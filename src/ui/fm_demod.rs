@@ -112,7 +112,7 @@ impl Panel for FmDemodPanel {
         // ── Status headline ────────────────────────────────────────────────
         if stale {
             lines.push(Line::from(vec![Span::raw(" "), Span::styled("\u{25cb} IDLE \u{2014} RX stopped", dim)]));
-        } else if let Some(_) = measure {
+        } else if measure.is_some() {
             lines.push(Line::from(vec![
                 Span::raw(" "),
                 Span::styled(format!("\u{25cf} DEMOD LOCK \u{2014} {}", state.signal.modulation.label()),
