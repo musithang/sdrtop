@@ -151,7 +151,7 @@ pub const SNAP_DC_GUARD_HZ: f64 = 10_000.0;
 /// guard swallows it — the caller then leaves the offset alone rather than
 /// jumping to an invented frequency.
 pub fn strongest_offset_hz(bins_dbfs: &[f32], sample_rate: f64) -> Option<i64> {
-    if bins_dbfs.is_empty() || !(sample_rate > 0.0) { return None; }
+    if bins_dbfs.is_empty() || !sample_rate.is_finite() || sample_rate <= 0.0 { return None; }
     let n = bins_dbfs.len();
     let bin_hz = sample_rate / n as f64;
     let centre = n as f64 / 2.0;

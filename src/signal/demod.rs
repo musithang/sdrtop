@@ -257,7 +257,7 @@ pub fn fm_discriminate(iq: &[Complex<f32>], rate: f64, out: &mut Vec<f32>) {
 /// unit circle over a long block.
 pub fn mix_offset(iq: &mut [Complex<f32>], offset_hz: f64, sample_rate: f64) {
     use std::f64::consts::PI;
-    if offset_hz == 0.0 || !(sample_rate > 0.0) { return; }
+    if offset_hz == 0.0 || !sample_rate.is_finite() || sample_rate <= 0.0 { return; }
     let dphi = -2.0 * PI * offset_hz / sample_rate;
     let step = Complex { re: dphi.cos() as f32, im: dphi.sin() as f32 };
     let mut ph = Complex { re: 1.0f32, im: 0.0f32 };

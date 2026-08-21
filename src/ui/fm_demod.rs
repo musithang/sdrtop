@@ -42,15 +42,30 @@ fn mpx_profile(frame: &MpxFrame, points: usize) -> Vec<f32> {
     let last = last.min(frame.mags_hz.len());
     if last == 0 { return Vec::new(); }
 
-    (0..points)
+    let mut profile: Vec<f32> = (0..points)
         .map(|i| {
             let lo = i * last / points;
             let hi = (((i + 1) * last / points).max(lo + 1)).min(last);
             let peak = frame.mags_hz[lo..hi].iter().copied().fold(0.0f32, f32::max);
             if peak > 0.0 { 20.0 * peak.log10() } else { -120.0 }
         })
-        .collect()
+        .collect();
+
+    // Clamp to a fixed window below the loudest component. A single braille row
+    // has only four vertical levels, so letting the scale stretch down to the
+    // noise floor squashes the whole MPX structure into the bottom level — the
+    // pilot, the very thing the section is about, becomes invisible. Anchoring the
+    // floor a fixed distance below the peak spends those four levels on signal.
+    let top = profile.iter().copied().fold(f32::NEG_INFINITY, f32::max);
+    if top.is_finite() {
+        let floor = top - MPX_DISPLAY_RANGE_DB;
+        for v in profile.iter_mut() { *v = v.max(floor); }
+    }
+    profile
 }
+
+/// Dynamic range shown in the MPX trace, below the loudest component.
+const MPX_DISPLAY_RANGE_DB: f32 = 40.0;
 
 /// Tick row under the MPX trace, marking the pilot, the stereo subcarrier and RDS
 /// at their true positions in the span.
@@ -354,6 +369,70 @@ mod tests {
         assert!(fmt_offset(-1_200.0).starts_with('\u{2212}'));
         // Zero reads as a positive zero rather than a bare number.
         assert!(fmt_offset(0.0).starts_with('+'));
+    }
+
+    fn frame_with_pilot() -> MpxFrame {
+        // 163 Hz bins; a tall line at 19 kHz over a quiet floor.
+        let bin_hz = 163.0;
+        let mut mags = vec![1.0f32; 512];
+        mags[(PILOT_HZ / bin_hz).round() as usize] = 7_500.0;
+        MpxFrame { bin_hz, mags_hz: mags }
+    }
+
+    #[test]
+    fn mpx_profile_keeps_the_pilot_line_visible() {
+        let f = frame_with_pilot();
+        let p = mpx_profile(&f, 64);
+        assert_eq!(p.len(), 64);
+        // The pilot column must stand clear of the floor: taking the max (not the
+        // mean) of each column's bins is what preserves a one-bin line.
+        let top = p.iter().copied().fold(f32::NEG_INFINITY, f32::max);
+        let bottom = p.iter().copied().fold(f32::INFINITY, f32::min);
+        assert!(top - bottom > 20.0, "pilot should tower over the floor: {top} vs {bottom}");
+        // The pilot sits at 19/60 of the span.
+        let idx = p.iter().enumerate()
+            .max_by(|a, b| a.1.partial_cmp(b.1).unwrap()).map(|(i, _)| i).unwrap();
+        let expect = (PILOT_HZ / MPX_SPAN_HZ * 64.0) as usize;
+        assert!((idx as i64 - expect as i64).abs() <= 1, "pilot at column {idx}, expected {expect}");
+    }
+
+    #[test]
+    fn mpx_profile_floor_is_clamped_to_the_display_range() {
+        let f = frame_with_pilot();
+        let p = mpx_profile(&f, 64);
+        let top = p.iter().copied().fold(f32::NEG_INFINITY, f32::max);
+        let bottom = p.iter().copied().fold(f32::INFINITY, f32::min);
+        assert!((top - bottom - MPX_DISPLAY_RANGE_DB).abs() < 0.01,
+                "range should be exactly {MPX_DISPLAY_RANGE_DB} dB, got {}", top - bottom);
+    }
+
+    #[test]
+    fn mpx_profile_declines_degenerate_frames() {
+        let empty = MpxFrame { bin_hz: 163.0, mags_hz: vec![] };
+        assert!(mpx_profile(&empty, 32).is_empty());
+        let bad_bin = MpxFrame { bin_hz: 0.0, mags_hz: vec![1.0; 100] };
+        assert!(mpx_profile(&bad_bin, 32).is_empty());
+        assert!(mpx_profile(&frame_with_pilot(), 0).is_empty());
+    }
+
+    #[test]
+    fn mpx_ticks_place_labels_in_span_order() {
+        let row = mpx_ticks(48);
+        assert_eq!(row.chars().count(), 48);
+        let p19 = row.find("19k").expect("19k tick");
+        let p38 = row.find("38k").expect("38k tick");
+        let p57 = row.find("57k").expect("57k tick");
+        assert!(p19 < p38 && p38 < p57, "ticks out of order: {p19} {p38} {p57}");
+        // 19 kHz of a 60 kHz span sits near a third across.
+        assert!((p19 as f64 - 48.0 * 19.0 / 60.0).abs() < 3.0);
+    }
+
+    #[test]
+    fn mpx_ticks_survive_a_narrow_panel() {
+        // Labels must never overflow the row, however little width there is.
+        for w in [0usize, 1, 3, 8, 20] {
+            assert_eq!(mpx_ticks(w).chars().count(), w, "width {w}");
+        }
     }
 
     #[test]
