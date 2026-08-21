@@ -136,6 +136,10 @@ pub struct DeviceInfo {
 pub struct RxContext {
     pub metrics: Arc<Mutex<SdrMetrics>>,
     pub sample_tx: crossbeam_channel::Sender<Vec<u8>>,
+    /// Second, independently lossy feed to the demod worker. Blocks are forwarded
+    /// only while `demod.enabled` is set, so the extra copy is paid for solely on
+    /// the bench that uses it.
+    pub demod_tx: crossbeam_channel::Sender<Vec<u8>>,
     pub format: SampleFormat,
 }
 

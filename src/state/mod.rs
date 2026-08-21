@@ -1,4 +1,5 @@
 mod acc;
+mod demod;
 mod iq;
 mod lab;
 mod micro;
@@ -13,6 +14,7 @@ mod ui;
 mod waterfall;
 
 pub(crate) use acc::Accumulators;
+pub use demod::{deviation_limit_hz, DemodState, FmMeasure};
 pub use iq::{IqState, IqCalState, CONSTELLATION_CAP};
 pub use lab::{LabState, RfFreeze};
 pub use micro::MicroView;
@@ -54,6 +56,8 @@ pub struct SdrMetrics {
     pub ui:       UiState,
     /// Lab "instrument mode" measurement state (REF/AVG/CAL). See [`LabState`].
     pub lab:      LabState,
+    /// Demodulator measurement + gating for the `lab_signal` bench. See [`DemodState`].
+    pub demod:    DemodState,
     /// Active device's capability descriptor — drives capability-aware UI
     /// rendering (gain model, BB filter / Friis applicability, ranges). Shared
     /// (Arc) so the per-frame `SdrMetrics` clone stays cheap.

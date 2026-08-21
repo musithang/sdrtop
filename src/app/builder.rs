@@ -6,7 +6,7 @@ use std::time::{Duration, Instant};
 use crate::config::{AppConfig, LayoutConfig};
 use crate::event::EventStream;
 use crate::hardware;
-use crate::signal::FftWorker;
+use crate::signal::{DemodWorker, FftWorker};
 use crate::state::{
     Accumulators, IqState, ObserverState, RadioState, SdrMetrics,
     SignalState, SpectrumState, SweepConfig, SweepState, SystemState, TimingState, UiState,
@@ -198,6 +198,7 @@ impl App {
             },
             ui:  UiState { recall: crate::state::recall_from_hz(cfg.radio.recall_hz), ..UiState::default() },
             lab: crate::state::LabState::default(),
+            demod: crate::state::DemodState::default(),
             caps: Arc::clone(&caps),
             acc: Accumulators::default(),
         }));
@@ -225,10 +226,18 @@ impl App {
         }
 
         let (sample_tx, sample_rx) = crossbeam_channel::bounded::<Vec<u8>>(4);
-        let rx_ctx = Arc::new(hardware::RxContext { metrics: Arc::clone(&state), sample_tx, format: sample_format });
+        // The demod queue is deliberately shallow: it duty-cycles to one update
+        // per 250 ms, so anything deeper would only hold blocks it will discard.
+        let (demod_tx, demod_rx) = crossbeam_channel::bounded::<Vec<u8>>(2);
+        let rx_ctx = Arc::new(hardware::RxContext {
+            metrics: Arc::clone(&state), sample_tx, demod_tx, format: sample_format,
+        });
 
         let fft_state = Arc::clone(&state);
         std::thread::spawn(move || FftWorker::new(sample_rx, fft_state, sample_format).run());
+
+        let demod_state = Arc::clone(&state);
+        std::thread::spawn(move || DemodWorker::new(demod_rx, demod_state, sample_format).run());
 
         tasks::spawn_rx_task(Arc::clone(&state), Arc::clone(&device), Arc::clone(&rx_ctx));
         tasks::spawn_sweep_task(Arc::clone(&state), Arc::clone(&device));
@@ -336,6 +345,7 @@ impl App {
             },
             ui:  UiState::default(),
             lab: crate::state::LabState::default(),
+            demod: crate::state::DemodState::default(),
             // Observer mode has no open device to query; use the matching
             // backend's capability profile so the UI labels stay correct.
             caps: Arc::new(match kind {

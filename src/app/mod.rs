@@ -96,9 +96,14 @@ impl App {
         // and stops with it, then take the render snapshot.
         let active_preset = self.engine.active_preset().to_string();
         let sweep_active = active_preset == "lab_sweep" || active_preset == "micro_sweep";
+        // The demod is owned by `lab_signal` the same way sweep is owned by
+        // `lab_sweep`: the preset gates whether blocks are forwarded at all, so
+        // the extra per-block copy costs nothing on every other screen.
+        let demod_preset = active_preset == "lab_signal";
         let mut m = {
             let mut guard = self.state.lock().unwrap_or_else(|e| e.into_inner());
             guard.sweep.active = sweep_active;
+            guard.demod.enabled = demod_preset && guard.demod.user_on;
             guard.clone()
         };
         // Mirror the engine's active preset into the cloned snapshot so the

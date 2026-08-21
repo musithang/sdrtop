@@ -98,6 +98,7 @@ fn handle_normal(
         Some("sweep_panel")      => handle_sweep_focus(key, state, device, engine, show_help, show_footer, focus_keys),
         Some("signal_metrics")   => handle_signal_metrics_focus(key, state, device, engine, show_help, show_footer, focus_keys),
         Some("signal_characterization") => handle_signal_characterization_focus(key, state, device, engine, show_help, show_footer, focus_keys),
+        Some("fm_demod")         => handle_demod_focus(key, state, device, engine, show_help, show_footer, focus_keys),
         Some("command_rail")     => handle_command_rail_focus(key, state, device, engine, show_help, show_footer, focus_keys),
         Some("lab_banner")      => handle_lab_banner_focus(key, state, device, engine, show_help, show_footer, focus_keys),
         _                       => handle_global(key, state, device, engine, show_help, show_footer, focus_keys),
@@ -657,6 +658,55 @@ fn handle_signal_characterization_focus(
             "Signal characterization \u{2014} {modulation}: SNR {snr:.1} dB \u{00b7} OBW {obw_str}{acpr_str}"
         ));
         return KeyAction::Continue;
+    }
+    handle_global(key, state, device, engine, show_help, show_footer, focus_keys)
+}
+
+/// `fm_demod` focus (`[M]`): `[Space]` switches the demodulator on and off,
+/// `[C]` snapshots the current measurement to the log.
+///
+/// `[Space]` is deliberately shadowed here rather than falling through to the
+/// global RX toggle: inside the demod bench the nearer meaning of "start/stop" is
+/// the demodulator, and RX remains reachable by leaving focus with `Esc`.
+fn handle_demod_focus(
+    key: KeyEvent,
+    state: &Arc<Mutex<SdrMetrics>>,
+    device: Option<&Arc<dyn hardware::SdrDevice>>,
+    engine: &mut ui::LayoutEngine,
+    show_help: &mut bool,
+    show_footer: &mut bool,
+    focus_keys: &HashMap<char, &'static str>,
+) -> KeyAction {
+    match key.code {
+        KeyCode::Char(' ') => {
+            let mut m = state.lock().unwrap_or_else(|e| e.into_inner());
+            m.demod.user_on = !m.demod.user_on;
+            let on = m.demod.user_on;
+            if !on {
+                // Drop the reading immediately so the panel can't keep showing a
+                // number the demod is no longer producing.
+                m.demod.fm = None;
+            }
+            m.push_log(if on { "Demod: on" } else { "Demod: off" });
+            return KeyAction::Continue;
+        }
+        KeyCode::Char('c') | KeyCode::Char('C') => {
+            let mut m = state.lock().unwrap_or_else(|e| e.into_inner());
+            let line = match m.demod.live() {
+                Some(fm) => format!(
+                    "Demod \u{2014} {}: peak dev {:.1} kHz \u{00b7} RMS {:.1} kHz \u{00b7} offset {:+.0} Hz \u{00b7} {:.0} kHz ch",
+                    m.signal.modulation.label(),
+                    fm.peak_dev_hz / 1000.0,
+                    fm.rms_dev_hz / 1000.0,
+                    fm.carrier_offset_hz,
+                    m.demod.channel_rate_hz / 1000.0,
+                ),
+                None => "Demod \u{2014} no measurement to snapshot".to_string(),
+            };
+            m.push_log(line);
+            return KeyAction::Continue;
+        }
+        _ => {}
     }
     handle_global(key, state, device, engine, show_help, show_footer, focus_keys)
 }

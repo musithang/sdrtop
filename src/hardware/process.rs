@@ -50,9 +50,11 @@ pub fn process_block(
     // stay on the RAW samples — the diagnostics measure the true hardware
     // impairment — while a corrected copy of the stream feeds the FFT and the
     // constellation so the [D] DC-block / [C] auto-cal cleanup is visible.
-    let cal = {
+    // Read the demod gate in the same lock as the correction state — the demod
+    // costs an extra block copy, so it must be free when switched off.
+    let (cal, demod_enabled) = {
         let m = ctx.metrics.lock().unwrap_or_else(|e| e.into_inner());
-        m.iq.cal
+        (m.iq.cal, m.demod.enabled)
     };
     let correcting = cal.correcting();
     let mut out_buf: Vec<u8> = if correcting { Vec::with_capacity(buf.len()) } else { Vec::new() };
@@ -169,6 +171,12 @@ pub fn process_block(
 
     // Forward the corrected stream when a correction is active, else the raw bytes.
     let forward = if correcting { out_buf } else { buf.to_vec() };
+    // The demod sees the same corrected stream as the FFT: a residual DC offset
+    // would otherwise land straight on the discriminator's carrier-offset reading,
+    // since a centre-tuned channel sits exactly on the DC spike.
+    if demod_enabled {
+        ctx.demod_tx.try_send(forward.clone()).ok();
+    }
     ctx.sample_tx.try_send(forward).ok();
 }
 
