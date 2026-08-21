@@ -29,6 +29,28 @@ use crate::ui::panel::Panel;
 
 pub struct FmDemodPanel;
 
+/// One zone of the demod panel.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+enum Sec { Mpx, Pilot, Deviation, Ctcss, Depth, Carrier, Rds, Audio }
+
+/// The sections a given modulation's panel shows.
+///
+/// This is the single dispatch the panel was designed around. MPX, the stereo
+/// pilot and RDS are wide-band FM concepts that simply do not exist for NFM or
+/// AM, and FM deviation is meaningless for an amplitude-modulated carrier — so
+/// each mode is shown only what it actually has, rather than a fixed grid of
+/// sections where most read as permanently empty.
+fn sections_for(m: Modulation) -> &'static [Sec] {
+    match m {
+        Modulation::Nfm => &[Sec::Deviation, Sec::Ctcss, Sec::Audio],
+        Modulation::Am  => &[Sec::Depth, Sec::Carrier, Sec::Audio],
+        // An unclassified carrier keeps the broadcast shape — the state the panel
+        // rests in before anything is tuned.
+        Modulation::Wfm | Modulation::Unknown =>
+            &[Sec::Mpx, Sec::Pilot, Sec::Deviation, Sec::Rds, Sec::Audio],
+    }
+}
+
 /// Resample an MPX spectrum onto exactly `points` display columns spanning
 /// 0..[`MPX_SPAN_HZ`], in dB.
 ///
@@ -144,7 +166,7 @@ impl Panel for FmDemodPanel {
 
     fn focus_bindings(&self) -> &'static [(&'static str, &'static str)] {
         &[("Space", "Demod on/off"), ("←/→", "Channel offset"), ("P", "Snap to carrier"),
-          ("0", "Centre"), ("C", "Snapshot to log")]
+          ("0", "Centre"), ("T", "Mode"), ("C", "Snapshot to log")]
     }
 
     fn render(&self, f: &mut Frame, area: Rect, state: &SdrMetrics, theme: &crate::Theme, focused: bool) {
@@ -172,6 +194,7 @@ impl Panel for FmDemodPanel {
 
         // `live()` already refuses an aged-out reading, so a frozen number can
         // never be mistaken for a current one.
+        let modulation = state.demod.effective_modulation(state.signal.modulation);
         let measure = if stale { None } else { state.demod.live() };
         let am = if stale { None } else { state.demod.live_am() };
         // One demodulator runs at a time, so a lock is whichever produced a value.
@@ -181,9 +204,12 @@ impl Panel for FmDemodPanel {
         if stale {
             lines.push(Line::from(vec![Span::raw(" "), Span::styled("\u{25cb} IDLE \u{2014} RX stopped", dim)]));
         } else if locked {
+            // A forced mode is marked, so a reading is never mistaken for the
+            // classifier's own conclusion.
+            let src = if state.demod.mode_override.is_some() { " \u{2731}" } else { "" };
             lines.push(Line::from(vec![
                 Span::raw(" "),
-                Span::styled(format!("\u{25cf} DEMOD LOCK \u{2014} {}", state.signal.modulation.label()),
+                Span::styled(format!("\u{25cf} DEMOD LOCK \u{2014} {}{}", modulation.label(), src),
                              Style::default().fg(theme.status_ok).add_modifier(Modifier::BOLD)),
             ]));
             let d = state.demod.decimation.max(1);
@@ -233,22 +259,7 @@ impl Panel for FmDemodPanel {
         lines.push(Line::raw(""));
 
         // ── Sections, chosen by modulation ─────────────────────────────────
-        // The single dispatch the panel was designed around: MPX, pilot and RDS
-        // are wide-band FM concepts and simply do not exist for NFM or AM, so the
-        // panel shows each mode only what that mode actually has.
-        #[derive(Clone, Copy)]
-        enum Sec { Mpx, Pilot, Deviation, Ctcss, Depth, Carrier, Rds, Audio }
-
-        let layout: &[Sec] = match modulation {
-            Modulation::Nfm => &[Sec::Deviation, Sec::Ctcss, Sec::Audio],
-            Modulation::Am  => &[Sec::Depth, Sec::Carrier, Sec::Audio],
-            // An unclassified carrier keeps the broadcast shape, which is what the
-            // panel rests in before anything is tuned.
-            Modulation::Wfm | Modulation::Unknown =>
-                &[Sec::Mpx, Sec::Pilot, Sec::Deviation, Sec::Rds, Sec::Audio],
-        };
-
-        for sec in layout {
+        for sec in sections_for(modulation) {
             match sec {
             Sec::Mpx => {
         lines.push(chrome::section("MPX BASEBAND", "0-60 kHz", iw, theme));
@@ -541,6 +552,53 @@ mod tests {
         for w in [0usize, 1, 3, 8, 20] {
             assert_eq!(mpx_ticks(w).chars().count(), w, "width {w}");
         }
+    }
+
+    #[test]
+    fn wfm_shows_the_broadcast_sections() {
+        let s = sections_for(Modulation::Wfm);
+        for want in [Sec::Mpx, Sec::Pilot, Sec::Deviation, Sec::Rds] {
+            assert!(s.contains(&want), "WFM missing {want:?}");
+        }
+        // CTCSS and AM depth belong to other modes.
+        assert!(!s.contains(&Sec::Ctcss));
+        assert!(!s.contains(&Sec::Depth));
+    }
+
+    #[test]
+    fn nfm_swaps_the_broadcast_sections_for_ctcss() {
+        let s = sections_for(Modulation::Nfm);
+        assert!(s.contains(&Sec::Deviation), "NFM still measures deviation");
+        assert!(s.contains(&Sec::Ctcss));
+        // These are wide-band FM concepts; showing them for NFM would be a lie.
+        for absent in [Sec::Mpx, Sec::Pilot, Sec::Rds] {
+            assert!(!s.contains(&absent), "NFM should not show {absent:?}");
+        }
+    }
+
+    #[test]
+    fn am_shows_depth_instead_of_deviation() {
+        let s = sections_for(Modulation::Am);
+        assert!(s.contains(&Sec::Depth));
+        assert!(s.contains(&Sec::Carrier));
+        // FM deviation is meaningless for an amplitude-modulated carrier.
+        assert!(!s.contains(&Sec::Deviation));
+        assert!(!s.contains(&Sec::Ctcss));
+    }
+
+    #[test]
+    fn unknown_rests_in_the_broadcast_shape() {
+        assert_eq!(sections_for(Modulation::Unknown), sections_for(Modulation::Wfm));
+    }
+
+    #[test]
+    fn depth_color_grades_on_the_negative_peak() {
+        let t = crate::Theme::sdr();
+        assert_eq!(depth_color(60.0, &t), t.status_ok);
+        assert_eq!(depth_color(95.0, &t), t.status_warn);
+        // 100 % negative pinches the carrier off — clipping and splatter.
+        assert_eq!(depth_color(100.0, &t), t.status_crit);
+        assert_eq!(depth_color(130.0, &t), t.status_crit);
     }
 
     #[test]

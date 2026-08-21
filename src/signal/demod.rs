@@ -647,7 +647,11 @@ impl DemodWorker {
 
             let (sample_rate, modulation, snr_db, streaming, offset_hz) = {
                 let m = self.state.lock().unwrap_or_else(|e| e.into_inner());
-                (m.radio.config_sample_rate, m.signal.modulation,
+                // The user's mode choice outranks the classifier — see
+                // `DemodState::mode_override` for why the heuristic is too coarse
+                // to pick a demodulator on its own.
+                (m.radio.config_sample_rate,
+                 m.demod.effective_modulation(m.signal.modulation),
                  m.signal.peak_to_nf_db, m.radio.hw_streaming, m.demod.offset_hz)
             };
 

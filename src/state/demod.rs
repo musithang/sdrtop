@@ -91,6 +91,14 @@ pub struct DemodState {
     /// station the radio is not centred on — which is how the channel is kept off
     /// the DC spike.
     pub offset_hz: i64,
+    /// Demodulator forced by the user, or `None` to follow the classifier.
+    ///
+    /// The classifier is a 99 %-occupied-bandwidth heuristic over the whole
+    /// captured span, so on a wide span it reads ≥ 100 kHz — and therefore WFM —
+    /// for almost anything, noise included. That is honest for a rough badge but
+    /// far too coarse to pick a demodulator, so the bench can say what it is
+    /// listening to.
+    pub mode_override: Option<super::Modulation>,
     /// Recovered MPX baseband spectrum, and the 19 kHz pilot read from it.
     /// WFM only — neither concept exists for NFM or AM.
     pub mpx:   Option<Arc<MpxFrame>>,
@@ -123,6 +131,7 @@ impl Default for DemodState {
             channel_rate_hz: 0.0,
             fm:              None,
             offset_hz:       0,
+            mode_override:   None,
             mpx:             None,
             pilot:           None,
             am:              None,
@@ -185,6 +194,24 @@ impl DemodState {
         let half_span = sample_rate / 2.0;
         let half_chan = self.channel_rate_hz.max(0.0) / 2.0;
         (half_span - half_chan).max(0.0) as i64
+    }
+
+    /// The modulation the demodulator should actually use: the user's choice when
+    /// they have made one, otherwise the classifier's.
+    pub fn effective_modulation(&self, classified: super::Modulation) -> super::Modulation {
+        self.mode_override.unwrap_or(classified)
+    }
+
+    /// Advance the mode selector: auto → WFM → NFM → AM → auto.
+    pub fn cycle_mode(&mut self) -> Option<super::Modulation> {
+        use super::Modulation::*;
+        self.mode_override = match self.mode_override {
+            None            => Some(Wfm),
+            Some(Wfm)       => Some(Nfm),
+            Some(Nfm)       => Some(Am),
+            Some(Am) | Some(Unknown) => None,
+        };
+        self.mode_override
     }
 
     /// Whether the channel is close enough to the tuned centre to be competing
@@ -320,6 +347,26 @@ mod tests {
         let d = DemodState { channel_rate_hz: 333_000.0, ..Default::default() };
         // 2 Msps: half span 1 MHz, minus half a 333 kHz channel.
         assert_eq!(d.offset_limit_hz(2_000_000.0), 833_500);
+    }
+
+    #[test]
+    fn mode_override_outranks_the_classifier() {
+        let mut d = DemodState::default();
+        // With no override the classifier's answer stands.
+        assert_eq!(d.effective_modulation(Modulation::Wfm), Modulation::Wfm);
+        d.mode_override = Some(Modulation::Nfm);
+        assert_eq!(d.effective_modulation(Modulation::Wfm), Modulation::Nfm);
+    }
+
+    #[test]
+    fn mode_cycle_returns_to_auto() {
+        let mut d = DemodState::default();
+        assert_eq!(d.cycle_mode(), Some(Modulation::Wfm));
+        assert_eq!(d.cycle_mode(), Some(Modulation::Nfm));
+        assert_eq!(d.cycle_mode(), Some(Modulation::Am));
+        // Full circle: the user can always hand control back to the classifier.
+        assert_eq!(d.cycle_mode(), None);
+        assert_eq!(d.cycle_mode(), Some(Modulation::Wfm));
     }
 
     #[test]

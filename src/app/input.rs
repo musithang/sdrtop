@@ -737,6 +737,23 @@ fn handle_demod_focus(
             m.push_log("Demod offset: centre");
             return KeyAction::Continue;
         }
+        KeyCode::Char('t') | KeyCode::Char('T') => {
+            // The classifier measures 99 % occupied bandwidth across the whole
+            // span, so on a wide span it reads WFM for nearly anything — fine as a
+            // badge, too coarse to choose a demodulator. This is the override.
+            let mut m = state.lock().unwrap_or_else(|e| e.into_inner());
+            let picked = m.demod.cycle_mode();
+            // The previous demodulator's numbers describe a different measurement.
+            m.demod.fm = None;
+            m.demod.am = None;
+            m.demod.ctcss = None;
+            m.demod.ctcss_fill = 0.0;
+            m.push_log(match picked {
+                Some(mode) => format!("Demod mode: {} (forced)", mode.label()),
+                None       => "Demod mode: auto".to_string(),
+            });
+            return KeyAction::Continue;
+        }
         KeyCode::Char('c') | KeyCode::Char('C') => {
             let mut m = state.lock().unwrap_or_else(|e| e.into_inner());
             let line = match m.demod.live() {
