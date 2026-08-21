@@ -139,7 +139,13 @@ pub struct RxContext {
     /// Second, independently lossy feed to the demod worker. Blocks are forwarded
     /// only while `demod.enabled` is set, so the extra copy is paid for solely on
     /// the bench that uses it.
-    pub demod_tx: crossbeam_channel::Sender<Vec<u8>>,
+    ///
+    /// Carries a monotonic sequence number alongside the bytes: this channel drops
+    /// under load like the FFT one, and the CTCSS detector needs to know whether
+    /// its half-second of audio is one unbroken run or two pieces either side of a
+    /// gap. The FFT feed needs no such thing, which is why only this channel pays
+    /// for it.
+    pub demod_tx: crossbeam_channel::Sender<(u64, Vec<u8>)>,
     pub format: SampleFormat,
 }
 

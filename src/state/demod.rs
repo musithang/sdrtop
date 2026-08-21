@@ -35,6 +35,30 @@ pub const DC_PROXIMITY_HZ: i64 = 30_000;
 /// panel stops presenting the number as live.
 pub const DEMOD_STALE_AFTER: Duration = Duration::from_millis(1_500);
 
+/// One AM envelope measurement.
+///
+/// `positive_pct` and `negative_pct` are reported separately from `depth_pct`
+/// because they fail differently: a negative depth approaching 100 % pinches the
+/// carrier off and splatters, while a mismatched pair points at a modulator fault
+/// rather than merely too much level.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct AmMeasure {
+    pub depth_pct:    f32,
+    pub positive_pct: f32,
+    pub negative_pct: f32,
+    pub carrier_dbfs: f32,
+}
+
+/// A detected CTCSS tone. `margin_db` is how far it stood above the best
+/// non-adjacent candidate — the evidence for the identification, kept so the
+/// panel can show a confident detection differently from a borderline one.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct CtcssMeasure {
+    pub tone_hz:      f32,
+    pub deviation_hz: f32,
+    pub margin_db:    f32,
+}
+
 /// One FM discriminator measurement, all in Hz.
 ///
 /// `peak_dev_hz` / `rms_dev_hz` are measured *about* `carrier_offset_hz`, so a
@@ -68,8 +92,22 @@ pub struct DemodState {
     /// the DC spike.
     pub offset_hz: i64,
     /// Recovered MPX baseband spectrum, and the 19 kHz pilot read from it.
+    /// WFM only — neither concept exists for NFM or AM.
     pub mpx:   Option<Arc<MpxFrame>>,
     pub pilot: Option<PilotMeasure>,
+    /// AM envelope measurement. Mutually exclusive with `fm` in practice: the
+    /// classifier picks one demodulator, and the other's field stays `None`.
+    pub am:    Option<AmMeasure>,
+    /// CTCSS subaudible tone, NFM only. `None` covers both "no tone" and "not
+    /// enough contiguous audio yet" — [`Self::ctcss_searching`] separates them.
+    pub ctcss: Option<CtcssMeasure>,
+    /// Fraction of the CTCSS observation window currently filled, 0..=1. Resets
+    /// whenever a dropped block breaks the run, so the panel can honestly show
+    /// "searching" instead of implying there is no tone.
+    pub ctcss_fill: f32,
+    /// Monotonic counter stamped on each forwarded block, so the worker can tell
+    /// a contiguous run from one interrupted by a dropped block.
+    pub block_seq: u64,
     pub last_update: Option<Instant>,
 }
 
@@ -87,6 +125,10 @@ impl Default for DemodState {
             offset_hz:       0,
             mpx:             None,
             pilot:           None,
+            am:              None,
+            ctcss:           None,
+            ctcss_fill:      0.0,
+            block_seq:       0,
             last_update:     None,
         }
     }
@@ -116,6 +158,24 @@ impl DemodState {
     /// The pilot reading to render, subject to the same staleness rule.
     pub fn live_pilot(&self) -> Option<PilotMeasure> {
         if self.is_stale() { None } else { self.pilot }
+    }
+
+    /// The AM reading to render, subject to the same staleness rule.
+    pub fn live_am(&self) -> Option<AmMeasure> {
+        if self.is_stale() { None } else { self.am }
+    }
+
+    /// The CTCSS reading to render, subject to the same staleness rule.
+    pub fn live_ctcss(&self) -> Option<CtcssMeasure> {
+        if self.is_stale() { None } else { self.ctcss }
+    }
+
+    /// Whether the CTCSS detector is still filling its observation window rather
+    /// than reporting the absence of a tone. The distinction matters: "no tone
+    /// yet" and "no tone" look identical otherwise, and only one of them is a
+    /// finding.
+    pub fn ctcss_searching(&self) -> bool {
+        !self.is_stale() && self.ctcss.is_none() && self.ctcss_fill < 1.0
     }
 
     /// Legal offset range for the current sample rate: the channel must stay

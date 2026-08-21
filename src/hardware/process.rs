@@ -113,6 +113,7 @@ pub fn process_block(
     }
 
     let pairs = (buf.len() / 2) as u64;
+    let block_seq: u64;
 
     // Single brief lock to flush accumulated results — O(1), no loops inside.
     {
@@ -167,6 +168,10 @@ pub fn process_block(
             m.acc.cb_gaps_us.push_back(gap_us);
         }
         m.acc.last_callback = Some(now);
+        // Stamped here, inside the lock that already runs, so the demod can tell a
+        // contiguous run of blocks from one interrupted by a drop.
+        m.demod.block_seq = m.demod.block_seq.wrapping_add(1);
+        block_seq = m.demod.block_seq;
     }
 
     // Forward the corrected stream when a correction is active, else the raw bytes.
@@ -175,7 +180,7 @@ pub fn process_block(
     // would otherwise land straight on the discriminator's carrier-offset reading,
     // since a centre-tuned channel sits exactly on the DC spike.
     if demod_enabled {
-        ctx.demod_tx.try_send(forward.clone()).ok();
+        ctx.demod_tx.try_send((block_seq, forward.clone())).ok();
     }
     ctx.sample_tx.try_send(forward).ok();
 }

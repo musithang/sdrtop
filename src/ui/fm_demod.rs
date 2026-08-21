@@ -125,6 +125,17 @@ fn deviation_color(ratio: f32, theme: &crate::Theme) -> ratatui::style::Color {
     else                 { theme.status_ok }
 }
 
+/// Colour for an AM depth reading, graded on the **negative** peak.
+///
+/// Positive over-modulation merely runs hot; a negative peak reaching 100 %
+/// pinches the carrier off entirely, which clips the envelope and splatters into
+/// the adjacent channel. That is the failure worth colouring for.
+fn depth_color(negative_pct: f32, theme: &crate::Theme) -> ratatui::style::Color {
+    if negative_pct >= 100.0     { theme.status_crit }
+    else if negative_pct >= 90.0 { theme.status_warn }
+    else                         { theme.status_ok }
+}
+
 impl Panel for FmDemodPanel {
     fn name(&self) -> &'static str { "fm_demod" }
     fn min_size(&self) -> (u16, u16) { (28, 12) }
@@ -162,11 +173,14 @@ impl Panel for FmDemodPanel {
         // `live()` already refuses an aged-out reading, so a frozen number can
         // never be mistaken for a current one.
         let measure = if stale { None } else { state.demod.live() };
+        let am = if stale { None } else { state.demod.live_am() };
+        // One demodulator runs at a time, so a lock is whichever produced a value.
+        let locked = measure.is_some() || am.is_some();
 
         // ── Status headline ────────────────────────────────────────────────
         if stale {
             lines.push(Line::from(vec![Span::raw(" "), Span::styled("\u{25cb} IDLE \u{2014} RX stopped", dim)]));
-        } else if measure.is_some() {
+        } else if locked {
             lines.push(Line::from(vec![
                 Span::raw(" "),
                 Span::styled(format!("\u{25cf} DEMOD LOCK \u{2014} {}", state.signal.modulation.label()),
@@ -218,7 +232,25 @@ impl Panel for FmDemodPanel {
         }
         lines.push(Line::raw(""));
 
-        // ── MPX BASEBAND — live in Phase 3 ─────────────────────────────────
+        // ── Sections, chosen by modulation ─────────────────────────────────
+        // The single dispatch the panel was designed around: MPX, pilot and RDS
+        // are wide-band FM concepts and simply do not exist for NFM or AM, so the
+        // panel shows each mode only what that mode actually has.
+        #[derive(Clone, Copy)]
+        enum Sec { Mpx, Pilot, Deviation, Ctcss, Depth, Carrier, Rds, Audio }
+
+        let layout: &[Sec] = match modulation {
+            Modulation::Nfm => &[Sec::Deviation, Sec::Ctcss, Sec::Audio],
+            Modulation::Am  => &[Sec::Depth, Sec::Carrier, Sec::Audio],
+            // An unclassified carrier keeps the broadcast shape, which is what the
+            // panel rests in before anything is tuned.
+            Modulation::Wfm | Modulation::Unknown =>
+                &[Sec::Mpx, Sec::Pilot, Sec::Deviation, Sec::Rds, Sec::Audio],
+        };
+
+        for sec in layout {
+            match sec {
+            Sec::Mpx => {
         lines.push(chrome::section("MPX BASEBAND", "0-60 kHz", iw, theme));
         match state.demod.live_mpx() {
             Some(frame) => {
@@ -238,9 +270,8 @@ impl Panel for FmDemodPanel {
             }
             None => lines.push(Line::raw("")),
         }
-        lines.push(Line::raw(""));
-
-        // ── PILOT / STEREO — live in Phase 3 ───────────────────────────────
+            }
+            Sec::Pilot => {
         lines.push(chrome::section("PILOT / STEREO", "19 kHz", iw, theme));
         match state.demod.live_pilot() {
             Some(p) => {
@@ -267,10 +298,9 @@ impl Panel for FmDemodPanel {
             }
             None => lines.push(Line::raw("")),
         }
-        lines.push(Line::raw(""));
-
-        // ── DEVIATION — live in Phase 2 ────────────────────────────────────
-        let limit = deviation_limit_hz(state.signal.modulation);
+            }
+            Sec::Deviation => {
+        let limit = deviation_limit_hz(modulation);
         let hint = format!("{:.0} kHz max", limit / 1000.0);
         lines.push(chrome::section("DEVIATION", &hint, iw, theme));
         match measure {
@@ -300,11 +330,89 @@ impl Panel for FmDemodPanel {
             }
             None => lines.push(Line::raw("")),
         }
-        lines.push(Line::raw(""));
-
-        // ── RDS / AUDIO: still declared-empty (Phases 4-5) ─────────────────
-        for (name, hint) in [("RDS", "57 kHz"), ("AUDIO", "")] {
-            lines.push(chrome::section(name, hint, iw, theme));
+            }
+            Sec::Ctcss => {
+                lines.push(chrome::section("CTCSS", "subaudible", iw, theme));
+                match state.demod.live_ctcss() {
+                    Some(t) => {
+                        lines.push(Line::from(vec![
+                            Span::raw(" "),
+                            Span::styled(format!("\u{25cf} {:.1} Hz", t.tone_hz),
+                                         Style::default().fg(theme.status_ok).add_modifier(Modifier::BOLD)),
+                        ]));
+                        lines.push(Line::from(vec![
+                            chrome::field("Dev", 8, theme),
+                            Span::styled(fmt_hz(t.deviation_hz), val),
+                        ]));
+                        lines.push(Line::from(vec![
+                            chrome::field("Margin", 8, theme),
+                            Span::styled(format!("{:.0} dB", t.margin_db), val),
+                        ]));
+                    }
+                    // "Still filling the window" and "there is no tone" look the
+                    // same on screen unless they are said differently — and only
+                    // one of them is a finding.
+                    None if state.demod.ctcss_searching() => {
+                        lines.push(Line::from(vec![
+                            Span::raw(" "),
+                            Span::styled(format!("\u{25cc} SEARCHING {:.0}%",
+                                                 state.demod.ctcss_fill * 100.0), lbl),
+                        ]));
+                    }
+                    None if !stale => {
+                        lines.push(Line::from(vec![
+                            Span::raw(" "),
+                            Span::styled("\u{25cb} NO TONE", lbl),
+                        ]));
+                    }
+                    None => lines.push(Line::raw("")),
+                }
+            }
+            Sec::Depth => {
+                lines.push(chrome::section("DEPTH", "100% max", iw, theme));
+                match am {
+                    Some(a) => {
+                        let ratio = a.depth_pct / 100.0;
+                        let color = depth_color(a.negative_pct, theme);
+                        lines.push(Line::from(vec![
+                            chrome::field("Depth", 8, theme),
+                            Span::styled(format!("{:.0}%", a.depth_pct),
+                                         Style::default().fg(color).add_modifier(Modifier::BOLD)),
+                        ]));
+                        let bar_w = iw.saturating_sub(9).min(14);
+                        if bar_w >= 4 {
+                            let mut row = vec![Span::raw(" ")];
+                            row.extend(bar_spans(ratio.clamp(0.0, 1.0) as f64, bar_w, color, theme));
+                            lines.push(Line::from(row));
+                        }
+                        // Split out because they fail differently: a negative peak
+                        // reaching 100 % pinches the carrier off and splatters.
+                        lines.push(Line::from(vec![
+                            chrome::field("Pos", 8, theme),
+                            Span::styled(format!("{:.0}%", a.positive_pct), val),
+                        ]));
+                        lines.push(Line::from(vec![
+                            chrome::field("Neg", 8, theme),
+                            Span::styled(format!("{:.0}%", a.negative_pct),
+                                         Style::default().fg(depth_color(a.negative_pct, theme))),
+                        ]));
+                    }
+                    None => lines.push(Line::raw("")),
+                }
+            }
+            Sec::Carrier => {
+                lines.push(chrome::section("CARRIER", "", iw, theme));
+                match am {
+                    Some(a) => lines.push(Line::from(vec![
+                        chrome::field("Level", 8, theme),
+                        Span::styled(format!("{:.1} dBFS", a.carrier_dbfs), val),
+                    ])),
+                    None => lines.push(Line::raw("")),
+                }
+            }
+            Sec::Rds   => lines.push(chrome::section("RDS", "57 kHz", iw, theme)),
+            Sec::Audio => lines.push(chrome::section("AUDIO", "", iw, theme)),
+            }
             lines.push(Line::raw(""));
         }
 

@@ -1,22 +1,24 @@
 //! FM demodulation as a *measurement*, not audio (see `dev_docs/demod-plan.md`).
 //!
-//! Phase 2 of the demod plan: a polar discriminator feeding peak / RMS deviation
-//! and carrier offset. No NCO (the channel is taken at centre), no MPX baseband
-//! FFT, no audio path — those are later phases that slot into the same worker.
+//! One worker covers all three modes, branching on the classifier: WFM (polar
+//! discriminator + MPX baseband + 19 kHz pilot), NFM (discriminator + CTCSS tone),
+//! and AM (envelope depth). An NCO selects the channel so it need not sit on the
+//! tuned centre, where both front-ends park their DC offset and LO leakage.
 //!
 //! Two properties of the sample pipeline shape everything here:
 //!
 //! * **The block stream is lossy by design.** `process_block` forwards blocks with
 //!   `try_send` on a bounded channel, so blocks are dropped under load — correct
-//!   load-shedding for a display feed, but it means phase cannot be carried across
-//!   a block boundary. Every block is therefore demodulated independently, and the
-//!   discriminator inherently drops one sample per block (N inputs → N−1 outputs),
-//!   which is exactly the splice guard we need.
+//!   load-shedding for a display feed. Statistics tolerate that happily. CTCSS
+//!   does not: telling ~2 Hz-apart tones apart needs half a second of *unbroken*
+//!   audio, so the demod feed carries a sequence number and the channel filter
+//!   ([`StreamingDecimator`]) keeps its state across blocks. A gap resets the run.
 //! * **CPU is a displayed metric.** Work is bounded twice: at most [`SLICE_PAIRS`]
-//!   input pairs are processed per update, and updates run at [`UPDATE_INTERVAL`]
-//!   regardless of how fast blocks arrive. Cost is then independent of the device
-//!   sample rate — the decimating FIR only computes every `d`-th output, so its
-//!   multiply count scales with the *channel* rate, not the ADC rate.
+//!   input pairs per update, and updates at [`UPDATE_INTERVAL`] regardless of how
+//!   fast blocks arrive — so cost is independent of the device sample rate, since
+//!   the decimating FIR computes only every `d`-th output and scales with the
+//!   *channel* rate. Narrow-band FM is the exception: continuity outranks the duty
+//!   cycle there, so it pays for every block.
 
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
@@ -25,7 +27,7 @@ use crossbeam_channel::Receiver;
 use num_complex::Complex;
 
 use crate::hardware::SampleFormat;
-use crate::state::{FmMeasure, Modulation, SdrMetrics};
+use crate::state::{AmMeasure, CtcssMeasure, FmMeasure, Modulation, SdrMetrics};
 
 /// Channel rate targeted for wide-band FM.
 ///
@@ -155,30 +157,6 @@ pub fn decode(buf: &[u8], format: SampleFormat, max_pairs: usize, out: &mut Vec<
                 });
             }
         }
-    }
-}
-
-/// Decimating FIR channel filter.
-///
-/// Only every `d`-th output is computed, so the multiply count is
-/// `taps × input.len() / d` — proportional to the channel rate, not the ADC rate.
-/// That is what keeps the cost flat from 2 Msps to 20 Msps.
-pub fn decimate(input: &[Complex<f32>], taps: &[f32], d: usize, out: &mut Vec<Complex<f32>>) {
-    out.clear();
-    let d = d.max(1);
-    let n = taps.len();
-    if input.len() < n || n == 0 { return; }
-    out.reserve((input.len() - n) / d + 1);
-    let mut start = 0usize;
-    while start + n <= input.len() {
-        let window = &input[start..start + n];
-        let mut acc = Complex { re: 0.0f32, im: 0.0f32 };
-        for (s, &h) in window.iter().zip(taps.iter()) {
-            acc.re += s.re * h;
-            acc.im += s.im * h;
-        }
-        out.push(acc);
-        start += d;
     }
 }
 
@@ -379,6 +357,16 @@ pub fn pilot_measure(mags_hz: &[f32], bin_hz: f64, limit_hz: f32) -> PilotMeasur
 /// for a sine the 99.9th percentile sits within 0.001 % of the true peak.
 const PEAK_QUANTILE: f64 = 0.999;
 
+/// Value at quantile `q` of `data`, found by partial sort — the same O(n)
+/// `select_nth_unstable` approach the FFT worker uses for its noise floor.
+/// Reorders `data`, which is always caller-owned scratch.
+fn quantile(data: &mut [f32], q: f64) -> f32 {
+    if data.is_empty() { return 0.0; }
+    let idx = (((data.len() - 1) as f64) * q.clamp(0.0, 1.0)).round() as usize;
+    data.select_nth_unstable_by(idx, |a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+    data[idx]
+}
+
 /// Peak / RMS deviation and carrier offset from a discriminator output.
 ///
 /// The carrier offset is the mean instantaneous frequency, and deviation is
@@ -399,9 +387,7 @@ pub fn fm_stats(inst_hz: &[f32]) -> Option<FmMeasure> {
         devs.push(d.abs() as f32);
     }
 
-    let idx = (((devs.len() - 1) as f64) * PEAK_QUANTILE).round() as usize;
-    devs.select_nth_unstable_by(idx, |a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
-    let peak = devs[idx];
+    let peak = quantile(&mut devs, PEAK_QUANTILE);
 
     Some(FmMeasure {
         peak_dev_hz:       peak,
@@ -410,14 +396,200 @@ pub fn fm_stats(inst_hz: &[f32]) -> Option<FmMeasure> {
     })
 }
 
-/// The channel rate to target for a modulation, or `None` when the signal is not
-/// something an FM discriminator says anything meaningful about. AM and an
-/// unclassified carrier deliberately produce no reading rather than a wrong one.
+/// Channel rate targeted for AM. An AM channel is 2 × the audio bandwidth, so
+/// ~10 kHz; a 16 kHz channel (filter passband 0.4 × 16 kHz = 6.4 kHz) clears it.
+pub const AM_TARGET_HZ: f64 = 16_000.0;
+
+/// The channel rate to target for a modulation, or `None` for a carrier that has
+/// not been classified — an unclassified signal deliberately produces no reading
+/// rather than a wrong one.
 pub fn target_rate_for(modulation: Modulation) -> Option<f64> {
     match modulation {
-        Modulation::Wfm => Some(WFM_TARGET_HZ),
-        Modulation::Nfm => Some(NFM_TARGET_HZ),
-        Modulation::Am | Modulation::Unknown => None,
+        Modulation::Wfm     => Some(WFM_TARGET_HZ),
+        Modulation::Nfm     => Some(NFM_TARGET_HZ),
+        Modulation::Am      => Some(AM_TARGET_HZ),
+        Modulation::Unknown => None,
+    }
+}
+
+/// AM envelope: `|z|` per sample, the amplitude the modulation rides on.
+pub fn am_envelope(iq: &[Complex<f32>], out: &mut Vec<f32>) {
+    out.clear();
+    out.reserve(iq.len());
+    out.extend(iq.iter().map(|z| z.norm()));
+}
+
+/// Modulation depth and asymmetry from an AM envelope.
+///
+/// Depth is the classic `(Vmax − Vmin) / (Vmax + Vmin)`. The peaks are taken as
+/// quantiles rather than absolute extremes for the same reason the FM peak is —
+/// one impulse would otherwise define the reading.
+///
+/// Positive and negative depths are reported separately because they fail
+/// differently: a negative depth reaching 100 % means the carrier is being
+/// pinched off, which clips and splatters, while an asymmetric pair points at a
+/// modulator fault rather than simply too much level.
+pub fn am_stats(env: &[f32]) -> Option<AmMeasure> {
+    if env.len() < 8 { return None; }
+    let carrier = env.iter().map(|&v| v as f64).sum::<f64>() / env.len() as f64;
+    if carrier <= 0.0 { return None; }
+
+    let mut scratch: Vec<f32> = env.to_vec();
+    let hi = quantile(&mut scratch, PEAK_QUANTILE) as f64;
+    let lo = quantile(&mut scratch, 1.0 - PEAK_QUANTILE) as f64;
+
+    let depth = if hi + lo > 0.0 { (hi - lo) / (hi + lo) } else { 0.0 };
+    Some(AmMeasure {
+        depth_pct:    (depth * 100.0) as f32,
+        positive_pct: (((hi - carrier) / carrier) * 100.0) as f32,
+        negative_pct: (((carrier - lo) / carrier) * 100.0) as f32,
+        carrier_dbfs: if carrier > 0.0 { 20.0 * (carrier as f32).log10() } else { f32::NEG_INFINITY },
+    })
+}
+
+/// The CTCSS tone table, in Hz: the 38 standard EIA/TIA tones plus 69.3 and
+/// 254.1, which virtually all equipment also offers.
+pub const CTCSS_TONES: [f64; 40] = [
+     67.0,  69.3,  71.9,  74.4,  77.0,  79.7,  82.5,  85.4,  88.5,  91.5,
+     94.8,  97.4, 100.0, 103.5, 107.2, 110.9, 114.8, 118.8, 123.0, 127.3,
+    131.8, 136.5, 141.3, 146.2, 151.4, 156.7, 162.2, 167.9, 173.8, 179.9,
+    186.2, 192.8, 203.5, 210.7, 218.1, 225.7, 233.6, 241.8, 250.3, 254.1,
+];
+
+/// Seconds of contiguous audio a CTCSS decision needs.
+///
+/// The closest standard tones are ~2.3 Hz apart (67.0 vs 69.3). Telling them
+/// apart needs an observation long enough that one tone's response at its
+/// neighbour's detector has fallen away — roughly `1 / Δf`, so ~430 ms minimum.
+/// Half a second gives margin. This is why the CTCSS path cannot run off the
+/// duty-cycled 33 ms snippets the deviation statistics are happy with.
+pub const CTCSS_WINDOW_S: f64 = 0.5;
+
+/// Smallest tone deviation accepted as a real CTCSS tone. Broadcast practice puts
+/// CTCSS at 10–15 % of an NFM channel's 5 kHz, so 500–750 Hz; 100 Hz is well
+/// under any real encoder while staying clear of incidental low-frequency content.
+const CTCSS_MIN_DEV_HZ: f32 = 100.0;
+
+/// How far the winning tone must stand above the best *non-adjacent* candidate
+/// before the detection is reported, in dB. Guards against voice energy or hum
+/// lighting up several detectors at once.
+const CTCSS_MARGIN_DB: f32 = 6.0;
+
+/// Goertzel amplitude estimate for one frequency, in the input's own units.
+///
+/// A single-bin DFT: far cheaper than a full transform when only a few dozen
+/// frequencies matter, and unconstrained by bin spacing — the CTCSS tones do not
+/// land on FFT bin centres. Scaled `2·|X| / Σw` so the result reads directly as
+/// the tone's amplitude.
+pub fn goertzel_amplitude(x: &[f32], window: &[f32], freq: f64, rate: f64) -> f32 {
+    let n = x.len().min(window.len());
+    if n == 0 || rate <= 0.0 { return 0.0; }
+    let w = 2.0 * std::f64::consts::PI * freq / rate;
+    let coeff = 2.0 * w.cos();
+    let (mut s1, mut s2) = (0.0f64, 0.0f64);
+    for i in 0..n {
+        let s0 = (x[i] * window[i]) as f64 + coeff * s1 - s2;
+        s2 = s1;
+        s1 = s0;
+    }
+    let power = (s1 * s1 + s2 * s2 - coeff * s1 * s2).max(0.0);
+    let w_sum: f32 = window[..n].iter().sum();
+    if w_sum <= 0.0 { return 0.0; }
+    2.0 * power.sqrt() as f32 / w_sum
+}
+
+/// Identify the CTCSS tone present in a block of discriminator output, if any.
+///
+/// Returns the winning tone only when it is both strong enough in absolute terms
+/// and clearly ahead of every non-adjacent rival — a tone that merely edges out
+/// its neighbour is an unresolved measurement, not a detection.
+pub fn ctcss_detect(audio_hz: &[f32], window: &[f32], rate: f64) -> Option<CtcssMeasure> {
+    if audio_hz.len() < window.len() || window.is_empty() { return None; }
+    let amps: Vec<f32> = CTCSS_TONES.iter()
+        .map(|&f| goertzel_amplitude(audio_hz, window, f, rate))
+        .collect();
+
+    let (best_i, best) = amps.iter().enumerate()
+        .fold((0usize, 0.0f32), |(bi, bv), (i, &v)| if v > bv { (i, v) } else { (bi, bv) });
+    if best < CTCSS_MIN_DEV_HZ { return None; }
+
+    // Adjacent table entries sit inside each other's skirts, so the runner-up is
+    // taken from the rest of the table.
+    let rival = amps.iter().enumerate()
+        .filter(|(i, _)| i.abs_diff(best_i) > 1)
+        .fold(0.0f32, |m, (_, &v)| m.max(v));
+    let margin_db = if rival > 0.0 { 20.0 * (best / rival).log10() } else { f32::INFINITY };
+    if margin_db < CTCSS_MARGIN_DB { return None; }
+
+    Some(CtcssMeasure {
+        tone_hz:      CTCSS_TONES[best_i] as f32,
+        deviation_hz: best,
+        margin_db,
+    })
+}
+
+/// A decimating FIR that keeps its state between calls, so successive blocks
+/// produce one seamless output stream.
+///
+/// The stateless [`decimate`] restarts at each block: it discards the first
+/// `taps` samples and resets the decimation grid, which puts a small timing step
+/// at every block boundary. Deviation statistics never notice, but a narrowband
+/// tone detector does — the CTCSS window spans several blocks, and a phase step
+/// inside it destroys the coherence the detection depends on.
+pub struct StreamingDecimator {
+    taps:  Vec<f32>,
+    d:     usize,
+    /// Input samples carried over so the next block's first output can see the
+    /// full filter history.
+    tail:  Vec<Complex<f32>>,
+    /// Where the decimation grid resumes inside the next block.
+    phase: usize,
+}
+
+impl StreamingDecimator {
+    pub fn new(taps: Vec<f32>, d: usize) -> Self {
+        Self { taps, d: d.max(1), tail: Vec::new(), phase: 0 }
+    }
+
+    /// Forget the carried state — after a dropped block, or a parameter change.
+    /// The next output block starts a fresh contiguous run.
+    pub fn reset(&mut self) {
+        self.tail.clear();
+        self.phase = 0;
+    }
+
+    pub fn process(&mut self, input: &[Complex<f32>], out: &mut Vec<Complex<f32>>) {
+        out.clear();
+        let n = self.taps.len();
+        if n == 0 || input.is_empty() { return; }
+
+        // Splice the carried history in front of the new samples.
+        let mut buf = std::mem::take(&mut self.tail);
+        buf.extend_from_slice(input);
+        if buf.len() < n {
+            self.tail = buf;
+            return;
+        }
+
+        let mut start = self.phase;
+        while start + n <= buf.len() {
+            let w = &buf[start..start + n];
+            let mut acc = Complex { re: 0.0f32, im: 0.0f32 };
+            for (s, &h) in w.iter().zip(self.taps.iter()) {
+                acc.re += s.re * h;
+                acc.im += s.im * h;
+            }
+            out.push(acc);
+            start += self.d;
+        }
+
+        // Keep the samples the next output still needs, and remember where the
+        // grid stands relative to them. When the stride overshoots the buffer
+        // entirely, the leftover stride carries into the next block as phase.
+        let consumed = start.min(buf.len());
+        buf.drain(..consumed);
+        self.phase = start - consumed;
+        self.tail = buf;
     }
 }
 
@@ -425,13 +597,13 @@ pub fn target_rate_for(modulation: Modulation) -> Option<f64> {
 /// buffers, consumes raw blocks, and writes finished measurements into the shared
 /// metrics.
 pub struct DemodWorker {
-    pub sample_rx: Receiver<Vec<u8>>,
+    pub sample_rx: Receiver<(u64, Vec<u8>)>,
     pub state: Arc<Mutex<SdrMetrics>>,
     pub format: SampleFormat,
 }
 
 impl DemodWorker {
-    pub fn new(sample_rx: Receiver<Vec<u8>>, state: Arc<Mutex<SdrMetrics>>, format: SampleFormat) -> Self {
+    pub fn new(sample_rx: Receiver<(u64, Vec<u8>)>, state: Arc<Mutex<SdrMetrics>>, format: SampleFormat) -> Self {
         Self { sample_rx, state, format }
     }
 
@@ -456,12 +628,22 @@ impl DemodWorker {
             .checked_sub(UPDATE_INTERVAL)
             .unwrap_or_else(Instant::now);
 
-        while let Ok(chunk) = self.sample_rx.recv() {
-            // Duty cycle: discard whatever arrives between updates. This is the
-            // CPU bound, and dropping here is free — the measurement is
-            // statistical, so it does not need a contiguous stream.
-            if last_update.elapsed() < UPDATE_INTERVAL { continue; }
-            last_update = Instant::now();
+        // Streaming channel filter, rebuilt when the decimation factor changes.
+        let mut sdec: Option<StreamingDecimator> = None;
+        let mut env: Vec<f32> = Vec::new();
+        // Contiguous discriminator output feeding the CTCSS detector, plus its
+        // window and the sequence bookkeeping that proves the run is unbroken.
+        let mut audio: Vec<f32> = Vec::new();
+        let mut ctcss_window: Vec<f32> = Vec::new();
+        let mut ctcss_len: usize = 0;
+        let mut last_seq: u64 = 0;
+        // Last decimated sample of the previous block, so the discriminator does
+        // not lose the sample pair that spans a block boundary.
+        let mut carry: Option<Complex<f32>> = None;
+
+        while let Ok((seq, chunk)) = self.sample_rx.recv() {
+            let contiguous = seq == last_seq.wrapping_add(1);
+            last_seq = seq;
 
             let (sample_rate, modulation, snr_db, streaming, offset_hz) = {
                 let m = self.state.lock().unwrap_or_else(|e| e.into_inner());
@@ -470,15 +652,23 @@ impl DemodWorker {
             };
 
             // Refuse to guess: without a carrier the classifier reports Unknown,
-            // and an FM reading off noise would be meaningless.
+            // and a reading off noise would be meaningless.
             let Some(target) = target_rate_for(modulation) else {
                 self.clear();
+                audio.clear();
                 continue;
             };
             if !streaming || snr_db < crate::state::CLASSIFY_MIN_SNR_DB {
                 self.clear();
+                audio.clear();
                 continue;
             }
+
+            // CTCSS needs an unbroken half-second, so narrow-band FM forgoes the
+            // duty cycle and pays for every block. The other modes stay cheap.
+            let needs_continuity = matches!(modulation, Modulation::Nfm);
+            let due = last_update.elapsed() >= UPDATE_INTERVAL;
+            if !needs_continuity && !due { continue; }
 
             let d = decimation_factor(sample_rate, target);
             if d != taps_for_d {
@@ -486,50 +676,115 @@ impl DemodWorker {
                 // fold-over point at 50 %.
                 taps = design_lowpass(tap_count(d), 0.4 / d as f64);
                 taps_for_d = d;
+                sdec = Some(StreamingDecimator::new(taps.clone(), d));
+                audio.clear();
+                carry = None;
+            }
+            let sd = sdec.get_or_insert_with(|| StreamingDecimator::new(taps.clone(), d));
+            // A dropped block, or a skipped one under the duty cycle, ends the run.
+            if !contiguous {
+                sd.reset();
+                audio.clear();
+                carry = None;
             }
 
-            decode(&chunk, self.format, SLICE_PAIRS, &mut iq);
+            // Continuity means every sample counts; otherwise the bounded slice
+            // keeps the cost flat regardless of device rate.
+            let cap = if needs_continuity { usize::MAX } else { SLICE_PAIRS };
+            decode(&chunk, self.format, cap, &mut iq);
             // Bring the selected channel to DC before filtering, so the channel
             // filter (centred at DC) selects it rather than whatever sits at the
             // tuned frequency.
             mix_offset(&mut iq, offset_hz as f64, sample_rate);
-            decimate(&iq, &taps, d, &mut dec);
+            sd.process(&iq, &mut dec);
             let rate = channel_rate(sample_rate, d);
-            fm_discriminate(&dec, rate, &mut inst);
+            if dec.is_empty() { continue; }
 
-            let Some(fresh) = fm_stats(&inst) else {
-                self.clear();
-                continue;
-            };
+            // Rejoin the boundary sample pair so a contiguous run really is one.
+            if let Some(prev) = carry.take() { dec.insert(0, prev); }
+            if needs_continuity { carry = dec.last().copied(); }
 
-            // MPX baseband + pilot. A short block simply yields no spectrum this
-            // update rather than a padded, misleading one.
-            mpx_spectrum(&inst, &mpx_window, mpx_fft.as_ref(), &mut mpx_scratch, &mut mpx_mags);
-            let mpx_frame = (!mpx_mags.is_empty()).then(|| {
-                Arc::new(crate::state::MpxFrame {
-                    bin_hz:  rate / MPX_FFT_SIZE as f64,
-                    mags_hz: mpx_mags.clone(),
-                })
-            });
-            let pilot = mpx_frame.as_ref().map(|f| {
-                pilot_measure(&f.mags_hz, f.bin_hz, crate::state::deviation_limit_hz(modulation))
-            });
+            let mut fresh_fm: Option<FmMeasure> = None;
+            let mut fresh_am: Option<AmMeasure> = None;
+            let mut mpx_frame = None;
+            let mut pilot = None;
+            let mut ctcss: Option<CtcssMeasure> = None;
+            let mut fill = 0.0f32;
+
+            match modulation {
+                Modulation::Am => {
+                    am_envelope(&dec, &mut env);
+                    fresh_am = am_stats(&env);
+                }
+                Modulation::Wfm | Modulation::Nfm => {
+                    fm_discriminate(&dec, rate, &mut inst);
+                    fresh_fm = fm_stats(&inst);
+
+                    if matches!(modulation, Modulation::Wfm) {
+                        // MPX baseband + pilot. A short block simply yields no
+                        // spectrum rather than a padded, misleading one.
+                        mpx_spectrum(&inst, &mpx_window, mpx_fft.as_ref(), &mut mpx_scratch, &mut mpx_mags);
+                        mpx_frame = (!mpx_mags.is_empty()).then(|| {
+                            Arc::new(crate::state::MpxFrame {
+                                bin_hz:  rate / MPX_FFT_SIZE as f64,
+                                mags_hz: mpx_mags.clone(),
+                            })
+                        });
+                        pilot = mpx_frame.as_ref().map(|f| {
+                            pilot_measure(&f.mags_hz, f.bin_hz,
+                                          crate::state::deviation_limit_hz(modulation))
+                        });
+                    } else {
+                        // Accumulate the contiguous run the tone detector needs.
+                        let want = (CTCSS_WINDOW_S * rate) as usize;
+                        if want != ctcss_len && want > 0 {
+                            ctcss_len = want;
+                            ctcss_window = super::dsp::compute_window(super::dsp::WindowFn::Hann, want);
+                            audio.clear();
+                        }
+                        audio.extend_from_slice(&inst);
+                        if audio.len() > ctcss_len {
+                            let excess = audio.len() - ctcss_len;
+                            audio.drain(..excess);
+                        }
+                        fill = if ctcss_len > 0 {
+                            (audio.len() as f32 / ctcss_len as f32).min(1.0)
+                        } else { 0.0 };
+                        if audio.len() >= ctcss_len && ctcss_len > 0 {
+                            ctcss = ctcss_detect(&audio, &ctcss_window, rate);
+                        }
+                    }
+                }
+                Modulation::Unknown => {}
+            }
+
+            // Publishing stays on the update cadence even when the intake does
+            // not, so the display rate and the lock traffic are unchanged.
+            if !due { continue; }
+            last_update = Instant::now();
 
             let mut m = self.state.lock().unwrap_or_else(|e| e.into_inner());
             m.demod.decimation      = d;
             m.demod.channel_rate_hz = rate;
             m.demod.mpx             = mpx_frame;
             m.demod.pilot           = pilot;
-            m.demod.fm = Some(match m.demod.fm {
-                Some(prev) => FmMeasure {
-                    // Peak hold with decay; EMA on the steadier figures.
-                    peak_dev_hz:       fresh.peak_dev_hz.max(prev.peak_dev_hz - PEAK_DECAY_HZ),
-                    rms_dev_hz:        EMA_ALPHA * fresh.rms_dev_hz + (1.0 - EMA_ALPHA) * prev.rms_dev_hz,
-                    carrier_offset_hz: EMA_ALPHA * fresh.carrier_offset_hz
-                                         + (1.0 - EMA_ALPHA) * prev.carrier_offset_hz,
-                },
-                None => fresh,
-            });
+            m.demod.am              = fresh_am;
+            m.demod.ctcss           = ctcss;
+            m.demod.ctcss_fill      = fill;
+            if let Some(fresh) = fresh_fm {
+                m.demod.fm = Some(match m.demod.fm {
+                    Some(prev) => FmMeasure {
+                        // Peak hold with decay; EMA on the steadier figures.
+                        peak_dev_hz:       fresh.peak_dev_hz.max(prev.peak_dev_hz - PEAK_DECAY_HZ),
+                        rms_dev_hz:        EMA_ALPHA * fresh.rms_dev_hz + (1.0 - EMA_ALPHA) * prev.rms_dev_hz,
+                        carrier_offset_hz: EMA_ALPHA * fresh.carrier_offset_hz
+                                             + (1.0 - EMA_ALPHA) * prev.carrier_offset_hz,
+                    },
+                    None => fresh,
+                });
+            } else {
+                m.demod.fm = None;
+            }
             m.demod.last_update = Some(Instant::now());
         }
     }
@@ -538,9 +793,12 @@ impl DemodWorker {
     /// leaving a stale number on screen.
     fn clear(&self) {
         let mut m = self.state.lock().unwrap_or_else(|e| e.into_inner());
-        m.demod.fm    = None;
-        m.demod.mpx   = None;
-        m.demod.pilot = None;
+        m.demod.fm         = None;
+        m.demod.mpx        = None;
+        m.demod.pilot      = None;
+        m.demod.am         = None;
+        m.demod.ctcss      = None;
+        m.demod.ctcss_fill = 0.0;
     }
 }
 
@@ -677,9 +935,9 @@ mod tests {
         let rate = 2_000_000.0;
         let d = 8;
         let iq = fm_signal(rate, 1 << 16, 5_000.0, 0.0, 0.0);
-        let taps = design_lowpass(tap_count(d), 0.4 / d as f64);
+        let mut sd = StreamingDecimator::new(design_lowpass(tap_count(d), 0.4 / d as f64), d);
         let mut dec = Vec::new();
-        decimate(&iq, &taps, d, &mut dec);
+        sd.process(&iq, &mut dec);
         assert!(dec.len() > 1000, "expected a decimated block, got {}", dec.len());
         let mut inst = Vec::new();
         fm_discriminate(&dec, channel_rate(rate, d), &mut inst);
@@ -689,11 +947,54 @@ mod tests {
 
     #[test]
     fn decimate_is_a_noop_when_input_is_shorter_than_the_filter() {
-        let taps = design_lowpass(63, 0.1);
+        let mut sd = StreamingDecimator::new(design_lowpass(63, 0.1), 4);
         let input = vec![Complex { re: 1.0f32, im: 0.0 }; 10];
         let mut out = Vec::new();
-        decimate(&input, &taps, 4, &mut out);
+        sd.process(&input, &mut out);
         assert!(out.is_empty());
+    }
+
+    #[test]
+    fn streaming_decimator_matches_one_long_block() {
+        // The property CTCSS depends on: feeding a signal in pieces must give the
+        // same output as feeding it whole — same samples, same count, no timing
+        // step at the seams.
+        let rate = 2_000_000.0;
+        let d = 8;
+        let iq = fm_signal(rate, 1 << 15, 5_000.0, 0.0, 0.0);
+        let taps = design_lowpass(tap_count(d), 0.4 / d as f64);
+
+        let mut whole = Vec::new();
+        StreamingDecimator::new(taps.clone(), d).process(&iq, &mut whole);
+
+        let mut sd = StreamingDecimator::new(taps, d);
+        let mut pieced = Vec::new();
+        let mut part = Vec::new();
+        // Deliberately ragged chunks, none a multiple of the decimation factor.
+        for chunk in iq.chunks(3_001) {
+            sd.process(chunk, &mut part);
+            pieced.extend_from_slice(&part);
+        }
+
+        assert_eq!(pieced.len(), whole.len(), "sample count diverged across blocks");
+        for (i, (a, b)) in pieced.iter().zip(whole.iter()).enumerate() {
+            assert!((a - b).norm() < 1e-3, "sample {i} differs: {a} vs {b}");
+        }
+    }
+
+    #[test]
+    fn streaming_decimator_reset_starts_a_fresh_run() {
+        let d = 4;
+        let taps = design_lowpass(31, 0.1);
+        let iq = fm_signal(200_000.0, 4096, 1_000.0, 0.0, 0.0);
+        let mut sd = StreamingDecimator::new(taps, d);
+        let (mut a, mut b) = (Vec::new(), Vec::new());
+        sd.process(&iq, &mut a);
+        sd.reset();
+        sd.process(&iq, &mut b);
+        // After a reset the filter has no history, so it must re-warm exactly as
+        // it did the first time rather than splice onto stale samples.
+        assert_eq!(a.len(), b.len());
     }
 
     #[test]
@@ -903,12 +1204,123 @@ mod tests {
     }
 
     #[test]
-    fn target_rate_only_for_fm_modulations() {
+    fn target_rate_per_modulation() {
         assert_eq!(target_rate_for(Modulation::Wfm), Some(WFM_TARGET_HZ));
         assert_eq!(target_rate_for(Modulation::Nfm), Some(NFM_TARGET_HZ));
-        // AM and "no idea" must produce no reading at all.
-        assert_eq!(target_rate_for(Modulation::Am), None);
+        assert_eq!(target_rate_for(Modulation::Am),  Some(AM_TARGET_HZ));
+        // An unclassified carrier must produce no reading at all.
         assert_eq!(target_rate_for(Modulation::Unknown), None);
+    }
+
+    /// AM carrier of unit amplitude, modulated `depth` (0..1) by a 1 kHz tone.
+    fn am_signal(rate: f64, n: usize, depth: f64) -> Vec<Complex<f32>> {
+        (0..n).map(|i| {
+            let t = i as f64 / rate;
+            let a = 1.0 + depth * (2.0 * PI * 1_000.0 * t).sin();
+            Complex { re: a as f32, im: 0.0 }
+        }).collect()
+    }
+
+    #[test]
+    fn am_depth_matches_a_known_modulation() {
+        let iq = am_signal(16_000.0, 1 << 13, 0.5);
+        let mut env = Vec::new();
+        am_envelope(&iq, &mut env);
+        let s = am_stats(&env).expect("stats");
+        assert!((s.depth_pct - 50.0).abs() < 2.0, "depth = {}", s.depth_pct);
+        // A symmetric modulator swings equally either side of the carrier.
+        assert!((s.positive_pct - s.negative_pct).abs() < 3.0,
+                "asymmetry {} vs {}", s.positive_pct, s.negative_pct);
+    }
+
+    #[test]
+    fn am_unmodulated_carrier_reads_zero_depth() {
+        let iq = am_signal(16_000.0, 1 << 13, 0.0);
+        let mut env = Vec::new();
+        am_envelope(&iq, &mut env);
+        let s = am_stats(&env).expect("stats");
+        assert!(s.depth_pct < 1.0, "depth = {}", s.depth_pct);
+    }
+
+    #[test]
+    fn am_stats_declines_a_tiny_or_dead_block() {
+        assert!(am_stats(&[1.0, 1.0]).is_none());
+        // A dead carrier has no depth to speak of, and dividing by it would be
+        // worse than saying nothing.
+        assert!(am_stats(&[0.0; 64]).is_none());
+    }
+
+    /// Discriminator-domain audio: a CTCSS tone plus a louder voice-band tone,
+    /// as a real NFM channel carries it.
+    fn ctcss_audio(rate: f64, n: usize, tone_hz: f64, tone_dev: f64, voice_dev: f64) -> Vec<f32> {
+        (0..n).map(|i| {
+            let t = i as f64 / rate;
+            (tone_dev * (2.0 * PI * tone_hz * t).sin()
+             + voice_dev * (2.0 * PI * 900.0 * t).sin()) as f32
+        }).collect()
+    }
+
+    #[test]
+    fn ctcss_identifies_the_right_tone_under_voice() {
+        let rate = 25_000.0;
+        let n = (CTCSS_WINDOW_S * rate) as usize;
+        let window = super::super::dsp::compute_window(super::super::dsp::WindowFn::Hann, n);
+        // 103.5 Hz at 600 Hz deviation, under 3 kHz of voice — typical proportions.
+        let audio = ctcss_audio(rate, n, 103.5, 600.0, 3_000.0);
+        let m = ctcss_detect(&audio, &window, rate).expect("tone detected");
+        assert_eq!(m.tone_hz, 103.5);
+        assert!((m.deviation_hz - 600.0).abs() < 100.0, "dev = {}", m.deviation_hz);
+    }
+
+    #[test]
+    fn ctcss_separates_the_closest_tone_pair() {
+        // 67.0 and 69.3 are only 2.3 Hz apart — the reason the window is half a
+        // second. Each must be identified as itself, not as its neighbour.
+        let rate = 25_000.0;
+        let n = (CTCSS_WINDOW_S * rate) as usize;
+        let window = super::super::dsp::compute_window(super::super::dsp::WindowFn::Hann, n);
+        for want in [67.0f32, 69.3] {
+            let audio = ctcss_audio(rate, n, want as f64, 600.0, 1_000.0);
+            let m = ctcss_detect(&audio, &window, rate)
+                .unwrap_or_else(|| panic!("no detection for {want}"));
+            assert_eq!(m.tone_hz, want, "confused {want} with {}", m.tone_hz);
+        }
+    }
+
+    #[test]
+    fn ctcss_reports_nothing_without_a_tone() {
+        let rate = 25_000.0;
+        let n = (CTCSS_WINDOW_S * rate) as usize;
+        let window = super::super::dsp::compute_window(super::super::dsp::WindowFn::Hann, n);
+        // Voice only — a carrier with no subaudible tone must not invent one.
+        let audio = ctcss_audio(rate, n, 100.0, 0.0, 3_000.0);
+        assert!(ctcss_detect(&audio, &window, rate).is_none());
+    }
+
+    #[test]
+    fn ctcss_declines_a_short_run() {
+        // Fewer samples than the window means the run is not yet long enough to
+        // decide — the caller must show "searching", not "no tone".
+        let rate = 25_000.0;
+        let n = (CTCSS_WINDOW_S * rate) as usize;
+        let window = super::super::dsp::compute_window(super::super::dsp::WindowFn::Hann, n);
+        let audio = ctcss_audio(rate, n / 4, 103.5, 600.0, 500.0);
+        assert!(ctcss_detect(&audio, &window, rate).is_none());
+    }
+
+    #[test]
+    fn goertzel_measures_a_tone_amplitude() {
+        let rate = 25_000.0;
+        let n = 8192;
+        let window = super::super::dsp::compute_window(super::super::dsp::WindowFn::Hann, n);
+        let x: Vec<f32> = (0..n)
+            .map(|i| (700.0 * (2.0 * PI * 150.0 * i as f64 / rate).sin()) as f32)
+            .collect();
+        let a = goertzel_amplitude(&x, &window, 150.0, rate);
+        assert!((a - 700.0).abs() < 20.0, "amplitude = {a}");
+        // Far off the tone the detector must read near zero.
+        let off = goertzel_amplitude(&x, &window, 500.0, rate);
+        assert!(off < 20.0, "off-tone leakage = {off}");
     }
 
     #[test]

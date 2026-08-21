@@ -228,7 +228,7 @@ impl App {
         let (sample_tx, sample_rx) = crossbeam_channel::bounded::<Vec<u8>>(4);
         // The demod queue is deliberately shallow: it duty-cycles to one update
         // per 250 ms, so anything deeper would only hold blocks it will discard.
-        let (demod_tx, demod_rx) = crossbeam_channel::bounded::<Vec<u8>>(2);
+        let (demod_tx, demod_rx) = crossbeam_channel::bounded::<(u64, Vec<u8>)>(2);
         let rx_ctx = Arc::new(hardware::RxContext {
             metrics: Arc::clone(&state), sample_tx, demod_tx, format: sample_format,
         });
