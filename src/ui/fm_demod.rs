@@ -21,13 +21,51 @@ use ratatui::{
     Frame,
 };
 
-use crate::signal::demod::FILTER_QUALITY_D_LIMIT;
-use crate::state::{deviation_limit_hz, FmMeasure, Modulation, SdrMetrics};
+use crate::signal::demod::{FILTER_QUALITY_D_LIMIT, MPX_SPAN_HZ, PILOT_HZ};
+use crate::state::{deviation_limit_hz, FmMeasure, Modulation, MpxFrame, PilotState, SdrMetrics};
 use crate::ui::chrome;
 use crate::ui::micro_common::bar_spans;
 use crate::ui::panel::Panel;
 
 pub struct FmDemodPanel;
+
+/// Resample an MPX spectrum onto exactly `points` display columns spanning
+/// 0..[`MPX_SPAN_HZ`], in dB.
+///
+/// Each column takes the **maximum** of the bins it covers, not their mean: the
+/// pilot is a single narrow line, and averaging would bury it under the wideband
+/// audio around it — the display would then disagree with the pilot readout right
+/// beneath it.
+fn mpx_profile(frame: &MpxFrame, points: usize) -> Vec<f32> {
+    if points == 0 || frame.bin_hz <= 0.0 || frame.mags_hz.is_empty() { return Vec::new(); }
+    let last = (MPX_SPAN_HZ / frame.bin_hz).ceil() as usize;
+    let last = last.min(frame.mags_hz.len());
+    if last == 0 { return Vec::new(); }
+
+    (0..points)
+        .map(|i| {
+            let lo = i * last / points;
+            let hi = (((i + 1) * last / points).max(lo + 1)).min(last);
+            let peak = frame.mags_hz[lo..hi].iter().copied().fold(0.0f32, f32::max);
+            if peak > 0.0 { 20.0 * peak.log10() } else { -120.0 }
+        })
+        .collect()
+}
+
+/// Tick row under the MPX trace, marking the pilot, the stereo subcarrier and RDS
+/// at their true positions in the span.
+fn mpx_ticks(width: usize) -> String {
+    let mut row = vec![b' '; width];
+    for (hz, label) in [(PILOT_HZ, "19k"), (38_000.0, "38k"), (57_000.0, "57k")] {
+        let pos = ((hz / MPX_SPAN_HZ) * width as f64).round() as usize;
+        // Centre the label on the tick, keeping it inside the row.
+        let start = pos.saturating_sub(label.len() / 2).min(width.saturating_sub(label.len()));
+        if start + label.len() <= width {
+            row[start..start + label.len()].copy_from_slice(label.as_bytes());
+        }
+    }
+    String::from_utf8(row).unwrap_or_default()
+}
 
 /// The idle headline: `(mark, headline, detail)`. Every branch is dim/neutral —
 /// an idle demod isn't a fault, the same framing `signal_characterization` uses
@@ -79,7 +117,8 @@ impl Panel for FmDemodPanel {
     fn focus_key(&self) -> Option<char> { Some('m') }
 
     fn focus_bindings(&self) -> &'static [(&'static str, &'static str)] {
-        &[("Space", "Demod on/off"), ("C", "Snapshot to log")]
+        &[("Space", "Demod on/off"), ("←/→", "Channel offset"), ("P", "Snap to carrier"),
+          ("0", "Centre"), ("C", "Snapshot to log")]
     }
 
     fn render(&self, f: &mut Frame, area: Rect, state: &SdrMetrics, theme: &crate::Theme, focused: bool) {
@@ -119,12 +158,33 @@ impl Panel for FmDemodPanel {
                              Style::default().fg(theme.status_ok).add_modifier(Modifier::BOLD)),
             ]));
             let d = state.demod.decimation.max(1);
+            // The absolute frequency actually being demodulated — with an offset
+            // in play this is not the tuned frequency, and must never be implied.
+            let demod_hz = state.radio.frequency as i64 + state.demod.offset_hz;
+            let off = state.demod.offset_hz;
+            let off_str = if off == 0 { "centre".to_string() }
+                          else { format!("{:+.0} kHz", off as f64 / 1000.0) };
+            lines.push(Line::from(vec![
+                Span::raw(" "),
+                Span::styled(format!("{:.3} MHz ", demod_hz as f64 / 1e6),
+                             Style::default().fg(theme.value_hi)),
+                Span::styled(off_str, lbl),
+            ]));
             lines.push(Line::from(vec![
                 Span::raw(" "),
                 Span::styled(
                     format!("{:.0} kHz channel \u{00b7} \u{00f7}{}", state.demod.channel_rate_hz / 1000.0, d),
                     lbl),
             ]));
+            // Sitting on the tuned centre means sharing the channel with the
+            // front-end's DC offset / LO leakage. Point at the existing fix.
+            if state.demod.on_dc_spike(state.iq.cal.correcting()) {
+                lines.push(Line::from(vec![
+                    Span::raw(" "),
+                    Span::styled("\u{2192} on DC spike \u{2014} [D] in Lab IQ, or offset",
+                                 Style::default().fg(theme.status_warn)),
+                ]));
+            }
             // The channel filter stops sharpening once the decimation factor
             // saturates the tap budget — advise, never coerce, in the house style.
             if d > FILTER_QUALITY_D_LIMIT {
@@ -143,11 +203,56 @@ impl Panel for FmDemodPanel {
         }
         lines.push(Line::raw(""));
 
-        // ── MPX / PILOT: still declared-empty (Phase 3) ────────────────────
-        for (name, hint) in [("MPX BASEBAND", "0-57 kHz"), ("PILOT / STEREO", "19 kHz")] {
-            lines.push(chrome::section(name, hint, iw, theme));
-            lines.push(Line::raw(""));
+        // ── MPX BASEBAND — live in Phase 3 ─────────────────────────────────
+        lines.push(chrome::section("MPX BASEBAND", "0-60 kHz", iw, theme));
+        match state.demod.live_mpx() {
+            Some(frame) => {
+                let w = iw.saturating_sub(2);
+                let profile = mpx_profile(frame, w * 2);
+                if w >= 8 && !profile.is_empty() {
+                    lines.push(Line::from(vec![
+                        Span::raw(" "),
+                        Span::styled(crate::ui::charts::mini_braille_line(&profile, w),
+                                     Style::default().fg(theme.border_accent)),
+                    ]));
+                    lines.push(Line::from(vec![
+                        Span::raw(" "),
+                        Span::styled(mpx_ticks(w), lbl),
+                    ]));
+                }
+            }
+            None => lines.push(Line::raw("")),
         }
+        lines.push(Line::raw(""));
+
+        // ── PILOT / STEREO — live in Phase 3 ───────────────────────────────
+        lines.push(chrome::section("PILOT / STEREO", "19 kHz", iw, theme));
+        match state.demod.live_pilot() {
+            Some(p) => {
+                let (mark, word, color) = match p.state {
+                    PilotState::Locked   => ("\u{25cf}", "STEREO",   theme.status_ok),
+                    PilotState::Marginal => ("\u{25d0}", "MARGINAL", theme.status_warn),
+                    PilotState::Absent   => ("\u{25cb}", "MONO",     theme.label),
+                };
+                lines.push(Line::from(vec![
+                    Span::raw(" "),
+                    Span::styled(format!("{mark} {word}"),
+                                 Style::default().fg(color).add_modifier(Modifier::BOLD)),
+                ]));
+                if p.state != PilotState::Absent {
+                    lines.push(Line::from(vec![
+                        chrome::field("Pilot", 8, theme),
+                        Span::styled(fmt_hz(p.deviation_hz), val),
+                    ]));
+                    lines.push(Line::from(vec![
+                        chrome::field("Inject", 8, theme),
+                        Span::styled(format!("{:.1}%", p.injection_pct), val),
+                    ]));
+                }
+            }
+            None => lines.push(Line::raw("")),
+        }
+        lines.push(Line::raw(""));
 
         // ── DEVIATION — live in Phase 2 ────────────────────────────────────
         let limit = deviation_limit_hz(state.signal.modulation);

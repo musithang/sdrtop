@@ -199,10 +199,15 @@ const ENVELOPE_GATE: f32 = 0.35;
 ///
 /// `f[n] = arg(z[n+1] · conj(z[n])) · rate / 2π`, unambiguous to ±`rate`/2 — at a
 /// 333 kHz channel rate that is ±166 kHz, comfortably clear of the 75 kHz WFM
-/// limit. Samples whose envelope falls below [`ENVELOPE_GATE`] are dropped rather
-/// than emitted, so the output length is *at most* `len − 1`; the always-missing
-/// first sample is precisely the block-splice guard, since the previous block's
-/// last phase is not usable.
+/// limit. Always yields `len − 1` outputs: the missing first sample is precisely
+/// the block-splice guard, since the previous block's last phase is not usable.
+///
+/// Samples failing [`ENVELOPE_GATE`] are replaced by the previous trustworthy
+/// value rather than removed. Dropping them would leave a non-uniform time base,
+/// which the MPX baseband spectrum cannot work from — a gap shifts every later
+/// sample in time and smears the 19 kHz pilot. Holding keeps the sample grid
+/// intact, and since the gate only fires on rare envelope collapses, the
+/// spectral cost is far smaller than the aliasing that dropping would cause.
 pub fn fm_discriminate(iq: &[Complex<f32>], rate: f64, out: &mut Vec<f32>) {
     use std::f64::consts::PI;
     out.clear();
@@ -216,12 +221,150 @@ pub fn fm_discriminate(iq: &[Complex<f32>], rate: f64, out: &mut Vec<f32>) {
 
     out.reserve(iq.len() - 1);
     let scale = (rate / (2.0 * PI)) as f32;
+    let mut held = 0.0f32;
+    let mut have_held = false;
     for w in iq.windows(2) {
         // Both endpoints must be trustworthy — the phase step spans the pair.
-        if w[0].norm_sqr() < floor_sq || w[1].norm_sqr() < floor_sq { continue; }
+        if w[0].norm_sqr() < floor_sq || w[1].norm_sqr() < floor_sq {
+            out.push(held);
+            continue;
+        }
         let prod = w[1] * w[0].conj();
-        out.push(prod.im.atan2(prod.re) * scale);
+        let f = prod.im.atan2(prod.re) * scale;
+        if !have_held {
+            // Backfill any leading run gated out before the first valid sample,
+            // so the block never opens with a fabricated zero.
+            for v in out.iter_mut() { *v = f; }
+            have_held = true;
+        }
+        held = f;
+        out.push(f);
     }
+}
+
+/// Mix the stream down by `offset_hz`, bringing a channel at that offset from the
+/// tuned centre to DC ready for the channel filter.
+///
+/// This is what lets the bench demodulate a station the radio is *not* centred
+/// on — the point being that the tuned centre is exactly where both front-ends
+/// put their DC offset and LO leakage, so a channel taken there competes with the
+/// artefact (see the plan's §3.5). Phase is restarted per block: blocks are
+/// independent by design, and a measurement does not care about phase continuity
+/// across a gap.
+///
+/// The phasor advances by repeated complex multiplication rather than a `sin`/`cos`
+/// per sample, renormalised periodically so rounding cannot let it drift off the
+/// unit circle over a long block.
+pub fn mix_offset(iq: &mut [Complex<f32>], offset_hz: f64, sample_rate: f64) {
+    use std::f64::consts::PI;
+    if offset_hz == 0.0 || !(sample_rate > 0.0) { return; }
+    let dphi = -2.0 * PI * offset_hz / sample_rate;
+    let step = Complex { re: dphi.cos() as f32, im: dphi.sin() as f32 };
+    let mut ph = Complex { re: 1.0f32, im: 0.0f32 };
+    for (i, z) in iq.iter_mut().enumerate() {
+        *z *= ph;
+        ph *= step;
+        if i % 1024 == 1023 {
+            let n = ph.norm();
+            if n > 0.0 { ph /= n; }
+        }
+    }
+}
+
+/// FFT size for the recovered MPX baseband. At a ~333 kHz channel rate this gives
+/// ~163 Hz resolution — ample to isolate the 19 kHz pilot from its neighbourhood
+/// and to place the 38 kHz stereo subcarrier and 57 kHz RDS.
+pub const MPX_FFT_SIZE: usize = 2048;
+
+/// Upper edge of the MPX display span. Covers the pilot (19 kHz), the stereo
+/// difference signal (38 kHz) and RDS (57 kHz) with a little headroom.
+pub const MPX_SPAN_HZ: f64 = 60_000.0;
+
+/// The stereo pilot's frequency.
+pub const PILOT_HZ: f64 = 19_000.0;
+
+/// Spectrum of the recovered MPX baseband, in **Hz of deviation per bin**.
+///
+/// The discriminator's output is already instantaneous deviation in Hz, so each
+/// bin's amplitude is the deviation contributed by that MPX component — which is
+/// exactly how pilot injection is specified. Scaling is `2·|X[k]| / Σw`, the
+/// standard single-sided amplitude recovery for a windowed transform.
+///
+/// Only the first `MPX_FFT_SIZE` samples are transformed; the caller supplies the
+/// planner-built transform and its window so nothing is re-planned per update.
+pub fn mpx_spectrum(
+    inst_hz: &[f32],
+    window: &[f32],
+    fft: &dyn rustfft::Fft<f32>,
+    scratch: &mut Vec<Complex<f32>>,
+    out: &mut Vec<f32>,
+) {
+    out.clear();
+    let n = window.len();
+    if inst_hz.len() < n || n == 0 { return; }
+
+    // Remove the carrier offset first: it is a DC term in this domain, and a large
+    // one would leak across the low bins through the window's skirts.
+    let mean = inst_hz[..n].iter().map(|&f| f as f64).sum::<f64>() / n as f64;
+
+    scratch.clear();
+    scratch.extend(inst_hz[..n].iter().zip(window.iter())
+        .map(|(&f, &w)| Complex { re: (f as f64 - mean) as f32 * w, im: 0.0 }));
+    fft.process(scratch);
+
+    let w_sum: f32 = window.iter().sum();
+    if w_sum <= 0.0 { return; }
+    let scale = 2.0 / w_sum;
+    // Only the positive half carries information for a real input.
+    out.extend(scratch[..n / 2].iter().map(|z| z.norm() * scale));
+}
+
+/// How confidently a 19 kHz stereo pilot is present.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum PilotState {
+    Absent,
+    /// Detectable but below a trustworthy injection level — reported as such
+    /// rather than being called stereo.
+    Marginal,
+    Locked,
+}
+
+/// A pilot measurement: its deviation contribution and injection ratio.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct PilotMeasure {
+    pub state:         PilotState,
+    pub deviation_hz:  f32,
+    /// Deviation as a percentage of the mode's peak-deviation limit. Broadcast
+    /// practice nominally injects the pilot at 8–10 %.
+    pub injection_pct: f32,
+}
+
+/// Injection at or above this percentage counts as a locked pilot — half the
+/// 8–10 % nominal, so a weakly injected but genuine pilot still reads as stereo.
+const PILOT_LOCK_PCT: f32 = 4.0;
+/// Below this the line is indistinguishable from baseband content near 19 kHz.
+const PILOT_MARGINAL_PCT: f32 = 1.5;
+
+/// Measure the pilot from an MPX spectrum.
+///
+/// Takes the strongest bin within a small neighbourhood of 19 kHz rather than one
+/// exact bin: the pilot rarely lands on a bin centre, and window leakage spreads
+/// it over its neighbours.
+pub fn pilot_measure(mags_hz: &[f32], bin_hz: f64, limit_hz: f32) -> PilotMeasure {
+    let absent = PilotMeasure { state: PilotState::Absent, deviation_hz: 0.0, injection_pct: 0.0 };
+    if mags_hz.is_empty() || bin_hz <= 0.0 || limit_hz <= 0.0 { return absent; }
+
+    let centre = (PILOT_HZ / bin_hz).round() as usize;
+    let lo = centre.saturating_sub(2);
+    let hi = (centre + 2).min(mags_hz.len().saturating_sub(1));
+    if lo > hi { return absent; }
+
+    let dev = mags_hz[lo..=hi].iter().copied().fold(0.0f32, f32::max);
+    let pct = dev / limit_hz * 100.0;
+    let state = if pct >= PILOT_LOCK_PCT          { PilotState::Locked }
+                else if pct >= PILOT_MARGINAL_PCT { PilotState::Marginal }
+                else                              { PilotState::Absent };
+    PilotMeasure { state, deviation_hz: dev, injection_pct: pct }
 }
 
 /// Quantile used for the peak-deviation reading — a quasi-peak detector rather
@@ -297,6 +440,13 @@ impl DemodWorker {
         let mut iq:   Vec<Complex<f32>> = Vec::new();
         let mut dec:  Vec<Complex<f32>> = Vec::new();
         let mut inst: Vec<f32>          = Vec::new();
+        let mut mpx_scratch: Vec<Complex<f32>> = Vec::new();
+        let mut mpx_mags:    Vec<f32>          = Vec::new();
+
+        // MPX transform, planned once. Hann keeps the pilot's skirts tight enough
+        // that a neighbouring MPX component cannot be mistaken for it.
+        let mpx_fft = rustfft::FftPlanner::<f32>::new().plan_fft_forward(MPX_FFT_SIZE);
+        let mpx_window = super::dsp::compute_window(super::dsp::WindowFn::Hann, MPX_FFT_SIZE);
         // Filter cache: redesigned only when the decimation factor changes, which
         // happens on a sample-rate change or a WFM↔NFM reclassification.
         let mut taps: Vec<f32> = Vec::new();
@@ -313,10 +463,10 @@ impl DemodWorker {
             if last_update.elapsed() < UPDATE_INTERVAL { continue; }
             last_update = Instant::now();
 
-            let (sample_rate, modulation, snr_db, streaming) = {
+            let (sample_rate, modulation, snr_db, streaming, offset_hz) = {
                 let m = self.state.lock().unwrap_or_else(|e| e.into_inner());
                 (m.radio.config_sample_rate, m.signal.modulation,
-                 m.signal.peak_to_nf_db, m.radio.hw_streaming)
+                 m.signal.peak_to_nf_db, m.radio.hw_streaming, m.demod.offset_hz)
             };
 
             // Refuse to guess: without a carrier the classifier reports Unknown,
@@ -339,6 +489,10 @@ impl DemodWorker {
             }
 
             decode(&chunk, self.format, SLICE_PAIRS, &mut iq);
+            // Bring the selected channel to DC before filtering, so the channel
+            // filter (centred at DC) selects it rather than whatever sits at the
+            // tuned frequency.
+            mix_offset(&mut iq, offset_hz as f64, sample_rate);
             decimate(&iq, &taps, d, &mut dec);
             let rate = channel_rate(sample_rate, d);
             fm_discriminate(&dec, rate, &mut inst);
@@ -348,9 +502,24 @@ impl DemodWorker {
                 continue;
             };
 
+            // MPX baseband + pilot. A short block simply yields no spectrum this
+            // update rather than a padded, misleading one.
+            mpx_spectrum(&inst, &mpx_window, mpx_fft.as_ref(), &mut mpx_scratch, &mut mpx_mags);
+            let mpx_frame = (!mpx_mags.is_empty()).then(|| {
+                Arc::new(crate::state::MpxFrame {
+                    bin_hz:  rate / MPX_FFT_SIZE as f64,
+                    mags_hz: mpx_mags.clone(),
+                })
+            });
+            let pilot = mpx_frame.as_ref().map(|f| {
+                pilot_measure(&f.mags_hz, f.bin_hz, crate::state::deviation_limit_hz(modulation))
+            });
+
             let mut m = self.state.lock().unwrap_or_else(|e| e.into_inner());
             m.demod.decimation      = d;
             m.demod.channel_rate_hz = rate;
+            m.demod.mpx             = mpx_frame;
+            m.demod.pilot           = pilot;
             m.demod.fm = Some(match m.demod.fm {
                 Some(prev) => FmMeasure {
                     // Peak hold with decay; EMA on the steadier figures.
@@ -369,7 +538,9 @@ impl DemodWorker {
     /// leaving a stale number on screen.
     fn clear(&self) {
         let mut m = self.state.lock().unwrap_or_else(|e| e.into_inner());
-        m.demod.fm = None;
+        m.demod.fm    = None;
+        m.demod.mpx   = None;
+        m.demod.pilot = None;
     }
 }
 
@@ -572,11 +743,31 @@ mod tests {
         }
         let mut inst = Vec::new();
         fm_discriminate(&iq, rate, &mut inst);
-        assert!(inst.len() < 4095, "gated samples must be dropped, got {}", inst.len());
-        assert!(inst.len() > 3900, "only the null should go, got {}", inst.len());
+        // The time base must stay uniform for the MPX spectrum, so gated samples
+        // are held at the last trustworthy value rather than removed.
+        assert_eq!(inst.len(), 4095, "gating must not disturb the sample grid");
         // Nothing survives near the ±rate/2 ambiguity rail.
         let worst = inst.iter().fold(0.0f32, |m, &v| m.max(v.abs()));
         assert!(worst < 100_000.0, "rail-level sample survived the gate: {worst}");
+        // The held region carries a plausible deviation, not a fabricated zero.
+        assert!(inst[1020].abs() <= 20_000.0 + 1.0, "held value = {}", inst[1020]);
+    }
+
+    #[test]
+    fn a_leading_gated_run_is_backfilled() {
+        // If the block opens inside a null there is no previous value to hold, so
+        // the first valid sample is written backwards over the gap — otherwise the
+        // block would start with a fabricated zero and put a step in the spectrum.
+        let rate = 250_000.0;
+        let mut iq = fm_signal(rate, 2048, 15_000.0, 0.0, 0.0);
+        for z in iq.iter_mut().take(40) {
+            *z = Complex { re: 1e-4, im: 1e-4 };
+        }
+        let mut inst = Vec::new();
+        fm_discriminate(&iq, rate, &mut inst);
+        assert_eq!(inst.len(), 2047);
+        assert!((inst[0] - 15_000.0).abs() < 200.0,
+                "leading gap must be backfilled, got {}", inst[0]);
     }
 
     #[test]
@@ -598,6 +789,117 @@ mod tests {
         fm_discriminate(&iq, rate, &mut inst);
         let s = fm_stats(&inst).expect("stats");
         assert!(s.peak_dev_hz > 85_000.0, "expected ~90 kHz, got {}", s.peak_dev_hz);
+    }
+
+    /// Synthesise a WFM-style composite: an audio tone plus a 19 kHz pilot at a
+    /// known injection, expressed as an FM carrier.
+    fn wfm_signal(rate: f64, n: usize, audio_dev: f64, pilot_dev: f64) -> Vec<Complex<f32>> {
+        let mut phase = 0.0f64;
+        let mut out = Vec::with_capacity(n);
+        for i in 0..n {
+            let t = i as f64 / rate;
+            let inst = audio_dev * (2.0 * PI * 1_000.0 * t).sin()
+                     + pilot_dev * (2.0 * PI * PILOT_HZ * t).sin();
+            phase += 2.0 * PI * inst / rate;
+            out.push(Complex { re: phase.cos() as f32, im: phase.sin() as f32 });
+        }
+        out
+    }
+
+    fn mpx_of(inst: &[f32], rate: f64) -> (Vec<f32>, f64) {
+        let fft = rustfft::FftPlanner::<f32>::new().plan_fft_forward(MPX_FFT_SIZE);
+        let window = super::super::dsp::compute_window(super::super::dsp::WindowFn::Hann, MPX_FFT_SIZE);
+        let (mut scratch, mut mags) = (Vec::new(), Vec::new());
+        mpx_spectrum(inst, &window, fft.as_ref(), &mut scratch, &mut mags);
+        (mags, rate / MPX_FFT_SIZE as f64)
+    }
+
+    #[test]
+    fn mix_offset_moves_a_carrier_to_dc() {
+        // A carrier 100 kHz up, mixed down by 100 kHz, must sit at 0 Hz.
+        let rate = 2_000_000.0;
+        let mut iq = fm_signal(rate, 4096, 100_000.0, 0.0, 0.0);
+        mix_offset(&mut iq, 100_000.0, rate);
+        let mut inst = Vec::new();
+        fm_discriminate(&iq, rate, &mut inst);
+        let s = fm_stats(&inst).expect("stats");
+        assert!(s.carrier_offset_hz.abs() < 200.0, "residual offset {}", s.carrier_offset_hz);
+    }
+
+    #[test]
+    fn mix_offset_is_a_noop_at_zero_and_keeps_amplitude() {
+        let rate = 2_000_000.0;
+        let original = fm_signal(rate, 256, 50_000.0, 0.0, 0.0);
+        let mut untouched = original.clone();
+        mix_offset(&mut untouched, 0.0, rate);
+        assert_eq!(untouched[10], original[10], "zero offset must not touch the samples");
+
+        // Mixing is a rotation: it must not change the envelope, or it would move
+        // samples across the gate threshold.
+        let mut mixed = original.clone();
+        mix_offset(&mut mixed, 250_000.0, rate);
+        for i in [0usize, 100, 255] {
+            assert!((mixed[i].norm() - original[i].norm()).abs() < 1e-3,
+                    "envelope changed at {i}");
+        }
+    }
+
+    #[test]
+    fn mpx_spectrum_recovers_pilot_deviation() {
+        // 30 kHz audio + a 7.5 kHz pilot — 10 % injection against the 75 kHz limit.
+        let rate = 333_000.0;
+        let iq = wfm_signal(rate, MPX_FFT_SIZE * 2, 30_000.0, 7_500.0);
+        let mut inst = Vec::new();
+        fm_discriminate(&iq, rate, &mut inst);
+        let (mags, bin_hz) = mpx_of(&inst, rate);
+        assert!(!mags.is_empty());
+
+        let p = pilot_measure(&mags, bin_hz, 75_000.0);
+        assert_eq!(p.state, PilotState::Locked);
+        // Amplitude scaling must return real Hz of deviation, not arbitrary units.
+        assert!((p.deviation_hz - 7_500.0).abs() < 800.0, "pilot dev = {}", p.deviation_hz);
+        assert!((p.injection_pct - 10.0).abs() < 1.5, "injection = {}", p.injection_pct);
+    }
+
+    #[test]
+    fn mono_signal_reports_no_pilot() {
+        let rate = 333_000.0;
+        let iq = wfm_signal(rate, MPX_FFT_SIZE * 2, 30_000.0, 0.0);
+        let mut inst = Vec::new();
+        fm_discriminate(&iq, rate, &mut inst);
+        let (mags, bin_hz) = mpx_of(&inst, rate);
+        let p = pilot_measure(&mags, bin_hz, 75_000.0);
+        assert_eq!(p.state, PilotState::Absent, "injection = {}", p.injection_pct);
+    }
+
+    #[test]
+    fn a_weak_pilot_reads_marginal_not_stereo() {
+        // 2 % injection: detectable, but not enough to claim stereo.
+        let rate = 333_000.0;
+        let iq = wfm_signal(rate, MPX_FFT_SIZE * 2, 30_000.0, 1_500.0);
+        let mut inst = Vec::new();
+        fm_discriminate(&iq, rate, &mut inst);
+        let (mags, bin_hz) = mpx_of(&inst, rate);
+        let p = pilot_measure(&mags, bin_hz, 75_000.0);
+        assert_eq!(p.state, PilotState::Marginal, "injection = {}", p.injection_pct);
+    }
+
+    #[test]
+    fn mpx_spectrum_declines_a_short_block() {
+        // Fewer samples than the transform needs yields nothing, never a
+        // zero-padded spectrum that would read as real signal.
+        let fft = rustfft::FftPlanner::<f32>::new().plan_fft_forward(MPX_FFT_SIZE);
+        let window = super::super::dsp::compute_window(super::super::dsp::WindowFn::Hann, MPX_FFT_SIZE);
+        let (mut scratch, mut mags) = (Vec::new(), Vec::new());
+        mpx_spectrum(&[0.0; 100], &window, fft.as_ref(), &mut scratch, &mut mags);
+        assert!(mags.is_empty());
+    }
+
+    #[test]
+    fn pilot_measure_refuses_degenerate_input() {
+        assert_eq!(pilot_measure(&[], 163.0, 75_000.0).state, PilotState::Absent);
+        assert_eq!(pilot_measure(&[1.0, 2.0], 0.0, 75_000.0).state, PilotState::Absent);
+        assert_eq!(pilot_measure(&[1.0, 2.0], 163.0, 0.0).state, PilotState::Absent);
     }
 
     #[test]

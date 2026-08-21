@@ -663,11 +663,16 @@ fn handle_signal_characterization_focus(
 }
 
 /// `fm_demod` focus (`[M]`): `[Space]` switches the demodulator on and off,
-/// `[C]` snapshots the current measurement to the log.
+/// `←`/`→` walk the channel offset, `[P]` snaps it onto the strongest carrier,
+/// `[0]` recentres it, and `[C]` snapshots the measurement to the log.
 ///
 /// `[Space]` is deliberately shadowed here rather than falling through to the
 /// global RX toggle: inside the demod bench the nearer meaning of "start/stop" is
 /// the demodulator, and RX remains reachable by leaving focus with `Esc`.
+///
+/// The offset exists because the tuned centre is where both front-ends put their
+/// DC offset and LO leakage; moving the channel off it is what makes the reading
+/// trustworthy, so it belongs on the arrow keys rather than buried in a submenu.
 fn handle_demod_focus(
     key: KeyEvent,
     state: &Arc<Mutex<SdrMetrics>>,
@@ -688,6 +693,48 @@ fn handle_demod_focus(
                 m.demod.fm = None;
             }
             m.push_log(if on { "Demod: on" } else { "Demod: off" });
+            return KeyAction::Continue;
+        }
+        KeyCode::Left | KeyCode::Right => {
+            let step = if matches!(key.code, KeyCode::Left) {
+                -crate::state::OFFSET_STEP_HZ
+            } else {
+                crate::state::OFFSET_STEP_HZ
+            };
+            let mut m = state.lock().unwrap_or_else(|e| e.into_inner());
+            let limit = m.demod.offset_limit_hz(m.radio.config_sample_rate);
+            let next = (m.demod.offset_hz + step).clamp(-limit, limit);
+            if next != m.demod.offset_hz {
+                m.demod.offset_hz = next;
+                // The channel moved; the old reading describes a different
+                // frequency, so drop it rather than let it linger.
+                m.demod.fm = None;
+                m.push_log(format!("Demod offset: {:+.0} kHz", next as f64 / 1000.0));
+            }
+            return KeyAction::Continue;
+        }
+        KeyCode::Char('p') | KeyCode::Char('P') => {
+            let mut m = state.lock().unwrap_or_else(|e| e.into_inner());
+            let bins = m.waterfall.last_fft.as_ref().map(|f| Arc::clone(&f.bins_dbfs));
+            let sr = m.radio.config_sample_rate;
+            match bins.and_then(|b| crate::state::strongest_offset_hz(&b, sr)) {
+                Some(off) => {
+                    let limit = m.demod.offset_limit_hz(sr);
+                    let snapped = off.clamp(-limit, limit);
+                    m.demod.offset_hz = snapped;
+                    m.demod.fm = None;
+                    m.push_log(format!("Demod snapped to carrier: {:+.0} kHz",
+                                       snapped as f64 / 1000.0));
+                }
+                None => m.push_log("Demod: no spectrum to snap to yet"),
+            }
+            return KeyAction::Continue;
+        }
+        KeyCode::Char('0') => {
+            let mut m = state.lock().unwrap_or_else(|e| e.into_inner());
+            m.demod.offset_hz = 0;
+            m.demod.fm = None;
+            m.push_log("Demod offset: centre");
             return KeyAction::Continue;
         }
         KeyCode::Char('c') | KeyCode::Char('C') => {

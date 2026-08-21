@@ -14,7 +14,8 @@ mod ui;
 mod waterfall;
 
 pub(crate) use acc::Accumulators;
-pub use demod::{deviation_limit_hz, DemodState, FmMeasure};
+pub use demod::{deviation_limit_hz, strongest_offset_hz, DemodState, FmMeasure, MpxFrame,
+                PilotState, OFFSET_STEP_HZ};
 pub use iq::{IqState, IqCalState, CONSTELLATION_CAP};
 pub use lab::{LabState, RfFreeze};
 pub use micro::MicroView;

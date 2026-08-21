@@ -5,7 +5,30 @@
 //! about the signal, never audio. Phase 2 carries the FM discriminator's output
 //! only; the MPX / pilot / RDS / audio fields land in later phases.
 
+use std::sync::Arc;
 use std::time::{Duration, Instant};
+
+pub use crate::signal::demod::{PilotMeasure, PilotState};
+
+/// One MPX baseband spectrum. `mags_hz[k]` is the deviation contributed by the
+/// component at `k · bin_hz`, so the display reads directly in Hz.
+///
+/// Shared behind an `Arc`: `SdrMetrics` is deep-cloned every frame, and this is
+/// the one large field the demod adds.
+#[derive(Clone, Debug)]
+pub struct MpxFrame {
+    pub bin_hz:  f64,
+    pub mags_hz: Vec<f32>,
+}
+
+/// Demod channel offsets step by this much per key press — coarse enough to walk
+/// a station off the DC spike in a couple of presses, fine enough to land inside
+/// a WFM channel.
+pub const OFFSET_STEP_HZ: i64 = 25_000;
+
+/// A channel this close to the tuned centre is sitting on the front-end's DC
+/// offset / LO leakage. Only worth flagging when no DC correction is active.
+pub const DC_PROXIMITY_HZ: i64 = 30_000;
 
 /// A measurement goes stale this long after the last worker update. At the
 /// worker's 250 ms cadence, this tolerates a couple of missed updates before the
@@ -40,6 +63,13 @@ pub struct DemodState {
     /// (no carrier, too weak, or a modulation an FM discriminator says nothing
     /// about). Never a stale number left behind.
     pub fm: Option<FmMeasure>,
+    /// Channel centre relative to the tuned frequency. Non-zero demodulates a
+    /// station the radio is not centred on — which is how the channel is kept off
+    /// the DC spike.
+    pub offset_hz: i64,
+    /// Recovered MPX baseband spectrum, and the 19 kHz pilot read from it.
+    pub mpx:   Option<Arc<MpxFrame>>,
+    pub pilot: Option<PilotMeasure>,
     pub last_update: Option<Instant>,
 }
 
@@ -54,6 +84,9 @@ impl Default for DemodState {
             decimation:      0,
             channel_rate_hz: 0.0,
             fm:              None,
+            offset_hz:       0,
+            mpx:             None,
+            pilot:           None,
             last_update:     None,
         }
     }
@@ -74,6 +107,63 @@ impl DemodState {
     pub fn live(&self) -> Option<FmMeasure> {
         if self.is_stale() { None } else { self.fm }
     }
+
+    /// The MPX spectrum to render, subject to the same staleness rule.
+    pub fn live_mpx(&self) -> Option<&Arc<MpxFrame>> {
+        if self.is_stale() { None } else { self.mpx.as_ref() }
+    }
+
+    /// The pilot reading to render, subject to the same staleness rule.
+    pub fn live_pilot(&self) -> Option<PilotMeasure> {
+        if self.is_stale() { None } else { self.pilot }
+    }
+
+    /// Legal offset range for the current sample rate: the channel must stay
+    /// wholly inside the captured span, so its centre can reach no further than
+    /// half the span minus half the channel.
+    pub fn offset_limit_hz(&self, sample_rate: f64) -> i64 {
+        let half_span = sample_rate / 2.0;
+        let half_chan = self.channel_rate_hz.max(0.0) / 2.0;
+        (half_span - half_chan).max(0.0) as i64
+    }
+
+    /// Whether the channel is close enough to the tuned centre to be competing
+    /// with the front-end's DC artefact. `dc_corrected` suppresses it: the
+    /// existing DC block already cleans that up.
+    pub fn on_dc_spike(&self, dc_corrected: bool) -> bool {
+        !dc_corrected && self.offset_hz.abs() < DC_PROXIMITY_HZ
+    }
+}
+
+/// Bins this close to the tuned centre are skipped when hunting for a carrier.
+///
+/// The centre bin is where the front-end parks its DC offset and LO leakage, and
+/// on a HackRF that artefact routinely out-peaks a real station a few hundred kHz
+/// away. Without the guard, "snap to the strongest carrier" reliably snaps to the
+/// artefact and lands the channel right back on DC — the opposite of the point.
+pub const SNAP_DC_GUARD_HZ: f64 = 10_000.0;
+
+/// Offset from the tuned centre, in Hz, of the strongest *carrier* in an
+/// fftshifted spectrum — what "snap the demod onto the loudest carrier" resolves
+/// to. Bins within [`SNAP_DC_GUARD_HZ`] of centre are excluded as artefact.
+///
+/// `None` for an empty spectrum, a nonsensical rate, or a span so narrow that the
+/// guard swallows it — the caller then leaves the offset alone rather than
+/// jumping to an invented frequency.
+pub fn strongest_offset_hz(bins_dbfs: &[f32], sample_rate: f64) -> Option<i64> {
+    if bins_dbfs.is_empty() || !(sample_rate > 0.0) { return None; }
+    let n = bins_dbfs.len();
+    let bin_hz = sample_rate / n as f64;
+    let centre = n as f64 / 2.0;
+    let guard_bins = (SNAP_DC_GUARD_HZ / bin_hz).ceil();
+
+    let mut best: Option<(usize, f32)> = None;
+    for (i, &v) in bins_dbfs.iter().enumerate() {
+        if (i as f64 - centre).abs() <= guard_bins { continue; }
+        if best.is_none_or(|(_, bv)| v > bv) { best = Some((i, v)); }
+    }
+    let (idx, _) = best?;
+    Some(((idx as f64 - centre) * bin_hz).round() as i64)
 }
 
 /// Nominal peak-deviation limit (Hz) for a modulation — the full-scale reference
@@ -132,5 +222,54 @@ mod tests {
     fn deviation_limits_follow_the_modulation() {
         assert_eq!(deviation_limit_hz(Modulation::Nfm), 5_000.0);
         assert_eq!(deviation_limit_hz(Modulation::Wfm), 75_000.0);
+    }
+
+    #[test]
+    fn strongest_offset_reads_a_shifted_spectrum() {
+        // 8 bins over 800 kHz → 100 kHz per bin, centre (DC) at index 4.
+        let mut bins = vec![-90.0f32; 8];
+        bins[6] = -10.0;
+        assert_eq!(strongest_offset_hz(&bins, 800_000.0), Some(200_000));
+        // A peak below centre reads negative.
+        bins[6] = -90.0;
+        bins[2] = -10.0;
+        assert_eq!(strongest_offset_hz(&bins, 800_000.0), Some(-200_000));
+    }
+
+    #[test]
+    fn strongest_offset_ignores_the_dc_artefact() {
+        // A towering LO-leakage spike at centre with a real, weaker station at
+        // +200 kHz. Snapping to the spike would put the channel back on DC, which
+        // is exactly what the offset exists to escape.
+        let mut bins = vec![-90.0f32; 8];
+        bins[4] = 0.0;    // DC spike, by far the strongest bin
+        bins[6] = -40.0;  // the actual carrier
+        assert_eq!(strongest_offset_hz(&bins, 800_000.0), Some(200_000));
+    }
+
+    #[test]
+    fn strongest_offset_declines_to_guess() {
+        assert_eq!(strongest_offset_hz(&[], 2_000_000.0), None);
+        assert_eq!(strongest_offset_hz(&[-10.0, -20.0], 0.0), None);
+        // A span narrower than the guard leaves no candidate bins at all.
+        assert_eq!(strongest_offset_hz(&[-10.0, -20.0, -30.0, -40.0], 8_000.0), None);
+    }
+
+    #[test]
+    fn offset_limit_keeps_the_channel_inside_the_span() {
+        let d = DemodState { channel_rate_hz: 333_000.0, ..Default::default() };
+        // 2 Msps: half span 1 MHz, minus half a 333 kHz channel.
+        assert_eq!(d.offset_limit_hz(2_000_000.0), 833_500);
+    }
+
+    #[test]
+    fn dc_spike_warning_only_without_correction() {
+        let centred = DemodState { offset_hz: 0, ..Default::default() };
+        assert!(centred.on_dc_spike(false));
+        // The existing DC block already handles it — no need to nag.
+        assert!(!centred.on_dc_spike(true));
+        // Tuned well off centre, the artefact is out of the channel.
+        let offset = DemodState { offset_hz: 200_000, ..Default::default() };
+        assert!(!offset.on_dc_spike(false));
     }
 }
