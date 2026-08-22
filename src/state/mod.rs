@@ -21,7 +21,8 @@ pub use lab::{LabState, RfFreeze};
 pub use micro::MicroView;
 pub use observer::ObserverState;
 pub use radio::RadioState;
-pub use signal::{classify, Modulation, SignalState, ACPR_OFFSET_HZ, CLASSIFY_MIN_SNR_DB, SAT_CLIP_PCT};
+pub use signal::{acpr_offset_hz, classify, Modulation, SignalState, CLASSIFY_MIN_SNR_DB,
+                 SAT_CLIP_PCT};
 pub use spectrum::{SpectrumMarker, SpectrumState, SpectrumStyle};
 pub use sweep::{SweepConfig, SweepFrame, SweepState, SWEEP_SETTLING_MS};
 pub use system::SystemState;

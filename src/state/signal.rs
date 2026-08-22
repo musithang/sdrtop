@@ -5,13 +5,28 @@ use std::collections::VecDeque;
 /// worth remembering, not measurement noise.
 pub const SAT_CLIP_PCT: f32 = 10.0;
 
-/// Adjacent-channel offset from centre for the ACPR measurement, fixed at the
-/// mockup's FM-broadcast spacing. This is sdrtop's own display convention, not
-/// a regulatory channel-plan value — it applies to whatever the measured
-/// occupied bandwidth turns out to be. Shared by the FFT worker (which computes
-/// the ratio) and the characterization panel (which labels the adjacent-band
-/// frequency from it), so the two never drift apart.
-pub const ACPR_OFFSET_HZ: f64 = 200_000.0;
+/// Adjacent-channel offset from centre for the ACPR measurement, by modulation.
+///
+/// One fixed spacing cannot serve every band: ±200 kHz is broadcast FM's channel
+/// step, and applying it to a 12.5 kHz narrow-FM channel measures a band eight
+/// channels away — a number that is arithmetically correct and answers nobody's
+/// question. So the offset follows what the carrier turns out to be.
+///
+/// These are the channel steps of the services the classifier can name, not
+/// regulatory ACPR masks (sdrtop asserts no mask; see the panel's own
+/// `ACPR_BAR_FLOOR_DB`). An unclassified carrier keeps the broadcast spacing,
+/// since that is the state the page rests in.
+///
+/// The value actually used is recorded in [`SignalState::acpr_offset_hz`] rather
+/// than re-derived by the panel, so the label can never name a different offset
+/// than the one measured.
+pub fn acpr_offset_hz(modulation: Modulation) -> f64 {
+    match modulation {
+        Modulation::Nfm => 25_000.0,
+        Modulation::Am  => 9_000.0,
+        _               => 200_000.0,
+    }
+}
 
 /// A rough modulation estimate for the signal at centre. Honest by design: a
 /// bandwidth heuristic (see [`classify`]), not a demodulating classifier. The
@@ -99,14 +114,21 @@ pub struct SignalState {
     pub channel_power_dbfs:  f32,
     pub occupied_bw_hz:      u64,
     /// Adjacent-channel power ratio, dB relative to the in-channel power, at
-    /// ±[`ACPR_OFFSET_HZ`]. `f32::NEG_INFINITY` when there is nothing to compare
-    /// against yet (no occupied bandwidth) or a band falls outside the captured
-    /// span — never a guessed number.
+    /// ±[`Self::acpr_offset_hz`]. `f32::NEG_INFINITY` when there is nothing to
+    /// compare against yet (no occupied bandwidth), a band falls outside the
+    /// captured span, or the bands would overlap the channel — never a guessed
+    /// number. The two are written together: both finite, or neither.
     pub acpr_lower_db:       f32,
     pub acpr_upper_db:       f32,
     /// Absolute level (dBFS) of the louder — worse — of the two adjacent bands.
-    /// Paired with `acpr_lower_db` / `acpr_upper_db`; same undefined sentinel.
+    /// Paired with `acpr_lower_db` / `acpr_upper_db`; same undefined sentinel,
+    /// which also covers a genuinely silent adjacent band.
     pub adj_carrier_dbfs:    f32,
+    /// The offset the ratio above was actually measured at, from
+    /// [`acpr_offset_hz`]. Recorded rather than re-derived so the panel's labels
+    /// and the adjacent-band frequency it prints can never disagree with the
+    /// measurement — the modulation could change between the two reads otherwise.
+    pub acpr_offset_hz:      f64,
     pub usb_errors_session:   u64,
     pub usb_errors_last_poll: u64,
     pub usb_error_history:    std::collections::VecDeque<u64>,
@@ -165,6 +187,7 @@ mod tests {
             peak_to_nf_db: 0.0, channel_power_dbfs: 0.0, occupied_bw_hz: 0,
             acpr_lower_db: f32::NEG_INFINITY, acpr_upper_db: f32::NEG_INFINITY,
             adj_carrier_dbfs: f32::NEG_INFINITY,
+            acpr_offset_hz: acpr_offset_hz(Modulation::Unknown),
             usb_errors_session: 0, usb_errors_last_poll: 0, usb_error_history: VecDeque::new(),
             snr_history: VecDeque::new(), pwr_history: VecDeque::new(), nf_history: VecDeque::new(),
             sat_history: VecDeque::new(),
@@ -190,6 +213,31 @@ mod tests {
         assert_eq!(classify(40.0, 15_000),  Modulation::Nfm);
         assert_eq!(classify(40.0, NFM_MIN_BW_HZ), Modulation::Nfm); // narrow-FM boundary
         assert_eq!(classify(40.0, 8_000),   Modulation::Am);
+    }
+
+    #[test]
+    fn acpr_offset_follows_the_channel_step_of_the_service() {
+        // Broadcast FM's 200 kHz step applied to a 12.5 kHz narrow-FM channel would
+        // measure a band eight channels away.
+        assert_eq!(acpr_offset_hz(Modulation::Wfm), 200_000.0);
+        assert_eq!(acpr_offset_hz(Modulation::Nfm), 25_000.0);
+        assert_eq!(acpr_offset_hz(Modulation::Am),   9_000.0);
+        // An unclassified carrier rests in the broadcast shape, like the panel does.
+        assert_eq!(acpr_offset_hz(Modulation::Unknown), acpr_offset_hz(Modulation::Wfm));
+    }
+
+    #[test]
+    fn acpr_offset_clears_the_bandwidth_of_its_own_service() {
+        // The measurement is only meaningful while the adjacent bands sit clear of
+        // the channel, and each band is as wide as the occupied bandwidth. So every
+        // offset has to exceed what its own modulation typically occupies, or the
+        // overlap guard in `acpr_bands` would suppress the reading for good.
+        for (m, typical_bw) in [(Modulation::Wfm, 120_000.0),
+                                (Modulation::Nfm, 15_000.0),
+                                (Modulation::Am,   8_000.0)] {
+            assert!(acpr_offset_hz(m) > typical_bw,
+                    "{m:?}: offset {} does not clear {typical_bw}", acpr_offset_hz(m));
+        }
     }
 
     #[test]

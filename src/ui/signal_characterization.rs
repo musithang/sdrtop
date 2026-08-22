@@ -55,6 +55,19 @@ pub(crate) fn fmt_bw(hz: u64) -> String {
     else                    { format!("{hz} Hz") }
 }
 
+/// ACPR row label — `L -200k`, `R +25k`. Derived from the offset the measurement
+/// actually used, so the two can never disagree: the spacing follows the
+/// modulation now, and a hardcoded label would quietly lie on every band but FM
+/// broadcast.
+fn acpr_label(side: char, offset_hz: f64, sign: char) -> String {
+    let mag = if offset_hz >= 1_000_000.0 {
+        format!("{:.1}M", offset_hz / 1e6)
+    } else {
+        format!("{:.0}k", offset_hz / 1e3)
+    };
+    format!("{side} {sign}{mag}")
+}
+
 /// The ACPR bar's own display floor — not a regulatory spectral-mask limit (we
 /// don't assert one), just how far down this gauge reads before showing a fully
 /// clean, empty bar. A ratio at 0 dB (touching the carrier) reads full/red.
@@ -120,9 +133,10 @@ pub(crate) fn verdict(modulation: Modulation, snr_db: f32, acpr_lower_db: f32, a
 
     let obw_str = fmt_bw(obw_hz);
     let mod_label = modulation.label();
-    // Worst (least negative — closest to the carrier) adjacent-channel ratio, if
-    // either side was measurable.
-    let worst_acpr = (acpr_lower_db.is_finite() || acpr_upper_db.is_finite())
+    // Worst (least negative — closest to the carrier) adjacent-channel ratio, when
+    // the pair was measurable. Both sides, because the clause below prints both: on
+    // one alone it would read "ACPR -inf/-38 dB".
+    let worst_acpr = (acpr_lower_db.is_finite() && acpr_upper_db.is_finite())
         .then(|| acpr_lower_db.max(acpr_upper_db));
 
     if snr_db < VERDICT_CLEAN_SNR_DB {
@@ -280,9 +294,15 @@ impl Panel for SignalCharacterizationPanel {
         // ── ADJACENT CHANNEL (ACPR) ───────────────────────────────────────────
         lines.push(section("ADJACENT CHANNEL", "ACPR", iw, theme));
         let sig = &state.signal;
-        if !stale && sig.acpr_lower_db.is_finite() {
+        let off = sig.acpr_offset_hz;
+        let lo_label = acpr_label('L', off, '\u{2212}');
+        let hi_label = acpr_label('R', off, '+');
+        // The pair is written together by the FFT worker — both finite, or neither.
+        // Testing both says so at the point of use rather than trusting it.
+        let measured = !stale && sig.acpr_lower_db.is_finite() && sig.acpr_upper_db.is_finite();
+        if measured {
             const LABEL_W: usize = 8;
-            for (label, db) in [("L -200k", sig.acpr_lower_db), ("R +200k", sig.acpr_upper_db)] {
+            for (label, db) in [(&lo_label, sig.acpr_lower_db), (&hi_label, sig.acpr_upper_db)] {
                 let value_str = format!("{db:.1} dB");
                 // lead(1) + label(8) + gap(1) + bar + gap(1) + value
                 let bar_w = iw.saturating_sub(1 + LABEL_W + 1 + 1 + value_str.chars().count()).max(6);
@@ -291,20 +311,31 @@ impl Panel for SignalCharacterizationPanel {
                 spans.push(Span::styled(format!(" {value_str}"), val));
                 lines.push(Line::from(spans));
             }
-            let adj_freq = if let Some(fr) = frame {
-                if sig.acpr_upper_db >= sig.acpr_lower_db {
-                    fr.center_freq_hz + crate::state::ACPR_OFFSET_HZ as u64
+            // The louder of the two bands is the one worth naming, and the FFT
+            // worker picks it the same way: lower wins a tie.
+            let adj_freq = frame.map(|fr| {
+                if sig.acpr_lower_db >= sig.acpr_upper_db {
+                    fr.center_freq_hz.saturating_sub(off as u64)
                 } else {
-                    fr.center_freq_hz.saturating_sub(crate::state::ACPR_OFFSET_HZ as u64)
+                    fr.center_freq_hz + off as u64
                 }
-            } else { 0 };
-            lines.push(metric("Adj carrier", vec![
-                Span::styled(format!("{:.1} dBFS", sig.adj_carrier_dbfs), val),
-                Span::styled(format!("   {}", fmt_freq(adj_freq)), dim),
-            ]));
+            });
+            // A silent adjacent band has no level to name — the sentinel must not
+            // reach the screen as a number.
+            lines.push(metric("Adj carrier", match (sig.adj_carrier_dbfs.is_finite(), adj_freq) {
+                (true, Some(hz)) => vec![
+                    Span::styled(format!("{:.1} dBFS", sig.adj_carrier_dbfs), val),
+                    Span::styled(format!("   {}", fmt_freq(hz)), dim),
+                ],
+                (true, None) => vec![Span::styled(format!("{:.1} dBFS", sig.adj_carrier_dbfs), val)],
+                (false, _)   => vec![dash()],
+            }));
         } else {
-            lines.push(metric("L -200k", vec![dash()]));
-            lines.push(metric("R +200k", vec![dash()]));
+            lines.push(metric(&lo_label, vec![dash()]));
+            lines.push(metric(&hi_label, vec![dash()]));
+            // Same row count either way, so the stack below does not jump when the
+            // measurement comes and goes.
+            lines.push(metric("Adj carrier", vec![dash()]));
         }
 
         lines.push(Line::raw(""));
@@ -517,5 +548,41 @@ mod tests {
         let (level, _, detail) = verdict(Modulation::Nfm, 30.0, f32::NEG_INFINITY, f32::NEG_INFINITY, 15_000);
         assert_eq!(level, VerdictLevel::Clean);
         assert!(!detail.contains("ACPR"));
+    }
+
+    #[test]
+    fn verdict_needs_both_sides_before_it_quotes_a_ratio() {
+        // The clause prints the pair, so half a measurement must produce none of it
+        // rather than "ACPR -inf/-38 dB".
+        for (lo, hi) in [(f32::NEG_INFINITY, -38.0), (-38.0, f32::NEG_INFINITY)] {
+            let (level, _, detail) = verdict(Modulation::Wfm, 30.0, lo, hi, 120_000);
+            assert_eq!(level, VerdictLevel::Clean);
+            assert!(!detail.contains("ACPR"), "half a pair reached the copy: {detail}");
+            assert!(!detail.contains("inf"), "sentinel reached the copy: {detail}");
+        }
+    }
+
+    #[test]
+    fn acpr_labels_name_the_offset_that_was_measured() {
+        // Hardcoded "-200k" was right for broadcast FM and wrong everywhere else,
+        // now that the spacing follows the modulation.
+        use crate::state::acpr_offset_hz;
+        assert_eq!(acpr_label('L', acpr_offset_hz(Modulation::Wfm), '\u{2212}'), "L \u{2212}200k");
+        assert_eq!(acpr_label('R', acpr_offset_hz(Modulation::Nfm), '+'), "R +25k");
+        assert_eq!(acpr_label('R', acpr_offset_hz(Modulation::Am),  '+'), "R +9k");
+        assert_eq!(acpr_label('L', 1_500_000.0, '\u{2212}'), "L \u{2212}1.5M");
+    }
+
+    #[test]
+    fn acpr_labels_fit_the_column() {
+        // The rows are laid out on a fixed 8-column label field; an overflow would
+        // push the bar out of alignment with the row above it.
+        use crate::state::acpr_offset_hz;
+        for m in [Modulation::Wfm, Modulation::Nfm, Modulation::Am, Modulation::Unknown] {
+            for (side, sign) in [('L', '\u{2212}'), ('R', '+')] {
+                let l = acpr_label(side, acpr_offset_hz(m), sign);
+                assert!(l.chars().count() <= 8, "{m:?} {side}: {l:?} is {} wide", l.chars().count());
+            }
+        }
     }
 }

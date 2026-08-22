@@ -6,7 +6,7 @@ use rustfft::FftPlanner;
 
 use super::dsp::{self, WindowFn};
 use crate::hardware::SampleFormat;
-use crate::state::{FftFrame, SdrMetrics, ACPR_OFFSET_HZ};
+use crate::state::{FftFrame, SdrMetrics};
 
 const DB_FLOOR: f32 = -160.0;
 /// Ratio floor for the ACPR measurement itself: an adjacent band this far below
@@ -135,13 +135,22 @@ fn occupied_bw(linear: &[f32], sample_rate: f64, noise_floor_db: f32) -> u64 {
 /// adjacent band. Each band is the same width as `occupied_bw_hz` (the standard
 /// ACPR convention: compare like-sized channels), centred at ±`offset_hz` from
 /// the spectrum's centre bin (`n/2`, already fftshifted). `None` when there is no
-/// measured channel to compare against, or a band would fall outside the
-/// captured span (too close to the edge, or the offset exceeds the span).
+/// measured channel to compare against, a band would fall outside the captured
+/// span (too close to the edge, or the offset exceeds the span), or the bands
+/// would overlap the channel they are being compared against.
+///
+/// That last guard is what the measurement lived without until the occupied
+/// bandwidth was scoped to the carrier. A band as wide as the channel, offset by
+/// less than that width, is mostly the same bins as the channel — so the ratio
+/// comes out at 0 dB and the panel drew a full red bar and called a clean carrier
+/// splattered. `None` is the honest answer: at that width, at this spacing, there
+/// is nothing to compare.
 fn acpr_bands(linear: &[f32], sample_rate: f64, occupied_bw_hz: u64, offset_hz: f64)
     -> Option<(f32, f32, f32)>
 {
     let n = linear.len();
     if occupied_bw_hz == 0 || sample_rate <= 0.0 || n == 0 { return None; }
+    if occupied_bw_hz as f64 >= offset_hz { return None; }
     let bin_hz = sample_rate / n as f64;
     let half_bw_bins = ((occupied_bw_hz as f64 / bin_hz) / 2.0).round() as i64;
     let offset_bins  = (offset_hz / bin_hz).round() as i64;
@@ -166,7 +175,9 @@ fn acpr_bands(linear: &[f32], sample_rate: f64, occupied_bw_hz: u64, offset_hz: 
     let lower_db = ratio_db(lower);
     let upper_db = ratio_db(upper);
     let worse_lin = if lower_db >= upper_db { lower } else { upper };
-    let adj_dbfs = if worse_lin > 0.0 { 10.0 * worse_lin.log10() } else { DB_FLOOR };
+    // A genuinely silent adjacent band has no level to report. The undefined
+    // sentinel says so; a floor constant would reach the screen as "-160.0 dBFS".
+    let adj_dbfs = if worse_lin > 0.0 { 10.0 * worse_lin.log10() } else { f32::NEG_INFINITY };
     Some((lower_db, upper_db, adj_dbfs))
 }
 
@@ -348,11 +359,17 @@ impl FftWorker {
                 // whole capture. See `occupied_bw`.
                 let occupied_bw_hz = occupied_bw(&linear, sample_rate, noise_floor);
 
-                // Adjacent-channel power ratio: L/R bands at ±ACPR_OFFSET_HZ, same
-                // width as the measured in-channel occupancy. `None` becomes the
-                // undefined sentinel — never a guessed ratio.
+                // The modulation is needed before the ACPR, not after: it picks the
+                // channel spacing the adjacent bands are measured at.
+                let modulation = crate::state::classify(peak_to_nf_db, occupied_bw_hz);
+
+                // Adjacent-channel power ratio: L/R bands at ±the channel step of
+                // whatever this turned out to be, each as wide as the measured
+                // in-channel occupancy. `None` becomes the undefined sentinel —
+                // never a guessed ratio.
+                let acpr_offset_hz = crate::state::acpr_offset_hz(modulation);
                 let (acpr_lower_db, acpr_upper_db, adj_carrier_dbfs) =
-                    acpr_bands(&linear, sample_rate, occupied_bw_hz, ACPR_OFFSET_HZ)
+                    acpr_bands(&linear, sample_rate, occupied_bw_hz, acpr_offset_hz)
                         .unwrap_or((f32::NEG_INFINITY, f32::NEG_INFINITY, f32::NEG_INFINITY));
 
                 if let Ok(mut m) = self.state.lock() {
@@ -362,10 +379,11 @@ impl FftWorker {
                     m.signal.peak_to_nf_db      = peak_to_nf_db;
                     m.signal.channel_power_dbfs = channel_power_dbfs;
                     m.signal.occupied_bw_hz     = occupied_bw_hz;
-                    m.signal.modulation         = crate::state::classify(peak_to_nf_db, occupied_bw_hz);
+                    m.signal.modulation         = modulation;
                     m.signal.acpr_lower_db      = acpr_lower_db;
                     m.signal.acpr_upper_db      = acpr_upper_db;
                     m.signal.adj_carrier_dbfs   = adj_carrier_dbfs;
+                    m.signal.acpr_offset_hz     = acpr_offset_hz;
 
                     // Per-marker occupied BW within each marker's channel window
                     if sample_rate > 0.0 {
@@ -705,6 +723,32 @@ mod tests {
         // A 900 kHz offset on a 1 MHz / 20-bin span pushes the adjacent band
         // clean off the array — must report "can't measure", not a wrong number.
         assert!(acpr_bands(&linear, 1_000_000.0, 100_000, 900_000.0).is_none());
+    }
+
+    #[test]
+    fn acpr_bands_none_when_the_bands_would_overlap_the_channel() {
+        // The bug that made a clean broadcast read as splattered: each band is as
+        // wide as the channel, so an occupancy at or beyond the spacing makes all
+        // three bands nearly the same bins. The ratio then comes out at 0 dB and the
+        // panel draws a full red bar.
+        let linear = vec![1.0f32; 2048];
+        assert!(acpr_bands(&linear, 2_000_000.0, 300_000, 200_000.0).is_none(),
+                "300 kHz occupancy at 200 kHz spacing: the bands overlap");
+        assert!(acpr_bands(&linear, 2_000_000.0, 200_000, 200_000.0).is_none(),
+                "exactly touching is still not a comparison");
+        // Clear of the spacing, the measurement stands.
+        assert!(acpr_bands(&linear, 2_000_000.0, 120_000, 200_000.0).is_some());
+    }
+
+    #[test]
+    fn acpr_bands_reports_no_level_for_a_silent_adjacent_band() {
+        // `-160.0 dBFS` is a floor constant, not a measurement, and it used to reach
+        // the screen as one.
+        let n = 2048;
+        let mut linear = vec![0.0f32; n];
+        for b in linear[n / 2 - 30..n / 2 + 30].iter_mut() { *b = 1.0; }
+        let (_, _, adj) = acpr_bands(&linear, 2_000_000.0, 60_000, 200_000.0).unwrap();
+        assert!(adj.is_infinite() && adj < 0.0, "expected the undefined sentinel, got {adj}");
     }
 
     #[test]

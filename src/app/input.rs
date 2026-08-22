@@ -649,8 +649,10 @@ fn handle_signal_characterization_focus(
         let obw_str = fmt_bw(obw);
         let acpr_lo = m.signal.acpr_lower_db;
         let acpr_hi = m.signal.acpr_upper_db;
-        let acpr_str = if acpr_lo.is_finite() {
-            format!(" · ACPR {acpr_lo:.0}/{acpr_hi:.0} dB")
+        // Both sides, or neither: the line prints the pair, so one alone would log
+        // "ACPR -inf/-38 dB".
+        let acpr_str = if acpr_lo.is_finite() && acpr_hi.is_finite() {
+            format!(" \u{00b7} ACPR {acpr_lo:.0}/{acpr_hi:.0} dB")
         } else {
             String::new()
         };
