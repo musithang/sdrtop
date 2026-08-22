@@ -36,6 +36,28 @@ pub struct SignalCharacterizationPanel;
 /// Label-column width — clears the longest label ("Channel power" = 13) plus a gap.
 const FIELD_W: usize = 14;
 
+/// Gap between a metric's value and its dim annotation.
+const ANN_GAP: usize = 3;
+
+/// Whether a metric row's dim annotation fits the panel's inner width `iw`, given
+/// the value it trails.
+///
+/// The annotations on this panel — the peak's frequency, `99% power`, the noise
+/// density, the adjacent band's frequency — are context, not measurements, and a
+/// clipped one is worse than none at all. At 120 columns the panel's inner width
+/// is 29 and the paragraph simply chopped them mid-token, so the Peak row read
+///
+/// ```text
+/// Peak          -35.4 dBFS   9
+/// ```
+///
+/// where `9` is the first character of `92.807 MHz`: a truncated frequency that
+/// reads as a value. Dropping the annotation costs the reader a detail they can
+/// get from the row above; truncating it tells them something untrue.
+fn annotation_fits(value_w: usize, ann_w: usize, iw: usize) -> bool {
+    1 + FIELD_W + value_w + ANN_GAP + ann_w <= iw
+}
+
 /// Status-lamp / headline colour by peak-to-noise: clean ≥ 20 dB, usable ≥ 10 dB,
 /// else weak. Same thresholds the signal strip and micro views already use.
 fn snr_color(snr: f32, theme: &crate::Theme) -> Color {
@@ -117,6 +139,13 @@ const VERDICT_CLEAN_SNR_DB: f32 = 20.0;
 /// worth a note. sdrtop's own instrument reading, not an asserted regulatory mask
 /// — same honesty stance as [`ACPR_BAR_FLOOR_DB`].
 const VERDICT_ACPR_CONCERN_DB: f32 = -20.0;
+
+/// Row budgets for the wrapped verdict card. Sized so the longest copy [`verdict`]
+/// can produce still lands whole at the panel's own minimum width (28 inner) —
+/// `verdict_copy_fits_the_narrowest_panel` holds them to it, so a future reword
+/// that overruns fails a test instead of silently losing its tail on screen.
+const VERDICT_HEAD_ROWS: usize = 2;
+const VERDICT_DETAIL_ROWS: usize = 4;
 
 /// The verdict card's severity, driving its colour and mark glyph. `NoSignal`
 /// reads dim/neutral, not critical — an empty channel isn't a fault. `pub(crate)`
@@ -281,30 +310,32 @@ impl Panel for SignalCharacterizationPanel {
             spans.extend(body);
             Line::from(spans)
         };
+        // A value with its trailing dim annotation, the annotation dropped whole
+        // when the column cannot hold both — see [`annotation_fits`].
+        let annotated = |value: String, ann: String| -> Vec<Span<'static>> {
+            let fits = annotation_fits(value.chars().count(), ann.chars().count(), iw);
+            let mut spans = vec![Span::styled(value, val)];
+            if fits { spans.push(Span::styled(format!("{}{ann}", " ".repeat(ANN_GAP)), dim)); }
+            spans
+        };
         if let Some(fr) = frame.filter(|_| !stale) {
             lines.push(metric("Channel power", if fr.channel_power_dbfs.is_finite() {
                 vec![Span::styled(format!("{:.1} dBFS", fr.channel_power_dbfs), val)]
             } else { vec![dash()] }));
 
             lines.push(metric("Peak", match peak_bin(fr) {
-                Some((lvl, hz)) => vec![
-                    Span::styled(format!("{lvl:.1} dBFS"), val),
-                    Span::styled(format!("   {}", fmt_freq(hz)), dim),
-                ],
+                Some((lvl, hz)) => annotated(format!("{lvl:.1} dBFS"), fmt_freq(hz)),
                 None => vec![dash()],
             }));
 
-            let mut nf_row = vec![Span::styled(format!("{:.1} dBFS", fr.noise_floor), val)];
-            if let Some(d) = noise_density_dbfs_hz(fr.noise_floor, fr.enbw_hz) {
-                nf_row.push(Span::styled(format!("   {d:.1} dBFS/Hz"), dim));
-            }
-            lines.push(metric("Noise floor", nf_row));
+            let nf = format!("{:.1} dBFS", fr.noise_floor);
+            lines.push(metric("Noise floor", match noise_density_dbfs_hz(fr.noise_floor, fr.enbw_hz) {
+                Some(d) => annotated(nf, format!("{d:.1} dBFS/Hz")),
+                None    => vec![Span::styled(nf, val)],
+            }));
 
             lines.push(metric("Occupied BW", if fr.occupied_bw_hz > 0 {
-                vec![
-                    Span::styled(fmt_bw(fr.occupied_bw_hz), val),
-                    Span::styled("   99% power", dim),
-                ]
+                annotated(fmt_bw(fr.occupied_bw_hz), "99% power".to_string())
             } else { vec![dash()] }));
 
             // Same scope as `peak_bin`: a peak hold sitting on the DC artefact
@@ -358,10 +389,7 @@ impl Panel for SignalCharacterizationPanel {
             // A silent adjacent band has no level to name — the sentinel must not
             // reach the screen as a number.
             lines.push(metric("Adj carrier", match (sig.adj_carrier_dbfs.is_finite(), adj_freq) {
-                (true, Some(hz)) => vec![
-                    Span::styled(format!("{:.1} dBFS", sig.adj_carrier_dbfs), val),
-                    Span::styled(format!("   {}", fmt_freq(hz)), dim),
-                ],
+                (true, Some(hz)) => annotated(format!("{:.1} dBFS", sig.adj_carrier_dbfs), fmt_freq(hz)),
                 (true, None) => vec![Span::styled(format!("{:.1} dBFS", sig.adj_carrier_dbfs), val)],
                 (false, _)   => vec![dash()],
             }));
@@ -427,11 +455,19 @@ impl Panel for SignalCharacterizationPanel {
                 VerdictLevel::Caution  => ("\u{26a0}", theme.status_warn),
                 VerdictLevel::NoSignal => ("\u{25cb}", theme.stale),
             };
-            lines.push(Line::from(vec![
-                Span::raw(" "),
-                Span::styled(format!("{mark} {headline}"), Style::default().fg(col).add_modifier(Modifier::BOLD)),
-            ]));
-            lines.push(Line::from(vec![Span::raw(" "), Span::styled(detail, Style::default().fg(theme.label))]));
+            // Prose, not a reading: it wraps rather than being clipped, because a
+            // cut sentence ("Strong carrier (47 dB), 1.25") ends on what looks like
+            // a number and reads as a truncated measurement.
+            let copy_w = iw.saturating_sub(1);
+            for row in crate::ui::chrome::wrap(&format!("{mark} {headline}"), copy_w, VERDICT_HEAD_ROWS) {
+                lines.push(Line::from(vec![
+                    Span::raw(" "),
+                    Span::styled(row, Style::default().fg(col).add_modifier(Modifier::BOLD)),
+                ]));
+            }
+            for row in crate::ui::chrome::wrap(&detail, copy_w, VERDICT_DETAIL_ROWS) {
+                lines.push(Line::from(vec![Span::raw(" "), Span::styled(row, Style::default().fg(theme.label))]));
+            }
             lines.push(Line::raw(""));
             lines.push(Line::from(vec![
                 Span::raw(" "),
@@ -638,6 +674,53 @@ mod tests {
             assert_eq!(level, VerdictLevel::Clean);
             assert!(!detail.contains("ACPR"), "half a pair reached the copy: {detail}");
             assert!(!detail.contains("inf"), "sentinel reached the copy: {detail}");
+        }
+    }
+
+    #[test]
+    fn annotation_dropped_rather_than_clipped_at_a_narrow_column() {
+        // The B2 row, measured: 120-column terminal → 29 inner. Lead 1 + label 14
+        // + "-35.4 dBFS" 10 + gap 3 leaves 1 column, and "92.807 MHz" needs 10 —
+        // so the frequency goes, instead of arriving as a lone "9".
+        assert!(!annotation_fits("-35.4 dBFS".chars().count(), "92.807 MHz".chars().count(), 29));
+        // Widen the panel past the exact total (1+14+10+3+10 = 38) and it returns.
+        assert!(annotation_fits("-35.4 dBFS".chars().count(), "92.807 MHz".chars().count(), 38));
+        assert!(!annotation_fits("-35.4 dBFS".chars().count(), "92.807 MHz".chars().count(), 37));
+    }
+
+    #[test]
+    fn noise_density_annotation_is_the_first_to_go() {
+        // The widest annotation on the panel; it should survive a full-width lab
+        // column (the left column at 200 wide is ~46 inner) and drop below it.
+        let (v, a) = ("-81.1 dBFS".chars().count(), "-112.8 dBFS/Hz".chars().count());
+        assert!(annotation_fits(v, a, 46));
+        assert!(!annotation_fits(v, a, 29));
+    }
+
+    #[test]
+    fn verdict_copy_fits_the_narrowest_panel() {
+        // Every verdict this panel can print, wrapped at the minimum width the
+        // panel declares (30 outer → 28 inner → 27 for the copy). The row budgets
+        // must hold the whole sentence: a verdict that loses its tail is exactly
+        // the clipping B2 set out to remove.
+        let copy_w = SignalCharacterizationPanel.min_size().0 as usize - 2 - 1;
+        let cases = [
+            verdict(Modulation::Unknown, 40.0, -40.0, -40.0, 0),
+            verdict(Modulation::Wfm, 15.0, -40.0, -40.0, 180_000),
+            verdict(Modulation::Wfm, 47.0, -10.0, -40.0, 1_250_000),
+            verdict(Modulation::Wfm, 43.0, -38.0, -41.0, 180_000),
+            verdict(Modulation::Nfm, 30.0, f32::NEG_INFINITY, f32::NEG_INFINITY, 15_000),
+        ];
+        for (_, headline, detail) in cases {
+            let head = crate::ui::chrome::wrap(&format!("\u{26a0} {headline}"), copy_w, VERDICT_HEAD_ROWS);
+            assert_eq!(head.join(" ").chars().filter(|c| !c.is_whitespace()).count(),
+                       format!("\u{26a0} {headline}").chars().filter(|c| !c.is_whitespace()).count(),
+                       "headline lost characters: {headline:?} -> {head:?}");
+            let body = crate::ui::chrome::wrap(&detail, copy_w, VERDICT_DETAIL_ROWS);
+            assert_eq!(body.join(" ").chars().filter(|c| !c.is_whitespace()).count(),
+                       detail.chars().filter(|c| !c.is_whitespace()).count(),
+                       "detail lost characters at {copy_w} wide: {detail:?} -> {body:?}");
+            for r in body { assert!(r.chars().count() <= copy_w); }
         }
     }
 
