@@ -131,6 +131,100 @@ Whether the capture chain is keeping up, with a trend sparkline under each metri
 
 ---
 
+## FM MPX · Demod  ·  *Lab Signal (`8`)*
+
+The right-hand column of **Lab Signal** actually demodulates the channel and reads
+out what is inside it. It is a **measurement instrument, not a receiver**. There is
+no audio anywhere in sdrtop, and this panel exists to tell you things about a
+transmission that a spectrum plot cannot: how hard it is deviating, whether it is
+in stereo, which subaudible tone opens the squelch, what the station calls itself.
+
+Press `m` to focus it. It only runs while the `8` preset is open, so it costs
+nothing on any other screen.
+
+**What it shows depends on the modulation.** Each mode is shown only what it
+actually has, rather than a fixed grid where most rows read as permanently empty:
+
+| Mode | Sections |
+|------|----------|
+| **WFM** (broadcast) | MPX baseband · Pilot/stereo · Deviation · RDS |
+| **NFM** (voice) | Deviation · CTCSS |
+| **AM** | Depth · Carrier |
+
+- **MPX baseband**: the demodulated composite from 0–60 kHz as a braille profile,
+  with ticks at 19 k (pilot), 38 k (stereo difference) and 57 k (RDS). This is the
+  audio-side spectrum, not the RF one. You are looking *inside* the FM channel.
+- **Pilot / stereo**: `● STEREO`, `◐ MARGINAL` or `○ MONO`, plus the pilot's own
+  deviation and its **injection percentage**. Broadcast practice is 8–10 %, so a
+  figure well outside that is a transmitter fault rather than a reception problem.
+- **Deviation**: peak (quasi-peak, with decay) and RMS deviation measured *about
+  the carrier*, plus the carrier offset. Measuring about the carrier is what makes
+  a mistuned radio report its tuning error as offset instead of inflating the
+  modulation figure. The bar is drawn against the mode's nominal limit, ±75 kHz for
+  broadcast and ±5 kHz for NFM, and turns amber then red as you approach and exceed
+  it.
+- **CTCSS**: the subaudible tone that opens a repeater's squelch, identified from
+  the standard 40-tone table, with its deviation and the **margin** it beat its
+  nearest rival by. It needs half a second of unbroken audio, so it shows
+  `◌ SEARCHING n%` while filling its window. That is not the same thing as
+  `○ NO TONE`, and the panel says which one it means.
+- **Depth** (AM): modulation depth with positive and negative peaks reported
+  separately, because they fail differently. A negative peak approaching 100 %
+  pinches the carrier off and splatters.
+- **RDS**: see below.
+
+### RDS
+
+For broadcast FM the panel decodes the **RDS** data stream on the 57 kHz
+subcarrier, and shows:
+
+- the **Programme Service** name (`● DANKO`), the 8-character station name,
+- **PI**, the station's unique hex identity code,
+- **PTY**, the programme type (`Pop Music`, `News`, `Culture`, and so on),
+- **Traffic** flags, when TP or TA is set,
+- **Groups**, the count accepted so far, which is the honest measure of how well
+  reception is going,
+- **RadioText**, the free 64-character field stations use for now-playing
+  information, wrapped across two rows.
+
+The headline distinguishes three states. `● NAME` is the answer. `◌ DECODING`
+means bits are arriving and the name is a second or two away. `○ NO RDS` means
+that as far as we can tell this station carries none.
+
+Nothing is shown until it has been **confirmed twice**. RDS has only a block CRC
+and no error correction beyond it, so a block can pass its check with an undetected
+error. Requiring a second identical sighting costs under a second and removes
+almost all of the wrong-glyph flicker a naive decoder shows on a weak signal. The
+same rule guards the PI code, because a random 26-bit window matches a valid block
+pattern often enough that a single hit is not evidence of anything.
+
+RDS needs a decent signal. It rides about 20 dB below the main programme audio, so
+a station you can hear perfectly may still decode nothing.
+
+### Tuning the demod channel
+
+While focused (`m`):
+
+- `Space` toggles the demod on and off.
+- `←` / `→` move the demodulated channel ±25 kHz *within* the captured spectrum,
+  without retuning the radio.
+- `P` snaps the channel onto the strongest carrier in view. The DC spike at centre
+  is excluded, or it would snap to the radio's own LO leakage every time.
+- `0` re-centres the channel.
+- `T` forces the demodulator: auto → WFM → NFM → AM → auto. **You will usually want
+  this.** The automatic classifier measures occupied bandwidth across the whole
+  captured span, which on a wide span reads as WFM for nearly anything. That is
+  fine as a rough badge but too coarse to pick a demodulator. A forced mode is
+  marked `✱` so a reading is never mistaken for the classifier's own conclusion.
+- `C` writes a snapshot of the current readings to the log.
+
+If the panel warns **"on DC spike"**, the channel is sitting on the front end's own
+DC offset and LO leakage, which swamps the phase detector and inflates every
+deviation figure. Either enable the DC block (`[D]` in Lab IQ) or walk the channel
+off centre with `←` / `→`.
+
+---
+
 ## Sweep  ·  *Lab Sweep (`9`)*
 
 The HackRF sees only as much spectrum at once as the sample rate covers (±10 MHz
