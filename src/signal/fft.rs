@@ -15,6 +15,79 @@ const DB_FLOOR: f32 = -160.0;
 /// scale — this is a measurement clamp, not a UI concern.
 const ACPR_MEASURE_FLOOR_DB: f32 = -100.0;
 
+/// How far a bin must stand above the noise floor to be counted as part of the
+/// carrier when the occupied-bandwidth window is drawn.
+///
+/// The 99 % cumulative method answers "where does the power sit", and handed the
+/// whole capture it answers "spread across the span" — a noise floor several MHz
+/// wide carries real power, so the 0.5 % / 99.5 % cut-offs land near the span edges
+/// and the result describes the sample rate rather than the signal. Bounding the
+/// method to the carrier first is what makes the number a property of the signal.
+///
+/// 10 dB is the same judgement `spectrum::PEAK_PROMINENCE_DB` already makes about
+/// what separates a solid carrier from FFT ripple.
+const OBW_CARRIER_THRESHOLD_DB: f32 = 10.0;
+
+/// How far the carrier window steps over bins below the threshold before it gives
+/// up. A broadcast signal's own spectrum is ragged, and a momentary null inside the
+/// channel must not amputate the measurement at that bin. In Hz, so it means the
+/// same thing at 2 Msps as at 20.
+const OBW_GAP_TOLERANCE_HZ: f64 = 10_000.0;
+
+/// 99 % occupied bandwidth of the carrier the spectrum is centred on, in two steps:
+///
+/// 1. **Bound the carrier.** From the strongest bin, walk outward while bins stay
+///    above `noise_floor + OBW_CARRIER_THRESHOLD_DB`, stepping over dips shorter
+///    than [`OBW_GAP_TOLERANCE_HZ`] and trimming back to the last bin that actually
+///    cleared the threshold.
+/// 2. **Apply ITU-R SM.328 inside that window.** Exclude the bottom 0.5 % and the
+///    top 0.5 % of the window's power; the span between the cut-offs is the answer.
+///
+/// `0` when no bin clears the threshold — the same "nothing to measure" sentinel
+/// the caller already treats as `---`, rather than a guess off the noise floor.
+fn occupied_bw(linear: &[f32], sample_rate: f64, noise_floor_db: f32) -> u64 {
+    let n = linear.len();
+    if n == 0 || sample_rate <= 0.0 { return 0; }
+    let bin_hz = sample_rate / n as f64;
+
+    let (peak_idx, peak_lin) = linear.iter().enumerate().fold(
+        (0usize, f32::NEG_INFINITY),
+        |(bi, bv), (i, &v)| if v > bv { (i, v) } else { (bi, bv) },
+    );
+    let threshold = 10f32.powf((noise_floor_db + OBW_CARRIER_THRESHOLD_DB) / 10.0);
+    if !peak_lin.is_finite() || peak_lin <= threshold { return 0; }
+
+    // Bins of slack, at least one, so a single ragged bin never ends the walk.
+    let gap = (OBW_GAP_TOLERANCE_HZ / bin_hz).ceil().max(1.0) as usize;
+    let mut lo = peak_idx;
+    let mut miss = 0usize;
+    for i in (0..peak_idx).rev() {
+        if linear[i] > threshold { lo = i; miss = 0; }
+        else { miss += 1; if miss > gap { break; } }
+    }
+    let mut hi = peak_idx;
+    miss = 0;
+    for (i, &v) in linear.iter().enumerate().skip(peak_idx + 1) {
+        if v > threshold { hi = i; miss = 0; }
+        else { miss += 1; if miss > gap { break; } }
+    }
+
+    let window = &linear[lo..=hi];
+    let total: f32 = window.iter().sum();
+    if !total.is_finite() || total <= 0.0 { return 0; }
+    let lo_thresh = total * 0.005;
+    let hi_thresh = total * 0.995;
+    let mut acc = 0f32;
+    let mut lo_b = 0usize;
+    let mut hi_b = window.len() - 1;
+    for (i, &v) in window.iter().enumerate() {
+        acc += v;
+        if acc < lo_thresh { lo_b = i; }
+        if acc < hi_thresh { hi_b = i; }
+    }
+    ((hi_b.saturating_sub(lo_b) + 1) as f64 * bin_hz) as u64
+}
+
 /// Adjacent-channel power ratio: the lower/upper adjacent-band power relative to
 /// the in-channel power, plus the absolute level (dBFS) of the louder — worse —
 /// adjacent band. Each band is the same width as `occupied_bw_hz` (the standard
@@ -228,25 +301,10 @@ impl FftWorker {
                     f32::NEG_INFINITY
                 };
 
-                // 99% occupied BW — ITU-R SM.328 cumulative method:
-                // exclude the bottom 0.5% and top 0.5% of total power,
-                // return the frequency span between those two cut-off points.
-                let occupied_bw_hz = if total_linear > 0.0 && sample_rate > 0.0 {
-                    let lo_thresh = total_linear * 0.005;
-                    let hi_thresh = total_linear * 0.995;
-                    let bin_hz    = sample_rate / n as f64;
-                    let mut acc   = 0f32;
-                    let mut lo_bin = 0usize;
-                    let mut hi_bin = n - 1;
-                    for (i, &lin) in linear.iter().enumerate() {
-                        acc += lin;
-                        if acc < lo_thresh { lo_bin = i; }
-                        if acc < hi_thresh { hi_bin = i; }
-                    }
-                    ((hi_bin.saturating_sub(lo_bin) + 1) as f64 * bin_hz) as u64
-                } else {
-                    0u64
-                };
+                // 99% occupied BW of the carrier — ITU-R SM.328 cumulative method,
+                // applied inside a window bounded to the carrier rather than to the
+                // whole capture. See `occupied_bw`.
+                let occupied_bw_hz = occupied_bw(&linear, sample_rate, noise_floor);
 
                 // Adjacent-channel power ratio: L/R bands at ±ACPR_OFFSET_HZ, same
                 // width as the measured in-channel occupancy. `None` becomes the
@@ -446,6 +504,92 @@ mod tests {
         let total_linear: f32 = 0.0;
         let power = if total_linear > 0.0 { 10.0 * total_linear.log10() } else { f32::NEG_INFINITY };
         assert!(power.is_infinite() && power < 0.0);
+    }
+
+    /// A linear-power spectrum: `n` bins of flat noise at `nf_db`, with one flat
+    /// carrier `bw_hz` wide at `level_db`, offset `offset_hz` from the centre bin.
+    fn spectrum(n: usize, sample_rate: f64, nf_db: f32, bw_hz: f64, level_db: f32, offset_hz: f64)
+        -> Vec<f32>
+    {
+        let lin = |db: f32| 10f32.powf(db / 10.0);
+        let mut bins = vec![lin(nf_db); n];
+        let bin_hz = sample_rate / n as f64;
+        let half = ((bw_hz / bin_hz) / 2.0).round() as i64;
+        let c = n as i64 / 2 + (offset_hz / bin_hz).round() as i64;
+        for i in (c - half)..(c + half) {
+            if (0..n as i64).contains(&i) { bins[i as usize] = lin(level_db); }
+        }
+        bins
+    }
+
+    #[test]
+    fn occupied_bw_measures_the_carrier_not_the_span() {
+        // The bug this replaces: the 99 % method over the whole capture reported
+        // 7.49 MHz for this signal at 10 Msps, because a noise floor that wide
+        // carries enough power to push the cut-offs out to the span edges.
+        let bins = spectrum(2048, 2_000_000.0, -90.0, 180_000.0, -40.0, 0.0);
+        let bw = occupied_bw(&bins, 2_000_000.0, -90.0);
+        assert!((170_000..=190_000).contains(&bw), "expected ~180 kHz, got {bw}");
+    }
+
+    #[test]
+    fn occupied_bw_is_a_property_of_the_signal_not_the_sample_rate() {
+        // The same 180 kHz carrier seen through a 2 MHz and a 10 MHz window must
+        // measure the same, to within the coarser window's bin size.
+        let narrow = occupied_bw(
+            &spectrum(2048, 2_000_000.0, -90.0, 180_000.0, -40.0, 0.0), 2_000_000.0, -90.0);
+        let wide = occupied_bw(
+            &spectrum(2048, 10_000_000.0, -90.0, 180_000.0, -40.0, 0.0), 10_000_000.0, -90.0);
+        let bin_hz = 10_000_000.0 / 2048.0;
+        assert!((narrow as f64 - wide as f64).abs() < 3.0 * bin_hz,
+                "narrow={narrow} wide={wide}, bin={bin_hz:.0} Hz");
+    }
+
+    #[test]
+    fn occupied_bw_follows_a_carrier_that_is_not_centred() {
+        // The window is drawn around the strongest bin, so an off-centre station
+        // still reports its own bandwidth rather than its distance from centre.
+        let bins = spectrum(2048, 2_000_000.0, -90.0, 180_000.0, -40.0, 300_000.0);
+        let bw = occupied_bw(&bins, 2_000_000.0, -90.0);
+        assert!((170_000..=190_000).contains(&bw), "expected ~180 kHz, got {bw}");
+    }
+
+    #[test]
+    fn occupied_bw_reads_a_narrow_carrier_as_narrow() {
+        // The wide/narrow split is what `classify` turns into the MOD badge, so a
+        // 15 kHz channel must not come back looking like broadcast FM.
+        let bins = spectrum(2048, 2_000_000.0, -90.0, 15_000.0, -40.0, 0.0);
+        let bw = occupied_bw(&bins, 2_000_000.0, -90.0);
+        assert!((10_000..=20_000).contains(&bw), "expected ~15 kHz, got {bw}");
+        assert_eq!(crate::state::classify(50.0, bw), crate::state::Modulation::Nfm);
+    }
+
+    #[test]
+    fn occupied_bw_steps_over_a_null_inside_the_channel() {
+        // A broadcast signal's own spectrum is ragged. A momentary null a few bins
+        // wide must not amputate the window at that bin.
+        let mut bins = spectrum(2048, 2_000_000.0, -90.0, 180_000.0, -40.0, 0.0);
+        let notch = 2048 / 2 - 40;
+        for b in bins.iter_mut().skip(notch).take(5) { *b = 10f32.powf(-90.0 / 10.0); }
+        let bw = occupied_bw(&bins, 2_000_000.0, -90.0);
+        assert!((170_000..=190_000).contains(&bw), "null truncated the window: {bw}");
+    }
+
+    #[test]
+    fn occupied_bw_is_zero_without_a_carrier() {
+        // Noise with a few dB of ripple is still noise: no window, no measurement,
+        // and `---` on screen rather than a bandwidth invented from the floor.
+        let mut bins = vec![10f32.powf(-90.0 / 10.0); 2048];
+        for (i, b) in bins.iter_mut().enumerate() {
+            *b = 10f32.powf((-90.0 + (i % 7) as f32 - 3.0) / 10.0);
+        }
+        assert_eq!(occupied_bw(&bins, 2_000_000.0, -90.0), 0);
+    }
+
+    #[test]
+    fn occupied_bw_declines_degenerate_input() {
+        assert_eq!(occupied_bw(&[], 2_000_000.0, -90.0), 0);
+        assert_eq!(occupied_bw(&[1.0, 1.0, 1.0], 0.0, -90.0), 0);
     }
 
     #[test]
