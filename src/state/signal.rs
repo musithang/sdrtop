@@ -111,6 +111,15 @@ pub struct SignalState {
     pub adc_saturation_peak: f32,
     pub saturation_history:  VecDeque<f32>,
     pub peak_to_nf_db:       f32,
+    /// Power integrated over the occupied channel at centre, dBFS.
+    ///
+    /// The *channel*, not the capture: summing every bin made this a function of the
+    /// sample rate, so widening the span raised the "channel power" of a station
+    /// that had not changed. `f32::NEG_INFINITY` when there is no carrier to
+    /// integrate — every reader already renders that as a dash.
+    ///
+    /// Distinct from [`Self::adc_rms_dbfs`], which is the full-bandwidth figure and
+    /// belongs to ADC loading rather than to the signal.
     pub channel_power_dbfs:  f32,
     pub occupied_bw_hz:      u64,
     /// Adjacent-channel power ratio, dB relative to the in-channel power, at

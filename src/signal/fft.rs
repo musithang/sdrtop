@@ -92,7 +92,22 @@ pub fn strongest_real_bin(bins: &[f32], radius_bins: Option<usize>) -> Option<(u
 /// the rates where it would otherwise reach past the capture.
 const OBW_SEARCH_RADIUS_HZ: f64 = 150_000.0;
 
-/// 99 % occupied bandwidth of the carrier the spectrum is centred on, in two steps:
+/// The occupied bandwidth the worker derives from [`carrier_window`], as its own
+/// entry point so the tests can be about the number rather than about bin indices.
+#[cfg(test)]
+fn occupied_bw(linear: &[f32], sample_rate: f64, noise_floor_db: f32) -> u64 {
+    let bin_hz = sample_rate / linear.len().max(1) as f64;
+    carrier_window(linear, sample_rate, noise_floor_db)
+        .map(|(lo, hi)| ((hi - lo + 1) as f64 * bin_hz) as u64)
+        .unwrap_or(0)
+}
+
+/// The carrier at centre, as the inclusive bin range holding 99 % of its power.
+/// The single carrier analysis in the app: both the occupied bandwidth and the
+/// in-channel power come from this one window, so they cannot end up describing
+/// different slices of the same spectrum.
+///
+/// Two steps:
 ///
 /// 1. **Bound the carrier.** Seed at the strongest bin within
 ///    [`OBW_SEARCH_RADIUS_HZ`] of centre and outside the DC guard, then walk outward
@@ -103,24 +118,25 @@ const OBW_SEARCH_RADIUS_HZ: f64 = 150_000.0;
 /// 2. **Apply ITU-R SM.328 inside that window.** Exclude the bottom 0.5 % and the
 ///    top 0.5 % of the window's power; the span between the cut-offs is the answer.
 ///
-/// `0` when no bin clears the threshold — the same "nothing to measure" sentinel
-/// the caller already treats as `---`, rather than a guess off the noise floor.
+/// `None` when no bin clears the threshold, or when all the occupancy turns out to
+/// be the DC artefact. Callers render that as `---` rather than guessing off the
+/// noise floor.
 ///
-/// Note what this is *not*: Carson's rule. A WFM broadcast is allocated 200 kHz and
-/// designed around 180 kHz, but the 99 % occupied bandwidth of one carrying real
-/// programme material measures nearer 85 kHz, because the time-averaged spectrum of
-/// FM is strongly peaked at the carrier. Measured, not assumed — which is the point
-/// of the field.
-fn occupied_bw(linear: &[f32], sample_rate: f64, noise_floor_db: f32) -> u64 {
+/// Note what the bandwidth this yields is *not*: Carson's rule. A WFM broadcast is
+/// allocated 200 kHz and designed around 180 kHz, but the 99 % occupied bandwidth of
+/// one carrying real programme material measures nearer 85 kHz, because the
+/// time-averaged spectrum of FM is strongly peaked at the carrier. Measured, not
+/// assumed — which is the point of the field.
+fn carrier_window(linear: &[f32], sample_rate: f64, noise_floor_db: f32) -> Option<(usize, usize)> {
     let n = linear.len();
-    if n == 0 || sample_rate <= 0.0 { return 0; }
+    if n == 0 || sample_rate <= 0.0 { return None; }
     let bin_hz = sample_rate / n as f64;
 
     let centre = n / 2;
     let radius = ((OBW_SEARCH_RADIUS_HZ / bin_hz).ceil() as usize).min(n);
-    let Some((peak_idx, peak_lin)) = strongest_real_bin(linear, Some(radius)) else { return 0 };
+    let (peak_idx, peak_lin) = strongest_real_bin(linear, Some(radius))?;
     let threshold = 10f32.powf((noise_floor_db + OBW_CARRIER_THRESHOLD_DB) / 10.0);
-    if !peak_lin.is_finite() || peak_lin <= threshold { return 0; }
+    if !peak_lin.is_finite() || peak_lin <= threshold { return None; }
 
     // Bins of slack, at least one, so a single ragged bin never ends the walk.
     let gap = (OBW_GAP_TOLERANCE_HZ / bin_hz).ceil().max(1.0) as usize;
@@ -139,7 +155,7 @@ fn occupied_bw(linear: &[f32], sample_rate: f64, noise_floor_db: f32) -> u64 {
 
     let window = &linear[lo..=hi];
     let total: f32 = window.iter().sum();
-    if !total.is_finite() || total <= 0.0 { return 0; }
+    if !total.is_finite() || total <= 0.0 { return None; }
     let lo_thresh = total * 0.005;
     let hi_thresh = total * 0.995;
     let mut acc = 0f32;
@@ -167,9 +183,9 @@ fn occupied_bw(linear: &[f32], sample_rate: f64, noise_floor_db: f32) -> u64 {
     // The cost is honest and small: a carrier too narrow to resolve at this bin size
     // reads as nothing, which is the truthful answer at 4.9 kHz bins.
     if occ_lo.abs_diff(centre) <= DC_GUARD_BINS && occ_hi.abs_diff(centre) <= DC_GUARD_BINS {
-        return 0;
+        return None;
     }
-    ((occ_hi - occ_lo + 1) as f64 * bin_hz) as u64
+    Some((occ_lo, occ_hi))
 }
 
 /// Adjacent-channel power ratio: the lower/upper adjacent-band power relative to
@@ -393,19 +409,30 @@ impl FftWorker {
                 for (l, &s) in linear.iter_mut().zip(smoothed.iter()) {
                     *l = 10f32.powf(s / 10.0);
                 }
-                let total_linear: f32 = linear.iter().sum();
 
-                // Channel power: integrate all bins → dBFS
-                let channel_power_dbfs = if total_linear > 0.0 {
-                    10.0 * total_linear.log10()
-                } else {
-                    f32::NEG_INFINITY
-                };
+                // One carrier analysis, two numbers, so they cannot describe
+                // different slices of the same spectrum. See `carrier_window`.
+                let carrier = carrier_window(&linear, sample_rate, noise_floor);
+                let bin_hz = if n > 0 { sample_rate / n as f64 } else { 0.0 };
 
                 // 99% occupied BW of the carrier — ITU-R SM.328 cumulative method,
                 // applied inside a window bounded to the carrier rather than to the
-                // whole capture. See `occupied_bw`.
-                let occupied_bw_hz = occupied_bw(&linear, sample_rate, noise_floor);
+                // whole capture.
+                let occupied_bw_hz = carrier
+                    .map(|(lo, hi)| ((hi - lo + 1) as f64 * bin_hz) as u64)
+                    .unwrap_or(0);
+
+                // Channel power: integrate the *channel*, which is what the field is
+                // named for and what `adc_rms_dbfs` is documented as being distinct
+                // from. It used to sum every bin in the capture, which made it a
+                // function of the sample rate — change the span and the "channel
+                // power" of an unchanged station moved with it. No carrier means no
+                // channel to integrate, and the readers all render that as `---`.
+                let channel_power_dbfs = carrier
+                    .map(|(lo, hi)| linear[lo..=hi].iter().sum::<f32>())
+                    .filter(|p| *p > 0.0)
+                    .map(|p| 10.0 * p.log10())
+                    .unwrap_or(f32::NEG_INFINITY);
 
                 // The modulation is needed before the ACPR, not after: it picks the
                 // channel spacing the adjacent bands are measured at.
@@ -614,8 +641,15 @@ mod tests {
         assert!(power.is_infinite() && power < 0.0);
     }
 
-    /// A linear-power spectrum: `n` bins of flat noise at `nf_db`, with one flat
-    /// carrier `bw_hz` wide at `level_db`, offset `offset_hz` from the centre bin.
+    /// A linear-power spectrum: `n` bins of noise at `nf_db` per bin, with one flat
+    /// carrier `bw_hz` wide offset `offset_hz` from centre.
+    ///
+    /// `level_db` is the carrier's **total** power, spread evenly across the bins it
+    /// covers — not a per-bin level. That distinction is the whole point: a fixed
+    /// per-bin level would make the carrier's power scale with how many bins the
+    /// sample rate happens to divide it into, so the same station would carry five
+    /// times the power at 2 Msps as at 10, and any test comparing the two would be
+    /// measuring the helper rather than the code.
     fn spectrum(n: usize, sample_rate: f64, nf_db: f32, bw_hz: f64, level_db: f32, offset_hz: f64)
         -> Vec<f32>
     {
@@ -624,8 +658,9 @@ mod tests {
         let bin_hz = sample_rate / n as f64;
         let half = ((bw_hz / bin_hz) / 2.0).round() as i64;
         let c = n as i64 / 2 + (offset_hz / bin_hz).round() as i64;
+        let count = (2 * half).max(1) as f32;
         for i in (c - half)..(c + half) {
-            if (0..n as i64).contains(&i) { bins[i as usize] = lin(level_db); }
+            if (0..n as i64).contains(&i) { bins[i as usize] = lin(level_db) / count; }
         }
         bins
     }
@@ -730,13 +765,67 @@ mod tests {
 
     #[test]
     fn occupied_bw_prefers_a_real_carrier_over_the_dc_line() {
-        // Both present: the artefact at centre, a station off to one side. The
-        // window must be drawn around the station.
+        // Both present: the artefact at centre, a station off to one side whose own
+        // skirts stop well short of it. The window must be drawn around the station,
+        // even though the artefact is 20 dB louder.
         let lin = |db: f32| 10f32.powf(db / 10.0);
-        let mut bins = spectrum(2048, 2_000_000.0, -90.0, 180_000.0, -40.0, 100_000.0);
+        let mut bins = spectrum(2048, 2_000_000.0, -90.0, 60_000.0, -40.0, 100_000.0);
         for b in bins[1023..=1025].iter_mut() { *b = lin(-20.0); } // artefact louder
         let bw = occupied_bw(&bins, 2_000_000.0, -90.0);
-        assert!((170_000..=190_000).contains(&bw), "expected ~180 kHz, got {bw}");
+        assert!((50_000..=70_000).contains(&bw), "expected ~60 kHz, got {bw}");
+    }
+
+    /// The in-channel power the worker derives from [`carrier_window`], mirrored
+    /// here so the tests can exercise the pairing rather than the worker loop.
+    fn channel_power(linear: &[f32], sample_rate: f64, noise_floor_db: f32) -> f32 {
+        carrier_window(linear, sample_rate, noise_floor_db)
+            .map(|(lo, hi)| linear[lo..=hi].iter().sum::<f32>())
+            .filter(|p| *p > 0.0)
+            .map(|p| 10.0 * p.log10())
+            .unwrap_or(f32::NEG_INFINITY)
+    }
+
+    #[test]
+    fn channel_power_reports_the_carrier_not_the_capture() {
+        // The bug: every bin was summed, so the answer was the total power in the
+        // span. Here the noise spread across 2048 bins carries about five times the
+        // carrier's own power, and the old code would have reported that.
+        let bins = spectrum(2048, 2_000_000.0, -70.0, 20_000.0, -43.0, 0.0);
+        let total: f32 = bins.iter().sum();
+        let capture_db = 10.0 * total.log10();
+        let ch = channel_power(&bins, 2_000_000.0, -70.0);
+        assert!((ch - (-43.0)).abs() < 1.5, "expected the carrier's ~-43 dBFS, got {ch:.1}");
+        assert!(capture_db - ch > 5.0,
+                "the capture should be visibly louder than the channel: {capture_db:.1} vs {ch:.1}");
+    }
+
+    #[test]
+    fn channel_power_ignores_a_station_outside_the_channel() {
+        // A second, louder station elsewhere in the span used to be added straight
+        // into the "channel" power of the one at centre.
+        let mut bins = spectrum(2048, 2_000_000.0, -90.0, 100_000.0, -40.0, 0.0);
+        let other = spectrum(2048, 2_000_000.0, -200.0, 100_000.0, -30.0, 700_000.0);
+        for (b, o) in bins.iter_mut().zip(other.iter()) { *b += *o; }
+        let ch = channel_power(&bins, 2_000_000.0, -90.0);
+        assert!((ch - (-40.0)).abs() < 1.5, "the neighbour leaked in: {ch:.1} dBFS");
+    }
+
+    #[test]
+    fn channel_power_does_not_move_with_the_noise_floor() {
+        // Same carrier, quiet span and noisy span: the noise is not in the channel.
+        let quiet = channel_power(
+            &spectrum(2048, 2_000_000.0, -120.0, 180_000.0, -40.0, 0.0), 2_000_000.0, -120.0);
+        let noisy = channel_power(
+            &spectrum(2048, 2_000_000.0, -80.0, 180_000.0, -40.0, 0.0), 2_000_000.0, -80.0);
+        assert!((quiet - noisy).abs() < 1.0,
+                "noise floor leaked into the channel: {quiet:.1} vs {noisy:.1} dBFS");
+    }
+
+    #[test]
+    fn channel_power_is_undefined_without_a_carrier() {
+        // No channel, no channel power. Every reader guards on `is_finite`.
+        let bins = vec![10f32.powf(-90.0 / 10.0); 2048];
+        assert!(channel_power(&bins, 2_000_000.0, -90.0).is_infinite());
     }
 
     #[test]
