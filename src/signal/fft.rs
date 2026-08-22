@@ -50,12 +50,27 @@ const OBW_GAP_TOLERANCE_HZ: f64 = 10_000.0;
 /// `strongest_offset_hz` refuses the same artefact for the same reason.
 const OBW_DC_GUARD_BINS: usize = 2;
 
+/// How far from the tuned centre the carrier window may be seeded.
+///
+/// The panel this feeds reads out *the signal at centre*, so the measurement has to
+/// be about the thing the user tuned to. Without a bound it is about whatever
+/// happens to be loudest in the capture: on an empty channel at 447 MHz the seed
+/// landed on a spur 863 kHz away and reported its 2 kHz width as the tuned signal.
+///
+/// About one broadcast channel wide, so a station is still found when the radio is
+/// parked a channel off it, while a different station further out is left to be
+/// tuned rather than silently characterised in its place. Clamped to the span, for
+/// the rates where it would otherwise reach past the capture.
+const OBW_SEARCH_RADIUS_HZ: f64 = 150_000.0;
+
 /// 99 % occupied bandwidth of the carrier the spectrum is centred on, in two steps:
 ///
-/// 1. **Bound the carrier.** From the strongest bin outside the DC guard, walk
-///    outward while bins stay above `noise_floor + OBW_CARRIER_THRESHOLD_DB`,
-///    stepping over dips shorter than [`OBW_GAP_TOLERANCE_HZ`] and trimming back to
-///    the last bin that actually cleared the threshold.
+/// 1. **Bound the carrier.** Seed at the strongest bin within
+///    [`OBW_SEARCH_RADIUS_HZ`] of centre and outside the DC guard, then walk outward
+///    while bins stay above `noise_floor + OBW_CARRIER_THRESHOLD_DB`, stepping over
+///    dips shorter than [`OBW_GAP_TOLERANCE_HZ`] and trimming back to the last bin
+///    that actually cleared the threshold. The walk itself is unbounded — only the
+///    seed has to be near centre, so a wide carrier keeps its skirts.
 /// 2. **Apply ITU-R SM.328 inside that window.** Exclude the bottom 0.5 % and the
 ///    top 0.5 % of the window's power; the span between the cut-offs is the answer.
 ///
@@ -73,8 +88,12 @@ fn occupied_bw(linear: &[f32], sample_rate: f64, noise_floor_db: f32) -> u64 {
     let bin_hz = sample_rate / n as f64;
 
     let centre = n / 2;
+    let radius = ((OBW_SEARCH_RADIUS_HZ / bin_hz).ceil() as usize).min(n);
     let (peak_idx, peak_lin) = linear.iter().enumerate()
-        .filter(|(i, _)| i.abs_diff(centre) > OBW_DC_GUARD_BINS)
+        .filter(|(i, _)| {
+            let d = i.abs_diff(centre);
+            d > OBW_DC_GUARD_BINS && d <= radius
+        })
         .fold((0usize, f32::NEG_INFINITY),
               |(bi, bv), (i, &v)| if v > bv { (i, v) } else { (bi, bv) });
     let threshold = 10f32.powf((noise_floor_db + OBW_CARRIER_THRESHOLD_DB) / 10.0);
@@ -580,12 +599,23 @@ mod tests {
     }
 
     #[test]
-    fn occupied_bw_follows_a_carrier_that_is_not_centred() {
-        // The window is drawn around the strongest bin, so an off-centre station
-        // still reports its own bandwidth rather than its distance from centre.
-        let bins = spectrum(2048, 2_000_000.0, -90.0, 180_000.0, -40.0, 300_000.0);
+    fn occupied_bw_finds_a_carrier_the_radio_is_parked_beside() {
+        // Tuned a little off the station: still the signal at centre for any
+        // practical purpose, and it must report its own bandwidth rather than its
+        // distance from centre.
+        let bins = spectrum(2048, 2_000_000.0, -90.0, 180_000.0, -40.0, 100_000.0);
         let bw = occupied_bw(&bins, 2_000_000.0, -90.0);
         assert!((170_000..=190_000).contains(&bw), "expected ~180 kHz, got {bw}");
+    }
+
+    #[test]
+    fn occupied_bw_ignores_a_station_that_is_not_the_tuned_one() {
+        // A strong station most of a megahertz away is somebody else's channel. The
+        // panel says "the signal at centre", so an empty centre reads as empty —
+        // measured live at 447 MHz, where an unbounded seed latched onto a spur
+        // 863 kHz out and reported its width as the tuned signal.
+        let bins = spectrum(2048, 2_000_000.0, -90.0, 180_000.0, -40.0, 800_000.0);
+        assert_eq!(occupied_bw(&bins, 2_000_000.0, -90.0), 0);
     }
 
     #[test]
@@ -648,7 +678,7 @@ mod tests {
         // Both present: the artefact at centre, a station off to one side. The
         // window must be drawn around the station.
         let lin = |db: f32| 10f32.powf(db / 10.0);
-        let mut bins = spectrum(2048, 2_000_000.0, -90.0, 180_000.0, -40.0, 400_000.0);
+        let mut bins = spectrum(2048, 2_000_000.0, -90.0, 180_000.0, -40.0, 100_000.0);
         for i in 1023..=1025 { bins[i] = lin(-20.0); } // artefact louder than the station
         let bw = occupied_bw(&bins, 2_000_000.0, -90.0);
         assert!((170_000..=190_000).contains(&bw), "expected ~180 kHz, got {bw}");
