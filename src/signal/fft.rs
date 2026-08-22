@@ -79,18 +79,34 @@ pub fn strongest_real_bin(bins: &[f32], radius_bins: Option<usize>) -> Option<(u
         })
 }
 
-/// How far from the tuned centre the carrier window may be seeded.
+/// How far from the tuned centre a measurement may look for its subject.
 ///
-/// The panel this feeds reads out *the signal at centre*, so the measurement has to
-/// be about the thing the user tuned to. Without a bound it is about whatever
-/// happens to be loudest in the capture: on an empty channel at 447 MHz the seed
-/// landed on a spur 863 kHz away and reported its 2 kHz width as the tuned signal.
+/// The panels this feeds read out *the signal at centre*, so the measurements have
+/// to be about the thing the user tuned to. Unbounded they are about whatever
+/// happens to be loudest in the capture: on an empty channel at 447 MHz the carrier
+/// seed landed on a spur 863 kHz away and reported its 2 kHz width as the tuned
+/// signal, and the SNR reported that spur's height as signal-to-noise.
+///
+/// It bounds the SNR peak as much as the carrier window, and that is the point:
+/// with one radius there is a single notion of "at centre" on the page, so the
+/// headline, the peak row and the occupancy cannot end up describing different
+/// signals. It also keeps a *trend* meaningful — the rail's 60-second SNR trace and
+/// the aiming view's trend arrow are only readable while their subject stays put,
+/// and an unbounded peak lets the subject jump between stations mid-trace with
+/// nothing on screen to say so.
 ///
 /// About one broadcast channel wide, so a station is still found when the radio is
 /// parked a channel off it, while a different station further out is left to be
-/// tuned rather than silently characterised in its place. Clamped to the span, for
-/// the rates where it would otherwise reach past the capture.
-const OBW_SEARCH_RADIUS_HZ: f64 = 150_000.0;
+/// tuned rather than silently measured in its place.
+const CENTRE_RADIUS_HZ: f64 = 150_000.0;
+
+/// [`CENTRE_RADIUS_HZ`] in bins for a given spectrum, clamped to the span for the
+/// rates where it would otherwise reach past the capture.
+pub fn centre_radius_bins(n: usize, sample_rate: f64) -> usize {
+    if n == 0 || sample_rate <= 0.0 { return 0; }
+    let bin_hz = sample_rate / n as f64;
+    ((CENTRE_RADIUS_HZ / bin_hz).ceil() as usize).min(n)
+}
 
 /// The occupied bandwidth the worker derives from [`carrier_window`], as its own
 /// entry point so the tests can be about the number rather than about bin indices.
@@ -110,7 +126,7 @@ fn occupied_bw(linear: &[f32], sample_rate: f64, noise_floor_db: f32) -> u64 {
 /// Two steps:
 ///
 /// 1. **Bound the carrier.** Seed at the strongest bin within
-///    [`OBW_SEARCH_RADIUS_HZ`] of centre and outside the DC guard, then walk outward
+///    [`CENTRE_RADIUS_HZ`] of centre and outside the DC guard, then walk outward
 ///    while bins stay above `noise_floor + OBW_CARRIER_THRESHOLD_DB`, stepping over
 ///    dips shorter than [`OBW_GAP_TOLERANCE_HZ`] and trimming back to the last bin
 ///    that actually cleared the threshold. The walk itself is unbounded — only the
@@ -133,7 +149,7 @@ fn carrier_window(linear: &[f32], sample_rate: f64, noise_floor_db: f32) -> Opti
     let bin_hz = sample_rate / n as f64;
 
     let centre = n / 2;
-    let radius = ((OBW_SEARCH_RADIUS_HZ / bin_hz).ceil() as usize).min(n);
+    let radius = centre_radius_bins(n, sample_rate);
     let (peak_idx, peak_lin) = strongest_real_bin(linear, Some(radius))?;
     let threshold = 10f32.powf((noise_floor_db + OBW_CARRIER_THRESHOLD_DB) / 10.0);
     if !peak_lin.is_finite() || peak_lin <= threshold { return None; }
@@ -394,12 +410,25 @@ impl FftWorker {
                     .map(|m| (m.radio.frequency, m.radio.config_sample_rate))
                     .unwrap_or((0, 0.0));
 
-                // SNR: peak minus noise floor. The peak has to be a real one — the
-                // DC artefact is the strongest bin in the spectrum whenever nothing
-                // else is on air, and reporting its height as signal-to-noise put
-                // 46 dB on the screen for an empty channel. No carrier at all leaves
-                // nothing to compare, which reads as 0 dB.
-                let peak_dbfs = strongest_real_bin(&smoothed, None)
+                // SNR: the strongest real bin *near centre*, minus the noise floor.
+                //
+                // Both bounds matter. The DC artefact is the tallest bin in the
+                // spectrum whenever nothing else is on air, and reporting its height
+                // as signal-to-noise put 46 dB on screen for an empty channel. And
+                // an unbounded peak makes this a statistic about the loudest thing
+                // anywhere in the capture, which is not what any of its readers want:
+                // the aiming view, the rail's 60-second trace and the trend arrow are
+                // all asking about the station being tuned, and a subject that jumps
+                // silently between signals makes a trend line meaningless.
+                //
+                // Deliberately *not* taken from `carrier_window`: that needs the
+                // signal to clear the carrier threshold first, and the interesting
+                // part of aiming an antenna is the climb below it. This stays defined
+                // and continuous all the way down to the noise.
+                //
+                // The noise floor stays span-wide — a reference that moves with the
+                // signal would flatten the very trend this is for.
+                let peak_dbfs = strongest_real_bin(&smoothed, Some(centre_radius_bins(n, sample_rate)))
                     .map(|(_, v)| v)
                     .unwrap_or(f32::NEG_INFINITY);
                 let peak_to_nf_db = (peak_dbfs - noise_floor).max(0.0);
@@ -845,6 +874,67 @@ mod tests {
         bins[1800] = -20.0; // 776 bins out, louder
         assert_eq!(strongest_real_bin(&bins, Some(100)), Some((1100, -40.0)));
         assert_eq!(strongest_real_bin(&bins, None), Some((1800, -20.0)));
+    }
+
+    /// The SNR the worker publishes, mirrored so the scoping rule can be tested
+    /// without running the FFT loop.
+    fn snr(smoothed: &[f32], sample_rate: f64, noise_floor: f32) -> f32 {
+        let peak = strongest_real_bin(smoothed, Some(centre_radius_bins(smoothed.len(), sample_rate)))
+            .map(|(_, v)| v)
+            .unwrap_or(f32::NEG_INFINITY);
+        (peak - noise_floor).max(0.0)
+    }
+
+    #[test]
+    fn snr_ignores_a_station_the_radio_is_not_tuned_to() {
+        // Measured live at 447.137 MHz with nothing on air: a spur 863 kHz away read
+        // as 26 dB of signal-to-noise, next to a verdict of NO SIGNAL. Both were
+        // true, and they contradicted each other on the same panel.
+        let mut bins = vec![-85.0f32; 2048];
+        bins[1908] = -60.0; // the spur, well outside the tuned channel
+        assert_eq!(snr(&bins, 2_000_000.0, -85.0), 0.0);
+        // The same bin inside the radius is a real reading.
+        let mut near = vec![-85.0f32; 2048];
+        near[1100] = -60.0;
+        assert!((snr(&near, 2_000_000.0, -85.0) - 25.0).abs() < 0.01);
+    }
+
+    #[test]
+    fn snr_stays_continuous_below_the_carrier_threshold() {
+        // The reason this is not taken from `carrier_window`: aiming an antenna is
+        // mostly spent under the carrier threshold, watching the number climb. A
+        // reading that sat at zero until the signal crossed 10 dB and then jumped
+        // would destroy exactly the feedback the aiming view exists for.
+        let mut last = -1.0f32;
+        for level in [-83.0f32, -81.0, -79.0, -77.0, -75.0] {
+            let mut bins = vec![-85.0f32; 2048];
+            bins[1050] = level;
+            let s = snr(&bins, 2_000_000.0, -85.0);
+            assert!(s > last, "SNR must rise with the signal: {s} after {last}");
+            assert!(s > 0.0, "still nothing to show at {level} dBFS over a -85 floor");
+            last = s;
+        }
+        // And it never goes negative when the channel is empty.
+        assert_eq!(snr(&vec![-85.0f32; 2048], 2_000_000.0, -85.0), 0.0);
+    }
+
+    #[test]
+    fn snr_refuses_the_dc_artefact() {
+        let mut bins = vec![-85.0f32; 2048];
+        for b in bins[1023..=1025].iter_mut() { *b = -39.0; }
+        assert_eq!(snr(&bins, 2_000_000.0, -85.0), 0.0);
+    }
+
+    #[test]
+    fn centre_radius_covers_a_broadcast_channel_and_clamps_to_the_span() {
+        // 977 Hz bins: 150 kHz is about 154 of them.
+        assert!((centre_radius_bins(2048, 2_000_000.0) as i64 - 154).abs() <= 1);
+        // 4.9 kHz bins at 10 Msps: the same 150 kHz is far fewer.
+        assert!((centre_radius_bins(2048, 10_000_000.0) as i64 - 31).abs() <= 1);
+        // Never wider than the spectrum it is applied to.
+        assert!(centre_radius_bins(64, 2_000.0) <= 64);
+        assert_eq!(centre_radius_bins(0, 2_000_000.0), 0);
+        assert_eq!(centre_radius_bins(2048, 0.0), 0);
     }
 
     #[test]

@@ -171,13 +171,16 @@ pub(crate) fn verdict(modulation: Modulation, snr_db: f32, acpr_lower_db: f32, a
 /// The strongest live bin as `(level_dbfs, freq_hz)`, mapping the bin index back to
 /// frequency across the captured span. `None` for an empty frame.
 ///
-/// Skips the DC artefact, via the same helper the FFT worker's own peak search uses
-/// — otherwise this row names the tuned frequency and the front end's LO leakage
-/// every time the channel is quiet, which is exactly when the reading matters.
+/// Skips the DC artefact and looks only near centre, via the same helper and radius
+/// the FFT worker's own peak search uses. Without the guard this row names the tuned
+/// frequency and the front end's LO leakage every time the channel is quiet, which
+/// is exactly when the reading matters; without the radius it can name a station the
+/// radio is not tuned to, and then disagree with the headline computed above it.
 fn peak_bin(fr: &FftFrame) -> Option<(f32, u64)> {
     let bins = &fr.bins_dbfs;
     let n = bins.len();
-    let (idx, best) = crate::signal::fft::strongest_real_bin(bins, None)?;
+    let radius = crate::signal::fft::centre_radius_bins(n, fr.sample_rate);
+    let (idx, best) = crate::signal::fft::strongest_real_bin(bins, Some(radius))?;
     let left = fr.center_freq_hz as f64 - fr.sample_rate / 2.0;
     let span_frac = if n > 1 { idx as f64 / (n - 1) as f64 } else { 0.0 };
     let freq = (left + span_frac * fr.sample_rate).max(0.0).round() as u64;
@@ -278,9 +281,13 @@ impl Panel for SignalCharacterizationPanel {
                 ]
             } else { vec![dash()] }));
 
-            // Same guard as `peak_bin` — a peak hold that has been sitting on the DC
-            // artefact since the session started is the least useful number here.
-            let ph = crate::signal::fft::strongest_real_bin(&fr.peak_hold, None).map(|(_, v)| v);
+            // Same scope as `peak_bin`: a peak hold sitting on the DC artefact
+            // since the session started, or on a station the radio is not tuned to,
+            // is the least useful number on the panel.
+            let ph = crate::signal::fft::strongest_real_bin(
+                &fr.peak_hold,
+                Some(crate::signal::fft::centre_radius_bins(fr.peak_hold.len(), fr.sample_rate)),
+            ).map(|(_, v)| v);
             lines.push(metric("Peak hold", match ph {
                 Some(v) if v.is_finite() => vec![Span::styled(format!("{v:.1} dBFS"), val)],
                 _ => vec![dash()],
@@ -440,25 +447,33 @@ mod tests {
         assert_eq!(SignalCharacterizationPanel.name(), "signal_characterization");
     }
 
-    /// 101 bins across 2 MHz centred at 100 MHz → span 99..101 MHz, 20 kHz a bin,
-    /// centre bin at index 50. Wide enough that the DC guard leaves candidates.
+    /// 101 bins across 400 kHz centred at 100 MHz → span 99.8..100.2 MHz, 3.96 kHz
+    /// a bin, centre bin at index 50. At that resolution the ±150 kHz centre radius
+    /// is 38 bins, so there is room either side of it to test both edges of the rule.
     fn peaked_at(idx: usize) -> FftFrame {
         let mut bins = vec![-80.0f32; 101];
         bins[idx] = -10.0;
-        frame(bins, 100_000_000, 2_000_000.0)
+        frame(bins, 100_000_000, 400_000.0)
     }
 
     #[test]
     fn peak_bin_maps_index_to_frequency() {
         let (lvl, hz) = peak_bin(&peaked_at(75)).unwrap();
         assert!((lvl + 10.0).abs() < 1e-6, "peak level is the max bin");
-        assert_eq!(hz, 100_500_000, "three quarters across the span");
+        assert_eq!(hz, 100_100_000, "three quarters across the span");
     }
 
     #[test]
-    fn peak_bin_edge_bins_hit_span_ends() {
-        let (_, hz) = peak_bin(&peaked_at(0)).unwrap();
-        assert_eq!(hz, 99_000_000, "first bin → left edge of the span");
+    fn peak_bin_stays_inside_the_tuned_channel() {
+        // A louder signal further out is somebody else's station. Naming it here
+        // would also put this row at odds with the headline above it, which is
+        // scoped the same way.
+        let mut bins = vec![-80.0f32; 101];
+        bins[75] = -30.0; // inside the radius
+        bins[5]  = 0.0;   // far outside it, and much louder
+        let (lvl, hz) = peak_bin(&frame(bins, 100_000_000, 400_000.0)).unwrap();
+        assert!((lvl + 30.0).abs() < 1e-6, "reported a station out of channel: {lvl}");
+        assert_eq!(hz, 100_100_000);
     }
 
     #[test]
@@ -468,10 +483,10 @@ mod tests {
         // though a station were there. The next real bin is the honest answer.
         let mut bins = vec![-80.0f32; 101];
         bins[50] = 0.0;   // artefact at centre, by far the strongest
-        bins[75] = -30.0; // a real, weaker carrier
-        let (lvl, hz) = peak_bin(&frame(bins, 100_000_000, 2_000_000.0)).unwrap();
+        bins[60] = -30.0; // a real, weaker carrier
+        let (lvl, hz) = peak_bin(&frame(bins, 100_000_000, 400_000.0)).unwrap();
         assert!((lvl + 30.0).abs() < 1e-6, "reported the artefact: {lvl}");
-        assert_eq!(hz, 100_500_000);
+        assert_eq!(hz, 100_040_000);
     }
 
     #[test]
