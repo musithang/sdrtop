@@ -267,6 +267,58 @@ pub fn bipolar_braille_strip(
     (out, over_range)
 }
 
+/// Unipolar braille **area trace** — a filled profile across `cols` braille chars
+/// (2 samples each) and `rows` text rows (4 dot levels each), auto-scaled to the
+/// data's own min..max. Returns exactly `rows` strings of exactly `cols` chars,
+/// **top row first**.
+///
+/// Filled, not a line ([`mini_braille_line`]): these traces exist to show a narrow
+/// spike standing out of a broad hump — the FM stereo pilot against the L+R audio
+/// beside it — and at braille resolution a filled column keeps that contrast where
+/// a one-dot line loses it against the slope.
+///
+/// The row count is the whole point. One row is four vertical levels, so over the
+/// 40 dB window an MPX trace is drawn in, each level is 10 dB and a pilot sitting
+/// ~20 dB below the audio lands on level 2 of 4 — indistinguishable from the audio
+/// around it. Three rows give twelve levels at 3.3 dB each and the same pilot stands
+/// halfway up the strip.
+pub fn braille_profile(data: &[f32], cols: usize, rows: usize) -> Vec<String> {
+    if cols == 0 || rows == 0 { return Vec::new(); }
+    // Dot bits within a 2×4 braille cell, indexed bottom (0) → top (3) per side,
+    // since a filled column grows upward from the floor.
+    const LEFT:  [u8; 4] = [0x40, 0x04, 0x02, 0x01]; // dots 7,3,2,1
+    const RIGHT: [u8; 4] = [0x80, 0x20, 0x10, 0x08]; // dots 8,6,5,4
+
+    let total_levels = (rows * 4) as i32;
+    let (lo, hi) = data.iter().copied()
+        .filter(|v| v.is_finite())
+        .fold((f32::INFINITY, f32::NEG_INFINITY), |(a, b), v| (a.min(v), b.max(v)));
+    // Nothing to plot, or a perfectly flat trace with no shape to show.
+    if !lo.is_finite() || !hi.is_finite() || (hi - lo) <= 1e-6 {
+        return vec![" ".repeat(cols); rows];
+    }
+    let range = hi - lo;
+
+    let mut cells = vec![0u8; cols * rows];
+    for (p, &v) in data.iter().take(cols * 2).enumerate() {
+        if !v.is_finite() { continue; }
+        let height = (((v - lo) / range) * total_levels as f32).round().clamp(0.0, total_levels as f32) as i32;
+        let (col, side) = (p / 2, p % 2);
+        for level in 0..height {
+            // Level 0 is the floor, so it belongs to the *last* returned row.
+            let cell_row = rows - 1 - (level / 4) as usize;
+            let dot = (level % 4) as usize;
+            cells[cell_row * cols + col] |= if side == 0 { LEFT[dot] } else { RIGHT[dot] };
+        }
+    }
+
+    (0..rows)
+        .map(|r| (0..cols)
+            .map(|c| char::from_u32(0x2800 + cells[r * cols + c] as u32).unwrap_or(' '))
+            .collect())
+        .collect()
+}
+
 /// Canvas filled-column graph — same style as the spectrum panel (filled columns + outline).
 /// Accepts a plain `&[u64]` slice. Scales automatically to the data maximum.
 pub fn draw_mini_graph(f: &mut Frame, area: Rect, data: &[u64], color: Color) {
@@ -304,6 +356,59 @@ pub fn draw_mini_graph(f: &mut Frame, area: Rect, data: &[u64], color: Color) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn braille_profile_geometry() {
+        let data: Vec<f32> = (0..16).map(|i| i as f32).collect();
+        let rows = braille_profile(&data, 8, 3);
+        assert_eq!(rows.len(), 3);
+        for r in &rows { assert_eq!(r.chars().count(), 8); }
+        // Every glyph is in the braille block.
+        for r in &rows {
+            for c in r.chars() { assert!((0x2800..=0x28FF).contains(&(c as u32)), "{c:?}"); }
+        }
+    }
+
+    #[test]
+    fn braille_profile_fills_upward_from_the_floor() {
+        // A ramp: the lowest sample is empty everywhere, the highest fills every
+        // row. Anything else would mean the trace is drawn hanging from the top.
+        let data: Vec<f32> = (0..8).map(|i| i as f32).collect();
+        let rows = braille_profile(&data, 4, 2);
+        let cell = |row: usize, col: usize| rows[row].chars().nth(col).unwrap();
+        assert_eq!(cell(0, 0), '\u{2800}', "the lowest samples reach nowhere near the top row");
+        assert_ne!(cell(1, 0), '\u{2800}', "but they do light the bottom row");
+        assert_eq!(cell(1, 3), '\u{28FF}', "the highest samples fill the bottom row through");
+        assert_ne!(cell(0, 3), '\u{2800}', "and carry on into the top one");
+    }
+
+    #[test]
+    fn braille_profile_resolves_a_spike_more_rows_can_show() {
+        // B6, as a test. A pilot 20 dB under the audio, in a 40 dB window: on one
+        // row it lands on the same dot level as the audio and vanishes; on three it
+        // is visibly taller than nothing and shorter than the peak.
+        let mut data = vec![-40.0f32; 32];
+        for v in data.iter_mut().take(6) { *v = 0.0; }   // the L+R audio hump
+        data[20] = -20.0; data[21] = -20.0;              // the pilot
+        let level = |rows: usize| -> usize {
+            let out = braille_profile(&data, 16, rows);
+            out.iter().filter(|r| r.chars().nth(10) != Some('\u{2800}')).count()
+        };
+        assert_eq!(level(1), 1, "one row can only say 'something is there'");
+        assert_eq!(level(3), 2, "three rows place the pilot two rows up from the floor");
+    }
+
+    #[test]
+    fn braille_profile_degenerate_inputs() {
+        assert!(braille_profile(&[1.0, 2.0], 0, 3).is_empty());
+        assert!(braille_profile(&[1.0, 2.0], 8, 0).is_empty());
+        // A flat trace has no shape; blank rows say so without inventing one.
+        let flat = braille_profile(&[3.0; 8], 4, 2);
+        assert_eq!(flat, vec!["    ", "    "]);
+        // Non-finite samples are skipped, not plotted as a floor.
+        let rows = braille_profile(&[f32::NAN, 1.0, 2.0, f32::INFINITY], 2, 1);
+        assert_eq!(rows.len(), 1);
+    }
 
     #[test]
     fn ema_smooth_single_sample_is_itself() {

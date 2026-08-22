@@ -64,6 +64,101 @@ fn sections_for(m: Modulation) -> &'static [Sec] {
     }
 }
 
+/// What a row is worth when the stack does not fit the panel.
+///
+/// `chrome::fit_spacers` can only hand back blank rows, and at 120x38 the WFM stack
+/// is still ten rows over once every spacer is gone — so the tail was simply clipped
+/// by the paragraph, and the tail is RDS. The panel showed `● DANKO` and lost the PI,
+/// the programme type, the group count and the RadioText under it: the payload of the
+/// section, cut without a mark. Reordering RDS higher only moves the amputation onto
+/// DEVIATION, which is a measurement too.
+///
+/// So rows say what they are instead, and the panel spends its height in that order.
+/// [`Heading`](Prio::Heading) and [`Core`](Prio::Core) are a section's nameplate and
+/// its lead reading — losing those makes the section a lie by omission.
+/// [`Detail`](Prio::Detail) is a secondary number a reader can do without;
+/// [`Minor`](Prio::Minor) is the least of a section's numbers, ranked below its
+/// siblings. [`Ornament`](Prio::Ornament) is a *picture of* a number already printed
+/// beside it: the deviation bar under `Peak`, the MPX tick row.
+///
+/// Shedding takes from the **top** of the stack first within each class, which is
+/// what protects the foot — the sections that used to vanish whole. `Minor` exists
+/// because that top-down order is right *between* sections and wrong *within* one:
+/// with a single detail class the pilot's deviation went before its injection level,
+/// purely because it is printed first.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+enum Prio { Heading, Core, Detail, Minor, Ornament }
+
+/// The panel's line stack, recording each row's [`Prio`] as it is pushed.
+///
+/// [`push`](Stack::push) is deliberately the un-suffixed one and means `Core`: a row
+/// is only sheddable when someone says so, so a row added later without a thought
+/// stays on screen rather than quietly becoming the first casualty.
+struct Stack<'a> { rows: Vec<(Line<'a>, Prio)> }
+
+/// A blank spacer row — the ones `chrome::fit_spacers` owns.
+fn is_gap(l: &Line<'_>) -> bool { l.spans.iter().all(|s| s.content.trim().is_empty()) }
+
+impl<'a> Stack<'a> {
+    fn new() -> Self { Stack { rows: Vec::new() } }
+    fn push(&mut self, l: Line<'a>)     { self.rows.push((l, Prio::Core)); }
+    fn heading(&mut self, l: Line<'a>)  { self.rows.push((l, Prio::Heading)); }
+    fn detail(&mut self, l: Line<'a>)   { self.rows.push((l, Prio::Detail)); }
+    fn minor(&mut self, l: Line<'a>)    { self.rows.push((l, Prio::Minor)); }
+    fn ornament(&mut self, l: Line<'a>) { self.rows.push((l, Prio::Ornament)); }
+    fn gap(&mut self)                   { self.rows.push((Line::raw(""), Prio::Core)); }
+
+    /// Shed rows until the stack fits `avail`, cheapest class first, and return what
+    /// is left. The caller still runs `chrome::fit_spacers` on the result.
+    ///
+    /// Spacers are counted as already spent: `collapse_spacers` will take every one
+    /// of them back for free afterwards, so they must not buy an ornament's life.
+    fn fit(mut self, avail: usize) -> Vec<Line<'a>> {
+        for prio in [Prio::Ornament, Prio::Minor, Prio::Detail] {
+            while Self::over(&self.rows, avail) {
+                let Some(i) = self.rows.iter().position(|(_, p)| *p == prio) else { break };
+                self.rows.remove(i);
+                // One removal at a time, because emptying a section frees its
+                // nameplate too and that may be all the room still needed.
+                drop_orphan_headings(&mut self.rows);
+            }
+        }
+        self.rows.into_iter().map(|(l, _)| l).collect()
+    }
+
+    fn over(rows: &[(Line<'a>, Prio)], avail: usize) -> bool {
+        let gaps = rows.iter().filter(|(l, _)| is_gap(l)).count();
+        rows.len() > avail.saturating_add(gaps)
+    }
+}
+
+/// Remove any section nameplate left with nothing under it.
+///
+/// Shedding works row by row and can empty a section completely — and a nameplate
+/// over blank space is exactly the failure B3 took out of the idle panel. Walked
+/// back to front so a run of newly emptied sections collapses in one pass.
+fn drop_orphan_headings(rows: &mut Vec<(Line<'_>, Prio)>) {
+    let mut i = rows.len();
+    while i > 0 {
+        i -= 1;
+        if rows[i].1 != Prio::Heading { continue; }
+        let orphan = rows[i + 1..].iter()
+            .find(|(l, _)| !is_gap(l))
+            .is_none_or(|(_, p)| *p == Prio::Heading);
+        if orphan { rows.remove(i); }
+    }
+}
+
+/// Rows the MPX trace grows to when the panel has height going spare, and the slack
+/// it refuses to spend getting there.
+///
+/// One braille row is four vertical levels over a 40 dB window — 10 dB a level, on
+/// which the stereo pilot (~20 dB under the audio) is level 2 of 4 and indistinct
+/// from the hump beside it. Three rows make it 3.3 dB a level. The reserve stops a
+/// panel with barely enough slack from trading all its air for trace resolution.
+const MPX_TRACE_MAX_ROWS: usize = 3;
+const MPX_TRACE_SLACK_RESERVE: usize = 4;
+
 /// Rows of RadioText the panel will show. Two rows hold the 64-character maximum
 /// on any column wide enough to be readable; a third would push the sections below
 /// off a short terminal for a field that is usually much shorter than its limit.
@@ -236,11 +331,52 @@ impl Panel for FmDemodPanel {
         f.render_widget(block, area);
         if inner.width == 0 || inner.height == 0 { return; }
 
+        let h = inner.height as usize;
         let iw = inner.width as usize;
+
+        // The MPX trace is the one block whose height is a free choice, and it
+        // cannot be sized until the rest of the stack is known — a taller trace is
+        // worth having only out of genuinely spare rows, and how many of those there
+        // are depends on the modulation, on whether RDS is decoding, and on which
+        // advisories are showing. So the stack is built once at one trace row to
+        // measure the slack, then rebuilt to spend it. Building is pure line
+        // construction over a snapshot that is already cloned, so the second pass
+        // costs nothing worth protecting against.
+        let probe = build_stack(state, theme, iw, stale, 1).0.fit(h).len();
+        let spare = h.saturating_sub(probe).saturating_sub(MPX_TRACE_SLACK_RESERVE);
+        let trace_rows = (1 + spare).min(MPX_TRACE_MAX_ROWS);
+
+        let (stack, headline_only) = build_stack(state, theme, iw, stale, trace_rows);
+        let mut lines = stack.fit(h);
+
+        if headline_only {
+            // With no sections there are two lines of message in a column thirty
+            // rows tall, and left at the top they read as content that failed to
+            // render. Centring them says "nothing here" deliberately.
+            //
+            // Not via `fit_spacers`: it fills by *growing the existing blank rows*
+            // proportionally, so leading padding gets amplified along with
+            // everything else and the message ends up pinned to the floor. An empty
+            // state has no stack to breathe — it just needs placing.
+            let pad = h.saturating_sub(lines.len()) / 2;
+            for _ in 0..pad { lines.insert(0, Line::raw("")); }
+        } else {
+            chrome::fit_spacers(&mut lines, h);
+        }
+        f.render_widget(Paragraph::new(lines), inner);
+    }
+}
+
+/// Build the panel's row stack at a given MPX trace height, and say whether it came
+/// out headline-only (no section had anything to show). Pure: no locking, no I/O, no
+/// mutation — see the module note on panels rendering from a snapshot.
+fn build_stack(
+    state: &SdrMetrics, theme: &crate::Theme, iw: usize, stale: bool, trace_rows: usize,
+) -> (Stack<'static>, bool) {
         let dim = Style::default().fg(theme.stale);
         let lbl = Style::default().fg(theme.label);
         let val = Style::default().fg(theme.value);
-        let mut lines: Vec<Line> = Vec::new();
+        let mut stack = Stack::new();
 
         // `live()` already refuses an aged-out reading, so a frozen number can
         // never be mistaken for a current one.
@@ -252,12 +388,12 @@ impl Panel for FmDemodPanel {
 
         // ── Status headline ────────────────────────────────────────────────
         if stale {
-            lines.push(Line::from(vec![Span::raw(" "), Span::styled("\u{25cb} IDLE \u{2014} RX stopped", dim)]));
+            stack.push(Line::from(vec![Span::raw(" "), Span::styled("\u{25cb} IDLE \u{2014} RX stopped", dim)]));
         } else if locked {
             // A forced mode is marked, so a reading is never mistaken for the
             // classifier's own conclusion.
             let src = if state.demod.mode_override.is_some() { " \u{2731}" } else { "" };
-            lines.push(Line::from(vec![
+            stack.push(Line::from(vec![
                 Span::raw(" "),
                 Span::styled(format!("\u{25cf} DEMOD LOCK \u{2014} {}{}", modulation.label(), src),
                              Style::default().fg(theme.status_ok).add_modifier(Modifier::BOLD)),
@@ -269,13 +405,15 @@ impl Panel for FmDemodPanel {
             let off = state.demod.offset_hz;
             let off_str = if off == 0 { "centre".to_string() }
                           else { format!("{:+.0} kHz", off as f64 / 1000.0) };
-            lines.push(Line::from(vec![
+            stack.push(Line::from(vec![
                 Span::raw(" "),
                 Span::styled(format!("{:.3} MHz ", demod_hz as f64 / 1e6),
                              Style::default().fg(theme.value_hi)),
                 Span::styled(off_str, lbl),
             ]));
-            lines.push(Line::from(vec![
+            // The chain's own settings, not a measurement — the first thing the
+            // headline can spare.
+            stack.minor(Line::from(vec![
                 Span::raw(" "),
                 Span::styled(
                     format!("{:.0} kHz channel \u{00b7} \u{00f7}{}", state.demod.channel_rate_hz / 1000.0, d),
@@ -284,7 +422,7 @@ impl Panel for FmDemodPanel {
             // Sitting on the tuned centre means sharing the channel with the
             // front-end's DC offset / LO leakage. Point at the existing fix.
             if state.demod.on_dc_spike(state.iq.cal.correcting()) {
-                lines.push(Line::from(vec![
+                stack.detail(Line::from(vec![
                     Span::raw(" "),
                     Span::styled("\u{2192} on DC spike \u{2014} [D] in Lab IQ, or offset",
                                  Style::default().fg(theme.status_warn)),
@@ -293,20 +431,20 @@ impl Panel for FmDemodPanel {
             // The channel filter stops sharpening once the decimation factor
             // saturates the tap budget — advise, never coerce, in the house style.
             if d > FILTER_QUALITY_D_LIMIT {
-                lines.push(Line::from(vec![
+                stack.detail(Line::from(vec![
                     Span::raw(" "),
                     Span::styled("\u{2192} 2\u{2013}2.4 Msps sharpens this", Style::default().fg(theme.status_warn)),
                 ]));
             }
         } else {
             let (mark, headline, detail) = idle_status(state.signal.modulation, state.demod.user_on);
-            lines.push(Line::from(vec![
+            stack.push(Line::from(vec![
                 Span::raw(" "),
                 Span::styled(format!("{mark} {headline}"), Style::default().fg(theme.stale).add_modifier(Modifier::BOLD)),
             ]));
-            lines.push(Line::from(vec![Span::raw(" "), Span::styled(detail, lbl)]));
+            stack.push(Line::from(vec![Span::raw(" "), Span::styled(detail, lbl)]));
         }
-        lines.push(Line::raw(""));
+        stack.gap();
 
         // ── Sections, chosen by modulation ─────────────────────────────────
         //
@@ -323,28 +461,35 @@ impl Panel for FmDemodPanel {
         for sec in sections {
             match sec {
             Sec::Mpx => {
-        lines.push(chrome::section("MPX BASEBAND", "0-60 kHz", iw, theme));
+        stack.heading(chrome::section("MPX BASEBAND", "0-60 kHz", iw, theme));
         match state.demod.live_mpx() {
             Some(frame) => {
                 let w = iw.saturating_sub(2);
                 let profile = mpx_profile(frame, w * 2);
                 if w >= 8 && !profile.is_empty() {
-                    lines.push(Line::from(vec![
-                        Span::raw(" "),
-                        Span::styled(crate::ui::charts::mini_braille_line(&profile, w),
-                                     Style::default().fg(theme.border_accent)),
-                    ]));
-                    lines.push(Line::from(vec![
+                    // The trace is one block at whatever height it was given, so the
+                    // rows go on together: the caller sizes it, the shedding pass
+                    // must not take a slice out of the middle of a picture.
+                    for row in crate::ui::charts::braille_profile(&profile, w, trace_rows) {
+                        stack.push(Line::from(vec![
+                            Span::raw(" "),
+                            Span::styled(row, Style::default().fg(theme.border_accent)),
+                        ]));
+                    }
+                    // The tick row is the first thing to go: a trace without its
+                    // 19k/38k/57k marks is still a shape, marks without a trace are
+                    // nothing at all.
+                    stack.ornament(Line::from(vec![
                         Span::raw(" "),
                         Span::styled(mpx_ticks(w), lbl),
                     ]));
                 }
             }
-            None => lines.push(Line::raw("")),
+            None => stack.gap(),
         }
             }
             Sec::Pilot => {
-        lines.push(chrome::section("PILOT / STEREO", "19 kHz", iw, theme));
+        stack.heading(chrome::section("PILOT / STEREO", "19 kHz", iw, theme));
         match state.demod.live_pilot() {
             Some(p) => {
                 let (mark, word, color) = match p.state {
@@ -352,34 +497,36 @@ impl Panel for FmDemodPanel {
                     PilotState::Marginal => ("\u{25d0}", "MARGINAL", theme.status_warn),
                     PilotState::Absent   => ("\u{25cb}", "MONO",     theme.label),
                 };
-                lines.push(Line::from(vec![
+                stack.push(Line::from(vec![
                     Span::raw(" "),
                     Span::styled(format!("{mark} {word}"),
                                  Style::default().fg(color).add_modifier(Modifier::BOLD)),
                 ]));
                 if p.state != PilotState::Absent {
-                    lines.push(Line::from(vec![
+                    stack.detail(Line::from(vec![
                         chrome::field("Pilot", 8, theme),
                         Span::styled(fmt_hz(p.deviation_hz), val),
                     ]));
-                    lines.push(Line::from(vec![
+                    // Injection is the deviation restated against 75 kHz, so it is
+                    // the one of the pair that can go.
+                    stack.minor(Line::from(vec![
                         chrome::field("Inject", 8, theme),
                         Span::styled(format!("{:.1}%", p.injection_pct), val),
                     ]));
                 }
             }
-            None => lines.push(Line::raw("")),
+            None => stack.gap(),
         }
             }
             Sec::Deviation => {
         let limit = deviation_limit_hz(modulation);
         let hint = format!("{:.0} kHz max", limit / 1000.0);
-        lines.push(chrome::section("DEVIATION", &hint, iw, theme));
+        stack.heading(chrome::section("DEVIATION", &hint, iw, theme));
         match measure {
             Some(FmMeasure { peak_dev_hz, rms_dev_hz, carrier_offset_hz }) => {
                 let ratio = if limit > 0.0 { peak_dev_hz / limit } else { 0.0 };
                 let color = deviation_color(ratio, theme);
-                lines.push(Line::from(vec![
+                stack.push(Line::from(vec![
                     chrome::field("Peak", 8, theme),
                     Span::styled(fmt_hz(peak_dev_hz), Style::default().fg(color).add_modifier(Modifier::BOLD)),
                 ]));
@@ -389,34 +536,34 @@ impl Panel for FmDemodPanel {
                     let mut row = vec![Span::raw(" ")];
                     row.extend(bar_spans(ratio.clamp(0.0, 1.0) as f64, bar_w, color, theme));
                     row.push(Span::styled(format!(" {:.0}%", (ratio * 100.0).min(999.0)), lbl));
-                    lines.push(Line::from(row));
+                    stack.ornament(Line::from(row));
                 }
-                lines.push(Line::from(vec![
+                stack.detail(Line::from(vec![
                     chrome::field("RMS", 8, theme),
                     Span::styled(fmt_hz(rms_dev_hz), val),
                 ]));
-                lines.push(Line::from(vec![
+                stack.detail(Line::from(vec![
                     chrome::field("Offset", 8, theme),
                     Span::styled(fmt_offset(carrier_offset_hz), val),
                 ]));
             }
-            None => lines.push(Line::raw("")),
+            None => stack.gap(),
         }
             }
             Sec::Ctcss => {
-                lines.push(chrome::section("CTCSS", "subaudible", iw, theme));
+                stack.heading(chrome::section("CTCSS", "subaudible", iw, theme));
                 match state.demod.live_ctcss() {
                     Some(t) => {
-                        lines.push(Line::from(vec![
+                        stack.push(Line::from(vec![
                             Span::raw(" "),
                             Span::styled(format!("\u{25cf} {:.1} Hz", t.tone_hz),
                                          Style::default().fg(theme.status_ok).add_modifier(Modifier::BOLD)),
                         ]));
-                        lines.push(Line::from(vec![
+                        stack.detail(Line::from(vec![
                             chrome::field("Dev", 8, theme),
                             Span::styled(fmt_hz(t.deviation_hz), val),
                         ]));
-                        lines.push(Line::from(vec![
+                        stack.minor(Line::from(vec![
                             chrome::field("Margin", 8, theme),
                             Span::styled(format!("{:.0} dB", t.margin_db), val),
                         ]));
@@ -425,28 +572,28 @@ impl Panel for FmDemodPanel {
                     // same on screen unless they are said differently — and only
                     // one of them is a finding.
                     None if state.demod.ctcss_searching() => {
-                        lines.push(Line::from(vec![
+                        stack.push(Line::from(vec![
                             Span::raw(" "),
                             Span::styled(format!("\u{25cc} SEARCHING {:.0}%",
                                                  state.demod.ctcss_fill * 100.0), lbl),
                         ]));
                     }
                     None if !stale => {
-                        lines.push(Line::from(vec![
+                        stack.push(Line::from(vec![
                             Span::raw(" "),
                             Span::styled("\u{25cb} NO TONE", lbl),
                         ]));
                     }
-                    None => lines.push(Line::raw("")),
+                    None => stack.gap(),
                 }
             }
             Sec::Depth => {
-                lines.push(chrome::section("DEPTH", "100% max", iw, theme));
+                stack.heading(chrome::section("DEPTH", "100% max", iw, theme));
                 match am {
                     Some(a) => {
                         let ratio = a.depth_pct / 100.0;
                         let color = depth_color(a.negative_pct, theme);
-                        lines.push(Line::from(vec![
+                        stack.push(Line::from(vec![
                             chrome::field("Depth", 8, theme),
                             Span::styled(format!("{:.0}%", a.depth_pct),
                                          Style::default().fg(color).add_modifier(Modifier::BOLD)),
@@ -455,35 +602,35 @@ impl Panel for FmDemodPanel {
                         if bar_w >= 4 {
                             let mut row = vec![Span::raw(" ")];
                             row.extend(bar_spans(ratio.clamp(0.0, 1.0) as f64, bar_w, color, theme));
-                            lines.push(Line::from(row));
+                            stack.ornament(Line::from(row));
                         }
                         // Split out because they fail differently: a negative peak
                         // reaching 100 % pinches the carrier off and splatters.
-                        lines.push(Line::from(vec![
+                        stack.detail(Line::from(vec![
                             chrome::field("Pos", 8, theme),
                             Span::styled(format!("{:.0}%", a.positive_pct), val),
                         ]));
-                        lines.push(Line::from(vec![
+                        stack.detail(Line::from(vec![
                             chrome::field("Neg", 8, theme),
                             Span::styled(format!("{:.0}%", a.negative_pct),
                                          Style::default().fg(depth_color(a.negative_pct, theme))),
                         ]));
                     }
-                    None => lines.push(Line::raw("")),
+                    None => stack.gap(),
                 }
             }
             Sec::Carrier => {
-                lines.push(chrome::section("CARRIER", "", iw, theme));
+                stack.heading(chrome::section("CARRIER", "", iw, theme));
                 match am {
-                    Some(a) => lines.push(Line::from(vec![
+                    Some(a) => stack.push(Line::from(vec![
                         chrome::field("Level", 8, theme),
                         Span::styled(format!("{:.1} dBFS", a.carrier_dbfs), val),
                     ])),
-                    None => lines.push(Line::raw("")),
+                    None => stack.gap(),
                 }
             }
             Sec::Rds => {
-                lines.push(chrome::section("RDS", "57 kHz", iw, theme));
+                stack.heading(chrome::section("RDS", "57 kHz", iw, theme));
                 match state.demod.live_rds() {
                     Some(d) => {
                         let age = state.demod.rds_age();
@@ -493,20 +640,20 @@ impl Panel for FmDemodPanel {
                         let dropped = age.is_none_or(|a| a > RDS_DROPPED_AFTER);
                         let (mark, text, ok) = rds_headline(d, state.demod.rds_sync, age);
                         let color = if ok { theme.status_ok } else { theme.label };
-                        lines.push(Line::from(vec![
+                        stack.push(Line::from(vec![
                             Span::raw(" "),
                             Span::styled(format!("{mark} {text}"),
                                          Style::default().fg(color).add_modifier(Modifier::BOLD)),
                         ]));
                         if let Some(pi) = d.pi.filter(|_| !dropped) {
-                            lines.push(Line::from(vec![
+                            stack.detail(Line::from(vec![
                                 chrome::field("PI", 8, theme),
                                 Span::styled(format!("{pi:04X}"), val),
                             ]));
                         }
                         if let Some(name) = d.pty.filter(|_| !dropped)
                             .map(|p| PTY_NAMES[(p & 0x1F) as usize]) {
-                            lines.push(Line::from(vec![
+                            stack.detail(Line::from(vec![
                                 chrome::field("PTY", 8, theme),
                                 Span::styled(name, val),
                             ]));
@@ -517,14 +664,16 @@ impl Panel for FmDemodPanel {
                             let mut flags = Vec::new();
                             if d.tp { flags.push("TP"); }
                             if d.ta { flags.push("TA"); }
-                            lines.push(Line::from(vec![
+                            stack.detail(Line::from(vec![
                                 chrome::field("Traffic", 8, theme),
                                 Span::styled(flags.join(" "),
                                              Style::default().fg(theme.status_warn)),
                             ]));
                         }
+                        // A running count of the decoder's own work, not anything
+                        // the station said — last of the RDS rows to be worth a row.
                         if d.groups_ok > 0 && !dropped {
-                            lines.push(Line::from(vec![
+                            stack.minor(Line::from(vec![
                                 chrome::field("Groups", 8, theme),
                                 Span::styled(d.groups_ok.to_string(), val),
                             ]));
@@ -533,33 +682,18 @@ impl Panel for FmDemodPanel {
                         // is the one thing here that has to wrap to the column.
                         if let Some(rt) = d.rt.as_deref().filter(|_| !dropped) {
                             for row in chrome::wrap(rt, iw.saturating_sub(1), RT_MAX_ROWS) {
-                                lines.push(Line::from(vec![Span::raw(" "), Span::styled(row, val)]));
+                                stack.detail(Line::from(vec![Span::raw(" "), Span::styled(row, val)]));
                             }
                         }
                     }
-                    None => lines.push(Line::raw("")),
+                    None => stack.gap(),
                 }
             }
             }
-            lines.push(Line::raw(""));
+            stack.gap();
         }
 
-        if sections.is_empty() {
-            // With no sections there are two lines of message in a column thirty
-            // rows tall, and left at the top they read as content that failed to
-            // render. Centring them says "nothing here" deliberately.
-            //
-            // Not via `fit_spacers`: it fills by *growing the existing blank rows*
-            // proportionally, so leading padding gets amplified along with
-            // everything else and the message ends up pinned to the floor. An empty
-            // state has no stack to breathe — it just needs placing.
-            let pad = (inner.height as usize).saturating_sub(lines.len()) / 2;
-            for _ in 0..pad { lines.insert(0, Line::raw("")); }
-        } else {
-            chrome::fit_spacers(&mut lines, inner.height as usize);
-        }
-        f.render_widget(Paragraph::new(lines), inner);
-    }
+        (stack, sections.is_empty())
 }
 
 #[cfg(test)]
@@ -814,4 +948,104 @@ mod tests {
         assert_eq!(rds_headline(&rds(None, 40), true, age).1, "DECODING");
     }
 
+    /// A stand-in for the WFM stack's shape: four sections, each a nameplate plus a
+    /// core reading, with detail and ornament hung off them. Content is the row's own
+    /// label so a fitted stack can be read back as a list of names.
+    fn wfm_stack() -> Stack<'static> {
+        let mut s = Stack::new();
+        s.push(Line::raw("lock"));
+        s.push(Line::raw("freq"));
+        s.minor(Line::raw("channel"));
+        s.gap();
+        s.heading(Line::raw("MPX"));
+        s.push(Line::raw("trace"));
+        s.ornament(Line::raw("ticks"));
+        s.gap();
+        s.heading(Line::raw("PILOT"));
+        s.push(Line::raw("stereo"));
+        s.detail(Line::raw("pilot"));
+        s.minor(Line::raw("inject"));
+        s.gap();
+        s.heading(Line::raw("RDS"));
+        s.push(Line::raw("name"));
+        s.detail(Line::raw("pi"));
+        s.minor(Line::raw("groups"));
+        s.detail(Line::raw("rt"));
+        s.gap();
+        s
+    }
+
+    fn names(lines: &[Line<'_>]) -> Vec<String> {
+        lines.iter().filter(|l| !is_gap(l))
+            .map(|l| l.spans.iter().map(|s| s.content.as_ref()).collect())
+            .collect()
+    }
+
+    #[test]
+    fn fit_keeps_everything_when_there_is_room() {
+        let s = wfm_stack();
+        let n = s.rows.len();
+        assert_eq!(s.fit(n).len(), n, "a stack that fits is left alone");
+    }
+
+    #[test]
+    fn fit_spends_gaps_before_it_sheds_a_row() {
+        // Five spacers are five free rows; `collapse_spacers` reclaims them after
+        // this returns, so an overflow smaller than that must cost no content.
+        let s = wfm_stack();
+        let content = s.rows.iter().filter(|(l, _)| !is_gap(l)).count();
+        let before = names(&wfm_stack().fit(usize::MAX));
+        assert_eq!(names(&s.fit(content + 1)), before, "spacers paid for it, not the rows");
+    }
+
+    #[test]
+    fn fit_sheds_ornament_then_minor_then_detail() {
+        let order = ["ticks", "channel", "inject", "groups", "pilot", "pi", "rt"];
+        let full = wfm_stack().rows.iter().filter(|(l, _)| !is_gap(l)).count();
+        let mut gone: Vec<&str> = Vec::new();
+        for drop in 1..=order.len() {
+            let kept = names(&wfm_stack().fit(full - drop));
+            gone = order.iter().copied().filter(|n| !kept.iter().any(|k| k == n)).collect();
+            assert_eq!(gone.len(), drop, "shed {drop}, got {gone:?}");
+        }
+        // Ornament first, then the minor rows top-down, then the details top-down.
+        assert_eq!(gone, order);
+    }
+
+    #[test]
+    fn fit_protects_the_foot_of_the_stack() {
+        // B5 itself: the RDS section is last and used to be the part that got cut.
+        // Under pressure it must still be the part that survives.
+        let full = wfm_stack().rows.iter().filter(|(l, _)| !is_gap(l)).count();
+        let kept = names(&wfm_stack().fit(full - 4));
+        assert!(kept.contains(&"RDS".to_string()) && kept.contains(&"name".to_string()));
+        assert!(kept.contains(&"pi".to_string()) && kept.contains(&"rt".to_string()),
+                "RDS lost its payload again: {kept:?}");
+    }
+
+    #[test]
+    fn fit_takes_an_emptied_sections_nameplate_with_it() {
+        // A heading over nothing is what B3 removed from the idle panel; the
+        // shedding pass must not put one back.
+        let mut s = Stack::new();
+        s.push(Line::raw("lock"));
+        s.gap();
+        s.heading(Line::raw("MPX"));
+        s.ornament(Line::raw("ticks"));
+        s.gap();
+        s.heading(Line::raw("PILOT"));
+        s.push(Line::raw("stereo"));
+        let kept = names(&s.fit(3));
+        assert_eq!(kept, vec!["lock", "PILOT", "stereo"], "orphaned nameplate survived: {kept:?}");
+    }
+
+    #[test]
+    fn fit_clips_rather_than_shedding_a_core_reading() {
+        // Nothing left to shed: the remaining rows are all readings, and losing one
+        // silently would be the original bug. The paragraph clips instead, which is
+        // the honest floor of what this can do without scrolling.
+        let mut s = Stack::new();
+        for n in ["a", "b", "c", "d"] { s.push(Line::raw(n)); }
+        assert_eq!(names(&s.fit(2)), vec!["a", "b", "c", "d"]);
+    }
 }
