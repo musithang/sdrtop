@@ -74,28 +74,33 @@ fn rds_headline(d: &crate::state::RdsData, sync: bool) -> (&'static str, String,
     }
 }
 
-/// Break `text` into at most `max_rows` rows of `width` columns, on word
-/// boundaries where one is available. A word longer than the column is cut rather
-/// than allowed to overflow the panel.
+/// Break `text` into at most `max_rows` rows of `width` columns, preferring a
+/// space to break on but never collapsing the spaces *inside* a row.
+///
+/// That last part is the whole point. RadioText arrives character by character and
+/// unconfirmed positions read as blanks, so a half-decoded message is full of gaps
+/// — and squeezing them out glues the surviving fragments into words the station
+/// never sent. `"Amor Fat  Amor      Danko"` is visibly a message still filling in;
+/// `"Amor Fat Amor Danko"` looks like a decoder that is simply wrong.
 fn wrap(text: &str, width: usize, max_rows: usize) -> Vec<String> {
     if width == 0 || max_rows == 0 { return Vec::new(); }
-    let mut rows: Vec<String> = Vec::new();
-    let mut row = String::new();
-    for word in text.split_whitespace() {
-        if !row.is_empty() && row.chars().count() + 1 + word.chars().count() > width {
-            rows.push(std::mem::take(&mut row));
-            if rows.len() == max_rows { return rows; }
+    let chars: Vec<char> = text.chars().collect();
+    let mut rows = Vec::new();
+    let mut i = 0;
+    while i < chars.len() && rows.len() < max_rows {
+        let hard = (i + width).min(chars.len());
+        // Break on a space when one falls in the back half of the row; breaking
+        // any earlier wastes more space than the tidier edge is worth.
+        let mut cut = hard;
+        if hard < chars.len() && !chars[hard].is_whitespace() {
+            if let Some(p) = chars[i..hard].iter().rposition(|c| *c == ' ') {
+                if p > width / 2 { cut = i + p; }
+            }
         }
-        if !row.is_empty() { row.push(' '); }
-        if word.chars().count() > width {
-            row.extend(word.chars().take(width - row.chars().count()));
-            rows.push(std::mem::take(&mut row));
-            if rows.len() == max_rows { return rows; }
-        } else {
-            row.push_str(word);
-        }
+        rows.push(chars[i..cut].iter().collect::<String>().trim_end().to_string());
+        // Consume only the single space we broke on, so interior gaps survive.
+        i = cut + usize::from(chars.get(cut) == Some(&' '));
     }
-    if !row.is_empty() { rows.push(row); }
     rows
 }
 
@@ -744,13 +749,25 @@ mod tests {
     }
 
     #[test]
+    fn wrap_keeps_the_gaps_in_a_half_decoded_message() {
+        // The bug this guards, seen live at 92 groups: RadioText fills in
+        // character by character, and collapsing the unconfirmed blanks turned
+        // "Amor Fati - Amor Fati - Danko Radio elo nepzenei studiokoncert" into
+        // "Amor Fat Amor Danko Radio elo once" — fragments glued into words the
+        // station never sent.
+        let partial = "Amor Fat  Amor      Danko";
+        let rows = wrap(partial, 40, 2);
+        assert_eq!(rows, vec![partial]);
+    }
+
+    #[test]
     fn wrap_respects_the_row_budget_and_the_column() {
         // More text than rows: the surplus is dropped, never overflowed.
         let rows = wrap("one two three four five six", 9, 2);
         assert_eq!(rows.len(), 2);
+        for r in &rows { assert!(r.chars().count() <= 9); }
         // A word longer than the column is cut rather than allowed to overhang.
-        let rows = wrap("supercalifragilistic", 8, 2);
-        assert_eq!(rows, vec!["supercal"]);
+        assert_eq!(wrap("supercalifragilistic", 8, 1), vec!["supercal"]);
         // Degenerate geometry yields nothing rather than panicking.
         assert!(wrap("text", 0, 2).is_empty());
         assert!(wrap("text", 10, 0).is_empty());
