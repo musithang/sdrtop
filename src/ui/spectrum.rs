@@ -34,6 +34,20 @@ fn freq_to_canvas_x(freq_hz: f64, left_hz: f64, bw: f64, n: f64) -> Option<f64> 
     if (0.0..=1.0).contains(&frac) { Some(frac * (n - 1.0)) } else { None }
 }
 
+/// A canvas x — the units [`freq_to_canvas_x`] returns, spanning `0..n-1` — as a
+/// terminal column inside `width`.
+///
+/// The two coordinate systems are easy to confuse and cost nothing to mix up
+/// silently: the canvas is as wide as the spectrum has bins, typically 2048, while
+/// the column is bounded by the panel, typically under 200. Using one as the other
+/// clamps every position to the right-hand edge, which is exactly what the OBW label
+/// did at every terminal size it was tried at.
+fn canvas_x_to_col(x: f64, n: f64, width: u16) -> u16 {
+    if n <= 1.0 || width == 0 { return 0; }
+    let frac = (x / (n - 1.0)).clamp(0.0, 1.0);
+    ((frac * width as f64).round() as u16).min(width - 1)
+}
+
 /// How far a bin must rise above the noise floor to count as a real signal peak.
 /// Well above typical FFT noise ripple, so only solid carriers qualify — which is
 /// what keeps the auto-flagged set stable frame-to-frame (no flicker on noise).
@@ -678,7 +692,7 @@ pub fn render(f: &mut Frame, area: Rect, state: &SdrMetrics, theme: &crate::Them
                     if let (Some(lo_x), Some(hi_x)) = (obw_lo_x, obw_hi_x) {
                         let label = format!("OBW {}", fmt_khz(frame.occupied_bw_hz));
                         let lw = label.chars().count() as u16;
-                        let mid_col = (((lo_x + hi_x) / 2.0) as u16).min(canvas_area.width.saturating_sub(1));
+                        let mid_col = canvas_x_to_col((lo_x + hi_x) / 2.0, n, canvas_area.width);
                         let col = mid_col.saturating_sub(lw / 2).min(canvas_area.width.saturating_sub(lw));
                         obw_label_cols = Some((col, col + lw));
                         f.render_widget(
@@ -889,6 +903,27 @@ mod tests {
         // Standalone / above: fully framed.
         assert_eq!(bond_borders(Bond::None), Borders::ALL);
         assert_eq!(bond_borders(Bond::Above), Borders::ALL);
+    }
+
+    #[test]
+    fn canvas_x_maps_across_the_column_range() {
+        // 2048 bins of canvas onto 100 columns.
+        assert_eq!(canvas_x_to_col(0.0, 2048.0, 100), 0);
+        assert_eq!(canvas_x_to_col(2047.0, 2048.0, 100), 99);
+        // The midpoint — the case that was broken: read as a column it clamped to
+        // the right-hand edge on every terminal size, so the OBW label never sat
+        // under the band it annotates.
+        let mid = canvas_x_to_col(1023.5, 2048.0, 100);
+        assert!((mid as i64 - 50).abs() <= 1, "midpoint landed at column {mid}");
+    }
+
+    #[test]
+    fn canvas_x_survives_degenerate_geometry() {
+        assert_eq!(canvas_x_to_col(500.0, 2048.0, 0), 0);
+        assert_eq!(canvas_x_to_col(0.0, 1.0, 80), 0);
+        // Out-of-range input is clamped rather than wrapping past the panel.
+        assert_eq!(canvas_x_to_col(-50.0, 2048.0, 80), 0);
+        assert_eq!(canvas_x_to_col(9_000.0, 2048.0, 80), 79);
     }
 
     #[test]
