@@ -114,6 +114,7 @@ The view sdrtop opens on. A slim header plus a left **instrument rail** that pac
 <p align="center"><sub>· · ·</sub></p>
 
 ### Bench-engineer measurements (the Lab presets)
+- **Demodulator** - not for listening. There is no audio anywhere in sdrtop, and that's the point: this one opens the channel up and reports what a spectrum plot structurally cannot. **FM deviation** (peak and RMS, measured about the carrier, so a mistuned radio confesses to being mistuned instead of faking modulation), the **MPX baseband** with its 19 kHz pilot and stereo injection percentage, **CTCSS** tones for narrowband voice, **AM depth** with positive and negative peaks kept apart, and **RDS**: station name, PI code, programme type and RadioText, decoded off the 57 kHz subcarrier. That last one turns an anonymous spike at 92.8 into `DANKO`, which is the single most satisfying thing a terminal can print at you
 - **RF chain** - tuned frequency with wavelength (λ, λ/4 for cutting antennas), a visual gain chain, estimated **noise figure** (Friis), **minimum detectable signal** (MDS) in dBm, an ADC-utilisation gauge, and a gain advisor that tells you when you're starving or clipping the front end
 - **IQ diagnostics** - DC offset, amplitude/phase imbalance and **image rejection ratio** (IRR), drawn as analog **null-meters** (centre is ideal, the needle shows the deviation). Paired with a **persistence constellation**: a phosphor-style I/Q cloud coloured by density, with a fitted imbalance ellipse whose stretch reads amplitude imbalance and whose tilt reads phase imbalance
 - **IQ histogram** - ADC amplitude distribution with a Low/Mid/Clip breakdown and **PAPR** (crest factor) that fingerprints the signal type at a glance
@@ -186,7 +187,7 @@ Press `Space` to start receiving. Press `?` for the key reference. Press `q` to 
 | `h`        | Hold / unhold spectrum frame   |
 | `e`        | Focus spectrum panel           |
 | `l`        | Focus waterfall panel          |
-| `i` / `v` / `t` / `g` | Focus lab panel: IQ / hardware vitals / timing / sweep |
+| `i` / `v` / `t` / `g` / `m` | Focus lab panel: IQ / hardware vitals / timing / sweep / demod |
 | `1`-`4`    | Switch built-in layout preset  |
 | `5` / `6` / `7` / `8` / `9` | Lab presets: IQ / RF / timing / signal / sweep |
 | `0`        | Micro field-mode view (compact; cycles signal → gain → health → sweep) |
@@ -266,6 +267,7 @@ The feature set is in. So the whole focus has shifted to **making what's already
 No shiny new features until this list feels done. Quality arc, not a feature sprint. ✨
 
 ### Just landed 🎉
+- [x] **FM demodulator with RDS** - filed under sharper radio math rather than new shiny, because it exists to make the numbers say more, not to add a screen. The `lab_signal` bench (`8`, focus `m`) now demodulates the channel: deviation, stereo pilot and injection, CTCSS, AM depth, and **RDS** station name, PTY and RadioText. Still no audio, deliberately. It reads radios, it doesn't play them
 - [x] **RTL-SDR support** - R820T / R828D / E4000, the most common dongle on Earth, behind a clean device-abstraction layer ✅ *in and working.* Community-contributed and confirmed on real hardware (RX + observer mode). The RTL clone zoo is vast and I can't test it all, so it still wants **testing across the variety, reports welcome and genuinely useful**.
 
 ### Hardware pipeline
