@@ -4,7 +4,7 @@
 
 The story of sdrtop so far — not as a wall of dates, but as **checkpoints**: the big moments where the app levelled up. Each one is condensed to the essentials.
 
-> **Where we are now:** the interactive TUI is feature-complete, RTL-SDR support has landed, and the current arc is **instrument-grade polish**: the **Command Rail** cockpit, the redrawn **Lab IQ**, the rebuilt **Lab RF** bench, and now the new **Lab Timing** real-time bench are the latest (see Checkpoint 11). The ongoing work is polishing the UI, sharpening the radio math, and squashing bugs. So if something looks off or behaves oddly, that's exactly what we're hunting.
+> **Where we are now:** the interactive TUI is feature-complete, RTL-SDR support has landed, and the current arc is **instrument-grade polish**: the **Command Rail** cockpit, the redrawn **Lab IQ**, the rebuilt **Lab RF** bench, the **Lab Timing** real-time bench, and now the **FM MPX · Demod** instrument with RDS are the latest (see Checkpoint 12). The ongoing work is polishing the UI, sharpening the radio math, and squashing bugs. So if something looks off or behaves oddly, that's exactly what we're hunting.
 
 ---
 
@@ -65,7 +65,19 @@ The polish arc grew teeth: the UI started reading like a real radio's front pane
 - **Lab RF, rebuilt as a front-end bench** (`6`): three panels that teach one idea — level climbs stage by stage, the signal/noise gap *is* the SNR set at the antenna, and gain only parks that gap in the ADC window. **RF Diagnostics** (gain lineup, staging, Friis noise figure, sensitivity, verdict), a **Gain-Staging Level Diagram** (signal and noise traces climbing ANT▸LNA▸MIX▸VGA▸ADC), and an **ADC Loading** panel (signed-sample histogram bell, loading stats, a modeled linearity card). Focus it with `D` and press `A` to auto-stage the gain, or `⎵` to freeze the bench — the dBm are honestly labelled *modeled / relative*, never a wattmeter
 - A shared braille-instrument language (oscilloscope traces, ⅛-block gain bars, gradient fills) applied across the rail, with the radio math left exactly as honest as it always was. No "AI-enhanced" anything; the only thing that learns here is you
 
-## ⏱️ Checkpoint 11 - Lab Timing (you are here)
+## 📻 Checkpoint 12 - It listens (you are here)
+Every instrument so far described a signal from the outside: how strong, how wide, how clean. The new **FM MPX · Demod** panel in **Lab Signal** (`8`, focus `m`) opens the channel up and reads what is inside it. There is still no audio anywhere in sdrtop. This is a measurement instrument, and it reports things a spectrum plot cannot.
+- **Deviation**: peak and RMS deviation measured *about the carrier*, so a mistuned radio reports its tuning error as offset instead of inflating the modulation figure, with the bar drawn against ±75 kHz for broadcast or ±5 kHz for narrowband
+- **MPX baseband**: the demodulated composite from 0 to 60 kHz as a live profile, with the 19 k pilot, 38 k stereo difference and 57 k RDS subcarrier all visible where they live
+- **Pilot / stereo**: STEREO, MARGINAL or MONO, plus the pilot's **injection percentage** against the 8 to 10 % broadcast norm, which reads a transmitter's health rather than your reception
+- **RDS**: station name, PI code, programme type, traffic flags and **RadioText**, decoded off the 57 kHz subcarrier. Nothing appears until it has been confirmed twice, so a mis-decoded character never flickers on screen and gets corrected in front of you
+- **CTCSS** for narrowband FM: the subaudible tone that opens a repeater's squelch, picked out of the standard 40-tone table with the margin it won by, and an honest "searching" state while it fills its half-second window
+- **AM depth**: modulation depth with positive and negative peaks reported separately, because a negative peak approaching 100 % pinches the carrier off and splatters
+- The demodulated channel tunes **inside** the captured spectrum with `←` / `→`, `P` snaps it to the strongest carrier while ignoring the radio's own LO leakage, and `T` forces the demodulator when the automatic classifier is too coarse to pick one
+
+---
+
+## ⏱️ Checkpoint 11 - Lab Timing
 The newest instrument answers a question the others could not: is your computer keeping up with the radio in real time? The radio ships samples in steady USB bursts, one callback at a time, and your machine has to catch every one on schedule or the buffer backs up and samples drop. **Lab Timing** (`7`) watches that handoff and grades it.
 - **Timing Diagnostics** (`t`): measured callback period versus the expected period at your sample rate, host clock drift in ppm, jitter, and per-callback deviation percentiles (p95 / p99 / peak) drawn against a **deadline budget** that scales with the rate, plus a late-callback count and a plain verdict (Excellent / Good / Marginal / Poor)
 - **Callback Interval Strip Chart**: every point is one real callback, plotted as how far its arrival drifted from the expected interval. Late deliveries climb, early ones dip, and anything past the deadline band gets tagged (▲ late, ▼ early), so a host hiccup is something you watch happen instead of guess at

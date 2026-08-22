@@ -105,6 +105,7 @@ lists the extra keys; `Esc` exits.
 | `d` | RF **D**iagnostics (`[6]` lab_rf) | `A` — auto-gain (one-shot to the optimal level; press again at the optimum to latch a continuous auto-track) · `⎵` / `F` — freeze the histogram + level diagram |
 | `v` | Hardware **V**itals (`[7]` lab_timing) | `R` — reset the session drop counter · `C` — clear the trend sparklines |
 | `t` | **T**iming (`[7]` lab_timing) | `R` — reset the session jitter peak · `C` — clear the jitter / throughput history |
+| `m` | FM **M**PX · Demod (`[8]` lab_signal) | `Space` toggle demod · `←/→` move the demodulated channel ±25 kHz · `P` snap to the strongest carrier · `0` re-centre · `T` force WFM / NFM / AM or auto · `C` log a snapshot |
 | `g` | Sweep `[G]` (`[9]` lab_sweep) | `←/→` — move cursor · `s` / `e` — set start / end frequency · `M` — peak/mean curve · `+/-` — dwell time · `Enter` — tune to the cursor frequency |
 
 The RF Diagnostics auto-gain drives the regular global gain controls (`↑`/`↓` LNA,
