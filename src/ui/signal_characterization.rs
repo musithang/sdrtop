@@ -170,15 +170,14 @@ pub(crate) fn verdict(modulation: Modulation, snr_db: f32, acpr_lower_db: f32, a
 
 /// The strongest live bin as `(level_dbfs, freq_hz)`, mapping the bin index back to
 /// frequency across the captured span. `None` for an empty frame.
+///
+/// Skips the DC artefact, via the same helper the FFT worker's own peak search uses
+/// — otherwise this row names the tuned frequency and the front end's LO leakage
+/// every time the channel is quiet, which is exactly when the reading matters.
 fn peak_bin(fr: &FftFrame) -> Option<(f32, u64)> {
     let bins = &fr.bins_dbfs;
     let n = bins.len();
-    if n == 0 { return None; }
-    let mut idx = 0usize;
-    let mut best = f32::NEG_INFINITY;
-    for (i, &v) in bins.iter().enumerate() {
-        if v > best { best = v; idx = i; }
-    }
+    let (idx, best) = crate::signal::fft::strongest_real_bin(bins, None)?;
     let left = fr.center_freq_hz as f64 - fr.sample_rate / 2.0;
     let span_frac = if n > 1 { idx as f64 / (n - 1) as f64 } else { 0.0 };
     let freq = (left + span_frac * fr.sample_rate).max(0.0).round() as u64;
@@ -279,10 +278,13 @@ impl Panel for SignalCharacterizationPanel {
                 ]
             } else { vec![dash()] }));
 
-            let ph = fr.peak_hold.iter().copied().fold(f32::NEG_INFINITY, f32::max);
-            lines.push(metric("Peak hold", if ph.is_finite() {
-                vec![Span::styled(format!("{ph:.1} dBFS"), val)]
-            } else { vec![dash()] }));
+            // Same guard as `peak_bin` — a peak hold that has been sitting on the DC
+            // artefact since the session started is the least useful number here.
+            let ph = crate::signal::fft::strongest_real_bin(&fr.peak_hold, None).map(|(_, v)| v);
+            lines.push(metric("Peak hold", match ph {
+                Some(v) if v.is_finite() => vec![Span::styled(format!("{v:.1} dBFS"), val)],
+                _ => vec![dash()],
+            }));
         } else {
             for name in ["Channel power", "Peak", "Noise floor", "Occupied BW", "Peak hold"] {
                 lines.push(metric(name, vec![dash()]));
@@ -438,21 +440,38 @@ mod tests {
         assert_eq!(SignalCharacterizationPanel.name(), "signal_characterization");
     }
 
+    /// 101 bins across 2 MHz centred at 100 MHz → span 99..101 MHz, 20 kHz a bin,
+    /// centre bin at index 50. Wide enough that the DC guard leaves candidates.
+    fn peaked_at(idx: usize) -> FftFrame {
+        let mut bins = vec![-80.0f32; 101];
+        bins[idx] = -10.0;
+        frame(bins, 100_000_000, 2_000_000.0)
+    }
+
     #[test]
     fn peak_bin_maps_index_to_frequency() {
-        // 5 bins across 2 MHz centred at 100 MHz → span 99..101 MHz. Peak at the
-        // centre bin (idx 2) maps back to the centre frequency.
-        let fr = frame(vec![-80.0, -60.0, -10.0, -60.0, -80.0], 100_000_000, 2_000_000.0);
-        let (lvl, hz) = peak_bin(&fr).unwrap();
+        let (lvl, hz) = peak_bin(&peaked_at(75)).unwrap();
         assert!((lvl + 10.0).abs() < 1e-6, "peak level is the max bin");
-        assert_eq!(hz, 100_000_000, "centre bin → centre frequency");
+        assert_eq!(hz, 100_500_000, "three quarters across the span");
     }
 
     #[test]
     fn peak_bin_edge_bins_hit_span_ends() {
-        let fr = frame(vec![-10.0, -80.0, -80.0, -80.0, -80.0], 100_000_000, 2_000_000.0);
-        let (_, hz) = peak_bin(&fr).unwrap();
+        let (_, hz) = peak_bin(&peaked_at(0)).unwrap();
         assert_eq!(hz, 99_000_000, "first bin → left edge of the span");
+    }
+
+    #[test]
+    fn peak_bin_skips_the_dc_artefact() {
+        // The whole point of the guard: on a quiet channel the LO leakage is the
+        // tallest bin, and naming it would put the tuned frequency in this row as
+        // though a station were there. The next real bin is the honest answer.
+        let mut bins = vec![-80.0f32; 101];
+        bins[50] = 0.0;   // artefact at centre, by far the strongest
+        bins[75] = -30.0; // a real, weaker carrier
+        let (lvl, hz) = peak_bin(&frame(bins, 100_000_000, 2_000_000.0)).unwrap();
+        assert!((lvl + 30.0).abs() < 1e-6, "reported the artefact: {lvl}");
+        assert_eq!(hz, 100_500_000);
     }
 
     #[test]

@@ -34,21 +34,50 @@ const OBW_CARRIER_THRESHOLD_DB: f32 = 10.0;
 /// same thing at 2 Msps as at 20.
 const OBW_GAP_TOLERANCE_HZ: f64 = 10_000.0;
 
-/// Bins either side of the centre that cannot *seed* the carrier window.
+/// Bins either side of centre that are treated as the DC artefact rather than as
+/// signal.
 ///
 /// Both front-ends park their DC offset and LO leakage on the centre bin, and on an
 /// otherwise empty channel that artefact is the strongest thing in the spectrum. It
 /// is a single spectral line, which the Hann window spreads over about three bins —
-/// so measured live at 447 MHz with nothing on air it reads as a 2 kHz carrier
-/// 46 dB above the floor, and the panel would name it a station.
+/// measured live at 447 MHz with nothing on air it stands 46 dB above the floor, and
+/// unguarded it becomes the reported peak, the SNR, and a 2 kHz "carrier".
 ///
 /// In bins rather than Hz because the width being excluded is a property of the
-/// transform's resolution, not of any frequency. Only the *seed* is excluded: a real
-/// carrier wider than the guard seeds from its own skirts and the window then grows
-/// back across the centre, so nothing but the bare line is lost.
+/// transform's resolution, not of any frequency. Two bins either side covers the
+/// Hann main lobe; the sidelobes beyond it fall below the carrier threshold, as the
+/// live capture confirms (`-78 dB` at ±2 against a `-74.8 dB` threshold).
+///
+/// Deliberately narrow, because it is also the width that is *not* excluded from a
+/// real narrow signal: the 6–8 kHz data bursts at 447 MHz span about seven bins at
+/// 2 Msps, so they still seed from their own skirts. A wider guard would swallow
+/// them whole, which is why widening it is not the answer to a stubborn artefact.
 ///
 /// `strongest_offset_hz` refuses the same artefact for the same reason.
-const OBW_DC_GUARD_BINS: usize = 2;
+pub const DC_GUARD_BINS: usize = 2;
+
+/// The strongest bin that is not part of the DC artefact, as `(index, value)`.
+///
+/// `radius_bins` optionally confines the search to that many bins either side of
+/// centre — what "the signal at centre" needs, as opposed to "the loudest thing in
+/// the capture". `None` searches the whole spectrum.
+///
+/// Returns `None` for an empty spectrum, or one where the guard and the radius
+/// between them leave no candidate.
+pub fn strongest_real_bin(bins: &[f32], radius_bins: Option<usize>) -> Option<(usize, f32)> {
+    let n = bins.len();
+    if n == 0 { return None; }
+    let centre = n / 2;
+    bins.iter().enumerate()
+        .filter(|(i, _)| {
+            let d = i.abs_diff(centre);
+            d > DC_GUARD_BINS && radius_bins.is_none_or(|r| d <= r)
+        })
+        .fold(None, |best: Option<(usize, f32)>, (i, &v)| match best {
+            Some((_, bv)) if bv >= v => best,
+            _ => Some((i, v)),
+        })
+}
 
 /// How far from the tuned centre the carrier window may be seeded.
 ///
@@ -89,13 +118,7 @@ fn occupied_bw(linear: &[f32], sample_rate: f64, noise_floor_db: f32) -> u64 {
 
     let centre = n / 2;
     let radius = ((OBW_SEARCH_RADIUS_HZ / bin_hz).ceil() as usize).min(n);
-    let (peak_idx, peak_lin) = linear.iter().enumerate()
-        .filter(|(i, _)| {
-            let d = i.abs_diff(centre);
-            d > OBW_DC_GUARD_BINS && d <= radius
-        })
-        .fold((0usize, f32::NEG_INFINITY),
-              |(bi, bv), (i, &v)| if v > bv { (i, v) } else { (bi, bv) });
+    let Some((peak_idx, peak_lin)) = strongest_real_bin(linear, Some(radius)) else { return 0 };
     let threshold = 10f32.powf((noise_floor_db + OBW_CARRIER_THRESHOLD_DB) / 10.0);
     if !peak_lin.is_finite() || peak_lin <= threshold { return 0; }
 
@@ -127,7 +150,26 @@ fn occupied_bw(linear: &[f32], sample_rate: f64, noise_floor_db: f32) -> u64 {
         if acc < lo_thresh { lo_b = i; }
         if acc < hi_thresh { hi_b = i; }
     }
-    ((hi_b.saturating_sub(lo_b) + 1) as f64 * bin_hz) as u64
+    // Where the measured occupancy actually ended up, in absolute bins.
+    let (occ_lo, occ_hi) = (lo + lo_b, lo + hi_b);
+
+    // If all of it sits where the artefact lives, it is the artefact. A strong DC
+    // line seeds a window from its own skirt — outside the guard, so the seed is
+    // allowed — and the 99 % cut-offs then collapse back onto the centre bins that
+    // dominate the window's power. Measured live at 447 MHz with nothing on air,
+    // that reported "976 Hz" as a channel.
+    //
+    // Position, not width, is the test. A width threshold cannot separate the
+    // artefact from the 6–8 kHz bursts on that same frequency, which are only a
+    // couple of bins wider; but those bursts put power *outside* the guard, and the
+    // artefact by definition does not.
+    //
+    // The cost is honest and small: a carrier too narrow to resolve at this bin size
+    // reads as nothing, which is the truthful answer at 4.9 kHz bins.
+    if occ_lo.abs_diff(centre) <= DC_GUARD_BINS && occ_hi.abs_diff(centre) <= DC_GUARD_BINS {
+        return 0;
+    }
+    ((occ_hi - occ_lo + 1) as f64 * bin_hz) as u64
 }
 
 /// Adjacent-channel power ratio: the lower/upper adjacent-band power relative to
@@ -336,8 +378,14 @@ impl FftWorker {
                     .map(|m| (m.radio.frequency, m.radio.config_sample_rate))
                     .unwrap_or((0, 0.0));
 
-                // SNR: peak minus noise floor
-                let peak_dbfs = smoothed.iter().cloned().fold(f32::NEG_INFINITY, f32::max);
+                // SNR: peak minus noise floor. The peak has to be a real one — the
+                // DC artefact is the strongest bin in the spectrum whenever nothing
+                // else is on air, and reporting its height as signal-to-noise put
+                // 46 dB on the screen for an empty channel. No carrier at all leaves
+                // nothing to compare, which reads as 0 dB.
+                let peak_dbfs = strongest_real_bin(&smoothed, None)
+                    .map(|(_, v)| v)
+                    .unwrap_or(f32::NEG_INFINITY);
                 let peak_to_nf_db = (peak_dbfs - noise_floor).max(0.0);
 
                 // Single linear-power pass — 10^(x/10) is expensive; compute once,
@@ -689,6 +737,60 @@ mod tests {
         for b in bins[1023..=1025].iter_mut() { *b = lin(-20.0); } // artefact louder
         let bw = occupied_bw(&bins, 2_000_000.0, -90.0);
         assert!((170_000..=190_000).contains(&bw), "expected ~180 kHz, got {bw}");
+    }
+
+    #[test]
+    fn strongest_real_bin_skips_the_dc_line() {
+        // The artefact towers over a real, weaker carrier off to one side. Report
+        // the carrier — the artefact is not signal, however loud it is.
+        let mut bins = vec![-90.0f32; 2048];
+        for b in bins[1023..=1025].iter_mut() { *b = -20.0; }
+        bins[1300] = -50.0;
+        assert_eq!(strongest_real_bin(&bins, None), Some((1300, -50.0)));
+    }
+
+    #[test]
+    fn strongest_real_bin_honours_the_search_radius() {
+        let mut bins = vec![-90.0f32; 2048];
+        bins[1100] = -40.0; // 76 bins out
+        bins[1800] = -20.0; // 776 bins out, louder
+        assert_eq!(strongest_real_bin(&bins, Some(100)), Some((1100, -40.0)));
+        assert_eq!(strongest_real_bin(&bins, None), Some((1800, -20.0)));
+    }
+
+    #[test]
+    fn strongest_real_bin_declines_when_nothing_is_left() {
+        assert_eq!(strongest_real_bin(&[], None), None);
+        // A span so narrow the guard covers all of it.
+        assert_eq!(strongest_real_bin(&[-10.0, -20.0, -30.0], None), None);
+        // A radius inside the guard leaves no candidate either.
+        assert_eq!(strongest_real_bin(&vec![-10.0f32; 2048], Some(1)), None);
+    }
+
+    #[test]
+    fn occupied_bw_rejects_occupancy_that_is_all_dc_artefact() {
+        // Measured live at 447 MHz with nothing on air: the artefact's skirt seeds a
+        // window outside the guard, then the 99 % cut-offs collapse back onto the
+        // centre bins that dominate it, and the panel reported "976 Hz" as a channel.
+        // The levels here are the ones the live dump recorded.
+        let lin = |db: f32| 10f32.powf(db / 10.0);
+        let mut bins = vec![lin(-85.0); 2048];
+        bins[1023] = lin(-44.9);
+        bins[1024] = lin(-39.0);
+        bins[1025] = lin(-45.0);
+        bins[1021] = lin(-70.0); // skirt, outside the guard, above the threshold
+        bins[1027] = lin(-70.0);
+        assert_eq!(occupied_bw(&bins, 2_000_000.0, -85.0), 0);
+    }
+
+    #[test]
+    fn occupied_bw_keeps_a_narrow_burst_the_artefact_could_be_mistaken_for() {
+        // The other half of the same rule. These bursts are only a couple of bins
+        // wider than the artefact, so no width threshold separates them — but they
+        // put real power outside the guard, and the artefact never does.
+        let bins = spectrum(2048, 2_000_000.0, -85.0, 7_000.0, -39.0, 0.0);
+        let bw = occupied_bw(&bins, 2_000_000.0, -85.0);
+        assert!(bw >= 4_000, "a real 7 kHz burst must survive the artefact rule, got {bw}");
     }
 
     #[test]
