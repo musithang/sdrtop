@@ -96,10 +96,14 @@ impl App {
         // and stops with it, then take the render snapshot.
         let active_preset = self.engine.active_preset().to_string();
         let sweep_active = active_preset == "lab_sweep" || active_preset == "micro_sweep";
-        // The demod is owned by `lab_signal` the same way sweep is owned by
-        // `lab_sweep`: the preset gates whether blocks are forwarded at all, so
-        // the extra per-block copy costs nothing on every other screen.
-        let demod_preset = active_preset == "lab_signal";
+        // The demod is gated on its panel being on screen, not on the preset being
+        // called `lab_signal`: presets are data, and a user preset that lists
+        // `fm_demod` used to get a panel that never received a block — it sat at
+        // "DEMOD IDLE — waiting for a usable channel" forever on a station the
+        // built-in preset locked onto instantly. Asking the engine which panels are
+        // active is how the rest of the layout already works. The gate itself stays,
+        // so the extra per-block copy still costs nothing on every screen without it.
+        let demod_preset = self.engine.is_panel_visible("fm_demod");
         let mut m = {
             let mut guard = self.state.lock().unwrap_or_else(|e| e.into_inner());
             guard.sweep.active = sweep_active;
