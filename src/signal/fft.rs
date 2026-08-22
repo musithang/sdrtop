@@ -305,6 +305,14 @@ impl FftWorker {
                 // applied inside a window bounded to the carrier rather than to the
                 // whole capture. See `occupied_bw`.
                 let occupied_bw_hz = occupied_bw(&linear, sample_rate, noise_floor);
+                // TEMP DEBUG — remove before commit
+                if let Ok(p) = std::env::var("SDRTOP_DUMP_FFT") {
+                    use std::io::Write;
+                    if let Ok(mut f) = std::fs::File::create(&p) {
+                        let _ = writeln!(f, "# sample_rate={sample_rate} n={n} noise_floor={noise_floor} obw={occupied_bw_hz}");
+                        for v in smoothed.iter() { let _ = writeln!(f, "{v}"); }
+                    }
+                }
 
                 // Adjacent-channel power ratio: L/R bands at ±ACPR_OFFSET_HZ, same
                 // width as the measured in-channel occupancy. `None` becomes the
