@@ -113,7 +113,21 @@ panels = [
 | `right`  | Right column of the body       | `width_pct` (% of body) |
 | `body`   | Centre column (fills remaining space) | — |
 
-**Available panel names:** `header`, `spectrum`, `waterfall`, `log`, `footer`, `signal_strip`, `rf_chain`, `iq_diagnostics`, `iq_histogram`, `hardware_health`, `signal_metrics`, `system_resources`, `timing_panel`, `sweep_panel`, `sweep_strip`, `micro_panel`, `micro_signal_panel`, `micro_gain_panel`, `micro_health_panel`, `micro_sweep_panel`.
+**Available panel names:** `header`, `header_slim`, `command_rail`, `lab_banner`, `lab_marker`, `spectrum`, `waterfall`, `log`, `footer`, `signal_strip`, `telemetry`, `gains`, `throughput`, `sample_rate`, `usb_sr`, `rf_chain`, `level_diagram`, `adc_loading`, `iq_diagnostics`, `iq_constellation`, `iq_histogram`, `image_scope`, `hardware_health`, `signal_metrics`, `signal_characterization`, `fm_demod`, `system_resources`, `timing_panel`, `timing_diagnostics`, `timing_stripchart`, `timing_vitals`, `sweep_panel`, `sweep_strip`, `observer`, `micro_panel`, `micro_signal_panel`, `micro_gain_panel`, `micro_health_panel`, `micro_sweep_panel`.
+
+**Panels that do work, not just drawing.** Most panels only render. Two of them
+drive a background job, and that job follows the panel rather than the preset's
+name, so both work in a preset of your own:
+
+- `fm_demod` runs the demodulator. Listing it anywhere gets you a working demod
+  bench; leaving it out costs nothing on every other layout.
+- A centre column that is exactly `spectrum` followed by `waterfall` bonds the two
+  into one instrument, with a single shared frequency ruler between them instead of
+  two facing borders.
+
+The `lab_` name prefix does still mean something: a preset whose name starts with
+it renders in "instrument mode", with the frame colours cooled toward steel blue.
+That is the one place a preset's name changes how it behaves.
 
 See [Advanced Features](advanced.md#defining-custom-presets) for the full guide to creating and managing custom presets.
 

@@ -4,6 +4,13 @@
 
 ---
 
+**Capitals work everywhere.** Every key below is listed the way the footer shows
+it, and `C` and `c` do the same thing. You never have to think about whether Shift
+is down. The one place case still matters is when you are *typing* something, like
+a marker name, where what you press is what you get.
+
+---
+
 ## General
 
 | Key | What it does |
@@ -105,8 +112,9 @@ lists the extra keys; `Esc` exits.
 | `d` | RF **D**iagnostics (`[6]` lab_rf) | `A` — auto-gain (one-shot to the optimal level; press again at the optimum to latch a continuous auto-track) · `⎵` / `F` — freeze the histogram + level diagram |
 | `v` | Hardware **V**itals (`[7]` lab_timing) | `R` — reset the session drop counter · `C` — clear the trend sparklines |
 | `t` | **T**iming (`[7]` lab_timing) | `R` — reset the session jitter peak · `C` — clear the jitter / throughput history |
-| `m` | FM **M**PX · Demod (`[8]` lab_signal) | `Space` toggle demod · `←/→` move the demodulated channel ±25 kHz · `P` snap to the strongest carrier · `0` re-centre · `T` force WFM / NFM / AM or auto · `C` log a snapshot |
-| `g` | Sweep `[G]` (`[9]` lab_sweep) | `←/→` — move cursor · `s` / `e` — set start / end frequency · `M` — peak/mean curve · `+/-` — dwell time · `Enter` — tune to the cursor frequency |
+| `m` | FM **M**PX · Demod (`fm_demod`, in `[8]` lab_signal) | `Space` toggle demod · `←/→` move the demodulated channel ±25 kHz · `P` snap to the strongest carrier · `0` re-centre · `T` force WFM / NFM / AM or auto · `C` log a snapshot |
+| `x` | Signal Characterization (`signal_characterization`, in `[8]` lab_signal) | `C`: log a snapshot of the modulation, SNR, occupied bandwidth and ACPR |
+| `g` | Sweep `[G]` (`[9]` lab_sweep) | `←/→` — move cursor · `S` / `E` — set start / end frequency · `M` — peak/mean curve · `+/-` — dwell time · `Enter` — tune to the cursor frequency |
 
 The RF Diagnostics auto-gain drives the regular global gain controls (`↑`/`↓` LNA,
 `[`/`]` VGA, `a` AMP, `r` reset), so touching any of them by hand drops the

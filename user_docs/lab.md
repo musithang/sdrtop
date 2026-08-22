@@ -131,6 +131,75 @@ Whether the capture chain is keeping up, with a trend sparkline under each metri
 
 ---
 
+## Signal Characterization  ·  *Lab Signal (`8`)*
+
+The left-hand column of **Lab Signal**. Where the demod panel opposite opens the
+channel up and reads what is inside it, this one answers the question you ask
+first: what *is* that, and how clean is it? Everything here comes from the same
+FFT frame the spectrum beside it draws, so the two always agree. Press `x` to
+focus it, then `C` to write the current readings to the log.
+
+**Radio headline.** Peak-to-noise in dB with a status lamp, and the classifier's
+guess at the modulation (`WFM`, `NFM`, `AM`). Green at 20 dB or better, amber down
+to 10, red below that.
+
+**Signal metrics.**
+
+- **Channel power**, the total power in the occupied channel. Unlike a single bin,
+  this does not change when you change the sample rate.
+- **Peak**, the strongest real bin near centre and its frequency. "Real" because
+  the front end's own LO leakage sits exactly at centre and is usually the tallest
+  thing there; naming it would report the tuned frequency as a station every time
+  the channel is quiet. The search also stays near centre, so this row cannot
+  wander off and name somebody else's transmitter.
+- **Noise floor**, in dBFS per bin, with the same figure as a **density** in
+  dBFS/Hz next to it. The per-bin number is the one that matches where the noise
+  sits on the trace, but it is not a property of your radio: it rises with the bin
+  width, so it changes when you change the sample rate and says as much about the
+  analyser as about the receiver. The density divides that out. Measured on one
+  station at two rates, the floor read −81.1 dBFS at 2 Msps and −73.8 at 10 Msps,
+  which looks alarming and is entirely the wider bin. As densities the same two
+  readings are −112.8 and −112.5 dBFS/Hz: the same radio, correctly reported as
+  the same radio.
+- **Occupied BW**, the 99 % occupied bandwidth (ITU-R SM.328), measured over the
+  carrier rather than the whole captured span. See the note below.
+- **Peak hold**, the highest level seen since the trace was last reset.
+
+**Adjacent channel (ACPR).** How far down the neighbouring channels sit relative
+to this one, one bar per side, more fill meaning closer to the carrier and so
+worse. The spacing follows the modulation (±200 kHz for broadcast FM, ±25 kHz for
+NFM, ±9 kHz for AM) and the row labels name whichever offset was actually used, so
+they cannot drift apart. The bar's floor is sdrtop's own display range, not a
+regulatory mask: no limit is being asserted, the bar just shows the measurement.
+
+**Spectral shape.** A 60-second trend of carrier-to-noise, and the crest factor
+(peak-to-RMS) of the ADC stream, which is the same honest "constant-envelope
+versus peaky" proxy the RF bench shows.
+
+**Verdict.** A plain-language read of the four zones above: modulation, SNR, ACPR
+and occupied bandwidth. Rule-based and nothing more. There is no model here and no
+demodulation; it is a sentence describing numbers that are already on the panel.
+
+### About occupied bandwidth
+
+**A broadcast station reads narrower than its allocation, and that is correct.**
+Broadcast FM is allocated 200 kHz and designed around 180, but a real programme
+measures somewhere around 85 to 120 kHz of 99 % occupied bandwidth. The reason is
+that the time-averaged spectrum of an FM signal is strongly peaked at the carrier:
+the deviation only reaches its extremes on loud passages, so most of the energy
+spends most of the time near the middle. The allocation is what the signal may
+occupy at its widest; this is what it occupies now. Carson's rule gives the first
+number, a spectrum analyser gives the second, and they are not supposed to match.
+
+**It varies with sample rate.** The same station measured 101.6 kHz at 2 Msps and
+65.9 kHz at 5 Msps, because a wider span means coarser bins and a different view of
+the carrier's skirts. That is worth knowing before you compare two readings: they
+are only comparable at the same rate. It also drags the modulation badge with it,
+so a broadcast station on a very wide span can classify as `NFM`. If you are using
+the demod panel opposite, force the mode with `T` rather than trusting the badge.
+
+---
+
 ## FM MPX · Demod  ·  *Lab Signal (`8`)*
 
 The right-hand column of **Lab Signal** actually demodulates the channel and reads
@@ -139,8 +208,10 @@ no audio anywhere in sdrtop, and this panel exists to tell you things about a
 transmission that a spectrum plot cannot: how hard it is deviating, whether it is
 in stereo, which subaudible tone opens the squelch, what the station calls itself.
 
-Press `m` to focus it. It only runs while the `8` preset is open, so it costs
-nothing on any other screen.
+Press `m` to focus it. It only runs while the panel is actually on screen, so it
+costs nothing on any other layout. That means it also works in a
+[custom preset](config.md#custom-layout-presets) of your own, as long as you list
+`fm_demod` in it.
 
 **What it shows depends on the modulation.** Each mode is shown only what it
 actually has, rather than a fixed grid where most rows read as permanently empty:
@@ -151,6 +222,9 @@ actually has, rather than a fixed grid where most rows read as permanently empty
 | **NFM** (voice) | Deviation · CTCSS |
 | **AM** | Depth · Carrier |
 
+There is no audio section, and there is no audio. A section a mode does not have is
+simply absent rather than sitting there empty.
+
 - **MPX baseband**: the demodulated composite from 0–60 kHz as a braille profile,
   with ticks at 19 k (pilot), 38 k (stereo difference) and 57 k (RDS). This is the
   audio-side spectrum, not the RF one. You are looking *inside* the FM channel.
@@ -158,9 +232,12 @@ actually has, rather than a fixed grid where most rows read as permanently empty
   deviation and its **injection percentage**. Broadcast practice is 8–10 %, so a
   figure well outside that is a transmitter fault rather than a reception problem.
 - **Deviation**: peak (quasi-peak, with decay) and RMS deviation measured *about
-  the carrier*, plus the carrier offset. Measuring about the carrier is what makes
-  a mistuned radio report its tuning error as offset instead of inflating the
-  modulation figure. The bar is drawn against the mode's nominal limit, ±75 kHz for
+  the carrier*, plus a **Carrier** row giving how far the carrier sits from the
+  centre of the demodulated channel. Measuring about the carrier is what makes a
+  mistuned radio report its tuning error there instead of inflating the modulation
+  figure. (That row used to be called "Offset", which collided with the channel
+  offset in the headline above it. The two point in opposite directions, so they no
+  longer share a name.) The bar is drawn against the mode's nominal limit, ±75 kHz for
   broadcast and ±5 kHz for NFM, and turns amber then red as you approach and exceed
   it.
 - **CTCSS**: the subaudible tone that opens a repeater's squelch, identified from
@@ -182,14 +259,28 @@ subcarrier, and shows:
 - **PI**, the station's unique hex identity code,
 - **PTY**, the programme type (`Pop Music`, `News`, `Culture`, and so on),
 - **Traffic** flags, when TP or TA is set,
-- **Groups**, the count accepted so far, which is the honest measure of how well
-  reception is going,
+- **Groups**, which is two numbers: the total accepted on this channel, and after
+  it the length of the current unbroken run. `Groups 1400  +1` means fourteen
+  hundred groups have been decoded here, but the run in progress is one group long,
+  so something keeps interrupting reception. When the two agree, only the total is
+  shown.
 - **RadioText**, the free 64-character field stations use for now-playing
   information, wrapped across two rows.
+
+**Accented characters come through.** RDS is not ASCII: it uses its own character
+set (IEC 62106 table G0), where the accented Latin letters live above the ASCII
+range. A Hungarian title reads as a Hungarian title rather than one with holes
+punched in it.
 
 The headline distinguishes three states. `● NAME` is the answer. `◌ DECODING`
 means bits are arriving and the name is a second or two away. `○ NO RDS` means
 that as far as we can tell this station carries none.
+
+A name does not outlive its station. RDS accumulates over seconds, which is
+exactly what lets it sit on screen looking confident after reception has stopped,
+so the panel ages it: a few seconds without a new group and the headline says how
+old it is, and past thirty seconds nothing is shown at all. Retuning drops
+everything at once, since none of it describes the new frequency.
 
 Nothing is shown until it has been **confirmed twice**. RDS has only a block CRC
 and no error correction beyond it, so a block can pass its check with an undetected
@@ -200,6 +291,14 @@ pattern often enough that a single hit is not evidence of anything.
 
 RDS needs a decent signal. It rides about 20 dB below the main programme audio, so
 a station you can hear perfectly may still decode nothing.
+
+**If the demod says blocks were dropped, believe it.** RDS and CTCSS both need an
+unbroken run of samples, and the demod is fed through a small queue that discards
+blocks when the machine cannot keep up. A busy host and a station without RDS look
+identical otherwise, so the panel counts them and says so, noting that RDS and
+CTCSS need a clean run. The line appears only while blocks are actually being lost,
+so an old glitch does not leave a warning pinned there. A lower sample rate, or
+closing whatever else is competing for the CPU, is the fix.
 
 ### Tuning the demod channel
 
