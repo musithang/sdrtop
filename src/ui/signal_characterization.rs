@@ -55,6 +55,28 @@ pub(crate) fn fmt_bw(hz: u64) -> String {
     else                    { format!("{hz} Hz") }
 }
 
+/// Noise floor as a power spectral density, `dBFS/Hz`, or `None` when the frame
+/// carries no usable resolution bandwidth.
+///
+/// The one figure on this panel that is genuinely meaningless on its own. Every
+/// other level here is a power — a peak, a channel, an adjacent band — and a power
+/// is a power whatever the analyser's resolution. A noise floor is not: it is the
+/// power that happened to land in one bin, so it rises with the bin width and says
+/// as much about the sample rate as about the radio.
+///
+/// Measured on the same station at two rates: the floor read -81.1 dBFS at 2 Msps
+/// and -73.8 dBFS at 10 Msps, a 7.3 dB difference that is entirely the 5× wider bin
+/// (theory says 7.0). As a density the same two readings are -112.8 and
+/// -112.5 dBFS/Hz — the same radio, correctly reported as the same radio.
+///
+/// Shown *beside* the per-bin figure rather than instead of it, because the per-bin
+/// number is the one that matches where the noise visually sits on the trace next
+/// to this panel.
+fn noise_density_dbfs_hz(noise_floor_dbfs: f32, enbw_hz: f64) -> Option<f32> {
+    if !enbw_hz.is_finite() || enbw_hz <= 0.0 || !noise_floor_dbfs.is_finite() { return None; }
+    Some(noise_floor_dbfs - 10.0 * enbw_hz.log10() as f32)
+}
+
 /// ACPR row label — `L -200k`, `R +25k`. Derived from the offset the measurement
 /// actually used, so the two can never disagree: the spacing follows the
 /// modulation now, and a hardcoded label would quietly lie on every band but FM
@@ -272,7 +294,11 @@ impl Panel for SignalCharacterizationPanel {
                 None => vec![dash()],
             }));
 
-            lines.push(metric("Noise floor", vec![Span::styled(format!("{:.1} dBFS", fr.noise_floor), val)]));
+            let mut nf_row = vec![Span::styled(format!("{:.1} dBFS", fr.noise_floor), val)];
+            if let Some(d) = noise_density_dbfs_hz(fr.noise_floor, fr.enbw_hz) {
+                nf_row.push(Span::styled(format!("   {d:.1} dBFS/Hz"), dim));
+            }
+            lines.push(metric("Noise floor", nf_row));
 
             lines.push(metric("Occupied BW", if fr.occupied_bw_hz > 0 {
                 vec![
@@ -454,6 +480,25 @@ mod tests {
         let mut bins = vec![-80.0f32; 101];
         bins[idx] = -10.0;
         frame(bins, 100_000_000, 400_000.0)
+    }
+
+    #[test]
+    fn noise_density_is_the_same_radio_at_any_resolution() {
+        // The two readings that started this, measured on 92.8 MHz at 2 and 10 Msps.
+        // Per bin they differ by 7.3 dB and describe the sample rate; as densities
+        // they agree, and describe the radio.
+        let two  = noise_density_dbfs_hz(-81.1, 976.5625 * 1.5).unwrap();
+        let ten  = noise_density_dbfs_hz(-73.8, 4882.8125 * 1.5).unwrap();
+        assert!((two - (-112.8)).abs() < 0.2, "2 Msps: {two:.1}");
+        assert!((ten - (-112.5)).abs() < 0.2, "10 Msps: {ten:.1}");
+        assert!((two - ten).abs() < 0.5, "densities must agree: {two:.1} vs {ten:.1}");
+    }
+
+    #[test]
+    fn noise_density_declines_without_a_resolution_bandwidth() {
+        assert!(noise_density_dbfs_hz(-81.0, 0.0).is_none());
+        assert!(noise_density_dbfs_hz(-81.0, f64::NAN).is_none());
+        assert!(noise_density_dbfs_hz(f32::NEG_INFINITY, 1_465.0).is_none());
     }
 
     #[test]
