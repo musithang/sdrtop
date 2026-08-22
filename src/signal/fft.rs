@@ -306,7 +306,7 @@ impl FftWorker {
                 // whole capture. See `occupied_bw`.
                 let occupied_bw_hz = occupied_bw(&linear, sample_rate, noise_floor);
                 // TEMP DEBUG — remove before commit
-                if let Ok(p) = std::env::var("SDRTOP_DUMP_FFT") {
+                if let Ok(p) = std::env::var("SDRTOP_DUMP_FFT").ok().filter(|_| peak_to_nf_db > 25.0).ok_or(()) {
                     use std::io::Write;
                     let tmp = format!("{p}.tmp");
                     if let Ok(mut f) = std::fs::File::create(&tmp) {
