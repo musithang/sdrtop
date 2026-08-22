@@ -643,6 +643,11 @@ impl DemodWorker {
         let mut rds: Option<super::rds_demod::RdsDemod> = None;
         let mut rds_dec = super::rds::RdsDecoder::new();
         let mut last_mod = Modulation::Unknown;
+        // When a whole group last completed, and the channel the decoder's contents
+        // describe. RDS accumulates, so unlike every other measurement here it has
+        // to be told when it stops being about the station in front of it.
+        let mut rds_last_group: Option<Instant> = None;
+        let mut last_channel: Option<(u64, i64)> = None;
         // Last decimated sample of the previous block, so the discriminator does
         // not lose the sample pair that spans a block boundary.
         let mut carry: Option<Complex<f32>> = None;
@@ -651,15 +656,54 @@ impl DemodWorker {
             let contiguous = seq == last_seq.wrapping_add(1);
             last_seq = seq;
 
-            let (sample_rate, modulation, snr_db, streaming, offset_hz) = {
+            let (sample_rate, modulation, snr_db, streaming, offset_hz, frequency, enabled) = {
                 let m = self.state.lock().unwrap_or_else(|e| e.into_inner());
                 // The user's mode choice outranks the classifier — see
                 // `DemodState::mode_override` for why the heuristic is too coarse
                 // to pick a demodulator on its own.
                 (m.radio.config_sample_rate,
                  m.demod.effective_modulation(m.signal.modulation),
-                 m.signal.peak_to_nf_db, m.radio.hw_streaming, m.demod.offset_hz)
+                 m.signal.peak_to_nf_db, m.radio.hw_streaming, m.demod.offset_hz,
+                 m.radio.frequency, m.demod.enabled)
             };
+
+            // Switching the demod off stops `process` forwarding, but up to four
+            // blocks are already in the channel — and publishing those overwrites
+            // the state the key handler just cleared, so the panel went on showing a
+            // live pilot lock and a station name under a "DEMOD OFF" headline.
+            // Clearing the intent is the user's job; honouring it is this loop's.
+            if !enabled {
+                rds = None;
+                rds_dec = super::rds::RdsDecoder::new();
+                rds_last_group = None;
+                audio.clear();
+                carry = None;
+                if let Some(sd) = sdec.as_mut() { sd.reset(); }
+                self.clear();
+                continue;
+            }
+
+            // A different channel is a different station, and nothing the decoder
+            // holds describes it. Retuning does not break block contiguity — the
+            // radio keeps streaming — and it does not change the modulation either,
+            // so without this check nothing invalidated the RDS state at all: the
+            // panel sat naming `DANKO` nine seconds after the radio had moved to
+            // 96.6 MHz, group counter frozen.
+            //
+            // A fresh decoder rather than `reset()`, which deliberately keeps the PI
+            // code across a dropout — that is exactly the field that must not
+            // survive a retune, since it identifies the station.
+            let channel = (frequency, offset_hz);
+            if last_channel.is_some_and(|c| c != channel) {
+                rds = None;
+                rds_dec = super::rds::RdsDecoder::new();
+                rds_last_group = None;
+                audio.clear();
+                carry = None;
+                if let Some(sd) = sdec.as_mut() { sd.reset(); }
+                self.clear();
+            }
+            last_channel = Some(channel);
 
             // Refuse to guess: without a carrier the classifier reports Unknown,
             // and a reading off noise would be meaningless.
@@ -669,6 +713,7 @@ impl DemodWorker {
                 last_mod = modulation;
                 rds = None;
                 rds_dec.reset();
+                rds_last_group = None;
                 audio.clear();
             }
 
@@ -756,7 +801,14 @@ impl DemodWorker {
                             rds_dec.reset();
                         }
                         let rd = rds.get_or_insert_with(|| super::rds_demod::RdsDemod::new(rate));
+                        // Compared across the call rather than against a tracked
+                        // counter: `reset()` zeroes `groups_ok`, and any scheme that
+                        // remembers the old value across a reset stops stamping.
+                        let before = rds_dec.data().groups_ok;
                         rd.process(&inst, &mut rds_dec);
+                        if rds_dec.data().groups_ok != before {
+                            rds_last_group = Some(Instant::now());
+                        }
 
                         // MPX baseband + pilot, only when it will actually be
                         // published — a spectrum nobody reads is wasted work. A
@@ -813,12 +865,23 @@ impl DemodWorker {
             };
 
             let mut m = self.state.lock().unwrap_or_else(|e| e.into_inner());
+            // Last word on whether this measurement is still wanted, taken under the
+            // lock that is about to publish it. The check at the top of the loop
+            // cannot be enough: up to four blocks sit in the channel, and any of
+            // them read `enabled` before the key press and would publish afterwards.
+            // Same for the channel — an offset key or a retune between the intake
+            // and here makes this measurement about a frequency nobody is on.
+            if !m.demod.enabled || (m.radio.frequency, m.demod.offset_hz) != channel {
+                m.demod.clear_measurements();
+                continue;
+            }
             m.demod.decimation      = d;
             m.demod.channel_rate_hz = rate;
             m.demod.mpx             = mpx_frame;
             m.demod.pilot           = pilot;
             m.demod.rds             = rds_out;
             m.demod.rds_sync        = rds_sync;
+            m.demod.rds_last_group  = rds_last_group;
             m.demod.am              = fresh_am;
             m.demod.ctcss           = ctcss;
             m.demod.ctcss_fill      = fill;
@@ -840,18 +903,11 @@ impl DemodWorker {
         }
     }
 
-    /// Drop the measurement so the panel falls back to its idle state rather than
-    /// leaving a stale number on screen.
+    /// Drop the measurements so the panel falls back to its idle state rather than
+    /// leaving stale numbers on screen.
     fn clear(&self) {
         let mut m = self.state.lock().unwrap_or_else(|e| e.into_inner());
-        m.demod.fm         = None;
-        m.demod.mpx        = None;
-        m.demod.pilot      = None;
-        m.demod.am         = None;
-        m.demod.ctcss      = None;
-        m.demod.ctcss_fill = 0.0;
-        m.demod.rds        = None;
-        m.demod.rds_sync   = false;
+        m.demod.clear_measurements();
     }
 }
 

@@ -36,6 +36,24 @@ pub const DC_PROXIMITY_HZ: i64 = 30_000;
 /// panel stops presenting the number as live.
 pub const DEMOD_STALE_AFTER: Duration = Duration::from_millis(1_500);
 
+/// RDS text older than this stops reading as a live decode.
+///
+/// Everything else the demod produces is remeasured several times a second, so a
+/// stale reading simply disappears. RDS is the exception: PS and RadioText are
+/// assembled over seconds and then *persist*, which is the whole point of them —
+/// and it is also how the panel came to sit there naming a station that had been
+/// off the air for nine seconds.
+///
+/// A group is 87.6 ms, and PS repeats about once a second on any station carrying
+/// it, so several seconds without one means reception has genuinely stopped rather
+/// than hiccupped.
+pub const RDS_AGED_AFTER: Duration = Duration::from_secs(5);
+
+/// RDS text older than this is not shown at all. Long enough that a walk behind a
+/// building does not cost the station name, short enough that what is on screen is
+/// still about the here and now.
+pub const RDS_DROPPED_AFTER: Duration = Duration::from_secs(30);
+
 /// One AM envelope measurement.
 ///
 /// `positive_pct` and `negative_pct` are reported separately from `depth_pct`
@@ -115,6 +133,10 @@ pub struct DemodState {
     /// Whether the RDS block synchroniser is currently tracking the group
     /// structure. Distinguishes "receiving RDS" from "hoping to".
     pub rds_sync: bool,
+    /// When the decoder last accepted a whole group. The freshness clock for
+    /// [`Self::rds`], which unlike every other measurement here survives its own
+    /// source going away — see [`RDS_AGED_AFTER`].
+    pub rds_last_group: Option<Instant>,
     /// AM envelope measurement. Mutually exclusive with `fm` in practice: the
     /// classifier picks one demodulator, and the other's field stays `None`.
     pub am:    Option<AmMeasure>,
@@ -148,6 +170,7 @@ impl Default for DemodState {
             pilot:           None,
             rds:             None,
             rds_sync:        false,
+            rds_last_group:  None,
             am:              None,
             ctcss:           None,
             ctcss_fill:      0.0,
@@ -158,6 +181,38 @@ impl Default for DemodState {
 }
 
 impl DemodState {
+    /// Drop every measurement at once.
+    ///
+    /// One call rather than a list, because the list is what went wrong: switching
+    /// the demod off dropped `fm` and left the MPX trace, the pilot lock and the RDS
+    /// station name on screen under a "DEMOD OFF" headline until they aged out
+    /// 1.5 s later. Anything that invalidates one reading invalidates all of them —
+    /// they all describe the same channel at the same instant.
+    ///
+    /// Clearing `last_update` matters as much as the fields: without it
+    /// [`Self::ctcss_searching`] keeps answering "still filling the window" for a
+    /// detector that is not running.
+    pub fn clear_measurements(&mut self) {
+        self.fm             = None;
+        self.am             = None;
+        self.ctcss          = None;
+        self.ctcss_fill     = 0.0;
+        self.mpx            = None;
+        self.pilot          = None;
+        self.rds            = None;
+        self.rds_sync       = false;
+        self.rds_last_group = None;
+        self.last_update    = None;
+    }
+
+    /// How long since the RDS decoder last completed a group, or `None` when it
+    /// never has. The freshness of [`Self::rds`], which is not the same question as
+    /// [`Self::is_stale`]: the snapshot is republished every cycle whether or not
+    /// anything new arrived in it.
+    pub fn rds_age(&self) -> Option<Duration> {
+        self.rds_last_group.map(|t| t.elapsed())
+    }
+
     /// Whether the last measurement is too old to present as live. Also true when
     /// there has never been one.
     pub fn is_stale(&self) -> bool {
@@ -316,6 +371,57 @@ mod tests {
         assert!(old.is_some());
         assert!(d.is_stale());
         assert!(d.live().is_none(), "a stale reading must never be presented as live");
+    }
+
+    #[test]
+    fn clear_measurements_drops_everything_not_just_the_fm_reading() {
+        // The bug: switching the demod off cleared `fm` alone, so the MPX trace, the
+        // pilot lock and the RDS station name stayed on screen for another 1.5 s
+        // under a "DEMOD OFF" headline.
+        let mut d = DemodState {
+            fm: Some(measure()),
+            am: Some(AmMeasure { depth_pct: 50.0, positive_pct: 50.0, negative_pct: 50.0, carrier_dbfs: -20.0 }),
+            ctcss: Some(CtcssMeasure { tone_hz: 103.5, deviation_hz: 500.0, margin_db: 12.0 }),
+            ctcss_fill: 0.7,
+            mpx: Some(Arc::new(MpxFrame { bin_hz: 163.0, mags_hz: vec![1.0; 8] })),
+            pilot: Some(PilotMeasure { state: PilotState::Locked, deviation_hz: 6_500.0, injection_pct: 8.7 }),
+            rds: Some(Arc::new(RdsData { pi: Some(0xB206), ..Default::default() })),
+            rds_sync: true,
+            rds_last_group: Some(Instant::now()),
+            last_update: Some(Instant::now()),
+            ..Default::default()
+        };
+        d.clear_measurements();
+        assert!(d.fm.is_none() && d.am.is_none() && d.ctcss.is_none());
+        assert!(d.mpx.is_none() && d.pilot.is_none() && d.rds.is_none());
+        assert!(!d.rds_sync && d.rds_last_group.is_none());
+        assert_eq!(d.ctcss_fill, 0.0);
+        // And the clock, or the CTCSS detector goes on claiming it is searching.
+        assert!(d.last_update.is_none());
+        assert!(d.is_stale());
+        assert!(!d.ctcss_searching());
+    }
+
+    #[test]
+    fn clear_measurements_keeps_the_settings_it_is_not_about() {
+        // Intent, channel offset and forced mode are the user's, not measurements.
+        let mut d = DemodState {
+            user_on: true, offset_hz: 75_000, mode_override: Some(Modulation::Nfm),
+            fm: Some(measure()), last_update: Some(Instant::now()),
+            ..Default::default()
+        };
+        d.clear_measurements();
+        assert!(d.user_on);
+        assert_eq!(d.offset_hz, 75_000);
+        assert_eq!(d.mode_override, Some(Modulation::Nfm));
+    }
+
+    #[test]
+    fn rds_age_is_none_until_a_group_completes() {
+        let mut d = DemodState::default();
+        assert!(d.rds_age().is_none());
+        d.rds_last_group = Some(Instant::now());
+        assert!(d.rds_age().is_some_and(|a| a < Duration::from_secs(1)));
     }
 
     #[test]

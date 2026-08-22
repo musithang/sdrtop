@@ -24,9 +24,12 @@ use ratatui::{
     Frame,
 };
 
+use std::time::Duration;
+
 use crate::signal::demod::{FILTER_QUALITY_D_LIMIT, MPX_SPAN_HZ, PILOT_HZ};
 use crate::state::{
-    deviation_limit_hz, FmMeasure, Modulation, MpxFrame, PilotState, SdrMetrics, PTY_NAMES,
+    deviation_limit_hz, FmMeasure, Modulation, MpxFrame, PilotState, SdrMetrics,
+    PTY_NAMES, RDS_AGED_AFTER, RDS_DROPPED_AFTER,
 };
 use crate::ui::chrome;
 use crate::ui::micro_common::bar_spans;
@@ -63,17 +66,33 @@ const RT_MAX_ROWS: usize = 2;
 
 /// The RDS headline: what the section leads with before any of the detail rows.
 ///
-/// The three states have to read differently. A confirmed Programme Service name
-/// is the answer. Block sync without a name yet means the decoder is working and
-/// the name is seconds away. Neither means the station carries no RDS *as far as
-/// we can tell* — which is why it is phrased as an absence, not a failure.
+/// The states have to read differently. A confirmed Programme Service name is the
+/// answer. Block sync without a name yet means the decoder is working and the name
+/// is seconds away. Neither means the station carries no RDS *as far as we can
+/// tell* — which is why it is phrased as an absence, not a failure.
+///
+/// `age` is how long since a whole group last arrived, and it is what stops a name
+/// from outliving its station. RDS is the one measurement here that accumulates, so
+/// it is the one that can sit on screen looking confident long after reception has
+/// stopped: past [`RDS_AGED_AFTER`] the name is marked with how old it is, and past
+/// [`RDS_DROPPED_AFTER`] it is not shown at all.
 ///
 /// Returns the marker glyph, the text, and whether it is a positive result.
-fn rds_headline(d: &crate::state::RdsData, sync: bool) -> (&'static str, String, bool) {
+fn rds_headline(d: &crate::state::RdsData, sync: bool, age: Option<Duration>)
+    -> (&'static str, String, bool)
+{
+    let dropped = age.is_none_or(|a| a > RDS_DROPPED_AFTER);
+    let aged    = age.is_some_and(|a| a > RDS_AGED_AFTER);
     match d.ps.as_deref() {
-        Some(ps) => ("\u{25cf}", ps.trim().to_string(), true),
-        None if sync || d.groups_ok > 0 => ("\u{25cc}", "DECODING".into(), false),
-        None => ("\u{25cb}", "NO RDS".into(), false),
+        Some(ps) if !dropped && aged => {
+            let secs = age.map(|a| a.as_secs()).unwrap_or(0);
+            ("\u{25cc}", format!("{}   {secs} s ago", ps.trim()), false)
+        }
+        Some(ps) if !dropped => ("\u{25cf}", ps.trim().to_string(), true),
+        // Either no name yet, or one too old to stand: both come down to whether
+        // the decoder is currently getting anywhere.
+        _ if sync || (d.groups_ok > 0 && !dropped) => ("\u{25cc}", "DECODING".into(), false),
+        _ => ("\u{25cb}", "NO RDS".into(), false),
     }
 }
 
@@ -481,20 +500,26 @@ impl Panel for FmDemodPanel {
                 lines.push(chrome::section("RDS", "57 kHz", iw, theme));
                 match state.demod.live_rds() {
                     Some(d) => {
-                        let (mark, text, ok) = rds_headline(d, state.demod.rds_sync);
+                        let age = state.demod.rds_age();
+                        // Past the drop timeout the accumulated text is not about
+                        // anything currently on air, so none of it is shown — not
+                        // the name, not the code, not the message.
+                        let dropped = age.is_none_or(|a| a > RDS_DROPPED_AFTER);
+                        let (mark, text, ok) = rds_headline(d, state.demod.rds_sync, age);
                         let color = if ok { theme.status_ok } else { theme.label };
                         lines.push(Line::from(vec![
                             Span::raw(" "),
                             Span::styled(format!("{mark} {text}"),
                                          Style::default().fg(color).add_modifier(Modifier::BOLD)),
                         ]));
-                        if let Some(pi) = d.pi {
+                        if let Some(pi) = d.pi.filter(|_| !dropped) {
                             lines.push(Line::from(vec![
                                 chrome::field("PI", 8, theme),
                                 Span::styled(format!("{pi:04X}"), val),
                             ]));
                         }
-                        if let Some(name) = d.pty.map(|p| PTY_NAMES[(p & 0x1F) as usize]) {
+                        if let Some(name) = d.pty.filter(|_| !dropped)
+                            .map(|p| PTY_NAMES[(p & 0x1F) as usize]) {
                             lines.push(Line::from(vec![
                                 chrome::field("PTY", 8, theme),
                                 Span::styled(name, val),
@@ -502,7 +527,7 @@ impl Panel for FmDemodPanel {
                         }
                         // Traffic flags only earn a row when one of them is set —
                         // "TP off, TA off" is the normal case and says nothing.
-                        if d.tp || d.ta {
+                        if (d.tp || d.ta) && !dropped {
                             let mut flags = Vec::new();
                             if d.tp { flags.push("TP"); }
                             if d.ta { flags.push("TA"); }
@@ -512,7 +537,7 @@ impl Panel for FmDemodPanel {
                                              Style::default().fg(theme.status_warn)),
                             ]));
                         }
-                        if d.groups_ok > 0 {
+                        if d.groups_ok > 0 && !dropped {
                             lines.push(Line::from(vec![
                                 chrome::field("Groups", 8, theme),
                                 Span::styled(d.groups_ok.to_string(), val),
@@ -520,7 +545,7 @@ impl Panel for FmDemodPanel {
                         }
                         // RadioText is a free-text field up to 64 characters, so it
                         // is the one thing here that has to wrap to the column.
-                        if let Some(rt) = d.rt.as_deref() {
+                        if let Some(rt) = d.rt.as_deref().filter(|_| !dropped) {
                             for row in wrap(rt, iw.saturating_sub(1), RT_MAX_ROWS) {
                                 lines.push(Line::from(vec![Span::raw(" "), Span::styled(row, val)]));
                             }
@@ -724,9 +749,12 @@ mod tests {
         }
     }
 
+    /// A group that arrived just now — the normal case for a station on air.
+    const FRESH: Option<Duration> = Some(Duration::ZERO);
+
     #[test]
     fn rds_headline_leads_with_the_station_name() {
-        let (mark, text, ok) = rds_headline(&rds(Some("SDRTOP  "), 40), true);
+        let (mark, text, ok) = rds_headline(&rds(Some("SDRTOP  "), 40), true, FRESH);
         assert_eq!(text, "SDRTOP", "trailing RDS padding must not reach the screen");
         assert!(ok);
         assert_eq!(mark, "\u{25cf}");
@@ -735,13 +763,47 @@ mod tests {
     #[test]
     fn rds_headline_separates_decoding_from_absent() {
         // Groups arriving but no confirmed name yet: the decoder is working.
-        let (_, text, ok) = rds_headline(&rds(None, 3), false);
+        let (_, text, ok) = rds_headline(&rds(None, 3), false, FRESH);
         assert_eq!(text, "DECODING");
         assert!(!ok);
         // Sync alone counts too — the first groups have not completed yet.
-        assert_eq!(rds_headline(&rds(None, 0), true).1, "DECODING");
+        assert_eq!(rds_headline(&rds(None, 0), true, FRESH).1, "DECODING");
         // Neither: as far as we can tell there is no RDS here.
-        assert_eq!(rds_headline(&rds(None, 0), false).1, "NO RDS");
+        assert_eq!(rds_headline(&rds(None, 0), false, None).1, "NO RDS");
+    }
+
+    #[test]
+    fn rds_headline_marks_a_name_that_has_stopped_arriving() {
+        // The station is still named — it may well come back — but the panel says
+        // how long ago it last spoke, instead of showing a confident lamp.
+        let age = Some(RDS_AGED_AFTER + Duration::from_secs(7));
+        let (mark, text, ok) = rds_headline(&rds(Some("DANKO"), 40), false, age);
+        assert_eq!(mark, "\u{25cc}", "an aged name must not wear the live lamp");
+        assert!(text.starts_with("DANKO"));
+        assert!(text.contains("12 s ago"), "got {text}");
+        assert!(!ok);
+    }
+
+    #[test]
+    fn rds_headline_drops_a_name_that_outlived_its_station() {
+        // The bug this guards: nine seconds after retuning from 92.8 to 96.6 the
+        // panel still read "● DANKO", group counter frozen. Retuning now wipes the
+        // decoder outright, but a station simply going off air has to expire too.
+        let age = Some(RDS_DROPPED_AFTER + Duration::from_secs(1));
+        let (mark, text, ok) = rds_headline(&rds(Some("DANKO"), 40), false, age);
+        assert_eq!(text, "NO RDS");
+        assert_eq!(mark, "\u{25cb}");
+        assert!(!ok);
+        // Never a group at all is the same answer.
+        assert_eq!(rds_headline(&rds(Some("DANKO"), 40), false, None).1, "NO RDS");
+    }
+
+    #[test]
+    fn rds_headline_keeps_decoding_while_sync_holds() {
+        // Sync outranks the drop timeout: blocks are arriving even if no whole group
+        // has completed for a while, so "NO RDS" would be wrong.
+        let age = Some(RDS_DROPPED_AFTER + Duration::from_secs(5));
+        assert_eq!(rds_headline(&rds(None, 40), true, age).1, "DECODING");
     }
 
     #[test]

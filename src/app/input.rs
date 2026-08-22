@@ -690,9 +690,17 @@ fn handle_demod_focus(
             m.demod.user_on = !m.demod.user_on;
             let on = m.demod.user_on;
             if !on {
-                // Drop the reading immediately so the panel can't keep showing a
-                // number the demod is no longer producing.
-                m.demod.fm = None;
+                // `enabled` is normally `App::draw`'s to compute, but waiting for
+                // the next frame leaves a window in which the worker publishes one
+                // more measurement — and that publish overwrites the clear below,
+                // then sits on screen for the full staleness timeout. Switching it
+                // off here means the worker's publish-time check sees the intent
+                // however the two threads interleave.
+                m.demod.enabled = false;
+                // Every reading at once, not just `fm`: they all describe the same
+                // channel, and dropping one left the MPX trace, the pilot lock and
+                // the RDS station name on screen under a "DEMOD OFF" headline.
+                m.demod.clear_measurements();
             }
             m.push_log(if on { "Demod: on" } else { "Demod: off" });
             return KeyAction::Continue;
@@ -708,9 +716,9 @@ fn handle_demod_focus(
             let next = (m.demod.offset_hz + step).clamp(-limit, limit);
             if next != m.demod.offset_hz {
                 m.demod.offset_hz = next;
-                // The channel moved; the old reading describes a different
-                // frequency, so drop it rather than let it linger.
-                m.demod.fm = None;
+                // The channel moved; every reading describes a different frequency
+                // now, the accumulated RDS text included.
+                m.demod.clear_measurements();
                 m.push_log(format!("Demod offset: {:+.0} kHz", next as f64 / 1000.0));
             }
             return KeyAction::Continue;
@@ -724,7 +732,7 @@ fn handle_demod_focus(
                     let limit = m.demod.offset_limit_hz(sr);
                     let snapped = off.clamp(-limit, limit);
                     m.demod.offset_hz = snapped;
-                    m.demod.fm = None;
+                    m.demod.clear_measurements();
                     m.push_log(format!("Demod snapped to carrier: {:+.0} kHz",
                                        snapped as f64 / 1000.0));
                 }
@@ -735,7 +743,7 @@ fn handle_demod_focus(
         KeyCode::Char('0') => {
             let mut m = state.lock().unwrap_or_else(|e| e.into_inner());
             m.demod.offset_hz = 0;
-            m.demod.fm = None;
+            m.demod.clear_measurements();
             m.push_log("Demod offset: centre");
             return KeyAction::Continue;
         }
@@ -746,10 +754,7 @@ fn handle_demod_focus(
             let mut m = state.lock().unwrap_or_else(|e| e.into_inner());
             let picked = m.demod.cycle_mode();
             // The previous demodulator's numbers describe a different measurement.
-            m.demod.fm = None;
-            m.demod.am = None;
-            m.demod.ctcss = None;
-            m.demod.ctcss_fill = 0.0;
+            m.demod.clear_measurements();
             m.push_log(match picked {
                 Some(mode) => format!("Demod mode: {} (forced)", mode.label()),
                 None       => "Demod mode: auto".to_string(),
