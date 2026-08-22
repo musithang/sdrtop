@@ -22,7 +22,8 @@ pub enum Modulation {
     /// fit the known bands.
     #[default]
     Unknown,
-    /// Wide-band FM broadcast (~180 kHz occupied).
+    /// Wide-band FM broadcast. Allocated a 200 kHz channel, but see
+    /// [`WFM_MIN_BW_HZ`] for what it actually *measures*.
     Wfm,
     /// Narrow-band FM voice / data (~11–30 kHz).
     Nfm,
@@ -50,6 +51,27 @@ impl Modulation {
 /// rather than labelling noise.
 pub const CLASSIFY_MIN_SNR_DB: f32 = 10.0;
 
+/// Occupied bandwidth at or above which the carrier reads as broadcast FM.
+///
+/// Not the 180 kHz of Carson's rule, and not the 200 kHz channel allocation. The
+/// 99 % occupied bandwidth of a real WFM broadcast measures far less than either,
+/// because the time-averaged spectrum of FM is strongly peaked at the carrier —
+/// 92.8 MHz on a stub antenna measures ~85 kHz, with 91 % of its power inside
+/// ±25 kHz. A weaker signal reads narrower still, since its skirts sink under the
+/// noise floor before the threshold that bounds the measurement window can see them.
+///
+/// So the boundary sits well below the observed figure, and still far above narrow
+/// FM, which tops out near 16 kHz. There is a factor of five of empty space between
+/// the two populations; this is the middle of it.
+pub const WFM_MIN_BW_HZ: u64 = 50_000;
+
+/// Occupied bandwidth at or above which the carrier reads as narrow-band FM rather
+/// than AM. The honest weak point of the heuristic: narrow FM data bursts and AM
+/// voice genuinely overlap here (a 447 MHz data burst measures 6–8 kHz, AM
+/// broadcast 9 kHz), and bandwidth alone cannot separate them. `[T]` on the demod
+/// bench is the override, and a demodulator that confirms the mode is the real fix.
+pub const NFM_MIN_BW_HZ: u64 = 11_000;
+
 /// Estimate the modulation of the signal at centre from its 99% occupied
 /// bandwidth, gated on signal presence. Deliberately conservative: a bandwidth
 /// heuristic, so the wide/narrow split is trustworthy while the AM vs NFM boundary
@@ -59,9 +81,9 @@ pub fn classify(snr_db: f32, occupied_bw_hz: u64) -> Modulation {
         return Modulation::Unknown;
     }
     match occupied_bw_hz {
-        bw if bw >= 100_000 => Modulation::Wfm,
-        bw if bw >= 11_000  => Modulation::Nfm,
-        _                   => Modulation::Am,
+        bw if bw >= WFM_MIN_BW_HZ => Modulation::Wfm,
+        bw if bw >= NFM_MIN_BW_HZ => Modulation::Nfm,
+        _                         => Modulation::Am,
     }
 }
 
@@ -164,10 +186,30 @@ mod tests {
     #[test]
     fn classify_bands_by_occupied_bandwidth() {
         assert_eq!(classify(40.0, 180_000), Modulation::Wfm);
-        assert_eq!(classify(40.0, 100_000), Modulation::Wfm); // wide boundary
+        assert_eq!(classify(40.0, WFM_MIN_BW_HZ), Modulation::Wfm); // wide boundary
         assert_eq!(classify(40.0, 15_000),  Modulation::Nfm);
-        assert_eq!(classify(40.0, 11_000),  Modulation::Nfm); // narrow-FM boundary
+        assert_eq!(classify(40.0, NFM_MIN_BW_HZ), Modulation::Nfm); // narrow-FM boundary
         assert_eq!(classify(40.0, 8_000),   Modulation::Am);
+    }
+
+    #[test]
+    fn classify_reads_a_real_broadcast_as_wfm() {
+        // Measured on air at 92.8 MHz: the 99 % occupied bandwidth of a WFM
+        // broadcast is ~85 kHz, not the 180 kHz of Carson's rule. The boundary that
+        // was calibrated against the old whole-span measure put this in NFM, and
+        // the demod then opened a 25 kHz channel on a broadcast station.
+        assert_eq!(classify(41.0, 85_000), Modulation::Wfm);
+        // Quiet programme material, or a weaker signal whose skirts sink under the
+        // floor, still has to land on the same side of the line.
+        assert_eq!(classify(41.0, 60_000), Modulation::Wfm);
+    }
+
+    #[test]
+    fn classify_keeps_narrow_fm_clear_of_the_wide_boundary() {
+        // The other side of the same gap: narrow FM tops out around 16 kHz, so
+        // there is no width at which the two populations can be confused.
+        assert_eq!(classify(40.0, 16_000), Modulation::Nfm);
+        assert_eq!(classify(40.0, 30_000), Modulation::Nfm);
     }
 
     #[test]

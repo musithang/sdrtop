@@ -34,26 +34,49 @@ const OBW_CARRIER_THRESHOLD_DB: f32 = 10.0;
 /// same thing at 2 Msps as at 20.
 const OBW_GAP_TOLERANCE_HZ: f64 = 10_000.0;
 
+/// Bins either side of the centre that cannot *seed* the carrier window.
+///
+/// Both front-ends park their DC offset and LO leakage on the centre bin, and on an
+/// otherwise empty channel that artefact is the strongest thing in the spectrum. It
+/// is a single spectral line, which the Hann window spreads over about three bins —
+/// so measured live at 447 MHz with nothing on air it reads as a 2 kHz carrier
+/// 46 dB above the floor, and the panel would name it a station.
+///
+/// In bins rather than Hz because the width being excluded is a property of the
+/// transform's resolution, not of any frequency. Only the *seed* is excluded: a real
+/// carrier wider than the guard seeds from its own skirts and the window then grows
+/// back across the centre, so nothing but the bare line is lost.
+///
+/// `strongest_offset_hz` refuses the same artefact for the same reason.
+const OBW_DC_GUARD_BINS: usize = 2;
+
 /// 99 % occupied bandwidth of the carrier the spectrum is centred on, in two steps:
 ///
-/// 1. **Bound the carrier.** From the strongest bin, walk outward while bins stay
-///    above `noise_floor + OBW_CARRIER_THRESHOLD_DB`, stepping over dips shorter
-///    than [`OBW_GAP_TOLERANCE_HZ`] and trimming back to the last bin that actually
-///    cleared the threshold.
+/// 1. **Bound the carrier.** From the strongest bin outside the DC guard, walk
+///    outward while bins stay above `noise_floor + OBW_CARRIER_THRESHOLD_DB`,
+///    stepping over dips shorter than [`OBW_GAP_TOLERANCE_HZ`] and trimming back to
+///    the last bin that actually cleared the threshold.
 /// 2. **Apply ITU-R SM.328 inside that window.** Exclude the bottom 0.5 % and the
 ///    top 0.5 % of the window's power; the span between the cut-offs is the answer.
 ///
 /// `0` when no bin clears the threshold — the same "nothing to measure" sentinel
 /// the caller already treats as `---`, rather than a guess off the noise floor.
+///
+/// Note what this is *not*: Carson's rule. A WFM broadcast is allocated 200 kHz and
+/// designed around 180 kHz, but the 99 % occupied bandwidth of one carrying real
+/// programme material measures nearer 85 kHz, because the time-averaged spectrum of
+/// FM is strongly peaked at the carrier. Measured, not assumed — which is the point
+/// of the field.
 fn occupied_bw(linear: &[f32], sample_rate: f64, noise_floor_db: f32) -> u64 {
     let n = linear.len();
     if n == 0 || sample_rate <= 0.0 { return 0; }
     let bin_hz = sample_rate / n as f64;
 
-    let (peak_idx, peak_lin) = linear.iter().enumerate().fold(
-        (0usize, f32::NEG_INFINITY),
-        |(bi, bv), (i, &v)| if v > bv { (i, v) } else { (bi, bv) },
-    );
+    let centre = n / 2;
+    let (peak_idx, peak_lin) = linear.iter().enumerate()
+        .filter(|(i, _)| i.abs_diff(centre) > OBW_DC_GUARD_BINS)
+        .fold((0usize, f32::NEG_INFINITY),
+              |(bi, bv), (i, &v)| if v > bv { (i, v) } else { (bi, bv) });
     let threshold = 10f32.powf((noise_floor_db + OBW_CARRIER_THRESHOLD_DB) / 10.0);
     if !peak_lin.is_finite() || peak_lin <= threshold { return 0; }
 
@@ -306,7 +329,7 @@ impl FftWorker {
                 // whole capture. See `occupied_bw`.
                 let occupied_bw_hz = occupied_bw(&linear, sample_rate, noise_floor);
                 // TEMP DEBUG — remove before commit
-                if let Ok(p) = std::env::var("SDRTOP_DUMP_FFT").ok().filter(|_| peak_to_nf_db > 25.0).ok_or(()) {
+                if let Ok(p) = std::env::var("SDRTOP_DUMP_FFT").ok().filter(|_| occupied_bw_hz > 0).ok_or(()) {
                     use std::io::Write;
                     let tmp = format!("{p}.tmp");
                     if let Ok(mut f) = std::fs::File::create(&tmp) {
@@ -595,6 +618,40 @@ mod tests {
             *b = 10f32.powf((-90.0 + (i % 7) as f32 - 3.0) / 10.0);
         }
         assert_eq!(occupied_bw(&bins, 2_000_000.0, -90.0), 0);
+    }
+
+    #[test]
+    fn occupied_bw_refuses_the_dc_artefact() {
+        // Measured live at 447.137 MHz with nothing on air: the LO leakage is a
+        // three-bin line at the centre, 46 dB above the floor. Without the guard it
+        // reports as a 2 kHz carrier and `classify` names it AM — a station
+        // invented out of the front end's own artefact.
+        let lin = |db: f32| 10f32.powf(db / 10.0);
+        let mut bins = vec![lin(-85.0); 2048];
+        for i in 1023..=1025 { bins[i] = lin(-39.0); }
+        assert_eq!(occupied_bw(&bins, 2_000_000.0, -85.0), 0);
+    }
+
+    #[test]
+    fn occupied_bw_still_sees_a_carrier_sitting_on_dc() {
+        // The guard excludes the seed, not the window: a real carrier wider than
+        // the artefact seeds from its own skirts, and the walk grows back across
+        // the centre. A 7 kHz burst centred on DC — the shape of the 447 MHz data
+        // bursts — must survive intact.
+        let bins = spectrum(2048, 2_000_000.0, -85.0, 7_000.0, -39.0, 0.0);
+        let bw = occupied_bw(&bins, 2_000_000.0, -85.0);
+        assert!((5_000..=9_000).contains(&bw), "expected ~7 kHz, got {bw}");
+    }
+
+    #[test]
+    fn occupied_bw_prefers_a_real_carrier_over_the_dc_line() {
+        // Both present: the artefact at centre, a station off to one side. The
+        // window must be drawn around the station.
+        let lin = |db: f32| 10f32.powf(db / 10.0);
+        let mut bins = spectrum(2048, 2_000_000.0, -90.0, 180_000.0, -40.0, 400_000.0);
+        for i in 1023..=1025 { bins[i] = lin(-20.0); } // artefact louder than the station
+        let bw = occupied_bw(&bins, 2_000_000.0, -90.0);
+        assert!((170_000..=190_000).contains(&bw), "expected ~180 kHz, got {bw}");
     }
 
     #[test]
