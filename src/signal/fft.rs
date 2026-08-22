@@ -647,7 +647,7 @@ mod tests {
         // invented out of the front end's own artefact.
         let lin = |db: f32| 10f32.powf(db / 10.0);
         let mut bins = vec![lin(-85.0); 2048];
-        for i in 1023..=1025 { bins[i] = lin(-39.0); }
+        for b in bins[1023..=1025].iter_mut() { *b = lin(-39.0); }
         assert_eq!(occupied_bw(&bins, 2_000_000.0, -85.0), 0);
     }
 
@@ -668,7 +668,7 @@ mod tests {
         // window must be drawn around the station.
         let lin = |db: f32| 10f32.powf(db / 10.0);
         let mut bins = spectrum(2048, 2_000_000.0, -90.0, 180_000.0, -40.0, 100_000.0);
-        for i in 1023..=1025 { bins[i] = lin(-20.0); } // artefact louder than the station
+        for b in bins[1023..=1025].iter_mut() { *b = lin(-20.0); } // artefact louder
         let bw = occupied_bw(&bins, 2_000_000.0, -90.0);
         assert!((170_000..=190_000).contains(&bw), "expected ~180 kHz, got {bw}");
     }
