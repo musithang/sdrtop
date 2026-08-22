@@ -22,7 +22,9 @@ use ratatui::{
 };
 
 use crate::signal::demod::{FILTER_QUALITY_D_LIMIT, MPX_SPAN_HZ, PILOT_HZ};
-use crate::state::{deviation_limit_hz, FmMeasure, Modulation, MpxFrame, PilotState, SdrMetrics};
+use crate::state::{
+    deviation_limit_hz, FmMeasure, Modulation, MpxFrame, PilotState, SdrMetrics, PTY_NAMES,
+};
 use crate::ui::chrome;
 use crate::ui::micro_common::bar_spans;
 use crate::ui::panel::Panel;
@@ -49,6 +51,52 @@ fn sections_for(m: Modulation) -> &'static [Sec] {
         Modulation::Wfm | Modulation::Unknown =>
             &[Sec::Mpx, Sec::Pilot, Sec::Deviation, Sec::Rds, Sec::Audio],
     }
+}
+
+/// Rows of RadioText the panel will show. Two rows hold the 64-character maximum
+/// on any column wide enough to be readable; a third would push the sections below
+/// off a short terminal for a field that is usually much shorter than its limit.
+const RT_MAX_ROWS: usize = 2;
+
+/// The RDS headline: what the section leads with before any of the detail rows.
+///
+/// The three states have to read differently. A confirmed Programme Service name
+/// is the answer. Block sync without a name yet means the decoder is working and
+/// the name is seconds away. Neither means the station carries no RDS *as far as
+/// we can tell* — which is why it is phrased as an absence, not a failure.
+///
+/// Returns the marker glyph, the text, and whether it is a positive result.
+fn rds_headline(d: &crate::state::RdsData, sync: bool) -> (&'static str, String, bool) {
+    match d.ps.as_deref() {
+        Some(ps) => ("\u{25cf}", ps.trim().to_string(), true),
+        None if sync || d.groups_ok > 0 => ("\u{25cc}", "DECODING".into(), false),
+        None => ("\u{25cb}", "NO RDS".into(), false),
+    }
+}
+
+/// Break `text` into at most `max_rows` rows of `width` columns, on word
+/// boundaries where one is available. A word longer than the column is cut rather
+/// than allowed to overflow the panel.
+fn wrap(text: &str, width: usize, max_rows: usize) -> Vec<String> {
+    if width == 0 || max_rows == 0 { return Vec::new(); }
+    let mut rows: Vec<String> = Vec::new();
+    let mut row = String::new();
+    for word in text.split_whitespace() {
+        if !row.is_empty() && row.chars().count() + 1 + word.chars().count() > width {
+            rows.push(std::mem::take(&mut row));
+            if rows.len() == max_rows { return rows; }
+        }
+        if !row.is_empty() { row.push(' '); }
+        if word.chars().count() > width {
+            row.extend(word.chars().take(width - row.chars().count()));
+            rows.push(std::mem::take(&mut row));
+            if rows.len() == max_rows { return rows; }
+        } else {
+            row.push_str(word);
+        }
+    }
+    if !row.is_empty() { rows.push(row); }
+    rows
 }
 
 /// Resample an MPX spectrum onto exactly `points` display columns spanning
@@ -421,7 +469,58 @@ impl Panel for FmDemodPanel {
                     None => lines.push(Line::raw("")),
                 }
             }
-            Sec::Rds   => lines.push(chrome::section("RDS", "57 kHz", iw, theme)),
+            Sec::Rds => {
+                lines.push(chrome::section("RDS", "57 kHz", iw, theme));
+                match state.demod.live_rds() {
+                    Some(d) => {
+                        let (mark, text, ok) = rds_headline(d, state.demod.rds_sync);
+                        let color = if ok { theme.status_ok } else { theme.label };
+                        lines.push(Line::from(vec![
+                            Span::raw(" "),
+                            Span::styled(format!("{mark} {text}"),
+                                         Style::default().fg(color).add_modifier(Modifier::BOLD)),
+                        ]));
+                        if let Some(pi) = d.pi {
+                            lines.push(Line::from(vec![
+                                chrome::field("PI", 8, theme),
+                                Span::styled(format!("{pi:04X}"), val),
+                            ]));
+                        }
+                        if let Some(name) = d.pty.map(|p| PTY_NAMES[(p & 0x1F) as usize]) {
+                            lines.push(Line::from(vec![
+                                chrome::field("PTY", 8, theme),
+                                Span::styled(name, val),
+                            ]));
+                        }
+                        // Traffic flags only earn a row when one of them is set —
+                        // "TP off, TA off" is the normal case and says nothing.
+                        if d.tp || d.ta {
+                            let mut flags = Vec::new();
+                            if d.tp { flags.push("TP"); }
+                            if d.ta { flags.push("TA"); }
+                            lines.push(Line::from(vec![
+                                chrome::field("Traffic", 8, theme),
+                                Span::styled(flags.join(" "),
+                                             Style::default().fg(theme.status_warn)),
+                            ]));
+                        }
+                        if d.groups_ok > 0 {
+                            lines.push(Line::from(vec![
+                                chrome::field("Groups", 8, theme),
+                                Span::styled(d.groups_ok.to_string(), val),
+                            ]));
+                        }
+                        // RadioText is a free-text field up to 64 characters, so it
+                        // is the one thing here that has to wrap to the column.
+                        if let Some(rt) = d.rt.as_deref() {
+                            for row in wrap(rt, iw.saturating_sub(1), RT_MAX_ROWS) {
+                                lines.push(Line::from(vec![Span::raw(" "), Span::styled(row, val)]));
+                            }
+                        }
+                    }
+                    None => lines.push(Line::raw("")),
+                }
+            }
             Sec::Audio => lines.push(chrome::section("AUDIO", "", iw, theme)),
             }
             lines.push(Line::raw(""));
@@ -609,5 +708,51 @@ mod tests {
         // At and above the nominal limit this is over-deviation — a real fault.
         assert_eq!(deviation_color(1.0, &t), t.status_crit);
         assert_eq!(deviation_color(1.4, &t), t.status_crit);
+    }
+    fn rds(ps: Option<&str>, groups: u32) -> crate::state::RdsData {
+        crate::state::RdsData {
+            pi: Some(0xB201), ps: ps.map(str::to_string), groups_ok: groups,
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn rds_headline_leads_with_the_station_name() {
+        let (mark, text, ok) = rds_headline(&rds(Some("SDRTOP  "), 40), true);
+        assert_eq!(text, "SDRTOP", "trailing RDS padding must not reach the screen");
+        assert!(ok);
+        assert_eq!(mark, "\u{25cf}");
+    }
+
+    #[test]
+    fn rds_headline_separates_decoding_from_absent() {
+        // Groups arriving but no confirmed name yet: the decoder is working.
+        let (_, text, ok) = rds_headline(&rds(None, 3), false);
+        assert_eq!(text, "DECODING");
+        assert!(!ok);
+        // Sync alone counts too — the first groups have not completed yet.
+        assert_eq!(rds_headline(&rds(None, 0), true).1, "DECODING");
+        // Neither: as far as we can tell there is no RDS here.
+        assert_eq!(rds_headline(&rds(None, 0), false).1, "NO RDS");
+    }
+
+    #[test]
+    fn wrap_breaks_radiotext_on_words() {
+        let rows = wrap("Now playing something long", 12, 3);
+        assert_eq!(rows, vec!["Now playing", "something", "long"]);
+        for r in &rows { assert!(r.chars().count() <= 12); }
+    }
+
+    #[test]
+    fn wrap_respects_the_row_budget_and_the_column() {
+        // More text than rows: the surplus is dropped, never overflowed.
+        let rows = wrap("one two three four five six", 9, 2);
+        assert_eq!(rows.len(), 2);
+        // A word longer than the column is cut rather than allowed to overhang.
+        let rows = wrap("supercalifragilistic", 8, 2);
+        assert_eq!(rows, vec!["supercal"]);
+        // Degenerate geometry yields nothing rather than panicking.
+        assert!(wrap("text", 0, 2).is_empty());
+        assert!(wrap("text", 10, 0).is_empty());
     }
 }

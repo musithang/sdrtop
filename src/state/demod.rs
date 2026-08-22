@@ -9,6 +9,7 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 pub use crate::signal::demod::{PilotMeasure, PilotState};
+pub use crate::signal::rds::{RdsData, PTY_NAMES};
 
 /// One MPX baseband spectrum. `mags_hz[k]` is the deviation contributed by the
 /// component at `k · bin_hz`, so the display reads directly in Hz.
@@ -103,6 +104,17 @@ pub struct DemodState {
     /// WFM only — neither concept exists for NFM or AM.
     pub mpx:   Option<Arc<MpxFrame>>,
     pub pilot: Option<PilotMeasure>,
+    /// Everything decoded from the 57 kHz RDS subcarrier. WFM only.
+    ///
+    /// Unlike the other measurements this one *accumulates*: PS and RadioText are
+    /// built up character by character over seconds, so the decoder keeps its own
+    /// running state and publishes a snapshot. `None` means the RDS chain is not
+    /// running at all, not that the station carries no RDS —
+    /// [`RdsData::groups_ok`] is what separates those.
+    pub rds: Option<Arc<RdsData>>,
+    /// Whether the RDS block synchroniser is currently tracking the group
+    /// structure. Distinguishes "receiving RDS" from "hoping to".
+    pub rds_sync: bool,
     /// AM envelope measurement. Mutually exclusive with `fm` in practice: the
     /// classifier picks one demodulator, and the other's field stays `None`.
     pub am:    Option<AmMeasure>,
@@ -134,6 +146,8 @@ impl Default for DemodState {
             mode_override:   None,
             mpx:             None,
             pilot:           None,
+            rds:             None,
+            rds_sync:        false,
             am:              None,
             ctcss:           None,
             ctcss_fill:      0.0,
@@ -167,6 +181,11 @@ impl DemodState {
     /// The pilot reading to render, subject to the same staleness rule.
     pub fn live_pilot(&self) -> Option<PilotMeasure> {
         if self.is_stale() { None } else { self.pilot }
+    }
+
+    /// The RDS snapshot to render, subject to the same staleness rule.
+    pub fn live_rds(&self) -> Option<&Arc<RdsData>> {
+        if self.is_stale() { None } else { self.rds.as_ref() }
     }
 
     /// The AM reading to render, subject to the same staleness rule.

@@ -1,4 +1,6 @@
 pub mod demod;
+pub mod rds;
+pub mod rds_demod;
 mod dsp;
 pub mod fft;
 pub mod iq;

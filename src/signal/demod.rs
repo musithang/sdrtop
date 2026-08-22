@@ -637,6 +637,12 @@ impl DemodWorker {
         let mut ctcss_window: Vec<f32> = Vec::new();
         let mut ctcss_len: usize = 0;
         let mut last_seq: u64 = 0;
+        // RDS. The subcarrier demod is rebuilt whenever the channel rate moves; the
+        // protocol decoder outlives it, since PS and RadioText take seconds to
+        // assemble and a rate change is not a reason to forget the station.
+        let mut rds: Option<super::rds_demod::RdsDemod> = None;
+        let mut rds_dec = super::rds::RdsDecoder::new();
+        let mut last_mod = Modulation::Unknown;
         // Last decimated sample of the previous block, so the discriminator does
         // not lose the sample pair that spans a block boundary.
         let mut carry: Option<Complex<f32>> = None;
@@ -657,20 +663,32 @@ impl DemodWorker {
 
             // Refuse to guess: without a carrier the classifier reports Unknown,
             // and a reading off noise would be meaningless.
+            // Switching demodulator invalidates everything downstream — a station
+            // decoded as WFM has nothing to say about the next one.
+            if modulation != last_mod {
+                last_mod = modulation;
+                rds = None;
+                rds_dec.reset();
+                audio.clear();
+            }
+
             let Some(target) = target_rate_for(modulation) else {
                 self.clear();
                 audio.clear();
+                rds_dec.reset();
                 continue;
             };
             if !streaming || snr_db < crate::state::CLASSIFY_MIN_SNR_DB {
                 self.clear();
                 audio.clear();
+                rds_dec.reset();
                 continue;
             }
 
-            // CTCSS needs an unbroken half-second, so narrow-band FM forgoes the
-            // duty cycle and pays for every block. The other modes stay cheap.
-            let needs_continuity = matches!(modulation, Modulation::Nfm);
+            // CTCSS needs an unbroken half-second and RDS a run of whole groups at
+            // 87.6 ms each, so both FM modes forgo the duty cycle and pay for every
+            // block. AM stays cheap — nothing in it needs continuity.
+            let needs_continuity = matches!(modulation, Modulation::Nfm | Modulation::Wfm);
             let due = last_update.elapsed() >= UPDATE_INTERVAL;
             if !needs_continuity && !due { continue; }
 
@@ -690,6 +708,11 @@ impl DemodWorker {
                 sd.reset();
                 audio.clear();
                 carry = None;
+                // Bits either side of a gap are not the same message. The demod's
+                // timing and the decoder's block sync both have to start over; the
+                // text already confirmed is kept, since the station has not changed.
+                if let Some(r) = rds.as_mut() { r.reset(); }
+                rds_dec.reset();
             }
 
             // Continuity means every sample counts; otherwise the bounded slice
@@ -725,19 +748,33 @@ impl DemodWorker {
                     fresh_fm = fm_stats(&inst);
 
                     if matches!(modulation, Modulation::Wfm) {
-                        // MPX baseband + pilot. A short block simply yields no
-                        // spectrum rather than a padded, misleading one.
-                        mpx_spectrum(&inst, &mpx_window, mpx_fft.as_ref(), &mut mpx_scratch, &mut mpx_mags);
-                        mpx_frame = (!mpx_mags.is_empty()).then(|| {
-                            Arc::new(crate::state::MpxFrame {
-                                bin_hz:  rate / MPX_FFT_SIZE as f64,
-                                mags_hz: mpx_mags.clone(),
-                            })
-                        });
-                        pilot = mpx_frame.as_ref().map(|f| {
-                            pilot_measure(&f.mags_hz, f.bin_hz,
-                                          crate::state::deviation_limit_hz(modulation))
-                        });
+                        // RDS rides on every block: the bitstream only survives if
+                        // the run is unbroken, so unlike the spectrum below it
+                        // cannot be sampled on the display cadence.
+                        if rds.as_ref().is_some_and(|r| r.rate() != rate) {
+                            rds = None;
+                            rds_dec.reset();
+                        }
+                        let rd = rds.get_or_insert_with(|| super::rds_demod::RdsDemod::new(rate));
+                        rd.process(&inst, &mut rds_dec);
+
+                        // MPX baseband + pilot, only when it will actually be
+                        // published — a spectrum nobody reads is wasted work. A
+                        // short block simply yields no spectrum rather than a
+                        // padded, misleading one.
+                        if due {
+                            mpx_spectrum(&inst, &mpx_window, mpx_fft.as_ref(), &mut mpx_scratch, &mut mpx_mags);
+                            mpx_frame = (!mpx_mags.is_empty()).then(|| {
+                                Arc::new(crate::state::MpxFrame {
+                                    bin_hz:  rate / MPX_FFT_SIZE as f64,
+                                    mags_hz: mpx_mags.clone(),
+                                })
+                            });
+                            pilot = mpx_frame.as_ref().map(|f| {
+                                pilot_measure(&f.mags_hz, f.bin_hz,
+                                              crate::state::deviation_limit_hz(modulation))
+                            });
+                        }
                     } else {
                         // Accumulate the contiguous run the tone detector needs.
                         let want = (CTCSS_WINDOW_S * rate) as usize;
@@ -767,11 +804,21 @@ impl DemodWorker {
             if !due { continue; }
             last_update = Instant::now();
 
+            // Snapshot the accumulating RDS state for the display. Cloned here,
+            // after the cadence gate, so the per-block path stays allocation-free.
+            let (rds_out, rds_sync) = if matches!(modulation, Modulation::Wfm) {
+                (Some(Arc::new(rds_dec.data().clone())), rds_dec.locked())
+            } else {
+                (None, false)
+            };
+
             let mut m = self.state.lock().unwrap_or_else(|e| e.into_inner());
             m.demod.decimation      = d;
             m.demod.channel_rate_hz = rate;
             m.demod.mpx             = mpx_frame;
             m.demod.pilot           = pilot;
+            m.demod.rds             = rds_out;
+            m.demod.rds_sync        = rds_sync;
             m.demod.am              = fresh_am;
             m.demod.ctcss           = ctcss;
             m.demod.ctcss_fill      = fill;
@@ -803,6 +850,8 @@ impl DemodWorker {
         m.demod.am         = None;
         m.demod.ctcss      = None;
         m.demod.ctcss_fill = 0.0;
+        m.demod.rds        = None;
+        m.demod.rds_sync   = false;
     }
 }
 
