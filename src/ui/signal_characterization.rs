@@ -29,6 +29,7 @@ use ratatui::{
 
 use crate::state::{FftFrame, Modulation, SdrMetrics};
 use crate::ui::chrome::{field, section};
+use crate::ui::micro_common::fmt_bw;
 use crate::ui::panel::Panel;
 
 pub struct SignalCharacterizationPanel;
@@ -68,13 +69,6 @@ fn snr_color(snr: f32, theme: &crate::Theme) -> Color {
 fn fmt_freq(hz: u64) -> String {
     if hz >= 1_000_000_000 { format!("{:.6} GHz", hz as f64 / 1e9) }
     else                   { format!("{:.3} MHz", hz as f64 / 1e6) }
-}
-
-/// Occupied-bandwidth readout: MHz / kHz / Hz by magnitude.
-pub(crate) fn fmt_bw(hz: u64) -> String {
-    if hz >= 1_000_000      { format!("{:.3} MHz", hz as f64 / 1e6) }
-    else if hz >= 1_000     { format!("{:.1} kHz", hz as f64 / 1e3) }
-    else                    { format!("{hz} Hz") }
 }
 
 /// Noise floor as a power spectral density, `dBFS/Hz`, or `None` when the frame
@@ -605,13 +599,6 @@ mod tests {
         let spans = acpr_bar(-95.0, 10, &t);
         let s: String = spans.iter().map(|s| s.content.as_ref()).collect();
         assert!(s.chars().all(|c| c == ' '), "below the display floor reads as clean/empty: {s:?}");
-    }
-
-    #[test]
-    fn fmt_bw_picks_units() {
-        assert_eq!(fmt_bw(180_000), "180.0 kHz");
-        assert_eq!(fmt_bw(1_500_000), "1.500 MHz");
-        assert_eq!(fmt_bw(400), "400 Hz");
     }
 
     #[test]

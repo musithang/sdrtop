@@ -171,7 +171,7 @@ fn signal_fields(sig: &crate::state::SignalState, stale: bool) -> Vec<(&'static 
             dash()
         }),
         ("OBW", if sig.occupied_bw_hz > 0 {
-            crate::ui::signal_characterization::fmt_bw(sig.occupied_bw_hz)
+            crate::ui::micro_common::fmt_bw(sig.occupied_bw_hz)
         } else {
             dash()
         }),
@@ -553,7 +553,7 @@ fn signal_marker_lines(state: &SdrMetrics, theme: &crate::Theme, iw: usize) -> V
     let stale = crate::ui::micro_common::fft_stale(state);
 
     let obw_str = if !stale && sig.occupied_bw_hz > 0 {
-        crate::ui::signal_characterization::fmt_bw(sig.occupied_bw_hz)
+        crate::ui::micro_common::fmt_bw(sig.occupied_bw_hz)
     } else {
         "\u{2014}".to_string()
     };

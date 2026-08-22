@@ -17,16 +17,6 @@ fn snr_color(snr: f32, theme: &crate::Theme) -> Color {
     else                { theme.status_crit }
 }
 
-fn fmt_bw(hz: u64) -> String {
-    if hz >= 1_000_000 {
-        format!("{:.3} MHz", hz as f64 / 1_000_000.0)
-    } else if hz >= 1_000 {
-        format!("{:.1} kHz", hz as f64 / 1_000.0)
-    } else {
-        format!("{} Hz", hz)
-    }
-}
-
 impl Panel for SignalMetricsPanel {
     fn name(&self) -> &'static str { "signal_metrics" }
     fn min_size(&self) -> (u16, u16) { (32, 6) }
@@ -81,7 +71,7 @@ impl Panel for SignalMetricsPanel {
             Line::from(vec![
                 Span::styled(format!("{:<15}", "Occupied BW"), lbl),
                 Span::styled(
-                    if state.signal.occupied_bw_hz > 0 { fmt_bw(state.signal.occupied_bw_hz) } else { "---".into() },
+                    if state.signal.occupied_bw_hz > 0 { crate::ui::micro_common::fmt_bw(state.signal.occupied_bw_hz) } else { "---".into() },
                     val,
                 ),
             ]),

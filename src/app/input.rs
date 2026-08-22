@@ -5,14 +5,9 @@ use crossterm::event::{KeyCode, KeyEvent};
 
 use crate::hardware;
 use crate::state::{InputMode, MicroView, RailMode, SdrMetrics, SpectrumMarker};
+use crate::ui::micro_common::fmt_bw;
 use crate::ui::{self, spectrum::{fmt_spectrum_step, next_spectrum_step, prev_spectrum_step}};
 use crate::ui::waterfall::{next_wf_stride, prev_wf_stride, next_wf_zoom, prev_wf_zoom};
-
-fn fmt_bw(hz: u64) -> String {
-    if hz >= 1_000_000 { format!("{:.1} MHz", hz as f64 / 1_000_000.0) }
-    else if hz >= 1_000 { format!("{} kHz", hz / 1_000) }
-    else                { format!("{} Hz", hz) }
-}
 
 pub enum KeyAction {
     Continue,
@@ -612,13 +607,7 @@ fn handle_signal_metrics_focus(
         let pwr = m.signal.channel_power_dbfs;
         let obw = m.signal.occupied_bw_hz;
         let nf  = m.waterfall.last_fft.as_ref().map(|fr| fr.noise_floor);
-        let obw_str = if obw >= 1_000_000 {
-            format!("{:.3} MHz", obw as f64 / 1_000_000.0)
-        } else if obw >= 1_000 {
-            format!("{:.1} kHz", obw as f64 / 1_000.0)
-        } else {
-            format!("{} Hz", obw)
-        };
+        let obw_str = fmt_bw(obw);
         let nf_str = nf.map(|n| format!("{:.1} dBFS", n)).unwrap_or_else(|| "\u{2014}".into());
         m.push_log(format!(
             "Signal snapshot — SNR: {:.1} dB · Pwr: {:.1} dBFS · OBW: {} · NF: {}",

@@ -35,11 +35,23 @@ pub fn fmt_freq_mhz(hz: u64) -> String {
     format!("{:.3} MHz", hz as f64 / 1_000_000.0)
 }
 
-/// `152 kHz` / `1.2 MHz` style bandwidth.
+/// `1.500 MHz` / `152.0 kHz` / `400 Hz` — the one bandwidth readout.
+///
+/// There were five of these, in `input.rs` (twice, once inline), `signal_metrics`,
+/// `signal_characterization` and here, and they disagreed: 180 kHz of occupied
+/// bandwidth read as `180 kHz` on the micro views and `180.0 kHz` on the lab panel,
+/// and the characterization panel and its own `[C]` snapshot printed the same number
+/// two different ways.
+///
+/// This precision is the lab one, kept because it is the honest one: roughly four
+/// significant figures at every scale, so the readout resolves to about 1 kHz on a
+/// megahertz-wide signal and 100 Hz on a kilohertz-wide one. An FFT bin is ~488 Hz
+/// at 2 Msps, so those digits are measured, not invented — while `{} kHz` integer
+/// truncation was throwing away resolution the analyser actually has.
 pub fn fmt_bw(hz: u64) -> String {
-    if hz >= 1_000_000 { format!("{:.2} MHz", hz as f64 / 1_000_000.0) }
-    else if hz >= 1_000 { format!("{} kHz", hz / 1_000) }
-    else { format!("{} Hz", hz) }
+    if hz >= 1_000_000      { format!("{:.3} MHz", hz as f64 / 1e6) }
+    else if hz >= 1_000     { format!("{:.1} kHz", hz as f64 / 1e3) }
+    else                    { format!("{hz} Hz") }
 }
 
 // ── Shared spans ────────────────────────────────────────────────────────────
@@ -168,8 +180,19 @@ mod tests {
         assert_eq!(fmt_rbw(9_800.0), "9.8 kHz");
         assert_eq!(fmt_rbw(800.0), "800 Hz");
         assert_eq!(fmt_freq_mhz(433_920_000), "433.920 MHz");
-        assert_eq!(fmt_bw(152_000), "152 kHz");
-        assert_eq!(fmt_bw(1_200_000), "1.20 MHz");
+        assert_eq!(fmt_bw(152_000), "152.0 kHz");
+        assert_eq!(fmt_bw(1_200_000), "1.200 MHz");
+        assert_eq!(fmt_bw(400), "400 Hz");
+    }
+
+    #[test]
+    fn fmt_bw_reads_the_same_everywhere() {
+        // C1: five copies of this used to disagree, which meant the lab panel and
+        // its own `[C]` snapshot printed one measurement two ways. There is one
+        // function now, so the only thing left to pin is that it keeps the
+        // resolution the analyser has rather than truncating to whole kHz.
+        assert_eq!(fmt_bw(180_500), "180.5 kHz", "sub-kHz resolution survives");
+        assert_eq!(fmt_bw(1_250_000), "1.250 MHz", "and sub-10-kHz at MHz scale");
     }
 
     #[test]
