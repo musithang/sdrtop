@@ -70,6 +70,21 @@ pub fn handle_key(
     }
 }
 
+/// Fold an uppercase letter key onto its lowercase twin, leaving every other key
+/// alone. See the note in [`handle_normal`] for why this exists and why it lives
+/// there rather than at [`handle_key`].
+///
+/// ASCII only, and letters only: a shifted digit or symbol arrives as its own
+/// character (`Shift+1` is `!`), so there is nothing to fold, and folding a
+/// non-ASCII character would change what a non-English keyboard sent.
+fn fold_key_case(key: KeyEvent) -> KeyEvent {
+    match key.code {
+        KeyCode::Char(c) if c.is_ascii_uppercase() =>
+            KeyEvent { code: KeyCode::Char(c.to_ascii_lowercase()), ..key },
+        _ => key,
+    }
+}
+
 // ── Normal mode ───────────────────────────────────────────────────────────────
 
 fn handle_normal(
@@ -81,6 +96,17 @@ fn handle_normal(
     show_footer: &mut bool,
     focus_keys: &HashMap<char, &'static str>,
 ) -> KeyAction {
+    // Every key hint in the app is capitalised — `[C] Snapshot to log`, `[Q] Quit`,
+    // `[J K] Cursor`, `[S/E] Start/End` — but the handlers below are written against
+    // lowercase, and only some of them spelled out `Char('c') | Char('C')`. So the
+    // same displayed key worked with Shift on the IQ bench and did nothing on the
+    // characterization panel next to it, and Shift+Q never quit anywhere.
+    //
+    // Folding case here rather than in twelve match arms makes it one rule that a
+    // new handler cannot forget. It sits in `handle_normal`, not `handle_key`, so
+    // the text-entry modes — a marker label is typed, capitals and all — are
+    // untouched.
+    let key = fold_key_case(key);
     let focused = engine.focused_panel_name().map(|s| s.to_string());
 
     match focused.as_deref() {
@@ -267,7 +293,7 @@ fn handle_spectrum_focus(
             }
         }
         // `D` cycles the trace render style (braille → fill → scatter); persisted.
-        KeyCode::Char('d') | KeyCode::Char('D') => {
+        KeyCode::Char('d') => {
             let mut m = state.lock().unwrap_or_else(|e| e.into_inner());
             let next = m.spectrum.style.next();
             m.spectrum.style = next;
@@ -361,7 +387,7 @@ fn handle_waterfall_focus(
         }
         // `P` cycles the colour gradient (classic → amber → ice → phosphor). The
         // choice persists to `[display] waterfall_palette` on quit.
-        KeyCode::Char('p') | KeyCode::Char('P') => {
+        KeyCode::Char('p') => {
             let mut m = state.lock().unwrap_or_else(|e| e.into_inner());
             let next = m.waterfall.palette.next();
             m.waterfall.palette = next;
@@ -410,12 +436,12 @@ fn handle_lab_banner_focus(
             let n = m.lab.avg_n;
             m.push_log(format!("Averaging: \u{00D7}{n}"));
         }
-        KeyCode::Char('r') | KeyCode::Char('R') => {
+        KeyCode::Char('r') => {
             let mut m = state.lock().unwrap_or_else(|e| e.into_inner());
             m.lab.ref_dbfs = None;
             m.push_log("Reference level cleared");
         }
-        KeyCode::Char('c') | KeyCode::Char('C') => {
+        KeyCode::Char('c') => {
             let mut m = state.lock().unwrap_or_else(|e| e.into_inner());
             if m.lab.ref_trace.is_some() {
                 m.lab.ref_trace = None;
@@ -443,7 +469,7 @@ fn handle_iq_focus(
 ) -> KeyAction {
     match key.code {
         // [M] — pin / unpin the carrier+image markers (override the live auto-track).
-        KeyCode::Char('m') | KeyCode::Char('M') => {
+        KeyCode::Char('m') => {
             let mut m = state.lock().unwrap_or_else(|e| e.into_inner());
             let auto = ui::image_scope::carrier_image(&m);
             if m.lab.iq_marker_pin.is_some() {
@@ -461,7 +487,7 @@ fn handle_iq_focus(
             return KeyAction::Continue;
         }
         // [D] — DC-block: subtract the live DC estimate from the stream.
-        KeyCode::Char('d') | KeyCode::Char('D') => {
+        KeyCode::Char('d') => {
             let mut m = state.lock().unwrap_or_else(|e| e.into_inner());
             m.iq.cal.dc_block_on = !m.iq.cal.dc_block_on;
             let on = m.iq.cal.dc_block_on;
@@ -470,7 +496,7 @@ fn handle_iq_focus(
             return KeyAction::Continue;
         }
         // [C] — auto-cal: capture (or clear) the I/Q quadrature correction.
-        KeyCode::Char('c') | KeyCode::Char('C') => {
+        KeyCode::Char('c') => {
             let mut m = state.lock().unwrap_or_else(|e| e.into_inner());
             if m.iq.cal.cal_applied || m.iq.cal.cal_pending {
                 m.iq.cal.cal_applied = false;
@@ -485,7 +511,7 @@ fn handle_iq_focus(
             return KeyAction::Continue;
         }
         // [F] — freeze / thaw the constellation cloud.
-        KeyCode::Char('f') | KeyCode::Char('F') => {
+        KeyCode::Char('f') => {
             let mut m = state.lock().unwrap_or_else(|e| e.into_inner());
             m.iq.cal.frozen = !m.iq.cal.frozen;
             let frozen = m.iq.cal.frozen;
@@ -515,7 +541,7 @@ fn handle_rf_focus(
     match key.code {
         // [A] — auto-gain: one-shot to optimal, or latch the continuous track once
         // already there. HackRF-only; never runs unless streaming.
-        KeyCode::Char('a') | KeyCode::Char('A') => {
+        KeyCode::Char('a') => {
             let (peak, lna, vga, friis, streaming) = {
                 let m = state.lock().unwrap_or_else(|e| e.into_inner());
                 (m.signal.adc_peak_dbfs as f64, m.radio.lna_gain, m.radio.vga_gain,
@@ -565,7 +591,7 @@ fn handle_rf_focus(
         }
         // [⎵]/[F] — freeze / thaw the histogram + level diagram (display only; RX
         // keeps running). Bound to focus, not global Space=RX.
-        KeyCode::Char(' ') | KeyCode::Char('f') | KeyCode::Char('F') => {
+        KeyCode::Char(' ') | KeyCode::Char('f') => {
             let mut m = state.lock().unwrap_or_else(|e| e.into_inner());
             if m.lab.rf_freeze.is_some() {
                 m.lab.rf_freeze = None;
@@ -712,7 +738,7 @@ fn handle_demod_focus(
             }
             return KeyAction::Continue;
         }
-        KeyCode::Char('p') | KeyCode::Char('P') => {
+        KeyCode::Char('p') => {
             let mut m = state.lock().unwrap_or_else(|e| e.into_inner());
             let bins = m.waterfall.last_fft.as_ref().map(|f| Arc::clone(&f.bins_dbfs));
             let sr = m.radio.config_sample_rate;
@@ -736,7 +762,7 @@ fn handle_demod_focus(
             m.push_log("Demod offset: centre");
             return KeyAction::Continue;
         }
-        KeyCode::Char('t') | KeyCode::Char('T') => {
+        KeyCode::Char('t') => {
             // The classifier measures 99 % occupied bandwidth across the whole
             // span, so on a wide span it reads WFM for nearly anything — fine as a
             // badge, too coarse to choose a demodulator. This is the override.
@@ -750,18 +776,37 @@ fn handle_demod_focus(
             });
             return KeyAction::Continue;
         }
-        KeyCode::Char('c') | KeyCode::Char('C') => {
+        KeyCode::Char('c') => {
             let mut m = state.lock().unwrap_or_else(|e| e.into_inner());
-            let line = match m.demod.live() {
-                Some(fm) => format!(
-                    "Demod \u{2014} {}: peak dev {:.1} kHz \u{00b7} RMS {:.1} kHz \u{00b7} offset {:+.0} Hz \u{00b7} {:.0} kHz ch",
-                    m.signal.modulation.label(),
-                    fm.peak_dev_hz / 1000.0,
-                    fm.rms_dev_hz / 1000.0,
-                    fm.carrier_offset_hz,
-                    m.demod.channel_rate_hz / 1000.0,
-                ),
-                None => "Demod \u{2014} no measurement to snapshot".to_string(),
+            // The panel shows whichever demodulator is running; the snapshot used to
+            // know only the FM one, so an AM depth reading or a decoded CTCSS tone
+            // logged "no measurement to snapshot" with the number on screen above it.
+            // The mode name is the *effective* one for the same reason the sections
+            // are chosen by it — a forced mode logged the classifier's guess.
+            let modulation = m.demod.effective_modulation(m.signal.modulation);
+            let ch = format!(" \u{00b7} {:.0} kHz ch", m.demod.channel_rate_hz / 1000.0);
+            let body = match (m.demod.live(), m.demod.live_am()) {
+                (Some(fm), _) => {
+                    // CTCSS rides on the same discriminator output, so when a tone is
+                    // identified it belongs on the same line as the deviation it came
+                    // from rather than in a snapshot of its own.
+                    let tone = m.demod.live_ctcss()
+                        .map(|t| format!(" \u{00b7} CTCSS {:.1} Hz", t.tone_hz))
+                        .unwrap_or_default();
+                    Some(format!(
+                        "peak dev {:.1} kHz \u{00b7} RMS {:.1} kHz \u{00b7} carrier {:+.0} Hz{tone}",
+                        fm.peak_dev_hz / 1000.0, fm.rms_dev_hz / 1000.0, fm.carrier_offset_hz,
+                    ))
+                }
+                (None, Some(am)) => Some(format!(
+                    "depth {:.0}% (+{:.0}/\u{2212}{:.0}) \u{00b7} carrier {:.1} dBFS",
+                    am.depth_pct, am.positive_pct, am.negative_pct, am.carrier_dbfs,
+                )),
+                (None, None) => None,
+            };
+            let line = match body {
+                Some(b) => format!("Demod \u{2014} {}: {b}{ch}", modulation.label()),
+                None    => "Demod \u{2014} no measurement to snapshot".to_string(),
             };
             m.push_log(line);
             return KeyAction::Continue;
@@ -968,7 +1013,7 @@ fn handle_command_rail_focus(
             if !closed { return handle_global(key, state, device, engine, show_help, show_footer, focus_keys); }
         }
         // Toggle the full-log overlay (in rail-focus; globally `l` focuses waterfall).
-        KeyCode::Char('l') | KeyCode::Char('L') => {
+        KeyCode::Char('l') => {
             let mut m = state.lock().unwrap_or_else(|e| e.into_inner());
             m.ui.log_overlay = !m.ui.log_overlay;
         }
@@ -998,7 +1043,7 @@ fn handle_command_rail_focus(
             m.push_log(format!("Rail mode: {}", mode.label()));
         }
         // Save the current tuning into a recall slot (free slot, else oldest).
-        KeyCode::Char('m') | KeyCode::Char('M') => {
+        KeyCode::Char('m') => {
             let mut m = state.lock().unwrap_or_else(|e| e.into_inner());
             let freq = m.radio.frequency;
             let slot = m.ui.save_recall(freq);
@@ -1498,5 +1543,46 @@ fn handle_marker_input(key: KeyEvent, state: &Arc<Mutex<SdrMetrics>>) {
             m.ui.input_buf.clear();
         }
         _ => {}
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crossterm::event::KeyModifiers;
+
+    fn ev(code: KeyCode) -> KeyEvent { KeyEvent::new(code, KeyModifiers::NONE) }
+
+    #[test]
+    fn fold_key_case_matches_the_capitalised_hints() {
+        // C6: every hint in the app is capitalised (`[C] Snapshot to log`,
+        // `[Q] Quit`, `[S/E] Start/End`) while the handlers are written lowercase.
+        for (from, to) in [('C', 'c'), ('Q', 'q'), ('J', 'j'), ('S', 's')] {
+            assert_eq!(fold_key_case(ev(KeyCode::Char(from))).code, KeyCode::Char(to));
+        }
+        // Lowercase and non-letters pass through untouched.
+        for c in ['c', '0', '[', '+', '/'] {
+            assert_eq!(fold_key_case(ev(KeyCode::Char(c))).code, KeyCode::Char(c));
+        }
+        assert_eq!(fold_key_case(ev(KeyCode::Left)).code, KeyCode::Left);
+    }
+
+    #[test]
+    fn fold_key_case_leaves_non_ascii_alone() {
+        // A non-English layout can send letters whose "lowercase" is not what the
+        // handlers match on; folding them would change the key that was pressed.
+        for c in ['\u{00c1}', '\u{0150}', '\u{00dc}'] {
+            assert_eq!(fold_key_case(ev(KeyCode::Char(c))).code, KeyCode::Char(c));
+        }
+    }
+
+    #[test]
+    fn fold_key_case_keeps_the_modifiers() {
+        // Shift is still on the event after the fold; nothing downstream reads it
+        // today, and a handler that starts to must see what was actually pressed.
+        let k = KeyEvent::new(KeyCode::Char('C'), KeyModifiers::SHIFT);
+        let folded = fold_key_case(k);
+        assert_eq!(folded.code, KeyCode::Char('c'));
+        assert_eq!(folded.modifiers, KeyModifiers::SHIFT);
     }
 }

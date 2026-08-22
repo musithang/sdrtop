@@ -437,7 +437,11 @@ fn build_stack(
                 ]));
             }
         } else {
-            let (mark, headline, detail) = idle_status(state.signal.modulation, state.demod.user_on);
+            // The *effective* mode, not the classifier's raw guess: the sections
+            // below are chosen by it, and passing the raw one meant forcing AM with
+            // [T] on an unclassified carrier printed "Tune to a broadcast station"
+            // directly above a DEPTH / CARRIER pair.
+            let (mark, headline, detail) = idle_status(modulation, state.demod.user_on);
             stack.push(Line::from(vec![
                 Span::raw(" "),
                 Span::styled(format!("{mark} {headline}"), Style::default().fg(theme.stale).add_modifier(Modifier::BOLD)),
@@ -542,8 +546,12 @@ fn build_stack(
                     chrome::field("RMS", 8, theme),
                     Span::styled(fmt_hz(rms_dev_hz), val),
                 ]));
+                // Not "Offset": the headline already uses that word for the
+                // channel's offset from the tuned centre, and this is the opposite
+                // measurement with the opposite sign — where the carrier sits inside
+                // the channel, i.e. the tuning error the demodulator is seeing.
                 stack.detail(Line::from(vec![
-                    chrome::field("Offset", 8, theme),
+                    chrome::field("Carrier", 8, theme),
                     Span::styled(fmt_offset(carrier_offset_hz), val),
                 ]));
             }
