@@ -39,7 +39,7 @@ pub struct FmDemodPanel;
 
 /// One zone of the demod panel.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
-enum Sec { Mpx, Pilot, Deviation, Ctcss, Depth, Carrier, Rds, Audio }
+enum Sec { Mpx, Pilot, Deviation, Ctcss, Depth, Carrier, Rds }
 
 /// The sections a given modulation's panel shows.
 ///
@@ -48,14 +48,19 @@ enum Sec { Mpx, Pilot, Deviation, Ctcss, Depth, Carrier, Rds, Audio }
 /// AM, and FM deviation is meaningless for an amplitude-modulated carrier — so
 /// each mode is shown only what it actually has, rather than a fixed grid of
 /// sections where most read as permanently empty.
+///
+/// There is no AUDIO section. One existed as a Phase-6 placeholder and appeared in
+/// every mode with nothing under it, in every state, forever — which is precisely
+/// the failure this dispatch was built to avoid. It comes back when there is
+/// something to put in it.
 fn sections_for(m: Modulation) -> &'static [Sec] {
     match m {
-        Modulation::Nfm => &[Sec::Deviation, Sec::Ctcss, Sec::Audio],
-        Modulation::Am  => &[Sec::Depth, Sec::Carrier, Sec::Audio],
+        Modulation::Nfm => &[Sec::Deviation, Sec::Ctcss],
+        Modulation::Am  => &[Sec::Depth, Sec::Carrier],
         // An unclassified carrier keeps the broadcast shape — the state the panel
         // rests in before anything is tuned.
         Modulation::Wfm | Modulation::Unknown =>
-            &[Sec::Mpx, Sec::Pilot, Sec::Deviation, Sec::Rds, Sec::Audio],
+            &[Sec::Mpx, Sec::Pilot, Sec::Deviation, Sec::Rds],
     }
 }
 
@@ -334,7 +339,18 @@ impl Panel for FmDemodPanel {
         lines.push(Line::raw(""));
 
         // ── Sections, chosen by modulation ─────────────────────────────────
-        for sec in sections_for(modulation) {
+        //
+        // Only while there is something to put under them. With the demod off, or
+        // before it has locked, every section is empty at once — and a stack of five
+        // headings over blank space reads as a broken panel rather than an idle one.
+        // The headline above already says why nothing is measured; repeating that in
+        // scaffolding adds no information.
+        let sections: &[Sec] = if state.demod.has_measurement() {
+            sections_for(modulation)
+        } else {
+            &[]
+        };
+        for sec in sections {
             match sec {
             Sec::Mpx => {
         lines.push(chrome::section("MPX BASEBAND", "0-60 kHz", iw, theme));
@@ -554,12 +570,24 @@ impl Panel for FmDemodPanel {
                     None => lines.push(Line::raw("")),
                 }
             }
-            Sec::Audio => lines.push(chrome::section("AUDIO", "", iw, theme)),
             }
             lines.push(Line::raw(""));
         }
 
-        chrome::fit_spacers(&mut lines, inner.height as usize);
+        if sections.is_empty() {
+            // With no sections there are two lines of message in a column thirty
+            // rows tall, and left at the top they read as content that failed to
+            // render. Centring them says "nothing here" deliberately.
+            //
+            // Not via `fit_spacers`: it fills by *growing the existing blank rows*
+            // proportionally, so leading padding gets amplified along with
+            // everything else and the message ends up pinned to the floor. An empty
+            // state has no stack to breathe — it just needs placing.
+            let pad = (inner.height as usize).saturating_sub(lines.len()) / 2;
+            for _ in 0..pad { lines.insert(0, Line::raw("")); }
+        } else {
+            chrome::fit_spacers(&mut lines, inner.height as usize);
+        }
         f.render_widget(Paragraph::new(lines), inner);
     }
 }
@@ -721,6 +749,16 @@ mod tests {
     #[test]
     fn unknown_rests_in_the_broadcast_shape() {
         assert_eq!(sections_for(Modulation::Unknown), sections_for(Modulation::Wfm));
+    }
+
+    #[test]
+    fn no_mode_carries_a_section_with_nothing_behind_it() {
+        // The AUDIO placeholder appeared in every mode, always empty, for as long as
+        // it existed. Each set is now exactly the sections that mode can fill.
+        assert_eq!(sections_for(Modulation::Wfm),
+                   &[Sec::Mpx, Sec::Pilot, Sec::Deviation, Sec::Rds]);
+        assert_eq!(sections_for(Modulation::Nfm), &[Sec::Deviation, Sec::Ctcss]);
+        assert_eq!(sections_for(Modulation::Am),  &[Sec::Depth, Sec::Carrier]);
     }
 
     #[test]

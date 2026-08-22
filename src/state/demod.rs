@@ -205,6 +205,19 @@ impl DemodState {
         self.last_update    = None;
     }
 
+    /// Whether anything at all is currently measured — the question the panel asks
+    /// before drawing its section headings.
+    ///
+    /// Not the same as "the FM discriminator produced a reading": a short block can
+    /// leave `fm` empty while the MPX spectrum and the pilot are perfectly good, and
+    /// a panel that keyed off `fm` alone would hide sections that have data in them.
+    pub fn has_measurement(&self) -> bool {
+        if self.is_stale() { return false; }
+        self.fm.is_some() || self.am.is_some() || self.ctcss.is_some()
+            || self.mpx.is_some() || self.pilot.is_some() || self.rds.is_some()
+            || self.ctcss_searching()
+    }
+
     /// How long since the RDS decoder last completed a group, or `None` when it
     /// never has. The freshness of [`Self::rds`], which is not the same question as
     /// [`Self::is_stale`]: the snapshot is republished every cycle whether or not
@@ -414,6 +427,46 @@ mod tests {
         assert!(d.user_on);
         assert_eq!(d.offset_hz, 75_000);
         assert_eq!(d.mode_override, Some(Modulation::Nfm));
+    }
+
+    #[test]
+    fn has_measurement_sees_past_the_fm_reading() {
+        // A short block can leave `fm` empty while the MPX spectrum and the pilot
+        // are perfectly good. Keying the panel's sections off `fm` alone would hide
+        // sections that have data in them.
+        let d = DemodState {
+            fm: None,
+            pilot: Some(PilotMeasure { state: PilotState::Locked, deviation_hz: 6_500.0, injection_pct: 8.7 }),
+            last_update: Some(Instant::now()),
+            ..Default::default()
+        };
+        assert!(d.live().is_none());
+        assert!(d.has_measurement());
+    }
+
+    #[test]
+    fn has_measurement_is_false_when_there_is_nothing_to_show() {
+        // What the panel checks before drawing five section headings over blank
+        // space: with the demod off, every one of them would be empty at once.
+        let mut d = DemodState { fm: Some(measure()), last_update: Some(Instant::now()), ..Default::default() };
+        assert!(d.has_measurement());
+        d.clear_measurements();
+        assert!(!d.has_measurement());
+        // Fresh state, and stale state with readings left in it, both count as
+        // nothing to show.
+        assert!(!DemodState::default().has_measurement());
+        let old = Instant::now().checked_sub(DEMOD_STALE_AFTER * 2);
+        assert!(old.is_some());
+        assert!(!DemodState { fm: Some(measure()), last_update: old, ..Default::default() }.has_measurement());
+    }
+
+    #[test]
+    fn has_measurement_counts_a_ctcss_search_in_progress() {
+        // "Still filling the window" is a thing worth a section, and the only state
+        // in which nothing is measured yet but something is happening.
+        let d = DemodState { ctcss_fill: 0.4, last_update: Some(Instant::now()), ..Default::default() };
+        assert!(d.ctcss_searching());
+        assert!(d.has_measurement());
     }
 
     #[test]
