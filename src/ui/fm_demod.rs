@@ -159,6 +159,11 @@ fn drop_orphan_headings(rows: &mut Vec<(Line<'_>, Prio)>) {
 const MPX_TRACE_MAX_ROWS: usize = 3;
 const MPX_TRACE_SLACK_RESERVE: usize = 4;
 
+/// Rows a headline advisory may wrap to. Two holds the longest of them at the
+/// panel's declared minimum width; a third would cost a section row to say the
+/// same thing.
+const ADVISORY_MAX_ROWS: usize = 2;
+
 /// Rows of RadioText the panel will show. Two rows hold the 64-character maximum
 /// on any column wide enough to be readable; a third would push the sections below
 /// off a short terminal for a field that is usually much shorter than its limit.
@@ -191,7 +196,10 @@ fn rds_headline(d: &crate::state::RdsData, sync: bool, age: Option<Duration>)
         Some(ps) if !dropped => ("\u{25cf}", ps.trim().to_string(), true),
         // Either no name yet, or one too old to stand: both come down to whether
         // the decoder is currently getting anywhere.
-        _ if sync || (d.groups_ok > 0 && !dropped) => ("\u{25cc}", "DECODING".into(), false),
+        // The session total, not the current run: a resync zeroes `groups_ok`, and
+        // reading that as "no RDS" would blink the headline off every time a block
+        // is lost on a station that is decoding perfectly well.
+        _ if sync || (d.groups_session > 0 && !dropped) => ("\u{25cc}", "DECODING".into(), false),
         _ => ("\u{25cb}", "NO RDS".into(), false),
     }
 }
@@ -419,22 +427,33 @@ fn build_stack(
                     format!("{:.0} kHz channel \u{00b7} \u{00f7}{}", state.demod.channel_rate_hz / 1000.0, d),
                     lbl),
             ]));
+            // Advisories are sentences, so they wrap rather than being clipped
+            // mid-word the way the DC-spike line was at 46 columns. Each is
+            // `Detail`: useful, and the first thing a short panel can spare.
+            let mut advise = |text: String| {
+                for row in chrome::wrap(&text, iw.saturating_sub(1), ADVISORY_MAX_ROWS) {
+                    stack.detail(Line::from(vec![
+                        Span::raw(" "),
+                        Span::styled(row, Style::default().fg(theme.status_warn)),
+                    ]));
+                }
+            };
             // Sitting on the tuned centre means sharing the channel with the
             // front-end's DC offset / LO leakage. Point at the existing fix.
             if state.demod.on_dc_spike(state.iq.cal.correcting()) {
-                stack.detail(Line::from(vec![
-                    Span::raw(" "),
-                    Span::styled("\u{2192} on DC spike \u{2014} [D] in Lab IQ, or offset",
-                                 Style::default().fg(theme.status_warn)),
-                ]));
+                advise("\u{2192} on DC spike \u{2014} [D] in Lab IQ, or offset".to_string());
+            }
+            // Blocks lost on the way here. RDS and CTCSS both need unbroken runs, so
+            // without this line a busy host and a station with no RDS look identical
+            // — the panel simply never decodes anything and never says why.
+            if let Some(n) = state.demod.dropping() {
+                advise(format!("\u{2192} {n} block{} dropped \u{2014} RDS/CTCSS need a clean run",
+                               if n == 1 { "" } else { "s" }));
             }
             // The channel filter stops sharpening once the decimation factor
             // saturates the tap budget — advise, never coerce, in the house style.
             if d > FILTER_QUALITY_D_LIMIT {
-                stack.detail(Line::from(vec![
-                    Span::raw(" "),
-                    Span::styled("\u{2192} 2\u{2013}2.4 Msps sharpens this", Style::default().fg(theme.status_warn)),
-                ]));
+                advise("\u{2192} 2\u{2013}2.4 Msps sharpens this".to_string());
             }
         } else {
             // The *effective* mode, not the classifier's raw guess: the sections
@@ -680,11 +699,23 @@ fn build_stack(
                         }
                         // A running count of the decoder's own work, not anything
                         // the station said — last of the RDS rows to be worth a row.
-                        if d.groups_ok > 0 && !dropped {
-                            stack.minor(Line::from(vec![
+                        //
+                        // The session total leads because that is what "Groups" is
+                        // read as. The run since the last resync trails it, and only
+                        // when the two differ: that is the whole point of the pair —
+                        // a session total climbing while the run keeps restarting is
+                        // a host that cannot keep up, not a station that will not
+                        // decode.
+                        if d.groups_session > 0 && !dropped {
+                            let mut row = vec![
                                 chrome::field("Groups", 8, theme),
-                                Span::styled(d.groups_ok.to_string(), val),
-                            ]));
+                                Span::styled(d.groups_session.to_string(), val),
+                            ];
+                            if d.groups_ok != d.groups_session {
+                                row.push(Span::styled(format!("  +{}", d.groups_ok),
+                                                      Style::default().fg(theme.stale)));
+                            }
+                            stack.minor(Line::from(row));
                         }
                         // RadioText is a free-text field up to 64 characters, so it
                         // is the one thing here that has to wrap to the column.
@@ -894,7 +925,8 @@ mod tests {
     }
     fn rds(ps: Option<&str>, groups: u32) -> crate::state::RdsData {
         crate::state::RdsData {
-            pi: Some(0xB201), ps: ps.map(str::to_string), groups_ok: groups,
+            pi: Some(0xB201), ps: ps.map(str::to_string),
+            groups_ok: groups, groups_session: groups,
             ..Default::default()
         }
     }

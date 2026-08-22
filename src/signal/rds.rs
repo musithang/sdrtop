@@ -147,9 +147,17 @@ pub struct RdsData {
     pub ps:  Option<String>,
     /// RadioText, up to 64 characters, trimmed of trailing padding.
     pub rt:  Option<String>,
-    /// Groups accepted since the decoder last reset — the honest measure of how
-    /// well reception is going.
+    /// Groups accepted since the decoder last lost synchronisation. A run that
+    /// keeps restarting is the signal that reception is breaking up.
     pub groups_ok: u32,
+    /// Groups accepted on this channel in total, across every resync.
+    ///
+    /// `groups_ok` reads like "how much have we decoded" and is not: it reset to 1
+    /// over and over during a live run while a build competed for CPU, which looks
+    /// like a station that cannot be decoded rather than a host that is busy. This
+    /// is the number that answers the question the panel is actually asked, and the
+    /// two together say whether a low count is the signal or the run.
+    pub groups_session: u32,
 }
 
 /// Number of consistent sightings before a text character is published.
@@ -168,11 +176,19 @@ struct ConfirmedText {
     chars:   Vec<u8>,
     pending: Vec<u8>,
     hits:    Vec<u8>,
+    /// Which positions have ever been confirmed. Tracked separately from `hits`
+    /// because [`forget_pending`](Self::forget_pending) clears the in-flight
+    /// sightings while the text they produced stays on screen — reading "anything
+    /// confirmed?" off `hits` would have made that text vanish.
+    seen:    Vec<bool>,
 }
 
 impl ConfirmedText {
     fn new(len: usize) -> Self {
-        Self { chars: vec![b' '; len], pending: vec![0; len], hits: vec![0; len] }
+        Self {
+            chars: vec![b' '; len], pending: vec![0; len],
+            hits: vec![0; len], seen: vec![false; len],
+        }
     }
 
     fn set(&mut self, i: usize, c: u8) {
@@ -185,11 +201,12 @@ impl ConfirmedText {
         }
         if self.hits[i] >= CONFIRM_COUNT {
             self.chars[i] = c;
+            self.seen[i] = true;
         }
     }
 
     fn confirmed_any(&self) -> bool {
-        self.hits.iter().any(|&h| h >= CONFIRM_COUNT)
+        self.seen.iter().any(|&s| s)
     }
 
     /// The text as a display string: control characters become spaces, and
@@ -204,6 +221,16 @@ impl ConfirmedText {
 
     fn clear(&mut self) {
         self.chars.fill(b' ');
+        self.pending.fill(0);
+        self.hits.fill(0);
+        self.seen.fill(false);
+    }
+
+    /// Drop the unconfirmed sightings, keeping the confirmed text. Used across a
+    /// break in the stream: a pending character from before the gap must not be
+    /// corroborated by one from after it, since the two are separate reception runs
+    /// and agreeing by chance is exactly the error [`CONFIRM_COUNT`] exists to catch.
+    fn forget_pending(&mut self) {
         self.pending.fill(0);
         self.hits.fill(0);
     }
@@ -265,14 +292,49 @@ impl RdsDecoder {
     /// Whether the decoder currently holds block synchronisation.
     pub fn locked(&self) -> bool { self.expect.is_some() }
 
-    /// Forget everything — used when the sample stream breaks, since bits from
-    /// either side of a gap do not belong to the same message.
+    /// Forget everything the decoder has learned. For a change of station — a
+    /// retune, a different modulation — where nothing held here describes what is
+    /// on air now.
     pub fn reset(&mut self) {
         let keep_pi = self.data.pi;
+        let keep_session = self.data.groups_session;
         *self = Self::new();
         // The PI code identifies the station and does not change mid-reception;
         // keeping it avoids a visible flicker across a brief dropout.
         self.data.pi = keep_pi;
+        // A session count that restarted on every reset would be the counter it was
+        // added to replace. It belongs to the channel, and only a fresh decoder —
+        // which the worker builds on a retune — starts it over.
+        self.data.groups_session = keep_session;
+    }
+
+    /// Drop **block synchronisation only**, keeping everything already decoded.
+    ///
+    /// For a break in the sample stream. Bits either side of a gap are not the same
+    /// message, so the bit window, the group being assembled and the lock all have
+    /// to start over — but the station has not changed, and the name, programme type
+    /// and RadioText confirmed before the gap still describe it.
+    ///
+    /// This is what the contiguity-break comment in `signal::demod` has always
+    /// claimed happens. It did not: `reset()` wiped PS, RadioText and the group
+    /// count, and blocks drop often enough that every glitch threw away seconds of
+    /// accumulated text. Keeping it is safe because the panel ages RDS separately —
+    /// past `RDS_DROPPED_AFTER` with no new group, nothing is shown at all — so text
+    /// that survives here still cannot outlive its station.
+    pub fn resync(&mut self) {
+        self.window = 0;
+        self.bit_count = 0;
+        self.expect = None;
+        self.misses = 0;
+        self.group = [None; 4];
+        // Half-confirmed characters are the one thing that must go: a pending
+        // sighting from before the gap paired with one after it would confirm a
+        // character on evidence from two different reception runs.
+        self.ps.forget_pending();
+        self.rt.forget_pending();
+        self.pi_pending = None;
+        self.pi_hits = 0;
+        self.data.groups_ok = 0;
     }
 
     /// Feed one recovered bit.
@@ -348,6 +410,7 @@ impl RdsDecoder {
             (self.group[0], self.group[1], self.group[2], self.group[3]) else { return };
 
         self.data.groups_ok = self.data.groups_ok.saturating_add(1);
+        self.data.groups_session = self.data.groups_session.saturating_add(1);
 
         // Block B always carries group type, version, TP and PTY.
         let group_type = (b >> 12) & 0xF;
@@ -613,6 +676,74 @@ mod tests {
         assert_eq!(d.data().ps, None);
         assert_eq!(d.data().groups_ok, 0);
         assert!(!d.locked());
+    }
+
+    /// Fill a decoder with a confirmed PS name and some RadioText.
+    fn decoded_station() -> RdsDecoder {
+        let mut d = RdsDecoder::new();
+        for _ in 0..CONFIRM_COUNT {
+            for seg in 0..4u16 {
+                for b in encode_group([0xB201, block_b_ps(3, seg), 0, 0x4142], false) {
+                    d.push_bit(b);
+                }
+            }
+        }
+        d
+    }
+
+    #[test]
+    fn resync_keeps_what_was_decoded_and_drops_only_the_lock() {
+        // C10: the contiguity-break comment in `signal::demod` has always said the
+        // confirmed text is kept. It called `reset`, which wiped it — and blocks drop
+        // often enough that every glitch cost seconds of accumulated name and text.
+        let mut d = decoded_station();
+        let ps = d.data().ps.clone();
+        assert!(ps.is_some());
+        let session = d.data().groups_session;
+        assert!(session > 0);
+
+        d.resync();
+        assert_eq!(d.data().ps, ps, "the station name is still the same station's");
+        assert_eq!(d.data().pi, Some(0xB201));
+        assert_eq!(d.data().groups_session, session, "the session total is not a per-run count");
+        assert_eq!(d.data().groups_ok, 0, "but the current run starts over");
+        assert!(!d.locked(), "block sync does not survive a gap in the bits");
+    }
+
+    #[test]
+    fn resync_discards_half_confirmed_characters() {
+        // A character seen once before the gap must not be confirmed by a sighting
+        // after it: the two are separate reception runs, and agreeing by chance is
+        // exactly the error CONFIRM_COUNT exists to catch.
+        let mut t = ConfirmedText::new(4);
+        t.set(0, b'A');                  // one sighting, not yet confirmed
+        assert!(!t.confirmed_any());
+        t.forget_pending();
+        t.set(0, b'A');                  // the first sighting of a new run
+        assert!(!t.confirmed_any(), "a pre-gap sighting corroborated a post-gap one");
+        t.set(0, b'A');
+        assert!(t.confirmed_any(), "two sightings in one run still confirm");
+    }
+
+    #[test]
+    fn resync_keeps_text_visible_when_its_pending_state_is_cleared() {
+        // The trap in the fix: `confirmed_any` used to read off `hits`, which
+        // `forget_pending` zeroes — so keeping the text would have made it vanish.
+        let mut d = decoded_station();
+        d.resync();
+        assert!(d.data().ps.is_some(), "confirmed text must not depend on pending hits");
+    }
+
+    #[test]
+    fn reset_starts_the_run_over_but_not_the_session() {
+        // C11: the session total belongs to the channel. Only a fresh decoder — what
+        // the worker builds on a retune — starts it again.
+        let mut d = decoded_station();
+        let session = d.data().groups_session;
+        d.reset();
+        assert_eq!(d.data().groups_session, session);
+        assert_eq!(d.data().groups_ok, 0);
+        assert_eq!(RdsDecoder::new().data().groups_session, 0);
     }
 
     #[test]

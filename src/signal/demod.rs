@@ -637,6 +637,11 @@ impl DemodWorker {
         let mut ctcss_window: Vec<f32> = Vec::new();
         let mut ctcss_len: usize = 0;
         let mut last_seq: u64 = 0;
+        // The sequence number of the previous block *that was forwarded to us*, or
+        // `None` when the run has not started. Distinct from `last_seq`: `block_seq`
+        // counts every device callback, so the jump across a stretch when the demod
+        // was switched off is not a dropped block and must not be counted as one.
+        let mut drop_ref: Option<u64> = None;
         // RDS. The subcarrier demod is rebuilt whenever the channel rate moves; the
         // protocol decoder outlives it, since PS and RadioText take seconds to
         // assemble and a rate change is not a reason to forget the station.
@@ -654,10 +659,24 @@ impl DemodWorker {
 
         while let Ok((seq, chunk)) = self.sample_rx.recv() {
             let contiguous = seq == last_seq.wrapping_add(1);
+            // Blocks the bounded channel lost between the previous forwarded block
+            // and this one. `process` forwards with `try_send` and discards the
+            // result, so this gap is the only record that they existed.
+            let dropped = drop_ref.map_or(0, |prev| seq.wrapping_sub(prev).saturating_sub(1));
+            let now = (dropped > 0).then(Instant::now);
             last_seq = seq;
+            drop_ref = Some(seq);
 
             let (sample_rate, modulation, snr_db, streaming, offset_hz, frequency, enabled) = {
-                let m = self.state.lock().unwrap_or_else(|e| e.into_inner());
+                let mut m = self.state.lock().unwrap_or_else(|e| e.into_inner());
+                // Integer accumulation inside the lock, the clock read outside it —
+                // and here rather than at the publish, because every path below this
+                // can `continue`, and a worker so far behind that it never publishes
+                // is exactly the one whose drops need reporting.
+                if let Some(t) = now {
+                    m.demod.blocks_dropped = m.demod.blocks_dropped.saturating_add(dropped);
+                    m.demod.last_drop = Some(t);
+                }
                 // The user's mode choice outranks the classifier — see
                 // `DemodState::mode_override` for why the heuristic is too coarse
                 // to pick a demodulator on its own.
@@ -679,6 +698,9 @@ impl DemodWorker {
                 audio.clear();
                 carry = None;
                 if let Some(sd) = sdec.as_mut() { sd.reset(); }
+                // Nothing is forwarded while off, so the next block will be many
+                // sequence numbers away without a single one having been lost.
+                drop_ref = None;
                 self.clear();
                 continue;
             }
@@ -702,6 +724,11 @@ impl DemodWorker {
                 carry = None;
                 if let Some(sd) = sdec.as_mut() { sd.reset(); }
                 self.clear();
+                // The drop count answers "is this station undecodable, or is the
+                // host behind?", so it belongs to the channel being asked about.
+                let mut m = self.state.lock().unwrap_or_else(|e| e.into_inner());
+                m.demod.blocks_dropped = 0;
+                m.demod.last_drop = None;
             }
             last_channel = Some(channel);
 
@@ -726,7 +753,10 @@ impl DemodWorker {
             if !streaming || snr_db < crate::state::CLASSIFY_MIN_SNR_DB {
                 self.clear();
                 audio.clear();
-                rds_dec.reset();
+                // Same reasoning as the contiguity break below: a fade under the
+                // gate stops the stream, it does not move the radio. The channel
+                // check above is what handles a change of station.
+                rds_dec.resync();
                 continue;
             }
 
@@ -756,8 +786,11 @@ impl DemodWorker {
                 // Bits either side of a gap are not the same message. The demod's
                 // timing and the decoder's block sync both have to start over; the
                 // text already confirmed is kept, since the station has not changed.
+                // `resync`, not `reset` — the comment above said this all along and
+                // `reset` did the opposite, throwing away the name and the RadioText
+                // on every dropped block.
                 if let Some(r) = rds.as_mut() { r.reset(); }
-                rds_dec.reset();
+                rds_dec.resync();
             }
 
             // Continuity means every sample counts; otherwise the bounded slice

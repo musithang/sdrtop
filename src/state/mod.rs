@@ -15,8 +15,7 @@ mod waterfall;
 
 pub(crate) use acc::Accumulators;
 pub use demod::{deviation_limit_hz, strongest_offset_hz, AmMeasure, CtcssMeasure, DemodState,
-                FmMeasure, MpxFrame, PilotState, RdsData, OFFSET_STEP_HZ, PTY_NAMES,
-                RDS_AGED_AFTER, RDS_DROPPED_AFTER};
+                FmMeasure, MpxFrame, PilotState, RdsData, OFFSET_STEP_HZ, PTY_NAMES, RDS_AGED_AFTER, RDS_DROPPED_AFTER};
 pub use iq::{IqState, IqCalState, CONSTELLATION_CAP};
 pub use lab::{LabState, RfFreeze};
 pub use micro::MicroView;

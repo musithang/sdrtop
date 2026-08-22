@@ -150,8 +150,26 @@ pub struct DemodState {
     /// Monotonic counter stamped on each forwarded block, so the worker can tell
     /// a contiguous run from one interrupted by a dropped block.
     pub block_seq: u64,
+    /// Blocks the demod channel dropped on this channel, and when the last one went.
+    ///
+    /// `process` forwards with `try_send` on a bounded channel, so a worker that
+    /// falls behind loses blocks silently — and RDS and CTCSS both need unbroken
+    /// runs, so what the user sees is a station that will not decode. "The host is
+    /// busy" and "this station has no RDS" were the same screen. Counted from gaps
+    /// in [`Self::block_seq`] rather than at the `try_send` itself: the sequence is
+    /// stamped under the lock that already runs, and a gap catches anything that
+    /// loses a block anywhere between there and the worker, not just a full channel.
+    pub blocks_dropped: u64,
+    pub last_drop: Option<Instant>,
     pub last_update: Option<Instant>,
 }
+
+/// How long after a dropped block the panel keeps saying so.
+///
+/// The count is cumulative, but the advisory is about *now*: a single glitch at
+/// startup must not leave a warning on screen for the rest of the session, and a
+/// worker that is genuinely behind drops blocks continuously and keeps it lit.
+pub const DROP_ADVISORY_FOR: Duration = Duration::from_secs(10);
 
 impl Default for DemodState {
     /// `user_on` starts **true**: arriving on the demod bench should demodulate,
@@ -175,6 +193,8 @@ impl Default for DemodState {
             ctcss:           None,
             ctcss_fill:      0.0,
             block_seq:       0,
+            blocks_dropped:  0,
+            last_drop:       None,
             last_update:     None,
         }
     }
@@ -192,6 +212,14 @@ impl DemodState {
     /// Clearing `last_update` matters as much as the fields: without it
     /// [`Self::ctcss_searching`] keeps answering "still filling the window" for a
     /// detector that is not running.
+    /// Blocks lost recently enough to still be worth saying so — see
+    /// [`DROP_ADVISORY_FOR`]. `None` when the channel is keeping up.
+    pub fn dropping(&self) -> Option<u64> {
+        self.last_drop
+            .filter(|t| t.elapsed() < DROP_ADVISORY_FOR)
+            .map(|_| self.blocks_dropped)
+    }
+
     pub fn clear_measurements(&mut self) {
         self.fm             = None;
         self.am             = None;
@@ -413,6 +441,23 @@ mod tests {
         assert!(d.last_update.is_none());
         assert!(d.is_stale());
         assert!(!d.ctcss_searching());
+    }
+
+    #[test]
+    fn dropping_reports_only_recent_losses() {
+        // C12: the count is cumulative but the advisory is about now. A single
+        // glitch at startup must not leave a warning up for the rest of the session.
+        let fresh = DemodState { blocks_dropped: 7, last_drop: Some(Instant::now()), ..Default::default() };
+        assert_eq!(fresh.dropping(), Some(7));
+
+        let stale = DemodState {
+            blocks_dropped: 7,
+            last_drop: Instant::now().checked_sub(DROP_ADVISORY_FOR + Duration::from_secs(1)),
+            ..Default::default()
+        };
+        assert_eq!(stale.dropping(), None, "an old glitch is not a current warning");
+
+        assert_eq!(DemodState::default().dropping(), None, "a clean channel says nothing");
     }
 
     #[test]
