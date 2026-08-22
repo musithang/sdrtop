@@ -143,20 +143,37 @@ fn timing_banner_fields(t: &crate::state::TimingState) -> Vec<(&'static str, Str
 /// Lab signal banner middle fields: `MOD … · SNR … · CH PWR … · OBW …`. MOD
 /// reads `—` while the classifier hasn't committed to a modulation (weak/no
 /// carrier at centre) — never a fabricated label.
+///
+/// Every one of these comes from the latest FFT frame, so when that frame ages out
+/// they stop being measurements and become the last thing that was true. Stop RX
+/// and the characterization panel below correctly dashed its whole stack while this
+/// line went on reading `SNR 47 dB · CH PWR -28.6 dBFS` two rows above it. The
+/// `‖ FRZ` lamp at the far right was the only hint, and it is nowhere near the
+/// numbers it applies to.
 fn signal_banner_fields(state: &SdrMetrics) -> Vec<(&'static str, String)> {
-    let sig = &state.signal;
+    signal_fields(&state.signal, crate::ui::micro_common::fft_stale(state))
+}
+
+/// The banner fields as a pure function of what was measured and whether it is
+/// still current — split out so the staleness rule can be tested without building a
+/// whole `SdrMetrics`.
+fn signal_fields(sig: &crate::state::SignalState, stale: bool) -> Vec<(&'static str, String)> {
+    let dash = || "\u{2014}".to_string();
+    if stale {
+        return vec![("MOD", dash()), ("SNR", dash()), ("CH PWR", dash()), ("OBW", dash())];
+    }
     vec![
         ("MOD",    sig.modulation.label().to_string()),
         ("SNR",    format!("{:.0} dB", sig.peak_to_nf_db)),
         ("CH PWR", if sig.channel_power_dbfs.is_finite() {
             format!("{:.1} dBFS", sig.channel_power_dbfs)
         } else {
-            "\u{2014}".to_string()
+            dash()
         }),
         ("OBW", if sig.occupied_bw_hz > 0 {
             crate::ui::signal_characterization::fmt_bw(sig.occupied_bw_hz)
         } else {
-            "\u{2014}".to_string()
+            dash()
         }),
     ]
 }
@@ -530,7 +547,12 @@ fn signal_marker_lines(state: &SdrMetrics, theme: &crate::Theme, iw: usize) -> V
         ], &mut used, &mut spans);
     }
 
-    let obw_str = if sig.occupied_bw_hz > 0 {
+    // Same rule as the banner: an aged FFT frame has no occupancy and no verdict to
+    // offer. A `QUALITY ✓ Clean` computed from frozen numbers is the worst of the
+    // two, because it is a judgement rather than a reading.
+    let stale = crate::ui::micro_common::fft_stale(state);
+
+    let obw_str = if !stale && sig.occupied_bw_hz > 0 {
         crate::ui::signal_characterization::fmt_bw(sig.occupied_bw_hz)
     } else {
         "\u{2014}".to_string()
@@ -540,17 +562,22 @@ fn signal_marker_lines(state: &SdrMetrics, theme: &crate::Theme, iw: usize) -> V
         Span::styled(obw_str, val),
     ], &mut used, &mut spans);
 
-    let (level, ..) = crate::ui::signal_characterization::verdict(
-        sig.modulation, sig.peak_to_nf_db, sig.acpr_lower_db, sig.acpr_upper_db, sig.occupied_bw_hz);
-    let (mark, col) = match level {
-        crate::ui::signal_characterization::VerdictLevel::Clean    => ("\u{2713}", theme.status_ok),
-        crate::ui::signal_characterization::VerdictLevel::Caution  => ("\u{26a0}", theme.status_warn),
-        crate::ui::signal_characterization::VerdictLevel::NoSignal => ("\u{25cb}", theme.stale),
+    let quality = if stale {
+        vec![Span::styled("\u{2014}".to_string(), Style::default().fg(theme.stale))]
+    } else {
+        let (level, ..) = crate::ui::signal_characterization::verdict(
+            sig.modulation, sig.peak_to_nf_db, sig.acpr_lower_db, sig.acpr_upper_db, sig.occupied_bw_hz);
+        let (mark, col) = match level {
+            crate::ui::signal_characterization::VerdictLevel::Clean    => ("\u{2713}", theme.status_ok),
+            crate::ui::signal_characterization::VerdictLevel::Caution  => ("\u{26a0}", theme.status_warn),
+            crate::ui::signal_characterization::VerdictLevel::NoSignal => ("\u{25cb}", theme.stale),
+        };
+        vec![Span::styled(format!("{mark} {}", level.short_label()),
+                          Style::default().fg(col).add_modifier(Modifier::BOLD))]
     };
-    try_add(vec![
-        Span::raw("   "), Span::styled("QUALITY ", dim),
-        Span::styled(format!("{mark} {}", level.short_label()), Style::default().fg(col).add_modifier(Modifier::BOLD)),
-    ], &mut used, &mut spans);
+    let mut q = vec![Span::raw("   "), Span::styled("QUALITY ", dim)];
+    q.extend(quality);
+    try_add(q, &mut used, &mut spans);
 
     append_focus_hints(state, theme, iw, used, &mut spans);
     vec![hairline(iw, theme.border_dim), Line::from(spans)]
@@ -658,6 +685,52 @@ impl Panel for LabMarkerPanel {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A signal state with real numbers in it, as if the FFT had just run.
+    fn measured() -> crate::state::SignalState {
+        crate::state::SignalState {
+            peak_to_nf_db: 47.0,
+            channel_power_dbfs: -28.6,
+            occupied_bw_hz: 120_000,
+            acpr_lower_db: -34.9,
+            acpr_upper_db: -35.1,
+            modulation: crate::state::Modulation::Wfm,
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn signal_banner_reads_the_measurement_while_it_is_live() {
+        let f = signal_fields(&measured(), false);
+        let get = |k: &str| f.iter().find(|(n, _)| *n == k).unwrap().1.clone();
+        assert_eq!(get("MOD"), "WFM");
+        assert_eq!(get("SNR"), "47 dB");
+        assert_eq!(get("CH PWR"), "-28.6 dBFS");
+        assert_eq!(get("OBW"), "120.0 kHz");
+    }
+
+    #[test]
+    fn signal_banner_dashes_every_field_once_the_frame_ages_out() {
+        // The bug: stop RX and the characterization panel dashed its whole stack
+        // while this line, two rows above it, went on reading `SNR 47 dB · CH PWR
+        // -28.6 dBFS` from a frame that was no longer arriving.
+        let f = signal_fields(&measured(), true);
+        assert_eq!(f.len(), 4, "the field set must not change shape when stale");
+        for (name, value) in &f {
+            assert_eq!(value, "\u{2014}", "{name} still reads as live");
+        }
+    }
+
+    #[test]
+    fn signal_banner_keeps_its_own_undefined_sentinels() {
+        // Live, but nothing measured yet: still dashes, from the sentinels rather
+        // than from staleness.
+        let f = signal_fields(&crate::state::SignalState::default(), false);
+        let get = |k: &str| f.iter().find(|(n, _)| *n == k).unwrap().1.clone();
+        assert_eq!(get("MOD"), "\u{2014}");
+        assert_eq!(get("CH PWR"), "\u{2014}");
+        assert_eq!(get("OBW"), "\u{2014}");
+    }
 
     #[test]
     fn lab_label_maps_current_key_numbers() {

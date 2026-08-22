@@ -153,23 +153,11 @@ impl App {
             signal: SignalState {
                 drops_per_sec: 0, total_drops_session: 0,
                 drop_history: std::collections::VecDeque::with_capacity(THROUGHPUT_HISTORY_LEN),
-                adc_saturation_pct: 0.0, adc_saturation_peak: 0.0,
                 saturation_history: std::collections::VecDeque::with_capacity(THROUGHPUT_HISTORY_LEN),
-                peak_to_nf_db: 0.0, channel_power_dbfs: f32::NEG_INFINITY,
-                occupied_bw_hz: 0,
-                acpr_lower_db: f32::NEG_INFINITY, acpr_upper_db: f32::NEG_INFINITY,
-                adj_carrier_dbfs: f32::NEG_INFINITY,
-                acpr_offset_hz: crate::state::acpr_offset_hz(crate::state::Modulation::Unknown),
-                usb_errors_session: 0,
-                usb_errors_last_poll: 0,
                 usb_error_history: std::collections::VecDeque::with_capacity(THROUGHPUT_HISTORY_LEN),
-                snr_history: std::collections::VecDeque::with_capacity(crate::state::SNR_HISTORY_LEN),
-                pwr_history: std::collections::VecDeque::with_capacity(crate::state::SNR_HISTORY_LEN),
-                nf_history:  std::collections::VecDeque::with_capacity(crate::state::SNR_HISTORY_LEN),
-                sat_history: std::collections::VecDeque::with_capacity(crate::state::SNR_HISTORY_LEN),
-                last_clip_at: None,
-                modulation: crate::state::Modulation::Unknown,
-                adc_peak_dbfs: 0.0, adc_rms_dbfs: 0.0, adc_clip_events: 0,
+                // Everything else is the no-measurement state, which `SignalState`
+                // defines once rather than here twice.
+                ..Default::default()
             },
             iq: IqState { iq_imbalance_db: 0.0, dc_offset_i: 0.0, dc_offset_q: 0.0, cb_period_us: 0, cb_jitter_us: 0, jitter_history: std::collections::VecDeque::with_capacity(THROUGHPUT_HISTORY_LEN), iq_amplitude_hist: [0u64; 32], adc_signed_hist: [0u64; 32], buf_fill_pct: 0.0, buf_fill_history: std::collections::VecDeque::with_capacity(THROUGHPUT_HISTORY_LEN), phase_imbalance_deg: 0.0, cal: crate::state::IqCalState::default(), irr_history: std::collections::VecDeque::with_capacity(crate::state::SNR_HISTORY_LEN), constellation: std::collections::VecDeque::new() },
             observer: ObserverState::default(),
@@ -292,23 +280,11 @@ impl App {
             signal: SignalState {
                 drops_per_sec: 0, total_drops_session: 0,
                 drop_history: std::collections::VecDeque::with_capacity(THROUGHPUT_HISTORY_LEN),
-                adc_saturation_pct: 0.0, adc_saturation_peak: 0.0,
                 saturation_history: std::collections::VecDeque::with_capacity(THROUGHPUT_HISTORY_LEN),
-                peak_to_nf_db: 0.0, channel_power_dbfs: f32::NEG_INFINITY,
-                occupied_bw_hz: 0,
-                acpr_lower_db: f32::NEG_INFINITY, acpr_upper_db: f32::NEG_INFINITY,
-                adj_carrier_dbfs: f32::NEG_INFINITY,
-                acpr_offset_hz: crate::state::acpr_offset_hz(crate::state::Modulation::Unknown),
-                usb_errors_session: 0,
-                usb_errors_last_poll: 0,
                 usb_error_history: std::collections::VecDeque::with_capacity(THROUGHPUT_HISTORY_LEN),
-                snr_history: std::collections::VecDeque::with_capacity(crate::state::SNR_HISTORY_LEN),
-                pwr_history: std::collections::VecDeque::with_capacity(crate::state::SNR_HISTORY_LEN),
-                nf_history:  std::collections::VecDeque::with_capacity(crate::state::SNR_HISTORY_LEN),
-                sat_history: std::collections::VecDeque::with_capacity(crate::state::SNR_HISTORY_LEN),
-                last_clip_at: None,
-                modulation: crate::state::Modulation::Unknown,
-                adc_peak_dbfs: 0.0, adc_rms_dbfs: 0.0, adc_clip_events: 0,
+                // Everything else is the no-measurement state, which `SignalState`
+                // defines once rather than here twice.
+                ..Default::default()
             },
             iq: IqState { iq_imbalance_db: 0.0, dc_offset_i: 0.0, dc_offset_q: 0.0, cb_period_us: 0, cb_jitter_us: 0, jitter_history: std::collections::VecDeque::with_capacity(THROUGHPUT_HISTORY_LEN), iq_amplitude_hist: [0u64; 32], adc_signed_hist: [0u64; 32], buf_fill_pct: 0.0, buf_fill_history: std::collections::VecDeque::with_capacity(THROUGHPUT_HISTORY_LEN), phase_imbalance_deg: 0.0, cal: crate::state::IqCalState::default(), irr_history: std::collections::VecDeque::with_capacity(crate::state::SNR_HISTORY_LEN), constellation: std::collections::VecDeque::new() },
             observer: ObserverState {

@@ -171,6 +171,35 @@ pub struct SignalState {
     pub adc_clip_events:      u64,
 }
 
+impl Default for SignalState {
+    /// The no-measurement state the app starts in, and the one the tests build on.
+    ///
+    /// Not `#[derive(Default)]`: the "nothing measured yet" value for a level or a
+    /// ratio is the undefined sentinel, not zero. Zero dBFS is full scale, and a
+    /// panel that renders it reads as a signal pinning the ADC.
+    fn default() -> Self {
+        let hist = || VecDeque::with_capacity(crate::state::SNR_HISTORY_LEN);
+        Self {
+            drops_per_sec: 0, total_drops_session: 0, drop_history: VecDeque::new(),
+            adc_saturation_pct: 0.0, adc_saturation_peak: 0.0,
+            saturation_history: VecDeque::new(),
+            peak_to_nf_db: 0.0,
+            channel_power_dbfs: f32::NEG_INFINITY,
+            occupied_bw_hz: 0,
+            acpr_lower_db: f32::NEG_INFINITY,
+            acpr_upper_db: f32::NEG_INFINITY,
+            adj_carrier_dbfs: f32::NEG_INFINITY,
+            acpr_offset_hz: acpr_offset_hz(Modulation::Unknown),
+            usb_errors_session: 0, usb_errors_last_poll: 0,
+            usb_error_history: VecDeque::new(),
+            snr_history: hist(), pwr_history: hist(), nf_history: hist(), sat_history: hist(),
+            last_clip_at: None,
+            modulation: Modulation::Unknown,
+            adc_peak_dbfs: 0.0, adc_rms_dbfs: 0.0, adc_clip_events: 0,
+        }
+    }
+}
+
 impl SignalState {
     /// Short-term SNR trend in dB: mean of the most recent half of
     /// `snr_history` minus the mean of the older half. Positive means the
