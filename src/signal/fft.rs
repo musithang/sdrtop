@@ -308,9 +308,12 @@ impl FftWorker {
                 // TEMP DEBUG — remove before commit
                 if let Ok(p) = std::env::var("SDRTOP_DUMP_FFT") {
                     use std::io::Write;
-                    if let Ok(mut f) = std::fs::File::create(&p) {
+                    let tmp = format!("{p}.tmp");
+                    if let Ok(mut f) = std::fs::File::create(&tmp) {
                         let _ = writeln!(f, "# sample_rate={sample_rate} n={n} noise_floor={noise_floor} obw={occupied_bw_hz}");
                         for v in smoothed.iter() { let _ = writeln!(f, "{v}"); }
+                        drop(f);
+                        let _ = std::fs::rename(&tmp, &p);
                     }
                 }
 
