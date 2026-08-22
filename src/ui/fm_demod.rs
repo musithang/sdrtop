@@ -1,13 +1,16 @@
 //! `fm_demod` — the right column of the `lab_signal` preset's redesign
 //! (DSN-2026-07): the FM MPX · DEMOD instrument.
 //!
-//! Phase 2 fills the DEVIATION section from the live FM discriminator
-//! (`signal::demod`): peak and RMS deviation plus carrier offset, measured about
-//! the carrier so a mistuned radio reports tuning error as offset rather than as
-//! modulation. The MPX / PILOT / RDS / AUDIO sections stay declared-but-empty
-//! nameplates until their phases land; NFM and AM already select their own
-//! deviation reference through [`deviation_limit_hz`], and the wider per-mode
-//! dispatch slots into the same `match` later.
+//! The panel dispatches on modulation ([`sections_for`]) rather than showing a
+//! fixed grid: broadcast FM gets MPX baseband, the stereo pilot, deviation and
+//! RDS; narrow-band FM swaps the broadcast sections for CTCSS; AM shows depth and
+//! carrier level instead of deviation. A section a mode does not have is absent,
+//! not rendered empty.
+//!
+//! Deviation is measured about the carrier (`signal::demod`), so a mistuned radio
+//! reports its tuning error as offset rather than as modulation, and the bar's
+//! reference comes from [`deviation_limit_hz`]. RDS comes from `signal::rds_demod`
+//! by way of `signal::rds`.
 //!
 //! The panel never invents a reading: when the demod is off, the signal is too
 //! weak, the modulation is not something an FM discriminator describes, or the
