@@ -160,6 +160,64 @@ pub struct RdsData {
     pub groups_session: u32,
 }
 
+/// The RDS character repertoire — IEC 62106 Annex E, code table G0 — indexed by
+/// `byte - 0x20`, laid out sixteen to a line so it can be read against the printed
+/// table (a line here is one *column* of it, i.e. one high nibble).
+///
+/// RDS is not ASCII, and treating it as such is why RadioText from a Hungarian
+/// station arrived as `Gati Pal - Gondczo`: every accented character sat above 0x7F,
+/// where the old decoder substituted a space. The accents are the difference between
+/// a spike on a spectrum and a sentence, on the band this instrument is actually
+/// used on.
+///
+/// The low half is *nearly* ASCII and the exceptions are deliberate, not typos:
+/// 0x24 is `¤` (RBDS, the North American variant, puts `$` there — G0 keeps it at
+/// 0xAB), 0x5E is `―`, 0x60 is `‖`, and 0x7E is `¯`. A European station will not send
+/// 0x24 meaning a dollar sign, so following IEC 62106 here costs nothing and reading
+/// it as ASCII would put the wrong glyph on screen.
+///
+/// Positions the table leaves blank (0x7F, 0xFF) render as a space, as do the control
+/// range below 0x20 — see [`g0_char`].
+#[rustfmt::skip]
+const G0: [char; 224] = [
+    // 0x2_
+    ' ', '!', '"', '#', '¤', '%', '&', '\'', '(', ')', '*', '+', ',', '-', '.', '/',
+    // 0x3_
+    '0', '1', '2', '3', '4', '5', '6', '7', '8', '9', ':', ';', '<', '=', '>', '?',
+    // 0x4_
+    '@', 'A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'I', 'J', 'K', 'L', 'M', 'N', 'O',
+    // 0x5_
+    'P', 'Q', 'R', 'S', 'T', 'U', 'V', 'W', 'X', 'Y', 'Z', '[', '\\', ']', '―', '_',
+    // 0x6_
+    '‖', 'a', 'b', 'c', 'd', 'e', 'f', 'g', 'h', 'i', 'j', 'k', 'l', 'm', 'n', 'o',
+    // 0x7_
+    'p', 'q', 'r', 's', 't', 'u', 'v', 'w', 'x', 'y', 'z', '{', '|', '}', '¯', ' ',
+    // 0x8_
+    'á', 'à', 'é', 'è', 'í', 'ì', 'ó', 'ò', 'ú', 'ù', 'Ñ', 'Ç', 'Ş', 'β', '¡', 'Ĳ',
+    // 0x9_
+    'â', 'ä', 'ê', 'ë', 'î', 'ï', 'ô', 'ö', 'û', 'ü', 'ñ', 'ç', 'ş', 'ǧ', 'ı', 'ĳ',
+    // 0xA_
+    'ª', 'α', '©', '‰', 'Ǧ', 'ě', 'ň', 'ő', 'π', '€', '£', '$', '←', '↑', '→', '↓',
+    // 0xB_
+    'º', '¹', '²', '³', '±', 'İ', 'ń', 'ű', 'µ', '¿', '÷', '°', '¼', '½', '¾', '§',
+    // 0xC_
+    'Á', 'À', 'É', 'È', 'Í', 'Ì', 'Ó', 'Ò', 'Ú', 'Ù', 'Ř', 'Č', 'Š', 'Ž', 'Ð', 'Ŀ',
+    // 0xD_
+    'Â', 'Ä', 'Ê', 'Ë', 'Î', 'Ï', 'Ô', 'Ö', 'Û', 'Ü', 'ř', 'č', 'š', 'ž', 'đ', 'ŀ',
+    // 0xE_
+    'Ã', 'Å', 'Æ', 'Œ', 'ŷ', 'Ý', 'Õ', 'Ø', 'Þ', 'Ŋ', 'Ŕ', 'Ć', 'Ś', 'Ź', 'Ŧ', 'ð',
+    // 0xF_
+    'ã', 'å', 'æ', 'œ', 'ŵ', 'ý', 'õ', 'ø', 'þ', 'ŋ', 'ŕ', 'ć', 'ś', 'ź', 'ŧ', ' ',
+];
+
+/// One RDS byte as the character it stands for in [`G0`].
+///
+/// Everything below 0x20 is a control code, not text — RadioText uses 0x0D to mark
+/// the end of a message — and becomes a space, which the caller then trims.
+pub fn g0_char(b: u8) -> char {
+    if b < 0x20 { ' ' } else { G0[(b - 0x20) as usize] }
+}
+
 /// Number of consistent sightings before a text character is published.
 ///
 /// RDS has no forward error correction here beyond the block CRC, and a block can
@@ -209,13 +267,11 @@ impl ConfirmedText {
         self.seen.iter().any(|&s| s)
     }
 
-    /// The text as a display string: control characters become spaces, and
-    /// trailing padding is trimmed.
+    /// The text as a display string, decoded through [`g0_char`], with trailing
+    /// padding trimmed.
     fn text(&self, limit: usize) -> String {
         let end = limit.min(self.chars.len());
-        let s: String = self.chars[..end].iter()
-            .map(|&b| if (0x20..0x7F).contains(&b) { b as char } else { ' ' })
-            .collect();
+        let s: String = self.chars[..end].iter().copied().map(g0_char).collect();
         s.trim_end().to_string()
     }
 
@@ -744,6 +800,62 @@ mod tests {
         assert_eq!(d.data().groups_session, session);
         assert_eq!(d.data().groups_ok, 0);
         assert_eq!(RdsDecoder::new().data().groups_session, 0);
+    }
+
+    #[test]
+    fn g0_covers_the_ascii_range_it_shares() {
+        // Letters and digits are where G0 and ASCII agree, and most of a message is
+        // made of them — a table that got these wrong would be obvious, so this is
+        // the cheap check that the indexing is right at all.
+        for b in b'A'..=b'Z' { assert_eq!(g0_char(b), b as char); }
+        for b in b'a'..=b'z' { assert_eq!(g0_char(b), b as char); }
+        for b in b'0'..=b'9' { assert_eq!(g0_char(b), b as char); }
+        assert_eq!(g0_char(b' '), ' ');
+    }
+
+    #[test]
+    fn g0_is_not_ascii_where_the_standard_says_so() {
+        // The four positions that would be silently wrong if the low half were
+        // treated as ASCII. RBDS puts `$` at 0x24; IEC 62106 puts it at 0xAB.
+        assert_eq!(g0_char(0x24), '\u{00a4}', "0x24 is the currency sign, not $");
+        assert_eq!(g0_char(0xAB), '$');
+        assert_eq!(g0_char(0x5E), '\u{2015}', "0x5E is a horizontal bar, not ^");
+        assert_eq!(g0_char(0x60), '\u{2016}', "0x60 is a double vertical line, not a backtick");
+        assert_eq!(g0_char(0x7E), '\u{00af}', "0x7E is a macron, not a tilde");
+    }
+
+    #[test]
+    fn g0_decodes_the_hungarian_letters_this_was_added_for() {
+        // The band this instrument is used on. Without these, RadioText from
+        // 92.8 MHz arrived as `Gati Pal - Gondczo`.
+        for (byte, ch) in [
+            (0x80u8, 'á'), (0x82, 'é'), (0x84, 'í'), (0x86, 'ó'),
+            (0x97, 'ö'), (0xA7, 'ő'), (0x88, 'ú'), (0x99, 'ü'), (0xB7, 'ű'),
+            (0xC0, 'Á'), (0xC2, 'É'), (0xC4, 'Í'), (0xC6, 'Ó'),
+            (0xD7, 'Ö'), (0xD9, 'Ü'),
+        ] {
+            assert_eq!(g0_char(byte), ch, "0x{byte:02X}");
+        }
+    }
+
+    #[test]
+    fn g0_maps_control_codes_and_blanks_to_space() {
+        // 0x0D ends a RadioText message; the blanks are unassigned in the table.
+        // All three have to become padding the caller can trim, never a glyph.
+        for b in [0x00u8, 0x0D, 0x1F, 0x7F, 0xFF] {
+            assert_eq!(g0_char(b), ' ', "0x{b:02X}");
+        }
+    }
+
+    #[test]
+    fn text_carries_accents_through_the_decoder() {
+        // End to end through ConfirmedText: the bytes a station actually sends for
+        // an accented word come out as that word.
+        let mut t = ConfirmedText::new(8);
+        for (i, b) in [0x47u8, 0x86, 0x9B, 0x84].into_iter().enumerate() {
+            for _ in 0..CONFIRM_COUNT { t.set(i, b); }
+        }
+        assert_eq!(t.text(8), "Góçí");
     }
 
     #[test]
