@@ -305,12 +305,18 @@ impl Panel for FooterPanel {
 /// than a panel's own state, so it names its tone instead of taking the standard
 /// focus-and-staleness rule.
 fn footer_tone(m: &SdrMetrics) -> FrameTone {
-    if m.observer.active { return FrameTone::Observer; }
-    match m.ui.input_mode {
-        // A value is half typed and waiting on Enter.
-        InputMode::Normal => {
-            if m.ui.focused_panel.is_some() { FrameTone::Focused } else { FrameTone::Dim }
-        }
+    tone_for(m.observer.active, &m.ui.input_mode, m.ui.focused_panel.is_some())
+}
+
+/// The rule itself, on plain inputs so it can be tested without a snapshot.
+fn tone_for(observer: bool, mode: &InputMode, panel_focused: bool) -> FrameTone {
+    if observer { return FrameTone::Observer; }
+    match mode {
+        // Normal: lit while a panel is focused, because the keys along the
+        // footer are that panel's, not the global set.
+        InputMode::Normal if panel_focused => FrameTone::Focused,
+        InputMode::Normal => FrameTone::Dim,
+        // Anything else is a half-typed value waiting on Enter.
         _ => FrameTone::Warn,
     }
 }
@@ -335,6 +341,22 @@ fn focus_items(m: &SdrMetrics) -> Vec<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_footer_frame_reports_what_the_keys_are_for() {
+        // Observer mode outranks everything: the radio is not ours to drive.
+        assert_eq!(tone_for(true, &InputMode::Normal, false), FrameTone::Observer);
+        assert_eq!(tone_for(true, &InputMode::FrequencyInput, true), FrameTone::Observer);
+        // A half-typed value is the loudest thing the footer can be saying.
+        for mode in [InputMode::FrequencyInput, InputMode::SampleRateInput,
+                     InputMode::SweepStartInput, InputMode::SweepStopInput,
+                     InputMode::MarkerNameInput] {
+            assert_eq!(tone_for(false, &mode, false), FrameTone::Warn);
+        }
+        // Otherwise it tracks whether the keys belong to a focused panel.
+        assert_eq!(tone_for(false, &InputMode::Normal, true), FrameTone::Focused);
+        assert_eq!(tone_for(false, &InputMode::Normal, false), FrameTone::Dim);
+    }
 
     #[test]
     fn item_spans_styles_key_and_description() {
