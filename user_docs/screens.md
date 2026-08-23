@@ -236,23 +236,15 @@ sdrtop picks the radio back up automatically. See
 
 Every panel sdrtop draws can be placed in a
 [custom layout](config.md#custom-layout-presets). These are the ones the tour
-above hasn't already covered: the structural pieces, plus a few older panels the
-lab benches grew out of, still handy when you want one number without a whole
-bench around it.
+above hasn't already covered: the structural pieces every layout is built from,
+plus one measurement panel that has no home preset of its own.
 
 | Panel | What it draws |
 |-------|---------------|
 | `header` | The full "Radio" block: frequency, band, sample rate, LNA/VGA/AMP and stream status |
 | `header_slim` | The thin version used by the Command Rail, where the frequency lives in the rail instead |
-| `telemetry` | Model, serial, status, frequency, sample rate, throughput and boost state as plain text |
-| `gains` | LNA and VGA as two labelled gauges |
-| `throughput` | USB throughput over time as a braille graph |
-| `sample_rate` | Measured sample rate over time as a braille graph |
-| `usb_sr` | Both of the above in one panel |
 | `system_resources` | sdrtop's own CPU and memory use |
-| `hardware_health` | The older standalone vitals panel: drops, saturation, CPU/RAM, USB errors, sample-rate accuracy, buffer fill |
 | `iq_histogram` | IQ amplitude distribution across 32 bins with a Low/Mid/Clip breakdown and PAPR |
-| `timing_panel` | The older single-panel timing diagnostics |
 | `signal_strip` | The eight-reading bar described above |
 | `log` | The scrollable message log, with a severity lamp in the gutter |
 | `footer` | Key hints for the current mode. `Tab` hides it |

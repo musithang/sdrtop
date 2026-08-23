@@ -89,8 +89,6 @@ pub struct TimingState {
     pub cb_period_delta_ppm:  i64,
     /// Std-dev of the callback period over the last poll window (µs).
     pub cb_jitter_us:         u64,
-    pub jitter_p95_us:        u64,
-    pub jitter_p99_us:        u64,
     /// Largest callback jitter seen in the most recent poll window.
     pub jitter_max_us:        u64,
     /// Largest callback jitter seen since RX start (or the last `[R]` reset in the
@@ -150,7 +148,8 @@ impl TimingState {
         } else {
             0
         };
-        let jitter_p95_us = percentile_u64(jitter, 95.0);
+        // p99 feeds the verdict but is not displayed anywhere, so it stays a local.
+        // It was a stored field until the `timing_panel` that printed it was retired.
         let jitter_p99_us = percentile_u64(jitter, 99.0);
         let jitter_max_us = jitter.iter().copied().max().unwrap_or(0);
         let sr_delta_ppm = if config_sample_rate > 0.0 && actual_sample_rate > 0 {
@@ -194,8 +193,6 @@ impl TimingState {
             cb_period_expected,
             cb_period_delta_ppm,
             cb_jitter_us,
-            jitter_p95_us,
-            jitter_p99_us,
             jitter_max_us,
             // Session peak is carried forward by the caller (rx task), not derived
             // from this window — start at 0 here.
@@ -292,12 +289,20 @@ mod tests {
     }
 
     #[test]
-    fn jitter_percentiles_populated() {
-        let jitter = [10u64, 20, 30, 40, 200];
-        let t = TimingState::compute(13_107, 10_000_000.0, HACKRF_SAMPLES_PER_TRANSFER, &jitter, &[], 35, 10_000_000, 0, 19.5, 0.2);
-        assert_eq!(t.jitter_max_us, 200);
-        assert!(t.jitter_p95_us >= t.jitter_p95_us.min(t.jitter_p99_us));
-        assert_eq!(t.jitter_p99_us, 200);
+    fn jitter_p99_still_reaches_the_verdict() {
+        // p99 stopped being a stored field when the panel that printed it was
+        // retired, but it is still what `classify` grades. This pins that wiring:
+        // the only difference between the two windows is the jitter tail, and the
+        // verdict has to move with it. On a 13.1 ms period the Good boundary is
+        // 10 % of the period, so a 200 µs tail is Excellent and a 5 ms one is not.
+        let calm  = [10u64, 20, 30, 40, 200];
+        let rough = [10u64, 20, 30, 40, 5_000];
+        let t_calm = TimingState::compute(13_107, 10_000_000.0, HACKRF_SAMPLES_PER_TRANSFER, &calm, &[], 35, 10_000_000, 0, 19.5, 0.2);
+        let t_rough = TimingState::compute(13_107, 10_000_000.0, HACKRF_SAMPLES_PER_TRANSFER, &rough, &[], 35, 10_000_000, 0, 19.5, 0.2);
+        assert_eq!(t_calm.jitter_max_us, 200);
+        assert_eq!(t_rough.jitter_max_us, 5_000);
+        assert_eq!(t_calm.timing_quality, TimingQuality::Excellent);
+        assert_eq!(t_rough.timing_quality, TimingQuality::Marginal);
     }
 
     #[test]

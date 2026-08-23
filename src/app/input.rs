@@ -114,8 +114,8 @@ fn handle_normal(
         Some("waterfall")       => handle_waterfall_focus(key, state, engine, show_help, show_footer, focus_keys),
         Some("iq_diagnostics")  => handle_iq_focus(key, state, device, engine, show_help, show_footer, focus_keys),
         Some("rf_chain")        => handle_rf_focus(key, state, device, engine, show_help, show_footer, focus_keys),
-        Some("hardware_health") => handle_health_focus(key, state, device, engine, show_help, show_footer, focus_keys),
-        Some("timing_panel")    => handle_timing_focus(key, state, device, engine, show_help, show_footer, focus_keys),
+        Some("timing_vitals")      => handle_timing_vitals_focus(key, state, device, engine, show_help, show_footer, focus_keys),
+        Some("timing_diagnostics") => handle_timing_diagnostics_focus(key, state, device, engine, show_help, show_footer, focus_keys),
         Some("sweep_panel")      => handle_sweep_focus(key, state, device, engine, show_help, show_footer, focus_keys),
         Some("signal_metrics")   => handle_signal_metrics_focus(key, state, device, engine, show_help, show_footer, focus_keys),
         Some("signal_characterization") => handle_signal_characterization_focus(key, state, device, engine, show_help, show_footer, focus_keys),
@@ -816,9 +816,14 @@ fn handle_demod_focus(
     handle_global(key, state, device, engine, show_help, show_footer, focus_keys)
 }
 
-/// `hardware_health` focus (`[V]`): `[R]` resets the session drop counter, `[C]`
+/// `timing_vitals` focus (`[V]`): `[R]` resets the session drop counter, `[C]`
 /// clears the trend sparkline histories.
-fn handle_health_focus(
+///
+/// Wired to `hardware_health` until the `lab_timing` rebuild retired that panel
+/// and nobody moved the arm: the vitals panel then advertised `[R]` and `[C]` in
+/// the footer while both fell through to the global handler, where `[R]` resets
+/// the whole radio to defaults.
+fn handle_timing_vitals_focus(
     key: KeyEvent,
     state: &Arc<Mutex<SdrMetrics>>,
     device: Option<&Arc<dyn hardware::SdrDevice>>,
@@ -847,9 +852,10 @@ fn handle_health_focus(
     KeyAction::Continue
 }
 
-/// `timing_panel` focus (`[T]`): `[R]` resets the session jitter peak, `[C]`
-/// clears the jitter / throughput / sample-rate histories.
-fn handle_timing_focus(
+/// `timing_diagnostics` focus (`[T]`): `[R]` resets the session jitter peak,
+/// `[C]` clears the jitter / throughput / sample-rate histories. Same story as
+/// the vitals arm above: pointed at the retired `timing_panel` until now.
+fn handle_timing_diagnostics_focus(
     key: KeyEvent,
     state: &Arc<Mutex<SdrMetrics>>,
     device: Option<&Arc<dyn hardware::SdrDevice>>,

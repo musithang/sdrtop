@@ -124,7 +124,7 @@ fn timing_banner_fields(t: &crate::state::TimingState) -> Vec<(&'static str, Str
     let callback = if t.cb_period_us == 0 {
         "\u{2014}".to_string()
     } else {
-        crate::ui::timing_panel::fmt_us(t.cb_period_us)
+        crate::ui::timing_fmt::fmt_us(t.cb_period_us)
     };
     let deadline = if t.late_callbacks == 0 {
         "\u{2713} met".to_string()
@@ -476,7 +476,7 @@ fn timing_marker_lines(state: &SdrMetrics, theme: &crate::Theme, iw: usize) -> V
 
     try_add(vec![
         Span::raw("   "), Span::styled("DRIFT ", dim),
-        crate::ui::timing_panel::ppm_span(t.cb_period_delta_ppm, theme),
+        crate::ui::timing_fmt::ppm_span(t.cb_period_delta_ppm, theme),
     ], &mut used, &mut spans);
 
     let late_col = if t.late_callbacks == 0 { theme.status_ok }
@@ -498,7 +498,7 @@ fn timing_marker_lines(state: &SdrMetrics, theme: &crate::Theme, iw: usize) -> V
     try_add(vec![
         Span::raw("   "), Span::styled("QUALITY ", dim),
         Span::styled(format!("{mark} {}", titlecase(q.label())),
-            Style::default().fg(crate::ui::timing_panel::quality_color(q, theme)).add_modifier(Modifier::BOLD)),
+            Style::default().fg(crate::ui::timing_fmt::quality_color(q, theme)).add_modifier(Modifier::BOLD)),
     ], &mut used, &mut spans);
 
     append_focus_hints(state, theme, iw, used, &mut spans);

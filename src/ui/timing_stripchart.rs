@@ -23,7 +23,7 @@ use ratatui::{
 use crate::state::SdrMetrics;
 use crate::ui::charts::bipolar_braille_strip;
 use crate::ui::panel::Panel;
-use crate::ui::timing_panel::fmt_us;
+use crate::ui::timing_fmt::fmt_us;
 
 pub struct TimingStripchartPanel;
 
@@ -135,7 +135,7 @@ impl Panel for TimingStripchartPanel {
         } else {
             let q = t.timing_quality;
             let mark = if q.severity() == 0 { "\u{2713}" } else { "\u{26a0}" };
-            let qcol = crate::ui::timing_panel::quality_color(q, theme);
+            let qcol = crate::ui::timing_fmt::quality_color(q, theme);
             Line::from(vec![
                 Span::raw(" "),
                 Span::styled(format!("jitter \u{00b1}{} \u{00b5}s", t.cb_jitter_us), Style::default().fg(theme.value)),

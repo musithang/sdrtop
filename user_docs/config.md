@@ -214,10 +214,7 @@ These are the valid values for `name`. What each one actually draws is in
 **IQ:** `iq_diagnostics` · `iq_constellation` · `iq_histogram` · `image_scope`
 
 **Timing and health:** `timing_diagnostics` · `timing_stripchart` ·
-`timing_vitals` · `timing_panel` · `hardware_health` · `system_resources`
-
-**Small read-outs:** `telemetry` · `gains` · `throughput` · `sample_rate` ·
-`usb_sr`
+`timing_vitals` · `system_resources`
 
 **Sweep:** `sweep_panel` · `sweep_strip`
 

@@ -25,7 +25,7 @@ use crate::state::SdrMetrics;
 use crate::ui::charts::gain_bar_colored;
 use crate::ui::micro_common::sparkline;
 use crate::ui::panel::Panel;
-use crate::ui::timing_panel::{fmt_us, ppm_span, quality_color};
+use crate::ui::timing_fmt::{fmt_us, ppm_span, quality_color};
 
 pub struct TimingDiagnosticsPanel;
 
