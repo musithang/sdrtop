@@ -138,6 +138,9 @@ the number keys, and you can define your own here. Yours are merged with the
 built-ins at startup and round-tripped verbatim on save, so hand-written presets
 survive quitting untouched.
 
+Presets can also live one-per-file in `~/.config/sdrtop/presets/`, described
+below. Everything on this page applies to both.
+
 **Every preset is overridable, including the built-ins.** Define one with the same
 name as a built-in (`command_rail`, `spectrum`, `waterfall`,
 `spectrum_waterfall`, `main`, `lab_iq`, `lab_rf`, `lab_timing`, `lab_signal`,
@@ -159,6 +162,43 @@ panels = [
   { name = "footer",   position = "bottom"                  },
 ]
 ```
+
+### A preset per file
+
+For a layout you want to keep, share, or just not lose in the middle of a growing
+config, write it as its own file instead. Drop `nightwatch.toml` in
+`~/.config/sdrtop/presets/` and `nightwatch` is a preset from then on, alongside
+the built-in ones:
+
+```toml
+# ~/.config/sdrtop/presets/nightwatch.toml
+panels = [
+  { name = "header_slim",  position = "top",  height = 4 },
+  { name = "command_rail", position = "left", width_pct = 28 },
+  { name = "waterfall",    position = "body" },
+  { name = "footer",       position = "bottom" },
+]
+```
+
+That is the whole installation step. There is no list to register the name in and
+nothing to rebuild; press `p` and it is in the cycle. The file is just the
+`panels = [...]` part, without the `[presets.name]` header, because the file name
+is the preset name.
+
+The sixteen built-in presets are written in exactly this format, so the quickest
+way to build on one is to copy it rather than transcribe it from the docs. They
+live in the source tree under `src/config/presets/`.
+
+Three things worth knowing:
+
+- **A layout with no panels is refused**, and so is a file that will not parse.
+  sdrtop skips it, writes the reason to `~/.config/sdrtop/sdrtop.log`, and loads
+  the rest: one stray comma should not cost you your other layouts or stop the
+  radio from starting.
+- **Only `*.toml` is read**, so notes and backups in that directory are ignored.
+- **`config.toml` wins over a file.** If a name is defined both as a
+  `[presets.*]` block and as a file, the block is the one that loads, on the
+  grounds that it is the file you edit by hand and the one sdrtop rewrites.
 
 ### Positions
 

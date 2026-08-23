@@ -17,9 +17,10 @@ in time.
 
 ---
 
-## 🎨 Checkpoint 14: Bring your own colours *(you are here)*
+## 🎨 Checkpoint 14: Bring your own *(you are here)*
 
-Two small things about themes, one of which was overdue.
+Themes and layouts both became things you can just *write*, plus one overdue
+bug fix.
 
 - **Per-field colour overrides survive a save.** They always loaded correctly, but
   quitting with `q` rewrote the config and deleted them, so anyone using them had
@@ -33,8 +34,17 @@ Two small things about themes, one of which was overdue.
   hex, and a broken file is skipped with a note in the log rather than stopping
   the radio from starting. See [Themes](themes.md#write-your-own-theme).
 
-Under the hood this is the same change: the built-in themes stopped being Rust
-code and became data, which is what made both of them possible.
+- **Layouts work the same way now.** Drop `nightwatch.toml` in
+  `~/.config/sdrtop/presets/` and `nightwatch` is a preset from then on, in the
+  `p` cycle alongside the built-in ones. Nothing to register, nothing to rebuild.
+  You can still define presets inline in `config.toml` with `[presets.my_view]`;
+  a file is just easier to keep, share, and not lose in a growing config. See
+  [Configuration](config.md#a-preset-per-file).
+
+Under the hood these are one change: the six built-in themes and the sixteen
+built-in layouts stopped being Rust code and became data files. That is what makes
+your own possible, and it means the built-ins are now the worked examples. Copy
+one and change it.
 
 ---
 

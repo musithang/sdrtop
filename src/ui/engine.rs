@@ -33,9 +33,13 @@ impl LayoutEngine {
         &self.config.active_preset
     }
 
-    /// Names of every panel the registry knows. Used by `builder.rs` to check
-    /// the built-in presets against it, since presets are data and the registry
-    /// is code and nothing else ties the two together.
+    /// Names of every panel the registry knows.
+    ///
+    /// Nothing draws this. It exists so `builder.rs` can check the built-in
+    /// presets against the registry: presets are data and the registry is code,
+    /// and a panel renamed on one side leaves the other quietly asking for a name
+    /// that resolves to nothing.
+    #[cfg_attr(not(test), allow(dead_code))]
     pub fn registered_panel_names(&self) -> impl Iterator<Item = &'static str> + '_ {
         self.registry.panels_iter().map(|p| p.name())
     }
