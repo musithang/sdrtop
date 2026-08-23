@@ -2,81 +2,291 @@
 
 ← [Back](README.md)
 
-sdrtop's **lab presets** are the bench-engineer views: instead of just a live spectrum, they surface the measurements sdrtop can derive about your receiver's *signal quality* and *hardware health*. They're built for setting up a clean capture and watching for trouble during a long run.
+sdrtop's **lab presets** are the bench-engineer views. Instead of just a live
+spectrum, they surface the measurements sdrtop can derive about your receiver's
+*signal quality* and *hardware health*. They're built for setting up a clean
+capture and for watching for trouble during a long run.
 
-The measurements are split across four focused presets, each on its own number key:
+Five presets, each on its own number key:
 
-| Key | Preset | Focus |
-|-----|--------|-------|
-| `5` | **Lab IQ** | IQ diagnostics + constellation + spectrum |
-| `6` | **Lab RF** | RF front-end bench: diagnostics + level diagram + ADC loading |
-| `7` | **Lab Timing** | stream-timing diagnostics + hardware vitals |
-| `8` | **Lab Signal** | spectrum + signal metrics + waterfall |
-| `9` | **Lab Sweep** | frequency scanner across a band wider than one window |
+| Key | Preset | The question it answers |
+|-----|--------|--------------------------|
+| `5` | **Lab IQ** | Is the quadrature clean, and can I make it cleaner? |
+| `6` | **Lab RF** | Is the front end staged properly for what I'm chasing? |
+| `7` | **Lab Timing** | Is my computer keeping up with the radio? |
+| `8` | **Lab Signal** | What is that signal, and what's inside it? |
+| `9` | **Lab Sweep** | What's out there across a band too wide to see at once? |
 
-This guide explains each measurement below; the heading notes which preset to open for it. Every panel turns its border and title **[STALE]** when RX is not streaming, so you always know whether you're looking at live data or a frozen snapshot.
+[What you see on screen](screens.md) says which panel is which and where it sits.
+This page is about what the readings *mean* and what to do about them.
 
-> The lab panels also have a focus mode for extra actions — see [Keyboard Shortcuts](keys.md#lab-panel-focus-modes). The focus key is the highlighted letter in each panel's title.
+Every panel turns its border and title **[STALE]** when RX is not streaming, so
+you always know whether you're looking at live data or a frozen snapshot. Panels
+with extra controls announce it with a highlighted letter in the title; the full
+list is in [Keyboard Shortcuts](keys.md#lab-panel-focus-modes).
 
 ---
 
-## RF Front-End Bench  ·  *Lab RF (`6`)*
+## The measurement banner
 
-A three-panel bench that reads the whole receive chain as one story. The thesis it teaches: **level climbs stage by stage; the gap between signal and noise is the SNR set at the antenna; gain only positions that gap in the ADC window** — it never improves it. Each panel restates one face of that.
+The thin strip across the top of every lab preset is a control panel, not a
+label. Focus it with `b`. It brings three habits from a bench spectrum analyser,
+and they're the difference between reading numbers and actually measuring
+something.
 
-The banner across the top sums it up: `CHAIN ANT▸LNA▸MIX▸VGA▸ADC · NF 6.0 dB · MDS −105 dBm · SNR 40 dB`, and the marker bar at the bottom reads the ADC window: `CLIP 0 dBFS · PEAK −8 dBFS · Δ headroom +8 dB · NOISE −48 dBFS · SNR 40 dB`.
+### Reference level (`↑` / `↓`, `R` to clear)
 
-> **A note on the levels.** The HackRF is not power-calibrated, so the dBm figures here are *modeled / relative*: the lineup is back-computed from the *measured* ADC level through the *known* stage gains, anchored to a documented `0 dBFS = 0 dBm` reference. They're exactly right for staging decisions, and they're not a wattmeter reading. Likewise the linearity figures (below) are datasheet-anchored estimates, not lab measurements — both are labelled as such in the panel.
+Draws a horizontal line across the spectrum at a level you choose, so "above the
+line" and "below the line" become something you see rather than something you work
+out. It starts at −10 dBFS, moves 1 dB per press, and runs from 0 down to −120.
 
-### RF Diagnostics *(left — focus `D`)*
+Use it as a threshold you've decided on: set it at the level a signal has to reach
+to be worth chasing, then anything poking above the line is a candidate.
 
-The chain quantified, top to bottom:
+### Trace averaging (`[` / `]`)
 
-- **Gain lineup** — the signal level after each stage (ANT, LNA, MIX, VGA, ADC), with each stage's gain in the middle column. You can watch the signal climb by each stage's gain and land at the measured ADC level.
-- **Gain staging** — LNA `n / 40` and VGA `n / 62` gradient bars (the same bars as the command rail and header), each with a `┊` tick marking the *optimal* target. The `opt` line reads `✓ at optimum` or points at the LNA/VGA the staging wants.
-- **Noise figure** — each stage's own NF as a bar, and the Friis **system total** beneath. The system total can sit *below* the worst single stage because the LNA's gain suppresses the noise of everything after it — that's the whole point of leading with a low-noise amplifier.
-- **Sensitivity** — **MDS** (Minimum Detectable Signal, `−174 dBm/Hz + 10·log₁₀(BW) + NF`) plus a noise-floor trend sparkline with its ±dB/60s spread. Narrowing the BB filter or lowering the NF improves (lowers) the MDS.
-- **Verdict** — a plain-language read of the staging (`WELL-STAGED`, `HOT`, `CLIPPING`, `UNDER-UTILISED`…) and the action chips `[A] auto-gain · [↑↓] LNA · [ ] VGA`.
+Smooths the spectrum across successive FFT frames, from 1 (no smoothing) up to 16.
+The default is 5.
 
-### Gain-Staging Level Diagram *(centre)*
+This works because noise and signal behave differently under averaging. Noise is
+random, so successive frames disagree about it and averaging pulls it down toward
+its mean. A real carrier is in the same bin at the same level every frame, so it
+stays exactly where it is. Turn averaging up and the floor gets visibly flatter
+while the signal doesn't move, which is how you find something a single frame
+buries.
 
-The lineup drawn as a picture: two traces climbing the stage axis ANT▸LNA▸MIX▸VGA▸ADC — **signal** (filled) and **noise floor** (line). The vertical gap between them is the SNR. Reading it left to right shows the gap being *carried up* the chain and parked inside the ADC window, never widened. Dashed reference lines mark the ADC clip ceiling and 8-bit floor; the band between the traces is shaded as **usable dynamic range** (or, if the noise ever climbs above the signal, flagged as a **buried** band instead of left blank).
+The cost is reaction time. At 16 the display is smooth and calm and about a
+second behind reality, which is wrong for watching a burst and right for measuring
+a steady carrier. Drop it back to 1 when you need to see something happen.
 
-### ADC Loading *(right)*
+### Reference trace (`C` to capture, `C` again to clear)
 
-How hard the 8-bit ADC is actually driven:
+Captures the current spectrum and keeps it on screen as a ghost behind the live
+trace. This is the before/after tool: capture, change one thing (an antenna, a
+filter, a length of coax, a gain setting), and read the difference directly off
+the screen instead of trying to remember what the floor looked like a minute ago.
 
-- **Signed sample histogram** — a centred bell from −FS to +FS. A healthy signal fills the middle without piling up on the rails; the rails turn amber, then red, as clipping appears. A lopsided bell reveals a DC offset.
-- **Headroom** bar — clip headroom in dB, with the optimal tick.
-- **Loading** — `peak` / `rms` in dBFS and ADC counts, **crest** factor, **effective bits** (ENOB), and the **clip-event** count for the window.
-- **Linearity** *(modeled)* — P1dB headroom, IIP3 / IMD3, and SFDR against the honest 8-bit ceiling (`6.02·8 + 1.76 ≈ 50 dB`). These need a two-tone source to measure for real; here they're gain-adjusted datasheet estimates for guidance.
+Averaging first, then capture, gives the cleanest comparison. Two averaged traces
+differ by what you changed; two single frames differ by that plus a lot of noise.
+
+### The marker bar
+
+The strip along the bottom is the read-out half of the same idea. It shows your
+placed markers with frequency and level, and the **Δ** between two of them in both
+axes at once, which is the fastest way to answer "how far apart, and how much
+weaker?" without arithmetic.
+
+Each bench adds its own field. Lab Signal carries occupied bandwidth and a quality
+verdict, Lab RF reads the ADC window (clip ceiling, peak, headroom, noise, SNR),
+and Lab IQ shows the measured carrier-to-image suppression.
+
+> **If you build your own preset**, note that the reference line and the ghost
+> trace are drawn only in **instrument mode**, which sdrtop turns on for presets
+> whose name begins with `lab_`. The banner keys work anywhere, and averaging
+> affects the spectrum everywhere, but the two overlays need the name.
+
+---
+
+## RF Front-End Bench · *Lab RF (`6`)*
+
+Three panels that read the whole receive chain as one story. The thesis they
+teach: **level climbs stage by stage; the gap between signal and noise is the SNR
+set at the antenna; gain only positions that gap in the ADC window.** It never
+improves it. Each panel restates one face of that.
+
+> **A note on the levels.** The HackRF is not power-calibrated, so the dBm figures
+> here are *modeled and relative*: the lineup is back-computed from the *measured*
+> ADC level through the *known* stage gains, anchored to a documented
+> `0 dBFS = 0 dBm` reference. They're exactly right for staging decisions, and
+> they're not a wattmeter reading. Likewise the linearity figures below are
+> datasheet-anchored estimates, not lab measurements. Both are labelled as such in
+> the panel.
+
+### RF Diagnostics *(focus `d`)*
+
+- **Gain lineup**: the signal level after each stage (ANT, LNA, MIX, VGA, ADC),
+  with each stage's gain in the middle column. You can watch the signal climb by
+  each stage's gain and land at the measured ADC level.
+- **Gain staging**: LNA `n / 40` and VGA `n / 62` gradient bars, each with a `┊`
+  tick marking the *optimal* target. The `opt` line reads whether you're at the
+  optimum or points at the LNA/VGA the staging wants.
+- **Noise figure**: each stage's own NF as a bar, and the Friis **system total**
+  beneath. The system total can sit *below* the worst single stage, because the
+  LNA's gain suppresses the noise of everything after it. That's the whole point
+  of leading with a low-noise amplifier.
+- **Sensitivity**: **MDS** (Minimum Detectable Signal,
+  `−174 dBm/Hz + 10·log₁₀(BW) + NF`) plus a noise-floor trend sparkline with its
+  ±dB/60s spread. Narrowing the BB filter or lowering the NF improves (lowers) the
+  MDS.
+- **Verdict**: a plain-language read of the staging (`WELL-STAGED`, `HOT`,
+  `CLIPPING`, `UNDER-UTILISED` and so on) with the action chips beside it.
+
+### Gain-Staging Level Diagram
+
+The lineup drawn as a picture: two traces climbing the stage axis, **signal**
+(filled) and **noise floor** (line). The vertical gap between them is the SNR.
+Reading it left to right shows that gap being *carried up* the chain and parked
+inside the ADC window, never widened. Dashed reference lines mark the ADC clip
+ceiling and the 8-bit floor, and the band between the traces is shaded as
+**usable dynamic range**. If the noise ever climbs above the signal, that band is
+flagged **buried** rather than left blank, because an empty gap and a negative one
+are very different situations.
+
+### ADC Loading
+
+How hard the 8-bit ADC is actually being driven:
+
+- **Signed sample histogram**: a centred bell from −FS to +FS. A healthy signal
+  fills the middle without piling up on the rails; the rails turn amber, then red,
+  as clipping appears. A lopsided bell reveals a DC offset.
+- **Headroom** bar: clip headroom in dB, with the optimal tick.
+- **Loading**: `peak` and `rms` in dBFS and ADC counts, **crest** factor,
+  **effective bits** (ENOB), and the **clip-event** count for the window.
+- **Linearity** *(modeled)*: P1dB headroom, IIP3 / IMD3, and SFDR against the
+  honest 8-bit ceiling (`6.02·8 + 1.76 ≈ 50 dB`). These need a two-tone source to
+  measure for real; here they're gain-adjusted datasheet estimates for guidance.
 
 ### Auto-gain and freeze
 
-Focus the RF Diagnostics panel with `D`, then:
+Focus RF Diagnostics with `d`, then:
 
-- **`A` — auto-gain.** When the chain is off-optimal, one press jumps LNA/VGA to the staging target (signal ≈ −8 dBFS, no clip), filling LNA first to protect the noise figure. Once you're already at the optimum, pressing `A` again **latches a continuous auto-track** that re-nudges the gain when the level drifts (the chip lights `✓`); press once more to unlatch. Touching the gain manually (`↑↓`, `[ ]`, `a`, `r`) drops the latch immediately, so it never fights you.
-- **`⎵` / `F` — freeze.** Holds the histogram and level diagram on a snapshot so you can study them while RX keeps running; both panels show `[FRZ]` in their title. Press again to go live.
+- **`A`, auto-gain.** When the chain is off-optimal, one press jumps LNA and VGA
+  to the staging target (signal around −8 dBFS, no clip), filling LNA first to
+  protect the noise figure. Once you're already at the optimum, pressing `A` again
+  **latches a continuous auto-track** that re-nudges the gain when the level
+  drifts. Press once more to unlatch. Touching the gain manually drops the latch
+  immediately, so it never fights you.
+- **`⎵` or `F`, freeze.** Holds the histogram and level diagram on a snapshot so
+  you can study them while RX keeps running. Both panels show `[FRZ]` in their
+  title. Press again to go live.
 
 ---
 
-## IQ Amplitude Distribution  ·  *optional panel (`iq_histogram`)*
+## IQ Bench · *Lab IQ (`5`)*
 
-> In the default **Lab IQ** preset the constellation (below) now fills this slot: the same ADC data shown as a richer 2-D cloud. The histogram is still available as a panel if you want the exact Low/Mid/Clip percentages: add `iq_histogram` to a [custom layout](config.md#custom-layout-presets).
+Everything here is about **quadrature**: whether the I and Q channels your radio
+produces are really equal in amplitude and really 90° apart. When they're not,
+every signal grows a mirror image on the opposite side of centre, and a spectrum
+with fake signals in it is worse than a noisy one.
 
-A histogram of incoming sample amplitudes across 32 bins, log-scaled vertically so both rare strong peaks and the bulk of weak samples are visible at once. Colour zones:
+Three panels ask the same question three ways, and then the focus mode lets you
+do something about the answer.
 
-- **Dim (left)** — low amplitude. The ADC is under-utilised.
-- **Green (centre)** — the healthy range.
-- **Red (right)** — high amplitude, approaching clipping.
+### IQ Diagnostics *(focus `i`)*
 
-**Numeric breakdown** — the exact percentages so you can set gain precisely:
+Each *deviation-from-ideal* is drawn as an analog **null-meter**: a centre tick is
+"perfect", and a coloured needle deflects left or right by how far off you are,
+with the span between centre and needle filled. A glance reads the state; the
+number beside it reads the exact value.
 
-```
-Low  12%   Mid  71%   Clip  17%
-```
+- **DC I / DC Q**: how far each channel is offset from zero, with a combined **DC
+  magnitude** quality bar. A high DC offset puts a fixed tone right in the middle
+  of your spectrum.
+- **DC spike**: how tall that centre-frequency spike is, in dBFS. Green below
+  −40 dBFS.
+- **Amp imbalance**: whether I and Q carry the same power. A mismatch creates
+  mirror images of signals on the opposite side of centre.
+- **Phase imbalance**: whether I and Q are exactly 90° apart. Also causes
+  mirroring.
+- **IRR**: **Image Rejection Ratio** in dB, as a red-to-green quality bar. This is
+  the key quadrature-quality figure. It tells you how far *below* every real
+  signal its mirror image appears. 30 dB or more is good, the images are faint;
+  below 20 dB and they become a problem.
 
-**PAPR** — **Peak-to-Average Power Ratio** (crest factor) in dB, estimated from the distribution. This is a quick fingerprint of *what kind* of signal you're looking at:
+A contextual hint at the bottom summarises whether anything needs attention,
+colour-matched to severity.
+
+### IQ Constellation
+
+Where the diagnostics give you numbers, the constellation gives you *shape*, and
+shape is often faster to read.
+
+- A **circle** centred on the origin means healthy quadrature.
+- An **ellipse** means amplitude imbalance (I and Q at different levels).
+- A **tilt** means phase imbalance (I and Q not 90° apart).
+- The cloud's **offset** from centre is the DC offset, marked with a crosshair.
+
+The cloud is coloured by **point density**, a phosphor-scope look where sparse
+edges are cool blue and the dense core glows orange, so you can see where the
+signal's energy actually concentrates. A measured **imbalance ellipse** is fitted
+over it: its axis ratio is the amplitude imbalance and its tilt is the phase
+imbalance, the same two faults the diagnostics quantify, drawn straight onto the
+cloud. No live numbers sit here on purpose; they're one panel to the left.
+
+### Image-Rejection Scope
+
+The empirical check on everything above. The other two panels *calculate* image
+rejection from the measured imbalance figures. This one goes and looks at a real
+image.
+
+It finds the strongest carrier in the frame, finds the bin that mirrors it about
+the centre (the LO), and reports:
+
+- **CARRIER**: its frequency and level.
+- **IMAGE**: the level of the mirror at the reflected frequency.
+- **DC spike**: the residual at centre, which is the I/Q offset rather than any
+  signal.
+- **image supp.**: the gap between carrier and image in dB, which is the measured
+  counterpart of the computed IRR next door.
+
+When the two disagree, trust this one for "what will actually appear in my
+spectrum" and the computed IRR for "how imbalanced is the hardware". They're
+answering slightly different questions.
+
+Two things stop it lying to you. It ignores a small guard band around centre, so
+the DC spike can never be mistaken for a carrier. And on the automatic path it
+requires the strongest bin to stand at least 10 dB clear of the noise floor;
+below that there is no carrier, only noise, and reporting the loudest noise bin as
+a carrier would produce an alarming suppression figure about nothing. Place a
+marker or pin one with `M` and that gate is bypassed, because an operator
+deliberately probing a weak signal outranks the heuristic.
+
+### Correcting, not just measuring
+
+This is the part that's easy to miss: two of the focus keys change the *samples*,
+not the display.
+
+- **`D`, DC-block.** Subtracts the live DC estimate from the stream. That
+  permanent spike at your centre frequency is the front end's own DC offset, not a
+  signal. Turn this on and watch it drop. Worth having on whenever the DC spike is
+  interfering with a measurement near centre, which includes the demodulator on
+  the signal bench.
+- **`C`, auto-cal.** Measures the amplitude and phase imbalance in the current
+  sample window and applies the inverse correction from there on. Mirror images
+  fade and IRR improves. It's a one-shot snapshot that stays fixed until you press
+  `C` again to clear it.
+
+  Because it estimates from whatever is in the window at that moment, capture it
+  with a decent signal present rather than on an empty band. The natural workflow
+  is: tune to a strong clean carrier, look at the image scope, press `C`, watch
+  the image drop, then go back to what you were doing with the correction still
+  applied.
+- **`F`** freezes the constellation cloud so you can study a shape while RX keeps
+  running.
+- **`M`** pins the carrier and image markers instead of letting them auto-track,
+  so they stay on the signal you chose rather than on whatever is loudest right
+  now.
+
+Both corrections are display-session state, not hardware settings, and neither is
+saved. A fresh launch is an uncorrected radio, which is the honest default.
+
+---
+
+## IQ Amplitude Distribution · *optional panel (`iq_histogram`)*
+
+> Not in any built-in preset any more; the image scope took its slot in Lab IQ.
+> Add `iq_histogram` to a [custom layout](config.md#custom-layout-presets) if you
+> want the exact Low/Mid/Clip percentages.
+
+A histogram of incoming sample amplitudes across 32 bins, log-scaled vertically so
+both rare strong peaks and the bulk of weak samples are visible at once. The
+colour zones are dim (low amplitude, ADC under-utilised), green (healthy) and red
+(approaching clipping), and below the chart a numeric breakdown gives the exact
+percentages so you can set gain precisely.
+
+**PAPR**, the Peak-to-Average Power Ratio (crest factor) in dB, is estimated from
+the distribution. It's a quick fingerprint of *what kind* of signal you're looking
+at:
 
 | PAPR | Likely signal |
 |------|---------------|
@@ -85,59 +295,15 @@ Low  12%   Mid  71%   Clip  17%
 | 8–15 dB | wideband / spread-spectrum |
 | over 15 dB | bursty / impulsive |
 
-A status line at the bottom summarises the picture: "Dynamic range OK", "weak signal — ADC under-utilised", or "clipping risk".
-
 ---
 
-## IQ Diagnostics  ·  *Lab IQ (`5`)*
+## Signal Characterization · *Lab Signal (`8`)*
 
-The quality of the I/Q signal coming off the ADC. Problems here show up as artefacts in the spectrum. Each *deviation-from-ideal* is drawn as an analog **null-meter**: a centre tick is "perfect", and a coloured needle deflects left/right by how far off you are, with the span between centre and needle filled. A glance reads the state; the number beside it reads the exact value.
-
-- **DC I / DC Q** - how far each channel is offset from zero (a null-meter each), with a combined **DC magnitude** quality bar. A high DC offset puts a fixed tone right in the middle of your spectrum.
-- **DC spike** - how tall that centre-frequency spike is, in dBFS. Green below −40 dBFS.
-- **Amp imbalance** - whether I and Q carry the same power (null-meter). A mismatch creates mirror images of signals on the opposite side of centre.
-- **Phase imbalance** - whether I and Q are exactly 90° apart (null-meter). Also causes mirroring.
-- **IRR** - **Image Rejection Ratio** in dB, as a red→green quality bar. This is the key quadrature-quality figure: it tells you how far *below* every real signal its mirror image appears. 30 dB or more is good (images are faint); below 20 dB and the images become a problem.
-
-A contextual hint at the bottom summarises whether anything needs attention, colour-matched to severity.
-
----
-
-## IQ Constellation  ·  *Lab IQ (`5`)*
-
-The 2-D picture of the same I/Q stream, in the centre of the Lab IQ preset. Where the diagnostics give you the numbers, the constellation gives you the *shape*, and shape is often faster to read.
-
-It plots recent I/Q sample pairs as a dot-cloud over a fixed reference frame (the unit circle, a faint ±0.5 ring, and I/Q axes). What to look for:
-
-- A **circle** centred on the origin means healthy quadrature.
-- An **ellipse** means amplitude imbalance (I and Q at different levels).
-- A **tilt** means phase imbalance (I and Q not 90° apart).
-- The cloud's **offset** from centre is the DC offset (a small crosshair marks the measured DC point).
-
-The cloud is coloured by **point density**: a phosphor-scope look where sparse edges are a cool blue and the dense core glows orange, so you can see where the signal's energy actually concentrates. A measured **imbalance ellipse** is fitted over it: its axis ratio is the amplitude imbalance, its tilt the phase imbalance, the same two faults the diagnostics quantify, drawn straight onto the cloud. No live numbers sit here on purpose; they're one panel to the left. Yes, it looks like an old analog scope. That's the point.
-
----
-
-## Hardware Vitals  ·  *Lab Timing (`7`)*
-
-Whether the capture chain is keeping up, with a trend sparkline under each metric.
-
-- **Drops** — samples lost per second, plus the session total. Non-zero means USB or CPU can't keep up.
-- **ADC saturation** — how often samples hit the ADC ceiling, with the session peak.
-- **CPU / RAM** — sdrtop's own processor and memory use. CPU is a system-wide percentage (100% means every core is maxed), so on a multi-core machine a healthy figure is well under 100%. If CPU climbs toward the warn/crit thresholds at high sample rates, that's often the cause of drops.
-- **USB errors** — zero-length USB transfers, usually a cable or hub problem. Coloured by recent rate, not session total, so a single old glitch doesn't pin it red forever.
-- **SR** — configured versus actually-measured sample rate, e.g. `20.000 → 19.847 MHz (−0.8%)`. A large gap means USB can't sustain the requested rate. Shows `→ ---` when not streaming.
-- **BUF fill** — receive-buffer fill percentage with history. A leading indicator: if this trends upward toward 100%, drops are about to start.
-
----
-
-## Signal Characterization  ·  *Lab Signal (`8`)*
-
-The left-hand column of **Lab Signal**. Where the demod panel opposite opens the
-channel up and reads what is inside it, this one answers the question you ask
-first: what *is* that, and how clean is it? Everything here comes from the same
-FFT frame the spectrum beside it draws, so the two always agree. Press `x` to
-focus it, then `C` to write the current readings to the log.
+Where the demod panel opposite opens the channel up and reads what is inside it,
+this one answers the question you ask first: what *is* that, and how clean is it?
+Everything here comes from the same FFT frame the spectrum beside it draws, so the
+two always agree. Press `x` to focus it, then `C` to write the current readings to
+the log.
 
 **Radio headline.** Peak-to-noise in dB with a status lamp, and the classifier's
 guess at the modulation (`WFM`, `NFM`, `AM`). Green at 20 dB or better, amber down
@@ -200,13 +366,13 @@ the demod panel opposite, force the mode with `T` rather than trusting the badge
 
 ---
 
-## FM MPX · Demod  ·  *Lab Signal (`8`)*
+## FM MPX · Demod · *Lab Signal (`8`)*
 
-The right-hand column of **Lab Signal** actually demodulates the channel and reads
-out what is inside it. It is a **measurement instrument, not a receiver**. There is
-no audio anywhere in sdrtop, and this panel exists to tell you things about a
-transmission that a spectrum plot cannot: how hard it is deviating, whether it is
-in stereo, which subaudible tone opens the squelch, what the station calls itself.
+This panel actually demodulates the channel and reads out what is inside it. It is
+a **measurement instrument, not a receiver**. There is no audio anywhere in
+sdrtop, and this panel exists to tell you things about a transmission that a
+spectrum plot cannot: how hard it is deviating, whether it is in stereo, which
+subaudible tone opens the squelch, what the station calls itself.
 
 Press `m` to focus it. It only runs while the panel is actually on screen, so it
 costs nothing on any other layout. That means it also works in a
@@ -225,21 +391,20 @@ actually has, rather than a fixed grid where most rows read as permanently empty
 There is no audio section, and there is no audio. A section a mode does not have is
 simply absent rather than sitting there empty.
 
-- **MPX baseband**: the demodulated composite from 0–60 kHz as a braille profile,
-  with ticks at 19 k (pilot), 38 k (stereo difference) and 57 k (RDS). This is the
-  audio-side spectrum, not the RF one. You are looking *inside* the FM channel.
+- **MPX baseband**: the demodulated composite from 0 to 60 kHz as a braille
+  profile, with ticks at 19 k (pilot), 38 k (stereo difference) and 57 k (RDS).
+  This is the audio-side spectrum, not the RF one. You are looking *inside* the FM
+  channel.
 - **Pilot / stereo**: `● STEREO`, `◐ MARGINAL` or `○ MONO`, plus the pilot's own
-  deviation and its **injection percentage**. Broadcast practice is 8–10 %, so a
-  figure well outside that is a transmitter fault rather than a reception problem.
+  deviation and its **injection percentage**. Broadcast practice is 8 to 10 %, so
+  a figure well outside that is a transmitter fault rather than a reception
+  problem.
 - **Deviation**: peak (quasi-peak, with decay) and RMS deviation measured *about
   the carrier*, plus a **Carrier** row giving how far the carrier sits from the
   centre of the demodulated channel. Measuring about the carrier is what makes a
   mistuned radio report its tuning error there instead of inflating the modulation
-  figure. (That row used to be called "Offset", which collided with the channel
-  offset in the headline above it. The two point in opposite directions, so they no
-  longer share a name.) The bar is drawn against the mode's nominal limit, ±75 kHz for
-  broadcast and ±5 kHz for NFM, and turns amber then red as you approach and exceed
-  it.
+  figure. The bar is drawn against the mode's nominal limit, ±75 kHz for broadcast
+  and ±5 kHz for NFM, and turns amber then red as you approach and exceed it.
 - **CTCSS**: the subaudible tone that opens a repeater's squelch, identified from
   the standard 40-tone table, with its deviation and the **margin** it beat its
   nearest rival by. It needs half a second of unbroken audio, so it shows
@@ -255,9 +420,9 @@ simply absent rather than sitting there empty.
 For broadcast FM the panel decodes the **RDS** data stream on the 57 kHz
 subcarrier, and shows:
 
-- the **Programme Service** name (`● DANKO`), the 8-character station name,
+- the **Programme Service** name, the 8-character station name,
 - **PI**, the station's unique hex identity code,
-- **PTY**, the programme type (`Pop Music`, `News`, `Culture`, and so on),
+- **PTY**, the programme type (`Pop Music`, `News`, `Culture` and so on),
 - **Traffic** flags, when TP or TA is set,
 - **Groups**, which is two numbers: the total accepted on this channel, and after
   it the length of the current unbroken run. `Groups 1400  +1` means fourteen
@@ -319,25 +484,92 @@ While focused (`m`):
 
 If the panel warns **"on DC spike"**, the channel is sitting on the front end's own
 DC offset and LO leakage, which swamps the phase detector and inflates every
-deviation figure. Either enable the DC block (`[D]` in Lab IQ) or walk the channel
+deviation figure. Either enable the DC block (`D` in Lab IQ) or walk the channel
 off centre with `←` / `→`.
 
 ---
 
-## Sweep  ·  *Lab Sweep (`9`)*
+## Timing Bench · *Lab Timing (`7`)*
 
-The HackRF sees only as much spectrum at once as the sample rate covers (±10 MHz
-at 20 Msps). **Lab Sweep** maps a wider band by retuning across it: at each step
-it measures briefly, records the peak and mean level, then moves on, stitching
-the results into one curve with frequency on the x-axis. Known bands are labelled
-from the band plan, and the cursor reads out the level and band at any point.
+The question no other bench can answer: is your computer keeping up with the radio
+in real time? The radio ships samples in steady USB bursts, one callback at a
+time, and your machine has to catch every one on schedule or the buffer backs up
+and samples drop.
+
+### Timing Diagnostics *(focus `t`)*
+
+- **Callback timing**: the measured callback period against the period expected at
+  your sample rate, the throughput that implies, and the jitter around it.
+- **Deadline budget**: per-callback deviation percentiles (p95, p99, peak) drawn
+  against a deadline that scales with the sample rate, because a callback that is
+  200 µs late is fine at 2 Msps and fatal at 20. A late-callback count sits beside
+  it, and a plain verdict (Excellent, Good, Marginal, Poor) sums it up.
+- **Sample rate**: host clock drift in ppm and the drift of the measured rate
+  against the configured one. This is clock integrity rather than throughput: a
+  steady few ppm is a crystal being a crystal, a wandering figure is not.
+
+`R` resets the session jitter peak, `C` clears the history.
+
+### Callback Interval Strip Chart
+
+Every point is one real USB callback, plotted by how far its arrival drifted from
+the expected interval. Late deliveries climb, early ones dip, and anything past the
+deadline band gets tagged. A host hiccup becomes something you watch happen rather
+than something you infer from a counter afterwards.
+
+This is the panel to have open when you suspect the problem is your computer and
+not your radio. A scheduler stall, a CPU frequency step, another process waking up
+on a timer: they all have a shape here, and the shape repeats.
+
+### Hardware Vitals *(focus `v`)*
+
+The supporting cast, all on a 60-second rolling window:
+
+- **Sample drops**: per second plus the session total. Non-zero means something
+  upstream is not keeping up.
+- **ADC saturation**: how often samples hit the ADC ceiling, with the session
+  peak.
+- **CPU load and RAM**: sdrtop's own use. CPU is a system-wide percentage, so
+  100 % means every core is maxed and a healthy figure on a multi-core machine is
+  well under it.
+- **USB link**: bus throughput, link utilisation against the device's real
+  ceiling, and USB errors (zero-length transfers, usually a cable or hub problem).
+  The errors are coloured by recent rate rather than session total, so one old
+  glitch doesn't pin the panel red forever.
+- **Ring buffer**: peak fill and overrun margin. This is the leading indicator.
+  Fill climbing toward the ceiling is the warning that drops are about to start,
+  and it arrives before the drop counter does.
+
+`R` resets the session drop counter, `C` clears the sparklines.
+
+---
+
+## Sweep · *Lab Sweep (`9`)*
+
+Your radio sees only as much spectrum at once as the sample rate covers, ±10 MHz
+at 20 Msps on a HackRF and rather less on an RTL-SDR. **Lab Sweep** maps a wider
+band by retuning across it: at each step it measures briefly, records the peak and
+mean level, then moves on, stitching the results into one curve with frequency on
+the x-axis. Known bands are labelled from the band plan, and the cursor reads out
+the level and band at any point.
 
 Because a full cycle takes a couple of seconds, sweep is for *finding* a signal,
-not watching it — once you spot one, focus the panel with `g` and press `Enter`
-to tune straight to the cursor frequency in normal RX. While focused, `s` / `e`
-set the start / end frequency live and `+` / `-` adjust the dwell; the band and
-dwell also live in the config (see [Configuration → Sweep scanner](config.md#sweep-scanner)). The
-`micro_sweep` step in the `0` cycle gives the same scan as a compact field list.
+not watching it. Once you spot one, focus the panel with `g` and press `Enter` to
+tune straight to the cursor frequency in normal RX.
+
+While focused, `S` and `E` set the start and end frequency live, `+` and `-`
+adjust the dwell, and `M` switches the curve between peak and mean. Peak finds
+brief transmissions that a mean would average away; mean gives a stabler picture
+of what is continuously present. The band and dwell also live in the config, see
+[Configuration](config.md#sweep-scanner).
+
+**Signal Metrics** *(focus `n`)* sits alongside with a compact read-out for
+wherever the radio is actually parked: peak-to-noise, channel power, noise floor
+and occupied bandwidth. `C` logs a snapshot. It's the same family of numbers as
+the signal bench, sized to fit next to a scan.
+
+The `micro_sweep` step in the `0` cycle gives the same scan as a compact field
+list.
 
 ---
 
@@ -346,10 +578,25 @@ dwell also live in the config (see [Configuration → Sweep scanner](config.md#s
 A typical setup flow, switching presets as you go:
 
 1. Tune to your target and start RX (`Space`).
-2. In **Lab IQ (`5`)**, watch the **constellation**: adjust LNA/VGA (`↑`/`↓`, `[`/`]`) until the cloud is a bright, well-filled ring sitting comfortably *inside* the unit circle (smearing out to the edge means clipping). Glance at **IQ Diagnostics**: a centred needle on each null-meter, IRR above 30 dB and DC spike below −40 dBFS mean clean quadrature.
-3. In **Lab RF (`6`)**, focus the **RF Diagnostics** panel (`D`) and press `A` to auto-stage the gain, then read **NF** and **MDS** to confirm the receiver is sensitive enough for what you're chasing. Watch the **ADC Loading** bell fill the range without touching the rails.
-4. In **Lab Timing (`7`)**, confirm the timing verdict is Good/Excellent before committing to a long run.
-5. During a long capture, keep an eye on **Hardware Vitals** (in **Lab Timing `7`**) — CPU, BUF fill, and Drops together tell you whether the run is sustainable.
+2. In **Lab IQ (`5`)**, watch the **constellation**: adjust LNA and VGA until the
+   cloud is a bright, well-filled ring sitting comfortably *inside* the unit
+   circle (smearing out to the edge means clipping). Glance at **IQ Diagnostics**:
+   a centred needle on each null-meter, IRR above 30 dB and DC spike below
+   −40 dBFS mean clean quadrature. If the DC spike is in your way, press `D`; if
+   the images are, park on a strong carrier and press `C`.
+3. In **Lab RF (`6`)**, focus **RF Diagnostics** (`d`) and press `A` to auto-stage
+   the gain, then read **NF** and **MDS** to confirm the receiver is sensitive
+   enough for what you're chasing. Watch the **ADC Loading** bell fill the range
+   without touching the rails.
+4. In **Lab Timing (`7`)**, confirm the timing verdict is Good or Excellent, and
+   that the ring-buffer fill isn't trending upward, before committing to a long
+   run.
+5. On the bench you're actually working at, set the banner up: averaging up if the
+   thing you're chasing is near the floor, and a reference trace captured before
+   you change anything.
+6. During a long capture, keep **Hardware Vitals** in view. CPU, buffer fill and
+   drops together tell you whether the run is sustainable, and buffer fill tells
+   you first.
 
 ---
 
