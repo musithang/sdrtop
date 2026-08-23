@@ -1,32 +1,43 @@
-# sdrtop — User Guide
+# sdrtop User Guide
 
 Welcome. This is the plain-language guide to using sdrtop.
 
-> **Status:** the interactive TUI is feature-complete (spectrum, waterfall, the lab presets, the sweep scanner, and the micro field views), and **RTL-SDR** support has landed. The current arc is **instrument-grade UI polish** (the Command Rail cockpit and the redrawn Lab IQ), plus bug-fixing and sharper radio math. See [What's New](whats-new.md).
+> **Status:** the interactive TUI is feature-complete (spectrum, waterfall, the
+> five lab benches, the sweep scanner and the micro field views), and both the
+> HackRF One and the RTL-SDR are fully supported. The current arc is polish:
+> instrument-grade UI, sharper radio math, and bug fixing. See
+> [What's New](whats-new.md).
 
 ---
 
-## Contents
+## Start here
 
-### Getting started & reference
+- **[Getting started](getting-started.md)**: install, build, first run
+- **[Keyboard shortcuts](keys.md)**: every key, including every focus mode
+- **[What you see on screen](screens.md)**: every panel, explained
 
-- [Getting started](getting-started.md) — install, build, and run
-- [Keyboard shortcuts](keys.md) — full key reference
-- [What you see on screen](screens.md) — every panel explained simply
+## Going deeper
 
-### In-depth guides
+- **[The Lab presets](lab.md)**: what each measurement means and how to act on it
+- **[Tips and Tricks](tips-and-tricks.md)**: setting gain, pulling weak signals
+  out of the noise, capture checklists
+- **[Advanced Features](advanced.md)**: multiple radios, observer mode, the
+  session log, what sdrtop deliberately doesn't do
+- **[Troubleshooting](troubleshooting.md)**: when it doesn't work
 
-- [The Lab presets](lab.md) — the bench-engineer views (NF, MDS, IRR, PAPR, vitals, timing) in depth
-- [Tips and Tricks](tips-and-tricks.md) — practical advice for gain tuning, marker systems, waterfall analysis, and workflows
-- [Advanced Features](advanced.md) — multiple devices, custom presets, observer mode, focus mode reference
-- [Troubleshooting](troubleshooting.md) — common issues and solutions
+## Setting it up
 
-### Configuration & customization
+- **[Configuration](config.md)**: the config file, markers, custom layouts
+- **[Themes](themes.md)**: the six palettes and per-field overrides
+- **[Supported hardware](hardware.md)**: what works today, and how the two
+  radios differ
 
-- [Configuration](config.md) — how to set up and customize sdrtop
-- [Themes](themes.md) — built-in color themes
-- [Supported hardware](hardware.md) — what works today and what's coming
+## Updates
 
-### Updates
+- **[What's new](whats-new.md)**: the checkpoint log, in plain language
 
-- [What's new](whats-new.md) — recent changes in plain language
+---
+
+Each fact lives in exactly one of these pages, and the others link to it. If you
+find the same thing explained two different ways, that's a bug in the docs, and
+worth an issue as much as a bug in the code.
