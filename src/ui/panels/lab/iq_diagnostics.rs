@@ -8,6 +8,7 @@ use ratatui::{
 
 use crate::signal::image_rejection_db;
 use crate::state::SdrMetrics;
+use crate::ui::chrome::section;
 use crate::ui::widgets::charts::{gain_bar_colored, null_meter};
 use crate::ui::panel::{Panel, PanelChrome, Staleness};
 
@@ -108,22 +109,6 @@ impl Panel for IqDiagnosticsPanel {
 
         // ├╴ SECTION ╶──── hint — nameplate with a dim right-aligned annotation,
         // the same instrument language as the command rail.
-        let section = |name: &str, hint: &str| -> Line<'static> {
-            let label = name.to_uppercase();
-            let left = label.chars().count() + 5;
-            let hint_w = if hint.is_empty() { 0 } else { hint.chars().count() + 1 };
-            let dashes = iw.saturating_sub(left + hint_w);
-            let mut spans = vec![
-                Span::styled("├╴ ".to_string(), Style::default().fg(dim)),
-                Span::styled(label, Style::default().fg(theme.label).add_modifier(Modifier::BOLD)),
-                Span::styled(" ╶".to_string(), Style::default().fg(dim)),
-                Span::styled("─".repeat(dashes), Style::default().fg(dim)),
-            ];
-            if !hint.is_empty() {
-                spans.push(Span::styled(format!(" {hint}"), Style::default().fg(dim)));
-            }
-            Line::from(spans)
-        };
         // A plain " text ………… value" readout line, value right-aligned to the panel.
         let readout = |text: &str, val: String, color: Color| -> Line<'static> {
             let pad = iw.saturating_sub(1 + text.chars().count() + val.chars().count());
@@ -175,7 +160,7 @@ impl Panel for IqDiagnosticsPanel {
         // --- DC OFFSET ---------------------------------------------------------
         // I / Q offsets are deviations from zero → null-meters; magnitude is a
         // green→red quality bar; the spike is a plain level readout.
-        lines.push(section("DC offset", "target \u{00b1}0.010"));
+        lines.push(section("DC offset", "target \u{00b1}0.010", iw, theme));
         let i_color = offset_color(state.iq.dc_offset_i.abs(), theme);
         let q_color = offset_color(state.iq.dc_offset_q.abs(), theme);
         lines.push(meter_row("I", state.iq.dc_offset_i as f64, 0.05, i_color,
@@ -203,7 +188,7 @@ impl Panel for IqDiagnosticsPanel {
         // --- QUADRATURE --------------------------------------------------------
         // Amplitude / phase imbalance are deviations from balance → null-meters;
         // IRR (higher = better) is a red→green quality bar.
-        lines.push(section("Quadrature", "gain \u{00b7} phase balance"));
+        lines.push(section("Quadrature", "gain \u{00b7} phase balance", iw, theme));
         let amp_abs = state.iq.iq_imbalance_db.abs();
         lines.push(meter_row("AMP", state.iq.iq_imbalance_db as f64, 4.0,
                              imbalance_color(amp_abs, theme),
@@ -216,7 +201,7 @@ impl Panel for IqDiagnosticsPanel {
         lines.push(Line::raw(""));
 
         // --- IMAGE REJECTION ---------------------------------------------------
-        lines.push(section("Image rejection", "IRR \u{00b7} higher better"));
+        lines.push(section("Image rejection", "IRR \u{00b7} higher better", iw, theme));
         lines.push(Line::raw(""));
         let irr = image_rejection_db(state.iq.iq_imbalance_db, state.iq.phase_imbalance_deg);
         let irr_str = if irr >= 60.0 { "> 60 dB".to_string() } else { format!("{irr:.1} dB") };
