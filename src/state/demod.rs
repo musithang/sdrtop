@@ -426,7 +426,7 @@ mod tests {
             ctcss_fill: 0.7,
             mpx: Some(Arc::new(MpxFrame { bin_hz: 163.0, mags_hz: vec![1.0; 8] })),
             pilot: Some(PilotMeasure { state: PilotState::Locked, deviation_hz: 6_500.0, injection_pct: 8.7 }),
-            rds: Some(Arc::new(RdsData { pi: Some(0xB206), ..Default::default() })),
+            rds: Some(Arc::new(RdsData { pi: Some(0x1234), ..Default::default() })),
             rds_sync: true,
             rds_last_group: Some(Instant::now()),
             last_update: Some(Instant::now()),

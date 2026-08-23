@@ -247,7 +247,17 @@ impl Panel for SignalCharacterizationPanel {
         let stale = frame.map(|fr| fr.timestamp.elapsed().as_millis() > 500).unwrap_or(true);
 
         let name_style = Style::default().fg(theme.label).add_modifier(Modifier::BOLD);
-        let mut title = vec![Span::raw(" "), Span::styled("Signal Characterization", name_style)];
+        // The focus key is advertised in the title like every other lab panel. `x`
+        // is not a letter of "Signal Characterization", so it takes the bracketed
+        // form the sweep panel already uses (`Sweep [G]`) rather than an inline
+        // highlight.
+        let key_style = Style::default().fg(theme.value_hi).add_modifier(Modifier::BOLD);
+        let mut title = vec![
+            Span::raw(" "),
+            Span::styled("Signal Characterization [", name_style),
+            Span::styled("X", key_style),
+            Span::styled("]", name_style),
+        ];
         if stale { title.push(Span::styled(" [STALE]", Style::default().fg(theme.stale))); }
         title.push(Span::raw(" "));
 

@@ -68,7 +68,7 @@ fn sections_for(m: Modulation) -> &'static [Sec] {
 ///
 /// `chrome::fit_spacers` can only hand back blank rows, and at 120x38 the WFM stack
 /// is still ten rows over once every spacer is gone — so the tail was simply clipped
-/// by the paragraph, and the tail is RDS. The panel showed `● DANKO` and lost the PI,
+/// by the paragraph, and the tail is RDS. The panel showed `● RADIO 1` and lost the PI,
 /// the programme type, the group count and the RadioText under it: the payload of the
 /// section, cut without a mark. Reordering RDS higher only moves the amputation onto
 /// DEVIATION, which is a measurement too.
@@ -325,7 +325,16 @@ impl Panel for FmDemodPanel {
     fn render(&self, f: &mut Frame, area: Rect, state: &SdrMetrics, theme: &crate::Theme, focused: bool) {
         let stale = !state.radio.hw_streaming;
         let name_style = Style::default().fg(theme.label).add_modifier(Modifier::BOLD);
-        let mut title = vec![Span::raw(" "), Span::styled("FM MPX \u{00b7} Demod", name_style)];
+        // `M` is the focus key and it is a letter of the name, so it gets the
+        // inline highlight the other lab panels use ("IQ Diagnostics", "Hardware
+        // Vitals"). The first M is the one, so the eye lands on it immediately.
+        let key_style = Style::default().fg(theme.value_hi).add_modifier(Modifier::BOLD);
+        let mut title = vec![
+            Span::raw(" "),
+            Span::styled("FM ", name_style),
+            Span::styled("M", key_style),
+            Span::styled("PX \u{00b7} Demod", name_style),
+        ];
         if stale { title.push(Span::styled(" [STALE]", Style::default().fg(theme.stale))); }
         title.push(Span::raw(" "));
 
@@ -959,9 +968,9 @@ mod tests {
         // The station is still named — it may well come back — but the panel says
         // how long ago it last spoke, instead of showing a confident lamp.
         let age = Some(RDS_AGED_AFTER + Duration::from_secs(7));
-        let (mark, text, ok) = rds_headline(&rds(Some("DANKO"), 40), false, age);
+        let (mark, text, ok) = rds_headline(&rds(Some("RADIO 1"), 40), false, age);
         assert_eq!(mark, "\u{25cc}", "an aged name must not wear the live lamp");
-        assert!(text.starts_with("DANKO"));
+        assert!(text.starts_with("RADIO 1"));
         assert!(text.contains("12 s ago"), "got {text}");
         assert!(!ok);
     }
@@ -969,15 +978,15 @@ mod tests {
     #[test]
     fn rds_headline_drops_a_name_that_outlived_its_station() {
         // The bug this guards: nine seconds after retuning from 92.8 to 96.6 the
-        // panel still read "● DANKO", group counter frozen. Retuning now wipes the
+        // panel still read "● RADIO 1", group counter frozen. Retuning now wipes the
         // decoder outright, but a station simply going off air has to expire too.
         let age = Some(RDS_DROPPED_AFTER + Duration::from_secs(1));
-        let (mark, text, ok) = rds_headline(&rds(Some("DANKO"), 40), false, age);
+        let (mark, text, ok) = rds_headline(&rds(Some("RADIO 1"), 40), false, age);
         assert_eq!(text, "NO RDS");
         assert_eq!(mark, "\u{25cb}");
         assert!(!ok);
         // Never a group at all is the same answer.
-        assert_eq!(rds_headline(&rds(Some("DANKO"), 40), false, None).1, "NO RDS");
+        assert_eq!(rds_headline(&rds(Some("RADIO 1"), 40), false, None).1, "NO RDS");
     }
 
     #[test]

@@ -709,7 +709,7 @@ impl DemodWorker {
             // holds describes it. Retuning does not break block contiguity — the
             // radio keeps streaming — and it does not change the modulation either,
             // so without this check nothing invalidated the RDS state at all: the
-            // panel sat naming `DANKO` nine seconds after the radio had moved to
+            // panel sat naming the old station nine seconds after the radio had moved to
             // 96.6 MHz, group counter frozen.
             //
             // A fresh decoder rather than `reset()`, which deliberately keeps the PI

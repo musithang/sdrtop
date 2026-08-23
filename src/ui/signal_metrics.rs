@@ -1,6 +1,6 @@
 use ratatui::{
     layout::{Constraint, Direction, Layout},
-    style::{Color, Style},
+    style::{Color, Modifier, Style},
     text::{Line, Span},
     widgets::{Block, BorderType, Borders, Paragraph},
     Frame,
@@ -30,12 +30,21 @@ impl Panel for SignalMetricsPanel {
             .map(|fr| fr.timestamp.elapsed().as_millis() > 500)
             .unwrap_or(true);
 
-        let title = if stale { " Signal Metrics [STALE] " } else { " Signal Metrics " };
+        // `N` is the focus key, highlighted inline like the other lab panels so the
+        // key to press is visible without opening the manual.
+        let key_style = Style::default().fg(theme.value_hi).add_modifier(Modifier::BOLD);
+        let mut title = vec![
+            Span::raw(" Sig"),
+            Span::styled("n", key_style),
+            Span::raw("al Metrics"),
+        ];
+        if stale { title.push(Span::styled(" [STALE]", Style::default().fg(theme.stale))); }
+        title.push(Span::raw(" "));
         let border_color = if focused { theme.border_focused }
             else if stale { theme.stale }
             else { theme.border_default };
         let block = Block::default()
-            .title(title)
+            .title(Line::from(title))
             .borders(Borders::ALL)
             .border_type(BorderType::Rounded)
             .border_style(Style::default().fg(border_color));

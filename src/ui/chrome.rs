@@ -145,8 +145,8 @@ pub fn field(name: &str, width: usize, theme: &crate::Theme) -> Span<'static> {
 /// Interior gaps survive on purpose. RadioText arrives character by character and
 /// unconfirmed positions read as blanks, so a half-decoded message is full of gaps
 /// — and squeezing them out glues the surviving fragments into words the station
-/// never sent. `"Amor Fat  Amor      Danko"` is visibly a message still filling in;
-/// `"Amor Fat Amor Danko"` looks like a decoder that is simply wrong.
+/// never sent. `"Now Play  Exam      Track"` is visibly a message still filling in;
+/// `"Now Play Exam Track"` looks like a decoder that is simply wrong.
 pub fn wrap(text: &str, width: usize, max_rows: usize) -> Vec<String> {
     if width == 0 || max_rows == 0 { return Vec::new(); }
     let chars: Vec<char> = text.chars().collect();
@@ -349,10 +349,10 @@ mod tests {
     fn wrap_keeps_the_gaps_in_a_half_decoded_message() {
         // The bug this guards, seen live at 92 groups: RadioText fills in
         // character by character, and collapsing the unconfirmed blanks turned
-        // "Amor Fati - Amor Fati - Danko Radio elo nepzenei studiokoncert" into
-        // "Amor Fat Amor Danko Radio elo once" — fragments glued into words the
+        // "Now Playing - Example Artist - Example Track Title" into
+        // "Now Play Exam Track" — fragments glued into words the
         // station never sent.
-        let partial = "Amor Fat  Amor      Danko";
+        let partial = "Now Play  Exam      Track";
         let rows = wrap(partial, 40, 2);
         assert_eq!(rows, vec![partial]);
     }
