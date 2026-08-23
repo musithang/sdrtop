@@ -71,11 +71,12 @@ pub fn status_badge(state: &SdrMetrics, theme: &crate::Theme) -> [Span<'static>;
 }
 
 /// Whether FFT-derived signal data (SNR, PWR, NF, RBW) is stale — no frame, or
-/// the last one is older than 500 ms.
+/// the last one older than the shared threshold.
+///
+/// The same rule the engine tags a title `[STALE]` with, so a panel's contents
+/// and its nameplate can never disagree about whether the numbers are live.
 pub fn fft_stale(state: &SdrMetrics) -> bool {
-    state.waterfall.last_fft.as_ref()
-        .map(|fr| fr.timestamp.elapsed().as_millis() > 500)
-        .unwrap_or(true)
+    crate::ui::panel::Staleness::FftAge.resolve(state)
 }
 
 /// A character bar `████░░░░` of `width` cells: filled (in `color`) for `ratio`,

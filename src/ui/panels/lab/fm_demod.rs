@@ -20,7 +20,7 @@ use ratatui::{
     layout::Rect,
     style::{Modifier, Style},
     text::{Line, Span},
-    widgets::{Block, BorderType, Borders, Paragraph},
+    widgets::Paragraph,
     Frame,
 };
 
@@ -33,7 +33,7 @@ use crate::state::{
 };
 use crate::ui::chrome;
 use crate::ui::widgets::micro_common::bar_spans;
-use crate::ui::panel::Panel;
+use crate::ui::panel::{Panel, PanelChrome, Staleness};
 
 pub struct FmDemodPanel;
 
@@ -322,30 +322,14 @@ impl Panel for FmDemodPanel {
           ("0", "Centre"), ("T", "Mode"), ("C", "Snapshot to log")]
     }
 
-    fn render(&self, f: &mut Frame, area: Rect, state: &SdrMetrics, theme: &crate::Theme, focused: bool) {
-        let stale = !state.radio.hw_streaming;
-        let name_style = Style::default().fg(theme.label).add_modifier(Modifier::BOLD);
-        // `M` is the focus key and it is a letter of the name, so it gets the
-        // inline highlight the other lab panels use ("IQ Diagnostics", "Hardware
-        // Vitals"). The first M is the one, so the eye lands on it immediately.
-        let key_style = Style::default().fg(theme.value_hi).add_modifier(Modifier::BOLD);
-        let mut title = vec![
-            Span::raw(" "),
-            Span::styled("FM ", name_style),
-            Span::styled("M", key_style),
-            Span::styled("PX \u{00b7} Demod", name_style),
-        ];
-        if stale { title.push(Span::styled(" [STALE]", Style::default().fg(theme.stale))); }
-        title.push(Span::raw(" "));
+    fn chrome(&self, _state: &SdrMetrics) -> PanelChrome {
+        // The marker sits on the M of MPX, not the M of FM: it is the start of a
+        // word, so the eye lands on it instead of hunting inside an initialism.
+        PanelChrome::new("FM _MPX \u{00b7} Demod").stale_when(Staleness::NotStreaming)
+    }
 
-        let border = if focused { theme.border_focused } else if stale { theme.stale } else { theme.border_default };
-        let block = Block::default()
-            .title(Line::from(title))
-            .borders(Borders::ALL)
-            .border_type(BorderType::Rounded)
-            .border_style(Style::default().fg(border));
-        let inner = block.inner(area);
-        f.render_widget(block, area);
+    fn render(&self, f: &mut Frame, inner: Rect, state: &SdrMetrics, theme: &crate::Theme, _focused: bool) {
+        let stale = !state.radio.hw_streaming;
         if inner.width == 0 || inner.height == 0 { return; }
 
         let h = inner.height as usize;

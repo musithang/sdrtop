@@ -12,14 +12,14 @@ use ratatui::{
     layout::Rect,
     style::{Color, Modifier, Style},
     text::{Line, Span},
-    widgets::{Block, BorderType, Borders, Paragraph},
+    widgets::Paragraph,
     Frame,
 };
 
 use crate::state::SdrMetrics;
 use crate::ui::widgets::charts::gain_bar_colored;
 use crate::ui::widgets::micro_common::{buf_color, drop_color, sat_color, sparkline};
-use crate::ui::panel::Panel;
+use crate::ui::panel::{Panel, PanelChrome, Staleness};
 
 pub struct TimingVitalsPanel;
 
@@ -53,25 +53,12 @@ impl Panel for TimingVitalsPanel {
         &[("R", "Reset drop counter"), ("C", "Clear history")]
     }
 
-    fn render(&self, f: &mut Frame, area: Rect, state: &SdrMetrics, theme: &crate::Theme, focused: bool) {
+    fn chrome(&self, _state: &SdrMetrics) -> PanelChrome {
+        PanelChrome::new("Hardware _Vitals").stale_when(Staleness::NotStreaming)
+    }
+
+    fn render(&self, f: &mut Frame, inner: Rect, state: &SdrMetrics, theme: &crate::Theme, _focused: bool) {
         let stale = !state.radio.hw_streaming;
-        let key_style = Style::default().fg(theme.value_hi).add_modifier(Modifier::BOLD);
-        let mut title = vec![
-            Span::raw(" Hardware "),
-            Span::styled("V", key_style),
-            Span::raw("itals"),
-        ];
-        if stale { title.push(Span::styled(" [STALE]", Style::default().fg(theme.stale))); }
-        title.push(Span::raw(" "));
-        let border = if focused { theme.border_focused } else if stale { theme.stale } else { theme.border_default };
-        let block = Block::default()
-            .title(Line::from(title))
-            .borders(Borders::ALL)
-            .border_type(BorderType::Rounded)
-            .border_style(Style::default().fg(border));
-        let inner = block.inner(area);
-        f.render_widget(block, area);
-        if inner.width == 0 || inner.height == 0 { return; }
         let iw = inner.width as usize;
 
         let lbl  = Style::default().fg(theme.label);

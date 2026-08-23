@@ -13,14 +13,13 @@ use ratatui::{
     style::{Color, Modifier, Style},
     text::{Line, Span},
     widgets::{
-        canvas::{Canvas, Line as CanvasLine, Points},
-        Block, BorderType, Borders, Paragraph,
+        canvas::{Canvas, Line as CanvasLine, Points}, Paragraph,
     },
     Frame,
 };
 
 use crate::state::SdrMetrics;
-use crate::ui::panel::Panel;
+use crate::ui::panel::{Panel, PanelChrome, Staleness};
 
 pub struct IqConstellationPanel;
 
@@ -181,23 +180,12 @@ impl Panel for IqConstellationPanel {
     fn name(&self) -> &'static str { "iq_constellation" }
     fn min_size(&self) -> (u16, u16) { (18, 10) }
 
-    fn render(&self, f: &mut Frame, area: Rect, state: &SdrMetrics, theme: &crate::Theme, focused: bool) {
-        let stale = !state.radio.hw_streaming;
-        let border_color = if focused { theme.border_focused }
-            else if stale { theme.stale }
-            else { theme.border_default };
+    fn chrome(&self, _state: &SdrMetrics) -> PanelChrome {
+        PanelChrome::new("IQ Constellation").stale_when(Staleness::NotStreaming)
+    }
 
-        let title_line = Line::from(Span::styled(
-            " IQ Constellation ",
-            Style::default().fg(theme.label).add_modifier(Modifier::BOLD),
-        ));
-        let block = Block::default()
-            .title(title_line)
-            .borders(Borders::ALL)
-            .border_type(BorderType::Rounded)
-            .border_style(Style::default().fg(border_color));
-        let inner = block.inner(area);
-        f.render_widget(block, area);
+    fn render(&self, f: &mut Frame, inner: Rect, state: &SdrMetrics, theme: &crate::Theme, _focused: bool) {
+        let stale = !state.radio.hw_streaming;
 
         if stale {
             f.render_widget(

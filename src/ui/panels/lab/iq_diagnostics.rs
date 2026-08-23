@@ -2,14 +2,14 @@ use ratatui::{
     layout::Rect,
     style::{Color, Modifier, Style},
     text::{Line, Span},
-    widgets::{Block, BorderType, Borders, Paragraph},
+    widgets::Paragraph,
     Frame,
 };
 
 use crate::signal::image_rejection_db;
 use crate::state::SdrMetrics;
 use crate::ui::widgets::charts::{gain_bar_colored, null_meter};
-use crate::ui::panel::Panel;
+use crate::ui::panel::{Panel, PanelChrome, Staleness};
 
 pub struct IqDiagnosticsPanel;
 
@@ -79,30 +79,12 @@ impl Panel for IqDiagnosticsPanel {
         &[("D", "DC-block"), ("C", "auto-cal"), ("F", "freeze"), ("M", "pin")]
     }
 
-    fn render(&self, f: &mut Frame, area: Rect, state: &SdrMetrics, theme: &crate::Theme, focused: bool) {
+    fn chrome(&self, _state: &SdrMetrics) -> PanelChrome {
+        PanelChrome::new("_IQ Diagnostics").stale_when(Staleness::NotStreaming)
+    }
+
+    fn render(&self, f: &mut Frame, inner: Rect, state: &SdrMetrics, theme: &crate::Theme, _focused: bool) {
         let stale = !state.radio.hw_streaming;
-        // Title: leading 'I' highlighted as the focus-key indicator ([I]).
-        let key_style = Style::default().fg(theme.value_hi).add_modifier(Modifier::BOLD);
-        let mut title_spans = vec![
-            Span::raw(" "),
-            Span::styled("I", key_style),
-            Span::raw("Q Diagnostics"),
-        ];
-        if stale {
-            title_spans.push(Span::styled(" [STALE]", Style::default().fg(theme.stale)));
-        }
-        title_spans.push(Span::raw(" "));
-        let title_line = Line::from(title_spans);
-        let border_color = if focused { theme.border_focused }
-            else if stale { theme.stale }
-            else { theme.border_default };
-        let block = Block::default()
-            .title(title_line)
-            .borders(Borders::ALL)
-            .border_type(BorderType::Rounded)
-            .border_style(Style::default().fg(border_color));
-        let inner = block.inner(area);
-        f.render_widget(block, area);
 
         if stale {
             f.render_widget(

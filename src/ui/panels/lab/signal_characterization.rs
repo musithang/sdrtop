@@ -23,14 +23,15 @@ use ratatui::{
     layout::Rect,
     style::{Color, Modifier, Style},
     text::{Line, Span},
-    widgets::{Block, BorderType, Borders, Paragraph},
+    widgets::Paragraph,
     Frame,
 };
 
 use crate::state::{FftFrame, Modulation, SdrMetrics};
 use crate::ui::chrome::{field, section};
 use crate::ui::widgets::micro_common::fmt_bw;
-use crate::ui::panel::Panel;
+use crate::ui::widgets::micro_common::fft_stale;
+use crate::ui::panel::{Panel, PanelChrome, Staleness};
 
 pub struct SignalCharacterizationPanel;
 
@@ -240,35 +241,15 @@ impl Panel for SignalCharacterizationPanel {
         &[("C", "Snapshot to log")]
     }
 
-    fn render(&self, f: &mut Frame, area: Rect, state: &SdrMetrics, theme: &crate::Theme, focused: bool) {
-        // FFT-driven panel: stale the instant the latest frame ages past the shared
-        // 500 ms threshold (or there is no frame yet), like the other signal views.
+    fn chrome(&self, _state: &SdrMetrics) -> PanelChrome {
+        // No `_` marker: `x` is not a letter of the name, so the engine advertises
+        // the key in brackets instead of lighting one up inline.
+        PanelChrome::new("Signal Characterization").stale_when(Staleness::FftAge)
+    }
+
+    fn render(&self, f: &mut Frame, inner: Rect, state: &SdrMetrics, theme: &crate::Theme, _focused: bool) {
         let frame = state.waterfall.last_fft.as_ref();
-        let stale = frame.map(|fr| fr.timestamp.elapsed().as_millis() > 500).unwrap_or(true);
-
-        let name_style = Style::default().fg(theme.label).add_modifier(Modifier::BOLD);
-        // The focus key is advertised in the title like every other lab panel. `x`
-        // is not a letter of "Signal Characterization", so it takes the bracketed
-        // form the sweep panel already uses (`Sweep [G]`) rather than an inline
-        // highlight.
-        let key_style = Style::default().fg(theme.value_hi).add_modifier(Modifier::BOLD);
-        let mut title = vec![
-            Span::raw(" "),
-            Span::styled("Signal Characterization [", name_style),
-            Span::styled("X", key_style),
-            Span::styled("]", name_style),
-        ];
-        if stale { title.push(Span::styled(" [STALE]", Style::default().fg(theme.stale))); }
-        title.push(Span::raw(" "));
-
-        let border = if focused { theme.border_focused } else if stale { theme.stale } else { theme.border_default };
-        let block = Block::default()
-            .title(Line::from(title))
-            .borders(Borders::ALL)
-            .border_type(BorderType::Rounded)
-            .border_style(Style::default().fg(border));
-        let inner = block.inner(area);
-        f.render_widget(block, area);
+        let stale = fft_stale(state);
         if inner.width == 0 || inner.height == 0 { return; }
         let iw = inner.width as usize;
 

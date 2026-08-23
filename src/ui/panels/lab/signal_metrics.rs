@@ -1,13 +1,14 @@
 use ratatui::{
     layout::{Constraint, Direction, Layout},
-    style::{Color, Modifier, Style},
+    style::{Color, Style},
     text::{Line, Span},
-    widgets::{Block, BorderType, Borders, Paragraph},
+    widgets::Paragraph,
     Frame,
 };
 
 use crate::state::SdrMetrics;
-use crate::ui::panel::Panel;
+use crate::ui::widgets::micro_common::fft_stale;
+use crate::ui::panel::{Panel, PanelChrome, Staleness};
 
 pub struct SignalMetricsPanel;
 
@@ -25,31 +26,12 @@ impl Panel for SignalMetricsPanel {
         &[("C", "Snapshot to log")]
     }
 
-    fn render(&self, f: &mut Frame, area: ratatui::layout::Rect, state: &SdrMetrics, theme: &crate::Theme, focused: bool) {
-        let stale = state.waterfall.last_fft.as_ref()
-            .map(|fr| fr.timestamp.elapsed().as_millis() > 500)
-            .unwrap_or(true);
+    fn chrome(&self, _state: &SdrMetrics) -> PanelChrome {
+        PanelChrome::new("Sig_nal Metrics").stale_when(Staleness::FftAge)
+    }
 
-        // `N` is the focus key, highlighted inline like the other lab panels so the
-        // key to press is visible without opening the manual.
-        let key_style = Style::default().fg(theme.value_hi).add_modifier(Modifier::BOLD);
-        let mut title = vec![
-            Span::raw(" Sig"),
-            Span::styled("n", key_style),
-            Span::raw("al Metrics"),
-        ];
-        if stale { title.push(Span::styled(" [STALE]", Style::default().fg(theme.stale))); }
-        title.push(Span::raw(" "));
-        let border_color = if focused { theme.border_focused }
-            else if stale { theme.stale }
-            else { theme.border_default };
-        let block = Block::default()
-            .title(Line::from(title))
-            .borders(Borders::ALL)
-            .border_type(BorderType::Rounded)
-            .border_style(Style::default().fg(border_color));
-        let inner = block.inner(area);
-        f.render_widget(block, area);
+    fn render(&self, f: &mut Frame, inner: ratatui::layout::Rect, state: &SdrMetrics, theme: &crate::Theme, _focused: bool) {
+        let stale = fft_stale(state);
 
         let lbl = Style::default().fg(theme.label);
         let val = Style::default().fg(theme.value);

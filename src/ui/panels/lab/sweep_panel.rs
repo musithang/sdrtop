@@ -9,8 +9,7 @@ use ratatui::{
     style::{Color, Modifier, Style},
     text::{Line, Span},
     widgets::{
-        canvas::{Canvas, Line as CanvasLine},
-        Block, BorderType, Borders, Paragraph,
+        canvas::{Canvas, Line as CanvasLine}, Paragraph,
     },
     Frame,
 };
@@ -18,7 +17,7 @@ use ratatui::{
 use crate::palette::{magnitude_to_color_themed, ColorDepth};
 use crate::state::SdrMetrics;
 use crate::ui::widgets::band_plan::{band_at, BAND_PLAN};
-use crate::ui::panel::Panel;
+use crate::ui::panel::{Panel, PanelChrome};
 
 pub struct SweepPanel;
 
@@ -45,35 +44,24 @@ impl Panel for SweepPanel {
         &[("←/→", "Cursor"), ("S/E", "Start/End"), ("M", "Peak/Mean"), ("+/-", "Dwell"), ("C", "Snapshot to log"), ("Enter", "Tune here")]
     }
 
-    fn render(&self, f: &mut Frame, area: Rect, state: &SdrMetrics, theme: &crate::Theme, focused: bool) {
+    fn chrome(&self, state: &SdrMetrics) -> PanelChrome {
+        // `g` is not a letter of "Sweep", so the engine advertises it in
+        // brackets. The scan parameters ride along as the suffix, rebuilt every
+        // frame so the band, dwell and cycle number stay live.
         let sw = &state.sweep;
-        let border = if focused { theme.border_focused } else { theme.border_default };
-
-        // Title: the scanner band + step + dwell + cycle, with 'G' as the focus key.
-        let key_style = Style::default().fg(theme.value_hi).add_modifier(Modifier::BOLD);
         let step_mhz = sw.config.effective_step_hz(state.radio.config_sample_rate) as f64 / 1e6;
-        let title = Line::from(vec![
-            Span::raw(" Sweep ["),
-            Span::styled("G", key_style),
-            Span::styled(
-                format!(
-                    "]  {:.1}–{:.1} MHz · step {:.1} MHz · dwell {} ms · cycle #{} ",
-                    sw.config.start_hz as f64 / 1e6,
-                    sw.config.stop_hz as f64 / 1e6,
-                    step_mhz,
-                    sw.config.dwell_ms,
-                    sw.cycle_count,
-                ),
-                Style::default().fg(theme.label),
-            ),
-        ]);
-        let block = Block::default()
-            .title(title)
-            .borders(Borders::ALL)
-            .border_type(BorderType::Rounded)
-            .border_style(Style::default().fg(border));
-        let inner = block.inner(area);
-        f.render_widget(block, area);
+        PanelChrome::new("Sweep").suffix(format!(
+            "  {:.1}–{:.1} MHz · step {:.1} MHz · dwell {} ms · cycle #{}",
+            sw.config.start_hz as f64 / 1e6,
+            sw.config.stop_hz as f64 / 1e6,
+            step_mhz,
+            sw.config.dwell_ms,
+            sw.cycle_count,
+        ))
+    }
+
+    fn render(&self, f: &mut Frame, inner: Rect, state: &SdrMetrics, theme: &crate::Theme, _focused: bool) {
+        let sw = &state.sweep;
         if inner.width <= AXIS_W + 2 || inner.height < 4 { return; }
 
         // Rows: plot area, x-axis labels, band-plan labels, status.

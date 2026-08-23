@@ -1,7 +1,8 @@
 use std::collections::HashMap;
 use ratatui::{layout::Rect, Frame};
 use crate::state::SdrMetrics;
-use crate::ui::panel::Panel;
+use crate::ui::chrome::frame;
+use crate::ui::panel::{FrameStyle, Panel};
 
 pub struct PanelRegistry {
     panels: HashMap<&'static str, Box<dyn Panel>>,
@@ -24,9 +25,26 @@ impl PanelRegistry {
         self.panels.values()
     }
 
+    /// Frame a panel and render it into what is left.
+    ///
+    /// The frame is drawn here, from the panel's own [`PanelChrome`], so the
+    /// border rule, the nameplate and the `[STALE]` tag are decided once for the
+    /// whole deck instead of once per panel file. A panel still on
+    /// [`FrameStyle::SelfFramed`] gets the outer rect and draws its own.
+    ///
+    /// [`PanelChrome`]: crate::ui::panel::PanelChrome
     pub fn render_panel(&self, name: &str, f: &mut Frame, area: Rect, state: &SdrMetrics, theme: &crate::Theme, focused: bool) {
-        if let Some(panel) = self.get(name) {
+        let Some(panel) = self.get(name) else { return };
+        let chrome = panel.chrome(state);
+        if chrome.frame == FrameStyle::SelfFramed {
             panel.render(f, area, state, theme, focused);
+            return;
+        }
+        let stale = chrome.staleness.resolve(state);
+        // A frame that leaves no inner rect still draws: the border is the only
+        // honest thing to show in a panel too small for its contents.
+        if let Some(inner) = frame::render_frame(f, area, &chrome, panel.focus_key(), stale, focused, theme) {
+            panel.render(f, inner, state, theme, focused);
         }
     }
 }

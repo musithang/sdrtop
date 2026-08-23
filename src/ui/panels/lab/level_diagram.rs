@@ -7,14 +7,14 @@
 
 use ratatui::{
     layout::Rect,
-    style::{Color, Modifier, Style},
+    style::{Color, Style},
     text::{Line, Span},
-    widgets::{Block, BorderType, Borders, Paragraph},
+    widgets::Paragraph,
     Frame,
 };
 
 use crate::state::SdrMetrics;
-use crate::ui::panel::Panel;
+use crate::ui::panel::{Panel, PanelChrome, Staleness, Tag};
 use crate::ui::rf_calc::{cascade, level_lineup, StageLevel};
 
 pub struct LevelDiagramPanel;
@@ -43,27 +43,14 @@ impl Panel for LevelDiagramPanel {
     fn name(&self) -> &'static str { "level_diagram" }
     fn min_size(&self) -> (u16, u16) { (40, 14) }
 
-    fn render(&self, f: &mut Frame, area: Rect, state: &SdrMetrics, theme: &crate::Theme, focused: bool) {
+    fn chrome(&self, state: &SdrMetrics) -> PanelChrome {
+        PanelChrome::new("Gain-Staging Level Diagram")
+            .stale_when(Staleness::NotStreaming)
+            .tag_if(state.lab.rf_freeze.is_some(), Tag::Frozen)
+    }
+
+    fn render(&self, f: &mut Frame, inner: Rect, state: &SdrMetrics, theme: &crate::Theme, _focused: bool) {
         let stale = !state.radio.hw_streaming;
-        let mut title = vec![
-            Span::raw(" "),
-            Span::styled("Gain-Staging Level Diagram",
-                         Style::default().fg(theme.label).add_modifier(Modifier::BOLD)),
-        ];
-        if stale { title.push(Span::styled(" [STALE]", Style::default().fg(theme.stale))); }
-        else if state.lab.rf_freeze.is_some() {
-            title.push(Span::styled(" [FRZ]", Style::default().fg(theme.status_warn)));
-        }
-        title.push(Span::raw(" "));
-        let border = if focused { theme.border_focused }
-            else if stale { theme.stale } else { theme.border_default };
-        let block = Block::default()
-            .title(Line::from(title))
-            .borders(Borders::ALL)
-            .border_type(BorderType::Rounded)
-            .border_style(Style::default().fg(border));
-        let inner = block.inner(area);
-        f.render_widget(block, area);
         if inner.width == 0 || inner.height == 0 { return; }
 
         let dim = theme.border_dim;

@@ -3,14 +3,13 @@ use ratatui::{
     style::Style,
     text::{Line, Span},
     widgets::{
-        canvas::{Canvas, Line as CanvasLine},
-        Block, BorderType, Borders, Paragraph,
+        canvas::{Canvas, Line as CanvasLine}, Paragraph,
     },
     Frame,
 };
 
 use crate::state::SdrMetrics;
-use crate::ui::panel::Panel;
+use crate::ui::panel::{Panel, PanelChrome, Staleness};
 
 pub struct IqHistogramPanel;
 
@@ -53,18 +52,12 @@ impl Panel for IqHistogramPanel {
     fn name(&self) -> &'static str { "iq_histogram" }
     fn min_size(&self) -> (u16, u16) { (36, 9) }
 
-    fn render(&self, f: &mut Frame, area: ratatui::layout::Rect, state: &SdrMetrics, theme: &crate::Theme, _focused: bool) {
-        let stale = !state.radio.hw_streaming;
-        let title = if stale { " IQ Amplitude Distribution [STALE] " }
-                    else     { " IQ Amplitude Distribution " };
-        let border_color = if stale { theme.stale } else { theme.border_default };
-        let block = Block::default()
-            .title(title)
-            .borders(Borders::ALL)
-            .border_type(BorderType::Rounded)
-            .border_style(Style::default().fg(border_color));
-        let inner = block.inner(area);
-        f.render_widget(block, area);
+    fn chrome(&self, _state: &SdrMetrics) -> PanelChrome {
+        PanelChrome::new("IQ Amplitude Distribution").stale_when(Staleness::NotStreaming)
+    }
+
+    fn render(&self, f: &mut Frame, inner: ratatui::layout::Rect, state: &SdrMetrics, theme: &crate::Theme, _focused: bool) {
+        let _stale = !state.radio.hw_streaming;
 
         if inner.height < 5 || inner.width < 4 { return; }
 

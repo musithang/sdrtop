@@ -8,13 +8,13 @@ use ratatui::{
     layout::Rect,
     style::{Color, Modifier, Style},
     text::{Line, Span},
-    widgets::{Block, BorderType, Borders, Paragraph},
+    widgets::Paragraph,
     Frame,
 };
 
 use crate::state::SdrMetrics;
 use crate::ui::widgets::micro_common::{bar_spans, fft_stale, fmt_bw, fmt_rbw, snr_color, status_badge};
-use crate::ui::panel::Panel;
+use crate::ui::panel::{Panel, PanelChrome};
 
 pub struct MicroSignalPanel;
 
@@ -25,16 +25,9 @@ impl Panel for MicroSignalPanel {
     fn name(&self) -> &'static str { "micro_signal_panel" }
     fn min_size(&self) -> (u16, u16) { (40, 6) }
 
-    fn render(&self, f: &mut Frame, area: Rect, state: &SdrMetrics, theme: &crate::Theme, focused: bool) {
-        let border = if focused { theme.border_focused } else { theme.border_default };
-        let block = Block::default()
-            .borders(Borders::ALL)
-            .border_type(BorderType::Rounded)
-            .border_style(Style::default().fg(border));
-        let inner = block.inner(area);
-        f.render_widget(block, area);
-        if inner.width == 0 || inner.height == 0 { return; }
+    fn chrome(&self, _state: &SdrMetrics) -> PanelChrome { PanelChrome::untitled() }
 
+    fn render(&self, f: &mut Frame, inner: Rect, state: &SdrMetrics, theme: &crate::Theme, _focused: bool) {
         let stale = fft_stale(state);
         let lbl  = |s: &'static str| Span::styled(s, Style::default().fg(theme.label));
         let dash = || Span::styled("---".to_string(), Style::default().fg(theme.stale));

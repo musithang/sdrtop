@@ -16,13 +16,13 @@ use ratatui::{
     layout::{Constraint, Direction, Layout, Rect},
     style::{Color, Modifier, Style},
     text::{Line, Span},
-    widgets::{Block, BorderType, Borders, Paragraph},
+    widgets::Paragraph,
     Frame,
 };
 
 use crate::state::SdrMetrics;
 use crate::ui::widgets::charts::bipolar_braille_strip;
-use crate::ui::panel::Panel;
+use crate::ui::panel::{Panel, PanelChrome, Staleness};
 use crate::ui::widgets::timing_fmt::fmt_us;
 
 pub struct TimingStripchartPanel;
@@ -84,21 +84,14 @@ impl Panel for TimingStripchartPanel {
     fn name(&self) -> &'static str { "timing_stripchart" }
     fn min_size(&self) -> (u16, u16) { (48, 12) }
 
-    fn render(&self, f: &mut Frame, area: Rect, state: &SdrMetrics, theme: &crate::Theme, focused: bool) {
+    fn chrome(&self, _state: &SdrMetrics) -> PanelChrome {
+        PanelChrome::new("Callback Interval")
+            .stale_when(Staleness::NotStreaming)
+            .suffix(" \u{00b7} Real-Time Strip Chart")
+    }
+
+    fn render(&self, f: &mut Frame, inner: Rect, state: &SdrMetrics, theme: &crate::Theme, _focused: bool) {
         let stale = !state.radio.hw_streaming;
-        let name = Style::default().fg(theme.label).add_modifier(Modifier::BOLD);
-        let border = if focused { theme.border_focused } else if stale { theme.stale } else { theme.border_default };
-        let block = Block::default()
-            .title(Line::from(vec![
-                Span::raw(" "),
-                Span::styled("Callback Interval", name),
-                Span::styled(" \u{00b7} Real-Time Strip Chart ", Style::default().fg(theme.label)),
-            ]))
-            .borders(Borders::ALL)
-            .border_type(BorderType::Rounded)
-            .border_style(Style::default().fg(border));
-        let inner = block.inner(area);
-        f.render_widget(block, area);
         if inner.width == 0 || inner.height == 0 { return; }
         let iw = inner.width as usize;
         let lbl = Style::default().fg(theme.label);

@@ -2,12 +2,12 @@ use ratatui::{
     layout::{Constraint, Direction, Layout, Rect},
     style::Style,
     text::Span,
-    widgets::{Block, BorderType, Borders, Gauge, Paragraph, Sparkline},
+    widgets::{Gauge, Paragraph, Sparkline},
     Frame,
 };
 
 use crate::state::SdrMetrics;
-use crate::ui::panel::Panel;
+use crate::ui::panel::{FrameStyle, Panel, PanelChrome};
 
 pub struct SystemResourcesPanel;
 
@@ -15,15 +15,13 @@ impl Panel for SystemResourcesPanel {
     fn name(&self) -> &'static str { "system_resources" }
     fn min_size(&self) -> (u16, u16) { (30, 10) }
 
-    fn render(&self, f: &mut Frame, area: Rect, state: &SdrMetrics, theme: &crate::Theme, _focused: bool) {
-        let block = Block::default()
-            .title(" System Resources ")
-            .borders(Borders::ALL)
-            .border_type(BorderType::Rounded)
-            .border_style(Style::default().fg(theme.border_dim));
-        let inner = block.inner(area);
-        f.render_widget(block, area);
+    fn chrome(&self, _state: &SdrMetrics) -> PanelChrome {
+        // A supporting readout: it never takes focus and its numbers come from
+        // this process, not the radio, so the frame stays put in the dim palette.
+        PanelChrome::new("System Resources").frame(FrameStyle::Muted)
+    }
 
+    fn render(&self, f: &mut Frame, inner: Rect, state: &SdrMetrics, theme: &crate::Theme, _focused: bool) {
         let rows = Layout::default()
             .direction(Direction::Vertical)
             .constraints([
