@@ -4,226 +4,346 @@
 
 ---
 
-## General startup issues
+## Start here: the log file
 
-### "Device not found" or permission error
+sdrtop owns the whole terminal while it runs, so there's nowhere on screen for an
+error that arrives mid-session. Everything of that kind goes to:
 
-**Problem:** sdrtop can't detect your HackRF One, or you see "Permission denied."
+```
+~/.config/sdrtop/sdrtop.log
+```
 
-**Solution:**
+Config parse warnings, backend library complaints, driver messages. If sdrtop did
+something strange and told you nothing, read that file first. It's also the single
+most useful thing to attach to a bug report.
 
-1. **Check the cable.** Make sure the USB cable is fully connected to the HackRF and your host.
-2. **Check device visibility:**
-   ```sh
-   lsusb | grep HackRF
-   ```
-   You should see a line with `HackRF One` or similar. If nothing appears, the device isn't detected by the kernel.
-
-3. **Check udev rules.** If you see the device in `lsusb` but get a permission error, you likely need udev rules. On most Linux distributions, installing the `hackrf` package handles this. If not, you can add a rule manually:
-   ```sh
-   # Create or append to /etc/udev/rules.d/25-hackrf.rules
-   SUBSYSTEM=="usb", ATTRS{idVendor}=="04b4", ATTRS{idProduct}=="b200", MODE="0664", GROUP="plugdev"
-   SUBSYSTEM=="usb", ATTRS{idVendor}=="04b4", ATTRS{idProduct}=="b201", MODE="0664", GROUP="plugdev"
-   ```
-   Then reload udev and reconnect the device:
-   ```sh
-   sudo udevadm control --reload-rules
-   sudo udevadm trigger
-   ```
-
-4. **Check your user is in the right group:**
-   ```sh
-   groups $USER | grep -c plugdev || echo "Not in plugdev group"
-   ```
-   If not, add yourself:
-   ```sh
-   sudo usermod -aG plugdev $USER
-   ```
-   Then log out and back in.
-
-### Device selector popup appears every time
-
-**Problem:** You have multiple HackRF devices connected, and sdrtop asks you to choose one every startup.
-
-**Solution:** You can start sdrtop with a specific device by selecting it in the popup, or you can hardcode the device by its serial number in your config file (this feature is planned but not yet implemented — somewhere between "soon" and "when I get to it"). For now, just select your preferred device from the list.
+The in-app log is a different thing: that's sdrtop talking to you about retunes,
+gain changes and warnings, shown in the `log` panel and in the Command Rail's `L`
+overlay.
 
 ---
 
-## Runtime issues
+## The radio isn't found
 
-### Spectrum / waterfall looks wrong or frozen
+### "No SDR device found"
 
-**Problem:** The spectrum is stuck, or the waterfall isn't scrolling.
+sdrtop prints this and exits before the TUI starts.
 
-**Solution:**
+1. **Check the cable and the port.** A surprising share of "dead" radios are dead
+   cables. Try a different, short one, straight into the machine rather than
+   through a hub.
+2. **Check the kernel sees it at all:**
+   ```sh
+   lsusb
+   ```
+   You want a line naming your device: `Great Scott Gadgets HackRF One`, or for a
+   dongle something like `Realtek Semiconductor Corp. RTL2838 DVB-T`. If nothing
+   appears, the problem is below sdrtop, and no amount of software configuration
+   will help.
+3. **If it appears in `lsusb` but sdrtop can't open it**, that's permissions. See
+   below.
+4. **If something else already has it**, sdrtop enters observer mode rather than
+   failing. See [Advanced Features](advanced.md#observer-mode-when-another-app-owns-the-radio).
 
-1. **Press `Space` to start RX.** If RX isn't streaming, the display will be frozen. You should see data moving almost immediately.
-2. **Check gain settings.** If the spectrum is completely flat (all noise or all empty), your gain is probably too high or too low. Use `↑` / `↓` to adjust LNA gain. A good starting point is LNA 24, VGA 30.
-3. **Check the Hardware Vitals.** Press `6` or `7` for a lab view that shows the **Hardware Vitals** metrics (or press `v` to focus it). Look for:
-   - **Drops** — if non-zero, USB can't keep up; try lowering sample rate with `s`.
-   - **ADC saturation** — if high, turn down gain.
-   - **CPU** — if near 100%, the host is maxed out.
+### Permission denied
 
-### Many samples dropping ("Drops" counter is high)
+Almost always missing udev rules. The easy fix is to install your distribution's
+package for the device, which ships the rules:
 
-**Problem:** The **Drops** counter in the Hardware Vitals panel is climbing, or you see non-zero in the signal strip.
+```sh
+sudo pacman -S hackrf rtl-sdr        # Arch
+sudo apt install hackrf rtl-sdr      # Debian / Ubuntu
+sudo dnf install hackrf rtl-sdr      # Fedora
+```
 
-**Solution:**
+If you need to write a rule by hand, take the vendor and product IDs from your own
+`lsusb` output rather than from a web page, since they vary by revision and clone.
+For a line reading `Bus 001 Device 005: ID 0bda:2838 …`, the rule is:
 
-1. **Lower the sample rate.** Press `s` and type a lower rate (start with 5 MHz if you're at 20 MHz).
-2. **Check USB stability.** Use a different USB cable, port, or hub. Long cables or cheap hubs often cause drops.
-3. **Check the host CPU.** Press `7` for the Lab Timing view and watch the CPU metric. If it's consistently above 80% on a modern multi-core machine, something else on your system is consuming CPU.
-4. **Try a different host.** If you have access to another Linux machine (Pi, another desktop, etc.), test the same setup there. USB or driver issues on your main host will be obvious.
+```sh
+# /etc/udev/rules.d/99-sdr.rules
+SUBSYSTEM=="usb", ATTRS{idVendor}=="0bda", ATTRS{idProduct}=="2838", MODE="0666", GROUP="plugdev"
+```
 
-### USB errors or "zero-length transfers"
+Then reload and replug:
 
-**Problem:** The **USB errors** metric in the Hardware Vitals panel shows a non-zero count.
+```sh
+sudo udevadm control --reload-rules
+sudo udevadm trigger
+```
 
-**Solution:**
+Check you're in the group the rule names:
 
-1. **Inspect your USB cable.** Replace it with a known-good, short cable (under 1 meter).
-2. **Try a different USB port.** USB 3.0 ports (usually blue) are sometimes more stable than USB 2.0 (black).
-3. **Avoid USB hubs if possible.** Connect the HackRF directly to the host computer.
-4. **Check the HackRF firmware.** Update to the latest firmware. This is rare, but occasionally a firmware issue can cause USB glitches.
+```sh
+groups $USER | grep -q plugdev || sudo usermod -aG plugdev $USER
+```
 
-### Gain won't change (arrows don't work)
-
-**Problem:** You press `↑` or `↓` but the LNA gain doesn't change, or `[` / `]` doesn't change VGA.
-
-**Solution:**
-
-1. **Make sure RX is on.** Press `Space` to start streaming.
-2. **Check gain bounds.** LNA is 0–40 dB (step 8), VGA is 0–62 dB (step 2). If you're at the limit, you can't go higher or lower. The display will show your current gain in the RF Chain panel.
-
-### Frequency won't change (pressing `f` does nothing)
-
-**Problem:** Press `f`, type a frequency, but it doesn't tune.
-
-**Solution:**
-
-1. **Check input mode.** After pressing `f`, you should see a prompt at the bottom of the screen asking for a frequency in MHz. Type the frequency and press `Enter`.
-2. **Valid range?** HackRF One supports 1 MHz to 6 GHz. If you entered a frequency outside that range, the radio will reject it.
-3. **Example:** To tune to 92.8 FM, type `92.8` (not `92800000`). For 433.92 MHz, type `433.92`.
-
-### IQ diagnostics show high DC offset
-
-**Problem:** The **DC I** or **DC Q** metric in the Lab IQ preset (`5`) is non-zero, or **DC spike** is high (above −40 dBFS).
-
-**Solution:**
-
-1. **This is often hardware-dependent.** Every HackRF has some DC offset due to component tolerances. A DC spike above −40 dBFS is generally acceptable.
-2. **Try a different sample rate.** Some rates exhibit lower DC offset than others. Press `s` and experiment.
-3. **Check your antenna connection.** Make sure the antenna connector isn't loose or damaged.
-
-### IRR (Image Rejection Ratio) is low
-
-**Problem:** The **IRR** in the Lab IQ preset (`5`) is below 20 dB.
-
-**Solution:**
-
-1. **Low IRR means quadrature (I/Q) imbalance is high.** This is usually hardware-dependent and not something you can fix in software.
-2. **Check sample rate.** Some rates produce better IRR than others. Experiment with different rates.
-3. **This is not critical for most use cases.** If you're just observing a strong signal, high IRR doesn't matter. If you need clean spectrum analysis, aim for 30+ dB.
+A group change needs a full logout to take effect, not just a new shell.
 
 ---
 
-## Observer mode
+## RTL-SDR specifics
 
-### Another app has my HackRF locked
+### The kernel stole your dongle
 
-**Problem:** You see "Observer mode" in the display.
+This is the most common RTL-SDR problem on Linux, and it looks exactly like a
+broken device. An RTL2832-based dongle is, as far as Linux is concerned, a DVB-T
+television tuner, so the kernel loads its TV driver and claims the hardware before
+any SDR software gets a chance.
 
-**Solution:** See [Advanced Features — Observer mode](advanced.md#observer-mode-when-another-app-owns-the-radio) for details on what's happening and how to recover control.
+Symptom: the dongle shows up in `lsusb`, and `rtl_test` says "usb_claim_interface
+error -6" or "Failed to open rtlsdr device".
+
+Fix: tell the kernel not to load that driver.
+
+```sh
+# /etc/modprobe.d/blacklist-rtl.conf
+blacklist dvb_usb_rtl28xxu
+blacklist rtl2832
+blacklist rtl2830
+blacklist rtl8xxxu
+```
+
+Then unload it for this session and replug the dongle:
+
+```sh
+sudo modprobe -r dvb_usb_rtl28xxu
+```
+
+If `modprobe -r` complains the module is in use, unplug the dongle first.
+
+### Confirm the dongle works at all
+
+Before blaming sdrtop, check the dongle against the reference tool:
+
+```sh
+rtl_test -t
+```
+
+That prints the tuner type (R820T, R828D, E4000) and the supported gain values. If
+`rtl_test` can't open it either, the problem isn't sdrtop.
+
+### Clones behave differently
+
+The RTL clone market is a zoo, and no single person owns all of it. Different
+tuners have different gain tables, different frequency ranges and different
+quirks. If yours behaves oddly in a way `rtl_test` doesn't explain,
+[open an issue](../../../issues) with the tuner type and what you saw.
 
 ---
 
-## Configuration and saving
+## The display isn't doing anything
 
-### Settings aren't saved
+### Spectrum and waterfall are frozen
 
-**Problem:** You quit with `q`, but when you restart, the frequency or gains have reset to defaults.
+1. **Press `Space`.** If RX isn't streaming, nothing moves. Every measurement
+   panel also marks itself `[STALE]` in this state, which is the tell.
+2. **Check gain.** A completely flat trace means gain is far too low (all noise
+   floor) or far too high (everything slammed at the top). `↑` / `↓` to adjust.
+   On a HackRF, LNA 24 / VGA 30 is a reasonable place to start over from.
+3. **Check the health panels.** Lab Timing (`7`) shows drops, saturation and CPU.
+   Non-zero drops mean USB or CPU can't keep up; high saturation means turn the
+   gain down.
 
-**Solution:**
+### A key does nothing
 
-1. **Check config file location.** sdrtop saves to `~/.config/sdrtop/config.toml`. Make sure this directory and file exist:
+1. **Focus keys only work when their panel is on screen.** `x` needs Lab Signal,
+   `d` needs Lab RF, and so on. If the panel isn't in the current preset, the key
+   is inert.
+2. **VGA keys do nothing on an RTL-SDR.** There's no VGA stage. `[` and `]` are
+   HackRF-only; use `a` for the tuner AGC instead.
+3. **You might be in a text-entry mode.** After `f`, `s` or `m`, keystrokes are
+   letters rather than commands until you press `Enter` or `Esc`.
+4. **Known bug: `v` and `t` are unreliable in Lab Timing.** Two panels each claim
+   these focus keys, and which one wins is decided randomly at startup. On some
+   launches pressing `v` or `t` in preset `7` does nothing at all, even though the
+   footer offers them. Restarting sdrtop reshuffles it. This is a bug and will be
+   fixed; it isn't something you're doing wrong.
+
+---
+
+## Drops, USB errors and stuttering
+
+### Samples are dropping
+
+1. **Lower the sample rate.** `s`, then a smaller number. If you're at 20, try 5.
+   This is the single most effective fix and usually the correct one.
+2. **Check which end is at fault.** Lab Timing (`7`) answers this directly. If the
+   **Callback Interval Strip Chart** shows late callbacks clustered around
+   something, your host is stalling. If the callbacks are punctual but the ring
+   buffer still fills, the bus is the limit.
+3. **Change the cable, port or hub.** Long cables and cheap hubs cause this
+   constantly. Straight into the machine, short cable.
+4. **Check CPU.** If sdrtop's own CPU is high on a modern multi-core machine,
+   something else is competing. A lower sample rate also cuts the FFT cost.
+
+### USB errors (zero-length transfers)
+
+Nearly always physical: cable, port or hub, in that order of likelihood. The count
+is coloured by *recent* rate rather than session total, so a single old glitch
+doesn't stay red forever. A slowly climbing count during a capture is worth acting
+on; one event on plug-in isn't.
+
+### Stuttering at high sample rates
+
+sdrtop redraws at about 30 fps. On a slow host at 20 Msps that's real work, mostly
+FFT.
+
+- Drop the sample rate. It cuts the FFT size and the CPU load together.
+- Use a smaller preset. The micro views (`0`) draw far less than a full lab bench.
+- Close the other things. Browsers are the usual culprit.
+
+---
+
+## Measurements that look wrong
+
+### The demod says blocks were dropped
+
+Believe it. The demodulator is fed through a small queue that discards blocks when
+the machine can't keep up, and RDS and CTCSS both need an unbroken run of samples
+to decode anything. Without that warning, a busy computer and a station with no
+RDS look identical.
+
+The fix is the same as for drops generally: lower the sample rate, or close
+whatever else is using the CPU. The warning only appears while blocks are actually
+being lost, so if it's gone, the problem is gone.
+
+### RDS shows nothing
+
+- **RDS needs a decent signal.** It rides about 20 dB below the programme audio,
+  so a station that sounds perfect can still decode nothing.
+- **Check the mode.** If the badge says `NFM` on a broadcast station, the
+  classifier has been fooled by a wide span. Press `T` in demod focus to force
+  WFM.
+- **Check the channel.** If the panel warns "on DC spike", the demodulated channel
+  is sitting on the radio's own LO leakage. Press `D` in Lab IQ for the DC block,
+  or walk the channel off centre with `←` / `→`.
+- **Give it a moment.** `◌ DECODING` means bits are arriving and the name is a
+  second or two away. `○ NO RDS` is the real "this station carries none".
+- **Check `Groups`.** Two numbers means the total decoded here and the current
+  unbroken run. A big total with a run of 1 means reception keeps breaking, which
+  points at signal or CPU rather than at the station.
+
+### Occupied bandwidth changed when I changed the sample rate
+
+It does, and that's a known limitation rather than a glitch. A wider span means
+coarser FFT bins and a different view of the carrier's skirts, so the same station
+can measure 101.6 kHz at 2 Msps and 65.9 kHz at 5 Msps. Two readings are only
+comparable at the same rate.
+
+It also drags the modulation badge along, which is why a broadcast station on a
+very wide span can classify as `NFM`. Force the demodulator with `T` rather than
+trusting the badge. Full explanation in
+[The Lab presets](lab.md#about-occupied-bandwidth).
+
+### The noise floor jumped when I changed the sample rate
+
+Look at the **density** figure in dBFS/Hz beside it instead. The per-bin noise
+floor rises with the bin width, so it genuinely changes with sample rate and
+describes the analyser as much as the radio. The density divides that out and
+reports the same receiver as the same receiver.
+
+### DC offset or DC spike is high
+
+Every radio has some DC offset from component tolerances, and a DC spike below
+−40 dBFS is normal. If it's in the way of a measurement, press `D` in Lab IQ
+focus and it's subtracted from the stream. Some sample rates also show less of it
+than others, so `s` and a bit of experimenting is worth a try.
+
+### IRR is low
+
+Below 20 dB means quadrature imbalance is significant and mirror images will be
+visible. Two things to try:
+
+- **Press `C` in Lab IQ focus** with a strong clean carrier on screen. That
+  captures a quadrature correction and applies it, which is exactly what this is
+  for. Watch the image drop on the Image-Rejection Scope.
+- **Try another sample rate.** Some are better than others on the same hardware.
+
+Beyond that, IRR is largely a property of the hardware. If you're just watching a
+strong signal it doesn't matter much; for clean spectrum work, aim for 30 dB or
+better.
+
+---
+
+## Settings and the config file
+
+### My settings vanished after I edited the config
+
+If the file doesn't parse, sdrtop falls back to **all defaults** for the whole
+file rather than guessing which line you meant, so one stray character looks like
+total amnesia. The warning naming the problem is in `~/.config/sdrtop/sdrtop.log`.
+
+The most common cause is a capitalised position name. `position = "top"` is
+correct; `"Top"` fails to parse and takes the whole file with it.
+
+### My theme color overrides disappeared
+
+Known bug. Only `theme.base` is written back on save, so per-field overrides like
+`border_accent` are removed from the file the first time you quit with `q`. They
+work correctly while sdrtop is running and load correctly every launch; they just
+aren't preserved. Keep them in a config you don't quit-and-save over
+(`--config`), or re-add them after a save. See
+[Configuration](config.md#what-survives-a-save).
+
+### Settings aren't saved at all
+
+1. **Quit with `q`, not `Ctrl+C`.** Only a clean quit saves.
+2. **Check the directory is writable:**
    ```sh
-   ls -la ~/.config/sdrtop/config.toml
+   ls -ld ~/.config/sdrtop/
    ```
-   If it doesn't exist, sdrtop will create it on quit.
-
-2. **Check permissions.** Make sure the directory is writable:
-   ```sh
-   ls -la ~/.config/sdrtop/
-   ```
-   If you see `dr--r--r--` or similar read-only permissions, change them:
-   ```sh
-   chmod 755 ~/.config/sdrtop/
-   ```
-
-3. **Check disk space.** If your home partition is full, the config save will fail silently. Check:
+3. **Check you have disk space.** A full home partition makes the save fail.
    ```sh
    df -h ~/
    ```
+4. **Observer mode never saves.** If another app held the radio, there was nothing
+   real to save, so sdrtop deliberately leaves the file alone.
 
-### Frequency markers not persisting
+### Markers aren't persisting
 
-**Problem:** You place a marker with `m` in spectrum focus mode, but it disappears next time you start sdrtop.
+Same rules: quit with `q`, and check the file:
 
-**Solution:**
+```sh
+grep -A2 spectrum_markers ~/.config/sdrtop/config.toml
+```
 
-Markers are saved automatically in the config file. If they're not appearing:
-
-1. **Check the config file manually:**
-   ```sh
-   cat ~/.config/sdrtop/config.toml | grep -A 5 "spectrum_markers"
-   ```
-   Your markers should be listed there.
-
-2. **Make sure you quit with `q` (not Ctrl+C).** Only a clean quit saves the config.
-
-3. **Edit the config by hand to add markers:**
-   ```toml
-   [[display.spectrum_markers]]
-   freq_hz = 92800000
-   label = "My Station"
-   ```
+You can also write them by hand; see
+[Configuration](config.md#spectrum-markers).
 
 ---
 
-## Performance and CPU
+## Building
 
-### sdrtop is slow or choppy at high sample rates
+### The build fails with "lock file version 4"
 
-**Problem:** CPU usage is high, or the display is stuttering at 20 MHz sample rate.
+Your `cargo` is too old. The lockfile needs cargo 1.78 or newer, and distribution
+Rust packages are frequently behind. Install rustup:
 
-**Solution:**
+```sh
+curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
+```
 
-1. **Reduce frame rate or complexity.** sdrtop runs at ~30 fps. On older or slower machines, this might be too much. There's no config option to reduce it yet, but it's planned.
-2. **Close other apps.** Terminal multiplexers, file managers, or background tasks can steal CPU. Close them and try again.
-3. **Try a lower sample rate.** If you don't need 20 MHz, use 10 MHz or 5 MHz. This halves the FFT size and CPU load.
-4. **Use a faster host.** Raspberry Pi 2 might struggle; Pi 4 or Pi 5 handles high rates well. A modern desktop/laptop should handle 20 MHz easily.
+### The build fails looking for libhackrf
 
-### Memory usage climbs over time
+sdrtop links **both** backends at build time, so you need `libhackrf` and
+`librtlsdr` present even if you only own one radio. At runtime it's happy with
+whichever you plug in. Package names per distribution are in
+[Getting Started](getting-started.md).
 
-**Problem:** After running sdrtop for hours, it starts using more and more memory.
-
-**Solution:**
-
-This is rare, but if it happens:
-
-1. **Check if there's a log growing.** The in-app log (visible in most presets) accumulates messages. If it's getting huge, that's unusual. Note the message count and report it.
-2. **Restart sdrtop.** Memory usage should reset.
-3. **Report the issue.** If you can reproduce this, save the config and report the steps.
+libhackrf must be **2023.01.1 or newer**. That's what ships in Raspberry Pi OS
+Bookworm and Ubuntu 24.04; older distributions need it built from source.
 
 ---
 
 ## Getting help
 
-If you've tried these steps and something still isn't working:
+If none of this covered it:
 
-1. **Check [What's new](whats-new.md)** for recent changes that might be relevant.
-2. **Run with verbose output (if supported).** Future versions will have a debug mode; for now, the app logs go to the in-app log.
-3. **Collect info:** Sample rate, HackRF firmware version (`firmware` shown at bottom of screen), host OS, CPU type, and steps to reproduce.
-4. **Report on GitHub** with as much detail as possible.
+1. **Check [What's new](whats-new.md)** in case the behaviour changed recently.
+2. **Collect the useful things:** `~/.config/sdrtop/sdrtop.log`, your device and
+   tuner type, sample rate, host OS and CPU, and what you did to trigger it.
+3. **[Open an issue](../../../issues)** with all of that. A log file and a
+   reproduction turn a guess into a fix.
 
 ← [Back](README.md)

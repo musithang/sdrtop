@@ -2,221 +2,270 @@
 
 ← [Back](README.md)
 
-Practical advice for getting the most out of sdrtop.
+Practical recipes: how to get gain right, how to find something that's barely
+there, and how to set up a capture that survives being left alone overnight.
 
 ---
 
-## Gain tuning
+## Setting gain
 
-### The 80/20 rule
+### What "right" looks like
 
-A good signal occupies the middle 20% of the ADC range — enough headroom above to catch peaks, enough margin below to stay out of the noise.
+A well-set gain fills the middle of the ADC's range: enough headroom above to
+catch peaks, enough margin below to stay clear of the noise. Too little and you're
+digitising mostly noise; too much and the ADC clips, which is worse than it
+sounds. A clipped ADC doesn't politely round up, it makes things up, and a
+confident lie is the worst kind of data.
 
-The **IQ Amplitude Distribution** in the Lab IQ preset (`5`) is your best friend. Adjust LNA and VGA until:
+The fastest way to see it is the **ADC Loading** bell in Lab RF (`6`): a shape
+that fills the middle without piling up on the rails. If you want exact numbers,
+add the `iq_histogram` panel to a [layout of your own](config.md#custom-layout-presets)
+and aim for:
 
-- **Low**: under 5% (ADC not wasting bits on empty space)
-- **Mid**: 60–80% (the healthy zone)
-- **Clip**: 0–5% (room for peaks, but not clipping)
+- **Low** under 5 %: the ADC isn't wasting bits on empty space
+- **Mid** 60 to 80 %: the healthy zone
+- **Clip** 0 to 5 %: room for peaks, but not clipping
 
-If you're clipping regularly, turn down VGA first (finer control), then LNA. A clipped ADC doesn't politely round up — it just makes things up, and a confident lie is the worst kind of data.
+### Let it do it for you
 
-### Gain settings by scenario
+Lab RF (`6`), focus with `d`, press `A`. That stages LNA and VGA to the target in
+one press, filling LNA first to protect the noise figure. Press `A` again once
+you're at the optimum and it latches a continuous track that follows level drift.
+Any manual gain key drops the latch, so it never fights you.
 
-| Scenario | LNA | VGA | Notes |
-|----------|-----|-----|-------|
-| Weak signal (−100+ dBm) | 40 | 60 | Max gain, very sensitive. Watch for noise. |
-| Moderate signal (−80 to −100 dBm) | 24 | 20 | A safe default. Good balance. |
-| Strong signal (−60 dBm+) | 8–16 | 10 | Lots of headroom to avoid clipping. |
-| In an urban area with many strong signals | 0 | 0 | Start here; turn up only as needed. |
-| Noisy environment | 40 | 40 | Maximize gain; you need all the sensitivity. |
+This is usually better than the table below, because it reads your actual signal
+rather than a guess about your situation.
 
-Use these as **starting points**, not rules. Every antenna, frequency, and environment is different.
+### Starting points by hand
 
----
+| Situation | HackRF LNA / VGA | RTL-SDR tuner |
+|-----------|------------------|---------------|
+| Weak signal, quiet band | 40 / 60 | Near the top of the table |
+| Moderate signal | 24 / 20 | Around the middle |
+| Strong local transmitter | 8–16 / 10 | Low, or AGC on |
+| Urban, many strong signals | 0 / 0 | Lowest, and work up |
 
-## Frequency tuning
+Use these as starting points, not rules. Every antenna, frequency and environment
+is different.
 
-### Quick frequency scanning
-
-To quickly check a few frequencies:
-
-1. Press `f`, type a frequency, press `Enter`.
-2. Look at the spectrum for 1–2 seconds.
-3. Repeat for the next frequency.
-
-The **frequency markers** help you remember which peaks you've seen. Use `m` in spectrum focus mode (`e`) to mark them.
-
-### Using markers for band planning
-
-Place markers at the band edges you care about:
-
-1. Tune to the edge of a band (e.g., 88 MHz for FM broadcast start).
-2. Press `e` to enter spectrum focus mode.
-3. Press `m` to place a marker.
-4. Name it (e.g., "FM start").
-
-Now when you tune across the band, you'll always see where the edges are.
+If you're clipping regularly on a HackRF, turn **VGA** down first: it's the finer
+control, and it doesn't cost you noise figure the way pulling LNA down does. On an
+RTL-SDR there's one gain, so step it down with `↓`, or hand the problem to the
+tuner's **AGC** with `a`.
 
 ---
 
-## Spectrum analysis in focus mode
+## Pulling a weak signal out of the noise
 
-### The hold feature
+This is what the [measurement banner](lab.md#the-measurement-banner) is for, and
+it's the most useful thing in sdrtop that nothing on screen advertises.
 
-Press `h` to freeze the current spectrum while live data continues below it. This is useful for:
+1. Open any lab preset and focus the banner with `b`.
+2. Press `]` a few times to raise **trace averaging**, up to 16.
 
-- **Comparing signals.** Freeze a strong signal, then tune to another frequency to compare peak heights.
-- **Measuring peak-to-peak.** Freeze the current spectrum, watch the live signal rise and fall relative to it, and estimate the dynamic range.
-- **Spotting weak signals.** Hold a moment, then look for where the new signal is lower.
+Watch the noise floor flatten while the signal stays put. That's not cosmetic:
+noise is random, so successive FFT frames disagree about it and averaging drags it
+toward its mean, while a real carrier sits in the same bin at the same level every
+frame and doesn't move. Something that was indistinguishable from the grass at
+averaging 1 can be obvious at 16.
 
-Press `h` again to disable the hold.
+The cost is reaction time. At 16 the display is calm and about a second behind
+reality, which is right for measuring a steady carrier and wrong for catching a
+burst. Drop back to 1 when you need to see something happen.
 
-### Using the zoom feature
+### Before and after, without relying on memory
 
-Press `↑` in spectrum focus mode to expand the dBFS axis (zoom in on weak signals). Press `↓` to compress it (see a wider dynamic range).
+Same panel, the `C` key:
 
-**Use case:** You're looking for a very weak signal, but the spectrum is dominated by one strong transmitter. Zoom in on the weak part to see fine detail.
+1. Set averaging up so the trace is stable.
+2. Press `C` to capture a **reference trace**. It stays on screen as a ghost.
+3. Change one thing: swap the antenna, add a filter, move the coax, turn on the
+   DC block.
+4. Read the difference directly off the screen.
 
-### Cursor and markers
+This beats writing numbers down, because you get the difference at every frequency
+at once rather than at the one you happened to note. Press `C` again to clear it.
 
-1. Press `e` to enter spectrum focus mode.
-2. Use `j` / `k` to move a cursor across the spectrum.
-3. The bottom of the panel shows the exact frequency and signal level at the cursor.
-4. Press `m` to place a named marker at that spot.
-
-**Use case:** You see a spike at an unknown frequency. Use the cursor to hover over it, read the frequency, then mark it if it's interesting.
-
-### Channel bandwidth cycling
-
-Once you've placed a marker, you can assign a **channel bandwidth** to it. This is useful if you're tracking a known signal:
-
-1. Place a marker with `m` (in spectrum focus mode).
-2. Name it (e.g., "FM station").
-3. Move the cursor near the marker (within a few spectrum steps).
-4. Press `B` (capital B) to cycle through channel bandwidth options.
-
-Available bandwidths: 6.25 kHz, 12.5 kHz, 25 kHz, 50 kHz, 100 kHz, 200 kHz, 500 kHz. Each press advances to the next one. When you reach the end, it cycles back to "no bandwidth assigned."
-
-**Why?** This is a placeholder for future features (bandwidth measurement, channel power readouts). For now, it's a way to tag a signal with its expected bandwidth.
+A reference **level** (`↑` / `↓` on the same banner) is the other half: put the
+line at whatever level makes a signal worth chasing, and anything poking above it
+is a candidate.
 
 ---
 
-## Waterfall analysis
+## Finding things
 
-### Reading the waterfall history
+### Quick manual scanning
 
-The waterfall scrolls downward, with each row representing a moment in time. The oldest rows are at the top. To look at older data:
+Press `f`, type a frequency in MHz, `Enter`, look for a second or two, repeat. It
+sounds primitive and it's often the fastest thing when you have a shortlist.
 
-1. Press `l` to enter waterfall focus mode.
-2. Use `j` / `k` to scroll backward (upward) and forward (downward) through history.
+For a band rather than a list, use **Lab Sweep** (`9`) instead. It scans wider
+than one window by retuning across the band, and `Enter` on the cursor tunes
+straight to whatever you found.
 
-This is great for:
+### Recall slots: three frequencies, one keypress
 
-- **Spotting intermittent signals.** Scroll back and see when they appeared and disappeared.
-- **Measuring signal duration.** Count the rows between when a signal started and ended.
-- **Checking for interference patterns.** Some interferers are periodic. Scrolling the history often reveals the pattern.
+The Command Rail (`1`) keeps three recall slots, and they're the fastest way to
+compare signals.
 
-### Slow-motion waterfall
+1. Press `c` to focus the rail.
+2. Tune to something interesting.
+3. Press `M` to save it into the next slot.
+4. Repeat for a second and third frequency.
+5. Now `1`, `2` and `3` jump between them instantly.
 
-Press `[` to slow down the waterfall by averaging multiple frames into each row. Press `]` to speed it back up.
+Each slot shows a little activity pip when that frequency has a signal on screen
+right now, so you can watch three channels at once without tuning to any of them.
+The slots persist in your config, so tomorrow they're still there.
 
-**Use case:** A signal appears and disappears very quickly, and you're missing it. Slow the waterfall down to see it more clearly.
+This is the setup for "is the repeater up?", "which of these three is stronger?",
+and "did that intermittent thing come back?".
 
-### Zooming the waterfall
+### Markers as a personal band plan
 
-Press `+` (or `=`) in waterfall focus mode to zoom in on the center frequency (narrow the displayed bandwidth). Press `-` to zoom out.
+Place markers at the edges and channels you care about, and they stay with you:
 
-This is the **inverse** of the spectrum zoom: the spectrum zoom changes the dBFS range, the waterfall zoom changes the frequency span shown.
+1. Press `e` for spectrum focus.
+2. `j` / `k` to move the cursor.
+3. `m` to place a marker, then type a name and `Enter`.
 
----
+Now tuning across the band always shows you where things are. Markers persist in
+the config, and you can write them there directly; see
+[Configuration](config.md#spectrum-markers).
 
-## Lab presets workflow
-
-The lab presets (`5`–`8`) are built for capture setup — each one focuses on a
-different aspect, so you switch between them as you dial things in. A typical flow:
-
-### Pre-capture checklist
-
-1. **Tune to your target frequency** with `f`.
-2. **Start RX** with `Space`.
-3. **Set gain — Lab IQ (`5`):**
-   - Watch the **IQ Amplitude Distribution** histogram.
-   - Use `↑` / `↓` and `[` / `]` until **Low** < 5%, **Mid** > 60%, **Clip** < 5%.
-   - While here, check **IQ Diagnostics**: **IRR** > 20 dB? **DC spike** < −40 dBFS?
-4. **Check the front end — Lab RF (`6`):**
-   - Is **Est. NF** < 5 dB? (Good noise figure.)
-   - Is **MDS** low enough to hear your target?
-5. **Check stability — Lab Timing (`7`):**
-   - Are **Drops** zero and the **timing verdict** Good/Excellent?
-   - Is **CPU** < 80% and **BUF** stable (not climbing)?
-
-If everything checks out, you're ready to capture.
-
-### During a long capture
-
-Keep an eye on the **Hardware Vitals** panel (in the `6`/`7` labs — or press `v`
-to focus it):
-
-- **Drops** climbing → USB is struggling; lower sample rate or try a different cable.
-- **CPU** trending up → something else on your system is consuming CPU; close other apps.
-- **BUF** trending toward 100% → a warning sign that drops are imminent.
+Once a marker exists, `b` cycles a **channel bandwidth** onto the nearest one
+(6.25 kHz through 500 kHz, then none), which draws the channel width around it.
+Handy for seeing at a glance whether a signal fits the channel it's supposed to be
+in.
 
 ---
 
-## Custom presets for your workflow
+## Reading the spectrum
 
-Define your own presets in the config for different use cases. See [Advanced Features](advanced.md#defining-custom-presets) for the full syntax, but here's a quick example:
+### Hold: compare two things
 
-```toml
-[presets.airband_chase]
-panels = [
-  { name = "header",       position = "top",    height = 2  },
-  { name = "spectrum",     position = "body"                 },
-  { name = "signal_strip", position = "bottom", height = 2  },
-]
-```
+`h` freezes the current trace as a ghost while live data keeps drawing over it.
 
-Assign it to a key by naming it after a built-in (e.g. `lab_timing` uses key `7`), which overrides that built-in, or access it via `p` (preset cycle).
+- **Compare two signals.** Freeze on one, tune to another, read the difference.
+- **Watch a range.** Freeze, then watch the live trace rise and fall against it.
+- **Catch a change.** Freeze before you touch something, look after.
+
+`h` again releases it. This is the quick version of the reference trace above; the
+banner's `C` is the one that survives retuning and works with averaging.
+
+### Zoom the level axis
+
+`↑` in spectrum focus expands the dBFS axis to spread out weak signals; `↓`
+compresses it to fit a wide dynamic range on screen. Useful when one strong local
+transmitter is squashing everything else flat.
+
+This is a different axis from `+` / `-`, which zoom **frequency**. Both live in
+spectrum focus and it's easy to reach for the wrong one.
+
+### The cursor
+
+`j` / `k` walk a cursor across the trace, reading out the exact frequency and
+level as it goes. Point it at an unknown spike, read the frequency, and if it's
+worth keeping, `m` marks it.
+
+### Trace style
+
+`d` cycles braille, filled and scatter. Braille is the most precise, filled reads
+best at a glance across a room, and scatter is easiest on a slow terminal. Your
+choice is saved.
 
 ---
 
-Add markers to your config so they're always loaded:
+## Reading the waterfall
 
-```toml
-[[display.spectrum_markers]]
-freq_hz = 88000000
-label = "FM start"
+### Scroll back through history
 
-[[display.spectrum_markers]]
-freq_hz = 108000000
-label = "FM end"
+Press `l` for waterfall focus, then `j` / `k` to move through the stored history.
 
-[[display.spectrum_markers]]
-freq_hz = 2400000000
-label = "ISM 2.4 GHz"
-```
+- **Intermittent signals**: scroll back and see when they came and went.
+- **Duration**: count rows between start and end.
+- **Interference patterns**: many interferers are periodic, and the pattern is
+  usually obvious once you can see a minute at a time.
+
+### Slow motion
+
+`[` averages more frames into each row, stretching the visible time window; `]`
+speeds it back up. If something appears and vanishes before you can look at it,
+slow the waterfall down.
+
+### Zoom and palette
+
+`+` and `-` zoom the frequency span, narrowing onto the centre. Note this is the
+*inverse* of the spectrum's `↑`/`↓`: the waterfall zoom changes frequency span,
+the spectrum zoom changes level range.
+
+`p` cycles the color palette (classic, amber, ice, phosphor). `classic` follows
+your [theme](themes.md); the others are fixed gradients. Beyond taste, a different
+gradient genuinely makes different things visible, so it's worth trying another
+one when a signal is right at the edge of showing up.
 
 ---
 
-## SSH and remote monitoring
+## A capture-setup checklist
 
-### Using sdrtop over SSH
+The lab presets are built for exactly this, one concern each. A typical run
+through:
 
-If you have a HackRF on a Raspberry Pi or embedded system, you can run sdrtop over SSH:
+1. **Tune** to your target with `f`, and **start RX** with `Space`.
+2. **Gain, Lab RF (`6`).** Focus with `d`, press `A`, and check the ADC Loading
+   bell fills the middle without touching the rails. Read **NF** and **MDS** to
+   confirm the receiver is sensitive enough for what you're after.
+3. **Quadrature, Lab IQ (`5`).** The constellation should be a bright ring
+   comfortably inside the unit circle; smeared out to the edge means clipping.
+   **IRR** above 30 dB and **DC spike** below −40 dBFS mean clean quadrature. If
+   the DC spike is in your way, press `D`. If mirror images are, park on a strong
+   carrier and press `C`.
+4. **Stability, Lab Timing (`7`).** The timing verdict should read Good or
+   Excellent, and the ring-buffer fill should be flat rather than trending up.
+5. **The bench you'll actually watch.** Set averaging, and capture a reference
+   trace before you change anything.
+
+If all four check out, the run is worth starting.
+
+---
+
+## During a long capture
+
+Keep **Hardware Vitals** in view (Lab Timing, `7`, focus `v`):
+
+- **Buffer fill trending toward the ceiling** is the warning that matters, and it
+  arrives *before* the drop counter does. Act on this one.
+- **Drops climbing**: USB or CPU can't keep up. Lower the sample rate with `s`, or
+  try a different cable.
+- **CPU trending up**: something else on the machine woke up. Close it.
+
+If you want to know whether the problem is your computer rather than your radio,
+the **Callback Interval Strip Chart** in the same preset shows every USB callback
+as it arrives, so a scheduler stall is something you watch happen instead of
+deduce.
+
+---
+
+## SSH, tmux and small screens
+
+sdrtop is built to live in a pane. It needs a real terminal (piping or redirecting
+its output gets you nothing), but that's the only requirement.
 
 ```sh
+# a radio on a Pi, from your desk
 ssh pi@raspberrypi.local sdrtop --theme nord --frequency 433920000
+
+# a permanent corner of your tmux session
+tmux split-window -v -p 30 'sdrtop --lna 24'
 ```
 
-For small screens, press `0` to enter **micro mode** — a compact, single-panel view.
+On anything cramped, press `0` for the [micro field views](screens.md#micro-field-views),
+which strip each concern down to one glance and stay readable down to about 40
+columns.
 
-### tmux pane
-
-sdrtop fits nicely in a tmux pane. Create a split and run:
-
-```sh
-tmux split-window -v -c ~/SDR -p 30 'sdrtop --lna 24'
-```
+One habit worth having: if you're scripting sdrtop or trying out a layout, pass
+`--config /tmp/something.toml`. `q` saves, so a script that runs sdrtop without it
+will quietly rewrite your real settings.
 
 ---
 
