@@ -7,7 +7,7 @@ use ratatui::{
 };
 
 use crate::state::SdrMetrics;
-use crate::ui::panel::{FrameStyle, Panel, PanelChrome};
+use crate::ui::panel::{FrameTone, Panel, PanelChrome};
 
 pub struct SystemResourcesPanel;
 
@@ -18,7 +18,7 @@ impl Panel for SystemResourcesPanel {
     fn chrome(&self, _state: &SdrMetrics) -> PanelChrome {
         // A supporting readout: it never takes focus and its numbers come from
         // this process, not the radio, so the frame stays put in the dim palette.
-        PanelChrome::new("System Resources").frame(FrameStyle::Muted)
+        PanelChrome::new("System Resources").tone(FrameTone::Dim)
     }
 
     fn render(&self, f: &mut Frame, inner: Rect, state: &SdrMetrics, theme: &crate::Theme, _focused: bool) {

@@ -7,8 +7,8 @@ use ratatui::{
 };
 
 use crate::state::SdrMetrics;
-use crate::ui::chrome;
-use crate::ui::panel::Panel;
+use crate::ui::widgets::micro_common::fft_stale;
+use crate::ui::panel::{Panel, PanelChrome};
 
 pub struct SignalStripPanel;
 
@@ -202,18 +202,11 @@ impl Panel for SignalStripPanel {
     fn name(&self) -> &'static str { "signal_strip" }
     fn min_size(&self) -> (u16, u16) { (60, 3) }
 
-    fn render(&self, f: &mut Frame, area: Rect, state: &SdrMetrics, theme: &crate::Theme, _focused: bool) {
-        let stale = state.waterfall.last_fft.as_ref()
-            .map(|fr| fr.timestamp.elapsed().as_millis() > 500)
-            .unwrap_or(true);
-        let hw_stale = !state.radio.hw_streaming;
+    fn chrome(&self, _state: &SdrMetrics) -> PanelChrome { PanelChrome::deck("Signal") }
 
-        let block = chrome::deck_block(theme.border_dim)
-            .title(chrome::title("Signal", theme.label, theme.border_dim));
-        let inner = block.inner(area);
-        f.render_widget(block, area);
-        chrome::corner_accents(f, area, theme.border_dim);
-        if inner.width == 0 || inner.height == 0 { return; }
+    fn render(&self, f: &mut Frame, inner: Rect, state: &SdrMetrics, theme: &crate::Theme, _focused: bool) {
+        let stale = fft_stale(state);
+        let hw_stale = !state.radio.hw_streaming;
 
         let cells = build_cells(state, theme, stale, hw_stale);
 

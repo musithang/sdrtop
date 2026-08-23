@@ -35,19 +35,6 @@ pub fn nameplate<'a>(label_spans: Vec<Span<'a>>, tick_color: Color) -> Vec<Span<
     spans
 }
 
-/// A single uppercase nameplate label span (no focus key) in `color`.
-pub fn label<'a>(text: &str, color: Color) -> Span<'a> {
-    Span::styled(
-        text.to_uppercase(),
-        Style::default().fg(color).add_modifier(Modifier::BOLD),
-    )
-}
-
-/// A complete nameplate title `Line` for a static label: `╴LABEL╶`.
-pub fn title<'a>(text: &str, label_color: Color, tick_color: Color) -> Line<'a> {
-    Line::from(nameplate(vec![label(text, label_color)], tick_color))
-}
-
 /// `├╴ SECTION ╶──── hint` — the shared lab side-panel subheading, spanning the
 /// full inner width `iw`: a `├╴` tick tab, the uppercased bold label, a `╶` cap,
 /// a dim dashed rule filling the middle, and an optional right-aligned `hint`.

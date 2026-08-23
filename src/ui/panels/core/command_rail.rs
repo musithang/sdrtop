@@ -28,7 +28,7 @@ use crate::state::{active_recall_slot, RailMode, SdrMetrics, RECALL_SLOTS};
 use crate::ui::widgets::charts::{ema_smooth, gain_bar_colored, mini_braille_line};
 use crate::ui::panels::core::header::{active_digit_idx, gain_bar, vfo_spans, vfo_string};
 use crate::ui::widgets::micro_common::{fft_stale, fmt_rbw, snr_color};
-use crate::ui::panel::Panel;
+use crate::ui::panel::{Panel, PanelChrome};
 use crate::ui::panels::core::spectrum::detect_peaks;
 use crate::ui::chrome;
 use crate::ui::panels::core::log;
@@ -581,21 +581,9 @@ impl Panel for CommandRailPanel {
         &[("←→", "Tune"), ("Tab", "Mode"), ("1·2·3", "Recall"), ("M", "Save"), ("L", "Log")]
     }
 
-    fn render(&self, f: &mut Frame, area: Rect, state: &SdrMetrics, theme: &crate::Theme, focused: bool) {
-        let border = if focused { theme.border_focused } else { theme.border_dim };
-        // Nameplate: COMMAND with the 'C' focus key highlighted (matches the
-        // SPECTRUM/WATERFALL convention — the lit letter is the key that focuses it).
-        let key_style  = Style::default().fg(theme.value_hi).add_modifier(Modifier::BOLD);
-        let name_style = Style::default().fg(theme.label).add_modifier(Modifier::BOLD);
-        let title_line = Line::from(chrome::nameplate(vec![
-            Span::styled("C", key_style),
-            Span::styled("OMMAND", name_style),
-        ], border));
-        let block = chrome::deck_block(border).title(title_line);
-        let inner = block.inner(area);
-        f.render_widget(block, area);
-        chrome::corner_accents(f, area, border);
-        if inner.width == 0 || inner.height == 0 { return; }
+    fn chrome(&self, _state: &SdrMetrics) -> PanelChrome { PanelChrome::deck("_Command") }
+
+    fn render(&self, f: &mut Frame, inner: Rect, state: &SdrMetrics, theme: &crate::Theme, _focused: bool) {
 
         let iw = inner.width as usize;
         let stale = fft_stale(state);

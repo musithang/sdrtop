@@ -7,7 +7,6 @@ use ratatui::{
 };
 
 use crate::state::{LogLevel, SdrMetrics};
-use crate::ui::chrome;
 
 /// Status lamp for a log line: a single-column glyph whose shape *and* colour
 /// escalate with severity (`·` info → `●` ok/error → `▲` warn), so a glance down
@@ -47,7 +46,7 @@ pub(crate) fn fmt_clock(epoch_secs: u64) -> String {
     fmt_hms(h, m, s)
 }
 
-pub fn render(f: &mut Frame, area: Rect, m: &SdrMetrics, theme: &crate::Theme) {
+pub fn render(f: &mut Frame, inner: Rect, m: &SdrMetrics, theme: &crate::Theme) {
     // Each entry → `lamp  HH:MM:SS  message`. The lamp + dim, fixed-width
     // timestamp form an aligned gutter; the message reads in normal value colour.
     let lines: Vec<Line> = m.ui.log.iter().map(|e| {
@@ -60,27 +59,20 @@ pub fn render(f: &mut Frame, area: Rect, m: &SdrMetrics, theme: &crate::Theme) {
         ])
     }).collect();
 
-    let inner_h = area.height.saturating_sub(2) as usize;
-    let scroll  = lines.len().saturating_sub(inner_h) as u16;
-    let panel = Paragraph::new(lines)
-        .block(
-            chrome::deck_block(theme.border_dim)
-                .title(chrome::title("Log", theme.label, theme.border_dim)),
-        )
-        .scroll((scroll, 0));
-    f.render_widget(panel, area);
-    chrome::corner_accents(f, area, theme.border_dim);
+    let scroll = lines.len().saturating_sub(inner.height as usize) as u16;
+    f.render_widget(Paragraph::new(lines).scroll((scroll, 0)), inner);
 }
 
-use crate::ui::panel::Panel;
+use crate::ui::panel::{Panel, PanelChrome};
 
 pub struct LogPanel;
 
 impl Panel for LogPanel {
     fn name(&self) -> &'static str { "log" }
     fn min_size(&self) -> (u16, u16) { (20, 7) }
-    fn render(&self, f: &mut Frame, area: Rect, state: &SdrMetrics, theme: &crate::Theme, _focused: bool) {
-        render(f, area, state, theme);
+    fn chrome(&self, _state: &SdrMetrics) -> PanelChrome { PanelChrome::deck("Log") }
+    fn render(&self, f: &mut Frame, inner: Rect, state: &SdrMetrics, theme: &crate::Theme, _focused: bool) {
+        render(f, inner, state, theme);
     }
 }
 

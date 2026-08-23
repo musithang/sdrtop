@@ -2,12 +2,12 @@ use ratatui::{
     layout::Rect,
     style::{Modifier, Style},
     text::{Line, Span},
-    widgets::{Block, BorderType, Borders, Paragraph},
+    widgets::Paragraph,
     Frame,
 };
 
 use crate::state::SdrMetrics;
-use crate::ui::panel::Panel;
+use crate::ui::panel::{FrameTone, Panel, PanelChrome};
 
 pub struct ObserverPanel;
 
@@ -15,7 +15,14 @@ impl Panel for ObserverPanel {
     fn name(&self) -> &'static str { "observer" }
     fn min_size(&self) -> (u16, u16) { (40, 10) }
 
-    fn render(&self, f: &mut Frame, area: Rect, state: &SdrMetrics, theme: &crate::Theme, _focused: bool) {
+    fn chrome(&self, _state: &SdrMetrics) -> PanelChrome {
+        // The border is the mode indicator: the radio belongs to another process,
+        // and the whole panel exists to say so.
+        PanelChrome::new("Observer Mode").tone(FrameTone::Observer)
+    }
+
+    fn render(&self, f: &mut Frame, inner: Rect, state: &SdrMetrics, theme: &crate::Theme, _focused: bool) {
+        let area = inner;
         let dash = "—";
         let device    = state.observer.device.as_deref().unwrap_or(dash);
         let serial    = state.observer.serial.as_deref().unwrap_or(dash);
@@ -70,14 +77,6 @@ impl Panel for ObserverPanel {
             Style::default().fg(theme.label),
         )));
 
-        let para = Paragraph::new(lines)
-            .block(
-                Block::default()
-                    .title(" Observer Mode ")
-                    .borders(Borders::ALL)
-                    .border_type(BorderType::Rounded)
-                    .border_style(Style::default().fg(theme.observer)),
-            );
-        f.render_widget(para, area);
+        f.render_widget(Paragraph::new(lines), inner);
     }
 }

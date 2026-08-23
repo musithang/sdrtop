@@ -20,7 +20,7 @@ use ratatui::{
 
 use crate::state::{SdrMetrics, SpectrumMarker};
 use crate::ui::rf_calc::{cascade, estimate_mds_dbm, staging_verdict, system_nf_db};
-use crate::ui::panel::Panel;
+use crate::ui::panel::{FrameStyle, Panel, PanelChrome};
 
 /// Map an active preset name to its lab banner label and the number key that
 /// selects it (the *current* key map, which we keep — see the implementation
@@ -662,8 +662,11 @@ impl Panel for LabBannerPanel {
     fn focus_bindings(&self) -> &'static [(&'static str, &'static str)] {
         &[("↑↓", "Ref level"), ("[ ]", "Averaging"), ("C", "Capture cal"), ("R", "Clear ref")]
     }
+    fn chrome(&self, _state: &SdrMetrics) -> PanelChrome {
+        PanelChrome::untitled().frame(FrameStyle::Borderless)
+    }
+
     fn render(&self, f: &mut Frame, area: Rect, state: &SdrMetrics, theme: &crate::Theme, focused: bool) {
-        if area.width == 0 || area.height == 0 { return; }
         let lines = banner_lines(state, theme, area.width as usize, focused);
         f.render_widget(Paragraph::new(lines), area);
     }
@@ -675,8 +678,11 @@ pub struct LabMarkerPanel;
 impl Panel for LabMarkerPanel {
     fn name(&self) -> &'static str { "lab_marker" }
     fn min_size(&self) -> (u16, u16) { (20, 1) }
+    fn chrome(&self, _state: &SdrMetrics) -> PanelChrome {
+        PanelChrome::untitled().frame(FrameStyle::Borderless)
+    }
+
     fn render(&self, f: &mut Frame, area: Rect, state: &SdrMetrics, theme: &crate::Theme, _focused: bool) {
-        if area.width == 0 || area.height == 0 { return; }
         let lines = marker_lines(state, theme, area.width as usize);
         f.render_widget(Paragraph::new(lines), area);
     }

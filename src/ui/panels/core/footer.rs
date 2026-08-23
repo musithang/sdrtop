@@ -8,8 +8,8 @@ use ratatui::{
 
 use crate::hardware::GainModel;
 use crate::state::{InputMode, MicroView, SdrMetrics};
-use crate::ui::chrome;
-use crate::ui::panel::Panel;
+use crate::ui::chrome::frame;
+use crate::ui::panel::{FrameStyle, FrameTone, Panel, PanelChrome};
 
 const FOCUS_SEP:  &str = "  ·  ";
 const NORMAL_SEP: &str = " · ";
@@ -236,49 +236,40 @@ impl Panel for FooterPanel {
         compute_footer_height(available_width, state)
     }
 
-    fn render(&self, f: &mut Frame, area: Rect, m: &SdrMetrics, theme: &crate::Theme, _focused: bool) {
-        // Clamp to the lines that actually fit — inner_h = area.height - 2 borders
-        let inner_w = area.width.saturating_sub(2) as usize;
-        let max_lines = area.height.saturating_sub(2) as usize;
+    fn chrome(&self, m: &SdrMetrics) -> PanelChrome {
+        // The footer's border is an application-mode indicator rather than a
+        // panel state: it reports what the keys along it are currently for.
+        PanelChrome::untitled().frame(FrameStyle::Deck).tone(footer_tone(m))
+    }
+
+    fn render(&self, f: &mut Frame, inner: Rect, m: &SdrMetrics, theme: &crate::Theme, _focused: bool) {
+        let inner_w = inner.width as usize;
+        let max_lines = inner.height as usize;
 
         // Single-line data-entry prompt: dim label, the live buffer highlighted.
         let prompt = |s: String| -> Vec<Line<'static>> {
             vec![Line::from(Span::styled(s, Style::default().fg(theme.value)))]
         };
 
-        let (lines, border_color): (Vec<Line<'static>>, _) = if m.observer.active {
-            (
-                styled_lines(vec![vec!["[Q] Quit".into(), "[?] Help".into(), "(Observer Mode)".into()]],
-                             FOCUS_SEP, theme, max_lines),
-                theme.observer,
-            )
+        let lines: Vec<Line<'static>> = if m.observer.active {
+            styled_lines(vec![vec!["[Q] Quit".into(), "[?] Help".into(), "(Observer Mode)".into()]],
+                         FOCUS_SEP, theme, max_lines)
         } else {
             match m.ui.input_mode {
-                InputMode::FrequencyInput => (
+                InputMode::FrequencyInput =>
                     prompt(format!(" Frequency (MHz): [{}▌]  [Enter] Confirm  [Esc] Cancel", m.ui.input_buf)),
-                    theme.status_warn,
-                ),
-                InputMode::SampleRateInput => (
+                InputMode::SampleRateInput =>
                     prompt(format!(" Sample rate ({:.1}–{:.1} MHz): [{}▌]  [Enter] Confirm  [Esc] Cancel",
                         m.caps.sample_rate_min_hz / 1e6, m.caps.sample_rate_max_hz / 1e6, m.ui.input_buf)),
-                    theme.status_warn,
-                ),
-                InputMode::SweepStartInput => (
+                InputMode::SweepStartInput =>
                     prompt(format!(" Sweep START (MHz): [{}▌]  [Enter] Confirm  [Esc] Cancel", m.ui.input_buf)),
-                    theme.status_warn,
-                ),
-                InputMode::SweepStopInput => (
+                InputMode::SweepStopInput =>
                     prompt(format!(" Sweep STOP (MHz): [{}▌]  [Enter] Confirm  [Esc] Cancel", m.ui.input_buf)),
-                    theme.status_warn,
-                ),
                 InputMode::MarkerNameInput => {
                     let freq_str = m.spectrum.pending_marker
                         .map(|f| format!("{:.3} MHz", f as f64 / 1_000_000.0))
                         .unwrap_or_default();
-                    (
-                        prompt(format!(" Marker name at {}:  [{}▌]  [Enter] Confirm  [Esc] Cancel", freq_str, m.ui.input_buf)),
-                        theme.status_warn,
-                    )
+                    prompt(format!(" Marker name at {}:  [{}▌]  [Enter] Confirm  [Esc] Cancel", freq_str, m.ui.input_buf))
                 }
                 InputMode::Normal => {
                     if let Some(panel_name) = &m.ui.focused_panel {
@@ -289,24 +280,38 @@ impl Panel for FooterPanel {
                             last.spans.push(Span::styled(format!("  — {}", panel_name),
                                                          Style::default().fg(theme.label)));
                         }
-                        (wrapped, theme.border_focused)
+                        wrapped
                     } else {
-                        let items  = normal_items(&m.ui.active_preset, &m.ui.preset_names, m.ui.micro_view, area.width, &m.caps.gain);
+                        let items  = normal_items(&m.ui.active_preset, &m.ui.preset_names, m.ui.micro_view,
+                                                  frame::outer_of(inner).width, &m.caps.gain);
                         let groups = wrap_items_grouped(&items, NORMAL_SEP, inner_w);
-                        (styled_lines(groups, NORMAL_SEP, theme, max_lines), theme.border_dim)
+                        styled_lines(groups, NORMAL_SEP, theme, max_lines)
                     }
                 }
             }
         };
 
-        let text = Text::from(lines);
         f.render_widget(
-            Paragraph::new(text)
-                .block(chrome::deck_block(border_color))
-                .alignment(Alignment::Center),
-            area,
+            Paragraph::new(Text::from(lines)).alignment(Alignment::Center),
+            inner,
         );
-        chrome::corner_accents(f, area, border_color);
+    }
+}
+
+/// Which palette slot the footer's frame is in, i.e. what the keys along it are
+/// currently for.
+///
+/// This is the one border in the deck that reports an *application* mode rather
+/// than a panel's own state, so it names its tone instead of taking the standard
+/// focus-and-staleness rule.
+fn footer_tone(m: &SdrMetrics) -> FrameTone {
+    if m.observer.active { return FrameTone::Observer; }
+    match m.ui.input_mode {
+        // A value is half typed and waiting on Enter.
+        InputMode::Normal => {
+            if m.ui.focused_panel.is_some() { FrameTone::Focused } else { FrameTone::Dim }
+        }
+        _ => FrameTone::Warn,
     }
 }
 

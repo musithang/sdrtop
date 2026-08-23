@@ -62,21 +62,59 @@ pub enum Tag {
     Frozen,
 }
 
-/// The border language a panel is drawn in.
+/// The *shape* of a panel's frame. Its colour is [`FrameTone`]; the two are
+/// separate because the same shape appears in several palettes and pairing them
+/// into one enum multiplied out into special cases.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum FrameStyle {
-    /// Rounded single border that follows focus and staleness. The instrument
-    /// box every lab and micro panel sits in.
+    /// Rounded single border with a `␣Name␣` nameplate: the instrument box every
+    /// lab and micro panel sits in.
     Instrument,
-    /// Rounded border held permanently in the dim palette, for supporting panels
-    /// that never take focus and never go stale.
-    Muted,
+    /// Square border with reinforced `┏┓┗┛` corners and a `╴NAME╶` tick-tab
+    /// nameplate: the schematic-deck cockpit chrome that surrounds the
+    /// instruments.
+    Deck,
+    /// No frame at all. The panel gets the whole rect and draws edge to edge:
+    /// the lab banner and marker bars, which are single lines of readout.
+    Borderless,
     /// The panel draws its own frame and receives the outer `Rect` untouched.
     ///
-    /// Transitional: the cockpit chrome (header, rail, footer, bars, log) and
-    /// the bonded spectrum/waterfall pair are still on this variant and move to
-    /// declared frames in R3b.
+    /// Not an unconverted leftover: it is for the two panels whose border is
+    /// part of the instrument rather than a container for it. Bonded, the
+    /// spectrum drops its bottom edge and the waterfall's top border *becomes*
+    /// the shared frequency ruler, which is content no generic frame can draw.
     SelfFramed,
+}
+
+/// Which palette slot a frame is drawn in when it is not focused or stale.
+///
+/// Semantic slots rather than colours, so a panel says what its border means and
+/// the engine decides how that looks in each of the six themes.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum FrameTone {
+    /// The ordinary instrument border.
+    Default,
+    /// Receded: supporting chrome that should not compete with the instruments.
+    Dim,
+    /// Lit as though focused, for a panel that is carrying the user's attention
+    /// without being focusable itself (the footer during an input prompt).
+    Focused,
+    /// Something needs an answer: the footer while a value is being typed.
+    Warn,
+    /// Observer mode, where the radio belongs to another process.
+    Observer,
+}
+
+impl FrameTone {
+    pub fn color(self, theme: &crate::Theme) -> ratatui::style::Color {
+        match self {
+            FrameTone::Default  => theme.border_default,
+            FrameTone::Dim      => theme.border_dim,
+            FrameTone::Focused  => theme.border_focused,
+            FrameTone::Warn     => theme.status_warn,
+            FrameTone::Observer => theme.observer,
+        }
+    }
 }
 
 /// Everything the engine needs to frame a panel. A panel describes itself; it
@@ -100,8 +138,10 @@ pub struct PanelChrome {
     pub title: &'static str,
     /// What makes this panel's readings go stale.
     pub staleness: Staleness,
-    /// Border language.
+    /// Border shape.
     pub frame: FrameStyle,
+    /// Border palette slot when the frame is neither focused nor stale.
+    pub tone: FrameTone,
     /// Live-state tags, drawn after the name in declaration order.
     pub tags: Vec<Tag>,
     /// Trailing detail drawn after the name and tags in the plain label colour,
@@ -117,9 +157,16 @@ impl PanelChrome {
             title,
             staleness: Staleness::Never,
             frame: FrameStyle::Instrument,
+            tone: FrameTone::Default,
             tags: Vec::new(),
             suffix: None,
         }
+    }
+
+    /// A `╴NAME╶` deck frame in the dim palette: the cockpit chrome around the
+    /// instruments. The one-call shorthand, since every deck panel wants both.
+    pub fn deck(title: &'static str) -> Self {
+        Self::new(title).frame(FrameStyle::Deck).tone(FrameTone::Dim)
     }
 
     /// An instrument box with no nameplate, for panels that head their own
@@ -139,6 +186,11 @@ impl PanelChrome {
 
     pub fn frame(mut self, frame: FrameStyle) -> Self {
         self.frame = frame;
+        self
+    }
+
+    pub fn tone(mut self, tone: FrameTone) -> Self {
+        self.tone = tone;
         self
     }
 

@@ -9,8 +9,8 @@ use ratatui::{
 use crate::state::SdrMetrics;
 use crate::ui::widgets::band_plan::band_at;
 use crate::ui::widgets::charts::gain_bar_colored;
-use crate::ui::chrome;
-use crate::ui::panel::Panel;
+use crate::ui::chrome::frame;
+use crate::ui::panel::{Panel, PanelChrome};
 
 pub struct HeaderPanel;
 
@@ -441,26 +441,22 @@ impl Panel for HeaderPanel {
     fn name(&self) -> &'static str { "header" }
     fn min_size(&self) -> (u16, u16) { (60, 5) }
 
-    fn render(&self, f: &mut Frame, area: Rect, state: &SdrMetrics, theme: &crate::Theme, _focused: bool) {
-        let block = chrome::deck_block(theme.border_dim)
-            .title(chrome::title("Radio", theme.label, theme.border_dim));
-        let inner = block.inner(area);
-        f.render_widget(block, area);
-        chrome::corner_accents(f, area, theme.border_dim);
+    fn chrome(&self, _state: &SdrMetrics) -> PanelChrome { PanelChrome::deck("Radio") }
 
-        // inner.height == 3 when area.height == 5
-        // Row positions (absolute y):
+    fn render(&self, f: &mut Frame, inner: Rect, state: &SdrMetrics, theme: &crate::Theme, _focused: bool) {
+        // inner.height == 3 when the panel is 5 rows tall. Row positions:
         //   inner.y     → top band
-        //   inner.y + 1 → separator (rendered at outer width to overwrite the │ border chars)
+        //   inner.y + 1 → the band strip, drawn at the *outer* width so its ├ and ┤
+        //                 end caps land on the side borders and tie into the frame
         //   inner.y + 2 → bottom band
-
         if inner.height < 3 { return; }
+        let outer = frame::outer_of(inner);
         let top_area = Rect { x: inner.x, y: inner.y,     width: inner.width, height: 1 };
-        let sep_area = Rect { x: area.x,  y: inner.y + 1, width: area.width,  height: 1 };
+        let sep_area = Rect { x: outer.x, y: inner.y + 1, width: outer.width, height: 1 };
         let bot_area = Rect { x: inner.x, y: inner.y + 2, width: inner.width, height: 1 };
 
         f.render_widget(Paragraph::new(top_band_line(state, theme, inner.width)), top_area);
-        f.render_widget(Paragraph::new(band_strip_line(state, theme, area.width)), sep_area);
+        f.render_widget(Paragraph::new(band_strip_line(state, theme, outer.width)), sep_area);
         f.render_widget(Paragraph::new(bottom_band_line(state, theme, inner.width)), bot_area);
     }
 }
@@ -477,22 +473,19 @@ impl Panel for SlimHeaderPanel {
     fn min_size(&self) -> (u16, u16) { (60, 4) }
     fn preferred_height(&self, _w: u16, _s: &SdrMetrics) -> u16 { 4 }
 
-    fn render(&self, f: &mut Frame, area: Rect, state: &SdrMetrics, theme: &crate::Theme, _focused: bool) {
-        let block = chrome::deck_block(theme.border_dim)
-            .title(chrome::title("Radio", theme.label, theme.border_dim));
-        let inner = block.inner(area);
-        f.render_widget(block, area);
-        chrome::corner_accents(f, area, theme.border_dim);
+    fn chrome(&self, _state: &SdrMetrics) -> PanelChrome { PanelChrome::deck("Radio") }
 
-        // inner.height == 2 when area.height == 4:
+    fn render(&self, f: &mut Frame, inner: Rect, state: &SdrMetrics, theme: &crate::Theme, _focused: bool) {
+        // inner.height == 2 when the panel is 4 rows tall:
         //   inner.y     → device-status band
-        //   inner.y + 1 → tuning dial (rendered at outer width so ├/┤ overwrite │)
+        //   inner.y + 1 → tuning dial, at outer width so its ├/┤ overwrite the │
         if inner.height < 2 { return; }
-        let top_area = Rect { x: inner.x, y: inner.y,     width: inner.width, height: 1 };
-        let dial_area = Rect { x: area.x, y: inner.y + 1, width: area.width,  height: 1 };
+        let outer = frame::outer_of(inner);
+        let top_area  = Rect { x: inner.x, y: inner.y,     width: inner.width, height: 1 };
+        let dial_area = Rect { x: outer.x, y: inner.y + 1, width: outer.width, height: 1 };
 
         f.render_widget(Paragraph::new(top_band_line(state, theme, inner.width)), top_area);
-        f.render_widget(Paragraph::new(band_strip_line(state, theme, area.width)), dial_area);
+        f.render_widget(Paragraph::new(band_strip_line(state, theme, outer.width)), dial_area);
     }
 }
 

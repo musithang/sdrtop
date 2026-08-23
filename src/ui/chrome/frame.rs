@@ -92,10 +92,17 @@ pub fn render_frame(
     focused: bool,
     theme: &crate::Theme,
 ) -> Option<Rect> {
+    // Borderless: nothing to draw, the panel gets the whole rect.
+    if chrome.frame == FrameStyle::Borderless {
+        return (area.width > 0 && area.height > 0).then_some(area);
+    }
+
+    let color = border_color(chrome, stale, focused, theme);
+    let deck = chrome.frame == FrameStyle::Deck;
     let mut block = Block::default()
         .borders(Borders::ALL)
-        .border_type(BorderType::Rounded)
-        .border_style(Style::default().fg(border_color(chrome.frame, stale, focused, theme)));
+        .border_type(if deck { BorderType::Plain } else { BorderType::Rounded })
+        .border_style(Style::default().fg(color));
 
     let spans = title_spans(chrome, focus_key, stale, theme);
     if !spans.is_empty() {
@@ -104,23 +111,36 @@ pub fn render_frame(
 
     let inner = block.inner(area);
     f.render_widget(block, area);
+    // The reinforced corners are an overlay, so they go on after the block.
+    if deck { corner_accents(f, area, color); }
     (inner.width > 0 && inner.height > 0).then_some(inner)
 }
 
-/// The border colour for a frame in a given state.
-fn border_color(style: FrameStyle, stale: bool, focused: bool, theme: &crate::Theme) -> Color {
-    match style {
-        // A muted frame never takes focus and never goes stale, so it never moves.
-        FrameStyle::Muted => theme.border_dim,
-        FrameStyle::Instrument | FrameStyle::SelfFramed => {
-            if focused { theme.border_focused }
-            else if stale { theme.stale }
-            else { theme.border_default }
-        }
+/// The outer rect an all-borders frame carved `inner` out of.
+///
+/// For the rare panel that deliberately draws *over* its own side borders: the
+/// header's tuning dial runs the full width so its `├` and `┤` end caps tie into
+/// the frame instead of stopping one column short of it. Everything else should
+/// stay inside the rect it was handed.
+pub fn outer_of(inner: Rect) -> Rect {
+    Rect {
+        x: inner.x.saturating_sub(1),
+        y: inner.y.saturating_sub(1),
+        width: inner.width + 2,
+        height: inner.height + 2,
     }
 }
 
-/// Build the nameplate spans: `␣Name [K] [STALE] [FRZ]suffix␣`.
+/// The border colour for a frame in a given state: focus outranks staleness,
+/// which outranks the panel's declared tone.
+fn border_color(chrome: &PanelChrome, stale: bool, focused: bool, theme: &crate::Theme) -> Color {
+    if focused { theme.border_focused }
+    else if stale { theme.stale }
+    else { chrome.tone.color(theme) }
+}
+
+/// Build the nameplate spans: `␣Name [K]suffix [STALE] [FRZ]␣`, or on a deck
+/// frame the engraved tick-tab form `╴NAME╶`.
 ///
 /// An untitled panel gets no nameplate at all, tags and suffix included — a box
 /// with nothing but `[STALE]` on its rule reads as debris rather than a title.
@@ -132,9 +152,18 @@ pub fn title_spans(
 ) -> Vec<Span<'static>> {
     if chrome.title.is_empty() { return Vec::new(); }
 
+    // A deck nameplate is an engraved plate: uppercase, between tick end caps in
+    // the border's own colour. An instrument nameplate is a label: mixed case,
+    // held off the corners by a plain space.
+    let deck = chrome.frame == FrameStyle::Deck;
     let name = Style::default().fg(theme.label).add_modifier(Modifier::BOLD);
     let key  = Style::default().fg(theme.value_hi).add_modifier(Modifier::BOLD);
-    let mut spans = vec![Span::raw(" ")];
+    let tick = Style::default().fg(border_color(chrome, stale, false, theme));
+    let plate = |s: &str| if deck { s.to_uppercase() } else { s.to_string() };
+
+    let mut spans = vec![
+        if deck { Span::styled("\u{2574}", tick) } else { Span::raw(" ") },
+    ];
 
     match split_mnemonic(chrome.title) {
         // The key is a letter of the name: light it where it stands.
@@ -144,14 +173,14 @@ pub fn title_spans(
                 "{}: nameplate marks '{letter}' but focus_key() is {focus_key:?}",
                 chrome.title,
             );
-            if !before.is_empty() { spans.push(Span::styled(before.to_string(), name)); }
-            spans.push(Span::styled(letter.to_string(), key));
-            if !after.is_empty() { spans.push(Span::styled(after.to_string(), name)); }
+            if !before.is_empty() { spans.push(Span::styled(plate(before), name)); }
+            spans.push(Span::styled(plate(&letter.to_string()), key));
+            if !after.is_empty() { spans.push(Span::styled(plate(after), name)); }
         }
         // No marker: the name as written, and the key bracketed after it if the
         // panel has one. Never silently absent — that was the bug.
         None => {
-            spans.push(Span::styled(chrome.title.to_string(), name));
+            spans.push(Span::styled(plate(chrome.title), name));
             if let Some(k) = focus_key {
                 spans.push(Span::styled(" [", name));
                 spans.push(Span::styled(k.to_uppercase().to_string(), key));
@@ -159,6 +188,8 @@ pub fn title_spans(
             }
         }
     }
+
+    if deck { spans.push(Span::styled("\u{2576}", tick)); }
 
     // The suffix belongs to the name (it says what the panel *is*); the tags say
     // what it is *doing right now*, so they go last, together, at the edge where
@@ -176,7 +207,9 @@ pub fn title_spans(
         spans.push(Span::styled(format!(" [{text}]"), Style::default().fg(color)));
     }
 
-    spans.push(Span::raw(" "));
+    // The deck's closing tick already caps the plate; only a label nameplate
+    // needs a space to keep it off the corner.
+    if !deck { spans.push(Span::raw(" ")); }
     spans
 }
 
@@ -192,7 +225,7 @@ fn split_mnemonic(title: &str) -> Option<(&str, char, &str)> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::ui::panel::{PanelChrome, Staleness};
+    use crate::ui::panel::{FrameTone, PanelChrome, Staleness};
 
     /// The rendered nameplate as plain text, for asserting on shape.
     fn text(spans: &[Span<'_>]) -> String {
@@ -281,15 +314,36 @@ mod tests {
     }
 
     #[test]
-    fn a_muted_frame_never_reacts_to_focus_or_staleness() {
+    fn focus_outranks_staleness_which_outranks_the_declared_tone() {
         let t = crate::theme::Theme::sdr();
-        for (stale, focused) in [(false, false), (true, false), (false, true), (true, true)] {
-            assert_eq!(border_color(FrameStyle::Muted, stale, focused, &t), t.border_dim);
+        let c = PanelChrome::new("Any");
+        assert_eq!(border_color(&c, false, false, &t), t.border_default, "the tone is the base");
+        assert_eq!(border_color(&c, true,  false, &t), t.stale);
+        assert_eq!(border_color(&c, true,  true,  &t), t.border_focused);
+
+        // The tone only shows through when neither override applies, so a panel
+        // that is never focusable and never stale simply keeps its own slot.
+        let dim = PanelChrome::new("Supporting").tone(FrameTone::Dim);
+        assert_eq!(border_color(&dim, false, false, &t), t.border_dim);
+        for tone in [FrameTone::Focused, FrameTone::Warn, FrameTone::Observer] {
+            let c = PanelChrome::untitled().tone(tone);
+            assert_eq!(border_color(&c, false, false, &t), tone.color(&t));
         }
-        // An instrument frame does, and focus outranks staleness.
-        assert_eq!(border_color(FrameStyle::Instrument, false, false, &t), t.border_default);
-        assert_eq!(border_color(FrameStyle::Instrument, true,  false, &t), t.stale);
-        assert_eq!(border_color(FrameStyle::Instrument, true,  true,  &t), t.border_focused);
+    }
+
+    #[test]
+    fn a_deck_nameplate_is_engraved_and_a_label_one_is_not() {
+        let t = crate::theme::Theme::sdr();
+        // Deck: uppercase between tick caps, no padding spaces.
+        let deck = PanelChrome::deck("_Command");
+        assert_eq!(text(&title_spans(&deck, Some('c'), false, &t)), "╴COMMAND╶");
+        assert_eq!(key_span(&title_spans(&deck, Some('c'), false, &t)[..], &t), Some("C"),
+                   "the mnemonic survives the uppercasing");
+        // Instrument: as written, held off the corners by a space.
+        let inst = PanelChrome::new("_Command");
+        assert_eq!(text(&title_spans(&inst, Some('c'), false, &t)), " Command ");
+        // Tags land outside the plate, not inside it.
+        assert_eq!(text(&title_spans(&deck, Some('c'), true, &t)), "╴COMMAND╶ [STALE]");
     }
 
     #[test]
