@@ -50,7 +50,8 @@ struct Cli {
     #[arg(long)]
     vga: Option<u32>,
 
-    /// Color theme (sdr, nord, dracula, gruvbox, catppuccin, solarized)
+    /// Color theme: a built-in (sdr, nord, dracula, gruvbox, catppuccin,
+    /// solarized) or the name of a file in ~/.config/sdrtop/themes/
     #[arg(long, value_name = "THEME")]
     theme: Option<String>,
 }

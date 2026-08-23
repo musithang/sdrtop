@@ -17,7 +17,28 @@ in time.
 
 ---
 
-## 🔬 Checkpoint 13: It checks itself *(you are here)*
+## 🎨 Checkpoint 14: Bring your own colours *(you are here)*
+
+Two small things about themes, one of which was overdue.
+
+- **Per-field colour overrides survive a save.** They always loaded correctly, but
+  quitting with `q` rewrote the config and deleted them, so anyone using them had
+  to keep a separate file and point `--config` at it. That workaround is no longer
+  needed.
+- **You can write a whole theme now**, not just override a colour or two. Drop
+  `tokyonight.toml` in `~/.config/sdrtop/themes/` and `tokyonight` is a theme from
+  then on, usable from `[theme] base` or `--theme`, alongside the six built-in
+  ones. Nothing to register, nothing to rebuild. The built-ins are written in
+  exactly the same format, so the quickest start is to copy one and change the
+  hex, and a broken file is skipped with a note in the log rather than stopping
+  the radio from starting. See [Themes](themes.md#write-your-own-theme).
+
+Under the hood this is the same change: the built-in themes stopped being Rust
+code and became data, which is what made both of them possible.
+
+---
+
+## 🔬 Checkpoint 13: It checks itself
 
 No new instrument this time. Instead, **Lab Signal** (`8`) was taken apart reading
 by reading and asked one question: is this number true? Several were not, and one

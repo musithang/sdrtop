@@ -233,8 +233,6 @@ and `TERM=xterm-256color` fixes most of it.
 - **No in-app config editing.** The TOML is hand-edited. On the roadmap.
 - **PortaPack support is partial.** Mayhem telemetry over serial is in
   development; full control like the HackRF is not there yet.
-- **Per-field theme overrides are wiped by a save.** See
-  [Configuration](config.md#what-survives-a-save).
 
 ---
 

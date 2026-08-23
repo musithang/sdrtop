@@ -233,15 +233,12 @@ that panel and not the layout.
 `q` rewrites the config from the running state, which means it overwrites
 `[radio]`, `active_preset`, the markers, the sweep band and dwell, the waterfall
 palette and the spectrum style with whatever they are at that moment. Your
-`[presets.*]` blocks are preserved verbatim.
+`[presets.*]` blocks and your `[theme]` block are preserved verbatim, apart from
+`theme.base`, which follows `--theme` when you pass it.
 
-> **Per-field theme overrides do not survive a save.** Only `theme.base` is
-> written back, so any `border_accent = "…"` style lines you added are gone from
-> the file the first time you quit with `q`. They work perfectly while sdrtop is
-> running, and they load correctly every launch; they just don't get written back
-> out. If you use them, keep them in a config you don't quit-and-save over: point
-> sdrtop at it with `--config`, or re-add the lines after a save. This is a bug
-> rather than a design decision, so expect it to change.
+> Per-field theme overrides used to be dropped on every save. They are kept now.
+> If you have been working around it with a separate `--config` file, you no
+> longer need to.
 
 If you want a hand-edited value to stick in general, quit with `Ctrl+C` rather
 than `q`. And if you're driving sdrtop from a script or testing a layout,

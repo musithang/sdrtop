@@ -113,8 +113,13 @@ impl Theme {
             .expect("the default theme must always load")
     }
 
-    /// A theme by name, preferring `<themes_dir>/<name>.toml` over the built-in
-    /// of the same name.
+    /// A theme by name, from `<themes_dir>/<name>.toml` if there is one,
+    /// otherwise the built-in of that name.
+    ///
+    /// The name is not checked against any list, so a file adds a theme as
+    /// readily as it replaces one: `tokyonight.toml` makes `tokyonight` a name
+    /// `[theme] base` and `--theme` accept, and `nord.toml` replaces the shipped
+    /// Nord. Both are the same lookup.
     ///
     /// A user file that will not parse is **reported and skipped**, not fatal:
     /// stderr is redirected to `sdrtop.log` for the session, so the reason is
@@ -231,6 +236,38 @@ mod tests {
         // A stray comma in a colour scheme must not stop the radio starting.
         let dir = themes_dir_with("nord", "name = \"nord\"\nborder_accent = ");
         assert_eq!(Theme::load("nord", Some(&dir)), Theme::by_name("nord"));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_user_file_adds_a_theme_as_readily_as_it_replaces_one() {
+        // A name that is not a built-in at all: dropping the file is the whole
+        // installation step, and `--theme tokyonight` then works.
+        let mut text = String::from("name = \"tokyonight\"\n");
+        for f in ["border_dim", "border_default", "border_accent", "border_focused",
+                  "label", "value", "value_hi", "status_ok", "status_warn",
+                  "status_crit", "peak_hold", "noise_floor", "stale", "observer"] {
+            text.push_str(&format!("{f} = \"#7aa2f7\"\n"));
+        }
+        text.push_str("palette = [{ at = 0.0, color = \"#1a1b26\" }, { at = 1.0, color = \"#f7768e\" }]\n");
+        let dir = themes_dir_with("tokyonight", &text);
+
+        let t = Theme::load("tokyonight", Some(&dir));
+        assert_eq!(t.name, "tokyonight", "a brand-new name must load, not fall back");
+        assert_eq!(t.border_accent, Color::Rgb(0x7a, 0xa2, 0xf7));
+        assert_eq!(t.palette.last(), Some(&(1.0, 0xf7, 0x76, 0x8e)));
+        // It is additive: the built-ins are all still reachable.
+        assert_eq!(Theme::load("nord", Some(&dir)).name, "nord");
+        assert_eq!(Theme::builtin_names().count(), 6);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_malformed_theme_with_a_novel_name_falls_back_to_the_default() {
+        // Nothing to fall back *to* by that name, so it lands on `sdr` rather
+        // than leaving the app with no theme at all.
+        let dir = themes_dir_with("tokyonight", "name = \"tokyonight\"\nborder_accent = ");
+        assert_eq!(Theme::load("tokyonight", Some(&dir)).name, "sdr");
         let _ = std::fs::remove_dir_all(&dir);
     }
 

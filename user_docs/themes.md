@@ -75,12 +75,83 @@ The full set of fields:
 | `stale` | `[STALE]` titles and their dimmed borders |
 | `observer` | Observer mode's status dot and accent |
 
-> **Heads up: overrides don't survive a save.** Only `theme.base` is written back
-> when you quit with `q`, so any override lines you add are removed from the file
-> the first time you do. They load and work perfectly; they just aren't preserved.
-> Until that's fixed, keep them in a config you don't quit-and-save over and point
-> sdrtop at it with `--config`. Details in
-> [Configuration](config.md#what-survives-a-save).
+Overrides are preserved when you quit with `q`, along with everything else in
+your config.
 
-Six themes ought to be enough to argue about. If they aren't, the overrides are
-here so you can out-bikeshed me entirely, no judgment.
+---
+
+## Write your own theme
+
+Overrides are for changing a colour or two. When you want a whole scheme, write it
+as a file.
+
+Call it whatever you like. Drop `tokyonight.toml` in `~/.config/sdrtop/themes/`
+and `tokyonight` is a theme from then on, sitting alongside the six built-in ones:
+
+```toml
+[theme]
+base = "tokyonight"
+```
+
+or from the command line, without touching the config at all:
+
+```sh
+sdrtop --theme tokyonight
+```
+
+That is the whole installation step. There is no list to register the name in and
+nothing to rebuild.
+
+A theme file names itself, gives all fourteen colours from the table above, and
+lists the gradient the spectrum and waterfall are painted with:
+
+```toml
+name = "tokyonight"
+
+border_dim     = "#57607a"
+border_default = "#3c7891"
+border_accent  = "#00d7ff"
+border_focused = "#ffffff"
+label          = "#8296b2"
+value          = "#c3d2dc"
+value_hi       = "#ffaf00"
+status_ok      = "#00d282"
+status_warn    = "#ffaf00"
+status_crit    = "#ff5a5a"
+peak_hold      = "#ffd700"
+noise_floor    = "#505f78"
+stale          = "#3c414b"
+observer       = "#6496ff"
+
+# Cold (weak signal) to hot (strong). `at` runs 0.0 to 1.0 and must climb.
+palette = [
+    { at = 0.00, color = "#0a0a50" },
+    { at = 0.25, color = "#0050b4" },
+    { at = 0.45, color = "#00d2d2" },
+    { at = 0.60, color = "#00d250" },
+    { at = 0.78, color = "#ffd700" },
+    { at = 1.00, color = "#ff3214" },
+]
+```
+
+Those are the built-in `sdr` colours verbatim under a new name, so the quickest
+start is to copy `sdr`'s values and change the hex.
+
+Three things worth knowing:
+
+- **Every colour is required.** A theme missing one would render that part of the
+  screen in some other theme's colour, which is a blend nobody chose, so sdrtop
+  refuses the file instead.
+- **A broken file is skipped, not fatal.** sdrtop falls back to a working theme
+  and writes the reason to `~/.config/sdrtop/sdrtop.log`; a stray comma in a
+  colour scheme should not stop a radio from starting.
+- **Reusing a built-in name replaces it.** If you do name your file `nord.toml`,
+  yours is the Nord sdrtop loads. That is occasionally handy if you just want to
+  fix one thing about a built-in and keep calling it by its name, but you almost
+  certainly want a new name instead.
+
+Per-field `[theme]` overrides still apply on top of your own theme too, so you can
+keep a scheme in a file and still nudge one colour from your config.
+
+Six themes ought to be enough to argue about. If they aren't, the overrides and
+theme files are here so you can out-bikeshed me entirely, no judgment.
