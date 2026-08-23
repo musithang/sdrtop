@@ -24,15 +24,16 @@ mod view;
 
 use ratatui::{
     layout::{Alignment, Constraint, Direction, Layout, Rect},
-    style::{Color, Modifier, Style},
-    text::{Line, Span},
+    style::{Color, Style},
+    text::Line,
     widgets::{Borders, Paragraph},
     Frame,
 };
 
 use crate::state::SdrMetrics;
 use crate::ui::chrome;
-use crate::ui::panel::{Bond, Panel};
+use crate::ui::chrome::frame;
+use crate::ui::panel::{Bond, FrameTone, Panel, PanelChrome, Staleness, Tag};
 
 pub(crate) use labels::detect_peaks;
 pub use scale::{fmt_spectrum_step, freq_scale_spans, next_spectrum_step, prev_spectrum_step};
@@ -40,9 +41,6 @@ pub use scale::{fmt_spectrum_step, freq_scale_spans, next_spectrum_step, prev_sp
 use scale::{freq_to_canvas_x, obw_bounds};
 use trace::{LabGhosts, Layers, MarkerRules, Rules, Vertical};
 use view::SpectrumView;
-
-/// How old the newest frame may get before the readings are called stale.
-const STALE_MS: u128 = 500;
 
 pub struct SpectrumPanel;
 
@@ -63,40 +61,58 @@ impl Panel for SpectrumPanel {
         ]
     }
 
+    fn chrome(&self, state: &SdrMetrics) -> PanelChrome {
+        PanelChrome::deck("SP_ECTRUM")
+            .stale_when(Staleness::FftAge)
+            .tone(FrameTone::Accent)
+            .tag_if(state.spectrum.hold.is_some(), Tag::Hold)
+    }
+
+    /// Engine-framed: `area` is the inner rect. The axes are tinted to match the
+    /// border, so the colour is asked for by the same rule the frame was drawn
+    /// with rather than re-derived here.
     fn render(&self, f: &mut Frame, area: Rect, state: &SdrMetrics, theme: &crate::Theme, focused: bool) {
-        render(f, area, state, theme, focused, Bond::None);
+        let border = frame::frame_color(&self.chrome(state), state, focused, theme);
+        contents(f, area, state, theme, focused, Bond::None, border);
     }
 }
 
-/// Free render entry point so the layout engine can bond the spectrum to the
-/// waterfall below it. `Bond::Below` drops the bottom border and the panel's own
-/// frequency-axis row — the waterfall's top border becomes the shared ruler.
+/// Free render entry point for the **bonded** case, which the layout engine calls
+/// directly instead of going through the registry.
+///
+/// `Bond::Below` drops the bottom border and the panel's own frequency-axis row —
+/// the waterfall's top border becomes the shared ruler. Only the border *set* is
+/// drawn here; the nameplate and the colour still come from the panel's own
+/// [`PanelChrome`], so the bonded and standalone plates cannot drift apart.
 pub fn render(f: &mut Frame, area: Rect, state: &SdrMetrics, theme: &crate::Theme, focused: bool, bond: Bond) {
-    let stale = state.waterfall.last_fft.as_ref()
-        .map(|fr| fr.timestamp.elapsed().as_millis() > STALE_MS)
-        .unwrap_or(false);
-    let border = if focused { theme.border_focused }
-        else if stale || state.waterfall.last_fft.is_none() { theme.stale }
-        else { theme.border_accent };
+    debug_assert_ne!(bond, Bond::None, "unbonded spectrum goes through the registry");
+    let chrome = SpectrumPanel.chrome(state);
+    let stale = chrome.staleness.resolve(state);
+    let border = frame::frame_color(&chrome, state, focused, theme);
 
     let block = chrome::deck_block_borders(border, bond_borders(bond))
-        .title(Line::from(nameplate(state, stale, border, theme)));
-
-    let Some(fft) = state.waterfall.last_fft.as_ref() else {
-        f.render_widget(
-            Paragraph::new("Waiting for RX\u{2026}")
-                .block(block)
-                .alignment(Alignment::Center)
-                .style(Style::default().fg(theme.label)),
-            area,
-        );
-        corner_accents(f, area, bond, border);
-        return;
-    };
+        .title(Line::from(frame::title_spans(&chrome, SpectrumPanel.focus_key(), stale, theme)));
 
     let inner = block.inner(area);
     f.render_widget(block, area);
     corner_accents(f, area, bond, border);
+    contents(f, inner, state, theme, focused, bond, border);
+}
+
+/// The instrument itself, drawn into whatever inner rect the caller carved.
+fn contents(
+    f: &mut Frame, inner: Rect, state: &SdrMetrics, theme: &crate::Theme,
+    focused: bool, bond: Bond, border: Color,
+) {
+    let Some(fft) = state.waterfall.last_fft.as_ref() else {
+        f.render_widget(
+            Paragraph::new("Waiting for RX\u{2026}")
+                .alignment(Alignment::Center)
+                .style(Style::default().fg(theme.label)),
+            inner,
+        );
+        return;
+    };
 
     // Shared frequency zoom: bonded below the waterfall, both plots narrow to
     // the same centre slice so the instrument zooms as one around the tuned
@@ -126,25 +142,6 @@ fn bond_borders(bond: Bond) -> Borders {
 fn corner_accents(f: &mut Frame, area: Rect, bond: Bond, border: Color) {
     if bond == Bond::Below { chrome::corner_accents_top(f, area, border); }
     else { chrome::corner_accents(f, area, border); }
-}
-
-/// `╴SPECTRUM╶` with the `E` focus key lit, plus the live `[HOLD]` and
-/// `[STALE]` tags.
-fn nameplate(state: &SdrMetrics, stale: bool, border: Color, theme: &crate::Theme) -> Vec<Span<'static>> {
-    let key = Style::default().fg(theme.value_hi).add_modifier(Modifier::BOLD);
-    let name = Style::default().fg(theme.label).add_modifier(Modifier::BOLD);
-    let mut spans = chrome::nameplate(vec![
-        Span::styled("SP", name),
-        Span::styled("E", key),
-        Span::styled("CTRUM", name),
-    ], border);
-    if state.spectrum.hold.is_some() {
-        spans.push(Span::styled(" [HOLD]", Style::default().fg(theme.status_warn)));
-    }
-    if stale {
-        spans.push(Span::styled(" [STALE]", Style::default().fg(theme.stale)));
-    }
-    spans
 }
 
 /// The rows the instrument is carved into, given the panel's inner rect.

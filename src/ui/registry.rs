@@ -29,8 +29,9 @@ impl PanelRegistry {
     ///
     /// The frame is drawn here, from the panel's own [`PanelChrome`], so the
     /// border rule, the nameplate and the `[STALE]` tag are decided once for the
-    /// whole deck instead of once per panel file. A panel still on
-    /// [`FrameStyle::SelfFramed`] gets the outer rect and draws its own.
+    /// whole deck instead of once per panel file. The
+    /// [`FrameStyle::SelfFramed`] branch is the trait default's safety net — no
+    /// registered panel takes it, and the lint says so.
     ///
     /// [`PanelChrome`]: crate::ui::panel::PanelChrome
     pub fn render_panel(&self, name: &str, f: &mut Frame, area: Rect, state: &SdrMetrics, theme: &crate::Theme, focused: bool) {

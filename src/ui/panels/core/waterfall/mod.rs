@@ -20,14 +20,15 @@ mod overlays;
 use ratatui::{
     layout::{Alignment, Constraint, Direction, Layout, Rect},
     style::{Color, Style},
-    text::{Line, Span},
+    text::Line,
     widgets::Paragraph,
     Frame,
 };
 
 use crate::state::SdrMetrics;
 use crate::ui::chrome;
-use crate::ui::panel::{Bond, Panel};
+use crate::ui::chrome::frame;
+use crate::ui::panel::{Bond, FrameTone, Panel, PanelChrome, Staleness, Tag};
 
 use axes::DB_COL;
 use bond::Window;
@@ -93,59 +94,83 @@ impl Panel for WaterfallPanel {
         ]
     }
 
+    fn chrome(&self, state: &SdrMetrics) -> PanelChrome {
+        let wf = &state.waterfall;
+        let buf = &wf.buffer;
+        PanelChrome::deck("WATERFA_LL")
+            .stale_when(Staleness::FftAge)
+            .tone(FrameTone::Accent)
+            // `Paused` suppresses `[STALE]` and cools the frame itself, so the
+            // plate reads `[PAUSED]` rather than answering the same question
+            // twice. That rule lives in `chrome::frame`, not here.
+            .tag_if(buf.paused, Tag::Paused)
+            .tag_if(buf.row_stride > 1, Tag::Stride(buf.row_stride))
+            .tag_if(wf.scroll_offset > 0, Tag::Scroll(wf.scroll_offset))
+    }
+
+    /// Engine-framed: `area` is the inner rect.
     fn render(&self, f: &mut Frame, area: Rect, state: &SdrMetrics, theme: &crate::Theme, focused: bool) {
-        render(f, area, state, theme, focused, Bond::None);
+        let border = frame::frame_color(&self.chrome(state), state, focused, theme);
+        contents(f, area, state, theme, focused, Bond::None, area, border);
     }
 }
 
-/// Free render entry point so the layout engine can bond the waterfall to the
-/// spectrum above it. `Bond::Above` drops the nameplate — its identity and live
-/// tags move to the shared ruler's end-cap tabs — and overlays that ruler on the
-/// top border so the two panels read as one instrument.
+/// Free render entry point for the **bonded** case, which the layout engine calls
+/// directly instead of going through the registry.
+///
+/// `Bond::Above` drops the nameplate — its identity and live tags move to the
+/// shared ruler's end-cap tabs — and overlays that ruler on the top border so the
+/// two panels read as one instrument.
 pub fn render(f: &mut Frame, area: Rect, state: &SdrMetrics, theme: &crate::Theme, focused: bool, bond: Bond) {
+    debug_assert_eq!(bond, Bond::Above, "unbonded waterfall goes through the registry");
+    let chrome = WaterfallPanel.chrome(state);
+    let border = frame::frame_color(&chrome, state, focused, theme);
+
+    // Bonded, the top border is the shared ruler, so the nameplate is suppressed
+    // and drawn back on as a cap once the plot area is known.
+    let block = chrome::deck_block(border).title(Line::from(""));
+    let inner = block.inner(area);
+    f.render_widget(block, area);
+    chrome::corner_accents(f, area, border);
+    contents(f, inner, state, theme, focused, bond, area, border);
+}
+
+/// The grid and its axes, drawn into whatever inner rect the caller carved.
+///
+/// `outer` is the whole panel, which the bonded seam needs to reach the top and
+/// bottom borders it writes the ruler and the status cap onto.
+#[allow(clippy::too_many_arguments)]
+fn contents(
+    f: &mut Frame, inner: Rect, state: &SdrMetrics, theme: &crate::Theme,
+    focused: bool, bond: Bond, outer: Rect, border: Color,
+) {
     let bonded = bond == Bond::Above;
     let wf = &state.waterfall;
     let buf = &wf.buffer;
 
-    let no_data = wf.last_fft.is_none();
+    if buf.rows.is_empty() {
+        f.render_widget(
+            Paragraph::new("Waiting for RX\u{2026}")
+                .alignment(Alignment::Center)
+                .style(Style::default().fg(theme.label)),
+            inner,
+        );
+        return;
+    }
+
     let stale = wf.last_fft.as_ref()
         .map(|fr| fr.timestamp.elapsed().as_millis() > STALE_MS)
         .unwrap_or(false);
-    let border = if focused { theme.border_focused }
-        else if buf.paused || stale || no_data { theme.stale }
-        else { theme.border_accent };
-
     // Clamp the reported scroll to what the buffer can actually give, so the
-    // `[↑N]` tag never promises history that is not there. The content height is
-    // the panel minus its two borders and the focus indicator row.
-    let approx_content_h = area.height.saturating_sub(3) as usize;
+    // bonded status cap never promises history that is not there. The content
+    // height is the panel minus its two borders and the focus indicator row.
+    let approx_content_h = outer.height.saturating_sub(3) as usize;
     let status = Status {
         paused: buf.paused,
         stale,
         stride: buf.row_stride,
         scroll: wf.scroll_offset.min(buf.rows.len().saturating_sub(approx_content_h * 2) / 2),
     };
-
-    // Bonded, the top border is the shared ruler, so the nameplate is suppressed
-    // and drawn back on as a cap once the plot area is known.
-    let title = if bonded { Line::from("") } else { Line::from(nameplate(&status, border, theme)) };
-    let block = chrome::deck_block(border).title(title);
-
-    if buf.rows.is_empty() {
-        f.render_widget(
-            Paragraph::new("Waiting for RX\u{2026}")
-                .block(block)
-                .alignment(Alignment::Center)
-                .style(Style::default().fg(theme.label)),
-            area,
-        );
-        chrome::corner_accents(f, area, border);
-        return;
-    }
-
-    let inner = block.inner(area);
-    f.render_widget(block, area);
-    chrome::corner_accents(f, area, border);
 
     // In focus mode one row goes to the readout, as on the spectrum.
     let (content, indicator) = if focused && inner.height > 2 {
@@ -177,7 +202,7 @@ pub fn render(f: &mut Frame, area: Rect, state: &SdrMetrics, theme: &crate::Them
         .unwrap_or(Window { left_hz: 0.0, bw: 1.0 });
 
     if bonded {
-        bond::seam(f, area, plot, window, &status, border, theme);
+        bond::seam(f, outer, plot, window, &status, border, theme);
     }
 
     let cursor_col = wf.cursor_freq.and_then(|cf| {
@@ -210,33 +235,9 @@ pub fn render(f: &mut Frame, area: Rect, state: &SdrMetrics, theme: &crate::Them
     }
 }
 
-/// `╴WATERFALL╶` with the second `L` lit, plus the live tags. The unbonded form:
-/// bonded, the same state rides the ruler caps instead (see [`bond`]).
-fn nameplate(status: &Status, border: Color, theme: &crate::Theme) -> Vec<Span<'static>> {
-    let mut spans = bond::nameplate(border, theme);
-    if status.paused {
-        spans.push(Span::styled(" [PAUSED]", Style::default().fg(theme.status_warn)));
-    } else if status.stale {
-        spans.push(Span::styled(" [STALE]", Style::default().fg(theme.stale)));
-    }
-    if status.stride > 1 {
-        spans.push(Span::styled(format!(" [\u{00D7}{}]", status.stride),
-                                Style::default().fg(theme.label)));
-    }
-    if status.scroll > 0 {
-        spans.push(Span::styled(format!(" [\u{2191}{}]", status.scroll),
-                                Style::default().fg(theme.value_hi)));
-    }
-    spans
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    fn text(spans: &[Span<'_>]) -> String {
-        spans.iter().map(|s| s.content.as_ref()).collect()
-    }
 
     #[test]
     fn the_ladders_walk_and_stop_at_their_ends() {
@@ -252,19 +253,4 @@ mod tests {
         assert_eq!(prev_wf_stride(5), 4);
     }
 
-    #[test]
-    fn the_nameplate_reports_state_in_a_fixed_order() {
-        let t = crate::theme::Theme::sdr();
-        let quiet = Status { paused: false, stale: false, stride: 1, scroll: 0 };
-        assert_eq!(text(&nameplate(&quiet, Color::Reset, &t)), "\u{2574}WATERFALL\u{2576}");
-
-        let busy = Status { paused: true, stale: true, stride: 4, scroll: 12 };
-        assert_eq!(text(&nameplate(&busy, Color::Reset, &t)),
-                   "\u{2574}WATERFALL\u{2576} [PAUSED] [\u{00D7}4] [\u{2191}12]",
-                   "paused outranks stale: a paused panel is not stale, it is held");
-
-        let drifting = Status { paused: false, stale: true, stride: 1, scroll: 0 };
-        assert_eq!(text(&nameplate(&drifting, Color::Reset, &t)),
-                   "\u{2574}WATERFALL\u{2576} [STALE]");
-    }
 }

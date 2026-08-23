@@ -133,10 +133,26 @@ pub fn outer_of(inner: Rect) -> Rect {
 
 /// The border colour for a frame in a given state: focus outranks staleness,
 /// which outranks the panel's declared tone.
+///
+/// [`Tag::Paused`] counts as staleness here. A paused panel's readings are as
+/// frozen as an aged-out one's — the border only says "this is not advancing",
+/// and the plate says which of the two it is.
 fn border_color(chrome: &PanelChrome, stale: bool, focused: bool, theme: &crate::Theme) -> Color {
     if focused { theme.border_focused }
-    else if stale { theme.stale }
+    else if stale || chrome.tags.contains(&Tag::Paused) { theme.stale }
     else { chrome.tone.color(theme) }
+}
+
+/// The colour the engine draws this panel's frame in.
+///
+/// For the two plots whose axes are tinted to match their own border: the engine
+/// hands them the *inner* rect, so they cannot read the colour off the frame and
+/// would otherwise re-derive the rule. Asking for it keeps "focus outranks
+/// staleness outranks tone" stated exactly once.
+pub fn frame_color(
+    chrome: &PanelChrome, state: &crate::state::SdrMetrics, focused: bool, theme: &crate::Theme,
+) -> Color {
+    border_color(chrome, chrome.staleness.resolve(state), focused, theme)
 }
 
 /// Build the nameplate spans: `␣Name [K]suffix [STALE] [FRZ]␣`, or on a deck
@@ -197,12 +213,19 @@ pub fn title_spans(
     if let Some(suffix) = &chrome.suffix {
         spans.push(Span::styled(suffix.clone(), Style::default().fg(theme.label)));
     }
-    if stale {
+    // A paused panel is not stale, it is held. Both tags say "not advancing", so
+    // printing them together would be two answers to one question — the more
+    // specific one wins.
+    if stale && !chrome.tags.contains(&Tag::Paused) {
         spans.push(Span::styled(" [STALE]", Style::default().fg(theme.stale)));
     }
     for tag in &chrome.tags {
         let (text, color) = match tag {
-            Tag::Frozen => ("FRZ", theme.status_warn),
+            Tag::Frozen     => ("FRZ".to_string(),               theme.status_warn),
+            Tag::Hold       => ("HOLD".to_string(),              theme.status_warn),
+            Tag::Paused     => ("PAUSED".to_string(),            theme.status_warn),
+            Tag::Stride(n)  => (format!("\u{00D7}{n}"),          theme.label),
+            Tag::Scroll(n)  => (format!("\u{2191}{n}"),          theme.value_hi),
         };
         spans.push(Span::styled(format!(" [{text}]"), Style::default().fg(color)));
     }
@@ -344,6 +367,58 @@ mod tests {
         assert_eq!(text(&title_spans(&inst, Some('c'), false, &t)), " Command ");
         // Tags land outside the plate, not inside it.
         assert_eq!(text(&title_spans(&deck, Some('c'), true, &t)), "╴COMMAND╶ [STALE]");
+    }
+
+    /// The waterfall's plate, built exactly as its `chrome()` builds it. It moved
+    /// here from the panel when the frame did: the ordering it pins is now the
+    /// engine's rule, not the panel's, and `chrome()` needs a whole metrics
+    /// snapshot to call.
+    fn waterfall_plate(paused: bool, stride: usize, scroll: usize) -> PanelChrome {
+        PanelChrome::deck("WATERFA_LL")
+            .stale_when(Staleness::FftAge)
+            .tone(FrameTone::Accent)
+            .tag_if(paused, Tag::Paused)
+            .tag_if(stride > 1, Tag::Stride(stride))
+            .tag_if(scroll > 0, Tag::Scroll(scroll))
+    }
+
+    #[test]
+    fn the_waterfall_plate_reports_state_in_a_fixed_order() {
+        let t = crate::theme::Theme::sdr();
+        assert_eq!(text(&title_spans(&waterfall_plate(false, 1, 0), Some('l'), false, &t)),
+                   "\u{2574}WATERFALL\u{2576}");
+
+        assert_eq!(text(&title_spans(&waterfall_plate(true, 4, 12), Some('l'), true, &t)),
+                   "\u{2574}WATERFALL\u{2576} [PAUSED] [\u{00D7}4] [\u{2191}12]",
+                   "paused outranks stale: a paused panel is not stale, it is held");
+
+        assert_eq!(text(&title_spans(&waterfall_plate(false, 1, 0), Some('l'), true, &t)),
+                   "\u{2574}WATERFALL\u{2576} [STALE]");
+    }
+
+    #[test]
+    fn a_paused_frame_is_cooled_even_while_its_data_is_fresh() {
+        // Pausing stops the panel advancing, which is what the cool border means.
+        // Without this the plate would say [PAUSED] inside a lit accent frame.
+        let t = crate::theme::Theme::sdr();
+        assert_eq!(border_color(&waterfall_plate(true, 1, 0), false, false, &t), t.stale);
+        assert_eq!(border_color(&waterfall_plate(false, 1, 0), false, false, &t), t.border_accent);
+        // Focus still outranks it, as for staleness.
+        assert_eq!(border_color(&waterfall_plate(true, 1, 0), false, true, &t), t.border_focused);
+    }
+
+    #[test]
+    fn the_spectrum_plate_lights_its_key_and_carries_hold() {
+        let t = crate::theme::Theme::sdr();
+        let held = PanelChrome::deck("SP_ECTRUM")
+            .stale_when(Staleness::FftAge)
+            .tone(FrameTone::Accent)
+            .tag_if(true, Tag::Hold);
+        assert_eq!(text(&title_spans(&held, Some('e'), false, &t)), "\u{2574}SPECTRUM\u{2576} [HOLD]");
+        assert_eq!(key_span(&title_spans(&held, Some('e'), false, &t)[..], &t), Some("E"));
+        // Held *and* stale: status reads outward from the plate, staleness first.
+        assert_eq!(text(&title_spans(&held, Some('e'), true, &t)),
+                   "\u{2574}SPECTRUM\u{2576} [STALE] [HOLD]");
     }
 
     #[test]

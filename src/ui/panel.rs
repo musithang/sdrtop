@@ -60,6 +60,24 @@ impl Staleness {
 pub enum Tag {
     /// `[FRZ]` — the readings are a held snapshot, not live.
     Frozen,
+    /// `[HOLD]` — the trace is frozen against a captured frame.
+    Hold,
+    /// `[PAUSED]` — the panel has stopped taking new data because the user said
+    /// so.
+    ///
+    /// Carries two consequences beyond its own spelling, both in
+    /// [`chrome::frame`](crate::ui::chrome::frame), and both because a paused
+    /// panel is *not advancing* exactly as a stale one is not:
+    ///
+    /// 1. It cools the frame the way staleness does.
+    /// 2. It **suppresses `[STALE]`**. A paused panel is not stale, it is held —
+    ///    and printing both would be two answers to one question. The plate says
+    ///    which of the two it is; the border only says that it is one of them.
+    Paused,
+    /// `[×N]` — frames averaged into each history row. Absent at 1.
+    Stride(usize),
+    /// `[↑N]` — how far back through the history the view is scrolled. Absent at 0.
+    Scroll(usize),
 }
 
 /// The *shape* of a panel's frame. Its colour is [`FrameTone`]; the two are
@@ -79,10 +97,18 @@ pub enum FrameStyle {
     Borderless,
     /// The panel draws its own frame and receives the outer `Rect` untouched.
     ///
-    /// Not an unconverted leftover: it is for the two panels whose border is
-    /// part of the instrument rather than a container for it. Bonded, the
-    /// spectrum drops its bottom edge and the waterfall's top border *becomes*
-    /// the shared frequency ruler, which is content no generic frame can draw.
+    /// No registered panel declares this any more: since R4h every one of them
+    /// says what it is and the engine frames it. It survives as the trait
+    /// default, so a panel that forgets `chrome()` renders instead of crashing —
+    /// and `check-docs.py` names it the next time the lint runs.
+    ///
+    /// The spectrum and the waterfall still have a self-drawn path, but the
+    /// layout engine calls it directly rather than through the registry, and only
+    /// when the two are **bonded**: there the spectrum drops its bottom edge and
+    /// the waterfall's top border *becomes* the shared frequency ruler, which is
+    /// content no generic frame can draw. Even then the plate and the border
+    /// colour come from the panel's own [`PanelChrome`]; only the border *set* is
+    /// its own.
     SelfFramed,
 }
 
@@ -94,6 +120,10 @@ pub enum FrameStyle {
 pub enum FrameTone {
     /// The ordinary instrument border.
     Default,
+    /// Lit: the primary instruments, which lead the eye on every preset. The
+    /// spectrum and the waterfall, and nothing else — an accent every panel wore
+    /// would be no accent at all.
+    Accent,
     /// Receded: supporting chrome that should not compete with the instruments.
     Dim,
     /// Lit as though focused, for a panel that is carrying the user's attention
@@ -109,6 +139,7 @@ impl FrameTone {
     pub fn color(self, theme: &crate::Theme) -> ratatui::style::Color {
         match self {
             FrameTone::Default  => theme.border_default,
+            FrameTone::Accent   => theme.border_accent,
             FrameTone::Dim      => theme.border_dim,
             FrameTone::Focused  => theme.border_focused,
             FrameTone::Warn     => theme.status_warn,
@@ -214,10 +245,9 @@ pub trait Panel: Send + Sync {
 
     /// Draw the panel's contents into `area`.
     ///
-    /// For a panel that declares a frame, `area` is the **inner** rect the
-    /// engine has already carved out, guaranteed non-empty. For one still on
-    /// [`FrameStyle::SelfFramed`], it is the outer rect and the panel frames
-    /// itself.
+    /// `area` is the **inner** rect the engine has already carved out, guaranteed
+    /// non-empty. Only a panel that fell back to the default
+    /// [`FrameStyle::SelfFramed`] gets the outer rect instead, and none should.
     fn render(&self, f: &mut Frame, area: Rect, state: &SdrMetrics, theme: &crate::Theme, focused: bool);
 
     /// How the engine should frame this panel: name, focus-key highlight,
