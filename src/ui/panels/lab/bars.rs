@@ -20,7 +20,7 @@ use ratatui::{
 
 use crate::state::{SdrMetrics, SpectrumMarker};
 use crate::ui::rf_calc::{cascade, estimate_mds_dbm, staging_verdict, system_nf_db};
-use super::panel::Panel;
+use crate::ui::panel::Panel;
 
 /// Map an active preset name to its lab banner label and the number key that
 /// selects it (the *current* key map, which we keep — see the implementation
@@ -124,7 +124,7 @@ fn timing_banner_fields(t: &crate::state::TimingState) -> Vec<(&'static str, Str
     let callback = if t.cb_period_us == 0 {
         "\u{2014}".to_string()
     } else {
-        crate::ui::timing_fmt::fmt_us(t.cb_period_us)
+        crate::ui::widgets::timing_fmt::fmt_us(t.cb_period_us)
     };
     let deadline = if t.late_callbacks == 0 {
         "\u{2713} met".to_string()
@@ -151,7 +151,7 @@ fn timing_banner_fields(t: &crate::state::TimingState) -> Vec<(&'static str, Str
 /// `‖ FRZ` lamp at the far right was the only hint, and it is nowhere near the
 /// numbers it applies to.
 fn signal_banner_fields(state: &SdrMetrics) -> Vec<(&'static str, String)> {
-    signal_fields(&state.signal, crate::ui::micro_common::fft_stale(state))
+    signal_fields(&state.signal, crate::ui::widgets::micro_common::fft_stale(state))
 }
 
 /// The banner fields as a pure function of what was measured and whether it is
@@ -171,7 +171,7 @@ fn signal_fields(sig: &crate::state::SignalState, stale: bool) -> Vec<(&'static 
             dash()
         }),
         ("OBW", if sig.occupied_bw_hz > 0 {
-            crate::ui::micro_common::fmt_bw(sig.occupied_bw_hz)
+            crate::ui::widgets::micro_common::fmt_bw(sig.occupied_bw_hz)
         } else {
             dash()
         }),
@@ -323,7 +323,7 @@ fn iq_marker_lines(state: &SdrMetrics, theme: &crate::Theme, iw: usize) -> Vec<L
     // image *levels it actually measured*, so the bar reads the exact same numbers
     // as the scope (no second frequency→bin round-trip to drift on).
     let pin = state.lab.iq_marker_pin;
-    let ci  = super::image_scope::carrier_image(state);
+    let ci  = crate::ui::panels::lab::image_scope::carrier_image(state);
 
     let slot = |n: usize, name: &str, color: ratatui::style::Color, data: Option<(u64, f32)>| -> Vec<Span<'static>> {
         let mut v = vec![
@@ -476,7 +476,7 @@ fn timing_marker_lines(state: &SdrMetrics, theme: &crate::Theme, iw: usize) -> V
 
     try_add(vec![
         Span::raw("   "), Span::styled("DRIFT ", dim),
-        crate::ui::timing_fmt::ppm_span(t.cb_period_delta_ppm, theme),
+        crate::ui::widgets::timing_fmt::ppm_span(t.cb_period_delta_ppm, theme),
     ], &mut used, &mut spans);
 
     let late_col = if t.late_callbacks == 0 { theme.status_ok }
@@ -490,7 +490,7 @@ fn timing_marker_lines(state: &SdrMetrics, theme: &crate::Theme, iw: usize) -> V
     try_add(vec![
         Span::raw("   "), Span::styled("BUF ", dim),
         Span::styled(format!("{:.0}%", state.iq.buf_fill_pct),
-            Style::default().fg(crate::ui::micro_common::buf_color(state.iq.buf_fill_pct, theme))),
+            Style::default().fg(crate::ui::widgets::micro_common::buf_color(state.iq.buf_fill_pct, theme))),
     ], &mut used, &mut spans);
 
     let q = t.timing_quality;
@@ -498,7 +498,7 @@ fn timing_marker_lines(state: &SdrMetrics, theme: &crate::Theme, iw: usize) -> V
     try_add(vec![
         Span::raw("   "), Span::styled("QUALITY ", dim),
         Span::styled(format!("{mark} {}", titlecase(q.label())),
-            Style::default().fg(crate::ui::timing_fmt::quality_color(q, theme)).add_modifier(Modifier::BOLD)),
+            Style::default().fg(crate::ui::widgets::timing_fmt::quality_color(q, theme)).add_modifier(Modifier::BOLD)),
     ], &mut used, &mut spans);
 
     append_focus_hints(state, theme, iw, used, &mut spans);
@@ -550,10 +550,10 @@ fn signal_marker_lines(state: &SdrMetrics, theme: &crate::Theme, iw: usize) -> V
     // Same rule as the banner: an aged FFT frame has no occupancy and no verdict to
     // offer. A `QUALITY ✓ Clean` computed from frozen numbers is the worst of the
     // two, because it is a judgement rather than a reading.
-    let stale = crate::ui::micro_common::fft_stale(state);
+    let stale = crate::ui::widgets::micro_common::fft_stale(state);
 
     let obw_str = if !stale && sig.occupied_bw_hz > 0 {
-        crate::ui::micro_common::fmt_bw(sig.occupied_bw_hz)
+        crate::ui::widgets::micro_common::fmt_bw(sig.occupied_bw_hz)
     } else {
         "\u{2014}".to_string()
     };
@@ -565,12 +565,12 @@ fn signal_marker_lines(state: &SdrMetrics, theme: &crate::Theme, iw: usize) -> V
     let quality = if stale {
         vec![Span::styled("\u{2014}".to_string(), Style::default().fg(theme.stale))]
     } else {
-        let (level, ..) = crate::ui::signal_characterization::verdict(
+        let (level, ..) = crate::ui::panels::lab::signal_characterization::verdict(
             sig.modulation, sig.peak_to_nf_db, sig.acpr_lower_db, sig.acpr_upper_db, sig.occupied_bw_hz);
         let (mark, col) = match level {
-            crate::ui::signal_characterization::VerdictLevel::Clean    => ("\u{2713}", theme.status_ok),
-            crate::ui::signal_characterization::VerdictLevel::Caution  => ("\u{26a0}", theme.status_warn),
-            crate::ui::signal_characterization::VerdictLevel::NoSignal => ("\u{25cb}", theme.stale),
+            crate::ui::panels::lab::signal_characterization::VerdictLevel::Clean    => ("\u{2713}", theme.status_ok),
+            crate::ui::panels::lab::signal_characterization::VerdictLevel::Caution  => ("\u{26a0}", theme.status_warn),
+            crate::ui::panels::lab::signal_characterization::VerdictLevel::NoSignal => ("\u{25cb}", theme.stale),
         };
         vec![Span::styled(format!("{mark} {}", level.short_label()),
                           Style::default().fg(col).add_modifier(Modifier::BOLD))]

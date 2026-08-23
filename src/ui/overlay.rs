@@ -80,7 +80,7 @@ pub fn render_log(f: &mut Frame, m: &SdrMetrics, theme: &crate::Theme) {
     let h = ((full.height as u32 * 7 / 10) as u16).max(7).min(full.height);
     let area = centered_rect(w, h, full);
     f.render_widget(Clear, area);
-    crate::ui::log::render(f, area, m, theme);
+    crate::ui::panels::core::log::render(f, area, m, theme);
 }
 
 fn centered_rect(width: u16, height: u16, r: Rect) -> Rect {

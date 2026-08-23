@@ -15,8 +15,8 @@ use ratatui::{
 };
 
 use crate::state::SdrMetrics;
-use crate::ui::charts::gain_bar_colored;
-use crate::ui::micro_common::spark_minmax;
+use crate::ui::widgets::charts::gain_bar_colored;
+use crate::ui::widgets::micro_common::spark_minmax;
 use crate::ui::panel::Panel;
 use crate::ui::rf_calc::{
     cascade, estimate_mds_dbm, level_lineup, staging_target, staging_verdict, system_nf_db, Stage,

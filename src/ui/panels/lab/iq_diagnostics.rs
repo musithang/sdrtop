@@ -8,7 +8,7 @@ use ratatui::{
 
 use crate::signal::image_rejection_db;
 use crate::state::SdrMetrics;
-use crate::ui::charts::{gain_bar_colored, null_meter};
+use crate::ui::widgets::charts::{gain_bar_colored, null_meter};
 use crate::ui::panel::Panel;
 
 pub struct IqDiagnosticsPanel;
@@ -61,7 +61,7 @@ fn spike_color(spike_dbfs: f64, theme: &crate::Theme) -> Color {
     else                       { theme.status_crit }
 }
 
-use crate::ui::micro_common::spark_minmax;
+use crate::ui::widgets::micro_common::spark_minmax;
 
 /// DC spike level in dBFS: how tall the centre-frequency spike is in the spectrum.
 ///   DC spike = 20·log₁₀(dc_magnitude)

@@ -17,8 +17,8 @@ use ratatui::{
 };
 
 use crate::state::SdrMetrics;
-use crate::ui::charts::gain_bar_colored;
-use crate::ui::micro_common::{buf_color, drop_color, sat_color, sparkline};
+use crate::ui::widgets::charts::gain_bar_colored;
+use crate::ui::widgets::micro_common::{buf_color, drop_color, sat_color, sparkline};
 use crate::ui::panel::Panel;
 
 pub struct TimingVitalsPanel;

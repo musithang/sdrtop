@@ -17,7 +17,7 @@ use ratatui::{
 
 use crate::palette::{magnitude_to_color_themed, ColorDepth};
 use crate::state::SdrMetrics;
-use crate::ui::band_plan::{band_at, BAND_PLAN};
+use crate::ui::widgets::band_plan::{band_at, BAND_PLAN};
 use crate::ui::panel::Panel;
 
 pub struct SweepPanel;

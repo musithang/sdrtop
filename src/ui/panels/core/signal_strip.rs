@@ -8,7 +8,7 @@ use ratatui::{
 
 use crate::state::SdrMetrics;
 use crate::ui::chrome;
-use super::panel::Panel;
+use crate::ui::panel::Panel;
 
 pub struct SignalStripPanel;
 

@@ -25,13 +25,15 @@ use ratatui::{
 use std::collections::VecDeque;
 
 use crate::state::{active_recall_slot, RailMode, SdrMetrics, RECALL_SLOTS};
-use super::charts::{ema_smooth, gain_bar_colored, mini_braille_line};
-use super::header::{active_digit_idx, gain_bar, vfo_spans, vfo_string};
-use super::micro_common::{fft_stale, fmt_rbw, snr_color};
-use super::panel::Panel;
-use super::spectrum::detect_peaks;
-use super::{bigdigits, chrome, log};
-use crate::ui::band_plan::band_at;
+use crate::ui::widgets::charts::{ema_smooth, gain_bar_colored, mini_braille_line};
+use crate::ui::panels::core::header::{active_digit_idx, gain_bar, vfo_spans, vfo_string};
+use crate::ui::widgets::micro_common::{fft_stale, fmt_rbw, snr_color};
+use crate::ui::panel::Panel;
+use crate::ui::panels::core::spectrum::detect_peaks;
+use crate::ui::chrome;
+use crate::ui::panels::core::log;
+use crate::ui::widgets::bigdigits;
+use crate::ui::widgets::band_plan::band_at;
 
 pub struct CommandRailPanel;
 

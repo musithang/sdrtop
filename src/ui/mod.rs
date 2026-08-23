@@ -1,75 +1,65 @@
-pub mod adc_loading;
-pub mod band_plan;
-pub mod bigdigits;
-pub mod charts;
+//! Terminal UI: the layout machinery, the shared chrome and widgets, and the
+//! panels themselves.
+//!
+//! The split is by role rather than by feature:
+//!
+//! - [`panel`], [`registry`], [`engine`]: the machinery. What a panel *is*, how
+//!   panels are looked up by name, and how a preset's list of names becomes
+//!   rectangles on screen.
+//! - [`chrome`]: the shared frame vocabulary. Deck blocks, nameplates, section
+//!   headings, fields, and the density helpers that let a line stack breathe or
+//!   compress to any terminal height.
+//! - [`widgets`]: drawing primitives with no opinion about layout.
+//! - [`panels`]: the panels, grouped `core` / `lab` / `micro`.
+//! - [`rf_calc`]: radio maths used by several panels, kept out of every one of
+//!   their `render` bodies.
+//! - [`overlay`], [`device_selector`]: full-screen UI that is not a panel.
+//!
+//! Panel structs are re-exported flat below, so `app::builder` registers them by
+//! name without caring where they live.
+
 pub mod chrome;
-pub mod command_rail;
 pub mod device_selector;
 pub mod engine;
-pub mod fm_demod;
-pub mod footer;
-pub mod header;
-pub mod image_scope;
-pub mod iq_constellation;
-pub mod level_diagram;
-pub mod iq_diagnostics;
-pub mod iq_histogram;
-pub mod lab_chrome;
-pub mod log;
-pub mod micro_common;
-pub mod micro_gain_panel;
-pub mod micro_health_panel;
-pub mod micro_panel;
-pub mod micro_signal_panel;
-pub mod micro_sweep_panel;
-pub mod observer;
 pub mod overlay;
 pub mod panel;
+pub mod panels;
 pub mod registry;
 pub mod rf_calc;
-pub mod rf_chain;
-pub mod signal_characterization;
-pub mod signal_metrics;
-pub mod signal_strip;
-pub mod spectrum;
-pub mod sweep_panel;
-pub mod sweep_strip;
-pub mod system_resources;
-pub mod timing_diagnostics;
-pub mod timing_fmt;
-pub mod timing_stripchart;
-pub mod timing_vitals;
-pub mod waterfall;
+pub mod widgets;
 
-pub use adc_loading::AdcLoadingPanel;
-pub use command_rail::CommandRailPanel;
 pub use engine::LayoutEngine;
-pub use fm_demod::FmDemodPanel;
-pub use footer::FooterPanel;
-pub use header::{HeaderPanel, SlimHeaderPanel};
-pub use image_scope::ImageScopePanel;
-pub use iq_constellation::IqConstellationPanel;
-pub use level_diagram::LevelDiagramPanel;
-pub use iq_diagnostics::IqDiagnosticsPanel;
-pub use iq_histogram::IqHistogramPanel;
-pub use lab_chrome::{LabBannerPanel, LabMarkerPanel};
-pub use log::LogPanel;
-pub use micro_gain_panel::MicroGainPanel;
-pub use micro_health_panel::MicroHealthPanel;
-pub use micro_panel::MicroPanel;
-pub use micro_signal_panel::MicroSignalPanel;
-pub use micro_sweep_panel::MicroSweepPanel;
-pub use observer::ObserverPanel;
 pub use registry::PanelRegistry;
-pub use rf_chain::RfChainPanel;
-pub use signal_characterization::SignalCharacterizationPanel;
-pub use signal_metrics::SignalMetricsPanel;
-pub use signal_strip::SignalStripPanel;
-pub use spectrum::SpectrumPanel;
-pub use sweep_panel::SweepPanel;
-pub use sweep_strip::SweepStripPanel;
-pub use system_resources::SystemResourcesPanel;
-pub use waterfall::WaterfallPanel;
-pub use timing_diagnostics::TimingDiagnosticsPanel;
-pub use timing_stripchart::TimingStripchartPanel;
-pub use timing_vitals::TimingVitalsPanel;
+
+pub use panels::core::command_rail::CommandRailPanel;
+pub use panels::core::footer::FooterPanel;
+pub use panels::core::header::{HeaderPanel, SlimHeaderPanel};
+pub use panels::core::log::LogPanel;
+pub use panels::core::observer::ObserverPanel;
+pub use panels::core::signal_strip::SignalStripPanel;
+pub use panels::core::spectrum::SpectrumPanel;
+pub use panels::core::system_resources::SystemResourcesPanel;
+pub use panels::core::waterfall::WaterfallPanel;
+
+pub use panels::lab::adc_loading::AdcLoadingPanel;
+pub use panels::lab::bars::{LabBannerPanel, LabMarkerPanel};
+pub use panels::lab::fm_demod::FmDemodPanel;
+pub use panels::lab::image_scope::ImageScopePanel;
+pub use panels::lab::iq_constellation::IqConstellationPanel;
+pub use panels::lab::iq_diagnostics::IqDiagnosticsPanel;
+pub use panels::lab::iq_histogram::IqHistogramPanel;
+pub use panels::lab::level_diagram::LevelDiagramPanel;
+pub use panels::lab::rf_chain::RfChainPanel;
+pub use panels::lab::signal_characterization::SignalCharacterizationPanel;
+pub use panels::lab::signal_metrics::SignalMetricsPanel;
+pub use panels::lab::sweep_panel::SweepPanel;
+pub use panels::lab::sweep_strip::SweepStripPanel;
+pub use panels::lab::timing_diagnostics::TimingDiagnosticsPanel;
+pub use panels::lab::timing_stripchart::TimingStripchartPanel;
+pub use panels::lab::timing_vitals::TimingVitalsPanel;
+
+pub use panels::micro::entry::MicroPanel;
+pub use panels::micro::gain::MicroGainPanel;
+pub use panels::micro::health::MicroHealthPanel;
+pub use panels::micro::signal::MicroSignalPanel;
+pub use panels::micro::sweep::MicroSweepPanel;

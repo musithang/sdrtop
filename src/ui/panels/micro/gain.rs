@@ -13,10 +13,10 @@ use ratatui::{
 };
 
 use crate::state::SdrMetrics;
-use super::charts::draw_hbar;
-use super::micro_common::{fmt_freq_mhz, sat_color, status_badge};
-use super::panel::Panel;
-use super::rf_calc::{adc_utilisation_ratio, estimate_mds_dbm, estimate_nf_db, gain_advice};
+use crate::ui::widgets::charts::draw_hbar;
+use crate::ui::widgets::micro_common::{fmt_freq_mhz, sat_color, status_badge};
+use crate::ui::panel::Panel;
+use crate::ui::rf_calc::{adc_utilisation_ratio, estimate_mds_dbm, estimate_nf_db, gain_advice};
 
 pub struct MicroGainPanel;
 

@@ -13,8 +13,8 @@ use ratatui::{
 };
 
 use crate::state::SdrMetrics;
-use super::micro_common::{buf_color, drop_color, fmt_freq_mhz, sat_color, sparkline, status_badge};
-use super::panel::Panel;
+use crate::ui::widgets::micro_common::{buf_color, drop_color, fmt_freq_mhz, sat_color, sparkline, status_badge};
+use crate::ui::panel::Panel;
 
 pub struct MicroHealthPanel;
 

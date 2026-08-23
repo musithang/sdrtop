@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 use ratatui::{layout::Rect, Frame};
 use crate::state::SdrMetrics;
-use super::panel::Panel;
+use crate::ui::panel::Panel;
 
 pub struct PanelRegistry {
     panels: HashMap<&'static str, Box<dyn Panel>>,

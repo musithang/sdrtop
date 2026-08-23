@@ -7,9 +7,10 @@ use ratatui::{
 
 use crate::config::{LayoutConfig, Position};
 use crate::state::SdrMetrics;
-use super::panel::Bond;
-use super::registry::PanelRegistry;
-use super::{chrome, spectrum, waterfall};
+use crate::ui::panel::Bond;
+use crate::ui::registry::PanelRegistry;
+use crate::ui::chrome;
+use crate::ui::panels::core::{spectrum, waterfall};
 
 pub struct LayoutEngine {
     pub config: LayoutConfig,
@@ -102,7 +103,7 @@ impl LayoutEngine {
             s.height.unwrap_or_else(|| {
                 // Call footer height directly to avoid dyn-dispatch ambiguity
                 if s.name == "footer" {
-                    return super::footer::compute_footer_height(size.width, state);
+                    return crate::ui::panels::core::footer::compute_footer_height(size.width, state);
                 }
                 self.registry.get(&s.name)
                     .map(|p| p.preferred_height(size.width, state))

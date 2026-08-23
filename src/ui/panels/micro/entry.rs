@@ -15,9 +15,9 @@ use ratatui::{
 };
 
 use crate::state::SdrMetrics;
-use super::charts::draw_hbar;
-use super::micro_common::{buf_color, drop_color, fmt_rbw, sat_color, snr_color};
-use super::panel::Panel;
+use crate::ui::widgets::charts::draw_hbar;
+use crate::ui::widgets::micro_common::{buf_color, drop_color, fmt_rbw, sat_color, snr_color};
+use crate::ui::panel::Panel;
 
 /// Width threshold (inner columns) for each adaptive mode.
 const COMPACT_MIN: u16 = 60;

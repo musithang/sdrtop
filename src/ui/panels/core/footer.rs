@@ -9,7 +9,7 @@ use ratatui::{
 use crate::hardware::GainModel;
 use crate::state::{InputMode, MicroView, SdrMetrics};
 use crate::ui::chrome;
-use super::panel::Panel;
+use crate::ui::panel::Panel;
 
 const FOCUS_SEP:  &str = "  ·  ";
 const NORMAL_SEP: &str = " · ";

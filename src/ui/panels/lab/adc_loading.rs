@@ -16,7 +16,7 @@ use ratatui::{
 };
 
 use crate::state::SdrMetrics;
-use crate::ui::charts::gain_bar_colored;
+use crate::ui::widgets::charts::gain_bar_colored;
 use crate::ui::panel::Panel;
 use crate::ui::rf_calc::{adc_loading, linearity, staging_verdict, OPT_PEAK_DBFS};
 

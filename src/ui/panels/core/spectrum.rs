@@ -13,7 +13,7 @@ use ratatui::{
 
 use crate::palette::{magnitude_to_color_themed, ColorDepth};
 use crate::state::{SdrMetrics, SpectrumStyle};
-use crate::ui::band_plan::BAND_PLAN;
+use crate::ui::widgets::band_plan::BAND_PLAN;
 use crate::ui::chrome;
 use crate::ui::panel::{Bond, Panel};
 

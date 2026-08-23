@@ -72,7 +72,7 @@ pub fn render(f: &mut Frame, area: Rect, m: &SdrMetrics, theme: &crate::Theme) {
     chrome::corner_accents(f, area, theme.border_dim);
 }
 
-use super::panel::Panel;
+use crate::ui::panel::Panel;
 
 pub struct LogPanel;
 

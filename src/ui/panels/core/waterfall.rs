@@ -8,10 +8,10 @@ use ratatui::{
 
 use crate::palette::{magnitude_to_color_palette, ColorDepth};
 use crate::state::SdrMetrics;
-use crate::ui::band_plan::BAND_PLAN;
+use crate::ui::widgets::band_plan::BAND_PLAN;
 use crate::ui::chrome;
 use crate::ui::panel::{Bond, Panel};
-use crate::ui::spectrum::{fmt_spectrum_step, freq_scale_spans};
+use crate::ui::panels::core::spectrum::{fmt_spectrum_step, freq_scale_spans};
 
 // ── Waterfall row-stride steps ────────────────────────────────────────────────
 

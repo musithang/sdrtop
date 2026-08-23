@@ -7,7 +7,7 @@ use ratatui::{
 };
 
 use crate::state::SdrMetrics;
-use super::panel::Panel;
+use crate::ui::panel::Panel;
 
 pub struct ObserverPanel;
 

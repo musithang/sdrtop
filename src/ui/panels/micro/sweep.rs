@@ -14,9 +14,9 @@ use ratatui::{
 };
 
 use crate::state::SdrMetrics;
-use crate::ui::band_plan::band_at;
-use super::micro_common::bar_spans;
-use super::panel::Panel;
+use crate::ui::widgets::band_plan::band_at;
+use crate::ui::widgets::micro_common::bar_spans;
+use crate::ui::panel::Panel;
 
 pub struct MicroSweepPanel;
 

@@ -5,9 +5,9 @@ use crossterm::event::{KeyCode, KeyEvent};
 
 use crate::hardware;
 use crate::state::{InputMode, MicroView, RailMode, SdrMetrics, SpectrumMarker};
-use crate::ui::micro_common::fmt_bw;
-use crate::ui::{self, spectrum::{fmt_spectrum_step, next_spectrum_step, prev_spectrum_step}};
-use crate::ui::waterfall::{next_wf_stride, prev_wf_stride, next_wf_zoom, prev_wf_zoom};
+use crate::ui::widgets::micro_common::fmt_bw;
+use crate::ui::{self, panels::core::spectrum::{fmt_spectrum_step, next_spectrum_step, prev_spectrum_step}};
+use crate::ui::panels::core::waterfall::{next_wf_stride, prev_wf_stride, next_wf_zoom, prev_wf_zoom};
 
 pub enum KeyAction {
     Continue,
@@ -471,7 +471,7 @@ fn handle_iq_focus(
         // [M] — pin / unpin the carrier+image markers (override the live auto-track).
         KeyCode::Char('m') => {
             let mut m = state.lock().unwrap_or_else(|e| e.into_inner());
-            let auto = ui::image_scope::carrier_image(&m);
+            let auto = ui::panels::lab::image_scope::carrier_image(&m);
             if m.lab.iq_marker_pin.is_some() {
                 m.lab.iq_marker_pin = None;
                 m.push_log("IQ markers: auto-tracking carrier/image".to_string());

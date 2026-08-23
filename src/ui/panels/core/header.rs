@@ -7,10 +7,10 @@ use ratatui::{
 };
 
 use crate::state::SdrMetrics;
-use crate::ui::band_plan::band_at;
-use crate::ui::charts::gain_bar_colored;
+use crate::ui::widgets::band_plan::band_at;
+use crate::ui::widgets::charts::gain_bar_colored;
 use crate::ui::chrome;
-use super::panel::Panel;
+use crate::ui::panel::Panel;
 
 pub struct HeaderPanel;
 
@@ -41,7 +41,7 @@ fn leader(gap: usize, color: ratatui::style::Color) -> Span<'static> {
 /// Uses continuous ⅛-block glyphs for smooth sub-cell resolution.
 /// Shared with the command rail so the gain bars read identically there.
 pub(crate) fn gain_bar(gain: u32, max_gain: u32, n: usize) -> (String, String) {
-    crate::ui::charts::eighth_block_bar(gain, max_gain, n)
+    crate::ui::widgets::charts::eighth_block_bar(gain, max_gain, n)
 }
 
 /// Power-of-ten exponent (in Hz) of the digit the current tuning step acts on:

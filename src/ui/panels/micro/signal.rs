@@ -13,8 +13,8 @@ use ratatui::{
 };
 
 use crate::state::SdrMetrics;
-use super::micro_common::{bar_spans, fft_stale, fmt_bw, fmt_rbw, snr_color, status_badge};
-use super::panel::Panel;
+use crate::ui::widgets::micro_common::{bar_spans, fft_stale, fmt_bw, fmt_rbw, snr_color, status_badge};
+use crate::ui::panel::Panel;
 
 pub struct MicroSignalPanel;
 
@@ -44,7 +44,7 @@ impl Panel for MicroSignalPanel {
         let header = Line::from(vec![
             Span::raw(" "), dot, word,
             Span::raw("   "),
-            Span::styled(super::micro_common::fmt_freq_mhz(state.radio.frequency),
+            Span::styled(crate::ui::widgets::micro_common::fmt_freq_mhz(state.radio.frequency),
                 Style::default().fg(theme.value_hi).add_modifier(Modifier::BOLD)),
         ]);
 

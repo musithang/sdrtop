@@ -80,7 +80,7 @@ impl Panel for SignalMetricsPanel {
             Line::from(vec![
                 Span::styled(format!("{:<15}", "Occupied BW"), lbl),
                 Span::styled(
-                    if state.signal.occupied_bw_hz > 0 { crate::ui::micro_common::fmt_bw(state.signal.occupied_bw_hz) } else { "---".into() },
+                    if state.signal.occupied_bw_hz > 0 { crate::ui::widgets::micro_common::fmt_bw(state.signal.occupied_bw_hz) } else { "---".into() },
                     val,
                 ),
             ]),

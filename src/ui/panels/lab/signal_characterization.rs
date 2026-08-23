@@ -29,7 +29,7 @@ use ratatui::{
 
 use crate::state::{FftFrame, Modulation, SdrMetrics};
 use crate::ui::chrome::{field, section};
-use crate::ui::micro_common::fmt_bw;
+use crate::ui::widgets::micro_common::fmt_bw;
 use crate::ui::panel::Panel;
 
 pub struct SignalCharacterizationPanel;
@@ -119,7 +119,7 @@ fn acpr_bar(db: f32, bar_w: usize, theme: &crate::Theme) -> Vec<Span<'static>> {
     let clamped = db.clamp(ACPR_BAR_FLOOR_DB, 0.0);
     let badness = ((clamped - ACPR_BAR_FLOOR_DB) * 10.0).round() as u32;
     let max_badness = ((0.0 - ACPR_BAR_FLOOR_DB) * 10.0).round() as u32;
-    crate::ui::charts::gain_bar_colored(badness, max_badness, bar_w, theme.status_ok, theme.status_crit, theme.border_dim)
+    crate::ui::widgets::charts::gain_bar_colored(badness, max_badness, bar_w, theme.status_ok, theme.status_crit, theme.border_dim)
 }
 
 /// SNR floor below which the panel won't even hazard a modulation guess (mirrors
@@ -418,7 +418,7 @@ impl Panel for SignalCharacterizationPanel {
             const TREND_ANN_W: usize = 10; // budget for "±NN.N dB"
             let snr_hist: Vec<f32> = sig.snr_history.iter().copied().collect();
             let spark_w = iw.saturating_sub(1 + LABEL.chars().count() + 1 + TREND_ANN_W).max(1);
-            let (spark, p2p) = crate::ui::micro_common::spark_minmax(&snr_hist, spark_w);
+            let (spark, p2p) = crate::ui::widgets::micro_common::spark_minmax(&snr_hist, spark_w);
             if !spark.is_empty() {
                 let ann = format!("\u{00b1}{:.1} dB", p2p / 2.0);
                 let used = 1 + LABEL.chars().count() + 1 + spark.chars().count() + 1 + ann.chars().count();

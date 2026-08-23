@@ -32,7 +32,7 @@ use crate::state::{
     PTY_NAMES, RDS_AGED_AFTER, RDS_DROPPED_AFTER,
 };
 use crate::ui::chrome;
-use crate::ui::micro_common::bar_spans;
+use crate::ui::widgets::micro_common::bar_spans;
 use crate::ui::panel::Panel;
 
 pub struct FmDemodPanel;
@@ -502,7 +502,7 @@ fn build_stack(
                     // The trace is one block at whatever height it was given, so the
                     // rows go on together: the caller sizes it, the shedding pass
                     // must not take a slice out of the middle of a picture.
-                    for row in crate::ui::charts::braille_profile(&profile, w, trace_rows) {
+                    for row in crate::ui::widgets::charts::braille_profile(&profile, w, trace_rows) {
                         stack.push(Line::from(vec![
                             Span::raw(" "),
                             Span::styled(row, Style::default().fg(theme.border_accent)),

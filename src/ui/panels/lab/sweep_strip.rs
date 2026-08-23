@@ -11,7 +11,7 @@ use ratatui::{
 };
 
 use crate::state::SdrMetrics;
-use crate::ui::band_plan::band_at;
+use crate::ui::widgets::band_plan::band_at;
 use crate::ui::panel::Panel;
 
 pub struct SweepStripPanel;
