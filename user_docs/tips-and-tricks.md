@@ -63,15 +63,13 @@ it's the most useful thing in sdrtop that nothing on screen advertises.
 1. Open any lab preset and focus the banner with `b`.
 2. Press `]` a few times to raise **trace averaging**, up to 16.
 
-Watch the noise floor flatten while the signal stays put. That's not cosmetic:
-noise is random, so successive FFT frames disagree about it and averaging drags it
-toward its mean, while a real carrier sits in the same bin at the same level every
-frame and doesn't move. Something that was indistinguishable from the grass at
-averaging 1 can be obvious at 16.
+Watch the noise floor flatten while the signal stays put. Something that was
+indistinguishable from the grass at averaging 1 can be obvious at 16. Why that
+works, and what it costs you in reaction time, is explained on the page linked
+above.
 
-The cost is reaction time. At 16 the display is calm and about a second behind
-reality, which is right for measuring a steady carrier and wrong for catching a
-burst. Drop back to 1 when you need to see something happen.
+Then drop back to 1 when you need to watch something happen rather than measure
+it.
 
 ### Before and after, without relying on memory
 

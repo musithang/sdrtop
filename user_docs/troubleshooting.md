@@ -13,9 +13,11 @@ error that arrives mid-session. Everything of that kind goes to:
 ~/.config/sdrtop/sdrtop.log
 ```
 
-Config parse warnings, backend library complaints, driver messages. If sdrtop did
-something strange and told you nothing, read that file first. It's also the single
-most useful thing to attach to a bug report.
+Config parse warnings, driver messages, and whatever the backend libraries feel
+like saying (librtlsdr in particular is talkative: "Allocating zero-copy buffers",
+"Found … tuner", "[R82XX] PLL not locked!"). If sdrtop did something strange and
+told you nothing, read that file first. It's also the single most useful thing to
+attach to a bug report.
 
 The in-app log is a different thing: that's sdrtop talking to you about retunes,
 gain changes and warnings, shown in the `log` panel and in the Command Rail's `L`

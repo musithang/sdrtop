@@ -45,24 +45,17 @@ settings.
 ## The session log
 
 sdrtop takes over the terminal completely, which means there's nowhere on screen
-for an error message that arrives while the alternate screen is up. So for the
-whole session it redirects its own error output to:
+for an error that arrives while the alternate screen is up. So for the whole
+session it redirects its own error output to `~/.config/sdrtop/sdrtop.log`, and
+restores the real stderr on the way out. Anything that would otherwise have
+scribbled over your spectrum ends up there.
 
-```
-~/.config/sdrtop/sdrtop.log
-```
+What's in it and when to read it:
+[Troubleshooting](troubleshooting.md#start-here-the-log-file).
 
-This is where a config parse warning goes, where a backend library's chatter goes
-(librtlsdr in particular is talkative: "Allocating zero-copy buffers", "Found …
-tuner", "[R82XX] PLL not locked!"), and where anything that would otherwise have
-scribbled over your spectrum ends up.
-
-If sdrtop behaved oddly and told you nothing, read that file. It's also the single
-most useful thing to attach to a bug report.
-
-The in-app log is a different thing: that's sdrtop talking to *you* (retunes, gain
-changes, snapshots, warnings), shown in the `log` panel and in the Command Rail's
-`L` overlay.
+The in-app log is a different thing: that's sdrtop talking to *you* about retunes,
+gain changes, snapshots and warnings, shown in the `log` panel and in the Command
+Rail's `L` overlay.
 
 ---
 

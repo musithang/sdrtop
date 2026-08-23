@@ -174,28 +174,22 @@ just reporting it.
 The strip across the top of every lab preset is not decoration, it's a control
 panel, and it brings the three habits of a bench spectrum analyser:
 
-- **Reference level** (`↑` / `↓`) draws a horizontal line across the spectrum at
-  the level you pick, so "above the line" and "below the line" become something
-  you see instead of something you work out. It starts at −10 dBFS, moves 1 dB per
-  press, runs from 0 down to −120, and `R` clears it.
-- **Trace averaging** (`[` / `]`) smooths the spectrum over successive FFT frames,
-  from 1 (no smoothing at all) up to 16. Noise is random and averages down; a real
-  signal is not and stays put. This is how you pull something out of the floor
-  that a single frame won't show, at the cost of reacting more slowly to change.
-  The default is 5.
-- **Reference trace** (`C`) captures the current spectrum and keeps it on screen
-  as a ghost behind the live one. Press `C` again to clear it. Capture before you
-  change something (an antenna, a filter, a gain setting), then watch the live
-  trace move against the frozen one.
+| Key | Control | Range |
+|-----|---------|-------|
+| `↑` / `↓` | **Reference level**: a horizontal line across the spectrum at the level you pick | 0 to −120 dBFS, 1 dB per press, starts at −10 |
+| `R` | Clear the reference level | |
+| `[` / `]` | **Trace averaging**: smooths the spectrum across successive FFT frames | 1 (no smoothing) to 16, default 5 |
+| `C` | **Reference trace**: capture the current spectrum as a ghost behind the live one, or clear it | |
 
-Averaging and a reference trace together are the closest sdrtop gets to a
-before/after measurement, and they cost nothing but patience.
+What each one is *for*, and why averaging finds signals a single frame buries, is
+in [The Lab presets](lab.md#the-measurement-banner).
 
 One wrinkle if you build [your own layout](config.md#custom-layout-presets): the
 reference line and the ghost trace are drawn only in **instrument mode**, which
 sdrtop turns on for presets whose name begins with `lab_`. The banner and its keys
 work anywhere you place it, and averaging affects the spectrum everywhere, but if
-you want the two overlays to appear, name your preset `lab_something`.
+you want the two overlays to appear, give your preset a name beginning with
+`lab_`.
 
 ### IQ Diagnostics (`i`): it corrects, not just measures
 

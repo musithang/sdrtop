@@ -278,10 +278,10 @@ bench around it.
 `main` is a sixth general preset with no key of its own: spectrum, waterfall,
 signal strip and log under a full header. `p` reaches it.
 
-Presets whose name starts with `lab_` render in **instrument mode**, with the
-frame colours cooled toward steel blue, and they're the only ones that draw the
-reference level and reference trace overlays. That's the one place a preset's
-*name* changes how it behaves, which matters if you write your own.
+A preset's *name* matters in one place: anything starting with `lab_` renders in
+**instrument mode**. If you're writing your own layout, that and the other two
+arrangements with behaviour attached are covered in
+[Configuration](config.md#custom-layout-presets).
 
 ---
 

@@ -190,10 +190,10 @@ Two arrangements have behaviour attached:
   the preset name, so your own layout gets a working demod bench, and leaving it
   out costs nothing on every other layout.
 
-And one thing is attached to the **name**: a preset called `lab_something` renders
-in **instrument mode**, with the frame colours cooled toward steel blue, and it's
-the only kind of preset that draws the reference level and reference trace
-overlays. If you want those, name accordingly.
+And one thing is attached to the **name**: a preset whose name begins with `lab_`
+renders in **instrument mode**, with the frame colours cooled toward steel blue,
+and it's the only kind of preset that draws the reference level and reference
+trace overlays. If you want those, name accordingly.
 
 ### Panel names
 
