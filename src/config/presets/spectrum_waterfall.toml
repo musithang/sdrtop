@@ -1,0 +1,10 @@
+# The classic pair. A [spectrum, waterfall] Body pair triggers the engine's
+# bond automatically: the two render as one instrument sharing a frequency ruler.
+
+panels = [
+    { name = "header",     position = "top", height = 5 },
+    { name = "spectrum",   position = "body" },
+    { name = "waterfall",  position = "body" },
+    { name = "log",        position = "bottom", height = 5 },
+    { name = "footer",     position = "bottom" },
+]

@@ -1,0 +1,6 @@
+# Micro health — [0] cycle step 4: hardware monitoring for long sessions.
+
+panels = [
+    { name = "micro_health_panel",  position = "body" },
+    { name = "footer",              position = "bottom" },
+]

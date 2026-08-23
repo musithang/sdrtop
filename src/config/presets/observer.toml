@@ -1,0 +1,11 @@
+# Observer mode, used when the radio belongs to another process: sysfs-derived
+# device info beside the host's own resource usage. Selected automatically rather
+# than by a key.
+
+panels = [
+    { name = "header",            position = "top", height = 5 },
+    { name = "observer",          position = "left", width_pct = 60 },
+    { name = "system_resources",  position = "right", width_pct = 40 },
+    { name = "log",               position = "bottom", height = 5 },
+    { name = "footer",            position = "bottom" },
+]

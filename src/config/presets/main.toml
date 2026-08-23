@@ -1,0 +1,11 @@
+# The original default view: spectrum over waterfall with a signal gauge strip.
+
+panels = [
+    { name = "header",        position = "top", height = 5 },
+    { name = "spectrum",      position = "body" },
+    { name = "waterfall",     position = "body" },
+    # height 4 → 2 inner rows for the signal_strip's 2×4 gauge grid.
+    { name = "signal_strip",  position = "bottom", height = 4 },
+    { name = "log",           position = "bottom", height = 5 },
+    { name = "footer",        position = "bottom" },
+]

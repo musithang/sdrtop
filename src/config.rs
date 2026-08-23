@@ -230,6 +230,29 @@ pub struct PresetConfig {
     pub panels: Vec<PanelSpec>,
 }
 
+/// The sixteen built-in layouts, embedded at compile time.
+const BUILTIN_PRESETS: &[(&str, &str)] = &[
+    ("spectrum",           include_str!("config/presets/spectrum.toml")),
+    ("waterfall",          include_str!("config/presets/waterfall.toml")),
+    ("spectrum_waterfall", include_str!("config/presets/spectrum_waterfall.toml")),
+    ("observer",           include_str!("config/presets/observer.toml")),
+    ("main",               include_str!("config/presets/main.toml")),
+    ("command_rail",       include_str!("config/presets/command_rail.toml")),
+    ("lab_iq",             include_str!("config/presets/lab_iq.toml")),
+    ("lab_rf",             include_str!("config/presets/lab_rf.toml")),
+    ("lab_signal",         include_str!("config/presets/lab_signal.toml")),
+    ("lab_timing",         include_str!("config/presets/lab_timing.toml")),
+    ("lab_sweep",          include_str!("config/presets/lab_sweep.toml")),
+    ("micro_main",         include_str!("config/presets/micro_main.toml")),
+    ("micro_signal",       include_str!("config/presets/micro_signal.toml")),
+    ("micro_gain",         include_str!("config/presets/micro_gain.toml")),
+    ("micro_health",       include_str!("config/presets/micro_health.toml")),
+    ("micro_sweep",        include_str!("config/presets/micro_sweep.toml")),
+];
+
+/// The layout sdrtop opens on when the config does not say otherwise.
+pub const DEFAULT_PRESET: &str = "command_rail";
+
 #[derive(Deserialize, Clone, Debug)]
 pub struct LayoutConfig {
     pub active_preset: String,
@@ -237,209 +260,86 @@ pub struct LayoutConfig {
 }
 
 impl LayoutConfig {
+    /// The built-in presets, in the order `[P]` was designed to walk them.
+    ///
+    /// TOML rather than Rust for the same reason the themes are: a user writing a
+    /// layout can read one and copy it, because their own file has exactly this
+    /// shape. Adding a built-in is a file plus one line here.
     pub fn default_config() -> Self {
-        use Position::*;
-        let spectrum = PresetConfig {
-            panels: vec![
-                PanelSpec { name: "header".into(),   position: Top,    height: Some(5), width_pct: None },
-                PanelSpec { name: "spectrum".into(),  position: Body,   height: None,    width_pct: None },
-                PanelSpec { name: "log".into(),       position: Bottom, height: Some(5), width_pct: None },
-                PanelSpec { name: "footer".into(),    position: Bottom, height: None,    width_pct: None },
-            ],
-        };
-        let waterfall = PresetConfig {
-            panels: vec![
-                PanelSpec { name: "header".into(),   position: Top,    height: Some(5), width_pct: None },
-                PanelSpec { name: "waterfall".into(), position: Body,   height: None,    width_pct: None },
-                PanelSpec { name: "log".into(),       position: Bottom, height: Some(5), width_pct: None },
-                PanelSpec { name: "footer".into(),    position: Bottom, height: None,    width_pct: None },
-            ],
-        };
-        let spectrum_waterfall = PresetConfig {
-            panels: vec![
-                PanelSpec { name: "header".into(),    position: Top,    height: Some(5), width_pct: None },
-                PanelSpec { name: "spectrum".into(),  position: Body,   height: None,    width_pct: None },
-                PanelSpec { name: "waterfall".into(), position: Body,   height: None,    width_pct: None },
-                PanelSpec { name: "log".into(),       position: Bottom, height: Some(5), width_pct: None },
-                PanelSpec { name: "footer".into(),    position: Bottom, height: None,    width_pct: None },
-            ],
-        };
-        let observer = PresetConfig {
-            panels: vec![
-                PanelSpec { name: "header".into(),           position: Top,    height: Some(5), width_pct: None     },
-                PanelSpec { name: "observer".into(),         position: Left,   height: None,    width_pct: Some(60) },
-                PanelSpec { name: "system_resources".into(), position: Right,  height: None,    width_pct: Some(40) },
-                PanelSpec { name: "log".into(),              position: Bottom, height: Some(5), width_pct: None     },
-                PanelSpec { name: "footer".into(),           position: Bottom, height: None,    width_pct: None     },
-            ],
-        };
-        // Lab IQ — the I/Q quality bench: diagnostics left, constellation 2-D cloud
-        // centre, image-rejection scope right (carrier vs mirror vs DC spike). The
-        // amplitude histogram is superseded by the constellation (richer view of the
-        // same data); the broadband spectrum gives way to the LO-centred scope.
-        let lab_iq = PresetConfig {
-            panels: vec![
-                PanelSpec { name: "header".into(),              position: Top,    height: Some(5), width_pct: None     },
-                PanelSpec { name: "lab_banner".into(),          position: Top,    height: Some(2), width_pct: None     },
-                PanelSpec { name: "iq_diagnostics".into(),      position: Left,   height: None,    width_pct: Some(28) },
-                PanelSpec { name: "iq_constellation".into(),    position: Body,   height: None,    width_pct: None     },
-                PanelSpec { name: "image_scope".into(),         position: Right,  height: None,    width_pct: Some(32) },
-                PanelSpec { name: "lab_marker".into(),          position: Bottom, height: Some(2), width_pct: None     },
-                PanelSpec { name: "log".into(),                 position: Bottom, height: Some(5), width_pct: None     },
-                PanelSpec { name: "footer".into(),              position: Bottom, height: None,    width_pct: None     },
-            ],
-        };
-        let main = PresetConfig {
-            panels: vec![
-                PanelSpec { name: "header".into(),       position: Top,    height: Some(5), width_pct: None },
-                PanelSpec { name: "spectrum".into(),      position: Body,   height: None,    width_pct: None },
-                PanelSpec { name: "waterfall".into(),     position: Body,   height: None,    width_pct: None },
-                // height 4 → 2 inner rows for the signal_strip's 2×4 gauge grid.
-                PanelSpec { name: "signal_strip".into(),  position: Bottom, height: Some(4), width_pct: None },
-                PanelSpec { name: "log".into(),           position: Bottom, height: Some(5), width_pct: None },
-                PanelSpec { name: "footer".into(),        position: Bottom, height: None,    width_pct: None },
-            ],
-        };
-        // Command Rail — the [1] poweruser default (DSN-2026-02): a slim header
-        // (status + γ-dial), a left instrument rail gathering freq-hero + signal +
-        // gain + stream + log foot, and the bonded spectrum/waterfall filling the
-        // body. The [spectrum, waterfall] Body pair triggers the bond automatically.
-        let command_rail = PresetConfig {
-            panels: vec![
-                PanelSpec { name: "header_slim".into(),   position: Top,    height: Some(4), width_pct: None     },
-                PanelSpec { name: "command_rail".into(),  position: Left,   height: None,    width_pct: Some(28) },
-                PanelSpec { name: "spectrum".into(),      position: Body,   height: None,    width_pct: None     },
-                PanelSpec { name: "waterfall".into(),     position: Body,   height: None,    width_pct: None     },
-                PanelSpec { name: "footer".into(),        position: Bottom, height: None,    width_pct: None     },
-            ],
-        };
-        // Lab RF — front-end / gain chain focus: RF chain + NF/MDS left, spectrum
-        // centre, hardware health right.
-        let lab_rf = PresetConfig {
-            panels: vec![
-                PanelSpec { name: "header".into(),          position: Top,    height: Some(5), width_pct: None     },
-                PanelSpec { name: "lab_banner".into(),      position: Top,    height: Some(2), width_pct: None     },
-                PanelSpec { name: "rf_chain".into(),        position: Left,   height: None,    width_pct: Some(30) },
-                PanelSpec { name: "level_diagram".into(),   position: Body,   height: None,    width_pct: None     },
-                PanelSpec { name: "adc_loading".into(),     position: Right,  height: None,    width_pct: Some(32) },
-                PanelSpec { name: "lab_marker".into(),      position: Bottom, height: Some(2), width_pct: None     },
-                PanelSpec { name: "log".into(),             position: Bottom, height: Some(5), width_pct: None     },
-                PanelSpec { name: "footer".into(),          position: Bottom, height: None,    width_pct: None     },
-            ],
-        };
-        // Lab signal — signal-characterization instrument (DSN-2026-07 redesign):
-        // a left characterization rail (headline / metrics / ACPR / spectral
-        // shape), the bonded spectrum + waterfall filling the body, and the FM
-        // MPX · demod column on the right. The [spectrum, waterfall] Body pair
-        // triggers the engine's bond automatically (shared frequency ruler).
-        let lab_signal = PresetConfig {
-            panels: vec![
-                PanelSpec { name: "header".into(),                  position: Top,    height: Some(5), width_pct: None     },
-                PanelSpec { name: "lab_banner".into(),              position: Top,    height: Some(2), width_pct: None     },
-                PanelSpec { name: "signal_characterization".into(), position: Left,   height: None,    width_pct: Some(26) },
-                PanelSpec { name: "spectrum".into(),                position: Body,   height: None,    width_pct: None     },
-                PanelSpec { name: "waterfall".into(),               position: Body,   height: None,    width_pct: None     },
-                PanelSpec { name: "fm_demod".into(),                position: Right,  height: None,    width_pct: Some(26) },
-                PanelSpec { name: "lab_marker".into(),              position: Bottom, height: Some(2), width_pct: None     },
-                PanelSpec { name: "log".into(),                     position: Bottom, height: Some(5), width_pct: None     },
-                PanelSpec { name: "footer".into(),                  position: Bottom, height: None,    width_pct: None     },
-            ],
-        };
-        // Lab timing — host-side stream-timing instrument (DSN-2026-06 redesign):
-        // a left diagnostics rail (callback period / jitter / deadline budget /
-        // sample-rate), the real-time per-callback strip chart filling the body,
-        // and a hardware-vitals column on the right.
-        let lab_timing = PresetConfig {
-            panels: vec![
-                PanelSpec { name: "header".into(),             position: Top,    height: Some(5), width_pct: None     },
-                PanelSpec { name: "lab_banner".into(),         position: Top,    height: Some(2), width_pct: None     },
-                PanelSpec { name: "timing_diagnostics".into(), position: Left,   height: None,    width_pct: Some(28) },
-                PanelSpec { name: "timing_stripchart".into(),  position: Body,   height: None,    width_pct: None     },
-                PanelSpec { name: "timing_vitals".into(),      position: Right,  height: None,    width_pct: Some(24) },
-                PanelSpec { name: "lab_marker".into(),         position: Bottom, height: Some(2), width_pct: None     },
-                PanelSpec { name: "log".into(),                position: Bottom, height: Some(5), width_pct: None     },
-                PanelSpec { name: "footer".into(),             position: Bottom, height: None,    width_pct: None     },
-            ],
-        };
-        // Lab sweep — frequency-scanner mode: the wide sweep curve fills the body,
-        // cursor metrics on the right, sweep status strip below. Compact header
-        // (gain matters less while sweeping).
-        let lab_sweep = PresetConfig {
-            panels: vec![
-                PanelSpec { name: "header".into(),         position: Top,    height: Some(3), width_pct: None     },
-                PanelSpec { name: "lab_banner".into(),     position: Top,    height: Some(2), width_pct: None     },
-                PanelSpec { name: "sweep_panel".into(),    position: Body,   height: None,    width_pct: None     },
-                PanelSpec { name: "signal_metrics".into(), position: Right,  height: None,    width_pct: Some(22) },
-                PanelSpec { name: "sweep_strip".into(),    position: Bottom, height: Some(3), width_pct: None     },
-                PanelSpec { name: "log".into(),            position: Bottom, height: Some(3), width_pct: None     },
-                PanelSpec { name: "footer".into(),         position: Bottom, height: None,    width_pct: None     },
-            ],
-        };
-        // Micro main — the [0] field-mode entry view. A single self-contained
-        // panel that manages its own zones, plus the footer.
-        let micro_main = PresetConfig {
-            panels: vec![
-                PanelSpec { name: "micro_panel".into(), position: Body,   height: None, width_pct: None },
-                PanelSpec { name: "footer".into(),      position: Bottom, height: None, width_pct: None },
-            ],
-        };
-        // Micro signal — [0] cycle step 2: large SNR view for antenna aiming.
-        let micro_signal = PresetConfig {
-            panels: vec![
-                PanelSpec { name: "micro_signal_panel".into(), position: Body,   height: None, width_pct: None },
-                PanelSpec { name: "footer".into(),             position: Bottom, height: None, width_pct: None },
-            ],
-        };
-        // Micro gain — [0] cycle step 3: gain-staging view for fast setup.
-        let micro_gain = PresetConfig {
-            panels: vec![
-                PanelSpec { name: "micro_gain_panel".into(), position: Body,   height: None, width_pct: None },
-                PanelSpec { name: "footer".into(),           position: Bottom, height: None, width_pct: None },
-            ],
-        };
-        // Micro health — [0] cycle step 4: hardware monitoring for long sessions.
-        let micro_health = PresetConfig {
-            panels: vec![
-                PanelSpec { name: "micro_health_panel".into(), position: Body,   height: None, width_pct: None },
-                PanelSpec { name: "footer".into(),             position: Bottom, height: None, width_pct: None },
-            ],
-        };
-        // Micro sweep — [0] cycle step 5: field scanner glance (starts a sweep).
-        let micro_sweep = PresetConfig {
-            panels: vec![
-                PanelSpec { name: "micro_sweep_panel".into(), position: Body,   height: None, width_pct: None },
-                PanelSpec { name: "footer".into(),            position: Bottom, height: None, width_pct: None },
-            ],
-        };
-        let mut presets = HashMap::new();
-        presets.insert("spectrum".into(), spectrum);
-        presets.insert("waterfall".into(), waterfall);
-        presets.insert("spectrum_waterfall".into(), spectrum_waterfall);
-        presets.insert("observer".into(), observer);
-        presets.insert("main".into(), main);
-        presets.insert("command_rail".into(), command_rail);
-        presets.insert("lab_iq".into(), lab_iq);
-        presets.insert("lab_rf".into(), lab_rf);
-        presets.insert("lab_signal".into(), lab_signal);
-        presets.insert("lab_timing".into(), lab_timing);
-        presets.insert("lab_sweep".into(), lab_sweep);
-        presets.insert("micro_main".into(), micro_main);
-        presets.insert("micro_signal".into(), micro_signal);
-        presets.insert("micro_gain".into(), micro_gain);
-        presets.insert("micro_health".into(), micro_health);
-        presets.insert("micro_sweep".into(), micro_sweep);
-        Self { active_preset: "command_rail".into(), presets }
+        let presets = BUILTIN_PRESETS.iter()
+            .map(|(name, text)| (name.to_string(), Self::parse_builtin(name, text)))
+            .collect();
+        Self { active_preset: DEFAULT_PRESET.into(), presets }
     }
 
-    /// Built-in presets with the user's custom presets merged on top. A user
-    /// preset whose name matches a built-in replaces it; new names are added
-    /// (and so join the `[P]` cycle automatically).
-    pub fn with_user_presets(user: &HashMap<String, PresetConfig>) -> Self {
+    /// Parse an embedded preset.
+    ///
+    /// The `expect` is safe by construction, not optimism: the text is
+    /// `include_str!`-ed at compile time, so it cannot differ between the test run
+    /// and the shipped binary, and `every_builtin_preset_parses` parses all
+    /// sixteen. A panic here would mean the tests did not run.
+    fn parse_builtin(name: &str, text: &str) -> PresetConfig {
+        toml::from_str(text)
+            .unwrap_or_else(|e| panic!("built-in preset '{name}' is malformed: {e}"))
+    }
+
+    /// Where a user's own presets live, given the config file's location:
+    /// `~/.config/sdrtop/presets/`. `None` when the config path has no parent.
+    pub fn presets_dir(config_path: &Path) -> Option<PathBuf> {
+        config_path.parent().map(|p| p.join("presets"))
+    }
+
+    /// Built-in presets with the user's own merged on top, in increasing order of
+    /// deliberateness: built-in, then `<presets_dir>/*.toml`, then the
+    /// `[presets.*]` blocks in `config.toml`.
+    ///
+    /// A name that matches a built-in replaces it; a name that does not is simply
+    /// **added**, and so joins the `[P]` cycle automatically. That is the whole
+    /// installation step for a layout of your own — there is no list to register
+    /// it in.
+    ///
+    /// `config.toml` wins over a file because it is the one the user edits by hand
+    /// and the one sdrtop itself rewrites; if a name is defined in both, the
+    /// nearer definition is the one they meant.
+    pub fn with_user_presets(
+        user: &HashMap<String, PresetConfig>,
+        presets_dir: Option<&Path>,
+    ) -> Self {
         let mut cfg = Self::default_config();
+        for (name, preset) in Self::read_preset_dir(presets_dir) {
+            cfg.presets.insert(name, preset);
+        }
         for (name, preset) in user {
             cfg.presets.insert(name.clone(), preset.clone());
         }
         cfg
+    }
+
+    /// Every `*.toml` in `dir` that parses, named after its file stem.
+    ///
+    /// A file that will not parse is reported and skipped, never fatal: stderr is
+    /// redirected to `sdrtop.log` for the session, and a stray comma in one layout
+    /// must not stop the radio from starting or take the other layouts with it.
+    fn read_preset_dir(dir: Option<&Path>) -> Vec<(String, PresetConfig)> {
+        let Some(dir) = dir else { return Vec::new() };
+        let Ok(entries) = std::fs::read_dir(dir) else { return Vec::new() };
+        let mut found: Vec<(String, PresetConfig)> = Vec::new();
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.extension().and_then(|e| e.to_str()) != Some("toml") { continue; }
+            let Some(name) = path.file_stem().and_then(|s| s.to_str()) else { continue };
+            let Ok(text) = std::fs::read_to_string(&path) else { continue };
+            match toml::from_str::<PresetConfig>(&text) {
+                Ok(p) if p.panels.is_empty() =>
+                    eprintln!("Warning: ignoring preset {}: it lists no panels", path.display()),
+                Ok(p) => found.push((name.to_string(), p)),
+                Err(e) => eprintln!("Warning: ignoring preset {}: {e}", path.display()),
+            }
+        }
+        // Deterministic order, so two files defining the same name do not depend
+        // on the order the filesystem happened to hand them back.
+        found.sort_by(|a, b| a.0.cmp(&b.0));
+        found
     }
 
     pub fn active_panels(&self) -> &[PanelSpec] {
@@ -453,6 +353,127 @@ impl LayoutConfig {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Write `files` into a fresh temp directory and return it.
+    fn presets_dir_with(tag: &str, files: &[(&str, &str)]) -> std::path::PathBuf {
+        let dir = std::env::temp_dir()
+            .join(format!("sdrtop-preset-test-{tag}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        for (name, body) in files {
+            std::fs::write(dir.join(format!("{name}.toml")), body).unwrap();
+        }
+        dir
+    }
+
+    const A_LAYOUT: &str = r#"
+panels = [
+    { name = "header",   position = "top", height = 5 },
+    { name = "spectrum", position = "body" },
+    { name = "footer",   position = "bottom" },
+]
+"#;
+
+    #[test]
+    fn every_builtin_preset_parses() {
+        // This is what makes `parse_builtin`'s `expect` safe: the text is compiled
+        // in, so it cannot differ between here and the shipped binary.
+        let cfg = LayoutConfig::default_config();
+        assert_eq!(cfg.presets.len(), 16, "sixteen built-ins");
+        assert_eq!(cfg.active_preset, DEFAULT_PRESET);
+        for (name, preset) in &cfg.presets {
+            assert!(!preset.panels.is_empty(), "{name} lists no panels");
+        }
+        for want in ["command_rail", "spectrum", "waterfall", "spectrum_waterfall",
+                     "observer", "main", "lab_iq", "lab_rf", "lab_signal",
+                     "lab_timing", "lab_sweep", "micro_main", "micro_signal",
+                     "micro_gain", "micro_health", "micro_sweep"] {
+            assert!(cfg.presets.contains_key(want), "missing built-in '{want}'");
+        }
+    }
+
+    #[test]
+    fn the_command_rail_layout_is_the_one_it_has_always_been() {
+        // Pinned because the sixteen presets moved from Rust into TOML in R7: a
+        // transcription slip would silently rearrange the default screen.
+        let cfg = LayoutConfig::default_config();
+        let p = &cfg.presets["command_rail"];
+        let got: Vec<(&str, &Position, Option<u16>, Option<u16>)> = p.panels.iter()
+            .map(|s| (s.name.as_str(), &s.position, s.height, s.width_pct)).collect();
+        assert_eq!(got, vec![
+            ("header_slim",  &Position::Top,    Some(4), None),
+            ("command_rail", &Position::Left,   None,    Some(28)),
+            ("spectrum",     &Position::Body,   None,    None),
+            ("waterfall",    &Position::Body,   None,    None),
+            ("footer",       &Position::Bottom, None,    None),
+        ]);
+    }
+
+    #[test]
+    fn a_preset_file_adds_a_layout_as_readily_as_it_replaces_one() {
+        // The point of the directory: a name nobody has used before is simply
+        // added, and joins the [P] cycle. No list to register it in.
+        let dir = presets_dir_with("add", &[("nightwatch", A_LAYOUT)]);
+        let cfg = LayoutConfig::with_user_presets(&HashMap::new(), Some(&dir));
+        assert!(cfg.presets.contains_key("nightwatch"), "a new name should be added");
+        assert_eq!(cfg.presets["nightwatch"].panels.len(), 3);
+        assert_eq!(cfg.presets.len(), 17, "added, not replaced");
+        // And every built-in is still there.
+        assert!(cfg.presets.contains_key("lab_signal"));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_preset_file_named_after_a_builtin_replaces_it() {
+        let dir = presets_dir_with("replace", &[("lab_iq", A_LAYOUT)]);
+        let cfg = LayoutConfig::with_user_presets(&HashMap::new(), Some(&dir));
+        assert_eq!(cfg.presets["lab_iq"].panels.len(), 3, "the file should win");
+        assert_eq!(cfg.presets.len(), 16, "replaced, not added");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_config_block_outranks_a_file_of_the_same_name() {
+        // config.toml is the file the user edits by hand and the one sdrtop
+        // rewrites, so a name defined in both resolves to the nearer definition.
+        let dir = presets_dir_with("precedence", &[("nightwatch", A_LAYOUT)]);
+        let mut inline = HashMap::new();
+        inline.insert("nightwatch".to_string(), PresetConfig {
+            panels: vec![PanelSpec { name: "footer".into(), position: Position::Bottom,
+                                     height: None, width_pct: None }],
+        });
+        let cfg = LayoutConfig::with_user_presets(&inline, Some(&dir));
+        assert_eq!(cfg.presets["nightwatch"].panels.len(), 1, "the config block wins");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_broken_preset_file_is_skipped_without_taking_the_others_with_it() {
+        // One stray comma must not cost the user their other layouts, or stop the
+        // radio from starting at all.
+        let dir = presets_dir_with("broken", &[
+            ("good",    A_LAYOUT),
+            ("broken",  "panels = [ { name = "),
+            ("empty",   "panels = []"),
+            ("notes",   "this is not toml at all"),
+        ]);
+        std::fs::write(dir.join("README.md"), "not a preset").unwrap();
+        let cfg = LayoutConfig::with_user_presets(&HashMap::new(), Some(&dir));
+        assert!(cfg.presets.contains_key("good"), "the good file should still load");
+        assert!(!cfg.presets.contains_key("broken"));
+        assert!(!cfg.presets.contains_key("empty"), "a layout with no panels is not a layout");
+        assert!(!cfg.presets.contains_key("notes"));
+        assert!(!cfg.presets.contains_key("README"), "only .toml is read");
+        assert_eq!(cfg.presets.len(), 17, "sixteen built-ins plus the one good file");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn no_preset_directory_is_not_an_error() {
+        assert_eq!(LayoutConfig::with_user_presets(&HashMap::new(), None).presets.len(), 16);
+        let missing = std::env::temp_dir().join("sdrtop-presets-that-do-not-exist");
+        assert_eq!(LayoutConfig::with_user_presets(&HashMap::new(), Some(&missing)).presets.len(), 16);
+    }
 
     #[test]
     fn default_config_has_minimal_preset() {
@@ -651,7 +672,7 @@ mod tests {
             ]
         "#;
         let app: AppConfig = toml::from_str(raw).unwrap();
-        let cfg = LayoutConfig::with_user_presets(&app.presets);
+        let cfg = LayoutConfig::with_user_presets(&app.presets, None);
         // New preset joined the set.
         assert!(cfg.presets.contains_key("custom"));
         // Built-in presets still present.

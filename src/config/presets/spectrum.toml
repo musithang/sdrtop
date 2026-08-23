@@ -1,0 +1,8 @@
+# Spectrum only, full width, with the log strip under it.
+
+panels = [
+    { name = "header",    position = "top", height = 5 },
+    { name = "spectrum",  position = "body" },
+    { name = "log",       position = "bottom", height = 5 },
+    { name = "footer",    position = "bottom" },
+]

@@ -21,6 +21,7 @@ impl App {
     fn build_ui(
         active_preset: &str,
         user_presets: &HashMap<String, crate::config::PresetConfig>,
+        presets_dir: Option<&std::path::Path>,
     ) -> (ui::LayoutEngine, HashMap<char, &'static str>) {
         let mut registry = ui::PanelRegistry::new();
         registry.register(ui::HeaderPanel);
@@ -66,7 +67,7 @@ impl App {
             "focus key claimed by more than one panel: {collisions:?}",
         );
 
-        let mut engine = ui::LayoutEngine::new(LayoutConfig::with_user_presets(user_presets), registry);
+        let mut engine = ui::LayoutEngine::new(LayoutConfig::with_user_presets(user_presets, presets_dir), registry);
         engine.set_preset(active_preset);
         (engine, focus_keys)
     }
@@ -83,6 +84,7 @@ impl App {
         let board_rev    = info.board_rev.unwrap_or(0xFE);
         let usb_api_ver  = info.usb_api_version.unwrap_or(0);
         let themes_dir    = config_path.as_deref().and_then(crate::config::AppConfig::themes_dir);
+        let presets_dir   = config_path.as_deref().and_then(crate::config::LayoutConfig::presets_dir);
         let caps          = Arc::new(device.capabilities().clone());
         let sample_format = caps.sample_format;
         let theme         = cfg.build_theme(themes_dir.as_deref());
@@ -224,7 +226,7 @@ impl App {
         tasks::spawn_sweep_task(Arc::clone(&state), Arc::clone(&device));
         tasks::spawn_sys_resource_task(Arc::clone(&state));
 
-        let (engine, focus_keys) = Self::build_ui(&cfg.display.active_preset, &cfg.presets);
+        let (engine, focus_keys) = Self::build_ui(&cfg.display.active_preset, &cfg.presets, presets_dir.as_deref());
 
         Ok(Self {
             state,
@@ -249,6 +251,7 @@ impl App {
         kind: hardware::DeviceKind,
     ) -> anyhow::Result<Self> {
         let themes_dir = config_path.as_deref().and_then(crate::config::AppConfig::themes_dir);
+        let presets_dir = config_path.as_deref().and_then(crate::config::LayoutConfig::presets_dir);
         let board_name = sysinfo.product.clone();
         let serial     = sysinfo.serial.clone();
         let theme      = cfg.build_theme(themes_dir.as_deref());
@@ -336,7 +339,7 @@ impl App {
         tasks::spawn_observer_task(Arc::clone(&state), sysinfo.bus, sysinfo.dev, kind);
         tasks::spawn_sys_resource_task(Arc::clone(&state));
 
-        let (engine, focus_keys) = Self::build_ui("observer", &cfg.presets);
+        let (engine, focus_keys) = Self::build_ui("observer", &cfg.presets, presets_dir.as_deref());
 
         Ok(Self {
             state,
@@ -398,7 +401,7 @@ mod tests {
     /// no focus mode at all, so this is checked rather than remembered.
     #[test]
     fn every_focusable_panel_has_a_dispatch_arm() {
-        let (_engine, focus_keys) = App::build_ui("command_rail", &HashMap::new());
+        let (_engine, focus_keys) = App::build_ui("command_rail", &HashMap::new(), None);
         // The dispatch table is read as source text: the arms are `&str` matches on
         // a panel name, so nothing in the type system ties them to the registry.
         let dispatch = include_str!("input/mod.rs");
@@ -411,6 +414,33 @@ mod tests {
                  `{arm}` arm, so its keys fall through to the global handler",
             );
         }
+    }
+
+    /// Every panel a built-in preset names must exist in the registry.
+    ///
+    /// The presets are TOML and the registry is Rust, so nothing in the type
+    /// system connects them: a panel renamed or removed leaves a preset quietly
+    /// asking for a name that resolves to nothing, and the layout engine just
+    /// draws a gap. Cheap to check, invisible otherwise.
+    #[test]
+    fn every_panel_named_by_a_builtin_preset_is_registered() {
+        let (engine, _) = App::build_ui("command_rail", &HashMap::new(), None);
+        let known: std::collections::HashSet<&str> =
+            engine.registered_panel_names().collect();
+        assert!(!known.is_empty(), "no panels were registered at all");
+
+        let cfg = crate::config::LayoutConfig::default_config();
+        let mut missing: Vec<String> = Vec::new();
+        for (preset, spec) in &cfg.presets {
+            for panel in &spec.panels {
+                if !known.contains(panel.name.as_str()) {
+                    missing.push(format!("{preset} -> {}", panel.name));
+                }
+            }
+        }
+        missing.sort();
+        assert!(missing.is_empty(),
+                "presets name panels that are not registered: {missing:?}");
     }
 
     /// Two panels claiming one key must be *reported*, not silently resolved.
@@ -450,7 +480,7 @@ mod tests {
     fn the_real_registry_has_no_focus_key_collisions() {
         // `build_ui` debug-asserts this too; the test states it as a fact rather
         // than relying on someone running a debug build.
-        let (_engine, keys) = App::build_ui("command_rail", &HashMap::new());
+        let (_engine, keys) = App::build_ui("command_rail", &HashMap::new(), None);
         let mut by_key: HashMap<char, usize> = HashMap::new();
         for k in keys.keys() { *by_key.entry(*k).or_default() += 1; }
         assert!(by_key.values().all(|&n| n == 1));

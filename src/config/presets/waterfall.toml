@@ -1,0 +1,8 @@
+# Waterfall only, full width.
+
+panels = [
+    { name = "header",     position = "top", height = 5 },
+    { name = "waterfall",  position = "body" },
+    { name = "log",        position = "bottom", height = 5 },
+    { name = "footer",     position = "bottom" },
+]

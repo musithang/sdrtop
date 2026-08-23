@@ -1,0 +1,13 @@
+# Lab RF — front-end / gain chain focus: RF chain + NF/MDS left, spectrum
+# centre, hardware health right.
+
+panels = [
+    { name = "header",         position = "top", height = 5 },
+    { name = "lab_banner",     position = "top", height = 2 },
+    { name = "rf_chain",       position = "left", width_pct = 30 },
+    { name = "level_diagram",  position = "body" },
+    { name = "adc_loading",    position = "right", width_pct = 32 },
+    { name = "lab_marker",     position = "bottom", height = 2 },
+    { name = "log",            position = "bottom", height = 5 },
+    { name = "footer",         position = "bottom" },
+]

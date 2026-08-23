@@ -33,6 +33,13 @@ impl LayoutEngine {
         &self.config.active_preset
     }
 
+    /// Names of every panel the registry knows. Used by `builder.rs` to check
+    /// the built-in presets against it, since presets are data and the registry
+    /// is code and nothing else ties the two together.
+    pub fn registered_panel_names(&self) -> impl Iterator<Item = &'static str> + '_ {
+        self.registry.panels_iter().map(|p| p.name())
+    }
+
     /// Names of all defined presets (built-in + user). Used by the footer to
     /// show only the lab presets that actually exist.
     pub fn preset_names(&self) -> Vec<String> {

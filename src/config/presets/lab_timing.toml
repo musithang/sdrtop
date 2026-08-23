@@ -1,0 +1,15 @@
+# Lab timing — host-side stream-timing instrument (DSN-2026-06 redesign):
+# a left diagnostics rail (callback period / jitter / deadline budget /
+# sample-rate), the real-time per-callback strip chart filling the body,
+# and a hardware-vitals column on the right.
+
+panels = [
+    { name = "header",              position = "top", height = 5 },
+    { name = "lab_banner",          position = "top", height = 2 },
+    { name = "timing_diagnostics",  position = "left", width_pct = 28 },
+    { name = "timing_stripchart",   position = "body" },
+    { name = "timing_vitals",       position = "right", width_pct = 24 },
+    { name = "lab_marker",          position = "bottom", height = 2 },
+    { name = "log",                 position = "bottom", height = 5 },
+    { name = "footer",              position = "bottom" },
+]

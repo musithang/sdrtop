@@ -1,0 +1,7 @@
+# Micro main — the [0] field-mode entry view. A single self-contained
+# panel that manages its own zones, plus the footer.
+
+panels = [
+    { name = "micro_panel",  position = "body" },
+    { name = "footer",       position = "bottom" },
+]

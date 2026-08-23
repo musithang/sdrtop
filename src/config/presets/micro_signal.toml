@@ -1,0 +1,6 @@
+# Micro signal — [0] cycle step 2: large SNR view for antenna aiming.
+
+panels = [
+    { name = "micro_signal_panel",  position = "body" },
+    { name = "footer",              position = "bottom" },
+]

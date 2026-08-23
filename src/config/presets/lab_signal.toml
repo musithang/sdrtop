@@ -1,0 +1,17 @@
+# Lab signal — signal-characterization instrument (DSN-2026-07 redesign):
+# a left characterization rail (headline / metrics / ACPR / spectral
+# shape), the bonded spectrum + waterfall filling the body, and the FM
+# MPX · demod column on the right. The [spectrum, waterfall] Body pair
+# triggers the engine's bond automatically (shared frequency ruler).
+
+panels = [
+    { name = "header",                   position = "top", height = 5 },
+    { name = "lab_banner",               position = "top", height = 2 },
+    { name = "signal_characterization",  position = "left", width_pct = 26 },
+    { name = "spectrum",                 position = "body" },
+    { name = "waterfall",                position = "body" },
+    { name = "fm_demod",                 position = "right", width_pct = 26 },
+    { name = "lab_marker",               position = "bottom", height = 2 },
+    { name = "log",                      position = "bottom", height = 5 },
+    { name = "footer",                   position = "bottom" },
+]

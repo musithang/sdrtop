@@ -1,0 +1,15 @@
+# Lab IQ — the I/Q quality bench: diagnostics left, constellation 2-D cloud
+# centre, image-rejection scope right (carrier vs mirror vs DC spike). The
+# amplitude histogram is superseded by the constellation (richer view of the
+# same data); the broadband spectrum gives way to the LO-centred scope.
+
+panels = [
+    { name = "header",            position = "top", height = 5 },
+    { name = "lab_banner",        position = "top", height = 2 },
+    { name = "iq_diagnostics",    position = "left", width_pct = 28 },
+    { name = "iq_constellation",  position = "body" },
+    { name = "image_scope",       position = "right", width_pct = 32 },
+    { name = "lab_marker",        position = "bottom", height = 2 },
+    { name = "log",               position = "bottom", height = 5 },
+    { name = "footer",            position = "bottom" },
+]

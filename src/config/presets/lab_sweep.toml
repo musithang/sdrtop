@@ -1,0 +1,13 @@
+# Lab sweep — frequency-scanner mode: the wide sweep curve fills the body,
+# cursor metrics on the right, sweep status strip below. Compact header
+# (gain matters less while sweeping).
+
+panels = [
+    { name = "header",          position = "top", height = 3 },
+    { name = "lab_banner",      position = "top", height = 2 },
+    { name = "sweep_panel",     position = "body" },
+    { name = "signal_metrics",  position = "right", width_pct = 22 },
+    { name = "sweep_strip",     position = "bottom", height = 3 },
+    { name = "log",             position = "bottom", height = 3 },
+    { name = "footer",          position = "bottom" },
+]
