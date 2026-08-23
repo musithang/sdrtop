@@ -39,7 +39,7 @@ bug fix.
   `p` cycle alongside the built-in ones. Nothing to register, nothing to rebuild.
   You can still define presets inline in `config.toml` with `[presets.my_view]`;
   a file is just easier to keep, share, and not lose in a growing config. See
-  [Configuration](config.md#a-preset-per-file).
+  [Configuration](presets.md#a-preset-per-file).
 
 Under the hood these are one change: the six built-in themes and the sixteen
 built-in layouts stopped being Rust code and became data files. That is what makes

@@ -19,7 +19,7 @@ confident lie is the worst kind of data.
 
 The fastest way to see it is the **ADC Loading** bell in Lab RF (`6`): a shape
 that fills the middle without piling up on the rails. If you want exact numbers,
-add the `iq_histogram` panel to a [layout of your own](config.md#custom-layout-presets)
+add the `iq_histogram` panel to a [layout of your own](presets.md)
 and aim for:
 
 - **Low** under 5 %: the ADC isn't wasting bits on empty space

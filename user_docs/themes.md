@@ -155,3 +155,9 @@ keep a scheme in a file and still nudge one colour from your config.
 
 Six themes ought to be enough to argue about. If they aren't, the overrides and
 theme files are here so you can out-bikeshed me entirely, no judgment.
+
+---
+
+Colours are one half of how sdrtop looks; which panels are on screen is the other.
+That is [Layout presets](presets.md), which works the same way: built-ins you can
+replace, and a directory you can drop your own into.

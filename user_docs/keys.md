@@ -184,7 +184,7 @@ panel, and it brings the three habits of a bench spectrum analyser:
 What each one is *for*, and why averaging finds signals a single frame buries, is
 in [The Lab presets](lab.md#the-measurement-banner).
 
-One wrinkle if you build [your own layout](config.md#custom-layout-presets): the
+One wrinkle if you build [your own layout](presets.md): the
 reference line and the ghost trace are drawn only in **instrument mode**, which
 sdrtop turns on for presets whose name begins with `lab_`. The banner and its keys
 work anywhere you place it, and averaging affects the spectrum everywhere, but if

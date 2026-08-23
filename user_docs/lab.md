@@ -275,7 +275,7 @@ saved. A fresh launch is an uncorrected radio, which is the honest default.
 ## IQ Amplitude Distribution · *optional panel (`iq_histogram`)*
 
 > Not in any built-in preset any more; the image scope took its slot in Lab IQ.
-> Add `iq_histogram` to a [custom layout](config.md#custom-layout-presets) if you
+> Add `iq_histogram` to a [custom layout](presets.md) if you
 > want the exact Low/Mid/Clip percentages.
 
 A histogram of incoming sample amplitudes across 32 bins, log-scaled vertically so
@@ -376,7 +376,7 @@ subaudible tone opens the squelch, what the station calls itself.
 
 Press `m` to focus it. It only runs while the panel is actually on screen, so it
 costs nothing on any other layout. That means it also works in a
-[custom preset](config.md#custom-layout-presets) of your own, as long as you list
+[custom preset](presets.md) of your own, as long as you list
 `fm_demod` in it.
 
 **What it shows depends on the modulation.** Each mode is shown only what it

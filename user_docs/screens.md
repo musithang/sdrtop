@@ -12,7 +12,7 @@ to act on it, is in [The Lab presets](lab.md).
 
 sdrtop is built out of **panels**, and a **preset** is a named arrangement of
 them. The number keys switch presets, `p` cycles them, and you can define your own
-in the [config file](config.md#custom-layout-presets) out of any panel on this
+in the [config file](presets.md) out of any panel on this
 page. Nothing here is hard-wired to a particular screen.
 
 Panels that show a derived measurement mark their title **[STALE]** the moment RX
@@ -235,7 +235,7 @@ sdrtop picks the radio back up automatically. See
 ## Panels you can add yourself
 
 Every panel sdrtop draws can be placed in a
-[custom layout](config.md#custom-layout-presets). These are the ones the tour
+[custom layout](presets.md). These are the ones the tour
 above hasn't already covered: the structural pieces every layout is built from,
 plus one measurement panel that has no home preset of its own.
 
@@ -273,7 +273,7 @@ signal strip and log under a full header. `p` reaches it.
 A preset's *name* matters in one place: anything starting with `lab_` renders in
 **instrument mode**. If you're writing your own layout, that and the other two
 arrangements with behaviour attached are covered in
-[Configuration](config.md#custom-layout-presets).
+[Configuration](presets.md).
 
 ---
 
