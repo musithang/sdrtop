@@ -1,0 +1,29 @@
+# Catppuccin Mocha (https://catppuccin.com/).
+
+name = "catppuccin"
+
+border_dim     = "#313244"   # background panels: log, system resources, gains
+border_default = "#585b70"   # ordinary instruments
+border_accent  = "#cba6f7"   # the spectrum and the waterfall
+border_focused = "#cdd6f4"   # whichever panel is in focus mode
+label          = "#585b70"   # quiet structure: "Frequency", "LNA gain"
+value          = "#cdd6f4"   # ordinary readings
+value_hi       = "#f9e2af"   # the numbers that lead: frequency, total gain
+status_ok      = "#a6e3a1"
+status_warn    = "#f9e2af"
+status_crit    = "#f38ba8"
+peak_hold      = "#f9e2af"   # the spectrum's peak-hold trace
+noise_floor    = "#313244"   # the measured noise-floor rule
+stale          = "#313244"   # [STALE] plates and the borders they cool
+observer       = "#89dceb"   # observer mode, when another process holds the radio
+
+# The spectrum and waterfall gradient, cold (weak) to hot (strong).
+# `at` is the position in 0.0..1.0; the stops must climb.
+palette = [
+    { at = 0.00,  color = "#1e1e2e" },
+    { at = 0.25,  color = "#74c7ec" },
+    { at = 0.48,  color = "#89dceb" },
+    { at = 0.63,  color = "#a6e3a1" },
+    { at = 0.80,  color = "#f9e2af" },
+    { at = 1.00,  color = "#f38ba8" },
+]

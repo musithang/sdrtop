@@ -1,6 +1,6 @@
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use crate::palette::WaterfallPalette;
 use crate::state::{SpectrumMarker, SpectrumStyle, DEFAULT_FREQUENCY, DEFAULT_LNA_GAIN, DEFAULT_SAMPLE_RATE, DEFAULT_VGA_GAIN};
@@ -149,8 +149,19 @@ impl AppConfig {
         }
     }
 
-    pub fn build_theme(&self) -> crate::Theme {
-        let mut t = crate::Theme::by_name(&self.theme.base);
+    /// Where a user's own themes live, given the config file's location:
+    /// `~/.config/sdrtop/themes/`. `None` when the config path has no parent,
+    /// which means there is nowhere to look and only the built-ins exist.
+    pub fn themes_dir(config_path: &Path) -> Option<PathBuf> {
+        config_path.parent().map(|p| p.join("themes"))
+    }
+
+    /// The theme named by `[theme] base`, with any per-field overrides applied.
+    ///
+    /// `themes_dir` is searched before the built-ins, so a user file named
+    /// `sdr.toml` replaces the shipped `sdr` rather than sitting beside it.
+    pub fn build_theme(&self, themes_dir: Option<&Path>) -> crate::Theme {
+        let mut t = crate::Theme::load(&self.theme.base, themes_dir);
         let tc = &self.theme;
         macro_rules! apply {
             ($field:ident) => {
@@ -677,9 +688,67 @@ mod tests {
     }
 
     #[test]
+    fn per_field_theme_overrides_survive_a_save() {
+        // The bug the lint reported from R3a to R6: `App::save_config` rebuilt the
+        // theme block as `ThemeConfig { base, ..Default::default() }`, so every
+        // per-field colour the user had written was deleted from their config the
+        // next time they pressed `q`. The docs carried a warning about it.
+        let mut loaded = ThemeConfig { base: "nord".into(), ..Default::default() };
+        loaded.border_accent = Some("#ff00ff".into());
+        loaded.stale         = Some("#101010".into());
+
+        // Exactly what `save_config` writes now: the loaded block, `base` refreshed.
+        let written = AppConfig {
+            theme: ThemeConfig { base: "nord".into(), ..loaded.clone() },
+            ..AppConfig::default()
+        };
+        let path = std::env::temp_dir()
+            .join(format!("sdrtop-theme-save-{}.toml", std::process::id()));
+        written.save(&path).unwrap();
+        let back = AppConfig::load_or_default(&path);
+        let _ = std::fs::remove_file(&path);
+
+        assert_eq!(back.theme.base, "nord");
+        assert_eq!(back.theme.border_accent.as_deref(), Some("#ff00ff"),
+                   "the override was dropped on save again");
+        assert_eq!(back.theme.stale.as_deref(), Some("#101010"));
+
+        // And the shape that caused it, so this test cannot pass by accident.
+        let old_way = ThemeConfig { base: "nord".into(), ..Default::default() };
+        assert!(old_way.border_accent.is_none(),
+                "spreading Default is what deleted the overrides");
+    }
+
+    #[test]
+    fn build_theme_prefers_a_user_theme_over_the_builtin() {
+        // `~/.config/sdrtop/themes/<base>.toml` replaces the shipped theme of that
+        // name, and per-field overrides still apply on top of whichever won.
+        let dir = std::env::temp_dir()
+            .join(format!("sdrtop-cfg-theme-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let mut text = String::from("name = \"gruvbox\"\n");
+        for f in ["border_dim", "border_default", "border_accent", "border_focused",
+                  "label", "value", "value_hi", "status_ok", "status_warn",
+                  "status_crit", "peak_hold", "noise_floor", "stale", "observer"] {
+            text.push_str(&format!("{f} = \"#020202\"\n"));
+        }
+        text.push_str("palette = [{ at = 0.0, color = \"#000000\" }, { at = 1.0, color = \"#ffffff\" }]\n");
+        std::fs::write(dir.join("gruvbox.toml"), text).unwrap();
+
+        let mut cfg = AppConfig::default();
+        cfg.theme.base = "gruvbox".into();
+        cfg.theme.value_hi = Some("#abcdef".into());
+        let t = cfg.build_theme(Some(&dir));
+        assert_eq!(t.border_accent, ratatui::style::Color::Rgb(2, 2, 2), "user file should win");
+        assert_eq!(t.value_hi, ratatui::style::Color::Rgb(0xab, 0xcd, 0xef),
+                   "an override still applies on top of a user theme");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
     fn build_theme_default_is_sdr() {
         let cfg = AppConfig::load_or_default(Path::new("/nonexistent/sdrtop/config.toml"));
-        let t = cfg.build_theme();
+        let t = cfg.build_theme(None);
         assert_eq!(t.name, "sdr");
     }
 
@@ -687,14 +756,14 @@ mod tests {
     fn build_theme_unknown_base_falls_back_to_sdr() {
         let toml = "[theme]\nbase = \"nonexistent\"\n";
         let cfg: AppConfig = toml::from_str(toml).unwrap();
-        assert_eq!(cfg.build_theme().name, "sdr");
+        assert_eq!(cfg.build_theme(None).name, "sdr");
     }
 
     #[test]
     fn build_theme_override_applies_hex_color() {
         let toml = "[theme]\nbase = \"nord\"\nborder_accent = \"#ff0000\"\n";
         let cfg: AppConfig = toml::from_str(toml).unwrap();
-        let t = cfg.build_theme();
+        let t = cfg.build_theme(None);
         assert_eq!(t.border_accent, ratatui::style::Color::Rgb(255, 0, 0));
     }
 
@@ -702,7 +771,7 @@ mod tests {
     fn build_theme_invalid_hex_override_ignored() {
         let toml = "[theme]\nbase = \"nord\"\nborder_accent = \"notahex\"\n";
         let cfg: AppConfig = toml::from_str(toml).unwrap();
-        let t = cfg.build_theme();
+        let t = cfg.build_theme(None);
         assert_eq!(t.name, "nord");
     }
 }

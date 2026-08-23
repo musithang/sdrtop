@@ -1,0 +1,29 @@
+# Solarized Dark (https://ethanschoonover.com/solarized/).
+
+name = "solarized"
+
+border_dim     = "#073642"   # background panels: log, system resources, gains
+border_default = "#586e75"   # ordinary instruments
+border_accent  = "#268bd2"   # the spectrum and the waterfall
+border_focused = "#fdf6e3"   # whichever panel is in focus mode
+label          = "#586e75"   # quiet structure: "Frequency", "LNA gain"
+value          = "#93a1a1"   # ordinary readings
+value_hi       = "#b58900"   # the numbers that lead: frequency, total gain
+status_ok      = "#859900"
+status_warn    = "#b58900"
+status_crit    = "#dc322f"
+peak_hold      = "#b58900"   # the spectrum's peak-hold trace
+noise_floor    = "#073642"   # the measured noise-floor rule
+stale          = "#073642"   # [STALE] plates and the borders they cool
+observer       = "#2aa198"   # observer mode, when another process holds the radio
+
+# The spectrum and waterfall gradient, cold (weak) to hot (strong).
+# `at` is the position in 0.0..1.0; the stops must climb.
+palette = [
+    { at = 0.00,  color = "#002b36" },
+    { at = 0.25,  color = "#268bd2" },
+    { at = 0.48,  color = "#2aa198" },
+    { at = 0.63,  color = "#859900" },
+    { at = 0.80,  color = "#b58900" },
+    { at = 1.00,  color = "#dc322f" },
+]

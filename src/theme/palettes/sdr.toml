@@ -1,0 +1,30 @@
+# Default theme, designed for sdrtop: deep black background, sharp cyan
+# accent, orange highlighted values, lime-to-red spectrum gradient.
+
+name = "sdr"
+
+border_dim     = "#57607a"   # background panels: log, system resources, gains
+border_default = "#3c7891"   # ordinary instruments
+border_accent  = "#00d7ff"   # the spectrum and the waterfall
+border_focused = "#ffffff"   # whichever panel is in focus mode
+label          = "#8296b2"   # quiet structure: "Frequency", "LNA gain"
+value          = "#c3d2dc"   # ordinary readings
+value_hi       = "#ffaf00"   # the numbers that lead: frequency, total gain
+status_ok      = "#00d282"
+status_warn    = "#ffaf00"
+status_crit    = "#ff5a5a"
+peak_hold      = "#ffd700"   # the spectrum's peak-hold trace
+noise_floor    = "#505f78"   # the measured noise-floor rule
+stale          = "#3c414b"   # [STALE] plates and the borders they cool
+observer       = "#6496ff"   # observer mode, when another process holds the radio
+
+# The spectrum and waterfall gradient, cold (weak) to hot (strong).
+# `at` is the position in 0.0..1.0; the stops must climb.
+palette = [
+    { at = 0.00,  color = "#0a0a50" },
+    { at = 0.25,  color = "#0050b4" },
+    { at = 0.45,  color = "#00d2d2" },
+    { at = 0.60,  color = "#00d250" },
+    { at = 0.78,  color = "#ffd700" },
+    { at = 1.00,  color = "#ff3214" },
+]

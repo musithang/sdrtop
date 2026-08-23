@@ -1,0 +1,29 @@
+# Dracula (https://draculatheme.com/).
+
+name = "dracula"
+
+border_dim     = "#44475a"   # background panels: log, system resources, gains
+border_default = "#6272a4"   # ordinary instruments
+border_accent  = "#bd93f9"   # the spectrum and the waterfall
+border_focused = "#f8f8f2"   # whichever panel is in focus mode
+label          = "#6272a4"   # quiet structure: "Frequency", "LNA gain"
+value          = "#f8f8f2"   # ordinary readings
+value_hi       = "#f1fa8c"   # the numbers that lead: frequency, total gain
+status_ok      = "#50fa7b"
+status_warn    = "#ffb86c"
+status_crit    = "#ff5555"
+peak_hold      = "#f1fa8c"   # the spectrum's peak-hold trace
+noise_floor    = "#44475a"   # the measured noise-floor rule
+stale          = "#44475a"   # [STALE] plates and the borders they cool
+observer       = "#8be9fd"   # observer mode, when another process holds the radio
+
+# The spectrum and waterfall gradient, cold (weak) to hot (strong).
+# `at` is the position in 0.0..1.0; the stops must climb.
+palette = [
+    { at = 0.00,  color = "#282a36" },
+    { at = 0.25,  color = "#6272a4" },
+    { at = 0.48,  color = "#8be9fd" },
+    { at = 0.63,  color = "#50fa7b" },
+    { at = 0.80,  color = "#ffb86c" },
+    { at = 1.00,  color = "#ff5555" },
+]

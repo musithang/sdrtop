@@ -1,0 +1,29 @@
+# Gruvbox Dark (https://github.com/morhetz/gruvbox).
+
+name = "gruvbox"
+
+border_dim     = "#3c3836"   # background panels: log, system resources, gains
+border_default = "#665c54"   # ordinary instruments
+border_accent  = "#d79921"   # the spectrum and the waterfall
+border_focused = "#ebdbb2"   # whichever panel is in focus mode
+label          = "#665c54"   # quiet structure: "Frequency", "LNA gain"
+value          = "#d5c4a1"   # ordinary readings
+value_hi       = "#fabd2f"   # the numbers that lead: frequency, total gain
+status_ok      = "#98971a"
+status_warn    = "#d79921"
+status_crit    = "#cc241d"
+peak_hold      = "#fabd2f"   # the spectrum's peak-hold trace
+noise_floor    = "#3c3836"   # the measured noise-floor rule
+stale          = "#3c3836"   # [STALE] plates and the borders they cool
+observer       = "#458588"   # observer mode, when another process holds the radio
+
+# The spectrum and waterfall gradient, cold (weak) to hot (strong).
+# `at` is the position in 0.0..1.0; the stops must climb.
+palette = [
+    { at = 0.00,  color = "#282828" },
+    { at = 0.25,  color = "#458588" },
+    { at = 0.48,  color = "#98971a" },
+    { at = 0.63,  color = "#d79921" },
+    { at = 0.80,  color = "#d65d0e" },
+    { at = 1.00,  color = "#cc241d" },
+]

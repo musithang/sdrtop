@@ -82,9 +82,10 @@ impl App {
         let fw_version   = info.fw_version.clone().unwrap_or_else(|| "unknown".to_string());
         let board_rev    = info.board_rev.unwrap_or(0xFE);
         let usb_api_ver  = info.usb_api_version.unwrap_or(0);
+        let themes_dir    = config_path.as_deref().and_then(crate::config::AppConfig::themes_dir);
         let caps          = Arc::new(device.capabilities().clone());
         let sample_format = caps.sample_format;
-        let theme         = cfg.build_theme();
+        let theme         = cfg.build_theme(themes_dir.as_deref());
 
         // Clamp the stored config into THIS device's legal range, falling back to
         // its default when out of range — so a config saved on one device (e.g. a
@@ -236,6 +237,7 @@ impl App {
             engine,
             theme,
             focus_keys,
+            theme_config: cfg.theme.clone(),
             user_presets: cfg.presets,
         })
     }
@@ -246,9 +248,10 @@ impl App {
         sysinfo: hardware::sysfs::HackRfSysInfo,
         kind: hardware::DeviceKind,
     ) -> anyhow::Result<Self> {
+        let themes_dir = config_path.as_deref().and_then(crate::config::AppConfig::themes_dir);
         let board_name = sysinfo.product.clone();
         let serial     = sysinfo.serial.clone();
-        let theme      = cfg.build_theme();
+        let theme      = cfg.build_theme(themes_dir.as_deref());
 
         let state = Arc::new(Mutex::new(SdrMetrics {
             radio: RadioState {
@@ -346,6 +349,7 @@ impl App {
             engine,
             theme,
             focus_keys,
+            theme_config: cfg.theme.clone(),
             user_presets: cfg.presets,
         })
     }

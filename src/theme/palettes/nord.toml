@@ -1,0 +1,29 @@
+# Arctic Professional. Nord colour system (https://www.nordtheme.com/).
+
+name = "nord"
+
+border_dim     = "#3b4252"   # background panels: log, system resources, gains
+border_default = "#4c566a"   # ordinary instruments
+border_accent  = "#88c0d0"   # the spectrum and the waterfall
+border_focused = "#d8dee9"   # whichever panel is in focus mode
+label          = "#4c566a"   # quiet structure: "Frequency", "LNA gain"
+value          = "#d8dee9"   # ordinary readings
+value_hi       = "#ebcb8b"   # the numbers that lead: frequency, total gain
+status_ok      = "#a3be8c"
+status_warn    = "#ebcb8b"
+status_crit    = "#bf616a"
+peak_hold      = "#ebcb8b"   # the spectrum's peak-hold trace
+noise_floor    = "#3b4252"   # the measured noise-floor rule
+stale          = "#3b4252"   # [STALE] plates and the borders they cool
+observer       = "#81a1c1"   # observer mode, when another process holds the radio
+
+# The spectrum and waterfall gradient, cold (weak) to hot (strong).
+# `at` is the position in 0.0..1.0; the stops must climb.
+palette = [
+    { at = 0.00,  color = "#242936" },
+    { at = 0.25,  color = "#43678d" },
+    { at = 0.50,  color = "#88c0d0" },
+    { at = 0.65,  color = "#a3be8c" },
+    { at = 0.82,  color = "#ebcb8b" },
+    { at = 1.00,  color = "#bf616a" },
+]

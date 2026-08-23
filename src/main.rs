@@ -121,7 +121,8 @@ async fn main() -> Result<()> {
     if let Some(g) = cli.gain      { app_cfg.radio.lna_gain = g; }
     if let Some(t) = cli.theme     { app_cfg.theme.base = t; }
 
-    let theme = app_cfg.build_theme();
+    let themes_dir = config_path.as_deref().and_then(config::AppConfig::themes_dir);
+    let theme = app_cfg.build_theme(themes_dir.as_deref());
 
     let mut devices = hardware::list_all_devices();
     if let Some(kind) = &cli.device {

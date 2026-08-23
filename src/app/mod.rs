@@ -30,6 +30,14 @@ pub struct App {
     /// User-defined presets as loaded from config.toml, kept so save_config can
     /// write them back verbatim instead of erasing hand-edited presets.
     pub(super) user_presets: HashMap<String, crate::config::PresetConfig>,
+    /// The `[theme]` block exactly as it was loaded.
+    ///
+    /// Kept for the same reason as `user_presets`: `save_config` rewrites the
+    /// whole file, so anything it does not carry forward is deleted. This block
+    /// holds the per-field colour overrides, which the app reads once at startup
+    /// and never touches again — so without a copy of them there is nothing left
+    /// to write back.
+    pub(super) theme_config: crate::config::ThemeConfig,
 }
 
 impl App {
@@ -152,7 +160,13 @@ impl App {
                 spectrum_style:     spec_style,
                 spectrum_markers:   markers,
             },
-            theme: crate::config::ThemeConfig { base: self.theme.name.to_string(), ..Default::default() },
+            // The loaded block, not a fresh one: `..Default::default()` here
+            // silently deleted every per-field colour override on every quit.
+            // Only `base` is owned by the running app (it follows `--theme`).
+            theme: crate::config::ThemeConfig {
+                base: self.theme.name.clone(),
+                ..self.theme_config.clone()
+            },
             sweep: crate::config::SweepSettings {
                 start_hz: sweep_cfg.start_hz,
                 stop_hz:  sweep_cfg.stop_hz,
