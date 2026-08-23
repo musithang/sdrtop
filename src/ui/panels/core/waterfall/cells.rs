@@ -172,6 +172,28 @@ mod tests {
     }
 
     #[test]
+    fn zoomed_columns_are_nothing_like_the_naive_full_range_mapping() {
+        // The bug this pins. The focus readout used to map its column onto the
+        // *whole* row — `col * row_bins / cols` — while the grid mapped it
+        // through the zoom window. At zoom 1 the two agree, which is why it
+        // went unnoticed; zoomed in, the readout quoted the level of a
+        // completely different frequency from the column it pointed at.
+        let (row_bins, cols) = (1024usize, 128usize);
+        let naive = |col: usize| col * row_bins / cols;
+
+        let unzoomed = Columns::new(row_bins, 1, cols);
+        for col in 0..cols {
+            assert_eq!(unzoomed.range(col).0, naive(col), "zoom 1 hides the bug");
+        }
+
+        let zoomed = Columns::new(row_bins, 4, cols);
+        assert_eq!(zoomed.range(0).0, 384);
+        assert_eq!(naive(0), 0, "the naive mapping reads a bin that is off screen");
+        // They coincide only at the centre, the one place the old readout was right.
+        assert_eq!(zoomed.range(cols / 2).0, naive(cols / 2));
+    }
+
+    #[test]
     fn degenerate_input_does_not_underflow() {
         // A zero-bin row and a zero zoom are both nonsense, and both used to be
         // one subtraction away from panicking.
