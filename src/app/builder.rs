@@ -395,7 +395,9 @@ mod tests {
     #[test]
     fn every_focusable_panel_has_a_dispatch_arm() {
         let (_engine, focus_keys) = App::build_ui("command_rail", &HashMap::new());
-        let dispatch = include_str!("input.rs");
+        // The dispatch table is read as source text: the arms are `&str` matches on
+        // a panel name, so nothing in the type system ties them to the registry.
+        let dispatch = include_str!("input/mod.rs");
         assert!(!focus_keys.is_empty(), "no focus keys were harvested at all");
         for (key, panel) in &focus_keys {
             let arm = format!("Some(\"{panel}\")");
