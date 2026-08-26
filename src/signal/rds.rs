@@ -275,9 +275,8 @@ struct ConfirmedText {
     pending: Vec<u8>,
     hits: Vec<u8>,
     /// Which positions have ever been confirmed. Tracked separately from `hits`
-    /// because [`forget_pending`](Self::forget_pending) clears the in-flight
-    /// sightings while the text they produced stays on screen — reading "anything
-    /// confirmed?" off `hits` would have made that text vanish.
+    /// so that "is there anything to show?" is a question about published text
+    /// rather than about sightings still in flight.
     seen: Vec<bool>,
 }
 
@@ -324,15 +323,6 @@ impl ConfirmedText {
         self.pending.fill(0);
         self.hits.fill(0);
         self.seen.fill(false);
-    }
-
-    /// Drop the unconfirmed sightings, keeping the confirmed text. Used across a
-    /// break in the stream: a pending character from before the gap must not be
-    /// corroborated by one from after it, since the two are separate reception runs
-    /// and agreeing by chance is exactly the error [`CONFIRM_COUNT`] exists to catch.
-    fn forget_pending(&mut self) {
-        self.pending.fill(0);
-        self.hits.fill(0);
     }
 }
 
@@ -436,11 +426,23 @@ impl RdsDecoder {
         self.expect = None;
         self.misses = 0;
         self.group = [None; 4];
-        // Half-confirmed characters are the one thing that must go: a pending
-        // sighting from before the gap paired with one after it would confirm a
-        // character on evidence from two different reception runs.
-        self.ps.forget_pending();
-        self.rt.forget_pending();
+        // The text buffers keep their half-confirmed characters. Every character
+        // they hold arrived through `commit_group`, which fires only when all
+        // four blocks of a group passed their checkwords — so two sightings that
+        // agree are two independently validated groups agreeing, and a gap
+        // between them does not make either less valid. A genuine change of
+        // message is caught by the RadioText A/B flag, which clears the buffer
+        // outright; the gap never was the thing to watch.
+        //
+        // Discarding them cost RadioText entirely. Its 16 segments repeat about
+        // 5.6 s apart, so confirming one needs an unbroken ~11 s; PS repeats
+        // every 0.9 s and confirms in under two. A resync every few seconds — one
+        // dropped block is enough — therefore let the name through and silently
+        // starved the text. `radiotext_survives_a_lossy_stream` is that measured.
+        //
+        // PI is different and keeps its reset: `accept` publishes it from block A
+        // alone, with no group commit behind it, so a chance syndrome match
+        // during a hunt really can feed it.
         self.pi_pending = None;
         self.pi_hits = 0;
         self.data.groups_ok = 0;
@@ -873,22 +875,114 @@ mod tests {
         assert!(!d.locked(), "block sync does not survive a gap in the bits");
     }
 
+    /// One second of a realistic RDS stream: ~11 groups in a typical mix, PS
+    /// cycling every 4 groups and RadioText every 16, as a real station sends it.
+    fn realistic_stream(d: &mut RdsDecoder, seconds: usize, resync_every_s: usize) {
+        let ps = b"SDRTOP  ";
+        let rt = b"NOW PLAYING SOMETHING VERY PLEASANT INDEED ON THE RADIO TONIGHT ";
+        let mut g = 0usize;
+        for s in 0..seconds {
+            for _ in 0..11 {
+                let b_common = TP | (3 << 5);
+                match g % 5 {
+                    0 | 1 => {
+                        let seg = ((g / 5) % 4) as u16;
+                        let i = seg as usize * 2;
+                        let dd = u16::from_be_bytes([ps[i], ps[i + 1]]);
+                        for bit in encode_group([0xB201, b_common | seg, 0, dd], false) {
+                            d.push_bit(bit);
+                        }
+                    }
+                    2 => {
+                        let seg = ((g / 5) % 16) as u16;
+                        let i = seg as usize * 4;
+                        let c = u16::from_be_bytes([rt[i], rt[i + 1]]);
+                        let dd = u16::from_be_bytes([rt[i + 2], rt[i + 3]]);
+                        for bit in encode_group([0xB201, GROUP_2A | b_common | seg, c, dd], false) {
+                            d.push_bit(bit);
+                        }
+                    }
+                    // Something else on the air, carrying no text.
+                    _ => {
+                        for bit in
+                            encode_group([0xB201, (3 << 12) | b_common, 0x1234, 0x5678], false)
+                        {
+                            d.push_bit(bit);
+                        }
+                    }
+                }
+                g += 1;
+            }
+            if resync_every_s > 0 && (s + 1) % resync_every_s == 0 {
+                d.resync();
+            }
+        }
+    }
+
     #[test]
-    fn resync_discards_half_confirmed_characters() {
-        // A character seen once before the gap must not be confirmed by a sighting
-        // after it: the two are separate reception runs, and agreeing by chance is
-        // exactly the error CONFIRM_COUNT exists to catch.
+    fn radiotext_survives_a_lossy_stream() {
+        // The bug, measured. RadioText's 16 segments repeat about 5.6 s apart, so
+        // confirming one takes an unbroken ~11 s; PS repeats every 0.9 s. While
+        // `resync` discarded half-confirmed characters, a resync every few seconds
+        // — one dropped block is enough — let the station name through and starved
+        // the text, which is exactly what the panel showed: a name, a programme
+        // type, a climbing group count, and no RadioText ever.
+        for resync_every_s in [0, 10, 5, 3] {
+            let mut d = RdsDecoder::new();
+            realistic_stream(&mut d, 60, resync_every_s);
+            assert_eq!(
+                d.data().ps.as_deref(),
+                Some("SDRTOP"),
+                "PS was never the problem (resync every {resync_every_s}s)"
+            );
+            let rt = d.data().rt.clone().unwrap_or_default();
+            assert!(
+                rt.starts_with("NOW PLAYING"),
+                "RadioText starved by a resync every {resync_every_s}s: {rt:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn resync_keeps_half_confirmed_characters() {
+        // The opposite of what this used to assert, and the RadioText bug.
+        //
+        // Every character in these buffers arrived through `commit_group`, which
+        // fires only when all four blocks of a group passed their checkwords. Two
+        // sightings that agree are two independently validated groups agreeing,
+        // and a gap between them does not make either less valid — so the
+        // evidence survives the resync and the second sighting confirms.
+        let mut d = RdsDecoder::new();
+        let send = |d: &mut RdsDecoder| {
+            let b = GROUP_2A | TP | (3 << 5);
+            for bit in encode_group([0xB201, b, 0x4142, 0x4344], false) {
+                d.push_bit(bit);
+            }
+        };
+        send(&mut d);
+        assert!(d.data().rt.is_none(), "one sighting is not yet evidence");
+        d.resync();
+        send(&mut d);
+        assert_eq!(
+            d.data().rt.as_deref(),
+            Some("ABCD"),
+            "a gap between two validated groups must not discard the first"
+        );
+    }
+
+    #[test]
+    fn a_character_still_needs_two_sightings_that_agree() {
+        // Keeping evidence across a gap is not the same as trusting one sighting.
         let mut t = ConfirmedText::new(4);
-        t.set(0, b'A'); // one sighting, not yet confirmed
-        assert!(!t.confirmed_any());
-        t.forget_pending();
-        t.set(0, b'A'); // the first sighting of a new run
+        t.set(0, b'A');
+        assert!(!t.confirmed_any(), "one sighting is not enough");
+        t.set(0, b'B');
         assert!(
             !t.confirmed_any(),
-            "a pre-gap sighting corroborated a post-gap one"
+            "two that disagree are not enough either"
         );
-        t.set(0, b'A');
-        assert!(t.confirmed_any(), "two sightings in one run still confirm");
+        t.set(0, b'B');
+        assert!(t.confirmed_any());
     }
 
     #[test]
