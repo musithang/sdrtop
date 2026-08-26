@@ -14,21 +14,26 @@ mod ui;
 mod waterfall;
 
 pub(crate) use acc::Accumulators;
-pub use demod::{deviation_limit_hz, strongest_offset_hz, AmMeasure, CtcssMeasure, DemodState,
-                FmMeasure, MpxFrame, PilotState, RdsData, OFFSET_STEP_HZ, PTY_NAMES, RDS_AGED_AFTER, RDS_DROPPED_AFTER};
-pub use iq::{IqState, IqCalState, CONSTELLATION_CAP};
+pub use demod::{
+    deviation_limit_hz, strongest_offset_hz, AmMeasure, CtcssMeasure, DemodState, FmMeasure,
+    MpxFrame, PilotState, RdsData, OFFSET_STEP_HZ, PTY_NAMES, RDS_AGED_AFTER, RDS_DROPPED_AFTER,
+};
+pub use iq::{IqCalState, IqState, CONSTELLATION_CAP};
 pub use lab::{LabState, RfFreeze};
 pub use micro::MicroView;
 pub use observer::ObserverState;
 pub use radio::RadioState;
-pub use signal::{acpr_offset_hz, classify, Modulation, SignalState, CLASSIFY_MIN_SNR_DB,
-                 SAT_CLIP_PCT};
+pub use signal::{
+    acpr_offset_hz, classify, Modulation, SignalState, CLASSIFY_MIN_SNR_DB, SAT_CLIP_PCT,
+};
 pub use spectrum::{SpectrumMarker, SpectrumState, SpectrumStyle};
 pub use sweep::{SweepConfig, SweepFrame, SweepState, SWEEP_SETTLING_MS};
 pub use system::SystemState;
 pub use timing::{TimingQuality, TimingState, HACKRF_SAMPLES_PER_TRANSFER};
-pub use ui::{active_recall_slot, recall_from_hz, recall_to_hz, InputMode, LogEntry, LogLevel,
-             RailMode, UiState, RECALL_SLOTS};
+pub use ui::{
+    active_recall_slot, recall_from_hz, recall_to_hz, InputMode, LogEntry, LogLevel, RailMode,
+    UiState, RECALL_SLOTS,
+};
 pub use waterfall::{FftFrame, WaterfallState};
 
 pub const THROUGHPUT_HISTORY_LEN: usize = 64;
@@ -46,24 +51,24 @@ pub const DEFAULT_SAMPLE_RATE: f64 = 10_000_000.0;
 
 #[derive(Clone)]
 pub struct SdrMetrics {
-    pub radio:    RadioState,
-    pub signal:   SignalState,
-    pub iq:       IqState,
+    pub radio: RadioState,
+    pub signal: SignalState,
+    pub iq: IqState,
     pub observer: ObserverState,
     pub spectrum: SpectrumState,
     pub waterfall: WaterfallState,
-    pub system:   SystemState,
-    pub timing:   TimingState,
-    pub sweep:    SweepState,
-    pub ui:       UiState,
+    pub system: SystemState,
+    pub timing: TimingState,
+    pub sweep: SweepState,
+    pub ui: UiState,
     /// Lab "instrument mode" measurement state (REF/AVG/CAL). See [`LabState`].
-    pub lab:      LabState,
+    pub lab: LabState,
     /// Demodulator measurement + gating for the `lab_signal` bench. See [`DemodState`].
-    pub demod:    DemodState,
+    pub demod: DemodState,
     /// Active device's capability descriptor — drives capability-aware UI
     /// rendering (gain model, BB filter / Friis applicability, ranges). Shared
     /// (Arc) so the per-frame `SdrMetrics` clone stays cheap.
-    pub caps:     std::sync::Arc<crate::hardware::DeviceCapabilities>,
+    pub caps: std::sync::Arc<crate::hardware::DeviceCapabilities>,
     pub(crate) acc: Accumulators,
 }
 

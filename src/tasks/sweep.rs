@@ -28,8 +28,13 @@ pub fn spawn_sweep_task(state: Arc<Mutex<SdrMetrics>>, device: Arc<dyn SdrDevice
         loop {
             let (active, config, sample_rate, fmin, fmax) = {
                 let m = state.lock().unwrap_or_else(|e| e.into_inner());
-                (m.sweep.active, m.sweep.config.clone(), m.radio.config_sample_rate,
-                 m.caps.freq_min_hz, m.caps.freq_max_hz)
+                (
+                    m.sweep.active,
+                    m.sweep.config.clone(),
+                    m.radio.config_sample_rate,
+                    m.caps.freq_min_hz,
+                    m.caps.freq_max_hz,
+                )
             };
 
             // ── Enter sweep: remember normal-RX state, force streaming on.
@@ -44,7 +49,8 @@ pub fn spawn_sweep_task(state: Arc<Mutex<SdrMetrics>>, device: Arc<dyn SdrDevice
                 m.sweep.positions_total = config.positions_total(sample_rate);
                 m.push_log(format!(
                     "Sweep started: {:.1}–{:.1} MHz",
-                    config.start_hz as f64 / 1e6, config.stop_hz as f64 / 1e6
+                    config.start_hz as f64 / 1e6,
+                    config.stop_hz as f64 / 1e6
                 ));
             }
 
@@ -62,7 +68,11 @@ pub fn spawn_sweep_task(state: Arc<Mutex<SdrMetrics>>, device: Arc<dyn SdrDevice
                     let mut m = state.lock().unwrap_or_else(|e| e.into_inner());
                     m.radio.frequency = target;
                     // A jump resumes normal RX; a plain stop restores the prior state.
-                    m.radio.rx_enabled = if target != saved_freq { true } else { saved_rx_enabled };
+                    m.radio.rx_enabled = if target != saved_freq {
+                        true
+                    } else {
+                        saved_rx_enabled
+                    };
                     m.sweep.cursor_frac = None;
                     m.push_log(if target != saved_freq {
                         format!("Tuned to {:.3} MHz from sweep", target as f64 / 1e6)
@@ -112,7 +122,9 @@ pub fn spawn_sweep_task(state: Arc<Mutex<SdrMetrics>>, device: Arc<dyn SdrDevice
                     {
                         let m = state.lock().unwrap_or_else(|e| e.into_inner());
                         if let Some(fr) = &m.waterfall.last_fft {
-                            if fr.center_freq_hz == hz && fr.timestamp.elapsed().as_millis() < FRAME_FRESH_MS {
+                            if fr.center_freq_hz == hz
+                                && fr.timestamp.elapsed().as_millis() < FRAME_FRESH_MS
+                            {
                                 let bins = &fr.bins_dbfs;
                                 if pos_peak.len() != bins.len() {
                                     pos_peak = vec![f32::NEG_INFINITY; bins.len()];
@@ -120,7 +132,9 @@ pub fn spawn_sweep_task(state: Arc<Mutex<SdrMetrics>>, device: Arc<dyn SdrDevice
                                     pos_sr = fr.sample_rate;
                                 }
                                 for (j, &b) in bins.iter().enumerate() {
-                                    if b > pos_peak[j] { pos_peak[j] = b; }
+                                    if b > pos_peak[j] {
+                                        pos_peak[j] = b;
+                                    }
                                     pos_mean_sum[j] += b as f64;
                                 }
                                 frames += 1;
@@ -152,7 +166,7 @@ pub fn spawn_sweep_task(state: Arc<Mutex<SdrMetrics>>, device: Arc<dyn SdrDevice
                     let cc = m.sweep.cycle_count;
                     m.sweep.current_frame = Some(Arc::new(SweepFrame {
                         start_hz: config.start_hz,
-                        stop_hz:  config.stop_hz,
+                        stop_hz: config.stop_hz,
                         freq_hz,
                         peak_dbfs: peak,
                         mean_dbfs: mean,

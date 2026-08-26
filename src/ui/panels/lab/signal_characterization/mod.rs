@@ -34,12 +34,7 @@ mod verdict;
 
 pub(crate) use verdict::{verdict, VerdictLevel};
 
-use ratatui::{
-    layout::Rect,
-    text::Line,
-    widgets::Paragraph,
-    Frame,
-};
+use ratatui::{layout::Rect, text::Line, widgets::Paragraph, Frame};
 
 use crate::state::SdrMetrics;
 use crate::ui::chrome::fit_spacers;
@@ -49,9 +44,15 @@ use crate::ui::widgets::micro_common::fft_stale;
 pub struct SignalCharacterizationPanel;
 
 impl Panel for SignalCharacterizationPanel {
-    fn name(&self) -> &'static str { "signal_characterization" }
-    fn min_size(&self) -> (u16, u16) { (30, 12) }
-    fn focus_key(&self) -> Option<char> { Some('x') }
+    fn name(&self) -> &'static str {
+        "signal_characterization"
+    }
+    fn min_size(&self) -> (u16, u16) {
+        (30, 12)
+    }
+    fn focus_key(&self) -> Option<char> {
+        Some('x')
+    }
     fn focus_bindings(&self) -> &'static [(&'static str, &'static str)] {
         &[("C", "Snapshot to log")]
     }
@@ -62,8 +63,17 @@ impl Panel for SignalCharacterizationPanel {
         PanelChrome::new("Signal Characterization").stale_when(Staleness::FftAge)
     }
 
-    fn render(&self, f: &mut Frame, inner: Rect, state: &SdrMetrics, theme: &crate::Theme, _focused: bool) {
-        if inner.width == 0 || inner.height == 0 { return; }
+    fn render(
+        &self,
+        f: &mut Frame,
+        inner: Rect,
+        state: &SdrMetrics,
+        theme: &crate::Theme,
+        _focused: bool,
+    ) {
+        if inner.width == 0 || inner.height == 0 {
+            return;
+        }
         let iw = inner.width as usize;
 
         let stale = fft_stale(state);
@@ -95,6 +105,9 @@ mod tests {
 
     #[test]
     fn panel_name_is_stable() {
-        assert_eq!(SignalCharacterizationPanel.name(), "signal_characterization");
+        assert_eq!(
+            SignalCharacterizationPanel.name(),
+            "signal_characterization"
+        );
     }
 }

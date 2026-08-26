@@ -59,8 +59,8 @@ pub fn spawn_rx_task(
             let hw_streaming = device.is_streaming();
             let now = Instant::now();
 
-            hw_rx_active = control::note_unexpected_stop(
-                &state, &device, hw_rx_active, hw_streaming);
+            hw_rx_active =
+                control::note_unexpected_stop(&state, &device, hw_rx_active, hw_streaming);
 
             let drained = poll::drain(&state, &rx_ctx, now, hw_streaming);
 
@@ -68,15 +68,30 @@ pub fn spawn_rx_task(
                 iq: metrics::iq_metrics(drained.moments, drained.cal),
                 had_samples: drained.moments.samples > 0,
                 callback: metrics::callback_timing(
-                    drained.jitter_sum_us, drained.jitter_sq_sum, drained.jitter_count),
+                    drained.jitter_sum_us,
+                    drained.jitter_sq_sum,
+                    drained.jitter_count,
+                ),
             };
 
             let rx_enabled = publish::write_back(
-                &state, &device, &computed, &mut throughput,
-                now, hw_streaming, &mut last_snr_push);
+                &state,
+                &device,
+                &computed,
+                &mut throughput,
+                now,
+                hw_streaming,
+                &mut last_snr_push,
+            );
 
             hw_rx_active = control::apply_rx_request(
-                &state, &device, &rx_ctx, &mut throughput, rx_enabled, hw_rx_active);
+                &state,
+                &device,
+                &rx_ctx,
+                &mut throughput,
+                rx_enabled,
+                hw_rx_active,
+            );
 
             if hw_streaming && hw_rx_active && computed.had_samples {
                 control::track_gain(&state, &device, computed.iq.adc_peak_dbfs);

@@ -13,7 +13,7 @@ use crate::hardware;
 use crate::state::{InputMode, MicroView, RailMode, SdrMetrics};
 use crate::ui;
 
-use super::{InputCtx, KeyAction, metrics};
+use super::{metrics, InputCtx, KeyAction};
 
 /// Next value for the primary front-end gain when stepping up/down: HackRF's LNA
 /// moves in 8 dB steps (0–40); RTL-SDR's single tuner gain walks its discrete
@@ -21,7 +21,11 @@ use super::{InputCtx, KeyAction, metrics};
 fn next_primary_gain(gain: &hardware::GainModel, current: u32, up: bool) -> u32 {
     match gain {
         hardware::GainModel::HackRf => {
-            if up { (current + 8).min(40) } else { current.saturating_sub(8) }
+            if up {
+                (current + 8).min(40)
+            } else {
+                current.saturating_sub(8)
+            }
         }
         hardware::GainModel::RtlSingle { gain_steps_db, .. } => {
             if gain_steps_db.is_empty() {
@@ -78,7 +82,7 @@ pub(super) fn handle(key: KeyEvent, ctx: &mut InputCtx<'_>) -> KeyAction {
                 // legal freq/rate instead of HackRF's 2.4 GHz / 10 Msps.
                 let caps = device.capabilities();
                 let def_freq = caps.default_frequency_hz;
-                let def_sr   = caps.default_sample_rate_hz;
+                let def_sr = caps.default_sample_rate_hz;
                 // Snap the default gains into this device's gain model so RTL-SDR
                 // lands on a legal tuner step, not HackRF's raw LNA/VGA constants.
                 let (lna_def, vga_def) = caps.gain.clamp_gains(DEFAULT_LNA_GAIN, DEFAULT_VGA_GAIN);
@@ -95,17 +99,19 @@ pub(super) fn handle(key: KeyEvent, ctx: &mut InputCtx<'_>) -> KeyAction {
                 ];
                 let mut m = metrics(state);
                 if results.iter().all(|r| r.is_ok()) {
-                    m.radio.lna_gain           = lna_def;
-                    m.radio.vga_gain           = vga_def;
-                    m.radio.amp_enabled        = false;
-                    m.lab.rf_autotrack         = false;
-                    m.radio.frequency          = def_freq;
+                    m.radio.lna_gain = lna_def;
+                    m.radio.vga_gain = vga_def;
+                    m.radio.amp_enabled = false;
+                    m.lab.rf_autotrack = false;
+                    m.radio.frequency = def_freq;
                     m.radio.config_sample_rate = def_sr;
-                    m.radio.bb_filter_hz       = bb_bw;
+                    m.radio.bb_filter_hz = bb_bw;
                     m.push_log("Settings reset to defaults");
                 } else {
                     for r in &results {
-                        if let Err(e) = r { m.push_log(format!("Reset error: {}", e)); }
+                        if let Err(e) = r {
+                            m.push_log(format!("Reset error: {}", e));
+                        }
                     }
                 }
             }
@@ -124,39 +130,73 @@ pub(super) fn handle(key: KeyEvent, ctx: &mut InputCtx<'_>) -> KeyAction {
             let mut m = metrics(state);
             m.ui.input_mode = InputMode::SampleRateInput;
             m.ui.input_buf.clear();
-            m.push_log(format!("Enter sample rate in MHz ({:.1}–{:.1}), then press Enter", lo, hi));
+            m.push_log(format!(
+                "Enter sample rate in MHz ({:.1}–{:.1}), then press Enter",
+                lo, hi
+            ));
         }
         KeyCode::Char('?') => *ctx.show_help = !*ctx.show_help,
-        KeyCode::Tab       => *ctx.show_footer = !*ctx.show_footer,
+        KeyCode::Tab => *ctx.show_footer = !*ctx.show_footer,
         KeyCode::Char('p') => {
             ctx.engine.cycle_preset();
             let name = ctx.engine.active_preset().to_string();
             metrics(state).push_log(format!("Preset: {}", name));
         }
-        KeyCode::Char('1') => { ctx.engine.set_preset("command_rail");     metrics(state).push_log("Preset: command rail"); }
-        KeyCode::Char('2') => { ctx.engine.set_preset("spectrum");         metrics(state).push_log("Preset: spectrum"); }
-        KeyCode::Char('3') => { ctx.engine.set_preset("waterfall");        metrics(state).push_log("Preset: waterfall"); }
-        KeyCode::Char('4') => { ctx.engine.set_preset("spectrum_waterfall"); metrics(state).push_log("Preset: spectrum+waterfall"); }
+        KeyCode::Char('1') => {
+            ctx.engine.set_preset("command_rail");
+            metrics(state).push_log("Preset: command rail");
+        }
+        KeyCode::Char('2') => {
+            ctx.engine.set_preset("spectrum");
+            metrics(state).push_log("Preset: spectrum");
+        }
+        KeyCode::Char('3') => {
+            ctx.engine.set_preset("waterfall");
+            metrics(state).push_log("Preset: waterfall");
+        }
+        KeyCode::Char('4') => {
+            ctx.engine.set_preset("spectrum_waterfall");
+            metrics(state).push_log("Preset: spectrum+waterfall");
+        }
         // Lab family on [5]–[8]. Each lights up automatically once its preset is
         // defined; until then it logs without switching.
-        KeyCode::Char('5') => { try_set_preset(ctx.engine, state, "lab_iq"); }
-        KeyCode::Char('6') => { try_set_preset(ctx.engine, state, "lab_rf"); }
-        KeyCode::Char('7') => { try_set_preset(ctx.engine, state, "lab_timing"); }
-        KeyCode::Char('8') => { try_set_preset(ctx.engine, state, "lab_signal"); }
+        KeyCode::Char('5') => {
+            try_set_preset(ctx.engine, state, "lab_iq");
+        }
+        KeyCode::Char('6') => {
+            try_set_preset(ctx.engine, state, "lab_rf");
+        }
+        KeyCode::Char('7') => {
+            try_set_preset(ctx.engine, state, "lab_timing");
+        }
+        KeyCode::Char('8') => {
+            try_set_preset(ctx.engine, state, "lab_signal");
+        }
         // [9] reserved for the future lab_sweep (Phase 6); pre-wired so it activates
         // the moment that preset exists.
-        KeyCode::Char('9') => { try_set_preset(ctx.engine, state, "lab_sweep"); }
-        KeyCode::Char('0') => { cycle_micro(ctx.engine, state); }
+        KeyCode::Char('9') => {
+            try_set_preset(ctx.engine, state, "lab_sweep");
+        }
+        KeyCode::Char('0') => {
+            cycle_micro(ctx.engine, state);
+        }
         KeyCode::Char('w') => {
             let mut m = metrics(state);
             m.waterfall.buffer.paused = !m.waterfall.buffer.paused;
-            let s = if m.waterfall.buffer.paused { "paused" } else { "resumed" };
+            let s = if m.waterfall.buffer.paused {
+                "paused"
+            } else {
+                "resumed"
+            };
             m.push_log(format!("Waterfall {}", s));
         }
         KeyCode::Char('h') => {
             let held = {
                 let m = metrics(state);
-                m.waterfall.last_fft.as_ref().map(|fr| Arc::clone(&fr.bins_dbfs))
+                m.waterfall
+                    .last_fft
+                    .as_ref()
+                    .map(|fr| Arc::clone(&fr.bins_dbfs))
             };
             let mut m = metrics(state);
             if m.spectrum.hold.is_some() {
@@ -179,9 +219,16 @@ pub(super) fn handle(key: KeyEvent, ctx: &mut InputCtx<'_>) -> KeyAction {
                         m.radio.lna_gain = new_gain;
                         // On a single-tuner device, setting a manual gain turns the
                         // tuner AGC off in hardware — keep the UI's AGC flag in sync.
-                        if gain.is_single() { m.radio.amp_enabled = false; }
-                        m.lab.rf_autotrack = false; m.ui.note_mode_action(RailMode::Bench);
-                        m.push_log(format!("{} gain → {} dB", primary_gain_label(gain), new_gain));
+                        if gain.is_single() {
+                            m.radio.amp_enabled = false;
+                        }
+                        m.lab.rf_autotrack = false;
+                        m.ui.note_mode_action(RailMode::Bench);
+                        m.push_log(format!(
+                            "{} gain → {} dB",
+                            primary_gain_label(gain),
+                            new_gain
+                        ));
                     }
                     Err(e) => m.push_log(format!("Gain error: {}", e)),
                 }
@@ -199,9 +246,16 @@ pub(super) fn handle(key: KeyEvent, ctx: &mut InputCtx<'_>) -> KeyAction {
                         m.radio.lna_gain = new_gain;
                         // On a single-tuner device, setting a manual gain turns the
                         // tuner AGC off in hardware — keep the UI's AGC flag in sync.
-                        if gain.is_single() { m.radio.amp_enabled = false; }
-                        m.lab.rf_autotrack = false; m.ui.note_mode_action(RailMode::Bench);
-                        m.push_log(format!("{} gain → {} dB", primary_gain_label(gain), new_gain));
+                        if gain.is_single() {
+                            m.radio.amp_enabled = false;
+                        }
+                        m.lab.rf_autotrack = false;
+                        m.ui.note_mode_action(RailMode::Bench);
+                        m.push_log(format!(
+                            "{} gain → {} dB",
+                            primary_gain_label(gain),
+                            new_gain
+                        ));
                     }
                     Err(e) => m.push_log(format!("Gain error: {}", e)),
                 }
@@ -211,11 +265,19 @@ pub(super) fn handle(key: KeyEvent, ctx: &mut InputCtx<'_>) -> KeyAction {
         KeyCode::Char('[') => {
             if let Some(device) = device {
                 if matches!(device.capabilities().gain, hardware::GainModel::HackRf) {
-                    let new_gain = { let m = metrics(state); m.radio.vga_gain.saturating_sub(2) };
+                    let new_gain = {
+                        let m = metrics(state);
+                        m.radio.vga_gain.saturating_sub(2)
+                    };
                     let result = device.set_vga_gain(new_gain);
                     let mut m = metrics(state);
                     match result {
-                        Ok(()) => { m.radio.vga_gain = new_gain; m.lab.rf_autotrack = false; m.ui.note_mode_action(RailMode::Bench); m.push_log(format!("VGA gain → {} dB", new_gain)); }
+                        Ok(()) => {
+                            m.radio.vga_gain = new_gain;
+                            m.lab.rf_autotrack = false;
+                            m.ui.note_mode_action(RailMode::Bench);
+                            m.push_log(format!("VGA gain → {} dB", new_gain));
+                        }
                         Err(e) => m.push_log(format!("VGA gain error: {}", e)),
                     }
                 }
@@ -224,11 +286,19 @@ pub(super) fn handle(key: KeyEvent, ctx: &mut InputCtx<'_>) -> KeyAction {
         KeyCode::Char(']') => {
             if let Some(device) = device {
                 if matches!(device.capabilities().gain, hardware::GainModel::HackRf) {
-                    let new_gain = { let m = metrics(state); (m.radio.vga_gain + 2).min(62) };
+                    let new_gain = {
+                        let m = metrics(state);
+                        (m.radio.vga_gain + 2).min(62)
+                    };
                     let result = device.set_vga_gain(new_gain);
                     let mut m = metrics(state);
                     match result {
-                        Ok(()) => { m.radio.vga_gain = new_gain; m.lab.rf_autotrack = false; m.ui.note_mode_action(RailMode::Bench); m.push_log(format!("VGA gain → {} dB", new_gain)); }
+                        Ok(()) => {
+                            m.radio.vga_gain = new_gain;
+                            m.lab.rf_autotrack = false;
+                            m.ui.note_mode_action(RailMode::Bench);
+                            m.push_log(format!("VGA gain → {} dB", new_gain));
+                        }
                         Err(e) => m.push_log(format!("VGA gain error: {}", e)),
                     }
                 }
@@ -238,9 +308,19 @@ pub(super) fn handle(key: KeyEvent, ctx: &mut InputCtx<'_>) -> KeyAction {
             if let Some(device) = device {
                 // `amp_enabled` doubles as the front-end-boost toggle: HackRF's RF
                 // amp, RTL-SDR's tuner AGC. The label follows the gain model.
-                let is_rtl = matches!(device.capabilities().gain, hardware::GainModel::RtlSingle { .. });
-                let new_state = { let m = metrics(state); !m.radio.amp_enabled };
-                let result = if is_rtl { device.set_tuner_agc(new_state) } else { device.set_amp_enable(new_state) };
+                let is_rtl = matches!(
+                    device.capabilities().gain,
+                    hardware::GainModel::RtlSingle { .. }
+                );
+                let new_state = {
+                    let m = metrics(state);
+                    !m.radio.amp_enabled
+                };
+                let result = if is_rtl {
+                    device.set_tuner_agc(new_state)
+                } else {
+                    device.set_amp_enable(new_state)
+                };
                 let label = if is_rtl { "AGC" } else { "AMP" };
                 let mut m = metrics(state);
                 match result {
@@ -248,7 +328,11 @@ pub(super) fn handle(key: KeyEvent, ctx: &mut InputCtx<'_>) -> KeyAction {
                         m.radio.amp_enabled = new_state;
                         m.lab.rf_autotrack = false;
                         m.ui.note_mode_action(RailMode::Bench);
-                        m.push_log(format!("{} {}", label, if new_state { "ON" } else { "OFF" }));
+                        m.push_log(format!(
+                            "{} {}",
+                            label,
+                            if new_state { "ON" } else { "OFF" }
+                        ));
                     }
                     Err(e) => m.push_log(format!("{} error: {}", label, e)),
                 }
@@ -270,7 +354,6 @@ pub(super) fn handle(key: KeyEvent, ctx: &mut InputCtx<'_>) -> KeyAction {
     KeyAction::Continue
 }
 
-
 /// [`handle`] with the radio hidden.
 ///
 /// The waterfall's focus handler never had a `device` parameter, so anything
@@ -289,7 +372,11 @@ pub(super) fn handle_no_device(key: KeyEvent, ctx: &mut InputCtx<'_>) -> KeyActi
 /// available. This keeps the number-key framework (`[6]`–`[9]`, `[0]`) in place
 /// before the presets themselves exist, so each one activates the moment it is
 /// added to the layout config.
-fn try_set_preset(engine: &mut ui::LayoutEngine, state: &Arc<Mutex<SdrMetrics>>, name: &str) -> KeyAction {
+fn try_set_preset(
+    engine: &mut ui::LayoutEngine,
+    state: &Arc<Mutex<SdrMetrics>>,
+    name: &str,
+) -> KeyAction {
     let mut m = metrics(state);
     if engine.has_preset(name) {
         engine.set_preset(name);
@@ -310,13 +397,24 @@ fn cycle_micro(engine: &mut ui::LayoutEngine, state: &Arc<Mutex<SdrMetrics>>) {
     const SWEEP_ACTIVE: bool = true;
     let in_micro = engine.active_preset().starts_with("micro_");
     let mut m = metrics(state);
-    let target = if in_micro { m.ui.micro_view.next(SWEEP_ACTIVE) } else { MicroView::Main };
+    let target = if in_micro {
+        m.ui.micro_view.next(SWEEP_ACTIVE)
+    } else {
+        MicroView::Main
+    };
     if engine.has_preset(target.preset_name()) {
         m.ui.micro_view = target;
         engine.set_preset(target.preset_name());
-        m.push_log(format!("Micro: {} ({}/{})", target.label(), target.position(), MicroView::total(SWEEP_ACTIVE)));
+        m.push_log(format!(
+            "Micro: {} ({}/{})",
+            target.label(),
+            target.position(),
+            MicroView::total(SWEEP_ACTIVE)
+        ));
     } else {
-        m.push_log(format!("Preset '{}' not yet available", target.preset_name()));
+        m.push_log(format!(
+            "Preset '{}' not yet available",
+            target.preset_name()
+        ));
     }
 }
-

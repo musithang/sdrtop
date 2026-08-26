@@ -7,10 +7,10 @@ use ratatui::{
 
 use crate::config::{LayoutConfig, Position};
 use crate::state::SdrMetrics;
-use crate::ui::panel::Bond;
-use crate::ui::registry::PanelRegistry;
 use crate::ui::chrome;
+use crate::ui::panel::Bond;
 use crate::ui::panels::core::{spectrum, waterfall};
+use crate::ui::registry::PanelRegistry;
 
 pub struct LayoutEngine {
     pub config: LayoutConfig,
@@ -21,12 +21,20 @@ pub struct LayoutEngine {
 
 impl LayoutEngine {
     pub fn new(config: LayoutConfig, registry: PanelRegistry) -> Self {
-        Self { config, registry, focused_panel: None, hidden_panels: HashSet::new() }
+        Self {
+            config,
+            registry,
+            focused_panel: None,
+            hidden_panels: HashSet::new(),
+        }
     }
 
     pub fn set_panel_hidden(&mut self, name: &str, hidden: bool) {
-        if hidden { self.hidden_panels.insert(name.to_string()); }
-        else      { self.hidden_panels.remove(name); }
+        if hidden {
+            self.hidden_panels.insert(name.to_string());
+        } else {
+            self.hidden_panels.remove(name);
+        }
     }
 
     pub fn active_preset(&self) -> &str {
@@ -53,7 +61,10 @@ impl LayoutEngine {
     pub fn cycle_preset(&mut self) {
         let mut names: Vec<String> = self.config.presets.keys().cloned().collect();
         names.sort();
-        let current = names.iter().position(|n| n == &self.config.active_preset).unwrap_or(0);
+        let current = names
+            .iter()
+            .position(|n| n == &self.config.active_preset)
+            .unwrap_or(0);
         self.config.active_preset = names[(current + 1) % names.len()].clone();
     }
 
@@ -92,7 +103,8 @@ impl LayoutEngine {
     }
 
     pub fn get_panel_bindings(&self, name: &str) -> &'static [(&'static str, &'static str)] {
-        self.registry.get(name)
+        self.registry
+            .get(name)
             .map(|p| p.focus_bindings())
             .unwrap_or(&[])
     }
@@ -104,26 +116,41 @@ impl LayoutEngine {
 
         let visible = |name: &str| !self.hidden_panels.contains(name);
 
-        let top_specs: Vec<_> = specs.iter().filter(|s| s.position == Position::Top && visible(&s.name)).collect();
-        let bottom_specs: Vec<_> = specs.iter().filter(|s| s.position == Position::Bottom && visible(&s.name)).collect();
-        let body_specs: Vec<_> = specs.iter().filter(|s| {
-            matches!(s.position, Position::Left | Position::Right | Position::Body) && visible(&s.name)
-        }).collect();
+        let top_specs: Vec<_> = specs
+            .iter()
+            .filter(|s| s.position == Position::Top && visible(&s.name))
+            .collect();
+        let bottom_specs: Vec<_> = specs
+            .iter()
+            .filter(|s| s.position == Position::Bottom && visible(&s.name))
+            .collect();
+        let body_specs: Vec<_> = specs
+            .iter()
+            .filter(|s| {
+                matches!(
+                    s.position,
+                    Position::Left | Position::Right | Position::Body
+                ) && visible(&s.name)
+            })
+            .collect();
 
         let panel_h = |s: &&crate::config::PanelSpec| -> u16 {
             s.height.unwrap_or_else(|| {
                 // Call footer height directly to avoid dyn-dispatch ambiguity
                 if s.name == "footer" {
-                    return crate::ui::panels::core::footer::compute_footer_height(size.width, state);
+                    return crate::ui::panels::core::footer::compute_footer_height(
+                        size.width, state,
+                    );
                 }
-                self.registry.get(&s.name)
+                self.registry
+                    .get(&s.name)
                     .map(|p| p.preferred_height(size.width, state))
                     .unwrap_or(3)
             })
         };
 
         // Compute heights once — reused for both total-height sum and per-panel Rect.
-        let top_heights: Vec<u16>    = top_specs.iter().map(panel_h).collect();
+        let top_heights: Vec<u16> = top_specs.iter().map(panel_h).collect();
         let bottom_heights: Vec<u16> = bottom_specs.iter().map(panel_h).collect();
         let top_h: u16 = top_heights.iter().sum();
         let bot_h: u16 = bottom_heights.iter().sum();
@@ -140,33 +167,61 @@ impl LayoutEngine {
         // Top panels — stacked downward
         let mut y = outer[0].y;
         for (spec, &h) in top_specs.iter().zip(top_heights.iter()) {
-            let area = Rect { x: outer[0].x, y, width: outer[0].width, height: h };
-            self.registry.render_panel(&spec.name, f, area, state, theme, focused == Some(spec.name.as_str()));
+            let area = Rect {
+                x: outer[0].x,
+                y,
+                width: outer[0].width,
+                height: h,
+            };
+            self.registry.render_panel(
+                &spec.name,
+                f,
+                area,
+                state,
+                theme,
+                focused == Some(spec.name.as_str()),
+            );
             y += h;
         }
 
         // Bottom panels — stacked downward
         let mut y = outer[2].y;
         for (spec, &h) in bottom_specs.iter().zip(bottom_heights.iter()) {
-            let area = Rect { x: outer[2].x, y, width: outer[2].width, height: h };
-            self.registry.render_panel(&spec.name, f, area, state, theme, focused == Some(spec.name.as_str()));
+            let area = Rect {
+                x: outer[2].x,
+                y,
+                width: outer[2].width,
+                height: h,
+            };
+            self.registry.render_panel(
+                &spec.name,
+                f,
+                area,
+                state,
+                theme,
+                focused == Some(spec.name.as_str()),
+            );
             y += h;
         }
 
         // Body — split into left / center / right columns
         if !body_specs.is_empty() {
-            let left_specs: Vec<_> = body_specs.iter()
-                .filter(|s| s.position == Position::Left).collect();
-            let right_specs: Vec<_> = body_specs.iter()
-                .filter(|s| s.position == Position::Right).collect();
-            let center_specs: Vec<_> = body_specs.iter()
-                .filter(|s| s.position == Position::Body).collect();
+            let left_specs: Vec<_> = body_specs
+                .iter()
+                .filter(|s| s.position == Position::Left)
+                .collect();
+            let right_specs: Vec<_> = body_specs
+                .iter()
+                .filter(|s| s.position == Position::Right)
+                .collect();
+            let center_specs: Vec<_> = body_specs
+                .iter()
+                .filter(|s| s.position == Position::Body)
+                .collect();
 
             // Column width is determined by the FIRST panel in each column.
-            let left_pct = left_specs.first()
-                .and_then(|s| s.width_pct).unwrap_or(0);
-            let right_pct = right_specs.first()
-                .and_then(|s| s.width_pct).unwrap_or(0);
+            let left_pct = left_specs.first().and_then(|s| s.width_pct).unwrap_or(0);
+            let right_pct = right_specs.first().and_then(|s| s.width_pct).unwrap_or(0);
 
             let columns = Layout::default()
                 .direction(Direction::Horizontal)
@@ -177,7 +232,15 @@ impl LayoutEngine {
                 ])
                 .split(outer[1]);
 
-            render_column(f, &left_specs, columns[0], state, &self.registry, theme, focused);
+            render_column(
+                f,
+                &left_specs,
+                columns[0],
+                state,
+                &self.registry,
+                theme,
+                focused,
+            );
             // Bond: a center column that is exactly [spectrum, waterfall] renders as
             // one instrument — the spectrum drops its bottom border + own freq axis,
             // the waterfall's top border becomes the shared frequency ruler, and a
@@ -190,16 +253,48 @@ impl LayoutEngine {
                     .direction(Direction::Vertical)
                     .constraints([Constraint::Min(0), Constraint::Min(0)])
                     .split(columns[1]);
-                spectrum::render(f, halves[0], state, theme, focused == Some("spectrum"), Bond::Below);
-                waterfall::render(f, halves[1], state, theme, focused == Some("waterfall"), Bond::Above);
+                spectrum::render(
+                    f,
+                    halves[0],
+                    state,
+                    theme,
+                    focused == Some("spectrum"),
+                    Bond::Below,
+                );
+                waterfall::render(
+                    f,
+                    halves[1],
+                    state,
+                    theme,
+                    focused == Some("waterfall"),
+                    Bond::Above,
+                );
                 let seam = if focused == Some("spectrum") || focused == Some("waterfall") {
                     theme.border_focused
-                } else { theme.border_accent };
+                } else {
+                    theme.border_accent
+                };
                 chrome::junction_caps(f, halves[1], seam);
             } else {
-                render_column(f, &center_specs, columns[1], state, &self.registry, theme, focused);
+                render_column(
+                    f,
+                    &center_specs,
+                    columns[1],
+                    state,
+                    &self.registry,
+                    theme,
+                    focused,
+                );
             }
-            render_column(f, &right_specs, columns[2], state, &self.registry, theme, focused);
+            render_column(
+                f,
+                &right_specs,
+                columns[2],
+                state,
+                &self.registry,
+                theme,
+                focused,
+            );
         }
     }
 }
@@ -213,7 +308,9 @@ fn render_column(
     theme: &crate::Theme,
     focused_panel: Option<&str>,
 ) {
-    if specs.is_empty() { return; }
+    if specs.is_empty() {
+        return;
+    }
     let constraints: Vec<Constraint> = specs.iter().map(|_| Constraint::Min(0)).collect();
     let areas = Layout::default()
         .direction(Direction::Vertical)

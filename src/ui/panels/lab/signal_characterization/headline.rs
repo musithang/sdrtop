@@ -14,8 +14,11 @@ use crate::ui::widgets::micro_common::snr_color;
 use super::row::{dim, val};
 
 pub(super) fn lines(
-    out: &mut Vec<Line<'static>>, state: &SdrMetrics, frame: Option<&FftFrame>,
-    iw: usize, theme: &crate::Theme,
+    out: &mut Vec<Line<'static>>,
+    state: &SdrMetrics,
+    frame: Option<&FftFrame>,
+    iw: usize,
+    theme: &crate::Theme,
 ) {
     out.push(section("RADIO HEADLINE", "", iw, theme));
     let Some(fr) = frame else {
@@ -32,7 +35,10 @@ pub(super) fn lines(
     let col = snr_color(snr, theme);
     let mut hspans = vec![
         Span::raw(" "),
-        Span::styled(format!("{snr:.1}"), Style::default().fg(col).add_modifier(Modifier::BOLD)),
+        Span::styled(
+            format!("{snr:.1}"),
+            Style::default().fg(col).add_modifier(Modifier::BOLD),
+        ),
         Span::styled(" dB", val(theme)),
         Span::styled("  peak / noise", dim(theme)),
     ];
@@ -40,7 +46,9 @@ pub(super) fn lines(
     if state.signal.modulation.is_known() {
         hspans.push(Span::styled(
             format!("   {}", state.signal.modulation.label()),
-            Style::default().fg(theme.value_hi).add_modifier(Modifier::BOLD),
+            Style::default()
+                .fg(theme.value_hi)
+                .add_modifier(Modifier::BOLD),
         ));
     }
     hspans.push(Span::styled("   \u{25cf}", Style::default().fg(col)));

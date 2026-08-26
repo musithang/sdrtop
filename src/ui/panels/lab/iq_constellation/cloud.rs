@@ -14,11 +14,11 @@ pub(super) const HEAT_LEVELS: usize = 5;
 /// Cool→hot persistence palette: sparse points are a cool blue, dense cores glow
 /// orange — the classic phosphor-scope look.
 pub(super) const HEAT: [Color; HEAT_LEVELS] = [
-    Color::Rgb(35, 65, 115),   // sparse — cool blue
-    Color::Rgb(30, 140, 150),  // teal
-    Color::Rgb(70, 180, 90),   // green
-    Color::Rgb(215, 200, 55),  // yellow
-    Color::Rgb(245, 130, 35),  // hot orange (dense core)
+    Color::Rgb(35, 65, 115),  // sparse — cool blue
+    Color::Rgb(30, 140, 150), // teal
+    Color::Rgb(70, 180, 90),  // green
+    Color::Rgb(215, 200, 55), // yellow
+    Color::Rgb(245, 130, 35), // hot orange (dense core)
 ];
 
 /// Split the cloud into [`HEAT_LEVELS`] layers by local point density, so each can
@@ -48,8 +48,8 @@ pub(super) fn density_layers(coords: &[(f64, f64)]) -> Vec<Vec<(f64, f64)>> {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use super::super::tests_support::ring;
+    use super::*;
 
     #[test]
     fn density_layers_partition_all_points() {
@@ -57,7 +57,11 @@ mod tests {
         let layers = density_layers(&coords);
         assert_eq!(layers.len(), HEAT_LEVELS);
         let total: usize = layers.iter().map(|l| l.len()).sum();
-        assert_eq!(total, coords.len(), "every point lands in exactly one layer");
+        assert_eq!(
+            total,
+            coords.len(),
+            "every point lands in exactly one layer"
+        );
     }
 
     #[test]
@@ -66,6 +70,9 @@ mod tests {
         let mut coords = vec![(0.1, 0.1); 500];
         coords.extend(ring(20, 1.0, 1.0));
         let layers = density_layers(&coords);
-        assert!(!layers[HEAT_LEVELS - 1].is_empty(), "dense core should reach the hot layer");
+        assert!(
+            !layers[HEAT_LEVELS - 1].is_empty(),
+            "dense core should reach the hot layer"
+        );
     }
 }

@@ -1,5 +1,5 @@
-use ratatui::{layout::Rect, Frame};
 use crate::state::SdrMetrics;
+use ratatui::{layout::Rect, Frame};
 
 /// How a panel is fused to a vertically-adjacent neighbour. When the spectrum
 /// sits directly above the waterfall they render as one bonded instrument with a
@@ -7,7 +7,11 @@ use crate::state::SdrMetrics;
 /// frequency axis (`Below`), and the waterfall's top border becomes that shared
 /// ruler (`Above`). `None` is the normal, standalone framing.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
-pub enum Bond { None, Below, Above }
+pub enum Bond {
+    None,
+    Below,
+    Above,
+}
 
 /// What makes a panel's readings go stale, i.e. when the engine tags its title
 /// `[STALE]` and cools its border.
@@ -35,7 +39,11 @@ impl Staleness {
     pub fn resolve(self, state: &SdrMetrics) -> bool {
         self.decide(
             state.radio.hw_streaming,
-            state.waterfall.last_fft.as_ref().map(|fr| fr.timestamp.elapsed().as_millis()),
+            state
+                .waterfall
+                .last_fft
+                .as_ref()
+                .map(|fr| fr.timestamp.elapsed().as_millis()),
         )
     }
 
@@ -138,11 +146,11 @@ pub enum FrameTone {
 impl FrameTone {
     pub fn color(self, theme: &crate::Theme) -> ratatui::style::Color {
         match self {
-            FrameTone::Default  => theme.border_default,
-            FrameTone::Accent   => theme.border_accent,
-            FrameTone::Dim      => theme.border_dim,
-            FrameTone::Focused  => theme.border_focused,
-            FrameTone::Warn     => theme.status_warn,
+            FrameTone::Default => theme.border_default,
+            FrameTone::Accent => theme.border_accent,
+            FrameTone::Dim => theme.border_dim,
+            FrameTone::Focused => theme.border_focused,
+            FrameTone::Warn => theme.status_warn,
             FrameTone::Observer => theme.observer,
         }
     }
@@ -197,17 +205,24 @@ impl PanelChrome {
     /// A `╴NAME╶` deck frame in the dim palette: the cockpit chrome around the
     /// instruments. The one-call shorthand, since every deck panel wants both.
     pub fn deck(title: &'static str) -> Self {
-        Self::new(title).frame(FrameStyle::Deck).tone(FrameTone::Dim)
+        Self::new(title)
+            .frame(FrameStyle::Deck)
+            .tone(FrameTone::Dim)
     }
 
     /// An instrument box with no nameplate, for panels that head their own
     /// content (the micro field views, the sweep strip).
-    pub fn untitled() -> Self { Self::new("") }
+    pub fn untitled() -> Self {
+        Self::new("")
+    }
 
     /// "This panel frames itself" — the trait default, and the escape hatch for
     /// the chrome that is not a plain box.
     pub fn self_framed() -> Self {
-        Self { frame: FrameStyle::SelfFramed, ..Self::new("") }
+        Self {
+            frame: FrameStyle::SelfFramed,
+            ..Self::new("")
+        }
     }
 
     pub fn stale_when(mut self, staleness: Staleness) -> Self {
@@ -228,7 +243,9 @@ impl PanelChrome {
     /// Append a tag when `cond` holds. The conditional form is the common one,
     /// since tags exist to report live state.
     pub fn tag_if(mut self, cond: bool, tag: Tag) -> Self {
-        if cond { self.tags.push(tag); }
+        if cond {
+            self.tags.push(tag);
+        }
         self
     }
 
@@ -248,27 +265,42 @@ pub trait Panel: Send + Sync {
     /// `area` is the **inner** rect the engine has already carved out, guaranteed
     /// non-empty. Only a panel that fell back to the default
     /// [`FrameStyle::SelfFramed`] gets the outer rect instead, and none should.
-    fn render(&self, f: &mut Frame, area: Rect, state: &SdrMetrics, theme: &crate::Theme, focused: bool);
+    fn render(
+        &self,
+        f: &mut Frame,
+        area: Rect,
+        state: &SdrMetrics,
+        theme: &crate::Theme,
+        focused: bool,
+    );
 
     /// How the engine should frame this panel: name, focus-key highlight,
     /// staleness rule, border language and live tags.
     ///
     /// Takes the metrics snapshot so tags and the suffix can be live. The
     /// default frames nothing and hands the panel its outer rect.
-    fn chrome(&self, _state: &SdrMetrics) -> PanelChrome { PanelChrome::self_framed() }
+    fn chrome(&self, _state: &SdrMetrics) -> PanelChrome {
+        PanelChrome::self_framed()
+    }
 
     /// Single character that activates panel-focus mode for this panel.
     /// Returns `None` for panels that don't support focus mode.
-    fn focus_key(&self) -> Option<char> { None }
+    fn focus_key(&self) -> Option<char> {
+        None
+    }
 
     /// Keybindings shown in the footer when this panel is focused.
     /// Each entry: (key_label, description). Empty by default.
     /// Do NOT include Esc or Tab — the footer appends those automatically.
-    fn focus_bindings(&self) -> &'static [(&'static str, &'static str)] { &[] }
+    fn focus_bindings(&self) -> &'static [(&'static str, &'static str)] {
+        &[]
+    }
 
     /// Preferred rendered height in rows, given the available terminal width and current state.
     /// Used by the layout engine for top/bottom panels. Default: 3 (1 content + 2 borders).
-    fn preferred_height(&self, _available_width: u16, _state: &SdrMetrics) -> u16 { 3 }
+    fn preferred_height(&self, _available_width: u16, _state: &SdrMetrics) -> u16 {
+        3
+    }
 }
 
 #[cfg(test)]
@@ -278,9 +310,21 @@ mod tests {
     struct DummyPanel;
 
     impl Panel for DummyPanel {
-        fn name(&self) -> &'static str { "dummy" }
-        fn min_size(&self) -> (u16, u16) { (10, 3) }
-        fn render(&self, _f: &mut Frame, _area: Rect, _state: &SdrMetrics, _theme: &crate::Theme, _focused: bool) {}
+        fn name(&self) -> &'static str {
+            "dummy"
+        }
+        fn min_size(&self) -> (u16, u16) {
+            (10, 3)
+        }
+        fn render(
+            &self,
+            _f: &mut Frame,
+            _area: Rect,
+            _state: &SdrMetrics,
+            _theme: &crate::Theme,
+            _focused: bool,
+        ) {
+        }
     }
 
     #[test]
@@ -302,7 +346,11 @@ mod tests {
             .tag_if(true, Tag::Frozen)
             .tag_if(false, Tag::Frozen)
             .suffix(" · held");
-        assert_eq!(built.tags, vec![Tag::Frozen], "only the true condition adds a tag");
+        assert_eq!(
+            built.tags,
+            vec![Tag::Frozen],
+            "only the true condition adds a tag"
+        );
         assert_eq!(built.suffix.as_deref(), Some(" · held"));
     }
 
@@ -310,13 +358,19 @@ mod tests {
     fn staleness_rules_are_independent_of_each_other() {
         // A dead radio staleness NotStreaming, and nothing else.
         assert!(Staleness::NotStreaming.decide(false, Some(0)));
-        assert!(!Staleness::FftAge.decide(false, Some(0)), "fresh frame, dead radio → live");
+        assert!(
+            !Staleness::FftAge.decide(false, Some(0)),
+            "fresh frame, dead radio → live"
+        );
         assert!(!Staleness::Never.decide(false, None), "Never means never");
 
         // A streaming radio whose FFT has dried up staleness only FftAge.
         assert!(!Staleness::NotStreaming.decide(true, None));
         assert!(Staleness::FftAge.decide(true, None), "no frame yet → stale");
         assert!(Staleness::FftAge.decide(true, Some(FFT_STALE_MS + 1)));
-        assert!(!Staleness::FftAge.decide(true, Some(FFT_STALE_MS)), "the threshold itself is live");
+        assert!(
+            !Staleness::FftAge.decide(true, Some(FFT_STALE_MS)),
+            "the threshold itself is live"
+        );
     }
 }

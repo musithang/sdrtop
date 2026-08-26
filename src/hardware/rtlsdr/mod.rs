@@ -28,14 +28,14 @@ const RTL_BUF_LEN: u32 = 65_536;
 const RTL_BUF_NUM: u32 = 0;
 
 pub struct RtlDevice {
-    ptr:          *mut c_void,
-    caps:         DeviceCapabilities,
-    info:         DeviceInfo,
+    ptr: *mut c_void,
+    caps: DeviceCapabilities,
+    info: DeviceInfo,
     /// Raw tuner gains in tenths of a dB, as reported by the device. The set
     /// path snaps a requested whole-dB value to the nearest entry here.
     gains_tenths: Vec<i32>,
-    streaming:    Arc<AtomicBool>,
-    thread:       Mutex<Option<JoinHandle<()>>>,
+    streaming: Arc<AtomicBool>,
+    thread: Mutex<Option<JoinHandle<()>>>,
 }
 
 // Safety: the device pointer is only touched from the main thread (control) and
@@ -96,14 +96,20 @@ extern "C" fn rtl_rx_callback(buf: *mut libc::c_uchar, len: u32, ctx: *mut c_voi
 // ── SdrDevice impl ─────────────────────────────────────────────────────────────
 
 impl SdrDevice for RtlDevice {
-    fn capabilities(&self) -> &DeviceCapabilities { &self.caps }
-    fn info(&self) -> DeviceInfo { self.info.clone() }
+    fn capabilities(&self) -> &DeviceCapabilities {
+        &self.caps
+    }
+    fn info(&self) -> DeviceInfo {
+        self.info.clone()
+    }
 
     fn start_rx(&self, ctx: Arc<RxContext>) -> anyhow::Result<()> {
         if self.streaming.swap(true, Ordering::SeqCst) {
             return Ok(()); // already streaming
         }
-        with_stderr_silenced(|| unsafe { rtlsdr_reset_buffer(self.ptr); });
+        with_stderr_silenced(|| unsafe {
+            rtlsdr_reset_buffer(self.ptr);
+        });
 
         // `rtlsdr_read_async` blocks until cancelled, so it gets its own thread.
         // The thread owns `cb_ctx`, keeping the pointer handed to the callback
@@ -131,7 +137,9 @@ impl SdrDevice for RtlDevice {
     }
 
     fn stop_rx(&self) -> anyhow::Result<()> {
-        unsafe { rtlsdr_cancel_async(self.ptr); }
+        unsafe {
+            rtlsdr_cancel_async(self.ptr);
+        }
         // Join so the read thread (and the Arc<RxContext> it holds) is fully gone
         // before we return — no callback can fire afterward.
         if let Some(h) = self.thread.lock().unwrap_or_else(|e| e.into_inner()).take() {
@@ -199,12 +207,16 @@ impl SdrDevice for RtlDevice {
 impl Drop for RtlDevice {
     fn drop(&mut self) {
         if self.streaming.load(Ordering::SeqCst) {
-            unsafe { rtlsdr_cancel_async(self.ptr); }
+            unsafe {
+                rtlsdr_cancel_async(self.ptr);
+            }
             if let Some(h) = self.thread.lock().unwrap_or_else(|e| e.into_inner()).take() {
                 let _ = h.join();
             }
         }
-        unsafe { rtlsdr_close(self.ptr); }
+        unsafe {
+            rtlsdr_close(self.ptr);
+        }
     }
 }
 
@@ -223,7 +235,9 @@ impl RtlDevice {
             let tuner = unsafe { rtlsdr_get_tuner_type(ptr) };
             let gains = unsafe { read_tuner_gains(ptr) };
             // Default to manual gain so the gain controls take effect immediately.
-            unsafe { rtlsdr_set_tuner_gain_mode(ptr, 1); }
+            unsafe {
+                rtlsdr_set_tuner_gain_mode(ptr, 1);
+            }
             (res, tuner, gains)
         });
         if res != 0 || ptr.is_null() {
@@ -231,12 +245,12 @@ impl RtlDevice {
         }
 
         let info = DeviceInfo {
-            board_name:      device_name(index as u32),
-            serial:          device_serial(index as u32).unwrap_or_else(|| format!("rtlsdr-{index}")),
-            fw_version:      None,
-            board_rev:       None,
+            board_name: device_name(index as u32),
+            serial: device_serial(index as u32).unwrap_or_else(|| format!("rtlsdr-{index}")),
+            fw_version: None,
+            board_rev: None,
             usb_api_version: None,
-            tuner_name:      tuner_name(tuner),
+            tuner_name: tuner_name(tuner),
         };
 
         Ok(Self {
@@ -258,9 +272,13 @@ pub fn list() -> Vec<DeviceListing> {
     for i in 0..count {
         let name = device_name(i);
         let serial = device_serial(i).unwrap_or_default();
-        let shown = if serial.is_empty() { format!("#{i}") } else { serial };
+        let shown = if serial.is_empty() {
+            format!("#{i}")
+        } else {
+            serial
+        };
         out.push(DeviceListing {
-            kind:  DeviceKind::RtlSdr,
+            kind: DeviceKind::RtlSdr,
             index: i as usize,
             label: format!("RTL-SDR · {} · {}", name, shown),
         });
@@ -278,8 +296,8 @@ fn rtl_caps(tuner: c_int, gains_tenths: &[i32]) -> DeviceCapabilities {
     // Frequency span depends on the tuner; the dominant R820T/R828D case covers
     // 24 MHz–1.766 GHz. E4000 reaches higher (with an internal gap we ignore).
     let (freq_min_hz, freq_max_hz) = match tuner {
-        1 => (52_000_000, 2_200_000_000),       // E4000
-        _ => (24_000_000, 1_766_000_000),        // R820T / R828D / others
+        1 => (52_000_000, 2_200_000_000), // E4000
+        _ => (24_000_000, 1_766_000_000), // R820T / R828D / others
     };
 
     // Round each gain step to whole dB for display, collapsing duplicates. The
@@ -300,15 +318,17 @@ fn rtl_caps(tuner: c_int, gains_tenths: &[i32]) -> DeviceCapabilities {
         // 225_001..=300_000 band is excluded as it can't be a single range).
         // 900_001 is the true floor; the sample-rate input clamps into this
         // range, so entering "0.9" (900_000) snaps up to a valid 900_001.
-        sample_rate_min_hz:     900_001.0,
-        sample_rate_max_hz:     3_200_000.0,
-        default_frequency_hz:   100_000_000,
+        sample_rate_min_hz: 900_001.0,
+        sample_rate_max_hz: 3_200_000.0,
+        default_frequency_hz: 100_000_000,
         default_sample_rate_hz: 2_400_000.0,
-        sample_format:          SampleFormat::Uint8,
-        gain: GainModel::RtlSingle { gain_steps_db: steps },
+        sample_format: SampleFormat::Uint8,
+        gain: GainModel::RtlSingle {
+            gain_steps_db: steps,
+        },
         samples_per_transfer: (RTL_BUF_LEN / 2) as u64,
-        has_bb_filter:        false,
-        friis_applicable:     false,
+        has_bb_filter: false,
+        friis_applicable: false,
     }
 }
 
@@ -354,8 +374,14 @@ fn device_serial(index: u32) -> Option<String> {
         {
             return None;
         }
-        let s = CStr::from_ptr(serial.as_ptr()).to_string_lossy().into_owned();
-        if s.is_empty() { None } else { Some(s) }
+        let s = CStr::from_ptr(serial.as_ptr())
+            .to_string_lossy()
+            .into_owned();
+        if s.is_empty() {
+            None
+        } else {
+            Some(s)
+        }
     }
 }
 
@@ -407,7 +433,11 @@ mod tests {
         // Mirrors set_lna_gain's snapping: 20 dB → 200 tenths → nearest of {197,207} = 197.
         let gains: [i32; 4] = [0, 197, 207, 496];
         let target: i32 = 20 * 10;
-        let nearest = gains.iter().copied().min_by_key(|&t| (t - target).abs()).unwrap();
+        let nearest = gains
+            .iter()
+            .copied()
+            .min_by_key(|&t| (t - target).abs())
+            .unwrap();
         assert_eq!(nearest, 197);
     }
 

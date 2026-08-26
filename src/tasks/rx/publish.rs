@@ -27,7 +27,9 @@ pub(super) struct Throughput {
 }
 
 impl Throughput {
-    pub(super) fn reset(&mut self) { *self = Self::default(); }
+    pub(super) fn reset(&mut self) {
+        *self = Self::default();
+    }
 
     fn push(&mut self, mbps: f64) {
         self.count += 1;
@@ -46,7 +48,11 @@ impl Throughput {
     /// One square root of two scalars is not what stalls a frame; the per-sample
     /// maths in `metrics` is, and that is outside.
     fn stats(&self) -> (f64, f64) {
-        let std = if self.count > 1 { (self.m2 / (self.count - 1) as f64).sqrt() } else { 0.0 };
+        let std = if self.count > 1 {
+            (self.m2 / (self.count - 1) as f64).sqrt()
+        } else {
+            0.0
+        };
         (self.mean, std)
     }
 }
@@ -79,9 +85,13 @@ pub(super) fn write_back(
         m.iq.dc_offset_i = iq.dc_i;
         m.iq.dc_offset_q = iq.dc_q;
         m.signal.adc_peak_dbfs = iq.adc_peak_dbfs;
-        m.signal.adc_rms_dbfs  = iq.adc_rms_dbfs;
-        if let Some(v) = iq.iq_imbalance_db { m.iq.iq_imbalance_db     = v; }
-        if let Some(v) = iq.phase_imbalance { m.iq.phase_imbalance_deg = v; }
+        m.signal.adc_rms_dbfs = iq.adc_rms_dbfs;
+        if let Some(v) = iq.iq_imbalance_db {
+            m.iq.iq_imbalance_db = v;
+        }
+        if let Some(v) = iq.phase_imbalance {
+            m.iq.phase_imbalance_deg = v;
+        }
 
         // DC-block tracks the live DC estimate so it follows slow drift.
         if m.iq.cal.dc_block_on || m.iq.cal.cal_applied {
@@ -98,11 +108,14 @@ pub(super) fn write_back(
             m.iq.cal.cal_applied = true;
             m.iq.cal.cal_pending = false;
             m.iq.cal.last_cal_at = std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs()).ok();
-            let irr = crate::signal::image_rejection_db(
-                m.iq.iq_imbalance_db, m.iq.phase_imbalance_deg);
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.as_secs())
+                .ok();
+            let irr =
+                crate::signal::image_rejection_db(m.iq.iq_imbalance_db, m.iq.phase_imbalance_deg);
             m.push_log(format!(
-                "IQ auto-cal applied \u{2014} quadrature corrected (was IRR {irr:.1} dB)"));
+                "IQ auto-cal applied \u{2014} quadrature corrected (was IRR {irr:.1} dB)"
+            ));
         }
     }
 
@@ -161,20 +174,26 @@ pub(super) fn write_back(
 /// immutable reads and the mutable pushes overlap.
 fn push_trends(m: &mut SdrMetrics) {
     let push = |h: &mut std::collections::VecDeque<f32>, v: f32| {
-        if h.len() >= SNR_HISTORY_LEN { h.pop_front(); }
+        if h.len() >= SNR_HISTORY_LEN {
+            h.pop_front();
+        }
         h.push_back(v);
     };
     let snr = m.signal.peak_to_nf_db;
     let pwr = m.signal.channel_power_dbfs;
     let sat = m.signal.adc_saturation_pct;
-    let nf  = m.waterfall.last_fft.as_ref().map(|f| f.noise_floor);
+    let nf = m.waterfall.last_fft.as_ref().map(|f| f.noise_floor);
     // IRR from the freshly-written imbalance, via the shared helper the Lab IQ
     // panel also uses (so trend and read-out agree).
-    let irr = crate::signal::image_rejection_db(
-        m.iq.iq_imbalance_db, m.iq.phase_imbalance_deg) as f32;
+    let irr =
+        crate::signal::image_rejection_db(m.iq.iq_imbalance_db, m.iq.phase_imbalance_deg) as f32;
     push(&mut m.signal.snr_history, snr);
-    if pwr.is_finite() { push(&mut m.signal.pwr_history, pwr); }
-    if let Some(nf) = nf { push(&mut m.signal.nf_history, nf); }
+    if pwr.is_finite() {
+        push(&mut m.signal.pwr_history, pwr);
+    }
+    if let Some(nf) = nf {
+        push(&mut m.signal.nf_history, nf);
+    }
     push(&mut m.signal.sat_history, sat);
     push(&mut m.iq.irr_history, irr);
 }
@@ -196,7 +215,9 @@ mod tests {
     #[test]
     fn throughput_is_a_running_mean_and_sample_deviation() {
         let mut tp = Throughput::default();
-        for v in [18.0, 20.0, 22.0] { tp.push(v); }
+        for v in [18.0, 20.0, 22.0] {
+            tp.push(v);
+        }
         let (mean, std) = tp.stats();
         assert!((mean - 20.0).abs() < 1e-9, "got {mean}");
         // Sample standard deviation of 18/20/22 is exactly 2.
@@ -208,10 +229,15 @@ mod tests {
         // RX start resets it, so the timing panel reports this session and not
         // whatever the last one was doing.
         let mut tp = Throughput::default();
-        for v in [1.0, 100.0] { tp.push(v); }
+        for v in [1.0, 100.0] {
+            tp.push(v);
+        }
         tp.reset();
         assert_eq!(tp.stats(), (0.0, 0.0));
         tp.push(20.0);
-        assert!((tp.stats().0 - 20.0).abs() < 1e-9, "the old samples must be gone");
+        assert!(
+            (tp.stats().0 - 20.0).abs() < 1e-9,
+            "the old samples must be gone"
+        );
     }
 }

@@ -18,13 +18,7 @@ mod fit;
 mod overlay;
 mod plot;
 
-use ratatui::{
-    layout::Rect,
-    style::Style,
-    text::Span,
-    widgets::Paragraph,
-    Frame,
-};
+use ratatui::{layout::Rect, style::Style, text::Span, widgets::Paragraph, Frame};
 
 use crate::state::SdrMetrics;
 use crate::ui::panel::{Panel, PanelChrome, Staleness};
@@ -44,14 +38,25 @@ const BOUND: f64 = 1.3;
 const CIRCLE_SEGS: usize = 48;
 
 impl Panel for IqConstellationPanel {
-    fn name(&self) -> &'static str { "iq_constellation" }
-    fn min_size(&self) -> (u16, u16) { (18, 10) }
+    fn name(&self) -> &'static str {
+        "iq_constellation"
+    }
+    fn min_size(&self) -> (u16, u16) {
+        (18, 10)
+    }
 
     fn chrome(&self, _state: &SdrMetrics) -> PanelChrome {
         PanelChrome::new("IQ Constellation").stale_when(Staleness::NotStreaming)
     }
 
-    fn render(&self, f: &mut Frame, inner: Rect, state: &SdrMetrics, theme: &crate::Theme, _focused: bool) {
+    fn render(
+        &self,
+        f: &mut Frame,
+        inner: Rect,
+        state: &SdrMetrics,
+        theme: &crate::Theme,
+        _focused: bool,
+    ) {
         if !state.radio.hw_streaming {
             return placeholder(f, inner, "Waiting for RX\u{2026}", theme);
         }
@@ -60,15 +65,18 @@ impl Panel for IqConstellationPanel {
         }
 
         // Pre-collect coords into an owned Vec so the paint closure can own them.
-        let coords: Vec<(f64, f64)> = state.iq.constellation.iter()
+        let coords: Vec<(f64, f64)> = state
+            .iq
+            .constellation
+            .iter()
             .map(|&(i, q)| (i as f64, q as f64))
             .collect();
 
         // Density-coloured layers (cool→hot) and the fitted imbalance ellipse,
         // computed once outside the paint closure and moved in.
-        let layers  = cloud::density_layers(&coords);
+        let layers = cloud::density_layers(&coords);
         let ellipse = fit::fit_ellipse(&coords);
-        let stats   = fit::cloud_stats(&coords, ellipse);
+        let stats = fit::cloud_stats(&coords, ellipse);
         let dc = (state.iq.dc_offset_i as f64, state.iq.dc_offset_q as f64);
 
         plot::draw(f, inner, layers, ellipse, dc, theme);
@@ -93,10 +101,12 @@ mod tests_support {
     use std::f64::consts::PI;
 
     pub(super) fn ring(n: usize, scale_i: f64, scale_q: f64) -> Vec<(f64, f64)> {
-        (0..n).map(|k| {
-            let a = 2.0 * PI * k as f64 / n as f64;
-            (scale_i * a.cos(), scale_q * a.sin())
-        }).collect()
+        (0..n)
+            .map(|k| {
+                let a = 2.0 * PI * k as f64 / n as f64;
+                (scale_i * a.cos(), scale_q * a.sin())
+            })
+            .collect()
     }
 }
 
@@ -115,6 +125,10 @@ mod tests {
     #[test]
     fn circle_segs_constant_is_positive_even() {
         assert!(CIRCLE_SEGS > 0);
-        assert_eq!(CIRCLE_SEGS % 2, 0, "even number of segments gives symmetric circle");
+        assert_eq!(
+            CIRCLE_SEGS % 2,
+            0,
+            "even number of segments gives symmetric circle"
+        );
     }
 }

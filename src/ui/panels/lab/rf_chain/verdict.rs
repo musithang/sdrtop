@@ -37,7 +37,8 @@ fn copy(word: &str, adc_peak: f64, headroom: f64, snr: f64) -> [String; 3] {
             "Increase LNA; if maxed, check the antenna".to_string(),
             "or reduce the system noise figure.".to_string(),
         ],
-        _ => [ // WELL-STAGED
+        _ => [
+            // WELL-STAGED
             format!("Signal at {adc_peak:.0} dBFS \u{2014} {headroom:.0} dB headroom,"),
             format!("{snr:.0} dB above the noise floor. SNR set at"),
             "the front end is fully preserved.".to_string(),
@@ -47,13 +48,13 @@ fn copy(word: &str, adc_peak: f64, headroom: f64, snr: f64) -> [String; 3] {
 
 /// What the verdict block needs beyond the theme.
 pub(super) struct Verdict<'a> {
-    pub word:     &'a str,
-    pub sev:      u8,
-    pub sev_col:  Color,
+    pub word: &'a str,
+    pub sev: u8,
+    pub sev_col: Color,
     pub adc_peak: f64,
-    pub snr:      f64,
-    pub adc_rms:  f32,
-    pub amp:      bool,
+    pub snr: f64,
+    pub adc_rms: f32,
+    pub amp: bool,
     pub tracking: bool,
 }
 
@@ -62,11 +63,19 @@ pub(super) fn draw(out: &mut Vec<Line<'static>>, v: &Verdict<'_>, theme: &crate:
     let lbl = Style::default().fg(theme.label);
     let headroom = -v.adc_peak;
 
-    let title_mark = if v.sev == 0 { "\u{2713}" } else if v.sev == 2 { "\u{26a0}" } else { "\u{00b7}" };
+    let title_mark = if v.sev == 0 {
+        "\u{2713}"
+    } else if v.sev == 2 {
+        "\u{26a0}"
+    } else {
+        "\u{00b7}"
+    };
     out.push(Line::from(vec![
         Span::raw(" "),
-        Span::styled(format!("{title_mark} GAIN {}", v.word),
-                     Style::default().fg(v.sev_col).add_modifier(Modifier::BOLD)),
+        Span::styled(
+            format!("{title_mark} GAIN {}", v.word),
+            Style::default().fg(v.sev_col).add_modifier(Modifier::BOLD),
+        ),
     ]));
     for line in copy(v.word, v.adc_peak, headroom, v.snr) {
         out.push(Line::from(vec![Span::raw(" "), Span::styled(line, lbl)]));
@@ -74,23 +83,41 @@ pub(super) fn draw(out: &mut Vec<Line<'static>>, v: &Verdict<'_>, theme: &crate:
 
     // Action chips (idle until Step 7 wires auto-gain) + status foot.
     let chip = |label: &str, active: bool| -> Span<'static> {
-        let bg = if active { theme.value_hi } else { theme.border_dim };
-        Span::styled(format!(" {label} "), Style::default().bg(bg).fg(Color::Rgb(4, 6, 15)))
+        let bg = if active {
+            theme.value_hi
+        } else {
+            theme.border_dim
+        };
+        Span::styled(
+            format!(" {label} "),
+            Style::default().bg(bg).fg(Color::Rgb(4, 6, 15)),
+        )
     };
     out.push(Line::from(vec![
         Span::raw(" "),
-        chip("A auto-gain", v.tracking), Span::raw(" "),
-        chip("\u{2191}\u{2193} LNA", false), Span::raw(" "),
+        chip("A auto-gain", v.tracking),
+        Span::raw(" "),
+        chip("\u{2191}\u{2193} LNA", false),
+        Span::raw(" "),
         chip("[ ] VGA", false),
     ]));
-    let limited = if v.adc_rms > -50.0 { "analog-noise limited" }
-                  else { "quantisation limited" };
+    let limited = if v.adc_rms > -50.0 {
+        "analog-noise limited"
+    } else {
+        "quantisation limited"
+    };
     let amp_txt = if v.amp { "AMP on" } else { "AMP bypass" };
-    let ag_txt  = if v.tracking { "auto-gain \u{2713} tracking" } else { "auto-gain idle" };
+    let ag_txt = if v.tracking {
+        "auto-gain \u{2713} tracking"
+    } else {
+        "auto-gain idle"
+    };
     out.push(Line::from(vec![
         Span::raw(" "),
-        Span::styled(format!("{amp_txt} \u{00b7} {ag_txt} \u{00b7} {limited}"),
-                     Style::default().fg(dim)),
+        Span::styled(
+            format!("{amp_txt} \u{00b7} {ag_txt} \u{00b7} {limited}"),
+            Style::default().fg(dim),
+        ),
     ]));
 }
 
@@ -107,14 +134,24 @@ mod tests {
         let mut words: Vec<&str> = Vec::new();
         for db in -120..=0 {
             let (w, _) = staging_verdict(db as f64);
-            if !words.contains(&w) { words.push(w); }
+            if !words.contains(&w) {
+                words.push(w);
+            }
         }
-        assert!(words.len() >= 4, "expected several distinct verdicts, got {words:?}");
+        assert!(
+            words.len() >= 4,
+            "expected several distinct verdicts, got {words:?}"
+        );
         let well_staged = copy("WELL-STAGED", -8.0, 8.0, 40.0);
         for w in &words {
-            if *w == "WELL-STAGED" { continue; }
-            assert_ne!(copy(w, -8.0, 8.0, 40.0), well_staged,
-                       "{w} has no copy of its own and falls through to WELL-STAGED");
+            if *w == "WELL-STAGED" {
+                continue;
+            }
+            assert_ne!(
+                copy(w, -8.0, 8.0, 40.0),
+                well_staged,
+                "{w} has no copy of its own and falls through to WELL-STAGED"
+            );
         }
     }
 
@@ -130,6 +167,9 @@ mod tests {
 
     #[test]
     fn an_unknown_verdict_reads_as_well_staged_rather_than_panicking() {
-        assert_eq!(copy("SOMETHING NEW", -8.0, 8.0, 40.0), copy("WELL-STAGED", -8.0, 8.0, 40.0));
+        assert_eq!(
+            copy("SOMETHING NEW", -8.0, 8.0, 40.0),
+            copy("WELL-STAGED", -8.0, 8.0, 40.0)
+        );
     }
 }

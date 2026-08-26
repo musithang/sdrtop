@@ -79,15 +79,37 @@ pub fn handle_key(
     show_footer: &mut bool,
     focus_keys: &HashMap<char, &'static str>,
 ) -> KeyAction {
-    let mut ctx = InputCtx { state, device, engine, show_help, show_footer, focus_keys };
+    let mut ctx = InputCtx {
+        state,
+        device,
+        engine,
+        show_help,
+        show_footer,
+        focus_keys,
+    };
     let input_mode = metrics(state).ui.input_mode.clone();
     match input_mode {
-        InputMode::Normal          => handle_normal(key, &mut ctx),
-        InputMode::FrequencyInput  => { text::frequency(key, state, device);    KeyAction::Continue }
-        InputMode::SampleRateInput => { text::sample_rate(key, state, device);  KeyAction::Continue }
-        InputMode::MarkerNameInput => { text::marker_name(key, state);          KeyAction::Continue }
-        InputMode::SweepStartInput => { text::sweep_range(key, state, true);    KeyAction::Continue }
-        InputMode::SweepStopInput  => { text::sweep_range(key, state, false);   KeyAction::Continue }
+        InputMode::Normal => handle_normal(key, &mut ctx),
+        InputMode::FrequencyInput => {
+            text::frequency(key, state, device);
+            KeyAction::Continue
+        }
+        InputMode::SampleRateInput => {
+            text::sample_rate(key, state, device);
+            KeyAction::Continue
+        }
+        InputMode::MarkerNameInput => {
+            text::marker_name(key, state);
+            KeyAction::Continue
+        }
+        InputMode::SweepStartInput => {
+            text::sweep_range(key, state, true);
+            KeyAction::Continue
+        }
+        InputMode::SweepStopInput => {
+            text::sweep_range(key, state, false);
+            KeyAction::Continue
+        }
     }
 }
 
@@ -100,8 +122,10 @@ pub fn handle_key(
 /// non-ASCII character would change what a non-English keyboard sent.
 fn fold_key_case(key: KeyEvent) -> KeyEvent {
     match key.code {
-        KeyCode::Char(c) if c.is_ascii_uppercase() =>
-            KeyEvent { code: KeyCode::Char(c.to_ascii_lowercase()), ..key },
+        KeyCode::Char(c) if c.is_ascii_uppercase() => KeyEvent {
+            code: KeyCode::Char(c.to_ascii_lowercase()),
+            ..key
+        },
         _ => key,
     }
 }
@@ -125,19 +149,19 @@ fn handle_normal(key: KeyEvent, ctx: &mut InputCtx<'_>) -> KeyAction {
     let focused = ctx.engine.focused_panel_name().map(|s| s.to_string());
 
     match focused.as_deref() {
-        Some("spectrum")                => core::spectrum(key, ctx),
-        Some("waterfall")               => core::waterfall(key, ctx),
-        Some("iq_diagnostics")          => bench::iq_diagnostics(key, ctx),
-        Some("rf_chain")                => bench::rf_chain(key, ctx),
-        Some("timing_vitals")           => bench::timing_vitals(key, ctx),
-        Some("timing_diagnostics")      => bench::timing_diagnostics(key, ctx),
-        Some("lab_banner")              => bench::lab_banner(key, ctx),
-        Some("signal_metrics")          => signal::signal_metrics(key, ctx),
+        Some("spectrum") => core::spectrum(key, ctx),
+        Some("waterfall") => core::waterfall(key, ctx),
+        Some("iq_diagnostics") => bench::iq_diagnostics(key, ctx),
+        Some("rf_chain") => bench::rf_chain(key, ctx),
+        Some("timing_vitals") => bench::timing_vitals(key, ctx),
+        Some("timing_diagnostics") => bench::timing_diagnostics(key, ctx),
+        Some("lab_banner") => bench::lab_banner(key, ctx),
+        Some("signal_metrics") => signal::signal_metrics(key, ctx),
         Some("signal_characterization") => signal::signal_characterization(key, ctx),
-        Some("fm_demod")                => signal::fm_demod(key, ctx),
-        Some("sweep_panel")             => sweep::sweep_panel(key, ctx),
-        Some("command_rail")            => rail::command_rail(key, ctx),
-        _                               => global::handle(key, ctx),
+        Some("fm_demod") => signal::fm_demod(key, ctx),
+        Some("sweep_panel") => sweep::sweep_panel(key, ctx),
+        Some("command_rail") => rail::command_rail(key, ctx),
+        _ => global::handle(key, ctx),
     }
 }
 
@@ -146,14 +170,19 @@ mod tests {
     use super::*;
     use crossterm::event::KeyModifiers;
 
-    fn ev(code: KeyCode) -> KeyEvent { KeyEvent::new(code, KeyModifiers::NONE) }
+    fn ev(code: KeyCode) -> KeyEvent {
+        KeyEvent::new(code, KeyModifiers::NONE)
+    }
 
     #[test]
     fn fold_key_case_matches_the_capitalised_hints() {
         // C6: every hint in the app is capitalised (`[C] Snapshot to log`,
         // `[Q] Quit`, `[S/E] Start/End`) while the handlers are written lowercase.
         for (from, to) in [('C', 'c'), ('Q', 'q'), ('J', 'j'), ('S', 's')] {
-            assert_eq!(fold_key_case(ev(KeyCode::Char(from))).code, KeyCode::Char(to));
+            assert_eq!(
+                fold_key_case(ev(KeyCode::Char(from))).code,
+                KeyCode::Char(to)
+            );
         }
         // Lowercase and non-letters pass through untouched.
         for c in ['c', '0', '[', '+', '/'] {

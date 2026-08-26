@@ -13,25 +13,36 @@
 /// non-zero tilt. `None` for too few points or a degenerate spread.
 pub(super) fn fit_ellipse(coords: &[(f64, f64)]) -> Option<(f64, f64, f64, f64, f64)> {
     let n = coords.len();
-    if n < 16 { return None; }
+    if n < 16 {
+        return None;
+    }
     let nf = n as f64;
     let (mut sx, mut sy) = (0.0, 0.0);
-    for &(x, y) in coords { sx += x; sy += y; }
+    for &(x, y) in coords {
+        sx += x;
+        sy += y;
+    }
     let (mx, my) = (sx / nf, sy / nf);
 
     let (mut cxx, mut cyy, mut cxy) = (0.0, 0.0, 0.0);
     for &(x, y) in coords {
         let (dx, dy) = (x - mx, y - my);
-        cxx += dx * dx; cyy += dy * dy; cxy += dx * dy;
+        cxx += dx * dx;
+        cyy += dy * dy;
+        cxy += dx * dy;
     }
-    cxx /= nf; cyy /= nf; cxy /= nf;
+    cxx /= nf;
+    cyy /= nf;
+    cxy /= nf;
 
     let tr = cxx + cyy;
     let det = cxx * cyy - cxy * cxy;
     let disc = (tr * tr / 4.0 - det).max(0.0).sqrt();
     let l1 = tr / 2.0 + disc;
     let l2 = (tr / 2.0 - disc).max(0.0);
-    if l1 <= 1e-9 { return None; }
+    if l1 <= 1e-9 {
+        return None;
+    }
 
     let a = (2.0 * l1).sqrt();
     let b = (2.0 * l2).sqrt();
@@ -43,14 +54,14 @@ pub(super) fn fit_ellipse(coords: &[(f64, f64)]) -> Option<(f64, f64, f64, f64, 
 /// `evm_*` / `mer_db` / `ecc` / `tilt_deg` are `None` until there are enough
 /// points for a stable ellipse fit.
 pub(super) struct CloudStats {
-    pub n:        usize,
-    pub cx:       f64,
-    pub cy:       f64,
-    pub sigma:    f64,
-    pub evm_rms:  Option<f64>,
-    pub evm_pk:   Option<f64>,
-    pub mer_db:   Option<f64>,
-    pub ecc:      Option<f64>,
+    pub n: usize,
+    pub cx: f64,
+    pub cy: f64,
+    pub sigma: f64,
+    pub evm_rms: Option<f64>,
+    pub evm_pk: Option<f64>,
+    pub mer_db: Option<f64>,
+    pub ecc: Option<f64>,
     pub tilt_deg: Option<f64>,
 }
 
@@ -62,24 +73,38 @@ pub(super) struct CloudStats {
 /// on the ellipse, so `ρ−1` measures how tightly the cloud hugs its own fitted ring
 /// (amplitude/phase imbalance is captured separately by `ecc`/`tilt`, not here).
 /// `mer_db = −20·log10(EVM_rms)`.
-pub(super) fn cloud_stats(coords: &[(f64, f64)], ellipse: Option<(f64, f64, f64, f64, f64)>) -> CloudStats {
-    let n  = coords.len();
+pub(super) fn cloud_stats(
+    coords: &[(f64, f64)],
+    ellipse: Option<(f64, f64, f64, f64, f64)>,
+) -> CloudStats {
+    let n = coords.len();
     let nf = n.max(1) as f64;
     let (mut sx, mut sy) = (0.0, 0.0);
-    for &(x, y) in coords { sx += x; sy += y; }
+    for &(x, y) in coords {
+        sx += x;
+        sy += y;
+    }
     let (cx, cy) = (sx / nf, sy / nf);
 
     let (mut sr, mut sr2) = (0.0, 0.0);
     for &(x, y) in coords {
         let r = (x - cx).hypot(y - cy);
-        sr += r; sr2 += r * r;
+        sr += r;
+        sr2 += r * r;
     }
     let mean_r = sr / nf;
-    let sigma  = (sr2 / nf - mean_r * mean_r).max(0.0).sqrt();
+    let sigma = (sr2 / nf - mean_r * mean_r).max(0.0).sqrt();
 
     let mut s = CloudStats {
-        n, cx, cy, sigma,
-        evm_rms: None, evm_pk: None, mer_db: None, ecc: None, tilt_deg: None,
+        n,
+        cx,
+        cy,
+        sigma,
+        evm_rms: None,
+        evm_pk: None,
+        mer_db: None,
+        ecc: None,
+        tilt_deg: None,
     };
 
     if let Some((ex, ey, a, b, th)) = ellipse {
@@ -88,7 +113,7 @@ pub(super) fn cloud_stats(coords: &[(f64, f64)], ellipse: Option<(f64, f64, f64,
             let (mut acc, mut pk) = (0.0, 0.0f64);
             for &(x, y) in coords {
                 let (dx, dy) = (x - ex, y - ey);
-                let u =  dx * ct + dy * st;   // rotate into the ellipse's own frame
+                let u = dx * ct + dy * st; // rotate into the ellipse's own frame
                 let v = -dx * st + dy * ct;
                 let rho = ((u / a).powi(2) + (v / b).powi(2)).sqrt();
                 let dev = rho - 1.0;
@@ -96,16 +121,24 @@ pub(super) fn cloud_stats(coords: &[(f64, f64)], ellipse: Option<(f64, f64, f64,
                 pk = pk.max(dev.abs());
             }
             let evm_rms = (acc / nf).sqrt();
-            let mer = if evm_rms > 1e-6 { -20.0 * evm_rms.log10() } else { 60.0 };
+            let mer = if evm_rms > 1e-6 {
+                -20.0 * evm_rms.log10()
+            } else {
+                60.0
+            };
             s.evm_rms = Some(evm_rms);
-            s.evm_pk  = Some(pk);
-            s.mer_db  = Some(mer.min(60.0));
+            s.evm_pk = Some(pk);
+            s.mer_db = Some(mer.min(60.0));
             // Cap the ratio: a near-collinear cloud (b→0, e.g. 90° phase imbalance)
             // would otherwise print a ~1e9 eccentricity.
-            s.ecc     = Some((a / b.max(1e-9)).min(99.0));
+            s.ecc = Some((a / b.max(1e-9)).min(99.0));
             let mut tilt = th.to_degrees();
-            while tilt >   90.0 { tilt -= 180.0; }
-            while tilt <= -90.0 { tilt += 180.0; }
+            while tilt > 90.0 {
+                tilt -= 180.0;
+            }
+            while tilt <= -90.0 {
+                tilt += 180.0;
+            }
             s.tilt_deg = Some(tilt);
         }
     }
@@ -114,8 +147,8 @@ pub(super) fn cloud_stats(coords: &[(f64, f64)], ellipse: Option<(f64, f64, f64,
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use super::super::tests_support::ring;
+    use super::*;
     use std::f64::consts::PI;
 
     #[test]
@@ -131,8 +164,15 @@ mod tests {
         // I stretched 2×, Q unchanged → major axis ~2× the minor, tilt ~0.
         let (_, _, a, b, th) = fit_ellipse(&ring(256, 2.0, 1.0)).unwrap();
         assert!(a > b, "major > minor");
-        assert!((a / b - 2.0).abs() < 0.1, "axis ratio ≈ 2, got {:.2}", a / b);
-        assert!(th.abs() < 0.05 || (th.abs() - PI).abs() < 0.05, "tilt ≈ 0 along I");
+        assert!(
+            (a / b - 2.0).abs() < 0.1,
+            "axis ratio ≈ 2, got {:.2}",
+            a / b
+        );
+        assert!(
+            th.abs() < 0.05 || (th.abs() - PI).abs() < 0.05,
+            "tilt ≈ 0 along I"
+        );
     }
 
     #[test]
@@ -170,7 +210,11 @@ mod tests {
         let mut coords = ring(128, 0.4, 0.4);
         coords.extend(ring(128, 0.6, 0.6));
         let s = cloud_stats(&coords, fit_ellipse(&coords));
-        assert!(s.evm_rms.unwrap() > 0.1, "expected scatter, evm {:?}", s.evm_rms);
+        assert!(
+            s.evm_rms.unwrap() > 0.1,
+            "expected scatter, evm {:?}",
+            s.evm_rms
+        );
         assert!(s.mer_db.unwrap() < 25.0, "mer {:?}", s.mer_db);
     }
 

@@ -7,10 +7,10 @@ use ratatui::{
 };
 
 use crate::state::SdrMetrics;
-use crate::ui::widgets::band_plan::band_at;
-use crate::ui::widgets::charts::gain_bar_colored;
 use crate::ui::chrome::frame;
 use crate::ui::panel::{Panel, PanelChrome};
+use crate::ui::widgets::band_plan::band_at;
+use crate::ui::widgets::charts::gain_bar_colored;
 
 pub struct HeaderPanel;
 
@@ -22,7 +22,10 @@ pub struct HeaderPanel;
 fn rx_pulse_glyph() -> &'static str {
     use std::time::{SystemTime, UNIX_EPOCH};
     const FRAMES: [&str; 4] = ["\u{2219}", "\u{2022}", "\u{25CF}", "\u{2022}"]; // ∙ • ● •
-    let ms = SystemTime::now().duration_since(UNIX_EPOCH).map(|d| d.as_millis()).unwrap_or(0);
+    let ms = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_millis())
+        .unwrap_or(0);
     FRAMES[((ms / 220) % FRAMES.len() as u128) as usize]
 }
 
@@ -31,7 +34,10 @@ fn rx_pulse_glyph() -> &'static str {
 /// engraved instrument readout. Falls back to plain spaces when too short.
 fn leader(gap: usize, color: ratatui::style::Color) -> Span<'static> {
     if gap >= 4 {
-        Span::styled(format!(" {} ", "·".repeat(gap - 2)), Style::default().fg(color))
+        Span::styled(
+            format!(" {} ", "·".repeat(gap - 2)),
+            Style::default().fg(color),
+        )
     } else {
         Span::raw(" ".repeat(gap))
     }
@@ -51,7 +57,10 @@ pub(crate) fn gain_bar(gain: u32, max_gain: u32, n: usize) -> (String, String) {
 fn step_place_exp(step_hz: u64) -> u32 {
     let mut e = 0u32;
     let mut s = step_hz.max(1);
-    while s >= 10 { s /= 10; e += 1; }
+    while s >= 10 {
+        s /= 10;
+        e += 1;
+    }
     e
 }
 
@@ -74,10 +83,10 @@ pub(crate) fn active_digit_idx(freq_hz: u64, step_hz: u64) -> Option<usize> {
     let dot_pos = s.find('.').unwrap_or(s.len());
     let exp = step_place_exp(step_hz);
     if exp >= 6 {
-        let from_right = (exp - 6) as usize;        // 0 = ones-MHz digit (just left of '.')
+        let from_right = (exp - 6) as usize; // 0 = ones-MHz digit (just left of '.')
         (from_right < dot_pos).then(|| dot_pos - 1 - from_right)
     } else if (3..=5).contains(&exp) {
-        Some(dot_pos + 1 + (5 - exp) as usize)       // 5→.1xx, 4→..1x, 3→...1
+        Some(dot_pos + 1 + (5 - exp) as usize) // 5→.1xx, 4→..1x, 3→...1
     } else {
         None
     }
@@ -85,17 +94,26 @@ pub(crate) fn active_digit_idx(freq_hz: u64, step_hz: u64) -> Option<usize> {
 
 /// the number of MHz digits (the caller measures it for layout). Shared with the
 /// command rail's freq-hero so the segmented readout + active-digit cue match.
-pub(crate) fn vfo_spans(freq_hz: u64, step_hz: u64, digit: ratatui::style::Color,
-             dot: ratatui::style::Color, active: ratatui::style::Color) -> Vec<Span<'static>> {
+pub(crate) fn vfo_spans(
+    freq_hz: u64,
+    step_hz: u64,
+    digit: ratatui::style::Color,
+    dot: ratatui::style::Color,
+    active: ratatui::style::Color,
+) -> Vec<Span<'static>> {
     let s = vfo_string(freq_hz); // e.g. "145.500"
     let active_idx = active_digit_idx(freq_hz, step_hz);
 
     let chars: Vec<char> = s.chars().collect();
     let mut spans = Vec::with_capacity(chars.len() * 2);
     for (i, c) in chars.iter().enumerate() {
-        if i > 0 { spans.push(Span::raw(" ")); }
+        if i > 0 {
+            spans.push(Span::raw(" "));
+        }
         let style = if Some(i) == active_idx {
-            Style::default().fg(active).add_modifier(Modifier::BOLD | Modifier::UNDERLINED)
+            Style::default()
+                .fg(active)
+                .add_modifier(Modifier::BOLD | Modifier::UNDERLINED)
         } else if *c == '.' {
             Style::default().fg(dot)
         } else {
@@ -109,10 +127,16 @@ pub(crate) fn vfo_spans(freq_hz: u64, step_hz: u64, digit: ratatui::style::Color
 /// Returns the number of space characters needed between the fw-version field
 /// and the right-aligned "AMP … USB …" section in the top band.
 /// All length arguments are in terminal columns (chars, not bytes).
-fn top_band_gap(board_name_len: usize, badge_len: usize, fw_value_len: usize,
-                amp_val_len: usize, usb_val_len: usize, inner_width: u16) -> usize {
+fn top_band_gap(
+    board_name_len: usize,
+    badge_len: usize,
+    fw_value_len: usize,
+    amp_val_len: usize,
+    usb_val_len: usize,
+    inner_width: u16,
+) -> usize {
     // left side: " " + " DeviceName " + "  " + " BADGE " + "  " + "hackrf fw " + fw_val
-    let left  = 1 + (2 + board_name_len) + 2 + badge_len + 2 + 10 + fw_value_len;
+    let left = 1 + (2 + board_name_len) + 2 + badge_len + 2 + 10 + fw_value_len;
     // right side: "AMP "(4) + amp_val + "  ·  "(5) + "USB "(4) + usb_val + "  "(2)
     let right = 4 + amp_val_len + 5 + 4 + usb_val_len + 2;
     (inner_width as usize).saturating_sub(left + right)
@@ -125,11 +149,23 @@ fn top_band_line(state: &SdrMetrics, theme: &crate::Theme, inner_width: u16) -> 
     // RX uses a breathing dot; IDLE/OBSERVER are steady. Every variant is 6
     // columns so `top_band_gap` stays valid.
     let (badge_text, badge_bg, badge_fg): (String, Color, Color) = if state.observer.active {
-        (" ◈ OBSERVER ".to_string(), theme.observer, Color::Rgb(4, 6, 15))
+        (
+            " ◈ OBSERVER ".to_string(),
+            theme.observer,
+            Color::Rgb(4, 6, 15),
+        )
     } else if state.radio.hw_streaming {
-        (format!(" {} RX ", rx_pulse_glyph()), theme.status_ok, Color::Rgb(3, 15, 6))
+        (
+            format!(" {} RX ", rx_pulse_glyph()),
+            theme.status_ok,
+            Color::Rgb(3, 15, 6),
+        )
     } else {
-        (" ○ IDLE ".to_string(), theme.status_warn, Color::Rgb(10, 7, 0))
+        (
+            " ○ IDLE ".to_string(),
+            theme.status_warn,
+            Color::Rgb(10, 7, 0),
+        )
     };
     let badge_len = badge_text.chars().count();
 
@@ -142,18 +178,35 @@ fn top_band_line(state: &SdrMetrics, theme: &crate::Theme, inner_width: u16) -> 
     // in observer mode. All labels are exactly 10 columns so top_band_gap stays
     // valid.
     let (fw_val, fw_label): (std::sync::Arc<str>, &str) = if state.caps.gain.is_single() {
-        let v = if state.observer.active { "—" } else { "librtlsdr" };
+        let v = if state.observer.active {
+            "—"
+        } else {
+            "librtlsdr"
+        };
         (std::sync::Arc::from(v), "rtl-sdr   ")
     } else if state.observer.active {
         (std::sync::Arc::from("—"), "hackrf fw ")
     } else {
         let is_mayhem = state.system.fw_version.starts_with("n_")
             || (state.system.fw_version.starts_with('v')
-                && state.system.fw_version.chars().nth(1).map_or(false, |c| c.is_ascii_digit()));
-        let label = if is_mayhem { "mayhem fw " } else { "hackrf fw " };
+                && state
+                    .system
+                    .fw_version
+                    .chars()
+                    .nth(1)
+                    .map_or(false, |c| c.is_ascii_digit()));
+        let label = if is_mayhem {
+            "mayhem fw "
+        } else {
+            "hackrf fw "
+        };
         (state.system.fw_version.clone(), label)
     };
-    let fw_color = if state.observer.active { theme.label } else { theme.value };
+    let fw_color = if state.observer.active {
+        theme.label
+    } else {
+        theme.value
+    };
     let fw_len = fw_val.chars().count();
 
     // --- AMP value (always 3 terminal columns) ---
@@ -166,17 +219,24 @@ fn top_band_line(state: &SdrMetrics, theme: &crate::Theme, inner_width: u16) -> 
     };
 
     // --- USB value (always 9 terminal columns) ---
-    let (usb_val, usb_color) = if state.radio.hw_streaming && state.radio.current_throughput_bps > 0 {
+    let (usb_val, usb_color) = if state.radio.hw_streaming && state.radio.current_throughput_bps > 0
+    {
         let mb = state.radio.current_throughput_bps as f64 / 1_000_000.0;
         (format!("{:4.1} MB/s", mb), theme.value)
     } else {
-        ("—        ".to_string(), theme.label)  // 1 + 8 spaces = 9 chars
+        ("—        ".to_string(), theme.label) // 1 + 8 spaces = 9 chars
     };
 
     // --- Gap ---
     let board_len = state.system.board_name.chars().count();
-    let gap = top_band_gap(board_len, badge_len, fw_len,
-                           amp_val.chars().count(), usb_val.chars().count(), inner_width);
+    let gap = top_band_gap(
+        board_len,
+        badge_len,
+        fw_len,
+        amp_val.chars().count(),
+        usb_val.chars().count(),
+        inner_width,
+    );
 
     Line::from(vec![
         Span::raw(" "),
@@ -190,7 +250,10 @@ fn top_band_line(state: &SdrMetrics, theme: &crate::Theme, inner_width: u16) -> 
         Span::raw("  "),
         Span::styled(
             badge_text,
-            Style::default().fg(badge_fg).bg(badge_bg).add_modifier(Modifier::BOLD),
+            Style::default()
+                .fg(badge_fg)
+                .bg(badge_bg)
+                .add_modifier(Modifier::BOLD),
         ),
         Span::raw("  "),
         Span::styled(fw_label, Style::default().fg(theme.label)),
@@ -198,7 +261,10 @@ fn top_band_line(state: &SdrMetrics, theme: &crate::Theme, inner_width: u16) -> 
         leader(gap, theme.border_dim),
         // HackRF's RF amp or RTL-SDR's tuner AGC — both 3-char labels, so the
         // "{label} " field stays 4 columns and top_band_gap remains valid.
-        Span::styled(format!("{} ", state.caps.gain.boost_label()), Style::default().fg(theme.label)),
+        Span::styled(
+            format!("{} ", state.caps.gain.boost_label()),
+            Style::default().fg(theme.label),
+        ),
         Span::styled(amp_val, Style::default().fg(amp_color)),
         Span::raw("  ·  "),
         Span::styled("USB ", Style::default().fg(theme.label)),
@@ -212,7 +278,11 @@ fn top_band_line(state: &SdrMetrics, theme: &crate::Theme, inner_width: u16) -> 
 fn fmt_freq_compact(hz: u64) -> String {
     if hz >= 1_000_000_000 {
         let g = hz as f64 / 1e9;
-        if (g - g.round()).abs() < 0.05 { format!("{:.0}G", g) } else { format!("{:.1}G", g) }
+        if (g - g.round()).abs() < 0.05 {
+            format!("{:.0}G", g)
+        } else {
+            format!("{:.1}G", g)
+        }
     } else if hz >= 1_000_000 {
         format!("{:.0}M", hz as f64 / 1e6)
     } else if hz >= 1_000 {
@@ -237,8 +307,13 @@ const DIAL_GAMMA: f64 = 0.4;
 fn range_frac(freq: u64, min: u64, max: u64) -> f64 {
     let lo = (min.max(1) as f64).powf(DIAL_GAMMA);
     let hi = (max.max(1) as f64).powf(DIAL_GAMMA);
-    if hi <= lo { return 0.0; }
-    let f = (freq as f64).clamp(min as f64, max as f64).max(1.0).powf(DIAL_GAMMA);
+    if hi <= lo {
+        return 0.0;
+    }
+    let f = (freq as f64)
+        .clamp(min as f64, max as f64)
+        .max(1.0)
+        .powf(DIAL_GAMMA);
     ((f - lo) / (hi - lo)).clamp(0.0, 1.0)
 }
 
@@ -260,20 +335,30 @@ fn plain_separator(theme: &crate::Theme, outer_width: u16) -> Line<'static> {
 /// `◆╴2m╶`), so the band you're in sits exactly where the eye lands. `outer_width`
 /// is the FULL panel width; rendered at the outer Rect so `├`/`┤` overwrite `│`.
 fn band_strip_line(state: &SdrMetrics, theme: &crate::Theme, outer_width: u16) -> Line<'static> {
-    compose_band_strip(state.radio.frequency, state.caps.freq_min_hz, state.caps.freq_max_hz,
-                       theme, outer_width)
+    compose_band_strip(
+        state.radio.frequency,
+        state.caps.freq_min_hz,
+        state.caps.freq_max_hz,
+        theme,
+        outer_width,
+    )
 }
 
 /// Pure core of [`band_strip_line`] — takes the tuned frequency and tunable range
 /// directly so it can be unit-tested without a full `SdrMetrics`.
-fn compose_band_strip(freq: u64, fmin: u64, fmax: u64,
-                      theme: &crate::Theme, outer_width: u16) -> Line<'static> {
-    let frac   = range_frac(freq, fmin, fmax);
+fn compose_band_strip(
+    freq: u64,
+    fmin: u64,
+    fmax: u64,
+    theme: &crate::Theme,
+    outer_width: u16,
+) -> Line<'static> {
+    let frac = range_frac(freq, fmin, fmax);
     let lo_lbl = fmt_freq_compact(fmin);
     let hi_lbl = fmt_freq_compact(fmax);
 
     // Fixed chrome around the track:  ├ ─ ␠ LO ␠ <track> ␠ HI ␠ ─ ┤
-    let left_w  = 1 + 1 + 1 + lo_lbl.chars().count() + 1;
+    let left_w = 1 + 1 + 1 + lo_lbl.chars().count() + 1;
     let right_w = 1 + hi_lbl.chars().count() + 1 + 1 + 1;
     let track_w = (outer_width as usize).saturating_sub(left_w + right_w);
 
@@ -283,7 +368,7 @@ fn compose_band_strip(freq: u64, fmin: u64, fmax: u64,
 
     let marker_col = ((frac * (track_w - 1) as f64).round() as usize).min(track_w - 1);
 
-    let dim   = theme.border_dim;
+    let dim = theme.border_dim;
     let track = theme.border_default;
 
     let mut spans = vec![
@@ -309,13 +394,21 @@ fn compose_band_strip(freq: u64, fmin: u64, fmax: u64,
 /// `╴NAME╶` placed against the needle (to its right if it fits, else its left).
 /// Position is double-encoded — brightness *and* line weight — so it reads at a
 /// glance, and the band label sits right at the needle.
-fn rail_spans(track_w: usize, marker_col: usize, band: Option<&'static str>,
-              theme: &crate::Theme) -> Vec<Span<'static>> {
+fn rail_spans(
+    track_w: usize,
+    marker_col: usize,
+    band: Option<&'static str>,
+    theme: &crate::Theme,
+) -> Vec<Span<'static>> {
     let heavy = Style::default().fg(theme.border_accent);
     let faint = Style::default().fg(theme.border_dim);
-    let mark  = Style::default().fg(theme.value_hi).add_modifier(Modifier::BOLD);
-    let cap   = Style::default().fg(theme.border_accent);
-    let name  = Style::default().fg(theme.value_hi).add_modifier(Modifier::BOLD);
+    let mark = Style::default()
+        .fg(theme.value_hi)
+        .add_modifier(Modifier::BOLD);
+    let cap = Style::default().fg(theme.border_accent);
+    let name = Style::default()
+        .fg(theme.value_hi)
+        .add_modifier(Modifier::BOLD);
 
     let callout: Vec<Span<'static>> = match band {
         Some(b) => vec![
@@ -329,7 +422,7 @@ fn rail_spans(track_w: usize, marker_col: usize, band: Option<&'static str>,
 
     let heavy_run = |n: usize| Span::styled("━".repeat(n), heavy);
     let faint_run = |n: usize| Span::styled("┈".repeat(n), faint);
-    let needle    = || Span::styled("◆", mark);
+    let needle = || Span::styled("◆", mark);
 
     let mut spans = Vec::with_capacity(6);
     if cw > 0 && marker_col + 1 + cw <= track_w {
@@ -364,9 +457,13 @@ fn bottom_band_line(state: &SdrMetrics, theme: &crate::Theme, inner_width: u16) 
     // Sample rate: right-padded to 4 chars
     let sr_str = format!("{:4.1}", state.radio.config_sample_rate / 1_000_000.0);
 
-    let freq_color = if state.observer.active { theme.label } else { theme.border_accent };
-    let val_color  = if active { theme.value } else { theme.label };
-    let dim        = theme.border_dim;
+    let freq_color = if state.observer.active {
+        theme.label
+    } else {
+        theme.border_accent
+    };
+    let val_color = if active { theme.value } else { theme.label };
+    let dim = theme.border_dim;
 
     // ⅛-block gain bar that matches the command rail: a meaning gradient while
     // streaming (LNA green→yellow, VGA cyan→orange), flat dim when idle.
@@ -375,8 +472,10 @@ fn bottom_band_line(state: &SdrMetrics, theme: &crate::Theme, inner_width: u16) 
             gain_bar_colored(gain, max, 8, lo, hi, dim)
         } else {
             let (f, e) = gain_bar(gain, max, 8);
-            vec![Span::styled(f, Style::default().fg(theme.label)),
-                 Span::styled(e, Style::default().fg(dim))]
+            vec![
+                Span::styled(f, Style::default().fg(theme.label)),
+                Span::styled(e, Style::default().fg(dim)),
+            ]
         }
     };
 
@@ -384,8 +483,13 @@ fn bottom_band_line(state: &SdrMetrics, theme: &crate::Theme, inner_width: u16) 
     // with the number of MHz digits and the active-digit underline, so it is
     // measured (below) rather than assumed, and the trailing gap fills the rest.
     let mut left_spans = vec![Span::raw("  ")];
-    left_spans.extend(vfo_spans(state.radio.frequency, state.spectrum.step_hz,
-                                freq_color, theme.label, theme.value_hi));
+    left_spans.extend(vfo_spans(
+        state.radio.frequency,
+        state.spectrum.step_hz,
+        freq_color,
+        theme.label,
+        theme.value_hi,
+    ));
     left_spans.extend([
         Span::raw(" "),
         Span::styled("MHz", Style::default().fg(theme.label)),
@@ -408,8 +512,12 @@ fn bottom_band_line(state: &SdrMetrics, theme: &crate::Theme, inner_width: u16) 
     let mut spans = left_spans;
     spans.push(leader(gap, theme.border_dim));
     spans.push(Span::styled(p_label, Style::default().fg(theme.label)));
-    spans.extend(gain_bar_spans(state.radio.lna_gain, gm.primary_max_db(),
-                                theme.status_ok, theme.value_hi));
+    spans.extend(gain_bar_spans(
+        state.radio.lna_gain,
+        gm.primary_max_db(),
+        theme.status_ok,
+        theme.value_hi,
+    ));
     spans.extend([
         Span::raw(" "),
         Span::styled(p_str, Style::default().fg(val_color)),
@@ -421,8 +529,12 @@ fn bottom_band_line(state: &SdrMetrics, theme: &crate::Theme, inner_width: u16) 
         // Secondary stage (HackRF VGA only) — cyan → orange gradient.
         let vga_str = format!("{:2}", state.radio.vga_gain);
         spans.push(Span::styled("VGA ", Style::default().fg(theme.label)));
-        spans.extend(gain_bar_spans(state.radio.vga_gain, 62,
-                                    theme.border_accent, theme.status_warn));
+        spans.extend(gain_bar_spans(
+            state.radio.vga_gain,
+            62,
+            theme.border_accent,
+            theme.status_warn,
+        ));
         spans.extend([
             Span::raw(" "),
             Span::styled(vga_str, Style::default().fg(val_color)),
@@ -438,26 +550,65 @@ fn bottom_band_line(state: &SdrMetrics, theme: &crate::Theme, inner_width: u16) 
 }
 
 impl Panel for HeaderPanel {
-    fn name(&self) -> &'static str { "header" }
-    fn min_size(&self) -> (u16, u16) { (60, 5) }
+    fn name(&self) -> &'static str {
+        "header"
+    }
+    fn min_size(&self) -> (u16, u16) {
+        (60, 5)
+    }
 
-    fn chrome(&self, _state: &SdrMetrics) -> PanelChrome { PanelChrome::deck("Radio") }
+    fn chrome(&self, _state: &SdrMetrics) -> PanelChrome {
+        PanelChrome::deck("Radio")
+    }
 
-    fn render(&self, f: &mut Frame, inner: Rect, state: &SdrMetrics, theme: &crate::Theme, _focused: bool) {
+    fn render(
+        &self,
+        f: &mut Frame,
+        inner: Rect,
+        state: &SdrMetrics,
+        theme: &crate::Theme,
+        _focused: bool,
+    ) {
         // inner.height == 3 when the panel is 5 rows tall. Row positions:
         //   inner.y     → top band
         //   inner.y + 1 → the band strip, drawn at the *outer* width so its ├ and ┤
         //                 end caps land on the side borders and tie into the frame
         //   inner.y + 2 → bottom band
-        if inner.height < 3 { return; }
+        if inner.height < 3 {
+            return;
+        }
         let outer = frame::outer_of(inner);
-        let top_area = Rect { x: inner.x, y: inner.y,     width: inner.width, height: 1 };
-        let sep_area = Rect { x: outer.x, y: inner.y + 1, width: outer.width, height: 1 };
-        let bot_area = Rect { x: inner.x, y: inner.y + 2, width: inner.width, height: 1 };
+        let top_area = Rect {
+            x: inner.x,
+            y: inner.y,
+            width: inner.width,
+            height: 1,
+        };
+        let sep_area = Rect {
+            x: outer.x,
+            y: inner.y + 1,
+            width: outer.width,
+            height: 1,
+        };
+        let bot_area = Rect {
+            x: inner.x,
+            y: inner.y + 2,
+            width: inner.width,
+            height: 1,
+        };
 
-        f.render_widget(Paragraph::new(top_band_line(state, theme, inner.width)), top_area);
-        f.render_widget(Paragraph::new(band_strip_line(state, theme, outer.width)), sep_area);
-        f.render_widget(Paragraph::new(bottom_band_line(state, theme, inner.width)), bot_area);
+        f.render_widget(
+            Paragraph::new(top_band_line(state, theme, inner.width)),
+            top_area,
+        );
+        f.render_widget(
+            Paragraph::new(band_strip_line(state, theme, outer.width)),
+            sep_area,
+        );
+        f.render_widget(
+            Paragraph::new(bottom_band_line(state, theme, inner.width)),
+            bot_area,
+        );
     }
 }
 
@@ -469,23 +620,56 @@ impl Panel for HeaderPanel {
 pub struct SlimHeaderPanel;
 
 impl Panel for SlimHeaderPanel {
-    fn name(&self) -> &'static str { "header_slim" }
-    fn min_size(&self) -> (u16, u16) { (60, 4) }
-    fn preferred_height(&self, _w: u16, _s: &SdrMetrics) -> u16 { 4 }
+    fn name(&self) -> &'static str {
+        "header_slim"
+    }
+    fn min_size(&self) -> (u16, u16) {
+        (60, 4)
+    }
+    fn preferred_height(&self, _w: u16, _s: &SdrMetrics) -> u16 {
+        4
+    }
 
-    fn chrome(&self, _state: &SdrMetrics) -> PanelChrome { PanelChrome::deck("Radio") }
+    fn chrome(&self, _state: &SdrMetrics) -> PanelChrome {
+        PanelChrome::deck("Radio")
+    }
 
-    fn render(&self, f: &mut Frame, inner: Rect, state: &SdrMetrics, theme: &crate::Theme, _focused: bool) {
+    fn render(
+        &self,
+        f: &mut Frame,
+        inner: Rect,
+        state: &SdrMetrics,
+        theme: &crate::Theme,
+        _focused: bool,
+    ) {
         // inner.height == 2 when the panel is 4 rows tall:
         //   inner.y     → device-status band
         //   inner.y + 1 → tuning dial, at outer width so its ├/┤ overwrite the │
-        if inner.height < 2 { return; }
+        if inner.height < 2 {
+            return;
+        }
         let outer = frame::outer_of(inner);
-        let top_area  = Rect { x: inner.x, y: inner.y,     width: inner.width, height: 1 };
-        let dial_area = Rect { x: outer.x, y: inner.y + 1, width: outer.width, height: 1 };
+        let top_area = Rect {
+            x: inner.x,
+            y: inner.y,
+            width: inner.width,
+            height: 1,
+        };
+        let dial_area = Rect {
+            x: outer.x,
+            y: inner.y + 1,
+            width: outer.width,
+            height: 1,
+        };
 
-        f.render_widget(Paragraph::new(top_band_line(state, theme, inner.width)), top_area);
-        f.render_widget(Paragraph::new(band_strip_line(state, theme, outer.width)), dial_area);
+        f.render_widget(
+            Paragraph::new(top_band_line(state, theme, inner.width)),
+            top_area,
+        );
+        f.render_widget(
+            Paragraph::new(band_strip_line(state, theme, outer.width)),
+            dial_area,
+        );
     }
 }
 
@@ -511,14 +695,14 @@ mod tests {
     #[test]
     fn step_place_exp_maps_steps_to_digit_place() {
         // decade steps land exactly on their digit
-        assert_eq!(step_place_exp(1_000),     3); // 1 kHz
-        assert_eq!(step_place_exp(10_000),    4); // 10 kHz
-        assert_eq!(step_place_exp(100_000),   5); // 100 kHz
+        assert_eq!(step_place_exp(1_000), 3); // 1 kHz
+        assert_eq!(step_place_exp(10_000), 4); // 10 kHz
+        assert_eq!(step_place_exp(100_000), 5); // 100 kHz
         assert_eq!(step_place_exp(1_000_000), 6); // 1 MHz
-        assert_eq!(step_place_exp(10_000_000),7); // 10 MHz
-        // non-decade steps collapse onto their leading digit's place
-        assert_eq!(step_place_exp(5_000),   3);
-        assert_eq!(step_place_exp(25_000),  4);
+        assert_eq!(step_place_exp(10_000_000), 7); // 10 MHz
+                                                   // non-decade steps collapse onto their leading digit's place
+        assert_eq!(step_place_exp(5_000), 3);
+        assert_eq!(step_place_exp(25_000), 4);
         assert_eq!(step_place_exp(500_000), 5);
         assert_eq!(step_place_exp(5_000_000), 6);
     }
@@ -529,7 +713,8 @@ mod tests {
         // 145.500 MHz, 10 kHz step → the 10-kHz digit is the first decimal-2 ('0'
         // in ".50"). Exactly one span carries UNDERLINED.
         let spans = vfo_spans(145_500_000, 10_000, t.border_accent, t.label, t.value_hi);
-        let underlined: Vec<&str> = spans.iter()
+        let underlined: Vec<&str> = spans
+            .iter()
             .filter(|s| s.style.add_modifier.contains(Modifier::UNDERLINED))
             .map(|s| s.content.as_ref())
             .collect();
@@ -537,7 +722,10 @@ mod tests {
         // "145.500": frac index 1 (5→exp5,4→exp4) → the '0' after the '5'
         assert_eq!(underlined[0], "0");
         // active digit is brightened, not the plain accent
-        let act = spans.iter().find(|s| s.style.add_modifier.contains(Modifier::UNDERLINED)).unwrap();
+        let act = spans
+            .iter()
+            .find(|s| s.style.add_modifier.contains(Modifier::UNDERLINED))
+            .unwrap();
         assert_eq!(act.style.fg, Some(t.value_hi));
     }
 
@@ -546,7 +734,9 @@ mod tests {
         let t = Theme::sdr();
         // 5 MHz, 10 MHz step → tens-of-MHz digit, which doesn't exist → no underline
         let spans = vfo_spans(5_000_000, 10_000_000, t.border_accent, t.label, t.value_hi);
-        let any = spans.iter().any(|s| s.style.add_modifier.contains(Modifier::UNDERLINED));
+        let any = spans
+            .iter()
+            .any(|s| s.style.add_modifier.contains(Modifier::UNDERLINED));
         assert!(!any, "active digit off-screen → nothing underlined");
     }
 
@@ -561,8 +751,13 @@ mod tests {
     fn gain_bar_total_always_equals_width() {
         for gain in [0u32, 1, 16, 20, 40] {
             let (f, e) = gain_bar(gain, 40, 8);
-            assert_eq!(f.chars().count() + e.chars().count(), 8,
-                "gain={gain}: filled({}) + empty({}) != 8", f.chars().count(), e.chars().count());
+            assert_eq!(
+                f.chars().count() + e.chars().count(),
+                8,
+                "gain={gain}: filled({}) + empty({}) != 8",
+                f.chars().count(),
+                e.chars().count()
+            );
         }
     }
 
@@ -587,12 +782,12 @@ mod tests {
 
     #[test]
     fn fmt_freq_compact_units() {
-        assert_eq!(fmt_freq_compact(1_000_000),     "1M");
-        assert_eq!(fmt_freq_compact(145_000_000),   "145M");
-        assert_eq!(fmt_freq_compact(24_000_000),    "24M");
-        assert_eq!(fmt_freq_compact(6_000_000_000), "6G");   // whole GHz drops decimal
+        assert_eq!(fmt_freq_compact(1_000_000), "1M");
+        assert_eq!(fmt_freq_compact(145_000_000), "145M");
+        assert_eq!(fmt_freq_compact(24_000_000), "24M");
+        assert_eq!(fmt_freq_compact(6_000_000_000), "6G"); // whole GHz drops decimal
         assert_eq!(fmt_freq_compact(1_766_000_000), "1.8G");
-        assert_eq!(fmt_freq_compact(300_000),       "300k");
+        assert_eq!(fmt_freq_compact(300_000), "300k");
     }
 
     #[test]
@@ -603,12 +798,16 @@ mod tests {
         // The whole point of the γ-power axis: the low end no longer eats half the
         // bar. 120 MHz sat at ~0.55 on a log axis; here it must be well under a
         // quarter, and the GHz range gets the room instead.
-        assert!(range_frac(120_000_000, lo, hi) < 0.25,
-                "120 MHz should sit in the lower quarter, got {}",
-                range_frac(120_000_000, lo, hi));
-        assert!(range_frac(1_000_000_000, lo, hi) > 0.40,
-                "1 GHz should be past the low band, got {}",
-                range_frac(1_000_000_000, lo, hi));
+        assert!(
+            range_frac(120_000_000, lo, hi) < 0.25,
+            "120 MHz should sit in the lower quarter, got {}",
+            range_frac(120_000_000, lo, hi)
+        );
+        assert!(
+            range_frac(1_000_000_000, lo, hi) > 0.40,
+            "1 GHz should be past the low band, got {}",
+            range_frac(1_000_000_000, lo, hi)
+        );
         // Strictly increasing with frequency.
         assert!(range_frac(100_000_000, lo, hi) < range_frac(1_000_000_000, lo, hi));
         assert!(range_frac(1_000_000_000, lo, hi) < range_frac(3_000_000_000, lo, hi));
@@ -626,9 +825,13 @@ mod tests {
             for marker in [0usize, 1, track_w / 2, track_w - 2, track_w - 1] {
                 for band in [None, Some("2m"), Some("ISM433")] {
                     let w: usize = rail_spans(track_w, marker, band, &t)
-                        .iter().map(|s| s.width()).sum();
-                    assert_eq!(w, track_w,
-                        "track_w={track_w} marker={marker} band={band:?}");
+                        .iter()
+                        .map(|s| s.width())
+                        .sum();
+                    assert_eq!(
+                        w, track_w,
+                        "track_w={track_w} marker={marker} band={band:?}"
+                    );
                 }
             }
         }
@@ -642,8 +845,14 @@ mod tests {
         let t = Theme::sdr();
         for outer in [60u16, 78, 120, 200] {
             for (lbl, line) in [
-                ("named", compose_band_strip(145_500_000, 1_000_000, 6_000_000_000, &t, outer)),
-                ("percent", compose_band_strip(200_000_000, 1_000_000, 6_000_000_000, &t, outer)),
+                (
+                    "named",
+                    compose_band_strip(145_500_000, 1_000_000, 6_000_000_000, &t, outer),
+                ),
+                (
+                    "percent",
+                    compose_band_strip(200_000_000, 1_000_000, 6_000_000_000, &t, outer),
+                ),
             ] {
                 let w: usize = line.spans.iter().map(|s| s.width()).sum();
                 assert_eq!(w, outer as usize, "{lbl} strip width at outer={outer}");

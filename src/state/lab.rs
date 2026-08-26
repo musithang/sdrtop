@@ -18,14 +18,14 @@ pub const REF_MAX: f32 = 0.0;
 /// the display is held. Captures everything the two panels derive from.
 #[derive(Clone)]
 pub struct RfFreeze {
-    pub signed_hist:  [u64; 32],
-    pub peak_dbfs:    f32,
-    pub rms_dbfs:     f32,
-    pub clip_events:  u64,
-    pub snr_db:       f32,
-    pub amp_enabled:  bool,
-    pub lna_gain:     u32,
-    pub vga_gain:     u32,
+    pub signed_hist: [u64; 32],
+    pub peak_dbfs: f32,
+    pub rms_dbfs: f32,
+    pub clip_events: u64,
+    pub snr_db: f32,
+    pub amp_enabled: bool,
+    pub lna_gain: u32,
+    pub vga_gain: u32,
 }
 
 /// Measurement-state for the lab instrument-chrome.
@@ -33,10 +33,10 @@ pub struct RfFreeze {
 pub struct LabState {
     /// Reference level (dBFS) — drawn as a horizontal line on the lab spectrum,
     /// and the marker readout shows Δ-from-REF. `None` → `—`, no line.
-    pub ref_dbfs:  Option<f32>,
+    pub ref_dbfs: Option<f32>,
     /// Spectrum trace-averaging depth. Maps to the FFT EMA: `alpha = 1/avg_n`.
     /// `1` = no averaging (instant). Default `5` ≈ the historical `alpha = 0.2`.
-    pub avg_n:     u16,
+    pub avg_n: u16,
     /// Captured reference trace (CAL): drawn as a static ghost on the lab spectrum
     /// for before/after comparison. `Some` ⇒ `CAL ✓`.
     pub ref_trace: Option<Arc<Vec<f32>>>,
@@ -57,8 +57,12 @@ pub struct LabState {
 impl Default for LabState {
     fn default() -> Self {
         Self {
-            ref_dbfs: None, avg_n: 5, ref_trace: None, iq_marker_pin: None,
-            rf_autotrack: false, rf_freeze: None,
+            ref_dbfs: None,
+            avg_n: 5,
+            ref_trace: None,
+            iq_marker_pin: None,
+            rf_autotrack: false,
+            rf_freeze: None,
         }
     }
 }
@@ -86,18 +90,26 @@ impl LabState {
     pub fn ref_label(&self) -> String {
         match self.ref_dbfs {
             Some(db) => format!("{db:.0} dBFS"),
-            None     => "\u{2014}".to_string(),
+            None => "\u{2014}".to_string(),
         }
     }
 
     /// `AVG` banner field: `×8` when averaging, else `OFF`.
     pub fn avg_label(&self) -> String {
-        if self.avg_n > 1 { format!("\u{00D7}{}", self.avg_n) } else { "OFF".to_string() }
+        if self.avg_n > 1 {
+            format!("\u{00D7}{}", self.avg_n)
+        } else {
+            "OFF".to_string()
+        }
     }
 
     /// `CAL` banner field: `✓` when a reference trace is captured, else `—`.
     pub fn cal_label(&self) -> &'static str {
-        if self.ref_trace.is_some() { "\u{2713}" } else { "\u{2014}" }
+        if self.ref_trace.is_some() {
+            "\u{2713}"
+        } else {
+            "\u{2014}"
+        }
     }
 }
 
@@ -108,10 +120,10 @@ mod tests {
     #[test]
     fn default_reads_as_x5_no_ref_no_cal() {
         let s = LabState::default();
-        assert_eq!(s.ref_label(), "\u{2014}");          // —
-        assert_eq!(s.avg_label(), "\u{00D7}5");         // ×5
-        assert_eq!(s.cal_label(), "\u{2014}");          // —
-        assert!((s.ema_alpha() - 0.2).abs() < 1e-6);    // preserves historical 0.2
+        assert_eq!(s.ref_label(), "\u{2014}"); // —
+        assert_eq!(s.avg_label(), "\u{00D7}5"); // ×5
+        assert_eq!(s.cal_label(), "\u{2014}"); // —
+        assert!((s.ema_alpha() - 0.2).abs() < 1e-6); // preserves historical 0.2
     }
 
     #[test]
@@ -122,13 +134,13 @@ mod tests {
         s.adjust_avg(-100);
         assert_eq!(s.avg_n, AVG_MIN);
         assert_eq!(s.avg_label(), "OFF");
-        assert!((s.ema_alpha() - 1.0).abs() < 1e-6);    // N=1 → no smoothing
+        assert!((s.ema_alpha() - 1.0).abs() < 1e-6); // N=1 → no smoothing
     }
 
     #[test]
     fn ref_adjust_inits_and_clamps() {
         let mut s = LabState::default();
-        s.adjust_ref(-5.0);                 // unset → starts at -10, then -5
+        s.adjust_ref(-5.0); // unset → starts at -10, then -5
         assert_eq!(s.ref_dbfs, Some(-15.0));
         s.adjust_ref(1000.0);
         assert_eq!(s.ref_dbfs, Some(REF_MAX));

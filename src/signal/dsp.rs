@@ -13,8 +13,8 @@ pub fn compute_window(fn_type: WindowFn, size: usize) -> Vec<f32> {
         .map(|i| {
             let x = 2.0 * PI * i as f64 / (n - 1.0);
             match fn_type {
-                WindowFn::Hann     => (0.5 * (1.0 - x.cos())) as f32,
-                WindowFn::Hamming  => (0.54 - 0.46 * x.cos()) as f32,
+                WindowFn::Hann => (0.5 * (1.0 - x.cos())) as f32,
+                WindowFn::Hamming => (0.54 - 0.46 * x.cos()) as f32,
                 WindowFn::Blackman => (0.42 - 0.5 * x.cos() + 0.08 * (2.0 * x).cos()) as f32,
             }
         })
@@ -35,7 +35,9 @@ mod tests {
     #[test]
     fn hann_peak_near_center() {
         let w = compute_window(WindowFn::Hann, 1024);
-        let peak_idx = w.iter().enumerate()
+        let peak_idx = w
+            .iter()
+            .enumerate()
             .max_by(|(_, a), (_, b)| a.partial_cmp(b).unwrap())
             .map(|(i, _)| i)
             .unwrap();
@@ -45,7 +47,11 @@ mod tests {
     #[test]
     fn hamming_endpoints_nonzero() {
         let w = compute_window(WindowFn::Hamming, 1024);
-        assert!(w[0] > 0.05, "Hamming endpoint should not reach zero, got {}", w[0]);
+        assert!(
+            w[0] > 0.05,
+            "Hamming endpoint should not reach zero, got {}",
+            w[0]
+        );
     }
 
     #[test]

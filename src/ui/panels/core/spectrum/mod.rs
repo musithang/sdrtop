@@ -45,19 +45,25 @@ use view::SpectrumView;
 pub struct SpectrumPanel;
 
 impl Panel for SpectrumPanel {
-    fn name(&self) -> &'static str { "spectrum" }
-    fn min_size(&self) -> (u16, u16) { (40, 10) }
-    fn focus_key(&self) -> Option<char> { Some('e') }
+    fn name(&self) -> &'static str {
+        "spectrum"
+    }
+    fn min_size(&self) -> (u16, u16) {
+        (40, 10)
+    }
+    fn focus_key(&self) -> Option<char> {
+        Some('e')
+    }
     fn focus_bindings(&self) -> &'static [(&'static str, &'static str)] {
         &[
             ("← →", "Tune frequency"),
             ("[ ]", "Step size"),
             ("↑ ↓", "Zoom y-axis"),
-            ("J K",  "Cursor"),
-            ("M",    "Place/remove marker"),
-            ("B",    "Cycle channel BW on nearest marker"),
-            ("H",    "Hold/unhold frame"),
-            ("D",    "Draw style"),
+            ("J K", "Cursor"),
+            ("M", "Place/remove marker"),
+            ("B", "Cycle channel BW on nearest marker"),
+            ("H", "Hold/unhold frame"),
+            ("D", "Draw style"),
         ]
     }
 
@@ -71,7 +77,14 @@ impl Panel for SpectrumPanel {
     /// Engine-framed: `area` is the inner rect. The axes are tinted to match the
     /// border, so the colour is asked for by the same rule the frame was drawn
     /// with rather than re-derived here.
-    fn render(&self, f: &mut Frame, area: Rect, state: &SdrMetrics, theme: &crate::Theme, focused: bool) {
+    fn render(
+        &self,
+        f: &mut Frame,
+        area: Rect,
+        state: &SdrMetrics,
+        theme: &crate::Theme,
+        focused: bool,
+    ) {
         let border = frame::frame_color(&self.chrome(state), state, focused, theme);
         contents(f, area, state, theme, focused, Bond::None, border);
     }
@@ -84,14 +97,26 @@ impl Panel for SpectrumPanel {
 /// the waterfall's top border becomes the shared ruler. Only the border *set* is
 /// drawn here; the nameplate and the colour still come from the panel's own
 /// [`PanelChrome`], so the bonded and standalone plates cannot drift apart.
-pub fn render(f: &mut Frame, area: Rect, state: &SdrMetrics, theme: &crate::Theme, focused: bool, bond: Bond) {
-    debug_assert_ne!(bond, Bond::None, "unbonded spectrum goes through the registry");
+pub fn render(
+    f: &mut Frame,
+    area: Rect,
+    state: &SdrMetrics,
+    theme: &crate::Theme,
+    focused: bool,
+    bond: Bond,
+) {
+    debug_assert_ne!(
+        bond,
+        Bond::None,
+        "unbonded spectrum goes through the registry"
+    );
     let chrome = SpectrumPanel.chrome(state);
     let stale = chrome.staleness.resolve(state);
     let border = frame::frame_color(&chrome, state, focused, theme);
 
-    let block = chrome::deck_block_borders(border, bond_borders(bond))
-        .title(Line::from(frame::title_spans(&chrome, SpectrumPanel.focus_key(), stale, theme)));
+    let block = chrome::deck_block_borders(border, bond_borders(bond)).title(Line::from(
+        frame::title_spans(&chrome, SpectrumPanel.focus_key(), stale, theme),
+    ));
 
     let inner = block.inner(area);
     f.render_widget(block, area);
@@ -101,8 +126,13 @@ pub fn render(f: &mut Frame, area: Rect, state: &SdrMetrics, theme: &crate::Them
 
 /// The instrument itself, drawn into whatever inner rect the caller carved.
 fn contents(
-    f: &mut Frame, inner: Rect, state: &SdrMetrics, theme: &crate::Theme,
-    focused: bool, bond: Bond, border: Color,
+    f: &mut Frame,
+    inner: Rect,
+    state: &SdrMetrics,
+    theme: &crate::Theme,
+    focused: bool,
+    bond: Bond,
+    border: Color,
 ) {
     let Some(fft) = state.waterfall.last_fft.as_ref() else {
         f.render_widget(
@@ -117,11 +147,21 @@ fn contents(
     // Shared frequency zoom: bonded below the waterfall, both plots narrow to
     // the same centre slice so the instrument zooms as one around the tuned
     // frequency. Standalone the spectrum shows the full span.
-    let zoom = if bond == Bond::Below { state.waterfall.hz_zoom as usize } else { 1 };
+    let zoom = if bond == Bond::Below {
+        state.waterfall.hz_zoom as usize
+    } else {
+        1
+    };
     let Some(view) = SpectrumView::new(
-        &fft.bins_dbfs, &fft.peak_hold, state.spectrum.hold.clone(),
-        fft.center_freq_hz, fft.sample_rate, zoom,
-    ) else { return };
+        &fft.bins_dbfs,
+        &fft.peak_hold,
+        state.spectrum.hold.clone(),
+        fft.center_freq_hz,
+        fft.sample_rate,
+        zoom,
+    ) else {
+        return;
+    };
 
     draw_instrument(f, inner, state, theme, focused, bond, &view, fft, border);
 }
@@ -140,8 +180,11 @@ fn bond_borders(bond: Bond) -> Borders {
 /// Bonded below, there is no bottom border to anchor `┗┛` against, so only the
 /// top corners are reinforced.
 fn corner_accents(f: &mut Frame, area: Rect, bond: Bond, border: Color) {
-    if bond == Bond::Below { chrome::corner_accents_top(f, area, border); }
-    else { chrome::corner_accents(f, area, border); }
+    if bond == Bond::Below {
+        chrome::corner_accents_top(f, area, border);
+    } else {
+        chrome::corner_accents(f, area, border);
+    }
 }
 
 /// The rows the instrument is carved into, given the panel's inner rect.
@@ -164,13 +207,21 @@ impl Rows {
             .split(inner);
 
         let mut constraints = vec![Constraint::Min(4)];
-        if show_freq { constraints.push(Constraint::Length(1)); }
-        if focused { constraints.push(Constraint::Length(1)); }
+        if show_freq {
+            constraints.push(Constraint::Length(1));
+        }
+        if focused {
+            constraints.push(Constraint::Length(1));
+        }
 
-        let rows = Layout::default().direction(Direction::Vertical)
-            .constraints(constraints.clone()).split(cols[1]);
-        let gutter_rows = Layout::default().direction(Direction::Vertical)
-            .constraints(constraints).split(cols[0]);
+        let rows = Layout::default()
+            .direction(Direction::Vertical)
+            .constraints(constraints.clone())
+            .split(cols[1]);
+        let gutter_rows = Layout::default()
+            .direction(Direction::Vertical)
+            .constraints(constraints)
+            .split(cols[0]);
 
         Self {
             canvas: rows[0],
@@ -183,30 +234,48 @@ impl Rows {
 
 #[allow(clippy::too_many_arguments)]
 fn draw_instrument(
-    f: &mut Frame, inner: Rect, state: &SdrMetrics, theme: &crate::Theme,
-    focused: bool, bond: Bond, view: &SpectrumView,
-    fft: &crate::state::FftFrame, border: Color,
+    f: &mut Frame,
+    inner: Rect,
+    state: &SdrMetrics,
+    theme: &crate::Theme,
+    focused: bool,
+    bond: Bond,
+    view: &SpectrumView,
+    fft: &crate::state::FftFrame,
+    border: Color,
 ) {
     // Bonded below, the shared ruler covers the frequency scale, so that row is
     // reclaimed for the plot.
     let rows = Rows::split(inner, focused, bond != Bond::Below);
-    let vert = Vertical::new(state.spectrum.y_min, state.spectrum.y_max, rows.canvas.height, theme);
+    let vert = Vertical::new(
+        state.spectrum.y_min,
+        state.spectrum.y_max,
+        rows.canvas.height,
+        theme,
+    );
     let n = view.n();
 
     // Signal-characterization overlays belong to the lab_signal instrument only.
     let signal_overlay = state.ui.active_preset == "lab_signal";
     let obw = if signal_overlay && fft.occupied_bw_hz > 0 {
         let (lo, hi) = obw_bounds(fft.center_freq_hz, fft.occupied_bw_hz);
-        (freq_to_canvas_x(lo, view.left_hz, view.bw, n),
-         freq_to_canvas_x(hi, view.left_hz, view.bw, n))
+        (
+            freq_to_canvas_x(lo, view.left_hz, view.bw, n),
+            freq_to_canvas_x(hi, view.left_hz, view.bw, n),
+        )
     } else {
         (None, None)
     };
 
-    let cursor_x = state.spectrum.cursor_freq
+    let cursor_x = state
+        .spectrum
+        .cursor_freq
         .and_then(|cf| freq_to_canvas_x(cf as f64, view.left_hz, view.bw, n));
 
-    let markers = state.spectrum.markers.iter()
+    let markers = state
+        .spectrum
+        .markers
+        .iter()
         .filter_map(|mk| {
             let at = |hz: f64| freq_to_canvas_x(hz, view.left_hz, view.bw, n);
             let (bw_lo, bw_hi) = match mk.channel_bw_hz {
@@ -217,8 +286,11 @@ fn draw_instrument(
                 None => (None, None),
             };
             let x = at(mk.freq_hz as f64);
-            (x.is_some() || bw_lo.is_some() || bw_hi.is_some())
-                .then_some(MarkerRules { x, bw_lo, bw_hi })
+            (x.is_some() || bw_lo.is_some() || bw_hi.is_some()).then_some(MarkerRules {
+                x,
+                bw_lo,
+                bw_hi,
+            })
         })
         .collect();
 
@@ -227,35 +299,69 @@ fn draw_instrument(
     let ghosts = if state.ui.is_lab_mode() {
         LabGhosts {
             trace: state.lab.ref_trace.clone(),
-            ref_dbfs: state.lab.ref_dbfs.map(|r| r.clamp(vert.min, vert.max) as f64),
+            ref_dbfs: state
+                .lab
+                .ref_dbfs
+                .map(|r| r.clamp(vert.min, vert.max) as f64),
         }
     } else {
-        LabGhosts { trace: None, ref_dbfs: None }
+        LabGhosts {
+            trace: None,
+            ref_dbfs: None,
+        }
     };
 
-    trace::draw(f, rows.canvas, view, &vert, Layers {
-        rules: Rules { markers, obw, cursor: cursor_x },
-        ghosts,
-        style: state.spectrum.style,
-        noise_floor: fft.noise_floor,
-    }, theme);
+    trace::draw(
+        f,
+        rows.canvas,
+        view,
+        &vert,
+        Layers {
+            rules: Rules {
+                markers,
+                obw,
+                cursor: cursor_x,
+            },
+            ghosts,
+            style: state.spectrum.style,
+            noise_floor: fft.noise_floor,
+        },
+        theme,
+    );
 
     labels::band_plan(f, rows.canvas, view, theme);
     labels::peak_flags(f, rows.canvas, view, &vert, fft.noise_floor, theme);
     labels::marker_labels(f, rows.canvas, view, state, theme);
     if signal_overlay {
-        labels::signal_annotations(f, rows.canvas, view, state, obw, fft.occupied_bw_hz,
-                                   &vert, fft.noise_floor, theme);
+        labels::signal_annotations(
+            f,
+            rows.canvas,
+            view,
+            state,
+            obw,
+            fft.occupied_bw_hz,
+            &vert,
+            fft.noise_floor,
+            theme,
+        );
     }
 
     if let Some(area) = rows.frequency {
         axes::frequency(f, area, rows.canvas.width, view, border, theme);
     }
     if let Some(area) = rows.tuning {
-        let cursor = state.spectrum.cursor_freq.and_then(|cf| {
-            view.level_at(cf).map(|pwr| (cf as f64 / 1_000_000.0, pwr))
-        });
-        axes::tuning(f, area, state.radio.frequency, state.spectrum.step_hz, cursor, theme);
+        let cursor = state
+            .spectrum
+            .cursor_freq
+            .and_then(|cf| view.level_at(cf).map(|pwr| (cf as f64 / 1_000_000.0, pwr)));
+        axes::tuning(
+            f,
+            area,
+            state.radio.frequency,
+            state.spectrum.step_hz,
+            cursor,
+            theme,
+        );
     }
     axes::db_gutter(f, rows.gutter, vert.min, vert.max, border, theme);
 }
@@ -278,7 +384,12 @@ mod tests {
 
     #[test]
     fn the_rows_shift_as_the_optional_ones_appear() {
-        let inner = Rect { x: 0, y: 0, width: 100, height: 20 };
+        let inner = Rect {
+            x: 0,
+            y: 0,
+            width: 100,
+            height: 20,
+        };
         // Bonded below and unfocused: the canvas gets every row.
         let bare = Rows::split(inner, false, false);
         assert_eq!(bare.canvas.height, 20);

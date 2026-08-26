@@ -21,8 +21,8 @@ use ratatui::{
 };
 
 use crate::state::SdrMetrics;
-use crate::ui::widgets::charts::bipolar_braille_strip;
 use crate::ui::panel::{Panel, PanelChrome, Staleness};
+use crate::ui::widgets::charts::bipolar_braille_strip;
 use crate::ui::widgets::timing_fmt::fmt_us;
 
 pub struct TimingStripchartPanel;
@@ -35,13 +35,21 @@ const BLANK: char = '\u{2800}';
 /// Severity of a column's worst deviation against the budget: 0 in budget,
 /// 1 over budget, 2 more than double over. Drives the bar colour.
 fn dev_severity(max_abs_us: u64, budget_us: u64) -> u8 {
-    if budget_us == 0 || max_abs_us <= budget_us { 0 }
-    else if max_abs_us <= budget_us * 2 { 1 }
-    else { 2 }
+    if budget_us == 0 || max_abs_us <= budget_us {
+        0
+    } else if max_abs_us <= budget_us * 2 {
+        1
+    } else {
+        2
+    }
 }
 
 fn severity_color(sev: u8, theme: &crate::Theme) -> Color {
-    match sev { 0 => theme.value, 1 => theme.status_warn, _ => theme.status_crit }
+    match sev {
+        0 => theme.value,
+        1 => theme.status_warn,
+        _ => theme.status_crit,
+    }
 }
 
 /// Direction of a column's over-range spike, from its two samples: `+1` if the
@@ -49,14 +57,24 @@ fn severity_color(sev: u8, theme: &crate::Theme) -> Color {
 /// (negative). Decides whether the spike tag is drawn as `▲` at the top of the
 /// chart (a late overrun) or `▼` at the bottom (an early one).
 fn over_tag_sign(a: i32, b: i32) -> i8 {
-    let worst = if a.unsigned_abs() >= b.unsigned_abs() { a } else { b };
-    if worst < 0 { -1 } else { 1 }
+    let worst = if a.unsigned_abs() >= b.unsigned_abs() {
+        a
+    } else {
+        b
+    };
+    if worst < 0 {
+        -1
+    } else {
+        1
+    }
 }
 
 /// Signed deviation (µs) at the top edge of text row `r` of an `rows`-tall chart,
 /// where row 0 is `+full_scale` and the last row is `−full_scale`.
 fn axis_value_us(r: usize, rows: usize, full_scale: i32) -> i32 {
-    if rows <= 1 { return 0; }
+    if rows <= 1 {
+        return 0;
+    }
     (full_scale as f64 * (1.0 - 2.0 * r as f64 / (rows - 1) as f64)).round() as i32
 }
 
@@ -65,13 +83,14 @@ fn axis_value_us(r: usize, rows: usize, full_scale: i32) -> i32 {
 fn gutter_label(text: Option<String>) -> String {
     match text {
         Some(s) => format!("{s:>w$} ", w = GUTTER_W - 1),
-        None    => " ".repeat(GUTTER_W),
+        None => " ".repeat(GUTTER_W),
     }
 }
 
 fn fmt_axis(us: i32) -> String {
-    if us == 0 { "0".to_string() }
-    else if us.unsigned_abs() >= 1000 {
+    if us == 0 {
+        "0".to_string()
+    } else if us.unsigned_abs() >= 1000 {
         let sign = if us < 0 { "\u{2212}" } else { "+" };
         format!("{sign}{:.1}", us.unsigned_abs() as f64 / 1000.0)
     } else {
@@ -81,8 +100,12 @@ fn fmt_axis(us: i32) -> String {
 }
 
 impl Panel for TimingStripchartPanel {
-    fn name(&self) -> &'static str { "timing_stripchart" }
-    fn min_size(&self) -> (u16, u16) { (48, 12) }
+    fn name(&self) -> &'static str {
+        "timing_stripchart"
+    }
+    fn min_size(&self) -> (u16, u16) {
+        (48, 12)
+    }
 
     fn chrome(&self, _state: &SdrMetrics) -> PanelChrome {
         PanelChrome::new("Callback Interval")
@@ -90,9 +113,18 @@ impl Panel for TimingStripchartPanel {
             .suffix(" \u{00b7} Real-Time Strip Chart")
     }
 
-    fn render(&self, f: &mut Frame, inner: Rect, state: &SdrMetrics, theme: &crate::Theme, _focused: bool) {
+    fn render(
+        &self,
+        f: &mut Frame,
+        inner: Rect,
+        state: &SdrMetrics,
+        theme: &crate::Theme,
+        _focused: bool,
+    ) {
         let stale = !state.radio.hw_streaming;
-        if inner.width == 0 || inner.height == 0 { return; }
+        if inner.width == 0 || inner.height == 0 {
+            return;
+        }
         let iw = inner.width as usize;
         let lbl = Style::default().fg(theme.label);
         let dim = Style::default().fg(theme.border_dim);
@@ -117,28 +149,50 @@ impl Panel for TimingStripchartPanel {
         } else {
             "callback interval deviation"
         };
-        f.render_widget(Paragraph::new(Line::from(vec![Span::raw(" "), Span::styled(desc, lbl)])), rows[0]);
+        f.render_widget(
+            Paragraph::new(Line::from(vec![Span::raw(" "), Span::styled(desc, lbl)])),
+            rows[0],
+        );
 
         let t = &state.timing;
         let budget = t.deadline_budget_us;
 
         // ── Inset stats line ────────────────────────────────────────────────────
         let stats = if stale {
-            Line::from(vec![Span::raw(" "), Span::styled("RX stopped", Style::default().fg(theme.stale))])
+            Line::from(vec![
+                Span::raw(" "),
+                Span::styled("RX stopped", Style::default().fg(theme.stale)),
+            ])
         } else {
             let q = t.timing_quality;
-            let mark = if q.severity() == 0 { "\u{2713}" } else { "\u{26a0}" };
+            let mark = if q.severity() == 0 {
+                "\u{2713}"
+            } else {
+                "\u{26a0}"
+            };
             let qcol = crate::ui::widgets::timing_fmt::quality_color(q, theme);
             Line::from(vec![
                 Span::raw(" "),
-                Span::styled(format!("jitter \u{00b1}{} \u{00b5}s", t.cb_jitter_us), Style::default().fg(theme.value)),
+                Span::styled(
+                    format!("jitter \u{00b1}{} \u{00b5}s", t.cb_jitter_us),
+                    Style::default().fg(theme.value),
+                ),
                 Span::styled("   worst ", lbl),
                 Span::styled(fmt_us(t.dev_peak_us), Style::default().fg(theme.value)),
                 Span::styled("   over budget ", lbl),
-                Span::styled(format!("{} / {}", t.late_callbacks, t.late_window),
-                    Style::default().fg(if t.late_callbacks == 0 { theme.status_ok } else { theme.status_warn })),
+                Span::styled(
+                    format!("{} / {}", t.late_callbacks, t.late_window),
+                    Style::default().fg(if t.late_callbacks == 0 {
+                        theme.status_ok
+                    } else {
+                        theme.status_warn
+                    }),
+                ),
                 Span::styled("   ", lbl),
-                Span::styled(format!("{mark} {}", q.label()), Style::default().fg(qcol).add_modifier(Modifier::BOLD)),
+                Span::styled(
+                    format!("{mark} {}", q.label()),
+                    Style::default().fg(qcol).add_modifier(Modifier::BOLD),
+                ),
             ])
         };
         f.render_widget(Paragraph::new(stats), rows[1]);
@@ -148,11 +202,24 @@ impl Panel for TimingStripchartPanel {
         let chart_h = chart.height as usize;
         let cols = (chart.width as usize).saturating_sub(GUTTER_W);
         if stale || cols < 4 || chart_h == 0 || t.cb_deviations_us.is_empty() {
-            let msg = if stale { "\u{25cb} IDLE \u{2014} RX stopped" } else { "waiting for callbacks\u{2026}" };
+            let msg = if stale {
+                "\u{25cb} IDLE \u{2014} RX stopped"
+            } else {
+                "waiting for callbacks\u{2026}"
+            };
             let mid = chart.y + chart.height / 2;
             f.render_widget(
-                Paragraph::new(Line::from(vec![Span::raw(" "), Span::styled(msg, Style::default().fg(theme.stale))])),
-                Rect { x: chart.x, y: mid, width: chart.width, height: 1 });
+                Paragraph::new(Line::from(vec![
+                    Span::raw(" "),
+                    Span::styled(msg, Style::default().fg(theme.stale)),
+                ])),
+                Rect {
+                    x: chart.x,
+                    y: mid,
+                    width: chart.width,
+                    height: 1,
+                },
+            );
         } else {
             let full_scale = ((budget as f64 * 1.5).round() as i32).max(1);
             let dev = &t.cb_deviations_us;
@@ -177,7 +244,9 @@ impl Panel for TimingStripchartPanel {
             for &c in &over {
                 let a = window.get(2 * c).copied().unwrap_or(0);
                 let b = window.get(2 * c + 1).copied().unwrap_or(0);
-                if let Some(slot) = over_sign.get_mut(c) { *slot = over_tag_sign(a, b); }
+                if let Some(slot) = over_sign.get_mut(c) {
+                    *slot = over_tag_sign(a, b);
+                }
             }
             let last_row = chart_h - 1;
 
@@ -188,21 +257,35 @@ impl Panel for TimingStripchartPanel {
             let band_bot = ((span * (1.0 + bf)).round() as usize / 4).min(chart_h - 1);
 
             // Rows that carry an axis label: top, quarter, mid, three-quarter, bottom.
-            let label_rows = [0, (chart_h - 1) / 4, (chart_h - 1) / 2, (chart_h - 1) * 3 / 4, chart_h - 1];
+            let label_rows = [
+                0,
+                (chart_h - 1) / 4,
+                (chart_h - 1) / 2,
+                (chart_h - 1) * 3 / 4,
+                chart_h - 1,
+            ];
 
             let mut out: Vec<Line> = Vec::with_capacity(chart_h);
             for (r, row_str) in strip.iter().enumerate() {
                 let chars: Vec<char> = row_str.chars().collect();
                 let label = if label_rows.contains(&r) {
                     Some(fmt_axis(axis_value_us(r, chart_h, full_scale)))
-                } else { None };
+                } else {
+                    None
+                };
                 let mut spans = vec![Span::styled(gutter_label(label), lbl)];
                 for (c, &ch) in chars.iter().enumerate() {
                     let osign = over_sign.get(c).copied().unwrap_or(0);
                     if r == 0 && osign > 0 {
-                        spans.push(Span::styled("\u{25B2}".to_string(), Style::default().fg(theme.status_crit)));
+                        spans.push(Span::styled(
+                            "\u{25B2}".to_string(),
+                            Style::default().fg(theme.status_crit),
+                        ));
                     } else if r == last_row && osign < 0 {
-                        spans.push(Span::styled("\u{25BC}".to_string(), Style::default().fg(theme.status_crit)));
+                        spans.push(Span::styled(
+                            "\u{25BC}".to_string(),
+                            Style::default().fg(theme.status_crit),
+                        ));
                     } else if ch == BLANK {
                         // Empty cell: draw the deadline guide on the band rows, else nothing.
                         if r == band_top || r == band_bot {
@@ -211,7 +294,9 @@ impl Panel for TimingStripchartPanel {
                             spans.push(Span::styled(BLANK.to_string(), dim));
                         }
                     } else {
-                        let col = col_sev(c).map(|s| severity_color(s, theme)).unwrap_or(theme.value);
+                        let col = col_sev(c)
+                            .map(|s| severity_color(s, theme))
+                            .unwrap_or(theme.value);
                         spans.push(Span::styled(ch.to_string(), Style::default().fg(col)));
                     }
                 }
@@ -225,9 +310,15 @@ impl Panel for TimingStripchartPanel {
             Span::raw(" "),
             Span::styled("\u{25AC} in budget", Style::default().fg(theme.value)),
             Span::raw("   "),
-            Span::styled("\u{25AC} over budget", Style::default().fg(theme.status_warn)),
+            Span::styled(
+                "\u{25AC} over budget",
+                Style::default().fg(theme.status_warn),
+            ),
             Span::raw("   "),
-            Span::styled(format!("\u{2504} \u{00b1}{} \u{00b5}s deadline", budget), dim),
+            Span::styled(
+                format!("\u{2504} \u{00b1}{} \u{00b5}s deadline", budget),
+                dim,
+            ),
         ]);
         f.render_widget(Paragraph::new(legend1), rows[4]);
 
@@ -238,7 +329,10 @@ impl Panel for TimingStripchartPanel {
             (shown as u64 * t.cb_period_us) as f64 / 1e6
         };
         let legend2 = if stale || t.cb_period_us == 0 {
-            Line::from(vec![Span::raw(" "), Span::styled("one point per RX callback", lbl)])
+            Line::from(vec![
+                Span::raw(" "),
+                Span::styled("one point per RX callback", lbl),
+            ])
         } else {
             Line::from(vec![
                 Span::raw(" "),

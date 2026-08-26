@@ -26,7 +26,9 @@ const BOT_DBM: f64 = -110.0;
 
 /// Interpolate a node series at fractional node position `p` (piecewise linear).
 fn lerp_at(vals: &[f64], p: f64) -> f64 {
-    if vals.is_empty() { return 0.0; }
+    if vals.is_empty() {
+        return 0.0;
+    }
     let lo = (p.floor() as usize).min(vals.len() - 1);
     let hi = (lo + 1).min(vals.len() - 1);
     let frac = p - lo as f64;
@@ -40,8 +42,12 @@ fn dbm_row(dbm: f64, h: usize) -> usize {
 }
 
 impl Panel for LevelDiagramPanel {
-    fn name(&self) -> &'static str { "level_diagram" }
-    fn min_size(&self) -> (u16, u16) { (40, 14) }
+    fn name(&self) -> &'static str {
+        "level_diagram"
+    }
+    fn min_size(&self) -> (u16, u16) {
+        (40, 14)
+    }
 
     fn chrome(&self, state: &SdrMetrics) -> PanelChrome {
         PanelChrome::new("Gain-Staging Level Diagram")
@@ -49,47 +55,78 @@ impl Panel for LevelDiagramPanel {
             .tag_if(state.lab.rf_freeze.is_some(), Tag::Frozen)
     }
 
-    fn render(&self, f: &mut Frame, inner: Rect, state: &SdrMetrics, theme: &crate::Theme, _focused: bool) {
+    fn render(
+        &self,
+        f: &mut Frame,
+        inner: Rect,
+        state: &SdrMetrics,
+        theme: &crate::Theme,
+        _focused: bool,
+    ) {
         let stale = !state.radio.hw_streaming;
-        if inner.width == 0 || inner.height == 0 { return; }
+        if inner.width == 0 || inner.height == 0 {
+            return;
+        }
 
         let dim = theme.border_dim;
         if stale || !state.caps.friis_applicable {
-            let msg = if stale { "\u{2014}\u{2014}\u{2014}" } else { "single-tuner \u{2014} no cascade" };
-            f.render_widget(Paragraph::new(Span::styled(msg, Style::default().fg(dim))), inner);
+            let msg = if stale {
+                "\u{2014}\u{2014}\u{2014}"
+            } else {
+                "single-tuner \u{2014} no cascade"
+            };
+            f.render_widget(
+                Paragraph::new(Span::styled(msg, Style::default().fg(dim))),
+                inner,
+            );
             return;
         }
 
         // --- model: 5 nodes ANT, LNA, MIX, VGA, ADC (ADC = VGA output) ----------
         // Frozen snapshot when held, else the live gain/level.
         let fz = state.lab.rf_freeze.as_ref();
-        let (amp, lna, vga) = fz.map(|f| (f.amp_enabled, f.lna_gain, f.vga_gain))
-            .unwrap_or((state.radio.amp_enabled, state.radio.lna_gain, state.radio.vga_gain));
+        let (amp, lna, vga) = fz
+            .map(|f| (f.amp_enabled, f.lna_gain, f.vga_gain))
+            .unwrap_or((
+                state.radio.amp_enabled,
+                state.radio.lna_gain,
+                state.radio.vga_gain,
+            ));
         let stages = cascade(amp, lna, vga);
-        let adc_peak = fz.map(|f| f.peak_dbfs).unwrap_or(state.signal.adc_peak_dbfs) as f64;
+        let adc_peak = fz
+            .map(|f| f.peak_dbfs)
+            .unwrap_or(state.signal.adc_peak_dbfs) as f64;
         let snr = fz.map(|f| f.snr_db).unwrap_or(state.signal.peak_to_nf_db) as f64;
         let mut nodes: Vec<StageLevel> = level_lineup(adc_peak, snr, &stages);
         if let Some(last) = nodes.last().copied() {
-            nodes.push(StageLevel { label: "ADC", ..last });
+            nodes.push(StageLevel {
+                label: "ADC",
+                ..last
+            });
         }
         let n = nodes.len();
-        if n < 2 { return; }
-        let sig: Vec<f64>   = nodes.iter().map(|s| s.signal_dbm).collect();
+        if n < 2 {
+            return;
+        }
+        let sig: Vec<f64> = nodes.iter().map(|s| s.signal_dbm).collect();
         let noise: Vec<f64> = nodes.iter().map(|s| s.noise_dbm).collect();
 
-        let sig_col   = theme.value_hi;
+        let sig_col = theme.value_hi;
         let noise_col = theme.border_accent;
-        let gap_col   = dim;
+        let gap_col = dim;
 
         // --- layout ------------------------------------------------------------
         let iw = inner.width as usize;
         let ih = inner.height as usize;
-        let gutter = 4usize;                         // "−110"
+        let gutter = 4usize; // "−110"
         let chart_w = iw.saturating_sub(gutter + 1);
         // Reserve: caption(1) + x-labels(1) + legend(1).
         let chart_h = ih.saturating_sub(3).clamp(4, 28);
         if chart_w < 8 || chart_h < 4 {
-            f.render_widget(Paragraph::new(Span::styled(" level diagram", Style::default().fg(dim))), inner);
+            f.render_widget(
+                Paragraph::new(Span::styled(" level diagram", Style::default().fg(dim))),
+                inner,
+            );
             return;
         }
 
@@ -98,44 +135,57 @@ impl Panel for LevelDiagramPanel {
         // Caption.
         lines.push(Line::from(Span::styled(
             " level climbs stage-by-stage \u{00b7} the gap between signal and noise is the SNR",
-            Style::default().fg(dim))));
+            Style::default().fg(dim),
+        )));
 
         // dBm gridline rows.
         let ticks = [10.0, -20.0, -50.0, -80.0, -110.0];
         let mut row_label = vec![String::new(); chart_h];
         for d in ticks {
             let r = dbm_row(d, chart_h);
-            if row_label[r].is_empty() { row_label[r] = format!("{:>w$}", d as i32, w = gutter); }
+            if row_label[r].is_empty() {
+                row_label[r] = format!("{:>w$}", d as i32, w = gutter);
+            }
         }
         // Reference lines: ADC clip @ 0 dBm, ADC 8-bit floor @ −50 dBm.
-        let clip_row  = dbm_row(0.0, chart_h);
+        let clip_row = dbm_row(0.0, chart_h);
         let floor_row = dbm_row(-50.0, chart_h);
 
         // Per-column interpolated signal/noise rows.
         let node_at = |col: usize| (col as f64 / (chart_w - 1) as f64) * (n - 1) as f64;
-        let sig_row: Vec<usize>   = (0..chart_w).map(|c| dbm_row(lerp_at(&sig,   node_at(c)), chart_h)).collect();
-        let noise_row: Vec<usize> = (0..chart_w).map(|c| dbm_row(lerp_at(&noise, node_at(c)), chart_h)).collect();
+        let sig_row: Vec<usize> = (0..chart_w)
+            .map(|c| dbm_row(lerp_at(&sig, node_at(c)), chart_h))
+            .collect();
+        let noise_row: Vec<usize> = (0..chart_w)
+            .map(|c| dbm_row(lerp_at(&noise, node_at(c)), chart_h))
+            .collect();
 
         for row in 0..chart_h {
             // y gutter
             let g = &row_label[row];
             let mut spans: Vec<Span> = Vec::new();
             if g.is_empty() {
-                spans.push(Span::styled(format!("{:>gutter$}\u{2502}", "", gutter = gutter), Style::default().fg(dim)));
+                spans.push(Span::styled(
+                    format!("{:>gutter$}\u{2502}", "", gutter = gutter),
+                    Style::default().fg(dim),
+                ));
             } else {
-                spans.push(Span::styled(format!("{g}\u{2524}"), Style::default().fg(dim)));
+                spans.push(Span::styled(
+                    format!("{g}\u{2524}"),
+                    Style::default().fg(dim),
+                ));
             }
             // plot row
             let mut cells: Vec<(char, Color)> = Vec::with_capacity(chart_w);
             for c in 0..chart_w {
                 let (ch, col) = match classify(row, sig_row[c], noise_row[c]) {
-                    Cell::Signal   => ('\u{2588}', sig_col),                       // █ signal
-                    Cell::Noise    => ('\u{25ac}', noise_col),                     // ▬ noise
-                    Cell::UsableDr => ('\u{2591}', gap_col),                       // ░ usable DR
-                    Cell::Buried   => ('\u{2592}', theme.status_warn),             // ▒ signal buried
-                    Cell::Empty if row == clip_row  => ('\u{00b7}', theme.status_crit),
+                    Cell::Signal => ('\u{2588}', sig_col),           // █ signal
+                    Cell::Noise => ('\u{25ac}', noise_col),          // ▬ noise
+                    Cell::UsableDr => ('\u{2591}', gap_col),         // ░ usable DR
+                    Cell::Buried => ('\u{2592}', theme.status_warn), // ▒ signal buried
+                    Cell::Empty if row == clip_row => ('\u{00b7}', theme.status_crit),
                     Cell::Empty if row == floor_row => ('\u{00b7}', theme.status_warn),
-                    Cell::Empty    => (' ', dim),
+                    Cell::Empty => (' ', dim),
                 };
                 cells.push((ch, col));
             }
@@ -148,14 +198,21 @@ impl Panel for LevelDiagramPanel {
         for (i, node) in nodes.iter().enumerate() {
             let col = ((i as f64 / (n - 1) as f64) * (chart_w - 1) as f64).round() as usize;
             let lbl = node.label;
-            let start = col.saturating_sub(lbl.len() / 2).min(chart_w.saturating_sub(lbl.len()));
+            let start = col
+                .saturating_sub(lbl.len() / 2)
+                .min(chart_w.saturating_sub(lbl.len()));
             for (k, ch) in lbl.chars().enumerate() {
-                if start + k < chart_w { axis[start + k] = ch; }
+                if start + k < chart_w {
+                    axis[start + k] = ch;
+                }
             }
         }
         lines.push(Line::from(vec![
             Span::raw(" ".repeat(gutter + 1)),
-            Span::styled(axis.into_iter().collect::<String>(), Style::default().fg(theme.label)),
+            Span::styled(
+                axis.into_iter().collect::<String>(),
+                Style::default().fg(theme.label),
+            ),
         ]));
 
         // Legend + key figures.
@@ -167,13 +224,20 @@ impl Panel for LevelDiagramPanel {
         ];
         if snr < 0.0 {
             // Signal sits below the noise at the ADC — flag the buried band.
-            legend.push(Span::styled("  \u{2592} buried", Style::default().fg(theme.status_warn)));
+            legend.push(Span::styled(
+                "  \u{2592} buried",
+                Style::default().fg(theme.status_warn),
+            ));
         } else {
-            legend.push(Span::styled("  \u{2591} usable DR", Style::default().fg(gap_col)));
+            legend.push(Span::styled(
+                "  \u{2591} usable DR",
+                Style::default().fg(gap_col),
+            ));
         }
         legend.push(Span::styled(
             format!("  \u{00b7} SNR {snr:.0} dB \u{00b7} headroom {headroom:.0} dB"),
-            Style::default().fg(dim)));
+            Style::default().fg(dim),
+        ));
         lines.push(Line::from(legend));
 
         // Self-adjusting density: drop only as many airy spacers as needed to fit,
@@ -188,14 +252,30 @@ impl Panel for LevelDiagramPanel {
 /// The `Buried` case keeps the diagram honest when the noise climbs above the signal
 /// (negative SNR): the band between them is flagged instead of left blank.
 #[derive(PartialEq, Debug)]
-enum Cell { Signal, Noise, UsableDr, Buried, Empty }
+enum Cell {
+    Signal,
+    Noise,
+    UsableDr,
+    Buried,
+    Empty,
+}
 
 fn classify(row: usize, sr: usize, nr: usize) -> Cell {
-    if row == sr { Cell::Signal }            // signal wins ties (SNR ≈ 0)
-    else if row == nr { Cell::Noise }
-    else if row > sr.min(nr) && row < sr.max(nr) {
-        if sr < nr { Cell::UsableDr } else { Cell::Buried }
-    } else { Cell::Empty }
+    if row == sr {
+        Cell::Signal
+    }
+    // signal wins ties (SNR ≈ 0)
+    else if row == nr {
+        Cell::Noise
+    } else if row > sr.min(nr) && row < sr.max(nr) {
+        if sr < nr {
+            Cell::UsableDr
+        } else {
+            Cell::Buried
+        }
+    } else {
+        Cell::Empty
+    }
 }
 
 /// Coalesce a per-cell `(char, colour)` row into runs of same-coloured spans.
@@ -206,7 +286,10 @@ fn coalesce(cells: Vec<(char, Color)>) -> Vec<Span<'static>> {
     for (ch, col) in cells {
         if run_col != Some(col) {
             if let Some(c) = run_col {
-                spans.push(Span::styled(std::mem::take(&mut run), Style::default().fg(c)));
+                spans.push(Span::styled(
+                    std::mem::take(&mut run),
+                    Style::default().fg(c),
+                ));
             }
             run_col = Some(col);
         }
@@ -237,7 +320,10 @@ mod tests {
         assert!((lerp_at(&v, 0.0) - 0.0).abs() < 1e-9);
         assert!((lerp_at(&v, 0.5) - 5.0).abs() < 1e-9);
         assert!((lerp_at(&v, 2.0) - 20.0).abs() < 1e-9);
-        assert!((lerp_at(&v, 9.0) - 20.0).abs() < 1e-9, "past the end clamps to last");
+        assert!(
+            (lerp_at(&v, 9.0) - 20.0).abs() < 1e-9,
+            "past the end clamps to last"
+        );
     }
 
     #[test]
@@ -250,7 +336,11 @@ mod tests {
         // signal at row 2 (higher level), noise at row 6 (lower level)
         assert_eq!(classify(2, 2, 6), Cell::Signal);
         assert_eq!(classify(6, 2, 6), Cell::Noise);
-        assert_eq!(classify(4, 2, 6), Cell::UsableDr, "between them = usable DR");
+        assert_eq!(
+            classify(4, 2, 6),
+            Cell::UsableDr,
+            "between them = usable DR"
+        );
         assert_eq!(classify(0, 2, 6), Cell::Empty);
         assert_eq!(classify(9, 2, 6), Cell::Empty);
     }

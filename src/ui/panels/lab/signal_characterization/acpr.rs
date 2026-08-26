@@ -21,8 +21,12 @@ const LABEL_W: usize = 8;
 pub(super) const ACPR_BAR_FLOOR_DB: f32 = -80.0;
 
 pub(super) fn lines(
-    out: &mut Vec<Line<'static>>, state: &SdrMetrics, frame: Option<&FftFrame>,
-    stale: bool, iw: usize, theme: &crate::Theme,
+    out: &mut Vec<Line<'static>>,
+    state: &SdrMetrics,
+    frame: Option<&FftFrame>,
+    stale: bool,
+    iw: usize,
+    theme: &crate::Theme,
 ) {
     out.push(section("ADJACENT CHANNEL", "ACPR", iw, theme));
     let sig = &state.signal;
@@ -41,11 +45,19 @@ pub(super) fn lines(
         return;
     }
 
-    for (label, db) in [(&lo_label, sig.acpr_lower_db), (&hi_label, sig.acpr_upper_db)] {
+    for (label, db) in [
+        (&lo_label, sig.acpr_lower_db),
+        (&hi_label, sig.acpr_upper_db),
+    ] {
         let value_str = format!("{db:.1} dB");
         // lead(1) + label(8) + gap(1) + bar + gap(1) + value
-        let bar_w = iw.saturating_sub(1 + LABEL_W + 1 + 1 + value_str.chars().count()).max(6);
-        let mut spans = vec![Span::styled(format!(" {label:<LABEL_W$}"), Style::default().fg(theme.label))];
+        let bar_w = iw
+            .saturating_sub(1 + LABEL_W + 1 + 1 + value_str.chars().count())
+            .max(6);
+        let mut spans = vec![Span::styled(
+            format!(" {label:<LABEL_W$}"),
+            Style::default().fg(theme.label),
+        )];
         spans.extend(acpr_bar(db, bar_w, theme));
         spans.push(Span::styled(format!(" {value_str}"), val(theme)));
         out.push(Line::from(spans));
@@ -61,11 +73,23 @@ pub(super) fn lines(
     });
     // A silent adjacent band has no level to name — the sentinel must not
     // reach the screen as a number.
-    out.push(metric("Adj carrier", match (sig.adj_carrier_dbfs.is_finite(), adj_freq) {
-        (true, Some(hz)) => annotated(format!("{:.1} dBFS", sig.adj_carrier_dbfs), fmt_freq(hz), iw, theme),
-        (true, None) => vec![Span::styled(format!("{:.1} dBFS", sig.adj_carrier_dbfs), val(theme))],
-        (false, _)   => vec![dash(theme)],
-    }, theme));
+    out.push(metric(
+        "Adj carrier",
+        match (sig.adj_carrier_dbfs.is_finite(), adj_freq) {
+            (true, Some(hz)) => annotated(
+                format!("{:.1} dBFS", sig.adj_carrier_dbfs),
+                fmt_freq(hz),
+                iw,
+                theme,
+            ),
+            (true, None) => vec![Span::styled(
+                format!("{:.1} dBFS", sig.adj_carrier_dbfs),
+                val(theme),
+            )],
+            (false, _) => vec![dash(theme)],
+        },
+        theme,
+    ));
 }
 
 /// ACPR row label — `L -200k`, `R +25k`. Derived from the offset the measurement
@@ -89,7 +113,14 @@ fn acpr_bar(db: f32, bar_w: usize, theme: &crate::Theme) -> Vec<Span<'static>> {
     let clamped = db.clamp(ACPR_BAR_FLOOR_DB, 0.0);
     let badness = ((clamped - ACPR_BAR_FLOOR_DB) * 10.0).round() as u32;
     let max_badness = ((0.0 - ACPR_BAR_FLOOR_DB) * 10.0).round() as u32;
-    crate::ui::widgets::charts::gain_bar_colored(badness, max_badness, bar_w, theme.status_ok, theme.status_crit, theme.border_dim)
+    crate::ui::widgets::charts::gain_bar_colored(
+        badness,
+        max_badness,
+        bar_w,
+        theme.status_ok,
+        theme.status_crit,
+        theme.border_dim,
+    )
 }
 
 #[cfg(test)]
@@ -117,7 +148,10 @@ mod tests {
         let t = crate::theme::Theme::sdr();
         let spans = acpr_bar(-95.0, 10, &t);
         let s: String = spans.iter().map(|s| s.content.as_ref()).collect();
-        assert!(s.chars().all(|c| c == ' '), "below the display floor reads as clean/empty: {s:?}");
+        assert!(
+            s.chars().all(|c| c == ' '),
+            "below the display floor reads as clean/empty: {s:?}"
+        );
     }
 
     #[test]
@@ -125,9 +159,18 @@ mod tests {
         // Hardcoded "-200k" was right for broadcast FM and wrong everywhere else,
         // now that the spacing follows the modulation.
         use crate::state::acpr_offset_hz;
-        assert_eq!(acpr_label('L', acpr_offset_hz(Modulation::Wfm), '\u{2212}'), "L \u{2212}200k");
-        assert_eq!(acpr_label('R', acpr_offset_hz(Modulation::Nfm), '+'), "R +25k");
-        assert_eq!(acpr_label('R', acpr_offset_hz(Modulation::Am),  '+'), "R +9k");
+        assert_eq!(
+            acpr_label('L', acpr_offset_hz(Modulation::Wfm), '\u{2212}'),
+            "L \u{2212}200k"
+        );
+        assert_eq!(
+            acpr_label('R', acpr_offset_hz(Modulation::Nfm), '+'),
+            "R +25k"
+        );
+        assert_eq!(
+            acpr_label('R', acpr_offset_hz(Modulation::Am), '+'),
+            "R +9k"
+        );
         assert_eq!(acpr_label('L', 1_500_000.0, '\u{2212}'), "L \u{2212}1.5M");
     }
 
@@ -136,10 +179,19 @@ mod tests {
         // The rows are laid out on a fixed 8-column label field; an overflow would
         // push the bar out of alignment with the row above it.
         use crate::state::acpr_offset_hz;
-        for m in [Modulation::Wfm, Modulation::Nfm, Modulation::Am, Modulation::Unknown] {
+        for m in [
+            Modulation::Wfm,
+            Modulation::Nfm,
+            Modulation::Am,
+            Modulation::Unknown,
+        ] {
             for (side, sign) in [('L', '\u{2212}'), ('R', '+')] {
                 let l = acpr_label(side, acpr_offset_hz(m), sign);
-                assert!(l.chars().count() <= LABEL_W, "{m:?} {side}: {l:?} is {} wide", l.chars().count());
+                assert!(
+                    l.chars().count() <= LABEL_W,
+                    "{m:?} {side}: {l:?} is {} wide",
+                    l.chars().count()
+                );
             }
         }
     }

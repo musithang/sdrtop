@@ -41,12 +41,7 @@ mod pilot;
 mod rds;
 mod stack;
 
-use ratatui::{
-    layout::Rect,
-    text::Line,
-    widgets::Paragraph,
-    Frame,
-};
+use ratatui::{layout::Rect, text::Line, widgets::Paragraph, Frame};
 
 use crate::state::{Modulation, SdrMetrics};
 use crate::ui::chrome;
@@ -58,7 +53,15 @@ pub struct FmDemodPanel;
 
 /// One zone of the demod panel.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
-enum Sec { Mpx, Pilot, Deviation, Ctcss, Depth, Carrier, Rds }
+enum Sec {
+    Mpx,
+    Pilot,
+    Deviation,
+    Ctcss,
+    Depth,
+    Carrier,
+    Rds,
+}
 
 /// The sections a given modulation's panel shows.
 ///
@@ -75,23 +78,34 @@ enum Sec { Mpx, Pilot, Deviation, Ctcss, Depth, Carrier, Rds }
 fn sections_for(m: Modulation) -> &'static [Sec] {
     match m {
         Modulation::Nfm => &[Sec::Deviation, Sec::Ctcss],
-        Modulation::Am  => &[Sec::Depth, Sec::Carrier],
+        Modulation::Am => &[Sec::Depth, Sec::Carrier],
         // An unclassified carrier keeps the broadcast shape — the state the panel
         // rests in before anything is tuned.
-        Modulation::Wfm | Modulation::Unknown =>
-            &[Sec::Mpx, Sec::Pilot, Sec::Deviation, Sec::Rds],
+        Modulation::Wfm | Modulation::Unknown => &[Sec::Mpx, Sec::Pilot, Sec::Deviation, Sec::Rds],
     }
 }
 
 impl Panel for FmDemodPanel {
-    fn name(&self) -> &'static str { "fm_demod" }
-    fn min_size(&self) -> (u16, u16) { (28, 12) }
+    fn name(&self) -> &'static str {
+        "fm_demod"
+    }
+    fn min_size(&self) -> (u16, u16) {
+        (28, 12)
+    }
 
-    fn focus_key(&self) -> Option<char> { Some('m') }
+    fn focus_key(&self) -> Option<char> {
+        Some('m')
+    }
 
     fn focus_bindings(&self) -> &'static [(&'static str, &'static str)] {
-        &[("Space", "Demod on/off"), ("←/→", "Channel offset"), ("P", "Snap to carrier"),
-          ("0", "Centre"), ("T", "Mode"), ("C", "Snapshot to log")]
+        &[
+            ("Space", "Demod on/off"),
+            ("←/→", "Channel offset"),
+            ("P", "Snap to carrier"),
+            ("0", "Centre"),
+            ("T", "Mode"),
+            ("C", "Snapshot to log"),
+        ]
     }
 
     fn chrome(&self, _state: &SdrMetrics) -> PanelChrome {
@@ -100,9 +114,18 @@ impl Panel for FmDemodPanel {
         PanelChrome::new("FM _MPX \u{00b7} Demod").stale_when(Staleness::NotStreaming)
     }
 
-    fn render(&self, f: &mut Frame, inner: Rect, state: &SdrMetrics, theme: &crate::Theme, _focused: bool) {
+    fn render(
+        &self,
+        f: &mut Frame,
+        inner: Rect,
+        state: &SdrMetrics,
+        theme: &crate::Theme,
+        _focused: bool,
+    ) {
         let stale = !state.radio.hw_streaming;
-        if inner.width == 0 || inner.height == 0 { return; }
+        if inner.width == 0 || inner.height == 0 {
+            return;
+        }
 
         let h = inner.height as usize;
         let iw = inner.width as usize;
@@ -116,7 +139,9 @@ impl Panel for FmDemodPanel {
         // construction over a snapshot that is already cloned, so the second pass
         // costs nothing worth protecting against.
         let probe = build_stack(state, theme, iw, stale, 1).0.fit(h).len();
-        let spare = h.saturating_sub(probe).saturating_sub(mpx::MPX_TRACE_SLACK_RESERVE);
+        let spare = h
+            .saturating_sub(probe)
+            .saturating_sub(mpx::MPX_TRACE_SLACK_RESERVE);
         let trace_rows = (1 + spare).min(mpx::MPX_TRACE_MAX_ROWS);
 
         let (stack, headline_only) = build_stack(state, theme, iw, stale, trace_rows);
@@ -132,7 +157,9 @@ impl Panel for FmDemodPanel {
             // everything else and the message ends up pinned to the floor. An empty
             // state has no stack to breathe — it just needs placing.
             let pad = h.saturating_sub(lines.len()) / 2;
-            for _ in 0..pad { lines.insert(0, Line::raw("")); }
+            for _ in 0..pad {
+                lines.insert(0, Line::raw(""));
+            }
         } else {
             chrome::fit_spacers(&mut lines, h);
         }
@@ -144,7 +171,11 @@ impl Panel for FmDemodPanel {
 /// out headline-only (no section had anything to show). Pure: no locking, no I/O, no
 /// mutation — see the module note on panels rendering from a snapshot.
 fn build_stack(
-    state: &SdrMetrics, theme: &crate::Theme, iw: usize, stale: bool, trace_rows: usize,
+    state: &SdrMetrics,
+    theme: &crate::Theme,
+    iw: usize,
+    stale: bool,
+    trace_rows: usize,
 ) -> (Stack<'static>, bool) {
     let mut stack = Stack::new();
 
@@ -173,13 +204,13 @@ fn build_stack(
     };
     for sec in sections {
         match sec {
-            Sec::Mpx       => mpx::lines(&mut stack, state, iw, trace_rows, theme),
-            Sec::Pilot     => pilot::lines(&mut stack, state, iw, theme),
+            Sec::Mpx => mpx::lines(&mut stack, state, iw, trace_rows, theme),
+            Sec::Pilot => pilot::lines(&mut stack, state, iw, theme),
             Sec::Deviation => deviation::lines(&mut stack, measure, modulation, iw, theme),
-            Sec::Ctcss     => ctcss::lines(&mut stack, state, stale, iw, theme),
-            Sec::Depth     => am::depth_lines(&mut stack, am_measure, iw, theme),
-            Sec::Carrier   => am::carrier_lines(&mut stack, am_measure, iw, theme),
-            Sec::Rds       => rds::lines(&mut stack, state, iw, theme),
+            Sec::Ctcss => ctcss::lines(&mut stack, state, stale, iw, theme),
+            Sec::Depth => am::depth_lines(&mut stack, am_measure, iw, theme),
+            Sec::Carrier => am::carrier_lines(&mut stack, am_measure, iw, theme),
+            Sec::Rds => rds::lines(&mut stack, state, iw, theme),
         }
         stack.gap();
     }
@@ -236,16 +267,21 @@ mod tests {
 
     #[test]
     fn unknown_rests_in_the_broadcast_shape() {
-        assert_eq!(sections_for(Modulation::Unknown), sections_for(Modulation::Wfm));
+        assert_eq!(
+            sections_for(Modulation::Unknown),
+            sections_for(Modulation::Wfm)
+        );
     }
 
     #[test]
     fn no_mode_carries_a_section_with_nothing_behind_it() {
         // The AUDIO placeholder appeared in every mode, always empty, for as long as
         // it existed. Each set is now exactly the sections that mode can fill.
-        assert_eq!(sections_for(Modulation::Wfm),
-                   &[Sec::Mpx, Sec::Pilot, Sec::Deviation, Sec::Rds]);
+        assert_eq!(
+            sections_for(Modulation::Wfm),
+            &[Sec::Mpx, Sec::Pilot, Sec::Deviation, Sec::Rds]
+        );
         assert_eq!(sections_for(Modulation::Nfm), &[Sec::Deviation, Sec::Ctcss]);
-        assert_eq!(sections_for(Modulation::Am),  &[Sec::Depth, Sec::Carrier]);
+        assert_eq!(sections_for(Modulation::Am), &[Sec::Depth, Sec::Carrier]);
     }
 }

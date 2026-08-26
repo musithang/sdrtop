@@ -4,15 +4,18 @@
 //! waterfall scrolls history, sets the row stride and moves the cursor. Both
 //! fall through to the global handler for anything they do not claim.
 
-
 use crossterm::event::{KeyCode, KeyEvent};
 
 use crate::state::{InputMode, RailMode};
+use crate::ui::panels::core::spectrum::{
+    fmt_spectrum_step, next_spectrum_step, prev_spectrum_step,
+};
+use crate::ui::panels::core::waterfall::{
+    next_wf_stride, next_wf_zoom, prev_wf_stride, prev_wf_zoom,
+};
 use crate::ui::widgets::micro_common::fmt_bw;
-use crate::ui::panels::core::spectrum::{fmt_spectrum_step, next_spectrum_step, prev_spectrum_step};
-use crate::ui::panels::core::waterfall::{next_wf_stride, prev_wf_stride, next_wf_zoom, prev_wf_zoom};
 
-use super::{InputCtx, KeyAction, global, metrics};
+use super::{global, metrics, InputCtx, KeyAction};
 
 // ── Spectrum focus keys ───────────────────────────────────────────────────────
 
@@ -24,12 +27,18 @@ pub(super) fn spectrum(key: KeyEvent, ctx: &mut InputCtx<'_>) -> KeyAction {
                 let fmin = device.capabilities().freq_min_hz;
                 let new_freq = {
                     let m = metrics(state);
-                    m.radio.frequency.saturating_sub(m.spectrum.step_hz).max(fmin)
+                    m.radio
+                        .frequency
+                        .saturating_sub(m.spectrum.step_hz)
+                        .max(fmin)
                 };
                 let result = device.set_frequency(new_freq);
                 let mut m = metrics(state);
                 match result {
-                    Ok(()) => { m.radio.frequency = new_freq; m.ui.note_mode_action(RailMode::Hunt); }
+                    Ok(()) => {
+                        m.radio.frequency = new_freq;
+                        m.ui.note_mode_action(RailMode::Hunt);
+                    }
                     Err(e) => m.push_log(format!("Tune error: {}", e)),
                 }
             }
@@ -44,7 +53,10 @@ pub(super) fn spectrum(key: KeyEvent, ctx: &mut InputCtx<'_>) -> KeyAction {
                 let result = device.set_frequency(new_freq);
                 let mut m = metrics(state);
                 match result {
-                    Ok(()) => { m.radio.frequency = new_freq; m.ui.note_mode_action(RailMode::Hunt); }
+                    Ok(()) => {
+                        m.radio.frequency = new_freq;
+                        m.ui.note_mode_action(RailMode::Hunt);
+                    }
                     Err(e) => m.push_log(format!("Tune error: {}", e)),
                 }
             }
@@ -99,7 +111,7 @@ pub(super) fn spectrum(key: KeyEvent, ctx: &mut InputCtx<'_>) -> KeyAction {
             let step = m.spectrum.step_hz;
             m.spectrum.cursor_freq = Some(match m.spectrum.cursor_freq {
                 Some(f) => f.saturating_sub(step).max(m.caps.freq_min_hz),
-                None    => m.radio.frequency,
+                None => m.radio.frequency,
             });
         }
         KeyCode::Char('k') => {
@@ -107,7 +119,7 @@ pub(super) fn spectrum(key: KeyEvent, ctx: &mut InputCtx<'_>) -> KeyAction {
             let step = m.spectrum.step_hz;
             m.spectrum.cursor_freq = Some(match m.spectrum.cursor_freq {
                 Some(f) => (f + step).min(m.caps.freq_max_hz),
-                None    => m.radio.frequency,
+                None => m.radio.frequency,
             });
         }
         KeyCode::Char('m') => {
@@ -116,20 +128,25 @@ pub(super) fn spectrum(key: KeyEvent, ctx: &mut InputCtx<'_>) -> KeyAction {
                 let freq = if let Some(f) = m.spectrum.cursor_freq {
                     f
                 } else if let Some(frame) = &m.waterfall.last_fft {
-                    let peak_bin = frame.bins_dbfs.iter()
+                    let peak_bin = frame
+                        .bins_dbfs
+                        .iter()
                         .enumerate()
                         .max_by(|a, b| a.1.partial_cmp(b.1).unwrap_or(std::cmp::Ordering::Equal))
                         .map(|(i, _)| i)
                         .unwrap_or(frame.bins_dbfs.len() / 2);
                     let left_hz = m.radio.frequency as f64 - frame.sample_rate / 2.0;
-                    (left_hz + peak_bin as f64 / frame.bins_dbfs.len() as f64 * frame.sample_rate).round() as u64
+                    (left_hz + peak_bin as f64 / frame.bins_dbfs.len() as f64 * frame.sample_rate)
+                        .round() as u64
                 } else {
                     m.radio.frequency
                 };
                 let step = m.spectrum.step_hz;
-                let idx = m.spectrum.markers.iter().position(|mk| {
-                    (mk.freq_hz as i64 - freq as i64).unsigned_abs() < step
-                });
+                let idx = m
+                    .spectrum
+                    .markers
+                    .iter()
+                    .position(|mk| (mk.freq_hz as i64 - freq as i64).unsigned_abs() < step);
                 (freq, idx)
             };
             let mut m = metrics(state);
@@ -150,13 +167,16 @@ pub(super) fn spectrum(key: KeyEvent, ctx: &mut InputCtx<'_>) -> KeyAction {
             const BW_STEPS: &[u64] = &[6_250, 12_500, 25_000, 50_000, 100_000, 200_000, 500_000];
             let mut m = metrics(state);
             let cursor = m.spectrum.cursor_freq.unwrap_or(m.radio.frequency);
-            let step   = m.spectrum.step_hz;
-            if let Some(mk) = m.spectrum.markers.iter_mut()
+            let step = m.spectrum.step_hz;
+            if let Some(mk) = m
+                .spectrum
+                .markers
+                .iter_mut()
                 .min_by_key(|mk| (mk.freq_hz as i64 - cursor as i64).unsigned_abs())
                 .filter(|mk| (mk.freq_hz as i64 - cursor as i64).unsigned_abs() < step * 4)
             {
                 let next = match mk.channel_bw_hz {
-                    None      => Some(BW_STEPS[0]),
+                    None => Some(BW_STEPS[0]),
                     Some(cur) => {
                         let idx = BW_STEPS.iter().position(|&b| b == cur);
                         idx.and_then(|i| BW_STEPS.get(i + 1)).copied()
@@ -166,7 +186,7 @@ pub(super) fn spectrum(key: KeyEvent, ctx: &mut InputCtx<'_>) -> KeyAction {
                 mk.measured_bw_hz = None;
                 let msg = match next {
                     Some(bw) => format!("Marker '{}' channel BW → {}", mk.label, fmt_bw(bw)),
-                    None     => format!("Marker '{}' channel BW cleared", mk.label),
+                    None => format!("Marker '{}' channel BW cleared", mk.label),
                 };
                 m.push_log(msg);
             } else {
@@ -241,7 +261,10 @@ pub(super) fn waterfall(key: KeyEvent, ctx: &mut InputCtx<'_>) -> KeyAction {
         KeyCode::Left => {
             let mut m = metrics(state);
             if let Some(cf) = m.waterfall.cursor_freq {
-                m.waterfall.cursor_freq = Some(cf.saturating_sub(m.spectrum.step_hz).max(m.caps.freq_min_hz));
+                m.waterfall.cursor_freq = Some(
+                    cf.saturating_sub(m.spectrum.step_hz)
+                        .max(m.caps.freq_min_hz),
+                );
             }
         }
         KeyCode::Right => {
@@ -271,4 +294,3 @@ pub(super) fn waterfall(key: KeyEvent, ctx: &mut InputCtx<'_>) -> KeyAction {
     }
     KeyAction::Continue
 }
-

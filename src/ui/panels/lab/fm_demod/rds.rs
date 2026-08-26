@@ -24,9 +24,17 @@ use super::stack::Stack;
 /// off a short terminal for a field that is usually much shorter than its limit.
 const RT_MAX_ROWS: usize = 2;
 
-pub(super) fn lines(stack: &mut Stack<'static>, state: &SdrMetrics, iw: usize, theme: &crate::Theme) {
+pub(super) fn lines(
+    stack: &mut Stack<'static>,
+    state: &SdrMetrics,
+    iw: usize,
+    theme: &crate::Theme,
+) {
     stack.heading(chrome::section("RDS", "57 kHz", iw, theme));
-    let Some(d) = state.demod.live_rds() else { stack.gap(); return };
+    let Some(d) = state.demod.live_rds() else {
+        stack.gap();
+        return;
+    };
 
     let age = state.demod.rds_age();
     // Past the drop timeout the accumulated text is not about anything currently
@@ -36,8 +44,10 @@ pub(super) fn lines(stack: &mut Stack<'static>, state: &SdrMetrics, iw: usize, t
     let color = if ok { theme.status_ok } else { theme.label };
     stack.push(Line::from(vec![
         Span::raw(" "),
-        Span::styled(format!("{mark} {text}"),
-                     Style::default().fg(color).add_modifier(Modifier::BOLD)),
+        Span::styled(
+            format!("{mark} {text}"),
+            Style::default().fg(color).add_modifier(Modifier::BOLD),
+        ),
     ]));
     if let Some(pi) = d.pi.filter(|_| !dropped) {
         stack.detail(Line::from(vec![
@@ -45,8 +55,11 @@ pub(super) fn lines(stack: &mut Stack<'static>, state: &SdrMetrics, iw: usize, t
             Span::styled(format!("{pi:04X}"), val(theme)),
         ]));
     }
-    if let Some(name) = d.pty.filter(|_| !dropped)
-        .map(|p| PTY_NAMES[(p & 0x1F) as usize]) {
+    if let Some(name) = d
+        .pty
+        .filter(|_| !dropped)
+        .map(|p| PTY_NAMES[(p & 0x1F) as usize])
+    {
         stack.detail(Line::from(vec![
             chrome::field("PTY", 8, theme),
             Span::styled(name, val(theme)),
@@ -56,12 +69,15 @@ pub(super) fn lines(stack: &mut Stack<'static>, state: &SdrMetrics, iw: usize, t
     // "TP off, TA off" is the normal case and says nothing.
     if (d.tp || d.ta) && !dropped {
         let mut flags = Vec::new();
-        if d.tp { flags.push("TP"); }
-        if d.ta { flags.push("TA"); }
+        if d.tp {
+            flags.push("TP");
+        }
+        if d.ta {
+            flags.push("TA");
+        }
         stack.detail(Line::from(vec![
             chrome::field("Traffic", 8, theme),
-            Span::styled(flags.join(" "),
-                         Style::default().fg(theme.status_warn)),
+            Span::styled(flags.join(" "), Style::default().fg(theme.status_warn)),
         ]));
     }
     // A running count of the decoder's own work, not anything
@@ -79,8 +95,10 @@ pub(super) fn lines(stack: &mut Stack<'static>, state: &SdrMetrics, iw: usize, t
             Span::styled(d.groups_session.to_string(), val(theme)),
         ];
         if d.groups_ok != d.groups_session {
-            row.push(Span::styled(format!("  +{}", d.groups_ok),
-                                  Style::default().fg(theme.stale)));
+            row.push(Span::styled(
+                format!("  +{}", d.groups_ok),
+                Style::default().fg(theme.stale),
+            ));
         }
         stack.minor(Line::from(row));
     }
@@ -88,7 +106,10 @@ pub(super) fn lines(stack: &mut Stack<'static>, state: &SdrMetrics, iw: usize, t
     // is the one thing here that has to wrap to the column.
     if let Some(rt) = d.rt.as_deref().filter(|_| !dropped) {
         for row in chrome::wrap(rt, iw.saturating_sub(1), RT_MAX_ROWS) {
-            stack.detail(Line::from(vec![Span::raw(" "), Span::styled(row, val(theme))]));
+            stack.detail(Line::from(vec![
+                Span::raw(" "),
+                Span::styled(row, val(theme)),
+            ]));
         }
     }
 }
@@ -107,11 +128,9 @@ pub(super) fn lines(stack: &mut Stack<'static>, state: &SdrMetrics, iw: usize, t
 /// [`RDS_DROPPED_AFTER`] it is not shown at all.
 ///
 /// Returns the marker glyph, the text, and whether it is a positive result.
-fn rds_headline(d: &RdsData, sync: bool, age: Option<Duration>)
-    -> (&'static str, String, bool)
-{
+fn rds_headline(d: &RdsData, sync: bool, age: Option<Duration>) -> (&'static str, String, bool) {
     let dropped = age.is_none_or(|a| a > RDS_DROPPED_AFTER);
-    let aged    = age.is_some_and(|a| a > RDS_AGED_AFTER);
+    let aged = age.is_some_and(|a| a > RDS_AGED_AFTER);
     match d.ps.as_deref() {
         Some(ps) if !dropped && aged => {
             let secs = age.map(|a| a.as_secs()).unwrap_or(0);
@@ -134,8 +153,10 @@ mod tests {
 
     fn rds(ps: Option<&str>, groups: u32) -> RdsData {
         RdsData {
-            pi: Some(0xB201), ps: ps.map(str::to_string),
-            groups_ok: groups, groups_session: groups,
+            pi: Some(0xB201),
+            ps: ps.map(str::to_string),
+            groups_ok: groups,
+            groups_session: groups,
             ..Default::default()
         }
     }
@@ -146,7 +167,10 @@ mod tests {
     #[test]
     fn rds_headline_leads_with_the_station_name() {
         let (mark, text, ok) = rds_headline(&rds(Some("SDRTOP  "), 40), true, FRESH);
-        assert_eq!(text, "SDRTOP", "trailing RDS padding must not reach the screen");
+        assert_eq!(
+            text, "SDRTOP",
+            "trailing RDS padding must not reach the screen"
+        );
         assert!(ok);
         assert_eq!(mark, "\u{25cf}");
     }
@@ -186,7 +210,10 @@ mod tests {
         assert_eq!(mark, "\u{25cb}");
         assert!(!ok);
         // Never a group at all is the same answer.
-        assert_eq!(rds_headline(&rds(Some("RADIO 1"), 40), false, None).1, "NO RDS");
+        assert_eq!(
+            rds_headline(&rds(Some("RADIO 1"), 40), false, None).1,
+            "NO RDS"
+        );
     }
 
     #[test]

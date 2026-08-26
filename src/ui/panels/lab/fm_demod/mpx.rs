@@ -32,7 +32,10 @@ const MPX_DISPLAY_RANGE_DB: f32 = 40.0;
 /// Push the section: nameplate, then the trace at the height the caller sized,
 /// then the tick row.
 pub(super) fn lines(
-    stack: &mut Stack<'static>, state: &SdrMetrics, iw: usize, trace_rows: usize,
+    stack: &mut Stack<'static>,
+    state: &SdrMetrics,
+    iw: usize,
+    trace_rows: usize,
     theme: &crate::Theme,
 ) {
     stack.heading(chrome::section("MPX BASEBAND", "0-60 kHz", iw, theme));
@@ -71,17 +74,25 @@ pub(super) fn lines(
 /// audio around it — the display would then disagree with the pilot readout right
 /// beneath it.
 fn mpx_profile(frame: &MpxFrame, points: usize) -> Vec<f32> {
-    if points == 0 || frame.bin_hz <= 0.0 || frame.mags_hz.is_empty() { return Vec::new(); }
+    if points == 0 || frame.bin_hz <= 0.0 || frame.mags_hz.is_empty() {
+        return Vec::new();
+    }
     let last = (MPX_SPAN_HZ / frame.bin_hz).ceil() as usize;
     let last = last.min(frame.mags_hz.len());
-    if last == 0 { return Vec::new(); }
+    if last == 0 {
+        return Vec::new();
+    }
 
     let mut profile: Vec<f32> = (0..points)
         .map(|i| {
             let lo = i * last / points;
             let hi = (((i + 1) * last / points).max(lo + 1)).min(last);
             let peak = frame.mags_hz[lo..hi].iter().copied().fold(0.0f32, f32::max);
-            if peak > 0.0 { 20.0 * peak.log10() } else { -120.0 }
+            if peak > 0.0 {
+                20.0 * peak.log10()
+            } else {
+                -120.0
+            }
         })
         .collect();
 
@@ -93,7 +104,9 @@ fn mpx_profile(frame: &MpxFrame, points: usize) -> Vec<f32> {
     let top = profile.iter().copied().fold(f32::NEG_INFINITY, f32::max);
     if top.is_finite() {
         let floor = top - MPX_DISPLAY_RANGE_DB;
-        for v in profile.iter_mut() { *v = v.max(floor); }
+        for v in profile.iter_mut() {
+            *v = v.max(floor);
+        }
     }
     profile
 }
@@ -105,7 +118,9 @@ fn mpx_ticks(width: usize) -> String {
     for (hz, label) in [(PILOT_HZ, "19k"), (38_000.0, "38k"), (57_000.0, "57k")] {
         let pos = ((hz / MPX_SPAN_HZ) * width as f64).round() as usize;
         // Centre the label on the tick, keeping it inside the row.
-        let start = pos.saturating_sub(label.len() / 2).min(width.saturating_sub(label.len()));
+        let start = pos
+            .saturating_sub(label.len() / 2)
+            .min(width.saturating_sub(label.len()));
         if start + label.len() <= width {
             row[start..start + label.len()].copy_from_slice(label.as_bytes());
         }
@@ -122,7 +137,10 @@ mod tests {
         let bin_hz = 163.0;
         let mut mags = vec![1.0f32; 512];
         mags[(PILOT_HZ / bin_hz).round() as usize] = 7_500.0;
-        MpxFrame { bin_hz, mags_hz: mags }
+        MpxFrame {
+            bin_hz,
+            mags_hz: mags,
+        }
     }
 
     #[test]
@@ -134,12 +152,22 @@ mod tests {
         // mean) of each column's bins is what preserves a one-bin line.
         let top = p.iter().copied().fold(f32::NEG_INFINITY, f32::max);
         let bottom = p.iter().copied().fold(f32::INFINITY, f32::min);
-        assert!(top - bottom > 20.0, "pilot should tower over the floor: {top} vs {bottom}");
+        assert!(
+            top - bottom > 20.0,
+            "pilot should tower over the floor: {top} vs {bottom}"
+        );
         // The pilot sits at 19/60 of the span.
-        let idx = p.iter().enumerate()
-            .max_by(|a, b| a.1.partial_cmp(b.1).unwrap()).map(|(i, _)| i).unwrap();
+        let idx = p
+            .iter()
+            .enumerate()
+            .max_by(|a, b| a.1.partial_cmp(b.1).unwrap())
+            .map(|(i, _)| i)
+            .unwrap();
         let expect = (PILOT_HZ / MPX_SPAN_HZ * 64.0) as usize;
-        assert!((idx as i64 - expect as i64).abs() <= 1, "pilot at column {idx}, expected {expect}");
+        assert!(
+            (idx as i64 - expect as i64).abs() <= 1,
+            "pilot at column {idx}, expected {expect}"
+        );
     }
 
     #[test]
@@ -148,15 +176,24 @@ mod tests {
         let p = mpx_profile(&f, 64);
         let top = p.iter().copied().fold(f32::NEG_INFINITY, f32::max);
         let bottom = p.iter().copied().fold(f32::INFINITY, f32::min);
-        assert!((top - bottom - MPX_DISPLAY_RANGE_DB).abs() < 0.01,
-                "range should be exactly {MPX_DISPLAY_RANGE_DB} dB, got {}", top - bottom);
+        assert!(
+            (top - bottom - MPX_DISPLAY_RANGE_DB).abs() < 0.01,
+            "range should be exactly {MPX_DISPLAY_RANGE_DB} dB, got {}",
+            top - bottom
+        );
     }
 
     #[test]
     fn mpx_profile_declines_degenerate_frames() {
-        let empty = MpxFrame { bin_hz: 163.0, mags_hz: vec![] };
+        let empty = MpxFrame {
+            bin_hz: 163.0,
+            mags_hz: vec![],
+        };
         assert!(mpx_profile(&empty, 32).is_empty());
-        let bad_bin = MpxFrame { bin_hz: 0.0, mags_hz: vec![1.0; 100] };
+        let bad_bin = MpxFrame {
+            bin_hz: 0.0,
+            mags_hz: vec![1.0; 100],
+        };
         assert!(mpx_profile(&bad_bin, 32).is_empty());
         assert!(mpx_profile(&frame_with_pilot(), 0).is_empty());
     }
@@ -168,7 +205,10 @@ mod tests {
         let p19 = row.find("19k").expect("19k tick");
         let p38 = row.find("38k").expect("38k tick");
         let p57 = row.find("57k").expect("57k tick");
-        assert!(p19 < p38 && p38 < p57, "ticks out of order: {p19} {p38} {p57}");
+        assert!(
+            p19 < p38 && p38 < p57,
+            "ticks out of order: {p19} {p38} {p57}"
+        );
         // 19 kHz of a 60 kHz span sits near a third across.
         assert!((p19 as f64 - 48.0 * 19.0 / 60.0).abs() < 3.0);
     }

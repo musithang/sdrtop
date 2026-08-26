@@ -7,22 +7,29 @@
 //! registered but unreachable. Its helpers had three callers by then, so they
 //! outlived it and belong somewhere that isn't a panel.
 
-use ratatui::{
-    style::Style,
-    text::Span,
-};
+use ratatui::{style::Style, text::Span};
 
 use crate::state::TimingQuality;
 
 /// Microseconds rendered as `ms` once they pass 1000 µs, else plain `µs`.
 pub(crate) fn fmt_us(us: u64) -> String {
-    if us >= 1_000 { format!("{:.3} ms", us as f64 / 1_000.0) } else { format!("{} µs", us) }
+    if us >= 1_000 {
+        format!("{:.3} ms", us as f64 / 1_000.0)
+    } else {
+        format!("{} µs", us)
+    }
 }
 
 /// Signed ppm value, colored by absolute magnitude (green / yellow / red).
 pub(crate) fn ppm_span(ppm: i64, theme: &crate::Theme) -> Span<'static> {
     let mag = ppm.unsigned_abs();
-    let color = if mag < 50 { theme.status_ok } else if mag < 200 { theme.status_warn } else { theme.status_crit };
+    let color = if mag < 50 {
+        theme.status_ok
+    } else if mag < 200 {
+        theme.status_warn
+    } else {
+        theme.status_crit
+    };
     Span::styled(format!("{:+} ppm", ppm), Style::default().fg(color))
 }
 

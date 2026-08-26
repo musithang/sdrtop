@@ -171,9 +171,15 @@ pub trait SdrDevice: Send + Sync {
     /// stages default to no-ops so call sites stay unconditional; capability
     /// flags decide what to render and bind.
     fn set_lna_gain(&self, db: u32) -> anyhow::Result<()>;
-    fn set_vga_gain(&self, _db: u32) -> anyhow::Result<()> { Ok(()) }
-    fn set_amp_enable(&self, _on: bool) -> anyhow::Result<()> { Ok(()) }
-    fn set_tuner_agc(&self, _on: bool) -> anyhow::Result<()> { Ok(()) }
+    fn set_vga_gain(&self, _db: u32) -> anyhow::Result<()> {
+        Ok(())
+    }
+    fn set_amp_enable(&self, _on: bool) -> anyhow::Result<()> {
+        Ok(())
+    }
+    fn set_tuner_agc(&self, _on: bool) -> anyhow::Result<()> {
+        Ok(())
+    }
 }
 
 #[cfg(test)]
@@ -194,12 +200,16 @@ mod tests {
 
     #[test]
     fn rtl_clamp_snaps_primary_to_table_keeps_vga() {
-        let g = GainModel::RtlSingle { gain_steps_db: vec![0, 9, 16, 24, 49] };
+        let g = GainModel::RtlSingle {
+            gain_steps_db: vec![0, 9, 16, 24, 49],
+        };
         // A HackRF LNA value snaps to the nearest tuner-table entry; vga is inert.
         assert_eq!(g.clamp_gains(20, 40), (16, 40));
         assert_eq!(g.clamp_gains(100, 0), (49, 0));
         // An empty table can't snap → the value passes through unchanged.
-        let empty = GainModel::RtlSingle { gain_steps_db: vec![] };
+        let empty = GainModel::RtlSingle {
+            gain_steps_db: vec![],
+        };
         assert_eq!(empty.clamp_gains(33, 7), (33, 7));
     }
 }

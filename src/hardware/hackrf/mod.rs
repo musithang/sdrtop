@@ -18,9 +18,9 @@ use super::{DeviceKind, DeviceListing};
 use ffi::*;
 
 pub struct HackRfDevice {
-    ptr:    *mut c_void,
-    caps:   DeviceCapabilities,
-    info:   DeviceInfo,
+    ptr: *mut c_void,
+    caps: DeviceCapabilities,
+    info: DeviceInfo,
     /// Keeps the streaming `RxContext` alive for the session, so the raw pointer
     /// handed to libhackrf stays valid until the device is told to stop.
     rx_ctx: Mutex<Option<Arc<RxContext>>>,
@@ -36,9 +36,8 @@ extern "C" fn rx_callback(transfer: *mut hackrf_transfer) -> c_int {
     // Catch any Rust panic before it crosses the C FFI boundary. With
     // panic=abort this won't unwind, but the guard keeps the intent explicit and
     // protects debug builds from UB through C frames.
-    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-        rx_callback_safe(transfer)
-    }));
+    let result =
+        std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| rx_callback_safe(transfer)));
     result.unwrap_or(0)
 }
 
@@ -48,16 +47,24 @@ fn rx_callback_safe(transfer: *mut hackrf_transfer) -> c_int {
         // inter-callback interval, not callback-entry-plus-processing time.
         let now = std::time::Instant::now();
 
-        if transfer.is_null() { return 0; }
+        if transfer.is_null() {
+            return 0;
+        }
         let t = &*transfer;
         let ctx_ptr = t.rx_ctx as *const RxContext;
-        if ctx_ptr.is_null() { return 0; }
+        if ctx_ptr.is_null() {
+            return 0;
+        }
         let ctx = &*ctx_ptr;
 
         // Guard against malformed USB transfers — libhackrf uses i32 and can
         // return error codes (negative) or zero-length transfers on instability.
-        if t.buffer.is_null() { return 0; }
-        if t.valid_length < 0 { return 0; }
+        if t.buffer.is_null() {
+            return 0;
+        }
+        if t.valid_length < 0 {
+            return 0;
+        }
         if t.valid_length == 0 {
             if let Ok(mut m) = ctx.metrics.lock() {
                 m.signal.usb_errors_session += 1;
@@ -80,8 +87,12 @@ fn rx_callback_safe(transfer: *mut hackrf_transfer) -> c_int {
 // ── SdrDevice impl ──────────────────────────────────────────────────────────
 
 impl SdrDevice for HackRfDevice {
-    fn capabilities(&self) -> &DeviceCapabilities { &self.caps }
-    fn info(&self) -> DeviceInfo { self.info.clone() }
+    fn capabilities(&self) -> &DeviceCapabilities {
+        &self.caps
+    }
+    fn info(&self) -> DeviceInfo {
+        self.info.clone()
+    }
 
     fn start_rx(&self, ctx: Arc<RxContext>) -> anyhow::Result<()> {
         let user_param = Arc::as_ptr(&ctx) as *mut c_void;
@@ -204,7 +215,11 @@ impl HackRfDevice {
             if index >= count {
                 hackrf_device_list_free(list_ptr);
                 hackrf_exit();
-                anyhow::bail!("Device index {} out of range ({} device(s) found).", index, count);
+                anyhow::bail!(
+                    "Device index {} out of range ({} device(s) found).",
+                    index,
+                    count
+                );
             }
 
             let mut ptr = std::ptr::null_mut();
@@ -218,15 +233,20 @@ impl HackRfDevice {
 
             let board_id = read_board_id(ptr).unwrap_or(0);
             let info = DeviceInfo {
-                board_name:      read_board_name(board_id),
-                serial:          read_serial(ptr).unwrap_or_else(|| "unknown".into()),
-                fw_version:      read_version(ptr),
-                board_rev:       read_board_rev(ptr),
+                board_name: read_board_name(board_id),
+                serial: read_serial(ptr).unwrap_or_else(|| "unknown".into()),
+                fw_version: read_version(ptr),
+                board_rev: read_board_rev(ptr),
                 usb_api_version: read_usb_api(ptr),
-                tuner_name:      None,
+                tuner_name: None,
             };
 
-            Ok(Self { ptr, caps: caps(), info, rx_ctx: Mutex::new(None) })
+            Ok(Self {
+                ptr,
+                caps: caps(),
+                info,
+                rx_ctx: Mutex::new(None),
+            })
         }
     }
 }
@@ -258,7 +278,7 @@ pub fn list() -> Vec<DeviceListing> {
                     continue;
                 }
                 out.push(DeviceListing {
-                    kind:  DeviceKind::HackRf,
+                    kind: DeviceKind::HackRf,
                     index: i,
                     label: format!("HackRF One · {}", serial),
                 });
@@ -273,17 +293,17 @@ pub fn list() -> Vec<DeviceListing> {
 /// HackRF One capability descriptor — also used as the observer-mode default.
 pub fn caps() -> DeviceCapabilities {
     DeviceCapabilities {
-        freq_min_hz:            1_000_000,
-        freq_max_hz:            6_000_000_000,
-        sample_rate_min_hz:     2_000_000.0,
-        sample_rate_max_hz:     20_000_000.0,
-        default_frequency_hz:   DEFAULT_FREQUENCY,
+        freq_min_hz: 1_000_000,
+        freq_max_hz: 6_000_000_000,
+        sample_rate_min_hz: 2_000_000.0,
+        sample_rate_max_hz: 20_000_000.0,
+        default_frequency_hz: DEFAULT_FREQUENCY,
         default_sample_rate_hz: DEFAULT_SAMPLE_RATE,
-        sample_format:          SampleFormat::Int8,
-        gain:                   GainModel::HackRf,
-        samples_per_transfer:   crate::state::HACKRF_SAMPLES_PER_TRANSFER,
-        has_bb_filter:          true,
-        friis_applicable:       true,
+        sample_format: SampleFormat::Int8,
+        gain: GainModel::HackRf,
+        samples_per_transfer: crate::state::HACKRF_SAMPLES_PER_TRANSFER,
+        has_bb_filter: true,
+        friis_applicable: true,
     }
 }
 
@@ -307,12 +327,18 @@ unsafe fn read_version(ptr: *mut c_void) -> Option<String> {
     // u8 buffer + .cast() so the pointer converts to *mut c_char on both glibc
     // (c_char = i8) and Android Bionic (c_char = u8).
     let mut buf = [0u8; 64];
-    (hackrf_version_string_read(ptr, buf.as_mut_ptr().cast(), 63) == 0)
-        .then(|| CStr::from_ptr(buf.as_ptr().cast()).to_string_lossy().into_owned())
+    (hackrf_version_string_read(ptr, buf.as_mut_ptr().cast(), 63) == 0).then(|| {
+        CStr::from_ptr(buf.as_ptr().cast())
+            .to_string_lossy()
+            .into_owned()
+    })
 }
 
 unsafe fn read_serial(ptr: *mut c_void) -> Option<String> {
-    let mut data = ReadPartidSerialno { part_id: [0; 2], serial_no: [0; 4] };
+    let mut data = ReadPartidSerialno {
+        part_id: [0; 2],
+        serial_no: [0; 4],
+    };
     (hackrf_board_partid_serialno_read(ptr, &mut data) == 0).then(|| {
         let s = data.serial_no;
         format!("{:08x}{:08x}{:08x}{:08x}", s[0], s[1], s[2], s[3])
@@ -332,27 +358,28 @@ unsafe fn read_usb_api(ptr: *mut c_void) -> Option<u16> {
 /// Maps a HackRF board-revision code to a human label.
 pub fn board_rev_name(rev: u8) -> &'static str {
     match rev {
-        0    => "HackRF One (old)",
-        6    => "HackRF One r6",
-        7    => "HackRF One r7",
-        8    => "HackRF One r8",
-        9    => "HackRF One r9",
-        10   => "HackRF One r10",
+        0 => "HackRF One (old)",
+        6 => "HackRF One r6",
+        7 => "HackRF One r7",
+        8 => "HackRF One r8",
+        9 => "HackRF One r9",
+        10 => "HackRF One r10",
         0xFE => "Undetected",
         0xFF => "Unrecognized",
-        _    => "Unknown",
+        _ => "Unknown",
     }
 }
 
 /// Nearest valid HackRF baseband-filter bandwidth for a given sample rate.
 pub fn compute_bb_filter_bw(sample_rate_hz: f64) -> u32 {
     const STEPS: &[u32] = &[
-        1_750_000, 2_500_000, 3_500_000, 5_000_000, 5_500_000, 6_000_000,
-        7_000_000, 8_000_000, 9_000_000, 10_000_000, 12_000_000, 14_000_000,
-        15_000_000, 20_000_000, 24_000_000, 28_000_000,
+        1_750_000, 2_500_000, 3_500_000, 5_000_000, 5_500_000, 6_000_000, 7_000_000, 8_000_000,
+        9_000_000, 10_000_000, 12_000_000, 14_000_000, 15_000_000, 20_000_000, 24_000_000,
+        28_000_000,
     ];
     let target = sample_rate_hz as u32;
-    STEPS.iter()
+    STEPS
+        .iter()
         .copied()
         .min_by_key(|&bw| (bw as i64 - target as i64).unsigned_abs())
         .unwrap_or(10_000_000)
@@ -365,17 +392,17 @@ mod tests {
     #[test]
     fn drop_detection_arithmetic() {
         let buffer_length: i32 = 262144;
-        let valid_length: i32  = 262144 - 128;
+        let valid_length: i32 = 262144 - 128;
         let dropped_pairs = ((buffer_length - valid_length) / 2) as u64;
         assert_eq!(dropped_pairs, 64);
     }
 
     #[test]
     fn board_rev_name_known_revisions() {
-        assert_eq!(board_rev_name(9),    "HackRF One r9");
+        assert_eq!(board_rev_name(9), "HackRF One r9");
         assert_eq!(board_rev_name(0xFF), "Unrecognized");
         assert_eq!(board_rev_name(0xFE), "Undetected");
-        assert_eq!(board_rev_name(0),    "HackRF One (old)");
+        assert_eq!(board_rev_name(0), "HackRF One (old)");
     }
 
     #[test]
@@ -393,7 +420,7 @@ mod tests {
 
     #[test]
     fn bb_filter_bw_clamps_to_valid_range() {
-        assert_eq!(compute_bb_filter_bw(500_000.0),    1_750_000);
+        assert_eq!(compute_bb_filter_bw(500_000.0), 1_750_000);
         assert_eq!(compute_bb_filter_bw(30_000_000.0), 28_000_000);
     }
 

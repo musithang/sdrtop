@@ -13,22 +13,50 @@ use crate::state::SdrMetrics;
 // ── Status colors ───────────────────────────────────────────────────────────
 
 pub fn snr_color(db: f32, theme: &crate::Theme) -> Color {
-    if db >= 20.0 { theme.status_ok } else if db >= 10.0 { theme.status_warn } else { theme.status_crit }
+    if db >= 20.0 {
+        theme.status_ok
+    } else if db >= 10.0 {
+        theme.status_warn
+    } else {
+        theme.status_crit
+    }
 }
 pub fn sat_color(pct: f32, theme: &crate::Theme) -> Color {
-    if pct < 1.0 { theme.status_ok } else if pct < 5.0 { theme.status_warn } else { theme.status_crit }
+    if pct < 1.0 {
+        theme.status_ok
+    } else if pct < 5.0 {
+        theme.status_warn
+    } else {
+        theme.status_crit
+    }
 }
 pub fn drop_color(drops: u64, theme: &crate::Theme) -> Color {
-    if drops == 0 { theme.status_ok } else if drops < 10 { theme.status_warn } else { theme.status_crit }
+    if drops == 0 {
+        theme.status_ok
+    } else if drops < 10 {
+        theme.status_warn
+    } else {
+        theme.status_crit
+    }
 }
 pub fn buf_color(pct: f32, theme: &crate::Theme) -> Color {
-    if pct < 50.0 { theme.status_ok } else if pct < 80.0 { theme.status_warn } else { theme.status_crit }
+    if pct < 50.0 {
+        theme.status_ok
+    } else if pct < 80.0 {
+        theme.status_warn
+    } else {
+        theme.status_crit
+    }
 }
 
 // ── Formatters ──────────────────────────────────────────────────────────────
 
 pub fn fmt_rbw(hz: f64) -> String {
-    if hz >= 1_000.0 { format!("{:.1} kHz", hz / 1_000.0) } else { format!("{:.0} Hz", hz) }
+    if hz >= 1_000.0 {
+        format!("{:.1} kHz", hz / 1_000.0)
+    } else {
+        format!("{:.0} Hz", hz)
+    }
 }
 
 pub fn fmt_freq_mhz(hz: u64) -> String {
@@ -49,9 +77,13 @@ pub fn fmt_freq_mhz(hz: u64) -> String {
 /// at 2 Msps, so those digits are measured, not invented — while `{} kHz` integer
 /// truncation was throwing away resolution the analyser actually has.
 pub fn fmt_bw(hz: u64) -> String {
-    if hz >= 1_000_000      { format!("{:.3} MHz", hz as f64 / 1e6) }
-    else if hz >= 1_000     { format!("{:.1} kHz", hz as f64 / 1e3) }
-    else                    { format!("{hz} Hz") }
+    if hz >= 1_000_000 {
+        format!("{:.3} MHz", hz as f64 / 1e6)
+    } else if hz >= 1_000 {
+        format!("{:.1} kHz", hz as f64 / 1e3)
+    } else {
+        format!("{hz} Hz")
+    }
 }
 
 // ── Shared spans ────────────────────────────────────────────────────────────
@@ -81,13 +113,18 @@ pub fn fft_stale(state: &SdrMetrics) -> bool {
 
 /// A character bar `████░░░░` of `width` cells: filled (in `color`) for `ratio`,
 /// empty (dim) for the rest. Two spans.
-pub fn bar_spans(ratio: f64, width: usize, color: Color, theme: &crate::Theme) -> [Span<'static>; 2] {
-    let ratio  = ratio.clamp(0.0, 1.0);
+pub fn bar_spans(
+    ratio: f64,
+    width: usize,
+    color: Color,
+    theme: &crate::Theme,
+) -> [Span<'static>; 2] {
+    let ratio = ratio.clamp(0.0, 1.0);
     let filled = (ratio * width as f64).round() as usize;
-    let empty  = width.saturating_sub(filled);
+    let empty = width.saturating_sub(filled);
     [
         Span::styled("█".repeat(filled), Style::default().fg(color)),
-        Span::styled("░".repeat(empty),  Style::default().fg(theme.border_dim)),
+        Span::styled("░".repeat(empty), Style::default().fg(theme.border_dim)),
     ]
 }
 
@@ -98,13 +135,18 @@ const SPARK_TICKS: [char; 8] = ['▁', '▂', '▃', '▄', '▅', '▆', '▇',
 /// the window maximum. An all-zero (or empty-window) input renders as the
 /// lowest tick so the row still reads as a flat baseline.
 pub fn sparkline(samples: &[f64], width: usize) -> String {
-    if samples.is_empty() || width == 0 { return String::new(); }
+    if samples.is_empty() || width == 0 {
+        return String::new();
+    }
     let start = samples.len().saturating_sub(width);
     let slice = &samples[start..];
     let max = slice.iter().cloned().fold(0.0f64, f64::max).max(1e-9);
-    slice.iter()
+    slice
+        .iter()
         .map(|&v| {
-            let idx = ((v / max) * (SPARK_TICKS.len() - 1) as f64).round().clamp(0.0, 7.0) as usize;
+            let idx = ((v / max) * (SPARK_TICKS.len() - 1) as f64)
+                .round()
+                .clamp(0.0, 7.0) as usize;
             SPARK_TICKS[idx]
         })
         .collect()
@@ -116,13 +158,16 @@ pub fn sparkline(samples: &[f64], width: usize) -> String {
 /// string and the peak-to-peak spread of the visible window (for a `±x` annotation).
 /// Shared by the Lab IQ IRR trend and the Lab RF sensitivity floor trend.
 pub fn spark_minmax(samples: &[f32], width: usize) -> (String, f64) {
-    if samples.is_empty() || width == 0 { return (String::new(), 0.0); }
+    if samples.is_empty() || width == 0 {
+        return (String::new(), 0.0);
+    }
     let start = samples.len().saturating_sub(width);
     let slice = &samples[start..];
     let lo = slice.iter().cloned().fold(f32::INFINITY, f32::min);
     let hi = slice.iter().cloned().fold(f32::NEG_INFINITY, f32::max);
     let span = (hi - lo).max(1e-6);
-    let s = slice.iter()
+    let s = slice
+        .iter()
         .map(|&v| SPARK_TICKS[(((v - lo) / span) * 7.0).round().clamp(0.0, 7.0) as usize])
         .collect();
     (s, (hi - lo) as f64)
@@ -162,7 +207,7 @@ mod tests {
         let t = Theme::sdr();
         assert_eq!(snr_color(25.0, &t), t.status_ok);
         assert_eq!(snr_color(15.0, &t), t.status_warn);
-        assert_eq!(snr_color(5.0,  &t), t.status_crit);
+        assert_eq!(snr_color(5.0, &t), t.status_crit);
     }
 
     #[test]
@@ -193,7 +238,11 @@ mod tests {
         // function now, so the only thing left to pin is that it keeps the
         // resolution the analyser has rather than truncating to whole kHz.
         assert_eq!(fmt_bw(180_500), "180.5 kHz", "sub-kHz resolution survives");
-        assert_eq!(fmt_bw(1_250_000), "1.250 MHz", "and sub-10-kHz at MHz scale");
+        assert_eq!(
+            fmt_bw(1_250_000),
+            "1.250 MHz",
+            "and sub-10-kHz at MHz scale"
+        );
     }
 
     #[test]

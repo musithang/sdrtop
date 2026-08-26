@@ -12,15 +12,19 @@ use ratatui::{
 
 /// How long a clip is remembered, and the window in which it's still "fresh"
 /// (loud red) before it fades to a dim memory line.
-const CLIP_FRESH_SECS:  u64 = 6;
+const CLIP_FRESH_SECS: u64 = 6;
 
 const CLIP_MEMORY_SECS: u64 = 30;
 
 /// Compact relative age for the alert-memory: `"4s"`, `"2m"`, `"1h"`. Pure.
 pub(super) fn fmt_since(secs: u64) -> String {
-    if secs < 60        { format!("{secs}s") }
-    else if secs < 3600 { format!("{}m", secs / 60) }
-    else                { format!("{}h", secs / 3600) }
+    if secs < 60 {
+        format!("{secs}s")
+    } else if secs < 3600 {
+        format!("{}m", secs / 60)
+    } else {
+        format!("{}h", secs / 3600)
+    }
 }
 
 /// The SAT clip alert-memory state: `Some((age_secs, fresh))` while a clip is
@@ -49,9 +53,17 @@ fn power_to_s_frac(dbfs: f32) -> f64 {
 fn frac_to_s_label(frac: f64) -> &'static str {
     match (frac * 14.0).round() as i32 {
         i32::MIN..=0 => "S1",
-        1 => "S2", 2 => "S3", 3 => "S4", 4 => "S5",
-        5 => "S6", 6 => "S7", 7 => "S8", 8..=9 => "S9",
-        10..=11 => "S9+20", 12..=13 => "S9+40", _ => "S9+60",
+        1 => "S2",
+        2 => "S3",
+        3 => "S4",
+        4 => "S5",
+        5 => "S6",
+        6 => "S7",
+        7 => "S8",
+        8..=9 => "S9",
+        10..=11 => "S9+20",
+        12..=13 => "S9+40",
+        _ => "S9+60",
     }
 }
 
@@ -74,7 +86,7 @@ fn s_bar_color(x: usize, bar_w: usize) -> Color {
 const S_EIGHTHS: [char; 9] = [' ', '▏', '▎', '▍', '▌', '▋', '▊', '▉', '█'];
 
 fn s_bar_char(x: usize, fill_eighths: usize, peak_col: Option<usize>) -> char {
-    let pos8  = x * 8;
+    let pos8 = x * 8;
     let next8 = pos8 + 8;
     if fill_eighths >= next8 {
         '█'
@@ -89,14 +101,24 @@ fn s_bar_char(x: usize, fill_eighths: usize, peak_col: Option<usize>) -> char {
 
 #[allow(clippy::eq_op)]
 const SCALE: &[(&str, f64)] = &[
-    ("S1", 0.0 / 14.0), ("S3", 2.0 / 14.0), ("S5", 4.0 / 14.0), ("S7", 6.0 / 14.0),
-    ("S9", 8.0 / 14.0), ("+20", 10.0 / 14.0), ("+40", 12.0 / 14.0), ("+60", 14.0 / 14.0),
+    ("S1", 0.0 / 14.0),
+    ("S3", 2.0 / 14.0),
+    ("S5", 4.0 / 14.0),
+    ("S7", 6.0 / 14.0),
+    ("S9", 8.0 / 14.0),
+    ("+20", 10.0 / 14.0),
+    ("+40", 12.0 / 14.0),
+    ("+60", 14.0 / 14.0),
 ];
 
-pub(super) fn s_meter_lines(power_dbfs: f32, peak_dbfs: Option<f32>, iw: usize,
-                 theme: &crate::Theme) -> [Line<'static>; 3] {
+pub(super) fn s_meter_lines(
+    power_dbfs: f32,
+    peak_dbfs: Option<f32>,
+    iw: usize,
+    theme: &crate::Theme,
+) -> [Line<'static>; 3] {
     let bar_w = iw.saturating_sub(1).max(1);
-    let frac  = power_to_s_frac(power_dbfs);
+    let frac = power_to_s_frac(power_dbfs);
     let fill_eighths = (frac * bar_w as f64 * 8.0) as usize;
     let peak_col = peak_dbfs.map(|p| (power_to_s_frac(p) * bar_w as f64) as usize);
 
@@ -104,11 +126,15 @@ pub(super) fn s_meter_lines(power_dbfs: f32, peak_dbfs: Option<f32>, iw: usize,
     let skip_alt = iw < 20;
     let mut scale_buf = vec![' '; bar_w];
     for (idx, &(lbl, frac_pos)) in SCALE.iter().enumerate() {
-        if skip_alt && idx % 2 != 0 { continue; }
+        if skip_alt && idx % 2 != 0 {
+            continue;
+        }
         let pos = (frac_pos * bar_w as f64) as usize;
         for (j, c) in lbl.chars().enumerate() {
             let col = pos + j;
-            if col < bar_w { scale_buf[col] = c; }
+            if col < bar_w {
+                scale_buf[col] = c;
+            }
         }
     }
     let scale_str: String = scale_buf.into_iter().collect();
@@ -137,14 +163,25 @@ pub(super) fn s_meter_lines(power_dbfs: f32, peak_dbfs: Option<f32>, iw: usize,
     let val_str = format!("{power_dbfs:.1} dBFS");
     let mut row2_spans = vec![
         Span::raw(" "),
-        Span::styled(s_label.to_string(), Style::default().fg(theme.value_hi).add_modifier(Modifier::BOLD)),
+        Span::styled(
+            s_label.to_string(),
+            Style::default()
+                .fg(theme.value_hi)
+                .add_modifier(Modifier::BOLD),
+        ),
         Span::styled("  ·  ".to_string(), Style::default().fg(theme.border_dim)),
         Span::styled(val_str, Style::default().fg(theme.value)),
     ];
     if let Some(p) = peak_dbfs {
         let p_label = frac_to_s_label(power_to_s_frac(p));
-        row2_spans.push(Span::styled("  ·  ".to_string(), Style::default().fg(theme.border_dim)));
-        row2_spans.push(Span::styled(format!("peak {p_label}"), Style::default().fg(theme.label)));
+        row2_spans.push(Span::styled(
+            "  ·  ".to_string(),
+            Style::default().fg(theme.border_dim),
+        ));
+        row2_spans.push(Span::styled(
+            format!("peak {p_label}"),
+            Style::default().fg(theme.label),
+        ));
     }
     let row2 = Line::from(row2_spans);
 
@@ -152,15 +189,20 @@ pub(super) fn s_meter_lines(power_dbfs: f32, peak_dbfs: Option<f32>, iw: usize,
 }
 
 pub(super) fn clip_decay_bg(since: u64) -> Option<Color> {
-    if since > CLIP_MEMORY_SECS { return None; }
+    if since > CLIP_MEMORY_SECS {
+        return None;
+    }
     let t = if since <= CLIP_FRESH_SECS {
         1.0_f64
     } else {
-        1.0 - (since - CLIP_FRESH_SECS) as f64
-            / (CLIP_MEMORY_SECS - CLIP_FRESH_SECS) as f64
+        1.0 - (since - CLIP_FRESH_SECS) as f64 / (CLIP_MEMORY_SECS - CLIP_FRESH_SECS) as f64
     };
     let r = (45.0 * t) as u8;
-    if r == 0 { None } else { Some(Color::Rgb(r, 0, 0)) }
+    if r == 0 {
+        None
+    } else {
+        Some(Color::Rgb(r, 0, 0))
+    }
 }
 
 #[cfg(test)]
@@ -177,11 +219,11 @@ mod tests {
 
     #[test]
     fn clip_alert_is_fresh_then_fades_then_expires() {
-        assert_eq!(clip_alert(None, 100), None);                 // never clipped
+        assert_eq!(clip_alert(None, 100), None); // never clipped
         assert_eq!(clip_alert(Some(100), 103), Some((3, true))); // fresh & loud
         assert_eq!(clip_alert(Some(100), 115), Some((15, false))); // remembered, dim
-        assert_eq!(clip_alert(Some(100), 140), None);            // older than memory
-        // Clock skew (clip "in the future") must not panic or misread.
+        assert_eq!(clip_alert(Some(100), 140), None); // older than memory
+                                                      // Clock skew (clip "in the future") must not panic or misread.
         assert_eq!(clip_alert(Some(100), 90), Some((0, true)));
     }
 
@@ -195,7 +237,10 @@ mod tests {
     #[test]
     fn power_to_s_frac_s9_is_eight_fourteenths() {
         let frac = power_to_s_frac(S9_DBFS);
-        assert!((frac - 8.0 / 14.0).abs() < 0.01, "S9 should be 8/14, got {frac}");
+        assert!(
+            (frac - 8.0 / 14.0).abs() < 0.01,
+            "S9 should be 8/14, got {frac}"
+        );
     }
 
     #[test]
@@ -228,10 +273,10 @@ mod tests {
 
     #[test]
     fn frac_to_s_label_known_values() {
-        assert_eq!(frac_to_s_label(0.0),        "S1");
+        assert_eq!(frac_to_s_label(0.0), "S1");
         assert_eq!(frac_to_s_label(6.0 / 14.0), "S7");
         assert_eq!(frac_to_s_label(8.0 / 14.0), "S9");
-        assert_eq!(frac_to_s_label(1.0),         "S9+60");
+        assert_eq!(frac_to_s_label(1.0), "S9+60");
     }
 
     #[test]

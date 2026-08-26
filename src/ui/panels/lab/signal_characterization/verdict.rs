@@ -31,15 +31,19 @@ const VERDICT_ACPR_CONCERN_DB: f32 = -20.0;
 /// can read the exact same severity the card shows — one source of truth, same
 /// precedent as `image_scope::CarrierImage`.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
-pub(crate) enum VerdictLevel { Clean, Caution, NoSignal }
+pub(crate) enum VerdictLevel {
+    Clean,
+    Caution,
+    NoSignal,
+}
 
 impl VerdictLevel {
     /// Short word for a tight space (the marker bar), distinct from the verdict
     /// card's fuller headline (e.g. "WEAK WFM SIGNAL" / "CLEAN WFM SIGNAL").
     pub(crate) fn short_label(self) -> &'static str {
         match self {
-            VerdictLevel::Clean    => "Clean",
-            VerdictLevel::Caution  => "Caution",
+            VerdictLevel::Clean => "Clean",
+            VerdictLevel::Caution => "Caution",
             VerdictLevel::NoSignal => "No signal",
         }
     }
@@ -47,9 +51,13 @@ impl VerdictLevel {
 
 /// The rule itself, returning `(level, headline, detail)`. `pub(crate)` for the
 /// same reason as [`VerdictLevel`].
-pub(crate) fn verdict(modulation: Modulation, snr_db: f32, acpr_lower_db: f32, acpr_upper_db: f32, obw_hz: u64)
-    -> (VerdictLevel, String, String)
-{
+pub(crate) fn verdict(
+    modulation: Modulation,
+    snr_db: f32,
+    acpr_lower_db: f32,
+    acpr_upper_db: f32,
+    obw_hz: u64,
+) -> (VerdictLevel, String, String) {
     if !modulation.is_known() || snr_db < VERDICT_NO_SIGNAL_SNR_DB {
         return (
             VerdictLevel::NoSignal,
@@ -86,7 +94,7 @@ pub(crate) fn verdict(modulation: Modulation, snr_db: f32, acpr_lower_db: f32, a
 
     let acpr_note = match worst_acpr {
         Some(_) => format!(", ACPR {acpr_lower_db:.0}/{acpr_upper_db:.0} dB"),
-        None    => String::new(),
+        None => String::new(),
     };
     (
         VerdictLevel::Clean,
@@ -145,7 +153,13 @@ mod tests {
     #[test]
     fn verdict_clean_without_acpr_data_omits_the_clause() {
         // No adjacent-channel measurement yet (e.g. band edge) → no fabricated ACPR note.
-        let (level, _, detail) = verdict(Modulation::Nfm, 30.0, f32::NEG_INFINITY, f32::NEG_INFINITY, 15_000);
+        let (level, _, detail) = verdict(
+            Modulation::Nfm,
+            30.0,
+            f32::NEG_INFINITY,
+            f32::NEG_INFINITY,
+            15_000,
+        );
         assert_eq!(level, VerdictLevel::Clean);
         assert!(!detail.contains("ACPR"));
     }
@@ -157,8 +171,14 @@ mod tests {
         for (lo, hi) in [(f32::NEG_INFINITY, -38.0), (-38.0, f32::NEG_INFINITY)] {
             let (level, _, detail) = verdict(Modulation::Wfm, 30.0, lo, hi, 120_000);
             assert_eq!(level, VerdictLevel::Clean);
-            assert!(!detail.contains("ACPR"), "half a pair reached the copy: {detail}");
-            assert!(!detail.contains("inf"), "sentinel reached the copy: {detail}");
+            assert!(
+                !detail.contains("ACPR"),
+                "half a pair reached the copy: {detail}"
+            );
+            assert!(
+                !detail.contains("inf"),
+                "sentinel reached the copy: {detail}"
+            );
         }
     }
 }

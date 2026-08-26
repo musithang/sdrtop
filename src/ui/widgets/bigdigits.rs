@@ -24,7 +24,7 @@ pub fn glyph(c: char) -> [&'static str; 3] {
         '8' => ["█▀█", "█▀█", "▀▀▀"],
         '9' => ["█▀█", "▀▀█", "▀▀▀"],
         '.' => ["   ", "   ", " ▄ "],
-        _   => ["   ", "   ", "   "],
+        _ => ["   ", "   ", "   "],
     }
 }
 
@@ -33,7 +33,11 @@ pub fn glyph(c: char) -> [&'static str; 3] {
 /// enough for the big readout or must fall back to a single line.
 pub fn big_width(s: &str) -> usize {
     let n = s.chars().count();
-    if n == 0 { 0 } else { n * GLYPH_W + (n - 1) }
+    if n == 0 {
+        0
+    } else {
+        n * GLYPH_W + (n - 1)
+    }
 }
 
 #[cfg(test)]
@@ -47,7 +51,11 @@ mod tests {
     fn every_glyph_row_is_three_columns() {
         for c in "0123456789. ".chars() {
             for (r, row) in glyph(c).iter().enumerate() {
-                assert_eq!(row.chars().count(), GLYPH_W, "char {c:?} row {r} not {GLYPH_W} cols");
+                assert_eq!(
+                    row.chars().count(),
+                    GLYPH_W,
+                    "char {c:?} row {r} not {GLYPH_W} cols"
+                );
             }
         }
     }

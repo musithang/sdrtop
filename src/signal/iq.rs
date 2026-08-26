@@ -13,7 +13,9 @@ pub fn image_rejection_db(amp_imbalance_db: f32, phase_imbalance_deg: f32) -> f6
     let theta = phase_imbalance_deg as f64 * std::f64::consts::PI / 180.0;
     let num = 1.0 + alpha * alpha + 2.0 * alpha * theta.cos();
     let den = 1.0 + alpha * alpha - 2.0 * alpha * theta.cos();
-    if den <= 1e-12 { return 99.9; }
+    if den <= 1e-12 {
+        return 99.9;
+    }
     10.0 * (num / den).log10()
 }
 
@@ -23,7 +25,9 @@ pub fn image_rejection_db(amp_imbalance_db: f32, phase_imbalance_deg: f32) -> f6
 /// cancels the mirror image. Returns identity `(0.0, 1.0)` for already-balanced or
 /// degenerate input, so applying it is always safe.
 pub fn iq_correction_coeffs(var_i: f64, var_q: f64, cov_iq: f64) -> (f32, f32) {
-    if var_i <= 1e-9 { return (0.0, 1.0); }
+    if var_i <= 1e-9 {
+        return (0.0, 1.0);
+    }
     let q_perp_var = (var_q - cov_iq * cov_iq / var_i).max(1e-9);
     let b = (var_i / q_perp_var).sqrt();
     ((-b * cov_iq / var_i) as f32, b as f32)
@@ -34,11 +38,15 @@ pub fn iq_correction_coeffs(var_i: f64, var_q: f64, cov_iq: f64) -> (f32, f32) {
 /// imbalance the corrected stream actually has — without a second per-sample
 /// accumulator — so the diagnostics agree with the corrected scope/constellation.
 /// Returns `(var_i', var_q', cov_iq')`.
-pub fn corrected_moments(var_i: f64, var_q: f64, cov_iq: f64, c_qi: f64, c_qq: f64)
-    -> (f64, f64, f64)
-{
+pub fn corrected_moments(
+    var_i: f64,
+    var_q: f64,
+    cov_iq: f64,
+    c_qi: f64,
+    c_qq: f64,
+) -> (f64, f64, f64) {
     let var_q2 = c_qi * c_qi * var_i + c_qq * c_qq * var_q + 2.0 * c_qi * c_qq * cov_iq;
-    let cov2   = c_qi * var_i + c_qq * cov_iq;
+    let cov2 = c_qi * var_i + c_qq * cov_iq;
     (var_i, var_q2.max(0.0), cov2)
 }
 
@@ -54,7 +62,10 @@ mod tests {
         let (c_qi, c_qq) = iq_correction_coeffs(var_i, var_q, cov);
         let (vi, vq, cv) = corrected_moments(var_i, var_q, cov, c_qi as f64, c_qq as f64);
         assert!(cv.abs() < 1e-5, "cov should cancel, got {cv}");
-        assert!((vi - vq).abs() < 1e-5, "power should match, got {vi} vs {vq}");
+        assert!(
+            (vi - vq).abs() < 1e-5,
+            "power should match, got {vi} vs {vq}"
+        );
         // → corrected IRR is effectively perfect.
         let amp = 10.0 * (vi / vq).log10();
         let phase = (2.0 * cv / (vi + vq)).asin().to_degrees();
@@ -85,7 +96,10 @@ mod tests {
     fn coeffs_phase_correlation_decorrelates() {
         // Equal power but correlated → a non-zero cross term that removes the I part.
         let (c_qi, c_qq) = iq_correction_coeffs(1.0, 1.0, 0.3);
-        assert!(c_qi < 0.0, "cross term should subtract the I component, got {c_qi}");
+        assert!(
+            c_qi < 0.0,
+            "cross term should subtract the I component, got {c_qi}"
+        );
         assert!(c_qq > 1.0, "rescale to restore power, got {c_qq}");
     }
 
@@ -118,7 +132,7 @@ mod tests {
 
     #[test]
     fn irr_worsens_with_more_imbalance() {
-        let irr_low  = image_rejection_db(0.5, 1.0);
+        let irr_low = image_rejection_db(0.5, 1.0);
         let irr_high = image_rejection_db(3.0, 5.0);
         assert!(irr_low > irr_high, "more imbalance should give worse IRR");
     }

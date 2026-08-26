@@ -50,14 +50,26 @@ const TIMING_GAIN: f64 = 0.1;
 
 /// Second-order resonator isolating the pilot before the phase detector, so
 /// programme audio cannot pull the loop.
-struct Resonator { b0: f64, a1: f64, a2: f64, z1: f64, z2: f64 }
+struct Resonator {
+    b0: f64,
+    a1: f64,
+    a2: f64,
+    z1: f64,
+    z2: f64,
+}
 
 impl Resonator {
     /// Band-pass centred at `f0` with bandwidth `bw`, both in Hz.
     fn new(f0: f64, bw: f64, rate: f64) -> Self {
         let w = 2.0 * std::f64::consts::PI * f0 / rate;
         let r = (-std::f64::consts::PI * bw / rate).exp();
-        Self { b0: 1.0 - r, a1: 2.0 * r * w.cos(), a2: -r * r, z1: 0.0, z2: 0.0 }
+        Self {
+            b0: 1.0 - r,
+            a1: 2.0 * r * w.cos(),
+            a2: -r * r,
+            z1: 0.0,
+            z2: 0.0,
+        }
     }
     fn process(&mut self, x: f64) -> f64 {
         let y = self.b0 * x + self.a1 * self.z1 + self.a2 * self.z2;
@@ -65,31 +77,34 @@ impl Resonator {
         self.z1 = y;
         y
     }
-    fn reset(&mut self) { self.z1 = 0.0; self.z2 = 0.0; }
+    fn reset(&mut self) {
+        self.z1 = 0.0;
+        self.z2 = 0.0;
+    }
 }
 
 /// Recovers RDS bits from MPX baseband samples.
 pub struct RdsDemod {
     rate: f64,
     // Pilot PLL.
-    band:  Resonator,
+    band: Resonator,
     phase: f64,
-    freq:  f64,
-    kp:    f64,
-    ki:    f64,
+    freq: f64,
+    kp: f64,
+    ki: f64,
     // Channel filter and decimation of the mixed-down subcarrier.
-    lp:      Vec<f32>,
-    hist:    Vec<Complex<f32>>,
+    lp: Vec<f32>,
+    hist: Vec<Complex<f32>>,
     hist_pos: usize,
-    dec_d:   usize,
+    dec_d: usize,
     dec_ctr: usize,
     // Symbol recovery.
     /// Baseband samples per symbol, generally fractional.
-    sps:      f64,
+    sps: f64,
     /// Baseband samples awaiting symbol evaluation.
-    buf:      Vec<f32>,
+    buf: Vec<f32>,
     /// Fractional carry, so a non-integer symbol length does not drift.
-    frac:     f64,
+    frac: f64,
     /// Squaring-estimator phase, smoothed across symbols.
     bpsk_phase: f32,
     prev_sym: Option<bool>,
@@ -124,13 +139,17 @@ impl RdsDemod {
 
     /// Rate this demod was built for — the caller rebuilds it when the channel
     /// rate changes.
-    pub fn rate(&self) -> f64 { self.rate }
+    pub fn rate(&self) -> f64 {
+        self.rate
+    }
 
     /// Drop all filter and timing state. Used when the sample stream breaks: bits
     /// either side of a gap are not the same message.
     pub fn reset(&mut self) {
         self.band.reset();
-        self.hist.iter_mut().for_each(|z| *z = Complex { re: 0.0, im: 0.0 });
+        self.hist
+            .iter_mut()
+            .for_each(|z| *z = Complex { re: 0.0, im: 0.0 });
         self.hist_pos = 0;
         self.dec_ctr = 0;
         self.buf.clear();
@@ -152,7 +171,9 @@ impl RdsDemod {
             let err = -p.signum() * s;
             self.freq += self.ki * err;
             self.phase += self.freq + self.kp * err;
-            if self.phase > std::f64::consts::TAU { self.phase -= std::f64::consts::TAU; }
+            if self.phase > std::f64::consts::TAU {
+                self.phase -= std::f64::consts::TAU;
+            }
 
             // ── Mix the subcarrier to DC using three times the pilot phase ──
             // Triple-angle identities rather than a second `sin_cos`: this runs on
@@ -160,16 +181,24 @@ impl RdsDemod {
             // already paid for sin/cos of the fundamental.
             let c3 = c * (4.0 * c * c - 3.0);
             let s3 = s * (3.0 - 4.0 * s * s);
-            let mixed = Complex { re: (x as f64 * c3) as f32, im: (-(x as f64) * s3) as f32 };
+            let mixed = Complex {
+                re: (x as f64 * c3) as f32,
+                im: (-(x as f64) * s3) as f32,
+            };
 
             // ── Channel filter, evaluated only on decimation instants ──────
             self.hist[self.hist_pos] = mixed;
             self.hist_pos = (self.hist_pos + 1) % LP_TAPS;
             self.dec_ctr += 1;
-            if self.dec_ctr < self.dec_d { continue; }
+            if self.dec_ctr < self.dec_d {
+                continue;
+            }
             self.dec_ctr = 0;
 
-            let mut acc = Complex { re: 0.0f32, im: 0.0f32 };
+            let mut acc = Complex {
+                re: 0.0f32,
+                im: 0.0f32,
+            };
             for (k, &h) in self.lp.iter().enumerate() {
                 let idx = (self.hist_pos + k) % LP_TAPS;
                 let z = self.hist[idx];
@@ -191,7 +220,8 @@ impl RdsDemod {
             // Small, steady correction — the pilot already holds the frequency, so
             // this only has to follow slow phase wander.
             let diff = (est - self.bpsk_phase + std::f32::consts::PI)
-                .rem_euclid(2.0 * std::f32::consts::PI) - std::f32::consts::PI;
+                .rem_euclid(2.0 * std::f32::consts::PI)
+                - std::f32::consts::PI;
             self.bpsk_phase += 0.01 * diff;
         }
         let (s, c) = self.bpsk_phase.sin_cos();
@@ -202,7 +232,9 @@ impl RdsDemod {
         // whole symbol plus both gates before any of them can be read.
         let delta = (self.sps / 4.0).max(1.0);
         let need = (self.sps + 2.0 * delta).ceil() as usize + 2;
-        if self.buf.len() < need { return; }
+        if self.buf.len() < need {
+            return;
+        }
 
         let early = biphase(&self.buf, 0.0, self.sps);
         let ontime = biphase(&self.buf, delta, self.sps);
@@ -236,15 +268,17 @@ fn biphase(buf: &[f32], off: f64, sps: f64) -> f32 {
     let a = off.round() as usize;
     let m = (off + sps / 2.0).round() as usize;
     let b = (off + sps).round() as usize;
-    if b > buf.len() || m <= a || b <= m { return 0.0; }
+    if b > buf.len() || m <= a || b <= m {
+        return 0.0;
+    }
     let mean = |r: &[f32]| r.iter().sum::<f32>() / r.len() as f32;
     mean(&buf[a..m]) - mean(&buf[m..b])
 }
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use super::super::rds::{encode_block, BlockOffset, RdsDecoder, BLOCK_BITS};
+    use super::*;
     use std::f64::consts::TAU;
 
     /// Build an MPX waveform carrying a pilot and an RDS bitstream, the way a
@@ -252,35 +286,60 @@ mod tests {
     fn mpx_with_rds(rate: f64, bits: &[u8], pilot_dev: f64, rds_dev: f64) -> Vec<f32> {
         // Differential encoding, then biphase — the transmitter's order.
         let mut sym = false;
-        let symbols: Vec<bool> = bits.iter().map(|&b| { sym ^= b == 1; sym }).collect();
+        let symbols: Vec<bool> = bits
+            .iter()
+            .map(|&b| {
+                sym ^= b == 1;
+                sym
+            })
+            .collect();
 
         let sps = rate / BITRATE;
         let n = (symbols.len() as f64 * sps) as usize;
-        (0..n).map(|i| {
-            let t = i as f64 / rate;
-            let si = (i as f64 / sps) as usize;
-            let frac = (i as f64 / sps).fract();
-            // Manchester: each symbol is a half-high, half-low pulse (or inverted).
-            let level = if symbols.get(si).copied().unwrap_or(false) {
-                if frac < 0.5 { 1.0 } else { -1.0 }
-            } else if frac < 0.5 { -1.0 } else { 1.0 };
-            let pilot = pilot_dev * (TAU * PILOT_HZ * t).sin();
-            // The subcarrier is locked to the pilot's third harmonic.
-            let rds = rds_dev * level * (TAU * SUBCARRIER_HZ * t).sin();
-            (pilot + rds) as f32
-        }).collect()
+        (0..n)
+            .map(|i| {
+                let t = i as f64 / rate;
+                let si = (i as f64 / sps) as usize;
+                let frac = (i as f64 / sps).fract();
+                // Manchester: each symbol is a half-high, half-low pulse (or inverted).
+                let level = if symbols.get(si).copied().unwrap_or(false) {
+                    if frac < 0.5 {
+                        1.0
+                    } else {
+                        -1.0
+                    }
+                } else if frac < 0.5 {
+                    -1.0
+                } else {
+                    1.0
+                };
+                let pilot = pilot_dev * (TAU * PILOT_HZ * t).sin();
+                // The subcarrier is locked to the pilot's third harmonic.
+                let rds = rds_dev * level * (TAU * SUBCARRIER_HZ * t).sin();
+                (pilot + rds) as f32
+            })
+            .collect()
     }
 
     /// Block B of a group 0A: type 0 and version A are both zero, TP is set, PTY
     /// is 3, and the low bits carry the PS segment index.
-    fn block_b(segment: u16) -> u16 { (1 << 10) | (3 << 5) | segment }
+    fn block_b(segment: u16) -> u16 {
+        (1 << 10) | (3 << 5) | segment
+    }
 
     fn group_bits(info: [u16; 4]) -> Vec<u8> {
-        let offs = [BlockOffset::A, BlockOffset::B, BlockOffset::C, BlockOffset::D];
+        let offs = [
+            BlockOffset::A,
+            BlockOffset::B,
+            BlockOffset::C,
+            BlockOffset::D,
+        ];
         let mut bits = Vec::new();
         for (w, off) in info.iter().zip(offs.iter()) {
             let block = encode_block(*w, *off);
-            for i in (0..BLOCK_BITS).rev() { bits.push(((block >> i) & 1) as u8); }
+            for i in (0..BLOCK_BITS).rev() {
+                bits.push(((block >> i) & 1) as u8);
+            }
         }
         bits
     }
@@ -292,15 +351,22 @@ mod tests {
         let mut on = 0.0f64;
         for i in 0..20_000 {
             let v = r.process((TAU * PILOT_HZ * i as f64 / rate).sin());
-            if i > 10_000 { on += v.abs(); }
+            if i > 10_000 {
+                on += v.abs();
+            }
         }
         let mut r2 = Resonator::new(PILOT_HZ, 200.0, rate);
         let mut off = 0.0f64;
         for i in 0..20_000 {
             let v = r2.process((TAU * 5_000.0 * i as f64 / rate).sin());
-            if i > 10_000 { off += v.abs(); }
+            if i > 10_000 {
+                off += v.abs();
+            }
         }
-        assert!(on > off * 10.0, "pilot {on:.3} should dominate 5 kHz audio {off:.3}");
+        assert!(
+            on > off * 10.0,
+            "pilot {on:.3} should dominate 5 kHz audio {off:.3}"
+        );
     }
 
     #[test]
@@ -354,7 +420,9 @@ mod tests {
             bits.extend(group_bits([0x1234, block_b(0), 0, 0x4142]));
         }
         let mpx: Vec<f32> = mpx_with_rds(rate, &bits, 7_500.0, 2_000.0)
-            .iter().map(|v| -v).collect();
+            .iter()
+            .map(|v| -v)
+            .collect();
 
         let mut demod = RdsDemod::new(rate);
         let mut dec = RdsDecoder::new();
@@ -384,4 +452,3 @@ mod tests {
         assert_eq!(d.rate(), 333_000.0);
     }
 }
-

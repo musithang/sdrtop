@@ -66,10 +66,15 @@ impl IqMetrics {
     /// rather than `-inf`. `iq_corr` is the identity Q-row.
     pub(super) fn idle() -> Self {
         Self {
-            dc_i: 0.0, dc_q: 0.0, dc_i_raw: 0.0, dc_q_raw: 0.0,
+            dc_i: 0.0,
+            dc_q: 0.0,
+            dc_i_raw: 0.0,
+            dc_q_raw: 0.0,
             iq_corr: (0.0, 1.0),
-            iq_imbalance_db: None, phase_imbalance: None,
-            adc_peak_dbfs: DBFS_FLOOR, adc_rms_dbfs: DBFS_FLOOR,
+            iq_imbalance_db: None,
+            phase_imbalance: None,
+            adc_peak_dbfs: DBFS_FLOOR,
+            adc_rms_dbfs: DBFS_FLOOR,
         }
     }
 }
@@ -85,23 +90,31 @@ impl IqMetrics {
 ///   correction, so the number agrees with the scope beside it instead of
 ///   reporting a fault the app is already compensating.
 pub(super) fn iq_metrics(m: Moments, cal: IqCalState) -> IqMetrics {
-    if m.samples == 0 { return IqMetrics::idle(); }
+    if m.samples == 0 {
+        return IqMetrics::idle();
+    }
 
-    let n      = m.samples as f64;
+    let n = m.samples as f64;
     let mean_i = m.i_sum as f64 / n;
     let mean_q = m.q_sum as f64 / n;
-    let var_i  = (m.i_sq_sum as f64 / n - mean_i * mean_i).max(0.0);
-    let var_q  = (m.q_sq_sum as f64 / n - mean_q * mean_q).max(0.0);
+    let var_i = (m.i_sq_sum as f64 / n - mean_i * mean_i).max(0.0);
+    let var_q = (m.q_sq_sum as f64 / n - mean_q * mean_q).max(0.0);
     let cov_iq = m.cross_sum as f64 / n - mean_i * mean_q;
 
     // ADC loading: peak from the loudest sample, RMS from the total I/Q power,
     // both referenced to full scale.
     let adc_peak_dbfs = if m.peak_amp > 0 {
         20.0 * (m.peak_amp as f32 / FULL_SCALE as f32).log10()
-    } else { DBFS_FLOOR };
+    } else {
+        DBFS_FLOOR
+    };
     let adc_rms_dbfs = {
         let p = (var_i + var_q) / (FULL_SCALE * FULL_SCALE);
-        if p > 0.0 { (10.0 * p.log10()) as f32 } else { DBFS_FLOOR }
+        if p > 0.0 {
+            (10.0 * p.log10()) as f32
+        } else {
+            DBFS_FLOOR
+        }
     };
 
     let iq_corr = crate::signal::iq_correction_coeffs(var_i, var_q, cov_iq);
@@ -139,9 +152,11 @@ pub(super) fn iq_metrics(m: Moments, cal: IqCalState) -> IqMetrics {
 /// Mean callback period and its standard deviation, in microseconds. `None` when
 /// no callback landed in the window.
 pub(super) fn callback_timing(sum_us: u64, sq_sum: u64, count: u64) -> Option<(u64, u64)> {
-    if count == 0 { return None; }
-    let mean     = sum_us / count;
-    let sq_mean  = sq_sum / count;
+    if count == 0 {
+        return None;
+    }
+    let mean = sum_us / count;
+    let sq_mean = sq_sum / count;
     // Saturating: the two sums are accumulated independently, so a window that
     // straddles a reset can leave `sq_mean` below `mean²` and underflow.
     let variance = sq_mean.saturating_sub(mean.saturating_mul(mean));
@@ -156,13 +171,19 @@ mod tests {
     /// as an ideal balanced front end would produce.
     fn balanced(n: u64, var: u64) -> Moments {
         Moments {
-            i_sum: 0, q_sum: 0,
-            i_sq_sum: var * n, q_sq_sum: var * n,
-            cross_sum: 0, samples: n, peak_amp: 0,
+            i_sum: 0,
+            q_sum: 0,
+            i_sq_sum: var * n,
+            q_sq_sum: var * n,
+            cross_sum: 0,
+            samples: n,
+            peak_amp: 0,
         }
     }
 
-    fn no_cal() -> IqCalState { IqCalState::default() }
+    fn no_cal() -> IqCalState {
+        IqCalState::default()
+    }
 
     #[test]
     fn an_empty_window_measures_nothing_rather_than_zero() {
@@ -171,15 +192,30 @@ mod tests {
         let m = iq_metrics(Moments::default(), no_cal());
         assert_eq!(m, IqMetrics::idle());
         assert!(m.iq_imbalance_db.is_none() && m.phase_imbalance.is_none());
-        assert_eq!(m.adc_peak_dbfs, DBFS_FLOOR, "a silent stream reports the floor, not -inf");
-        assert_eq!(m.iq_corr, (0.0, 1.0), "the identity Q-row leaves the samples alone");
+        assert_eq!(
+            m.adc_peak_dbfs, DBFS_FLOOR,
+            "a silent stream reports the floor, not -inf"
+        );
+        assert_eq!(
+            m.iq_corr,
+            (0.0, 1.0),
+            "the identity Q-row leaves the samples alone"
+        );
     }
 
     #[test]
     fn a_balanced_front_end_reports_no_impairment() {
         let m = iq_metrics(balanced(1000, 400), no_cal());
-        assert!(m.iq_imbalance_db.unwrap().abs() < 1e-4, "{:?}", m.iq_imbalance_db);
-        assert!(m.phase_imbalance.unwrap().abs() < 1e-4, "{:?}", m.phase_imbalance);
+        assert!(
+            m.iq_imbalance_db.unwrap().abs() < 1e-4,
+            "{:?}",
+            m.iq_imbalance_db
+        );
+        assert!(
+            m.phase_imbalance.unwrap().abs() < 1e-4,
+            "{:?}",
+            m.phase_imbalance
+        );
         assert!(m.dc_i.abs() < 1e-6 && m.dc_q.abs() < 1e-6);
     }
 
@@ -218,10 +254,20 @@ mod tests {
 
     #[test]
     fn dc_offset_is_reported_as_a_fraction_of_full_scale() {
-        let mo = Moments { i_sum: 64 * 1000, q_sum: -32 * 1000, samples: 1000,
-                           i_sq_sum: 100 * 1000, q_sq_sum: 100 * 1000, ..Moments::default() };
+        let mo = Moments {
+            i_sum: 64 * 1000,
+            q_sum: -32 * 1000,
+            samples: 1000,
+            i_sq_sum: 100 * 1000,
+            q_sq_sum: 100 * 1000,
+            ..Moments::default()
+        };
         let m = iq_metrics(mo, no_cal());
-        assert!((m.dc_i - 0.5).abs() < 1e-6, "64 of 128 counts is half scale: {}", m.dc_i);
+        assert!(
+            (m.dc_i - 0.5).abs() < 1e-6,
+            "64 of 128 counts is half scale: {}",
+            m.dc_i
+        );
         assert!((m.dc_q + 0.25).abs() < 1e-6);
         // The raw figures stay in counts, because that is what DC-block subtracts.
         assert!((m.dc_i_raw - 64.0).abs() < 1e-4);
@@ -232,22 +278,41 @@ mod tests {
     fn dc_block_removes_the_offset_from_the_displayed_figure_only() {
         // With DC-block on, the panel should read the residual (zero), while the
         // raw estimate keeps tracking so the block follows slow drift.
-        let mo = Moments { i_sum: 64 * 1000, q_sum: 0, samples: 1000,
-                           i_sq_sum: 100 * 1000, q_sq_sum: 100 * 1000, ..Moments::default() };
-        let cal = IqCalState { dc_block_on: true, dc_i_raw: 64.0, ..IqCalState::default() };
+        let mo = Moments {
+            i_sum: 64 * 1000,
+            q_sum: 0,
+            samples: 1000,
+            i_sq_sum: 100 * 1000,
+            q_sq_sum: 100 * 1000,
+            ..Moments::default()
+        };
+        let cal = IqCalState {
+            dc_block_on: true,
+            dc_i_raw: 64.0,
+            ..IqCalState::default()
+        };
         let m = iq_metrics(mo, cal);
         assert!(m.dc_i.abs() < 1e-6, "residual should be ~0, got {}", m.dc_i);
-        assert!((m.dc_i_raw - 64.0).abs() < 1e-4, "the raw estimate must keep tracking");
+        assert!(
+            (m.dc_i_raw - 64.0).abs() < 1e-4,
+            "the raw estimate must keep tracking"
+        );
     }
 
     #[test]
     fn adc_loading_is_referenced_to_full_scale() {
         let mut mo = balanced(1000, 0);
         mo.peak_amp = 128;
-        assert!(iq_metrics(mo, no_cal()).adc_peak_dbfs.abs() < 1e-4, "a rail-hitting sample is 0 dBFS");
+        assert!(
+            iq_metrics(mo, no_cal()).adc_peak_dbfs.abs() < 1e-4,
+            "a rail-hitting sample is 0 dBFS"
+        );
         mo.peak_amp = 64;
         let half = iq_metrics(mo, no_cal()).adc_peak_dbfs;
-        assert!((half + 6.0206).abs() < 0.01, "half scale is -6 dBFS, got {half}");
+        assert!(
+            (half + 6.0206).abs() < 0.01,
+            "half scale is -6 dBFS, got {half}"
+        );
         // No sample recorded at all: the floor, never -inf.
         mo.peak_amp = 0;
         assert_eq!(iq_metrics(mo, no_cal()).adc_peak_dbfs, DBFS_FLOOR);
@@ -260,7 +325,10 @@ mod tests {
         let db = iq_metrics(balanced(1000, var), no_cal()).adc_rms_dbfs;
         assert!(db.abs() < 0.01, "got {db}");
         // A dead-silent stream floors rather than reporting -inf.
-        assert_eq!(iq_metrics(balanced(1000, 0), no_cal()).adc_rms_dbfs, DBFS_FLOOR);
+        assert_eq!(
+            iq_metrics(balanced(1000, 0), no_cal()).adc_rms_dbfs,
+            DBFS_FLOOR
+        );
     }
 
     #[test]
@@ -274,7 +342,11 @@ mod tests {
 
     #[test]
     fn callback_timing_declines_an_empty_window() {
-        assert_eq!(callback_timing(0, 0, 0), None, "no callbacks means no measurement");
+        assert_eq!(
+            callback_timing(0, 0, 0),
+            None,
+            "no callbacks means no measurement"
+        );
     }
 
     #[test]

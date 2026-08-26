@@ -1,12 +1,11 @@
 //! `[C]` command-rail focus: tune with the arrows, cycle the rail mode, recall a
 //! saved frequency, and toggle the log overlay.
 
-
 use crossterm::event::{KeyCode, KeyEvent};
 
 use crate::state::RailMode;
 
-use super::{InputCtx, KeyAction, global, metrics};
+use super::{global, metrics, InputCtx, KeyAction};
 
 // ── Command Rail focus keys ───────────────────────────────────────────────────
 
@@ -21,9 +20,16 @@ pub(super) fn command_rail(key: KeyEvent, ctx: &mut InputCtx<'_>) -> KeyAction {
         KeyCode::Esc => {
             let closed = {
                 let mut m = metrics(state);
-                if m.ui.log_overlay { m.ui.log_overlay = false; true } else { false }
+                if m.ui.log_overlay {
+                    m.ui.log_overlay = false;
+                    true
+                } else {
+                    false
+                }
             };
-            if !closed { return global::handle(key, ctx); }
+            if !closed {
+                return global::handle(key, ctx);
+            }
         }
         // Toggle the full-log overlay (in rail-focus; globally `l` focuses waterfall).
         KeyCode::Char('l') => {
@@ -45,7 +51,10 @@ pub(super) fn command_rail(key: KeyEvent, ctx: &mut InputCtx<'_>) -> KeyAction {
                 let result = device.set_frequency(new_freq);
                 let mut m = metrics(state);
                 match result {
-                    Ok(()) => { m.radio.frequency = new_freq; m.ui.note_mode_action(RailMode::Hunt); }
+                    Ok(()) => {
+                        m.radio.frequency = new_freq;
+                        m.ui.note_mode_action(RailMode::Hunt);
+                    }
                     Err(e) => m.push_log(format!("Tune error: {}", e)),
                 }
             }
@@ -60,7 +69,11 @@ pub(super) fn command_rail(key: KeyEvent, ctx: &mut InputCtx<'_>) -> KeyAction {
             let mut m = metrics(state);
             let freq = m.radio.frequency;
             let slot = m.ui.save_recall(freq);
-            m.push_log(format!("Recall {} ← {:.3} MHz", slot + 1, freq as f64 / 1e6));
+            m.push_log(format!(
+                "Recall {} ← {:.3} MHz",
+                slot + 1,
+                freq as f64 / 1e6
+            ));
         }
         // Jump to recall slot 1/2/3 (rail-focus only; globally these switch presets).
         KeyCode::Char(c @ '1'..='3') => {
@@ -90,4 +103,3 @@ pub(super) fn command_rail(key: KeyEvent, ctx: &mut InputCtx<'_>) -> KeyAction {
     }
     KeyAction::Continue
 }
-

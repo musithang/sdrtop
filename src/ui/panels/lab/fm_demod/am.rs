@@ -17,7 +17,10 @@ use super::stack::Stack;
 /// `DEPTH`: modulation index, with the positive and negative peaks split out
 /// under it.
 pub(super) fn depth_lines(
-    stack: &mut Stack<'static>, am: Option<AmMeasure>, iw: usize, theme: &crate::Theme,
+    stack: &mut Stack<'static>,
+    am: Option<AmMeasure>,
+    iw: usize,
+    theme: &crate::Theme,
 ) {
     stack.heading(chrome::section("DEPTH", "100% max", iw, theme));
     match am {
@@ -26,8 +29,10 @@ pub(super) fn depth_lines(
             let color = depth_color(a.negative_pct, theme);
             stack.push(Line::from(vec![
                 chrome::field("Depth", 8, theme),
-                Span::styled(format!("{:.0}%", a.depth_pct),
-                             Style::default().fg(color).add_modifier(Modifier::BOLD)),
+                Span::styled(
+                    format!("{:.0}%", a.depth_pct),
+                    Style::default().fg(color).add_modifier(Modifier::BOLD),
+                ),
             ]));
             let bar_w = iw.saturating_sub(9).min(14);
             if bar_w >= 4 {
@@ -43,8 +48,10 @@ pub(super) fn depth_lines(
             ]));
             stack.detail(Line::from(vec![
                 chrome::field("Neg", 8, theme),
-                Span::styled(format!("{:.0}%", a.negative_pct),
-                             Style::default().fg(depth_color(a.negative_pct, theme))),
+                Span::styled(
+                    format!("{:.0}%", a.negative_pct),
+                    Style::default().fg(depth_color(a.negative_pct, theme)),
+                ),
             ]));
         }
         None => stack.gap(),
@@ -53,7 +60,10 @@ pub(super) fn depth_lines(
 
 /// `CARRIER`: the unmodulated level the depth above is a percentage of.
 pub(super) fn carrier_lines(
-    stack: &mut Stack<'static>, am: Option<AmMeasure>, iw: usize, theme: &crate::Theme,
+    stack: &mut Stack<'static>,
+    am: Option<AmMeasure>,
+    iw: usize,
+    theme: &crate::Theme,
 ) {
     stack.heading(chrome::section("CARRIER", "", iw, theme));
     match am {
@@ -71,9 +81,13 @@ pub(super) fn carrier_lines(
 /// pinches the carrier off entirely, which clips the envelope and splatters into
 /// the adjacent channel. That is the failure worth colouring for.
 fn depth_color(negative_pct: f32, theme: &crate::Theme) -> ratatui::style::Color {
-    if negative_pct >= 100.0     { theme.status_crit }
-    else if negative_pct >= 90.0 { theme.status_warn }
-    else                         { theme.status_ok }
+    if negative_pct >= 100.0 {
+        theme.status_crit
+    } else if negative_pct >= 90.0 {
+        theme.status_warn
+    } else {
+        theme.status_ok
+    }
 }
 
 #[cfg(test)]

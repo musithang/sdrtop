@@ -2,22 +2,21 @@ mod data;
 
 use ratatui::style::Color;
 
-
 /// All colors used anywhere in the UI. No panel file hardcodes a Color after Phase 12.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Theme {
     pub name: String,
 
     // Borders — three tiers of visual weight
-    pub border_dim: Color,      // log, system_resources, gains (background panels)
-    pub border_default: Color,  // rf_chain, hardware_health, signal_metrics, iq_*
-    pub border_accent: Color,   // spectrum, waterfall (primary visual panels)
-    pub border_focused: Color,  // any panel currently in panel-focus mode
+    pub border_dim: Color, // log, system_resources, gains (background panels)
+    pub border_default: Color, // rf_chain, hardware_health, signal_metrics, iq_*
+    pub border_accent: Color, // spectrum, waterfall (primary visual panels)
+    pub border_focused: Color, // any panel currently in panel-focus mode
 
     // Text
-    pub label: Color,           // dim labels: "Frequency", "LNA gain"
-    pub value: Color,           // normal values
-    pub value_hi: Color,        // highlighted values: frequency, total gain, board name
+    pub label: Color,    // dim labels: "Frequency", "LNA gain"
+    pub value: Color,    // normal values
+    pub value_hi: Color, // highlighted values: frequency, total gain, board name
 
     // Status indicators
     pub status_ok: Color,
@@ -31,8 +30,8 @@ pub struct Theme {
     pub noise_floor: Color,
 
     // Misc
-    pub stale: Color,      // [STALE] title + dim border when FFT frame is old
-    pub observer: Color,   // observer mode status dot + accent
+    pub stale: Color,    // [STALE] title + dim border when FFT frame is old
+    pub observer: Color, // observer mode status dot + accent
 }
 
 /// Shift a colour ~25% toward a cool steel-blue anchor, leaving 256/16-colour
@@ -54,9 +53,9 @@ impl Theme {
     /// colours are left untouched so focus stays crisp and meaning stays readable.
     pub fn steeled(&self) -> Theme {
         Theme {
-            border_dim:     steel_color(self.border_dim),
+            border_dim: steel_color(self.border_dim),
             border_default: steel_color(self.border_default),
-            border_accent:  steel_color(self.border_accent),
+            border_accent: steel_color(self.border_accent),
             ..self.clone()
         }
     }
@@ -68,12 +67,12 @@ impl Theme {
 /// file in `~/.config/sdrtop/themes/` has exactly this shape, so "make my own
 /// theme" is "copy `sdr.toml` and edit the hex".
 const BUILTIN: &[(&str, &str)] = &[
-    ("sdr",        include_str!("palettes/sdr.toml")),
-    ("nord",       include_str!("palettes/nord.toml")),
-    ("dracula",    include_str!("palettes/dracula.toml")),
-    ("gruvbox",    include_str!("palettes/gruvbox.toml")),
+    ("sdr", include_str!("palettes/sdr.toml")),
+    ("nord", include_str!("palettes/nord.toml")),
+    ("dracula", include_str!("palettes/dracula.toml")),
+    ("gruvbox", include_str!("palettes/gruvbox.toml")),
     ("catppuccin", include_str!("palettes/catppuccin.toml")),
-    ("solarized",  include_str!("palettes/solarized.toml")),
+    ("solarized", include_str!("palettes/solarized.toml")),
 ];
 
 /// The name every fallback lands on.
@@ -93,10 +92,12 @@ impl Theme {
     /// six. A panic here would mean the tests did not run.
     fn builtin(name: &str) -> Option<Self> {
         let (_, text) = BUILTIN.iter().find(|(n, _)| *n == name)?;
-        Some(data::ThemeFile::parse(text)
-            .unwrap_or_else(|e| panic!("built-in theme '{name}' is malformed: {e}"))
-            .into_theme()
-            .unwrap_or_else(|e| panic!("built-in theme '{name}' is malformed: {e}")))
+        Some(
+            data::ThemeFile::parse(text)
+                .unwrap_or_else(|e| panic!("built-in theme '{name}' is malformed: {e}"))
+                .into_theme()
+                .unwrap_or_else(|e| panic!("built-in theme '{name}' is malformed: {e}")),
+        )
     }
 
     /// The default theme.
@@ -104,7 +105,9 @@ impl Theme {
     /// Only `sdr` keeps a named constructor, because it is what 61 tests across
     /// the codebase draw against when they need *a* theme rather than a
     /// particular one. The other five are reached by name like a user's own.
-    pub fn sdr() -> Self { Self::by_name(DEFAULT_THEME) }
+    pub fn sdr() -> Self {
+        Self::by_name(DEFAULT_THEME)
+    }
 
     /// Return a built-in theme by name. Unknown name -> `sdr` (default).
     pub fn by_name(name: &str) -> Self {
@@ -126,10 +129,15 @@ impl Theme {
     /// recoverable, and the alternative is a radio that will not start because of
     /// a stray comma in a colour scheme.
     pub fn load(name: &str, themes_dir: Option<&std::path::Path>) -> Self {
-        let Some(dir) = themes_dir else { return Self::by_name(name) };
+        let Some(dir) = themes_dir else {
+            return Self::by_name(name);
+        };
         let path = dir.join(format!("{name}.toml"));
-        let Ok(text) = std::fs::read_to_string(&path) else { return Self::by_name(name) };
-        match data::ThemeFile::parse(&text).map_err(|e| e.to_string())
+        let Ok(text) = std::fs::read_to_string(&path) else {
+            return Self::by_name(name);
+        };
+        match data::ThemeFile::parse(&text)
+            .map_err(|e| e.to_string())
             .and_then(|f| f.into_theme())
         {
             Ok(t) => t,
@@ -143,7 +151,9 @@ impl Theme {
     /// Parse a "#rrggbb" hex string into `Color::Rgb`. Returns `None` on invalid input.
     pub fn parse_hex(s: &str) -> Option<Color> {
         let s = s.trim().strip_prefix('#')?;
-        if s.len() != 6 { return None; }
+        if s.len() != 6 {
+            return None;
+        }
         let r = u8::from_str_radix(&s[0..2], 16).ok()?;
         let g = u8::from_str_radix(&s[2..4], 16).ok()?;
         let b = u8::from_str_radix(&s[4..6], 16).ok()?;
@@ -152,13 +162,19 @@ impl Theme {
 
     /// Interpolate within the theme's gradient palette. `t` ∈ [0.0, 1.0].
     pub fn palette_color(&self, t: f32) -> Color {
-        if self.palette.is_empty() { return Color::White; }
+        if self.palette.is_empty() {
+            return Color::White;
+        }
         let t = t.clamp(0.0, 1.0);
         for i in 0..self.palette.len().saturating_sub(1) {
             let (t0, r0, g0, b0) = self.palette[i];
             let (t1, r1, g1, b1) = self.palette[i + 1];
             if t <= t1 {
-                let s = if (t1 - t0).abs() < f32::EPSILON { 0.0 } else { (t - t0) / (t1 - t0) };
+                let s = if (t1 - t0).abs() < f32::EPSILON {
+                    0.0
+                } else {
+                    (t - t0) / (t1 - t0)
+                };
                 let lerp = |a: u8, b: u8| (a as f32 + (b as f32 - a as f32) * s) as u8;
                 return Color::Rgb(lerp(r0, r1), lerp(g0, g1), lerp(b0, b1));
             }
@@ -174,8 +190,8 @@ mod tests {
 
     /// Write `text` to `<tmp>/<name>.toml` and return the directory.
     fn themes_dir_with(name: &str, text: &str) -> std::path::PathBuf {
-        let dir = std::env::temp_dir()
-            .join(format!("sdrtop-theme-test-{}-{}", name, std::process::id()));
+        let dir =
+            std::env::temp_dir().join(format!("sdrtop-theme-test-{}-{}", name, std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
         std::fs::write(dir.join(format!("{name}.toml")), text).unwrap();
         dir
@@ -193,9 +209,16 @@ mod tests {
             assert!(t.palette.len() >= 2, "{name}: a gradient needs stops");
             // Every colour resolved: a `#000000` field is legal, an unset one is
             // not, and `into_theme` is what refuses the second case.
-            for (field, c) in [("border_accent", t.border_accent), ("status_crit", t.status_crit),
-                               ("value_hi", t.value_hi), ("observer", t.observer)] {
-                assert!(matches!(c, Color::Rgb(..)), "{name}.{field} is not truecolor");
+            for (field, c) in [
+                ("border_accent", t.border_accent),
+                ("status_crit", t.status_crit),
+                ("value_hi", t.value_hi),
+                ("observer", t.observer),
+            ] {
+                assert!(
+                    matches!(c, Color::Rgb(..)),
+                    "{name}.{field} is not truecolor"
+                );
             }
         }
     }
@@ -205,27 +228,46 @@ mod tests {
         // Pinned because the six themes moved from Rust into TOML in R6: a
         // transcription slip would repaint the whole deck silently.
         let t = Theme::by_name("sdr");
-        assert_eq!(t.border_accent,  Color::Rgb(0, 215, 255));
+        assert_eq!(t.border_accent, Color::Rgb(0, 215, 255));
         assert_eq!(t.border_focused, Color::Rgb(255, 255, 255));
-        assert_eq!(t.value_hi,       Color::Rgb(255, 175, 0));
-        assert_eq!(t.status_crit,    Color::Rgb(255, 90, 90));
-        assert_eq!(t.stale,          Color::Rgb(60, 65, 75));
+        assert_eq!(t.value_hi, Color::Rgb(255, 175, 0));
+        assert_eq!(t.status_crit, Color::Rgb(255, 90, 90));
+        assert_eq!(t.stale, Color::Rgb(60, 65, 75));
         assert_eq!(t.palette.first(), Some(&(0.00, 10, 10, 80)));
-        assert_eq!(t.palette.last(),  Some(&(1.00, 255, 50, 20)));
+        assert_eq!(t.palette.last(), Some(&(1.00, 255, 50, 20)));
     }
 
     #[test]
     fn a_user_file_replaces_the_builtin_of_the_same_name() {
         let mut text = String::from("name = \"sdr\"\n");
-        for f in ["border_dim", "border_default", "border_accent", "border_focused",
-                  "label", "value", "value_hi", "status_ok", "status_warn",
-                  "status_crit", "peak_hold", "noise_floor", "stale", "observer"] {
+        for f in [
+            "border_dim",
+            "border_default",
+            "border_accent",
+            "border_focused",
+            "label",
+            "value",
+            "value_hi",
+            "status_ok",
+            "status_warn",
+            "status_crit",
+            "peak_hold",
+            "noise_floor",
+            "stale",
+            "observer",
+        ] {
             text.push_str(&format!("{f} = \"#010203\"\n"));
         }
-        text.push_str("palette = [{ at = 0.0, color = \"#000000\" }, { at = 1.0, color = \"#ffffff\" }]\n");
+        text.push_str(
+            "palette = [{ at = 0.0, color = \"#000000\" }, { at = 1.0, color = \"#ffffff\" }]\n",
+        );
         let dir = themes_dir_with("sdr", &text);
         let t = Theme::load("sdr", Some(&dir));
-        assert_eq!(t.border_accent, Color::Rgb(1, 2, 3), "the user file should win");
+        assert_eq!(
+            t.border_accent,
+            Color::Rgb(1, 2, 3),
+            "the user file should win"
+        );
         // And the built-in is untouched for anyone not overriding it.
         assert_eq!(Theme::by_name("sdr").border_accent, Color::Rgb(0, 215, 255));
         let _ = std::fs::remove_dir_all(&dir);
@@ -244,16 +286,34 @@ mod tests {
         // A name that is not a built-in at all: dropping the file is the whole
         // installation step, and `--theme tokyonight` then works.
         let mut text = String::from("name = \"tokyonight\"\n");
-        for f in ["border_dim", "border_default", "border_accent", "border_focused",
-                  "label", "value", "value_hi", "status_ok", "status_warn",
-                  "status_crit", "peak_hold", "noise_floor", "stale", "observer"] {
+        for f in [
+            "border_dim",
+            "border_default",
+            "border_accent",
+            "border_focused",
+            "label",
+            "value",
+            "value_hi",
+            "status_ok",
+            "status_warn",
+            "status_crit",
+            "peak_hold",
+            "noise_floor",
+            "stale",
+            "observer",
+        ] {
             text.push_str(&format!("{f} = \"#7aa2f7\"\n"));
         }
-        text.push_str("palette = [{ at = 0.0, color = \"#1a1b26\" }, { at = 1.0, color = \"#f7768e\" }]\n");
+        text.push_str(
+            "palette = [{ at = 0.0, color = \"#1a1b26\" }, { at = 1.0, color = \"#f7768e\" }]\n",
+        );
         let dir = themes_dir_with("tokyonight", &text);
 
         let t = Theme::load("tokyonight", Some(&dir));
-        assert_eq!(t.name, "tokyonight", "a brand-new name must load, not fall back");
+        assert_eq!(
+            t.name, "tokyonight",
+            "a brand-new name must load, not fall back"
+        );
         assert_eq!(t.border_accent, Color::Rgb(0x7a, 0xa2, 0xf7));
         assert_eq!(t.palette.last(), Some(&(1.0, 0xf7, 0x76, 0x8e)));
         // It is additive: the built-ins are all still reachable.
@@ -296,7 +356,14 @@ mod tests {
 
     #[test]
     fn all_themes_have_non_empty_palette() {
-        for name in &["sdr", "nord", "dracula", "gruvbox", "catppuccin", "solarized"] {
+        for name in &[
+            "sdr",
+            "nord",
+            "dracula",
+            "gruvbox",
+            "catppuccin",
+            "solarized",
+        ] {
             let t = Theme::by_name(name);
             assert!(!t.palette.is_empty(), "theme '{}' has empty palette", name);
         }
@@ -312,9 +379,9 @@ mod tests {
 
     #[test]
     fn parse_hex_invalid_returns_none() {
-        assert_eq!(Theme::parse_hex("00d7ff"), None);  // missing #
+        assert_eq!(Theme::parse_hex("00d7ff"), None); // missing #
         assert_eq!(Theme::parse_hex("#gggggg"), None); // invalid hex chars
-        assert_eq!(Theme::parse_hex("#fff"), None);    // too short
+        assert_eq!(Theme::parse_hex("#fff"), None); // too short
         assert_eq!(Theme::parse_hex(""), None);
     }
 

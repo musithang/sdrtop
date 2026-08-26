@@ -7,7 +7,7 @@ use crossterm::event::{KeyCode, KeyEvent};
 
 use crate::ui::widgets::micro_common::fmt_bw;
 
-use super::{InputCtx, KeyAction, global, metrics};
+use super::{global, metrics, InputCtx, KeyAction};
 
 pub(super) fn signal_metrics(key: KeyEvent, ctx: &mut InputCtx<'_>) -> KeyAction {
     let (state, _device) = (ctx.state, ctx.device);
@@ -16,9 +16,11 @@ pub(super) fn signal_metrics(key: KeyEvent, ctx: &mut InputCtx<'_>) -> KeyAction
         let snr = m.signal.peak_to_nf_db;
         let pwr = m.signal.channel_power_dbfs;
         let obw = m.signal.occupied_bw_hz;
-        let nf  = m.waterfall.last_fft.as_ref().map(|fr| fr.noise_floor);
+        let nf = m.waterfall.last_fft.as_ref().map(|fr| fr.noise_floor);
         let obw_str = fmt_bw(obw);
-        let nf_str = nf.map(|n| format!("{:.1} dBFS", n)).unwrap_or_else(|| "\u{2014}".into());
+        let nf_str = nf
+            .map(|n| format!("{:.1} dBFS", n))
+            .unwrap_or_else(|| "\u{2014}".into());
         m.push_log(format!(
             "Signal snapshot — SNR: {:.1} dB · Pwr: {:.1} dBFS · OBW: {} · NF: {}",
             snr, pwr, obw_str, nf_str
@@ -110,7 +112,11 @@ pub(super) fn fm_demod(key: KeyEvent, ctx: &mut InputCtx<'_>) -> KeyAction {
         }
         KeyCode::Char('p') => {
             let mut m = metrics(state);
-            let bins = m.waterfall.last_fft.as_ref().map(|f| Arc::clone(&f.bins_dbfs));
+            let bins = m
+                .waterfall
+                .last_fft
+                .as_ref()
+                .map(|f| Arc::clone(&f.bins_dbfs));
             let sr = m.radio.config_sample_rate;
             match bins.and_then(|b| crate::state::strongest_offset_hz(&b, sr)) {
                 Some(off) => {
@@ -118,8 +124,10 @@ pub(super) fn fm_demod(key: KeyEvent, ctx: &mut InputCtx<'_>) -> KeyAction {
                     let snapped = off.clamp(-limit, limit);
                     m.demod.offset_hz = snapped;
                     m.demod.clear_measurements();
-                    m.push_log(format!("Demod snapped to carrier: {:+.0} kHz",
-                                       snapped as f64 / 1000.0));
+                    m.push_log(format!(
+                        "Demod snapped to carrier: {:+.0} kHz",
+                        snapped as f64 / 1000.0
+                    ));
                 }
                 None => m.push_log("Demod: no spectrum to snap to yet"),
             }
@@ -142,7 +150,7 @@ pub(super) fn fm_demod(key: KeyEvent, ctx: &mut InputCtx<'_>) -> KeyAction {
             m.demod.clear_measurements();
             m.push_log(match picked {
                 Some(mode) => format!("Demod mode: {} (forced)", mode.label()),
-                None       => "Demod mode: auto".to_string(),
+                None => "Demod mode: auto".to_string(),
             });
             return KeyAction::Continue;
         }
@@ -160,7 +168,9 @@ pub(super) fn fm_demod(key: KeyEvent, ctx: &mut InputCtx<'_>) -> KeyAction {
                     // CTCSS rides on the same discriminator output, so when a tone is
                     // identified it belongs on the same line as the deviation it came
                     // from rather than in a snapshot of its own.
-                    let tone = m.demod.live_ctcss()
+                    let tone = m
+                        .demod
+                        .live_ctcss()
                         .map(|t| format!(" \u{00b7} CTCSS {:.1} Hz", t.tone_hz))
                         .unwrap_or_default();
                     Some(format!(
@@ -176,7 +186,7 @@ pub(super) fn fm_demod(key: KeyEvent, ctx: &mut InputCtx<'_>) -> KeyAction {
             };
             let line = match body {
                 Some(b) => format!("Demod \u{2014} {}: {b}{ch}", modulation.label()),
-                None    => "Demod \u{2014} no measurement to snapshot".to_string(),
+                None => "Demod \u{2014} no measurement to snapshot".to_string(),
             };
             m.push_log(line);
             return KeyAction::Continue;

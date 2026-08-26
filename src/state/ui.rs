@@ -22,9 +22,9 @@ impl RailMode {
     /// The full-width tab label.
     pub fn label(self) -> &'static str {
         match self {
-            RailMode::Hunt    => "HUNT",
+            RailMode::Hunt => "HUNT",
             RailMode::Monitor => "MONITOR",
-            RailMode::Bench   => "BENCH",
+            RailMode::Bench => "BENCH",
         }
     }
 
@@ -34,9 +34,9 @@ impl RailMode {
     /// Next mode in the `Tab` cycle: HUNT → MONITOR → BENCH → HUNT.
     pub fn next(self) -> RailMode {
         match self {
-            RailMode::Hunt    => RailMode::Monitor,
+            RailMode::Hunt => RailMode::Monitor,
             RailMode::Monitor => RailMode::Bench,
-            RailMode::Bench   => RailMode::Hunt,
+            RailMode::Bench => RailMode::Hunt,
         }
     }
 }
@@ -65,12 +65,17 @@ pub const RECALL_MATCH_HZ: u64 = 1_000;
 /// Which slot a save should write: the lowest empty slot, or — when all are full
 /// — the rotating `cursor` (oldest-overwrite). Pure for testability.
 pub fn next_recall_slot(slots: &[Option<u64>; RECALL_SLOTS], cursor: usize) -> usize {
-    slots.iter().position(Option::is_none).unwrap_or(cursor % RECALL_SLOTS)
+    slots
+        .iter()
+        .position(Option::is_none)
+        .unwrap_or(cursor % RECALL_SLOTS)
 }
 
 /// The slot the radio is currently parked on (within [`RECALL_MATCH_HZ`]), if any.
 pub fn active_recall_slot(slots: &[Option<u64>; RECALL_SLOTS], freq: u64) -> Option<usize> {
-    slots.iter().position(|s| s.is_some_and(|hz| hz.abs_diff(freq) <= RECALL_MATCH_HZ))
+    slots
+        .iter()
+        .position(|s| s.is_some_and(|hz| hz.abs_diff(freq) <= RECALL_MATCH_HZ))
 }
 
 /// Config `recall_hz` (0 = empty) → in-memory slots.
@@ -87,7 +92,12 @@ pub fn recall_to_hz(slots: &[Option<u64>; RECALL_SLOTS]) -> [u64; RECALL_SLOTS] 
 /// Derived from the message text (see [`LogLevel::infer`]) so the ~86 existing
 /// `push_log` call sites keep working unchanged.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
-pub enum LogLevel { Info, Ok, Warn, Error }
+pub enum LogLevel {
+    Info,
+    Ok,
+    Warn,
+    Error,
+}
 
 impl LogLevel {
     /// Classify a message by keyword. Order matters: hard failures win over the
@@ -112,8 +122,8 @@ impl LogLevel {
 #[derive(Clone)]
 pub struct LogEntry {
     pub at_epoch_secs: u64,
-    pub level:         LogLevel,
-    pub text:          Arc<str>,
+    pub level: LogLevel,
+    pub text: Arc<str>,
 }
 
 #[derive(Clone, PartialEq)]
@@ -128,33 +138,33 @@ pub enum InputMode {
 
 #[derive(Clone)]
 pub struct UiState {
-    pub input_mode:             InputMode,
-    pub input_buf:              String,
-    pub focused_panel:          Option<String>,
+    pub input_mode: InputMode,
+    pub input_buf: String,
+    pub focused_panel: Option<String>,
     pub focused_panel_bindings: &'static [(&'static str, &'static str)],
     /// Name of the engine's active preset, synced each frame before draw so the
     /// footer can show it. The engine owns the authoritative value; this is a
     /// render-time mirror.
-    pub active_preset:          String,
+    pub active_preset: String,
     /// Names of all defined presets, synced each frame alongside active_preset.
     /// Lets the footer build the lab map from presets that actually exist.
-    pub preset_names:           Vec<String>,
+    pub preset_names: Vec<String>,
     /// Current position in the micro `[0]` cycle. Advanced by the `[0]` handler;
     /// read by the footer to show "micro N/M".
-    pub micro_view:             MicroView,
-    pub log:                    VecDeque<LogEntry>,
+    pub micro_view: MicroView,
+    pub log: VecDeque<LogEntry>,
     /// Command Rail lead-view mode (Hunt/Monitor/Bench). See [`RailMode`].
-    pub rail_mode:              RailMode,
+    pub rail_mode: RailMode,
     /// Whether `rail_mode` was set by auto-follow (decays) vs. pinned by `Tab`.
-    pub rail_mode_auto:         bool,
+    pub rail_mode_auto: bool,
     /// When the last auto mode-change happened, for the idle decay to Monitor.
-    pub last_mode_action:       Option<Instant>,
+    pub last_mode_action: Option<Instant>,
     /// Command Rail recall slots; `None` is empty. See [`next_recall_slot`].
-    pub recall:                 [Option<u64>; RECALL_SLOTS],
+    pub recall: [Option<u64>; RECALL_SLOTS],
     /// Rotation pointer for overwriting once all recall slots are full.
-    pub recall_cursor:          usize,
+    pub recall_cursor: usize,
     /// Whether the Command Rail's full-log overlay (`L` in rail-focus) is open.
-    pub log_overlay:            bool,
+    pub log_overlay: bool,
 }
 
 impl UiState {
@@ -168,7 +178,11 @@ impl UiState {
         if self.log.len() >= LOG_MAX_ENTRIES {
             self.log.pop_front();
         }
-        self.log.push_back(LogEntry { at_epoch_secs, level, text: Arc::from(text) });
+        self.log.push_back(LogEntry {
+            at_epoch_secs,
+            level,
+            text: Arc::from(text),
+        });
     }
 
     /// Whether the active preset is a measurement lab (`lab_*`). Lab presets wear
@@ -181,23 +195,26 @@ impl UiState {
     /// Record an auto-follow mode change (tuning → Hunt, gain → Bench): set the
     /// mode and (re)start its idle decay timer.
     pub fn note_mode_action(&mut self, mode: RailMode) {
-        self.rail_mode        = mode;
-        self.rail_mode_auto   = true;
+        self.rail_mode = mode;
+        self.rail_mode_auto = true;
         self.last_mode_action = Some(Instant::now());
     }
 
     /// Manual `Tab` cycle in rail-focus: pin the next mode so it won't decay.
     pub fn cycle_rail_mode(&mut self) -> RailMode {
-        self.rail_mode        = self.rail_mode.next();
-        self.rail_mode_auto   = false;
+        self.rail_mode = self.rail_mode.next();
+        self.rail_mode_auto = false;
         self.last_mode_action = None;
         self.rail_mode
     }
 
     /// The mode to render right now, after applying the idle decay.
     pub fn effective_rail_mode(&self) -> RailMode {
-        decayed_mode(self.rail_mode, self.rail_mode_auto,
-                     self.last_mode_action.map(|t| t.elapsed()))
+        decayed_mode(
+            self.rail_mode,
+            self.rail_mode_auto,
+            self.last_mode_action.map(|t| t.elapsed()),
+        )
     }
 
     /// Store `freq` in the next recall slot (free slot, else oldest), advance the
@@ -213,20 +230,20 @@ impl UiState {
 impl Default for UiState {
     fn default() -> Self {
         Self {
-            input_mode:             InputMode::Normal,
-            input_buf:              String::new(),
-            focused_panel:          None,
+            input_mode: InputMode::Normal,
+            input_buf: String::new(),
+            focused_panel: None,
             focused_panel_bindings: &[],
-            active_preset:          String::new(),
-            preset_names:           Vec::new(),
-            micro_view:             MicroView::default(),
-            log:                    VecDeque::new(),
-            rail_mode:              RailMode::default(),
-            rail_mode_auto:         false,
-            last_mode_action:       None,
-            recall:                 [None; RECALL_SLOTS],
-            recall_cursor:          0,
-            log_overlay:            false,
+            active_preset: String::new(),
+            preset_names: Vec::new(),
+            micro_view: MicroView::default(),
+            log: VecDeque::new(),
+            rail_mode: RailMode::default(),
+            rail_mode_auto: false,
+            last_mode_action: None,
+            recall: [None; RECALL_SLOTS],
+            recall_cursor: 0,
+            log_overlay: false,
         }
     }
 }
@@ -261,7 +278,10 @@ mod tests {
     #[test]
     fn infer_flags_success_events() {
         assert_eq!(LogLevel::infer("RX streaming started"), LogLevel::Ok);
-        assert_eq!(LogLevel::infer("Connected: HackRF One | Serial: …"), LogLevel::Ok);
+        assert_eq!(
+            LogLevel::infer("Connected: HackRF One | Serial: …"),
+            LogLevel::Ok
+        );
     }
 
     #[test]
@@ -282,16 +302,28 @@ mod tests {
         assert_eq!(RailMode::Monitor.next(), RailMode::Bench);
         assert_eq!(RailMode::Bench.next(), RailMode::Hunt);
         assert_eq!(RailMode::default(), RailMode::Monitor);
-        assert_eq!(RailMode::ALL, [RailMode::Hunt, RailMode::Monitor, RailMode::Bench]);
+        assert_eq!(
+            RailMode::ALL,
+            [RailMode::Hunt, RailMode::Monitor, RailMode::Bench]
+        );
     }
 
     #[test]
     fn auto_mode_decays_to_monitor_when_idle() {
         // Fresh auto-set Hunt holds; past the decay window it relaxes to Monitor.
-        assert_eq!(decayed_mode(RailMode::Hunt, true, Some(Duration::from_secs(2))), RailMode::Hunt);
-        assert_eq!(decayed_mode(RailMode::Hunt, true, Some(RAIL_MODE_DECAY)), RailMode::Monitor);
+        assert_eq!(
+            decayed_mode(RailMode::Hunt, true, Some(Duration::from_secs(2))),
+            RailMode::Hunt
+        );
+        assert_eq!(
+            decayed_mode(RailMode::Hunt, true, Some(RAIL_MODE_DECAY)),
+            RailMode::Monitor
+        );
         // A manually-pinned mode never decays.
-        assert_eq!(decayed_mode(RailMode::Bench, false, Some(Duration::from_secs(999))), RailMode::Bench);
+        assert_eq!(
+            decayed_mode(RailMode::Bench, false, Some(Duration::from_secs(999))),
+            RailMode::Bench
+        );
         // No timer yet → whatever the mode is.
         assert_eq!(decayed_mode(RailMode::Bench, true, None), RailMode::Bench);
     }
@@ -313,7 +345,10 @@ mod tests {
         assert_eq!(ui.save_recall(92_800_000), 0);
         assert_eq!(ui.save_recall(145_500_000), 1);
         assert_eq!(ui.save_recall(446_006_000), 2);
-        assert_eq!(ui.recall, [Some(92_800_000), Some(145_500_000), Some(446_006_000)]);
+        assert_eq!(
+            ui.recall,
+            [Some(92_800_000), Some(145_500_000), Some(446_006_000)]
+        );
         // All full → overwrite the oldest (slot 0), then 1, …
         assert_eq!(ui.save_recall(100_000_000), 0);
         assert_eq!(ui.recall[0], Some(100_000_000));

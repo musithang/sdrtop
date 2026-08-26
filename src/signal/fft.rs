@@ -66,9 +66,12 @@ pub const DC_GUARD_BINS: usize = 2;
 /// between them leave no candidate.
 pub fn strongest_real_bin(bins: &[f32], radius_bins: Option<usize>) -> Option<(usize, f32)> {
     let n = bins.len();
-    if n == 0 { return None; }
+    if n == 0 {
+        return None;
+    }
     let centre = n / 2;
-    bins.iter().enumerate()
+    bins.iter()
+        .enumerate()
         .filter(|(i, _)| {
             let d = i.abs_diff(centre);
             d > DC_GUARD_BINS && radius_bins.is_none_or(|r| d <= r)
@@ -103,7 +106,9 @@ const CENTRE_RADIUS_HZ: f64 = 150_000.0;
 /// [`CENTRE_RADIUS_HZ`] in bins for a given spectrum, clamped to the span for the
 /// rates where it would otherwise reach past the capture.
 pub fn centre_radius_bins(n: usize, sample_rate: f64) -> usize {
-    if n == 0 || sample_rate <= 0.0 { return 0; }
+    if n == 0 || sample_rate <= 0.0 {
+        return 0;
+    }
     let bin_hz = sample_rate / n as f64;
     ((CENTRE_RADIUS_HZ / bin_hz).ceil() as usize).min(n)
 }
@@ -145,33 +150,53 @@ fn occupied_bw(linear: &[f32], sample_rate: f64, noise_floor_db: f32) -> u64 {
 /// assumed — which is the point of the field.
 fn carrier_window(linear: &[f32], sample_rate: f64, noise_floor_db: f32) -> Option<(usize, usize)> {
     let n = linear.len();
-    if n == 0 || sample_rate <= 0.0 { return None; }
+    if n == 0 || sample_rate <= 0.0 {
+        return None;
+    }
     let bin_hz = sample_rate / n as f64;
 
     let centre = n / 2;
     let radius = centre_radius_bins(n, sample_rate);
     let (peak_idx, peak_lin) = strongest_real_bin(linear, Some(radius))?;
     let threshold = 10f32.powf((noise_floor_db + OBW_CARRIER_THRESHOLD_DB) / 10.0);
-    if !peak_lin.is_finite() || peak_lin <= threshold { return None; }
+    if !peak_lin.is_finite() || peak_lin <= threshold {
+        return None;
+    }
 
     // Bins of slack, at least one, so a single ragged bin never ends the walk.
     let gap = (OBW_GAP_TOLERANCE_HZ / bin_hz).ceil().max(1.0) as usize;
     let mut lo = peak_idx;
     let mut miss = 0usize;
     for i in (0..peak_idx).rev() {
-        if linear[i] > threshold { lo = i; miss = 0; }
-        else { miss += 1; if miss > gap { break; } }
+        if linear[i] > threshold {
+            lo = i;
+            miss = 0;
+        } else {
+            miss += 1;
+            if miss > gap {
+                break;
+            }
+        }
     }
     let mut hi = peak_idx;
     miss = 0;
     for (i, &v) in linear.iter().enumerate().skip(peak_idx + 1) {
-        if v > threshold { hi = i; miss = 0; }
-        else { miss += 1; if miss > gap { break; } }
+        if v > threshold {
+            hi = i;
+            miss = 0;
+        } else {
+            miss += 1;
+            if miss > gap {
+                break;
+            }
+        }
     }
 
     let window = &linear[lo..=hi];
     let total: f32 = window.iter().sum();
-    if !total.is_finite() || total <= 0.0 { return None; }
+    if !total.is_finite() || total <= 0.0 {
+        return None;
+    }
     let lo_thresh = total * 0.005;
     let hi_thresh = total * 0.995;
     let mut acc = 0f32;
@@ -179,8 +204,12 @@ fn carrier_window(linear: &[f32], sample_rate: f64, noise_floor_db: f32) -> Opti
     let mut hi_b = window.len() - 1;
     for (i, &v) in window.iter().enumerate() {
         acc += v;
-        if acc < lo_thresh { lo_b = i; }
-        if acc < hi_thresh { hi_b = i; }
+        if acc < lo_thresh {
+            lo_b = i;
+        }
+        if acc < hi_thresh {
+            hi_b = i;
+        }
     }
     // Where the measured occupancy actually ended up, in absolute bins.
     let (occ_lo, occ_hi) = (lo + lo_b, lo + hi_b);
@@ -219,39 +248,57 @@ fn carrier_window(linear: &[f32], sample_rate: f64, noise_floor_db: f32) -> Opti
 /// comes out at 0 dB and the panel drew a full red bar and called a clean carrier
 /// splattered. `None` is the honest answer: at that width, at this spacing, there
 /// is nothing to compare.
-fn acpr_bands(linear: &[f32], sample_rate: f64, occupied_bw_hz: u64, offset_hz: f64)
-    -> Option<(f32, f32, f32)>
-{
+fn acpr_bands(
+    linear: &[f32],
+    sample_rate: f64,
+    occupied_bw_hz: u64,
+    offset_hz: f64,
+) -> Option<(f32, f32, f32)> {
     let n = linear.len();
-    if occupied_bw_hz == 0 || sample_rate <= 0.0 || n == 0 { return None; }
-    if occupied_bw_hz as f64 >= offset_hz { return None; }
+    if occupied_bw_hz == 0 || sample_rate <= 0.0 || n == 0 {
+        return None;
+    }
+    if occupied_bw_hz as f64 >= offset_hz {
+        return None;
+    }
     let bin_hz = sample_rate / n as f64;
     let half_bw_bins = ((occupied_bw_hz as f64 / bin_hz) / 2.0).round() as i64;
-    let offset_bins  = (offset_hz / bin_hz).round() as i64;
+    let offset_bins = (offset_hz / bin_hz).round() as i64;
     let center = n as i64 / 2;
 
     let band_power = |c: i64| -> Option<f32> {
         let lo = c - half_bw_bins;
         let hi = c + half_bw_bins;
-        if lo < 0 || hi >= n as i64 || lo > hi { return None; }
+        if lo < 0 || hi >= n as i64 || lo > hi {
+            return None;
+        }
         Some(linear[lo as usize..=hi as usize].iter().sum())
     };
 
     let ic = band_power(center)?;
-    if ic <= 0.0 { return None; }
+    if ic <= 0.0 {
+        return None;
+    }
     let lower = band_power(center - offset_bins)?;
     let upper = band_power(center + offset_bins)?;
 
     let ratio_db = |band: f32| {
-        if band > 0.0 { (10.0 * (band / ic).log10()).max(ACPR_MEASURE_FLOOR_DB) }
-        else          { ACPR_MEASURE_FLOOR_DB }
+        if band > 0.0 {
+            (10.0 * (band / ic).log10()).max(ACPR_MEASURE_FLOOR_DB)
+        } else {
+            ACPR_MEASURE_FLOOR_DB
+        }
     };
     let lower_db = ratio_db(lower);
     let upper_db = ratio_db(upper);
     let worse_lin = if lower_db >= upper_db { lower } else { upper };
     // A genuinely silent adjacent band has no level to report. The undefined
     // sentinel says so; a floor constant would reach the screen as "-160.0 dBFS".
-    let adj_dbfs = if worse_lin > 0.0 { 10.0 * worse_lin.log10() } else { f32::NEG_INFINITY };
+    let adj_dbfs = if worse_lin > 0.0 {
+        10.0 * worse_lin.log10()
+    } else {
+        f32::NEG_INFINITY
+    };
     Some((lower_db, upper_db, adj_dbfs))
 }
 
@@ -267,7 +314,11 @@ pub struct FftWorker {
 }
 
 impl FftWorker {
-    pub fn new(sample_rx: Receiver<Vec<u8>>, state: Arc<Mutex<SdrMetrics>>, format: SampleFormat) -> Self {
+    pub fn new(
+        sample_rx: Receiver<Vec<u8>>,
+        state: Arc<Mutex<SdrMetrics>>,
+        format: SampleFormat,
+    ) -> Self {
         Self {
             sample_rx,
             state,
@@ -288,21 +339,21 @@ impl FftWorker {
         // ENBW coefficient: N × Σ(w²) / (Σ(w))² — exact for whatever window is used.
         // Hann ≈ 1.5, Hamming ≈ 1.36, Blackman ≈ 1.73.
         let w_sum_sq: f64 = window.iter().map(|&w| (w as f64).powi(2)).sum();
-        let w_sum:    f64 = window.iter().map(|&w| w as f64).sum();
+        let w_sum: f64 = window.iter().map(|&w| w as f64).sum();
         let enbw_coeff = n as f64 * w_sum_sq / (w_sum * w_sum);
 
         // Pre-allocate all scratch buffers — reused every frame, zero heap churn
         let mut buf: Vec<u8> = Vec::new();
         let mut samples: Vec<Complex<f32>> = vec![Complex::default(); n];
-        let mut mags:    Vec<f32>          = vec![0.0; n];
-        let mut shifted: Vec<f32>          = vec![0.0; n];
-        let mut smoothed: Vec<f32>         = vec![DB_FLOOR; n];
-        let mut peak: Vec<f32>             = vec![DB_FLOOR; n];
+        let mut mags: Vec<f32> = vec![0.0; n];
+        let mut shifted: Vec<f32> = vec![0.0; n];
+        let mut smoothed: Vec<f32> = vec![DB_FLOOR; n];
+        let mut peak: Vec<f32> = vec![DB_FLOOR; n];
         // scratch for noise floor partial sort (avoids O(n log n) full sort)
-        let mut noise_scratch: Vec<f32>    = vec![0.0; n];
+        let mut noise_scratch: Vec<f32> = vec![0.0; n];
         // linear power per bin — computed once per display frame, reused for channel
         // power, occupied BW, and per-marker BW (avoids repeated 10^(x/10) powf calls)
-        let mut linear: Vec<f32>           = vec![0.0; n];
+        let mut linear: Vec<f32> = vec![0.0; n];
         let mut initialized = false;
 
         // Throttle state writes to ~30 fps — EMA runs on every frame for accuracy,
@@ -341,7 +392,8 @@ impl FftWorker {
                 // byte→sample decode once per frame, not per sample.
                 match self.format {
                     SampleFormat::Int8 => {
-                        for (i, (pair, &w)) in frame.chunks_exact(2).zip(window.iter()).enumerate() {
+                        for (i, (pair, &w)) in frame.chunks_exact(2).zip(window.iter()).enumerate()
+                        {
                             samples[i] = Complex {
                                 re: pair[0] as i8 as f32 / 128.0 * w,
                                 im: pair[1] as i8 as f32 / 128.0 * w,
@@ -349,7 +401,8 @@ impl FftWorker {
                         }
                     }
                     SampleFormat::Uint8 => {
-                        for (i, (pair, &w)) in frame.chunks_exact(2).zip(window.iter()).enumerate() {
+                        for (i, (pair, &w)) in frame.chunks_exact(2).zip(window.iter()).enumerate()
+                        {
                             samples[i] = Complex {
                                 re: (pair[0] as f32 - 127.5) / 127.5 * w,
                                 im: (pair[1] as f32 - 127.5) / 127.5 * w,
@@ -365,7 +418,11 @@ impl FftWorker {
                 let n_f32 = n as f32;
                 for (i, z) in samples.iter().enumerate() {
                     let norm = z.norm() / n_f32;
-                    mags[i] = if norm > 0.0 { 20.0 * norm.log10() } else { DB_FLOOR };
+                    mags[i] = if norm > 0.0 {
+                        20.0 * norm.log10()
+                    } else {
+                        DB_FLOOR
+                    };
                 }
 
                 // fftshift in-place
@@ -428,9 +485,10 @@ impl FftWorker {
                 //
                 // The noise floor stays span-wide — a reference that moves with the
                 // signal would flatten the very trend this is for.
-                let peak_dbfs = strongest_real_bin(&smoothed, Some(centre_radius_bins(n, sample_rate)))
-                    .map(|(_, v)| v)
-                    .unwrap_or(f32::NEG_INFINITY);
+                let peak_dbfs =
+                    strongest_real_bin(&smoothed, Some(centre_radius_bins(n, sample_rate)))
+                        .map(|(_, v)| v)
+                        .unwrap_or(f32::NEG_INFINITY);
                 let peak_to_nf_db = (peak_dbfs - noise_floor).max(0.0);
 
                 // Single linear-power pass — 10^(x/10) is expensive; compute once,
@@ -473,25 +531,28 @@ impl FftWorker {
                 // never a guessed ratio.
                 let acpr_offset_hz = crate::state::acpr_offset_hz(modulation);
                 let (acpr_lower_db, acpr_upper_db, adj_carrier_dbfs) =
-                    acpr_bands(&linear, sample_rate, occupied_bw_hz, acpr_offset_hz)
-                        .unwrap_or((f32::NEG_INFINITY, f32::NEG_INFINITY, f32::NEG_INFINITY));
+                    acpr_bands(&linear, sample_rate, occupied_bw_hz, acpr_offset_hz).unwrap_or((
+                        f32::NEG_INFINITY,
+                        f32::NEG_INFINITY,
+                        f32::NEG_INFINITY,
+                    ));
 
                 if let Ok(mut m) = self.state.lock() {
                     // Refresh the averaging factor from the lab control (cheap read
                     // under the lock we already hold for the result write-back).
                     current_alpha = m.lab.ema_alpha();
-                    m.signal.peak_to_nf_db      = peak_to_nf_db;
+                    m.signal.peak_to_nf_db = peak_to_nf_db;
                     m.signal.channel_power_dbfs = channel_power_dbfs;
-                    m.signal.occupied_bw_hz     = occupied_bw_hz;
-                    m.signal.modulation         = modulation;
-                    m.signal.acpr_lower_db      = acpr_lower_db;
-                    m.signal.acpr_upper_db      = acpr_upper_db;
-                    m.signal.adj_carrier_dbfs   = adj_carrier_dbfs;
-                    m.signal.acpr_offset_hz     = acpr_offset_hz;
+                    m.signal.occupied_bw_hz = occupied_bw_hz;
+                    m.signal.modulation = modulation;
+                    m.signal.acpr_lower_db = acpr_lower_db;
+                    m.signal.acpr_upper_db = acpr_upper_db;
+                    m.signal.adj_carrier_dbfs = adj_carrier_dbfs;
+                    m.signal.acpr_offset_hz = acpr_offset_hz;
 
                     // Per-marker occupied BW within each marker's channel window
                     if sample_rate > 0.0 {
-                        let bin_hz  = sample_rate / n as f64;
+                        let bin_hz = sample_rate / n as f64;
                         let left_hz = center_freq_hz as f64 - sample_rate / 2.0;
                         let right_hz = left_hz + sample_rate;
                         for mk in m.spectrum.markers.iter_mut() {
@@ -502,10 +563,11 @@ impl FftWorker {
                                     mk.measured_bw_hz = None;
                                     continue;
                                 }
-                                let lo_hz  = mf - ch_bw as f64 / 2.0;
-                                let hi_hz  = mf + ch_bw as f64 / 2.0;
+                                let lo_hz = mf - ch_bw as f64 / 2.0;
+                                let hi_hz = mf + ch_bw as f64 / 2.0;
                                 let lo_bin = ((lo_hz - left_hz) / bin_hz).floor().max(0.0) as usize;
-                                let hi_bin = ((hi_hz - left_hz) / bin_hz).ceil().min((n - 1) as f64) as usize;
+                                let hi_bin = ((hi_hz - left_hz) / bin_hz).ceil().min((n - 1) as f64)
+                                    as usize;
                                 if lo_bin <= hi_bin && hi_bin < n {
                                     let lin_slice = &linear[lo_bin..=hi_bin];
                                     let tot: f32 = lin_slice.iter().sum();
@@ -517,10 +579,17 @@ impl FftWorker {
                                         let mut hi_b = lin_slice.len() - 1;
                                         for (i, &lin) in lin_slice.iter().enumerate() {
                                             acc += lin;
-                                            if acc < lo_t { lo_b = i; }
-                                            if acc < hi_t { hi_b = i; }
+                                            if acc < lo_t {
+                                                lo_b = i;
+                                            }
+                                            if acc < hi_t {
+                                                hi_b = i;
+                                            }
                                         }
-                                        mk.measured_bw_hz = Some(((hi_b.saturating_sub(lo_b) + 1) as f64 * bin_hz) as u64);
+                                        mk.measured_bw_hz = Some(
+                                            ((hi_b.saturating_sub(lo_b) + 1) as f64 * bin_hz)
+                                                as u64,
+                                        );
                                     }
                                 } else {
                                     mk.measured_bw_hz = None;
@@ -603,9 +672,16 @@ mod tests {
 
     #[test]
     fn magnitude_floor_for_zero_input() {
-        let z = Complex { re: 0.0f32, im: 0.0f32 };
+        let z = Complex {
+            re: 0.0f32,
+            im: 0.0f32,
+        };
         let norm = z.norm() / 2048.0f32;
-        let db = if norm > 0.0 { 20.0 * norm.log10() } else { DB_FLOOR };
+        let db = if norm > 0.0 {
+            20.0 * norm.log10()
+        } else {
+            DB_FLOOR
+        };
         assert_eq!(db, DB_FLOOR);
     }
 
@@ -666,7 +742,11 @@ mod tests {
     #[test]
     fn channel_power_zero_signal_is_neg_inf() {
         let total_linear: f32 = 0.0;
-        let power = if total_linear > 0.0 { 10.0 * total_linear.log10() } else { f32::NEG_INFINITY };
+        let power = if total_linear > 0.0 {
+            10.0 * total_linear.log10()
+        } else {
+            f32::NEG_INFINITY
+        };
         assert!(power.is_infinite() && power < 0.0);
     }
 
@@ -679,9 +759,14 @@ mod tests {
     /// sample rate happens to divide it into, so the same station would carry five
     /// times the power at 2 Msps as at 10, and any test comparing the two would be
     /// measuring the helper rather than the code.
-    fn spectrum(n: usize, sample_rate: f64, nf_db: f32, bw_hz: f64, level_db: f32, offset_hz: f64)
-        -> Vec<f32>
-    {
+    fn spectrum(
+        n: usize,
+        sample_rate: f64,
+        nf_db: f32,
+        bw_hz: f64,
+        level_db: f32,
+        offset_hz: f64,
+    ) -> Vec<f32> {
         let lin = |db: f32| 10f32.powf(db / 10.0);
         let mut bins = vec![lin(nf_db); n];
         let bin_hz = sample_rate / n as f64;
@@ -689,7 +774,9 @@ mod tests {
         let c = n as i64 / 2 + (offset_hz / bin_hz).round() as i64;
         let count = (2 * half).max(1) as f32;
         for i in (c - half)..(c + half) {
-            if (0..n as i64).contains(&i) { bins[i as usize] = lin(level_db) / count; }
+            if (0..n as i64).contains(&i) {
+                bins[i as usize] = lin(level_db) / count;
+            }
         }
         bins
     }
@@ -701,7 +788,10 @@ mod tests {
         // carries enough power to push the cut-offs out to the span edges.
         let bins = spectrum(2048, 2_000_000.0, -90.0, 180_000.0, -40.0, 0.0);
         let bw = occupied_bw(&bins, 2_000_000.0, -90.0);
-        assert!((170_000..=190_000).contains(&bw), "expected ~180 kHz, got {bw}");
+        assert!(
+            (170_000..=190_000).contains(&bw),
+            "expected ~180 kHz, got {bw}"
+        );
     }
 
     #[test]
@@ -709,12 +799,20 @@ mod tests {
         // The same 180 kHz carrier seen through a 2 MHz and a 10 MHz window must
         // measure the same, to within the coarser window's bin size.
         let narrow = occupied_bw(
-            &spectrum(2048, 2_000_000.0, -90.0, 180_000.0, -40.0, 0.0), 2_000_000.0, -90.0);
+            &spectrum(2048, 2_000_000.0, -90.0, 180_000.0, -40.0, 0.0),
+            2_000_000.0,
+            -90.0,
+        );
         let wide = occupied_bw(
-            &spectrum(2048, 10_000_000.0, -90.0, 180_000.0, -40.0, 0.0), 10_000_000.0, -90.0);
+            &spectrum(2048, 10_000_000.0, -90.0, 180_000.0, -40.0, 0.0),
+            10_000_000.0,
+            -90.0,
+        );
         let bin_hz = 10_000_000.0 / 2048.0;
-        assert!((narrow as f64 - wide as f64).abs() < 3.0 * bin_hz,
-                "narrow={narrow} wide={wide}, bin={bin_hz:.0} Hz");
+        assert!(
+            (narrow as f64 - wide as f64).abs() < 3.0 * bin_hz,
+            "narrow={narrow} wide={wide}, bin={bin_hz:.0} Hz"
+        );
     }
 
     #[test]
@@ -724,7 +822,10 @@ mod tests {
         // distance from centre.
         let bins = spectrum(2048, 2_000_000.0, -90.0, 180_000.0, -40.0, 100_000.0);
         let bw = occupied_bw(&bins, 2_000_000.0, -90.0);
-        assert!((170_000..=190_000).contains(&bw), "expected ~180 kHz, got {bw}");
+        assert!(
+            (170_000..=190_000).contains(&bw),
+            "expected ~180 kHz, got {bw}"
+        );
     }
 
     #[test]
@@ -743,8 +844,14 @@ mod tests {
         // 15 kHz channel must not come back looking like broadcast FM.
         let bins = spectrum(2048, 2_000_000.0, -90.0, 15_000.0, -40.0, 0.0);
         let bw = occupied_bw(&bins, 2_000_000.0, -90.0);
-        assert!((10_000..=20_000).contains(&bw), "expected ~15 kHz, got {bw}");
-        assert_eq!(crate::state::classify(50.0, bw), crate::state::Modulation::Nfm);
+        assert!(
+            (10_000..=20_000).contains(&bw),
+            "expected ~15 kHz, got {bw}"
+        );
+        assert_eq!(
+            crate::state::classify(50.0, bw),
+            crate::state::Modulation::Nfm
+        );
     }
 
     #[test]
@@ -753,9 +860,14 @@ mod tests {
         // wide must not amputate the window at that bin.
         let mut bins = spectrum(2048, 2_000_000.0, -90.0, 180_000.0, -40.0, 0.0);
         let notch = 2048 / 2 - 40;
-        for b in bins.iter_mut().skip(notch).take(5) { *b = 10f32.powf(-90.0 / 10.0); }
+        for b in bins.iter_mut().skip(notch).take(5) {
+            *b = 10f32.powf(-90.0 / 10.0);
+        }
         let bw = occupied_bw(&bins, 2_000_000.0, -90.0);
-        assert!((170_000..=190_000).contains(&bw), "null truncated the window: {bw}");
+        assert!(
+            (170_000..=190_000).contains(&bw),
+            "null truncated the window: {bw}"
+        );
     }
 
     #[test]
@@ -777,7 +889,9 @@ mod tests {
         // invented out of the front end's own artefact.
         let lin = |db: f32| 10f32.powf(db / 10.0);
         let mut bins = vec![lin(-85.0); 2048];
-        for b in bins[1023..=1025].iter_mut() { *b = lin(-39.0); }
+        for b in bins[1023..=1025].iter_mut() {
+            *b = lin(-39.0);
+        }
         assert_eq!(occupied_bw(&bins, 2_000_000.0, -85.0), 0);
     }
 
@@ -799,9 +913,14 @@ mod tests {
         // even though the artefact is 20 dB louder.
         let lin = |db: f32| 10f32.powf(db / 10.0);
         let mut bins = spectrum(2048, 2_000_000.0, -90.0, 60_000.0, -40.0, 100_000.0);
-        for b in bins[1023..=1025].iter_mut() { *b = lin(-20.0); } // artefact louder
+        for b in bins[1023..=1025].iter_mut() {
+            *b = lin(-20.0);
+        } // artefact louder
         let bw = occupied_bw(&bins, 2_000_000.0, -90.0);
-        assert!((50_000..=70_000).contains(&bw), "expected ~60 kHz, got {bw}");
+        assert!(
+            (50_000..=70_000).contains(&bw),
+            "expected ~60 kHz, got {bw}"
+        );
     }
 
     /// The in-channel power the worker derives from [`carrier_window`], mirrored
@@ -823,9 +942,14 @@ mod tests {
         let total: f32 = bins.iter().sum();
         let capture_db = 10.0 * total.log10();
         let ch = channel_power(&bins, 2_000_000.0, -70.0);
-        assert!((ch - (-43.0)).abs() < 1.5, "expected the carrier's ~-43 dBFS, got {ch:.1}");
-        assert!(capture_db - ch > 5.0,
-                "the capture should be visibly louder than the channel: {capture_db:.1} vs {ch:.1}");
+        assert!(
+            (ch - (-43.0)).abs() < 1.5,
+            "expected the carrier's ~-43 dBFS, got {ch:.1}"
+        );
+        assert!(
+            capture_db - ch > 5.0,
+            "the capture should be visibly louder than the channel: {capture_db:.1} vs {ch:.1}"
+        );
     }
 
     #[test]
@@ -834,20 +958,33 @@ mod tests {
         // into the "channel" power of the one at centre.
         let mut bins = spectrum(2048, 2_000_000.0, -90.0, 100_000.0, -40.0, 0.0);
         let other = spectrum(2048, 2_000_000.0, -200.0, 100_000.0, -30.0, 700_000.0);
-        for (b, o) in bins.iter_mut().zip(other.iter()) { *b += *o; }
+        for (b, o) in bins.iter_mut().zip(other.iter()) {
+            *b += *o;
+        }
         let ch = channel_power(&bins, 2_000_000.0, -90.0);
-        assert!((ch - (-40.0)).abs() < 1.5, "the neighbour leaked in: {ch:.1} dBFS");
+        assert!(
+            (ch - (-40.0)).abs() < 1.5,
+            "the neighbour leaked in: {ch:.1} dBFS"
+        );
     }
 
     #[test]
     fn channel_power_does_not_move_with_the_noise_floor() {
         // Same carrier, quiet span and noisy span: the noise is not in the channel.
         let quiet = channel_power(
-            &spectrum(2048, 2_000_000.0, -120.0, 180_000.0, -40.0, 0.0), 2_000_000.0, -120.0);
+            &spectrum(2048, 2_000_000.0, -120.0, 180_000.0, -40.0, 0.0),
+            2_000_000.0,
+            -120.0,
+        );
         let noisy = channel_power(
-            &spectrum(2048, 2_000_000.0, -80.0, 180_000.0, -40.0, 0.0), 2_000_000.0, -80.0);
-        assert!((quiet - noisy).abs() < 1.0,
-                "noise floor leaked into the channel: {quiet:.1} vs {noisy:.1} dBFS");
+            &spectrum(2048, 2_000_000.0, -80.0, 180_000.0, -40.0, 0.0),
+            2_000_000.0,
+            -80.0,
+        );
+        assert!(
+            (quiet - noisy).abs() < 1.0,
+            "noise floor leaked into the channel: {quiet:.1} vs {noisy:.1} dBFS"
+        );
     }
 
     #[test]
@@ -862,7 +999,9 @@ mod tests {
         // The artefact towers over a real, weaker carrier off to one side. Report
         // the carrier — the artefact is not signal, however loud it is.
         let mut bins = vec![-90.0f32; 2048];
-        for b in bins[1023..=1025].iter_mut() { *b = -20.0; }
+        for b in bins[1023..=1025].iter_mut() {
+            *b = -20.0;
+        }
         bins[1300] = -50.0;
         assert_eq!(strongest_real_bin(&bins, None), Some((1300, -50.0)));
     }
@@ -879,9 +1018,12 @@ mod tests {
     /// The SNR the worker publishes, mirrored so the scoping rule can be tested
     /// without running the FFT loop.
     fn snr(smoothed: &[f32], sample_rate: f64, noise_floor: f32) -> f32 {
-        let peak = strongest_real_bin(smoothed, Some(centre_radius_bins(smoothed.len(), sample_rate)))
-            .map(|(_, v)| v)
-            .unwrap_or(f32::NEG_INFINITY);
+        let peak = strongest_real_bin(
+            smoothed,
+            Some(centre_radius_bins(smoothed.len(), sample_rate)),
+        )
+        .map(|(_, v)| v)
+        .unwrap_or(f32::NEG_INFINITY);
         (peak - noise_floor).max(0.0)
     }
 
@@ -911,7 +1053,10 @@ mod tests {
             bins[1050] = level;
             let s = snr(&bins, 2_000_000.0, -85.0);
             assert!(s > last, "SNR must rise with the signal: {s} after {last}");
-            assert!(s > 0.0, "still nothing to show at {level} dBFS over a -85 floor");
+            assert!(
+                s > 0.0,
+                "still nothing to show at {level} dBFS over a -85 floor"
+            );
             last = s;
         }
         // And it never goes negative when the channel is empty.
@@ -921,7 +1066,9 @@ mod tests {
     #[test]
     fn snr_refuses_the_dc_artefact() {
         let mut bins = vec![-85.0f32; 2048];
-        for b in bins[1023..=1025].iter_mut() { *b = -39.0; }
+        for b in bins[1023..=1025].iter_mut() {
+            *b = -39.0;
+        }
         assert_eq!(snr(&bins, 2_000_000.0, -85.0), 0.0);
     }
 
@@ -969,7 +1116,10 @@ mod tests {
         // put real power outside the guard, and the artefact never does.
         let bins = spectrum(2048, 2_000_000.0, -85.0, 7_000.0, -39.0, 0.0);
         let bw = occupied_bw(&bins, 2_000_000.0, -85.0);
-        assert!(bw >= 4_000, "a real 7 kHz burst must survive the artefact rule, got {bw}");
+        assert!(
+            bw >= 4_000,
+            "a real 7 kHz burst must survive the artefact rule, got {bw}"
+        );
     }
 
     #[test]
@@ -986,11 +1136,18 @@ mod tests {
         let sample_rate = 1_000_000.0;
         let mut linear = vec![1e-8f32; n];
         let center = n / 2;
-        for i in center - 5..center + 5 { linear[i] = 1.0; }       // in-channel: sum = 10.0
-        for i in center - 25..center - 15 { linear[i] = 1e-4; }    // lower adjacent: sum = 1e-3
-        for i in center + 15..center + 25 { linear[i] = 1e-4; }    // upper adjacent: sum = 1e-3
+        for i in center - 5..center + 5 {
+            linear[i] = 1.0;
+        } // in-channel: sum = 10.0
+        for i in center - 25..center - 15 {
+            linear[i] = 1e-4;
+        } // lower adjacent: sum = 1e-3
+        for i in center + 15..center + 25 {
+            linear[i] = 1e-4;
+        } // upper adjacent: sum = 1e-3
 
-        let (lo_db, up_db, adj_dbfs) = acpr_bands(&linear, sample_rate, 100_000, 200_000.0).unwrap();
+        let (lo_db, up_db, adj_dbfs) =
+            acpr_bands(&linear, sample_rate, 100_000, 200_000.0).unwrap();
         // ratio = 1e-3 / 10.0 = 1e-4 → -40 dB
         assert!((lo_db - (-40.0)).abs() < 0.5, "lo_db={lo_db}");
         assert!((up_db - (-40.0)).abs() < 0.5, "up_db={up_db}");
@@ -1013,10 +1170,14 @@ mod tests {
         // three bands nearly the same bins. The ratio then comes out at 0 dB and the
         // panel draws a full red bar.
         let linear = vec![1.0f32; 2048];
-        assert!(acpr_bands(&linear, 2_000_000.0, 300_000, 200_000.0).is_none(),
-                "300 kHz occupancy at 200 kHz spacing: the bands overlap");
-        assert!(acpr_bands(&linear, 2_000_000.0, 200_000, 200_000.0).is_none(),
-                "exactly touching is still not a comparison");
+        assert!(
+            acpr_bands(&linear, 2_000_000.0, 300_000, 200_000.0).is_none(),
+            "300 kHz occupancy at 200 kHz spacing: the bands overlap"
+        );
+        assert!(
+            acpr_bands(&linear, 2_000_000.0, 200_000, 200_000.0).is_none(),
+            "exactly touching is still not a comparison"
+        );
         // Clear of the spacing, the measurement stands.
         assert!(acpr_bands(&linear, 2_000_000.0, 120_000, 200_000.0).is_some());
     }
@@ -1027,9 +1188,14 @@ mod tests {
         // the screen as one.
         let n = 2048;
         let mut linear = vec![0.0f32; n];
-        for b in linear[n / 2 - 30..n / 2 + 30].iter_mut() { *b = 1.0; }
+        for b in linear[n / 2 - 30..n / 2 + 30].iter_mut() {
+            *b = 1.0;
+        }
         let (_, _, adj) = acpr_bands(&linear, 2_000_000.0, 60_000, 200_000.0).unwrap();
-        assert!(adj.is_infinite() && adj < 0.0, "expected the undefined sentinel, got {adj}");
+        assert!(
+            adj.is_infinite() && adj < 0.0,
+            "expected the undefined sentinel, got {adj}"
+        );
     }
 
     #[test]
@@ -1044,7 +1210,9 @@ mod tests {
         let n = 100;
         let mut linear = vec![0.0f32; n];
         let center = n / 2;
-        for i in center - 5..center + 5 { linear[i] = 1.0; }
+        for i in center - 5..center + 5 {
+            linear[i] = 1.0;
+        }
         let (lo_db, up_db, _) = acpr_bands(&linear, 1_000_000.0, 100_000, 200_000.0).unwrap();
         assert_eq!(lo_db, ACPR_MEASURE_FLOOR_DB);
         assert_eq!(up_db, ACPR_MEASURE_FLOOR_DB);

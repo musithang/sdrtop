@@ -30,7 +30,9 @@ pub(super) fn note_unexpected_stop(
     hw_rx_active: bool,
     hw_streaming: bool,
 ) -> bool {
-    if !hw_rx_active || hw_streaming { return hw_rx_active; }
+    if !hw_rx_active || hw_streaming {
+        return hw_rx_active;
+    }
     let _ = device.stop_rx();
     let mut m = state.lock().unwrap_or_else(|e| e.into_inner());
     m.radio.rx_enabled = false;
@@ -96,23 +98,41 @@ pub(super) fn track_gain(
 ) {
     let (latched, friis, lna, vga) = {
         let m = state.lock().unwrap_or_else(|e| e.into_inner());
-        (m.lab.rf_autotrack, m.caps.friis_applicable, m.radio.lna_gain, m.radio.vga_gain)
+        (
+            m.lab.rf_autotrack,
+            m.caps.friis_applicable,
+            m.radio.lna_gain,
+            m.radio.vga_gain,
+        )
     };
-    if !latched || !friis || AUTOGAIN_COMFORT_DBFS.contains(&adc_peak_dbfs) { return; }
+    if !latched || !friis || AUTOGAIN_COMFORT_DBFS.contains(&adc_peak_dbfs) {
+        return;
+    }
 
     let (lna_t, vga_t) = crate::ui::rf_calc::staging_target(adc_peak_dbfs as f64, lna, vga);
-    if (lna_t, vga_t) == (lna, vga) { return; }
+    if (lna_t, vga_t) == (lna, vga) {
+        return;
+    }
 
     // Device sets run with no lock held.
-    let r1 = if lna_t != lna { device.set_lna_gain(lna_t) } else { Ok(()) };
-    let r2 = if vga_t != vga { device.set_vga_gain(vga_t) } else { Ok(()) };
+    let r1 = if lna_t != lna {
+        device.set_lna_gain(lna_t)
+    } else {
+        Ok(())
+    };
+    let r2 = if vga_t != vga {
+        device.set_vga_gain(vga_t)
+    } else {
+        Ok(())
+    };
     let mut m = state.lock().unwrap_or_else(|e| e.into_inner());
     match (r1, r2) {
         (Ok(()), Ok(())) => {
             m.radio.lna_gain = lna_t;
             m.radio.vga_gain = vga_t;
             m.push_log(format!(
-                "Auto-gain track \u{2192} LNA {lna_t} \u{00b7} VGA {vga_t} dB"));
+                "Auto-gain track \u{2192} LNA {lna_t} \u{00b7} VGA {vga_t} dB"
+            ));
         }
         _ => m.push_log("Auto-gain track: device error".to_string()),
     }
@@ -135,7 +155,9 @@ mod tests {
         // The window brackets the staging target, or auto-gain would chase its
         // own tail: settle at the target, find it out of window, move again.
         let opt = crate::ui::rf_calc::OPT_PEAK_DBFS as f32;
-        assert!(AUTOGAIN_COMFORT_DBFS.contains(&opt),
-                "the optimum {opt} dBFS must be inside the comfort window");
+        assert!(
+            AUTOGAIN_COMFORT_DBFS.contains(&opt),
+            "the optimum {opt} dBFS must be inside the comfort window"
+        );
     }
 }

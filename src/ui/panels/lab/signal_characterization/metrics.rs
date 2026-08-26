@@ -12,46 +12,91 @@ use super::row::{annotated, dash, fmt_freq, metric, val};
 /// The five rows, in order. The idle branch prints the same five names against
 /// dashes, so the stack below does not jump when the measurement comes and goes.
 pub(super) fn lines(
-    out: &mut Vec<Line<'static>>, frame: Option<&FftFrame>, iw: usize, theme: &crate::Theme,
+    out: &mut Vec<Line<'static>>,
+    frame: Option<&FftFrame>,
+    iw: usize,
+    theme: &crate::Theme,
 ) {
     out.push(section("SIGNAL METRICS", "", iw, theme));
     let Some(fr) = frame else {
-        for name in ["Channel power", "Peak", "Noise floor", "Occupied BW", "Peak hold"] {
+        for name in [
+            "Channel power",
+            "Peak",
+            "Noise floor",
+            "Occupied BW",
+            "Peak hold",
+        ] {
             out.push(metric(name, vec![dash(theme)], theme));
         }
         return;
     };
 
-    out.push(metric("Channel power", if fr.channel_power_dbfs.is_finite() {
-        vec![Span::styled(format!("{:.1} dBFS", fr.channel_power_dbfs), val(theme))]
-    } else { vec![dash(theme)] }, theme));
+    out.push(metric(
+        "Channel power",
+        if fr.channel_power_dbfs.is_finite() {
+            vec![Span::styled(
+                format!("{:.1} dBFS", fr.channel_power_dbfs),
+                val(theme),
+            )]
+        } else {
+            vec![dash(theme)]
+        },
+        theme,
+    ));
 
-    out.push(metric("Peak", match peak_bin(fr) {
-        Some((lvl, hz)) => annotated(format!("{lvl:.1} dBFS"), fmt_freq(hz), iw, theme),
-        None => vec![dash(theme)],
-    }, theme));
+    out.push(metric(
+        "Peak",
+        match peak_bin(fr) {
+            Some((lvl, hz)) => annotated(format!("{lvl:.1} dBFS"), fmt_freq(hz), iw, theme),
+            None => vec![dash(theme)],
+        },
+        theme,
+    ));
 
     let nf = format!("{:.1} dBFS", fr.noise_floor);
-    out.push(metric("Noise floor", match noise_density_dbfs_hz(fr.noise_floor, fr.enbw_hz) {
-        Some(d) => annotated(nf, format!("{d:.1} dBFS/Hz"), iw, theme),
-        None    => vec![Span::styled(nf, val(theme))],
-    }, theme));
+    out.push(metric(
+        "Noise floor",
+        match noise_density_dbfs_hz(fr.noise_floor, fr.enbw_hz) {
+            Some(d) => annotated(nf, format!("{d:.1} dBFS/Hz"), iw, theme),
+            None => vec![Span::styled(nf, val(theme))],
+        },
+        theme,
+    ));
 
-    out.push(metric("Occupied BW", if fr.occupied_bw_hz > 0 {
-        annotated(fmt_bw(fr.occupied_bw_hz), "99% power".to_string(), iw, theme)
-    } else { vec![dash(theme)] }, theme));
+    out.push(metric(
+        "Occupied BW",
+        if fr.occupied_bw_hz > 0 {
+            annotated(
+                fmt_bw(fr.occupied_bw_hz),
+                "99% power".to_string(),
+                iw,
+                theme,
+            )
+        } else {
+            vec![dash(theme)]
+        },
+        theme,
+    ));
 
     // Same scope as `peak_bin`: a peak hold sitting on the DC artefact
     // since the session started, or on a station the radio is not tuned to,
     // is the least useful number on the panel.
     let ph = crate::signal::fft::strongest_real_bin(
         &fr.peak_hold,
-        Some(crate::signal::fft::centre_radius_bins(fr.peak_hold.len(), fr.sample_rate)),
-    ).map(|(_, v)| v);
-    out.push(metric("Peak hold", match ph {
-        Some(v) if v.is_finite() => vec![Span::styled(format!("{v:.1} dBFS"), val(theme))],
-        _ => vec![dash(theme)],
-    }, theme));
+        Some(crate::signal::fft::centre_radius_bins(
+            fr.peak_hold.len(),
+            fr.sample_rate,
+        )),
+    )
+    .map(|(_, v)| v);
+    out.push(metric(
+        "Peak hold",
+        match ph {
+            Some(v) if v.is_finite() => vec![Span::styled(format!("{v:.1} dBFS"), val(theme))],
+            _ => vec![dash(theme)],
+        },
+        theme,
+    ));
 }
 
 /// Noise floor as a power spectral density, `dBFS/Hz`, or `None` when the frame
@@ -72,7 +117,9 @@ pub(super) fn lines(
 /// number is the one that matches where the noise visually sits on the trace next
 /// to this panel.
 fn noise_density_dbfs_hz(noise_floor_dbfs: f32, enbw_hz: f64) -> Option<f32> {
-    if !enbw_hz.is_finite() || enbw_hz <= 0.0 || !noise_floor_dbfs.is_finite() { return None; }
+    if !enbw_hz.is_finite() || enbw_hz <= 0.0 || !noise_floor_dbfs.is_finite() {
+        return None;
+    }
     Some(noise_floor_dbfs - 10.0 * enbw_hz.log10() as f32)
 }
 
@@ -90,7 +137,11 @@ fn peak_bin(fr: &FftFrame) -> Option<(f32, u64)> {
     let radius = crate::signal::fft::centre_radius_bins(n, fr.sample_rate);
     let (idx, best) = crate::signal::fft::strongest_real_bin(bins, Some(radius))?;
     let left = fr.center_freq_hz as f64 - fr.sample_rate / 2.0;
-    let span_frac = if n > 1 { idx as f64 / (n - 1) as f64 } else { 0.0 };
+    let span_frac = if n > 1 {
+        idx as f64 / (n - 1) as f64
+    } else {
+        0.0
+    };
     let freq = (left + span_frac * fr.sample_rate).max(0.0).round() as u64;
     Some((best, freq))
 }
@@ -130,11 +181,14 @@ mod tests {
         // The two readings that started this, measured on 92.8 MHz at 2 and 10 Msps.
         // Per bin they differ by 7.3 dB and describe the sample rate; as densities
         // they agree, and describe the radio.
-        let two  = noise_density_dbfs_hz(-81.1, 976.5625 * 1.5).unwrap();
-        let ten  = noise_density_dbfs_hz(-73.8, 4882.8125 * 1.5).unwrap();
+        let two = noise_density_dbfs_hz(-81.1, 976.5625 * 1.5).unwrap();
+        let ten = noise_density_dbfs_hz(-73.8, 4882.8125 * 1.5).unwrap();
         assert!((two - (-112.8)).abs() < 0.2, "2 Msps: {two:.1}");
         assert!((ten - (-112.5)).abs() < 0.2, "10 Msps: {ten:.1}");
-        assert!((two - ten).abs() < 0.5, "densities must agree: {two:.1} vs {ten:.1}");
+        assert!(
+            (two - ten).abs() < 0.5,
+            "densities must agree: {two:.1} vs {ten:.1}"
+        );
     }
 
     #[test]
@@ -158,9 +212,12 @@ mod tests {
         // scoped the same way.
         let mut bins = vec![-80.0f32; 101];
         bins[75] = -30.0; // inside the radius
-        bins[5]  = 0.0;   // far outside it, and much louder
+        bins[5] = 0.0; // far outside it, and much louder
         let (lvl, hz) = peak_bin(&frame(bins, 100_000_000, 400_000.0)).unwrap();
-        assert!((lvl + 30.0).abs() < 1e-6, "reported a station out of channel: {lvl}");
+        assert!(
+            (lvl + 30.0).abs() < 1e-6,
+            "reported a station out of channel: {lvl}"
+        );
         assert_eq!(hz, 100_100_000);
     }
 
@@ -170,7 +227,7 @@ mod tests {
         // tallest bin, and naming it would put the tuned frequency in this row as
         // though a station were there. The next real bin is the honest answer.
         let mut bins = vec![-80.0f32; 101];
-        bins[50] = 0.0;   // artefact at centre, by far the strongest
+        bins[50] = 0.0; // artefact at centre, by far the strongest
         bins[60] = -30.0; // a real, weaker carrier
         let (lvl, hz) = peak_bin(&frame(bins, 100_000_000, 400_000.0)).unwrap();
         assert!((lvl + 30.0).abs() < 1e-6, "reported the artefact: {lvl}");

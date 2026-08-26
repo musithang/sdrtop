@@ -57,8 +57,7 @@ struct Cli {
 }
 
 fn default_config_path() -> Option<PathBuf> {
-    std::env::var_os("HOME")
-        .map(|h| PathBuf::from(h).join(".config/sdrtop/config.toml"))
+    std::env::var_os("HOME").map(|h| PathBuf::from(h).join(".config/sdrtop/config.toml"))
 }
 
 fn log_path() -> PathBuf {
@@ -79,7 +78,11 @@ fn redirect_stderr_to_log() -> Option<i32> {
     if let Some(parent) = path.parent() {
         let _ = std::fs::create_dir_all(parent);
     }
-    let file = std::fs::OpenOptions::new().create(true).append(true).open(&path).ok()?;
+    let file = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(&path)
+        .ok()?;
     unsafe {
         let saved = libc::dup(libc::STDERR_FILENO);
         if saved < 0 {
@@ -114,21 +117,33 @@ async fn main() -> Result<()> {
         .map(AppConfig::load_or_default)
         .unwrap_or_default();
 
-    if let Some(f) = cli.frequency { app_cfg.radio.frequency_hz = f; }
-    if let Some(l) = cli.lna       { app_cfg.radio.lna_gain = l.min(40); }
-    if let Some(v) = cli.vga       { app_cfg.radio.vga_gain = v.min(62); }
+    if let Some(f) = cli.frequency {
+        app_cfg.radio.frequency_hz = f;
+    }
+    if let Some(l) = cli.lna {
+        app_cfg.radio.lna_gain = l.min(40);
+    }
+    if let Some(v) = cli.vga {
+        app_cfg.radio.vga_gain = v.min(62);
+    }
     // --gain is the device-agnostic primary gain (applied after --lna so it wins);
     // the device clamps/snaps it at program time (HackRF LNA range, RTL nearest step).
-    if let Some(g) = cli.gain      { app_cfg.radio.lna_gain = g; }
-    if let Some(t) = cli.theme     { app_cfg.theme.base = t; }
+    if let Some(g) = cli.gain {
+        app_cfg.radio.lna_gain = g;
+    }
+    if let Some(t) = cli.theme {
+        app_cfg.theme.base = t;
+    }
 
-    let themes_dir = config_path.as_deref().and_then(config::AppConfig::themes_dir);
+    let themes_dir = config_path
+        .as_deref()
+        .and_then(config::AppConfig::themes_dir);
     let theme = app_cfg.build_theme(themes_dir.as_deref());
 
     let mut devices = hardware::list_all_devices();
     if let Some(kind) = &cli.device {
         let want = match kind.to_ascii_lowercase().as_str() {
-            "hackrf"                     => hardware::DeviceKind::HackRf,
+            "hackrf" => hardware::DeviceKind::HackRf,
             "rtlsdr" | "rtl-sdr" | "rtl" => hardware::DeviceKind::RtlSdr,
             other => {
                 eprintln!("Unknown --device '{}' (use 'hackrf' or 'rtlsdr')", other);
@@ -153,21 +168,32 @@ async fn main() -> Result<()> {
     let saved_stderr = redirect_stderr_to_log();
 
     let selected = if devices.len() > 1 {
-        let items: Vec<(usize, String)> =
-            devices.iter().enumerate().map(|(i, d)| (i, d.label.clone())).collect();
+        let items: Vec<(usize, String)> = devices
+            .iter()
+            .enumerate()
+            .map(|(i, d)| (i, d.label.clone()))
+            .collect();
         match ui::device_selector::run(items, &theme, &mut terminal) {
             Ok(Some(pos)) => pos,
             Ok(None) => {
                 restore_stderr(saved_stderr);
                 disable_raw_mode()?;
-                execute!(terminal.backend_mut(), LeaveAlternateScreen, DisableMouseCapture)?;
+                execute!(
+                    terminal.backend_mut(),
+                    LeaveAlternateScreen,
+                    DisableMouseCapture
+                )?;
                 terminal.show_cursor()?;
                 return Ok(());
             }
             Err(e) => {
                 restore_stderr(saved_stderr);
                 disable_raw_mode()?;
-                execute!(terminal.backend_mut(), LeaveAlternateScreen, DisableMouseCapture)?;
+                execute!(
+                    terminal.backend_mut(),
+                    LeaveAlternateScreen,
+                    DisableMouseCapture
+                )?;
                 terminal.show_cursor()?;
                 eprintln!("Device selection error: {}", e);
                 std::process::exit(1);
@@ -182,7 +208,11 @@ async fn main() -> Result<()> {
         Err(e) => {
             restore_stderr(saved_stderr);
             disable_raw_mode()?;
-            execute!(terminal.backend_mut(), LeaveAlternateScreen, DisableMouseCapture)?;
+            execute!(
+                terminal.backend_mut(),
+                LeaveAlternateScreen,
+                DisableMouseCapture
+            )?;
             terminal.show_cursor()?;
             eprintln!("Error: {}", e);
             std::process::exit(1);

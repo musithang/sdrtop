@@ -14,9 +14,9 @@ use crate::state::{LogLevel, SdrMetrics};
 /// the `●` disc and separate purely by colour, like a green/red panel LED.
 pub(crate) fn lamp(level: LogLevel, theme: &crate::Theme) -> Span<'static> {
     let (glyph, color) = match level {
-        LogLevel::Info  => ("\u{00B7}", theme.border_dim),  // ·
-        LogLevel::Ok    => ("\u{25CF}", theme.status_ok),   // ●
-        LogLevel::Warn  => ("\u{25B2}", theme.status_warn), // ▲
+        LogLevel::Info => ("\u{00B7}", theme.border_dim), // ·
+        LogLevel::Ok => ("\u{25CF}", theme.status_ok),    // ●
+        LogLevel::Warn => ("\u{25B2}", theme.status_warn), // ▲
         LogLevel::Error => ("\u{25CF}", theme.status_crit), // ●
     };
     Span::styled(glyph, Style::default().fg(color))
@@ -40,7 +40,11 @@ pub(crate) fn fmt_clock(epoch_secs: u64) -> String {
         if libc::localtime_r(&t, &mut tm).is_null() {
             (0, 0, 0)
         } else {
-            (tm.tm_hour.max(0) as u32, tm.tm_min.max(0) as u32, tm.tm_sec.max(0) as u32)
+            (
+                tm.tm_hour.max(0) as u32,
+                tm.tm_min.max(0) as u32,
+                tm.tm_sec.max(0) as u32,
+            )
         }
     };
     fmt_hms(h, m, s)
@@ -49,15 +53,22 @@ pub(crate) fn fmt_clock(epoch_secs: u64) -> String {
 pub fn render(f: &mut Frame, inner: Rect, m: &SdrMetrics, theme: &crate::Theme) {
     // Each entry → `lamp  HH:MM:SS  message`. The lamp + dim, fixed-width
     // timestamp form an aligned gutter; the message reads in normal value colour.
-    let lines: Vec<Line> = m.ui.log.iter().map(|e| {
-        Line::from(vec![
-            lamp(e.level, theme),
-            Span::raw(" "),
-            Span::styled(fmt_clock(e.at_epoch_secs), Style::default().fg(theme.border_dim)),
-            Span::raw("  "),
-            Span::styled(e.text.as_ref(), Style::default().fg(theme.value)),
-        ])
-    }).collect();
+    let lines: Vec<Line> =
+        m.ui.log
+            .iter()
+            .map(|e| {
+                Line::from(vec![
+                    lamp(e.level, theme),
+                    Span::raw(" "),
+                    Span::styled(
+                        fmt_clock(e.at_epoch_secs),
+                        Style::default().fg(theme.border_dim),
+                    ),
+                    Span::raw("  "),
+                    Span::styled(e.text.as_ref(), Style::default().fg(theme.value)),
+                ])
+            })
+            .collect();
 
     let scroll = lines.len().saturating_sub(inner.height as usize) as u16;
     f.render_widget(Paragraph::new(lines).scroll((scroll, 0)), inner);
@@ -68,10 +79,23 @@ use crate::ui::panel::{Panel, PanelChrome};
 pub struct LogPanel;
 
 impl Panel for LogPanel {
-    fn name(&self) -> &'static str { "log" }
-    fn min_size(&self) -> (u16, u16) { (20, 7) }
-    fn chrome(&self, _state: &SdrMetrics) -> PanelChrome { PanelChrome::deck("Log") }
-    fn render(&self, f: &mut Frame, inner: Rect, state: &SdrMetrics, theme: &crate::Theme, _focused: bool) {
+    fn name(&self) -> &'static str {
+        "log"
+    }
+    fn min_size(&self) -> (u16, u16) {
+        (20, 7)
+    }
+    fn chrome(&self, _state: &SdrMetrics) -> PanelChrome {
+        PanelChrome::deck("Log")
+    }
+    fn render(
+        &self,
+        f: &mut Frame,
+        inner: Rect,
+        state: &SdrMetrics,
+        theme: &crate::Theme,
+        _focused: bool,
+    ) {
         render(f, inner, state, theme);
     }
 }

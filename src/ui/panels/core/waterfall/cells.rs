@@ -32,7 +32,11 @@ pub(super) const DB_MAX: f32 = 0.0;
 pub(super) fn band_max(row: &[f32], start: usize, end: usize) -> f32 {
     let s = start.min(row.len());
     let e = end.min(row.len()).max(s);
-    if s == e { f32::NEG_INFINITY } else { row[s..e].iter().copied().fold(f32::NEG_INFINITY, f32::max) }
+    if s == e {
+        f32::NEG_INFINITY
+    } else {
+        row[s..e].iter().copied().fold(f32::NEG_INFINITY, f32::max)
+    }
 }
 
 /// Which bins each plot column covers, under the current frequency zoom.
@@ -93,18 +97,20 @@ pub(super) fn draw(
     let mut data = rows.iter().skip(skip_data).take(area.height as usize * 2);
     while let Some((_ts, top_row)) = data.next() {
         let bot_row = data.next().map(|(_ts, r)| r.as_ref());
-        let spans: Vec<Span> = (0..cols).map(|col| {
-            let (lo, hi) = columns.range(col);
-            let bot_color = bot_row.map(|r| color(band_max(r, lo, hi))).unwrap_or(floor);
-            // The cursor column keeps the background so the history still reads
-            // through it, but takes a bright foreground as its marker.
-            let top_color = if Some(col) == cursor_col {
-                theme.value_hi
-            } else {
-                color(band_max(top_row, lo, hi))
-            };
-            Span::styled("\u{2580}", Style::default().fg(top_color).bg(bot_color))
-        }).collect();
+        let spans: Vec<Span> = (0..cols)
+            .map(|col| {
+                let (lo, hi) = columns.range(col);
+                let bot_color = bot_row.map(|r| color(band_max(r, lo, hi))).unwrap_or(floor);
+                // The cursor column keeps the background so the history still reads
+                // through it, but takes a bright foreground as its marker.
+                let top_color = if Some(col) == cursor_col {
+                    theme.value_hi
+                } else {
+                    color(band_max(top_row, lo, hi))
+                };
+                Span::styled("\u{2580}", Style::default().fg(top_color).bg(bot_color))
+            })
+            .collect();
         lines.push(Line::from(spans));
     }
 
@@ -146,7 +152,11 @@ mod tests {
         assert_eq!(last, 1024, "the last column ends at the last bin");
         // Contiguous: each column picks up where the previous one stopped.
         for col in 1..128 {
-            assert_eq!(c.range(col).0, c.range(col - 1).1, "gap or overlap at column {col}");
+            assert_eq!(
+                c.range(col).0,
+                c.range(col - 1).1,
+                "gap or overlap at column {col}"
+            );
         }
     }
 
@@ -188,7 +198,11 @@ mod tests {
 
         let zoomed = Columns::new(row_bins, 4, cols);
         assert_eq!(zoomed.range(0).0, 384);
-        assert_eq!(naive(0), 0, "the naive mapping reads a bin that is off screen");
+        assert_eq!(
+            naive(0),
+            0,
+            "the naive mapping reads a bin that is off screen"
+        );
         // They coincide only at the centre, the one place the old readout was right.
         assert_eq!(zoomed.range(cols / 2).0, naive(cols / 2));
     }

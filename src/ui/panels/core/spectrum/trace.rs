@@ -46,16 +46,25 @@ impl Vertical {
         let span = (max - min).max(1e-3);
         let steps = (canvas_height as usize * 4).clamp(1, 512);
         let depth = ColorDepth::detect();
-        let frac_of = |s: usize| if steps > 1 { s as f32 / (steps - 1) as f32 } else { 0.0 };
-        let height_color = |s: usize| magnitude_to_color_themed(min + frac_of(s) * span, min, max, depth, theme);
+        let frac_of = |s: usize| {
+            if steps > 1 {
+                s as f32 / (steps - 1) as f32
+            } else {
+                0.0
+            }
+        };
+        let height_color =
+            |s: usize| magnitude_to_color_themed(min + frac_of(s) * span, min, max, depth, theme);
         Self {
-            min, max, span, steps,
+            min,
+            max,
+            span,
+            steps,
             band_y: (0..steps).map(|s| min + frac_of(s) * span).collect(),
             band_dim: (0..steps).map(|s| dim(height_color(s), 0.45)).collect(),
             band_bright: (0..steps).map(height_color).collect(),
         }
     }
-
 
     /// How far *down* the window a level sits, `0.0` at the top edge and `1.0`
     /// at the bottom. The row-from-level conversion every annotation needs, so
@@ -148,7 +157,12 @@ pub(super) fn draw(
     layers: Layers,
     theme: &crate::Theme,
 ) {
-    let Layers { rules, ghosts, style, noise_floor } = layers;
+    let Layers {
+        rules,
+        ghosts,
+        style,
+        noise_floor,
+    } = layers;
     let pal = Palette::new(theme);
     let n = view.n();
     let (y_min, y_max) = (vert.min as f64, vert.max as f64);
@@ -157,7 +171,11 @@ pub(super) fn draw(
     let bins = Arc::clone(&view.bins);
     let peaks = Arc::clone(&view.peaks);
     let held = view.held.clone();
-    let (band_y, band_dim, band_bright) = (vert.band_y.clone(), vert.band_dim.clone(), vert.band_bright.clone());
+    let (band_y, band_dim, band_bright) = (
+        vert.band_y.clone(),
+        vert.band_dim.clone(),
+        vert.band_bright.clone(),
+    );
     let (steps, v_min, v_max, span) = (vert.steps, vert.min, vert.max, vert.span);
 
     f.render_widget(
@@ -167,20 +185,36 @@ pub(super) fn draw(
             .paint(move |ctx| {
                 let bright_at = |level: f32| band_bright[band_of(level, v_min, span, steps)];
                 let rule = |ctx: &mut ratatui::widgets::canvas::Context, x: f64, color: Color| {
-                    ctx.draw(&CanvasLine { x1: x, y1: y_min, x2: x, y2: y_max, color });
+                    ctx.draw(&CanvasLine {
+                        x1: x,
+                        y1: y_min,
+                        x2: x,
+                        y2: y_max,
+                        color,
+                    });
                 };
-                let level_line = |ctx: &mut ratatui::widgets::canvas::Context, y: f64, color: Color| {
-                    ctx.draw(&CanvasLine { x1: 0.0, y1: y, x2: n - 1.0, y2: y, color });
-                };
-                let series = |ctx: &mut ratatui::widgets::canvas::Context, v: &[f32], color: Color| {
-                    for i in 1..v.len() {
+                let level_line =
+                    |ctx: &mut ratatui::widgets::canvas::Context, y: f64, color: Color| {
                         ctx.draw(&CanvasLine {
-                            x1: (i - 1) as f64, y1: v[i - 1].clamp(v_min, v_max) as f64,
-                            x2: i as f64,       y2: v[i].clamp(v_min, v_max) as f64,
+                            x1: 0.0,
+                            y1: y,
+                            x2: n - 1.0,
+                            y2: y,
                             color,
                         });
-                    }
-                };
+                    };
+                let series =
+                    |ctx: &mut ratatui::widgets::canvas::Context, v: &[f32], color: Color| {
+                        for i in 1..v.len() {
+                            ctx.draw(&CanvasLine {
+                                x1: (i - 1) as f64,
+                                y1: v[i - 1].clamp(v_min, v_max) as f64,
+                                x2: i as f64,
+                                y2: v[i].clamp(v_min, v_max) as f64,
+                                color,
+                            });
+                        }
+                    };
 
                 // 0. Graticule — the dB and frequency reference grid, drawn first
                 //    so only the parts above the signal show through.
@@ -189,7 +223,9 @@ pub(super) fn draw(
                     rule(ctx, (n - 1.0).max(0.0) * (i as f64 / 4.0), pal.grid);
                 }
                 // 1. Hold ghost — the entire frozen spectrum as a soft outline.
-                if let Some(ref h) = held { series(ctx, h, pal.hold); }
+                if let Some(ref h) = held {
+                    series(ctx, h, pal.hold);
+                }
                 // 2. Filled body — solid horizontal runs per band, continuous so
                 //    no isolated dots blink on and off as bins jitter. Braille
                 //    dims it into a glow under its crisp edge; Fill keeps it at
@@ -197,15 +233,23 @@ pub(super) fn draw(
                 if style != SpectrumStyle::Scatter {
                     for s in 0..steps {
                         let yb = band_y[s];
-                        let color = if style == SpectrumStyle::Fill { band_bright[s] } else { band_dim[s] };
+                        let color = if style == SpectrumStyle::Fill {
+                            band_bright[s]
+                        } else {
+                            band_dim[s]
+                        };
                         let mut i = 0usize;
                         while i < bins.len() {
                             if bins[i] >= yb {
                                 let start = i;
-                                while i < bins.len() && bins[i] >= yb { i += 1; }
+                                while i < bins.len() && bins[i] >= yb {
+                                    i += 1;
+                                }
                                 ctx.draw(&CanvasLine {
-                                    x1: start as f64, y1: yb as f64,
-                                    x2: (i - 1) as f64, y2: yb as f64,
+                                    x1: start as f64,
+                                    y1: yb as f64,
+                                    x2: (i - 1) as f64,
+                                    y2: yb as f64,
                                     color,
                                 });
                             } else {
@@ -219,10 +263,13 @@ pub(super) fn draw(
                 //    edge, Scatter has no line.
                 if style == SpectrumStyle::Braille {
                     for i in 1..bins.len() {
-                        let (y0, y1) = (bins[i - 1].clamp(v_min, v_max), bins[i].clamp(v_min, v_max));
+                        let (y0, y1) =
+                            (bins[i - 1].clamp(v_min, v_max), bins[i].clamp(v_min, v_max));
                         ctx.draw(&CanvasLine {
-                            x1: (i - 1) as f64, y1: y0 as f64,
-                            x2: i as f64,       y2: y1 as f64,
+                            x1: (i - 1) as f64,
+                            y1: y0 as f64,
+                            x2: i as f64,
+                            y2: y1 as f64,
                             color: bright_at((y0 + y1) * 0.5),
                         });
                     }
@@ -231,7 +278,10 @@ pub(super) fn draw(
                 if style == SpectrumStyle::Scatter {
                     for i in 0..bins.len() {
                         let yv = bins[i].clamp(v_min, v_max);
-                        ctx.draw(&Points { coords: &[(i as f64, yv as f64)], color: bright_at(yv) });
+                        ctx.draw(&Points {
+                            coords: &[(i as f64, yv as f64)],
+                            color: bright_at(yv),
+                        });
                     }
                 }
                 // 4. Peak hold — one connected gold line tracing the decaying max
@@ -243,21 +293,37 @@ pub(super) fn draw(
                 //     when it matches the current bin count, i.e. at the zoom it
                 //     was captured at.
                 if let Some(ref tr) = ghosts.trace {
-                    if tr.len() == bins.len() { series(ctx, tr, pal.cal); }
+                    if tr.len() == bins.len() {
+                        series(ctx, tr, pal.cal);
+                    }
                 }
                 // 5c. REF level — a horizontal line at the set dBFS.
-                if let Some(ry) = ghosts.ref_dbfs { level_line(ctx, ry, pal.ref_line); }
+                if let Some(ry) = ghosts.ref_dbfs {
+                    level_line(ctx, ry, pal.ref_line);
+                }
                 // 6. Markers and their channel-bandwidth edges.
                 for md in &rules.markers {
-                    if let Some(cx) = md.x { rule(ctx, cx, pal.marker); }
-                    if let Some(lo) = md.bw_lo { rule(ctx, lo, pal.channel_bw); }
-                    if let Some(hi) = md.bw_hi { rule(ctx, hi, pal.channel_bw); }
+                    if let Some(cx) = md.x {
+                        rule(ctx, cx, pal.marker);
+                    }
+                    if let Some(lo) = md.bw_lo {
+                        rule(ctx, lo, pal.channel_bw);
+                    }
+                    if let Some(hi) = md.bw_hi {
+                        rule(ctx, hi, pal.channel_bw);
+                    }
                 }
                 // 6b. OBW band edges (lab_signal only).
-                if let Some(x) = rules.obw.0 { rule(ctx, x, pal.obw); }
-                if let Some(x) = rules.obw.1 { rule(ctx, x, pal.obw); }
+                if let Some(x) = rules.obw.0 {
+                    rule(ctx, x, pal.obw);
+                }
+                if let Some(x) = rules.obw.1 {
+                    rule(ctx, x, pal.obw);
+                }
                 // 7. Tuning cursor — full height, always on top.
-                if let Some(cx) = rules.cursor { rule(ctx, cx, pal.cursor); }
+                if let Some(cx) = rules.cursor {
+                    rule(ctx, cx, pal.cursor);
+                }
             }),
         area,
     );

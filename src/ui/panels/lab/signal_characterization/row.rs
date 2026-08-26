@@ -15,11 +15,15 @@ const FIELD_W: usize = 14;
 const ANN_GAP: usize = 3;
 
 /// Value colour: the measurements themselves.
-pub(super) fn val(theme: &crate::Theme) -> Style { Style::default().fg(theme.value) }
+pub(super) fn val(theme: &crate::Theme) -> Style {
+    Style::default().fg(theme.value)
+}
 
 /// Dim colour: annotations, units and anything that is context rather than a
 /// reading.
-pub(super) fn dim(theme: &crate::Theme) -> Style { Style::default().fg(theme.stale) }
+pub(super) fn dim(theme: &crate::Theme) -> Style {
+    Style::default().fg(theme.stale)
+}
 
 /// The placeholder for a reading that is not available. Dim, and never a number:
 /// an unmeasured field must not look like a measured one.
@@ -36,17 +40,30 @@ pub(super) fn metric(name: &str, body: Vec<Span<'static>>, theme: &crate::Theme)
 
 /// A value with its trailing dim annotation, the annotation dropped whole when
 /// the column cannot hold both — see [`annotation_fits`].
-pub(super) fn annotated(value: String, ann: String, iw: usize, theme: &crate::Theme) -> Vec<Span<'static>> {
+pub(super) fn annotated(
+    value: String,
+    ann: String,
+    iw: usize,
+    theme: &crate::Theme,
+) -> Vec<Span<'static>> {
     let fits = annotation_fits(value.chars().count(), ann.chars().count(), iw);
     let mut spans = vec![Span::styled(value, val(theme))];
-    if fits { spans.push(Span::styled(format!("{}{ann}", " ".repeat(ANN_GAP)), dim(theme))); }
+    if fits {
+        spans.push(Span::styled(
+            format!("{}{ann}", " ".repeat(ANN_GAP)),
+            dim(theme),
+        ));
+    }
     spans
 }
 
 /// `92.800 MHz` / `1.234500 GHz` — the same precise readout the lab marker bar uses.
 pub(super) fn fmt_freq(hz: u64) -> String {
-    if hz >= 1_000_000_000 { format!("{:.6} GHz", hz as f64 / 1e9) }
-    else                   { format!("{:.3} MHz", hz as f64 / 1e6) }
+    if hz >= 1_000_000_000 {
+        format!("{:.6} GHz", hz as f64 / 1e9)
+    } else {
+        format!("{:.3} MHz", hz as f64 / 1e6)
+    }
 }
 
 /// Whether a metric row's dim annotation fits the panel's inner width `iw`, given
@@ -77,17 +94,32 @@ mod tests {
         // The B2 row, measured: 120-column terminal → 29 inner. Lead 1 + label 14
         // + "-35.4 dBFS" 10 + gap 3 leaves 1 column, and "92.807 MHz" needs 10 —
         // so the frequency goes, instead of arriving as a lone "9".
-        assert!(!annotation_fits("-35.4 dBFS".chars().count(), "92.807 MHz".chars().count(), 29));
+        assert!(!annotation_fits(
+            "-35.4 dBFS".chars().count(),
+            "92.807 MHz".chars().count(),
+            29
+        ));
         // Widen the panel past the exact total (1+14+10+3+10 = 38) and it returns.
-        assert!(annotation_fits("-35.4 dBFS".chars().count(), "92.807 MHz".chars().count(), 38));
-        assert!(!annotation_fits("-35.4 dBFS".chars().count(), "92.807 MHz".chars().count(), 37));
+        assert!(annotation_fits(
+            "-35.4 dBFS".chars().count(),
+            "92.807 MHz".chars().count(),
+            38
+        ));
+        assert!(!annotation_fits(
+            "-35.4 dBFS".chars().count(),
+            "92.807 MHz".chars().count(),
+            37
+        ));
     }
 
     #[test]
     fn noise_density_annotation_is_the_first_to_go() {
         // The widest annotation on the panel; it should survive a full-width lab
         // column (the left column at 200 wide is ~46 inner) and drop below it.
-        let (v, a) = ("-81.1 dBFS".chars().count(), "-112.8 dBFS/Hz".chars().count());
+        let (v, a) = (
+            "-81.1 dBFS".chars().count(),
+            "-112.8 dBFS/Hz".chars().count(),
+        );
         assert!(annotation_fits(v, a, 46));
         assert!(!annotation_fits(v, a, 29));
     }

@@ -11,13 +11,17 @@ use crossterm::event::{KeyCode, KeyEvent};
 use crate::state::RailMode;
 use crate::ui;
 
-use super::{InputCtx, KeyAction, global, metrics};
+use super::{global, metrics, InputCtx, KeyAction};
 
 pub(super) fn lab_banner(key: KeyEvent, ctx: &mut InputCtx<'_>) -> KeyAction {
     let (state, _device) = (ctx.state, ctx.device);
     match key.code {
-        KeyCode::Up   => { metrics(state).lab.adjust_ref(1.0); }
-        KeyCode::Down => { metrics(state).lab.adjust_ref(-1.0); }
+        KeyCode::Up => {
+            metrics(state).lab.adjust_ref(1.0);
+        }
+        KeyCode::Down => {
+            metrics(state).lab.adjust_ref(-1.0);
+        }
         KeyCode::Char('[') => {
             let mut m = metrics(state);
             m.lab.adjust_avg(-1);
@@ -40,7 +44,12 @@ pub(super) fn lab_banner(key: KeyEvent, ctx: &mut InputCtx<'_>) -> KeyAction {
             if m.lab.ref_trace.is_some() {
                 m.lab.ref_trace = None;
                 m.push_log("Reference trace cleared");
-            } else if let Some(bins) = m.waterfall.last_fft.as_ref().map(|fr| Arc::clone(&fr.bins_dbfs)) {
+            } else if let Some(bins) = m
+                .waterfall
+                .last_fft
+                .as_ref()
+                .map(|fr| Arc::clone(&fr.bins_dbfs))
+            {
                 m.lab.ref_trace = Some(bins);
                 m.push_log("Reference trace captured");
             } else {
@@ -66,7 +75,9 @@ pub(super) fn iq_diagnostics(key: KeyEvent, ctx: &mut InputCtx<'_>) -> KeyAction
                 m.lab.iq_marker_pin = Some((ci.carrier_hz, ci.image_hz));
                 m.push_log(format!(
                     "IQ markers pinned — carrier {:.3} MHz · image {:.3} MHz · supp {:.1} dB",
-                    ci.carrier_hz as f64 / 1e6, ci.image_hz as f64 / 1e6, ci.suppression_db,
+                    ci.carrier_hz as f64 / 1e6,
+                    ci.image_hz as f64 / 1e6,
+                    ci.suppression_db,
                 ));
             } else {
                 m.push_log("IQ markers: no carrier detected yet".to_string());
@@ -78,8 +89,14 @@ pub(super) fn iq_diagnostics(key: KeyEvent, ctx: &mut InputCtx<'_>) -> KeyAction
             let mut m = metrics(state);
             m.iq.cal.dc_block_on = !m.iq.cal.dc_block_on;
             let on = m.iq.cal.dc_block_on;
-            m.push_log(if on { "DC-block ON — subtracting DC offset from the stream" }
-                       else  { "DC-block OFF" }.to_string());
+            m.push_log(
+                if on {
+                    "DC-block ON — subtracting DC offset from the stream"
+                } else {
+                    "DC-block OFF"
+                }
+                .to_string(),
+            );
             return KeyAction::Continue;
         }
         // [C] — auto-cal: capture (or clear) the I/Q quadrature correction.
@@ -102,7 +119,14 @@ pub(super) fn iq_diagnostics(key: KeyEvent, ctx: &mut InputCtx<'_>) -> KeyAction
             let mut m = metrics(state);
             m.iq.cal.frozen = !m.iq.cal.frozen;
             let frozen = m.iq.cal.frozen;
-            m.push_log(if frozen { "Constellation frozen" } else { "Constellation live" }.to_string());
+            m.push_log(
+                if frozen {
+                    "Constellation frozen"
+                } else {
+                    "Constellation live"
+                }
+                .to_string(),
+            );
             return KeyAction::Continue;
         }
         _ => {}
@@ -124,12 +148,16 @@ pub(super) fn rf_chain(key: KeyEvent, ctx: &mut InputCtx<'_>) -> KeyAction {
         KeyCode::Char('a') => {
             let (peak, lna, vga, friis, streaming) = {
                 let m = metrics(state);
-                (m.signal.adc_peak_dbfs as f64, m.radio.lna_gain, m.radio.vga_gain,
-                 m.caps.friis_applicable, m.radio.hw_streaming)
+                (
+                    m.signal.adc_peak_dbfs as f64,
+                    m.radio.lna_gain,
+                    m.radio.vga_gain,
+                    m.caps.friis_applicable,
+                    m.radio.hw_streaming,
+                )
             };
             if !streaming {
-                metrics(state)
-                    .push_log("Auto-gain: start RX first ([Space])".to_string());
+                metrics(state).push_log("Auto-gain: start RX first ([Space])".to_string());
                 return KeyAction::Continue;
             }
             if !friis {
@@ -142,8 +170,16 @@ pub(super) fn rf_chain(key: KeyEvent, ctx: &mut InputCtx<'_>) -> KeyAction {
                 // Off-optimal → one-shot jump through the same clamped gain path the
                 // manual keys use. The latch is left as-is (hands-off one-shot).
                 if let Some(device) = device {
-                    let r1 = if lna_t != lna { device.set_lna_gain(lna_t) } else { Ok(()) };
-                    let r2 = if vga_t != vga { device.set_vga_gain(vga_t) } else { Ok(()) };
+                    let r1 = if lna_t != lna {
+                        device.set_lna_gain(lna_t)
+                    } else {
+                        Ok(())
+                    };
+                    let r2 = if vga_t != vga {
+                        device.set_vga_gain(vga_t)
+                    } else {
+                        Ok(())
+                    };
                     let mut m = metrics(state);
                     match (r1, r2) {
                         (Ok(()), Ok(())) => {
@@ -178,14 +214,14 @@ pub(super) fn rf_chain(key: KeyEvent, ctx: &mut InputCtx<'_>) -> KeyAction {
                 m.push_log("Lab RF: live".to_string());
             } else {
                 m.lab.rf_freeze = Some(crate::state::RfFreeze {
-                    signed_hist:  m.iq.adc_signed_hist,
-                    peak_dbfs:    m.signal.adc_peak_dbfs,
-                    rms_dbfs:     m.signal.adc_rms_dbfs,
-                    clip_events:  m.signal.adc_clip_events,
-                    snr_db:       m.signal.peak_to_nf_db,
-                    amp_enabled:  m.radio.amp_enabled,
-                    lna_gain:     m.radio.lna_gain,
-                    vga_gain:     m.radio.vga_gain,
+                    signed_hist: m.iq.adc_signed_hist,
+                    peak_dbfs: m.signal.adc_peak_dbfs,
+                    rms_dbfs: m.signal.adc_rms_dbfs,
+                    clip_events: m.signal.adc_clip_events,
+                    snr_db: m.signal.peak_to_nf_db,
+                    amp_enabled: m.radio.amp_enabled,
+                    lna_gain: m.radio.lna_gain,
+                    vga_gain: m.radio.vga_gain,
                 });
                 m.push_log("Lab RF: frozen \u{2014} histogram & diagram held".to_string());
             }

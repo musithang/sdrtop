@@ -11,11 +11,11 @@ use ratatui::style::Color;
 /// The three colours a column can take, plus the base for everything else and
 /// the rule colour the chart's gutter, ticks and axis are drawn in.
 pub(super) struct Tint {
-    pub base:    Color,
+    pub base: Color,
     pub carrier: Color,
-    pub image:   Color,
-    pub dc:      Color,
-    pub rule:    Color,
+    pub image: Color,
+    pub dc: Color,
+    pub rule: Color,
 }
 
 impl Tint {
@@ -23,11 +23,11 @@ impl Tint {
         Self {
             // Half-brightness accent: the un-marked spectrum is context, and at
             // full strength it competes with the three columns that matter.
-            base:    dim(theme.border_accent, 0.5),
+            base: dim(theme.border_accent, 0.5),
             carrier: theme.value_hi,
-            image:   theme.status_warn,
-            dc:      theme.status_crit,
-            rule:    theme.border_dim,
+            image: theme.status_warn,
+            dc: theme.status_crit,
+            rule: theme.border_dim,
         }
     }
 }
@@ -35,17 +35,24 @@ impl Tint {
 /// Dim an `Rgb` colour's brightness by `f`. Non-Rgb colours pass through.
 fn dim(c: Color, f: f32) -> Color {
     match c {
-        Color::Rgb(r, g, b) =>
-            Color::Rgb((r as f32 * f) as u8, (g as f32 * f) as u8, (b as f32 * f) as u8),
+        Color::Rgb(r, g, b) => Color::Rgb(
+            (r as f32 * f) as u8,
+            (g as f32 * f) as u8,
+            (b as f32 * f) as u8,
+        ),
         other => other,
     }
 }
 
 /// Colour for an image-suppression figure: deeper is better.
 pub(super) fn supp_color(supp_db: f32, theme: &crate::Theme) -> Color {
-    if supp_db >= 40.0      { theme.status_ok   }
-    else if supp_db >= 20.0 { theme.status_warn }
-    else                    { theme.status_crit }
+    if supp_db >= 40.0 {
+        theme.status_ok
+    } else if supp_db >= 20.0 {
+        theme.status_warn
+    } else {
+        theme.status_crit
+    }
 }
 
 #[cfg(test)]

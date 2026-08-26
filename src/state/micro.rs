@@ -39,22 +39,22 @@ impl MicroView {
     /// The layout preset name this view switches to.
     pub fn preset_name(self) -> &'static str {
         match self {
-            MicroView::Main   => "micro_main",
+            MicroView::Main => "micro_main",
             MicroView::Signal => "micro_signal",
-            MicroView::Gain   => "micro_gain",
+            MicroView::Gain => "micro_gain",
             MicroView::Health => "micro_health",
-            MicroView::Sweep  => "micro_sweep",
+            MicroView::Sweep => "micro_sweep",
         }
     }
 
     /// Short label for the footer (`main`, `signal`, …).
     pub fn label(self) -> &'static str {
         match self {
-            MicroView::Main   => "main",
+            MicroView::Main => "main",
             MicroView::Signal => "signal",
-            MicroView::Gain   => "gain",
+            MicroView::Gain => "gain",
             MicroView::Health => "health",
-            MicroView::Sweep  => "sweep",
+            MicroView::Sweep => "sweep",
         }
     }
 
@@ -62,11 +62,11 @@ impl MicroView {
     /// of whether sweep is active, since Sweep is always last.
     pub fn position(self) -> usize {
         match self {
-            MicroView::Main   => 1,
+            MicroView::Main => 1,
             MicroView::Signal => 2,
-            MicroView::Gain   => 3,
+            MicroView::Gain => 3,
             MicroView::Health => 4,
-            MicroView::Sweep  => 5,
+            MicroView::Sweep => 5,
         }
     }
 

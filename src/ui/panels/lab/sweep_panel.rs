@@ -9,15 +9,16 @@ use ratatui::{
     style::{Color, Modifier, Style},
     text::{Line, Span},
     widgets::{
-        canvas::{Canvas, Line as CanvasLine}, Paragraph,
+        canvas::{Canvas, Line as CanvasLine},
+        Paragraph,
     },
     Frame,
 };
 
 use crate::palette::{magnitude_to_color_themed, ColorDepth};
 use crate::state::SdrMetrics;
-use crate::ui::widgets::band_plan::{band_at, BAND_PLAN};
 use crate::ui::panel::{Panel, PanelChrome};
+use crate::ui::widgets::band_plan::{band_at, BAND_PLAN};
 
 pub struct SweepPanel;
 
@@ -25,7 +26,11 @@ pub struct SweepPanel;
 /// spectrum's filled-body shading so the sweep envelope reads the same way.
 fn dim(c: Color, f: f32) -> Color {
     match c {
-        Color::Rgb(r, g, b) => Color::Rgb((r as f32 * f) as u8, (g as f32 * f) as u8, (b as f32 * f) as u8),
+        Color::Rgb(r, g, b) => Color::Rgb(
+            (r as f32 * f) as u8,
+            (g as f32 * f) as u8,
+            (b as f32 * f) as u8,
+        ),
         other => other,
     }
 }
@@ -37,11 +42,24 @@ const Y_MAX: f32 = 0.0;
 const AXIS_W: u16 = 5;
 
 impl Panel for SweepPanel {
-    fn name(&self) -> &'static str { "sweep_panel" }
-    fn min_size(&self) -> (u16, u16) { (40, 10) }
-    fn focus_key(&self) -> Option<char> { Some('g') }
+    fn name(&self) -> &'static str {
+        "sweep_panel"
+    }
+    fn min_size(&self) -> (u16, u16) {
+        (40, 10)
+    }
+    fn focus_key(&self) -> Option<char> {
+        Some('g')
+    }
     fn focus_bindings(&self) -> &'static [(&'static str, &'static str)] {
-        &[("←/→", "Cursor"), ("S/E", "Start/End"), ("M", "Peak/Mean"), ("+/-", "Dwell"), ("C", "Snapshot to log"), ("Enter", "Tune here")]
+        &[
+            ("←/→", "Cursor"),
+            ("S/E", "Start/End"),
+            ("M", "Peak/Mean"),
+            ("+/-", "Dwell"),
+            ("C", "Snapshot to log"),
+            ("Enter", "Tune here"),
+        ]
     }
 
     fn chrome(&self, state: &SdrMetrics) -> PanelChrome {
@@ -60,9 +78,18 @@ impl Panel for SweepPanel {
         ))
     }
 
-    fn render(&self, f: &mut Frame, inner: Rect, state: &SdrMetrics, theme: &crate::Theme, _focused: bool) {
+    fn render(
+        &self,
+        f: &mut Frame,
+        inner: Rect,
+        state: &SdrMetrics,
+        theme: &crate::Theme,
+        _focused: bool,
+    ) {
         let sw = &state.sweep;
-        if inner.width <= AXIS_W + 2 || inner.height < 4 { return; }
+        if inner.width <= AXIS_W + 2 || inner.height < 4 {
+            return;
+        }
 
         // Rows: plot area, x-axis labels, band-plan labels, status.
         let rows = Layout::default()
@@ -78,7 +105,11 @@ impl Panel for SweepPanel {
         let Some(frame) = sw.current_frame.as_ref() else {
             f.render_widget(
                 Paragraph::new(Line::from(Span::styled(
-                    if state.radio.hw_streaming { "  Scanning… first cycle in progress" } else { "  Waiting — open lab_sweep with RX available" },
+                    if state.radio.hw_streaming {
+                        "  Scanning… first cycle in progress"
+                    } else {
+                        "  Waiting — open lab_sweep with RX available"
+                    },
                     Style::default().fg(theme.stale),
                 ))),
                 rows[0],
@@ -87,24 +118,46 @@ impl Panel for SweepPanel {
         };
 
         let plot = rows[0];
-        if plot.width <= AXIS_W || plot.height == 0 { return; }
+        if plot.width <= AXIS_W || plot.height == 0 {
+            return;
+        }
         // Left dBFS gutter + braille envelope canvas to its right.
-        let gutter = Rect { x: plot.x, y: plot.y, width: AXIS_W, height: plot.height };
-        let canvas_area = Rect { x: plot.x + AXIS_W, y: plot.y, width: plot.width - AXIS_W, height: plot.height };
-        let plot_w = canvas_area.width as usize;   // cells — used by the axis, band-plan and cursor maths
+        let gutter = Rect {
+            x: plot.x,
+            y: plot.y,
+            width: AXIS_W,
+            height: plot.height,
+        };
+        let canvas_area = Rect {
+            x: plot.x + AXIS_W,
+            y: plot.y,
+            width: plot.width - AXIS_W,
+            height: plot.height,
+        };
+        let plot_w = canvas_area.width as usize; // cells — used by the axis, band-plan and cursor maths
         let plot_h = canvas_area.height as usize;
-        if plot_w == 0 || plot_h == 0 { return; }
+        if plot_w == 0 || plot_h == 0 {
+            return;
+        }
 
         let span_db = (Y_MAX - Y_MIN).max(1.0);
 
         // dBFS gutter labels: top = Y_MAX, middle, bottom = Y_MIN.
         let mut gutter_lines: Vec<Line> = Vec::with_capacity(plot_h);
         for r in 0..plot_h {
-            let s = if r == 0 { format!("{:>4} ", Y_MAX as i32) }
-                else if r == plot_h - 1 { format!("{:>4} ", Y_MIN as i32) }
-                else if plot_h >= 5 && r == plot_h / 2 { format!("{:>4} ", ((Y_MAX + Y_MIN) / 2.0) as i32) }
-                else { "     ".to_string() };
-            gutter_lines.push(Line::from(Span::styled(s, Style::default().fg(theme.label))));
+            let s = if r == 0 {
+                format!("{:>4} ", Y_MAX as i32)
+            } else if r == plot_h - 1 {
+                format!("{:>4} ", Y_MIN as i32)
+            } else if plot_h >= 5 && r == plot_h / 2 {
+                format!("{:>4} ", ((Y_MAX + Y_MIN) / 2.0) as i32)
+            } else {
+                "     ".to_string()
+            };
+            gutter_lines.push(Line::from(Span::styled(
+                s,
+                Style::default().fg(theme.label),
+            )));
         }
         f.render_widget(Paragraph::new(gutter_lines), gutter);
 
@@ -113,8 +166,15 @@ impl Panel for SweepPanel {
         let n_cols = (plot_w * 2).max(2);
         let raw = frame.project(n_cols, sw.show_peak);
         // Envelope heights, clamped into the window (non-finite → floor → no fill).
-        let body: Vec<f32> = raw.iter()
-            .map(|&v| if v.is_finite() { v.clamp(Y_MIN, Y_MAX) } else { Y_MIN })
+        let body: Vec<f32> = raw
+            .iter()
+            .map(|&v| {
+                if v.is_finite() {
+                    v.clamp(Y_MIN, Y_MAX)
+                } else {
+                    Y_MIN
+                }
+            })
             .collect();
         let n = body.len();
 
@@ -123,12 +183,32 @@ impl Panel for SweepPanel {
         let depth = ColorDepth::detect();
         let v_steps = (plot_h * 4).clamp(1, 512);
         let band_y: Vec<f32> = (0..v_steps)
-            .map(|s| Y_MIN + (if v_steps > 1 { s as f32 / (v_steps - 1) as f32 } else { 0.0 }) * span_db)
+            .map(|s| {
+                Y_MIN
+                    + (if v_steps > 1 {
+                        s as f32 / (v_steps - 1) as f32
+                    } else {
+                        0.0
+                    }) * span_db
+            })
             .collect();
-        let band_dim:    Vec<Color> = band_y.iter().map(|&yb| dim(magnitude_to_color_themed(yb, Y_MIN, Y_MAX, depth, theme), 0.45)).collect();
-        let band_bright: Vec<Color> = band_y.iter().map(|&yb| magnitude_to_color_themed(yb, Y_MIN, Y_MAX, depth, theme)).collect();
+        let band_dim: Vec<Color> = band_y
+            .iter()
+            .map(|&yb| {
+                dim(
+                    magnitude_to_color_themed(yb, Y_MIN, Y_MAX, depth, theme),
+                    0.45,
+                )
+            })
+            .collect();
+        let band_bright: Vec<Color> = band_y
+            .iter()
+            .map(|&yb| magnitude_to_color_themed(yb, Y_MIN, Y_MAX, depth, theme))
+            .collect();
 
-        let cursor_x = sw.cursor_frac.map(|fr| (fr * (n - 1) as f64).clamp(0.0, (n - 1) as f64));
+        let cursor_x = sw
+            .cursor_frac
+            .map(|fr| (fr * (n - 1) as f64).clamp(0.0, (n - 1) as f64));
         let cursor_color = theme.value_hi;
         let x_max = (n as f64 - 1.0).max(0.0);
 
@@ -145,21 +225,43 @@ impl Panel for SweepPanel {
                         while i < body.len() {
                             if body[i] >= yb {
                                 let start = i;
-                                while i < body.len() && body[i] >= yb { i += 1; }
-                                ctx.draw(&CanvasLine { x1: start as f64, y1: ybf, x2: (i - 1) as f64, y2: ybf, color });
-                            } else { i += 1; }
+                                while i < body.len() && body[i] >= yb {
+                                    i += 1;
+                                }
+                                ctx.draw(&CanvasLine {
+                                    x1: start as f64,
+                                    y1: ybf,
+                                    x2: (i - 1) as f64,
+                                    y2: ybf,
+                                    color,
+                                });
+                            } else {
+                                i += 1;
+                            }
                         }
                     }
                     // 2. Crisp top edge — connect column tops, coloured by height.
                     for i in 1..body.len() {
                         let (y0, y1) = (body[i - 1], body[i]);
                         let frac = (((y0 + y1) * 0.5 - Y_MIN) / span_db).clamp(0.0, 1.0);
-                        let idx  = ((frac * (v_steps - 1) as f32) as usize).min(v_steps - 1);
-                        ctx.draw(&CanvasLine { x1: (i - 1) as f64, y1: y0 as f64, x2: i as f64, y2: y1 as f64, color: band_bright[idx] });
+                        let idx = ((frac * (v_steps - 1) as f32) as usize).min(v_steps - 1);
+                        ctx.draw(&CanvasLine {
+                            x1: (i - 1) as f64,
+                            y1: y0 as f64,
+                            x2: i as f64,
+                            y2: y1 as f64,
+                            color: band_bright[idx],
+                        });
                     }
                     // 3. Cursor glow — a full-height column at the cursor position.
                     if let Some(cx) = cursor_x {
-                        ctx.draw(&CanvasLine { x1: cx, y1: Y_MIN as f64, x2: cx, y2: Y_MAX as f64, color: cursor_color });
+                        ctx.draw(&CanvasLine {
+                            x1: cx,
+                            y1: Y_MIN as f64,
+                            x2: cx,
+                            y2: Y_MAX as f64,
+                            color: cursor_color,
+                        });
                     }
                 }),
             canvas_area,
@@ -179,10 +281,25 @@ impl Panel for SweepPanel {
             midw = plot_w / 3,
             endw = plot_w - 2 * (plot_w / 3),
         );
-        f.render_widget(Paragraph::new(Line::from(Span::styled(axis, Style::default().fg(theme.label)))), rows[1]);
+        f.render_widget(
+            Paragraph::new(Line::from(Span::styled(
+                axis,
+                Style::default().fg(theme.label),
+            ))),
+            rows[1],
+        );
 
         // Band-plan label row: place each overlapping band's name at its centre x.
-        f.render_widget(Paragraph::new(band_plan_line(frame.start_hz, frame.stop_hz, plot_w, AXIS_W as usize, theme)), rows[2]);
+        f.render_widget(
+            Paragraph::new(band_plan_line(
+                frame.start_hz,
+                frame.stop_hz,
+                plot_w,
+                AXIS_W as usize,
+                theme,
+            )),
+            rows[2],
+        );
 
         // Status line: cursor readout, else the cycle summary.
         let status = match cursor_hz {
@@ -190,11 +307,22 @@ impl Panel for SweepPanel {
                 let frac = sw.cursor_frac.unwrap_or(0.0);
                 let bucket = ((frac * n as f64) as usize).min(n.saturating_sub(1));
                 let level = raw.get(bucket).copied().unwrap_or(f32::NEG_INFINITY);
-                let level_str = if level.is_finite() { format!("{:.1} dBFS", level) } else { "—".to_string() };
-                let band = band_at(hz).map(|b| format!("  [{}]", b)).unwrap_or_default();
+                let level_str = if level.is_finite() {
+                    format!("{:.1} dBFS", level)
+                } else {
+                    "—".to_string()
+                };
+                let band = band_at(hz)
+                    .map(|b| format!("  [{}]", b))
+                    .unwrap_or_default();
                 Line::from(vec![
                     Span::styled(" Cursor ", Style::default().fg(theme.label)),
-                    Span::styled(format!("{:.3} MHz", hz as f64 / 1e6), Style::default().fg(theme.value_hi).add_modifier(Modifier::BOLD)),
+                    Span::styled(
+                        format!("{:.3} MHz", hz as f64 / 1e6),
+                        Style::default()
+                            .fg(theme.value_hi)
+                            .add_modifier(Modifier::BOLD),
+                    ),
                     Span::raw("  "),
                     Span::styled(level_str, Style::default().fg(theme.value)),
                     Span::styled(band, Style::default().fg(theme.status_ok)),
@@ -202,13 +330,32 @@ impl Panel for SweepPanel {
             }
             None => Line::from(vec![
                 Span::styled(" pos ", Style::default().fg(theme.label)),
-                Span::styled(format!("{}/{}", sw.positions_done, sw.positions_total), Style::default().fg(theme.value)),
+                Span::styled(
+                    format!("{}/{}", sw.positions_done, sw.positions_total),
+                    Style::default().fg(theme.value),
+                ),
                 Span::styled("  ·  cycle ", Style::default().fg(theme.label)),
-                Span::styled(format!("#{} ({:.1}s)", frame.cycle_count, frame.cycle_duration_ms as f64 / 1000.0), Style::default().fg(theme.value)),
+                Span::styled(
+                    format!(
+                        "#{} ({:.1}s)",
+                        frame.cycle_count,
+                        frame.cycle_duration_ms as f64 / 1000.0
+                    ),
+                    Style::default().fg(theme.value),
+                ),
                 Span::styled("  ·  ", Style::default().fg(theme.label)),
-                Span::styled(if sw.show_peak { "PEAK" } else { "MEAN" }, Style::default().fg(theme.value_hi)),
-                Span::styled(format!("  ·  {:.0}s ago", frame.timestamp.elapsed().as_secs_f64()), Style::default().fg(theme.stale)),
-                Span::styled("  ·  focus [G] for cursor", Style::default().fg(theme.stale)),
+                Span::styled(
+                    if sw.show_peak { "PEAK" } else { "MEAN" },
+                    Style::default().fg(theme.value_hi),
+                ),
+                Span::styled(
+                    format!("  ·  {:.0}s ago", frame.timestamp.elapsed().as_secs_f64()),
+                    Style::default().fg(theme.stale),
+                ),
+                Span::styled(
+                    "  ·  focus [G] for cursor",
+                    Style::default().fg(theme.stale),
+                ),
             ]),
         };
         f.render_widget(Paragraph::new(status), rows[3]);
@@ -217,12 +364,20 @@ impl Panel for SweepPanel {
 
 /// Build the band-plan label row: each known band overlapping `[start, stop]`
 /// gets its name placed at its centre x (within the plot area, after the gutter).
-fn band_plan_line(start_hz: u64, stop_hz: u64, plot_w: usize, gutter: usize, theme: &crate::Theme) -> Line<'static> {
+fn band_plan_line(
+    start_hz: u64,
+    stop_hz: u64,
+    plot_w: usize,
+    gutter: usize,
+    theme: &crate::Theme,
+) -> Line<'static> {
     let mut row = vec![' '; gutter + plot_w];
     if stop_hz > start_hz {
         let span = (stop_hz - start_hz) as f64;
         for &(bs, be, name) in BAND_PLAN {
-            if be <= start_hz || bs >= stop_hz { continue; }
+            if be <= start_hz || bs >= stop_hz {
+                continue;
+            }
             let centre = (bs.max(start_hz) + be.min(stop_hz)) / 2;
             let frac = (centre - start_hz) as f64 / span;
             let col = gutter + ((frac * plot_w as f64) as usize).min(plot_w.saturating_sub(1));
@@ -235,5 +390,8 @@ fn band_plan_line(start_hz: u64, stop_hz: u64, plot_w: usize, gutter: usize, the
             }
         }
     }
-    Line::from(Span::styled(row.into_iter().collect::<String>(), Style::default().fg(theme.border_dim)))
+    Line::from(Span::styled(
+        row.into_iter().collect::<String>(),
+        Style::default().fg(theme.border_dim),
+    ))
 }

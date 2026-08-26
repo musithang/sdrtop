@@ -31,8 +31,15 @@ pub struct IqCalState {
 impl Default for IqCalState {
     fn default() -> Self {
         Self {
-            dc_block_on: false, cal_applied: false, cal_pending: false, last_cal_at: None,
-            frozen: false, dc_i_raw: 0.0, dc_q_raw: 0.0, c_qi: 0.0, c_qq: 1.0,
+            dc_block_on: false,
+            cal_applied: false,
+            cal_pending: false,
+            last_cal_at: None,
+            frozen: false,
+            dc_i_raw: 0.0,
+            dc_q_raw: 0.0,
+            c_qi: 0.0,
+            c_qq: 1.0,
         }
     }
 }
@@ -54,7 +61,9 @@ impl IqCalState {
     }
 
     /// Whether any correction currently modifies the samples.
-    pub fn correcting(&self) -> bool { self.dc_block_on || self.cal_applied }
+    pub fn correcting(&self) -> bool {
+        self.dc_block_on || self.cal_applied
+    }
 }
 
 #[cfg(test)]
@@ -91,26 +100,26 @@ mod cal_tests {
 
 #[derive(Clone)]
 pub struct IqState {
-    pub iq_imbalance_db:    f32,
-    pub dc_offset_i:        f32,
-    pub dc_offset_q:        f32,
-    pub cb_period_us:        u64,
-    pub cb_jitter_us:        u64,
-    pub jitter_history:      std::collections::VecDeque<u64>,
-    pub iq_amplitude_hist:   [u64; 32],
+    pub iq_imbalance_db: f32,
+    pub dc_offset_i: f32,
+    pub dc_offset_q: f32,
+    pub cb_period_us: u64,
+    pub cb_jitter_us: u64,
+    pub jitter_history: std::collections::VecDeque<u64>,
+    pub iq_amplitude_hist: [u64; 32],
     /// Signed ADC sample histogram (I and Q binned together) for the Lab RF
     /// ADC-loading bell: bin `((v + 128) / 8)`, bin 16 = mid-scale, 0/31 = the rails.
     /// Snapshotted from the accumulator each ~200 ms window, like `iq_amplitude_hist`.
-    pub adc_signed_hist:     [u64; 32],
-    pub buf_fill_pct:        f32,
-    pub buf_fill_history:    std::collections::VecDeque<u64>,
+    pub adc_signed_hist: [u64; 32],
+    pub buf_fill_pct: f32,
+    pub buf_fill_history: std::collections::VecDeque<u64>,
     pub phase_imbalance_deg: f32,
     /// Live I/Q correction state ([D] DC-block / [C] auto-cal / [F] freeze).
-    pub cal:                 IqCalState,
+    pub cal: IqCalState,
     /// IRR (image-rejection ratio, dB) trend history for the Lab IQ diagnostics
     /// sparkline. Sampled at the same ~500 ms cadence and [`SNR_HISTORY_LEN`] depth
     /// as the command-rail SIGNAL traces so a full panel-width sweep ≈ 60 s.
-    pub irr_history:         std::collections::VecDeque<f32>,
+    pub irr_history: std::collections::VecDeque<f32>,
     /// Decimated I/Q sample ring buffer for the 2-D constellation display.
     /// Values are normalised to [-1, 1] (divided by 128). Written in the RX
     /// hot-path at a 1 : [`CONST_DECIMATE`] decimation; oldest pairs are

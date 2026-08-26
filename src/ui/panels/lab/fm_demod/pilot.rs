@@ -12,19 +12,26 @@ use crate::ui::chrome;
 use super::fmt::{fmt_hz, val};
 use super::stack::Stack;
 
-pub(super) fn lines(stack: &mut Stack<'static>, state: &SdrMetrics, iw: usize, theme: &crate::Theme) {
+pub(super) fn lines(
+    stack: &mut Stack<'static>,
+    state: &SdrMetrics,
+    iw: usize,
+    theme: &crate::Theme,
+) {
     stack.heading(chrome::section("PILOT / STEREO", "19 kHz", iw, theme));
     match state.demod.live_pilot() {
         Some(p) => {
             let (mark, word, color) = match p.state {
-                PilotState::Locked   => ("\u{25cf}", "STEREO",   theme.status_ok),
+                PilotState::Locked => ("\u{25cf}", "STEREO", theme.status_ok),
                 PilotState::Marginal => ("\u{25d0}", "MARGINAL", theme.status_warn),
-                PilotState::Absent   => ("\u{25cb}", "MONO",     theme.label),
+                PilotState::Absent => ("\u{25cb}", "MONO", theme.label),
             };
             stack.push(Line::from(vec![
                 Span::raw(" "),
-                Span::styled(format!("{mark} {word}"),
-                             Style::default().fg(color).add_modifier(Modifier::BOLD)),
+                Span::styled(
+                    format!("{mark} {word}"),
+                    Style::default().fg(color).add_modifier(Modifier::BOLD),
+                ),
             ]));
             if p.state != PilotState::Absent {
                 stack.detail(Line::from(vec![

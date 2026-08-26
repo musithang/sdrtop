@@ -19,11 +19,15 @@ impl EventStream {
             if event::poll(tick_rate).unwrap_or(false) {
                 match event::read() {
                     Ok(Event::Key(key)) => {
-                        if tx.send(AppEvent::Key(key)).is_err() { break; }
+                        if tx.send(AppEvent::Key(key)).is_err() {
+                            break;
+                        }
                     }
                     Ok(Event::Resize(..)) => {
                         // Trigger an immediate redraw so preferred_height re-runs with the new width.
-                        if tx.send(AppEvent::Tick).is_err() { break; }
+                        if tx.send(AppEvent::Tick).is_err() {
+                            break;
+                        }
                     }
                     _ => {}
                 }

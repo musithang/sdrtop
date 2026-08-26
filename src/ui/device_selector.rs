@@ -19,7 +19,11 @@ impl<'a> DeviceSelector<'a> {
     fn new(devices: &'a [(usize, String)], theme: &'a Theme) -> Self {
         let mut state = ListState::default();
         state.select(Some(0));
-        Self { devices, state, theme }
+        Self {
+            devices,
+            state,
+            theme,
+        }
     }
 
     fn draw(&mut self, f: &mut Frame) {
@@ -70,8 +74,7 @@ impl<'a> DeviceSelector<'a> {
             .devices
             .iter()
             .map(|(_, serial)| {
-                ListItem::new(format!("  {serial}"))
-                    .style(Style::default().fg(self.theme.value))
+                ListItem::new(format!("  {serial}")).style(Style::default().fg(self.theme.value))
             })
             .collect();
 

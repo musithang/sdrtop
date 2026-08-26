@@ -63,37 +63,48 @@ impl ThemeFile {
     pub fn into_theme(self) -> Result<Theme, String> {
         macro_rules! hex {
             ($field:ident) => {
-                Theme::parse_hex(&self.$field)
-                    .ok_or_else(|| format!("{}: '{}' is not a #rrggbb colour",
-                                           stringify!($field), self.$field))?
+                Theme::parse_hex(&self.$field).ok_or_else(|| {
+                    format!(
+                        "{}: '{}' is not a #rrggbb colour",
+                        stringify!($field),
+                        self.$field
+                    )
+                })?
             };
         }
         let theme = Theme {
-            border_dim:     hex!(border_dim),
+            border_dim: hex!(border_dim),
             border_default: hex!(border_default),
-            border_accent:  hex!(border_accent),
+            border_accent: hex!(border_accent),
             border_focused: hex!(border_focused),
-            label:          hex!(label),
-            value:          hex!(value),
-            value_hi:       hex!(value_hi),
-            status_ok:      hex!(status_ok),
-            status_warn:    hex!(status_warn),
-            status_crit:    hex!(status_crit),
-            peak_hold:      hex!(peak_hold),
-            noise_floor:    hex!(noise_floor),
-            stale:          hex!(stale),
-            observer:       hex!(observer),
-            palette: self.palette.iter()
+            label: hex!(label),
+            value: hex!(value),
+            value_hi: hex!(value_hi),
+            status_ok: hex!(status_ok),
+            status_warn: hex!(status_warn),
+            status_crit: hex!(status_crit),
+            peak_hold: hex!(peak_hold),
+            noise_floor: hex!(noise_floor),
+            stale: hex!(stale),
+            observer: hex!(observer),
+            palette: self
+                .palette
+                .iter()
                 .map(|s| match Theme::parse_hex(&s.color) {
                     Some(ratatui::style::Color::Rgb(r, g, b)) => Ok((s.at, r, g, b)),
-                    _ => Err(format!("palette stop at {}: '{}' is not a #rrggbb colour",
-                                     s.at, s.color)),
+                    _ => Err(format!(
+                        "palette stop at {}: '{}' is not a #rrggbb colour",
+                        s.at, s.color
+                    )),
                 })
                 .collect::<Result<Vec<_>, _>>()?,
             name: self.name,
         };
         if theme.palette.len() < 2 {
-            return Err(format!("{}: a gradient needs at least two stops", theme.name));
+            return Err(format!(
+                "{}: a gradient needs at least two stops",
+                theme.name
+            ));
         }
         Ok(theme)
     }
@@ -106,12 +117,27 @@ mod tests {
     /// A complete, valid theme file, for tests that want to break exactly one thing.
     fn good() -> String {
         let mut t = String::from("name = \"test\"\n");
-        for f in ["border_dim", "border_default", "border_accent", "border_focused",
-                  "label", "value", "value_hi", "status_ok", "status_warn",
-                  "status_crit", "peak_hold", "noise_floor", "stale", "observer"] {
+        for f in [
+            "border_dim",
+            "border_default",
+            "border_accent",
+            "border_focused",
+            "label",
+            "value",
+            "value_hi",
+            "status_ok",
+            "status_warn",
+            "status_crit",
+            "peak_hold",
+            "noise_floor",
+            "stale",
+            "observer",
+        ] {
             t.push_str(&format!("{f} = \"#102030\"\n"));
         }
-        t.push_str("palette = [{ at = 0.0, color = \"#000000\" }, { at = 1.0, color = \"#ffffff\" }]\n");
+        t.push_str(
+            "palette = [{ at = 0.0, color = \"#000000\" }, { at = 1.0, color = \"#ffffff\" }]\n",
+        );
         t
     }
 
@@ -119,7 +145,10 @@ mod tests {
     fn a_complete_file_becomes_a_theme() {
         let t = ThemeFile::parse(&good()).unwrap().into_theme().unwrap();
         assert_eq!(t.name, "test");
-        assert_eq!(t.border_accent, ratatui::style::Color::Rgb(0x10, 0x20, 0x30));
+        assert_eq!(
+            t.border_accent,
+            ratatui::style::Color::Rgb(0x10, 0x20, 0x30)
+        );
         assert_eq!(t.palette, vec![(0.0, 0, 0, 0), (1.0, 255, 255, 255)]);
     }
 
@@ -129,7 +158,10 @@ mod tests {
         // and the result would be a blend nobody chose.
         let broken = good().replace("status_crit = \"#102030\"\n", "");
         let err = ThemeFile::parse(&broken).unwrap_err().to_string();
-        assert!(err.contains("status_crit"), "the error should name the field: {err}");
+        assert!(
+            err.contains("status_crit"),
+            "the error should name the field: {err}"
+        );
     }
 
     #[test]
@@ -152,7 +184,8 @@ mod tests {
         // and would make every signal level the same colour.
         let broken = good().replace(
             "palette = [{ at = 0.0, color = \"#000000\" }, { at = 1.0, color = \"#ffffff\" }]",
-            "palette = [{ at = 0.0, color = \"#000000\" }]");
+            "palette = [{ at = 0.0, color = \"#000000\" }]",
+        );
         let err = ThemeFile::parse(&broken).unwrap().into_theme().unwrap_err();
         assert!(err.contains("two stops"), "{err}");
     }

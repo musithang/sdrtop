@@ -14,7 +14,9 @@ use ratatui::{
 pub(super) fn dim(c: Color, f: f32) -> Color {
     match c {
         Color::Rgb(r, g, b) => Color::Rgb(
-            (r as f32 * f) as u8, (g as f32 * f) as u8, (b as f32 * f) as u8,
+            (r as f32 * f) as u8,
+            (g as f32 * f) as u8,
+            (b as f32 * f) as u8,
         ),
         other => other,
     }
@@ -22,9 +24,15 @@ pub(super) fn dim(c: Color, f: f32) -> Color {
 
 /// Map a frequency to a canvas x-coordinate in `[0, n-1]`, or `None` if out of view.
 pub(super) fn freq_to_canvas_x(freq_hz: f64, left_hz: f64, bw: f64, n: f64) -> Option<f64> {
-    if bw <= 0.0 { return None; }
+    if bw <= 0.0 {
+        return None;
+    }
     let frac = (freq_hz - left_hz) / bw;
-    if (0.0..=1.0).contains(&frac) { Some(frac * (n - 1.0)) } else { None }
+    if (0.0..=1.0).contains(&frac) {
+        Some(frac * (n - 1.0))
+    } else {
+        None
+    }
 }
 
 /// A canvas x — the units [`freq_to_canvas_x`] returns, spanning `0..n-1` — as a
@@ -36,7 +44,9 @@ pub(super) fn freq_to_canvas_x(freq_hz: f64, left_hz: f64, bw: f64, n: f64) -> O
 /// to the right-hand edge, which is exactly what the OBW label did at every
 /// terminal size it was tried at.
 pub(super) fn canvas_x_to_col(x: f64, n: f64, width: u16) -> u16 {
-    if n <= 1.0 || width == 0 { return 0; }
+    if n <= 1.0 || width == 0 {
+        return 0;
+    }
     let frac = (x / (n - 1.0)).clamp(0.0, 1.0);
     ((frac * width as f64).round() as u16).min(width - 1)
 }
@@ -68,7 +78,9 @@ pub fn prev_spectrum_step(current: u64) -> u64 {
     match SPECTRUM_STEPS.iter().position(|&s| s == current) {
         Some(idx) => SPECTRUM_STEPS[idx.saturating_sub(1)],
         // Not in list: find the largest step strictly below current
-        None => SPECTRUM_STEPS.iter().copied()
+        None => SPECTRUM_STEPS
+            .iter()
+            .copied()
             .rfind(|&s| s < current)
             .unwrap_or(SPECTRUM_STEPS[0]),
     }
@@ -78,7 +90,9 @@ pub fn next_spectrum_step(current: u64) -> u64 {
     match SPECTRUM_STEPS.iter().position(|&s| s == current) {
         Some(idx) => SPECTRUM_STEPS[(idx + 1).min(SPECTRUM_STEPS.len() - 1)],
         // Not in list: find the smallest step strictly above current
-        None => SPECTRUM_STEPS.iter().copied()
+        None => SPECTRUM_STEPS
+            .iter()
+            .copied()
             .find(|&s| s > current)
             .unwrap_or(*SPECTRUM_STEPS.last().unwrap()),
     }
@@ -86,26 +100,38 @@ pub fn next_spectrum_step(current: u64) -> u64 {
 
 /// Compact bandwidth, for marker suffixes and the OBW label: `25k`, `1.5M`.
 pub(super) fn fmt_khz(hz: u64) -> String {
-    if hz >= 1_000_000 { format!("{:.1}M", hz as f64 / 1_000_000.0) }
-    else               { format!("{}k", hz / 1_000) }
+    if hz >= 1_000_000 {
+        format!("{:.1}M", hz as f64 / 1_000_000.0)
+    } else {
+        format!("{}k", hz / 1_000)
+    }
 }
 
 /// The tuning step as the footer and indicator spell it: `25 kHz`, `1 MHz`.
 pub fn fmt_spectrum_step(hz: u64) -> String {
-    if hz >= 1_000_000 { format!("{} MHz", hz / 1_000_000) }
-    else { format!("{} kHz", hz / 1_000) }
+    if hz >= 1_000_000 {
+        format!("{} MHz", hz / 1_000_000)
+    } else {
+        format!("{} kHz", hz / 1_000)
+    }
 }
 
 /// Build the frequency-scale spans for an axis/ruler `width` columns wide: a `┬`
 /// tick + MHz label at each quarter, the inter-tick gaps filled with `fill`.
 /// Reused by the spectrum's own axis (fill `' '`) and the bonded shared ruler on
 /// the waterfall's top border (fill `'─'`, so it reads as a continuous rule).
-pub fn freq_scale_spans(left_hz: f64, bw: f64, width: usize,
-                        tick_color: Color, label_color: Color, fill: char) -> Vec<Span<'static>> {
+pub fn freq_scale_spans(
+    left_hz: f64,
+    bw: f64,
+    width: usize,
+    tick_color: Color,
+    label_color: Color,
+    fill: char,
+) -> Vec<Span<'static>> {
     let labels: Vec<String> = (0..=4)
         .map(|i| format!("{:.2}M", (left_hz + bw * i as f64 / 4.0) / 1_000_000.0))
         .collect();
-    let lw  = labels.iter().map(|s| s.len()).max().unwrap_or(7);
+    let lw = labels.iter().map(|s| s.len()).max().unwrap_or(7);
     let seg = width.saturating_sub(lw) / 4;
     let mut spans: Vec<Span> = Vec::with_capacity(12);
     for (i, lab) in labels.iter().enumerate() {
@@ -113,7 +139,10 @@ pub fn freq_scale_spans(left_hz: f64, bw: f64, width: usize,
         if i < 4 {
             let pad = seg.saturating_sub(1).saturating_sub(lab.len());
             spans.push(Span::styled(lab.clone(), Style::default().fg(label_color)));
-            spans.push(Span::styled(fill.to_string().repeat(pad), Style::default().fg(tick_color)));
+            spans.push(Span::styled(
+                fill.to_string().repeat(pad),
+                Style::default().fg(tick_color),
+            ));
         } else {
             spans.push(Span::styled(lab.clone(), Style::default().fg(label_color)));
         }
@@ -131,7 +160,11 @@ mod tests {
         // Three quarters across a 2048-bin canvas is column 120 of 160, not 160.
         let n = 2048.0;
         assert_eq!(canvas_x_to_col(0.0, n, 160), 0);
-        assert_eq!(canvas_x_to_col(n - 1.0, n, 160), 159, "the last bin is the last column");
+        assert_eq!(
+            canvas_x_to_col(n - 1.0, n, 160),
+            159,
+            "the last bin is the last column"
+        );
         assert_eq!(canvas_x_to_col((n - 1.0) * 0.75, n, 160), 120);
         // Degenerate geometry answers 0 rather than dividing by zero.
         assert_eq!(canvas_x_to_col(500.0, 1.0, 160), 0);
@@ -144,9 +177,18 @@ mod tests {
         assert_eq!(freq_to_canvas_x(92_000_000.0, left, bw, n), Some(0.0));
         assert_eq!(freq_to_canvas_x(94_000_000.0, left, bw, n), Some(1000.0));
         assert_eq!(freq_to_canvas_x(93_000_000.0, left, bw, n), Some(500.0));
-        assert!(freq_to_canvas_x(91_999_999.0, left, bw, n).is_none(), "below the window");
-        assert!(freq_to_canvas_x(94_000_001.0, left, bw, n).is_none(), "above the window");
-        assert!(freq_to_canvas_x(93_000_000.0, left, 0.0, n).is_none(), "no span, no position");
+        assert!(
+            freq_to_canvas_x(91_999_999.0, left, bw, n).is_none(),
+            "below the window"
+        );
+        assert!(
+            freq_to_canvas_x(94_000_001.0, left, bw, n).is_none(),
+            "above the window"
+        );
+        assert!(
+            freq_to_canvas_x(93_000_000.0, left, 0.0, n).is_none(),
+            "no span, no position"
+        );
     }
 
     #[test]
@@ -154,7 +196,11 @@ mod tests {
         assert_eq!(next_spectrum_step(1_000), 5_000);
         assert_eq!(prev_spectrum_step(5_000), 1_000);
         assert_eq!(prev_spectrum_step(1_000), 1_000, "already at the bottom");
-        assert_eq!(next_spectrum_step(10_000_000), 10_000_000, "already at the top");
+        assert_eq!(
+            next_spectrum_step(10_000_000),
+            10_000_000,
+            "already at the top"
+        );
         // A value that is not on the ladder snaps to the neighbour in that direction.
         assert_eq!(next_spectrum_step(7_500), 10_000);
         assert_eq!(prev_spectrum_step(7_500), 5_000);
@@ -179,7 +225,14 @@ mod tests {
 
     #[test]
     fn the_frequency_ruler_spans_the_width_it_was_given() {
-        let spans = freq_scale_spans(92_000_000.0, 2_000_000.0, 60, Color::Reset, Color::Reset, '─');
+        let spans = freq_scale_spans(
+            92_000_000.0,
+            2_000_000.0,
+            60,
+            Color::Reset,
+            Color::Reset,
+            '─',
+        );
         let w: usize = spans.iter().map(|s| s.content.chars().count()).sum();
         assert!(w <= 60, "the ruler never overruns its row (got {w})");
         // Five ticks, first and last labelled with the window edges.

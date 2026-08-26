@@ -29,26 +29,50 @@ use ratatui::text::Line;
 /// with a single detail class the pilot's deviation went before its injection level,
 /// purely because it is printed first.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
-pub(super) enum Prio { Heading, Core, Detail, Minor, Ornament }
+pub(super) enum Prio {
+    Heading,
+    Core,
+    Detail,
+    Minor,
+    Ornament,
+}
 
 /// The panel's line stack, recording each row's [`Prio`] as it is pushed.
 ///
 /// [`push`](Stack::push) is deliberately the un-suffixed one and means `Core`: a row
 /// is only sheddable when someone says so, so a row added later without a thought
 /// stays on screen rather than quietly becoming the first casualty.
-pub(super) struct Stack<'a> { rows: Vec<(Line<'a>, Prio)> }
+pub(super) struct Stack<'a> {
+    rows: Vec<(Line<'a>, Prio)>,
+}
 
 /// A blank spacer row — the ones `chrome::fit_spacers` owns.
-fn is_gap(l: &Line<'_>) -> bool { l.spans.iter().all(|s| s.content.trim().is_empty()) }
+fn is_gap(l: &Line<'_>) -> bool {
+    l.spans.iter().all(|s| s.content.trim().is_empty())
+}
 
 impl<'a> Stack<'a> {
-    pub(super) fn new() -> Self { Stack { rows: Vec::new() } }
-    pub(super) fn push(&mut self, l: Line<'a>)     { self.rows.push((l, Prio::Core)); }
-    pub(super) fn heading(&mut self, l: Line<'a>)  { self.rows.push((l, Prio::Heading)); }
-    pub(super) fn detail(&mut self, l: Line<'a>)   { self.rows.push((l, Prio::Detail)); }
-    pub(super) fn minor(&mut self, l: Line<'a>)    { self.rows.push((l, Prio::Minor)); }
-    pub(super) fn ornament(&mut self, l: Line<'a>) { self.rows.push((l, Prio::Ornament)); }
-    pub(super) fn gap(&mut self)                   { self.rows.push((Line::raw(""), Prio::Core)); }
+    pub(super) fn new() -> Self {
+        Stack { rows: Vec::new() }
+    }
+    pub(super) fn push(&mut self, l: Line<'a>) {
+        self.rows.push((l, Prio::Core));
+    }
+    pub(super) fn heading(&mut self, l: Line<'a>) {
+        self.rows.push((l, Prio::Heading));
+    }
+    pub(super) fn detail(&mut self, l: Line<'a>) {
+        self.rows.push((l, Prio::Detail));
+    }
+    pub(super) fn minor(&mut self, l: Line<'a>) {
+        self.rows.push((l, Prio::Minor));
+    }
+    pub(super) fn ornament(&mut self, l: Line<'a>) {
+        self.rows.push((l, Prio::Ornament));
+    }
+    pub(super) fn gap(&mut self) {
+        self.rows.push((Line::raw(""), Prio::Core));
+    }
 
     /// Shed rows until the stack fits `avail`, cheapest class first, and return what
     /// is left. The caller still runs `chrome::fit_spacers` on the result.
@@ -58,7 +82,9 @@ impl<'a> Stack<'a> {
     pub(super) fn fit(mut self, avail: usize) -> Vec<Line<'a>> {
         for prio in [Prio::Ornament, Prio::Minor, Prio::Detail] {
             while Self::over(&self.rows, avail) {
-                let Some(i) = self.rows.iter().position(|(_, p)| *p == prio) else { break };
+                let Some(i) = self.rows.iter().position(|(_, p)| *p == prio) else {
+                    break;
+                };
                 self.rows.remove(i);
                 // One removal at a time, because emptying a section frees its
                 // nameplate too and that may be all the room still needed.
@@ -83,11 +109,16 @@ fn drop_orphan_headings(rows: &mut Vec<(Line<'_>, Prio)>) {
     let mut i = rows.len();
     while i > 0 {
         i -= 1;
-        if rows[i].1 != Prio::Heading { continue; }
-        let orphan = rows[i + 1..].iter()
+        if rows[i].1 != Prio::Heading {
+            continue;
+        }
+        let orphan = rows[i + 1..]
+            .iter()
             .find(|(l, _)| !is_gap(l))
             .is_none_or(|(_, p)| *p == Prio::Heading);
-        if orphan { rows.remove(i); }
+        if orphan {
+            rows.remove(i);
+        }
     }
 }
 
@@ -123,7 +154,9 @@ mod tests {
     }
 
     fn names(lines: &[Line<'_>]) -> Vec<String> {
-        lines.iter().filter(|l| !is_gap(l))
+        lines
+            .iter()
+            .filter(|l| !is_gap(l))
             .map(|l| l.spans.iter().map(|s| s.content.as_ref()).collect())
             .collect()
     }
@@ -142,7 +175,11 @@ mod tests {
         let s = wfm_stack();
         let content = s.rows.iter().filter(|(l, _)| !is_gap(l)).count();
         let before = names(&wfm_stack().fit(usize::MAX));
-        assert_eq!(names(&s.fit(content + 1)), before, "spacers paid for it, not the rows");
+        assert_eq!(
+            names(&s.fit(content + 1)),
+            before,
+            "spacers paid for it, not the rows"
+        );
     }
 
     #[test]
@@ -152,7 +189,11 @@ mod tests {
         let mut gone: Vec<&str> = Vec::new();
         for drop in 1..=order.len() {
             let kept = names(&wfm_stack().fit(full - drop));
-            gone = order.iter().copied().filter(|n| !kept.iter().any(|k| k == n)).collect();
+            gone = order
+                .iter()
+                .copied()
+                .filter(|n| !kept.iter().any(|k| k == n))
+                .collect();
             assert_eq!(gone.len(), drop, "shed {drop}, got {gone:?}");
         }
         // Ornament first, then the minor rows top-down, then the details top-down.
@@ -166,8 +207,10 @@ mod tests {
         let full = wfm_stack().rows.iter().filter(|(l, _)| !is_gap(l)).count();
         let kept = names(&wfm_stack().fit(full - 4));
         assert!(kept.contains(&"RDS".to_string()) && kept.contains(&"name".to_string()));
-        assert!(kept.contains(&"pi".to_string()) && kept.contains(&"rt".to_string()),
-                "RDS lost its payload again: {kept:?}");
+        assert!(
+            kept.contains(&"pi".to_string()) && kept.contains(&"rt".to_string()),
+            "RDS lost its payload again: {kept:?}"
+        );
     }
 
     #[test]
@@ -183,7 +226,11 @@ mod tests {
         s.heading(Line::raw("PILOT"));
         s.push(Line::raw("stereo"));
         let kept = names(&s.fit(3));
-        assert_eq!(kept, vec!["lock", "PILOT", "stereo"], "orphaned nameplate survived: {kept:?}");
+        assert_eq!(
+            kept,
+            vec!["lock", "PILOT", "stereo"],
+            "orphaned nameplate survived: {kept:?}"
+        );
     }
 
     #[test]
@@ -192,7 +239,9 @@ mod tests {
         // silently would be the original bug. The paragraph clips instead, which is
         // the honest floor of what this can do without scrolling.
         let mut s = Stack::new();
-        for n in ["a", "b", "c", "d"] { s.push(Line::raw(n)); }
+        for n in ["a", "b", "c", "d"] {
+            s.push(Line::raw(n));
+        }
         assert_eq!(names(&s.fit(2)), vec!["a", "b", "c", "d"]);
     }
 }

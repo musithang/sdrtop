@@ -16,17 +16,17 @@ use crate::state::SdrMetrics;
 use crate::ui;
 
 pub struct App {
-    pub(super) state:       Arc<Mutex<SdrMetrics>>,
-    pub(super) device:      Option<Arc<dyn SdrDevice>>,
+    pub(super) state: Arc<Mutex<SdrMetrics>>,
+    pub(super) device: Option<Arc<dyn SdrDevice>>,
     #[allow(dead_code)]
-    pub(super) rx_ctx:      Option<Arc<RxContext>>,
+    pub(super) rx_ctx: Option<Arc<RxContext>>,
     pub(super) config_path: Option<PathBuf>,
-    pub(super) events:      EventStream,
-    pub(super) show_help:   bool,
+    pub(super) events: EventStream,
+    pub(super) show_help: bool,
     pub(super) show_footer: bool,
-    pub(super) engine:      ui::LayoutEngine,
-    pub(super) theme:       crate::Theme,
-    pub(super) focus_keys:  HashMap<char, &'static str>,
+    pub(super) engine: ui::LayoutEngine,
+    pub(super) theme: crate::Theme,
+    pub(super) focus_keys: HashMap<char, &'static str>,
     /// User-defined presets as loaded from config.toml, kept so save_config can
     /// write them back verbatim instead of erasing hand-edited presets.
     pub(super) user_presets: HashMap<String, crate::config::PresetConfig>,
@@ -41,7 +41,11 @@ pub struct App {
 }
 
 impl App {
-    pub fn new(cfg: AppConfig, config_path: Option<PathBuf>, listing: &hardware::DeviceListing) -> anyhow::Result<Self> {
+    pub fn new(
+        cfg: AppConfig,
+        config_path: Option<PathBuf>,
+        listing: &hardware::DeviceListing,
+    ) -> anyhow::Result<Self> {
         match hardware::open_device(listing) {
             Ok(device) => Self::new_normal(cfg, config_path, device),
             Err(open_err) => {
@@ -122,43 +126,79 @@ impl App {
         // footer can render it without reaching into the engine.
         m.ui.active_preset = active_preset;
         m.ui.preset_names = self.engine.preset_names();
-        let hide_footer = !self.show_footer
-            && m.ui.input_mode == crate::state::InputMode::Normal;
+        let hide_footer = !self.show_footer && m.ui.input_mode == crate::state::InputMode::Normal;
         self.engine.set_panel_hidden("footer", hide_footer);
         // Measurement labs wear "instrument mode": the resting frames cool toward
         // steel-blue. One per-frame tint at the draw root keeps every lab panel
         // (and its chrome) cohesive without each panel knowing about lab mode.
-        let frame_theme = if m.ui.is_lab_mode() { self.theme.steeled() } else { self.theme.clone() };
+        let frame_theme = if m.ui.is_lab_mode() {
+            self.theme.steeled()
+        } else {
+            self.theme.clone()
+        };
         terminal.draw(|f| {
             self.engine.draw(f, &m, &frame_theme);
             // The rail's full-log overlay only floats while the rail is focused.
             if m.ui.log_overlay && m.ui.focused_panel.as_deref() == Some("command_rail") {
                 ui::overlay::render_log(f, &m, &frame_theme);
             }
-            if self.show_help { ui::overlay::render_help(f, &m); }
+            if self.show_help {
+                ui::overlay::render_help(f, &m);
+            }
         })?;
         Ok(())
     }
 
     fn save_config(&self) {
-        if self.device.is_none() { return; }
-        let Some(path) = &self.config_path else { return };
-        let (freq, rate, lna, vga, amp, wf_rows, wf_palette, spec_style, markers, sweep_cfg, recall) = {
+        if self.device.is_none() {
+            return;
+        }
+        let Some(path) = &self.config_path else {
+            return;
+        };
+        let (
+            freq,
+            rate,
+            lna,
+            vga,
+            amp,
+            wf_rows,
+            wf_palette,
+            spec_style,
+            markers,
+            sweep_cfg,
+            recall,
+        ) = {
             let m = self.state.lock().unwrap_or_else(|e| e.into_inner());
-            (m.radio.frequency, m.radio.config_sample_rate, m.radio.lna_gain,
-             m.radio.vga_gain, m.radio.amp_enabled, m.waterfall.buffer.max_rows,
-             m.waterfall.palette, m.spectrum.style,
-             m.spectrum.markers.clone(), m.sweep.config.clone(),
-             crate::state::recall_to_hz(&m.ui.recall))
+            (
+                m.radio.frequency,
+                m.radio.config_sample_rate,
+                m.radio.lna_gain,
+                m.radio.vga_gain,
+                m.radio.amp_enabled,
+                m.waterfall.buffer.max_rows,
+                m.waterfall.palette,
+                m.spectrum.style,
+                m.spectrum.markers.clone(),
+                m.sweep.config.clone(),
+                crate::state::recall_to_hz(&m.ui.recall),
+            )
         };
         let cfg = AppConfig {
-            radio: RadioConfig { frequency_hz: freq, sample_rate: rate, lna_gain: lna, vga_gain: vga, amp_enabled: amp, recall_hz: recall },
+            radio: RadioConfig {
+                frequency_hz: freq,
+                sample_rate: rate,
+                lna_gain: lna,
+                vga_gain: vga,
+                amp_enabled: amp,
+                recall_hz: recall,
+            },
             display: DisplayConfig {
-                active_preset:      self.engine.active_preset().to_string(),
+                active_preset: self.engine.active_preset().to_string(),
                 waterfall_max_rows: wf_rows,
-                waterfall_palette:  wf_palette,
-                spectrum_style:     spec_style,
-                spectrum_markers:   markers,
+                waterfall_palette: wf_palette,
+                spectrum_style: spec_style,
+                spectrum_markers: markers,
             },
             // The loaded block, not a fresh one: `..Default::default()` here
             // silently deleted every per-field colour override on every quit.
@@ -169,7 +209,7 @@ impl App {
             },
             sweep: crate::config::SweepSettings {
                 start_hz: sweep_cfg.start_hz,
-                stop_hz:  sweep_cfg.stop_hz,
+                stop_hz: sweep_cfg.stop_hz,
                 dwell_ms: sweep_cfg.dwell_ms,
             },
             presets: self.user_presets.clone(),
@@ -201,8 +241,8 @@ mod tests {
     #[test]
     fn adc_saturation_pct_full() {
         let acc_saturated = 200_u64;
-        let acc_samples   = 100_u64;
-        let saturable     = acc_samples * 2;
+        let acc_samples = 100_u64;
+        let saturable = acc_samples * 2;
         let pct = (acc_saturated as f32 / saturable as f32) * 100.0;
         assert!((pct - 100.0).abs() < 0.01, "expected 100%, got {}", pct);
     }

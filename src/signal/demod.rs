@@ -77,7 +77,8 @@ const EMA_ALPHA: f32 = 0.3;
 pub fn decimation_factor(sample_rate: f64, target_hz: f64) -> usize {
     // `is_finite` first so a NaN rate can never slip through the comparisons
     // below (every ordering test against NaN is false).
-    if !(sample_rate.is_finite() && target_hz.is_finite()) || sample_rate <= 0.0 || target_hz <= 0.0 {
+    if !(sample_rate.is_finite() && target_hz.is_finite()) || sample_rate <= 0.0 || target_hz <= 0.0
+    {
         return 1;
     }
     (sample_rate / target_hz).floor().max(1.0) as usize
@@ -85,7 +86,9 @@ pub fn decimation_factor(sample_rate: f64, target_hz: f64) -> usize {
 
 /// The channel rate a decimation factor actually lands on.
 pub fn channel_rate(sample_rate: f64, d: usize) -> f64 {
-    if d == 0 { return sample_rate; }
+    if d == 0 {
+        return sample_rate;
+    }
     sample_rate / d as f64
 }
 
@@ -118,7 +121,11 @@ pub fn design_lowpass(taps: usize, fc: f64) -> Vec<f32> {
     for i in 0..taps {
         let x = i as f64 - m;
         // sinc, with the removable singularity at the centre tap handled exactly.
-        let sinc = if x.abs() < 1e-9 { 2.0 * fc } else { (2.0 * PI * fc * x).sin() / (PI * x) };
+        let sinc = if x.abs() < 1e-9 {
+            2.0 * fc
+        } else {
+            (2.0 * PI * fc * x).sin() / (PI * x)
+        };
         let w = 0.54 - 0.46 * (2.0 * PI * i as f64 / (taps - 1).max(1) as f64).cos();
         let v = sinc * w;
         sum += v;
@@ -127,7 +134,9 @@ pub fn design_lowpass(taps: usize, fc: f64) -> Vec<f32> {
     // Normalise to unit DC gain so decimation does not change the level, and the
     // deviation figures stay in real Hz.
     if sum.abs() > 1e-12 {
-        for v in h.iter_mut() { *v /= sum; }
+        for v in h.iter_mut() {
+            *v /= sum;
+        }
     }
     h.into_iter().map(|v| v as f32).collect()
 }
@@ -189,12 +198,16 @@ const ENVELOPE_GATE: f32 = 0.35;
 pub fn fm_discriminate(iq: &[Complex<f32>], rate: f64, out: &mut Vec<f32>) {
     use std::f64::consts::PI;
     out.clear();
-    if iq.len() < 2 { return; }
+    if iq.len() < 2 {
+        return;
+    }
 
     // Mean power over the block sets the gate. Compared in the squared domain so
     // the per-sample test needs no square root.
     let mean_sq = iq.iter().map(|z| z.norm_sqr() as f64).sum::<f64>() / iq.len() as f64;
-    if !mean_sq.is_finite() || mean_sq <= 0.0 { return; }
+    if !mean_sq.is_finite() || mean_sq <= 0.0 {
+        return;
+    }
     let floor_sq = (mean_sq * (ENVELOPE_GATE * ENVELOPE_GATE) as f64) as f32;
 
     out.reserve(iq.len() - 1);
@@ -212,7 +225,9 @@ pub fn fm_discriminate(iq: &[Complex<f32>], rate: f64, out: &mut Vec<f32>) {
         if !have_held {
             // Backfill any leading run gated out before the first valid sample,
             // so the block never opens with a fabricated zero.
-            for v in out.iter_mut() { *v = f; }
+            for v in out.iter_mut() {
+                *v = f;
+            }
             have_held = true;
         }
         held = f;
@@ -235,16 +250,26 @@ pub fn fm_discriminate(iq: &[Complex<f32>], rate: f64, out: &mut Vec<f32>) {
 /// unit circle over a long block.
 pub fn mix_offset(iq: &mut [Complex<f32>], offset_hz: f64, sample_rate: f64) {
     use std::f64::consts::PI;
-    if offset_hz == 0.0 || !sample_rate.is_finite() || sample_rate <= 0.0 { return; }
+    if offset_hz == 0.0 || !sample_rate.is_finite() || sample_rate <= 0.0 {
+        return;
+    }
     let dphi = -2.0 * PI * offset_hz / sample_rate;
-    let step = Complex { re: dphi.cos() as f32, im: dphi.sin() as f32 };
-    let mut ph = Complex { re: 1.0f32, im: 0.0f32 };
+    let step = Complex {
+        re: dphi.cos() as f32,
+        im: dphi.sin() as f32,
+    };
+    let mut ph = Complex {
+        re: 1.0f32,
+        im: 0.0f32,
+    };
     for (i, z) in iq.iter_mut().enumerate() {
         *z *= ph;
         ph *= step;
         if i % 1024 == 1023 {
             let n = ph.norm();
-            if n > 0.0 { ph /= n; }
+            if n > 0.0 {
+                ph /= n;
+            }
         }
     }
 }
@@ -279,19 +304,30 @@ pub fn mpx_spectrum(
 ) {
     out.clear();
     let n = window.len();
-    if inst_hz.len() < n || n == 0 { return; }
+    if inst_hz.len() < n || n == 0 {
+        return;
+    }
 
     // Remove the carrier offset first: it is a DC term in this domain, and a large
     // one would leak across the low bins through the window's skirts.
     let mean = inst_hz[..n].iter().map(|&f| f as f64).sum::<f64>() / n as f64;
 
     scratch.clear();
-    scratch.extend(inst_hz[..n].iter().zip(window.iter())
-        .map(|(&f, &w)| Complex { re: (f as f64 - mean) as f32 * w, im: 0.0 }));
+    scratch.extend(
+        inst_hz[..n]
+            .iter()
+            .zip(window.iter())
+            .map(|(&f, &w)| Complex {
+                re: (f as f64 - mean) as f32 * w,
+                im: 0.0,
+            }),
+    );
     fft.process(scratch);
 
     let w_sum: f32 = window.iter().sum();
-    if w_sum <= 0.0 { return; }
+    if w_sum <= 0.0 {
+        return;
+    }
     let scale = 2.0 / w_sum;
     // Only the positive half carries information for a real input.
     out.extend(scratch[..n / 2].iter().map(|z| z.norm() * scale));
@@ -310,8 +346,8 @@ pub enum PilotState {
 /// A pilot measurement: its deviation contribution and injection ratio.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct PilotMeasure {
-    pub state:         PilotState,
-    pub deviation_hz:  f32,
+    pub state: PilotState,
+    pub deviation_hz: f32,
     /// Deviation as a percentage of the mode's peak-deviation limit. Broadcast
     /// practice nominally injects the pilot at 8–10 %.
     pub injection_pct: f32,
@@ -329,20 +365,36 @@ const PILOT_MARGINAL_PCT: f32 = 1.5;
 /// exact bin: the pilot rarely lands on a bin centre, and window leakage spreads
 /// it over its neighbours.
 pub fn pilot_measure(mags_hz: &[f32], bin_hz: f64, limit_hz: f32) -> PilotMeasure {
-    let absent = PilotMeasure { state: PilotState::Absent, deviation_hz: 0.0, injection_pct: 0.0 };
-    if mags_hz.is_empty() || bin_hz <= 0.0 || limit_hz <= 0.0 { return absent; }
+    let absent = PilotMeasure {
+        state: PilotState::Absent,
+        deviation_hz: 0.0,
+        injection_pct: 0.0,
+    };
+    if mags_hz.is_empty() || bin_hz <= 0.0 || limit_hz <= 0.0 {
+        return absent;
+    }
 
     let centre = (PILOT_HZ / bin_hz).round() as usize;
     let lo = centre.saturating_sub(2);
     let hi = (centre + 2).min(mags_hz.len().saturating_sub(1));
-    if lo > hi { return absent; }
+    if lo > hi {
+        return absent;
+    }
 
     let dev = mags_hz[lo..=hi].iter().copied().fold(0.0f32, f32::max);
     let pct = dev / limit_hz * 100.0;
-    let state = if pct >= PILOT_LOCK_PCT          { PilotState::Locked }
-                else if pct >= PILOT_MARGINAL_PCT { PilotState::Marginal }
-                else                              { PilotState::Absent };
-    PilotMeasure { state, deviation_hz: dev, injection_pct: pct }
+    let state = if pct >= PILOT_LOCK_PCT {
+        PilotState::Locked
+    } else if pct >= PILOT_MARGINAL_PCT {
+        PilotState::Marginal
+    } else {
+        PilotState::Absent
+    };
+    PilotMeasure {
+        state,
+        deviation_hz: dev,
+        injection_pct: pct,
+    }
 }
 
 /// Quantile used for the peak-deviation reading — a quasi-peak detector rather
@@ -361,9 +413,13 @@ const PEAK_QUANTILE: f64 = 0.999;
 /// `select_nth_unstable` approach the FFT worker uses for its noise floor.
 /// Reorders `data`, which is always caller-owned scratch.
 fn quantile(data: &mut [f32], q: f64) -> f32 {
-    if data.is_empty() { return 0.0; }
+    if data.is_empty() {
+        return 0.0;
+    }
     let idx = (((data.len() - 1) as f64) * q.clamp(0.0, 1.0)).round() as usize;
-    data.select_nth_unstable_by(idx, |a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+    data.select_nth_unstable_by(idx, |a, b| {
+        a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal)
+    });
     data[idx]
 }
 
@@ -375,7 +431,9 @@ fn quantile(data: &mut [f32], q: f64) -> f32 {
 /// [`PEAK_QUANTILE`] quasi-peak, found with the same O(n) partial sort the FFT
 /// worker uses for its noise floor.
 pub fn fm_stats(inst_hz: &[f32]) -> Option<FmMeasure> {
-    if inst_hz.is_empty() { return None; }
+    if inst_hz.is_empty() {
+        return None;
+    }
     let n = inst_hz.len() as f64;
     let mean = inst_hz.iter().map(|&f| f as f64).sum::<f64>() / n;
 
@@ -390,8 +448,8 @@ pub fn fm_stats(inst_hz: &[f32]) -> Option<FmMeasure> {
     let peak = quantile(&mut devs, PEAK_QUANTILE);
 
     Some(FmMeasure {
-        peak_dev_hz:       peak,
-        rms_dev_hz:        (sq / n).sqrt() as f32,
+        peak_dev_hz: peak,
+        rms_dev_hz: (sq / n).sqrt() as f32,
         carrier_offset_hz: mean as f32,
     })
 }
@@ -405,9 +463,9 @@ pub const AM_TARGET_HZ: f64 = 16_000.0;
 /// rather than a wrong one.
 pub fn target_rate_for(modulation: Modulation) -> Option<f64> {
     match modulation {
-        Modulation::Wfm     => Some(WFM_TARGET_HZ),
-        Modulation::Nfm     => Some(NFM_TARGET_HZ),
-        Modulation::Am      => Some(AM_TARGET_HZ),
+        Modulation::Wfm => Some(WFM_TARGET_HZ),
+        Modulation::Nfm => Some(NFM_TARGET_HZ),
+        Modulation::Am => Some(AM_TARGET_HZ),
         Modulation::Unknown => None,
     }
 }
@@ -430,30 +488,41 @@ pub fn am_envelope(iq: &[Complex<f32>], out: &mut Vec<f32>) {
 /// pinched off, which clips and splatters, while an asymmetric pair points at a
 /// modulator fault rather than simply too much level.
 pub fn am_stats(env: &[f32]) -> Option<AmMeasure> {
-    if env.len() < 8 { return None; }
+    if env.len() < 8 {
+        return None;
+    }
     let carrier = env.iter().map(|&v| v as f64).sum::<f64>() / env.len() as f64;
-    if carrier <= 0.0 { return None; }
+    if carrier <= 0.0 {
+        return None;
+    }
 
     let mut scratch: Vec<f32> = env.to_vec();
     let hi = quantile(&mut scratch, PEAK_QUANTILE) as f64;
     let lo = quantile(&mut scratch, 1.0 - PEAK_QUANTILE) as f64;
 
-    let depth = if hi + lo > 0.0 { (hi - lo) / (hi + lo) } else { 0.0 };
+    let depth = if hi + lo > 0.0 {
+        (hi - lo) / (hi + lo)
+    } else {
+        0.0
+    };
     Some(AmMeasure {
-        depth_pct:    (depth * 100.0) as f32,
+        depth_pct: (depth * 100.0) as f32,
         positive_pct: (((hi - carrier) / carrier) * 100.0) as f32,
         negative_pct: (((carrier - lo) / carrier) * 100.0) as f32,
-        carrier_dbfs: if carrier > 0.0 { 20.0 * (carrier as f32).log10() } else { f32::NEG_INFINITY },
+        carrier_dbfs: if carrier > 0.0 {
+            20.0 * (carrier as f32).log10()
+        } else {
+            f32::NEG_INFINITY
+        },
     })
 }
 
 /// The CTCSS tone table, in Hz: the 38 standard EIA/TIA tones plus 69.3 and
 /// 254.1, which virtually all equipment also offers.
 pub const CTCSS_TONES: [f64; 40] = [
-     67.0,  69.3,  71.9,  74.4,  77.0,  79.7,  82.5,  85.4,  88.5,  91.5,
-     94.8,  97.4, 100.0, 103.5, 107.2, 110.9, 114.8, 118.8, 123.0, 127.3,
-    131.8, 136.5, 141.3, 146.2, 151.4, 156.7, 162.2, 167.9, 173.8, 179.9,
-    186.2, 192.8, 203.5, 210.7, 218.1, 225.7, 233.6, 241.8, 250.3, 254.1,
+    67.0, 69.3, 71.9, 74.4, 77.0, 79.7, 82.5, 85.4, 88.5, 91.5, 94.8, 97.4, 100.0, 103.5, 107.2,
+    110.9, 114.8, 118.8, 123.0, 127.3, 131.8, 136.5, 141.3, 146.2, 151.4, 156.7, 162.2, 167.9,
+    173.8, 179.9, 186.2, 192.8, 203.5, 210.7, 218.1, 225.7, 233.6, 241.8, 250.3, 254.1,
 ];
 
 /// Seconds of contiguous audio a CTCSS decision needs.
@@ -483,7 +552,9 @@ const CTCSS_MARGIN_DB: f32 = 6.0;
 /// the tone's amplitude.
 pub fn goertzel_amplitude(x: &[f32], window: &[f32], freq: f64, rate: f64) -> f32 {
     let n = x.len().min(window.len());
-    if n == 0 || rate <= 0.0 { return 0.0; }
+    if n == 0 || rate <= 0.0 {
+        return 0.0;
+    }
     let w = 2.0 * std::f64::consts::PI * freq / rate;
     let coeff = 2.0 * w.cos();
     let (mut s1, mut s2) = (0.0f64, 0.0f64);
@@ -494,7 +565,9 @@ pub fn goertzel_amplitude(x: &[f32], window: &[f32], freq: f64, rate: f64) -> f3
     }
     let power = (s1 * s1 + s2 * s2 - coeff * s1 * s2).max(0.0);
     let w_sum: f32 = window[..n].iter().sum();
-    if w_sum <= 0.0 { return 0.0; }
+    if w_sum <= 0.0 {
+        return 0.0;
+    }
     2.0 * power.sqrt() as f32 / w_sum
 }
 
@@ -504,25 +577,41 @@ pub fn goertzel_amplitude(x: &[f32], window: &[f32], freq: f64, rate: f64) -> f3
 /// and clearly ahead of every non-adjacent rival — a tone that merely edges out
 /// its neighbour is an unresolved measurement, not a detection.
 pub fn ctcss_detect(audio_hz: &[f32], window: &[f32], rate: f64) -> Option<CtcssMeasure> {
-    if audio_hz.len() < window.len() || window.is_empty() { return None; }
-    let amps: Vec<f32> = CTCSS_TONES.iter()
+    if audio_hz.len() < window.len() || window.is_empty() {
+        return None;
+    }
+    let amps: Vec<f32> = CTCSS_TONES
+        .iter()
         .map(|&f| goertzel_amplitude(audio_hz, window, f, rate))
         .collect();
 
-    let (best_i, best) = amps.iter().enumerate()
-        .fold((0usize, 0.0f32), |(bi, bv), (i, &v)| if v > bv { (i, v) } else { (bi, bv) });
-    if best < CTCSS_MIN_DEV_HZ { return None; }
+    let (best_i, best) =
+        amps.iter().enumerate().fold(
+            (0usize, 0.0f32),
+            |(bi, bv), (i, &v)| if v > bv { (i, v) } else { (bi, bv) },
+        );
+    if best < CTCSS_MIN_DEV_HZ {
+        return None;
+    }
 
     // Adjacent table entries sit inside each other's skirts, so the runner-up is
     // taken from the rest of the table.
-    let rival = amps.iter().enumerate()
+    let rival = amps
+        .iter()
+        .enumerate()
         .filter(|(i, _)| i.abs_diff(best_i) > 1)
         .fold(0.0f32, |m, (_, &v)| m.max(v));
-    let margin_db = if rival > 0.0 { 20.0 * (best / rival).log10() } else { f32::INFINITY };
-    if margin_db < CTCSS_MARGIN_DB { return None; }
+    let margin_db = if rival > 0.0 {
+        20.0 * (best / rival).log10()
+    } else {
+        f32::INFINITY
+    };
+    if margin_db < CTCSS_MARGIN_DB {
+        return None;
+    }
 
     Some(CtcssMeasure {
-        tone_hz:      CTCSS_TONES[best_i] as f32,
+        tone_hz: CTCSS_TONES[best_i] as f32,
         deviation_hz: best,
         margin_db,
     })
@@ -537,18 +626,23 @@ pub fn ctcss_detect(audio_hz: &[f32], window: &[f32], rate: f64) -> Option<Ctcss
 /// tone detector does — the CTCSS window spans several blocks, and a phase step
 /// inside it destroys the coherence the detection depends on.
 pub struct StreamingDecimator {
-    taps:  Vec<f32>,
-    d:     usize,
+    taps: Vec<f32>,
+    d: usize,
     /// Input samples carried over so the next block's first output can see the
     /// full filter history.
-    tail:  Vec<Complex<f32>>,
+    tail: Vec<Complex<f32>>,
     /// Where the decimation grid resumes inside the next block.
     phase: usize,
 }
 
 impl StreamingDecimator {
     pub fn new(taps: Vec<f32>, d: usize) -> Self {
-        Self { taps, d: d.max(1), tail: Vec::new(), phase: 0 }
+        Self {
+            taps,
+            d: d.max(1),
+            tail: Vec::new(),
+            phase: 0,
+        }
     }
 
     /// Forget the carried state — after a dropped block, or a parameter change.
@@ -561,7 +655,9 @@ impl StreamingDecimator {
     pub fn process(&mut self, input: &[Complex<f32>], out: &mut Vec<Complex<f32>>) {
         out.clear();
         let n = self.taps.len();
-        if n == 0 || input.is_empty() { return; }
+        if n == 0 || input.is_empty() {
+            return;
+        }
 
         // Splice the carried history in front of the new samples.
         let mut buf = std::mem::take(&mut self.tail);
@@ -574,7 +670,10 @@ impl StreamingDecimator {
         let mut start = self.phase;
         while start + n <= buf.len() {
             let w = &buf[start..start + n];
-            let mut acc = Complex { re: 0.0f32, im: 0.0f32 };
+            let mut acc = Complex {
+                re: 0.0f32,
+                im: 0.0f32,
+            };
             for (s, &h) in w.iter().zip(self.taps.iter()) {
                 acc.re += s.re * h;
                 acc.im += s.im * h;
@@ -603,17 +702,25 @@ pub struct DemodWorker {
 }
 
 impl DemodWorker {
-    pub fn new(sample_rx: Receiver<(u64, Vec<u8>)>, state: Arc<Mutex<SdrMetrics>>, format: SampleFormat) -> Self {
-        Self { sample_rx, state, format }
+    pub fn new(
+        sample_rx: Receiver<(u64, Vec<u8>)>,
+        state: Arc<Mutex<SdrMetrics>>,
+        format: SampleFormat,
+    ) -> Self {
+        Self {
+            sample_rx,
+            state,
+            format,
+        }
     }
 
     pub fn run(self) {
         // Scratch reused across updates — no per-update allocation.
-        let mut iq:   Vec<Complex<f32>> = Vec::new();
-        let mut dec:  Vec<Complex<f32>> = Vec::new();
-        let mut inst: Vec<f32>          = Vec::new();
+        let mut iq: Vec<Complex<f32>> = Vec::new();
+        let mut dec: Vec<Complex<f32>> = Vec::new();
+        let mut inst: Vec<f32> = Vec::new();
         let mut mpx_scratch: Vec<Complex<f32>> = Vec::new();
-        let mut mpx_mags:    Vec<f32>          = Vec::new();
+        let mut mpx_mags: Vec<f32> = Vec::new();
 
         // MPX transform, planned once. Hann keeps the pilot's skirts tight enough
         // that a neighbouring MPX component cannot be mistaken for it.
@@ -680,10 +787,15 @@ impl DemodWorker {
                 // The user's mode choice outranks the classifier — see
                 // `DemodState::mode_override` for why the heuristic is too coarse
                 // to pick a demodulator on its own.
-                (m.radio.config_sample_rate,
-                 m.demod.effective_modulation(m.signal.modulation),
-                 m.signal.peak_to_nf_db, m.radio.hw_streaming, m.demod.offset_hz,
-                 m.radio.frequency, m.demod.enabled)
+                (
+                    m.radio.config_sample_rate,
+                    m.demod.effective_modulation(m.signal.modulation),
+                    m.signal.peak_to_nf_db,
+                    m.radio.hw_streaming,
+                    m.demod.offset_hz,
+                    m.radio.frequency,
+                    m.demod.enabled,
+                )
             };
 
             // Switching the demod off stops `process` forwarding, but up to four
@@ -697,7 +809,9 @@ impl DemodWorker {
                 rds_last_group = None;
                 audio.clear();
                 carry = None;
-                if let Some(sd) = sdec.as_mut() { sd.reset(); }
+                if let Some(sd) = sdec.as_mut() {
+                    sd.reset();
+                }
                 // Nothing is forwarded while off, so the next block will be many
                 // sequence numbers away without a single one having been lost.
                 drop_ref = None;
@@ -722,7 +836,9 @@ impl DemodWorker {
                 rds_last_group = None;
                 audio.clear();
                 carry = None;
-                if let Some(sd) = sdec.as_mut() { sd.reset(); }
+                if let Some(sd) = sdec.as_mut() {
+                    sd.reset();
+                }
                 self.clear();
                 // The drop count answers "is this station undecodable, or is the
                 // host behind?", so it belongs to the channel being asked about.
@@ -765,7 +881,9 @@ impl DemodWorker {
             // block. AM stays cheap — nothing in it needs continuity.
             let needs_continuity = matches!(modulation, Modulation::Nfm | Modulation::Wfm);
             let due = last_update.elapsed() >= UPDATE_INTERVAL;
-            if !needs_continuity && !due { continue; }
+            if !needs_continuity && !due {
+                continue;
+            }
 
             let d = decimation_factor(sample_rate, target);
             if d != taps_for_d {
@@ -789,13 +907,19 @@ impl DemodWorker {
                 // `resync`, not `reset` — the comment above said this all along and
                 // `reset` did the opposite, throwing away the name and the RadioText
                 // on every dropped block.
-                if let Some(r) = rds.as_mut() { r.reset(); }
+                if let Some(r) = rds.as_mut() {
+                    r.reset();
+                }
                 rds_dec.resync();
             }
 
             // Continuity means every sample counts; otherwise the bounded slice
             // keeps the cost flat regardless of device rate.
-            let cap = if needs_continuity { usize::MAX } else { SLICE_PAIRS };
+            let cap = if needs_continuity {
+                usize::MAX
+            } else {
+                SLICE_PAIRS
+            };
             decode(&chunk, self.format, cap, &mut iq);
             // Bring the selected channel to DC before filtering, so the channel
             // filter (centred at DC) selects it rather than whatever sits at the
@@ -803,11 +927,17 @@ impl DemodWorker {
             mix_offset(&mut iq, offset_hz as f64, sample_rate);
             sd.process(&iq, &mut dec);
             let rate = channel_rate(sample_rate, d);
-            if dec.is_empty() { continue; }
+            if dec.is_empty() {
+                continue;
+            }
 
             // Rejoin the boundary sample pair so a contiguous run really is one.
-            if let Some(prev) = carry.take() { dec.insert(0, prev); }
-            if needs_continuity { carry = dec.last().copied(); }
+            if let Some(prev) = carry.take() {
+                dec.insert(0, prev);
+            }
+            if needs_continuity {
+                carry = dec.last().copied();
+            }
 
             let mut fresh_fm: Option<FmMeasure> = None;
             let mut fresh_am: Option<AmMeasure> = None;
@@ -848,16 +978,25 @@ impl DemodWorker {
                         // short block simply yields no spectrum rather than a
                         // padded, misleading one.
                         if due {
-                            mpx_spectrum(&inst, &mpx_window, mpx_fft.as_ref(), &mut mpx_scratch, &mut mpx_mags);
+                            mpx_spectrum(
+                                &inst,
+                                &mpx_window,
+                                mpx_fft.as_ref(),
+                                &mut mpx_scratch,
+                                &mut mpx_mags,
+                            );
                             mpx_frame = (!mpx_mags.is_empty()).then(|| {
                                 Arc::new(crate::state::MpxFrame {
-                                    bin_hz:  rate / MPX_FFT_SIZE as f64,
+                                    bin_hz: rate / MPX_FFT_SIZE as f64,
                                     mags_hz: mpx_mags.clone(),
                                 })
                             });
                             pilot = mpx_frame.as_ref().map(|f| {
-                                pilot_measure(&f.mags_hz, f.bin_hz,
-                                              crate::state::deviation_limit_hz(modulation))
+                                pilot_measure(
+                                    &f.mags_hz,
+                                    f.bin_hz,
+                                    crate::state::deviation_limit_hz(modulation),
+                                )
                             });
                         }
                     } else {
@@ -865,7 +1004,8 @@ impl DemodWorker {
                         let want = (CTCSS_WINDOW_S * rate) as usize;
                         if want != ctcss_len && want > 0 {
                             ctcss_len = want;
-                            ctcss_window = super::dsp::compute_window(super::dsp::WindowFn::Hann, want);
+                            ctcss_window =
+                                super::dsp::compute_window(super::dsp::WindowFn::Hann, want);
                             audio.clear();
                         }
                         audio.extend_from_slice(&inst);
@@ -875,7 +1015,9 @@ impl DemodWorker {
                         }
                         fill = if ctcss_len > 0 {
                             (audio.len() as f32 / ctcss_len as f32).min(1.0)
-                        } else { 0.0 };
+                        } else {
+                            0.0
+                        };
                         if audio.len() >= ctcss_len && ctcss_len > 0 {
                             ctcss = ctcss_detect(&audio, &ctcss_window, rate);
                         }
@@ -886,7 +1028,9 @@ impl DemodWorker {
 
             // Publishing stays on the update cadence even when the intake does
             // not, so the display rate and the lock traffic are unchanged.
-            if !due { continue; }
+            if !due {
+                continue;
+            }
             last_update = Instant::now();
 
             // Snapshot the accumulating RDS state for the display. Cloned here,
@@ -908,24 +1052,25 @@ impl DemodWorker {
                 m.demod.clear_measurements();
                 continue;
             }
-            m.demod.decimation      = d;
+            m.demod.decimation = d;
             m.demod.channel_rate_hz = rate;
-            m.demod.mpx             = mpx_frame;
-            m.demod.pilot           = pilot;
-            m.demod.rds             = rds_out;
-            m.demod.rds_sync        = rds_sync;
-            m.demod.rds_last_group  = rds_last_group;
-            m.demod.am              = fresh_am;
-            m.demod.ctcss           = ctcss;
-            m.demod.ctcss_fill      = fill;
+            m.demod.mpx = mpx_frame;
+            m.demod.pilot = pilot;
+            m.demod.rds = rds_out;
+            m.demod.rds_sync = rds_sync;
+            m.demod.rds_last_group = rds_last_group;
+            m.demod.am = fresh_am;
+            m.demod.ctcss = ctcss;
+            m.demod.ctcss_fill = fill;
             if let Some(fresh) = fresh_fm {
                 m.demod.fm = Some(match m.demod.fm {
                     Some(prev) => FmMeasure {
                         // Peak hold with decay; EMA on the steadier figures.
-                        peak_dev_hz:       fresh.peak_dev_hz.max(prev.peak_dev_hz - PEAK_DECAY_HZ),
-                        rms_dev_hz:        EMA_ALPHA * fresh.rms_dev_hz + (1.0 - EMA_ALPHA) * prev.rms_dev_hz,
+                        peak_dev_hz: fresh.peak_dev_hz.max(prev.peak_dev_hz - PEAK_DECAY_HZ),
+                        rms_dev_hz: EMA_ALPHA * fresh.rms_dev_hz
+                            + (1.0 - EMA_ALPHA) * prev.rms_dev_hz,
                         carrier_offset_hz: EMA_ALPHA * fresh.carrier_offset_hz
-                                             + (1.0 - EMA_ALPHA) * prev.carrier_offset_hz,
+                            + (1.0 - EMA_ALPHA) * prev.carrier_offset_hz,
                     },
                     None => fresh,
                 });
@@ -951,14 +1096,23 @@ mod tests {
 
     /// Synthesise a complex FM tone: carrier at `offset_hz`, sinusoidally
     /// modulated at `mod_hz` with peak deviation `dev_hz`.
-    fn fm_signal(rate: f64, n: usize, offset_hz: f64, dev_hz: f64, mod_hz: f64) -> Vec<Complex<f32>> {
+    fn fm_signal(
+        rate: f64,
+        n: usize,
+        offset_hz: f64,
+        dev_hz: f64,
+        mod_hz: f64,
+    ) -> Vec<Complex<f32>> {
         let mut phase = 0.0f64;
         let mut out = Vec::with_capacity(n);
         for i in 0..n {
             let t = i as f64 / rate;
             let inst = offset_hz + dev_hz * (2.0 * PI * mod_hz * t).sin();
             phase += 2.0 * PI * inst / rate;
-            out.push(Complex { re: phase.cos() as f32, im: phase.sin() as f32 });
+            out.push(Complex {
+                re: phase.cos() as f32,
+                im: phase.sin() as f32,
+            });
         }
         out
     }
@@ -989,11 +1143,19 @@ mod tests {
     fn wfm_channel_covers_carson_bandwidth_at_every_device_rate() {
         // Too narrow a channel makes the discriminator click, so the filter's
         // passband (0.4 × channel rate) must clear ±128 kHz everywhere.
-        for sr in [2_000_000.0, 2_400_000.0, 3_200_000.0, 10_000_000.0, 20_000_000.0] {
+        for sr in [
+            2_000_000.0,
+            2_400_000.0,
+            3_200_000.0,
+            10_000_000.0,
+            20_000_000.0,
+        ] {
             let d = decimation_factor(sr, WFM_TARGET_HZ);
             let passband = 0.4 * channel_rate(sr, d);
-            assert!(passband >= 128_000.0,
-                    "sr={sr}: passband {passband} Hz is inside Carson bandwidth");
+            assert!(
+                passband >= 128_000.0,
+                "sr={sr}: passband {passband} Hz is inside Carson bandwidth"
+            );
         }
     }
 
@@ -1029,7 +1191,11 @@ mod tests {
             (re * re + im * im).sqrt()
         };
         assert!(eval(0.0) > 0.99, "passband gain {}", eval(0.0));
-        assert!(eval(0.20) < 0.01, "stopband gain {} should be < -40 dB", eval(0.20));
+        assert!(
+            eval(0.20) < 0.01,
+            "stopband gain {} should be < -40 dB",
+            eval(0.20)
+        );
     }
 
     #[test]
@@ -1039,7 +1205,11 @@ mod tests {
         let mut inst = Vec::new();
         fm_discriminate(&iq, rate, &mut inst);
         let s = fm_stats(&inst).expect("stats");
-        assert!((s.carrier_offset_hz - 10_000.0).abs() < 50.0, "offset = {}", s.carrier_offset_hz);
+        assert!(
+            (s.carrier_offset_hz - 10_000.0).abs() < 50.0,
+            "offset = {}",
+            s.carrier_offset_hz
+        );
         // An unmodulated carrier has no deviation.
         assert!(s.peak_dev_hz < 50.0, "peak = {}", s.peak_dev_hz);
     }
@@ -1052,10 +1222,18 @@ mod tests {
         let mut inst = Vec::new();
         fm_discriminate(&iq, rate, &mut inst);
         let s = fm_stats(&inst).expect("stats");
-        assert!((s.peak_dev_hz - 40_000.0).abs() < 500.0, "peak = {}", s.peak_dev_hz);
+        assert!(
+            (s.peak_dev_hz - 40_000.0).abs() < 500.0,
+            "peak = {}",
+            s.peak_dev_hz
+        );
         // A sine's RMS is its peak / √2.
         let expect_rms = 40_000.0 / 2f32.sqrt();
-        assert!((s.rms_dev_hz - expect_rms).abs() < 500.0, "rms = {}", s.rms_dev_hz);
+        assert!(
+            (s.rms_dev_hz - expect_rms).abs() < 500.0,
+            "rms = {}",
+            s.rms_dev_hz
+        );
     }
 
     #[test]
@@ -1067,8 +1245,16 @@ mod tests {
         let mut inst = Vec::new();
         fm_discriminate(&iq, rate, &mut inst);
         let s = fm_stats(&inst).expect("stats");
-        assert!((s.carrier_offset_hz - 30_000.0).abs() < 500.0, "offset = {}", s.carrier_offset_hz);
-        assert!((s.peak_dev_hz - 20_000.0).abs() < 500.0, "peak = {}", s.peak_dev_hz);
+        assert!(
+            (s.carrier_offset_hz - 30_000.0).abs() < 500.0,
+            "offset = {}",
+            s.carrier_offset_hz
+        );
+        assert!(
+            (s.peak_dev_hz - 20_000.0).abs() < 500.0,
+            "peak = {}",
+            s.peak_dev_hz
+        );
     }
 
     #[test]
@@ -1080,17 +1266,31 @@ mod tests {
         let mut sd = StreamingDecimator::new(design_lowpass(tap_count(d), 0.4 / d as f64), d);
         let mut dec = Vec::new();
         sd.process(&iq, &mut dec);
-        assert!(dec.len() > 1000, "expected a decimated block, got {}", dec.len());
+        assert!(
+            dec.len() > 1000,
+            "expected a decimated block, got {}",
+            dec.len()
+        );
         let mut inst = Vec::new();
         fm_discriminate(&dec, channel_rate(rate, d), &mut inst);
         let s = fm_stats(&inst).expect("stats");
-        assert!((s.carrier_offset_hz - 5_000.0).abs() < 100.0, "offset = {}", s.carrier_offset_hz);
+        assert!(
+            (s.carrier_offset_hz - 5_000.0).abs() < 100.0,
+            "offset = {}",
+            s.carrier_offset_hz
+        );
     }
 
     #[test]
     fn decimate_is_a_noop_when_input_is_shorter_than_the_filter() {
         let mut sd = StreamingDecimator::new(design_lowpass(63, 0.1), 4);
-        let input = vec![Complex { re: 1.0f32, im: 0.0 }; 10];
+        let input = vec![
+            Complex {
+                re: 1.0f32,
+                im: 0.0
+            };
+            10
+        ];
         let mut out = Vec::new();
         sd.process(&input, &mut out);
         assert!(out.is_empty());
@@ -1118,7 +1318,11 @@ mod tests {
             pieced.extend_from_slice(&part);
         }
 
-        assert_eq!(pieced.len(), whole.len(), "sample count diverged across blocks");
+        assert_eq!(
+            pieced.len(),
+            whole.len(),
+            "sample count diverged across blocks"
+        );
         for (i, (a, b)) in pieced.iter().zip(whole.iter()).enumerate() {
             assert!((a - b).norm() < 1e-3, "sample {i} differs: {a} vs {b}");
         }
@@ -1170,9 +1374,16 @@ mod tests {
             inst[i] = 125_000.0;
         }
         let s = fm_stats(&inst).expect("stats");
-        assert!(s.peak_dev_hz < 22_000.0,
-                "impulses must not be reported as deviation, got {}", s.peak_dev_hz);
-        assert!(s.peak_dev_hz > 18_000.0, "genuine peak still tracked, got {}", s.peak_dev_hz);
+        assert!(
+            s.peak_dev_hz < 22_000.0,
+            "impulses must not be reported as deviation, got {}",
+            s.peak_dev_hz
+        );
+        assert!(
+            s.peak_dev_hz > 18_000.0,
+            "genuine peak still tracked, got {}",
+            s.peak_dev_hz
+        );
     }
 
     #[test]
@@ -1182,7 +1393,10 @@ mod tests {
         // Collapse a run of samples to near zero, as a beat null or noise null
         // does. Their phase is meaningless and must not reach the statistics.
         for z in iq.iter_mut().skip(1000).take(50) {
-            *z = Complex { re: 1e-4, im: -1e-4 };
+            *z = Complex {
+                re: 1e-4,
+                im: -1e-4,
+            };
         }
         let mut inst = Vec::new();
         fm_discriminate(&iq, rate, &mut inst);
@@ -1191,9 +1405,16 @@ mod tests {
         assert_eq!(inst.len(), 4095, "gating must not disturb the sample grid");
         // Nothing survives near the ±rate/2 ambiguity rail.
         let worst = inst.iter().fold(0.0f32, |m, &v| m.max(v.abs()));
-        assert!(worst < 100_000.0, "rail-level sample survived the gate: {worst}");
+        assert!(
+            worst < 100_000.0,
+            "rail-level sample survived the gate: {worst}"
+        );
         // The held region carries a plausible deviation, not a fabricated zero.
-        assert!(inst[1020].abs() <= 20_000.0 + 1.0, "held value = {}", inst[1020]);
+        assert!(
+            inst[1020].abs() <= 20_000.0 + 1.0,
+            "held value = {}",
+            inst[1020]
+        );
     }
 
     #[test]
@@ -1209,8 +1430,11 @@ mod tests {
         let mut inst = Vec::new();
         fm_discriminate(&iq, rate, &mut inst);
         assert_eq!(inst.len(), 2047);
-        assert!((inst[0] - 15_000.0).abs() < 200.0,
-                "leading gap must be backfilled, got {}", inst[0]);
+        assert!(
+            (inst[0] - 15_000.0).abs() < 200.0,
+            "leading gap must be backfilled, got {}",
+            inst[0]
+        );
     }
 
     #[test]
@@ -1231,7 +1455,11 @@ mod tests {
         let mut inst = Vec::new();
         fm_discriminate(&iq, rate, &mut inst);
         let s = fm_stats(&inst).expect("stats");
-        assert!(s.peak_dev_hz > 85_000.0, "expected ~90 kHz, got {}", s.peak_dev_hz);
+        assert!(
+            s.peak_dev_hz > 85_000.0,
+            "expected ~90 kHz, got {}",
+            s.peak_dev_hz
+        );
     }
 
     /// Synthesise a WFM-style composite: an audio tone plus a 19 kHz pilot at a
@@ -1242,16 +1470,20 @@ mod tests {
         for i in 0..n {
             let t = i as f64 / rate;
             let inst = audio_dev * (2.0 * PI * 1_000.0 * t).sin()
-                     + pilot_dev * (2.0 * PI * PILOT_HZ * t).sin();
+                + pilot_dev * (2.0 * PI * PILOT_HZ * t).sin();
             phase += 2.0 * PI * inst / rate;
-            out.push(Complex { re: phase.cos() as f32, im: phase.sin() as f32 });
+            out.push(Complex {
+                re: phase.cos() as f32,
+                im: phase.sin() as f32,
+            });
         }
         out
     }
 
     fn mpx_of(inst: &[f32], rate: f64) -> (Vec<f32>, f64) {
         let fft = rustfft::FftPlanner::<f32>::new().plan_fft_forward(MPX_FFT_SIZE);
-        let window = super::super::dsp::compute_window(super::super::dsp::WindowFn::Hann, MPX_FFT_SIZE);
+        let window =
+            super::super::dsp::compute_window(super::super::dsp::WindowFn::Hann, MPX_FFT_SIZE);
         let (mut scratch, mut mags) = (Vec::new(), Vec::new());
         mpx_spectrum(inst, &window, fft.as_ref(), &mut scratch, &mut mags);
         (mags, rate / MPX_FFT_SIZE as f64)
@@ -1266,7 +1498,11 @@ mod tests {
         let mut inst = Vec::new();
         fm_discriminate(&iq, rate, &mut inst);
         let s = fm_stats(&inst).expect("stats");
-        assert!(s.carrier_offset_hz.abs() < 200.0, "residual offset {}", s.carrier_offset_hz);
+        assert!(
+            s.carrier_offset_hz.abs() < 200.0,
+            "residual offset {}",
+            s.carrier_offset_hz
+        );
     }
 
     #[test]
@@ -1275,15 +1511,20 @@ mod tests {
         let original = fm_signal(rate, 256, 50_000.0, 0.0, 0.0);
         let mut untouched = original.clone();
         mix_offset(&mut untouched, 0.0, rate);
-        assert_eq!(untouched[10], original[10], "zero offset must not touch the samples");
+        assert_eq!(
+            untouched[10], original[10],
+            "zero offset must not touch the samples"
+        );
 
         // Mixing is a rotation: it must not change the envelope, or it would move
         // samples across the gate threshold.
         let mut mixed = original.clone();
         mix_offset(&mut mixed, 250_000.0, rate);
         for i in [0usize, 100, 255] {
-            assert!((mixed[i].norm() - original[i].norm()).abs() < 1e-3,
-                    "envelope changed at {i}");
+            assert!(
+                (mixed[i].norm() - original[i].norm()).abs() < 1e-3,
+                "envelope changed at {i}"
+            );
         }
     }
 
@@ -1300,8 +1541,16 @@ mod tests {
         let p = pilot_measure(&mags, bin_hz, 75_000.0);
         assert_eq!(p.state, PilotState::Locked);
         // Amplitude scaling must return real Hz of deviation, not arbitrary units.
-        assert!((p.deviation_hz - 7_500.0).abs() < 800.0, "pilot dev = {}", p.deviation_hz);
-        assert!((p.injection_pct - 10.0).abs() < 1.5, "injection = {}", p.injection_pct);
+        assert!(
+            (p.deviation_hz - 7_500.0).abs() < 800.0,
+            "pilot dev = {}",
+            p.deviation_hz
+        );
+        assert!(
+            (p.injection_pct - 10.0).abs() < 1.5,
+            "injection = {}",
+            p.injection_pct
+        );
     }
 
     #[test]
@@ -1312,7 +1561,12 @@ mod tests {
         fm_discriminate(&iq, rate, &mut inst);
         let (mags, bin_hz) = mpx_of(&inst, rate);
         let p = pilot_measure(&mags, bin_hz, 75_000.0);
-        assert_eq!(p.state, PilotState::Absent, "injection = {}", p.injection_pct);
+        assert_eq!(
+            p.state,
+            PilotState::Absent,
+            "injection = {}",
+            p.injection_pct
+        );
     }
 
     #[test]
@@ -1324,7 +1578,12 @@ mod tests {
         fm_discriminate(&iq, rate, &mut inst);
         let (mags, bin_hz) = mpx_of(&inst, rate);
         let p = pilot_measure(&mags, bin_hz, 75_000.0);
-        assert_eq!(p.state, PilotState::Marginal, "injection = {}", p.injection_pct);
+        assert_eq!(
+            p.state,
+            PilotState::Marginal,
+            "injection = {}",
+            p.injection_pct
+        );
     }
 
     #[test]
@@ -1332,7 +1591,8 @@ mod tests {
         // Fewer samples than the transform needs yields nothing, never a
         // zero-padded spectrum that would read as real signal.
         let fft = rustfft::FftPlanner::<f32>::new().plan_fft_forward(MPX_FFT_SIZE);
-        let window = super::super::dsp::compute_window(super::super::dsp::WindowFn::Hann, MPX_FFT_SIZE);
+        let window =
+            super::super::dsp::compute_window(super::super::dsp::WindowFn::Hann, MPX_FFT_SIZE);
         let (mut scratch, mut mags) = (Vec::new(), Vec::new());
         mpx_spectrum(&[0.0; 100], &window, fft.as_ref(), &mut scratch, &mut mags);
         assert!(mags.is_empty());
@@ -1340,27 +1600,41 @@ mod tests {
 
     #[test]
     fn pilot_measure_refuses_degenerate_input() {
-        assert_eq!(pilot_measure(&[], 163.0, 75_000.0).state, PilotState::Absent);
-        assert_eq!(pilot_measure(&[1.0, 2.0], 0.0, 75_000.0).state, PilotState::Absent);
-        assert_eq!(pilot_measure(&[1.0, 2.0], 163.0, 0.0).state, PilotState::Absent);
+        assert_eq!(
+            pilot_measure(&[], 163.0, 75_000.0).state,
+            PilotState::Absent
+        );
+        assert_eq!(
+            pilot_measure(&[1.0, 2.0], 0.0, 75_000.0).state,
+            PilotState::Absent
+        );
+        assert_eq!(
+            pilot_measure(&[1.0, 2.0], 163.0, 0.0).state,
+            PilotState::Absent
+        );
     }
 
     #[test]
     fn target_rate_per_modulation() {
         assert_eq!(target_rate_for(Modulation::Wfm), Some(WFM_TARGET_HZ));
         assert_eq!(target_rate_for(Modulation::Nfm), Some(NFM_TARGET_HZ));
-        assert_eq!(target_rate_for(Modulation::Am),  Some(AM_TARGET_HZ));
+        assert_eq!(target_rate_for(Modulation::Am), Some(AM_TARGET_HZ));
         // An unclassified carrier must produce no reading at all.
         assert_eq!(target_rate_for(Modulation::Unknown), None);
     }
 
     /// AM carrier of unit amplitude, modulated `depth` (0..1) by a 1 kHz tone.
     fn am_signal(rate: f64, n: usize, depth: f64) -> Vec<Complex<f32>> {
-        (0..n).map(|i| {
-            let t = i as f64 / rate;
-            let a = 1.0 + depth * (2.0 * PI * 1_000.0 * t).sin();
-            Complex { re: a as f32, im: 0.0 }
-        }).collect()
+        (0..n)
+            .map(|i| {
+                let t = i as f64 / rate;
+                let a = 1.0 + depth * (2.0 * PI * 1_000.0 * t).sin();
+                Complex {
+                    re: a as f32,
+                    im: 0.0,
+                }
+            })
+            .collect()
     }
 
     #[test]
@@ -1371,8 +1645,12 @@ mod tests {
         let s = am_stats(&env).expect("stats");
         assert!((s.depth_pct - 50.0).abs() < 2.0, "depth = {}", s.depth_pct);
         // A symmetric modulator swings equally either side of the carrier.
-        assert!((s.positive_pct - s.negative_pct).abs() < 3.0,
-                "asymmetry {} vs {}", s.positive_pct, s.negative_pct);
+        assert!(
+            (s.positive_pct - s.negative_pct).abs() < 3.0,
+            "asymmetry {} vs {}",
+            s.positive_pct,
+            s.negative_pct
+        );
     }
 
     #[test]
@@ -1395,11 +1673,13 @@ mod tests {
     /// Discriminator-domain audio: a CTCSS tone plus a louder voice-band tone,
     /// as a real NFM channel carries it.
     fn ctcss_audio(rate: f64, n: usize, tone_hz: f64, tone_dev: f64, voice_dev: f64) -> Vec<f32> {
-        (0..n).map(|i| {
-            let t = i as f64 / rate;
-            (tone_dev * (2.0 * PI * tone_hz * t).sin()
-             + voice_dev * (2.0 * PI * 900.0 * t).sin()) as f32
-        }).collect()
+        (0..n)
+            .map(|i| {
+                let t = i as f64 / rate;
+                (tone_dev * (2.0 * PI * tone_hz * t).sin()
+                    + voice_dev * (2.0 * PI * 900.0 * t).sin()) as f32
+            })
+            .collect()
     }
 
     #[test]
@@ -1411,7 +1691,11 @@ mod tests {
         let audio = ctcss_audio(rate, n, 103.5, 600.0, 3_000.0);
         let m = ctcss_detect(&audio, &window, rate).expect("tone detected");
         assert_eq!(m.tone_hz, 103.5);
-        assert!((m.deviation_hz - 600.0).abs() < 100.0, "dev = {}", m.deviation_hz);
+        assert!(
+            (m.deviation_hz - 600.0).abs() < 100.0,
+            "dev = {}",
+            m.deviation_hz
+        );
     }
 
     #[test]

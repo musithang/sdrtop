@@ -19,8 +19,8 @@ use ratatui::{
 };
 
 use crate::state::{SdrMetrics, SpectrumMarker};
-use crate::ui::rf_calc::{cascade, estimate_mds_dbm, staging_verdict, system_nf_db};
 use crate::ui::panel::{FrameStyle, Panel, PanelChrome};
+use crate::ui::rf_calc::{cascade, estimate_mds_dbm, staging_verdict, system_nf_db};
 
 /// Map an active preset name to its lab banner label and the number key that
 /// selects it (the *current* key map, which we keep — see the implementation
@@ -28,11 +28,11 @@ use crate::ui::panel::{FrameStyle, Panel, PanelChrome};
 /// render outside a lab.
 pub fn lab_label(preset: &str) -> Option<(&'static str, char)> {
     match preset {
-        "lab_iq"     => Some(("I/Q QUALITY", '5')),
-        "lab_rf"     => Some(("RF CHAIN",    '6')),
+        "lab_iq" => Some(("I/Q QUALITY", '5')),
+        "lab_rf" => Some(("RF CHAIN", '6')),
         "lab_timing" => Some(("HOST TIMING", '7')),
-        "lab_signal" => Some(("SIGNAL",      '8')),
-        "lab_sweep"  => Some(("SWEEP",       '9')),
+        "lab_signal" => Some(("SIGNAL", '8')),
+        "lab_sweep" => Some(("SWEEP", '9')),
         _ => None,
     }
 }
@@ -56,7 +56,7 @@ fn fmt_delta(df_hz: u64, dl_db: Option<f32>) -> String {
     };
     match dl_db {
         Some(d) => format!("{f} {:.1} dB", d.abs()),
-        None    => f,
+        None => f,
     }
 }
 
@@ -65,10 +65,14 @@ fn fmt_delta(df_hz: u64, dl_db: Option<f32>) -> String {
 fn level_at_freq(state: &SdrMetrics, freq_hz: u64) -> Option<f32> {
     let fr = state.waterfall.last_fft.as_ref()?;
     let n = fr.bins_dbfs.len();
-    if n == 0 { return None; }
+    if n == 0 {
+        return None;
+    }
     let left = fr.center_freq_hz as f64 - fr.sample_rate / 2.0;
     let frac = (freq_hz as f64 - left) / fr.sample_rate;
-    if !(0.0..=1.0).contains(&frac) { return None; }
+    if !(0.0..=1.0).contains(&frac) {
+        return None;
+    }
     let idx = (frac * (n - 1) as f64).round() as usize;
     fr.bins_dbfs.get(idx.min(n - 1)).copied()
 }
@@ -80,7 +84,10 @@ fn span_w(spans: &[Span]) -> usize {
 
 /// A full-width hairline rule in `color`.
 fn hairline(iw: usize, color: ratatui::style::Color) -> Line<'static> {
-    Line::from(Span::styled("\u{2500}".repeat(iw), Style::default().fg(color)))
+    Line::from(Span::styled(
+        "\u{2500}".repeat(iw),
+        Style::default().fg(color),
+    ))
 }
 
 // ── Banner (top bar) ────────────────────────────────────────────────────────
@@ -89,9 +96,13 @@ fn hairline(iw: usize, color: ratatui::style::Color) -> Line<'static> {
 /// with `AMP` inserted when the front-end amp is on, collapsing to `ANT▸TUNER▸ADC`
 /// on a single-tuner radio (no cascade).
 fn rf_chain_str(friis_applicable: bool, amp_enabled: bool) -> String {
-    if !friis_applicable { return "ANT\u{25B8}TUNER\u{25B8}ADC".to_string(); }
+    if !friis_applicable {
+        return "ANT\u{25B8}TUNER\u{25B8}ADC".to_string();
+    }
     let mut s = String::from("ANT\u{25B8}");
-    if amp_enabled { s.push_str("AMP\u{25B8}"); }
+    if amp_enabled {
+        s.push_str("AMP\u{25B8}");
+    }
     s.push_str("LNA\u{25B8}MIX\u{25B8}VGA\u{25B8}ADC");
     s
 }
@@ -100,20 +111,24 @@ fn rf_chain_str(friis_applicable: bool, amp_enabled: bool) -> String {
 /// from the live cascade). On a single-tuner radio only the honest CHAIN + SNR show.
 fn rf_banner_fields(state: &SdrMetrics) -> Vec<(&'static str, String)> {
     let chain = rf_chain_str(state.caps.friis_applicable, state.radio.amp_enabled);
-    let snr   = format!("{:.0} dB", state.signal.peak_to_nf_db);
+    let snr = format!("{:.0} dB", state.signal.peak_to_nf_db);
     if !state.caps.friis_applicable {
         return vec![("CHAIN", chain), ("SNR", snr)];
     }
-    let nf  = system_nf_db(&cascade(state.radio.amp_enabled, state.radio.lna_gain, state.radio.vga_gain));
+    let nf = system_nf_db(&cascade(
+        state.radio.amp_enabled,
+        state.radio.lna_gain,
+        state.radio.vga_gain,
+    ));
     let mds = match estimate_mds_dbm(state.radio.bb_filter_hz, nf) {
         Some(m) => format!("{m:.0} dBm"),
-        None    => "\u{2014}".to_string(),
+        None => "\u{2014}".to_string(),
     };
     vec![
         ("CHAIN", chain),
-        ("NF",    format!("{nf:.1} dB")),
-        ("MDS",   mds),
-        ("SNR",   snr),
+        ("NF", format!("{nf:.1} dB")),
+        ("MDS", mds),
+        ("SNR", snr),
     ]
 }
 
@@ -129,13 +144,17 @@ fn timing_banner_fields(t: &crate::state::TimingState) -> Vec<(&'static str, Str
     let deadline = if t.late_callbacks == 0 {
         "\u{2713} met".to_string()
     } else {
-        let pct = if t.deadline_budget_us > 0 { t.dev_peak_us * 100 / t.deadline_budget_us } else { 0 };
+        let pct = if t.deadline_budget_us > 0 {
+            t.dev_peak_us * 100 / t.deadline_budget_us
+        } else {
+            0
+        };
         format!("\u{26a0} {pct}%")
     };
     vec![
         ("CALLBACK", callback),
-        ("JITTER",   format!("\u{00b1}{} \u{00b5}s", t.cb_jitter_us)),
-        ("DRIFT",    format!("{:+} ppm", t.cb_period_delta_ppm)),
+        ("JITTER", format!("\u{00b1}{} \u{00b5}s", t.cb_jitter_us)),
+        ("DRIFT", format!("{:+} ppm", t.cb_period_delta_ppm)),
         ("DEADLINE", deadline),
     ]
 }
@@ -151,7 +170,10 @@ fn timing_banner_fields(t: &crate::state::TimingState) -> Vec<(&'static str, Str
 /// `‖ FRZ` lamp at the far right was the only hint, and it is nowhere near the
 /// numbers it applies to.
 fn signal_banner_fields(state: &SdrMetrics) -> Vec<(&'static str, String)> {
-    signal_fields(&state.signal, crate::ui::widgets::micro_common::fft_stale(state))
+    signal_fields(
+        &state.signal,
+        crate::ui::widgets::micro_common::fft_stale(state),
+    )
 }
 
 /// The banner fields as a pure function of what was measured and whether it is
@@ -160,37 +182,62 @@ fn signal_banner_fields(state: &SdrMetrics) -> Vec<(&'static str, String)> {
 fn signal_fields(sig: &crate::state::SignalState, stale: bool) -> Vec<(&'static str, String)> {
     let dash = || "\u{2014}".to_string();
     if stale {
-        return vec![("MOD", dash()), ("SNR", dash()), ("CH PWR", dash()), ("OBW", dash())];
+        return vec![
+            ("MOD", dash()),
+            ("SNR", dash()),
+            ("CH PWR", dash()),
+            ("OBW", dash()),
+        ];
     }
     vec![
-        ("MOD",    sig.modulation.label().to_string()),
-        ("SNR",    format!("{:.0} dB", sig.peak_to_nf_db)),
-        ("CH PWR", if sig.channel_power_dbfs.is_finite() {
-            format!("{:.1} dBFS", sig.channel_power_dbfs)
-        } else {
-            dash()
-        }),
-        ("OBW", if sig.occupied_bw_hz > 0 {
-            crate::ui::widgets::micro_common::fmt_bw(sig.occupied_bw_hz)
-        } else {
-            dash()
-        }),
+        ("MOD", sig.modulation.label().to_string()),
+        ("SNR", format!("{:.0} dB", sig.peak_to_nf_db)),
+        (
+            "CH PWR",
+            if sig.channel_power_dbfs.is_finite() {
+                format!("{:.1} dBFS", sig.channel_power_dbfs)
+            } else {
+                dash()
+            },
+        ),
+        (
+            "OBW",
+            if sig.occupied_bw_hz > 0 {
+                crate::ui::widgets::micro_common::fmt_bw(sig.occupied_bw_hz)
+            } else {
+                dash()
+            },
+        ),
     ]
 }
 
-fn banner_lines(state: &SdrMetrics, theme: &crate::Theme, iw: usize, focused: bool) -> Vec<Line<'static>> {
+fn banner_lines(
+    state: &SdrMetrics,
+    theme: &crate::Theme,
+    iw: usize,
+    focused: bool,
+) -> Vec<Line<'static>> {
     let (label, num) = match lab_label(&state.ui.active_preset) {
         Some(x) => x,
-        None    => return vec![Line::raw("")],
+        None => return vec![Line::raw("")],
     };
-    let dim  = Style::default().fg(theme.label);
-    let bold = Style::default().fg(theme.label).add_modifier(Modifier::BOLD);
-    let hi   = Style::default().fg(theme.value_hi).add_modifier(Modifier::BOLD);
-    let val  = Style::default().fg(theme.value);
+    let dim = Style::default().fg(theme.label);
+    let bold = Style::default()
+        .fg(theme.label)
+        .add_modifier(Modifier::BOLD);
+    let hi = Style::default()
+        .fg(theme.value_hi)
+        .add_modifier(Modifier::BOLD);
+    let val = Style::default().fg(theme.value);
 
     // Left zone: "▸LAB · RF CHAIN [6]" (▸ when the banner holds focus).
     let lead = if focused {
-        Span::styled("\u{25B8}", Style::default().fg(theme.value_hi).add_modifier(Modifier::BOLD))
+        Span::styled(
+            "\u{25B8}",
+            Style::default()
+                .fg(theme.value_hi)
+                .add_modifier(Modifier::BOLD),
+        )
     } else {
         Span::raw(" ")
     };
@@ -208,14 +255,31 @@ fn banner_lines(state: &SdrMetrics, theme: &crate::Theme, iw: usize, focused: bo
     // Right zone: live / freeze.
     let streaming = state.radio.hw_streaming && !state.observer.active;
     let mut right: Vec<Span> = if streaming {
-        vec![Span::styled("\u{25B6} ", Style::default().fg(theme.status_ok)),
-             Span::styled("LIVE ", Style::default().fg(theme.status_ok).add_modifier(Modifier::BOLD))]
+        vec![
+            Span::styled("\u{25B6} ", Style::default().fg(theme.status_ok)),
+            Span::styled(
+                "LIVE ",
+                Style::default()
+                    .fg(theme.status_ok)
+                    .add_modifier(Modifier::BOLD),
+            ),
+        ]
     } else {
-        vec![Span::styled("\u{2016} ", Style::default().fg(theme.status_warn)),
-             Span::styled("FRZ ", Style::default().fg(theme.status_warn).add_modifier(Modifier::BOLD))]
+        vec![
+            Span::styled("\u{2016} ", Style::default().fg(theme.status_warn)),
+            Span::styled(
+                "FRZ ",
+                Style::default()
+                    .fg(theme.status_warn)
+                    .add_modifier(Modifier::BOLD),
+            ),
+        ]
     };
     let mut rw = span_w(&right);
-    if iw <= lw + rw + 1 { right.clear(); rw = 0; } // too narrow for the right zone
+    if iw <= lw + rw + 1 {
+        right.clear();
+        rw = 0;
+    } // too narrow for the right zone
 
     // Middle fields. Lab RF reads the RF cascade summary (CHAIN/NF/MDS/SNR) rather
     // than the generic spectrum REF/MKR/AVG/CAL set.
@@ -229,16 +293,24 @@ fn banner_lines(state: &SdrMetrics, theme: &crate::Theme, iw: usize, focused: bo
         // In Lab IQ the two markers are the auto-tracked carrier + image, so MKR
         // reads "2" (and "pin" when frozen) rather than the placed-marker count.
         let mkr_str = if state.ui.active_preset == "lab_iq" {
-            if state.lab.iq_marker_pin.is_some() { "2 pin".to_string() } else { "2".to_string() }
+            if state.lab.iq_marker_pin.is_some() {
+                "2 pin".to_string()
+            } else {
+                "2".to_string()
+            }
         } else {
             state.spectrum.markers.len().to_string()
         };
         // In Lab IQ the CAL field reflects the live I/Q auto-cal, not the spectrum
         // reference-trace cal used by the other labs.
         let cal_str = if state.ui.active_preset == "lab_iq" {
-            if state.iq.cal.cal_applied      { "\u{2713}".to_string() }
-            else if state.iq.cal.cal_pending { "\u{2026}".to_string() }
-            else                             { "\u{2014}".to_string() }
+            if state.iq.cal.cal_applied {
+                "\u{2713}".to_string()
+            } else if state.iq.cal.cal_pending {
+                "\u{2026}".to_string()
+            } else {
+                "\u{2014}".to_string()
+            }
         } else {
             state.lab.cal_label().to_string()
         };
@@ -259,7 +331,10 @@ fn banner_lines(state: &SdrMetrics, theme: &crate::Theme, iw: usize, focused: bo
             Span::styled(value, val),
         ];
         let cw = span_w(&cand);
-        if lw + mw + cw + rw + 1 <= iw { mid.extend(cand); mw += cw; }
+        if lw + mw + cw + rw + 1 <= iw {
+            mid.extend(cand);
+            mw += cw;
+        }
     }
 
     let filler = iw.saturating_sub(lw + mw + rw).max(1);
@@ -268,16 +343,24 @@ fn banner_lines(state: &SdrMetrics, theme: &crate::Theme, iw: usize, focused: bo
     spans.push(Span::raw(" ".repeat(filler)));
     spans.extend(right);
 
-    let rule = if focused { theme.border_focused } else { theme.border_dim };
+    let rule = if focused {
+        theme.border_focused
+    } else {
+        theme.border_dim
+    };
     vec![Line::from(spans), hairline(iw, rule)]
 }
 
 // ── Marker bar (bottom bar) ─────────────────────────────────────────────────
 
-fn marker_spans(idx: usize, mk: Option<&SpectrumMarker>, state: &SdrMetrics,
-                theme: &crate::Theme) -> Vec<Span<'static>> {
-    let dim  = Style::default().fg(theme.label);
-    let val  = Style::default().fg(theme.value);
+fn marker_spans(
+    idx: usize,
+    mk: Option<&SpectrumMarker>,
+    state: &SdrMetrics,
+    theme: &crate::Theme,
+) -> Vec<Span<'static>> {
+    let dim = Style::default().fg(theme.label);
+    let val = Style::default().fg(theme.value);
     match mk {
         Some(m) => {
             let lvl = level_at_freq(state, m.freq_hz)
@@ -290,21 +373,34 @@ fn marker_spans(idx: usize, mk: Option<&SpectrumMarker>, state: &SdrMetrics,
                 Span::styled(lvl, val),
             ]
         }
-        None => vec![Span::styled(format!("MKR{idx} "), dim),
-                     Span::styled("\u{2014}", Style::default().fg(theme.border_dim))],
+        None => vec![
+            Span::styled(format!("MKR{idx} "), dim),
+            Span::styled("\u{2014}", Style::default().fg(theme.border_dim)),
+        ],
     }
 }
 
 /// Right-side focus hints from the currently focused panel, appended if they fit.
-fn append_focus_hints(state: &SdrMetrics, theme: &crate::Theme, iw: usize,
-                      used: usize, spans: &mut Vec<Span<'static>>) {
+fn append_focus_hints(
+    state: &SdrMetrics,
+    theme: &crate::Theme,
+    iw: usize,
+    used: usize,
+    spans: &mut Vec<Span<'static>>,
+) {
     let key = Style::default().fg(theme.value_hi);
     let dim = Style::default().fg(theme.label);
-    let hints: Vec<Span> = state.ui.focused_panel_bindings.iter()
-        .flat_map(|(k, l)| vec![
-            Span::styled(format!("[{k}] "), key),
-            Span::styled(format!("{l}  "), dim),
-        ]).collect();
+    let hints: Vec<Span> = state
+        .ui
+        .focused_panel_bindings
+        .iter()
+        .flat_map(|(k, l)| {
+            vec![
+                Span::styled(format!("[{k}] "), key),
+                Span::styled(format!("{l}  "), dim),
+            ]
+        })
+        .collect();
     let hw = span_w(&hints);
     if !hints.is_empty() && used + hw + 2 <= iw {
         let filler = iw.saturating_sub(used + hw);
@@ -323,29 +419,45 @@ fn iq_marker_lines(state: &SdrMetrics, theme: &crate::Theme, iw: usize) -> Vec<L
     // image *levels it actually measured*, so the bar reads the exact same numbers
     // as the scope (no second frequency→bin round-trip to drift on).
     let pin = state.lab.iq_marker_pin;
-    let ci  = crate::ui::panels::lab::image_scope::carrier_image(state);
+    let ci = crate::ui::panels::lab::image_scope::carrier_image(state);
 
-    let slot = |n: usize, name: &str, color: ratatui::style::Color, data: Option<(u64, f32)>| -> Vec<Span<'static>> {
+    let slot = |n: usize,
+                name: &str,
+                color: ratatui::style::Color,
+                data: Option<(u64, f32)>|
+     -> Vec<Span<'static>> {
         let mut v = vec![
             Span::styled(format!("MKR{n} \u{00b7} "), dim),
-            Span::styled(name.to_string(), Style::default().fg(color).add_modifier(Modifier::BOLD)),
+            Span::styled(
+                name.to_string(),
+                Style::default().fg(color).add_modifier(Modifier::BOLD),
+            ),
         ];
         match data {
             Some((f, lvl)) => {
                 v.push(Span::raw(" "));
-                v.push(Span::styled(fmt_freq_mhz(f), Style::default().fg(theme.value)));
+                v.push(Span::styled(
+                    fmt_freq_mhz(f),
+                    Style::default().fg(theme.value),
+                ));
                 v.push(Span::raw("  "));
-                v.push(Span::styled(format!("{lvl:.1} dBFS"), Style::default().fg(theme.value)));
+                v.push(Span::styled(
+                    format!("{lvl:.1} dBFS"),
+                    Style::default().fg(theme.value),
+                ));
             }
             None => {
                 v.push(Span::raw(" "));
-                v.push(Span::styled("\u{2014}", Style::default().fg(theme.border_dim)));
+                v.push(Span::styled(
+                    "\u{2014}",
+                    Style::default().fg(theme.border_dim),
+                ));
             }
         }
         v
     };
 
-    let image_data   = ci.as_ref().map(|c| (c.image_hz, c.image_dbfs));
+    let image_data = ci.as_ref().map(|c| (c.image_hz, c.image_dbfs));
     let carrier_data = ci.as_ref().map(|c| (c.carrier_hz, c.carrier_dbfs));
 
     let mut spans: Vec<Span> = vec![Span::raw(" ")];
@@ -354,7 +466,10 @@ fn iq_marker_lines(state: &SdrMetrics, theme: &crate::Theme, iw: usize) -> Vec<L
 
     let try_add = |cand: Vec<Span<'static>>, used: &mut usize, spans: &mut Vec<Span<'static>>| {
         let cw = span_w(&cand);
-        if *used + cw + 1 <= iw { spans.extend(cand); *used += cw; }
+        if *used + cw + 1 <= iw {
+            spans.extend(cand);
+            *used += cw;
+        }
     };
 
     let mut c2 = vec![Span::raw("   ")];
@@ -365,15 +480,25 @@ fn iq_marker_lines(state: &SdrMetrics, theme: &crate::Theme, iw: usize) -> Vec<L
     // colour-graded by the true suppression so an inverted pick is not flattered.
     if let Some(c) = &ci {
         let rel = c.image_dbfs - c.carrier_dbfs;
-        let scol = if c.suppression_db >= 40.0 { theme.status_ok }
-                   else if c.suppression_db >= 20.0 { theme.status_warn }
-                   else { theme.status_crit };
-        let rel_str = if rel <= 0.0 { format!("\u{2212}{:.1} dB", -rel) }
-                      else          { format!("+{rel:.1} dB") };
+        let scol = if c.suppression_db >= 40.0 {
+            theme.status_ok
+        } else if c.suppression_db >= 20.0 {
+            theme.status_warn
+        } else {
+            theme.status_crit
+        };
+        let rel_str = if rel <= 0.0 {
+            format!("\u{2212}{:.1} dB", -rel)
+        } else {
+            format!("+{rel:.1} dB")
+        };
         let cand = vec![
             Span::raw("   "),
             Span::styled("\u{0394} image ", dim),
-            Span::styled(rel_str, Style::default().fg(scol).add_modifier(Modifier::BOLD)),
+            Span::styled(
+                rel_str,
+                Style::default().fg(scol).add_modifier(Modifier::BOLD),
+            ),
         ];
         try_add(cand, &mut used, &mut spans);
     }
@@ -398,13 +523,15 @@ fn rf_marker_lines(state: &SdrMetrics, theme: &crate::Theme, iw: usize) -> Vec<L
     let dim = Style::default().fg(theme.label);
     let val = Style::default().fg(theme.value);
 
-    let peak     = state.signal.adc_peak_dbfs;
-    let snr      = state.signal.peak_to_nf_db;
-    let noise    = peak - snr; // ADC noise floor, dBFS
+    let peak = state.signal.adc_peak_dbfs;
+    let snr = state.signal.peak_to_nf_db;
+    let noise = peak - snr; // ADC noise floor, dBFS
     let headroom = -peak;
     let (_, sev) = staging_verdict(peak as f64);
     let peak_col = match sev {
-        2 => theme.status_crit, 1 => theme.status_warn, _ => theme.status_ok,
+        2 => theme.status_crit,
+        1 => theme.status_warn,
+        _ => theme.status_ok,
     };
 
     // CLIP reference line is the constant 0 dBFS rail; always shown first.
@@ -417,28 +544,59 @@ fn rf_marker_lines(state: &SdrMetrics, theme: &crate::Theme, iw: usize) -> Vec<L
 
     let try_add = |cand: Vec<Span<'static>>, used: &mut usize, spans: &mut Vec<Span<'static>>| {
         let cw = span_w(&cand);
-        if *used + cw + 1 <= iw { spans.extend(cand); *used += cw; }
+        if *used + cw + 1 <= iw {
+            spans.extend(cand);
+            *used += cw;
+        }
     };
 
-    try_add(vec![
-        Span::raw("   "), Span::styled("PEAK ", dim),
-        Span::styled(format!("{peak:.0} dBFS"), Style::default().fg(peak_col).add_modifier(Modifier::BOLD)),
-    ], &mut used, &mut spans);
+    try_add(
+        vec![
+            Span::raw("   "),
+            Span::styled("PEAK ", dim),
+            Span::styled(
+                format!("{peak:.0} dBFS"),
+                Style::default().fg(peak_col).add_modifier(Modifier::BOLD),
+            ),
+        ],
+        &mut used,
+        &mut spans,
+    );
 
-    try_add(vec![
-        Span::raw("   "), Span::styled("\u{0394} headroom ", dim),
-        Span::styled(format!("{headroom:+.0} dB"), Style::default().fg(peak_col)),
-    ], &mut used, &mut spans);
+    try_add(
+        vec![
+            Span::raw("   "),
+            Span::styled("\u{0394} headroom ", dim),
+            Span::styled(format!("{headroom:+.0} dB"), Style::default().fg(peak_col)),
+        ],
+        &mut used,
+        &mut spans,
+    );
 
-    try_add(vec![
-        Span::raw("   "), Span::styled("NOISE ", dim),
-        Span::styled(format!("{noise:.0} dBFS"), val),
-    ], &mut used, &mut spans);
+    try_add(
+        vec![
+            Span::raw("   "),
+            Span::styled("NOISE ", dim),
+            Span::styled(format!("{noise:.0} dBFS"), val),
+        ],
+        &mut used,
+        &mut spans,
+    );
 
-    try_add(vec![
-        Span::raw("   "), Span::styled("SNR ", dim),
-        Span::styled(format!("{snr:.0} dB"), Style::default().fg(theme.value).add_modifier(Modifier::BOLD)),
-    ], &mut used, &mut spans);
+    try_add(
+        vec![
+            Span::raw("   "),
+            Span::styled("SNR ", dim),
+            Span::styled(
+                format!("{snr:.0} dB"),
+                Style::default()
+                    .fg(theme.value)
+                    .add_modifier(Modifier::BOLD),
+            ),
+        ],
+        &mut used,
+        &mut spans,
+    );
 
     append_focus_hints(state, theme, iw, used, &mut spans);
     vec![hairline(iw, theme.border_dim), Line::from(spans)]
@@ -471,35 +629,78 @@ fn timing_marker_lines(state: &SdrMetrics, theme: &crate::Theme, iw: usize) -> V
 
     let try_add = |cand: Vec<Span<'static>>, used: &mut usize, spans: &mut Vec<Span<'static>>| {
         let cw = span_w(&cand);
-        if *used + cw + 1 <= iw { spans.extend(cand); *used += cw; }
+        if *used + cw + 1 <= iw {
+            spans.extend(cand);
+            *used += cw;
+        }
     };
 
-    try_add(vec![
-        Span::raw("   "), Span::styled("DRIFT ", dim),
-        crate::ui::widgets::timing_fmt::ppm_span(t.cb_period_delta_ppm, theme),
-    ], &mut used, &mut spans);
+    try_add(
+        vec![
+            Span::raw("   "),
+            Span::styled("DRIFT ", dim),
+            crate::ui::widgets::timing_fmt::ppm_span(t.cb_period_delta_ppm, theme),
+        ],
+        &mut used,
+        &mut spans,
+    );
 
-    let late_col = if t.late_callbacks == 0 { theme.status_ok }
-                   else if t.late_callbacks * 20 > t.late_window.max(1) { theme.status_crit }
-                   else { theme.status_warn };
-    try_add(vec![
-        Span::raw("   "), Span::styled("LATE ", dim),
-        Span::styled(format!("{}/{}", t.late_callbacks, t.late_window), Style::default().fg(late_col)),
-    ], &mut used, &mut spans);
+    let late_col = if t.late_callbacks == 0 {
+        theme.status_ok
+    } else if t.late_callbacks * 20 > t.late_window.max(1) {
+        theme.status_crit
+    } else {
+        theme.status_warn
+    };
+    try_add(
+        vec![
+            Span::raw("   "),
+            Span::styled("LATE ", dim),
+            Span::styled(
+                format!("{}/{}", t.late_callbacks, t.late_window),
+                Style::default().fg(late_col),
+            ),
+        ],
+        &mut used,
+        &mut spans,
+    );
 
-    try_add(vec![
-        Span::raw("   "), Span::styled("BUF ", dim),
-        Span::styled(format!("{:.0}%", state.iq.buf_fill_pct),
-            Style::default().fg(crate::ui::widgets::micro_common::buf_color(state.iq.buf_fill_pct, theme))),
-    ], &mut used, &mut spans);
+    try_add(
+        vec![
+            Span::raw("   "),
+            Span::styled("BUF ", dim),
+            Span::styled(
+                format!("{:.0}%", state.iq.buf_fill_pct),
+                Style::default().fg(crate::ui::widgets::micro_common::buf_color(
+                    state.iq.buf_fill_pct,
+                    theme,
+                )),
+            ),
+        ],
+        &mut used,
+        &mut spans,
+    );
 
     let q = t.timing_quality;
-    let mark = if q.severity() == 0 { "\u{2713}" } else { "\u{26a0}" };
-    try_add(vec![
-        Span::raw("   "), Span::styled("QUALITY ", dim),
-        Span::styled(format!("{mark} {}", titlecase(q.label())),
-            Style::default().fg(crate::ui::widgets::timing_fmt::quality_color(q, theme)).add_modifier(Modifier::BOLD)),
-    ], &mut used, &mut spans);
+    let mark = if q.severity() == 0 {
+        "\u{2713}"
+    } else {
+        "\u{26a0}"
+    };
+    try_add(
+        vec![
+            Span::raw("   "),
+            Span::styled("QUALITY ", dim),
+            Span::styled(
+                format!("{mark} {}", titlecase(q.label())),
+                Style::default()
+                    .fg(crate::ui::widgets::timing_fmt::quality_color(q, theme))
+                    .add_modifier(Modifier::BOLD),
+            ),
+        ],
+        &mut used,
+        &mut spans,
+    );
 
     append_focus_hints(state, theme, iw, used, &mut spans);
     vec![hairline(iw, theme.border_dim), Line::from(spans)]
@@ -525,7 +726,10 @@ fn signal_marker_lines(state: &SdrMetrics, theme: &crate::Theme, iw: usize) -> V
 
     let try_add = |cand: Vec<Span<'static>>, used: &mut usize, spans: &mut Vec<Span<'static>>| {
         let cw = span_w(&cand);
-        if *used + cw + 1 <= iw { spans.extend(cand); *used += cw; }
+        if *used + cw + 1 <= iw {
+            spans.extend(cand);
+            *used += cw;
+        }
     };
 
     if m2.is_some() {
@@ -536,15 +740,27 @@ fn signal_marker_lines(state: &SdrMetrics, theme: &crate::Theme, iw: usize) -> V
 
     if let (Some(a), Some(b)) = (m1, m2) {
         let df = (b.freq_hz as i64 - a.freq_hz as i64).unsigned_abs();
-        let dl = match (level_at_freq(state, a.freq_hz), level_at_freq(state, b.freq_hz)) {
+        let dl = match (
+            level_at_freq(state, a.freq_hz),
+            level_at_freq(state, b.freq_hz),
+        ) {
             (Some(x), Some(y)) => Some(y - x),
             _ => None,
         };
-        try_add(vec![
-            Span::raw("   "),
-            Span::styled("\u{0394} ", dim),
-            Span::styled(fmt_delta(df, dl), Style::default().fg(theme.value).add_modifier(Modifier::BOLD)),
-        ], &mut used, &mut spans);
+        try_add(
+            vec![
+                Span::raw("   "),
+                Span::styled("\u{0394} ", dim),
+                Span::styled(
+                    fmt_delta(df, dl),
+                    Style::default()
+                        .fg(theme.value)
+                        .add_modifier(Modifier::BOLD),
+                ),
+            ],
+            &mut used,
+            &mut spans,
+        );
     }
 
     // Same rule as the banner: an aged FFT frame has no occupancy and no verdict to
@@ -557,23 +773,44 @@ fn signal_marker_lines(state: &SdrMetrics, theme: &crate::Theme, iw: usize) -> V
     } else {
         "\u{2014}".to_string()
     };
-    try_add(vec![
-        Span::raw("   "), Span::styled("OBW ", dim),
-        Span::styled(obw_str, val),
-    ], &mut used, &mut spans);
+    try_add(
+        vec![
+            Span::raw("   "),
+            Span::styled("OBW ", dim),
+            Span::styled(obw_str, val),
+        ],
+        &mut used,
+        &mut spans,
+    );
 
     let quality = if stale {
-        vec![Span::styled("\u{2014}".to_string(), Style::default().fg(theme.stale))]
+        vec![Span::styled(
+            "\u{2014}".to_string(),
+            Style::default().fg(theme.stale),
+        )]
     } else {
         let (level, ..) = crate::ui::panels::lab::signal_characterization::verdict(
-            sig.modulation, sig.peak_to_nf_db, sig.acpr_lower_db, sig.acpr_upper_db, sig.occupied_bw_hz);
+            sig.modulation,
+            sig.peak_to_nf_db,
+            sig.acpr_lower_db,
+            sig.acpr_upper_db,
+            sig.occupied_bw_hz,
+        );
         let (mark, col) = match level {
-            crate::ui::panels::lab::signal_characterization::VerdictLevel::Clean    => ("\u{2713}", theme.status_ok),
-            crate::ui::panels::lab::signal_characterization::VerdictLevel::Caution  => ("\u{26a0}", theme.status_warn),
-            crate::ui::panels::lab::signal_characterization::VerdictLevel::NoSignal => ("\u{25cb}", theme.stale),
+            crate::ui::panels::lab::signal_characterization::VerdictLevel::Clean => {
+                ("\u{2713}", theme.status_ok)
+            }
+            crate::ui::panels::lab::signal_characterization::VerdictLevel::Caution => {
+                ("\u{26a0}", theme.status_warn)
+            }
+            crate::ui::panels::lab::signal_characterization::VerdictLevel::NoSignal => {
+                ("\u{25cb}", theme.stale)
+            }
         };
-        vec![Span::styled(format!("{mark} {}", level.short_label()),
-                          Style::default().fg(col).add_modifier(Modifier::BOLD))]
+        vec![Span::styled(
+            format!("{mark} {}", level.short_label()),
+            Style::default().fg(col).add_modifier(Modifier::BOLD),
+        )]
     };
     let mut q = vec![Span::raw("   "), Span::styled("QUALITY ", dim)];
     q.extend(quality);
@@ -609,7 +846,10 @@ fn marker_lines(state: &SdrMetrics, theme: &crate::Theme, iw: usize) -> Vec<Line
 
     let try_add = |cand: Vec<Span<'static>>, used: &mut usize, spans: &mut Vec<Span<'static>>| {
         let cw = span_w(&cand);
-        if *used + cw + 1 <= iw { spans.extend(cand); *used += cw; }
+        if *used + cw + 1 <= iw {
+            spans.extend(cand);
+            *used += cw;
+        }
     };
 
     if m2.is_some() {
@@ -621,24 +861,38 @@ fn marker_lines(state: &SdrMetrics, theme: &crate::Theme, iw: usize) -> Vec<Line
     // Δ between the two markers.
     if let (Some(a), Some(b)) = (m1, m2) {
         let df = (b.freq_hz as i64 - a.freq_hz as i64).unsigned_abs();
-        let dl = match (level_at_freq(state, a.freq_hz), level_at_freq(state, b.freq_hz)) {
+        let dl = match (
+            level_at_freq(state, a.freq_hz),
+            level_at_freq(state, b.freq_hz),
+        ) {
             (Some(x), Some(y)) => Some(y - x),
             _ => None,
         };
         let c = vec![
             Span::raw("   "),
             Span::styled("\u{0394} ", dim),
-            Span::styled(fmt_delta(df, dl), Style::default().fg(theme.value).add_modifier(Modifier::BOLD)),
+            Span::styled(
+                fmt_delta(df, dl),
+                Style::default()
+                    .fg(theme.value)
+                    .add_modifier(Modifier::BOLD),
+            ),
         ];
         try_add(c, &mut used, &mut spans);
     }
 
     // Right-side focus hints from the currently focused panel, if any room.
-    let hints: Vec<Span> = state.ui.focused_panel_bindings.iter()
-        .flat_map(|(k, l)| vec![
-            Span::styled(format!("[{k}] "), key),
-            Span::styled(format!("{l}  "), dim),
-        ]).collect();
+    let hints: Vec<Span> = state
+        .ui
+        .focused_panel_bindings
+        .iter()
+        .flat_map(|(k, l)| {
+            vec![
+                Span::styled(format!("[{k}] "), key),
+                Span::styled(format!("{l}  "), dim),
+            ]
+        })
+        .collect();
     let hw = span_w(&hints);
     if !hints.is_empty() && used + hw + 2 <= iw {
         let filler = iw.saturating_sub(used + hw);
@@ -655,18 +909,36 @@ fn marker_lines(state: &SdrMetrics, theme: &crate::Theme, iw: usize) -> Vec<Line
 pub struct LabBannerPanel;
 
 impl Panel for LabBannerPanel {
-    fn name(&self) -> &'static str { "lab_banner" }
-    fn min_size(&self) -> (u16, u16) { (20, 1) }
+    fn name(&self) -> &'static str {
+        "lab_banner"
+    }
+    fn min_size(&self) -> (u16, u16) {
+        (20, 1)
+    }
     // `b` focuses the measurement banner to drive REF / averaging / CAL directly.
-    fn focus_key(&self) -> Option<char> { Some('b') }
+    fn focus_key(&self) -> Option<char> {
+        Some('b')
+    }
     fn focus_bindings(&self) -> &'static [(&'static str, &'static str)] {
-        &[("↑↓", "Ref level"), ("[ ]", "Averaging"), ("C", "Capture cal"), ("R", "Clear ref")]
+        &[
+            ("↑↓", "Ref level"),
+            ("[ ]", "Averaging"),
+            ("C", "Capture cal"),
+            ("R", "Clear ref"),
+        ]
     }
     fn chrome(&self, _state: &SdrMetrics) -> PanelChrome {
         PanelChrome::untitled().frame(FrameStyle::Borderless)
     }
 
-    fn render(&self, f: &mut Frame, area: Rect, state: &SdrMetrics, theme: &crate::Theme, focused: bool) {
+    fn render(
+        &self,
+        f: &mut Frame,
+        area: Rect,
+        state: &SdrMetrics,
+        theme: &crate::Theme,
+        focused: bool,
+    ) {
         let lines = banner_lines(state, theme, area.width as usize, focused);
         f.render_widget(Paragraph::new(lines), area);
     }
@@ -676,13 +948,24 @@ impl Panel for LabBannerPanel {
 pub struct LabMarkerPanel;
 
 impl Panel for LabMarkerPanel {
-    fn name(&self) -> &'static str { "lab_marker" }
-    fn min_size(&self) -> (u16, u16) { (20, 1) }
+    fn name(&self) -> &'static str {
+        "lab_marker"
+    }
+    fn min_size(&self) -> (u16, u16) {
+        (20, 1)
+    }
     fn chrome(&self, _state: &SdrMetrics) -> PanelChrome {
         PanelChrome::untitled().frame(FrameStyle::Borderless)
     }
 
-    fn render(&self, f: &mut Frame, area: Rect, state: &SdrMetrics, theme: &crate::Theme, _focused: bool) {
+    fn render(
+        &self,
+        f: &mut Frame,
+        area: Rect,
+        state: &SdrMetrics,
+        theme: &crate::Theme,
+        _focused: bool,
+    ) {
         let lines = marker_lines(state, theme, area.width as usize);
         f.render_widget(Paragraph::new(lines), area);
     }
@@ -740,24 +1023,24 @@ mod tests {
 
     #[test]
     fn lab_label_maps_current_key_numbers() {
-        assert_eq!(lab_label("lab_rf"),     Some(("RF CHAIN", '6')));
-        assert_eq!(lab_label("lab_iq"),     Some(("I/Q QUALITY", '5')));
+        assert_eq!(lab_label("lab_rf"), Some(("RF CHAIN", '6')));
+        assert_eq!(lab_label("lab_iq"), Some(("I/Q QUALITY", '5')));
         assert_eq!(lab_label("lab_signal"), Some(("SIGNAL", '8')));
         assert_eq!(lab_label("command_rail"), None);
-        assert_eq!(lab_label("spectrum"),     None);
+        assert_eq!(lab_label("spectrum"), None);
     }
 
     #[test]
     fn fmt_freq_mhz_picks_unit() {
-        assert_eq!(fmt_freq_mhz(92_800_000),    "92.800 MHz");
-        assert_eq!(fmt_freq_mhz(433_920_000),   "433.920 MHz");
+        assert_eq!(fmt_freq_mhz(92_800_000), "92.800 MHz");
+        assert_eq!(fmt_freq_mhz(433_920_000), "433.920 MHz");
         assert_eq!(fmt_freq_mhz(1_234_500_000), "1.234500 GHz");
     }
 
     #[test]
     fn fmt_delta_formats_with_and_without_level() {
         assert_eq!(fmt_delta(5_400_000, Some(-12.3)), "5.400 MHz 12.3 dB");
-        assert_eq!(fmt_delta(5_400_000, None),        "5.400 MHz");
+        assert_eq!(fmt_delta(5_400_000, None), "5.400 MHz");
     }
 
     #[test]
@@ -770,7 +1053,10 @@ mod tests {
     #[test]
     fn timing_banner_deadline_met_then_breached() {
         let mut t = crate::state::TimingState {
-            cb_period_us: 13_107, cb_jitter_us: 42, deadline_budget_us: 603, ..Default::default()
+            cb_period_us: 13_107,
+            cb_jitter_us: 42,
+            deadline_budget_us: 603,
+            ..Default::default()
         };
         // No late callbacks → DEADLINE reads "✓ met".
         let f = timing_banner_fields(&t);
@@ -787,8 +1073,18 @@ mod tests {
 
     #[test]
     fn rf_chain_str_inserts_amp_and_collapses_single_tuner() {
-        assert_eq!(rf_chain_str(true, false), "ANT\u{25B8}LNA\u{25B8}MIX\u{25B8}VGA\u{25B8}ADC");
-        assert_eq!(rf_chain_str(true, true),  "ANT\u{25B8}AMP\u{25B8}LNA\u{25B8}MIX\u{25B8}VGA\u{25B8}ADC");
-        assert_eq!(rf_chain_str(false, true), "ANT\u{25B8}TUNER\u{25B8}ADC", "no cascade → single tuner");
+        assert_eq!(
+            rf_chain_str(true, false),
+            "ANT\u{25B8}LNA\u{25B8}MIX\u{25B8}VGA\u{25B8}ADC"
+        );
+        assert_eq!(
+            rf_chain_str(true, true),
+            "ANT\u{25B8}AMP\u{25B8}LNA\u{25B8}MIX\u{25B8}VGA\u{25B8}ADC"
+        );
+        assert_eq!(
+            rf_chain_str(false, true),
+            "ANT\u{25B8}TUNER\u{25B8}ADC",
+            "no cascade → single tuner"
+        );
     }
 }

@@ -61,36 +61,38 @@ pub(super) fn drain(
         m.signal.drops_per_sec = dps;
     }
     let drops_snapshot = m.signal.drops_per_sec;
-    if m.signal.drop_history.len() >= THROUGHPUT_HISTORY_LEN { m.signal.drop_history.pop_front(); }
+    if m.signal.drop_history.len() >= THROUGHPUT_HISTORY_LEN {
+        m.signal.drop_history.pop_front();
+    }
     m.signal.drop_history.push_back(drops_snapshot);
 
     let acc_saturated = m.acc.saturated;
     let drained = Drained {
         moments: Moments {
-            i_sum:     m.acc.i_sum,
-            q_sum:     m.acc.q_sum,
-            i_sq_sum:  m.acc.i_sq_sum,
-            q_sq_sum:  m.acc.q_sq_sum,
+            i_sum: m.acc.i_sum,
+            q_sum: m.acc.q_sum,
+            i_sq_sum: m.acc.i_sq_sum,
+            q_sq_sum: m.acc.q_sq_sum,
             cross_sum: m.acc.iq_cross_sum,
-            samples:   m.acc.sample_count,
-            peak_amp:  m.acc.peak_amp,
+            samples: m.acc.sample_count,
+            peak_amp: m.acc.peak_amp,
         },
         cal: m.iq.cal,
         jitter_sum_us: m.acc.jitter_sum_us,
         jitter_sq_sum: m.acc.jitter_sq_sum,
-        jitter_count:  m.acc.jitter_count,
+        jitter_count: m.acc.jitter_count,
     };
-    m.acc.drops         = 0;
-    m.acc.saturated     = 0;
-    m.acc.i_sum         = 0;
-    m.acc.q_sum         = 0;
-    m.acc.i_sq_sum      = 0;
-    m.acc.q_sq_sum      = 0;
-    m.acc.iq_cross_sum  = 0;
-    m.acc.sample_count  = 0;
+    m.acc.drops = 0;
+    m.acc.saturated = 0;
+    m.acc.i_sum = 0;
+    m.acc.q_sum = 0;
+    m.acc.i_sq_sum = 0;
+    m.acc.q_sq_sum = 0;
+    m.acc.iq_cross_sum = 0;
+    m.acc.sample_count = 0;
     m.acc.jitter_sum_us = 0;
     m.acc.jitter_sq_sum = 0;
-    m.acc.jitter_count  = 0;
+    m.acc.jitter_count = 0;
 
     m.iq.iq_amplitude_hist = m.acc.iq_hist;
     m.acc.iq_hist = [0u64; 32];
@@ -102,18 +104,24 @@ pub(super) fn drain(
     let saturable = drained.moments.samples * 2;
     m.signal.adc_saturation_pct = if saturable > 0 {
         (acc_saturated as f32 / saturable as f32) * 100.0
-    } else { 0.0 };
+    } else {
+        0.0
+    };
     if m.signal.adc_saturation_pct > m.signal.adc_saturation_peak {
         m.signal.adc_saturation_peak = m.signal.adc_saturation_pct;
     }
     let sat_snapshot = m.signal.adc_saturation_pct;
-    if m.signal.saturation_history.len() >= THROUGHPUT_HISTORY_LEN { m.signal.saturation_history.pop_front(); }
+    if m.signal.saturation_history.len() >= THROUGHPUT_HISTORY_LEN {
+        m.signal.saturation_history.pop_front();
+    }
     m.signal.saturation_history.push_back(sat_snapshot);
     // Remember the moment of a real clip so the rail can show a fading
     // "last clip Xs" memory (decays in render; nothing flickers here).
     if sat_snapshot >= crate::state::SAT_CLIP_PCT {
         m.signal.last_clip_at = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs()).ok();
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_secs())
+            .ok();
     }
 
     let usb_now = m.signal.usb_errors_session;
@@ -127,7 +135,9 @@ pub(super) fn drain(
     let cap = rx_ctx.sample_tx.capacity().unwrap_or(4);
     m.iq.buf_fill_pct = if cap > 0 {
         rx_ctx.sample_tx.len() as f32 / cap as f32 * 100.0
-    } else { 0.0 };
+    } else {
+        0.0
+    };
     let buf_sample = (m.iq.buf_fill_pct * 10.0) as u64;
     if m.iq.buf_fill_history.len() >= THROUGHPUT_HISTORY_LEN {
         m.iq.buf_fill_history.pop_front();

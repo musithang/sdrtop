@@ -1,10 +1,10 @@
-use std::sync::Arc;
 use serde::{Deserialize, Serialize};
+use std::sync::Arc;
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct SpectrumMarker {
-    pub freq_hz:       u64,
-    pub label:         String,
+    pub freq_hz: u64,
+    pub label: String,
     #[serde(default)]
     pub channel_bw_hz: Option<u64>,
     #[serde(skip)]
@@ -32,7 +32,7 @@ impl SpectrumStyle {
     pub fn next(self) -> Self {
         match self {
             Self::Braille => Self::Fill,
-            Self::Fill    => Self::Scatter,
+            Self::Fill => Self::Scatter,
             Self::Scatter => Self::Braille,
         }
     }
@@ -41,7 +41,7 @@ impl SpectrumStyle {
     pub fn label(self) -> &'static str {
         match self {
             Self::Scatter => "scatter",
-            Self::Fill    => "fill",
+            Self::Fill => "fill",
             Self::Braille => "braille",
         }
     }
@@ -49,13 +49,13 @@ impl SpectrumStyle {
 
 #[derive(Clone)]
 pub struct SpectrumState {
-    pub step_hz:        u64,
-    pub y_min:          f32,
-    pub y_max:          f32,
-    pub hold:           Option<Arc<Vec<f32>>>,
-    pub cursor_freq:    Option<u64>,
-    pub markers:        Vec<SpectrumMarker>,
+    pub step_hz: u64,
+    pub y_min: f32,
+    pub y_max: f32,
+    pub hold: Option<Arc<Vec<f32>>>,
+    pub cursor_freq: Option<u64>,
+    pub markers: Vec<SpectrumMarker>,
     pub pending_marker: Option<u64>,
     /// Trace render style; cycled with `D`. See [`SpectrumStyle`].
-    pub style:          SpectrumStyle,
+    pub style: SpectrumStyle,
 }

@@ -25,8 +25,11 @@ const VERDICT_HEAD_ROWS: usize = 2;
 const VERDICT_DETAIL_ROWS: usize = 4;
 
 pub(super) fn lines(
-    out: &mut Vec<Line<'static>>, state: &SdrMetrics, frame: Option<&FftFrame>,
-    iw: usize, theme: &crate::Theme,
+    out: &mut Vec<Line<'static>>,
+    state: &SdrMetrics,
+    frame: Option<&FftFrame>,
+    iw: usize,
+    theme: &crate::Theme,
 ) {
     let Some(fr) = frame else {
         out.push(Line::from(vec![
@@ -38,10 +41,15 @@ pub(super) fn lines(
 
     let sig = &state.signal;
     let (level, headline, detail) = verdict(
-        sig.modulation, fr.peak_to_nf_db, sig.acpr_lower_db, sig.acpr_upper_db, fr.occupied_bw_hz);
+        sig.modulation,
+        fr.peak_to_nf_db,
+        sig.acpr_lower_db,
+        sig.acpr_upper_db,
+        fr.occupied_bw_hz,
+    );
     let (mark, col) = match level {
-        VerdictLevel::Clean    => ("\u{2713}", theme.status_ok),
-        VerdictLevel::Caution  => ("\u{26a0}", theme.status_warn),
+        VerdictLevel::Clean => ("\u{2713}", theme.status_ok),
+        VerdictLevel::Caution => ("\u{26a0}", theme.status_warn),
         VerdictLevel::NoSignal => ("\u{25cb}", theme.stale),
     };
     let copy_w = iw.saturating_sub(1);
@@ -52,12 +60,20 @@ pub(super) fn lines(
         ]));
     }
     for row in wrap(&detail, copy_w, VERDICT_DETAIL_ROWS) {
-        out.push(Line::from(vec![Span::raw(" "), Span::styled(row, Style::default().fg(theme.label))]));
+        out.push(Line::from(vec![
+            Span::raw(" "),
+            Span::styled(row, Style::default().fg(theme.label)),
+        ]));
     }
     out.push(Line::raw(""));
     out.push(Line::from(vec![
         Span::raw(" "),
-        Span::styled("[C]", Style::default().fg(theme.value_hi).add_modifier(Modifier::BOLD)),
+        Span::styled(
+            "[C]",
+            Style::default()
+                .fg(theme.value_hi)
+                .add_modifier(Modifier::BOLD),
+        ),
         Span::styled(" snapshot to log", Style::default().fg(theme.label)),
     ]));
 }
@@ -80,18 +96,39 @@ mod tests {
             verdict(Modulation::Wfm, 15.0, -40.0, -40.0, 180_000),
             verdict(Modulation::Wfm, 47.0, -10.0, -40.0, 1_250_000),
             verdict(Modulation::Wfm, 43.0, -38.0, -41.0, 180_000),
-            verdict(Modulation::Nfm, 30.0, f32::NEG_INFINITY, f32::NEG_INFINITY, 15_000),
+            verdict(
+                Modulation::Nfm,
+                30.0,
+                f32::NEG_INFINITY,
+                f32::NEG_INFINITY,
+                15_000,
+            ),
         ];
         for (_, headline, detail) in cases {
             let head = wrap(&format!("\u{26a0} {headline}"), copy_w, VERDICT_HEAD_ROWS);
-            assert_eq!(head.join(" ").chars().filter(|c| !c.is_whitespace()).count(),
-                       format!("\u{26a0} {headline}").chars().filter(|c| !c.is_whitespace()).count(),
-                       "headline lost characters: {headline:?} -> {head:?}");
+            assert_eq!(
+                head.join(" ")
+                    .chars()
+                    .filter(|c| !c.is_whitespace())
+                    .count(),
+                format!("\u{26a0} {headline}")
+                    .chars()
+                    .filter(|c| !c.is_whitespace())
+                    .count(),
+                "headline lost characters: {headline:?} -> {head:?}"
+            );
             let body = wrap(&detail, copy_w, VERDICT_DETAIL_ROWS);
-            assert_eq!(body.join(" ").chars().filter(|c| !c.is_whitespace()).count(),
-                       detail.chars().filter(|c| !c.is_whitespace()).count(),
-                       "detail lost characters at {copy_w} wide: {detail:?} -> {body:?}");
-            for r in body { assert!(r.chars().count() <= copy_w); }
+            assert_eq!(
+                body.join(" ")
+                    .chars()
+                    .filter(|c| !c.is_whitespace())
+                    .count(),
+                detail.chars().filter(|c| !c.is_whitespace()).count(),
+                "detail lost characters at {copy_w} wide: {detail:?} -> {body:?}"
+            );
+            for r in body {
+                assert!(r.chars().count() <= copy_w);
+            }
         }
     }
 }

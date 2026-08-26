@@ -39,11 +39,20 @@ use cells::Columns;
 pub const WF_STRIDES: &[usize] = &[1, 2, 4, 8, 16, 32, 64];
 
 pub fn prev_wf_stride(current: usize) -> usize {
-    WF_STRIDES.iter().rev().find(|&&s| s < current).copied().unwrap_or(1)
+    WF_STRIDES
+        .iter()
+        .rev()
+        .find(|&&s| s < current)
+        .copied()
+        .unwrap_or(1)
 }
 
 pub fn next_wf_stride(current: usize) -> usize {
-    WF_STRIDES.iter().find(|&&s| s > current).copied().unwrap_or(64)
+    WF_STRIDES
+        .iter()
+        .find(|&&s| s > current)
+        .copied()
+        .unwrap_or(64)
 }
 
 // ── Waterfall frequency zoom levels ──────────────────────────────────────────
@@ -51,11 +60,20 @@ pub fn next_wf_stride(current: usize) -> usize {
 pub const WF_ZOOM_LEVELS: &[u32] = &[1, 2, 4, 8, 16, 32];
 
 pub fn prev_wf_zoom(current: u32) -> u32 {
-    WF_ZOOM_LEVELS.iter().rev().find(|&&z| z < current).copied().unwrap_or(1)
+    WF_ZOOM_LEVELS
+        .iter()
+        .rev()
+        .find(|&&z| z < current)
+        .copied()
+        .unwrap_or(1)
 }
 
 pub fn next_wf_zoom(current: u32) -> u32 {
-    WF_ZOOM_LEVELS.iter().find(|&&z| z > current).copied().unwrap_or(32)
+    WF_ZOOM_LEVELS
+        .iter()
+        .find(|&&z| z > current)
+        .copied()
+        .unwrap_or(32)
 }
 
 /// How old the newest frame may get before the readings are called stale.
@@ -74,23 +92,31 @@ pub(super) struct Status {
 pub struct WaterfallPanel;
 
 impl WaterfallPanel {
-    pub fn new() -> Self { Self }
+    pub fn new() -> Self {
+        Self
+    }
 }
 
 impl Panel for WaterfallPanel {
-    fn name(&self) -> &'static str { "waterfall" }
-    fn min_size(&self) -> (u16, u16) { (40, 5) }
-    fn focus_key(&self) -> Option<char> { Some('l') }
+    fn name(&self) -> &'static str {
+        "waterfall"
+    }
+    fn min_size(&self) -> (u16, u16) {
+        (40, 5)
+    }
+    fn focus_key(&self) -> Option<char> {
+        Some('l')
+    }
     fn focus_bindings(&self) -> &'static [(&'static str, &'static str)] {
         &[
             ("↑ ↓", "Zoom colour scale"),
-            ("+ -",  "Frequency zoom"),
-            ("J K",  "Scroll history"),
-            ("[ ]",  "Row stride (speed)"),
-            ("M",    "Place/remove cursor"),
-            ("← →",  "Move cursor"),
-            ("W",    "Pause / resume"),
-            ("P",    "Colour palette"),
+            ("+ -", "Frequency zoom"),
+            ("J K", "Scroll history"),
+            ("[ ]", "Row stride (speed)"),
+            ("M", "Place/remove cursor"),
+            ("← →", "Move cursor"),
+            ("W", "Pause / resume"),
+            ("P", "Colour palette"),
         ]
     }
 
@@ -109,7 +135,14 @@ impl Panel for WaterfallPanel {
     }
 
     /// Engine-framed: `area` is the inner rect.
-    fn render(&self, f: &mut Frame, area: Rect, state: &SdrMetrics, theme: &crate::Theme, focused: bool) {
+    fn render(
+        &self,
+        f: &mut Frame,
+        area: Rect,
+        state: &SdrMetrics,
+        theme: &crate::Theme,
+        focused: bool,
+    ) {
         let border = frame::frame_color(&self.chrome(state), state, focused, theme);
         contents(f, area, state, theme, focused, Bond::None, area, border);
     }
@@ -121,8 +154,19 @@ impl Panel for WaterfallPanel {
 /// `Bond::Above` drops the nameplate — its identity and live tags move to the
 /// shared ruler's end-cap tabs — and overlays that ruler on the top border so the
 /// two panels read as one instrument.
-pub fn render(f: &mut Frame, area: Rect, state: &SdrMetrics, theme: &crate::Theme, focused: bool, bond: Bond) {
-    debug_assert_eq!(bond, Bond::Above, "unbonded waterfall goes through the registry");
+pub fn render(
+    f: &mut Frame,
+    area: Rect,
+    state: &SdrMetrics,
+    theme: &crate::Theme,
+    focused: bool,
+    bond: Bond,
+) {
+    debug_assert_eq!(
+        bond,
+        Bond::Above,
+        "unbonded waterfall goes through the registry"
+    );
     let chrome = WaterfallPanel.chrome(state);
     let border = frame::frame_color(&chrome, state, focused, theme);
 
@@ -141,8 +185,14 @@ pub fn render(f: &mut Frame, area: Rect, state: &SdrMetrics, theme: &crate::Them
 /// bottom borders it writes the ruler and the status cap onto.
 #[allow(clippy::too_many_arguments)]
 fn contents(
-    f: &mut Frame, inner: Rect, state: &SdrMetrics, theme: &crate::Theme,
-    focused: bool, bond: Bond, outer: Rect, border: Color,
+    f: &mut Frame,
+    inner: Rect,
+    state: &SdrMetrics,
+    theme: &crate::Theme,
+    focused: bool,
+    bond: Bond,
+    outer: Rect,
+    border: Color,
 ) {
     let bonded = bond == Bond::Above;
     let wf = &state.waterfall;
@@ -158,7 +208,9 @@ fn contents(
         return;
     }
 
-    let stale = wf.last_fft.as_ref()
+    let stale = wf
+        .last_fft
+        .as_ref()
         .map(|fr| fr.timestamp.elapsed().as_millis() > STALE_MS)
         .unwrap_or(false);
     // Clamp the reported scroll to what the buffer can actually give, so the
@@ -169,7 +221,9 @@ fn contents(
         paused: buf.paused,
         stale,
         stride: buf.row_stride,
-        scroll: wf.scroll_offset.min(buf.rows.len().saturating_sub(approx_content_h * 2) / 2),
+        scroll: wf
+            .scroll_offset
+            .min(buf.rows.len().saturating_sub(approx_content_h * 2) / 2),
     };
 
     // In focus mode one row goes to the readout, as on the spectrum.
@@ -190,16 +244,26 @@ fn contents(
         width: content.width.saturating_sub(DB_COL),
         height: content.height,
     };
-    if plot.width == 0 { return; }
+    if plot.width == 0 {
+        return;
+    }
     let cols = plot.width as usize;
 
     // The frequency window, narrowed by the shared zoom around the tuned centre.
-    let window = wf.last_fft.as_ref()
+    let window = wf
+        .last_fft
+        .as_ref()
         .map(|fr| {
             let visible = fr.sample_rate / wf.hz_zoom as f64;
-            Window { left_hz: fr.center_freq_hz as f64 - visible / 2.0, bw: visible }
+            Window {
+                left_hz: fr.center_freq_hz as f64 - visible / 2.0,
+                bw: visible,
+            }
         })
-        .unwrap_or(Window { left_hz: 0.0, bw: 1.0 });
+        .unwrap_or(Window {
+            left_hz: 0.0,
+            bw: 1.0,
+        });
 
     if bonded {
         bond::seam(f, outer, plot, window, &status, border, theme);
@@ -207,7 +271,9 @@ fn contents(
 
     let cursor_col = wf.cursor_freq.and_then(|cf| {
         let frac = (cf as f64 - window.left_hz) / window.bw;
-        (0.0..=1.0).contains(&frac).then(|| ((frac * cols as f64) as usize).min(cols - 1))
+        (0.0..=1.0)
+            .contains(&frac)
+            .then(|| ((frac * cols as f64) as usize).min(cols - 1))
     });
 
     // Two rows of history per character cell, so every scroll figure exists in
@@ -219,8 +285,9 @@ fn contents(
     let row_bins = buf.rows.front().map(|(_, r)| r.len()).unwrap_or(1);
     let columns = Columns::new(row_bins, wf.hz_zoom, cols);
 
-    cells::draw(f, plot, &buf.rows, &columns, cursor_col, skip_data,
-                wf.db_min, wf.palette, theme);
+    cells::draw(
+        f, plot, &buf.rows, &columns, cursor_col, skip_data, wf.db_min, wf.palette, theme,
+    );
 
     // Bonded, the spectrum above already carries the band plan; twice is noise.
     if !bonded {
@@ -228,10 +295,28 @@ fn contents(
     }
     overlays::time_axis(f, plot, &buf.rows, skip_data, theme);
 
-    axes::db_legend(f, Rect { width: DB_COL, ..content }, wf.db_min, wf.palette, theme);
+    axes::db_legend(
+        f,
+        Rect {
+            width: DB_COL,
+            ..content
+        },
+        wf.db_min,
+        wf.palette,
+        theme,
+    );
     if let Some(area) = indicator {
-        axes::indicator(f, area, state, &buf.rows, &columns, skip_data,
-                        cursor_col, status.stride, theme);
+        axes::indicator(
+            f,
+            area,
+            state,
+            &buf.rows,
+            &columns,
+            skip_data,
+            cursor_col,
+            status.stride,
+            theme,
+        );
     }
 }
 
@@ -252,5 +337,4 @@ mod tests {
         assert_eq!(next_wf_stride(5), 8);
         assert_eq!(prev_wf_stride(5), 4);
     }
-
 }

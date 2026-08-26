@@ -1,11 +1,10 @@
 //! `[G]` sweep-panel focus: band entry, dwell, and starting or stopping a sweep.
 
-
 use crossterm::event::{KeyCode, KeyEvent};
 
 use crate::state::InputMode;
 
-use super::{InputCtx, KeyAction, global, metrics};
+use super::{global, metrics, InputCtx, KeyAction};
 
 /// `sweep_panel` focus (`[G]`): cursor with `←/→`, peak/mean with `M`, dwell with
 /// `+/-`, and `[Enter]` to leave the sweep tuned to the cursor frequency.
@@ -45,25 +44,39 @@ pub(super) fn sweep_panel(key: KeyEvent, ctx: &mut InputCtx<'_>) -> KeyAction {
         KeyCode::Char('c') => {
             let m = metrics(state);
             let msg = if let Some(frame) = m.sweep.current_frame.as_ref() {
-                let curve = if m.sweep.show_peak { &frame.peak_dbfs } else { &frame.mean_dbfs };
+                let curve = if m.sweep.show_peak {
+                    &frame.peak_dbfs
+                } else {
+                    &frame.mean_dbfs
+                };
                 let cursor_str = if let Some(frac) = m.sweep.cursor_frac {
                     let hz = frame.freq_at_fraction(frac);
                     // Find the bin in freq_hz closest to the cursor frequency.
-                    let level = frame.freq_hz.iter().enumerate()
+                    let level = frame
+                        .freq_hz
+                        .iter()
+                        .enumerate()
                         .min_by_key(|(_, &f)| f.abs_diff(hz))
                         .and_then(|(i, _)| curve.get(i).copied().filter(|v| v.is_finite()));
-                    let db_str = level.map(|v| format!("{:.1} dBFS", v)).unwrap_or_else(|| "\u{2014}".into());
+                    let db_str = level
+                        .map(|v| format!("{:.1} dBFS", v))
+                        .unwrap_or_else(|| "\u{2014}".into());
                     format!("cursor {:.3} MHz {} · ", hz as f64 / 1e6, db_str)
                 } else {
                     String::new()
                 };
-                let top = frame.top_peaks(1, 500_000).into_iter().next()
+                let top = frame
+                    .top_peaks(1, 500_000)
+                    .into_iter()
+                    .next()
                     .map(|(f, v)| format!("top {:.3} MHz {:.1} dBFS", f as f64 / 1e6, v))
                     .unwrap_or_else(|| "no data".into());
                 format!(
                     "Sweep snapshot — {}{} · {:.1}–{:.1} MHz ({:.1}s/cycle)",
-                    cursor_str, top,
-                    frame.start_hz as f64 / 1e6, frame.stop_hz as f64 / 1e6,
+                    cursor_str,
+                    top,
+                    frame.start_hz as f64 / 1e6,
+                    frame.stop_hz as f64 / 1e6,
                     frame.cycle_duration_ms as f64 / 1000.0,
                 )
             } else {
@@ -111,4 +124,3 @@ pub(super) fn sweep_panel(key: KeyEvent, ctx: &mut InputCtx<'_>) -> KeyAction {
     }
     KeyAction::Continue
 }
-

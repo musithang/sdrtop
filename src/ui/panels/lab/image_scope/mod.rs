@@ -42,23 +42,34 @@ pub struct ImageScopePanel;
 /// result: `image_scope::CarrierImage` is the path other code names it by, the
 /// same way `signal_characterization::VerdictLevel` works.
 pub(crate) struct CarrierImage {
-    pub carrier_hz:     u64,
-    pub image_hz:       u64,
-    pub carrier_dbfs:   f32,
-    pub image_dbfs:     f32,
+    pub carrier_hz: u64,
+    pub image_hz: u64,
+    pub carrier_dbfs: f32,
+    pub image_dbfs: f32,
     /// carrier − image, in dB (positive = image is below the carrier).
     pub suppression_db: f32,
 }
 
 impl Panel for ImageScopePanel {
-    fn name(&self) -> &'static str { "image_scope" }
-    fn min_size(&self) -> (u16, u16) { (28, 12) }
+    fn name(&self) -> &'static str {
+        "image_scope"
+    }
+    fn min_size(&self) -> (u16, u16) {
+        (28, 12)
+    }
 
     fn chrome(&self, _state: &SdrMetrics) -> PanelChrome {
         PanelChrome::new("Image-Rejection Scope").stale_when(Staleness::NotStreaming)
     }
 
-    fn render(&self, f: &mut Frame, inner: Rect, state: &SdrMetrics, theme: &crate::Theme, _focused: bool) {
+    fn render(
+        &self,
+        f: &mut Frame,
+        inner: Rect,
+        state: &SdrMetrics,
+        theme: &crate::Theme,
+        _focused: bool,
+    ) {
         if !state.radio.hw_streaming {
             return placeholder(f, inner, "\u{2014}\u{2014}\u{2014}", theme);
         }

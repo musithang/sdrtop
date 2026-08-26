@@ -42,19 +42,40 @@ use crate::ui::widgets::micro_common::fft_stale;
 pub struct CommandRailPanel;
 
 impl Panel for CommandRailPanel {
-    fn name(&self) -> &'static str { "command_rail" }
-    fn min_size(&self) -> (u16, u16) { (22, 12) }
+    fn name(&self) -> &'static str {
+        "command_rail"
+    }
+    fn min_size(&self) -> (u16, u16) {
+        (22, 12)
+    }
 
     // `c` for Command: focus the rail to drive it directly. In focus, `←/→` tune
     // (which auto-switches the mode to Hunt) and `Tab` cycles the mode manually.
-    fn focus_key(&self) -> Option<char> { Some('c') }
+    fn focus_key(&self) -> Option<char> {
+        Some('c')
+    }
     fn focus_bindings(&self) -> &'static [(&'static str, &'static str)] {
-        &[("←→", "Tune"), ("Tab", "Mode"), ("1·2·3", "Recall"), ("M", "Save"), ("L", "Log")]
+        &[
+            ("←→", "Tune"),
+            ("Tab", "Mode"),
+            ("1·2·3", "Recall"),
+            ("M", "Save"),
+            ("L", "Log"),
+        ]
     }
 
-    fn chrome(&self, _state: &SdrMetrics) -> PanelChrome { PanelChrome::deck("_Command") }
+    fn chrome(&self, _state: &SdrMetrics) -> PanelChrome {
+        PanelChrome::deck("_Command")
+    }
 
-    fn render(&self, f: &mut Frame, inner: Rect, state: &SdrMetrics, theme: &crate::Theme, _focused: bool) {
+    fn render(
+        &self,
+        f: &mut Frame,
+        inner: Rect,
+        state: &SdrMetrics,
+        theme: &crate::Theme,
+        _focused: bool,
+    ) {
         let iw = inner.width as usize;
         let stale = fft_stale(state);
         let observer = state.observer.active;
@@ -66,8 +87,18 @@ impl Panel for CommandRailPanel {
         // stack and the foot can never overlap — that overlap used to flicker —
         // and the foot stays anchored however tall the stack is.
         let (stack_area, foot_area) = if inner.height >= 4 {
-            (Rect { height: inner.height - 1, ..inner },
-             Some(Rect { x: inner.x, y: inner.y + inner.height - 1, width: inner.width, height: 1 }))
+            (
+                Rect {
+                    height: inner.height - 1,
+                    ..inner
+                },
+                Some(Rect {
+                    x: inner.x,
+                    y: inner.y + inner.height - 1,
+                    width: inner.width,
+                    height: 1,
+                }),
+            )
         } else {
             (inner, None)
         };
@@ -90,23 +121,43 @@ impl Panel for CommandRailPanel {
 }
 
 /// The whole rail as one line stack, in screen order.
-fn stack(state: &SdrMetrics, stale: bool, active: bool, observer: bool,
-         iw: usize, theme: &crate::Theme) -> Vec<Line<'static>> {
+fn stack(
+    state: &SdrMetrics,
+    stale: bool,
+    active: bool,
+    observer: bool,
+    iw: usize,
+    theme: &crate::Theme,
+) -> Vec<Line<'static>> {
     let mut lines: Vec<Line> = Vec::new();
 
     // ── Frequency hero, band/SR, S-meter ────────────────────────────────────
-    lines.extend(hero::freq_hero_lines(state.radio.frequency, state.spectrum.step_hz,
-                                       observer, iw, theme));
+    lines.extend(hero::freq_hero_lines(
+        state.radio.frequency,
+        state.spectrum.step_hz,
+        observer,
+        iw,
+        theme,
+    ));
     lines.push(hero::band_sr_line(state, iw, theme));
     // The S-meter sits directly under the band line, in what used to be a blank
     // gap. It is dropped entirely when there is nothing to measure, rather than
     // shown pinned at the floor, which reads as a real (very weak) signal.
     let pwr = state.signal.channel_power_dbfs;
     if !stale && pwr.is_finite() {
-        let peak = state.signal.pwr_history.iter().copied()
+        let peak = state
+            .signal
+            .pwr_history
+            .iter()
+            .copied()
             .filter(|v| v.is_finite())
             .fold(f32::NEG_INFINITY, f32::max);
-        lines.extend(smeter::s_meter_lines(pwr, peak.is_finite().then_some(peak), iw, theme));
+        lines.extend(smeter::s_meter_lines(
+            pwr,
+            peak.is_finite().then_some(peak),
+            iw,
+            theme,
+        ));
     }
     lines.push(Line::raw(""));
 
@@ -121,7 +172,7 @@ fn stack(state: &SdrMetrics, stale: bool, active: bool, observer: bool,
     for (name, section) in [
         ("Recall", recall::lines(state, stale, theme)),
         ("Signal", signal::lines(state, stale, active, iw, theme)),
-        ("Gain",   gain::lines(state, active, observer, iw, theme)),
+        ("Gain", gain::lines(state, active, observer, iw, theme)),
         ("Stream", stream::lines(state, active, theme)),
     ] {
         lines.push(chrome::section(name, "", iw, theme));
@@ -139,8 +190,14 @@ fn log_foot(entry: &crate::state::LogEntry, theme: &crate::Theme) -> Line<'stati
         Span::raw(" "),
         log::lamp(entry.level, theme),
         Span::raw(" "),
-        Span::styled(log::fmt_clock(entry.at_epoch_secs), Style::default().fg(theme.border_dim)),
+        Span::styled(
+            log::fmt_clock(entry.at_epoch_secs),
+            Style::default().fg(theme.border_dim),
+        ),
         Span::raw(" "),
-        Span::styled(entry.text.as_ref().to_string(), Style::default().fg(theme.value)),
+        Span::styled(
+            entry.text.as_ref().to_string(),
+            Style::default().fg(theme.value),
+        ),
     ])
 }

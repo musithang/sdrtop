@@ -19,9 +19,9 @@ pub const DEFAULT_SWEEP_DWELL_MS: u64 = 200;
 #[derive(Clone, Debug, PartialEq)]
 pub struct SweepConfig {
     pub start_hz: u64,
-    pub stop_hz:  u64,
+    pub stop_hz: u64,
     /// Explicit step in Hz, or 0 to derive it from the sample rate.
-    pub step_hz:  u64,
+    pub step_hz: u64,
     pub dwell_ms: u64,
 }
 
@@ -29,8 +29,8 @@ impl Default for SweepConfig {
     fn default() -> Self {
         Self {
             start_hz: 400_000_000,
-            stop_hz:  500_000_000,
-            step_hz:  0,
+            stop_hz: 500_000_000,
+            step_hz: 0,
             dwell_ms: DEFAULT_SWEEP_DWELL_MS,
         }
     }
@@ -65,9 +65,9 @@ impl SweepConfig {
 /// One completed sweep cycle: a stitched curve of bin center frequencies and the
 /// peak / mean dBFS measured at each, ascending in frequency.
 pub struct SweepFrame {
-    pub start_hz:  u64,
-    pub stop_hz:   u64,
-    pub freq_hz:   Vec<u64>,
+    pub start_hz: u64,
+    pub stop_hz: u64,
+    pub freq_hz: Vec<u64>,
     pub peak_dbfs: Vec<f32>,
     pub mean_dbfs: Vec<f32>,
     pub timestamp: Instant,
@@ -85,7 +85,11 @@ impl SweepFrame {
             return out;
         }
         let span = (self.stop_hz - self.start_hz) as f64;
-        let vals = if peak { &self.peak_dbfs } else { &self.mean_dbfs };
+        let vals = if peak {
+            &self.peak_dbfs
+        } else {
+            &self.mean_dbfs
+        };
         for (i, &f) in self.freq_hz.iter().enumerate() {
             if f < self.start_hz || f >= self.stop_hz {
                 continue;
@@ -105,9 +109,13 @@ impl SweepFrame {
     /// doesn't fill the list. Strongest first. Powers the micro_sweep field view.
     pub fn top_peaks(&self, n: usize, min_spacing_hz: u64) -> Vec<(u64, f32)> {
         let len = self.freq_hz.len().min(self.peak_dbfs.len());
-        let mut idx: Vec<usize> = (0..len).filter(|&i| self.peak_dbfs[i].is_finite()).collect();
+        let mut idx: Vec<usize> = (0..len)
+            .filter(|&i| self.peak_dbfs[i].is_finite())
+            .collect();
         idx.sort_by(|&a, &b| {
-            self.peak_dbfs[b].partial_cmp(&self.peak_dbfs[a]).unwrap_or(std::cmp::Ordering::Equal)
+            self.peak_dbfs[b]
+                .partial_cmp(&self.peak_dbfs[a])
+                .unwrap_or(std::cmp::Ordering::Equal)
         });
         let mut out: Vec<(u64, f32)> = Vec::new();
         for i in idx {
@@ -132,41 +140,41 @@ impl SweepFrame {
 
 #[derive(Clone)]
 pub struct SweepState {
-    pub config:            SweepConfig,
+    pub config: SweepConfig,
     /// True while the `lab_sweep` preset is active — drives the `sweep_task`.
-    pub active:            bool,
+    pub active: bool,
     /// Position the radio is currently parked on.
-    pub current_hz:        u64,
+    pub current_hz: u64,
     /// Last completed sweep cycle, shared with the renderer.
-    pub current_frame:     Option<Arc<SweepFrame>>,
-    pub positions_total:   usize,
-    pub positions_done:    usize,
-    pub cycle_count:       u64,
+    pub current_frame: Option<Arc<SweepFrame>>,
+    pub positions_total: usize,
+    pub positions_done: usize,
+    pub cycle_count: u64,
     pub cycle_duration_ms: u64,
     /// Render the peak curve (`true`) or the mean curve (`false`); toggled by `[M]`.
-    pub show_peak:         bool,
+    pub show_peak: bool,
     /// Cursor position as a 0..1 fraction across the band, set in the panel's
     /// focus mode (`None` = no cursor).
-    pub cursor_frac:       Option<f64>,
+    pub cursor_frac: Option<f64>,
     /// Set by the `[Enter]` jump: the frequency to return to when sweep stops, so
     /// the radio lands on the cursor instead of the pre-sweep frequency.
-    pub pending_tune:      Option<u64>,
+    pub pending_tune: Option<u64>,
 }
 
 impl Default for SweepState {
     fn default() -> Self {
         Self {
-            config:            SweepConfig::default(),
-            active:            false,
-            current_hz:        0,
-            current_frame:     None,
-            positions_total:   0,
-            positions_done:    0,
-            cycle_count:       0,
+            config: SweepConfig::default(),
+            active: false,
+            current_hz: 0,
+            current_frame: None,
+            positions_total: 0,
+            positions_done: 0,
+            cycle_count: 0,
             cycle_duration_ms: 0,
-            show_peak:         true,
-            cursor_frac:       None,
-            pending_tune:      None,
+            show_peak: true,
+            cursor_frac: None,
+            pending_tune: None,
         }
     }
 }
@@ -177,29 +185,49 @@ mod tests {
 
     #[test]
     fn effective_step_uses_sample_rate_when_unset() {
-        let c = SweepConfig { step_hz: 0, ..Default::default() };
+        let c = SweepConfig {
+            step_hz: 0,
+            ..Default::default()
+        };
         // 10 Msps × 0.9 = 9 MHz.
         assert_eq!(c.effective_step_hz(10_000_000.0), 9_000_000);
         // Explicit step wins.
-        let c2 = SweepConfig { step_hz: 5_000_000, ..Default::default() };
+        let c2 = SweepConfig {
+            step_hz: 5_000_000,
+            ..Default::default()
+        };
         assert_eq!(c2.effective_step_hz(10_000_000.0), 5_000_000);
     }
 
     #[test]
     fn positions_total_matches_design_table() {
         // 400–500 MHz at 9 MHz step → 12 positions (matches the design doc).
-        let c = SweepConfig { start_hz: 400_000_000, stop_hz: 500_000_000, step_hz: 0, dwell_ms: 200 };
+        let c = SweepConfig {
+            start_hz: 400_000_000,
+            stop_hz: 500_000_000,
+            step_hz: 0,
+            dwell_ms: 200,
+        };
         assert_eq!(c.positions_total(10_000_000.0), 12);
         // 20 Msps → 18 MHz step → 6 positions.
         assert_eq!(c.positions_total(20_000_000.0), 6);
         // Degenerate range → no positions.
-        let bad = SweepConfig { start_hz: 500_000_000, stop_hz: 400_000_000, ..Default::default() };
+        let bad = SweepConfig {
+            start_hz: 500_000_000,
+            stop_hz: 400_000_000,
+            ..Default::default()
+        };
         assert_eq!(bad.positions_total(10_000_000.0), 0);
     }
 
     #[test]
     fn position_hz_steps_from_start() {
-        let c = SweepConfig { start_hz: 400_000_000, stop_hz: 500_000_000, step_hz: 0, dwell_ms: 200 };
+        let c = SweepConfig {
+            start_hz: 400_000_000,
+            stop_hz: 500_000_000,
+            step_hz: 0,
+            dwell_ms: 200,
+        };
         assert_eq!(c.position_hz(0, 10_000_000.0), 400_000_000);
         assert_eq!(c.position_hz(2, 10_000_000.0), 418_000_000);
     }
@@ -207,8 +235,8 @@ mod tests {
     fn frame() -> SweepFrame {
         SweepFrame {
             start_hz: 400_000_000,
-            stop_hz:  500_000_000,
-            freq_hz:  vec![400_000_000, 450_000_000, 499_000_000],
+            stop_hz: 500_000_000,
+            freq_hz: vec![400_000_000, 450_000_000, 499_000_000],
             peak_dbfs: vec![-80.0, -20.0, -60.0],
             mean_dbfs: vec![-90.0, -40.0, -70.0],
             timestamp: Instant::now(),
@@ -236,8 +264,8 @@ mod tests {
     fn top_peaks_picks_strongest_and_spaces_them() {
         let f = SweepFrame {
             start_hz: 400_000_000,
-            stop_hz:  500_000_000,
-            freq_hz:  vec![410_000_000, 410_500_000, 450_000_000, 480_000_000],
+            stop_hz: 500_000_000,
+            freq_hz: vec![410_000_000, 410_500_000, 450_000_000, 480_000_000],
             peak_dbfs: vec![-30.0, -28.0, -50.0, -70.0],
             mean_dbfs: vec![-40.0, -38.0, -60.0, -80.0],
             timestamp: Instant::now(),

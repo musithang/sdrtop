@@ -8,19 +8,27 @@
 use ratatui::style::Style;
 
 /// Label colour: hints, units, and anything that is not itself a reading.
-pub(super) fn lbl(theme: &crate::Theme) -> Style { Style::default().fg(theme.label) }
+pub(super) fn lbl(theme: &crate::Theme) -> Style {
+    Style::default().fg(theme.label)
+}
 
 /// Value colour: the numbers, where the number is not being graded.
-pub(super) fn val(theme: &crate::Theme) -> Style { Style::default().fg(theme.value) }
+pub(super) fn val(theme: &crate::Theme) -> Style {
+    Style::default().fg(theme.value)
+}
 
 /// Frequency in the most readable unit for a deviation / offset figure. Keeps
 /// three significant figures across the WFM (tens of kHz) and NFM (single kHz)
 /// ranges without ever padding a number with false precision.
 pub(super) fn fmt_hz(hz: f32) -> String {
     let a = hz.abs();
-    if a >= 10_000.0      { format!("{:.1} kHz", hz / 1000.0) }
-    else if a >= 1_000.0  { format!("{:.2} kHz", hz / 1000.0) }
-    else                  { format!("{:.0} Hz", hz) }
+    if a >= 10_000.0 {
+        format!("{:.1} kHz", hz / 1000.0)
+    } else if a >= 1_000.0 {
+        format!("{:.2} kHz", hz / 1000.0)
+    } else {
+        format!("{:.0} Hz", hz)
+    }
 }
 
 /// Signed variant for the carrier offset, where the sign is the point.
@@ -36,8 +44,8 @@ mod tests {
     #[test]
     fn fmt_hz_picks_a_readable_unit() {
         assert_eq!(fmt_hz(42_300.0), "42.3 kHz");
-        assert_eq!(fmt_hz(4_230.0),  "4.23 kHz");
-        assert_eq!(fmt_hz(420.0),    "420 Hz");
+        assert_eq!(fmt_hz(4_230.0), "4.23 kHz");
+        assert_eq!(fmt_hz(420.0), "420 Hz");
     }
 
     #[test]

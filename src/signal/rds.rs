@@ -21,15 +21,21 @@ pub const BLOCK_BITS: u32 = 26;
 
 /// Offset words, per block position within a group. `C_PRIME` marks the "version
 /// B" third block, which carries the PI code again instead of new data.
-pub const OFFSET_A:       u16 = 0b0011111100;
-pub const OFFSET_B:       u16 = 0b0110011000;
-pub const OFFSET_C:       u16 = 0b0101101000;
+pub const OFFSET_A: u16 = 0b0011111100;
+pub const OFFSET_B: u16 = 0b0110011000;
+pub const OFFSET_C: u16 = 0b0101101000;
 pub const OFFSET_C_PRIME: u16 = 0b1101010000;
-pub const OFFSET_D:       u16 = 0b0110110100;
+pub const OFFSET_D: u16 = 0b0110110100;
 
 /// Which position in a group a block occupies.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum BlockOffset { A, B, C, CPrime, D }
+pub enum BlockOffset {
+    A,
+    B,
+    C,
+    CPrime,
+    D,
+}
 
 impl BlockOffset {
     /// The offset word XORed into this position's checkword. Only the encoder
@@ -37,11 +43,11 @@ impl BlockOffset {
     #[cfg(test)]
     pub fn word(self) -> u16 {
         match self {
-            BlockOffset::A      => OFFSET_A,
-            BlockOffset::B      => OFFSET_B,
-            BlockOffset::C      => OFFSET_C,
+            BlockOffset::A => OFFSET_A,
+            BlockOffset::B => OFFSET_B,
+            BlockOffset::C => OFFSET_C,
             BlockOffset::CPrime => OFFSET_C_PRIME,
-            BlockOffset::D      => OFFSET_D,
+            BlockOffset::D => OFFSET_D,
         }
     }
 
@@ -79,7 +85,9 @@ pub fn syndrome(block: u32) -> u16 {
     let mut reg: u32 = 0;
     for i in (0..BLOCK_BITS).rev() {
         reg = (reg << 1) | ((block >> i) & 1);
-        if reg & 0x400 != 0 { reg ^= POLY; }
+        if reg & 0x400 != 0 {
+            reg ^= POLY;
+        }
     }
     (reg & 0x3FF) as u16
 }
@@ -105,26 +113,54 @@ pub fn encode_block(info: u16, offset: BlockOffset) -> u32 {
 /// it straddles a boundary, or it has bit errors.
 pub fn identify(block: u32) -> Option<BlockOffset> {
     match syndrome(block) {
-        s if s == OFFSET_A       => Some(BlockOffset::A),
-        s if s == OFFSET_B       => Some(BlockOffset::B),
-        s if s == OFFSET_C       => Some(BlockOffset::C),
+        s if s == OFFSET_A => Some(BlockOffset::A),
+        s if s == OFFSET_B => Some(BlockOffset::B),
+        s if s == OFFSET_C => Some(BlockOffset::C),
         s if s == OFFSET_C_PRIME => Some(BlockOffset::CPrime),
-        s if s == OFFSET_D       => Some(BlockOffset::D),
+        s if s == OFFSET_D => Some(BlockOffset::D),
         _ => None,
     }
 }
 
 /// The information word carried by a block.
-pub fn info_of(block: u32) -> u16 { ((block >> 10) & 0xFFFF) as u16 }
+pub fn info_of(block: u32) -> u16 {
+    ((block >> 10) & 0xFFFF) as u16
+}
 
 /// Programme type names, indexed by the 5-bit PTY field (RDS / European table).
 pub const PTY_NAMES: [&str; 32] = [
-    "None", "News", "Current Affairs", "Information", "Sport", "Education", "Drama",
-    "Culture", "Science", "Varied", "Pop Music", "Rock Music", "Easy Listening",
-    "Light Classical", "Serious Classical", "Other Music", "Weather", "Finance",
-    "Children", "Social Affairs", "Religion", "Phone In", "Travel", "Leisure",
-    "Jazz Music", "Country Music", "National Music", "Oldies Music", "Folk Music",
-    "Documentary", "Alarm Test", "Alarm",
+    "None",
+    "News",
+    "Current Affairs",
+    "Information",
+    "Sport",
+    "Education",
+    "Drama",
+    "Culture",
+    "Science",
+    "Varied",
+    "Pop Music",
+    "Rock Music",
+    "Easy Listening",
+    "Light Classical",
+    "Serious Classical",
+    "Other Music",
+    "Weather",
+    "Finance",
+    "Children",
+    "Social Affairs",
+    "Religion",
+    "Phone In",
+    "Travel",
+    "Leisure",
+    "Jazz Music",
+    "Country Music",
+    "National Music",
+    "Oldies Music",
+    "Folk Music",
+    "Documentary",
+    "Alarm Test",
+    "Alarm",
 ];
 
 /// Everything the decoder has learned about the station.
@@ -136,17 +172,17 @@ pub const PTY_NAMES: [&str; 32] = [
 pub struct RdsData {
     /// Programme Identification — the station's unique code. Present as soon as
     /// one valid block A arrives, which makes it the fastest thing to appear.
-    pub pi:  Option<u16>,
+    pub pi: Option<u16>,
     /// Programme type, as a 5-bit code; index into [`PTY_NAMES`].
     pub pty: Option<u8>,
     /// Traffic Programme / Traffic Announcement flags.
-    pub tp:  bool,
-    pub ta:  bool,
+    pub tp: bool,
+    pub ta: bool,
     /// Programme Service name, 8 characters. `None` until every position has been
     /// confirmed at least twice.
-    pub ps:  Option<String>,
+    pub ps: Option<String>,
     /// RadioText, up to 64 characters, trimmed of trailing padding.
-    pub rt:  Option<String>,
+    pub rt: Option<String>,
     /// Groups accepted since the decoder last lost synchronisation. A run that
     /// keeps restarting is the signal that reception is breaking up.
     pub groups_ok: u32,
@@ -215,7 +251,11 @@ const G0: [char; 224] = [
 /// Everything below 0x20 is a control code, not text — RadioText uses 0x0D to mark
 /// the end of a message — and becomes a space, which the caller then trims.
 pub fn g0_char(b: u8) -> char {
-    if b < 0x20 { ' ' } else { G0[(b - 0x20) as usize] }
+    if b < 0x20 {
+        ' '
+    } else {
+        G0[(b - 0x20) as usize]
+    }
 }
 
 /// Number of consistent sightings before a text character is published.
@@ -231,26 +271,30 @@ const CONFIRM_COUNT: u8 = 2;
 /// [`CONFIRM_COUNT`] times running.
 #[derive(Clone, Debug)]
 struct ConfirmedText {
-    chars:   Vec<u8>,
+    chars: Vec<u8>,
     pending: Vec<u8>,
-    hits:    Vec<u8>,
+    hits: Vec<u8>,
     /// Which positions have ever been confirmed. Tracked separately from `hits`
     /// because [`forget_pending`](Self::forget_pending) clears the in-flight
     /// sightings while the text they produced stays on screen — reading "anything
     /// confirmed?" off `hits` would have made that text vanish.
-    seen:    Vec<bool>,
+    seen: Vec<bool>,
 }
 
 impl ConfirmedText {
     fn new(len: usize) -> Self {
         Self {
-            chars: vec![b' '; len], pending: vec![0; len],
-            hits: vec![0; len], seen: vec![false; len],
+            chars: vec![b' '; len],
+            pending: vec![0; len],
+            hits: vec![0; len],
+            seen: vec![false; len],
         }
     }
 
     fn set(&mut self, i: usize, c: u8) {
-        if i >= self.chars.len() { return; }
+        if i >= self.chars.len() {
+            return;
+        }
         if self.pending[i] == c {
             self.hits[i] = self.hits[i].saturating_add(1);
         } else {
@@ -300,38 +344,43 @@ impl ConfirmedText {
 /// back to hunting rather than letting it drift and emit rubbish.
 pub struct RdsDecoder {
     /// Sliding 26-bit window over the incoming bits.
-    window:   u32,
+    window: u32,
     /// Bits seen since the last block boundary while locked.
     bit_count: u32,
     /// Where in the group the next block is expected, once synchronised.
-    expect:   Option<BlockOffset>,
+    expect: Option<BlockOffset>,
     /// Consecutive failures at an expected position, before giving up the lock.
-    misses:   u32,
+    misses: u32,
     /// Information words of the group being assembled.
-    group:    [Option<u16>; 4],
-    ps:       ConfirmedText,
-    rt:       ConfirmedText,
+    group: [Option<u16>; 4],
+    ps: ConfirmedText,
+    rt: ConfirmedText,
     /// RadioText transmissions are restarted by toggling this flag; a change means
     /// the message has been replaced and the buffer must not blend old with new.
-    rt_ab:    Option<bool>,
-    rt_len:   usize,
+    rt_ab: Option<bool>,
+    rt_len: usize,
     /// PI awaiting corroboration, and how many times it has been seen running.
     pi_pending: Option<u16>,
-    pi_hits:  u8,
-    data:     RdsData,
+    pi_hits: u8,
+    data: RdsData,
 }
 
 /// Consecutive missed blocks that cost the decoder its lock.
 const MAX_MISSES: u32 = 3;
 
 impl Default for RdsDecoder {
-    fn default() -> Self { Self::new() }
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl RdsDecoder {
     pub fn new() -> Self {
         Self {
-            window: 0, bit_count: 0, expect: None, misses: 0,
+            window: 0,
+            bit_count: 0,
+            expect: None,
+            misses: 0,
             group: [None; 4],
             ps: ConfirmedText::new(8),
             rt: ConfirmedText::new(64),
@@ -343,10 +392,14 @@ impl RdsDecoder {
         }
     }
 
-    pub fn data(&self) -> &RdsData { &self.data }
+    pub fn data(&self) -> &RdsData {
+        &self.data
+    }
 
     /// Whether the decoder currently holds block synchronisation.
-    pub fn locked(&self) -> bool { self.expect.is_some() }
+    pub fn locked(&self) -> bool {
+        self.expect.is_some()
+    }
 
     /// Forget everything the decoder has learned. For a change of station — a
     /// retune, a different modulation — where nothing held here describes what is
@@ -410,7 +463,9 @@ impl RdsDecoder {
             // Locked: only look on the predicted boundary.
             Some(expected) => {
                 self.bit_count += 1;
-                if self.bit_count < BLOCK_BITS { return; }
+                if self.bit_count < BLOCK_BITS {
+                    return;
+                }
                 self.bit_count = 0;
 
                 match identify(self.window) {
@@ -463,23 +518,26 @@ impl RdsDecoder {
 
     fn commit_group(&mut self) {
         let (Some(_a), Some(b), Some(c), Some(d)) =
-            (self.group[0], self.group[1], self.group[2], self.group[3]) else { return };
+            (self.group[0], self.group[1], self.group[2], self.group[3])
+        else {
+            return;
+        };
 
         self.data.groups_ok = self.data.groups_ok.saturating_add(1);
         self.data.groups_session = self.data.groups_session.saturating_add(1);
 
         // Block B always carries group type, version, TP and PTY.
         let group_type = (b >> 12) & 0xF;
-        let version_b  = (b >> 11) & 1 == 1;
-        self.data.tp   = (b >> 10) & 1 == 1;
-        self.data.pty  = Some(((b >> 5) & 0x1F) as u8);
+        let version_b = (b >> 11) & 1 == 1;
+        self.data.tp = (b >> 10) & 1 == 1;
+        self.data.pty = Some(((b >> 5) & 0x1F) as u8);
 
         match group_type {
             // 0A / 0B — programme service name, two characters per group.
             0 => {
                 self.data.ta = (b >> 4) & 1 == 1;
                 let idx = (b & 0x3) as usize * 2;
-                self.ps.set(idx,     (d >> 8) as u8);
+                self.ps.set(idx, (d >> 8) as u8);
                 self.ps.set(idx + 1, (d & 0xFF) as u8);
                 if self.ps.confirmed_any() {
                     self.data.ps = Some(self.ps.text(8));
@@ -499,12 +557,12 @@ impl RdsDecoder {
                 let seg = (b & 0xF) as usize;
                 if version_b {
                     let idx = seg * 2;
-                    self.rt.set(idx,     (d >> 8) as u8);
+                    self.rt.set(idx, (d >> 8) as u8);
                     self.rt.set(idx + 1, (d & 0xFF) as u8);
                     self.rt_len = self.rt_len.max(idx + 2);
                 } else {
                     let idx = seg * 4;
-                    self.rt.set(idx,     (c >> 8) as u8);
+                    self.rt.set(idx, (c >> 8) as u8);
                     self.rt.set(idx + 1, (c & 0xFF) as u8);
                     self.rt.set(idx + 2, (d >> 8) as u8);
                     self.rt.set(idx + 3, (d & 0xFF) as u8);
@@ -528,7 +586,11 @@ mod tests {
         let offs = [
             BlockOffset::A,
             BlockOffset::B,
-            if version_b { BlockOffset::CPrime } else { BlockOffset::C },
+            if version_b {
+                BlockOffset::CPrime
+            } else {
+                BlockOffset::C
+            },
             BlockOffset::D,
         ];
         let mut bits = Vec::with_capacity(104);
@@ -554,12 +616,20 @@ mod tests {
     #[test]
     fn syndrome_of_a_valid_block_is_its_offset_word() {
         // The property the whole synchroniser rests on.
-        for off in [BlockOffset::A, BlockOffset::B, BlockOffset::C,
-                    BlockOffset::CPrime, BlockOffset::D] {
+        for off in [
+            BlockOffset::A,
+            BlockOffset::B,
+            BlockOffset::C,
+            BlockOffset::CPrime,
+            BlockOffset::D,
+        ] {
             for info in [0x0000u16, 0x1234, 0xABCD, 0xFFFF] {
                 let block = encode_block(info, off);
-                assert_eq!(syndrome(block), off.word(),
-                           "offset {off:?} info {info:#06x}");
+                assert_eq!(
+                    syndrome(block),
+                    off.word(),
+                    "offset {off:?} info {info:#06x}"
+                );
                 assert_eq!(identify(block), Some(off));
                 assert_eq!(info_of(block), info);
             }
@@ -572,7 +642,10 @@ mod tests {
         // Every single-bit error must be caught — that is the minimum the CRC owes.
         for bit in 0..BLOCK_BITS {
             let bad = block ^ (1 << bit);
-            assert!(identify(bad).is_none(), "single-bit error at {bit} slipped through");
+            assert!(
+                identify(bad).is_none(),
+                "single-bit error at {bit} slipped through"
+            );
         }
     }
 
@@ -580,7 +653,9 @@ mod tests {
     fn decoder_recovers_a_group_and_confirms_pi_on_the_second() {
         let mut d = RdsDecoder::new();
         let group = || encode_group([0xB201, block_b_ps(10, 0), 0, 0x4142], false);
-        for b in group() { d.push_bit(b); }
+        for b in group() {
+            d.push_bit(b);
+        }
         // A whole group is proof enough for everything the group itself carries…
         assert_eq!(d.data().pty, Some(10));
         assert!(d.data().tp);
@@ -589,7 +664,9 @@ mod tests {
         // …but not yet for PI, which a single chance syndrome hit could also
         // produce. One more sighting of the same word settles it.
         assert_eq!(d.data().pi, None);
-        for b in group() { d.push_bit(b); }
+        for b in group() {
+            d.push_bit(b);
+        }
         assert_eq!(d.data().pi, Some(0xB201));
         assert_eq!(d.data().groups_ok, 2);
     }
@@ -600,15 +677,24 @@ mod tests {
         // luck, and a station code appears out of noise. One block A is not
         // evidence — and two *different* ones are not either.
         let mut d = RdsDecoder::new();
-        for b in encode_group([0xB201, block_b_ps(10, 0), 0, 0x4142], false).into_iter().take(26) {
+        for b in encode_group([0xB201, block_b_ps(10, 0), 0, 0x4142], false)
+            .into_iter()
+            .take(26)
+        {
             d.push_bit(b);
         }
         assert_eq!(d.data().pi, None);
         let mut d = RdsDecoder::new();
         for pi in [0xB201u16, 0x1234] {
-            for b in encode_group([pi, block_b_ps(10, 0), 0, 0x4142], false) { d.push_bit(b); }
+            for b in encode_group([pi, block_b_ps(10, 0), 0, 0x4142], false) {
+                d.push_bit(b);
+            }
         }
-        assert_eq!(d.data().pi, None, "disagreeing sightings must not confirm either");
+        assert_eq!(
+            d.data().pi,
+            None,
+            "disagreeing sightings must not confirm either"
+        );
     }
 
     #[test]
@@ -641,7 +727,11 @@ mod tests {
                 d.push_bit(b);
             }
         }
-        assert_eq!(d.data().ps, None, "unconfirmed text must not reach the display");
+        assert_eq!(
+            d.data().ps,
+            None,
+            "unconfirmed text must not reach the display"
+        );
         // …but the PI, which needs no confirmation, is already there.
         assert_eq!(d.data().pi, Some(0xB201));
     }
@@ -673,7 +763,9 @@ mod tests {
                 let c = u16::from_be_bytes([text[0], text[1]]);
                 let dd = u16::from_be_bytes([text[2], text[3]]);
                 let b = (2 << 12) | (1 << 10) | (ab << 4) | (3 << 5);
-                for bit in encode_group([0xB201, b, c, dd], false) { d.push_bit(bit); }
+                for bit in encode_group([0xB201, b, c, dd], false) {
+                    d.push_bit(bit);
+                }
             }
         };
         send(&mut d, b"AAAA", 0);
@@ -681,14 +773,19 @@ mod tests {
         // A toggled flag means a new message; the old text must not survive in it.
         send(&mut d, b"BBBB", 1);
         let rt = d.data().rt.clone().unwrap_or_default();
-        assert!(!rt.contains('A'), "old message leaked into the new one: {rt:?}");
+        assert!(
+            !rt.contains('A'),
+            "old message leaked into the new one: {rt:?}"
+        );
     }
 
     #[test]
     fn decoder_finds_sync_from_an_arbitrary_bit_offset() {
         let mut d = RdsDecoder::new();
         // Junk before the stream: the hunt must not be confused by it.
-        for b in [1u8, 0, 1, 1, 0, 0, 0, 1, 1, 1, 0] { d.push_bit(b); }
+        for b in [1u8, 0, 1, 1, 0, 0, 0, 1, 1, 1, 0] {
+            d.push_bit(b);
+        }
         for _ in 0..CONFIRM_COUNT {
             for seg in 0..4u16 {
                 let chars = u16::from_be_bytes(*b"OK");
@@ -704,7 +801,9 @@ mod tests {
     #[test]
     fn sustained_garbage_drops_the_lock() {
         let mut d = RdsDecoder::new();
-        for b in encode_group([0xB201, block_b_ps(3, 0), 0, 0x4142], false) { d.push_bit(b); }
+        for b in encode_group([0xB201, block_b_ps(3, 0), 0, 0x4142], false) {
+            d.push_bit(b);
+        }
         assert!(d.locked());
         // Enough invalid blocks in a row and the decoder must let go rather than
         // keep publishing from a boundary it no longer believes in.
@@ -759,9 +858,17 @@ mod tests {
         assert!(session > 0);
 
         d.resync();
-        assert_eq!(d.data().ps, ps, "the station name is still the same station's");
+        assert_eq!(
+            d.data().ps,
+            ps,
+            "the station name is still the same station's"
+        );
         assert_eq!(d.data().pi, Some(0xB201));
-        assert_eq!(d.data().groups_session, session, "the session total is not a per-run count");
+        assert_eq!(
+            d.data().groups_session,
+            session,
+            "the session total is not a per-run count"
+        );
         assert_eq!(d.data().groups_ok, 0, "but the current run starts over");
         assert!(!d.locked(), "block sync does not survive a gap in the bits");
     }
@@ -772,11 +879,14 @@ mod tests {
         // after it: the two are separate reception runs, and agreeing by chance is
         // exactly the error CONFIRM_COUNT exists to catch.
         let mut t = ConfirmedText::new(4);
-        t.set(0, b'A');                  // one sighting, not yet confirmed
+        t.set(0, b'A'); // one sighting, not yet confirmed
         assert!(!t.confirmed_any());
         t.forget_pending();
-        t.set(0, b'A');                  // the first sighting of a new run
-        assert!(!t.confirmed_any(), "a pre-gap sighting corroborated a post-gap one");
+        t.set(0, b'A'); // the first sighting of a new run
+        assert!(
+            !t.confirmed_any(),
+            "a pre-gap sighting corroborated a post-gap one"
+        );
         t.set(0, b'A');
         assert!(t.confirmed_any(), "two sightings in one run still confirm");
     }
@@ -787,7 +897,10 @@ mod tests {
         // `forget_pending` zeroes — so keeping the text would have made it vanish.
         let mut d = decoded_station();
         d.resync();
-        assert!(d.data().ps.is_some(), "confirmed text must not depend on pending hits");
+        assert!(
+            d.data().ps.is_some(),
+            "confirmed text must not depend on pending hits"
+        );
     }
 
     #[test]
@@ -807,9 +920,15 @@ mod tests {
         // Letters and digits are where G0 and ASCII agree, and most of a message is
         // made of them — a table that got these wrong would be obvious, so this is
         // the cheap check that the indexing is right at all.
-        for b in b'A'..=b'Z' { assert_eq!(g0_char(b), b as char); }
-        for b in b'a'..=b'z' { assert_eq!(g0_char(b), b as char); }
-        for b in b'0'..=b'9' { assert_eq!(g0_char(b), b as char); }
+        for b in b'A'..=b'Z' {
+            assert_eq!(g0_char(b), b as char);
+        }
+        for b in b'a'..=b'z' {
+            assert_eq!(g0_char(b), b as char);
+        }
+        for b in b'0'..=b'9' {
+            assert_eq!(g0_char(b), b as char);
+        }
         assert_eq!(g0_char(b' '), ' ');
     }
 
@@ -817,10 +936,18 @@ mod tests {
     fn g0_is_not_ascii_where_the_standard_says_so() {
         // The four positions that would be silently wrong if the low half were
         // treated as ASCII. RBDS puts `$` at 0x24; IEC 62106 puts it at 0xAB.
-        assert_eq!(g0_char(0x24), '\u{00a4}', "0x24 is the currency sign, not $");
+        assert_eq!(
+            g0_char(0x24),
+            '\u{00a4}',
+            "0x24 is the currency sign, not $"
+        );
         assert_eq!(g0_char(0xAB), '$');
         assert_eq!(g0_char(0x5E), '\u{2015}', "0x5E is a horizontal bar, not ^");
-        assert_eq!(g0_char(0x60), '\u{2016}', "0x60 is a double vertical line, not a backtick");
+        assert_eq!(
+            g0_char(0x60),
+            '\u{2016}',
+            "0x60 is a double vertical line, not a backtick"
+        );
         assert_eq!(g0_char(0x7E), '\u{00af}', "0x7E is a macron, not a tilde");
     }
 
@@ -829,10 +956,21 @@ mod tests {
         // The band this instrument is used on. Without these, RadioText from
         // 92.8 MHz arrived as `Gati Pal - Gondczo`.
         for (byte, ch) in [
-            (0x80u8, 'á'), (0x82, 'é'), (0x84, 'í'), (0x86, 'ó'),
-            (0x97, 'ö'), (0xA7, 'ő'), (0x88, 'ú'), (0x99, 'ü'), (0xB7, 'ű'),
-            (0xC0, 'Á'), (0xC2, 'É'), (0xC4, 'Í'), (0xC6, 'Ó'),
-            (0xD7, 'Ö'), (0xD9, 'Ü'),
+            (0x80u8, 'á'),
+            (0x82, 'é'),
+            (0x84, 'í'),
+            (0x86, 'ó'),
+            (0x97, 'ö'),
+            (0xA7, 'ő'),
+            (0x88, 'ú'),
+            (0x99, 'ü'),
+            (0xB7, 'ű'),
+            (0xC0, 'Á'),
+            (0xC2, 'É'),
+            (0xC4, 'Í'),
+            (0xC6, 'Ó'),
+            (0xD7, 'Ö'),
+            (0xD9, 'Ü'),
         ] {
             assert_eq!(g0_char(byte), ch, "0x{byte:02X}");
         }
@@ -853,7 +991,9 @@ mod tests {
         // an accented word come out as that word.
         let mut t = ConfirmedText::new(8);
         for (i, b) in [0x47u8, 0x86, 0x9B, 0x84].into_iter().enumerate() {
-            for _ in 0..CONFIRM_COUNT { t.set(i, b); }
+            for _ in 0..CONFIRM_COUNT {
+                t.set(i, b);
+            }
         }
         assert_eq!(t.text(8), "Góçí");
     }

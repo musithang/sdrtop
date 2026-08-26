@@ -18,7 +18,7 @@ pub use crate::signal::rds::{RdsData, PTY_NAMES};
 /// the one large field the demod adds.
 #[derive(Clone, Debug)]
 pub struct MpxFrame {
-    pub bin_hz:  f64,
+    pub bin_hz: f64,
     pub mags_hz: Vec<f32>,
 }
 
@@ -62,7 +62,7 @@ pub const RDS_DROPPED_AFTER: Duration = Duration::from_secs(30);
 /// rather than merely too much level.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct AmMeasure {
-    pub depth_pct:    f32,
+    pub depth_pct: f32,
     pub positive_pct: f32,
     pub negative_pct: f32,
     pub carrier_dbfs: f32,
@@ -73,9 +73,9 @@ pub struct AmMeasure {
 /// panel can show a confident detection differently from a borderline one.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct CtcssMeasure {
-    pub tone_hz:      f32,
+    pub tone_hz: f32,
     pub deviation_hz: f32,
-    pub margin_db:    f32,
+    pub margin_db: f32,
 }
 
 /// One FM discriminator measurement, all in Hz.
@@ -84,8 +84,8 @@ pub struct CtcssMeasure {
 /// mistuned radio reports its tuning error as offset rather than as modulation.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct FmMeasure {
-    pub peak_dev_hz:       f32,
-    pub rms_dev_hz:        f32,
+    pub peak_dev_hz: f32,
+    pub rms_dev_hz: f32,
     pub carrier_offset_hz: f32,
 }
 
@@ -100,7 +100,7 @@ pub struct DemodState {
     pub enabled: bool,
     /// Decimation factor in use, and the channel rate it actually lands on —
     /// reported rather than assumed, since the factor is rounded.
-    pub decimation:      usize,
+    pub decimation: usize,
     pub channel_rate_hz: f64,
     /// The current measurement, or `None` when there is nothing honest to show
     /// (no carrier, too weak, or a modulation an FM discriminator says nothing
@@ -120,7 +120,7 @@ pub struct DemodState {
     pub mode_override: Option<super::Modulation>,
     /// Recovered MPX baseband spectrum, and the 19 kHz pilot read from it.
     /// WFM only — neither concept exists for NFM or AM.
-    pub mpx:   Option<Arc<MpxFrame>>,
+    pub mpx: Option<Arc<MpxFrame>>,
     pub pilot: Option<PilotMeasure>,
     /// Everything decoded from the 57 kHz RDS subcarrier. WFM only.
     ///
@@ -139,7 +139,7 @@ pub struct DemodState {
     pub rds_last_group: Option<Instant>,
     /// AM envelope measurement. Mutually exclusive with `fm` in practice: the
     /// classifier picks one demodulator, and the other's field stays `None`.
-    pub am:    Option<AmMeasure>,
+    pub am: Option<AmMeasure>,
     /// CTCSS subaudible tone, NFM only. `None` covers both "no tone" and "not
     /// enough contiguous audio yet" — [`Self::ctcss_searching`] separates them.
     pub ctcss: Option<CtcssMeasure>,
@@ -177,25 +177,25 @@ impl Default for DemodState {
     /// `enabled` also requires the `lab_signal` preset to be active.
     fn default() -> Self {
         Self {
-            user_on:         true,
-            enabled:         false,
-            decimation:      0,
+            user_on: true,
+            enabled: false,
+            decimation: 0,
             channel_rate_hz: 0.0,
-            fm:              None,
-            offset_hz:       0,
-            mode_override:   None,
-            mpx:             None,
-            pilot:           None,
-            rds:             None,
-            rds_sync:        false,
-            rds_last_group:  None,
-            am:              None,
-            ctcss:           None,
-            ctcss_fill:      0.0,
-            block_seq:       0,
-            blocks_dropped:  0,
-            last_drop:       None,
-            last_update:     None,
+            fm: None,
+            offset_hz: 0,
+            mode_override: None,
+            mpx: None,
+            pilot: None,
+            rds: None,
+            rds_sync: false,
+            rds_last_group: None,
+            am: None,
+            ctcss: None,
+            ctcss_fill: 0.0,
+            block_seq: 0,
+            blocks_dropped: 0,
+            last_drop: None,
+            last_update: None,
         }
     }
 }
@@ -221,16 +221,16 @@ impl DemodState {
     }
 
     pub fn clear_measurements(&mut self) {
-        self.fm             = None;
-        self.am             = None;
-        self.ctcss          = None;
-        self.ctcss_fill     = 0.0;
-        self.mpx            = None;
-        self.pilot          = None;
-        self.rds            = None;
-        self.rds_sync       = false;
+        self.fm = None;
+        self.am = None;
+        self.ctcss = None;
+        self.ctcss_fill = 0.0;
+        self.mpx = None;
+        self.pilot = None;
+        self.rds = None;
+        self.rds_sync = false;
         self.rds_last_group = None;
-        self.last_update    = None;
+        self.last_update = None;
     }
 
     /// Whether anything at all is currently measured — the question the panel asks
@@ -240,9 +240,15 @@ impl DemodState {
     /// leave `fm` empty while the MPX spectrum and the pilot are perfectly good, and
     /// a panel that keyed off `fm` alone would hide sections that have data in them.
     pub fn has_measurement(&self) -> bool {
-        if self.is_stale() { return false; }
-        self.fm.is_some() || self.am.is_some() || self.ctcss.is_some()
-            || self.mpx.is_some() || self.pilot.is_some() || self.rds.is_some()
+        if self.is_stale() {
+            return false;
+        }
+        self.fm.is_some()
+            || self.am.is_some()
+            || self.ctcss.is_some()
+            || self.mpx.is_some()
+            || self.pilot.is_some()
+            || self.rds.is_some()
             || self.ctcss_searching()
     }
 
@@ -259,39 +265,63 @@ impl DemodState {
     pub fn is_stale(&self) -> bool {
         match self.last_update {
             Some(t) => t.elapsed() > DEMOD_STALE_AFTER,
-            None    => true,
+            None => true,
         }
     }
 
     /// The measurement to render, or `None` when it is missing or stale. The one
     /// call a panel should make — it cannot accidentally show an expired reading.
     pub fn live(&self) -> Option<FmMeasure> {
-        if self.is_stale() { None } else { self.fm }
+        if self.is_stale() {
+            None
+        } else {
+            self.fm
+        }
     }
 
     /// The MPX spectrum to render, subject to the same staleness rule.
     pub fn live_mpx(&self) -> Option<&Arc<MpxFrame>> {
-        if self.is_stale() { None } else { self.mpx.as_ref() }
+        if self.is_stale() {
+            None
+        } else {
+            self.mpx.as_ref()
+        }
     }
 
     /// The pilot reading to render, subject to the same staleness rule.
     pub fn live_pilot(&self) -> Option<PilotMeasure> {
-        if self.is_stale() { None } else { self.pilot }
+        if self.is_stale() {
+            None
+        } else {
+            self.pilot
+        }
     }
 
     /// The RDS snapshot to render, subject to the same staleness rule.
     pub fn live_rds(&self) -> Option<&Arc<RdsData>> {
-        if self.is_stale() { None } else { self.rds.as_ref() }
+        if self.is_stale() {
+            None
+        } else {
+            self.rds.as_ref()
+        }
     }
 
     /// The AM reading to render, subject to the same staleness rule.
     pub fn live_am(&self) -> Option<AmMeasure> {
-        if self.is_stale() { None } else { self.am }
+        if self.is_stale() {
+            None
+        } else {
+            self.am
+        }
     }
 
     /// The CTCSS reading to render, subject to the same staleness rule.
     pub fn live_ctcss(&self) -> Option<CtcssMeasure> {
-        if self.is_stale() { None } else { self.ctcss }
+        if self.is_stale() {
+            None
+        } else {
+            self.ctcss
+        }
     }
 
     /// Whether the CTCSS detector is still filling its observation window rather
@@ -321,9 +351,9 @@ impl DemodState {
     pub fn cycle_mode(&mut self) -> Option<super::Modulation> {
         use super::Modulation::*;
         self.mode_override = match self.mode_override {
-            None            => Some(Wfm),
-            Some(Wfm)       => Some(Nfm),
-            Some(Nfm)       => Some(Am),
+            None => Some(Wfm),
+            Some(Wfm) => Some(Nfm),
+            Some(Nfm) => Some(Am),
             Some(Am) | Some(Unknown) => None,
         };
         self.mode_override
@@ -353,7 +383,9 @@ pub const SNAP_DC_GUARD_HZ: f64 = 10_000.0;
 /// guard swallows it — the caller then leaves the offset alone rather than
 /// jumping to an invented frequency.
 pub fn strongest_offset_hz(bins_dbfs: &[f32], sample_rate: f64) -> Option<i64> {
-    if bins_dbfs.is_empty() || !sample_rate.is_finite() || sample_rate <= 0.0 { return None; }
+    if bins_dbfs.is_empty() || !sample_rate.is_finite() || sample_rate <= 0.0 {
+        return None;
+    }
     let n = bins_dbfs.len();
     let bin_hz = sample_rate / n as f64;
     let centre = n as f64 / 2.0;
@@ -361,8 +393,12 @@ pub fn strongest_offset_hz(bins_dbfs: &[f32], sample_rate: f64) -> Option<i64> {
 
     let mut best: Option<(usize, f32)> = None;
     for (i, &v) in bins_dbfs.iter().enumerate() {
-        if (i as f64 - centre).abs() <= guard_bins { continue; }
-        if best.is_none_or(|(_, bv)| v > bv) { best = Some((i, v)); }
+        if (i as f64 - centre).abs() <= guard_bins {
+            continue;
+        }
+        if best.is_none_or(|(_, bv)| v > bv) {
+            best = Some((i, v));
+        }
     }
     let (idx, _) = best?;
     Some(((idx as f64 - centre) * bin_hz).round() as i64)
@@ -374,7 +410,7 @@ pub fn strongest_offset_hz(bins_dbfs: &[f32], sample_rate: f64) -> Option<i64> {
 pub fn deviation_limit_hz(modulation: super::Modulation) -> f32 {
     match modulation {
         super::Modulation::Nfm => 5_000.0,
-        _                      => 75_000.0,
+        _ => 75_000.0,
     }
 }
 
@@ -384,7 +420,11 @@ mod tests {
     use crate::state::Modulation;
 
     fn measure() -> FmMeasure {
-        FmMeasure { peak_dev_hz: 40_000.0, rms_dev_hz: 28_000.0, carrier_offset_hz: -1_200.0 }
+        FmMeasure {
+            peak_dev_hz: 40_000.0,
+            rms_dev_hz: 28_000.0,
+            carrier_offset_hz: -1_200.0,
+        }
     }
 
     #[test]
@@ -399,7 +439,11 @@ mod tests {
 
     #[test]
     fn a_just_updated_measurement_is_live() {
-        let d = DemodState { fm: Some(measure()), last_update: Some(Instant::now()), ..Default::default() };
+        let d = DemodState {
+            fm: Some(measure()),
+            last_update: Some(Instant::now()),
+            ..Default::default()
+        };
         assert!(!d.is_stale());
         assert_eq!(d.live(), Some(measure()));
     }
@@ -407,11 +451,18 @@ mod tests {
     #[test]
     fn an_old_measurement_does_not_render() {
         let old = Instant::now().checked_sub(DEMOD_STALE_AFTER * 2);
-        let d = DemodState { fm: Some(measure()), last_update: old, ..Default::default() };
+        let d = DemodState {
+            fm: Some(measure()),
+            last_update: old,
+            ..Default::default()
+        };
         // A checked_sub failure would make this vacuous, so assert we really aged it.
         assert!(old.is_some());
         assert!(d.is_stale());
-        assert!(d.live().is_none(), "a stale reading must never be presented as live");
+        assert!(
+            d.live().is_none(),
+            "a stale reading must never be presented as live"
+        );
     }
 
     #[test]
@@ -421,12 +472,31 @@ mod tests {
         // under a "DEMOD OFF" headline.
         let mut d = DemodState {
             fm: Some(measure()),
-            am: Some(AmMeasure { depth_pct: 50.0, positive_pct: 50.0, negative_pct: 50.0, carrier_dbfs: -20.0 }),
-            ctcss: Some(CtcssMeasure { tone_hz: 103.5, deviation_hz: 500.0, margin_db: 12.0 }),
+            am: Some(AmMeasure {
+                depth_pct: 50.0,
+                positive_pct: 50.0,
+                negative_pct: 50.0,
+                carrier_dbfs: -20.0,
+            }),
+            ctcss: Some(CtcssMeasure {
+                tone_hz: 103.5,
+                deviation_hz: 500.0,
+                margin_db: 12.0,
+            }),
             ctcss_fill: 0.7,
-            mpx: Some(Arc::new(MpxFrame { bin_hz: 163.0, mags_hz: vec![1.0; 8] })),
-            pilot: Some(PilotMeasure { state: PilotState::Locked, deviation_hz: 6_500.0, injection_pct: 8.7 }),
-            rds: Some(Arc::new(RdsData { pi: Some(0x1234), ..Default::default() })),
+            mpx: Some(Arc::new(MpxFrame {
+                bin_hz: 163.0,
+                mags_hz: vec![1.0; 8],
+            })),
+            pilot: Some(PilotMeasure {
+                state: PilotState::Locked,
+                deviation_hz: 6_500.0,
+                injection_pct: 8.7,
+            }),
+            rds: Some(Arc::new(RdsData {
+                pi: Some(0x1234),
+                ..Default::default()
+            })),
             rds_sync: true,
             rds_last_group: Some(Instant::now()),
             last_update: Some(Instant::now()),
@@ -447,7 +517,11 @@ mod tests {
     fn dropping_reports_only_recent_losses() {
         // C12: the count is cumulative but the advisory is about now. A single
         // glitch at startup must not leave a warning up for the rest of the session.
-        let fresh = DemodState { blocks_dropped: 7, last_drop: Some(Instant::now()), ..Default::default() };
+        let fresh = DemodState {
+            blocks_dropped: 7,
+            last_drop: Some(Instant::now()),
+            ..Default::default()
+        };
         assert_eq!(fresh.dropping(), Some(7));
 
         let stale = DemodState {
@@ -455,17 +529,28 @@ mod tests {
             last_drop: Instant::now().checked_sub(DROP_ADVISORY_FOR + Duration::from_secs(1)),
             ..Default::default()
         };
-        assert_eq!(stale.dropping(), None, "an old glitch is not a current warning");
+        assert_eq!(
+            stale.dropping(),
+            None,
+            "an old glitch is not a current warning"
+        );
 
-        assert_eq!(DemodState::default().dropping(), None, "a clean channel says nothing");
+        assert_eq!(
+            DemodState::default().dropping(),
+            None,
+            "a clean channel says nothing"
+        );
     }
 
     #[test]
     fn clear_measurements_keeps_the_settings_it_is_not_about() {
         // Intent, channel offset and forced mode are the user's, not measurements.
         let mut d = DemodState {
-            user_on: true, offset_hz: 75_000, mode_override: Some(Modulation::Nfm),
-            fm: Some(measure()), last_update: Some(Instant::now()),
+            user_on: true,
+            offset_hz: 75_000,
+            mode_override: Some(Modulation::Nfm),
+            fm: Some(measure()),
+            last_update: Some(Instant::now()),
             ..Default::default()
         };
         d.clear_measurements();
@@ -481,7 +566,11 @@ mod tests {
         // sections that have data in them.
         let d = DemodState {
             fm: None,
-            pilot: Some(PilotMeasure { state: PilotState::Locked, deviation_hz: 6_500.0, injection_pct: 8.7 }),
+            pilot: Some(PilotMeasure {
+                state: PilotState::Locked,
+                deviation_hz: 6_500.0,
+                injection_pct: 8.7,
+            }),
             last_update: Some(Instant::now()),
             ..Default::default()
         };
@@ -493,7 +582,11 @@ mod tests {
     fn has_measurement_is_false_when_there_is_nothing_to_show() {
         // What the panel checks before drawing five section headings over blank
         // space: with the demod off, every one of them would be empty at once.
-        let mut d = DemodState { fm: Some(measure()), last_update: Some(Instant::now()), ..Default::default() };
+        let mut d = DemodState {
+            fm: Some(measure()),
+            last_update: Some(Instant::now()),
+            ..Default::default()
+        };
         assert!(d.has_measurement());
         d.clear_measurements();
         assert!(!d.has_measurement());
@@ -502,14 +595,23 @@ mod tests {
         assert!(!DemodState::default().has_measurement());
         let old = Instant::now().checked_sub(DEMOD_STALE_AFTER * 2);
         assert!(old.is_some());
-        assert!(!DemodState { fm: Some(measure()), last_update: old, ..Default::default() }.has_measurement());
+        assert!(!DemodState {
+            fm: Some(measure()),
+            last_update: old,
+            ..Default::default()
+        }
+        .has_measurement());
     }
 
     #[test]
     fn has_measurement_counts_a_ctcss_search_in_progress() {
         // "Still filling the window" is a thing worth a section, and the only state
         // in which nothing is measured yet but something is happening.
-        let d = DemodState { ctcss_fill: 0.4, last_update: Some(Instant::now()), ..Default::default() };
+        let d = DemodState {
+            ctcss_fill: 0.4,
+            last_update: Some(Instant::now()),
+            ..Default::default()
+        };
         assert!(d.ctcss_searching());
         assert!(d.has_measurement());
     }
@@ -524,7 +626,11 @@ mod tests {
 
     #[test]
     fn cleared_measurement_reports_nothing_even_when_recent() {
-        let d = DemodState { fm: None, last_update: Some(Instant::now()), ..Default::default() };
+        let d = DemodState {
+            fm: None,
+            last_update: Some(Instant::now()),
+            ..Default::default()
+        };
         assert!(d.live().is_none());
     }
 
@@ -552,8 +658,8 @@ mod tests {
         // +200 kHz. Snapping to the spike would put the channel back on DC, which
         // is exactly what the offset exists to escape.
         let mut bins = vec![-90.0f32; 8];
-        bins[4] = 0.0;    // DC spike, by far the strongest bin
-        bins[6] = -40.0;  // the actual carrier
+        bins[4] = 0.0; // DC spike, by far the strongest bin
+        bins[6] = -40.0; // the actual carrier
         assert_eq!(strongest_offset_hz(&bins, 800_000.0), Some(200_000));
     }
 
@@ -562,12 +668,18 @@ mod tests {
         assert_eq!(strongest_offset_hz(&[], 2_000_000.0), None);
         assert_eq!(strongest_offset_hz(&[-10.0, -20.0], 0.0), None);
         // A span narrower than the guard leaves no candidate bins at all.
-        assert_eq!(strongest_offset_hz(&[-10.0, -20.0, -30.0, -40.0], 8_000.0), None);
+        assert_eq!(
+            strongest_offset_hz(&[-10.0, -20.0, -30.0, -40.0], 8_000.0),
+            None
+        );
     }
 
     #[test]
     fn offset_limit_keeps_the_channel_inside_the_span() {
-        let d = DemodState { channel_rate_hz: 333_000.0, ..Default::default() };
+        let d = DemodState {
+            channel_rate_hz: 333_000.0,
+            ..Default::default()
+        };
         // 2 Msps: half span 1 MHz, minus half a 333 kHz channel.
         assert_eq!(d.offset_limit_hz(2_000_000.0), 833_500);
     }
@@ -594,12 +706,18 @@ mod tests {
 
     #[test]
     fn dc_spike_warning_only_without_correction() {
-        let centred = DemodState { offset_hz: 0, ..Default::default() };
+        let centred = DemodState {
+            offset_hz: 0,
+            ..Default::default()
+        };
         assert!(centred.on_dc_spike(false));
         // The existing DC block already handles it — no need to nag.
         assert!(!centred.on_dc_spike(true));
         // Tuned well off centre, the artefact is out of the channel.
-        let offset = DemodState { offset_hz: 200_000, ..Default::default() };
+        let offset = DemodState {
+            offset_hz: 200_000,
+            ..Default::default()
+        };
         assert!(!offset.on_dc_spike(false));
     }
 }

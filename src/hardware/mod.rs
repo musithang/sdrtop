@@ -21,7 +21,7 @@ pub enum DeviceKind {
 /// device selector.
 #[derive(Clone, Debug)]
 pub struct DeviceListing {
-    pub kind:  DeviceKind,
+    pub kind: DeviceKind,
     pub index: usize,
     pub label: String,
 }

@@ -1,8 +1,8 @@
-use std::collections::HashMap;
-use ratatui::{layout::Rect, Frame};
 use crate::state::SdrMetrics;
 use crate::ui::chrome::frame;
 use crate::ui::panel::{FrameStyle, Panel};
+use ratatui::{layout::Rect, Frame};
+use std::collections::HashMap;
 
 pub struct PanelRegistry {
     panels: HashMap<&'static str, Box<dyn Panel>>,
@@ -10,7 +10,9 @@ pub struct PanelRegistry {
 
 impl PanelRegistry {
     pub fn new() -> Self {
-        Self { panels: HashMap::new() }
+        Self {
+            panels: HashMap::new(),
+        }
     }
 
     pub fn register(&mut self, panel: impl Panel + 'static) {
@@ -34,7 +36,15 @@ impl PanelRegistry {
     /// registered panel takes it, and the lint says so.
     ///
     /// [`PanelChrome`]: crate::ui::panel::PanelChrome
-    pub fn render_panel(&self, name: &str, f: &mut Frame, area: Rect, state: &SdrMetrics, theme: &crate::Theme, focused: bool) {
+    pub fn render_panel(
+        &self,
+        name: &str,
+        f: &mut Frame,
+        area: Rect,
+        state: &SdrMetrics,
+        theme: &crate::Theme,
+        focused: bool,
+    ) {
         let Some(panel) = self.get(name) else { return };
         let chrome = panel.chrome(state);
         if chrome.frame == FrameStyle::SelfFramed {
@@ -44,7 +54,9 @@ impl PanelRegistry {
         let stale = chrome.staleness.resolve(state);
         // A frame that leaves no inner rect still draws: the border is the only
         // honest thing to show in a panel too small for its contents.
-        if let Some(inner) = frame::render_frame(f, area, &chrome, panel.focus_key(), stale, focused, theme) {
+        if let Some(inner) =
+            frame::render_frame(f, area, &chrome, panel.focus_key(), stale, focused, theme)
+        {
             panel.render(f, inner, state, theme, focused);
         }
     }
@@ -58,9 +70,21 @@ mod tests {
     struct NamedPanel(&'static str);
 
     impl Panel for NamedPanel {
-        fn name(&self) -> &'static str { self.0 }
-        fn min_size(&self) -> (u16, u16) { (0, 0) }
-        fn render(&self, _f: &mut Frame, _area: Rect, _state: &SdrMetrics, _theme: &crate::Theme, _focused: bool) {}
+        fn name(&self) -> &'static str {
+            self.0
+        }
+        fn min_size(&self) -> (u16, u16) {
+            (0, 0)
+        }
+        fn render(
+            &self,
+            _f: &mut Frame,
+            _area: Rect,
+            _state: &SdrMetrics,
+            _theme: &crate::Theme,
+            _focused: bool,
+        ) {
+        }
     }
 
     #[test]

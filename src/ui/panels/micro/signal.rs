@@ -13,8 +13,10 @@ use ratatui::{
 };
 
 use crate::state::SdrMetrics;
-use crate::ui::widgets::micro_common::{bar_spans, fft_stale, fmt_bw, fmt_rbw, snr_color, status_badge};
 use crate::ui::panel::{Panel, PanelChrome};
+use crate::ui::widgets::micro_common::{
+    bar_spans, fft_stale, fmt_bw, fmt_rbw, snr_color, status_badge,
+};
 
 pub struct MicroSignalPanel;
 
@@ -22,32 +24,58 @@ pub struct MicroSignalPanel;
 const SNR_FULL_SCALE: f32 = 40.0;
 
 impl Panel for MicroSignalPanel {
-    fn name(&self) -> &'static str { "micro_signal_panel" }
-    fn min_size(&self) -> (u16, u16) { (40, 6) }
+    fn name(&self) -> &'static str {
+        "micro_signal_panel"
+    }
+    fn min_size(&self) -> (u16, u16) {
+        (40, 6)
+    }
 
-    fn chrome(&self, _state: &SdrMetrics) -> PanelChrome { PanelChrome::untitled() }
+    fn chrome(&self, _state: &SdrMetrics) -> PanelChrome {
+        PanelChrome::untitled()
+    }
 
-    fn render(&self, f: &mut Frame, inner: Rect, state: &SdrMetrics, theme: &crate::Theme, _focused: bool) {
+    fn render(
+        &self,
+        f: &mut Frame,
+        inner: Rect,
+        state: &SdrMetrics,
+        theme: &crate::Theme,
+        _focused: bool,
+    ) {
         let stale = fft_stale(state);
-        let lbl  = |s: &'static str| Span::styled(s, Style::default().fg(theme.label));
+        let lbl = |s: &'static str| Span::styled(s, Style::default().fg(theme.label));
         let dash = || Span::styled("---".to_string(), Style::default().fg(theme.stale));
 
         // Header: status badge + frequency.
         let [dot, word] = status_badge(state, theme);
         let header = Line::from(vec![
-            Span::raw(" "), dot, word,
+            Span::raw(" "),
+            dot,
+            word,
             Span::raw("   "),
-            Span::styled(crate::ui::widgets::micro_common::fmt_freq_mhz(state.radio.frequency),
-                Style::default().fg(theme.value_hi).add_modifier(Modifier::BOLD)),
+            Span::styled(
+                crate::ui::widgets::micro_common::fmt_freq_mhz(state.radio.frequency),
+                Style::default()
+                    .fg(theme.value_hi)
+                    .add_modifier(Modifier::BOLD),
+            ),
         ]);
 
         // SNR bar row.
         let snr = state.signal.peak_to_nf_db;
-        let snr_col = if stale { theme.stale } else { snr_color(snr, theme) };
+        let snr_col = if stale {
+            theme.stale
+        } else {
+            snr_color(snr, theme)
+        };
         let bar_w = (inner.width as usize).saturating_sub(24).clamp(8, 28);
         let mut snr_row = vec![Span::raw(" ")];
         if stale {
-            snr_row.push(Span::styled("░".repeat(bar_w), Style::default().fg(theme.border_dim)));
+            snr_row.push(Span::styled(
+                "░".repeat(bar_w),
+                Style::default().fg(theme.border_dim),
+            ));
             snr_row.push(Span::raw("  "));
             snr_row.push(dash());
         } else {
@@ -55,7 +83,10 @@ impl Panel for MicroSignalPanel {
             snr_row.push(filled);
             snr_row.push(empty);
             snr_row.push(Span::raw("  "));
-            snr_row.push(Span::styled(format!("{:.1} dB", snr), Style::default().fg(snr_col)));
+            snr_row.push(Span::styled(
+                format!("{:.1} dB", snr),
+                Style::default().fg(snr_col),
+            ));
             if let Some(span) = delta_span(state.signal.snr_delta(), theme) {
                 snr_row.push(Span::raw("   "));
                 snr_row.push(span);
@@ -70,12 +101,19 @@ impl Panel for MicroSignalPanel {
             Span::styled(format!("{:.1} dBFS", pwr), Style::default().fg(theme.value))
         };
         let nf_span = match state.waterfall.last_fft.as_ref().filter(|_| !stale) {
-            Some(fr) => Span::styled(format!("{:.1} dBFS", fr.noise_floor), Style::default().fg(theme.value)),
-            None     => dash(),
+            Some(fr) => Span::styled(
+                format!("{:.1} dBFS", fr.noise_floor),
+                Style::default().fg(theme.value),
+            ),
+            None => dash(),
         };
         let pwr_nf = Line::from(vec![
-            Span::raw(" "), lbl("PWR  "), pwr_span,
-            Span::raw("    "), lbl("NF  "), nf_span,
+            Span::raw(" "),
+            lbl("PWR  "),
+            pwr_span,
+            Span::raw("    "),
+            lbl("NF  "),
+            nf_span,
         ]);
 
         // OCC.BW / RBW row.
@@ -85,13 +123,22 @@ impl Panel for MicroSignalPanel {
         } else {
             Span::styled(fmt_bw(occ), Style::default().fg(theme.value))
         };
-        let rbw_span = match state.waterfall.last_fft.as_ref().filter(|fr| !stale && fr.enbw_hz > 0.0) {
+        let rbw_span = match state
+            .waterfall
+            .last_fft
+            .as_ref()
+            .filter(|fr| !stale && fr.enbw_hz > 0.0)
+        {
             Some(fr) => Span::styled(fmt_rbw(fr.enbw_hz), Style::default().fg(theme.value)),
-            None     => dash(),
+            None => dash(),
         };
         let occ_rbw = Line::from(vec![
-            Span::raw(" "), lbl("OCC.BW  "), occ_span,
-            Span::raw("    "), lbl("RBW  "), rbw_span,
+            Span::raw(" "),
+            lbl("OCC.BW  "),
+            occ_span,
+            Span::raw("    "),
+            lbl("RBW  "),
+            rbw_span,
         ]);
 
         let lines = vec![
@@ -130,8 +177,14 @@ mod tests {
     fn delta_span_directions() {
         let t = Theme::sdr();
         assert!(delta_span(None, &t).is_none());
-        assert_eq!(delta_span(Some(2.3), &t).unwrap().style.fg, Some(t.status_ok));
-        assert_eq!(delta_span(Some(-1.8), &t).unwrap().style.fg, Some(t.status_warn));
+        assert_eq!(
+            delta_span(Some(2.3), &t).unwrap().style.fg,
+            Some(t.status_ok)
+        );
+        assert_eq!(
+            delta_span(Some(-1.8), &t).unwrap().style.fg,
+            Some(t.status_warn)
+        );
         assert_eq!(delta_span(Some(0.1), &t).unwrap().style.fg, Some(t.stale));
     }
 }

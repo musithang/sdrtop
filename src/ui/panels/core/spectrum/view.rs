@@ -46,7 +46,9 @@ impl SpectrumView {
         zoom: usize,
     ) -> Option<Self> {
         let full_n = bins.len();
-        if full_n == 0 || sample_rate <= 0.0 { return None; }
+        if full_n == 0 || sample_rate <= 0.0 {
+            return None;
+        }
         let full_left = center_hz as f64 - sample_rate / 2.0;
         let zoom = zoom.max(1);
 
@@ -63,7 +65,9 @@ impl SpectrumView {
         }
 
         let visible_n = (full_n / zoom).max(1);
-        let lo = (full_n / 2).saturating_sub(visible_n / 2).min(full_n - visible_n);
+        let lo = (full_n / 2)
+            .saturating_sub(visible_n / 2)
+            .min(full_n - visible_n);
         let hi = lo + visible_n;
         let bin_hz = sample_rate / full_n as f64;
         let win = |v: &[f32]| Arc::new(v[lo.min(v.len())..hi.min(v.len())].to_vec());
@@ -79,15 +83,21 @@ impl SpectrumView {
     }
 
     /// Frequency of the right edge.
-    pub fn right_hz(&self) -> f64 { self.left_hz + self.bw }
+    pub fn right_hz(&self) -> f64 {
+        self.left_hz + self.bw
+    }
 
     /// Canvas width in the units the paint closure works in: `0..n-1`.
-    pub fn n(&self) -> f64 { self.n_bins as f64 }
+    pub fn n(&self) -> f64 {
+        self.n_bins as f64
+    }
 
     /// The level at `freq_hz`, or `None` when it falls outside the window.
     pub fn level_at(&self, freq_hz: u64) -> Option<f32> {
         let frac = (freq_hz as f64 - self.left_hz) / self.bw;
-        if !(0.0..=1.0).contains(&frac) { return None; }
+        if !(0.0..=1.0).contains(&frac) {
+            return None;
+        }
         let idx = (frac * (self.n_bins - 1) as f64).round() as usize;
         self.bins.get(idx.min(self.n_bins - 1)).copied()
     }
@@ -114,7 +124,10 @@ mod tests {
         assert_eq!(v.n_bins, 1024);
         assert_eq!(v.left_hz, 91_800_000.0);
         assert_eq!(v.bw, 2_000_000.0);
-        assert!(Arc::ptr_eq(&v.bins, &bins), "zoom 1 shares the frame's buffer");
+        assert!(
+            Arc::ptr_eq(&v.bins, &bins),
+            "zoom 1 shares the frame's buffer"
+        );
     }
 
     #[test]
@@ -141,8 +154,10 @@ mod tests {
     #[test]
     fn an_empty_frame_yields_no_view() {
         assert!(SpectrumView::new(&ramp(0), &ramp(0), None, 92_800_000, 2_000_000.0, 1).is_none());
-        assert!(SpectrumView::new(&ramp(64), &ramp(64), None, 92_800_000, 0.0, 1).is_none(),
-                "a zero sample rate has no span to draw");
+        assert!(
+            SpectrumView::new(&ramp(64), &ramp(64), None, 92_800_000, 0.0, 1).is_none(),
+            "a zero sample rate has no span to draw"
+        );
     }
 
     #[test]

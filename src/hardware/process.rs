@@ -35,15 +35,15 @@ pub fn process_block(
     now: Instant,
 ) {
     // Per-sample math runs entirely without the mutex.
-    let mut saturated:   u64 = 0;
-    let mut i_sum:       i64 = 0;
-    let mut q_sum:       i64 = 0;
-    let mut i_sq:        i64 = 0;
-    let mut q_sq:        i64 = 0;
-    let mut iq_cross:    i64 = 0;
-    let mut local_hist:  [u64; 32] = [0; 32];
-    let mut local_signed: [u64; 32] = [0; 32];   // signed I/Q distribution (ADC bell)
-    let mut local_peak:  u32 = 0;                 // loudest |i|,|q| this block
+    let mut saturated: u64 = 0;
+    let mut i_sum: i64 = 0;
+    let mut q_sum: i64 = 0;
+    let mut i_sq: i64 = 0;
+    let mut q_sq: i64 = 0;
+    let mut iq_cross: i64 = 0;
+    let mut local_hist: [u64; 32] = [0; 32];
+    let mut local_signed: [u64; 32] = [0; 32]; // signed I/Q distribution (ADC bell)
+    let mut local_peak: u32 = 0; // loudest |i|,|q| this block
     let mut local_const: Vec<(f32, f32)> = Vec::new();
 
     // Snapshot the live correction state once (cheap Copy). The accumulators below
@@ -57,7 +57,11 @@ pub fn process_block(
         (m.iq.cal, m.demod.enabled)
     };
     let correcting = cal.correcting();
-    let mut out_buf: Vec<u8> = if correcting { Vec::with_capacity(buf.len()) } else { Vec::new() };
+    let mut out_buf: Vec<u8> = if correcting {
+        Vec::with_capacity(buf.len())
+    } else {
+        Vec::new()
+    };
 
     for (pair_idx, chunk) in buf.chunks_exact(2).enumerate() {
         // Decode to a centered signed value in [-128, 127] and flag clipping at
@@ -78,13 +82,17 @@ pub fn process_block(
                 chunk[1] == 0x00 || chunk[1] == 0xFF,
             ),
         };
-        i_sum    += i;
-        q_sum    += q;
-        i_sq     += i * i;
-        q_sq     += q * q;
+        i_sum += i;
+        q_sum += q;
+        i_sq += i * i;
+        q_sq += q * q;
         iq_cross += i * q;
-        if i_sat { saturated += 1; }
-        if q_sat { saturated += 1; }
+        if i_sat {
+            saturated += 1;
+        }
+        if q_sat {
+            saturated += 1;
+        }
         // Chebyshev distance, 32 bins of width 4. `unsigned_abs` of the centered
         // value can reach 128 (the -128 extreme); `.min(31)` clamps that to the
         // last bin instead of indexing [32] and panicking inside the callback.
@@ -98,8 +106,11 @@ pub fn process_block(
 
         // Display path: corrected samples feed the FFT (re-encoded bytes) and the
         // constellation. When no correction is active these equal the raw samples.
-        let (ci, cq) = if correcting { cal.apply(i as f32, q as f32) }
-                       else          { (i as f32, q as f32) };
+        let (ci, cq) = if correcting {
+            cal.apply(i as f32, q as f32)
+        } else {
+            (i as f32, q as f32)
+        };
         if correcting {
             let (bi, bq) = encode_pair(ci, cq, format);
             out_buf.push(bi);
@@ -107,7 +118,8 @@ pub fn process_block(
         }
         // Constellation decimation: one normalised (I, Q) pair per CONST_DECIMATE.
         // Frozen ([F]) → stop collecting so the cloud holds its last shape.
-        if !cal.frozen && pair_idx % CONST_DECIMATE == 0 && local_const.len() < CONST_MAX_PER_BLOCK {
+        if !cal.frozen && pair_idx % CONST_DECIMATE == 0 && local_const.len() < CONST_MAX_PER_BLOCK
+        {
             local_const.push((ci / 128.0, cq / 128.0));
         }
     }
@@ -129,11 +141,11 @@ pub fn process_block(
             m.signal.total_drops_session += dropped_pairs;
         }
 
-        m.acc.saturated    += saturated;
-        m.acc.i_sum        += i_sum;
-        m.acc.q_sum        += q_sum;
-        m.acc.i_sq_sum     += i_sq as u64;
-        m.acc.q_sq_sum     += q_sq as u64;
+        m.acc.saturated += saturated;
+        m.acc.i_sum += i_sum;
+        m.acc.q_sum += q_sum;
+        m.acc.i_sq_sum += i_sq as u64;
+        m.acc.q_sq_sum += q_sq as u64;
         m.acc.iq_cross_sum += iq_cross;
         m.acc.sample_count += pairs;
 
@@ -158,7 +170,7 @@ pub fn process_block(
             let gap_us = now.duration_since(last).as_micros() as u64;
             m.acc.jitter_sum_us += gap_us;
             m.acc.jitter_sq_sum += gap_us.saturating_mul(gap_us);
-            m.acc.jitter_count  += 1;
+            m.acc.jitter_count += 1;
             // Rolling per-callback gap ring for the lab_timing strip chart. Bounded
             // FIFO; the poll task only snapshots it, so it stays continuous across
             // the 200 ms windows the sum/variance accumulators reset on.
@@ -191,7 +203,7 @@ fn encode_pair(i: f32, q: f32, format: SampleFormat) -> (u8, u8) {
     let ci = i.round().clamp(-128.0, 127.0) as i32;
     let cq = q.round().clamp(-128.0, 127.0) as i32;
     match format {
-        SampleFormat::Int8  => (ci as i8 as u8, cq as i8 as u8),
+        SampleFormat::Int8 => (ci as i8 as u8, cq as i8 as u8),
         SampleFormat::Uint8 => ((ci + 128) as u8, (cq + 128) as u8),
     }
 }
@@ -212,11 +224,11 @@ mod tests {
 
     #[test]
     fn signed_bin_maps_rails_and_centre() {
-        assert_eq!(super::signed_bin(-128), 0,  "−FS rail → bin 0");
-        assert_eq!(super::signed_bin(0),    16, "mid-scale → centre bin");
-        assert_eq!(super::signed_bin(127),  31, "+FS rail → top bin");
+        assert_eq!(super::signed_bin(-128), 0, "−FS rail → bin 0");
+        assert_eq!(super::signed_bin(0), 16, "mid-scale → centre bin");
+        assert_eq!(super::signed_bin(127), 31, "+FS rail → top bin");
         // Clamps out-of-range without panicking on the array index.
-        assert_eq!(super::signed_bin(200),  31);
+        assert_eq!(super::signed_bin(200), 31);
         assert_eq!(super::signed_bin(-200), 0);
     }
 
@@ -243,7 +255,10 @@ mod tests {
         let mid: u8 = 0x80;
         assert!(lo == 0x00 || lo == 0xFF);
         assert!(hi == 0x00 || hi == 0xFF);
-        assert!(!(mid == 0x00 || mid == 0xFF), "DC-bias midpoint must not read as clipping");
+        assert!(
+            !(mid == 0x00 || mid == 0xFF),
+            "DC-bias midpoint must not read as clipping"
+        );
     }
 
     // --- Histogram binning (shared) ------------------------------------------

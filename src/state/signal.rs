@@ -23,8 +23,8 @@ pub const SAT_CLIP_PCT: f32 = 10.0;
 pub fn acpr_offset_hz(modulation: Modulation) -> f64 {
     match modulation {
         Modulation::Nfm => 25_000.0,
-        Modulation::Am  => 9_000.0,
-        _               => 200_000.0,
+        Modulation::Am => 9_000.0,
+        _ => 200_000.0,
     }
 }
 
@@ -50,15 +50,17 @@ impl Modulation {
     /// Short badge label for the banner / headline: `WFM` / `NFM` / `AM` / `—`.
     pub fn label(self) -> &'static str {
         match self {
-            Modulation::Wfm     => "WFM",
-            Modulation::Nfm     => "NFM",
-            Modulation::Am      => "AM",
+            Modulation::Wfm => "WFM",
+            Modulation::Nfm => "NFM",
+            Modulation::Am => "AM",
             Modulation::Unknown => "\u{2014}",
         }
     }
 
     /// Whether a modulation was confidently classified (not the no-signal fallback).
-    pub fn is_known(self) -> bool { !matches!(self, Modulation::Unknown) }
+    pub fn is_known(self) -> bool {
+        !matches!(self, Modulation::Unknown)
+    }
 }
 
 /// Minimum peak-to-noise (dB) for [`classify`] to commit to a modulation. Below
@@ -98,19 +100,19 @@ pub fn classify(snr_db: f32, occupied_bw_hz: u64) -> Modulation {
     match occupied_bw_hz {
         bw if bw >= WFM_MIN_BW_HZ => Modulation::Wfm,
         bw if bw >= NFM_MIN_BW_HZ => Modulation::Nfm,
-        _                         => Modulation::Am,
+        _ => Modulation::Am,
     }
 }
 
 #[derive(Clone)]
 pub struct SignalState {
-    pub drops_per_sec:       u64,
+    pub drops_per_sec: u64,
     pub total_drops_session: u64,
-    pub drop_history:        VecDeque<u64>,
-    pub adc_saturation_pct:  f32,
+    pub drop_history: VecDeque<u64>,
+    pub adc_saturation_pct: f32,
     pub adc_saturation_peak: f32,
-    pub saturation_history:  VecDeque<f32>,
-    pub peak_to_nf_db:       f32,
+    pub saturation_history: VecDeque<f32>,
+    pub peak_to_nf_db: f32,
     /// Power integrated over the occupied channel at centre, dBFS.
     ///
     /// The *channel*, not the capture: summing every bin made this a function of the
@@ -120,55 +122,55 @@ pub struct SignalState {
     ///
     /// Distinct from [`Self::adc_rms_dbfs`], which is the full-bandwidth figure and
     /// belongs to ADC loading rather than to the signal.
-    pub channel_power_dbfs:  f32,
-    pub occupied_bw_hz:      u64,
+    pub channel_power_dbfs: f32,
+    pub occupied_bw_hz: u64,
     /// Adjacent-channel power ratio, dB relative to the in-channel power, at
     /// ±[`Self::acpr_offset_hz`]. `f32::NEG_INFINITY` when there is nothing to
     /// compare against yet (no occupied bandwidth), a band falls outside the
     /// captured span, or the bands would overlap the channel — never a guessed
     /// number. The two are written together: both finite, or neither.
-    pub acpr_lower_db:       f32,
-    pub acpr_upper_db:       f32,
+    pub acpr_lower_db: f32,
+    pub acpr_upper_db: f32,
     /// Absolute level (dBFS) of the louder — worse — of the two adjacent bands.
     /// Paired with `acpr_lower_db` / `acpr_upper_db`; same undefined sentinel,
     /// which also covers a genuinely silent adjacent band.
-    pub adj_carrier_dbfs:    f32,
+    pub adj_carrier_dbfs: f32,
     /// The offset the ratio above was actually measured at, from
     /// [`acpr_offset_hz`]. Recorded rather than re-derived so the panel's labels
     /// and the adjacent-band frequency it prints can never disagree with the
     /// measurement — the modulation could change between the two reads otherwise.
-    pub acpr_offset_hz:      f64,
-    pub usb_errors_session:   u64,
+    pub acpr_offset_hz: f64,
+    pub usb_errors_session: u64,
     pub usb_errors_last_poll: u64,
-    pub usb_error_history:    std::collections::VecDeque<u64>,
+    pub usb_error_history: std::collections::VecDeque<u64>,
     /// Recent SNR (peak/noise-floor) samples, pushed by the rx poll task roughly
     /// every 500 ms while streaming. Powers the micro_signal trend arrow.
-    pub snr_history:          VecDeque<f32>,
+    pub snr_history: VecDeque<f32>,
     /// Recent channel-power (dBFS) samples — pushed alongside `snr_history` at the
     /// same ~500 ms cadence. Powers the command rail's PWR sparkline + trend.
-    pub pwr_history:          VecDeque<f32>,
+    pub pwr_history: VecDeque<f32>,
     /// Recent noise-floor (dBFS) samples — pushed alongside `snr_history`. Powers
     /// the command rail's NF sparkline + trend.
-    pub nf_history:           VecDeque<f32>,
+    pub nf_history: VecDeque<f32>,
     /// Recent ADC-saturation (%) samples — pushed alongside `snr_history` at the
     /// same ~500 ms / [`crate::state::SNR_HISTORY_LEN`] depth so the command rail's
     /// SAT trace fills like the other three. Distinct from [`Self::saturation_history`],
     /// which feeds the health panels' mini-graph at the 200 ms / 64-deep cadence.
-    pub sat_history:          VecDeque<f32>,
+    pub sat_history: VecDeque<f32>,
     /// Unix-epoch second of the most recent ADC clip (saturation ≥ [`SAT_CLIP_PCT`]),
     /// for the rail's fading "last clip Xs" alert-memory. `None` = none this session.
-    pub last_clip_at:         Option<u64>,
+    pub last_clip_at: Option<u64>,
     /// Rough modulation estimate for the signal at centre, refreshed each display
     /// frame by the FFT worker via [`classify`]. Drives the lab_signal headline /
     /// banner and, later, the demod panel's mode-adaptive view.
-    pub modulation:           Modulation,
+    pub modulation: Modulation,
     /// ADC loading for the Lab RF bench, refreshed each ~200 ms window: the loudest
     /// sample (`adc_peak_dbfs`), the full-bandwidth RMS level (`adc_rms_dbfs`, total
     /// I/Q power vs full scale — distinct from the in-channel `channel_power_dbfs`),
     /// and the clipped-sample count in the last window (`adc_clip_events`).
-    pub adc_peak_dbfs:        f32,
-    pub adc_rms_dbfs:         f32,
-    pub adc_clip_events:      u64,
+    pub adc_peak_dbfs: f32,
+    pub adc_rms_dbfs: f32,
+    pub adc_clip_events: u64,
 }
 
 impl Default for SignalState {
@@ -180,8 +182,11 @@ impl Default for SignalState {
     fn default() -> Self {
         let hist = || VecDeque::with_capacity(crate::state::SNR_HISTORY_LEN);
         Self {
-            drops_per_sec: 0, total_drops_session: 0, drop_history: VecDeque::new(),
-            adc_saturation_pct: 0.0, adc_saturation_peak: 0.0,
+            drops_per_sec: 0,
+            total_drops_session: 0,
+            drop_history: VecDeque::new(),
+            adc_saturation_pct: 0.0,
+            adc_saturation_peak: 0.0,
             saturation_history: VecDeque::new(),
             peak_to_nf_db: 0.0,
             channel_power_dbfs: f32::NEG_INFINITY,
@@ -190,12 +195,18 @@ impl Default for SignalState {
             acpr_upper_db: f32::NEG_INFINITY,
             adj_carrier_dbfs: f32::NEG_INFINITY,
             acpr_offset_hz: acpr_offset_hz(Modulation::Unknown),
-            usb_errors_session: 0, usb_errors_last_poll: 0,
+            usb_errors_session: 0,
+            usb_errors_last_poll: 0,
             usb_error_history: VecDeque::new(),
-            snr_history: hist(), pwr_history: hist(), nf_history: hist(), sat_history: hist(),
+            snr_history: hist(),
+            pwr_history: hist(),
+            nf_history: hist(),
+            sat_history: hist(),
             last_clip_at: None,
             modulation: Modulation::Unknown,
-            adc_peak_dbfs: 0.0, adc_rms_dbfs: 0.0, adc_clip_events: 0,
+            adc_peak_dbfs: 0.0,
+            adc_rms_dbfs: 0.0,
+            adc_clip_events: 0,
         }
     }
 }
@@ -206,9 +217,11 @@ impl SignalState {
     /// signal is strengthening. `None` until there are enough samples.
     pub fn snr_delta(&self) -> Option<f32> {
         let n = self.snr_history.len();
-        if n < 4 { return None; }
+        if n < 4 {
+            return None;
+        }
         let half = n / 2;
-        let older:  f32 = self.snr_history.iter().take(half).sum::<f32>() / half as f32;
+        let older: f32 = self.snr_history.iter().take(half).sum::<f32>() / half as f32;
         let recent: f32 = self.snr_history.iter().skip(n - half).sum::<f32>() / half as f32;
         Some(recent - older)
     }
@@ -220,18 +233,31 @@ mod tests {
 
     fn with_history(samples: &[f32]) -> SignalState {
         let mut s = SignalState {
-            drops_per_sec: 0, total_drops_session: 0, drop_history: VecDeque::new(),
-            adc_saturation_pct: 0.0, adc_saturation_peak: 0.0, saturation_history: VecDeque::new(),
-            peak_to_nf_db: 0.0, channel_power_dbfs: 0.0, occupied_bw_hz: 0,
-            acpr_lower_db: f32::NEG_INFINITY, acpr_upper_db: f32::NEG_INFINITY,
+            drops_per_sec: 0,
+            total_drops_session: 0,
+            drop_history: VecDeque::new(),
+            adc_saturation_pct: 0.0,
+            adc_saturation_peak: 0.0,
+            saturation_history: VecDeque::new(),
+            peak_to_nf_db: 0.0,
+            channel_power_dbfs: 0.0,
+            occupied_bw_hz: 0,
+            acpr_lower_db: f32::NEG_INFINITY,
+            acpr_upper_db: f32::NEG_INFINITY,
             adj_carrier_dbfs: f32::NEG_INFINITY,
             acpr_offset_hz: acpr_offset_hz(Modulation::Unknown),
-            usb_errors_session: 0, usb_errors_last_poll: 0, usb_error_history: VecDeque::new(),
-            snr_history: VecDeque::new(), pwr_history: VecDeque::new(), nf_history: VecDeque::new(),
+            usb_errors_session: 0,
+            usb_errors_last_poll: 0,
+            usb_error_history: VecDeque::new(),
+            snr_history: VecDeque::new(),
+            pwr_history: VecDeque::new(),
+            nf_history: VecDeque::new(),
             sat_history: VecDeque::new(),
             last_clip_at: None,
             modulation: Modulation::Unknown,
-            adc_peak_dbfs: 0.0, adc_rms_dbfs: 0.0, adc_clip_events: 0,
+            adc_peak_dbfs: 0.0,
+            adc_rms_dbfs: 0.0,
+            adc_clip_events: 0,
         };
         s.snr_history.extend(samples.iter().copied());
         s
@@ -241,16 +267,16 @@ mod tests {
     fn classify_gates_on_signal_presence() {
         // Weak carrier or no occupancy → no guess.
         assert_eq!(classify(5.0, 180_000), Modulation::Unknown);
-        assert_eq!(classify(40.0, 0),      Modulation::Unknown);
+        assert_eq!(classify(40.0, 0), Modulation::Unknown);
     }
 
     #[test]
     fn classify_bands_by_occupied_bandwidth() {
         assert_eq!(classify(40.0, 180_000), Modulation::Wfm);
         assert_eq!(classify(40.0, WFM_MIN_BW_HZ), Modulation::Wfm); // wide boundary
-        assert_eq!(classify(40.0, 15_000),  Modulation::Nfm);
+        assert_eq!(classify(40.0, 15_000), Modulation::Nfm);
         assert_eq!(classify(40.0, NFM_MIN_BW_HZ), Modulation::Nfm); // narrow-FM boundary
-        assert_eq!(classify(40.0, 8_000),   Modulation::Am);
+        assert_eq!(classify(40.0, 8_000), Modulation::Am);
     }
 
     #[test]
@@ -259,9 +285,12 @@ mod tests {
         // measure a band eight channels away.
         assert_eq!(acpr_offset_hz(Modulation::Wfm), 200_000.0);
         assert_eq!(acpr_offset_hz(Modulation::Nfm), 25_000.0);
-        assert_eq!(acpr_offset_hz(Modulation::Am),   9_000.0);
+        assert_eq!(acpr_offset_hz(Modulation::Am), 9_000.0);
         // An unclassified carrier rests in the broadcast shape, like the panel does.
-        assert_eq!(acpr_offset_hz(Modulation::Unknown), acpr_offset_hz(Modulation::Wfm));
+        assert_eq!(
+            acpr_offset_hz(Modulation::Unknown),
+            acpr_offset_hz(Modulation::Wfm)
+        );
     }
 
     #[test]
@@ -270,11 +299,16 @@ mod tests {
         // the channel, and each band is as wide as the occupied bandwidth. So every
         // offset has to exceed what its own modulation typically occupies, or the
         // overlap guard in `acpr_bands` would suppress the reading for good.
-        for (m, typical_bw) in [(Modulation::Wfm, 120_000.0),
-                                (Modulation::Nfm, 15_000.0),
-                                (Modulation::Am,   8_000.0)] {
-            assert!(acpr_offset_hz(m) > typical_bw,
-                    "{m:?}: offset {} does not clear {typical_bw}", acpr_offset_hz(m));
+        for (m, typical_bw) in [
+            (Modulation::Wfm, 120_000.0),
+            (Modulation::Nfm, 15_000.0),
+            (Modulation::Am, 8_000.0),
+        ] {
+            assert!(
+                acpr_offset_hz(m) > typical_bw,
+                "{m:?}: offset {} does not clear {typical_bw}",
+                acpr_offset_hz(m)
+            );
         }
     }
 

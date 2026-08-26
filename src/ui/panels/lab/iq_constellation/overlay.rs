@@ -20,7 +20,8 @@ use super::fit::CloudStats;
 
 /// Bottom caption — echoes the image scope's own framing, so the two Lab IQ
 /// panels read as one bench.
-const CAPTION: &str = "image mirrors the carrier about the LO \u{00b7} DC offset \u{2192} centre spike";
+const CAPTION: &str =
+    "image mirrors the carrier about the LO \u{00b7} DC offset \u{2192} centre spike";
 
 pub(super) fn draw(f: &mut Frame, inner: Rect, stats: &CloudStats, theme: &crate::Theme) {
     stats_box(f, inner, stats, theme);
@@ -29,10 +30,12 @@ pub(super) fn draw(f: &mut Frame, inner: Rect, stats: &CloudStats, theme: &crate
 
 /// EVM / MER / σ / n / fit, top-right.
 fn stats_box(f: &mut Frame, inner: Rect, stats: &CloudStats, theme: &crate::Theme) {
-    if inner.width < 26 || inner.height < 8 { return; }
+    if inner.width < 26 || inner.height < 8 {
+        return;
+    }
 
-    let val   = theme.value_hi;
-    let bold  = Style::default().fg(val).add_modifier(Modifier::BOLD);
+    let val = theme.value_hi;
+    let bold = Style::default().fg(val).add_modifier(Modifier::BOLD);
     let dimst = Style::default().fg(theme.border_dim);
     let labst = Style::default().fg(theme.label);
 
@@ -70,13 +73,20 @@ fn stats_box(f: &mut Frame, inner: Rect, stats: &CloudStats, theme: &crate::Them
     // a narrower box right-clips the leading "fit" off that line.
     let w = 28u16.min(inner.width);
     let h = (sl.len() as u16).min(inner.height);
-    let rect = Rect { x: inner.x + inner.width - w, y: inner.y, width: w, height: h };
+    let rect = Rect {
+        x: inner.x + inner.width - w,
+        y: inner.y,
+        width: w,
+        height: h,
+    };
     f.render_widget(Paragraph::new(sl).alignment(Alignment::Right), rect);
 }
 
 /// The legend, the centroid and the caption — the bottom two or three rows.
 fn foot(f: &mut Frame, inner: Rect, stats: &CloudStats, theme: &crate::Theme) {
-    if inner.width < 24 || inner.height < 6 { return; }
+    if inner.width < 24 || inner.height < 6 {
+        return;
+    }
 
     let dimst = Style::default().fg(theme.border_dim);
     let labst = Style::default().fg(theme.label);
@@ -85,7 +95,11 @@ fn foot(f: &mut Frame, inner: Rect, stats: &CloudStats, theme: &crate::Theme) {
 
     // Caption is decorative — only draw it when the whole line fits, otherwise
     // a centred truncation chops both ends into noise.
-    let cap_h: u16 = if inner.height >= 7 && inner.width as usize >= CAPTION.chars().count() { 1 } else { 0 };
+    let cap_h: u16 = if inner.height >= 7 && inner.width as usize >= CAPTION.chars().count() {
+        1
+    } else {
+        0
+    };
     let row_y = inner.y + inner.height - 2 - cap_h;
 
     // Centroid carries live numbers, so it gets the width it needs first; the
@@ -98,13 +112,16 @@ fn foot(f: &mut Frame, inner: Rect, stats: &CloudStats, theme: &crate::Theme) {
             Span::styled("centroid", dimst),
         ]),
         Line::from(Span::styled(
-            format!("I {:+.4} \u{b7} Q {:+.4}", stats.cx, stats.cy), labst,
+            format!("I {:+.4} \u{b7} Q {:+.4}", stats.cx, stats.cy),
+            labst,
         )),
     ];
     let cw = 22u16.min(inner.width);
     let cen_rect = Rect {
-        x: inner.x + inner.width - cw, y: row_y,
-        width: cw, height: 2,
+        x: inner.x + inner.width - cw,
+        y: row_y,
+        width: cw,
+        height: 2,
     };
     f.render_widget(Paragraph::new(cen).alignment(Alignment::Right), cen_rect);
 
@@ -124,7 +141,12 @@ fn foot(f: &mut Frame, inner: Rect, stats: &CloudStats, theme: &crate::Theme) {
                 Span::styled("centroid", dimst),
             ]),
         ];
-        let leg_rect = Rect { x: inner.x, y: row_y, width: leg_w, height: 2 };
+        let leg_rect = Rect {
+            x: inner.x,
+            y: row_y,
+            width: leg_w,
+            height: 2,
+        };
         f.render_widget(Paragraph::new(leg), leg_rect);
     }
 
@@ -132,8 +154,10 @@ fn foot(f: &mut Frame, inner: Rect, stats: &CloudStats, theme: &crate::Theme) {
     if cap_h == 1 {
         let cap = Line::from(Span::styled(CAPTION, dimst));
         let rect = Rect {
-            x: inner.x, y: inner.y + inner.height - 1,
-            width: inner.width, height: 1,
+            x: inner.x,
+            y: inner.y + inner.height - 1,
+            width: inner.width,
+            height: 1,
         };
         f.render_widget(Paragraph::new(cap).alignment(Alignment::Center), rect);
     }

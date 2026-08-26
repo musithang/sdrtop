@@ -42,13 +42,24 @@ const LABEL_W: usize = 3;
 const VALW: usize = 10;
 
 impl Panel for RfChainPanel {
-    fn name(&self) -> &'static str { "rf_chain" }
-    fn min_size(&self) -> (u16, u16) { (32, 16) }
+    fn name(&self) -> &'static str {
+        "rf_chain"
+    }
+    fn min_size(&self) -> (u16, u16) {
+        (32, 16)
+    }
     // `d` (Diagnostics) focuses the RF bench for its own actions; `r`/`f` are taken
     // globally (reset / frequency), so the panel takes a free mnemonic.
-    fn focus_key(&self) -> Option<char> { Some('d') }
+    fn focus_key(&self) -> Option<char> {
+        Some('d')
+    }
     fn focus_bindings(&self) -> &'static [(&'static str, &'static str)] {
-        &[("\u{2191}\u{2193}", "LNA"), ("[ ]", "VGA"), ("A", "auto-gain"), ("\u{23B5}", "freeze")]
+        &[
+            ("\u{2191}\u{2193}", "LNA"),
+            ("[ ]", "VGA"),
+            ("A", "auto-gain"),
+            ("\u{23B5}", "freeze"),
+        ]
     }
 
     fn chrome(&self, state: &SdrMetrics) -> PanelChrome {
@@ -57,13 +68,24 @@ impl Panel for RfChainPanel {
             .tag_if(state.lab.rf_freeze.is_some(), Tag::Frozen)
     }
 
-    fn render(&self, f: &mut Frame, inner: Rect, state: &SdrMetrics, theme: &crate::Theme, _focused: bool) {
+    fn render(
+        &self,
+        f: &mut Frame,
+        inner: Rect,
+        state: &SdrMetrics,
+        theme: &crate::Theme,
+        _focused: bool,
+    ) {
         let iw = inner.width as usize;
 
         if !state.radio.hw_streaming {
             f.render_widget(
-                Paragraph::new(Span::styled("\u{2014}\u{2014}\u{2014}",
-                                            Style::default().fg(theme.label))), inner);
+                Paragraph::new(Span::styled(
+                    "\u{2014}\u{2014}\u{2014}",
+                    Style::default().fg(theme.label),
+                )),
+                inner,
+            );
             return;
         }
         // Single-tuner (RTL-SDR): the cascade bench assumes the HackRF chain.
@@ -77,7 +99,9 @@ impl Panel for RfChainPanel {
         let amp = fz.map(|f| f.amp_enabled).unwrap_or(state.radio.amp_enabled);
         let lna = fz.map(|f| f.lna_gain).unwrap_or(state.radio.lna_gain);
         let vga = fz.map(|f| f.vga_gain).unwrap_or(state.radio.vga_gain);
-        let adc_peak = fz.map(|f| f.peak_dbfs).unwrap_or(state.signal.adc_peak_dbfs) as f64;
+        let adc_peak = fz
+            .map(|f| f.peak_dbfs)
+            .unwrap_or(state.signal.adc_peak_dbfs) as f64;
         let snr = fz.map(|f| f.snr_db).unwrap_or(state.signal.peak_to_nf_db) as f64;
         let adc_rms = fz.map(|f| f.rms_dbfs).unwrap_or(state.signal.adc_rms_dbfs);
         let stages: Vec<Stage> = cascade(amp, lna, vga);
@@ -96,10 +120,20 @@ impl Panel for RfChainPanel {
         lines.push(Line::raw(""));
         noise::sensitivity(&mut lines, state, nf, iw, theme);
         lines.push(Line::raw(""));
-        verdict::draw(&mut lines, &verdict::Verdict {
-            word: verdict_word, sev, sev_col, adc_peak, snr, adc_rms, amp,
-            tracking: state.lab.rf_autotrack,
-        }, theme);
+        verdict::draw(
+            &mut lines,
+            &verdict::Verdict {
+                word: verdict_word,
+                sev,
+                sev_col,
+                adc_peak,
+                snr,
+                adc_rms,
+                amp,
+                tracking: state.lab.rf_autotrack,
+            },
+            theme,
+        );
 
         // Self-adjusting density: collapse spacers when short, grow them to fill when
         // tall (chrome::fit_spacers), so the pane breathes the same at every height —
@@ -113,16 +147,26 @@ impl Panel for RfChainPanel {
 /// bench does not apply to a single-tuner front end.
 fn single_tuner(state: &SdrMetrics, theme: &crate::Theme) -> Vec<Line<'static>> {
     vec![
-        Line::from(Span::styled(" TUNER gain ",
-                   Style::default().fg(theme.label).add_modifier(Modifier::BOLD))),
+        Line::from(Span::styled(
+            " TUNER gain ",
+            Style::default()
+                .fg(theme.label)
+                .add_modifier(Modifier::BOLD),
+        )),
         Line::from(vec![
             Span::raw(" "),
-            Span::styled(format!("{} dB", state.radio.lna_gain),
-                         Style::default().fg(theme.value_hi).add_modifier(Modifier::BOLD)),
+            Span::styled(
+                format!("{} dB", state.radio.lna_gain),
+                Style::default()
+                    .fg(theme.value_hi)
+                    .add_modifier(Modifier::BOLD),
+            ),
         ]),
         Line::raw(""),
-        Line::from(Span::styled(" single-tuner \u{2014} cascade N/A",
-                   Style::default().fg(theme.stale))),
+        Line::from(Span::styled(
+            " single-tuner \u{2014} cascade N/A",
+            Style::default().fg(theme.stale),
+        )),
     ]
 }
 
