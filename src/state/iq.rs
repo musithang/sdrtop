@@ -79,20 +79,24 @@ mod cal_tests {
 
     #[test]
     fn dc_block_subtracts_dc_only() {
-        let mut c = IqCalState::default();
-        c.dc_block_on = true;
-        c.dc_i_raw = 5.0;
-        c.dc_q_raw = -3.0;
+        let c = IqCalState {
+            dc_block_on: true,
+            dc_i_raw: 5.0,
+            dc_q_raw: -3.0,
+            ..IqCalState::default()
+        };
         assert!(c.correcting());
         assert_eq!(c.apply(10.0, 0.0), (5.0, 3.0)); // i-5, q-(-3)
     }
 
     #[test]
     fn cal_applied_runs_q_matrix_after_dc() {
-        let mut c = IqCalState::default();
-        c.cal_applied = true;
-        c.c_qi = -0.5;
-        c.c_qq = 2.0;
+        let c = IqCalState {
+            cal_applied: true,
+            c_qi: -0.5,
+            c_qq: 2.0,
+            ..IqCalState::default()
+        };
         // I passes through; Q_out = c_qi·I + c_qq·Q (DC is zero here).
         assert_eq!(c.apply(4.0, 1.0), (4.0, -0.5 * 4.0 + 2.0 * 1.0));
     }

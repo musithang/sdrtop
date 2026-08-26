@@ -75,8 +75,8 @@ impl GainModel {
     pub fn clamp_gains(&self, lna: u32, vga: u32) -> (u32, u32) {
         match self {
             GainModel::HackRf => (
-                (lna.min(40) + 4) / 8 * 8, // nearest 8 dB step within 0..=40
-                (vga.min(62) + 1) / 2 * 2, // nearest 2 dB step within 0..=62
+                (lna.min(40) + 4) / 8 * 8,   // nearest 8 dB step within 0..=40
+                vga.min(62).div_ceil(2) * 2, // nearest 2 dB step within 0..=62
             ),
             GainModel::RtlSingle { gain_steps_db } => {
                 let snapped = gain_steps_db

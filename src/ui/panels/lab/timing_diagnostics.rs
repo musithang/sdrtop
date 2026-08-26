@@ -58,11 +58,7 @@ fn budget_bar(value: u64, budget: u64, bar_w: usize, theme: &crate::Theme) -> Ve
 /// Two-line plain-language verdict copy, keyed off the 4-level severity, with live
 /// numbers folded in (worst deviation and its share of the budget).
 fn verdict_copy(severity: u8, peak_us: u64, budget_us: u64) -> [String; 2] {
-    let pct = if budget_us > 0 {
-        peak_us * 100 / budget_us
-    } else {
-        0
-    };
+    let pct = (peak_us * 100).checked_div(budget_us).unwrap_or(0);
     match severity {
         0 => [
             "Every callback met its deadline.".into(),

@@ -226,12 +226,9 @@ impl Panel for IqHistogramPanel {
 
         // Numeric breakdown: Low / Mid / Clip percentages
         let lbl = Style::default().fg(theme.label);
+        let pct = |n: u64| (n * 100).checked_div(total).unwrap_or(0);
         let (low_pct, mid_pct, high_pct) = if total > 0 {
-            (
-                low_count * 100 / total,
-                mid_count * 100 / total,
-                high_count * 100 / total,
-            )
+            (pct(low_count), pct(mid_count), pct(high_count))
         } else {
             (0, 0, 0)
         };

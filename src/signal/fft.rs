@@ -392,7 +392,12 @@ impl FftWorker {
                 // byte→sample decode once per frame, not per sample.
                 match self.format {
                     SampleFormat::Int8 => {
-                        for (i, (pair, &w)) in frame.chunks_exact(2).zip(window.iter()).enumerate()
+                        for (i, (pair, &w)) in frame
+                            .as_chunks::<2>()
+                            .0
+                            .iter()
+                            .zip(window.iter())
+                            .enumerate()
                         {
                             samples[i] = Complex {
                                 re: pair[0] as i8 as f32 / 128.0 * w,
@@ -401,7 +406,12 @@ impl FftWorker {
                         }
                     }
                     SampleFormat::Uint8 => {
-                        for (i, (pair, &w)) in frame.chunks_exact(2).zip(window.iter()).enumerate()
+                        for (i, (pair, &w)) in frame
+                            .as_chunks::<2>()
+                            .0
+                            .iter()
+                            .zip(window.iter())
+                            .enumerate()
                         {
                             samples[i] = Complex {
                                 re: (pair[0] as f32 - 127.5) / 127.5 * w,
@@ -1136,15 +1146,9 @@ mod tests {
         let sample_rate = 1_000_000.0;
         let mut linear = vec![1e-8f32; n];
         let center = n / 2;
-        for i in center - 5..center + 5 {
-            linear[i] = 1.0;
-        } // in-channel: sum = 10.0
-        for i in center - 25..center - 15 {
-            linear[i] = 1e-4;
-        } // lower adjacent: sum = 1e-3
-        for i in center + 15..center + 25 {
-            linear[i] = 1e-4;
-        } // upper adjacent: sum = 1e-3
+        linear[center - 5..center + 5].fill(1.0); // in-channel: sum = 10.0
+        linear[center - 25..center - 15].fill(1e-4); // lower adjacent: sum = 1e-3
+        linear[center + 15..center + 25].fill(1e-4); // upper adjacent: sum = 1e-3
 
         let (lo_db, up_db, adj_dbfs) =
             acpr_bands(&linear, sample_rate, 100_000, 200_000.0).unwrap();
@@ -1210,9 +1214,7 @@ mod tests {
         let n = 100;
         let mut linear = vec![0.0f32; n];
         let center = n / 2;
-        for i in center - 5..center + 5 {
-            linear[i] = 1.0;
-        }
+        linear[center - 5..center + 5].fill(1.0);
         let (lo_db, up_db, _) = acpr_bands(&linear, 1_000_000.0, 100_000, 200_000.0).unwrap();
         assert_eq!(lo_db, ACPR_MEASURE_FLOOR_DB);
         assert_eq!(up_db, ACPR_MEASURE_FLOOR_DB);

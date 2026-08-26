@@ -438,7 +438,7 @@ mod tests {
         // the late count / percentiles only consider the last STRIP_WINDOW of them.
         let exp = 13_107u64;
         let mut gaps: Vec<u64> = vec![exp + 5_000; 40]; // 40 old, very late
-        gaps.extend(std::iter::repeat(exp).take(STRIP_WINDOW)); // STRIP_WINDOW on time
+        gaps.extend(std::iter::repeat_n(exp, STRIP_WINDOW)); // STRIP_WINDOW on time
         let t = TimingState::compute(
             exp,
             10_000_000.0,

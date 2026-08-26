@@ -63,25 +63,9 @@ pub fn process_block(
         Vec::new()
     };
 
-    for (pair_idx, chunk) in buf.chunks_exact(2).enumerate() {
-        // Decode to a centered signed value in [-128, 127] and flag clipping at
-        // the format's extremes. Centering Uint8 by 128 (rather than the true
-        // 127.5 DC bias) keeps the downstream DC-offset `/128.0` normalization
-        // valid — the half-LSB difference is negligible for diagnostics.
-        let (i, q, i_sat, q_sat) = match format {
-            SampleFormat::Int8 => (
-                chunk[0] as i8 as i64,
-                chunk[1] as i8 as i64,
-                chunk[0] == 0x80 || chunk[0] == 0x7F,
-                chunk[1] == 0x80 || chunk[1] == 0x7F,
-            ),
-            SampleFormat::Uint8 => (
-                chunk[0] as i64 - 128,
-                chunk[1] as i64 - 128,
-                chunk[0] == 0x00 || chunk[0] == 0xFF,
-                chunk[1] == 0x00 || chunk[1] == 0xFF,
-            ),
-        };
+    for (pair_idx, chunk) in buf.as_chunks::<2>().0.iter().enumerate() {
+        let (i, i_sat) = decode(format, chunk[0]);
+        let (q, q_sat) = decode(format, chunk[1]);
         i_sum += i;
         q_sum += q;
         i_sq += i * i;
@@ -208,18 +192,45 @@ fn encode_pair(i: f32, q: f32, format: SampleFormat) -> (u8, u8) {
     }
 }
 
+/// Decode one raw byte into a centered signed value in [-128, 127], and say
+/// whether it sits on a rail.
+///
+/// The two formats differ only here: HackRF sends `Int8`, RTL-SDR `Uint8` biased
+/// at 127.5. Centering Uint8 by 128 rather than the true bias keeps the
+/// downstream DC-offset `/128.0` normalization valid, and the half-LSB
+/// difference is negligible for diagnostics.
+///
+/// `#[inline]` because this runs twice per sample in the RX callback.
+#[inline]
+fn decode(format: SampleFormat, b: u8) -> (i64, bool) {
+    match format {
+        SampleFormat::Int8 => (b as i8 as i64, b == 0x80 || b == 0x7F),
+        SampleFormat::Uint8 => (b as i64 - 128, b == 0x00 || b == 0xFF),
+    }
+}
+
 #[cfg(test)]
 mod tests {
+    use super::SampleFormat;
+
     // These exercise the decode/saturation/histogram arithmetic that
     // `process_block` performs inline; constructing a full RxContext is left to
     // the hardware-in-the-loop verification.
 
     // --- Int8 (HackRF) decode -------------------------------------------------
     #[test]
-    fn int8_saturation_bytes() {
-        assert!(0x7Fu8 == 0x7F || 0x7Fu8 == 0x80);
-        let normal: u8 = 0x40;
-        assert!(normal != 0x7F && normal != 0x80);
+    fn int8_flags_both_rails_and_nothing_between() {
+        // This used to assert `0x7F == 0x7F || 0x7F == 0x80`, which is true of
+        // any program. It now asks `decode` itself.
+        for b in [0x7Fu8, 0x80] {
+            assert!(super::decode(SampleFormat::Int8, b).1, "{b:#04x} is a rail");
+        }
+        for b in [0x00u8, 0x40, 0x7E, 0x81, 0xC0] {
+            assert!(
+                !super::decode(SampleFormat::Int8, b).1,
+                "{b:#04x} is not a rail"
+            );
+        }
     }
 
     #[test]
@@ -234,30 +245,33 @@ mod tests {
 
     #[test]
     fn int8_centered_value() {
-        assert_eq!(0x7Fu8 as i8 as i64, 127);
-        assert_eq!(0x80u8 as i8 as i64, -128);
-        assert_eq!(0x00u8 as i8 as i64, 0);
+        let v = |b| super::decode(SampleFormat::Int8, b).0;
+        assert_eq!(v(0x7F), 127);
+        assert_eq!(v(0x80), -128);
+        assert_eq!(v(0x00), 0);
     }
 
     // --- Uint8 (RTL-SDR) decode ----------------------------------------------
     #[test]
     fn uint8_centered_value() {
         // 0x00 → -128, 0x80 → 0, 0xFF → +127
-        assert_eq!(0x00u8 as i64 - 128, -128);
-        assert_eq!(0x80u8 as i64 - 128, 0);
-        assert_eq!(0xFFu8 as i64 - 128, 127);
+        let v = |b| super::decode(SampleFormat::Uint8, b).0;
+        assert_eq!(v(0x00), -128);
+        assert_eq!(v(0x80), 0);
+        assert_eq!(v(0xFF), 127);
     }
 
     #[test]
-    fn uint8_saturation_at_unsigned_extremes() {
-        let lo: u8 = 0x00;
-        let hi: u8 = 0xFF;
-        let mid: u8 = 0x80;
-        assert!(lo == 0x00 || lo == 0xFF);
-        assert!(hi == 0x00 || hi == 0xFF);
+    fn uint8_flags_the_unsigned_extremes() {
+        for b in [0x00u8, 0xFF] {
+            assert!(
+                super::decode(SampleFormat::Uint8, b).1,
+                "{b:#04x} is a rail"
+            );
+        }
         assert!(
-            !(mid == 0x00 || mid == 0xFF),
-            "DC-bias midpoint must not read as clipping"
+            !super::decode(SampleFormat::Uint8, 0x80).1,
+            "the DC-bias midpoint must not read as clipping"
         );
     }
 

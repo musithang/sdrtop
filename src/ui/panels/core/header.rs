@@ -194,7 +194,7 @@ fn top_band_line(state: &SdrMetrics, theme: &crate::Theme, inner_width: u16) -> 
                     .fw_version
                     .chars()
                     .nth(1)
-                    .map_or(false, |c| c.is_ascii_digit()));
+                    .is_some_and(|c| c.is_ascii_digit()));
         let label = if is_mayhem {
             "mayhem fw "
         } else {

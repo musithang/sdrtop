@@ -160,9 +160,8 @@ impl Panel for LevelDiagramPanel {
             .map(|c| dbm_row(lerp_at(&noise, node_at(c)), chart_h))
             .collect();
 
-        for row in 0..chart_h {
+        for (row, g) in row_label.iter().enumerate() {
             // y gutter
-            let g = &row_label[row];
             let mut spans: Vec<Span> = Vec::new();
             if g.is_empty() {
                 spans.push(Span::styled(

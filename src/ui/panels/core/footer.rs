@@ -292,7 +292,7 @@ pub fn compute_footer_height(available_width: u16, state: &SdrMetrics) -> u16 {
             inner_w,
         )
     };
-    (n as u16 + 2).min(MAX_CONTENT_LINES + 2).max(3)
+    (n as u16 + 2).clamp(3, MAX_CONTENT_LINES + 2)
 }
 
 pub struct FooterPanel;

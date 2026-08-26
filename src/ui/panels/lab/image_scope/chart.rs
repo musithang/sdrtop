@@ -155,9 +155,8 @@ pub(super) fn draw(
     }
 
     // Bar rows, top → bottom.
-    for row in 0..chart_h {
+    for (row, g) in row_label.iter().enumerate() {
         let mut spans: Vec<Span> = Vec::new();
-        let g = &row_label[row];
         if g.is_empty() {
             spans.push(Span::styled(
                 format!("{:>gutter$}\u{2502}", "", gutter = GUTTER),
@@ -173,8 +172,8 @@ pub(super) fn draw(
         let mut run = String::new();
         let mut run_col = tint.base;
         let mut started = false;
-        for c in 0..chart_w {
-            let frac = ((col_level[c] - FLOOR_DBFS) / (TOP_DBFS - FLOOR_DBFS)).clamp(0.0, 1.0);
+        for (c, &level) in col_level.iter().enumerate() {
+            let frac = ((level - FLOOR_DBFS) / (TOP_DBFS - FLOOR_DBFS)).clamp(0.0, 1.0);
             let cell = frac * chart_h as f32 - from_bottom;
             let ch = if cell >= 1.0 {
                 '\u{2588}'

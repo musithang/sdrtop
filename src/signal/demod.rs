@@ -151,7 +151,7 @@ pub fn decode(buf: &[u8], format: SampleFormat, max_pairs: usize, out: &mut Vec<
     let bytes = &buf[..pairs * 2];
     match format {
         SampleFormat::Int8 => {
-            for pair in bytes.chunks_exact(2) {
+            for pair in bytes.as_chunks::<2>().0 {
                 out.push(Complex {
                     re: pair[0] as i8 as f32 / 128.0,
                     im: pair[1] as i8 as f32 / 128.0,
@@ -159,7 +159,7 @@ pub fn decode(buf: &[u8], format: SampleFormat, max_pairs: usize, out: &mut Vec<
             }
         }
         SampleFormat::Uint8 => {
-            for pair in bytes.chunks_exact(2) {
+            for pair in bytes.as_chunks::<2>().0 {
                 out.push(Complex {
                     re: (pair[0] as f32 - 127.5) / 127.5,
                     im: (pair[1] as f32 - 127.5) / 127.5,

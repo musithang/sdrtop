@@ -76,7 +76,7 @@ impl Panel for ObserverPanel {
                 let truncated = if cmdline.len() > (area.width as usize).saturating_sub(4) {
                     format!(
                         "  {}…",
-                        &cmdline
+                        cmdline
                             .chars()
                             .take((area.width as usize).saturating_sub(5))
                             .collect::<String>()

@@ -115,8 +115,8 @@ pub(super) fn detect_image(
 
 /// Resolve the carrier bin from operator intent, in priority order:
 /// 1. an explicit `[M]` pin, 2. the strongest **placed spectrum marker**, else
-/// `None` so [`detect_image`] auto-picks the strongest bin. This is what makes a
-/// marker you set on the spectrum actually drive the image calculation.
+///    `None` so [`detect_image`] auto-picks the strongest bin. This is what makes
+///    a marker you set on the spectrum actually drive the image calculation.
 pub(super) fn carrier_hint_bin(state: &SdrMetrics, frame: &FftFrame) -> Option<usize> {
     let n = frame.bins_dbfs.len();
     let to_bin = |f: u64| freq_to_bin(f, frame.center_freq_hz, frame.sample_rate, n);

@@ -23,12 +23,11 @@ impl EventStream {
                             break;
                         }
                     }
-                    Ok(Event::Resize(..)) => {
+                    Ok(Event::Resize(..))
                         // Trigger an immediate redraw so preferred_height re-runs with the new width.
-                        if tx.send(AppEvent::Tick).is_err() {
+                        if tx.send(AppEvent::Tick).is_err() => {
                             break;
                         }
-                    }
                     _ => {}
                 }
             } else if tx.send(AppEvent::Tick).is_err() {

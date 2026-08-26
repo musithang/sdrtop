@@ -14,27 +14,6 @@ use crate::ui::widgets::charts::{gain_bar_colored, null_meter};
 
 pub struct IqDiagnosticsPanel;
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn dc_spike_typical_values() {
-        // dc_mag = 0.005 → spike = 20*log10(0.005) ≈ -46 dBFS
-        let s = dc_spike_dbfs(0.005).unwrap();
-        assert!(
-            (s - (-46.0)).abs() < 0.2,
-            "expected ~-46 dBFS, got {:.1}",
-            s
-        );
-    }
-
-    #[test]
-    fn dc_spike_zero_is_none() {
-        assert!(dc_spike_dbfs(0.0).is_none());
-    }
-}
-
 fn offset_color(abs_val: f32, theme: &crate::Theme) -> Color {
     if abs_val > 0.02 {
         theme.status_crit
@@ -479,5 +458,26 @@ impl Panel for IqDiagnosticsPanel {
         // nameplates keep the grouping either way.
         crate::ui::chrome::fit_spacers(&mut lines, inner.height as usize);
         f.render_widget(Paragraph::new(lines), inner);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn dc_spike_typical_values() {
+        // dc_mag = 0.005 → spike = 20*log10(0.005) ≈ -46 dBFS
+        let s = dc_spike_dbfs(0.005).unwrap();
+        assert!(
+            (s - (-46.0)).abs() < 0.2,
+            "expected ~-46 dBFS, got {:.1}",
+            s
+        );
+    }
+
+    #[test]
+    fn dc_spike_zero_is_none() {
+        assert!(dc_spike_dbfs(0.0).is_none());
     }
 }

@@ -124,11 +124,15 @@ mod tests {
 
     #[test]
     fn circle_segs_constant_is_positive_even() {
-        assert!(CIRCLE_SEGS > 0);
-        assert_eq!(
-            CIRCLE_SEGS % 2,
-            0,
-            "even number of segments gives symmetric circle"
-        );
+        // A `const` block, so an edit that breaks the invariant fails the build
+        // rather than a test run. An odd segment count draws a circle whose two
+        // halves do not meet.
+        const { assert!(CIRCLE_SEGS > 0) };
+        const {
+            assert!(
+                CIRCLE_SEGS.is_multiple_of(2),
+                "even segments give a symmetric circle"
+            )
+        };
     }
 }

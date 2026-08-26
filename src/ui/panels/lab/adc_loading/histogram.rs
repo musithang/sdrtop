@@ -208,7 +208,7 @@ mod tests {
         let cols = rebin(&hist, 8);
         let peak = cols.iter().enumerate().max_by_key(|(_, &c)| c).unwrap().0;
         assert!(
-            peak >= 3 && peak <= 4,
+            (3..=4).contains(&peak),
             "centre bin should land mid-bell, got col {peak}"
         );
     }

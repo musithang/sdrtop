@@ -144,11 +144,9 @@ fn timing_banner_fields(t: &crate::state::TimingState) -> Vec<(&'static str, Str
     let deadline = if t.late_callbacks == 0 {
         "\u{2713} met".to_string()
     } else {
-        let pct = if t.deadline_budget_us > 0 {
-            t.dev_peak_us * 100 / t.deadline_budget_us
-        } else {
-            0
-        };
+        let pct = (t.dev_peak_us * 100)
+            .checked_div(t.deadline_budget_us)
+            .unwrap_or(0);
         format!("\u{26a0} {pct}%")
     };
     vec![
@@ -331,7 +329,7 @@ fn banner_lines(
             Span::styled(value, val),
         ];
         let cw = span_w(&cand);
-        if lw + mw + cw + rw + 1 <= iw {
+        if lw + mw + cw + rw < iw {
             mid.extend(cand);
             mw += cw;
         }
@@ -466,7 +464,7 @@ fn iq_marker_lines(state: &SdrMetrics, theme: &crate::Theme, iw: usize) -> Vec<L
 
     let try_add = |cand: Vec<Span<'static>>, used: &mut usize, spans: &mut Vec<Span<'static>>| {
         let cw = span_w(&cand);
-        if *used + cw + 1 <= iw {
+        if *used + cw < iw {
             spans.extend(cand);
             *used += cw;
         }
@@ -544,7 +542,7 @@ fn rf_marker_lines(state: &SdrMetrics, theme: &crate::Theme, iw: usize) -> Vec<L
 
     let try_add = |cand: Vec<Span<'static>>, used: &mut usize, spans: &mut Vec<Span<'static>>| {
         let cw = span_w(&cand);
-        if *used + cw + 1 <= iw {
+        if *used + cw < iw {
             spans.extend(cand);
             *used += cw;
         }
@@ -629,7 +627,7 @@ fn timing_marker_lines(state: &SdrMetrics, theme: &crate::Theme, iw: usize) -> V
 
     let try_add = |cand: Vec<Span<'static>>, used: &mut usize, spans: &mut Vec<Span<'static>>| {
         let cw = span_w(&cand);
-        if *used + cw + 1 <= iw {
+        if *used + cw < iw {
             spans.extend(cand);
             *used += cw;
         }
@@ -726,7 +724,7 @@ fn signal_marker_lines(state: &SdrMetrics, theme: &crate::Theme, iw: usize) -> V
 
     let try_add = |cand: Vec<Span<'static>>, used: &mut usize, spans: &mut Vec<Span<'static>>| {
         let cw = span_w(&cand);
-        if *used + cw + 1 <= iw {
+        if *used + cw < iw {
             spans.extend(cand);
             *used += cw;
         }
@@ -846,7 +844,7 @@ fn marker_lines(state: &SdrMetrics, theme: &crate::Theme, iw: usize) -> Vec<Line
 
     let try_add = |cand: Vec<Span<'static>>, used: &mut usize, spans: &mut Vec<Span<'static>>| {
         let cw = span_w(&cand);
-        if *used + cw + 1 <= iw {
+        if *used + cw < iw {
             spans.extend(cand);
             *used += cw;
         }
