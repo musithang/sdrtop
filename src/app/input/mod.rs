@@ -32,6 +32,9 @@ use crate::hardware;
 use crate::state::{InputMode, SdrMetrics};
 use crate::ui;
 
+/// What the main loop should do next. `PartialEq`/`Debug` so a test can say
+/// which one it expected.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum KeyAction {
     Continue,
     Quit,

@@ -342,3 +342,84 @@ fn summary_line(state: &SdrMetrics, theme: &crate::Theme) -> Line<'static> {
         ),
     ])
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::state::fixture::draw;
+
+    const W: u16 = 46;
+    const H: u16 = 18;
+
+    /// Idle is a state, not a failure: the panel says so plainly and does not
+    /// dress up stale counters as live ones.
+    #[test]
+    fn an_idle_radio_reads_idle_rather_than_all_clear() {
+        let out = draw(MicroHealthPanel, W, H, &SdrMetrics::fixture()).join("\n");
+        assert!(out.contains("IDLE"), "idle verdict missing:\n{out}");
+        assert!(!out.contains("System OK"), "idle must not read OK:\n{out}");
+    }
+
+    /// A healthy stream gets the all-clear plus a session timer, which is the
+    /// reason this panel exists: a long unattended capture you can glance at.
+    #[test]
+    fn a_healthy_stream_reads_ok_with_a_session_timer() {
+        let m = SdrMetrics::fixture().streaming().with_carrier(0.0, 40.0);
+        let out = draw(MicroHealthPanel, W, H, &m).join("\n");
+        assert!(out.contains("System OK"), "all-clear missing:\n{out}");
+        assert!(out.contains("session"), "session timer missing:\n{out}");
+    }
+
+    /// Drops outrank CPU outrank all-clear, and the panel has one verdict row —
+    /// so the worst thing true must be the thing shown.
+    #[test]
+    fn the_verdict_shows_the_worst_thing_that_is_true() {
+        let mut m = SdrMetrics::fixture().streaming().with_carrier(0.0, 40.0);
+        m.system.process_cpu_pct = 85.0;
+        let cpu_only = draw(MicroHealthPanel, W, H, &m).join("\n");
+        assert!(
+            cpu_only.contains("CPU HIGH"),
+            "CPU verdict missing:\n{cpu_only}"
+        );
+        assert!(!cpu_only.contains("System OK"));
+
+        // Drops on top of high CPU: drops win, and the CPU line is still drawn.
+        m.signal.drops_per_sec = 12;
+        let both = draw(MicroHealthPanel, W, H, &m).join("\n");
+        assert!(
+            both.contains("DROP DETECTED"),
+            "drop verdict missing:\n{both}"
+        );
+        assert!(!both.contains("CPU HIGH"), "two verdicts at once:\n{both}");
+    }
+
+    /// CPU and RAM come from the system task, not the radio, so they stay live
+    /// with RX stopped. Everything measured from the stream must not.
+    #[test]
+    fn system_stats_survive_a_stopped_radio() {
+        let mut m = SdrMetrics::fixture();
+        m.system.process_cpu_pct = 12.5;
+        m.system.process_rss_mb = 41;
+        let out = draw(MicroHealthPanel, W, H, &m).join("\n");
+        assert!(out.contains("41 MB"), "RSS missing while idle:\n{out}");
+        assert!(
+            out.contains("12.5") || out.contains("12"),
+            "CPU missing:\n{out}"
+        );
+    }
+
+    /// The panel has to survive the sizes a micro layout actually gives it.
+    #[test]
+    fn it_renders_at_every_size_the_layout_can_hand_it() {
+        let m = SdrMetrics::fixture().streaming().with_carrier(0.0, 40.0);
+        let (min_w, min_h) = MicroHealthPanel.min_size();
+        for (w, h) in [(min_w, min_h), (W, H), (120, 40)] {
+            let out = draw(MicroHealthPanel, w, h, &m);
+            assert_eq!(
+                out.len(),
+                h as usize,
+                "{w}x{h} produced the wrong row count"
+            );
+        }
+    }
+}

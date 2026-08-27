@@ -1,5 +1,7 @@
 mod acc;
 mod demod;
+#[cfg(test)]
+pub(crate) mod fixture;
 mod iq;
 mod lab;
 mod micro;

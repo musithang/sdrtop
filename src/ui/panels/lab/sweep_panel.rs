@@ -395,3 +395,98 @@ fn band_plan_line(
         Style::default().fg(theme.border_dim),
     ))
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::state::fixture::draw;
+
+    fn swept() -> SdrMetrics {
+        SdrMetrics::fixture()
+            .streaming()
+            .with_sweep(88_000_000, 108_000_000)
+    }
+
+    /// The nameplate carries the scan parameters, rebuilt every frame, so a
+    /// reader can tell what band the plot is of without leaving the panel.
+    #[test]
+    fn the_nameplate_states_the_band_being_scanned() {
+        let out = draw(SweepPanel, 90, 14, &swept()).join("\n");
+        assert!(out.contains("88.0"), "start MHz missing:\n{out}");
+        assert!(out.contains("108.0"), "stop MHz missing:\n{out}");
+        assert!(out.contains("cycle #3"), "cycle number missing:\n{out}");
+    }
+
+    /// Without a cursor the status line is the cycle summary; with one it becomes
+    /// the readout. Both are the same row, so only one can be right at a time.
+    #[test]
+    fn the_status_line_switches_between_progress_and_cursor() {
+        let progress = draw(SweepPanel, 90, 14, &swept()).join("\n");
+        assert!(
+            progress.contains("pos "),
+            "no progress readout:\n{progress}"
+        );
+        assert!(progress.contains("64/64"), "positions missing:\n{progress}");
+
+        let mut m = swept();
+        m.sweep.cursor_frac = Some(0.5);
+        let cursor = draw(SweepPanel, 90, 14, &m).join("\n");
+        assert!(cursor.contains("Cursor"), "no cursor readout:\n{cursor}");
+        assert!(
+            cursor.contains("98."),
+            "the cursor should read the middle of 88–108 MHz:\n{cursor}"
+        );
+        assert!(
+            !cursor.contains("pos "),
+            "both readouts drawn at once:\n{cursor}"
+        );
+    }
+
+    /// The axis labels bracket the swept band rather than the tuned frequency —
+    /// the radio is parked somewhere inside the band while the plot spans it.
+    #[test]
+    fn the_axis_spans_the_band_not_the_current_tuning() {
+        let out = draw(SweepPanel, 90, 14, &swept()).join("\n");
+        // Whole MHz on the axis, not the nameplate's one decimal: the axis has
+        // three labels to fit across the plot and the band is 20 MHz wide.
+        assert!(out.contains(" 88 "), "left edge label missing:\n{out}");
+        assert!(out.contains("108 MHz"), "right edge label missing:\n{out}");
+        // The radio is parked at 100 MHz; the plot is of the band, not of it.
+        assert!(out.contains(" 98 "), "midpoint label missing:\n{out}");
+    }
+
+    /// The panel bails out on a rect it cannot draw a plot in, instead of
+    /// panicking on a zero-height layout or drawing a smear. The frame is still
+    /// there, because the engine draws that.
+    #[test]
+    fn a_rect_too_small_to_plot_draws_nothing_but_the_frame() {
+        // Too small is `inner.width <= AXIS_W + 2 || inner.height < 4`, and the
+        // frame costs two of each — so a 9-wide or 5-tall panel has no plot.
+        for (w, h) in [(9u16, 14u16), (90, 5), (8, 4)] {
+            let out = draw(SweepPanel, w, h, &swept());
+            assert_eq!(
+                out.len(),
+                h as usize,
+                "{w}x{h} produced the wrong row count"
+            );
+            let body: String = out[1..out.len().saturating_sub(1)].join("");
+            assert!(
+                !body.contains("pos "),
+                "{w}x{h} should be too small for the status line, got:\n{}",
+                out.join("\n")
+            );
+        }
+    }
+
+    /// A sweep with no completed frame yet must not render a plot of nothing.
+    #[test]
+    fn no_frame_yet_is_not_a_flat_line_at_the_floor() {
+        let mut m = swept();
+        m.sweep.current_frame = None;
+        let out = draw(SweepPanel, 90, 14, &m).join("\n");
+        assert!(
+            !out.contains('\u{2588}'),
+            "an empty sweep drew filled cells:\n{out}"
+        );
+    }
+}

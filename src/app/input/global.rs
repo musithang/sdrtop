@@ -418,3 +418,188 @@ fn cycle_micro(engine: &mut ui::LayoutEngine, state: &Arc<Mutex<SdrMetrics>>) {
         ));
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::config::LayoutConfig;
+    use crate::ui::PanelRegistry;
+    use std::collections::HashMap;
+
+    /// A context with no device: the observer-mode shape, and the one that makes
+    /// the hardware keys' guards visible.
+    struct Harness {
+        state: Arc<Mutex<SdrMetrics>>,
+        engine: ui::LayoutEngine,
+        show_help: bool,
+        show_footer: bool,
+        focus_keys: HashMap<char, &'static str>,
+    }
+
+    impl Harness {
+        fn new() -> Self {
+            let mut engine =
+                ui::LayoutEngine::new(LayoutConfig::default_config(), PanelRegistry::new());
+            engine.set_preset("command_rail");
+            Self {
+                state: Arc::new(Mutex::new(SdrMetrics::fixture())),
+                engine,
+                show_help: false,
+                show_footer: true,
+                focus_keys: HashMap::new(),
+            }
+        }
+
+        fn press(&mut self, c: char) -> KeyAction {
+            self.key(KeyCode::Char(c))
+        }
+
+        fn key(&mut self, code: KeyCode) -> KeyAction {
+            let mut ctx = InputCtx {
+                state: &self.state,
+                device: None,
+                engine: &mut self.engine,
+                show_help: &mut self.show_help,
+                show_footer: &mut self.show_footer,
+                focus_keys: &self.focus_keys,
+            };
+            handle(KeyEvent::from(code), &mut ctx)
+        }
+
+        fn log(&self) -> String {
+            metrics(&self.state)
+                .ui
+                .log
+                .iter()
+                .map(|e| e.text.clone())
+                .collect::<Vec<_>>()
+                .join("\n")
+        }
+    }
+
+    #[test]
+    fn q_is_the_only_key_that_quits() {
+        let mut h = Harness::new();
+        assert_eq!(h.press('q'), KeyAction::Quit);
+        for c in ['?', 'p', '1', 'w', 'a', 'z'] {
+            assert_eq!(h.press(c), KeyAction::Continue, "'{c}' should not quit");
+        }
+        assert_eq!(h.key(KeyCode::Esc), KeyAction::Continue);
+    }
+
+    #[test]
+    fn the_overlay_keys_toggle_rather_than_latch() {
+        let mut h = Harness::new();
+        assert!(!h.show_help);
+        h.press('?');
+        assert!(h.show_help);
+        h.press('?');
+        assert!(!h.show_help, "[?] must toggle, not latch");
+
+        assert!(h.show_footer);
+        h.key(KeyCode::Tab);
+        assert!(!h.show_footer);
+    }
+
+    /// The number keys hard-code preset names, so a renamed preset would leave a
+    /// slot pointing at nothing. `try_set_preset` is what makes that say so
+    /// instead of silently doing nothing.
+    #[test]
+    fn a_number_key_switches_preset_and_says_which() {
+        let mut h = Harness::new();
+        h.press('2');
+        assert_eq!(h.engine.active_preset(), "spectrum");
+        assert!(h.log().contains("Preset"), "no log line:\n{}", h.log());
+    }
+
+    #[test]
+    fn a_slot_whose_preset_does_not_exist_logs_instead_of_switching() {
+        let mut h = Harness::new();
+        // Empty the preset table down to the one we are on, so every named slot
+        // resolves to nothing. The engine must stay put and say why.
+        let keep = h.engine.active_preset().to_string();
+        h.engine.config.presets.retain(|name, _| name == &keep);
+        h.press('7');
+        assert_eq!(
+            h.engine.active_preset(),
+            keep,
+            "switched to a missing preset"
+        );
+        assert!(
+            h.log().contains("not yet available"),
+            "a dead slot must explain itself:\n{}",
+            h.log()
+        );
+    }
+
+    #[test]
+    fn p_cycles_through_every_preset_and_returns() {
+        let mut h = Harness::new();
+        let n = h.engine.preset_names().len();
+        let start = h.engine.active_preset().to_string();
+        for _ in 0..n {
+            h.press('p');
+        }
+        assert_eq!(h.engine.active_preset(), start, "the cycle must close");
+    }
+
+    /// `handle_no_device` exists so the waterfall's fall-through cannot reach the
+    /// radio. With no device the hardware keys must be inert — not merely
+    /// harmless, but leaving the requested state untouched.
+    #[test]
+    fn the_hardware_keys_are_inert_without_a_device() {
+        let mut h = Harness::new();
+        let before = {
+            let m = metrics(&h.state);
+            (m.radio.rx_enabled, m.radio.lna_gain, m.radio.vga_gain)
+        };
+        for c in [' ', 'r', 'f', 's'] {
+            h.press(c);
+        }
+        let after = {
+            let m = metrics(&h.state);
+            (m.radio.rx_enabled, m.radio.lna_gain, m.radio.vga_gain)
+        };
+        assert_eq!(before, after, "a hardware key changed state with no device");
+    }
+
+    /// Esc leaves focus and clears everything focus mode put on screen. Missing
+    /// one of these is how a cursor or a scroll offset survives into a panel that
+    /// has no way to clear it.
+    #[test]
+    fn esc_clears_every_trace_of_focus_mode() {
+        let mut h = Harness::new();
+        h.engine.focus("waterfall");
+        {
+            let mut m = metrics(&h.state);
+            m.ui.focused_panel = Some("waterfall".to_string());
+            m.ui.log_overlay = true;
+            m.spectrum.cursor_freq = Some(100_000_000);
+            m.waterfall.scroll_offset = 7;
+            m.waterfall.cursor_freq = Some(100_000_000);
+        }
+        h.key(KeyCode::Esc);
+
+        assert!(h.engine.focused_panel_name().is_none());
+        let m = metrics(&h.state);
+        assert!(m.ui.focused_panel.is_none());
+        assert!(!m.ui.log_overlay);
+        assert!(m.spectrum.cursor_freq.is_none());
+        assert_eq!(m.waterfall.scroll_offset, 0);
+        assert!(m.waterfall.cursor_freq.is_none());
+    }
+
+    /// An unbound key must fall through silently rather than logging noise or
+    /// changing anything.
+    #[test]
+    fn an_unbound_key_does_nothing_at_all() {
+        let mut h = Harness::new();
+        let preset = h.engine.active_preset().to_string();
+        let logs_before = metrics(&h.state).ui.log.len();
+        for c in ['x', 'y', 'z', '@'] {
+            assert_eq!(h.press(c), KeyAction::Continue);
+        }
+        assert_eq!(h.engine.active_preset(), preset);
+        assert_eq!(metrics(&h.state).ui.log.len(), logs_before);
+    }
+}
