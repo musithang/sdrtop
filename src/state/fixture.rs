@@ -341,4 +341,96 @@ mod tests {
             draw(crate::ui::SignalMetricsPanel, 60, 10, &m)
         );
     }
+
+    /// TEMPORARY (R10b): dump both Lab IQ panels across a matrix of states and
+    /// sizes, so the split can be proved to change nothing on screen.
+    #[test]
+    fn r10b_probe() {
+        use crate::ui::{IqDiagnosticsPanel, IqHistogramPanel};
+        let mut out = String::new();
+
+        let mut states: Vec<(&str, SdrMetrics)> = Vec::new();
+        states.push(("idle", SdrMetrics::fixture()));
+
+        let base = SdrMetrics::fixture().streaming().with_carrier(0.0, 40.0);
+
+        let mut clean = base.clone();
+        clean.iq.dc_offset_i = 0.0008;
+        clean.iq.dc_offset_q = -0.0011;
+        clean.iq.iq_imbalance_db = 0.12;
+        clean.iq.phase_imbalance_deg = 0.4;
+        clean.iq.irr_history = (0..60).map(|i| 44.0 + (i % 7) as f32 * 0.3).collect();
+        states.push(("clean", clean.clone()));
+
+        let mut minor = clean.clone();
+        minor.iq.iq_imbalance_db = 1.8;
+        minor.iq.phase_imbalance_deg = 2.6;
+        states.push(("minor", minor));
+
+        let mut dc_bad = clean.clone();
+        dc_bad.iq.dc_offset_i = 0.031;
+        dc_bad.iq.dc_offset_q = -0.022;
+        states.push(("dc_bad", dc_bad.clone()));
+
+        let mut dc_bad_blocked = dc_bad.clone();
+        dc_bad_blocked.iq.cal.dc_block_on = true;
+        states.push(("dc_bad_blocked", dc_bad_blocked));
+
+        let mut quad_bad = clean.clone();
+        quad_bad.iq.iq_imbalance_db = -4.2;
+        quad_bad.iq.phase_imbalance_deg = 7.5;
+        states.push(("quad_bad", quad_bad.clone()));
+
+        let mut quad_bad_cal = quad_bad.clone();
+        quad_bad_cal.iq.cal.cal_applied = true;
+        quad_bad_cal.iq.cal.last_cal_at = Some(1);
+        states.push(("quad_bad_cal", quad_bad_cal));
+
+        let mut corrected = clean.clone();
+        corrected.iq.cal.cal_applied = true;
+        corrected.iq.cal.dc_block_on = true;
+        corrected.iq.cal.frozen = true;
+        corrected.iq.cal.cal_pending = false;
+        states.push(("corrected", corrected));
+
+        let mut pending = clean.clone();
+        pending.iq.cal.cal_pending = true;
+        states.push(("pending", pending));
+
+        // Histogram states.
+        let mut hist_typical = clean.clone();
+        for (i, b) in hist_typical.iq.iq_amplitude_hist.iter_mut().enumerate() {
+            *b = (1000.0 * (-(i as f64) / 6.0).exp()) as u64 + 1;
+        }
+        hist_typical.iq.adc_signed_hist = hist_typical.iq.iq_amplitude_hist;
+        states.push(("hist_typical", hist_typical));
+
+        let mut hist_clip = clean.clone();
+        for (i, b) in hist_clip.iq.iq_amplitude_hist.iter_mut().enumerate() {
+            *b = if i >= 29 { 4000 } else { 40 };
+        }
+        hist_clip.iq.adc_signed_hist = hist_clip.iq.iq_amplitude_hist;
+        states.push(("hist_clip", hist_clip));
+
+        let mut hist_weak = clean.clone();
+        hist_weak.iq.iq_amplitude_hist[0] = 9000;
+        hist_weak.iq.iq_amplitude_hist[1] = 300;
+        states.push(("hist_weak", hist_weak));
+
+        for (name, st) in &states {
+            for (w, h) in [(30u16, 12u16), (36, 20), (44, 26), (60, 30), (80, 16)] {
+                out.push_str(&format!("### iq_diagnostics {name} {w}x{h}\n"));
+                out.push_str(&draw(IqDiagnosticsPanel, w, h, st).join("\n"));
+                out.push_str("\n");
+                out.push_str(&format!("### iq_histogram {name} {w}x{h}\n"));
+                out.push_str(&draw(IqHistogramPanel, w, h, st).join("\n"));
+                out.push_str("\n");
+            }
+        }
+        std::fs::write(
+            std::env::var("R10B_OUT").unwrap_or_else(|_| "/tmp/r10b.txt".into()),
+            out,
+        )
+        .unwrap();
+    }
 }
