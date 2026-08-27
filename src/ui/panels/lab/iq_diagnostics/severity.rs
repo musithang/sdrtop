@@ -103,7 +103,11 @@ mod tests {
         assert_eq!(irr_color(25.0, &t), t.status_warn);
         assert_eq!(irr_color(5.0, &t), t.status_crit);
 
-        assert_eq!(spike_color(-60.0, &t), t.status_ok, "a lower spike is better");
+        assert_eq!(
+            spike_color(-60.0, &t),
+            t.status_ok,
+            "a lower spike is better"
+        );
         assert_eq!(spike_color(-30.0, &t), t.status_warn);
         assert_eq!(spike_color(-5.0, &t), t.status_crit);
     }

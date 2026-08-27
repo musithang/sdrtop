@@ -54,7 +54,12 @@ impl Reading {
                 "> 60 dB".to_string()
             }
         } else {
-            format!("{:.*}{}", decimals, self.irr_db, if decimals == 0 { "" } else { " dB" })
+            format!(
+                "{:.*}{}",
+                decimals,
+                self.irr_db,
+                if decimals == 0 { "" } else { " dB" }
+            )
         }
     }
 }

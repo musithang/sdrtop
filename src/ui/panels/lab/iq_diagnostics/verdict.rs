@@ -188,8 +188,8 @@ mod tests {
     #[test]
     fn the_decision_is_drawing_free() {
         let src = include_str!("verdict.rs");
-        let decide_body = &src[src.find("pub(super) fn decide").unwrap()
-            ..src.find("pub(super) fn lines").unwrap()];
+        let decide_body = &src
+            [src.find("pub(super) fn decide").unwrap()..src.find("pub(super) fn lines").unwrap()];
         for forbidden in ["theme", "Theme", "Span", "Style", "iw", "Color"] {
             assert!(
                 !decide_body.contains(forbidden),
@@ -217,8 +217,14 @@ mod tests {
     fn each_band_has_its_own_verdict() {
         let cal = IqCalState::default();
         assert_eq!(decide(&clean(), &cal).title, "IQ QUALITY OK");
-        assert_eq!(decide(&reading(1.5, 0.2, 0.0), &cal).title, "MINOR IMBALANCE");
-        assert_eq!(decide(&reading(0.1, 0.2, 0.03), &cal).title, "DC OFFSET HIGH");
+        assert_eq!(
+            decide(&reading(1.5, 0.2, 0.0), &cal).title,
+            "MINOR IMBALANCE"
+        );
+        assert_eq!(
+            decide(&reading(0.1, 0.2, 0.03), &cal).title,
+            "DC OFFSET HIGH"
+        );
         assert_eq!(
             decide(&reading(4.0, 0.2, 0.0), &cal).title,
             "QUADRATURE IMBALANCE"
@@ -285,7 +291,10 @@ mod tests {
         let cal = IqCalState::default();
         let just_under = AMP_WARN_DB - 0.01;
         let just_over = AMP_WARN_DB + 0.01;
-        assert_eq!(decide(&reading(just_under, 0.0, 0.0), &cal).level, Level::Ok);
+        assert_eq!(
+            decide(&reading(just_under, 0.0, 0.0), &cal).level,
+            Level::Ok
+        );
         assert_eq!(
             decide(&reading(just_over, 0.0, 0.0), &cal).level,
             Level::Warn

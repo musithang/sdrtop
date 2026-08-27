@@ -119,6 +119,10 @@ mod tests {
             last_cal_at: Some(500),
             ..Default::default()
         };
-        assert!(foot(&cal, 100).contains("last cal 0s ago"), "{}", foot(&cal, 100));
+        assert!(
+            foot(&cal, 100).contains("last cal 0s ago"),
+            "{}",
+            foot(&cal, 100)
+        );
     }
 }

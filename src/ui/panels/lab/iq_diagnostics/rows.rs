@@ -149,12 +149,22 @@ mod tests {
         let t = Theme::sdr();
         for iw in [30usize, 36, 44, 60, 80] {
             let r = Rows::new(iw, &t);
-            let meter = r.meter("I", 0.01, 0.05, t.status_ok, "+0.0100".into());
-            let bar = r.bar("MAG", 0.3, t.status_ok, t.status_crit, t.status_ok, "0.0100".into());
+            // Same value text on both, or the comparison measures the values
+            // rather than the fields.
+            let val = "+0.0100";
+            let meter = r.meter("I", 0.01, 0.05, t.status_ok, val.into());
+            let bar = r.bar(
+                "MAG",
+                0.3,
+                t.status_ok,
+                t.status_crit,
+                t.status_ok,
+                val.into(),
+            );
             assert_eq!(
                 width_of(&meter),
                 width_of(&bar),
-                "iw={iw}: a meter and a bar with the same value width must match"
+                "iw={iw}: a meter and a bar with the same value must end in the same column"
             );
         }
     }
@@ -177,6 +187,14 @@ mod tests {
         let r = Rows::new(20, &t);
         let line = r.readout("a very long label indeed", "-57.3 dBFS".into(), t.label);
         let text: String = line.spans.iter().map(|s| s.content.as_ref()).collect();
-        assert!(text.contains("l -57.3"), "no separator: {text:?}");
+        assert!(
+            text.ends_with("-57.3 dBFS"),
+            "value not at the end: {text:?}"
+        );
+        let before = text.trim_end_matches("-57.3 dBFS");
+        assert!(
+            before.ends_with(' '),
+            "label and value ran together: {text:?}"
+        );
     }
 }

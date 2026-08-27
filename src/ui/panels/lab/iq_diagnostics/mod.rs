@@ -93,10 +93,7 @@ impl Panel for IqDiagnosticsPanel {
         lines.push(Line::raw(""));
         lines.extend(image::lines(state, &r, &rows));
         lines.push(Line::raw(""));
-        lines.extend(verdict::lines(
-            &verdict::decide(&r, &state.iq.cal),
-            &rows,
-        ));
+        lines.extend(verdict::lines(&verdict::decide(&r, &state.iq.cal), &rows));
         lines.extend(controls::lines(&state.iq.cal, &rows));
 
         // Self-adjusting density: collapse spacers when the pane is short, grow
@@ -127,7 +124,10 @@ mod tests {
     fn a_stopped_radio_draws_no_readings() {
         let out = draw(IqDiagnosticsPanel, 60, 24, &SdrMetrics::fixture()).join("\n");
         assert!(out.contains("---"), "{out}");
-        assert!(!out.contains("DC OFFSET"), "stale panel drew a section:\n{out}");
+        assert!(
+            !out.contains("DC OFFSET"),
+            "stale panel drew a section:\n{out}"
+        );
         assert!(out.contains("STALE"), "the frame should be tagged:\n{out}");
     }
 
@@ -139,7 +139,10 @@ mod tests {
         let quad = out.find("QUADRATURE").expect("no quadrature block");
         let img = out.find("IMAGE REJECTION").expect("no image block");
         let verdict = out.find("IQ QUALITY OK").expect("no verdict");
-        assert!(dc < quad && quad < img && img < verdict, "out of order:\n{out}");
+        assert!(
+            dc < quad && quad < img && img < verdict,
+            "out of order:\n{out}"
+        );
     }
 
     /// The chips fall back to single letters before the freeze chip would be
