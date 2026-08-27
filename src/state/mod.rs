@@ -24,7 +24,8 @@ pub use micro::MicroView;
 pub use observer::ObserverState;
 pub use radio::RadioState;
 pub use signal::{
-    acpr_offset_hz, classify, Modulation, SignalState, CLASSIFY_MIN_SNR_DB, SAT_CLIP_PCT,
+    acpr_offset_hz, classify, Modulation, SignalState, ADC_COMFORT_DBFS, CLASSIFY_MIN_SNR_DB,
+    SAT_CLIP_PCT, SAT_CRIT_PCT, SAT_WARN_PCT,
 };
 pub use spectrum::{SpectrumMarker, SpectrumState, SpectrumStyle};
 pub use sweep::{SweepConfig, SweepFrame, SweepState, SWEEP_SETTLING_MS};

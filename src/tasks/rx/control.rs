@@ -11,13 +11,13 @@ use std::sync::{Arc, Mutex};
 use std::time::Instant;
 
 use crate::hardware::{RxContext, SdrDevice};
-use crate::state::SdrMetrics;
+// The ADC peak window auto-gain is content to leave alone. Shared with the
+// Command Rail's CHAIN verdict, which calls anything above the top of it
+// "hot": two constants would let the rail advise backing off a level this
+// latch is happy to hold.
+use crate::state::{SdrMetrics, ADC_COMFORT_DBFS as AUTOGAIN_COMFORT_DBFS};
 
 use super::publish::Throughput;
-
-/// The ADC peak window auto-gain is content to leave alone, in dBFS. Outside it,
-/// the latch re-centres the level; inside, it does nothing at all.
-const AUTOGAIN_COMFORT_DBFS: std::ops::RangeInclusive<f32> = -12.0..=-4.0;
 
 /// Notice that the radio stopped streaming without being asked, and say so.
 ///

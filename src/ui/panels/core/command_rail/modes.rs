@@ -76,24 +76,41 @@ pub(super) fn rail_peaks(
         .collect()
 }
 
-/// BENCH gain-health verdict from ADC saturation and clip headroom. Returns the
+/// Headroom above which the front end is being wasted: the signal is so far below
+/// full scale that gain is the answer. Well outside
+/// [`ADC_COMFORT_DBFS`](crate::state::ADC_COMFORT_DBFS), because a human reading
+/// "low" wants to be told about a genuinely under-driven chain, not nudged the
+/// moment the auto-gain latch would re-centre.
+const HEADROOM_LOW_DB: f32 = 45.0;
+
+/// BENCH gain-health verdict from clip headroom and ADC saturation. Returns the
 /// word plus severity (2=crit, 1=warn, 0=ok), so the caller picks the colour.
-/// Pure for testability. `headroom_db` is `-adc_peak_dbfs`.
-/// Severity mirrors [`super::signal::sat_color`]: ≥50% → crit, ≥10% → warn.
+/// Pure for testability. `headroom_db` is `-adc_peak_dbfs`, clamped at 0.
+///
+/// **Headroom is what a gain control wants to be told**, which is why it leads
+/// here. This verdict used to be driven by saturation against the rail's own
+/// laxer thresholds (≥50 % → crit, ≥10 % → warn) — the second scale D1 removed.
+/// Saturation still gets the final word on *clipping*, because samples pinned to
+/// the rails are direct evidence and headroom alone cannot distinguish "peaking
+/// at full scale" from "clipping hard"; but it does so on the one shared scale.
+/// The warn edge is now the top of [`ADC_COMFORT_DBFS`](crate::state::ADC_COMFORT_DBFS),
+/// so the rail cannot call a level "hot" that the auto-gain latch is content to
+/// hold — and it warns while there is still headroom left, rather than after a
+/// tenth of the samples have already pinned.
 fn chain_verdict(sat_pct: f32, headroom_db: f32) -> (&'static str, i8) {
-    if sat_pct >= 50.0 {
+    // The peak is a level, not a rate, so it cannot tell clipping from a signal
+    // that merely reaches full scale. Saturation can, and does.
+    if sat_pct >= crate::state::SAT_CRIT_PCT {
         ("clipping", 2)
     }
-    // rail hits → back off now
-    else if sat_pct >= 10.0 {
+    // Above the comfort window → back off before it clips.
+    else if headroom_db < -*crate::state::ADC_COMFORT_DBFS.end() {
         ("hot", 1)
     }
-    // high level → nudge down
-    else if headroom_db > 45.0 {
+    // Far below it → there is gain going unused.
+    else if headroom_db > HEADROOM_LOW_DB {
         ("low", 1)
-    }
-    // lots of room → add gain
-    else {
+    } else {
         ("optimal", 0)
     }
 }
@@ -293,10 +310,42 @@ mod tests {
     }
 
     #[test]
-    fn chain_verdict_reads_saturation_and_headroom() {
-        assert_eq!(chain_verdict(60.0, 10.0), ("clipping", 2)); // ≥50% → crit
-        assert_eq!(chain_verdict(20.0, 10.0), ("hot", 1)); // 10-50% → warn
-        assert_eq!(chain_verdict(0.0, 60.0), ("low", 1)); // lots of headroom
+    fn chain_verdict_leads_with_headroom() {
+        // Saturation still decides *clipping*, on the one shared scale — 20 % of
+        // samples pinned is clipping, and used to read merely "hot" here because
+        // the rail had its own 50 % crit point.
+        assert_eq!(chain_verdict(60.0, 10.0), ("clipping", 2));
+        assert_eq!(chain_verdict(20.0, 10.0), ("clipping", 2));
+        assert_eq!(
+            chain_verdict(crate::state::SAT_CRIT_PCT, 10.0),
+            ("clipping", 2)
+        );
+
+        // Below that, headroom leads: it warns while there is still room left,
+        // instead of after a tenth of the samples have already pinned.
+        assert_eq!(chain_verdict(0.0, 2.0), ("hot", 1));
+        assert_eq!(chain_verdict(0.0, 60.0), ("low", 1));
         assert_eq!(chain_verdict(0.0, 20.0), ("optimal", 0));
+    }
+
+    /// The rail must not call a level "hot" that the auto-gain latch is content
+    /// to hold, or the two halves of the same app give opposite advice about the
+    /// same reading. Both now read `state::ADC_COMFORT_DBFS`.
+    #[test]
+    fn nothing_inside_the_autogain_comfort_window_reads_hot() {
+        let band = crate::state::ADC_COMFORT_DBFS;
+        for peak_dbfs in [*band.start(), -8.0, *band.end()] {
+            let headroom = (-peak_dbfs).max(0.0);
+            let (word, sev) = chain_verdict(0.0, headroom);
+            assert_eq!(
+                (word, sev),
+                ("optimal", 0),
+                "peak {peak_dbfs} dBFS is inside the window auto-gain leaves alone, \
+                 but the rail called it {word}"
+            );
+        }
+        // Just above the window, the rail does speak up.
+        let just_hot = (-(*crate::state::ADC_COMFORT_DBFS.end() + 0.5)).max(0.0);
+        assert_eq!(chain_verdict(0.0, just_hot), ("hot", 1));
     }
 }

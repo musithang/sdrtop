@@ -1,9 +1,46 @@
 use std::collections::VecDeque;
 
+/// The ADC-saturation scale, in percent of samples pinned to the converter's
+/// rails: calm below [`SAT_WARN_PCT`], amber to [`SAT_CRIT_PCT`], red above.
+///
+/// **One scale, defined once.** Every SAT readout in the app colours from this
+/// pair through `micro_common::sat_color`, and the clip alert-memory below is
+/// anchored to it. The Command Rail used to carry a second, laxer pair (10 % /
+/// 50 %) on the argument that a rail sitting beside a gain control should not cry
+/// wolf at the saturation a well-driven front end normally runs at — which was
+/// true of the *advice*, but not of the *number*: the same measurement then read
+/// green in the rail and red in the micro views at the same instant, and nothing
+/// told the user which to believe. The advice now comes from clip headroom
+/// instead (see `command_rail::modes::chain_verdict`), which is the thing a gain
+/// control actually wants, and the number means one thing everywhere.
+///
+/// These live in `state` rather than beside the colour helper so that
+/// [`SAT_CLIP_PCT`] and the RX poll can share them without the hot path
+/// depending on the UI.
+pub const SAT_WARN_PCT: f32 = 1.0;
+/// Upper end of the [`SAT_WARN_PCT`] scale: at or above this, samples are pinned
+/// often enough that the reading is clipping rather than peaks grazing the rails.
+pub const SAT_CRIT_PCT: f32 = 5.0;
+
 /// ADC saturation at or above this percent records a clip event for the Command
-/// Rail's alert-memory. Aligned with the SAT "warn" colour — real clipping that's
-/// worth remembering, not measurement noise.
-pub const SAT_CLIP_PCT: f32 = 10.0;
+/// Rail's alert-memory — real clipping that's worth remembering, not measurement
+/// noise.
+///
+/// The crit point of the scale above rather than a number of its own, so the
+/// remembered event and the red SAT reading are the same threshold. (It was 10 %
+/// while the rail had its own scale to be "aligned with the warn colour" of; that
+/// scale is gone, and anchoring to *warn* instead would remember every amber
+/// graze, which is not what an alert-memory is for.)
+pub const SAT_CLIP_PCT: f32 = SAT_CRIT_PCT;
+
+/// The ADC peak window a front end is well driven in, in dBFS.
+///
+/// Shared on purpose by the two things that judge gain staging: the auto-gain
+/// latch re-centres the level when the peak leaves this window and does nothing
+/// at all inside it, and the Command Rail's CHAIN verdict calls anything above
+/// the top of it "hot". Two constants would let the rail advise backing off a
+/// level the auto-gain is content to hold.
+pub const ADC_COMFORT_DBFS: std::ops::RangeInclusive<f32> = -12.0..=-4.0;
 
 /// Adjacent-channel offset from centre for the ACPR measurement, by modulation.
 ///
@@ -356,5 +393,44 @@ mod tests {
     fn snr_delta_negative_when_falling() {
         let d = with_history(&[20.0, 20.0, 12.0, 12.0]).snr_delta().unwrap();
         assert!((d + 8.0).abs() < 1e-6, "got {d}");
+    }
+
+    /// The saturation scale is a scale: the thresholds are ordered, and the clip
+    /// alert-memory sits on one of them rather than beside it.
+    ///
+    /// Two of these numbers used to disagree by a factor of ten between the rail
+    /// and the micro views (D1). The relationships are asserted rather than
+    /// commented so a future edit to one of them has to face the others.
+    #[test]
+    fn the_saturation_scale_is_ordered_and_the_clip_memory_sits_on_it() {
+        // `const` blocks, so breaking the scale fails the build rather than a
+        // test run: these are facts about four literals, and there is no reason
+        // to wait for `cargo test` to hear about it.
+        const { assert!(SAT_WARN_PCT > 0.0, "0 % saturation must read calm") };
+        const {
+            assert!(
+                SAT_WARN_PCT < SAT_CRIT_PCT,
+                "warn must come before crit, or the scale has no amber band"
+            )
+        };
+        const { assert!(SAT_CRIT_PCT < 100.0) };
+        // Deliberately breaking one of these fails `cargo build`, not `cargo test`.
+        const {
+            assert!(
+                SAT_CLIP_PCT == SAT_CRIT_PCT,
+                "a remembered clip and a red SAT reading must be the same event"
+            )
+        };
+    }
+
+    /// The comfort window has to be a window, and it has to sit below full scale
+    /// with room to spare — the rail derives its "hot" edge from the top of it.
+    #[test]
+    fn the_adc_comfort_window_is_below_full_scale() {
+        assert!(ADC_COMFORT_DBFS.start() < ADC_COMFORT_DBFS.end());
+        assert!(
+            *ADC_COMFORT_DBFS.end() < 0.0,
+            "a comfortable peak is never at full scale"
+        );
     }
 }

@@ -1,6 +1,6 @@
 use ratatui::{
     layout::{Constraint, Direction, Layout},
-    style::{Color, Style},
+    style::Style,
     text::{Line, Span},
     widgets::Paragraph,
     Frame,
@@ -8,19 +8,11 @@ use ratatui::{
 
 use crate::state::SdrMetrics;
 use crate::ui::panel::{Panel, PanelChrome, Staleness};
-use crate::ui::widgets::micro_common::fft_stale;
+// `snr_color` shared rather than re-declared: one measurement, one scale.
+// See `state::SAT_WARN_PCT` for what a second copy costs.
+use crate::ui::widgets::micro_common::{fft_stale, snr_color};
 
 pub struct SignalMetricsPanel;
-
-fn snr_color(snr: f32, theme: &crate::Theme) -> Color {
-    if snr >= 20.0 {
-        theme.status_ok
-    } else if snr >= 10.0 {
-        theme.status_warn
-    } else {
-        theme.status_crit
-    }
-}
 
 impl Panel for SignalMetricsPanel {
     fn name(&self) -> &'static str {

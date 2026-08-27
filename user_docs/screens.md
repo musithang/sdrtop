@@ -42,6 +42,10 @@ top to bottom:
 - **SIGNAL**: SNR · PWR · NF · SAT, each as a braille **oscilloscope trace** of
   its recent history beside the live value and a trend arrow.
 - **GAIN**: AMP, LNA and VGA as ⅛-block bars, plus total gain and clip headroom.
+  The Bench card's CHAIN verdict reads that headroom: "optimal" while the peak
+  sits in the window the auto-gain also leaves alone, "hot" above it, "low" when
+  there is a lot of gain going unused, and "clipping" once samples are actually
+  hitting the rails.
 - **STREAM**: drops, buffer fill, USB throughput, and a one-line log foot.
 
 Press `c` to focus the rail: `←`/`→` tune, `1` `2` `3` recall, `M` save, `L` for
@@ -88,8 +92,9 @@ A single bar with eight live readings, sized to sit at the bottom of a layout:
 - **SNR**: signal-to-noise ratio. Higher is cleaner.
 - **PWR**: channel power in dBFS.
 - **NF**: estimated noise floor in dBFS.
-- **SAT**: ADC saturation percentage. Non-zero means the input is clipping, so
-  turn the gain down.
+- **SAT**: ADC saturation percentage, the share of samples pinned to the
+  converter's rails. The colour means the same thing on every screen: green under
+  1 %, amber to 5 %, red above. Red means turn the gain down.
 - **DROP**: sample drops per second. If this is non-zero, USB can't keep up.
 - **BUF**: receive buffer fill percentage. A leading indicator: if this climbs
   toward 100 %, drops are coming.

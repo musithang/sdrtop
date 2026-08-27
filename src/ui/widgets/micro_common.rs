@@ -21,10 +21,15 @@ pub fn snr_color(db: f32, theme: &crate::Theme) -> Color {
         theme.status_crit
     }
 }
+/// The colour for an ADC-saturation percentage — the app's only SAT scale.
+///
+/// The thresholds live in [`crate::state`] so the RX poll's clip memory and this
+/// colour cannot drift apart; see [`crate::state::SAT_WARN_PCT`] for why there is
+/// exactly one pair.
 pub fn sat_color(pct: f32, theme: &crate::Theme) -> Color {
-    if pct < 1.0 {
+    if pct < crate::state::SAT_WARN_PCT {
         theme.status_ok
-    } else if pct < 5.0 {
+    } else if pct < crate::state::SAT_CRIT_PCT {
         theme.status_warn
     } else {
         theme.status_crit

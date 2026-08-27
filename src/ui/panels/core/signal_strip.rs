@@ -8,49 +8,11 @@ use ratatui::{
 
 use crate::state::SdrMetrics;
 use crate::ui::panel::{Panel, PanelChrome};
-use crate::ui::widgets::micro_common::fft_stale;
+// The threshold→colour helpers were four byte-identical copies of these, which
+// is how a scale comes to disagree with itself. See `state::SAT_WARN_PCT`.
+use crate::ui::widgets::micro_common::{buf_color, drop_color, fft_stale, sat_color, snr_color};
 
 pub struct SignalStripPanel;
-
-fn snr_color(db: f32, theme: &crate::Theme) -> Color {
-    if db >= 20.0 {
-        theme.status_ok
-    } else if db >= 10.0 {
-        theme.status_warn
-    } else {
-        theme.status_crit
-    }
-}
-
-fn sat_color(pct: f32, theme: &crate::Theme) -> Color {
-    if pct < 1.0 {
-        theme.status_ok
-    } else if pct < 5.0 {
-        theme.status_warn
-    } else {
-        theme.status_crit
-    }
-}
-
-fn drop_color(drops: u64, theme: &crate::Theme) -> Color {
-    if drops == 0 {
-        theme.status_ok
-    } else if drops < 10 {
-        theme.status_warn
-    } else {
-        theme.status_crit
-    }
-}
-
-fn buf_color(pct: f32, theme: &crate::Theme) -> Color {
-    if pct < 50.0 {
-        theme.status_ok
-    } else if pct < 80.0 {
-        theme.status_warn
-    } else {
-        theme.status_crit
-    }
-}
 
 fn iq_color(db: f32, theme: &crate::Theme) -> Color {
     if db.abs() < 1.0 {

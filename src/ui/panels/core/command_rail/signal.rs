@@ -10,7 +10,7 @@ use ratatui::{
 
 use crate::state::SdrMetrics;
 use crate::ui::widgets::charts::{ema_smooth, mini_braille_line};
-use crate::ui::widgets::micro_common::snr_color;
+use crate::ui::widgets::micro_common::{sat_color, snr_color};
 
 use super::smeter::{clip_alert, clip_decay_bg, fmt_since};
 
@@ -151,22 +151,6 @@ fn metric_block(m: Metric<'_>, iw: usize, theme: &crate::Theme) -> Line<'static>
         }
     }
     Line::from(spans)
-}
-
-/// Colour for the ADC-saturation value: calm below 10 %, warn to 50 %, crit above.
-///
-/// Deliberately **not** [`crate::ui::widgets::micro_common::sat_color`], which
-/// escalates at 1 % and 5 %. The micro field views are a go/no-go glance and want
-/// to shout early; the rail sits beside a gain control and would cry wolf at the
-/// saturation a well-driven front end normally runs at.
-pub(super) fn sat_color(pct: f32, theme: &crate::Theme) -> Color {
-    if pct >= 50.0 {
-        theme.status_crit
-    } else if pct >= 10.0 {
-        theme.status_warn
-    } else {
-        theme.value
-    }
 }
 
 /// The SIGNAL section rows: SNR, PWR, FLR and SAT, each a metric block, with a
@@ -334,10 +318,20 @@ mod tests {
     }
 
     #[test]
-    fn sat_color_escalates() {
+    /// The rail reads the shared scale, not one of its own.
+    ///
+    /// It used to escalate at 10 % and 50 %, so a SAT of 20 % was calm here and
+    /// red two screens away. Pinned against `crate::state`'s thresholds rather
+    /// than literals, so moving the scale moves this test with it.
+    fn sat_color_is_the_shared_scale() {
         let t = Theme::sdr();
-        assert_eq!(sat_color(0.0, &t), t.value);
-        assert_eq!(sat_color(20.0, &t), t.status_warn);
-        assert_eq!(sat_color(80.0, &t), t.status_crit);
+        assert_eq!(sat_color(0.0, &t), t.status_ok);
+        assert_eq!(sat_color(crate::state::SAT_WARN_PCT, &t), t.status_warn);
+        assert_eq!(sat_color(crate::state::SAT_CRIT_PCT, &t), t.status_crit);
+        assert_eq!(
+            sat_color(20.0, &t),
+            t.status_crit,
+            "20 % is not calm anywhere"
+        );
     }
 }

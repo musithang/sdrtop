@@ -17,7 +17,34 @@ in time.
 
 ---
 
-## 🎨 Checkpoint 14: Bring your own *(you are here)*
+## 📏 Checkpoint 15: One number, one meaning *(you are here)*
+
+The SAT reading used to disagree with itself. The Command Rail called it calm
+below 10 %, while the micro views and the lab benches went amber at 1 % and red
+at 5 %, so the same saturation could show green in one corner of the screen and
+red in another at the same instant, with nothing to say which was right.
+
+- **There is now one saturation scale**: green under 1 %, amber to 5 %, red
+  above, everywhere it appears. If SAT is red, it is red on every screen.
+- **The rail's advice moved to clip headroom**, which is what the reading beside
+  a gain control actually wants. The Bench card's CHAIN verdict says "optimal"
+  while the peak sits in the same window the auto-gain leaves alone, "hot" above
+  it, "low" when there is gain going unused, and "clipping" once samples really
+  are hitting the rails. The rail was given a laxer scale so it would not cry
+  wolf at a well-driven front end; this gives it that without the number having
+  to mean two things.
+- **The `⚠ last clip` memory** under SAT now fires at the same point the reading
+  turns red, rather than at a threshold of its own.
+- **Staleness is decided in one place too.** A couple of panels kept their own
+  copy of "how old is too old". They happened to agree, and one of them already
+  disagreed about the moment before the first reading arrives.
+
+Nothing you do changes; a few numbers change colour a little earlier in the
+rail, and they now agree with the rest of the app.
+
+---
+
+## 🎨 Checkpoint 14: Bring your own
 
 Themes and layouts both became things you can just *write*, plus one overdue
 bug fix.
