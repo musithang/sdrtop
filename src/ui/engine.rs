@@ -98,8 +98,17 @@ impl LayoutEngine {
         self.focused_panel.as_deref()
     }
 
+    /// Whether this panel is actually on screen: named by the active preset
+    /// **and** not hidden.
+    ///
+    /// The hidden check used to be missing, so the answer was really "does the
+    /// preset name it". Nothing was wrong today — `footer` is the only panel ever
+    /// hidden and nothing asks about it — but `App::draw` gates the demodulator on
+    /// `is_panel_visible("fm_demod")`, so the first panel hidden other than the
+    /// footer would have kept its worker running behind a panel that is not drawn.
     pub fn is_panel_visible(&self, name: &str) -> bool {
-        self.config.active_panels().iter().any(|s| s.name == name)
+        !self.hidden_panels.contains(name)
+            && self.config.active_panels().iter().any(|s| s.name == name)
     }
 
     pub fn get_panel_bindings(&self, name: &str) -> &'static [(&'static str, &'static str)] {
@@ -319,5 +328,165 @@ fn render_column(
     for (spec, area) in specs.iter().zip(areas.iter()) {
         let focused = focused_panel == Some(spec.name.as_str());
         registry.render_panel(&spec.name, f, *area, state, theme, focused);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::config::{PanelSpec, PresetConfig};
+    use crate::ui::panel::Panel;
+    use std::collections::HashMap;
+
+    /// A panel that exists only to be registered, so the engine's bookkeeping can
+    /// be exercised without a frame, a theme or a metrics snapshot.
+    struct Stub(&'static str, &'static [(&'static str, &'static str)]);
+    impl Panel for Stub {
+        fn name(&self) -> &'static str {
+            self.0
+        }
+        fn min_size(&self) -> (u16, u16) {
+            (1, 1)
+        }
+        fn focus_bindings(&self) -> &'static [(&'static str, &'static str)] {
+            self.1
+        }
+        fn render(&self, _: &mut Frame, _: Rect, _: &SdrMetrics, _: &crate::Theme, _: bool) {}
+    }
+
+    fn spec(name: &str) -> PanelSpec {
+        PanelSpec {
+            name: name.into(),
+            position: Position::Body,
+            height: None,
+            width_pct: None,
+        }
+    }
+
+    /// Two presets, `alpha` and `beta`, so ordering questions have an answer that
+    /// does not depend on which built-ins happen to exist.
+    fn engine() -> LayoutEngine {
+        let mut presets = HashMap::new();
+        presets.insert(
+            "alpha".to_string(),
+            PresetConfig {
+                panels: vec![spec("one"), spec("two")],
+            },
+        );
+        presets.insert(
+            "beta".to_string(),
+            PresetConfig {
+                panels: vec![spec("two")],
+            },
+        );
+        let mut cfg = LayoutConfig {
+            active_preset: "alpha".into(),
+            presets,
+        };
+        cfg.active_preset = "alpha".into();
+
+        let mut registry = PanelRegistry::new();
+        registry.register(Stub("one", &[("A", "do a thing")]));
+        registry.register(Stub("two", &[]));
+        LayoutEngine::new(cfg, registry)
+    }
+
+    /// A preset name that resolves to nothing must not become the active layout.
+    ///
+    /// `active_panels()` returns an empty slice for an unknown name, so accepting
+    /// one would draw a blank screen with no error anywhere — the failure mode is
+    /// silence, which is why the guard is checked rather than trusted.
+    #[test]
+    fn set_preset_refuses_a_name_that_is_not_defined() {
+        let mut e = engine();
+        e.set_preset("beta");
+        assert_eq!(e.active_preset(), "beta");
+        e.set_preset("nope");
+        assert_eq!(
+            e.active_preset(),
+            "beta",
+            "unknown name must not take effect"
+        );
+        assert!(!e.has_preset("nope"));
+        assert!(e.has_preset("alpha"));
+    }
+
+    /// `[P]` walks every preset and comes back round.
+    ///
+    /// The order is the sorted name order, not the HashMap's, which is the only
+    /// thing that makes the cycle stable between launches.
+    #[test]
+    fn cycle_preset_walks_sorted_and_wraps() {
+        let mut e = engine();
+        assert_eq!(e.active_preset(), "alpha");
+        e.cycle_preset();
+        assert_eq!(e.active_preset(), "beta");
+        e.cycle_preset();
+        assert_eq!(e.active_preset(), "alpha", "cycle must wrap, not stop");
+    }
+
+    /// A user preset joins the cycle with no list to register it in.
+    #[test]
+    fn a_preset_added_after_construction_joins_the_cycle() {
+        let mut e = engine();
+        e.config.presets.insert(
+            "aardvark".to_string(),
+            PresetConfig {
+                panels: vec![spec("one")],
+            },
+        );
+        // Sorted order is aardvark, alpha, beta — so from alpha the next is beta,
+        // and one more wrap brings the new name round.
+        e.cycle_preset();
+        e.cycle_preset();
+        assert_eq!(e.active_preset(), "aardvark");
+        assert_eq!(e.preset_names().len(), 3);
+    }
+
+    #[test]
+    fn focus_is_a_round_trip() {
+        let mut e = engine();
+        assert_eq!(e.focused_panel_name(), None);
+        e.focus("one");
+        assert!(e.is_focused("one"));
+        assert!(!e.is_focused("two"));
+        assert_eq!(e.focused_panel_name(), Some("one"));
+        e.clear_focus();
+        assert_eq!(e.focused_panel_name(), None);
+        assert!(!e.is_focused("one"));
+    }
+
+    /// Visible means *on screen*: named by the active preset and not hidden.
+    ///
+    /// `App::draw` gates the demodulator worker on this, so a panel that is hidden
+    /// but still reported visible would leave a worker running for a panel nobody
+    /// can see.
+    #[test]
+    fn a_hidden_panel_is_not_visible() {
+        let mut e = engine();
+        assert!(e.is_panel_visible("one"));
+        e.set_panel_hidden("one", true);
+        assert!(!e.is_panel_visible("one"));
+        e.set_panel_hidden("one", false);
+        assert!(e.is_panel_visible("one"));
+    }
+
+    /// Not in the active preset is also not visible, hidden flag or no.
+    #[test]
+    fn a_panel_the_preset_does_not_name_is_not_visible() {
+        let mut e = engine();
+        e.set_preset("beta"); // names only "two"
+        assert!(!e.is_panel_visible("one"));
+        assert!(e.is_panel_visible("two"));
+    }
+
+    /// The footer renders whatever `focus_bindings()` returns, so an unknown name
+    /// has to give back an empty slice rather than panic: the name comes from the
+    /// focus state, which outlives a preset switch.
+    #[test]
+    fn bindings_for_an_unregistered_panel_are_empty() {
+        let e = engine();
+        assert_eq!(e.get_panel_bindings("one").len(), 1);
+        assert!(e.get_panel_bindings("ghost").is_empty());
     }
 }

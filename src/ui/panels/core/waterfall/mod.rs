@@ -76,9 +76,6 @@ pub fn next_wf_zoom(current: u32) -> u32 {
         .unwrap_or(32)
 }
 
-/// How old the newest frame may get before the readings are called stale.
-const STALE_MS: u128 = 500;
-
 /// The live state the nameplate and the bonded status cap both report.
 pub(super) struct Status {
     pub paused: bool,
@@ -208,11 +205,14 @@ fn contents(
         return;
     }
 
-    let stale = wf
-        .last_fft
-        .as_ref()
-        .map(|fr| fr.timestamp.elapsed().as_millis() > STALE_MS)
-        .unwrap_or(false);
+    // The bonded status cap and the nameplate answer the same question, so they
+    // ask it once. This used to be a second copy of the rule against a local
+    // `STALE_MS = 500` sitting beside `panel::FFT_STALE_MS = 500`: the two agreed
+    // only by coincidence, and disagreed already on "no frame yet" (the copy said
+    // fresh, the plate said stale). Unreachable in practice — `contents` has
+    // returned by then if there are no rows — but two rules for one word is how
+    // the deck starts contradicting itself.
+    let stale = Staleness::FftAge.resolve(state);
     // Clamp the reported scroll to what the buffer can actually give, so the
     // bonded status cap never promises history that is not there. The content
     // height is the panel minus its two borders and the focus indicator row.

@@ -17,7 +17,9 @@ use ratatui::{
 use crate::state::SdrMetrics;
 use crate::ui::panel::{Panel, PanelChrome};
 use crate::ui::widgets::charts::draw_hbar;
-use crate::ui::widgets::micro_common::{buf_color, drop_color, fmt_rbw, sat_color, snr_color};
+use crate::ui::widgets::micro_common::{
+    buf_color, drop_color, fft_stale, fmt_rbw, sat_color, snr_color,
+};
 
 /// Width threshold (inner columns) for each adaptive mode.
 const COMPACT_MIN: u16 = 60;
@@ -204,12 +206,7 @@ fn render_gain(f: &mut Frame, area: Rect, state: &SdrMetrics, theme: &crate::The
 
 /// SIGNAL zone: SNR / channel power / noise floor.
 fn signal_line(state: &SdrMetrics, theme: &crate::Theme, mode: Mode) -> Line<'static> {
-    let stale = state
-        .waterfall
-        .last_fft
-        .as_ref()
-        .map(|fr| fr.timestamp.elapsed().as_millis() > 500)
-        .unwrap_or(true);
+    let stale = fft_stale(state);
 
     let snr = state.signal.peak_to_nf_db;
     let pwr = state.signal.channel_power_dbfs;
@@ -307,12 +304,7 @@ fn signal_line(state: &SdrMetrics, theme: &crate::Theme, mode: Mode) -> Line<'st
 /// HEALTH zone: drop rate / buffer / saturation / RBW.
 fn health_line(state: &SdrMetrics, theme: &crate::Theme, mode: Mode) -> Line<'static> {
     let hw_stale = !state.radio.hw_streaming;
-    let fft_stale = state
-        .waterfall
-        .last_fft
-        .as_ref()
-        .map(|fr| fr.timestamp.elapsed().as_millis() > 500)
-        .unwrap_or(true);
+    let fft_is_stale = fft_stale(state);
 
     let drops = state.signal.drops_per_sec;
     let buf = state.iq.buf_fill_pct;
@@ -321,7 +313,7 @@ fn health_line(state: &SdrMetrics, theme: &crate::Theme, mode: Mode) -> Line<'st
         .waterfall
         .last_fft
         .as_ref()
-        .filter(|_| !fft_stale)
+        .filter(|_| !fft_is_stale)
         .map(|fr| fr.enbw_hz);
 
     let lbl = |s: &'static str| Span::styled(s, Style::default().fg(theme.label));
