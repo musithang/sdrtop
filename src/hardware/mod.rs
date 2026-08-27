@@ -5,7 +5,7 @@ pub mod sysfs;
 pub mod traits;
 
 pub use hackrf::{board_rev_name, compute_bb_filter_bw};
-pub use traits::{DeviceCapabilities, GainModel, RxContext, SampleFormat, SdrDevice};
+pub use traits::{DeviceCapabilities, DeviceInfo, GainModel, RxContext, SampleFormat, SdrDevice};
 
 use std::sync::Arc;
 

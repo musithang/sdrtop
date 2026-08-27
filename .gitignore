@@ -22,8 +22,7 @@ docs/.obsidian/
 .obsidian/
 
 # Claude code superpowers
-.superpowers/
-docs/superpowers/
+.claude/
 CLAUDE.md
 
 # Developer-specific docsuments
