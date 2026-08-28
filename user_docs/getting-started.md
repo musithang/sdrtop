@@ -9,7 +9,9 @@
 - A Linux machine
 - A HackRF One **or** an RTL-SDR dongle connected via USB
 - The `libhackrf` and `librtlsdr` libraries
-- A recent Rust stable, 1.78 or newer
+- Rust stable 1.88 or newer. Most distributions ship something older, so
+  install it with [rustup](https://rustup.rs) rather than from your package
+  manager
 
 ```sh
 # Arch Linux / Manjaro

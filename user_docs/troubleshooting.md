@@ -326,6 +326,11 @@ Rust packages are frequently behind. Install rustup:
 curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
 ```
 
+Note that 1.78 only gets you past the *lockfile*. The code itself needs **1.88 or
+newer**, so a toolchain in between clears this error and then fails on the source
+with something like `no method named as_chunks found for slice`. If you see that,
+the fix is the same command above: `rustup update stable`.
+
 ### The build fails looking for libhackrf
 
 sdrtop links **both** backends at build time, so you need `libhackrf` and

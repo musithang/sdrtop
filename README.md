@@ -145,7 +145,7 @@ The view sdrtop opens on. A slim header plus a left **instrument rail** that pac
 
 ## Quick start
 
-**Requirements:** Linux · HackRF One *or* RTL-SDR · `libhackrf` + `librtlsdr` + `pkg-config` · a recent Rust stable (1.78+)
+**Requirements:** Linux · HackRF One *or* RTL-SDR · `libhackrf` + `librtlsdr` + `pkg-config` · Rust stable 1.88 or newer
 
 Both libraries are needed at build time even if you only own one radio; at runtime sdrtop is happy with whichever you plug in.
 

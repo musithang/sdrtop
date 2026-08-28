@@ -3,6 +3,17 @@ name = "sdrtop"
 version = "0.3.5"
 edition = "2021"
 license = "GPL-3.0-or-later"
+description = "Terminal monitor for HackRF One and RTL-SDR: live spectrum, waterfall, and IQ/RF/timing/signal diagnostics"
+repository = "https://github.com/mustang6139/sdrtop"
+homepage = "https://github.com/mustang6139/sdrtop"
+readme = "README.md"
+keywords = ["sdr", "hackrf", "rtl-sdr", "radio", "tui"]
+categories = ["command-line-utilities", "hardware-support", "science"]
+# Measured, not guessed: `slice::as_chunks` (hot path, `hardware/process.rs` and
+# `signal/demod`) stabilised in 1.88.0 and `u32::is_multiple_of` in 1.87.0. The
+# README claimed 1.78 for years, which is the *lockfile* floor - a toolchain
+# between the two compiles the lockfile and then fails on the source.
+rust-version = "1.88"
 
 [[bin]]
 name = "sdrtop"

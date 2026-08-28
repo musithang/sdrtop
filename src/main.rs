@@ -24,7 +24,14 @@ use std::io;
 use std::path::PathBuf;
 
 #[derive(Parser)]
-#[command(name = "sdrtop", about = "HackRF One / RTL-SDR terminal monitor")]
+// `version` is not decoration: it is the first thing anyone pastes into a bug
+// report, and a packaged binary that cannot say which build it is makes every
+// report ambiguous.
+#[command(
+    name = "sdrtop",
+    version,
+    about = "HackRF One / RTL-SDR terminal monitor"
+)]
 struct Cli {
     /// Path to config file (default: ~/.config/sdrtop/config.toml)
     #[arg(long, value_name = "FILE")]
@@ -235,4 +242,43 @@ async fn main() -> Result<()> {
     }
 
     Ok(())
+}
+
+#[cfg(test)]
+mod cli_tests {
+    use super::Cli;
+    use clap::CommandFactory;
+
+    /// `--version` has to exist and report the crate's own version.
+    ///
+    /// It is the first thing anyone pastes into a bug report, and a packaged
+    /// binary that cannot say which build it is makes every report ambiguous.
+    /// Wired through clap's `version` attribute, which reads `CARGO_PKG_VERSION`,
+    /// so this checks the wiring rather than the number.
+    #[test]
+    fn the_binary_reports_its_own_version() {
+        let cmd = Cli::command();
+        assert_eq!(
+            cmd.get_version(),
+            Some(env!("CARGO_PKG_VERSION")),
+            "--version is not wired to the crate version"
+        );
+    }
+
+    /// The packaging metadata is what `cargo deb` builds the package from, and it
+    /// refuses to run without a description. Asserted here so the package cannot
+    /// be broken by an edit to `Cargo.toml` that nothing else notices.
+    #[test]
+    fn the_package_metadata_a_deb_needs_is_present() {
+        assert!(
+            !env!("CARGO_PKG_DESCRIPTION").is_empty(),
+            "cargo-deb refuses to build a package with no description"
+        );
+        assert!(!env!("CARGO_PKG_REPOSITORY").is_empty());
+        assert_eq!(env!("CARGO_PKG_LICENSE"), "GPL-3.0-or-later");
+        // The command's own `about` and the package description are two different
+        // strings on purpose: one is a one-line usage banner, the other is what
+        // `apt show` prints. Both must exist.
+        assert!(Cli::command().get_about().is_some());
+    }
 }
