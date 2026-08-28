@@ -23,16 +23,18 @@ case "$ARCH" in
 esac
 
 REPO="$(cd "$(dirname "$0")/.." && pwd)"
+. "$REPO/packaging/_container.sh"
+
 
 # One image per architecture; the expensive layers are shared through podman's
 # cache, so only the first build pays for rustup and cargo-deb.
-if ! podman image exists "$IMAGE"; then
+if ! "$CONTAINER" image inspect "$IMAGE" >/dev/null 2>&1; then
     echo "building the $IMAGE image" >&2
-    podman build --platform linux/amd64 --build-arg "DEB_ARCH=$ARCH" \
+    "$CONTAINER" build --platform linux/amd64 --build-arg "DEB_ARCH=$ARCH" \
         -t "$IMAGE" -f "$REPO/packaging/Containerfile" "$REPO"
 fi
 
-exec podman run --rm --platform linux/amd64 \
+exec "$CONTAINER" run --rm --platform linux/amd64 $CONTAINER_USER \
     -v "$REPO:/src" -w /src \
     -e TRIPLE="$TRIPLE" -e GNU="$GNU" \
     "$IMAGE" sh -eu -c '

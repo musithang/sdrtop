@@ -1,0 +1,89 @@
+name: Release
+
+# Deliberately separate from ci.yaml. That runs on every push and must stay
+# fast; this runs once per tag and takes half an hour, because it builds three
+# architectures in a Debian 12 container.
+on:
+  push:
+    tags: ["v*"]
+  # Buildable without publishing, to check the recipe before cutting a tag.
+  workflow_dispatch:
+
+permissions:
+  contents: write # to create the release and upload to it
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # A tag that disagrees with Cargo.toml would publish artefacts named after
+      # one version containing another. The .deb and the tarball both take their
+      # name from the crate version, so the mismatch would be silent.
+      - name: The tag and the crate version must agree
+        if: startsWith(github.ref, 'refs/tags/v')
+        run: |
+          crate=$(sed -n 's/^version = "\(.*\)"/\1/p' Cargo.toml | head -1)
+          tag="${GITHUB_REF_NAME#v}"
+          echo "crate=$crate tag=$tag"
+          test "$crate" = "$tag" || {
+            echo "::error::tag $GITHUB_REF_NAME does not match Cargo.toml version $crate"
+            exit 1
+          }
+
+      # The same recipe that runs locally. `packaging/` is in the repo for this
+      # reason: a second copy of the build steps written in YAML would drift.
+      - name: Build the packages
+        run: |
+          for arch in amd64 arm64 armhf; do
+            packaging/build-deb.sh "$arch"
+          done
+          packaging/build-tarball.sh
+
+      # An arm64 package holding an x86-64 binary installs happily and then does
+      # nothing. Nothing else in this pipeline would notice.
+      - name: Verify each package
+        run: |
+          for deb in target/debian/*.deb; do
+            packaging/verify-deb.sh "$deb"
+          done
+
+      - name: Collect the artefacts and their checksums
+        run: |
+          mkdir -p release
+          cp target/debian/*.deb target/dist/*.tar.gz release/
+          cd release
+          sha256sum -- * > SHA256SUMS
+          cat SHA256SUMS
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: packages
+          path: release/
+
+      # Only a tag publishes. A manual run builds and verifies and stops there.
+      - name: Publish the release
+        if: startsWith(github.ref, 'refs/tags/v')
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" \
+            --repo "$GITHUB_REPOSITORY" \
+            --title "$GITHUB_REF_NAME" \
+            --generate-notes \
+            --notes-file - release/* <<'NOTES'
+          These packages are **unsigned**, so `apt` cannot verify them. Install
+          with `sudo dpkg -i sdrtop_*_<arch>.deb`, then `sudo apt-get -f install`
+          if it asks for dependencies.
+
+          Built on Debian 12, so they install on Debian 12/13, Ubuntu 24.04+,
+          Linux Mint 22, and Raspberry Pi OS Bookworm. Older releases are out of
+          reach: their glibc and their libhackrf are both too old.
+
+          Your user needs to be in the `plugdev` group to open the radio:
+
+              sudo usermod -aG plugdev $USER
+
+          Then log out and back in. Verify a download against `SHA256SUMS`.
+          NOTES
