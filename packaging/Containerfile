@@ -1,0 +1,48 @@
+# The build environment for one architecture's .deb.
+#
+#   podman build --build-arg DEB_ARCH=arm64 -t sdrtop-deb-arm64 -f packaging/Containerfile .
+#
+# Debian 12 (bookworm) because glibc is forward-compatible only: a package built
+# here installs on Debian 12/13, Ubuntu 24.04+, Mint 22 and Raspberry Pi OS
+# Bookworm. Built on Ubuntu 24.04 it would exclude the first and the last, for
+# nothing. See dev_docs/release-packaging-plan.md.
+#
+# One image *per architecture*, not one image for all three, because bookworm's
+# `libhackrf-dev` carries no `Multi-Arch` field and therefore cannot be installed
+# for two architectures at once (`librtlsdr-dev` is `Multi-Arch: same` and would
+# have been fine). Everything expensive - apt, rustup, compiling cargo-deb -
+# happens before the ARG, so podman's layer cache shares it across all three.
+FROM docker.io/library/debian:12
+
+ENV DEBIAN_FRONTEND=noninteractive
+ENV CARGO_TERM_COLOR=never
+
+RUN dpkg --add-architecture arm64 \
+ && dpkg --add-architecture armhf \
+ && apt-get update -qq \
+ && apt-get install -y -qq --no-install-recommends \
+        curl ca-certificates build-essential pkg-config \
+        gcc-aarch64-linux-gnu gcc-arm-linux-gnueabihf \
+        libc6-dev:arm64 libc6-dev:armhf
+
+# Debian ships rustc 1.63; sdrtop needs 1.88 (`slice::as_chunks`). The distro
+# compiler gets past the lockfile and then fails on the source, which is the
+# two-stage failure the troubleshooting page warns users about.
+ENV RUSTUP_HOME=/usr/local/rustup CARGO_HOME=/usr/local/cargo
+ENV PATH=/usr/local/cargo/bin:$PATH
+RUN curl -sSf https://sh.rustup.rs | sh -s -- -y --profile minimal --default-toolchain stable \
+ && rustup target add \
+        x86_64-unknown-linux-gnu \
+        aarch64-unknown-linux-gnu \
+        armv7-unknown-linux-gnueabihf \
+ && cargo install cargo-deb --locked \
+ && chmod -R a+w "$CARGO_HOME"
+
+# Everything above is architecture-independent and cached across the three
+# builds. Only this last layer differs.
+ARG DEB_ARCH=amd64
+RUN apt-get install -y -qq --no-install-recommends \
+        "libhackrf-dev:${DEB_ARCH}" "librtlsdr-dev:${DEB_ARCH}" \
+ && rm -rf /var/lib/apt/lists/*
+
+RUN rustc --version && cargo deb --version

@@ -4,7 +4,6 @@ target/
 /Dockerfile
 /.dockerignore
 /scripts/
-packaging/
 
 # Build output / extracted binaries
 /dist/
