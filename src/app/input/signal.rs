@@ -31,7 +31,7 @@ pub(super) fn signal_metrics(key: KeyEvent, ctx: &mut InputCtx<'_>) -> KeyAction
 }
 
 /// `signal_characterization` focus (`[X]`): `[C]` logs a one-line snapshot of the
-/// current characterization — modulation, SNR, occupied BW, and ACPR when it's
+/// current characterization - modulation, SNR, occupied BW, and ACPR when it's
 /// been measured. The `lab_signal` analogue of `handle_signal_metrics_focus`.
 pub(super) fn signal_characterization(key: KeyEvent, ctx: &mut InputCtx<'_>) -> KeyAction {
     let (state, _device) = (ctx.state, ctx.device);
@@ -79,7 +79,7 @@ pub(super) fn fm_demod(key: KeyEvent, ctx: &mut InputCtx<'_>) -> KeyAction {
             if !on {
                 // `enabled` is normally `App::draw`'s to compute, but waiting for
                 // the next frame leaves a window in which the worker publishes one
-                // more measurement — and that publish overwrites the clear below,
+                // more measurement - and that publish overwrites the clear below,
                 // then sits on screen for the full staleness timeout. Switching it
                 // off here means the worker's publish-time check sees the intent
                 // however the two threads interleave.
@@ -142,7 +142,7 @@ pub(super) fn fm_demod(key: KeyEvent, ctx: &mut InputCtx<'_>) -> KeyAction {
         }
         KeyCode::Char('t') => {
             // The classifier measures 99 % occupied bandwidth across the whole
-            // span, so on a wide span it reads WFM for nearly anything — fine as a
+            // span, so on a wide span it reads WFM for nearly anything - fine as a
             // badge, too coarse to choose a demodulator. This is the override.
             let mut m = metrics(state);
             let picked = m.demod.cycle_mode();
@@ -160,7 +160,7 @@ pub(super) fn fm_demod(key: KeyEvent, ctx: &mut InputCtx<'_>) -> KeyAction {
             // know only the FM one, so an AM depth reading or a decoded CTCSS tone
             // logged "no measurement to snapshot" with the number on screen above it.
             // The mode name is the *effective* one for the same reason the sections
-            // are chosen by it — a forced mode logged the classifier's guess.
+            // are chosen by it - a forced mode logged the classifier's guess.
             let modulation = m.demod.effective_modulation(m.signal.modulation);
             let ch = format!(" \u{00b7} {:.0} kHz ch", m.demod.channel_rate_hz / 1000.0);
             let body = match (m.demod.live(), m.demod.live_am()) {

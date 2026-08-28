@@ -102,8 +102,8 @@ impl LayoutEngine {
     /// **and** not hidden.
     ///
     /// The hidden check used to be missing, so the answer was really "does the
-    /// preset name it". Nothing was wrong today — `footer` is the only panel ever
-    /// hidden and nothing asks about it — but `App::draw` gates the demodulator on
+    /// preset name it". Nothing was wrong today - `footer` is the only panel ever
+    /// hidden and nothing asks about it - but `App::draw` gates the demodulator on
     /// `is_panel_visible("fm_demod")`, so the first panel hidden other than the
     /// footer would have kept its worker running behind a panel that is not drawn.
     pub fn is_panel_visible(&self, name: &str) -> bool {
@@ -158,7 +158,7 @@ impl LayoutEngine {
             })
         };
 
-        // Compute heights once — reused for both total-height sum and per-panel Rect.
+        // Compute heights once - reused for both total-height sum and per-panel Rect.
         let top_heights: Vec<u16> = top_specs.iter().map(panel_h).collect();
         let bottom_heights: Vec<u16> = bottom_specs.iter().map(panel_h).collect();
         let top_h: u16 = top_heights.iter().sum();
@@ -173,7 +173,7 @@ impl LayoutEngine {
             ])
             .split(size);
 
-        // Top panels — stacked downward
+        // Top panels - stacked downward
         let mut y = outer[0].y;
         for (spec, &h) in top_specs.iter().zip(top_heights.iter()) {
             let area = Rect {
@@ -193,7 +193,7 @@ impl LayoutEngine {
             y += h;
         }
 
-        // Bottom panels — stacked downward
+        // Bottom panels - stacked downward
         let mut y = outer[2].y;
         for (spec, &h) in bottom_specs.iter().zip(bottom_heights.iter()) {
             let area = Rect {
@@ -213,7 +213,7 @@ impl LayoutEngine {
             y += h;
         }
 
-        // Body — split into left / center / right columns
+        // Body - split into left / center / right columns
         if !body_specs.is_empty() {
             let left_specs: Vec<_> = body_specs
                 .iter()
@@ -251,7 +251,7 @@ impl LayoutEngine {
                 focused,
             );
             // Bond: a center column that is exactly [spectrum, waterfall] renders as
-            // one instrument — the spectrum drops its bottom border + own freq axis,
+            // one instrument - the spectrum drops its bottom border + own freq axis,
             // the waterfall's top border becomes the shared frequency ruler, and a
             // `├`/`┤` junction overlay ties the seam into the continuous side borders.
             let is_bond_pair = center_specs.len() == 2
@@ -394,7 +394,7 @@ mod tests {
     /// A preset name that resolves to nothing must not become the active layout.
     ///
     /// `active_panels()` returns an empty slice for an unknown name, so accepting
-    /// one would draw a blank screen with no error anywhere — the failure mode is
+    /// one would draw a blank screen with no error anywhere - the failure mode is
     /// silence, which is why the guard is checked rather than trusted.
     #[test]
     fn set_preset_refuses_a_name_that_is_not_defined() {
@@ -435,7 +435,7 @@ mod tests {
                 panels: vec![spec("one")],
             },
         );
-        // Sorted order is aardvark, alpha, beta — so from alpha the next is beta,
+        // Sorted order is aardvark, alpha, beta - so from alpha the next is beta,
         // and one more wrap brings the new name round.
         e.cycle_preset();
         e.cycle_preset();

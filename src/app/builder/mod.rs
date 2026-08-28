@@ -2,9 +2,9 @@
 //!
 //! Two ways in, split by whether the radio is ours to command:
 //!
-//! - [`App::new_normal`] — the device opened, so it gets programmed, streamed
+//! - [`App::new_normal`] - the device opened, so it gets programmed, streamed
 //!   from, and swept.
-//! - [`App::new_observer`] — another process holds it, so everything is read
+//! - [`App::new_observer`] - another process holds it, so everything is read
 //!   from sysfs and every control is inert.
 //!
 //! What they share is factored by kind rather than by order: [`boot`] owns the

@@ -1,4 +1,4 @@
-//! `micro_sweep` — the field scanner view (`[0]` cycle, sweep step).
+//! `micro_sweep` - the field scanner view (`[0]` cycle, sweep step).
 //!
 //! A compact glance at the running sweep: band range and cycle progress, plus the
 //! strongest signals found, each tagged with its band-plan name. Entering this

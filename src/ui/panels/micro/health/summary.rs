@@ -14,7 +14,7 @@ const CPU_HIGH_PCT: f32 = 70.0;
 
 /// One-glance verdict: drops beat CPU beat all-clear; idle when not streaming.
 ///
-/// One row, so the ordering is the whole design — the worst thing that is true
+/// One row, so the ordering is the whole design - the worst thing that is true
 /// is the thing shown.
 pub(super) fn line(state: &SdrMetrics, fd: &Field) -> Line<'static> {
     let theme = fd.theme;

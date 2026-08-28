@@ -11,15 +11,15 @@ pub struct Stage {
     pub nf_db: f64,
 }
 
-/// The HackRF One receive chain as an ordered stage list — the single model behind
+/// The HackRF One receive chain as an ordered stage list - the single model behind
 /// the cascade NF, the gain lineup, and the level diagram, so they can never drift.
 ///
 /// Stage approximations (HackRF One / MAX2837):
-///   AMP  — MGA-81563 front-end LNA (only when enabled): gain 14 dB, NF ~2.0 dB
-///   LNA  — MAX2837 LNA: NF ~3.5 dB at max gain (40 dB), degrades ~0.15 dB per dB of
+///   AMP  - MGA-81563 front-end LNA (only when enabled): gain 14 dB, NF ~2.0 dB
+///   LNA  - MAX2837 LNA: NF ~3.5 dB at max gain (40 dB), degrades ~0.15 dB per dB of
 ///          gain reduction (NF_LNA = 3.5 + (40−G)×0.15)
-///   MIX  — down-conversion mixer: ~7 dB conversion loss, NF ~7 dB
-///   VGA  — MAX2837 baseband VGA: gain `vga_db`, NF ~10 dB
+///   MIX  - down-conversion mixer: ~7 dB conversion loss, NF ~7 dB
+///   VGA  - MAX2837 baseband VGA: gain `vga_db`, NF ~10 dB
 pub fn cascade(amp_enabled: bool, lna_gain: u32, vga_gain: u32) -> Vec<Stage> {
     let nf_lna = 3.5 + (40.0 - lna_gain as f64).max(0.0) * 0.15;
     let mut stages = Vec::with_capacity(4);
@@ -51,7 +51,7 @@ pub fn cascade(amp_enabled: bool, lna_gain: u32, vga_gain: u32) -> Vec<Stage> {
 /// System Noise Figure (dB) of a cascade via Friis:
 ///   F = F₁ + (F₂−1)/G₁ + (F₃−1)/(G₁G₂) + …   (linear, → back to dB)
 /// The last stage's gain never enters (no stage follows it to suppress), so VGA gain
-/// is irrelevant to the NF — only its NF and the gains ahead of it matter.
+/// is irrelevant to the NF - only its NF and the gains ahead of it matter.
 pub fn system_nf_db(stages: &[Stage]) -> f64 {
     let lin = |db: f64| 10f64.powf(db / 10.0);
     let mut f_total = 0.0;
@@ -67,7 +67,7 @@ pub fn system_nf_db(stages: &[Stage]) -> f64 {
     10.0 * (f_total + 1.0).log10()
 }
 
-/// Cascade Noise Figure (dB) for the live front-end — the one number shown app-wide.
+/// Cascade Noise Figure (dB) for the live front-end - the one number shown app-wide.
 /// Thin wrapper over [`system_nf_db`]`(`[`cascade`]`)`; VGA gain is irrelevant to NF
 /// so a nominal 0 is passed.
 pub fn estimate_nf_db(amp_enabled: bool, lna_gain: u32) -> f64 {
@@ -121,7 +121,7 @@ pub fn adc_utilisation_ratio(hist: &[u64; 32]) -> f64 {
 
 /// `0 dBFS = 0 dBm` reference that anchors the modeled dBm lineup to the measured ADC
 /// level. The HackRF is not power-calibrated, so every dBm here is **modeled /
-/// relative** — useful for staging, not a wattmeter reading.
+/// relative** - useful for staging, not a wattmeter reading.
 pub const ADC_DBFS_REF_DBM: f64 = 0.0;
 
 /// Signal and (modeled) noise level at one node of the chain, in dBm.
@@ -193,7 +193,7 @@ pub fn adc_loading(peak_dbfs: f64, rms_dbfs: f64, clip_events: u64, n: u64) -> A
     }
 }
 
-/// Large-signal linearity figures. **All modeled** — these need a two-tone source to
+/// Large-signal linearity figures. **All modeled** - these need a two-tone source to
 /// measure, so they are datasheet-anchored estimates nudged by the live gain, not lab
 /// readings. `sfdr_limit_db` is the hard 8-bit quantisation ceiling (6.02·8 + 1.76).
 #[derive(Clone, Copy, Debug)]
@@ -222,7 +222,7 @@ pub fn linearity(lna_gain: u32, vga_gain: u32) -> Linearity {
 pub const OPT_PEAK_DBFS: f64 = -8.0;
 
 /// Staging verdict from the ADC peak level. `(word, severity)` with severity
-/// 0 = OK, 1 = warn, 2 = crit — same scale as [`gain_advice`].
+/// 0 = OK, 1 = warn, 2 = crit - same scale as [`gain_advice`].
 pub fn staging_verdict(peak_dbfs: f64) -> (&'static str, u8) {
     if peak_dbfs >= -1.0 {
         ("CLIPPING", 2)

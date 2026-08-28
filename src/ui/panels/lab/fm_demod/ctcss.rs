@@ -1,4 +1,4 @@
-//! `CTCSS` — the subaudible tone a narrow-band FM repeater is squelched on.
+//! `CTCSS` - the subaudible tone a narrow-band FM repeater is squelched on.
 //!
 //! The only section with three empty states rather than one: a tone, a search
 //! still filling its window, and a channel that carries no tone at all. They
@@ -44,7 +44,7 @@ pub(super) fn lines(
             ]));
         }
         // "Still filling the window" and "there is no tone" look the
-        // same on screen unless they are said differently — and only
+        // same on screen unless they are said differently - and only
         // one of them is a finding.
         None if state.demod.ctcss_searching() => {
             stack.push(Line::from(vec![

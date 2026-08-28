@@ -1,7 +1,7 @@
 //! The mode strip and its lead card.
 //!
-//! The rail's mode auto-follows what the user is doing — tuning switches to
-//! Hunt, touching gain switches to Bench, and it decays back to Monitor — so the
+//! The rail's mode auto-follows what the user is doing - tuning switches to
+//! Hunt, touching gain switches to Bench, and it decays back to Monitor - so the
 //! card under the tabs shows whatever is most useful right now. Everything below
 //! the card is fixed, which is what keeps the rail readable while the top of it
 //! adapts.
@@ -24,7 +24,7 @@ fn mode_tabs_full_w() -> usize {
         .sum::<usize>()
 }
 
-/// The `HUNT·MONITOR·BENCH` mode strip — every mode a filled ` LABEL ` chip: the
+/// The `HUNT·MONITOR·BENCH` mode strip - every mode a filled ` LABEL ` chip: the
 /// active one lit bright (`value_hi` bg, bold), the inactive ones the same chip in a
 /// muted "inactive" fill (`border_dim` bg) so they read as selected-but-off rather
 /// than plain text. Both use dark text on the fill. Falls back to 3-letter codes
@@ -89,13 +89,13 @@ const HEADROOM_LOW_DB: f32 = 45.0;
 ///
 /// **Headroom is what a gain control wants to be told**, which is why it leads
 /// here. This verdict used to be driven by saturation against the rail's own
-/// laxer thresholds (≥50 % → crit, ≥10 % → warn) — the second scale D1 removed.
+/// laxer thresholds (≥50 % → crit, ≥10 % → warn) - the second scale D1 removed.
 /// Saturation still gets the final word on *clipping*, because samples pinned to
 /// the rails are direct evidence and headroom alone cannot distinguish "peaking
 /// at full scale" from "clipping hard"; but it does so on the one shared scale.
 /// The warn edge is now the top of [`ADC_COMFORT_DBFS`](crate::state::ADC_COMFORT_DBFS),
 /// so the rail cannot call a level "hot" that the auto-gain latch is content to
-/// hold — and it warns while there is still headroom left, rather than after a
+/// hold - and it warns while there is still headroom left, rather than after a
 /// tenth of the samples have already pinned.
 fn chain_verdict(sat_pct: f32, headroom_db: f32) -> (&'static str, i8) {
     // The peak is a level, not a rate, so it cannot tell clipping from a signal
@@ -131,7 +131,7 @@ pub(super) fn mode_card_lines(
     };
 
     match mode {
-        // HUNT — the three strongest signals on screen, with band tags.
+        // HUNT - the three strongest signals on screen, with band tags.
         RailMode::Hunt => {
             let fft = state.waterfall.last_fft.as_ref().filter(|_| !stale);
             let Some(fr) = fft else {
@@ -171,7 +171,7 @@ pub(super) fn mode_card_lines(
                 .collect()
         }
 
-        // MONITOR — a calm watch headline: signal quality + how many signals are up.
+        // MONITOR - a calm watch headline: signal quality + how many signals are up.
         RailMode::Monitor => {
             let snr = state.signal.peak_to_nf_db;
             let (word, col) = if stale {
@@ -221,7 +221,7 @@ pub(super) fn mode_card_lines(
             ]
         }
 
-        // BENCH — gain-chain health: clip headroom + a one-word verdict.
+        // BENCH - gain-chain health: clip headroom + a one-word verdict.
         RailMode::Bench => {
             let streaming = state.radio.hw_streaming;
             let power = state.signal.adc_peak_dbfs;
@@ -304,14 +304,14 @@ mod tests {
         // Each chip is label+2 (pad spaces) + 1 gap = label+3:
         // (4+3) + (7+3) + (5+3) + 1 = 26.
         assert_eq!(mode_tabs_full_w(), 26);
-        // Compact kicks in below that — the strip then uses 3-letter codes.
+        // Compact kicks in below that - the strip then uses 3-letter codes.
         assert!(mode_tabs_full_w() > 20, "narrow rail must compact");
         assert!(mode_tabs_full_w() <= 28, "wide rail shows full labels");
     }
 
     #[test]
     fn chain_verdict_leads_with_headroom() {
-        // Saturation still decides *clipping*, on the one shared scale — 20 % of
+        // Saturation still decides *clipping*, on the one shared scale - 20 % of
         // samples pinned is clipping, and used to read merely "hot" here because
         // the rail had its own 50 % crit point.
         assert_eq!(chain_verdict(60.0, 10.0), ("clipping", 2));

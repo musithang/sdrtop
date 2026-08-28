@@ -3,7 +3,7 @@
 //!
 //! Two braille columns fit in one character cell, so every text column carries
 //! **two** callbacks. That is why the per-column severity is the worse of a pair
-//! rather than one sample's — a cell that contains one late callback is late.
+//! rather than one sample's - a cell that contains one late callback is late.
 
 use ratatui::{
     layout::Rect,
@@ -23,7 +23,7 @@ use super::severity::{dev_severity, over_tag_sign, severity_color};
 /// instead of drawing four cells of noise.
 const MIN_COLS: usize = 4;
 
-/// Callbacks per character cell — braille packs two columns of dots per cell.
+/// Callbacks per character cell - braille packs two columns of dots per cell.
 const SAMPLES_PER_COL: usize = 2;
 
 /// Per-column readings, resolved once so the row loop is a lookup.
@@ -175,7 +175,7 @@ mod tests {
     }
 
     /// A column carries two callbacks, and the worse of the pair decides its
-    /// colour — a cell holding one late callback is late.
+    /// colour - a cell holding one late callback is late.
     #[test]
     fn a_column_takes_the_worse_of_its_two_samples() {
         let window = [10i32, 5_000, 20, 30];

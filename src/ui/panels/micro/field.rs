@@ -1,7 +1,7 @@
 //! The vocabulary the field views share.
 //!
-//! All of these panels open the same way — a status badge and the tuned
-//! frequency — and all of them use the same two conventions inside: a dim label,
+//! All of these panels open the same way - a status badge and the tuned
+//! frequency - and all of them use the same two conventions inside: a dim label,
 //! and `---` where a number is not being measured. That header was written out
 //! three times, byte for byte, in `gain`, `health` and `signal`.
 //!
@@ -90,7 +90,7 @@ mod tests {
         assert!(!text(&live).contains("IDLE"));
     }
 
-    /// A padded label is exactly its column, however long the name is — a name
+    /// A padded label is exactly its column, however long the name is - a name
     /// wider than the column pushes rather than truncating, because a clipped
     /// label is worse than a nudged one.
     #[test]

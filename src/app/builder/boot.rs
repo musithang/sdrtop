@@ -4,15 +4,15 @@
 //! `new_normal` and `new_observer` each used to carry a copy of the same
 //! ~110-line `SdrMetrics` literal. The two copies differed in **eleven** places;
 //! everything else was byte-identical, which is the kind of duplication that
-//! drifts silently — a field added to one boot path and not the other shows up
+//! drifts silently - a field added to one boot path and not the other shows up
 //! as a panel that reads correctly on a free radio and wrongly on a busy one.
 //!
 //! So the eleven live in [`Boot`], one per field, and the literal lives once in
 //! [`initial_metrics`]. [`Boot::normal`] and [`Boot::observer`] are then the
 //! whole of the difference between the two startups, in two readable blocks.
 //!
-//! [`resolve_tuning`] is the startup clamp, split out because it is pure — no
-//! device, no clock, no lock — which is what lets the cross-device-family gain
+//! [`resolve_tuning`] is the startup clamp, split out because it is pure - no
+//! device, no clock, no lock - which is what lets the cross-device-family gain
 //! and range snapping be tested with no radio attached.
 
 use std::collections::VecDeque;
@@ -62,7 +62,7 @@ pub(super) struct Boot {
     pub observer: ObserverState,
     /// Saved spectrum markers, restored only when there is a spectrum to put
     /// them on: observer mode spawns no FFT worker, so a marker there would
-    /// annotate an axis that never draws — and `save_config` is a no-op in
+    /// annotate an axis that never draws - and `save_config` is a no-op in
     /// observer mode, so there is no path back for them either.
     pub markers: Vec<SpectrumMarker>,
     /// Command Rail recall slots. Empty in observer mode for the same reason:
@@ -104,7 +104,7 @@ impl Boot {
     /// The config's tuning is taken **verbatim**, not clamped like [`Self::normal`]'s.
     /// The clamp exists to make a setting legal for the device it is about to be
     /// programmed into, and here nothing is programmed; worse, the observer
-    /// capability profiles are placeholders — `rtlsdr::observer_caps()` carries
+    /// capability profiles are placeholders - `rtlsdr::observer_caps()` carries
     /// an empty gain table, so snapping against it would report every RTL gain as
     /// 0 dB. A config value the operator recognises beats a fabricated legal one.
     pub(super) fn observer(
@@ -151,7 +151,7 @@ impl Boot {
 }
 
 /// Clamp the stored config into THIS device's legal range, falling back to its
-/// default when out of range — so a config saved on one device (e.g. a HackRF at
+/// default when out of range - so a config saved on one device (e.g. a HackRF at
 /// 2.4 GHz / 10 Msps) boots an RTL-SDR at a legal freq/rate instead of failing,
 /// without discarding the original device's settings.
 ///
@@ -407,7 +407,7 @@ mod tests {
     }
 
     /// The two boot paths must agree about everything they do not deliberately
-    /// disagree about — that is the whole point of the shared literal.
+    /// disagree about - that is the whole point of the shared literal.
     #[test]
     fn both_startups_begin_with_no_measurements() {
         let cfg = AppConfig::default();

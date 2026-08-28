@@ -21,7 +21,7 @@ pub fn snr_color(db: f32, theme: &crate::Theme) -> Color {
         theme.status_crit
     }
 }
-/// The colour for an ADC-saturation percentage — the app's only SAT scale.
+/// The colour for an ADC-saturation percentage - the app's only SAT scale.
 ///
 /// The thresholds live in [`crate::state`] so the RX poll's clip memory and this
 /// colour cannot drift apart; see [`crate::state::SAT_WARN_PCT`] for why there is
@@ -68,7 +68,7 @@ pub fn fmt_freq_mhz(hz: u64) -> String {
     format!("{:.3} MHz", hz as f64 / 1_000_000.0)
 }
 
-/// `1.500 MHz` / `152.0 kHz` / `400 Hz` — the one bandwidth readout.
+/// `1.500 MHz` / `152.0 kHz` / `400 Hz` - the one bandwidth readout.
 ///
 /// There were five of these, in `input.rs` (twice, once inline), `signal_metrics`,
 /// `signal_characterization` and here, and they disagreed: 180 kHz of occupied
@@ -79,7 +79,7 @@ pub fn fmt_freq_mhz(hz: u64) -> String {
 /// This precision is the lab one, kept because it is the honest one: roughly four
 /// significant figures at every scale, so the readout resolves to about 1 kHz on a
 /// megahertz-wide signal and 100 Hz on a kilohertz-wide one. An FFT bin is ~488 Hz
-/// at 2 Msps, so those digits are measured, not invented — while `{} kHz` integer
+/// at 2 Msps, so those digits are measured, not invented - while `{} kHz` integer
 /// truncation was throwing away resolution the analyser actually has.
 pub fn fmt_bw(hz: u64) -> String {
     if hz >= 1_000_000 {
@@ -107,7 +107,7 @@ pub fn status_badge(state: &SdrMetrics, theme: &crate::Theme) -> [Span<'static>;
     ]
 }
 
-/// Whether FFT-derived signal data (SNR, PWR, NF, RBW) is stale — no frame, or
+/// Whether FFT-derived signal data (SNR, PWR, NF, RBW) is stale - no frame, or
 /// the last one older than the shared threshold.
 ///
 /// The same rule the engine tags a title `[STALE]` with, so a panel's contents
@@ -158,8 +158,8 @@ pub fn sparkline(samples: &[f64], width: usize) -> String {
 }
 
 /// Block-sparkline of the most recent `width` samples, **auto-scaled to the window's
-/// own min..max** (not 0..max) so a flat-but-jittery trend — IRR hovering at 56 dB,
-/// a noise floor wandering near −48 dBFS — still shows its wiggle. Returns the glyph
+/// own min..max** (not 0..max) so a flat-but-jittery trend - IRR hovering at 56 dB,
+/// a noise floor wandering near −48 dBFS - still shows its wiggle. Returns the glyph
 /// string and the peak-to-peak spread of the visible window (for a `±x` annotation).
 /// Shared by the Lab IQ IRR trend and the Lab RF sensitivity floor trend.
 pub fn spark_minmax(samples: &[f32], width: usize) -> (String, f64) {

@@ -1,7 +1,7 @@
 //! The canvas itself: reference frame, cloud, fitted ellipse, DC crosshair.
 //!
 //! Everything drawn here is computed before the paint closure is built and moved
-//! into it — the closure runs per resize inside `Canvas`, so it must own plain
+//! into it - the closure runs per resize inside `Canvas`, so it must own plain
 //! data rather than borrow the metrics snapshot.
 
 use std::f64::consts::PI;
@@ -82,7 +82,7 @@ pub(super) fn draw(
                     });
                 }
 
-                // Constellation cloud — sparse (cool) layers first, dense (hot)
+                // Constellation cloud - sparse (cool) layers first, dense (hot)
                 // core on top, for a phosphor-persistence look.
                 for (k, layer) in layers.iter().enumerate() {
                     ctx.draw(&Points {
@@ -131,7 +131,7 @@ pub(super) fn draw(
                     color: dc_color,
                 });
 
-                // Reference labels (no live numbers — just orientation).
+                // Reference labels (no live numbers - just orientation).
                 let tick = |s: &str| {
                     Line::from(Span::styled(
                         s.to_string(),

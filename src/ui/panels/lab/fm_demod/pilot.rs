@@ -1,4 +1,4 @@
-//! `PILOT / STEREO` — the 19 kHz tone that says a broadcast is in stereo, and
+//! `PILOT / STEREO` - the 19 kHz tone that says a broadcast is in stereo, and
 //! how hard it is being injected.
 
 use ratatui::{

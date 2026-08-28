@@ -1,4 +1,4 @@
-//! `timing_stripchart` — the centrepiece of the `lab_timing` bench.
+//! `timing_stripchart` - the centrepiece of the `lab_timing` bench.
 //!
 //! A real-time strip chart of the per-callback interval deviation from the
 //! expected period (`state.timing.cb_deviations_us`, newest last). Positive bars
@@ -8,7 +8,7 @@
 //! clamp and are tagged in the direction they blew out: `▲` at the top for a late
 //! (positive) overrun, `▼` at the bottom for an early (negative) one.
 //!
-//! Split like `sweep_panel`, because it is the same kind of instrument —
+//! Split like `sweep_panel`, because it is the same kind of instrument -
 //! coordinates, then the plotted data, then the text around it:
 //!
 //! - [`scale`]: the axis anchored to the budget, the gutter, the label and band

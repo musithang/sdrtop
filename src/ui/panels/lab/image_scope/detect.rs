@@ -8,8 +8,8 @@
 use crate::state::{FftFrame, SdrMetrics};
 
 /// How far above the noise floor (dB) the strongest bin must sit before the auto
-/// path treats it as a carrier. Below this there is no signal to measure — only
-/// noise — so the scope reports "no carrier" rather than a random noise peak.
+/// path treats it as a carrier. Below this there is no signal to measure - only
+/// noise - so the scope reports "no carrier" rather than a random noise peak.
 /// A placed marker / pin bypasses this gate.
 const CARRIER_MIN_SNR_DB: f32 = 10.0;
 
@@ -35,8 +35,8 @@ pub(crate) fn carrier_image(state: &SdrMetrics) -> Option<CarrierImage> {
 
 /// Carrier / image / DC read-out derived from one fftshifted FFT frame.
 pub(super) struct ImageReadout {
-    /// Which bin the carrier was found in. Nothing draws it — the panel works in
-    /// frequencies — but it is the single most important thing `detect_image`
+    /// Which bin the carrier was found in. Nothing draws it - the panel works in
+    /// frequencies - but it is the single most important thing `detect_image`
     /// decides, and every test in this module asserts on it. Kept as the
     /// detection's assertion surface, and as where a future cursor would read
     /// from. (This is what the old `let _ = r.carrier_idx;` in `render` was for;
@@ -73,12 +73,12 @@ pub(super) fn detect_image(
 
     let carrier_idx = match carrier_hint {
         // Honour a hinted carrier (marker / pin) when it lands in a usable band,
-        // regardless of strength — the operator may be probing a deliberately
+        // regardless of strength - the operator may be probing a deliberately
         // weak signal, so explicit intent overrides the noise gate below.
         Some(h) if in_band(h) => h,
         // Auto path: the strongest bin outside the DC guard, but only when it
         // stands clear of the noise floor. With no real carrier present (just
-        // noise), the loudest bin is a random noise peak — reporting it as a
+        // noise), the loudest bin is a random noise peak - reporting it as a
         // "carrier" would show a meaningless, alarming image-suppression figure
         // and make the scope's frequency axis jitter frame to frame. Treat that
         // as "no signal" instead.
@@ -138,7 +138,7 @@ pub(super) fn carrier_hint_bin(state: &SdrMetrics, frame: &FftFrame) -> Option<u
 /// Map an absolute frequency to a bin index in the fftshifted frame, or `None` if
 /// it falls outside the captured span. Uses the canonical fftshift convention
 /// (`bin = n/2 + (f − f_c)·n/rate`, bin `n/2` = DC), the exact inverse of the
-/// per-bin frequency the scope and `carrier_offset_hz` use — so a frequency and
+/// per-bin frequency the scope and `carrier_offset_hz` use - so a frequency and
 /// its bin round-trip without the off-by-one an `(n−1)` mapping introduces.
 fn freq_to_bin(freq_hz: u64, center_freq_hz: u64, sample_rate: f64, n: usize) -> Option<usize> {
     if n == 0 || sample_rate <= 0.0 {

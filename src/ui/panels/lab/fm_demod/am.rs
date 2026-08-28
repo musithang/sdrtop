@@ -1,4 +1,4 @@
-//! `DEPTH` and `CARRIER` — the AM pair. Two sections rather than one because
+//! `DEPTH` and `CARRIER` - the AM pair. Two sections rather than one because
 //! they answer different questions, but one module because they read the same
 //! measurement and appear together or not at all.
 
@@ -99,7 +99,7 @@ mod tests {
         let t = crate::Theme::sdr();
         assert_eq!(depth_color(60.0, &t), t.status_ok);
         assert_eq!(depth_color(95.0, &t), t.status_warn);
-        // 100 % negative pinches the carrier off — clipping and splatter.
+        // 100 % negative pinches the carrier off - clipping and splatter.
         assert_eq!(depth_color(100.0, &t), t.status_crit);
         assert_eq!(depth_color(130.0, &t), t.status_crit);
     }

@@ -1,7 +1,7 @@
 //! What the radio delivers: sample drops and ADC saturation, each as a 60 s trend.
 //!
 //! Both are counted in the hot path and both mean "the stream is not clean", but
-//! for different reasons — drops are the host failing to keep up, saturation is
+//! for different reasons - drops are the host failing to keep up, saturation is
 //! the front end being over-driven. Side by side because a reader is deciding
 //! which of the two it is.
 

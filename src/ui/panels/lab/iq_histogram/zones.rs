@@ -1,7 +1,7 @@
 //! The three amplitude zones, and the counts that fall in them.
 //!
 //! The histogram's 32 bins split into Low / Mid / Clip, and before the split that
-//! boundary was written out **five** times as bare `8` and `24` — as slice
+//! boundary was written out **five** times as bare `8` and `24` - as slice
 //! ranges, as canvas x-comparisons twice, and as an axis-width fraction. Moving
 //! one of them and not the others would have coloured a column one zone while the
 //! percentage under it counted another.

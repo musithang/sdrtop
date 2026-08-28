@@ -1,10 +1,10 @@
-//! `micro_gain` — the field gain-staging view (`[0]` cycle, 3rd step).
+//! `micro_gain` - the field gain-staging view (`[0]` cycle, 3rd step).
 //!
 //! For setting gain fast on arrival: wide primary/second-stage bars, prominent
 //! ADC utilisation, and a central gain-advisor verdict, with estimated NF and MDS
 //! for context.
 //!
-//! Split by the question each block answers — what the chain is set to, what that
+//! Split by the question each block answers - what the chain is set to, what that
 //! is doing to the converter, what it costs in sensitivity, and what to do about
 //! it:
 //!
@@ -103,7 +103,7 @@ mod tests {
     }
 
     /// The three gain rows are read as a column, so they must start in the same
-    /// place — on either device family. On an RTL-SDR the primary stage is
+    /// place - on either device family. On an RTL-SDR the primary stage is
     /// `Tuner`, five characters against the HackRF's three, and the rows used to
     /// start at columns 8, 7 and 6.
     #[test]
@@ -169,7 +169,7 @@ mod tests {
         assert!(out.contains("Total: 54 dB"), "{out}");
     }
 
-    /// Stopped, everything measured reads as a dash — but the gain itself does
+    /// Stopped, everything measured reads as a dash - but the gain itself does
     /// not, because it is configured rather than measured.
     #[test]
     fn a_stopped_radio_still_shows_the_gain_it_is_set_to() {

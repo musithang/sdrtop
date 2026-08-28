@@ -2,7 +2,7 @@
 //! a marker's label.
 //!
 //! These are reached through [`InputMode`] rather than through panel focus, and
-//! they are the one place a key is **not** case-folded — a marker label is typed,
+//! they are the one place a key is **not** case-folded - a marker label is typed,
 //! capitals and all.
 
 use std::sync::{Arc, Mutex};
@@ -110,7 +110,7 @@ pub(super) fn sample_rate(
                         .filter(|&mhz| mhz > 0.0)
                         .map(|mhz| (mhz * 1_000_000.0).clamp(lo_hz, hi_hz))
                 };
-                // Release lock before calling device — set_sample_rate is a
+                // Release lock before calling device - set_sample_rate is a
                 // blocking USB control transfer; holding the mutex here deadlocks the
                 // rx_callback thread that needs the same lock to return.
                 let result = rate_hz.map(|hz| device.set_sample_rate(hz));

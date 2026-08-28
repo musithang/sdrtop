@@ -1,4 +1,4 @@
-//! RDS — the protocol layer: block synchronisation, group assembly, and the
+//! RDS - the protocol layer: block synchronisation, group assembly, and the
 //! fields the panel shows (PI, PTY, programme service name, RadioText).
 //!
 //! The DSP that recovers the bitstream from the 57 kHz subcarrier lives in
@@ -6,8 +6,8 @@
 //! bits, which makes the whole protocol testable without a radio or a waveform.
 //!
 //! Structure of the data, briefly, because the constants below only make sense
-//! against it: RDS sends 26-bit *blocks* — 16 information bits followed by a
-//! 10-bit checkword — in *groups* of four. The checkword is the CRC of the
+//! against it: RDS sends 26-bit *blocks* - 16 information bits followed by a
+//! 10-bit checkword - in *groups* of four. The checkword is the CRC of the
 //! information word XOR'd with a per-position **offset word**, which is what makes
 //! the blocks self-locating: a receiver that computes the syndrome of a candidate
 //! 26-bit window and gets one of the five offset words back has found a block
@@ -39,7 +39,7 @@ pub enum BlockOffset {
 
 impl BlockOffset {
     /// The offset word XORed into this position's checkword. Only the encoder
-    /// needs it — a decoder compares syndromes against the constants directly.
+    /// needs it - a decoder compares syndromes against the constants directly.
     #[cfg(test)]
     pub fn word(self) -> u16 {
         match self {
@@ -79,7 +79,7 @@ impl BlockOffset {
 ///
 /// Because the encoder XORs the offset word into the checkword, and the syndrome
 /// is linear, an error-free block's syndrome comes back as **exactly the offset
-/// word that was used** — which is what turns the checkword into a position
+/// word that was used** - which is what turns the checkword into a position
 /// marker as well as an error check.
 pub fn syndrome(block: u32) -> u16 {
     let mut reg: u32 = 0;
@@ -94,7 +94,7 @@ pub fn syndrome(block: u32) -> u16 {
 
 /// The checkword for an information word at a given block position: the CRC of
 /// the information word, XOR the offset word. This is the transmitter's side of
-/// the protocol, which sdrtop never performs — it exists so the decoder can be
+/// the protocol, which sdrtop never performs - it exists so the decoder can be
 /// proved against known-good data.
 #[cfg(test)]
 pub fn checkword(info: u16, offset: u16) -> u16 {
@@ -102,14 +102,14 @@ pub fn checkword(info: u16, offset: u16) -> u16 {
 }
 
 /// Assemble a complete 26-bit block from an information word and a position.
-/// Transmitter-side, and so test-only — see [`checkword`].
+/// Transmitter-side, and so test-only - see [`checkword`].
 #[cfg(test)]
 pub fn encode_block(info: u16, offset: BlockOffset) -> u32 {
     ((info as u32) << 10) | checkword(info, offset.word()) as u32
 }
 
 /// Identify a 26-bit window as a block at some position, if its syndrome matches
-/// one of the offset words. `None` means the window is not a valid block — either
+/// one of the offset words. `None` means the window is not a valid block - either
 /// it straddles a boundary, or it has bit errors.
 pub fn identify(block: u32) -> Option<BlockOffset> {
     match syndrome(block) {
@@ -170,7 +170,7 @@ pub const PTY_NAMES: [&str; 32] = [
 /// front of the user.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct RdsData {
-    /// Programme Identification — the station's unique code. Present as soon as
+    /// Programme Identification - the station's unique code. Present as soon as
     /// one valid block A arrives, which makes it the fastest thing to appear.
     pub pi: Option<u16>,
     /// Programme type, as a 5-bit code; index into [`PTY_NAMES`].
@@ -196,7 +196,7 @@ pub struct RdsData {
     pub groups_session: u32,
 }
 
-/// The RDS character repertoire — IEC 62106 Annex E, code table G0 — indexed by
+/// The RDS character repertoire - IEC 62106 Annex E, code table G0 - indexed by
 /// `byte - 0x20`, laid out sixteen to a line so it can be read against the printed
 /// table (a line here is one *column* of it, i.e. one high nibble).
 ///
@@ -207,13 +207,13 @@ pub struct RdsData {
 /// used on.
 ///
 /// The low half is *nearly* ASCII and the exceptions are deliberate, not typos:
-/// 0x24 is `¤` (RBDS, the North American variant, puts `$` there — G0 keeps it at
+/// 0x24 is `¤` (RBDS, the North American variant, puts `$` there - G0 keeps it at
 /// 0xAB), 0x5E is `―`, 0x60 is `‖`, and 0x7E is `¯`. A European station will not send
 /// 0x24 meaning a dollar sign, so following IEC 62106 here costs nothing and reading
 /// it as ASCII would put the wrong glyph on screen.
 ///
 /// Positions the table leaves blank (0x7F, 0xFF) render as a space, as do the control
-/// range below 0x20 — see [`g0_char`].
+/// range below 0x20 - see [`g0_char`].
 #[rustfmt::skip]
 const G0: [char; 224] = [
     // 0x2_
@@ -248,8 +248,8 @@ const G0: [char; 224] = [
 
 /// One RDS byte as the character it stands for in [`G0`].
 ///
-/// Everything below 0x20 is a control code, not text — RadioText uses 0x0D to mark
-/// the end of a message — and becomes a space, which the caller then trims.
+/// Everything below 0x20 is a control code, not text - RadioText uses 0x0D to mark
+/// the end of a message - and becomes a space, which the caller then trims.
 pub fn g0_char(b: u8) -> char {
     if b < 0x20 {
         ' '
@@ -262,8 +262,8 @@ pub fn g0_char(b: u8) -> char {
 ///
 /// RDS has no forward error correction here beyond the block CRC, and a block can
 /// pass its CRC with an undetected error. Requiring a character to arrive twice
-/// with the same value costs one extra transmission of that group — under a second
-/// in practice — and removes almost all of the flicker of wrong glyphs that a
+/// with the same value costs one extra transmission of that group - under a second
+/// in practice - and removes almost all of the flicker of wrong glyphs that a
 /// naive decoder shows on a weak signal.
 const CONFIRM_COUNT: u8 = 2;
 
@@ -391,8 +391,8 @@ impl RdsDecoder {
         self.expect.is_some()
     }
 
-    /// Forget everything the decoder has learned. For a change of station — a
-    /// retune, a different modulation — where nothing held here describes what is
+    /// Forget everything the decoder has learned. For a change of station - a
+    /// retune, a different modulation - where nothing held here describes what is
     /// on air now.
     pub fn reset(&mut self) {
         let keep_pi = self.data.pi;
@@ -402,8 +402,8 @@ impl RdsDecoder {
         // keeping it avoids a visible flicker across a brief dropout.
         self.data.pi = keep_pi;
         // A session count that restarted on every reset would be the counter it was
-        // added to replace. It belongs to the channel, and only a fresh decoder —
-        // which the worker builds on a retune — starts it over.
+        // added to replace. It belongs to the channel, and only a fresh decoder -
+        // which the worker builds on a retune - starts it over.
         self.data.groups_session = keep_session;
     }
 
@@ -411,14 +411,14 @@ impl RdsDecoder {
     ///
     /// For a break in the sample stream. Bits either side of a gap are not the same
     /// message, so the bit window, the group being assembled and the lock all have
-    /// to start over — but the station has not changed, and the name, programme type
+    /// to start over - but the station has not changed, and the name, programme type
     /// and RadioText confirmed before the gap still describe it.
     ///
     /// This is what the contiguity-break comment in `signal::demod` has always
     /// claimed happens. It did not: `reset()` wiped PS, RadioText and the group
     /// count, and blocks drop often enough that every glitch threw away seconds of
-    /// accumulated text. Keeping it is safe because the panel ages RDS separately —
-    /// past `RDS_DROPPED_AFTER` with no new group, nothing is shown at all — so text
+    /// accumulated text. Keeping it is safe because the panel ages RDS separately -
+    /// past `RDS_DROPPED_AFTER` with no new group, nothing is shown at all - so text
     /// that survives here still cannot outlive its station.
     pub fn resync(&mut self) {
         self.window = 0;
@@ -428,7 +428,7 @@ impl RdsDecoder {
         self.group = [None; 4];
         // The text buffers keep their half-confirmed characters. Every character
         // they hold arrived through `commit_group`, which fires only when all
-        // four blocks of a group passed their checkwords — so two sightings that
+        // four blocks of a group passed their checkwords - so two sightings that
         // agree are two independently validated groups agreeing, and a gap
         // between them does not make either less valid. A genuine change of
         // message is caught by the RadioText A/B flag, which clears the buffer
@@ -436,8 +436,8 @@ impl RdsDecoder {
         //
         // Discarding them cost RadioText entirely. Its 16 segments repeat about
         // 5.6 s apart, so confirming one needs an unbroken ~11 s; PS repeats
-        // every 0.9 s and confirms in under two. A resync every few seconds — one
-        // dropped block is enough — therefore let the name through and silently
+        // every 0.9 s and confirms in under two. A resync every few seconds - one
+        // dropped block is enough - therefore let the name through and silently
         // starved the text. `radiotext_survives_a_lossy_stream` is that measured.
         //
         // PI is different and keeps its reset: `accept` publishes it from block A
@@ -499,7 +499,7 @@ impl RdsDecoder {
             // PI is published only once corroborated. A random 26-bit window
             // matches one of the five offset syndromes about once in 200, so over
             // a few hundred bits of noise a chance "block A" is not unlikely at
-            // all — and one of those must never put a station code on screen.
+            // all - and one of those must never put a station code on screen.
             // Two sightings of the *same* word is evidence; one is not.
             if self.pi_pending == Some(info) {
                 self.pi_hits = self.pi_hits.saturating_add(1);
@@ -535,7 +535,7 @@ impl RdsDecoder {
         self.data.pty = Some(((b >> 5) & 0x1F) as u8);
 
         match group_type {
-            // 0A / 0B — programme service name, two characters per group.
+            // 0A / 0B - programme service name, two characters per group.
             0 => {
                 self.data.ta = (b >> 4) & 1 == 1;
                 let idx = (b & 0x3) as usize * 2;
@@ -545,7 +545,7 @@ impl RdsDecoder {
                     self.data.ps = Some(self.ps.text(8));
                 }
             }
-            // 2A / 2B — RadioText. 2A carries four characters in blocks C and D;
+            // 2A / 2B - RadioText. 2A carries four characters in blocks C and D;
             // 2B carries two in block D and repeats the PI in block C.
             2 => {
                 let ab = (b >> 4) & 1 == 1;
@@ -641,7 +641,7 @@ mod tests {
     #[test]
     fn a_corrupted_block_fails_identification() {
         let block = encode_block(0x1234, BlockOffset::A);
-        // Every single-bit error must be caught — that is the minimum the CRC owes.
+        // Every single-bit error must be caught - that is the minimum the CRC owes.
         for bit in 0..BLOCK_BITS {
             let bad = block ^ (1 << bit);
             assert!(
@@ -677,7 +677,7 @@ mod tests {
     fn a_lone_chance_block_never_publishes_a_station_code() {
         // The failure this guards: a 26-bit window matches an offset syndrome by
         // luck, and a station code appears out of noise. One block A is not
-        // evidence — and two *different* ones are not either.
+        // evidence - and two *different* ones are not either.
         let mut d = RdsDecoder::new();
         for b in encode_group([0xB201, block_b_ps(10, 0), 0, 0x4142], false)
             .into_iter()
@@ -851,7 +851,7 @@ mod tests {
     #[test]
     fn resync_keeps_what_was_decoded_and_drops_only_the_lock() {
         // C10: the contiguity-break comment in `signal::demod` has always said the
-        // confirmed text is kept. It called `reset`, which wiped it — and blocks drop
+        // confirmed text is kept. It called `reset`, which wiped it - and blocks drop
         // often enough that every glitch cost seconds of accumulated name and text.
         let mut d = decoded_station();
         let ps = d.data().ps.clone();
@@ -924,7 +924,7 @@ mod tests {
         // The bug, measured. RadioText's 16 segments repeat about 5.6 s apart, so
         // confirming one takes an unbroken ~11 s; PS repeats every 0.9 s. While
         // `resync` discarded half-confirmed characters, a resync every few seconds
-        // — one dropped block is enough — let the station name through and starved
+        // (one dropped block is enough) let the station name through and starved
         // the text, which is exactly what the panel showed: a name, a programme
         // type, a climbing group count, and no RadioText ever.
         for resync_every_s in [0, 10, 5, 3] {
@@ -950,7 +950,7 @@ mod tests {
         // Every character in these buffers arrived through `commit_group`, which
         // fires only when all four blocks of a group passed their checkwords. Two
         // sightings that agree are two independently validated groups agreeing,
-        // and a gap between them does not make either less valid — so the
+        // and a gap between them does not make either less valid - so the
         // evidence survives the resync and the second sighting confirms.
         let mut d = RdsDecoder::new();
         let send = |d: &mut RdsDecoder| {
@@ -988,7 +988,7 @@ mod tests {
     #[test]
     fn resync_keeps_text_visible_when_its_pending_state_is_cleared() {
         // The trap in the fix: `confirmed_any` used to read off `hits`, which
-        // `forget_pending` zeroes — so keeping the text would have made it vanish.
+        // `forget_pending` zeroes - so keeping the text would have made it vanish.
         let mut d = decoded_station();
         d.resync();
         assert!(
@@ -999,8 +999,8 @@ mod tests {
 
     #[test]
     fn reset_starts_the_run_over_but_not_the_session() {
-        // C11: the session total belongs to the channel. Only a fresh decoder — what
-        // the worker builds on a retune — starts it again.
+        // C11: the session total belongs to the channel. Only a fresh decoder - what
+        // the worker builds on a retune - starts it again.
         let mut d = decoded_station();
         let session = d.data().groups_session;
         d.reset();
@@ -1012,7 +1012,7 @@ mod tests {
     #[test]
     fn g0_covers_the_ascii_range_it_shares() {
         // Letters and digits are where G0 and ASCII agree, and most of a message is
-        // made of them — a table that got these wrong would be obvious, so this is
+        // made of them - a table that got these wrong would be obvious, so this is
         // the cheap check that the indexing is right at all.
         for b in b'A'..=b'Z' {
             assert_eq!(g0_char(b), b as char);

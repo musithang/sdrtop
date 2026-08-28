@@ -1,7 +1,7 @@
 //! The per-frame DSP: bytes in, a smoothed spectrum out.
 //!
 //! Runs on **every** FFT frame, not at display rate, because the averaging is
-//! only accurate if it sees every one. Nothing here takes the lock — it is the
+//! only accurate if it sees every one. Nothing here takes the lock - it is the
 //! other half of the worker's discipline: the cheap-and-constant part runs at
 //! full rate and lock-free, and only the expensive analysis and the write-back
 //! are throttled to the display.

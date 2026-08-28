@@ -3,7 +3,7 @@
 //! Split by **when the lock is held**, which is the property that matters in a
 //! thread feeding the UI:
 //!
-//! - [`frame`]: per-frame DSP — decode, transform, average. Full rate, no lock.
+//! - [`frame`]: per-frame DSP - decode, transform, average. Full rate, no lock.
 //! - [`analysis`]: the measurements. Display rate, no lock, no clock.
 //! - [`publish`]: the one lock block.
 //! - [`worker`]: the loop that sequences them.

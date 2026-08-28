@@ -72,7 +72,7 @@ mod tests {
         assert_eq!(offset_ppm(10_000_000.0, 9_999_900), Some(-10));
     }
 
-    /// No reported rate is *unknown*, not zero offset — the difference between
+    /// No reported rate is *unknown*, not zero offset - the difference between
     /// "the clock is perfect" and "the device has not said".
     #[test]
     fn an_unreported_rate_has_no_offset() {

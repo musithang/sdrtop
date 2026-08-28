@@ -1,4 +1,4 @@
-//! `IqHistogramPanel` — where the ADC's range is actually being used.
+//! `IqHistogramPanel` - where the ADC's range is actually being used.
 //!
 //! A log-scaled chart of the 32-bin I/Q amplitude histogram, split into Low / Mid
 //! / Clip zones, with the zone shares, a PAPR estimate and a one-line verdict

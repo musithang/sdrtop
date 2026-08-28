@@ -20,7 +20,7 @@ pub(super) fn draw(
     theme: &crate::Theme,
 ) {
     // The canvas paint closure is `move`, so every colour it needs is resolved
-    // out of the theme first — a borrow of `theme` cannot cross into it.
+    // out of the theme first - a borrow of `theme` cannot cross into it.
     let low = theme.label;
     let mid = theme.status_ok;
     let clip = theme.status_crit;

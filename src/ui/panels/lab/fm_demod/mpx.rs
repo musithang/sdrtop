@@ -1,4 +1,4 @@
-//! `MPX BASEBAND` — the 0-60 kHz composite the discriminator recovers, drawn as
+//! `MPX BASEBAND` - the 0-60 kHz composite the discriminator recovers, drawn as
 //! a braille trace with a tick row naming the three carriers inside it.
 //!
 //! This is the one section whose height is a free choice, so the constants the
@@ -19,7 +19,7 @@ use super::stack::Stack;
 /// Rows the MPX trace grows to when the panel has height going spare, and the slack
 /// it refuses to spend getting there.
 ///
-/// One braille row is four vertical levels over a 40 dB window — 10 dB a level, on
+/// One braille row is four vertical levels over a 40 dB window - 10 dB a level, on
 /// which the stereo pilot (~20 dB under the audio) is level 2 of 4 and indistinct
 /// from the hump beside it. Three rows make it 3.3 dB a level. The reserve stops a
 /// panel with barely enough slack from trading all its air for trace resolution.
@@ -71,7 +71,7 @@ pub(super) fn lines(
 ///
 /// Each column takes the **maximum** of the bins it covers, not their mean: the
 /// pilot is a single narrow line, and averaging would bury it under the wideband
-/// audio around it — the display would then disagree with the pilot readout right
+/// audio around it - the display would then disagree with the pilot readout right
 /// beneath it.
 fn mpx_profile(frame: &MpxFrame, points: usize) -> Vec<f32> {
     if points == 0 || frame.bin_hz <= 0.0 || frame.mags_hz.is_empty() {
@@ -98,7 +98,7 @@ fn mpx_profile(frame: &MpxFrame, points: usize) -> Vec<f32> {
 
     // Clamp to a fixed window below the loudest component. A single braille row
     // has only four vertical levels, so letting the scale stretch down to the
-    // noise floor squashes the whole MPX structure into the bottom level — the
+    // noise floor squashes the whole MPX structure into the bottom level - the
     // pilot, the very thing the section is about, becomes invisible. Anchoring the
     // floor a fixed distance below the peak spends those four levels on signal.
     let top = profile.iter().copied().fold(f32::NEG_INFINITY, f32::max);

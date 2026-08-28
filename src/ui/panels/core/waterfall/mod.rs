@@ -148,8 +148,8 @@ impl Panel for WaterfallPanel {
 /// Free render entry point for the **bonded** case, which the layout engine calls
 /// directly instead of going through the registry.
 ///
-/// `Bond::Above` drops the nameplate — its identity and live tags move to the
-/// shared ruler's end-cap tabs — and overlays that ruler on the top border so the
+/// `Bond::Above` drops the nameplate - its identity and live tags move to the
+/// shared ruler's end-cap tabs - and overlays that ruler on the top border so the
 /// two panels read as one instrument.
 pub fn render(
     f: &mut Frame,
@@ -209,8 +209,8 @@ fn contents(
     // ask it once. This used to be a second copy of the rule against a local
     // `STALE_MS = 500` sitting beside `panel::FFT_STALE_MS = 500`: the two agreed
     // only by coincidence, and disagreed already on "no frame yet" (the copy said
-    // fresh, the plate said stale). Unreachable in practice — `contents` has
-    // returned by then if there are no rows — but two rules for one word is how
+    // fresh, the plate said stale). Unreachable in practice - `contents` has
+    // returned by then if there are no rows - but two rules for one word is how
     // the deck starts contradicting itself.
     let stale = Staleness::FftAge.resolve(state);
     // Clamp the reported scroll to what the buffer can actually give, so the

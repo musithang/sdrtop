@@ -29,7 +29,7 @@ fn fmt_hms(h: u32, m: u32, s: u32) -> String {
 }
 
 /// Local wall-clock `HH:MM:SS` for a Unix-epoch instant, via libc's reentrant
-/// `localtime_r` (already a dependency — no time crate needed). Falls back to
+/// `localtime_r` (already a dependency - no time crate needed). Falls back to
 /// `00:00:00` if the conversion fails.
 pub(crate) fn fmt_clock(epoch_secs: u64) -> String {
     // SAFETY: `localtime_r` writes into our stack `tm` and returns a pointer to

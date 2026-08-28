@@ -1,6 +1,6 @@
 //! The closing line: one word on the pipeline, and how long it has been running.
 //!
-//! [`decide`] draws nothing — it takes a severity and returns the mark, the
+//! [`decide`] draws nothing - it takes a severity and returns the mark, the
 //! words and how loudly to say them, so the wording can be checked without a
 //! frame.
 
@@ -17,7 +17,7 @@ use super::rows::Rows;
 /// The verdict for a [`TimingQuality`](crate::state::TimingQuality) severity.
 ///
 /// Three bands from four severities on purpose: this panel is about the *host
-/// pipeline*, and "good" and "marginal" timing both mean the same thing here —
+/// pipeline*, and "good" and "marginal" timing both mean the same thing here -
 /// it is coping, but working for it. `timing_diagnostics` is the panel that
 /// distinguishes them, because that is where the numbers are.
 pub(super) fn decide(severity: u8) -> (&'static str, &'static str, u8) {

@@ -2,7 +2,7 @@
 //!
 //! This is the shape of `theme/palettes/*.toml` and of anything a user drops in
 //! `~/.config/sdrtop/themes/`. [`Theme`](super::Theme) is the shape the renderer
-//! wants — parsed `Color`s — and [`ThemeFile::into_theme`] is the one crossing
+//! wants - parsed `Color`s - and [`ThemeFile::into_theme`] is the one crossing
 //! between them.
 //!
 //! Every colour is required. A theme missing `status_crit` would render a fault

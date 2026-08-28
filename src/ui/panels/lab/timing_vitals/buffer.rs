@@ -1,8 +1,8 @@
 //! The ring buffer between the radio and the host: how full it gets, and how much
 //! room is left before an overrun.
 //!
-//! The peak matters more than the instantaneous fill — the buffer only has to
-//! reach the ceiling once to lose samples — which is why the margin is computed
+//! The peak matters more than the instantaneous fill - the buffer only has to
+//! reach the ceiling once to lose samples - which is why the margin is computed
 //! from the session peak rather than from the current depth.
 
 use ratatui::{

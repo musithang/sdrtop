@@ -3,7 +3,7 @@
 //! Registration is the one list that makes a panel addressable: a preset names
 //! panels by string and the input dispatch matches them by string, so nothing in
 //! the type system connects either to the code. The tests at the foot of this
-//! file are what stands in for that — they read the presets and the dispatch
+//! file are what stands in for that - they read the presets and the dispatch
 //! table as data and check them against the registry built here.
 
 use std::collections::HashMap;
@@ -119,7 +119,7 @@ mod tests {
     /// `timing_diagnostics`, but the dispatch kept naming the old two. Focusing
     /// either new panel then highlighted its border, printed `[R] Reset drop
     /// counter · [C] Clear history` in the footer, and dropped every key through
-    /// to `handle_global` — where `[R]` resets the whole radio to defaults.
+    /// to `handle_global` - where `[R]` resets the whole radio to defaults.
     ///
     /// A panel that offers keys and silently ignores them is worse than one with
     /// no focus mode at all, so this is checked rather than remembered.
@@ -247,7 +247,7 @@ mod tests {
         );
     }
 
-    /// The preset a config asks for is the one the engine comes up in — and a
+    /// The preset a config asks for is the one the engine comes up in - and a
     /// name that resolves to nothing must not leave the engine on it.
     ///
     /// `build_ui` is where a saved `active_preset` meets the merged preset table,

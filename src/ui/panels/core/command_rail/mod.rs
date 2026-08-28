@@ -1,8 +1,8 @@
 //! The Command Rail: the `[1]` cockpit's left column.
 //!
 //! One vertical stack of sections, top to bottom: the frequency hero, the mode
-//! strip with its adaptive lead card, then four fixed sections — recall, signal,
-//! gain, stream — and a one-line log foot pinned to the bottom.
+//! strip with its adaptive lead card, then four fixed sections - recall, signal,
+//! gain, stream - and a one-line log foot pinned to the bottom.
 //!
 //! Split by section, because that is how it reads on screen and how it is
 //! edited:
@@ -84,7 +84,7 @@ impl Panel for CommandRailPanel {
         let mut lines = stack(state, stale, active, observer, iw, theme);
 
         // The bottom inner row belongs to the log foot, split off first so the
-        // stack and the foot can never overlap — that overlap used to flicker —
+        // stack and the foot can never overlap - that overlap used to flicker -
         // and the foot stays anchored however tall the stack is.
         let (stack_area, foot_area) = if inner.height >= 4 {
             (
@@ -104,7 +104,7 @@ impl Panel for CommandRailPanel {
         };
 
         // Self-adjusting density: on a short rail where the airy layout would
-        // overflow — and clip a whole section — drop only as many blank spacers
+        // overflow - and clip a whole section - drop only as many blank spacers
         // as needed, evenly across the stack, so the panel keeps as much
         // breathing room as fits instead of snapping to fully dense and
         // stranding empty rows above the foot. Tall rails keep every spacer;

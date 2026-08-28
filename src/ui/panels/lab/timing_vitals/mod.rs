@@ -1,4 +1,4 @@
-//! `timing_vitals` — the host-pipeline health column of the `lab_timing` preset.
+//! `timing_vitals` - the host-pipeline health column of the `lab_timing` preset.
 //!
 //! Sample drops, ADC saturation and CPU as 60 s trends, then the USB link and the
 //! ring buffer as captioned bars, closed by a one-line verdict and the uptime.
@@ -6,7 +6,7 @@
 //! (`caps.sample_rate_max_hz`), not a magic constant.
 //!
 //! Split by **what each zone measures**, which is also the order a reader works
-//! through it — what the radio delivered, what the host could take, what the
+//! through it - what the radio delivered, what the host could take, what the
 //! queue between them did, and the verdict:
 //!
 //! - [`calc`]: the arithmetic. No theme, no width.
@@ -102,7 +102,7 @@ mod tests {
     }
 
     /// A stopped radio dashes every measured value rather than showing the last
-    /// one it had — and says plainly that it is idle.
+    /// one it had - and says plainly that it is idle.
     #[test]
     fn a_stopped_radio_dashes_its_readings() {
         let out = draw(TimingVitalsPanel, W, H, &SdrMetrics::fixture()).join("\n");

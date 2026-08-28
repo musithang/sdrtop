@@ -1,4 +1,4 @@
-//! What the stream is doing: drops, saturation, buffer fill — each with its 60 s
+//! What the stream is doing: drops, saturation, buffer fill - each with its 60 s
 //! trend and a one-word verdict.
 //!
 //! Three readings of one pipeline, read top to bottom: drops are the symptom,

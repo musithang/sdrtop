@@ -131,7 +131,7 @@ pub fn find_owner(bus: u32, dev: u32) -> Option<OwnerInfo> {
         let proc_base = entry.path();
 
         // Check if this process has the HackRF device node open.
-        // read_dir on fd/ will fail if we don't own the process — skip silently.
+        // read_dir on fd/ will fail if we don't own the process - skip silently.
         let owns_device = fs::read_dir(proc_base.join("fd"))
             .map(|entries| {
                 entries.flatten().any(|fd| {

@@ -2,7 +2,7 @@
 //! RF chain, and the two timing panels.
 //!
 //! What they have in common is that each drives the *radio* rather than the
-//! view — gain, calibration, capture — so most of them need the device.
+//! view - gain, calibration, capture - so most of them need the device.
 
 use std::sync::Arc;
 
@@ -64,7 +64,7 @@ pub(super) fn lab_banner(key: KeyEvent, ctx: &mut InputCtx<'_>) -> KeyAction {
 pub(super) fn iq_diagnostics(key: KeyEvent, ctx: &mut InputCtx<'_>) -> KeyAction {
     let (state, _device) = (ctx.state, ctx.device);
     match key.code {
-        // [M] — pin / unpin the carrier+image markers (override the live auto-track).
+        // [M] - pin / unpin the carrier+image markers (override the live auto-track).
         KeyCode::Char('m') => {
             let mut m = metrics(state);
             let auto = ui::panels::lab::image_scope::carrier_image(&m);
@@ -84,7 +84,7 @@ pub(super) fn iq_diagnostics(key: KeyEvent, ctx: &mut InputCtx<'_>) -> KeyAction
             }
             return KeyAction::Continue;
         }
-        // [D] — DC-block: subtract the live DC estimate from the stream.
+        // [D] - DC-block: subtract the live DC estimate from the stream.
         KeyCode::Char('d') => {
             let mut m = metrics(state);
             m.iq.cal.dc_block_on = !m.iq.cal.dc_block_on;
@@ -99,7 +99,7 @@ pub(super) fn iq_diagnostics(key: KeyEvent, ctx: &mut InputCtx<'_>) -> KeyAction
             );
             return KeyAction::Continue;
         }
-        // [C] — auto-cal: capture (or clear) the I/Q quadrature correction.
+        // [C] - auto-cal: capture (or clear) the I/Q quadrature correction.
         KeyCode::Char('c') => {
             let mut m = metrics(state);
             if m.iq.cal.cal_applied || m.iq.cal.cal_pending {
@@ -114,7 +114,7 @@ pub(super) fn iq_diagnostics(key: KeyEvent, ctx: &mut InputCtx<'_>) -> KeyAction
             }
             return KeyAction::Continue;
         }
-        // [F] — freeze / thaw the constellation cloud.
+        // [F] - freeze / thaw the constellation cloud.
         KeyCode::Char('f') => {
             let mut m = metrics(state);
             m.iq.cal.frozen = !m.iq.cal.frozen;
@@ -135,7 +135,7 @@ pub(super) fn iq_diagnostics(key: KeyEvent, ctx: &mut InputCtx<'_>) -> KeyAction
 }
 
 /// `rf_chain` (RF Diagnostics) focus (`[D]`): the Lab RF bench actions.
-/// `[A]` — when the chain is off-optimal, one-shot jump LNA/VGA to the staging
+/// `[A]` - when the chain is off-optimal, one-shot jump LNA/VGA to the staging
 /// target (signal ≈ −8 dBFS); when already optimal, toggle the continuous auto-track
 /// latch. `[⎵]`/`[F]` freeze or thaw the histogram + level diagram. Everything else
 /// (incl. the [↑↓]/[ ] gain nudges) falls through to the global handler.
@@ -143,7 +143,7 @@ pub(super) fn rf_chain(key: KeyEvent, ctx: &mut InputCtx<'_>) -> KeyAction {
     let (state, device) = (ctx.state, ctx.device);
     use crate::ui::rf_calc::staging_target;
     match key.code {
-        // [A] — auto-gain: one-shot to optimal, or latch the continuous track once
+        // [A] - auto-gain: one-shot to optimal, or latch the continuous track once
         // already there. HackRF-only; never runs unless streaming.
         KeyCode::Char('a') => {
             let (peak, lna, vga, friis, streaming) = {
@@ -205,7 +205,7 @@ pub(super) fn rf_chain(key: KeyEvent, ctx: &mut InputCtx<'_>) -> KeyAction {
             }
             return KeyAction::Continue;
         }
-        // [⎵]/[F] — freeze / thaw the histogram + level diagram (display only; RX
+        // [⎵]/[F] - freeze / thaw the histogram + level diagram (display only; RX
         // keeps running). Bound to focus, not global Space=RX.
         KeyCode::Char(' ') | KeyCode::Char('f') => {
             let mut m = metrics(state);

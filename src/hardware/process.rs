@@ -47,10 +47,10 @@ pub fn process_block(
     let mut local_const: Vec<(f32, f32)> = Vec::new();
 
     // Snapshot the live correction state once (cheap Copy). The accumulators below
-    // stay on the RAW samples — the diagnostics measure the true hardware
-    // impairment — while a corrected copy of the stream feeds the FFT and the
+    // stay on the RAW samples - the diagnostics measure the true hardware
+    // impairment - while a corrected copy of the stream feeds the FFT and the
     // constellation so the [D] DC-block / [C] auto-cal cleanup is visible.
-    // Read the demod gate in the same lock as the correction state — the demod
+    // Read the demod gate in the same lock as the correction state - the demod
     // costs an extra block copy, so it must be free when switched off.
     let (cal, demod_enabled) = {
         let m = ctx.metrics.lock().unwrap_or_else(|e| e.into_inner());
@@ -83,7 +83,7 @@ pub fn process_block(
         let amp = i.unsigned_abs().max(q.unsigned_abs());
         local_hist[((amp / 4) as usize).min(31)] += 1;
         // Signed sample distribution (I and Q each) for the ADC-loading bell, plus the
-        // loudest sample — both on the RAW samples, the physical ADC's-eye view.
+        // loudest sample - both on the RAW samples, the physical ADC's-eye view.
         local_peak = local_peak.max(amp as u32);
         local_signed[signed_bin(i)] += 1;
         local_signed[signed_bin(q)] += 1;
@@ -111,7 +111,7 @@ pub fn process_block(
     let pairs = (buf.len() / 2) as u64;
     let block_seq: u64;
 
-    // Single brief lock to flush accumulated results — O(1), no loops inside.
+    // Single brief lock to flush accumulated results - O(1), no loops inside.
     {
         let Ok(mut m) = ctx.metrics.lock() else {
             ctx.sample_tx.try_send(buf.to_vec()).ok();

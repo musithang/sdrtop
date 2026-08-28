@@ -15,7 +15,7 @@ use crate::ui::widgets::charts::gain_bar_colored;
 pub struct HeaderPanel;
 
 /// A "breathing" RX status dot that cycles small→large→small on a ~0.9 s loop.
-/// Pure glyph animation — the badge colours never change. All four glyphs are a
+/// Pure glyph animation - the badge colours never change. All four glyphs are a
 /// single terminal column, so the badge width (and the header gap math) is fixed.
 /// Only animates while frames are flowing (RX), which is exactly when the UI
 /// is already redrawing, so it costs no extra wakeups.
@@ -66,7 +66,7 @@ fn step_place_exp(step_hz: u64) -> u32 {
 
 /// Segmented VFO frequency readout: the MHz value rendered digit-by-digit with a
 /// thin gap between every character, and the single digit the current tuning step
-/// moves underlined + brightened — so you can see at a glance which place `← →`
+/// moves underlined + brightened - so you can see at a glance which place `← →`
 /// will change. The decimal point is dimmed. Returns the spans; width varies with
 /// The MHz readout string the VFO renders, e.g. `"145.500"`. Shared so the big
 /// freq-hero formats the frequency identically and the active-digit index lines
@@ -174,7 +174,7 @@ fn top_band_line(state: &SdrMetrics, theme: &crate::Theme, inner_width: u16) -> 
     // Standard HackRF firmware ("2024.02.1", "git-...") → label as "hackrf fw "
     // Both labels are exactly 10 chars so top_band_gap stays valid.
     // Firmware field. RTL-SDR has no on-device firmware (it's host-driven by
-    // librtlsdr), so it gets a neutral label instead of "hackrf fw" — including
+    // librtlsdr), so it gets a neutral label instead of "hackrf fw" - including
     // in observer mode. All labels are exactly 10 columns so top_band_gap stays
     // valid.
     let (fw_val, fw_label): (std::sync::Arc<str>, &str) = if state.caps.gain.is_single() {
@@ -259,7 +259,7 @@ fn top_band_line(state: &SdrMetrics, theme: &crate::Theme, inner_width: u16) -> 
         Span::styled(fw_label, Style::default().fg(theme.label)),
         Span::styled(fw_val.to_string(), Style::default().fg(fw_color)),
         leader(gap, theme.border_dim),
-        // HackRF's RF amp or RTL-SDR's tuner AGC — both 3-char labels, so the
+        // HackRF's RF amp or RTL-SDR's tuner AGC - both 3-char labels, so the
         // "{label} " field stays 4 columns and top_band_gap remains valid.
         Span::styled(
             format!("{} ", state.caps.gain.boost_label()),
@@ -293,11 +293,11 @@ fn fmt_freq_compact(hz: u64) -> String {
 }
 
 /// Logarithmic position (0..1) of `freq` within the tunable range `[min,max]`.
-/// Log, because a receiver's span is enormous (MHz…GHz) — a linear bar would
+/// Log, because a receiver's span is enormous (MHz…GHz) - a linear bar would
 /// Perceptual exponent for the tuning-dial position. A pure-log axis pushes the
 /// low end too far right (1 MHz…120 MHz already eats ~55 % of the bar, then the
 /// whole GHz range crawls in the remaining 45 %). A pure-linear axis does the
-/// opposite — it crushes everything below ~1 GHz into the first columns. `0.4`
+/// opposite - it crushes everything below ~1 GHz into the first columns. `0.4`
 /// is the middle ground: it spreads VHF/UHF readably while still moving the
 /// needle at a steady pace up into the GHz range.
 const DIAL_GAMMA: f64 = 0.4;
@@ -317,7 +317,7 @@ fn range_frac(freq: u64, min: u64, max: u64) -> f64 {
     ((f - lo) / (hi - lo)).clamp(0.0, 1.0)
 }
 
-/// A plain ruled `├───────┤` rule — fallback for terminals too narrow to fit the
+/// A plain ruled `├───────┤` rule - fallback for terminals too narrow to fit the
 /// live tuning strip.
 fn plain_separator(theme: &crate::Theme, outer_width: u16) -> Line<'static> {
     let fill = (outer_width as usize).saturating_sub(2);
@@ -331,7 +331,7 @@ fn plain_separator(theme: &crate::Theme, outer_width: u16) -> Line<'static> {
 /// The header's central rule, repurposed from a static "FREQUENCY" label into a
 /// live tuning dial: a `γ`-power position bar across the device's whole tunable
 /// range, end-capped by the range limits, with a lit `━` rail behind a `◆` needle
-/// at the current frequency — and the **band name riding the needle** (e.g.
+/// at the current frequency - and the **band name riding the needle** (e.g.
 /// `◆╴2m╶`), so the band you're in sits exactly where the eye lands. `outer_width`
 /// is the FULL panel width; rendered at the outer Rect so `├`/`┤` overwrite `│`.
 fn band_strip_line(state: &SdrMetrics, theme: &crate::Theme, outer_width: u16) -> Line<'static> {
@@ -344,7 +344,7 @@ fn band_strip_line(state: &SdrMetrics, theme: &crate::Theme, outer_width: u16) -
     )
 }
 
-/// Pure core of [`band_strip_line`] — takes the tuned frequency and tunable range
+/// Pure core of [`band_strip_line`] - takes the tuned frequency and tunable range
 /// directly so it can be unit-tested without a full `SdrMetrics`.
 fn compose_band_strip(
     freq: u64,
@@ -392,7 +392,7 @@ fn compose_band_strip(
 /// The lit-rail dial itself, exactly `track_w` columns: a bright heavy `━` rule up
 /// to the `◆` needle, then a faint dashed `┈` rule, with the band-name callout
 /// `╴NAME╶` placed against the needle (to its right if it fits, else its left).
-/// Position is double-encoded — brightness *and* line weight — so it reads at a
+/// Position is double-encoded - brightness *and* line weight - so it reads at a
 /// glance, and the band label sits right at the needle.
 fn rail_spans(
     track_w: usize,
@@ -432,7 +432,7 @@ fn rail_spans(
         spans.extend(callout);
         spans.push(faint_run(track_w - marker_col - 1 - cw));
     } else if cw > 0 && marker_col >= cw {
-        // No room on the right — tuck the callout to the LEFT of the needle.
+        // No room on the right - tuck the callout to the LEFT of the needle.
         spans.push(heavy_run(marker_col - cw));
         spans.extend(callout);
         spans.push(needle());
@@ -447,7 +447,7 @@ fn rail_spans(
 }
 
 /// Frequency · sample-rate on the left, gain bars right-aligned. Left block
-/// (freq + SR): 31 chars. Right block: 42 chars — either HackRF's LNA + VGA, or a
+/// (freq + SR): 31 chars. Right block: 42 chars - either HackRF's LNA + VGA, or a
 /// single-tuner stage (RTL-SDR) with the second-stage region blanked to the same
 /// width so the gap math and right-alignment hold for both.
 fn bottom_band_line(state: &SdrMetrics, theme: &crate::Theme, inner_width: u16) -> Line<'static> {
@@ -505,7 +505,7 @@ fn bottom_band_line(state: &SdrMetrics, theme: &crate::Theme, inner_width: u16) 
     let right = 22 + 20;
     let gap = (inner_width as usize).saturating_sub(left_w + right);
 
-    // Primary stage: HackRF LNA / RTL-SDR tuner — green → yellow gradient.
+    // Primary stage: HackRF LNA / RTL-SDR tuner - green → yellow gradient.
     let p_str = format!("{:2}", state.radio.lna_gain);
     let p_label = if gm.is_single() { "TUN " } else { "LNA " };
 
@@ -526,7 +526,7 @@ fn bottom_band_line(state: &SdrMetrics, theme: &crate::Theme, inner_width: u16) 
     ]);
 
     if gm.has_second_stage() {
-        // Secondary stage (HackRF VGA only) — cyan → orange gradient.
+        // Secondary stage (HackRF VGA only) - cyan → orange gradient.
         let vga_str = format!("{:2}", state.radio.vga_gain);
         spans.push(Span::styled("VGA ", Style::default().fg(theme.label)));
         spans.extend(gain_bar_spans(
@@ -613,7 +613,7 @@ impl Panel for HeaderPanel {
 }
 
 /// A two-row header for the Command Rail layout: just the device-status band and
-/// the γ-power tuning dial — the frequency readout and gain bars move into the
+/// the γ-power tuning dial - the frequency readout and gain bars move into the
 /// rail, so the header stays out of the way ("where am I in the range" context
 /// only). Reuses the full header's `top_band_line` + `band_strip_line`, so the
 /// two stay visually identical. Height 4 (2 inner rows).

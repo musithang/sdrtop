@@ -1,6 +1,6 @@
 use libc::{c_char, c_int, c_uchar, c_void};
 
-/// `void (*)(unsigned char *buf, uint32_t len, void *ctx)` — the async read sink.
+/// `void (*)(unsigned char *buf, uint32_t len, void *ctx)` - the async read sink.
 pub type RtlSdrReadAsyncCb = extern "C" fn(*mut c_uchar, u32, *mut c_void);
 
 // librtlsdr's `rtlsdr_dev_t` is opaque; carry it as `*mut c_void`.

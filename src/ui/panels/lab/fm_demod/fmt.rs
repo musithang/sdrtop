@@ -1,8 +1,8 @@
 //! The value vocabulary every section shares: how a frequency is written, and
 //! the two styles a reading wears.
 //!
-//! Sections print into one shape — [`chrome::field`](crate::ui::chrome::field)
-//! for the label, one of these styles for the number beside it — so the styles
+//! Sections print into one shape - [`chrome::field`](crate::ui::chrome::field)
+//! for the label, one of these styles for the number beside it - so the styles
 //! live here rather than being re-derived at the top of each section module.
 
 use ratatui::style::Style;

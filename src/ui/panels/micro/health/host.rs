@@ -1,7 +1,7 @@
 //! What the computer is spending on the stream: CPU, memory, and the USB link.
 //!
 //! CPU and RAM come from the system task rather than the radio, so they stay live
-//! with RX stopped — which is deliberate: a process still burning CPU after you
+//! with RX stopped - which is deliberate: a process still burning CPU after you
 //! stopped the stream is worth seeing.
 
 use ratatui::{

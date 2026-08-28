@@ -4,7 +4,7 @@
 //! `▀ ▄ █` (each exactly one terminal column), so `92.800` renders as a big,
 //! instrument-panel readout instead of a normal line of text. The caller draws
 //! the three rows itself (one styled `Span` per character) so it can colour the
-//! actively-tuned digit differently — see [`glyph`].
+//! actively-tuned digit differently - see [`glyph`].
 
 /// Cell width of a single big glyph (columns).
 pub const GLYPH_W: usize = 3;
@@ -45,7 +45,7 @@ mod tests {
     use super::*;
 
     // Every glyph cell here is a single-column char (space or a block element),
-    // so `chars().count()` equals the display width — no unicode-width needed.
+    // so `chars().count()` equals the display width - no unicode-width needed.
 
     #[test]
     fn every_glyph_row_is_three_columns() {

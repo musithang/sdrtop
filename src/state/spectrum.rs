@@ -18,11 +18,11 @@ pub struct SpectrumMarker {
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Default, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum SpectrumStyle {
-    /// Airy dot-cloud — a single point per bin, no fill or connecting line.
+    /// Airy dot-cloud - a single point per bin, no fill or connecting line.
     Scatter,
-    /// Solid height-gradient filled columns — a heavy "body", no thin edge.
+    /// Solid height-gradient filled columns - a heavy "body", no thin edge.
     Fill,
-    /// Sharp thin 2×4 braille trace over a soft dimmed body — the default.
+    /// Sharp thin 2×4 braille trace over a soft dimmed body - the default.
     #[default]
     Braille,
 }

@@ -1,4 +1,4 @@
-//! `RDS` — the 57 kHz data subcarrier: the station's name, its identity codes,
+//! `RDS` - the 57 kHz data subcarrier: the station's name, its identity codes,
 //! and whatever RadioText it is sending.
 //!
 //! The one section here that *accumulates*. Everything else in the panel is a
@@ -38,7 +38,7 @@ pub(super) fn lines(
 
     let age = state.demod.rds_age();
     // Past the drop timeout the accumulated text is not about anything currently
-    // on air, so none of it is shown — not the name, not the code, not the message.
+    // on air, so none of it is shown - not the name, not the code, not the message.
     let dropped = age.is_none_or(|a| a > RDS_DROPPED_AFTER);
     let (mark, text, ok) = rds_headline(d, state.demod.rds_sync, age);
     let color = if ok { theme.status_ok } else { theme.label };
@@ -65,7 +65,7 @@ pub(super) fn lines(
             Span::styled(name, val(theme)),
         ]));
     }
-    // Traffic flags only earn a row when one of them is set —
+    // Traffic flags only earn a row when one of them is set -
     // "TP off, TA off" is the normal case and says nothing.
     if (d.tp || d.ta) && !dropped {
         let mut flags = Vec::new();
@@ -81,11 +81,11 @@ pub(super) fn lines(
         ]));
     }
     // A running count of the decoder's own work, not anything
-    // the station said — last of the RDS rows to be worth a row.
+    // the station said - last of the RDS rows to be worth a row.
     //
     // The session total leads because that is what "Groups" is
     // read as. The run since the last resync trails it, and only
-    // when the two differ: that is the whole point of the pair —
+    // when the two differ: that is the whole point of the pair -
     // a session total climbing while the run keeps restarting is
     // a host that cannot keep up, not a station that will not
     // decode.
@@ -119,7 +119,7 @@ pub(super) fn lines(
 /// The states have to read differently. A confirmed Programme Service name is the
 /// answer. Block sync without a name yet means the decoder is working and the name
 /// is seconds away. Neither means the station carries no RDS *as far as we can
-/// tell* — which is why it is phrased as an absence, not a failure.
+/// tell* - which is why it is phrased as an absence, not a failure.
 ///
 /// `age` is how long since a whole group last arrived, and it is what stops a name
 /// from outliving its station. RDS is the one measurement here that accumulates, so
@@ -161,7 +161,7 @@ mod tests {
         }
     }
 
-    /// A group that arrived just now — the normal case for a station on air.
+    /// A group that arrived just now - the normal case for a station on air.
     const FRESH: Option<Duration> = Some(Duration::ZERO);
 
     #[test]
@@ -181,7 +181,7 @@ mod tests {
         let (_, text, ok) = rds_headline(&rds(None, 3), false, FRESH);
         assert_eq!(text, "DECODING");
         assert!(!ok);
-        // Sync alone counts too — the first groups have not completed yet.
+        // Sync alone counts too - the first groups have not completed yet.
         assert_eq!(rds_headline(&rds(None, 0), true, FRESH).1, "DECODING");
         // Neither: as far as we can tell there is no RDS here.
         assert_eq!(rds_headline(&rds(None, 0), false, None).1, "NO RDS");
@@ -189,7 +189,7 @@ mod tests {
 
     #[test]
     fn rds_headline_marks_a_name_that_has_stopped_arriving() {
-        // The station is still named — it may well come back — but the panel says
+        // The station is still named - it may well come back - but the panel says
         // how long ago it last spoke, instead of showing a confident lamp.
         let age = Some(RDS_AGED_AFTER + Duration::from_secs(7));
         let (mark, text, ok) = rds_headline(&rds(Some("RADIO 1"), 40), false, age);

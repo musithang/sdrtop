@@ -34,7 +34,7 @@ impl Clone for WaterfallBuffer {
             max_rows: self.max_rows,
             paused: self.paused,
             row_stride: self.row_stride,
-            // acc_bins is an internal FFT accumulator never read by the UI —
+            // acc_bins is an internal FFT accumulator never read by the UI -
             // skip the 8 KB copy and give the clone an empty buffer.
             acc_bins: Vec::new(),
             acc_count: self.acc_count,
@@ -66,7 +66,7 @@ impl WaterfallBuffer {
         if self.acc_count == 0 || self.acc_bins.len() != bins.len() {
             // Fresh accumulation: the first frame of a stride, or the bin count
             // changed mid-stride. Restart cleanly (count = 1) so the materialised
-            // row divides by the number of frames it actually summed — not a stale
+            // row divides by the number of frames it actually summed - not a stale
             // count carried over from the previous, differently-sized run.
             self.acc_bins.resize(bins.len(), 0.0);
             self.acc_bins.copy_from_slice(bins);
@@ -83,7 +83,7 @@ impl WaterfallBuffer {
             for a in self.acc_bins.iter_mut() {
                 *a *= inv;
             }
-            // Clone acc_bins into the row Arc — acc_bins keeps its allocation for the next push.
+            // Clone acc_bins into the row Arc - acc_bins keeps its allocation for the next push.
             let averaged = Arc::new(self.acc_bins.clone());
             if self.rows.len() >= self.max_rows {
                 self.rows.pop_back();

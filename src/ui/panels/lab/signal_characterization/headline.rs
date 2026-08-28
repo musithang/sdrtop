@@ -1,4 +1,4 @@
-//! `RADIO HEADLINE` — the one figure that answers "is there anything here?":
+//! `RADIO HEADLINE` - the one figure that answers "is there anything here?":
 //! peak over noise floor, with the classifier's modulation badge and a status
 //! lamp in the same colour.
 
@@ -42,7 +42,7 @@ pub(super) fn lines(
         Span::styled(" dB", val(theme)),
         Span::styled("  peak / noise", dim(theme)),
     ];
-    // MOD badge — the classifier's estimate of what's at centre.
+    // MOD badge - the classifier's estimate of what's at centre.
     if state.signal.modulation.is_known() {
         hspans.push(Span::styled(
             format!("   {}", state.signal.modulation.label()),

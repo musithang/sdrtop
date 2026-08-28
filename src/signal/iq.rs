@@ -35,8 +35,8 @@ pub fn iq_correction_coeffs(var_i: f64, var_q: f64, cov_iq: f64) -> (f32, f32) {
 
 /// Second moments after the Q-row correction `q' = c_qi·i + c_qq·q` is applied to
 /// DC-removed samples (I passes through). Lets the RX task report the **residual**
-/// imbalance the corrected stream actually has — without a second per-sample
-/// accumulator — so the diagnostics agree with the corrected scope/constellation.
+/// imbalance the corrected stream actually has - without a second per-sample
+/// accumulator - so the diagnostics agree with the corrected scope/constellation.
 /// Returns `(var_i', var_q', cov_iq')`.
 pub fn corrected_moments(
     var_i: f64,

@@ -1,7 +1,7 @@
 //! The two axes: the dBFS gutter down the left and the frequency row underneath.
 //!
 //! Both are built as plain strings first so the arithmetic can be tested without
-//! a frame — an axis that mislabels the plot is worse than no axis, and it is the
+//! a frame - an axis that mislabels the plot is worse than no axis, and it is the
 //! kind of error that is invisible until someone trusts a reading off it.
 
 use ratatui::{

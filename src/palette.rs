@@ -9,7 +9,7 @@ use std::sync::OnceLock;
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Default, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum WaterfallPalette {
-    /// The active theme's gradient — the existing behaviour, and the default.
+    /// The active theme's gradient - the existing behaviour, and the default.
     #[default]
     Classic,
     /// Warm amber CRT.
@@ -204,7 +204,7 @@ pub fn magnitude_to_color_themed(
 /// `Classic` defers to the theme gradient (identical to the themed version), the
 /// others use their fixed stops on TrueColor. On 256/16-colour terminals every
 /// palette falls back to the shared hardcoded ramp (the curve stays sharp, only
-/// the colour-AA is lost — DSN-2026-04 §05).
+/// the colour-AA is lost - DSN-2026-04 §05).
 pub fn magnitude_to_color_palette(
     db: f32,
     db_min: f32,

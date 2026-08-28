@@ -35,7 +35,7 @@ pub struct App {
     /// Kept for the same reason as `user_presets`: `save_config` rewrites the
     /// whole file, so anything it does not carry forward is deleted. This block
     /// holds the per-field colour overrides, which the app reads once at startup
-    /// and never touches again — so without a copy of them there is nothing left
+    /// and never touches again - so without a copy of them there is nothing left
     /// to write back.
     pub(super) theme_config: crate::config::ThemeConfig,
 }
@@ -49,7 +49,7 @@ impl App {
         match hardware::open_device(listing) {
             Ok(device) => Self::new_normal(cfg, config_path, device),
             Err(open_err) => {
-                // Device is present but couldn't be opened (e.g. busy) — fall back
+                // Device is present but couldn't be opened (e.g. busy) - fall back
                 // to read-only observer mode via the matching backend's sysfs scan.
                 let sysinfo = match listing.kind {
                     hardware::DeviceKind::HackRf => hardware::sysfs::find_hackrf(),
@@ -110,7 +110,7 @@ impl App {
         let sweep_active = active_preset == "lab_sweep" || active_preset == "micro_sweep";
         // The demod is gated on its panel being on screen, not on the preset being
         // called `lab_signal`: presets are data, and a user preset that lists
-        // `fm_demod` used to get a panel that never received a block — it sat at
+        // `fm_demod` used to get a panel that never received a block - it sat at
         // "DEMOD IDLE — waiting for a usable channel" forever on a station the
         // built-in preset locked onto instantly. Asking the engine which panels are
         // active is how the rest of the layout already works. The gate itself stays,

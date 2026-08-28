@@ -1,8 +1,8 @@
 //! The row vocabulary this panel's three zones share.
 //!
 //! A padded label field, the `---` stale form, an inline trend, and the deadline
-//! budget bar. These were four locals inside `render` — `lbl`, `val`, `dim`,
-//! `dash` — repeated identically in `timing_vitals`, which is the panel this one
+//! budget bar. These were four locals inside `render` - `lbl`, `val`, `dim`,
+//! `dash` - repeated identically in `timing_vitals`, which is the panel this one
 //! sits beside in `lab_timing`.
 //!
 //! The label column is [`LABEL_W`], the same width `timing_vitals` uses, so the
@@ -19,7 +19,7 @@ use crate::ui::widgets::micro_common::sparkline;
 
 /// Width of the label field. Clears the longest labels here (`Host drift`,
 /// `Throughput` = 10) and keeps a separating space, so no value butts up against
-/// its label — and matches `timing_vitals` on the other half of the bench.
+/// its label - and matches `timing_vitals` on the other half of the bench.
 pub(super) const LABEL_W: usize = 11;
 
 /// Inline trend sparkline width.

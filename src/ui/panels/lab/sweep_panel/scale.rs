@@ -112,8 +112,8 @@ pub(super) fn cursor_x(frac: f64, n: usize) -> f64 {
 /// uses to fill the buckets, so the number beside the cursor is read out of the
 /// bucket that frequency was binned into.
 ///
-/// **These two are not the same mapping**, and they differ by up to half a bucket
-/// — `cursor_x` spreads `frac` over `n-1` intervals, `cursor_bucket` over `n`
+/// **These two are not the same mapping**, and they differ by up to half a bucket:
+/// `cursor_x` spreads `frac` over `n-1` intervals, `cursor_bucket` over `n`
 /// bins. At the plot's resolution (two buckets per character cell) that is a
 /// quarter of a cell, so it has never been visible, and unifying them would move
 /// the drawn line. Named here rather than left as two expressions in two files

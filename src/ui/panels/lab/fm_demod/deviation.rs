@@ -1,4 +1,4 @@
-//! `DEVIATION` — how far the carrier is being swung, against the nominal limit
+//! `DEVIATION` - how far the carrier is being swung, against the nominal limit
 //! for the mode, plus where the carrier actually sits inside the channel.
 
 use ratatui::{
@@ -59,7 +59,7 @@ pub(super) fn lines(
             ]));
             // Not "Offset": the headline already uses that word for the
             // channel's offset from the tuned centre, and this is the opposite
-            // measurement with the opposite sign — where the carrier sits inside
+            // measurement with the opposite sign - where the carrier sits inside
             // the channel, i.e. the tuning error the demodulator is seeing.
             stack.detail(Line::from(vec![
                 chrome::field("Carrier", 8, theme),
@@ -91,7 +91,7 @@ mod tests {
         let t = crate::Theme::sdr();
         assert_eq!(deviation_color(0.5, &t), t.status_ok);
         assert_eq!(deviation_color(0.95, &t), t.status_warn);
-        // At and above the nominal limit this is over-deviation — a real fault.
+        // At and above the nominal limit this is over-deviation - a real fault.
         assert_eq!(deviation_color(1.0, &t), t.status_crit);
         assert_eq!(deviation_color(1.4, &t), t.status_crit);
     }

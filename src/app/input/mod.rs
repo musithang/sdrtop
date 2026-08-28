@@ -6,13 +6,13 @@
 //!    a frequency, sample rate, sweep bound or marker label is being typed, the
 //!    keyboard belongs to [`text`] and nothing else sees it.
 //! 2. **Panel focus.** [`handle_normal`] asks the layout engine which panel holds
-//!    focus and hands the key to that panel's own handler — [`core`], [`bench`],
+//!    focus and hands the key to that panel's own handler - [`core`], [`bench`],
 //!    [`signal`], [`sweep`] or [`rail`].
 //! 3. **Global.** Anything a focus handler does not claim falls through to
 //!    [`global`], which is also where an unfocused key lands.
 //!
 //! Every handler below the first layer takes the same [`InputCtx`], so adding a
-//! panel handler means writing one function and one line in the dispatch table —
+//! panel handler means writing one function and one line in the dispatch table -
 //! not threading six more parameters through the file.
 
 mod bench;
@@ -48,11 +48,11 @@ pub enum KeyAction {
 /// `handle_global_no_device` to express "not this one".
 ///
 /// The shared references are `Copy`, so a handler can pull `state` and `device`
-/// out into locals and still pass `ctx` on to [`global::handle`] afterwards —
+/// out into locals and still pass `ctx` on to [`global::handle`] afterwards -
 /// that is what keeps the fall-through a single line.
 pub(super) struct InputCtx<'a> {
     pub state: &'a Arc<Mutex<SdrMetrics>>,
-    /// `None` in observer mode, when the radio belongs to another process — and
+    /// `None` in observer mode, when the radio belongs to another process - and
     /// temporarily `None` inside [`global::handle_no_device`].
     pub device: Option<&'a Arc<dyn hardware::SdrDevice>>,
     pub engine: &'a mut ui::LayoutEngine,
@@ -64,7 +64,7 @@ pub(super) struct InputCtx<'a> {
 
 /// The metrics, locked.
 ///
-/// A poisoned mutex must not kill the TUI — a panic while one handler holds the
+/// A poisoned mutex must not kill the TUI - a panic while one handler holds the
 /// lock would otherwise take the whole app down on the *next* key. Recovering the
 /// guard is that rule, and it was written out at all 122 lock sites in this module
 /// before it was written down once here.
@@ -138,15 +138,15 @@ fn fold_key_case(key: KeyEvent) -> KeyEvent {
 /// The handler is named after the panel it serves, so this reads as a list of
 /// pairs and a missing entry is visible rather than inferred.
 fn handle_normal(key: KeyEvent, ctx: &mut InputCtx<'_>) -> KeyAction {
-    // Every key hint in the app is capitalised — `[C] Snapshot to log`, `[Q] Quit`,
-    // `[J K] Cursor`, `[S/E] Start/End` — but the handlers below are written against
+    // Every key hint in the app is capitalised - `[C] Snapshot to log`, `[Q] Quit`,
+    // `[J K] Cursor`, `[S/E] Start/End` - but the handlers below are written against
     // lowercase, and only some of them spelled out `Char('c') | Char('C')`. So the
     // same displayed key worked with Shift on the IQ bench and did nothing on the
     // characterization panel next to it, and Shift+Q never quit anywhere.
     //
     // Folding case here rather than in twelve match arms makes it one rule that a
     // new handler cannot forget. It sits in `handle_normal`, not `handle_key`, so
-    // the text-entry modes — a marker label is typed, capitals and all — are
+    // the text-entry modes - a marker label is typed, capitals and all - are
     // untouched.
     let key = fold_key_case(key);
     let focused = ctx.engine.focused_panel_name().map(|s| s.to_string());

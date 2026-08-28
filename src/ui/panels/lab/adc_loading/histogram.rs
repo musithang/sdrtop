@@ -24,7 +24,7 @@ pub(super) struct Levels {
     pub peak_frac: f64,
     /// Per-axis 1σ of the distribution, as a fraction of full scale.
     pub sigma_frac: f64,
-    /// Whether the ADC is clipping — reddens the rail-adjacent columns.
+    /// Whether the ADC is clipping - reddens the rail-adjacent columns.
     pub clipping: bool,
 }
 
@@ -120,7 +120,7 @@ pub(super) fn draw(
         ),
     ]));
 
-    // Caliper legend: the glyph keys coloured to match the guides — peak (loudest
+    // Caliper legend: the glyph keys coloured to match the guides - peak (loudest
     // sample) and the per-axis 1σ, each as a percent of full scale, so the line
     // positions tie to numbers. The combined-magnitude rms lives in LOADING below.
     if maxc == 0 {
@@ -163,7 +163,7 @@ fn rebin(hist: &[u64; 32], w: usize) -> Vec<u64> {
 }
 
 /// Per-axis 1σ amplitude (fraction of full scale) from the combined-magnitude RMS
-/// in dBFS. `adc_rms_dbfs` measures √(var_i+var_q) — the magnitude RMS — but the
+/// in dBFS. `adc_rms_dbfs` measures √(var_i+var_q) - the magnitude RMS - but the
 /// signed histogram's axis is a single I/Q component, whose standard deviation is
 /// that divided by √2 (balanced I/Q). Placing the inner caliper here brackets the
 /// bell's actual spread instead of sitting √2 wider than it.
@@ -174,7 +174,7 @@ pub(super) fn per_axis_sigma_frac(rms_dbfs: f64) -> f64 {
 /// Caliper column pair for an amplitude fraction `a` (0..1 of full scale), placed
 /// symmetrically about the centre of a `w`-wide axis that runs −FS … 0 … +FS.
 /// Returns `(lo, hi)` display columns, clamped into range. `a = 1` lands on the
-/// rails, `a = 0` collapses to the centre — so the guides measure how close the
+/// rails, `a = 0` collapses to the centre - so the guides measure how close the
 /// signal comes to clipping, independent of where the bell's mass actually sits.
 fn caliper_cols(a: f64, w: usize) -> (usize, usize) {
     if w == 0 {

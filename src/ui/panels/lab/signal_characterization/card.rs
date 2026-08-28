@@ -1,7 +1,7 @@
 //! The verdict card: the panel's last zone, where [`verdict`](super::verdict)'s
 //! two sentences become rows.
 //!
-//! Prose, not readings — which is the whole reason this is a card and not another
+//! Prose, not readings - which is the whole reason this is a card and not another
 //! metric row: it wraps rather than being clipped, because a cut sentence
 //! ("Strong carrier (47 dB), 1.25") ends on what looks like a number and reads as
 //! a truncated measurement.
@@ -18,7 +18,7 @@ use super::row::dim;
 use super::verdict::{verdict, VerdictLevel};
 
 /// Row budgets for the wrapped verdict card. Sized so the longest copy `verdict`
-/// can produce still lands whole at the panel's own minimum width (28 inner) —
+/// can produce still lands whole at the panel's own minimum width (28 inner) -
 /// `verdict_copy_fits_the_narrowest_panel` holds them to it, so a future reword
 /// that overruns fails a test instead of silently losing its tail on screen.
 const VERDICT_HEAD_ROWS: usize = 2;

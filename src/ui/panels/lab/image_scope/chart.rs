@@ -1,7 +1,7 @@
 //! The bar chart: an LO-centred slice of the spectrum drawn in block characters,
 //! with a marker row above it and a frequency axis below.
 //!
-//! Not a ratatui `Canvas` — the whole point of this plot is that the carrier, its
+//! Not a ratatui `Canvas` - the whole point of this plot is that the carrier, its
 //! mirror and the DC spike are *the same three columns* in the marker row, the
 //! bars and the axis, and colouring a column consistently across all three is
 //! what makes the mirror symmetry legible. Block cells give that column identity;
@@ -14,7 +14,7 @@ use ratatui::{
 
 use super::tint::Tint;
 
-/// Fixed dBFS window for the bar chart — a stable axis (0 at top, −120 at the
+/// Fixed dBFS window for the bar chart - a stable axis (0 at top, −120 at the
 /// floor) reads better than an auto-ranging one when comparing two peaks.
 const FLOOR_DBFS: f32 = -120.0;
 const TOP_DBFS: f32 = 0.0;

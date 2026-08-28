@@ -3,7 +3,7 @@
 //! [`verdict_copy`] draws nothing: it takes a severity and two numbers and
 //! returns two lines of plain English, so the wording is testable on its own.
 //! This panel prints the full four-level [`TimingQuality`] label, unlike
-//! `timing_vitals` which collapses the middle two — this is the column with the
+//! `timing_vitals` which collapses the middle two - this is the column with the
 //! numbers, so it is the one that can afford the distinction.
 
 use ratatui::{

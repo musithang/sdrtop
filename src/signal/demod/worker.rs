@@ -1,7 +1,7 @@
 //! The demodulator worker: one thread, one block at a time.
 //!
 //! Everything this module calls is in [`super`] and is a pure function of its
-//! arguments. What lives here is the part that is *not* pure — the session state
+//! arguments. What lives here is the part that is *not* pure - the session state
 //! carried between blocks, and the decisions about when to throw it away.
 //!
 //! Those decisions are the whole difficulty. Four different things invalidate
@@ -47,7 +47,7 @@ pub(super) struct BlockPlan {
 /// Read the sequence numbers.
 ///
 /// `drop_ref` is the sequence of the previous block *that was forwarded to us*,
-/// or `None` when the run has not started — distinct from `last_seq` because the
+/// or `None` when the run has not started - distinct from `last_seq` because the
 /// device counts every callback, so the jump across a stretch when the demod was
 /// switched off is not a loss and must not be counted as one.
 ///
@@ -164,7 +164,7 @@ impl Session {
     /// A different demodulator is running: a station decoded as WFM has nothing
     /// to say about the next one.
     ///
-    /// `reset()`, not a fresh decoder, and the filter is left alone — the samples
+    /// `reset()`, not a fresh decoder, and the filter is left alone - the samples
     /// are still the same samples, only their interpretation changed.
     fn switch_modulation(&mut self, modulation: Modulation) {
         self.last_mod = modulation;
@@ -177,7 +177,7 @@ impl Session {
     /// Blocks were lost, so the run is broken.
     ///
     /// Bits either side of a gap are not the same message: the demod's timing and
-    /// the decoder's block sync both start over. `resync`, **not** `reset` — the
+    /// the decoder's block sync both start over. `resync`, **not** `reset` - the
     /// text already confirmed is kept, since the station has not changed. `reset`
     /// here used to throw away the name and the RadioText on every dropped block.
     fn break_run(&mut self) {
@@ -236,7 +236,7 @@ impl DemodWorker {
 
             let (sample_rate, modulation, snr_db, streaming, offset_hz, frequency, enabled) = {
                 let mut m = self.state.lock().unwrap_or_else(|e| e.into_inner());
-                // Integer accumulation inside the lock, the clock read outside it —
+                // Integer accumulation inside the lock, the clock read outside it -
                 // and here rather than at the publish, because every path below this
                 // can `continue`, and a worker so far behind that it never publishes
                 // is exactly the one whose drops need reporting.
@@ -244,7 +244,7 @@ impl DemodWorker {
                     m.demod.blocks_dropped = m.demod.blocks_dropped.saturating_add(plan.dropped);
                     m.demod.last_drop = Some(t);
                 }
-                // The user's mode choice outranks the classifier — see
+                // The user's mode choice outranks the classifier - see
                 // `DemodState::mode_override` for why the heuristic is too coarse
                 // to pick a demodulator on its own.
                 (
@@ -259,7 +259,7 @@ impl DemodWorker {
             };
 
             // Switching the demod off stops `process` forwarding, but up to four
-            // blocks are already in the channel — and publishing those overwrites
+            // blocks are already in the channel - and publishing those overwrites
             // the state the key handler just cleared, so the panel went on showing a
             // live pilot lock and a station name under a "DEMOD OFF" headline.
             // Clearing the intent is the user's job; honouring it is this loop's.
@@ -273,8 +273,8 @@ impl DemodWorker {
             }
 
             // A different channel is a different station, and nothing the decoder
-            // holds describes it. Retuning does not break block contiguity — the
-            // radio keeps streaming — and it does not change the modulation either,
+            // holds describes it. Retuning does not break block contiguity - the
+            // radio keeps streaming - and it does not change the modulation either,
             // so without this check nothing invalidated the RDS state at all: the
             // panel sat naming the old station nine seconds after the radio had
             // moved to 96.6 MHz, group counter frozen.
@@ -382,7 +382,7 @@ impl DemodWorker {
             // lock that is about to publish it. The check at the top of the loop
             // cannot be enough: up to four blocks sit in the channel, and any of
             // them read `enabled` before the key press and would publish afterwards.
-            // Same for the channel — an offset key or a retune between the intake
+            // Same for the channel - an offset key or a retune between the intake
             // and here makes this measurement about a frequency nobody is on.
             if !m.demod.enabled || (m.radio.frequency, m.demod.offset_hz) != channel {
                 m.demod.clear_measurements();
@@ -476,7 +476,7 @@ impl DemodWorker {
             s.rds_last_group = Some(Instant::now());
         }
 
-        // MPX baseband + pilot, only when it will actually be published — a
+        // MPX baseband + pilot, only when it will actually be published - a
         // spectrum nobody reads is wasted work. A short block simply yields no
         // spectrum rather than a padded, misleading one.
         if !due {

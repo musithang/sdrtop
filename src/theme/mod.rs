@@ -7,7 +7,7 @@ use ratatui::style::Color;
 pub struct Theme {
     pub name: String,
 
-    // Borders — three tiers of visual weight
+    // Borders - three tiers of visual weight
     pub border_dim: Color, // log, system_resources, gains (background panels)
     pub border_default: Color, // rf_chain, hardware_health, signal_metrics, iq_*
     pub border_accent: Color, // spectrum, waterfall (primary visual panels)

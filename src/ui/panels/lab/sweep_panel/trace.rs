@@ -1,4 +1,4 @@
-//! The braille canvas: filled body, top edge, cursor glow — in that order, so
+//! The braille canvas: filled body, top edge, cursor glow - in that order, so
 //! each layer sits over the one before it.
 
 use ratatui::{

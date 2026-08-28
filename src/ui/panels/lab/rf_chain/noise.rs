@@ -1,4 +1,4 @@
-//! `NOISE FIGURE` and `SENSITIVITY` — what the chain costs in noise, and how
+//! `NOISE FIGURE` and `SENSITIVITY` - what the chain costs in noise, and how
 //! faint a signal it can still hear.
 //!
 //! One module because the second reads out of the first: the MDS is derived from

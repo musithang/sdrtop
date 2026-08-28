@@ -12,7 +12,7 @@ use super::scale::{Y_MAX, Y_MIN};
 /// Horizontal buckets per character cell.
 ///
 /// Two, because the canvas draws in braille and a single-bin peak projected at
-/// one bucket per cell fills the whole cell — a narrow spike and a broad signal
+/// one bucket per cell fills the whole cell - a narrow spike and a broad signal
 /// would look the same. At two, a spike reads as a spike.
 const BUCKETS_PER_CELL: usize = 2;
 

@@ -18,7 +18,7 @@ use super::tint::{supp_color, Tint};
 const ESSENTIAL_SPANS: usize = 3;
 
 /// The four lines, fitted to `iw`. `carrier_hz` is the carrier's *absolute*
-/// frequency — the readout carries only its offset from the LO, and printing that
+/// frequency - the readout carries only its offset from the LO, and printing that
 /// as though it were a tuned frequency is exactly the kind of near-miss this
 /// panel must not make.
 pub(super) fn lines(

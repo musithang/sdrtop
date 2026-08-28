@@ -22,7 +22,7 @@ use super::trace::Vertical;
 use super::view::SpectrumView;
 
 /// How far a bin must rise above the noise floor to count as a real signal peak.
-/// Well above typical FFT noise ripple, so only solid carriers qualify — which is
+/// Well above typical FFT noise ripple, so only solid carriers qualify - which is
 /// what keeps the auto-flagged set stable frame-to-frame (no flicker on noise).
 const PEAK_PROMINENCE_DB: f32 = 10.0;
 
@@ -259,7 +259,7 @@ pub(super) fn signal_annotations(
     let nf_color = theme.noise_floor;
     let mut obw_label_cols: Option<(u16, u16)> = None;
 
-    // OBW label — centred under its two boundary lines, bottom row.
+    // OBW label - centred under its two boundary lines, bottom row.
     if let (Some(lo_x), Some(hi_x)) = obw {
         let label = format!("OBW {}", fmt_khz(obw_hz));
         let lw = label.chars().count() as u16;
@@ -279,7 +279,7 @@ pub(super) fn signal_annotations(
         );
     }
 
-    // Noise-floor label — near the left edge, on the row the line actually sits.
+    // Noise-floor label - near the left edge, on the row the line actually sits.
     let nf_row =
         ((vert.frac_down_to(noise_floor) * (ch - 1) as f32) as u16).min(ch.saturating_sub(2));
     let nf_label = format!("noise floor {:.0} dBFS", noise_floor);
@@ -299,7 +299,7 @@ pub(super) fn signal_annotations(
         );
     }
 
-    // Δ readout — top right, MKR2 relative to MKR1, when both markers exist and
+    // Δ readout - top right, MKR2 relative to MKR1, when both markers exist and
     // both fall inside the currently zoomed view.
     if let (Some(m1), Some(m2)) = (
         state.spectrum.markers.first(),
@@ -330,7 +330,7 @@ pub(super) fn signal_annotations(
         }
     }
 
-    // Trace legend — bottom right, best effort: skipped entirely if it would
+    // Trace legend - bottom right, best effort: skipped entirely if it would
     // collide with the OBW label sharing the same row.
     let legend = vec![
         Span::styled("\u{2501}", Style::default().fg(theme.border_accent)),

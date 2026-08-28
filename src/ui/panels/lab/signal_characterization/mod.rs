@@ -1,4 +1,4 @@
-//! `signal_characterization` — the left column of the `lab_signal` preset's
+//! `signal_characterization` - the left column of the `lab_signal` preset's
 //! redesign (DSN-2026-07).
 //!
 //! An airy read-out of what the signal at centre *is* and how clean it is, built
@@ -6,13 +6,13 @@
 //! shared `chrome::section` nameplates, exactly like `iq_diagnostics`,
 //! `rf_chain`, and `timing_diagnostics`:
 //!
-//!   1. [`headline`] RADIO HEADLINE   — the peak/noise figure + a status lamp.
-//!   2. [`metrics`]  SIGNAL METRICS   — channel power, peak (+freq), noise floor,
+//!   1. [`headline`] RADIO HEADLINE   - the peak/noise figure + a status lamp.
+//!   2. [`metrics`]  SIGNAL METRICS   - channel power, peak (+freq), noise floor,
 //!      occupied BW, peak hold.
-//!   3. [`acpr`]     ADJACENT CHANNEL — ACPR L/R, a badness-fill bar per side plus
+//!   3. [`acpr`]     ADJACENT CHANNEL - ACPR L/R, a badness-fill bar per side plus
 //!      the absolute level of the louder adjacent band.
-//!   4. [`shape`]    SPECTRAL SHAPE   — C/N trend + crest.
-//!   5. [`card`]     Verdict          — a rule-based, plain-language read of the
+//!   4. [`shape`]    SPECTRAL SHAPE   - C/N trend + crest.
+//!   5. [`card`]     Verdict          - a rule-based, plain-language read of the
 //!      same four zones.
 //!
 //! The verdict's *rule* lives apart from its card, in [`verdict`]: a pure function

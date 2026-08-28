@@ -64,7 +64,7 @@ fn trend_arrow(
 }
 
 /// Width of the fixed label field (margin + 3-char label + gap) so every metric
-/// trace starts at the same column — labels are SNR/PWR/SAT (3) and NF (2).
+/// trace starts at the same column - labels are SNR/PWR/SAT (3) and NF (2).
 const METRIC_LABEL_W: usize = 3;
 
 const METRIC_LEAD: usize = 1 + METRIC_LABEL_W + 1;
@@ -79,7 +79,7 @@ const METRIC_VALUE_W: usize = 14;
 ///  SNR ▏⣀⣠⡔⡒⡉⡒⡢⡄⣀      43.7 dB ↗
 /// ```
 /// A faint `▏` left axis anchors an oscilloscope-style braille line trace; the
-/// label sits left of the axis, the value right of the trace — neither overlaps it.
+/// label sits left of the axis, the value right of the trace - neither overlaps it.
 /// The trace width is fixed (label field + axis + value budget reserved) so traces
 /// and values align across metrics and shrink together with the rail. When value is
 /// None (stale) the trace still draws from the buffer and the value shows a dim "—".
@@ -177,7 +177,7 @@ pub(super) fn lines(
     let sat = sig.adc_saturation_pct;
 
     // `good_when_rising` is what makes the trend arrow mean something: rising SNR
-    // is good, a rising noise floor or saturation is not, and power is neither —
+    // is good, a rising noise floor or saturation is not, and power is neither -
     // it is just the level the user asked for.
     let mut out = vec![
         metric_block(
@@ -235,7 +235,7 @@ pub(super) fn lines(
 
     // Alert-memory: a recent clip leaves a fading `⚠ last clip Xs` line under
     // SAT. It occupies the SAT section's trailing spacer row rather than adding
-    // one, so the total line count — and with it the airy/dense decision — does
+    // one, so the total line count - and with it the airy/dense decision - does
     // not change when a clip appears. Before that, the rail collapsed its
     // spacers the moment anything clipped.
     let now = std::time::SystemTime::now()

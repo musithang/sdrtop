@@ -1,4 +1,4 @@
-//! `SPECTRAL SHAPE` — how the signal has behaved over the last minute, and how
+//! `SPECTRAL SHAPE` - how the signal has behaved over the last minute, and how
 //! peaky it is.
 //!
 //! Neither reading is new state: the C/N trend is `snr_history`, the same ring
@@ -39,7 +39,7 @@ pub(super) fn lines(
     // C/N trend: reuses `snr_history` (already fed ~500 ms by the rx poll
     // task, [`crate::state::SNR_HISTORY_LEN`] = 120 deep → 60 s), the same
     // ring the Command Rail's SNR trace and the micro views read. No new
-    // state — C/N ≈ peak/noise = SNR.
+    // state - C/N ≈ peak/noise = SNR.
     let snr_hist: Vec<f32> = sig.snr_history.iter().copied().collect();
     let spark_w = iw
         .saturating_sub(1 + LABEL.chars().count() + 1 + TREND_ANN_W)
@@ -67,8 +67,8 @@ pub(super) fn lines(
     }
 
     // Crest / PAPR: reuses the exact ADC-loading model from the Lab RF
-    // bench (`rf_calc::adc_loading`) rather than re-deriving peak-minus-rms
-    // — full-bandwidth ADC crest factor, the same honest proxy the RF lab
+    // bench (`rf_calc::adc_loading`) rather than re-deriving peak-minus-rms:
+    // full-bandwidth ADC crest factor, the same honest proxy the RF lab
     // already shows for "constant-envelope vs peaky".
     let n: u64 = state.iq.adc_signed_hist.iter().sum();
     let load = crate::ui::rf_calc::adc_loading(

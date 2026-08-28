@@ -1,9 +1,9 @@
-//! `micro_panel` — the field-operator entry view (`micro_main`).
+//! `micro_panel` - the field-operator entry view (`micro_main`).
 //!
 //! A self-contained panel (not a composition of others) that answers the four
 //! field questions in stacked zones: where am I (freq), what's the signal, is it
 //! running healthy, and the gain I'm most likely adjusting. It adapts to width
-//! in three modes — compact (≥60), narrow (40–59), minimum (<40) — so it stays
+//! in three modes - compact (≥60), narrow (40–59), minimum (<40) - so it stays
 //! readable from an 80×24 SSH session down to a 40-col framebuffer.
 
 use ratatui::{

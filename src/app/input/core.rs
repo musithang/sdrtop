@@ -73,7 +73,7 @@ pub(super) fn spectrum(key: KeyEvent, ctx: &mut InputCtx<'_>) -> KeyAction {
             m.spectrum.step_hz = new_step;
             m.push_log(format!("Step → {}", fmt_spectrum_step(new_step)));
         }
-        // Shared frequency zoom — in the bonded spectrum+waterfall view both plots
+        // Shared frequency zoom - in the bonded spectrum+waterfall view both plots
         // share one span, so `+`/`-` here drive the same `hz_zoom` the waterfall
         // does, narrowing the whole instrument together.
         KeyCode::Char('+') | KeyCode::Char('=') => {

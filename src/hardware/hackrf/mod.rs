@@ -57,7 +57,7 @@ fn rx_callback_safe(transfer: *mut hackrf_transfer) -> c_int {
         }
         let ctx = &*ctx_ptr;
 
-        // Guard against malformed USB transfers — libhackrf uses i32 and can
+        // Guard against malformed USB transfers - libhackrf uses i32 and can
         // return error codes (negative) or zero-length transfers on instability.
         if t.buffer.is_null() {
             return 0;
@@ -112,7 +112,7 @@ impl SdrDevice for HackRfDevice {
             }
         }
         // hackrf_stop_rx joins libhackrf's transfer thread before returning, so
-        // no further callback can fire — safe to release the context here.
+        // no further callback can fire - safe to release the context here.
         *self.rx_ctx.lock().unwrap_or_else(|e| e.into_inner()) = None;
         Ok(())
     }
@@ -252,7 +252,7 @@ impl HackRfDevice {
 }
 
 /// Enumerates connected HackRF devices with a readable serial. Swallows
-/// enumeration errors (returns an empty list) — the caller unions backends and
+/// enumeration errors (returns an empty list) - the caller unions backends and
 /// reports "no device" only when every backend is empty.
 pub fn list() -> Vec<DeviceListing> {
     let mut out = Vec::new();
@@ -290,7 +290,7 @@ pub fn list() -> Vec<DeviceListing> {
     out
 }
 
-/// HackRF One capability descriptor — also used as the observer-mode default.
+/// HackRF One capability descriptor - also used as the observer-mode default.
 pub fn caps() -> DeviceCapabilities {
     DeviceCapabilities {
         freq_min_hz: 1_000_000,

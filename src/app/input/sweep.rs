@@ -99,7 +99,7 @@ pub(super) fn sweep_panel(key: KeyEvent, ctx: &mut InputCtx<'_>) -> KeyAction {
         }
         KeyCode::Enter => {
             // Resolve the cursor frequency, stash it as the jump target, then leave
-            // lab_sweep — the sweep_task tunes there as it stops.
+            // lab_sweep - the sweep_task tunes there as it stops.
             let target = {
                 let m = metrics(state);
                 match (m.sweep.cursor_frac, m.sweep.current_frame.as_ref()) {

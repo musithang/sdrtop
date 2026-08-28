@@ -78,7 +78,7 @@ impl Panel for SystemResourcesPanel {
         );
 
         // In observer mode the device is owned by another process and our own
-        // rx task does not run, so our throughput is always 0 — show N/A rather
+        // rx task does not run, so our throughput is always 0 - show N/A rather
         // than a misleading "0.00 MB/s" with an empty graph.
         if state.observer.active {
             f.render_widget(

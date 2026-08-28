@@ -1,4 +1,4 @@
-//! `IqConstellationPanel` — 2-D braille dot-cloud of recent I/Q samples.
+//! `IqConstellationPanel` - 2-D braille dot-cloud of recent I/Q samples.
 //!
 //! Each frame shows up to `CONSTELLATION_CAP` normalised (I, Q) pairs from
 //! the RX hot-path, decimated 1 : 1024. The cloud's position reveals the DC
@@ -10,7 +10,7 @@
 //!
 //! - [`fit`]: the covariance ellipse and the stats read off it. Pure maths.
 //! - [`cloud`]: the density buckets and their heat palette.
-//! - [`plot`]: the canvas — reference frame, cloud, ellipse, DC crosshair.
+//! - [`plot`]: the canvas - reference frame, cloud, ellipse, DC crosshair.
 //! - [`overlay`]: the text boxes drawn over the canvas.
 
 mod cloud;
@@ -27,8 +27,8 @@ pub struct IqConstellationPanel;
 
 /// The canvas coordinate system, shared by everything that reads or draws it.
 ///
-/// `BOUND` is the half-extent — slightly wider than the unit circle so the circle
-/// border and labels are not clipped — and it is what `cloud::density_layers` bins
+/// `BOUND` is the half-extent - slightly wider than the unit circle so the circle
+/// border and labels are not clipped - and it is what `cloud::density_layers` bins
 /// against as well as what `plot` sets as the canvas bounds. The two must agree:
 /// a density grid measured over a different extent than the one drawn would colour
 /// the wrong points hot.

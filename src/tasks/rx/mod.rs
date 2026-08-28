@@ -54,7 +54,7 @@ pub fn spawn_rx_task(
         let mut throughput = Throughput::default();
 
         loop {
-            // Single is_streaming() call per iteration — the result is used for
+            // Single is_streaming() call per iteration - the result is used for
             // both the unexpected-stop check and the hw_streaming state update.
             let hw_streaming = device.is_streaming();
             let now = Instant::now();

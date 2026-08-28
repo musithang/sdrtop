@@ -18,7 +18,7 @@ pub(crate) struct Accumulators {
     pub iq_cross_sum: i64,
     pub last_callback: Option<Instant>,
     /// Rolling window of recent inter-callback gaps (µs), newest at the back.
-    /// Unlike the sum/variance accumulators above, this is NOT zeroed each poll —
+    /// Unlike the sum/variance accumulators above, this is NOT zeroed each poll -
     /// it is a continuous ring the poll task only snapshots, feeding the
     /// `lab_timing` strip chart and the deadline / late-callback math. Deviation
     /// from the expected period is derived downstream, not stored here.

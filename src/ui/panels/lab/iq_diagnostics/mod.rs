@@ -1,11 +1,11 @@
-//! `IqDiagnosticsPanel` — the front end's I/Q health, as four stacked blocks.
+//! `IqDiagnosticsPanel` - the front end's I/Q health, as four stacked blocks.
 //!
 //! DC offset, quadrature balance, image rejection, then one plain-language
 //! verdict and the live correction state. Every reading is the **residual** after
 //! any active correction, which is what makes a lit chip beside a bad number
 //! meaningful: the correction is not keeping up.
 //!
-//! Split on the seam a bench instrument actually has — measure, then rate, then
+//! Split on the seam a bench instrument actually has - measure, then rate, then
 //! draw:
 //!
 //! - [`reading`]: the six numbers, computed once. Pure maths.

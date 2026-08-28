@@ -1,7 +1,7 @@
 //! The gain chain: the primary stage, the second stage where there is one, and
 //! the front-end boost with the running total.
 //!
-//! Always drawn, streaming or not — gain is configured, not measured, so a
+//! Always drawn, streaming or not - gain is configured, not measured, so a
 //! stopped radio still has a real answer here. That is the point of this view:
 //! you set the gain before you press play.
 
@@ -27,7 +27,7 @@ const AMP_GAIN_DB: i32 = 14;
 /// Width of the label column these three rows share.
 ///
 /// **Sized to the device's own labels**, not to a literal. It used to be baked
-/// into each format string — `" LNA  "`, `" VGA   "`, `" AMP  "` — which lined up
+/// into each format string - `" LNA  "`, `" VGA   "`, `" AMP  "` - which lined up
 /// only because those three names are all three characters. On an RTL-SDR the
 /// primary stage is `Tuner`, and the three rows started in three different
 /// columns: the bar at 8, the dash at 7, the boost at 6.
@@ -142,8 +142,8 @@ mod tests {
         }
     }
 
-    /// HackRF's three labels are all three characters, so its column is unchanged
-    /// — the fix costs the common device nothing.
+    /// HackRF's three labels are all three characters, so its column is unchanged:
+    /// the fix costs the common device nothing.
     #[test]
     fn the_hackrf_column_is_the_width_it_always_was() {
         assert_eq!(label_w(&GainModel::HackRf), 3);
@@ -151,7 +151,7 @@ mod tests {
     }
 
     /// A single-stage tuner has no second stage or amp to add, so its total is
-    /// its one gain — including when the boost flag happens to be set.
+    /// its one gain - including when the boost flag happens to be set.
     #[test]
     fn a_single_stage_total_is_just_its_own_gain() {
         let mut m = SdrMetrics::fixture().single_stage();

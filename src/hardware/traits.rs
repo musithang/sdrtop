@@ -18,7 +18,7 @@ pub enum SampleFormat {
     Uint8,
 }
 
-/// The gain "shape" a device exposes — drives UI rendering and key bindings.
+/// The gain "shape" a device exposes - drives UI rendering and key bindings.
 #[derive(Clone, Debug)]
 pub enum GainModel {
     /// HackRF: RF amp (0 / +14 dB) → LNA (0..=40 step 8) → VGA (0..=62 step 2).
@@ -29,7 +29,7 @@ pub enum GainModel {
 }
 
 impl GainModel {
-    /// True for a single-tuner device (RTL-SDR) — no separate VGA stage.
+    /// True for a single-tuner device (RTL-SDR) - no separate VGA stage.
     pub fn is_single(&self) -> bool {
         matches!(self, GainModel::RtlSingle { .. })
     }
@@ -68,7 +68,7 @@ impl GainModel {
 
     /// Snap stored gains into this model's legal values, returning `(lna, vga)`.
     /// A config saved on one device family must not apply or display an illegal
-    /// gain on another — e.g. an RTL-SDR tuner's 49 dB on a HackRF LNA that maxes
+    /// gain on another - e.g. an RTL-SDR tuner's 49 dB on a HackRF LNA that maxes
     /// at 40, or a HackRF value shown unsnapped on an RTL tuner's discrete table.
     /// HackRF snaps to its 8 dB LNA / 2 dB VGA steps; a single-tuner device snaps
     /// the primary gain to the nearest table entry and leaves `vga` untouched.
@@ -90,7 +90,7 @@ impl GainModel {
     }
 }
 
-/// Static description of a device's limits and features — the single source of
+/// Static description of a device's limits and features - the single source of
 /// truth for every clamp, default, and UI capability check. Built once at open.
 #[derive(Clone, Debug)]
 pub struct DeviceCapabilities {
@@ -105,7 +105,7 @@ pub struct DeviceCapabilities {
     pub default_sample_rate_hz: f64,
     pub sample_format: SampleFormat,
     pub gain: GainModel,
-    /// IQ pairs per USB transfer — feeds the expected callback-period math in
+    /// IQ pairs per USB transfer - feeds the expected callback-period math in
     /// [`crate::state::TimingState`].
     pub samples_per_transfer: u64,
     /// Programmable baseband filter (HackRF yes, RTL-SDR no). Part of the device
@@ -167,7 +167,7 @@ pub trait SdrDevice: Send + Sync {
     /// has none.
     fn set_sample_rate(&self, hz: f64) -> anyhow::Result<u32>;
 
-    /// Primary front-end gain — HackRF's LNA, RTL-SDR's tuner gain. The other
+    /// Primary front-end gain - HackRF's LNA, RTL-SDR's tuner gain. The other
     /// stages default to no-ops so call sites stay unconditional; capability
     /// flags decide what to render and bind.
     fn set_lna_gain(&self, db: u32) -> anyhow::Result<()>;
@@ -191,7 +191,7 @@ mod tests {
         let g = GainModel::HackRf;
         // In-range values already on a step are unchanged.
         assert_eq!(g.clamp_gains(16, 30), (16, 30));
-        // An RTL tuner's 49 dB can't reach a HackRF LNA — caps to 40, a legal step.
+        // An RTL tuner's 49 dB can't reach a HackRF LNA - caps to 40, a legal step.
         assert_eq!(g.clamp_gains(49, 100), (40, 62));
         // Off-step values snap to the nearest 8 dB / 2 dB step.
         assert_eq!(g.clamp_gains(20, 31), (24, 32));

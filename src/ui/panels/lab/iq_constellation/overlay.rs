@@ -18,7 +18,7 @@ use ratatui::{
 use super::cloud::{HEAT, HEAT_LEVELS};
 use super::fit::CloudStats;
 
-/// Bottom caption — echoes the image scope's own framing, so the two Lab IQ
+/// Bottom caption - echoes the image scope's own framing, so the two Lab IQ
 /// panels read as one bench.
 const CAPTION: &str =
     "image mirrors the carrier about the LO \u{00b7} DC offset \u{2192} centre spike";
@@ -82,7 +82,7 @@ fn stats_box(f: &mut Frame, inner: Rect, stats: &CloudStats, theme: &crate::Them
     f.render_widget(Paragraph::new(sl).alignment(Alignment::Right), rect);
 }
 
-/// The legend, the centroid and the caption — the bottom two or three rows.
+/// The legend, the centroid and the caption - the bottom two or three rows.
 fn foot(f: &mut Frame, inner: Rect, stats: &CloudStats, theme: &crate::Theme) {
     if inner.width < 24 || inner.height < 6 {
         return;
@@ -93,7 +93,7 @@ fn foot(f: &mut Frame, inner: Rect, stats: &CloudStats, theme: &crate::Theme) {
     let dc_color = theme.status_warn;
     let ellipse_color = theme.border_focused;
 
-    // Caption is decorative — only draw it when the whole line fits, otherwise
+    // Caption is decorative - only draw it when the whole line fits, otherwise
     // a centred truncation chops both ends into noise.
     let cap_h: u16 = if inner.height >= 7 && inner.width as usize >= CAPTION.chars().count() {
         1
@@ -150,7 +150,7 @@ fn foot(f: &mut Frame, inner: Rect, stats: &CloudStats, theme: &crate::Theme) {
         f.render_widget(Paragraph::new(leg), leg_rect);
     }
 
-    // Caption, full-width bottom row — echoes the scope's framing.
+    // Caption, full-width bottom row - echoes the scope's framing.
     if cap_h == 1 {
         let cap = Line::from(Span::styled(CAPTION, dimst));
         let rect = Rect {

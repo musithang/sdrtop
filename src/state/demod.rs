@@ -1,4 +1,4 @@
-//! `DemodState` — the measurement the demodulator produces, and the gating that
+//! `DemodState` - the measurement the demodulator produces, and the gating that
 //! decides whether it runs at all. See `dev_docs/demod-plan.md`.
 //!
 //! The demod is a measurement instrument, not a receiver: it produces numbers
@@ -22,7 +22,7 @@ pub struct MpxFrame {
     pub mags_hz: Vec<f32>,
 }
 
-/// Demod channel offsets step by this much per key press — coarse enough to walk
+/// Demod channel offsets step by this much per key press - coarse enough to walk
 /// a station off the DC spike in a couple of presses, fine enough to land inside
 /// a WFM channel.
 pub const OFFSET_STEP_HZ: i64 = 25_000;
@@ -40,7 +40,7 @@ pub const DEMOD_STALE_AFTER: Duration = Duration::from_millis(1_500);
 ///
 /// Everything else the demod produces is remeasured several times a second, so a
 /// stale reading simply disappears. RDS is the exception: PS and RadioText are
-/// assembled over seconds and then *persist*, which is the whole point of them —
+/// assembled over seconds and then *persist*, which is the whole point of them -
 /// and it is also how the panel came to sit there naming a station that had been
 /// off the air for nine seconds.
 ///
@@ -69,7 +69,7 @@ pub struct AmMeasure {
 }
 
 /// A detected CTCSS tone. `margin_db` is how far it stood above the best
-/// non-adjacent candidate — the evidence for the identification, kept so the
+/// non-adjacent candidate - the evidence for the identification, kept so the
 /// panel can show a confident detection differently from a borderline one.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct CtcssMeasure {
@@ -98,7 +98,7 @@ pub struct DemodState {
     /// user's intent AND the demod preset being active. Recomputed each frame in
     /// `App::draw`, the same way `sweep.active` follows the active preset.
     pub enabled: bool,
-    /// Decimation factor in use, and the channel rate it actually lands on —
+    /// Decimation factor in use, and the channel rate it actually lands on -
     /// reported rather than assumed, since the factor is rounded.
     pub decimation: usize,
     pub channel_rate_hz: f64,
@@ -107,19 +107,19 @@ pub struct DemodState {
     /// about). Never a stale number left behind.
     pub fm: Option<FmMeasure>,
     /// Channel centre relative to the tuned frequency. Non-zero demodulates a
-    /// station the radio is not centred on — which is how the channel is kept off
+    /// station the radio is not centred on - which is how the channel is kept off
     /// the DC spike.
     pub offset_hz: i64,
     /// Demodulator forced by the user, or `None` to follow the classifier.
     ///
     /// The classifier is a 99 %-occupied-bandwidth heuristic over the whole
-    /// captured span, so on a wide span it reads ≥ 100 kHz — and therefore WFM —
+    /// captured span, so on a wide span it reads ≥ 100 kHz - and therefore WFM -
     /// for almost anything, noise included. That is honest for a rough badge but
     /// far too coarse to pick a demodulator, so the bench can say what it is
     /// listening to.
     pub mode_override: Option<super::Modulation>,
     /// Recovered MPX baseband spectrum, and the 19 kHz pilot read from it.
-    /// WFM only — neither concept exists for NFM or AM.
+    /// WFM only - neither concept exists for NFM or AM.
     pub mpx: Option<Arc<MpxFrame>>,
     pub pilot: Option<PilotMeasure>,
     /// Everything decoded from the 57 kHz RDS subcarrier. WFM only.
@@ -127,7 +127,7 @@ pub struct DemodState {
     /// Unlike the other measurements this one *accumulates*: PS and RadioText are
     /// built up character by character over seconds, so the decoder keeps its own
     /// running state and publishes a snapshot. `None` means the RDS chain is not
-    /// running at all, not that the station carries no RDS —
+    /// running at all, not that the station carries no RDS -
     /// [`RdsData::groups_ok`] is what separates those.
     pub rds: Option<Arc<RdsData>>,
     /// Whether the RDS block synchroniser is currently tracking the group
@@ -135,13 +135,13 @@ pub struct DemodState {
     pub rds_sync: bool,
     /// When the decoder last accepted a whole group. The freshness clock for
     /// [`Self::rds`], which unlike every other measurement here survives its own
-    /// source going away — see [`RDS_AGED_AFTER`].
+    /// source going away - see [`RDS_AGED_AFTER`].
     pub rds_last_group: Option<Instant>,
     /// AM envelope measurement. Mutually exclusive with `fm` in practice: the
     /// classifier picks one demodulator, and the other's field stays `None`.
     pub am: Option<AmMeasure>,
     /// CTCSS subaudible tone, NFM only. `None` covers both "no tone" and "not
-    /// enough contiguous audio yet" — [`Self::ctcss_searching`] separates them.
+    /// enough contiguous audio yet" - [`Self::ctcss_searching`] separates them.
     pub ctcss: Option<CtcssMeasure>,
     /// Fraction of the CTCSS observation window currently filled, 0..=1. Resets
     /// whenever a dropped block breaks the run, so the panel can honestly show
@@ -153,7 +153,7 @@ pub struct DemodState {
     /// Blocks the demod channel dropped on this channel, and when the last one went.
     ///
     /// `process` forwards with `try_send` on a bounded channel, so a worker that
-    /// falls behind loses blocks silently — and RDS and CTCSS both need unbroken
+    /// falls behind loses blocks silently - and RDS and CTCSS both need unbroken
     /// runs, so what the user sees is a station that will not decode. "The host is
     /// busy" and "this station has no RDS" were the same screen. Counted from gaps
     /// in [`Self::block_seq`] rather than at the `try_send` itself: the sequence is
@@ -206,13 +206,13 @@ impl DemodState {
     /// One call rather than a list, because the list is what went wrong: switching
     /// the demod off dropped `fm` and left the MPX trace, the pilot lock and the RDS
     /// station name on screen under a "DEMOD OFF" headline until they aged out
-    /// 1.5 s later. Anything that invalidates one reading invalidates all of them —
+    /// 1.5 s later. Anything that invalidates one reading invalidates all of them -
     /// they all describe the same channel at the same instant.
     ///
     /// Clearing `last_update` matters as much as the fields: without it
     /// [`Self::ctcss_searching`] keeps answering "still filling the window" for a
     /// detector that is not running.
-    /// Blocks lost recently enough to still be worth saying so — see
+    /// Blocks lost recently enough to still be worth saying so - see
     /// [`DROP_ADVISORY_FOR`]. `None` when the channel is keeping up.
     pub fn dropping(&self) -> Option<u64> {
         self.last_drop
@@ -233,7 +233,7 @@ impl DemodState {
         self.last_update = None;
     }
 
-    /// Whether anything at all is currently measured — the question the panel asks
+    /// Whether anything at all is currently measured - the question the panel asks
     /// before drawing its section headings.
     ///
     /// Not the same as "the FM discriminator produced a reading": a short block can
@@ -270,7 +270,7 @@ impl DemodState {
     }
 
     /// The measurement to render, or `None` when it is missing or stale. The one
-    /// call a panel should make — it cannot accidentally show an expired reading.
+    /// call a panel should make - it cannot accidentally show an expired reading.
     pub fn live(&self) -> Option<FmMeasure> {
         if self.is_stale() {
             None
@@ -372,15 +372,15 @@ impl DemodState {
 /// The centre bin is where the front-end parks its DC offset and LO leakage, and
 /// on a HackRF that artefact routinely out-peaks a real station a few hundred kHz
 /// away. Without the guard, "snap to the strongest carrier" reliably snaps to the
-/// artefact and lands the channel right back on DC — the opposite of the point.
+/// artefact and lands the channel right back on DC - the opposite of the point.
 pub const SNAP_DC_GUARD_HZ: f64 = 10_000.0;
 
 /// Offset from the tuned centre, in Hz, of the strongest *carrier* in an
-/// fftshifted spectrum — what "snap the demod onto the loudest carrier" resolves
+/// fftshifted spectrum - what "snap the demod onto the loudest carrier" resolves
 /// to. Bins within [`SNAP_DC_GUARD_HZ`] of centre are excluded as artefact.
 ///
 /// `None` for an empty spectrum, a nonsensical rate, or a span so narrow that the
-/// guard swallows it — the caller then leaves the offset alone rather than
+/// guard swallows it - the caller then leaves the offset alone rather than
 /// jumping to an invented frequency.
 pub fn strongest_offset_hz(bins_dbfs: &[f32], sample_rate: f64) -> Option<i64> {
     if bins_dbfs.is_empty() || !sample_rate.is_finite() || sample_rate <= 0.0 {
@@ -404,7 +404,7 @@ pub fn strongest_offset_hz(bins_dbfs: &[f32], sample_rate: f64) -> Option<i64> {
     Some(((idx as f64 - centre) * bin_hz).round() as i64)
 }
 
-/// Nominal peak-deviation limit (Hz) for a modulation — the full-scale reference
+/// Nominal peak-deviation limit (Hz) for a modulation - the full-scale reference
 /// the deviation bar is drawn against. WFM broadcast is ±75 kHz; narrow-band FM
 /// voice is ±5 kHz on 25 kHz channels.
 pub fn deviation_limit_hz(modulation: super::Modulation) -> f32 {
@@ -711,7 +711,7 @@ mod tests {
             ..Default::default()
         };
         assert!(centred.on_dc_spike(false));
-        // The existing DC block already handles it — no need to nag.
+        // The existing DC block already handles it - no need to nag.
         assert!(!centred.on_dc_spike(true));
         // Tuned well off centre, the artefact is out of the channel.
         let offset = DemodState {

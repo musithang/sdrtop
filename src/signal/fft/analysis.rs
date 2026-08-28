@@ -20,7 +20,7 @@ const NOISE_FLOOR_FRACTION: usize = 10;
 /// The carrier at centre, analysed once.
 ///
 /// Two numbers from one window, so they cannot end up describing different slices
-/// of the same spectrum — and one scan of the spectrum rather than two.
+/// of the same spectrum - and one scan of the spectrum rather than two.
 pub(super) struct Carrier {
     /// 99 % occupied bandwidth. Zero when there is no carrier.
     pub occupied_bw_hz: u64,
@@ -44,7 +44,7 @@ pub(super) fn carrier(linear: &[f32], sample_rate: f64, noise_floor_db: f32) -> 
     }
 }
 
-/// Mean of the quietest tenth of the spectrum, via a partial sort — O(n) on
+/// Mean of the quietest tenth of the spectrum, via a partial sort - O(n) on
 /// average, against O(n log n) for a full one, on every display frame.
 ///
 /// `scratch` is the worker's reused buffer; nothing is allocated here.
@@ -73,7 +73,7 @@ pub(super) fn noise_floor(smoothed: &[f32], scratch: &mut [f32]) -> f32 {
 /// the climb below it. This stays defined and continuous all the way down to the
 /// noise.
 ///
-/// The noise floor stays span-wide — a reference that moves with the signal would
+/// The noise floor stays span-wide - a reference that moves with the signal would
 /// flatten the very trend this is for.
 pub(super) fn snr_db(smoothed: &[f32], sample_rate: f64, noise_floor: f32) -> f32 {
     let peak = strongest_real_bin(
@@ -111,7 +111,7 @@ pub(super) struct Reading {
 /// The analysis pass. Fills `linear` from `smoothed` and returns the readings.
 ///
 /// `scratch` is the noise-floor partial-sort buffer. Both are the worker's reused
-/// allocations — this function allocates nothing.
+/// allocations - this function allocates nothing.
 pub(super) fn measure(
     smoothed: &[f32],
     linear: &mut [f32],
@@ -128,7 +128,7 @@ pub(super) fn measure(
     // spacing the adjacent bands are measured at.
     let modulation = crate::state::classify(peak_to_nf_db, c.occupied_bw_hz);
     let acpr_offset_hz = crate::state::acpr_offset_hz(modulation);
-    // `None` becomes the undefined sentinel — never a guessed ratio.
+    // `None` becomes the undefined sentinel - never a guessed ratio.
     let (acpr_lower_db, acpr_upper_db, adj_carrier_dbfs) =
         acpr_bands(linear, sample_rate, c.occupied_bw_hz, acpr_offset_hz).unwrap_or((
             f32::NEG_INFINITY,
@@ -190,7 +190,7 @@ mod tests {
     }
 
     /// `level_db` is the carrier's **total** power, spread evenly across the bins it
-    /// covers — not a per-bin level. That distinction is the whole point: a fixed
+    /// covers - not a per-bin level. That distinction is the whole point: a fixed
     /// per-bin level would make the carrier's power scale with how many bins the
     /// sample rate happens to divide it into, so the same station would carry five
     /// times the power at 2 Msps as at 10, and any test comparing the two would be

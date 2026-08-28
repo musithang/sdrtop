@@ -6,7 +6,7 @@
 //! the last number it happened to have.
 //!
 //! The label column is [`LABEL_W`], and it is the same 11 columns
-//! `timing_diagnostics` uses on the other half of the `lab_timing` bench — the
+//! `timing_diagnostics` uses on the other half of the `lab_timing` bench - the
 //! two panels are read side by side, so their values line up down one column
 //! across the gap. That was two independent `11`s before this split.
 
@@ -25,7 +25,7 @@ pub(super) const LABEL_W: usize = 11;
 
 /// A resource's load, in percent, at which it stops being comfortable.
 ///
-/// Deliberately one pair for two readings — CPU load and peak ring-buffer fill.
+/// Deliberately one pair for two readings - CPU load and peak ring-buffer fill.
 /// Both answer "how much of this resource is being used", so grading them
 /// differently would mean a machine at 70 % CPU and a buffer at 70 % full got
 /// different colours for the same degree of pressure.

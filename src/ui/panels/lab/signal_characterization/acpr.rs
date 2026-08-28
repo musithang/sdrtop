@@ -1,4 +1,4 @@
-//! `ADJACENT CHANNEL` — the two adjacent-channel power ratios, each with a
+//! `ADJACENT CHANNEL` - the two adjacent-channel power ratios, each with a
 //! badness bar, plus the absolute level of the louder of the two bands.
 
 use ratatui::{
@@ -15,7 +15,7 @@ use super::row::{annotated, dash, fmt_freq, metric, val};
 /// overflow here would push one row's bar out of alignment with the other's.
 const LABEL_W: usize = 8;
 
-/// The ACPR bar's own display floor — not a regulatory spectral-mask limit (we
+/// The ACPR bar's own display floor - not a regulatory spectral-mask limit (we
 /// don't assert one), just how far down this gauge reads before showing a fully
 /// clean, empty bar. A ratio at 0 dB (touching the carrier) reads full/red.
 pub(super) const ACPR_BAR_FLOOR_DB: f32 = -80.0;
@@ -33,7 +33,7 @@ pub(super) fn lines(
     let off = sig.acpr_offset_hz;
     let lo_label = acpr_label('L', off, '\u{2212}');
     let hi_label = acpr_label('R', off, '+');
-    // The pair is written together by the FFT worker — both finite, or neither.
+    // The pair is written together by the FFT worker - both finite, or neither.
     // Testing both says so at the point of use rather than trusting it.
     let measured = !stale && sig.acpr_lower_db.is_finite() && sig.acpr_upper_db.is_finite();
     if !measured {
@@ -71,7 +71,7 @@ pub(super) fn lines(
             fr.center_freq_hz + off as u64
         }
     });
-    // A silent adjacent band has no level to name — the sentinel must not
+    // A silent adjacent band has no level to name - the sentinel must not
     // reach the screen as a number.
     out.push(metric(
         "Adj carrier",
@@ -92,7 +92,7 @@ pub(super) fn lines(
     ));
 }
 
-/// ACPR row label — `L -200k`, `R +25k`. Derived from the offset the measurement
+/// ACPR row label - `L -200k`, `R +25k`. Derived from the offset the measurement
 /// actually used, so the two can never disagree: the spacing follows the
 /// modulation now, and a hardcoded label would quietly lie on every band but FM
 /// broadcast.
@@ -107,7 +107,7 @@ fn acpr_label(side: char, offset_hz: f64, sign: char) -> String {
 
 /// Map an ACPR ratio to a ⅛-block badness bar: more fill = closer to the
 /// carrier = worse (green→red, same grading the timing deadline bars use). No
-/// reference tick — unlike the timing budget bar, there is no verified
+/// reference tick - unlike the timing budget bar, there is no verified
 /// regulatory ACPR threshold to mark, so the bar shows the measurement only.
 fn acpr_bar(db: f32, bar_w: usize, theme: &crate::Theme) -> Vec<Span<'static>> {
     let clamped = db.clamp(ACPR_BAR_FLOOR_DB, 0.0);

@@ -1,13 +1,13 @@
 //! The row vocabulary the two Lab RF bench columns share.
 //!
-//! `adc_loading` and `rf_chain` are one instrument split across two panels — the
-//! same gain staging, read from the ADC's end and from the antenna's end — so
+//! `adc_loading` and `rf_chain` are one instrument split across two panels - the
+//! same gain staging, read from the ADC's end and from the antenna's end - so
 //! their rows have to line up and grade the same. They already share the maths in
 //! [`rf_calc`](crate::ui::rf_calc); this is the drawing half of that.
 //!
 //! Both panels also carried their own private copy of the section nameplate,
-//! character for character identical to [`chrome::section`](crate::ui::chrome::section)
-//! — which already named `rf_chain` in its doc comment as one of its users. Those
+//! character for character identical to [`chrome::section`](crate::ui::chrome::section),
+//! which already named `rf_chain` in its doc comment as one of its users. Those
 //! copies are gone; there is nothing to share here because the shared thing was
 //! always in `chrome`.
 
@@ -31,7 +31,7 @@ pub(super) fn severity_color(sev: u8, theme: &crate::Theme) -> Color {
     }
 }
 
-/// ` LBL  mid ·········· right` — a label, a middle column, and a right-aligned
+/// ` LBL  mid ·········· right` - a label, a middle column, and a right-aligned
 /// value pushed to the panel edge.
 ///
 /// `label_w` differs between the two panels (4 for the ADC column's `HDRM` /
@@ -68,7 +68,7 @@ pub(super) fn row(r: Row<'_>, iw: usize, theme: &crate::Theme) -> Line<'static> 
     ])
 }
 
-/// ` LBL [▇▇▇▅  ] value` — the app's standard eighth-block gradient gain bar (the
+/// ` LBL [▇▇▇▅  ] value` - the app's standard eighth-block gradient gain bar (the
 /// same widget as the command rail and the header's LNA·VGA), with an optional
 /// `┊` tick overlaid on one cell to mark an optimal target.
 ///

@@ -1,7 +1,7 @@
 //! The waterfall grid itself: history rows painted as coloured half-blocks.
 //!
-//! Each character cell carries **two** time rows — `▀` with the older row as the
-//! background and the newer as the foreground — so the visible history is twice
+//! Each character cell carries **two** time rows - `▀` with the older row as the
+//! background and the newer as the foreground - so the visible history is twice
 //! the panel's height. That doubling is why the scroll and stride arithmetic
 //! keeps two units in play at once, `skip_chars` and `skip_data`, and mixing
 //! them up scrolls at half or double speed.
@@ -26,8 +26,8 @@ pub(super) const DB_MAX: f32 = 0.0;
 
 /// Max dB over the bin range `[start, end)` of one waterfall row, clamped to the
 /// row's own length. Rows are normally all the (fixed) FFT bin count, but reading
-/// each row against its own length means a row that ever differs — e.g. if the FFT
-/// size changed at runtime — degrades to a partial read instead of slicing out of
+/// each row against its own length means a row that ever differs - e.g. if the FFT
+/// size changed at runtime - degrades to a partial read instead of slicing out of
 /// bounds and panicking. An empty or fully out-of-range span reads −∞ (the floor).
 pub(super) fn band_max(row: &[f32], start: usize, end: usize) -> f32 {
     let s = start.min(row.len());
@@ -41,7 +41,7 @@ pub(super) fn band_max(row: &[f32], start: usize, end: usize) -> f32 {
 
 /// Which bins each plot column covers, under the current frequency zoom.
 ///
-/// Zoom keeps the centre `1/zoom` of the row's bins — the same slice the bonded
+/// Zoom keeps the centre `1/zoom` of the row's bins - the same slice the bonded
 /// spectrum above narrows to, so `+`/`-` zoom both plots as one instrument.
 pub(super) struct Columns {
     lo_bin: usize,
@@ -184,7 +184,7 @@ mod tests {
     #[test]
     fn zoomed_columns_are_nothing_like_the_naive_full_range_mapping() {
         // The bug this pins. The focus readout used to map its column onto the
-        // *whole* row — `col * row_bins / cols` — while the grid mapped it
+        // *whole* row - `col * row_bins / cols` - while the grid mapped it
         // through the zoom window. At zoom 1 the two agree, which is why it
         // went unnoticed; zoomed in, the readout quoted the level of a
         // completely different frequency from the column it pointed at.

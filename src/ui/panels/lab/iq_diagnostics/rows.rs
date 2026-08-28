@@ -16,7 +16,7 @@ use ratatui::{
 
 use crate::ui::widgets::charts::{gain_bar_colored, null_meter};
 
-/// Fixed label field: `" LBL "` — space + three columns + space.
+/// Fixed label field: `" LBL "` - space + three columns + space.
 const LEAD: usize = 5;
 /// Right-hand value budget, so the numbers align down the panel.
 const VALUE_W: usize = 10;
@@ -54,7 +54,7 @@ impl<'a> Rows<'a> {
         self.dim
     }
 
-    /// `" text ………… value"` — value right-aligned to the panel edge.
+    /// `" text ………… value"` - value right-aligned to the panel edge.
     pub(super) fn readout(&self, text: &str, val: String, color: Color) -> Line<'static> {
         let pad = self
             .iw

@@ -16,7 +16,7 @@ use super::rows::{load_color, Rows};
 pub(super) fn cpu_lines(state: &SdrMetrics, r: &Rows) -> Vec<Line<'static>> {
     let cpu = state.system.process_cpu_pct as f64;
     // Not `r.heading`: this pair is measured by the system task, so it has no
-    // stale form — a stopped radio does not stop the process using CPU.
+    // stale form - a stopped radio does not stop the process using CPU.
     let head = vec![
         Span::raw(" "),
         Span::styled("CPU load ", r.lbl()),

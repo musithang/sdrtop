@@ -1,4 +1,4 @@
-//! `SweepState` — the frequency-scanner mode (`lab_sweep`, `[9]`).
+//! `SweepState` - the frequency-scanner mode (`lab_sweep`, `[9]`).
 //!
 //! A sweep maps a band wider than one sample-rate window by retuning the radio
 //! across a series of positions, harvesting the FFT at each, and stitching the
@@ -141,7 +141,7 @@ impl SweepFrame {
 #[derive(Clone)]
 pub struct SweepState {
     pub config: SweepConfig,
-    /// True while the `lab_sweep` preset is active — drives the `sweep_task`.
+    /// True while the `lab_sweep` preset is active - drives the `sweep_task`.
     pub active: bool,
     /// Position the radio is currently parked on.
     pub current_hz: u64,

@@ -44,7 +44,7 @@ pub const THROUGHPUT_HISTORY_LEN: usize = 64;
 /// keeps roughly the last 3 s at the HackRF/RTL callback cadence (~73–76 cb/s),
 /// enough to fill the chart's ~160-column window with headroom.
 pub const CB_GAP_HISTORY_LEN: usize = 256;
-/// SNR/PWR/NF history depth — 120 samples at the 500 ms push cadence = 60 s window.
+/// SNR/PWR/NF history depth - 120 samples at the 500 ms push cadence = 60 s window.
 /// Must be ≥ 2 × max scope_top_w so the braille mini-scope fills completely.
 pub const SNR_HISTORY_LEN: usize = 120;
 pub const DEFAULT_LNA_GAIN: u32 = 16;
@@ -68,7 +68,7 @@ pub struct SdrMetrics {
     pub lab: LabState,
     /// Demodulator measurement + gating for the `lab_signal` bench. See [`DemodState`].
     pub demod: DemodState,
-    /// Active device's capability descriptor — drives capability-aware UI
+    /// Active device's capability descriptor - drives capability-aware UI
     /// rendering (gain model, BB filter / Friis applicability, ranges). Shared
     /// (Arc) so the per-frame `SdrMetrics` clone stays cheap.
     pub caps: std::sync::Arc<crate::hardware::DeviceCapabilities>,

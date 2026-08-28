@@ -1,7 +1,7 @@
 //! The action chips and the status foot: what the corrections are doing now.
 //!
 //! Separate from [`super::verdict`] because it reports state rather than judging
-//! it — the chips light from `IqCalState` directly, and say nothing about whether
+//! it - the chips light from `IqCalState` directly, and say nothing about whether
 //! the readings are good.
 
 use ratatui::{

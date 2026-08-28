@@ -2,7 +2,7 @@
 //! whether anything is being demodulated and, if so, what and where.
 //!
 //! Three states, and they have to read differently: RX stopped, locked, and idle.
-//! Only the locked one carries advisories — sentences about something the reader
+//! Only the locked one carries advisories - sentences about something the reader
 //! can act on, which is why they wrap rather than clip.
 
 use ratatui::{
@@ -59,7 +59,7 @@ pub(super) fn lines(
             ),
         ]));
         let d = state.demod.decimation.max(1);
-        // The absolute frequency actually being demodulated — with an offset
+        // The absolute frequency actually being demodulated - with an offset
         // in play this is not the tuned frequency, and must never be implied.
         let demod_hz = state.radio.frequency as i64 + state.demod.offset_hz;
         let off = state.demod.offset_hz;
@@ -76,7 +76,7 @@ pub(super) fn lines(
             ),
             Span::styled(off_str, lbl(theme)),
         ]));
-        // The chain's own settings, not a measurement — the first thing the
+        // The chain's own settings, not a measurement - the first thing the
         // headline can spare.
         stack.minor(Line::from(vec![
             Span::raw(" "),
@@ -137,8 +137,8 @@ fn advisories(
         advise("\u{2192} on DC spike \u{2014} [D] in Lab IQ, or offset".to_string());
     }
     // Blocks lost on the way here. RDS and CTCSS both need unbroken runs, so
-    // without this line a busy host and a station with no RDS look identical
-    // — the panel simply never decodes anything and never says why.
+    // without this line a busy host and a station with no RDS look identical:
+    // the panel simply never decodes anything and never says why.
     if let Some(n) = state.demod.dropping() {
         advise(format!(
             "\u{2192} {n} block{} dropped \u{2014} RDS/CTCSS need a clean run",
@@ -146,13 +146,13 @@ fn advisories(
         ));
     }
     // The channel filter stops sharpening once the decimation factor
-    // saturates the tap budget — advise, never coerce, in the house style.
+    // saturates the tap budget - advise, never coerce, in the house style.
     if d > FILTER_QUALITY_D_LIMIT {
         advise("\u{2192} 2\u{2013}2.4 Msps sharpens this".to_string());
     }
 }
 
-/// The idle headline: `(mark, headline, detail)`. Every branch is dim/neutral —
+/// The idle headline: `(mark, headline, detail)`. Every branch is dim/neutral -
 /// an idle demod isn't a fault, the same framing `signal_characterization` uses
 /// for its own "IDLE — RX stopped".
 fn idle_status(
@@ -206,7 +206,7 @@ mod tests {
 
     #[test]
     fn idle_status_says_off_when_the_user_switched_it_off() {
-        // Switched off outranks the classifier — otherwise the panel would blame
+        // Switched off outranks the classifier - otherwise the panel would blame
         // the signal for a state the user chose.
         let (_, headline, _) = idle_status(Modulation::Wfm, false);
         assert_eq!(headline, "DEMOD OFF");

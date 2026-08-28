@@ -1,4 +1,4 @@
-//! `micro_health` — the field health view (`[0]` cycle, 4th step).
+//! `micro_health` - the field health view (`[0]` cycle, 4th step).
 //!
 //! For long unattended captures: what the stream is doing, what the host is
 //! spending on it, whether the clock is honest, and one line saying whether to
@@ -112,7 +112,7 @@ mod tests {
         assert!(out.contains("session"), "session timer missing:\n{out}");
     }
 
-    /// Drops outrank CPU outrank all-clear, and the panel has one verdict row —
+    /// Drops outrank CPU outrank all-clear, and the panel has one verdict row -
     /// so the worst thing true must be the thing shown.
     #[test]
     fn the_verdict_shows_the_worst_thing_that_is_true() {

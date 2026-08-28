@@ -1,4 +1,4 @@
-//! `sweep_panel` — the frequency-scanner display for the `lab_sweep` preset.
+//! `sweep_panel` - the frequency-scanner display for the `lab_sweep` preset.
 //!
 //! The latest completed `SweepFrame` as a braille envelope over the swept band,
 //! with a dBFS gutter, a frequency axis, a band-plan row and a status line. The
@@ -7,7 +7,7 @@
 //! Split the way `panels/core/spectrum/` is, because it is the same kind of
 //! instrument:
 //!
-//! - [`scale`]: the coordinate systems — the dBFS window, the gutter width, the
+//! - [`scale`]: the coordinate systems - the dBFS window, the gutter width, the
 //!   height→colour gradient, and the two cursor mappings.
 //! - [`envelope`]: the sweep projected onto the plot's horizontal resolution.
 //! - [`trace`]: the canvas layers.
@@ -206,7 +206,7 @@ mod tests {
         );
     }
 
-    /// The axis labels bracket the swept band rather than the tuned frequency —
+    /// The axis labels bracket the swept band rather than the tuned frequency -
     /// the radio is parked somewhere inside the band while the plot spans it.
     #[test]
     fn the_axis_spans_the_band_not_the_current_tuning() {
@@ -225,7 +225,7 @@ mod tests {
     #[test]
     fn a_rect_too_small_to_plot_draws_nothing_but_the_frame() {
         // Too small is `inner.width <= AXIS_W + 2 || inner.height < 4`, and the
-        // frame costs two of each — so a 9-wide or 5-tall panel has no plot.
+        // frame costs two of each - so a 9-wide or 5-tall panel has no plot.
         for (w, h) in [(9u16, 14u16), (90, 5), (8, 4)] {
             let out = draw(SweepPanel, w, h, &swept());
             assert_eq!(

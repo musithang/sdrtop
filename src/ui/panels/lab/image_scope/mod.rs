@@ -1,9 +1,9 @@
-//! `ImageScopePanel` — the LO-centred image-rejection scope for the Lab IQ preset.
+//! `ImageScopePanel` - the LO-centred image-rejection scope for the Lab IQ preset.
 //!
 //! Reads the existing fftshifted FFT frame (DC/LO at the centre bin) and tells the
 //! quadrature story directly: the strongest **carrier**, its **mirror image**
 //! reflected about the LO, and the residual **DC spike** at the centre. The gap
-//! between carrier and image is the measured image suppression — the empirical
+//! between carrier and image is the measured image suppression - the empirical
 //! counterpart to the computed IRR shown one panel left.
 //!
 //! Split the same way as its bench partner `iq_constellation`: what is measured,
@@ -93,7 +93,7 @@ impl Panel for ImageScopePanel {
         let readouts = readout::lines(&r, win.carrier_hz, &tint, iw, theme);
         let chart_w = iw.saturating_sub(chart::GUTTER + 1);
         let reserved = 1 /*marker*/ + 1 /*axis*/ + 1 /*gap*/ + readouts.len() + 1 /*caption*/;
-        // Fill all the vertical room left after the chrome — a taller chart gives
+        // Fill all the vertical room left after the chrome - a taller chart gives
         // finer dBFS resolution and matches the mockup's full-height scope.
         let chart_h = ih.saturating_sub(reserved);
 
@@ -110,7 +110,7 @@ impl Panel for ImageScopePanel {
 }
 
 /// The three "nothing to plot" states: RX stopped, no frame yet, no carrier in
-/// the frame. All neutral — none of them is a fault.
+/// the frame. All neutral - none of them is a fault.
 fn placeholder(f: &mut Frame, inner: Rect, text: &'static str, theme: &crate::Theme) {
     f.render_widget(
         Paragraph::new(Span::styled(text, Style::default().fg(theme.label))),

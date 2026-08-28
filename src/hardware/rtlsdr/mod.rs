@@ -21,7 +21,7 @@ use super::{DeviceKind, DeviceListing};
 use ffi::*;
 
 /// Bytes per async transfer (must be a multiple of 512). 64 KiB ≈ 32 768 IQ
-/// pairs — ~73 callbacks/s at 2.4 Msps, matching HackRF's cadence and keeping
+/// pairs - ~73 callbacks/s at 2.4 Msps, matching HackRF's cadence and keeping
 /// lock contention and latency moderate.
 const RTL_BUF_LEN: u32 = 65_536;
 /// Number of USB transfer buffers (0 = librtlsdr default of 15).
@@ -50,9 +50,9 @@ static STDERR_LOCK: Mutex<()> = Mutex::new(());
 
 /// Run `f` with the process's stderr redirected to /dev/null, then restore it.
 ///
-/// librtlsdr chatters to stderr on open, on tuning, and on gain changes — "Found
+/// librtlsdr chatters to stderr on open, on tuning, and on gain changes - "Found
 /// Rafael Micro R820T tuner", "Detached kernel driver", "[R82XX] PLL not
-/// locked!" — which would scramble the TUI's alternate screen. Every librtlsdr
+/// locked!" - which would scramble the TUI's alternate screen. Every librtlsdr
 /// control call is wrapped in this; the long-lived async read is not (it runs on
 /// its own thread). Best-effort: if the redirect can't be set up, `f` runs
 /// unsilenced.
@@ -141,7 +141,7 @@ impl SdrDevice for RtlDevice {
             rtlsdr_cancel_async(self.ptr);
         }
         // Join so the read thread (and the Arc<RxContext> it holds) is fully gone
-        // before we return — no callback can fire afterward.
+        // before we return - no callback can fire afterward.
         if let Some(h) = self.thread.lock().unwrap_or_else(|e| e.into_inner()).take() {
             let _ = h.join();
         }
@@ -264,7 +264,7 @@ impl RtlDevice {
     }
 }
 
-/// Enumerates connected RTL-SDR dongles. Never fails — returns an empty list
+/// Enumerates connected RTL-SDR dongles. Never fails - returns an empty list
 /// when librtlsdr finds none.
 pub fn list() -> Vec<DeviceListing> {
     let mut out = Vec::new();

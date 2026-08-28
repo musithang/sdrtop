@@ -24,7 +24,7 @@ const VALW: usize = 11;
 /// Top of the headroom gauge, in dB below full scale.
 const HDRM_MAX: f64 = 24.0;
 
-/// `HEADROOM` — how far the peak sits below 0 dBFS, with a tick at the optimal
+/// `HEADROOM` - how far the peak sits below 0 dBFS, with a tick at the optimal
 /// landing (`−OPT_PEAK_DBFS`, i.e. 8 dB of headroom).
 pub(super) fn headroom(
     out: &mut Vec<Line<'static>>,
@@ -52,7 +52,7 @@ pub(super) fn headroom(
     ));
 }
 
-/// `LOADING` — peak, rms, effective bits and clip events, with the staging
+/// `LOADING` - peak, rms, effective bits and clip events, with the staging
 /// verdict on the last row.
 pub(super) fn loading(
     out: &mut Vec<Line<'static>>,
@@ -119,7 +119,7 @@ pub(super) fn loading(
     ));
 }
 
-/// `LINEARITY` — modeled, not measured: P1dB headroom, IIP3 / IMD3 and SFDR
+/// `LINEARITY` - modeled, not measured: P1dB headroom, IIP3 / IMD3 and SFDR
 /// against the 8-bit limit. Followed by the panel's teaching caption.
 pub(super) fn linearity_card(
     out: &mut Vec<Line<'static>>,

@@ -1,4 +1,4 @@
-//! RDS — the signal layer: recovering the bitstream from the 57 kHz subcarrier
+//! RDS - the signal layer: recovering the bitstream from the 57 kHz subcarrier
 //! in the demodulated MPX baseband. The protocol that consumes those bits lives
 //! in [`super::rds`].
 //!
@@ -8,7 +8,7 @@
 //!    19 kHz stereo pilot, and the 1187.5 bps symbol clock is that subcarrier
 //!    divided by 48. Tracking the pilot therefore pins carrier *and* symbol
 //!    frequency at once, and the pilot is the strongest, purest line in the
-//!    baseband — far easier to lock than the suppressed-carrier RDS itself.
+//!    baseband - far easier to lock than the suppressed-carrier RDS itself.
 //! 2. **Mix and decimate.** Multiplying by three times the pilot phase brings the
 //!    subcarrier to DC; a narrow low-pass then rejects the stereo difference
 //!    signal, whose upper edge lands only ~4 kHz away once shifted.
@@ -33,7 +33,7 @@ pub const PILOT_HZ: f64 = 19_000.0;
 
 /// Half-bandwidth kept around the subcarrier. RDS occupies ±2.4 kHz.
 const RDS_BW_HZ: f64 = 2_400.0;
-/// Baseband rate after decimation, targeted at ~17 samples per symbol — enough to
+/// Baseband rate after decimation, targeted at ~17 samples per symbol - enough to
 /// place the mid-symbol transition precisely without carrying needless samples.
 const BASEBAND_TARGET_HZ: f64 = 20_000.0;
 /// Channel-filter length. Long enough that the stereo difference signal, which
@@ -137,7 +137,7 @@ impl RdsDemod {
         }
     }
 
-    /// Rate this demod was built for — the caller rebuilds it when the channel
+    /// Rate this demod was built for - the caller rebuilds it when the channel
     /// rate changes.
     pub fn rate(&self) -> f64 {
         self.rate
@@ -217,7 +217,7 @@ impl RdsDemod {
         let sq = z * z;
         if sq.norm() > 1e-12 {
             let est = 0.5 * sq.im.atan2(sq.re);
-            // Small, steady correction — the pilot already holds the frequency, so
+            // Small, steady correction - the pilot already holds the frequency, so
             // this only has to follow slow phase wander.
             let diff = (est - self.bpsk_phase + std::f32::consts::PI)
                 .rem_euclid(2.0 * std::f32::consts::PI)
@@ -262,7 +262,7 @@ impl RdsDemod {
 
 /// Biphase matched filter over one symbol of `buf` starting at `off`: the mean of
 /// the first half-symbol minus the mean of the second. Manchester coding puts a
-/// guaranteed transition at the midpoint, so this peaks exactly on alignment —
+/// guaranteed transition at the midpoint, so this peaks exactly on alignment -
 /// which is what makes it serve as both bit slicer and timing discriminator.
 fn biphase(buf: &[f32], off: f64, sps: f64) -> f32 {
     let a = off.round() as usize;
@@ -284,7 +284,7 @@ mod tests {
     /// Build an MPX waveform carrying a pilot and an RDS bitstream, the way a
     /// broadcast transmitter would.
     fn mpx_with_rds(rate: f64, bits: &[u8], pilot_dev: f64, rds_dev: f64) -> Vec<f32> {
-        // Differential encoding, then biphase — the transmitter's order.
+        // Differential encoding, then biphase - the transmitter's order.
         let mut sym = false;
         let symbols: Vec<bool> = bits
             .iter()
@@ -413,7 +413,7 @@ mod tests {
     #[test]
     fn inverted_subcarrier_decodes_identically() {
         // Differential encoding means the absolute polarity carries no
-        // information — a 180° carrier error must change nothing.
+        // information - a 180° carrier error must change nothing.
         let rate = 333_000.0;
         let mut bits = Vec::new();
         for _ in 0..12 {

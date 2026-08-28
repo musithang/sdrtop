@@ -1,10 +1,10 @@
-//! `AdcLoadingPanel` — the ADC Loading column of the Lab RF bench ([6]).
+//! `AdcLoadingPanel` - the ADC Loading column of the Lab RF bench ([6]).
 //!
 //! Shows how hard the 8-bit ADC is actually driven: the **signed sample histogram**
 //! (a centred bell whose tails light up as they approach the rails), the **clip
 //! headroom** bar, the **loading** read-out (peak / rms / crest / effective bits /
 //! clip events), and a **modeled linearity** card (P1dB / IIP3 / IMD3 / SFDR). The
-//! thesis: fill the ADC window without hitting the rails — that is what positions the
+//! thesis: fill the ADC window without hitting the rails - that is what positions the
 //! signal/noise gap the other two panels draw.
 //!
 //! - [`histogram`]: the bell, its calipers, the axis and the legend.
@@ -122,7 +122,7 @@ impl Panel for AdcLoadingPanel {
         readouts::linearity_card(&mut lines, lna_g, vga_g, iw, theme);
 
         // Self-adjusting density: collapse spacers when short, grow them to fill when
-        // tall (chrome::fit_spacers), so the pane breathes the same at every height —
+        // tall (chrome::fit_spacers), so the pane breathes the same at every height -
         // consistent with the other lab side panels.
         crate::ui::chrome::fit_spacers(&mut lines, ih);
         f.render_widget(Paragraph::new(lines), inner);

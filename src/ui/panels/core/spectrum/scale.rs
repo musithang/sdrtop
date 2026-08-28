@@ -35,7 +35,7 @@ pub(super) fn freq_to_canvas_x(freq_hz: f64, left_hz: f64, bw: f64, n: f64) -> O
     }
 }
 
-/// A canvas x — the units [`freq_to_canvas_x`] returns, spanning `0..n-1` — as a
+/// A canvas x - the units [`freq_to_canvas_x`] returns, spanning `0..n-1` - as a
 /// terminal column inside `width`.
 ///
 /// The two coordinate systems cost nothing to mix up silently: the canvas is as
@@ -51,7 +51,7 @@ pub(super) fn canvas_x_to_col(x: f64, n: f64, width: u16) -> u16 {
     ((frac * width as f64).round() as u16).min(width - 1)
 }
 
-/// The occupied-bandwidth window as a symmetric span around `center_hz` — the
+/// The occupied-bandwidth window as a symmetric span around `center_hz` - the
 /// app's own display convention ("the channel is centred at the tuned LO",
 /// matching the ACPR offset math and the lab_iq carrier model), not necessarily
 /// the SM.328 cumulative method's true (possibly asymmetric) cutoff bins, which
@@ -62,7 +62,7 @@ pub(super) fn obw_bounds(center_hz: u64, obw_hz: u64) -> (f64, f64) {
     (center_hz as f64 - half, center_hz as f64 + half)
 }
 
-/// Signed delta between two markers: `(Δf_hz, Δlevel_db)`, second minus first —
+/// Signed delta between two markers: `(Δf_hz, Δlevel_db)`, second minus first -
 /// matches the mockup's "Δ +180.0 kHz  -38.1 dB" reading (MKR2 relative to MKR1).
 pub(super) fn marker_delta(freq_a: u64, level_a: f32, freq_b: u64, level_b: f32) -> (i64, f32) {
     (freq_b as i64 - freq_a as i64, level_b - level_a)

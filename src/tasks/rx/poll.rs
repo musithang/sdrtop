@@ -1,7 +1,7 @@
 //! **Lock block 1**: drain the accumulators and do the integer work.
 //!
 //! One critical section, entered once per poll. Everything in here is integer
-//! arithmetic, ring-buffer pushes and field copies — cheap operations that the
+//! arithmetic, ring-buffer pushes and field copies - cheap operations that the
 //! UI thread can afford to wait behind. The `sqrt` / `log10` / `asin` that turn
 //! these sums into readings happen in [`metrics`](super::metrics), after the
 //! guard is dropped.

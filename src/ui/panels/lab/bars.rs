@@ -1,11 +1,11 @@
-//! Lab "instrument mode" chrome — the two thin bars that wrap every measurement
+//! Lab "instrument mode" chrome - the two thin bars that wrap every measurement
 //! lab (`[5]`–`[9]`):
 //!
 //! - [`LabBannerPanel`] (top): `LAB · RF CHAIN [6]   REF —   AVG OFF   CAL —   MKR 2        ▶ LIVE`
 //! - [`LabMarkerPanel`] (bottom): `MKR1 92.800 MHz -19.1 dBFS   MKR2 …   Δ …        [hints]`
 //!
 //! Both are borderless single-line bars (text row + a dim hairline) laid into the
-//! lab presets' Top/Bottom slots like the footer — no engine changes. They read
+//! lab presets' Top/Bottom slots like the footer - no engine changes. They read
 //! the measurement flags from [`LabState`](crate::state::LabState) and the marker
 //! list from `SpectrumState` (not duplicated). Every field is width-aware:
 //! lower-priority fields drop out whole rather than clip mid-word.
@@ -23,7 +23,7 @@ use crate::ui::panel::{FrameStyle, Panel, PanelChrome};
 use crate::ui::rf_calc::{cascade, estimate_mds_dbm, staging_verdict, system_nf_db};
 
 /// Map an active preset name to its lab banner label and the number key that
-/// selects it (the *current* key map, which we keep — see the implementation
+/// selects it (the *current* key map, which we keep - see the implementation
 /// plan). `None` for any non-lab preset, so the chrome bars no-op if they ever
 /// render outside a lab.
 pub fn lab_label(preset: &str) -> Option<(&'static str, char)> {
@@ -77,7 +77,7 @@ fn level_at_freq(state: &SdrMetrics, freq_hz: u64) -> Option<f32> {
     fr.bins_dbfs.get(idx.min(n - 1)).copied()
 }
 
-/// Display width (columns) of a span run — every glyph we use here is single-width.
+/// Display width (columns) of a span run - every glyph we use here is single-width.
 fn span_w(spans: &[Span]) -> usize {
     spans.iter().map(|s| s.content.chars().count()).sum()
 }
@@ -159,7 +159,7 @@ fn timing_banner_fields(t: &crate::state::TimingState) -> Vec<(&'static str, Str
 
 /// Lab signal banner middle fields: `MOD … · SNR … · CH PWR … · OBW …`. MOD
 /// reads `—` while the classifier hasn't committed to a modulation (weak/no
-/// carrier at centre) — never a fabricated label.
+/// carrier at centre) - never a fabricated label.
 ///
 /// Every one of these comes from the latest FFT frame, so when that frame ages out
 /// they stop being measurements and become the last thing that was true. Stop RX
@@ -175,7 +175,7 @@ fn signal_banner_fields(state: &SdrMetrics) -> Vec<(&'static str, String)> {
 }
 
 /// The banner fields as a pure function of what was measured and whether it is
-/// still current — split out so the staleness rule can be tested without building a
+/// still current - split out so the staleness rule can be tested without building a
 /// whole `SdrMetrics`.
 fn signal_fields(sig: &crate::state::SignalState, stale: bool) -> Vec<(&'static str, String)> {
     let dash = || "\u{2014}".to_string();
@@ -513,8 +513,8 @@ fn iq_marker_lines(state: &SdrMetrics, theme: &crate::Theme, iw: usize) -> Vec<L
     vec![hairline(iw, theme.border_dim), Line::from(spans)]
 }
 
-/// Lab RF marker bar: the ADC window read as a single line —
-/// `CLIP 0 dBFS · PEAK −8 dBFS · Δ headroom +8 dB · NOISE −48 dBFS · SNR 40 dB` —
+/// Lab RF marker bar: the ADC window read as a single line -
+/// `CLIP 0 dBFS · PEAK −8 dBFS · Δ headroom +8 dB · NOISE −48 dBFS · SNR 40 dB` -
 /// plus the focused panel's key hints. PEAK / headroom carry the staging severity
 /// colour so a clipping or starved chain reads at a glance.
 fn rf_marker_lines(state: &SdrMetrics, theme: &crate::Theme, iw: usize) -> Vec<Line<'static>> {
@@ -609,8 +609,8 @@ fn titlecase(s: &str) -> String {
     }
 }
 
-/// Lab timing marker bar: the host-timing window as a single line —
-/// `JITTER ±42 µs · DRIFT +12 ppm · LATE 0 · BUF 0% · QUALITY ✓ Excellent` —
+/// Lab timing marker bar: the host-timing window as a single line -
+/// `JITTER ±42 µs · DRIFT +12 ppm · LATE 0 · BUF 0% · QUALITY ✓ Excellent` -
 /// plus the focused panel's key hints. LATE / BUF / QUALITY carry their severity
 /// colour so a pressured pipeline reads at a glance.
 fn timing_marker_lines(state: &SdrMetrics, theme: &crate::Theme, iw: usize) -> Vec<Line<'static>> {
@@ -704,10 +704,10 @@ fn timing_marker_lines(state: &SdrMetrics, theme: &crate::Theme, iw: usize) -> V
     vec![hairline(iw, theme.border_dim), Line::from(spans)]
 }
 
-/// Lab signal marker bar: `MKR1 … · MKR2 … · Δ … · OBW … · QUALITY …` — the
+/// Lab signal marker bar: `MKR1 … · MKR2 … · Δ … · OBW … · QUALITY …` - the
 /// user-placed markers (same read as the generic bar), plus the occupied
 /// bandwidth and verdict severity the left rail's card already shows. QUALITY
-/// calls `signal_characterization::verdict` directly — one source of truth, so
+/// calls `signal_characterization::verdict` directly - one source of truth, so
 /// the bottom bar and the card can never disagree (same precedent as Lab IQ's
 /// marker bar reading `image_scope::carrier_image`).
 fn signal_marker_lines(state: &SdrMetrics, theme: &crate::Theme, iw: usize) -> Vec<Line<'static>> {

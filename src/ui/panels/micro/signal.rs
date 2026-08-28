@@ -1,4 +1,4 @@
-//! `micro_signal` — the field signal-quality view (`[0]` cycle, 2nd step).
+//! `micro_signal` - the field signal-quality view (`[0]` cycle, 2nd step).
 //!
 //! Built for antenna aiming and level hunting: a large, immediately readable SNR
 //! bar with a short-term trend arrow (the key feedback when sweeping an antenna),
@@ -45,7 +45,7 @@ impl Panel for MicroSignalPanel {
         let lbl = |s: &'static str| Span::styled(s, Style::default().fg(theme.label));
         let dash = || Span::styled("---".to_string(), Style::default().fg(theme.stale));
 
-        // Header: status badge + frequency. Shared with the other field views —
+        // Header: status badge + frequency. Shared with the other field views -
         // it was written out identically in three of them.
         let header = super::field::header(state, theme);
 

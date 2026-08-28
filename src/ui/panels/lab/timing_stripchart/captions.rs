@@ -23,7 +23,7 @@ const DESC: [&str; 3] = [
 /// The longest form that actually fits, counting the leading space.
 ///
 /// **Chosen by measuring, not by a hand-picked width.** The thresholds used to be
-/// literals — 78 and 40 — while the sentences they select need 113 and 57
+/// literals - 78 and 40 - while the sentences they select need 113 and 57
 /// columns, so every tier was picked at widths it could not fit: a 48-column
 /// panel read `…from the expe`, an 80-column one `…from the expected p`. Deriving
 /// the threshold from each string means editing a sentence moves its own

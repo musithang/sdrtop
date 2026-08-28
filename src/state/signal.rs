@@ -7,7 +7,7 @@ use std::collections::VecDeque;
 /// pair through `micro_common::sat_color`, and the clip alert-memory below is
 /// anchored to it. The Command Rail used to carry a second, laxer pair (10 % /
 /// 50 %) on the argument that a rail sitting beside a gain control should not cry
-/// wolf at the saturation a well-driven front end normally runs at — which was
+/// wolf at the saturation a well-driven front end normally runs at - which was
 /// true of the *advice*, but not of the *number*: the same measurement then read
 /// green in the rail and red in the micro views at the same instant, and nothing
 /// told the user which to believe. The advice now comes from clip headroom
@@ -23,7 +23,7 @@ pub const SAT_WARN_PCT: f32 = 1.0;
 pub const SAT_CRIT_PCT: f32 = 5.0;
 
 /// ADC saturation at or above this percent records a clip event for the Command
-/// Rail's alert-memory — real clipping that's worth remembering, not measurement
+/// Rail's alert-memory - real clipping that's worth remembering, not measurement
 /// noise.
 ///
 /// The crit point of the scale above rather than a number of its own, so the
@@ -46,7 +46,7 @@ pub const ADC_COMFORT_DBFS: std::ops::RangeInclusive<f32> = -12.0..=-4.0;
 ///
 /// One fixed spacing cannot serve every band: ±200 kHz is broadcast FM's channel
 /// step, and applying it to a 12.5 kHz narrow-FM channel measures a band eight
-/// channels away — a number that is arithmetically correct and answers nobody's
+/// channels away - a number that is arithmetically correct and answers nobody's
 /// question. So the offset follows what the carrier turns out to be.
 ///
 /// These are the channel steps of the services the classifier can name, not
@@ -109,7 +109,7 @@ pub const CLASSIFY_MIN_SNR_DB: f32 = 10.0;
 ///
 /// Not the 180 kHz of Carson's rule, and not the 200 kHz channel allocation. The
 /// 99 % occupied bandwidth of a real WFM broadcast measures far less than either,
-/// because the time-averaged spectrum of FM is strongly peaked at the carrier —
+/// because the time-averaged spectrum of FM is strongly peaked at the carrier -
 /// 92.8 MHz on a stub antenna measures ~85 kHz, with 91 % of its power inside
 /// ±25 kHz. A weaker signal reads narrower still, since its skirts sink under the
 /// noise floor before the threshold that bounds the measurement window can see them.
@@ -155,7 +155,7 @@ pub struct SignalState {
     /// The *channel*, not the capture: summing every bin made this a function of the
     /// sample rate, so widening the span raised the "channel power" of a station
     /// that had not changed. `f32::NEG_INFINITY` when there is no carrier to
-    /// integrate — every reader already renders that as a dash.
+    /// integrate - every reader already renders that as a dash.
     ///
     /// Distinct from [`Self::adc_rms_dbfs`], which is the full-bandwidth figure and
     /// belongs to ADC loading rather than to the signal.
@@ -164,18 +164,18 @@ pub struct SignalState {
     /// Adjacent-channel power ratio, dB relative to the in-channel power, at
     /// ±[`Self::acpr_offset_hz`]. `f32::NEG_INFINITY` when there is nothing to
     /// compare against yet (no occupied bandwidth), a band falls outside the
-    /// captured span, or the bands would overlap the channel — never a guessed
+    /// captured span, or the bands would overlap the channel - never a guessed
     /// number. The two are written together: both finite, or neither.
     pub acpr_lower_db: f32,
     pub acpr_upper_db: f32,
-    /// Absolute level (dBFS) of the louder — worse — of the two adjacent bands.
+    /// Absolute level (dBFS) of the louder - worse - of the two adjacent bands.
     /// Paired with `acpr_lower_db` / `acpr_upper_db`; same undefined sentinel,
     /// which also covers a genuinely silent adjacent band.
     pub adj_carrier_dbfs: f32,
     /// The offset the ratio above was actually measured at, from
     /// [`acpr_offset_hz`]. Recorded rather than re-derived so the panel's labels
     /// and the adjacent-band frequency it prints can never disagree with the
-    /// measurement — the modulation could change between the two reads otherwise.
+    /// measurement - the modulation could change between the two reads otherwise.
     pub acpr_offset_hz: f64,
     pub usb_errors_session: u64,
     pub usb_errors_last_poll: u64,
@@ -183,13 +183,13 @@ pub struct SignalState {
     /// Recent SNR (peak/noise-floor) samples, pushed by the rx poll task roughly
     /// every 500 ms while streaming. Powers the micro_signal trend arrow.
     pub snr_history: VecDeque<f32>,
-    /// Recent channel-power (dBFS) samples — pushed alongside `snr_history` at the
+    /// Recent channel-power (dBFS) samples - pushed alongside `snr_history` at the
     /// same ~500 ms cadence. Powers the command rail's PWR sparkline + trend.
     pub pwr_history: VecDeque<f32>,
-    /// Recent noise-floor (dBFS) samples — pushed alongside `snr_history`. Powers
+    /// Recent noise-floor (dBFS) samples - pushed alongside `snr_history`. Powers
     /// the command rail's NF sparkline + trend.
     pub nf_history: VecDeque<f32>,
-    /// Recent ADC-saturation (%) samples — pushed alongside `snr_history` at the
+    /// Recent ADC-saturation (%) samples - pushed alongside `snr_history` at the
     /// same ~500 ms / [`crate::state::SNR_HISTORY_LEN`] depth so the command rail's
     /// SAT trace fills like the other three. Distinct from [`Self::saturation_history`],
     /// which feeds the health panels' mini-graph at the 200 ms / 64-deep cadence.
@@ -203,7 +203,7 @@ pub struct SignalState {
     pub modulation: Modulation,
     /// ADC loading for the Lab RF bench, refreshed each ~200 ms window: the loudest
     /// sample (`adc_peak_dbfs`), the full-bandwidth RMS level (`adc_rms_dbfs`, total
-    /// I/Q power vs full scale — distinct from the in-channel `channel_power_dbfs`),
+    /// I/Q power vs full scale - distinct from the in-channel `channel_power_dbfs`),
     /// and the clipped-sample count in the last window (`adc_clip_events`).
     pub adc_peak_dbfs: f32,
     pub adc_rms_dbfs: f32,
@@ -424,7 +424,7 @@ mod tests {
     }
 
     /// The comfort window has to be a window, and it has to sit below full scale
-    /// with room to spare — the rail derives its "hot" edge from the top of it.
+    /// with room to spare - the rail derives its "hot" edge from the top of it.
     #[test]
     fn the_adc_comfort_window_is_below_full_scale() {
         assert!(ADC_COMFORT_DBFS.start() < ADC_COMFORT_DBFS.end());

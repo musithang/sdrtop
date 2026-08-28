@@ -1,4 +1,4 @@
-//! Lab "instrument mode" measurement state — the REF / averaging / reference-
+//! Lab "instrument mode" measurement state - the REF / averaging / reference-
 //! trace controls the lab presets' instrument-chrome (banner + marker bar) shows
 //! and the lab spectrum reacts to. Driven from the banner focus (`b`); the marker
 //! data itself lives in [`SpectrumState`](super::SpectrumState) (not duplicated).
@@ -14,7 +14,7 @@ pub const REF_MAX: f32 = 0.0;
 
 /// A frozen Lab RF display snapshot (`[⎵]`/`[F]`). When present, the ADC-loading and
 /// level-diagram panels render this captured state instead of the live stream, so the
-/// bench can be studied without the histogram and traces moving. RX keeps running — only
+/// bench can be studied without the histogram and traces moving. RX keeps running - only
 /// the display is held. Captures everything the two panels derive from.
 #[derive(Clone)]
 pub struct RfFreeze {
@@ -31,7 +31,7 @@ pub struct RfFreeze {
 /// Measurement-state for the lab instrument-chrome.
 #[derive(Clone)]
 pub struct LabState {
-    /// Reference level (dBFS) — drawn as a horizontal line on the lab spectrum,
+    /// Reference level (dBFS) - drawn as a horizontal line on the lab spectrum,
     /// and the marker readout shows Δ-from-REF. `None` → `—`, no line.
     pub ref_dbfs: Option<f32>,
     /// Spectrum trace-averaging depth. Maps to the FFT EMA: `alpha = 1/avg_n`.
@@ -120,9 +120,9 @@ mod tests {
     #[test]
     fn default_reads_as_x5_no_ref_no_cal() {
         let s = LabState::default();
-        assert_eq!(s.ref_label(), "\u{2014}"); // —
+        assert_eq!(s.ref_label(), "\u{2014}"); // -
         assert_eq!(s.avg_label(), "\u{00D7}5"); // ×5
-        assert_eq!(s.cal_label(), "\u{2014}"); // —
+        assert_eq!(s.cal_label(), "\u{2014}"); // -
         assert!((s.ema_alpha() - 0.2).abs() < 1e-6); // preserves historical 0.2
     }
 

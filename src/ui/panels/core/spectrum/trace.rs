@@ -216,17 +216,17 @@ pub(super) fn draw(
                         }
                     };
 
-                // 0. Graticule — the dB and frequency reference grid, drawn first
+                // 0. Graticule - the dB and frequency reference grid, drawn first
                 //    so only the parts above the signal show through.
                 for i in 0..=4 {
                     level_line(ctx, y_min + (y_max - y_min) * (i as f64 / 4.0), pal.grid);
                     rule(ctx, (n - 1.0).max(0.0) * (i as f64 / 4.0), pal.grid);
                 }
-                // 1. Hold ghost — the entire frozen spectrum as a soft outline.
+                // 1. Hold ghost - the entire frozen spectrum as a soft outline.
                 if let Some(ref h) = held {
                     series(ctx, h, pal.hold);
                 }
-                // 2. Filled body — solid horizontal runs per band, continuous so
+                // 2. Filled body - solid horizontal runs per band, continuous so
                 //    no isolated dots blink on and off as bins jitter. Braille
                 //    dims it into a glow under its crisp edge; Fill keeps it at
                 //    full brightness as a heavy body; Scatter has none.
@@ -258,7 +258,7 @@ pub(super) fn draw(
                         }
                     }
                 }
-                // 3. Live edge — the crisp trace connecting bin tops, coloured by
+                // 3. Live edge - the crisp trace connecting bin tops, coloured by
                 //    height. Only Braille draws it: Fill's bright body is its own
                 //    edge, Scatter has no line.
                 if style == SpectrumStyle::Braille {
@@ -274,7 +274,7 @@ pub(super) fn draw(
                         });
                     }
                 }
-                // 3b. Scatter — an airy dot per bin at its top, no fill or line.
+                // 3b. Scatter - an airy dot per bin at its top, no fill or line.
                 if style == SpectrumStyle::Scatter {
                     for i in 0..bins.len() {
                         let yv = bins[i].clamp(v_min, v_max);
@@ -284,12 +284,12 @@ pub(super) fn draw(
                         });
                     }
                 }
-                // 4. Peak hold — one connected gold line tracing the decaying max
+                // 4. Peak hold - one connected gold line tracing the decaying max
                 //    envelope. A line stays calm where scattered points blink.
                 series(ctx, &peaks, pal.peak_hold);
                 // 5. Noise floor reference line.
                 level_line(ctx, noise_floor.clamp(v_min, v_max) as f64, pal.noise_floor);
-                // 5b. CAL reference-trace ghost — the captured baseline, drawn only
+                // 5b. CAL reference-trace ghost - the captured baseline, drawn only
                 //     when it matches the current bin count, i.e. at the zoom it
                 //     was captured at.
                 if let Some(ref tr) = ghosts.trace {
@@ -297,7 +297,7 @@ pub(super) fn draw(
                         series(ctx, tr, pal.cal);
                     }
                 }
-                // 5c. REF level — a horizontal line at the set dBFS.
+                // 5c. REF level - a horizontal line at the set dBFS.
                 if let Some(ry) = ghosts.ref_dbfs {
                     level_line(ctx, ry, pal.ref_line);
                 }
@@ -320,7 +320,7 @@ pub(super) fn draw(
                 if let Some(x) = rules.obw.1 {
                     rule(ctx, x, pal.obw);
                 }
-                // 7. Tuning cursor — full height, always on top.
+                // 7. Tuning cursor - full height, always on top.
                 if let Some(cx) = rules.cursor {
                     rule(ctx, cx, pal.cursor);
                 }
@@ -345,7 +345,7 @@ mod tests {
             // `band_y[s]` does not always map back to exactly `s`: the round trip
             // through f32 lands a hair under the boundary and truncates to `s-1`.
             // That is why the filled body indexes `band_bright[s]` directly rather
-            // than going through here — one is a band's own colour, the other is
+            // than going through here - one is a band's own colour, the other is
             // "the colour for this level", and they are allowed to differ by one
             // step without either being wrong.
             assert!(s - got <= 1, "band {s} drifted to {got}");

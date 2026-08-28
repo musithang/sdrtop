@@ -9,7 +9,7 @@ use ratatui::text::Line;
 /// What a row is worth when the stack does not fit the panel.
 ///
 /// `chrome::fit_spacers` can only hand back blank rows, and at 120x38 the WFM stack
-/// is still ten rows over once every spacer is gone — so the tail was simply clipped
+/// is still ten rows over once every spacer is gone - so the tail was simply clipped
 /// by the paragraph, and the tail is RDS. The panel showed `● RADIO 1` and lost the PI,
 /// the programme type, the group count and the RadioText under it: the payload of the
 /// section, cut without a mark. Reordering RDS higher only moves the amputation onto
@@ -17,14 +17,14 @@ use ratatui::text::Line;
 ///
 /// So rows say what they are instead, and the panel spends its height in that order.
 /// [`Heading`](Prio::Heading) and [`Core`](Prio::Core) are a section's nameplate and
-/// its lead reading — losing those makes the section a lie by omission.
+/// its lead reading - losing those makes the section a lie by omission.
 /// [`Detail`](Prio::Detail) is a secondary number a reader can do without;
 /// [`Minor`](Prio::Minor) is the least of a section's numbers, ranked below its
 /// siblings. [`Ornament`](Prio::Ornament) is a *picture of* a number already printed
 /// beside it: the deviation bar under `Peak`, the MPX tick row.
 ///
 /// Shedding takes from the **top** of the stack first within each class, which is
-/// what protects the foot — the sections that used to vanish whole. `Minor` exists
+/// what protects the foot - the sections that used to vanish whole. `Minor` exists
 /// because that top-down order is right *between* sections and wrong *within* one:
 /// with a single detail class the pilot's deviation went before its injection level,
 /// purely because it is printed first.
@@ -46,7 +46,7 @@ pub(super) struct Stack<'a> {
     rows: Vec<(Line<'a>, Prio)>,
 }
 
-/// A blank spacer row — the ones `chrome::fit_spacers` owns.
+/// A blank spacer row - the ones `chrome::fit_spacers` owns.
 fn is_gap(l: &Line<'_>) -> bool {
     l.spans.iter().all(|s| s.content.trim().is_empty())
 }
@@ -102,7 +102,7 @@ impl<'a> Stack<'a> {
 
 /// Remove any section nameplate left with nothing under it.
 ///
-/// Shedding works row by row and can empty a section completely — and a nameplate
+/// Shedding works row by row and can empty a section completely - and a nameplate
 /// over blank space is exactly the failure B3 took out of the idle panel. Walked
 /// back to front so a run of newly emptied sections collapses in one pass.
 fn drop_orphan_headings(rows: &mut Vec<(Line<'_>, Prio)>) {

@@ -21,7 +21,7 @@ pub fn deck_block<'a>(border_color: Color) -> Block<'a> {
     deck_block_borders(border_color, Borders::ALL)
 }
 
-/// Like [`deck_block`] but with an explicit border set — used when two panels
+/// Like [`deck_block`] but with an explicit border set - used when two panels
 /// bond into one instrument and the facing edge is dropped (e.g. the spectrum
 /// renders `TOP | LEFT | RIGHT`, letting the waterfall's top border below it act
 /// as the shared frequency ruler).
@@ -32,7 +32,7 @@ pub fn deck_block_borders<'a>(border_color: Color, borders: Borders) -> Block<'a
         .border_style(Style::default().fg(border_color))
 }
 
-/// Overlay only the top reinforced corners (`┏┓`) — for a panel bonded below a
+/// Overlay only the top reinforced corners (`┏┓`) - for a panel bonded below a
 /// neighbour, which has no bottom border to anchor `┗┛`.
 pub fn corner_accents_top(f: &mut Frame, area: Rect, color: Color) {
     if area.width < 2 || area.height < 1 {
@@ -91,7 +91,7 @@ pub fn junction_caps(f: &mut Frame, area: Rect, color: Color) {
 
 /// Overlay reinforced "bracket" corners on an already-rendered panel frame, in
 /// the panel's own border colour. The heavier corner glyphs (`┏┓┗┛`) against the
-/// light edges read as fastened instrument-panel corners — a schematic-deck
+/// light edges read as fastened instrument-panel corners - a schematic-deck
 /// detail that adds structure without touching the colour palette. Call right
 /// after rendering the block. No-op for frames too small to have real corners.
 pub fn corner_accents(f: &mut Frame, area: Rect, color: Color) {
@@ -182,7 +182,7 @@ pub fn outer_of(inner: Rect) -> Rect {
 /// which outranks the panel's declared tone.
 ///
 /// [`Tag::Paused`] counts as staleness here. A paused panel's readings are as
-/// frozen as an aged-out one's — the border only says "this is not advancing",
+/// frozen as an aged-out one's - the border only says "this is not advancing",
 /// and the plate says which of the two it is.
 fn border_color(chrome: &PanelChrome, stale: bool, focused: bool, theme: &crate::Theme) -> Color {
     if focused {
@@ -212,7 +212,7 @@ pub fn frame_color(
 /// Build the nameplate spans: `␣Name [K]suffix [STALE] [FRZ]␣`, or on a deck
 /// frame the engraved tick-tab form `╴NAME╶`.
 ///
-/// An untitled panel gets no nameplate at all, tags and suffix included — a box
+/// An untitled panel gets no nameplate at all, tags and suffix included - a box
 /// with nothing but `[STALE]` on its rule reads as debris rather than a title.
 pub fn title_spans(
     chrome: &PanelChrome,
@@ -266,7 +266,7 @@ pub fn title_spans(
             }
         }
         // No marker: the name as written, and the key bracketed after it if the
-        // panel has one. Never silently absent — that was the bug.
+        // panel has one. Never silently absent - that was the bug.
         None => {
             spans.push(Span::styled(plate(chrome.title), name));
             if let Some(k) = focus_key {
@@ -291,7 +291,7 @@ pub fn title_spans(
         ));
     }
     // A paused panel is not stale, it is held. Both tags say "not advancing", so
-    // printing them together would be two answers to one question — the more
+    // printing them together would be two answers to one question - the more
     // specific one wins.
     if stale && !chrome.tags.contains(&Tag::Paused) {
         spans.push(Span::styled(" [STALE]", Style::default().fg(theme.stale)));

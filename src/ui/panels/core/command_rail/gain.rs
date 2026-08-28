@@ -22,7 +22,7 @@ fn total_gain(lna: u32, vga: u32, has_second_stage: bool) -> u32 {
     }
 }
 
-/// Width of the gain bar given the rail's inner width — leaves room for the
+/// Width of the gain bar given the rail's inner width - leaves room for the
 /// `LNA ` label, a space, and a 2-col value. Clamped so it neither vanishes on a
 /// narrow rail nor sprawls on a wide one.
 fn gain_bar_width(inner_w: usize) -> usize {
@@ -30,7 +30,7 @@ fn gain_bar_width(inner_w: usize) -> usize {
 }
 
 /// The GAIN section rows: front-end boost, one bar per stage, then TOTAL with
-/// its clip headroom. `active` is "streaming and we own the radio" — idle, every
+/// its clip headroom. `active` is "streaming and we own the radio" - idle, every
 /// value drops to the label colour and the bars go flat.
 pub(super) fn lines(
     state: &SdrMetrics,
@@ -44,7 +44,7 @@ pub(super) fn lines(
     let val_col = if active { theme.value } else { theme.label };
     let mut out: Vec<Line<'static>> = Vec::new();
 
-    // Front-end boost (HackRF RF amp / RTL-SDR tuner AGC — one flag, two names).
+    // Front-end boost (HackRF RF amp / RTL-SDR tuner AGC - one flag, two names).
     let (boost_val, boost_col) = if observer {
         ("\u{2014}".to_string(), theme.label)
     } else if state.radio.amp_enabled {

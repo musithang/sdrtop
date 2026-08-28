@@ -1,4 +1,4 @@
-//! `fm_demod` — the right column of the `lab_signal` preset's redesign
+//! `fm_demod` - the right column of the `lab_signal` preset's redesign
 //! (DSN-2026-07): the FM MPX · DEMOD instrument.
 //!
 //! The panel dispatches on modulation ([`sections_for`]) rather than showing a
@@ -24,7 +24,7 @@
 //! - [`mpx`], [`pilot`], [`deviation`], [`ctcss`], [`am`], [`rds`]: one per
 //!   section, in the order [`sections_for`] can emit them. `am` holds both AM
 //!   sections because they read one measurement and appear together.
-//! - [`stack`]: the row stack and the shedding rule — the only place that
+//! - [`stack`]: the row stack and the shedding rule - the only place that
 //!   decides what a short panel gives up.
 //! - [`fmt`]: the value vocabulary the sections share.
 //!
@@ -67,19 +67,19 @@ enum Sec {
 ///
 /// This is the single dispatch the panel was designed around. MPX, the stereo
 /// pilot and RDS are wide-band FM concepts that simply do not exist for NFM or
-/// AM, and FM deviation is meaningless for an amplitude-modulated carrier — so
+/// AM, and FM deviation is meaningless for an amplitude-modulated carrier - so
 /// each mode is shown only what it actually has, rather than a fixed grid of
 /// sections where most read as permanently empty.
 ///
 /// There is no AUDIO section. One existed as a Phase-6 placeholder and appeared in
-/// every mode with nothing under it, in every state, forever — which is precisely
+/// every mode with nothing under it, in every state, forever - which is precisely
 /// the failure this dispatch was built to avoid. It comes back when there is
 /// something to put in it.
 fn sections_for(m: Modulation) -> &'static [Sec] {
     match m {
         Modulation::Nfm => &[Sec::Deviation, Sec::Ctcss],
         Modulation::Am => &[Sec::Depth, Sec::Carrier],
-        // An unclassified carrier keeps the broadcast shape — the state the panel
+        // An unclassified carrier keeps the broadcast shape - the state the panel
         // rests in before anything is tuned.
         Modulation::Wfm | Modulation::Unknown => &[Sec::Mpx, Sec::Pilot, Sec::Deviation, Sec::Rds],
     }
@@ -131,7 +131,7 @@ impl Panel for FmDemodPanel {
         let iw = inner.width as usize;
 
         // The MPX trace is the one block whose height is a free choice, and it
-        // cannot be sized until the rest of the stack is known — a taller trace is
+        // cannot be sized until the rest of the stack is known - a taller trace is
         // worth having only out of genuinely spare rows, and how many of those there
         // are depends on the modulation, on whether RDS is decoding, and on which
         // advisories are showing. So the stack is built once at one trace row to
@@ -155,7 +155,7 @@ impl Panel for FmDemodPanel {
             // Not via `fit_spacers`: it fills by *growing the existing blank rows*
             // proportionally, so leading padding gets amplified along with
             // everything else and the message ends up pinned to the floor. An empty
-            // state has no stack to breathe — it just needs placing.
+            // state has no stack to breathe - it just needs placing.
             let pad = h.saturating_sub(lines.len()) / 2;
             for _ in 0..pad {
                 lines.insert(0, Line::raw(""));
@@ -169,7 +169,7 @@ impl Panel for FmDemodPanel {
 
 /// Build the panel's row stack at a given MPX trace height, and say whether it came
 /// out headline-only (no section had anything to show). Pure: no locking, no I/O, no
-/// mutation — see the module note on panels rendering from a snapshot.
+/// mutation - see the module note on panels rendering from a snapshot.
 fn build_stack(
     state: &SdrMetrics,
     theme: &crate::Theme,
@@ -193,7 +193,7 @@ fn build_stack(
     // ── Sections, chosen by modulation ─────────────────────────────────
     //
     // Only while there is something to put under them. With the demod off, or
-    // before it has locked, every section is empty at once — and a stack of five
+    // before it has locked, every section is empty at once - and a stack of five
     // headings over blank space reads as a broken panel rather than an idle one.
     // The headline above already says why nothing is measured; repeating that in
     // scaffolding adds no information.

@@ -1,4 +1,4 @@
-//! `GAIN LINEUP` and `GAIN STAGING` — the signal's level after each stage, and
+//! `GAIN LINEUP` and `GAIN STAGING` - the signal's level after each stage, and
 //! where the two gain controls sit against their optimal targets.
 //!
 //! One module because they are the same question asked twice: the lineup says
@@ -15,7 +15,7 @@ use crate::ui::rf_calc::{Stage, StageLevel};
 use super::super::rf_bench::{bar_row, bar_width, row, Bar, Row};
 use super::{LABEL_W, VALW};
 
-/// `GAIN LINEUP` — the modeled level at each node of the chain, ending at the
+/// `GAIN LINEUP` - the modeled level at each node of the chain, ending at the
 /// ADC read in dBFS.
 pub(super) fn lineup(
     out: &mut Vec<Line<'static>>,
@@ -64,7 +64,7 @@ pub(super) fn lineup(
     ));
 }
 
-/// `GAIN STAGING` — LNA and VGA against their optimal targets, with the target
+/// `GAIN STAGING` - LNA and VGA against their optimal targets, with the target
 /// spelled out underneath when they are not already there.
 pub(super) fn staging(
     out: &mut Vec<Line<'static>>,

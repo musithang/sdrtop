@@ -2,7 +2,7 @@
 /// Oldest pairs are discarded when this limit is reached.
 pub const CONSTELLATION_CAP: usize = 1024;
 
-/// Lab IQ correction state — the live DSP behind the `[D]` DC-block / `[C]`
+/// Lab IQ correction state - the live DSP behind the `[D]` DC-block / `[C]`
 /// auto-cal chips and `[F]` freeze. Coefficients are applied in the RX hot path
 /// ([`process_block`](crate::hardware::process_block)) to the samples that feed
 /// the FFT and the constellation, so the spectrum/scope DC spike and the cloud
@@ -10,15 +10,15 @@ pub const CONSTELLATION_CAP: usize = 1024;
 /// diagnostics keep reporting the true hardware impairment being compensated.
 #[derive(Clone, Copy)]
 pub struct IqCalState {
-    /// `[D]` — subtract the live DC estimate from the stream.
+    /// `[D]` - subtract the live DC estimate from the stream.
     pub dc_block_on: bool,
-    /// `[C]` — an I/Q amplitude+phase correction matrix has been captured & applied.
+    /// `[C]` - an I/Q amplitude+phase correction matrix has been captured & applied.
     pub cal_applied: bool,
     /// `[C]` was just pressed; the next metrics cycle captures the coefficients.
     pub cal_pending: bool,
     /// Unix seconds of the last successful auto-cal (for "last cal Xm ago").
     pub last_cal_at: Option<u64>,
-    /// `[F]` — pause constellation accumulation (the cloud freezes in place).
+    /// `[F]` - pause constellation accumulation (the cloud freezes in place).
     pub frozen: bool,
     /// DC to subtract, in raw sample units (mean I/Q); tracks live while correcting.
     pub dc_i_raw: f32,

@@ -8,14 +8,14 @@
 //! Two properties of the sample pipeline shape everything here:
 //!
 //! * **The block stream is lossy by design.** `process_block` forwards blocks with
-//!   `try_send` on a bounded channel, so blocks are dropped under load — correct
+//!   `try_send` on a bounded channel, so blocks are dropped under load - correct
 //!   load-shedding for a display feed. Statistics tolerate that happily. CTCSS
 //!   does not: telling ~2 Hz-apart tones apart needs half a second of *unbroken*
 //!   audio, so the demod feed carries a sequence number and the channel filter
 //!   ([`StreamingDecimator`]) keeps its state across blocks. A gap resets the run.
 //! * **CPU is a displayed metric.** Work is bounded twice: at most [`SLICE_PAIRS`]
 //!   input pairs per update, and updates at [`UPDATE_INTERVAL`] regardless of how
-//!   fast blocks arrive — so cost is independent of the device sample rate, since
+//!   fast blocks arrive - so cost is independent of the device sample rate, since
 //!   the decimating FIR computes only every `d`-th output and scales with the
 //!   *channel* rate. Narrow-band FM is the exception: continuity outranks the duty
 //!   cycle there, so it pays for every block.
@@ -33,7 +33,7 @@ use crate::state::{AmMeasure, CtcssMeasure, FmMeasure, Modulation};
 /// signal at ±75 kHz deviation with 53 kHz of MPX occupies 2·(75 + 53) ≈ 256 kHz,
 /// so the channel must pass roughly ±128 kHz. Filtering an FM carrier more
 /// narrowly than its Carson bandwidth collapses the envelope on large excursions
-/// and produces click artefacts — 2π phase steps the discriminator reports as
+/// and produces click artefacts - 2π phase steps the discriminator reports as
 /// excursions pinned at its ambiguity limit. At a 320 kHz target the filter
 /// (cutoff 0.4 × channel rate) passes ±128 kHz or more at every supported device
 /// rate. It also leaves ample room for the 57 kHz RDS subcarrier in the recovered
@@ -43,7 +43,7 @@ pub const WFM_TARGET_HZ: f64 = 320_000.0;
 pub const NFM_TARGET_HZ: f64 = 25_000.0;
 
 /// Ceiling on I/Q pairs processed per update. 65 536 pairs is 6.5 ms of signal at
-/// 10 Msps and 33 ms at 2 Msps — both far more than deviation statistics need,
+/// 10 Msps and 33 ms at 2 Msps - both far more than deviation statistics need,
 /// while capping the per-update cost at a fixed number of samples.
 pub const SLICE_PAIRS: usize = 65_536;
 
@@ -52,7 +52,7 @@ pub const SLICE_PAIRS: usize = 65_536;
 pub const UPDATE_INTERVAL: Duration = Duration::from_millis(250);
 
 /// Peak-deviation hold decay per update. The peak reading behaves like a bench
-/// instrument's peak hold — it latches the loudest excursion and bleeds down when
+/// instrument's peak hold - it latches the loudest excursion and bleeds down when
 /// modulation quietens, instead of flickering with every update.
 const PEAK_DECAY_HZ: f32 = 2_000.0;
 
@@ -70,7 +70,7 @@ const EMA_ALPHA: f32 = 0.3;
 /// passband misses ±128 kHz.
 ///
 /// The factor is an integer, so the *actual* channel rate is [`channel_rate`]
-/// rather than the target — reported as such, in keeping with the app's rule of
+/// rather than the target - reported as such, in keeping with the app's rule of
 /// showing measured values instead of intended ones.
 pub fn decimation_factor(sample_rate: f64, target_hz: f64) -> usize {
     // `is_finite` first so a NaN rate can never slip through the comparisons
@@ -95,7 +95,7 @@ pub fn channel_rate(sample_rate: f64, d: usize) -> f64 {
 /// A Hamming-windowed sinc has a transition width of roughly `3.3 / taps`
 /// (normalised to the input rate). Holding that to about a fifth of the channel
 /// bandwidth needs ~16.5 × `d` taps. Clamped: below 31 the filter is too soft to
-/// reject a neighbouring station, and above 511 the cost stops buying quality —
+/// reject a neighbouring station, and above 511 the cost stops buying quality -
 /// at very high sample rates the filter degrades gracefully, which is why the
 /// panel advises dropping the sample rate rather than pretending otherwise.
 pub fn tap_count(d: usize) -> usize {
@@ -141,7 +141,7 @@ pub fn design_lowpass(taps: usize, fc: f64) -> Vec<f32> {
 
 /// Decode raw wire bytes into complex samples, taking at most `max_pairs`.
 ///
-/// Deliberately unwindowed — this is a time-domain signal path, not an FFT input.
+/// Deliberately unwindowed - this is a time-domain signal path, not an FFT input.
 pub fn decode(buf: &[u8], format: SampleFormat, max_pairs: usize, out: &mut Vec<Complex<f32>>) {
     out.clear();
     let pairs = (buf.len() / 2).min(max_pairs);
@@ -172,7 +172,7 @@ pub fn decode(buf: &[u8], format: SampleFormat, max_pairs: usize, out: &mut Vec<
 ///
 /// An FM carrier has a constant envelope, so on a clean signal every sample
 /// passes this gate. The envelope only collapses where the phase is meaningless
-/// anyway — noise nulls, and the beat nulls of a second carrier inside the
+/// anyway - noise nulls, and the beat nulls of a second carrier inside the
 /// channel. Those are exactly the samples that produce a full 2π phase step,
 /// which the discriminator reports as an excursion pinned at its ±rate/2
 /// ambiguity limit. Ungated, a handful of them dominate the peak reading: on a
@@ -182,14 +182,14 @@ const ENVELOPE_GATE: f32 = 0.35;
 
 /// Polar discriminator: instantaneous frequency in Hz.
 ///
-/// `f[n] = arg(z[n+1] · conj(z[n])) · rate / 2π`, unambiguous to ±`rate`/2 — at a
+/// `f[n] = arg(z[n+1] · conj(z[n])) · rate / 2π`, unambiguous to ±`rate`/2 - at a
 /// 333 kHz channel rate that is ±166 kHz, comfortably clear of the 75 kHz WFM
 /// limit. Always yields `len − 1` outputs: the missing first sample is precisely
 /// the block-splice guard, since the previous block's last phase is not usable.
 ///
 /// Samples failing [`ENVELOPE_GATE`] are replaced by the previous trustworthy
 /// value rather than removed. Dropping them would leave a non-uniform time base,
-/// which the MPX baseband spectrum cannot work from — a gap shifts every later
+/// which the MPX baseband spectrum cannot work from - a gap shifts every later
 /// sample in time and smears the 19 kHz pilot. Holding keeps the sample grid
 /// intact, and since the gate only fires on rare envelope collapses, the
 /// spectral cost is far smaller than the aliasing that dropping would cause.
@@ -213,7 +213,7 @@ pub fn fm_discriminate(iq: &[Complex<f32>], rate: f64, out: &mut Vec<f32>) {
     let mut held = 0.0f32;
     let mut have_held = false;
     for w in iq.windows(2) {
-        // Both endpoints must be trustworthy — the phase step spans the pair.
+        // Both endpoints must be trustworthy - the phase step spans the pair.
         if w[0].norm_sqr() < floor_sq || w[1].norm_sqr() < floor_sq {
             out.push(held);
             continue;
@@ -237,7 +237,7 @@ pub fn fm_discriminate(iq: &[Complex<f32>], rate: f64, out: &mut Vec<f32>) {
 /// tuned centre to DC ready for the channel filter.
 ///
 /// This is what lets the bench demodulate a station the radio is *not* centred
-/// on — the point being that the tuned centre is exactly where both front-ends
+/// on - the point being that the tuned centre is exactly where both front-ends
 /// put their DC offset and LO leakage, so a channel taken there competes with the
 /// artefact (see the plan's §3.5). Phase is restarted per block: blocks are
 /// independent by design, and a measurement does not care about phase continuity
@@ -273,7 +273,7 @@ pub fn mix_offset(iq: &mut [Complex<f32>], offset_hz: f64, sample_rate: f64) {
 }
 
 /// FFT size for the recovered MPX baseband. At a ~333 kHz channel rate this gives
-/// ~163 Hz resolution — ample to isolate the 19 kHz pilot from its neighbourhood
+/// ~163 Hz resolution - ample to isolate the 19 kHz pilot from its neighbourhood
 /// and to place the 38 kHz stereo subcarrier and 57 kHz RDS.
 pub const MPX_FFT_SIZE: usize = 2048;
 
@@ -287,7 +287,7 @@ pub const PILOT_HZ: f64 = 19_000.0;
 /// Spectrum of the recovered MPX baseband, in **Hz of deviation per bin**.
 ///
 /// The discriminator's output is already instantaneous deviation in Hz, so each
-/// bin's amplitude is the deviation contributed by that MPX component — which is
+/// bin's amplitude is the deviation contributed by that MPX component - which is
 /// exactly how pilot injection is specified. Scaling is `2·|X[k]| / Σw`, the
 /// standard single-sided amplitude recovery for a windowed transform.
 ///
@@ -335,7 +335,7 @@ pub fn mpx_spectrum(
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum PilotState {
     Absent,
-    /// Detectable but below a trustworthy injection level — reported as such
+    /// Detectable but below a trustworthy injection level - reported as such
     /// rather than being called stereo.
     Marginal,
     Locked,
@@ -351,7 +351,7 @@ pub struct PilotMeasure {
     pub injection_pct: f32,
 }
 
-/// Injection at or above this percentage counts as a locked pilot — half the
+/// Injection at or above this percentage counts as a locked pilot - half the
 /// 8–10 % nominal, so a weakly injected but genuine pilot still reads as stereo.
 const PILOT_LOCK_PCT: f32 = 4.0;
 /// Below this the line is indistinguishable from baseband content near 19 kHz.
@@ -395,7 +395,7 @@ pub fn pilot_measure(mags_hz: &[f32], bin_hz: f64, limit_hz: f32) -> PilotMeasur
     }
 }
 
-/// Quantile used for the peak-deviation reading — a quasi-peak detector rather
+/// Quantile used for the peak-deviation reading - a quasi-peak detector rather
 /// than a raw maximum.
 ///
 /// A single corrupted sample pair produces an enormous phase step, and the
@@ -403,11 +403,11 @@ pub fn pilot_measure(mags_hz: &[f32], bin_hz: f64, limit_hz: f32) -> PilotMeasur
 /// limit. Taking the absolute maximum therefore reports impulse noise as
 /// modulation: on a strong broadcast station it reads ~125 kHz against a 16 kHz
 /// RMS, a crest factor no real transmitter produces. Ignoring the top 0.1 % of
-/// samples rejects those outliers while still tracking genuine programme peaks —
+/// samples rejects those outliers while still tracking genuine programme peaks -
 /// for a sine the 99.9th percentile sits within 0.001 % of the true peak.
 const PEAK_QUANTILE: f64 = 0.999;
 
-/// Value at quantile `q` of `data`, found by partial sort — the same O(n)
+/// Value at quantile `q` of `data`, found by partial sort - the same O(n)
 /// `select_nth_unstable` approach the FFT worker uses for its noise floor.
 /// Reorders `data`, which is always caller-owned scratch.
 fn quantile(data: &mut [f32], q: f64) -> f32 {
@@ -424,7 +424,7 @@ fn quantile(data: &mut [f32], q: f64) -> f32 {
 /// Peak / RMS deviation and carrier offset from a discriminator output.
 ///
 /// The carrier offset is the mean instantaneous frequency, and deviation is
-/// measured *about that mean* — otherwise a mistuned radio would report its own
+/// measured *about that mean* - otherwise a mistuned radio would report its own
 /// tuning error as modulation and inflate the deviation figure. The peak is a
 /// [`PEAK_QUANTILE`] quasi-peak, found with the same O(n) partial sort the FFT
 /// worker uses for its noise floor.
@@ -457,7 +457,7 @@ pub fn fm_stats(inst_hz: &[f32]) -> Option<FmMeasure> {
 pub const AM_TARGET_HZ: f64 = 16_000.0;
 
 /// The channel rate to target for a modulation, or `None` for a carrier that has
-/// not been classified — an unclassified signal deliberately produces no reading
+/// not been classified - an unclassified signal deliberately produces no reading
 /// rather than a wrong one.
 pub fn target_rate_for(modulation: Modulation) -> Option<f64> {
     match modulation {
@@ -478,7 +478,7 @@ pub fn am_envelope(iq: &[Complex<f32>], out: &mut Vec<f32>) {
 /// Modulation depth and asymmetry from an AM envelope.
 ///
 /// Depth is the classic `(Vmax − Vmin) / (Vmax + Vmin)`. The peaks are taken as
-/// quantiles rather than absolute extremes for the same reason the FM peak is —
+/// quantiles rather than absolute extremes for the same reason the FM peak is -
 /// one impulse would otherwise define the reading.
 ///
 /// Positive and negative depths are reported separately because they fail
@@ -527,7 +527,7 @@ pub const CTCSS_TONES: [f64; 40] = [
 ///
 /// The closest standard tones are ~2.3 Hz apart (67.0 vs 69.3). Telling them
 /// apart needs an observation long enough that one tone's response at its
-/// neighbour's detector has fallen away — roughly `1 / Δf`, so ~430 ms minimum.
+/// neighbour's detector has fallen away - roughly `1 / Δf`, so ~430 ms minimum.
 /// Half a second gives margin. This is why the CTCSS path cannot run off the
 /// duty-cycled 33 ms snippets the deviation statistics are happy with.
 pub const CTCSS_WINDOW_S: f64 = 0.5;
@@ -545,7 +545,7 @@ const CTCSS_MARGIN_DB: f32 = 6.0;
 /// Goertzel amplitude estimate for one frequency, in the input's own units.
 ///
 /// A single-bin DFT: far cheaper than a full transform when only a few dozen
-/// frequencies matter, and unconstrained by bin spacing — the CTCSS tones do not
+/// frequencies matter, and unconstrained by bin spacing - the CTCSS tones do not
 /// land on FFT bin centres. Scaled `2·|X| / Σw` so the result reads directly as
 /// the tone's amplitude.
 pub fn goertzel_amplitude(x: &[f32], window: &[f32], freq: f64, rate: f64) -> f32 {
@@ -572,7 +572,7 @@ pub fn goertzel_amplitude(x: &[f32], window: &[f32], freq: f64, rate: f64) -> f3
 /// Identify the CTCSS tone present in a block of discriminator output, if any.
 ///
 /// Returns the winning tone only when it is both strong enough in absolute terms
-/// and clearly ahead of every non-adjacent rival — a tone that merely edges out
+/// and clearly ahead of every non-adjacent rival - a tone that merely edges out
 /// its neighbour is an unresolved measurement, not a detection.
 pub fn ctcss_detect(audio_hz: &[f32], window: &[f32], rate: f64) -> Option<CtcssMeasure> {
     if audio_hz.len() < window.len() || window.is_empty() {
@@ -621,7 +621,7 @@ pub fn ctcss_detect(audio_hz: &[f32], window: &[f32], rate: f64) -> Option<Ctcss
 /// The stateless [`decimate`] restarts at each block: it discards the first
 /// `taps` samples and resets the decimation grid, which puts a small timing step
 /// at every block boundary. Deviation statistics never notice, but a narrowband
-/// tone detector does — the CTCSS window spans several blocks, and a phase step
+/// tone detector does - the CTCSS window spans several blocks, and a phase step
 /// inside it destroys the coherence the detection depends on.
 pub struct StreamingDecimator {
     taps: Vec<f32>,
@@ -643,7 +643,7 @@ impl StreamingDecimator {
         }
     }
 
-    /// Forget the carried state — after a dropped block, or a parameter change.
+    /// Forget the carried state - after a dropped block, or a parameter change.
     /// The next output block starts a fresh contiguous run.
     pub fn reset(&mut self) {
         self.tail.clear();
@@ -728,7 +728,7 @@ mod tests {
     #[test]
     fn decimation_factor_rounds_down_and_floors_at_one() {
         assert_eq!(decimation_factor(2_000_000.0, 250_000.0), 8);
-        // 9.6 rounds *down* to 9 — a wider channel than asked for, never narrower.
+        // 9.6 rounds *down* to 9 - a wider channel than asked for, never narrower.
         assert_eq!(decimation_factor(2_400_000.0, 250_000.0), 9);
         assert_eq!(decimation_factor(10_000_000.0, 250_000.0), 40);
         // A target above the sample rate cannot decimate at all.
@@ -825,7 +825,7 @@ mod tests {
     #[test]
     fn discriminator_measures_known_deviation() {
         let rate = 250_000.0;
-        // 40 kHz peak deviation, 1 kHz tone — a textbook WFM test signal.
+        // 40 kHz peak deviation, 1 kHz tone - a textbook WFM test signal.
         let iq = fm_signal(rate, 1 << 15, 0.0, 40_000.0, 1_000.0);
         let mut inst = Vec::new();
         fm_discriminate(&iq, rate, &mut inst);
@@ -907,7 +907,7 @@ mod tests {
     #[test]
     fn streaming_decimator_matches_one_long_block() {
         // The property CTCSS depends on: feeding a signal in pieces must give the
-        // same output as feeding it whole — same samples, same count, no timing
+        // same output as feeding it whole - same samples, same count, no timing
         // step at the seams.
         let rate = 2_000_000.0;
         let d = 8;
@@ -972,7 +972,7 @@ mod tests {
     #[test]
     fn peak_ignores_impulse_outliers() {
         // A clean ±20 kHz sine with a handful of samples corrupted to the
-        // discriminator's ambiguity rail — exactly what a few bad sample pairs
+        // discriminator's ambiguity rail - exactly what a few bad sample pairs
         // look like. The reading must follow the signal, not the impulses.
         let rate = 250_000.0;
         let iq = fm_signal(rate, 1 << 14, 0.0, 20_000.0, 1_000.0);
@@ -1028,7 +1028,7 @@ mod tests {
     #[test]
     fn a_leading_gated_run_is_backfilled() {
         // If the block opens inside a null there is no previous value to hold, so
-        // the first valid sample is written backwards over the gap — otherwise the
+        // the first valid sample is written backwards over the gap - otherwise the
         // block would start with a fabricated zero and put a step in the spectrum.
         let rate = 250_000.0;
         let mut iq = fm_signal(rate, 2048, 15_000.0, 0.0, 0.0);
@@ -1056,7 +1056,7 @@ mod tests {
 
     #[test]
     fn peak_still_tracks_a_real_over_deviation() {
-        // Over-deviation is a real fault the panel must be able to show — the
+        // Over-deviation is a real fault the panel must be able to show - the
         // outlier rejection must not flatten a genuinely hot signal.
         let rate = 250_000.0;
         let iq = fm_signal(rate, 1 << 15, 0.0, 90_000.0, 1_000.0);
@@ -1138,7 +1138,7 @@ mod tests {
 
     #[test]
     fn mpx_spectrum_recovers_pilot_deviation() {
-        // 30 kHz audio + a 7.5 kHz pilot — 10 % injection against the 75 kHz limit.
+        // 30 kHz audio + a 7.5 kHz pilot - 10 % injection against the 75 kHz limit.
         let rate = 333_000.0;
         let iq = wfm_signal(rate, MPX_FFT_SIZE * 2, 30_000.0, 7_500.0);
         let mut inst = Vec::new();
@@ -1295,7 +1295,7 @@ mod tests {
         let rate = 25_000.0;
         let n = (CTCSS_WINDOW_S * rate) as usize;
         let window = super::super::dsp::compute_window(super::super::dsp::WindowFn::Hann, n);
-        // 103.5 Hz at 600 Hz deviation, under 3 kHz of voice — typical proportions.
+        // 103.5 Hz at 600 Hz deviation, under 3 kHz of voice - typical proportions.
         let audio = ctcss_audio(rate, n, 103.5, 600.0, 3_000.0);
         let m = ctcss_detect(&audio, &window, rate).expect("tone detected");
         assert_eq!(m.tone_hz, 103.5);
@@ -1308,7 +1308,7 @@ mod tests {
 
     #[test]
     fn ctcss_separates_the_closest_tone_pair() {
-        // 67.0 and 69.3 are only 2.3 Hz apart — the reason the window is half a
+        // 67.0 and 69.3 are only 2.3 Hz apart - the reason the window is half a
         // second. Each must be identified as itself, not as its neighbour.
         let rate = 25_000.0;
         let n = (CTCSS_WINDOW_S * rate) as usize;
@@ -1326,7 +1326,7 @@ mod tests {
         let rate = 25_000.0;
         let n = (CTCSS_WINDOW_S * rate) as usize;
         let window = super::super::dsp::compute_window(super::super::dsp::WindowFn::Hann, n);
-        // Voice only — a carrier with no subaudible tone must not invent one.
+        // Voice only - a carrier with no subaudible tone must not invent one.
         let audio = ctcss_audio(rate, n, 100.0, 0.0, 3_000.0);
         assert!(ctcss_detect(&audio, &window, rate).is_none());
     }
@@ -1334,7 +1334,7 @@ mod tests {
     #[test]
     fn ctcss_declines_a_short_run() {
         // Fewer samples than the window means the run is not yet long enough to
-        // decide — the caller must show "searching", not "no tone".
+        // decide - the caller must show "searching", not "no tone".
         let rate = 25_000.0;
         let n = (CTCSS_WINDOW_S * rate) as usize;
         let window = super::super::dsp::compute_window(super::super::dsp::WindowFn::Hann, n);

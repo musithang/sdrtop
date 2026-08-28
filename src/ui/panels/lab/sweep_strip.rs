@@ -1,4 +1,4 @@
-//! `sweep_strip` — a one-line status bar for the `lab_sweep` preset, mirroring
+//! `sweep_strip` - a one-line status bar for the `lab_sweep` preset, mirroring
 //! `signal_strip`: sweep badge, band, progress, cycle info, and the cursor
 //! readout with band-plan identification.
 

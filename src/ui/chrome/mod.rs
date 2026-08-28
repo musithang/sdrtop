@@ -1,11 +1,11 @@
-//! Shared chrome — one frame and nameplate vocabulary for every panel.
+//! Shared chrome - one frame and nameplate vocabulary for every panel.
 //!
 //! - [`frame`]: the panel frame itself. [`frame::render_frame`] turns a panel's
 //!   [`PanelChrome`](crate::ui::panel::PanelChrome) into a border, a nameplate
 //!   and the inner rect, so no panel draws its own box. The schematic-deck
 //!   pieces ([`deck_block`], [`corner_accents`], [`junction_caps`]) live there
 //!   too and are re-exported here.
-//! - This module: the vocabulary panels use *inside* that frame — nameplate
+//! - This module: the vocabulary panels use *inside* that frame - nameplate
 //!   labels, the `├╴ SECTION ╶──── hint` subheading, `label : value` fields,
 //!   text wrapping, and the density helpers that let an airy line stack breathe
 //!   or compress to any terminal height.
@@ -35,7 +35,7 @@ pub fn nameplate<'a>(label_spans: Vec<Span<'a>>, tick_color: Color) -> Vec<Span<
     spans
 }
 
-/// `├╴ SECTION ╶──── hint` — the shared lab side-panel subheading, spanning the
+/// `├╴ SECTION ╶──── hint` - the shared lab side-panel subheading, spanning the
 /// full inner width `iw`: a `├╴` tick tab, the uppercased bold label, a `╶` cap,
 /// a dim dashed rule filling the middle, and an optional right-aligned `hint`.
 ///
@@ -83,12 +83,12 @@ pub fn field(name: &str, width: usize, theme: &crate::Theme) -> Span<'static> {
 ///
 /// The shared alternative to letting a `Paragraph` clip: a chopped line reads as
 /// a value (`Strong carrier (47 dB), 1.25`), so anything long enough to overrun a
-/// lab panel's narrow column — RadioText, the verdict copy — comes through here
+/// lab panel's narrow column - RadioText, the verdict copy - comes through here
 /// instead.
 ///
 /// Interior gaps survive on purpose. RadioText arrives character by character and
-/// unconfirmed positions read as blanks, so a half-decoded message is full of gaps
-/// — and squeezing them out glues the surviving fragments into words the station
+/// unconfirmed positions read as blanks, so a half-decoded message is full of gaps,
+/// and squeezing them out glues the surviving fragments into words the station
 /// never sent. `"Now Play  Exam      Track"` is visibly a message still filling in;
 /// `"Now Play Exam Track"` looks like a decoder that is simply wrong.
 pub fn wrap(text: &str, width: usize, max_rows: usize) -> Vec<String> {
@@ -129,7 +129,7 @@ pub fn wrap(text: &str, width: usize, max_rows: usize) -> Vec<String> {
 ///
 /// When the overflow meets or exceeds the whole spacer budget every spacer goes
 /// (true dense). Otherwise only as many as needed are removed, picked evenly
-/// across the spacer list so the surviving breathing room stays balanced —
+/// across the spacer list so the surviving breathing room stays balanced -
 /// instead of the all-or-nothing cliff that, at in-between heights, collapsed a
 /// panel to fully dense and stranded a block of blank rows at its foot.
 pub fn spacers_to_drop(total: usize, blank_idx: &[usize], avail: usize) -> Vec<usize> {
@@ -146,7 +146,7 @@ pub fn spacers_to_drop(total: usize, blank_idx: &[usize], avail: usize) -> Vec<u
 }
 
 /// Fit an airy `lines` stack into `avail` rows in place: drop only as many blank
-/// spacer rows as needed — evenly across the stack — so a panel keeps as much
+/// spacer rows as needed - evenly across the stack - so a panel keeps as much
 /// breathing room as fits rather than snapping to fully dense and stranding empty
 /// rows. A blank row is one whose spans are all whitespace. No-op when it already
 /// fits. The shared self-adjusting-density routine for every airy-stack panel.
@@ -270,7 +270,7 @@ mod tests {
     #[test]
     fn spacers_to_drop_drops_all_when_overflow_exceeds_budget() {
         let blanks = vec![3, 5, 7, 9];
-        // Overflow of 6 but only 4 spacers — every spacer must go (true dense).
+        // Overflow of 6 but only 4 spacers - every spacer must go (true dense).
         assert_eq!(spacers_to_drop(30, &blanks, 24), blanks);
         // Overflow exactly equal to the spacer count also clears them all.
         assert_eq!(spacers_to_drop(28, &blanks, 24), blanks);
@@ -366,7 +366,7 @@ mod tests {
         // The bug this guards, seen live at 92 groups: RadioText fills in
         // character by character, and collapsing the unconfirmed blanks turned
         // "Now Playing - Example Artist - Example Track Title" into
-        // "Now Play Exam Track" — fragments glued into words the
+        // "Now Play Exam Track" - fragments glued into words the
         // station never sent.
         let partial = "Now Play  Exam      Track";
         let rows = wrap(partial, 40, 2);

@@ -16,7 +16,7 @@ use crate::ui::widgets::micro_common::fmt_rbw;
 /// The frequency hero: the big 3-row block readout, or a single bold line when
 /// the rail is too narrow for the block font. The actively-tuned digit is lit in
 /// `value_hi` (the same digit the small VFO underlines), the rest in `value`, the
-/// decimal point dim — all dim in observer mode.
+/// decimal point dim - all dim in observer mode.
 pub(super) fn freq_hero_lines(
     freq: u64,
     step: u64,
@@ -74,7 +74,7 @@ pub(super) fn freq_hero_lines(
     vec![Line::from(r0), Line::from(r1), Line::from(r2)]
 }
 
-/// `[FM]  SR 2.0M · RBW 1.5 kHz` — the band chip plus sample-rate / resolution
+/// `[FM]  SR 2.0M · RBW 1.5 kHz` - the band chip plus sample-rate / resolution
 /// context, sitting just under the frequency hero.
 pub(super) fn band_sr_line(state: &SdrMetrics, iw: usize, theme: &crate::Theme) -> Line<'static> {
     let mut spans = vec![Span::raw(" ")];
@@ -94,7 +94,7 @@ pub(super) fn band_sr_line(state: &SdrMetrics, iw: usize, theme: &crate::Theme) 
     let sr = format!("SR {:.1}M", state.radio.config_sample_rate / 1_000_000.0);
     used += sr.chars().count();
     spans.push(Span::styled(sr, Style::default().fg(theme.label)));
-    // RBW is the first thing to go on a narrow rail — drop it (and its separator)
+    // RBW is the first thing to go on a narrow rail - drop it (and its separator)
     // rather than let it clip mid-word at the panel border.
     let rbw = match state
         .waterfall

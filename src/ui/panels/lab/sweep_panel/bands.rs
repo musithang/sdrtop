@@ -58,8 +58,8 @@ mod tests {
 
     const GUTTER: usize = 5;
 
-    /// The row is exactly as wide as the gutter plus the plot, whatever it holds
-    /// — a longer row would wrap and a shorter one would leave the plot's right
+    /// The row is exactly as wide as the gutter plus the plot, whatever it holds:
+    /// a longer row would wrap and a shorter one would leave the plot's right
     /// edge unlabelled.
     #[test]
     fn the_row_is_always_the_width_of_the_plot() {

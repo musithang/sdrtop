@@ -8,7 +8,7 @@ use ratatui::{
 
 use crate::ui::chrome::field;
 
-/// Label-column width — clears the longest label ("Channel power" = 13) plus a gap.
+/// Label-column width - clears the longest label ("Channel power" = 13) plus a gap.
 const FIELD_W: usize = 14;
 
 /// Gap between a metric's value and its dim annotation.
@@ -39,7 +39,7 @@ pub(super) fn metric(name: &str, body: Vec<Span<'static>>, theme: &crate::Theme)
 }
 
 /// A value with its trailing dim annotation, the annotation dropped whole when
-/// the column cannot hold both — see [`annotation_fits`].
+/// the column cannot hold both - see [`annotation_fits`].
 pub(super) fn annotated(
     value: String,
     ann: String,
@@ -57,7 +57,7 @@ pub(super) fn annotated(
     spans
 }
 
-/// `92.800 MHz` / `1.234500 GHz` — the same precise readout the lab marker bar uses.
+/// `92.800 MHz` / `1.234500 GHz` - the same precise readout the lab marker bar uses.
 pub(super) fn fmt_freq(hz: u64) -> String {
     if hz >= 1_000_000_000 {
         format!("{:.6} GHz", hz as f64 / 1e9)
@@ -69,8 +69,8 @@ pub(super) fn fmt_freq(hz: u64) -> String {
 /// Whether a metric row's dim annotation fits the panel's inner width `iw`, given
 /// the value it trails.
 ///
-/// The annotations on this panel — the peak's frequency, `99% power`, the noise
-/// density, the adjacent band's frequency — are context, not measurements, and a
+/// The annotations on this panel - the peak's frequency, `99% power`, the noise
+/// density, the adjacent band's frequency - are context, not measurements, and a
 /// clipped one is worse than none at all. At 120 columns the panel's inner width
 /// is 29 and the paragraph simply chopped them mid-token, so the Peak row read
 ///
@@ -92,7 +92,7 @@ mod tests {
     #[test]
     fn annotation_dropped_rather_than_clipped_at_a_narrow_column() {
         // The B2 row, measured: 120-column terminal → 29 inner. Lead 1 + label 14
-        // + "-35.4 dBFS" 10 + gap 3 leaves 1 column, and "92.807 MHz" needs 10 —
+        // + "-35.4 dBFS" 10 + gap 3 leaves 1 column, and "92.807 MHz" needs 10 -
         // so the frequency goes, instead of arriving as a lone "9".
         assert!(!annotation_fits(
             "-35.4 dBFS".chars().count(),

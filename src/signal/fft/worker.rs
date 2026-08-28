@@ -4,7 +4,7 @@
 //! discipline is visible in the file layout rather than in a comment:
 //!
 //! - [`frame`](super::frame) is the per-frame DSP. Runs at **full rate**, holds
-//!   no lock — the averaging is only accurate if it sees every frame.
+//!   no lock - the averaging is only accurate if it sees every frame.
 //! - [`analysis`](super::analysis) is the expensive maths. Runs at display rate,
 //!   holds **no lock**, reads no clock.
 //! - [`publish`](super::publish) is the one lock block.
@@ -27,7 +27,7 @@ use crate::state::SdrMetrics;
 use super::publish::{Pacing, Snapshot};
 use super::{analysis, frame, DB_FLOOR};
 
-/// Throttle state writes to ~30 fps — the EMA runs on every frame for accuracy,
+/// Throttle state writes to ~30 fps - the EMA runs on every frame for accuracy,
 /// but the expensive analysis and the state lock fire at display rate only.
 const UPDATE_INTERVAL: Duration = Duration::from_millis(33);
 
@@ -38,7 +38,7 @@ pub struct FftWorker {
     pub window_fn: WindowFn,
     pub ema_alpha: f32,
     pub peak_decay_db: f32,
-    /// How to decode the raw bytes — set from the active device's capabilities.
+    /// How to decode the raw bytes - set from the active device's capabilities.
     pub format: SampleFormat,
 }
 
@@ -65,13 +65,13 @@ impl FftWorker {
         let fft = planner.plan_fft_forward(n);
         let window = dsp::compute_window(self.window_fn, n);
 
-        // ENBW coefficient: N × Σ(w²) / (Σ(w))² — exact for whatever window is used.
+        // ENBW coefficient: N × Σ(w²) / (Σ(w))² - exact for whatever window is used.
         // Hann ≈ 1.5, Hamming ≈ 1.36, Blackman ≈ 1.73.
         let w_sum_sq: f64 = window.iter().map(|&w| (w as f64).powi(2)).sum();
         let w_sum: f64 = window.iter().map(|&w| w as f64).sum();
         let enbw_coeff = n as f64 * w_sum_sq / (w_sum * w_sum);
 
-        // Pre-allocate every scratch buffer — reused each frame, zero heap churn.
+        // Pre-allocate every scratch buffer - reused each frame, zero heap churn.
         let mut buf: Vec<u8> = Vec::new();
         let mut samples: Vec<Complex<f32>> = vec![Complex::default(); n];
         let mut mags: Vec<f32> = vec![0.0; n];
@@ -169,7 +169,7 @@ mod tests {
 
     /// Run the real worker over synthetic IQ and return the state it published.
     ///
-    /// The worker had no test at all before the split — it is a thread that reads
+    /// The worker had no test at all before the split - it is a thread that reads
     /// a channel and writes a mutex, and nothing exercised it end to end. This is
     /// what makes the split provable: the arithmetic moved between files, so the
     /// check that matters is that a known tone still comes out where it went in.
@@ -202,8 +202,8 @@ mod tests {
     }
 
     /// A tone put in at a known offset comes out at that bin, at full amplitude,
-    /// standing clear of the floor. This exercises the whole chain — decode,
-    /// window, transform, magnitude, fftshift, average — and the publish block.
+    /// standing clear of the floor. This exercises the whole chain - decode,
+    /// window, transform, magnitude, fftshift, average - and the publish block.
     #[test]
     fn a_known_tone_lands_in_its_own_bin() {
         const N: usize = 2048;
@@ -231,7 +231,7 @@ mod tests {
     }
 
     /// The SNR the worker publishes is the tone above the noise floor, and the
-    /// noise floor is the quiet part of the span — not the tone.
+    /// noise floor is the quiet part of the span - not the tone.
     #[test]
     fn the_published_snr_measures_the_tone_against_the_floor() {
         let m = run_against(20, 1);
@@ -271,7 +271,7 @@ mod tests {
     }
 
     /// The averaging runs on every frame, so more frames converge rather than
-    /// diverge — and the peak hold never falls below the trace.
+    /// diverge - and the peak hold never falls below the trace.
     #[test]
     fn averaging_over_many_frames_stays_bounded() {
         let m = run_against(20, 40);
@@ -290,7 +290,7 @@ mod tests {
     }
 
     /// The ENBW published with the frame is the window's, scaled by the bin
-    /// width — a Hann window is about 1.5 bins wide.
+    /// width - a Hann window is about 1.5 bins wide.
     #[test]
     fn the_frame_carries_the_windows_noise_bandwidth() {
         const N: f64 = 2048.0;

@@ -271,7 +271,7 @@ fn count_lines<S: AsRef<str>>(items: &[S], sep: &str, inner_w: usize) -> usize {
     wrap_items(items, sep, inner_w).len()
 }
 
-/// Public free function — called directly from the engine (bypasses dyn dispatch).
+/// Public free function - called directly from the engine (bypasses dyn dispatch).
 pub fn compute_footer_height(available_width: u16, state: &SdrMetrics) -> u16 {
     if !matches!(state.ui.input_mode, InputMode::Normal) || state.observer.active {
         return 3;

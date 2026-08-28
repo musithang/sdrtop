@@ -38,7 +38,7 @@ struct Cli {
     #[arg(long, value_name = "HZ")]
     frequency: Option<u64>,
 
-    /// Primary front-end gain in dB — HackRF LNA / RTL-SDR tuner (overrides config)
+    /// Primary front-end gain in dB - HackRF LNA / RTL-SDR tuner (overrides config)
     #[arg(long, value_name = "DB")]
     gain: Option<u32>,
 
@@ -67,9 +67,9 @@ fn log_path() -> PathBuf {
 }
 
 /// Redirect stderr (fd 2) to a log file for the TUI session and return the saved
-/// original fd. Backend libraries are chatty on stderr — librtlsdr prints
+/// original fd. Backend libraries are chatty on stderr - librtlsdr prints
 /// "Allocating zero-copy buffers", "Found … tuner", "[R82XX] PLL not locked!",
-/// some from its own read thread — which would scribble over the alternate
+/// some from its own read thread - which would scribble over the alternate
 /// screen. Sending it to a file keeps the TUI clean while preserving the output
 /// for debugging. Best-effort: returns `None` (and leaves stderr alone) on error.
 fn redirect_stderr_to_log() -> Option<i32> {
@@ -163,7 +163,7 @@ async fn main() -> Result<()> {
     let backend = CrosstermBackend::new(stdout);
     let mut terminal = Terminal::new(backend)?;
 
-    // From here on the alternate screen is live — keep backend-library chatter
+    // From here on the alternate screen is live - keep backend-library chatter
     // off it by routing stderr to the log file until we tear the TUI down.
     let saved_stderr = redirect_stderr_to_log();
 

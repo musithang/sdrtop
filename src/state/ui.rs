@@ -7,8 +7,8 @@ use super::MicroView;
 pub const LOG_MAX_ENTRIES: usize = 100;
 
 /// Which lead view the Command Rail's mode-card shows. It auto-follows what you
-/// are doing — tuning relaxes to **Hunt** (find signals), gain changes to
-/// **Bench** (set up the chain) — and falls back to **Monitor** when idle. `Tab`
+/// are doing - tuning relaxes to **Hunt** (find signals), gain changes to
+/// **Bench** (set up the chain) - and falls back to **Monitor** when idle. `Tab`
 /// in rail-focus pins a mode manually (no auto-decay).
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
 pub enum RailMode {
@@ -59,11 +59,11 @@ pub fn decayed_mode(mode: RailMode, auto: bool, since: Option<Duration>) -> Rail
 pub const RECALL_SLOTS: usize = 3;
 
 /// A recalled frequency this many Hz from the current tuning counts as "parked
-/// on" that slot — the device may round a tuned frequency slightly.
+/// on" that slot - the device may round a tuned frequency slightly.
 pub const RECALL_MATCH_HZ: u64 = 1_000;
 
-/// Which slot a save should write: the lowest empty slot, or — when all are full
-/// — the rotating `cursor` (oldest-overwrite). Pure for testability.
+/// Which slot a save should write: the lowest empty slot, or, when all are full,
+/// the rotating `cursor` (oldest-overwrite). Pure for testability.
 pub fn next_recall_slot(slots: &[Option<u64>; RECALL_SLOTS], cursor: usize) -> usize {
     slots
         .iter()

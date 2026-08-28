@@ -34,7 +34,7 @@ mod tests {
             );
         }
         assert!(label_cell("BUF", &t).content.starts_with("BUF"));
-        // A name longer than the column is not truncated — it pushes its own
+        // A name longer than the column is not truncated - it pushes its own
         // value along rather than losing a character.
         assert_eq!(label_cell("HEADROOM", &t).content, "HEADROOM");
     }

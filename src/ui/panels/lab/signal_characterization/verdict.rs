@@ -1,7 +1,7 @@
 //! The verdict engine: a plain-language read of the same four zones the panel
 //! has just printed as numbers.
 //!
-//! Rule-based and pure — a function of what Tier A already measures (modulation,
+//! Rule-based and pure - a function of what Tier A already measures (modulation,
 //! SNR, ACPR, occupied BW). No ML, no demod; it mirrors
 //! `timing_diagnostics::verdict_copy`'s honest-narrative approach.
 //!
@@ -14,21 +14,21 @@ use crate::state::Modulation;
 use crate::ui::widgets::micro_common::fmt_bw;
 
 /// SNR floor below which the panel won't even hazard a modulation guess (mirrors
-/// [`crate::state::CLASSIFY_MIN_SNR_DB`], the classifier's own gate) — below this
+/// [`crate::state::CLASSIFY_MIN_SNR_DB`], the classifier's own gate) - below this
 /// there's nothing to characterize.
 const VERDICT_NO_SIGNAL_SNR_DB: f32 = crate::state::CLASSIFY_MIN_SNR_DB;
-/// SNR at/above which the carrier reads as genuinely clean — the same "clean"
+/// SNR at/above which the carrier reads as genuinely clean - the same "clean"
 /// threshold `snr_color` already uses everywhere else in this panel.
 const VERDICT_CLEAN_SNR_DB: f32 = 20.0;
 /// ACPR worse (less negative) than this is flagged as adjacent-channel splatter
-/// worth a note. sdrtop's own instrument reading, not an asserted regulatory mask
-/// — same honesty stance as [`ACPR_BAR_FLOOR_DB`](super::acpr::ACPR_BAR_FLOOR_DB).
+/// worth a note. sdrtop's own instrument reading, not an asserted regulatory mask;
+/// same honesty stance as [`ACPR_BAR_FLOOR_DB`](super::acpr::ACPR_BAR_FLOOR_DB).
 const VERDICT_ACPR_CONCERN_DB: f32 = -20.0;
 
 /// The verdict card's severity, driving its colour and mark glyph. `NoSignal`
-/// reads dim/neutral, not critical — an empty channel isn't a fault. `pub(crate)`
+/// reads dim/neutral, not critical - an empty channel isn't a fault. `pub(crate)`
 /// so the lab_signal marker bar's QUALITY field (`lab_chrome::signal_marker_lines`)
-/// can read the exact same severity the card shows — one source of truth, same
+/// can read the exact same severity the card shows - one source of truth, same
 /// precedent as `image_scope::CarrierImage`.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub(crate) enum VerdictLevel {
@@ -68,7 +68,7 @@ pub(crate) fn verdict(
 
     let obw_str = fmt_bw(obw_hz);
     let mod_label = modulation.label();
-    // Worst (least negative — closest to the carrier) adjacent-channel ratio, when
+    // Worst (least negative - closest to the carrier) adjacent-channel ratio, when
     // the pair was measurable. Both sides, because the clause below prints both: on
     // one alone it would read "ACPR -inf/-38 dB".
     let worst_acpr = (acpr_lower_db.is_finite() && acpr_upper_db.is_finite())

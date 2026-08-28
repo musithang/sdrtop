@@ -8,7 +8,7 @@
 //!   and the frequency ruler the waterfall borrows when the two are bonded.
 //! - [`view`]: which slice of the FFT frame is on screen. Everything downstream
 //!   works in *its* coordinates.
-//! - [`trace`]: the braille canvas — graticule, hold ghost, body, live edge,
+//! - [`trace`]: the braille canvas - graticule, hold ghost, body, live edge,
 //!   peak hold, reference lines, markers, cursor.
 //! - [`labels`]: text drawn over the canvas, all of it collision-aware.
 //! - [`axes`]: the frequency ruler, the tuning handle and the dBFS gutter.
@@ -93,7 +93,7 @@ impl Panel for SpectrumPanel {
 /// Free render entry point for the **bonded** case, which the layout engine calls
 /// directly instead of going through the registry.
 ///
-/// `Bond::Below` drops the bottom border and the panel's own frequency-axis row —
+/// `Bond::Below` drops the bottom border and the panel's own frequency-axis row -
 /// the waterfall's top border becomes the shared ruler. Only the border *set* is
 /// drawn here; the nameplate and the colour still come from the panel's own
 /// [`PanelChrome`], so the bonded and standalone plates cannot drift apart.

@@ -1,7 +1,7 @@
 //! The `LABEL  value  sparkline  OK/⚠` row the stream block is built from.
 //!
 //! Was a seven-parameter free function whose call sites each repeated the same
-//! `if stale { … } else { … }` twice — once for the value and once for the
+//! `if stale { … } else { … }` twice - once for the value and once for the
 //! colour. As a struct the staleness is asked once, and a caller supplies only
 //! what actually differs between the three rows.
 
@@ -28,7 +28,7 @@ pub(super) struct Row<'a> {
     pub hist: &'a [f64],
     /// Colour of the value and its trend when live.
     pub color: Color,
-    /// Whether this reading is within tolerance — drives the `OK` / `⚠` mark.
+    /// Whether this reading is within tolerance - drives the `OK` / `⚠` mark.
     pub ok: bool,
 }
 
@@ -76,7 +76,7 @@ mod tests {
         Field { theme: t, stale }
     }
 
-    /// A stopped radio shows no value, no trend colour and — crucially — no
+    /// A stopped radio shows no value, no trend colour and - crucially - no
     /// verdict mark, because it is not taking the reading.
     #[test]
     fn a_stale_row_makes_no_claim() {

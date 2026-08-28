@@ -1,7 +1,7 @@
 //! The lock block: the only place this worker writes to the shared state.
 //!
 //! Everything expensive has already been computed by [`super::analysis`], so the
-//! mutex is held for a sequence of writes and one buffer copy — not for a
+//! mutex is held for a sequence of writes and one buffer copy - not for a
 //! spectrum's worth of `powf`. The one read taken while holding it is the lab's
 //! averaging factor, which is a single field and would cost a second lock
 //! acquisition to fetch on its own.
@@ -75,7 +75,7 @@ pub(super) struct Snapshot<'a> {
 /// Write one display frame's results back.
 ///
 /// Returns the EMA factor read from the lab control, or `None` if the mutex was
-/// poisoned — in which case nothing was written and the caller keeps the factor
+/// poisoned - in which case nothing was written and the caller keeps the factor
 /// it had. A poisoned mutex here means the UI has already panicked; the worker
 /// keeps computing but stops publishing rather than tearing anything else down.
 pub(super) fn publish(
@@ -170,7 +170,7 @@ fn update_marker_bandwidths(m: &mut SdrMetrics, snap: &Snapshot<'_>) {
 /// Replace the drawn spectrum frame, reusing the previous one's allocations.
 ///
 /// We hold the mutex, so the refcount is 1 and `try_unwrap` is guaranteed to
-/// succeed — the frame is rebuilt with no heap traffic at all.
+/// succeed - the frame is rebuilt with no heap traffic at all.
 fn refresh_spectrum(m: &mut SdrMetrics, snap: &Snapshot<'_>) {
     let n = snap.smoothed.len();
     let (mut bins_vec, mut peak_vec) = match m.waterfall.last_fft.take() {

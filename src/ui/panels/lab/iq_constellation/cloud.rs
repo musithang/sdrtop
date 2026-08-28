@@ -12,9 +12,9 @@ const DENSITY_GRID: usize = 28;
 pub(super) const HEAT_LEVELS: usize = 5;
 
 /// Cool→hot persistence palette: sparse points are a cool blue, dense cores glow
-/// orange — the classic phosphor-scope look.
+/// orange - the classic phosphor-scope look.
 pub(super) const HEAT: [Color; HEAT_LEVELS] = [
-    Color::Rgb(35, 65, 115),  // sparse — cool blue
+    Color::Rgb(35, 65, 115),  // sparse - cool blue
     Color::Rgb(30, 140, 150), // teal
     Color::Rgb(70, 180, 90),  // green
     Color::Rgb(215, 200, 55), // yellow

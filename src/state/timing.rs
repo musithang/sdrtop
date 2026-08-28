@@ -1,4 +1,4 @@
-//! `TimingState` — host-side timing accuracy of the RX stream, derived by the
+//! `TimingState` - host-side timing accuracy of the RX stream, derived by the
 //! `rx` polling task and rendered by the `timing_panel` (`lab_timing`, `[8]`).
 //!
 //! Everything here is measured against the host monotonic clock: the per-callback
@@ -119,7 +119,7 @@ pub struct TimingState {
     /// Window size the late count was measured over (denominator for "n / N").
     pub late_window: u32,
     /// Percentiles / peak of the *absolute per-callback deviation* over the shown
-    /// window (µs) — the "how late do callbacks actually get" figures, distinct
+    /// window (µs) - the "how late do callbacks actually get" figures, distinct
     /// from the per-window jitter-rms percentiles above.
     pub dev_p95_us: u64,
     pub dev_p99_us: u64,
@@ -181,7 +181,7 @@ impl TimingState {
             DEADLINE_BUDGET_FLOOR_US
         };
         // The strip chart plots the whole snapshot ring so a wide panel fills with
-        // real samples (newest at the right edge) rather than blanking out — the
+        // real samples (newest at the right edge) rather than blanking out - the
         // chart shows as many of these as its width allows.
         let cb_deviations_us: Vec<i32> = cb_gaps
             .iter()
@@ -209,7 +209,7 @@ impl TimingState {
             cb_jitter_us,
             jitter_max_us,
             // Session peak is carried forward by the caller (rx task), not derived
-            // from this window — start at 0 here.
+            // from this window - start at 0 here.
             jitter_session_max_us: 0,
             sr_delta_ppm,
             throughput_mean_mbps,
@@ -226,7 +226,7 @@ impl TimingState {
     }
 }
 
-/// Nearest-rank percentile of a small unsorted sample set. Copies and sorts —
+/// Nearest-rank percentile of a small unsorted sample set. Copies and sorts -
 /// the window is bounded (≤ `THROUGHPUT_HISTORY_LEN`), so this stays cheap.
 /// `p` is a percentage in `0.0..=100.0`. Empty input yields 0.
 pub fn percentile_u64(samples: &[u64], p: f64) -> u64 {

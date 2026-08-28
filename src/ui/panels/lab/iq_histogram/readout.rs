@@ -14,8 +14,8 @@ use super::zones::{Zones, BINS};
 
 /// Share of samples that is "too much" for each zone, in percent.
 ///
-/// Deliberately asymmetric. Low and Mid are *distribution* judgements — a signal
-/// mostly in the bottom eighth of the range is under-driven — while Clip is a
+/// Deliberately asymmetric. Low and Mid are *distribution* judgements - a signal
+/// mostly in the bottom eighth of the range is under-driven - while Clip is a
 /// *fault*: any sample at all near the rails is worth an amber, because unlike
 /// the other two it destroys information rather than merely wasting range.
 const LOW_CRIT_PCT: u64 = 90;
@@ -57,7 +57,7 @@ pub(super) fn breakdown(f: &mut Frame, area: Rect, z: &Zones, theme: &crate::The
     );
 }
 
-/// "More of this is worse" — neutral, then amber, then red.
+/// "More of this is worse" - neutral, then amber, then red.
 fn threshold_down(pct: u64, warn: u64, crit: u64, theme: &crate::Theme) -> Color {
     if pct > crit {
         theme.status_crit

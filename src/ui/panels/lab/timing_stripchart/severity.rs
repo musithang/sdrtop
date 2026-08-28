@@ -1,7 +1,7 @@
 //! How bad a column is, and which way it blew out.
 //!
 //! Note the level-0 colour: [`theme.value`](crate::Theme), not `status_ok`. This
-//! grades a **chart trace**, not a verdict — a plot in which every in-budget
+//! grades a **chart trace**, not a verdict - a plot in which every in-budget
 //! sample is bright green reads as a wall of green, and the eye stops finding the
 //! few that are not. `rf_bench::severity_color` has the same name and signature
 //! and uses `status_ok`, because it grades a verdict. The two are not

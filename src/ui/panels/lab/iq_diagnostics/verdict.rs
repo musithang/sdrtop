@@ -9,7 +9,7 @@
 //!
 //! The thresholds are [`super::severity`]'s, not literals of its own. Before the
 //! split the verdict compared against `3.0`, `5.0`, `0.02`, `1.0` and `2.0`
-//! written out again — the same numbers the colours use, but agreeing only by
+//! written out again - the same numbers the colours use, but agreeing only by
 //! coincidence, so a re-tuned scale would have left the words saying one thing
 //! and the colours another.
 

@@ -247,10 +247,10 @@ pub enum Position {
 pub struct PanelSpec {
     pub name: String,
     pub position: Position,
-    /// Height in terminal rows — used for Top and Bottom panels.
+    /// Height in terminal rows - used for Top and Bottom panels.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub height: Option<u16>,
-    /// Width as a percentage of the body zone — used for Left and Right panels.
+    /// Width as a percentage of the body zone - used for Left and Right panels.
     /// All panels in the same column carry the same value; the LayoutEngine
     /// reads only the first panel's value to determine column width.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -346,7 +346,7 @@ impl LayoutConfig {
     ///
     /// A name that matches a built-in replaces it; a name that does not is simply
     /// **added**, and so joins the `[P]` cycle automatically. That is the whole
-    /// installation step for a layout of your own — there is no list to register
+    /// installation step for a layout of your own - there is no list to register
     /// it in.
     ///
     /// `config.toml` wins over a file because it is the one the user edits by hand

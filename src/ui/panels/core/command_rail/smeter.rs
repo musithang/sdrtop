@@ -30,7 +30,7 @@ pub(super) fn fmt_since(secs: u64) -> String {
 /// The SAT clip alert-memory state: `Some((age_secs, fresh))` while a clip is
 /// still remembered, `None` once it's older than [`CLIP_MEMORY_SECS`]. A fresh
 /// clip (≤ [`CLIP_FRESH_SECS`]) renders loud; afterwards it fades. Pure over the
-/// clock so it's testable, and it only ever fades — it never flickers.
+/// clock so it's testable, and it only ever fades - it never flickers.
 pub(super) fn clip_alert(last_clip_at: Option<u64>, now: u64) -> Option<(u64, bool)> {
     let since = now.saturating_sub(last_clip_at?);
     (since <= CLIP_MEMORY_SECS).then_some((since, since <= CLIP_FRESH_SECS))

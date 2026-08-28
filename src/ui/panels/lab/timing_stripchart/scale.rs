@@ -8,7 +8,7 @@
 
 /// Left axis gutter width (the `+0.45 ` labels).
 pub(super) const GUTTER_W: usize = 7;
-/// Blank braille cell — an "empty" column with no plotted dots.
+/// Blank braille cell - an "empty" column with no plotted dots.
 pub(super) const BLANK: char = '\u{2800}';
 
 /// How far past the budget the axis reaches. At 1.5 the band edges sit two
@@ -66,7 +66,7 @@ pub(super) fn label_rows(chart_h: usize) -> [usize; 5] {
 /// guide is drawn.
 ///
 /// Braille packs four dot-rows into one text row, so the band is found in dot
-/// space and divided down — otherwise the guide would land up to four dot-rows
+/// space and divided down - otherwise the guide would land up to four dot-rows
 /// away from the level it claims to mark.
 pub(super) fn band_rows(chart_h: usize, budget_us: u64, full_scale: i32) -> (usize, usize) {
     let last = chart_h.saturating_sub(1);

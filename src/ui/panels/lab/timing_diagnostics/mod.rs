@@ -1,10 +1,10 @@
-//! `timing_diagnostics` — the numbers column of the `lab_timing` preset.
+//! `timing_diagnostics` - the numbers column of the `lab_timing` preset.
 //!
 //! Three zones and a verdict: how regularly callbacks arrive, how close the worst
 //! of them came to the deadline budget, and whether the sample clock is
 //! delivering what was asked for.
 //!
-//! Split by zone, which is also the order the question narrows — is the stream
+//! Split by zone, which is also the order the question narrows - is the stream
 //! regular, is it late, is the clock right:
 //!
 //! - [`rows`]: the label field, the `---` stale form, the trend and the budget
@@ -133,7 +133,7 @@ mod tests {
     }
 
     /// Until the device reports an actual rate, the configured one is shown and
-    /// the comparison is a dash — not a fabricated match.
+    /// the comparison is a dash - not a fabricated match.
     #[test]
     fn an_unreported_sample_rate_is_a_dash_not_a_match() {
         let mut m = live();

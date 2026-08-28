@@ -1,4 +1,4 @@
-//! Estimated noise figure and minimum discernible signal — what the current
+//! Estimated noise figure and minimum discernible signal - what the current
 //! staging costs in sensitivity.
 //!
 //! Both come from the Friis cascade, which needs a known front-end topology.

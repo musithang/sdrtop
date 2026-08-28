@@ -2,7 +2,7 @@
 //! it sits directly under the spectrum.
 //!
 //! Bonded, the two panels are one instrument. The waterfall's **top border
-//! becomes the shared frequency ruler** — a `┬`-ticked MHz scale aligned to the
+//! becomes the shared frequency ruler** - a `┬`-ticked MHz scale aligned to the
 //! plot, with `─` fill so it reads as a continuous engraved rule rather than a
 //! box edge. The panel keeps its identity without a second frame: the
 //! `╴WATERFALL╶` plate rides the rule's left cap and the live status tags ride a

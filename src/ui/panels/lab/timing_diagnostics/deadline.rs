@@ -1,6 +1,6 @@
 //! DEADLINE BUDGET: how close the worst callbacks came to the drop threshold.
 //!
-//! Three bars — p95, p99, peak — against the same budget, with the budget marker
+//! Three bars - p95, p99, peak - against the same budget, with the budget marker
 //! at mid-bar. Reading up the three tells you whether lateness is the usual case
 //! or one outlier, which is the difference between a machine that needs tuning
 //! and one that hiccuped.

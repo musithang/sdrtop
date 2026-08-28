@@ -4,14 +4,14 @@
 //! range once and both the occupied bandwidth and the channel power are taken
 //! from it, so the two cannot describe different slices of the same spectrum.
 //!
-//! Everything here is pure — a slice of linear power in, numbers out — which is
+//! Everything here is pure - a slice of linear power in, numbers out - which is
 //! why it carries most of this module's tests.
 
 /// How far a bin must stand above the noise floor to be counted as part of the
 /// carrier when the occupied-bandwidth window is drawn.
 ///
 /// The 99 % cumulative method answers "where does the power sit", and handed the
-/// whole capture it answers "spread across the span" — a noise floor several MHz
+/// whole capture it answers "spread across the span" - a noise floor several MHz
 /// wide carries real power, so the 0.5 % / 99.5 % cut-offs land near the span edges
 /// and the result describes the sample rate rather than the signal. Bounding the
 /// method to the carrier first is what makes the number a property of the signal.
@@ -31,7 +31,7 @@ const OBW_GAP_TOLERANCE_HZ: f64 = 10_000.0;
 ///
 /// Both front-ends park their DC offset and LO leakage on the centre bin, and on an
 /// otherwise empty channel that artefact is the strongest thing in the spectrum. It
-/// is a single spectral line, which the Hann window spreads over about three bins —
+/// is a single spectral line, which the Hann window spreads over about three bins -
 /// measured live at 447 MHz with nothing on air it stands 46 dB above the floor, and
 /// unguarded it becomes the reported peak, the SNR, and a 2 kHz "carrier".
 ///
@@ -52,7 +52,7 @@ pub(super) const DC_GUARD_BINS: usize = 2;
 /// The strongest bin that is not part of the DC artefact, as `(index, value)`.
 ///
 /// `radius_bins` optionally confines the search to that many bins either side of
-/// centre — what "the signal at centre" needs, as opposed to "the loudest thing in
+/// centre - what "the signal at centre" needs, as opposed to "the loudest thing in
 /// the capture". `None` searches the whole spectrum.
 ///
 /// Returns `None` for an empty spectrum, or one where the guard and the radius
@@ -86,7 +86,7 @@ pub fn strongest_real_bin(bins: &[f32], radius_bins: Option<usize>) -> Option<(u
 /// It bounds the SNR peak as much as the carrier window, and that is the point:
 /// with one radius there is a single notion of "at centre" on the page, so the
 /// headline, the peak row and the occupancy cannot end up describing different
-/// signals. It also keeps a *trend* meaningful — the rail's 60-second SNR trace and
+/// signals. It also keeps a *trend* meaningful - the rail's 60-second SNR trace and
 /// the aiming view's trend arrow are only readable while their subject stays put,
 /// and an unbounded peak lets the subject jump between stations mid-trace with
 /// nothing on screen to say so.
@@ -117,7 +117,7 @@ pub fn centre_radius_bins(n: usize, sample_rate: f64) -> usize {
 ///    [`CENTRE_RADIUS_HZ`] of centre and outside the DC guard, then walk outward
 ///    while bins stay above `noise_floor + OBW_CARRIER_THRESHOLD_DB`, stepping over
 ///    dips shorter than [`OBW_GAP_TOLERANCE_HZ`] and trimming back to the last bin
-///    that actually cleared the threshold. The walk itself is unbounded — only the
+///    that actually cleared the threshold. The walk itself is unbounded - only the
 ///    seed has to be near centre, so a wide carrier keeps its skirts.
 /// 2. **Apply ITU-R SM.328 inside that window.** Exclude the bottom 0.5 % and the
 ///    top 0.5 % of the window's power; the span between the cut-offs is the answer.
@@ -130,7 +130,7 @@ pub fn centre_radius_bins(n: usize, sample_rate: f64) -> usize {
 /// allocated 200 kHz and designed around 180 kHz, but the 99 % occupied bandwidth of
 /// one carrying real programme material measures nearer 85 kHz, because the
 /// time-averaged spectrum of FM is strongly peaked at the carrier. Measured, not
-/// assumed — which is the point of the field.
+/// assumed - which is the point of the field.
 pub(super) fn carrier_window(
     linear: &[f32],
     sample_rate: f64,
@@ -202,8 +202,8 @@ pub(super) fn carrier_window(
     let (occ_lo, occ_hi) = (lo + lo_b, lo + hi_b);
 
     // If all of it sits where the artefact lives, it is the artefact. A strong DC
-    // line seeds a window from its own skirt — outside the guard, so the seed is
-    // allowed — and the 99 % cut-offs then collapse back onto the centre bins that
+    // line seeds a window from its own skirt - outside the guard, so the seed is
+    // allowed - and the 99 % cut-offs then collapse back onto the centre bins that
     // dominate the window's power. Measured live at 447 MHz with nothing on air,
     // that reported "976 Hz" as a channel.
     //
@@ -226,7 +226,7 @@ mod tests {
     use super::*;
 
     /// `level_db` is the carrier's **total** power, spread evenly across the bins it
-    /// covers — not a per-bin level. That distinction is the whole point: a fixed
+    /// covers - not a per-bin level. That distinction is the whole point: a fixed
     /// per-bin level would make the carrier's power scale with how many bins the
     /// sample rate happens to divide it into, so the same station would carry five
     /// times the power at 2 Msps as at 10, and any test comparing the two would be
@@ -305,7 +305,7 @@ mod tests {
     #[test]
     fn occupied_bw_ignores_a_station_that_is_not_the_tuned_one() {
         // A strong station most of a megahertz away is somebody else's channel. The
-        // panel says "the signal at centre", so an empty centre reads as empty —
+        // panel says "the signal at centre", so an empty centre reads as empty -
         // measured live at 447 MHz, where an unbounded seed latched onto a spur
         // 863 kHz out and reported its width as the tuned signal.
         let bins = spectrum(2048, 2_000_000.0, -90.0, 180_000.0, -40.0, 800_000.0);
@@ -359,7 +359,7 @@ mod tests {
     fn occupied_bw_refuses_the_dc_artefact() {
         // Measured live at 447.137 MHz with nothing on air: the LO leakage is a
         // three-bin line at the centre, 46 dB above the floor. Without the guard it
-        // reports as a 2 kHz carrier and `classify` names it AM — a station
+        // reports as a 2 kHz carrier and `classify` names it AM - a station
         // invented out of the front end's own artefact.
         let lin = |db: f32| 10f32.powf(db / 10.0);
         let mut bins = vec![lin(-85.0); 2048];
@@ -373,8 +373,8 @@ mod tests {
     fn occupied_bw_still_sees_a_carrier_sitting_on_dc() {
         // The guard excludes the seed, not the window: a real carrier wider than
         // the artefact seeds from its own skirts, and the walk grows back across
-        // the centre. A 7 kHz burst centred on DC — the shape of the 447 MHz data
-        // bursts — must survive intact.
+        // the centre. A 7 kHz burst centred on DC - the shape of the 447 MHz data
+        // bursts - must survive intact.
         let bins = spectrum(2048, 2_000_000.0, -85.0, 7_000.0, -39.0, 0.0);
         let bw = carrier(&bins, 2_000_000.0, -85.0).occupied_bw_hz;
         assert!((5_000..=9_000).contains(&bw), "expected ~7 kHz, got {bw}");
@@ -400,7 +400,7 @@ mod tests {
     #[test]
     fn strongest_real_bin_skips_the_dc_line() {
         // The artefact towers over a real, weaker carrier off to one side. Report
-        // the carrier — the artefact is not signal, however loud it is.
+        // the carrier - the artefact is not signal, however loud it is.
         let mut bins = vec![-90.0f32; 2048];
         for b in bins[1023..=1025].iter_mut() {
             *b = -20.0;
@@ -458,7 +458,7 @@ mod tests {
     #[test]
     fn occupied_bw_keeps_a_narrow_burst_the_artefact_could_be_mistaken_for() {
         // The other half of the same rule. These bursts are only a couple of bins
-        // wider than the artefact, so no width threshold separates them — but they
+        // wider than the artefact, so no width threshold separates them - but they
         // put real power outside the guard, and the artefact never does.
         let bins = spectrum(2048, 2_000_000.0, -85.0, 7_000.0, -39.0, 0.0);
         let bw = carrier(&bins, 2_000_000.0, -85.0).occupied_bw_hz;

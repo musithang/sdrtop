@@ -16,7 +16,7 @@ pub(super) fn lines(state: &SdrMetrics, r: &Rows) -> Vec<Line<'static>> {
     let theme = r.theme;
     let configured = state.radio.config_sample_rate / 1_000_000.0;
     // Until the device reports back, there is a configured rate but no measured
-    // one — so the configured value is shown and the comparison is a dash.
+    // one - so the configured value is shown and the comparison is a dash.
     let no_actual = r.stale || state.radio.actual_sample_rate == 0;
 
     let rate = if no_actual {

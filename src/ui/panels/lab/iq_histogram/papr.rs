@@ -1,6 +1,6 @@
 //! Peak-to-Average Power Ratio, estimated from the amplitude histogram.
 //!
-//! Pure arithmetic over the bin counts, with no access to the panel — which is
+//! Pure arithmetic over the bin counts, with no access to the panel - which is
 //! why it already had tests before the split, and why they moved here unchanged.
 
 use super::zones::BINS;
@@ -68,7 +68,7 @@ mod tests {
     fn papr_single_bin_is_near_zero_db() {
         // All samples in one mid/high bin → peak_top/bin_centre ≈ 1 → PAPR near 0 dB.
         // (Bin 0 is a special case: ratio = 4/2 = 2 → 6 dB, a quantisation artefact
-        //  for noise-floor signals — the status label already flags those as "weak".)
+        //  for noise-floor signals - the status label already flags those as "weak".)
         let mut hist = [0u64; 32];
         hist[20] = 1000;
         let papr = estimate_papr_db(&hist, 1000).unwrap();

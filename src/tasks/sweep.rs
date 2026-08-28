@@ -1,4 +1,4 @@
-//! `sweep_task` — drives the frequency scanner for the `lab_sweep` preset.
+//! `sweep_task` - drives the frequency scanner for the `lab_sweep` preset.
 //!
 //! While `state.sweep.active` (set when `lab_sweep` is the active preset), the
 //! task walks the configured band one position at a time: retune → settle →

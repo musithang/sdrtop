@@ -1,8 +1,8 @@
-//! `LevelDiagramPanel` — the Gain-Staging Level Diagram, centre of the Lab RF bench.
+//! `LevelDiagramPanel` - the Gain-Staging Level Diagram, centre of the Lab RF bench.
 //!
 //! Plots the modeled signal level and noise floor climbing stage-by-stage
 //! (ANT▸LNA▸MIX▸VGA▸ADC). The vertical gap between the two traces is the SNR: it is
-//! set at the antenna and only repositioned — not improved — by gain. Reading it left
+//! set at the antenna and only repositioned - not improved - by gain. Reading it left
 //! to right tells the whole front-end story the left panel quantifies.
 
 use ratatui::{
@@ -222,7 +222,7 @@ impl Panel for LevelDiagramPanel {
             Span::styled("  \u{25ac} noise", Style::default().fg(noise_col)),
         ];
         if snr < 0.0 {
-            // Signal sits below the noise at the ADC — flag the buried band.
+            // Signal sits below the noise at the ADC - flag the buried band.
             legend.push(Span::styled(
                 "  \u{2592} buried",
                 Style::default().fg(theme.status_warn),

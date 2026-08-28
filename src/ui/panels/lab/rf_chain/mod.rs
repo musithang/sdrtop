@@ -1,10 +1,10 @@
-//! `RfChainPanel` — the RF Diagnostics column of the Lab RF bench ([6]).
+//! `RfChainPanel` - the RF Diagnostics column of the Lab RF bench ([6]).
 //!
 //! Reads the whole receive chain as one story: the per-stage **gain lineup** (level
 //! after each stage), **gain staging** (LNA/VGA vs their optimal targets), the Friis
 //! **noise figure** breakdown, **sensitivity** (MDS + noise-floor trend), and a
 //! plain-language verdict with the action chips. All levels are *modeled / relative*
-//! dBm anchored to the measured ADC level — useful for staging, not a wattmeter.
+//! dBm anchored to the measured ADC level - useful for staging, not a wattmeter.
 //!
 //! - [`staging`]: the gain lineup and the two gain bars.
 //! - [`noise`]: the Friis breakdown and the sensitivity read-out.
@@ -136,7 +136,7 @@ impl Panel for RfChainPanel {
         );
 
         // Self-adjusting density: collapse spacers when short, grow them to fill when
-        // tall (chrome::fit_spacers), so the pane breathes the same at every height —
+        // tall (chrome::fit_spacers), so the pane breathes the same at every height -
         // consistent with the other lab side panels.
         crate::ui::chrome::fit_spacers(&mut lines, inner.height as usize);
         f.render_widget(Paragraph::new(lines), inner);

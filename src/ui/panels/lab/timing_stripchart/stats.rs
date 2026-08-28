@@ -2,7 +2,7 @@
 //!
 //! The plot says *when* callbacks were late; this row says how often and how
 //! badly, and closes with the same `TimingQuality` verdict `timing_diagnostics`
-//! prints — from `quality_color`, so the two cannot grade the stream differently.
+//! prints - from `quality_color`, so the two cannot grade the stream differently.
 
 use ratatui::{
     style::{Modifier, Style},

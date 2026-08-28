@@ -66,11 +66,11 @@ impl Staleness {
 /// the deck and no panel file names a colour.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum Tag {
-    /// `[FRZ]` — the readings are a held snapshot, not live.
+    /// `[FRZ]` - the readings are a held snapshot, not live.
     Frozen,
-    /// `[HOLD]` — the trace is frozen against a captured frame.
+    /// `[HOLD]` - the trace is frozen against a captured frame.
     Hold,
-    /// `[PAUSED]` — the panel has stopped taking new data because the user said
+    /// `[PAUSED]` - the panel has stopped taking new data because the user said
     /// so.
     ///
     /// Carries two consequences beyond its own spelling, both in
@@ -78,13 +78,13 @@ pub enum Tag {
     /// panel is *not advancing* exactly as a stale one is not:
     ///
     /// 1. It cools the frame the way staleness does.
-    /// 2. It **suppresses `[STALE]`**. A paused panel is not stale, it is held —
+    /// 2. It **suppresses `[STALE]`**. A paused panel is not stale, it is held -
     ///    and printing both would be two answers to one question. The plate says
     ///    which of the two it is; the border only says that it is one of them.
     Paused,
-    /// `[×N]` — frames averaged into each history row. Absent at 1.
+    /// `[×N]` - frames averaged into each history row. Absent at 1.
     Stride(usize),
-    /// `[↑N]` — how far back through the history the view is scrolled. Absent at 0.
+    /// `[↑N]` - how far back through the history the view is scrolled. Absent at 0.
     Scroll(usize),
 }
 
@@ -107,7 +107,7 @@ pub enum FrameStyle {
     ///
     /// No registered panel declares this any more: since R4h every one of them
     /// says what it is and the engine frames it. It survives as the trait
-    /// default, so a panel that forgets `chrome()` renders instead of crashing —
+    /// default, so a panel that forgets `chrome()` renders instead of crashing -
     /// and `check-docs.py` names it the next time the lint runs.
     ///
     /// The spectrum and the waterfall still have a self-drawn path, but the
@@ -129,7 +129,7 @@ pub enum FrameTone {
     /// The ordinary instrument border.
     Default,
     /// Lit: the primary instruments, which lead the eye on every preset. The
-    /// spectrum and the waterfall, and nothing else — an accent every panel wore
+    /// spectrum and the waterfall, and nothing else - an accent every panel wore
     /// would be no accent at all.
     Accent,
     /// Receded: supporting chrome that should not compete with the instruments.
@@ -216,7 +216,7 @@ impl PanelChrome {
         Self::new("")
     }
 
-    /// "This panel frames itself" — the trait default, and the escape hatch for
+    /// "This panel frames itself" - the trait default, and the escape hatch for
     /// the chrome that is not a plain box.
     pub fn self_framed() -> Self {
         Self {
@@ -291,7 +291,7 @@ pub trait Panel: Send + Sync {
 
     /// Keybindings shown in the footer when this panel is focused.
     /// Each entry: (key_label, description). Empty by default.
-    /// Do NOT include Esc or Tab — the footer appends those automatically.
+    /// Do NOT include Esc or Tab - the footer appends those automatically.
     fn focus_bindings(&self) -> &'static [(&'static str, &'static str)] {
         &[]
     }

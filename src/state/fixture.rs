@@ -4,7 +4,7 @@
 //! until this module existed, which is why no panel body had ever been unit
 //! tested: every `render` takes one, and building one by hand is forty lines of
 //! sub-state literals. So the panels were checked by driving the real binary in
-//! tmux against a real radio — slow, needs hardware, and the step that produced
+//! tmux against a real radio - slow, needs hardware, and the step that produced
 //! two vacuous passes during R4.
 //!
 //! What this gives instead: [`SdrMetrics::fixture`] for an idle radio, a handful
@@ -15,7 +15,7 @@
 //! **Deliberately a real struct literal, not `Default`.** `SdrMetrics` has no
 //! `Default` and should not get one: a snapshot with no `caps` is not a state the
 //! app can ever be in, and the compiler forcing this file to name every new field
-//! is the point — a field added without a decision about what it means at rest
+//! is the point - a field added without a decision about what it means at rest
 //! would otherwise silently arrive as zero in every test.
 
 use std::collections::VecDeque;
@@ -28,7 +28,7 @@ impl SdrMetrics {
     /// An idle radio: a HackRF open at 100 MHz, RX not started, no FFT frame yet.
     ///
     /// This is what a panel sees a fraction of a second after launch, which is
-    /// also the state most likely to be got wrong — every "waiting for RX" and
+    /// also the state most likely to be got wrong - every "waiting for RX" and
     /// `[STALE]` path runs through it.
     pub(crate) fn fixture() -> Self {
         SdrMetrics {
@@ -271,7 +271,7 @@ impl SdrMetrics {
 ///
 /// Goes through [`PanelRegistry::render_panel`] rather than calling
 /// `Panel::render` directly, so the frame, the nameplate and the `[STALE]` tag
-/// are part of what is compared — those are as much the panel's output as its
+/// are part of what is compared - those are as much the panel's output as its
 /// body is, and R3 moved them out of the panel precisely so they could not drift.
 pub(crate) fn draw(
     panel: impl crate::ui::panel::Panel + 'static,

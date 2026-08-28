@@ -2,8 +2,8 @@
 //!
 //! Bonded under the waterfall, the two plots narrow to the same centre slice of
 //! bins so the instrument zooms as one around the tuned frequency. Standalone,
-//! the spectrum shows the whole span. Everything downstream — the trace, the
-//! peak flags, the marker columns, the axes — works in *this* window's
+//! the spectrum shows the whole span. Everything downstream - the trace, the
+//! peak flags, the marker columns, the axes - works in *this* window's
 //! coordinates, which is what makes it worth naming.
 //!
 //! Getting this wrong is not hypothetical: detecting peaks against the full
@@ -53,7 +53,7 @@ impl SpectrumView {
         let zoom = zoom.max(1);
 
         if zoom == 1 {
-            // Arc::clone is O(1) — no data copied.
+            // Arc::clone is O(1) - no data copied.
             return Some(Self {
                 bins: Arc::clone(bins),
                 peaks: Arc::clone(peaks),

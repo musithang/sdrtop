@@ -129,7 +129,7 @@ pub(super) fn write_back(
     }
 
     // Sample SNR / PWR / NF / SAT into their trend histories at ~500 ms while
-    // streaming — one cadence and depth so the command rail's four SIGNAL traces
+    // streaming - one cadence and depth so the command rail's four SIGNAL traces
     // fill and align together.
     if hw_streaming && now.duration_since(*last_snr_push) >= Duration::from_millis(500) {
         *last_snr_push = now;
@@ -147,7 +147,7 @@ pub(super) fn write_back(
     // Snapshot the rolling per-callback gap ring for the strip chart; deviation /
     // late-count / percentiles are derived in `compute`.
     let gaps_snapshot: Vec<u64> = m.acc.cb_gaps_us.iter().copied().collect();
-    // Carry the session jitter peak across the wholesale rebuild — it is reset on
+    // Carry the session jitter peak across the wholesale rebuild - it is reset on
     // RX start and by the timing panel's [R] focus binding.
     let prev_peak = m.timing.jitter_session_max_us;
     m.timing = crate::state::TimingState::compute(

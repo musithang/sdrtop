@@ -6,7 +6,7 @@ use ratatui::{
     Frame,
 };
 
-/// Full-block horizontal bar — same visual language as the header's LNA/VGA gain bars.
+/// Full-block horizontal bar - same visual language as the header's LNA/VGA gain bars.
 /// Renders into a single terminal row: `label ████░░░░ value_str`
 pub fn draw_hbar(
     f: &mut Frame,
@@ -35,7 +35,7 @@ pub fn draw_hbar(
     );
 }
 
-/// EMA smoothing — alpha near 1 = responsive, near 0 = smooth. Empty input → empty vec.
+/// EMA smoothing - alpha near 1 = responsive, near 0 = smooth. Empty input → empty vec.
 pub fn ema_smooth(data: &[f32], alpha: f32) -> Vec<f32> {
     if data.is_empty() {
         return Vec::new();
@@ -53,7 +53,7 @@ pub fn ema_smooth(data: &[f32], alpha: f32) -> Vec<f32> {
 pub(crate) const EIGHTHS: [char; 9] = [' ', '▏', '▎', '▍', '▌', '▋', '▊', '▉', '█'];
 
 /// Continuous horizontal ⅛-block bar: `val/max_val` fill ratio across `n` columns.
-/// Returns `(filled_part, empty_part)` — drop-in replacement for the legacy `▮▯` gain bar.
+/// Returns `(filled_part, empty_part)` - drop-in replacement for the legacy `▮▯` gain bar.
 pub fn eighth_block_bar(val: u32, max_val: u32, n: usize) -> (String, String) {
     if n == 0 || max_val == 0 {
         return (String::new(), " ".repeat(n));
@@ -87,7 +87,7 @@ fn lerp_color(a: Color, b: Color, t: f64) -> Color {
 /// Continuous ⅛-block gain bar with a position-based gradient. Same fill maths as
 /// [`eighth_block_bar`], but returns per-column [`Span`]s so the filled part shades
 /// from `lo` (left) to `hi` (right); empty columns get `empty_col`. The colour of a
-/// column is fixed by its position across the full `n`-wide bar — the fill just
+/// column is fixed by its position across the full `n`-wide bar - the fill just
 /// reveals more of the gradient. Used by the command rail's GAIN section.
 pub fn gain_bar_colored(
     val: u32,
@@ -169,7 +169,7 @@ pub fn null_meter(
     spans
 }
 
-/// Single-row braille **line trace** — an oscilloscope-style connected curve (not a
+/// Single-row braille **line trace** - an oscilloscope-style connected curve (not a
 /// filled area). Returns exactly `width` braille chars, each holding 2 time samples
 /// (left/right dot columns) over 4 vertical levels, auto-scaled to the most recent
 /// 2×width samples' min..max. Consecutive samples are joined by filling the dot rows
@@ -304,19 +304,19 @@ pub fn bipolar_braille_strip(
     (out, over_range)
 }
 
-/// Unipolar braille **area trace** — a filled profile across `cols` braille chars
+/// Unipolar braille **area trace** - a filled profile across `cols` braille chars
 /// (2 samples each) and `rows` text rows (4 dot levels each), auto-scaled to the
 /// data's own min..max. Returns exactly `rows` strings of exactly `cols` chars,
 /// **top row first**.
 ///
 /// Filled, not a line ([`mini_braille_line`]): these traces exist to show a narrow
-/// spike standing out of a broad hump — the FM stereo pilot against the L+R audio
-/// beside it — and at braille resolution a filled column keeps that contrast where
+/// spike standing out of a broad hump - the FM stereo pilot against the L+R audio
+/// beside it - and at braille resolution a filled column keeps that contrast where
 /// a one-dot line loses it against the slope.
 ///
 /// The row count is the whole point. One row is four vertical levels, so over the
 /// 40 dB window an MPX trace is drawn in, each level is 10 dB and a pilot sitting
-/// ~20 dB below the audio lands on level 2 of 4 — indistinguishable from the audio
+/// ~20 dB below the audio lands on level 2 of 4 - indistinguishable from the audio
 /// around it. Three rows give twelve levels at 3.3 dB each and the same pilot stands
 /// halfway up the strip.
 pub fn braille_profile(data: &[f32], cols: usize, rows: usize) -> Vec<String> {

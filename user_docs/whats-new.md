@@ -17,7 +17,30 @@ in time.
 
 ---
 
-## 📏 Checkpoint 15: One number, one meaning *(you are here)*
+## 🔬 Checkpoint 16: Small things that were quietly wrong *(you are here)*
+
+A pass over the parts of the code nobody had split up yet. Nothing here is a new
+feature; three things that had been subtly wrong on screen are now right.
+
+- **The field gain view lines up on an RTL-SDR.** The Tuner, VGA and AGC rows
+  each started in a different column, because the label widths were set for
+  three-letter names and `Tuner` is five. HackRF was never affected, which is why
+  it went unnoticed.
+- **The callback strip chart's caption is no longer cut off.** It has three
+  lengths and picked the longest one for the panel width, but the widths it
+  compared against were guesses: at 48 columns it read `...from the expe`, at 80
+  `...from the expected p`. It now picks the longest sentence that actually fits.
+- **The layout keys tell the truth.** `1` to `4` logged "Preset: spectrum" even
+  when that layout was missing and nothing had changed. They now say the layout
+  is not available, the way `5` to `9` already did. The log also names the layout
+  exactly as you would write it in `config.toml`.
+
+Behind the scenes, every panel can now be tested without a radio attached, which
+is how all three of these were found.
+
+---
+
+## 📏 Checkpoint 15: One number, one meaning
 
 The SAT reading used to disagree with itself. The Command Rail called it calm
 below 10 %, while the micro views and the lab benches went amber at 1 % and red

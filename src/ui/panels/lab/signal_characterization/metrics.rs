@@ -1,4 +1,4 @@
-//! `SIGNAL METRICS` — the five scalars, all read off the same coherent FFT frame
+//! `SIGNAL METRICS` - the five scalars, all read off the same coherent FFT frame
 //! so they agree with the bonded spectrum beside the panel.
 
 use ratatui::text::{Line, Span};
@@ -103,7 +103,7 @@ pub(super) fn lines(
 /// carries no usable resolution bandwidth.
 ///
 /// The one figure on this panel that is genuinely meaningless on its own. Every
-/// other level here is a power — a peak, a channel, an adjacent band — and a power
+/// other level here is a power - a peak, a channel, an adjacent band - and a power
 /// is a power whatever the analyser's resolution. A noise floor is not: it is the
 /// power that happened to land in one bin, so it rises with the bin width and says
 /// as much about the sample rate as about the radio.
@@ -111,7 +111,7 @@ pub(super) fn lines(
 /// Measured on the same station at two rates: the floor read -81.1 dBFS at 2 Msps
 /// and -73.8 dBFS at 10 Msps, a 7.3 dB difference that is entirely the 5× wider bin
 /// (theory says 7.0). As a density the same two readings are -112.8 and
-/// -112.5 dBFS/Hz — the same radio, correctly reported as the same radio.
+/// -112.5 dBFS/Hz - the same radio, correctly reported as the same radio.
 ///
 /// Shown *beside* the per-bin figure rather than instead of it, because the per-bin
 /// number is the one that matches where the noise visually sits on the trace next

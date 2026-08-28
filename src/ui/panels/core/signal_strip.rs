@@ -251,7 +251,7 @@ fn cell_sigil(color: Color, theme: &crate::Theme) -> &'static str {
     } // ◦
 }
 
-/// ` ● LABEL ▰▰▰▱▱ value ▁▂▃▅` — one gauge cell with a leading status lamp and,
+/// ` ● LABEL ▰▰▰▱▱ value ▁▂▃▅` - one gauge cell with a leading status lamp and,
 /// when `spark_w` columns are free and the cell has history, a trailing
 /// sparkline. Laid out left-aligned in its column.
 fn cell_spans(c: &Cell, theme: &crate::Theme, spark_w: usize) -> Vec<Span<'static>> {
@@ -309,7 +309,7 @@ impl Panel for SignalStripPanel {
             let col_w = inner.width / ncol;
             // The base cell (sigil+label+bar+value) is 27 cols; anything past that,
             // up to 8, becomes the trailing sparkline. Narrow terminals simply omit
-            // it (spark_w < 3) — no truncation, graceful degradation.
+            // it (spark_w < 3) - no truncation, graceful degradation.
             let spark_w = (col_w as usize).saturating_sub(28).min(8);
             for (ri, chunk) in cells.chunks(4).enumerate().take(inner.height as usize) {
                 for (ci, c) in chunk.iter().enumerate() {

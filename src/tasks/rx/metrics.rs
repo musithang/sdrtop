@@ -8,8 +8,8 @@
 //! waiting on that same mutex.
 //!
 //! It is also the half that was untestable while it lived in the middle of a
-//! 400-line `async move` block. The radio maths below — I/Q amplitude and phase
-//! imbalance, ADC loading in dBFS, callback jitter — had no tests at all before
+//! 400-line `async move` block. The radio maths below - I/Q amplitude and phase
+//! imbalance, ADC loading in dBFS, callback jitter - had no tests at all before
 //! R8a.
 
 use crate::state::IqCalState;

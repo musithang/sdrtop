@@ -3,16 +3,16 @@
 //!
 //! Pure, and deliberately willing to answer `None`: a band that falls off the end
 //! of the capture, or one that would overlap the channel being measured, has no
-//! ratio — and a guessed one would be worse than none.
+//! ratio - and a guessed one would be worse than none.
 
 /// Ratio floor for the ACPR measurement itself: an adjacent band this far below
 /// the in-channel power (or lower) reports as "clean" rather than chasing
 /// floating-point underflow toward -inf. Distinct from the panel's own display
-/// scale — this is a measurement clamp, not a UI concern.
+/// scale - this is a measurement clamp, not a UI concern.
 const ACPR_MEASURE_FLOOR_DB: f32 = -100.0;
 
 /// Adjacent-channel power ratio: the lower/upper adjacent-band power relative to
-/// the in-channel power, plus the absolute level (dBFS) of the louder — worse —
+/// the in-channel power, plus the absolute level (dBFS) of the louder - worse -
 /// adjacent band. Each band is the same width as `occupied_bw_hz` (the standard
 /// ACPR convention: compare like-sized channels), centred at ±`offset_hz` from
 /// the spectrum's centre bin (`n/2`, already fftshifted). `None` when there is no
@@ -22,7 +22,7 @@ const ACPR_MEASURE_FLOOR_DB: f32 = -100.0;
 ///
 /// That last guard is what the measurement lived without until the occupied
 /// bandwidth was scoped to the carrier. A band as wide as the channel, offset by
-/// less than that width, is mostly the same bins as the channel — so the ratio
+/// less than that width, is mostly the same bins as the channel - so the ratio
 /// comes out at 0 dB and the panel drew a full red bar and called a clean carrier
 /// splattered. `None` is the honest answer: at that width, at this spacing, there
 /// is nothing to compare.
@@ -109,7 +109,7 @@ mod tests {
     fn acpr_bands_none_when_band_falls_outside_span() {
         let linear = vec![1.0f32; 20];
         // A 900 kHz offset on a 1 MHz / 20-bin span pushes the adjacent band
-        // clean off the array — must report "can't measure", not a wrong number.
+        // clean off the array - must report "can't measure", not a wrong number.
         assert!(acpr_bands(&linear, 1_000_000.0, 100_000, 900_000.0).is_none());
     }
 

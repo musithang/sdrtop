@@ -1,8 +1,8 @@
 //! The measurement behind the picture: fit a ring to the cloud, then say how
 //! tightly the cloud sits on it.
 //!
-//! The two steps are separate on purpose. [`fit_ellipse`] is pure geometry — the
-//! covariance ellipse of the points — and it is what makes amplitude imbalance
+//! The two steps are separate on purpose. [`fit_ellipse`] is pure geometry - the
+//! covariance ellipse of the points - and it is what makes amplitude imbalance
 //! (`a≠b`) and phase imbalance (a non-zero tilt) legible as a shape.
 //! [`cloud_stats`] then measures the cloud *against* that fit, which is why
 //! imbalance does not inflate the EVM figure: the ellipse has already absorbed it.
