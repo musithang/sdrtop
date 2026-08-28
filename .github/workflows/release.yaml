@@ -62,28 +62,18 @@ jobs:
           name: packages
           path: release/
 
-      # Only a tag publishes. A manual run builds and verifies and stops there.
-      - name: Publish the release
+      # Only a tag drafts a release. A manual run builds and verifies and stops
+      # there. A draft is never public until a human presses Publish, so the
+      # title and the notes get written in the release editor, where they can be
+      # read before anyone can download them.
+      - name: Draft the release
         if: startsWith(github.ref, 'refs/tags/v')
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           gh release create "$GITHUB_REF_NAME" \
             --repo "$GITHUB_REPOSITORY" \
+            --draft \
             --title "$GITHUB_REF_NAME" \
             --generate-notes \
-            --notes-file - release/* <<'NOTES'
-          These packages are **unsigned**, so `apt` cannot verify them. Install
-          with `sudo dpkg -i sdrtop_*_<arch>.deb`, then `sudo apt-get -f install`
-          if it asks for dependencies.
-
-          Built on Debian 12, so they install on Debian 12/13, Ubuntu 24.04+,
-          Linux Mint 22, and Raspberry Pi OS Bookworm. Older releases are out of
-          reach: their glibc and their libhackrf are both too old.
-
-          Your user needs to be in the `plugdev` group to open the radio:
-
-              sudo usermod -aG plugdev $USER
-
-          Then log out and back in. Verify a download against `SHA256SUMS`.
-          NOTES
+            release/*
