@@ -247,6 +247,25 @@ impl SdrMetrics {
     }
 }
 
+impl SdrMetrics {
+    /// Swap in an RTL-SDR-shaped capability profile: one gain stage, a stepped
+    /// tuner table, and no Friis cascade to estimate a noise figure from.
+    ///
+    /// The device-generic panels branch on these three, so a panel tested only
+    /// against the HackRF fixture has half its rows unexercised.
+    pub(crate) fn single_stage(mut self) -> Self {
+        let mut caps = (*self.caps).clone();
+        caps.gain = crate::hardware::GainModel::RtlSingle {
+            gain_steps_db: vec![0, 9, 14, 27, 37, 49],
+        };
+        caps.friis_applicable = false;
+        self.radio.lna_gain = 27;
+        self.radio.vga_gain = 0;
+        self.caps = Arc::new(caps);
+        self
+    }
+}
+
 /// Render one panel into a `width × height` buffer and return it as text lines,
 /// trailing spaces trimmed.
 ///

@@ -6,7 +6,7 @@
 
 use ratatui::{
     layout::Rect,
-    style::{Color, Modifier, Style},
+    style::{Color, Style},
     text::{Line, Span},
     widgets::Paragraph,
     Frame,
@@ -14,9 +14,7 @@ use ratatui::{
 
 use crate::state::SdrMetrics;
 use crate::ui::panel::{Panel, PanelChrome};
-use crate::ui::widgets::micro_common::{
-    bar_spans, fft_stale, fmt_bw, fmt_rbw, snr_color, status_badge,
-};
+use crate::ui::widgets::micro_common::{bar_spans, fft_stale, fmt_bw, fmt_rbw, snr_color};
 
 pub struct MicroSignalPanel;
 
@@ -47,20 +45,9 @@ impl Panel for MicroSignalPanel {
         let lbl = |s: &'static str| Span::styled(s, Style::default().fg(theme.label));
         let dash = || Span::styled("---".to_string(), Style::default().fg(theme.stale));
 
-        // Header: status badge + frequency.
-        let [dot, word] = status_badge(state, theme);
-        let header = Line::from(vec![
-            Span::raw(" "),
-            dot,
-            word,
-            Span::raw("   "),
-            Span::styled(
-                crate::ui::widgets::micro_common::fmt_freq_mhz(state.radio.frequency),
-                Style::default()
-                    .fg(theme.value_hi)
-                    .add_modifier(Modifier::BOLD),
-            ),
-        ]);
+        // Header: status badge + frequency. Shared with the other field views —
+        // it was written out identically in three of them.
+        let header = super::field::header(state, theme);
 
         // SNR bar row.
         let snr = state.signal.peak_to_nf_db;

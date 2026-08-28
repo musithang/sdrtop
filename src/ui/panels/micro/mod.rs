@@ -4,6 +4,8 @@
 //! down to a single glance. All of them adapt across three width modes so they
 //! stay readable from an 80x24 SSH session down to a 40-column framebuffer.
 
+mod field;
+
 pub mod entry;
 pub mod gain;
 pub mod health;
