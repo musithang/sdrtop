@@ -201,6 +201,53 @@ impl SdrMetrics {
     }
 }
 
+
+impl SdrMetrics {
+    /// A plausible timing snapshot: callbacks arriving on time, a budget derived
+    /// from the expected period, and a deviation series to plot.
+    ///
+    /// `jitter_ratio` scales the deviations against the deadline budget, so a
+    /// test can ask for "comfortably inside" (0.3) or "well over" (2.5) without
+    /// knowing the thresholds.
+    pub(crate) fn with_timing(mut self, jitter_ratio: f64) -> Self {
+        let expected = 4_096u64;
+        let budget = (expected as f64 * 0.15).round() as u64;
+        let peak = (budget as f64 * jitter_ratio).round() as i32;
+        let deviations: Vec<i32> = (0..320)
+            .map(|i| {
+                let phase = (i % 16) as f64 / 16.0 * std::f64::consts::TAU;
+                (peak as f64 * phase.sin()).round() as i32
+            })
+            .collect();
+        let abs: Vec<u64> = deviations.iter().map(|d| d.unsigned_abs() as u64).collect();
+        let mut sorted = abs.clone();
+        sorted.sort_unstable();
+        let pick = |q: f64| sorted[((sorted.len() as f64 * q) as usize).min(sorted.len() - 1)];
+        self.timing = TimingState {
+            cb_period_us: expected,
+            cb_period_expected: expected,
+            cb_period_delta_ppm: 12,
+            cb_jitter_us: (peak as u64) / 3,
+            jitter_max_us: peak as u64,
+            jitter_session_max_us: peak as u64,
+            sr_delta_ppm: 18,
+            throughput_mean_mbps: 38.1,
+            throughput_std_mbps: 0.4,
+            timing_quality: TimingQuality::classify(pick(0.99), expected, 18, 0),
+            late_callbacks: abs.iter().filter(|&&d| d > budget).count() as u32,
+            late_window: abs.len() as u32,
+            dev_p95_us: pick(0.95),
+            dev_p99_us: pick(0.99),
+            dev_peak_us: sorted[sorted.len() - 1],
+            cb_deviations_us: deviations,
+            deadline_budget_us: budget,
+        };
+        self.iq.cb_period_us = expected;
+        self.iq.cb_jitter_us = self.timing.cb_jitter_us;
+        self
+    }
+}
+
 /// Render one panel into a `width × height` buffer and return it as text lines,
 /// trailing spaces trimmed.
 ///
@@ -340,5 +387,66 @@ mod tests {
             draw(crate::ui::SignalMetricsPanel, 60, 10, &m),
             draw(crate::ui::SignalMetricsPanel, 60, 10, &m)
         );
+    }
+
+    /// TEMPORARY (R10d1): dump the two timing row panels across states and sizes.
+    #[test]
+    fn r10d1_probe() {
+        use crate::ui::{TimingDiagnosticsPanel, TimingVitalsPanel};
+        let mut out = String::new();
+
+        let mut states: Vec<(&str, SdrMetrics)> = Vec::new();
+        states.push(("idle", SdrMetrics::fixture()));
+
+        let base = SdrMetrics::fixture().streaming().with_carrier(0.0, 40.0);
+        states.push(("healthy", base.clone().with_timing(0.3)));
+        states.push(("marginal", base.clone().with_timing(1.4)));
+        states.push(("poor", base.clone().with_timing(3.5)));
+
+        let mut drops = base.clone().with_timing(0.3);
+        drops.signal.drops_per_sec = 12;
+        drops.signal.total_drops_session = 480;
+        drops.signal.drop_history = (0..60).map(|i| (i % 5) as u64).collect();
+        states.push(("drops", drops));
+
+        let mut sat = base.clone().with_timing(0.3);
+        sat.signal.adc_saturation_pct = 7.5;
+        sat.signal.adc_saturation_peak = 19.0;
+        sat.signal.saturation_history = (0..60).map(|i| (i % 9) as f32).collect();
+        states.push(("saturated", sat));
+
+        let mut hot = base.clone().with_timing(0.3);
+        hot.system.process_cpu_pct = 88.0;
+        hot.system.process_rss_mb = 310;
+        hot.system.cpu_history = (0..60).map(|i| 600 + (i % 300) as u64).collect();
+        states.push(("cpu_hot", hot));
+
+        let mut full = base.clone().with_timing(0.3);
+        full.iq.buf_fill_pct = 91.0;
+        full.iq.buf_fill_history = (0..60).map(|i| 50 + (i % 40) as u64).collect();
+        full.signal.usb_errors_session = 3;
+        states.push(("buffer_full", full));
+
+        let mut drift = base.clone().with_timing(0.3);
+        drift.timing.sr_delta_ppm = -740;
+        drift.timing.cb_period_delta_ppm = 900;
+        drift.radio.actual_sample_rate = 9_992_600;
+        states.push(("drifting", drift));
+
+        for (name, st) in &states {
+            for (w, h) in [(34u16, 12u16), (44, 20), (56, 26), (72, 34), (100, 18)] {
+                out.push_str(&format!("### vitals {name} {w}x{h}\n"));
+                out.push_str(&draw(TimingVitalsPanel, w, h, st).join("\n"));
+                out.push_str("\n");
+                out.push_str(&format!("### diagnostics {name} {w}x{h}\n"));
+                out.push_str(&draw(TimingDiagnosticsPanel, w, h, st).join("\n"));
+                out.push_str("\n");
+            }
+        }
+        std::fs::write(
+            std::env::var("R10D1_OUT").unwrap_or_else(|_| "/tmp/r10d1.txt".into()),
+            out,
+        )
+        .unwrap();
     }
 }
