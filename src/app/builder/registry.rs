@@ -290,4 +290,67 @@ mod tests {
         assert_eq!(engine.active_preset(), "my_layout");
         assert!(engine.is_panel_visible("spectrum"));
     }
+
+    /// A full-height waterfall must reach its own bottom border.
+    ///
+    /// The `waterfall` preset gives the panel the whole body, and each character
+    /// cell shows two rows of history - so a tall terminal needs more than twice
+    /// its height in buffered rows. With the old 64-row default it ran out and
+    /// left a blank strip above the bottom border that never filled: the plot
+    /// looked cut off short of its own frame.
+    ///
+    /// Rendered through the real layout engine, because the bug was in the
+    /// interaction between the preset's height and the buffer's depth - neither
+    /// the panel nor the buffer is wrong on its own.
+    #[test]
+    fn a_full_height_waterfall_fills_its_panel() {
+        use crate::state::{SdrMetrics, WaterfallState, WATERFALL_MIN_ROWS};
+
+        let mut m = SdrMetrics::fixture()
+            .streaming()
+            .with_carrier(1_000_000.0, 40.0);
+        m.waterfall = WaterfallState::new(
+            WATERFALL_MIN_ROWS,
+            crate::palette::WaterfallPalette::default(),
+        );
+        for i in 0..WATERFALL_MIN_ROWS {
+            let bins: Vec<f32> = (0..256)
+                .map(|b| if b % 17 == i % 17 { -40.0 } else { -95.0 })
+                .collect();
+            m.waterfall.buffer.push(&bins);
+        }
+        let theme = crate::Theme::sdr();
+
+        for h in [20u16, 30, 45, 60, 90] {
+            let (engine, _) = App::build_ui("waterfall", &HashMap::new(), None);
+            let backend = ratatui::backend::TestBackend::new(100, h);
+            let mut term = ratatui::Terminal::new(backend).unwrap();
+            term.draw(|f| engine.draw(f, &m, &theme)).unwrap();
+            let buf = term.backend().buffer();
+            let rows: Vec<String> = (0..h)
+                .map(|y| (0..100).map(|x| buf.get(x, y).symbol()).collect())
+                .collect();
+
+            let Some(top) = rows.iter().position(|r| r.contains("WATERFALL")) else {
+                continue; // too short to place the panel at all
+            };
+            let Some(bot) = rows[top + 1..]
+                .iter()
+                .position(|r| r.starts_with('\u{2517}'))
+                .map(|i| top + 1 + i)
+            else {
+                continue;
+            };
+            let blank = rows[top + 1..bot]
+                .iter()
+                .filter(|r| r.chars().all(|c| c == ' ' || c == '\u{2502}'))
+                .count();
+            assert_eq!(
+                blank,
+                0,
+                "height {h}: {blank} blank rows between the waterfall and its border\n{}",
+                rows[top..=bot].join("\n")
+            );
+        }
+    }
 }

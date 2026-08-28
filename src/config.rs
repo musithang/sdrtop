@@ -26,8 +26,15 @@ fn default_recall() -> [u64; 3] {
 fn default_active_preset() -> String {
     "command_rail".into()
 }
+/// Rows of waterfall history kept, and therefore how far `J`/`K` can scroll back.
+///
+/// Each character cell shows **two** rows (half-block `▀`), so this is twice the
+/// visible height of the tallest waterfall plus the scrollback. 64 was the value
+/// for years and it is not enough for a full-height waterfall: on the `waterfall`
+/// preset a tall terminal ran out of history and left a blank strip above the
+/// bottom border that never filled. See [`crate::state::WATERFALL_MIN_ROWS`].
 fn default_waterfall_max_rows() -> usize {
-    64
+    512
 }
 
 #[derive(Deserialize, Serialize, Clone, Debug)]

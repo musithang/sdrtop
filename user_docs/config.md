@@ -48,7 +48,7 @@ recall_hz    = [0, 0, 0]   # Command Rail recall slots. 0 means empty
 
 [display]
 active_preset      = "command_rail"  # which layout to open on
-waterfall_max_rows = 64              # rows of history the waterfall keeps
+waterfall_max_rows = 512             # rows of history the waterfall keeps
 waterfall_palette  = "classic"       # classic · amber · ice · phosphor
 spectrum_style     = "braille"       # braille · fill · scatter
 
@@ -60,6 +60,12 @@ start_hz = 400000000       # scanner band start
 stop_hz  = 500000000       # scanner band end
 dwell_ms = 200             # measure time per step (50–2000)
 ```
+
+Each waterfall cell shows two rows of history, so `waterfall_max_rows` is twice
+the visible height plus however far you want `J` / `K` to scroll back. Values
+below 256 are raised to 256 at startup: less than that cannot fill a full-height
+waterfall, and the plot would stop short of its own bottom border.
+
 
 Markers and your own presets get their own blocks, described below.
 

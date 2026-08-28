@@ -144,14 +144,18 @@ fn contents(
         return;
     };
 
-    // Shared frequency zoom: bonded below the waterfall, both plots narrow to
-    // the same centre slice so the instrument zooms as one around the tuned
-    // frequency. Standalone the spectrum shows the full span.
-    let zoom = if bond == Bond::Below {
-        state.waterfall.hz_zoom as usize
-    } else {
-        1
-    };
+    // The one frequency zoom, whatever this panel is bonded to.
+    //
+    // `hz_zoom` lives on `WaterfallState` for historical reasons but is the whole
+    // instrument's zoom: `+`/`-` in *spectrum* focus drive it (see
+    // `input/core::spectrum`), and bonded below the waterfall both plots narrow to
+    // the same centre slice.
+    //
+    // It used to be applied only when bonded, which made two things wrong at once:
+    // `+` and `-` were dead keys in the standalone `spectrum` preset, and a zoom
+    // set on the Command Rail vanished when you pressed `[2]` to look at the same
+    // signal larger.
+    let zoom = state.waterfall.hz_zoom as usize;
     let Some(view) = SpectrumView::new(
         &fft.bins_dbfs,
         &fft.peak_hold,
@@ -410,5 +414,63 @@ mod tests {
         // The gutter always matches the canvas, or the dB labels drift off the trace.
         assert_eq!(full.gutter.height, full.canvas.height);
         assert_eq!(full.gutter.width, 6);
+    }
+}
+
+#[cfg(test)]
+mod zoom_tests {
+    use super::*;
+    use crate::state::fixture::draw;
+    use crate::state::SdrMetrics;
+
+    fn tuned() -> SdrMetrics {
+        SdrMetrics::fixture().streaming().with_carrier(0.0, 40.0)
+    }
+
+    /// The frequency axis has to narrow with the zoom even when the spectrum is
+    /// standalone.
+    ///
+    /// It used to apply `hz_zoom` only when bonded below the waterfall, which made
+    /// `+` and `-` dead keys in the `spectrum` preset and dropped a zoom set on the
+    /// Command Rail the moment you pressed `[2]` to look at the same signal larger.
+    #[test]
+    fn the_standalone_spectrum_honours_the_shared_zoom() {
+        let mut m = tuned();
+        let wide = draw(SpectrumPanel, 100, 20, &m).join("\n");
+        assert!(wide.contains("95.00M"), "unzoomed span missing:\n{wide}");
+        assert!(wide.contains("105.00M"), "unzoomed span missing:\n{wide}");
+
+        m.waterfall.hz_zoom = 4;
+        let narrow = draw(SpectrumPanel, 100, 20, &m).join("\n");
+        assert!(
+            !narrow.contains("95.00M"),
+            "the zoomed plot still spans the whole capture:\n{narrow}"
+        );
+        assert!(
+            narrow.contains("100.00M"),
+            "the zoom should stay centred on the tuning:\n{narrow}"
+        );
+    }
+
+    /// Zooming in narrows monotonically, and zoom 1 is the whole span.
+    #[test]
+    fn each_zoom_step_shows_less_of_the_band() {
+        let mut m = tuned();
+        let mut previous: Option<String> = None;
+        for zoom in [1u32, 2, 4, 8] {
+            m.waterfall.hz_zoom = zoom;
+            let out = draw(SpectrumPanel, 100, 20, &m).join("\n");
+            if let Some(prev) = &previous {
+                assert_ne!(
+                    &out, prev,
+                    "zoom ×{zoom} drew the same span as the step before"
+                );
+            }
+            assert!(
+                out.contains("100.00M"),
+                "zoom ×{zoom} lost the tuned centre:\n{out}"
+            );
+            previous = Some(out);
+        }
     }
 }

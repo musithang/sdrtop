@@ -24,7 +24,7 @@ use crate::hardware::{self, DeviceCapabilities};
 use crate::state::{
     Accumulators, IqState, ObserverState, RadioState, SdrMetrics, SignalState, SpectrumMarker,
     SpectrumState, SweepConfig, SweepState, SystemState, TimingState, UiState, WaterfallState,
-    RECALL_SLOTS, THROUGHPUT_HISTORY_LEN,
+    RECALL_SLOTS, THROUGHPUT_HISTORY_LEN, WATERFALL_MIN_ROWS,
 };
 
 /// The radio settings a session starts at, after the startup clamp.
@@ -255,8 +255,11 @@ pub(super) fn initial_metrics(cfg: &AppConfig, boot: Boot) -> SdrMetrics {
             pending_marker: None,
             style: cfg.display.spectrum_style,
         },
+        // Clamped, not trusted: `save_config` writes the live buffer depth back,
+        // so a config written before the floor existed carries a value too small
+        // to fill a full-height waterfall. See [`WATERFALL_MIN_ROWS`].
         waterfall: WaterfallState::new(
-            cfg.display.waterfall_max_rows,
+            cfg.display.waterfall_max_rows.max(WATERFALL_MIN_ROWS),
             cfg.display.waterfall_palette,
         ),
         system: SystemState {
@@ -436,6 +439,38 @@ mod tests {
             assert!(m.waterfall.last_fft.is_none());
             assert_eq!(m.iq.iq_amplitude_hist, [0u64; 32]);
         }
+    }
+
+    /// A config that asks for less waterfall history than a full-height panel
+    /// needs is raised, not honoured.
+    ///
+    /// `save_config` writes the live buffer depth back, so the old 64-row default
+    /// is baked into the config of anyone who has ever quit the app. Honouring it
+    /// leaves a blank strip above the waterfall's bottom border that never fills.
+    #[test]
+    fn a_shallow_waterfall_buffer_is_raised_to_the_floor() {
+        let mut cfg = AppConfig::default();
+        cfg.display.waterfall_max_rows = 64;
+        let m = initial_metrics(
+            &cfg,
+            Boot::observer(&cfg, &sysinfo(), hardware::DeviceKind::HackRf),
+        );
+        assert_eq!(
+            m.waterfall.buffer.max_rows,
+            crate::state::WATERFALL_MIN_ROWS
+        );
+    }
+
+    /// A deeper setting is the user's to make, and is left alone.
+    #[test]
+    fn a_deep_waterfall_buffer_is_left_alone() {
+        let mut cfg = AppConfig::default();
+        cfg.display.waterfall_max_rows = 4_096;
+        let m = initial_metrics(
+            &cfg,
+            Boot::observer(&cfg, &sysinfo(), hardware::DeviceKind::HackRf),
+        );
+        assert_eq!(m.waterfall.buffer.max_rows, 4_096);
     }
 
     #[test]

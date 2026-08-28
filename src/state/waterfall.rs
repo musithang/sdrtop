@@ -42,6 +42,19 @@ impl Clone for WaterfallBuffer {
     }
 }
 
+/// Fewest rows of history a waterfall buffer may keep.
+///
+/// Two data rows per character cell, so this fills a 128-row-tall waterfall - far
+/// beyond any real terminal - with nothing left over. Below it a full-height
+/// waterfall draws every row it has and then leaves the rest of the panel blank,
+/// which reads as the plot being cut off short of its own border.
+///
+/// A floor rather than only a default, because `save_config` writes the *live*
+/// buffer depth back to `config.toml`: anyone who has quit the app once has the
+/// old 64 baked into their config, and raising the default alone would never
+/// reach them. Clamped at startup, the same way an out-of-range frequency is.
+pub const WATERFALL_MIN_ROWS: usize = 256;
+
 impl WaterfallBuffer {
     pub fn new(max_rows: usize) -> Self {
         Self {
@@ -125,6 +138,33 @@ impl WaterfallState {
             last_fft: None,
             palette,
         }
+    }
+}
+
+#[cfg(test)]
+mod min_rows_tests {
+    use super::*;
+
+    /// Two data rows per character cell, so the floor has to be twice the tallest
+    /// waterfall anyone can produce. 128 character rows is far beyond any real
+    /// terminal; below that the plot draws what it has and leaves the rest of the
+    /// panel blank.
+    #[test]
+    fn the_floor_fills_a_taller_waterfall_than_any_terminal() {
+        const ROWS_PER_CELL: usize = 2;
+        const TALLEST_PLAUSIBLE_PANEL: usize = 128;
+        const { assert!(WATERFALL_MIN_ROWS >= ROWS_PER_CELL * TALLEST_PLAUSIBLE_PANEL) };
+    }
+
+    /// The buffer keeps what it is told to and no more, so the floor is the only
+    /// thing standing between a saved config and a short waterfall.
+    #[test]
+    fn the_buffer_keeps_exactly_its_depth() {
+        let mut b = WaterfallBuffer::new(4);
+        for _ in 0..10 {
+            b.push(&[-50.0; 8]);
+        }
+        assert_eq!(b.rows.len(), 4);
     }
 }
 

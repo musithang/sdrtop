@@ -17,7 +17,24 @@ in time.
 
 ---
 
-## 🔬 Checkpoint 16: Small things that were quietly wrong *(you are here)*
+## 🔭 Checkpoint 17: Two fixes on the plots *(you are here)*
+
+- **The frequency zoom now works on the spectrum-only view.** `+` and `-` in
+  spectrum focus set one zoom for the whole instrument, but the standalone
+  spectrum was ignoring it: the keys did nothing on preset `2`, and a zoom you had
+  set on the Command Rail was thrown away the moment you pressed `2` to look at
+  the same signal larger. The plot and its frequency axis now follow the zoom in
+  every layout.
+- **The waterfall fills its panel again.** On preset `3` the waterfall gets the
+  whole screen, and each row of the plot holds two rows of history, so a tall
+  terminal needed more history than the buffer kept. It ran out and left a blank
+  strip above the bottom border that never filled. The buffer is deeper now, and
+  is raised to a usable depth at startup even if your saved config asks for less,
+  so this also gives `J` / `K` a lot more to scroll back through.
+
+---
+
+## 🔬 Checkpoint 16: Small things that were quietly wrong
 
 A pass over the parts of the code nobody had split up yet. Nothing here is a new
 feature; three things that had been subtly wrong on screen are now right.

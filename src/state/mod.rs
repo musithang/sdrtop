@@ -37,7 +37,7 @@ pub use ui::{
     active_recall_slot, recall_from_hz, recall_to_hz, InputMode, LogEntry, LogLevel, RailMode,
     UiState, RECALL_SLOTS,
 };
-pub use waterfall::{FftFrame, WaterfallState};
+pub use waterfall::{FftFrame, WaterfallState, WATERFALL_MIN_ROWS};
 
 pub const THROUGHPUT_HISTORY_LEN: usize = 64;
 /// Depth of the per-callback gap ring feeding the `lab_timing` strip chart. ~256
