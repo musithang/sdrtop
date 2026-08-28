@@ -1,0 +1,55 @@
+// The command line. Kept in its own file because two things read it: `main.rs`
+// parses with it, and `build.rs` `include!`s this file to render the man page
+// from the same `Parser` derive.
+//
+// So this file stays self-contained - no `crate::` paths, no imports beyond what
+// a build script can also satisfy, and no `//!` module docs, which are invalid
+// through an `include!`. The module's documentation lives on `mod cli;` in
+// `main.rs` instead.
+
+// ASCII ranges (`0-40`, not an en dash) on purpose: these strings become the
+// man page, and a bare `groff -man` pipeline without preconv renders a
+// non-ASCII dash as mojibake. `man(1)` itself gets it right; not everything
+// that reads a man page is `man(1)`.
+use clap::Parser;
+use std::path::PathBuf;
+
+#[derive(Parser)]
+// `version` is not decoration: it is the first thing anyone pastes into a bug
+// report, and a packaged binary that cannot say which build it is makes every
+// report ambiguous.
+#[command(
+    name = "sdrtop",
+    version,
+    about = "HackRF One / RTL-SDR terminal monitor"
+)]
+pub struct Cli {
+    /// Path to config file (default: ~/.config/sdrtop/config.toml)
+    #[arg(long, value_name = "FILE")]
+    pub config: Option<PathBuf>,
+
+    /// Pick the backend when more than one device type is connected
+    #[arg(long, value_name = "hackrf|rtlsdr")]
+    pub device: Option<String>,
+
+    /// Center frequency in Hz, e.g. 433920000 (overrides config)
+    #[arg(long, value_name = "HZ")]
+    pub frequency: Option<u64>,
+
+    /// Primary front-end gain in dB - HackRF LNA / RTL-SDR tuner (overrides config)
+    #[arg(long, value_name = "DB")]
+    pub gain: Option<u32>,
+
+    /// HackRF LNA gain in dB, 0-40 step 8 (overrides config)
+    #[arg(long)]
+    pub lna: Option<u32>,
+
+    /// HackRF VGA gain in dB, 0-62 step 2 (overrides config)
+    #[arg(long)]
+    pub vga: Option<u32>,
+
+    /// Color theme: a built-in (sdr, nord, dracula, gruvbox, catppuccin,
+    /// solarized) or the name of a file in ~/.config/sdrtop/themes/
+    #[arg(long, value_name = "THEME")]
+    pub theme: Option<String>,
+}

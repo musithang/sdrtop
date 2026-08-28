@@ -1,4 +1,12 @@
+/// Where the generated man page lands.
+///
+/// A fixed path under `target/`, not `OUT_DIR`: `cargo deb` has to name this file
+/// in its asset list, and `OUT_DIR` carries a build hash that nothing can predict.
+const MAN_DIR: &str = "target/man";
+
 fn main() {
+    generate_man_page();
+
     // Requires libhackrf >= 2023.01.1 (hackrf_board_rev_read,
     // hackrf_usb_api_version_read). Many .pc files omit the version field so
     // atleast_version() fails even on a correct install; just probe and let
@@ -22,4 +30,36 @@ fn main() {
     if pkg_config::probe_library("librtlsdr").is_err() {
         println!("cargo:rustc-link-lib=rtlsdr");
     }
+}
+
+/// Render `sdrtop.1` from the CLI definition.
+///
+/// `include!` rather than a shared crate: this is a binary-only package, so
+/// `src/cli.rs` is not importable from a build script any other way. It is why
+/// that file has to stay self-contained.
+fn generate_man_page() {
+    // pkg-config emits `rerun-if-env-changed`, which switches off cargo's default
+    // "re-run when any file changes" - so the man page's own input has to be
+    // declared, or an edit to the flags would not regenerate it.
+    println!("cargo:rerun-if-changed=src/cli.rs");
+
+    use clap::CommandFactory;
+    mod cli {
+        include!("src/cli.rs");
+    }
+
+    let cmd = cli::Cli::command()
+        .name("sdrtop")
+        .version(env!("CARGO_PKG_VERSION"));
+    let mut page = Vec::new();
+    if clap_mangen::Man::new(cmd).render(&mut page).is_err() {
+        // A missing man page is a lintian warning, not a broken build.
+        println!("cargo:warning=could not render the man page");
+        return;
+    }
+    if std::fs::create_dir_all(MAN_DIR).is_err() {
+        println!("cargo:warning=could not create {MAN_DIR}");
+        return;
+    }
+    let _ = std::fs::write(format!("{MAN_DIR}/sdrtop.1"), page);
 }
