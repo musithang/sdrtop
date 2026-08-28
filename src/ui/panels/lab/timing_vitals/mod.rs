@@ -65,11 +65,7 @@ impl Panel for TimingVitalsPanel {
         theme: &crate::Theme,
         _focused: bool,
     ) {
-        let r = Rows::new(
-            inner.width as usize,
-            !state.radio.hw_streaming,
-            theme,
-        );
+        let r = Rows::new(inner.width as usize, !state.radio.hw_streaming, theme);
 
         let mut lines: Vec<Line> = vec![Line::from(vec![
             Span::raw(" "),
@@ -90,5 +86,89 @@ impl Panel for TimingVitalsPanel {
 
         crate::ui::chrome::fit_spacers(&mut lines, inner.height as usize);
         f.render_widget(Paragraph::new(lines), inner);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::state::fixture::draw;
+
+    const W: u16 = 56;
+    const H: u16 = 26;
+
+    fn live() -> SdrMetrics {
+        SdrMetrics::fixture().streaming().with_timing(0.3)
+    }
+
+    /// A stopped radio dashes every measured value rather than showing the last
+    /// one it had — and says plainly that it is idle.
+    #[test]
+    fn a_stopped_radio_dashes_its_readings() {
+        let out = draw(TimingVitalsPanel, W, H, &SdrMetrics::fixture()).join("\n");
+        assert!(out.contains("---"), "{out}");
+        assert!(out.contains("idle"), "no idle verdict:\n{out}");
+        assert!(out.contains("STALE"), "the frame should be tagged:\n{out}");
+    }
+
+    /// All five zones are present, in the order the panel promises.
+    #[test]
+    fn the_zones_appear_in_order() {
+        let out = draw(TimingVitalsPanel, W, H, &live()).join("\n");
+        let drops = out.find("Sample drops").expect("no drops zone");
+        let sat = out.find("ADC saturation").expect("no saturation zone");
+        let cpu = out.find("CPU load").expect("no cpu zone");
+        let usb = out.find("USB LINK").expect("no usb zone");
+        let ring = out.find("RING BUFFER").expect("no ring zone");
+        assert!(
+            drops < sat && sat < cpu && cpu < usb && usb < ring,
+            "zones out of order:\n{out}"
+        );
+    }
+
+    /// The verdict follows the timing quality, and the three bands are reachable.
+    #[test]
+    fn the_verdict_follows_the_timing_quality() {
+        let good = draw(TimingVitalsPanel, W, H, &live()).join("\n");
+        assert!(good.contains("all vitals nominal"), "{good}");
+
+        let strained = SdrMetrics::fixture().streaming().with_timing(1.6);
+        let mid = draw(TimingVitalsPanel, W, H, &strained).join("\n");
+        assert!(mid.contains("under load"), "{mid}");
+
+        let mut dropping = live();
+        dropping.signal.drops_per_sec = 8;
+        dropping.timing.timing_quality = crate::state::TimingQuality::classify(9_000, 4_096, 0, 8);
+        let bad = draw(TimingVitalsPanel, W, H, &dropping).join("\n");
+        assert!(bad.contains("overrun logged"), "{bad}");
+    }
+
+    /// Link utilisation is referenced to the device's own ceiling, so the same
+    /// throughput reads differently on a radio with a different maximum rate.
+    #[test]
+    fn link_utilisation_is_relative_to_the_device() {
+        let mut m = live();
+        m.timing.throughput_mean_mbps = 19.0; // half of a 20 Msps HackRF's ceiling
+        let out = draw(TimingVitalsPanel, W, H, &m).join("\n");
+        assert!(out.contains("38.1 max"), "ceiling missing:\n{out}");
+        assert!(
+            out.contains("50%") || out.contains("49%"),
+            "utilisation should read about half:\n{out}"
+        );
+    }
+
+    /// The panel fills whatever height it is given without spilling out of it.
+    #[test]
+    fn it_fits_every_size_the_layout_can_hand_it() {
+        let m = live();
+        let (min_w, min_h) = TimingVitalsPanel.min_size();
+        for (w, h) in [(min_w, min_h), (44, 20), (W, H), (100, 40)] {
+            let out = draw(TimingVitalsPanel, w, h, &m);
+            assert_eq!(out.len(), h as usize, "{w}x{h}: wrong row count");
+            assert!(
+                out.iter().all(|l| l.chars().count() <= w as usize),
+                "{w}x{h}: a row overran the panel"
+            );
+        }
     }
 }

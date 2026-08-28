@@ -24,7 +24,10 @@ pub(super) fn cpu_lines(state: &SdrMetrics, r: &Rows) -> Vec<Line<'static>> {
             format!("{cpu:.1} %"),
             Style::default().fg(load_color(cpu, r.theme)),
         ),
-        Span::styled(format!("   RAM {} MB", state.system.process_rss_mb), r.lbl()),
+        Span::styled(
+            format!("   RAM {} MB", state.system.process_rss_mb),
+            r.lbl(),
+        ),
     ];
     r.trend(
         head,
@@ -79,10 +82,7 @@ pub(super) fn usb_lines(state: &SdrMetrics, r: &Rows) -> Vec<Line<'static>> {
         vec![
             Span::raw(" "),
             Span::styled("Bus throughput ", r.lbl()),
-            Span::styled(
-                format!("{mbps:.1} MB/s"),
-                Style::default().fg(theme.value),
-            ),
+            Span::styled(format!("{mbps:.1} MB/s"), Style::default().fg(theme.value)),
             Span::styled(format!(" of {ceiling:.1} max"), r.lbl()),
         ]
     }));

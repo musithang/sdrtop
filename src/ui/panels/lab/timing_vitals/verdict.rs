@@ -74,7 +74,10 @@ mod tests {
         let mut last = 0u8;
         for sev in 0..=3u8 {
             let (mark, text, level) = decide(sev);
-            assert!(!text.is_empty() && !mark.is_empty(), "sev {sev} has no words");
+            assert!(
+                !text.is_empty() && !mark.is_empty(),
+                "sev {sev} has no words"
+            );
             assert!(level >= last, "sev {sev} graded softer than {}", sev - 1);
             last = level;
         }

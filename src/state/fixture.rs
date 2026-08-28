@@ -201,7 +201,6 @@ impl SdrMetrics {
     }
 }
 
-
 impl SdrMetrics {
     /// A plausible timing snapshot: callbacks arriving on time, a budget derived
     /// from the expected period, and a deviation series to plot.
@@ -387,66 +386,5 @@ mod tests {
             draw(crate::ui::SignalMetricsPanel, 60, 10, &m),
             draw(crate::ui::SignalMetricsPanel, 60, 10, &m)
         );
-    }
-
-    /// TEMPORARY (R10d1): dump the two timing row panels across states and sizes.
-    #[test]
-    fn r10d1_probe() {
-        use crate::ui::{TimingDiagnosticsPanel, TimingVitalsPanel};
-        let mut out = String::new();
-
-        let mut states: Vec<(&str, SdrMetrics)> = Vec::new();
-        states.push(("idle", SdrMetrics::fixture()));
-
-        let base = SdrMetrics::fixture().streaming().with_carrier(0.0, 40.0);
-        states.push(("healthy", base.clone().with_timing(0.3)));
-        states.push(("marginal", base.clone().with_timing(1.4)));
-        states.push(("poor", base.clone().with_timing(3.5)));
-
-        let mut drops = base.clone().with_timing(0.3);
-        drops.signal.drops_per_sec = 12;
-        drops.signal.total_drops_session = 480;
-        drops.signal.drop_history = (0..60).map(|i| (i % 5) as u64).collect();
-        states.push(("drops", drops));
-
-        let mut sat = base.clone().with_timing(0.3);
-        sat.signal.adc_saturation_pct = 7.5;
-        sat.signal.adc_saturation_peak = 19.0;
-        sat.signal.saturation_history = (0..60).map(|i| (i % 9) as f32).collect();
-        states.push(("saturated", sat));
-
-        let mut hot = base.clone().with_timing(0.3);
-        hot.system.process_cpu_pct = 88.0;
-        hot.system.process_rss_mb = 310;
-        hot.system.cpu_history = (0..60).map(|i| 600 + (i % 300) as u64).collect();
-        states.push(("cpu_hot", hot));
-
-        let mut full = base.clone().with_timing(0.3);
-        full.iq.buf_fill_pct = 91.0;
-        full.iq.buf_fill_history = (0..60).map(|i| 50 + (i % 40) as u64).collect();
-        full.signal.usb_errors_session = 3;
-        states.push(("buffer_full", full));
-
-        let mut drift = base.clone().with_timing(0.3);
-        drift.timing.sr_delta_ppm = -740;
-        drift.timing.cb_period_delta_ppm = 900;
-        drift.radio.actual_sample_rate = 9_992_600;
-        states.push(("drifting", drift));
-
-        for (name, st) in &states {
-            for (w, h) in [(34u16, 12u16), (44, 20), (56, 26), (72, 34), (100, 18)] {
-                out.push_str(&format!("### vitals {name} {w}x{h}\n"));
-                out.push_str(&draw(TimingVitalsPanel, w, h, st).join("\n"));
-                out.push_str("\n");
-                out.push_str(&format!("### diagnostics {name} {w}x{h}\n"));
-                out.push_str(&draw(TimingDiagnosticsPanel, w, h, st).join("\n"));
-                out.push_str("\n");
-            }
-        }
-        std::fs::write(
-            std::env::var("R10D1_OUT").unwrap_or_else(|_| "/tmp/r10d1.txt".into()),
-            out,
-        )
-        .unwrap();
     }
 }

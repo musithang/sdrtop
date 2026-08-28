@@ -176,8 +176,22 @@ mod tests {
         let t = Theme::sdr();
         for iw in [30usize, 44, 56, 72, 100] {
             let r = Rows::new(iw, false, &t);
-            let short = r.bar("fill depth", 0.5, "5%".into(), t.status_ok, t.status_crit, t.value);
-            let long = r.bar("link util", 0.5, "100%".into(), t.status_ok, t.status_crit, t.value);
+            let short = r.bar(
+                "fill depth",
+                0.5,
+                "5%".into(),
+                t.status_ok,
+                t.status_crit,
+                t.value,
+            );
+            let long = r.bar(
+                "link util",
+                0.5,
+                "100%".into(),
+                t.status_ok,
+                t.status_crit,
+                t.value,
+            );
             assert_eq!(
                 text(&short).chars().count(),
                 text(&long).chars().count(),
@@ -192,14 +206,26 @@ mod tests {
         let t = Theme::sdr();
         let r = Rows::new(56, true, &t);
         let [head, spark] = r.trend(
-            r.heading("Sample drops ", "12/s".into(), t.status_crit, "  session 9".into()),
+            r.heading(
+                "Sample drops ",
+                "12/s".into(),
+                t.status_crit,
+                "  session 9".into(),
+            ),
             (0..40).map(|i| i as f64).collect(),
         );
         assert!(text(&head).contains("---"), "{:?}", text(&head));
         assert!(!text(&head).contains("12/s"));
         assert_eq!(text(&spark).trim(), "", "a stale trend drew history");
 
-        let bar = r.bar("fill depth", 0.9, "90%".into(), t.status_ok, t.status_crit, t.value);
+        let bar = r.bar(
+            "fill depth",
+            0.9,
+            "90%".into(),
+            t.status_ok,
+            t.status_crit,
+            t.value,
+        );
         assert!(text(&bar).contains("---"), "{:?}", text(&bar));
         assert!(!text(&bar).contains("90%"));
     }
@@ -210,7 +236,12 @@ mod tests {
         let t = Theme::sdr();
         let r = Rows::new(56, false, &t);
         let [head, spark] = r.trend(
-            r.heading("Sample drops ", "12/s".into(), t.status_crit, "  session 9".into()),
+            r.heading(
+                "Sample drops ",
+                "12/s".into(),
+                t.status_crit,
+                "  session 9".into(),
+            ),
             (0..40).map(|i| (i % 7) as f64).collect(),
         );
         assert!(text(&head).contains("12/s"));
@@ -223,7 +254,7 @@ mod tests {
         assert_eq!(load_color(0.0, &t), t.status_ok);
         assert_eq!(load_color(LOAD_WARN_PCT, &t), t.status_warn);
         assert_eq!(load_color(LOAD_CRIT_PCT, &t), t.status_crit);
-        assert!(LOAD_WARN_PCT < LOAD_CRIT_PCT);
+        const { assert!(LOAD_WARN_PCT < LOAD_CRIT_PCT, "warn must come before crit") };
     }
 
     /// A panel too narrow for the label plus a value still draws a usable bar
@@ -232,7 +263,14 @@ mod tests {
     fn a_very_narrow_panel_keeps_a_drawable_bar() {
         let t = Theme::sdr();
         let r = Rows::new(6, false, &t);
-        let bar = r.bar("fill depth", 0.5, "50%".into(), t.status_ok, t.status_crit, t.value);
+        let bar = r.bar(
+            "fill depth",
+            0.5,
+            "50%".into(),
+            t.status_ok,
+            t.status_crit,
+            t.value,
+        );
         assert!(!text(&bar).is_empty());
     }
 }

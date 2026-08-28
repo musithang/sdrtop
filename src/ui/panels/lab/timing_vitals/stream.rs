@@ -34,11 +34,7 @@ pub(super) fn lines(state: &SdrMetrics, r: &Rows) -> Vec<Line<'static>> {
             sat_color(drops.adc_saturation_pct, r.theme),
             format!("   peak {:.1}%", drops.adc_saturation_peak),
         ),
-        drops
-            .saturation_history
-            .iter()
-            .map(|&v| v as f64)
-            .collect(),
+        drops.saturation_history.iter().map(|&v| v as f64).collect(),
     ));
     out
 }

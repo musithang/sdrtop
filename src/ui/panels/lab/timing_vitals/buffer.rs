@@ -43,7 +43,11 @@ pub(super) fn lines(state: &SdrMetrics, r: &Rows) -> Vec<Line<'static>> {
         ("headroom ok", theme.status_ok)
     };
     out.push(Line::from(if r.stale {
-        vec![Span::raw(" "), Span::styled("Peak fill ", r.lbl()), r.dash()]
+        vec![
+            Span::raw(" "),
+            Span::styled("Peak fill ", r.lbl()),
+            r.dash(),
+        ]
     } else {
         vec![
             Span::raw(" "),
