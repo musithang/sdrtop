@@ -4,23 +4,37 @@
 #   curl -fsSL https://raw.githubusercontent.com/mustang6139/sdrtop/main/packaging/install.sh | sh
 #   sh install.sh --prefix ~/.local        # no root anywhere
 #   sh install.sh --from-source            # skip the prebuilt binary
+#   sh install.sh --git                    # build the main branch, not a release
 #   sh install.sh --uninstall
 #
-# One prebuilt tarball is published, for x86_64 glibc. Everything else this
-# script handles by building from source, and it decides which it is by asking
-# rather than by guessing: it unpacks the binary and tries to run it, and falls
-# back to a source build if that fails for any reason at all.
+# There are two ways to get sdrtop and this script picks between them, so nobody
+# else has to:
+#
+#   1. the prebuilt tarball, x86_64 glibc only, published on the release page,
+#   2. `cargo install sdrtop --locked`, which works everywhere because it
+#      compiles on the machine it is installing to.
+#
+# It decides by asking rather than by guessing: it unpacks the binary, tries to
+# run it, and falls through to cargo if that fails for any reason at all.
 #
 # That fallback is the whole design. sdrtop links `librtlsdr`, and Debian ships
 # it as `librtlsdr.so.0` while Ubuntu ships the same upstream as `.so.2`, so no
 # single prebuilt binary can serve both. Running the binary catches that, and
-# also catches musl, a missing loader and every future soname bump, none of
-# which a list of distribution names would have covered.
+# also catches musl, aarch64, a missing loader and every future soname bump,
+# none of which a list of distribution names would have covered.
+#
+# What this script does NOT do, deliberately: build sdrtop itself. It used to
+# carry its own download-and-compile pipeline, which was a second unmaintained
+# copy of the build recipe. `cargo install` is that job, better tested than
+# anything here could be, because the whole Rust ecosystem runs it daily.
 set -eu
 
 REPO=mustang6139/sdrtop
+CRATE=sdrtop
 RAW_DEPS_ONLY=0
 FROM_SOURCE=0
+FROM_GIT=0
+NO_VERIFY=0
 UNINSTALL=0
 PREFIX=""
 TAG=""
@@ -35,8 +49,10 @@ usage() {
 sdrtop installer
 
   --prefix DIR    install under DIR (default /usr/local, or ~/.local without root)
-  --version TAG   install a specific release, e.g. v0.4.0 (default: the latest)
-  --from-source   build from source even on x86_64
+  --version TAG   install a specific release, e.g. v0.4.1 (default: the latest)
+  --from-source   compile with cargo even on x86_64, skipping the prebuilt binary
+  --git           compile the main branch instead of a release (unversioned)
+  --no-verify     install a download without checking its checksum (say why first)
   --deps-only     install the library dependencies and stop
   --uninstall     remove what a previous run installed
   --help          this
@@ -48,6 +64,8 @@ while [ $# -gt 0 ]; do
         --prefix)  PREFIX="${2:?--prefix needs a directory}"; shift 2 ;;
         --version) TAG="${2:?--version needs a tag}"; shift 2 ;;
         --from-source) FROM_SOURCE=1; shift ;;
+        --git)         FROM_GIT=1; FROM_SOURCE=1; shift ;;
+        --no-verify)   NO_VERIFY=1; shift ;;
         --deps-only)   RAW_DEPS_ONLY=1; shift ;;
         --uninstall)   UNINSTALL=1; shift ;;
         --help|-h)     usage; exit 0 ;;
@@ -56,6 +74,13 @@ while [ $# -gt 0 ]; do
 done
 
 [ "$(uname -s)" = Linux ] || die "sdrtop is Linux only; this is $(uname -s)"
+
+# `--git` installs whatever main happens to be, which has no version number to
+# ask for. Silently ignoring one would install something other than what was
+# asked for, which is the failure this whole flag exists to make visible.
+if [ "$FROM_GIT" -eq 1 ] && [ -n "$TAG" ]; then
+    die "--git and --version are mutually exclusive: --git installs the main branch"
+fi
 
 # ── Where things go ─────────────────────────────────────────────────────────
 # Root is not required. Without it the default moves to ~/.local, which is on
@@ -197,9 +222,12 @@ install_runtime_deps() {
     fi
     install_first "$LIB_HACKRF" || warn "could not install libhackrf automatically"
     install_first "$LIB_RTLSDR" || warn "could not install librtlsdr automatically"
-    # Where the rules are their own package, take them: otherwise the radio
-    # installs fine and then needs root to open.
-    for p in $UDEV_PKGS; do pm_install "$p" >/dev/null 2>&1 && say "  $p" || true; done
+    # Where a distribution ships the udev rules as their own package, take them.
+    # This is the only udev handling here, and it is a package install like any
+    # other. See "Device access" at the bottom for why nothing is hand-written.
+    for p in $UDEV_PKGS; do
+        if pm_install "$p" >/dev/null 2>&1; then say "  $p"; fi
+    done
 }
 
 install_runtime_deps
@@ -207,6 +235,9 @@ install_runtime_deps
 
 BINARY=""
 SRC_DIR=""
+
+WORK=$(mktemp -d)
+trap 'rm -rf "$WORK"' EXIT INT TERM
 
 # ── An unpacked tarball installs itself, with no network at all ─────────────
 # install.sh travels inside the release tarball, so a copy of it sitting beside
@@ -231,70 +262,94 @@ case "$0" in
         ;;
 esac
 
-# ── Which release ───────────────────────────────────────────────────────────
-if [ -z "$BINARY" ]; then
-fetch() { curl -fsSL "$1" -o "$2"; }
-command -v curl >/dev/null 2>&1 || die "curl is required"
-command -v tar  >/dev/null 2>&1 || die "tar is required"
-
-if [ -z "$TAG" ]; then
-    step "Finding the latest release"
-    # No jq: the API's own field, first match, nothing else on the line.
-    TAG=$(curl -fsSL "https://api.github.com/repos/$REPO/releases/latest" \
-          | sed -n 's/.*"tag_name": *"\([^"]*\)".*/\1/p' | head -1)
-    [ -n "$TAG" ] || die "could not determine the latest release; pass --version"
-fi
-VERSION="${TAG#v}"
-say "sdrtop $TAG"
-
-WORK=$(mktemp -d)
-trap 'rm -rf "$WORK"' EXIT INT TERM
-
 # ── The prebuilt binary, if it can possibly work here ───────────────────────
-ARCH=$(uname -m)
+if [ -z "$BINARY" ] && [ "$FROM_SOURCE" -eq 0 ]; then
+    command -v curl >/dev/null 2>&1 || die "curl is required"
+    command -v tar  >/dev/null 2>&1 || die "tar is required"
+    fetch() { curl -fsSL "$1" -o "$2"; }
 
-if [ "$FROM_SOURCE" -eq 0 ] && [ "$ARCH" = x86_64 ]; then
-    step "Downloading the prebuilt binary"
-    NAME="sdrtop-$VERSION-x86_64-linux"
-    BASE="https://github.com/$REPO/releases/download/$TAG"
-    if fetch "$BASE/$NAME.tar.gz" "$WORK/$NAME.tar.gz"; then
-        # The checksums are published beside the tarball; a download that does
-        # not match one is not unpacked.
-        if fetch "$BASE/SHA256SUMS" "$WORK/SHA256SUMS" \
-           && command -v sha256sum >/dev/null 2>&1; then
-            ( cd "$WORK" && grep " $NAME.tar.gz\$" SHA256SUMS | sha256sum -c - ) \
-                || die "checksum mismatch on $NAME.tar.gz"
-        else
-            warn "could not verify the checksum"
-        fi
-        tar -xzf "$WORK/$NAME.tar.gz" -C "$WORK"
+    if [ -z "$TAG" ]; then
+        step "Finding the latest release"
+        # No jq: the API's own field, first match, nothing else on the line.
+        TAG=$(curl -fsSL "https://api.github.com/repos/$REPO/releases/latest" \
+              | sed -n 's/.*"tag_name": *"\([^"]*\)".*/\1/p' | head -1)
+        [ -n "$TAG" ] || die "could not determine the latest release; pass --version"
+    fi
+    VERSION="${TAG#v}"
+    say "sdrtop $TAG"
 
-        # The honest test, and the reason this script needs no distribution
-        # list: run the thing. `--version` returns before any device is opened,
-        # so it needs no radio, and it fails for every reason that matters here.
-        #
-        # Running it beats reading `ldd` output. On musl `ldd` is the musl
-        # loader, which cannot load a glibc binary at all and says so without
-        # ever printing "not found", so a grep for that phrase would conclude
-        # the binary was fine and install something that cannot start.
-        if "$WORK/$NAME/sdrtop" --version >/dev/null 2>&1; then
-            BINARY="$WORK/$NAME/sdrtop"
-            SRC_DIR="$WORK/$NAME"
-        else
-            say "the prebuilt binary does not run on this system:"
-            ldd "$WORK/$NAME/sdrtop" 2>&1 | grep -E 'not found|Error|error' \
-                | sed 's/^/    /' || say "    (it failed to start)"
-            say "building from source instead, which links what you do have"
-        fi
+    ARCH=$(uname -m)
+    if [ "$ARCH" != x86_64 ]; then
+        say "no prebuilt binary for $ARCH; compiling instead"
     else
-        warn "no prebuilt tarball for $TAG; building from source"
+        step "Downloading the prebuilt binary"
+        BASE="https://github.com/$REPO/releases/download/$TAG"
+        # The asset name is the full Rust target triple from 0.4.2 onwards. The
+        # short form is what 0.4.0 and 0.4.1 shipped, and `--version v0.4.0` has
+        # to keep working, so both are tried. Drop the legacy name once no
+        # supported release uses it.
+        NAME=""
+        for candidate in \
+            "sdrtop-$VERSION-x86_64-unknown-linux-gnu" \
+            "sdrtop-$VERSION-x86_64-linux"
+        do
+            if fetch "$BASE/$candidate.tar.gz" "$WORK/$candidate.tar.gz"; then
+                NAME="$candidate"
+                break
+            fi
+        done
+
+        if [ -z "$NAME" ]; then
+            warn "no prebuilt tarball for $TAG; compiling instead"
+        else
+            # Verification is fatal, and that is the fix for the version of this
+            # script that wrapped it in an `if` whose every branch continued. A
+            # failed SHA256SUMS download, or a machine without sha256sum, then
+            # installed an unverified binary and said nothing. A check that a
+            # network hiccup can skip is not a check.
+            if [ "$NO_VERIFY" -eq 1 ]; then
+                warn "--no-verify: installing $NAME.tar.gz without checking its checksum"
+            else
+                command -v sha256sum >/dev/null 2>&1 \
+                    || die "sha256sum is needed to verify the download (or pass --no-verify)"
+                fetch "$BASE/SHA256SUMS" "$WORK/SHA256SUMS" \
+                    || die "could not download SHA256SUMS for $TAG (or pass --no-verify)"
+                grep " $NAME.tar.gz\$" "$WORK/SHA256SUMS" > "$WORK/expected.sha256" \
+                    || die "SHA256SUMS for $TAG does not list $NAME.tar.gz"
+                ( cd "$WORK" && sha256sum -c expected.sha256 >/dev/null ) \
+                    || die "checksum mismatch on $NAME.tar.gz; refusing to install it"
+                say "  checksum verified"
+            fi
+
+            tar -xzf "$WORK/$NAME.tar.gz" -C "$WORK"
+
+            # The honest test, and the reason this script needs no distribution
+            # list: run the thing. `--version` returns before any device is
+            # opened, so it needs no radio, and it fails for every reason that
+            # matters here.
+            #
+            # Running it beats reading `ldd` output. On musl `ldd` is the musl
+            # loader, which cannot load a glibc binary at all and says so
+            # without ever printing "not found", so a grep for that phrase would
+            # conclude the binary was fine and install something that cannot
+            # start.
+            if "$WORK/$NAME/sdrtop" --version >/dev/null 2>&1; then
+                BINARY="$WORK/$NAME/sdrtop"
+                SRC_DIR="$WORK/$NAME"
+            else
+                say "the prebuilt binary does not run on this system:"
+                ldd "$WORK/$NAME/sdrtop" 2>&1 | grep -E 'not found|Error|error' \
+                    | sed 's/^/    /' || say "    (it failed to start)"
+                say "compiling instead, which links what you do have"
+            fi
+        fi
     fi
 fi
-fi # end of the download path, skipped entirely for a local tarball
 
-# ── Or build it ─────────────────────────────────────────────────────────────
+# ── Or compile it, which is one cargo command ───────────────────────────────
 if [ -z "$BINARY" ]; then
-    step "Building from source"
+    step "Compiling with cargo"
+
     # Only if they are not already there. Someone who has built sdrtop before,
     # or who has any SDR development environment, should not be asked for a root
     # password to install packages they have. pkg-config is asked first, but
@@ -320,6 +375,7 @@ if [ -z "$BINARY" ]; then
     need_rustup=1
     if command -v cargo >/dev/null 2>&1; then
         rv=$(cargo --version 2>/dev/null | sed -n 's/^cargo \([0-9]*\)\.\([0-9]*\).*/\1 \2/p')
+        # shellcheck disable=SC2086 # deliberate: two fields into $1 and $2
         set -- $rv
         if [ "${1:-0}" -gt 1 ] || { [ "${1:-0}" -eq 1 ] && [ "${2:-0}" -ge 88 ]; }; then
             need_rustup=0
@@ -331,80 +387,89 @@ if [ -z "$BINARY" ]; then
         say "installing Rust with rustup (into ~/.rustup and ~/.cargo, no root)"
         curl --proto '=https' --tlsv1.2 -fsSL https://sh.rustup.rs \
             | sh -s -- -y --profile minimal --default-toolchain stable >/dev/null
+        # shellcheck disable=SC1091 # written by rustup a moment ago
         . "$HOME/.cargo/env"
     fi
 
-    say "fetching the sources for $TAG"
-    # Into a directory of its own. The failed prebuilt tarball is still unpacked
-    # in $WORK as `sdrtop-<version>-x86_64-linux`, and a search for `sdrtop-*`
-    # across $WORK finds that first and tries to build a directory that has no
-    # Cargo.toml in it.
-    mkdir -p "$WORK/src"
-    fetch "https://github.com/$REPO/archive/refs/tags/$TAG.tar.gz" "$WORK/src.tar.gz" \
-        || die "could not download the sources for $TAG"
-    tar -xzf "$WORK/src.tar.gz" -C "$WORK/src"
-    # Identified by what a build actually needs rather than by its name, so the
-    # archive's top-level directory can be called anything.
-    SRC_DIR=$(find "$WORK/src" -maxdepth 2 -name Cargo.toml -type f | head -1)
-    SRC_DIR=${SRC_DIR%/Cargo.toml}
-    [ -n "$SRC_DIR" ] && [ -d "$SRC_DIR" ] || die "no Cargo.toml in the source archive for $TAG"
+    say ""
+    say "This compiles sdrtop from source. Expect a few minutes on a laptop and"
+    say "considerably longer on a Raspberry Pi. Nothing is wrong if it goes quiet."
+    say ""
 
-    say "compiling (this takes a few minutes)"
-    ( cd "$SRC_DIR" && cargo build --release ) || die "the build failed; see the output above"
-    BINARY="$SRC_DIR/target/release/sdrtop"
-    [ -f "$SRC_DIR/target/man/sdrtop.1" ] && cp "$SRC_DIR/target/man/sdrtop.1" "$SRC_DIR/sdrtop.1"
+    # Into a throwaway root, not straight into $PREFIX. Compiling as an ordinary
+    # user and then copying one file with sudo keeps root to a single `install`
+    # command, instead of handing a whole build to it. It also means both paths
+    # through this script end the same way, with $BINARY pointing at a file.
+    # One command, three sources. `cargo install` takes the crate name
+    # positionally whichever source it reads from, so only the source arguments
+    # differ and there is no reason to write the command out three times.
+    src_args=""
+    src_label="the latest $CRATE from crates.io"
+    if [ "$FROM_GIT" -eq 1 ]; then
+        src_args="--git https://github.com/$REPO"
+        src_label="the main branch from git"
+    elif [ -n "$TAG" ]; then
+        src_args="--version ${TAG#v}"
+        src_label="$CRATE ${TAG#v} from crates.io"
+    fi
+    say "building $src_label"
+    # shellcheck disable=SC2086 # deliberate: $src_args is an argument list
+    cargo install "$CRATE" --locked --root "$WORK/cargo" $src_args \
+        || die "the build failed; see the output above"
+
+    BINARY="$WORK/cargo/bin/sdrtop"
+    [ -x "$BINARY" ] || die "cargo reported success but produced no binary"
+    # No SRC_DIR: `cargo install` delivers a binary and nothing else, so this
+    # path installs no README, man page or user_docs. That is what the command
+    # means, and the documentation lives at github.com/mustang6139/sdrtop.
 fi
 
 # ── Install ─────────────────────────────────────────────────────────────────
 step "Installing into $PREFIX"
 as_root install -Dm755 "$BINARY" "$BIN_DIR/sdrtop"
 say "  $BIN_DIR/sdrtop"
-if [ -f "$SRC_DIR/sdrtop.1" ]; then
-    as_root install -Dm644 "$SRC_DIR/sdrtop.1" "$MAN_DIR/sdrtop.1"
-    say "  $MAN_DIR/sdrtop.1"
-fi
-for f in "$SRC_DIR/README.md" "$SRC_DIR/LICENSE"; do
-    [ -f "$f" ] && as_root install -Dm644 "$f" "$DOC_DIR/$(basename "$f")"
-done
-if [ -d "$SRC_DIR/user_docs" ]; then
-    for f in "$SRC_DIR"/user_docs/*.md; do
-        [ -f "$f" ] && as_root install -Dm644 "$f" "$DOC_DIR/user_docs/$(basename "$f")"
+if [ -n "$SRC_DIR" ]; then
+    if [ -f "$SRC_DIR/sdrtop.1" ]; then
+        as_root install -Dm644 "$SRC_DIR/sdrtop.1" "$MAN_DIR/sdrtop.1"
+        say "  $MAN_DIR/sdrtop.1"
+    fi
+    for f in "$SRC_DIR/README.md" "$SRC_DIR/LICENSE"; do
+        [ -f "$f" ] && as_root install -Dm644 "$f" "$DOC_DIR/$(basename "$f")"
     done
-fi
-
-# ── The radio has to be openable ────────────────────────────────────────────
-# The library packages normally ship the udev rules, so this only writes any
-# when the system has none. The IDs are the HackRF One and the two generic
-# RTL2832U dongles, copied from the rules those packages install; the full
-# osmocom list covers another forty variants.
-step "Device access"
-if [ -n "$SUDO" ] || [ "$(id -u)" -eq 0 ]; then
-    if grep -rqs plugdev /usr/lib/udev/rules.d /lib/udev/rules.d /etc/udev/rules.d; then
-        say "udev rules for SDR hardware are already installed"
-    else
-        say "no SDR udev rules found, writing a minimal set"
-        as_root sh -c 'cat > /etc/udev/rules.d/60-sdrtop.rules' <<'RULES'
-# Minimal fallback rules, written by the sdrtop installer only because no
-# libhackrf or librtlsdr package had supplied any. Replace with your
-# distribution's own package rules if you install them later.
-SUBSYSTEM=="usb", ATTR{idVendor}=="1d50", ATTR{idProduct}=="6089", MODE="0660", GROUP="plugdev"
-SUBSYSTEM=="usb", ATTR{idVendor}=="1d50", ATTR{idProduct}=="604b", MODE="0660", GROUP="plugdev"
-SUBSYSTEMS=="usb", ATTRS{idVendor}=="0bda", ATTRS{idProduct}=="2832", MODE="0660", GROUP="plugdev"
-SUBSYSTEMS=="usb", ATTRS{idVendor}=="0bda", ATTRS{idProduct}=="2838", MODE="0660", GROUP="plugdev"
-RULES
-        as_root udevadm control --reload-rules 2>/dev/null || true
-        as_root udevadm trigger 2>/dev/null || true
+    if [ -d "$SRC_DIR/user_docs" ]; then
+        for f in "$SRC_DIR"/user_docs/*.md; do
+            [ -f "$f" ] && as_root install -Dm644 "$f" "$DOC_DIR/user_docs/$(basename "$f")"
+        done
     fi
 fi
 
-NEEDS_GROUP=0
+# ── The radio has to be openable ────────────────────────────────────────────
+# Reported, never written. The libhackrf and rtl-sdr packages ship their own
+# udev rules, so a machine with the libraries has the permissions, and a second
+# set of rules written here would be a second answer to one question that agrees
+# with the first only until someone edits one of them.
+#
+# On Alpine the rules are separate packages, and those were installed above with
+# the libraries, which is the same mechanism rather than an exception to it.
+step "Device access"
+if grep -rqs -e 'idVendor.*1d50' -e 'idVendor.*0bda' \
+     /usr/lib/udev/rules.d /lib/udev/rules.d /etc/udev/rules.d; then
+    say "udev rules for SDR hardware are installed"
+else
+    warn "no udev rules for SDR hardware were found on this system"
+    say "  sdrtop will need root to open the radio until they exist. They come"
+    say "  with the libhackrf and rtl-sdr packages on most distributions; see"
+    say "  user_docs/troubleshooting.md if installing those did not supply any."
+fi
+
 if ! id -nG 2>/dev/null | tr ' ' '\n' | grep -qx plugdev; then
-    NEEDS_GROUP=1
-    if [ -n "$SUDO" ] || [ "$(id -u)" -eq 0 ]; then
-        getent group plugdev >/dev/null 2>&1 || as_root groupadd plugdev
-        as_root usermod -aG plugdev "$(id -un)" && say "added $(id -un) to plugdev"
-    else
-        warn "you are not in the plugdev group and this run cannot add you"
+    if getent group plugdev >/dev/null 2>&1; then
+        say ""
+        say "You are not in the plugdev group, which those rules usually grant"
+        say "access through. To join it:"
+        say "    sudo usermod -aG plugdev $(id -un)"
+        say "then log out and back in, because group membership only applies to"
+        say "new sessions."
     fi
 fi
 
@@ -422,10 +487,5 @@ case ":$PATH:" in
        say "    export PATH=\"$BIN_DIR:\$PATH\"" ;;
 esac
 
-if [ "$NEEDS_GROUP" -eq 1 ]; then
-    say ""
-    say "Log out and back in before plugging the radio in: group membership"
-    say "only applies to new sessions."
-fi
 say ""
 say "Run 'sdrtop', press Space to start receiving and ? for the keys."
