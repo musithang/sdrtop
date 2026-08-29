@@ -15,7 +15,20 @@
 # `librtlsdr2`, soname .so.2). install.sh runs `ldd` over the downloaded binary
 # and builds from source when that check fails, so the tarball never has to be
 # the answer everywhere. See dev_docs/release-packaging-plan.md.
-FROM docker.io/library/debian:12
+# Pinned by digest, not by the `debian:12` tag. A tag is a moving pointer: it
+# advances on every Debian point release, so the same commit built two months
+# apart would come out of two different base images and produce two different
+# binaries. That alone makes a reproducible release impossible, and it is the
+# floor everything else in R6 sits on.
+#
+# This is the multi-arch manifest list, which is why `--platform linux/amd64` on
+# the build and run commands still selects. The amd64 image it resolves to is
+# sha256:2f65600e1252c5649d2213e1d1ea4d74253d26514dc6530102a875e429245929,
+# recorded here so a mismatch is traceable rather than mysterious.
+#
+# Bumping it is deliberate: it changes the released binary's bytes, and the
+# glibc floor assertion in release.yaml is what catches a bump that goes too far.
+FROM docker.io/library/debian:12@sha256:6ebd97fa83deb272194a2cf015b3d26a4d538e9ad3a7a79d544c8af5b0a01443
 
 ENV DEBIAN_FRONTEND=noninteractive
 ENV CARGO_TERM_COLOR=never

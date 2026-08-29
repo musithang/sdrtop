@@ -70,8 +70,16 @@ if [ -n "$COMMIT" ] && ! git -C "$REPO" diff --quiet HEAD 2>/dev/null; then
     echo "warning: building a release tarball from a dirty tree" >&2
 fi
 
+# The commit's own date, which is the one timestamp about this build that is a
+# property of the source rather than of when someone happened to run this. Every
+# mtime in the archive is forced to it below, so two builds of one commit produce
+# one checksum. 0 when there is no git: still deterministic, and a build with no
+# commit was never going to be reproducible anyway.
+SOURCE_DATE_EPOCH=$(git -C "$REPO" log -1 --format=%ct 2>/dev/null || echo 0)
+
 exec "$CONTAINER" run --rm --platform linux/amd64 $CONTAINER_USER \
     -v "$REPO:/src" -w /src -e NAME="$NAME" -e SDRTOP_COMMIT="$COMMIT" \
+    -e SOURCE_DATE_EPOCH="$SOURCE_DATE_EPOCH" \
     "$IMAGE" sh -eu -c '
     # Out of the way of the host tree, so a container build never leaves the
     # working copy in a state a later host build inherits.
@@ -106,6 +114,24 @@ exec "$CONTAINER" run --rm --platform linux/amd64 $CONTAINER_USER \
     # target/ is build output, so this deletes nothing that cannot be rebuilt.
     rm -rf /src/target/dist
     mkdir -p /src/target/dist
-    tar -C /src/target/tarball -czf "/src/target/dist/$NAME.tar.gz" "$NAME"
+    # Deterministic, so the same commit gives the same checksum and anyone can
+    # rebuild this and compare. `tar -czf` is not: it records each file mtime
+    # (which `cp` set to now) and walks the directory in filesystem order, and
+    # gzip stamps its own header with the current time. Each flag kills one of
+    # those sources of variance:
+    #
+    #   --sort=name     archive order stops depending on the filesystem
+    #   --mtime         every entry gets the commit date, not the copy time
+    #   --owner/--group whoever ran the build stops being recorded
+    #   --format=gnu    explicit, since pax would add extended time headers
+    #   gzip -n         no timestamp, and no original filename, in the header
+    #
+    # Two steps rather than a pipeline: this is dash, which has no pipefail, so
+    # a failing tar in a pipe would be invisible. `set -e` catches both of these.
+    tar --sort=name --format=gnu \
+        --mtime="@$SOURCE_DATE_EPOCH" \
+        --owner=0 --group=0 --numeric-owner \
+        -C /src/target/tarball -cf "/src/target/dist/$NAME.tar" "$NAME"
+    gzip -9n "/src/target/dist/$NAME.tar"
     echo "/src/target/dist/$NAME.tar.gz"
 '
