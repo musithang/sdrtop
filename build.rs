@@ -1,7 +1,8 @@
 /// Where the generated man page lands.
 ///
-/// A fixed path under `target/`, not `OUT_DIR`: `cargo deb` has to name this file
-/// in its asset list, and `OUT_DIR` carries a build hash that nothing can predict.
+/// A fixed path under `target/`, not `OUT_DIR`: `packaging/build-tarball.sh` has
+/// to copy this file into the release tarball, and `OUT_DIR` carries a build
+/// hash that nothing can predict.
 const MAN_DIR: &str = "target/man";
 
 fn main() {

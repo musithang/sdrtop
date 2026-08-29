@@ -4,6 +4,31 @@
 
 ---
 
+## The short way
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/mustang6139/sdrtop/main/packaging/install.sh | sh
+```
+
+The installer covers everything the rest of this page describes: it finds your
+package manager, installs the two libraries under whatever names your
+distribution gives them, installs sdrtop into `/usr/local/bin` (or `~/.local`
+with `--prefix` if you would rather not use root), makes sure the udev rules and
+your `plugdev` membership let you open the radio, and runs the result to prove
+it works.
+
+It uses the prebuilt binary only when that binary can run on your machine, which
+it decides by running `ldd` over it rather than by guessing from your
+distribution's name. When it cannot, on a Raspberry Pi or on Ubuntu, whose
+`librtlsdr` has a different soname to Debian's, it installs Rust if needed and
+builds from source instead. That takes a few minutes and needs no decisions from
+you.
+
+Read it before you pipe it into a shell if you like:
+[`packaging/install.sh`](https://github.com/mustang6139/sdrtop/blob/main/packaging/install.sh).
+
+Everything below is the same job done by hand.
+
 ## What you need
 
 - A Linux machine

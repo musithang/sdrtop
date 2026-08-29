@@ -1,13 +1,15 @@
 name: Release
 
 # Deliberately separate from ci.yaml. That runs on every push and must stay
-# fast; this runs once per tag and builds three architectures in a Debian 12
-# container.
+# fast; this runs once per tag and builds the release tarball in a Debian 12
+# container, for the glibc floor.
 #
-# Three jobs in a chain, because each one can only fail in a way the previous
-# one cannot see: `build` produces the packages, `smoke` installs and runs every
-# one of them on its own architecture, and only then does `release` make them
-# downloadable. A package that does not install never reaches a release page.
+# One artefact and one installer. There is no package matrix and no emulated
+# test matrix, because packaging/install.sh is what adapts to the target: it
+# resolves the library dependencies through whatever package manager the machine
+# has, and it builds from source whenever the prebuilt binary cannot run there.
+# That covers every architecture and every distribution without this pipeline
+# needing to know about any of them.
 on:
   push:
     tags: ["v*"]
@@ -29,120 +31,75 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      # A tag that disagrees with the sources would publish artefacts named
-      # after one version containing another. The .deb and the tarball both take
-      # their name from the crate version, so the mismatch would be silent.
-      - name: The tag, the crate and the changelog must agree
+      # A tag that disagrees with Cargo.toml would publish a tarball named after
+      # one version containing another. The name comes from the crate version,
+      # so the mismatch would be silent.
+      - name: The tag and the crate version must agree
         if: startsWith(github.ref, 'refs/tags/v')
         run: |
           tag="${GITHUB_REF_NAME#v}"
           crate=$(sed -n 's/^version = "\(.*\)"/\1/p' Cargo.toml | head -1)
-          # `cargo deb` takes the package version from Cargo.toml but ships
-          # debian/changelog verbatim, so a stale changelog produces a package
-          # whose own changelog claims a different version. Nothing downstream
-          # would notice: it is documentation, not metadata.
-          chlog=$(sed -n '1s/^sdrtop (\([0-9.]*\)-[0-9]*).*/\1/p' debian/changelog)
-          echo "tag=$tag crate=$crate changelog=$chlog"
+          echo "tag=$tag crate=$crate"
           test "$crate" = "$tag" || {
             echo "::error::tag $GITHUB_REF_NAME does not match Cargo.toml version $crate"
             exit 1
           }
-          test "$chlog" = "$tag" || {
-            echo "::error::tag $GITHUB_REF_NAME does not match debian/changelog version $chlog"
-            exit 1
-          }
+
+      # install.sh is what every user runs, so a syntax error in it is a broken
+      # release even when the tarball is perfect. It is a shell script, so this
+      # is the whole of what can be checked without a machine to install onto.
+      - name: Check the installer parses
+        run: |
+          sh -n packaging/install.sh
+          sh packaging/install.sh --help >/dev/null
 
       # The same recipe that runs locally. `packaging/` is in the repo for this
       # reason: a second copy of the build steps written in YAML would drift.
-      - name: Build the packages
-        run: |
-          for arch in amd64 arm64 armhf; do
-            packaging/build-deb.sh "$arch"
-          done
-          packaging/build-tarball.sh
+      - name: Build the tarball
+        run: packaging/build-tarball.sh
 
-      # An arm64 package holding an x86-64 binary installs happily and then does
-      # nothing. Nothing else in this pipeline would notice.
-      - name: Verify each package
+      # The container could have produced anything. Ask the binary what it is
+      # and what it needs, and fail here rather than on someone's machine.
+      - name: Check what came out
         run: |
-          for deb in target/debian/*.deb; do
-            packaging/verify-deb.sh "$deb"
-          done
+          tar -xzf target/dist/*.tar.gz -C "$RUNNER_TEMP"
+          bin=$(find "$RUNNER_TEMP" -name sdrtop -type f | head -1)
+          file "$bin"
+          readelf -h "$bin" | grep -q 'X86-64' || {
+            echo "::error::the tarball does not contain an x86-64 binary"; exit 1; }
+          echo "needs:"
+          readelf -d "$bin" | sed -n 's/.*Shared library: \[\(.*\)\]/    \1/p'
+          # The floor this whole container exists to keep. If a newer base image
+          # ever raises it, the tarball silently stops working on Debian 12.
+          need=$(objdump -T "$bin" | sed -n 's/.*GLIBC_\([0-9.]*\).*/\1/p' | sort -V | tail -1)
+          echo "highest glibc symbol required: $need"
+          test "$(printf '%s\n2.37\n' "$need" | sort -V | tail -1)" = 2.37 || {
+            echo "::error::binary needs glibc $need, above the Debian 12 floor"; exit 1; }
 
       # Named globs rather than `*`, so the checksum file can never list itself
       # and an empty build directory fails here instead of producing an empty
       # SHA256SUMS that verifies nothing.
       #
-      # These names are the checksums. Renaming an asset after upload silently
-      # breaks `sha256sum -c` for everyone who downloads it, so whatever comes
-      # out of this step is the name the release must carry. `sdrtop_0.4.0-1_amd64.deb`
-      # is the Debian convention: name, upstream version, Debian revision, arch.
+      # These names are the checksums, and install.sh checks a download against
+      # them. Renaming an asset after upload breaks that for everyone.
       - name: Collect the artefacts and their checksums
         run: |
           mkdir -p release
-          cp target/debian/*.deb target/dist/*.tar.gz release/
+          cp target/dist/*.tar.gz release/
+          cp packaging/install.sh release/
           cd release
-          sha256sum -- *.deb *.tar.gz > SHA256SUMS
+          sha256sum -- *.tar.gz install.sh > SHA256SUMS
           cat SHA256SUMS
 
       - uses: actions/upload-artifact@v4
         with:
-          name: packages
+          name: release
           path: release/
           if-no-files-found: error
 
-  # The only claim this pipeline can check without hardware: that the package
-  # installs on the distribution it targets and that the binary starts. It is
-  # also the claim that was wrong at 0.4.0 - the rtl-sdr library changed its
-  # package name between distribution generations and nothing here noticed until
-  # someone ran `dpkg -i` by hand. `--version` returns before any device is
-  # opened, so it needs no radio.
-  smoke:
-    needs: build
-    runs-on: ubuntu-latest
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - arch: amd64
-            platform: linux/amd64
-          - arch: arm64
-            platform: linux/arm64
-          - arch: armhf
-            platform: linux/arm/v7
-    steps:
-      - uses: actions/download-artifact@v4
-        with:
-          name: packages
-          path: release
-
-      # amd64 runs natively; the other two are emulated. Slow, but it is one
-      # process start each.
-      - uses: docker/setup-qemu-action@v3
-        if: matrix.arch != 'amd64'
-
-      - name: Install it and run it on ${{ matrix.arch }}
-        run: |
-          docker run --rm --platform ${{ matrix.platform }} \
-            -v "$PWD/release:/pkg:ro" debian:12 sh -eu -c '
-              apt-get update -qq
-              # `apt-get install` on a path resolves the dependencies the
-              # package declares. `dpkg -i` would not, and would pass here while
-              # failing on a user machine.
-              apt-get install -y -qq /pkg/sdrtop_*_${{ matrix.arch }}.deb
-              sdrtop --version
-              # The udev rules come from the library packages, not from ours,
-              # which is the whole reason `depends = "$auto"` is enough. Asked
-              # by property rather than by filename, because the filename
-              # carries the soname (60-libhackrf0.rules, 60-librtlsdr2.rules)
-              # and that is exactly what changes between generations.
-              grep -rq plugdev /usr/lib/udev/rules.d/
-            '
-
   release:
-    needs: [build, smoke]
-    # Only a tag drafts a release. A manual run builds, verifies, smoke-tests
-    # and stops there.
+    needs: build
+    # Only a tag drafts a release. A manual run builds, checks and stops there.
     if: startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-latest
     permissions:
@@ -150,7 +107,7 @@ jobs:
     steps:
       - uses: actions/download-artifact@v4
         with:
-          name: packages
+          name: release
           path: release
 
       # A draft is never public until a human presses Publish, so the title and
@@ -160,7 +117,8 @@ jobs:
       # Idempotent, because the alternative is a rerun failing at the last step
       # after the whole build. The one thing it will not do is overwrite the
       # assets of a release that is already published: that is a live download
-      # someone may already have a checksum for.
+      # someone may already have a checksum for. Delete the release first if
+      # that is genuinely what you want.
       - name: Draft the release
         env:
           GH_TOKEN: ${{ github.token }}

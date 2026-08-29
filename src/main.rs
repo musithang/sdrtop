@@ -292,20 +292,20 @@ mod cli_tests {
         out
     }
 
-    /// The packaging metadata is what `cargo deb` builds the package from, and it
-    /// refuses to run without a description. Asserted here so the package cannot
-    /// be broken by an edit to `Cargo.toml` that nothing else notices.
+    /// The crate metadata is what the generated man page and `--help` are built
+    /// from, and what a release page quotes. Asserted here so it cannot be
+    /// broken by an edit to `Cargo.toml` that nothing else notices.
     #[test]
-    fn the_package_metadata_a_deb_needs_is_present() {
+    fn the_package_metadata_the_man_page_needs_is_present() {
         assert!(
             !env!("CARGO_PKG_DESCRIPTION").is_empty(),
-            "cargo-deb refuses to build a package with no description"
+            "the man page's NAME section is the package description"
         );
         assert!(!env!("CARGO_PKG_REPOSITORY").is_empty());
         assert_eq!(env!("CARGO_PKG_LICENSE"), "GPL-3.0-or-later");
         // The command's own `about` and the package description are two different
-        // strings on purpose: one is a one-line usage banner, the other is what
-        // `apt show` prints. Both must exist.
+        // strings on purpose: one is a one-line usage banner, the other is the
+        // longer sentence the man page and the README open with. Both must exist.
         assert!(Cli::command().get_about().is_some());
     }
 }

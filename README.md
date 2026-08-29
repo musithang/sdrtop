@@ -10,7 +10,7 @@
 [![PortaPack](https://img.shields.io/badge/hardware-PortaPack%20H4M-blueviolet)](https://github.com/portapack-mayhem/mayhem-firmware)
 
 <p align="center">
-  <a href="#quick-start">Quick start</a> ·
+  <a href="#-install">Install</a> ·
   <a href="#keys">Keys</a> ·
   <a href="#config">Config</a> ·
   <a href="#supported-hardware">Hardware</a>
@@ -143,38 +143,48 @@ The view sdrtop opens on. A slim header plus a left **instrument rail** that pac
 
 ---
 
-## Quick start
+## 📦 Install
+
+One line. Any Linux distribution.
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/mustang6139/sdrtop/main/packaging/install.sh | sh
+```
+
+That is the whole thing. The installer works out which distribution you are on, installs `libhackrf` and `librtlsdr` with whatever package manager it finds (apt, dnf, pacman, zypper, apk, xbps, emerge, nix), puts sdrtop in `/usr/local/bin`, adds you to `plugdev` so the radio is openable, and checks the result runs.
+
+It takes the prebuilt binary when that binary can actually run on your machine, and **builds from source when it cannot**, which is how one installer covers every architecture, a Raspberry Pi included. It asks `ldd` rather than guessing from the distribution's name.
+
+<details>
+<summary>Options, and installing without root</summary>
+
+```sh
+sh install.sh --prefix ~/.local     # no root anywhere
+sh install.sh --from-source         # skip the prebuilt binary
+sh install.sh --version v0.4.0      # a specific release
+sh install.sh --deps-only           # just the libraries
+sh install.sh --uninstall
+```
+
+Piping to `sh` runs a script you have not read. If you would rather read it first, and you should: [`packaging/install.sh`](packaging/install.sh).
+
+</details>
+
+### Or build it yourself
 
 **Requirements:** Linux · HackRF One *or* RTL-SDR · `libhackrf` + `librtlsdr` + `pkg-config` · Rust stable 1.88 or newer
 
 Both libraries are needed at build time even if you only own one radio; at runtime sdrtop is happy with whichever you plug in.
 
-### Arch
-
 ```sh
-sudo pacman -S hackrf rtl-sdr pkgconf rust
-```
+sudo pacman -S hackrf rtl-sdr pkgconf rust     # Arch
+sudo apt install libhackrf-dev librtlsdr-dev pkg-config   # Debian / Ubuntu
 
-### Debian / Ubuntu
-
-```sh
-sudo apt install libhackrf-dev librtlsdr-dev pkg-config
-```
-
-Other distributions are covered in [Getting started](user_docs/getting-started.md). You also need Rust; if you don't have it yet:
-
-```sh
-curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
-```
-
-Distro Rust packages are often too old to read this repo's lockfile. If the build stops with something about `lock file version 4`, that's the one; rustup fixes it.
-
-### Then build
-
-```sh
 cargo build --release
 ./target/release/sdrtop
 ```
+
+Other distributions are covered in [Getting started](user_docs/getting-started.md). Distro Rust packages are often too old to read this repo's lockfile; if the build stops with something about `lock file version 4`, that is the one, and rustup fixes it.
 
 Press `Space` to start receiving. Press `?` for the key reference. Press `q` to quit and save.
 
