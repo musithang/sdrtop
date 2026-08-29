@@ -16,6 +16,12 @@ checkpoint instead of by version.
 
 ## [Unreleased]
 
+## [0.4.1] - 2026-08-29
+
+The first release published to [crates.io](https://crates.io/crates/sdrtop), so
+`cargo install sdrtop --locked` works from here on. Packaging only: the program
+behaves exactly as 0.4.0 did, and no radio-facing code was touched.
+
 ### Changed
 
 - The crate is publishable. `user_docs/pics`, `packaging/`, `.github/` and
@@ -221,7 +227,8 @@ sdrtop stopped being a one-radio program.
   image rejection ratio, wavelength and antenna metrics.
 - Config file with atomic save on quit, and the CLI flags that override it.
 
-[Unreleased]: https://github.com/mustang6139/sdrtop/compare/v0.4.0...HEAD
+[Unreleased]: https://github.com/mustang6139/sdrtop/compare/v0.4.1...HEAD
+[0.4.1]: https://github.com/mustang6139/sdrtop/compare/v0.4.0...v0.4.1
 [0.4.0]: https://github.com/mustang6139/sdrtop/compare/v0.3.5...v0.4.0
 [0.3.5]: https://github.com/mustang6139/sdrtop/compare/v0.3.0...v0.3.5
 [0.3.0]: https://github.com/mustang6139/sdrtop/compare/v0.2.0...v0.3.0
