@@ -8,6 +8,17 @@ const MAN_DIR: &str = "target/man";
 fn main() {
     generate_man_page();
 
+    // docs.rs builds every published crate and cannot install system packages,
+    // so the probe below would panic there and leave a red build badge on the
+    // crates.io page of a binary-only crate whose docs nobody reads. docs.rs
+    // announces itself with DOCS_RS=1. Skipping the link directives costs
+    // nothing there: `cargo doc` documents the crate, it never links the
+    // binary.
+    println!("cargo:rerun-if-env-changed=DOCS_RS");
+    if std::env::var_os("DOCS_RS").is_some() {
+        return;
+    }
+
     // Requires libhackrf >= 2023.01.1 (hackrf_board_rev_read,
     // hackrf_usb_api_version_read). Many .pc files omit the version field so
     // atleast_version() fails even on a correct install; just probe and let

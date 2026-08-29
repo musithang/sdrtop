@@ -45,8 +45,8 @@ It's a hobby project built in my spare time, and honestly, I made it for *you* â
 ## Gallery
 
 <p align="center">
-  <a href="user_docs/pics/hackrf/video.mp4">
-    <img src="user_docs/pics/hackrf/command_rail.png" width="100%" alt="sdrtop in motion: click to watch the demo video">
+  <a href="https://github.com/mustang6139/sdrtop/blob/main/user_docs/pics/hackrf/video.mp4">
+    <img src="https://raw.githubusercontent.com/mustang6139/sdrtop/main/user_docs/pics/hackrf/command_rail.png" width="100%" alt="sdrtop in motion: click to watch the demo video">
   </a>
   <br>
   <sub>â–¶ click the screenshot to play the demo video</sub>
@@ -54,22 +54,22 @@ It's a hobby project built in my spare time, and honestly, I made it for *you* â
 
 *It's a terminal app, so brace yourself for the visual spectacle of monospace text in color. The only special effects are honest dBFS numbers.*
 
-Screenshots, split by device. More to come. Got a clean capture on your hardware? Drop it in [`user_docs/pics/`](user_docs/pics/) and send a PR (RTL-SDR shots from different tuners especially welcome).
+Screenshots, split by device. More to come. Got a clean capture on your hardware? Drop it in [`user_docs/pics/`](https://github.com/mustang6139/sdrtop/tree/main/user_docs/pics) and send a PR (RTL-SDR shots from different tuners especially welcome).
 
 <details open>
   <summary><b>ðŸ“» HackRF One</b>: spectrum, waterfall &amp; lab presets</summary>
   <br>
   <table>
     <tr>
-      <td width="50%"><img src="user_docs/pics/hackrf/command_rail.png" alt="HackRF: Command Rail cockpit"></td>
-      <td width="50%"><img src="user_docs/pics/hackrf/spectrum.png" alt="HackRF: spectrum & waterfall"></td>
+      <td width="50%"><img src="https://raw.githubusercontent.com/mustang6139/sdrtop/main/user_docs/pics/hackrf/command_rail.png" alt="HackRF: Command Rail cockpit"></td>
+      <td width="50%"><img src="https://raw.githubusercontent.com/mustang6139/sdrtop/main/user_docs/pics/hackrf/spectrum.png" alt="HackRF: spectrum & waterfall"></td>
     </tr>
     <tr>
-      <td width="50%"><img src="user_docs/pics/hackrf/lab_iq.png" alt="HackRF: IQ diagnostics lab"></td>
-      <td width="50%"><img src="user_docs/pics/hackrf/lab_rf.png" alt="HackRF: RF chain lab"></td>
+      <td width="50%"><img src="https://raw.githubusercontent.com/mustang6139/sdrtop/main/user_docs/pics/hackrf/lab_iq.png" alt="HackRF: IQ diagnostics lab"></td>
+      <td width="50%"><img src="https://raw.githubusercontent.com/mustang6139/sdrtop/main/user_docs/pics/hackrf/lab_rf.png" alt="HackRF: RF chain lab"></td>
     </tr>
     <tr>
-      <td width="100%" colspan="2"><img src="user_docs/pics/hackrf/lab_timing.png" alt="HackRF: timing lab"></td>
+      <td width="100%" colspan="2"><img src="https://raw.githubusercontent.com/mustang6139/sdrtop/main/user_docs/pics/hackrf/lab_timing.png" alt="HackRF: timing lab"></td>
     </tr>
   </table>
 </details>
@@ -79,8 +79,8 @@ Screenshots, split by device. More to come. Got a clean capture on your hardware
   <br>
   <table>
     <tr>
-      <td width="50%"><img src="user_docs/pics/rtlsdr/rtl-sdr1.png" alt="RTL-SDR: spectrum & waterfall"></td>
-      <td width="50%"><img src="user_docs/pics/rtlsdr/rtl-sdr2.png" alt="RTL-SDR: observer mode"></td>
+      <td width="50%"><img src="https://raw.githubusercontent.com/mustang6139/sdrtop/main/user_docs/pics/rtlsdr/rtl-sdr1.png" alt="RTL-SDR: spectrum & waterfall"></td>
+      <td width="50%"><img src="https://raw.githubusercontent.com/mustang6139/sdrtop/main/user_docs/pics/rtlsdr/rtl-sdr2.png" alt="RTL-SDR: observer mode"></td>
     </tr>
   </table>
 </details>
@@ -99,8 +99,8 @@ The view sdrtop opens on. A slim header plus a left **instrument rail** that pac
   <br>
   <table>
     <tr>
-      <td width="50%"><img src="user_docs/pics/annotate-2026-06-22_22-42-55.png" alt="HackRF: bench"></td>
-      <td width="50%"><img src="user_docs/pics/annotate-2026-06-22_22-43-06.png" alt="HackRF: hunt"></td>
+      <td width="50%"><img src="https://raw.githubusercontent.com/mustang6139/sdrtop/main/user_docs/pics/annotate-2026-06-22_22-42-55.png" alt="HackRF: bench"></td>
+      <td width="50%"><img src="https://raw.githubusercontent.com/mustang6139/sdrtop/main/user_docs/pics/annotate-2026-06-22_22-43-06.png" alt="HackRF: hunt"></td>
     </tr>
   </table>
 </details>

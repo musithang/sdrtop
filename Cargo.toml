@@ -16,6 +16,23 @@ categories = ["command-line-utilities", "hardware-support", "science"]
 rust-version = "1.88"
 authors = ["MusiThang <viktor.laszlo92@protonmail.com>"]
 
+# What `cargo publish` must not carry. crates.io caps a crate at 10 MB and
+# `user_docs/pics` alone is 18 MB of it, 15.8 of which is a single demo
+# `video.mp4`: without this the publish is rejected outright, not merely
+# wasteful. The rest is build and release plumbing that a source package has no
+# use for. `user_docs/*.md` deliberately stays, being small and worth having
+# offline beside the binary.
+#
+# Consequence, and the reason README.md addresses its screenshots by absolute
+# URL rather than a relative path: the images are not in the package, so a
+# relative `src` would render broken on the crates.io page.
+exclude = [
+    "user_docs/pics",
+    "packaging",
+    ".github",
+    "dev_docs",
+]
+
 [[bin]]
 name = "sdrtop"
 path = "src/main.rs"
