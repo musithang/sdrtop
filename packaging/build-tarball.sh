@@ -34,6 +34,13 @@ exec "$CONTAINER" run --rm --platform linux/amd64 $CONTAINER_USER \
     export CARGO_TARGET_DIR=/src/target/container
     cargo build --release --target x86_64-unknown-linux-gnu
 
+    # Reading the ELF headers proves what the binary asks for; this proves it
+    # starts. It has to happen in here, because Debian 12 is the only place it
+    # is expected to run: on the CI runner, which is Ubuntu, it would fail for
+    # the librtlsdr soname reason that install.sh exists to handle.
+    # `--version` returns before any device is opened, so it needs no radio.
+    target/container/x86_64-unknown-linux-gnu/release/sdrtop --version
+
     OUT=/src/target/tarball/$NAME
     rm -rf "$OUT"; mkdir -p "$OUT"
     cp target/container/x86_64-unknown-linux-gnu/release/sdrtop "$OUT/"

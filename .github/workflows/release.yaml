@@ -58,8 +58,11 @@ jobs:
       - name: Build the tarball
         run: packaging/build-tarball.sh
 
-      # The container could have produced anything. Ask the binary what it is
-      # and what it needs, and fail here rather than on someone's machine.
+      # build-tarball.sh has already proved the binary *starts*, inside the
+      # Debian 12 container, which is the only place it can be run: this runner
+      # is Ubuntu and has librtlsdr.so.2 where the binary wants .so.0, the exact
+      # mismatch install.sh exists to handle. What is left to check here is what
+      # the binary *is* and what it asks of a machine, which the headers answer.
       - name: Check what came out
         run: |
           out="$RUNNER_TEMP/unpacked"
@@ -84,16 +87,6 @@ jobs:
           # works while it actually carries the installer.
           cmp -s "$out"/*/install.sh packaging/install.sh || {
             echo "::error::the tarball's install.sh is missing or out of date"; exit 1; }
-
-      # Reading the headers proves what the binary asks for; this proves it
-      # starts. It cannot run on the runner itself, which is Ubuntu and has
-      # librtlsdr.so.2 where this binary wants .so.0 - the exact mismatch
-      # install.sh exists to handle - so it runs in the image that built it.
-      # `--version` returns before any device is opened, so it needs no radio.
-      - name: Run it where it is meant to run
-        run: |
-          docker run --rm -v "$PWD:/src" -w /src sdrtop-build \
-            ./target/container/x86_64-unknown-linux-gnu/release/sdrtop --version
 
       # Named globs rather than `*`, so the checksum file can never list itself
       # and an empty build directory fails here instead of producing an empty
