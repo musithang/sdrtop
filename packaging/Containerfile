@@ -2,10 +2,16 @@
 #
 #   podman build --build-arg DEB_ARCH=arm64 -t sdrtop-deb-arm64 -f packaging/Containerfile .
 #
-# Debian 12 (bookworm) because glibc is forward-compatible only: a package built
-# here installs on Debian 12/13, Ubuntu 24.04+, Mint 22 and Raspberry Pi OS
-# Bookworm. Built on Ubuntu 24.04 it would exclude the first and the last, for
-# nothing. See dev_docs/release-packaging-plan.md.
+# Debian 12 (bookworm) because glibc is forward-compatible only: built on Ubuntu
+# 24.04 the package would demand glibc 2.39 and exclude Debian 12 and Raspberry
+# Pi OS Bookworm for nothing.
+#
+# glibc is not the only floor, and the other one is not forward-compatible at
+# all. `depends = "$auto"` resolves the rtl-sdr library to whatever this image
+# calls it, which here is `librtlsdr0`; Ubuntu 24.04, Mint 22 and Debian 13 ship
+# `librtlsdr2` and cannot satisfy that. So the real reach of this image is the
+# Debian 12 generation, and covering the newer one means a second image, not a
+# different base. See dev_docs/release-packaging-plan.md.
 #
 # One image *per architecture*, not one image for all three, because bookworm's
 # `libhackrf-dev` carries no `Multi-Arch` field and therefore cannot be installed

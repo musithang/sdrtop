@@ -5,6 +5,16 @@ on:
     branches: [main]
   pull_request:
 
+# Nothing here writes to the repository.
+permissions:
+  contents: read
+
+# A second push to the same branch or pull request makes the first one's answer
+# irrelevant before it arrives.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   test:
     runs-on: ubuntu-latest
