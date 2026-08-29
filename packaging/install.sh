@@ -284,10 +284,12 @@ if [ -z "$BINARY" ] && [ "$FROM_SOURCE" -eq 0 ]; then
     else
         step "Downloading the prebuilt binary"
         BASE="https://github.com/$REPO/releases/download/$TAG"
-        # The asset name is the full Rust target triple from 0.4.2 onwards. The
-        # short form is what 0.4.0 and 0.4.1 shipped, and `--version v0.4.0` has
-        # to keep working, so both are tried. Drop the legacy name once no
-        # supported release uses it.
+        # The asset name is the full Rust target triple from 0.4.2 onwards.
+        # v0.4.1, the only release older than that with a tarball attached,
+        # carries the short form `sdrtop-0.4.1-x86_64-linux.tar.gz`, and
+        # `--version v0.4.1` has to keep working. So both are tried, newest
+        # spelling first. Drop the legacy candidate once no supported release
+        # uses it, which is the moment 0.4.1 stops being worth installing.
         NAME=""
         for candidate in \
             "sdrtop-$VERSION-x86_64-unknown-linux-gnu" \
