@@ -16,18 +16,40 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  test:
+  # The shell scripts need no Rust and no C libraries, so they get their own job
+  # and answer in seconds instead of waiting behind a compile.
+  scripts:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
 
       # packaging/install.sh is the one-liner in the README, so a syntax error
       # in it breaks installation for everyone while every Rust check stays
-      # green. Cheap enough to run on every push rather than only at release.
-      - name: Check the shell scripts parse
+      # green.
+      - name: The shell scripts parse
         run: |
           for s in packaging/*.sh; do sh -n "$s"; done
           sh packaging/install.sh --help >/dev/null
+
+      # `sh -n` proves only that a script parses. shellcheck is what finds the
+      # unquoted expansion that breaks on a path with a space, which matters
+      # because install.sh runs on machines nobody here has seen.
+      #
+      # --severity=warning, not the default: the info-level findings on these
+      # two scripts are all deliberate. `$CONTAINER_USER` in build-tarball.sh
+      # must word-split (it is either `--user 1000:1000` or empty), the
+      # container's `sh -c '...'` body must not expand on the host, and
+      # `. "$HOME/.cargo/env"` cannot be followed at lint time. Annotate those
+      # in place with `# shellcheck disable=` when R5, R6 and R8 rewrite the
+      # scripts, then this can drop to the default severity.
+      # shellcheck is preinstalled on the GitHub Ubuntu runner images.
+      - name: The shell scripts lint
+        run: shellcheck --severity=warning packaging/*.sh
+
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
 
       - name: Install system dependencies
         # librtlsdr-dev matters as much as libhackrf-dev: build.rs falls back to a
@@ -48,5 +70,51 @@ jobs:
       - name: Clippy
         run: cargo clippy --all-targets -- -D warnings
 
+      # --locked, so CI tests the dependency versions a user actually gets from
+      # `cargo install sdrtop --locked` rather than whatever resolved this
+      # morning.
       - name: Test
-        run: cargo test --all
+        run: cargo test --all --locked
+
+      # sdrtop is published to crates.io, and a publish cannot be undone: a
+      # version that fails to package can only be fixed by burning the version
+      # number. So the packaging is checked on every push, not at tag time.
+      #
+      # This runs the full verification build rather than --no-verify, and that
+      # is the point. `exclude` in Cargo.toml means the repository can build
+      # while the *package* does not, if something the build needs is excluded.
+      # Only a build from the packaged tree can catch that.
+      #
+      # It lives here rather than in a job of its own to reuse this one's
+      # toolchain, C libraries and warm registry cache.
+      - name: The crate still packages
+        run: cargo package --locked
+
+  # rust-version = "1.88" in Cargo.toml is a promise to everyone installing from
+  # crates.io, where the user's own toolchain does the compiling. Without this
+  # job it is a comment: a transitive dependency raising its own MSRV would
+  # break those users while every check above stayed green.
+  #
+  # 1.88 is not arbitrary. `slice::as_chunks` (hot path in hardware/process.rs
+  # and signal/demod) stabilised there, and `u32::is_multiple_of` in 1.87.
+  msrv:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install system dependencies
+        run: sudo apt-get update && sudo apt-get install -y libhackrf-dev librtlsdr-dev pkg-config libusb-1.0-0-dev
+
+      - name: Install Rust 1.88
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: "1.88"
+
+      - uses: Swatinem/rust-cache@v2
+
+      # `check`, not `test`: this job answers "does the promised toolchain still
+      # compile this", and the stable job above already proves the tests pass.
+      # --all-targets so the test and build-script code is checked too, since
+      # that is where a dependency's MSRV bump usually lands first.
+      - name: Check on the declared MSRV
+        run: cargo check --locked --all-targets
