@@ -21,6 +21,14 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # packaging/install.sh is the one-liner in the README, so a syntax error
+      # in it breaks installation for everyone while every Rust check stays
+      # green. Cheap enough to run on every push rather than only at release.
+      - name: Check the shell scripts parse
+        run: |
+          for s in packaging/*.sh; do sh -n "$s"; done
+          sh packaging/install.sh --help >/dev/null
+
       - name: Install system dependencies
         # librtlsdr-dev matters as much as libhackrf-dev: build.rs falls back to a
         # bare `-lrtlsdr` link directive when it finds no .pc file, so a missing

@@ -62,19 +62,38 @@ jobs:
       # and what it needs, and fail here rather than on someone's machine.
       - name: Check what came out
         run: |
-          tar -xzf target/dist/*.tar.gz -C "$RUNNER_TEMP"
-          bin=$(find "$RUNNER_TEMP" -name sdrtop -type f | head -1)
+          out="$RUNNER_TEMP/unpacked"
+          mkdir -p "$out"
+          tar -xzf target/dist/*.tar.gz -C "$out"
+          bin=$(find "$out" -name sdrtop -type f | head -1)
+          [ -n "$bin" ] || { echo "::error::no sdrtop binary in the tarball"; exit 1; }
           file "$bin"
           readelf -h "$bin" | grep -q 'X86-64' || {
             echo "::error::the tarball does not contain an x86-64 binary"; exit 1; }
           echo "needs:"
           readelf -d "$bin" | sed -n 's/.*Shared library: \[\(.*\)\]/    \1/p'
+
           # The floor this whole container exists to keep. If a newer base image
           # ever raises it, the tarball silently stops working on Debian 12.
           need=$(objdump -T "$bin" | sed -n 's/.*GLIBC_\([0-9.]*\).*/\1/p' | sort -V | tail -1)
           echo "highest glibc symbol required: $need"
           test "$(printf '%s\n2.37\n' "$need" | sort -V | tail -1)" = 2.37 || {
             echo "::error::binary needs glibc $need, above the Debian 12 floor"; exit 1; }
+
+          # An unpacked tarball can install itself with no network, which only
+          # works while it actually carries the installer.
+          cmp -s "$out"/*/install.sh packaging/install.sh || {
+            echo "::error::the tarball's install.sh is missing or out of date"; exit 1; }
+
+      # Reading the headers proves what the binary asks for; this proves it
+      # starts. It cannot run on the runner itself, which is Ubuntu and has
+      # librtlsdr.so.2 where this binary wants .so.0 - the exact mismatch
+      # install.sh exists to handle - so it runs in the image that built it.
+      # `--version` returns before any device is opened, so it needs no radio.
+      - name: Run it where it is meant to run
+        run: |
+          docker run --rm -v "$PWD:/src" -w /src sdrtop-build \
+            ./target/container/x86_64-unknown-linux-gnu/release/sdrtop --version
 
       # Named globs rather than `*`, so the checksum file can never list itself
       # and an empty build directory fails here instead of producing an empty
@@ -110,7 +129,7 @@ jobs:
           name: release
           path: release
 
-      # A draft is never public until a human presses Publish, so the title and
+      # A draft is never public until a ME presses Publish, so the title and
       # the notes get written in the release editor, where they can be read
       # before anyone can download them.
       #

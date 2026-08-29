@@ -8,15 +8,14 @@
 #
 # One prebuilt tarball is published, for x86_64 glibc. Everything else this
 # script handles by building from source, and it decides which it is by asking
-# rather than by guessing: it unpacks the binary, runs `ldd` over it, and falls
-# back to a source build the moment a library is missing.
+# rather than by guessing: it unpacks the binary and tries to run it, and falls
+# back to a source build if that fails for any reason at all.
 #
-# That fallback is the whole design. sdrtop links `librtlsdr`, whose soname
-# changed between distribution generations (`librtlsdr.so.0` on the Debian 12
-# generation, `.so.2` on Ubuntu 24.04, Mint 22, Debian 13), so no single
-# prebuilt binary can cover both. A build from source links whatever the machine
-# actually has, which is why it is the answer for every case the tarball cannot
-# serve instead of an error message.
+# That fallback is the whole design. sdrtop links `librtlsdr`, and Debian ships
+# it as `librtlsdr.so.0` while Ubuntu ships the same upstream as `.so.2`, so no
+# single prebuilt binary can serve both. Running the binary catches that, and
+# also catches musl, a missing loader and every future soname bump, none of
+# which a list of distribution names would have covered.
 set -eu
 
 REPO=mustang6139/sdrtop
@@ -191,7 +190,11 @@ install_runtime_deps() {
     fi
     step "Installing libhackrf and librtlsdr with $PM"
     say "(this can take a moment, and is the only step that needs root)"
-    [ "$PM" = apt-get ] && as_root apt-get update -qq
+    # Not fatal. A stale or unreachable mirror must not end the installation
+    # before the libraries have even been tried, and they may be cached already.
+    if [ "$PM" = apt-get ]; then
+        as_root apt-get update -qq || warn "apt-get update failed, trying anyway"
+    fi
     install_first "$LIB_HACKRF" || warn "could not install libhackrf automatically"
     install_first "$LIB_RTLSDR" || warn "could not install librtlsdr automatically"
     # Where the rules are their own package, take them: otherwise the radio
@@ -202,7 +205,34 @@ install_runtime_deps() {
 install_runtime_deps
 [ "$RAW_DEPS_ONLY" -eq 1 ] && exit 0
 
+BINARY=""
+SRC_DIR=""
+
+# ── An unpacked tarball installs itself, with no network at all ─────────────
+# install.sh travels inside the release tarball, so a copy of it sitting beside
+# an `sdrtop` binary and the `user_docs` directory the tarball carries is an
+# unpacked release rather than a coincidence. Tested that precisely: `$0` says
+# nothing useful when this script arrives through a pipe, so a looser check
+# could pick up an unrelated file named `sdrtop` in whatever directory the
+# `curl | sh` happened to run in.
+case "$0" in
+    */install.sh|install.sh)
+        d=$(cd "$(dirname "$0")" 2>/dev/null && pwd) || d=""
+        if [ -n "$d" ] && [ -x "$d/sdrtop" ] && [ -d "$d/user_docs" ] \
+           && [ "$FROM_SOURCE" -eq 0 ]; then
+            step "Installing from the unpacked tarball beside this script"
+            if "$d/sdrtop" --version >/dev/null 2>&1; then
+                BINARY="$d/sdrtop"
+                SRC_DIR="$d"
+            else
+                say "that binary does not run here; fetching a release instead"
+            fi
+        fi
+        ;;
+esac
+
 # ── Which release ───────────────────────────────────────────────────────────
+if [ -z "$BINARY" ]; then
 fetch() { curl -fsSL "$1" -o "$2"; }
 command -v curl >/dev/null 2>&1 || die "curl is required"
 command -v tar  >/dev/null 2>&1 || die "tar is required"
@@ -222,7 +252,6 @@ trap 'rm -rf "$WORK"' EXIT INT TERM
 
 # ── The prebuilt binary, if it can possibly work here ───────────────────────
 ARCH=$(uname -m)
-BINARY=""
 
 if [ "$FROM_SOURCE" -eq 0 ] && [ "$ARCH" = x86_64 ]; then
     step "Downloading the prebuilt binary"
@@ -241,19 +270,27 @@ if [ "$FROM_SOURCE" -eq 0 ] && [ "$ARCH" = x86_64 ]; then
         tar -xzf "$WORK/$NAME.tar.gz" -C "$WORK"
 
         # The honest test, and the reason this script needs no distribution
-        # list: the binary is asked whether its libraries exist on THIS machine.
-        if ldd "$WORK/$NAME/sdrtop" 2>/dev/null | grep -q 'not found'; then
-            say "the prebuilt binary needs libraries this system does not have:"
-            ldd "$WORK/$NAME/sdrtop" 2>/dev/null | grep 'not found' | sed 's/^/    /'
-            say "building from source instead, which links what you do have"
-        else
+        # list: run the thing. `--version` returns before any device is opened,
+        # so it needs no radio, and it fails for every reason that matters here.
+        #
+        # Running it beats reading `ldd` output. On musl `ldd` is the musl
+        # loader, which cannot load a glibc binary at all and says so without
+        # ever printing "not found", so a grep for that phrase would conclude
+        # the binary was fine and install something that cannot start.
+        if "$WORK/$NAME/sdrtop" --version >/dev/null 2>&1; then
             BINARY="$WORK/$NAME/sdrtop"
             SRC_DIR="$WORK/$NAME"
+        else
+            say "the prebuilt binary does not run on this system:"
+            ldd "$WORK/$NAME/sdrtop" 2>&1 | grep -E 'not found|Error|error' \
+                | sed 's/^/    /' || say "    (it failed to start)"
+            say "building from source instead, which links what you do have"
         fi
     else
         warn "no prebuilt tarball for $TAG; building from source"
     fi
 fi
+fi # end of the download path, skipped entirely for a local tarball
 
 # ── Or build it ─────────────────────────────────────────────────────────────
 if [ -z "$BINARY" ]; then
