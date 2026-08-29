@@ -415,8 +415,14 @@ if [ -z "$BINARY" ]; then
         src_label="$CRATE ${TAG#v} from crates.io"
     fi
     say "building $src_label"
+    # PATH is prefixed with the throwaway root only for this command, to silence
+    # cargo's "be sure to add ... to your PATH" advice. That advice names the
+    # temporary directory, which stops existing seconds later, and this script
+    # prints the correct PATH line about $BIN_DIR at the end anyway. Two pieces
+    # of contradictory advice is worse than one.
     # shellcheck disable=SC2086 # deliberate: $src_args is an argument list
-    cargo install "$CRATE" --locked --root "$WORK/cargo" $src_args \
+    PATH="$WORK/cargo/bin:$PATH" \
+        cargo install "$CRATE" --locked --root "$WORK/cargo" $src_args \
         || die "the build failed; see the output above"
 
     BINARY="$WORK/cargo/bin/sdrtop"
