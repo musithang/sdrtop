@@ -188,9 +188,19 @@ jobs:
       # a short-lived registry token, so no long-lived CRATES_IO_TOKEN has to
       # sit in this repository's secrets waiting to leak or expire.
       #
-      # This has to be configured once on the crate's crates.io settings page,
-      # naming this repository and this workflow file. Until then, this job
-      # fails at the token exchange.
+      # Configured once, on 2026-08-29, at crates.io/crates/sdrtop under
+      # Settings, naming repository `mustang6139/sdrtop` and workflow
+      # `release.yaml`. Two things there have to keep matching this file or the
+      # token exchange is refused with an error that names neither:
+      #
+      #   - the workflow filename is `release.yaml`, with an `a`. Nearly every
+      #     example in the wild says `release.yml`.
+      #   - the Environment field is empty, so this job must have no
+      #     `environment:` key. Adding one here means adding the same name
+      #     there, and the reverse.
+      #
+      # Renaming this file therefore breaks publishing until the crates.io side
+      # is edited to match.
       id-token: write
     steps:
       - uses: actions/checkout@v4
