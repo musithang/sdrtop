@@ -295,8 +295,21 @@ fi # end of the download path, skipped entirely for a local tarball
 # ── Or build it ─────────────────────────────────────────────────────────────
 if [ -z "$BINARY" ]; then
     step "Building from source"
-    if [ -n "$PM" ]; then
-        say "installing the build dependencies"
+    # Only if they are not already there. Someone who has built sdrtop before,
+    # or who has any SDR development environment, should not be asked for a root
+    # password to install packages they have. pkg-config is asked first, but
+    # librtlsdr ships no .pc file on some distributions, so the header is the
+    # fallback question.
+    have_dev() {
+        { pkg-config --exists libhackrf 2>/dev/null \
+            || [ -e /usr/include/libhackrf/hackrf.h ] || [ -e /usr/include/hackrf.h ]; } \
+        && { pkg-config --exists librtlsdr 2>/dev/null \
+            || [ -e /usr/include/rtl-sdr.h ]; }
+    }
+    if have_dev; then
+        say "the build dependencies are already installed"
+    elif [ -n "$PM" ]; then
+        say "installing the build dependencies (this will ask for your password)"
         for p in $DEV_PKGS; do pm_install "$p" >/dev/null 2>&1 || true; done
     fi
 
@@ -322,11 +335,19 @@ if [ -z "$BINARY" ]; then
     fi
 
     say "fetching the sources for $TAG"
+    # Into a directory of its own. The failed prebuilt tarball is still unpacked
+    # in $WORK as `sdrtop-<version>-x86_64-linux`, and a search for `sdrtop-*`
+    # across $WORK finds that first and tries to build a directory that has no
+    # Cargo.toml in it.
+    mkdir -p "$WORK/src"
     fetch "https://github.com/$REPO/archive/refs/tags/$TAG.tar.gz" "$WORK/src.tar.gz" \
         || die "could not download the sources for $TAG"
-    tar -xzf "$WORK/src.tar.gz" -C "$WORK"
-    SRC_DIR=$(find "$WORK" -maxdepth 1 -type d -name 'sdrtop-*' | head -1)
-    [ -n "$SRC_DIR" ] || die "unexpected source archive layout"
+    tar -xzf "$WORK/src.tar.gz" -C "$WORK/src"
+    # Identified by what a build actually needs rather than by its name, so the
+    # archive's top-level directory can be called anything.
+    SRC_DIR=$(find "$WORK/src" -maxdepth 2 -name Cargo.toml -type f | head -1)
+    SRC_DIR=${SRC_DIR%/Cargo.toml}
+    [ -n "$SRC_DIR" ] && [ -d "$SRC_DIR" ] || die "no Cargo.toml in the source archive for $TAG"
 
     say "compiling (this takes a few minutes)"
     ( cd "$SRC_DIR" && cargo build --release ) || die "the build failed; see the output above"

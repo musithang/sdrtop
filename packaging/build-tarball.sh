@@ -13,7 +13,32 @@
 set -eu
 
 REPO="$(cd "$(dirname "$0")/.." && pwd)"
-. "$REPO/packaging/_container.sh"
+
+# Podman first, then docker. This used to live in a _container.sh that two build
+# scripts shared; there is one left, so it lives here. Set CONTAINER to override
+# on a machine where the wrong one is first on PATH.
+#
+# The GitHub runner has both and therefore picks podman, which is worth knowing:
+# a workflow step that reaches for `docker` directly cannot see an image this
+# script built. That mistake cost a release build once.
+if [ -z "${CONTAINER:-}" ]; then
+    if command -v podman >/dev/null 2>&1; then
+        CONTAINER=podman
+    elif command -v docker >/dev/null 2>&1; then
+        CONTAINER=docker
+    else
+        echo "no container runtime: install podman or docker" >&2
+        exit 2
+    fi
+fi
+
+# Rootless podman maps the container's root to the invoking user, so files land
+# owned by whoever ran the build. Docker does not: without this, every artefact
+# comes back owned by root and the next local build cannot overwrite it.
+CONTAINER_USER=""
+if [ "$CONTAINER" = docker ]; then
+    CONTAINER_USER="--user $(id -u):$(id -g)"
+fi
 
 IMAGE=sdrtop-build
 if ! "$CONTAINER" image inspect "$IMAGE" >/dev/null 2>&1; then
