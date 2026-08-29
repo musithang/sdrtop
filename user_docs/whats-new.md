@@ -17,7 +17,44 @@ in time.
 
 ---
 
-## 🔭 Checkpoint 17: Two fixes on the plots *(you are here)*
+## 📦 Checkpoint 18: You can just install it now *(you are here)*
+
+No new panels, no new maths. This one is about how sdrtop reaches your machine,
+which up to now was "clone it and hope your Rust is new enough".
+
+- **sdrtop is on [crates.io](https://crates.io/crates/sdrtop).** `cargo install
+  sdrtop --locked` is now the shortest path to a working binary, on any
+  architecture and any distribution, because it compiles on your machine and
+  links what your machine actually has. No release page to visit, no name to
+  get right.
+- **The installer stopped pretending to be a build system.** It used to carry
+  its own download-and-compile pipeline, a second unmaintained copy of the build
+  recipe. Now it does the two jobs cargo cannot (your distribution's libraries,
+  and a Rust new enough to matter) and hands the rest to `cargo install`.
+- **Downloads are verified, properly.** The checksum check used to be skippable
+  by a network hiccup: if `SHA256SUMS` failed to download, the install carried on
+  without a word. Now it stops. `--no-verify` exists if you insist, and it says
+  so out loud.
+- **Device permissions are reported, not meddled with.** The installer no longer
+  writes its own udev rules or edits your groups. The `libhackrf` and `rtl-sdr`
+  packages ship rules already, and two sets of rules that agree only by
+  coincidence is worse than one. It tells you what it found and what to do if
+  there is nothing.
+- **`--version` says which build you have**, like `sdrtop 0.4.2 (a1b2c3d)`, with
+  a `-dirty` marker if it came from an edited tree. Bug reports stop being
+  ambiguous, which matters now that `install.sh --git` can hand you the `main`
+  branch on request.
+- **The release tarball is reproducible and signed for.** Build the same commit
+  twice and you get the same bytes, and `gh attestation verify` will confirm a
+  download really came out of this repository's release workflow rather than
+  merely arriving intact. Both from 0.4.2 onward.
+
+New installer flags: `--git` to build `main`, and `--no-verify` for the
+determined. Everything else works as it did.
+
+---
+
+## 🔭 Checkpoint 17: Two fixes on the plots
 
 - **The frequency zoom now works on the spectrum-only view.** `+` and `-` in
   spectrum focus set one zoom for the whole instrument, but the standalone

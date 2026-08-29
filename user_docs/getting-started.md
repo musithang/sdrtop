@@ -6,23 +6,41 @@
 
 ## The short way
 
+If you already have Rust, this is the whole thing:
+
+```sh
+cargo install sdrtop --locked
+```
+
+sdrtop is on [crates.io](https://crates.io/crates/sdrtop), so cargo compiles it
+on your machine and links whatever your machine actually has. Works on every
+architecture and every distribution. You still need the two libraries first,
+which is the "What you need" section below.
+
+## The shorter way, if you don't want to think about it
+
 ```sh
 curl -fsSL https://raw.githubusercontent.com/mustang6139/sdrtop/main/packaging/install.sh | sh
 ```
 
 The installer covers everything the rest of this page describes: it finds your
 package manager, installs the two libraries under whatever names your
-distribution gives them, installs sdrtop into `/usr/local/bin` (or `~/.local`
-with `--prefix` if you would rather not use root), makes sure the udev rules and
-your `plugdev` membership let you open the radio, and runs the result to prove
-it works.
+distribution gives them, and puts sdrtop into `/usr/local/bin` (or `~/.local`
+with `--prefix` if you would rather not use root). Then it runs the result to
+prove it works.
 
-It uses the prebuilt binary only when that binary can run on your machine, which
-it decides by running `ldd` over it rather than by guessing from your
-distribution's name. When it cannot, on a Raspberry Pi or on Ubuntu, whose
-`librtlsdr` has a different soname to Debian's, it installs Rust if needed and
-builds from source instead. That takes a few minutes and needs no decisions from
-you.
+It uses the prebuilt binary only when that binary can run on your machine, and
+it decides that by **running it**, not by guessing from your distribution's
+name. When it cannot, on a Raspberry Pi or on Ubuntu, whose `librtlsdr` has a
+different soname to Debian's, it makes sure Rust is present and hands over to
+`cargo install sdrtop --locked` instead. That takes a few minutes and needs no
+decisions from you.
+
+What it does **not** do is set up device permissions. It reports on them, and
+that is deliberate: the `libhackrf` and `rtl-sdr` packages ship their own udev
+rules, so installing the libraries is what grants access. If your radio still
+needs root afterwards, [troubleshooting](troubleshooting.md#permission-denied)
+has the fix.
 
 Read it before you pipe it into a shell if you like:
 [`packaging/install.sh`](https://github.com/mustang6139/sdrtop/blob/main/packaging/install.sh).
@@ -77,14 +95,24 @@ about `lock file version 4`, that's what happened, and rustup is the fix.
 
 ---
 
-## Build and run
+## Install and run
+
+With the libraries in place, either of these gets you a working `sdrtop`:
 
 ```sh
+# From crates.io, straight onto your PATH
+cargo install sdrtop --locked
+
+# Or from a clone, if you want to poke at the source
 git clone https://github.com/mustang6139/sdrtop
 cd sdrtop
 cargo build --release
 ./target/release/sdrtop
 ```
+
+`--locked` is worth the four extra characters: it builds with the exact
+dependency versions the release was tested with, rather than whatever resolved
+this morning.
 
 That's it. sdrtop finds your radio automatically. If it doesn't, that's what the
 [troubleshooting](troubleshooting.md) page is for, and we've all been there at

@@ -145,46 +145,72 @@ The view sdrtop opens on. A slim header plus a left **instrument rail** that pac
 
 ## 📦 Install
 
-One line. Any Linux distribution.
+**Requirements:** Linux · HackRF One *or* RTL-SDR · `libhackrf` + `librtlsdr` + `pkg-config`
+
+Three ways in. Take the first one that fits, they all end with the same binary.
+
+### 1. `cargo install`, the boring one that always works
+
+sdrtop lives on [crates.io](https://crates.io/crates/sdrtop). Cargo compiles it *on your machine*, which means it links whatever your machine actually has and doesn't care what architecture or distribution you're running. Grab the two libraries first, then the program:
+
+```sh
+sudo apt install libhackrf-dev librtlsdr-dev pkg-config          # Debian / Ubuntu / Mint
+sudo pacman -S hackrf rtl-sdr pkgconf                            # Arch / Manjaro
+sudo dnf install hackrf-devel rtl-sdr-devel pkgconf-pkg-config   # Fedora
+
+cargo install sdrtop --locked
+```
+
+You need both libraries at build time even if you only own one radio. Sorry. At runtime sdrtop is happy with whichever you plug in.
+
+Wants **Rust 1.88 or newer**. Your distro's Rust is quite possibly ancient (Debian 12 ships 1.63, bless it), and [rustup](https://rustup.rs) sorts that out in one line. More distributions in [Getting started](user_docs/getting-started.md).
+
+Then go make coffee: a few minutes on a laptop, considerably more on a Raspberry Pi. It's not frozen, it's just Rust.
+
+### 2. The installer, if you'd rather not think about any of that
 
 ```sh
 curl -fsSL https://raw.githubusercontent.com/mustang6139/sdrtop/main/packaging/install.sh | sh
 ```
 
-That is the whole thing. The installer works out which distribution you are on, installs `libhackrf` and `librtlsdr` with whatever package manager it finds (apt, dnf, pacman, zypper, apk, xbps, emerge, nix), puts sdrtop in `/usr/local/bin`, adds you to `plugdev` so the radio is openable, and checks the result runs.
+It figures out your distribution, installs `libhackrf` and `librtlsdr` under whatever names that distribution gives them (apt, dnf, pacman, zypper, apk, xbps, emerge and nix are all handled), then grabs the prebuilt binary if it can actually run on your box, and quietly falls back to `cargo install` if it can't.
 
-It takes the prebuilt binary when that binary can actually run on your machine, and **builds from source when it cannot**, which is how one installer covers every architecture, a Raspberry Pi included. It asks `ldd` rather than guessing from the distribution's name.
+The nice bit: it decides by **running the thing**, not by reading your distro's name off a list and hoping. That's how one script covers every architecture, Raspberry Pi included.
 
 <details>
 <summary>Options, and installing without root</summary>
 
 ```sh
 sh install.sh --prefix ~/.local     # no root anywhere
-sh install.sh --from-source         # skip the prebuilt binary
-sh install.sh --version v0.4.0      # a specific release
+sh install.sh --from-source         # skip the prebuilt binary, always compile
+sh install.sh --git                 # compile main instead of a release, live dangerously
+sh install.sh --version v0.4.1      # a specific release
 sh install.sh --deps-only           # just the libraries
 sh install.sh --uninstall
 ```
 
-Piping to `sh` runs a script you have not read. If you would rather read it first, and you should: [`packaging/install.sh`](packaging/install.sh).
+Piping a script into `sh` means running code you haven't read. You should read it: [`packaging/install.sh`](packaging/install.sh). I'd want to.
 
 </details>
 
-### Or build it yourself
+### 3. The prebuilt binary, for the no-toolchain crowd
 
-**Requirements:** Linux · HackRF One *or* RTL-SDR · `libhackrf` + `librtlsdr` + `pkg-config` · Rust stable 1.88 or newer
+Over on the [releases page](../../releases). One tarball, x86_64 only, and it wants **glibc 2.36+** and **`librtlsdr.so.0`**. In practice: Debian 12 and 13, Kali, Raspberry Pi OS Bookworm.
 
-Both libraries are needed at build time even if you only own one radio; at runtime sdrtop is happy with whichever you plug in.
+Ubuntu and Mint package that exact same library as `.so.2`, because of course they do, so the binary won't start there. Use option 1 or 2 and it'll be fine.
 
 ```sh
-sudo pacman -S hackrf rtl-sdr pkgconf rust     # Arch
-sudo apt install libhackrf-dev librtlsdr-dev pkg-config   # Debian / Ubuntu
-
-cargo build --release
-./target/release/sdrtop
+tar -xzf sdrtop-<version>-x86_64-unknown-linux-gnu.tar.gz
+cd sdrtop-<version>-x86_64-unknown-linux-gnu
+sha256sum -c <(grep sdrtop- ../SHA256SUMS)   # check it before you trust it
+sudo install -Dm755 sdrtop /usr/local/bin/sdrtop
 ```
 
-Other distributions are covered in [Getting started](user_docs/getting-started.md). Distro Rust packages are often too old to read this repo's lockfile; if the build stops with something about `lock file version 4`, that is the one, and rustup fixes it.
+From 0.4.2 onward the release also carries a signed build provenance attestation. The checksum only tells you the download didn't get mangled; this tells you the file actually came out of this repo's release workflow:
+
+```sh
+gh attestation verify sdrtop-<version>-x86_64-unknown-linux-gnu.tar.gz --repo mustang6139/sdrtop
+```
 
 Press `Space` to start receiving. Press `?` for the key reference. Press `q` to quit and save.
 

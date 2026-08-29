@@ -315,6 +315,60 @@ You can also write them by hand; see
 
 ---
 
+## Installing
+
+### "the prebuilt binary does not run on this system"
+
+Not a failure. That's the installer doing its job.
+
+One prebuilt tarball is published, for x86_64 with glibc 2.36 or newer and
+`librtlsdr.so.0`. Debian, Kali and Raspberry Pi OS Bookworm match that. Ubuntu
+and Mint package the identical upstream library as `.so.2`, and a Raspberry Pi
+isn't x86_64 at all, so on those machines the binary can't start.
+
+The installer finds this out by **running the binary** rather than by guessing
+from your distribution's name, prints what `ldd` says is missing, and then
+compiles from source with `cargo install` instead. That links what your machine
+actually has. It takes a few minutes and needs nothing from you.
+
+### "checksum mismatch" or "could not download SHA256SUMS"
+
+The installer refuses to unpack a download it can't verify, and that's on
+purpose: an earlier version quietly skipped this check when the network hiccuped,
+which is not a check at all.
+
+Usually it's a transient network problem, so try again. If it keeps happening,
+download the tarball and `SHA256SUMS` from the
+[releases page](../../../releases) by hand and compare them yourself. If they
+genuinely disagree, please [open an issue](../../../issues), because that should
+never happen.
+
+`--no-verify` exists and skips the check. Have a reason.
+
+### "sha256sum is needed to verify the download"
+
+Your system has no `sha256sum`. It's in `coreutils` on most distributions, and
+in `busybox` on Alpine. Install it, or use `cargo install sdrtop --locked`,
+which doesn't need it.
+
+### `cargo install sdrtop` fails on libhackrf
+
+Same cause as the build failure below: both libraries have to be present at
+build time. See [The build fails looking for libhackrf](#the-build-fails-looking-for-libhackrf).
+
+### Which build am I actually running?
+
+```sh
+sdrtop --version
+```
+
+From 0.4.2 onward that prints the commit too, like `sdrtop 0.4.2 (a1b2c3d)`. A
+`-dirty` suffix means it was built from a tree with uncommitted changes. Worth
+pasting into any issue you open, because "0.4.2" alone doesn't distinguish a
+release from an `install.sh --git` build off `main`.
+
+---
+
 ## Building
 
 ### The build fails with "lock file version 4"
