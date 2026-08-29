@@ -16,6 +16,127 @@ checkpoint instead of by version.
 
 ## [Unreleased]
 
+## [0.4.2] - 2026-08-29
+
+> 🎧 Assembled across 48 hours without meaningful sleep, in a fight that turned
+> out to be against a YAML file. The YAML file lost. Eventually. At 04:00.
+>
+> Soundtrack, if you want the authentic experience:
+> [What's Happening 2 BATTLE](https://www.youtube.com/watch?v=eYWDZrn3ptQ)
+
+**No radio-facing code changed.** Not one line. The spectrum is the spectrum,
+RDS still decodes, the FM discriminator is still hand written and still correct.
+What changed is everything about how sdrtop reaches you.
+
+This is the first release built end to end by the current pipeline: reproducible
+bytes, a signed provenance attestation, and a release page written by a human
+instead of assembled from commit subjects.
+
+Things that were true a week ago and are no longer true:
+
+- the checksum check in the installer was a **decoration**. It lived inside an
+  `if` whose every branch continued, so a network hiccup silently skipped it
+- the build container **never rebuilt** after its recipe changed
+- "what version is this" had **two different answers**, one of which was a
+  regular expression applied to JSON
+- there was, briefly, a plan to ship a `.dmg`. On Linux.
+
+Things that are true and will remain true forever:
+
+- Debian says `librtlsdr0`, Ubuntu says `librtlsdr2`, and they are the same
+  source code
+- docs.rs says "sdrtop is not a library", and docs.rs is right
+- it is `release.yaml`. With an `a`.
+
+### Added
+
+- **`sdrtop --version` now names the commit**, like `0.4.2 (a1b2c3d)`, with a
+  `-dirty` marker when it was built from an edited tree. A bug report saying
+  "0.4.2" now identifies exactly one tree, which matters because `install.sh`
+  can hand you the `main` branch on request.
+- **Signed build provenance.** Release artefacts carry a Sigstore attestation
+  binding them to this repository and this workflow. Verify with
+  `gh attestation verify <file> --repo mustang6139/sdrtop`. The checksum says a
+  download arrived intact; this says where it came from.
+- **`install.sh --git`** builds the `main` branch, and **`install.sh
+  --no-verify`** skips the checksum for whoever has a reason.
+- **`RELEASING.md`**, the release procedure written down instead of remembered.
+
+### Changed
+
+- **`install.sh` no longer builds sdrtop itself.** It used to carry its own
+  download-and-compile pipeline, a second unmaintained copy of the build recipe.
+  It now does the two jobs cargo cannot (your distribution's libraries, and a
+  Rust new enough to matter) and hands the rest to
+  `cargo install sdrtop --locked`.
+- **The installer reports on device permissions instead of arranging them.** It
+  no longer writes its own udev rules or edits your groups. The `libhackrf` and
+  `rtl-sdr` packages ship rules already, and a second set that agrees only by
+  coincidence is worse than one.
+- **The release tarball is named after the full Rust target triple**,
+  `sdrtop-0.4.2-x86_64-unknown-linux-gnu.tar.gz`. The old short form did not say
+  which libc, which is the exact axis this project has trouble on. `install.sh`
+  still understands the old name for 0.4.1.
+- **Release notes come from this file**, not from a list of commit subjects.
+- Publishing to crates.io happens automatically on a tag, through Trusted
+  Publishing, before the GitHub release is drafted.
+- The README documents three install paths in order, and states plainly which
+  machines the prebuilt binary actually serves. It does not serve Ubuntu or Mint.
+
+### Fixed
+
+- **Checksum verification could silently not happen.** The check lived inside an
+  `if` whose every branch continued, so a failed `SHA256SUMS` download, or a
+  machine without `sha256sum`, installed an unverified binary without a word. It
+  now stops.
+- **The build container was never rebuilt after its recipe changed.** Editing
+  `Containerfile` on a machine that already had an image produced a tarball
+  built by the old recipe, with nothing on screen to say so.
+- Two different rules decided what "the version" was, one of them a regular
+  expression applied to `cargo metadata` JSON. There is now one.
+- `README.md` claimed the installer adds you to `plugdev`, which it no longer
+  does, and its one example of `--version` pointed at a release that does not
+  exist.
+
+### Internal
+
+- **The release tarball is reproducible.** The same commit built twice produces
+  the same bytes, archive and binary alike: base image pinned by digest,
+  compiler pinned, `SOURCE_DATE_EPOCH` from the commit date, deterministic `tar`
+  and `gzip -n`.
+- The release workflow asserts the glibc floor, the exact set of shared
+  libraries the binary needs, and that the binary reports the version the
+  archive is named after.
+- CI gained an MSRV job on 1.88, `--locked` everywhere, `cargo package` on every
+  push, and shellcheck.
+
+### Removed
+
+- The `.deb` matrix, the architecture matrix, and the QEMU-emulated `armhf`
+  runner that built a package for a machine nobody owned and then tested it on a
+  machine that did not exist. It is in the git history if anyone gets nostalgic.
+- The plan to ship a `.dmg`. For a terminal application. On Linux.
+- 48 consecutive hours of the maintainer's sleep. Unlike a crates.io version,
+  this cannot be yanked either.
+
+<!--
+     .  *  .   .
+  .    \ | /    .           you found it
+.   --== 📡 ==--   .
+  .    / | \    .        0.4.2 was assembled across 48 hours
+     .  *  .   .         without meaningful sleep, in a fight
+                         that was ultimately against a YAML file.
+
+                         the YAML file lost. eventually. at 04:00.
+
+                         if you are reading the raw markdown of a
+                         changelog looking for jokes, you are exactly
+                         the kind of person this program was written
+                         for. plug in a radio. press space.
+
+                                              73 de sdrtop 📻
+-->
+
 ## [0.4.1] - 2026-08-29
 
 The first release published to [crates.io](https://crates.io/crates/sdrtop), so
