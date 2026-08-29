@@ -28,6 +28,14 @@ concurrency:
 jobs:
   build:
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      # Sigstore signs through a short-lived OIDC token minted for this run
+      # rather than through a key this repository has to hold, rotate and not
+      # lose. That is the whole reason attestations beat a minisign keypair
+      # here, and it is why the job needs to mint one and to write the result.
+      id-token: write
+      attestations: write
     steps:
       - uses: actions/checkout@v4
 
@@ -58,11 +66,14 @@ jobs:
       - name: Build the tarball
         run: packaging/build-tarball.sh
 
-      # build-tarball.sh has already proved the binary *starts*, inside the
-      # Debian 12 container, which is the only place it can be run: this runner
-      # is Ubuntu and has librtlsdr.so.2 where the binary wants .so.0, the exact
-      # mismatch install.sh exists to handle. What is left to check here is what
-      # the binary *is* and what it asks of a machine, which the headers answer.
+      # build-tarball.sh has already proved the binary *runs* and reports the
+      # version the archive is named after, inside the Debian 12 container,
+      # which is the only place it can be run: this runner is Ubuntu and has
+      # librtlsdr.so.2 where the binary wants .so.0, the exact mismatch
+      # install.sh exists to handle. So none of the checks below execute it.
+      #
+      # What is left is what the binary *is* and what it asks of a machine,
+      # which the ELF headers answer without running anything.
       - name: Check what came out
         run: |
           out="$RUNNER_TEMP/unpacked"
@@ -73,8 +84,26 @@ jobs:
           file "$bin"
           readelf -h "$bin" | grep -q 'X86-64' || {
             echo "::error::the tarball does not contain an x86-64 binary"; exit 1; }
-          echo "needs:"
-          readelf -d "$bin" | sed -n 's/.*Shared library: \[\(.*\)\]/    \1/p'
+
+          # What the binary asks a machine for, asserted rather than printed.
+          # The glibc floor below this was already checked while the library
+          # list was only echoed into a log nobody reads, and that asymmetry was
+          # the bug: if a future dependency pulls in a link to something Debian
+          # 12 happens to have and a user's machine does not, the tarball
+          # silently stops working for them with every check still green.
+          #
+          # Changing this list is a deliberate act, and the edit belongs in the
+          # same commit as the dependency that caused it.
+          expected="libc.so.6 libgcc_s.so.1 libhackrf.so.0 libm.so.6 librtlsdr.so.0"
+          actual=$(readelf -d "$bin" \
+            | sed -n 's/.*Shared library: \[\(.*\)\]/\1/p' | sort | tr '\n' ' ')
+          actual=${actual% }
+          echo "needs: $actual"
+          test "$actual" = "$expected" || {
+            echo "::error::the set of shared libraries changed"
+            echo "::error::expected: $expected"
+            echo "::error::actual:   $actual"
+            exit 1; }
 
           # The floor this whole container exists to keep. If a newer base image
           # ever raises it, the tarball silently stops working on Debian 12.
@@ -102,6 +131,31 @@ jobs:
           cd release
           sha256sum -- *.tar.gz install.sh > SHA256SUMS
           cat SHA256SUMS
+
+      # Signed provenance, which is a different claim from the checksums above.
+      # SHA256SUMS proves a download was not corrupted in transit. It proves
+      # nothing about where the file came from, because it is served from the
+      # same place as the file and anyone who can write one can write the other.
+      #
+      # This binds each artefact's digest to this repository, this workflow file
+      # and this commit, signed through Sigstore. A user checks it with:
+      #
+      #   gh attestation verify sdrtop-<version>-x86_64-unknown-linux-gnu.tar.gz \
+      #      --repo mustang6139/sdrtop
+      #
+      # SHA256SUMS itself is not attested: it is derived from the two files that
+      # are, so attesting it would add a third thing to keep in agreement and
+      # prove nothing the other two do not already.
+      #
+      # Deliberately not gated on a tag. A workflow_dispatch run produces a real
+      # attestation, which is the only way to exercise this before a release
+      # depends on it working.
+      - name: Attest what was built
+        uses: actions/attest-build-provenance@v2
+        with:
+          subject-path: |
+            release/*.tar.gz
+            release/install.sh
 
       - uses: actions/upload-artifact@v4
         with:

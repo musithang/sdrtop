@@ -79,23 +79,43 @@ SOURCE_DATE_EPOCH=$(git -C "$REPO" log -1 --format=%ct 2>/dev/null || echo 0)
 
 exec "$CONTAINER" run --rm --platform linux/amd64 $CONTAINER_USER \
     -v "$REPO:/src" -w /src -e NAME="$NAME" -e SDRTOP_COMMIT="$COMMIT" \
-    -e SOURCE_DATE_EPOCH="$SOURCE_DATE_EPOCH" \
+    -e SOURCE_DATE_EPOCH="$SOURCE_DATE_EPOCH" -e VERSION="$VERSION" \
     "$IMAGE" sh -eu -c '
     # Out of the way of the host tree, so a container build never leaves the
     # working copy in a state a later host build inherits.
     export CARGO_TARGET_DIR=/src/target/container
     cargo build --release --target x86_64-unknown-linux-gnu
 
-    # Reading the ELF headers proves what the binary asks for; this proves it
-    # starts. It has to happen in here, because Debian 12 is the only place it
-    # is expected to run: on the CI runner, which is Ubuntu, it would fail for
-    # the librtlsdr soname reason that install.sh exists to handle.
-    # `--version` returns before any device is opened, so it needs no radio.
-    target/container/x86_64-unknown-linux-gnu/release/sdrtop --version
-
     OUT=/src/target/tarball/$NAME
     rm -rf "$OUT"; mkdir -p "$OUT"
     cp target/container/x86_64-unknown-linux-gnu/release/sdrtop "$OUT/"
+
+    # Reading the ELF headers proves what the binary asks of a machine; this
+    # proves it runs. Tested here, in the staging directory, so the file that
+    # gets exercised is the exact one that goes into the archive rather than the
+    # one it was copied from.
+    #
+    # It has to happen inside the container: Debian 12 is the only place this
+    # binary is expected to start, and on the Ubuntu CI runner it fails for the
+    # librtlsdr soname reason that install.sh exists to handle. Both flags
+    # return before any device is opened, so neither needs a radio.
+    reported=$("$OUT/sdrtop" --version)
+    echo "$reported"
+    "$OUT/sdrtop" --help >/dev/null
+
+    # And it has to be *this* version. Nothing else in the pipeline compares the
+    # binary against the name on the archive, so a stale CARGO_TARGET_DIR could
+    # ship an older build under the current version and no check would notice.
+    # release.yaml separately asserts the tag against Cargo.toml, and $VERSION
+    # came from version.sh reading that same file, so the two together chain the
+    # tag all the way to the binary.
+    case "$reported" in
+        "sdrtop $VERSION" | "sdrtop $VERSION "*) ;;
+        *)
+            echo "the binary reports \"$reported\", not sdrtop $VERSION" >&2
+            exit 1
+            ;;
+    esac
     cp README.md LICENSE "$OUT/"
     cp target/man/sdrtop.1 "$OUT/"
     # install.sh travels with the tarball as well as being the one-liner on the
