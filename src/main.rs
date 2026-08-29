@@ -216,19 +216,41 @@ mod cli_tests {
     use super::Cli;
     use clap::CommandFactory;
 
-    /// `--version` has to exist and report the crate's own version.
+    /// `--version` has to exist and lead with the crate's own version.
     ///
     /// It is the first thing anyone pastes into a bug report, and a packaged
     /// binary that cannot say which build it is makes every report ambiguous.
-    /// Wired through clap's `version` attribute, which reads `CARGO_PKG_VERSION`,
-    /// so this checks the wiring rather than the number.
+    ///
+    /// Starts with rather than equals: `build.rs` appends the commit when it can
+    /// find one, so the string is `0.4.1 (2ec9491)` from a checkout or a
+    /// published crate and a bare `0.4.1` from a source tree with neither. All
+    /// three are legal, and the crate version leading is the part that must
+    /// hold, because that is what the tag and crates.io agree on.
     #[test]
     fn the_binary_reports_its_own_version() {
         let cmd = Cli::command();
-        assert_eq!(
-            cmd.get_version(),
-            Some(env!("CARGO_PKG_VERSION")),
-            "--version is not wired to the crate version"
+        let reported = cmd.get_version().expect("--version is not wired up at all");
+        let crate_version = env!("CARGO_PKG_VERSION");
+
+        assert!(
+            reported.starts_with(crate_version),
+            "--version reports {reported:?}, which does not lead with the crate version {crate_version:?}"
+        );
+
+        // Whatever follows is the commit, and it has to look like one: a
+        // parenthesised short sha, optionally marked dirty. A malformed suffix
+        // means build.rs put something else there, which a bug report would
+        // then carry as if it were a commit.
+        let suffix = &reported[crate_version.len()..];
+        assert!(
+            suffix.is_empty()
+                || (suffix.starts_with(" (")
+                    && suffix.ends_with(')')
+                    && suffix[2..suffix.len() - 1]
+                        .trim_end_matches("-dirty")
+                        .chars()
+                        .all(|c| c.is_ascii_hexdigit())),
+            "--version suffix {suffix:?} is not a parenthesised short commit"
         );
     }
 

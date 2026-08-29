@@ -29,9 +29,24 @@ RUN apt-get update -qq \
 # Debian ships rustc 1.63; sdrtop needs 1.88 (`slice::as_chunks`). The distro
 # compiler gets past the lockfile and then fails on the source, which is the
 # two-stage failure the troubleshooting page warns users about.
+#
+# Pinned to an exact version rather than `stable`, and only here. Two builds of
+# one commit six weeks apart would otherwise use two different compilers and
+# produce two different binaries, which makes the reproducible-build work in R6
+# unreachable before it starts.
+#
+# The pin lives in this file and nowhere else, deliberately. A repo-level
+# rust-toolchain.toml would also bind CI and every contributor, and it would
+# silently override the MSRV job's 1.88 with this version, turning that job into
+# a second copy of the stable one. What sdrtop actually promises is a floor
+# (rust-version = "1.88", checked in CI) and a reproducible release build (this
+# line). Those are different jobs and they get different mechanisms.
+#
+# Bumping it is a deliberate act: it changes the released binary's bytes.
+ENV RUST_VERSION=1.98.0
 ENV RUSTUP_HOME=/usr/local/rustup CARGO_HOME=/usr/local/cargo
 ENV PATH=/usr/local/cargo/bin:$PATH
-RUN curl -sSf https://sh.rustup.rs | sh -s -- -y --profile minimal --default-toolchain stable \
+RUN curl -sSf https://sh.rustup.rs | sh -s -- -y --profile minimal --default-toolchain "$RUST_VERSION" \
  && chmod -R a+w "$CARGO_HOME"
 
 RUN rustc --version

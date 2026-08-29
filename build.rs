@@ -6,6 +6,7 @@
 const MAN_DIR: &str = "target/man";
 
 fn main() {
+    emit_version();
     generate_man_page();
 
     // docs.rs builds every published crate and cannot install system packages,
@@ -74,4 +75,99 @@ fn generate_man_page() {
         return;
     }
     let _ = std::fs::write(format!("{MAN_DIR}/sdrtop.1"), page);
+}
+
+/// Emit `SDRTOP_VERSION`, the string `--version` prints: `0.4.1 (2ec9491)`.
+///
+/// The plain crate version stopped being enough the moment install.sh could
+/// install from `main` as readily as from a release, because both would print
+/// the same number and a bug report naming it would identify nothing.
+fn emit_version() {
+    let version = match commit() {
+        Some(c) => format!("{} ({})", env!("CARGO_PKG_VERSION"), c),
+        // Not fatal, and not rare: a tarball of the sources with no git and no
+        // packaging step lands here. The plain version is what every release up
+        // to 0.4.0 printed anyway.
+        None => env!("CARGO_PKG_VERSION").to_string(),
+    };
+    println!("cargo:rustc-env=SDRTOP_VERSION={version}");
+}
+
+/// The short commit, from whichever of the three sources can answer.
+///
+/// They are tried in order of authority, not convenience.
+fn commit() -> Option<String> {
+    // 1. Set by packaging/build-tarball.sh, which resolves it on the host. The
+    //    release container has no git in it, and bind-mounting `.git` would hit
+    //    git's safe.directory check whenever the uid does not match.
+    println!("cargo:rerun-if-env-changed=SDRTOP_COMMIT");
+    if let Some(sha) = std::env::var("SDRTOP_COMMIT")
+        .ok()
+        .filter(|s| !s.is_empty())
+    {
+        return Some(sha);
+    }
+
+    // 2. A git checkout: a contributor's build, or `cargo install --git`.
+    //    The commit moves without any tracked file changing, so cargo has to be
+    //    told to look again, and watching `.git/HEAD` alone is not enough: that
+    //    file holds `ref: refs/heads/main` and a commit does not touch it. The
+    //    file it names is the one that moves. Watch both, so a new commit and a
+    //    branch switch each rebuild. Neither path existing is fine, including
+    //    the packed-refs case, where the worst outcome is a stale local build
+    //    that still carries an honest `-dirty` once anything is edited.
+    println!("cargo:rerun-if-changed=.git/HEAD");
+    if let Ok(head) = std::fs::read_to_string(".git/HEAD") {
+        if let Some(git_ref) = head.trim().strip_prefix("ref: ") {
+            println!("cargo:rerun-if-changed=.git/{git_ref}");
+        }
+    }
+    if let Some(sha) = git_commit() {
+        return Some(sha);
+    }
+
+    // 3. A crate unpacked from crates.io, which has no `.git` but does carry
+    //    the commit cargo recorded at publish time.
+    vcs_info_commit()
+}
+
+fn git_commit() -> Option<String> {
+    let out = std::process::Command::new("git")
+        .args(["rev-parse", "--short", "HEAD"])
+        .output()
+        .ok()?;
+    if !out.status.success() {
+        return None;
+    }
+    let sha = String::from_utf8(out.stdout).ok()?.trim().to_string();
+    if sha.is_empty() {
+        return None;
+    }
+
+    // A build from a tree with uncommitted changes is not the commit it names,
+    // and saying which build this is was the entire point of printing one.
+    let dirty = std::process::Command::new("git")
+        .args(["diff", "--quiet", "HEAD"])
+        .status()
+        .map(|s| !s.success())
+        .unwrap_or(false);
+
+    Some(if dirty { format!("{sha}-dirty") } else { sha })
+}
+
+/// Read the commit out of `.cargo_vcs_info.json`, which cargo writes into every
+/// published crate.
+///
+/// Searched as text rather than parsed: it is one field of a fixed shape, and
+/// taking on a JSON build-dependency to read it would cost every user of
+/// `cargo install sdrtop` a compile for one string.
+fn vcs_info_commit() -> Option<String> {
+    let text = std::fs::read_to_string(".cargo_vcs_info.json").ok()?;
+    let after_key = &text[text.find("\"sha1\"")? + "\"sha1\"".len()..];
+    let after_colon = after_key.trim_start().strip_prefix(':')?;
+    let value = after_colon.trim_start().strip_prefix('"')?;
+    let sha = &value[..value.find('"')?];
+    // Shortened to match what `git rev-parse --short` gives, so the two sources
+    // are indistinguishable in a bug report.
+    Some(sha.chars().take(7).collect())
 }

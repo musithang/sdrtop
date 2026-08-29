@@ -14,13 +14,26 @@
 use clap::Parser;
 use std::path::PathBuf;
 
-#[derive(Parser)]
 // `version` is not decoration: it is the first thing anyone pastes into a bug
 // report, and a packaged binary that cannot say which build it is makes every
-// report ambiguous.
+// report ambiguous. The crate version alone stopped being enough once
+// install.sh could install from `main` as readily as from a release, so
+// `build.rs` folds the commit in and this prints `0.4.1 (2ec9491)`.
+//
+// `option_env!` rather than `env!`, and that is forced: `build.rs` `include!`s
+// this file, and a build script is compiled before it runs, so before any
+// `cargo:rustc-env` it emits exists. `env!` would refuse to compile there.
+// Inside the build script this is therefore always the fallback arm, which is
+// correct: the man page carries the plain version and no commit.
+const VERSION: &str = match option_env!("SDRTOP_VERSION") {
+    Some(v) => v,
+    None => env!("CARGO_PKG_VERSION"),
+};
+
+#[derive(Parser)]
 #[command(
     name = "sdrtop",
-    version,
+    version = VERSION,
     about = "HackRF One / RTL-SDR terminal monitor"
 )]
 pub struct Cli {

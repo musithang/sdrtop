@@ -41,18 +41,37 @@ if [ "$CONTAINER" = docker ]; then
 fi
 
 IMAGE=sdrtop-build
-if ! "$CONTAINER" image inspect "$IMAGE" >/dev/null 2>&1; then
-    echo "building the $IMAGE image" >&2
-    "$CONTAINER" build --platform linux/amd64 \
-        -t "$IMAGE" -f "$REPO/packaging/Containerfile" "$REPO"
+
+# Unconditionally, and that is the fix rather than the cost. This used to be
+# guarded by `image inspect`, which meant an edited Containerfile was ignored on
+# any machine that already had an image: you got a tarball built by the old
+# recipe with nothing on screen to say so. CI never noticed, because a fresh
+# runner has no image to skip. The layer cache makes a no-change rebuild nearly
+# instant, which is what the layer cache is for.
+echo "building the $IMAGE image" >&2
+"$CONTAINER" build --platform linux/amd64 \
+    -t "$IMAGE" -f "$REPO/packaging/Containerfile" "$REPO"
+
+VERSION=$("$REPO/packaging/version.sh")
+
+# The full Rust target triple, not `x86_64-linux`. The short form does not say
+# which libc, and that is precisely the axis this project is known to have
+# trouble on. It also means a musl or aarch64 build can be added later as a new
+# name rather than by breaking this one and every install.sh already in the
+# wild. See dev_docs/release-process-plan.md.
+NAME="sdrtop-${VERSION}-x86_64-unknown-linux-gnu"
+
+# The commit is resolved here, on the host, and handed to build.rs through the
+# environment. The container has no git, and bind-mounting .git into it would
+# trip git's safe.directory check when the uid does not match. See build.rs.
+COMMIT=$(git -C "$REPO" rev-parse --short HEAD 2>/dev/null || echo "")
+if [ -n "$COMMIT" ] && ! git -C "$REPO" diff --quiet HEAD 2>/dev/null; then
+    COMMIT="$COMMIT-dirty"
+    echo "warning: building a release tarball from a dirty tree" >&2
 fi
 
-VERSION=$("$CONTAINER" run --rm $CONTAINER_USER -v "$REPO:/src" -w /src "$IMAGE" \
-    sh -c 'cargo metadata --no-deps --format-version 1 | sed -n "s/.*\"version\":\"\([^\"]*\)\".*/\1/p" | head -1')
-NAME="sdrtop-${VERSION}-x86_64-linux"
-
 exec "$CONTAINER" run --rm --platform linux/amd64 $CONTAINER_USER \
-    -v "$REPO:/src" -w /src -e NAME="$NAME" \
+    -v "$REPO:/src" -w /src -e NAME="$NAME" -e SDRTOP_COMMIT="$COMMIT" \
     "$IMAGE" sh -eu -c '
     # Out of the way of the host tree, so a container build never leaves the
     # working copy in a state a later host build inherits.
@@ -79,6 +98,13 @@ exec "$CONTAINER" run --rm --platform linux/amd64 $CONTAINER_USER \
     mkdir -p "$OUT/user_docs"
     cp user_docs/*.md "$OUT/user_docs/"
 
+    # Cleared, not just created. release.yaml collects the release assets with
+    # `cp target/dist/*.tar.gz`, so anything left here from an earlier build
+    # ships alongside this one: rename the asset, as R5 just did, and a local
+    # run leaves both the old and the new name sitting in the glob. A fresh CI
+    # runner never sees it, which is exactly what makes it worth closing here.
+    # target/ is build output, so this deletes nothing that cannot be rebuilt.
+    rm -rf /src/target/dist
     mkdir -p /src/target/dist
     tar -C /src/target/tarball -czf "/src/target/dist/$NAME.tar.gz" "$NAME"
     echo "/src/target/dist/$NAME.tar.gz"

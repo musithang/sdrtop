@@ -38,7 +38,7 @@ jobs:
         if: startsWith(github.ref, 'refs/tags/v')
         run: |
           tag="${GITHUB_REF_NAME#v}"
-          crate=$(sed -n 's/^version = "\(.*\)"/\1/p' Cargo.toml | head -1)
+          crate=$(packaging/version.sh)
           echo "tag=$tag crate=$crate"
           test "$crate" = "$tag" || {
             echo "::error::tag $GITHUB_REF_NAME does not match Cargo.toml version $crate"
