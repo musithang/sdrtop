@@ -53,6 +53,15 @@ jobs:
             exit 1
           }
 
+      # Checked here, before the container build, because it costs a second and
+      # the alternative is discovering after several minutes of compiling that
+      # the release has nothing to say for itself. release-notes.sh exits
+      # non-zero when the version has no section, which is what makes this a
+      # gate rather than a formality.
+      - name: The changelog must describe this version
+        if: startsWith(github.ref, 'refs/tags/v')
+        run: packaging/release-notes.sh "${GITHUB_REF_NAME#v}" >/dev/null
+
       # install.sh is what every user runs, so a syntax error in it is a broken
       # release even when the tarball is perfect. It is a shell script, so this
       # is the whole of what can be checked without a machine to install onto.
@@ -163,22 +172,97 @@ jobs:
           path: release/
           if-no-files-found: error
 
-  release:
+  # crates.io before GitHub, and the order is the whole point: the irreversible
+  # step goes first, the recoverable one last. A failed release draft can be
+  # retried; a published version can never be replaced, only yanked. Doing it
+  # the other way round would mean a perfect release page pointing at a version
+  # that failed to publish.
+  publish:
     needs: build
+    # Only a tag publishes. A manual run builds, checks, attests and stops.
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      # Trusted Publishing: crates.io trades a short-lived GitHub OIDC token for
+      # a short-lived registry token, so no long-lived CRATES_IO_TOKEN has to
+      # sit in this repository's secrets waiting to leak or expire.
+      #
+      # This has to be configured once on the crate's crates.io settings page,
+      # naming this repository and this workflow file. Until then, this job
+      # fails at the token exchange.
+      id-token: write
+    steps:
+      - uses: actions/checkout@v4
+
+      # `cargo publish` runs a verification build, so the C libraries have to be
+      # present. Publishing with --no-verify to dodge that would mean uploading
+      # a version nobody proved compiles, which is the one thing here that
+      # cannot be taken back.
+      - name: Install system dependencies
+        run: sudo apt-get update && sudo apt-get install -y libhackrf-dev librtlsdr-dev pkg-config libusb-1.0-0-dev
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - name: Exchange the OIDC token for a crates.io token
+        id: auth
+        uses: rust-lang/crates-io-auth-action@v1
+
+      # Idempotent in the only sense available: a published version can never be
+      # replaced, so "already there" and "done" are the same state. Without this
+      # a rerun of the workflow would fail here over work that already
+      # succeeded, after the whole build.
+      #
+      # The User-Agent is required, not politeness. crates.io answers 403 to a
+      # request without one, and `curl -f` reports that the same way it reports
+      # a 404, so a probe without it reads every version as unpublished and
+      # tries to publish on every rerun. Verified: no UA gives 403 for a version
+      # that plainly exists; with one, 200 for a published version and 404 for
+      # an absent one.
+      - name: Publish to crates.io
+        env:
+          CARGO_REGISTRY_TOKEN: ${{ steps.auth.outputs.token }}
+        run: |
+          version=$(packaging/version.sh)
+          probe="https://crates.io/api/v1/crates/sdrtop/$version"
+          if curl -fsS -A "sdrtop-release-workflow ($GITHUB_SERVER_URL/$GITHUB_REPOSITORY)" \
+               "$probe" >/dev/null; then
+            echo "sdrtop $version is already on crates.io; nothing to do"
+            exit 0
+          fi
+          cargo publish --locked
+
+  release:
+    needs: [build, publish]
     # Only a tag drafts a release. A manual run builds, checks and stops there.
     if: startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-latest
     permissions:
       contents: write # to create the release and upload to it
     steps:
+      # Checked out for CHANGELOG.md and release-notes.sh, not to build
+      # anything. The release body is written by a human and read back here.
+      - uses: actions/checkout@v4
+
       - uses: actions/download-artifact@v4
         with:
           name: release
           path: release
 
-      # A draft is never public until a ME presses Publish, so the title and
-      # the notes get written in the release editor, where they can be read
-      # before anyone can download them.
+      - name: Render the release notes from the changelog
+        run: |
+          packaging/release-notes.sh "${GITHUB_REF_NAME#v}" > "$RUNNER_TEMP/notes.md"
+          cat "$RUNNER_TEMP/notes.md"
+
+      # A draft, always. Nothing is visible until a human has read the notes and
+      # pressed Publish, which is also where the release text gets its final
+      # pass. A prerelease was considered and rejected for the obvious reason:
+      # it is public from the moment it exists, so that reading would happen on
+      # a page anyone can already download from.
+      #
+      # The body comes from CHANGELOG.md, not from --generate-notes, which only
+      # lists commit subjects. The build job already refused to get this far
+      # without a section for this version.
       #
       # Idempotent, because the alternative is a rerun failing at the last step
       # after the whole build. The one thing it will not do is overwrite the
@@ -199,11 +283,13 @@ jobs:
                 --draft \
                 --verify-tag \
                 --title "$GITHUB_REF_NAME" \
-                --generate-notes \
+                --notes-file "$RUNNER_TEMP/notes.md" \
                 release/*
               ;;
             true)
-              echo "draft already exists, replacing its assets"
+              echo "draft already exists, replacing its assets and notes"
+              gh release edit "$GITHUB_REF_NAME" --repo "$REPO" \
+                --notes-file "$RUNNER_TEMP/notes.md"
               gh release upload "$GITHUB_REF_NAME" --repo "$REPO" --clobber release/*
               ;;
             *)
