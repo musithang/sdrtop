@@ -264,9 +264,42 @@ pub struct PanelSpec {
     pub width_pct: Option<u16>,
 }
 
-#[derive(Deserialize, Serialize, Clone, Debug)]
+/// One layout: which panels it draws, and where the menu files it.
+///
+/// The four menu fields are all optional, so a preset written before the menu
+/// existed still loads. `skip_serializing_if` is what keeps `save_config` from
+/// writing four empty keys into every `[presets.*]` block it round-trips.
+///
+/// `Default` is derived for the tests that care only about `panels`: they close
+/// their literals with `..Default::default()`, so the next field added here does
+/// not break them the way this one did.
+#[derive(Deserialize, Serialize, Clone, Debug, Default)]
 pub struct PresetConfig {
     pub panels: Vec<PanelSpec>,
+
+    /// Which menu section this layout belongs to, e.g. `"lab"`. Absent means the
+    /// Other section. The reserved id `"hidden"` keeps it out of the menu
+    /// entirely, which is what `observer` uses: it is given, not chosen.
+    ///
+    /// Declared here rather than derived from the preset's name because the name
+    /// already carries runtime behaviour. `lab_sweep` belongs in the Sweep
+    /// section but must keep its `lab_` prefix, which drives both the steel
+    /// frame (`UiState::is_lab_mode`) and the sweep task's start and stop.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub section: Option<String>,
+
+    /// The number key inside that section, 1 to 9. Absent means no number key:
+    /// the menu still lists the layout, and the cursor still reaches it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub slot: Option<u8>,
+
+    /// What the menu calls it. Absent means the preset name.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub title: Option<String>,
+
+    /// The second line under the title in the menu. Absent means no second line.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub blurb: Option<String>,
 }
 
 /// The sixteen built-in layouts, embedded at compile time.
@@ -538,6 +571,7 @@ panels = [
                     height: None,
                     width_pct: None,
                 }],
+                ..Default::default()
             },
         );
         let cfg = LayoutConfig::with_user_presets(&inline, Some(&dir));
@@ -1022,5 +1056,96 @@ panels = [
         let cfg: AppConfig = toml::from_str(toml).unwrap();
         let t = cfg.build_theme(None);
         assert_eq!(t.name, "nord");
+    }
+
+    // ── The menu metadata ────────────────────────────────────────────────────
+    //
+    // The menu is built from these fields rather than from a list in the code,
+    // so these four tests are what stop a built-in layout going missing from it.
+
+    /// Every built-in preset files itself somewhere.
+    ///
+    /// A missing section is legal for a *user* preset, which lands in Other. For
+    /// a built-in it means somebody added a layout and forgot the menu, which is
+    /// exactly the drift this design replaces.
+    #[test]
+    fn every_builtin_preset_declares_a_section() {
+        let cfg = LayoutConfig::default_config();
+        for (name, preset) in &cfg.presets {
+            assert!(
+                preset.section.is_some(),
+                "built-in preset '{name}' declares no section"
+            );
+        }
+    }
+
+    /// A slot is a number key, so two presets in one section cannot both claim
+    /// it. Across sections they can and must: that is the whole point of scoping
+    /// the digits.
+    #[test]
+    fn slots_are_unique_within_a_section() {
+        use std::collections::HashSet;
+        let cfg = LayoutConfig::default_config();
+        let mut seen: HashSet<(&str, u8)> = HashSet::new();
+        for (name, preset) in &cfg.presets {
+            let (Some(section), Some(slot)) = (preset.section.as_deref(), preset.slot) else {
+                continue;
+            };
+            assert!(
+                seen.insert((section, slot)),
+                "'{name}' claims slot {slot} in section '{section}', which is taken"
+            );
+        }
+    }
+
+    /// A slot is a single number key, so there is no slot 0 and no slot 12.
+    #[test]
+    fn slots_are_single_digits() {
+        let cfg = LayoutConfig::default_config();
+        for (name, preset) in &cfg.presets {
+            if let Some(slot) = preset.slot {
+                assert!(
+                    (1..=9).contains(&slot),
+                    "'{name}' has slot {slot}, which is not a number key"
+                );
+            }
+        }
+    }
+
+    /// A preset written before the menu existed still loads, and lands nowhere in
+    /// particular rather than failing. Loading has always been forgiving here and
+    /// four new fields must not change that.
+    #[test]
+    fn a_preset_without_menu_fields_still_parses() {
+        let src = r#"
+            panels = [ { name = "footer", position = "bottom" } ]
+        "#;
+        let preset: PresetConfig = toml::from_str(src).expect("must still parse");
+        assert!(preset.section.is_none());
+        assert!(preset.slot.is_none());
+        assert!(preset.title.is_none());
+        assert!(preset.blurb.is_none());
+        assert_eq!(preset.panels.len(), 1);
+    }
+
+    /// And a preset that carries no menu fields serialises without inventing
+    /// them. `save_config` rewrites the whole file, so without the
+    /// `skip_serializing_if` every round-tripped `[presets.*]` block in a user's
+    /// config would grow four empty keys on the next quit.
+    #[test]
+    fn absent_menu_fields_are_not_written_back() {
+        let preset = PresetConfig {
+            panels: vec![PanelSpec {
+                name: "footer".into(),
+                position: Position::Bottom,
+                height: None,
+                width_pct: None,
+            }],
+            ..Default::default()
+        };
+        let out = toml::to_string_pretty(&preset).unwrap();
+        for key in ["section", "slot", "title", "blurb"] {
+            assert!(!out.contains(key), "'{key}' should not appear in:\n{out}");
+        }
     }
 }

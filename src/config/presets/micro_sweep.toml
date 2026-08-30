@@ -1,5 +1,10 @@
 # Micro sweep — [0] cycle step 5: field scanner glance (starts a sweep).
 
+section = "sweep"
+slot    = 2
+title   = "Sweep, micro"
+blurb   = "the scan in a small window"
+
 panels = [
     { name = "micro_sweep_panel",  position = "body" },
     { name = "footer",             position = "bottom" },

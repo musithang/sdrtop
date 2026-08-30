@@ -284,6 +284,7 @@ mod tests {
                     height: None,
                     width_pct: None,
                 }],
+                ..Default::default()
             },
         );
         let (engine, _) = App::build_ui("my_layout", &user, None);

@@ -1,5 +1,10 @@
 # Waterfall only, full width.
 
+section = "command_rail"
+slot    = 3
+title   = "Waterfall"
+blurb   = "full width waterfall"
+
 panels = [
     { name = "header",     position = "top", height = 5 },
     { name = "waterfall",  position = "body" },

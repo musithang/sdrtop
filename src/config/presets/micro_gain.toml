@@ -1,5 +1,10 @@
 # Micro gain — [0] cycle step 3: gain-staging view for fast setup.
 
+section = "micro"
+slot    = 3
+title   = "Gain"
+blurb   = "the gain chain, large type"
+
 panels = [
     { name = "micro_gain_panel",  position = "body" },
     { name = "footer",            position = "bottom" },

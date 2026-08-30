@@ -1,6 +1,11 @@
 # The classic pair. A [spectrum, waterfall] Body pair triggers the engine's
 # bond automatically: the two render as one instrument sharing a frequency ruler.
 
+section = "command_rail"
+slot    = 4
+title   = "Spectrum + Waterfall"
+blurb   = "bonded pair, one shared ruler"
+
 panels = [
     { name = "header",     position = "top", height = 5 },
     { name = "spectrum",   position = "body" },

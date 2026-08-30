@@ -3,6 +3,11 @@
 # sample-rate), the real-time per-callback strip chart filling the body,
 # and a hardware-vitals column on the right.
 
+section = "lab"
+slot    = 3
+title   = "Timing"
+blurb   = "jitter, drops, scheduling"
+
 panels = [
     { name = "header",              position = "top", height = 5 },
     { name = "lab_banner",          position = "top", height = 2 },

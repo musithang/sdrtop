@@ -1,5 +1,10 @@
 # Spectrum only, full width, with the log strip under it.
 
+section = "command_rail"
+slot    = 2
+title   = "Spectrum"
+blurb   = "full width spectrum plot"
+
 panels = [
     { name = "header",    position = "top", height = 5 },
     { name = "spectrum",  position = "body" },

@@ -1,5 +1,10 @@
 # The original default view: spectrum over waterfall with a signal gauge strip.
 
+section = "command_rail"
+slot    = 5
+title   = "Classic"
+blurb   = "spectrum over waterfall with gauges"
+
 panels = [
     { name = "header",        position = "top", height = 5 },
     { name = "spectrum",      position = "body" },

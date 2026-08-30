@@ -1,6 +1,11 @@
 # Lab RF — front-end / gain chain focus: RF chain + NF/MDS left, spectrum
 # centre, hardware health right.
 
+section = "lab"
+slot    = 2
+title   = "RF"
+blurb   = "chain, noise figure, level line up"
+
 panels = [
     { name = "header",         position = "top", height = 5 },
     { name = "lab_banner",     position = "top", height = 2 },

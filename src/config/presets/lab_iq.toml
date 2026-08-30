@@ -3,6 +3,11 @@
 # amplitude histogram is superseded by the constellation (richer view of the
 # same data); the broadband spectrum gives way to the LO-centred scope.
 
+section = "lab"
+slot    = 1
+title   = "IQ"
+blurb   = "constellation, image rejection, DC"
+
 panels = [
     { name = "header",            position = "top", height = 5 },
     { name = "lab_banner",        position = "top", height = 2 },

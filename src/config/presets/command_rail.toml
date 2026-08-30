@@ -3,6 +3,11 @@
 # gain + stream + log foot, and the bonded spectrum/waterfall filling the
 # body. The [spectrum, waterfall] Body pair triggers the bond automatically.
 
+section = "command_rail"
+slot    = 1
+title   = "Rail"
+blurb   = "tuning deck, recall slots, log"
+
 panels = [
     { name = "header_slim",   position = "top", height = 4 },
     { name = "command_rail",  position = "left", width_pct = 28 },

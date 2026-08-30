@@ -371,12 +371,14 @@ mod tests {
             "alpha".to_string(),
             PresetConfig {
                 panels: vec![spec("one"), spec("two")],
+                ..Default::default()
             },
         );
         presets.insert(
             "beta".to_string(),
             PresetConfig {
                 panels: vec![spec("two")],
+                ..Default::default()
             },
         );
         let mut cfg = LayoutConfig {
@@ -433,6 +435,7 @@ mod tests {
             "aardvark".to_string(),
             PresetConfig {
                 panels: vec![spec("one")],
+                ..Default::default()
             },
         );
         // Sorted order is aardvark, alpha, beta - so from alpha the next is beta,

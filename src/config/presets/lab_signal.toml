@@ -4,6 +4,11 @@
 # MPX · demod column on the right. The [spectrum, waterfall] Body pair
 # triggers the engine's bond automatically (shared frequency ruler).
 
+section = "lab"
+slot    = 4
+title   = "Signal"
+blurb   = "SNR, occupied bandwidth, demod"
+
 panels = [
     { name = "header",                   position = "top", height = 5 },
     { name = "lab_banner",               position = "top", height = 2 },

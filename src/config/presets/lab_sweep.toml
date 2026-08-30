@@ -2,6 +2,11 @@
 # cursor metrics on the right, sweep status strip below. Compact header
 # (gain matters less while sweeping).
 
+section = "sweep"
+slot    = 1
+title   = "Band sweep"
+blurb   = "scan a range, hold the peaks"
+
 panels = [
     { name = "header",          position = "top", height = 3 },
     { name = "lab_banner",      position = "top", height = 2 },

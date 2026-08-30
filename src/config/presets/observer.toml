@@ -2,6 +2,8 @@
 # device info beside the host's own resource usage. Selected automatically rather
 # than by a key.
 
+section = "hidden"
+
 panels = [
     { name = "header",            position = "top", height = 5 },
     { name = "observer",          position = "left", width_pct = 60 },
