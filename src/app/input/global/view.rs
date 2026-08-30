@@ -33,6 +33,7 @@ pub(super) fn open_menu(ctx: &mut InputCtx<'_>) {
         section,
         entry,
         pane: crate::state::MenuPane::Views,
+        scroll: 0,
     });
 }
 

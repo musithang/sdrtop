@@ -10,12 +10,14 @@
 //! - [`model`]: presets to sections. The only part with logic, and the only part
 //!   that never touches ratatui.
 //! - [`sections`]: the left column.
-//! - [`entries`]: the right column.
+//! - [`entries`]: the right column, a section's layouts.
+//! - [`keys`]: the right column, the key reference.
 //!
 //! [`render`] is the orchestrator. It resolves the frame, carves the rows and
 //! columns, and calls each part once. **The parts do not call each other.**
 
 pub mod entries;
+pub mod keys;
 pub mod model;
 pub mod sections;
 
@@ -98,10 +100,11 @@ pub fn render(
             .direction(Direction::Horizontal)
             .constraints([Constraint::Length(LEFT_WIDTH), Constraint::Min(1)])
             .split(rows[1]);
-        sections::render(f, cols[0], menu, si, theme);
-        right_pane(f, cols[1], menu, si, ei, state.pane, false, theme);
+        let row = sections::selected_row(menu, si, state.pane);
+        sections::render(f, cols[0], menu, row, theme);
+        right_pane(f, cols[1], m, menu, si, ei, state, false, theme);
     } else {
-        right_pane(f, rows[1], menu, si, ei, state.pane, true, theme);
+        right_pane(f, rows[1], m, menu, si, ei, state, true, theme);
     }
 }
 
@@ -117,39 +120,39 @@ pub fn render(
 fn right_pane(
     f: &mut Frame,
     area: Rect,
+    m: &SdrMetrics,
     menu: &Menu,
     section: usize,
     cursor: usize,
-    pane: MenuPane,
+    state: &MenuState,
     folded: bool,
     theme: &crate::Theme,
 ) {
-    match pane {
-        MenuPane::Views => {
-            // In the folded single-column form the section name is the heading,
-            // because the list that would otherwise name it is not on screen.
-            let (heading, body) = if folded {
-                let split = Layout::default()
-                    .direction(Direction::Vertical)
-                    .constraints([Constraint::Length(1), Constraint::Min(1)])
-                    .split(area);
-                (Some(split[0]), split[1])
-            } else {
-                (None, area)
-            };
-            if let Some(heading) = heading {
-                f.render_widget(
-                    Paragraph::new(chrome::section(
-                        &menu.sections[section].title,
-                        "",
-                        heading.width as usize,
-                        theme,
-                    )),
-                    heading,
-                );
-            }
-            entries::render(f, body, &menu.sections[section], cursor, theme);
-        }
+    // In the folded single-column form the pane names itself, because the list
+    // that would otherwise name it is not on screen.
+    let (heading, body) = if folded {
+        let split = Layout::default()
+            .direction(Direction::Vertical)
+            .constraints([Constraint::Length(1), Constraint::Min(1)])
+            .split(area);
+        (Some(split[0]), split[1])
+    } else {
+        (None, area)
+    };
+    if let Some(heading) = heading {
+        let title = match state.pane {
+            MenuPane::Views => menu.sections[section].title.as_str(),
+            MenuPane::Keys => "Keys",
+        };
+        f.render_widget(
+            Paragraph::new(chrome::section(title, "", heading.width as usize, theme)),
+            heading,
+        );
+    }
+
+    match state.pane {
+        MenuPane::Views => entries::render(f, body, &menu.sections[section], cursor, theme),
+        MenuPane::Keys => keys::render(f, body, &m.caps.gain, state.scroll, theme),
     }
 }
 
@@ -226,6 +229,7 @@ mod tests {
             section,
             entry,
             pane: MenuPane::Views,
+            scroll: 0,
         }
     }
 
@@ -302,6 +306,60 @@ mod tests {
         let folded = draw(44, 16, &at(0, 0)).join("\n");
         assert!(!folded.contains("Command Rail"), "{folded}");
         assert!(folded.contains("COMMAND RAIL"), "{folded}");
+    }
+
+    /// The Keys pane is a row in the left column and the content of the right
+    /// one, and it replaces an overlay that had drifted out of step with the
+    /// dispatch. `keys.rs` owns the check that it cannot drift again.
+    #[test]
+    fn the_keys_pane_lists_the_global_keys() {
+        let state = MenuState {
+            section: 0,
+            entry: 0,
+            pane: MenuPane::Keys,
+            scroll: 0,
+        };
+        let all = draw(90, 30, &state).join("\n");
+        assert!(
+            all.contains("Keys"),
+            "the left column needs the row:\n{all}"
+        );
+        assert!(all.contains("start or stop RX"), "{all}");
+        assert!(all.contains("type a frequency"), "{all}");
+        // The section list is still there: the pane replaces the right column,
+        // not the whole menu.
+        assert!(all.contains("Command Rail"), "{all}");
+    }
+
+    /// The reference is taller than a short terminal, so it scrolls, and the
+    /// scroll actually moves the content rather than being stored and ignored.
+    #[test]
+    fn the_keys_pane_scrolls() {
+        let top = draw(
+            90,
+            18,
+            &MenuState {
+                section: 0,
+                entry: 0,
+                pane: MenuPane::Keys,
+                scroll: 0,
+            },
+        )
+        .join("\n");
+        let down = draw(
+            90,
+            18,
+            &MenuState {
+                section: 0,
+                entry: 0,
+                pane: MenuPane::Keys,
+                scroll: 8,
+            },
+        )
+        .join("\n");
+        assert!(top.contains("start or stop RX"), "{top}");
+        assert!(!down.contains("start or stop RX"), "scrolled away:\n{down}");
+        assert_ne!(top, down);
     }
 
     /// Small enough that nothing sensible fits. The requirement is only that it

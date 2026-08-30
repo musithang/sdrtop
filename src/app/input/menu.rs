@@ -10,7 +10,8 @@
 
 use crossterm::event::{KeyCode, KeyEvent};
 
-use crate::state::MenuState;
+use crate::state::{MenuPane, MenuState};
+use crate::ui::menu::{keys, sections};
 
 use super::{global, metrics, InputCtx, KeyAction};
 
@@ -25,15 +26,18 @@ pub(super) fn handle(key: KeyEvent, ctx: &mut InputCtx<'_>) -> KeyAction {
         KeyCode::Esc => close(ctx),
         KeyCode::Char('q') => return KeyAction::Quit,
 
-        KeyCode::Tab | KeyCode::Right => move_section(ctx, state, 1),
-        KeyCode::BackTab | KeyCode::Left => move_section(ctx, state, -1),
-        KeyCode::Down => move_entry(ctx, state, 1),
-        KeyCode::Up => move_entry(ctx, state, -1),
+        KeyCode::Tab | KeyCode::Right => move_row(ctx, state, 1),
+        KeyCode::BackTab | KeyCode::Left => move_row(ctx, state, -1),
+        KeyCode::Down => move_down(ctx, state, 1),
+        KeyCode::Up => move_down(ctx, state, -1),
 
         // A digit opens that slot in this section, which is the same thing the
         // digit does on the deck. The menu is a picture of the number keys, so
         // the two must not be able to disagree.
-        KeyCode::Char(c @ '1'..='9') => {
+        //
+        // The Keys pane has no slots, so a digit there does nothing rather than
+        // acting on whichever section the cursor last sat in.
+        KeyCode::Char(c @ '1'..='9') if state.pane == MenuPane::Views => {
             let slot = c as u8 - b'0';
             let target = section_of(ctx, state).and_then(|s| {
                 s.entries
@@ -45,7 +49,7 @@ pub(super) fn handle(key: KeyEvent, ctx: &mut InputCtx<'_>) -> KeyAction {
                 return open(ctx, &name);
             }
         }
-        KeyCode::Enter => {
+        KeyCode::Enter if state.pane == MenuPane::Views => {
             let target = ctx
                 .engine
                 .menu()
@@ -79,39 +83,79 @@ fn section_of<'a>(
     ctx.engine.menu().sections.get(si)
 }
 
-/// Step to another section, pulling the entry cursor back into range: the new
-/// section may be shorter than the one we came from.
-fn move_section(ctx: &mut InputCtx<'_>, state: MenuState, step: isize) {
-    let count = ctx.engine.menu().sections.len();
-    if count == 0 {
+/// Step down the left column: the sections, then the panes under the rule.
+///
+/// One index over both kinds of row, so `Tab` walks the column exactly as it is
+/// drawn and cannot skip the rule or land on it.
+fn move_row(ctx: &mut InputCtx<'_>, state: MenuState, step: isize) {
+    let menu = ctx.engine.menu();
+    let rows = sections::row_count(menu);
+    if rows == 0 {
         return;
     }
-    let Some((si, _)) = ctx.engine.menu().clamp(state.section, state.entry) else {
+    let Some((si, _)) = menu.clamp(state.section, state.entry) else {
         return;
     };
-    let next = wrap(si, step, count);
-    let entries = ctx.engine.menu().sections[next].entries.len();
-    metrics(ctx.state).ui.menu = Some(MenuState {
-        section: next,
-        entry: state.entry.min(entries.saturating_sub(1)),
-        ..state
-    });
+    let next = wrap(sections::selected_row(menu, si, state.pane), step, rows);
+
+    let updated = match sections::row_target(menu, next) {
+        Ok(section) => {
+            // The new section may be shorter than the one we came from.
+            let len = menu.sections[section].entries.len();
+            MenuState {
+                section,
+                entry: state.entry.min(len.saturating_sub(1)),
+                pane: MenuPane::Views,
+                scroll: 0,
+            }
+        }
+        // Leaving for a pane keeps `section` and `entry`, so coming back lands
+        // where you were rather than at the top.
+        Err(pane) => MenuState {
+            pane,
+            scroll: 0,
+            ..state
+        },
+    };
+    metrics(ctx.state).ui.menu = Some(updated);
 }
 
-/// Step within the current section, wrapping at its ends.
-fn move_entry(ctx: &mut InputCtx<'_>, state: MenuState, step: isize) {
-    let Some((si, ei)) = ctx.engine.menu().clamp(state.section, state.entry) else {
-        return;
-    };
-    let count = ctx.engine.menu().sections[si].entries.len();
-    if count == 0 {
-        return;
+/// Up and down: through a section's layouts, or through the key reference.
+fn move_down(ctx: &mut InputCtx<'_>, state: MenuState, step: isize) {
+    match state.pane {
+        MenuPane::Views => {
+            let Some((si, ei)) = ctx.engine.menu().clamp(state.section, state.entry) else {
+                return;
+            };
+            let count = ctx.engine.menu().sections[si].entries.len();
+            if count == 0 {
+                return;
+            }
+            metrics(ctx.state).ui.menu = Some(MenuState {
+                section: si,
+                entry: wrap(ei, step, count),
+                ..state
+            });
+        }
+        // The reference is taller than a short terminal, so it scrolls. It does
+        // not wrap: a list you are reading top to bottom should stop at the
+        // bottom rather than silently start again.
+        MenuPane::Keys => {
+            let last = {
+                let m = metrics(ctx.state);
+                keys::row_count(&m.caps.gain).saturating_sub(1)
+            };
+            let next = if step >= 0 {
+                (state.scroll + 1).min(last)
+            } else {
+                state.scroll.saturating_sub(1)
+            };
+            metrics(ctx.state).ui.menu = Some(MenuState {
+                scroll: next,
+                ..state
+            });
+        }
     }
-    metrics(ctx.state).ui.menu = Some(MenuState {
-        section: si,
-        entry: wrap(ei, step, count),
-        ..state
-    });
 }
 
 /// `i + step` modulo `len`, for a step of -1 or 1. Pure, so the wrap-around at
