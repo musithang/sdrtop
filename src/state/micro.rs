@@ -47,6 +47,23 @@ impl MicroView {
         }
     }
 
+    /// The view a preset name names, if it names one.
+    ///
+    /// The inverse of [`MicroView::preset_name`], and the reason the view needs
+    /// no field of its own: the active preset already knows, so a second copy
+    /// could only ever disagree with it.
+    pub fn from_preset(name: &str) -> Option<Self> {
+        [
+            MicroView::Main,
+            MicroView::Signal,
+            MicroView::Gain,
+            MicroView::Health,
+            MicroView::Sweep,
+        ]
+        .into_iter()
+        .find(|v| v.preset_name() == name)
+    }
+
     /// Short label for the footer (`main`, `signal`, …).
     pub fn label(self) -> &'static str {
         match self {
@@ -118,5 +135,33 @@ mod tests {
         assert_eq!(MicroView::Main.preset_name(), "micro_main");
         assert_eq!(MicroView::Signal.preset_name(), "micro_signal");
         assert_eq!(MicroView::Health.preset_name(), "micro_health");
+    }
+
+    /// The active preset is the single source of truth for which micro view is
+    /// on screen.
+    ///
+    /// Two copies of that fact was one too many: `cycle_micro` set both, and
+    /// every other route into a micro preset set only the preset, so the footer
+    /// could advertise the keys of a view you were not looking at.
+    #[test]
+    fn every_view_round_trips_through_its_preset_name() {
+        for view in [
+            MicroView::Main,
+            MicroView::Signal,
+            MicroView::Gain,
+            MicroView::Health,
+            MicroView::Sweep,
+        ] {
+            assert_eq!(MicroView::from_preset(view.preset_name()), Some(view));
+        }
+    }
+
+    /// A layout that is not a micro view names none, rather than defaulting to
+    /// one and quietly claiming the deck is in micro mode.
+    #[test]
+    fn a_non_micro_preset_names_no_view() {
+        for name in ["lab_iq", "spectrum", "command_rail", "observer", ""] {
+            assert_eq!(MicroView::from_preset(name), None, "{name}");
+        }
     }
 }

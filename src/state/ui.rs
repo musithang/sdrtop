@@ -149,9 +149,6 @@ pub struct UiState {
     /// Names of all defined presets, synced each frame alongside active_preset.
     /// Lets the footer build the lab map from presets that actually exist.
     pub preset_names: Vec<String>,
-    /// Current position in the micro `[0]` cycle. Advanced by the `[0]` handler;
-    /// read by the footer to show "micro N/M".
-    pub micro_view: MicroView,
     pub log: VecDeque<LogEntry>,
     /// Command Rail lead-view mode (Hunt/Monitor/Bench). See [`RailMode`].
     pub rail_mode: RailMode,
@@ -230,6 +227,19 @@ impl UiState {
         self.active_preset.starts_with("lab_")
     }
 
+    /// Which micro view is on screen, read off the active preset exactly the way
+    /// [`UiState::is_lab_mode`] reads the lab chrome.
+    ///
+    /// This used to be a stored field. `cycle_micro` kept it in step and nothing
+    /// else did, so any other route into a micro preset left the footer showing
+    /// the position and key hints of a view that was not on screen. Reading the
+    /// preset removes the possibility rather than fixing the instance.
+    ///
+    /// Reads the per-frame `active_preset` mirror, so it is valid during draw.
+    pub fn micro_view(&self) -> MicroView {
+        MicroView::from_preset(&self.active_preset).unwrap_or_default()
+    }
+
     /// Record an auto-follow mode change (tuning → Hunt, gain → Bench): set the
     /// mode and (re)start its idle decay timer.
     pub fn note_mode_action(&mut self, mode: RailMode) {
@@ -274,7 +284,6 @@ impl Default for UiState {
             focused_panel_bindings: &[],
             active_preset: String::new(),
             preset_names: Vec::new(),
-            micro_view: MicroView::default(),
             log: VecDeque::new(),
             rail_mode: RailMode::default(),
             rail_mode_auto: false,
@@ -418,5 +427,52 @@ mod tests {
         assert_eq!(e.level, LogLevel::Error);
         assert_eq!(e.text.as_ref(), "Tune error: nope");
         assert!(e.at_epoch_secs > 0, "timestamp captured");
+    }
+
+    /// The micro view follows the active preset **however that preset was
+    /// reached**.
+    ///
+    /// This is the bug the field caused. `cycle_micro` wrote both the field and
+    /// the preset, so `[0]` looked correct; every other route wrote only the
+    /// preset, and the footer went on showing the position and key hints of the
+    /// view you had left. Now there is nothing to write.
+    #[test]
+    fn the_micro_view_follows_the_active_preset_by_any_route() {
+        let mut ui = UiState::default();
+        for (preset, expected) in [
+            ("micro_main", MicroView::Main),
+            ("micro_gain", MicroView::Gain),
+            ("micro_sweep", MicroView::Sweep),
+            ("micro_health", MicroView::Health),
+        ] {
+            ui.active_preset = preset.to_string();
+            assert_eq!(ui.micro_view(), expected, "reached {preset}");
+        }
+    }
+
+    /// Off the micro family the answer is the default rather than whatever the
+    /// last micro view happened to be, so a stale position cannot follow you onto
+    /// a lab bench.
+    #[test]
+    fn a_non_micro_preset_reports_the_default_view() {
+        let mut ui = UiState {
+            active_preset: "micro_health".to_string(),
+            ..Default::default()
+        };
+        assert_eq!(ui.micro_view(), MicroView::Health);
+        ui.active_preset = "lab_iq".to_string();
+        assert_eq!(ui.micro_view(), MicroView::default());
+    }
+
+    /// `is_lab_mode` and `micro_view` read the same field and must never both
+    /// claim the deck.
+    #[test]
+    fn a_layout_is_not_both_a_lab_and_a_micro_view() {
+        let mut ui = UiState::default();
+        for preset in ["lab_iq", "lab_sweep", "micro_main", "spectrum"] {
+            ui.active_preset = preset.to_string();
+            let micro = MicroView::from_preset(preset).is_some();
+            assert!(!(ui.is_lab_mode() && micro), "{preset} claims to be both");
+        }
     }
 }

@@ -39,20 +39,19 @@ pub(in crate::app::input) fn try_set_preset(
 /// The `[0]` micro-ecosystem cycle. Entering from a non-micro preset lands on
 /// `micro_main`; pressing `[0]` again while already in a micro preset advances
 /// to the next view. A target whose preset is not yet defined is logged and
-/// skipped (micro_view does not advance), so the cycle never strands the user on
-/// a blank view while the micro presets are still being built out.
+/// skipped, so the cycle never strands the user on a blank view while the micro
+/// presets are still being built out.
 pub(super) fn cycle_micro(engine: &mut ui::LayoutEngine, state: &Arc<Mutex<SdrMetrics>>) {
     // The sweep step is part of the cycle: entering micro_sweep starts a scan.
     const SWEEP_ACTIVE: bool = true;
-    let in_micro = engine.active_preset().starts_with("micro_");
-    let mut m = metrics(state);
-    let target = if in_micro {
-        m.ui.micro_view.next(SWEEP_ACTIVE)
-    } else {
-        MicroView::Main
+    // Ask the engine, which owns the authoritative value, rather than the
+    // per-frame mirror in `UiState`: this runs on a key, between draws.
+    let target = match MicroView::from_preset(engine.active_preset()) {
+        Some(current) => current.next(SWEEP_ACTIVE),
+        None => MicroView::Main,
     };
+    let mut m = metrics(state);
     if engine.has_preset(target.preset_name()) {
-        m.ui.micro_view = target;
         engine.set_preset(target.preset_name());
         m.push_log(format!(
             "Micro: {} ({}/{})",

@@ -284,7 +284,7 @@ pub fn compute_footer_height(available_width: u16, state: &SdrMetrics) -> u16 {
             &normal_items(
                 &state.ui.active_preset,
                 &state.ui.preset_names,
-                state.ui.micro_view,
+                state.ui.micro_view(),
                 available_width,
                 &state.caps.gain,
             ),
@@ -394,7 +394,7 @@ impl Panel for FooterPanel {
                         let items = normal_items(
                             &m.ui.active_preset,
                             &m.ui.preset_names,
-                            m.ui.micro_view,
+                            m.ui.micro_view(),
                             frame::outer_of(inner).width,
                             &m.caps.gain,
                         );
