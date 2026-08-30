@@ -21,6 +21,7 @@
 pub mod chrome;
 pub mod device_selector;
 pub mod engine;
+pub mod menu;
 pub mod overlay;
 pub mod panel;
 pub mod panels;
