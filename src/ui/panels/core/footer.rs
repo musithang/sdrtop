@@ -24,7 +24,7 @@ const NORMAL_ITEMS: &[&str] = &[
     "[F] Freq",
     "[S] Rate",
     "[R] Reset",
-    "[?] Help",
+    "[Esc] Menu",
     "[Tab] Hide",
 ];
 
@@ -40,7 +40,7 @@ fn base_normal_items(gm: &GainModel) -> Vec<String> {
             "[F] Freq".into(),
             "[S] Rate".into(),
             "[R] Reset".into(),
-            "[?] Help".into(),
+            "[Esc] Menu".into(),
             "[Tab] Hide".into(),
         ]
     } else {
@@ -50,16 +50,6 @@ fn base_normal_items(gm: &GainModel) -> Vec<String> {
 
 /// Width (terminal columns) below which the preset name is shown in short form.
 const NARROW_COLS: u16 = 60;
-
-/// The lab preset family, in reserved number-key order. The footer shows these
-/// as a navigation map when one of them is the active preset; only the ones
-/// that actually exist (synced into `preset_names`) are listed.
-const LAB_FAMILY: &[(&str, &str)] = &[
-    ("5", "lab_iq"),
-    ("6", "lab_rf"),
-    ("7", "lab_timing"),
-    ("8", "lab_signal"),
-];
 
 /// Display label for a preset in the footer. Narrow terminals get an
 /// abbreviated form for the few long names; everything else passes through.
@@ -77,29 +67,44 @@ fn preset_label(name: &str, narrow: bool) -> &str {
 }
 
 /// Whether `name` belongs to the lab preset family.
+///
+/// The prefix rather than a table of four names: the same prefix already drives
+/// `UiState::is_lab_mode` and the steel frame, so one rule decides. `lab_sweep`
+/// is deliberately included by it, which is what it always was on screen.
 fn is_lab_preset(name: &str) -> bool {
-    LAB_FAMILY.iter().any(|(_, n)| *n == name)
+    name.starts_with("lab_")
 }
 
-/// Whether `name` is a micro ecosystem preset (entered via the `[0]` cycle).
+/// Whether `name` is a micro ecosystem preset.
 fn is_micro_preset(name: &str) -> bool {
     name.starts_with("micro_")
 }
 
-/// Condensed footer for the micro ecosystem: the essential field keys plus the
-/// `[0]▸{next}` hint and the `N/M` cycle position.
-fn micro_items(view: MicroView, narrow: bool, gm: &GainModel) -> Vec<String> {
-    // The sweep step is part of the [0] cycle.
+/// Condensed footer for the micro ecosystem: the essential field keys, the range
+/// of number keys that switch view, and the `N/M` position.
+///
+/// The hint used to be `[0]\u{25B8}{next}`, naming the key that walked the cycle.
+/// The cycle is gone: the views have number keys like every other section, so the
+/// footer names the range that actually works.
+fn micro_items(
+    view: MicroView,
+    scope: &[(Option<u8>, String)],
+    narrow: bool,
+    gm: &GainModel,
+) -> Vec<String> {
     let sweep_active = true;
-    let next = view.next(sweep_active);
     let total = MicroView::total(sweep_active);
     let pos = view.position();
+    let keys = match scope.iter().filter(|(slot, _)| slot.is_some()).count() {
+        0 => "[1-9]".to_string(),
+        n => format!("[1-{n}]"),
+    };
     if narrow {
         vec![
             "[Q]".into(),
             "[Spc]".into(),
             "[↑↓]".into(),
-            format!("[0]▸{}", next.label()),
+            keys,
             format!("{}/{}", pos, total),
         ]
     } else {
@@ -111,46 +116,59 @@ fn micro_items(view: MicroView, narrow: bool, gm: &GainModel) -> Vec<String> {
             v.push("[[]VGA".into());
         }
         v.push("[F]req".into());
-        v.push(format!("[0]▸{}", next.label()));
+        v.push(keys);
         v.push(format!("micro {}/{}", pos, total));
         v
     }
 }
 
-/// Navigation map for the lab family: one entry per defined lab preset, with
-/// the active one marked `▸`. Returns empty if none are available.
-fn lab_map_items(active: &str, available: &[String]) -> Vec<String> {
-    LAB_FAMILY
+/// Navigation map for the active section: one entry per layout that has a number
+/// key, with the current one marked `▸`.
+///
+/// Built from `UiState::scope`, which mirrors the engine's section into the frame
+/// snapshot. It used to be built from a `LAB_FAMILY` table hard-coding
+/// `[5]`-`[8]`, which stopped being true the moment the digits became
+/// section-relative: the footer would have gone on advertising four keys that do
+/// nothing, which is the same way the old help overlay came to claim `[1]` meant
+/// `main`. A footer that names keys has to read the keys.
+fn scope_map_items(active: &str, scope: &[(Option<u8>, String)]) -> Vec<String> {
+    scope
         .iter()
-        .filter(|(_, name)| available.iter().any(|p| p == name))
-        .map(|(key, name)| {
-            if *name == active {
-                format!("[{}]▸{}", key, name)
+        // A layout with no slot has no number key, so the map has nothing to
+        // teach about it.
+        .filter_map(|(slot, name)| slot.map(|s| (s, name)))
+        .map(|(slot, name)| {
+            if name == active {
+                format!("[{}]\u{25B8}{}", slot, name)
             } else {
-                format!("[{}] {}", key, name)
+                format!("[{}] {}", slot, name)
             }
         })
         .collect()
 }
 
 /// The normal-mode footer items for the active preset:
-/// - micro presets → a condensed field-key set with the `[0]` cycle hint;
-/// - lab presets   → the fixed keys plus the lab navigation map;
+/// - micro presets → a condensed field-key set and the position in the family;
+/// - lab presets   → the fixed keys plus the section's navigation map;
 /// - everything else → the fixed keys plus the `[P] {preset}` hint.
+///
+/// `scope` is the active section, mirrored into the snapshot each frame. The
+/// footer names keys, and the keys are section-relative, so it has to read the
+/// section rather than a table of its own.
 fn normal_items(
     active_preset: &str,
-    available: &[String],
+    scope: &[(Option<u8>, String)],
     micro_view: MicroView,
     available_width: u16,
     gm: &GainModel,
 ) -> Vec<String> {
     let narrow = available_width < NARROW_COLS;
     if is_micro_preset(active_preset) {
-        return micro_items(micro_view, narrow, gm);
+        return micro_items(micro_view, scope, narrow, gm);
     }
     let mut items: Vec<String> = base_normal_items(gm);
     if is_lab_preset(active_preset) {
-        items.extend(lab_map_items(active_preset, available));
+        items.extend(scope_map_items(active_preset, scope));
     } else {
         items.push(format!("[P] {}", preset_label(active_preset, narrow)));
     }
@@ -283,7 +301,7 @@ pub fn compute_footer_height(available_width: u16, state: &SdrMetrics) -> u16 {
         count_lines(
             &normal_items(
                 &state.ui.active_preset,
-                &state.ui.preset_names,
+                &state.ui.scope,
                 state.ui.micro_view(),
                 available_width,
                 &state.caps.gain,
@@ -340,7 +358,7 @@ impl Panel for FooterPanel {
             styled_lines(
                 vec![vec![
                     "[Q] Quit".into(),
-                    "[?] Help".into(),
+                    "[Esc] Menu".into(),
                     "(Observer Mode)".into(),
                 ]],
                 FOCUS_SEP,
@@ -393,7 +411,7 @@ impl Panel for FooterPanel {
                     } else {
                         let items = normal_items(
                             &m.ui.active_preset,
-                            &m.ui.preset_names,
+                            &m.ui.scope,
                             m.ui.micro_view(),
                             frame::outer_of(inner).width,
                             &m.caps.gain,
@@ -604,12 +622,38 @@ mod tests {
         assert_eq!(items.last().map(String::as_str), Some("[P] spec+wf"));
     }
 
+    /// The Micro section as the engine mirrors it: four layouts, slots 1 to 4.
+    fn micro_scope() -> Vec<(Option<u8>, String)> {
+        vec![
+            (Some(1), "micro_main".to_string()),
+            (Some(2), "micro_signal".to_string()),
+            (Some(3), "micro_gain".to_string()),
+            (Some(4), "micro_health".to_string()),
+        ]
+    }
+
+    /// The Lab section, likewise.
+    fn lab_scope() -> Vec<(Option<u8>, String)> {
+        vec![
+            (Some(1), "lab_iq".to_string()),
+            (Some(2), "lab_rf".to_string()),
+            (Some(3), "lab_timing".to_string()),
+            (Some(4), "lab_signal".to_string()),
+        ]
+    }
+
     #[test]
-    fn micro_preset_shows_condensed_footer_with_next_and_position() {
-        // From micro_main (Main), the [0] hint points at the next view (signal)
-        // and the position reads 1/5 (the cycle includes the sweep step).
-        let items = normal_items("micro_main", &[], MicroView::Main, 120, &GainModel::HackRf);
-        assert!(items.iter().any(|i| i == "[0]▸signal"));
+    fn micro_preset_shows_the_working_keys_and_the_position() {
+        let items = normal_items(
+            "micro_main",
+            &micro_scope(),
+            MicroView::Main,
+            120,
+            &GainModel::HackRf,
+        );
+        // The hint names the range of keys that work, not the retired [0] cycle.
+        assert!(items.iter().any(|i| i == "[1-4]"), "{items:?}");
+        assert!(items.iter().all(|i| !i.starts_with("[0]")), "{items:?}");
         assert!(items.iter().any(|i| i == "micro 1/5"));
         // No [P] hint and none of the long normal items in micro mode.
         assert!(items.iter().all(|i| !i.starts_with("[P]")));
@@ -620,40 +664,76 @@ mod tests {
     fn micro_footer_narrow_is_more_compact() {
         let items = normal_items(
             "micro_signal",
-            &[],
+            &micro_scope(),
             MicroView::Signal,
             50,
             &GainModel::HackRf,
         );
-        assert!(items.iter().any(|i| i == "[0]▸gain"));
+        assert!(items.iter().any(|i| i == "[1-4]"), "{items:?}");
         assert!(items.iter().any(|i| i == "2/5"));
     }
 
+    /// The map names the keys the section actually has, with the current layout
+    /// marked. It used to name `[5]`-`[8]` from a table of its own; those keys do
+    /// nothing now, and a footer that names keys has to read the keys.
     #[test]
-    fn lab_map_lists_only_available_presets_with_active_marked() {
-        let available = vec![
-            "lab_iq".to_string(),
-            "lab_rf".to_string(),
-            "lab_signal".to_string(),
+    fn the_section_map_uses_the_real_slots_with_the_active_one_marked() {
+        let map = scope_map_items("lab_rf", &lab_scope());
+        assert_eq!(
+            map,
+            vec![
+                "[1] lab_iq",
+                "[2]▸lab_rf",
+                "[3] lab_timing",
+                "[4] lab_signal"
+            ]
+        );
+    }
+
+    /// A layout with no slot has no number key, so the map stays quiet about it
+    /// rather than inventing one.
+    #[test]
+    fn the_section_map_skips_a_layout_with_no_slot() {
+        let scope = vec![
+            (Some(1), "lab_iq".to_string()),
+            (None, "mine".to_string()),
+            (Some(2), "lab_rf".to_string()),
         ];
-        let map = lab_map_items("lab_rf", &available);
-        // lab_timing [7] is not available → excluded.
-        assert_eq!(map, vec!["[5] lab_iq", "[6]▸lab_rf", "[8] lab_signal"]);
+        assert_eq!(
+            scope_map_items("lab_iq", &scope),
+            vec!["[1]▸lab_iq", "[2] lab_rf"]
+        );
     }
 
     #[test]
-    fn normal_items_shows_lab_map_in_lab_preset() {
-        let available = vec!["lab_iq".to_string(), "lab_rf".to_string()];
+    fn normal_items_shows_the_section_map_in_a_lab_preset() {
         let items = normal_items(
             "lab_iq",
-            &available,
+            &lab_scope(),
             MicroView::Main,
             120,
             &GainModel::HackRf,
         );
         // No [P] entry in lab mode; the map entries are appended instead.
         assert!(items.iter().all(|i| !i.starts_with("[P]")));
-        assert!(items.contains(&"[5]▸lab_iq".to_string()));
-        assert!(items.contains(&"[6] lab_rf".to_string()));
+        assert!(items.contains(&"[1]▸lab_iq".to_string()));
+        assert!(items.contains(&"[2] lab_rf".to_string()));
+    }
+
+    /// The footer must not advertise a key that does nothing. `[?]` and `[0]`
+    /// are both retired, and this is the surface that used to name them.
+    #[test]
+    fn the_footer_names_no_retired_key() {
+        for (preset, scope) in [
+            ("main", Vec::new()),
+            ("lab_iq", lab_scope()),
+            ("micro_main", micro_scope()),
+        ] {
+            let items = normal_items(preset, &scope, MicroView::Main, 120, &GainModel::HackRf);
+            for item in &items {
+                assert!(!item.contains("[?]"), "{preset}: {item}");
+                assert!(!item.starts_with("[0]"), "{preset}: {item}");
+            }
+        }
     }
 }
