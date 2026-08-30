@@ -18,8 +18,8 @@ checkpoint instead of by version.
 
 ## [0.4.2] - 2026-08-29
 
-> 🎧 Assembled across 48 hours without meaningful sleep, in a fight that turned
-> out to be against a YAML file. The YAML file lost. Eventually. At 04:00.
+> 🎧 Written on two days without sleep, most of which were spent losing an
+> argument to a YAML file. It is a good release. I would not do it again.
 >
 > Soundtrack, if you want the authentic experience:
 > [What's Happening 2 BATTLE](https://www.youtube.com/watch?v=eYWDZrn3ptQ)
