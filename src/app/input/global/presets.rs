@@ -21,7 +21,7 @@ use super::super::{metrics, KeyAction};
 /// directly and then log `"Preset: spectrum"` unconditionally - but `set_preset`
 /// silently declines a name it does not know, so with that preset missing the key
 /// logged a switch that had not happened.
-pub(super) fn try_set_preset(
+pub(in crate::app::input) fn try_set_preset(
     engine: &mut ui::LayoutEngine,
     state: &Arc<Mutex<SdrMetrics>>,
     name: &str,

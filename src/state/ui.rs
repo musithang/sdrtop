@@ -165,6 +165,35 @@ pub struct UiState {
     pub recall_cursor: usize,
     /// Whether the Command Rail's full-log overlay (`L` in rail-focus) is open.
     pub log_overlay: bool,
+    /// Where the cursor is while the menu is open, `None` when it is closed.
+    /// See [`MenuState`].
+    pub menu: Option<MenuState>,
+}
+
+/// Which pane the menu's right column is showing.
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
+pub enum MenuPane {
+    /// The selected section's layouts. The only pane the number keys work in.
+    #[default]
+    Views,
+}
+
+/// Where the cursor is while the menu is open.
+///
+/// The cursor sits on a **view**, never on a section heading. That is what lets
+/// `Enter` mean exactly one thing, and it is why resume needs no key of its own:
+/// the menu opens with the cursor already on the active preset, so `Enter` puts
+/// you back where you were using the same key that opens anything else.
+///
+/// Indices into `menu::model::Menu`, which the engine owns and rebuilds never.
+/// A stale index cannot outlive the table it points into, but the renderer still
+/// clamps rather than trusting them, because this is cloned into every frame's
+/// snapshot and a panic during draw takes the terminal with it.
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
+pub struct MenuState {
+    pub section: usize,
+    pub entry: usize,
+    pub pane: MenuPane,
 }
 
 impl UiState {
@@ -244,6 +273,7 @@ impl Default for UiState {
             recall: [None; RECALL_SLOTS],
             recall_cursor: 0,
             log_overlay: false,
+            menu: None,
         }
     }
 }

@@ -50,22 +50,22 @@ impl LayoutEngine {
     pub fn menu_warnings(&self) -> &[String] {
         &self.menu.warnings
     }
+
+    /// The section table the menu draws.
+    pub fn menu(&self) -> &menu::model::Menu {
+        &self.menu
+    }
 }
 
 /// Where the deck is, and what a number key means there.
 ///
 /// Its own impl block so the group reads together, and so one `allow` covers it:
-/// nothing outside the tests calls these until the menu screen and the scoped
-/// number keys land. This is a binary crate, so `pub` does not keep an uncalled
-/// item alive, and CI runs clippy with `-D warnings`. **Delete the attribute
-/// once the menu renders and the digits are scoped.**
+/// nothing outside the tests calls these three until the number keys are scoped
+/// to the active section. This is a binary crate, so `pub` does not keep an
+/// uncalled item alive, and CI runs clippy with `-D warnings`. **Delete the
+/// attribute in the checkpoint that scopes the digits.**
 #[allow(dead_code)]
 impl LayoutEngine {
-    /// The section table the menu draws.
-    pub fn menu(&self) -> &menu::model::Menu {
-        &self.menu
-    }
-
     /// Which section the deck is in: the section of the active preset.
     ///
     /// **Derived, never stored.** A second copy of "where am I" is a copy that

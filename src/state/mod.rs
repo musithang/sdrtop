@@ -34,8 +34,8 @@ pub use sweep::{SweepConfig, SweepFrame, SweepState, SWEEP_SETTLING_MS};
 pub use system::SystemState;
 pub use timing::{TimingQuality, TimingState, HACKRF_SAMPLES_PER_TRANSFER};
 pub use ui::{
-    active_recall_slot, recall_from_hz, recall_to_hz, InputMode, LogEntry, LogLevel, RailMode,
-    UiState, RECALL_SLOTS,
+    active_recall_slot, recall_from_hz, recall_to_hz, InputMode, LogEntry, LogLevel, MenuPane,
+    MenuState, RailMode, UiState, RECALL_SLOTS,
 };
 pub use waterfall::{FftFrame, WaterfallState, WATERFALL_MIN_ROWS};
 

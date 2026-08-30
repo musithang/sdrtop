@@ -18,7 +18,9 @@
 //! against.
 
 mod gain;
-mod presets;
+// `menu` reaches `try_set_preset` too: the menu and the number keys must load
+// a layout the same way, or the two could drift.
+pub(super) mod presets;
 mod radio;
 mod view;
 
@@ -28,7 +30,7 @@ use super::{InputCtx, KeyAction};
 
 pub(super) fn handle(key: KeyEvent, ctx: &mut InputCtx<'_>) -> KeyAction {
     match key.code {
-        KeyCode::Esc => view::leave_focus(ctx),
+        KeyCode::Esc => view::leave_focus_or_open_menu(ctx),
         KeyCode::Char('q') => return KeyAction::Quit,
 
         // ── The radio ───────────────────────────────────────────────────────

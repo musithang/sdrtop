@@ -1,14 +1,17 @@
 //! Keyboard dispatch.
 //!
-//! Three layers, in this order:
+//! Four layers, in this order:
 //!
 //! 1. **Input mode.** [`handle_key`] looks at `UiState::input_mode` first: while
 //!    a frequency, sample rate, sweep bound or marker label is being typed, the
 //!    keyboard belongs to [`text`] and nothing else sees it.
-//! 2. **Panel focus.** [`handle_normal`] asks the layout engine which panel holds
+//! 2. **The menu.** While it is open it is modal and owns the keyboard, so a
+//!    focus handler cannot act on a deck that is currently behind it. It is not
+//!    an `InputMode` because those five variants are all text being typed.
+//! 3. **Panel focus.** [`handle_normal`] asks the layout engine which panel holds
 //!    focus and hands the key to that panel's own handler - [`core`], [`bench`],
 //!    [`signal`], [`sweep`] or [`rail`].
-//! 3. **Global.** Anything a focus handler does not claim falls through to
+//! 4. **Global.** Anything a focus handler does not claim falls through to
 //!    [`global`], which is also where an unfocused key lands.
 //!
 //! Every handler below the first layer takes the same [`InputCtx`], so adding a
@@ -18,6 +21,7 @@
 mod bench;
 mod core;
 mod global;
+mod menu;
 mod rail;
 mod signal;
 mod sweep;
@@ -92,7 +96,16 @@ pub fn handle_key(
     };
     let input_mode = metrics(state).ui.input_mode.clone();
     match input_mode {
-        InputMode::Normal => handle_normal(key, &mut ctx),
+        InputMode::Normal => {
+            // Layer 2. The menu is modal, so while it is open it owns the
+            // keyboard: a panel's focus handler must not act on a deck the user
+            // is not currently looking at.
+            if metrics(state).ui.menu.is_some() {
+                menu::handle(key, &mut ctx)
+            } else {
+                handle_normal(key, &mut ctx)
+            }
+        }
         InputMode::FrequencyInput => {
             text::frequency(key, state, device);
             KeyAction::Continue

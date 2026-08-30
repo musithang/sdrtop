@@ -145,6 +145,19 @@ impl App {
             if self.show_help {
                 ui::overlay::render_help(f, &m);
             }
+            // The menu floats over the deck, the same way the log overlay does.
+            // Drawn last so nothing else lands on top of it, and outside the
+            // layout engine because it is not a panel.
+            if let Some(menu_state) = m.ui.menu {
+                let full = f.size();
+                let area = ui::overlay::centered_rect(
+                    (full.width * 8 / 10).clamp(1, full.width).max(1),
+                    (full.height * 8 / 10).clamp(1, full.height).max(1),
+                    full,
+                );
+                f.render_widget(ratatui::widgets::Clear, area);
+                ui::menu::render(f, area, &m, self.engine.menu(), &menu_state, &frame_theme);
+            }
         })?;
         Ok(())
     }

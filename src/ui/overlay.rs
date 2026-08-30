@@ -87,7 +87,9 @@ pub fn render_log(f: &mut Frame, m: &SdrMetrics, theme: &crate::Theme) {
     crate::ui::panels::core::log::render(f, area, m, theme);
 }
 
-fn centered_rect(width: u16, height: u16, r: Rect) -> Rect {
+/// A `width` by `height` box in the middle of `r`. Shared with `ui::menu`,
+/// which floats over the deck the same way the log overlay does.
+pub(crate) fn centered_rect(width: u16, height: u16, r: Rect) -> Rect {
     let vertical = Layout::default()
         .direction(Direction::Vertical)
         .constraints([

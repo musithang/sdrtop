@@ -6,6 +6,36 @@ use std::sync::Arc;
 
 use super::super::{metrics, InputCtx};
 
+/// `[Esc]` is one rule applied repeatedly: up one level.
+///
+/// With a panel focused that means leaving focus. With nothing focused there was
+/// nothing above the deck until now, and now there is the menu, so the new
+/// meaning fills a hole rather than taking a job away: `Esc` on an unfocused
+/// deck did nothing at all before this.
+pub(super) fn leave_focus_or_open_menu(ctx: &mut InputCtx<'_>) {
+    if ctx.engine.focused_panel_name().is_some() {
+        leave_focus(ctx);
+        return;
+    }
+    open_menu(ctx);
+}
+
+/// Open the menu with the cursor on the active preset.
+///
+/// The cursor starting there is what makes `Enter` resume: the most ordinary
+/// thing a person does with this screen needs no key of its own. A preset the
+/// menu hides, or one no longer in the config, starts the cursor at the top
+/// rather than refusing to open.
+pub(super) fn open_menu(ctx: &mut InputCtx<'_>) {
+    let active = ctx.engine.active_preset().to_string();
+    let (section, entry) = ctx.engine.menu().locate(&active).unwrap_or((0, 0));
+    metrics(ctx.state).ui.menu = Some(crate::state::MenuState {
+        section,
+        entry,
+        pane: crate::state::MenuPane::Views,
+    });
+}
+
 /// `[Esc]` - leave focus mode, and clear **everything** focus mode put on screen.
 ///
 /// Missing one of these is how a cursor or a scroll offset survives into a panel

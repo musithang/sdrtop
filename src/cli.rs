@@ -25,7 +25,7 @@ use std::path::PathBuf;
 // `cargo:rustc-env` it emits exists. `env!` would refuse to compile there.
 // Inside the build script this is therefore always the fallback arm, which is
 // correct: the man page carries the plain version and no commit.
-const VERSION: &str = match option_env!("SDRTOP_VERSION") {
+pub(crate) const VERSION: &str = match option_env!("SDRTOP_VERSION") {
     Some(v) => v,
     None => env!("CARGO_PKG_VERSION"),
 };
