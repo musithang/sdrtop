@@ -199,6 +199,17 @@ impl App {
         let active = preset_override.unwrap_or(&cfg.display.active_preset);
         let (engine, focus_keys) = Self::build_ui(active, &cfg.presets, presets_dir.as_deref());
 
+        // A user preset that wanted a number key already taken says so, once,
+        // here. `menu::model::build` collects these instead of logging them so it
+        // can stay a pure function; this is the one place that has both the
+        // warnings and the lock.
+        {
+            let mut m = state.lock().unwrap_or_else(|e| e.into_inner());
+            for warning in engine.menu_warnings() {
+                m.push_log(warning.clone());
+            }
+        }
+
         Self {
             state,
             device,

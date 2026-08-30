@@ -14,10 +14,9 @@
 //! orchestrator that will resolve the frame, carve the columns and call each of
 //! them once.
 
-// Nothing calls the model yet: the engine picks it up next, and this crate is a
-// binary, so `pub` does not make an unused item reachable the way it would in a
-// library. CI runs clippy with `-D warnings`, so without this the checkpoint
-// that adds a tested module and the one that wires it in could not be separate
-// commits. Delete this line the moment `LayoutEngine` holds a `Menu`.
+// The engine holds a `Menu` now, but its accessors are still only reached from
+// tests, so `Section`, `Entry` and the lookups on `Menu` are not yet live code.
+// This is a binary crate, where `pub` does not keep an uncalled item alive, and
+// CI runs clippy with `-D warnings`. Delete this the moment the menu renders.
 #[allow(dead_code)]
 pub mod model;

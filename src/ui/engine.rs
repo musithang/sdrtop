@@ -8,6 +8,7 @@ use ratatui::{
 use crate::config::{LayoutConfig, Position};
 use crate::state::SdrMetrics;
 use crate::ui::chrome;
+use crate::ui::menu;
 use crate::ui::panel::Bond;
 use crate::ui::panels::core::{spectrum, waterfall};
 use crate::ui::registry::PanelRegistry;
@@ -17,18 +18,90 @@ pub struct LayoutEngine {
     registry: PanelRegistry,
     focused_panel: Option<String>,
     hidden_panels: HashSet<String>,
+    /// The sections, built once from the merged presets.
+    ///
+    /// The menu renders this and the number keys resolve through it, so both
+    /// read one table instead of keeping two lists in step.
+    ///
+    /// Built in [`LayoutEngine::new`] and not rebuilt, because the preset table
+    /// is fully merged before the engine is constructed (`App::build_ui` folds
+    /// the built-ins, the user's preset directory and `config.toml` together
+    /// first). `config` is `pub` and so could in principle gain a preset later;
+    /// nothing does that outside the tests, and a preset added that way would be
+    /// absent from the menu rather than break it.
+    menu: menu::model::Menu,
 }
 
 impl LayoutEngine {
     pub fn new(config: LayoutConfig, registry: PanelRegistry) -> Self {
+        let menu = menu::model::build(&config.presets);
         Self {
             config,
             registry,
             focused_panel: None,
             hidden_panels: HashSet::new(),
+            menu,
         }
     }
 
+    /// Anything odd found while building the menu, for the caller to log once at
+    /// startup. Collected rather than logged in `model` so that module needs no
+    /// mutex and stays testable as a pure function.
+    pub fn menu_warnings(&self) -> &[String] {
+        &self.menu.warnings
+    }
+}
+
+/// Where the deck is, and what a number key means there.
+///
+/// Its own impl block so the group reads together, and so one `allow` covers it:
+/// nothing outside the tests calls these until the menu screen and the scoped
+/// number keys land. This is a binary crate, so `pub` does not keep an uncalled
+/// item alive, and CI runs clippy with `-D warnings`. **Delete the attribute
+/// once the menu renders and the digits are scoped.**
+#[allow(dead_code)]
+impl LayoutEngine {
+    /// The section table the menu draws.
+    pub fn menu(&self) -> &menu::model::Menu {
+        &self.menu
+    }
+
+    /// Which section the deck is in: the section of the active preset.
+    ///
+    /// **Derived, never stored.** A second copy of "where am I" is a copy that
+    /// can disagree with the screen, which is the bug this whole design exists to
+    /// make impossible. `None` for a preset the menu hides, which today means
+    /// `observer`, and for a preset that is not in the config at all.
+    pub fn scope(&self) -> Option<&menu::model::Section> {
+        let (si, _) = self.menu.locate(&self.config.active_preset)?;
+        self.menu.sections.get(si)
+    }
+
+    /// The preset a number key selects right now, or `None` when this scope has
+    /// no such slot.
+    ///
+    /// A digit past the end of a section names nothing. It deliberately does not
+    /// wrap: a key that quietly means "the last one" is a key you cannot trust,
+    /// and the menu would then be showing something other than what the keys do.
+    pub fn preset_in_scope(&self, slot: u8) -> Option<&str> {
+        let section = self.scope()?;
+        section
+            .entries
+            .iter()
+            .find(|e| e.slot == Some(slot))
+            .map(|e| e.preset.as_str())
+    }
+
+    /// The next layout in this section, wrapping at its end. What `[P]` uses once
+    /// it stops walking every preset in the config alphabetically.
+    pub fn next_in_scope(&self) -> Option<String> {
+        let (si, ei) = self.menu.locate(&self.config.active_preset)?;
+        let entries = &self.menu.sections[si].entries;
+        Some(entries[(ei + 1) % entries.len()].preset.clone())
+    }
+}
+
+impl LayoutEngine {
     pub fn set_panel_hidden(&mut self, name: &str, hidden: bool) {
         if hidden {
             self.hidden_panels.insert(name.to_string());
@@ -491,5 +564,117 @@ mod tests {
         let e = engine();
         assert_eq!(e.get_panel_bindings("one").len(), 1);
         assert!(e.get_panel_bindings("ghost").is_empty());
+    }
+
+    // ── Scope ────────────────────────────────────────────────────────────────
+    //
+    // These run on the real built-in presets rather than the stub engine above,
+    // because the thing under test is precisely how those presets are filed.
+
+    fn real_engine(active: &str) -> LayoutEngine {
+        let mut cfg = LayoutConfig::default_config();
+        cfg.active_preset = active.to_string();
+        LayoutEngine::new(cfg, PanelRegistry::new())
+    }
+
+    /// The scope is the section of whatever preset is active. Nothing stores it,
+    /// so it cannot disagree with what is on screen.
+    #[test]
+    fn the_scope_follows_the_active_preset() {
+        let mut e = real_engine("lab_timing");
+        assert_eq!(e.scope().map(|s| s.id.as_str()), Some("lab"));
+        e.set_preset("spectrum");
+        assert_eq!(e.scope().map(|s| s.id.as_str()), Some("command_rail"));
+        e.set_preset("micro_gain");
+        assert_eq!(e.scope().map(|s| s.id.as_str()), Some("micro"));
+    }
+
+    /// A number key means "the nth view of the section I am in", so the same
+    /// digit resolves to a different preset in a different scope. This is the
+    /// whole feature in one assertion.
+    #[test]
+    fn the_same_digit_means_different_things_in_different_scopes() {
+        let mut e = real_engine("lab_iq");
+        assert_eq!(e.preset_in_scope(2), Some("lab_rf"));
+        e.set_preset("command_rail");
+        assert_eq!(e.preset_in_scope(2), Some("spectrum"));
+        e.set_preset("micro_main");
+        assert_eq!(e.preset_in_scope(2), Some("micro_signal"));
+    }
+
+    /// The Sweep section has two entries, so 3 to 9 name nothing there. A key
+    /// that names nothing must be silent rather than wrap: a digit that quietly
+    /// means "the last one" is a digit you cannot trust.
+    #[test]
+    fn a_digit_past_the_end_of_a_section_names_nothing() {
+        let e = real_engine("lab_sweep");
+        assert_eq!(e.preset_in_scope(1), Some("lab_sweep"));
+        assert_eq!(e.preset_in_scope(2), Some("micro_sweep"));
+        assert_eq!(e.preset_in_scope(3), None);
+        assert_eq!(e.preset_in_scope(9), None);
+    }
+
+    /// `[P]` stops crossing section boundaries: it walks the current section and
+    /// wraps at its end.
+    #[test]
+    fn cycle_in_scope_wraps_inside_the_section() {
+        let mut e = real_engine("lab_timing");
+        assert_eq!(e.next_in_scope().as_deref(), Some("lab_signal"));
+        e.set_preset("lab_signal");
+        assert_eq!(e.next_in_scope().as_deref(), Some("lab_iq"), "wraps");
+    }
+
+    /// Walking a section returns to where it started, having visited every
+    /// entry. A cycle that skipped one would leave a layout unreachable by `[P]`.
+    #[test]
+    fn cycling_a_section_visits_every_entry_once() {
+        let mut e = real_engine("command_rail");
+        let mut seen = vec![e.active_preset().to_string()];
+        for _ in 0..4 {
+            let next = e.next_in_scope().expect("a next");
+            e.set_preset(&next);
+            seen.push(next);
+        }
+        assert_eq!(
+            seen,
+            [
+                "command_rail",
+                "spectrum",
+                "waterfall",
+                "spectrum_waterfall",
+                "main",
+            ]
+        );
+        assert_eq!(e.next_in_scope().as_deref(), Some("command_rail"), "wraps");
+    }
+
+    /// Observer mode is hidden from the menu, so it has no scope. Asking must
+    /// give `None`, never a panic: `App::new` falls back to this preset whenever
+    /// the device is busy, so it is a real path rather than a hypothetical.
+    #[test]
+    fn a_hidden_preset_has_no_scope() {
+        let e = real_engine("observer");
+        assert!(e.scope().is_none());
+        assert_eq!(e.preset_in_scope(1), None);
+        assert_eq!(e.next_in_scope(), None);
+    }
+
+    /// And so does a preset name that is not in the config at all, which is what
+    /// a config naming a layout the user has since deleted looks like.
+    #[test]
+    fn an_unknown_preset_has_no_scope() {
+        let e = real_engine("deleted_by_a_user");
+        assert!(e.scope().is_none());
+        assert_eq!(e.preset_in_scope(1), None);
+        assert_eq!(e.next_in_scope(), None);
+    }
+
+    /// The built-ins file themselves cleanly, so a default install logs nothing
+    /// at startup. A warning here would mean two built-in presets fight over a
+    /// number key.
+    #[test]
+    fn the_builtin_presets_produce_no_warnings() {
+        let e = real_engine("command_rail");
+        assert!(e.menu_warnings().is_empty(), "{:?}", e.menu_warnings());
     }
 }
