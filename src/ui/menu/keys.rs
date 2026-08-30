@@ -104,15 +104,13 @@ pub const GLOBAL: &[(&str, &[Binding])] = &[
             b("W", Some('w'), "pause or resume the waterfall"),
             b("H", Some('h'), "freeze a ghost trace, or clear it"),
             b("Tab", None, "show or hide the footer"),
-            b("?", Some('?'), "the old help overlay, retiring"),
         ],
     ),
     (
         "Layouts and session",
         &[
-            b("1-9", None, "pick a layout in this section"),
-            b("0", Some('0'), "cycle the micro views"),
-            b("P", Some('p'), "next layout"),
+            b("1-9", None, "the nth layout of this section"),
+            b("P", Some('p'), "next layout in this section"),
             b("Esc", None, "up one level, or open this menu"),
             b("Q", Some('q'), "quit, saving the config"),
         ],

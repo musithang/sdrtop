@@ -47,31 +47,27 @@ pub(super) fn handle(key: KeyEvent, ctx: &mut InputCtx<'_>) -> KeyAction {
         KeyCode::Char('a') => gain::toggle_boost(ctx),
 
         // ── Overlays and the drawn view ─────────────────────────────────────
-        KeyCode::Char('?') => *ctx.show_help = !*ctx.show_help,
         KeyCode::Tab => *ctx.show_footer = !*ctx.show_footer,
         KeyCode::Char('w') => view::toggle_waterfall_pause(ctx),
         KeyCode::Char('h') => view::toggle_hold(ctx),
 
         // ── Layouts ─────────────────────────────────────────────────────────
-        KeyCode::Char('p') => {
-            ctx.engine.cycle_preset();
-            let name = ctx.engine.active_preset().to_string();
-            super::metrics(ctx.state).push_log(format!("Preset: {}", name));
+        // One arm for all nine. A digit means "the nth layout of the section I am
+        // in", which is exactly what the menu shows, so the menu is a picture of
+        // what these keys do right now rather than a second list to keep in step.
+        //
+        // This used to be nine hand-wired arms naming nine presets, which is why
+        // `[1]` could go on meaning `command_rail` while the help overlay claimed
+        // it meant `main`. There is now nothing here to disagree with.
+        KeyCode::Char(c @ '1'..='9') => {
+            let slot = c as u8 - b'0';
+            // The name is copied out before `try_set_preset` takes `&mut engine`.
+            let Some(name) = ctx.engine.preset_in_scope(slot).map(str::to_string) else {
+                return KeyAction::Continue;
+            };
+            return presets::try_set_preset(ctx.engine, ctx.state, &name);
         }
-        KeyCode::Char('1') => {
-            return presets::try_set_preset(ctx.engine, ctx.state, "command_rail")
-        }
-        KeyCode::Char('2') => return presets::try_set_preset(ctx.engine, ctx.state, "spectrum"),
-        KeyCode::Char('3') => return presets::try_set_preset(ctx.engine, ctx.state, "waterfall"),
-        KeyCode::Char('4') => {
-            return presets::try_set_preset(ctx.engine, ctx.state, "spectrum_waterfall")
-        }
-        KeyCode::Char('5') => return presets::try_set_preset(ctx.engine, ctx.state, "lab_iq"),
-        KeyCode::Char('6') => return presets::try_set_preset(ctx.engine, ctx.state, "lab_rf"),
-        KeyCode::Char('7') => return presets::try_set_preset(ctx.engine, ctx.state, "lab_timing"),
-        KeyCode::Char('8') => return presets::try_set_preset(ctx.engine, ctx.state, "lab_signal"),
-        KeyCode::Char('9') => return presets::try_set_preset(ctx.engine, ctx.state, "lab_sweep"),
-        KeyCode::Char('0') => presets::cycle_micro(ctx.engine, ctx.state),
+        KeyCode::Char('p') => presets::cycle_in_scope(ctx),
 
         // ── Anything else: a panel's focus key, or nothing ──────────────────
         KeyCode::Char(c) => view::enter_focus(ctx, c),
@@ -109,7 +105,6 @@ mod tests {
     struct Harness {
         state: Arc<Mutex<SdrMetrics>>,
         engine: ui::LayoutEngine,
-        show_help: bool,
         show_footer: bool,
         focus_keys: HashMap<char, &'static str>,
     }
@@ -122,7 +117,6 @@ mod tests {
             Self {
                 state: Arc::new(Mutex::new(SdrMetrics::fixture())),
                 engine,
-                show_help: false,
                 show_footer: true,
                 focus_keys: HashMap::new(),
             }
@@ -137,7 +131,6 @@ mod tests {
                 state: &self.state,
                 device: None,
                 engine: &mut self.engine,
-                show_help: &mut self.show_help,
                 show_footer: &mut self.show_footer,
                 focus_keys: &self.focus_keys,
             };
@@ -166,22 +159,15 @@ mod tests {
     }
 
     #[test]
-    fn the_overlay_keys_toggle_rather_than_latch() {
+    fn the_footer_toggle_toggles_rather_than_latching() {
         let mut h = Harness::new();
-        assert!(!h.show_help);
-        h.press('?');
-        assert!(h.show_help);
-        h.press('?');
-        assert!(!h.show_help, "[?] must toggle, not latch");
-
         assert!(h.show_footer);
         h.key(KeyCode::Tab);
         assert!(!h.show_footer);
+        h.key(KeyCode::Tab);
+        assert!(h.show_footer, "[Tab] must toggle, not latch");
     }
 
-    /// The number keys hard-code preset names, so a renamed preset would leave a
-    /// slot pointing at nothing. `try_set_preset` is what makes that say so
-    /// instead of silently doing nothing.
     #[test]
     fn a_number_key_switches_preset_and_says_which() {
         let mut h = Harness::new();
@@ -190,14 +176,53 @@ mod tests {
         assert!(h.log().contains("Preset"), "no log line:\n{}", h.log());
     }
 
+    /// A digit means "the nth layout of the section I am in", so the same key
+    /// lands somewhere else depending on where you are. This is the feature.
+    #[test]
+    fn a_number_key_selects_within_the_current_section() {
+        let mut h = Harness::new();
+        h.engine.set_preset("lab_iq");
+        h.press('3');
+        assert_eq!(h.engine.active_preset(), "lab_timing");
+
+        h.engine.set_preset("command_rail");
+        h.press('3');
+        assert_eq!(h.engine.active_preset(), "waterfall");
+
+        h.engine.set_preset("micro_main");
+        h.press('3');
+        assert_eq!(h.engine.active_preset(), "micro_gain");
+    }
+
+    /// The Sweep section holds two layouts, so `3` to `9` name nothing there.
+    /// Silence, and specifically **not** a jump into another section: before this
+    /// change `[3]` meant `waterfall` from anywhere at all.
+    #[test]
+    fn a_digit_past_the_end_of_a_section_does_nothing() {
+        let mut h = Harness::new();
+        h.engine.set_preset("lab_sweep");
+        let before = metrics(&h.state).ui.log.len();
+        for c in ['3', '7', '9'] {
+            h.press(c);
+            assert_eq!(h.engine.active_preset(), "lab_sweep", "'{c}' moved us");
+        }
+        assert_eq!(
+            metrics(&h.state).ui.log.len(),
+            before,
+            "a key that names nothing should say nothing:\n{}",
+            h.log()
+        );
+    }
+
+    /// A slot whose preset has gone from the config says so rather than silently
+    /// doing nothing. The menu is built once at construction, so the slot still
+    /// resolves to a name; `try_set_preset` is what notices the layout is absent.
     #[test]
     fn a_slot_whose_preset_does_not_exist_logs_instead_of_switching() {
         let mut h = Harness::new();
-        // Empty the preset table down to the one we are on, so every named slot
-        // resolves to nothing. The engine must stay put and say why.
         let keep = h.engine.active_preset().to_string();
         h.engine.config.presets.retain(|name, _| name == &keep);
-        h.press('7');
+        h.press('2');
         assert_eq!(
             h.engine.active_preset(),
             keep,
@@ -239,15 +264,51 @@ mod tests {
         );
     }
 
+    /// `[P]` walks the section it is in and closes on itself.
+    ///
+    /// It used to walk every preset in the config, alphabetically, which made it
+    /// the one key that still crossed a section boundary in a design whose whole
+    /// premise is that keys do not.
     #[test]
-    fn p_cycles_through_every_preset_and_returns() {
+    fn p_cycles_within_the_section_and_returns() {
         let mut h = Harness::new();
-        let n = h.engine.preset_names().len();
         let start = h.engine.active_preset().to_string();
+        let n = h.engine.scope().expect("a scope").entries.len();
+        assert_eq!(n, 5, "Command Rail holds five layouts");
         for _ in 0..n {
             h.press('p');
         }
         assert_eq!(h.engine.active_preset(), start, "the cycle must close");
+    }
+
+    /// And it never leaves the section on the way round.
+    #[test]
+    fn p_never_leaves_the_section() {
+        let mut h = Harness::new();
+        h.engine.set_preset("lab_iq");
+        for _ in 0..12 {
+            h.press('p');
+            assert!(
+                h.engine.active_preset().starts_with("lab_"),
+                "[P] left the Lab section and landed on {}",
+                h.engine.active_preset()
+            );
+        }
+    }
+
+    /// `[0]` and `[?]` are retired. Neither may keep doing anything quietly: a
+    /// key that still works but is documented nowhere is how the old help drifted
+    /// in the first place.
+    #[test]
+    fn the_retired_keys_do_nothing() {
+        let mut h = Harness::new();
+        let preset = h.engine.active_preset().to_string();
+        let logs_before = metrics(&h.state).ui.log.len();
+        for c in ['0', '?'] {
+            assert_eq!(h.press(c), KeyAction::Continue);
+        }
+        assert_eq!(h.engine.active_preset(), preset);
+        assert_eq!(metrics(&h.state).ui.log.len(), logs_before);
     }
 
     /// `handle_no_device` exists so the waterfall's fall-through cannot reach the

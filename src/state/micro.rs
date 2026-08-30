@@ -140,7 +140,7 @@ mod tests {
     /// The active preset is the single source of truth for which micro view is
     /// on screen.
     ///
-    /// Two copies of that fact was one too many: `cycle_micro` set both, and
+    /// Two copies of that fact was one too many: the old `[0]` cycle set both, and
     /// every other route into a micro preset set only the preset, so the footer
     /// could advertise the keys of a view you were not looking at.
     #[test]

@@ -60,7 +60,6 @@ pub(super) struct InputCtx<'a> {
     /// temporarily `None` inside [`global::handle_no_device`].
     pub device: Option<&'a Arc<dyn hardware::SdrDevice>>,
     pub engine: &'a mut ui::LayoutEngine,
-    pub show_help: &'a mut bool,
     pub show_footer: &'a mut bool,
     /// Focus key → panel name, harvested from the registry by `App::build_ui`.
     pub focus_keys: &'a HashMap<char, &'static str>,
@@ -82,7 +81,6 @@ pub fn handle_key(
     state: &Arc<Mutex<SdrMetrics>>,
     device: Option<&Arc<dyn hardware::SdrDevice>>,
     engine: &mut ui::LayoutEngine,
-    show_help: &mut bool,
     show_footer: &mut bool,
     focus_keys: &HashMap<char, &'static str>,
 ) -> KeyAction {
@@ -90,7 +88,6 @@ pub fn handle_key(
         state,
         device,
         engine,
-        show_help,
         show_footer,
         focus_keys,
     };

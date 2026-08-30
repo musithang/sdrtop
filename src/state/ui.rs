@@ -149,6 +149,16 @@ pub struct UiState {
     /// Names of all defined presets, synced each frame alongside active_preset.
     /// Lets the footer build the lab map from presets that actually exist.
     pub preset_names: Vec<String>,
+    /// The active section's layouts as `(slot, preset name)`, synced each frame
+    /// alongside `active_preset`. Empty for a preset the menu hides.
+    ///
+    /// The footer needs to name the keys that work *right now*, and the keys are
+    /// scoped, so it cannot hold a table of its own. It used to: `LAB_FAMILY`
+    /// mapped `[5]`-`[8]` to the four lab benches, and the moment the digits
+    /// became section-relative that table started advertising keys that do
+    /// nothing. Mirroring the real thing is the same trick `active_preset`
+    /// already uses to keep the footer out of the engine.
+    pub scope: Vec<(Option<u8>, String)>,
     pub log: VecDeque<LogEntry>,
     /// Command Rail lead-view mode (Hunt/Monitor/Bench). See [`RailMode`].
     pub rail_mode: RailMode,
@@ -230,7 +240,7 @@ impl UiState {
     /// Which micro view is on screen, read off the active preset exactly the way
     /// [`UiState::is_lab_mode`] reads the lab chrome.
     ///
-    /// This used to be a stored field. `cycle_micro` kept it in step and nothing
+    /// This used to be a stored field. The old `[0]` cycle kept it in step and nothing
     /// else did, so any other route into a micro preset left the footer showing
     /// the position and key hints of a view that was not on screen. Reading the
     /// preset removes the possibility rather than fixing the instance.
@@ -284,6 +294,7 @@ impl Default for UiState {
             focused_panel_bindings: &[],
             active_preset: String::new(),
             preset_names: Vec::new(),
+            scope: Vec::new(),
             log: VecDeque::new(),
             rail_mode: RailMode::default(),
             rail_mode_auto: false,
@@ -432,7 +443,7 @@ mod tests {
     /// The micro view follows the active preset **however that preset was
     /// reached**.
     ///
-    /// This is the bug the field caused. `cycle_micro` wrote both the field and
+    /// This is the bug the field caused. The old `[0]` cycle wrote both the field and
     /// the preset, so `[0]` looked correct; every other route wrote only the
     /// preset, and the footer went on showing the position and key hints of the
     /// view you had left. Now there is nothing to write.

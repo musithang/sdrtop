@@ -22,7 +22,6 @@ pub struct App {
     pub(super) rx_ctx: Option<Arc<RxContext>>,
     pub(super) config_path: Option<PathBuf>,
     pub(super) events: EventStream,
-    pub(super) show_help: bool,
     pub(super) show_footer: bool,
     pub(super) engine: ui::LayoutEngine,
     pub(super) theme: crate::Theme,
@@ -80,7 +79,6 @@ impl App {
                         &self.state,
                         self.device.as_ref(),
                         &mut self.engine,
-                        &mut self.show_help,
                         &mut self.show_footer,
                         &self.focus_keys,
                     ) {
@@ -126,6 +124,18 @@ impl App {
         // footer can render it without reaching into the engine.
         m.ui.active_preset = active_preset;
         m.ui.preset_names = self.engine.preset_names();
+        // The footer names the keys that work right now, and the digits are
+        // scoped, so it reads the active section rather than keeping a table.
+        m.ui.scope = self
+            .engine
+            .scope()
+            .map(|s| {
+                s.entries
+                    .iter()
+                    .map(|e| (e.slot, e.preset.clone()))
+                    .collect()
+            })
+            .unwrap_or_default();
         let hide_footer = !self.show_footer && m.ui.input_mode == crate::state::InputMode::Normal;
         self.engine.set_panel_hidden("footer", hide_footer);
         // Measurement labs wear "instrument mode": the resting frames cool toward
@@ -141,9 +151,6 @@ impl App {
             // The rail's full-log overlay only floats while the rail is focused.
             if m.ui.log_overlay && m.ui.focused_panel.as_deref() == Some("command_rail") {
                 ui::overlay::render_log(f, &m, &frame_theme);
-            }
-            if self.show_help {
-                ui::overlay::render_help(f, &m);
             }
             // The menu floats over the deck, the same way the log overlay does.
             // Drawn last so nothing else lands on top of it, and outside the

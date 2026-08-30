@@ -59,12 +59,9 @@ impl LayoutEngine {
 
 /// Where the deck is, and what a number key means there.
 ///
-/// Its own impl block so the group reads together, and so one `allow` covers it:
-/// nothing outside the tests calls these three until the number keys are scoped
-/// to the active section. This is a binary crate, so `pub` does not keep an
-/// uncalled item alive, and CI runs clippy with `-D warnings`. **Delete the
-/// attribute in the checkpoint that scopes the digits.**
-#[allow(dead_code)]
+/// Its own impl block so the group reads together: these three are what `[1]` to
+/// `[9]` and `[P]` resolve through, and unlike the methods below they answer
+/// about the **active** preset rather than about the table.
 impl LayoutEngine {
     /// Which section the deck is in: the section of the active preset.
     ///
@@ -129,16 +126,6 @@ impl LayoutEngine {
     /// show only the lab presets that actually exist.
     pub fn preset_names(&self) -> Vec<String> {
         self.config.presets.keys().cloned().collect()
-    }
-
-    pub fn cycle_preset(&mut self) {
-        let mut names: Vec<String> = self.config.presets.keys().cloned().collect();
-        names.sort();
-        let current = names
-            .iter()
-            .position(|n| n == &self.config.active_preset)
-            .unwrap_or(0);
-        self.config.active_preset = names[(current + 1) % names.len()].clone();
     }
 
     pub fn set_preset(&mut self, name: &str) {
@@ -490,33 +477,30 @@ mod tests {
     ///
     /// The order is the sorted name order, not the HashMap's, which is the only
     /// thing that makes the cycle stable between launches.
+    /// A preset inserted after the engine was built is in the config but not in
+    /// the menu, and `[P]` therefore does not reach it.
+    ///
+    /// This pins the limitation the `menu` field documents rather than papering
+    /// over it. The real merge happens before construction (`App::build_ui` folds
+    /// the built-ins, the preset directory and `config.toml` together first), so
+    /// nothing outside these tests inserts here. It replaces a test that asserted
+    /// such a preset *did* join the cycle, which was true while `[P]` walked the
+    /// whole config alphabetically and stopped being true when it started walking
+    /// the current section.
     #[test]
-    fn cycle_preset_walks_sorted_and_wraps() {
-        let mut e = engine();
-        assert_eq!(e.active_preset(), "alpha");
-        e.cycle_preset();
-        assert_eq!(e.active_preset(), "beta");
-        e.cycle_preset();
-        assert_eq!(e.active_preset(), "alpha", "cycle must wrap, not stop");
-    }
-
-    /// A user preset joins the cycle with no list to register it in.
-    #[test]
-    fn a_preset_added_after_construction_joins_the_cycle() {
+    fn a_preset_added_after_construction_is_not_in_the_menu() {
         let mut e = engine();
         e.config.presets.insert(
             "aardvark".to_string(),
             PresetConfig {
                 panels: vec![spec("one")],
+                section: Some("lab".into()),
+                slot: Some(9),
                 ..Default::default()
             },
         );
-        // Sorted order is aardvark, alpha, beta - so from alpha the next is beta,
-        // and one more wrap brings the new name round.
-        e.cycle_preset();
-        e.cycle_preset();
-        assert_eq!(e.active_preset(), "aardvark");
-        assert_eq!(e.preset_names().len(), 3);
+        assert_eq!(e.preset_names().len(), 3, "the config has it");
+        assert!(e.menu().locate("aardvark").is_none(), "the menu does not");
     }
 
     #[test]

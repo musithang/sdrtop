@@ -216,7 +216,6 @@ impl App {
             rx_ctx,
             config_path,
             events: EventStream::new(Duration::from_millis(33)),
-            show_help: false,
             show_footer: true,
             engine,
             theme,
