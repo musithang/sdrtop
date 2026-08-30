@@ -661,4 +661,26 @@ mod tests {
         let e = real_engine("command_rail");
         assert!(e.menu_warnings().is_empty(), "{:?}", e.menu_warnings());
     }
+
+    /// The startup menu opens on the layout the config restored, which is what
+    /// makes `Enter` resume without a key of its own.
+    ///
+    /// `(1, 2)` is the Lab section, third entry: the sections run command_rail,
+    /// lab, sweep, micro, and Lab runs IQ, RF, Timing, Signal.
+    #[test]
+    fn the_startup_cursor_lands_on_the_restored_preset() {
+        let e = real_engine("lab_timing");
+        assert_eq!(e.menu().locate(e.active_preset()), Some((1, 2)));
+    }
+
+    /// A config naming a layout the menu hides, or one that no longer exists,
+    /// must still open the menu rather than panic. `App::new` falls back to
+    /// `observer` whenever the device is busy, so this is a real path.
+    #[test]
+    fn a_hidden_or_unknown_preset_starts_the_cursor_at_the_top() {
+        for name in ["observer", "deleted_by_a_user"] {
+            let e = real_engine(name);
+            assert_eq!(e.menu().locate(e.active_preset()), None, "{name}");
+        }
+    }
 }

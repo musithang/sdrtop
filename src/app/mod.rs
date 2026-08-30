@@ -23,6 +23,13 @@ pub struct App {
     pub(super) config_path: Option<PathBuf>,
     pub(super) events: EventStream,
     pub(super) show_footer: bool,
+    /// Whether the deck has been on screen yet this session.
+    ///
+    /// The menu is the first screen and owns the whole terminal there; once you
+    /// have picked a layout it becomes a box floating over that layout. This is
+    /// the only difference between the two, so it is a flag rather than a second
+    /// renderer: same function, different `Rect`.
+    pub(super) deck_shown: bool,
     pub(super) engine: ui::LayoutEngine,
     pub(super) theme: crate::Theme,
     pub(super) focus_keys: HashMap<char, &'static str>,
@@ -138,6 +145,8 @@ impl App {
             .unwrap_or_default();
         let hide_footer = !self.show_footer && m.ui.input_mode == crate::state::InputMode::Normal;
         self.engine.set_panel_hidden("footer", hide_footer);
+        // Copied out before the closure borrows `self` for the engine.
+        let deck_shown = self.deck_shown;
         // Measurement labs wear "instrument mode": the resting frames cool toward
         // steel-blue. One per-frame tint at the draw root keeps every lab panel
         // (and its chrome) cohesive without each panel knowing about lab mode.
@@ -157,15 +166,27 @@ impl App {
             // layout engine because it is not a panel.
             if let Some(menu_state) = m.ui.menu {
                 let full = f.size();
-                let area = ui::overlay::centered_rect(
-                    (full.width * 8 / 10).clamp(1, full.width).max(1),
-                    (full.height * 8 / 10).clamp(1, full.height).max(1),
-                    full,
-                );
+                // Startup gets the whole terminal, because there is no deck
+                // behind it worth showing yet. Afterwards it is a box over the
+                // layout you are on, so you can see what you are leaving.
+                let area = if deck_shown {
+                    ui::overlay::centered_rect(
+                        (full.width * 8 / 10).clamp(1, full.width).max(1),
+                        (full.height * 8 / 10).clamp(1, full.height).max(1),
+                        full,
+                    )
+                } else {
+                    full
+                };
                 f.render_widget(ratatui::widgets::Clear, area);
                 ui::menu::render(f, area, &m, self.engine.menu(), &menu_state, &frame_theme);
             }
         })?;
+        // The deck is behind the menu from the moment it has been drawn once
+        // without one in front of it.
+        if m.ui.menu.is_none() {
+            self.deck_shown = true;
+        }
         Ok(())
     }
 

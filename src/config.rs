@@ -854,7 +854,7 @@ panels = [
 
     #[test]
     fn default_config_has_full_micro_cycle() {
-        // Every step of the [0] cycle must have a defined preset + its dedicated panel.
+        // Every micro view must have a defined preset + its dedicated panel.
         let cfg = LayoutConfig::default_config();
         for (preset, panel) in [
             ("micro_main", "micro_panel"),

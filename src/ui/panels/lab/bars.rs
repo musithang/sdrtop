@@ -1,7 +1,7 @@
 //! Lab "instrument mode" chrome - the two thin bars that wrap every measurement
-//! lab (`[5]`–`[9]`):
+//! lab:
 //!
-//! - [`LabBannerPanel`] (top): `LAB · RF CHAIN [6]   REF —   AVG OFF   CAL —   MKR 2        ▶ LIVE`
+//! - [`LabBannerPanel`] (top): `LAB · RF CHAIN [2]   REF —   AVG OFF   CAL —   MKR 2        ▶ LIVE`
 //! - [`LabMarkerPanel`] (bottom): `MKR1 92.800 MHz -19.1 dBFS   MKR2 …   Δ …        [hints]`
 //!
 //! Both are borderless single-line bars (text row + a dim hairline) laid into the
@@ -22,19 +22,33 @@ use crate::state::{SdrMetrics, SpectrumMarker};
 use crate::ui::panel::{FrameStyle, Panel, PanelChrome};
 use crate::ui::rf_calc::{cascade, estimate_mds_dbm, staging_verdict, system_nf_db};
 
-/// Map an active preset name to its lab banner label and the number key that
-/// selects it (the *current* key map, which we keep - see the implementation
-/// plan). `None` for any non-lab preset, so the chrome bars no-op if they ever
-/// render outside a lab.
-pub fn lab_label(preset: &str) -> Option<(&'static str, char)> {
+/// The banner's name for a lab preset. `None` for any non-lab preset, so the
+/// chrome bars no-op if they ever render outside a lab.
+///
+/// The wording only. This used to return the number key as well, hard-coding
+/// `[5]` through `[9]`, and went on printing them after the digits became
+/// section-relative: the `lab_timing` banner read `HOST TIMING [7]` while `7`
+/// did nothing and `3` was the key. The number now comes from
+/// [`slot_for`], which reads the section the engine actually built.
+pub fn lab_label(preset: &str) -> Option<&'static str> {
     match preset {
-        "lab_iq" => Some(("I/Q QUALITY", '5')),
-        "lab_rf" => Some(("RF CHAIN", '6')),
-        "lab_timing" => Some(("HOST TIMING", '7')),
-        "lab_signal" => Some(("SIGNAL", '8')),
-        "lab_sweep" => Some(("SWEEP", '9')),
+        "lab_iq" => Some("I/Q QUALITY"),
+        "lab_rf" => Some("RF CHAIN"),
+        "lab_timing" => Some("HOST TIMING"),
+        "lab_signal" => Some("SIGNAL"),
+        "lab_sweep" => Some("SWEEP"),
         _ => None,
     }
+}
+
+/// The number key that selects `preset` right now, from the active section as
+/// mirrored into the frame snapshot. `None` when the layout has no number key,
+/// in which case the banner simply shows no bracket.
+fn slot_for(preset: &str, scope: &[(Option<u8>, String)]) -> Option<u8> {
+    scope
+        .iter()
+        .find(|(_, name)| name == preset)
+        .and_then(|(slot, _)| *slot)
 }
 
 /// Precise marker-readout frequency: `92.800 MHz` / `433.920 MHz` / `1.234500 GHz`.
@@ -215,10 +229,10 @@ fn banner_lines(
     iw: usize,
     focused: bool,
 ) -> Vec<Line<'static>> {
-    let (label, num) = match lab_label(&state.ui.active_preset) {
-        Some(x) => x,
-        None => return vec![Line::raw("")],
+    let Some(label) = lab_label(&state.ui.active_preset) else {
+        return vec![Line::raw("")];
     };
+    let slot = slot_for(&state.ui.active_preset, &state.ui.scope);
     let dim = Style::default().fg(theme.label);
     let bold = Style::default()
         .fg(theme.label)
@@ -228,7 +242,7 @@ fn banner_lines(
         .add_modifier(Modifier::BOLD);
     let val = Style::default().fg(theme.value);
 
-    // Left zone: "▸LAB · RF CHAIN [6]" (▸ when the banner holds focus).
+    // Left zone: "▸LAB · RF CHAIN [2]" (▸ when the banner holds focus).
     let lead = if focused {
         Span::styled(
             "\u{25B8}",
@@ -239,15 +253,19 @@ fn banner_lines(
     } else {
         Span::raw(" ")
     };
-    let left: Vec<Span> = vec![
+    let mut left: Vec<Span> = vec![
         lead,
         Span::styled("LAB", bold),
         Span::styled(" \u{00B7} ", dim),
         Span::styled(label, hi),
-        Span::styled(" [", dim),
-        Span::styled(num.to_string(), hi),
-        Span::styled("]", dim),
     ];
+    // No bracket at all when the layout has no number key, rather than a bracket
+    // around a key that does nothing.
+    if let Some(slot) = slot {
+        left.push(Span::styled(" [", dim));
+        left.push(Span::styled(slot.to_string(), hi));
+        left.push(Span::styled("]", dim));
+    }
     let lw = span_w(&left);
 
     // Right zone: live / freeze.
@@ -1020,12 +1038,29 @@ mod tests {
     }
 
     #[test]
-    fn lab_label_maps_current_key_numbers() {
-        assert_eq!(lab_label("lab_rf"), Some(("RF CHAIN", '6')));
-        assert_eq!(lab_label("lab_iq"), Some(("I/Q QUALITY", '5')));
-        assert_eq!(lab_label("lab_signal"), Some(("SIGNAL", '8')));
+    fn lab_label_names_the_labs_and_nothing_else() {
+        assert_eq!(lab_label("lab_rf"), Some("RF CHAIN"));
+        assert_eq!(lab_label("lab_iq"), Some("I/Q QUALITY"));
+        assert_eq!(lab_label("lab_signal"), Some("SIGNAL"));
         assert_eq!(lab_label("command_rail"), None);
         assert_eq!(lab_label("spectrum"), None);
+    }
+
+    /// The banner's bracket is the key that works right now, read off the
+    /// mirrored section. It used to be a hard-coded `[5]`-`[9]`, which went on
+    /// being printed after those keys stopped doing anything.
+    #[test]
+    fn the_banner_number_comes_from_the_active_section() {
+        let scope = vec![
+            (Some(1), "lab_iq".to_string()),
+            (Some(2), "lab_rf".to_string()),
+            (Some(3), "lab_timing".to_string()),
+        ];
+        assert_eq!(slot_for("lab_timing", &scope), Some(3));
+        assert_eq!(slot_for("lab_iq", &scope), Some(1));
+        // Not in this section, and a layout with no number key.
+        assert_eq!(slot_for("spectrum", &scope), None);
+        assert_eq!(slot_for("mine", &[(None, "mine".to_string())]), None);
     }
 
     #[test]

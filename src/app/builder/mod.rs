@@ -208,6 +208,22 @@ impl App {
             for warning in engine.menu_warnings() {
                 m.push_log(warning.clone());
             }
+
+            // The menu is the first screen. The cursor starts on the layout the
+            // config restored, so `Enter` resumes and no other key is needed for
+            // it: resume is where the cursor is, not a command of its own. On a
+            // first run, or after the config names a layout the menu hides, there
+            // is nothing to restore and the cursor starts at the top.
+            let (section, entry) = engine
+                .menu()
+                .locate(engine.active_preset())
+                .unwrap_or((0, 0));
+            m.ui.menu = Some(crate::state::MenuState {
+                section,
+                entry,
+                pane: crate::state::MenuPane::Views,
+                scroll: 0,
+            });
         }
 
         Self {
@@ -217,6 +233,7 @@ impl App {
             config_path,
             events: EventStream::new(Duration::from_millis(33)),
             show_footer: true,
+            deck_shown: false,
             engine,
             theme,
             focus_keys,
