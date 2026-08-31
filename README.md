@@ -1,4 +1,8 @@
-# sdrtop
+<p align="center">
+  <img src="user_docs/pics/sdrtop_logo.png" alt="sdrtop logo" width="75">
+</p>
+
+<h1 align="center">sdrtop</h1>
 
 [![Rust](https://img.shields.io/badge/rust-stable-orange?logo=rust&logoColor=white)](https://www.rust-lang.org)
 [![License](https://img.shields.io/badge/license-GPL--3.0-blue)](LICENSE)
