@@ -34,15 +34,15 @@ pub(crate) const VERSION: &str = match option_env!("SDRTOP_VERSION") {
 #[command(
     name = "sdrtop",
     version = VERSION,
-    about = "HackRF One / RTL-SDR terminal monitor"
+    about = "SDR terminal monitor: HackRF One, RTL-SDR, and SoapySDR devices"
 )]
 pub struct Cli {
     /// Path to config file (default: ~/.config/sdrtop/config.toml)
     #[arg(long, value_name = "FILE")]
     pub config: Option<PathBuf>,
 
-    /// Pick the backend when more than one device type is connected
-    #[arg(long, value_name = "hackrf|rtlsdr")]
+    /// Pick the backend, optionally with SoapySDR device args (soapy=driver=airspy)
+    #[arg(long, value_name = "hackrf|rtlsdr|soapy[=args]")]
     pub device: Option<String>,
 
     /// Center frequency in Hz, e.g. 433920000 (overrides config)
