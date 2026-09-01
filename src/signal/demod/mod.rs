@@ -144,9 +144,13 @@ pub fn design_lowpass(taps: usize, fc: f64) -> Vec<f32> {
 /// Deliberately unwindowed - this is a time-domain signal path, not an FFT input.
 pub fn decode(buf: &[u8], geometry: SampleGeometry, max_pairs: usize, out: &mut Vec<Complex<f32>>) {
     out.clear();
-    let pairs = (buf.len() / 2).min(max_pairs);
+    // Bytes per pair, not a constant 2: a 16-bit block holds half as many pairs
+    // as its length suggests, and slicing it as though it held twice as many
+    // would read past the end.
+    let stride = geometry.bytes_per_pair();
+    let pairs = (buf.len() / stride).min(max_pairs);
     out.reserve(pairs);
-    let bytes = &buf[..pairs * 2];
+    let bytes = &buf[..pairs * stride];
     match geometry.format {
         SampleFormat::Int8 => {
             let fs = geometry.full_scale;
@@ -165,6 +169,15 @@ pub fn decode(buf: &[u8], geometry: SampleGeometry, max_pairs: usize, out: &mut 
                 out.push(Complex {
                     re: (pair[0] as f32 - bias) / bias,
                     im: (pair[1] as f32 - bias) / bias,
+                });
+            }
+        }
+        SampleFormat::Int16 => {
+            let fs = geometry.full_scale;
+            for quad in bytes.as_chunks::<4>().0 {
+                out.push(Complex {
+                    re: i16::from_le_bytes([quad[0], quad[1]]) as f32 / fs,
+                    im: i16::from_le_bytes([quad[2], quad[3]]) as f32 / fs,
                 });
             }
         }
@@ -1379,6 +1392,24 @@ mod tests {
         decode(&[0x80, 0x80], geom(SampleFormat::Uint8), 8, &mut out);
         assert_eq!(out.len(), 1);
         assert!(out[0].re.abs() < 0.01 && out[0].im.abs() < 0.01);
+    }
+
+    /// A 16-bit block holds half as many pairs as its length suggests. The cap
+    /// and the slice both have to use the stride, or the decoder reads past the
+    /// end of what it was given.
+    #[test]
+    fn decode_counts_sixteen_bit_pairs_by_stride() {
+        let wide = SampleGeometry {
+            format: SampleFormat::Int16,
+            full_scale: 32768.0,
+        };
+        // 16 bytes: four 16-bit pairs, or eight 8-bit ones.
+        let bytes = vec![0u8; 16];
+        let mut out = Vec::new();
+        decode(&bytes, wide, 100, &mut out);
+        assert_eq!(out.len(), 4);
+        decode(&bytes, geom(SampleFormat::Int8), 100, &mut out);
+        assert_eq!(out.len(), 8);
     }
 
     /// The normalisation follows the device's full scale rather than a constant.

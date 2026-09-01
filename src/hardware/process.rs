@@ -60,16 +60,12 @@ pub fn process_block(
     let fs_counts = full_scale as i64;
     let amp_width = amp_bin_width(fs_counts);
     // Per-sample math runs entirely without the mutex.
-    let mut saturated: u64 = 0;
-    let mut i_sum: i64 = 0;
-    let mut q_sum: i64 = 0;
-    let mut i_sq: i64 = 0;
-    let mut q_sq: i64 = 0;
-    let mut iq_cross: i64 = 0;
-    let mut local_hist: [u64; 32] = [0; 32];
-    let mut local_signed: [u64; 32] = [0; 32]; // signed I/Q distribution (ADC bell)
-    let mut local_peak: u32 = 0; // loudest |i|,|q| this block
-    let mut local_const: Vec<(f32, f32)> = Vec::new();
+    let mut acc = Accumulators {
+        geometry,
+        amp_width,
+        full_scale,
+        ..Accumulators::default()
+    };
 
     // Snapshot the live correction state once (cheap Copy). The accumulators below
     // stay on the RAW samples - the diagnostics measure the true hardware
@@ -82,58 +78,44 @@ pub fn process_block(
         (m.iq.cal, m.demod.enabled)
     };
     let correcting = cal.correcting();
-    let mut out_buf: Vec<u8> = if correcting {
-        Vec::with_capacity(buf.len())
-    } else {
-        Vec::new()
-    };
+    acc.correcting = correcting;
+    acc.cal = cal;
+    if correcting {
+        acc.out.reserve(buf.len());
+    }
 
-    for (pair_idx, chunk) in buf.as_chunks::<2>().0.iter().enumerate() {
-        let (i, i_sat) = decode(format, chunk[0]);
-        let (q, q_sat) = decode(format, chunk[1]);
-        i_sum += i;
-        q_sum += q;
-        i_sq += i * i;
-        q_sq += q * q;
-        iq_cross += i * q;
-        if i_sat {
-            saturated += 1;
+    // The width branch is taken **once per block**, not once per sample. Both
+    // arms call the same `fold`, so there is one copy of the accumulation and
+    // two ways of getting a pair out of the bytes.
+    match format {
+        SampleFormat::Int8 | SampleFormat::Uint8 => {
+            for (idx, c) in buf.as_chunks::<2>().0.iter().enumerate() {
+                acc.fold(idx, decode(format, c[0]), decode(format, c[1]));
+            }
         }
-        if q_sat {
-            saturated += 1;
-        }
-        // Chebyshev distance, 32 bins of width 4. `unsigned_abs` of the centered
-        // value can reach 128 (the -128 extreme); `.min(31)` clamps that to the
-        // last bin instead of indexing [32] and panicking inside the callback.
-        let amp = i.unsigned_abs().max(q.unsigned_abs());
-        local_hist[((amp / amp_width) as usize).min(31)] += 1;
-        // Signed sample distribution (I and Q each) for the ADC-loading bell, plus the
-        // loudest sample - both on the RAW samples, the physical ADC's-eye view.
-        local_peak = local_peak.max(amp as u32);
-        local_signed[signed_bin(&geometry, i)] += 1;
-        local_signed[signed_bin(&geometry, q)] += 1;
-
-        // Display path: corrected samples feed the FFT (re-encoded bytes) and the
-        // constellation. When no correction is active these equal the raw samples.
-        let (ci, cq) = if correcting {
-            cal.apply(i as f32, q as f32)
-        } else {
-            (i as f32, q as f32)
-        };
-        if correcting {
-            let (bi, bq) = encode_pair(ci, cq, &geometry);
-            out_buf.push(bi);
-            out_buf.push(bq);
-        }
-        // Constellation decimation: one normalised (I, Q) pair per CONST_DECIMATE.
-        // Frozen ([F]) → stop collecting so the cloud holds its last shape.
-        if !cal.frozen && pair_idx % CONST_DECIMATE == 0 && local_const.len() < CONST_MAX_PER_BLOCK
-        {
-            local_const.push((ci / full_scale, cq / full_scale));
+        SampleFormat::Int16 => {
+            for (idx, c) in buf.as_chunks::<4>().0.iter().enumerate() {
+                acc.fold(idx, decode_i16([c[0], c[1]]), decode_i16([c[2], c[3]]));
+            }
         }
     }
 
-    let pairs = (buf.len() / 2) as u64;
+    let Accumulators {
+        saturated,
+        i_sum,
+        q_sum,
+        i_sq,
+        q_sq,
+        iq_cross,
+        hist: local_hist,
+        signed: local_signed,
+        peak: local_peak,
+        consts: local_const,
+        out: out_buf,
+        ..
+    } = acc;
+
+    let pairs = (buf.len() / geometry.bytes_per_pair()) as u64;
     let block_seq: u64;
 
     // Single brief lock to flush accumulated results - O(1), no loops inside.
@@ -206,21 +188,114 @@ pub fn process_block(
     ctx.sample_tx.try_send(forward).ok();
 }
 
+/// The running totals one block folds into, and the per-pair body that fills
+/// them.
+///
+/// Split out so the two sample widths share one accumulation instead of two
+/// copies that agree only until someone edits one of them. The width branch
+/// lives outside the loop, in `process_block`, which is the same discipline
+/// `signal::fft::frame` uses: an answer that cannot change within a block is not
+/// worth asking thousands of times.
+#[derive(Default)]
+struct Accumulators {
+    geometry: SampleGeometry,
+    /// Counts per bucket of the amplitude histogram, precomputed once.
+    amp_width: u64,
+    full_scale: f32,
+    cal: crate::state::IqCalState,
+    correcting: bool,
+
+    saturated: u64,
+    i_sum: i64,
+    q_sum: i64,
+    i_sq: i64,
+    q_sq: i64,
+    iq_cross: i64,
+    hist: [u64; 32],
+    /// Signed I/Q distribution, the ADC bell.
+    signed: [u64; 32],
+    /// Loudest |i|,|q| this block.
+    peak: u32,
+    consts: Vec<(f32, f32)>,
+    /// Corrected samples re-encoded for the display path. Empty unless a
+    /// correction is live.
+    out: Vec<u8>,
+}
+
+impl Accumulators {
+    /// Fold one decoded I/Q pair in. `idx` is the pair's position in the block,
+    /// which only the constellation decimation cares about.
+    #[inline]
+    fn fold(&mut self, idx: usize, (i, i_sat): (i64, bool), (q, q_sat): (i64, bool)) {
+        self.i_sum += i;
+        self.q_sum += q;
+        self.i_sq += i * i;
+        self.q_sq += q * q;
+        self.iq_cross += i * q;
+        if i_sat {
+            self.saturated += 1;
+        }
+        if q_sat {
+            self.saturated += 1;
+        }
+        // Chebyshev distance over 32 bins. `unsigned_abs` of the centered value
+        // can reach full scale itself (the -FS extreme); `.min(31)` clamps that
+        // to the last bin instead of indexing [32] and panicking inside the RX
+        // callback.
+        let amp = i.unsigned_abs().max(q.unsigned_abs());
+        self.hist[((amp / self.amp_width) as usize).min(31)] += 1;
+        // Both on the RAW samples: the physical ADC's-eye view.
+        self.peak = self.peak.max(amp as u32);
+        self.signed[signed_bin(&self.geometry, i)] += 1;
+        self.signed[signed_bin(&self.geometry, q)] += 1;
+
+        // Display path: corrected samples feed the FFT (re-encoded bytes) and the
+        // constellation. When no correction is active these equal the raw samples.
+        let (ci, cq) = if self.correcting {
+            self.cal.apply(i as f32, q as f32)
+        } else {
+            (i as f32, q as f32)
+        };
+        if self.correcting {
+            encode_into(&mut self.out, ci, cq, &self.geometry);
+        }
+        // Constellation decimation: one normalised (I, Q) pair per CONST_DECIMATE.
+        // Frozen ([F]) → stop collecting so the cloud holds its last shape.
+        if !self.cal.frozen
+            && idx.is_multiple_of(CONST_DECIMATE)
+            && self.consts.len() < CONST_MAX_PER_BLOCK
+        {
+            self.consts
+                .push((ci / self.full_scale, cq / self.full_scale));
+        }
+    }
+}
+
 /// Re-encode one corrected (I, Q) sample back to the wire byte format, clamping
 /// to the device's own range. Used only when a correction is active.
-fn encode_pair(i: f32, q: f32, g: &SampleGeometry) -> (u8, u8) {
+fn encode_into(out: &mut Vec<u8>, i: f32, q: f32, g: &SampleGeometry) {
     let hi = g.full_scale - 1.0;
     let lo = -g.full_scale;
     let ci = i.round().clamp(lo, hi) as i32;
     let cq = q.round().clamp(lo, hi) as i32;
     match g.format {
-        SampleFormat::Int8 => (ci as i8 as u8, cq as i8 as u8),
-        SampleFormat::Uint8 => ((ci + 128) as u8, (cq + 128) as u8),
+        SampleFormat::Int8 => {
+            out.push(ci as i8 as u8);
+            out.push(cq as i8 as u8);
+        }
+        SampleFormat::Uint8 => {
+            out.push((ci + 128) as u8);
+            out.push((cq + 128) as u8);
+        }
+        SampleFormat::Int16 => {
+            out.extend_from_slice(&(ci as i16).to_le_bytes());
+            out.extend_from_slice(&(cq as i16).to_le_bytes());
+        }
     }
 }
 
-/// Decode one raw byte into a centered signed value in [-128, 127], and say
-/// whether it sits on a rail.
+/// Decode one raw byte of an 8-bit format into a centered signed value in
+/// [-128, 127], and say whether it sits on a rail.
 ///
 /// The two formats differ only here: HackRF sends `Int8`, RTL-SDR `Uint8` biased
 /// at 127.5. Centering Uint8 by 128 rather than the true bias keeps the
@@ -233,7 +308,24 @@ fn decode(format: SampleFormat, b: u8) -> (i64, bool) {
     match format {
         SampleFormat::Int8 => (b as i8 as i64, b == 0x80 || b == 0x7F),
         SampleFormat::Uint8 => (b as i64 - 128, b == 0x00 || b == 0xFF),
+        // Unreachable: `process_block` sends 16-bit blocks down the other arm,
+        // where a pair is four bytes and one byte on its own means nothing.
+        SampleFormat::Int16 => (0, false),
     }
+}
+
+/// Decode one little-endian signed 16-bit component, and say whether it sits on
+/// a rail.
+///
+/// Little endian because that is what `SOAPY_SDR_CS16` is on every platform
+/// sdrtop runs on. Getting the byte order wrong here does not crash: it produces
+/// a spectrum that looks plausible and is wrong, which is the hardest kind of
+/// bug to notice, so the test asserts against a literal byte pair rather than
+/// against another expression that could be wrong the same way.
+#[inline]
+fn decode_i16(bytes: [u8; 2]) -> (i64, bool) {
+    let v = i16::from_le_bytes(bytes);
+    (v as i64, v == i16::MIN || v == i16::MAX)
 }
 
 #[cfg(test)]
@@ -304,6 +396,95 @@ mod tests {
         assert_eq!(super::signed_bin(&g, -32768), 0);
         assert_eq!(super::signed_bin(&g, 0), 16);
         assert_eq!(super::signed_bin(&g, 32767), 31);
+    }
+
+    // --- Int16 (SoapySDR CS16) decode ----------------------------------------
+    /// Byte order, asserted against literal bytes rather than against another
+    /// expression that could be wrong the same way. A swapped decoder produces
+    /// a spectrum that looks plausible and is wrong, which is the hardest kind
+    /// of mistake to spot on a screen.
+    #[test]
+    fn int16_is_little_endian() {
+        assert_eq!(super::decode_i16([0x00, 0x01]).0, 256, "low byte first");
+        assert_eq!(super::decode_i16([0x01, 0x00]).0, 1);
+        assert_eq!(super::decode_i16([0xFF, 0xFF]).0, -1, "two's complement");
+        assert_eq!(super::decode_i16([0x00, 0x80]).0, -32768);
+    }
+
+    #[test]
+    fn int16_flags_both_rails_and_nothing_inside_them() {
+        assert!(super::decode_i16([0xFF, 0x7F]).1, "+32767 is a rail");
+        assert!(super::decode_i16([0x00, 0x80]).1, "-32768 is a rail");
+        // One count inside either rail is not clipping.
+        assert!(!super::decode_i16([0xFE, 0x7F]).1);
+        assert!(!super::decode_i16([0x01, 0x80]).1);
+        assert!(!super::decode_i16([0x00, 0x00]).1);
+    }
+
+    /// A 16-bit pair is four bytes, so a block holds half as many pairs as an
+    /// 8-bit block of the same length. Getting this wrong scales every
+    /// throughput and drop reading by two.
+    #[test]
+    fn a_sixteen_bit_pair_is_four_bytes() {
+        let g = SampleGeometry {
+            format: SampleFormat::Int16,
+            full_scale: 32768.0,
+        };
+        assert_eq!(g.bytes_per_pair(), 4);
+        assert_eq!(
+            1024 / g.bytes_per_pair(),
+            256,
+            "1 KiB is 256 pairs, not 512"
+        );
+    }
+
+    /// The signed histogram against a 16-bit full scale puts the rails in the
+    /// end bins, exactly as it does at 8.
+    #[test]
+    fn int16_bins_across_its_own_full_scale() {
+        let g = SampleGeometry {
+            format: SampleFormat::Int16,
+            full_scale: 32768.0,
+        };
+        assert_eq!(super::signed_bin(&g, -32768), 0);
+        assert_eq!(super::signed_bin(&g, 0), 16);
+        assert_eq!(super::signed_bin(&g, 32767), 31);
+    }
+
+    /// Re-encoding a corrected sample round-trips through the wire format. The
+    /// 16-bit path writes four bytes where the 8-bit ones write two, and a
+    /// mismatch here would desynchronise the whole display stream by a byte.
+    #[test]
+    fn encoding_round_trips_at_both_widths() {
+        let wide = SampleGeometry {
+            format: SampleFormat::Int16,
+            full_scale: 32768.0,
+        };
+        let mut out = Vec::new();
+        super::encode_into(&mut out, 1234.0, -5678.0, &wide);
+        assert_eq!(out.len(), 4, "one 16-bit pair is four bytes");
+        assert_eq!(super::decode_i16([out[0], out[1]]).0, 1234);
+        assert_eq!(super::decode_i16([out[2], out[3]]).0, -5678);
+
+        let narrow = eight_bit();
+        out.clear();
+        super::encode_into(&mut out, 100.0, -100.0, &narrow);
+        assert_eq!(out.len(), 2);
+        assert_eq!(super::decode(SampleFormat::Int8, out[0]).0, 100);
+    }
+
+    /// Clamping follows the declared full scale, so a correction that overshoots
+    /// lands on the rail instead of wrapping to the opposite one.
+    #[test]
+    fn encoding_clamps_rather_than_wrapping() {
+        let wide = SampleGeometry {
+            format: SampleFormat::Int16,
+            full_scale: 32768.0,
+        };
+        let mut out = Vec::new();
+        super::encode_into(&mut out, 90_000.0, -90_000.0, &wide);
+        assert_eq!(super::decode_i16([out[0], out[1]]).0, 32767);
+        assert_eq!(super::decode_i16([out[2], out[3]]).0, -32768);
     }
 
     /// A driver reporting a tiny full scale must not divide by zero inside the

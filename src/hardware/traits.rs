@@ -16,6 +16,25 @@ pub enum SampleFormat {
     /// Interleaved unsigned 8-bit, DC bias 127.5 (RTL-SDR).
     /// Decode `(b as f32 - 127.5) / 127.5`.
     Uint8,
+    /// Interleaved signed 16-bit little endian, two bytes per component, which
+    /// is what SoapySDR calls `CS16`. The container is 16 bits wide; how many of
+    /// them the converter actually fills is
+    /// [`SampleGeometry::bits`], from the full scale the driver reports.
+    ///
+    /// Nothing shipped constructs this yet: it is decoded and tested here so the
+    /// SoapySDR read thread does not have to arrive with an untested sample path
+    /// attached. **The allow comes off in S9**, where that thread starts
+    /// producing 16-bit blocks.
+    #[cfg_attr(not(test), allow(dead_code))]
+    Int16,
+}
+
+impl Default for SampleFormat {
+    /// Only so [`SampleGeometry`] can derive `Default` for the RX accumulators.
+    /// Nothing chooses a format this way: every device states its own.
+    fn default() -> Self {
+        SampleFormat::Int8
+    }
 }
 
 /// How a device's raw bytes decode, and what "full scale" means in them.
@@ -28,7 +47,7 @@ pub enum SampleFormat {
 /// Both shipped radios are 8-bit, so `full_scale` is 128.0 for each. That stays
 /// true even for the RTL-SDR, whose true DC bias is 127.5: see
 /// [`super::process`] on why centering by 128 is deliberate.
-#[derive(Clone, Copy, Debug, PartialEq)]
+#[derive(Clone, Copy, Debug, PartialEq, Default)]
 pub struct SampleGeometry {
     pub format: SampleFormat,
     /// The sample count that means 0 dBFS.
@@ -46,6 +65,7 @@ impl SampleGeometry {
     pub fn bytes_per_pair(&self) -> usize {
         match self.format {
             SampleFormat::Int8 | SampleFormat::Uint8 => 2,
+            SampleFormat::Int16 => 4,
         }
     }
 

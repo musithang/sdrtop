@@ -61,6 +61,24 @@ pub(super) fn decode_into(
                 };
             }
         }
+        // Four bytes to a pair, little endian, and normalised by the full scale
+        // the driver reported rather than by 32768: a 12-bit converter in a
+        // 16-bit container is at its own rail long before the container is.
+        SampleFormat::Int16 => {
+            let fs = geometry.full_scale;
+            for (i, (quad, &w)) in frame
+                .as_chunks::<4>()
+                .0
+                .iter()
+                .zip(window.iter())
+                .enumerate()
+            {
+                out[i] = Complex {
+                    re: i16::from_le_bytes([quad[0], quad[1]]) as f32 / fs * w,
+                    im: i16::from_le_bytes([quad[2], quad[3]]) as f32 / fs * w,
+                };
+            }
+        }
     }
 }
 
@@ -219,6 +237,49 @@ mod tests {
         // +64 counts is half scale against 128 and an eighth against 512.
         assert!((decoded([0x40, 0x40], SampleFormat::Int8, 128.0).re - 0.5).abs() < 1e-6);
         assert!((decoded([0x40, 0x40], SampleFormat::Int8, 512.0).re - 0.125).abs() < 1e-6);
+    }
+
+    /// The 16-bit path: four bytes to a pair, little endian, normalised by the
+    /// full scale the driver reported and not by the container's 32768.
+    #[test]
+    fn int16_decodes_four_bytes_per_pair() {
+        let mut out = [Complex { re: 0.0, im: 0.0 }; 2];
+        // Two pairs: (+16384, -16384) then (+32767, 0).
+        let bytes = [
+            0x00, 0x40, 0x00, 0xC0, // 16384, -16384
+            0xFF, 0x7F, 0x00, 0x00, // 32767, 0
+        ];
+        decode_into(
+            &bytes,
+            &[1.0, 1.0],
+            SampleGeometry {
+                format: SampleFormat::Int16,
+                full_scale: 32768.0,
+            },
+            &mut out,
+        );
+        assert!((out[0].re - 0.5).abs() < 1e-6, "got {}", out[0].re);
+        assert!((out[0].im + 0.5).abs() < 1e-6, "got {}", out[0].im);
+        assert!((out[1].re - 0.99997).abs() < 1e-4, "got {}", out[1].re);
+        assert!(out[1].im.abs() < 1e-9);
+    }
+
+    /// A 12-bit converter handing over 16-bit containers is at its own rail at
+    /// 2048 counts, not at 32768. Normalising by the container would report it
+    /// 24 dB quieter than it is, on every frame, forever.
+    #[test]
+    fn int16_normalises_by_the_reported_scale_not_the_container() {
+        let mut out = [Complex { re: 0.0, im: 0.0 }];
+        decode_into(
+            &[0x00, 0x08, 0x00, 0x00], // +2048
+            &[1.0],
+            SampleGeometry {
+                format: SampleFormat::Int16,
+                full_scale: 2048.0,
+            },
+            &mut out,
+        );
+        assert!((out[0].re - 1.0).abs() < 1e-6, "got {}", out[0].re);
     }
 
     #[test]
