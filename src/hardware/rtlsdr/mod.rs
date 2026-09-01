@@ -15,7 +15,7 @@ use libc::{c_int, c_void};
 
 use super::process::process_block;
 use super::traits::{
-    DeviceCapabilities, DeviceInfo, GainModel, RxContext, SampleFormat, SdrDevice,
+    DeviceCapabilities, DeviceInfo, GainModel, RxContext, SampleFormat, SampleGeometry, SdrDevice,
 };
 use super::{DeviceKind, DeviceListing};
 use ffi::*;
@@ -89,7 +89,7 @@ extern "C" fn rtl_rx_callback(buf: *mut libc::c_uchar, len: u32, ctx: *mut c_voi
         // the whole `rtlsdr_read_async` call (see `start_rx`).
         let rx = unsafe { &*(ctx as *const RxContext) };
         let slice = unsafe { std::slice::from_raw_parts(buf as *const u8, len as usize) };
-        process_block(slice, SampleFormat::Uint8, 0, rx, now);
+        process_block(slice, rx.geometry, 0, rx, now);
     }));
 }
 
@@ -322,7 +322,12 @@ fn rtl_caps(tuner: c_int, gains_tenths: &[i32]) -> DeviceCapabilities {
         sample_rate_max_hz: 3_200_000.0,
         default_frequency_hz: 100_000_000,
         default_sample_rate_hz: 2_400_000.0,
-        sample_format: SampleFormat::Uint8,
+        sample_geometry: SampleGeometry {
+            format: SampleFormat::Uint8,
+            // Centered by 128 rather than the true 127.5 bias, deliberately.
+            // See `process::decode`.
+            full_scale: 128.0,
+        },
         gain: GainModel::RtlSingle {
             gain_steps_db: steps,
         },
@@ -414,7 +419,8 @@ mod tests {
             }
             _ => panic!("expected RtlSingle gain model"),
         }
-        assert_eq!(caps.sample_format, SampleFormat::Uint8);
+        assert_eq!(caps.sample_geometry.format, SampleFormat::Uint8);
+        assert_eq!(caps.sample_geometry.full_scale, 128.0);
         assert!(!caps.has_bb_filter && !caps.friis_applicable);
         assert_eq!(caps.freq_min_hz, 24_000_000);
         assert_eq!(caps.freq_max_hz, 1_766_000_000);

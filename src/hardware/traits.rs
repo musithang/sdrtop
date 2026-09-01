@@ -18,6 +18,23 @@ pub enum SampleFormat {
     Uint8,
 }
 
+/// How a device's raw bytes decode, and what "full scale" means in them.
+///
+/// The two questions travel together because every caller needs both: reading a
+/// sample and knowing how loud it is allowed to get are the same question asked
+/// twice. Keeping them apart is how a decoder ends up correct and a histogram
+/// ends up drawn against the wrong ceiling.
+///
+/// Both shipped radios are 8-bit, so `full_scale` is 128.0 for each. That stays
+/// true even for the RTL-SDR, whose true DC bias is 127.5: see
+/// [`super::process`] on why centering by 128 is deliberate.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct SampleGeometry {
+    pub format: SampleFormat,
+    /// The sample count that means 0 dBFS.
+    pub full_scale: f32,
+}
+
 /// The gain "shape" a device exposes - drives UI rendering and key bindings.
 #[derive(Clone, Debug)]
 pub enum GainModel {
@@ -103,7 +120,7 @@ pub struct DeviceCapabilities {
     /// on an RTL-SDR), so the radio never boots to an illegal setting.
     pub default_frequency_hz: u64,
     pub default_sample_rate_hz: f64,
-    pub sample_format: SampleFormat,
+    pub sample_geometry: SampleGeometry,
     pub gain: GainModel,
     /// IQ pairs per USB transfer - feeds the expected callback-period math in
     /// [`crate::state::TimingState`].
@@ -131,8 +148,8 @@ pub struct DeviceInfo {
 
 /// Shared RX plumbing handed to a backend's streaming start. The per-sample
 /// accumulators write into `metrics`; raw byte blocks go out via `sample_tx` to
-/// the FFT worker. `format` tells [`crate::hardware::process::process_block`]
-/// how to decode the bytes.
+/// the FFT worker. `geometry` tells [`crate::hardware::process::process_block`]
+/// how to decode the bytes and what full scale is worth in them.
 pub struct RxContext {
     pub metrics: Arc<Mutex<SdrMetrics>>,
     pub sample_tx: crossbeam_channel::Sender<Vec<u8>>,
@@ -146,7 +163,7 @@ pub struct RxContext {
     /// gap. The FFT feed needs no such thing, which is why only this channel pays
     /// for it.
     pub demod_tx: crossbeam_channel::Sender<(u64, Vec<u8>)>,
-    pub format: SampleFormat,
+    pub geometry: SampleGeometry,
 }
 
 /// A tuned SDR receiver. Object-safe so it can be stored as `Arc<dyn SdrDevice>`

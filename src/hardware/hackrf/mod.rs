@@ -12,7 +12,7 @@ use crate::state::{DEFAULT_FREQUENCY, DEFAULT_SAMPLE_RATE};
 
 use super::process::process_block;
 use super::traits::{
-    DeviceCapabilities, DeviceInfo, GainModel, RxContext, SampleFormat, SdrDevice,
+    DeviceCapabilities, DeviceInfo, GainModel, RxContext, SampleFormat, SampleGeometry, SdrDevice,
 };
 use super::{DeviceKind, DeviceListing};
 use ffi::*;
@@ -79,7 +79,7 @@ fn rx_callback_safe(transfer: *mut hackrf_transfer) -> c_int {
             0
         };
 
-        process_block(buf, ctx.format, dropped_pairs, ctx, now);
+        process_block(buf, ctx.geometry, dropped_pairs, ctx, now);
     }
     0
 }
@@ -299,7 +299,10 @@ pub fn caps() -> DeviceCapabilities {
         sample_rate_max_hz: 20_000_000.0,
         default_frequency_hz: DEFAULT_FREQUENCY,
         default_sample_rate_hz: DEFAULT_SAMPLE_RATE,
-        sample_format: SampleFormat::Int8,
+        sample_geometry: SampleGeometry {
+            format: SampleFormat::Int8,
+            full_scale: 128.0,
+        },
         gain: GainModel::HackRf,
         samples_per_transfer: crate::state::HACKRF_SAMPLES_PER_TRANSFER,
         has_bb_filter: true,
@@ -433,6 +436,7 @@ mod tests {
         assert_eq!(c.sample_rate_max_hz, 20_000_000.0);
         assert_eq!(c.samples_per_transfer, 131_072);
         assert!(c.has_bb_filter && c.friis_applicable);
-        assert_eq!(c.sample_format, SampleFormat::Int8);
+        assert_eq!(c.sample_geometry.format, SampleFormat::Int8);
+        assert_eq!(c.sample_geometry.full_scale, 128.0);
     }
 }

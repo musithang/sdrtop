@@ -6,7 +6,7 @@
 
 use std::time::Instant;
 
-use super::traits::{RxContext, SampleFormat};
+use super::traits::{RxContext, SampleFormat, SampleGeometry};
 
 /// Fold one raw byte block into the shared metrics accumulators and forward it
 /// to the FFT worker.
@@ -20,20 +20,45 @@ const CONST_DECIMATE: usize = 1024;
 /// Hard cap on constellation points collected per block (bounds lock time).
 const CONST_MAX_PER_BLOCK: usize = 64;
 
-/// Bin a centered signed sample (`[-128, 127]`) into the 32-bucket signed ADC
-/// histogram: bin 0 = −FS rail, 16 = mid-scale, 31 = +FS rail.
+/// Bin a centered signed sample into the 32-bucket signed ADC histogram:
+/// bin 0 = −FS rail, 16 = mid-scale, 31 = +FS rail.
+///
+/// Integer arithmetic against the device's own full scale, so an 8-bit radio
+/// lands on exactly the `(v + 128) / 8` this used to hardcode.
 #[inline]
-fn signed_bin(v: i64) -> usize {
-    ((v + 128) / 8).clamp(0, 31) as usize
+fn signed_bin(g: &SampleGeometry, v: i64) -> usize {
+    let fs = g.full_scale as i64;
+    ((v + fs) / bin_width(fs)).clamp(0, 31) as usize
+}
+
+/// Counts per histogram bucket: the full −FS..+FS span divided into 32.
+///
+/// `.max(1)` is not defensive dressing. A driver reporting a full scale under
+/// 16 counts would otherwise divide by zero inside the RX callback, which is the
+/// worst place in the program to find out.
+#[inline]
+fn bin_width(full_scale: i64) -> i64 {
+    (full_scale * 2 / 32).max(1)
+}
+
+/// Counts per bucket of the *amplitude* histogram, which spans 0..+FS rather
+/// than −FS..+FS and so uses half the width.
+#[inline]
+fn amp_bin_width(full_scale: i64) -> u64 {
+    (full_scale as u64 / 32).max(1)
 }
 
 pub fn process_block(
     buf: &[u8],
-    format: SampleFormat,
+    geometry: SampleGeometry,
     dropped_pairs: u64,
     ctx: &RxContext,
     now: Instant,
 ) {
+    let format = geometry.format;
+    let full_scale = geometry.full_scale;
+    let fs_counts = full_scale as i64;
+    let amp_width = amp_bin_width(fs_counts);
     // Per-sample math runs entirely without the mutex.
     let mut saturated: u64 = 0;
     let mut i_sum: i64 = 0;
@@ -81,12 +106,12 @@ pub fn process_block(
         // value can reach 128 (the -128 extreme); `.min(31)` clamps that to the
         // last bin instead of indexing [32] and panicking inside the callback.
         let amp = i.unsigned_abs().max(q.unsigned_abs());
-        local_hist[((amp / 4) as usize).min(31)] += 1;
+        local_hist[((amp / amp_width) as usize).min(31)] += 1;
         // Signed sample distribution (I and Q each) for the ADC-loading bell, plus the
         // loudest sample - both on the RAW samples, the physical ADC's-eye view.
         local_peak = local_peak.max(amp as u32);
-        local_signed[signed_bin(i)] += 1;
-        local_signed[signed_bin(q)] += 1;
+        local_signed[signed_bin(&geometry, i)] += 1;
+        local_signed[signed_bin(&geometry, q)] += 1;
 
         // Display path: corrected samples feed the FFT (re-encoded bytes) and the
         // constellation. When no correction is active these equal the raw samples.
@@ -96,7 +121,7 @@ pub fn process_block(
             (i as f32, q as f32)
         };
         if correcting {
-            let (bi, bq) = encode_pair(ci, cq, format);
+            let (bi, bq) = encode_pair(ci, cq, &geometry);
             out_buf.push(bi);
             out_buf.push(bq);
         }
@@ -104,7 +129,7 @@ pub fn process_block(
         // Frozen ([F]) → stop collecting so the cloud holds its last shape.
         if !cal.frozen && pair_idx % CONST_DECIMATE == 0 && local_const.len() < CONST_MAX_PER_BLOCK
         {
-            local_const.push((ci / 128.0, cq / 128.0));
+            local_const.push((ci / full_scale, cq / full_scale));
         }
     }
 
@@ -181,12 +206,14 @@ pub fn process_block(
     ctx.sample_tx.try_send(forward).ok();
 }
 
-/// Re-encode one corrected (I, Q) sample back to the wire byte format, clamping to
-/// the 8-bit range. Used only when a correction is active.
-fn encode_pair(i: f32, q: f32, format: SampleFormat) -> (u8, u8) {
-    let ci = i.round().clamp(-128.0, 127.0) as i32;
-    let cq = q.round().clamp(-128.0, 127.0) as i32;
-    match format {
+/// Re-encode one corrected (I, Q) sample back to the wire byte format, clamping
+/// to the device's own range. Used only when a correction is active.
+fn encode_pair(i: f32, q: f32, g: &SampleGeometry) -> (u8, u8) {
+    let hi = g.full_scale - 1.0;
+    let lo = -g.full_scale;
+    let ci = i.round().clamp(lo, hi) as i32;
+    let cq = q.round().clamp(lo, hi) as i32;
+    match g.format {
         SampleFormat::Int8 => (ci as i8 as u8, cq as i8 as u8),
         SampleFormat::Uint8 => ((ci + 128) as u8, (cq + 128) as u8),
     }
@@ -211,7 +238,7 @@ fn decode(format: SampleFormat, b: u8) -> (i64, bool) {
 
 #[cfg(test)]
 mod tests {
-    use super::SampleFormat;
+    use super::{SampleFormat, SampleGeometry};
 
     // These exercise the decode/saturation/histogram arithmetic that
     // `process_block` performs inline; constructing a full RxContext is left to
@@ -233,14 +260,65 @@ mod tests {
         }
     }
 
+    /// An 8-bit geometry, which is what both shipped radios report.
+    fn eight_bit() -> SampleGeometry {
+        SampleGeometry {
+            format: SampleFormat::Int8,
+            full_scale: 128.0,
+        }
+    }
+
     #[test]
     fn signed_bin_maps_rails_and_centre() {
-        assert_eq!(super::signed_bin(-128), 0, "−FS rail → bin 0");
-        assert_eq!(super::signed_bin(0), 16, "mid-scale → centre bin");
-        assert_eq!(super::signed_bin(127), 31, "+FS rail → top bin");
+        let g = eight_bit();
+        assert_eq!(super::signed_bin(&g, -128), 0, "−FS rail → bin 0");
+        assert_eq!(super::signed_bin(&g, 0), 16, "mid-scale → centre bin");
+        assert_eq!(super::signed_bin(&g, 127), 31, "+FS rail → top bin");
         // Clamps out-of-range without panicking on the array index.
-        assert_eq!(super::signed_bin(200), 31);
-        assert_eq!(super::signed_bin(-200), 0);
+        assert_eq!(super::signed_bin(&g, 200), 31);
+        assert_eq!(super::signed_bin(&g, -200), 0);
+    }
+
+    /// The bin widths this file used to hardcode, now derived, must come out
+    /// identical for 8 bits. If someone later "tidies" full_scale to the RTL's
+    /// true 127.5 bias, this is what fails and says why.
+    #[test]
+    fn eight_bit_geometry_reproduces_the_old_constants() {
+        assert_eq!(
+            super::bin_width(128),
+            8,
+            "the signed histogram was (v+128)/8"
+        );
+        assert_eq!(super::amp_bin_width(128), 4, "the amplitude one was amp/4");
+    }
+
+    /// The same arithmetic on a wider converter still puts the rails in the end
+    /// bins and mid-scale in the middle. Exercised before any device reports it,
+    /// because the alternative is finding out from a stranger's screenshot.
+    #[test]
+    fn a_wider_converter_bins_the_same_way() {
+        let g = SampleGeometry {
+            format: SampleFormat::Int8,
+            full_scale: 32768.0,
+        };
+        assert_eq!(super::signed_bin(&g, -32768), 0);
+        assert_eq!(super::signed_bin(&g, 0), 16);
+        assert_eq!(super::signed_bin(&g, 32767), 31);
+    }
+
+    /// A driver reporting a tiny full scale must not divide by zero inside the
+    /// RX callback, which is the one place in the program that cannot afford it.
+    #[test]
+    fn a_nonsense_full_scale_does_not_divide_by_zero() {
+        for fs in [0i64, 1, 15] {
+            assert!(super::bin_width(fs) >= 1);
+            assert!(super::amp_bin_width(fs) >= 1);
+        }
+        let g = SampleGeometry {
+            format: SampleFormat::Int8,
+            full_scale: 0.0,
+        };
+        let _ = super::signed_bin(&g, 0);
     }
 
     #[test]

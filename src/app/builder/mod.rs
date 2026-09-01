@@ -38,7 +38,7 @@ impl App {
     ) -> anyhow::Result<Self> {
         let info = device.info();
         let caps = Arc::new(device.capabilities().clone());
-        let sample_format = caps.sample_format;
+        let geometry = caps.sample_geometry;
 
         let mut tuning = resolve_tuning(&cfg.radio, &caps);
         let sr_result = match device.set_sample_rate(tuning.sample_rate) {
@@ -116,14 +116,14 @@ impl App {
             metrics: Arc::clone(&state),
             sample_tx,
             demod_tx,
-            format: sample_format,
+            geometry,
         });
 
         let fft_state = Arc::clone(&state);
-        std::thread::spawn(move || FftWorker::new(sample_rx, fft_state, sample_format).run());
+        std::thread::spawn(move || FftWorker::new(sample_rx, fft_state, geometry.format).run());
 
         let demod_state = Arc::clone(&state);
-        std::thread::spawn(move || DemodWorker::new(demod_rx, demod_state, sample_format).run());
+        std::thread::spawn(move || DemodWorker::new(demod_rx, demod_state, geometry.format).run());
 
         tasks::spawn_rx_task(Arc::clone(&state), Arc::clone(&device), Arc::clone(&rx_ctx));
         tasks::spawn_sweep_task(Arc::clone(&state), Arc::clone(&device));
