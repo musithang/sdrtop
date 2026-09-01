@@ -17,6 +17,7 @@ use std::sync::Arc;
 pub enum DeviceKind {
     HackRf,
     RtlSdr,
+    Soapy,
 }
 
 /// One enumerated device, before it is opened. `index` is the per-backend index
@@ -27,6 +28,13 @@ pub struct DeviceListing {
     pub kind: DeviceKind,
     pub index: usize,
     pub label: String,
+    /// SoapySDR device arguments, `None` for the two native backends.
+    ///
+    /// Soapy identifies a device by key/value arguments, not by a position in a
+    /// list, and an index into a list that may have been re-enumerated since is
+    /// a race. The two native backends genuinely are index addressed, so they
+    /// carry nothing here.
+    pub args: Option<String>,
 }
 
 /// Every connected device across all compiled-in backends. Never fails: a
@@ -43,5 +51,11 @@ pub fn open_device(listing: &DeviceListing) -> anyhow::Result<Arc<dyn SdrDevice>
     match listing.kind {
         DeviceKind::HackRf => Ok(Arc::new(hackrf::HackRfDevice::open(listing.index)?)),
         DeviceKind::RtlSdr => Ok(Arc::new(rtlsdr::RtlDevice::open(listing.index)?)),
+        DeviceKind::Soapy => {
+            let Some(args) = listing.args.as_deref() else {
+                anyhow::bail!("a SoapySDR listing with no device arguments cannot be opened");
+            };
+            Ok(Arc::new(soapy::device::SoapyDevice::open(args)?))
+        }
     }
 }

@@ -60,6 +60,11 @@ impl App {
                 let sysinfo = match listing.kind {
                     hardware::DeviceKind::HackRf => hardware::sysfs::find_hackrf(),
                     hardware::DeviceKind::RtlSdr => hardware::sysfs::find_rtlsdr(),
+                    // Observer mode reads sysfs for a USB device sdrtop knows
+                    // by name. There is no generic equivalent for "whatever
+                    // SoapySDR was talking to", so a Soapy device that will not
+                    // open simply will not open, and says why.
+                    hardware::DeviceKind::Soapy => None,
                 };
                 let Some(sysinfo) = sysinfo else {
                     return Err(open_err);

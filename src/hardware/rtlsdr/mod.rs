@@ -281,6 +281,7 @@ pub fn list() -> Vec<DeviceListing> {
             kind: DeviceKind::RtlSdr,
             index: i as usize,
             label: format!("RTL-SDR · {} · {}", name, shown),
+            args: None,
         });
     }
     out

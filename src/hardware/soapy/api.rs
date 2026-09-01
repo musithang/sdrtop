@@ -11,7 +11,7 @@
 //! and runs on a machine that has never heard of SoapySDR. There, [`api`] simply
 //! answers `None` and no Soapy devices exist. See `dev_docs/soapy-design.md`.
 
-use std::ffi::{c_char, CStr};
+use std::ffi::{c_char, c_int, c_void, CStr};
 use std::sync::OnceLock;
 
 /// The ABI this code was written against, from `SOAPY_SDR_ABI_VERSION` in
@@ -21,6 +21,32 @@ use std::sync::OnceLock;
 /// `0.8.1` is what `SoapySDR_getLibVersion` returns. Upstream's own guidance in
 /// that header is a plain string comparison against this constant.
 const WANT_ABI: &str = "0.8";
+
+/// The RX direction, `SOAPY_SDR_RX` from `SoapySDR/Constants.h`. TX is 0.
+pub const RX: c_int = 1;
+
+/// sdrtop drives channel 0 and only channel 0.
+pub const CHAN: usize = 0;
+
+/// Opaque device handle, `typedef struct SoapySDRDevice SoapySDRDevice;`.
+#[repr(C)]
+pub struct SoapySDRDevice {
+    _private: [u8; 0],
+}
+
+/// `SoapySDRRange` from `SoapySDR/Types.h`.
+///
+/// **Returned by value** from `getGainRange`, which is worth noticing: three
+/// doubles is over the register limit on x86-64, so it comes back through a
+/// hidden pointer. Rust's `extern "C"` handles that, but it is the kind of thing
+/// that is silently wrong if the struct layout is off by a field.
+#[repr(C)]
+#[derive(Clone, Copy, Debug, Default)]
+pub struct SoapySDRRange {
+    pub minimum: f64,
+    pub maximum: f64,
+    pub step: f64,
+}
 
 /// `SoapySDRKwargs` from `SoapySDR/Types.h`: a key/value string map.
 ///
@@ -77,6 +103,43 @@ pub struct SoapyApi {
     _lib: libloading::Library,
 
     get_abi_version: unsafe extern "C" fn() -> *const c_char,
+
+    last_error: unsafe extern "C" fn() -> *const c_char,
+    free: unsafe extern "C" fn(*mut c_void),
+    strings_clear: unsafe extern "C" fn(*mut *mut *mut c_char, usize),
+    kwargs_list_clear: unsafe extern "C" fn(*mut SoapySDRKwargs, usize),
+
+    enumerate: unsafe extern "C" fn(*const SoapySDRKwargs, *mut usize) -> *mut SoapySDRKwargs,
+    make_str_args: unsafe extern "C" fn(*const c_char) -> *mut SoapySDRDevice,
+    unmake: unsafe extern "C" fn(*mut SoapySDRDevice) -> c_int,
+
+    get_driver_key: unsafe extern "C" fn(*const SoapySDRDevice) -> *mut c_char,
+    get_hardware_key: unsafe extern "C" fn(*const SoapySDRDevice) -> *mut c_char,
+
+    get_frequency_range:
+        unsafe extern "C" fn(*const SoapySDRDevice, c_int, usize, *mut usize) -> *mut SoapySDRRange,
+    get_sample_rate_range:
+        unsafe extern "C" fn(*const SoapySDRDevice, c_int, usize, *mut usize) -> *mut SoapySDRRange,
+    get_bandwidth_range:
+        unsafe extern "C" fn(*const SoapySDRDevice, c_int, usize, *mut usize) -> *mut SoapySDRRange,
+    get_gain_range: unsafe extern "C" fn(*const SoapySDRDevice, c_int, usize) -> SoapySDRRange,
+    list_gains:
+        unsafe extern "C" fn(*const SoapySDRDevice, c_int, usize, *mut usize) -> *mut *mut c_char,
+    has_gain_mode: unsafe extern "C" fn(*const SoapySDRDevice, c_int, usize) -> bool,
+    get_native_stream_format:
+        unsafe extern "C" fn(*const SoapySDRDevice, c_int, usize, *mut f64) -> *mut c_char,
+
+    set_frequency: unsafe extern "C" fn(
+        *mut SoapySDRDevice,
+        c_int,
+        usize,
+        f64,
+        *const SoapySDRKwargs,
+    ) -> c_int,
+    set_sample_rate: unsafe extern "C" fn(*mut SoapySDRDevice, c_int, usize, f64) -> c_int,
+    set_bandwidth: unsafe extern "C" fn(*mut SoapySDRDevice, c_int, usize, f64) -> c_int,
+    set_gain: unsafe extern "C" fn(*mut SoapySDRDevice, c_int, usize, f64) -> c_int,
+    set_gain_mode: unsafe extern "C" fn(*mut SoapySDRDevice, c_int, usize, bool) -> c_int,
 }
 
 impl SoapyApi {
@@ -85,6 +148,225 @@ impl SoapyApi {
         // Safety: the pointer comes from the library we are holding open, and
         // SoapySDR returns a static string here, not an allocation to free.
         unsafe { cstr_to_string((self.get_abi_version)()) }
+    }
+
+    /// The library's own message for the last failed call.
+    ///
+    /// Every error path in this backend quotes it. A community issue that
+    /// arrives with the driver's own words in it is one we can act on; one that
+    /// says "it did not work" is not.
+    pub fn last_error(&self) -> String {
+        unsafe { cstr_to_string((self.last_error)()) }
+    }
+
+    /// Every device SoapySDR can see, as key/value maps.
+    pub fn enumerate(&self) -> Vec<Vec<(String, String)>> {
+        let mut len: usize = 0;
+        // Safety: a null argument means "no filter", which is what the C API
+        // example passes.
+        let list = unsafe { (self.enumerate)(std::ptr::null(), &mut len) };
+        if list.is_null() {
+            return Vec::new();
+        }
+        let out = (0..len)
+            .map(|i| unsafe { kwargs_to_vec(list.add(i)) })
+            .collect();
+        // One of four deallocators, and the wrong one here is heap corruption
+        // rather than a leak. A kwargs list is not freed with `free` and not
+        // with `SoapySDR_free`.
+        unsafe { (self.kwargs_list_clear)(list, len) };
+        out
+    }
+
+    /// Open a device from an argument string, or say why not.
+    ///
+    /// # Safety
+    /// The returned pointer must be handed to [`Self::unmake`] exactly once.
+    pub unsafe fn make(&self, args: &str) -> Result<*mut SoapySDRDevice, String> {
+        let Ok(c) = std::ffi::CString::new(args) else {
+            return Err(format!("device arguments contain a NUL byte: {args:?}"));
+        };
+        let dev = unsafe { (self.make_str_args)(c.as_ptr()) };
+        if dev.is_null() {
+            return Err(self.last_error());
+        }
+        Ok(dev)
+    }
+
+    /// # Safety
+    /// `dev` must come from [`Self::make`] and must not be used afterwards.
+    pub unsafe fn unmake(&self, dev: *mut SoapySDRDevice) {
+        unsafe { (self.unmake)(dev) };
+    }
+
+    /// # Safety
+    /// `dev` must be a live handle for every method below. That is the whole
+    /// contract: nothing here validates the pointer, because nothing can.
+    pub unsafe fn driver_key(&self, dev: *const SoapySDRDevice) -> String {
+        unsafe { self.owned_string((self.get_driver_key)(dev)) }
+    }
+
+    /// # Safety
+    /// See [`Self::driver_key`].
+    pub unsafe fn hardware_key(&self, dev: *const SoapySDRDevice) -> String {
+        unsafe { self.owned_string((self.get_hardware_key)(dev)) }
+    }
+
+    /// # Safety
+    /// See [`Self::driver_key`].
+    pub unsafe fn freq_ranges(&self, dev: *const SoapySDRDevice) -> Vec<(f64, f64)> {
+        unsafe { self.range_list(self.get_frequency_range, dev) }
+    }
+
+    /// # Safety
+    /// See [`Self::driver_key`].
+    pub unsafe fn rate_ranges(&self, dev: *const SoapySDRDevice) -> Vec<(f64, f64)> {
+        unsafe { self.range_list(self.get_sample_rate_range, dev) }
+    }
+
+    /// # Safety
+    /// See [`Self::driver_key`].
+    pub unsafe fn bandwidth_ranges(&self, dev: *const SoapySDRDevice) -> Vec<(f64, f64)> {
+        unsafe { self.range_list(self.get_bandwidth_range, dev) }
+    }
+
+    /// # Safety
+    /// See [`Self::driver_key`].
+    pub unsafe fn gain_range(&self, dev: *const SoapySDRDevice) -> (f64, f64) {
+        let r = unsafe { (self.get_gain_range)(dev, RX, CHAN) };
+        (r.minimum, r.maximum)
+    }
+
+    /// # Safety
+    /// See [`Self::driver_key`].
+    pub unsafe fn gain_elements(&self, dev: *const SoapySDRDevice) -> Vec<String> {
+        let mut len: usize = 0;
+        let mut list = unsafe { (self.list_gains)(dev, RX, CHAN, &mut len) };
+        if list.is_null() {
+            return Vec::new();
+        }
+        let out = (0..len)
+            .map(|i| unsafe { cstr_to_string(*list.add(i)) })
+            .collect();
+        // A string list has its own deallocator, and it takes the address of the
+        // pointer so it can null it out.
+        unsafe { (self.strings_clear)(&mut list, len) };
+        out
+    }
+
+    /// # Safety
+    /// See [`Self::driver_key`].
+    pub unsafe fn has_gain_mode(&self, dev: *const SoapySDRDevice) -> bool {
+        unsafe { (self.has_gain_mode)(dev, RX, CHAN) }
+    }
+
+    /// The native wire format and the full scale that goes with it.
+    ///
+    /// # Safety
+    /// See [`Self::driver_key`].
+    pub unsafe fn native_format(&self, dev: *const SoapySDRDevice) -> (String, f64) {
+        let mut full_scale: f64 = 0.0;
+        let name = unsafe {
+            self.owned_string((self.get_native_stream_format)(
+                dev,
+                RX,
+                CHAN,
+                &mut full_scale,
+            ))
+        };
+        (name, full_scale)
+    }
+
+    /// # Safety
+    /// See [`Self::driver_key`].
+    pub unsafe fn set_frequency(&self, dev: *mut SoapySDRDevice, hz: f64) -> Result<(), String> {
+        self.check(unsafe { (self.set_frequency)(dev, RX, CHAN, hz, std::ptr::null()) })
+    }
+
+    /// # Safety
+    /// See [`Self::driver_key`].
+    pub unsafe fn set_sample_rate(&self, dev: *mut SoapySDRDevice, hz: f64) -> Result<(), String> {
+        self.check(unsafe { (self.set_sample_rate)(dev, RX, CHAN, hz) })
+    }
+
+    /// # Safety
+    /// See [`Self::driver_key`].
+    pub unsafe fn set_bandwidth(&self, dev: *mut SoapySDRDevice, hz: f64) -> Result<(), String> {
+        self.check(unsafe { (self.set_bandwidth)(dev, RX, CHAN, hz) })
+    }
+
+    /// # Safety
+    /// See [`Self::driver_key`].
+    pub unsafe fn set_gain(&self, dev: *mut SoapySDRDevice, db: f64) -> Result<(), String> {
+        self.check(unsafe { (self.set_gain)(dev, RX, CHAN, db) })
+    }
+
+    /// # Safety
+    /// See [`Self::driver_key`].
+    pub unsafe fn set_gain_mode(
+        &self,
+        dev: *mut SoapySDRDevice,
+        automatic: bool,
+    ) -> Result<(), String> {
+        self.check(unsafe { (self.set_gain_mode)(dev, RX, CHAN, automatic) })
+    }
+
+    /// Zero is success everywhere in this API; anything else is an error whose
+    /// text the library is holding.
+    fn check(&self, code: c_int) -> Result<(), String> {
+        if code == 0 {
+            Ok(())
+        } else {
+            Err(self.last_error())
+        }
+    }
+
+    /// Read a `SoapySDRRange` array out and free it.
+    ///
+    /// **These are freed with libc `free`**, not `SoapySDR_free` and not a
+    /// `_clear` helper. That is the trap in this API: it is the one returned
+    /// allocation whose deallocator is not a SoapySDR function, and it sits
+    /// right next to three that are.
+    ///
+    /// # Safety
+    /// See [`Self::driver_key`].
+    unsafe fn range_list(
+        &self,
+        f: unsafe extern "C" fn(
+            *const SoapySDRDevice,
+            c_int,
+            usize,
+            *mut usize,
+        ) -> *mut SoapySDRRange,
+        dev: *const SoapySDRDevice,
+    ) -> Vec<(f64, f64)> {
+        let mut len: usize = 0;
+        let list = unsafe { f(dev, RX, CHAN, &mut len) };
+        if list.is_null() {
+            return Vec::new();
+        }
+        let out = (0..len)
+            .map(|i| {
+                let r = unsafe { *list.add(i) };
+                (r.minimum, r.maximum)
+            })
+            .collect();
+        unsafe { libc::free(list as *mut c_void) };
+        out
+    }
+
+    /// A `char*` the library allocated for us: copy it, then hand it back.
+    ///
+    /// # Safety
+    /// `ptr` must be null or an allocation from a SoapySDR call that documents
+    /// `SoapySDR_free` as its deallocator.
+    unsafe fn owned_string(&self, ptr: *mut c_char) -> String {
+        if ptr.is_null() {
+            return String::new();
+        }
+        let out = unsafe { cstr_to_string(ptr) };
+        unsafe { (self.free)(ptr as *mut c_void) };
+        out
     }
 }
 
@@ -155,12 +437,33 @@ fn resolve(lib: libloading::Library) -> Result<SoapyApi, &'static str> {
         }};
     }
 
-    let get_abi_version = sym!("SoapySDR_getABIVersion");
-
-    Ok(SoapyApi {
+    let api = SoapyApi {
+        get_abi_version: sym!("SoapySDR_getABIVersion"),
+        last_error: sym!("SoapySDRDevice_lastError"),
+        free: sym!("SoapySDR_free"),
+        strings_clear: sym!("SoapySDRStrings_clear"),
+        kwargs_list_clear: sym!("SoapySDRKwargsList_clear"),
+        enumerate: sym!("SoapySDRDevice_enumerate"),
+        make_str_args: sym!("SoapySDRDevice_makeStrArgs"),
+        unmake: sym!("SoapySDRDevice_unmake"),
+        get_driver_key: sym!("SoapySDRDevice_getDriverKey"),
+        get_hardware_key: sym!("SoapySDRDevice_getHardwareKey"),
+        get_frequency_range: sym!("SoapySDRDevice_getFrequencyRange"),
+        get_sample_rate_range: sym!("SoapySDRDevice_getSampleRateRange"),
+        get_bandwidth_range: sym!("SoapySDRDevice_getBandwidthRange"),
+        get_gain_range: sym!("SoapySDRDevice_getGainRange"),
+        list_gains: sym!("SoapySDRDevice_listGains"),
+        has_gain_mode: sym!("SoapySDRDevice_hasGainMode"),
+        get_native_stream_format: sym!("SoapySDRDevice_getNativeStreamFormat"),
+        set_frequency: sym!("SoapySDRDevice_setFrequency"),
+        set_sample_rate: sym!("SoapySDRDevice_setSampleRate"),
+        set_bandwidth: sym!("SoapySDRDevice_setBandwidth"),
+        set_gain: sym!("SoapySDRDevice_setGain"),
+        set_gain_mode: sym!("SoapySDRDevice_setGainMode"),
+        // Last, so every `sym!` above has already borrowed it.
         _lib: lib,
-        get_abi_version,
-    })
+    };
+    Ok(api)
 }
 
 /// Whether a reported ABI string is one these signatures are safe against.

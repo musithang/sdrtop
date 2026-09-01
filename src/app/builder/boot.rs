@@ -118,6 +118,16 @@ impl Boot {
             caps: Arc::new(match kind {
                 hardware::DeviceKind::HackRf => hardware::hackrf::caps(),
                 hardware::DeviceKind::RtlSdr => hardware::rtlsdr::observer_caps(),
+                // Unreachable: `App::new` refuses observer mode for a Soapy
+                // device, because there is no sysfs profile for "whatever
+                // SoapySDR was talking to". The arm exists to satisfy the match,
+                // and the assert exists so a future edit that removes that
+                // refusal is caught by the test suite rather than by a user
+                // staring at a HackRF's gain labels on an Airspy.
+                hardware::DeviceKind::Soapy => {
+                    debug_assert!(false, "observer mode has no SoapySDR profile");
+                    hardware::hackrf::caps()
+                }
             }),
             tuning: Tuning {
                 frequency_hz: cfg.radio.frequency_hz,

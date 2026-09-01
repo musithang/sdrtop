@@ -281,6 +281,7 @@ pub fn list() -> Vec<DeviceListing> {
                     kind: DeviceKind::HackRf,
                     index: i,
                     label: format!("HackRF One · {}", serial),
+                    args: None,
                 });
             }
         }

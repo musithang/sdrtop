@@ -1,0 +1,303 @@
+//! [`SoapyDevice`]: open a device, describe it, and drive its controls.
+//!
+//! Orchestration only. The unsafe calls are in [`super::api`], the
+//! interpretation is in [`super::caps`], and what is left here is the order
+//! things happen in.
+//!
+//! **Streaming is not here yet.** `start_rx` refuses with a message until S9
+//! gives it a read thread, which is why this module is still not wired into
+//! [`crate::hardware::list_all_devices`]: a device that appears in the selector
+//! and then cannot receive is worse than one that does not appear.
+
+use std::sync::Arc;
+
+use super::api::{self, SoapyApi, SoapySDRDevice};
+use super::{args, caps};
+use crate::hardware::{
+    DeviceCapabilities, DeviceInfo, DeviceKind, DeviceListing, GainModel, RxContext, SdrDevice,
+};
+
+pub struct SoapyDevice {
+    api: &'static SoapyApi,
+    dev: *mut SoapySDRDevice,
+    caps: DeviceCapabilities,
+    info: DeviceInfo,
+    /// The argument string this device was opened with, kept for the log so a
+    /// failure names the device it happened on.
+    args: String,
+}
+
+// Safety: the same split the two native backends already rely on. The handle is
+// touched from the input thread (control) and the read thread (S9), never
+// concurrently for the same call, and SoapySDR's own device objects are
+// documented as safe to use from multiple threads.
+unsafe impl Send for SoapyDevice {}
+unsafe impl Sync for SoapyDevice {}
+
+impl SoapyDevice {
+    /// Open the device an argument string names, and ask it about itself.
+    pub fn open(args: &str) -> anyhow::Result<Self> {
+        let Some(api) = api::api() else {
+            anyhow::bail!("libSoapySDR is not available");
+        };
+        // Safety: the handle is stored in `self.dev` and unmade exactly once, in
+        // `Drop`.
+        let dev = unsafe { api.make(args) }
+            .map_err(|e| anyhow::anyhow!("SoapySDR could not open {args}: {e}"))?;
+
+        // Safety: `dev` is live from here until Drop.
+        let answers = unsafe { ask(api, dev) };
+        let caps = match caps::capabilities(&answers) {
+            Ok(c) => c,
+            Err(why) => {
+                unsafe { api.unmake(dev) };
+                anyhow::bail!("SoapySDR device {args} cannot be used: {why}");
+            }
+        };
+        let info = unsafe { describe(api, dev, args) };
+
+        Ok(Self {
+            api,
+            dev,
+            caps,
+            info,
+            args: args.to_string(),
+        })
+    }
+
+    /// Both boost keys land here. Which one the user pressed does not matter:
+    /// a Soapy device has one automatic gain mode, and `GainModel::boost_label`
+    /// already calls it AGC.
+    ///
+    /// Guarded rather than attempted. Calling `setGainMode` on a driver without
+    /// one is an error return in the good case, and `SoapyHackRF` really does
+    /// report `Supports AGC: NO`, so this is the common path and not the edge.
+    fn set_boost(&self, on: bool) -> anyhow::Result<()> {
+        if !self.caps.gain.has_boost() {
+            return Ok(());
+        }
+        unsafe { self.api.set_gain_mode(self.dev, on) }
+            .map_err(|e| anyhow::anyhow!("{}: {e}", self.args))
+    }
+}
+
+impl SdrDevice for SoapyDevice {
+    fn capabilities(&self) -> &DeviceCapabilities {
+        &self.caps
+    }
+
+    fn info(&self) -> DeviceInfo {
+        self.info.clone()
+    }
+
+    fn start_rx(&self, _ctx: Arc<RxContext>) -> anyhow::Result<()> {
+        anyhow::bail!("the SoapySDR read thread is not implemented yet")
+    }
+
+    fn stop_rx(&self) -> anyhow::Result<()> {
+        Ok(())
+    }
+
+    fn is_streaming(&self) -> bool {
+        false
+    }
+
+    fn set_frequency(&self, hz: u64) -> anyhow::Result<()> {
+        unsafe { self.api.set_frequency(self.dev, hz as f64) }
+            .map_err(|e| anyhow::anyhow!("{}: {e}", self.args))
+    }
+
+    /// Sets the rate, then matches the baseband filter to it where the device
+    /// has one, and returns the bandwidth actually asked for.
+    ///
+    /// The filter follows the rate rather than being left where it was, because
+    /// a filter wider than the sample rate aliases everything outside the window
+    /// back into it, and a filter far narrower throws away signal the user can
+    /// see on screen.
+    fn set_sample_rate(&self, hz: f64) -> anyhow::Result<u32> {
+        unsafe { self.api.set_sample_rate(self.dev, hz) }
+            .map_err(|e| anyhow::anyhow!("{}: {e}", self.args))?;
+        if !self.caps.has_bb_filter {
+            return Ok(0);
+        }
+        match unsafe { self.api.set_bandwidth(self.dev, hz) } {
+            Ok(()) => Ok(hz as u32),
+            // A device with a bandwidth range that refuses this particular one
+            // is still a working receiver. Say so and carry on rather than
+            // failing a retune over the filter.
+            Err(_) => Ok(0),
+        }
+    }
+
+    fn set_lna_gain(&self, db: u32) -> anyhow::Result<()> {
+        let (clamped, _) = self.caps.gain.clamp_gains(db, 0);
+        unsafe { self.api.set_gain(self.dev, clamped as f64) }
+            .map_err(|e| anyhow::anyhow!("{}: {e}", self.args))
+    }
+
+    /// There is no second stage. The trait's default would do, but saying it
+    /// here keeps the "why nothing happened" answer next to the key.
+    fn set_vga_gain(&self, _db: u32) -> anyhow::Result<()> {
+        Ok(())
+    }
+
+    fn set_amp_enable(&self, on: bool) -> anyhow::Result<()> {
+        self.set_boost(on)
+    }
+
+    fn set_tuner_agc(&self, on: bool) -> anyhow::Result<()> {
+        self.set_boost(on)
+    }
+}
+
+impl Drop for SoapyDevice {
+    fn drop(&mut self) {
+        // Safety: `dev` came from `make` and this is the only place it is
+        // unmade.
+        unsafe { self.api.unmake(self.dev) };
+    }
+}
+
+/// Everything sdrtop asks a device about itself, in one place.
+///
+/// # Safety
+/// `dev` must be a live handle.
+unsafe fn ask(api: &SoapyApi, dev: *mut SoapySDRDevice) -> caps::DriverAnswers {
+    let (native_format, native_full_scale) = unsafe { api.native_format(dev) };
+    caps::DriverAnswers {
+        freq_ranges: unsafe { api.freq_ranges(dev) },
+        rate_ranges: unsafe { api.rate_ranges(dev) },
+        gain_range: unsafe { api.gain_range(dev) },
+        gain_elements: unsafe { api.gain_elements(dev) },
+        has_gain_mode: unsafe { api.has_gain_mode(dev) },
+        bandwidth_ranges: unsafe { api.bandwidth_ranges(dev) },
+        native_format,
+        native_full_scale,
+    }
+}
+
+/// Identity for the header and the RF panels.
+///
+/// # Safety
+/// `dev` must be a live handle.
+unsafe fn describe(api: &SoapyApi, dev: *mut SoapySDRDevice, args: &str) -> DeviceInfo {
+    let hardware = unsafe { api.hardware_key(dev) };
+    let driver = unsafe { api.driver_key(dev) };
+    DeviceInfo {
+        board_name: if hardware.is_empty() {
+            format!("SoapySDR {driver}")
+        } else {
+            hardware
+        },
+        // The serial is in the arguments we opened with, since that is what
+        // identified this device in the first place.
+        serial: serial_from(args).unwrap_or_else(|| driver.clone()),
+        fw_version: None,
+        board_rev: None,
+        usb_api_version: None,
+        // Soapy has no notion of a tuner chip, so the driver key is the closest
+        // true answer. Better than leaving the field blank and better than
+        // inventing a chip name.
+        tuner_name: (!driver.is_empty()).then_some(driver),
+    }
+}
+
+/// Pull the serial back out of an argument string like
+/// `driver=hackrf, serial=0000...c3`.
+///
+/// Parsed rather than carried alongside because the argument string is the one
+/// thing that definitely survives from enumeration to open. Two fields holding
+/// the same fact is how they end up disagreeing.
+fn serial_from(args: &str) -> Option<String> {
+    args.split(',')
+        .filter_map(|part| part.split_once('='))
+        .find(|(k, _)| k.trim() == "serial")
+        .map(|(_, v)| v.trim().to_string())
+        .filter(|v| !v.is_empty())
+}
+
+/// Every device SoapySDR can see, as listings.
+///
+/// Not called from [`crate::hardware::list_all_devices`] yet; S11 wires it in
+/// along with the deduplication against the native backends and the audio
+/// driver's default exclusion.
+pub fn list() -> Vec<DeviceListing> {
+    let Some(api) = api::api() else {
+        return Vec::new();
+    };
+    api.enumerate()
+        .into_iter()
+        .enumerate()
+        .map(|(i, kwargs)| DeviceListing {
+            kind: DeviceKind::Soapy,
+            index: i,
+            label: args::label(&kwargs, i),
+            args: Some(args::open_markup(&kwargs, i)),
+        })
+        .collect()
+}
+
+/// The gain a device will actually be set to for a requested value.
+///
+/// Split out because it is the one piece of arithmetic here worth checking
+/// without a device: a Soapy gain range can be `0..116` on a HackRF and `0..0`
+/// on a sound card, and both have to come out sane.
+pub fn effective_gain_db(model: &GainModel, requested: u32) -> u32 {
+    model.clamp_gains(requested, 0).0
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn the_serial_comes_back_out_of_the_argument_string() {
+        assert_eq!(
+            serial_from("driver=hackrf, serial=0000000000000000955c64dc2a3d89c3").as_deref(),
+            Some("0000000000000000955c64dc2a3d89c3")
+        );
+        assert_eq!(serial_from("driver=audio, device_id=0"), None);
+        assert_eq!(serial_from(""), None);
+        assert_eq!(serial_from("serial="), None, "blank is not a serial");
+    }
+
+    /// Enumeration, for real, against whatever this machine has.
+    ///
+    /// Nothing here can assert that a device is present: CI has none and a
+    /// developer machine might have three. What must hold either way is that
+    /// every listing this backend produces is one `open_device` could actually
+    /// act on. A listing with no arguments is unopenable, and that is exactly
+    /// the mistake this backend's index-free addressing exists to avoid.
+    #[test]
+    fn every_listing_carries_what_it_takes_to_open_it() {
+        for l in list() {
+            assert_eq!(l.kind, DeviceKind::Soapy);
+            assert!(!l.label.is_empty(), "a blank row in the device selector");
+            let args = l
+                .args
+                .expect("a Soapy listing without arguments cannot be opened");
+            assert!(args.contains('='), "not argument markup: {args:?}");
+        }
+    }
+
+    /// The two real gain ranges probed on this machine, plus the shapes a driver
+    /// is free to invent. None of them may panic or produce a value outside the
+    /// device's own range.
+    #[test]
+    fn the_gain_lands_inside_whatever_range_the_driver_reported() {
+        let soapy = |min_db, max_db| GainModel::Soapy {
+            min_db,
+            max_db,
+            elements: vec![],
+            agc: false,
+        };
+        // SoapyHackRF: 0 to 116 dB.
+        assert_eq!(effective_gain_db(&soapy(0, 116), 40), 40);
+        assert_eq!(effective_gain_db(&soapy(0, 116), 200), 116);
+        // The sound card: no gain control at all.
+        assert_eq!(effective_gain_db(&soapy(0, 0), 30), 0);
+        // A driver reporting its range backwards must not produce a clamp that
+        // panics on an inverted interval.
+        assert_eq!(effective_gain_db(&soapy(50, 10), 30), 50);
+    }
+}

@@ -16,6 +16,11 @@ pub fn spawn_observer_task(state: Arc<Mutex<SdrMetrics>>, bus: u32, dev: u32, ki
             let found = match kind {
                 DeviceKind::HackRf => hardware::sysfs::find_hackrf(),
                 DeviceKind::RtlSdr => hardware::sysfs::find_rtlsdr(),
+                // Never spawned for a Soapy device: `App::new` refuses observer
+                // mode there because there is no sysfs profile to read. None
+                // keeps the loop honest rather than reporting a HackRF's USB
+                // statistics for something else entirely.
+                DeviceKind::Soapy => None,
             };
             if let Some(info) = found {
                 let owner = hardware::sysfs::find_owner(info.bus, info.dev);
