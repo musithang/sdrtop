@@ -11,12 +11,50 @@ to act on it, is in [The Lab presets](lab.md).
 ## How the screen is put together
 
 sdrtop is built out of **panels**, and a **preset** is a named arrangement of
-them. The number keys switch presets, `p` cycles them, and you can define your own
-in the [config file](presets.md) out of any panel on this
-page. Nothing here is hard-wired to a particular screen.
+them, which this page also calls a **layout**. Layouts are grouped into four
+**sections**, and the menu is how you move between them. Within a section the
+number keys pick a layout and `p` steps to the next one. You can define your own
+out of any panel on this page, in the [config file](presets.md). Nothing here is
+hard-wired to a particular screen.
 
 Panels that show a derived measurement mark their title **[STALE]** the moment RX
 stops, so a number that has stopped updating never passes for a live one.
+
+---
+
+## The menu
+
+The first thing sdrtop shows you, and `Esc` from anywhere brings it back.
+
+It is one screen in two columns. The left column lists the four **sections**, and
+below a dotted rule two panes that are not sections: **Keys** and **Options**. The
+right column shows whatever is selected on the left.
+
+| Section | Holds |
+|---------|-------|
+| **Command Rail** | The five general views: the cockpit, spectrum, waterfall, both bonded, and the classic layout |
+| **Lab** | The four measurement benches |
+| **Sweep** | The band sweep, full size and compact |
+| **Micro** | The four field views for a small screen |
+
+Each layout shows its **number** beside its name, and that number is the key that
+opens it while you are in that section. The number is the same one the footer
+shows you on the deck, because both read the same table. There is no second copy
+to go stale.
+
+**Keys** is the general key reference, scrollable with `↑` / `↓`. It replaces the
+old `?` overlay, and unlike that overlay it is checked against the app's own key
+dispatch, so it cannot promise a key that does not exist.
+
+**Options** is empty on purpose so far, and says so when you open it.
+
+The menu opens with the cursor on the layout you are already using, so `Enter`
+puts you back without looking anything up. At startup that is your last session's
+layout, which makes the first `Enter` of the day a resume.
+
+Nothing behind the menu is disturbed while it is open. The radio keeps streaming,
+and the header keeps the tuned frequency on screen, so opening the menu never
+hides the one number you were watching.
 
 ---
 
@@ -24,9 +62,9 @@ stops, so a number that has stopped updating never passes for a live one.
 
 ### Command Rail
 
-The view sdrtop opens on (`1`). A left **instrument rail** that gathers everything
-a poweruser glances at, with the spectrum and waterfall bonded to its right. From
-top to bottom:
+The view sdrtop opens on (`Command Rail 1`). A left **instrument rail** that
+gathers everything a poweruser glances at, with the spectrum and waterfall bonded
+to its right. From top to bottom:
 
 - **Frequency hero**: the tuned frequency in big segmented digits, the actively
   tuned digit lit.
@@ -105,9 +143,10 @@ A single bar with eight live readings, sized to sit at the bottom of a layout:
 
 ## The lab benches
 
-The five lab presets (`5` to `9`) are the measurement side of sdrtop. Each one
-puts three or four panels together to answer a single question. This section says
-what each panel *is*; [The Lab presets](lab.md) explains the readings.
+The four layouts in the **Lab** section, plus the band sweep next door in
+**Sweep**, are the measurement side of sdrtop. Each one puts three or four panels
+together to answer a single question. This section says what each panel *is*;
+[The Lab presets](lab.md) explains the readings.
 
 ### The measurement banner and the marker bar
 
@@ -124,7 +163,7 @@ between two of them, in both frequency and level. On the signal bench it also
 carries the occupied bandwidth and a quality verdict; on the RF bench it reads the
 ADC window instead (clip ceiling, peak, headroom, noise, SNR).
 
-### RF front-end bench · `6`
+### RF front-end bench · `Lab 2`
 
 Three panels that tell the whole receive chain as one story: level climbs stage by
 stage, the gap between signal and noise is the SNR set at the antenna, and gain
@@ -142,7 +181,7 @@ only positions that gap inside the ADC window. It cannot widen it.
 The dBm figures are modeled and relative, not a calibrated wattmeter reading, and
 the panel says so itself.
 
-### IQ bench · `5`
+### IQ bench · `Lab 1`
 
 Three views of the same quadrature question, from three directions.
 
@@ -160,7 +199,7 @@ Three views of the same quadrature question, from three directions.
   gap between them. The diagnostics panel calculates image rejection from the
   imbalance figures; this one goes and measures a real image.
 
-### Signal bench · `8`
+### Signal bench · `Lab 4`
 
 - **Signal Characterization** *(left, focus `x`)*: what is that, and how clean is
   it? Modulation class, SNR, channel power, occupied bandwidth, adjacent-channel
@@ -172,7 +211,7 @@ Three views of the same quadrature question, from three directions.
   RadioText. There is no audio anywhere in sdrtop, deliberately. This is an
   instrument, not a receiver.
 
-### Timing bench · `7`
+### Timing bench · `Lab 3`
 
 Whether your computer is keeping up with the radio in real time.
 
@@ -187,7 +226,7 @@ Whether your computer is keeping up with the radio in real time.
   60-second trends, USB errors, configured versus measured sample rate, buffer
   fill, and uptime. Every one with a sparkline.
 
-### Sweep · `9`
+### Sweep · `Sweep 1`
 
 - **Sweep** *(body, focus `g`)*: your radio sees only as much spectrum at once as
   the sample rate covers. This scans a wider band by retuning across it, measuring
@@ -202,21 +241,26 @@ Whether your computer is keeping up with the radio in real time.
 
 ## Micro field views
 
-Press `0`. The idea is that sdrtop shouldn't need a full terminal to be useful:
-squeezed into a slim tmux split, an SSH session on a phone, or the small screen of
-a cyberdeck, the full panels stop being readable. Each micro view strips one
-concern down to a single glance, and each adapts to the width it's given, staying
-readable from an 80×24 SSH session down to a 40-column framebuffer.
+The **Micro** section of the menu. The idea is that sdrtop shouldn't need a full
+terminal to be useful: squeezed into a slim tmux split, an SSH session on a phone,
+or the small screen of a cyberdeck, the full panels stop being readable. Each
+micro view strips one concern down to a single glance, and each adapts to the
+width it's given, staying readable from an 80×24 SSH session down to a 40-column
+framebuffer.
 
-Press `0` again to move through the cycle:
+Four views, on `1` to `4` inside the section:
 
-| Step | View | Built for |
-|------|------|-----------|
-| 1 | **Overview** | The four field questions at once: where am I, what's the signal, is it healthy, what's the gain |
-| 2 | **Signal** | Aiming an antenna. A large SNR bar with a trend arrow, plus channel power, noise floor, occupied BW and RBW |
-| 3 | **Gain** | Setting gain fast on arrival. Wide LNA/VGA bars, prominent ADC utilisation, a gain-advisor verdict, with NF and MDS for context |
-| 4 | **Health** | Long unattended captures. Drop, saturation and buffer sparklines, CPU and RAM, USB throughput, sample-rate accuracy, a summary verdict and a session timer |
-| 5 | **Sweep** | Field scanning. Band range, cycle progress, and the strongest signals found with their band-plan names. Entering this view starts the sweep |
+| Key | View | Built for |
+|-----|------|-----------|
+| `Micro 1` | **Overview** | The four field questions at once: where am I, what's the signal, is it healthy, what's the gain |
+| `Micro 2` | **Signal** | Aiming an antenna. A large SNR bar with a trend arrow, plus channel power, noise floor, occupied BW and RBW |
+| `Micro 3` | **Gain** | Setting gain fast on arrival. Wide LNA/VGA bars, prominent ADC utilisation, a gain-advisor verdict, with NF and MDS for context |
+| `Micro 4` | **Health** | Long unattended captures. Drop, saturation and buffer sparklines, CPU and RAM, USB throughput, sample-rate accuracy, a summary verdict and a session timer |
+
+There used to be a fifth, the compact sweep, reached by cycling one step past
+Health. It now lives in the **Sweep** section as `Sweep 2`, next to the full-size
+sweep it is a small version of. Grouping by what a view is for beats grouping by
+how small it is.
 
 The looks here are still cooking. The idea is solid, the pixels are a work in
 progress.
@@ -258,27 +302,64 @@ plus one measurement panel that has no home preset of its own.
 
 ## Layouts
 
+The fifteen built-in layouts, by section. The key is the number to press while
+that section is active, which is what the menu shows beside each name.
+
+The menu labels them with a short title rather than the preset name, so
+`command_rail` reads as **Rail** and `main` as **Classic**. The preset name is the
+one you use in a [config file](presets.md); the title is only what it is called on
+screen.
+
+**Command Rail**
+
 | Key | Preset | What's in it |
 |-----|--------|--------------|
 | `1` | `command_rail` | Command Rail + bonded spectrum/waterfall (the default) |
 | `2` | `spectrum` | Spectrum, with header and log |
 | `3` | `waterfall` | Waterfall, with header and log |
 | `4` | `spectrum_waterfall` | Both, bonded |
-| `5` | `lab_iq` | IQ diagnostics · constellation · image scope |
-| `6` | `lab_rf` | RF diagnostics · level diagram · ADC loading |
-| `7` | `lab_timing` | Timing diagnostics · callback strip chart · hardware vitals |
-| `8` | `lab_signal` | Signal characterization · spectrum/waterfall · FM demod |
-| `9` | `lab_sweep` | Sweep scanner · signal metrics · sweep strip |
-| `0` | `micro_*` | The five field views, cycled |
-| `p` | any | Cycle every preset including your own |
+| `5` | `main` | Spectrum, waterfall, signal strip and log under a full header |
 
-`main` is a sixth general preset with no key of its own: spectrum, waterfall,
-signal strip and log under a full header. `p` reaches it.
+**Lab**
+
+| Key | Preset | What's in it |
+|-----|--------|--------------|
+| `1` | `lab_iq` | IQ diagnostics · constellation · image scope |
+| `2` | `lab_rf` | RF diagnostics · level diagram · ADC loading |
+| `3` | `lab_timing` | Timing diagnostics · callback strip chart · hardware vitals |
+| `4` | `lab_signal` | Signal characterization · spectrum/waterfall · FM demod |
+
+**Sweep**
+
+| Key | Preset | What's in it |
+|-----|--------|--------------|
+| `1` | `lab_sweep` | Sweep scanner · signal metrics · sweep strip |
+| `2` | `micro_sweep` | The same scan as a compact field view |
+
+**Micro**
+
+| Key | Preset | What's in it |
+|-----|--------|--------------|
+| `1` | `micro_main` | Overview |
+| `2` | `micro_signal` | Signal |
+| `3` | `micro_gain` | Gain |
+| `4` | `micro_health` | Health |
+
+`p` steps to the next layout in whichever section you are in, and wraps at the
+end. A sixteenth preset, `observer`, is marked hidden, so it has no section and no
+key: sdrtop loads it by itself when [another app owns the
+radio](#observer-mode).
+
+`main` had no key at all until the sections arrived. The general views had four
+digits between them and there were five of them, so one had to lose, and it lost
+quietly: the docs said "`p` reaches it" and left it there. Sections give each
+family its own nine digits, which is more than any of them needs.
 
 A preset's *name* matters in one place: anything starting with `lab_` renders in
 **instrument mode**. If you're writing your own layout, that and the other two
 arrangements with behaviour attached are covered in
-[Configuration](presets.md).
+[Configuration](presets.md), along with how to give it a section and a number of
+its own.
 
 ---
 
