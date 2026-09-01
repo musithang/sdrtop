@@ -14,6 +14,8 @@
 //! - [`api`]: the dlopen'd symbol table. The only file with `unsafe extern`
 //!   declarations for this library.
 //! - [`args`]: device arguments and labels. Safe and pure.
+//! - [`caps`]: driver answers to [`crate::hardware::DeviceCapabilities`]. Safe
+//!   and pure, and where the actual thinking is.
 //!
 //! The parts that decide anything take plain Rust data and return plain Rust
 //! data. They never see a device pointer, which is why the interesting logic can
@@ -22,3 +24,4 @@
 
 pub mod api;
 pub mod args;
+pub mod caps;

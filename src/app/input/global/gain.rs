@@ -21,6 +21,10 @@ const LNA_MAX_DB: u32 = 40;
 /// HackRF's VGA moves in 2 dB steps across 0–62 dB.
 const VGA_STEP_DB: u32 = 2;
 const VGA_MAX_DB: u32 = 62;
+/// A SoapySDR device reports a continuous overall range and no step, so one is
+/// chosen here. Small on purpose: the range can be 0 to 116 dB on a HackRF and
+/// 0 to 0 on a sound card, and a big step would be useless at one end of that.
+const SOAPY_STEP_DB: u32 = 1;
 
 /// Next value for the primary front-end gain when stepping up/down: HackRF's LNA
 /// moves in 8 dB steps (0–40); RTL-SDR's single tuner gain walks its discrete
@@ -51,6 +55,17 @@ pub(super) fn next_primary_gain(gain: &GainModel, current: u32, up: bool) -> u32
             };
             gain_steps_db[new_idx]
         }
+        // A continuous range, so a fixed step is the only sensible answer. 1 dB
+        // is deliberately fine rather than fast: a Soapy device's range can be
+        // anything from 0 to 116 dB, and there is no per-device step to follow.
+        GainModel::Soapy { min_db, max_db, .. } => {
+            let hi = (*max_db).max(*min_db);
+            if up {
+                (current + SOAPY_STEP_DB).clamp(*min_db, hi)
+            } else {
+                current.saturating_sub(SOAPY_STEP_DB).clamp(*min_db, hi)
+            }
+        }
     }
 }
 
@@ -59,6 +74,7 @@ pub(super) fn primary_gain_label(gain: &GainModel) -> &'static str {
     match gain {
         GainModel::HackRf => "LNA",
         GainModel::RtlSingle { .. } => "Tuner",
+        GainModel::Soapy { .. } => "Gain",
     }
 }
 

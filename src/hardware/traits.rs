@@ -76,8 +76,24 @@ impl SampleGeometry {
     /// also the honest answer for a 12-bit ADC delivering 16-bit containers: a
     /// driver reporting a full scale of 2048 is telling us it has 12 bits, and
     /// the ADC bench would be wrong to call it 16.
+    ///
+    /// **Capped by the container**, because a driver can report a full scale
+    /// that does not fit in the format it is sending. SoapySDR's `audio` module
+    /// reports `CS16 [full-scale=65536]`, which derives to 17 bits, and there is
+    /// no such thing as a 17-bit sample in a 16-bit container. Found by probing
+    /// a real driver, not by imagining one.
     pub fn bits(&self) -> u8 {
-        (self.full_scale.max(1.0).log2().round() as i32 + 1).clamp(1, 32) as u8
+        let derived = (self.full_scale.max(1.0).log2().round() as i32 + 1).clamp(1, 32) as u8;
+        derived.min(self.container_bits())
+    }
+
+    /// How many bits the wire format can carry per component, whatever the
+    /// converter behind it actually fills.
+    fn container_bits(&self) -> u8 {
+        match self.format {
+            SampleFormat::Int8 | SampleFormat::Uint8 => 8,
+            SampleFormat::Int16 => 16,
+        }
     }
 }
 
@@ -89,12 +105,34 @@ pub enum GainModel {
     /// RTL-SDR: a single tuner gain restricted to a discrete table (whole dB),
     /// plus a tuner-AGC toggle.
     RtlSingle { gain_steps_db: Vec<u32> },
+    /// A SoapySDR device: one overall gain across the driver's own range, and
+    /// the element names for display only.
+    ///
+    /// Mapping named elements onto sdrtop's LNA / VGA / AMP is device-specific,
+    /// unverifiable without the device, and a wrong guess silently drives the
+    /// wrong stage. So 0.5.0 does not guess. See `dev_docs/soapy-design.md`,
+    /// decision 3.
+    ///
+    /// `agc` is `hasGainMode`, and it is genuinely false on real hardware: a
+    /// HackRF through SoapyHackRF reports `Supports AGC: NO`, so the boost key
+    /// has nothing to toggle there.
+    ///
+    /// `elements` and `agc` are written by `soapy::caps` and read by the UI in
+    /// **S10**, which is where a device with no boost stops being offered one.
+    Soapy {
+        min_db: u32,
+        max_db: u32,
+        #[cfg_attr(not(test), allow(dead_code))]
+        elements: Vec<String>,
+        #[cfg_attr(not(test), allow(dead_code))]
+        agc: bool,
+    },
 }
 
 impl GainModel {
-    /// True for a single-tuner device (RTL-SDR) - no separate VGA stage.
+    /// True for a device with one gain control and no separate VGA stage.
     pub fn is_single(&self) -> bool {
-        matches!(self, GainModel::RtlSingle { .. })
+        matches!(self, GainModel::RtlSingle { .. } | GainModel::Soapy { .. })
     }
 
     /// Label for the primary front-end gain stage.
@@ -102,6 +140,9 @@ impl GainModel {
         match self {
             GainModel::HackRf => "LNA",
             GainModel::RtlSingle { .. } => "Tuner",
+            // Soapy distributes one number across whatever elements the device
+            // has, so there is no one stage to name.
+            GainModel::Soapy { .. } => "Gain",
         }
     }
 
@@ -112,6 +153,7 @@ impl GainModel {
             GainModel::RtlSingle { gain_steps_db, .. } => {
                 gain_steps_db.last().copied().unwrap_or(49)
             }
+            GainModel::Soapy { max_db, .. } => *max_db,
         }
     }
 
@@ -125,7 +167,22 @@ impl GainModel {
     pub fn boost_label(&self) -> &'static str {
         match self {
             GainModel::HackRf => "AMP",
-            GainModel::RtlSingle { .. } => "AGC",
+            GainModel::RtlSingle { .. } | GainModel::Soapy { .. } => "AGC",
+        }
+    }
+
+    /// Whether there is a front-end boost to toggle at all.
+    ///
+    /// Both native radios have one, so this was previously not a question worth
+    /// asking. A SoapySDR device often has neither an RF amp nor an automatic
+    /// gain mode, and a key that toggles a flag meaning nothing is worse than a
+    /// key that is not offered. **S10 is where the UI stops offering it**, and
+    /// where this allow comes off.
+    #[cfg_attr(not(test), allow(dead_code))]
+    pub fn has_boost(&self) -> bool {
+        match self {
+            GainModel::HackRf | GainModel::RtlSingle { .. } => true,
+            GainModel::Soapy { agc, .. } => *agc,
         }
     }
 
@@ -148,6 +205,12 @@ impl GainModel {
                     .min_by_key(|&g| (g as i64 - lna as i64).abs())
                     .unwrap_or(lna);
                 (snapped, vga)
+            }
+            // A continuous range, so clamping is the whole job. `vga` is left
+            // alone because there is no second stage to put it in, and a config
+            // carried over from a HackRF should not be silently rewritten.
+            GainModel::Soapy { min_db, max_db, .. } => {
+                (lna.clamp(*min_db, (*max_db).max(*min_db)), vga)
             }
         }
     }
@@ -255,14 +318,61 @@ mod tests {
     /// wrong ENOB on the RF bench for every such radio.
     #[test]
     fn bit_depth_follows_full_scale() {
-        let g = |fs| SampleGeometry {
-            format: SampleFormat::Int8,
+        let wide = |fs| SampleGeometry {
+            format: SampleFormat::Int16,
             full_scale: fs,
         };
-        assert_eq!(g(128.0).bits(), 8, "both shipped radios");
-        assert_eq!(g(2048.0).bits(), 12, "a 12-bit ADC in a 16-bit container");
-        assert_eq!(g(8192.0).bits(), 14);
-        assert_eq!(g(32768.0).bits(), 16);
+        assert_eq!(
+            SampleGeometry {
+                format: SampleFormat::Int8,
+                full_scale: 128.0,
+            }
+            .bits(),
+            8,
+            "both shipped radios"
+        );
+        assert_eq!(
+            wide(2048.0).bits(),
+            12,
+            "a 12-bit ADC in a 16-bit container"
+        );
+        assert_eq!(wide(8192.0).bits(), 14);
+        assert_eq!(wide(32768.0).bits(), 16);
+    }
+
+    /// Two real drivers, probed on this machine, that would each have been got
+    /// wrong by a rule that only looked at one of format or full scale.
+    #[test]
+    fn the_container_caps_the_depth() {
+        // SoapySDR's audio module: `CS16 [full-scale=65536]`. Deriving from the
+        // full scale alone gives 17, and a 16-bit container cannot hold 17 bits.
+        assert_eq!(
+            SampleGeometry {
+                format: SampleFormat::Int16,
+                full_scale: 65536.0,
+            }
+            .bits(),
+            16
+        );
+        // SoapyHackRF: `CS8 [full-scale=128]`, which is 8 either way.
+        assert_eq!(
+            SampleGeometry {
+                format: SampleFormat::Int8,
+                full_scale: 128.0,
+            }
+            .bits(),
+            8
+        );
+        // And a driver claiming an absurd scale in a narrow container is still
+        // capped rather than believed.
+        assert_eq!(
+            SampleGeometry {
+                format: SampleFormat::Int8,
+                full_scale: 1_000_000.0,
+            }
+            .bits(),
+            8
+        );
     }
 
     /// A driver is free to report nonsense. It must not produce a depth of zero,
