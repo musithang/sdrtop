@@ -382,7 +382,7 @@ mod tests {
             all.contains("Options"),
             "the left column needs the row:\n{all}"
         );
-        assert!(all.contains("Nothing to configure yet"), "{all}");
+        assert!(all.contains("Settings will live here"), "{all}");
         // And the pane replaces the right column only, the same as Keys.
         assert!(all.contains("Command Rail"), "{all}");
     }

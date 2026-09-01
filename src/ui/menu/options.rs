@@ -7,6 +7,10 @@
 //! turns into a refactor of the pane, the enum, the column and the dispatch all
 //! at once.
 //!
+//! Two lines and a TODO is the whole screen. Anyone who opens it already knows
+//! what an empty Options pane means, so explaining it at length would be talking
+//! past the reader.
+//!
 //! Draws only, like [`super::entries`] and [`super::keys`]. When the first real
 //! row lands it goes in here and nowhere else.
 
@@ -20,13 +24,9 @@ use ratatui::{
 
 use crate::ui::chrome;
 
-/// Where the settings actually live in the meantime. Worth saying out loud: a
-/// pane that only apologises is less useful than one that points somewhere.
-const BODY: &str = "Everything sdrtop can be told is still told on the command line or in \
-                    config.toml, and that file is honest about what it holds. This pane is \
-                    the seam for the day that stops being true: a theme picker, the footer, \
-                    where the config lives. It is here now so that adding the first setting \
-                    is one row and not one refactor.";
+/// The heading. Says what the pane is for, in the future tense, because that is
+/// the only true tense for it right now.
+const HEADING: &str = "Settings will live here.";
 
 /// The joke, and also the truth. Written without the `// ` so it can wrap like
 /// any other prose: a comment that runs off the edge of a narrow pane is still a
@@ -42,20 +42,13 @@ const TODO: &[&str] = &[
 /// the only thing here that can be wrong, and it can be checked without a
 /// terminal.
 fn lines(iw: usize, theme: &crate::Theme) -> Vec<Line<'static>> {
-    let mut out = vec![
-        Line::from(""),
-        Line::from(Span::styled(
-            "  Nothing to configure yet.",
+    let mut out = vec![Line::from("")];
+    for row in chrome::wrap(HEADING, iw.saturating_sub(4), 3) {
+        out.push(Line::from(Span::styled(
+            format!("  {row}"),
             Style::default()
                 .fg(theme.value_hi)
                 .add_modifier(Modifier::BOLD),
-        )),
-        Line::from(""),
-    ];
-    for row in chrome::wrap(BODY, iw.saturating_sub(4), 12) {
-        out.push(Line::from(Span::styled(
-            format!("  {row}"),
-            Style::default().fg(theme.label),
         )));
     }
     out.push(Line::from(""));
@@ -85,23 +78,20 @@ pub fn render(f: &mut Frame, area: Rect, theme: &crate::Theme) {
 mod tests {
     use super::*;
 
-    /// The pane's whole job right now is to say it is empty, so that is the part
-    /// worth pinning.
+    /// The pane's whole job right now is to name itself and admit it is empty,
+    /// so both halves are worth pinning.
     #[test]
-    fn the_empty_state_says_it_is_empty() {
+    fn the_empty_state_names_itself_and_admits_it() {
         let text: String = lines(60, &crate::Theme::sdr())
             .iter()
             .map(|l| l.to_string())
             .collect::<Vec<_>>()
             .join("\n");
-        assert!(text.contains("Nothing to configure yet"), "{text}");
-        assert!(
-            text.contains("config.toml"),
-            "it should point at where the settings really are:\n{text}"
-        );
+        assert!(text.contains("Settings will live here"), "{text}");
+        assert!(text.contains("TODO"), "{text}");
     }
 
-    /// The prose wraps, so it has to keep fitting the narrow single column form
+    /// The copy wraps, so it has to keep fitting the narrow single column form
     /// as well as a wide one. A row wider than the pane is a row the reader only
     /// sees half of.
     #[test]
@@ -117,11 +107,10 @@ mod tests {
         }
     }
 
-    /// No em dashes in anything a user reads. House style, and this file is one
-    /// of the few that is almost entirely prose.
+    /// House style.
     #[test]
     fn the_copy_uses_no_em_dashes() {
-        assert!(!BODY.contains('\u{2014}'));
+        assert!(!HEADING.contains('\u{2014}'));
         assert!(TODO.iter().all(|t| !t.contains('\u{2014}')));
     }
 }
