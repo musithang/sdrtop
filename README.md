@@ -4,38 +4,55 @@
 
 <h1 align="center">sdrtop</h1>
 
-[![Rust](https://img.shields.io/badge/rust-stable-orange?logo=rust&logoColor=white)](https://www.rust-lang.org)
-[![License](https://img.shields.io/badge/license-GPL--3.0-blue)](LICENSE)
-[![Platform](https://img.shields.io/badge/platform-linux-lightgrey?logo=linux&logoColor=white)]()
-[![Development Stage](https://img.shields.io/badge/stage-early%20development-red)]()
+<p align="center">
+  <a href="https://www.rust-lang.org"><img src="https://img.shields.io/badge/rust-1.88%2B-orange?logo=rust&logoColor=white" alt="Rust 1.88+"></a>
+  <a href="LICENSE"><img src="https://img.shields.io/badge/license-GPL--3.0-blue" alt="GPL-3.0"></a>
+  <img src="https://img.shields.io/badge/platform-linux-lightgrey?logo=linux&logoColor=white" alt="Linux">
+  <img src="https://img.shields.io/badge/stage-early%20development-red" alt="Early development">
+</p>
 
-[![HackRF One](https://img.shields.io/badge/hardware-HackRF%20One-brightgreen)](https://greatscottgadgets.com/hackrf/one/)
-[![RTL-SDR](https://img.shields.io/badge/hardware-RTL--SDR-green)](https://www.rtl-sdr.com/)
-[![PortaPack](https://img.shields.io/badge/hardware-PortaPack%20H4M-blueviolet)](https://github.com/portapack-mayhem/mayhem-firmware)
+<p align="center">
+  <b>Tested on real hardware</b><br>
+  <a href="https://greatscottgadgets.com/hackrf/one/"><img src="https://img.shields.io/badge/HackRF%20One-brightgreen" alt="HackRF One"></a>
+  <a href="https://www.rtl-sdr.com/"><img src="https://img.shields.io/badge/RTL--SDR-green" alt="RTL-SDR"></a>
+  <a href="https://github.com/portapack-mayhem/mayhem-firmware"><img src="https://img.shields.io/badge/PortaPack%20H4M-blueviolet" alt="PortaPack H4M"></a>
+</p>
+
+<p align="center">
+  <b>Via SoapySDR</b> <img src="https://img.shields.io/badge/BETA-orange" alt="Beta"><br>
+  <a href="user_docs/hardware.md#soapysdr-the-honest-version"><img src="https://img.shields.io/badge/SoapySDR-0.8-informational" alt="SoapySDR 0.8"></a>
+  <a href="user_docs/hardware.md#soapysdr-the-honest-version"><img src="https://img.shields.io/badge/Airspy-lightgrey" alt="Airspy"></a>
+  <a href="user_docs/hardware.md#soapysdr-the-honest-version"><img src="https://img.shields.io/badge/SDRplay%20RSP-lightgrey" alt="SDRplay RSP"></a>
+  <a href="user_docs/hardware.md#soapysdr-the-honest-version"><img src="https://img.shields.io/badge/PlutoSDR-lightgrey" alt="PlutoSDR"></a>
+  <a href="user_docs/hardware.md#soapysdr-the-honest-version"><img src="https://img.shields.io/badge/LimeSDR-lightgrey" alt="LimeSDR"></a>
+  <a href="user_docs/hardware.md#soapysdr-the-honest-version"><img src="https://img.shields.io/badge/bladeRF-lightgrey" alt="bladeRF"></a>
+  <a href="user_docs/hardware.md#soapysdr-the-honest-version"><img src="https://img.shields.io/badge/USRP-lightgrey" alt="USRP"></a>
+  <br>
+  <sub>Grey means <b>written from the API, not from owning one</b>. Nobody has reported back yet. <a href="user_docs/hardware.md#soapysdr-the-honest-version">The honest version</a>.</sub>
+</p>
 
 <p align="center">
   <a href="#-install">Install</a> ·
   <a href="#keys">Keys</a> ·
   <a href="#config">Config</a> ·
-  <a href="#supported-hardware">Hardware</a>
+  <a href="#supported-hardware">Hardware</a> ·
+  <a href="user_docs/README.md">Full guide</a>
 </p>
 
-**Hey there! This is my take on a terminal monitor for SDR hardware.** I wanted something that could hunt down every bit of diagnostic data from your radio and stream it straight to your terminal.
-
-I didn't want to cut corners, so this definitely isn't just a lazy hardware info tool clone. It delivers raw, real-time metrics (spectrum, waterfall, ADC health, gain chain) right inside the terminal. It's lightweight, distraction-free, and fits perfectly into a tmux pane, an SSH session, or the custom screen of your cyberdeck.
+**Hey there! This is my take on a terminal monitor for SDR hardware.** I wanted something that could hunt down every bit of diagnostic data from your radio and stream it straight to your terminal. Not a lazy `*-info` clone: raw, real-time metrics with a spectrum, a waterfall and a set of bench instruments, in a tmux pane, an SSH session, or the postage-stamp screen of a cyberdeck.
 
 It's a hobby project built in my spare time, and honestly, I made it for *you* ❤️. Use it however you like, beat on it, and don't be shy: open issues, dig through the code, and if you've got a good idea, send it my way as a pull request or just a message. This is an open table, not my private garage.
 
 > [!IMPORTANT]
-> **Project status: early development.**
+> **Project status: early development.** The TUI is feature-complete and the arc now is polish, sharper radio math and bug fixing, not more features.
 >
-> * **Hardware:** the **HackRF One** and the **RTL-SDR** (R820T / R828D / E4000) are both fully supported, in normal RX and in observer mode. RTL clones vary wildly, though, and nobody owns all of them, so if yours behaves oddly please [open an issue](../../issues). Anything with a **SoapySDR** driver works too, written from the API rather than from owning the hardware, which is [a different kind of supported](user_docs/hardware.md#soapysdr-the-honest-version).
-> * **Software:** the **interactive TUI is feature-complete** (spectrum, waterfall, the IQ / RF / timing / signal / sweep lab presets, and the micro field views). The focus now is **polishing the UI, sharpening the radio math, and fixing bugs**, not piling on features. The most recent pass went through the Lab Signal bench reading by reading asking "is this number actually true?", and several were not.
-> * **Known issues:** plenty 😄 If something looks broken, it's either a bug or an undocumented feature. Flip a coin, then open an issue.
+> Two radios are **verified on hardware**: HackRF One and RTL-SDR. Anything with a **SoapySDR** driver also works, and that backend is **beta**: it was written from the API rather than from owning the radios, so treat it as "should work, nobody has confirmed it yet". [The docs say exactly which parts are confirmed](user_docs/hardware.md#soapysdr-the-honest-version). If you own one of those, an issue either way is worth a lot to me.
+>
+> Known issues: plenty 😄 If something looks broken, it's either a bug or an undocumented feature. Flip a coin, then open an issue.
 
 ### 📖 Documentation
 
-**[→ Full user guide](user_docs/README.md)**: everything below, in depth. Or jump straight to:
+**[→ Full user guide](user_docs/README.md)**. This page is the short version; everything below is covered properly over there.
 
 | | | |
 |---|---|---|
@@ -58,30 +75,18 @@ It's a hobby project built in my spare time, and honestly, I made it for *you* �
 
 *It's a terminal app, so brace yourself for the visual spectacle of monospace text in color. The only special effects are honest dBFS numbers.*
 
-Screenshots, split by device. More to come. Got a clean capture on your hardware? Drop it in [`user_docs/pics/`](https://github.com/mustang6139/sdrtop/tree/main/user_docs/pics) and send a PR (RTL-SDR shots from different tuners especially welcome).
-
-<details open>
-  <summary><b>📻 HackRF One</b>: spectrum, waterfall &amp; lab presets</summary>
-  <br>
-  <table>
-    <tr>
-      <td width="50%"><img src="https://raw.githubusercontent.com/mustang6139/sdrtop/main/user_docs/pics/hackrf/command_rail.png" alt="HackRF: Command Rail cockpit"></td>
-      <td width="50%"><img src="https://raw.githubusercontent.com/mustang6139/sdrtop/main/user_docs/pics/hackrf/spectrum.png" alt="HackRF: spectrum & waterfall"></td>
-    </tr>
-    <tr>
-      <td width="50%"><img src="https://raw.githubusercontent.com/mustang6139/sdrtop/main/user_docs/pics/hackrf/lab_iq.png" alt="HackRF: IQ diagnostics lab"></td>
-      <td width="50%"><img src="https://raw.githubusercontent.com/mustang6139/sdrtop/main/user_docs/pics/hackrf/lab_rf.png" alt="HackRF: RF chain lab"></td>
-    </tr>
-    <tr>
-      <td width="100%" colspan="2"><img src="https://raw.githubusercontent.com/mustang6139/sdrtop/main/user_docs/pics/hackrf/lab_timing.png" alt="HackRF: timing lab"></td>
-    </tr>
-  </table>
-</details>
-
 <details>
-  <summary><b>📡 RTL-SDR</b>: spectrum, waterfall &amp; observer mode</summary>
+  <summary><b>📻 More screenshots</b>: lab benches, RTL-SDR, the Command Rail cards</summary>
   <br>
   <table>
+    <tr>
+      <td width="50%"><img src="https://raw.githubusercontent.com/mustang6139/sdrtop/main/user_docs/pics/hackrf/spectrum.png" alt="HackRF: spectrum & waterfall"></td>
+      <td width="50%"><img src="https://raw.githubusercontent.com/mustang6139/sdrtop/main/user_docs/pics/hackrf/lab_iq.png" alt="HackRF: IQ diagnostics lab"></td>
+    </tr>
+    <tr>
+      <td width="50%"><img src="https://raw.githubusercontent.com/mustang6139/sdrtop/main/user_docs/pics/hackrf/lab_rf.png" alt="HackRF: RF chain lab"></td>
+      <td width="50%"><img src="https://raw.githubusercontent.com/mustang6139/sdrtop/main/user_docs/pics/hackrf/lab_timing.png" alt="HackRF: timing lab"></td>
+    </tr>
     <tr>
       <td width="50%"><img src="https://raw.githubusercontent.com/mustang6139/sdrtop/main/user_docs/pics/rtlsdr/rtl-sdr1.png" alt="RTL-SDR: spectrum & waterfall"></td>
       <td width="50%"><img src="https://raw.githubusercontent.com/mustang6139/sdrtop/main/user_docs/pics/rtlsdr/rtl-sdr2.png" alt="RTL-SDR: observer mode"></td>
@@ -89,59 +94,23 @@ Screenshots, split by device. More to come. Got a clean capture on your hardware
   </table>
 </details>
 
+Got a clean capture on your hardware? Drop it in [`user_docs/pics/`](https://github.com/mustang6139/sdrtop/tree/main/user_docs/pics) and send a PR. Shots from radios I don't own are the most useful ones there are.
+
 ---
 
-## What it shows
+## What it does
 
 Everything your radio knows about itself, in real time, without leaving the terminal.
 
-### The Command Rail: the default cockpit
-The default layout, and the one the menu has waiting on a first run. A slim header plus a left **instrument rail** that packs what a poweruser reads at a glance: a big segmented **frequency hero**, an analog **S-meter**, the **HUNT · MONITOR · BENCH** mode tabs whose lead card follows what you're doing, **recall slots** with live activity pips, and a SIGNAL zone where SNR · PWR · NF · SAT each ride their own little braille oscilloscope trace beside the value. Gain and stream health round it out, and the bonded spectrum + waterfall fill the rest. Press `c` to drive it, `←/→` to tune. All dials, no autopilot. It's a radio, not a self-driving car.
-
-<details>
-  <summary><b>🛰️ Command Rail</b>: the BENCH &amp; HUNT mode cards</summary>
-  <br>
-  <table>
-    <tr>
-      <td width="50%"><img src="https://raw.githubusercontent.com/mustang6139/sdrtop/main/user_docs/pics/annotate-2026-06-22_22-42-55.png" alt="HackRF: bench"></td>
-      <td width="50%"><img src="https://raw.githubusercontent.com/mustang6139/sdrtop/main/user_docs/pics/annotate-2026-06-22_22-43-06.png" alt="HackRF: hunt"></td>
-    </tr>
-  </table>
-</details>
-
-<p align="center"><sub>· · ·</sub></p>
-
-### Live spectrum & waterfall
-- **Spectrum analyzer**: FFT with EMA smoothing, peak hold, noise floor tracking, dBFS axis, zoom, band-plan overlay, and persistent frequency markers
-- **Waterfall**: scrolling spectrogram in truecolor / 256-color / 16-color, with adjustable color scale, history scroll-back, and frame averaging for longer time windows
-- **Focus modes**: press the highlighted letter in a panel's title to take it over. `e` spectrum, `l` waterfall, `c` the Command Rail, plus cursor read-outs, holds, and markers without ever touching the mouse
-
-<p align="center"><sub>· · ·</sub></p>
-
-### Bench-engineer measurements (the Lab presets)
-- **Demodulator**: not for listening. There is no audio anywhere in sdrtop, and that's the point. This one opens the channel up and reports what a spectrum plot structurally cannot: **FM deviation** (peak and RMS, measured about the carrier, so a mistuned radio confesses to being mistuned instead of faking modulation), the **MPX baseband** with its 19 kHz pilot and stereo injection percentage, **CTCSS** tones for narrowband voice, **AM depth** with positive and negative peaks kept apart, and **RDS**: station name, PI code, programme type and RadioText, decoded off the 57 kHz subcarrier, accents and all
-- **Signal characterization**: what *is* that, and how clean is it? Modulation class, SNR, channel power, 99 % **occupied bandwidth** (ITU-R SM.328, measured over the carrier rather than the captured span), **ACPR** against the neighbouring channels at the right spacing for the mode, and a noise floor given both per bin and as a **density** in dBFS/Hz, so the same receiver reads as the same receiver whatever the sample rate
-- **RF chain**: tuned frequency with wavelength (λ, λ/4 for cutting antennas), a visual gain chain, estimated **noise figure** (Friis), **minimum detectable signal** (MDS) in dBm, an ADC-utilisation gauge, and a gain advisor that tells you when you're starving or clipping the front end
-- **IQ diagnostics**: DC offset, amplitude/phase imbalance and **image rejection ratio** (IRR), drawn as analog **null-meters** (centre is ideal, the needle shows the deviation). Paired with a **persistence constellation**, a phosphor-style I/Q cloud coloured by density with a fitted imbalance ellipse whose stretch reads amplitude imbalance and whose tilt reads phase imbalance, and an **image scope** that measures a carrier against its own mirror to check the computed IRR against a real one
-- **IQ correction**: not just measurement. A keypress subtracts the live DC estimate from the stream, another captures a quadrature correction and applies it, so you can watch the DC spike and the mirror images actually go away
-- **Measurement banner**: the spectrum-analyser workflow on every lab preset. Set a **reference level**, dial in **trace averaging** to pull a signal out of the noise, capture a **reference trace**, and read the marker bar's delta against it
-- **IQ histogram**: ADC amplitude distribution with a Low/Mid/Clip breakdown and **PAPR** (crest factor) that fingerprints the signal type at a glance
-- **Timing**: USB transfer cadence, throughput, and jitter with a quality verdict and session peak tracking
-- **Hardware vitals**: drops, ADC saturation, sdrtop's own CPU/RAM, USB errors, configured-vs-measured sample rate, and buffer fill, every one with a trend sparkline
-
-<p align="center"><sub>· · ·</sub></p>
-
-### Scanning & field views
-- **Frequency sweep**: scan a band wider than one window can show. sdrtop retunes across it, stitches the result into a single curve with band-plan labels, and lets you press `Enter` on a peak to tune straight to it
-- **Micro field views**: the deliberately tiny mode, a section of its own in the menu. The idea is that sdrtop shouldn't need a full terminal to be useful. When it's squeezed into a slim tmux split, an SSH session on a phone, or the postage-stamp screen of a cyberdeck, the full panels stop being readable, so the micro views strip each concern down to a single glance (overview · signal · gain · health) and give each one its own key. One number that matters, big enough to read across the room. *(Heads up: the looks are still cooking. The idea's solid, the pixels are a work in progress.)*
-- **Signal strip**: one live bar with the essentials. P/NF · channel power · noise floor · ADC saturation · drops · buffer fill · IQ imbalance · RBW
-- **Observer mode**: if another app already holds the radio, sdrtop shows device identity, the owning process, and USB stats instead of falling over, then reclaims the device when it's free
-
-<p align="center"><sub>· · ·</sub></p>
-
-### Make it yours
-- **Six themes**: `sdr` · `nord` · `dracula` · `gruvbox` · `catppuccin` · `solarized`
-- **Layout presets**: general + specialised lab layouts, grouped into four sections you switch between in the menu. Nine number keys per section, `p` to step through one, or define your own in the config out of any panel sdrtop draws, with its own section and key
+- **The Command Rail**, the default cockpit: a big segmented frequency hero, an analog S-meter, HUNT · MONITOR · BENCH mode cards that follow what you're doing, recall slots, and SNR · PWR · NF · SAT each riding its own braille oscilloscope trace. All dials, no autopilot. It's a radio, not a self-driving car.
+- **Spectrum and waterfall**: FFT with peak hold, noise floor tracking, zoom, band-plan overlay and persistent markers; a scrolling spectrogram in truecolor, 256 or 16 colors with history scroll-back and frame averaging.
+- **Four lab benches** for the questions a plot can't answer: is the quadrature clean, is the front end staged right, is my computer keeping up, and what *is* that signal. Noise figure, MDS, IRR, occupied bandwidth, ACPR, ADC loading, jitter. [The details](user_docs/lab.md).
+- **A demodulator that doesn't play audio**, deliberately. It opens the channel and reports what a spectrum plot structurally cannot: FM deviation about the carrier, the MPX baseband with its 19 kHz pilot, stereo injection, CTCSS, AM depth, and **RDS** station name, PTY and RadioText. It reads radios, it doesn't play them.
+- **IQ correction, not just measurement**: one key subtracts the live DC estimate from the stream, another captures a quadrature correction and applies it. Watch the spike and the mirror images actually go away.
+- **A band sweep** wider than one window, stitched into a single curve with band-plan labels, `Enter` on a peak to tune straight to it.
+- **Micro field views** for when a full terminal isn't on offer: each concern stripped to one glance, readable down to about 40 columns.
+- **Observer mode**: if another app already holds the radio, sdrtop shows device identity, the owning process and USB stats instead of falling over, then takes the radio back when it's free.
+- **Six themes and a layout system**: presets grouped into four sections, `Esc` for the menu, or define your own out of any panel sdrtop draws.
 
 > Every lab panel marks itself **[STALE]** the moment RX stops, so a frozen number is never mistaken for a live one. Because the only thing worse than no data is confidently wrong data.
 
@@ -149,13 +118,21 @@ The default layout, and the one the menu has waiting on a first run. A slim head
 
 ## 📦 Install
 
-**Requirements:** Linux · HackRF One *or* RTL-SDR · `libhackrf` + `librtlsdr` + `pkg-config`
+**Requirements:** Linux · a HackRF One, an RTL-SDR, or anything SoapySDR speaks to
 
-Three ways in. Take the first one that fits, they all end with the same binary.
+### The one-liner
 
-### 1. `cargo install`, the boring one that always works
+```sh
+curl -fsSL https://raw.githubusercontent.com/mustang6139/sdrtop/main/packaging/install.sh | sh
+```
 
-sdrtop lives on [crates.io](https://crates.io/crates/sdrtop). Cargo compiles it *on your machine*, which means it links whatever your machine actually has and doesn't care what architecture or distribution you're running. Grab the two libraries first, then the program:
+It works out your distribution, installs the libraries under whatever names that distribution gives them (apt, dnf, pacman, zypper, apk, xbps, emerge and nix are all handled), grabs the prebuilt binary if it can actually run on your box, and quietly falls back to compiling if it can't. The nice bit: it decides by **running the thing**, not by reading your distro's name off a list and hoping.
+
+Piping a script into `sh` means running code you haven't read. You should read it: [`packaging/install.sh`](packaging/install.sh). I'd want to. It also takes `--prefix ~/.local` if root isn't on the menu, and [a handful of other flags](user_docs/getting-started.md#the-shorter-way-if-you-dont-want-to-think-about-it).
+
+### Or cargo, the boring one that always works
+
+sdrtop is on [crates.io](https://crates.io/crates/sdrtop). Cargo compiles it *on your machine*, so it links what your machine actually has and doesn't care about your architecture or distribution.
 
 ```sh
 sudo apt install libhackrf-dev librtlsdr-dev pkg-config          # Debian / Ubuntu / Mint
@@ -165,159 +142,82 @@ sudo dnf install hackrf-devel rtl-sdr-devel pkgconf-pkg-config   # Fedora
 cargo install sdrtop --locked
 ```
 
-You need both libraries at build time even if you only own one radio. Sorry. At runtime sdrtop is happy with whichever you plug in.
-
-Wants **Rust 1.88 or newer**. Your distro's Rust is quite possibly ancient (Debian 12 ships 1.63, bless it), and [rustup](https://rustup.rs) sorts that out in one line. More distributions in [Getting started](user_docs/getting-started.md).
+You need both libraries at build time even if you only own one radio. Sorry. Wants **Rust 1.88+**, and your distro's Rust is quite possibly ancient (Debian 12 ships 1.63, bless it), which [rustup](https://rustup.rs) fixes in one line.
 
 Then go make coffee: a few minutes on a laptop, considerably more on a Raspberry Pi. It's not frozen, it's just Rust.
 
-### 2. The installer, if you'd rather not think about any of that
+### For SoapySDR devices
+
+Beta, see [Hardware](#supported-hardware). Neither of these is needed to build or run sdrtop; it looks for them at startup and shrugs if they aren't there.
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/mustang6139/sdrtop/main/packaging/install.sh | sh
+sudo apt install libsoapysdr0.8 soapysdr-tools soapysdr-module-all
+SoapySDRUtil --find     # if this can't see your radio, sdrtop can't either
 ```
 
-It figures out your distribution, installs `libhackrf` and `librtlsdr` under whatever names that distribution gives them (apt, dnf, pacman, zypper, apk, xbps, emerge and nix are all handled), then grabs the prebuilt binary if it can actually run on your box, and quietly falls back to `cargo install` if it can't.
+<sub>Prefer a prebuilt binary, need a specific version, or on something unusual? <b><a href="user_docs/getting-started.md">Getting started</a></b> has the release tarball, the signature check, every installer flag and the distro-by-distro package names.</sub>
 
-The nice bit: it decides by **running the thing**, not by reading your distro's name off a list and hoping. That's how one script covers every architecture, Raspberry Pi included.
-
-<details>
-<summary>Options, and installing without root</summary>
-
-```sh
-sh install.sh --prefix ~/.local     # no root anywhere
-sh install.sh --from-source         # skip the prebuilt binary, always compile
-sh install.sh --git                 # compile main instead of a release, live dangerously
-sh install.sh --version v0.4.1      # a specific release
-sh install.sh --deps-only           # just the libraries
-sh install.sh --uninstall
-```
-
-Piping a script into `sh` means running code you haven't read. You should read it: [`packaging/install.sh`](packaging/install.sh). I'd want to.
-
-</details>
-
-### 3. The prebuilt binary, for the no-toolchain crowd
-
-Over on the [releases page](../../releases). One tarball, x86_64 only, and it wants **glibc 2.36+** and **`librtlsdr.so.0`**. In practice: Debian 12 and 13, Kali, Raspberry Pi OS Bookworm.
-
-Ubuntu and Mint package that exact same library as `.so.2`, because of course they do, so the binary won't start there. Use option 1 or 2 and it'll be fine.
-
-```sh
-tar -xzf sdrtop-<version>-x86_64-unknown-linux-gnu.tar.gz
-cd sdrtop-<version>-x86_64-unknown-linux-gnu
-sha256sum -c <(grep sdrtop- ../SHA256SUMS)   # check it before you trust it
-sudo install -Dm755 sdrtop /usr/local/bin/sdrtop
-```
-
-From 0.4.2 onward the release also carries a signed build provenance attestation. The checksum only tells you the download didn't get mangled; this tells you the file actually came out of this repo's release workflow:
-
-```sh
-gh attestation verify sdrtop-<version>-x86_64-unknown-linux-gnu.tar.gz --repo mustang6139/sdrtop
-```
-
-sdrtop opens on its menu: pick a layout with `Enter`, then `Space` to start receiving. `Esc` brings the menu back at any time, and `q` quits and saves.
+**First run:** sdrtop opens on its menu. `Enter` takes a layout, `Space` starts receiving, `Esc` brings the menu back, `q` quits and saves.
 
 ---
 
 ## Keys
 
-The layouts are grouped into four sections, and **each section has its own numbers**: `Command Rail` for the general views, `Lab` for the measurement benches, `Sweep` for the band scan, `Micro` for the field views. `2` is the RF bench inside Lab and the spectrum inside Command Rail. `Esc` opens the menu, which shows you the sections, the layouts in the one you're on, and the number that opens each. Nine keys, four times over, rather than one long row to memorise.
+Layouts are grouped into four sections and **each section has its own numbers**: `Command Rail` for the general views, `Lab` for the benches, `Sweep` for the band scan, `Micro` for the field views. So `2` is the RF bench inside Lab and the spectrum inside Command Rail. `Esc` opens the menu, which shows you the sections, the layouts in the one you're on, and the number that opens each. Nine keys, four times over, rather than one long row to memorise.
 
-| Key        | Action                         |
-| ---------- | ------------------------------ |
-| `Space`    | Start / stop RX                |
-| `↑` / `↓` | Primary gain: HackRF LNA ±8 dB, RTL-SDR tuner step |
-| `[` / `]`  | VGA gain ±2 dB (HackRF only)   |
-| `a`        | Toggle the front end boost (RF amp / tuner AGC), where the device has one |
-| `f`        | Enter frequency (MHz)          |
-| `s`        | Enter sample rate (HackRF 2–20 MHz · RTL-SDR 0.9–3.2 MHz) |
-| `r`        | Reset all settings to defaults |
-| `w`        | Pause / resume waterfall       |
-| `h`        | Hold / unhold spectrum frame   |
+The ten that get you everywhere:
+
+| Key | Action |
+|---|---|
+| `Esc` | Open the menu, or leave a focused panel |
+| `Enter` | Take the highlighted layout |
+| `Space` | Start / stop RX |
+| `1`–`9` | The nth layout **of the section you're in** |
+| `↑` / `↓` | Primary gain |
+| `f` / `s` | Type a frequency / a sample rate |
 | `c` / `e` / `l` | Focus the Command Rail / spectrum / waterfall |
-| `i` / `d` / `t` / `v` / `x` / `m` / `n` / `g` / `b` | Focus a lab panel: IQ · RF · timing · vitals · signal · demod · metrics · sweep · measurement banner |
-| `Esc`      | Open the menu, or leave a focused panel |
-| `1`–`9`    | The nth layout **of the section you're in** |
-| `p`        | Next layout in the same section |
-| `Tab`      | Toggle footer bar              |
-| `q`        | Quit and save config           |
+| `q` | Quit and save |
 
-> Capitals work everywhere: `C` and `c` do the same thing, so you never have to think about whether Shift is down. The only place case matters is when you're *typing*, like a marker name.
+Capitals work everywhere: `C` and `c` do the same thing, so you never have to think about whether Shift is down. The gain keys relabel themselves per device, and a control your radio doesn't have simply isn't offered rather than sitting there doing nothing.
 
-> **On an RTL-SDR** the gain keys adapt to the hardware: `↑`/`↓` step the tuner's single discrete gain table and `a` toggles tuner **AGC** (there's no separate VGA stage, so `[`/`]` sit out). The UI relabels itself accordingly, no muscle memory to relearn. With more than one radio plugged in, a picker appears at launch; pin one with `--device hackrf|rtlsdr|soapy`.
->
-> **Through SoapySDR** there is one overall gain on `↑`/`↓` across whatever range the driver reports, `[`/`]` sit out, and `a` exists only if the driver says there is an automatic gain mode. sdrtop asks; it does not assume.
-
-Full reference, including every focus mode: **[Keyboard shortcuts](user_docs/keys.md)**.
+Forgotten one mid-session? `Esc`, then `Tab` to **Keys**. That reference is generated from the same table the app dispatches on, so it cannot go stale. Full list including every focus mode: **[Keyboard shortcuts](user_docs/keys.md)**.
 
 ---
 
 ## Config
 
-Everything is saved automatically to `~/.config/sdrtop/config.toml` when you quit, and hand-editing is safe: a missing or broken file just falls back to defaults. Go ahead, mangle it; the parser has seen worse.
+Saved to `~/.config/sdrtop/config.toml` when you quit. Hand-editing is safe: a missing or broken file just falls back to defaults. Go ahead, mangle it; the parser has seen worse.
 
-```toml
-[radio]
-frequency_hz = 92800000      # tuned center frequency
-sample_rate  = 2000000.0     # HackRF 2–20 MHz · RTL-SDR 0.9–3.2 MHz
-lna_gain     = 24            # HackRF LNA / RTL-SDR tuner gain
-vga_gain     = 30            # HackRF only (ignored on RTL-SDR)
-amp_enabled  = false         # HackRF RF amp / RTL-SDR tuner AGC
+Frequency, gains, sample rate, markers, the sweep band, your theme and your layout all live there, plus any layouts of your own. Give a custom preset a `section` and a `slot` and it gets a place in the menu and a number key. Annotated example and every field: **[Configuration](user_docs/config.md)** and **[Layout presets](user_docs/presets.md)**.
 
-[display]
-active_preset      = "command_rail"
-waterfall_max_rows = 64
-
-# Spectrum markers persist here, one block each
-[[display.spectrum_markers]]
-freq_hz = 92800000
-label   = "FM Radio"
-
-[sweep]
-start_hz = 400000000         # frequency scanner: band start
-stop_hz  = 500000000         # band end
-dwell_ms = 200               # measure time per step (50–2000)
-
-[theme]
-base = "nord"
-# optional per-field overrides:
-# border_accent = "#88c0d0"
-# value_hi      = "#ebcb8b"
-```
-
-**Themes:** `sdr` (default) · `nord` · `dracula` · `gruvbox` · `catppuccin` · `solarized`. See [Themes](user_docs/themes.md).
-
-**Custom layouts:** define your own `[presets.*]` blocks and they merge with the built-ins, surviving every save. Give one a `section` and a `slot` and it gets a place in the menu and a number key of its own. Full reference in [Layout presets](user_docs/presets.md).
+**Themes:** `sdr` (default) · `nord` · `dracula` · `gruvbox` · `catppuccin` · `solarized`, with per-field overrides. See [Themes](user_docs/themes.md).
 
 ---
 
 ## Supported hardware
 
-| Device                                 | Status            | Notes                                     |
-| -------------------------------------- | ----------------- | ----------------------------------------- |
-| HackRF One                             | ✅ Full support    | All diagnostics, gain stages, ADC metrics |
-| RTL-SDR (R820T, E4000, R828D)          | ✅ Full support    | Single tuner gain + AGC; no VGA, no BB filter, no Friis NF |
-| **Anything with a SoapySDR driver**    | 🧪 Supported, untested | Airspy, SDRplay, Pluto, Lime, bladeRF, USRP, SoapyRemote. Written from the API, not from owning them |
-| PortaPack H4M (Mayhem)                 | 🔧 In development | Telemetry panel via CDC/ACM serial        |
-| HackRF Pro                             | 🔲 Planned        | Needs hardware                            |
+| Device | Status | Notes |
+|---|---|---|
+| HackRF One | ✅ Full support | All diagnostics, gain stages, ADC metrics |
+| RTL-SDR (R820T, E4000, R828D) | ✅ Full support | Single tuner gain + AGC; no VGA, no BB filter, no Friis NF |
+| **Anything with a SoapySDR driver** | 🧪 **Beta** | Airspy, SDRplay, Pluto, Lime, bladeRF, USRP, SoapyRemote. Unconfirmed on anything but a HackRF |
+| PortaPack H4M (Mayhem) | 🔧 In development | Telemetry panel via CDC/ACM serial |
+| HackRF Pro | 🔲 Planned | Needs hardware |
 
-> Native hardware support is added only after physical testing on real devices. No guessing from datasheets. (Translation: that list moves at exactly the speed of my hobby budget.)
->
-> **SoapySDR is the deliberate exception**, because "I don't own one" was a bad answer to give every week. Nothing about your radio is hardcoded: sdrtop asks the driver for the frequency range, the gain range, whether there's an AGC, the sample format and how many of its bits mean anything. What it can't ask, it refuses rather than invents. What's verified: the loader, enumeration, opening, capabilities and streaming, all against a HackRF through `SoapyHackRF`. What isn't: literally every other radio. If you have one, [an issue](../../issues) either way is worth a lot. See [the honest version](user_docs/hardware.md#soapysdr-the-honest-version).
->
-> libSoapySDR is opened at runtime, so it is **not** a build or run dependency: the same binary works with it and without it.
+Native support is added only after physical testing on real devices. No guessing from datasheets. Translation: that list moves at exactly the speed of my hobby budget.
+
+**SoapySDR is the deliberate exception**, because "I don't own one" was a bad answer to give every week. Nothing about your radio is hardcoded: sdrtop asks the driver for the frequency range, the gain range, whether there's an AGC, the sample format and how many of its bits mean anything. What it can't ask, it refuses rather than invents. Verified against a HackRF through `SoapyHackRF`: the loader, enumeration, opening, capabilities and streaming. Unverified: literally every other radio. [The honest version](user_docs/hardware.md#soapysdr-the-honest-version) has the full reckoning, including the gotchas I already hit.
 
 ### The hardware wishlist
 
-Every device on the planned list needs to physically exist on my desk before it gets a backend, and development here runs on a HackRF One and a PortaPack H4M. If you use `sdrtop` and want your device supported sooner, contributions go straight into buying it. Every radio that arrives gets a proper backend: tested on real hardware, documented, shipped.
+Every native backend needs the device to physically exist on my desk, and development here runs on a HackRF One and a PortaPack H4M. If sdrtop is useful to you and you'd like your radio supported properly, contributions go straight into buying it. Every radio that arrives gets a real backend: tested on hardware, documented, shipped.
 
-| Device               | Why it matters                                                     | Price |
-| -------------------- | ------------------------------------------------------------------ | ----- |
-| RTL-SDR Blog V4      | The backend is in; a unit here would let me test the clone variants | ~€25  |
-| Airspy Mini          | Clean 24–1700 MHz, popular with hams and scanner hobbyists          | ~€80  |
-| Airspy HF+ Discovery | Best budget HF receiver, dedicated listener community               | ~€150 |
-| LimeSDR Mini 2.0     | Full-duplex, wide range, opens up SoapySDR for dozens of devices    | ~€160 |
+| Device | Why it matters | Price |
+|---|---|---|
+| RTL-SDR Blog V4 | The backend is in; a unit here would let me test the clone variants | ~€25 |
+| Airspy Mini | Clean 24–1700 MHz, popular with hams and scanner hobbyists | ~€80 |
+| Airspy HF+ Discovery | Best budget HF receiver, dedicated listener community | ~€150 |
+| LimeSDR Mini 2.0 | Full-duplex, wide range, and the obvious device to confirm the SoapySDR path on | ~€160 |
 
 No pressure, but if this scratches an itch for you, this is where it goes.
 
@@ -327,30 +227,11 @@ No pressure, but if this scratches an itch for you, this is where it goes.
 
 ## Roadmap
 
-### Right now: polish over features
-The feature set is in. So the whole focus has shifted to **making what's already here genuinely good**:
+**Right now: polish over features.** The feature set is in, so the focus is making what's here genuinely good: UI polish, a micro view redesign, auditing the derived measurements until the numbers are not just present but trustworthy, and hunting the rough edges. No shiny new things until that feels done. ✨
 
-- [ ] **UI polish**: layout, spacing, color, readability, and the small edge cases that make a TUI feel hand-built instead of merely functional
-- [ ] **Micro view redesign**: the field views do their job, but the layout deserves a rethink. Bigger, calmer, easier to read at a glance on a tiny screen
-- [ ] **Sharper radio math**: auditing and refining the derived measurements (NF, MDS, IRR, PAPR, sample-rate accuracy, timing) so the numbers are not just present but *trustworthy*
-- [ ] **Bug fixes**: hunting down the rough edges before piling on anything new
+**Just landed 🎉** SoapySDR support (beta) · a menu with scoped keys · an ADC bench that follows the device's real bit depth · a measurement audit of the Lab Signal bench · the FM demodulator with RDS. The whole story, in order, is in [What's new](user_docs/whats-new.md).
 
-No shiny new features until this list feels done. Quality arc, not a feature sprint. ✨
-
-### Just landed 🎉
-- [x] **A measurement audit of the Lab Signal bench**: every reading taken apart and asked whether it was true. Occupied bandwidth was measuring the captured span instead of the signal, and that one wrong number was quietly feeding four others. RDS now survives a dropped block instead of throwing away seconds of decoded text, reads accented characters, and stops claiming a station name after you've retuned away from it
-- [x] **FM demodulator with RDS**: filed under sharper radio math rather than new shiny, because it exists to make the numbers say more, not to add a screen. The `lab_signal` bench (`Lab 4`, focus `m`) demodulates the channel: deviation, stereo pilot and injection, CTCSS, AM depth, and **RDS** station name, PTY and RadioText. Still no audio, deliberately. It reads radios, it doesn't play them
-- [x] **RTL-SDR support**: R820T / R828D / E4000, the most common dongle on Earth, behind a clean device-abstraction layer. Normal RX and observer mode both
-
-### Hardware pipeline
-- [ ] Airspy Mini / Airspy HF+ Discovery
-- [ ] HackRF Pro
-- [ ] LimeSDR / bladeRF / SDRplay / PlutoSDR via SoapySDR
-
-### Later (once the polish arc is home)
-- [x] Frequency scanner mode: the `lab_sweep` / `micro_sweep` scanner ✅ *done*
-- [ ] Signal recording to file
-- [ ] In-app config editing (no hand-editing TOML)
+**Later:** signal recording to file · in-app config editing · native backends for whatever lands on the desk.
 
 ---
 

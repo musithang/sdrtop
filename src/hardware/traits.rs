@@ -105,7 +105,7 @@ pub enum GainModel {
     ///
     /// Mapping named elements onto sdrtop's LNA / VGA / AMP is device-specific,
     /// unverifiable without the device, and a wrong guess silently drives the
-    /// wrong stage. So 0.5.0 does not guess. See `dev_docs/soapy-design.md`,
+    /// wrong stage. So 0.4.5 does not guess. See `dev_docs/soapy-design.md`,
     /// decision 3.
     ///
     /// `agc` is `hasGainMode`, and it is genuinely false on real hardware: a

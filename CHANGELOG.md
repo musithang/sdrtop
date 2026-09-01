@@ -16,9 +16,12 @@ checkpoint instead of by version.
 
 ## [Unreleased]
 
-**This will ship as 0.5.0, not 0.4.3.** The number keys change meaning, which is
-a breaking change to the thing users actually touch, and while the major version
-is 0 that belongs in the minor.
+**This will ship as 0.4.5.** The number keys change meaning, which is a real
+break in muscle memory, but this file's version promise is specifically about the
+config file, and that contract holds: a config written by an older sdrtop loads
+unchanged, and the new preset fields are optional. The SoapySDR backend is beta
+and there is still plenty to sand down, so the minor bump can wait until it has
+earned itself.
 
 sdrtop had grown to fifteen layouts and ten digits to reach them with. One layout
 never got a key at all, `?` opened a help overlay that had been quietly wrong for
