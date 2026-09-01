@@ -14,6 +14,48 @@ a marker name, where what you press is what you get.
 
 ---
 
+## The menu
+
+`Esc` opens the menu. It is also the first thing you see when sdrtop starts.
+
+The menu is one screen in two columns. On the left are the **sections**, which
+are the four families of layout, plus two panes underneath a dotted rule: the
+**Keys** reference and **Options**. On the right is whatever the left column has
+selected.
+
+| Key | In the menu |
+|-----|-------------|
+| `Tab` / `Shift+Tab` | Next or previous row in the left column: the sections, then Keys, then Options |
+| `←` / `→` | The same thing |
+| `↑` / `↓` | Move through the layouts on the right, or scroll the Keys reference |
+| `1` to `9` | Open the layout with that number, in this section |
+| `Enter` | Open the highlighted layout |
+| `Esc` | Close the menu and go back to what you were looking at |
+| `q` | Quit and save |
+
+The menu opens with the cursor already on the layout you are using, so `Enter`
+puts you straight back. That is also how the first screen of a session works:
+sdrtop remembers the layout you quit from, and the menu opens on it.
+
+**Numbers belong to a section.** `2` is the RF bench inside Lab and the spectrum
+inside Command Rail, and each section starts again at `1`. This is what keeps the
+keyboard small: four families of layout, nine keys, instead of one long row of
+numbers you have to memorise.
+
+Because a bare number is ambiguous on its own, this guide writes them as
+**section then number**:
+
+| Written | Means |
+|---------|-------|
+| `Lab 2` | The RF bench, `2` while the Lab section is active |
+| `Sweep 1` | The band sweep |
+| `Micro 3` | The gain field view |
+
+On screen you never have to do that translation: the menu shows the number beside
+each layout, and the footer shows the numbers for the section you are in.
+
+---
+
 ## General
 
 | Key | What it does |
@@ -26,19 +68,23 @@ a marker name, where what you press is what you get.
 | `w` | Pause or resume the waterfall |
 | `h` | Freeze the spectrum (hold the current frame behind the live one) |
 | a letter | Focus the panel whose title highlights it. `e` `l` `c` `i` `d` `t` `v` `x` `m` `n` `g` `b`, all listed [below](#focus-modes) |
-| `1` / `2` / `3` / `4` | Layout presets: Command Rail (the default) · spectrum · waterfall · both |
-| `5` / `6` / `7` / `8` / `9` | Lab presets: IQ · RF · timing · signal · sweep |
-| `0` | Micro field views. Press again to cycle: overview → signal → gain → health → sweep |
-| `p` | Cycle through every preset, built-in and your own, in alphabetical order |
+| `1` to `9` | The nth layout **of the section you are in** |
+| `p` | Next layout in the same section, wrapping at the end |
+| `Esc` | Leave panel focus, or open the menu when nothing is focused |
 | `Tab` | Show or hide the footer bar |
-| `?` | Show the help overlay |
 | `q` | Quit and save settings |
 
 `q` **saves**. Quitting is how your frequency, gains, markers and sweep band
 persist to the [config file](config.md); `Ctrl+C` exits without saving anything.
 
-One built-in preset, `main`, has no number key of its own. `p` is the way to
-reach it.
+`p` stays inside the section. It used to walk every preset in the app in
+alphabetical order, which meant leaving the benches for a micro view halfway
+through and no way to predict what came next. Cycling within Lab is a thing you
+might actually want to do.
+
+`Esc` steps out one level at a time: out of a focused panel first, and only then
+into the menu. So a focused panel is never one keystroke away from a full screen
+you did not ask for.
 
 If something goes wrong and the screen tells you nothing, look in
 `~/.config/sdrtop/sdrtop.log`. sdrtop redirects its own error output there for the
@@ -138,8 +184,8 @@ saved to the config.
 
 ## Command Rail focus mode
 
-Press `c` to drive the Command Rail, the instrument rail in the default `1`
-preset.
+Press `c` to drive the Command Rail, the instrument rail in the default
+`Command Rail 1` layout.
 
 | Key | What it does |
 |-----|-------------|
@@ -150,6 +196,11 @@ preset.
 | `L` | Toggle the full-log overlay |
 | `Esc` | Close the log overlay if open, otherwise exit focus mode |
 
+**While the rail is focused, `1` `2` `3` are recall slots and not layouts.** A
+focused panel is offered every key first, and the rail claims those three. The
+rest of the digits fall through as usual, so `4` and `5` still switch layout from
+inside rail focus. `Esc` gives the digits back.
+
 ---
 
 ## Lab panel focus modes
@@ -157,14 +208,14 @@ preset.
 | Key | Panel | Where it lives | What it adds |
 |-----|-------|----------------|--------------|
 | `b` | Measurement banner | every lab preset | `↑↓` reference level · `[ ]` trace averaging · `C` capture or clear the reference trace · `R` clear the reference level |
-| `i` | **I**Q Diagnostics | `5` lab_iq | `D` DC-block · `C` auto-cal · `F` freeze the constellation · `M` pin the carrier/image markers |
-| `d` | RF **D**iagnostics | `6` lab_rf | `A` auto-gain · `⎵` or `F` freeze the histogram and level diagram |
-| `t` | **T**iming Diagnostics | `7` lab_timing | `R` reset the session jitter peak · `C` clear the jitter and throughput history |
-| `v` | Hardware **V**itals | `7` lab_timing | `R` reset the session drop counter · `C` clear the trend sparklines |
-| `x` | Signal Characterization | `8` lab_signal | `C` log a snapshot of the modulation, SNR, occupied bandwidth and ACPR |
-| `m` | FM **M**PX · Demod | `8` lab_signal | `Space` demod on/off · `←/→` move the channel ±25 kHz · `P` snap to the strongest carrier · `0` re-centre · `T` force WFM / NFM / AM or auto · `C` log a snapshot |
-| `n` | Signal Metrics | `9` lab_sweep | `C` log a snapshot |
-| `g` | Sweep | `9` lab_sweep | `←/→` cursor · `S` / `E` set start / end frequency · `M` peak or mean curve · `+/-` dwell time · `C` log a snapshot · `Enter` tune to the cursor frequency |
+| `i` | **I**Q Diagnostics | `Lab 1` | `D` DC-block · `C` auto-cal · `F` freeze the constellation · `M` pin the carrier/image markers |
+| `d` | RF **D**iagnostics | `Lab 2` | `A` auto-gain · `⎵` or `F` freeze the histogram and level diagram |
+| `t` | **T**iming Diagnostics | `Lab 3` | `R` reset the session jitter peak · `C` clear the jitter and throughput history |
+| `v` | Hardware **V**itals | `Lab 3` | `R` reset the session drop counter · `C` clear the trend sparklines |
+| `x` | Signal Characterization | `Lab 4` | `C` log a snapshot of the modulation, SNR, occupied bandwidth and ACPR |
+| `m` | FM **M**PX · Demod | `Lab 4` | `Space` demod on/off · `←/→` move the channel ±25 kHz · `P` snap to the strongest carrier · `0` re-centre · `T` force WFM / NFM / AM or auto · `C` log a snapshot |
+| `n` | Signal Metrics | `Sweep 1` | `C` log a snapshot |
+| `g` | Sweep | `Sweep 1` | `←/→` cursor · `S` / `E` set start / end frequency · `M` peak or mean curve · `+/-` dwell time · `C` log a snapshot · `Enter` tune to the cursor frequency |
 
 The two panels worth a longer word are the ones that change something rather than
 just reporting it.
@@ -236,8 +287,9 @@ examples are in [Advanced Features](advanced.md).
 
 ## Tips
 
-- If you're not sure what a reading means, the `?` overlay shows a quick summary
-  while you use the app.
+- If you forget a key, `Esc` and then `Tab` to **Keys** shows the whole general
+  list without leaving the app. It is generated from the same table the app
+  dispatches on, so it cannot drift out of date the way the old `?` overlay did.
 - Gain settings, frequency, markers, sweep band, trace style and waterfall palette
   are all saved when you quit with `q`. You can also edit them directly in the
   [config file](config.md).
