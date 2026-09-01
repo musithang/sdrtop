@@ -6,18 +6,77 @@ The story of sdrtop so far, not as a wall of dates but as **checkpoints**: the
 moments where the app levelled up. Newest first, so scrolling down goes backwards
 in time.
 
+> **A note on the keys in the older entries.** Checkpoint 19 grouped the layouts
+> into sections and gave each section its own numbers, so a bare `(7)` in an entry
+> below means whatever that key meant at the time. Everything from 19 onward
+> writes them as section then number, like `Lab 3`. The current keys are always in
+> [Keyboard shortcuts](keys.md); the entries below are a record of what happened,
+> not a reference.
+
 > **Where we are now:** the interactive TUI is feature-complete and both radios
 > are fully supported. The current arc is instrument-grade polish: the **Command
 > Rail** cockpit, the redrawn **Lab IQ**, the rebuilt **Lab RF** bench, the **Lab
 > Timing** real-time bench and the **FM MPX · Demod** instrument with RDS, most
-> recently gone over reading by reading for anything that was not strictly true.
+> recently gone over reading by reading for anything that was not strictly true,
+> and now reachable through a menu instead of a row of numbers that had run out.
 > The ongoing work is polishing the UI, sharpening the radio math, and squashing
 > bugs. So if something looks off or behaves oddly, that's exactly what we're
 > hunting.
 
 ---
 
-## 📦 Checkpoint 18: You can just install it now *(you are here)*
+## 🧭 Checkpoint 19: A front door *(you are here)*
+
+sdrtop had fifteen layouts and ten digits to reach them with. The arithmetic had
+been losing for a while: `main` never got a key at all, `0` walked the micro views
+in a fixed order whether or not you wanted the one it stopped on, and `?` opened a
+help overlay that had been quietly wrong for several releases. Nothing tied that
+overlay to the keys the app actually handled, so when the keys moved, the help
+did not.
+
+**There is a menu now.** `Esc` opens it, and it is the first thing you see when
+sdrtop starts. Two columns: the families of layout on the left, the layouts in the
+selected family on the right, each with the number that opens it.
+
+**Layouts are grouped into four sections**, and each section has its own numbers.
+`Command Rail` holds the general views, `Lab` the four measurement benches,
+`Sweep` the band scan in both sizes, `Micro` the field views. `2` is the RF bench
+inside Lab and the spectrum inside Command Rail. The docs write that as `Lab 2`.
+
+That is the whole idea: the same nine digits, four times over, instead of one row
+of ten that had run out. `p` now steps to the next layout in the section you are
+in rather than walking every preset in the app alphabetically, which used to drop
+you into a micro view halfway through comparing two benches.
+
+The menu opens with the cursor on the layout you are already using, so `Enter`
+puts you back. At startup that is the layout you quit from, which makes the first
+`Enter` of the session a resume rather than a choice.
+
+A few things fall out of it:
+
+- **`main` is reachable.** It is `Command Rail 5`. It has been in sdrtop since
+  0.2.0 and the docs' honest answer was "press `p` until it comes round".
+- **The compact sweep moved.** It used to be the fifth stop in the `0` cycle;
+  it is `Sweep 2` now, next to the full-size sweep it is a small version of.
+  Grouping by what a view is for beats grouping by how small it is.
+- **The key reference cannot go stale again.** It is a pane in the menu, and the
+  test suite checks it against the app's own key dispatch in both directions: a
+  key with no entry fails the build, and an entry for a key that no longer exists
+  fails it too. That check is the actual fix. The overlay was not wrong because
+  nobody updated it; it was wrong because nothing could tell.
+- **Your own layouts can join in.** A preset can declare which section it belongs
+  to, which number opens it, what the menu calls it and a half-line describing it.
+  See [Layout presets](presets.md#where-it-appears-in-the-menu).
+- **There is an Options pane, and it is empty.** It says so when you open it. It
+  is there ahead of its first setting so that adding one is a row rather than a
+  rebuild.
+
+Gone: `?` and `0`. The first is the menu's Keys pane, the second is the Micro
+section.
+
+---
+
+## 📦 Checkpoint 18: You can just install it now
 
 No new panels, no new maths. This one is about how sdrtop reaches your machine,
 which up to now was "clone it and hope your Rust is new enough".

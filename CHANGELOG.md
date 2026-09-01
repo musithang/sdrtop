@@ -16,6 +16,68 @@ checkpoint instead of by version.
 
 ## [Unreleased]
 
+**This will ship as 0.5.0, not 0.4.3.** The number keys change meaning, which is
+a breaking change to the thing users actually touch, and while the major version
+is 0 that belongs in the minor.
+
+sdrtop had grown to fifteen layouts and ten digits to reach them with. One layout
+never got a key at all, `?` opened a help overlay that had been quietly wrong for
+several releases, and `0` cycled the micro views in a fixed order you had to walk
+through. The fix is a menu and four sections: layouts are grouped by what they
+are for, and each section has its own `1` to `9`. The same nine digits, four
+times over, instead of one exhausted row.
+
+### Added
+
+- **A menu**, opened with `Esc` and shown at startup. Two columns: the sections
+  on the left, the layouts in the selected one on the right. It opens with the
+  cursor on the layout you are already using, so `Enter` resumes. At startup that
+  is the layout you quit from.
+- **Sections.** Layouts are grouped into **Command Rail**, **Lab**, **Sweep** and
+  **Micro**. Which section a layout belongs to, and which number opens it, are
+  declared by the layout itself rather than hardcoded in the key dispatch.
+- **A Keys pane** in the menu, replacing the `?` overlay. It is checked against
+  the app's own dispatch by the test suite, in both directions: a key with no
+  entry fails the build, and an entry for a key that no longer exists fails it
+  too. The overlay it replaces had no such check, which is why it was wrong.
+- **An Options pane**, empty for now and saying so. It exists ahead of its first
+  setting so that adding one is a row rather than a rebuild of the pane.
+- **`main` is reachable.** It is `Command Rail 5`. It has been in the app since
+  0.2.0 with no key of its own.
+- **Four optional preset fields**: `section`, `slot`, `title` and `blurb`. A
+  layout of your own can now sit in a section with a number key and a description,
+  instead of only being reachable by cycling. Documented in
+  [`user_docs/presets.md`](user_docs/presets.md).
+
+### Changed
+
+- **`1` to `9` are scoped to the section you are in.** `2` is the RF bench inside
+  Lab and the spectrum inside Command Rail. The docs write this as `Lab 2`.
+- **`p` cycles within the current section** and wraps at the end, instead of
+  walking every preset in the app in alphabetical order.
+- **`Esc` opens the menu**, and steps out one level at a time: out of a focused
+  panel first, and only then into the menu.
+- **The footer and the lab banner read the live section** rather than each
+  keeping its own copy of the key map. There were three such copies, and each was
+  a place the app could tell you about a key that did nothing.
+- Your existing `config.toml` needs no changes. The new preset fields are
+  optional, and a config written by an older version loads unchanged.
+
+### Removed
+
+- **`?`**, the help overlay. Its content is the menu's Keys pane, which cannot go
+  stale the way the overlay did.
+- **`0`**, the micro cycle. The micro views are the **Micro** section, on `1` to
+  `4`, so you can go straight to the one you want instead of pressing `0` until it
+  comes round.
+- The compact sweep left the micro cycle for the **Sweep** section, as `Sweep 2`,
+  next to the full-size sweep it is a small version of.
+
+### Fixed
+
+- The `[0.4.2]` release had no compare link at the bottom of this file, and
+  `[Unreleased]` still compared against `v0.4.1`.
+
 ## [0.4.2] - 2026-08-29
 
 > 🎧 Written on two days without sleep, most of which were spent losing an
@@ -348,7 +410,8 @@ sdrtop stopped being a one-radio program.
   image rejection ratio, wavelength and antenna metrics.
 - Config file with atomic save on quit, and the CLI flags that override it.
 
-[Unreleased]: https://github.com/mustang6139/sdrtop/compare/v0.4.1...HEAD
+[Unreleased]: https://github.com/mustang6139/sdrtop/compare/v0.4.2...HEAD
+[0.4.2]: https://github.com/mustang6139/sdrtop/compare/v0.4.1...v0.4.2
 [0.4.1]: https://github.com/mustang6139/sdrtop/compare/v0.4.0...v0.4.1
 [0.4.0]: https://github.com/mustang6139/sdrtop/compare/v0.3.5...v0.4.0
 [0.3.5]: https://github.com/mustang6139/sdrtop/compare/v0.3.0...v0.3.5
