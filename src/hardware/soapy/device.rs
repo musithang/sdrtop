@@ -4,10 +4,10 @@
 //! interpretation is in [`super::caps`], and what is left here is the order
 //! things happen in.
 //!
-//! **Streaming is not here yet.** `start_rx` refuses with a message until S9
-//! gives it a read thread, which is why this module is still not wired into
-//! [`crate::hardware::list_all_devices`]: a device that appears in the selector
-//! and then cannot receive is worse than one that does not appear.
+//! Streaming lives in [`super::stream`], which owns the read thread.
+//!
+//! **Still not wired into [`crate::hardware::list_all_devices`].** S11 does
+//! that, together with the deduplication against the native backends.
 
 use std::sync::Arc;
 
@@ -25,6 +25,10 @@ pub struct SoapyDevice {
     /// The argument string this device was opened with, kept for the log so a
     /// failure names the device it happened on.
     args: String,
+    /// The driver's own wire format, kept because `setupStream` wants the name
+    /// and `caps` only kept what the name meant.
+    native_format: String,
+    streaming: super::stream::Streaming,
 }
 
 // Safety: the same split the two native backends already rely on. The handle is
@@ -62,6 +66,8 @@ impl SoapyDevice {
             caps,
             info,
             args: args.to_string(),
+            native_format: answers.native_format,
+            streaming: super::stream::Streaming::default(),
         })
     }
 
@@ -90,16 +96,18 @@ impl SdrDevice for SoapyDevice {
         self.info.clone()
     }
 
-    fn start_rx(&self, _ctx: Arc<RxContext>) -> anyhow::Result<()> {
-        anyhow::bail!("the SoapySDR read thread is not implemented yet")
+    fn start_rx(&self, ctx: Arc<RxContext>) -> anyhow::Result<()> {
+        self.streaming
+            .start(self.api, self.dev, self.native_format.clone(), ctx)
     }
 
     fn stop_rx(&self) -> anyhow::Result<()> {
+        self.streaming.stop();
         Ok(())
     }
 
     fn is_streaming(&self) -> bool {
-        false
+        self.streaming.is_active()
     }
 
     fn set_frequency(&self, hz: u64) -> anyhow::Result<()> {
@@ -152,6 +160,10 @@ impl SdrDevice for SoapyDevice {
 
 impl Drop for SoapyDevice {
     fn drop(&mut self) {
+        // The read thread borrows `dev`, so it has to be gone before the handle
+        // is. `Streaming` also stops itself on drop, but field drop order is not
+        // something to leave a device handle's lifetime resting on.
+        self.streaming.stop();
         // Safety: `dev` came from `make` and this is the only place it is
         // unmade.
         unsafe { self.api.unmake(self.dev) };

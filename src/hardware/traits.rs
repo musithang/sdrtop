@@ -21,11 +21,6 @@ pub enum SampleFormat {
     /// them the converter actually fills is
     /// [`SampleGeometry::bits`], from the full scale the driver reports.
     ///
-    /// Nothing shipped constructs this yet: it is decoded and tested here so the
-    /// SoapySDR read thread does not have to arrive with an untested sample path
-    /// attached. **The allow comes off in S9**, where that thread starts
-    /// producing 16-bit blocks.
-    #[cfg_attr(not(test), allow(dead_code))]
     Int16,
 }
 

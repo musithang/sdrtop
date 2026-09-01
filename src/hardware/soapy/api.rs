@@ -28,6 +28,20 @@ pub const RX: c_int = 1;
 /// sdrtop drives channel 0 and only channel 0.
 pub const CHAN: usize = 0;
 
+/// Opaque stream handle, `typedef struct SoapySDRStream SoapySDRStream;`.
+#[repr(C)]
+pub struct SoapySDRStream {
+    _private: [u8; 0],
+}
+
+/// `SOAPY_SDR_TIMEOUT` from `SoapySDR/Errors.h`: no samples arrived inside the
+/// window. **Normal on a quiet bus**, not a failure.
+pub const ERR_TIMEOUT: c_int = -1;
+/// `SOAPY_SDR_OVERFLOW`: the driver's own buffer filled and samples were lost.
+/// This is the drop signal, and it maps onto the counter HackRF fills from its
+/// short transfers.
+pub const ERR_OVERFLOW: c_int = -4;
+
 /// Opaque device handle, `typedef struct SoapySDRDevice SoapySDRDevice;`.
 #[repr(C)]
 pub struct SoapySDRDevice {
@@ -140,6 +154,41 @@ pub struct SoapyApi {
     set_bandwidth: unsafe extern "C" fn(*mut SoapySDRDevice, c_int, usize, f64) -> c_int,
     set_gain: unsafe extern "C" fn(*mut SoapySDRDevice, c_int, usize, f64) -> c_int,
     set_gain_mode: unsafe extern "C" fn(*mut SoapySDRDevice, c_int, usize, bool) -> c_int,
+
+    format_to_size: unsafe extern "C" fn(*const c_char) -> usize,
+    err_to_str: unsafe extern "C" fn(c_int) -> *const c_char,
+    setup_stream: unsafe extern "C" fn(
+        *mut SoapySDRDevice,
+        c_int,
+        *const c_char,
+        *const usize,
+        usize,
+        *const SoapySDRKwargs,
+    ) -> *mut SoapySDRStream,
+    activate_stream: unsafe extern "C" fn(
+        *mut SoapySDRDevice,
+        *mut SoapySDRStream,
+        c_int,
+        std::ffi::c_longlong,
+        usize,
+    ) -> c_int,
+    read_stream: unsafe extern "C" fn(
+        *mut SoapySDRDevice,
+        *mut SoapySDRStream,
+        *const *mut c_void,
+        usize,
+        *mut c_int,
+        *mut std::ffi::c_longlong,
+        std::ffi::c_long,
+    ) -> c_int,
+    deactivate_stream: unsafe extern "C" fn(
+        *mut SoapySDRDevice,
+        *mut SoapySDRStream,
+        c_int,
+        std::ffi::c_longlong,
+    ) -> c_int,
+    close_stream: unsafe extern "C" fn(*mut SoapySDRDevice, *mut SoapySDRStream) -> c_int,
+    get_stream_mtu: unsafe extern "C" fn(*const SoapySDRDevice, *mut SoapySDRStream) -> usize,
 }
 
 impl SoapyApi {
@@ -311,6 +360,112 @@ impl SoapyApi {
         self.check(unsafe { (self.set_gain_mode)(dev, RX, CHAN, automatic) })
     }
 
+    /// Bytes one element of `format` occupies on the wire.
+    ///
+    /// Asked rather than derived. `readStream` counts elements and everything
+    /// downstream counts bytes, and getting that conversion wrong produces a
+    /// spectrum that looks plausible and is wrong.
+    pub fn format_size(&self, format: &str) -> usize {
+        let Ok(c) = std::ffi::CString::new(format) else {
+            return 0;
+        };
+        unsafe { (self.format_to_size)(c.as_ptr()) }
+    }
+
+    /// The library's own name for a stream return code.
+    pub fn err_to_str(&self, code: c_int) -> String {
+        unsafe { cstr_to_string((self.err_to_str)(code)) }
+    }
+
+    /// Open an RX stream in `format` on channel 0.
+    ///
+    /// # Safety
+    /// `dev` must be live, and the returned stream must be closed exactly once.
+    pub unsafe fn setup_stream(
+        &self,
+        dev: *mut SoapySDRDevice,
+        format: &str,
+    ) -> Result<*mut SoapySDRStream, String> {
+        let Ok(c) = std::ffi::CString::new(format) else {
+            return Err(format!("sample format {format:?} contains a NUL byte"));
+        };
+        // A null channel list with a count of zero means channel 0, which is
+        // what the upstream C example passes and all sdrtop wants.
+        let stream = unsafe {
+            (self.setup_stream)(dev, RX, c.as_ptr(), std::ptr::null(), 0, std::ptr::null())
+        };
+        if stream.is_null() {
+            return Err(self.last_error());
+        }
+        Ok(stream)
+    }
+
+    /// # Safety
+    /// `dev` and `stream` must be live.
+    pub unsafe fn activate_stream(
+        &self,
+        dev: *mut SoapySDRDevice,
+        stream: *mut SoapySDRStream,
+    ) -> Result<(), String> {
+        self.check(unsafe { (self.activate_stream)(dev, stream, 0, 0, 0) })
+    }
+
+    /// # Safety
+    /// `dev` and `stream` must be live.
+    pub unsafe fn deactivate_stream(&self, dev: *mut SoapySDRDevice, stream: *mut SoapySDRStream) {
+        unsafe { (self.deactivate_stream)(dev, stream, 0, 0) };
+    }
+
+    /// # Safety
+    /// `dev` and `stream` must be live, and `stream` must not be used after.
+    pub unsafe fn close_stream(&self, dev: *mut SoapySDRDevice, stream: *mut SoapySDRStream) {
+        unsafe { (self.close_stream)(dev, stream) };
+    }
+
+    /// # Safety
+    /// `dev` and `stream` must be live.
+    pub unsafe fn stream_mtu(
+        &self,
+        dev: *const SoapySDRDevice,
+        stream: *mut SoapySDRStream,
+    ) -> usize {
+        unsafe { (self.get_stream_mtu)(dev, stream) }
+    }
+
+    /// Read up to `elems` I/Q pairs into `buf`, which must hold that many
+    /// elements of the stream's format.
+    ///
+    /// Returns the driver's raw return code: a count when positive, one of the
+    /// `SOAPY_SDR_*` codes when negative. Classifying it is
+    /// [`super::stream::outcome`]'s job, which keeps that decision testable.
+    ///
+    /// # Safety
+    /// `dev` and `stream` must be live, and `buf` must be large enough for
+    /// `elems` elements of the format the stream was set up with.
+    pub unsafe fn read_stream(
+        &self,
+        dev: *mut SoapySDRDevice,
+        stream: *mut SoapySDRStream,
+        buf: *mut c_void,
+        elems: usize,
+        timeout_us: i64,
+    ) -> c_int {
+        let buffs: [*mut c_void; 1] = [buf];
+        let mut flags: c_int = 0;
+        let mut time_ns: std::ffi::c_longlong = 0;
+        unsafe {
+            (self.read_stream)(
+                dev,
+                stream,
+                buffs.as_ptr(),
+                elems,
+                &mut flags,
+                &mut time_ns,
+                timeout_us as std::ffi::c_long,
+            )
+        }
+    }
+
     /// Zero is success everywhere in this API; anything else is an error whose
     /// text the library is holding.
     fn check(&self, code: c_int) -> Result<(), String> {
@@ -460,6 +615,14 @@ fn resolve(lib: libloading::Library) -> Result<SoapyApi, &'static str> {
         set_bandwidth: sym!("SoapySDRDevice_setBandwidth"),
         set_gain: sym!("SoapySDRDevice_setGain"),
         set_gain_mode: sym!("SoapySDRDevice_setGainMode"),
+        format_to_size: sym!("SoapySDR_formatToSize"),
+        err_to_str: sym!("SoapySDR_errToStr"),
+        setup_stream: sym!("SoapySDRDevice_setupStream"),
+        activate_stream: sym!("SoapySDRDevice_activateStream"),
+        read_stream: sym!("SoapySDRDevice_readStream"),
+        deactivate_stream: sym!("SoapySDRDevice_deactivateStream"),
+        close_stream: sym!("SoapySDRDevice_closeStream"),
+        get_stream_mtu: sym!("SoapySDRDevice_getStreamMTU"),
         // Last, so every `sym!` above has already borrowed it.
         _lib: lib,
     };

@@ -17,6 +17,7 @@
 //! - [`caps`]: driver answers to [`crate::hardware::DeviceCapabilities`]. Safe
 //!   and pure, and where the actual thinking is.
 //! - [`device`]: `SoapyDevice`. Orchestration: the order things happen in.
+//! - [`stream`]: the RX stream and its owned read thread.
 //!
 //! The parts that decide anything take plain Rust data and return plain Rust
 //! data. They never see a device pointer, which is why the interesting logic can
@@ -27,3 +28,4 @@ pub mod api;
 pub mod args;
 pub mod caps;
 pub mod device;
+pub mod stream;
