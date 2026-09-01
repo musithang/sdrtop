@@ -74,7 +74,7 @@ pub(super) fn primary_gain_label(gain: &GainModel) -> &'static str {
     match gain {
         GainModel::HackRf => "LNA",
         GainModel::RtlSingle { .. } => "Tuner",
-        GainModel::Soapy { .. } => "Gain",
+        GainModel::Soapy { .. } => "RF",
     }
 }
 
@@ -140,16 +140,33 @@ pub(super) fn step_vga(ctx: &mut InputCtx<'_>, up: bool) {
 /// `amp_enabled` doubles as the boost toggle for both families: HackRF's RF amp,
 /// RTL-SDR's tuner AGC. The label and the device call both follow the gain model.
 pub(super) fn toggle_boost(ctx: &mut InputCtx<'_>) {
-    let Some(device) = ctx.device else { return };
-    let is_rtl = matches!(device.capabilities().gain, GainModel::RtlSingle { .. });
-    let new_state = !metrics(ctx.state).radio.amp_enabled;
+    // Plenty of SoapySDR devices have neither an RF amp nor an automatic gain
+    // mode. Flipping `amp_enabled` for one of those would light a lamp on the
+    // rail, the micro gain view and the lab banner for a stage that is not in
+    // the radio, and add 14 dB to a gain total that never had it. The key says
+    // nothing happened instead of pretending something did.
+    //
+    // Asked of the shared capabilities rather than of the device handle, for two
+    // reasons: it is the same value the panels decide on, so the key and the
+    // display cannot disagree; and it is answerable before the handle is, which
+    // is what lets it be tested.
+    let gm = metrics(ctx.state).caps.gain.clone();
+    if !gm.has_boost() {
+        metrics(ctx.state).push_log("This device has no front end boost to toggle");
+        return;
+    }
 
-    let result = if is_rtl {
+    let Some(device) = ctx.device else { return };
+    let new_state = !metrics(ctx.state).radio.amp_enabled;
+    // Which trait call, from the capability rather than from the device family:
+    // a single-gain device drives an automatic gain mode, a staged one drives a
+    // discrete amplifier. The label comes from the same place.
+    let result = if gm.is_single() {
         device.set_tuner_agc(new_state)
     } else {
         device.set_amp_enable(new_state)
     };
-    let label = if is_rtl { "AGC" } else { "AMP" };
+    let label = gm.boost_label();
 
     let mut m = metrics(ctx.state);
     match result {

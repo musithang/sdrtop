@@ -28,8 +28,29 @@ pub enum OnSingle {
     Same,
     /// Different wording.
     Reword(&'static str),
-    /// Not applicable there, so the row is not drawn.
-    Hide,
+}
+
+/// What a device has to have for a key to do anything.
+///
+/// This used to be an `OnSingle::Hide`, which hid `[` and `]` because the device
+/// was "single knob". That was the right answer for the wrong reason: they are
+/// hidden because there is no second gain stage. A SoapySDR device has no second
+/// stage either, and often no front end boost, and the reference has to be able
+/// to say so without pretending it is an RTL-SDR.
+pub enum Needs {
+    Always,
+    SecondStage,
+    Boost,
+}
+
+impl Needs {
+    fn met(&self, model: &GainModel) -> bool {
+        match self {
+            Needs::Always => true,
+            Needs::SecondStage => model.has_second_stage(),
+            Needs::Boost => model.has_boost(),
+        }
+    }
 }
 
 /// A global key and what it does.
@@ -46,6 +67,8 @@ pub struct Binding {
     pub ch: Option<char>,
     pub what: &'static str,
     pub single: OnSingle,
+    /// What the device must have for this key to exist at all.
+    pub needs: Needs,
 }
 
 const fn b(key: &'static str, ch: Option<char>, what: &'static str) -> Binding {
@@ -54,6 +77,7 @@ const fn b(key: &'static str, ch: Option<char>, what: &'static str) -> Binding {
         ch,
         what,
         single: OnSingle::Same,
+        needs: Needs::Always,
     }
 }
 
@@ -77,24 +101,28 @@ pub const GLOBAL: &[(&str, &[Binding])] = &[
                 ch: None,
                 what: "LNA gain, down and up",
                 single: OnSingle::Reword("tuner gain, down and up, in steps"),
+                needs: Needs::Always,
             },
             Binding {
                 key: "[",
                 ch: Some('['),
                 what: "VGA gain down",
-                single: OnSingle::Hide,
+                single: OnSingle::Same,
+                needs: Needs::SecondStage,
             },
             Binding {
                 key: "]",
                 ch: Some(']'),
                 what: "VGA gain up",
-                single: OnSingle::Hide,
+                single: OnSingle::Same,
+                needs: Needs::SecondStage,
             },
             Binding {
                 key: "A",
                 ch: Some('a'),
                 what: "front end boost: the RF amp",
                 single: OnSingle::Reword("front end boost: the tuner AGC"),
+                needs: Needs::Boost,
             },
         ],
     ),
@@ -130,13 +158,20 @@ fn lines(model: &GainModel, iw: usize, theme: &crate::Theme) -> Vec<Line<'static
 
     let mut out = Vec::new();
     for (group, bindings) in GLOBAL {
+        // Which of this group's keys this device actually has. Collected first
+        // so a group that filters down to nothing takes its heading with it: a
+        // section title over empty space reads as a rendering bug, not as
+        // "your radio has none of these".
+        let shown: Vec<&Binding> = bindings.iter().filter(|b| b.needs.met(model)).collect();
+        if shown.is_empty() {
+            continue;
+        }
         if !out.is_empty() {
             out.push(Line::from(""));
         }
         out.push(chrome::section(group, "", iw, theme));
-        for binding in *bindings {
+        for binding in shown {
             let what = match (single, &binding.single) {
-                (true, OnSingle::Hide) => continue,
                 (true, OnSingle::Reword(text)) => *text,
                 _ => binding.what,
             };
@@ -233,6 +268,44 @@ mod tests {
                 }
             }
         }
+    }
+
+    /// A device with no automatic gain mode and no second stage is offered
+    /// neither, and the reference is three rows shorter than a HackRF's.
+    ///
+    /// This is not a hypothetical device: `SoapySDRUtil --probe="driver=hackrf"`
+    /// reports `Supports AGC: NO`, so a HackRF reached through SoapySDR is
+    /// exactly this shape.
+    #[test]
+    fn a_device_with_no_boost_is_not_told_about_one() {
+        let theme = crate::Theme::sdr();
+        let hackrf = lines(&GainModel::HackRf, 40, &theme);
+        let soapy = lines(
+            &GainModel::Soapy {
+                min_db: 0,
+                max_db: 116,
+                elements: vec![],
+                agc: false,
+            },
+            40,
+            &theme,
+        );
+        let text = |ls: &[Line<'static>]| {
+            ls.iter()
+                .map(|l| l.to_string())
+                .collect::<Vec<_>>()
+                .join("\n")
+        };
+        assert!(text(&hackrf).contains("front end boost"));
+        assert!(
+            !text(&soapy).contains("front end boost"),
+            "offered a boost it does not have:\n{}",
+            text(&soapy)
+        );
+        assert!(!text(&soapy).contains("VGA"), "and no second stage either");
+        assert_eq!(soapy.len(), hackrf.len() - 3, "two VGA rows and the boost");
+        // The group survives, because the primary gain key is still there.
+        assert!(text(&soapy).contains("GAIN"), "{}", text(&soapy));
     }
 
     /// The RTL-SDR reference drops the VGA rows rather than describing a knob

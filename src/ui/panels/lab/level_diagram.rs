@@ -71,9 +71,9 @@ impl Panel for LevelDiagramPanel {
         let dim = theme.border_dim;
         if stale || !state.caps.friis_applicable {
             let msg = if stale {
-                "\u{2014}\u{2014}\u{2014}"
+                "\u{2014}\u{2014}\u{2014}".to_string()
             } else {
-                "single-tuner \u{2014} no cascade"
+                state.caps.gain.no_cascade_reason().to_string()
             };
             f.render_widget(
                 Paragraph::new(Span::styled(msg, Style::default().fg(dim))),

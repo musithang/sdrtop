@@ -88,7 +88,9 @@ impl Panel for RfChainPanel {
             );
             return;
         }
-        // Single-tuner (RTL-SDR): the cascade bench assumes the HackRF chain.
+        // No modelled cascade: the bench assumes the HackRF chain, and this
+        // device is either one tuner or one whose stages we were never told the
+        // noise figures for. The gain model says which.
         if !state.caps.friis_applicable {
             f.render_widget(Paragraph::new(single_tuner(state, theme)), inner);
             return;
@@ -148,7 +150,7 @@ impl Panel for RfChainPanel {
 fn single_tuner(state: &SdrMetrics, theme: &crate::Theme) -> Vec<Line<'static>> {
     vec![
         Line::from(Span::styled(
-            " TUNER gain ",
+            format!(" {} gain ", state.caps.gain.primary_label().to_uppercase()),
             Style::default()
                 .fg(theme.label)
                 .add_modifier(Modifier::BOLD),
@@ -164,7 +166,7 @@ fn single_tuner(state: &SdrMetrics, theme: &crate::Theme) -> Vec<Line<'static>> 
         ]),
         Line::raw(""),
         Line::from(Span::styled(
-            " single-tuner \u{2014} cascade N/A",
+            format!(" {}", state.caps.gain.no_cascade_reason()),
             Style::default().fg(theme.stale),
         )),
     ]

@@ -10,6 +10,7 @@
 //! list from `SpectrumState` (not duplicated). Every field is width-aware:
 //! lower-priority fields drop out whole rather than clip mid-word.
 
+use crate::hardware::GainModel;
 use ratatui::{
     layout::Rect,
     style::{Modifier, Style},
@@ -109,9 +110,11 @@ fn hairline(iw: usize, color: ratatui::style::Color) -> Line<'static> {
 /// The receive-chain flow string for the Lab RF banner: `ANT▸LNA▸MIX▸VGA▸ADC`,
 /// with `AMP` inserted when the front-end amp is on, collapsing to `ANT▸TUNER▸ADC`
 /// on a single-tuner radio (no cascade).
-fn rf_chain_str(friis_applicable: bool, amp_enabled: bool) -> String {
+fn rf_chain_str(gm: &GainModel, friis_applicable: bool, amp_enabled: bool) -> String {
     if !friis_applicable {
-        return "ANT\u{25B8}TUNER\u{25B8}ADC".to_string();
+        // The stages the device itself names, not a guess: an RTL-SDR is one
+        // tuner, and a SoapySDR device reports its own gain elements.
+        return format!("ANT\u{25B8}{}\u{25B8}ADC", gm.unmodelled_stages());
     }
     let mut s = String::from("ANT\u{25B8}");
     if amp_enabled {
@@ -124,7 +127,11 @@ fn rf_chain_str(friis_applicable: bool, amp_enabled: bool) -> String {
 /// Lab RF banner middle fields: `CHAIN … · NF … · MDS … · SNR …` (modeled NF/MDS
 /// from the live cascade). On a single-tuner radio only the honest CHAIN + SNR show.
 fn rf_banner_fields(state: &SdrMetrics) -> Vec<(&'static str, String)> {
-    let chain = rf_chain_str(state.caps.friis_applicable, state.radio.amp_enabled);
+    let chain = rf_chain_str(
+        &state.caps.gain,
+        state.caps.friis_applicable,
+        state.radio.amp_enabled,
+    );
     let snr = format!("{:.0} dB", state.signal.peak_to_nf_db);
     if !state.caps.friis_applicable {
         return vec![("CHAIN", chain), ("SNR", snr)];
@@ -1106,18 +1113,64 @@ mod tests {
 
     #[test]
     fn rf_chain_str_inserts_amp_and_collapses_single_tuner() {
+        let rtl = GainModel::RtlSingle {
+            gain_steps_db: vec![0, 49],
+        };
         assert_eq!(
-            rf_chain_str(true, false),
+            rf_chain_str(&GainModel::HackRf, true, false),
             "ANT\u{25B8}LNA\u{25B8}MIX\u{25B8}VGA\u{25B8}ADC"
         );
         assert_eq!(
-            rf_chain_str(true, true),
+            rf_chain_str(&GainModel::HackRf, true, true),
             "ANT\u{25B8}AMP\u{25B8}LNA\u{25B8}MIX\u{25B8}VGA\u{25B8}ADC"
         );
         assert_eq!(
-            rf_chain_str(false, true),
+            rf_chain_str(&rtl, false, true),
             "ANT\u{25B8}TUNER\u{25B8}ADC",
-            "no cascade → single tuner"
+            "no cascade means one tuner on an RTL-SDR"
         );
+    }
+
+    /// A device sdrtop cannot model is not automatically a single tuner.
+    ///
+    /// A HackRF reached through SoapySDR has three gain elements and no modelled
+    /// cascade, and this banner used to call it ANT-TUNER-ADC, which is a
+    /// receiver it is not. The stages now come from the driver's own listGains.
+    #[test]
+    fn an_unmodelled_chain_shows_the_stages_the_driver_named() {
+        let soapy = GainModel::Soapy {
+            min_db: 0,
+            max_db: 116,
+            elements: vec!["LNA".into(), "AMP".into(), "VGA".into()],
+            agc: false,
+        };
+        assert_eq!(
+            rf_chain_str(&soapy, false, false),
+            "ANT\u{25B8}LNA\u{25B8}AMP\u{25B8}VGA\u{25B8}ADC"
+        );
+        // A driver that names none gets a question mark, not an invented stage.
+        let mute = GainModel::Soapy {
+            min_db: 0,
+            max_db: 0,
+            elements: vec![],
+            agc: true,
+        };
+        assert_eq!(rf_chain_str(&mute, false, false), "ANT\u{25B8}?\u{25B8}ADC");
+    }
+
+    /// And the reason printed beside it names the right reason.
+    #[test]
+    fn the_no_cascade_reason_is_not_one_sentence_for_two_devices() {
+        let rtl = GainModel::RtlSingle {
+            gain_steps_db: vec![0, 49],
+        };
+        let soapy = GainModel::Soapy {
+            min_db: 0,
+            max_db: 116,
+            elements: vec![],
+            agc: false,
+        };
+        assert!(rtl.no_cascade_reason().contains("single tuner"));
+        assert!(!soapy.no_cascade_reason().contains("single tuner"));
     }
 }

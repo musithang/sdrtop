@@ -120,7 +120,14 @@ impl Panel for AdcLoadingPanel {
         lines.push(Line::raw(""));
         readouts::loading(&mut lines, &load, verdict, sev_col, iw, theme);
         lines.push(Line::raw(""));
-        readouts::linearity_card(&mut lines, lna_g, vga_g, bits, iw, theme);
+        // The quantisation ceiling on that card follows the device, but its
+        // IIP3, IMD3 and SFDR figures are a specific front end's datasheet
+        // wearing a generic name. Drawn only where the chain is one sdrtop
+        // actually models, which is the same flag the Friis cascade uses and for
+        // the same reason.
+        if state.caps.friis_applicable {
+            readouts::linearity_card(&mut lines, lna_g, vga_g, bits, iw, theme);
+        }
 
         // Self-adjusting density: collapse spacers when short, grow them to fill when
         // tall (chrome::fit_spacers), so the pane breathes the same at every height -
@@ -140,5 +147,53 @@ mod tests {
         assert_eq!(p.name(), "adc_loading");
         let (w, h) = p.min_size();
         assert!(w >= 16 && h >= 8);
+    }
+
+    /// The linearity card is a specific front end's datasheet. It is drawn for
+    /// the radio it describes and for nothing else.
+    ///
+    /// Everything above it, the histogram and the loading read-out, is a real
+    /// measurement of whatever converter is attached, so it stays.
+    #[test]
+    fn the_modeled_linearity_card_is_only_drawn_for_a_chain_we_model() {
+        let hackrf = crate::state::fixture::draw(
+            AdcLoadingPanel,
+            60,
+            30,
+            &crate::state::SdrMetrics::fixture().streaming(),
+        )
+        .join("\n");
+        assert!(hackrf.contains("LINEARITY"), "{hackrf}");
+        assert!(hackrf.contains("IIP3"), "{hackrf}");
+
+        let unknown = crate::state::fixture::draw(
+            AdcLoadingPanel,
+            60,
+            30,
+            &crate::state::SdrMetrics::fixture().streaming().soapy(),
+        )
+        .join("\n");
+        assert!(
+            !unknown.contains("IIP3"),
+            "a modeled intercept point for a chain we do not know:\n{unknown}"
+        );
+        assert!(
+            unknown.contains("LOADING"),
+            "the measured half must survive:\n{unknown}"
+        );
+    }
+
+    /// The converter depth reaches the read-out. A 14-bit device must not be
+    /// described with an 8-bit ceiling.
+    #[test]
+    fn the_readout_names_the_devices_own_bit_depth() {
+        let unknown = crate::state::fixture::draw(
+            AdcLoadingPanel,
+            60,
+            30,
+            &crate::state::SdrMetrics::fixture().streaming().soapy(),
+        )
+        .join("\n");
+        assert!(unknown.contains("/ 14 eff"), "{unknown}");
     }
 }

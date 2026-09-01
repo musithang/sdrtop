@@ -82,18 +82,27 @@ pub(super) fn draw(
         );
     }
 
+    // A dash where there is no boost, the same shape the VGA row uses when there
+    // is no second stage. The row stays so the block keeps its height and the
+    // three labels keep their column, and the dash says "not on this radio"
+    // rather than "off".
+    let boost_cell = if gm.has_boost() {
+        Span::styled(
+            if r.amp_enabled { "ON " } else { "OFF" },
+            Style::default().fg(if r.amp_enabled {
+                theme.status_ok
+            } else {
+                theme.value
+            }),
+        )
+    } else {
+        fd.dash()
+    };
     f.render_widget(
         Paragraph::new(Line::from(vec![
             Span::raw(" "),
             fd.padded(gm.boost_label(), w + 2),
-            Span::styled(
-                if r.amp_enabled { "ON " } else { "OFF" },
-                Style::default().fg(if r.amp_enabled {
-                    theme.status_ok
-                } else {
-                    theme.value
-                }),
-            ),
+            boost_cell,
             Span::raw("    "),
             fd.label("Total: "),
             Span::styled(
@@ -126,12 +135,53 @@ mod tests {
         }
     }
 
+    fn soapy() -> GainModel {
+        GainModel::Soapy {
+            min_db: 0,
+            max_db: 116,
+            elements: vec![],
+            agc: false,
+        }
+    }
+
+    /// A device with no boost gets a dash where the state would be, not `OFF`.
+    ///
+    /// `OFF` is an invitation to look for the key that turns it on. There is no
+    /// such key on that radio, and the reader would be hunting for one.
+    #[test]
+    fn a_device_with_no_boost_shows_a_dash_rather_than_off() {
+        let lines = crate::state::fixture::draw(
+            crate::ui::MicroGainPanel,
+            48,
+            18,
+            &crate::state::SdrMetrics::fixture().streaming().soapy(),
+        )
+        .join("\n");
+        assert!(
+            lines.contains("AGC"),
+            "the row and its label stay:\n{lines}"
+        );
+        assert!(
+            !lines.contains("AGC  OFF") && !lines.contains("AGC  ON"),
+            "a boost this radio does not have:\n{lines}"
+        );
+        // And the device that does have one still says so.
+        let hackrf = crate::state::fixture::draw(
+            crate::ui::MicroGainPanel,
+            48,
+            18,
+            &crate::state::SdrMetrics::fixture().streaming(),
+        )
+        .join("\n");
+        assert!(hackrf.contains("AMP"), "{hackrf}");
+    }
+
     /// Every label in the group fits the column, whichever device is attached.
     /// This is the alignment that was broken: `Tuner` is five characters and the
     /// literals were padded for three.
     #[test]
     fn the_label_column_fits_every_label_the_device_uses() {
-        for gm in [GainModel::HackRf, rtl()] {
+        for gm in [GainModel::HackRf, rtl(), soapy()] {
             let w = label_w(&gm);
             for name in [gm.primary_label(), "VGA", gm.boost_label()] {
                 assert!(

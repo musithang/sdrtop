@@ -264,6 +264,38 @@ impl SdrMetrics {
         self.caps = Arc::new(caps);
         self
     }
+
+    /// Swap in a SoapySDR-shaped profile: one overall gain, **no second stage**,
+    /// **no front end boost**, a 14-bit converter, and no chain to model.
+    ///
+    /// The shape is real. `SoapySDRUtil --probe="driver=hackrf"` reports
+    /// `Supports AGC: NO` and a single `[0, 116] dB` overall range, so a HackRF
+    /// reached through SoapySDR genuinely has no boost to toggle. The bit depth
+    /// is 14 rather than 8 so a panel that still assumes an 8-bit converter
+    /// shows up here rather than in a stranger's screenshot.
+    ///
+    /// This exists because it is the only way to render every panel for a device
+    /// nobody here owns, which is the whole testing strategy for this backend.
+    pub(crate) fn soapy(mut self) -> Self {
+        let mut caps = (*self.caps).clone();
+        caps.gain = crate::hardware::GainModel::Soapy {
+            min_db: 0,
+            max_db: 116,
+            elements: vec!["LNA".into(), "AMP".into(), "VGA".into()],
+            agc: false,
+        };
+        caps.friis_applicable = false;
+        caps.has_bb_filter = false;
+        caps.sample_geometry = crate::hardware::SampleGeometry {
+            format: crate::hardware::SampleFormat::Int16,
+            full_scale: 8192.0,
+        };
+        self.radio.lna_gain = 40;
+        self.radio.vga_gain = 0;
+        self.radio.amp_enabled = false;
+        self.caps = Arc::new(caps);
+        self
+    }
 }
 
 /// Render one panel into a `width × height` buffer and return it as text lines,

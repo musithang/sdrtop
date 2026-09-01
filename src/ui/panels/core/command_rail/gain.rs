@@ -45,19 +45,26 @@ pub(super) fn lines(
     let mut out: Vec<Line<'static>> = Vec::new();
 
     // Front-end boost (HackRF RF amp / RTL-SDR tuner AGC - one flag, two names).
-    let (boost_val, boost_col) = if observer {
-        ("\u{2014}".to_string(), theme.label)
-    } else if state.radio.amp_enabled {
-        ("ON".to_string(), theme.value_hi)
-    } else {
-        ("OFF".to_string(), theme.label)
-    };
-    out.push(Line::from(vec![
-        Span::raw(" "),
-        label_cell(gm.boost_label(), theme),
-        Span::styled(boost_val, Style::default().fg(boost_col)),
-    ]));
-    out.push(Line::raw(""));
+    //
+    // A device that has neither gets no row at all rather than a row reading
+    // OFF, which would be a stage the reader could go looking for a key to turn
+    // on. The rail is short on space; a line that means nothing is worse than no
+    // line.
+    if gm.has_boost() {
+        let (boost_val, boost_col) = if observer {
+            ("\u{2014}".to_string(), theme.label)
+        } else if state.radio.amp_enabled {
+            ("ON".to_string(), theme.value_hi)
+        } else {
+            ("OFF".to_string(), theme.label)
+        };
+        out.push(Line::from(vec![
+            Span::raw(" "),
+            label_cell(gm.boost_label(), theme),
+            Span::styled(boost_val, Style::default().fg(boost_col)),
+        ]));
+        out.push(Line::raw(""));
+    }
 
     // Primary stage (LNA / Tuner): green → yellow.
     out.push(gain_row(
@@ -152,6 +159,34 @@ fn gain_row(
 
 #[cfg(test)]
 mod tests {
+
+    /// The rail drops the boost row entirely on a device that has none, rather
+    /// than printing a stage the reader could go hunting for a key to turn on.
+    /// The rail is the most space-constrained panel in the app; a line that
+    /// means nothing costs a line that would.
+    #[test]
+    fn the_rail_omits_a_boost_the_device_does_not_have() {
+        let with = crate::state::fixture::draw(
+            crate::ui::CommandRailPanel,
+            34,
+            40,
+            &crate::state::SdrMetrics::fixture().streaming(),
+        )
+        .join("\n");
+        assert!(with.contains("AMP"), "{with}");
+
+        let without = crate::state::fixture::draw(
+            crate::ui::CommandRailPanel,
+            34,
+            40,
+            &crate::state::SdrMetrics::fixture().streaming().soapy(),
+        )
+        .join("\n");
+        assert!(!without.contains("AMP"), "{without}");
+        assert!(!without.contains("AGC"), "{without}");
+        // The stages that do exist are still there.
+        assert!(without.contains("GAIN"), "{without}");
+    }
     use super::*;
 
     #[test]

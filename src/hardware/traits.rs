@@ -112,14 +112,13 @@ pub enum GainModel {
     /// HackRF through SoapyHackRF reports `Supports AGC: NO`, so the boost key
     /// has nothing to toggle there.
     ///
-    /// `elements` and `agc` are written by `soapy::caps` and read by the UI in
-    /// **S10**, which is where a device with no boost stops being offered one.
+    /// `elements` is display only for now: naming which stage is which is the
+    /// follow-up this release deliberately does not guess at.
     Soapy {
         min_db: u32,
         max_db: u32,
         #[cfg_attr(not(test), allow(dead_code))]
         elements: Vec<String>,
-        #[cfg_attr(not(test), allow(dead_code))]
         agc: bool,
     },
 }
@@ -136,8 +135,11 @@ impl GainModel {
             GainModel::HackRf => "LNA",
             GainModel::RtlSingle { .. } => "Tuner",
             // Soapy distributes one number across whatever elements the device
-            // has, so there is no one stage to name.
-            GainModel::Soapy { .. } => "Gain",
+            // has, so there is no one stage to name. "RF" is the overall front
+            // end gain, and it reads correctly in the two places this appears:
+            // as a bar label on its own, and as "RF gain" in a heading. "Gain"
+            // read as "GAIN gain" there.
+            GainModel::Soapy { .. } => "RF",
         }
     }
 
@@ -166,14 +168,45 @@ impl GainModel {
         }
     }
 
+    /// The stages between antenna and converter, for the panels that draw a
+    /// chain they cannot model.
+    ///
+    /// Only read where `friis_applicable` is false. An RTL-SDR really is one
+    /// tuner, and a SoapySDR device is **whatever `listGains` named**, which is
+    /// the driver's own answer rather than one of ours. A driver that names no
+    /// elements gets a question mark, because that is the honest character for
+    /// "it did not say".
+    pub fn unmodelled_stages(&self) -> String {
+        match self {
+            GainModel::HackRf => "LNA\u{25b8}MIX\u{25b8}VGA".to_string(),
+            GainModel::RtlSingle { .. } => "TUNER".to_string(),
+            GainModel::Soapy { elements, .. } if !elements.is_empty() => elements.join("\u{25b8}"),
+            GainModel::Soapy { .. } => "?".to_string(),
+        }
+    }
+
+    /// Why the modelled cascade is not on offer, in a few words.
+    ///
+    /// Two devices land in that branch for **different reasons**, and the panels
+    /// used to print one sentence for both: "single-tuner". That is true of an
+    /// RTL-SDR and false of a HackRF reached through SoapySDR, which has three
+    /// gain elements and a cascade we simply have not been told the noise
+    /// figures for.
+    pub fn no_cascade_reason(&self) -> &'static str {
+        match self {
+            // Never shown: this device has a cascade.
+            GainModel::HackRf => "no cascade",
+            GainModel::RtlSingle { .. } => "single tuner, no cascade",
+            GainModel::Soapy { .. } => "chain not modelled",
+        }
+    }
+
     /// Whether there is a front-end boost to toggle at all.
     ///
     /// Both native radios have one, so this was previously not a question worth
     /// asking. A SoapySDR device often has neither an RF amp nor an automatic
     /// gain mode, and a key that toggles a flag meaning nothing is worse than a
-    /// key that is not offered. **S10 is where the UI stops offering it**, and
-    /// where this allow comes off.
-    #[cfg_attr(not(test), allow(dead_code))]
+    /// key that is not offered.
     pub fn has_boost(&self) -> bool {
         match self {
             GainModel::HackRf | GainModel::RtlSingle { .. } => true,

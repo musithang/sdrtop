@@ -371,4 +371,27 @@ mod tests {
         assert_eq!(h.engine.active_preset(), preset);
         assert_eq!(metrics(&h.state).ui.log.len(), logs_before);
     }
+    /// The boost key on a device with no boost changes nothing and says so.
+    ///
+    /// Silently flipping `amp_enabled` would light a lamp on the rail, the micro
+    /// gain view and the lab banner for a stage that is not in the radio, and
+    /// the gain total would gain 14 dB that does not exist.
+    #[test]
+    fn the_boost_key_does_nothing_on_a_device_that_has_no_boost() {
+        let mut h = Harness::new();
+        {
+            let mut m = metrics(&h.state);
+            *m = SdrMetrics::fixture().soapy();
+        }
+        let before = metrics(&h.state).radio.amp_enabled;
+        h.press('a');
+        let m = metrics(&h.state);
+        assert_eq!(m.radio.amp_enabled, before, "the flag must not move");
+        assert!(
+            m.ui.log
+                .iter()
+                .any(|e| e.text.contains("no front end boost")),
+            "and the user is told why nothing happened"
+        );
+    }
 }
