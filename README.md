@@ -28,7 +28,7 @@
   <a href="user_docs/hardware.md#soapysdr-the-honest-version"><img src="https://img.shields.io/badge/bladeRF-lightgrey" alt="bladeRF"></a>
   <a href="user_docs/hardware.md#soapysdr-the-honest-version"><img src="https://img.shields.io/badge/USRP-lightgrey" alt="USRP"></a>
   <br>
-  <sub>Grey means <b>written from the API, not from owning one</b>. Nobody has reported back yet. <a href="user_docs/hardware.md#soapysdr-the-honest-version">The honest version</a>.</sub>
+  <sub>Grey means <b>written from the API, not from owning one</b>. It should work. Nobody has told me either way yet, which is exactly as reassuring as it sounds. <a href="user_docs/hardware.md#soapysdr-the-honest-version">The honest version</a>.</sub>
 </p>
 
 <p align="center">
@@ -39,7 +39,7 @@
   <a href="user_docs/README.md">Full guide</a>
 </p>
 
-**Hey there! This is my take on a terminal monitor for SDR hardware.** I wanted something that could hunt down every bit of diagnostic data from your radio and stream it straight to your terminal. Not a lazy `*-info` clone: raw, real-time metrics with a spectrum, a waterfall and a set of bench instruments, in a tmux pane, an SSH session, or the postage-stamp screen of a cyberdeck.
+**Hey there! This is my take on a terminal monitor for SDR hardware.** I wanted something that could hunt down every bit of diagnostic data from your radio and stream it straight to your terminal. Not a lazy `*-info` clone: raw, real-time metrics with a spectrum, a waterfall and a set of bench instruments, in a tmux pane, an SSH session, or the postage-stamp screen of a cyberdeck. I set out to print a few numbers. There is now a Friis noise figure model in here. I'm not entirely sure how that happened.
 
 It's a hobby project built in my spare time, and honestly, I made it for *you* ❤️. Use it however you like, beat on it, and don't be shy: open issues, dig through the code, and if you've got a good idea, send it my way as a pull request or just a message. This is an open table, not my private garage.
 
@@ -100,7 +100,7 @@ Got a clean capture on your hardware? Drop it in [`user_docs/pics/`](https://git
 
 ## What it does
 
-Everything your radio knows about itself, in real time, without leaving the terminal.
+Everything your radio knows about itself, in real time, without leaving the terminal. It's more than I planned. Every one of these started as "that'd be a nice little readout".
 
 - **The Command Rail**, the default cockpit: a big segmented frequency hero, an analog S-meter, HUNT · MONITOR · BENCH mode cards that follow what you're doing, recall slots, and SNR · PWR · NF · SAT each riding its own braille oscilloscope trace. All dials, no autopilot. It's a radio, not a self-driving car.
 - **Spectrum and waterfall**: FFT with peak hold, noise floor tracking, zoom, band-plan overlay and persistent markers; a scrolling spectrogram in truecolor, 256 or 16 colors with history scroll-back and frame averaging.
@@ -109,7 +109,7 @@ Everything your radio knows about itself, in real time, without leaving the term
 - **IQ correction, not just measurement**: one key subtracts the live DC estimate from the stream, another captures a quadrature correction and applies it. Watch the spike and the mirror images actually go away.
 - **A band sweep** wider than one window, stitched into a single curve with band-plan labels, `Enter` on a peak to tune straight to it.
 - **Micro field views** for when a full terminal isn't on offer: each concern stripped to one glance, readable down to about 40 columns.
-- **Observer mode**: if another app already holds the radio, sdrtop shows device identity, the owning process and USB stats instead of falling over, then takes the radio back when it's free.
+- **Observer mode**: if another app already holds the radio, sdrtop tells you which one, shows device identity and USB stats, and waits. No error dialog, no fight over the USB handle, and it takes the radio back the moment it's free.
 - **Six themes and a layout system**: presets grouped into four sections, `Esc` for the menu, or define your own out of any panel sdrtop draws.
 
 > Every lab panel marks itself **[STALE]** the moment RX stops, so a frozen number is never mistaken for a live one. Because the only thing worse than no data is confidently wrong data.
@@ -155,7 +155,9 @@ sudo apt install libsoapysdr0.8 soapysdr-tools soapysdr-module-all
 SoapySDRUtil --find     # if this can't see your radio, sdrtop can't either
 ```
 
-<sub>Prefer a prebuilt binary, need a specific version, or on something unusual? <b><a href="user_docs/getting-started.md">Getting started</a></b> has the release tarball, the signature check, every installer flag and the distro-by-distro package names.</sub>
+That last command is the whole diagnostic. If your radio isn't in that list, the missing piece is a driver module, and no amount of shouting at sdrtop will conjure one up.
+
+<sub>Prefer a prebuilt binary, need a specific version, or on something unusual? <b><a href="user_docs/getting-started.md">Getting started</a></b> has the release tarball, the signature check, every installer flag and the distro-by-distro package names. Short version on the tarball: it's x86_64 and it wants Debian's <code>librtlsdr.so.0</code>, so it won't start on Ubuntu or Mint, who package the identical library as <code>.so.2</code> because of course they do.</sub>
 
 **First run:** sdrtop opens on its menu. `Enter` takes a layout, `Space` starts receiving, `Esc` brings the menu back, `q` quits and saves.
 
@@ -163,7 +165,7 @@ SoapySDRUtil --find     # if this can't see your radio, sdrtop can't either
 
 ## Keys
 
-Layouts are grouped into four sections and **each section has its own numbers**: `Command Rail` for the general views, `Lab` for the benches, `Sweep` for the band scan, `Micro` for the field views. So `2` is the RF bench inside Lab and the spectrum inside Command Rail. `Esc` opens the menu, which shows you the sections, the layouts in the one you're on, and the number that opens each. Nine keys, four times over, rather than one long row to memorise.
+Layouts are grouped into four sections and **each section has its own numbers**: `Command Rail` for the general views, `Lab` for the benches, `Sweep` for the band scan, `Micro` for the field views. So `2` is the RF bench inside Lab and the spectrum inside Command Rail. `Esc` opens the menu, which shows you the sections, the layouts in the one you're on, and the number that opens each. Nine keys, four times over, rather than one long row to memorise. The arrangement before this had ten layouts competing for nine digits, which went exactly as well as you'd expect: one of them simply never got a key, and the help screen had been lying about the rest for several releases.
 
 The ten that get you everywhere:
 
@@ -206,7 +208,7 @@ Frequency, gains, sample rate, markers, the sweep band, your theme and your layo
 
 Native support is added only after physical testing on real devices. No guessing from datasheets. Translation: that list moves at exactly the speed of my hobby budget.
 
-**SoapySDR is the deliberate exception**, because "I don't own one" was a bad answer to give every week. Nothing about your radio is hardcoded: sdrtop asks the driver for the frequency range, the gain range, whether there's an AGC, the sample format and how many of its bits mean anything. What it can't ask, it refuses rather than invents. Verified against a HackRF through `SoapyHackRF`: the loader, enumeration, opening, capabilities and streaming. Unverified: literally every other radio. [The honest version](user_docs/hardware.md#soapysdr-the-honest-version) has the full reckoning, including the gotchas I already hit.
+**SoapySDR is the deliberate exception**, because "I don't own one" was a bad answer to give every week, and buying one of everything is not a plan, it's a fantasy with a shipping address. Nothing about your radio is hardcoded: sdrtop asks the driver for the frequency range, the gain range, whether there's an AGC, the sample format and how many of its bits mean anything. What it can't ask, it refuses rather than invents. Verified against a HackRF through `SoapyHackRF`: the loader, enumeration, opening, capabilities and streaming. Unverified: literally every other radio. [The honest version](user_docs/hardware.md#soapysdr-the-honest-version) has the full reckoning, including the gotchas I already hit.
 
 ### The hardware wishlist
 
@@ -227,7 +229,7 @@ No pressure, but if this scratches an itch for you, this is where it goes.
 
 ## Roadmap
 
-**Right now: polish over features.** The feature set is in, so the focus is making what's here genuinely good: UI polish, a micro view redesign, auditing the derived measurements until the numbers are not just present but trustworthy, and hunting the rough edges. No shiny new things until that feels done. ✨
+**Right now: polish over features.** The feature set is in, so the focus is making what's here genuinely good: UI polish, a micro view redesign, auditing the derived measurements until the numbers are not just present but trustworthy, and hunting the rough edges. No shiny new things until that feels done. I have said this before and then written a demodulator. This time there's a list. ✨
 
 **Just landed 🎉** SoapySDR support (beta) · a menu with scoped keys · an ADC bench that follows the device's real bit depth · a measurement audit of the Lab Signal bench · the FM demodulator with RDS. The whole story, in order, is in [What's new](user_docs/whats-new.md).
 

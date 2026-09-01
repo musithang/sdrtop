@@ -31,9 +31,10 @@ prove it works.
 
 It uses the prebuilt binary only when that binary can run on your machine, and
 it decides that by **running it**, not by guessing from your distribution's
-name. When it cannot, on a Raspberry Pi or on Ubuntu, whose `librtlsdr` has a
-different soname to Debian's, it makes sure Rust is present and hands over to
-`cargo install sdrtop --locked` instead. That takes a few minutes and needs no
+name. When it cannot, on a Raspberry Pi or on Ubuntu and Mint, which package the
+exact same `librtlsdr` as Debian under a different soname because of course they
+do, it makes sure Rust is present and hands over to `cargo install sdrtop
+--locked` instead. That takes a few minutes and needs no
 decisions from you.
 
 What it does **not** do is set up device permissions. It reports on them, and
