@@ -7,15 +7,16 @@ spectrum, they surface the measurements sdrtop can derive about your receiver's
 *signal quality* and *hardware health*. They're built for setting up a clean
 capture and for watching for trouble during a long run.
 
-Five presets, each on its own number key:
+Four benches in the **Lab** section, plus the band sweep in **Sweep**. The key
+is the number to press while that section is active:
 
 | Key | Preset | The question it answers |
 |-----|--------|--------------------------|
-| `5` | **Lab IQ** | Is the quadrature clean, and can I make it cleaner? |
-| `6` | **Lab RF** | Is the front end staged properly for what I'm chasing? |
-| `7` | **Lab Timing** | Is my computer keeping up with the radio? |
-| `8` | **Lab Signal** | What is that signal, and what's inside it? |
-| `9` | **Lab Sweep** | What's out there across a band too wide to see at once? |
+| `Lab 1` | **Lab IQ** | Is the quadrature clean, and can I make it cleaner? |
+| `Lab 2` | **Lab RF** | Is the front end staged properly for what I'm chasing? |
+| `Lab 3` | **Lab Timing** | Is my computer keeping up with the radio? |
+| `Lab 4` | **Lab Signal** | What is that signal, and what's inside it? |
+| `Sweep 1` | **Lab Sweep** | What's out there across a band too wide to see at once? |
 
 [What you see on screen](screens.md) says which panel is which and where it sits.
 This page is about what the readings *mean* and what to do about them.
@@ -87,7 +88,7 @@ and Lab IQ shows the measured carrier-to-image suppression.
 
 ---
 
-## RF Front-End Bench · *Lab RF (`6`)*
+## RF Front-End Bench · *Lab RF (`Lab 2`)*
 
 Three panels that read the whole receive chain as one story. The thesis they
 teach: **level climbs stage by stage; the gap between signal and noise is the SNR
@@ -162,7 +163,7 @@ Focus RF Diagnostics with `d`, then:
 
 ---
 
-## IQ Bench · *Lab IQ (`5`)*
+## IQ Bench · *Lab IQ (`Lab 1`)*
 
 Everything here is about **quadrature**: whether the I and Q channels your radio
 produces are really equal in amplitude and really 90° apart. When they're not,
@@ -297,7 +298,7 @@ at:
 
 ---
 
-## Signal Characterization · *Lab Signal (`8`)*
+## Signal Characterization · *Lab Signal (`Lab 4`)*
 
 Where the demod panel opposite opens the channel up and reads what is inside it,
 this one answers the question you ask first: what *is* that, and how clean is it?
@@ -366,7 +367,7 @@ the demod panel opposite, force the mode with `T` rather than trusting the badge
 
 ---
 
-## FM MPX · Demod · *Lab Signal (`8`)*
+## FM MPX · Demod · *Lab Signal (`Lab 4`)*
 
 This panel actually demodulates the channel and reads out what is inside it. It is
 a **measurement instrument, not a receiver**. There is no audio anywhere in
@@ -489,7 +490,7 @@ off centre with `←` / `→`.
 
 ---
 
-## Timing Bench · *Lab Timing (`7`)*
+## Timing Bench · *Lab Timing (`Lab 3`)*
 
 The question no other bench can answer: is your computer keeping up with the radio
 in real time? The radio ships samples in steady USB bursts, one callback at a
@@ -544,7 +545,7 @@ The supporting cast, all on a 60-second rolling window:
 
 ---
 
-## Sweep · *Lab Sweep (`9`)*
+## Sweep · *Lab Sweep (`Sweep 1`)*
 
 Your radio sees only as much spectrum at once as the sample rate covers, ±10 MHz
 at 20 Msps on a HackRF and rather less on an RTL-SDR. **Lab Sweep** maps a wider
@@ -568,8 +569,7 @@ wherever the radio is actually parked: peak-to-noise, channel power, noise floor
 and occupied bandwidth. `C` logs a snapshot. It's the same family of numbers as
 the signal bench, sized to fit next to a scan.
 
-The `micro_sweep` step in the `0` cycle gives the same scan as a compact field
-list.
+`micro_sweep` (`Sweep 2`) gives the same scan as a compact field list.
 
 ---
 
@@ -578,17 +578,17 @@ list.
 A typical setup flow, switching presets as you go:
 
 1. Tune to your target and start RX (`Space`).
-2. In **Lab IQ (`5`)**, watch the **constellation**: adjust LNA and VGA until the
+2. In **Lab IQ (`Lab 1`)**, watch the **constellation**: adjust LNA and VGA until the
    cloud is a bright, well-filled ring sitting comfortably *inside* the unit
    circle (smearing out to the edge means clipping). Glance at **IQ Diagnostics**:
    a centred needle on each null-meter, IRR above 30 dB and DC spike below
    −40 dBFS mean clean quadrature. If the DC spike is in your way, press `D`; if
    the images are, park on a strong carrier and press `C`.
-3. In **Lab RF (`6`)**, focus **RF Diagnostics** (`d`) and press `A` to auto-stage
+3. In **Lab RF (`Lab 2`)**, focus **RF Diagnostics** (`d`) and press `A` to auto-stage
    the gain, then read **NF** and **MDS** to confirm the receiver is sensitive
    enough for what you're chasing. Watch the **ADC Loading** bell fill the range
    without touching the rails.
-4. In **Lab Timing (`7`)**, confirm the timing verdict is Good or Excellent, and
+4. In **Lab Timing (`Lab 3`)**, confirm the timing verdict is Good or Excellent, and
    that the ring-buffer fill isn't trending upward, before committing to a long
    run.
 5. On the bench you're actually working at, set the banner up: averaging up if the

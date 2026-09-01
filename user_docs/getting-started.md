@@ -127,19 +127,27 @@ listing every HackRF and RTL-SDR by type and serial. Use `↑` / `↓` (or `j` /
 to pick one, then `Enter`. Skip it entirely with `--device hackrf` or
 `--device rtlsdr`.
 
-Then:
+Then the **menu** opens, which is sdrtop's front door. On the left are the four
+families of layout, on the right the layouts in whichever one is selected.
 
-1. **`Space`** to start receiving. The spectrum and waterfall come to life.
-2. **`↑` / `↓`** to adjust gain if the signal looks too weak or too strong. That's
+1. **`Enter`** takes the highlighted layout, which on a first run is the Command
+   Rail cockpit. From then on the menu opens on whatever you were using last, so
+   `Enter` is a resume.
+2. **`Space`** to start receiving. The spectrum and waterfall come to life.
+3. **`↑` / `↓`** to adjust gain if the signal looks too weak or too strong. That's
    LNA on a HackRF, the tuner gain on an RTL-SDR. A flat trace usually means gain
    is far off in one direction or the other.
-3. **`?`** at any time for the full key reference on screen.
-4. **`q`** to quit. Your settings are saved automatically.
+4. **`Esc`** brings the menu back at any time. Tab across to **Keys** for the full
+   key reference without leaving the app.
+5. **`q`** to quit. Your settings are saved automatically.
 
-Once that works, the interesting parts are the number keys: `1` is the Command
-Rail cockpit you started on, `5` through `9` are the
-[measurement benches](lab.md), and `0` shrinks everything down for a small
-screen.
+Once that works, the interesting part is the sections. `Esc`, then `Tab` to
+**Lab**, and `1` to `4` are the [measurement benches](lab.md). **Micro** shrinks
+everything down for a small screen, and **Sweep** scans a whole band.
+
+Numbers start again at `1` in every section, which is why there are four families
+rather than one long row of keys. This guide writes them as section then number,
+so `Lab 2` means "press `2` while Lab is the section you are in".
 
 ---
 

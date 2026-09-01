@@ -153,16 +153,18 @@ pkill -f sdrpp
 
 ## Micro mode on small screens
 
-`0` enters the micro field views and cycles through them. They exist because
-sdrtop shouldn't need a full terminal to be useful: in a slim tmux split, an SSH
+The **Micro** section of the menu holds the field views, on `1` to `4`. They exist
+because sdrtop shouldn't need a full terminal to be useful: in a slim tmux split, an SSH
 session on a phone, or a cyberdeck's screen, the full panels stop being readable.
 
 Each view adapts to the width it's given across three layouts, so it stays
 readable from an 80×24 SSH session down to a 40-column framebuffer. What's in each
 view is in [What you see on screen](screens.md#micro-field-views).
 
-Entering the sweep view starts a scan on its own, so it's self-contained for field
-use: press `0` until you're there and it begins.
+The compact sweep view starts a scan on its own, so it's self-contained for field
+use: open `Sweep 2` and it begins. It sits in the **Sweep** section rather than
+with the other micro views, next to the full-size sweep it is a small version
+of.
 
 ---
 
@@ -228,7 +230,7 @@ and `TERM=xterm-256color` fixes most of it.
 - **No per-serial device pinning.** `--device` picks a type, not a unit.
 - **Sample rate ceilings are USB-bound.** USB 2.0 limits the HackRF to about
   20 Msps in practice, and an older hub or a long cable will lower that. If drops
-  appear, the [timing bench](lab.md#timing-bench--lab-timing-7) will tell you
+  appear, the [timing bench](lab.md#timing-bench--lab-timing-lab-3) will tell you
   whether it's the bus or your CPU.
 - **No in-app config editing.** The TOML is hand-edited. On the roadmap.
 - **PortaPack support is partial.** Mayhem telemetry over serial is in

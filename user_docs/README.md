@@ -3,7 +3,7 @@
 Welcome. This is the plain-language guide to using sdrtop.
 
 > **Status:** the interactive TUI is feature-complete (spectrum, waterfall, the
-> five lab benches, the sweep scanner and the micro field views), and both the
+> four lab benches, the sweep scanner and the micro field views), and both the
 > HackRF One and the RTL-SDR are fully supported. The current arc is polish:
 > instrument-grade UI, sharper radio math, and bug fixing. See
 > [What's New](whats-new.md).

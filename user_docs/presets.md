@@ -3,8 +3,8 @@
 ← [Back](README.md)
 
 A *preset* is a named arrangement of panels: which ones are on screen, where they
-sit, and how much room each gets. sdrtop ships with sixteen, on the number keys
-and the `p` cycle, and you can write your own.
+sit, and how much room each gets. sdrtop ships with sixteen, grouped into the four
+sections of the [menu](screens.md#the-menu), and you can write your own.
 
 There are two places to put one, and they behave identically:
 
@@ -22,9 +22,9 @@ name as a built-in (`command_rail`, `spectrum`, `waterfall`,
 `spectrum_waterfall`, `main`, `lab_iq`, `lab_rf`, `lab_timing`, `lab_signal`,
 `lab_sweep`, `micro_main`, `micro_signal`, `micro_gain`, `micro_health`,
 `micro_sweep`, `observer`) and your version replaces it, so the number key that
-triggers it now opens your layout. Those names are the whole list; a name that
-isn't on it is a new preset, which joins the `p` cycle automatically rather than
-taking over a key.
+opens it now opens your layout. Those names are the whole list; a name that isn't
+on it is a new preset, which appears in the menu automatically rather than taking
+over a key.
 
 A preset is a list of panels, each with a `name`, a `position`, and optionally a
 size:
@@ -38,6 +38,42 @@ panels = [
   { name = "footer",   position = "bottom"                  },
 ]
 ```
+
+## Where it appears in the menu
+
+Four optional fields put a preset somewhere in the [menu](screens.md#the-menu)
+and give it a number key. Leave them all out and the layout still works; it just
+lands in a section called **Other** with no shortcut.
+
+```toml
+[presets.my_view]
+section = "lab"
+slot    = 5
+title   = "Nightwatch"
+blurb   = "Waterfall and log, for leaving running"
+panels  = [ ... ]   # exactly as above
+```
+
+| Field | What it does |
+|-------|--------------|
+| `section` | Which family it belongs to: `command_rail`, `lab`, `sweep`, `micro`, or a name of your own, which becomes a new section. `hidden` keeps it out of the menu entirely |
+| `slot` | The number key, `1` to `9`, **within that section**. Leave it out and the layout is still listed, just without a shortcut |
+| `title` | What the menu calls it. Defaults to the preset name |
+| `blurb` | The half-line under the title. Optional, and worth writing: it is what tells you which of two similar layouts you want |
+
+A few things follow from how these are read:
+
+- **Numbers are per section**, so `slot = 5` in `lab` does not collide with
+  `slot = 5` in `micro`. That is the whole point of the sections: nine keys, four
+  times over, instead of one exhausted row.
+- **Two presets wanting the same slot is not fatal.** The one whose *preset name*
+  sorts first keeps the key, the other stays in the list without one, and the
+  reason is written to the log so you can see it happened. Losing a shortcut is a
+  better answer than losing the layout.
+- **A section name sdrtop does not know becomes a section of its own**, listed
+  after the four built-in ones and titled with the name you gave it.
+- **`hidden` is how the built-in `observer` preset stays out of the way.** It is
+  loaded by sdrtop itself, so there is nothing to pick.
 
 ## A preset per file
 
@@ -56,7 +92,7 @@ panels = [
 ```
 
 That is the whole installation step. There is no list to register the name in and
-nothing to rebuild; press `p` and it is in the cycle. The file is just the
+nothing to rebuild; open the menu and it is there. The file is just the
 `panels = [...]` part, without the `[presets.name]` header, because the file name
 is the preset name.
 
@@ -148,7 +184,7 @@ that panel and not the layout.
 
 Presets decide *which* panels you see. [What you see on screen](screens.md)
 explains what each one is telling you, and [The Lab presets](lab.md) covers the
-five measurement benches in depth. For the rest of the config file, see
+measurement benches in depth. For the rest of the config file, see
 [Configuration](config.md).
 
 ← [Back](README.md)

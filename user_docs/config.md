@@ -121,7 +121,7 @@ just a line.
 
 ## Sweep scanner
 
-The `lab_sweep` preset (`9`) and the `micro_sweep` field view scan a band wider
+The `lab_sweep` preset (`Sweep 1`) and `micro_sweep` (`Sweep 2`) scan a band wider
 than one sample-rate window by retuning across it. The band and dwell time are set
 in `[sweep]` above.
 

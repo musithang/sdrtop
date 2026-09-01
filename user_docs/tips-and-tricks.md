@@ -17,7 +17,7 @@ digitising mostly noise; too much and the ADC clips, which is worse than it
 sounds. A clipped ADC doesn't politely round up, it makes things up, and a
 confident lie is the worst kind of data.
 
-The fastest way to see it is the **ADC Loading** bell in Lab RF (`6`): a shape
+The fastest way to see it is the **ADC Loading** bell in Lab RF (`Lab 2`): a shape
 that fills the middle without piling up on the rails. If you want exact numbers,
 add the `iq_histogram` panel to a [layout of your own](presets.md)
 and aim for:
@@ -28,7 +28,7 @@ and aim for:
 
 ### Let it do it for you
 
-Lab RF (`6`), focus with `d`, press `A`. That stages LNA and VGA to the target in
+Lab RF (`Lab 2`), focus with `d`, press `A`. That stages LNA and VGA to the target in
 one press, filling LNA first to protect the noise figure. Press `A` again once
 you're at the optimum and it latches a continuous track that follows level drift.
 Any manual gain key drops the latch, so it never fights you.
@@ -97,20 +97,22 @@ is a candidate.
 Press `f`, type a frequency in MHz, `Enter`, look for a second or two, repeat. It
 sounds primitive and it's often the fastest thing when you have a shortlist.
 
-For a band rather than a list, use **Lab Sweep** (`9`) instead. It scans wider
+For a band rather than a list, use **Lab Sweep** (`Sweep 1`) instead. It scans wider
 than one window by retuning across the band, and `Enter` on the cursor tunes
 straight to whatever you found.
 
 ### Recall slots: three frequencies, one keypress
 
-The Command Rail (`1`) keeps three recall slots, and they're the fastest way to
+The Command Rail (`Command Rail 1`) keeps three recall slots, and they're the fastest way to
 compare signals.
 
 1. Press `c` to focus the rail.
 2. Tune to something interesting.
 3. Press `M` to save it into the next slot.
 4. Repeat for a second and third frequency.
-5. Now `1`, `2` and `3` jump between them instantly.
+5. Now `1`, `2` and `3` jump between them instantly, for as long as the rail
+   is focused. Those three digits are the rail's while it holds the keyboard;
+   `Esc` gives them back to the layouts.
 
 Each slot shows a little activity pip when that frequency has a signal on screen
 right now, so you can watch three channels at once without tuning to any of them.
@@ -210,15 +212,15 @@ The lab presets are built for exactly this, one concern each. A typical run
 through:
 
 1. **Tune** to your target with `f`, and **start RX** with `Space`.
-2. **Gain, Lab RF (`6`).** Focus with `d`, press `A`, and check the ADC Loading
+2. **Gain, Lab RF (`Lab 2`).** Focus with `d`, press `A`, and check the ADC Loading
    bell fills the middle without touching the rails. Read **NF** and **MDS** to
    confirm the receiver is sensitive enough for what you're after.
-3. **Quadrature, Lab IQ (`5`).** The constellation should be a bright ring
+3. **Quadrature, Lab IQ (`Lab 1`).** The constellation should be a bright ring
    comfortably inside the unit circle; smeared out to the edge means clipping.
    **IRR** above 30 dB and **DC spike** below −40 dBFS mean clean quadrature. If
    the DC spike is in your way, press `D`. If mirror images are, park on a strong
    carrier and press `C`.
-4. **Stability, Lab Timing (`7`).** The timing verdict should read Good or
+4. **Stability, Lab Timing (`Lab 3`).** The timing verdict should read Good or
    Excellent, and the ring-buffer fill should be flat rather than trending up.
 5. **The bench you'll actually watch.** Set averaging, and capture a reference
    trace before you change anything.
@@ -229,7 +231,7 @@ If all four check out, the run is worth starting.
 
 ## During a long capture
 
-Keep **Hardware Vitals** in view (Lab Timing, `7`, focus `v`):
+Keep **Hardware Vitals** in view (Lab Timing, `Lab 3`, focus `v`):
 
 - **Buffer fill trending toward the ceiling** is the warning that matters, and it
   arrives *before* the drop counter does. Act on this one.
@@ -257,9 +259,9 @@ ssh pi@raspberrypi.local sdrtop --theme nord --frequency 433920000
 tmux split-window -v -p 30 'sdrtop --lna 24'
 ```
 
-On anything cramped, press `0` for the [micro field views](screens.md#micro-field-views),
-which strip each concern down to one glance and stay readable down to about 40
-columns.
+On anything cramped, the [micro field views](screens.md#micro-field-views) strip
+each concern down to one glance and stay readable down to about 40 columns. `Esc`
+for the menu, then the **Micro** section.
 
 One habit worth having: if you're scripting sdrtop or trying out a layout, pass
 `--config /tmp/something.toml`. `q` saves, so a script that runs sdrtop without it

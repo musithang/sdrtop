@@ -143,7 +143,7 @@ quirks. If yours behaves oddly in a way `rtl_test` doesn't explain,
 2. **Check gain.** A completely flat trace means gain is far too low (all noise
    floor) or far too high (everything slammed at the top). `↑` / `↓` to adjust.
    On a HackRF, LNA 24 / VGA 30 is a reasonable place to start over from.
-3. **Check the health panels.** Lab Timing (`7`) shows drops, saturation and CPU.
+3. **Check the health panels.** Lab Timing (`Lab 3`) shows drops, saturation and CPU.
    Non-zero drops mean USB or CPU can't keep up; high saturation means turn the
    gain down.
 
@@ -158,7 +158,7 @@ quirks. If yours behaves oddly in a way `rtl_test` doesn't explain,
    letters rather than commands until you press `Enter` or `Esc`.
 4. **Known bug: `v` and `t` are unreliable in Lab Timing.** Two panels each claim
    these focus keys, and which one wins is decided randomly at startup. On some
-   launches pressing `v` or `t` in preset `7` does nothing at all, even though the
+   launches pressing `v` or `t` in the timing bench does nothing at all, even though the
    footer offers them. Restarting sdrtop reshuffles it. This is a bug and will be
    fixed; it isn't something you're doing wrong.
 
@@ -170,7 +170,7 @@ quirks. If yours behaves oddly in a way `rtl_test` doesn't explain,
 
 1. **Lower the sample rate.** `s`, then a smaller number. If you're at 20, try 5.
    This is the single most effective fix and usually the correct one.
-2. **Check which end is at fault.** Lab Timing (`7`) answers this directly. If the
+2. **Check which end is at fault.** Lab Timing (`Lab 3`) answers this directly. If the
    **Callback Interval Strip Chart** shows late callbacks clustered around
    something, your host is stalling. If the callbacks are punctual but the ring
    buffer still fills, the bus is the limit.
@@ -192,7 +192,8 @@ sdrtop redraws at about 30 fps. On a slow host at 20 Msps that's real work, most
 FFT.
 
 - Drop the sample rate. It cuts the FFT size and the CPU load together.
-- Use a smaller preset. The micro views (`0`) draw far less than a full lab bench.
+- Use a smaller preset. The micro views draw far less than a full lab bench.
+  `Esc`, then the **Micro** section.
 - Close the other things. Browsers are the usual culprit.
 
 ---
