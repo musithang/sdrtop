@@ -21,6 +21,9 @@ which is the "What you need" section below.
 
 ```sh
 curl -fsSL https://raw.githubusercontent.com/mustang6139/sdrtop/main/packaging/install.sh | sh
+
+# ...and with SoapySDR, if you have an Airspy, an RSP, a Pluto or a Lime
+curl -fsSL https://raw.githubusercontent.com/mustang6139/sdrtop/main/packaging/install.sh | sh -s -- --soapy
 ```
 
 The installer covers everything the rest of this page describes: it finds your
@@ -36,6 +39,15 @@ exact same `librtlsdr` as Debian under a different soname because of course they
 do, it makes sure Rust is present and hands over to `cargo install sdrtop
 --locked` instead. That takes a few minutes and needs no
 decisions from you.
+
+**SoapySDR is not installed unless you ask.** sdrtop opens it at runtime and
+works perfectly well without it, so a plain run leaves it alone and just tells
+you at the end whether you have it and what it would buy you. `--soapy` adds the
+library and the driver modules your distribution ships. If your distribution's
+packages are named something this script has not heard of, it says so rather
+than failing, and the fix is one line in
+[`packaging/install.sh`](https://github.com/mustang6139/sdrtop/blob/main/packaging/install.sh)
+plus an issue so I can correct it for everyone else.
 
 What it does **not** do is set up device permissions. It reports on them, and
 that is deliberate: the `libhackrf` and `rtl-sdr` packages ship their own udev

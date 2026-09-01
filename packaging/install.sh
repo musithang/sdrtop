@@ -31,6 +31,7 @@ set -eu
 
 REPO=mustang6139/sdrtop
 CRATE=sdrtop
+WANT_SOAPY=0
 RAW_DEPS_ONLY=0
 FROM_SOURCE=0
 FROM_GIT=0
@@ -53,6 +54,7 @@ sdrtop installer
   --from-source   compile with cargo even on x86_64, skipping the prebuilt binary
   --git           compile the main branch instead of a release (unversioned)
   --no-verify     install a download without checking its checksum (say why first)
+  --soapy         also install libSoapySDR and its driver modules (optional)
   --deps-only     install the library dependencies and stop
   --uninstall     remove what a previous run installed
   --help          this
@@ -66,6 +68,7 @@ while [ $# -gt 0 ]; do
         --from-source) FROM_SOURCE=1; shift ;;
         --git)         FROM_GIT=1; FROM_SOURCE=1; shift ;;
         --no-verify)   NO_VERIFY=1; shift ;;
+        --soapy)       WANT_SOAPY=1; shift ;;
         --deps-only)   RAW_DEPS_ONLY=1; shift ;;
         --uninstall)   UNINSTALL=1; shift ;;
         --help|-h)     usage; exit 0 ;;
@@ -134,41 +137,71 @@ done
 # Debian, Mint follows Ubuntu. Both names are in the list, so neither family
 # needs to be detected.
 UDEV_PKGS=""
+# SoapySDR is optional: sdrtop opens it at runtime and works without it, so
+# these are only used by --soapy. Two lists, because the library alone finds no
+# devices: SOAPY_LIB is what sdrtop loads, SOAPY_MODULES is what actually talks
+# to a radio.
+#
+# **Confidence varies, and that matters more than tidiness here.** The apt names
+# were read off this machine's own index; Arch, Void, Gentoo and nixpkgs come
+# from repology. Fedora, openSUSE and Alpine could not be checked and are
+# best-effort: `install_first` tries each candidate and warns if none take, so a
+# wrong guess costs a warning rather than a failed install. If you are on one of
+# those three and it warns, the right fix is to read your distribution's index
+# and correct the list, not to add another guess.
+SOAPY_LIB=""
+SOAPY_MODULES=""
 case "$PM" in
     apt-get)
         LIB_HACKRF="libhackrf0 libhackrf-dev"
         LIB_RTLSDR="librtlsdr0 librtlsdr2 librtlsdr-dev"
+        SOAPY_LIB="libsoapysdr0.8 libsoapysdr0.7 libsoapysdr-dev"
+        SOAPY_MODULES="soapysdr-module-all"
         DEV_PKGS="libhackrf-dev librtlsdr-dev pkg-config build-essential" ;;
     dnf|yum)
         LIB_HACKRF="hackrf hackrf-devel"
         LIB_RTLSDR="rtl-sdr rtl-sdr-devel"
+        SOAPY_LIB="SoapySDR"
+        SOAPY_MODULES="SoapySDR-hackrf SoapySDR-rtlsdr SoapySDR-airspy SoapySDR-plutosdr"
         DEV_PKGS="hackrf-devel rtl-sdr-devel pkgconf-pkg-config gcc" ;;
     pacman)
         LIB_HACKRF="hackrf"
         LIB_RTLSDR="rtl-sdr"
+        SOAPY_LIB="soapysdr"
+        SOAPY_MODULES="soapyhackrf soapyrtlsdr soapyairspy soapyplutosdr"
         DEV_PKGS="hackrf rtl-sdr pkgconf base-devel" ;;
     zypper)
         LIB_HACKRF="libhackrf0 hackrf libhackrf-devel"
         LIB_RTLSDR="librtlsdr0 rtl-sdr rtl-sdr-devel"
+        SOAPY_LIB="libSoapySDR0_8 SoapySDR SoapySDR-devel"
+        SOAPY_MODULES="SoapySDR-module-hackrf SoapySDR-module-rtlsdr"
         DEV_PKGS="libhackrf-devel rtl-sdr-devel pkg-config gcc" ;;
     apk)
         # Alpine splits further than anyone else: the library, the headers and
         # the udev rules are three packages.
         LIB_HACKRF="hackrf-libs hackrf-dev"
         LIB_RTLSDR="librtlsdr librtlsdr-dev"
+        SOAPY_LIB="soapysdr soapysdr-dev"
+        SOAPY_MODULES="soapysdr-hackrf soapysdr-rtlsdr"
         UDEV_PKGS="hackrf-udev librtlsdr-udev"
         DEV_PKGS="hackrf-dev librtlsdr-dev pkgconf build-base" ;;
     xbps-install)
         LIB_HACKRF="hackrf hackrf-devel"
         LIB_RTLSDR="rtl-sdr rtl-sdr-devel"
+        SOAPY_LIB="SoapySDR SoapySDR-devel"
+        SOAPY_MODULES="SoapyHackRF SoapyRTLSDR"
         DEV_PKGS="hackrf-devel rtl-sdr-devel pkg-config base-devel" ;;
     emerge)
         LIB_HACKRF="net-wireless/hackrf"
         LIB_RTLSDR="net-wireless/rtl-sdr"
+        SOAPY_LIB="net-wireless/soapysdr"
+        SOAPY_MODULES="net-wireless/soapyhackrf net-wireless/soapyrtlsdr"
         DEV_PKGS="net-wireless/hackrf net-wireless/rtl-sdr" ;;
     nix-env)
         LIB_HACKRF="hackrf"
         LIB_RTLSDR="rtl-sdr"
+        SOAPY_LIB="soapysdr-with-plugins soapysdr"
+        SOAPY_MODULES=""
         DEV_PKGS="hackrf rtl-sdr pkg-config" ;;
     "")
         LIB_HACKRF=""; LIB_RTLSDR=""; DEV_PKGS="" ;;
@@ -204,6 +237,32 @@ have_libs() {
         && ldconfig -p 2>/dev/null | grep -q 'librtlsdr\.so'
 }
 
+# SoapySDR is not a dependency. sdrtop opens it at runtime if it is there and
+# behaves exactly as it always did if it is not, so this asks rather than
+# requires.
+have_soapy() {
+    ldconfig -p 2>/dev/null | grep -q 'libSoapySDR\.so'
+}
+
+install_soapy() {
+    if have_soapy; then
+        say "libSoapySDR is already present"
+    elif [ -z "$PM" ] || [ -z "$SOAPY_LIB" ]; then
+        warn "no SoapySDR package list for this system; install libSoapySDR yourself"
+        return 0
+    else
+        step "Installing libSoapySDR with $PM"
+        install_first "$SOAPY_LIB" || warn "could not install libSoapySDR automatically"
+    fi
+    # The library alone finds nothing. Each radio needs its own driver module,
+    # and a machine with the library and no modules is the most confusing
+    # possible outcome: sdrtop loads SoapySDR successfully and then lists no
+    # devices.
+    for p in $SOAPY_MODULES; do
+        if pm_install "$p" >/dev/null 2>&1; then say "  $p"; fi
+    done
+}
+
 install_runtime_deps() {
     if have_libs; then
         say "libhackrf and librtlsdr are already present"
@@ -231,6 +290,7 @@ install_runtime_deps() {
 }
 
 install_runtime_deps
+[ "$WANT_SOAPY" -eq 1 ] && install_soapy
 [ "$RAW_DEPS_ONLY" -eq 1 ] && exit 0
 
 BINARY=""
@@ -451,6 +511,28 @@ if [ -n "$SRC_DIR" ]; then
     fi
 fi
 
+# ── SoapySDR, if it happens to be here ──────────────────────────────────────
+# Reported, not required, for the same reason the udev rules below are reported
+# rather than written: sdrtop works without it, and a machine that has it should
+# be told what that buys.
+step "SoapySDR"
+if have_soapy; then
+    say "libSoapySDR is present, so SoapySDR devices will be offered too."
+    if command -v SoapySDRUtil >/dev/null 2>&1; then
+        say "  'SoapySDRUtil --find' lists what it can see."
+    else
+        say "  Install the SoapySDR tools for 'SoapySDRUtil --find', which is the"
+        say "  first thing to check if a device does not appear."
+    fi
+    say "  That backend is beta: written from the API rather than from owning the"
+    say "  radios. Reports either way are genuinely welcome."
+else
+    say "libSoapySDR is not installed, and sdrtop does not need it."
+    say "  With it, sdrtop also reaches Airspy, SDRplay, PlutoSDR, LimeSDR,"
+    say "  bladeRF, USRP and anything else with a SoapySDR driver."
+    say "  Re-run this installer with --soapy to add it."
+fi
+
 # ── The radio has to be openable ────────────────────────────────────────────
 # Reported, never written. The libhackrf and rtl-sdr packages ship their own
 # udev rules, so a machine with the libraries has the permissions, and a second
@@ -496,4 +578,5 @@ case ":$PATH:" in
 esac
 
 say ""
-say "Run 'sdrtop', press Space to start receiving and ? for the keys."
+say "Run 'sdrtop'. It opens on its menu: Enter takes a layout, Space starts"
+say "receiving, Esc brings the menu back, q quits and saves."

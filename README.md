@@ -128,6 +128,8 @@ curl -fsSL https://raw.githubusercontent.com/mustang6139/sdrtop/main/packaging/i
 
 It works out your distribution, installs the libraries under whatever names that distribution gives them (apt, dnf, pacman, zypper, apk, xbps, emerge and nix are all handled), grabs the prebuilt binary if it can actually run on your box, and quietly falls back to compiling if it can't. The nice bit: it decides by **running the thing**, not by reading your distro's name off a list and hoping.
 
+Add `--soapy` if you want the SoapySDR library and driver modules too; without it the installer leaves them alone and just tells you at the end what you're missing out on.
+
 Piping a script into `sh` means running code you haven't read. You should read it: [`packaging/install.sh`](packaging/install.sh). I'd want to. It also takes `--prefix ~/.local` if root isn't on the menu, and [a handful of other flags](user_docs/getting-started.md#the-shorter-way-if-you-dont-want-to-think-about-it).
 
 ### Or cargo, the boring one that always works
