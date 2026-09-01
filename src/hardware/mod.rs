@@ -1,6 +1,7 @@
 pub mod hackrf;
 pub mod process;
 pub mod rtlsdr;
+pub mod soapy;
 pub mod sysfs;
 pub mod traits;
 
