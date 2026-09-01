@@ -73,6 +73,68 @@ times over, instead of one exhausted row.
 - The compact sweep left the micro cycle for the **Sweep** section, as `Sweep 2`,
   next to the full-size sweep it is a small version of.
 
+### Added, part two: SoapySDR
+
+**sdrtop speaks [SoapySDR](https://github.com/pothosware/SoapySDR).** One API,
+and behind it Airspy, SDRplay's RSP line, PlutoSDR, LimeSDR, bladeRF, USRP and
+SoapyRemote. If `libSoapySDR` is installed, those devices appear in the picker
+alongside a HackRF or an RTL-SDR.
+
+**This is a different kind of "supported" and the docs say so.** The backend was
+written from the SoapySDR headers rather than from owning the hardware, which
+suspends the project's standing rule that support lands only after physical
+testing. What replaces it:
+
+- **Nothing about a device is hardcoded.** Frequency range, sample rates, gain
+  range, whether there is an automatic gain mode, whether there is a baseband
+  filter, the native sample format and its full scale: all queried at open.
+- **What cannot be queried is refused, never guessed.** A capability sdrtop
+  cannot determine reads as unavailable.
+- **Failures name the driver, the call and the library's own error text**, in
+  `~/.config/sdrtop/sdrtop.log`.
+- **Verified on hardware:** loading, the ABI check, enumeration, opening,
+  capability derivation and streaming at full rate, all against a HackRF One
+  through `SoapyHackRF`. Everything else is unverified, and
+  [`user_docs/hardware.md`](user_docs/hardware.md) says which is which.
+
+- **`libSoapySDR` is opened at runtime, not linked.** There is no new build
+  dependency and no new runtime requirement: the same binary works with it and
+  without it, and a machine that has never heard of SoapySDR behaves exactly as
+  it did before. The ABI version is checked at load and anything that is not 0.8
+  is refused with a log line, because SoapySDR changed `setupStream`'s signature
+  between 0.7 and 0.8 and calling the wrong one is not a degraded experience.
+- **`--device soapy`**, and `--device soapy=driver=airspy` to name a driver or
+  any other device argument.
+- **A 16-bit sample path.** `CS16` joins `CS8` and `CU8`, so a 12 or 14-bit radio
+  streams at its own width instead of being truncated to 8 bits.
+
+### Changed, part two
+
+- **The ADC bench follows the device's real converter depth.** Peak counts, ENOB
+  and the SFDR ceiling were hardcoded to 8 bits, which was true of both radios
+  sdrtop could open and of nothing else. A 14-bit device now reads as 14-bit, and
+  both 8-bit radios read exactly as they did before.
+- **The USB link ceiling counts the device's own bytes per sample**, rather than
+  assuming two. A 16-bit stream at the same sample rate is twice the traffic.
+- **Panels decline what a device does not have.** No front end boost means the
+  `[A]` key is not offered and the rail, the header, the micro gain view and the
+  Keys pane leave the row out rather than showing an `OFF` that cannot be
+  changed. No modelled gain chain means the Friis noise figure, the MDS and the
+  modelled linearity card stay out rather than describing a different receiver.
+- **A device with no modelled chain is no longer called a "single tuner".** The
+  RF bench and the lab banner used one sentence for two situations: an RTL-SDR
+  really is one tuner, while a HackRF reached through SoapySDR has three gain
+  elements and a chain sdrtop simply has not been told the noise figures for. The
+  stages shown now come from the driver's own `listGains`.
+- **The header names the backend a device came from.** It used to work this out
+  from the gain model, which meant any device with one gain control introduced
+  itself as an RTL-SDR.
+- The same radio reached through both a native backend and SoapySDR is listed
+  **once**: the native path wins. `--device soapy` overrides that.
+- SoapySDR's `audio` driver is skipped by default. It presents sound cards as SDR
+  sources, which is real and useful with a soundcard receiver and confusing on a
+  laptop. `--device soapy=driver=audio` asks for it.
+
 ### Fixed
 
 - The `[0.4.2]` release had no compare link at the bottom of this file, and

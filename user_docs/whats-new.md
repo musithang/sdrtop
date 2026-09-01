@@ -18,14 +18,75 @@ in time.
 > Rail** cockpit, the redrawn **Lab IQ**, the rebuilt **Lab RF** bench, the **Lab
 > Timing** real-time bench and the **FM MPX · Demod** instrument with RDS, most
 > recently gone over reading by reading for anything that was not strictly true,
-> and now reachable through a menu instead of a row of numbers that had run out.
+> now reachable through a menu instead of a row of numbers that had run out, and
+> reaching a great deal more hardware than the two radios I actually own.
 > The ongoing work is polishing the UI, sharpening the radio math, and squashing
 > bugs. So if something looks off or behaves oddly, that's exactly what we're
 > hunting.
 
 ---
 
-## 🧭 Checkpoint 19: A front door *(you are here)*
+## 📡 Checkpoint 20: It talks to your radio now *(you are here)*
+
+I own two radios. sdrtop supported two radios. You can see the problem.
+
+Every week somebody said they'd try this if it spoke to their Airspy, and every
+week the answer was "sorry, I don't have one". Buying one of everything is not a
+plan, it is a wish, and the list was moving at exactly the speed of a hobby
+budget.
+
+So sdrtop speaks **SoapySDR** now. One API, and behind it Airspy, SDRplay's RSP
+line, PlutoSDR, LimeSDR, bladeRF, USRP, and SoapyRemote for a radio on a
+different machine entirely. If libSoapySDR is installed, your devices show up in
+the picker. If it isn't, nothing changes and the same binary keeps working.
+
+**Which means I broke my own rule**, the one that said hardware support only
+lands after physical testing. It was a good rule. It was also why the answer was
+always no.
+
+What I did instead of pretending I'd tested an Airspy:
+
+- **Nothing about your radio is hardcoded.** Frequency range, sample rates, gain
+  range, whether there's an AGC, whether there's a baseband filter, the sample
+  format and how many of its bits actually mean something: sdrtop asks the
+  driver. There is no device table in the source, because a table would be me
+  guessing about hardware I've never held.
+- **What can't be asked is refused, not invented.** A reading sdrtop can't
+  determine reads as unavailable. It never falls back to a plausible number,
+  because a plausible number is the worst thing a measurement tool can produce.
+- **Failures name names.** Driver, call, and the driver's own error text, in
+  `~/.config/sdrtop/sdrtop.log`. That's the difference between a useful issue and
+  a mystery.
+
+Verified end to end on a HackRF through `SoapyHackRF`: loading, enumeration,
+opening, capabilities, and streaming at full rate with no drops. Everything else
+is unverified, and [the hardware page](hardware.md#soapysdr-the-honest-version)
+says so in more detail than is probably comfortable. If you own one of these, an
+issue either way is worth a lot to me.
+
+Two things came along for the ride, both because Soapy devices forced the
+question:
+
+- **The ADC bench stopped assuming 8 bits.** It now follows the converter the
+  driver reports, so a 12 or 14-bit radio is described as one. The two 8-bit
+  radios read exactly as before, which took some doing and a lot of tests.
+- **Panels learned to say "not on this radio".** No front end boost? The key
+  isn't offered and the row is a dash instead of an `OFF` you can't change. No
+  known gain chain? The noise figure and the linearity card stay out rather than
+  showing you a different receiver's datasheet. That last one caught a real bug:
+  the RF bench used to call *any* unmodelled device a "single tuner", which a
+  HackRF with three gain elements very much is not.
+
+Two smaller things worth knowing. Your **sound card may appear as an SDR**, which
+is `soapysdr-module-audio` doing its job and genuinely useful with a soundcard
+receiver; sdrtop skips it unless you ask with `--device soapy=driver=audio`. And
+a HackRF or RTL-SDR with the Soapy module installed is listed **once**, not
+twice: the native backend wins, because it knows more about those two radios than
+the generic path does. `--device soapy` forces the other way if you want it.
+
+---
+
+## 🧭 Checkpoint 19: A front door
 
 sdrtop had fifteen layouts and ten digits to reach them with. The arithmetic had
 been losing for a while: `main` never got a key at all, `0` walked the micro views

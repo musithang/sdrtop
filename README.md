@@ -29,7 +29,7 @@ It's a hobby project built in my spare time, and honestly, I made it for *you* �
 > [!IMPORTANT]
 > **Project status: early development.**
 >
-> * **Hardware:** the **HackRF One** and the **RTL-SDR** (R820T / R828D / E4000) are both fully supported, in normal RX and in observer mode. RTL clones vary wildly, though, and nobody owns all of them, so if yours behaves oddly please [open an issue](../../issues).
+> * **Hardware:** the **HackRF One** and the **RTL-SDR** (R820T / R828D / E4000) are both fully supported, in normal RX and in observer mode. RTL clones vary wildly, though, and nobody owns all of them, so if yours behaves oddly please [open an issue](../../issues). Anything with a **SoapySDR** driver works too, written from the API rather than from owning the hardware, which is [a different kind of supported](user_docs/hardware.md#soapysdr-the-honest-version).
 > * **Software:** the **interactive TUI is feature-complete** (spectrum, waterfall, the IQ / RF / timing / signal / sweep lab presets, and the micro field views). The focus now is **polishing the UI, sharpening the radio math, and fixing bugs**, not piling on features. The most recent pass went through the Lab Signal bench reading by reading asking "is this number actually true?", and several were not.
 > * **Known issues:** plenty 😄 If something looks broken, it's either a bug or an undocumented feature. Flip a coin, then open an issue.
 
@@ -229,7 +229,7 @@ The layouts are grouped into four sections, and **each section has its own numbe
 | `Space`    | Start / stop RX                |
 | `↑` / `↓` | Primary gain: HackRF LNA ±8 dB, RTL-SDR tuner step |
 | `[` / `]`  | VGA gain ±2 dB (HackRF only)   |
-| `a`        | Toggle RF amplifier / tuner AGC |
+| `a`        | Toggle the front end boost (RF amp / tuner AGC), where the device has one |
 | `f`        | Enter frequency (MHz)          |
 | `s`        | Enter sample rate (HackRF 2–20 MHz · RTL-SDR 0.9–3.2 MHz) |
 | `r`        | Reset all settings to defaults |
@@ -245,7 +245,9 @@ The layouts are grouped into four sections, and **each section has its own numbe
 
 > Capitals work everywhere: `C` and `c` do the same thing, so you never have to think about whether Shift is down. The only place case matters is when you're *typing*, like a marker name.
 
-> **On an RTL-SDR** the gain keys adapt to the hardware: `↑`/`↓` step the tuner's single discrete gain table and `a` toggles tuner **AGC** (there's no separate VGA stage, so `[`/`]` sit out). The UI relabels itself accordingly, no muscle memory to relearn. With more than one radio plugged in, a picker appears at launch; pin one with `--device hackrf|rtlsdr`.
+> **On an RTL-SDR** the gain keys adapt to the hardware: `↑`/`↓` step the tuner's single discrete gain table and `a` toggles tuner **AGC** (there's no separate VGA stage, so `[`/`]` sit out). The UI relabels itself accordingly, no muscle memory to relearn. With more than one radio plugged in, a picker appears at launch; pin one with `--device hackrf|rtlsdr|soapy`.
+>
+> **Through SoapySDR** there is one overall gain on `↑`/`↓` across whatever range the driver reports, `[`/`]` sit out, and `a` exists only if the driver says there is an automatic gain mode. sdrtop asks; it does not assume.
 
 Full reference, including every focus mode: **[Keyboard shortcuts](user_docs/keys.md)**.
 
@@ -296,12 +298,15 @@ base = "nord"
 | -------------------------------------- | ----------------- | ----------------------------------------- |
 | HackRF One                             | ✅ Full support    | All diagnostics, gain stages, ADC metrics |
 | RTL-SDR (R820T, E4000, R828D)          | ✅ Full support    | Single tuner gain + AGC; no VGA, no BB filter, no Friis NF |
+| **Anything with a SoapySDR driver**    | 🧪 Supported, untested | Airspy, SDRplay, Pluto, Lime, bladeRF, USRP, SoapyRemote. Written from the API, not from owning them |
 | PortaPack H4M (Mayhem)                 | 🔧 In development | Telemetry panel via CDC/ACM serial        |
-| Airspy Mini / Airspy HF+               | 🔲 Planned        | Needs hardware                            |
 | HackRF Pro                             | 🔲 Planned        | Needs hardware                            |
-| LimeSDR / bladeRF / SDRplay / PlutoSDR | 🔲 Planned        | Needs hardware                            |
 
-> Hardware support is added only after physical testing on real devices. No guessing from datasheets. (Translation: the list moves at exactly the speed of my hobby budget.)
+> Native hardware support is added only after physical testing on real devices. No guessing from datasheets. (Translation: that list moves at exactly the speed of my hobby budget.)
+>
+> **SoapySDR is the deliberate exception**, because "I don't own one" was a bad answer to give every week. Nothing about your radio is hardcoded: sdrtop asks the driver for the frequency range, the gain range, whether there's an AGC, the sample format and how many of its bits mean anything. What it can't ask, it refuses rather than invents. What's verified: the loader, enumeration, opening, capabilities and streaming, all against a HackRF through `SoapyHackRF`. What isn't: literally every other radio. If you have one, [an issue](../../issues) either way is worth a lot. See [the honest version](user_docs/hardware.md#soapysdr-the-honest-version).
+>
+> libSoapySDR is opened at runtime, so it is **not** a build or run dependency: the same binary works with it and without it.
 
 ### The hardware wishlist
 

@@ -64,7 +64,7 @@ each layout, and the footer shows the numbers for the section you are in.
 | `f` | Type a new center frequency (in MHz) |
 | `s` | Type a new sample rate (HackRF 2–20 MHz · RTL-SDR 0.9–3.2 MHz) |
 | `r` | Reset all settings to defaults |
-| `a` | Toggle the RF amplifier (HackRF) / tuner AGC (RTL-SDR) |
+| `a` | Toggle the front end boost: RF amplifier (HackRF) / tuner AGC (RTL-SDR). Absent on a device that reports neither |
 | `w` | Pause or resume the waterfall |
 | `h` | Freeze the spectrum (hold the current frame behind the live one) |
 | a letter | Focus the panel whose title highlights it. `e` `l` `c` `i` `d` `t` `v` `x` `m` `n` `g` `b`, all listed [below](#focus-modes) |
@@ -108,6 +108,12 @@ VGA 30.
 On an **RTL-SDR** there's a single tuner gain that steps through a fixed table of
 values (the `↑`/`↓` keys walk it), and no VGA, so `[`/`]` simply do nothing.
 Instead of a VGA you have tuner **AGC**, toggled with `a`.
+
+On a device reached through [SoapySDR](hardware.md#soapysdr-the-honest-version)
+there is **one overall gain** on `↑`/`↓`, across whatever range the driver
+reports, and `[`/`]` sit out. Whether `a` exists at all depends on the driver: if
+it reports no automatic gain mode, the key is not offered and the panels leave
+the row out rather than showing you an `OFF` you cannot change.
 
 Either way: if the spectrum is maxed out (everything near 0 dBFS), turn it down.
 If it's all noise at the bottom, try turning it up.

@@ -47,6 +47,37 @@ sdrtop prints this and exits before the TUI starts.
 4. **If something else already has it**, sdrtop enters observer mode rather than
    failing. See [Advanced Features](advanced.md#observer-mode-when-another-app-owns-the-radio).
 
+### A SoapySDR device doesn't appear
+
+Everything else on this page assumes a HackRF or an RTL-SDR. If you are here for
+an Airspy, an RSP, a Pluto or anything else reached through
+[SoapySDR](hardware.md#soapysdr-the-honest-version), the ladder is different and
+it is short.
+
+1. **Ask SoapySDR first.**
+   ```sh
+   SoapySDRUtil --find
+   ```
+   If your radio is not in that list, sdrtop has no chance and the problem is not
+   in sdrtop. You are missing the driver module: `soapysdr-module-airspy`,
+   `soapysdr-module-sdrplay`, and so on, or `soapysdr-module-all` if you would
+   rather not think about it.
+2. **Check sdrtop loaded the library at all.** In
+   `~/.config/sdrtop/sdrtop.log`, a line starting `SoapySDR:` means it tried and
+   declined, and it says why. The likely one is an ABI mismatch: sdrtop is
+   written against SoapySDR **0.8**, and it refuses anything else rather than
+   calling into a library whose functions have a different shape. That refusal is
+   not caution, it is the difference between "no devices" and a crash.
+3. **Your sound card is not a bug.** If `SoapySDRUtil --find` lists
+   `driver = audio`, that is `soapysdr-module-audio` doing its job. sdrtop skips
+   it by default. If you actually want it, `--device soapy=driver=audio`.
+4. **Your HackRF or RTL-SDR appears once, not twice.** Deliberate: the native
+   backend wins. `--device soapy` forces the other path.
+5. **Still nothing?** Please [open an issue](../../../issues) with the full
+   `SoapySDRUtil --find` output and anything in the log starting `SoapySDR:`.
+   That backend was written from the API rather than from owning the hardware, so
+   your report is not a nuisance, it is the test.
+
 ### Permission denied
 
 Almost always missing udev rules. The easy fix is to install your distribution's
@@ -153,10 +184,15 @@ quirks. If yours behaves oddly in a way `rtl_test` doesn't explain,
    `d` needs Lab RF, and so on. If the panel isn't in the current preset, the key
    is inert.
 2. **VGA keys do nothing on an RTL-SDR.** There's no VGA stage. `[` and `]` are
-   HackRF-only; use `a` for the tuner AGC instead.
-3. **You might be in a text-entry mode.** After `f`, `s` or `m`, keystrokes are
+   HackRF-only; use `a` for the tuner AGC instead. The same goes for a device
+   reached through SoapySDR, which has one overall gain on `↑` / `↓`.
+3. **`a` does nothing on some SoapySDR devices.** sdrtop asks the driver whether
+   there is an automatic gain mode and only offers the key if there is. Where
+   there is not, the key says so in the log and the panels leave the row out
+   rather than showing you an `OFF` you cannot change.
+4. **You might be in a text-entry mode.** After `f`, `s` or `m`, keystrokes are
    letters rather than commands until you press `Enter` or `Esc`.
-4. **Known bug: `v` and `t` are unreliable in Lab Timing.** Two panels each claim
+5. **Known bug: `v` and `t` are unreliable in Lab Timing.** Two panels each claim
    these focus keys, and which one wins is decided randomly at startup. On some
    launches pressing `v` or `t` in the timing bench does nothing at all, even though the
    footer offers them. Restarting sdrtop reshuffles it. This is a bug and will be

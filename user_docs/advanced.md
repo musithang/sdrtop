@@ -25,7 +25,7 @@ duplicate, go straight to the source:
 sdrtop --frequency 92800000      # start tuned here (Hz)
 sdrtop --gain 30                 # primary gain: HackRF LNA / RTL-SDR tuner
 sdrtop --lna 24 --vga 30         # HackRF's two stages separately
-sdrtop --device rtlsdr           # pin a backend: hackrf | rtlsdr
+sdrtop --device rtlsdr           # pin a backend: hackrf | rtlsdr | soapy
 sdrtop --theme nord              # see themes.md
 sdrtop --config ~/my-config.toml # use a different config file
 ```
@@ -76,7 +76,8 @@ Select device:
 
 `j` / `k` or `↑` / `↓` to move, `Enter` to confirm.
 
-`--device hackrf` or `--device rtlsdr` skips the picker when your two radios are
+`--device hackrf`, `--device rtlsdr` or `--device soapy` skips the picker when
+your radios are
 different types. Pinning a *specific* serial isn't possible yet, so with two of
 the same kind you still get the list.
 
@@ -227,7 +228,9 @@ and `TERM=xterm-256color` fixes most of it.
 ## Known limitations
 
 - **One radio per instance.** See above; run several instances.
-- **No per-serial device pinning.** `--device` picks a type, not a unit.
+- **No per-serial device pinning** for the native backends. `--device` picks a
+  type, not a unit. Through SoapySDR you can be as specific as the driver lets
+  you: `--device soapy=driver=airspy,serial=644064DC3639AF31`.
 - **Sample rate ceilings are USB-bound.** USB 2.0 limits the HackRF to about
   20 Msps in practice, and an older hub or a long cable will lower that. If drops
   appear, the [timing bench](lab.md#timing-bench--lab-timing-lab-3) will tell you

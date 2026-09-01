@@ -27,7 +27,8 @@ The config is **device-agnostic**: the same file works for a HackRF or an
 RTL-SDR. Any value outside the active device's range is clamped into it at
 startup rather than rejected, so a config saved on a HackRF at 2.4 GHz and
 10 Msps still boots an RTL-SDR at a legal frequency and rate instead of failing.
-With both radios connected, pick one with `--device hackrf|rtlsdr`.
+With more than one radio connected, pick one with
+`--device hackrf|rtlsdr|soapy`.
 
 ---
 
@@ -43,7 +44,7 @@ frequency_hz = 92800000    # tuned center frequency, in Hz
 sample_rate  = 2000000.0   # samples/sec. HackRF 2–20 M · RTL-SDR 0.9–3.2 M
 lna_gain     = 24          # HackRF LNA (0–40 dB, step 8) / RTL-SDR tuner gain
 vga_gain     = 30          # HackRF VGA (0–62 dB, step 2). Ignored on RTL-SDR
-amp_enabled  = false       # HackRF RF amplifier / RTL-SDR tuner AGC
+amp_enabled  = false       # front end boost: HackRF RF amp / RTL-SDR tuner AGC
 recall_hz    = [0, 0, 0]   # Command Rail recall slots. 0 means empty
 
 [display]
