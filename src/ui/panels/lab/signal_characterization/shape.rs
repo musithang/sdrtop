@@ -76,6 +76,7 @@ pub(super) fn lines(
         sig.adc_rms_dbfs as f64,
         sig.adc_clip_events,
         n,
+        state.caps.sample_geometry.bits(),
     );
     out.push(metric(
         "Crest / PAPR",

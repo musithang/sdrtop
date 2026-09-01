@@ -83,7 +83,7 @@ pub(super) fn loading(
         "peak",
         format!("{:.0} dBFS", load.peak_dbfs),
         sev_col,
-        format!("{}/127 cts", load.peak_counts),
+        format!("{}/{} cts", load.peak_counts, load.full_scale_counts),
         theme.value,
     ));
     out.push(r(
@@ -95,7 +95,7 @@ pub(super) fn loading(
     ));
     out.push(r(
         "bits",
-        format!("{:.1} / 8 eff", load.enob),
+        format!("{:.1} / {} eff", load.enob, load.bits),
         theme.value_hi,
         "ENOB".to_string(),
         dim,
@@ -120,11 +120,13 @@ pub(super) fn loading(
 }
 
 /// `LINEARITY` - modeled, not measured: P1dB headroom, IIP3 / IMD3 and SFDR
-/// against the 8-bit limit. Followed by the panel's teaching caption.
+/// against the converter's own quantisation limit. Followed by the panel's
+/// teaching caption.
 pub(super) fn linearity_card(
     out: &mut Vec<Line<'static>>,
     lna_g: u32,
     vga_g: u32,
+    bits: u8,
     iw: usize,
     theme: &crate::Theme,
 ) {
@@ -144,7 +146,7 @@ pub(super) fn linearity_card(
         )
     };
 
-    let lin = linearity(lna_g, vga_g);
+    let lin = linearity(lna_g, vga_g, bits);
     out.push(section("Linearity", "modeled", iw, theme));
     out.push(r(
         "P1dB",
@@ -164,7 +166,7 @@ pub(super) fn linearity_card(
         "SFDR",
         format!("{:.0} dB", lin.sfdr_db),
         theme.value_hi,
-        format!("8-bit \u{2264}{:.0}", lin.sfdr_limit_db),
+        format!("{bits}-bit \u{2264}{:.0}", lin.sfdr_limit_db),
         dim,
     ));
 

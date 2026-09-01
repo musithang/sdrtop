@@ -90,7 +90,8 @@ impl Panel for AdcLoadingPanel {
         let (lna_g, vga_g) = fz
             .map(|f| (f.lna_gain, f.vga_gain))
             .unwrap_or((state.radio.lna_gain, state.radio.vga_gain));
-        let load = adc_loading(peak, rms, clip, n);
+        let bits = state.caps.sample_geometry.bits();
+        let load = adc_loading(peak, rms, clip, n, bits);
         let (verdict, sev) = staging_verdict(peak);
         let sev_col = severity_color(sev, theme);
 
@@ -119,7 +120,7 @@ impl Panel for AdcLoadingPanel {
         lines.push(Line::raw(""));
         readouts::loading(&mut lines, &load, verdict, sev_col, iw, theme);
         lines.push(Line::raw(""));
-        readouts::linearity_card(&mut lines, lna_g, vga_g, iw, theme);
+        readouts::linearity_card(&mut lines, lna_g, vga_g, bits, iw, theme);
 
         // Self-adjusting density: collapse spacers when short, grow them to fill when
         // tall (chrome::fit_spacers), so the pane breathes the same at every height -

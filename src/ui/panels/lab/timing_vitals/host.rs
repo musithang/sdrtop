@@ -66,7 +66,10 @@ pub(super) fn usb_lines(state: &SdrMetrics, r: &Rows) -> Vec<Line<'static>> {
     ]));
 
     let mbps = state.timing.throughput_mean_mbps;
-    let ceiling = link_ceiling_mbps(state.caps.sample_rate_max_hz);
+    let ceiling = link_ceiling_mbps(
+        state.caps.sample_rate_max_hz,
+        state.caps.sample_geometry.bytes_per_pair(),
+    );
     let util = if ceiling > 0.0 {
         (mbps / ceiling).clamp(0.0, 1.0)
     } else {

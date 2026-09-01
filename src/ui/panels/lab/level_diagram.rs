@@ -147,9 +147,14 @@ impl Panel for LevelDiagramPanel {
                 row_label[r] = format!("{:>w$}", d as i32, w = gutter);
             }
         }
-        // Reference lines: ADC clip @ 0 dBm, ADC 8-bit floor @ −50 dBm.
+        // Reference lines: ADC clip at 0 dBm, and the converter's quantisation
+        // floor below it. That floor was drawn at a flat -50 dBm, which is the
+        // 8-bit answer and about 36 dB too high for a 14-bit radio.
         let clip_row = dbm_row(0.0, chart_h);
-        let floor_row = dbm_row(-50.0, chart_h);
+        let floor_row = dbm_row(
+            -crate::ui::rf_calc::quantisation_snr_db(state.caps.sample_geometry.bits()),
+            chart_h,
+        );
 
         // Per-column interpolated signal/noise rows.
         let node_at = |col: usize| (col as f64 / (chart_w - 1) as f64) * (n - 1) as f64;

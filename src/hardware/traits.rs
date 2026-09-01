@@ -35,6 +35,32 @@ pub struct SampleGeometry {
     pub full_scale: f32,
 }
 
+impl SampleGeometry {
+    /// Wire bytes per I/Q pair.
+    ///
+    /// Two for every 8-bit format, one byte each for I and Q. Anything wider
+    /// costs more, and the USB link ceiling and the block-to-sample arithmetic
+    /// both need to know: a 16-bit stream at the same sample rate is twice the
+    /// traffic, and calling it the same would report a device as comfortably
+    /// inside a budget it is actually at the edge of.
+    pub fn bytes_per_pair(&self) -> usize {
+        match self.format {
+            SampleFormat::Int8 | SampleFormat::Uint8 => 2,
+        }
+    }
+
+    /// Significant bits in the converter.
+    ///
+    /// **Derived, not stored.** A converter's depth and its full scale are one
+    /// fact written two ways, and two fields would eventually disagree. This is
+    /// also the honest answer for a 12-bit ADC delivering 16-bit containers: a
+    /// driver reporting a full scale of 2048 is telling us it has 12 bits, and
+    /// the ADC bench would be wrong to call it 16.
+    pub fn bits(&self) -> u8 {
+        (self.full_scale.max(1.0).log2().round() as i32 + 1).clamp(1, 32) as u8
+    }
+}
+
 /// The gain "shape" a device exposes - drives UI rendering and key bindings.
 #[derive(Clone, Debug)]
 pub enum GainModel {
@@ -202,6 +228,37 @@ pub trait SdrDevice: Send + Sync {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The depth follows the full scale, which is the number a SoapySDR driver
+    /// actually reports. The 2048 case is the one that matters: a 12-bit ADC
+    /// handing over 16-bit containers is 12 bits, and saying 16 would put a
+    /// wrong ENOB on the RF bench for every such radio.
+    #[test]
+    fn bit_depth_follows_full_scale() {
+        let g = |fs| SampleGeometry {
+            format: SampleFormat::Int8,
+            full_scale: fs,
+        };
+        assert_eq!(g(128.0).bits(), 8, "both shipped radios");
+        assert_eq!(g(2048.0).bits(), 12, "a 12-bit ADC in a 16-bit container");
+        assert_eq!(g(8192.0).bits(), 14);
+        assert_eq!(g(32768.0).bits(), 16);
+    }
+
+    /// A driver is free to report nonsense. It must not produce a depth of zero,
+    /// which would divide the ADC bench by zero, or a negative one, which would
+    /// panic on the cast.
+    #[test]
+    fn a_nonsense_full_scale_still_gives_a_usable_depth() {
+        for fs in [0.0, -1.0, 0.5, f32::NAN] {
+            let b = SampleGeometry {
+                format: SampleFormat::Int8,
+                full_scale: fs,
+            }
+            .bits();
+            assert!((1..=32).contains(&b), "full_scale {fs} gave {b} bits");
+        }
+    }
 
     #[test]
     fn hackrf_clamp_snaps_to_steps_and_caps() {

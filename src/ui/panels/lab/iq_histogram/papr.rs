@@ -7,10 +7,16 @@ use super::zones::BINS;
 
 /// Estimated Peak-to-Average Power Ratio from the IQ amplitude histogram.
 ///
-/// Bin mapping (from rx callback): bin i = max(|I|,|Q|) in range [4i, 4(i+1)) / 128.
+/// Bin mapping (from the rx callback): the 0..full-scale amplitude range is cut
+/// into [`BINS`] equal buckets, so bin `i` normalised runs `[i/32, (i+1)/32)`.
 /// Peak amplitude = top of the highest occupied bin.
-/// RMS amplitude  = sqrt( Σ hist[i]·((4i+2)/128)² / total ).
+/// RMS amplitude  = sqrt( Σ hist[i]·((i+0.5)/32)² / total ).
 /// Returns None when no samples or when all samples are in bin 0 (zero RMS).
+///
+/// **The device's full scale cancels out.** It used to appear here as a literal
+/// 128 alongside a literal bin width of 4, which was two device facts hiding in
+/// a ratio that does not depend on either: a peak-to-average *ratio* is the same
+/// number on an 8-bit radio and a 16-bit one. So this needs no device at all.
 pub(super) fn estimate_papr_db(hist: &[u64; BINS], total: u64) -> Option<f64> {
     if total == 0 {
         return None;
@@ -22,13 +28,13 @@ pub(super) fn estimate_papr_db(hist: &[u64; BINS], total: u64) -> Option<f64> {
         .rev()
         .find(|(_, &c)| c > 0)
         .map(|(i, _)| i)?;
-    let peak_amp = (peak_bin as f64 * 4.0 + 4.0) / 128.0;
+    let peak_amp = (peak_bin + 1) as f64 / BINS as f64;
 
     let mean_sq: f64 = hist
         .iter()
         .enumerate()
         .map(|(i, &c)| {
-            let amp = (4 * i + 2) as f64 / 128.0; // bin centre, normalised
+            let amp = (i as f64 + 0.5) / BINS as f64; // bin centre, normalised
             c as f64 * amp * amp
         })
         .sum::<f64>()
