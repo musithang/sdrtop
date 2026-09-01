@@ -271,6 +271,17 @@ pub struct DeviceCapabilities {
     pub friis_applicable: bool,
 }
 
+/// The software layer between sdrtop and a radio that has no firmware of its
+/// own, for the header's firmware field.
+///
+/// `label` is padded to ten columns by the backend that sets it, because the
+/// header's top band gap is computed from a fixed field width.
+#[derive(Clone, Debug)]
+pub struct SoftwareStack {
+    pub label: &'static str,
+    pub value: std::sync::Arc<str>,
+}
+
 /// Identity / metadata shown in the header, telemetry, and RF-chain panels.
 /// Fields a given device can't report are `None`.
 #[derive(Clone, Debug, Default)]
@@ -281,6 +292,13 @@ pub struct DeviceInfo {
     pub board_rev: Option<u8>,
     pub usb_api_version: Option<u16>,
     pub tuner_name: Option<String>,
+    /// What to show where a HackRF shows its firmware version.
+    ///
+    /// `None` on a device with firmware of its own. The header used to work this
+    /// out by asking whether the gain model was single-knob, which was a fine
+    /// proxy while there were two backends and started calling a SoapySDR device
+    /// an RTL-SDR the moment there were three. A backend says what it is.
+    pub stack: Option<SoftwareStack>,
 }
 
 /// Shared RX plumbing handed to a backend's streaming start. The per-sample

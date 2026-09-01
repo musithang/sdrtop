@@ -131,14 +131,19 @@ fn top_band_gap(
     board_name_len: usize,
     badge_len: usize,
     fw_value_len: usize,
-    amp_val_len: usize,
+    amp_val_len: Option<usize>,
     usb_val_len: usize,
     inner_width: u16,
 ) -> usize {
     // left side: " " + " DeviceName " + "  " + " BADGE " + "  " + "hackrf fw " + fw_val
     let left = 1 + (2 + board_name_len) + 2 + badge_len + 2 + 10 + fw_value_len;
     // right side: "AMP "(4) + amp_val + "  ·  "(5) + "USB "(4) + usb_val + "  "(2)
-    let right = 4 + amp_val_len + 5 + 4 + usb_val_len + 2;
+    //
+    // `None` is a device with no front end boost, which draws neither the label
+    // nor the value. Passing 0 instead would leave a four column hole at the
+    // right edge, because the label is part of the field.
+    let boost = amp_val_len.map_or(0, |n| 4 + n);
+    let right = boost + 5 + 4 + usb_val_len + 2;
     (inner_width as usize).saturating_sub(left + right)
 }
 
@@ -173,17 +178,19 @@ fn top_band_line(state: &SdrMetrics, theme: &crate::Theme, inner_width: u16) -> 
     // Mayhem nightly: "n_XXXXXX"; Mayhem release: "vX.Y.Z" → label as "mayhem fw "
     // Standard HackRF firmware ("2024.02.1", "git-...") → label as "hackrf fw "
     // Both labels are exactly 10 chars so top_band_gap stays valid.
-    // Firmware field. RTL-SDR has no on-device firmware (it's host-driven by
-    // librtlsdr), so it gets a neutral label instead of "hackrf fw" - including
-    // in observer mode. All labels are exactly 10 columns so top_band_gap stays
-    // valid.
-    let (fw_val, fw_label): (std::sync::Arc<str>, &str) = if state.caps.gain.is_single() {
-        let v = if state.observer.active {
-            "—"
+    // Firmware field. A device with no firmware of its own names its software
+    // stack instead, and **the backend says which** rather than the header
+    // working it out: this used to ask whether the gain model was single-knob,
+    // which meant a SoapySDR device with one gain control introduced itself as
+    // an RTL-SDR the moment there was a third backend. All labels are exactly 10
+    // columns so top_band_gap stays valid.
+    let (fw_val, fw_label): (std::sync::Arc<str>, &str) = if let Some(stack) = &state.system.stack {
+        let v: std::sync::Arc<str> = if state.observer.active {
+            std::sync::Arc::from("—")
         } else {
-            "librtlsdr"
+            std::sync::Arc::clone(&stack.value)
         };
-        (std::sync::Arc::from(v), "rtl-sdr   ")
+        (v, stack.label)
     } else if state.observer.active {
         (std::sync::Arc::from("—"), "hackrf fw ")
     } else {
@@ -233,7 +240,7 @@ fn top_band_line(state: &SdrMetrics, theme: &crate::Theme, inner_width: u16) -> 
         board_len,
         badge_len,
         fw_len,
-        amp_val.chars().count(),
+        state.caps.gain.has_boost().then(|| amp_val.chars().count()),
         usb_val.chars().count(),
         inner_width,
     );
@@ -261,11 +268,26 @@ fn top_band_line(state: &SdrMetrics, theme: &crate::Theme, inner_width: u16) -> 
         leader(gap, theme.border_dim),
         // HackRF's RF amp or RTL-SDR's tuner AGC - both 3-char labels, so the
         // "{label} " field stays 4 columns and top_band_gap remains valid.
+        //
+        // A device with neither gets neither, the same as the rail and the
+        // micro gain view: an `AGC OFF` for a stage that is not in the radio
+        // sends the reader looking for the key that turns it on.
         Span::styled(
-            format!("{} ", state.caps.gain.boost_label()),
+            if state.caps.gain.has_boost() {
+                format!("{} ", state.caps.gain.boost_label())
+            } else {
+                String::new()
+            },
             Style::default().fg(theme.label),
         ),
-        Span::styled(amp_val, Style::default().fg(amp_color)),
+        Span::styled(
+            if state.caps.gain.has_boost() {
+                amp_val
+            } else {
+                String::new()
+            },
+            Style::default().fg(amp_color),
+        ),
         Span::raw("  ·  "),
         Span::styled("USB ", Style::default().fg(theme.label)),
         Span::styled(usb_val, Style::default().fg(usb_color)),
@@ -765,19 +787,29 @@ mod tests {
     fn top_band_gap_rx_state() {
         // HackRF One (len=10), badge " ● RX " (len=6), fw "2024.02.1" (len=9), inner=78
         // amp_val "ON " (3), usb_val "10.0 MB/s" (9)
-        assert_eq!(top_band_gap(10, 6, 9, 3, 9, 78), 9);
+        assert_eq!(top_band_gap(10, 6, 9, Some(3), 9, 78), 9);
     }
 
     #[test]
     fn top_band_gap_idle_state() {
         // badge " ○ IDLE " is 2 chars wider than RX → gap shrinks by 2
-        assert_eq!(top_band_gap(10, 8, 9, 3, 9, 78), 7);
+        assert_eq!(top_band_gap(10, 8, 9, Some(3), 9, 78), 7);
     }
 
     #[test]
     fn top_band_gap_observer_state() {
         // badge " ◈ OBSERVER " (len=12), fw "—" (len=1)
-        assert_eq!(top_band_gap(10, 12, 1, 3, 9, 78), 11);
+        assert_eq!(top_band_gap(10, 12, 1, Some(3), 9, 78), 11);
+    }
+
+    /// A device with no boost draws neither the label nor the value, so the gap
+    /// has to grow by the whole four column field. Passing zero instead leaves a
+    /// hole at the right edge, which is what the live run showed.
+    #[test]
+    fn the_gap_absorbs_a_boost_field_that_is_not_drawn() {
+        let with = top_band_gap(10, 6, 9, Some(3), 9, 78);
+        let without = top_band_gap(10, 6, 9, None, 9, 78);
+        assert_eq!(without, with + 4 + 3, "the label and its value");
     }
 
     #[test]
@@ -860,5 +892,53 @@ mod tests {
                 assert_eq!(line.spans.last().unwrap().content.as_ref(), "┤");
             }
         }
+    }
+    /// The header names the backend, and it names the right one.
+    ///
+    /// It used to work this out from the gain model: a device with one gain
+    /// control was an RTL-SDR. That held while there were two backends and broke
+    /// the moment a HackRF reached through SoapySDR reported a single overall
+    /// gain, at which point the header introduced it as `rtl-sdr librtlsdr`.
+    #[test]
+    fn the_header_names_the_backend_the_device_came_from() {
+        let soapy = crate::state::fixture::draw(
+            HeaderPanel,
+            120,
+            8,
+            &crate::state::SdrMetrics::fixture().streaming().soapy(),
+        )
+        .join("\n");
+        assert!(soapy.contains("soapysdr"), "{soapy}");
+        assert!(!soapy.contains("librtlsdr"), "not an RTL-SDR:\n{soapy}");
+
+        // And a HackRF still shows its own firmware.
+        let hackrf = crate::state::fixture::draw(
+            HeaderPanel,
+            120,
+            8,
+            &crate::state::SdrMetrics::fixture().streaming(),
+        )
+        .join("\n");
+        assert!(!hackrf.contains("soapysdr"), "{hackrf}");
+    }
+
+    /// And it does not offer a front end boost the radio does not have. This is
+    /// the fourth surface that had to learn the same thing, after the rail, the
+    /// micro gain view and the Keys pane.
+    #[test]
+    fn the_header_omits_a_boost_the_device_does_not_have() {
+        let soapy = crate::state::fixture::draw(
+            HeaderPanel,
+            120,
+            8,
+            &crate::state::SdrMetrics::fixture().streaming().soapy(),
+        )
+        .join("\n");
+        assert!(!soapy.contains("AGC"), "{soapy}");
+        assert!(!soapy.contains("AMP"), "{soapy}");
+        assert!(
+            soapy.contains("USB"),
+            "the rest of the band survives:\n{soapy}"
+        );
     }
 }

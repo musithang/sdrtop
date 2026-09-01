@@ -7,6 +7,10 @@ pub struct SystemState {
     #[allow(dead_code)]
     pub serial: Arc<str>,
     pub fw_version: Arc<str>,
+    /// The software layer between sdrtop and a radio with no firmware of its
+    /// own, shown where a HackRF shows its firmware version. `None` on a device
+    /// that has one. See [`crate::hardware::SoftwareStack`].
+    pub stack: Option<crate::hardware::SoftwareStack>,
     // Device identity captured at launch and logged once; kept on the struct for
     // completeness like `serial`, though no panel currently renders them.
     #[allow(dead_code)]

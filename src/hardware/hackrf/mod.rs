@@ -239,6 +239,8 @@ impl HackRfDevice {
                 board_rev: read_board_rev(ptr),
                 usb_api_version: read_usb_api(ptr),
                 tuner_name: None,
+                // A HackRF reports its own firmware, so the header shows that.
+                stack: None,
             };
 
             Ok(Self {
@@ -282,6 +284,7 @@ pub fn list() -> Vec<DeviceListing> {
                     index: i,
                     label: format!("HackRF One · {}", serial),
                     args: None,
+                    serial: Some(serial.clone()),
                 });
             }
         }

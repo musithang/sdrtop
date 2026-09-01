@@ -251,6 +251,13 @@ impl RtlDevice {
             board_rev: None,
             usb_api_version: None,
             tuner_name: tuner_name(tuner),
+            // No on-device firmware: an RTL-SDR is driven entirely from the
+            // host, so the header names the library instead of a version the
+            // dongle does not have.
+            stack: Some(crate::hardware::SoftwareStack {
+                label: "rtl-sdr   ",
+                value: std::sync::Arc::from("librtlsdr"),
+            }),
         };
 
         Ok(Self {
@@ -282,6 +289,7 @@ pub fn list() -> Vec<DeviceListing> {
             index: i as usize,
             label: format!("RTL-SDR · {} · {}", name, shown),
             args: None,
+            serial: device_serial(i),
         });
     }
     out

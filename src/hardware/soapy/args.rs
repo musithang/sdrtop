@@ -82,18 +82,41 @@ pub fn open_markup(args: &[(String, String)], index: usize) -> String {
     parts.join(", ")
 }
 
-/// A serial in a form two backends can be compared on.
+/// One value out of an argument markup string, `driver=hackrf, serial=abc`.
 ///
-/// libhackrf and SoapyHackRF happen to agree byte for byte on this machine
-/// (`0000000000000000955c64dc2a3d89c3` from both), but agreeing by luck is not a
-/// rule. Lowercased and stripped of leading zeros, so a driver that trims the
-/// padding still matches one that does not.
+/// The inverse of [`open_markup`], and the reason it exists is that the markup
+/// is the only thing that survives from enumeration all the way to open: keeping
+/// a second copy of the driver key or the serial beside it is how the two end up
+/// disagreeing.
+pub fn value_of<'a>(markup: &'a str, key: &str) -> Option<&'a str> {
+    markup
+        .split(',')
+        .filter_map(|part| part.split_once('='))
+        .find(|(k, _)| k.trim() == key)
+        .map(|(_, v)| v.trim())
+        .filter(|v| !v.is_empty())
+}
+
+/// Whether a device's arguments satisfy every `key=value` in a filter.
 ///
-/// All-zero serials are common on unprogrammed hardware and collapse to `None`
-/// rather than to an empty string that would match every other such device.
-pub fn comparable_serial(args: &[(String, String)]) -> Option<String> {
-    let raw = get(args, "serial")?;
-    let trimmed = raw.trim_start_matches('0').to_ascii_lowercase();
+/// Used by `--device soapy=driver=airspy`. A filter naming a key the device does
+/// not have matches nothing, which is the answer a person typing a filter wants:
+/// silence, not everything.
+pub fn matches_filter(markup: &str, filter: &str) -> bool {
+    filter
+        .split(',')
+        .filter_map(|part| part.split_once('='))
+        .all(|(k, v)| value_of(markup, k.trim()) == Some(v.trim()))
+}
+
+/// Normalise a serial so two backends' spellings of the same radio compare
+/// equal.
+///
+/// Lowercased and stripped of leading zeros. All-zero collapses to `None`,
+/// because an unprogrammed serial is not an identity and matching on it would
+/// make every such device look like every other one.
+pub fn normalise_serial(raw: &str) -> Option<String> {
+    let trimmed = raw.trim().trim_start_matches('0').to_ascii_lowercase();
     (!trimmed.is_empty()).then_some(trimmed)
 }
 
@@ -203,30 +226,65 @@ mod tests {
         assert_eq!(open_markup(&nothing, 2), "driver=x, device_id=2");
     }
 
-    /// The deduplication in S11 compares this against the native backend's
-    /// serial. On this machine libhackrf and SoapyHackRF agree byte for byte,
-    /// but the normalisation is what makes that a rule rather than luck.
+    /// The deduplication compares this against the native backend's serial. On
+    /// this machine libhackrf and SoapyHackRF agree byte for byte, but agreeing
+    /// by luck is not a rule.
     #[test]
     fn serials_compare_after_normalising_padding_and_case() {
         assert_eq!(
-            comparable_serial(&hackrf()).unwrap(),
+            normalise_serial("0000000000000000955c64dc2a3d89c3").unwrap(),
             "955c64dc2a3d89c3",
             "leading zeros are padding, not identity"
         );
-        let upper = kv(&[("serial", "955C64DC2A3D89C3")]);
-        assert_eq!(comparable_serial(&upper), comparable_serial(&hackrf()));
+        assert_eq!(
+            normalise_serial("955C64DC2A3D89C3"),
+            normalise_serial("0000000000000000955c64dc2a3d89c3"),
+            "and the two backends may not agree on case"
+        );
     }
 
     /// The case that would otherwise make every unprogrammed device look like
     /// every other one, and quietly hide all but the first.
     #[test]
-    fn an_all_zero_or_missing_serial_is_no_serial() {
-        assert_eq!(comparable_serial(&built_in_audio()), None, "no serial key");
-        let zeros = kv(&[("serial", "00000000")]);
+    fn an_all_zero_or_blank_serial_is_no_serial() {
+        assert_eq!(normalise_serial("00000000"), None, "all padding");
+        assert_eq!(normalise_serial("   "), None);
+        assert_eq!(normalise_serial(""), None);
+    }
+
+    /// Reading one value back out of the markup, which is how the driver key and
+    /// the serial are recovered without keeping a second copy of either.
+    #[test]
+    fn a_value_can_be_read_back_out_of_the_markup() {
+        let m = open_markup(&hackrf(), 0);
+        assert_eq!(value_of(&m, "driver"), Some("hackrf"));
         assert_eq!(
-            comparable_serial(&zeros),
-            None,
-            "all padding is not an identity"
+            value_of(&m, "serial"),
+            Some("0000000000000000955c64dc2a3d89c3")
         );
+        assert_eq!(value_of(&m, "label"), None, "not in the open markup");
+        assert_eq!(value_of("", "driver"), None);
+    }
+
+    /// The `--device soapy=...` filter. A filter naming a key the device does
+    /// not have matches nothing, because silence is what someone typing a filter
+    /// expects when it does not apply, not everything.
+    #[test]
+    fn a_filter_must_match_every_pair_it_names() {
+        let m = open_markup(&hackrf(), 0);
+        assert!(matches_filter(&m, "driver=hackrf"));
+        assert!(matches_filter(
+            &m,
+            "driver=hackrf, serial=0000000000000000955c64dc2a3d89c3"
+        ));
+        assert!(!matches_filter(&m, "driver=airspy"));
+        assert!(!matches_filter(&m, "driver=hackrf, serial=nope"));
+        assert!(
+            !matches_filter(&m, "label=anything"),
+            "a key the device does not carry cannot match"
+        );
+        // The audio device is reachable by naming it, which is the whole point.
+        let a = open_markup(&built_in_audio(), 0);
+        assert!(matches_filter(&a, "driver=audio"));
     }
 }

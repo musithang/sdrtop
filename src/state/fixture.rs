@@ -79,6 +79,8 @@ impl SdrMetrics {
             },
             waterfall: WaterfallState::new(512, crate::palette::WaterfallPalette::default()),
             system: SystemState {
+                // The HackRF fixture reports its own firmware, so no stack row.
+                stack: None,
                 board_name: Arc::from("HackRF One"),
                 serial: Arc::from("0000000000000000"),
                 fw_version: Arc::from("2024.02.1"),
@@ -293,6 +295,10 @@ impl SdrMetrics {
         self.radio.lna_gain = 40;
         self.radio.vga_gain = 0;
         self.radio.amp_enabled = false;
+        self.system.stack = Some(crate::hardware::SoftwareStack {
+            label: "soapysdr  ",
+            value: Arc::from("hackrf"),
+        });
         self.caps = Arc::new(caps);
         self
     }

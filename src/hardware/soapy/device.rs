@@ -14,7 +14,7 @@ use std::sync::Arc;
 use super::api::{self, SoapyApi, SoapySDRDevice};
 use super::{args, caps};
 use crate::hardware::{
-    DeviceCapabilities, DeviceInfo, DeviceKind, DeviceListing, GainModel, RxContext, SdrDevice,
+    DeviceCapabilities, DeviceInfo, DeviceKind, DeviceListing, RxContext, SdrDevice,
 };
 
 pub struct SoapyDevice {
@@ -210,22 +210,28 @@ unsafe fn describe(api: &SoapyApi, dev: *mut SoapySDRDevice, args: &str) -> Devi
         // Soapy has no notion of a tuner chip, so the driver key is the closest
         // true answer. Better than leaving the field blank and better than
         // inventing a chip name.
-        tuner_name: (!driver.is_empty()).then_some(driver),
+        tuner_name: (!driver.is_empty()).then_some(driver.clone()),
+        // Whatever firmware is in there is the driver's business, not ours. The
+        // header names the path instead: which library, and which driver inside
+        // it, because that is what a bug report needs.
+        stack: Some(crate::hardware::SoftwareStack {
+            label: "soapysdr  ",
+            value: std::sync::Arc::from(
+                if driver.is_empty() {
+                    "unknown".to_string()
+                } else {
+                    driver.to_ascii_lowercase()
+                }
+                .as_str(),
+            ),
+        }),
     }
 }
 
 /// Pull the serial back out of an argument string like
 /// `driver=hackrf, serial=0000...c3`.
-///
-/// Parsed rather than carried alongside because the argument string is the one
-/// thing that definitely survives from enumeration to open. Two fields holding
-/// the same fact is how they end up disagreeing.
 fn serial_from(args: &str) -> Option<String> {
-    args.split(',')
-        .filter_map(|part| part.split_once('='))
-        .find(|(k, _)| k.trim() == "serial")
-        .map(|(_, v)| v.trim().to_string())
-        .filter(|v| !v.is_empty())
+    args::value_of(args, "serial").map(str::to_string)
 }
 
 /// Every device SoapySDR can see, as listings.
@@ -244,23 +250,16 @@ pub fn list() -> Vec<DeviceListing> {
             kind: DeviceKind::Soapy,
             index: i,
             label: args::label(&kwargs, i),
+            serial: args::get(&kwargs, "serial").map(str::to_string),
             args: Some(args::open_markup(&kwargs, i)),
         })
         .collect()
 }
 
-/// The gain a device will actually be set to for a requested value.
-///
-/// Split out because it is the one piece of arithmetic here worth checking
-/// without a device: a Soapy gain range can be `0..116` on a HackRF and `0..0`
-/// on a sound card, and both have to come out sane.
-pub fn effective_gain_db(model: &GainModel, requested: u32) -> u32 {
-    model.clamp_gains(requested, 0).0
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::hardware::GainModel;
 
     #[test]
     fn the_serial_comes_back_out_of_the_argument_string() {
@@ -304,12 +303,12 @@ mod tests {
             agc: false,
         };
         // SoapyHackRF: 0 to 116 dB.
-        assert_eq!(effective_gain_db(&soapy(0, 116), 40), 40);
-        assert_eq!(effective_gain_db(&soapy(0, 116), 200), 116);
+        assert_eq!(soapy(0, 116).clamp_gains(40, 0).0, 40);
+        assert_eq!(soapy(0, 116).clamp_gains(200, 0).0, 116);
         // The sound card: no gain control at all.
-        assert_eq!(effective_gain_db(&soapy(0, 0), 30), 0);
+        assert_eq!(soapy(0, 0).clamp_gains(30, 0).0, 0);
         // A driver reporting its range backwards must not produce a clamp that
         // panics on an inverted interval.
-        assert_eq!(effective_gain_db(&soapy(50, 10), 30), 50);
+        assert_eq!(soapy(50, 10).clamp_gains(30, 0).0, 50);
     }
 }

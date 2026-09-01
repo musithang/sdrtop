@@ -46,6 +46,7 @@ pub(super) struct Identity {
     pub board_name: String,
     pub serial: String,
     pub fw_version: String,
+    pub stack: Option<crate::hardware::SoftwareStack>,
     pub board_rev: u8,
     pub usb_api_version: u16,
 }
@@ -89,6 +90,7 @@ impl Boot {
                     .fw_version
                     .clone()
                     .unwrap_or_else(|| "unknown".to_string()),
+                stack: info.stack.clone(),
                 board_rev: info.board_rev.unwrap_or(0xFE),
                 usb_api_version: info.usb_api_version.unwrap_or(0),
             },
@@ -140,6 +142,9 @@ impl Boot {
                 board_name: sysinfo.product.clone(),
                 serial: sysinfo.serial.clone(),
                 fw_version: "Observer Mode".to_string(),
+                // Observer mode reads sysfs for a device sdrtop knows by name,
+                // and only the two native backends have such a profile.
+                stack: None,
                 board_rev: 0xFE,
                 usb_api_version: 0,
             },
@@ -276,6 +281,7 @@ pub(super) fn initial_metrics(cfg: &AppConfig, boot: Boot) -> SdrMetrics {
             board_name: Arc::from(identity.board_name.as_str()),
             serial: Arc::from(identity.serial.as_str()),
             fw_version: Arc::from(identity.fw_version.as_str()),
+            stack: identity.stack,
             board_rev: identity.board_rev,
             usb_api_version: identity.usb_api_version,
             process_cpu_pct: 0.0,

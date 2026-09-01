@@ -114,20 +114,43 @@ async fn main() -> Result<()> {
         .and_then(config::AppConfig::themes_dir);
     let theme = app_cfg.build_theme(themes_dir.as_deref());
 
-    let mut devices = hardware::list_all_devices();
-    if let Some(kind) = &cli.device {
-        let want = match kind.to_ascii_lowercase().as_str() {
-            "hackrf" => hardware::DeviceKind::HackRf,
-            "rtlsdr" | "rtl-sdr" | "rtl" => hardware::DeviceKind::RtlSdr,
-            other => {
-                eprintln!("Unknown --device '{}' (use 'hackrf' or 'rtlsdr')", other);
-                std::process::exit(1);
-            }
-        };
-        devices.retain(|d| d.kind == want);
-    }
+    // `--device` names a backend, and for SoapySDR it may carry the device
+    // arguments too: `--device soapy=driver=airspy`. Those arguments are both a
+    // filter and the way to ask for a driver sdrtop skips by default.
+    let (want, soapy_filter) = match cli.device.as_deref() {
+        None => (None, None),
+        Some(spec) => {
+            let (name, filter) = match spec.split_once('=') {
+                Some((n, f)) => (n, Some(f)),
+                None => (spec, None),
+            };
+            let kind = match name.to_ascii_lowercase().as_str() {
+                "hackrf" => hardware::DeviceKind::HackRf,
+                "rtlsdr" | "rtl-sdr" | "rtl" => hardware::DeviceKind::RtlSdr,
+                "soapy" | "soapysdr" => hardware::DeviceKind::Soapy,
+                other => {
+                    eprintln!(
+                        "Unknown --device '{other}' (use 'hackrf', 'rtlsdr', or \
+                         'soapy', optionally as 'soapy=driver=airspy')"
+                    );
+                    std::process::exit(1);
+                }
+            };
+            (Some(kind), filter)
+        }
+    };
+
+    let devices = hardware::list_all_devices(want, soapy_filter);
     if devices.is_empty() {
-        eprintln!("No SDR device found. Connect a HackRF or RTL-SDR and try again.");
+        // Mentioning SoapySDR only where it could actually help. Telling someone
+        // to install a driver for a library they do not have is a wild goose
+        // chase, and they have enough to check already.
+        let soapy_hint = if hardware::soapy::api::api().is_some() {
+            " SoapySDR is installed: `SoapySDRUtil --find` lists what it can see."
+        } else {
+            ""
+        };
+        eprintln!("No SDR device found. Connect a HackRF or RTL-SDR and try again.{soapy_hint}");
         std::process::exit(1);
     }
 
