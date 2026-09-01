@@ -155,6 +155,10 @@ fn move_down(ctx: &mut InputCtx<'_>, state: MenuState, step: isize) {
                 ..state
             });
         }
+        // Nothing to move through yet. When the first setting lands this grows a
+        // cursor of its own; until then the arrows are quiet rather than moving
+        // something the reader cannot see.
+        MenuPane::Options => {}
     }
 }
 
@@ -172,6 +176,130 @@ fn wrap(i: usize, step: isize, len: usize) -> usize {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::config::LayoutConfig;
+    use crate::state::SdrMetrics;
+    use crate::ui::{self, PanelRegistry};
+    use crossterm::event::KeyEvent;
+    use std::collections::HashMap;
+    use std::sync::{Arc, Mutex};
+
+    /// Drives the menu layer the way the app does, minus the terminal. Same
+    /// shape as the harness in `global/mod.rs`, and deliberately device-free:
+    /// nothing the menu does should reach the radio.
+    struct Harness {
+        state: Arc<Mutex<SdrMetrics>>,
+        engine: ui::LayoutEngine,
+        show_footer: bool,
+        focus_keys: HashMap<char, &'static str>,
+    }
+
+    impl Harness {
+        fn new() -> Self {
+            let mut engine =
+                ui::LayoutEngine::new(LayoutConfig::default_config(), PanelRegistry::new());
+            engine.set_preset("command_rail");
+            let state = Arc::new(Mutex::new(SdrMetrics::fixture()));
+            state.lock().unwrap().ui.menu = Some(MenuState::default());
+            Self {
+                state,
+                engine,
+                show_footer: true,
+                focus_keys: HashMap::new(),
+            }
+        }
+
+        fn key(&mut self, code: KeyCode) -> KeyAction {
+            let mut ctx = InputCtx {
+                state: &self.state,
+                device: None,
+                engine: &mut self.engine,
+                show_footer: &mut self.show_footer,
+                focus_keys: &self.focus_keys,
+            };
+            handle(KeyEvent::from(code), &mut ctx)
+        }
+
+        fn menu(&self) -> MenuState {
+            self.state.lock().unwrap().ui.menu.expect("menu is open")
+        }
+    }
+
+    /// Tab walks the column exactly as it is drawn: every section, then Keys,
+    /// then Options, then round to the top. The panes are the two rows under the
+    /// rule, so this is what proves Options is reachable at all.
+    #[test]
+    fn tab_walks_the_sections_then_both_panes_then_wraps() {
+        let mut h = Harness::new();
+        let sections = h.engine.menu().sections.len();
+        for _ in 0..sections - 1 {
+            h.key(KeyCode::Tab);
+        }
+        assert_eq!(h.menu().pane, MenuPane::Views, "still on the last section");
+
+        h.key(KeyCode::Tab);
+        assert_eq!(h.menu().pane, MenuPane::Keys);
+        h.key(KeyCode::Tab);
+        assert_eq!(h.menu().pane, MenuPane::Options);
+        h.key(KeyCode::Tab);
+        assert_eq!(h.menu().pane, MenuPane::Views, "wraps back to the sections");
+        assert_eq!(h.menu().section, 0);
+    }
+
+    /// Options holds nothing yet, so the keys that act on a list are quiet
+    /// rather than acting on whichever section the cursor came from. A digit
+    /// there must not load a layout behind the reader's back.
+    #[test]
+    fn options_has_nothing_to_steer() {
+        let mut h = Harness::new();
+        h.state.lock().unwrap().ui.menu = Some(MenuState {
+            section: 1,
+            entry: 2,
+            pane: MenuPane::Options,
+            scroll: 0,
+        });
+        let before = h.menu();
+
+        for code in [
+            KeyCode::Down,
+            KeyCode::Up,
+            KeyCode::Char('1'),
+            KeyCode::Enter,
+        ] {
+            h.key(code);
+            assert_eq!(h.menu(), before, "{code:?} moved something");
+        }
+        assert_eq!(
+            h.engine.active_preset(),
+            "command_rail",
+            "no key in Options may load a layout"
+        );
+    }
+
+    /// A pane is a detour, not a reset: the place you had in the list survives
+    /// the visit, so stepping back onto the sections does not start you at the
+    /// top of one.
+    #[test]
+    fn a_pane_visit_does_not_disturb_the_place_in_the_list() {
+        let mut h = Harness::new();
+        // The last section, because that is the one the panes are entered from.
+        // Walking there first would move the cursor on its own and prove nothing
+        // about the panes.
+        let last = h.engine.menu().sections.len() - 1;
+        let place = MenuState {
+            section: last,
+            entry: 1,
+            pane: MenuPane::Views,
+            scroll: 0,
+        };
+        h.state.lock().unwrap().ui.menu = Some(place);
+
+        h.key(KeyCode::Tab);
+        assert_eq!(h.menu().pane, MenuPane::Keys);
+        assert_eq!((h.menu().section, h.menu().entry), (last, 1));
+        h.key(KeyCode::Tab);
+        assert_eq!(h.menu().pane, MenuPane::Options);
+        assert_eq!((h.menu().section, h.menu().entry), (last, 1));
+    }
 
     #[test]
     fn wrap_moves_forward_and_back() {

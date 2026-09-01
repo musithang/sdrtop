@@ -1,9 +1,9 @@
 //! The menu's left column.
 //!
 //! Two kinds of row, separated by a rule: the **sections**, which come from
-//! [`super::model`], and the **panes**, which do not. `Keys` is a pane: it groups
-//! nothing and holds no layouts, so listing it among the sections would say it
-//! was one.
+//! [`super::model`], and the **panes**, which do not. `Keys` and `Options` are
+//! panes: they group nothing and hold no layouts, so listing them among the
+//! sections would say they were sections.
 //!
 //! Draws only. Which row is selected is decided by the caller.
 
@@ -24,7 +24,7 @@ use super::model::Menu;
 const CURSOR: &str = "\u{25B8} "; // ▸
 
 /// The rows that are not sections, in the order they appear under the rule.
-pub const PANES: &[(MenuPane, &str)] = &[(MenuPane::Keys, "Keys")];
+pub const PANES: &[(MenuPane, &str)] = &[(MenuPane::Keys, "Keys"), (MenuPane::Options, "Options")];
 
 /// Total rows in the column: every section, then every pane.
 pub fn row_count(menu: &Menu) -> usize {

@@ -12,6 +12,7 @@
 //! - [`sections`]: the left column.
 //! - [`entries`]: the right column, a section's layouts.
 //! - [`keys`]: the right column, the key reference.
+//! - [`options`]: the right column, settings. Empty for now, and honest about it.
 //!
 //! [`render`] is the orchestrator. It resolves the frame, carves the rows and
 //! columns, and calls each part once. **The parts do not call each other.**
@@ -19,6 +20,7 @@
 pub mod entries;
 pub mod keys;
 pub mod model;
+pub mod options;
 pub mod sections;
 
 use ratatui::{
@@ -143,6 +145,7 @@ fn right_pane(
         let title = match state.pane {
             MenuPane::Views => menu.sections[section].title.as_str(),
             MenuPane::Keys => "Keys",
+            MenuPane::Options => "Options",
         };
         f.render_widget(
             Paragraph::new(chrome::section(title, "", heading.width as usize, theme)),
@@ -153,6 +156,7 @@ fn right_pane(
     match state.pane {
         MenuPane::Views => entries::render(f, body, &menu.sections[section], cursor, theme),
         MenuPane::Keys => keys::render(f, body, &m.caps.gain, state.scroll, theme),
+        MenuPane::Options => options::render(f, body, theme),
     }
 }
 
@@ -360,6 +364,27 @@ mod tests {
         assert!(top.contains("start or stop RX"), "{top}");
         assert!(!down.contains("start or stop RX"), "scrolled away:\n{down}");
         assert_ne!(top, down);
+    }
+
+    /// The Options pane is empty by design, so what is being pinned is that the
+    /// emptiness is stated on screen. A pane that opens to blank space reads as
+    /// a bug; one that says why it is blank reads as a decision.
+    #[test]
+    fn the_options_pane_admits_it_is_empty() {
+        let state = MenuState {
+            section: 0,
+            entry: 0,
+            pane: MenuPane::Options,
+            scroll: 0,
+        };
+        let all = draw(90, 30, &state).join("\n");
+        assert!(
+            all.contains("Options"),
+            "the left column needs the row:\n{all}"
+        );
+        assert!(all.contains("Nothing to configure yet"), "{all}");
+        // And the pane replaces the right column only, the same as Keys.
+        assert!(all.contains("Command Rail"), "{all}");
     }
 
     /// Small enough that nothing sensible fits. The requirement is only that it
