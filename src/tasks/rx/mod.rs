@@ -65,7 +65,11 @@ pub fn spawn_rx_task(
             let drained = poll::drain(&state, &rx_ctx, now, hw_streaming);
 
             let computed = Computed {
-                iq: metrics::iq_metrics(drained.moments, drained.cal),
+                iq: metrics::iq_metrics(
+                    drained.moments,
+                    drained.cal,
+                    device.capabilities().sample_geometry.full_scale as f64,
+                ),
                 had_samples: drained.moments.samples > 0,
                 callback: metrics::callback_timing(
                     drained.jitter_sum_us,

@@ -8,7 +8,7 @@
 
 use num_complex::Complex;
 
-use crate::hardware::SampleFormat;
+use crate::hardware::{SampleFormat, SampleGeometry};
 
 use super::DB_FLOOR;
 
@@ -20,11 +20,12 @@ use super::DB_FLOOR;
 pub(super) fn decode_into(
     frame: &[u8],
     window: &[f32],
-    format: SampleFormat,
+    geometry: SampleGeometry,
     out: &mut [Complex<f32>],
 ) {
-    match format {
+    match geometry.format {
         SampleFormat::Int8 => {
+            let fs = geometry.full_scale;
             for (i, (pair, &w)) in frame
                 .as_chunks::<2>()
                 .0
@@ -33,14 +34,20 @@ pub(super) fn decode_into(
                 .enumerate()
             {
                 out[i] = Complex {
-                    re: pair[0] as i8 as f32 / 128.0 * w,
-                    im: pair[1] as i8 as f32 / 128.0 * w,
+                    re: pair[0] as i8 as f32 / fs * w,
+                    im: pair[1] as i8 as f32 / fs * w,
                 };
             }
         }
         // RTL-SDR unsigned-8-bit decode around the 127.5 DC bias maps the byte
         // range symmetrically onto [-1, 1]: 0x00 → -1.0, 0x80 → ~0, 0xFF → +1.0.
+        //
+        // The bias sits half a count below mid-scale, hence `full_scale - 0.5`.
+        // `hardware::process` centres its *accumulators* by the whole 128
+        // instead, deliberately, and the half count matters to neither job.
+        // These two numbers look like they want to be one number. They do not.
         SampleFormat::Uint8 => {
+            let bias = geometry.full_scale - 0.5;
             for (i, (pair, &w)) in frame
                 .as_chunks::<2>()
                 .0
@@ -49,8 +56,8 @@ pub(super) fn decode_into(
                 .enumerate()
             {
                 out[i] = Complex {
-                    re: (pair[0] as f32 - 127.5) / 127.5 * w,
-                    im: (pair[1] as f32 - 127.5) / 127.5 * w,
+                    re: (pair[0] as f32 - bias) / bias * w,
+                    im: (pair[1] as f32 - bias) / bias * w,
                 };
             }
         }
@@ -139,30 +146,79 @@ mod tests {
         assert_eq!(db, DB_FLOOR);
     }
 
+    /// Decode one I/Q pair through the real function, with a unit window so the
+    /// windowing cannot hide a scaling mistake.
+    ///
+    /// These three tests used to compute `byte as i8 as f32 / 128.0` themselves
+    /// and assert the answer, which passes whatever `decode_into` does. They ask
+    /// it now.
+    fn decoded(bytes: [u8; 2], format: SampleFormat, full_scale: f32) -> Complex<f32> {
+        let mut out = [Complex { re: 0.0, im: 0.0 }];
+        decode_into(
+            &bytes,
+            &[1.0],
+            SampleGeometry { format, full_scale },
+            &mut out,
+        );
+        out[0]
+    }
+
     #[test]
     fn iq_byte_i8_max_converts_correctly() {
-        let byte: u8 = 0x7F;
-        let f = byte as i8 as f32 / 128.0;
-        assert!((f - 0.9921875).abs() < 1e-6, "got {}", f);
+        let z = decoded([0x7F, 0x7F], SampleFormat::Int8, 128.0);
+        assert!((z.re - 0.9921875).abs() < 1e-6, "got {}", z.re);
     }
 
     #[test]
     fn iq_byte_i8_min_converts_correctly() {
-        let byte: u8 = 0x80;
-        let f = byte as i8 as f32 / 128.0;
-        assert!((f - (-1.0)).abs() < 1e-6, "got {}", f);
+        let z = decoded([0x80, 0x80], SampleFormat::Int8, 128.0);
+        assert!((z.re - (-1.0)).abs() < 1e-6, "got {}", z.re);
     }
 
     #[test]
     fn iq_byte_uint8_converts_correctly() {
         // RTL-SDR unsigned-8-bit decode around the 127.5 DC bias maps the byte
         // range symmetrically onto [-1, 1]: 0x00 → -1.0, 0x80 → ~0, 0xFF → +1.0.
-        let lo = (0x00u8 as f32 - 127.5) / 127.5;
-        let mid = (0x80u8 as f32 - 127.5) / 127.5;
-        let hi = (0xFFu8 as f32 - 127.5) / 127.5;
+        let lo = decoded([0x00, 0x00], SampleFormat::Uint8, 128.0).re;
+        let mid = decoded([0x80, 0x80], SampleFormat::Uint8, 128.0).re;
+        let hi = decoded([0xFF, 0xFF], SampleFormat::Uint8, 128.0).re;
         assert!((lo - (-1.0)).abs() < 1e-6, "lo = {}", lo);
         assert!(mid.abs() < 0.01, "mid = {}", mid);
         assert!((hi - 1.0).abs() < 1e-6, "hi = {}", hi);
+    }
+
+    /// The window multiplies the decoded sample, and it does so on both formats.
+    /// A decoder that applied the window to only one branch would still pass
+    /// every test above.
+    #[test]
+    fn the_window_is_applied_to_both_formats() {
+        let mut out = [Complex { re: 0.0, im: 0.0 }];
+        for format in [SampleFormat::Int8, SampleFormat::Uint8] {
+            decode_into(
+                &[0x7F, 0x7F],
+                &[0.5],
+                SampleGeometry {
+                    format,
+                    full_scale: 128.0,
+                },
+                &mut out,
+            );
+            let full = decoded([0x7F, 0x7F], format, 128.0).re;
+            assert!(
+                (out[0].re - full * 0.5).abs() < 1e-6,
+                "{format:?}: windowed {} is not half of {full}",
+                out[0].re
+            );
+        }
+    }
+
+    /// Scaling follows the device's declared full scale, not a constant. Proven
+    /// on a fabricated wider geometry before any device reports one.
+    #[test]
+    fn decoding_follows_the_declared_full_scale() {
+        // +64 counts is half scale against 128 and an eighth against 512.
+        assert!((decoded([0x40, 0x40], SampleFormat::Int8, 128.0).re - 0.5).abs() < 1e-6);
+        assert!((decoded([0x40, 0x40], SampleFormat::Int8, 512.0).re - 0.125).abs() < 1e-6);
     }
 
     #[test]

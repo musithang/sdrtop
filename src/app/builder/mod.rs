@@ -120,10 +120,10 @@ impl App {
         });
 
         let fft_state = Arc::clone(&state);
-        std::thread::spawn(move || FftWorker::new(sample_rx, fft_state, geometry.format).run());
+        std::thread::spawn(move || FftWorker::new(sample_rx, fft_state, geometry).run());
 
         let demod_state = Arc::clone(&state);
-        std::thread::spawn(move || DemodWorker::new(demod_rx, demod_state, geometry.format).run());
+        std::thread::spawn(move || DemodWorker::new(demod_rx, demod_state, geometry).run());
 
         tasks::spawn_rx_task(Arc::clone(&state), Arc::clone(&device), Arc::clone(&rx_ctx));
         tasks::spawn_sweep_task(Arc::clone(&state), Arc::clone(&device));

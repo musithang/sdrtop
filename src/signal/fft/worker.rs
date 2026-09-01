@@ -20,7 +20,7 @@ use crossbeam_channel::Receiver;
 use num_complex::Complex;
 use rustfft::FftPlanner;
 
-use crate::hardware::SampleFormat;
+use crate::hardware::SampleGeometry;
 use crate::signal::dsp::{self, WindowFn};
 use crate::state::SdrMetrics;
 
@@ -39,14 +39,14 @@ pub struct FftWorker {
     pub ema_alpha: f32,
     pub peak_decay_db: f32,
     /// How to decode the raw bytes - set from the active device's capabilities.
-    pub format: SampleFormat,
+    pub geometry: SampleGeometry,
 }
 
 impl FftWorker {
     pub fn new(
         sample_rx: Receiver<Vec<u8>>,
         state: Arc<Mutex<SdrMetrics>>,
-        format: SampleFormat,
+        geometry: SampleGeometry,
     ) -> Self {
         Self {
             sample_rx,
@@ -55,7 +55,7 @@ impl FftWorker {
             window_fn: WindowFn::Hann,
             ema_alpha: 0.2,
             peak_decay_db: 0.5,
-            format,
+            geometry,
         }
     }
 
@@ -102,7 +102,7 @@ impl FftWorker {
                 frame::decode_into(
                     &buf[buf_start..buf_start + frame_bytes],
                     &window,
-                    self.format,
+                    self.geometry,
                     &mut samples,
                 );
                 buf_start += frame_bytes;
@@ -194,7 +194,14 @@ mod tests {
         }
         drop(tx); // ends the worker's recv loop
 
-        let worker = FftWorker::new(rx, Arc::clone(&state), SampleFormat::Int8);
+        let worker = FftWorker::new(
+            rx,
+            Arc::clone(&state),
+            SampleGeometry {
+                format: crate::hardware::SampleFormat::Int8,
+                full_scale: 128.0,
+            },
+        );
         std::thread::spawn(move || worker.run()).join().unwrap();
 
         let guard = state.lock().unwrap();

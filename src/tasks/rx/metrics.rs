@@ -14,9 +14,6 @@
 
 use crate::state::IqCalState;
 
-/// Full scale for an 8-bit signed sample, in counts.
-const FULL_SCALE: f64 = 128.0;
-
 /// The floor every dBFS reading is clamped to, so a silent stream reports a
 /// number rather than `-inf`.
 pub(super) const DBFS_FLOOR: f32 = -120.0;
@@ -89,7 +86,11 @@ impl IqMetrics {
 /// - the **displayed** impairment is the residual left after the active
 ///   correction, so the number agrees with the scope beside it instead of
 ///   reporting a fault the app is already compensating.
-pub(super) fn iq_metrics(m: Moments, cal: IqCalState) -> IqMetrics {
+///
+/// `full_scale` is the device's own count for 0 dBFS, from
+/// [`crate::hardware::SampleGeometry`]. It used to be a module constant of 128,
+/// which was true of both radios sdrtop could open and of nothing else.
+pub(super) fn iq_metrics(m: Moments, cal: IqCalState, full_scale: f64) -> IqMetrics {
     if m.samples == 0 {
         return IqMetrics::idle();
     }
@@ -104,12 +105,12 @@ pub(super) fn iq_metrics(m: Moments, cal: IqCalState) -> IqMetrics {
     // ADC loading: peak from the loudest sample, RMS from the total I/Q power,
     // both referenced to full scale.
     let adc_peak_dbfs = if m.peak_amp > 0 {
-        20.0 * (m.peak_amp as f32 / FULL_SCALE as f32).log10()
+        20.0 * (m.peak_amp as f32 / full_scale as f32).log10()
     } else {
         DBFS_FLOOR
     };
     let adc_rms_dbfs = {
-        let p = (var_i + var_q) / (FULL_SCALE * FULL_SCALE);
+        let p = (var_i + var_q) / (full_scale * full_scale);
         if p > 0.0 {
             (10.0 * p.log10()) as f32
         } else {
@@ -134,8 +135,8 @@ pub(super) fn iq_metrics(m: Moments, cal: IqCalState) -> IqMetrics {
     let q_ac = ev_q.sqrt();
     let denom = ev_i + ev_q;
     IqMetrics {
-        dc_i: (emean_i / FULL_SCALE) as f32,
-        dc_q: (emean_q / FULL_SCALE) as f32,
+        dc_i: (emean_i / full_scale) as f32,
+        dc_q: (emean_q / full_scale) as f32,
         dc_i_raw: mean_i as f32,
         dc_q_raw: mean_q as f32,
         iq_corr,
@@ -165,6 +166,10 @@ pub(super) fn callback_timing(sum_us: u64, sq_sum: u64, count: u64) -> Option<(u
 
 #[cfg(test)]
 mod tests {
+    /// Both shipped radios. Named rather than repeated so a future 16-bit case
+    /// reads as a different device and not as a typo.
+    const EIGHT_BIT: f64 = 128.0;
+
     use super::*;
 
     /// Moments for `n` samples with the given per-component variance and no DC,
@@ -189,7 +194,7 @@ mod tests {
     fn an_empty_window_measures_nothing_rather_than_zero() {
         // The distinction matters: 0.0 dB imbalance is a *perfect* front end, and
         // a stopped radio must not claim that.
-        let m = iq_metrics(Moments::default(), no_cal());
+        let m = iq_metrics(Moments::default(), no_cal(), EIGHT_BIT);
         assert_eq!(m, IqMetrics::idle());
         assert!(m.iq_imbalance_db.is_none() && m.phase_imbalance.is_none());
         assert_eq!(
@@ -205,7 +210,7 @@ mod tests {
 
     #[test]
     fn a_balanced_front_end_reports_no_impairment() {
-        let m = iq_metrics(balanced(1000, 400), no_cal());
+        let m = iq_metrics(balanced(1000, 400), no_cal(), EIGHT_BIT);
         assert!(
             m.iq_imbalance_db.unwrap().abs() < 1e-4,
             "{:?}",
@@ -224,12 +229,19 @@ mod tests {
         // I carries 4x the power of Q, so twice the amplitude: +6.02 dB.
         let mut mo = balanced(1000, 100);
         mo.i_sq_sum *= 4;
-        let db = iq_metrics(mo, no_cal()).iq_imbalance_db.unwrap();
+        let db = iq_metrics(mo, no_cal(), EIGHT_BIT).iq_imbalance_db.unwrap();
         assert!((db - 6.0206).abs() < 0.01, "got {db}");
         // And the sign follows which arm is louder.
         let mut swapped = balanced(1000, 100);
         swapped.q_sq_sum *= 4;
-        assert!((iq_metrics(swapped, no_cal()).iq_imbalance_db.unwrap() + 6.0206).abs() < 0.01);
+        assert!(
+            (iq_metrics(swapped, no_cal(), EIGHT_BIT)
+                .iq_imbalance_db
+                .unwrap()
+                + 6.0206)
+                .abs()
+                < 0.01
+        );
     }
 
     #[test]
@@ -238,7 +250,7 @@ mod tests {
         // Here c = vi/2, so sin(theta) = 0.5 and theta = 30 degrees.
         let mut mo = balanced(1000, 200);
         mo.cross_sum = 100 * 1000;
-        let deg = iq_metrics(mo, no_cal()).phase_imbalance.unwrap();
+        let deg = iq_metrics(mo, no_cal(), EIGHT_BIT).phase_imbalance.unwrap();
         assert!((deg - 30.0).abs() < 0.01, "got {deg}");
     }
 
@@ -248,7 +260,7 @@ mod tests {
         // NaN. The clamp is what keeps a number on screen.
         let mut mo = balanced(100, 50);
         mo.cross_sum = 10_000 * 100;
-        let deg = iq_metrics(mo, no_cal()).phase_imbalance.unwrap();
+        let deg = iq_metrics(mo, no_cal(), EIGHT_BIT).phase_imbalance.unwrap();
         assert!(deg.is_finite() && (deg - 90.0).abs() < 1e-3, "got {deg}");
     }
 
@@ -262,7 +274,7 @@ mod tests {
             q_sq_sum: 100 * 1000,
             ..Moments::default()
         };
-        let m = iq_metrics(mo, no_cal());
+        let m = iq_metrics(mo, no_cal(), EIGHT_BIT);
         assert!(
             (m.dc_i - 0.5).abs() < 1e-6,
             "64 of 128 counts is half scale: {}",
@@ -291,7 +303,7 @@ mod tests {
             dc_i_raw: 64.0,
             ..IqCalState::default()
         };
-        let m = iq_metrics(mo, cal);
+        let m = iq_metrics(mo, cal, EIGHT_BIT);
         assert!(m.dc_i.abs() < 1e-6, "residual should be ~0, got {}", m.dc_i);
         assert!(
             (m.dc_i_raw - 64.0).abs() < 1e-4,
@@ -304,29 +316,32 @@ mod tests {
         let mut mo = balanced(1000, 0);
         mo.peak_amp = 128;
         assert!(
-            iq_metrics(mo, no_cal()).adc_peak_dbfs.abs() < 1e-4,
+            iq_metrics(mo, no_cal(), EIGHT_BIT).adc_peak_dbfs.abs() < 1e-4,
             "a rail-hitting sample is 0 dBFS"
         );
         mo.peak_amp = 64;
-        let half = iq_metrics(mo, no_cal()).adc_peak_dbfs;
+        let half = iq_metrics(mo, no_cal(), EIGHT_BIT).adc_peak_dbfs;
         assert!(
             (half + 6.0206).abs() < 0.01,
             "half scale is -6 dBFS, got {half}"
         );
         // No sample recorded at all: the floor, never -inf.
         mo.peak_amp = 0;
-        assert_eq!(iq_metrics(mo, no_cal()).adc_peak_dbfs, DBFS_FLOOR);
+        assert_eq!(
+            iq_metrics(mo, no_cal(), EIGHT_BIT).adc_peak_dbfs,
+            DBFS_FLOOR
+        );
     }
 
     #[test]
     fn adc_rms_sums_the_power_of_both_arms() {
         // var_i = var_q = 128²/2 gives total power 128², i.e. 0 dBFS.
         let var = (128 * 128) / 2;
-        let db = iq_metrics(balanced(1000, var), no_cal()).adc_rms_dbfs;
+        let db = iq_metrics(balanced(1000, var), no_cal(), EIGHT_BIT).adc_rms_dbfs;
         assert!(db.abs() < 0.01, "got {db}");
         // A dead-silent stream floors rather than reporting -inf.
         assert_eq!(
-            iq_metrics(balanced(1000, 0), no_cal()).adc_rms_dbfs,
+            iq_metrics(balanced(1000, 0), no_cal(), EIGHT_BIT).adc_rms_dbfs,
             DBFS_FLOOR
         );
     }
@@ -355,5 +370,25 @@ mod tests {
         // can leave the mean of squares below the square of the mean. That is a
         // subtraction away from underflowing a u64 into a vast bogus jitter.
         assert_eq!(callback_timing(1_000_000, 0, 1), Some((1_000_000, 0)));
+    }
+    /// The dBFS reading follows the device's own full scale. A 16-bit radio
+    /// whose peak sample is at its rail is at 0 dBFS, exactly like an 8-bit one
+    /// at its own. Before this was a parameter it would have read as -48 dBFS,
+    /// which is a receiver that looks broken and is not.
+    #[test]
+    fn full_scale_is_the_devices_own_and_not_a_constant() {
+        let mut mo = Moments {
+            samples: 1000,
+            ..Moments::default()
+        };
+        mo.peak_amp = 32768;
+        assert!(
+            iq_metrics(mo, no_cal(), 32768.0).adc_peak_dbfs.abs() < 1e-4,
+            "a 16-bit rail is 0 dBFS on a 16-bit device"
+        );
+        assert!(
+            iq_metrics(mo, no_cal(), EIGHT_BIT).adc_peak_dbfs > 40.0,
+            "and the same counts on an 8-bit device are far above its rail"
+        );
     }
 }

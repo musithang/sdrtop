@@ -17,7 +17,7 @@ use std::time::Instant;
 use crossbeam_channel::Receiver;
 use rustfft::num_complex::Complex;
 
-use crate::hardware::SampleFormat;
+use crate::hardware::SampleGeometry;
 use crate::state::{AmMeasure, CtcssMeasure, FmMeasure, Modulation, SdrMetrics};
 
 use super::{
@@ -30,7 +30,7 @@ use super::{
 pub struct DemodWorker {
     pub sample_rx: Receiver<(u64, Vec<u8>)>,
     pub state: Arc<Mutex<SdrMetrics>>,
-    pub format: SampleFormat,
+    pub geometry: SampleGeometry,
 }
 
 /// What the worker knows about a block before it looks at the samples.
@@ -210,12 +210,12 @@ impl DemodWorker {
     pub fn new(
         sample_rx: Receiver<(u64, Vec<u8>)>,
         state: Arc<Mutex<SdrMetrics>>,
-        format: SampleFormat,
+        geometry: SampleGeometry,
     ) -> Self {
         Self {
             sample_rx,
             state,
-            format,
+            geometry,
         }
     }
 
@@ -339,7 +339,7 @@ impl DemodWorker {
             // Continuity means every sample counts; otherwise the bounded slice
             // keeps the cost flat regardless of device rate.
             let cap = if continuous { usize::MAX } else { SLICE_PAIRS };
-            decode(&chunk, self.format, cap, &mut s.iq);
+            decode(&chunk, self.geometry, cap, &mut s.iq);
             // Bring the selected channel to DC before filtering, so the channel
             // filter (centred at DC) selects it rather than whatever sits at the
             // tuned frequency.

@@ -24,7 +24,7 @@ use std::time::Duration;
 
 use num_complex::Complex;
 
-use crate::hardware::SampleFormat;
+use crate::hardware::{SampleFormat, SampleGeometry};
 use crate::state::{AmMeasure, CtcssMeasure, FmMeasure, Modulation};
 
 /// Channel rate targeted for wide-band FM.
@@ -142,25 +142,29 @@ pub fn design_lowpass(taps: usize, fc: f64) -> Vec<f32> {
 /// Decode raw wire bytes into complex samples, taking at most `max_pairs`.
 ///
 /// Deliberately unwindowed - this is a time-domain signal path, not an FFT input.
-pub fn decode(buf: &[u8], format: SampleFormat, max_pairs: usize, out: &mut Vec<Complex<f32>>) {
+pub fn decode(buf: &[u8], geometry: SampleGeometry, max_pairs: usize, out: &mut Vec<Complex<f32>>) {
     out.clear();
     let pairs = (buf.len() / 2).min(max_pairs);
     out.reserve(pairs);
     let bytes = &buf[..pairs * 2];
-    match format {
+    match geometry.format {
         SampleFormat::Int8 => {
+            let fs = geometry.full_scale;
             for pair in bytes.as_chunks::<2>().0 {
                 out.push(Complex {
-                    re: pair[0] as i8 as f32 / 128.0,
-                    im: pair[1] as i8 as f32 / 128.0,
+                    re: pair[0] as i8 as f32 / fs,
+                    im: pair[1] as i8 as f32 / fs,
                 });
             }
         }
+        // Half a count below mid-scale, for the reason spelled out in
+        // `signal::fft::frame::decode_into`.
         SampleFormat::Uint8 => {
+            let bias = geometry.full_scale - 0.5;
             for pair in bytes.as_chunks::<2>().0 {
                 out.push(Complex {
-                    re: (pair[0] as f32 - 127.5) / 127.5,
-                    im: (pair[1] as f32 - 127.5) / 127.5,
+                    re: (pair[0] as f32 - bias) / bias,
+                    im: (pair[1] as f32 - bias) / bias,
                 });
             }
         }
@@ -1357,16 +1361,41 @@ mod tests {
         assert!(off < 20.0, "off-tone leakage = {off}");
     }
 
+    fn geom(format: SampleFormat) -> SampleGeometry {
+        SampleGeometry {
+            format,
+            full_scale: 128.0,
+        }
+    }
+
     #[test]
     fn decode_respects_the_slice_cap_and_format() {
         let bytes: Vec<u8> = (0..200u16).map(|v| v as u8).collect();
         let mut out = Vec::new();
-        decode(&bytes, SampleFormat::Int8, 10, &mut out);
+        decode(&bytes, geom(SampleFormat::Int8), 10, &mut out);
         assert_eq!(out.len(), 10, "must stop at the slice cap");
 
         // Uint8 decodes around the 127.5 bias: 0x80 is ~zero.
-        decode(&[0x80, 0x80], SampleFormat::Uint8, 8, &mut out);
+        decode(&[0x80, 0x80], geom(SampleFormat::Uint8), 8, &mut out);
         assert_eq!(out.len(), 1);
         assert!(out[0].re.abs() < 0.01 && out[0].im.abs() < 0.01);
+    }
+
+    /// The normalisation follows the device's full scale rather than a constant.
+    /// Exercised with a fabricated wider geometry, so the scaling is proven
+    /// before any real device reports one.
+    #[test]
+    fn decode_normalises_against_the_declared_full_scale() {
+        let wide = SampleGeometry {
+            format: SampleFormat::Int8,
+            full_scale: 512.0,
+        };
+        let mut out = Vec::new();
+        // 0x40 is +64 counts. Against 128 that is half scale; against 512 it is
+        // an eighth. Same bytes, different device, different answer.
+        decode(&[0x40, 0x40], geom(SampleFormat::Int8), 1, &mut out);
+        assert!((out[0].re - 0.5).abs() < 1e-6, "got {}", out[0].re);
+        decode(&[0x40, 0x40], wide, 1, &mut out);
+        assert!((out[0].re - 0.125).abs() < 1e-6, "got {}", out[0].re);
     }
 }
