@@ -107,8 +107,11 @@ pub enum FrameStyle {
     ///
     /// No registered panel declares this any more: since R4h every one of them
     /// says what it is and the engine frames it. It survives as the trait
-    /// default, so a panel that forgets `chrome()` renders instead of crashing -
-    /// and `check-docs.py` names it the next time the lint runs.
+    /// default, so a panel that forgets `chrome()` renders instead of crashing.
+    ///
+    /// Nothing checks for that any more. The lint that used to name a panel
+    /// falling back here is gone, and no test replaced it, so this is a
+    /// convention now rather than a rule.
     ///
     /// The spectrum and the waterfall still have a self-drawn path, but the
     /// layout engine calls it directly rather than through the registry, and only

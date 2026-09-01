@@ -14,8 +14,9 @@
 //! - [`view`]: the keys that only change what is drawn.
 //!
 //! Keeping the match whole is deliberate: it is the one place to read every
-//! global key, and `check-docs.py` reads it as source text to check the manual
-//! against.
+//! global key, and `ui/menu/keys.rs` reads this file as source text to check the
+//! on-screen key reference against it. Add an arm here, add its row there, or the
+//! suite fails.
 
 mod gain;
 // `menu` reaches `try_set_preset` too: the menu and the number keys must load
