@@ -95,8 +95,8 @@ Screenshots, split by device. More to come. Got a clean capture on your hardware
 
 Everything your radio knows about itself, in real time, without leaving the terminal.
 
-### The Command Rail: the default cockpit (`1`)
-The view sdrtop opens on. A slim header plus a left **instrument rail** that packs what a poweruser reads at a glance: a big segmented **frequency hero**, an analog **S-meter**, the **HUNT · MONITOR · BENCH** mode tabs whose lead card follows what you're doing, **recall slots** with live activity pips, and a SIGNAL zone where SNR · PWR · NF · SAT each ride their own little braille oscilloscope trace beside the value. Gain and stream health round it out, and the bonded spectrum + waterfall fill the rest. Press `c` to drive it, `←/→` to tune. All dials, no autopilot. It's a radio, not a self-driving car.
+### The Command Rail: the default cockpit
+The default layout, and the one the menu has waiting on a first run. A slim header plus a left **instrument rail** that packs what a poweruser reads at a glance: a big segmented **frequency hero**, an analog **S-meter**, the **HUNT · MONITOR · BENCH** mode tabs whose lead card follows what you're doing, **recall slots** with live activity pips, and a SIGNAL zone where SNR · PWR · NF · SAT each ride their own little braille oscilloscope trace beside the value. Gain and stream health round it out, and the bonded spectrum + waterfall fill the rest. Press `c` to drive it, `←/→` to tune. All dials, no autopilot. It's a radio, not a self-driving car.
 
 <details>
   <summary><b>🛰️ Command Rail</b>: the BENCH &amp; HUNT mode cards</summary>
@@ -133,7 +133,7 @@ The view sdrtop opens on. A slim header plus a left **instrument rail** that pac
 
 ### Scanning & field views
 - **Frequency sweep**: scan a band wider than one window can show. sdrtop retunes across it, stitches the result into a single curve with band-plan labels, and lets you press `Enter` on a peak to tune straight to it
-- **Micro field views**: the deliberately tiny mode (`0`). The idea is that sdrtop shouldn't need a full terminal to be useful. When it's squeezed into a slim tmux split, an SSH session on a phone, or the postage-stamp screen of a cyberdeck, the full panels stop being readable, so the micro views strip each concern down to a single glance (overview · signal · gain · health · sweep) and let you cycle between them. One number that matters, big enough to read across the room. *(Heads up: the looks are still cooking. The idea's solid, the pixels are a work in progress.)*
+- **Micro field views**: the deliberately tiny mode, a section of its own in the menu. The idea is that sdrtop shouldn't need a full terminal to be useful. When it's squeezed into a slim tmux split, an SSH session on a phone, or the postage-stamp screen of a cyberdeck, the full panels stop being readable, so the micro views strip each concern down to a single glance (overview · signal · gain · health) and give each one its own key. One number that matters, big enough to read across the room. *(Heads up: the looks are still cooking. The idea's solid, the pixels are a work in progress.)*
 - **Signal strip**: one live bar with the essentials. P/NF · channel power · noise floor · ADC saturation · drops · buffer fill · IQ imbalance · RBW
 - **Observer mode**: if another app already holds the radio, sdrtop shows device identity, the owning process, and USB stats instead of falling over, then reclaims the device when it's free
 
@@ -141,7 +141,7 @@ The view sdrtop opens on. A slim header plus a left **instrument rail** that pac
 
 ### Make it yours
 - **Six themes**: `sdr` · `nord` · `dracula` · `gruvbox` · `catppuccin` · `solarized`
-- **Layout presets**: general + specialised lab layouts. Switch on the fly with the number keys, cycle with `p`, or define your own in the config out of any panel sdrtop draws
+- **Layout presets**: general + specialised lab layouts, grouped into four sections you switch between in the menu. Nine number keys per section, `p` to step through one, or define your own in the config out of any panel sdrtop draws, with its own section and key
 
 > Every lab panel marks itself **[STALE]** the moment RX stops, so a frozen number is never mistaken for a live one. Because the only thing worse than no data is confidently wrong data.
 
@@ -216,11 +216,13 @@ From 0.4.2 onward the release also carries a signed build provenance attestation
 gh attestation verify sdrtop-<version>-x86_64-unknown-linux-gnu.tar.gz --repo mustang6139/sdrtop
 ```
 
-Press `Space` to start receiving. Press `?` for the key reference. Press `q` to quit and save.
+sdrtop opens on its menu: pick a layout with `Enter`, then `Space` to start receiving. `Esc` brings the menu back at any time, and `q` quits and saves.
 
 ---
 
 ## Keys
+
+The layouts are grouped into four sections, and **each section has its own numbers**: `Command Rail` for the general views, `Lab` for the measurement benches, `Sweep` for the band scan, `Micro` for the field views. `2` is the RF bench inside Lab and the spectrum inside Command Rail. `Esc` opens the menu, which shows you the sections, the layouts in the one you're on, and the number that opens each. Nine keys, four times over, rather than one long row to memorise.
 
 | Key        | Action                         |
 | ---------- | ------------------------------ |
@@ -235,12 +237,10 @@ Press `Space` to start receiving. Press `?` for the key reference. Press `q` to 
 | `h`        | Hold / unhold spectrum frame   |
 | `c` / `e` / `l` | Focus the Command Rail / spectrum / waterfall |
 | `i` / `d` / `t` / `v` / `x` / `m` / `n` / `g` / `b` | Focus a lab panel: IQ · RF · timing · vitals · signal · demod · metrics · sweep · measurement banner |
-| `1`–`4`    | Layout presets: Command Rail · spectrum · waterfall · both |
-| `5`–`9`    | Lab presets: IQ · RF · timing · signal · sweep |
-| `0`        | Micro field-mode view (compact; cycles overview → signal → gain → health → sweep) |
-| `p`        | Cycle presets                  |
+| `Esc`      | Open the menu, or leave a focused panel |
+| `1`–`9`    | The nth layout **of the section you're in** |
+| `p`        | Next layout in the same section |
 | `Tab`      | Toggle footer bar              |
-| `?`        | Help overlay                   |
 | `q`        | Quit and save config           |
 
 > Capitals work everywhere: `C` and `c` do the same thing, so you never have to think about whether Shift is down. The only place case matters is when you're *typing*, like a marker name.
@@ -286,7 +286,7 @@ base = "nord"
 
 **Themes:** `sdr` (default) · `nord` · `dracula` · `gruvbox` · `catppuccin` · `solarized`. See [Themes](user_docs/themes.md).
 
-**Custom layouts:** define your own `[presets.*]` blocks and they merge with the built-ins, surviving every save. Full reference in [Layout presets](user_docs/presets.md).
+**Custom layouts:** define your own `[presets.*]` blocks and they merge with the built-ins, surviving every save. Give one a `section` and a `slot` and it gets a place in the menu and a number key of its own. Full reference in [Layout presets](user_docs/presets.md).
 
 ---
 
@@ -326,7 +326,7 @@ No pressure, but if this scratches an itch for you, this is where it goes.
 The feature set is in. So the whole focus has shifted to **making what's already here genuinely good**:
 
 - [ ] **UI polish**: layout, spacing, color, readability, and the small edge cases that make a TUI feel hand-built instead of merely functional
-- [ ] **Micro view redesign**: the field views (`0`) do their job, but the layout deserves a rethink. Bigger, calmer, easier to read at a glance on a tiny screen
+- [ ] **Micro view redesign**: the field views do their job, but the layout deserves a rethink. Bigger, calmer, easier to read at a glance on a tiny screen
 - [ ] **Sharper radio math**: auditing and refining the derived measurements (NF, MDS, IRR, PAPR, sample-rate accuracy, timing) so the numbers are not just present but *trustworthy*
 - [ ] **Bug fixes**: hunting down the rough edges before piling on anything new
 
@@ -334,7 +334,7 @@ No shiny new features until this list feels done. Quality arc, not a feature spr
 
 ### Just landed 🎉
 - [x] **A measurement audit of the Lab Signal bench**: every reading taken apart and asked whether it was true. Occupied bandwidth was measuring the captured span instead of the signal, and that one wrong number was quietly feeding four others. RDS now survives a dropped block instead of throwing away seconds of decoded text, reads accented characters, and stops claiming a station name after you've retuned away from it
-- [x] **FM demodulator with RDS**: filed under sharper radio math rather than new shiny, because it exists to make the numbers say more, not to add a screen. The `lab_signal` bench (`8`, focus `m`) demodulates the channel: deviation, stereo pilot and injection, CTCSS, AM depth, and **RDS** station name, PTY and RadioText. Still no audio, deliberately. It reads radios, it doesn't play them
+- [x] **FM demodulator with RDS**: filed under sharper radio math rather than new shiny, because it exists to make the numbers say more, not to add a screen. The `lab_signal` bench (`Lab 4`, focus `m`) demodulates the channel: deviation, stereo pilot and injection, CTCSS, AM depth, and **RDS** station name, PTY and RadioText. Still no audio, deliberately. It reads radios, it doesn't play them
 - [x] **RTL-SDR support**: R820T / R828D / E4000, the most common dongle on Earth, behind a clean device-abstraction layer. Normal RX and observer mode both
 
 ### Hardware pipeline
