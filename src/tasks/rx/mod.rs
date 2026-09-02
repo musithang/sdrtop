@@ -58,6 +58,9 @@ pub fn spawn_rx_task(
         // Task local: the sample-rate baseline is neither drawn nor shared, so it
         // stays out of the per-frame clone of SdrMetrics.
         let mut rate = metrics::RateBaseline::default();
+        // Last reading of the pull backend's cumulative read-loop clock, so each
+        // poll reports this window rather than the whole session.
+        let mut last_loop_us: Option<(u64, u64)> = None;
 
         loop {
             // Single is_streaming() call per iteration - the result is used for
@@ -84,6 +87,7 @@ pub fn spawn_rx_task(
                     drained.jitter_count,
                 ),
                 measured_rate: rate.rate(device.capabilities().sample_geometry.bytes_per_pair()),
+                read_occupancy: window_occupancy(device.read_loop_us(), &mut last_loop_us),
             };
 
             let rx_enabled = publish::write_back(
@@ -113,4 +117,20 @@ pub fn spawn_rx_task(
             tokio::time::sleep(POLL_INTERVAL).await;
         }
     });
+}
+
+/// Turn the read loop's cumulative clock into this window's occupancy.
+///
+/// The counters are cumulative and never reset, so the first poll of a session
+/// has nothing to subtract from and reports `None` rather than the whole
+/// session's average. `saturating_sub` guards the case a push backend or a
+/// restart could otherwise turn into a wrapped subtraction.
+fn window_occupancy(current: Option<(u64, u64)>, last: &mut Option<(u64, u64)>) -> Option<f32> {
+    let (wait, work) = current?;
+    let previous = last.replace((wait, work));
+    let (prev_wait, prev_work) = previous?;
+    metrics::occupancy(
+        wait.saturating_sub(prev_wait),
+        work.saturating_sub(prev_work),
+    )
 }

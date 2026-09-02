@@ -23,7 +23,7 @@
 //! radio, which is the rule for this whole backend.
 
 use std::ffi::c_void;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::thread::JoinHandle;
 use std::time::Instant;
@@ -99,16 +99,51 @@ pub fn read_size(want: usize, mtu: usize) -> usize {
     }
 }
 
+/// Where the read loop's time went, in microseconds since the stream opened.
+///
+/// **Atomics rather than the shared accumulator**, deliberately. `process_block`
+/// already takes the metrics mutex once per block; folding these in there would
+/// mean a second lock on the same hot path, for two integers, to serve a concept
+/// only a pull backend has. Two relaxed atomic adds cost nothing and keep the
+/// idea where it is true.
+///
+/// Cumulative and never reset. The poll task reads them and takes the difference
+/// between consecutive polls, so a stream that stops and starts again carries on
+/// counting rather than stepping backwards.
+#[derive(Default)]
+pub struct ReadLoopClock {
+    /// Time blocked inside `readStream`.
+    wait_us: AtomicU64,
+    /// Time spent on what it returned.
+    work_us: AtomicU64,
+}
+
+impl ReadLoopClock {
+    /// `(waiting, working)` in microseconds.
+    pub fn read(&self) -> (u64, u64) {
+        (
+            self.wait_us.load(Ordering::Relaxed),
+            self.work_us.load(Ordering::Relaxed),
+        )
+    }
+}
+
 /// A running RX stream, or nothing.
 #[derive(Default)]
 pub struct Streaming {
     pub active: Arc<AtomicBool>,
     thread: Mutex<Option<JoinHandle<()>>>,
+    clock: Arc<ReadLoopClock>,
 }
 
 impl Streaming {
     pub fn is_active(&self) -> bool {
         self.active.load(Ordering::SeqCst)
+    }
+
+    /// Where the read loop's time has gone, for the timing bench.
+    pub fn clock(&self) -> &ReadLoopClock {
+        &self.clock
     }
 
     /// Set the stream up, activate it, and hand it to an owned thread.
@@ -177,6 +212,7 @@ impl Streaming {
         }
 
         let active = Arc::clone(&self.active);
+        let clock = Arc::clone(&self.clock);
         // Raw pointers are not `Send`, and these two are only ever touched by
         // this thread once it starts. The same usize hop `rtlsdr/mod.rs` makes.
         let dev_addr = dev as usize;
@@ -192,6 +228,7 @@ impl Streaming {
                 bytes_per_pair,
                 &active,
                 &ctx,
+                &clock,
             );
             // Teardown belongs to the thread that owned the stream.
             unsafe {
@@ -229,11 +266,13 @@ fn run(
     bytes_per_pair: usize,
     active: &AtomicBool,
     ctx: &RxContext,
+    clock: &ReadLoopClock,
 ) {
     let mut buf = vec![0u8; byte_len(pairs_per_read, bytes_per_pair)];
     let mut quiet_reads: u32 = 0;
 
     while active.load(Ordering::SeqCst) {
+        let entered = Instant::now();
         // Safety: the handles are live for the life of this thread, and `buf`
         // holds `pairs_per_read` elements of the stream's own format.
         let code = unsafe {
@@ -246,8 +285,14 @@ fn run(
             )
         };
         // Taken here rather than after the work, so jitter measures the true
-        // interval between reads and not read-plus-processing.
+        // interval between reads and not read-plus-processing. It is also the
+        // boundary between waiting and working, which is what the clock below
+        // splits the loop on.
         let now = Instant::now();
+        clock.wait_us.fetch_add(
+            now.duration_since(entered).as_micros() as u64,
+            Ordering::Relaxed,
+        );
 
         match outcome(code) {
             Outcome::Pairs(pairs) => {
@@ -285,6 +330,11 @@ fn run(
                 break;
             }
         }
+        // Everything between the read returning and here is work: decoding,
+        // the FFT hand-off, and the accumulator fold inside `process_block`.
+        clock
+            .work_us
+            .fetch_add(now.elapsed().as_micros() as u64, Ordering::Relaxed);
     }
 }
 

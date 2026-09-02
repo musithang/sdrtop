@@ -167,6 +167,24 @@ pub(super) fn callback_timing(sum_us: u64, sq_sum: u64, count: u64) -> Option<(u
     Some((mean, (variance as f64).sqrt() as u64))
 }
 
+/// What fraction of a pull backend's read loop went on work rather than waiting.
+///
+/// **The pull-mode answer to "is the host keeping up".** A push backend is
+/// graded on whether callbacks arrive on time, because the driver paces them. A
+/// pull loop sets its own rhythm, so arrival times say nothing; what says
+/// everything is whether the loop ever gets to block. Below one there is
+/// headroom. At one it never waits, which means it is behind and the driver's
+/// buffer is filling behind it.
+///
+/// `None` before the first complete pass, when there is no window to divide by.
+pub(super) fn occupancy(wait_us: u64, work_us: u64) -> Option<f32> {
+    let total = wait_us.checked_add(work_us)?;
+    if total == 0 {
+        return None;
+    }
+    Some((work_us as f64 / total as f64) as f32)
+}
+
 /// How much history the sample-rate estimate averages over, in microseconds.
 ///
 /// **This is a resolution requirement, not a taste.** Bytes arrive in whole
@@ -498,6 +516,34 @@ mod tests {
             iq_metrics(mo, no_cal(), EIGHT_BIT).adc_peak_dbfs > 40.0,
             "and the same counts on an 8-bit device are far above its rail"
         );
+    }
+
+    // ── Read-loop occupancy ─────────────────────────────────────────────────
+
+    #[test]
+    fn occupancy_is_the_share_of_the_loop_spent_working() {
+        assert_eq!(occupancy(900, 100), Some(0.1), "mostly waiting is healthy");
+        assert_eq!(occupancy(500, 500), Some(0.5));
+        assert_eq!(
+            occupancy(0, 1_000),
+            Some(1.0),
+            "never blocking means the loop is behind"
+        );
+    }
+
+    /// Before the first pass there is no window, and dividing by one that does
+    /// not exist would report a confident 0 or 100 per cent.
+    #[test]
+    fn no_window_yet_is_not_an_answer() {
+        assert_eq!(occupancy(0, 0), None);
+    }
+
+    /// Two counters read at different instants can in principle be nonsense.
+    /// Saturating rather than panicking is the right response in a poll loop.
+    #[test]
+    fn absurd_counters_do_not_panic() {
+        assert_eq!(occupancy(u64::MAX, u64::MAX), None, "the sum overflows");
+        assert_eq!(occupancy(u64::MAX, 0), Some(0.0));
     }
 
     // ── The sample-rate baseline ────────────────────────────────────────────

@@ -243,6 +243,9 @@ impl SdrMetrics {
             throughput_std_mbps: 0.4,
             timing_quality: verdict.quality,
             timing_cause: verdict.cause,
+            // The fixture is a push device (an idle HackRF), which has no read
+            // loop to measure.
+            read_occupancy: None,
             late_callbacks: abs.iter().filter(|&&d| d > budget).count() as u32,
             late_window: abs.len() as u32,
             dev_p95_us: pick(0.95),

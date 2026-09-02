@@ -157,6 +157,13 @@ pub struct TimingState {
     /// Which condition produced `timing_quality`. Written by the same
     /// `classify` call, so the grade and its wording cannot disagree.
     pub timing_cause: TimingCause,
+    /// For a pull backend, the share of the read loop spent working rather than
+    /// waiting. `None` on a push backend, which has no read loop.
+    ///
+    /// Read by the timing bench from T5. Collected now so the path from the read
+    /// thread to the panel is proven before anything draws it.
+    #[cfg_attr(not(test), allow(dead_code))]
+    pub read_occupancy: Option<f32>,
 
     // ── Per-callback deadline view (drives the lab_timing strip chart) ──────────
     /// Signed per-callback deviation from the expected period (µs), newest last.
@@ -268,6 +275,9 @@ impl TimingState {
             throughput_std_mbps,
             timing_quality: verdict.quality,
             timing_cause: verdict.cause,
+            // Measured outside `compute`, by the poll task, and written by
+            // `publish` immediately after this returns.
+            read_occupancy: None,
             cb_deviations_us,
             deadline_budget_us,
             late_callbacks,

@@ -392,6 +392,20 @@ pub trait SdrDevice: Send + Sync {
     fn set_tuner_agc(&self, _on: bool) -> anyhow::Result<()> {
         Ok(())
     }
+
+    /// Cumulative microseconds the read loop has spent `(waiting, working)`,
+    /// for a [`DeliveryModel::Pull`] backend.
+    ///
+    /// `None` is the honest answer for a push backend rather than a pair of
+    /// zeroes: there is no read loop there, so there is nothing to divide. The
+    /// same shape as the optional gain stages above, and for the same reason:
+    /// a device that cannot answer declines rather than inventing a number.
+    ///
+    /// Cumulative, so the caller takes differences. Never reset, so a stream
+    /// that stops and restarts does not step the counters backwards.
+    fn read_loop_us(&self) -> Option<(u64, u64)> {
+        None
+    }
 }
 
 #[cfg(test)]

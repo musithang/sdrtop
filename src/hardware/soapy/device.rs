@@ -113,6 +113,10 @@ impl SdrDevice for SoapyDevice {
         self.streaming.is_active()
     }
 
+    fn read_loop_us(&self) -> Option<(u64, u64)> {
+        Some(self.streaming.clock().read())
+    }
+
     fn set_frequency(&self, hz: u64) -> anyhow::Result<()> {
         unsafe { self.api.set_frequency(self.dev, hz as f64) }
             .map_err(|e| anyhow::anyhow!("{}: {e}", self.args))
