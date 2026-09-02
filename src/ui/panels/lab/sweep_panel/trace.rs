@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (C) 2026 MusiThang <viktor.laszlo92@protonmail.com>
+
 //! The braille canvas: filled body, top edge, cursor glow - in that order, so
 //! each layer sits over the one before it.
 

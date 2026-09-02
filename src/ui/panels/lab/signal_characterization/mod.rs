@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (C) 2026 MusiThang <viktor.laszlo92@protonmail.com>
+
 //! `signal_characterization` - the left column of the `lab_signal` preset's
 //! redesign (DSN-2026-07).
 //!

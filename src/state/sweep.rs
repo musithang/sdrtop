@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (C) 2026 MusiThang <viktor.laszlo92@protonmail.com>
+
 //! `SweepState` - the frequency-scanner mode (`lab_sweep`, `[9]`).
 //!
 //! A sweep maps a band wider than one sample-rate window by retuning the radio

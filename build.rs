@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (C) 2026 MusiThang <viktor.laszlo92@protonmail.com>
+
 /// Where the generated man page lands.
 ///
 /// A fixed path under `target/`, not `OUT_DIR`: `packaging/build-tarball.sh` has

@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (C) 2026 MusiThang <viktor.laszlo92@protonmail.com>
+
 //! The S-meter: an S1..S9+60 bar under the frequency hero, plus the clip
 //! alert-memory line that fades under the SAT metric.
 //!

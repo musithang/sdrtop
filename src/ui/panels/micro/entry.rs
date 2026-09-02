@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (C) 2026 MusiThang <viktor.laszlo92@protonmail.com>
+
 //! `micro_panel` - the field-operator entry view (`micro_main`).
 //!
 //! A self-contained panel (not a composition of others) that answers the four

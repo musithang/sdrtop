@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (C) 2026 MusiThang <viktor.laszlo92@protonmail.com>
+
 /// Ring-buffer capacity for the IQ constellation (number of normalised sample pairs).
 /// Oldest pairs are discarded when this limit is reached.
 pub const CONSTELLATION_CAP: usize = 1024;

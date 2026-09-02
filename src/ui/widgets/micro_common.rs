@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (C) 2026 MusiThang <viktor.laszlo92@protonmail.com>
+
 //! Shared building blocks for the micro ecosystem panels (`micro_panel`,
 //! `micro_signal`, `micro_gain`, `micro_health`). Keeps the status colors,
 //! formatters, the status badge, and the character bar in one place so the four

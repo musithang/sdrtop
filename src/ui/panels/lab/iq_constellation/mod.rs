@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (C) 2026 MusiThang <viktor.laszlo92@protonmail.com>
+
 //! `IqConstellationPanel` - 2-D braille dot-cloud of recent I/Q samples.
 //!
 //! Each frame shows up to `CONSTELLATION_CAP` normalised (I, Q) pairs from

@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (C) 2026 MusiThang <viktor.laszlo92@protonmail.com>
+
 //! `IqHistogramPanel` - where the ADC's range is actually being used.
 //!
 //! A log-scaled chart of the 32-bin I/Q amplitude histogram, split into Low / Mid

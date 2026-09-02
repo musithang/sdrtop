@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (C) 2026 MusiThang <viktor.laszlo92@protonmail.com>
+
 //! Estimated noise figure and minimum discernible signal - what the current
 //! staging costs in sensitivity.
 //!

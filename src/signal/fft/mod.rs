@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (C) 2026 MusiThang <viktor.laszlo92@protonmail.com>
+
 //! Spectrum analysis: the FFT worker thread and the measurements it publishes.
 //!
 //! Split by **when the lock is held**, which is the property that matters in a

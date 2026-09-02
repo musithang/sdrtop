@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (C) 2026 MusiThang <viktor.laszlo92@protonmail.com>
+
 //! `GAIN LINEUP` and `GAIN STAGING` - the signal's level after each stage, and
 //! where the two gain controls sit against their optimal targets.
 //!

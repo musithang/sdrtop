@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (C) 2026 MusiThang <viktor.laszlo92@protonmail.com>
+
 //! What the computer can take: process CPU/RAM, and the USB link it arrives over.
 //!
 //! CPU and RAM come from the system task rather than the radio, so unlike

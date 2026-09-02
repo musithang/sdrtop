@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (C) 2026 MusiThang <viktor.laszlo92@protonmail.com>
+
 //! QUADRATURE section: how far the two channels are from balance.
 //!
 //! Both readings are deviations from zero that can err either way, so both are

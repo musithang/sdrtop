@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (C) 2026 MusiThang <viktor.laszlo92@protonmail.com>
+
 //! The zone label row under the chart: `0───`, a centred `── OK ──`, and `clip`.
 //!
 //! The three widths are the three zones' share of the chart, so the labels sit

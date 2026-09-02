@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (C) 2026 MusiThang <viktor.laszlo92@protonmail.com>
+
 //! `micro_sweep` - the field scanner view (`[0]` cycle, sweep step).
 //!
 //! A compact glance at the running sweep: band range and cycle progress, plus the

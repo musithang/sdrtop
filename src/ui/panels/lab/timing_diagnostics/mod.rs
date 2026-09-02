@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (C) 2026 MusiThang <viktor.laszlo92@protonmail.com>
+
 //! `timing_diagnostics` - the numbers column of the `lab_timing` preset.
 //!
 //! Three zones and a verdict: how regularly callbacks arrive, how close the worst

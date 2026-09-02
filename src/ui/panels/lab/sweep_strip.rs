@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (C) 2026 MusiThang <viktor.laszlo92@protonmail.com>
+
 //! `sweep_strip` - a one-line status bar for the `lab_sweep` preset, mirroring
 //! `signal_strip`: sweep badge, band, progress, cycle info, and the cursor
 //! readout with band-plan identification.

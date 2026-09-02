@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (C) 2026 MusiThang <viktor.laszlo92@protonmail.com>
+
 //! `MPX BASEBAND` - the 0-60 kHz composite the discriminator recovers, drawn as
 //! a braille trace with a tick row naming the three carriers inside it.
 //!

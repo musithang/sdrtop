@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (C) 2026 MusiThang <viktor.laszlo92@protonmail.com>
+
 //! How bad a column is, and which way it blew out.
 //!
 //! Note the level-0 colour: [`theme.value`](crate::Theme), not `status_ok`. This

@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (C) 2026 MusiThang <viktor.laszlo92@protonmail.com>
+
 //! The SIGNAL section of the rail: four metric rows, each a faint axis with a
 //! braille trace over it and the current value at the end.
 

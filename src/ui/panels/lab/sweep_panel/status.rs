@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (C) 2026 MusiThang <viktor.laszlo92@protonmail.com>
+
 //! The bottom row: what the cursor is on, or how the scan is going.
 //!
 //! One row, two mutually exclusive readouts. With a cursor placed the row belongs

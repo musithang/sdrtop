@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (C) 2026 MusiThang <viktor.laszlo92@protonmail.com>
+
 //! The row vocabulary this panel's three zones share.
 //!
 //! A padded label field, the `---` stale form, an inline trend, and the deadline

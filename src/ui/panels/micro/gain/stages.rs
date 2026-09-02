@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (C) 2026 MusiThang <viktor.laszlo92@protonmail.com>
+
 //! The gain chain: the primary stage, the second stage where there is one, and
 //! the front-end boost with the running total.
 //!

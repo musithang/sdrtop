@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (C) 2026 MusiThang <viktor.laszlo92@protonmail.com>
+
 //! Startup: opening the session the rest of the app runs in.
 //!
 //! Two ways in, split by whether the radio is ours to command:

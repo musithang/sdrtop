@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (C) 2026 MusiThang <viktor.laszlo92@protonmail.com>
+
 //! `TimingState` - host-side timing accuracy of the RX stream, derived by the
 //! `rx` polling task and rendered by the `timing_panel` (`lab_timing`, `[8]`).
 //!

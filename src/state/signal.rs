@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (C) 2026 MusiThang <viktor.laszlo92@protonmail.com>
+
 use std::collections::VecDeque;
 
 /// The ADC-saturation scale, in percent of samples pinned to the converter's

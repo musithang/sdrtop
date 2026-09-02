@@ -1,4 +1,8 @@
 #!/bin/sh
+
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (C) 2026 MusiThang <viktor.laszlo92@protonmail.com>
+
 # Print the CHANGELOG.md section for one version, for use as a release body.
 #
 #   packaging/release-notes.sh 0.4.1

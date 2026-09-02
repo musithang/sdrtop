@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (C) 2026 MusiThang <viktor.laszlo92@protonmail.com>
+
 //! The row vocabulary this panel's five zones share.
 //!
 //! Two shapes: a **trend block** (a heading line with an inline 60 s sparkline

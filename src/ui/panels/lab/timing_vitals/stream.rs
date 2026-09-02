@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (C) 2026 MusiThang <viktor.laszlo92@protonmail.com>
+
 //! What the radio delivers: sample drops and ADC saturation, each as a 60 s trend.
 //!
 //! Both are counted in the hot path and both mean "the stream is not clean", but

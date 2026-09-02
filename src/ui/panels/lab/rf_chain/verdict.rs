@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (C) 2026 MusiThang <viktor.laszlo92@protonmail.com>
+
 //! The verdict: three lines of plain language about the gain staging, the action
 //! chips under them, and the status foot.
 //!

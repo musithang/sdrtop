@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (C) 2026 MusiThang <viktor.laszlo92@protonmail.com>
+
 // The command line. Kept in its own file because two things read it: `main.rs`
 // parses with it, and `build.rs` `include!`s this file to render the man page
 // from the same `Parser` derive.

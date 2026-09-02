@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (C) 2026 MusiThang <viktor.laszlo92@protonmail.com>
+
 //! The three read-out blocks under the bell: clip headroom, loading, and the
 //! modeled linearity card.
 //!

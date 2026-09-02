@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (C) 2026 MusiThang <viktor.laszlo92@protonmail.com>
+
 //! `sweep_task` - drives the frequency scanner for the `lab_sweep` preset.
 //!
 //! While `state.sweep.active` (set when `lab_sweep` is the active preset), the

@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (C) 2026 MusiThang <viktor.laszlo92@protonmail.com>
+
 //! `LevelDiagramPanel` - the Gain-Staging Level Diagram, centre of the Lab RF bench.
 //!
 //! Plots the modeled signal level and noise floor climbing stage-by-stage

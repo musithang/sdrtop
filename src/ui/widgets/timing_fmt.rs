@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (C) 2026 MusiThang <viktor.laszlo92@protonmail.com>
+
 //! Shared formatting for the timing read-outs, so every panel that prints a
 //! period, a drift or a verdict prints it the same way.
 //!

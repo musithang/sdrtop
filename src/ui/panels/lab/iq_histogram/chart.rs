@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (C) 2026 MusiThang <viktor.laszlo92@protonmail.com>
+
 //! The log-scaled bin chart: filled columns with an outline over their tops.
 //!
 //! Same visual language as the spectrum trace, so the two read alike. Colour is

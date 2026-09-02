@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (C) 2026 MusiThang <viktor.laszlo92@protonmail.com>
+
 //! Drawing primitives shared across panels.
 //!
 //! Nothing here knows about layout or about any particular panel: these are the

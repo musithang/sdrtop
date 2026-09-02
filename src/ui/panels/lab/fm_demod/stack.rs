@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (C) 2026 MusiThang <viktor.laszlo92@protonmail.com>
+
 //! The line stack and its shedding rule: what the panel gives up first when the
 //! sections it wants to show are taller than the column it has.
 //!

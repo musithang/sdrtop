@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (C) 2026 MusiThang <viktor.laszlo92@protonmail.com>
+
 //! The bonded seam: what the waterfall draws instead of its own nameplate when
 //! it sits directly under the spectrum.
 //!

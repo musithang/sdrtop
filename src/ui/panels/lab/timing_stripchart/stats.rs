@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (C) 2026 MusiThang <viktor.laszlo92@protonmail.com>
+
 //! The inset stats line: the numbers the chart cannot show.
 //!
 //! The plot says *when* callbacks were late; this row says how often and how

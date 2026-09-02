@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (C) 2026 MusiThang <viktor.laszlo92@protonmail.com>
+
 //! What the gain is actually doing to the converter: how much of its range is in
 //! use, and how often it is being driven past the end of it.
 //!

@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (C) 2026 MusiThang <viktor.laszlo92@protonmail.com>
+
 //! Three-row block-glyph digits for the Command Rail's frequency hero.
 //!
 //! Each character is a 3×3 cell sprite drawn with the half-block elements

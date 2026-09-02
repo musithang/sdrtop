@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (C) 2026 MusiThang <viktor.laszlo92@protonmail.com>
+
 //! RDS - the signal layer: recovering the bitstream from the 57 kHz subcarrier
 //! in the demodulated MPX baseband. The protocol that consumes those bits lives
 //! in [`super::rds`].

@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (C) 2026 MusiThang <viktor.laszlo92@protonmail.com>
+
 //! The RX stream and the thread that drives it.
 //!
 //! `readStream` is a blocking pull, like librtlsdr's async read, so it gets an

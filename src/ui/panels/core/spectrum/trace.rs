@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (C) 2026 MusiThang <viktor.laszlo92@protonmail.com>
+
 //! The trace itself: the braille dot-matrix canvas the spectrum is drawn on.
 //!
 //! ratatui's `Canvas` rasterises every shape onto a 2x4 braille dot grid per

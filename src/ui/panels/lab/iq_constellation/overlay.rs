@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (C) 2026 MusiThang <viktor.laszlo92@protonmail.com>
+
 //! The text boxes drawn *over* the canvas: a vector-analyser read-out top-right,
 //! the density legend bottom-left, the measured centroid bottom-right, and the
 //! caption along the foot.

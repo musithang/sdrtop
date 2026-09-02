@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (C) 2026 MusiThang <viktor.laszlo92@protonmail.com>
+
 //! Shared I/Q quality math used by both the RX task (trend history) and the
 //! Lab IQ panels, so the displayed IRR and the logged/trended IRR can never drift
 //! apart.

@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (C) 2026 MusiThang <viktor.laszlo92@protonmail.com>
+
 //! DC OFFSET section: where the I/Q centroid sits, and what that costs at the LO.
 //!
 //! I and Q are deviations from zero, so they get null-meters; the magnitude is a

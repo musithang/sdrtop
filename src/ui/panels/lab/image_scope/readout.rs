@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (C) 2026 MusiThang <viktor.laszlo92@protonmail.com>
+
 //! The four read-out lines under the chart, plus the caption.
 //!
 //! Each line is `mark · label · value · decoration`, and the decoration is the

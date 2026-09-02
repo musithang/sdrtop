@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (C) 2026 MusiThang <viktor.laszlo92@protonmail.com>
+
 //! `timing_stripchart` - the centrepiece of the `lab_timing` bench.
 //!
 //! A real-time strip chart of the per-callback interval deviation from the

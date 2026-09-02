@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (C) 2026 MusiThang <viktor.laszlo92@protonmail.com>
+
 //! `SPECTRAL SHAPE` - how the signal has behaved over the last minute, and how
 //! peaky it is.
 //!

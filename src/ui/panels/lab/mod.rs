@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (C) 2026 MusiThang <viktor.laszlo92@protonmail.com>
+
 //! The measurement benches (`5` to `9`) and the instrument bars that wrap them.
 //!
 //! [`bars`] holds the top banner and the bottom marker readout that every lab

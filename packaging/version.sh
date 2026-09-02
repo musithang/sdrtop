@@ -1,4 +1,8 @@
 #!/bin/sh
+
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (C) 2026 MusiThang <viktor.laszlo92@protonmail.com>
+
 # The one rule for what version sdrtop is.
 #
 #   packaging/version.sh     ->   0.4.1

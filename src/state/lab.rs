@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (C) 2026 MusiThang <viktor.laszlo92@protonmail.com>
+
 //! Lab "instrument mode" measurement state - the REF / averaging / reference-
 //! trace controls the lab presets' instrument-chrome (banner + marker bar) shows
 //! and the lab spectrum reacts to. Driven from the banner focus (`b`); the marker

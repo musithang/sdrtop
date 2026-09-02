@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (C) 2026 MusiThang <viktor.laszlo92@protonmail.com>
+
 //! A theme as it is *written down*: hex strings and gradient stops.
 //!
 //! This is the shape of `theme/palettes/*.toml` and of anything a user drops in

@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (C) 2026 MusiThang <viktor.laszlo92@protonmail.com>
+
 //! The bar chart: an LO-centred slice of the spectrum drawn in block characters,
 //! with a marker row above it and a frequency axis below.
 //!

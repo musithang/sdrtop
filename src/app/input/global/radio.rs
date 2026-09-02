@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (C) 2026 MusiThang <viktor.laszlo92@protonmail.com>
+
 //! The keys that command the radio: `[Space]`, `[R]`, `[F]`, `[S]`.
 //!
 //! Each is a no-op without a device, which is what makes observer mode and the

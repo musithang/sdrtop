@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (C) 2026 MusiThang <viktor.laszlo92@protonmail.com>
+
 //! Shared RF-chain calculations: cascade noise figure, minimum detectable
 //! signal, gain-staging advice, and ADC utilisation. Used by both the `rf_chain`
 //! lab panel and the `micro_gain` field view so the numbers stay identical.

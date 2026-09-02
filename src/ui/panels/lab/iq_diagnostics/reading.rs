@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (C) 2026 MusiThang <viktor.laszlo92@protonmail.com>
+
 //! What the panel measures, computed once.
 //!
 //! Four blocks draw from the same six numbers, and two of them (the verdict and

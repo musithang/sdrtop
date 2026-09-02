@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (C) 2026 MusiThang <viktor.laszlo92@protonmail.com>
+
 //! `RDS` - the 57 kHz data subcarrier: the station's name, its identity codes,
 //! and whatever RadioText it is sending.
 //!

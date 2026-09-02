@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (C) 2026 MusiThang <viktor.laszlo92@protonmail.com>
+
 //! The cloud's heat layers: splitting the dot cloud by local point density so a
 //! dense core can be drawn hotter than the sparse skirt around it.
 

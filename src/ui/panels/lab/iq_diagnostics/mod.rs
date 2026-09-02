@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (C) 2026 MusiThang <viktor.laszlo92@protonmail.com>
+
 //! `IqDiagnosticsPanel` - the front end's I/Q health, as four stacked blocks.
 //!
 //! DC offset, quadrature balance, image rejection, then one plain-language

@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (C) 2026 MusiThang <viktor.laszlo92@protonmail.com>
+
 //! The measurement behind the picture: fit a ring to the cloud, then say how
 //! tightly the cloud sits on it.
 //!

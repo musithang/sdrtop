@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (C) 2026 MusiThang <viktor.laszlo92@protonmail.com>
+
 //! `micro_signal` - the field signal-quality view (`[0]` cycle, 2nd step).
 //!
 //! Built for antenna aiming and level hunting: a large, immediately readable SNR

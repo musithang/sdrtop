@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (C) 2026 MusiThang <viktor.laszlo92@protonmail.com>
+
 //! The arithmetic behind the readings. No theme, no width, no frame.
 
 /// Binary MB/s ceiling of the USB link for this device: the byte rate at the

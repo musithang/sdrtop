@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (C) 2026 MusiThang <viktor.laszlo92@protonmail.com>
+
 //! `micro_health` - the field health view (`[0]` cycle, 4th step).
 //!
 //! For long unattended captures: what the stream is doing, what the host is

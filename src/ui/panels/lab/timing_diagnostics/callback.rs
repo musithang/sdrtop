@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (C) 2026 MusiThang <viktor.laszlo92@protonmail.com>
+
 //! CALLBACK TIMING: how regularly the driver hands blocks over.
 //!
 //! Two different scatter measures live here and they are not the same thing:

@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (C) 2026 MusiThang <viktor.laszlo92@protonmail.com>
+
 //! `micro_gain` - the field gain-staging view (`[0]` cycle, 3rd step).
 //!
 //! For setting gain fast on arrival: wide primary/second-stage bars, prominent

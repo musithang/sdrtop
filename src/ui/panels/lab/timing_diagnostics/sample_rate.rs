@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (C) 2026 MusiThang <viktor.laszlo92@protonmail.com>
+
 //! SAMPLE RATE: whether the clock is delivering what was asked for.
 //!
 //! Configured against actual, the drift in ppm, and the throughput it produces.

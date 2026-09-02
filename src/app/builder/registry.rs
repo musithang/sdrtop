@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (C) 2026 MusiThang <viktor.laszlo92@protonmail.com>
+
 //! The panel registry and the layout engine built on it.
 //!
 //! Registration is the one list that makes a panel addressable: a preset names

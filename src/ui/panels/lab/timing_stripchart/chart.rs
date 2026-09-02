@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (C) 2026 MusiThang <viktor.laszlo92@protonmail.com>
+
 //! The strip itself: braille columns, coloured where they cross the budget, with
 //! the deadline guide behind them and spike tags at the edges.
 //!

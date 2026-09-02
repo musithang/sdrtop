@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (C) 2026 MusiThang <viktor.laszlo92@protonmail.com>
+
 /// Known frequency allocations: (start_hz, end_hz, label).
 /// Used by the spectrum and waterfall panels for visual overlays.
 pub const BAND_PLAN: &[(u64, u64, &str)] = &[

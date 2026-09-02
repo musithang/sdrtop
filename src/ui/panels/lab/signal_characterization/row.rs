@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (C) 2026 MusiThang <viktor.laszlo92@protonmail.com>
+
 //! The row vocabulary every zone of this panel writes into: the label column,
 //! the rule for a trailing annotation, and the two styles a value wears.
 

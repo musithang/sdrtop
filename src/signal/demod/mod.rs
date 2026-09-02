@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (C) 2026 MusiThang <viktor.laszlo92@protonmail.com>
+
 //! FM demodulation as a *measurement*, not audio (see `dev_docs/demod-plan.md`).
 //!
 //! One worker covers all three modes, branching on the classifier: WFM (polar

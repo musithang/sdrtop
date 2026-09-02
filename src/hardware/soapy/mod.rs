@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (C) 2026 MusiThang <viktor.laszlo92@protonmail.com>
+
 //! The SoapySDR backend: one API, and behind it most of the radios sdrtop does
 //! not have a driver for.
 //!

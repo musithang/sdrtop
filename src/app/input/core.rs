@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (C) 2026 MusiThang <viktor.laszlo92@protonmail.com>
+
 //! The two primary plots' focus keys.
 //!
 //! `[E]` on the spectrum tunes, steps, zooms and places markers; `[L]` on the

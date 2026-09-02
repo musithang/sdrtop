@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (C) 2026 MusiThang <viktor.laszlo92@protonmail.com>
+
 //! The frequency hero at the top of the rail: the tuned frequency in big
 //! seven-segment digits with the active tuning digit lit, and the band / sample
 //! rate line under it.

@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (C) 2026 MusiThang <viktor.laszlo92@protonmail.com>
+
 //! Device-agnostic per-block sample accumulation. Both backends funnel their
 //! raw USB byte blocks through [`process_block`]: HackRF from its `extern "C"`
 //! callback, RTL-SDR from its owned read thread. Only the byte→sample decode and

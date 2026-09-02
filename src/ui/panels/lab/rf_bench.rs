@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (C) 2026 MusiThang <viktor.laszlo92@protonmail.com>
+
 //! The row vocabulary the two Lab RF bench columns share.
 //!
 //! `adc_loading` and `rf_chain` are one instrument split across two panels - the

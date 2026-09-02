@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (C) 2026 MusiThang <viktor.laszlo92@protonmail.com>
+
 //! `ADJACENT CHANNEL` - the two adjacent-channel power ratios, each with a
 //! badness bar, plus the absolute level of the louder of the two bands.
 

@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (C) 2026 MusiThang <viktor.laszlo92@protonmail.com>
+
 //! Device abstraction: the [`SdrDevice`] trait plus the capability and metadata
 //! types that let HackRF, RTL-SDR, and future backends share one RX → FFT
 //! pipeline, one UI, and one input handler. Concrete backends live in the

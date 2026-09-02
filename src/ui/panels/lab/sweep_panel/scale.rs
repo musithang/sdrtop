@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (C) 2026 MusiThang <viktor.laszlo92@protonmail.com>
+
 //! The plot's coordinate systems: the dBFS window, the gutter width, and how a
 //! height maps to a colour.
 //!

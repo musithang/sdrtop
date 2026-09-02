@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (C) 2026 MusiThang <viktor.laszlo92@protonmail.com>
+
 //! The band-plan label row: which allocations the sweep is crossing.
 //!
 //! Pure string building, so the placement can be checked without rendering. It

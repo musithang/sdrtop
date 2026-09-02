@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (C) 2026 MusiThang <viktor.laszlo92@protonmail.com>
+
 //! The lock block: the only place this worker writes to the shared state.
 //!
 //! Everything expensive has already been computed by [`super::analysis`], so the

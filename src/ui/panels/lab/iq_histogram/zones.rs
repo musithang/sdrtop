@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (C) 2026 MusiThang <viktor.laszlo92@protonmail.com>
+
 //! The three amplitude zones, and the counts that fall in them.
 //!
 //! The histogram's 32 bins split into Low / Mid / Clip, and before the split that

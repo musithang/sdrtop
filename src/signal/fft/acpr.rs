@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (C) 2026 MusiThang <viktor.laszlo92@protonmail.com>
+
 //! Adjacent-channel power ratio: how much of this transmission is landing in the
 //! channels either side of it.
 //!

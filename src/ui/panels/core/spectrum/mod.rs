@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (C) 2026 MusiThang <viktor.laszlo92@protonmail.com>
+
 //! The spectrum: the deck's primary instrument.
 //!
 //! Split by what each part draws rather than by when it runs, because the parts

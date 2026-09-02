@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (C) 2026 MusiThang <viktor.laszlo92@protonmail.com>
+
 //! The menu: the app's launcher and its key reference.
 //!
 //! **Not a panel.** Full-screen UI in the family of [`crate::ui::overlay`] and

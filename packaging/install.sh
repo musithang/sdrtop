@@ -1,4 +1,8 @@
 #!/bin/sh
+
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (C) 2026 MusiThang <viktor.laszlo92@protonmail.com>
+
 # Install sdrtop on any Linux distribution.
 #
 #   curl -fsSL https://raw.githubusercontent.com/mustang6139/sdrtop/main/packaging/install.sh | sh

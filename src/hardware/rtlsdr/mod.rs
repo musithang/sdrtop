@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (C) 2026 MusiThang <viktor.laszlo92@protonmail.com>
+
 //! RTL-SDR backend: implements [`SdrDevice`] over librtlsdr. The per-sample math
 //! is shared with HackRF via [`super::process::process_block`]; what differs is
 //! the unsigned-8-bit sample format, the single discrete tuner-gain model, and

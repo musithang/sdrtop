@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (C) 2026 MusiThang <viktor.laszlo92@protonmail.com>
+
 //! The visible slice of the FFT frame.
 //!
 //! Bonded under the waterfall, the two plots narrow to the same centre slice of

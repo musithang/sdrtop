@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (C) 2026 MusiThang <viktor.laszlo92@protonmail.com>
+
 //! The signed-sample bell: the panel's hero visual, plus the caliper guides
 //! overlaid on it and the axis and legend that tie it to numbers.
 //!

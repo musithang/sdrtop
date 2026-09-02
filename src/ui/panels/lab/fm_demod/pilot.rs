@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (C) 2026 MusiThang <viktor.laszlo92@protonmail.com>
+
 //! `PILOT / STEREO` - the 19 kHz tone that says a broadcast is in stereo, and
 //! how hard it is being injected.
 

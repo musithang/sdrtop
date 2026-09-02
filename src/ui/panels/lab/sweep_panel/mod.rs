@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (C) 2026 MusiThang <viktor.laszlo92@protonmail.com>
+
 //! `sweep_panel` - the frequency-scanner display for the `lab_sweep` preset.
 //!
 //! The latest completed `SweepFrame` as a braille envelope over the swept band,

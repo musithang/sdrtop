@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (C) 2026 MusiThang <viktor.laszlo92@protonmail.com>
+
 //! Coordinate mapping and the frequency ruler.
 //!
 //! The spectrum works in three coordinate systems at once and they are easy to

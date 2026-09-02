@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (C) 2026 MusiThang <viktor.laszlo92@protonmail.com>
+
 //! The libSoapySDR symbol table, and the one place in the tree that declares it.
 //!
 //! **Nothing else calls into the library.** Every `unsafe extern "C"` signature

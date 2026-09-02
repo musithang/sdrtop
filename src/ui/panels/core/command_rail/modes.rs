@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (C) 2026 MusiThang <viktor.laszlo92@protonmail.com>
+
 //! The mode strip and its lead card.
 //!
 //! The rail's mode auto-follows what the user is doing - tuning switches to

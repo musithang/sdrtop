@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (C) 2026 MusiThang <viktor.laszlo92@protonmail.com>
+
 //! The ring buffer between the radio and the host: how full it gets, and how much
 //! room is left before an overrun.
 //!

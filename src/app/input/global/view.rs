@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (C) 2026 MusiThang <viktor.laszlo92@protonmail.com>
+
 //! The keys that change what is on screen without touching the radio: leaving
 //! focus, the overlays, the waterfall pause and the spectrum hold, and entering
 //! a panel's own mode.

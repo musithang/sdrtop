@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (C) 2026 MusiThang <viktor.laszlo92@protonmail.com>
+
 //! What a driver said about itself, turned into a [`DeviceCapabilities`].
 //!
 //! **This file never sees a device pointer.** It takes [`DriverAnswers`], which

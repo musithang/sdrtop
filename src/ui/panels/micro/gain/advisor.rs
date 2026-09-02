@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (C) 2026 MusiThang <viktor.laszlo92@protonmail.com>
+
 //! The headline: one sentence saying what to do about the gain.
 //!
 //! The reason this view exists. Everything above it is evidence; this is the

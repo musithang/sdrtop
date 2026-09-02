@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (C) 2026 MusiThang <viktor.laszlo92@protonmail.com>
+
 //! The scope's colour vocabulary.
 //!
 //! Carrier, image and DC each get one colour, and every part of the panel uses

@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (C) 2026 MusiThang <viktor.laszlo92@protonmail.com>
+
 //! `DEVIATION` - how far the carrier is being swung, against the nominal limit
 //! for the mode, plus where the carrier actually sits inside the channel.
 

@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (C) 2026 MusiThang <viktor.laszlo92@protonmail.com>
+
 //! RDS - the protocol layer: block synchronisation, group assembly, and the
 //! fields the panel shows (PI, PTY, programme service name, RadioText).
 //!

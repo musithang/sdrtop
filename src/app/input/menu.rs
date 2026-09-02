@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (C) 2026 MusiThang <viktor.laszlo92@protonmail.com>
+
 //! The menu's own keys, live only while the menu is open.
 //!
 //! Layer 2 of the dispatch: above panel focus, below text entry. The menu is

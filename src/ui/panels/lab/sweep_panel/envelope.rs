@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (C) 2026 MusiThang <viktor.laszlo92@protonmail.com>
+
 //! Projecting a completed sweep onto the plot's horizontal resolution.
 //!
 //! Two vectors come out of this, and the difference matters: `raw` keeps

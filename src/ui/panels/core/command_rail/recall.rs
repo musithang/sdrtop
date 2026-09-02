@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (C) 2026 MusiThang <viktor.laszlo92@protonmail.com>
+
 //! The RECALL section: three tuning-memory slots, each a pip showing whether it
 //! is empty, holding a frequency, or the one currently tuned.
 

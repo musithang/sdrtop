@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (C) 2026 MusiThang <viktor.laszlo92@protonmail.com>
+
 //! The key reference, and the check that stops it drifting.
 //!
 //! The overlay this replaces was a hardcoded block of text that claimed

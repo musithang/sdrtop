@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (C) 2026 MusiThang <viktor.laszlo92@protonmail.com>
+
 //! **Lock block 1**: drain the accumulators and do the integer work.
 //!
 //! One critical section, entered once per poll. Everything in here is integer

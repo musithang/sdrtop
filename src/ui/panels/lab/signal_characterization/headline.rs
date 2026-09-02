@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (C) 2026 MusiThang <viktor.laszlo92@protonmail.com>
+
 //! `RADIO HEADLINE` - the one figure that answers "is there anything here?":
 //! peak over noise floor, with the classifier's modulation badge and a status
 //! lamp in the same colour.

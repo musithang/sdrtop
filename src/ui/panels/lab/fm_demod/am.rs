@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (C) 2026 MusiThang <viktor.laszlo92@protonmail.com>
+
 //! `DEPTH` and `CARRIER` - the AM pair. Two sections rather than one because
 //! they answer different questions, but one module because they read the same
 //! measurement and appear together or not at all.

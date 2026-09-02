@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (C) 2026 MusiThang <viktor.laszlo92@protonmail.com>
+
 //! `AdcLoadingPanel` - the ADC Loading column of the Lab RF bench ([6]).
 //!
 //! Shows how hard the 8-bit ADC is actually driven: the **signed sample histogram**

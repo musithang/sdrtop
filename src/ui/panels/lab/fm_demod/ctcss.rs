@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (C) 2026 MusiThang <viktor.laszlo92@protonmail.com>
+
 //! `CTCSS` - the subaudible tone a narrow-band FM repeater is squelched on.
 //!
 //! The only section with three empty states rather than one: a tone, a search

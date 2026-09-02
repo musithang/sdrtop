@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (C) 2026 MusiThang <viktor.laszlo92@protonmail.com>
+
 //! The dBFS colour-scale gutter down the left edge and the focus-mode readout
 //! row along the bottom.
 //!

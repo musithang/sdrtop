@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (C) 2026 MusiThang <viktor.laszlo92@protonmail.com>
+
 //! The number keys: `[1]`–`[9]` pick a layout, `[0]` cycles the micro family.
 //!
 //! Presets are data and the keys are code, so a key can always end up naming a

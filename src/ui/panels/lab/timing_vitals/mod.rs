@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (C) 2026 MusiThang <viktor.laszlo92@protonmail.com>
+
 //! `timing_vitals` - the host-pipeline health column of the `lab_timing` preset.
 //!
 //! Sample drops, ADC saturation and CPU as 60 s trends, then the USB link and the

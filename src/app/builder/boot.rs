@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (C) 2026 MusiThang <viktor.laszlo92@protonmail.com>
+
 //! What a fresh [`SdrMetrics`] looks like, and the handful of fields that depend
 //! on whether there is a device to talk to.
 //!

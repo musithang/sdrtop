@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (C) 2026 MusiThang <viktor.laszlo92@protonmail.com>
+
 //! The RX poll: one 200 ms loop that is the only writer of most of `SdrMetrics`.
 //!
 //! The loop is split by **when it holds the lock**, because that is the property

@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (C) 2026 MusiThang <viktor.laszlo92@protonmail.com>
+
 //! Peak-to-Average Power Ratio, estimated from the amplitude histogram.
 //!
 //! Pure arithmetic over the bin counts, with no access to the panel - which is

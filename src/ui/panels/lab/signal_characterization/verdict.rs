@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (C) 2026 MusiThang <viktor.laszlo92@protonmail.com>
+
 //! The verdict engine: a plain-language read of the same four zones the panel
 //! has just printed as numbers.
 //!

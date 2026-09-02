@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (C) 2026 MusiThang <viktor.laszlo92@protonmail.com>
+
 //! The panels themselves, grouped by which screen they belong to.
 //!
 //! - [`core`]: the everyday views. Header, spectrum, waterfall, the Command Rail,

@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (C) 2026 MusiThang <viktor.laszlo92@protonmail.com>
+
 //! The waterfall grid itself: history rows painted as coloured half-blocks.
 //!
 //! Each character cell carries **two** time rows - `▀` with the older row as the

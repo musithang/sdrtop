@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (C) 2026 MusiThang <viktor.laszlo92@protonmail.com>
+
 //! What the stream is doing: drops, saturation, buffer fill - each with its 60 s
 //! trend and a one-word verdict.
 //!

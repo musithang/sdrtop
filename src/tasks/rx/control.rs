@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (C) 2026 MusiThang <viktor.laszlo92@protonmail.com>
+
 //! The parts of the poll that talk to the radio: starting and stopping RX,
 //! noticing that it stopped on its own, and the Lab RF auto-gain latch.
 //!
