@@ -29,6 +29,12 @@ pub(super) struct Drained {
     pub jitter_sum_us: u64,
     pub jitter_sq_sum: u64,
     pub jitter_count: u64,
+    /// The configured sample rate this window was captured at.
+    ///
+    /// The task watches it for changes. A long baseline that spans a retune to
+    /// a different rate is an average of two regimes, and would report the blend
+    /// as a clock fault for the length of the baseline.
+    pub config_sample_rate: f64,
     /// This window's length and byte count, for the task's rate baseline.
     ///
     /// Handed out rather than turned into a sample rate here: the sample rate is
@@ -94,6 +100,7 @@ pub(super) fn drain(
         jitter_count: m.acc.jitter_count,
         elapsed_us,
         bytes,
+        config_sample_rate: m.radio.config_sample_rate,
     };
     m.acc.drops = 0;
     m.acc.saturated = 0;

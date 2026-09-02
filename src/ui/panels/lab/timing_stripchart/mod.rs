@@ -48,10 +48,14 @@ impl Panel for TimingStripchartPanel {
         (48, 12)
     }
 
-    fn chrome(&self, _state: &SdrMetrics) -> PanelChrome {
-        PanelChrome::new("Callback Interval")
-            .stale_when(Staleness::NotStreaming)
-            .suffix(" \u{00b7} Real-Time Strip Chart")
+    fn chrome(&self, state: &SdrMetrics) -> PanelChrome {
+        PanelChrome::new(match state.caps.delivery {
+            // A pull backend has no callbacks; the plot is of read gaps.
+            crate::hardware::DeliveryModel::Push => "Callback Interval",
+            crate::hardware::DeliveryModel::Pull => "Read Interval",
+        })
+        .stale_when(Staleness::NotStreaming)
+        .suffix(" \u{00b7} Real-Time Strip Chart")
     }
 
     fn render(
@@ -84,7 +88,7 @@ impl Panel for TimingStripchartPanel {
             Paragraph::new(Line::from(vec![
                 Span::raw(" "),
                 Span::styled(
-                    captions::description(inner.width as usize),
+                    captions::description(inner.width as usize, state.caps.delivery),
                     Style::default().fg(theme.label),
                 ),
             ])),
@@ -104,7 +108,13 @@ impl Panel for TimingStripchartPanel {
             rows[4],
         );
         f.render_widget(
-            Paragraph::new(captions::window_row(rows[3].width, t, stale, theme)),
+            Paragraph::new(captions::window_row(
+                rows[3].width,
+                t,
+                state.caps.delivery,
+                stale,
+                theme,
+            )),
             rows[5],
         );
     }
@@ -209,7 +219,7 @@ mod tests {
             );
             assert_eq!(
                 desc,
-                super::captions::description(w as usize - 2),
+                super::captions::description(w as usize - 2, crate::hardware::DeliveryModel::Push),
                 "width {w}: drew a form the width does not select"
             );
         }

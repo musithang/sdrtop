@@ -16,11 +16,21 @@ use super::chart::shown_samples;
 /// The leading space every caption row is indented by.
 const LEAD_W: usize = 1;
 
-/// What the plot is, written three times at three lengths.
-const DESC: [&str; 3] = [
+/// What the plot is, written three times at three lengths, once per delivery
+/// model.
+///
+/// A pull backend has no callbacks and no expected period to deviate from: each
+/// point is one `readStream` return, and the spread is our own loop draining a
+/// buffer. Saying otherwise is the same invented fact the verdict used to print.
+const DESC_PUSH: [&str; 3] = [
     "each point is one RX callback \u{00b7} deviation of its interval from the expected period \u{00b7} bars past the band are late",
     "per-callback interval deviation from the expected period",
     "callback interval deviation",
+];
+const DESC_PULL: [&str; 3] = [
+    "each point is one read \u{00b7} how far its gap sat from the mean \u{00b7} a pull loop drains, then waits",
+    "read gap spread \u{00b7} our own rhythm, not the link's",
+    "read gap spread",
 ];
 
 /// The longest form that actually fits, counting the leading space.
@@ -35,13 +45,18 @@ const DESC: [&str; 3] = [
 /// The shortest form is the floor. It needs 28 columns and the panel's
 /// `min_size` is 48, so it is only clipped in a layout the panel already
 /// declines.
-pub(super) fn description(iw: usize) -> &'static str {
+pub(super) fn description(iw: usize, delivery: crate::hardware::DeliveryModel) -> &'static str {
+    let table = match delivery {
+        crate::hardware::DeliveryModel::Push => &DESC_PUSH,
+        crate::hardware::DeliveryModel::Pull => &DESC_PULL,
+    };
     // Every caption row starts with one space, so that column is not available.
     let room = iw.saturating_sub(LEAD_W);
-    DESC.iter()
+    table
+        .iter()
         .find(|d| d.chars().count() <= room)
         .copied()
-        .unwrap_or(DESC[DESC.len() - 1])
+        .unwrap_or(table[table.len() - 1])
 }
 
 /// The colour key, and what the guide line marks.
@@ -88,22 +103,24 @@ pub(super) fn window_secs(chart_w: u16, t: &TimingState) -> f64 {
 pub(super) fn window_row(
     chart_w: u16,
     t: &TimingState,
+    delivery: crate::hardware::DeliveryModel,
     stale: bool,
     theme: &crate::Theme,
 ) -> Line<'static> {
     let lbl = Style::default().fg(theme.label);
+    let unit = match delivery {
+        crate::hardware::DeliveryModel::Push => "one point per RX callback",
+        crate::hardware::DeliveryModel::Pull => "one point per read",
+    };
     // With no measured period there is no time axis to name, only a sample axis.
     if stale || t.cb_period_us == 0 {
-        return Line::from(vec![
-            Span::raw(" "),
-            Span::styled("one point per RX callback", lbl),
-        ]);
+        return Line::from(vec![Span::raw(" "), Span::styled(unit, lbl)]);
     }
     Line::from(vec![
         Span::raw(" "),
         Span::styled(
             format!(
-                "\u{2190} {:.1} s window \u{00b7} one point per RX callback \u{2192}",
+                "\u{2190} {:.1} s window \u{00b7} {unit} \u{2192}",
                 window_secs(chart_w, t)
             ),
             lbl,
@@ -120,7 +137,7 @@ mod tests {
     #[test]
     fn every_description_fits_the_width_that_selects_it() {
         for iw in [28usize, 40, 57, 60, 113, 200] {
-            let d = description(iw);
+            let d = description(iw, crate::hardware::DeliveryModel::Push);
             assert!(
                 d.chars().count() <= iw - LEAD_W,
                 "iw={iw}: {:?} is {} chars",
@@ -134,20 +151,36 @@ mod tests {
     /// the longer sentence starts to fit.
     #[test]
     fn the_description_grows_with_the_panel() {
-        assert!(description(30).len() < description(60).len());
-        assert!(description(60).len() < description(120).len());
-        for d in DESC {
+        let push = crate::hardware::DeliveryModel::Push;
+        assert!(description(30, push).len() < description(60, push).len());
+        assert!(description(60, push).len() < description(120, push).len());
+        for d in DESC_PUSH {
             let need = d.chars().count() + LEAD_W;
-            assert_eq!(description(need), d, "{d:?} should be chosen at {need}");
+            assert_eq!(
+                description(need, push),
+                d,
+                "{d:?} should be chosen at {need}"
+            );
         }
         // Every form but the last gives way one column below its own length.
         // The shortest is the floor and is returned however narrow the panel is.
-        for d in &DESC[..DESC.len() - 1] {
+        for d in &DESC_PUSH[..DESC_PUSH.len() - 1] {
             let need = d.chars().count() + LEAD_W;
             assert_ne!(
-                description(need - 1),
+                description(need - 1, push),
                 *d,
                 "{d:?} was chosen one column too narrow"
+            );
+        }
+        // The pull table has to obey the same width contract, or a SoapySDR
+        // panel would clip a sentence the push one fits.
+        let pull = crate::hardware::DeliveryModel::Pull;
+        for d in DESC_PULL {
+            let need = d.chars().count() + LEAD_W;
+            assert_eq!(
+                description(need, pull),
+                d,
+                "{d:?} should be chosen at {need}"
             );
         }
     }

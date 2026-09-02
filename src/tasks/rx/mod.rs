@@ -61,6 +61,14 @@ pub fn spawn_rx_task(
         // Last reading of the pull backend's cumulative read-loop clock, so each
         // poll reports this window rather than the whole session.
         let mut last_loop_us: Option<(u64, u64)> = None;
+        // The rate the baselines below are averaging over. A change makes every
+        // sample they hold describe a different stream.
+        //
+        // Seeded NaN, which compares unequal to everything including itself, so
+        // the first poll always clears. They are empty then, so it costs
+        // nothing, and it means there is no separate first-time branch to get
+        // wrong.
+        let mut baseline_rate = f64::NAN;
 
         loop {
             // Single is_streaming() call per iteration - the result is used for
@@ -72,6 +80,14 @@ pub fn spawn_rx_task(
                 control::note_unexpected_stop(&state, &device, hw_rx_active, hw_streaming);
 
             let drained = poll::drain(&state, &rx_ctx, now, hw_streaming);
+            // `[S]` retunes the rate mid-stream. Averaging across that would
+            // report the blend of two rates as an offset from one of them, for
+            // the whole length of the baseline.
+            if drained.config_sample_rate != baseline_rate {
+                baseline_rate = drained.config_sample_rate;
+                rate.reset();
+                throughput.reset();
+            }
             rate.push(drained.elapsed_us, drained.bytes);
 
             let computed = Computed {

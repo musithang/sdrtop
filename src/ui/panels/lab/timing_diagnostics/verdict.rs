@@ -14,6 +14,7 @@ use ratatui::{
     text::{Line, Span},
 };
 
+use crate::hardware::DeliveryModel;
 use crate::state::{SdrMetrics, TimingCause};
 use crate::ui::widgets::timing_fmt::{fmt_us, quality_color};
 
@@ -28,10 +29,16 @@ use super::rows::Rows;
 pub(super) struct Reading {
     pub severity: u8,
     pub cause: TimingCause,
+    /// The all-clear copy has to name what was clear, and a pull backend has
+    /// neither callbacks nor a budget. Without this it read "Every callback met
+    /// its deadline. Worst 2.886 ms (470% of budget)." on a healthy SoapySDR
+    /// link, which is two invented facts and a self-contradiction in two lines.
+    pub delivery: DeliveryModel,
     pub peak_us: u64,
     pub budget_us: u64,
     pub drops_per_sec: u64,
     pub sr_delta_ppm: i64,
+    pub occupancy: Option<f32>,
 }
 
 /// Two-line plain-language verdict copy.
@@ -46,10 +53,19 @@ pub(super) fn verdict_copy(r: &Reading) -> [String; 2] {
     let ppm = r.sr_delta_ppm.unsigned_abs();
 
     match (r.severity, r.cause) {
-        (0, _) => [
-            "Every callback met its deadline.".into(),
-            format!("Worst {worst} ({pct}% of budget)."),
-        ],
+        (0, _) => match r.delivery {
+            DeliveryModel::Push => [
+                "Every callback met its deadline.".into(),
+                format!("Worst {worst} ({pct}% of budget)."),
+            ],
+            DeliveryModel::Pull => [
+                "The read loop is keeping up.".into(),
+                match r.occupancy {
+                    Some(o) => format!("{} % of it spare.", 100 - (o * 100.0).round() as u32),
+                    None => "Nothing lost, nothing late.".into(),
+                },
+            ],
+        },
         // Samples were counted as lost. This is the only branch that may say so.
         (_, TimingCause::Drops) => [
             "Overrun \u{2014} samples lost.".into(),
@@ -109,6 +125,8 @@ pub(super) fn lines(state: &SdrMetrics, r: &Rows) -> Vec<Line<'static>> {
         budget_us: t.deadline_budget_us,
         drops_per_sec: state.signal.drops_per_sec,
         sr_delta_ppm: t.sr_delta_ppm,
+        delivery: state.caps.delivery,
+        occupancy: t.read_occupancy,
     };
     for copy in verdict_copy(&reading) {
         out.push(Line::from(vec![
@@ -140,6 +158,8 @@ mod tests {
             budget_us: 603,
             drops_per_sec: 0,
             sr_delta_ppm: 0,
+            delivery: DeliveryModel::Push,
+            occupancy: None,
         }
     }
 
@@ -181,6 +201,8 @@ mod tests {
             budget_us: 150,
             drops_per_sec: 0,
             sr_delta_ppm: -576,
+            delivery: DeliveryModel::Push,
+            occupancy: None,
         });
         let joined = jittery.join(" ").to_lowercase();
         // Claims of loss, not the word: "nothing lost" is exactly what this copy

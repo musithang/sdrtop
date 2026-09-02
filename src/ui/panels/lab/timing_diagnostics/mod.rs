@@ -240,3 +240,86 @@ mod tests {
         }
     }
 }
+
+#[cfg(test)]
+mod vocabulary {
+    use super::*;
+    use crate::state::fixture::draw;
+
+    /// The one place a pull panel may say "deadline": to say it does not have
+    /// one. Anything else is the panel describing a mechanism the device does
+    /// not use.
+    const DELIBERATE: &str = "not a deadline";
+
+    /// Every timing panel, rendered against a pull backend, swept for push-only
+    /// vocabulary.
+    ///
+    /// **This found four leaks that the per-panel tests did not.** Each of those
+    /// tests asserted what its own panel should say; none of them asked what the
+    /// whole screen still said. On a healthy SoapySDR link the bench printed
+    /// "Every callback met its deadline." immediately followed by "Worst 2.886
+    /// ms (470% of budget)", which is two facts the device does not have and a
+    /// contradiction between them, plus a panel titled "Callback Interval"
+    /// plotting reads, described as "per-callback interval deviation from the
+    /// expected period", with "one point per RX callback" beneath it.
+    ///
+    /// A word list is a blunt instrument and that is the point: it does not need
+    /// to know which sentence is wrong, only that the vocabulary has no business
+    /// being there.
+    #[test]
+    fn no_timing_panel_speaks_of_callbacks_or_deadlines_to_a_pull_backend() {
+        let pull = SdrMetrics::fixture()
+            .streaming()
+            .with_timing(4.7)
+            .pulling(0.65);
+        let push = SdrMetrics::fixture().streaming().with_timing(4.7);
+
+        // Push-only mechanisms, and nothing else. "Overrun" and "dropped" are
+        // deliberately absent: a pull backend loses samples too (SoapySDR
+        // returns SOAPY_SDR_OVERFLOW), so a ring buffer's overrun margin is a
+        // real reading on both. The list is about mechanisms the device does
+        // not have, not about alarming words.
+        let words = ["callback", "deadline", "budget", "late"];
+        let render = |m: &SdrMetrics| {
+            vec![
+                (
+                    "timing_diagnostics",
+                    draw(TimingDiagnosticsPanel, 60, 34, m).join("\n"),
+                ),
+                (
+                    "timing_stripchart",
+                    draw(crate::ui::TimingStripchartPanel, 96, 22, m).join("\n"),
+                ),
+                (
+                    "timing_vitals",
+                    draw(crate::ui::TimingVitalsPanel, 50, 30, m).join("\n"),
+                ),
+            ]
+        };
+
+        let mut leaks = String::new();
+        for (name, out) in render(&pull) {
+            for line in out.lines() {
+                let lower = line.to_lowercase();
+                if lower.contains(DELIBERATE) {
+                    continue;
+                }
+                if let Some(w) = words.iter().find(|w| lower.contains(**w)) {
+                    leaks.push_str(&format!("  {name}: {w:?} in {:?}\n", line.trim()));
+                }
+            }
+        }
+        assert!(
+            leaks.is_empty(),
+            "a pull backend was told about a mechanism it does not have:\n{leaks}"
+        );
+
+        // And the push backend must still be told all of it, or this test would
+        // pass just as well by deleting the vocabulary everywhere.
+        let pushed: String = render(&push).into_iter().map(|(_, o)| o).collect();
+        let lower = pushed.to_lowercase();
+        for w in ["callback", "deadline", "budget", "late"] {
+            assert!(lower.contains(w), "push lost its own vocabulary: {w:?}");
+        }
+    }
+}
