@@ -255,7 +255,7 @@ Every native backend needs the device to physically exist on my desk, and develo
 
 No pressure, but if this scratches an itch for you, this is where it goes.
 
-[![Ko-fi](https://ko-fi.com/img/githubbutton_sm.svg)](https://ko-fi.com/mustang6139)
+[![Ko-fi](https://ko-fi.com/img/githubbutton_sm.svg)](https://ko-fi.com/musithang)
 
 ---
 
