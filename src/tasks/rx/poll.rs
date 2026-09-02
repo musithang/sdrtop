@@ -29,6 +29,14 @@ pub(super) struct Drained {
     pub jitter_sum_us: u64,
     pub jitter_sq_sum: u64,
     pub jitter_count: u64,
+    /// This window's length and byte count, for the task's rate baseline.
+    ///
+    /// Handed out rather than turned into a sample rate here: the sample rate is
+    /// measured over tens of seconds (see [`RateBaseline`](super::metrics)) and
+    /// the accumulator that does it is task local, so it has no business being
+    /// touched from inside the lock.
+    pub elapsed_us: u64,
+    pub bytes: u64,
 }
 
 /// Enter the lock, take everything this window produced, reset the accumulators,
@@ -40,27 +48,27 @@ pub(super) fn drain(
     hw_streaming: bool,
 ) -> Drained {
     let mut m = state.lock().unwrap_or_else(|e| e.into_inner());
-    let elapsed_ms = now.duration_since(m.radio.last_poll_time).as_millis() as u64;
+    // Microseconds, not milliseconds. Truncating a ~200 ms window to whole
+    // milliseconds throws away up to 5000 ppm on its own, which is ten times the
+    // threshold the sample-rate offset is graded against.
+    let elapsed_us = now.duration_since(m.radio.last_poll_time).as_micros() as u64;
     let bytes = m.radio.bytes_since_last_poll;
     m.radio.bytes_since_last_poll = 0;
     m.radio.last_poll_time = now;
     m.radio.hw_streaming = hw_streaming;
 
-    if let Some(bps) = (bytes * 1000).checked_div(elapsed_ms) {
+    // The live throughput figure stays per window: the MB/s readout and the flow
+    // bar want to react now. Only the sample-rate offset moves to a long
+    // baseline, because that one feeds a 500 ppm threshold.
+    if let Some(bps) = (bytes * 1_000_000).checked_div(elapsed_us) {
         m.radio.current_throughput_bps = bps;
-        m.radio.actual_sample_rate = (m.radio.current_throughput_bps / 2) as u32;
-        let throughput_kb = m.radio.current_throughput_bps / 1024;
+        let throughput_kb = bps / 1024;
         if m.radio.throughput_history.len() >= THROUGHPUT_HISTORY_LEN {
             m.radio.throughput_history.pop_front();
         }
         m.radio.throughput_history.push_back(throughput_kb);
-        let actual_sr = m.radio.actual_sample_rate as u64;
-        if m.radio.sample_rate_history.len() >= THROUGHPUT_HISTORY_LEN {
-            m.radio.sample_rate_history.pop_front();
-        }
-        m.radio.sample_rate_history.push_back(actual_sr);
     }
-    if let Some(dps) = (m.acc.drops * 1000).checked_div(elapsed_ms) {
+    if let Some(dps) = (m.acc.drops * 1_000_000).checked_div(elapsed_us) {
         m.signal.drops_per_sec = dps;
     }
     let drops_snapshot = m.signal.drops_per_sec;
@@ -84,6 +92,8 @@ pub(super) fn drain(
         jitter_sum_us: m.acc.jitter_sum_us,
         jitter_sq_sum: m.acc.jitter_sq_sum,
         jitter_count: m.acc.jitter_count,
+        elapsed_us,
+        bytes,
     };
     m.acc.drops = 0;
     m.acc.saturated = 0;

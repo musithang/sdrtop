@@ -68,6 +68,9 @@ pub(super) struct Computed {
     pub had_samples: bool,
     /// Mean callback period and jitter, when a callback landed in the window.
     pub callback: Option<(u64, u64)>,
+    /// Delivered sample rate over the long baseline, or `None` while that
+    /// baseline is still too short to mean anything.
+    pub measured_rate: Option<u32>,
 }
 
 /// Write the results, sample the trend histories, rebuild the timing snapshot,
@@ -82,6 +85,17 @@ pub(super) fn write_back(
     last_snr_push: &mut Instant,
 ) -> bool {
     let mut m = state.lock().unwrap_or_else(|e| e.into_inner());
+
+    // The delivered sample rate, measured over tens of seconds rather than over
+    // this one window. `None` means the baseline is not long enough yet, and the
+    // last good figure is kept rather than replaced by a worse one.
+    if let Some(rate) = c.measured_rate {
+        m.radio.actual_sample_rate = rate;
+        if m.radio.sample_rate_history.len() >= crate::state::THROUGHPUT_HISTORY_LEN {
+            m.radio.sample_rate_history.pop_front();
+        }
+        m.radio.sample_rate_history.push_back(rate as u64);
+    }
 
     if c.had_samples {
         let iq = &c.iq;

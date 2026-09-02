@@ -55,6 +55,9 @@ pub fn spawn_rx_task(
         // Throttles SNR history sampling to ~500 ms regardless of the 200 ms poll.
         let mut last_snr_push = Instant::now();
         let mut throughput = Throughput::default();
+        // Task local: the sample-rate baseline is neither drawn nor shared, so it
+        // stays out of the per-frame clone of SdrMetrics.
+        let mut rate = metrics::RateBaseline::default();
 
         loop {
             // Single is_streaming() call per iteration - the result is used for
@@ -66,6 +69,7 @@ pub fn spawn_rx_task(
                 control::note_unexpected_stop(&state, &device, hw_rx_active, hw_streaming);
 
             let drained = poll::drain(&state, &rx_ctx, now, hw_streaming);
+            rate.push(drained.elapsed_us, drained.bytes);
 
             let computed = Computed {
                 iq: metrics::iq_metrics(
@@ -79,6 +83,7 @@ pub fn spawn_rx_task(
                     drained.jitter_sq_sum,
                     drained.jitter_count,
                 ),
+                measured_rate: rate.rate(device.capabilities().sample_geometry.bytes_per_pair()),
             };
 
             let rx_enabled = publish::write_back(
@@ -96,6 +101,7 @@ pub fn spawn_rx_task(
                 &device,
                 &rx_ctx,
                 &mut throughput,
+                &mut rate,
                 rx_enabled,
                 hw_rx_active,
             );

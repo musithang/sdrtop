@@ -20,6 +20,7 @@ use crate::hardware::{RxContext, SdrDevice};
 // latch is happy to hold.
 use crate::state::{SdrMetrics, ADC_COMFORT_DBFS as AUTOGAIN_COMFORT_DBFS};
 
+use super::metrics::RateBaseline;
 use super::publish::Throughput;
 
 /// Notice that the radio stopped streaming without being asked, and say so.
@@ -52,14 +53,18 @@ pub(super) fn apply_rx_request(
     device: &Arc<dyn SdrDevice>,
     rx_ctx: &Arc<RxContext>,
     tp: &mut Throughput,
+    rate: &mut RateBaseline,
     rx_enabled: bool,
     hw_rx_active: bool,
 ) -> bool {
     match (rx_enabled, hw_rx_active) {
         (true, false) => match device.start_rx(Arc::clone(rx_ctx)) {
             Ok(()) => {
-                // Fresh per-session throughput statistics.
+                // Fresh per-session throughput statistics, and a rate baseline
+                // that does not span the stop. Averaging across one would mix a
+                // silent stretch into the sample-rate offset.
                 tp.reset();
+                rate.reset();
                 let mut m = state.lock().unwrap_or_else(|e| e.into_inner());
                 m.radio.rx_start_time = Some(Instant::now());
                 m.timing.jitter_session_max_us = 0;
@@ -76,6 +81,7 @@ pub(super) fn apply_rx_request(
         },
         (false, true) => {
             let result = device.stop_rx();
+            rate.reset();
             let mut m = state.lock().unwrap_or_else(|e| e.into_inner());
             m.radio.rx_start_time = None;
             match result {

@@ -167,6 +167,111 @@ pub(super) fn callback_timing(sum_us: u64, sq_sum: u64, count: u64) -> Option<(u
     Some((mean, (variance as f64).sqrt() as u64))
 }
 
+/// How much history the sample-rate estimate averages over, in microseconds.
+///
+/// **This is a resolution requirement, not a taste.** Bytes arrive in whole
+/// driver blocks, so a poll window holds a whole number of them and nothing in
+/// between: measured on a HackRF through SoapyHackRF at 10 Msps, a 200 ms window
+/// held anywhere from 120 to 127 blocks of 32768 bytes, and not one partial
+/// block in 126 windows. One block is 8192 ppm of a 200 ms window, and the
+/// observed spread of the per-window estimate was -17 000 to +40 000 ppm.
+///
+/// `TimingCause::Clock` fires above 500 ppm. An estimator sixteen times coarser
+/// than its own threshold does not measure a clock, it measures how many blocks
+/// happened to fit.
+///
+/// Summing consecutive windows fixes it by arithmetic rather than by smoothing:
+/// the whole-block error survives only at the two ends of the baseline, so it
+/// divides by the total elapsed time. One block is 8192 ppm over 200 ms, 164 ppm
+/// over 10 s, and 55 ppm over 30 s. Thirty seconds leaves a comfortable margin
+/// under the threshold.
+const RATE_BASELINE_US: u64 = 30_000_000;
+
+/// Below this the baseline is too short to be worth a number, and the reading is
+/// `None` rather than a plausible-looking one.
+///
+/// Ten seconds, because that is where the block quantisation drops to 164 ppm at
+/// 10 Msps, comfortably under the 500 ppm the grade fires at. A shorter floor
+/// was tried at two seconds and measured on hardware: the estimate read -1379,
+/// -797 and -670 ppm over its first twenty seconds, which would have traded a
+/// permanent false clock fault for a temporary one.
+const RATE_BASELINE_MIN_US: u64 = 10_000_000;
+
+/// Sliding long-baseline estimate of the delivered sample rate.
+///
+/// Task local, deliberately: it is neither drawn nor shared, so it has no
+/// business being cloned into every frame with the rest of `SdrMetrics`.
+///
+/// No clock in here either, in keeping with the rest of this module. It is
+/// handed each window's length rather than reading one.
+#[derive(Debug, Default)]
+pub(super) struct RateBaseline {
+    /// `(window length in microseconds, bytes in that window)`, oldest first.
+    windows: std::collections::VecDeque<(u64, u64)>,
+    elapsed_us: u64,
+    bytes: u64,
+    /// Whether the window that straddles stream startup has been discarded yet.
+    ///
+    /// The first window after a reset is not a window of a running stream: it
+    /// contains whatever arrived between `activateStream` and the next poll, so
+    /// it is short by an arbitrary fraction. Measured on hardware it dragged the
+    /// baseline about three blocks low, which is 1400 ppm over four seconds and
+    /// still 500 ppm out twenty seconds later, because it stays in the baseline
+    /// until it ages out.
+    started: bool,
+}
+
+impl RateBaseline {
+    /// Forget everything. Called whenever the baseline would span a change that
+    /// makes it meaningless: RX stopping, or the sample rate moving.
+    /// Whole-struct assignment rather than field by field, so a field added
+    /// later cannot be forgotten here. It was, once, and the startup window
+    /// stopped being discarded on the second RX session.
+    pub(super) fn reset(&mut self) {
+        *self = Self::default();
+    }
+
+    /// Fold in one poll window, dropping whatever no longer fits the baseline.
+    pub(super) fn push(&mut self, elapsed_us: u64, bytes: u64) {
+        if elapsed_us == 0 {
+            return;
+        }
+        // Discard the window that straddles stream startup, as above.
+        if !self.started {
+            self.started = true;
+            return;
+        }
+        self.windows.push_back((elapsed_us, bytes));
+        self.elapsed_us += elapsed_us;
+        self.bytes += bytes;
+        // Keep at least one window beyond the target so the baseline never
+        // shrinks below it after a trim.
+        while self.windows.len() > 1 {
+            let (oldest_us, oldest_bytes) = self.windows[0];
+            if self.elapsed_us - oldest_us < RATE_BASELINE_US {
+                break;
+            }
+            self.windows.pop_front();
+            self.elapsed_us -= oldest_us;
+            self.bytes -= oldest_bytes;
+        }
+    }
+
+    /// Complex samples per second over the baseline, or `None` while it is still
+    /// too short to mean anything.
+    ///
+    /// `bytes_per_pair` comes from the device's `SampleGeometry`. It used to be
+    /// a hardcoded 2, which is right for `Int8` and `Uint8` and reports double
+    /// the true rate for `Int16`.
+    pub(super) fn rate(&self, bytes_per_pair: usize) -> Option<u32> {
+        if self.elapsed_us < RATE_BASELINE_MIN_US || bytes_per_pair == 0 {
+            return None;
+        }
+        let pairs = self.bytes / bytes_per_pair as u64;
+        u32::try_from(pairs.checked_mul(1_000_000)? / self.elapsed_us).ok()
+    }
+}
+
 #[cfg(test)]
 mod tests {
     /// Both shipped radios. Named rather than repeated so a future 16-bit case
@@ -393,5 +498,152 @@ mod tests {
             iq_metrics(mo, no_cal(), EIGHT_BIT).adc_peak_dbfs > 40.0,
             "and the same counts on an 8-bit device are far above its rail"
         );
+    }
+
+    // ── The sample-rate baseline ────────────────────────────────────────────
+    //
+    // The fixture reproduces the measurement that motivated it: a driver that
+    // hands over whole 32768-byte blocks, so each 200 ms window carries a whole
+    // number of them and the count wobbles by a few either way.
+
+    const BLOCK_BYTES: u64 = 32_768;
+    const WINDOW_US: u64 = 200_000;
+    /// 10 Msps of CS8 is 20 MB/s, which is 4 000 000 bytes per 200 ms window,
+    /// i.e. 122.07 blocks. A real window therefore holds 122 or 123, and the
+    /// hardware capture ranged over 120 to 127.
+    const TRUE_RATE: u64 = 10_000_000;
+
+    /// Feed `b` with windows from a device running at `rate` samples per second
+    /// that delivers **whole blocks only**.
+    ///
+    /// The quantisation is produced rather than copied from the capture: bytes
+    /// accumulate at the true rate, a window carries away as many whole blocks
+    /// as have accumulated, and the remainder carries into the next one. That
+    /// is the physical situation, and it is why the per-window count wobbles
+    /// while the long-run total does not.
+    ///
+    /// Writing this out was worth it: the first version of these tests hardcoded
+    /// eight block counts read off the capture, whose mean was 123.125 against a
+    /// true 122.07. The fixture itself ran 8600 ppm fast and failed the test it
+    /// was written to support.
+    fn feed_quantised(b: &mut RateBaseline, rate: u64, bytes_per_pair: u64, windows: usize) {
+        let mut pending = 0u64;
+        for _ in 0..windows {
+            pending += rate * bytes_per_pair * WINDOW_US / 1_000_000;
+            let delivered = (pending / BLOCK_BYTES) * BLOCK_BYTES;
+            pending -= delivered;
+            b.push(WINDOW_US, delivered);
+        }
+    }
+
+    fn ppm_off(rate: u32) -> i64 {
+        (rate as i64 - TRUE_RATE as i64) * 1_000_000 / TRUE_RATE as i64
+    }
+
+    /// A single window cannot measure a clock, and the estimate is not asked to.
+    #[test]
+    fn a_short_baseline_is_refused_rather_than_answered_badly() {
+        let mut b = RateBaseline::default();
+        b.push(WINDOW_US, 127 * BLOCK_BYTES);
+        assert_eq!(b.rate(2), None, "200 ms is not a baseline");
+        feed_quantised(&mut b, TRUE_RATE, 2, 20); // 4 s
+        assert_eq!(b.rate(2), None, "nor is 4 s, which measured -1379 ppm");
+    }
+
+    /// The window that straddles stream startup is short by an arbitrary
+    /// fraction and must not enter the baseline. Without this, one partial
+    /// window sat in the average for its full 30 s.
+    #[test]
+    fn the_window_that_straddles_startup_is_discarded() {
+        let mut b = RateBaseline::default();
+        // A first window holding a quarter of what it should.
+        b.push(WINDOW_US, 1_000_000);
+        feed_quantised(&mut b, TRUE_RATE, 2, 150);
+        let ppm = ppm_off(b.rate(2).expect("30 s is a baseline"));
+        assert!(
+            ppm.abs() < 500,
+            "the startup window must not drag the baseline: {ppm} ppm"
+        );
+        // And a reset arms the discard again, for the next RX session.
+        b.reset();
+        b.push(WINDOW_US, 1_000_000);
+        assert_eq!(b.elapsed_us, 0, "the first window after a reset is dropped");
+    }
+
+    /// The whole point of the checkpoint. Block-quantised windows must land far
+    /// inside the 500 ppm threshold once the baseline is long.
+    ///
+    #[test]
+    fn a_long_baseline_beats_the_clock_threshold_despite_block_quantisation() {
+        let mut b = RateBaseline::default();
+        feed_quantised(&mut b, TRUE_RATE, 2, 150); // 30 s
+        let ppm = ppm_off(b.rate(2).expect("30 s is a baseline"));
+        assert!(
+            ppm.abs() < 500,
+            "a healthy link must not trip TimingCause::Clock: {ppm} ppm"
+        );
+    }
+
+    /// And a clock that really is off must still be caught, or the fix would
+    /// have traded a false alarm for a blind spot.
+    #[test]
+    fn a_genuinely_offset_clock_still_shows_up() {
+        let mut b = RateBaseline::default();
+        feed_quantised(&mut b, TRUE_RATE * 99 / 100, 2, 150);
+        let ppm = ppm_off(b.rate(2).expect("30 s is a baseline"));
+        assert!(
+            (-11_000..-9_000).contains(&ppm),
+            "1 % slow should read about -10 000 ppm: {ppm}"
+        );
+    }
+
+    /// The stride, at all three widths. `Int16` is the one that was wrong: the
+    /// hardcoded 2 reported double the true rate for a four-byte pair.
+    #[test]
+    fn the_rate_divides_by_the_geometrys_stride() {
+        let mut narrow = RateBaseline::default();
+        let mut wide = RateBaseline::default();
+        for _ in 0..30 {
+            // The same sample count at each width is twice the bytes at Int16.
+            narrow.push(WINDOW_US, 2_000_000);
+            wide.push(WINDOW_US, 4_000_000);
+        }
+        assert_eq!(
+            narrow.rate(2),
+            wide.rate(4),
+            "the same stream of pairs reads as the same rate at either width"
+        );
+        assert_eq!(
+            wide.rate(2),
+            narrow.rate(2).map(|r| r * 2),
+            "and reading a four-byte pair as two bytes doubles it, which is the bug"
+        );
+    }
+
+    /// The baseline slides rather than growing forever, so a rate change is not
+    /// averaged against the old rate for the rest of the session.
+    #[test]
+    fn the_baseline_slides_and_forgets() {
+        let mut b = RateBaseline::default();
+        for _ in 0..400 {
+            b.push(WINDOW_US, 4_000_000);
+        }
+        assert!(
+            b.elapsed_us <= RATE_BASELINE_US + WINDOW_US,
+            "80 s of windows must not accumulate into an 80 s baseline: {}",
+            b.elapsed_us
+        );
+        // A reset really does forget.
+        b.reset();
+        assert_eq!(b.rate(2), None);
+    }
+
+    /// A window with no elapsed time is not a window, and must not divide.
+    #[test]
+    fn a_zero_length_window_is_ignored() {
+        let mut b = RateBaseline::default();
+        b.push(0, 4_000_000);
+        assert_eq!(b.rate(2), None);
+        assert_eq!(b.elapsed_us, 0);
     }
 }
