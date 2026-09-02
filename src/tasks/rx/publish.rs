@@ -180,11 +180,10 @@ pub(super) fn write_back(
         m.signal.drops_per_sec,
         tp_mean,
         tp_std,
+        device.capabilities().delivery,
+        c.read_occupancy,
     );
     m.timing.jitter_session_max_us = prev_peak.max(m.timing.jitter_max_us);
-    // `compute` builds a fresh TimingState, so anything measured outside it is
-    // written afterwards, the same way the session jitter peak is.
-    m.timing.read_occupancy = c.read_occupancy;
 
     m.radio.rx_enabled
 }

@@ -26,6 +26,7 @@ use std::sync::Arc;
 use std::time::Instant;
 
 use super::*;
+use crate::hardware::DeliveryModel;
 
 impl SdrMetrics {
     /// An idle radio: a HackRF open at 100 MHz, RX not started, no FFT frame yet.
@@ -213,6 +214,31 @@ impl SdrMetrics {
     /// `jitter_ratio` scales the deviations against the deadline budget, so a
     /// test can ask for "comfortably inside" (0.3) or "well over" (2.5) without
     /// knowing the thresholds.
+    /// Turn the fixture into a pull backend whose read loop sits at
+    /// `occupancy`, and regrade it.
+    ///
+    /// Chain after [`with_timing`], because the whole point is to take a stream
+    /// whose read intervals are wild and show that a pull backend is not judged
+    /// on them. The regrade is the fixture doing what the poll task does, so a
+    /// test never has to set a quality by hand and get it wrong.
+    pub(crate) fn pulling(mut self, occupancy: f32) -> Self {
+        let mut caps = (*self.caps).clone();
+        caps.delivery = DeliveryModel::Pull;
+        self.caps = std::sync::Arc::new(caps);
+        self.timing.read_occupancy = Some(occupancy);
+        let v = TimingQuality::classify(
+            self.timing.dev_p99_us,
+            self.timing.cb_period_expected,
+            self.timing.sr_delta_ppm,
+            0,
+            DeliveryModel::Pull,
+            Some(occupancy),
+        );
+        self.timing.timing_quality = v.quality;
+        self.timing.timing_cause = v.cause;
+        self
+    }
+
     pub(crate) fn with_timing(mut self, jitter_ratio: f64) -> Self {
         let expected = 4_096u64;
         let budget = (expected as f64 * 0.15).round() as u64;
@@ -230,7 +256,8 @@ impl SdrMetrics {
         // One call, both answers. Grading twice would let a fixture hold a
         // quality and a cause that never came from the same decision, which is
         // the exact confusion this pair exists to prevent.
-        let verdict = TimingQuality::classify(pick(0.99), expected, 18, 0);
+        let verdict =
+            TimingQuality::classify(pick(0.99), expected, 18, 0, DeliveryModel::Push, None);
         self.timing = TimingState {
             cb_period_us: expected,
             cb_period_expected: expected,

@@ -90,10 +90,17 @@ impl Panel for TimingStripchartPanel {
             ])),
             rows[0],
         );
-        f.render_widget(Paragraph::new(stats::line(t, stale, theme)), rows[1]);
+        f.render_widget(
+            Paragraph::new(stats::line(t, state.caps.delivery, stale, theme)),
+            rows[1],
+        );
         chart::draw(f, rows[3], t, stale, theme);
         f.render_widget(
-            Paragraph::new(captions::key_row(t.deadline_budget_us, theme)),
+            Paragraph::new(captions::key_row(
+                t.deadline_budget_us,
+                state.caps.delivery,
+                theme,
+            )),
             rows[4],
         );
         f.render_widget(
@@ -220,5 +227,33 @@ mod tests {
                 "{w}x{h}: a row overran the panel"
             );
         }
+    }
+
+    /// The strip chart's inset line and legend must not talk about a budget on a
+    /// pull backend. Alongside the banner, the footer and the numbers column,
+    /// this was the fourth place on one screen saying "over budget" about a link
+    /// that was losing nothing.
+    #[test]
+    fn the_strip_chart_drops_the_budget_language_for_a_pull_backend() {
+        let pull = SdrMetrics::fixture()
+            .streaming()
+            .with_timing(4.7)
+            .pulling(0.65);
+        let out = draw(TimingStripchartPanel, 96, 20, &pull).join("\n");
+        assert!(
+            !out.contains("over budget"),
+            "a pull loop was measured against a deadline:\n{out}"
+        );
+        assert!(out.contains("65 %"), "no occupancy figure:\n{out}");
+        assert!(
+            out.contains("for scale only"),
+            "legend still promises a deadline:\n{out}"
+        );
+
+        // The push device keeps every word of it.
+        let push = SdrMetrics::fixture().streaming().with_timing(4.7);
+        let out = draw(TimingStripchartPanel, 96, 20, &push).join("\n");
+        assert!(out.contains("over budget"), "{out}");
+        assert!(out.contains("deadline"), "{out}");
     }
 }

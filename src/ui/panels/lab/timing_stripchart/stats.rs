@@ -12,10 +12,16 @@ use ratatui::{
     text::{Line, Span},
 };
 
+use crate::hardware::DeliveryModel;
 use crate::state::TimingState;
 use crate::ui::widgets::timing_fmt::{fmt_us, quality_color};
 
-pub(super) fn line(t: &TimingState, stale: bool, theme: &crate::Theme) -> Line<'static> {
+pub(super) fn line(
+    t: &TimingState,
+    delivery: DeliveryModel,
+    stale: bool,
+    theme: &crate::Theme,
+) -> Line<'static> {
     if stale {
         return Line::from(vec![
             Span::raw(" "),
@@ -38,15 +44,33 @@ pub(super) fn line(t: &TimingState, stale: bool, theme: &crate::Theme) -> Line<'
         ),
         Span::styled("   worst ", lbl),
         Span::styled(fmt_us(t.dev_peak_us), Style::default().fg(theme.value)),
-        Span::styled("   over budget ", lbl),
-        Span::styled(
-            format!("{} / {}", t.late_callbacks, t.late_window),
-            Style::default().fg(if t.late_callbacks == 0 {
-                theme.status_ok
-            } else {
-                theme.status_warn
-            }),
-        ),
+        // "Over budget" counts against a deadline, which a pull loop does not
+        // have: its read interval is its own rhythm. It reports how much of
+        // itself is spare instead.
+        match delivery {
+            DeliveryModel::Push => Span::styled("   over budget ", lbl),
+            DeliveryModel::Pull => Span::styled("   loop ", lbl),
+        },
+        match delivery {
+            DeliveryModel::Push => Span::styled(
+                format!("{} / {}", t.late_callbacks, t.late_window),
+                Style::default().fg(if t.late_callbacks == 0 {
+                    theme.status_ok
+                } else {
+                    theme.status_warn
+                }),
+            ),
+            DeliveryModel::Pull => match t.read_occupancy {
+                Some(o) => Span::styled(
+                    format!("{} %", (o * 100.0).round() as u32),
+                    Style::default().fg(quality_color(
+                        crate::state::TimingQuality::from_occupancy(o),
+                        theme,
+                    )),
+                ),
+                None => Span::styled("\u{2014}", Style::default().fg(theme.value)),
+            },
+        },
         Span::styled("   ", lbl),
         Span::styled(
             format!("{mark} {}", q.label()),

@@ -156,28 +156,49 @@ fn rf_banner_fields(state: &SdrMetrics) -> Vec<(&'static str, String)> {
     ]
 }
 
-/// Lab timing banner middle fields: `CALLBACK … · JITTER … · DRIFT … · DEADLINE …`.
+/// Lab timing banner middle fields.
+///
+/// `CALLBACK … · JITTER … · DRIFT … · DEADLINE …` on a push backend, where
 /// DEADLINE reads `✓ met` while no callback misses the budget, else the worst
 /// slip as a percentage of the budget (the mockup's `⚠ 130%` / `⚠ 1050%`).
-fn timing_banner_fields(t: &crate::state::TimingState) -> Vec<(&'static str, String)> {
+///
+/// On a pull backend the last field is **OCCUPANCY** instead. There is no
+/// deadline to meet when the loop sets its own pace, and this banner printed
+/// `DEADLINE ⚠ 4378%` above a SoapySDR link that was losing nothing.
+fn timing_banner_fields(
+    t: &crate::state::TimingState,
+    delivery: crate::hardware::DeliveryModel,
+) -> Vec<(&'static str, String)> {
     let callback = if t.cb_period_us == 0 {
         "\u{2014}".to_string()
     } else {
         crate::ui::widgets::timing_fmt::fmt_us(t.cb_period_us)
     };
-    let deadline = if t.late_callbacks == 0 {
-        "\u{2713} met".to_string()
-    } else {
-        let pct = (t.dev_peak_us * 100)
-            .checked_div(t.deadline_budget_us)
-            .unwrap_or(0);
-        format!("\u{26a0} {pct}%")
+    let last = match delivery {
+        crate::hardware::DeliveryModel::Push => {
+            let deadline = if t.late_callbacks == 0 {
+                "\u{2713} met".to_string()
+            } else {
+                let pct = (t.dev_peak_us * 100)
+                    .checked_div(t.deadline_budget_us)
+                    .unwrap_or(0);
+                format!("\u{26a0} {pct}%")
+            };
+            ("DEADLINE", deadline)
+        }
+        crate::hardware::DeliveryModel::Pull => (
+            "OCCUPANCY",
+            match t.read_occupancy {
+                Some(o) => format!("{} %", (o * 100.0).round() as u32),
+                None => "\u{2014}".to_string(),
+            },
+        ),
     };
     vec![
         ("CALLBACK", callback),
         ("JITTER", format!("\u{00b1}{} \u{00b5}s", t.cb_jitter_us)),
         ("DRIFT", format!("{:+} ppm", t.cb_period_delta_ppm)),
-        ("DEADLINE", deadline),
+        last,
     ]
 }
 
@@ -312,7 +333,7 @@ fn banner_lines(
     let fields: Vec<(&'static str, String)> = if state.ui.active_preset == "lab_rf" {
         rf_banner_fields(state)
     } else if state.ui.active_preset == "lab_timing" {
-        timing_banner_fields(&state.timing)
+        timing_banner_fields(&state.timing, state.caps.delivery)
     } else if state.ui.active_preset == "lab_signal" {
         signal_banner_fields(state)
     } else {
@@ -671,25 +692,46 @@ fn timing_marker_lines(state: &SdrMetrics, theme: &crate::Theme, iw: usize) -> V
         &mut spans,
     );
 
-    let late_col = if t.late_callbacks == 0 {
-        theme.status_ok
-    } else if t.late_callbacks * 20 > t.late_window.max(1) {
-        theme.status_crit
-    } else {
-        theme.status_warn
+    // LATE counts callbacks past a deadline, which only a push backend has. A
+    // pull loop reports how much of itself is spare instead.
+    let pace_field = match state.caps.delivery {
+        crate::hardware::DeliveryModel::Push => {
+            let late_col = if t.late_callbacks == 0 {
+                theme.status_ok
+            } else if t.late_callbacks * 20 > t.late_window.max(1) {
+                theme.status_crit
+            } else {
+                theme.status_warn
+            };
+            vec![
+                Span::raw("   "),
+                Span::styled("LATE ", dim),
+                Span::styled(
+                    format!("{}/{}", t.late_callbacks, t.late_window),
+                    Style::default().fg(late_col),
+                ),
+            ]
+        }
+        crate::hardware::DeliveryModel::Pull => match t.read_occupancy {
+            Some(o) => vec![
+                Span::raw("   "),
+                Span::styled("LOOP ", dim),
+                Span::styled(
+                    format!("{} %", (o * 100.0).round() as u32),
+                    Style::default().fg(crate::ui::widgets::timing_fmt::quality_color(
+                        crate::state::TimingQuality::from_occupancy(o),
+                        theme,
+                    )),
+                ),
+            ],
+            None => vec![
+                Span::raw("   "),
+                Span::styled("LOOP ", dim),
+                Span::styled("\u{2014}", val),
+            ],
+        },
     };
-    try_add(
-        vec![
-            Span::raw("   "),
-            Span::styled("LATE ", dim),
-            Span::styled(
-                format!("{}/{}", t.late_callbacks, t.late_window),
-                Style::default().fg(late_col),
-            ),
-        ],
-        &mut used,
-        &mut spans,
-    );
+    try_add(pace_field, &mut used, &mut spans);
 
     try_add(
         vec![
@@ -1102,16 +1144,40 @@ mod tests {
             ..Default::default()
         };
         // No late callbacks → DEADLINE reads "✓ met".
-        let f = timing_banner_fields(&t);
+        let push = crate::hardware::DeliveryModel::Push;
+        let f = timing_banner_fields(&t, push);
         let deadline = f.iter().find(|(k, _)| *k == "DEADLINE").unwrap();
         assert_eq!(deadline.1, "\u{2713} met");
         assert!(f.iter().any(|(k, v)| *k == "CALLBACK" && v == "13.107 ms"));
         // A worst slip past budget → "⚠ N%" of the budget.
         t.late_callbacks = 3;
         t.dev_peak_us = 6_300; // 6300 / 603 ≈ 1044%
-        let f = timing_banner_fields(&t);
+        let f = timing_banner_fields(&t, push);
         let deadline = f.iter().find(|(k, _)| *k == "DEADLINE").unwrap();
         assert_eq!(deadline.1, "\u{26a0} 1044%");
+    }
+
+    /// The same alarming numbers on a pull backend must not produce a deadline
+    /// field at all. This banner printed `DEADLINE ⚠ 4378%` over a SoapySDR
+    /// link that was losing nothing.
+    #[test]
+    fn the_timing_banner_offers_no_deadline_to_a_pull_backend() {
+        let t = crate::state::TimingState {
+            cb_period_us: 1_638,
+            late_callbacks: 136,
+            late_window: 160,
+            dev_peak_us: 6_568,
+            deadline_budget_us: 150,
+            read_occupancy: Some(0.65),
+            ..Default::default()
+        };
+        let f = timing_banner_fields(&t, crate::hardware::DeliveryModel::Pull);
+        assert!(
+            !f.iter().any(|(k, _)| *k == "DEADLINE"),
+            "a pull loop was given a deadline: {f:?}"
+        );
+        let occ = f.iter().find(|(k, _)| *k == "OCCUPANCY").unwrap();
+        assert_eq!(occ.1, "65 %");
     }
 
     #[test]

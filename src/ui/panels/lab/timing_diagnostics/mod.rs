@@ -3,9 +3,14 @@
 
 //! `timing_diagnostics` - the numbers column of the `lab_timing` preset.
 //!
-//! Three zones and a verdict: how regularly callbacks arrive, how close the worst
-//! of them came to the deadline budget, and whether the sample clock is
-//! delivering what was asked for.
+//! Three zones and a verdict: how well the stream is keeping up, how close the
+//! worst of it came to the threshold, and whether the sample clock is delivering
+//! what was asked for.
+//!
+//! **The first zone depends on how samples arrive.** A push backend gets
+//! [`callback`] and [`deadline`], which measure block arrival against a deadline
+//! the driver's pacing makes meaningful. A pull backend gets [`read_loop`]
+//! instead, because there the interval between blocks is our own loop's rhythm.
 //!
 //! Split by zone, which is also the order the question narrows - is the stream
 //! regular, is it late, is the clock right:
@@ -18,6 +23,7 @@
 
 mod callback;
 mod deadline;
+mod read_loop;
 mod rows;
 mod sample_rate;
 mod verdict;
@@ -63,9 +69,19 @@ impl Panel for TimingDiagnosticsPanel {
         let r = Rows::new(inner.width as usize, !state.radio.hw_streaming, theme);
 
         let mut lines: Vec<Line> = Vec::new();
-        lines.extend(callback::lines(state, &r));
-        lines.push(Line::raw(""));
-        lines.extend(deadline::lines(state, &r));
+        // The first two zones are the ones that only mean something when the
+        // driver paces the blocks. A pull backend gets the question it can
+        // actually answer instead. See `read_loop` for why.
+        match state.caps.delivery {
+            crate::hardware::DeliveryModel::Push => {
+                lines.extend(callback::lines(state, &r));
+                lines.push(Line::raw(""));
+                lines.extend(deadline::lines(state, &r));
+            }
+            crate::hardware::DeliveryModel::Pull => {
+                lines.extend(read_loop::lines(state, &r));
+            }
+        }
         lines.push(Line::raw(""));
         lines.extend(sample_rate::lines(state, &r));
         lines.push(Line::raw(""));
@@ -96,6 +112,64 @@ mod tests {
         assert!(
             !out.contains("EXCELLENT"),
             "a stale panel graded the stream:\n{out}"
+        );
+    }
+
+    /// The swap this checkpoint exists for. A pull backend is shown the zone it
+    /// can answer, and is not shown the two it cannot.
+    #[test]
+    fn a_pull_backend_gets_the_read_loop_zone_instead_of_the_deadline_zones() {
+        let out = draw(TimingDiagnosticsPanel, W, H, &live().pulling(0.65)).join("\n");
+        assert!(out.contains("READ LOOP"), "no read-loop zone:\n{out}");
+        assert!(
+            !out.contains("DEADLINE BUDGET"),
+            "a pull loop was given a deadline:\n{out}"
+        );
+        assert!(
+            !out.contains("CALLBACK TIMING"),
+            "a pull loop has no callbacks:\n{out}"
+        );
+        // And the push device still gets both, unchanged.
+        let push = draw(TimingDiagnosticsPanel, W, H, &live()).join("\n");
+        assert!(push.contains("CALLBACK TIMING") && push.contains("DEADLINE BUDGET"));
+        assert!(!push.contains("READ LOOP"));
+    }
+
+    /// The original complaint, end to end through the renderer: read intervals
+    /// wild enough to fail a deadline, a read loop with a third of itself spare,
+    /// and nothing lost. The bench must call that healthy.
+    #[test]
+    fn a_healthy_pull_stream_with_wild_read_intervals_reads_as_healthy() {
+        let wild = SdrMetrics::fixture()
+            .streaming()
+            .with_timing(4.7)
+            .pulling(0.65);
+        let out = draw(TimingDiagnosticsPanel, W, H, &wild).join("\n");
+        assert!(
+            out.contains("EXCELLENT"),
+            "graded a healthy pull link:\n{out}"
+        );
+        assert!(out.contains("65 %"), "no occupancy figure:\n{out}");
+
+        // The identical stream on a push backend is still a fault, because
+        // there the interval really is the driver's.
+        let pushed = SdrMetrics::fixture().streaming().with_timing(4.7);
+        let out = draw(TimingDiagnosticsPanel, W, H, &pushed).join("\n");
+        assert!(
+            out.contains("POOR"),
+            "a push link with 4.7x jitter is fine?\n{out}"
+        );
+    }
+
+    /// A read loop that never blocks is behind, and says so before a drop.
+    #[test]
+    fn a_saturated_read_loop_is_called_out() {
+        let out = draw(TimingDiagnosticsPanel, W, H, &live().pulling(0.99)).join("\n");
+        assert!(out.contains("POOR"), "{out}");
+        assert!(out.contains("not keeping up"), "{out}");
+        assert!(
+            !out.to_lowercase().contains("dropped"),
+            "nothing was lost yet:\n{out}"
         );
     }
 

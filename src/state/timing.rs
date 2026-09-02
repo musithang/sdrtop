@@ -10,6 +10,8 @@
 //! from an online Welford accumulator the task keeps across polls. None of it
 //! needs hardware support beyond the bytes already flowing.
 
+use crate::hardware::DeliveryModel;
+
 /// Complex samples delivered per HackRF USB transfer: the libhackrf transfer
 /// buffer is 262 144 bytes of interleaved 8-bit I/Q, i.e. 131 072 IQ pairs. The
 /// expected callback period is this many samples divided by the sample rate.
@@ -57,10 +59,48 @@ pub enum TimingCause {
     Settled,
     /// Samples were counted as lost. The only cause that means data is gone.
     Drops,
-    /// Callback arrival scatter, relative to the expected period.
+    /// Callback arrival scatter, relative to the expected period. Push only:
+    /// see [`DeliveryModel`].
     Jitter,
     /// The delivered sample rate is off the configured one.
     Clock,
+    /// The read loop has stopped getting to wait. Pull only.
+    Backlog,
+}
+
+/// Read-loop occupancy bands for a pull backend, worst first.
+///
+/// These are chosen rather than derived, like [`DEADLINE_BUDGET_FRAC`] is on the
+/// push side, and the calibration point is a measurement: a HackRF through
+/// `SoapyHackRF` at 10 Msps CS8 sits at **0.65** in a release build, with the
+/// accounting closing exactly against wall time. That is a healthy stream with
+/// about a third of the loop spare, so it must grade as excellent.
+///
+/// At 1.0 the loop never blocks, which does not mean it is busy: it means it is
+/// behind, and the driver's buffer is filling up behind it. That is the
+/// condition worth a red verdict, and it arrives before any sample is lost,
+/// which is the whole point of watching it.
+const OCCUPANCY_POOR: f32 = 0.95;
+const OCCUPANCY_MARGINAL: f32 = 0.85;
+const OCCUPANCY_GOOD: f32 = 0.75;
+
+impl TimingQuality {
+    /// Grade a pull backend's read-loop occupancy.
+    ///
+    /// **The one place these bands live.** The read-loop zone colours its figure
+    /// by calling this rather than by carrying its own copy of the numbers, so
+    /// the colour and the verdict cannot disagree.
+    pub fn from_occupancy(occupancy: f32) -> Self {
+        if occupancy > OCCUPANCY_POOR {
+            TimingQuality::Poor
+        } else if occupancy > OCCUPANCY_MARGINAL {
+            TimingQuality::Marginal
+        } else if occupancy > OCCUPANCY_GOOD {
+            TimingQuality::Good
+        } else {
+            TimingQuality::Excellent
+        }
+    }
 }
 
 /// A grade and the reason for it, decided together.
@@ -78,35 +118,76 @@ impl TimingQuality {
     ///
     /// Returns the reason alongside the grade. The order the causes are tested
     /// in is the order of severity of their consequence: lost samples first,
-    /// then a stream that is not arriving on time, then a clock that is off.
+    /// then a stream that is not keeping up, then a clock that is off.
+    ///
+    /// **The middle test depends on how samples arrive.** On a push backend the
+    /// driver paces the callbacks, so the interval between them is the link's
+    /// own cadence and its scatter is the right thing to grade. On a pull
+    /// backend that interval is our read loop's rhythm: a burst of fast reads
+    /// followed by a wait is exactly what draining a driver's buffer looks like,
+    /// and it is healthy. Grading it put a permanent red verdict on a HackRF
+    /// through SoapyHackRF that had zero drops, a correct sample rate and half
+    /// the bus spare. A pull loop is graded on occupancy instead: whether it
+    /// still gets to block.
     pub fn classify(
         jitter_p99_us: u64,
         cb_period_expected: u64,
         sr_delta_ppm: i64,
         drops_per_sec: u64,
+        delivery: DeliveryModel,
+        read_occupancy: Option<f32>,
     ) -> TimingVerdict {
         // No timing data yet (not streaming / first poll) reads as the best case
         // rather than alarming the user with a red verdict on an idle radio.
         if cb_period_expected == 0 {
             return TimingVerdict::default();
         }
-        let ratio = jitter_p99_us as f64 / cb_period_expected as f64;
         let ppm = sr_delta_ppm.unsigned_abs();
+
+        // The pace test, in whichever currency this backend deals in. A missing
+        // reading grades as nothing rather than as zero.
+        let (pace_grade, pace_cause) = match delivery {
+            DeliveryModel::Push => {
+                // f64, unchanged from before this became two currencies: the
+                // push grade must not shift by a rounding step.
+                let ratio = jitter_p99_us as f64 / cb_period_expected as f64;
+                let grade = if ratio > 0.50 {
+                    TimingQuality::Poor
+                } else if ratio > 0.25 {
+                    TimingQuality::Marginal
+                } else if ratio > 0.10 {
+                    TimingQuality::Good
+                } else {
+                    TimingQuality::Excellent
+                };
+                (grade, TimingCause::Jitter)
+            }
+            DeliveryModel::Pull => (
+                read_occupancy
+                    .map(TimingQuality::from_occupancy)
+                    .unwrap_or(TimingQuality::Excellent),
+                TimingCause::Backlog,
+            ),
+        };
+
+        let clock_grade = if ppm > 500 {
+            TimingQuality::Poor
+        } else if ppm > 200 {
+            TimingQuality::Marginal
+        } else if ppm > 50 {
+            TimingQuality::Good
+        } else {
+            TimingQuality::Excellent
+        };
 
         let (quality, cause) = if drops_per_sec > 0 {
             (TimingQuality::Poor, TimingCause::Drops)
-        } else if ratio > 0.50 {
-            (TimingQuality::Poor, TimingCause::Jitter)
-        } else if ppm > 500 {
-            (TimingQuality::Poor, TimingCause::Clock)
-        } else if ratio > 0.25 {
-            (TimingQuality::Marginal, TimingCause::Jitter)
-        } else if ppm > 200 {
-            (TimingQuality::Marginal, TimingCause::Clock)
-        } else if ratio > 0.10 {
-            (TimingQuality::Good, TimingCause::Jitter)
-        } else if ppm > 50 {
-            (TimingQuality::Good, TimingCause::Clock)
+        } else if pace_grade.severity() >= clock_grade.severity()
+            && pace_grade != TimingQuality::Excellent
+        {
+            (pace_grade, pace_cause)
+        } else if clock_grade != TimingQuality::Excellent {
+            (clock_grade, TimingCause::Clock)
         } else {
             (TimingQuality::Excellent, TimingCause::Settled)
         };
@@ -201,6 +282,8 @@ impl TimingState {
         drops_per_sec: u64,
         throughput_mean_mbps: f64,
         throughput_std_mbps: f64,
+        delivery: DeliveryModel,
+        read_occupancy: Option<f32>,
     ) -> Self {
         let cb_period_expected = if config_sample_rate > 0.0 {
             (samples_per_transfer as f64 / config_sample_rate * 1e6).round() as u64
@@ -228,6 +311,8 @@ impl TimingState {
             cb_period_expected,
             sr_delta_ppm,
             drops_per_sec,
+            delivery,
+            read_occupancy,
         );
 
         // ── Per-callback deadline view ──────────────────────────────────────────
@@ -275,9 +360,7 @@ impl TimingState {
             throughput_std_mbps,
             timing_quality: verdict.quality,
             timing_cause: verdict.cause,
-            // Measured outside `compute`, by the poll task, and written by
-            // `publish` immediately after this returns.
-            read_occupancy: None,
+            read_occupancy,
             cb_deviations_us,
             deadline_budget_us,
             late_callbacks,
@@ -333,6 +416,8 @@ mod tests {
             0,
             4.5,
             0.1,
+            DeliveryModel::Push,
+            None,
         );
         assert_eq!(t.cb_period_expected, 3_413);
     }
@@ -351,6 +436,8 @@ mod tests {
             0,
             19.5,
             0.2,
+            DeliveryModel::Push,
+            None,
         );
         assert_eq!(t.cb_period_expected, 13_107);
         // Measured slightly under expected → negative ppm.
@@ -371,6 +458,8 @@ mod tests {
             0,
             19.5,
             0.2,
+            DeliveryModel::Push,
+            None,
         );
         assert_eq!(t.sr_delta_ppm, -200);
     }
@@ -388,6 +477,8 @@ mod tests {
             0,
             0.0,
             0.0,
+            DeliveryModel::Push,
+            None,
         );
         assert_eq!(t.cb_period_expected, 0);
         assert_eq!(t.timing_quality, TimingQuality::Excellent);
@@ -396,7 +487,9 @@ mod tests {
     #[test]
     fn quality_decision_tree() {
         let exp = 13_107u64;
-        let grade = |j, ppm, drops| TimingQuality::classify(j, exp, ppm, drops).quality;
+        let grade = |j, ppm, drops| {
+            TimingQuality::classify(j, exp, ppm, drops, DeliveryModel::Push, None).quality
+        };
         // Clean stream.
         assert_eq!(grade(500, 10, 0), TimingQuality::Excellent);
         // Mild jitter (~11% of period) → Good.
@@ -416,7 +509,9 @@ mod tests {
     #[test]
     fn the_reason_for_the_grade_comes_back_with_it() {
         let exp = 13_107u64;
-        let why = |j, ppm, drops| TimingQuality::classify(j, exp, ppm, drops).cause;
+        let why = |j, ppm, drops| {
+            TimingQuality::classify(j, exp, ppm, drops, DeliveryModel::Push, None).cause
+        };
 
         assert_eq!(why(500, 10, 0), TimingCause::Settled);
         assert_eq!(why(0, 0, 5), TimingCause::Drops);
@@ -431,9 +526,75 @@ mod tests {
 
         // No stream yet is settled, not a fault.
         assert_eq!(
-            TimingQuality::classify(9_000, 0, 9_000, 9).cause,
+            TimingQuality::classify(9_000, 0, 9_000, 9, DeliveryModel::Push, None).cause,
             TimingCause::Settled
         );
+    }
+
+    /// The regression the whole T phase exists for.
+    ///
+    /// These are the numbers measured on a HackRF through SoapyHackRF: a p99
+    /// deviation of 7763 µs against a 1638 µs expected period, which is 4.7
+    /// times the period, on a link with zero drops, a correct clock and a read
+    /// loop sitting at 0.65 occupancy. A push backend would rightly call that
+    /// catastrophic. A pull backend must call it fine, because it is.
+    #[test]
+    fn a_pull_backend_is_not_graded_on_its_own_read_rhythm() {
+        let measured =
+            TimingQuality::classify(7_763, 1_638, -18, 0, DeliveryModel::Pull, Some(0.65));
+        assert_eq!(measured.quality, TimingQuality::Excellent, "{measured:?}");
+        assert_eq!(measured.cause, TimingCause::Settled);
+
+        // The identical stream on a push backend is still a disaster, because
+        // there the interval really is the link's.
+        let pushed = TimingQuality::classify(7_763, 1_638, -18, 0, DeliveryModel::Push, None);
+        assert_eq!(pushed.quality, TimingQuality::Poor);
+        assert_eq!(pushed.cause, TimingCause::Jitter);
+    }
+
+    /// A pull loop that never gets to block is behind, and says so before a
+    /// single sample is lost. That warning is the reason for the metric.
+    #[test]
+    fn a_read_loop_that_stops_waiting_is_the_pull_alarm() {
+        let bands = [
+            (0.65, TimingQuality::Excellent),
+            (0.80, TimingQuality::Good),
+            (0.90, TimingQuality::Marginal),
+            (0.98, TimingQuality::Poor),
+            (1.00, TimingQuality::Poor),
+        ];
+        for (occ, want) in bands {
+            let v = TimingQuality::classify(0, 1_638, 0, 0, DeliveryModel::Pull, Some(occ));
+            assert_eq!(v.quality, want, "occupancy {occ}: {v:?}");
+            if want != TimingQuality::Excellent {
+                assert_eq!(v.cause, TimingCause::Backlog, "occupancy {occ}");
+            }
+        }
+    }
+
+    /// The two causes that are not about pace still apply to a pull backend.
+    #[test]
+    fn drops_and_the_clock_still_count_on_a_pull_backend() {
+        let dropping = TimingQuality::classify(0, 1_638, 0, 3, DeliveryModel::Pull, Some(0.1));
+        assert_eq!(
+            dropping.cause,
+            TimingCause::Drops,
+            "drops outrank everything"
+        );
+
+        let off = TimingQuality::classify(0, 1_638, 900, 0, DeliveryModel::Pull, Some(0.1));
+        assert_eq!(off.quality, TimingQuality::Poor);
+        assert_eq!(off.cause, TimingCause::Clock);
+    }
+
+    /// A pull backend with no occupancy reading yet must not be graded on a
+    /// number it does not have, and must not silently fall back to the jitter
+    /// it is not supposed to be judged by.
+    #[test]
+    fn a_pull_backend_without_a_reading_is_not_graded_on_pace() {
+        let v = TimingQuality::classify(99_999, 1_638, 0, 0, DeliveryModel::Pull, None);
+        assert_eq!(v.quality, TimingQuality::Excellent, "{v:?}");
+        assert_eq!(v.cause, TimingCause::Settled);
     }
 
     #[test]
@@ -456,6 +617,8 @@ mod tests {
             0,
             19.5,
             0.2,
+            DeliveryModel::Push,
+            None,
         );
         let t_rough = TimingState::compute(
             13_107,
@@ -468,6 +631,8 @@ mod tests {
             0,
             19.5,
             0.2,
+            DeliveryModel::Push,
+            None,
         );
         assert_eq!(t_calm.jitter_max_us, 200);
         assert_eq!(t_rough.jitter_max_us, 5_000);
@@ -498,6 +663,8 @@ mod tests {
             0,
             19.5,
             0.2,
+            DeliveryModel::Push,
+            None,
         );
         assert_eq!(t.deadline_budget_us, 603, "budget = round(0.046 * 13107)");
         // Signed deviations preserved, newest last, early spike negative.
@@ -528,6 +695,8 @@ mod tests {
             0,
             19.5,
             0.2,
+            DeliveryModel::Push,
+            None,
         );
         // Whole ring is available to plot.
         assert_eq!(t.cb_deviations_us.len(), 40 + STRIP_WINDOW);
@@ -554,6 +723,8 @@ mod tests {
             0,
             0.0,
             0.0,
+            DeliveryModel::Push,
+            None,
         );
         assert_eq!(t.deadline_budget_us, DEADLINE_BUDGET_FLOOR_US);
     }

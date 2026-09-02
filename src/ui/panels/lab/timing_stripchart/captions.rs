@@ -45,20 +45,33 @@ pub(super) fn description(iw: usize) -> &'static str {
 }
 
 /// The colour key, and what the guide line marks.
-pub(super) fn key_row(budget_us: u64, theme: &crate::Theme) -> Line<'static> {
+///
+/// A pull backend has no deadline to be in or out of, so the legend names the
+/// band rather than a verdict on it.
+pub(super) fn key_row(
+    budget_us: u64,
+    delivery: crate::hardware::DeliveryModel,
+    theme: &crate::Theme,
+) -> Line<'static> {
+    let (inside, outside, guide) = match delivery {
+        crate::hardware::DeliveryModel::Push => (
+            "\u{25AC} in budget",
+            "\u{25AC} over budget",
+            format!("\u{2504} \u{00b1}{budget_us} \u{00b5}s deadline"),
+        ),
+        crate::hardware::DeliveryModel::Pull => (
+            "\u{25AC} near the mean",
+            "\u{25AC} a long read gap",
+            format!("\u{2504} \u{00b1}{budget_us} \u{00b5}s, for scale only"),
+        ),
+    };
     Line::from(vec![
         Span::raw(" "),
-        Span::styled("\u{25AC} in budget", Style::default().fg(theme.value)),
+        Span::styled(inside, Style::default().fg(theme.value)),
         Span::raw("   "),
-        Span::styled(
-            "\u{25AC} over budget",
-            Style::default().fg(theme.status_warn),
-        ),
+        Span::styled(outside, Style::default().fg(theme.status_warn)),
         Span::raw("   "),
-        Span::styled(
-            format!("\u{2504} \u{00b1}{budget_us} \u{00b5}s deadline"),
-            Style::default().fg(theme.border_dim),
-        ),
+        Span::styled(guide, Style::default().fg(theme.border_dim)),
     ])
 }
 

@@ -55,6 +55,12 @@ pub(super) fn verdict_copy(r: &Reading) -> [String; 2] {
             "Overrun \u{2014} samples lost.".into(),
             format!("{}/s dropped.", r.drops_per_sec),
         ],
+        // The pull-side alarm. It fires before anything is lost, which is why
+        // the second line says what is about to go wrong rather than what has.
+        (_, TimingCause::Backlog) => [
+            "The read loop is not keeping up.".into(),
+            "Barely waiting; the driver's buffer is filling.".into(),
+        ],
         (_, TimingCause::Clock) => [
             "Sample clock is off the configured rate.".into(),
             format!("{ppm} ppm out, nothing lost."),
