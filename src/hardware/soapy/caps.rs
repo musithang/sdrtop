@@ -16,7 +16,7 @@
 
 use std::fmt;
 
-use crate::hardware::{DeviceCapabilities, GainModel, SampleFormat, SampleGeometry};
+use crate::hardware::{DeliveryModel, DeviceCapabilities, GainModel, SampleFormat, SampleGeometry};
 
 /// Pairs read out of one `readStream` call.
 ///
@@ -112,6 +112,9 @@ pub fn capabilities(a: &DriverAnswers) -> Result<DeviceCapabilities, Unsupported
         // for a chain we invented is the worst output this program could
         // produce. S10 is where the panels learn to say so.
         friis_applicable: false,
+        // `readStream` is a pull: it returns as soon as the driver has data,
+        // so our loop sets the rhythm rather than measuring one.
+        delivery: DeliveryModel::Pull,
     })
 }
 
@@ -237,6 +240,11 @@ mod tests {
         assert_eq!(c.sample_geometry.bits(), 8);
         assert!(c.has_bb_filter, "1.75 to 28 MHz of filter bandwidths");
         assert!(!c.friis_applicable, "we do not know a Soapy device's chain");
+        assert_eq!(
+            c.delivery,
+            DeliveryModel::Pull,
+            "readStream returns as soon as there is data, so we set the rhythm"
+        );
         match c.gain {
             GainModel::Soapy {
                 min_db,

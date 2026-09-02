@@ -15,7 +15,8 @@ use crate::state::{DEFAULT_FREQUENCY, DEFAULT_SAMPLE_RATE};
 
 use super::process::process_block;
 use super::traits::{
-    DeviceCapabilities, DeviceInfo, GainModel, RxContext, SampleFormat, SampleGeometry, SdrDevice,
+    DeliveryModel, DeviceCapabilities, DeviceInfo, GainModel, RxContext, SampleFormat,
+    SampleGeometry, SdrDevice,
 };
 use super::{DeviceKind, DeviceListing};
 use ffi::*;
@@ -314,6 +315,9 @@ pub fn caps() -> DeviceCapabilities {
         samples_per_transfer: crate::state::HACKRF_SAMPLES_PER_TRANSFER,
         has_bb_filter: true,
         friis_applicable: true,
+        // libhackrf owns the thread and calls `rx_callback`. The interval
+        // between callbacks is the link's own cadence.
+        delivery: DeliveryModel::Push,
     }
 }
 
@@ -443,6 +447,11 @@ mod tests {
         assert_eq!(c.sample_rate_max_hz, 20_000_000.0);
         assert_eq!(c.samples_per_transfer, 131_072);
         assert!(c.has_bb_filter && c.friis_applicable);
+        assert_eq!(
+            c.delivery,
+            DeliveryModel::Push,
+            "libhackrf drives rx_callback, so the callback interval is the link's"
+        );
         assert_eq!(c.sample_geometry.format, SampleFormat::Int8);
         assert_eq!(c.sample_geometry.full_scale, 128.0);
     }

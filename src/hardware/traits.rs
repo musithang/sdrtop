@@ -247,6 +247,35 @@ impl GainModel {
     }
 }
 
+/// How samples reach us, which decides what "on time" can even mean.
+///
+/// Not a property of the radio. A property of the **transport**, which is why it
+/// lives here beside the other capability answers rather than in a `DeviceKind`
+/// match: two backends could reach the same radio by different routes, and the
+/// timing bench has to follow the route rather than the hardware.
+///
+/// The distinction is not cosmetic. It was found by measuring: on a HackRF
+/// reached through `SoapyHackRF`, the timing bench reported permanent USB
+/// distress on a link with zero drops, a correct sample rate and 50 per cent of
+/// the bus spare. The gaps between reads were bimodal, median 1079 µs against an
+/// expected 1638, p95 5933 and p99 7763. Nothing was wrong. A pull loop drains
+/// whatever the driver has buffered and then blocks, so the interval between
+/// reads is our own rhythm and not the link's, and a deadline measured over it
+/// grades the wrong thing.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum DeliveryModel {
+    /// The driver calls us and paces the calls. HackRF's `hackrf_start_rx` and
+    /// RTL-SDR's `rtlsdr_read_async` both take a callback and drive it, so the
+    /// interval between callbacks really is the link's cadence and the deadline
+    /// budget means something.
+    Push,
+    /// We ask, and the call returns as soon as the driver has anything. A
+    /// SoapySDR `readStream` loop. Health here is throughput against the
+    /// configured rate, drops, and how much of the loop is spent waiting rather
+    /// than working.
+    Pull,
+}
+
 /// Static description of a device's limits and features - the single source of
 /// truth for every clamp, default, and UI capability check. Built once at open.
 #[derive(Clone, Debug)]
@@ -272,6 +301,14 @@ pub struct DeviceCapabilities {
     pub has_bb_filter: bool,
     /// The Friis cascade NF / MDS panel applies (HackRF's known 3-stage chain).
     pub friis_applicable: bool,
+    /// Whether the driver pushes samples at us or we pull them.
+    ///
+    /// Read by the capability tests only until T5, where the timing bench starts
+    /// asking it. Declared now rather than then so that every backend has to
+    /// answer the question as part of describing itself, including any added in
+    /// between.
+    #[cfg_attr(not(test), allow(dead_code))]
+    pub delivery: DeliveryModel,
 }
 
 /// The software layer between sdrtop and a radio that has no firmware of its

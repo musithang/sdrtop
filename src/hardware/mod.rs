@@ -10,8 +10,8 @@ pub mod traits;
 
 pub use hackrf::{board_rev_name, compute_bb_filter_bw};
 pub use traits::{
-    DeviceCapabilities, DeviceInfo, GainModel, RxContext, SampleFormat, SampleGeometry, SdrDevice,
-    SoftwareStack,
+    DeliveryModel, DeviceCapabilities, DeviceInfo, GainModel, RxContext, SampleFormat,
+    SampleGeometry, SdrDevice, SoftwareStack,
 };
 
 use std::sync::Arc;

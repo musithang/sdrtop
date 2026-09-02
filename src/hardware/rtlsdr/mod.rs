@@ -18,7 +18,8 @@ use libc::{c_int, c_void};
 
 use super::process::process_block;
 use super::traits::{
-    DeviceCapabilities, DeviceInfo, GainModel, RxContext, SampleFormat, SampleGeometry, SdrDevice,
+    DeliveryModel, DeviceCapabilities, DeviceInfo, GainModel, RxContext, SampleFormat,
+    SampleGeometry, SdrDevice,
 };
 use super::{DeviceKind, DeviceListing};
 use ffi::*;
@@ -346,6 +347,9 @@ fn rtl_caps(tuner: c_int, gains_tenths: &[i32]) -> DeviceCapabilities {
         samples_per_transfer: (RTL_BUF_LEN / 2) as u64,
         has_bb_filter: false,
         friis_applicable: false,
+        // We own the thread, but `rtlsdr_read_async` drives `rtl_rx_callback`
+        // from inside it. The pacing is still the driver's, not ours.
+        delivery: DeliveryModel::Push,
     }
 }
 
@@ -434,6 +438,11 @@ mod tests {
         assert_eq!(caps.sample_geometry.format, SampleFormat::Uint8);
         assert_eq!(caps.sample_geometry.full_scale, 128.0);
         assert!(!caps.has_bb_filter && !caps.friis_applicable);
+        assert_eq!(
+            caps.delivery,
+            DeliveryModel::Push,
+            "we own the thread, but rtlsdr_read_async paces the callback inside it"
+        );
         assert_eq!(caps.freq_min_hz, 24_000_000);
         assert_eq!(caps.freq_max_hz, 1_766_000_000);
         assert_eq!(caps.samples_per_transfer, 32_768);
