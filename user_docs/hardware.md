@@ -11,7 +11,7 @@
 | HackRF One | Fully supported: spectrum, waterfall, every diagnostic |
 | RTL-SDR (R820T / R828D / E4000) | Fully supported: the whole spectrum, waterfall and lab stack, with a single tuner gain plus AGC |
 | **Anything with a SoapySDR driver** | Supported, **and not yet confirmed on hardware other than a HackRF**. See [below](#soapysdr-the-honest-version) |
-| PortaPack H4M (Mayhem) | In development: telemetry panel over USB serial |
+| PortaPack H4M (Mayhem) | Fully supported (HackRF mode) |
 
 The first two are built and tested on real hardware. Support for them was only
 added after physical testing, never guessed from documentation. Datasheets have

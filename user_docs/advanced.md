@@ -236,8 +236,6 @@ and `TERM=xterm-256color` fixes most of it.
   appear, the [timing bench](lab.md#timing-bench--lab-timing-lab-3) will tell you
   whether it's the bus or your CPU.
 - **No in-app config editing.** The TOML is hand-edited. On the roadmap.
-- **PortaPack support is partial.** Mayhem telemetry over serial is in
-  development; full control like the HackRF is not there yet.
 
 ---
 

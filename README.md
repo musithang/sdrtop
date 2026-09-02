@@ -35,6 +35,7 @@
   <a href="#-install">Install</a> ·
   <a href="#keys">Keys</a> ·
   <a href="#config">Config</a> ·
+  <a href="#roadmap">Roadmap</a> ·
   <a href="#supported-hardware">Hardware</a> ·
   <a href="user_docs/README.md">Full guide</a>
 </p>
@@ -198,6 +199,35 @@ Frequency, gains, sample rate, markers, the sweep band, your theme and your layo
 
 ---
 
+## Roadmap
+
+### ✅ Done
+
+- HackRF One and RTL-SDR: full native support
+- Spectrum, waterfall, markers, band-plan overlay
+- Four lab benches: IQ, RF, Timing, Signal
+- FM demodulator with RDS, MPX baseband, CTCSS
+- IQ correction, band sweep, observer mode
+- Six themes, layout presets, micro field views
+- PortaPack H4M in HackRF mode
+
+### 🔧 In progress
+
+- **SoapySDR feature parity** -- closing the gap so every panel and every measurement works through a SoapySDR device the same way it does on a HackRF or RTL-SDR
+- **Math audit** -- derived measurements audited reading by reading until the numbers are not just present but trustworthy
+- **UI polish** -- micro view redesign, rough edges, the small things that make a good tool feel right
+
+### 🔜 Next
+
+- Signal recording to file
+- In-app config editing
+- Native backends for hardware that lands on the desk
+- **Digital signal demodulation done properly**: WiFi, Bluetooth, ADS-B, AIS, LoRa, DMR -- each with its own UI and detailed info panel, no audio, just data
+
+The whole story, in order: [What's new](user_docs/whats-new.md).
+
+---
+
 ## Supported hardware
 
 | Device | Status | Notes |
@@ -205,7 +235,7 @@ Frequency, gains, sample rate, markers, the sweep band, your theme and your layo
 | HackRF One | ✅ Full support | All diagnostics, gain stages, ADC metrics |
 | RTL-SDR (R820T, E4000, R828D) | ✅ Full support | Single tuner gain + AGC; no VGA, no BB filter, no Friis NF |
 | **Anything with a SoapySDR driver** | 🧪 **Beta** | Airspy, SDRplay, Pluto, Lime, bladeRF, USRP, SoapyRemote. Unconfirmed on anything but a HackRF |
-| PortaPack H4M (Mayhem) | 🔧 In development | Telemetry panel via CDC/ACM serial |
+| PortaPack H4M (Mayhem) | ✅ Full support | HackRF mode: all HackRF diagnostics apply |
 | HackRF Pro | 🔲 Planned | Needs hardware |
 
 Native support is added only after physical testing on real devices. No guessing from datasheets. Translation: that list moves at exactly the speed of my hobby budget.
@@ -226,16 +256,6 @@ Every native backend needs the device to physically exist on my desk, and develo
 No pressure, but if this scratches an itch for you, this is where it goes.
 
 [![Ko-fi](https://ko-fi.com/img/githubbutton_sm.svg)](https://ko-fi.com/mustang6139)
-
----
-
-## Roadmap
-
-**Right now: polish over features.** The feature set is in, so the focus is making what's here genuinely good: UI polish, a micro view redesign, auditing the derived measurements until the numbers are not just present but trustworthy, and hunting the rough edges. No shiny new things until that feels done. I have said this before and then written a demodulator. This time there's a list. ✨
-
-**Just landed 🎉** SoapySDR support (beta) · a menu with scoped keys · an ADC bench that follows the device's real bit depth · a measurement audit of the Lab Signal bench · the FM demodulator with RDS. The whole story, in order, is in [What's new](user_docs/whats-new.md).
-
-**Later:** signal recording to file · in-app config editing · native backends for whatever lands on the desk.
 
 ---
 
