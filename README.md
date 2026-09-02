@@ -201,6 +201,8 @@ Frequency, gains, sample rate, markers, the sweep band, your theme and your layo
 
 ## Roadmap
 
+**Polish over features.** I have said that before and then went and wrote a demodulator, so this time there's a list. ✨
+
 ### ✅ Done
 
 - HackRF One and RTL-SDR: full native support
@@ -213,16 +215,16 @@ Frequency, gains, sample rate, markers, the sweep band, your theme and your layo
 
 ### 🔧 In progress
 
-- **SoapySDR feature parity** -- closing the gap so every panel and every measurement works through a SoapySDR device the same way it does on a HackRF or RTL-SDR
-- **Math audit** -- derived measurements audited reading by reading until the numbers are not just present but trustworthy
-- **UI polish** -- micro view redesign, rough edges, the small things that make a good tool feel right
+- **SoapySDR feature parity**: closing the gap so every panel and every measurement works through a SoapySDR device the same way it does on a HackRF or RTL-SDR
+- **Math audit**: derived measurements audited reading by reading until the numbers are not just present but trustworthy
+- **UI polish**: micro view redesign, rough edges, the small things that make a good tool feel right
 
 ### 🔜 Next
 
 - Signal recording to file
 - In-app config editing
 - Native backends for hardware that lands on the desk
-- **Digital signal demodulation done properly**: WiFi, Bluetooth, ADS-B, AIS, LoRa, DMR -- each with its own UI and detailed info panel, no audio, just data
+- **Digital signal demodulation done properly**: WiFi, Bluetooth, ADS-B, AIS, LoRa, DMR. Each gets its own UI and its own detailed info panel. Still no audio, still just data
 
 The whole story, in order: [What's new](user_docs/whats-new.md).
 
