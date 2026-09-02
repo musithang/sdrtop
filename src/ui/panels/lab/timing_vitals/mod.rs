@@ -141,7 +141,9 @@ mod tests {
 
         let mut dropping = live();
         dropping.signal.drops_per_sec = 8;
-        dropping.timing.timing_quality = crate::state::TimingQuality::classify(9_000, 4_096, 0, 8);
+        let v = crate::state::TimingQuality::classify(9_000, 4_096, 0, 8);
+        dropping.timing.timing_quality = v.quality;
+        dropping.timing.timing_cause = v.cause;
         let bad = draw(TimingVitalsPanel, W, H, &dropping).join("\n");
         assert!(bad.contains("overrun logged"), "{bad}");
     }

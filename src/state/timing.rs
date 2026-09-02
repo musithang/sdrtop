@@ -38,33 +38,79 @@ pub enum TimingQuality {
     Poor,
 }
 
+/// Which of the three independent conditions produced the grade.
+///
+/// Three different things reach `Poor` and only one of them is a drop, but the
+/// verdict panel used to word the worst grade as "block dropped, resynced, ring
+/// buffer hit its ceiling" whichever one had fired. It named two facts it had
+/// never read, and on a SoapySDR device, where the read loop is a pull rather
+/// than a paced callback, it printed them beside its own reading of zero drops
+/// and a half-empty buffer.
+///
+/// So the grade and its explanation come out of **one** decision. Anything that
+/// re-derives the reason from the grade is a second copy of these thresholds,
+/// and the two only agree until someone edits one of them.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
+pub enum TimingCause {
+    /// Nothing crossed a threshold.
+    #[default]
+    Settled,
+    /// Samples were counted as lost. The only cause that means data is gone.
+    Drops,
+    /// Callback arrival scatter, relative to the expected period.
+    Jitter,
+    /// The delivered sample rate is off the configured one.
+    Clock,
+}
+
+/// A grade and the reason for it, decided together.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
+pub struct TimingVerdict {
+    pub quality: TimingQuality,
+    pub cause: TimingCause,
+}
+
 impl TimingQuality {
     /// Decision tree over the p99 jitter (as a fraction of the expected callback
     /// period), the sample-rate offset, and whether samples are being dropped.
     /// A longer expected period tolerates proportionally more absolute jitter, so
     /// the jitter test is relative rather than a fixed microsecond threshold.
+    ///
+    /// Returns the reason alongside the grade. The order the causes are tested
+    /// in is the order of severity of their consequence: lost samples first,
+    /// then a stream that is not arriving on time, then a clock that is off.
     pub fn classify(
         jitter_p99_us: u64,
         cb_period_expected: u64,
         sr_delta_ppm: i64,
         drops_per_sec: u64,
-    ) -> Self {
+    ) -> TimingVerdict {
         // No timing data yet (not streaming / first poll) reads as the best case
         // rather than alarming the user with a red verdict on an idle radio.
         if cb_period_expected == 0 {
-            return TimingQuality::Excellent;
+            return TimingVerdict::default();
         }
         let ratio = jitter_p99_us as f64 / cb_period_expected as f64;
         let ppm = sr_delta_ppm.unsigned_abs();
-        if drops_per_sec > 0 || ratio > 0.50 || ppm > 500 {
-            TimingQuality::Poor
-        } else if ratio > 0.25 || ppm > 200 {
-            TimingQuality::Marginal
-        } else if ratio > 0.10 || ppm > 50 {
-            TimingQuality::Good
+
+        let (quality, cause) = if drops_per_sec > 0 {
+            (TimingQuality::Poor, TimingCause::Drops)
+        } else if ratio > 0.50 {
+            (TimingQuality::Poor, TimingCause::Jitter)
+        } else if ppm > 500 {
+            (TimingQuality::Poor, TimingCause::Clock)
+        } else if ratio > 0.25 {
+            (TimingQuality::Marginal, TimingCause::Jitter)
+        } else if ppm > 200 {
+            (TimingQuality::Marginal, TimingCause::Clock)
+        } else if ratio > 0.10 {
+            (TimingQuality::Good, TimingCause::Jitter)
+        } else if ppm > 50 {
+            (TimingQuality::Good, TimingCause::Clock)
         } else {
-            TimingQuality::Excellent
-        }
+            (TimingQuality::Excellent, TimingCause::Settled)
+        };
+        TimingVerdict { quality, cause }
     }
 
     pub fn label(self) -> &'static str {
@@ -108,6 +154,9 @@ pub struct TimingState {
     pub throughput_mean_mbps: f64,
     pub throughput_std_mbps: f64,
     pub timing_quality: TimingQuality,
+    /// Which condition produced `timing_quality`. Written by the same
+    /// `classify` call, so the grade and its wording cannot disagree.
+    pub timing_cause: TimingCause,
 
     // ── Per-callback deadline view (drives the lab_timing strip chart) ──────────
     /// Signed per-callback deviation from the expected period (µs), newest last.
@@ -167,7 +216,7 @@ impl TimingState {
         } else {
             0
         };
-        let timing_quality = TimingQuality::classify(
+        let verdict = TimingQuality::classify(
             jitter_p99_us,
             cb_period_expected,
             sr_delta_ppm,
@@ -217,7 +266,8 @@ impl TimingState {
             sr_delta_ppm,
             throughput_mean_mbps,
             throughput_std_mbps,
-            timing_quality,
+            timing_quality: verdict.quality,
+            timing_cause: verdict.cause,
             cb_deviations_us,
             deadline_budget_us,
             late_callbacks,
@@ -336,28 +386,43 @@ mod tests {
     #[test]
     fn quality_decision_tree() {
         let exp = 13_107u64;
+        let grade = |j, ppm, drops| TimingQuality::classify(j, exp, ppm, drops).quality;
         // Clean stream.
-        assert_eq!(
-            TimingQuality::classify(500, exp, 10, 0),
-            TimingQuality::Excellent
-        );
+        assert_eq!(grade(500, 10, 0), TimingQuality::Excellent);
         // Mild jitter (~11% of period) → Good.
-        assert_eq!(
-            TimingQuality::classify(1_500, exp, 0, 0),
-            TimingQuality::Good
-        );
+        assert_eq!(grade(1_500, 0, 0), TimingQuality::Good);
         // Sample-rate offset alone pushes to Good / Marginal.
-        assert_eq!(TimingQuality::classify(0, exp, 120, 0), TimingQuality::Good);
-        assert_eq!(
-            TimingQuality::classify(0, exp, 300, 0),
-            TimingQuality::Marginal
-        );
+        assert_eq!(grade(0, 120, 0), TimingQuality::Good);
+        assert_eq!(grade(0, 300, 0), TimingQuality::Marginal);
         // Any drops → Poor regardless of jitter.
-        assert_eq!(TimingQuality::classify(0, exp, 0, 5), TimingQuality::Poor);
+        assert_eq!(grade(0, 0, 5), TimingQuality::Poor);
         // Severe jitter (>50%) → Poor.
+        assert_eq!(grade(7_000, 0, 0), TimingQuality::Poor);
+    }
+
+    /// The grade alone does not say what went wrong, and three independent
+    /// conditions reach `Poor`. The verdict panel words its copy from the
+    /// cause, so the cause has to be right for each of them separately.
+    #[test]
+    fn the_reason_for_the_grade_comes_back_with_it() {
+        let exp = 13_107u64;
+        let why = |j, ppm, drops| TimingQuality::classify(j, exp, ppm, drops).cause;
+
+        assert_eq!(why(500, 10, 0), TimingCause::Settled);
+        assert_eq!(why(0, 0, 5), TimingCause::Drops);
+        assert_eq!(why(7_000, 0, 0), TimingCause::Jitter);
+        assert_eq!(why(0, 600, 0), TimingCause::Clock);
+
+        // Drops outrank everything: samples are already gone, and that is the
+        // thing worth saying first.
+        assert_eq!(why(7_000, 600, 5), TimingCause::Drops);
+        // Jitter outranks a clock offset, both being Poor on their own.
+        assert_eq!(why(7_000, 600, 0), TimingCause::Jitter);
+
+        // No stream yet is settled, not a fault.
         assert_eq!(
-            TimingQuality::classify(7_000, exp, 0, 0),
-            TimingQuality::Poor
+            TimingQuality::classify(9_000, 0, 9_000, 9).cause,
+            TimingCause::Settled
         );
     }
 

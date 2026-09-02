@@ -227,6 +227,10 @@ impl SdrMetrics {
         let mut sorted = abs.clone();
         sorted.sort_unstable();
         let pick = |q: f64| sorted[((sorted.len() as f64 * q) as usize).min(sorted.len() - 1)];
+        // One call, both answers. Grading twice would let a fixture hold a
+        // quality and a cause that never came from the same decision, which is
+        // the exact confusion this pair exists to prevent.
+        let verdict = TimingQuality::classify(pick(0.99), expected, 18, 0);
         self.timing = TimingState {
             cb_period_us: expected,
             cb_period_expected: expected,
@@ -237,7 +241,8 @@ impl SdrMetrics {
             sr_delta_ppm: 18,
             throughput_mean_mbps: 38.1,
             throughput_std_mbps: 0.4,
-            timing_quality: TimingQuality::classify(pick(0.99), expected, 18, 0),
+            timing_quality: verdict.quality,
+            timing_cause: verdict.cause,
             late_callbacks: abs.iter().filter(|&&d| d > budget).count() as u32,
             late_window: abs.len() as u32,
             dev_p95_us: pick(0.95),
