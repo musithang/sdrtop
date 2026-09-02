@@ -67,8 +67,8 @@ It's a hobby project built in my spare time, and honestly, I made it for *you* â
 ## Gallery
 
 <p align="center">
-  <a href="https://github.com/mustang6139/sdrtop/blob/main/user_docs/pics/hackrf/video.mp4">
-    <img src="https://raw.githubusercontent.com/mustang6139/sdrtop/main/user_docs/pics/hackrf/command_rail.png" width="100%" alt="sdrtop in motion: click to watch the demo video">
+  <a href="https://github.com/musithang/sdrtop/blob/main/user_docs/pics/hackrf/video.mp4">
+    <img src="https://raw.githubusercontent.com/musithang/sdrtop/main/user_docs/pics/hackrf/command_rail.png" width="100%" alt="sdrtop in motion: click to watch the demo video">
   </a>
   <br>
   <sub>â–¶ click the screenshot to play the demo video</sub>
@@ -81,21 +81,21 @@ It's a hobby project built in my spare time, and honestly, I made it for *you* â
   <br>
   <table>
     <tr>
-      <td width="50%"><img src="https://raw.githubusercontent.com/mustang6139/sdrtop/main/user_docs/pics/hackrf/spectrum.png" alt="HackRF: spectrum & waterfall"></td>
-      <td width="50%"><img src="https://raw.githubusercontent.com/mustang6139/sdrtop/main/user_docs/pics/hackrf/lab_iq.png" alt="HackRF: IQ diagnostics lab"></td>
+      <td width="50%"><img src="https://raw.githubusercontent.com/musithang/sdrtop/main/user_docs/pics/hackrf/spectrum.png" alt="HackRF: spectrum & waterfall"></td>
+      <td width="50%"><img src="https://raw.githubusercontent.com/musithang/sdrtop/main/user_docs/pics/hackrf/lab_iq.png" alt="HackRF: IQ diagnostics lab"></td>
     </tr>
     <tr>
-      <td width="50%"><img src="https://raw.githubusercontent.com/mustang6139/sdrtop/main/user_docs/pics/hackrf/lab_rf.png" alt="HackRF: RF chain lab"></td>
-      <td width="50%"><img src="https://raw.githubusercontent.com/mustang6139/sdrtop/main/user_docs/pics/hackrf/lab_timing.png" alt="HackRF: timing lab"></td>
+      <td width="50%"><img src="https://raw.githubusercontent.com/musithang/sdrtop/main/user_docs/pics/hackrf/lab_rf.png" alt="HackRF: RF chain lab"></td>
+      <td width="50%"><img src="https://raw.githubusercontent.com/musithang/sdrtop/main/user_docs/pics/hackrf/lab_timing.png" alt="HackRF: timing lab"></td>
     </tr>
     <tr>
-      <td width="50%"><img src="https://raw.githubusercontent.com/mustang6139/sdrtop/main/user_docs/pics/rtlsdr/rtl-sdr1.png" alt="RTL-SDR: spectrum & waterfall"></td>
-      <td width="50%"><img src="https://raw.githubusercontent.com/mustang6139/sdrtop/main/user_docs/pics/rtlsdr/rtl-sdr2.png" alt="RTL-SDR: observer mode"></td>
+      <td width="50%"><img src="https://raw.githubusercontent.com/musithang/sdrtop/main/user_docs/pics/rtlsdr/rtl-sdr1.png" alt="RTL-SDR: spectrum & waterfall"></td>
+      <td width="50%"><img src="https://raw.githubusercontent.com/musithang/sdrtop/main/user_docs/pics/rtlsdr/rtl-sdr2.png" alt="RTL-SDR: observer mode"></td>
     </tr>
   </table>
 </details>
 
-Got a clean capture on your hardware? Drop it in [`user_docs/pics/`](https://github.com/mustang6139/sdrtop/tree/main/user_docs/pics) and send a PR. Shots from radios I don't own are the most useful ones there are.
+Got a clean capture on your hardware? Drop it in [`user_docs/pics/`](https://github.com/musithang/sdrtop/tree/main/user_docs/pics) and send a PR. Shots from radios I don't own are the most useful ones there are.
 
 ---
 
@@ -124,7 +124,7 @@ Everything your radio knows about itself, in real time, without leaving the term
 ### The one-liner
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/mustang6139/sdrtop/main/packaging/install.sh | sh
+curl -fsSL https://raw.githubusercontent.com/musithang/sdrtop/main/packaging/install.sh | sh
 ```
 
 It works out your distribution, installs the libraries under whatever names that distribution gives them (apt, dnf, pacman, zypper, apk, xbps, emerge and nix are all handled), grabs the prebuilt binary if it can actually run on your box, and quietly falls back to compiling if it can't. The nice bit: it decides by **running the thing**, not by reading your distro's name off a list and hoping.

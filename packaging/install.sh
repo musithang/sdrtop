@@ -5,7 +5,7 @@
 
 # Install sdrtop on any Linux distribution.
 #
-#   curl -fsSL https://raw.githubusercontent.com/mustang6139/sdrtop/main/packaging/install.sh | sh
+#   curl -fsSL https://raw.githubusercontent.com/musithang/sdrtop/main/packaging/install.sh | sh
 #   sh install.sh --prefix ~/.local        # no root anywhere
 #   sh install.sh --from-source            # skip the prebuilt binary
 #   sh install.sh --git                    # build the main branch, not a release
@@ -33,7 +33,7 @@
 # anything here could be, because the whole Rust ecosystem runs it daily.
 set -eu
 
-REPO=mustang6139/sdrtop
+REPO=musithang/sdrtop
 CRATE=sdrtop
 WANT_SOAPY=0
 RAW_DEPS_ONLY=0
@@ -493,7 +493,7 @@ if [ -z "$BINARY" ]; then
     [ -x "$BINARY" ] || die "cargo reported success but produced no binary"
     # No SRC_DIR: `cargo install` delivers a binary and nothing else, so this
     # path installs no README, man page or user_docs. That is what the command
-    # means, and the documentation lives at github.com/mustang6139/sdrtop.
+    # means, and the documentation lives at github.com/musithang/sdrtop.
 fi
 
 # ── Install ─────────────────────────────────────────────────────────────────

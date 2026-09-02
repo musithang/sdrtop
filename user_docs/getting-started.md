@@ -20,10 +20,10 @@ which is the "What you need" section below.
 ## The shorter way, if you don't want to think about it
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/mustang6139/sdrtop/main/packaging/install.sh | sh
+curl -fsSL https://raw.githubusercontent.com/musithang/sdrtop/main/packaging/install.sh | sh
 
 # ...and with SoapySDR, if you have an Airspy, an RSP, a Pluto or a Lime
-curl -fsSL https://raw.githubusercontent.com/mustang6139/sdrtop/main/packaging/install.sh | sh -s -- --soapy
+curl -fsSL https://raw.githubusercontent.com/musithang/sdrtop/main/packaging/install.sh | sh -s -- --soapy
 ```
 
 The installer covers everything the rest of this page describes: it finds your
@@ -46,7 +46,7 @@ you at the end whether you have it and what it would buy you. `--soapy` adds the
 library and the driver modules your distribution ships. If your distribution's
 packages are named something this script has not heard of, it says so rather
 than failing, and the fix is one line in
-[`packaging/install.sh`](https://github.com/mustang6139/sdrtop/blob/main/packaging/install.sh)
+[`packaging/install.sh`](https://github.com/musithang/sdrtop/blob/main/packaging/install.sh)
 plus an issue so I can correct it for everyone else.
 
 What it does **not** do is set up device permissions. It reports on them, and
@@ -56,7 +56,7 @@ needs root afterwards, [troubleshooting](troubleshooting.md#permission-denied)
 has the fix.
 
 Read it before you pipe it into a shell if you like:
-[`packaging/install.sh`](https://github.com/mustang6139/sdrtop/blob/main/packaging/install.sh).
+[`packaging/install.sh`](https://github.com/musithang/sdrtop/blob/main/packaging/install.sh).
 
 Everything below is the same job done by hand.
 
@@ -117,7 +117,7 @@ With the libraries in place, either of these gets you a working `sdrtop`:
 cargo install sdrtop --locked
 
 # Or from a clone, if you want to poke at the source
-git clone https://github.com/mustang6139/sdrtop
+git clone https://github.com/musithang/sdrtop
 cd sdrtop
 cargo build --release
 ./target/release/sdrtop

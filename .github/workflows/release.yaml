@@ -150,7 +150,7 @@ jobs:
       # and this commit, signed through Sigstore. A user checks it with:
       #
       #   gh attestation verify sdrtop-<version>-x86_64-unknown-linux-gnu.tar.gz \
-      #      --repo mustang6139/sdrtop
+      #      --repo musithang/sdrtop
       #
       # SHA256SUMS itself is not attested: it is derived from the two files that
       # are, so attesting it would add a third thing to keep in agreement and
@@ -189,7 +189,7 @@ jobs:
       # sit in this repository's secrets waiting to leak or expire.
       #
       # Configured once, on 2026-08-29, at crates.io/crates/sdrtop under
-      # Settings, naming repository `mustang6139/sdrtop` and workflow
+      # Settings, naming repository `musithang/sdrtop` and workflow
       # `release.yaml`. Two things there have to keep matching this file or the
       # token exchange is refused with an error that names neither:
       #

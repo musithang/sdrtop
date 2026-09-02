@@ -183,7 +183,7 @@ Things that are true and will remain true forever:
   can hand you the `main` branch on request.
 - **Signed build provenance.** Release artefacts carry a Sigstore attestation
   binding them to this repository and this workflow. Verify with
-  `gh attestation verify <file> --repo mustang6139/sdrtop`. The checksum says a
+  `gh attestation verify <file> --repo musithang/sdrtop`. The checksum says a
   download arrived intact; this says where it came from.
 - **`install.sh --git`** builds the `main` branch, and **`install.sh
   --no-verify`** skips the checksum for whoever has a reason.
@@ -475,10 +475,10 @@ sdrtop stopped being a one-radio program.
   image rejection ratio, wavelength and antenna metrics.
 - Config file with atomic save on quit, and the CLI flags that override it.
 
-[Unreleased]: https://github.com/mustang6139/sdrtop/compare/v0.4.2...HEAD
-[0.4.2]: https://github.com/mustang6139/sdrtop/compare/v0.4.1...v0.4.2
-[0.4.1]: https://github.com/mustang6139/sdrtop/compare/v0.4.0...v0.4.1
-[0.4.0]: https://github.com/mustang6139/sdrtop/compare/v0.3.5...v0.4.0
-[0.3.5]: https://github.com/mustang6139/sdrtop/compare/v0.3.0...v0.3.5
-[0.3.0]: https://github.com/mustang6139/sdrtop/compare/v0.2.0...v0.3.0
-[0.2.0]: https://github.com/mustang6139/sdrtop/releases/tag/v0.2.0
+[Unreleased]: https://github.com/musithang/sdrtop/compare/v0.4.2...HEAD
+[0.4.2]: https://github.com/musithang/sdrtop/compare/v0.4.1...v0.4.2
+[0.4.1]: https://github.com/musithang/sdrtop/compare/v0.4.0...v0.4.1
+[0.4.0]: https://github.com/musithang/sdrtop/compare/v0.3.5...v0.4.0
+[0.3.5]: https://github.com/musithang/sdrtop/compare/v0.3.0...v0.3.5
+[0.3.0]: https://github.com/musithang/sdrtop/compare/v0.2.0...v0.3.0
+[0.2.0]: https://github.com/musithang/sdrtop/releases/tag/v0.2.0

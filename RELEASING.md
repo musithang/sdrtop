@@ -233,7 +233,7 @@ sh packaging/install.sh --prefix ~/.cache/rel-test --uninstall
 And demand that the attestation prove itself:
 
 ```sh
-gh attestation verify sdrtop-X.Y.Z-x86_64-unknown-linux-gnu.tar.gz --repo mustang6139/sdrtop
+gh attestation verify sdrtop-X.Y.Z-x86_64-unknown-linux-gnu.tar.gz --repo musithang/sdrtop
 ```
 
 > *The checksum check in `install.sh` once lived inside an `if` whose every
