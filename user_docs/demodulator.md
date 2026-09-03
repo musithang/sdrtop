@@ -8,9 +8,82 @@ is about how it arrives at those numbers.
 [The Lab presets](lab.md#fm-mpx--demod--lab-signal-lab-4) covers the other half:
 what each reading means and what to do about it. If you want to *use* the demod,
 start there. This page is for anyone who wants to know what is actually happening
-between the antenna and the number, or who is thinking about writing one.
+between the antenna and the number.
+
+It comes in two sizes. **Part one** is the whole thing in plain language, and it
+is short. **[Part two](#part-two-with-the-arithmetic-left-in)** is the same story
+with the arithmetic left in, for anyone who is thinking about writing one of
+these.
 
 ---
+
+# Part one: the short version
+
+**A radio does not send sound. It sends numbers.**
+
+Millions of them a second, each describing where the incoming wave was at that
+instant: how strong, and at what angle. What comes down the USB cable is not
+music. It is a very long list of coordinates, and sdrtop keeps it that way.
+
+The demodulator's job is to work out what the transmitter was doing and say so in
+numbers you can write down. Here is the whole of it.
+
+**1. Pick one station out of the crowd.** The radio hears a wide slice of the
+band at once. The demod slides sideways to the station you point it at and
+filters the rest away. It pointedly avoids the exact dead centre of that slice,
+because the dead centre is where the radio's own electrical noise sits, quietly,
+doing an impression of a station.
+
+**2. Watch the wobble.** FM carries information by wobbling its frequency up and
+down, so compare each sample's angle to the one before it. That difference *is*
+the wobble, in Hz.
+
+And that is the whole of FM demodulation. One subtraction, a few hundred thousand
+times a second. There is an enormous amount of theory explaining why it works and
+none of it is required in order to use it, which feels a little like getting away
+with something.
+
+**3. Then look at the wobble itself.** Treat it as a signal in its own right and
+take its spectrum. For a broadcast station it opens like a drawer:
+
+- a steady tone at 19 kHz, the **pilot**, whose entire job in life is to sit
+  there and mean "this station is in stereo"
+- the stereo difference signal at 38 kHz
+- **RDS** at 57 kHz, the small data channel carrying the station name
+
+**4. Read the data channel.** RDS sits at exactly three times the pilot, and its
+bit clock is tied to the pilot as well. So lock onto the pilot, which is loud and
+clean and thoroughly cooperative, and the data channel's position *and* its
+metronome both turn up free of charge. Read the bits, check them, assemble them
+into a station name, a programme type and scrolling text.
+
+Whoever specified RDS was plainly thinking about the poor soul who would one day
+have to decode it. This cannot be said of every standard.
+
+**5. On a walkie-talkie channel instead**, listen underneath the voice for a
+quiet tone that radios use to decide whose calls to let through. There are forty
+of them, and the two closest are 2.3 Hz apart, which is the sort of number that
+comes out of a committee. Separating those two takes half a second of
+uninterrupted signal and cannot be hurried by writing better code.
+
+**6. On AM instead**, measure how much the signal's loudness swings and how
+evenly it swings each way. After the other five, AM is almost restful.
+
+That is it. Everything on the demod panel falls out of those steps.
+
+**One thing worth adding, because it is rather the point.** Apart from the FFT,
+every piece of arithmetic above is written out in this project's own Rust rather
+than lifted from a signal processing library. Not for sport. This is a measuring
+instrument, and when one of its readings argues with your bench equipment there
+has to be a real answer available, rather than a shrug and a link to somebody
+else's issue tracker.
+
+If that was the depth you were after, you are done, and the panel itself is
+[documented here](lab.md#fm-mpx--demod--lab-signal-lab-4).
+
+---
+
+# Part two: with the arithmetic left in
 
 ## The honest ledger
 
