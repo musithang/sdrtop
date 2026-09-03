@@ -258,4 +258,110 @@ mod tests {
         assert!(!out.contains("not modelled"), "{out}");
         assert!(out.contains("MIX"), "and its modelled mixer stage:\n{out}");
     }
+
+    /// Build a device with `n` stages, each named `name`-ish and set to 10 dB.
+    fn with_stages(n: usize, name: &str) -> SdrMetrics {
+        use crate::hardware::StageSpec;
+        let mut m = soapy();
+        let mut caps = (*m.caps).clone();
+        if let crate::hardware::GainModel::Soapy { stages, .. } = &mut caps.gain {
+            *stages = (0..n)
+                .map(|i| StageSpec::ranged(&format!("{name}{i}"), 0.0, 30.0, 1.0))
+                .collect();
+        }
+        m.caps = std::sync::Arc::new(caps);
+        m.radio.gains = vec![10.0; n];
+        m
+    }
+
+    /// One stage, two, three, six. The lineup is the device's own chain, so
+    /// there is no count it can assume.
+    #[test]
+    fn the_lineup_draws_however_many_stages_there_are() {
+        for n in [1usize, 2, 3, 6] {
+            let out = draw(RfChainPanel, W, 34, &with_stages(n, "ST")).join("\n");
+            for i in 0..n {
+                assert!(
+                    out.contains(&format!("ST{i}")),
+                    "{n} stages: no ST{i}:\n{out}"
+                );
+            }
+            assert!(out.contains("ANT") && out.contains("ADC"), "{n}:\n{out}");
+        }
+    }
+
+    /// Six stages in forty columns: the case the plan named, and the one that
+    /// used to clip `-58 dBm` down to `-58 `.
+    #[test]
+    fn six_stages_in_forty_columns_keep_every_reading() {
+        let out = draw(RfChainPanel, 40, 30, &with_stages(6, "STAGE"));
+        for line in &out {
+            assert!(
+                line.chars().count() <= 40,
+                "a row grew past the pane: {line:?}"
+            );
+        }
+        let joined = out.join("\n");
+        assert_eq!(
+            joined.matches("dBm").count(),
+            7,
+            "the antenna and six stages each keep their level:\n{joined}"
+        );
+        assert!(
+            joined.contains("dBFS"),
+            "and the ADC keeps its own:\n{joined}"
+        );
+    }
+
+    /// A driver may name a stage anything. A long name is **cut to the column**
+    /// rather than allowed to push the reading off the right-hand edge: the
+    /// level is the measurement, the label is only its name.
+    #[test]
+    fn a_long_stage_name_is_clipped_rather_than_shoving_the_reading_out() {
+        let out = draw(RfChainPanel, 32, 30, &with_stages(3, "PREAMPLIFIER"));
+        for line in &out {
+            assert!(line.chars().count() <= 32, "{line:?}");
+        }
+        let joined = out.join("\n");
+        assert_eq!(
+            joined.matches("dBm").count(),
+            4,
+            "antenna plus three stages:\n{joined}"
+        );
+        assert!(
+            joined.contains("PREAMPLI"),
+            "the name is cut, not dropped:\n{joined}"
+        );
+    }
+
+    /// The reading stays flush against the right edge whatever the names are.
+    ///
+    /// The label column grows into the padding rather than pushing the value
+    /// along, so a column of levels stays a column: readable down the panel
+    /// without the eye having to find each number.
+    #[test]
+    fn the_reading_stays_flush_right_whatever_the_names_are() {
+        // Columns, not bytes: an em dash in the middle column is one column and
+        // three bytes, and measuring the wrong one makes aligned rows look ragged.
+        let end_column = |line: &str| -> Option<usize> {
+            let cols: Vec<char> = line.chars().collect();
+            let text: String = cols.iter().collect();
+            text.find("dBm")
+                .map(|byte| text[..byte].chars().count() + 3)
+        };
+        let edges = |m: &SdrMetrics| -> Vec<usize> {
+            draw(RfChainPanel, W, 30, m)
+                .iter()
+                .filter_map(|l| end_column(l))
+                .collect()
+        };
+        let short = edges(&with_stages(2, "A"));
+        let long = edges(&with_stages(2, "PREAMPLIFIER"));
+        assert!(!short.is_empty());
+        assert_eq!(short, long, "the name length must not move the reading");
+        assert!(
+            short.windows(2).all(|w| w[0] == w[1]),
+            "and every row in the column agrees: {short:?}"
+        );
+    }
 }

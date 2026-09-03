@@ -32,17 +32,45 @@ pub(super) fn lineup(
     let dim = theme.border_dim;
     out.push(section("Gain lineup", "level after each stage", iw, theme));
     out.push(Line::raw(""));
+
+    // **The label column is the widest name there actually is**, not a fixed
+    // three. A driver names its own stages, and `IFGR` or `PREAMP` is as likely
+    // as `LNA`; a three-wide column does not truncate them, it lets the row grow
+    // past the pane and the terminal clips the reading off the right-hand end.
+    // Which is the wrong thing to lose: the level is the measurement, the label
+    // is only its name.
+    let label_w = lineup_label_w(levels);
+
+    // If both columns will not fit, the **middle one goes**. The per-stage gain
+    // is context and is spelled out again in the staging block below; the level
+    // is the reading and cannot be recovered from anywhere else on the panel.
+    let widest_mid = levels
+        .iter()
+        .enumerate()
+        .map(|(i, _)| mid_text(i, stages).chars().count())
+        .chain(std::iter::once(4)) // the ADC row's "0 dB"
+        .max()
+        .unwrap_or(0);
+    let widest_right = levels
+        .iter()
+        .map(|n| format!("{:.0} dBm", n.signal_dbm).chars().count())
+        .chain(std::iter::once(
+            format!("{adc_peak:.0} dBFS").chars().count(),
+        ))
+        .max()
+        .unwrap_or(0);
+    let show_mid = 1 + label_w + 1 + widest_mid + 1 + widest_right <= iw;
+
     for (i, node) in levels.iter().enumerate() {
-        let gain_str = if i == 0 {
-            "\u{2014}".to_string()
-        } else {
-            format!("{:+} dB", stages[i - 1].gain_db as i64)
-        };
         out.push(row(
             Row {
-                label: &node.label,
-                label_w: LABEL_W,
-                mid: gain_str,
+                label: &clip(&node.label, label_w),
+                label_w,
+                mid: if show_mid {
+                    mid_text(i, stages)
+                } else {
+                    String::new()
+                },
                 mid_col: dim,
                 right: format!("{:.0} dBm", node.signal_dbm),
                 right_col: theme.value,
@@ -52,12 +80,16 @@ pub(super) fn lineup(
         ));
         out.push(Line::raw(""));
     }
-    // ADC node = VGA output, read in dBFS.
+    // ADC node = the last stage's output, read in dBFS.
     out.push(row(
         Row {
             label: "ADC",
-            label_w: LABEL_W,
-            mid: "0 dB".to_string(),
+            label_w,
+            mid: if show_mid {
+                "0 dB".to_string()
+            } else {
+                String::new()
+            },
             mid_col: dim,
             right: format!("{adc_peak:.0} dBFS"),
             right_col: sev_col,
@@ -65,6 +97,37 @@ pub(super) fn lineup(
         iw,
         theme,
     ));
+}
+
+/// Widest stage name in the lineup, bounded.
+///
+/// `ADC` is always present, so three is the floor. The ceiling stops one
+/// verbose driver name from eating the row it is supposed to label.
+pub(super) fn lineup_label_w(levels: &[StageLevel]) -> usize {
+    levels
+        .iter()
+        .map(|n| n.label.chars().count())
+        .max()
+        .unwrap_or(LABEL_W)
+        .clamp(LABEL_W, 8)
+}
+
+/// A name cut to the column, rather than allowed to push the row wider.
+fn clip(label: &str, w: usize) -> String {
+    if label.chars().count() <= w {
+        label.to_string()
+    } else {
+        label.chars().take(w).collect()
+    }
+}
+
+/// The middle column: what this node's stage contributed. The antenna is where
+/// the signal arrives, so it contributes nothing and says so with a dash.
+fn mid_text(index: usize, stages: &[Stage]) -> String {
+    match index.checked_sub(1).and_then(|k| stages.get(k)) {
+        Some(stage) => format!("{:+} dB", stage.gain_db as i64),
+        None => "\u{2014}".to_string(),
+    }
 }
 
 /// `GAIN STAGING` - LNA and VGA against their optimal targets, with the target
