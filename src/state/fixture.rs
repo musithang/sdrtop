@@ -41,8 +41,7 @@ impl SdrMetrics {
                 config_sample_rate: 10_000_000.0,
                 actual_sample_rate: 0,
                 bb_filter_hz: 5_000_000,
-                lna_gain: 24,
-                vga_gain: 30,
+                gains: vec![24.0, 30.0],
                 amp_enabled: false,
                 rx_enabled: false,
                 hw_streaming: false,
@@ -299,8 +298,8 @@ impl SdrMetrics {
             gain_steps_db: vec![0, 9, 14, 27, 37, 49],
         };
         caps.friis_applicable = false;
-        self.radio.lna_gain = 27;
-        self.radio.vga_gain = 0;
+        self.radio.set_primary_gain(27);
+        self.radio.set_secondary_gain(0);
         self.caps = Arc::new(caps);
         self
     }
@@ -355,8 +354,8 @@ impl SdrMetrics {
             format: crate::hardware::SampleFormat::Int16,
             full_scale: 8192.0,
         };
-        self.radio.lna_gain = 40;
-        self.radio.vga_gain = 0;
+        self.radio.set_primary_gain(40);
+        self.radio.set_secondary_gain(0);
         self.radio.amp_enabled = false;
         self.system.stack = Some(crate::hardware::SoftwareStack {
             label: "soapysdr  ",
@@ -424,10 +423,13 @@ mod tests {
         assert!(m.waterfall.last_fft.is_none());
         // The tuning is legal for the capabilities the fixture claims.
         assert!((m.caps.freq_min_hz..=m.caps.freq_max_hz).contains(&m.radio.frequency));
-        let (lna, vga) = m.caps.gain.clamp_gains(m.radio.lna_gain, m.radio.vga_gain);
+        let (lna, vga) = m
+            .caps
+            .gain
+            .clamp_gains(m.radio.primary_gain(), m.radio.secondary_gain());
         assert_eq!(
             (lna, vga),
-            (m.radio.lna_gain, m.radio.vga_gain),
+            (m.radio.primary_gain(), m.radio.secondary_gain()),
             "the fixture's gains must be ones this device can be set to"
         );
     }

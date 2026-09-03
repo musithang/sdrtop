@@ -85,14 +85,14 @@ pub(super) fn primary_gain_label(gain: &GainModel) -> &'static str {
 pub(super) fn step_primary(ctx: &mut InputCtx<'_>, up: bool) {
     let Some(device) = ctx.device else { return };
     let gain = &device.capabilities().gain;
-    let current = metrics(ctx.state).radio.lna_gain;
+    let current = metrics(ctx.state).radio.primary_gain();
     let new_gain = next_primary_gain(gain, current, up);
 
     let result = device.set_lna_gain(new_gain);
     let mut m = metrics(ctx.state);
     match result {
         Ok(()) => {
-            m.radio.lna_gain = new_gain;
+            m.radio.set_primary_gain(new_gain);
             // On a single-tuner device, setting a manual gain turns the tuner AGC
             // off in hardware - keep the UI's AGC flag in sync.
             if gain.is_single() {
@@ -119,9 +119,9 @@ pub(super) fn step_vga(ctx: &mut InputCtx<'_>, up: bool) {
     let new_gain = {
         let m = metrics(ctx.state);
         if up {
-            (m.radio.vga_gain + VGA_STEP_DB).min(VGA_MAX_DB)
+            (m.radio.secondary_gain() + VGA_STEP_DB).min(VGA_MAX_DB)
         } else {
-            m.radio.vga_gain.saturating_sub(VGA_STEP_DB)
+            m.radio.secondary_gain().saturating_sub(VGA_STEP_DB)
         }
     };
 
@@ -129,7 +129,7 @@ pub(super) fn step_vga(ctx: &mut InputCtx<'_>, up: bool) {
     let mut m = metrics(ctx.state);
     match result {
         Ok(()) => {
-            m.radio.vga_gain = new_gain;
+            m.radio.set_secondary_gain(new_gain);
             m.lab.rf_autotrack = false;
             m.ui.note_mode_action(RailMode::Bench);
             m.push_log(format!("VGA gain \u{2192} {} dB", new_gain));

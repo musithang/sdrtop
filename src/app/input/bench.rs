@@ -153,8 +153,8 @@ pub(super) fn rf_chain(key: KeyEvent, ctx: &mut InputCtx<'_>) -> KeyAction {
                 let m = metrics(state);
                 (
                     m.signal.adc_peak_dbfs as f64,
-                    m.radio.lna_gain,
-                    m.radio.vga_gain,
+                    m.radio.primary_gain(),
+                    m.radio.secondary_gain(),
                     m.caps.friis_applicable,
                     m.radio.hw_streaming,
                 )
@@ -186,8 +186,8 @@ pub(super) fn rf_chain(key: KeyEvent, ctx: &mut InputCtx<'_>) -> KeyAction {
                     let mut m = metrics(state);
                     match (r1, r2) {
                         (Ok(()), Ok(())) => {
-                            m.radio.lna_gain = lna_t;
-                            m.radio.vga_gain = vga_t;
+                            m.radio.set_primary_gain(lna_t);
+                            m.radio.set_secondary_gain(vga_t);
                             m.ui.note_mode_action(RailMode::Bench);
                             m.push_log(format!(
                                 "Auto-gain \u{2192} LNA {lna_t} \u{00b7} VGA {vga_t} dB (signal \u{2192} \u{2212}8 dBFS)"));
@@ -223,8 +223,8 @@ pub(super) fn rf_chain(key: KeyEvent, ctx: &mut InputCtx<'_>) -> KeyAction {
                     clip_events: m.signal.adc_clip_events,
                     snr_db: m.signal.peak_to_nf_db,
                     amp_enabled: m.radio.amp_enabled,
-                    lna_gain: m.radio.lna_gain,
-                    vga_gain: m.radio.vga_gain,
+                    lna_gain: m.radio.primary_gain(),
+                    vga_gain: m.radio.secondary_gain(),
                 });
                 m.push_log("Lab RF: frozen \u{2014} histogram & diagram held".to_string());
             }

@@ -159,18 +159,18 @@ fn render_gain(f: &mut Frame, area: Rect, state: &SdrMetrics, theme: &crate::The
             draw_hbar(
                 f,
                 halves[0],
-                r.lna_gain as f64 / 40.0,
+                r.primary_gain() as f64 / 40.0,
                 " LNA ",
-                &format!("{} dB", r.lna_gain),
+                &format!("{} dB", r.primary_gain()),
                 theme.value,
                 theme,
             );
             draw_hbar(
                 f,
                 halves[1],
-                r.vga_gain as f64 / 62.0,
+                r.secondary_gain() as f64 / 62.0,
                 " VGA ",
-                &format!("{} dB", r.vga_gain),
+                &format!("{} dB", r.secondary_gain()),
                 theme.value,
                 theme,
             );
@@ -180,13 +180,13 @@ fn render_gain(f: &mut Frame, area: Rect, state: &SdrMetrics, theme: &crate::The
                 Span::raw(" "),
                 Span::styled("LNA:", Style::default().fg(theme.label)),
                 Span::styled(
-                    format!("{}dB", r.lna_gain),
+                    format!("{}dB", r.primary_gain()),
                     Style::default().fg(theme.value),
                 ),
                 Span::raw("  "),
                 Span::styled("VGA:", Style::default().fg(theme.label)),
                 Span::styled(
-                    format!("{}dB", r.vga_gain),
+                    format!("{}dB", r.secondary_gain()),
                     Style::default().fg(theme.value),
                 ),
             ]);
@@ -197,7 +197,7 @@ fn render_gain(f: &mut Frame, area: Rect, state: &SdrMetrics, theme: &crate::The
             let line = Line::from(vec![
                 Span::raw(" "),
                 Span::styled(
-                    format!("L:{} V:{} ", r.lna_gain, r.vga_gain),
+                    format!("L:{} V:{} ", r.primary_gain(), r.secondary_gain()),
                     Style::default().fg(theme.value),
                 ),
                 Span::styled(format!("AMP:{}", amp), Style::default().fg(theme.label)),

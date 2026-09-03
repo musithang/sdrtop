@@ -57,9 +57,9 @@ pub(super) fn draw(
     draw_hbar(
         f,
         primary,
-        r.lna_gain as f64 / gm.primary_max_db().max(1) as f64,
+        r.primary_gain() as f64 / gm.primary_max_db().max(1) as f64,
         &format!(" {:<w$}  ", gm.primary_label()),
-        &format!("{} dB", r.lna_gain),
+        &format!("{} dB", r.primary_gain()),
         theme.value,
         theme,
     );
@@ -68,9 +68,9 @@ pub(super) fn draw(
         draw_hbar(
             f,
             second,
-            r.vga_gain as f64 / VGA_MAX_DB,
+            r.secondary_gain() as f64 / VGA_MAX_DB,
             &format!(" {:<w$}  ", "VGA"),
-            &format!("{} dB", r.vga_gain),
+            &format!("{} dB", r.secondary_gain()),
             theme.value,
             theme,
         );
@@ -122,9 +122,11 @@ pub(super) fn draw(
 fn total_gain_db(state: &SdrMetrics) -> i32 {
     let r = &state.radio;
     if state.caps.gain.is_single() {
-        r.lna_gain as i32
+        r.primary_gain() as i32
     } else {
-        r.lna_gain as i32 + r.vga_gain as i32 + if r.amp_enabled { AMP_GAIN_DB } else { 0 }
+        r.primary_gain() as i32
+            + r.secondary_gain() as i32
+            + if r.amp_enabled { AMP_GAIN_DB } else { 0 }
     }
 }
 
@@ -210,7 +212,7 @@ mod tests {
     #[test]
     fn a_single_stage_total_is_just_its_own_gain() {
         let mut m = SdrMetrics::fixture().single_stage();
-        m.radio.lna_gain = 27;
+        m.radio.set_primary_gain(27);
         m.radio.amp_enabled = true;
         assert_eq!(total_gain_db(&m), 27);
     }
@@ -218,8 +220,8 @@ mod tests {
     #[test]
     fn a_two_stage_total_sums_both_stages_and_the_amp() {
         let mut m = SdrMetrics::fixture();
-        m.radio.lna_gain = 24;
-        m.radio.vga_gain = 30;
+        m.radio.set_primary_gain(24);
+        m.radio.set_secondary_gain(30);
         assert_eq!(total_gain_db(&m), 54);
         m.radio.amp_enabled = true;
         assert_eq!(total_gain_db(&m), 54 + AMP_GAIN_DB);

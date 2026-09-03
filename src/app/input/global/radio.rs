@@ -49,8 +49,8 @@ pub(super) fn reset_defaults(ctx: &mut InputCtx<'_>) {
 
     let mut m = metrics(ctx.state);
     if results.iter().all(|r| r.is_ok()) {
-        m.radio.lna_gain = lna_def;
-        m.radio.vga_gain = vga_def;
+        m.radio.set_primary_gain(lna_def);
+        m.radio.set_secondary_gain(vga_def);
         m.radio.amp_enabled = false;
         m.lab.rf_autotrack = false;
         m.radio.frequency = def_freq;

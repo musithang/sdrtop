@@ -92,7 +92,7 @@ impl Panel for AdcLoadingPanel {
             .unwrap_or(state.signal.adc_clip_events);
         let (lna_g, vga_g) = fz
             .map(|f| (f.lna_gain, f.vga_gain))
-            .unwrap_or((state.radio.lna_gain, state.radio.vga_gain));
+            .unwrap_or((state.radio.primary_gain(), state.radio.secondary_gain()));
         let bits = state.caps.sample_geometry.bits();
         let load = adc_loading(peak, rms, clip, n, bits);
         let (verdict, sev) = staging_verdict(peak);

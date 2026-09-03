@@ -531,14 +531,14 @@ fn bottom_band_line(state: &SdrMetrics, theme: &crate::Theme, inner_width: u16) 
     let gap = (inner_width as usize).saturating_sub(left_w + right);
 
     // Primary stage: HackRF LNA / RTL-SDR tuner - green → yellow gradient.
-    let p_str = format!("{:2}", state.radio.lna_gain);
+    let p_str = format!("{:2}", state.radio.primary_gain());
     let p_label = if gm.is_single() { "TUN " } else { "LNA " };
 
     let mut spans = left_spans;
     spans.push(leader(gap, theme.border_dim));
     spans.push(Span::styled(p_label, Style::default().fg(theme.label)));
     spans.extend(gain_bar_spans(
-        state.radio.lna_gain,
+        state.radio.primary_gain(),
         gm.primary_max_db(),
         theme.status_ok,
         theme.value_hi,
@@ -552,10 +552,10 @@ fn bottom_band_line(state: &SdrMetrics, theme: &crate::Theme, inner_width: u16) 
 
     if gm.has_second_stage() {
         // Secondary stage (HackRF VGA only) - cyan → orange gradient.
-        let vga_str = format!("{:2}", state.radio.vga_gain);
+        let vga_str = format!("{:2}", state.radio.secondary_gain());
         spans.push(Span::styled("VGA ", Style::default().fg(theme.label)));
         spans.extend(gain_bar_spans(
-            state.radio.vga_gain,
+            state.radio.secondary_gain(),
             62,
             theme.border_accent,
             theme.status_warn,

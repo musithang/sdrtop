@@ -110,8 +110,8 @@ pub(super) fn track_gain(
         (
             m.lab.rf_autotrack,
             m.caps.friis_applicable,
-            m.radio.lna_gain,
-            m.radio.vga_gain,
+            m.radio.primary_gain(),
+            m.radio.secondary_gain(),
         )
     };
     if !latched || !friis || AUTOGAIN_COMFORT_DBFS.contains(&adc_peak_dbfs) {
@@ -137,8 +137,8 @@ pub(super) fn track_gain(
     let mut m = state.lock().unwrap_or_else(|e| e.into_inner());
     match (r1, r2) {
         (Ok(()), Ok(())) => {
-            m.radio.lna_gain = lna_t;
-            m.radio.vga_gain = vga_t;
+            m.radio.set_primary_gain(lna_t);
+            m.radio.set_secondary_gain(vga_t);
             m.push_log(format!(
                 "Auto-gain track \u{2192} LNA {lna_t} \u{00b7} VGA {vga_t} dB"
             ));

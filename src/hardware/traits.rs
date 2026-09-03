@@ -311,10 +311,18 @@ impl GainModel {
     /// Full-scale value for the primary-gain bar/gauge (dB).
     pub fn primary_max_db(&self) -> u32 {
         match self {
-            GainModel::HackRf => 40,
-            GainModel::RtlSingle { gain_steps_db, .. } => {
-                gain_steps_db.last().copied().unwrap_or(49)
-            }
+            // From the stage list, so the 40 dB ceiling and the tuner's top
+            // entry are not written twice. `stages()` is empty only for a tuner
+            // that named no gains at all, which keeps the old fallback.
+            GainModel::HackRf | GainModel::RtlSingle { .. } => self
+                .stages()
+                .first()
+                .map(|s| s.max_db.max(0.0).round() as u32)
+                .unwrap_or(49),
+            // Deliberately still the **whole chain**. A Soapy device's primary
+            // gain is one combined figure until G8 teaches the knob to
+            // distribute; answering with the first stage's ceiling would put a
+            // 40 dB scale under a control that still sets 116.
             GainModel::Soapy { max_db, .. } => *max_db,
         }
     }

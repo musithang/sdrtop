@@ -323,14 +323,22 @@ mod tests {
         let mut h = Harness::new();
         let before = {
             let m = metrics(&h.state);
-            (m.radio.rx_enabled, m.radio.lna_gain, m.radio.vga_gain)
+            (
+                m.radio.rx_enabled,
+                m.radio.primary_gain(),
+                m.radio.secondary_gain(),
+            )
         };
         for c in [' ', 'r', 'f', 's'] {
             h.press(c);
         }
         let after = {
             let m = metrics(&h.state);
-            (m.radio.rx_enabled, m.radio.lna_gain, m.radio.vga_gain)
+            (
+                m.radio.rx_enabled,
+                m.radio.primary_gain(),
+                m.radio.secondary_gain(),
+            )
         };
         assert_eq!(before, after, "a hardware key changed state with no device");
     }

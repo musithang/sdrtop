@@ -47,7 +47,7 @@ pub(super) fn draw(f: &mut Frame, nf_row: Rect, mds_row: Rect, state: &SdrMetric
     }
 
     let r = &state.radio;
-    let nf = estimate_nf_db(r.amp_enabled, r.lna_gain);
+    let nf = estimate_nf_db(r.amp_enabled, r.primary_gain());
     let nf_color = if nf < NF_GOOD_DB {
         theme.status_ok
     } else if nf < NF_FAIR_DB {

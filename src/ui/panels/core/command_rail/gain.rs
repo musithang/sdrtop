@@ -72,7 +72,7 @@ pub(super) fn lines(
     // Primary stage (LNA / Tuner): green → yellow.
     out.push(gain_row(
         label_cell(gm.primary_label(), theme),
-        state.radio.lna_gain,
+        state.radio.primary_gain(),
         gm.primary_max_db(),
         theme.status_ok,
         theme.value_hi,
@@ -86,7 +86,7 @@ pub(super) fn lines(
     if gm.has_second_stage() {
         out.push(gain_row(
             label_cell("VGA", theme),
-            state.radio.vga_gain,
+            state.radio.secondary_gain(),
             62,
             theme.border_accent,
             theme.status_warn,
@@ -99,8 +99,8 @@ pub(super) fn lines(
     }
 
     let total = total_gain(
-        state.radio.lna_gain,
-        state.radio.vga_gain,
+        state.radio.primary_gain(),
+        state.radio.secondary_gain(),
         gm.has_second_stage(),
     );
     let mut total_spans = vec![

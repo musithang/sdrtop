@@ -102,8 +102,10 @@ impl Panel for RfChainPanel {
         // --- model (frozen snapshot when held, else live) ----------------------
         let fz = state.lab.rf_freeze.as_ref();
         let amp = fz.map(|f| f.amp_enabled).unwrap_or(state.radio.amp_enabled);
-        let lna = fz.map(|f| f.lna_gain).unwrap_or(state.radio.lna_gain);
-        let vga = fz.map(|f| f.vga_gain).unwrap_or(state.radio.vga_gain);
+        let lna = fz.map(|f| f.lna_gain).unwrap_or(state.radio.primary_gain());
+        let vga = fz
+            .map(|f| f.vga_gain)
+            .unwrap_or(state.radio.secondary_gain());
         let adc_peak = fz
             .map(|f| f.peak_dbfs)
             .unwrap_or(state.signal.adc_peak_dbfs) as f64;
@@ -161,7 +163,7 @@ fn single_tuner(state: &SdrMetrics, theme: &crate::Theme) -> Vec<Line<'static>> 
         Line::from(vec![
             Span::raw(" "),
             Span::styled(
-                format!("{} dB", state.radio.lna_gain),
+                format!("{} dB", state.radio.primary_gain()),
                 Style::default()
                     .fg(theme.value_hi)
                     .add_modifier(Modifier::BOLD),

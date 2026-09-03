@@ -222,8 +222,8 @@ impl App {
             (
                 m.radio.frequency,
                 m.radio.config_sample_rate,
-                m.radio.lna_gain,
-                m.radio.vga_gain,
+                m.radio.primary_gain(),
+                m.radio.secondary_gain(),
                 m.radio.amp_enabled,
                 m.waterfall.buffer.max_rows,
                 m.waterfall.palette,

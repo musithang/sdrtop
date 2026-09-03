@@ -224,8 +224,9 @@ pub(super) fn initial_metrics(cfg: &AppConfig, boot: Boot) -> SdrMetrics {
             config_sample_rate: tuning.sample_rate,
             actual_sample_rate: 0,
             bb_filter_hz: tuning.bb_filter_hz,
-            lna_gain: tuning.lna_gain,
-            vga_gain: tuning.vga_gain,
+            // Position, not name: `resolve_tuning` has already snapped these
+            // onto the device's own stages.
+            gains: vec![tuning.lna_gain as f64, tuning.vga_gain as f64],
             amp_enabled: cfg.radio.amp_enabled,
             rx_enabled: false,
             hw_streaming: false,
