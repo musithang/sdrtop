@@ -98,6 +98,7 @@ impl App {
                         &self.focus_keys,
                     ) {
                         input::KeyAction::Quit => {
+                            self.restore_noise_sweep();
                             self.save_config();
                             return Ok(());
                         }
@@ -196,6 +197,38 @@ impl App {
             self.deck_shown = true;
         }
         Ok(())
+    }
+
+    /// Put the swept stage back before the app goes away.
+    ///
+    /// A sweep parks the front stage at each of its settings in turn, so quitting
+    /// mid-measurement would leave the radio at whatever step it had reached -
+    /// and, worse, `save_config` would then write that step out as the user's
+    /// gain. Restoring here fixes both: the radio ends where it started, and the
+    /// config records the setting that was actually chosen.
+    fn restore_noise_sweep(&self) {
+        let restore = {
+            let mut m = self.state.lock().unwrap_or_else(|e| e.into_inner());
+            let r = m.lab.noise_sweep.as_ref().map(|sw| sw.restore());
+            m.lab.noise_sweep = None;
+            r
+        };
+        let (Some((idx, db)), Some(device)) = (restore, self.device.as_ref()) else {
+            return;
+        };
+        let stages = {
+            let m = self.state.lock().unwrap_or_else(|e| e.into_inner());
+            m.caps.gain.stages()
+        };
+        let Some(spec) = stages.get(idx) else {
+            return;
+        };
+        // Device call with no lock held, as everywhere else.
+        let _ = device.set_stage_gain(idx, &spec.name, db);
+        let mut m = self.state.lock().unwrap_or_else(|e| e.into_inner());
+        if let Some(g) = m.radio.gains.get_mut(idx) {
+            *g = db;
+        }
     }
 
     fn save_config(&self) {

@@ -179,6 +179,58 @@ fn fmt_mhz(hz: u32) -> String {
     }
 }
 
+/// The noise step measurement, while it is running.
+///
+/// Draws nothing at all when no sweep is under way: an idle instrument should
+/// not spend a row saying it is idle.
+pub(super) fn sweep_progress(
+    out: &mut Vec<Line<'static>>,
+    state: &SdrMetrics,
+    iw: usize,
+    theme: &crate::Theme,
+) {
+    let Some(sw) = state.lab.noise_sweep.as_ref() else {
+        return;
+    };
+    let (done, total) = sw.steps();
+    let name = state
+        .caps
+        .gain
+        .stages()
+        .get(sw.stage())
+        .map(|s| s.name.clone())
+        .unwrap_or_else(|| "stage".to_string());
+    let at = state
+        .radio
+        .gains
+        .get(sw.stage())
+        .copied()
+        .unwrap_or_default();
+
+    out.push(section("Noise Step", "sweep running", iw, theme));
+    out.push(Line::raw(""));
+    // Six cells, not ten: the row also carries a stage name, a value and a
+    // count, and at the panel's minimum width a wider bar is the part that
+    // gets truncated.
+    const CELLS: usize = 6;
+    let filled = (sw.progress() * CELLS as f32)
+        .round()
+        .clamp(0.0, CELLS as f32) as usize;
+    let bar: String = "\u{2588}".repeat(filled) + &"\u{2591}".repeat(CELLS - filled);
+    out.push(row(
+        Row {
+            label: "sweep",
+            label_w: LABEL_W,
+            mid: format!("{name} {at:.0} dB"),
+            mid_col: theme.value,
+            right: format!("{done}/{total} {bar}"),
+            right_col: theme.value_hi,
+        },
+        iw,
+        theme,
+    ));
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

@@ -13,6 +13,7 @@
 //! publish::write_back             ── LOCK ──  write results, read rx_enabled
 //! control::apply_rx_request       device call with no lock held
 //! control::track_gain             lock, drop, device call, lock
+//! control::advance_noise_sweep     lock, drop, device call, lock
 //! ```
 //!
 //! Two lock blocks per poll, with every transcendental between them. The UI
@@ -129,6 +130,13 @@ pub fn spawn_rx_task(
             if hw_streaming && hw_rx_active && computed.had_samples {
                 control::track_gain(&state, &device, computed.iq.adc_peak_dbfs);
             }
+            // **Outside the streaming gate, deliberately.** Auto-track only has
+            // something to do while blocks are arriving, but the sweep's most
+            // important job is the one it does when they stop: a sweep parks the
+            // front stage at each setting in turn, so a run interrupted by [Space]
+            // would leave the radio at some intermediate step with nothing left
+            // running to put it back.
+            control::advance_noise_sweep(&state, &device);
 
             tokio::time::sleep(POLL_INTERVAL).await;
         }

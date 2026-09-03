@@ -70,7 +70,6 @@ pub const NOISE_LIMITED_SLOPE: f32 = 0.7;
 
 /// What the machine wants the caller to do next.
 #[derive(Clone, Copy, Debug, PartialEq)]
-#[allow(dead_code)] // wired in at M2
 pub enum Action {
     /// Put this stage at this value, then keep feeding readings.
     Set { stage: usize, db: f64 },
@@ -83,7 +82,6 @@ pub enum Action {
 
 /// One measured point: the stage's value, and the noise floor there.
 #[derive(Clone, Copy, Debug, PartialEq)]
-#[allow(dead_code)] // wired in at M2
 pub struct Point {
     pub gain_db: f64,
     pub noise_dbfs: f32,
@@ -91,7 +89,6 @@ pub struct Point {
 
 /// What the sweep found.
 #[derive(Clone, Debug, PartialEq)]
-#[allow(dead_code)] // wired in at M2
 pub struct Reading {
     /// Every point visited, in the order visited.
     pub points: Vec<Point>,
@@ -108,7 +105,6 @@ pub struct Reading {
 /// Drive it by calling [`Self::feed`] once per FFT frame with that frame's noise
 /// floor, and doing whatever the returned [`Action`] says.
 #[derive(Clone, Debug)]
-#[allow(dead_code)] // wired in at M2
 pub struct GainSweep {
     stage: usize,
     plan: Vec<f64>,
@@ -118,9 +114,26 @@ pub struct GainSweep {
     samples: Vec<f32>,
     points: Vec<Point>,
     finished: bool,
+    /// A `Set` has been emitted and the radio has not been told yet.
+    ///
+    /// **The two halves of this measurement run on different threads.** Readings
+    /// arrive on the FFT worker, which must never touch the device; device calls
+    /// belong to the poll task, which runs at its own pace. So a step is emitted
+    /// here, applied there, and the settle count does not start until
+    /// [`Self::applied`] says the radio has actually moved. Counting from the
+    /// moment the machine *decided* would fold up to one poll period of the old
+    /// setting into the new point.
+    pending: Option<(usize, f64)>,
+    /// The sweep was stopped rather than completed.
+    ///
+    /// Kept apart from `finished` because the two mean different things to the
+    /// caller: a completed sweep has an answer, a stopped one has some points
+    /// and no answer. Two points do define a line, and printing that line as the
+    /// result of a measurement the user deliberately interrupted would be the
+    /// instrument answering a question it was not allowed to finish asking.
+    aborted: bool,
 }
 
-#[allow(dead_code)] // wired in at M2
 impl GainSweep {
     /// Plan a sweep of one stage across `values`, returning to `restore_db`.
     ///
@@ -136,6 +149,8 @@ impl GainSweep {
             samples: Vec::new(),
             points: Vec::new(),
             finished: false,
+            pending: None,
+            aborted: false,
         }
     }
 
@@ -144,20 +159,46 @@ impl GainSweep {
     /// Separate from `feed` so a caller cannot start collecting before the stage
     /// has been moved, which would fold one reading of the old setting into the
     /// first point.
-    pub fn begin(&self) -> Action {
+    pub fn begin(&mut self) -> Action {
         match self.plan.first() {
-            Some(&db) => Action::Set {
-                stage: self.stage,
-                db,
-            },
-            None => Action::Done,
+            Some(&db) => {
+                self.pending = Some((self.stage, db));
+                Action::Set {
+                    stage: self.stage,
+                    db,
+                }
+            }
+            None => {
+                self.finished = true;
+                Action::Done
+            }
         }
+    }
+
+    /// What the radio still needs to be told, if anything.
+    ///
+    /// The poll task reads this, drops the lock, makes the call, and then says
+    /// [`Self::applied`].
+    pub fn pending_set(&self) -> Option<(usize, f64)> {
+        self.pending
+    }
+
+    /// The radio has been moved. Start counting settle frames from now.
+    pub fn applied(&mut self) {
+        self.pending = None;
+        self.settling = SETTLE_FRAMES;
+        self.samples.clear();
     }
 
     /// Fold in one frame's noise floor.
     pub fn feed(&mut self, noise_dbfs: f32) -> Action {
         if self.finished || self.at >= self.plan.len() {
             return Action::Done;
+        }
+        // Still waiting for the radio to be moved: this frame is of the previous
+        // setting and belongs to nothing.
+        if self.pending.is_some() {
+            return Action::Hold;
         }
         if self.settling > 0 {
             self.settling -= 1;
@@ -180,12 +221,16 @@ impl GainSweep {
         self.at += 1;
 
         match self.plan.get(self.at) {
-            Some(&db) => Action::Set {
-                stage: self.stage,
-                db,
-            },
+            Some(&db) => {
+                self.pending = Some((self.stage, db));
+                Action::Set {
+                    stage: self.stage,
+                    db,
+                }
+            }
             None => {
                 self.finished = true;
+                self.pending = Some((self.stage, self.restore_db));
                 // The last thing the sweep does is put the stage back. It is a
                 // `Set` rather than something the caller has to remember,
                 // because a measurement that leaves the radio somewhere else is
@@ -205,6 +250,8 @@ impl GainSweep {
     /// never ran.
     pub fn abort(&mut self) -> Action {
         self.finished = true;
+        self.aborted = true;
+        self.pending = Some((self.stage, self.restore_db));
         Action::Set {
             stage: self.stage,
             db: self.restore_db,
@@ -215,6 +262,21 @@ impl GainSweep {
         self.finished
     }
 
+    /// Points measured so far, and points planned.
+    pub fn steps(&self) -> (usize, usize) {
+        (self.points.len(), self.plan.len())
+    }
+
+    /// The stage being swept and the value it must be put back to.
+    pub fn restore(&self) -> (usize, f64) {
+        (self.stage, self.restore_db)
+    }
+
+    /// Which stage is being swept.
+    pub fn stage(&self) -> usize {
+        self.stage
+    }
+
     /// How far along, 0.0 to 1.0, for a progress indicator.
     pub fn progress(&self) -> f32 {
         if self.plan.is_empty() {
@@ -223,10 +285,10 @@ impl GainSweep {
         self.at as f32 / self.plan.len() as f32
     }
 
-    /// What was found, or `None` if fewer than two points were measured: a slope
-    /// needs two.
+    /// What was found, or `None` if the sweep was stopped or measured fewer than
+    /// two points: a slope needs two, and a stopped sweep has no answer at all.
     pub fn reading(&self) -> Option<Reading> {
-        if self.points.len() < 2 {
+        if self.aborted || self.points.len() < 2 {
             return None;
         }
         let first = self.points.first()?;
@@ -269,9 +331,143 @@ impl GainSweep {
     }
 }
 
+/// The most points a sweep will visit.
+///
+/// Each point costs `SETTLE_FRAMES + AVERAGE_FRAMES` frames, so the whole
+/// measurement is this many times that. At the measured ~15 frames/s that is
+/// about six seconds for eight points, which is short enough that the antenna
+/// and the band have not moved underneath it.
+pub const MAX_POINTS: usize = 8;
+
+/// Where to sample a stage.
+///
+/// Not the same question as "what settings does this stage have". A gain table
+/// with twenty-nine entries does not need twenty-nine measurements; the slope is
+/// a straight line fit and the ends carry it. So this spreads at most
+/// [`MAX_POINTS`] evenly across the stage's real positions, always including
+/// both ends, and returns nothing for a stage that cannot give an answer.
+///
+/// A switch is refused deliberately. Two points do define a line, but a boost
+/// that is either in or out is not a gain axis: the number that came back would
+/// be the difference between two front ends, printed as a slope.
+pub fn plan_for(spec: &crate::hardware::StageSpec) -> Vec<f64> {
+    let Some(n) = spec.positions() else {
+        return Vec::new();
+    };
+    if n < 3 {
+        return Vec::new();
+    }
+    let all: Vec<f64> = if spec.table.is_empty() {
+        (0..n)
+            .map(|i| spec.min_db + f64::from(i) * spec.step_db)
+            .collect()
+    } else {
+        spec.table.clone()
+    };
+    if all.len() <= MAX_POINTS {
+        return all;
+    }
+    // Evenly spaced indices with both ends included: i * (len-1) / (MAX-1).
+    let last = all.len() - 1;
+    (0..MAX_POINTS)
+        .map(|i| all[i * last / (MAX_POINTS - 1)])
+        .collect()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn ranged(min_db: f64, max_db: f64, step_db: f64) -> crate::hardware::StageSpec {
+        crate::hardware::StageSpec {
+            name: "LNA".into(),
+            min_db,
+            max_db,
+            step_db,
+            table: Vec::new(),
+        }
+    }
+
+    #[test]
+    fn a_stopped_sweep_reports_no_reading_however_far_it_got() {
+        let mut s = GainSweep::new(0, vec![0.0, 8.0, 16.0, 24.0], 40.0);
+        s.begin();
+        s.applied();
+        // Two full points measured, which is enough for a slope.
+        for _ in 0..2 * (SETTLE_FRAMES + AVERAGE_FRAMES) {
+            if let Action::Set { .. } = s.feed(-90.0) {
+                s.applied();
+            }
+        }
+        assert!(s.steps().0 >= 2, "the run must reach two points first");
+        s.abort();
+        assert_eq!(
+            s.reading(),
+            None,
+            "a stopped sweep has points but no answer"
+        );
+    }
+
+    #[test]
+    fn frames_arriving_before_the_radio_moves_are_discarded() {
+        // The gap between deciding a step and the poll task making the call is
+        // real, and every frame in it is of the *old* setting. Counting them as
+        // settle frames would fold the old gain into the new point.
+        let mut s = GainSweep::new(0, vec![0.0, 8.0], 0.0);
+        assert_eq!(s.begin(), Action::Set { stage: 0, db: 0.0 });
+        for _ in 0..50 {
+            assert_eq!(s.feed(-90.0), Action::Hold);
+        }
+        assert_eq!(
+            s.steps(),
+            (0, 2),
+            "nothing may be measured before the set lands"
+        );
+        s.applied();
+        // Now the settle count runs, and only then does a point get measured.
+        for _ in 0..SETTLE_FRAMES {
+            assert_eq!(s.feed(-90.0), Action::Hold);
+        }
+        assert_eq!(s.steps(), (0, 2));
+        for _ in 0..AVERAGE_FRAMES {
+            s.feed(-90.0);
+        }
+        assert_eq!(s.steps(), (1, 2));
+    }
+
+    #[test]
+    fn a_short_stage_is_swept_at_every_setting() {
+        // HackRF LNA: 0..40 in 8 dB steps is six settings, and six is under the
+        // cap, so nothing is skipped.
+        assert_eq!(
+            plan_for(&ranged(0.0, 40.0, 8.0)),
+            vec![0.0, 8.0, 16.0, 24.0, 32.0, 40.0]
+        );
+    }
+
+    #[test]
+    fn a_long_gain_table_is_thinned_but_keeps_both_ends() {
+        let mut spec = ranged(0.0, 0.0, 0.0);
+        spec.table = (0..29).map(|i| f64::from(i) * 1.4).collect();
+        let plan = plan_for(&spec);
+        assert_eq!(plan.len(), MAX_POINTS);
+        assert_eq!(plan.first(), Some(&0.0));
+        assert_eq!(plan.last(), Some(&(28.0 * 1.4)));
+        // Strictly increasing: no setting is visited twice.
+        assert!(plan.windows(2).all(|w| w[1] > w[0]), "{plan:?}");
+    }
+
+    #[test]
+    fn a_switch_gives_no_plan() {
+        // An RF amp is on or off. Two points make a line, but not this line.
+        assert!(plan_for(&ranged(0.0, 14.0, 14.0)).is_empty());
+    }
+
+    #[test]
+    fn a_stage_that_cannot_move_gives_no_plan() {
+        assert!(plan_for(&ranged(0.0, 0.0, 0.0)).is_empty());
+        assert!(plan_for(&ranged(20.0, 20.0, 1.0)).is_empty());
+    }
 
     /// Run a whole sweep against a synthetic receiver, returning what it found.
     ///
@@ -284,9 +480,13 @@ mod tests {
             Action::Set { db, .. } => db,
             _ => panic!("a sweep with points must start by setting one"),
         };
+        s.applied();
         for _ in 0..10_000 {
             match s.feed(noise_at(current)) {
-                Action::Set { db, .. } => current = db,
+                Action::Set { db, .. } => {
+                    current = db;
+                    s.applied();
+                }
                 Action::Hold => {}
                 Action::Done => break,
             }
@@ -349,6 +549,7 @@ mod tests {
     fn aborting_restores_too() {
         let mut s = GainSweep::new(1, vec![0.0, 8.0, 16.0], 40.0);
         assert_eq!(s.begin(), Action::Set { stage: 1, db: 0.0 });
+        s.applied();
         for _ in 0..5 {
             s.feed(-90.0);
         }
@@ -364,6 +565,7 @@ mod tests {
     fn the_frames_right_after_a_step_are_thrown_away() {
         let mut s = GainSweep::new(0, vec![0.0, 8.0], 0.0);
         s.begin();
+        s.applied();
         for _ in 0..SETTLE_FRAMES {
             assert_eq!(s.feed(-40.0), Action::Hold, "a transient, discarded");
         }
@@ -382,6 +584,7 @@ mod tests {
     fn a_point_is_an_average_rather_than_one_frame() {
         let mut s = GainSweep::new(0, vec![0.0, 8.0], 0.0);
         s.begin();
+        s.applied();
         for _ in 0..SETTLE_FRAMES {
             s.feed(-90.0);
         }
@@ -413,13 +616,14 @@ mod tests {
     /// A stage with nowhere to go, and a reading asked for too early.
     #[test]
     fn a_sweep_with_no_points_is_answered_rather_than_indexed() {
-        let s = GainSweep::new(0, Vec::new(), 12.0);
+        let mut s = GainSweep::new(0, Vec::new(), 12.0);
         assert_eq!(s.begin(), Action::Done);
         assert_eq!(s.progress(), 1.0);
         assert_eq!(s.reading(), None);
 
         let mut one = GainSweep::new(0, vec![5.0], 12.0);
         one.begin();
+        one.applied();
         for _ in 0..(SETTLE_FRAMES + AVERAGE_FRAMES) {
             one.feed(-90.0);
         }
@@ -432,6 +636,7 @@ mod tests {
     fn a_nonsense_reading_is_skipped() {
         let mut s = GainSweep::new(0, vec![0.0, 8.0], 0.0);
         s.begin();
+        s.applied();
         for _ in 0..SETTLE_FRAMES {
             s.feed(-90.0);
         }

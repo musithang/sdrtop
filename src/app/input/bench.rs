@@ -224,6 +224,66 @@ pub(super) fn rf_chain(key: KeyEvent, ctx: &mut InputCtx<'_>) -> KeyAction {
             }
             return KeyAction::Continue;
         }
+        // [K] - the noise step measurement: walk the front stage across its
+        // settings and watch what each step does to the noise floor. Pressing it
+        // again during a run stops it and puts the stage back.
+        KeyCode::Char('k') => {
+            let (running, stages, current, streaming) = {
+                let m = metrics(state);
+                (
+                    m.lab.noise_sweep.is_some(),
+                    m.caps.gain.stages(),
+                    m.radio.gains.clone(),
+                    m.radio.hw_streaming,
+                )
+            };
+            if running {
+                let mut m = metrics(state);
+                if let Some(sw) = m.lab.noise_sweep.as_mut() {
+                    sw.abort();
+                }
+                m.push_log("Noise sweep: stopping, restoring gain".to_string());
+                return KeyAction::Continue;
+            }
+            if !streaming {
+                metrics(state).push_log("Noise sweep: start RX first ([Space])".to_string());
+                return KeyAction::Continue;
+            }
+            // The front stage, because it is the one that decides the noise
+            // figure of the whole chain. Sweeping a later stage measures the
+            // stage in front of it, which is not the question.
+            let Some(spec) = stages.first() else {
+                metrics(state)
+                    .push_log("Noise sweep: this device reports no gain stages".to_string());
+                return KeyAction::Continue;
+            };
+            let plan = crate::signal::noise_slope::plan_for(spec);
+            if plan.is_empty() {
+                metrics(state).push_log(format!(
+                    "Noise sweep: {} has too few settings to sweep",
+                    spec.name
+                ));
+                return KeyAction::Continue;
+            }
+            let restore = current.first().copied().unwrap_or(spec.min_db);
+            let mut sweep = crate::signal::noise_slope::GainSweep::new(0, plan.clone(), restore);
+            sweep.begin();
+            let mut m = metrics(state);
+            // The latch would spend the whole measurement putting the stage
+            // back; see the note in `tasks/rx/control.rs::track_gain`.
+            m.lab.rf_autotrack = false;
+            m.lab.noise_reading = None;
+            m.lab.noise_sweep = Some(sweep);
+            m.ui.note_mode_action(RailMode::Bench);
+            m.push_log(format!(
+                "Noise sweep: {} across {} settings, {:.0}\u{2013}{:.0} dB",
+                spec.name,
+                plan.len(),
+                plan[0],
+                plan[plan.len() - 1]
+            ));
+            return KeyAction::Continue;
+        }
         // [⎵]/[F] - freeze / thaw the histogram + level diagram (display only; RX
         // keeps running). Bound to focus, not global Space=RX.
         KeyCode::Char(' ') | KeyCode::Char('f') => {

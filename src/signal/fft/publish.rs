@@ -106,6 +106,13 @@ pub(super) fn publish(
 
     update_marker_bandwidths(&mut m, &snap);
 
+    // The noise step measurement eats one reading per frame. It only ever
+    // returns a decision here; the radio is moved by the rx poll task, which is
+    // the only thread allowed to make a device call.
+    if let Some(sweep) = m.lab.noise_sweep.as_mut() {
+        sweep.feed(r.noise_floor);
+    }
+
     // Advance the waterfall every display frame.
     if m.waterfall.buffer.push(snap.smoothed) {
         pacing.rows_since_spectrum += 1;

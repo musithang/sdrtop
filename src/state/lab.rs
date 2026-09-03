@@ -6,6 +6,7 @@
 //! and the lab spectrum reacts to. Driven from the banner focus (`b`); the marker
 //! data itself lives in [`SpectrumState`](super::SpectrumState) (not duplicated).
 
+use crate::signal::noise_slope::{GainSweep, Reading};
 use std::sync::Arc;
 
 /// Smallest / largest selectable trace-averaging depth (`AVG ×N`).
@@ -55,6 +56,16 @@ pub struct LabState {
     /// Lab RF display freeze (`[⎵]`/`[F]`): captured ADC-loading + level-diagram state,
     /// or `None` when live.
     pub rf_freeze: Option<RfFreeze>,
+    /// The running noise step measurement (`[N]`), or `None` when idle.
+    ///
+    /// Fed one reading per FFT frame by the publish path, which holds the lock
+    /// and must never touch the radio; the steps it asks for are carried out by
+    /// the rx poll task, which may. The two halves meet through
+    /// [`GainSweep::pending_set`].
+    pub noise_sweep: Option<GainSweep>,
+    /// What the last completed sweep found. Outlives the sweep, so the panel can
+    /// keep showing it.
+    pub noise_reading: Option<Reading>,
 }
 
 impl Default for LabState {
@@ -66,6 +77,8 @@ impl Default for LabState {
             iq_marker_pin: None,
             rf_autotrack: false,
             rf_freeze: None,
+            noise_sweep: None,
+            noise_reading: None,
         }
     }
 }

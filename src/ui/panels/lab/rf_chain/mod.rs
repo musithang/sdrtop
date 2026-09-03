@@ -61,6 +61,7 @@ impl Panel for RfChainPanel {
             ("\u{2191}\u{2193}", "LNA"),
             ("[ ]", "VGA"),
             ("A", "auto-gain"),
+            ("K", "noise sweep"),
             ("\u{23B5}", "freeze"),
         ]
     }
@@ -154,6 +155,7 @@ impl Panel for RfChainPanel {
             noise::not_modelled(&mut lines, state.caps.gain.no_cascade_reason(), iw, theme);
         }
         lines.push(Line::raw(""));
+        noise::sweep_progress(&mut lines, state, iw, theme);
         verdict::draw(
             &mut lines,
             &verdict::Verdict {
@@ -191,6 +193,37 @@ mod tests {
 
     use crate::state::fixture::draw;
     use crate::state::SdrMetrics;
+
+    #[test]
+    fn an_idle_bench_spends_no_row_saying_the_sweep_is_idle() {
+        let m = SdrMetrics::fixture().streaming().with_carrier(0.0, 40.0);
+        let out = draw(RfChainPanel, 46, 30, &m).join("\n");
+        assert!(!out.contains("NOISE STEP"), "{out}");
+    }
+
+    #[test]
+    fn a_running_sweep_shows_its_stage_and_how_far_along_it_is() {
+        let mut m = SdrMetrics::fixture().streaming().with_carrier(0.0, 40.0);
+        let spec = m.caps.gain.stages().remove(0);
+        let plan = crate::signal::noise_slope::plan_for(&spec);
+        assert!(
+            plan.len() > 2,
+            "the fixture's front stage must be sweepable"
+        );
+        let mut sw = crate::signal::noise_slope::GainSweep::new(0, plan.clone(), 24.0);
+        sw.begin();
+        m.lab.noise_sweep = Some(sw);
+        let out = draw(RfChainPanel, 46, 30, &m).join("\n");
+        assert!(out.contains("NOISE STEP"), "{out}");
+        assert!(out.contains(&spec.name), "{out}");
+        assert!(out.contains(&format!("0/{}", plan.len())), "{out}");
+    }
+
+    #[test]
+    fn the_footer_advertises_the_sweep_key() {
+        let b = RfChainPanel.focus_bindings();
+        assert!(b.contains(&("K", "noise sweep")), "{b:?}");
+    }
 
     const W: u16 = 56;
     const H: u16 = 22;

@@ -107,6 +107,13 @@ pub(super) fn track_gain(
 ) {
     let (latched, stages, current) = {
         let m = state.lock().unwrap_or_else(|e| e.into_inner());
+        // A noise sweep moves one stage on purpose and reads what that does to
+        // the floor. Auto-track exists to undo exactly that. Whichever ran
+        // second would win, and the measurement would be of the argument
+        // between them, so the sweep holds the chain while it lasts.
+        if m.lab.noise_sweep.is_some() {
+            return;
+        }
         (
             m.lab.rf_autotrack,
             m.caps.gain.stages(),
@@ -151,6 +158,82 @@ pub(super) fn track_gain(
             ));
         }
         Some(why) => m.push_log(format!("Auto-gain track: {why}")),
+    }
+}
+
+/// Carry out whatever step the noise sweep is waiting on.
+///
+/// The sweep itself lives under the lock and is fed by the FFT publish path, at
+/// frame rate. It cannot make the call it needs: a device call must not happen
+/// with the mutex held, and the FFT worker must not talk to the radio at all. So
+/// it leaves the step behind as `pending_set`, and this picks it up on the next
+/// poll: lock, read, drop, set, lock, acknowledge. `applied` is what starts the
+/// settle count, so the sweep waits for the radio rather than for the clock.
+pub(super) fn advance_noise_sweep(state: &Arc<Mutex<SdrMetrics>>, device: &Arc<dyn SdrDevice>) {
+    let (pending, stages, streaming) = {
+        let m = state.lock().unwrap_or_else(|e| e.into_inner());
+        match m.lab.noise_sweep.as_ref() {
+            Some(sw) => (sw.pending_set(), m.caps.gain.stages(), m.radio.hw_streaming),
+            None => return,
+        }
+    };
+
+    // No frames means no readings, and a sweep that is never fed never ends.
+    // Put the stage back and say so rather than leaving the radio parked at some
+    // intermediate step of a measurement nobody is watching.
+    if !streaming && pending.is_none() {
+        let mut m = state.lock().unwrap_or_else(|e| e.into_inner());
+        if let Some(sw) = m.lab.noise_sweep.as_mut() {
+            sw.abort();
+        }
+        m.push_log("Noise sweep: streaming stopped, restoring gain".to_string());
+        return;
+    }
+
+    let Some((idx, db)) = pending else {
+        return;
+    };
+    let Some(spec) = stages.get(idx) else {
+        return;
+    };
+
+    // Device set with no lock held.
+    let outcome = device.set_stage_gain(idx, &spec.name, db);
+
+    let mut m = state.lock().unwrap_or_else(|e| e.into_inner());
+    let Some(sw) = m.lab.noise_sweep.as_mut() else {
+        return;
+    };
+    match outcome {
+        Ok(()) => {
+            sw.applied();
+            let finished = sw.is_finished();
+            let reading = finished.then(|| sw.reading()).flatten();
+            if let Some(g) = m.radio.gains.get_mut(idx) {
+                *g = db;
+            }
+            if finished {
+                m.lab.noise_sweep = None;
+                // A stopped sweep returns no reading, and the stop was already
+                // logged where it was asked for: a second line saying the same
+                // thing is noise.
+                if let Some(r) = reading {
+                    m.push_log(format!(
+                        "Noise sweep: {:.2} dB/dB over {} points",
+                        r.slope,
+                        r.points.len()
+                    ));
+                    m.lab.noise_reading = Some(r);
+                }
+            }
+        }
+        Err(e) => {
+            // The radio refused mid-measurement. Anything gathered so far is a
+            // sweep of a chain that did not do what it was told, so it is
+            // dropped rather than reported.
+            m.lab.noise_sweep = None;
+            m.push_log(format!("Noise sweep: {}: {e}", spec.name));
+        }
     }
 }
 
