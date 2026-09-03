@@ -144,6 +144,14 @@ pub struct UiState {
     pub input_mode: InputMode,
     pub input_buf: String,
     pub focused_panel: Option<String>,
+    /// Which gain stage the command rail's focus mode is pointed at, if any.
+    ///
+    /// `None` means the knob is the whole chain, which is what it has always
+    /// been. Selecting a stage narrows `↑`/`↓` to that one and leaves the others
+    /// alone, and **leaving the mode does not put them back**: a stage set by
+    /// hand stays set until the one-knob control is used again, because undoing
+    /// someone's deliberate setting on the way out is worse than keeping it.
+    pub gain_stage: Option<usize>,
     pub focused_panel_bindings: &'static [(&'static str, &'static str)],
     /// Name of the engine's active preset, synced each frame before draw so the
     /// footer can show it. The engine owns the authoritative value; this is a
@@ -298,6 +306,7 @@ impl Default for UiState {
             input_mode: InputMode::Normal,
             input_buf: String::new(),
             focused_panel: None,
+            gain_stage: None,
             focused_panel_bindings: &[],
             active_preset: String::new(),
             preset_names: Vec::new(),

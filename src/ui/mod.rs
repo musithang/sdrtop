@@ -72,6 +72,7 @@ pub use panels::micro::sweep::MicroSweepPanel;
 mod gain_rendering {
     use crate::state::fixture::draw;
     use crate::state::SdrMetrics;
+    use crate::ui::panel::Panel;
 
     /// Every panel that draws a gain, rendered against each device shape, with
     /// **distinct** values in each stage.
@@ -210,5 +211,61 @@ mod gain_rendering {
             out.contains("TUN"),
             "an RTL-SDR really does have one:\n{out}"
         );
+    }
+
+    /// The rail marks the stage the focus mode is pointed at, and marks nothing
+    /// when it is pointed at the whole chain.
+    ///
+    /// The marker replaces a column rather than adding one, so the bars must sit
+    /// at the same offset either way: a block that twitched sideways on every
+    /// selection would be worse than no marker at all.
+    #[test]
+    fn the_rail_marks_the_selected_stage_without_moving_the_bars() {
+        let plain = SdrMetrics::fixture().streaming();
+        let mut picked = SdrMetrics::fixture().streaming();
+        picked.ui.gain_stage = Some(1);
+
+        let a = draw(super::CommandRailPanel, 60, 30, &plain);
+        let b = draw(super::CommandRailPanel, 60, 30, &picked);
+        assert_eq!(a.len(), b.len());
+
+        let marked: Vec<usize> = b
+            .iter()
+            .enumerate()
+            .filter(|(_, l)| l.contains('\u{25B8}'))
+            .map(|(i, _)| i)
+            .collect();
+        assert_eq!(
+            marked.len(),
+            1,
+            "exactly one stage is pointed at:\n{}",
+            b.join("\n")
+        );
+        assert!(
+            b[marked[0]].contains("VGA"),
+            "the marked row is the selected one: {:?}",
+            b[marked[0]]
+        );
+        assert!(
+            !a.iter().any(|l| l.contains('\u{25B8}')),
+            "nothing is marked when the knob is the whole chain"
+        );
+
+        // Same width either way: every line keeps its length.
+        for (x, y) in a.iter().zip(&b) {
+            assert_eq!(x.chars().count(), y.chars().count(), "{x:?} vs {y:?}");
+        }
+    }
+
+    /// The footer names the mode's keys, which is how anyone finds it. They come
+    /// from `focus_bindings`, so this also pins that the rail declares them.
+    #[test]
+    fn the_rail_focus_footer_names_the_stage_keys() {
+        let mut m = SdrMetrics::fixture().streaming();
+        m.ui.focused_panel = Some("command_rail".into());
+        m.ui.focused_panel_bindings = super::CommandRailPanel.focus_bindings();
+        let out = draw(super::FooterPanel, 150, 4, &m).join("\n");
+        assert!(out.contains("Stage"), "no stage key hint:\n{out}");
+        assert!(out.contains("Adjust"), "no adjust key hint:\n{out}");
     }
 }

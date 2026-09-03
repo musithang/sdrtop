@@ -13,17 +13,7 @@ use crate::state::SdrMetrics;
 use crate::ui::panels::core::header::gain_bar;
 use crate::ui::widgets::charts::gain_bar_colored;
 
-use super::row::label_cell;
-
-/// Combined front-end gain for the TOTAL readout: primary + secondary stage when
-/// the device has two (HackRF LNA+VGA), else just the primary (RTL-SDR tuner).
-fn total_gain(lna: u32, vga: u32, has_second_stage: bool) -> u32 {
-    if has_second_stage {
-        lna + vga
-    } else {
-        lna
-    }
-}
+use super::row::{label_cell, stage_label_cell};
 
 /// Width of the gain bar given the rail's inner width - leaves room for the
 /// `LNA ` label, a space, and a 2-col value. Clamped so it neither vanishes on a
@@ -69,27 +59,28 @@ pub(super) fn lines(
         out.push(Line::raw(""));
     }
 
-    // Primary stage (LNA / Tuner): green → yellow.
-    out.push(gain_row(
-        label_cell(gm.primary_label(), theme),
-        state.shown_gain(),
-        gm.primary_max_db(),
-        theme.status_ok,
-        theme.value_hi,
-        bar_w,
-        active,
-        val_col,
-        theme,
-    ));
-    out.push(Line::raw(""));
-    // Secondary stage (HackRF VGA only): cyan → orange.
-    if gm.has_second_stage() {
+    // One row per stage the device actually has, in the driver's own order.
+    //
+    // **Not a fixed primary/secondary pair.** That shape was the HackRF's, and
+    // it left a SoapySDR device showing a single combined bar while the focus
+    // mode could point at stages that had no row on screen. Showing where the
+    // gain went is also the whole argument of this arc: the driver's automatic
+    // split was the thing nobody could see.
+    let selected = state.ui.gain_stage;
+    let stages = gm.stages();
+    for (index, spec) in stages.iter().enumerate() {
+        // The front stage is the one to notice, so it keeps the warmer ramp.
+        let (from, to) = if index == 0 {
+            (theme.status_ok, theme.value_hi)
+        } else {
+            (theme.border_accent, theme.status_warn)
+        };
         out.push(gain_row(
-            label_cell("VGA", theme),
-            state.radio.secondary_gain(),
-            62,
-            theme.border_accent,
-            theme.status_warn,
+            stage_label_cell(&spec.name, selected == Some(index), theme),
+            state.radio.stage_gain(index).max(0.0).round() as u32,
+            spec.max_db.max(1.0).round() as u32,
+            from,
+            to,
             bar_w,
             active,
             val_col,
@@ -98,11 +89,7 @@ pub(super) fn lines(
         out.push(Line::raw(""));
     }
 
-    let total = total_gain(
-        state.shown_gain(),
-        state.radio.secondary_gain(),
-        gm.has_second_stage(),
-    );
+    let total = state.radio.total_gain().max(0.0).round() as u32;
     let mut total_spans = vec![
         Span::raw(" "),
         label_cell("TOTAL", theme),
@@ -194,10 +181,21 @@ mod tests {
     }
     use super::*;
 
+    /// The TOTAL row is the sum of the stages, whatever there are of them.
+    ///
+    /// It used to be `primary + secondary if two stages else primary`, which is
+    /// the HackRF's shape again: on a SoapySDR device with three elements it
+    /// would have reported the front one alone as the whole chain.
     #[test]
-    fn total_gain_sums_only_with_second_stage() {
-        assert_eq!(total_gain(32, 30, true), 62); // HackRF LNA+VGA
-        assert_eq!(total_gain(40, 99, false), 40); // RTL-SDR tuner only
+    fn the_total_is_the_sum_of_however_many_stages_there_are() {
+        let mut m = crate::state::SdrMetrics::fixture().streaming();
+        assert_eq!(m.radio.total_gain(), 54.0, "a HackRF's LNA 24 plus VGA 30");
+
+        m.radio.gains = vec![10.0, 20.0, 30.0];
+        assert_eq!(m.radio.total_gain(), 60.0, "three stages all count");
+
+        m.radio.gains.clear();
+        assert_eq!(m.radio.total_gain(), 0.0);
     }
 
     #[test]

@@ -20,6 +20,24 @@ pub(super) fn label_cell(text: &str, theme: &crate::Theme) -> Span<'static> {
     )
 }
 
+/// The same cell, marked when the rail's focus mode is pointed at this stage.
+///
+/// The marker replaces the label's leading column rather than being added to it,
+/// so the bars stay aligned: a row that shifted right when selected would make
+/// the whole block twitch.
+pub(super) fn stage_label_cell(text: &str, selected: bool, theme: &crate::Theme) -> Span<'static> {
+    if !selected {
+        return label_cell(text, theme);
+    }
+    let inner = LABEL_W.saturating_sub(1);
+    Span::styled(
+        format!("\u{25B8}{text:<inner$}"),
+        Style::default()
+            .fg(theme.value_hi)
+            .add_modifier(ratatui::style::Modifier::BOLD),
+    )
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

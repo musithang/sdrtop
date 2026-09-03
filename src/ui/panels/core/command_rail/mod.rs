@@ -61,6 +61,8 @@ impl Panel for CommandRailPanel {
         &[
             ("←→", "Tune"),
             ("Tab", "Mode"),
+            (",·.", "Stage"),
+            ("↑↓", "Adjust"),
             ("1·2·3", "Recall"),
             ("M", "Save"),
             ("L", "Log"),
