@@ -1211,18 +1211,8 @@ mod tests {
             min_db: 0,
             max_db: 116,
             stages: vec![
-                crate::hardware::StageSpec {
-                    name: "LNA".into(),
-                    min_db: 0.0,
-                    max_db: 40.0,
-                    step_db: 8.0,
-                },
-                crate::hardware::StageSpec {
-                    name: "VGA".into(),
-                    min_db: 0.0,
-                    max_db: 62.0,
-                    step_db: 2.0,
-                },
+                crate::hardware::StageSpec::ranged("LNA", 0.0, 40.0, 8.0),
+                crate::hardware::StageSpec::ranged("VGA", 0.0, 62.0, 2.0),
             ],
             boost: None,
         };

@@ -761,12 +761,7 @@ mod tests {
             max_db: 116,
             stages: vec![],
             boost: Some(crate::hardware::SoapyBoost::Element(
-                crate::hardware::StageSpec {
-                    name: "AMP".into(),
-                    min_db: 0.0,
-                    max_db: 14.0,
-                    step_db: 14.0,
-                },
+                crate::hardware::StageSpec::ranged("AMP", 0.0, 14.0, 14.0),
             )),
         };
         let items = base_normal_items(&amp).join(" ");

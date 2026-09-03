@@ -116,6 +116,13 @@ pub struct StageSpec {
     pub max_db: f64,
     /// Spacing of the legal values, or zero for a continuous range.
     pub step_db: f64,
+    /// The exact legal values, for a device that has a **table** rather than a
+    /// grid. Empty means the bounds and step above describe it fully.
+    ///
+    /// An RTL-SDR tuner is the case: its gains are an irregular list the driver
+    /// reads out of the device, not a span with a spacing. Rounding one to a
+    /// nearest step would offer settings the tuner will refuse.
+    pub table: Vec<f64>,
 }
 
 #[allow(dead_code)] // read from G3
@@ -127,7 +134,32 @@ impl StageSpec {
     /// silently kept, because a stage pinned at zero looks exactly like a stage
     /// the user turned down.
     pub fn is_usable(&self) -> bool {
-        self.min_db.is_finite() && self.max_db.is_finite() && self.max_db >= self.min_db
+        !self.table.is_empty()
+            || (self.min_db.is_finite() && self.max_db.is_finite() && self.max_db >= self.min_db)
+    }
+
+    /// A stage over a span, with a spacing. `step` of zero is continuous.
+    pub fn ranged(name: &str, min_db: f64, max_db: f64, step_db: f64) -> Self {
+        Self {
+            name: name.to_string(),
+            min_db,
+            max_db,
+            step_db,
+            table: Vec::new(),
+        }
+    }
+
+    /// A stage over an exact list of values, for a device that has one.
+    pub fn tabled(name: &str, values: Vec<f64>) -> Self {
+        let min_db = values.iter().copied().fold(f64::INFINITY, f64::min);
+        let max_db = values.iter().copied().fold(f64::NEG_INFINITY, f64::max);
+        Self {
+            name: name.to_string(),
+            min_db,
+            max_db,
+            step_db: 0.0,
+            table: values,
+        }
     }
 
     /// How many settings this element has, or `None` when it is continuous.
@@ -138,6 +170,9 @@ impl StageSpec {
     /// to distribute a figure across. That is the driver's own answer, not a
     /// table of what a HackRF has.
     pub fn positions(&self) -> Option<u32> {
+        if !self.table.is_empty() {
+            return Some(self.table.len() as u32);
+        }
         if !self.is_usable() || self.step_db <= 0.0 {
             return None;
         }
@@ -164,6 +199,27 @@ impl StageSpec {
     /// inverted range or a NaN bound, and a value read over FFI is exactly where
     /// those come from.
     pub fn snap(&self, db: f64) -> f64 {
+        // A table is the exact set of values the device accepts, so it wins
+        // over any grid the bounds might imply. Ties go to the first entry,
+        // which is what the RTL-SDR path did before this existed.
+        if !self.table.is_empty() {
+            let want = if db.is_finite() {
+                db
+            } else {
+                f64::NEG_INFINITY
+            };
+            return self
+                .table
+                .iter()
+                .copied()
+                .min_by(|a, b| {
+                    (a - want)
+                        .abs()
+                        .partial_cmp(&(b - want).abs())
+                        .unwrap_or(std::cmp::Ordering::Equal)
+                })
+                .unwrap_or(0.0);
+        }
         if !self.is_usable() {
             return if self.min_db.is_finite() {
                 self.min_db
@@ -335,6 +391,39 @@ impl GainModel {
         }
     }
 
+    /// Every adjustable stage this device has, front to back.
+    ///
+    /// **Derived, not stored.** The two native models are two shapes of the same
+    /// answer and the datasheet lives here, once: a second copy inside
+    /// [`Self::clamp_gains`] is exactly the drift this codebase keeps removing,
+    /// which is why that method is written on top of this one.
+    ///
+    /// The boost is **not** here. It is a toggle, not a range, and every caller
+    /// that wants it asks [`Self::has_boost`].
+    pub fn stages(&self) -> Vec<StageSpec> {
+        match self {
+            // HackRF One, from the datasheet: baseband LNA in 8 dB steps, VGA in
+            // 2 dB steps. The RF amp is the boost and is not a stage.
+            GainModel::HackRf => vec![
+                StageSpec::ranged("LNA", 0.0, 40.0, 8.0),
+                StageSpec::ranged("VGA", 0.0, 62.0, 2.0),
+            ],
+            // One tuner, over the values the driver read out of the device. A
+            // table rather than a grid, because the real list is irregular and a
+            // nearest-step answer would offer settings the tuner refuses.
+            // A tuner that named no values has no describable stage. Saying so
+            // is not the same as saying it sits at zero, and the difference
+            // matters: `clamp_gains` leaves a gain alone rather than zeroing it
+            // when there is nothing to snap to.
+            GainModel::RtlSingle { gain_steps_db } if gain_steps_db.is_empty() => Vec::new(),
+            GainModel::RtlSingle { gain_steps_db } => vec![StageSpec::tabled(
+                "Tuner",
+                gain_steps_db.iter().map(|&g| g as f64).collect(),
+            )],
+            GainModel::Soapy { stages, .. } => stages.clone(),
+        }
+    }
+
     /// Snap stored gains into this model's legal values, returning `(lna, vga)`.
     /// A config saved on one device family must not apply or display an illegal
     /// gain on another - e.g. an RTL-SDR tuner's 49 dB on a HackRF LNA that maxes
@@ -343,17 +432,22 @@ impl GainModel {
     /// the primary gain to the nearest table entry and leaves `vga` untouched.
     pub fn clamp_gains(&self, lna: u32, vga: u32) -> (u32, u32) {
         match self {
-            GainModel::HackRf => (
-                (lna.min(40) + 4) / 8 * 8,   // nearest 8 dB step within 0..=40
-                vga.min(62).div_ceil(2) * 2, // nearest 2 dB step within 0..=62
-            ),
-            GainModel::RtlSingle { gain_steps_db } => {
-                let snapped = gain_steps_db
-                    .iter()
-                    .copied()
-                    .min_by_key(|&g| (g as i64 - lna as i64).abs())
+            // Both native models answer from `stages()`, so the 8 dB and 2 dB
+            // grids and the tuner's table are written once. An exhaustive test
+            // pins this against the arithmetic it replaced, for every value in
+            // range, because these two numbers are what a saved config lands on
+            // when it is opened on the other radio.
+            GainModel::HackRf | GainModel::RtlSingle { .. } => {
+                let s = self.stages();
+                let first = s
+                    .first()
+                    .map(|st| st.snap(lna as f64).max(0.0).round() as u32)
                     .unwrap_or(lna);
-                (snapped, vga)
+                let second = s
+                    .get(1)
+                    .map(|st| st.snap(vga as f64).max(0.0).round() as u32)
+                    .unwrap_or(vga);
+                (first, second)
             }
             // A continuous range, so clamping is the whole job. `vga` is left
             // alone because there is no second stage to put it in, and a config
@@ -541,6 +635,77 @@ pub trait SdrDevice: Send + Sync {
 mod tests {
     use super::*;
 
+    // ── The native stage lists ──────────────────────────────────────────────
+
+    /// `clamp_gains` is what a config saved on one radio lands on when it is
+    /// opened on the other, so rewriting it on top of `stages()` had to change
+    /// nothing. This is the arithmetic it replaced, run against the new path for
+    /// **every** value either stage can be handed.
+    #[test]
+    fn the_hackrf_stage_list_reproduces_the_old_clamp_exactly() {
+        let g = GainModel::HackRf;
+        for lna in 0..=200u32 {
+            for vga in [0u32, 1, 2, 3, 31, 47, 61, 62, 63, 99, 200] {
+                let was = ((lna.min(40) + 4) / 8 * 8, vga.min(62).div_ceil(2) * 2);
+                assert_eq!(g.clamp_gains(lna, vga), was, "lna={lna} vga={vga}");
+            }
+        }
+    }
+
+    #[test]
+    fn the_rtl_stage_list_reproduces_the_old_clamp_exactly() {
+        // The shape `rtl_caps` produces: whole dB, deduped, irregular.
+        let table: Vec<u32> = vec![0, 1, 3, 4, 8, 15, 24, 33, 40, 49];
+        let g = GainModel::RtlSingle {
+            gain_steps_db: table.clone(),
+        };
+        for lna in 0..=120u32 {
+            let was = table
+                .iter()
+                .copied()
+                .min_by_key(|&x| (x as i64 - lna as i64).abs())
+                .unwrap();
+            assert_eq!(g.clamp_gains(lna, 30), (was, 30), "lna={lna}");
+        }
+    }
+
+    /// The two native models describe themselves, and the boost is not among
+    /// the stages: it is a toggle, not a range.
+    #[test]
+    fn the_native_models_name_their_own_stages() {
+        let hack = GainModel::HackRf.stages();
+        let names: Vec<&str> = hack.iter().map(|s| s.name.as_str()).collect();
+        assert_eq!(
+            names,
+            ["LNA", "VGA"],
+            "the RF amp is the boost, not a stage"
+        );
+        assert_eq!(hack[0].positions(), Some(6), "0, 8, 16, 24, 32, 40");
+        assert_eq!(hack[1].positions(), Some(32));
+
+        let rtl = GainModel::RtlSingle {
+            gain_steps_db: vec![0, 1, 3, 49],
+        }
+        .stages();
+        assert_eq!(rtl.len(), 1);
+        assert_eq!(rtl[0].name, "Tuner");
+        assert_eq!(rtl[0].positions(), Some(4), "a table, not a grid");
+        assert_eq!(rtl[0].snap(2.0), 1.0, "nearest entry, ties to the first");
+        assert_eq!(rtl[0].snap(1000.0), 49.0);
+    }
+
+    /// A tuner that reported nothing still has to answer. The driver's own
+    /// fallback is a single zero entry, and a stage over it must not divide by
+    /// an empty table.
+    #[test]
+    fn a_single_entry_table_is_still_a_stage() {
+        let g = GainModel::RtlSingle {
+            gain_steps_db: vec![0],
+        };
+        assert_eq!(g.stages()[0].positions(), Some(1));
+        assert_eq!(g.clamp_gains(37, 12), (0, 12));
+    }
+
     // ── StageSpec ───────────────────────────────────────────────────────────
     //
     // The three fixtures are the real answers `SoapySDRUtil --probe` gives for a
@@ -551,12 +716,7 @@ mod tests {
     //     VGA gain range: [0, 62, 2] dB
 
     fn stage(name: &str, min: f64, max: f64, step: f64) -> StageSpec {
-        StageSpec {
-            name: name.into(),
-            min_db: min,
-            max_db: max,
-            step_db: step,
-        }
+        StageSpec::ranged(name, min, max, step)
     }
 
     #[test]

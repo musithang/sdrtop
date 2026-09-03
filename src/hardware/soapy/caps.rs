@@ -150,12 +150,7 @@ pub fn capabilities(a: &DriverAnswers) -> Result<Built, Unsupported> {
     // the whole-chain range. One unnamed stage over it is exactly what this
     // backend did before it could ask per element, so nothing regresses.
     if stages.is_empty() {
-        stages.push(StageSpec {
-            name: "RF".into(),
-            min_db: gain_lo,
-            max_db: gain_hi.max(gain_lo),
-            step_db: 0.0,
-        });
+        stages.push(StageSpec::ranged("RF", gain_lo, gain_hi.max(gain_lo), 0.0));
         if !a.gain_elements.is_empty() {
             notes.push(
                 "SoapySDR: no usable gain element, falling back to the whole-chain range."
@@ -261,12 +256,7 @@ mod tests {
     /// One element as the driver describes it: name, then the `SoapySDRRange`
     /// it answers `getGainElementRange` with.
     fn el(name: &str, min: f64, max: f64, step: f64) -> StageSpec {
-        StageSpec {
-            name: name.into(),
-            min_db: min,
-            max_db: max,
-            step_db: step,
-        }
+        StageSpec::ranged(name, min, max, step)
     }
 
     fn soapy_hackrf() -> DriverAnswers {

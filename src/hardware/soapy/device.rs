@@ -217,12 +217,7 @@ unsafe fn ask(api: &SoapyApi, dev: *mut SoapySDRDevice) -> caps::DriverAnswers {
             .into_iter()
             .map(|name| {
                 let r = unsafe { api.gain_element_range(dev, &name) }.unwrap_or_default();
-                crate::hardware::StageSpec {
-                    name,
-                    min_db: r.minimum,
-                    max_db: r.maximum,
-                    step_db: r.step,
-                }
+                crate::hardware::StageSpec::ranged(&name, r.minimum, r.maximum, r.step)
             })
             .collect(),
         has_gain_mode: unsafe { api.has_gain_mode(dev) },
