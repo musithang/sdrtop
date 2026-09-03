@@ -60,7 +60,7 @@ It's a hobby project built in my spare time, and honestly, I made it for *you* â
 | [Getting started](user_docs/getting-started.md): install & run | [Keyboard shortcuts](user_docs/keys.md): every key | [What's on screen](user_docs/screens.md): panels explained |
 | [The Lab presets](user_docs/lab.md): the bench-engineer views | [Configuration](user_docs/config.md): config.toml &amp; [layouts](user_docs/presets.md) | [Advanced features](user_docs/advanced.md): workflows & limits |
 | [Tips & tricks](user_docs/tips-and-tricks.md): gain, markers, workflows | [Troubleshooting](user_docs/troubleshooting.md): when things go sideways | [Supported hardware](user_docs/hardware.md): what works today |
-| [Themes](user_docs/themes.md): the six palettes | [What's new](user_docs/whats-new.md): the checkpoint log | |
+| [Themes](user_docs/themes.md): the six palettes | [What's new](user_docs/whats-new.md): the checkpoint log | [The demodulator](user_docs/demodulator.md): how it was built |
 
 ---
 
@@ -107,7 +107,7 @@ Everything your radio knows about itself, in real time, without leaving the term
 - **Spectrum and waterfall**: FFT with peak hold, noise floor tracking, zoom, band-plan overlay and persistent markers; a scrolling spectrogram in truecolor, 256 or 16 colors with history scroll-back and frame averaging.
 - **Focus modes**: press the highlighted letter in a panel's title and the panel is yours, with cursor read-outs, holds and markers. There is no mouse anywhere in sdrtop, and nothing in it needs one.
 - **Four lab benches** for the questions a plot can't answer: is the quadrature clean, is the front end staged right, is my computer keeping up, and what *is* that signal. Noise figure, MDS, IRR, occupied bandwidth, ACPR, ADC loading, jitter. Measured the awkward way rather than the easy way: bandwidth about the carrier, not across whatever span you happened to capture, so a mistuned radio confesses instead of faking a good number. The noise floor comes as a density too, so the same receiver reads as the same receiver whatever the sample rate. [The details](user_docs/lab.md).
-- **A demodulator that doesn't play audio**, deliberately. It opens the channel and reports what a spectrum plot structurally cannot: FM deviation about the carrier, the MPX baseband with its 19 kHz pilot, stereo injection, CTCSS, AM depth, and **RDS** station name, PTY and RadioText. It reads radios, it doesn't play them.
+- **A demodulator that doesn't play audio**, deliberately. It opens the channel and reports what a spectrum plot structurally cannot: FM deviation about the carrier, the MPX baseband with its 19 kHz pilot, stereo injection, CTCSS, AM depth, and **RDS** station name, PTY and RadioText. It reads radios, it doesn't play them. [How it works](user_docs/demodulator.md).
 - **IQ correction, not just measurement**: one key subtracts the live DC estimate from the stream, another captures a quadrature correction and applies it. Watch the spike and the mirror images actually go away.
 - **A band sweep** wider than one window, stitched into a single curve with band-plan labels, `Enter` on a peak to tune straight to it.
 - **Micro field views**, because sdrtop shouldn't need a full terminal to be useful. When the panels stop being readable, each concern strips down to the one number that matters, big enough to read across the room.
