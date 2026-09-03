@@ -12,6 +12,7 @@ use ratatui::{
     text::{Line, Span},
 };
 
+use crate::hardware::StageSpec;
 use crate::ui::chrome::section;
 use crate::ui::rf_calc::{Stage, StageLevel};
 
@@ -130,18 +131,28 @@ fn mid_text(index: usize, stages: &[Stage]) -> String {
     }
 }
 
-/// `GAIN STAGING` - LNA and VGA against their optimal targets, with the target
-/// spelled out underneath when they are not already there.
+/// `GAIN STAGING` - each stage against its own range, with the optimal target
+/// ticked, and the target spelled out underneath when the chain is not there.
+///
+/// **One bar per stage the device has**, named and scaled by the driver's own
+/// answer. It used to be exactly two bars, labelled LNA and VGA and measured
+/// against 40 and 62: correct on a HackRF and wrong on anything else, including
+/// a HackRF reached through SoapySDR, whose stage list is the driver's.
 pub(super) fn staging(
     out: &mut Vec<Line<'static>>,
-    lna: u32,
-    vga: u32,
-    lna_opt: u32,
-    vga_opt: u32,
+    stages: &[StageSpec],
+    current: &[f64],
+    targets: &[f64],
     iw: usize,
     theme: &crate::Theme,
 ) {
-    let bw = bar_width(iw, LABEL_W, VALW);
+    let label_w = stages
+        .iter()
+        .map(|s| s.name.chars().count())
+        .max()
+        .unwrap_or(LABEL_W)
+        .clamp(LABEL_W, 8);
+    let bw = bar_width(iw, label_w, VALW);
     out.push(section(
         "Gain staging",
         "\u{2502} = optimal target",
@@ -149,39 +160,41 @@ pub(super) fn staging(
         theme,
     ));
     out.push(Line::raw(""));
-    out.push(bar_row(
-        Bar {
-            label: "LNA",
-            label_w: LABEL_W,
-            value: lna,
-            max: 40,
-            lo: theme.status_ok,
-            hi: theme.value_hi,
-            tick: Some(lna_opt as f64 / 40.0),
-            val_str: format!("{lna} / 40 dB"),
-            val_col: theme.value,
-        },
-        bw,
-        theme,
-    ));
-    out.push(Line::raw(""));
-    out.push(bar_row(
-        Bar {
-            label: "VGA",
-            label_w: LABEL_W,
-            value: vga,
-            max: 62,
-            lo: theme.border_accent,
-            hi: theme.status_warn,
-            tick: Some(vga_opt as f64 / 62.0),
-            val_str: format!("{vga} / 62 dB"),
-            val_col: theme.value,
-        },
-        bw,
-        theme,
-    ));
-    out.push(Line::raw(""));
-    let at_opt = lna == lna_opt && vga == vga_opt;
+
+    for (index, spec) in stages.iter().enumerate() {
+        let value = current.get(index).copied().unwrap_or(spec.min_db);
+        let target = targets.get(index).copied().unwrap_or(value);
+        let span = (spec.max_db - spec.min_db).max(1.0);
+        // The front stage keeps the warmer ramp, as in the command rail: it is
+        // the one whose setting decides the noise figure.
+        let (lo, hi) = if index == 0 {
+            (theme.status_ok, theme.value_hi)
+        } else {
+            (theme.border_accent, theme.status_warn)
+        };
+        out.push(bar_row(
+            Bar {
+                label: &clip(&spec.name, label_w),
+                label_w,
+                value: value.max(0.0).round() as u32,
+                max: spec.max_db.max(1.0).round() as u32,
+                lo,
+                hi,
+                tick: Some(((target - spec.min_db) / span).clamp(0.0, 1.0)),
+                val_str: format!("{:.0} / {:.0} dB", value, spec.max_db),
+                val_col: theme.value,
+            },
+            bw,
+            theme,
+        ));
+        out.push(Line::raw(""));
+    }
+
+    let at_opt = stages.iter().enumerate().all(|(i, spec)| {
+        let value = current.get(i).copied().unwrap_or(spec.min_db);
+        let target = targets.get(i).copied().unwrap_or(value);
+        (value - target).abs() < 0.5
+    });
     out.push(Line::from(vec![
         Span::raw(" "),
         Span::styled("opt ", Style::default().fg(theme.label)),
@@ -189,7 +202,18 @@ pub(super) fn staging(
             Span::styled("\u{2713} at optimum", Style::default().fg(theme.status_ok))
         } else {
             Span::styled(
-                format!("\u{2192} LNA {lna_opt} \u{00b7} VGA {vga_opt}"),
+                stages
+                    .iter()
+                    .enumerate()
+                    .map(|(i, spec)| {
+                        format!(
+                            "{} {:.0}",
+                            spec.name,
+                            targets.get(i).copied().unwrap_or(0.0)
+                        )
+                    })
+                    .collect::<Vec<_>>()
+                    .join(" \u{00b7} "),
                 Style::default().fg(theme.status_warn),
             )
         },

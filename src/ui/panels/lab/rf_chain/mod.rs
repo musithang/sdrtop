@@ -130,13 +130,21 @@ impl Panel for RfChainPanel {
             signal_lineup(adc_peak, &stages)
         };
         let (verdict_word, sev) = staging_verdict(adc_peak);
-        let (lna_opt, vga_opt) = staging_target(adc_peak, lna, vga);
+        let stage_specs = state.caps.gain.stages();
+        let targets = staging_target(adc_peak, &stage_specs, &state.radio.gains);
         let sev_col = severity_color(sev, theme);
 
         let mut lines: Vec<Line> = Vec::new();
         staging::lineup(&mut lines, &levels, &stages, adc_peak, sev_col, iw, theme);
         lines.push(Line::raw(""));
-        staging::staging(&mut lines, lna, vga, lna_opt, vga_opt, iw, theme);
+        staging::staging(
+            &mut lines,
+            &stage_specs,
+            &state.radio.gains,
+            &targets,
+            iw,
+            theme,
+        );
         lines.push(Line::raw(""));
         if modelled {
             noise::noise_figure(&mut lines, &stages, nf, iw, theme);

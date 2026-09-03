@@ -105,45 +105,52 @@ pub(super) fn track_gain(
     device: &Arc<dyn SdrDevice>,
     adc_peak_dbfs: f32,
 ) {
-    let (latched, friis, lna, vga) = {
+    let (latched, stages, current) = {
         let m = state.lock().unwrap_or_else(|e| e.into_inner());
         (
             m.lab.rf_autotrack,
-            m.caps.friis_applicable,
-            m.radio.primary_gain(),
-            m.radio.secondary_gain(),
+            m.caps.gain.stages(),
+            m.radio.gains.clone(),
         )
     };
-    if !latched || !friis || AUTOGAIN_COMFORT_DBFS.contains(&adc_peak_dbfs) {
+    // No longer gated on a modelled chain: since R3 the target is one policy
+    // over whatever stages the device reports, so any radio that names some can
+    // be tracked. A radio that names none has nothing to move.
+    if !latched || stages.is_empty() || AUTOGAIN_COMFORT_DBFS.contains(&adc_peak_dbfs) {
         return;
     }
 
-    let (lna_t, vga_t) = crate::ui::rf_calc::staging_target(adc_peak_dbfs as f64, lna, vga);
-    if (lna_t, vga_t) == (lna, vga) {
+    let targets = crate::ui::rf_calc::staging_target(adc_peak_dbfs as f64, &stages, &current);
+    // The total, not the arrangement: see the note in `input/bench.rs`.
+    let now_total: f64 = current.iter().take(stages.len()).sum();
+    let want_total: f64 = targets.iter().sum();
+    if (now_total - want_total).abs() < 0.5 {
         return;
     }
 
     // Device sets run with no lock held.
-    let r1 = if lna_t != lna {
-        device.set_lna_gain(lna_t)
-    } else {
-        Ok(())
-    };
-    let r2 = if vga_t != vga {
-        device.set_vga_gain(vga_t)
-    } else {
-        Ok(())
-    };
+    let mut failed = None;
+    for (i, spec) in stages.iter().enumerate() {
+        if let Err(e) = device.set_stage_gain(i, &spec.name, targets[i]) {
+            failed = Some(format!("{}: {e}", spec.name));
+            break;
+        }
+    }
     let mut m = state.lock().unwrap_or_else(|e| e.into_inner());
-    match (r1, r2) {
-        (Ok(()), Ok(())) => {
-            m.radio.set_primary_gain(lna_t);
-            m.radio.set_secondary_gain(vga_t);
+    match failed {
+        None => {
+            m.radio.gains = targets.clone();
+            let split: Vec<String> = stages
+                .iter()
+                .enumerate()
+                .map(|(i, spec)| format!("{} {:.0}", spec.name, targets[i]))
+                .collect();
             m.push_log(format!(
-                "Auto-gain track \u{2192} LNA {lna_t} \u{00b7} VGA {vga_t} dB"
+                "Auto-gain track \u{2192} {} dB",
+                split.join(" \u{00b7} ")
             ));
         }
-        _ => m.push_log("Auto-gain track: device error".to_string()),
+        Some(why) => m.push_log(format!("Auto-gain track: {why}")),
     }
 }
 

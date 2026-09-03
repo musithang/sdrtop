@@ -5,6 +5,8 @@
 //! signal, gain-staging advice, and ADC utilisation. Used by both the `rf_chain`
 //! lab panel and the `micro_gain` field view so the numbers stay identical.
 
+use crate::hardware::StageSpec;
+
 /// One link in the receive chain, used by the cascade NF, the gain lineup, and the
 /// level diagram. `gain_db` is signed (a mixer's conversion loss is negative).
 #[derive(Clone, Debug)]
@@ -340,31 +342,26 @@ pub fn staging_verdict(peak_dbfs: f64) -> (&'static str, u8) {
     }
 }
 
-/// Auto-gain target (HackRF legal steps: LNA 0..40/8, VGA 0..62/2) that lands the ADC
-/// peak near [`OPT_PEAK_DBFS`]. NF-aware: when the level must come **down** it trims the
-/// VGA first (preserving LNA gain for noise figure); when it must come **up** it adds
-/// LNA first. Clamped to the legal grid; the result may not hit the target exactly when
-/// the chain is already at a rail.
-pub fn staging_target(peak_dbfs: f64, lna_gain: u32, vga_gain: u32) -> (u32, u32) {
-    let delta = OPT_PEAK_DBFS - peak_dbfs; // +ve = need more gain
-    let mut lna = lna_gain as f64;
-    let mut vga = vga_gain as f64;
-    if delta >= 0.0 {
-        // Need more: fill LNA first (best NF), spill the rest into VGA.
-        let head_lna = 40.0 - lna;
-        let add_lna = delta.min(head_lna.max(0.0));
-        lna += add_lna;
-        vga = (vga + (delta - add_lna)).min(62.0);
-    } else {
-        // Need less: drop VGA first (keep LNA gain for NF), then LNA.
-        let drop = -delta;
-        let cut_vga = drop.min(vga);
-        vga -= cut_vga;
-        lna = (lna - (drop - cut_vga)).max(0.0);
-    }
-    let lna_c = ((lna / 8.0).round() * 8.0).clamp(0.0, 40.0) as u32;
-    let vga_c = ((vga / 2.0).round() * 2.0).clamp(0.0, 62.0) as u32;
-    (lna_c, vga_c)
+/// Where each stage should sit to land the ADC peak near [`OPT_PEAK_DBFS`].
+///
+/// **The policy is general; the grids never were.** The previous version wrote
+/// out "fill the LNA first, trim the VGA first" against literal 40 / 8 / 62 / 2,
+/// which is the HackRF's datasheet in the middle of an RF calculation. The
+/// reasoning behind it is not a HackRF fact at all: gain taken early lifts the
+/// signal above every later stage's own noise, so when more is needed it goes in
+/// at the front, and when less is needed it comes off the back. That is exactly
+/// what [`crate::hardware::gain::distribute`] does, and doing it twice in two
+/// places is how the auto-gain key and the manual knob end up disagreeing about
+/// which end of the chain to fill.
+///
+/// So this is now one line of policy over the device's own stages: work out the
+/// total that would put the converter where we want it, and lay that total down
+/// front to back. Each stage lands on its own grid, and the result may not hit
+/// the target exactly when the chain is already at a rail or the grid is coarse.
+pub fn staging_target(peak_dbfs: f64, stages: &[StageSpec], current: &[f64]) -> Vec<f64> {
+    let now: f64 = current.iter().take(stages.len()).sum();
+    let wanted = now + (OPT_PEAK_DBFS - peak_dbfs);
+    crate::hardware::gain::distribute(stages, wanted).0
 }
 
 #[cfg(test)]
@@ -601,31 +598,77 @@ mod tests {
         assert_eq!(staging_verdict(-40.0).0, "WEAK");
     }
 
-    #[test]
-    fn staging_target_clamps_to_legal_grid() {
-        let (lna, vga) = staging_target(-30.0, 0, 0); // very weak → add gain
-        assert!(
-            lna <= 40 && lna % 8 == 0,
-            "LNA on the /8 grid within range: {lna}"
-        );
-        assert!(
-            vga <= 62 && vga % 2 == 0,
-            "VGA on the /2 grid within range: {vga}"
-        );
+    /// A HackRF's two stages, as `GainModel::stages()` reports them.
+    fn hackrf_stages() -> Vec<StageSpec> {
+        vec![
+            StageSpec::ranged("LNA", 0.0, 40.0, 8.0),
+            StageSpec::ranged("VGA", 0.0, 62.0, 2.0),
+        ]
     }
 
     #[test]
-    fn staging_target_reduces_gain_when_clipping_and_trims_vga_first() {
-        // Peak at 0 dBFS, both stages mid → needs −8 dB; VGA should drop, LNA held.
-        let (lna, vga) = staging_target(0.0, 32, 32);
-        assert_eq!(lna, 32, "LNA kept for NF when only a small cut is needed");
-        assert!(vga < 32, "VGA trimmed to drop the level: {vga}");
+    fn staging_target_lands_on_each_stages_own_grid() {
+        let s = hackrf_stages();
+        let t = staging_target(-30.0, &s, &[0.0, 0.0]); // very weak, add gain
+        assert_eq!(t.len(), 2);
+        assert_eq!(t[0] % 8.0, 0.0, "LNA on its own grid: {}", t[0]);
+        assert_eq!(t[1] % 2.0, 0.0, "VGA on its own grid: {}", t[1]);
+        assert!(t[0] <= 40.0 && t[1] <= 62.0, "and inside their ranges");
+    }
+
+    /// The policy, which is the part that was never HackRF specific: gain comes
+    /// off the back before the front, because front gain is what sets the noise
+    /// figure.
+    #[test]
+    fn staging_target_trims_the_back_stage_first() {
+        let s = hackrf_stages();
+        // Peak at 0 dBFS from a chain at 32 + 32: needs about 8 dB less.
+        let t = staging_target(0.0, &s, &[32.0, 32.0]);
+        assert_eq!(t[0], 40.0, "the front stage is not what gets cut");
+        assert!(t[1] < 32.0, "the back stage takes the cut: {}", t[1]);
+        let total: f64 = t.iter().sum();
+        assert!((total - 56.0).abs() < 2.0, "about 8 dB off 64: {total}");
+    }
+
+    /// And when more is needed it goes in at the front **first**, which is not
+    /// the same as filling the front to its ceiling: only what is needed goes
+    /// in, and the back takes whatever the front's grid cannot express.
+    #[test]
+    fn staging_target_adds_at_the_front_first() {
+        let s = hackrf_stages();
+        // -30 dBFS wants about 22 dB more. The LNA's 8 dB grid takes 16 of it.
+        let t = staging_target(-30.0, &s, &[0.0, 0.0]);
+        assert_eq!(t[0], 16.0, "the front takes what its grid can hold");
+        assert_eq!(t[1], 6.0, "the back takes the remainder, not the bulk");
+        assert!(t[0] > t[1], "and the front still gets the larger share");
+    }
+
+    /// A device with one stage, and a device with none. Neither may panic, and
+    /// neither may be handed a HackRF's grid.
+    #[test]
+    fn staging_target_serves_any_stage_count() {
+        let one = vec![StageSpec::tabled("Tuner", vec![0.0, 9.0, 16.0, 24.0, 49.0])];
+        let t = staging_target(-30.0, &one, &[0.0]);
+        assert_eq!(t.len(), 1);
+        assert!(
+            one[0].table.contains(&t[0]),
+            "a tuner target must be one of its own values: {}",
+            t[0]
+        );
+        assert!(staging_target(-8.0, &[], &[]).is_empty());
     }
 
     #[test]
-    fn staging_target_near_optimum_is_stable() {
-        let (lna, vga) = staging_target(OPT_PEAK_DBFS, 32, 30);
-        assert_eq!((lna, vga), (32, 30), "already optimal → no change");
+    fn staging_target_at_the_optimum_keeps_the_same_total() {
+        let s = hackrf_stages();
+        let current = vec![32.0, 30.0];
+        let t = staging_target(OPT_PEAK_DBFS, &s, &current);
+        let before: f64 = current.iter().sum();
+        let after: f64 = t.iter().sum();
+        assert!(
+            (before - after).abs() < 1.0,
+            "already optimal, so the total does not move: {before} -> {after}"
+        );
     }
 
     /// The signal-only walk is the part that needs no noise figures: the same

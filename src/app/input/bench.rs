@@ -149,13 +149,12 @@ pub(super) fn rf_chain(key: KeyEvent, ctx: &mut InputCtx<'_>) -> KeyAction {
         // [A] - auto-gain: one-shot to optimal, or latch the continuous track once
         // already there. HackRF-only; never runs unless streaming.
         KeyCode::Char('a') => {
-            let (peak, lna, vga, friis, streaming) = {
+            let (peak, stages, current, streaming) = {
                 let m = metrics(state);
                 (
                     m.signal.adc_peak_dbfs as f64,
-                    m.radio.primary_gain(),
-                    m.radio.secondary_gain(),
-                    m.caps.friis_applicable,
+                    m.caps.gain.stages(),
+                    m.radio.gains.clone(),
                     m.radio.hw_streaming,
                 )
             };
@@ -163,36 +162,53 @@ pub(super) fn rf_chain(key: KeyEvent, ctx: &mut InputCtx<'_>) -> KeyAction {
                 metrics(state).push_log("Auto-gain: start RX first ([Space])".to_string());
                 return KeyAction::Continue;
             }
-            if !friis {
-                metrics(state)
-                    .push_log("Auto-gain: single-tuner radio \u{2014} not applicable".to_string());
+            // **No longer gated on a modelled chain.** The target used to be
+            // computed against the HackRF's own grids, so it meant nothing
+            // anywhere else; since R3 it is one policy laid over whatever stages
+            // the device reports, and a radio with a stage list can be staged.
+            if stages.is_empty() {
+                metrics(state).push_log(
+                    "Auto-gain: this device reports no gain stages \u{2014} nothing to set"
+                        .to_string(),
+                );
                 return KeyAction::Continue;
             }
-            let (lna_t, vga_t) = staging_target(peak, lna, vga);
-            if (lna_t, vga_t) != (lna, vga) {
-                // Off-optimal → one-shot jump through the same clamped gain path the
-                // manual keys use. The latch is left as-is (hands-off one-shot).
+            let targets = staging_target(peak, &stages, &current);
+            // Judged on the **total**, not on the arrangement. Auto-gain is
+            // about where the converter sits; how that total is spread is the
+            // knob's business. Comparing per stage would make a hand-set chain
+            // at a perfectly good level read as "off optimal" and rearrange
+            // itself under the user.
+            let now_total: f64 = current.iter().take(stages.len()).sum();
+            let want_total: f64 = targets.iter().sum();
+            let moved = (now_total - want_total).abs() >= 0.5;
+            if moved {
+                // Off-optimal → one-shot jump, one call per stage, through the
+                // same per-stage path the manual keys use.
                 if let Some(device) = device {
-                    let r1 = if lna_t != lna {
-                        device.set_lna_gain(lna_t)
-                    } else {
-                        Ok(())
-                    };
-                    let r2 = if vga_t != vga {
-                        device.set_vga_gain(vga_t)
-                    } else {
-                        Ok(())
-                    };
-                    let mut m = metrics(state);
-                    match (r1, r2) {
-                        (Ok(()), Ok(())) => {
-                            m.radio.set_primary_gain(lna_t);
-                            m.radio.set_secondary_gain(vga_t);
-                            m.ui.note_mode_action(RailMode::Bench);
-                            m.push_log(format!(
-                                "Auto-gain \u{2192} LNA {lna_t} \u{00b7} VGA {vga_t} dB (signal \u{2192} \u{2212}8 dBFS)"));
+                    let mut failed = None;
+                    for (i, spec) in stages.iter().enumerate() {
+                        if let Err(e) = device.set_stage_gain(i, &spec.name, targets[i]) {
+                            failed = Some(format!("{}: {e}", spec.name));
+                            break;
                         }
-                        _ => m.push_log("Auto-gain: device error".to_string()),
+                    }
+                    let mut m = metrics(state);
+                    match failed {
+                        None => {
+                            m.radio.gains = targets.clone();
+                            m.ui.note_mode_action(RailMode::Bench);
+                            let split: Vec<String> = stages
+                                .iter()
+                                .enumerate()
+                                .map(|(i, spec)| format!("{} {:.0}", spec.name, targets[i]))
+                                .collect();
+                            m.push_log(format!(
+                                "Auto-gain \u{2192} {} dB (signal \u{2192} \u{2212}8 dBFS)",
+                                split.join(" \u{00b7} ")
+                            ));
+                        }
+                        Some(why) => m.push_log(format!("Auto-gain: {why}")),
                     }
                 }
             } else {
