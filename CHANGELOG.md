@@ -14,10 +14,9 @@ For the same story told as narrative rather than as a list, see
 [`user_docs/whats-new.md`](user_docs/whats-new.md), which is organised by
 checkpoint instead of by version.
 
-## [Unreleased]
+## [0.5.0] - 2026-09-03
 
-**This will ship as 0.5.0.** It was going to be 0.4.5, and the gain work is what
-changed that: `[radio]` now stores one `gain` line in place of `lna_gain` and
+**This was going to be 0.4.5**, and the gain work is what changed that: `[radio]` now stores one `gain` line in place of `lna_gain` and
 `vga_gain`, which is a change to the shape of the config file and is exactly what
 this file's version promise is about. Loading stays forgiving in both directions,
 so nothing is lost and nothing needs editing (see *Changed, part three*), but the
@@ -550,7 +549,8 @@ sdrtop stopped being a one-radio program.
   image rejection ratio, wavelength and antenna metrics.
 - Config file with atomic save on quit, and the CLI flags that override it.
 
-[Unreleased]: https://github.com/musithang/sdrtop/compare/v0.4.2...HEAD
+[Unreleased]: https://github.com/musithang/sdrtop/compare/v0.5.0...HEAD
+[0.5.0]: https://github.com/musithang/sdrtop/compare/v0.4.2...v0.5.0
 [0.4.2]: https://github.com/musithang/sdrtop/compare/v0.4.1...v0.4.2
 [0.4.1]: https://github.com/musithang/sdrtop/compare/v0.4.0...v0.4.1
 [0.4.0]: https://github.com/musithang/sdrtop/compare/v0.3.5...v0.4.0

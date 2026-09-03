@@ -3,14 +3,14 @@
 
 [package]
 name = "sdrtop"
-version = "0.4.2"
+version = "0.5.0"
 edition = "2021"
 license = "GPL-3.0-or-later"
-description = "Terminal monitor for HackRF One and RTL-SDR: live spectrum, waterfall, and IQ/RF/timing/signal diagnostics"
+description = "Terminal monitor for HackRF One, RTL-SDR and any SoapySDR radio: live spectrum, waterfall, and IQ/RF/timing/signal diagnostics"
 repository = "https://github.com/musithang/sdrtop"
 homepage = "https://github.com/musithang/sdrtop"
 readme = "README.md"
-keywords = ["sdr", "hackrf", "rtl-sdr", "radio", "tui"]
+keywords = ["sdr", "hackrf", "rtl-sdr", "soapysdr", "tui"]
 categories = ["command-line-utilities", "hardware-support", "science"]
 # Measured, not guessed: `slice::as_chunks` (hot path, `hardware/process.rs` and
 # `signal/demod`) stabilised in 1.88.0 and `u32::is_multiple_of` in 1.87.0. The
