@@ -44,6 +44,9 @@ impl App {
         let geometry = caps.sample_geometry;
 
         let mut tuning = resolve_tuning(&cfg.radio, &caps);
+        // Taken out before `tuning` is moved into `Boot`, rather than cloning
+        // the whole thing to keep them.
+        let gain_notes = std::mem::take(&mut tuning.notes);
         let sr_result = match device.set_sample_rate(tuning.sample_rate) {
             // The device is the authority on the baseband width it actually
             // selected; the computed value stands in only when the call failed.
@@ -103,6 +106,13 @@ impl App {
             // have nothing to say; a SoapySDR device names any gain element
             // whose range the driver described unusably.
             for note in device.open_notes() {
+                m.push_log(note.clone());
+            }
+            // Anything the configured `gain` string asked for and did not get:
+            // a stage name this radio does not have, or an entry that is not
+            // `NAME=value` at all. Computed by `resolve_tuning`, which is pure,
+            // and surfaced here.
+            for note in &gain_notes {
                 m.push_log(note.clone());
             }
             let names = [

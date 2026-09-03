@@ -23,16 +23,22 @@ duplicate, go straight to the source:
 
 ```sh
 sdrtop --frequency 92800000      # start tuned here (Hz)
-sdrtop --gain 30                 # primary gain: HackRF LNA / RTL-SDR tuner
-sdrtop --lna 24 --vga 30         # HackRF's two stages separately
+sdrtop --gain "LNA=24,VGA=30"    # name the stages your radio reports
+sdrtop --gain 54                 # or a total, placed front stage first
 sdrtop --device rtlsdr           # pin a backend: hackrf | rtlsdr | soapy
 sdrtop --theme nord              # see themes.md
 sdrtop --config ~/my-config.toml # use a different config file
 ```
 
+`--lna` and `--vga` are still there and still work, setting the first and second
+stage by position. They are the pre-0.5.0 way of saying it and are kept so old
+scripts keep running; `--gain` says the same thing by name and reaches stages
+those two cannot.
+
 Flags override the config file, and they're applied before the device is opened,
 so `--frequency` and `--gain` take effect on the very first frame rather than
-after a retune.
+after a retune. If `--gain` names a stage your radio doesn't have, the log says
+so at startup and lists the ones it does have.
 
 `--config` is the one worth remembering. It swaps the whole settings file, which
 makes it the clean way to keep a throwaway experiment (a layout you're testing, a

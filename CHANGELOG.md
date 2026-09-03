@@ -211,6 +211,10 @@ a SoapySDR device instead of reading about one.
   over a sliding baseline, and reads a steady few tens of ppm with visible
   thermal drift, which is what a crystal actually does. The baseline resets on a
   mid-stream sample-rate change; it previously carried the old rate across.
+- **The gain string's diagnostics reached nobody.** A `gain` naming a stage the
+  radio does not have produced a perfectly good note listing the stages it does
+  have, and `resolve_tuning` discarded it, so a typo looked exactly like a
+  setting that worked. The notes are now pushed to the log at startup.
 - The `[0.4.2]` release had no compare link at the bottom of this file, and
   `[Unreleased]` still compared against `v0.4.1`.
 

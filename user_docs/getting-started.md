@@ -204,8 +204,9 @@ families of layout, on the right the layouts in whichever one is selected.
    `Enter` is a resume.
 2. **`Space`** to start receiving. The spectrum and waterfall come to life.
 3. **`↑` / `↓`** to adjust gain if the signal looks too weak or too strong. That's
-   LNA on a HackRF, the tuner gain on an RTL-SDR. A flat trace usually means gain
-   is far off in one direction or the other.
+   the LNA on a HackRF, the tuner gain on an RTL-SDR, and the whole gain chain on
+   anything reached through SoapySDR. A flat trace usually means gain is far off
+   in one direction or the other.
 4. **`Esc`** brings the menu back at any time. Tab across to **Keys** for the full
    key reference without leaving the app.
 5. **`q`** to quit. Your settings are saved automatically.
@@ -226,11 +227,11 @@ so `Lab 2` means "press `2` while Lab is the section you are in".
 # Start tuned to a specific frequency (in Hz)
 sdrtop --frequency 92800000
 
-# Start with specific gain settings (HackRF LNA and VGA)
-sdrtop --lna 24 --vga 30
+# Start with specific gain settings, naming the stages your radio has
+sdrtop --gain "LNA=24,VGA=30"
 
-# Device-agnostic primary gain: HackRF LNA, RTL-SDR tuner
-sdrtop --gain 30
+# Or give a total and let sdrtop place it, front stage first
+sdrtop --gain 54
 
 # Pin a backend when you have both a HackRF and an RTL-SDR plugged in
 sdrtop --device rtlsdr

@@ -41,6 +41,13 @@ pub(super) struct Tuning {
     pub bb_filter_hz: u32,
     /// One value per stage, in `caps.gain.stages()` order, already snapped.
     pub gains: Vec<f64>,
+    /// What the configured gain string could not be honoured about.
+    ///
+    /// Carried out of here rather than logged here, because this function is
+    /// pure and its tests depend on that. `new_normal` pushes them. They were
+    /// dropped on the floor until 0.5.0: a `gain` naming a stage the radio does
+    /// not have produced a perfectly good diagnostic that nothing ever showed.
+    pub notes: Vec<String>,
 }
 
 /// Who the device says it is. `new_observer` fills this from sysfs, with
@@ -143,6 +150,9 @@ impl Boot {
                 // here would replace every gain the operator set with 0 dB and
                 // present it as a legal value. The test below pins the reasoning.
                 gains: observer_gains(&cfg.radio),
+                // Nothing to report: with no real stage list there is nothing
+                // to fail to match a name against.
+                notes: Vec::new(),
             },
             identity: Identity {
                 board_name: sysinfo.product.clone(),
@@ -196,12 +206,13 @@ pub(super) fn resolve_tuning(radio: &RadioConfig, caps: &DeviceCapabilities) -> 
         } else {
             caps.default_sample_rate_hz
         };
-    let (gains, _) = resolve_gains(radio, &caps.gain);
+    let (gains, notes) = resolve_gains(radio, &caps.gain);
     Tuning {
         frequency_hz,
         sample_rate,
         bb_filter_hz: hardware::compute_bb_filter_bw(sample_rate),
         gains,
+        notes,
     }
 }
 
@@ -478,6 +489,19 @@ mod tests {
                 "asked {asked} dB, got {got} which is not a step this tuner has"
             );
         }
+    }
+
+    #[test]
+    fn resolve_tuning_carries_the_gain_notes_out_rather_than_dropping_them() {
+        // The diagnostic was computed and thrown away until 0.5.0: a `gain`
+        // naming a stage the radio does not have looked exactly like one that
+        // worked.
+        let mut cfg = hackrf_config();
+        cfg.radio.gain = Some("IF1=10".to_string());
+        let t = resolve_tuning(&cfg.radio, &hardware::hackrf::caps());
+        assert_eq!(t.notes.len(), 1, "{:?}", t.notes);
+        assert!(t.notes[0].contains("IF1"), "{}", t.notes[0]);
+        assert!(t.notes[0].contains("LNA"), "{}", t.notes[0]);
     }
 
     /// The reason `Boot::observer` does **not** reuse [`resolve_tuning`].
