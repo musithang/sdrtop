@@ -21,7 +21,7 @@ mod verdict;
 
 use ratatui::{
     layout::Rect,
-    style::{Modifier, Style},
+    style::Style,
     text::{Line, Span},
     widgets::Paragraph,
     Frame,
@@ -30,7 +30,7 @@ use ratatui::{
 use crate::state::SdrMetrics;
 use crate::ui::panel::{Panel, PanelChrome, Staleness, Tag};
 use crate::ui::rf_calc::{
-    cascade, level_lineup, staging_target, staging_verdict, system_nf_db, Stage,
+    cascade, level_lineup, signal_lineup, staging_target, staging_verdict, system_nf_db, Stage,
 };
 
 use super::rf_bench::severity_color;
@@ -91,14 +91,6 @@ impl Panel for RfChainPanel {
             );
             return;
         }
-        // No modelled cascade: the bench assumes the HackRF chain, and this
-        // device is either one tuner or one whose stages we were never told the
-        // noise figures for. The gain model says which.
-        if !state.caps.friis_applicable {
-            f.render_widget(Paragraph::new(single_tuner(state, theme)), inner);
-            return;
-        }
-
         // --- model (frozen snapshot when held, else live) ----------------------
         let fz = state.lab.rf_freeze.as_ref();
         let amp = fz.map(|f| f.amp_enabled).unwrap_or(state.radio.amp_enabled);
@@ -111,9 +103,32 @@ impl Panel for RfChainPanel {
             .unwrap_or(state.signal.adc_peak_dbfs) as f64;
         let snr = fz.map(|f| f.snr_db).unwrap_or(state.signal.peak_to_nf_db) as f64;
         let adc_rms = fz.map(|f| f.rms_dbfs).unwrap_or(state.signal.adc_rms_dbfs);
-        let stages: Vec<Stage> = cascade(amp, lna, vga);
+        // **The gate is per block, not per panel.** Only two of the five blocks
+        // below need per-stage noise figures. The level lineup needs gains, the
+        // staging advice needs the ADC peak, and the verdict needs neither, so a
+        // device whose chain is unmodelled loses the noise numbers and keeps
+        // everything else. It used to lose the whole bench: three lines on a
+        // twenty row panel.
+        let modelled = state.caps.friis_applicable;
+        let stages: Vec<Stage> = if modelled {
+            cascade(amp, lna, vga)
+        } else {
+            // The driver's own stages, with the gains it is actually set to.
+            state
+                .caps
+                .gain
+                .stages()
+                .iter()
+                .enumerate()
+                .map(|(i, s)| Stage::unmodelled(&s.name, state.radio.stage_gain(i)))
+                .collect()
+        };
         let nf = system_nf_db(&stages);
-        let levels = level_lineup(adc_peak, snr, &stages);
+        let levels = if modelled {
+            level_lineup(adc_peak, snr, &stages)
+        } else {
+            signal_lineup(adc_peak, &stages)
+        };
         let (verdict_word, sev) = staging_verdict(adc_peak);
         let (lna_opt, vga_opt) = staging_target(adc_peak, lna, vga);
         let sev_col = severity_color(sev, theme);
@@ -123,9 +138,13 @@ impl Panel for RfChainPanel {
         lines.push(Line::raw(""));
         staging::staging(&mut lines, lna, vga, lna_opt, vga_opt, iw, theme);
         lines.push(Line::raw(""));
-        noise::noise_figure(&mut lines, &stages, nf, iw, theme);
-        lines.push(Line::raw(""));
-        noise::sensitivity(&mut lines, state, nf, iw, theme);
+        if modelled {
+            noise::noise_figure(&mut lines, &stages, nf, iw, theme);
+            lines.push(Line::raw(""));
+            noise::sensitivity(&mut lines, state, nf, iw, theme);
+        } else {
+            noise::not_modelled(&mut lines, state.caps.gain.no_cascade_reason(), iw, theme);
+        }
         lines.push(Line::raw(""));
         verdict::draw(
             &mut lines,
@@ -150,33 +169,6 @@ impl Panel for RfChainPanel {
     }
 }
 
-/// What an RTL-SDR gets: one gain figure and an honest note that the rest of this
-/// bench does not apply to a single-tuner front end.
-fn single_tuner(state: &SdrMetrics, theme: &crate::Theme) -> Vec<Line<'static>> {
-    vec![
-        Line::from(Span::styled(
-            format!(" {} gain ", state.caps.gain.primary_label().to_uppercase()),
-            Style::default()
-                .fg(theme.label)
-                .add_modifier(Modifier::BOLD),
-        )),
-        Line::from(vec![
-            Span::raw(" "),
-            Span::styled(
-                format!("{} dB", state.radio.primary_gain()),
-                Style::default()
-                    .fg(theme.value_hi)
-                    .add_modifier(Modifier::BOLD),
-            ),
-        ]),
-        Line::raw(""),
-        Line::from(Span::styled(
-            format!(" {}", state.caps.gain.no_cascade_reason()),
-            Style::default().fg(theme.stale),
-        )),
-    ]
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -187,5 +179,83 @@ mod tests {
         assert_eq!(p.name(), "rf_chain");
         let (w, h) = p.min_size();
         assert!(w >= 16 && h >= 8);
+    }
+
+    use crate::state::fixture::draw;
+    use crate::state::SdrMetrics;
+
+    const W: u16 = 56;
+    const H: u16 = 22;
+
+    fn soapy() -> SdrMetrics {
+        SdrMetrics::fixture()
+            .streaming()
+            .soapy()
+            .with_carrier(0.0, 20.0)
+    }
+
+    /// The complaint this checkpoint answers. The bench used to return after
+    /// three lines on any device without a modelled cascade, leaving most of a
+    /// twenty row panel blank.
+    #[test]
+    fn an_unmodelled_device_gets_the_blocks_that_do_not_need_noise_figures() {
+        let out = draw(RfChainPanel, W, H, &soapy()).join("\n");
+        assert!(out.contains("GAIN LINEUP"), "no level lineup:\n{out}");
+        assert!(out.contains("GAIN STAGING"), "no staging advice:\n{out}");
+        assert!(out.contains("ANT"), "no antenna node:\n{out}");
+        assert!(out.contains("dBm"), "no levels:\n{out}");
+        // And the verdict, which needs only the ADC peak.
+        assert!(
+            out.contains("STAGED") || out.contains("GAIN"),
+            "no verdict:\n{out}"
+        );
+    }
+
+    /// The two blocks that genuinely cannot work say so, in the space their
+    /// numbers would have filled, with the reason this device gives.
+    #[test]
+    fn the_noise_blocks_name_what_is_missing_rather_than_printing_a_number() {
+        let out = draw(RfChainPanel, W, H, &soapy()).join("\n");
+        assert!(out.contains("not modelled"), "{out}");
+        assert!(
+            out.contains("chain not modelled"),
+            "the device's own reason:\n{out}"
+        );
+        // No noise **number** anywhere. The explanation may name MDS and NF, and
+        // does, so this looks for a figure beside them rather than for the words.
+        for word in ["MDS", "NF"] {
+            assert!(
+                !out.lines().any(|l| l.contains(word) && l.contains("dB")),
+                "printed a {word} value it cannot know:\n{out}"
+            );
+        }
+    }
+
+    /// An RTL-SDR is the other unmodelled shape: one stage, and a different
+    /// reason. Both used to print the same sentence.
+    #[test]
+    fn a_single_stage_device_gets_the_same_treatment_and_its_own_reason() {
+        let m = SdrMetrics::fixture()
+            .streaming()
+            .rtlsdr()
+            .with_carrier(0.0, 20.0);
+        let out = draw(RfChainPanel, W, H, &m).join("\n");
+        assert!(out.contains("GAIN LINEUP"), "{out}");
+        assert!(out.contains("Tuner"), "the driver's own stage name:\n{out}");
+        assert!(out.contains("single tuner"), "its own reason:\n{out}");
+    }
+
+    /// The modelled device is untouched: it still gets all five blocks.
+    #[test]
+    fn a_hackrf_still_gets_the_full_bench() {
+        let m = SdrMetrics::fixture().streaming().with_carrier(0.0, 20.0);
+        let out = draw(RfChainPanel, W, 34, &m).join("\n");
+        assert!(out.contains("GAIN LINEUP"), "{out}");
+        assert!(
+            out.contains("MDS"),
+            "the modelled bench keeps its sensitivity:\n{out}"
+        );
+        assert!(!out.contains("not modelled"), "{out}");
+        assert!(out.contains("MIX"), "and its modelled mixer stage:\n{out}");
     }
 }

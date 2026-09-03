@@ -7,11 +7,33 @@
 
 /// One link in the receive chain, used by the cascade NF, the gain lineup, and the
 /// level diagram. `gain_db` is signed (a mixer's conversion loss is negative).
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Debug)]
 pub struct Stage {
-    pub label: &'static str,
+    /// The stage's name. Owned, because on a device sdrtop did not model the
+    /// name comes from the driver at runtime rather than from a literal here.
+    pub label: String,
     pub gain_db: f64,
+    /// Noise added by this stage. **`NaN` when it is not known**, which is the
+    /// case for every device sdrtop has not modelled.
+    ///
+    /// NaN rather than zero on purpose: a zero here is a plausible-looking noise
+    /// figure, and it would flow into a cascade sum and out onto the screen as a
+    /// confident number nobody measured. NaN cannot be mistaken for an answer,
+    /// and any comparison against it is false, so a path that reads it by
+    /// accident fails visibly rather than quietly.
     pub nf_db: f64,
+}
+
+impl Stage {
+    /// A stage whose gain is known and whose noise is not: the driver told us
+    /// what it amplifies by, and nothing at all about what it adds.
+    pub fn unmodelled(label: &str, gain_db: f64) -> Self {
+        Self {
+            label: label.to_string(),
+            gain_db,
+            nf_db: f64::NAN,
+        }
+    }
 }
 
 /// The HackRF One receive chain as an ordered stage list - the single model behind
@@ -28,23 +50,23 @@ pub fn cascade(amp_enabled: bool, lna_gain: u32, vga_gain: u32) -> Vec<Stage> {
     let mut stages = Vec::with_capacity(4);
     if amp_enabled {
         stages.push(Stage {
-            label: "AMP",
+            label: "AMP".to_string(),
             gain_db: 14.0,
             nf_db: 2.0,
         });
     }
     stages.push(Stage {
-        label: "LNA",
+        label: "LNA".to_string(),
         gain_db: lna_gain as f64,
         nf_db: nf_lna,
     });
     stages.push(Stage {
-        label: "MIX",
+        label: "MIX".to_string(),
         gain_db: -7.0,
         nf_db: 7.0,
     });
     stages.push(Stage {
-        label: "VGA",
+        label: "VGA".to_string(),
         gain_db: vga_gain as f64,
         nf_db: 10.0,
     });
@@ -128,11 +150,19 @@ pub fn adc_utilisation_ratio(hist: &[u64; 32]) -> f64 {
 pub const ADC_DBFS_REF_DBM: f64 = 0.0;
 
 /// Signal and (modeled) noise level at one node of the chain, in dBm.
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Debug)]
 pub struct StageLevel {
-    pub label: &'static str,
+    pub label: String,
     pub signal_dbm: f64,
-    pub noise_dbm: f64,
+    /// Where the noise sits at this node, when the chain's noise figures are
+    /// known.
+    ///
+    /// `None` on a device whose stages sdrtop has never been told the noise
+    /// figures for. The signal walk is still exact there, because it needs only
+    /// the gains and the measured ADC level; the noise walk is not, because it
+    /// is anchored on the cascade NF. Drawing it anyway with a zero would put a
+    /// confident line on the screen for a number nobody has.
+    pub noise_dbm: Option<f64>,
 }
 
 /// Level lineup down the chain: signal climbs by each stage's gain; the noise climbs
@@ -148,9 +178,9 @@ pub fn level_lineup(adc_signal_dbfs: f64, snr_db: f64, stages: &[Stage]) -> Vec<
 
     let mut out = Vec::with_capacity(stages.len() + 1);
     out.push(StageLevel {
-        label: "ANT",
+        label: "ANT".to_string(),
         signal_dbm: ant_signal,
-        noise_dbm: ant_signal - snr_ant,
+        noise_dbm: Some(ant_signal - snr_ant),
     });
     let mut cum_gain = 0.0;
     for k in 0..stages.len() {
@@ -159,9 +189,38 @@ pub fn level_lineup(adc_signal_dbfs: f64, snr_db: f64, stages: &[Stage]) -> Vec<
         let cum_nf = system_nf_db(&stages[..=k]);
         let snr_here = snr_ant - cum_nf;
         out.push(StageLevel {
-            label: stages[k].label,
+            label: stages[k].label.clone(),
             signal_dbm: signal,
-            noise_dbm: signal - snr_here,
+            noise_dbm: Some(signal - snr_here),
+        });
+    }
+    out
+}
+
+/// The same walk down the chain with **only** the part that needs no noise
+/// figures: where the signal sits after each stage.
+///
+/// This is what an unmodelled device can honestly show. The gains are the
+/// driver's own, the ADC level is measured, and the antenna end follows from the
+/// two; none of it needs to know how much noise any stage adds. What is missing
+/// is the noise line, and it is missing rather than guessed.
+pub fn signal_lineup(adc_signal_dbfs: f64, stages: &[Stage]) -> Vec<StageLevel> {
+    let total_gain: f64 = stages.iter().map(|s| s.gain_db).sum();
+    let ant_signal = adc_signal_dbfs + ADC_DBFS_REF_DBM - total_gain;
+
+    let mut out = Vec::with_capacity(stages.len() + 1);
+    out.push(StageLevel {
+        label: "ANT".to_string(),
+        signal_dbm: ant_signal,
+        noise_dbm: None,
+    });
+    let mut cum_gain = 0.0;
+    for stage in stages {
+        cum_gain += stage.gain_db;
+        out.push(StageLevel {
+            label: stage.label.clone(),
+            signal_dbm: ant_signal + cum_gain,
+            noise_dbm: None,
         });
     }
     out
@@ -443,7 +502,7 @@ mod tests {
             "ADC node = measured level"
         );
         // SNR at the ADC equals the measured SNR.
-        assert!((adc.signal_dbm - adc.noise_dbm - 40.0).abs() < 1e-9);
+        assert!((adc.signal_dbm - adc.noise_dbm.unwrap() - 40.0).abs() < 1e-9);
         // Signal climbs by the chain gain back from the antenna.
         let ant = &lv[0];
         assert!((adc.signal_dbm - ant.signal_dbm - 57.0).abs() < 1e-9);
@@ -455,7 +514,7 @@ mod tests {
         let nf = system_nf_db(&stages);
         let lv = level_lineup(-8.0, 40.0, &stages);
         let ant = &lv[0];
-        let ant_snr = ant.signal_dbm - ant.noise_dbm;
+        let ant_snr = ant.signal_dbm - ant.noise_dbm.unwrap();
         assert!(
             (ant_snr - (40.0 + nf)).abs() < 1e-9,
             "antenna SNR = ADC SNR + NF"
@@ -567,5 +626,39 @@ mod tests {
     fn staging_target_near_optimum_is_stable() {
         let (lna, vga) = staging_target(OPT_PEAK_DBFS, 32, 30);
         assert_eq!((lna, vga), (32, 30), "already optimal → no change");
+    }
+
+    /// The signal-only walk is the part that needs no noise figures: the same
+    /// signal levels as the full lineup, and no noise line at all.
+    #[test]
+    fn the_signal_only_lineup_matches_the_full_one_and_omits_the_noise() {
+        let stages = cascade(false, 32, 32);
+        let full = level_lineup(-8.0, 40.0, &stages);
+        let signal = signal_lineup(-8.0, &stages);
+
+        assert_eq!(full.len(), signal.len());
+        for (a, b) in full.iter().zip(&signal) {
+            assert_eq!(a.label, b.label);
+            assert!(
+                (a.signal_dbm - b.signal_dbm).abs() < 1e-9,
+                "the signal walk needs only the gains: {} vs {}",
+                a.signal_dbm,
+                b.signal_dbm
+            );
+            assert!(a.noise_dbm.is_some());
+            assert!(
+                b.noise_dbm.is_none(),
+                "and the noise line is absent, not zero"
+            );
+        }
+    }
+
+    /// A device with no stages still has an antenna node, and the ADC anchor is
+    /// the antenna level when nothing amplifies in between.
+    #[test]
+    fn a_chain_with_no_stages_is_just_the_antenna() {
+        let lv = signal_lineup(-8.0, &[]);
+        assert_eq!(lv.len(), 1);
+        assert_eq!(lv[0].label, "ANT");
     }
 }

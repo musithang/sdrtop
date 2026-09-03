@@ -40,7 +40,7 @@ pub(super) fn lineup(
         };
         out.push(row(
             Row {
-                label: node.label,
+                label: &node.label,
                 label_w: LABEL_W,
                 mid: gain_str,
                 mid_col: dim,

@@ -101,9 +101,9 @@ impl Panel for LevelDiagramPanel {
             .unwrap_or(state.signal.adc_peak_dbfs) as f64;
         let snr = fz.map(|f| f.snr_db).unwrap_or(state.signal.peak_to_nf_db) as f64;
         let mut nodes: Vec<StageLevel> = level_lineup(adc_peak, snr, &stages);
-        if let Some(last) = nodes.last().copied() {
+        if let Some(last) = nodes.last().cloned() {
             nodes.push(StageLevel {
-                label: "ADC",
+                label: "ADC".to_string(),
                 ..last
             });
         }
@@ -112,7 +112,12 @@ impl Panel for LevelDiagramPanel {
             return;
         }
         let sig: Vec<f64> = nodes.iter().map(|s| s.signal_dbm).collect();
-        let noise: Vec<f64> = nodes.iter().map(|s| s.noise_dbm).collect();
+        // This panel is gated on `friis_applicable`, so every node has a noise
+        // figure; the fallback keeps the type total rather than unwrapping.
+        let noise: Vec<f64> = nodes
+            .iter()
+            .map(|s| s.noise_dbm.unwrap_or(s.signal_dbm))
+            .collect();
 
         let sig_col = theme.value_hi;
         let noise_col = theme.border_accent;
@@ -204,7 +209,7 @@ impl Panel for LevelDiagramPanel {
         let mut axis: Vec<char> = vec![' '; chart_w];
         for (i, node) in nodes.iter().enumerate() {
             let col = ((i as f64 / (n - 1) as f64) * (chart_w - 1) as f64).round() as usize;
-            let lbl = node.label;
+            let lbl = node.label.as_str();
             let start = col
                 .saturating_sub(lbl.len() / 2)
                 .min(chart_w.saturating_sub(lbl.len()));

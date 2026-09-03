@@ -25,6 +25,49 @@ use super::{LABEL_W, VALW};
 /// The total can sit *below* the worst individual stage, and that is not a bug:
 /// the LNA's gain suppresses the noise of everything after it. The per-stage bars
 /// are what make that legible rather than surprising.
+/// What stands in for the two noise blocks on a device whose chain sdrtop has
+/// never been told the noise figures for.
+///
+/// **It says what is missing and why**, in the space the numbers would have
+/// filled, rather than leaving a hole. The reason comes from the gain model, so
+/// an RTL-SDR reads "single tuner, no cascade" and a SoapySDR device reads
+/// "chain not modelled": two different facts that used to share one sentence.
+pub(super) fn not_modelled(
+    out: &mut Vec<Line<'static>>,
+    reason: &str,
+    iw: usize,
+    theme: &crate::Theme,
+) {
+    out.push(section("Noise figure", "not modelled", iw, theme));
+    out.push(Line::raw(""));
+    out.push(Line::from(vec![
+        Span::raw(" "),
+        Span::styled(reason.to_string(), Style::default().fg(theme.stale)),
+    ]));
+    out.push(Line::raw(""));
+    out.push(Line::from(vec![
+        Span::raw(" "),
+        Span::styled(
+            "NF and MDS need each stage's own noise figure,".to_string(),
+            Style::default().fg(theme.label),
+        ),
+    ]));
+    out.push(Line::from(vec![
+        Span::raw(" "),
+        Span::styled(
+            "which no driver reports. The levels above are".to_string(),
+            Style::default().fg(theme.label),
+        ),
+    ]));
+    out.push(Line::from(vec![
+        Span::raw(" "),
+        Span::styled(
+            "measured and do not need it.".to_string(),
+            Style::default().fg(theme.label),
+        ),
+    ]));
+}
+
 pub(super) fn noise_figure(
     out: &mut Vec<Line<'static>>,
     stages: &[Stage],
@@ -38,7 +81,7 @@ pub(super) fn noise_figure(
     for s in stages {
         out.push(bar_row(
             Bar {
-                label: s.label,
+                label: &s.label,
                 label_w: LABEL_W,
                 value: (s.nf_db * 100.0) as u32,
                 max: 1200,
