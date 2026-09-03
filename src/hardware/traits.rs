@@ -95,6 +95,100 @@ impl SampleGeometry {
     }
 }
 
+/// One amplification element: what it is called, and what values it accepts.
+///
+/// The shape half of the gain model. `caps` owns a list of these, built once at
+/// open; the state owns the values in the same order. Nothing here knows what
+/// any stage is currently set to.
+///
+/// **`f64`, not `u32`.** `SoapySDRRange` places no constraint on either bound,
+/// so an element can have a fractional step or a negative minimum, the latter
+/// describing an attenuator rather than an amplifier. The previous model rounded
+/// both away and would have answered 0 dB for a stage sitting at -10.
+#[derive(Clone, Debug, PartialEq)]
+#[allow(dead_code)] // read from G3
+pub struct StageSpec {
+    /// The driver's own name for it: `LNA`, `IFGR`, `TUNER`, whatever it said.
+    /// Never one of ours, because a name we chose would be a claim about a chain
+    /// we have not seen.
+    pub name: String,
+    pub min_db: f64,
+    pub max_db: f64,
+    /// Spacing of the legal values, or zero for a continuous range.
+    pub step_db: f64,
+}
+
+#[allow(dead_code)] // read from G3
+impl StageSpec {
+    /// Whether the driver said anything usable about this element.
+    ///
+    /// A maximum below the minimum, or a bound that is not a finite number, is
+    /// not a range. Such an element is dropped with a named log line rather than
+    /// silently kept, because a stage pinned at zero looks exactly like a stage
+    /// the user turned down.
+    pub fn is_usable(&self) -> bool {
+        self.min_db.is_finite() && self.max_db.is_finite() && self.max_db >= self.min_db
+    }
+
+    /// How many settings this element has, or `None` when it is continuous.
+    ///
+    /// **This is what makes a switch detectable rather than assumed.** A HackRF
+    /// through SoapyHackRF reports `AMP [0, 14, 14]`: the step spans the whole
+    /// range, so there are exactly two settings and it is a boost, not a stage
+    /// to distribute a figure across. That is the driver's own answer, not a
+    /// table of what a HackRF has.
+    pub fn positions(&self) -> Option<u32> {
+        if !self.is_usable() || self.step_db <= 0.0 {
+            return None;
+        }
+        let n = ((self.max_db - self.min_db) / self.step_db).floor();
+        Some((n.max(0.0) as u32).saturating_add(1))
+    }
+
+    /// Two settings and nothing between: a boost, which sdrtop already has a
+    /// concept and a key for.
+    pub fn is_switch(&self) -> bool {
+        self.positions() == Some(2)
+    }
+
+    /// One setting: the driver exposes the element but it cannot be moved.
+    /// Not a fault, and not something to offer the user a control for.
+    pub fn is_fixed(&self) -> bool {
+        self.positions() == Some(1)
+    }
+
+    /// The nearest legal value to `db`.
+    ///
+    /// Total by construction: a driver that reports nonsense gets the one value
+    /// it certainly accepts rather than a panic. `f64::clamp` panics on an
+    /// inverted range or a NaN bound, and a value read over FFI is exactly where
+    /// those come from.
+    pub fn snap(&self, db: f64) -> f64 {
+        if !self.is_usable() {
+            return if self.min_db.is_finite() {
+                self.min_db
+            } else {
+                0.0
+            };
+        }
+        if !db.is_finite() {
+            return self.min_db;
+        }
+        let v = db.clamp(self.min_db, self.max_db);
+        if self.step_db <= 0.0 {
+            return v; // continuous, or a step the driver declined to give
+        }
+        let snapped = self.min_db + ((v - self.min_db) / self.step_db).round() * self.step_db;
+        // Rounding up can leave the grid: the top of the range is not always on
+        // it. `[0, 10, 3]` allows 9, never 12.
+        if snapped > self.max_db {
+            (snapped - self.step_db).max(self.min_db)
+        } else {
+            snapped
+        }
+    }
+}
+
 /// The gain "shape" a device exposes - drives UI rendering and key bindings.
 #[derive(Clone, Debug)]
 pub enum GainModel {
@@ -411,6 +505,125 @@ pub trait SdrDevice: Send + Sync {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    // ── StageSpec ───────────────────────────────────────────────────────────
+    //
+    // The three fixtures are the real answers `SoapySDRUtil --probe` gives for a
+    // HackRF through SoapyHackRF, transcribed rather than invented:
+    //
+    //     LNA gain range: [0, 40, 8] dB
+    //     AMP gain range: [0, 14, 14] dB
+    //     VGA gain range: [0, 62, 2] dB
+
+    fn stage(name: &str, min: f64, max: f64, step: f64) -> StageSpec {
+        StageSpec {
+            name: name.into(),
+            min_db: min,
+            max_db: max,
+            step_db: step,
+        }
+    }
+
+    #[test]
+    fn snapping_lands_on_the_drivers_own_grid() {
+        let lna = stage("LNA", 0.0, 40.0, 8.0);
+        assert_eq!(lna.snap(0.0), 0.0);
+        assert_eq!(lna.snap(11.0), 8.0, "nearest, not nearest-below");
+        assert_eq!(lna.snap(13.0), 16.0);
+        assert_eq!(lna.snap(40.0), 40.0);
+
+        let vga = stage("VGA", 0.0, 62.0, 2.0);
+        assert_eq!(vga.snap(47.0), 48.0);
+        assert_eq!(vga.snap(47.9), 48.0);
+    }
+
+    #[test]
+    fn snapping_clamps_to_the_range() {
+        let lna = stage("LNA", 0.0, 40.0, 8.0);
+        assert_eq!(lna.snap(1000.0), 40.0);
+        assert_eq!(lna.snap(-1000.0), 0.0);
+    }
+
+    /// The top of a range is not always on the grid, and rounding up must not
+    /// leave it. `[0, 10, 3]` allows 9 and never 12.
+    #[test]
+    fn snapping_never_steps_above_the_maximum() {
+        let odd = stage("ODD", 0.0, 10.0, 3.0);
+        assert_eq!(odd.snap(10.0), 9.0);
+        assert_eq!(odd.snap(11.0), 9.0);
+        assert_eq!(odd.positions(), Some(4), "0, 3, 6, 9");
+    }
+
+    /// An attenuator. The old `u32` model rounded this away and would have
+    /// reported a stage sitting at -10 dB as 0.
+    #[test]
+    fn a_negative_minimum_is_a_real_range() {
+        let att = stage("ATT", -30.0, 0.0, 10.0);
+        assert!(att.is_usable());
+        assert_eq!(att.snap(-12.0), -10.0);
+        assert_eq!(att.snap(-100.0), -30.0);
+        assert_eq!(att.snap(5.0), 0.0);
+        assert_eq!(att.positions(), Some(4));
+    }
+
+    /// A step of zero is the driver declining to quantise, not a zero-width
+    /// grid to divide by.
+    #[test]
+    fn a_continuous_range_is_not_snapped() {
+        let cont = stage("RF", 0.0, 50.0, 0.0);
+        assert_eq!(cont.snap(17.3), 17.3);
+        assert_eq!(cont.snap(60.0), 50.0);
+        assert_eq!(cont.positions(), None);
+        assert!(!cont.is_switch());
+    }
+
+    /// The G1 finding, and the reason `positions` exists: an element whose step
+    /// spans its range has two settings and is a boost, not a stage.
+    #[test]
+    fn an_element_whose_step_spans_its_range_is_a_switch() {
+        let amp = stage("AMP", 0.0, 14.0, 14.0);
+        assert_eq!(amp.positions(), Some(2));
+        assert!(amp.is_switch());
+        assert_eq!(amp.snap(3.0), 0.0);
+        assert_eq!(amp.snap(8.0), 14.0);
+
+        // And the two real neighbours from the same probe are not switches.
+        assert!(!stage("LNA", 0.0, 40.0, 8.0).is_switch());
+        assert!(!stage("VGA", 0.0, 62.0, 2.0).is_switch());
+    }
+
+    /// A step wider than the range leaves one setting. Not a fault, but not a
+    /// control to offer either.
+    #[test]
+    fn a_step_wider_than_the_range_leaves_one_setting() {
+        let stuck = stage("STUCK", 0.0, 5.0, 20.0);
+        assert_eq!(stuck.positions(), Some(1));
+        assert!(stuck.is_fixed());
+        assert!(!stuck.is_switch());
+        assert_eq!(stuck.snap(5.0), 0.0);
+    }
+
+    /// What a broken driver can hand back over FFI. `f64::clamp` panics on an
+    /// inverted range or a NaN bound, so every one of these has to be answered
+    /// rather than passed through.
+    #[test]
+    fn nonsense_from_a_driver_is_refused_without_panicking() {
+        let inverted = stage("BAD", 40.0, 0.0, 8.0);
+        assert!(!inverted.is_usable());
+        assert_eq!(inverted.snap(20.0), 40.0, "the one value it surely accepts");
+        assert_eq!(inverted.positions(), None);
+
+        let nan_max = stage("NAN", 0.0, f64::NAN, 1.0);
+        assert!(!nan_max.is_usable());
+        assert_eq!(nan_max.snap(5.0), 0.0);
+
+        let nan_min = stage("NAN", f64::NAN, 10.0, 1.0);
+        assert!(!nan_min.is_usable());
+        assert_eq!(nan_min.snap(5.0), 0.0);
+
+        // And a NaN asked for, against a range that is fine.
+        assert_eq!(stage("LNA", 0.0, 40.0, 8.0).snap(f64::NAN), 0.0);
+    }
 
     /// The depth follows the full scale, which is the number a SoapySDR driver
     /// actually reports. The 2048 case is the one that matters: a 12-bit ADC
