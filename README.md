@@ -5,6 +5,11 @@
 <h1 align="center">sdrtop</h1>
 
 <p align="center">
+  <b>A bench instrument for software defined radios, living in your terminal.</b><br>
+  <sub>Spectrum, waterfall, and the measurements a plot cannot give you.</sub>
+</p>
+
+<p align="center">
   <a href="https://www.rust-lang.org"><img src="https://img.shields.io/badge/rust-1.88%2B-orange?logo=rust&logoColor=white" alt="Rust 1.88+"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-GPL--3.0--or--later-blue" alt="GPL-3.0-or-later"></a>
   <img src="https://img.shields.io/badge/platform-linux-lightgrey?logo=linux&logoColor=white" alt="Linux">
@@ -51,17 +56,6 @@ It's a hobby project built in my spare time, and honestly, I made it for *you* �
 >
 > Known issues: plenty 😄 If something looks broken, it's either a bug or an undocumented feature. Flip a coin, then open an issue.
 
-### 📖 Documentation
-
-**[→ Full user guide](user_docs/README.md)**. This page is the short version; everything below is covered properly over there.
-
-| | | |
-|---|---|---|
-| [Getting started](user_docs/getting-started.md): install & run | [Keyboard shortcuts](user_docs/keys.md): every key | [What's on screen](user_docs/screens.md): panels explained |
-| [The Lab presets](user_docs/lab.md): the bench-engineer views | [Configuration](user_docs/config.md): config.toml &amp; [layouts](user_docs/presets.md) | [Advanced features](user_docs/advanced.md): workflows & limits |
-| [Tips & tricks](user_docs/tips-and-tricks.md): gain, markers, workflows | [Troubleshooting](user_docs/troubleshooting.md): when things go sideways | [Supported hardware](user_docs/hardware.md): what works today |
-| [Themes](user_docs/themes.md): the six palettes | [What's new](user_docs/whats-new.md): the checkpoint log | [The demodulator](user_docs/demodulator.md): how it was built |
-
 ---
 
 ## Gallery
@@ -105,8 +99,8 @@ Everything your radio knows about itself, in real time, without leaving the term
 
 - **The Command Rail**, the default cockpit: a big segmented frequency hero, an analog S-meter, HUNT · MONITOR · BENCH mode cards that follow what you're doing, recall slots, and SNR · PWR · NF · SAT each riding its own braille oscilloscope trace. All dials, no autopilot. It's a radio, not a self-driving car.
 - **Spectrum and waterfall**: FFT with peak hold, noise floor tracking, zoom, band-plan overlay and persistent markers; a scrolling spectrogram in truecolor, 256 or 16 colors with history scroll-back and frame averaging.
-- **Focus modes**: press the highlighted letter in a panel's title and the panel is yours, with cursor read-outs, holds and markers. There is no mouse anywhere in sdrtop, and nothing in it needs one.
-- **Four lab benches** for the questions a plot can't answer: is the quadrature clean, is the front end staged right, is my computer keeping up, and what *is* that signal. Noise figure, MDS, IRR, occupied bandwidth, ACPR, ADC loading, jitter. Measured the awkward way rather than the easy way: bandwidth about the carrier, not across whatever span you happened to capture, so a mistuned radio confesses instead of faking a good number. The noise floor comes as a density too, so the same receiver reads as the same receiver whatever the sample rate. [The details](user_docs/lab.md).
+- **Focus modes**: press the highlighted letter in a panel's title and the panel is yours, with cursor read-outs, holds and markers. No mouse input is handled anywhere, and nothing in sdrtop needs any.
+- **Four lab benches** for the questions a plot can't answer: is the quadrature clean, is the front end staged right, is my computer keeping up, and what *is* that signal. Noise figure, MDS, IRR, occupied bandwidth, ACPR, ADC loading, jitter. [The details](user_docs/lab.md).
 - **A demodulator that doesn't play audio**, deliberately. It opens the channel and reports what a spectrum plot structurally cannot: FM deviation about the carrier, the MPX baseband with its 19 kHz pilot, stereo injection, CTCSS, AM depth, and **RDS** station name, PTY and RadioText. It reads radios, it doesn't play them. [How it works](user_docs/demodulator.md).
 - **IQ correction, not just measurement**: one key subtracts the live DC estimate from the stream, another captures a quadrature correction and applies it. Watch the spike and the mirror images actually go away.
 - **A band sweep** wider than one window, stitched into a single curve with band-plan labels, `Enter` on a peak to tune straight to it.
@@ -114,7 +108,22 @@ Everything your radio knows about itself, in real time, without leaving the term
 - **Observer mode**: if another app already holds the radio, sdrtop tells you which one, shows device identity and USB stats, and waits. No error dialog, no fight over the USB handle, and it takes the radio back the moment it's free.
 - **Six themes and a layout system**: presets grouped into four sections, `Esc` for the menu, or define your own out of any panel sdrtop draws.
 
-> Every lab panel marks itself **[STALE]** the moment RX stops, so a frozen number is never mistaken for a live one. Because the only thing worse than no data is confidently wrong data.
+Measured the awkward way rather than the easy way. Bandwidth about the carrier, not across whatever span you happened to capture, so a mistuned radio confesses instead of faking a good number. The noise floor as a density, so the same receiver reads as the same receiver whatever the sample rate. And every lab panel marks itself **[STALE]** the moment RX stops, so a frozen number is never mistaken for a live one.
+
+> Because the only thing worse than no data is confidently wrong data.
+
+---
+
+### 📖 Documentation
+
+**[→ Full user guide](user_docs/README.md)**. This page is the short version; everything below is covered properly over there.
+
+| | | |
+|---|---|---|
+| [Getting started](user_docs/getting-started.md): install & run | [Keyboard shortcuts](user_docs/keys.md): every key | [What's on screen](user_docs/screens.md): panels explained |
+| [The Lab presets](user_docs/lab.md): the bench-engineer views | [Configuration](user_docs/config.md): config.toml &amp; [layouts](user_docs/presets.md) | [Advanced features](user_docs/advanced.md): workflows & limits |
+| [Tips & tricks](user_docs/tips-and-tricks.md): gain, markers, workflows | [Troubleshooting](user_docs/troubleshooting.md): when things go sideways | [Supported hardware](user_docs/hardware.md): what works today |
+| [Themes](user_docs/themes.md): the six palettes | [What's new](user_docs/whats-new.md): the checkpoint log | [The demodulator](user_docs/demodulator.md): how it was built |
 
 ---
 
@@ -192,7 +201,7 @@ That last command is the whole diagnostic. If your radio isn't in that list, the
 
 Layouts are grouped into four sections and **each section has its own numbers**: `Command Rail` for the general views, `Lab` for the benches, `Sweep` for the band scan, `Micro` for the field views. So `2` is the RF bench inside Lab and the spectrum inside Command Rail. `Esc` opens the menu, which shows you the sections, the layouts in the one you're on, and the number that opens each. Nine keys, four times over, rather than one long row to memorise.
 
-The ten that get you everywhere:
+The eight that get you everywhere:
 
 | Key | Action |
 |---|---|
@@ -313,4 +322,4 @@ Yep, it's a radio tower. I'm a simple man, I see free time, I make ASCII art.
 
 ---
 
-**[Credits](CREDITS.md)**
+**[Credits](CREDITS.md)** · **[POLICY](POLICY.md)**: the rules this instrument is held to, and the one it broke
