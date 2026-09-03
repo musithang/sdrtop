@@ -243,10 +243,12 @@ Frequency, gains, sample rate, markers, the sweep band, your theme and your layo
 - IQ correction, band sweep, observer mode
 - Six themes, layout presets, micro field views
 - PortaPack H4M in HackRF mode
+- Per-stage gain control on any radio, placed front to back rather than by the driver
+- A measured noise-step sweep on the RF bench, not just the modelled figure
 
 ### 🔧 In progress
 
-- **SoapySDR feature parity**: closing the gap so every panel and every measurement works through a SoapySDR device the same way it does on a HackRF or RTL-SDR
+- **SoapySDR feature parity**: closing the gap so every panel and every measurement works through a SoapySDR device the same way it does on a HackRF or RTL-SDR. The gain chain, the timing bench and the RF bench are done; the remaining gaps are the ones that need a datasheet nobody publishes
 - **Math audit**: derived measurements audited reading by reading until the numbers are not just present but trustworthy
 - **UI polish**: micro view redesign, rough edges, the small things that make a good tool feel right
 

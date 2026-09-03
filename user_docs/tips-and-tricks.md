@@ -240,9 +240,8 @@ Keep **Hardware Vitals** in view (Lab Timing, `Lab 3`, focus `v`):
 - **CPU trending up**: something else on the machine woke up. Close it.
 
 If you want to know whether the problem is your computer rather than your radio,
-the **Callback Interval Strip Chart** in the same preset shows every USB callback
-as it arrives, so a scheduler stall is something you watch happen instead of
-deduce.
+the **Interval Strip Chart** in the same preset shows every block as it arrives,
+so a scheduler stall is something you watch happen instead of deduce.
 
 ---
 

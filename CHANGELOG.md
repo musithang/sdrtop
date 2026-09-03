@@ -16,12 +16,15 @@ checkpoint instead of by version.
 
 ## [Unreleased]
 
-**This will ship as 0.4.5.** The number keys change meaning, which is a real
-break in muscle memory, but this file's version promise is specifically about the
-config file, and that contract holds: a config written by an older sdrtop loads
-unchanged, and the new preset fields are optional. The SoapySDR backend is beta
-and there is still plenty to sand down, so the minor bump can wait until it has
-earned itself.
+**This will ship as 0.5.0.** It was going to be 0.4.5, and the gain work is what
+changed that: `[radio]` now stores one `gain` line in place of `lna_gain` and
+`vga_gain`, which is a change to the shape of the config file and is exactly what
+this file's version promise is about. Loading stays forgiving in both directions,
+so nothing is lost and nothing needs editing (see *Changed, part three*), but the
+file a fresh quit writes is not the file 0.4.x wrote, and that earns the minor
+bump on its own.
+
+The number keys also change meaning, which is a real break in muscle memory.
 
 sdrtop had grown to fifteen layouts and ten digits to reach them with. One layout
 never got a key at all, `?` opened a help overlay that had been quietly wrong for
@@ -138,8 +141,76 @@ testing. What replaces it:
   sources, which is real and useful with a soundcard receiver and confusing on a
   laptop. `--device soapy=driver=audio` asks for it.
 
+### Added, part three: the gain chain and a measured bench
+
+**The three things that kept 0.4.5 from shipping**, all found by sitting down with
+a SoapySDR device instead of reading about one.
+
+- **Per-stage gain on any radio.** sdrtop reads every gain element the driver
+  names and every element's own range, and places gain itself instead of handing
+  a total over. `↑` / `↓` move the whole chain, filling the front stage first up
+  to its ceiling and then the next, which is the arrangement with the best noise
+  figure. On a HackRF through `SoapyHackRF` the driver's own split was not even
+  monotonic: turning the knob up could collapse the LNA from 32 dB to 19.
+- **`,` and `.` in the Command Rail** select one gain element by name; `↑` / `↓`
+  then move that one alone by its own step, redistributing nothing. Stepping past
+  either end of the list returns to the whole-chain knob. This is the only way to
+  reach a third gain element, which some radios have and sdrtop previously could
+  not address at all.
+- **`gain` in the config and on the command line takes named stages**, comma or
+  semicolon separated: `gain = "LNA=32,VGA=20"`. A bare number still works and is
+  placed the same way the `↑` key places it, so the file and the knob cannot
+  disagree. Names are matched case-insensitively against the device's own; a name
+  the device does not have is reported in the log along with the ones it does
+  have, never applied to the nearest guess.
+- **`K` on the RF bench runs a noise step sweep.** It walks the front gain stage
+  across its settings, settles at each, and reports the **knee**: the lowest gain
+  from which the noise floor follows the gain, which is the lowest gain at which
+  the front end rather than the converter sets the sensitivity. Six settings in
+  about five seconds. Measured on a HackRF, the knee sat at LNA 24 dB on a busy
+  FM channel and 32 dB on quiet UHF, which is the direction physics requires.
+  It is not a noise figure and the panel says so: that needs a known source at
+  the input. The stage is restored on completion, on stop, when RX stops and on
+  quit, and quitting mid-sweep saves the gain you chose rather than the step it
+  was parked on. A sweep stopped early reports nothing.
+
+### Changed, part three
+
+- **`[radio].gain` replaces `lna_gain` and `vga_gain`.** The old fields still
+  load and still override the first and second stage, so an existing config opens
+  exactly where it left off; they are no longer written, and the first quit
+  replaces them with one `gain` line. They were a HackRF's shape imposed on every
+  other radio: a device with three gain elements had no way to say so.
+- **The rail's GAIN card draws one bar per stage the device reports**, with the
+  driver's own names and in the driver's own order, plus the total. It was a
+  fixed LNA/VGA pair, which left a SoapySDR device showing one combined bar while
+  the focus mode could point at stages that had no row on screen.
+- **The RF bench is gated per block rather than as a whole.** Only the Friis
+  noise figure and the MDS need per-stage noise figures; the level line-up, the
+  staging advice and the verdict are measured. A device with no modelled chain
+  now keeps those and gets one line naming what is missing, instead of a bench
+  reduced to four lines on a twenty row panel. The staging bars and the level
+  line-up are drawn from the device's own stage list.
+- **The timing bench measures a pull backend by occupancy, not by deadline.** A
+  HackRF or RTL-SDR pushes blocks and can be late; a SoapySDR device is read in a
+  loop and cannot be, because a slow reader simply waits less. Grading pull
+  traffic against a deadline that does not exist is what made a healthy link
+  report a permanent USB overload. The panel now measures how much of each read
+  cycle was spent working rather than waiting, and the strip chart, its caption
+  and the verdict all use the vocabulary of whichever transport is in use.
+- **The timing verdict names its own cause.** `Sample clock is off the configured
+  rate / 182 ppm out, nothing lost` no longer shares a grade and a sentence with a
+  link that is genuinely dropping samples.
+
 ### Fixed
 
+- **The sample-rate estimate was quantisation noise.** It counted whole blocks in
+  a fixed window, which on a HackRF's 262144-byte transfers gave a resolution of
+  437 ppm against a 500 ppm threshold, and readings that swung between -159 and
+  +499 ppm on a radio doing nothing wrong. It is now timed between block arrivals
+  over a sliding baseline, and reads a steady few tens of ppm with visible
+  thermal drift, which is what a crystal actually does. The baseline resets on a
+  mid-stream sample-rate change; it previously carried the old rate across.
 - The `[0.4.2]` release had no compare link at the bottom of this file, and
   `[Unreleased]` still compared against `v0.4.1`.
 

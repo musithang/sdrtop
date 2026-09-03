@@ -19,14 +19,114 @@ in time.
 > Timing** real-time bench and the **FM MPX · Demod** instrument with RDS, most
 > recently gone over reading by reading for anything that was not strictly true,
 > now reachable through a menu instead of a row of numbers that had run out, and
-> reaching a great deal more hardware than the two radios I actually own.
+> reaching a great deal more hardware than the two radios I actually own. Then the
+> benches were held to the same standard on that new hardware as on mine: the gain
+> chain is driven per stage instead of being handed to a driver, the timing bench
+> measures what a pull backend actually does, and the RF bench measures its own
+> noise knee rather than only modelling one.
 > The ongoing work is polishing the UI, sharpening the radio math, and squashing
 > bugs. So if something looks off or behaves oddly, that's exactly what we're
 > hunting.
 
 ---
 
-## 📡 Checkpoint 20: It talks to your radio now *(you are here)*
+## 📐 Checkpoint 21: Believing the instrument *(you are here)*
+
+Checkpoint 20 got sdrtop talking to a lot more radios. Then I actually sat down
+with one of them, and three things were wrong.
+
+The RF bench was nearly empty. The timing bench insisted the USB link was
+overloaded when it plainly wasn't. And the gain knob was worse than useless: at a
+total of 60 dB the driver had quietly put nearly all of it in the VGA and left the
+LNA low, which is the arrangement with the *worst* noise figure of the ones
+available. Turning the knob up could make the LNA go *down*.
+
+None of that is a small cosmetic thing. A measuring instrument you can't believe
+is furniture. So 0.4.5 waited.
+
+### The gain is yours now
+
+sdrtop no longer hands a total to the driver and hopes. It reads **every gain
+element the device names, and every element's own range**, and places the gain
+itself.
+
+- **`↑` / `↓` move the whole chain**, filling the front stage first up to its
+  ceiling, then the next. Front-first is the arrangement with the best noise
+  figure. On the HackRF the difference is not subtle: what used to be a
+  non-monotonic mess is now `0/0 → 8/0 → 24/0 → 40/12 → 40/52 → 40/62`.
+- **`,` and `.` in the Command Rail** pick one element by name, and then `↑` / `↓`
+  move that one alone by its own step. Nothing is redistributed. This is also the
+  only way to reach a third gain element, and some radios have one.
+- **The GAIN card shows one bar per stage the radio actually has**, in the
+  driver's own order, with the driver's own names. Not a fixed LNA/VGA pair, which
+  was the HackRF's shape imposed on everything else.
+- **The config file names them**: `gain = "LNA=32,VGA=20"`, or a bare total if you
+  would rather let sdrtop place it. Old `lna_gain` / `vga_gain` files still load;
+  they are rewritten as one `gain` line the first time you quit.
+
+No device table anywhere in this. If the driver reports its elements, it works.
+
+### The timing bench measures the right thing
+
+There are two ways a radio hands samples over. A HackRF *pushes*: the driver calls
+you, and the question is whether you answered in time. A SoapySDR device *pulls*:
+you ask, and you wait. There is **no deadline to miss** on a pull backend, because
+a slow reader simply waits less.
+
+The bench had been grading pull traffic against a deadline that does not exist,
+which is why a perfectly healthy link read `POOR` with a permanent late-callback
+count. It now measures the opposite quantity: how much of each read cycle went on
+working rather than waiting. Low is healthy. Near 100 % means the slack is gone,
+which is the same warning a late callback gives on the other transport.
+
+The verdict names its reason too, so a clock that is slightly off reads as
+`Sample clock is off the configured rate / 182 ppm out, nothing lost` instead of
+sharing a grade with a link that is genuinely dropping samples. Those two used to
+look identical, and they are not remotely the same problem.
+
+### The RF bench came back
+
+It had gone almost blank on anything that wasn't a HackRF, because the whole panel
+was gated on knowing the chain's noise figures stage by stage. But only two of its
+blocks need that. The level line-up, the staging advice and the verdict are
+**measured**, not modelled, and they work on any radio that names its stages.
+
+So the gate moved from the panel to the two blocks that actually need it. Those
+two now say which fact is missing and why, and everything else stays. Four lines
+on a twenty row panel became a full bench with a level line-up you can check by
+hand.
+
+### And something new: measure it instead of modelling it
+
+The bench can now **run a measurement** rather than only report one. Press `K` in
+RF Diagnostics and sdrtop walks the front gain stage across its settings, waits at
+each for the picture to settle, and watches what the noise floor does.
+
+What comes back is the **knee**: the lowest gain at which your radio's front end,
+rather than its converter, decides how faint a signal you can hear. Below it you
+are throwing sensitivity away. Above it you are only spending headroom. Six
+settings, about five seconds.
+
+It is real, and it moves the way physics says it should. On my HackRF the knee sat
+at LNA 24 dB on a busy FM channel and at 32 dB on a quiet stretch of UHF, same
+afternoon, same antenna: a quieter band has less noise coming in, so it takes more
+gain before the front end clears the converter. That is why the block always names
+the frequency it measured at, and why a reading left on screen after you retune is
+telling you about somewhere else.
+
+It is **not** a noise figure, and the panel says so out loud. A noise figure needs
+a known source at the input, which sdrtop has no way to provide and no way to ask
+you for. On a HackRF the measured knee and the modelled Friis number sit next to
+each other, which is the point: they answer different questions, and where they
+disagree that is a finding rather than a bug.
+
+Stopping the sweep early reports nothing at all. Two points do define a line, and
+printing that line as the result of a measurement you interrupted would be the
+instrument answering a question it was not allowed to finish asking.
+
+---
+
+## 📡 Checkpoint 20: It talks to your radio now
 
 I own two radios. sdrtop supported two radios. You can see the problem.
 

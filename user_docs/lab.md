@@ -107,10 +107,13 @@ improves it. Each panel restates one face of that.
 
 - **Gain lineup**: the signal level after each stage (ANT, LNA, MIX, VGA, ADC),
   with each stage's gain in the middle column. You can watch the signal climb by
-  each stage's gain and land at the measured ADC level.
-- **Gain staging**: LNA `n / 40` and VGA `n / 62` gradient bars, each with a `┊`
-  tick marking the *optimal* target. The `opt` line reads whether you're at the
-  optimum or points at the LNA/VGA the staging wants.
+  each stage's gain and land at the measured ADC level. On a radio sdrtop has no
+  noise model for, the stages are the ones the driver names, with the gains they
+  are actually set to.
+- **Gain staging**: one gradient bar per gain stage the device has, each `n / max`
+  against that stage's own ceiling, each with a `┊` tick marking the *optimal*
+  target. The `opt` line reads whether you're at the optimum, or names the value
+  it wants for every stage.
 - **Noise figure**: each stage's own NF as a bar, and the Friis **system total**
   beneath. The system total can sit *below* the worst single stage, because the
   LNA's gain suppresses the noise of everything after it. That's the whole point
@@ -119,8 +122,17 @@ improves it. Each panel restates one face of that.
   `−174 dBm/Hz + 10·log₁₀(BW) + NF`) plus a noise-floor trend sparkline with its
   ±dB/60s spread. Narrowing the BB filter or lowering the NF improves (lowers) the
   MDS.
+- **Noise step**: what the `K` measurement found, when you've run one. Described
+  [below](#the-noise-step-k).
 - **Verdict**: a plain-language read of the staging (`WELL-STAGED`, `HOT`,
   `CLIPPING`, `UNDER-UTILISED` and so on) with the action chips beside it.
+
+**Two of those blocks need numbers no driver reports**, and only those two. Noise
+figure and MDS are computed from each stage's own noise figure, which sdrtop
+knows for the HackRF and for nothing else. On any other radio those two blocks are
+replaced by one line saying which fact is missing and why, and the rest of the
+bench, which is measured rather than modelled, stays exactly as it is. The bench
+used to go blank instead: three lines on a twenty row panel.
 
 ### Gain-Staging Level Diagram
 
@@ -160,6 +172,63 @@ Focus RF Diagnostics with `d`, then:
 - **`⎵` or `F`, freeze.** Holds the histogram and level diagram on a snapshot so
   you can study them while RX keeps running. Both panels show `[FRZ]` in their
   title. Press again to go live.
+
+### The noise step (`K`)
+
+Everything else on this bench reports. This one **measures**.
+
+Press `K` with RX running and sdrtop walks the front gain stage across its
+settings, waits at each for the display to settle, averages the noise floor
+there, and moves on. Six settings takes about five seconds on a HackRF. While it
+runs the block shows which stage it is on and how far along it is.
+
+What comes back looks like this:
+
+```
+├╴ NOISE STEP ╶────────────────── measured at 92.800 MHz
+ knee  LNA 24 dB and up                       0.80 dB/dB
+ floor ▁▁▂▃▅█                             -88 → -66 dBFS
+
+ Under 24 dB the converter sets the floor, not the RF.
+ Not a noise figure: that needs a known source.
+```
+
+**The knee is the number to read.** Below it, adding gain barely moves the noise
+floor, because what you are looking at is the converter's own noise and you are
+simply not driving it hard enough. Above it, every dB of gain lifts the floor by
+about a dB, because now you are amplifying real noise from the front end and the
+antenna along with everything else. The knee is the boundary: the lowest gain at
+which your radio, and not its ADC, decides how faint a signal you can hear.
+
+Under the knee you are throwing sensitivity away. Over it you are only spending
+headroom. That is the whole of it.
+
+The figure beside the knee is the slope measured **above** it. It should be near
+1.0. If it is well under, the front end has not fully taken over even at the top
+of the stage's range.
+
+**The frequency in the heading is part of the reading.** The knee moves with the
+band, because a quiet band has less noise coming in and needs more gain before
+the front end clears the converter. On one HackRF it sat at LNA 24 dB on a busy
+FM channel and at 32 dB on a quiet stretch of UHF, on the same afternoon and the
+same antenna. So the block always names where the measurement was taken, and a
+reading left on screen after you retune is telling you about somewhere else.
+
+**What it is not.** It is not a noise figure. A noise figure says how much noise
+your receiver adds in absolute terms, and getting one means putting a *known*
+source at the input, which sdrtop has no way to do and no way to ask you for. The
+knee tells you where the converter stops limiting you. It says nothing about how
+good the front end is once it takes over. The two sit next to each other on the
+panel on a HackRF precisely so you can read the modelled figure and the measured
+knee as the different things they are.
+
+Stopping early with `K` reports nothing at all. Two points do define a line, and
+printing that line as the result of a measurement you interrupted would be the
+instrument answering a question it was not allowed to finish asking.
+
+However you leave the sweep, by finishing, by stopping it, by stopping RX or by
+quitting sdrtop, the stage goes back where it was. Quitting mid-sweep also saves
+the gain you chose rather than the step it happened to be parked on.
 
 ---
 
@@ -493,30 +562,54 @@ off centre with `←` / `→`.
 ## Timing Bench · *Lab Timing (`Lab 3`)*
 
 The question no other bench can answer: is your computer keeping up with the radio
-in real time? The radio ships samples in steady USB bursts, one callback at a
-time, and your machine has to catch every one on schedule or the buffer backs up
-and samples drop.
+in real time? Samples arrive in steady USB bursts, and your machine has to keep
+taking them or the buffer backs up and samples drop.
+
+**There are two ways a radio hands samples over, and this bench measures them
+differently.** A HackRF or an RTL-SDR *pushes*: the driver calls you when a block
+is ready, and the useful question is whether your code answered in time, so the
+panel talks about callbacks and deadlines. A SoapySDR device *pulls*: your code
+asks for a block and waits until there is one, and there is no deadline to miss,
+because a slow reader just waits less. The useful question there is the opposite
+one, how much of each cycle was spent **waiting** rather than working, and that is
+what the panel measures instead. The words on screen change with the transport.
+
+Getting this wrong is what made an entirely healthy SoapySDR link report a
+permanent USB overload: it was being marked late against a deadline that does not
+exist on a pull backend.
 
 ### Timing Diagnostics *(focus `t`)*
 
-- **Callback timing**: the measured callback period against the period expected at
-  your sample rate, the throughput that implies, and the jitter around it.
-- **Deadline budget**: per-callback deviation percentiles (p95, p99, peak) drawn
-  against a deadline that scales with the sample rate, because a callback that is
-  200 µs late is fine at 2 Msps and fatal at 20. A late-callback count sits beside
-  it, and a plain verdict (Excellent, Good, Marginal, Poor) sums it up.
+- **Callback timing** (push) or **read timing** (pull): the measured period against
+  the period expected at your sample rate, the throughput that implies, and the
+  jitter around it.
+- **Deadline budget** (push): per-callback deviation percentiles (p95, p99, peak)
+  drawn against a deadline that scales with the sample rate, because a callback
+  that is 200 µs late is fine at 2 Msps and fatal at 20. A late-callback count
+  sits beside it.
+- **Read occupancy** (pull): the share of the read loop spent working rather than
+  waiting. Low is healthy and means there is slack. Climbing toward 100 % means
+  the reader has stopped having spare time, and the driver's buffer is about to
+  start filling, which is the same warning a late callback gives on the other
+  transport.
 - **Sample rate**: host clock drift in ppm and the drift of the measured rate
   against the configured one. This is clock integrity rather than throughput: a
   steady few ppm is a crystal being a crystal, a wandering figure is not.
+- **The verdict** names its own reason rather than just a grade, so
+  `Sample clock is off the configured rate / 182 ppm out, nothing lost` is
+  distinguishable at a glance from `Overrun, samples lost`. A clock that is a
+  little off and a link that is dropping samples used to read the same.
 
 `R` resets the session jitter peak, `C` clears the history.
 
-### Callback Interval Strip Chart
+### Interval Strip Chart
 
-Every point is one real USB callback, plotted by how far its arrival drifted from
-the expected interval. Late deliveries climb, early ones dip, and anything past the
+Every point is one real block, plotted by how far its arrival drifted from the
+expected interval. Late deliveries climb, early ones dip, and anything past the
 deadline band gets tagged. A host hiccup becomes something you watch happen rather
-than something you infer from a counter afterwards.
+than something you infer from a counter afterwards. The panel is titled
+**Callback Interval** or **Read Interval** to match the transport, and so is its
+caption.
 
 This is the panel to have open when you suspect the problem is your computer and
 not your radio. A scheduler stall, a CPU frequency step, another process waking up

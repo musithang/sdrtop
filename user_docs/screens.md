@@ -79,15 +79,20 @@ to its right. From top to bottom:
   with a little activity pip when that frequency has a signal on screen right now.
 - **SIGNAL**: SNR · PWR · NF · SAT, each as a braille **oscilloscope trace** of
   its recent history beside the live value and a trend arrow.
-- **GAIN**: AMP, LNA and VGA as ⅛-block bars, plus total gain and clip headroom.
-  The Bench card's CHAIN verdict reads that headroom: "optimal" while the peak
-  sits in the window the auto-gain also leaves alone, "hot" above it, "low" when
-  there is a lot of gain going unused, and "clipping" once samples are actually
-  hitting the rails.
+- **GAIN**: the front-end boost, then **one ⅛-block bar per gain stage the radio
+  actually has**, named the way the driver names them, then the total and the
+  clip headroom. Not a fixed LNA/VGA pair: a radio with three gain elements gets
+  three rows, and a radio with one gets one. The Bench card's CHAIN verdict reads
+  that headroom: "optimal" while the peak sits in the window the auto-gain also
+  leaves alone, "hot" above it, "low" when there is a lot of gain going unused,
+  and "clipping" once samples are actually hitting the rails.
 - **STREAM**: drops, buffer fill, USB throughput, and a one-line log foot.
 
 Press `c` to focus the rail: `←`/`→` tune, `1` `2` `3` recall, `M` save, `L` for
-the full log overlay.
+the full log overlay, and `,` / `.` to pick one gain stage for the `↑`/`↓` keys.
+With a stage picked its name lights up in the GAIN card and the arrows move that
+stage alone, by its own step, leaving the others where they are. Step past either
+end of the list and you are back to driving the whole chain.
 
 ### Spectrum
 
@@ -215,13 +220,15 @@ Three views of the same quadrature question, from three directions.
 
 Whether your computer is keeping up with the radio in real time.
 
-- **Timing Diagnostics** *(left, focus `t`)*: measured versus expected callback
-  period, host clock drift in ppm, jitter, deviation percentiles against a
-  deadline budget that scales with the sample rate, and a verdict.
-- **Callback Interval Strip Chart** *(centre)*: every point is one real USB
-  callback, plotted by how far its arrival drifted from the expected interval.
-  Late deliveries climb, early ones dip. A host hiccup is something you watch
-  happen rather than infer.
+- **Timing Diagnostics** *(left, focus `t`)*: measured versus expected block
+  period, host clock drift in ppm, jitter, and a verdict that names its own
+  reason. On a radio that pushes blocks at you (HackRF, RTL-SDR) it grades
+  deviation percentiles against a deadline budget that scales with the sample
+  rate; on one you pull from (SoapySDR) there is no deadline to miss, so it
+  measures how much of the read loop went on waiting instead.
+- **Interval Strip Chart** *(centre)*: every point is one real block, plotted by
+  how far its arrival drifted from the expected interval. Late deliveries climb,
+  early ones dip. A host hiccup is something you watch happen rather than infer.
 - **Hardware Vitals** *(right, focus `v`)*: drops, ADC saturation, CPU and RAM as
   60-second trends, USB errors, configured versus measured sample rate, buffer
   fill, and uptime. Every one with a sparkline.
@@ -326,7 +333,7 @@ screen.
 |-----|--------|--------------|
 | `1` | `lab_iq` | IQ diagnostics · constellation · image scope |
 | `2` | `lab_rf` | RF diagnostics · level diagram · ADC loading |
-| `3` | `lab_timing` | Timing diagnostics · callback strip chart · hardware vitals |
+| `3` | `lab_timing` | Timing diagnostics · interval strip chart · hardware vitals |
 | `4` | `lab_signal` | Signal characterization · spectrum/waterfall · FM demod |
 
 **Sweep**

@@ -206,10 +206,12 @@ quirks. If yours behaves oddly in a way `rtl_test` doesn't explain,
 
 1. **Lower the sample rate.** `s`, then a smaller number. If you're at 20, try 5.
    This is the single most effective fix and usually the correct one.
-2. **Check which end is at fault.** Lab Timing (`Lab 3`) answers this directly. If the
-   **Callback Interval Strip Chart** shows late callbacks clustered around
-   something, your host is stalling. If the callbacks are punctual but the ring
-   buffer still fills, the bus is the limit.
+2. **Check which end is at fault.** Lab Timing (`Lab 3`) answers this directly. If
+   the **Interval Strip Chart** shows late arrivals clustered around something,
+   your host is stalling. If they are punctual but the ring buffer still fills,
+   the bus is the limit. On a SoapySDR device there is no lateness to see, so
+   read the **occupancy** figure instead: near 100 % means the read loop has run
+   out of slack, which is the same warning.
 3. **Change the cable, port or hub.** Long cables and cheap hubs cause this
    constantly. Straight into the machine, short cable.
 4. **Check CPU.** If sdrtop's own CPU is high on a modern multi-core machine,

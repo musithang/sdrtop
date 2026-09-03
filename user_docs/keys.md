@@ -97,7 +97,7 @@ whole session, because the alternate screen has no room for a stack trace. See
 
 | Key | What it does |
 |-----|-------------|
-| `↑` / `↓` | Primary gain up or down: HackRF LNA (±8 dB) / RTL-SDR tuner (next table step) |
+| `↑` / `↓` | Gain up or down: HackRF LNA (±8 dB) / RTL-SDR tuner (next table step) / SoapySDR the whole chain |
 | `[` / `]` | VGA gain up or down by 2 dB (HackRF only) |
 
 On a **HackRF**, LNA (Low Noise Amplifier) is the first gain stage, how much you
@@ -109,11 +109,18 @@ On an **RTL-SDR** there's a single tuner gain that steps through a fixed table o
 values (the `↑`/`↓` keys walk it), and no VGA, so `[`/`]` simply do nothing.
 Instead of a VGA you have tuner **AGC**, toggled with `a`.
 
-On a device reached through [SoapySDR](hardware.md#soapysdr-the-honest-version)
-there is **one overall gain** on `↑`/`↓`, across whatever range the driver
-reports, and `[`/`]` sit out. Whether `a` exists at all depends on the driver: if
-it reports no automatic gain mode, the key is not offered and the panels leave
-the row out rather than showing you an `OFF` you cannot change.
+On a device reached through [SoapySDR](hardware.md#soapysdr-the-honest-version),
+`↑`/`↓` move the **whole chain**, and sdrtop decides where the gain goes: it
+fills the front stage first, up to its ceiling, then the next one. That is the
+arrangement with the best noise figure, and it is not the one most drivers pick
+for you. Whether `a` exists at all still depends on the driver: if it reports no
+automatic gain mode, the key is not offered and the panels leave the row out
+rather than showing you an `OFF` you cannot change.
+
+**To set one stage on its own, on any device**, focus the Command Rail with `c`,
+pick the stage with `,` and `.`, then use `↑`/`↓`. That works on a radio with
+three gain elements as well as on a HackRF, and it is the only way to reach the
+third one. See [Command Rail focus mode](#command-rail-focus-mode).
 
 Either way: if the spectrum is maxed out (everything near 0 dBFS), turn it down.
 If it's all noise at the bottom, try turning it up.
@@ -196,6 +203,8 @@ Press `c` to drive the Command Rail, the instrument rail in the default
 | Key | What it does |
 |-----|-------------|
 | `←` / `→` | Tune the center frequency by one step (auto-switches the mode strip to Hunt) |
+| `,` / `.` | Pick which gain stage the arrows drive, or step past the ends for the whole chain |
+| `↑` / `↓` | Move the picked stage by its own step. With no stage picked, the usual gain keys |
 | `1` / `2` / `3` | Jump to recall slot 1, 2 or 3 |
 | `M` | Save the current tuning to the next recall slot |
 | `Tab` | Cycle the HUNT · MONITOR · BENCH mode manually (otherwise it auto-follows your actions) |
@@ -207,6 +216,22 @@ focused panel is offered every key first, and the rail claims those three. The
 rest of the digits fall through as usual, so `4` and `5` still switch layout from
 inside rail focus. `Esc` gives the digits back.
 
+### Setting one stage at a time
+
+`,` and `.` walk the gain rows in the rail, in the order your device reports
+them, and the selected row's name lights up. `↑` and `↓` then move **that stage
+alone**, by that stage's own step: 8 dB on a HackRF LNA, 2 dB on its VGA, one
+table entry on an RTL-SDR tuner, and whatever the driver says everywhere else.
+Nothing is redistributed. That is the entire point of the mode.
+
+"The whole chain" is a real stop on the ring rather than a thing you have to
+remember `Esc` for. Keep pressing `.` past the last stage and the selection comes
+back off, and `↑`/`↓` go back to being the ordinary gain keys.
+
+Leaving focus with `Esc` also puts the selection back to the whole chain. It does
+**not** put the gains back: undoing a setting you deliberately made, on the way
+out, would be the surprising half of that.
+
 ---
 
 ## Lab panel focus modes
@@ -215,7 +240,7 @@ inside rail focus. `Esc` gives the digits back.
 |-----|-------|----------------|--------------|
 | `b` | Measurement banner | every lab preset | `↑↓` reference level · `[ ]` trace averaging · `C` capture or clear the reference trace · `R` clear the reference level |
 | `i` | **I**Q Diagnostics | `Lab 1` | `D` DC-block · `C` auto-cal · `F` freeze the constellation · `M` pin the carrier/image markers |
-| `d` | RF **D**iagnostics | `Lab 2` | `A` auto-gain · `⎵` or `F` freeze the histogram and level diagram |
+| `d` | RF **D**iagnostics | `Lab 2` | `A` auto-gain · `K` measure the noise step · `⎵` or `F` freeze the histogram and level diagram |
 | `t` | **T**iming Diagnostics | `Lab 3` | `R` reset the session jitter peak · `C` clear the jitter and throughput history |
 | `v` | Hardware **V**itals | `Lab 3` | `R` reset the session drop counter · `C` clear the trend sparklines |
 | `x` | Signal Characterization | `Lab 4` | `C` log a snapshot of the modulation, SNR, occupied bandwidth and ACPR |
@@ -276,6 +301,27 @@ optimum, pressing `A` again latches a **continuous auto-track** that re-nudges t
 gain as the level drifts. It drives the same global gain controls you use by hand
 (`↑↓`, `[ ]`, `a`, `r`), so touching any of them drops the latch immediately. It
 never fights a manual tweak.
+
+### The noise step (`K` in RF Diagnostics)
+
+`K` runs a short measurement instead of reporting one. sdrtop walks the front
+gain stage across its settings, waits at each for the display to settle, and
+records what the noise floor did. Six settings takes about five seconds on a
+HackRF.
+
+What comes back is the **knee**: the lowest gain from which the noise floor
+follows the gain, which is the lowest gain at which your radio's front end, and
+not its converter, decides how faint a signal you can hear. Below the knee you
+are throwing sensitivity away. Above it you are only spending headroom.
+
+It needs RX running, and it takes the chain over while it runs: the auto-track
+latch drops, because auto-gain exists to undo exactly what the sweep is doing.
+Press `K` again to stop early. However you leave it, by finishing, by stopping,
+by stopping RX or by quitting the app, the stage goes back where it was. Stopping
+early reports nothing at all: an interrupted measurement has no answer.
+
+See [the RF bench](lab.md#the-noise-step-k) for what the reading says and,
+just as importantly, what it does not.
 
 ---
 

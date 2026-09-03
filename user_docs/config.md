@@ -42,8 +42,7 @@ rather than treated as an error.
 [radio]
 frequency_hz = 92800000    # tuned center frequency, in Hz
 sample_rate  = 2000000.0   # samples/sec. HackRF 2–20 M · RTL-SDR 0.9–3.2 M
-lna_gain     = 24          # HackRF LNA (0–40 dB, step 8) / RTL-SDR tuner gain
-vga_gain     = 30          # HackRF VGA (0–62 dB, step 2). Ignored on RTL-SDR
+gain         = "LNA=24,VGA=30"  # per stage, or a bare total like gain = 54
 amp_enabled  = false       # front end boost: HackRF RF amp / RTL-SDR tuner AGC
 recall_hz    = [0, 0, 0]   # Command Rail recall slots. 0 means empty
 
@@ -73,6 +72,46 @@ Markers and your own presets get their own blocks, described below.
 **`[radio]`** is the tuning state, and it's what `q` writes back. `recall_hz` holds
 the Command Rail's three recall slots, which you set with `M` in rail focus, so
 tuning memory lives with the radio rather than with the display.
+
+### The gain line
+
+`gain` takes either shape:
+
+```toml
+gain = "LNA=24,VGA=30"   # name each stage
+gain = 54                 # or give a total and let sdrtop place it
+```
+
+Names are the ones your device reports, matched without regard to case, and
+separated by commas or semicolons. Whitespace around them doesn't matter. A stage
+you don't name keeps whatever it already had, so `gain = "VGA=30"` is a legal
+thing to write and means "leave the front end alone".
+
+A **bare number** is the whole chain, and sdrtop spreads it the same way the `↑`
+key does: front stage first, up to its ceiling, then the next. That is on purpose.
+It means the file and the knob can't disagree about what "54 dB" looks like.
+
+Every value is snapped onto its stage's own grid. Ask a HackRF LNA for 30 and you
+get 32, because that stage moves in 8 dB steps and 30 isn't one of them.
+
+If you name a stage the radio doesn't have, sdrtop says so in the log and tells
+you which stages it does have. It does not quietly apply the number to the
+nearest-sounding one.
+
+Quitting always writes the named form, listing every stage the device has:
+
+```toml
+gain = "LNA=40,VGA=20"
+```
+
+**Upgrading from 0.4.x.** The old `lna_gain` and `vga_gain` fields still load,
+and still override the first and second stage respectively, so an existing config
+opens exactly where you left it. They are no longer written: the first time you
+quit, they are replaced by one `gain` line. Nothing to do, and nothing lost.
+
+They were replaced because they were a HackRF's shape imposed on everything else.
+A radio with three gain elements had no way to say so, and one with a stage named
+something other than LNA or VGA had to pretend.
 
 **`[display]`** is what the screen looks like. `waterfall_palette` and
 `spectrum_style` are the two you're most likely to want to set by hand, because
