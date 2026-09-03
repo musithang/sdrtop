@@ -96,6 +96,12 @@ impl App {
             } else {
                 m.push_log(board);
             }
+            // Anything the backend declined while opening. Both native paths
+            // have nothing to say; a SoapySDR device names any gain element
+            // whose range the driver described unusably.
+            for note in device.open_notes() {
+                m.push_log(note.clone());
+            }
             let names = [
                 "frequency",
                 "sample rate",

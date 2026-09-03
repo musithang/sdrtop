@@ -1210,19 +1210,32 @@ mod tests {
         let soapy = GainModel::Soapy {
             min_db: 0,
             max_db: 116,
-            elements: vec!["LNA".into(), "AMP".into(), "VGA".into()],
-            agc: false,
+            stages: vec![
+                crate::hardware::StageSpec {
+                    name: "LNA".into(),
+                    min_db: 0.0,
+                    max_db: 40.0,
+                    step_db: 8.0,
+                },
+                crate::hardware::StageSpec {
+                    name: "VGA".into(),
+                    min_db: 0.0,
+                    max_db: 62.0,
+                    step_db: 2.0,
+                },
+            ],
+            boost: None,
         };
         assert_eq!(
             rf_chain_str(&soapy, false, false),
-            "ANT\u{25B8}LNA\u{25B8}AMP\u{25B8}VGA\u{25B8}ADC"
+            "ANT\u{25B8}LNA\u{25B8}VGA\u{25B8}ADC"
         );
         // A driver that names none gets a question mark, not an invented stage.
         let mute = GainModel::Soapy {
             min_db: 0,
             max_db: 0,
-            elements: vec![],
-            agc: true,
+            stages: vec![],
+            boost: Some(crate::hardware::SoapyBoost::GainMode),
         };
         assert_eq!(rf_chain_str(&mute, false, false), "ANT\u{25B8}?\u{25B8}ADC");
     }
@@ -1236,8 +1249,8 @@ mod tests {
         let soapy = GainModel::Soapy {
             min_db: 0,
             max_db: 116,
-            elements: vec![],
-            agc: false,
+            stages: vec![],
+            boost: None,
         };
         assert!(rtl.no_cascade_reason().contains("single tuner"));
         assert!(!soapy.no_cascade_reason().contains("single tuner"));

@@ -142,8 +142,8 @@ mod tests {
         GainModel::Soapy {
             min_db: 0,
             max_db: 116,
-            elements: vec![],
-            agc: false,
+            stages: vec![],
+            boost: None,
         }
     }
 
@@ -157,7 +157,9 @@ mod tests {
             crate::ui::MicroGainPanel,
             48,
             18,
-            &crate::state::SdrMetrics::fixture().streaming().soapy(),
+            &crate::state::SdrMetrics::fixture()
+                .streaming()
+                .soapy_no_boost(),
         )
         .join("\n");
         assert!(

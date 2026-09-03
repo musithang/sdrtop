@@ -11,7 +11,7 @@ pub mod traits;
 pub use hackrf::{board_rev_name, compute_bb_filter_bw};
 pub use traits::{
     DeliveryModel, DeviceCapabilities, DeviceInfo, GainModel, RxContext, SampleFormat,
-    SampleGeometry, SdrDevice, SoftwareStack,
+    SampleGeometry, SdrDevice, SoapyBoost, SoftwareStack, StageSpec,
 };
 
 use std::sync::Arc;

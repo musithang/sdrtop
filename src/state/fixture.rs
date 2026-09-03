@@ -316,13 +316,53 @@ impl SdrMetrics {
     ///
     /// This exists because it is the only way to render every panel for a device
     /// nobody here owns, which is the whole testing strategy for this backend.
+    /// A SoapySDR device that offers **no** boost at all: no automatic gain
+    /// mode, and no two-position element to stand in for one.
+    ///
+    /// Kept apart from [`Self::soapy`] since G3, when the plain Soapy fixture
+    /// gained a boost. A `SoapyHackRF` reports `Supports AGC: NO` and yet has
+    /// `AMP [0, 14, 14]`, which is the same physical switch the native backend
+    /// drives, so it does have one. The panels still need a device that does
+    /// not, and that is this.
+    pub(crate) fn soapy_no_boost(mut self) -> Self {
+        self = self.soapy();
+        let mut caps = (*self.caps).clone();
+        if let crate::hardware::GainModel::Soapy { boost, .. } = &mut caps.gain {
+            *boost = None;
+        }
+        self.caps = Arc::new(caps);
+        self
+    }
+
     pub(crate) fn soapy(mut self) -> Self {
         let mut caps = (*self.caps).clone();
         caps.gain = crate::hardware::GainModel::Soapy {
             min_db: 0,
             max_db: 116,
-            elements: vec!["LNA".into(), "AMP".into(), "VGA".into()],
-            agc: false,
+            // The real SoapyHackRF answers: AMP is a switch and became the
+            // boost, so the stages are LNA and VGA.
+            stages: vec![
+                crate::hardware::StageSpec {
+                    name: "LNA".into(),
+                    min_db: 0.0,
+                    max_db: 40.0,
+                    step_db: 8.0,
+                },
+                crate::hardware::StageSpec {
+                    name: "VGA".into(),
+                    min_db: 0.0,
+                    max_db: 62.0,
+                    step_db: 2.0,
+                },
+            ],
+            boost: Some(crate::hardware::SoapyBoost::Element(
+                crate::hardware::StageSpec {
+                    name: "AMP".into(),
+                    min_db: 0.0,
+                    max_db: 14.0,
+                    step_db: 14.0,
+                },
+            )),
         };
         caps.friis_applicable = false;
         caps.has_bb_filter = false;

@@ -189,6 +189,22 @@ impl StageSpec {
     }
 }
 
+/// What a SoapySDR device offers as a front-end boost, if anything.
+///
+/// Two different mechanisms, and the distinction is the driver's, not ours. A
+/// HackRF through `SoapyHackRF` reports `Supports AGC: NO` and yet has an `AMP`
+/// element with exactly two positions, which is the same physical switch the
+/// native backend drives. Treating "no gain mode" as "no boost" cost that device
+/// its amp key.
+#[derive(Clone, Debug, PartialEq)]
+pub enum SoapyBoost {
+    /// `setGainMode`: the driver's own automatic gain control.
+    GainMode,
+    /// A two-position element, driven to one end or the other with
+    /// `setGainElement`.
+    Element(StageSpec),
+}
+
 /// The gain "shape" a device exposes - drives UI rendering and key bindings.
 #[derive(Clone, Debug)]
 pub enum GainModel {
@@ -197,26 +213,22 @@ pub enum GainModel {
     /// RTL-SDR: a single tuner gain restricted to a discrete table (whole dB),
     /// plus a tuner-AGC toggle.
     RtlSingle { gain_steps_db: Vec<u32> },
-    /// A SoapySDR device: one overall gain across the driver's own range, and
-    /// the element names for display only.
+    /// A SoapySDR device: the elements the driver named, each with its own
+    /// range and step, in the order `listGains` gave them.
     ///
-    /// Mapping named elements onto sdrtop's LNA / VGA / AMP is device-specific,
-    /// unverifiable without the device, and a wrong guess silently drives the
-    /// wrong stage. So 0.4.5 does not guess. See `dev_docs/soapy-design.md`,
-    /// decision 3.
+    /// The order is the driver's statement about its own chain. It is a
+    /// convention rather than a guarantee, and `SoapyHackRF` bends it by listing
+    /// LNA before AMP when the physical order is the reverse. It is still the
+    /// only statement available, and still better than the automatic
+    /// distribution `setGain` performs, which fills the VGA first.
     ///
-    /// `agc` is `hasGainMode`, and it is genuinely false on real hardware: a
-    /// HackRF through SoapyHackRF reports `Supports AGC: NO`, so the boost key
-    /// has nothing to toggle there.
-    ///
-    /// `elements` is display only for now: naming which stage is which is the
-    /// follow-up this release deliberately does not guess at.
+    /// `min_db` / `max_db` are the whole-chain range from `getGainRange`, kept
+    /// for the gauges until G5 derives them from the stages.
     Soapy {
         min_db: u32,
         max_db: u32,
-        #[cfg_attr(not(test), allow(dead_code))]
-        elements: Vec<String>,
-        agc: bool,
+        stages: Vec<StageSpec>,
+        boost: Option<SoapyBoost>,
     },
 }
 
@@ -258,10 +270,18 @@ impl GainModel {
 
     /// Label for the front-end-boost toggle (`amp_enabled`): HackRF's RF amp vs
     /// RTL-SDR's tuner AGC.
-    pub fn boost_label(&self) -> &'static str {
+    pub fn boost_label(&self) -> &str {
         match self {
             GainModel::HackRf => "AMP",
-            GainModel::RtlSingle { .. } | GainModel::Soapy { .. } => "AGC",
+            GainModel::RtlSingle { .. } => "AGC",
+            // The driver's own name for the switch, when the boost is one. A
+            // `SoapyHackRF` calls it AMP, which is what the native backend calls
+            // it too, so the same radio reads the same either way round.
+            GainModel::Soapy {
+                boost: Some(SoapyBoost::Element(s)),
+                ..
+            } => &s.name,
+            GainModel::Soapy { .. } => "AGC",
         }
     }
 
@@ -277,7 +297,11 @@ impl GainModel {
         match self {
             GainModel::HackRf => "LNA\u{25b8}MIX\u{25b8}VGA".to_string(),
             GainModel::RtlSingle { .. } => "TUNER".to_string(),
-            GainModel::Soapy { elements, .. } if !elements.is_empty() => elements.join("\u{25b8}"),
+            GainModel::Soapy { stages, .. } if !stages.is_empty() => stages
+                .iter()
+                .map(|s| s.name.as_str())
+                .collect::<Vec<_>>()
+                .join("\u{25b8}"),
             GainModel::Soapy { .. } => "?".to_string(),
         }
     }
@@ -307,7 +331,7 @@ impl GainModel {
     pub fn has_boost(&self) -> bool {
         match self {
             GainModel::HackRf | GainModel::RtlSingle { .. } => true,
-            GainModel::Soapy { agc, .. } => *agc,
+            GainModel::Soapy { boost, .. } => boost.is_some(),
         }
     }
 
@@ -485,6 +509,17 @@ pub trait SdrDevice: Send + Sync {
     }
     fn set_tuner_agc(&self, _on: bool) -> anyhow::Result<()> {
         Ok(())
+    }
+
+    /// Anything the backend refused or worked around while opening, for the
+    /// startup log.
+    ///
+    /// Empty for a backend that had nothing to say, which is both native ones.
+    /// It exists because a refusal made during `open` has no log to go to yet:
+    /// the app is built afterwards. `App::assemble` drains this, the same way
+    /// it drains the menu's warnings.
+    fn open_notes(&self) -> &[String] {
+        &[]
     }
 
     /// Cumulative microseconds the read loop has spent `(waiting, working)`,

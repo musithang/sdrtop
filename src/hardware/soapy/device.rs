@@ -32,6 +32,8 @@ pub struct SoapyDevice {
     /// and `caps` only kept what the name meant.
     native_format: String,
     streaming: super::stream::Streaming,
+    /// What `caps` declined to use, in words, for the startup log.
+    notes: Vec<String>,
 }
 
 // Safety: the same split the two native backends already rely on. The handle is
@@ -54,13 +56,14 @@ impl SoapyDevice {
 
         // Safety: `dev` is live from here until Drop.
         let answers = unsafe { ask(api, dev) };
-        let caps = match caps::capabilities(&answers) {
+        let built = match caps::capabilities(&answers) {
             Ok(c) => c,
             Err(why) => {
                 unsafe { api.unmake(dev) };
                 anyhow::bail!("SoapySDR device {args} cannot be used: {why}");
             }
         };
+        let caps = built.caps;
         let info = unsafe { describe(api, dev, args) };
 
         Ok(Self {
@@ -71,22 +74,38 @@ impl SoapyDevice {
             args: args.to_string(),
             native_format: answers.native_format,
             streaming: super::stream::Streaming::default(),
+            // `caps` refuses an element by name rather than silently keeping it.
+            // There is no log to say so to yet, so it is carried out to the
+            // startup sequence, which has one.
+            notes: built.notes,
         })
     }
 
-    /// Both boost keys land here. Which one the user pressed does not matter:
-    /// a Soapy device has one automatic gain mode, and `GainModel::boost_label`
-    /// already calls it AGC.
+    /// Both boost keys land here. Which one the user pressed does not matter;
+    /// what matters is which mechanism the driver actually has.
     ///
     /// Guarded rather than attempted. Calling `setGainMode` on a driver without
     /// one is an error return in the good case, and `SoapyHackRF` really does
     /// report `Supports AGC: NO`, so this is the common path and not the edge.
     fn set_boost(&self, on: bool) -> anyhow::Result<()> {
-        if !self.caps.gain.has_boost() {
+        let crate::hardware::GainModel::Soapy { boost, .. } = &self.caps.gain else {
             return Ok(());
+        };
+        match boost {
+            None => Ok(()),
+            Some(crate::hardware::SoapyBoost::GainMode) => {
+                unsafe { self.api.set_gain_mode(self.dev, on) }
+                    .map_err(|e| anyhow::anyhow!("{}: {e}", self.args))
+            }
+            // A two-position element: driven to one end or the other. Its own
+            // reported bounds decide which, rather than 0 and 14 from knowing
+            // what a HackRF is.
+            Some(crate::hardware::SoapyBoost::Element(s)) => {
+                let db = if on { s.max_db } else { s.min_db };
+                unsafe { self.api.set_gain_element(self.dev, &s.name, db) }
+                    .map_err(|e| anyhow::anyhow!("{}: {e}", self.args))
+            }
         }
-        unsafe { self.api.set_gain_mode(self.dev, on) }
-            .map_err(|e| anyhow::anyhow!("{}: {e}", self.args))
     }
 }
 
@@ -111,6 +130,10 @@ impl SdrDevice for SoapyDevice {
 
     fn is_streaming(&self) -> bool {
         self.streaming.is_active()
+    }
+
+    fn open_notes(&self) -> &[String] {
+        &self.notes
     }
 
     fn read_loop_us(&self) -> Option<(u64, u64)> {
@@ -187,7 +210,21 @@ unsafe fn ask(api: &SoapyApi, dev: *mut SoapySDRDevice) -> caps::DriverAnswers {
         freq_ranges: unsafe { api.freq_ranges(dev) },
         rate_ranges: unsafe { api.rate_ranges(dev) },
         gain_range: unsafe { api.gain_range(dev) },
-        gain_elements: unsafe { api.gain_elements(dev) },
+        // `listGains` names them; each name is then asked for its own range,
+        // which is where the step comes from. Order is preserved exactly: it is
+        // the driver's statement about its chain.
+        gain_elements: unsafe { api.gain_elements(dev) }
+            .into_iter()
+            .map(|name| {
+                let r = unsafe { api.gain_element_range(dev, &name) }.unwrap_or_default();
+                crate::hardware::StageSpec {
+                    name,
+                    min_db: r.minimum,
+                    max_db: r.maximum,
+                    step_db: r.step,
+                }
+            })
+            .collect(),
         has_gain_mode: unsafe { api.has_gain_mode(dev) },
         bandwidth_ranges: unsafe { api.bandwidth_ranges(dev) },
         native_format,
@@ -306,8 +343,8 @@ mod tests {
         let soapy = |min_db, max_db| GainModel::Soapy {
             min_db,
             max_db,
-            elements: vec![],
-            agc: false,
+            stages: vec![],
+            boost: None,
         };
         // SoapyHackRF: 0 to 116 dB.
         assert_eq!(soapy(0, 116).clamp_gains(40, 0).0, 40);

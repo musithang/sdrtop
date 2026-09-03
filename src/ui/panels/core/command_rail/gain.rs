@@ -182,7 +182,9 @@ mod tests {
             crate::ui::CommandRailPanel,
             34,
             40,
-            &crate::state::SdrMetrics::fixture().streaming().soapy(),
+            &crate::state::SdrMetrics::fixture()
+                .streaming()
+                .soapy_no_boost(),
         )
         .join("\n");
         assert!(!without.contains("AMP"), "{without}");

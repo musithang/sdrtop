@@ -934,7 +934,9 @@ mod tests {
             HeaderPanel,
             120,
             8,
-            &crate::state::SdrMetrics::fixture().streaming().soapy(),
+            &crate::state::SdrMetrics::fixture()
+                .streaming()
+                .soapy_no_boost(),
         )
         .join("\n");
         assert!(!soapy.contains("AGC"), "{soapy}");

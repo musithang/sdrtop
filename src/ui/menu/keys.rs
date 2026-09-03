@@ -287,8 +287,8 @@ mod tests {
             &GainModel::Soapy {
                 min_db: 0,
                 max_db: 116,
-                elements: vec![],
-                agc: false,
+                stages: vec![],
+                boost: None,
             },
             40,
             &theme,

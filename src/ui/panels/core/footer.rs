@@ -32,23 +32,33 @@ const NORMAL_ITEMS: &[&str] = &[
 ];
 
 /// Base normal-mode key hints, adapted to the device's gain model: HackRF shows
-/// LNA/VGA/AMP; a single-tuner device (RTL-SDR) shows one gain + AGC, no VGA.
+/// LNA/VGA/AMP; a single-tuner device (RTL-SDR) shows one gain, no VGA.
+///
+/// **The boost is named by the model, not by this list**, and is omitted for a
+/// device that has none. Both used to be hardcoded here: every single-gain
+/// device was offered `[A] AGC` whether or not it had anything to toggle, and a
+/// HackRF reached through SoapySDR ended up with `AMP OFF` in the gain block and
+/// `[A] AGC` in the footer, two names for one switch on one screen.
 fn base_normal_items(gm: &GainModel) -> Vec<String> {
-    if gm.is_single() {
-        vec![
-            "[Q] Quit".into(),
-            "[Space] RX".into(),
-            "[↑↓] Gain".into(),
-            "[A] AGC".into(),
-            "[F] Freq".into(),
-            "[S] Rate".into(),
-            "[R] Reset".into(),
-            "[Esc] Menu".into(),
-            "[Tab] Hide".into(),
-        ]
-    } else {
-        NORMAL_ITEMS.iter().map(|s| s.to_string()).collect()
+    if !gm.is_single() {
+        return NORMAL_ITEMS.iter().map(|s| s.to_string()).collect();
     }
+    let mut items: Vec<String> = vec!["[Q] Quit".into(), "[Space] RX".into(), "[↑↓] Gain".into()];
+    if gm.has_boost() {
+        items.push(format!("[A] {}", gm.boost_label()));
+    }
+    items.extend(
+        [
+            "[F] Freq",
+            "[S] Rate",
+            "[R] Reset",
+            "[Esc] Menu",
+            "[Tab] Hide",
+        ]
+        .iter()
+        .map(|s| s.to_string()),
+    );
+    items
 }
 
 /// Width (terminal columns) below which the preset name is shown in short form.
@@ -738,5 +748,53 @@ mod tests {
                 assert!(!item.starts_with("[0]"), "{preset}: {item}");
             }
         }
+    }
+
+    /// The footer names the boost the same way every other panel does, and
+    /// offers no key for a device that has none.
+    #[test]
+    fn the_boost_hint_is_named_by_the_model_and_omitted_when_absent() {
+        // A SoapySDR device whose boost is a two-position element: the driver's
+        // own name for it, not a generic AGC.
+        let amp = crate::hardware::GainModel::Soapy {
+            min_db: 0,
+            max_db: 116,
+            stages: vec![],
+            boost: Some(crate::hardware::SoapyBoost::Element(
+                crate::hardware::StageSpec {
+                    name: "AMP".into(),
+                    min_db: 0.0,
+                    max_db: 14.0,
+                    step_db: 14.0,
+                },
+            )),
+        };
+        let items = base_normal_items(&amp).join(" ");
+        assert!(items.contains("[A] AMP"), "{items}");
+        assert!(!items.contains("AGC"), "two names for one switch: {items}");
+
+        // An automatic gain mode really is an AGC.
+        let agc = crate::hardware::GainModel::Soapy {
+            min_db: 0,
+            max_db: 0,
+            stages: vec![],
+            boost: Some(crate::hardware::SoapyBoost::GainMode),
+        };
+        assert!(base_normal_items(&agc).join(" ").contains("[A] AGC"));
+
+        // And a device with neither is offered no key at all, rather than one
+        // that does nothing.
+        let none = crate::hardware::GainModel::Soapy {
+            min_db: 0,
+            max_db: 45,
+            stages: vec![],
+            boost: None,
+        };
+        let items = base_normal_items(&none).join(" ");
+        assert!(
+            !items.contains("[A]"),
+            "offered a key it cannot use: {items}"
+        );
+        assert!(items.contains("[F] Freq"), "and kept the rest: {items}");
     }
 }
