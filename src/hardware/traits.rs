@@ -192,6 +192,48 @@ impl StageSpec {
         self.positions() == Some(1)
     }
 
+    /// The largest legal value **not above** `db`.
+    ///
+    /// The distribution needs this rather than [`Self::snap`]: rounding to the
+    /// nearest can round up, and a stage that rounds up has spent gain the
+    /// caller did not ask for. Flooring keeps the running total at or under the
+    /// request, which is what makes the knob monotonic.
+    pub fn snap_down(&self, db: f64) -> f64 {
+        if !self.table.is_empty() {
+            let want = if db.is_finite() {
+                db
+            } else {
+                f64::NEG_INFINITY
+            };
+            // Largest entry at or below, or the smallest entry if none is.
+            let mut best: Option<f64> = None;
+            let mut lowest = f64::INFINITY;
+            for &v in &self.table {
+                lowest = lowest.min(v);
+                if v <= want && best.is_none_or(|b| v > b) {
+                    best = Some(v);
+                }
+            }
+            return best.unwrap_or(lowest);
+        }
+        if !self.is_usable() {
+            return if self.min_db.is_finite() {
+                self.min_db
+            } else {
+                0.0
+            };
+        }
+        if !db.is_finite() {
+            return self.min_db;
+        }
+        let v = db.clamp(self.min_db, self.max_db);
+        if self.step_db <= 0.0 {
+            return v;
+        }
+        let steps = ((v - self.min_db) / self.step_db).floor();
+        (self.min_db + steps * self.step_db).clamp(self.min_db, self.max_db)
+    }
+
     /// The nearest legal value to `db`.
     ///
     /// Total by construction: a driver that reports nonsense gets the one value
