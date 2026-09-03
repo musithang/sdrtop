@@ -35,14 +35,15 @@ pub(super) struct Drained {
     /// a different rate is an average of two regimes, and would report the blend
     /// as a clock fault for the length of the baseline.
     pub config_sample_rate: f64,
-    /// This window's length and byte count, for the task's rate baseline.
+    /// Bytes this window, and when its **last block** arrived.
     ///
-    /// Handed out rather than turned into a sample rate here: the sample rate is
-    /// measured over tens of seconds (see [`RateBaseline`](super::metrics)) and
-    /// the accumulator that does it is task local, so it has no business being
-    /// touched from inside the lock.
-    pub elapsed_us: u64,
+    /// The pair goes to the task's rate tracker, which measures one window from
+    /// the previous window's last block to this one's. Timing between poll
+    /// instants instead would divide an exact whole-block byte count by an
+    /// interval that starts and ends wherever the poll happened to fall, and
+    /// that mismatch is one block: 437 ppm over 30 s on a HackRF.
     pub bytes: u64,
+    pub last_block_at: Option<Instant>,
 }
 
 /// Enter the lock, take everything this window produced, reset the accumulators,
@@ -98,8 +99,8 @@ pub(super) fn drain(
         jitter_sum_us: m.acc.jitter_sum_us,
         jitter_sq_sum: m.acc.jitter_sq_sum,
         jitter_count: m.acc.jitter_count,
-        elapsed_us,
         bytes,
+        last_block_at: m.acc.last_callback,
         config_sample_rate: m.radio.config_sample_rate,
     };
     m.acc.drops = 0;

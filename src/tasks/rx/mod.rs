@@ -57,7 +57,7 @@ pub fn spawn_rx_task(
         let mut throughput = Throughput::default();
         // Task local: the sample-rate baseline is neither drawn nor shared, so it
         // stays out of the per-frame clone of SdrMetrics.
-        let mut rate = metrics::RateBaseline::default();
+        let mut rate = metrics::RateTracker::default();
         // Last reading of the pull backend's cumulative read-loop clock, so each
         // poll reports this window rather than the whole session.
         let mut last_loop_us: Option<(u64, u64)> = None;
@@ -88,7 +88,7 @@ pub fn spawn_rx_task(
                 rate.reset();
                 throughput.reset();
             }
-            rate.push(drained.elapsed_us, drained.bytes);
+            rate.push(drained.last_block_at, drained.bytes);
 
             let computed = Computed {
                 iq: metrics::iq_metrics(

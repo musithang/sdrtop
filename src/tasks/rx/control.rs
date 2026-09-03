@@ -20,7 +20,7 @@ use crate::hardware::{RxContext, SdrDevice};
 // latch is happy to hold.
 use crate::state::{SdrMetrics, ADC_COMFORT_DBFS as AUTOGAIN_COMFORT_DBFS};
 
-use super::metrics::RateBaseline;
+use super::metrics::RateTracker;
 use super::publish::Throughput;
 
 /// Notice that the radio stopped streaming without being asked, and say so.
@@ -53,7 +53,7 @@ pub(super) fn apply_rx_request(
     device: &Arc<dyn SdrDevice>,
     rx_ctx: &Arc<RxContext>,
     tp: &mut Throughput,
-    rate: &mut RateBaseline,
+    rate: &mut RateTracker,
     rx_enabled: bool,
     hw_rx_active: bool,
 ) -> bool {

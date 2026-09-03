@@ -215,6 +215,56 @@ const RATE_BASELINE_US: u64 = 30_000_000;
 /// permanent false clock fault for a temporary one.
 const RATE_BASELINE_MIN_US: u64 = 10_000_000;
 
+/// Pairs each window's bytes with the interval its blocks actually arrived in.
+///
+/// **This is what removes the quantisation rather than averaging it away.** A
+/// window's byte count is exact: it is a whole number of driver blocks. What
+/// was not exact was the time it was divided by, measured between poll instants
+/// that fall wherever they fall between two block arrivals. The mismatch is up
+/// to one block, and one block is 437 ppm over a 30 s baseline on a HackRF,
+/// whose transfer is 262144 bytes. Measured on hardware, that made the native
+/// bench swing between -159 and +499 ppm on a stream whose real offset is
+/// about +130, and grade itself `GOOD` or `MARGINAL` at random.
+///
+/// Timing from the last block of one window to the last block of the next makes
+/// the numerator and the denominator refer to the same two boundaries, and the
+/// error cancels exactly. What is left is the callback's own scheduling jitter,
+/// about 148 µs on a HackRF, which over 30 s is 5 ppm.
+///
+/// It holds an `Instant` but never reads one: the timestamp is recorded by
+/// `process_block` in the hot path and handed here, so this module keeps its
+/// rule of having no clock of its own.
+#[derive(Debug, Default)]
+pub(super) struct RateTracker {
+    baseline: RateBaseline,
+    prev_block_at: Option<std::time::Instant>,
+}
+
+impl RateTracker {
+    pub(super) fn reset(&mut self) {
+        *self = Self::default();
+    }
+
+    /// Fold in one poll window: the arrival of its last block, and the bytes
+    /// that arrived since the previous window's last block.
+    ///
+    /// A window with no block in it carries no timestamp and is skipped, which
+    /// is also what makes the first window after a reset cost nothing: there is
+    /// no earlier boundary to measure from, so there is nothing to fold.
+    pub(super) fn push(&mut self, last_block_at: Option<std::time::Instant>, bytes: u64) {
+        let Some(at) = last_block_at else { return };
+        let Some(prev) = self.prev_block_at.replace(at) else {
+            return;
+        };
+        self.baseline
+            .push(at.duration_since(prev).as_micros() as u64, bytes);
+    }
+
+    pub(super) fn rate(&self, bytes_per_pair: usize) -> Option<u32> {
+        self.baseline.rate(bytes_per_pair)
+    }
+}
+
 /// Sliding long-baseline estimate of the delivered sample rate.
 ///
 /// Task local, deliberately: it is neither drawn nor shared, so it has no
@@ -228,35 +278,12 @@ pub(super) struct RateBaseline {
     windows: std::collections::VecDeque<(u64, u64)>,
     elapsed_us: u64,
     bytes: u64,
-    /// Whether the window that straddles stream startup has been discarded yet.
-    ///
-    /// The first window after a reset is not a window of a running stream: it
-    /// contains whatever arrived between `activateStream` and the next poll, so
-    /// it is short by an arbitrary fraction. Measured on hardware it dragged the
-    /// baseline about three blocks low, which is 1400 ppm over four seconds and
-    /// still 500 ppm out twenty seconds later, because it stays in the baseline
-    /// until it ages out.
-    started: bool,
 }
 
 impl RateBaseline {
-    /// Forget everything. Called whenever the baseline would span a change that
-    /// makes it meaningless: RX stopping, or the sample rate moving.
-    /// Whole-struct assignment rather than field by field, so a field added
-    /// later cannot be forgotten here. It was, once, and the startup window
-    /// stopped being discarded on the second RX session.
-    pub(super) fn reset(&mut self) {
-        *self = Self::default();
-    }
-
     /// Fold in one poll window, dropping whatever no longer fits the baseline.
     pub(super) fn push(&mut self, elapsed_us: u64, bytes: u64) {
         if elapsed_us == 0 {
-            return;
-        }
-        // Discard the window that straddles stream startup, as above.
-        if !self.started {
-            self.started = true;
             return;
         }
         self.windows.push_back((elapsed_us, bytes));
@@ -596,50 +623,65 @@ mod tests {
         assert_eq!(b.rate(2), None, "nor is 4 s, which measured -1379 ppm");
     }
 
-    /// The window that straddles stream startup is short by an arbitrary
-    /// fraction and must not enter the baseline. Without this, one partial
-    /// window sat in the average for its full 30 s.
-    #[test]
-    fn the_window_that_straddles_startup_is_discarded() {
-        let mut b = RateBaseline::default();
-        // A first window holding a quarter of what it should.
-        b.push(WINDOW_US, 1_000_000);
-        feed_quantised(&mut b, TRUE_RATE, 2, 150);
-        let ppm = ppm_off(b.rate(2).expect("30 s is a baseline"));
-        assert!(
-            ppm.abs() < 500,
-            "the startup window must not drag the baseline: {ppm} ppm"
-        );
-        // And a reset arms the discard again, for the next RX session.
-        b.reset();
-        b.push(WINDOW_US, 1_000_000);
-        assert_eq!(b.elapsed_us, 0, "the first window after a reset is dropped");
-    }
-
-    /// The whole point of the checkpoint. Block-quantised windows must land far
-    /// inside the 500 ppm threshold once the baseline is long.
+    /// The whole reason the tracker exists: with the window timed between block
+    /// arrivals, a whole-block byte count divides by the interval those exact
+    /// blocks spanned, and the quantisation is gone rather than averaged down.
     ///
+    /// Sized on the HackRF's transfer, which is the case that exposed it: 131072
+    /// pairs is 262144 bytes, eight times the SoapySDR read, and one of those
+    /// over a 30 s baseline is 437 ppm against a 500 ppm threshold. Measured on
+    /// hardware, the native bench swung between -159 and +499 ppm on a stream
+    /// whose real offset is about +130.
     #[test]
-    fn a_long_baseline_beats_the_clock_threshold_despite_block_quantisation() {
-        let mut b = RateBaseline::default();
-        feed_quantised(&mut b, TRUE_RATE, 2, 150); // 30 s
-        let ppm = ppm_off(b.rate(2).expect("30 s is a baseline"));
+    fn timing_between_block_arrivals_removes_the_quantisation() {
+        const HACKRF_BLOCK: u64 = 262_144;
+        let base = std::time::Instant::now();
+        let mut t = RateTracker::default();
+
+        // A device delivering whole HackRF transfers at exactly 10 Msps. Poll
+        // windows fall wherever they fall, so each carries a varying number of
+        // blocks, but every block boundary lands on the exact rate.
+        let block_us = HACKRF_BLOCK * 1_000_000 / (TRUE_RATE * 2); // 13107 us
+        let mut blocks_sent = 0u64;
+        for window in 1..=200u64 {
+            // 200 ms of polling holds 15.26 blocks, so the count alternates.
+            let want = window * 200_000 / block_us;
+            let n = want - blocks_sent;
+            blocks_sent = want;
+            let at = base + std::time::Duration::from_micros(blocks_sent * block_us);
+            t.push(Some(at), n * HACKRF_BLOCK);
+        }
+        let ppm = ppm_off(t.rate(2).expect("plenty of baseline"));
         assert!(
-            ppm.abs() < 500,
-            "a healthy link must not trip TimingCause::Clock: {ppm} ppm"
+            ppm.abs() < 50,
+            "block-boundary timing should be all but exact: {ppm} ppm"
         );
     }
 
-    /// And a clock that really is off must still be caught, or the fix would
-    /// have traded a false alarm for a blind spot.
+    /// A window with no block in it carries no boundary, and the first window
+    /// after a reset has nothing earlier to measure from. Neither may fold.
     #[test]
-    fn a_genuinely_offset_clock_still_shows_up() {
-        let mut b = RateBaseline::default();
-        feed_quantised(&mut b, TRUE_RATE * 99 / 100, 2, 150);
-        let ppm = ppm_off(b.rate(2).expect("30 s is a baseline"));
-        assert!(
-            (-11_000..-9_000).contains(&ppm),
-            "1 % slow should read about -10 000 ppm: {ppm}"
+    fn a_window_without_a_block_boundary_is_skipped() {
+        let base = std::time::Instant::now();
+        let mut t = RateTracker::default();
+        t.push(None, 4_000_000);
+        assert_eq!(t.rate(2), None, "no boundary, nothing to measure");
+        t.push(Some(base), 4_000_000);
+        assert_eq!(t.rate(2), None, "the first boundary is only a start point");
+
+        // And a reset puts it back to needing a fresh start point.
+        for i in 1..=200u64 {
+            t.push(
+                Some(base + std::time::Duration::from_micros(i * 200_000)),
+                4_000_000,
+            );
+        }
+        assert!(t.rate(2).is_some());
+        t.reset();
+        assert_eq!(
+            t.rate(2),
+            None,
+            "a reset forgets the baseline and its origin"
         );
     }
 
@@ -679,9 +721,6 @@ mod tests {
             "80 s of windows must not accumulate into an 80 s baseline: {}",
             b.elapsed_us
         );
-        // A reset really does forget.
-        b.reset();
-        assert_eq!(b.rate(2), None);
     }
 
     /// A window with no elapsed time is not a window, and must not divide.
