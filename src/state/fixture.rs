@@ -315,6 +315,29 @@ impl SdrMetrics {
     ///
     /// This exists because it is the only way to render every panel for a device
     /// nobody here owns, which is the whole testing strategy for this backend.
+    /// An RTL-SDR: one tuner stage over the driver's own discrete table, plus
+    /// a tuner AGC. The other shape the gain model has to serve.
+    ///
+    /// The table is the real one an R820T reads out, rounded to whole dB and
+    /// deduplicated the way `rtl_caps` does it.
+    pub(crate) fn rtlsdr(mut self) -> Self {
+        let mut caps = (*self.caps).clone();
+        caps.gain = crate::hardware::GainModel::RtlSingle {
+            gain_steps_db: vec![0, 1, 3, 4, 6, 9, 14, 16, 20, 22, 25, 29, 33, 37, 40, 44, 49],
+        };
+        caps.friis_applicable = false;
+        caps.has_bb_filter = false;
+        caps.sample_geometry = crate::hardware::SampleGeometry {
+            format: crate::hardware::SampleFormat::Uint8,
+            full_scale: 128.0,
+        };
+        self.caps = Arc::new(caps);
+        // One stage, so only position 0 means anything.
+        self.radio.gains = vec![25.0];
+        self.system.board_name = Arc::from("RTL-SDR");
+        self
+    }
+
     /// A SoapySDR device that offers **no** boost at all: no automatic gain
     /// mode, and no two-position element to stand in for one.
     ///
