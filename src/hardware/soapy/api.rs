@@ -156,6 +156,22 @@ pub struct SoapyApi {
     set_sample_rate: unsafe extern "C" fn(*mut SoapySDRDevice, c_int, usize, f64) -> c_int,
     set_bandwidth: unsafe extern "C" fn(*mut SoapySDRDevice, c_int, usize, f64) -> c_int,
     set_gain: unsafe extern "C" fn(*mut SoapySDRDevice, c_int, usize, f64) -> c_int,
+    // Device.h:828, 847, 866. The trailing `name` is what separates these from
+    // their whole-chain counterparts above, and it is the single argument that
+    // would compile, run, and corrupt the stack if it were left off.
+    //
+    // Declared and resolved before anything calls them, so that a driver missing
+    // one is refused at load with the symbol named, rather than part way through
+    // building a stage list. Read from G3.
+    #[allow(dead_code)]
+    set_gain_element:
+        unsafe extern "C" fn(*mut SoapySDRDevice, c_int, usize, *const c_char, f64) -> c_int,
+    #[allow(dead_code)]
+    get_gain_element:
+        unsafe extern "C" fn(*const SoapySDRDevice, c_int, usize, *const c_char) -> f64,
+    #[allow(dead_code)]
+    get_gain_element_range:
+        unsafe extern "C" fn(*const SoapySDRDevice, c_int, usize, *const c_char) -> SoapySDRRange,
     set_gain_mode: unsafe extern "C" fn(*mut SoapySDRDevice, c_int, usize, bool) -> c_int,
 
     format_to_size: unsafe extern "C" fn(*const c_char) -> usize,
@@ -351,6 +367,60 @@ impl SoapyApi {
     /// See [`Self::driver_key`].
     pub unsafe fn set_gain(&self, dev: *mut SoapySDRDevice, db: f64) -> Result<(), String> {
         self.check(unsafe { (self.set_gain)(dev, RX, CHAN, db) })
+    }
+
+    /// Set one named amplification element.
+    ///
+    /// The reason this backend needs it at all: `setGain` above is documented as
+    /// distributing the figure "automatically across available element", and
+    /// that distribution is the driver's policy rather than ours. On a HackRF
+    /// through SoapyHackRF it fills the VGA before the LNA, which is the wrong
+    /// end for noise figure.
+    ///
+    /// # Safety
+    /// See [`Self::driver_key`].
+    #[allow(dead_code)] // read from G3
+    pub unsafe fn set_gain_element(
+        &self,
+        dev: *mut SoapySDRDevice,
+        name: &str,
+        db: f64,
+    ) -> Result<(), String> {
+        let c = std::ffi::CString::new(name)
+            .map_err(|_| format!("gain element name {name:?} contains a NUL"))?;
+        self.check(unsafe { (self.set_gain_element)(dev, RX, CHAN, c.as_ptr(), db) })
+    }
+
+    /// Read back one named element, for confirming what actually took effect.
+    ///
+    /// Returns `None` for a name the C API cannot be given, rather than 0 dB: a
+    /// stage we failed to ask about is not a stage sitting at zero.
+    ///
+    /// # Safety
+    /// See [`Self::driver_key`].
+    #[allow(dead_code)] // read from G3
+    pub unsafe fn gain_element(&self, dev: *const SoapySDRDevice, name: &str) -> Option<f64> {
+        let c = std::ffi::CString::new(name).ok()?;
+        Some(unsafe { (self.get_gain_element)(dev, RX, CHAN, c.as_ptr()) })
+    }
+
+    /// The range and step of one named element.
+    ///
+    /// **Returned by value, and allocates nothing.** It belongs to none of the
+    /// four deallocator families this file juggles, and calling `free` on it
+    /// would be heap corruption. Same shape as [`Self::gain_range`], which is
+    /// why that one's note about the hidden return pointer applies here too.
+    ///
+    /// # Safety
+    /// See [`Self::driver_key`].
+    #[allow(dead_code)] // read from G3
+    pub unsafe fn gain_element_range(
+        &self,
+        dev: *const SoapySDRDevice,
+        name: &str,
+    ) -> Option<SoapySDRRange> {
+        let c = std::ffi::CString::new(name).ok()?;
+        Some(unsafe { (self.get_gain_element_range)(dev, RX, CHAN, c.as_ptr()) })
     }
 
     /// # Safety
@@ -610,6 +680,9 @@ fn resolve(lib: libloading::Library) -> Result<SoapyApi, &'static str> {
         get_sample_rate_range: sym!("SoapySDRDevice_getSampleRateRange"),
         get_bandwidth_range: sym!("SoapySDRDevice_getBandwidthRange"),
         get_gain_range: sym!("SoapySDRDevice_getGainRange"),
+        set_gain_element: sym!("SoapySDRDevice_setGainElement"),
+        get_gain_element: sym!("SoapySDRDevice_getGainElement"),
+        get_gain_element_range: sym!("SoapySDRDevice_getGainElementRange"),
         list_gains: sym!("SoapySDRDevice_listGains"),
         has_gain_mode: sym!("SoapySDRDevice_hasGainMode"),
         get_native_stream_format: sym!("SoapySDRDevice_getNativeStreamFormat"),
