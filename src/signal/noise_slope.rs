@@ -98,6 +98,16 @@ pub struct Reading {
     /// sweep found one. `None` means it never was, which is itself an answer:
     /// on this stage, more gain still buys sensitivity.
     pub knee_db: Option<f64>,
+    /// Slope measured from the knee upward, when there is a knee.
+    ///
+    /// **This is the number that means something, and `slope` is not.** The span
+    /// slope averages two different regimes: below the knee the converter sets
+    /// the floor and the slope is near zero, above it the front end does and the
+    /// slope is near one. Averaging them produces a figure that describes
+    /// neither, and it moves with where the sweep happened to start. This one is
+    /// measured only over the part that is actually tracking, so it says how
+    /// completely the front end has taken over.
+    pub slope_above_knee: Option<f32>,
 }
 
 /// The sweep, as a state machine.
@@ -299,10 +309,12 @@ impl GainSweep {
         } else {
             0.0
         };
+        let knee_db = self.knee();
         Some(Reading {
             points: self.points.clone(),
             slope,
-            knee_db: self.knee(),
+            slope_above_knee: knee_db.and_then(|k| self.slope_from(k)),
+            knee_db,
         })
     }
 
@@ -313,6 +325,18 @@ impl GainSweep {
     /// behaviour changes part way along. Once found, the rest of the sweep has
     /// to agree: a single steep pair in the middle of a flat curve is noise, not
     /// a knee.
+    /// Straight line fit through every point at or above `from_db`.
+    fn slope_from(&self, from_db: f64) -> Option<f32> {
+        let kept: Vec<&Point> = self
+            .points
+            .iter()
+            .filter(|p| p.gain_db >= from_db - f64::EPSILON)
+            .collect();
+        let (first, last) = (kept.first()?, kept.last()?);
+        let span = (last.gain_db - first.gain_db) as f32;
+        (span.abs() > f32::EPSILON).then(|| (last.noise_dbfs - first.noise_dbfs) / span)
+    }
+
     fn knee(&self) -> Option<f64> {
         let slopes: Vec<(f64, f32)> = self
             .points
@@ -386,6 +410,42 @@ mod tests {
             step_db,
             table: Vec::new(),
         }
+    }
+
+    /// A receiver that is converter limited below `knee` and front-end limited
+    /// above it: flat, then rising one for one.
+    fn kneed(knee: f64) -> impl Fn(f64) -> f32 {
+        move |g| {
+            if g < knee {
+                -90.0
+            } else {
+                (-90.0 + (g - knee)) as f32
+            }
+        }
+    }
+
+    #[test]
+    fn the_span_slope_and_the_above_knee_slope_are_different_numbers() {
+        // 0..40 in 8 dB steps with the knee at 24: three flat segments, two
+        // rising ones. The span average is well under one and says nothing about
+        // either half; the above-knee slope is the physics.
+        let (r, _) = run(vec![0.0, 8.0, 16.0, 24.0, 32.0, 40.0], 0.0, kneed(24.0));
+        assert_eq!(r.knee_db, Some(24.0));
+        let above = r.slope_above_knee.expect("a knee brings a slope with it");
+        assert!((above - 1.0).abs() < 0.01, "above knee {above}");
+        assert!(
+            r.slope < 0.6,
+            "the span average must not be mistaken for the real slope: {}",
+            r.slope
+        );
+    }
+
+    #[test]
+    fn no_knee_means_no_above_knee_slope_to_quote() {
+        // The floor never moves: the converter is setting it at every setting.
+        let (r, _) = run(vec![0.0, 8.0, 16.0, 24.0], 0.0, |_| -90.0);
+        assert_eq!(r.knee_db, None);
+        assert_eq!(r.slope_above_knee, None);
     }
 
     #[test]

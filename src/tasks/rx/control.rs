@@ -218,12 +218,24 @@ pub(super) fn advance_noise_sweep(state: &Arc<Mutex<SdrMetrics>>, device: &Arc<d
                 // logged where it was asked for: a second line saying the same
                 // thing is noise.
                 if let Some(r) = reading {
-                    m.push_log(format!(
-                        "Noise sweep: {:.2} dB/dB over {} points",
-                        r.slope,
-                        r.points.len()
-                    ));
-                    m.lab.noise_reading = Some(r);
+                    // The knee and the slope above it, matching the panel. The
+                    // span slope averages the converter-limited half with the
+                    // front-end-limited half and describes neither, so it is not
+                    // quoted here either.
+                    m.push_log(match (r.knee_db, r.slope_above_knee) {
+                        (Some(k), Some(above)) => format!(
+                            "Noise sweep: knee at {k:.0} dB, {above:.2} dB/dB above it ({} points)",
+                            r.points.len()
+                        ),
+                        _ => format!(
+                            "Noise sweep: no knee in range over {} points \u{2014} the converter set the floor throughout",
+                            r.points.len()
+                        ),
+                    });
+                    m.lab.noise_reading = Some(crate::state::NoiseReading {
+                        at_hz: m.radio.frequency,
+                        reading: r,
+                    });
                 }
             }
         }

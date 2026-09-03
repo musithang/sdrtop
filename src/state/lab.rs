@@ -9,6 +9,20 @@
 use crate::signal::noise_slope::{GainSweep, Reading};
 use std::sync::Arc;
 
+/// A completed noise step measurement and the frequency it was taken at.
+///
+/// **The frequency is part of the reading, not context.** The knee moves with
+/// the band: measured on a HackRF it sat at LNA 24 dB on a busy FM channel and
+/// at 32 dB on a quiet stretch of UHF, because a quieter band needs more gain
+/// before the front end's own noise clears the converter's. A knee left on
+/// screen after a retune belongs to somewhere else, so the panel names the
+/// frequency every time rather than trying to detect when it has gone stale.
+#[derive(Clone, Debug)]
+pub struct NoiseReading {
+    pub at_hz: u64,
+    pub reading: Reading,
+}
+
 /// Smallest / largest selectable trace-averaging depth (`AVG ×N`).
 pub const AVG_MIN: u16 = 1;
 pub const AVG_MAX: u16 = 16;
@@ -63,9 +77,9 @@ pub struct LabState {
     /// the rx poll task, which may. The two halves meet through
     /// [`GainSweep::pending_set`].
     pub noise_sweep: Option<GainSweep>,
-    /// What the last completed sweep found. Outlives the sweep, so the panel can
-    /// keep showing it.
-    pub noise_reading: Option<Reading>,
+    /// What the last completed sweep found, and where it was tuned when it found
+    /// it. Outlives the sweep, so the panel can keep showing it.
+    pub noise_reading: Option<NoiseReading>,
 }
 
 impl Default for LabState {

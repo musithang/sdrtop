@@ -24,7 +24,7 @@ pub use demod::{
     MpxFrame, PilotState, RdsData, OFFSET_STEP_HZ, PTY_NAMES, RDS_AGED_AFTER, RDS_DROPPED_AFTER,
 };
 pub use iq::{IqCalState, IqState, CONSTELLATION_CAP};
-pub use lab::{LabState, RfFreeze};
+pub use lab::{LabState, NoiseReading, RfFreeze};
 pub use micro::MicroView;
 pub use observer::ObserverState;
 pub use radio::RadioState;

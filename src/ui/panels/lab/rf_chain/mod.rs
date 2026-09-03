@@ -155,7 +155,16 @@ impl Panel for RfChainPanel {
             noise::not_modelled(&mut lines, state.caps.gain.no_cascade_reason(), iw, theme);
         }
         lines.push(Line::raw(""));
-        noise::sweep_progress(&mut lines, state, iw, theme);
+        // Running or finished, never both: the progress block is the same
+        // measurement mid-flight. It sits under SENSITIVITY on a modelled radio
+        // so the measured knee and the Friis number can be read together - they
+        // answer different questions, and seeing them apart is what makes a
+        // disagreement between them findable.
+        if state.lab.noise_sweep.is_some() {
+            noise::sweep_progress(&mut lines, state, iw, theme);
+        } else {
+            noise::sweep_reading(&mut lines, state, iw, theme);
+        }
         verdict::draw(
             &mut lines,
             &verdict::Verdict {
@@ -217,6 +226,127 @@ mod tests {
         assert!(out.contains("NOISE STEP"), "{out}");
         assert!(out.contains(&spec.name), "{out}");
         assert!(out.contains(&format!("0/{}", plan.len())), "{out}");
+    }
+
+    /// The panel's prose as a reader sees it: frame columns removed and the line
+    /// breaks closed up, so a sentence that `chrome::wrap` split across two rows
+    /// still reads as one string. Asserting on the raw buffer instead makes a
+    /// test that passes or fails on where the wrap happened to land.
+    fn prose(rows: &[String]) -> String {
+        rows.iter()
+            .map(|r| r.trim_matches(|c| c == '\u{2502}' || c == ' '))
+            .collect::<Vec<_>>()
+            .join(" ")
+            .split_whitespace()
+            .collect::<Vec<_>>()
+            .join(" ")
+    }
+
+    fn with_reading(knee: Option<f64>, above: Option<f32>) -> SdrMetrics {
+        use crate::signal::noise_slope::{Point, Reading};
+        let mut m = SdrMetrics::fixture().streaming().with_carrier(0.0, 40.0);
+        m.lab.noise_reading = Some(crate::state::NoiseReading {
+            at_hz: 92_800_000,
+            reading: Reading {
+                points: vec![
+                    Point {
+                        gain_db: 0.0,
+                        noise_dbfs: -84.0,
+                    },
+                    Point {
+                        gain_db: 8.0,
+                        noise_dbfs: -84.0,
+                    },
+                    Point {
+                        gain_db: 16.0,
+                        noise_dbfs: -83.0,
+                    },
+                    Point {
+                        gain_db: 24.0,
+                        noise_dbfs: -79.0,
+                    },
+                    Point {
+                        gain_db: 32.0,
+                        noise_dbfs: -71.0,
+                    },
+                    Point {
+                        gain_db: 40.0,
+                        noise_dbfs: -63.0,
+                    },
+                ],
+                slope: 0.52,
+                knee_db: knee,
+                slope_above_knee: above,
+            },
+        });
+        m
+    }
+
+    #[test]
+    fn the_reading_leads_with_the_knee_and_never_quotes_the_span_slope() {
+        let m = with_reading(Some(24.0), Some(0.94));
+        let out = draw(RfChainPanel, 50, 34, &m).join("\n");
+        assert!(out.contains("NOISE STEP"), "{out}");
+        assert!(out.contains("LNA 24 dB and up"), "{out}");
+        assert!(out.contains("0.94 dB/dB"), "{out}");
+        // The span average describes neither half of the curve; it must not
+        // appear anywhere on the bench.
+        assert!(!out.contains("0.52"), "{out}");
+    }
+
+    #[test]
+    fn the_reading_names_the_band_it_belongs_to() {
+        // The knee moved from LNA 24 to 32 dB between the FM band and quiet UHF
+        // on the same radio, so a reading with no frequency on it is a number
+        // about somewhere else the moment the user retunes.
+        let m = with_reading(Some(24.0), Some(0.94));
+        let out = prose(&draw(RfChainPanel, 50, 34, &m));
+        assert!(
+            out.contains("NOISE STEP ╶────────── measured at 92.800 MHz"),
+            "{out}"
+        );
+    }
+
+    #[test]
+    fn the_reading_says_what_it_is_not() {
+        let m = with_reading(Some(24.0), Some(0.94));
+        let out = prose(&draw(RfChainPanel, 50, 34, &m));
+        assert!(
+            out.contains("Not a noise figure: that needs a known source"),
+            "{out}"
+        );
+    }
+
+    #[test]
+    fn no_knee_is_an_answer_rather_than_a_blank() {
+        let m = with_reading(None, None);
+        let out = prose(&draw(RfChainPanel, 50, 34, &m));
+        assert!(out.contains("none in range"), "{out}");
+        // With one regime in the data the span slope has no two halves to
+        // average, so it is the honest summary here and is shown.
+        assert!(out.contains("0.52 dB/dB"), "{out}");
+        assert!(
+            out.contains(
+                "The floor never followed the gain, so the converter set it at every setting"
+            ),
+            "{out}"
+        );
+    }
+
+    #[test]
+    fn a_running_sweep_replaces_the_last_reading_rather_than_stacking_on_it() {
+        let mut m = with_reading(Some(24.0), Some(0.94));
+        let spec = m.caps.gain.stages().remove(0);
+        let mut sw = crate::signal::noise_slope::GainSweep::new(
+            0,
+            crate::signal::noise_slope::plan_for(&spec),
+            24.0,
+        );
+        sw.begin();
+        m.lab.noise_sweep = Some(sw);
+        let out = draw(RfChainPanel, 50, 34, &m).join("\n");
+        assert!(out.contains("sweep running"), "{out}");
+        assert!(!out.contains("and up"), "{out}");
     }
 
     #[test]
