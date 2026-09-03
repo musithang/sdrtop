@@ -79,6 +79,15 @@ What I did instead of pretending otherwise:
   driver's own error text. That is in `~/.config/sdrtop/sdrtop.log`, and it is
   what makes a bug report actionable instead of a mystery.
 
+A necessary evil, then, and it turned out to be less of an evil than I feared.
+Before this, every row in the table above was green, and "tested on real
+hardware" was a phrase that covered everything I shipped, which is another way of
+saying it separated nothing. The grey rows are what give the green ones meaning.
+A rule nobody has ever had a reason to test is not a rule, it is a habit, and
+this one now has one marked edge on it. Marked being the whole point: an
+exception you do not write down is not an exception, it is a rule you quietly
+dropped.
+
 ### What is actually verified
 
 | Thing | State |
