@@ -58,6 +58,31 @@ has the fix.
 Read it before you pipe it into a shell if you like:
 [`packaging/install.sh`](https://github.com/musithang/sdrtop/blob/main/packaging/install.sh).
 
+### Every flag it takes
+
+```sh
+sh install.sh --prefix ~/.local     # install under a directory, no root anywhere
+sh install.sh --version v0.4.1      # a specific release instead of the latest
+sh install.sh --from-source         # skip the prebuilt binary, always compile
+sh install.sh --git                 # compile the main branch, live dangerously
+sh install.sh --no-verify           # skip the checksum check (say why first)
+sh install.sh --soapy               # add SoapySDR and its driver modules
+sh install.sh --deps-only           # the libraries and nothing else
+sh install.sh --uninstall           # remove what a previous run installed
+sh install.sh --help                # this list, from the script itself
+```
+
+Piped straight into a shell they go after `sh -s --`, the way `--soapy` does
+higher up. `--help` is the authority here: the script prints its own flags, and
+that list cannot drift out of date the way this page can.
+
+`--no-verify` earns a warning of its own. It turns off the checksum check on a
+download, which is the one thing standing between you and a tarball that isn't
+the one I published. It exists for people who have a reason and know they have
+one. If you are reaching for it because the check failed,
+[troubleshooting](troubleshooting.md#checksum-mismatch-or-could-not-download-sha256sums)
+is the better door.
+
 Everything below is the same job done by hand.
 
 ## What you need
@@ -130,6 +155,37 @@ this morning.
 That's it. sdrtop finds your radio automatically. If it doesn't, that's what the
 [troubleshooting](troubleshooting.md) page is for, and we've all been there at
 2 a.m.
+
+---
+
+## The prebuilt tarball, by hand
+
+The [releases page](../../../releases) carries one tarball per release, and the
+installer fetches it for you. If you would rather do it yourself, or you are
+putting sdrtop somewhere a script has no business going:
+
+```sh
+tar -xzf sdrtop-<version>-x86_64-unknown-linux-gnu.tar.gz
+cd sdrtop-<version>-x86_64-unknown-linux-gnu
+sha256sum -c <(grep sdrtop- ../SHA256SUMS)   # check it before you trust it
+sudo install -Dm755 sdrtop /usr/local/bin/sdrtop
+```
+
+It is x86_64 only, and it wants **glibc 2.36 or newer** plus `librtlsdr.so.0`.
+In practice that means Debian 12 and 13, Kali, and Raspberry Pi OS Bookworm.
+Ubuntu and Mint package the identical upstream library as `.so.2`, so it will
+not start there, and a Raspberry Pi is not x86_64 in the first place. On those,
+compile. It is one command, it takes a few minutes, and it always works.
+
+From 0.4.2 onward every release also carries a signed build provenance
+attestation. The checksum only tells you the download arrived intact. This tells
+you the file came out of this repository's release workflow and nowhere else:
+
+```sh
+gh attestation verify sdrtop-<version>-x86_64-unknown-linux-gnu.tar.gz --repo musithang/sdrtop
+```
+
+Worth thirty seconds. You are about to give this binary your USB bus.
 
 ---
 

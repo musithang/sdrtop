@@ -105,11 +105,12 @@ Everything your radio knows about itself, in real time, without leaving the term
 
 - **The Command Rail**, the default cockpit: a big segmented frequency hero, an analog S-meter, HUNT · MONITOR · BENCH mode cards that follow what you're doing, recall slots, and SNR · PWR · NF · SAT each riding its own braille oscilloscope trace. All dials, no autopilot. It's a radio, not a self-driving car.
 - **Spectrum and waterfall**: FFT with peak hold, noise floor tracking, zoom, band-plan overlay and persistent markers; a scrolling spectrogram in truecolor, 256 or 16 colors with history scroll-back and frame averaging.
-- **Four lab benches** for the questions a plot can't answer: is the quadrature clean, is the front end staged right, is my computer keeping up, and what *is* that signal. Noise figure, MDS, IRR, occupied bandwidth, ACPR, ADC loading, jitter. [The details](user_docs/lab.md).
+- **Focus modes**: press the highlighted letter in a panel's title and the panel is yours, with cursor read-outs, holds and markers. There is no mouse anywhere in sdrtop, and nothing in it needs one.
+- **Four lab benches** for the questions a plot can't answer: is the quadrature clean, is the front end staged right, is my computer keeping up, and what *is* that signal. Noise figure, MDS, IRR, occupied bandwidth, ACPR, ADC loading, jitter. Measured the awkward way rather than the easy way: bandwidth about the carrier, not across whatever span you happened to capture, so a mistuned radio confesses instead of faking a good number. The noise floor comes as a density too, so the same receiver reads as the same receiver whatever the sample rate. [The details](user_docs/lab.md).
 - **A demodulator that doesn't play audio**, deliberately. It opens the channel and reports what a spectrum plot structurally cannot: FM deviation about the carrier, the MPX baseband with its 19 kHz pilot, stereo injection, CTCSS, AM depth, and **RDS** station name, PTY and RadioText. It reads radios, it doesn't play them.
 - **IQ correction, not just measurement**: one key subtracts the live DC estimate from the stream, another captures a quadrature correction and applies it. Watch the spike and the mirror images actually go away.
 - **A band sweep** wider than one window, stitched into a single curve with band-plan labels, `Enter` on a peak to tune straight to it.
-- **Micro field views** for when a full terminal isn't on offer: each concern stripped to one glance, readable down to about 40 columns.
+- **Micro field views**, because sdrtop shouldn't need a full terminal to be useful. When the panels stop being readable, each concern strips down to the one number that matters, big enough to read across the room.
 - **Observer mode**: if another app already holds the radio, sdrtop tells you which one, shows device identity and USB stats, and waits. No error dialog, no fight over the USB handle, and it takes the radio back the moment it's free.
 - **Six themes and a layout system**: presets grouped into four sections, `Esc` for the menu, or define your own out of any panel sdrtop draws.
 
@@ -131,7 +132,28 @@ It works out your distribution, installs the libraries under whatever names that
 
 Add `--soapy` if you want the SoapySDR library and driver modules too; without it the installer leaves them alone and just tells you at the end what you're missing out on.
 
-Piping a script into `sh` means running code you haven't read. You should read it: [`packaging/install.sh`](packaging/install.sh). I'd want to. It also takes `--prefix ~/.local` if root isn't on the menu, and [a handful of other flags](user_docs/getting-started.md#the-shorter-way-if-you-dont-want-to-think-about-it).
+<details>
+<summary>Every flag it takes, and installing without root</summary>
+
+<br>
+
+```sh
+sh install.sh --prefix ~/.local     # install under a directory, no root anywhere
+sh install.sh --version v0.4.1      # a specific release instead of the latest
+sh install.sh --from-source         # skip the prebuilt binary, always compile
+sh install.sh --git                 # compile the main branch, live dangerously
+sh install.sh --no-verify           # skip the checksum check (say why first)
+sh install.sh --soapy               # add SoapySDR and its driver modules
+sh install.sh --deps-only           # the libraries and nothing else
+sh install.sh --uninstall           # remove what a previous run installed
+sh install.sh --help                # this list, from the script itself
+```
+
+Piped straight into a shell they go after `sh -s --`. `--no-verify` turns off the checksum check on a download, which is the one thing standing between you and a tarball that isn't the one I published, so have a reason. The rest are explained in [Getting started](user_docs/getting-started.md#every-flag-it-takes).
+
+</details>
+
+Piping a script into `sh` means running code you haven't read. You should read it: [`packaging/install.sh`](packaging/install.sh). I'd want to.
 
 ### Or cargo, the boring one that always works
 
@@ -160,7 +182,7 @@ SoapySDRUtil --find     # if this can't see your radio, sdrtop can't either
 
 That last command is the whole diagnostic. If your radio isn't in that list, the missing piece is a driver module, and no amount of shouting at sdrtop will conjure one up.
 
-<sub>Prefer a prebuilt binary, need a specific version, or on something unusual? <b><a href="user_docs/getting-started.md">Getting started</a></b> has the release tarball, the signature check, every installer flag and the distro-by-distro package names. Short version on the tarball: it's x86_64 and it wants Debian's <code>librtlsdr.so.0</code>, so it won't start on Ubuntu or Mint, who package the identical library as <code>.so.2</code> because of course they do.</sub>
+<sub>Prefer a prebuilt binary, or on something unusual? <b><a href="user_docs/getting-started.md#the-prebuilt-tarball-by-hand">Getting started</a></b> has the release tarball, the checksum and the provenance attestation to check it against, plus the distro-by-distro package names. Short version on the tarball: it's x86_64 and it wants Debian's <code>librtlsdr.so.0</code>, so it won't start on Ubuntu or Mint, who package the identical library as <code>.so.2</code> because of course they do.</sub>
 
 **First run:** sdrtop opens on its menu. `Enter` takes a layout, `Space` starts receiving, `Esc` brings the menu back, `q` quits and saves.
 
@@ -168,7 +190,7 @@ That last command is the whole diagnostic. If your radio isn't in that list, the
 
 ## Keys
 
-Layouts are grouped into four sections and **each section has its own numbers**: `Command Rail` for the general views, `Lab` for the benches, `Sweep` for the band scan, `Micro` for the field views. So `2` is the RF bench inside Lab and the spectrum inside Command Rail. `Esc` opens the menu, which shows you the sections, the layouts in the one you're on, and the number that opens each. Nine keys, four times over, rather than one long row to memorise. The arrangement before this had ten layouts competing for nine digits, which went exactly as well as you'd expect: one of them simply never got a key, and the help screen had been lying about the rest for several releases.
+Layouts are grouped into four sections and **each section has its own numbers**: `Command Rail` for the general views, `Lab` for the benches, `Sweep` for the band scan, `Micro` for the field views. So `2` is the RF bench inside Lab and the spectrum inside Command Rail. `Esc` opens the menu, which shows you the sections, the layouts in the one you're on, and the number that opens each. Nine keys, four times over, rather than one long row to memorise.
 
 The ten that get you everywhere:
 
