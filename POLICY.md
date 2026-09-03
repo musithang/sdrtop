@@ -310,10 +310,58 @@ somebody else's envelope.
 
 ---
 
-# THE EXCEPTION
+# THE MARKED EXCEPTION
 
 *In which the court admits evidence it is not entitled to, says so on the record,
-and instructs the gallery precisely what it is worth.*
+instructs the gallery precisely what it is worth, and turns out to have
+strengthened the very rule it broke.*
+
+### ⟨ a note from the clerk, on why this chapter is allowed to exist ⟩
+
+The Assize's first act after the Great Agreement was the Absolute Rules Act,
+which forbade any exception to any rule of evidence, on any ground, for any
+reason, permanently. It was drafted in nine weeks by people who were not in the
+mood, and it is still regarded as the most rigorous legal instrument the planet
+has ever produced.
+
+It held for four hundred years, a figure the Assize once quoted with some pride
+and now tends to leave out.
+
+The trouble was found by a clerk doing an inventory, which is how most things are
+found. Of the four thousand or so rules then on the books, a great many had never
+been invoked, never been argued against, and never been pressed on by anybody at
+all.
+
+**A rule that has never been pressed on gives back no information about itself.**
+It cannot be told apart from a habit, and the archive was already full of habits.
+Nobody could say which of the four thousand were load-bearing. Not because any of
+them were bad. Because none of them had been tested, and an untested rule is not
+a rule you have. It is a rule you are assuming.
+
+So the Assize adopted the doctrine this chapter runs on, and it is narrower than
+it sounds:
+
+> **A rule may be broken once. Deliberately, in the open, with the boundary drawn
+> and the breach marked on every document it touches.**
+
+The breach is not a weakening. It is the only measurement of the rule anybody
+will ever get. Everything outside the marked boundary is now *known* to be
+governed rather than assumed to be, because the boundary is visible and a person
+can walk around it and see where it stops.
+
+The phrase they arrived at has been misquoted ever since, almost always by
+somebody looking for a way out of something: **the exception proves the rule.**
+
+Proves as in *tests*. As in a proving ground. As in proof spirit. Nobody on
+Vesperid Nine has ever used it to mean *excuses*, and the Assize has fined people
+for trying.
+
+**The whole doctrine hangs on the marking.** An exception that is not marked is
+not an exception at all. It is a rule that was quietly abandoned by somebody who
+did not want the argument, and the archive holds several of those, which is
+precisely how anyone knows the difference matters.
+
+---
 
 The Instrument Court holds that Rule One is not satisfied in respect of any radio
 reached through **SoapySDR**. Airspy, the SDRplay RSP line, PlutoSDR, LimeSDR,
@@ -353,7 +401,27 @@ The conditions of admission, all of them already met:
 
 The exception stands until the evidence is replaced by the admissible kind. Every
 one of those radios stays grey until somebody who owns one stands it on a desk
-and files a report. Then that one, and only that one, is entered properly.
+and files a report. Then that one, and only that one, is entered properly. The
+debt is real, it is itemised, and it is repayable.
+
+And here is the part that took a while to see.
+
+**Before this breach, the First Law had never been tested.** Every radio sdrtop
+supported was green, and "verified on hardware" was a phrase that applied to
+everything the project shipped, which is another way of saying it distinguished
+nothing at all. It was not a law. It was a habit that had never been inconvenient,
+and it would have gone on being one indefinitely.
+
+The grey badge is the first evidence that the green badge means something. There
+was no way to obtain a grey badge without breaking something on purpose, in the
+open, and writing down exactly where the break stops.
+
+The boundary is drawn. The breach is marked on the badge, in the status block, in
+the hardware table and in this document. And the First Law is stronger inside
+that boundary than it ever was in the four hundred years nobody had a reason to
+push against it.
+
+The exception proves the rule. Tests it. Both.
 
 ## AFFIDAVIT
 
@@ -383,6 +451,15 @@ It has just become a thing I get to be right about.
 So I broke it deliberately, in one place, and then spent considerably longer
 making sure it could not spread than I spent writing the backend. Everything in
 the ruling above is what that cost, and I would do it again.
+
+It took me an embarrassingly long time to stop feeling bad about it. What finally
+did it was working out that I had not weakened the rule. I had given it its first
+edge. Before SoapySDR I could say "verified on hardware" about every single thing
+in this program, which felt like rigour and was actually just a sentence with
+nothing to push against.
+
+I would rather have a rule with one marked scar on it than a rule nobody has ever
+had a reason to test.
 
 If you own one of those radios: **you are the visitor with their own gauge.** You
 are the only thing that has ever ended a Great Agreement, and you will not be
