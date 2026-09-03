@@ -5,6 +5,7 @@ pub mod demod;
 mod dsp;
 pub mod fft;
 pub mod iq;
+pub mod noise_slope;
 pub mod rds;
 pub mod rds_demod;
 
