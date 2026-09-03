@@ -82,8 +82,19 @@ pub(super) fn primary_gain_label(gain: &GainModel) -> &'static str {
 }
 
 /// `↑` / `↓` - step the primary front-end stage.
+///
+/// On a device that presents its stages separately, HackRF and RTL-SDR, this
+/// moves the front one and nothing else, exactly as it always did.
+///
+/// On a **SoapySDR** device the knob is one figure for the whole chain, and
+/// sdrtop now spreads that figure itself rather than handing it to `setGain`.
+/// See [`step_distributed`].
 pub(super) fn step_primary(ctx: &mut InputCtx<'_>, up: bool) {
     let Some(device) = ctx.device else { return };
+    if matches!(device.capabilities().gain, GainModel::Soapy { .. }) {
+        step_distributed(ctx, up);
+        return;
+    }
     let gain = &device.capabilities().gain;
     let current = metrics(ctx.state).radio.primary_gain();
     let new_gain = next_primary_gain(gain, current, up);
@@ -107,6 +118,58 @@ pub(super) fn step_primary(ctx: &mut InputCtx<'_>, up: bool) {
             ));
         }
         Err(e) => m.push_log(format!("Gain error: {}", e)),
+    }
+}
+
+/// `↑` / `↓` on a SoapySDR device: move the whole chain by one reachable step,
+/// and place the result across the stages ourselves.
+///
+/// The step is measured in **reachable totals**, not in dB. Adding a fixed 1 dB
+/// and redistributing lands on the same achievable figure again, because the
+/// stages have grids: on a HackRF's 8 dB LNA and 2 dB VGA, 21 floors back to 20
+/// and the readout would never move.
+///
+/// Every stage is set, not just the ones that changed. A driver is entitled to
+/// have moved an element behind our back, and the cost of being sure is a
+/// handful of USB control transfers on a keypress.
+fn step_distributed(ctx: &mut InputCtx<'_>, up: bool) {
+    let Some(device) = ctx.device else { return };
+    let stages = device.capabilities().gain.stages();
+    if stages.is_empty() {
+        return;
+    }
+    let from = metrics(ctx.state).radio.total_gain();
+    let want = crate::hardware::gain::next_total(&stages, from, up);
+    let (values, achieved) = crate::hardware::gain::distribute(&stages, want);
+
+    // Device calls with no lock held, as everywhere else in this file.
+    let mut failed = None;
+    for (index, (value, spec)) in values.iter().zip(&stages).enumerate() {
+        if let Err(e) = device.set_stage_gain(index, &spec.name, *value) {
+            failed = Some(format!("{}: {e}", spec.name));
+            break;
+        }
+    }
+
+    let mut m = metrics(ctx.state);
+    match failed {
+        Some(why) => m.push_log(format!("Gain error: {why}")),
+        None => {
+            m.radio.gains = values.clone();
+            m.lab.rf_autotrack = false;
+            m.ui.note_mode_action(RailMode::Bench);
+            // The achieved total, never the request: a request that is not
+            // reachable would put a number on screen the radio is not set to.
+            let split: Vec<String> = stages
+                .iter()
+                .zip(&values)
+                .map(|(s, v)| format!("{} {:.0}", s.name, v))
+                .collect();
+            m.push_log(format!(
+                "RF gain \u{2192} {achieved:.0} dB  ({})",
+                split.join(" \u{00b7} ")
+            ));
+        }
     }
 }
 

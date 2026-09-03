@@ -51,6 +51,16 @@ impl RadioState {
         Self::whole(self.gains.get(1).copied())
     }
 
+    /// Everything the chain is contributing, added up.
+    ///
+    /// What a single-knob device's readout means. On an RTL-SDR there is one
+    /// stage so this equals the primary; on a SoapySDR device the knob sets a
+    /// total that sdrtop then distributes, and this is the figure that was
+    /// actually achieved.
+    pub fn total_gain(&self) -> f64 {
+        self.gains.iter().copied().filter(|v| v.is_finite()).sum()
+    }
+
     /// One stage by position, exact.
     ///
     /// The exact-value pair to [`Self::set_stage_gain`], read from G8 where the

@@ -350,6 +350,20 @@ impl GainModel {
         }
     }
 
+    /// The primary stage's name in three columns, for the header's fixed field.
+    ///
+    /// A short form is a real need, not a duplicate: the header budgets four
+    /// columns and `Tuner` does not fit. It lives beside the full name so the
+    /// two cannot drift, which they did: the header hardcoded `TUN` for every
+    /// single-knob device and so called a SoapySDR device's chain a tuner.
+    pub fn primary_label_short(&self) -> &'static str {
+        match self {
+            GainModel::HackRf => "LNA",
+            GainModel::RtlSingle { .. } => "TUN",
+            GainModel::Soapy { .. } => "RF",
+        }
+    }
+
     /// Full-scale value for the primary-gain bar/gauge (dB).
     pub fn primary_max_db(&self) -> u32 {
         match self {
@@ -361,11 +375,19 @@ impl GainModel {
                 .first()
                 .map(|s| s.max_db.max(0.0).round() as u32)
                 .unwrap_or(49),
-            // Deliberately still the **whole chain**. A Soapy device's primary
-            // gain is one combined figure until G8 teaches the knob to
-            // distribute; answering with the first stage's ceiling would put a
-            // 40 dB scale under a control that still sets 116.
-            GainModel::Soapy { max_db, .. } => *max_db,
+            // The whole chain, but only the part the knob can reach. Since G8
+            // the knob distributes across the stages, and the boost is not one
+            // of them: `getGainRange` says 116 dB on a HackRF because it counts
+            // the 14 dB AMP, which has its own key. A scale to 116 under a
+            // control that stops at 102 would read as broken at the top.
+            GainModel::Soapy { stages, max_db, .. } => {
+                let reachable: f64 = stages.iter().map(|s| s.max_db).sum();
+                if reachable > 0.0 {
+                    reachable.round() as u32
+                } else {
+                    *max_db
+                }
+            }
         }
     }
 
@@ -653,6 +675,25 @@ pub trait SdrDevice: Send + Sync {
     }
     fn set_tuner_agc(&self, _on: bool) -> anyhow::Result<()> {
         Ok(())
+    }
+
+    /// Set one stage by position, exactly.
+    ///
+    /// **One path for every backend.** The default maps position onto the two
+    /// setters the native radios already have, so a HackRF and an RTL-SDR need
+    /// no new code; a SoapySDR device overrides it and addresses the element by
+    /// the name the driver gave it.
+    ///
+    /// `name` is passed rather than looked up because the caller already has the
+    /// stage list it is iterating, and a second lookup here could disagree with
+    /// it.
+    fn set_stage_gain(&self, index: usize, _name: &str, db: f64) -> anyhow::Result<()> {
+        let whole = db.max(0.0).round() as u32;
+        match index {
+            0 => self.set_lna_gain(whole),
+            1 => self.set_vga_gain(whole),
+            _ => Ok(()),
+        }
     }
 
     /// Anything the backend refused or worked around while opening, for the

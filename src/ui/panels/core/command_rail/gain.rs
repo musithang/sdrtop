@@ -72,7 +72,7 @@ pub(super) fn lines(
     // Primary stage (LNA / Tuner): green → yellow.
     out.push(gain_row(
         label_cell(gm.primary_label(), theme),
-        state.radio.primary_gain(),
+        state.shown_gain(),
         gm.primary_max_db(),
         theme.status_ok,
         theme.value_hi,
@@ -99,7 +99,7 @@ pub(super) fn lines(
     }
 
     let total = total_gain(
-        state.radio.primary_gain(),
+        state.shown_gain(),
         state.radio.secondary_gain(),
         gm.has_second_stage(),
     );

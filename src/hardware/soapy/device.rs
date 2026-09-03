@@ -179,6 +179,17 @@ impl SdrDevice for SoapyDevice {
         Ok(())
     }
 
+    /// Address the element by the name the driver gave it, with the exact value.
+    ///
+    /// This is the call `setGain` was standing in for. The measured difference
+    /// is in `measured-receiver-design.md`: the driver's own distribution
+    /// reverses itself twice across the range, dropping the LNA by 13 dB at one
+    /// point while the user is turning the gain **up**.
+    fn set_stage_gain(&self, _index: usize, name: &str, db: f64) -> anyhow::Result<()> {
+        unsafe { self.api.set_gain_element(self.dev, name, db) }
+            .map_err(|e| anyhow::anyhow!("{}: {e}", self.args))
+    }
+
     fn set_amp_enable(&self, on: bool) -> anyhow::Result<()> {
         self.set_boost(on)
     }

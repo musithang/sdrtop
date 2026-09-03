@@ -79,6 +79,26 @@ pub struct SdrMetrics {
 }
 
 impl SdrMetrics {
+    /// The gain figure a readout should show for the front-end knob.
+    ///
+    /// **The whole chain on a single-knob device, the front stage otherwise.**
+    /// A HackRF presents LNA and VGA as separate controls, so its front stage is
+    /// its own number. An RTL-SDR and a SoapySDR device present one knob, and on
+    /// a SoapySDR device that knob's value is now spread across several stages
+    /// by [`crate::hardware::gain::distribute`], so the front stage alone is
+    /// only part of what the user asked for.
+    ///
+    /// Lives here rather than on `RadioState` because it needs `caps` to know
+    /// which shape the device is, and duplicating the choice at each readout is
+    /// how eight panels end up disagreeing.
+    pub fn shown_gain(&self) -> u32 {
+        if self.caps.gain.is_single() {
+            self.radio.total_gain().max(0.0).round() as u32
+        } else {
+            self.radio.primary_gain()
+        }
+    }
+
     pub fn push_log(&mut self, msg: impl Into<String>) {
         self.ui.push_log(msg);
     }

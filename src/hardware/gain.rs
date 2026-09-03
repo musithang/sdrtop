@@ -77,6 +77,47 @@ pub fn total_range(stages: &[StageSpec]) -> (f64, f64) {
         .fold((0.0, 0.0), |(lo, hi), s| (lo + s.min_db, hi + s.max_db))
 }
 
+/// The next total the stage list can actually reach, above or below `from`.
+///
+/// **Without this the knob sticks.** Stepping by a fixed 1 dB and redistributing
+/// lands on the same achievable total again: on a HackRF's 8 dB and 2 dB grids,
+/// 21 floors back to 20, so the readout never moves however long the key is
+/// held. The step has to be measured in reachable totals, not in dB.
+///
+/// The probe is the finest grid any stage has, because a total can only change
+/// by at least that much. A list of purely continuous stages has no grid, and
+/// 1 dB is the arbitrary-but-useful answer there, matching what the knob used to
+/// do before it distributed anything.
+#[allow(dead_code)] // wired in at G8
+pub fn next_total(stages: &[StageSpec], from: f64, up: bool) -> f64 {
+    let (lo, hi) = total_range(stages);
+    if stages.is_empty() || hi <= lo {
+        return lo;
+    }
+    let finest = stages
+        .iter()
+        .map(|s| s.step_db)
+        .filter(|s| *s > 0.0)
+        .fold(f64::INFINITY, f64::min);
+    let probe = if finest.is_finite() { finest } else { 1.0 };
+
+    let current = distribute(stages, from).1;
+    let dir = if up { 1.0 } else { -1.0 };
+    // Bounded by the range itself, so a pathological grid cannot spin here.
+    let limit = (((hi - lo) / probe).ceil() as i64).clamp(1, 4096);
+    for k in 1..=limit {
+        let candidate = (current + dir * probe * k as f64).clamp(lo, hi);
+        let got = distribute(stages, candidate).1;
+        if (got - current).abs() > 1e-9 {
+            return got;
+        }
+        if (candidate - lo).abs() < 1e-9 || (candidate - hi).abs() < 1e-9 {
+            break;
+        }
+    }
+    current
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -216,6 +257,77 @@ mod tests {
         let s = hackrf();
         assert_eq!(distribute(&s, f64::NAN), (vec![0.0, 0.0], 0.0));
         assert_eq!(distribute(&s, f64::INFINITY), (vec![0.0, 0.0], 0.0));
+    }
+
+    /// The knob has to move. Stepping a fixed 1 dB and redistributing would
+    /// floor straight back to where it started, and the readout would never
+    /// change however long the key was held.
+    #[test]
+    fn the_knob_steps_to_the_next_reachable_total() {
+        let s = hackrf();
+        assert_eq!(next_total(&s, 20.0, true), 22.0);
+        assert_eq!(next_total(&s, 20.0, false), 18.0);
+        // From a total that is not itself reachable, the answer is still a
+        // reachable one on the correct side.
+        assert_eq!(next_total(&s, 21.0, true), 22.0);
+        assert_eq!(next_total(&s, 21.0, false), 18.0, "21 floors to 20 first");
+    }
+
+    /// And it stops at the rails rather than running off or spinning.
+    #[test]
+    fn the_knob_rests_against_the_rails() {
+        let s = hackrf();
+        assert_eq!(next_total(&s, 0.0, false), 0.0);
+        assert_eq!(next_total(&s, -50.0, false), 0.0);
+        assert_eq!(next_total(&s, 102.0, true), 102.0);
+        assert_eq!(next_total(&s, 500.0, true), 102.0);
+    }
+
+    /// Walking the whole range one press at a time must terminate at both ends
+    /// and visit strictly increasing totals.
+    #[test]
+    fn a_walk_from_end_to_end_terminates() {
+        let s = hackrf();
+        let mut at = 0.0;
+        let mut seen = 0;
+        while at < 102.0 && seen < 200 {
+            let next = next_total(&s, at, true);
+            assert!(next > at, "stalled at {at}");
+            at = next;
+            seen += 1;
+        }
+        assert_eq!(at, 102.0, "did not reach the ceiling in {seen} presses");
+        while at > 0.0 && seen < 400 {
+            let next = next_total(&s, at, false);
+            assert!(next < at, "stalled coming down at {at}");
+            at = next;
+            seen += 1;
+        }
+        assert_eq!(at, 0.0);
+    }
+
+    /// A continuous range has no grid to follow, so the knob keeps its old 1 dB
+    /// feel rather than inventing something finer.
+    #[test]
+    fn a_continuous_stage_steps_by_one_db() {
+        let s = vec![StageSpec::ranged("RF", 0.0, 45.0, 0.0)];
+        assert_eq!(next_total(&s, 17.0, true), 18.0);
+        assert_eq!(next_total(&s, 17.0, false), 16.0);
+    }
+
+    /// An RTL-SDR walks its own table.
+    #[test]
+    fn a_tabled_stage_steps_between_its_entries() {
+        let s = vec![StageSpec::tabled("Tuner", vec![0.0, 9.0, 16.0, 24.0, 49.0])];
+        assert_eq!(next_total(&s, 9.0, true), 16.0);
+        assert_eq!(next_total(&s, 16.0, false), 9.0);
+        assert_eq!(next_total(&s, 49.0, true), 49.0);
+    }
+
+    /// Nothing to step across.
+    #[test]
+    fn an_empty_list_has_nowhere_to_step() {
+        assert_eq!(next_total(&[], 10.0, true), 0.0);
     }
 
     /// A second two-position element stays in the list after G3 gave the boost

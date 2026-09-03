@@ -166,4 +166,49 @@ mod gain_rendering {
         let _ = draw(super::CommandRailPanel, 60, 30, &m);
         let _ = draw(super::MicroGainPanel, 44, 14, &m);
     }
+
+    /// The knob's readout on a single-knob device is the **whole chain**, not
+    /// the front stage. G8 made the SoapySDR knob distribute its figure across
+    /// several stages, so showing position zero would show part of what the
+    /// user set.
+    #[test]
+    fn a_distributed_knob_reads_as_the_whole_chain() {
+        let mut m = SdrMetrics::fixture().streaming().soapy();
+        m.radio.gains = vec![16.0, 4.0];
+        assert_eq!(m.radio.primary_gain(), 16, "the front stage on its own");
+        assert_eq!(m.shown_gain(), 20, "but the knob was set to 20");
+
+        for (name, out) in [
+            ("header", draw(super::HeaderPanel, 120, 5, &m).join("\n")),
+            (
+                "command_rail",
+                draw(super::CommandRailPanel, 60, 30, &m).join("\n"),
+            ),
+        ] {
+            assert!(out.contains("20"), "{name}: shows a partial figure:\n{out}");
+        }
+
+        // A HackRF presents its stages separately, so its front stage is still
+        // its own number and nothing here changes.
+        let hack = SdrMetrics::fixture().streaming();
+        assert_eq!(hack.shown_gain(), 24, "not 24 + 30");
+    }
+
+    /// The header's four-column field abbreviates, and it must abbreviate the
+    /// right word. It called every single-knob device a tuner, so a SoapySDR
+    /// chain read `TUN` while every other panel called it `RF`.
+    #[test]
+    fn the_header_abbreviates_the_stage_the_device_actually_has() {
+        let soapy = SdrMetrics::fixture().streaming().soapy();
+        let out = draw(super::HeaderPanel, 120, 5, &soapy).join("\n");
+        assert!(out.contains("RF"), "{out}");
+        assert!(!out.contains("TUN"), "called a Soapy chain a tuner:\n{out}");
+
+        let rtl = SdrMetrics::fixture().streaming().rtlsdr();
+        let out = draw(super::HeaderPanel, 120, 5, &rtl).join("\n");
+        assert!(
+            out.contains("TUN"),
+            "an RTL-SDR really does have one:\n{out}"
+        );
+    }
 }

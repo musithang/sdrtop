@@ -92,7 +92,7 @@ impl Panel for LevelDiagramPanel {
             .map(|f| (f.amp_enabled, f.lna_gain, f.vga_gain))
             .unwrap_or((
                 state.radio.amp_enabled,
-                state.radio.primary_gain(),
+                state.shown_gain(),
                 state.radio.secondary_gain(),
             ));
         let stages = cascade(amp, lna, vga);

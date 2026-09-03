@@ -141,7 +141,7 @@ fn rf_banner_fields(state: &SdrMetrics) -> Vec<(&'static str, String)> {
     }
     let nf = system_nf_db(&cascade(
         state.radio.amp_enabled,
-        state.radio.primary_gain(),
+        state.shown_gain(),
         state.radio.secondary_gain(),
     ));
     let mds = match estimate_mds_dbm(state.radio.bb_filter_hz, nf) {

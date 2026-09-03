@@ -531,14 +531,14 @@ fn bottom_band_line(state: &SdrMetrics, theme: &crate::Theme, inner_width: u16) 
     let gap = (inner_width as usize).saturating_sub(left_w + right);
 
     // Primary stage: HackRF LNA / RTL-SDR tuner - green → yellow gradient.
-    let p_str = format!("{:2}", state.radio.primary_gain());
-    let p_label = if gm.is_single() { "TUN " } else { "LNA " };
+    let p_str = format!("{:2}", state.shown_gain());
+    let p_label = format!("{:<4}", gm.primary_label_short());
 
     let mut spans = left_spans;
     spans.push(leader(gap, theme.border_dim));
     spans.push(Span::styled(p_label, Style::default().fg(theme.label)));
     spans.extend(gain_bar_spans(
-        state.radio.primary_gain(),
+        state.shown_gain(),
         gm.primary_max_db(),
         theme.status_ok,
         theme.value_hi,
