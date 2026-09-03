@@ -23,11 +23,11 @@ use std::sync::Arc;
 use std::time::Instant;
 
 use crate::config::{AppConfig, RadioConfig};
-use crate::hardware::{self, DeviceCapabilities};
+use crate::hardware::{self, DeviceCapabilities, GainModel};
 use crate::state::{
     Accumulators, IqState, ObserverState, RadioState, SdrMetrics, SignalState, SpectrumMarker,
     SpectrumState, SweepConfig, SweepState, SystemState, TimingState, UiState, WaterfallState,
-    RECALL_SLOTS, THROUGHPUT_HISTORY_LEN, WATERFALL_MIN_ROWS,
+    DEFAULT_LNA_GAIN, DEFAULT_VGA_GAIN, RECALL_SLOTS, THROUGHPUT_HISTORY_LEN, WATERFALL_MIN_ROWS,
 };
 
 /// The radio settings a session starts at, after the startup clamp.
@@ -39,8 +39,8 @@ pub(super) struct Tuning {
     pub frequency_hz: u64,
     pub sample_rate: f64,
     pub bb_filter_hz: u32,
-    pub lna_gain: u32,
-    pub vga_gain: u32,
+    /// One value per stage, in `caps.gain.stages()` order, already snapped.
+    pub gains: Vec<f64>,
 }
 
 /// Who the device says it is. `new_observer` fills this from sysfs, with
@@ -138,8 +138,11 @@ impl Boot {
                 frequency_hz: cfg.radio.frequency_hz,
                 sample_rate: cfg.radio.sample_rate,
                 bb_filter_hz: hardware::compute_bb_filter_bw(cfg.radio.sample_rate),
-                lna_gain: cfg.radio.lna_gain,
-                vga_gain: cfg.radio.vga_gain,
+                // **Unclamped, deliberately.** Observer capability profiles are
+                // placeholders whose gain tables hold a single zero, so snapping
+                // here would replace every gain the operator set with 0 dB and
+                // present it as a legal value. The test below pins the reasoning.
+                gains: observer_gains(&cfg.radio),
             },
             identity: Identity {
                 board_name: sysinfo.product.clone(),
@@ -193,14 +196,100 @@ pub(super) fn resolve_tuning(radio: &RadioConfig, caps: &DeviceCapabilities) -> 
         } else {
             caps.default_sample_rate_hz
         };
-    let (lna_gain, vga_gain) = caps.gain.clamp_gains(radio.lna_gain, radio.vga_gain);
+    let (gains, _) = resolve_gains(radio, &caps.gain);
     Tuning {
         frequency_hz,
         sample_rate,
         bb_filter_hz: hardware::compute_bb_filter_bw(sample_rate),
-        lna_gain,
-        vga_gain,
+        gains,
     }
+}
+
+/// The configured gains as they are, with no device to snap them onto.
+///
+/// Observer mode's capability profile is a placeholder, so there is no real
+/// stage list to resolve against. The named form is read positionally in the
+/// order it was written, which is the best that can be done without knowing the
+/// device, and the pre-0.5.0 pair falls straight through.
+fn observer_gains(radio: &RadioConfig) -> Vec<f64> {
+    let mut values: Vec<f64> = match radio.gain.as_deref().map(str::trim) {
+        Some(text) if !text.is_empty() => match text.parse::<f64>() {
+            Ok(total) => vec![total],
+            Err(_) => hardware::gain::parse_named(text)
+                .0
+                .into_iter()
+                .map(|(_, v)| v)
+                .collect(),
+        },
+        _ => vec![DEFAULT_LNA_GAIN as f64, DEFAULT_VGA_GAIN as f64],
+    };
+    for (index, override_db) in [(0usize, radio.lna_gain), (1, radio.vga_gain)] {
+        if let Some(db) = override_db {
+            if values.len() <= index {
+                values.resize(index + 1, 0.0);
+            }
+            values[index] = db as f64;
+        }
+    }
+    values
+}
+
+/// Turn what the config says about gain into one value per stage.
+///
+/// Three layers, in increasing order of how deliberate they are, which is the
+/// same order the presets merge in:
+///
+/// 1. the device's own minimums, so every stage has a value;
+/// 2. the `gain` string, which is either a **whole-chain total** to distribute
+///    or `NAME=value` pairs to place;
+/// 3. the pre-0.5.0 `lna_gain` / `vga_gain`, which are **positional** overrides
+///    on the first two stages.
+///
+/// Layer 3 is doing two jobs at once and that is deliberate. It migrates an old
+/// config, whose gains are exactly a positional pair, and it carries `--lna` and
+/// `--vga`, which are positional by nature: `--lna` on an RTL-SDR means its
+/// tuner, whatever the driver calls it. Layering them on top of the string
+/// rather than instead of it means a flag overrides one stage without silently
+/// resetting the others.
+///
+/// Never fails. A gain string nobody can parse leaves the defaults in place and
+/// says so, because a config that refuses to load is worse than one setting that
+/// did not take.
+pub fn resolve_gains(radio: &RadioConfig, gm: &GainModel) -> (Vec<f64>, Vec<String>) {
+    let stages = gm.stages();
+    let mut notes = Vec::new();
+    let mut values: Vec<f64> = stages.iter().map(|s| s.min_db).collect();
+
+    match radio.gain.as_deref().map(str::trim) {
+        Some(text) if !text.is_empty() => match text.parse::<f64>() {
+            // A bare number is the whole chain, spread the way the knob spreads
+            // it, so the file and the `[UP]` key mean the same thing.
+            Ok(total) => values = hardware::gain::distribute(&stages, total).0,
+            Err(_) => {
+                let (pairs, mut n) = hardware::gain::parse_named(text);
+                let (v, more) = hardware::gain::apply_named(&stages, &pairs, &values);
+                n.extend(more);
+                notes.extend(n);
+                values = v;
+            }
+        },
+        // No string at all: the historical defaults, so a first run is unchanged.
+        _ => {
+            if let Some(first) = stages.first() {
+                values[0] = first.snap(DEFAULT_LNA_GAIN as f64);
+            }
+            if let Some(second) = stages.get(1) {
+                values[1] = second.snap(DEFAULT_VGA_GAIN as f64);
+            }
+        }
+    }
+
+    for (index, override_db) in [(0usize, radio.lna_gain), (1, radio.vga_gain)] {
+        if let (Some(db), Some(spec)) = (override_db, stages.get(index)) {
+            values[index] = spec.snap(db as f64);
+        }
+    }
+    (values, notes)
 }
 
 /// The one shared `SdrMetrics` literal, parameterised by [`Boot`].
@@ -224,9 +313,9 @@ pub(super) fn initial_metrics(cfg: &AppConfig, boot: Boot) -> SdrMetrics {
             config_sample_rate: tuning.sample_rate,
             actual_sample_rate: 0,
             bb_filter_hz: tuning.bb_filter_hz,
-            // Position, not name: `resolve_tuning` has already snapped these
-            // onto the device's own stages.
-            gains: vec![tuning.lna_gain as f64, tuning.vga_gain as f64],
+            // Already one value per stage, snapped onto the device's own grids
+            // by `resolve_gains`.
+            gains: tuning.gains.clone(),
             amp_enabled: cfg.radio.amp_enabled,
             rx_enabled: false,
             hw_streaming: false,
@@ -323,8 +412,8 @@ mod tests {
         let mut cfg = AppConfig::default();
         cfg.radio.frequency_hz = 2_400_000_000;
         cfg.radio.sample_rate = 10_000_000.0;
-        cfg.radio.lna_gain = 24;
-        cfg.radio.vga_gain = 30;
+        cfg.radio.lna_gain = Some(24);
+        cfg.radio.vga_gain = Some(30);
         cfg
     }
 
@@ -351,7 +440,7 @@ mod tests {
         assert_eq!(t.frequency_hz, 2_400_000_000);
         assert!((t.sample_rate - 10_000_000.0).abs() < f64::EPSILON);
         // 24 is already on the HackRF's 8 dB LNA grid and 30 on its 2 dB VGA grid.
-        assert_eq!((t.lna_gain, t.vga_gain), (24, 30));
+        assert_eq!(t.gains, vec![24.0, 30.0]);
     }
 
     #[test]
@@ -361,13 +450,13 @@ mod tests {
         // number the hardware can never be in.
         let caps = hardware::hackrf::caps();
         let mut cfg = AppConfig::default();
-        cfg.radio.lna_gain = 49;
-        cfg.radio.vga_gain = 99;
+        cfg.radio.lna_gain = Some(49);
+        cfg.radio.vga_gain = Some(99);
         let t = resolve_tuning(&cfg.radio, &caps);
-        assert_eq!(t.lna_gain, 40, "clamped to the LNA maximum");
-        assert!(t.lna_gain.is_multiple_of(8), "and onto the 8 dB grid");
-        assert_eq!(t.vga_gain, 62, "clamped to the VGA maximum");
-        assert!(t.vga_gain.is_multiple_of(2), "and onto the 2 dB grid");
+        assert_eq!(t.gains[0], 40.0, "clamped to the LNA maximum");
+        assert_eq!(t.gains[0] % 8.0, 0.0, "and onto the 8 dB grid");
+        assert_eq!(t.gains[1], 62.0, "clamped to the VGA maximum");
+        assert_eq!(t.gains[1] % 2.0, 0.0, "and onto the 2 dB grid");
     }
 
     #[test]
@@ -381,12 +470,12 @@ mod tests {
         };
         for asked in [0u32, 5, 12, 30, 100] {
             let mut cfg = AppConfig::default();
-            cfg.radio.lna_gain = asked;
+            cfg.radio.lna_gain = Some(asked);
             let t = resolve_tuning(&cfg.radio, &caps);
+            let got = t.gains[0] as u32;
             assert!(
-                steps.contains(&t.lna_gain),
-                "asked {asked} dB, got {} which is not a step this tuner has",
-                t.lna_gain
+                steps.contains(&got),
+                "asked {asked} dB, got {got} which is not a step this tuner has"
             );
         }
     }
@@ -403,14 +492,15 @@ mod tests {
         let cfg = hackrf_config();
         let caps = hardware::rtlsdr::observer_caps();
         assert_eq!(
-            resolve_tuning(&cfg.radio, &caps).lna_gain,
-            0,
-            "the placeholder profile has no gain table to snap onto"
+            resolve_tuning(&cfg.radio, &caps).gains,
+            vec![0.0],
+            "the placeholder profile's table holds only 0, so everything snaps there"
         );
 
         let boot = Boot::observer(&cfg, &sysinfo(), hardware::DeviceKind::RtlSdr);
         assert_eq!(
-            boot.tuning.lna_gain, 24,
+            boot.tuning.gains,
+            vec![24.0, 30.0],
             "so observer mode shows the config"
         );
         assert_eq!(boot.tuning.frequency_hz, 2_400_000_000);
@@ -523,5 +613,110 @@ mod tests {
         assert!(obs.spectrum.markers.is_empty());
         assert!(obs.ui.recall.iter().all(|s| s.is_none()));
         assert!(obs.observer.active);
+    }
+
+    // ── The config's gain, and its migration ────────────────────────────────
+
+    /// A file written before 0.5.0 has a positional pair and no string. It must
+    /// keep its gains: someone's carefully set radio is not a good place to
+    /// discover that the format changed.
+    #[test]
+    fn a_pre_0_5_0_config_keeps_its_gains() {
+        let caps = hardware::hackrf::caps();
+        let cfg = hackrf_config();
+        assert!(cfg.radio.gain.is_none(), "the old form has no string");
+        let (gains, notes) = resolve_gains(&cfg.radio, &caps.gain);
+        assert_eq!(gains, vec![24.0, 30.0]);
+        assert!(notes.is_empty(), "{notes:?}");
+    }
+
+    /// A file with neither form is a first run, and must land where it always
+    /// did rather than at the device's floor.
+    #[test]
+    fn a_config_with_no_gain_at_all_uses_the_historical_defaults() {
+        let caps = hardware::hackrf::caps();
+        let cfg = AppConfig::default();
+        let (gains, _) = resolve_gains(&cfg.radio, &caps.gain);
+        assert_eq!(gains, vec![16.0, 20.0]);
+    }
+
+    /// The named form names the device's own stages, and each value lands on
+    /// that stage's grid.
+    #[test]
+    fn the_named_form_places_each_stage() {
+        let caps = hardware::hackrf::caps();
+        let mut cfg = AppConfig::default();
+        cfg.radio.gain = Some("VGA=41,LNA=27".into());
+        let (gains, notes) = resolve_gains(&cfg.radio, &caps.gain);
+        assert_eq!(
+            gains,
+            vec![24.0, 42.0],
+            "order in the string does not matter"
+        );
+        assert!(notes.is_empty(), "{notes:?}");
+    }
+
+    /// A bare number is the whole chain, spread the way the knob spreads it, so
+    /// `gain = "45"` and holding `[UP]` to 45 dB mean the same thing.
+    #[test]
+    fn a_bare_number_is_a_whole_chain_total() {
+        let caps = hardware::hackrf::caps();
+        let mut cfg = AppConfig::default();
+        cfg.radio.gain = Some("45".into());
+        let (gains, _) = resolve_gains(&cfg.radio, &caps.gain);
+        assert_eq!(
+            gains,
+            vec![40.0, 4.0],
+            "front to back, 44 of the 45 reachable"
+        );
+    }
+
+    /// `--lna` and `--vga` are positional overrides layered **on top of** the
+    /// string, so one flag does not silently reset the other stages.
+    #[test]
+    fn the_positional_flags_override_one_stage_and_leave_the_rest() {
+        let caps = hardware::hackrf::caps();
+        let mut cfg = AppConfig::default();
+        cfg.radio.gain = Some("LNA=8,VGA=40".into());
+        cfg.radio.lna_gain = Some(32);
+        let (gains, _) = resolve_gains(&cfg.radio, &caps.gain);
+        assert_eq!(gains, vec![32.0, 40.0], "the VGA kept what the string set");
+    }
+
+    /// A config written for another radio. The unknown stage is reported and the
+    /// known one still applies; the file loads either way, because a config that
+    /// refuses to load is worse than one setting that did not take.
+    #[test]
+    fn a_string_naming_another_radios_stage_is_reported_not_fatal() {
+        let caps = hardware::hackrf::caps();
+        let mut cfg = AppConfig::default();
+        cfg.radio.gain = Some("IFGR=20,LNA=16".into());
+        let (gains, notes) = resolve_gains(&cfg.radio, &caps.gain);
+        assert_eq!(gains[0], 16.0);
+        assert_eq!(notes.len(), 1);
+        assert!(notes[0].contains("IFGR"), "{:?}", notes[0]);
+    }
+
+    /// Text nobody can parse leaves the stage list intact rather than emptying
+    /// it, and says what it could not read.
+    #[test]
+    fn unreadable_text_leaves_the_defaults_and_says_so() {
+        let caps = hardware::hackrf::caps();
+        let mut cfg = AppConfig::default();
+        cfg.radio.gain = Some("banana".into());
+        let (gains, notes) = resolve_gains(&cfg.radio, &caps.gain);
+        assert_eq!(gains.len(), 2, "still one value per stage");
+        assert!(!notes.is_empty(), "and it said why");
+    }
+
+    /// Observer mode has no device to snap against, so the configured gain
+    /// passes through untouched. The placeholder profile would flatten it to 0.
+    #[test]
+    fn observer_reads_the_named_form_without_a_device() {
+        let mut cfg = AppConfig::default();
+        cfg.radio.gain = Some("LNA=37,VGA=41".into());
+        assert_eq!(observer_gains(&cfg.radio), vec![37.0, 41.0], "not snapped");
+        cfg.radio.gain = Some("55".into());
+        assert_eq!(observer_gains(&cfg.radio), vec![55.0]);
     }
 }

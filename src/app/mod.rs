@@ -205,25 +205,12 @@ impl App {
         let Some(path) = &self.config_path else {
             return;
         };
-        let (
-            freq,
-            rate,
-            lna,
-            vga,
-            amp,
-            wf_rows,
-            wf_palette,
-            spec_style,
-            markers,
-            sweep_cfg,
-            recall,
-        ) = {
+        let (freq, rate, gains, amp, wf_rows, wf_palette, spec_style, markers, sweep_cfg, recall) = {
             let m = self.state.lock().unwrap_or_else(|e| e.into_inner());
             (
                 m.radio.frequency,
                 m.radio.config_sample_rate,
-                m.radio.primary_gain(),
-                m.radio.secondary_gain(),
+                crate::hardware::gain::format_named(&m.caps.gain.stages(), &m.radio.gains),
                 m.radio.amp_enabled,
                 m.waterfall.buffer.max_rows,
                 m.waterfall.palette,
@@ -237,8 +224,12 @@ impl App {
             radio: RadioConfig {
                 frequency_hz: freq,
                 sample_rate: rate,
-                lna_gain: lna,
-                vga_gain: vga,
+                // The named form, and only that: the pre-0.5.0 positional pair
+                // is still read on load and is no longer written, so a saved
+                // file names the stages the device actually has.
+                gain: Some(gains),
+                lna_gain: None,
+                vga_gain: None,
                 amp_enabled: amp,
                 recall_hz: recall,
             },

@@ -6,22 +6,13 @@ use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
 use crate::palette::WaterfallPalette;
-use crate::state::{
-    SpectrumMarker, SpectrumStyle, DEFAULT_FREQUENCY, DEFAULT_LNA_GAIN, DEFAULT_SAMPLE_RATE,
-    DEFAULT_VGA_GAIN,
-};
+use crate::state::{SpectrumMarker, SpectrumStyle, DEFAULT_FREQUENCY, DEFAULT_SAMPLE_RATE};
 
 fn default_frequency_hz() -> u64 {
     DEFAULT_FREQUENCY
 }
 fn default_sample_rate() -> f64 {
     DEFAULT_SAMPLE_RATE
-}
-fn default_lna_gain() -> u32 {
-    DEFAULT_LNA_GAIN
-}
-fn default_vga_gain() -> u32 {
-    DEFAULT_VGA_GAIN
 }
 fn default_recall() -> [u64; 3] {
     [0; 3]
@@ -46,10 +37,23 @@ pub struct RadioConfig {
     pub frequency_hz: u64,
     #[serde(default = "default_sample_rate")]
     pub sample_rate: f64,
-    #[serde(default = "default_lna_gain")]
-    pub lna_gain: u32,
-    #[serde(default = "default_vga_gain")]
-    pub vga_gain: u32,
+    /// Gain as named stages: `"LNA=28,VGA=12"`.
+    ///
+    /// The device's own names, in its own units, which is the only form that
+    /// works on a radio whose stages are called `IFGR` and `RFGR`. Written on
+    /// every save; read in preference to the two fields below.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub gain: Option<String>,
+    /// Pre-0.5.0 gain, kept **readable and no longer written**.
+    ///
+    /// `Option` rather than a defaulted number so that a file which never had
+    /// them is distinguishable from one that set them to zero, and so a save
+    /// stops emitting them. An existing config keeps its gains: these migrate
+    /// into the first two stages on load.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub lna_gain: Option<u32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub vga_gain: Option<u32>,
     #[serde(default)]
     pub amp_enabled: bool,
     /// Command Rail recall slots (the rail's `M` save / `1·2·3` jump). Three
@@ -63,8 +67,9 @@ impl Default for RadioConfig {
         Self {
             frequency_hz: DEFAULT_FREQUENCY,
             sample_rate: DEFAULT_SAMPLE_RATE,
-            lna_gain: DEFAULT_LNA_GAIN,
-            vga_gain: DEFAULT_VGA_GAIN,
+            gain: None,
+            lna_gain: None,
+            vga_gain: None,
             amp_enabled: false,
             recall_hz: [0; 3],
         }
@@ -677,7 +682,11 @@ panels = [
     #[test]
     fn default_radio_config_frequency() {
         assert_eq!(RadioConfig::default().frequency_hz, 2_400_000_000);
-        assert_eq!(RadioConfig::default().lna_gain, 16);
+        assert_eq!(
+            RadioConfig::default().gain,
+            None,
+            "a fresh config names no gain"
+        );
     }
 
     #[test]
@@ -697,11 +706,11 @@ panels = [
     #[test]
     fn serialize_deserialize_round_trip() {
         let mut cfg = AppConfig::default();
-        cfg.radio.lna_gain = 24;
+        cfg.radio.gain = Some("LNA=24,VGA=30".into());
         cfg.display.active_preset = "spectrum".into();
         let serialized = toml::to_string_pretty(&cfg).unwrap();
         let restored: AppConfig = toml::from_str(&serialized).unwrap();
-        assert_eq!(restored.radio.lna_gain, 24);
+        assert_eq!(restored.radio.gain.as_deref(), Some("LNA=24,VGA=30"));
         assert_eq!(restored.display.active_preset, "spectrum");
     }
 

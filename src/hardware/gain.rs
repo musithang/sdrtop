@@ -118,6 +118,105 @@ pub fn next_total(stages: &[StageSpec], from: f64, up: bool) -> f64 {
     current
 }
 
+/// Parse a named-stage gain string: `"LNA=28,VGA=12"`.
+///
+/// **One parser for the config file and the command line.** They accept the same
+/// text on purpose: a form the file can express but the flag cannot is a trap,
+/// and two parsers would eventually disagree about which.
+///
+/// Tolerant by design, because this is user-typed text in a file that must never
+/// fail to load. A malformed entry is skipped and reported; the rest still
+/// apply. Separators are `,` or `;`, whitespace is ignored, and names are
+/// matched without regard to case later, so `lna=28` works.
+///
+/// Returns the pairs in the order given, plus anything worth telling the user.
+#[allow(dead_code)] // wired in at G10
+pub fn parse_named(text: &str) -> (Vec<(String, f64)>, Vec<String>) {
+    let mut pairs = Vec::new();
+    let mut notes = Vec::new();
+    for entry in text
+        .split([',', ';'])
+        .map(str::trim)
+        .filter(|e| !e.is_empty())
+    {
+        match entry.split_once('=') {
+            Some((name, value)) => {
+                let (name, value) = (name.trim(), value.trim());
+                if name.is_empty() {
+                    notes.push(format!("gain: {entry:?} has no stage name"));
+                    continue;
+                }
+                match value.parse::<f64>() {
+                    Ok(v) if v.is_finite() => pairs.push((name.to_string(), v)),
+                    _ => notes.push(format!("gain: {value:?} is not a number, in {entry:?}")),
+                }
+            }
+            None => notes.push(format!("gain: {entry:?} is not NAME=value")),
+        }
+    }
+    (pairs, notes)
+}
+
+/// Place parsed pairs onto a device's stages, snapping each into its own range.
+///
+/// Starts from `current`, so a string that names only some stages leaves the
+/// others where they were rather than zeroing them. A name the device does not
+/// have is **reported, not guessed at**: silently applying it to the nearest
+/// stage is how a config written for one radio quietly mis-sets another.
+#[allow(dead_code)] // wired in at G10
+pub fn apply_named(
+    stages: &[StageSpec],
+    pairs: &[(String, f64)],
+    current: &[f64],
+) -> (Vec<f64>, Vec<String>) {
+    let mut out: Vec<f64> = stages
+        .iter()
+        .enumerate()
+        .map(|(i, s)| current.get(i).copied().unwrap_or(s.min_db))
+        .collect();
+    let mut notes = Vec::new();
+    for (name, value) in pairs {
+        match stages
+            .iter()
+            .position(|s| s.name.eq_ignore_ascii_case(name))
+        {
+            Some(i) => out[i] = stages[i].snap(*value),
+            None => {
+                let known: Vec<&str> = stages.iter().map(|s| s.name.as_str()).collect();
+                notes.push(format!(
+                    "gain: this device has no stage {name:?}; it has {}",
+                    if known.is_empty() {
+                        "none".to_string()
+                    } else {
+                        known.join(", ")
+                    }
+                ));
+            }
+        }
+    }
+    (out, notes)
+}
+
+/// Render the current values as the string the config and the flag accept.
+///
+/// The round trip is the contract: what this writes, [`parse_named`] and
+/// [`apply_named`] must read back to the same values.
+#[allow(dead_code)] // wired in at G10
+pub fn format_named(stages: &[StageSpec], values: &[f64]) -> String {
+    stages
+        .iter()
+        .enumerate()
+        .map(|(i, s)| {
+            format!(
+                "{}={:.0}",
+                s.name,
+                values.get(i).copied().unwrap_or(s.min_db)
+            )
+        })
+        .collect::<Vec<_>>()
+        .join(",")
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -346,5 +445,105 @@ mod tests {
             "20 does not fit in 15"
         );
         assert_eq!(distribute(&s, 60.0), (vec![40.0, 20.0], 60.0));
+    }
+
+    // ── The named-stage string ──────────────────────────────────────────────
+
+    #[test]
+    fn the_named_form_round_trips() {
+        let s = hackrf();
+        let values = vec![24.0, 30.0];
+        let text = format_named(&s, &values);
+        assert_eq!(text, "LNA=24,VGA=30");
+
+        let (pairs, notes) = parse_named(&text);
+        assert!(notes.is_empty(), "{notes:?}");
+        let (back, notes) = apply_named(&s, &pairs, &[0.0, 0.0]);
+        assert!(notes.is_empty(), "{notes:?}");
+        assert_eq!(back, values, "what we wrote must read back the same");
+    }
+
+    /// User-typed text, in a file that must never fail to load.
+    #[test]
+    fn the_parser_forgives_the_shapes_people_actually_type() {
+        let (pairs, notes) = parse_named(" lna = 28 ; VGA=12 , ");
+        assert!(notes.is_empty(), "{notes:?}");
+        assert_eq!(
+            pairs,
+            vec![("lna".to_string(), 28.0), ("VGA".to_string(), 12.0)]
+        );
+        assert_eq!(parse_named("").0, vec![]);
+    }
+
+    /// A broken entry is skipped and named; the rest still apply. Refusing the
+    /// whole line would lose settings the user got right.
+    #[test]
+    fn a_malformed_entry_is_reported_and_the_rest_survive() {
+        let (pairs, notes) = parse_named("LNA=24,VGA,=9,MIX=abc,AMP=14");
+        assert_eq!(
+            pairs,
+            vec![("LNA".to_string(), 24.0), ("AMP".to_string(), 14.0)]
+        );
+        assert_eq!(notes.len(), 3, "{notes:?}");
+        assert!(notes.iter().any(|n| n.contains("\"VGA\"")));
+        assert!(notes.iter().any(|n| n.contains("no stage name")));
+        assert!(notes.iter().any(|n| n.contains("not a number")));
+    }
+
+    /// Names are matched without regard to case, and each value lands on its own
+    /// stage's grid rather than wherever the user typed.
+    #[test]
+    fn values_snap_onto_the_stage_they_name() {
+        let s = hackrf();
+        let (pairs, _) = parse_named("lna=27,vga=31");
+        let (out, notes) = apply_named(&s, &pairs, &[0.0, 0.0]);
+        assert!(notes.is_empty(), "{notes:?}");
+        assert_eq!(out, vec![24.0, 32.0], "8 dB and 2 dB grids");
+    }
+
+    /// A stage the string does not mention keeps what it had, rather than being
+    /// zeroed by omission.
+    #[test]
+    fn an_unmentioned_stage_is_left_alone() {
+        let s = hackrf();
+        let (pairs, _) = parse_named("VGA=20");
+        let (out, _) = apply_named(&s, &pairs, &[40.0, 8.0]);
+        assert_eq!(out, vec![40.0, 20.0]);
+    }
+
+    /// A config written on one radio, opened on another. The name that does not
+    /// exist is **reported**, and the message says what the device does have,
+    /// because that is the only thing that helps the person reading it.
+    #[test]
+    fn a_stage_this_device_does_not_have_is_named_not_guessed_at() {
+        let s = hackrf();
+        let (pairs, _) = parse_named("IFGR=20,LNA=8");
+        let (out, notes) = apply_named(&s, &pairs, &[0.0, 0.0]);
+        assert_eq!(out, vec![8.0, 0.0], "the one it does have still applied");
+        assert_eq!(notes.len(), 1);
+        assert!(notes[0].contains("IFGR"), "{:?}", notes[0]);
+        assert!(
+            notes[0].contains("LNA, VGA"),
+            "names what it has: {:?}",
+            notes[0]
+        );
+    }
+
+    /// Out of range in either direction, and a device with no stages at all.
+    #[test]
+    fn values_out_of_range_are_clamped_and_no_stages_is_survivable() {
+        let s = hackrf();
+        let (pairs, _) = parse_named("LNA=999,VGA=-50");
+        let (out, _) = apply_named(&s, &pairs, &[0.0, 0.0]);
+        assert_eq!(out, vec![40.0, 0.0]);
+
+        let (out, notes) = apply_named(&[], &pairs, &[]);
+        assert!(out.is_empty());
+        assert_eq!(
+            notes.len(),
+            2,
+            "both names are unknown to a device with none"
+        );
+        assert_eq!(format_named(&[], &[]), "");
     }
 }

@@ -52,15 +52,15 @@ pub struct Cli {
     #[arg(long, value_name = "HZ")]
     pub frequency: Option<u64>,
 
-    /// Primary front-end gain in dB - HackRF LNA / RTL-SDR tuner (overrides config)
+    /// Gain: a total in dB, or named stages like "LNA=28,VGA=12" (overrides config)
     #[arg(long, value_name = "DB")]
-    pub gain: Option<u32>,
+    pub gain: Option<String>,
 
-    /// HackRF LNA gain in dB, 0-40 step 8 (overrides config)
+    /// First stage gain in dB: HackRF LNA, RTL-SDR tuner (overrides config)
     #[arg(long)]
     pub lna: Option<u32>,
 
-    /// HackRF VGA gain in dB, 0-62 step 2 (overrides config)
+    /// Second stage gain in dB, on a device that has one (overrides config)
     #[arg(long)]
     pub vga: Option<u32>,
 

@@ -57,14 +57,17 @@ impl App {
         // HackRF's RF amp (set_amp_enable) and RTL-SDR's tuner AGC (set_tuner_agc).
         // Calling both applies the right one per device (the other is a no-op) so
         // the programmed state matches what the UI shows.
-        let startup_results = [
-            device.set_frequency(tuning.frequency_hz),
-            sr_result,
-            device.set_lna_gain(tuning.lna_gain),
-            device.set_vga_gain(tuning.vga_gain),
-            device.set_amp_enable(cfg.radio.amp_enabled),
-            device.set_tuner_agc(cfg.radio.amp_enabled),
-        ];
+        // One call per stage the device actually has, in its own order. The two
+        // named setters are what the default `set_stage_gain` maps onto, so both
+        // native radios are programmed exactly as they always were.
+        let stages = caps.gain.stages();
+        let mut startup_results = vec![device.set_frequency(tuning.frequency_hz), sr_result];
+        for (index, spec) in stages.iter().enumerate() {
+            let db = tuning.gains.get(index).copied().unwrap_or(spec.min_db);
+            startup_results.push(device.set_stage_gain(index, &spec.name, db));
+        }
+        startup_results.push(device.set_amp_enable(cfg.radio.amp_enabled));
+        startup_results.push(device.set_tuner_agc(cfg.radio.amp_enabled));
 
         let state = Arc::new(Mutex::new(initial_metrics(
             &cfg,

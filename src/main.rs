@@ -97,16 +97,23 @@ async fn main() -> Result<()> {
     if let Some(f) = cli.frequency {
         app_cfg.radio.frequency_hz = f;
     }
+    // `--lna` / `--vga` are **positional**: the first and second stage, whatever
+    // the device calls them. That is what they already meant on the two native
+    // radios, and it is the only reading that works on a device whose stages are
+    // named `IFGR` and `RFGR`. `resolve_gains` layers them over the config's own
+    // gain, so one flag does not silently reset the other stages.
     if let Some(l) = cli.lna {
-        app_cfg.radio.lna_gain = l.min(40);
+        app_cfg.radio.lna_gain = Some(l);
     }
     if let Some(v) = cli.vga {
-        app_cfg.radio.vga_gain = v.min(62);
+        app_cfg.radio.vga_gain = Some(v);
     }
-    // --gain is the device-agnostic primary gain (applied after --lna so it wins);
-    // the device clamps/snaps it at program time (HackRF LNA range, RTL nearest step).
+    // `--gain` takes either form the config file takes: a bare number, which is
+    // the whole chain and gets distributed the way the knob distributes it, or
+    // `NAME=value` pairs. One parser serves both, so the flag can never express
+    // something the file cannot.
     if let Some(g) = cli.gain {
-        app_cfg.radio.lna_gain = g;
+        app_cfg.radio.gain = Some(g);
     }
     if let Some(t) = cli.theme {
         app_cfg.theme.base = t;
