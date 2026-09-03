@@ -25,6 +25,78 @@ pub(super) fn full_scale_us(budget_us: u64) -> i32 {
     ((budget_us as f64 * FULL_SCALE_FACTOR).round() as i32).max(1)
 }
 
+/// What the chart is drawn against, and whether crossing it means anything.
+///
+/// **The words were fixed for a pull backend before the geometry was, and the
+/// geometry is what mattered.** The axis was anchored to `deadline_budget_us` on
+/// both models. On a HackRF through SoapySDR that budget is 377 µs while the read
+/// gaps swing by 18 ms, so every column pinned to the rails, every one was
+/// tagged as a spike, and the whole plot came out a solid block of red on a link
+/// the same screen graded Excellent with 85 % of its loop spare.
+///
+/// A pull loop drains a buffer and then waits. Those swings are the rhythm, not
+/// faults, so on `Pull` there is **no threshold at all**: no colour grading, no
+/// spike tags, no guide band. The axis is scaled to hold the data instead.
+pub(super) struct Reference {
+    /// Deviation at the top and bottom edge of the plot, in µs.
+    pub full_scale_us: i32,
+    /// What a column is judged against, or `None` when there is nothing to
+    /// judge. `None` is the whole of the pull case.
+    pub threshold_us: Option<u64>,
+}
+
+impl Reference {
+    pub(super) fn of(
+        delivery: crate::hardware::DeliveryModel,
+        deviations: &[i32],
+        budget_us: u64,
+        period_expected_us: u64,
+    ) -> Self {
+        match delivery {
+            crate::hardware::DeliveryModel::Push => Self {
+                full_scale_us: full_scale_us(budget_us),
+                threshold_us: Some(budget_us),
+            },
+            crate::hardware::DeliveryModel::Pull => {
+                let peak = deviations
+                    .iter()
+                    .map(|d| d.unsigned_abs() as u64)
+                    .max()
+                    .unwrap_or(0);
+                Self {
+                    full_scale_us: round_125(peak.max(period_expected_us)) as i32,
+                    threshold_us: None,
+                }
+            }
+        }
+    }
+}
+
+/// Round up to the next 1, 2 or 5 times a power of ten.
+///
+/// The axis has to hold the data, and it also has to stay still: an axis that
+/// tracked the peak exactly would move every frame and a steady stream would
+/// look like a drifting one. Snapping to a 1/2/5 step means it only changes when
+/// the data changes regime, which is the moment you want to notice anyway.
+pub(super) fn round_125(v: u64) -> u64 {
+    if v == 0 {
+        return 1;
+    }
+    let mut step = 1u64;
+    loop {
+        for m in [1u64, 2, 5] {
+            let candidate = step.saturating_mul(m);
+            if candidate >= v {
+                return candidate;
+            }
+        }
+        step = match step.checked_mul(10) {
+            Some(s) => s,
+            None => return v,
+        };
+    }
+}
+
 /// Signed deviation (µs) at the top edge of text row `r` of an `rows`-tall chart,
 /// where row 0 is `+full_scale` and the last row is `−full_scale`.
 pub(super) fn axis_value_us(r: usize, rows: usize, full_scale: i32) -> i32 {
@@ -84,6 +156,55 @@ pub(super) fn band_rows(chart_h: usize, budget_us: u64, full_scale: i32) -> (usi
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    use crate::hardware::DeliveryModel;
+
+    #[test]
+    fn round_125_goes_up_to_the_next_readable_step() {
+        assert_eq!(round_125(1), 1);
+        assert_eq!(round_125(3), 5);
+        assert_eq!(round_125(6), 10);
+        assert_eq!(round_125(12_000), 20_000);
+        assert_eq!(round_125(50_000), 50_000);
+        assert_eq!(round_125(50_001), 100_000);
+        assert_eq!(
+            round_125(0),
+            1,
+            "a zero scale would divide the strip by zero"
+        );
+    }
+
+    /// The measured SoapySDR HackRF: a 377 µs budget and read gaps swinging by
+    /// tens of milliseconds. Anchoring to the budget put every point off scale.
+    #[test]
+    fn a_pull_axis_holds_the_data_instead_of_the_budget() {
+        let devs = vec![-8_192, 41_800, -8_190, 41_900];
+        let r = Reference::of(DeliveryModel::Pull, &devs, 377, 8_192);
+        assert!(
+            r.full_scale_us >= 41_900,
+            "the plot must contain its own data: {}",
+            r.full_scale_us
+        );
+        assert_eq!(
+            r.threshold_us, None,
+            "a pull loop drains and waits; there is nothing to be over"
+        );
+    }
+
+    #[test]
+    fn a_push_axis_is_still_anchored_to_the_deadline() {
+        let devs = vec![-8_192, 41_800];
+        let r = Reference::of(DeliveryModel::Push, &devs, 3_015, 65_536);
+        assert_eq!(r.full_scale_us, full_scale_us(3_015));
+        assert_eq!(r.threshold_us, Some(3_015));
+    }
+
+    /// A quiet pull loop must not collapse the axis onto its own noise.
+    #[test]
+    fn a_pull_axis_never_shrinks_below_one_block_period() {
+        let r = Reference::of(DeliveryModel::Pull, &[3, -4], 377, 8_192);
+        assert!(r.full_scale_us >= 8_192, "{}", r.full_scale_us);
+    }
 
     #[test]
     fn axis_value_spans_full_scale_top_to_bottom() {

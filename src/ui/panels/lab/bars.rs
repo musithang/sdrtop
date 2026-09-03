@@ -194,8 +194,14 @@ fn timing_banner_fields(
             },
         ),
     };
+    // The first field's *name* follows the transport too. It said CALLBACK on a
+    // pull backend while the panel two rows below correctly said READ LOOP.
+    let period_label = match delivery {
+        crate::hardware::DeliveryModel::Push => "CALLBACK",
+        crate::hardware::DeliveryModel::Pull => "READ",
+    };
     vec![
-        ("CALLBACK", callback),
+        (period_label, callback),
         ("JITTER", format!("\u{00b1}{} \u{00b5}s", t.cb_jitter_us)),
         ("DRIFT", format!("{:+} ppm", t.cb_period_delta_ppm)),
         last,

@@ -37,7 +37,20 @@ struct Columns {
 }
 
 impl Columns {
-    fn of(window: &[i32], cols: usize, over: &[usize], budget_us: u64) -> Self {
+    fn of(window: &[i32], cols: usize, over: &[usize], threshold_us: Option<u64>) -> Self {
+        // Nothing to be over: one neutral trace, no tags. See `scale::Reference`.
+        let Some(budget_us) = threshold_us else {
+            return Self {
+                severity: (0..cols)
+                    .map(|c| {
+                        (window.get(SAMPLES_PER_COL * c).is_some()
+                            || window.get(SAMPLES_PER_COL * c + 1).is_some())
+                        .then_some(0u8)
+                    })
+                    .collect(),
+                over_sign: vec![0i8; cols],
+            };
+        };
         let pair = |c: usize| {
             (
                 window.get(SAMPLES_PER_COL * c).copied(),
@@ -80,22 +93,33 @@ pub(super) fn shown_samples(chart_w: u16, available: usize) -> usize {
     (SAMPLES_PER_COL * cols).min(available)
 }
 
-pub(super) fn draw(f: &mut Frame, area: Rect, t: &TimingState, stale: bool, theme: &crate::Theme) {
+pub(super) fn draw(
+    f: &mut Frame,
+    area: Rect,
+    t: &TimingState,
+    reference: &scale::Reference,
+    stale: bool,
+    theme: &crate::Theme,
+) {
     let chart_h = area.height as usize;
     let cols = (area.width as usize).saturating_sub(GUTTER_W);
     if stale || cols < MIN_COLS || chart_h == 0 || t.cb_deviations_us.is_empty() {
         return placeholder(f, area, stale, theme);
     }
 
-    let full_scale = scale::full_scale_us(t.deadline_budget_us);
+    let full_scale = reference.full_scale_us;
     let dev = &t.cb_deviations_us;
     let (strip, over) = bipolar_braille_strip(dev, cols, chart_h, full_scale);
 
     // The samples actually shown (the last two per column), for per-column colour.
     let window = &dev[dev.len().saturating_sub(SAMPLES_PER_COL * cols)..];
-    let columns = Columns::of(window, cols, &over, t.deadline_budget_us);
+    let columns = Columns::of(window, cols, &over, reference.threshold_us);
 
-    let (band_top, band_bot) = scale::band_rows(chart_h, t.deadline_budget_us, full_scale);
+    // No threshold means no guide to draw. Rows out of range, so nothing matches.
+    let (band_top, band_bot) = match reference.threshold_us {
+        Some(th) => scale::band_rows(chart_h, th, full_scale),
+        None => (usize::MAX, usize::MAX),
+    };
     let label_rows = scale::label_rows(chart_h);
     let last_row = chart_h - 1;
     let lbl = Style::default().fg(theme.label);
@@ -182,7 +206,7 @@ mod tests {
     #[test]
     fn a_column_takes_the_worse_of_its_two_samples() {
         let window = [10i32, 5_000, 20, 30];
-        let c = Columns::of(&window, 2, &[], 600);
+        let c = Columns::of(&window, 2, &[], Some(600));
         assert_eq!(c.severity[0], Some(2), "the 5000 µs sample must win");
         assert_eq!(c.severity[1], Some(0));
     }
@@ -191,7 +215,7 @@ mod tests {
     /// a fabricated in-budget one.
     #[test]
     fn columns_past_the_data_have_no_severity() {
-        let c = Columns::of(&[10i32, 20], 4, &[], 600);
+        let c = Columns::of(&[10i32, 20], 4, &[], Some(600));
         assert_eq!(c.severity[0], Some(0));
         assert_eq!(c.severity[1], None);
         assert_eq!(c.severity[3], None);
@@ -200,7 +224,7 @@ mod tests {
     #[test]
     fn only_over_range_columns_get_a_tag() {
         let window = [10i32, 20, -9_000, 5];
-        let c = Columns::of(&window, 2, &[1], 600);
+        let c = Columns::of(&window, 2, &[1], Some(600));
         assert_eq!(c.over_sign(0), 0, "an in-range column is untagged");
         assert_eq!(c.over_sign(1), -1, "an early spike tags downward");
         assert_eq!(c.over_sign(99), 0, "out of range is untagged, not a panic");

@@ -98,13 +98,15 @@ impl Panel for TimingStripchartPanel {
             Paragraph::new(stats::line(t, state.caps.delivery, stale, theme)),
             rows[1],
         );
-        chart::draw(f, rows[3], t, stale, theme);
+        let reference = super::timing_stripchart::scale::Reference::of(
+            state.caps.delivery,
+            &t.cb_deviations_us,
+            t.deadline_budget_us,
+            t.cb_period_expected,
+        );
+        chart::draw(f, rows[3], t, &reference, stale, theme);
         f.render_widget(
-            Paragraph::new(captions::key_row(
-                t.deadline_budget_us,
-                state.caps.delivery,
-                theme,
-            )),
+            Paragraph::new(captions::key_row(&reference, state.caps.delivery, theme)),
             rows[4],
         );
         f.render_widget(
@@ -256,8 +258,16 @@ mod tests {
         );
         assert!(out.contains("65 %"), "no occupancy figure:\n{out}");
         assert!(
-            out.contains("for scale only"),
-            "legend still promises a deadline:\n{out}"
+            out.contains("scaled to the read gaps"),
+            "legend does not say what the axis is:\n{out}"
+        );
+        // The geometry, not only the words. The axis used to be anchored to the
+        // deadline budget on both models, which put every read gap off scale and
+        // tagged every column, so the plot came out a solid block of red on a
+        // link the same screen graded Excellent.
+        assert!(
+            !out.contains("\u{25B2}") && !out.contains("\u{25BC}"),
+            "a pull loop's own rhythm was tagged as spikes:\n{out}"
         );
 
         // The push device keeps every word of it.

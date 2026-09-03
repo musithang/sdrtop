@@ -64,30 +64,48 @@ pub(super) fn description(iw: usize, delivery: crate::hardware::DeliveryModel) -
 /// A pull backend has no deadline to be in or out of, so the legend names the
 /// band rather than a verdict on it.
 pub(super) fn key_row(
-    budget_us: u64,
+    reference: &super::scale::Reference,
     delivery: crate::hardware::DeliveryModel,
     theme: &crate::Theme,
 ) -> Line<'static> {
-    let (inside, outside, guide) = match delivery {
-        crate::hardware::DeliveryModel::Push => (
-            "\u{25AC} in budget",
-            "\u{25AC} over budget",
-            format!("\u{2504} \u{00b1}{budget_us} \u{00b5}s deadline"),
-        ),
-        crate::hardware::DeliveryModel::Pull => (
-            "\u{25AC} near the mean",
-            "\u{25AC} a long read gap",
-            format!("\u{2504} \u{00b1}{budget_us} \u{00b5}s, for scale only"),
-        ),
+    // Pull has no colour key because it has no two colours: there is nothing to
+    // be over, so the row says what the axis spans and stops.
+    let Some(budget_us) = reference.threshold_us else {
+        let span = fmt_span(reference.full_scale_us);
+        return Line::from(vec![
+            Span::raw(" "),
+            Span::styled("\u{25AC} one read gap", Style::default().fg(theme.value)),
+            Span::raw("   "),
+            Span::styled(
+                format!("axis \u{00b1}{span} \u{00b7} scaled to the read gaps"),
+                Style::default().fg(theme.border_dim),
+            ),
+        ]);
     };
+    let _ = delivery;
     Line::from(vec![
         Span::raw(" "),
-        Span::styled(inside, Style::default().fg(theme.value)),
+        Span::styled("\u{25AC} in budget", Style::default().fg(theme.value)),
         Span::raw("   "),
-        Span::styled(outside, Style::default().fg(theme.status_warn)),
+        Span::styled(
+            "\u{25AC} over budget",
+            Style::default().fg(theme.status_warn),
+        ),
         Span::raw("   "),
-        Span::styled(guide, Style::default().fg(theme.border_dim)),
+        Span::styled(
+            format!("\u{2504} \u{00b1}{budget_us} \u{00b5}s deadline"),
+            Style::default().fg(theme.border_dim),
+        ),
     ])
+}
+
+/// An axis span in the unit that reads best: µs under a millisecond, ms above.
+fn fmt_span(us: i32) -> String {
+    if us.unsigned_abs() >= 1000 {
+        format!("{:.1} ms", us.unsigned_abs() as f64 / 1000.0)
+    } else {
+        format!("{} \u{00b5}s", us.unsigned_abs())
+    }
 }
 
 /// How long a stretch of stream the plot covers.
