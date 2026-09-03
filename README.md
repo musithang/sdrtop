@@ -275,7 +275,7 @@ Native support is added only after physical testing on real devices. No guessing
 
 **SoapySDR is the deliberate exception**, because "I don't own one" was a bad answer to give every week, and buying one of everything is not a plan, it's a fantasy with a shipping address. Nothing about your radio is hardcoded: sdrtop asks the driver for the frequency range, the gain range, whether there's an AGC, the sample format and how many of its bits mean anything. What it can't ask, it refuses rather than invents. Verified against a HackRF through `SoapyHackRF`: the loader, enumeration, opening, capabilities and streaming. Unverified: literally every other radio. [The honest version](user_docs/hardware.md#soapysdr-the-honest-version) has the full reckoning, including the gotchas I already hit.
 
-It took me a while to stop wincing at that. Before this, every row above was green and "tested on real hardware" applied to everything I shipped, which is another way of saying it separated nothing. The grey badges are what make the green ones mean something, and a rule nobody has ever had a reason to test is not a rule, it's a habit. This one now has one marked edge on it, on purpose. [Why that makes it stronger, not weaker](POLICY.md).
+It took me a while to stop wincing at that. Before this, every row above was green and "tested on real hardware" applied to everything I shipped, which is another way of saying it separated nothing. The grey badges are what make the green ones mean something, and a rule nobody has ever had a reason to test is not a rule, it's a habit. This one now has one marked edge on it, on purpose.
 
 ### The hardware wishlist
 
@@ -324,4 +324,4 @@ Yep, it's a radio tower. I'm a simple man, I see free time, I make ASCII art.
 
 ---
 
-**[Credits](CREDITS.md)** · **[POLICY](POLICY.md)**: the rules this instrument is held to, and the one it broke
+**[Credits](CREDITS.md)**
