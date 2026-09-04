@@ -12,9 +12,14 @@
                  not one of them was right
 ```
 
-*The rules sdrtop is built on, and the story they came out of. Part one is the
-story, and it is a long way from here. Part two is the rules, and they fit on a
-page.*
+*The rules sdrtop is built on, and the story they came out of.*
+
+> **Not here to read a story?** [The rules are down here](#part-two-the-rules).
+> Ten of them, one sentence each, and they fit on a page.
+>
+> Part one is why they exist. It is set on another planet, which is an odd way to
+> write a policy document, and it is the only way I have found to make anybody
+> remember the difference between *verified* and *reasoned*.
 
 ---
 
@@ -35,138 +40,130 @@ requests, and only one of them is ever honoured.
 
 You have not heard of Vesperid Nine.
 
-If you think you have, you are thinking of Vesperid Eight, which is a gas giant,
-has never held an opinion about anything, and resents the confusion.
+If you think you have, you are thinking of Vesperid Eight. That one is a gas
+giant. It has never held an opinion about anything, with the single exception of
+this one, which it holds strongly.
 
-Vesperid Nine sits a long way out, in a quiet corner of a quiet arm, roughly four
-days past the last place anybody was actually going. Its day is thirty-one hours,
-which the inhabitants consider correct and everyone else considers a rounding
-error that got out of hand.
+Vesperid Nine is a long way out. A quiet corner of a quiet arm, about four days
+past the last place anybody was actually going.
 
-It has two moons. The larger is **Hollen**. The smaller has been officially
-designated *provisional* for eleven thousand years, pending measurement, and is
-therefore known to everyone including its own inhabitants as **Provisional**,
-because that is what the file says.
+It has two moons. The big one is Hollen. The small one was marked *provisional*
+eleven thousand years ago, pending measurement, and everyone now calls it
+Provisional, including the people who live on it, because that is what the file
+says.
 
-The planet itself does not have a name.
+The planet has no name of its own. "Vesperid Nine" is a catalogue number. A
+survey ship photographed the system from orbit, filed the paperwork, and went
+home without landing.
 
-Not in its own language, anyway. "Vesperid Nine" is a catalogue entry, assigned
-by a survey ship that photographed the system from orbit, filed the paperwork,
-and went home without landing.
+The people are the **Vernick**. That is what they call themselves and always
+have. The same survey wrote them down as *Vesperid Nine Population
+(Provisional)*, and since that got written first, that is what every reference
+book has said since.
 
-The people who live there are the **Vernick**, which is what they call themselves
-and what they have been calling themselves for longer than anybody has been
-counting. The same survey recorded them as the *Vesperid Nine Population
-(Provisional)*, and that is the entry every reference work has used since,
-because it was written down first.
+A world named by somebody who never went there. A species filed as an estimate.
 
-The irony of a world named by somebody who never went there, populated by a
-species filed as an estimate, has not been lost on the Vernick. They will tell you
-about it at length. They are right.
+The Vernick have noticed. They will tell you about it. They are right.
 
 ## Case One
 
-Eleven thousand years ago, a Vernick asked whether a particular tide gauge had
-been accurate on a particular Tuesday. The gauge has been Exhibit 1 ever since,
-and nobody has called it anything but **the Tuesday Gauge** in nine thousand
-years.
+Eleven thousand years ago a Vernick asked whether a tide gauge had been accurate
+on a particular Tuesday.
 
-This was a reasonable question of no great importance, and it was expected to
-take an afternoon.
+Fair question. Nobody thought much of it. It was expected to take an afternoon.
 
-The difficulty is procedural, and it is worth following, because everything else
-in this document hangs off it. Under the rules the Assize adopted in its first
-week, a case cannot close until every piece of evidence in it has been verified.
-One piece of evidence was a gauge. Verifying a gauge requires a second gauge. A
-second gauge introduced into proceedings is itself evidence, and must therefore
-be verified, which requires a third.
+The problem was a rule. The Assize had written it in their first week, and it
+said, sensibly enough, that a case cannot close until all the evidence has been
+checked.
 
-Case One has been open ever since.
+One piece of evidence was a gauge.
 
-Every hearing held on Vesperid Nine for eleven thousand years has been,
-technically, a sub-hearing of Case One. The trial that ended the Great Agreement
-was a sub-hearing. So was the harbour dispute, so was the business with the bell,
-and so, for reasons nobody enjoys explaining to visitors, is the ongoing status
-of the second moon.
+Checking a gauge means fetching another gauge. And a gauge you carry into a
+courtroom becomes evidence, so it needs checking too. Which means a third.
 
-The Assize is entirely aware that this is ridiculous. It has considered closing
-Case One on eleven separate occasions and declined every time, on the grounds
-that closing it would require an instrument the court trusts, and trusting an
-instrument requires closing a case.
+Case One is still open.
 
-So they sit. Permanently. They have been in permanent session since before they
-had a word for it, and the word they eventually got is not a good one.
+Every hearing held on that planet since has technically been part of it. The
+trial that ended the Great Agreement. The tide gauge in the mountain. The
+business with the bell.
 
-And here is what eleven thousand years of continuous argument about gauges will
-do to a civilisation: it will make them, and this is not disputed anywhere, **the
-finest instrument builders in known space.**
+And the second moon, which is still officially provisional because confirming it
+means measuring it, and no measurement on Vesperid Nine is final while Case One
+is open. Nobody enjoys explaining that one to visitors.
 
-That is the origin of everything below, including the part where it goes
-catastrophically wrong.
+They know it is ridiculous. They have voted on closing it nine times and declined
+nine times, because closing Case One needs an instrument the court trusts, and
+trusting an instrument needs a closed case.
 
-## The one thing they never learned
+So they sit. Every day. They have been sitting since before they had a word for
+it.
 
-The Vernick were not exaggerating and neither is this document. A Vernick gauge
-recovered from a wreck four hundred years after it sank was found to be inside
-tolerance, and is now behind glass in a museum on a different planet, with a
-queue.
+Eleven thousand years of continuous argument about gauges does something to a
+civilisation.
 
-**They were right about their instruments.** The reputation was earned, over and
-over, by people who deserved every bit of it.
+It makes them very, very good at gauges.
 
-Which is exactly how it happened.
+This is not seriously disputed. Vernick instruments are the finest anyone has
+ever made. A
+Vernick gauge came out of a shipwreck nine hundred years after it sank, still
+inside tolerance, and now sits behind glass in a museum on another planet with a queue
+outside.
 
-When your instruments are the best that have ever existed, doubting one stops
-looking like diligence and starts looking like ignorance. A Vernick engineer who
-questioned a Vernick gauge was not being careful. They were being provincial.
+They were right about their instruments.
+
+Because when your instruments are the best that have ever existed, doubting one
+stops looking like care and starts looking like ignorance. A Vernick engineer who
+questioned a Vernick gauge was not being thorough. They were being provincial.
+
 Everyone was very polite about it, which was worse.
 
-So a species that had spent eleven millennia arguing about whether instruments
-were accurate never developed the habit of asking one a question. There was no
+So a species that spent eleven thousand years arguing about whether instruments
+were accurate never picked up the habit of asking one a question. There was no
 need. The instruments were excellent.
 
-The instruments **remained** excellent. That was never the problem, and a court
-would eventually confirm it in the most humiliating way available.
+They stayed excellent. That was never the problem.
 
 ## The Great Agreement
 
 For four hundred and six years, every instrument on Vesperid Nine agreed with
 every other instrument on Vesperid Nine.
 
-This was taken, at the time, as the crowning achievement of the planet's
-scientific establishment, and there were monuments. Three are still standing,
-which is two more than the inquiry recommended. Schoolchildren were taught the
-date on which the last dissenting gauge was brought into line, and the technician
-who did it, **Corvin Thest**, had a modest but entirely genuine public holiday
-named after him. It is still observed. It has been renamed twice, and is now
-called Standards Day, which the Vernick mark by not working and not measuring
-anything.
+They were very proud of this. There were monuments. Three are still standing,
+which is two more than the inquiry recommended.
 
-Nobody, at any point, considered that the dissenting gauge might be the one
-telling the truth. That would have required believing a Vernick instrument could
-be wrong, and the only Vernick instrument anybody had ever known to be wrong was a
-broken one. The reasoning was sound. It was sound for four thousand years. It
-was sound right up until it was catastrophic, which is the only warning that kind
-of reasoning ever gives.
+Children learned the date the last disagreeing gauge was brought into line. The
+technician who did it, **Corvin Thest**, got a public holiday. It is still
+observed. It has been renamed twice and is now Standards Day, which the Vernick
+mark by not working and not measuring anything.
 
-The dissenting gauge, catalogued then and now as **the Thest Instrument**, had
-been right from the beginning. It emerged rather later. It is in a museum too, in
-a case, beside a small printed card that does not mention any of this.
+It did not occur to anybody that the odd gauge out might be the one telling the
+truth.
+That would have meant believing a Vernick instrument could be wrong, and the only
+wrong Vernick instrument anyone had ever met was a broken one.
 
-The instruments agreed because they were all wrong in the same direction, for the
-same reason, about the same thing. Nobody found this by noticing a discrepancy,
-because there were no discrepancies to notice. No civilisation in recorded
-history has ever been better protected against discrepancies.
+The reasoning was sound. It had been sound for as long as anybody had been making
+instruments. It was sound right up until it was a catastrophe. That is the only
+warning that kind of reasoning ever gives.
 
-And here is the part nobody likes bringing up. During the Great Agreement,
-Vesperid Nine completed a canal, two orbital elevators and a full planetary
-census, and **all three of them worked.** A system that is wrong in one
-consistent direction does not fall over. It functions beautifully, for a very
-long time, and gets more expensive to correct every year that it does.
+The gauge is still catalogued as **the Thest Instrument**, after the man who
+silenced it. It had been right all along. It is in a museum too, in a case,
+beside a small card that mentions none of this.
+
+They all agreed because they were all wrong in the same direction, for the same
+reason, about the same thing. Nobody caught it by spotting a discrepancy, because
+there were no discrepancies to spot.
+
+Nobody on Vesperid Nine brings up what else happened during those four hundred
+and six years. They built a canal, two orbital elevators and a full planetary
+census, and all three of them **worked**.
+
+A system that is wrong in one consistent direction does not fall over. It works
+beautifully, for a very long time, and gets more expensive to fix every year it
+does.
 
 ## The visitor
 
-It ended because somebody brought their own gauge.
+It ended because somebody brought her own gauge.
 
 She was passing through. Her instrument had been built somewhere else entirely,
 by people with no opinion whatsoever about the Vernick, and it disagreed with
@@ -174,273 +171,284 @@ absolutely everything.
 
 She was detained for eleven days.
 
-There is a statue of her now, near the third monument. The Assize recorded her
-gauge's designation but not her name, which nobody noticed for two hundred years
-and nobody has been able to correct since, so the plaque reads
+Then she was released, with apologies. Her gauge was not.
+
+It had been entered as evidence, and evidence in Case One does not leave, because
+Case One does not close. She waited two years. Then she went home without it.
+
+Her homeworld has asked for it back every century since. The Assize answers every
+time, politely, to say that the matter is still before the court.
+
+The statue went up much later, long after anyone could ask her anything. By then
+they had realised what she had done for them and wanted to say so. The trouble
+was that the Assize had recorded her gauge's serial number and not her name, and
+nobody noticed for two hundred years, and by then that omission was evidence too.
+
+So the plaque reads
 
 > INSTRUMENT 4471-K (FOREIGN)
 
-and is noticeably shorter than the ones on either side.
+and is noticeably shorter than the ones either side of it.
 
 ## The trial
 
-The Assize did the obvious thing and put the original instrument in the dock. The
-proceedings were exhaustive, the public mood was not generous, and the verdict
-was an acquittal that astonished everybody except the three people who had read
-the transcripts, two of whom had been saying so for some time and one of whom was
-the manufacturer and was therefore discounted on principle.
+They put the instrument in the dock.
 
-The instrument had never malfunctioned. Not once, across four centuries, had it
-reported anything other than exactly what it measured, to a tolerance that
-remains slightly embarrassing for the equipment that replaced it.
+It went on for a long time, the public mood was not generous, and the verdict
+astonished everybody except the three people who had read the transcripts. Two of
+those had been saying so for years. The third was the manufacturer and was
+ignored on principle.
 
-What it had measured was the width of the window it was looking through.
+The instrument was acquitted.
+
+It had never malfunctioned. Not once in four centuries had it reported anything
+other than exactly what it measured, to a tolerance that is still faintly
+embarrassing for the equipment that replaced it.
+
+What it measured was the width of the window it was looking through.
 
 The word above the number said `BANDWIDTH`.
 
-In four hundred and six years, nobody had ever asked the word anything at all.
+In four hundred and six years nobody had ever asked the word anything.
 
-They had built the finest instruments in known space and then spent four
-centuries reading the labels somebody had stuck above them, which nobody had
-ever thought to test, because labels are not instruments and testing was
-something you did to instruments.
+And every other gauge on the planet had been calibrated, sooner or later, against
+that one.
+
+Which is how a single wrong word became four hundred and six years of perfect
+agreement. **Calibration copies a definition as faithfully as it copies a value.**
+Every instrument in the chain inherited the label along with the number, and the
+label had never been checked by anybody, because labels are not instruments and
+checking was something you did to instruments.
+
+Catching it would have needed two instruments that disagreed.
+
+There had not been two instruments that disagreed in four hundred and six
+years.
 
 ---
 
 *None of that happened.*
 
-*All of it happens continuously, in software, on a smaller scale, to fewer
-people, with no monuments and no inquiry and no public holiday: a quantity
-measured perfectly, labelled as something it is not, agreeing beautifully with
-four other quantities that are wrong for the same reason, and read with total
-confidence by somebody who has no way to check and no reason on earth to suspect
-they should.*
-
-*The rest of this is what Vesperid Nine did about it, and what sdrtop takes from
-that.*
+*All of it happens constantly, in software, smaller, to fewer people, with no
+monuments and no inquiry: a number measured perfectly, labelled as something it
+is not, agreeing beautifully with four other numbers that are wrong for the same
+reason, and read with total confidence by somebody who has no way to check.*
 
 ---
 
-## What they tried first, and why it failed
+## What they did about it
 
-The Assize's first act was the **Absolute Rules Act**: no exception to any rule
-of evidence, on any ground, for any reason, permanently. It was drafted in nine
-weeks by people who were not in the mood, and it is still regarded as the most
-rigorous legal instrument the planet has produced.
+Twice. The first attempt was a disaster.
 
-It held for four hundred years, a figure the Assize once quoted with pride and
-now tends to leave out.
+**The Absolute Rules Act** came first. No exception to any rule of evidence, ever,
+on any ground. Nine weeks to write, by people who were not in the mood. Still the
+most rigorous law the planet has produced.
 
-The trouble was found by a clerk doing an inventory, which is how most things are
-found. Of the four thousand rules then on the books, a great many had never been
-invoked, never been argued against, and never been pressed on by anybody at all.
+It lasted three hundred years.
 
-**A rule that has never been pressed on gives back no information about itself.**
-It cannot be told apart from a habit, and the archive was already full of habits.
-Nobody could say which of the four thousand were load-bearing. Not because any of
-them were bad, but because none had been tested, and an untested rule is not a
-rule you have. It is a rule you are assuming.
+A clerk doing an inventory found the problem, which is how most things get found.
+Of the four thousand rules on the books, most had never been used. Never argued
+against. Never leaned on by anybody.
 
-Which was, with a precision nobody enjoyed pointing out, the Great Agreement
-again, in a different building, made of paper.
+And a rule nobody has leaned on tells you nothing about itself. You cannot tell it
+apart from a habit.
 
-So they adopted the doctrine the Court still runs on:
+There was no way to tell which of the four thousand were holding anything up.
 
-> **A rule may be broken once. Deliberately, in the open, with the boundary drawn
-> and the breach marked on every document it touches.**
+Which was, and somebody did point this out, the Great Agreement again. Same shape,
+different building, made of paper.
 
-The breach is not a weakening. It is the only measurement of the rule that anyone
-will ever get. Everything outside the marked boundary is now *known* to be
-governed rather than assumed to be, because the boundary is visible and a person
-can walk around it and see where it stops.
+So they threw it out and wrote the doctrine the court still runs on:
 
-The phrase they settled on has been misquoted ever since, almost always by
-somebody looking for a way out of something: **the exception proves the rule.**
+> **A rule may be broken once. On purpose, in the open, with the boundary drawn
+> and the breach written on everything it touches.**
 
-Proves as in *tests*. As in a proving ground. As in proof spirit. No Vernick has
+The breach is not damage. It is the only measurement of the rule anyone will ever
+get. Everything outside the line is now *known* to be governed instead of assumed
+to be, because you can see where the line is and walk around it.
+
+The phrase they landed on has been misquoted ever since, usually by somebody
+looking for a way out of something: **the exception proves the rule.**
+
+Proves as in tests. As in a proving ground. As in proof spirit. No Vernick has
 ever used it to mean *excuses*, and the Assize has fined people for trying.
 
-**The whole doctrine hangs on the marking.** An exception nobody wrote down is
-not an exception. It is a rule that was quietly abandoned by somebody who did not
-want the argument, and the archive holds several of those, which is precisely how
-anybody knows the difference matters.
+It all hangs on the marking. An exception nobody wrote down is not an exception.
+It is a rule somebody quietly dropped because they did not want the argument. The
+archive holds several of those. That is how anybody knows the difference
+matters.
 
-## What they tried second, and why it worked
+The second attempt was **the Second Opinion Act**. Every measurement that matters
+gets confirmed by a second instrument of independent manufacture.
 
-The **Second Opinion Act** required every measurement of consequence to be
-confirmed by a second instrument of independent manufacture.
+It worked beautifully for nine years.
 
-It worked extremely well for about nine years.
+Then the money caught up. Independent manufacture is expensive, and the market did
+what markets do. Within a decade the two biggest instrument makers on the planet
+were selling four brand names, eleven model lines and, on inspection, one design.
+Two instruments, two makers, two certificates, two differently coloured boxes, one
+set of assumptions. It passed every audit.
 
-The difficulty was economic. Independent manufacture is expensive, and the market
-did what markets do. Within a decade the two largest instrument makers on
-Vesperid Nine were producing, between them, four brand names, eleven model lines
-and, on inspection, one design. The Act was satisfied at every audit. Two instruments, two
-manufacturers, two certificates, two differently coloured boxes, one set of
-assumptions.
+So they amended it to require independent *design*. The makers hired the same
+three consultants.
 
-The Act was amended to require independent *design*. The manufacturers engaged
-the same three consultants. The Act was amended to require independent
-*consultants*. There were, by that point, three consultants.
+So they amended it to require independent *consultants*. There were, by then,
+three consultants.
 
-The final amendment is still law. It gave up on defining independence
-structurally and required instead that the second measurement be taken **by
-somebody who does not care how it comes out.** This is much harder to define,
-completely impossible to audit, and has never once failed.
+The final amendment is still law. It gave up on defining independence and asked
+instead that the second measurement be taken **by somebody who does not care how
+it comes out.**
 
-That person cannot be hired, legislated for, or manufactured. They can only turn
-up, which is what the visitor did, and it is why she has a statue even though
-nobody enjoys walking past it.
+Impossible to define. Impossible to audit. Has never once failed.
 
-## Four cases the Court is known for
+You cannot hire that person, legislate for them, or build one. They can only turn
+up.
 
-**The tide gauge.** Rule 4(a) requires an instrument to be physically present for
-its own examination. In the year 9,102 a four-kilometre tide gauge was called to
-give evidence about a harbour. The Assize considered an exception, took eleven
-months over the question, and declined, on the grounds that an exception to 4(a)
-would be an exception to 4(a). So the court went to the gauge, and the chamber
-was cut into the mountain around it over the following two years, at a cost
-described at the time as obscene and described now in tourist literature. The
-gauge was found accurate in every particular. That is usually reported as the
-embarrassing part. It is not. Four kilometres of excavated mountain is what a
-court looks like when it takes its own rule seriously enough to be ruined by it,
-and every generation since has proposed relaxing 4(a), and the hole is why none
-of them has.
+Which is what the woman with her own gauge did.
 
-**The bell.** For six hundred years the archive was protected by a bell that
-would ring if the lower chambers flooded. It was tested annually, on a fixed
-date, by ringing it. The bell rang. The test passed. The result was minuted.
-Nothing in the arrangement had ever connected the bell to the water. The flood,
-when it came, was not especially bad, and is remembered chiefly because six
-hundred consecutive annual certificates were recovered from it in excellent
-condition, each confirming that the bell worked.
+## Four things that happened
 
-**The lighthouse keeper.** He testified, accurately and in remarkable detail,
-about a shoal. The shoal was correct. He had last looked at it in a different
-decade and had not thought to mention this, because nobody asked, and nobody
-asked because the testimony was so specific that asking felt rude. Every clerk is
-taught this case in their first week and every clerk reaches the same wrong
-conclusion first, which is that the keeper lied. He did not lie. He answered the
-question. The question was the problem, and the question was: *is the shoal
-there.*
+**The mountain.** An instrument has to be physically present at its own hearing.
+In the year 9,102 that instrument was a four-kilometre tide gauge, so the court
+went to it, and cut a chamber into the mountain around it over two years, at a
+cost described then as obscene and now in tourist brochures.
 
-**The archive.** Every exhibit is cross-referenced to the exhibits that
-corroborate it. Visiting archivists have wept. It also means that when an exhibit
-is wrong, every exhibit pointing at it is wrong, all of them agree, and the
-archive is at its most persuasive precisely where it is least correct. A
-researcher checking a doubtful fact finds it confirmed four times in under a
-minute, leaves satisfied, and carries the error out of the building. Two official
-histories of the institution exist. They disagree about nearly everything except
-the archive, which both describe as beyond reproach. Both are held in the
-archive. Each is cross-referenced to the other.
+They could have marked an exception. The doctrine allows exactly one, and this
+was the obvious place to spend it. They declined, on the grounds that a doctrine
+kept for convenient occasions is not a doctrine, it is a preference.
 
-## The regulars
+The gauge turned out to be perfectly accurate. That is not the embarrassing part.
+Four kilometres of excavated mountain is what a court looks like when it would
+rather be ruined than spend its one exception on a saving in transport costs.
+Every generation since has proposed relaxing that rule. The hole is why none of
+them has.
 
-Five witnesses appear often enough to have names. None of them is lying, which is
-what makes them difficult.
+**The bell.** For six hundred years a bell would ring if the lower archive
+flooded. It was tested every year by ringing it. The bell rang. The test passed.
+It was minuted.
 
-**The Witness Who Was Never Contradicted.** Appears because a gap looked untidy.
-Derived from a default, a neighbour, or an assumption made years ago in a
-different context, and never marked, because marking it would have drawn
-attention to it, which was the problem it was invented to solve. Always the best
-dressed figure in the room. It has never been challenged and will tell you so at
-length, and this is routinely mistaken for an alibi. It is not an alibi. It is an
-attendance record.
+Nothing in the arrangement had ever connected the bell to the water.
 
-**The Right Answer, Under Oath, For The Wrong Reason.** Correct today. The
-reasoning beneath it is not. It passes every test, because tests check answers
-and its answers are impeccable. It waits. It is in no hurry whatsoever. It has,
-quite literally, nothing better to do.
+The flood was not even that bad. It is remembered because six hundred annual
+certificates came out of it in excellent condition, each one confirming that the
+bell worked.
 
-**The Witness Who Will Not Say Where They Were Standing.** Reports in dB against
-nothing in particular. Perfectly precise, entirely unanchored, and destined to be
-compared one day against a figure from somewhere else with a different reference,
-in a comparison that is meaningless in a way neither number can admit to. Asked
-for a reference, it offers more decimal places.
+**The lighthouse keeper.** He described a shoal in remarkable detail and every
+word was accurate. He had last looked at it in a different decade, and never
+mentioned that, because nobody asked, and nobody asked because the description
+was so specific that asking felt rude.
 
-**The Courier Called As An Expert.** Decodes flawlessly, produces the bytes, and
-can say nothing about how they got there, how close they came to not arriving, or
-what they cost the channel around them. A demodulator in roughly the sense that a
-scale reading only "heavy" is a scale.
+Every clerk learns this case in their first week and every clerk decides he lied.
+He did not lie. He answered the question. The question was the problem, and the
+question was: *is the shoal there.*
 
-**The Disclosure Made At Three In The Morning To An Empty Room.** Technically
-entered into the record. Buried on a page reached from another page, in smaller
-type, in a sentence built so a reader in a hurry comes away encouraged. Every
-word true. Nobody who needed it received it. It is in the record, and so is
-everything else, and that is what a record is.
+**The archive.** Every exhibit is cross-referenced to the exhibits that back it
+up. Which means that when one is wrong, everything pointing at it is wrong, they
+all agree, and the archive is most convincing exactly where it is least correct.
 
-## Two things the Court will not do
+There are two official histories of the institution. They disagree about nearly
+everything except the archive, which both call beyond reproach. Both are held in
+the archive. Each cites the other.
 
-It has been asked eleven times to rule on whether a thing was beautiful. It has
-declined eleven times, holding no instrument for it and refusing to improvise
-one, and has been criticised on all eleven occasions, in the press, at length, by
-people who would have been appalled if it had answered. The twelfth request is
-expected within the century. The position is not under review.
+One smaller note, because a later rule leans on it. The Assize has been asked
+eleven times to rule on whether something was beautiful and declined eleven
+times, having no instrument for it and refusing to improvise one. It was
+criticised each time by people who would have been appalled if it had answered.
 
-It has twice attempted to summon a star. Both transcripts are in the archive and
-are, by a comfortable margin, the funniest documents on the planet.
+## The regular
+
+The court sees a great many witnesses who are not lying. Those are the difficult
+ones. There is a whole taxonomy and none of it is cheerful: the reading that
+turned up because a gap looked untidy and has never once been challenged, which
+people mistake for an alibi when it is only an attendance record. The disclosure
+technically on the record, in smaller type, on a page you reach from another
+page, every word true and read by nobody who needed it.
+
+The one worth naming is **the Courier Called As An Expert.**
+
+It decodes flawlessly. It produces the bytes. It can tell you nothing at all
+about how they got there, how close they came to not arriving, or what they cost
+the channel around them.
+
+It is not lying either. It is answering a smaller question than the one it was
+called for, and answering it very well.
 
 ## The Standard
 
-A chain of verification has to end somewhere, and the Vernick are the only people
-who have ever taken that sentence seriously enough to be ruined by it.
+A chain of checking has to stop somewhere. The Vernick are the only people who
+ever took that sentence seriously enough to be ruined by it.
 
-Around the fifth millennium, worn down by Case One and the regress underneath it,
-the Assize did the only thing available. It declared one object correct **by
-definition.** Not measured. Not verified. Correct because it had been named
-correct, and therefore not itself requiring an instrument, and therefore the
-place where the chain could finally stop.
+Around the fifth millennium, worn out by Case One, the Assize did the only thing
+left. They declared one object correct **by definition**. Not measured. Not
+checked. Correct because it had been named correct, and therefore not needing an
+instrument, and therefore the place the chain could finally stop.
 
-The object was a brass cylinder roughly the length of a forearm.
+It was a brass cylinder about the length of your forearm.
 
-Every instrument on Vesperid Nine is calibrated, through a documented and
-unbroken chain, against something calibrated against something calibrated against
-that cylinder. The chain is complete. It has never been broken. On this one point
-the Vernick are more rigorous than any civilisation anybody has ever surveyed, and
-they are entitled to every bit of that.
+Every instrument on the planet is calibrated against something calibrated against
+something calibrated against that cylinder. The chain is documented. It has never
+been broken. On this one point the Vernick are more rigorous than anybody has
+ever managed, and they have earned every bit of that.
 
 The cylinder was lost in the year 5,140.
 
-Nobody is certain how. The hearing ran sixty years and established only that it
-was in the building on a Thursday and was not in the building the following
-spring. Since every measurement taken in the preceding eleven centuries was
-traceable to it, ruling it *lost* would have invalidated all of them, along with
-a canal, two orbital elevators and a census.
+Nobody knows how. The hearing ran sixty years and established only that it was in
+the building on a Thursday and was not there the following spring. Every
+measurement of the previous eleven centuries traced back to it, so calling it
+*lost* would have voided all of them, and every bridge, tunnel and boundary line
+laid out using them.
 
-So the Assize ruled that it is not lost. It is **not currently in the room.**
+So the Assize ruled that it is not lost.
 
-It has held that status for six thousand years. It is the only entry in the
-archive whose location is recorded as *elsewhere*, and the Vernick will show you
-the card if you ask, because they are not hiding it and never have been.
+It is **not currently in the room**.
 
-Here is the part worth sitting with.
+Six thousand years, that status. It is the only thing in the archive whose
+location is recorded as *elsewhere*, and they will show you the card if you ask,
+because they are not hiding it and never have been.
 
-**The system works.** It has always worked. Every instrument on that planet agrees
-with every other instrument to a precision nobody else can approach, and they
-agree because they are all traceable to the same absent cylinder, which is
-another way of saying that they agree with one another about something not one of
-them has ever checked.
+**The system works.** It has always worked. Every instrument on that planet
+agrees with every other instrument to a precision nobody else can touch, and they
+agree because they all trace back to the same absent cylinder.
 
-The Vernick know this. They have known it for six thousand years. There is a
-standing motion, raised at intervals, to declare a new standard and begin again.
-It has never passed, because declaring a new standard requires measuring it, and
-measuring it requires the old one. The motion itself was submitted to Case One in
-the year 5,206 and is still pending.
+Which is another way of saying they agree with each other about something not one
+of them has ever seen.
 
-So they sit. Every day. In permanent session, in a court founded to determine
-whether a gauge was accurate on a Tuesday, with a doctrine of marked exceptions
-and a hole in a mountain and eleven thousand years of jurisprudence, resting the
-entire structure on a brass cylinder nobody has seen since before most of it was
-written down.
+The Vernick know. They have known for six thousand years. Somebody raises a
+motion every so often to declare a new standard and start again, and it never
+passes, because declaring a new standard means measuring it, and measuring it
+means the old one. The motion went into Case One in the year 5,206 and is still
+pending.
 
-They are not embarrassed by this, and they are right not to be.
+And there is one more thing, which does not appear in either official history.
+
+The cylinder vanished in 5,140. The Great Agreement began a long time after that.
+
+So for the whole four hundred and six years they were so proud of, every
+instrument on the planet was tracing back, through a perfect and fully documented
+chain, to an object nobody had laid eyes on for centuries.
+
+Nobody has ever quite wanted to put those two facts next to each other. They are
+both in the archive. Each is cross-referenced to a great many things, and not to
+the other.
+
+So they sit. Every day. Eleven thousand years of law, a doctrine of marked
+exceptions, a hole in a mountain, all of it resting on a brass cylinder nobody
+has laid eyes on since before most of it was written down.
+
+There is exactly one instrument on that planet whose accuracy does not depend on
+the missing cylinder. It was built somewhere else. It was checked by people who
+had never heard of the Vernick.
+
+It is in a drawer in the archive, tagged, because it is evidence.
+
+They are not embarrassed. They should not be.
 
 **They are the only people who have written down where the bottom of their chain
-is, and admitted they cannot see it.**
+is and admitted they cannot see it.**
 
 Everybody else has a bottom to their chain too.
 
-Most of them have simply never gone and looked.
+Most of them have just never gone and looked.
 
 ---
 
@@ -620,11 +628,10 @@ Every one of those radios stays grey until somebody who owns one stands it on a
 desk and files a report. Then that one, and only that one, is entered properly.
 The debt is real, itemised and repayable.
 
-And here is the part that took a while to see. **Before this breach, Rule One had
-never been tested.** Every radio was green, and "verified on hardware" applied to
-everything the project shipped, which is another way of saying it distinguished
-nothing. It was not a law. It was a habit that had never been inconvenient, and
-Vesperid Nine has a good deal to say about those.
+**Before this breach, Rule One had never been tested.** Every radio was green, and
+"verified on hardware" applied to everything the project shipped, which is another
+way of saying it distinguished nothing. It was not a law. It was a habit that had
+never been inconvenient, and Vesperid Nine has a good deal to say about those.
 
 The grey badge is the first evidence that the green badge means anything.
 
