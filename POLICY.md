@@ -38,13 +38,13 @@ requests, and only one of them is ever honoured.
 
 ## A place you have not heard of
 
-You have not heard of Vesperid Nine.
+You have not heard of Grellish Nine.
 
-If you think you have, you are thinking of Vesperid Eight. That one is a gas
+If you think you have, you are thinking of Grellish Eight. That one is a gas
 giant. It has never held an opinion about anything, with the single exception of
 this one, which it holds strongly.
 
-Vesperid Nine is a long way out. A quiet corner of a quiet arm, about four days
+Grellish Nine is a long way out. A quiet corner of a quiet arm, about four days
 past the last place anybody was actually going.
 
 It has two moons. The big one is Hollen. The small one was marked *provisional*
@@ -52,22 +52,34 @@ eleven thousand years ago, pending measurement, and everyone now calls it
 Provisional, including the people who live on it, because that is what the file
 says.
 
-The planet has no name of its own. "Vesperid Nine" is a catalogue number. A
+The planet has no name of its own. "Grellish Nine" is a catalogue number. A
 survey ship photographed the system from orbit, filed the paperwork, and went
 home without landing.
 
-The people are the **Vernick**. That is what they call themselves and always
-have. The same survey wrote them down as *Vesperid Nine Population
-(Provisional)*, and since that got written first, that is what every reference
-book has said since.
+The people are the **Abeyan**.
 
-A world named by somebody who never went there. A species filed as an estimate.
+The word is theirs and it is very old. It translates badly. The nearest is
+*pending determination*: something that has been entered and not yet settled.
+They chose it about eleven thousand years ago and have never seen a reason to
+look at it again.
 
-The Vernick have noticed. They will tell you about it. They are right.
+The survey wrote them down as *Grellish Nine Population (Provisional)*. That was
+a filing status and nothing more. It got written first, so it is what every
+reference book has said since.
+
+The two words mean the same thing.
+
+Nobody on either side has ever noticed.
+
+A world named by somebody who never went there. A species filed as an estimate,
+correctly.
+
+The Abeyan have noticed the first half. They will tell you about it at length.
+They are right to.
 
 ## Case One
 
-Eleven thousand years ago a Vernick asked whether a tide gauge had been accurate
+Eleven thousand years ago an Abeyan asked whether a tide gauge had been accurate
 on a particular Tuesday.
 
 Fair question. Nobody thought much of it. It was expected to take an afternoon.
@@ -88,7 +100,7 @@ trial that ended the Great Agreement. The tide gauge in the mountain. The
 business with the bell.
 
 And the second moon, which is still officially provisional because confirming it
-means measuring it, and no measurement on Vesperid Nine is final while Case One
+means measuring it, and no measurement on Grellish Nine is final while Case One
 is open. Nobody enjoys explaining that one to visitors.
 
 They know it is ridiculous. They have voted on closing it nine times and declined
@@ -103,17 +115,16 @@ civilisation.
 
 It makes them very, very good at gauges.
 
-This is not seriously disputed. Vernick instruments are the finest anyone has
-ever made. A
-Vernick gauge came out of a shipwreck nine hundred years after it sank, still
-inside tolerance, and now sits behind glass in a museum on another planet with a queue
-outside.
+This is not seriously disputed. Abeyan instruments are the finest anyone has ever
+made. An Abeyan gauge came out of a shipwreck nine hundred years after it sank,
+still inside tolerance, and now sits behind glass in a museum on another planet
+with a queue outside.
 
 They were right about their instruments.
 
 Because when your instruments are the best that have ever existed, doubting one
-stops looking like care and starts looking like ignorance. A Vernick engineer who
-questioned a Vernick gauge was not being thorough. They were being provincial.
+stops looking like care and starts looking like ignorance. An Abeyan engineer who
+questioned an Abeyan gauge was not being thorough. They were being provincial.
 
 Everyone was very polite about it, which was worse.
 
@@ -125,21 +136,20 @@ They stayed excellent. That was never the problem.
 
 ## The Great Agreement
 
-For four hundred and six years, every instrument on Vesperid Nine agreed with
-every other instrument on Vesperid Nine.
+For four hundred and six years, every instrument on Grellish Nine agreed with
+every other instrument on Grellish Nine.
 
 They were very proud of this. There were monuments. Three are still standing,
 which is two more than the inquiry recommended.
 
 Children learned the date the last disagreeing gauge was brought into line. The
 technician who did it, **Corvin Thest**, got a public holiday. It is still
-observed. It has been renamed twice and is now Standards Day, which the Vernick
+observed. It has been renamed twice and is now Standards Day, which the Abeyan
 mark by not working and not measuring anything.
 
 It did not occur to anybody that the odd gauge out might be the one telling the
-truth.
-That would have meant believing a Vernick instrument could be wrong, and the only
-wrong Vernick instrument anyone had ever met was a broken one.
+truth. That would have meant believing an Abeyan instrument could be wrong, and
+the only wrong Abeyan instrument anyone had ever met was a broken one.
 
 The reasoning was sound. It had been sound for as long as anybody had been making
 instruments. It was sound right up until it was a catastrophe. That is the only
@@ -153,7 +163,7 @@ They all agreed because they were all wrong in the same direction, for the same
 reason, about the same thing. Nobody caught it by spotting a discrepancy, because
 there were no discrepancies to spot.
 
-Nobody on Vesperid Nine brings up what else happened during those four hundred
+Nobody on Grellish Nine brings up what else happened during those four hundred
 and six years. They built a canal, two orbital elevators and a full planetary
 census, and all three of them **worked**.
 
@@ -166,7 +176,7 @@ does.
 It ended because somebody brought her own gauge.
 
 She was passing through. Her instrument had been built somewhere else entirely,
-by people with no opinion whatsoever about the Vernick, and it disagreed with
+by people with no opinion whatsoever about the Abeyan, and it disagreed with
 absolutely everything.
 
 She was detained for eleven days.
@@ -270,7 +280,7 @@ to be, because you can see where the line is and walk around it.
 The phrase they landed on has been misquoted ever since, usually by somebody
 looking for a way out of something: **the exception proves the rule.**
 
-Proves as in tests. As in a proving ground. As in proof spirit. No Vernick has
+Proves as in tests. As in a proving ground. As in proof spirit. No Abeyan has
 ever used it to mean *excuses*, and the Assize has fined people for trying.
 
 It all hangs on the marking. An exception nobody wrote down is not an exception.
@@ -375,7 +385,7 @@ called for, and answering it very well.
 
 ## The Standard
 
-A chain of checking has to stop somewhere. The Vernick are the only people who
+A chain of checking has to stop somewhere. The Abeyan are the only people who
 ever took that sentence seriously enough to be ruined by it.
 
 Around the fifth millennium, worn out by Case One, the Assize did the only thing
@@ -387,7 +397,7 @@ It was a brass cylinder about the length of your forearm.
 
 Every instrument on the planet is calibrated against something calibrated against
 something calibrated against that cylinder. The chain is documented. It has never
-been broken. On this one point the Vernick are more rigorous than anybody has
+been broken. On this one point the Abeyan are more rigorous than anybody has
 ever managed, and they have earned every bit of that.
 
 The cylinder was lost in the year 5,140.
@@ -413,7 +423,7 @@ agree because they all trace back to the same absent cylinder.
 Which is another way of saying they agree with each other about something not one
 of them has ever seen.
 
-The Vernick know. They have known for six thousand years. Somebody raises a
+The Abeyan know. They have known for six thousand years. Somebody raises a
 motion every so often to declare a new standard and start again, and it never
 passes, because declaring a new standard means measuring it, and measuring it
 means the old one. The motion went into Case One in the year 5,206 and is still
@@ -437,7 +447,7 @@ has laid eyes on since before most of it was written down.
 
 There is exactly one instrument on that planet whose accuracy does not depend on
 the missing cylinder. It was built somewhere else. It was checked by people who
-had never heard of the Vernick.
+had never heard of the Abeyan.
 
 It is in a drawer in the archive, tagged, because it is evidence.
 
@@ -631,7 +641,7 @@ The debt is real, itemised and repayable.
 **Before this breach, Rule One had never been tested.** Every radio was green, and
 "verified on hardware" applied to everything the project shipped, which is another
 way of saying it distinguished nothing. It was not a law. It was a habit that had
-never been inconvenient, and Vesperid Nine has a good deal to say about those.
+never been inconvenient, and Grellish Nine has a good deal to say about those.
 
 The grey badge is the first evidence that the green badge means anything.
 
