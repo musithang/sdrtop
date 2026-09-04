@@ -16,12 +16,11 @@ use std::thread::JoinHandle;
 
 use libc::{c_int, c_void};
 
-use super::process::process_block;
-use super::traits::{
-    DeliveryModel, DeviceCapabilities, DeviceInfo, GainModel, RxContext, SampleFormat,
-    SampleGeometry, SdrDevice,
+use crate::hardware::process::process_block;
+use crate::hardware::{
+    DeliveryModel, DeviceCapabilities, DeviceInfo, DeviceKind, DeviceListing, GainModel, RxContext,
+    SampleFormat, SampleGeometry, SdrDevice,
 };
-use super::{DeviceKind, DeviceListing};
 use ffi::*;
 
 /// Bytes per async transfer (must be a multiple of 512). 64 KiB ≈ 32 768 IQ

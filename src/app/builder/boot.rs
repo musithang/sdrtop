@@ -128,8 +128,8 @@ impl Boot {
             // Observer mode has no open device to query; use the matching
             // backend's capability profile so the UI labels stay correct.
             caps: Arc::new(match kind {
-                hardware::DeviceKind::HackRf => hardware::hackrf::caps(),
-                hardware::DeviceKind::RtlSdr => hardware::rtlsdr::observer_caps(),
+                hardware::DeviceKind::HackRf => hardware::native::hackrf::caps(),
+                hardware::DeviceKind::RtlSdr => hardware::native::rtlsdr::observer_caps(),
                 // Unreachable: `App::new` refuses observer mode for a Soapy
                 // device, because there is no sysfs profile for "whatever
                 // SoapySDR was talking to". The arm exists to satisfy the match,
@@ -138,7 +138,7 @@ impl Boot {
                 // staring at a HackRF's gain labels on an Airspy.
                 hardware::DeviceKind::Soapy => {
                     debug_assert!(false, "observer mode has no SoapySDR profile");
-                    hardware::hackrf::caps()
+                    hardware::native::hackrf::caps()
                 }
             }),
             tuning: Tuning {
@@ -434,7 +434,7 @@ mod tests {
         // other device family. 2.4 GHz and 10 Msps are both out of an RTL-SDR's
         // reach, so each falls back to the device's own default rather than
         // being programmed as-is (which the driver would reject) or refused.
-        let caps = hardware::rtlsdr::observer_caps();
+        let caps = hardware::native::rtlsdr::observer_caps();
         let t = resolve_tuning(&hackrf_config().radio, &caps);
         assert_eq!(t.frequency_hz, caps.default_frequency_hz);
         assert!((t.sample_rate - caps.default_sample_rate_hz).abs() < f64::EPSILON);
@@ -446,7 +446,7 @@ mod tests {
 
     #[test]
     fn an_in_range_config_is_left_alone() {
-        let caps = hardware::hackrf::caps();
+        let caps = hardware::native::hackrf::caps();
         let t = resolve_tuning(&hackrf_config().radio, &caps);
         assert_eq!(t.frequency_hz, 2_400_000_000);
         assert!((t.sample_rate - 10_000_000.0).abs() < f64::EPSILON);
@@ -459,7 +459,7 @@ mod tests {
         // An RTL tuner's 49 dB has no meaning as a HackRF LNA value: the LNA is
         // an 0..=40 dB, 8 dB-stepped attenuator. Displaying 49 there would be a
         // number the hardware can never be in.
-        let caps = hardware::hackrf::caps();
+        let caps = hardware::native::hackrf::caps();
         let mut cfg = AppConfig::default();
         cfg.radio.lna_gain = Some(49);
         cfg.radio.vga_gain = Some(99);
@@ -475,7 +475,7 @@ mod tests {
         // The RTL path is a lookup into the tuner's own step table, not a range
         // clamp, so the general property is "the answer is in the table".
         let steps = vec![0u32, 9, 14, 27, 37, 49];
-        let mut caps = hardware::rtlsdr::observer_caps();
+        let mut caps = hardware::native::rtlsdr::observer_caps();
         caps.gain = GainModel::RtlSingle {
             gain_steps_db: steps.clone(),
         };
@@ -498,7 +498,7 @@ mod tests {
         // worked.
         let mut cfg = hackrf_config();
         cfg.radio.gain = Some("IF1=10".to_string());
-        let t = resolve_tuning(&cfg.radio, &hardware::hackrf::caps());
+        let t = resolve_tuning(&cfg.radio, &hardware::native::hackrf::caps());
         assert_eq!(t.notes.len(), 1, "{:?}", t.notes);
         assert!(t.notes[0].contains("IF1"), "{}", t.notes[0]);
         assert!(t.notes[0].contains("LNA"), "{}", t.notes[0]);
@@ -514,7 +514,7 @@ mod tests {
     #[test]
     fn observer_keeps_the_configured_gain_the_clamp_would_erase() {
         let cfg = hackrf_config();
-        let caps = hardware::rtlsdr::observer_caps();
+        let caps = hardware::native::rtlsdr::observer_caps();
         assert_eq!(
             resolve_tuning(&cfg.radio, &caps).gains,
             vec![0.0],
@@ -557,8 +557,8 @@ mod tests {
                 &cfg,
                 Boot::normal(
                     &cfg,
-                    Arc::new(hardware::hackrf::caps()),
-                    resolve_tuning(&cfg.radio, &hardware::hackrf::caps()),
+                    Arc::new(hardware::native::hackrf::caps()),
+                    resolve_tuning(&cfg.radio, &hardware::native::hackrf::caps()),
                     &hardware::DeviceInfo::default(),
                 ),
             ),
@@ -622,8 +622,8 @@ mod tests {
             &cfg,
             Boot::normal(
                 &cfg,
-                Arc::new(hardware::hackrf::caps()),
-                resolve_tuning(&cfg.radio, &hardware::hackrf::caps()),
+                Arc::new(hardware::native::hackrf::caps()),
+                resolve_tuning(&cfg.radio, &hardware::native::hackrf::caps()),
                 &hardware::DeviceInfo::default(),
             ),
         );
@@ -646,7 +646,7 @@ mod tests {
     /// discover that the format changed.
     #[test]
     fn a_pre_0_5_0_config_keeps_its_gains() {
-        let caps = hardware::hackrf::caps();
+        let caps = hardware::native::hackrf::caps();
         let cfg = hackrf_config();
         assert!(cfg.radio.gain.is_none(), "the old form has no string");
         let (gains, notes) = resolve_gains(&cfg.radio, &caps.gain);
@@ -658,7 +658,7 @@ mod tests {
     /// did rather than at the device's floor.
     #[test]
     fn a_config_with_no_gain_at_all_uses_the_historical_defaults() {
-        let caps = hardware::hackrf::caps();
+        let caps = hardware::native::hackrf::caps();
         let cfg = AppConfig::default();
         let (gains, _) = resolve_gains(&cfg.radio, &caps.gain);
         assert_eq!(gains, vec![16.0, 20.0]);
@@ -668,7 +668,7 @@ mod tests {
     /// that stage's grid.
     #[test]
     fn the_named_form_places_each_stage() {
-        let caps = hardware::hackrf::caps();
+        let caps = hardware::native::hackrf::caps();
         let mut cfg = AppConfig::default();
         cfg.radio.gain = Some("VGA=41,LNA=27".into());
         let (gains, notes) = resolve_gains(&cfg.radio, &caps.gain);
@@ -684,7 +684,7 @@ mod tests {
     /// `gain = "45"` and holding `[UP]` to 45 dB mean the same thing.
     #[test]
     fn a_bare_number_is_a_whole_chain_total() {
-        let caps = hardware::hackrf::caps();
+        let caps = hardware::native::hackrf::caps();
         let mut cfg = AppConfig::default();
         cfg.radio.gain = Some("45".into());
         let (gains, _) = resolve_gains(&cfg.radio, &caps.gain);
@@ -699,7 +699,7 @@ mod tests {
     /// string, so one flag does not silently reset the other stages.
     #[test]
     fn the_positional_flags_override_one_stage_and_leave_the_rest() {
-        let caps = hardware::hackrf::caps();
+        let caps = hardware::native::hackrf::caps();
         let mut cfg = AppConfig::default();
         cfg.radio.gain = Some("LNA=8,VGA=40".into());
         cfg.radio.lna_gain = Some(32);
@@ -712,7 +712,7 @@ mod tests {
     /// refuses to load is worse than one setting that did not take.
     #[test]
     fn a_string_naming_another_radios_stage_is_reported_not_fatal() {
-        let caps = hardware::hackrf::caps();
+        let caps = hardware::native::hackrf::caps();
         let mut cfg = AppConfig::default();
         cfg.radio.gain = Some("IFGR=20,LNA=16".into());
         let (gains, notes) = resolve_gains(&cfg.radio, &caps.gain);
@@ -725,7 +725,7 @@ mod tests {
     /// it, and says what it could not read.
     #[test]
     fn unreadable_text_leaves_the_defaults_and_says_so() {
-        let caps = hardware::hackrf::caps();
+        let caps = hardware::native::hackrf::caps();
         let mut cfg = AppConfig::default();
         cfg.radio.gain = Some("banana".into());
         let (gains, notes) = resolve_gains(&cfg.radio, &caps.gain);

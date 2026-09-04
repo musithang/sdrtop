@@ -14,7 +14,8 @@
 
 use std::sync::Arc;
 
-use super::{hackrf, rtlsdr, soapy, SdrDevice};
+use super::native::{hackrf, rtlsdr};
+use super::{soapy, SdrDevice};
 
 /// Which backend a [`DeviceListing`] / open request targets.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

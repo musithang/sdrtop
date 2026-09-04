@@ -13,12 +13,11 @@ use std::sync::{Arc, Mutex};
 
 use crate::state::{DEFAULT_FREQUENCY, DEFAULT_SAMPLE_RATE};
 
-use super::process::process_block;
-use super::traits::{
-    DeliveryModel, DeviceCapabilities, DeviceInfo, GainModel, RxContext, SampleFormat,
-    SampleGeometry, SdrDevice,
+use crate::hardware::process::process_block;
+use crate::hardware::{
+    DeliveryModel, DeviceCapabilities, DeviceInfo, DeviceKind, DeviceListing, GainModel, RxContext,
+    SampleFormat, SampleGeometry, SdrDevice,
 };
-use super::{DeviceKind, DeviceListing};
 use ffi::*;
 
 pub struct HackRfDevice {

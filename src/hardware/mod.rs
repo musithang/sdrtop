@@ -3,15 +3,14 @@
 
 pub mod discovery;
 pub mod gain;
-pub mod hackrf;
+pub mod native;
 pub mod process;
-pub mod rtlsdr;
 pub mod soapy;
 pub mod sysfs;
 mod traits;
 
 pub use discovery::{list_all_devices, open_device, DeviceKind, DeviceListing};
-pub use hackrf::{board_rev_name, compute_bb_filter_bw};
+pub use native::hackrf::{board_rev_name, compute_bb_filter_bw};
 pub use traits::{
     DeliveryModel, DeviceCapabilities, DeviceInfo, GainModel, RxContext, SampleFormat,
     SampleGeometry, SdrDevice, SoapyBoost, SoftwareStack, StageSpec,

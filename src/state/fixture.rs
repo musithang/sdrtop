@@ -98,7 +98,7 @@ impl SdrMetrics {
             ui: UiState::default(),
             lab: LabState::default(),
             demod: DemodState::default(),
-            caps: Arc::new(crate::hardware::hackrf::caps()),
+            caps: Arc::new(crate::hardware::native::hackrf::caps()),
             acc: Accumulators::default(),
         }
     }
