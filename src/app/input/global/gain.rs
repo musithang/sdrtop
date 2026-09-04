@@ -13,14 +13,11 @@
 //! `]` twenty more; they are one function each now, with the direction as an
 //! argument.
 
-use crate::hardware::GainModel;
+use crate::hardware::{Boost, GainModel, StageSpec};
 use crate::state::RailMode;
 
 use super::super::{metrics, InputCtx};
 
-/// HackRF's VGA moves in 2 dB steps across 0–62 dB.
-const VGA_STEP_DB: u32 = 2;
-const VGA_MAX_DB: u32 = 62;
 /// How far a continuous stage moves per keypress.
 ///
 /// A stage that reports no step of its own has to be given one. Small on
@@ -28,24 +25,16 @@ const VGA_MAX_DB: u32 = 62;
 /// sound card, and a big step would be useless at one end of that.
 const CONTINUOUS_STEP_DB: u32 = 1;
 
-/// Next value for the primary front-end gain when stepping up/down.
+/// The next reachable value on one stage, up or down.
 ///
-/// **Asked of the front stage, not of the device family.** A stage with a table
-/// walks to the neighbouring entry, one with a grid moves by its own step, and
-/// a continuous one moves by [`CONTINUOUS_STEP_DB`] because it has none to
-/// follow. That covers a HackRF's 8 dB LNA, an RTL-SDR's irregular tuner table
-/// and whatever a driver reported, without naming any of them.
-///
-/// A device whose front stage does not exist cannot be stepped and is left
-/// alone: an RTL-SDR that reported no gain table is exactly that case.
-pub(super) fn next_primary_gain(gain: &GainModel, current: u32, up: bool) -> u32 {
-    let stages = gain.stages();
-    let Some(front) = stages.first() else {
-        return current;
-    };
-
-    if !front.table.is_empty() {
-        let idx = front
+/// **The whole stepping rule, once.** A stage with a table walks to the
+/// neighbouring entry; one with a grid moves by its own step; a continuous one
+/// moves by [`CONTINUOUS_STEP_DB`] because it has none of its own to follow.
+/// That covers a HackRF's 8 dB LNA and 2 dB VGA, an RTL-SDR's irregular tuner
+/// table and whatever a driver reported, without naming any of them.
+fn next_on_stage(stage: &StageSpec, current: u32, up: bool) -> u32 {
+    if !stage.table.is_empty() {
+        let idx = stage
             .table
             .iter()
             .enumerate()
@@ -53,17 +42,17 @@ pub(super) fn next_primary_gain(gain: &GainModel, current: u32, up: bool) -> u32
             .map(|(i, _)| i)
             .unwrap_or(0);
         let next = if up {
-            (idx + 1).min(front.table.len() - 1)
+            (idx + 1).min(stage.table.len() - 1)
         } else {
             idx.saturating_sub(1)
         };
-        return front.table[next].max(0.0).round() as u32;
+        return stage.table[next].max(0.0).round() as u32;
     }
 
-    let lo = front.min_db.max(0.0).round() as u32;
-    let hi = front.max_db.max(front.min_db).max(0.0).round() as u32;
-    let step = if front.step_db > 0.0 {
-        (front.step_db.round() as u32).max(1)
+    let lo = stage.min_db.max(0.0).round() as u32;
+    let hi = stage.max_db.max(stage.min_db).max(0.0).round() as u32;
+    let step = if stage.step_db > 0.0 {
+        (stage.step_db.round() as u32).max(1)
     } else {
         CONTINUOUS_STEP_DB
     };
@@ -74,14 +63,25 @@ pub(super) fn next_primary_gain(gain: &GainModel, current: u32, up: bool) -> u32
     }
 }
 
+/// Next value for the primary front-end gain when stepping up/down.
+///
+/// A device whose front stage does not exist cannot be stepped and is left
+/// alone: an RTL-SDR that reported no gain table is exactly that case.
+pub(super) fn next_primary_gain(gain: &GainModel, current: u32, up: bool) -> u32 {
+    match gain.stages().first() {
+        Some(front) => next_on_stage(front, current, up),
+        None => current,
+    }
+}
+
 /// `↑` / `↓` - step the primary front-end stage.
 ///
-/// On a device that presents its stages separately, HackRF and RTL-SDR, this
-/// moves the front one and nothing else, exactly as it always did.
+/// On a device that presents its stages separately, this moves the front one
+/// and nothing else. A HackRF is that device: two stages, two keys.
 ///
-/// On a **SoapySDR** device the knob is one figure for the whole chain, and
-/// sdrtop now spreads that figure itself rather than handing it to `setGain`.
-/// See [`step_distributed`].
+/// On one whose knob is a single figure for a chain of several stages, sdrtop
+/// spreads that figure itself rather than handing it to the driver. See
+/// [`step_distributed`].
 pub(super) fn step_primary(ctx: &mut InputCtx<'_>, up: bool) {
     let Some(device) = ctx.device else { return };
     // A knob that moves a chain has to be distributed across it. Asked as
@@ -119,8 +119,13 @@ pub(super) fn step_primary(ctx: &mut InputCtx<'_>, up: bool) {
     }
 }
 
-/// `↑` / `↓` on a SoapySDR device: move the whole chain by one reachable step,
-/// and place the result across the stages ourselves.
+/// `↑` / `↓` on a device whose knob moves a whole chain: step by one reachable
+/// total, and place the result across the stages ourselves.
+///
+/// Handing a driver a total and letting it split is what this replaced. A
+/// `SoapyHackRF` splits VGA-first, which is the arrangement with the worst
+/// noise figure of the ones available, and it is not monotonic: turning the
+/// knob up could drop the LNA from 32 dB to 19.
 ///
 /// The step is measured in **reachable totals**, not in dB. Adding a fixed 1 dB
 /// and redistributing lands on the same achievable figure again, because the
@@ -171,19 +176,23 @@ fn step_distributed(ctx: &mut InputCtx<'_>, up: bool) {
     }
 }
 
-/// `[` / `]` - step the VGA. HackRF-only; on a single-tuner device these no-op.
+/// `[` / `]` - step the second stage. No-op on a device that does not give one
+/// a key of its own, which today is everything but a HackRF.
+///
+/// The step comes from the stage, not from a datasheet written down here: the
+/// 2 dB grid is the model's to state, the same way the front stage's 8 dB is.
 pub(super) fn step_vga(ctx: &mut InputCtx<'_>, up: bool) {
     let Some(device) = ctx.device else { return };
-    if !device.capabilities().gain.has_second_stage() {
+    let gm = &device.capabilities().gain;
+    if !gm.has_second_stage() {
         return;
     }
+    let stages = gm.stages();
+    let Some(second) = stages.get(1) else { return };
+    let label = second.name.clone();
     let new_gain = {
         let m = metrics(ctx.state);
-        if up {
-            (m.radio.secondary_gain() + VGA_STEP_DB).min(VGA_MAX_DB)
-        } else {
-            m.radio.secondary_gain().saturating_sub(VGA_STEP_DB)
-        }
+        next_on_stage(second, m.radio.secondary_gain(), up)
     };
 
     let result = device.set_vga_gain(new_gain);
@@ -193,9 +202,9 @@ pub(super) fn step_vga(ctx: &mut InputCtx<'_>, up: bool) {
             m.radio.set_secondary_gain(new_gain);
             m.lab.rf_autotrack = false;
             m.ui.note_mode_action(RailMode::Bench);
-            m.push_log(format!("VGA gain \u{2192} {} dB", new_gain));
+            m.push_log(format!("{label} gain \u{2192} {} dB", new_gain));
         }
-        Err(e) => m.push_log(format!("VGA gain error: {}", e)),
+        Err(e) => m.push_log(format!("{label} gain error: {}", e)),
     }
 }
 
@@ -222,13 +231,21 @@ pub(super) fn toggle_boost(ctx: &mut InputCtx<'_>) {
 
     let Some(device) = ctx.device else { return };
     let new_state = !metrics(ctx.state).radio.amp_enabled;
-    // Which trait call, from the capability rather than from the device family:
-    // a single-gain device drives an automatic gain mode, a staged one drives a
-    // discrete amplifier. The label comes from the same place.
-    let result = if gm.is_single() {
-        device.set_tuner_agc(new_state)
-    } else {
-        device.set_amp_enable(new_state)
+    // **Which trait call, asked of the mechanism rather than of the shape.**
+    // This used to ask `is_single()`, which happened to give the right answer
+    // and meant the wrong thing: "one knob" is not the same question as "the
+    // boost is an automatic gain mode". A device with one knob and a discrete
+    // amplifier exists, and a HackRF reached through SoapySDR is one.
+    //
+    // Getting it backwards is silent, which is why it is worth spelling out.
+    // `RtlDevice` does not implement `set_amp_enable` and `HackRfDevice` does
+    // not implement `set_tuner_agc`; both fall back to the trait's `Ok(())`. A
+    // misrouted key would report success and toggle nothing.
+    let result = match gm.boost() {
+        Some(Boost::GainMode) => device.set_tuner_agc(new_state),
+        Some(Boost::Element(_)) => device.set_amp_enable(new_state),
+        // Unreachable: `has_boost()` above returned early.
+        None => Ok(()),
     };
     let label = gm.boost_label();
 
@@ -290,6 +307,25 @@ mod tests {
         assert_eq!(next_primary_gain(&g, 27, false), 27);
     }
 
+    /// Which trait call `[A]` makes follows the boost's mechanism, and getting
+    /// it backwards is **silent**: `RtlDevice` does not implement
+    /// `set_amp_enable` and `HackRfDevice` does not implement `set_tuner_agc`,
+    /// so a misrouted key reports success and toggles nothing.
+    ///
+    /// This pins the fact the routing reads. Testing the call itself would need
+    /// a fake device, and there is deliberately no such thing in this tree.
+    #[test]
+    fn each_backend_boost_is_the_mechanism_its_device_implements() {
+        assert!(
+            matches!(hackrf::gain_model().boost(), Some(Boost::Element(e)) if e.name == "AMP"),
+            "the RF amp is a switch, driven with set_amp_enable"
+        );
+        assert!(
+            matches!(rtl(&[0, 9, 28]).boost(), Some(Boost::GainMode)),
+            "the tuner AGC is a gain mode, driven with set_tuner_agc"
+        );
+    }
+
     #[test]
     fn the_label_names_the_stage_the_device_actually_has() {
         assert_eq!(hackrf::gain_model().primary_label(), "LNA");
@@ -297,11 +333,20 @@ mod tests {
     }
 
     /// The step and the maximum have to agree, or the top of the range is
-    /// unreachable by stepping.
+    /// unreachable by stepping. Asked of the model rather than of a constant
+    /// here, because the model is where the grid now lives.
     #[test]
     fn the_lna_range_is_reachable_in_whole_steps() {
-        const { assert!(VGA_MAX_DB.is_multiple_of(VGA_STEP_DB)) };
         let g = hackrf::gain_model();
+        for stage in g.stages() {
+            assert!(
+                (stage.max_db / stage.step_db).fract() < f64::EPSILON,
+                "{} spans {} in steps of {}, which does not divide",
+                stage.name,
+                stage.max_db,
+                stage.step_db
+            );
+        }
         let mut v = 0;
         for _ in 0..100 {
             v = next_primary_gain(&g, v, true);
