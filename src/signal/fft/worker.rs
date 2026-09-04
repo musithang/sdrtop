@@ -97,7 +97,12 @@ impl FftWorker {
         while let Ok(chunk) = self.sample_rx.recv() {
             buf.extend_from_slice(&chunk);
 
-            let frame_bytes = n * 2;
+            // `n` **pairs**, and a pair is not two bytes on every radio: CS16
+            // is four. Asking the geometry rather than assuming eight bits is
+            // what keeps `decode_into` filling the whole window - a short frame
+            // stops at the end of the bytes and leaves the tail of `samples` at
+            // whatever it last held, which is the zeros it was allocated with.
+            let frame_bytes = n * self.geometry.bytes_per_pair();
             let mut buf_start = 0usize;
 
             while buf.len() - buf_start >= frame_bytes {
@@ -170,6 +175,13 @@ mod tests {
     use crate::state::SdrMetrics;
     use std::f32::consts::TAU;
 
+    /// Peak amplitude of the synthetic tone, as a fraction of full scale.
+    ///
+    /// 0.9375 rather than 1.0 so an `i8` cannot be asked to hold 128, and it is
+    /// the same 120/128 the Int8 helper used before it was generalised - the
+    /// existing assertions are unchanged by the split.
+    const TONE_AMP: f32 = 120.0 / 128.0;
+
     /// Run the real worker over synthetic IQ and return the state it published.
     ///
     /// The worker had no test at all before the split - it is a thread that reads
@@ -177,6 +189,25 @@ mod tests {
     /// what makes the split provable: the arithmetic moved between files, so the
     /// check that matters is that a known tone still comes out where it went in.
     fn run_against(tone_bin_offset: i32, frames: usize) -> SdrMetrics {
+        run_geometry(
+            SampleGeometry {
+                format: crate::hardware::SampleFormat::Int8,
+                full_scale: 128.0,
+            },
+            tone_bin_offset,
+            frames,
+        )
+    }
+
+    /// The same run, at a stated geometry.
+    ///
+    /// Split out because the bytes a frame occupies is the one thing about the
+    /// stream the worker cannot read off the transform length, and an
+    /// eight-bit-only helper cannot notice it getting that wrong. Every format
+    /// encodes the *same* normalised tone, so the published spectra are directly
+    /// comparable and a stride mistake shows up as a level, not as noise.
+    fn run_geometry(geometry: SampleGeometry, tone_bin_offset: i32, frames: usize) -> SdrMetrics {
+        use crate::hardware::SampleFormat;
         const N: usize = 2048;
         let (tx, rx) = crossbeam_channel::unbounded::<Vec<u8>>();
         let state = Arc::new(Mutex::new(SdrMetrics::fixture().streaming()));
@@ -186,25 +217,35 @@ mod tests {
 
         let mut phase = 0.0f32;
         let step = TAU * tone_hz / sample_rate;
+        let fs = geometry.full_scale;
         for _ in 0..frames {
-            let mut bytes = Vec::with_capacity(N * 2);
+            let mut bytes = Vec::with_capacity(N * geometry.bytes_per_pair());
             for _ in 0..N {
-                bytes.push((phase.cos() * 120.0) as i8 as u8);
-                bytes.push((phase.sin() * 120.0) as i8 as u8);
+                let (i, q) = (phase.cos() * TONE_AMP, phase.sin() * TONE_AMP);
+                match geometry.format {
+                    SampleFormat::Int8 => {
+                        bytes.push((i * fs) as i8 as u8);
+                        bytes.push((q * fs) as i8 as u8);
+                    }
+                    // The unsigned decode is about the 127.5 bias, not about 128,
+                    // so the encoder has to use the same half count back.
+                    SampleFormat::Uint8 => {
+                        let bias = fs - 0.5;
+                        bytes.push((i * bias + bias) as u8);
+                        bytes.push((q * bias + bias) as u8);
+                    }
+                    SampleFormat::Int16 => {
+                        bytes.extend_from_slice(&((i * fs) as i16).to_le_bytes());
+                        bytes.extend_from_slice(&((q * fs) as i16).to_le_bytes());
+                    }
+                }
                 phase += step;
             }
             tx.send(bytes).unwrap();
         }
         drop(tx); // ends the worker's recv loop
 
-        let worker = FftWorker::new(
-            rx,
-            Arc::clone(&state),
-            SampleGeometry {
-                format: crate::hardware::SampleFormat::Int8,
-                full_scale: 128.0,
-            },
-        );
+        let worker = FftWorker::new(rx, Arc::clone(&state), geometry);
         std::thread::spawn(move || worker.run()).join().unwrap();
 
         let guard = state.lock().unwrap();
@@ -238,6 +279,61 @@ mod tests {
             "peak at bin {idx}, expected {}",
             N / 2 + offset as usize
         );
+    }
+
+    /// The same tone reads the same on every wire format the app accepts.
+    ///
+    /// **The frame is `n` pairs, not `n * 2` bytes.** A pair is two bytes at
+    /// eight bits and four at sixteen, and the worker used to assume the former:
+    /// on a CS16 device it handed `decode_into` half a frame, which filled half
+    /// the window and left the rest of `samples` at the zeros it was allocated
+    /// with, permanently. The tone still landed in its own bin - which is why
+    /// this went unnoticed - but six dB down, with the leakage skirts of a window
+    /// cut off at its own maximum, and a noise floor and occupied bandwidth to
+    /// match. Every reading taken from the spectrum was wrong on every CS16
+    /// radio: SDRplay, Airspy, Pluto, Lime, bladeRF, USRP.
+    ///
+    /// Comparing formats rather than asserting an absolute level is what makes
+    /// this hold: the quantisation floor legitimately differs between eight bits
+    /// and sixteen, the tone above it does not.
+    #[test]
+    fn every_sample_format_reads_the_same_tone_the_same_way() {
+        use crate::hardware::SampleFormat;
+        const N: usize = 2048;
+        let offset = 20;
+
+        let peak_of = |m: &SdrMetrics| -> (usize, f32) {
+            let fr = m
+                .waterfall
+                .last_fft
+                .as_ref()
+                .expect("no spectrum published");
+            let (idx, v) = fr
+                .bins_dbfs
+                .iter()
+                .enumerate()
+                .max_by(|a, b| a.1.partial_cmp(b.1).unwrap())
+                .unwrap();
+            (idx, *v)
+        };
+
+        let reference = run_against(offset, 4);
+        let (ref_bin, ref_level) = peak_of(&reference);
+        assert_eq!(ref_bin, N / 2 + offset as usize, "the reference moved");
+
+        for (format, full_scale) in [(SampleFormat::Uint8, 128.0), (SampleFormat::Int16, 32768.0)] {
+            let m = run_geometry(SampleGeometry { format, full_scale }, offset, 4);
+            let (bin, level) = peak_of(&m);
+            assert_eq!(bin, ref_bin, "{format:?}: the tone moved bin");
+            assert!(
+                (level - ref_level).abs() < 1.0,
+                "{format:?}: peak is {level:.2} dBFS against the reference {ref_level:.2}"
+            );
+            assert_eq!(
+                m.signal.occupied_bw_hz, reference.signal.occupied_bw_hz,
+                "{format:?}: the same tone occupies a different bandwidth"
+            );
+        }
     }
 
     /// The SNR the worker publishes is the tone above the noise floor, and the

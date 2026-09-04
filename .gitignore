@@ -21,8 +21,7 @@ target/
 docs/.obsidian/
 .obsidian/
 
-# Claude code superpowers
-.claude/
+# Claude
 CLAUDE.md
 
 # Developer-specific docsuments
