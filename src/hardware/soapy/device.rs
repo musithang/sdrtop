@@ -9,8 +9,9 @@
 //!
 //! Streaming lives in [`super::stream`], which owns the read thread.
 //!
-//! **Still not wired into [`crate::hardware::list_all_devices`].** S11 does
-//! that, together with the deduplication against the native backends.
+//! [`list`] hands its results to [`crate::hardware::discovery`], which decides
+//! which of them to offer once the native backends have had their say. This
+//! module does not know that decision exists.
 
 use std::sync::Arc;
 
@@ -286,9 +287,10 @@ fn serial_from(args: &str) -> Option<String> {
 
 /// Every device SoapySDR can see, as listings.
 ///
-/// Not called from [`crate::hardware::list_all_devices`] yet; S11 wires it in
-/// along with the deduplication against the native backends and the audio
-/// driver's default exclusion.
+/// Everything SoapySDR reports, unfiltered. The deduplication against the
+/// native backends and the audio driver's default exclusion are applied by
+/// [`crate::hardware::discovery`], not here: this backend answers for itself
+/// and knows nothing about the others.
 pub fn list() -> Vec<DeviceListing> {
     let Some(api) = api::api() else {
         return Vec::new();

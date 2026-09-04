@@ -112,17 +112,6 @@ pub fn matches_filter(markup: &str, filter: &str) -> bool {
         .all(|(k, v)| value_of(markup, k.trim()) == Some(v.trim()))
 }
 
-/// Normalise a serial so two backends' spellings of the same radio compare
-/// equal.
-///
-/// Lowercased and stripped of leading zeros. All-zero collapses to `None`,
-/// because an unprogrammed serial is not an identity and matching on it would
-/// make every such device look like every other one.
-pub fn normalise_serial(raw: &str) -> Option<String> {
-    let trimmed = raw.trim().trim_start_matches('0').to_ascii_lowercase();
-    (!trimmed.is_empty()).then_some(trimmed)
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -227,32 +216,6 @@ mod tests {
         assert_eq!(open_markup(&only_label, 2), "driver=x, label=Thing");
         let nothing = kv(&[("driver", "x")]);
         assert_eq!(open_markup(&nothing, 2), "driver=x, device_id=2");
-    }
-
-    /// The deduplication compares this against the native backend's serial. On
-    /// this machine libhackrf and SoapyHackRF agree byte for byte, but agreeing
-    /// by luck is not a rule.
-    #[test]
-    fn serials_compare_after_normalising_padding_and_case() {
-        assert_eq!(
-            normalise_serial("0000000000000000955c64dc2a3d89c3").unwrap(),
-            "955c64dc2a3d89c3",
-            "leading zeros are padding, not identity"
-        );
-        assert_eq!(
-            normalise_serial("955C64DC2A3D89C3"),
-            normalise_serial("0000000000000000955c64dc2a3d89c3"),
-            "and the two backends may not agree on case"
-        );
-    }
-
-    /// The case that would otherwise make every unprogrammed device look like
-    /// every other one, and quietly hide all but the first.
-    #[test]
-    fn an_all_zero_or_blank_serial_is_no_serial() {
-        assert_eq!(normalise_serial("00000000"), None, "all padding");
-        assert_eq!(normalise_serial("   "), None);
-        assert_eq!(normalise_serial(""), None);
     }
 
     /// Reading one value back out of the markup, which is how the driver key and
