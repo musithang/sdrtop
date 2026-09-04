@@ -107,6 +107,48 @@ pub fn normalise_serial(raw: &str) -> Option<String> {
     (!trimmed.is_empty()).then_some(trimmed)
 }
 
+/// Parse what `--device` named: a backend, and for SoapySDR the device
+/// arguments that may ride along, as in `--device soapy=driver=airspy`.
+///
+/// Those arguments are both a filter and the way to ask for a driver sdrtop
+/// hides by default, which is why they travel together with the backend rather
+/// than as a flag of their own.
+///
+/// Returns an error rather than exiting, so the parse is testable and the
+/// process only ends in `main`, where ending it is the job.
+pub fn parse_device_arg(spec: &str) -> anyhow::Result<(DeviceKind, Option<String>)> {
+    let (name, filter) = match spec.split_once('=') {
+        Some((n, f)) => (n, Some(f.to_string())),
+        None => (spec, None),
+    };
+    let kind = match name.to_ascii_lowercase().as_str() {
+        "hackrf" => DeviceKind::HackRf,
+        "rtlsdr" | "rtl-sdr" | "rtl" => DeviceKind::RtlSdr,
+        "soapy" | "soapysdr" => DeviceKind::Soapy,
+        other => anyhow::bail!(
+            "Unknown --device '{other}' (use 'hackrf', 'rtlsdr', or \
+             'soapy', optionally as 'soapy=driver=airspy')"
+        ),
+    };
+    Ok((kind, filter))
+}
+
+/// What else the operator could look at, when enumeration found nothing.
+///
+/// Empty when there is nothing useful to add. Mentioning SoapySDR to someone who
+/// does not have it installed is a wild goose chase, and they have enough to
+/// check already.
+///
+/// Asked here rather than in `main` so that finding out costs the caller no
+/// knowledge of which backends exist or how one reports itself present.
+pub fn no_device_hint() -> &'static str {
+    if soapy::api::api().is_some() {
+        " SoapySDR is installed: `SoapySDRUtil --find` lists what it can see."
+    } else {
+        ""
+    }
+}
+
 /// Every connected device across all compiled-in backends. Never fails: a
 /// backend with no devices (or an enumeration error) simply contributes nothing.
 ///
@@ -379,6 +421,49 @@ mod tests {
             normalise_serial("0000000000000000955c64dc2a3d89c3"),
             "and the two backends may not agree on case"
         );
+    }
+
+    /// The four shapes `--device` comes in. `main` never tested any of them,
+    /// because the parse lived inside it and ended in `process::exit`.
+    #[test]
+    fn a_device_argument_names_a_backend_and_may_carry_its_arguments() {
+        assert_eq!(
+            parse_device_arg("hackrf").unwrap(),
+            (DeviceKind::HackRf, None)
+        );
+        assert_eq!(
+            parse_device_arg("soapy=driver=airspy").unwrap(),
+            (DeviceKind::Soapy, Some("driver=airspy".to_string())),
+            "only the first = separates the name from the arguments"
+        );
+        assert!(parse_device_arg("airspy").is_err(), "not a backend name");
+        assert!(parse_device_arg("").is_err(), "nor is nothing");
+    }
+
+    /// Spellings that have to keep working, and the case fold.
+    #[test]
+    fn the_backend_names_have_the_aliases_the_help_text_promises() {
+        for s in ["rtlsdr", "rtl-sdr", "rtl", "RTL-SDR"] {
+            assert_eq!(parse_device_arg(s).unwrap().0, DeviceKind::RtlSdr, "{s}");
+        }
+        for s in ["soapy", "soapysdr", "SoapySDR"] {
+            assert_eq!(parse_device_arg(s).unwrap().0, DeviceKind::Soapy, "{s}");
+        }
+    }
+
+    /// `--device soapy=` is a backend with an empty filter, and an empty filter
+    /// is not a filter: it must offer the same list as `--device soapy`.
+    ///
+    /// Worth pinning across the two functions rather than in either, because
+    /// the parse produces `Some("")` and the offering treats it as absent. One
+    /// of those changing alone is the bug.
+    #[test]
+    fn an_empty_argument_string_is_not_a_filter() {
+        let (kind, filter) = parse_device_arg("soapy=").unwrap();
+        assert_eq!(kind, DeviceKind::Soapy);
+        assert_eq!(filter.as_deref(), Some(""));
+        let all = vec![soapy_hackrf(), soapy_airspy()];
+        assert_eq!(offer_soapy(all, &[], filter.as_deref()).len(), 2);
     }
 
     /// Observer mode reads sysfs for a USB device sdrtop knows by vendor and
