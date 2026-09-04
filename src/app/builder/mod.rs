@@ -88,7 +88,7 @@ impl App {
             );
             let board = format!(
                 "Board: {} | USB API: {:#06x}",
-                hardware::board_rev_name(m.system.board_rev),
+                hardware::native::hackrf::board_rev_name(m.system.board_rev),
                 m.system.usb_api_version
             );
             m.push_log(connected);

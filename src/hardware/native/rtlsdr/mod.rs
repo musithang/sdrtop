@@ -2,7 +2,7 @@
 // Copyright (C) 2026 MusiThang <viktor.laszlo92@protonmail.com>
 
 //! RTL-SDR backend: implements [`SdrDevice`] over librtlsdr. The per-sample math
-//! is shared with HackRF via [`super::process::process_block`]; what differs is
+//! is shared with HackRF via [`crate::hardware::process::process_block`]; what differs is
 //! the unsigned-8-bit sample format, the single discrete tuner-gain model, and
 //! the blocking `rtlsdr_read_async` loop (which we drive on an owned thread and
 //! stop with `rtlsdr_cancel_async`).

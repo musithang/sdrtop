@@ -144,7 +144,7 @@ impl Boot {
             tuning: Tuning {
                 frequency_hz: cfg.radio.frequency_hz,
                 sample_rate: cfg.radio.sample_rate,
-                bb_filter_hz: hardware::compute_bb_filter_bw(cfg.radio.sample_rate),
+                bb_filter_hz: hardware::native::hackrf::compute_bb_filter_bw(cfg.radio.sample_rate),
                 // **Unclamped, deliberately.** Observer capability profiles are
                 // placeholders whose gain tables hold a single zero, so snapping
                 // here would replace every gain the operator set with 0 dB and
@@ -210,7 +210,7 @@ pub(super) fn resolve_tuning(radio: &RadioConfig, caps: &DeviceCapabilities) -> 
     Tuning {
         frequency_hz,
         sample_rate,
-        bb_filter_hz: hardware::compute_bb_filter_bw(sample_rate),
+        bb_filter_hz: hardware::native::hackrf::compute_bb_filter_bw(sample_rate),
         gains,
         notes,
     }

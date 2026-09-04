@@ -37,7 +37,10 @@ pub(super) fn reset_defaults(ctx: &mut InputCtx<'_>) {
 
     let (sr_result, bb_bw) = match device.set_sample_rate(def_sr) {
         Ok(bw) => (Ok(()), bw),
-        Err(e) => (Err(e), crate::hardware::compute_bb_filter_bw(def_sr)),
+        Err(e) => (
+            Err(e),
+            crate::hardware::native::hackrf::compute_bb_filter_bw(def_sr),
+        ),
     };
     let results = [
         device.set_lna_gain(lna_def),

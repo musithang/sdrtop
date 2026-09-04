@@ -2,7 +2,7 @@
 // Copyright (C) 2026 MusiThang <viktor.laszlo92@protonmail.com>
 
 //! HackRF One backend: implements [`SdrDevice`] over libhackrf. The raw
-//! per-sample math lives in [`super::process::process_block`]; this module owns
+//! per-sample math lives in [`crate::hardware::process::process_block`]; this module owns
 //! the FFI, the device lifecycle, and the HackRF-specific capability descriptor.
 
 pub mod ffi;

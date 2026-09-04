@@ -7,7 +7,7 @@ pub const CONSTELLATION_CAP: usize = 1024;
 
 /// Lab IQ correction state - the live DSP behind the `[D]` DC-block / `[C]`
 /// auto-cal chips and `[F]` freeze. Coefficients are applied in the RX hot path
-/// ([`process_block`](crate::hardware::process_block)) to the samples that feed
+/// ([`process_block`](crate::hardware::process::process_block)) to the samples that feed
 /// the FFT and the constellation, so the spectrum/scope DC spike and the cloud
 /// actually clean up. The *metrics* stay measured on the raw stream, so the
 /// diagnostics keep reporting the true hardware impairment being compensated.
