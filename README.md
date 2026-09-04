@@ -42,6 +42,7 @@
   <a href="#config">Config</a> ·
   <a href="#roadmap">Roadmap</a> ·
   <a href="#supported-hardware">Hardware</a> ·
+  <a href="CHANGELOG.md">Changelog</a> ·
   <a href="user_docs/README.md">Full guide</a>
 </p>
 
