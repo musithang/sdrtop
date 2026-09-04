@@ -62,15 +62,6 @@ pub fn normalise_serial(raw: &str) -> Option<String> {
     (!trimmed.is_empty()).then_some(trimmed)
 }
 
-/// The driver key SoapySDR gives a sound card.
-///
-/// Skipped unless asked for by name. On any desktop with `soapysdr-module-audio`
-/// installed, enumeration otherwise reports the built-in microphone as an SDR,
-/// and sdrtop would start on a laptop with no radio attached at all. It is a
-/// real SDR source for anyone running a soundcard receiver, so it is one flag
-/// away rather than gone: `--device soapy=driver=audio`.
-const AUDIO_DRIVER: &str = "audio";
-
 /// Every connected device across all compiled-in backends. Never fails: a
 /// backend with no devices (or an enumeration error) simply contributes nothing.
 ///
@@ -128,10 +119,12 @@ fn offer_soapy(
             let args = d.args.as_deref().unwrap_or("");
             match filter {
                 // Asked for by name: the user gets exactly what they asked for,
-                // audio included.
+                // including anything that would otherwise hide itself.
                 Some(f) if !f.is_empty() => soapy::args::matches_filter(args, f),
-                // Otherwise every driver but the sound card.
-                _ => soapy::args::value_of(args, "driver") != Some(AUDIO_DRIVER),
+                // Otherwise, everything that does not hide itself. Which
+                // listings those are is SoapySDR's own business and is answered
+                // in `soapy::args`; nothing here knows why one would.
+                _ => !soapy::args::hidden_by_default(args),
             }
         })
         // **The native backend wins.** sdrtop's own HackRF and RTL-SDR paths know
@@ -200,7 +193,11 @@ mod tests {
         )
     }
 
-    fn soapy_audio() -> DeviceListing {
+    /// A listing that hides itself. The sound card is the only driver that does
+    /// so today; which ones do is answered by `soapy::args::hidden_by_default`
+    /// and tested there. These tests are about what the offering policy does
+    /// with such a listing, not about which driver it is.
+    fn soapy_hidden() -> DeviceListing {
         listing(
             DeviceKind::Soapy,
             "SoapySDR \u{00b7} audio \u{00b7} Built-in Audio",
@@ -243,7 +240,7 @@ mod tests {
             None,
         )];
         let out = offer_soapy(
-            vec![soapy_airspy(), soapy_audio()],
+            vec![soapy_airspy(), soapy_hidden()],
             &native,
             Some("driver=audio"),
         );
@@ -271,18 +268,20 @@ mod tests {
         assert_eq!(out.len(), 1, "two unprogrammed radios are still two radios");
     }
 
-    /// The sound card is skipped by default, and reachable by name.
+    /// A listing that hides itself is skipped by default, and reachable by name.
     ///
     /// Without the first half, sdrtop starts on any laptop with the audio module
-    /// installed and no radio attached at all.
+    /// installed and no radio attached at all. Naming a driver is what overrides
+    /// the hiding, and it overrides it for any driver, not for a special-cased
+    /// one.
     #[test]
-    fn the_audio_driver_is_skipped_unless_it_is_asked_for() {
-        let out = offer_soapy(vec![soapy_audio(), soapy_airspy()], &[], None);
+    fn a_self_hiding_listing_is_skipped_unless_it_is_asked_for() {
+        let out = offer_soapy(vec![soapy_hidden(), soapy_airspy()], &[], None);
         assert_eq!(out.len(), 1);
         assert!(out[0].label.contains("airspy"), "{out:?}");
 
         let asked = offer_soapy(
-            vec![soapy_audio(), soapy_airspy()],
+            vec![soapy_hidden(), soapy_airspy()],
             &[],
             Some("driver=audio"),
         );

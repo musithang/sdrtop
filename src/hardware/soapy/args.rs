@@ -112,6 +112,25 @@ pub fn matches_filter(markup: &str, filter: &str) -> bool {
         .all(|(k, v)| value_of(markup, k.trim()) == Some(v.trim()))
 }
 
+/// The driver key SoapySDR gives a sound card.
+const AUDIO_DRIVER: &str = "audio";
+
+/// Whether this device is one SoapySDR offers that sdrtop hides unless it is
+/// asked for by name.
+///
+/// One driver, so far. On any desktop with `soapysdr-module-audio` installed,
+/// enumeration reports the built-in microphone as an SDR, and sdrtop would
+/// otherwise start on a laptop with no radio attached at all. It is a real SDR
+/// source for anyone running a soundcard receiver, so it is one flag away
+/// rather than gone: `--device soapy=driver=audio`.
+///
+/// **Which drivers behave like this is SoapySDR's business**, which is why the
+/// question lives here. The module that decides what to offer asks whether a
+/// listing hides itself; it does not know what a sound card is.
+pub fn hidden_by_default(markup: &str) -> bool {
+    value_of(markup, "driver") == Some(AUDIO_DRIVER)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -252,5 +271,25 @@ mod tests {
         // The audio device is reachable by naming it, which is the whole point.
         let a = open_markup(&built_in_audio(), 0);
         assert!(matches_filter(&a, "driver=audio"));
+    }
+
+    /// Which drivers hide themselves is SoapySDR's business, and this is where
+    /// that fact lives. The module that decides what to offer only asks the
+    /// question.
+    ///
+    /// The sound card is the whole list. Without it sdrtop starts on any laptop
+    /// with `soapysdr-module-audio` installed and no radio attached at all.
+    #[test]
+    fn the_sound_card_is_the_driver_that_hides_itself() {
+        assert!(hidden_by_default(&open_markup(&built_in_audio(), 0)));
+        assert!(!hidden_by_default(&open_markup(&hackrf(), 0)));
+        assert!(
+            !hidden_by_default(""),
+            "a listing with no arguments names no driver, so it hides nothing"
+        );
+        assert!(
+            !hidden_by_default("driver=audiocodec"),
+            "the key is matched whole, not by prefix"
+        );
     }
 }
