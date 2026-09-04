@@ -358,10 +358,10 @@ mod tests {
     const W: u16 = 56;
     const H: u16 = 22;
 
-    fn soapy() -> SdrMetrics {
+    fn chain() -> SdrMetrics {
         SdrMetrics::fixture()
             .streaming()
-            .soapy()
+            .named_chain()
             .with_carrier(0.0, 20.0)
     }
 
@@ -370,7 +370,7 @@ mod tests {
     /// twenty row panel blank.
     #[test]
     fn an_unmodelled_device_gets_the_blocks_that_do_not_need_noise_figures() {
-        let out = draw(RfChainPanel, W, H, &soapy()).join("\n");
+        let out = draw(RfChainPanel, W, H, &chain()).join("\n");
         assert!(out.contains("GAIN LINEUP"), "no level lineup:\n{out}");
         assert!(out.contains("GAIN STAGING"), "no staging advice:\n{out}");
         assert!(out.contains("ANT"), "no antenna node:\n{out}");
@@ -386,7 +386,7 @@ mod tests {
     /// numbers would have filled, with the reason this device gives.
     #[test]
     fn the_noise_blocks_name_what_is_missing_rather_than_printing_a_number() {
-        let out = draw(RfChainPanel, W, H, &soapy()).join("\n");
+        let out = draw(RfChainPanel, W, H, &chain()).join("\n");
         assert!(out.contains("not modelled"), "{out}");
         assert!(
             out.contains("chain not modelled"),
@@ -433,7 +433,7 @@ mod tests {
     /// Build a device with `n` stages, each named `name`-ish and set to 10 dB.
     fn with_stages(n: usize, name: &str) -> SdrMetrics {
         use crate::hardware::StageSpec;
-        let mut m = soapy();
+        let mut m = chain();
         let mut caps = (*m.caps).clone();
         caps.gain = crate::hardware::GainModel::new(
             (0..n)

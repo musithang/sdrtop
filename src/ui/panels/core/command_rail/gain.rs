@@ -171,7 +171,7 @@ mod tests {
             40,
             &crate::state::SdrMetrics::fixture()
                 .streaming()
-                .soapy_no_boost(),
+                .named_chain_no_boost(),
         )
         .join("\n");
         assert!(!without.contains("AMP"), "{without}");

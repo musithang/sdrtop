@@ -904,15 +904,17 @@ mod tests {
     /// gain, at which point the header introduced it as `rtl-sdr librtlsdr`.
     #[test]
     fn the_header_names_the_backend_the_device_came_from() {
-        let soapy = crate::state::fixture::draw(
+        let chain = crate::state::fixture::draw(
             HeaderPanel,
             120,
             8,
-            &crate::state::SdrMetrics::fixture().streaming().soapy(),
+            &crate::state::SdrMetrics::fixture()
+                .streaming()
+                .named_chain(),
         )
         .join("\n");
-        assert!(soapy.contains("soapysdr"), "{soapy}");
-        assert!(!soapy.contains("librtlsdr"), "not an RTL-SDR:\n{soapy}");
+        assert!(chain.contains("soapysdr"), "{chain}");
+        assert!(!chain.contains("librtlsdr"), "not an RTL-SDR:\n{chain}");
 
         // And a HackRF still shows its own firmware.
         let hackrf = crate::state::fixture::draw(
@@ -930,20 +932,20 @@ mod tests {
     /// micro gain view and the Keys pane.
     #[test]
     fn the_header_omits_a_boost_the_device_does_not_have() {
-        let soapy = crate::state::fixture::draw(
+        let chain = crate::state::fixture::draw(
             HeaderPanel,
             120,
             8,
             &crate::state::SdrMetrics::fixture()
                 .streaming()
-                .soapy_no_boost(),
+                .named_chain_no_boost(),
         )
         .join("\n");
-        assert!(!soapy.contains("AGC"), "{soapy}");
-        assert!(!soapy.contains("AMP"), "{soapy}");
+        assert!(!chain.contains("AGC"), "{chain}");
+        assert!(!chain.contains("AMP"), "{chain}");
         assert!(
-            soapy.contains("USB"),
-            "the rest of the band survives:\n{soapy}"
+            chain.contains("USB"),
+            "the rest of the band survives:\n{chain}"
         );
     }
 }

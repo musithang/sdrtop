@@ -284,7 +284,7 @@ mod tests {
     fn a_device_with_no_boost_is_not_told_about_one() {
         let theme = crate::Theme::sdr();
         let hackrf = lines(&hackrf::gain_model(), 40, &theme);
-        let soapy = lines(
+        let chain = lines(
             &GainModel::new(vec![], "RF", "RF").with_gauge_fallback(116),
             40,
             &theme,
@@ -297,14 +297,14 @@ mod tests {
         };
         assert!(text(&hackrf).contains("front end boost"));
         assert!(
-            !text(&soapy).contains("front end boost"),
+            !text(&chain).contains("front end boost"),
             "offered a boost it does not have:\n{}",
-            text(&soapy)
+            text(&chain)
         );
-        assert!(!text(&soapy).contains("VGA"), "and no second stage either");
-        assert_eq!(soapy.len(), hackrf.len() - 3, "two VGA rows and the boost");
+        assert!(!text(&chain).contains("VGA"), "and no second stage either");
+        assert_eq!(chain.len(), hackrf.len() - 3, "two VGA rows and the boost");
         // The group survives, because the primary gain key is still there.
-        assert!(text(&soapy).contains("GAIN"), "{}", text(&soapy));
+        assert!(text(&chain).contains("GAIN"), "{}", text(&chain));
     }
 
     /// The RTL-SDR reference drops the VGA rows rather than describing a knob

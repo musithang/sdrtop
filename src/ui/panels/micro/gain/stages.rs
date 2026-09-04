@@ -139,7 +139,7 @@ mod tests {
         rtlsdr::gain_model(&[0, 9, 14, 27, 37, 49])
     }
 
-    fn soapy() -> GainModel {
+    fn chain() -> GainModel {
         GainModel::new(vec![], "RF", "RF").with_gauge_fallback(116)
     }
 
@@ -155,7 +155,7 @@ mod tests {
             18,
             &crate::state::SdrMetrics::fixture()
                 .streaming()
-                .soapy_no_boost(),
+                .named_chain_no_boost(),
         )
         .join("\n");
         assert!(
@@ -182,7 +182,7 @@ mod tests {
     /// literals were padded for three.
     #[test]
     fn the_label_column_fits_every_label_the_device_uses() {
-        for gm in [hackrf::gain_model(), rtl(), soapy()] {
+        for gm in [hackrf::gain_model(), rtl(), chain()] {
             let w = label_w(&gm);
             for name in [gm.primary_label(), "VGA", gm.boost_label()] {
                 assert!(

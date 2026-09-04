@@ -173,7 +173,9 @@ mod tests {
             AdcLoadingPanel,
             60,
             30,
-            &crate::state::SdrMetrics::fixture().streaming().soapy(),
+            &crate::state::SdrMetrics::fixture()
+                .streaming()
+                .named_chain(),
         )
         .join("\n");
         assert!(
@@ -194,7 +196,9 @@ mod tests {
             AdcLoadingPanel,
             60,
             30,
-            &crate::state::SdrMetrics::fixture().streaming().soapy(),
+            &crate::state::SdrMetrics::fixture()
+                .streaming()
+                .named_chain(),
         )
         .join("\n");
         assert!(unknown.contains("/ 14 eff"), "{unknown}");

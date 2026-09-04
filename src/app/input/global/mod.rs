@@ -392,7 +392,7 @@ mod tests {
         let mut h = Harness::new();
         {
             let mut m = metrics(&h.state);
-            *m = SdrMetrics::fixture().soapy_no_boost();
+            *m = SdrMetrics::fixture().named_chain_no_boost();
         }
         let before = metrics(&h.state).radio.amp_enabled;
         h.press('a');

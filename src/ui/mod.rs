@@ -148,7 +148,7 @@ mod gain_rendering {
     /// with four elements arrives in.
     #[test]
     fn more_stages_than_the_panels_know_about_render_without_panicking() {
-        let mut m = SdrMetrics::fixture().streaming().soapy();
+        let mut m = SdrMetrics::fixture().streaming().named_chain();
         m.radio.gains = vec![12.0, 34.0, 56.0, 78.0];
         for (w, h) in [(120u16, 4u16), (60, 30), (44, 14), (40, 10)] {
             let _ = draw(super::HeaderPanel, w, 5, &m);
@@ -174,7 +174,7 @@ mod gain_rendering {
     /// user set.
     #[test]
     fn a_distributed_knob_reads_as_the_whole_chain() {
-        let mut m = SdrMetrics::fixture().streaming().soapy();
+        let mut m = SdrMetrics::fixture().streaming().named_chain();
         m.radio.gains = vec![16.0, 4.0];
         assert_eq!(m.radio.primary_gain(), 16, "the front stage on its own");
         assert_eq!(m.shown_gain(), 20, "but the knob was set to 20");
@@ -200,8 +200,8 @@ mod gain_rendering {
     /// chain read `TUN` while every other panel called it `RF`.
     #[test]
     fn the_header_abbreviates_the_stage_the_device_actually_has() {
-        let soapy = SdrMetrics::fixture().streaming().soapy();
-        let out = draw(super::HeaderPanel, 120, 5, &soapy).join("\n");
+        let chain = SdrMetrics::fixture().streaming().named_chain();
+        let out = draw(super::HeaderPanel, 120, 5, &chain).join("\n");
         assert!(out.contains("RF"), "{out}");
         assert!(!out.contains("TUN"), "called a Soapy chain a tuner:\n{out}");
 

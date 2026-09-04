@@ -336,28 +336,30 @@ impl SdrMetrics {
         self
     }
 
-    /// A SoapySDR device that offers **no** boost at all: no automatic gain
-    /// mode, and no two-position element to stand in for one.
+    /// A named chain that offers **no** boost at all: no automatic gain mode,
+    /// and no two-position element to stand in for one.
     ///
-    /// Kept apart from [`Self::soapy`] since G3, when the plain Soapy fixture
+    /// Kept apart from [`Self::named_chain`] since G3, when the plain fixture
     /// gained a boost. A `SoapyHackRF` reports `Supports AGC: NO` and yet has
     /// `AMP [0, 14, 14]`, which is the same physical switch the native backend
     /// drives, so it does have one. The panels still need a device that does
     /// not, and that is this.
-    pub(crate) fn soapy_no_boost(mut self) -> Self {
-        self = self.soapy();
+    pub(crate) fn named_chain_no_boost(mut self) -> Self {
+        self = self.named_chain();
         let mut caps = (*self.caps).clone();
-        caps.gain = Self::soapy_chain(None);
+        caps.gain = Self::chain_model(None);
         self.caps = Arc::new(caps);
         self
     }
 
-    /// The gain chain a `SoapyHackRF` reports, as `soapy::caps` would build it.
+    /// The gain model behind both chain fixtures.
     ///
-    /// The real answers: AMP is a two-position element and became the boost, so
-    /// the stages left are LNA and VGA, and the whole-chain 116 dB is only the
-    /// gauge's fallback because those two describe a span of their own.
-    fn soapy_chain(boost: Option<crate::hardware::Boost>) -> crate::hardware::GainModel {
+    /// The numbers are a real probe answer, not an invented shape:
+    /// `SoapySDRUtil --probe="driver=hackrf"` reports `LNA [0, 40, 8]`,
+    /// `AMP [0, 14, 14]` and `VGA [0, 62, 2]`. AMP is a two-position element and
+    /// became the boost, so two stages are left, and the whole-chain 116 dB is
+    /// only the gauge's fallback because those two describe a span of their own.
+    fn chain_model(boost: Option<crate::hardware::Boost>) -> crate::hardware::GainModel {
         let gm = crate::hardware::GainModel::new(
             vec![
                 crate::hardware::StageSpec::ranged("LNA", 0.0, 40.0, 8.0),
@@ -373,9 +375,19 @@ impl SdrMetrics {
         }
     }
 
-    pub(crate) fn soapy(mut self) -> Self {
+    /// A device whose gain chain the **driver named**, rather than one sdrtop
+    /// knows from a datasheet: several stages with their own ranges, driven as
+    /// one figure through a single knob, and a 16-bit sample format.
+    ///
+    /// **Named after the shape, not after a backend.** It is the shape the
+    /// device-generic panels branch on, and any backend could present it; that
+    /// the one real example is a HackRF reached through `SoapyHackRF` is where
+    /// the numbers came from, not what the fixture is for. The identity it
+    /// claims stays SoapySDR, because the panels that print a software stack
+    /// need something true to print.
+    pub(crate) fn named_chain(mut self) -> Self {
         let mut caps = (*self.caps).clone();
-        caps.gain = Self::soapy_chain(Some(crate::hardware::Boost::Element(
+        caps.gain = Self::chain_model(Some(crate::hardware::Boost::Element(
             crate::hardware::StageSpec::ranged("AMP", 0.0, 14.0, 14.0),
         )));
         caps.friis_applicable = false;

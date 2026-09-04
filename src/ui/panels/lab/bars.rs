@@ -1212,7 +1212,7 @@ mod tests {
     /// receiver it is not. The stages now come from the driver's own listGains.
     #[test]
     fn an_unmodelled_chain_shows_the_stages_the_driver_named() {
-        let soapy = GainModel::new(
+        let chain = GainModel::new(
             vec![
                 crate::hardware::StageSpec::ranged("LNA", 0.0, 40.0, 8.0),
                 crate::hardware::StageSpec::ranged("VGA", 0.0, 62.0, 2.0),
@@ -1222,7 +1222,7 @@ mod tests {
         )
         .with_gauge_fallback(116);
         assert_eq!(
-            rf_chain_str(&soapy, false, false),
+            rf_chain_str(&chain, false, false),
             "ANT\u{25B8}LNA\u{25B8}VGA\u{25B8}ADC"
         );
         // A driver that names none gets a question mark, not an invented stage.
@@ -1236,8 +1236,8 @@ mod tests {
     #[test]
     fn the_no_cascade_reason_is_not_one_sentence_for_two_devices() {
         let rtl = rtlsdr::gain_model(&[0, 49]);
-        let soapy = GainModel::new(vec![], "RF", "RF").with_gauge_fallback(116);
+        let chain = GainModel::new(vec![], "RF", "RF").with_gauge_fallback(116);
         assert!(rtl.no_cascade_reason().contains("single tuner"));
-        assert!(!soapy.no_cascade_reason().contains("single tuner"));
+        assert!(!chain.no_cascade_reason().contains("single tuner"));
     }
 }
