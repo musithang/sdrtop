@@ -89,10 +89,7 @@ impl SoapyDevice {
     /// one is an error return in the good case, and `SoapyHackRF` really does
     /// report `Supports AGC: NO`, so this is the common path and not the edge.
     fn set_boost(&self, on: bool) -> anyhow::Result<()> {
-        let crate::hardware::GainModel::Soapy { boost, .. } = &self.caps.gain else {
-            return Ok(());
-        };
-        match boost {
+        match self.caps.gain.boost() {
             None => Ok(()),
             Some(crate::hardware::Boost::GainMode) => {
                 unsafe { self.api.set_gain_mode(self.dev, on) }
@@ -311,7 +308,6 @@ pub fn list() -> Vec<DeviceListing> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::hardware::GainModel;
 
     #[test]
     fn the_serial_comes_back_out_of_the_argument_string() {
@@ -348,11 +344,21 @@ mod tests {
     /// device's own range.
     #[test]
     fn the_gain_lands_inside_whatever_range_the_driver_reported() {
-        let soapy = |min_db, max_db| GainModel::Soapy {
-            min_db,
-            max_db,
-            stages: vec![],
-            boost: None,
+        // The shape `caps.rs` actually produces: a driver that named no usable
+        // element still gets one synthesised stage over its whole-chain range.
+        // The old version of this test built `stages: vec![]`, which no device
+        // can be, and so tested a clamp nothing reaches.
+        let soapy = |min_db: u32, max_db: u32| {
+            crate::hardware::GainModel::new(
+                vec![crate::hardware::StageSpec::ranged(
+                    "RF",
+                    min_db as f64,
+                    max_db as f64,
+                    0.0,
+                )],
+                "RF",
+                "RF",
+            )
         };
         // SoapyHackRF: 0 to 116 dB.
         assert_eq!(soapy(0, 116).clamp_gains(40, 0).0, 40);

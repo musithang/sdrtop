@@ -294,9 +294,7 @@ impl SdrMetrics {
     /// against the HackRF fixture has half its rows unexercised.
     pub(crate) fn single_stage(mut self) -> Self {
         let mut caps = (*self.caps).clone();
-        caps.gain = crate::hardware::GainModel::RtlSingle {
-            gain_steps_db: vec![0, 9, 14, 27, 37, 49],
-        };
+        caps.gain = crate::hardware::native::rtlsdr::gain_model(&[0, 9, 14, 27, 37, 49]);
         caps.friis_applicable = false;
         self.radio.set_primary_gain(27);
         self.radio.set_secondary_gain(0);
@@ -322,9 +320,9 @@ impl SdrMetrics {
     /// deduplicated the way `rtl_caps` does it.
     pub(crate) fn rtlsdr(mut self) -> Self {
         let mut caps = (*self.caps).clone();
-        caps.gain = crate::hardware::GainModel::RtlSingle {
-            gain_steps_db: vec![0, 1, 3, 4, 6, 9, 14, 16, 20, 22, 25, 29, 33, 37, 40, 44, 49],
-        };
+        caps.gain = crate::hardware::native::rtlsdr::gain_model(&[
+            0, 1, 3, 4, 6, 9, 14, 16, 20, 22, 25, 29, 33, 37, 40, 44, 49,
+        ]);
         caps.friis_applicable = false;
         caps.has_bb_filter = false;
         caps.sample_geometry = crate::hardware::SampleGeometry {
@@ -349,28 +347,37 @@ impl SdrMetrics {
     pub(crate) fn soapy_no_boost(mut self) -> Self {
         self = self.soapy();
         let mut caps = (*self.caps).clone();
-        if let crate::hardware::GainModel::Soapy { boost, .. } = &mut caps.gain {
-            *boost = None;
-        }
+        caps.gain = Self::soapy_chain(None);
         self.caps = Arc::new(caps);
         self
     }
 
-    pub(crate) fn soapy(mut self) -> Self {
-        let mut caps = (*self.caps).clone();
-        caps.gain = crate::hardware::GainModel::Soapy {
-            min_db: 0,
-            max_db: 116,
-            // The real SoapyHackRF answers: AMP is a switch and became the
-            // boost, so the stages are LNA and VGA.
-            stages: vec![
+    /// The gain chain a `SoapyHackRF` reports, as `soapy::caps` would build it.
+    ///
+    /// The real answers: AMP is a two-position element and became the boost, so
+    /// the stages left are LNA and VGA, and the whole-chain 116 dB is only the
+    /// gauge's fallback because those two describe a span of their own.
+    fn soapy_chain(boost: Option<crate::hardware::Boost>) -> crate::hardware::GainModel {
+        let gm = crate::hardware::GainModel::new(
+            vec![
                 crate::hardware::StageSpec::ranged("LNA", 0.0, 40.0, 8.0),
                 crate::hardware::StageSpec::ranged("VGA", 0.0, 62.0, 2.0),
             ],
-            boost: Some(crate::hardware::Boost::Element(
-                crate::hardware::StageSpec::ranged("AMP", 0.0, 14.0, 14.0),
-            )),
-        };
+            "RF",
+            "RF",
+        )
+        .with_gauge_fallback(116);
+        match boost {
+            Some(b) => gm.with_boost(b),
+            None => gm,
+        }
+    }
+
+    pub(crate) fn soapy(mut self) -> Self {
+        let mut caps = (*self.caps).clone();
+        caps.gain = Self::soapy_chain(Some(crate::hardware::Boost::Element(
+            crate::hardware::StageSpec::ranged("AMP", 0.0, 14.0, 14.0),
+        )));
         caps.friis_applicable = false;
         caps.has_bb_filter = false;
         caps.sample_geometry = crate::hardware::SampleGeometry {

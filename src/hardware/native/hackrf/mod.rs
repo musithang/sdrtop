@@ -15,8 +15,8 @@ use crate::state::{DEFAULT_FREQUENCY, DEFAULT_SAMPLE_RATE};
 
 use crate::hardware::process::process_block;
 use crate::hardware::{
-    DeliveryModel, DeviceCapabilities, DeviceInfo, DeviceKind, DeviceListing, GainModel, RxContext,
-    SampleFormat, SampleGeometry, SdrDevice,
+    Boost, DeliveryModel, DeviceCapabilities, DeviceInfo, DeviceKind, DeviceListing, GainModel,
+    RxContext, SampleFormat, SampleGeometry, SdrDevice, StageSpec,
 };
 use ffi::*;
 
@@ -297,6 +297,32 @@ pub fn list() -> Vec<DeviceListing> {
     out
 }
 
+/// The HackRF One's gain chain, from the datasheet.
+///
+/// Baseband LNA in 8 dB steps, VGA in 2 dB steps, and an RF amp that is a
+/// two-position switch rather than a stage: 0 or +14 dB, on its own key. The
+/// mixer sits between the two stages and has no gain to set, which is why the
+/// diagram names it and the stage list does not.
+///
+/// This is the one place these numbers live. Everything device-generic asks the
+/// model rather than knowing what a HackRF is.
+pub fn gain_model() -> GainModel {
+    GainModel::new(
+        vec![
+            StageSpec::ranged("LNA", 0.0, 40.0, 8.0),
+            StageSpec::ranged("VGA", 0.0, 62.0, 2.0),
+        ],
+        "LNA",
+        "LNA",
+    )
+    .with_second_stage()
+    .with_boost(Boost::Element(StageSpec::ranged("AMP", 0.0, 14.0, 14.0)))
+    .with_chain_diagram("LNA\u{25b8}MIX\u{25b8}VGA")
+    // Never shown: this device has a modelled cascade, so `friis_applicable`
+    // is true and the panels never ask why it is not.
+    .with_no_cascade_reason("no cascade")
+}
+
 /// HackRF One capability descriptor - also used as the observer-mode default.
 pub fn caps() -> DeviceCapabilities {
     DeviceCapabilities {
@@ -310,7 +336,7 @@ pub fn caps() -> DeviceCapabilities {
             format: SampleFormat::Int8,
             full_scale: 128.0,
         },
-        gain: GainModel::HackRf,
+        gain: gain_model(),
         samples_per_transfer: crate::state::HACKRF_SAMPLES_PER_TRANSFER,
         has_bb_filter: true,
         friis_applicable: true,

@@ -207,6 +207,7 @@ pub fn row_count(model: &GainModel) -> usize {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::hardware::native::{hackrf, rtlsdr};
 
     /// Every character key `input/global/mod.rs` claims is documented here.
     ///
@@ -282,14 +283,9 @@ mod tests {
     #[test]
     fn a_device_with_no_boost_is_not_told_about_one() {
         let theme = crate::Theme::sdr();
-        let hackrf = lines(&GainModel::HackRf, 40, &theme);
+        let hackrf = lines(&hackrf::gain_model(), 40, &theme);
         let soapy = lines(
-            &GainModel::Soapy {
-                min_db: 0,
-                max_db: 116,
-                stages: vec![],
-                boost: None,
-            },
+            &GainModel::new(vec![], "RF", "RF").with_gauge_fallback(116),
             40,
             &theme,
         );
@@ -316,15 +312,8 @@ mod tests {
     #[test]
     fn a_single_knob_device_gets_a_shorter_reference() {
         let theme = crate::Theme::sdr();
-        let hackrf = lines(&GainModel::HackRf, 40, &theme).len();
-        let rtl = lines(
-            &GainModel::RtlSingle {
-                gain_steps_db: vec![0, 10, 20],
-            },
-            40,
-            &theme,
-        )
-        .len();
+        let hackrf = lines(&hackrf::gain_model(), 40, &theme).len();
+        let rtl = lines(&rtlsdr::gain_model(&[0, 10, 20]), 40, &theme).len();
         assert_eq!(rtl, hackrf - 2, "the two VGA rows should be gone");
     }
 }

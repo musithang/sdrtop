@@ -494,6 +494,7 @@ fn focus_items(m: &SdrMetrics) -> Vec<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::hardware::native::hackrf;
 
     #[test]
     fn the_footer_frame_reports_what_the_keys_are_for() {
@@ -618,7 +619,7 @@ mod tests {
 
     #[test]
     fn normal_items_appends_preset_entry() {
-        let items = normal_items("main", &[], MicroView::Main, 120, &GainModel::HackRf);
+        let items = normal_items("main", &[], MicroView::Main, 120, &hackrf::gain_model());
         assert_eq!(items.last().map(String::as_str), Some("[P] main"));
         assert_eq!(items.len(), NORMAL_ITEMS.len() + 1);
     }
@@ -630,7 +631,7 @@ mod tests {
             &[],
             MicroView::Main,
             50,
-            &GainModel::HackRf,
+            &hackrf::gain_model(),
         );
         assert_eq!(items.last().map(String::as_str), Some("[P] spec+wf"));
     }
@@ -662,7 +663,7 @@ mod tests {
             &micro_scope(),
             MicroView::Main,
             120,
-            &GainModel::HackRf,
+            &hackrf::gain_model(),
         );
         // The hint names the range of keys that work, not the retired [0] cycle.
         assert!(items.iter().any(|i| i == "[1-4]"), "{items:?}");
@@ -680,7 +681,7 @@ mod tests {
             &micro_scope(),
             MicroView::Signal,
             50,
-            &GainModel::HackRf,
+            &hackrf::gain_model(),
         );
         assert!(items.iter().any(|i| i == "[1-4]"), "{items:?}");
         assert!(items.iter().any(|i| i == "2/5"));
@@ -725,7 +726,7 @@ mod tests {
             &lab_scope(),
             MicroView::Main,
             120,
-            &GainModel::HackRf,
+            &hackrf::gain_model(),
         );
         // No [P] entry in lab mode; the map entries are appended instead.
         assert!(items.iter().all(|i| !i.starts_with("[P]")));
@@ -742,7 +743,7 @@ mod tests {
             ("lab_iq", lab_scope()),
             ("micro_main", micro_scope()),
         ] {
-            let items = normal_items(preset, &scope, MicroView::Main, 120, &GainModel::HackRf);
+            let items = normal_items(preset, &scope, MicroView::Main, 120, &hackrf::gain_model());
             for item in &items {
                 assert!(!item.contains("[?]"), "{preset}: {item}");
                 assert!(!item.starts_with("[0]"), "{preset}: {item}");
@@ -756,35 +757,24 @@ mod tests {
     fn the_boost_hint_is_named_by_the_model_and_omitted_when_absent() {
         // A SoapySDR device whose boost is a two-position element: the driver's
         // own name for it, not a generic AGC.
-        let amp = crate::hardware::GainModel::Soapy {
-            min_db: 0,
-            max_db: 116,
-            stages: vec![],
-            boost: Some(crate::hardware::Boost::Element(
+        let amp = GainModel::new(vec![], "RF", "RF")
+            .with_gauge_fallback(116)
+            .with_boost(crate::hardware::Boost::Element(
                 crate::hardware::StageSpec::ranged("AMP", 0.0, 14.0, 14.0),
-            )),
-        };
+            ));
         let items = base_normal_items(&amp).join(" ");
         assert!(items.contains("[A] AMP"), "{items}");
         assert!(!items.contains("AGC"), "two names for one switch: {items}");
 
         // An automatic gain mode really is an AGC.
-        let agc = crate::hardware::GainModel::Soapy {
-            min_db: 0,
-            max_db: 0,
-            stages: vec![],
-            boost: Some(crate::hardware::Boost::GainMode),
-        };
+        let agc = GainModel::new(vec![], "RF", "RF")
+            .with_gauge_fallback(0)
+            .with_boost(crate::hardware::Boost::GainMode);
         assert!(base_normal_items(&agc).join(" ").contains("[A] AGC"));
 
         // And a device with neither is offered no key at all, rather than one
         // that does nothing.
-        let none = crate::hardware::GainModel::Soapy {
-            min_db: 0,
-            max_db: 45,
-            stages: vec![],
-            boost: None,
-        };
+        let none = GainModel::new(vec![], "RF", "RF").with_gauge_fallback(45);
         let items = base_normal_items(&none).join(" ");
         assert!(
             !items.contains("[A]"),

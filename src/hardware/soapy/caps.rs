@@ -170,11 +170,27 @@ pub fn capabilities(a: &DriverAnswers) -> Result<Built, Unsupported> {
         default_frequency_hz: WANT_FREQ_HZ.clamp(freq_min, freq_max) as u64,
         default_sample_rate_hz: WANT_RATE_HZ.clamp(rate_min, rate_max),
         sample_geometry: geometry,
-        gain: GainModel::Soapy {
-            min_db,
-            max_db,
-            stages,
-            boost,
+        // The elements the driver named, in the order `listGains` gave them.
+        // That order is the driver's own statement about its chain: a
+        // convention rather than a guarantee, and `SoapyHackRF` bends it by
+        // listing LNA before AMP when the physical order is the reverse. It is
+        // still the only statement available, and still better than the
+        // automatic distribution `setGain` performs, which fills the VGA first.
+        //
+        // "RF" for the label because there is no one stage to name: the knob
+        // moves the whole front end. It reads correctly in the two places it
+        // appears, as a bar label on its own and as "RF gain" in a heading;
+        // "Gain" read as "GAIN gain" there.
+        //
+        // No `with_second_stage`: however many elements the driver named, they
+        // are driven as one figure. The whole-chain maximum is the gauge's
+        // fallback for a driver whose elements describe no span at all.
+        gain: {
+            let mut gm = GainModel::new(stages, "RF", "RF").with_gauge_fallback(max_db.max(min_db));
+            if let Some(boost) = boost {
+                gm = gm.with_boost(boost);
+            }
+            gm
         },
         samples_per_transfer: READ_PAIRS,
         has_bb_filter: hull(&a.bandwidth_ranges).is_some(),
@@ -331,14 +347,14 @@ mod tests {
             DeliveryModel::Pull,
             "readStream returns as soon as there is data, so we set the rhythm"
         );
-        match c.gain {
-            GainModel::Soapy {
-                min_db,
-                max_db,
-                ref stages,
-                ref boost,
-            } => {
-                assert_eq!((min_db, max_db), (0, 116), "LNA 40 + AMP 14 + VGA 62");
+        {
+            let stages = &c.gain.stages();
+            let boost = &c.gain.boost();
+            {
+                // 40 + 62. `getGainRange` says 116 because it counts the 14 dB
+                // AMP, which became the boost and has a key of its own; a gauge
+                // to 116 under a control that stops at 102 reads as broken.
+                assert_eq!(c.gain.primary_max_db(), 102, "LNA 40 + VGA 62");
                 // AMP is a switch and became the boost, so two stages are left,
                 // in the order the driver listed them.
                 let names: Vec<&str> = stages.iter().map(|s| s.name.as_str()).collect();
@@ -353,7 +369,6 @@ mod tests {
                     other => panic!("AMP [0, 14, 14] should be the boost, got {other:?}"),
                 }
             }
-            other => panic!("expected a Soapy gain model, got {other:?}"),
         }
     }
 
@@ -381,10 +396,6 @@ mod tests {
     #[test]
     fn a_zero_width_gain_range_is_carried_through_intact() {
         let c = capabilities(&built_in_audio()).unwrap().caps;
-        match c.gain {
-            GainModel::Soapy { min_db, max_db, .. } => assert_eq!((min_db, max_db), (0, 0)),
-            other => panic!("{other:?}"),
-        }
         assert_eq!(c.gain.primary_max_db(), 0);
         // Clamping into an empty range must return something, not panic.
         assert_eq!(c.gain.clamp_gains(30, 20), (0, 20));
@@ -399,10 +410,8 @@ mod tests {
         a.gain_elements.insert(1, el("BROKEN", 40.0, 0.0, 1.0));
         let built = capabilities(&a).unwrap();
 
-        let names: Vec<&str> = match &built.caps.gain {
-            GainModel::Soapy { stages, .. } => stages.iter().map(|s| s.name.as_str()).collect(),
-            other => panic!("{other:?}"),
-        };
+        let stages = built.caps.gain.stages();
+        let names: Vec<&str> = stages.iter().map(|s| s.name.as_str()).collect();
         assert_eq!(names, ["LNA", "VGA"], "the bad one is gone");
         assert_eq!(built.notes.len(), 1);
         assert!(
@@ -418,13 +427,9 @@ mod tests {
     #[test]
     fn a_driver_that_names_nothing_still_gets_one_stage() {
         let built = capabilities(&built_in_audio()).unwrap();
-        match &built.caps.gain {
-            GainModel::Soapy { stages, .. } => {
-                assert_eq!(stages.len(), 1);
-                assert_eq!(stages[0].step_db, 0.0, "continuous: no grid was given");
-            }
-            other => panic!("{other:?}"),
-        }
+        let stages = built.caps.gain.stages();
+        assert_eq!(stages.len(), 1);
+        assert_eq!(stages[0].step_db, 0.0, "continuous: no grid was given");
         assert!(built.notes.is_empty(), "{:?}", built.notes);
     }
 
@@ -435,14 +440,10 @@ mod tests {
         let mut a = soapy_hackrf();
         a.gain_elements = vec![el("A", f64::NAN, 10.0, 1.0), el("B", 5.0, 1.0, 1.0)];
         let built = capabilities(&a).unwrap();
-        match &built.caps.gain {
-            GainModel::Soapy { stages, boost, .. } => {
-                assert_eq!(stages.len(), 1, "the whole-chain fallback");
-                assert_eq!(stages[0].max_db, 116.0);
-                assert!(boost.is_none(), "no switch survived either");
-            }
-            other => panic!("{other:?}"),
-        }
+        let stages = built.caps.gain.stages();
+        assert_eq!(stages.len(), 1, "the whole-chain fallback");
+        assert_eq!(stages[0].max_db, 116.0);
+        assert!(!built.caps.gain.has_boost(), "no switch survived either");
         assert_eq!(
             built.notes.len(),
             3,
@@ -459,14 +460,10 @@ mod tests {
         let mut a = soapy_hackrf();
         a.gain_elements.push(el("PREAMP", 0.0, 20.0, 20.0));
         let built = capabilities(&a).unwrap();
-        match &built.caps.gain {
-            GainModel::Soapy { stages, boost, .. } => {
-                let names: Vec<&str> = stages.iter().map(|s| s.name.as_str()).collect();
-                assert_eq!(names, ["LNA", "VGA", "PREAMP"]);
-                assert!(matches!(boost, Some(Boost::Element(e)) if e.name == "AMP"));
-            }
-            other => panic!("{other:?}"),
-        }
+        let stages = built.caps.gain.stages();
+        let names: Vec<&str> = stages.iter().map(|s| s.name.as_str()).collect();
+        assert_eq!(names, ["LNA", "VGA", "PREAMP"]);
+        assert!(matches!(built.caps.gain.boost(), Some(Boost::Element(e)) if e.name == "AMP"));
     }
 
     /// Two mechanisms can be a boost, and a device with neither has none.

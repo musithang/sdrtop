@@ -18,8 +18,8 @@ use libc::{c_int, c_void};
 
 use crate::hardware::process::process_block;
 use crate::hardware::{
-    DeliveryModel, DeviceCapabilities, DeviceInfo, DeviceKind, DeviceListing, GainModel, RxContext,
-    SampleFormat, SampleGeometry, SdrDevice,
+    Boost, DeliveryModel, DeviceCapabilities, DeviceInfo, DeviceKind, DeviceListing, GainModel,
+    RxContext, SampleFormat, SampleGeometry, SdrDevice, StageSpec,
 };
 use ffi::*;
 
@@ -304,6 +304,33 @@ pub fn observer_caps() -> DeviceCapabilities {
     rtl_caps(5, &[])
 }
 
+/// An RTL-SDR's gain chain: one tuner, over the values the driver read out of
+/// the device, plus the tuner AGC as its boost.
+///
+/// **A table rather than a grid**, because the real list is irregular and a
+/// nearest-step answer would offer settings the tuner refuses.
+///
+/// A tuner that named no values has no describable stage, and saying so is not
+/// the same as saying it sits at zero: `clamp_gains` then leaves a gain alone
+/// rather than snapping it to a table that does not exist. The gauge still needs
+/// a full scale in that case, and 49 dB is the answer it has always given.
+pub fn gain_model(steps_db: &[u32]) -> GainModel {
+    let stages = if steps_db.is_empty() {
+        Vec::new()
+    } else {
+        vec![StageSpec::tabled(
+            "Tuner",
+            steps_db.iter().map(|&g| g as f64).collect(),
+        )]
+    };
+    GainModel::new(stages, "Tuner", "TUN")
+        // The tuner AGC: a flag the driver owns, not a switch with a name.
+        .with_boost(Boost::GainMode)
+        .with_chain_diagram("TUNER")
+        .with_no_cascade_reason("single tuner, no cascade")
+        .with_gauge_fallback(49)
+}
+
 fn rtl_caps(tuner: c_int, gains_tenths: &[i32]) -> DeviceCapabilities {
     // Frequency span depends on the tuner; the dominant R820T/R828D case covers
     // 24 MHz–1.766 GHz. E4000 reaches higher (with an internal gap we ignore).
@@ -340,9 +367,7 @@ fn rtl_caps(tuner: c_int, gains_tenths: &[i32]) -> DeviceCapabilities {
             // See `process::decode`.
             full_scale: 128.0,
         },
-        gain: GainModel::RtlSingle {
-            gain_steps_db: steps,
-        },
+        gain: gain_model(&steps),
         samples_per_transfer: (RTL_BUF_LEN / 2) as u64,
         has_bb_filter: false,
         friis_applicable: false,
@@ -427,13 +452,10 @@ mod tests {
         // R820T-style raw tenths → rounded whole dB, duplicates collapsed.
         let raw = [0, 9, 14, 27, 37, 496];
         let caps = rtl_caps(5, &raw);
-        match caps.gain {
-            GainModel::RtlSingle { gain_steps_db, .. } => {
-                // 0.0→0, 0.9→1, 1.4→1 (dup of 1), 2.7→3, 3.7→4, 49.6→50
-                assert_eq!(gain_steps_db, vec![0, 1, 3, 4, 50]);
-            }
-            _ => panic!("expected RtlSingle gain model"),
-        }
+        // 0.0→0, 0.9→1, 1.4→1 (dup of 1), 2.7→3, 3.7→4, 49.6→50
+        let stages = caps.gain.stages();
+        assert_eq!(stages.len(), 1, "one tuner");
+        assert_eq!(stages[0].table, vec![0.0, 1.0, 3.0, 4.0, 50.0]);
         assert_eq!(caps.sample_geometry.format, SampleFormat::Uint8);
         assert_eq!(caps.sample_geometry.full_scale, 128.0);
         assert!(!caps.has_bb_filter && !caps.friis_applicable);

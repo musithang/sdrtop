@@ -409,7 +409,6 @@ pub(super) fn initial_metrics(cfg: &AppConfig, boot: Boot) -> SdrMetrics {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::hardware::GainModel;
 
     /// A config written on a HackRF: 2.4 GHz, 10 Msps, LNA 24 / VGA 30.
     fn hackrf_config() -> AppConfig {
@@ -469,9 +468,7 @@ mod tests {
         // clamp, so the general property is "the answer is in the table".
         let steps = vec![0u32, 9, 14, 27, 37, 49];
         let mut caps = hardware::native::rtlsdr::observer_caps();
-        caps.gain = GainModel::RtlSingle {
-            gain_steps_db: steps.clone(),
-        };
+        caps.gain = crate::hardware::native::rtlsdr::gain_model(&steps);
         for asked in [0u32, 5, 12, 30, 100] {
             let mut cfg = AppConfig::default();
             cfg.radio.lna_gain = Some(asked);

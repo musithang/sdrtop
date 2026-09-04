@@ -435,11 +435,13 @@ mod tests {
         use crate::hardware::StageSpec;
         let mut m = soapy();
         let mut caps = (*m.caps).clone();
-        if let crate::hardware::GainModel::Soapy { stages, .. } = &mut caps.gain {
-            *stages = (0..n)
+        caps.gain = crate::hardware::GainModel::new(
+            (0..n)
                 .map(|i| StageSpec::ranged(&format!("{name}{i}"), 0.0, 30.0, 1.0))
-                .collect();
-        }
+                .collect(),
+            "RF",
+            "RF",
+        );
         m.caps = std::sync::Arc::new(caps);
         m.radio.gains = vec![10.0; n];
         m

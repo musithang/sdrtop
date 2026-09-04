@@ -4,7 +4,7 @@
 //! Device abstraction: the [`SdrDevice`] trait plus the capability and metadata
 //! types that let HackRF, RTL-SDR, and future backends share one RX → FFT
 //! pipeline, one UI, and one input handler. Concrete backends live in the
-//! `hackrf` / `rtlsdr` submodules; everything device-generic keys off the
+//! `native` and `soapy` submodules; everything device-generic keys off the
 //! [`DeviceCapabilities`] descriptor rather than matching on the device type.
 
 use std::sync::{Arc, Mutex};
@@ -296,10 +296,10 @@ impl StageSpec {
 /// its amp key.
 ///
 /// **Not named after a backend.** Both mechanisms are ideas any driver could
-/// present, and the type was called `Boost` only because SoapySDR was the
-/// first to need the distinction. The two native backends have a boost too;
-/// they cannot hold one of these yet, because `GainModel::HackRf` is a unit
-/// variant with nowhere to put it.
+/// present, and this was called `SoapyBoost` only because SoapySDR was the
+/// first to need the distinction. All three backends build one now: a HackRF's
+/// RF amp really is a two-position element, and an RTL-SDR's tuner AGC really
+/// is a gain mode.
 #[derive(Clone, Debug, PartialEq)]
 pub enum Boost {
     /// An automatic gain mode, set as a flag. SoapySDR's `setGainMode`.
@@ -324,51 +324,123 @@ impl Boost {
     }
 }
 
-/// The gain "shape" a device exposes - drives UI rendering and key bindings.
+/// The gain chain a device exposes: what stages it has, what to call them, and
+/// which of the questions the UI asks it answers yes to.
+///
+/// **A description, not a taxonomy.** This was an enum with a variant per
+/// backend, which put a fact about one radio's gain chain in the file the other
+/// two share and answered every question about it with a match arm naming all
+/// three. Each backend now builds one of these for itself, and the eleven
+/// questions below are field reads. A driver that has to describe itself
+/// differently changes the constructor in its own module and nothing else.
 #[derive(Clone, Debug)]
-pub enum GainModel {
-    /// HackRF: RF amp (0 / +14 dB) → LNA (0..=40 step 8) → VGA (0..=62 step 2).
-    HackRf,
-    /// RTL-SDR: a single tuner gain restricted to a discrete table (whole dB),
-    /// plus a tuner-AGC toggle.
-    RtlSingle { gain_steps_db: Vec<u32> },
-    /// A SoapySDR device: the elements the driver named, each with its own
-    /// range and step, in the order `listGains` gave them.
+pub struct GainModel {
+    /// The adjustable stages, front to back, in the order the device presents
+    /// them. The one source for the chain, as [`Self::stages`] always promised.
+    stages: Vec<StageSpec>,
+    /// The front-end boost, when there is one. **Not a stage**: it is a toggle
+    /// with its own key, not a range to distribute a figure across.
+    boost: Option<Boost>,
+    primary_label: &'static str,
+    primary_label_short: &'static str,
+    /// Whether sdrtop offers a dedicated key for a second stage.
     ///
-    /// The order is the driver's statement about its own chain. It is a
-    /// convention rather than a guarantee, and `SoapyHackRF` bends it by listing
-    /// LNA before AMP when the physical order is the reverse. It is still the
-    /// only statement available, and still better than the automatic
-    /// distribution `setGain` performs, which fills the VGA first.
+    /// **Declared, not counted.** A chain device can have three stages and
+    /// still present one knob, because sdrtop distributes a single figure
+    /// across them rather than giving each its own key.
+    has_second_stage: bool,
+    /// The signal path as a caption, for the panels that draw a chain they
+    /// cannot model.
     ///
-    /// `min_db` / `max_db` are the whole-chain range from `getGainRange`, kept
-    /// for the gauges until G5 derives them from the stages.
-    Soapy {
-        min_db: u32,
-        max_db: u32,
-        stages: Vec<StageSpec>,
-        boost: Option<Boost>,
-    },
+    /// Not built from `stages`, because it names parts that have no gain to
+    /// set: a HackRF reads `LNA▸MIX▸VGA`, and the mixer is not a stage.
+    chain_diagram: String,
+    no_cascade_reason: &'static str,
+    /// Full scale for the primary gain gauge when the stages describe no span.
+    ///
+    /// Reachable only for a device whose stages are absent or zero width: an
+    /// RTL-SDR whose tuner named no gains at all, or a driver that reported a
+    /// chain with no room in it. 49 dB is the historical RTL answer.
+    gauge_fallback_db: u32,
 }
 
 impl GainModel {
-    /// True for a device with one gain control and no separate VGA stage.
+    /// Describe a chain of stages, front to back.
+    ///
+    /// The defaults are the ones a device sdrtop knows nothing about should
+    /// get: one knob, no boost, no modelled cascade, and a diagram built from
+    /// the stage names. A backend that knows more says so with the `with_`
+    /// methods below, which keeps each addition visible at the call site.
+    pub fn new(
+        stages: Vec<StageSpec>,
+        primary_label: &'static str,
+        primary_label_short: &'static str,
+    ) -> Self {
+        let chain_diagram = stages
+            .iter()
+            .map(|s| s.name.as_str())
+            .collect::<Vec<_>>()
+            .join("\u{25b8}");
+        Self {
+            stages,
+            boost: None,
+            primary_label,
+            primary_label_short,
+            has_second_stage: false,
+            // A driver that named nothing gets a question mark, because that is
+            // the honest character for "it did not say".
+            chain_diagram: if chain_diagram.is_empty() {
+                "?".to_string()
+            } else {
+                chain_diagram
+            },
+            no_cascade_reason: "chain not modelled",
+            gauge_fallback_db: 0,
+        }
+    }
+
+    /// This device has a front-end boost, reached the given way.
+    pub fn with_boost(mut self, boost: Boost) -> Self {
+        self.boost = Some(boost);
+        self
+    }
+
+    /// The second stage gets its own key, rather than a share of one figure.
+    pub fn with_second_stage(mut self) -> Self {
+        self.has_second_stage = true;
+        self
+    }
+
+    /// The signal path in full, including parts that are not gain stages.
+    pub fn with_chain_diagram(mut self, diagram: &str) -> Self {
+        self.chain_diagram = diagram.to_string();
+        self
+    }
+
+    /// Why the modelled Friis cascade is not on offer for this device.
+    pub fn with_no_cascade_reason(mut self, reason: &'static str) -> Self {
+        self.no_cascade_reason = reason;
+        self
+    }
+
+    /// What the primary gauge reads full at when the stages describe no span.
+    pub fn with_gauge_fallback(mut self, db: u32) -> Self {
+        self.gauge_fallback_db = db;
+        self
+    }
+
+    /// True for a device with one gain control and no separate second stage.
+    ///
+    /// Exactly the negation of [`Self::has_second_stage`]. Two names for one
+    /// fact, kept because each reads correctly at its own call sites, but
+    /// **one field**: they cannot drift apart.
     pub fn is_single(&self) -> bool {
-        matches!(self, GainModel::RtlSingle { .. } | GainModel::Soapy { .. })
+        !self.has_second_stage
     }
 
     /// Label for the primary front-end gain stage.
     pub fn primary_label(&self) -> &'static str {
-        match self {
-            GainModel::HackRf => "LNA",
-            GainModel::RtlSingle { .. } => "Tuner",
-            // Soapy distributes one number across whatever elements the device
-            // has, so there is no one stage to name. "RF" is the overall front
-            // end gain, and it reads correctly in the two places this appears:
-            // as a bar label on its own, and as "RF gain" in a heading. "Gain"
-            // read as "GAIN gain" there.
-            GainModel::Soapy { .. } => "RF",
-        }
+        self.primary_label
     }
 
     /// The primary stage's name in three columns, for the header's fixed field.
@@ -378,61 +450,49 @@ impl GainModel {
     /// two cannot drift, which they did: the header hardcoded `TUN` for every
     /// single-knob device and so called a SoapySDR device's chain a tuner.
     pub fn primary_label_short(&self) -> &'static str {
-        match self {
-            GainModel::HackRf => "LNA",
-            GainModel::RtlSingle { .. } => "TUN",
-            GainModel::Soapy { .. } => "RF",
-        }
+        self.primary_label_short
     }
 
     /// Full-scale value for the primary-gain bar/gauge (dB).
     pub fn primary_max_db(&self) -> u32 {
-        match self {
-            // From the stage list, so the 40 dB ceiling and the tuner's top
-            // entry are not written twice. `stages()` is empty only for a tuner
-            // that named no gains at all, which keeps the old fallback.
-            GainModel::HackRf | GainModel::RtlSingle { .. } => self
-                .stages()
-                .first()
-                .map(|s| s.max_db.max(0.0).round() as u32)
-                .unwrap_or(49),
-            // The whole chain, but only the part the knob can reach. Since G8
-            // the knob distributes across the stages, and the boost is not one
-            // of them: `getGainRange` says 116 dB on a HackRF because it counts
-            // the 14 dB AMP, which has its own key. A scale to 116 under a
-            // control that stops at 102 would read as broken at the top.
-            GainModel::Soapy { stages, max_db, .. } => {
-                let reachable: f64 = stages.iter().map(|s| s.max_db).sum();
-                if reachable > 0.0 {
-                    reachable.round() as u32
-                } else {
-                    *max_db
-                }
+        if self.has_second_stage {
+            // The knob moves the front stage alone, so the gauge is that stage.
+            if let Some(first) = self.stages.first() {
+                return first.max_db.max(0.0).round() as u32;
+            }
+        } else {
+            // One knob for the whole chain, so the gauge is everything the knob
+            // can reach. The boost is not part of it and has its own key:
+            // `getGainRange` says 116 dB on a HackRF because it counts the
+            // 14 dB AMP, and a scale to 116 under a control that stops at 102
+            // would read as broken at the top.
+            let reachable: f64 = self.stages.iter().map(|s| s.max_db).sum();
+            if reachable > 0.0 {
+                return reachable.round() as u32;
             }
         }
+        self.gauge_fallback_db
     }
 
     /// Whether a distinct second gain stage (HackRF's VGA) exists.
     pub fn has_second_stage(&self) -> bool {
-        matches!(self, GainModel::HackRf)
+        self.has_second_stage
     }
 
     /// Label for the front-end-boost toggle (`amp_enabled`): HackRF's RF amp vs
-    /// RTL-SDR's tuner AGC.
+    /// RTL-SDR's tuner AGC vs whatever a driver called its own switch.
+    ///
+    /// "AGC" covers the two cases with no name of their own, and neither is a
+    /// guess: a gain mode genuinely is an automatic gain control, and a device
+    /// with no boost at all never reaches this line, because every one of the
+    /// nine call sites is gated on [`Self::has_boost`] first.
     pub fn boost_label(&self) -> &str {
-        match self {
-            GainModel::HackRf => "AMP",
-            GainModel::RtlSingle { .. } => "AGC",
-            // Whatever the boost calls itself, when it has a name of its own.
-            //
-            // "AGC" covers both fallbacks, and neither is a guess. A gain mode
-            // genuinely is an automatic gain control. A device with no boost at
-            // all never reaches this line, because every one of the nine call
-            // sites is gated on `has_boost()` first.
-            GainModel::Soapy { boost, .. } => {
-                boost.as_ref().and_then(Boost::label).unwrap_or("AGC")
-            }
-        }
+        self.boost.as_ref().and_then(Boost::label).unwrap_or("AGC")
+    }
+
+    /// How the boost is reached, for the backend that has to drive it.
+    pub fn boost(&self) -> Option<&Boost> {
+        self.boost.as_ref()
     }
 
     /// The stages between antenna and converter, for the panels that draw a
@@ -440,116 +500,63 @@ impl GainModel {
     ///
     /// Only read where `friis_applicable` is false. An RTL-SDR really is one
     /// tuner, and a SoapySDR device is **whatever `listGains` named**, which is
-    /// the driver's own answer rather than one of ours. A driver that names no
-    /// elements gets a question mark, because that is the honest character for
-    /// "it did not say".
+    /// the driver's own answer rather than one of ours.
     pub fn unmodelled_stages(&self) -> String {
-        match self {
-            GainModel::HackRf => "LNA\u{25b8}MIX\u{25b8}VGA".to_string(),
-            GainModel::RtlSingle { .. } => "TUNER".to_string(),
-            GainModel::Soapy { stages, .. } if !stages.is_empty() => stages
-                .iter()
-                .map(|s| s.name.as_str())
-                .collect::<Vec<_>>()
-                .join("\u{25b8}"),
-            GainModel::Soapy { .. } => "?".to_string(),
-        }
+        self.chain_diagram.clone()
     }
 
     /// Why the modelled cascade is not on offer, in a few words.
     ///
-    /// Two devices land in that branch for **different reasons**, and the panels
-    /// used to print one sentence for both: "single-tuner". That is true of an
-    /// RTL-SDR and false of a HackRF reached through SoapySDR, which has three
-    /// gain elements and a cascade we simply have not been told the noise
+    /// Devices land in that branch for **different reasons**, and the panels
+    /// used to print one sentence for all of them: "single-tuner". That is true
+    /// of an RTL-SDR and false of a HackRF reached through SoapySDR, which has
+    /// three gain elements and a cascade we simply have not been told the noise
     /// figures for.
     pub fn no_cascade_reason(&self) -> &'static str {
-        match self {
-            // Never shown: this device has a cascade.
-            GainModel::HackRf => "no cascade",
-            GainModel::RtlSingle { .. } => "single tuner, no cascade",
-            GainModel::Soapy { .. } => "chain not modelled",
-        }
+        self.no_cascade_reason
     }
 
     /// Whether there is a front-end boost to toggle at all.
     ///
-    /// Both native radios have one, so this was previously not a question worth
-    /// asking. A SoapySDR device often has neither an RF amp nor an automatic
-    /// gain mode, and a key that toggles a flag meaning nothing is worse than a
-    /// key that is not offered.
+    /// A device can decline: plenty of SoapySDR devices have neither an RF amp
+    /// nor an automatic gain mode, and a key that toggles a flag meaning
+    /// nothing is worse than a key that is not offered.
     pub fn has_boost(&self) -> bool {
-        match self {
-            GainModel::HackRf | GainModel::RtlSingle { .. } => true,
-            GainModel::Soapy { boost, .. } => boost.is_some(),
-        }
+        self.boost.is_some()
     }
 
     /// Every adjustable stage this device has, front to back.
     ///
-    /// **Derived, not stored.** The two native models are two shapes of the same
-    /// answer and the datasheet lives here, once: a second copy inside
-    /// [`Self::clamp_gains`] is exactly the drift this codebase keeps removing,
-    /// which is why that method is written on top of this one.
-    ///
     /// The boost is **not** here. It is a toggle, not a range, and every caller
     /// that wants it asks [`Self::has_boost`].
     pub fn stages(&self) -> Vec<StageSpec> {
-        match self {
-            // HackRF One, from the datasheet: baseband LNA in 8 dB steps, VGA in
-            // 2 dB steps. The RF amp is the boost and is not a stage.
-            GainModel::HackRf => vec![
-                StageSpec::ranged("LNA", 0.0, 40.0, 8.0),
-                StageSpec::ranged("VGA", 0.0, 62.0, 2.0),
-            ],
-            // One tuner, over the values the driver read out of the device. A
-            // table rather than a grid, because the real list is irregular and a
-            // nearest-step answer would offer settings the tuner refuses.
-            // A tuner that named no values has no describable stage. Saying so
-            // is not the same as saying it sits at zero, and the difference
-            // matters: `clamp_gains` leaves a gain alone rather than zeroing it
-            // when there is nothing to snap to.
-            GainModel::RtlSingle { gain_steps_db } if gain_steps_db.is_empty() => Vec::new(),
-            GainModel::RtlSingle { gain_steps_db } => vec![StageSpec::tabled(
-                "Tuner",
-                gain_steps_db.iter().map(|&g| g as f64).collect(),
-            )],
-            GainModel::Soapy { stages, .. } => stages.clone(),
-        }
+        self.stages.clone()
     }
 
     /// Snap stored gains into this model's legal values, returning `(lna, vga)`.
+    ///
     /// A config saved on one device family must not apply or display an illegal
-    /// gain on another - e.g. an RTL-SDR tuner's 49 dB on a HackRF LNA that maxes
-    /// at 40, or a HackRF value shown unsnapped on an RTL tuner's discrete table.
-    /// HackRF snaps to its 8 dB LNA / 2 dB VGA steps; a single-tuner device snaps
-    /// the primary gain to the nearest table entry and leaves `vga` untouched.
+    /// gain on another - e.g. an RTL-SDR tuner's 49 dB on a HackRF LNA that
+    /// maxes at 40, or a HackRF value shown unsnapped on an RTL tuner's discrete
+    /// table.
+    ///
+    /// **Every device answers from `stages()`**, so the 8 dB and 2 dB grids, the
+    /// tuner's table and a driver's reported elements are each written once. A
+    /// device with fewer stages than values leaves the extra ones alone rather
+    /// than zeroing them: there is nothing to snap to, and saying so is not the
+    /// same as saying the value is 0.
     pub fn clamp_gains(&self, lna: u32, vga: u32) -> (u32, u32) {
-        match self {
-            // Both native models answer from `stages()`, so the 8 dB and 2 dB
-            // grids and the tuner's table are written once. An exhaustive test
-            // pins this against the arithmetic it replaced, for every value in
-            // range, because these two numbers are what a saved config lands on
-            // when it is opened on the other radio.
-            GainModel::HackRf | GainModel::RtlSingle { .. } => {
-                let s = self.stages();
-                let first = s
-                    .first()
-                    .map(|st| st.snap(lna as f64).max(0.0).round() as u32)
-                    .unwrap_or(lna);
-                let second = s
-                    .get(1)
-                    .map(|st| st.snap(vga as f64).max(0.0).round() as u32)
-                    .unwrap_or(vga);
-                (first, second)
-            }
-            // A continuous range, so clamping is the whole job. `vga` is left
-            // alone because there is no second stage to put it in, and a config
-            // carried over from a HackRF should not be silently rewritten.
-            GainModel::Soapy { min_db, max_db, .. } => {
-                (lna.clamp(*min_db, (*max_db).max(*min_db)), vga)
-            }
-        }
+        let first = self
+            .stages
+            .first()
+            .map(|st| st.snap(lna as f64).max(0.0).round() as u32)
+            .unwrap_or(lna);
+        let second = self
+            .stages
+            .get(1)
+            .map(|st| st.snap(vga as f64).max(0.0).round() as u32)
+            .unwrap_or(vga);
+        (first, second)
     }
 }
 
@@ -747,6 +754,7 @@ pub trait SdrDevice: Send + Sync {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::hardware::native::{hackrf, rtlsdr};
 
     // ── The native stage lists ──────────────────────────────────────────────
 
@@ -756,7 +764,7 @@ mod tests {
     /// **every** value either stage can be handed.
     #[test]
     fn the_hackrf_stage_list_reproduces_the_old_clamp_exactly() {
-        let g = GainModel::HackRf;
+        let g = hackrf::gain_model();
         for lna in 0..=200u32 {
             for vga in [0u32, 1, 2, 3, 31, 47, 61, 62, 63, 99, 200] {
                 let was = ((lna.min(40) + 4) / 8 * 8, vga.min(62).div_ceil(2) * 2);
@@ -769,9 +777,7 @@ mod tests {
     fn the_rtl_stage_list_reproduces_the_old_clamp_exactly() {
         // The shape `rtl_caps` produces: whole dB, deduped, irregular.
         let table: Vec<u32> = vec![0, 1, 3, 4, 8, 15, 24, 33, 40, 49];
-        let g = GainModel::RtlSingle {
-            gain_steps_db: table.clone(),
-        };
+        let g = rtlsdr::gain_model(&table.clone());
         for lna in 0..=120u32 {
             let was = table
                 .iter()
@@ -786,7 +792,7 @@ mod tests {
     /// the stages: it is a toggle, not a range.
     #[test]
     fn the_native_models_name_their_own_stages() {
-        let hack = GainModel::HackRf.stages();
+        let hack = hackrf::gain_model().stages();
         let names: Vec<&str> = hack.iter().map(|s| s.name.as_str()).collect();
         assert_eq!(
             names,
@@ -796,10 +802,7 @@ mod tests {
         assert_eq!(hack[0].positions(), Some(6), "0, 8, 16, 24, 32, 40");
         assert_eq!(hack[1].positions(), Some(32));
 
-        let rtl = GainModel::RtlSingle {
-            gain_steps_db: vec![0, 1, 3, 49],
-        }
-        .stages();
+        let rtl = rtlsdr::gain_model(&[0, 1, 3, 49]).stages();
         assert_eq!(rtl.len(), 1);
         assert_eq!(rtl[0].name, "Tuner");
         assert_eq!(rtl[0].positions(), Some(4), "a table, not a grid");
@@ -812,9 +815,7 @@ mod tests {
     /// an empty table.
     #[test]
     fn a_single_entry_table_is_still_a_stage() {
-        let g = GainModel::RtlSingle {
-            gain_steps_db: vec![0],
-        };
+        let g = rtlsdr::gain_model(&[0]);
         assert_eq!(g.stages()[0].positions(), Some(1));
         assert_eq!(g.clamp_gains(37, 12), (0, 12));
     }
@@ -832,12 +833,13 @@ mod tests {
         StageSpec::ranged(name, min, max, step)
     }
 
+    /// A driver-described chain, the shape `soapy::caps` builds: stages the
+    /// driver named, one knob for all of them, no modelled cascade.
     fn chain_with_boost(boost: Option<Boost>) -> GainModel {
-        GainModel::Soapy {
-            min_db: 0,
-            max_db: 102,
-            stages: vec![stage("LNA", 0.0, 40.0, 8.0)],
-            boost,
+        let gm = GainModel::new(vec![stage("LNA", 0.0, 40.0, 8.0)], "RF", "RF");
+        match boost {
+            Some(b) => gm.with_boost(b),
+            None => gm,
         }
     }
 
@@ -851,14 +853,8 @@ mod tests {
     /// not.
     #[test]
     fn each_backend_names_its_own_boost() {
-        assert_eq!(GainModel::HackRf.boost_label(), "AMP");
-        assert_eq!(
-            GainModel::RtlSingle {
-                gain_steps_db: vec![0, 15, 28]
-            }
-            .boost_label(),
-            "AGC"
-        );
+        assert_eq!(hackrf::gain_model().boost_label(), "AMP");
+        assert_eq!(rtlsdr::gain_model(&[0, 15, 28]).boost_label(), "AGC");
 
         // A driver that named its switch: its own word wins. `SoapyHackRF` says
         // AMP for the same physical amplifier the native path calls AMP, so one
@@ -879,11 +875,8 @@ mod tests {
     #[test]
     fn a_device_with_no_boost_reports_none_to_offer() {
         assert!(!chain_with_boost(None).has_boost());
-        assert!(GainModel::HackRf.has_boost());
-        assert!(GainModel::RtlSingle {
-            gain_steps_db: vec![0]
-        }
-        .has_boost());
+        assert!(hackrf::gain_model().has_boost());
+        assert!(rtlsdr::gain_model(&[0]).has_boost());
     }
 
     #[test]
@@ -897,6 +890,56 @@ mod tests {
         let vga = stage("VGA", 0.0, 62.0, 2.0);
         assert_eq!(vga.snap(47.0), 48.0);
         assert_eq!(vga.snap(47.9), 48.0);
+    }
+
+    /// The bug the struct conversion fixed, pinned so it cannot come back.
+    ///
+    /// A `SoapyHackRF` reports a whole-chain range of 0 to 116 dB, and the old
+    /// chain arm of `clamp_gains` clamped the **primary** gain against it. The
+    /// stage that value goes into stops at 40. Asking for 100 therefore stored
+    /// 100, presented it as legal, and only the radio disagreed.
+    ///
+    /// Every device now answers from `stages()`, and the two native backends
+    /// always did, which is why this was only ever wrong on one of the three.
+    #[test]
+    fn a_chain_clamps_each_gain_into_its_own_stage() {
+        let chain = GainModel::new(
+            vec![stage("LNA", 0.0, 40.0, 8.0), stage("VGA", 0.0, 62.0, 2.0)],
+            "RF",
+            "RF",
+        )
+        .with_gauge_fallback(116);
+
+        assert_eq!(
+            chain.clamp_gains(100, 0).0,
+            40,
+            "the front stage stops at 40, whatever the whole chain adds up to"
+        );
+        assert_eq!(chain.clamp_gains(200, 200), (40, 62), "both ends");
+        assert_eq!(chain.clamp_gains(16, 20), (16, 20), "already on the grids");
+        assert_eq!(chain.clamp_gains(13, 47), (16, 48), "snapped to them");
+
+        // And the gauge reads what the knob can reach, not what `getGainRange`
+        // said: 116 counts the AMP, which is the boost and has its own key.
+        assert_eq!(chain.primary_max_db(), 102);
+    }
+
+    /// A device with fewer stages than values leaves the extra ones alone.
+    ///
+    /// Not the same as zeroing them. An RTL-SDR that named no gains has no
+    /// table to snap to, and a config the operator recognises beats a
+    /// fabricated legal value.
+    #[test]
+    fn a_gain_with_no_stage_to_snap_to_is_left_as_it_is() {
+        let one = GainModel::new(vec![stage("RF", 0.0, 30.0, 0.0)], "RF", "RF");
+        assert_eq!(
+            one.clamp_gains(20, 44),
+            (20, 44),
+            "nothing holds the second"
+        );
+        let none = GainModel::new(Vec::new(), "RF", "RF").with_gauge_fallback(49);
+        assert_eq!(none.clamp_gains(27, 13), (27, 13));
+        assert_eq!(none.primary_max_db(), 49, "the gauge still needs a top");
     }
 
     #[test]
@@ -1067,7 +1110,7 @@ mod tests {
 
     #[test]
     fn hackrf_clamp_snaps_to_steps_and_caps() {
-        let g = GainModel::HackRf;
+        let g = hackrf::gain_model();
         // In-range values already on a step are unchanged.
         assert_eq!(g.clamp_gains(16, 30), (16, 30));
         // An RTL tuner's 49 dB can't reach a HackRF LNA - caps to 40, a legal step.
@@ -1079,16 +1122,12 @@ mod tests {
 
     #[test]
     fn rtl_clamp_snaps_primary_to_table_keeps_vga() {
-        let g = GainModel::RtlSingle {
-            gain_steps_db: vec![0, 9, 16, 24, 49],
-        };
+        let g = rtlsdr::gain_model(&[0, 9, 16, 24, 49]);
         // A HackRF LNA value snaps to the nearest tuner-table entry; vga is inert.
         assert_eq!(g.clamp_gains(20, 40), (16, 40));
         assert_eq!(g.clamp_gains(100, 0), (49, 0));
         // An empty table can't snap → the value passes through unchanged.
-        let empty = GainModel::RtlSingle {
-            gain_steps_db: vec![],
-        };
+        let empty = rtlsdr::gain_model(&[]);
         assert_eq!(empty.clamp_gains(33, 7), (33, 7));
     }
 }

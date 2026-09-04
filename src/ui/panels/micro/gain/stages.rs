@@ -133,20 +133,14 @@ fn total_gain_db(state: &SdrMetrics) -> i32 {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::hardware::native::{hackrf, rtlsdr};
 
     fn rtl() -> GainModel {
-        GainModel::RtlSingle {
-            gain_steps_db: vec![0, 9, 14, 27, 37, 49],
-        }
+        rtlsdr::gain_model(&[0, 9, 14, 27, 37, 49])
     }
 
     fn soapy() -> GainModel {
-        GainModel::Soapy {
-            min_db: 0,
-            max_db: 116,
-            stages: vec![],
-            boost: None,
-        }
+        GainModel::new(vec![], "RF", "RF").with_gauge_fallback(116)
     }
 
     /// A device with no boost gets a dash where the state would be, not `OFF`.
@@ -188,7 +182,7 @@ mod tests {
     /// literals were padded for three.
     #[test]
     fn the_label_column_fits_every_label_the_device_uses() {
-        for gm in [GainModel::HackRf, rtl(), soapy()] {
+        for gm in [hackrf::gain_model(), rtl(), soapy()] {
             let w = label_w(&gm);
             for name in [gm.primary_label(), "VGA", gm.boost_label()] {
                 assert!(
@@ -203,7 +197,7 @@ mod tests {
     /// the fix costs the common device nothing.
     #[test]
     fn the_hackrf_column_is_the_width_it_always_was() {
-        assert_eq!(label_w(&GainModel::HackRf), 3);
+        assert_eq!(label_w(&hackrf::gain_model()), 3);
         assert_eq!(label_w(&rtl()), 5, "Tuner needs five");
     }
 

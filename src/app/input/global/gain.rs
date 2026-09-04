@@ -18,66 +18,59 @@ use crate::state::RailMode;
 
 use super::super::{metrics, InputCtx};
 
-/// HackRF's LNA moves in 8 dB steps across 0–40 dB.
-const LNA_STEP_DB: u32 = 8;
-const LNA_MAX_DB: u32 = 40;
 /// HackRF's VGA moves in 2 dB steps across 0–62 dB.
 const VGA_STEP_DB: u32 = 2;
 const VGA_MAX_DB: u32 = 62;
-/// A SoapySDR device reports a continuous overall range and no step, so one is
-/// chosen here. Small on purpose: the range can be 0 to 116 dB on a HackRF and
-/// 0 to 0 on a sound card, and a big step would be useless at one end of that.
-const SOAPY_STEP_DB: u32 = 1;
+/// How far a continuous stage moves per keypress.
+///
+/// A stage that reports no step of its own has to be given one. Small on
+/// purpose: such a range can be 0 to 116 dB on a HackRF chain and 0 to 0 on a
+/// sound card, and a big step would be useless at one end of that.
+const CONTINUOUS_STEP_DB: u32 = 1;
 
-/// Next value for the primary front-end gain when stepping up/down: HackRF's LNA
-/// moves in 8 dB steps (0–40); RTL-SDR's single tuner gain walks its discrete
-/// table to the neighbouring entry.
+/// Next value for the primary front-end gain when stepping up/down.
+///
+/// **Asked of the front stage, not of the device family.** A stage with a table
+/// walks to the neighbouring entry, one with a grid moves by its own step, and
+/// a continuous one moves by [`CONTINUOUS_STEP_DB`] because it has none to
+/// follow. That covers a HackRF's 8 dB LNA, an RTL-SDR's irregular tuner table
+/// and whatever a driver reported, without naming any of them.
+///
+/// A device whose front stage does not exist cannot be stepped and is left
+/// alone: an RTL-SDR that reported no gain table is exactly that case.
 pub(super) fn next_primary_gain(gain: &GainModel, current: u32, up: bool) -> u32 {
-    match gain {
-        GainModel::HackRf => {
-            if up {
-                (current + LNA_STEP_DB).min(LNA_MAX_DB)
-            } else {
-                current.saturating_sub(LNA_STEP_DB)
-            }
-        }
-        GainModel::RtlSingle { gain_steps_db, .. } => {
-            if gain_steps_db.is_empty() {
-                return current;
-            }
-            let idx = gain_steps_db
-                .iter()
-                .enumerate()
-                .min_by_key(|(_, &g)| (g as i64 - current as i64).abs())
-                .map(|(i, _)| i)
-                .unwrap_or(0);
-            let new_idx = if up {
-                (idx + 1).min(gain_steps_db.len() - 1)
-            } else {
-                idx.saturating_sub(1)
-            };
-            gain_steps_db[new_idx]
-        }
-        // A continuous range, so a fixed step is the only sensible answer. 1 dB
-        // is deliberately fine rather than fast: a Soapy device's range can be
-        // anything from 0 to 116 dB, and there is no per-device step to follow.
-        GainModel::Soapy { min_db, max_db, .. } => {
-            let hi = (*max_db).max(*min_db);
-            if up {
-                (current + SOAPY_STEP_DB).clamp(*min_db, hi)
-            } else {
-                current.saturating_sub(SOAPY_STEP_DB).clamp(*min_db, hi)
-            }
-        }
-    }
-}
+    let stages = gain.stages();
+    let Some(front) = stages.first() else {
+        return current;
+    };
 
-/// Label for the primary gain stage in log messages.
-pub(super) fn primary_gain_label(gain: &GainModel) -> &'static str {
-    match gain {
-        GainModel::HackRf => "LNA",
-        GainModel::RtlSingle { .. } => "Tuner",
-        GainModel::Soapy { .. } => "RF",
+    if !front.table.is_empty() {
+        let idx = front
+            .table
+            .iter()
+            .enumerate()
+            .min_by_key(|(_, &g)| (g - current as f64).abs().round() as i64)
+            .map(|(i, _)| i)
+            .unwrap_or(0);
+        let next = if up {
+            (idx + 1).min(front.table.len() - 1)
+        } else {
+            idx.saturating_sub(1)
+        };
+        return front.table[next].max(0.0).round() as u32;
+    }
+
+    let lo = front.min_db.max(0.0).round() as u32;
+    let hi = front.max_db.max(front.min_db).max(0.0).round() as u32;
+    let step = if front.step_db > 0.0 {
+        (front.step_db.round() as u32).max(1)
+    } else {
+        CONTINUOUS_STEP_DB
+    };
+    if up {
+        (current + step).clamp(lo, hi)
+    } else {
+        current.saturating_sub(step).clamp(lo, hi)
     }
 }
 
@@ -91,7 +84,12 @@ pub(super) fn primary_gain_label(gain: &GainModel) -> &'static str {
 /// See [`step_distributed`].
 pub(super) fn step_primary(ctx: &mut InputCtx<'_>, up: bool) {
     let Some(device) = ctx.device else { return };
-    if matches!(device.capabilities().gain, GainModel::Soapy { .. }) {
+    // A knob that moves a chain has to be distributed across it. Asked as
+    // "more than one stage and no key of its own for the second", which is what
+    // that has always meant: a HackRF drives its two stages from two keys, and
+    // an RTL-SDR's single tuner is stepped directly.
+    let gm = &device.capabilities().gain;
+    if !gm.has_second_stage() && gm.stages().len() > 1 {
         step_distributed(ctx, up);
         return;
     }
@@ -113,7 +111,7 @@ pub(super) fn step_primary(ctx: &mut InputCtx<'_>, up: bool) {
             m.ui.note_mode_action(RailMode::Bench);
             m.push_log(format!(
                 "{} gain \u{2192} {} dB",
-                primary_gain_label(gain),
+                gain.primary_label(),
                 new_gain
             ));
         }
@@ -176,7 +174,7 @@ fn step_distributed(ctx: &mut InputCtx<'_>, up: bool) {
 /// `[` / `]` - step the VGA. HackRF-only; on a single-tuner device these no-op.
 pub(super) fn step_vga(ctx: &mut InputCtx<'_>, up: bool) {
     let Some(device) = ctx.device else { return };
-    if !matches!(device.capabilities().gain, GainModel::HackRf) {
+    if !device.capabilities().gain.has_second_stage() {
         return;
     }
     let new_gain = {
@@ -254,18 +252,18 @@ pub(super) fn toggle_boost(ctx: &mut InputCtx<'_>) {
 mod tests {
     use super::*;
 
+    use crate::hardware::native::{hackrf, rtlsdr};
+
     fn rtl(steps: &[u32]) -> GainModel {
-        GainModel::RtlSingle {
-            gain_steps_db: steps.to_vec(),
-        }
+        rtlsdr::gain_model(steps)
     }
 
     #[test]
     fn the_lna_walks_its_step_and_clamps_at_both_ends() {
-        let g = GainModel::HackRf;
+        let g = hackrf::gain_model();
         assert_eq!(next_primary_gain(&g, 16, true), 24);
         assert_eq!(next_primary_gain(&g, 16, false), 8);
-        assert_eq!(next_primary_gain(&g, LNA_MAX_DB, true), LNA_MAX_DB);
+        assert_eq!(next_primary_gain(&g, 40, true), 40);
         assert_eq!(next_primary_gain(&g, 0, false), 0);
     }
 
@@ -294,24 +292,20 @@ mod tests {
 
     #[test]
     fn the_label_names_the_stage_the_device_actually_has() {
-        assert_eq!(primary_gain_label(&GainModel::HackRf), "LNA");
-        assert_eq!(primary_gain_label(&rtl(&[0, 9])), "Tuner");
+        assert_eq!(hackrf::gain_model().primary_label(), "LNA");
+        assert_eq!(rtl(&[0, 9]).primary_label(), "Tuner");
     }
 
     /// The step and the maximum have to agree, or the top of the range is
     /// unreachable by stepping.
     #[test]
     fn the_lna_range_is_reachable_in_whole_steps() {
-        const { assert!(LNA_MAX_DB.is_multiple_of(LNA_STEP_DB)) };
         const { assert!(VGA_MAX_DB.is_multiple_of(VGA_STEP_DB)) };
-        let g = GainModel::HackRf;
+        let g = hackrf::gain_model();
         let mut v = 0;
         for _ in 0..100 {
             v = next_primary_gain(&g, v, true);
         }
-        assert_eq!(
-            v, LNA_MAX_DB,
-            "stepping up should reach the maximum exactly"
-        );
+        assert_eq!(v, 40, "stepping up should reach the maximum exactly");
     }
 }

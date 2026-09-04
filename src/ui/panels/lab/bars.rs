@@ -1048,6 +1048,7 @@ impl Panel for LabMarkerPanel {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::hardware::native::{hackrf, rtlsdr};
 
     /// A signal state with real numbers in it, as if the FFT had just run.
     fn measured() -> crate::state::SignalState {
@@ -1188,15 +1189,13 @@ mod tests {
 
     #[test]
     fn rf_chain_str_inserts_amp_and_collapses_single_tuner() {
-        let rtl = GainModel::RtlSingle {
-            gain_steps_db: vec![0, 49],
-        };
+        let rtl = rtlsdr::gain_model(&[0, 49]);
         assert_eq!(
-            rf_chain_str(&GainModel::HackRf, true, false),
+            rf_chain_str(&hackrf::gain_model(), true, false),
             "ANT\u{25B8}LNA\u{25B8}MIX\u{25B8}VGA\u{25B8}ADC"
         );
         assert_eq!(
-            rf_chain_str(&GainModel::HackRf, true, true),
+            rf_chain_str(&hackrf::gain_model(), true, true),
             "ANT\u{25B8}AMP\u{25B8}LNA\u{25B8}MIX\u{25B8}VGA\u{25B8}ADC"
         );
         assert_eq!(
@@ -1213,41 +1212,31 @@ mod tests {
     /// receiver it is not. The stages now come from the driver's own listGains.
     #[test]
     fn an_unmodelled_chain_shows_the_stages_the_driver_named() {
-        let soapy = GainModel::Soapy {
-            min_db: 0,
-            max_db: 116,
-            stages: vec![
+        let soapy = GainModel::new(
+            vec![
                 crate::hardware::StageSpec::ranged("LNA", 0.0, 40.0, 8.0),
                 crate::hardware::StageSpec::ranged("VGA", 0.0, 62.0, 2.0),
             ],
-            boost: None,
-        };
+            "RF",
+            "RF",
+        )
+        .with_gauge_fallback(116);
         assert_eq!(
             rf_chain_str(&soapy, false, false),
             "ANT\u{25B8}LNA\u{25B8}VGA\u{25B8}ADC"
         );
         // A driver that names none gets a question mark, not an invented stage.
-        let mute = GainModel::Soapy {
-            min_db: 0,
-            max_db: 0,
-            stages: vec![],
-            boost: Some(crate::hardware::Boost::GainMode),
-        };
+        let mute = GainModel::new(vec![], "RF", "RF")
+            .with_gauge_fallback(0)
+            .with_boost(crate::hardware::Boost::GainMode);
         assert_eq!(rf_chain_str(&mute, false, false), "ANT\u{25B8}?\u{25B8}ADC");
     }
 
     /// And the reason printed beside it names the right reason.
     #[test]
     fn the_no_cascade_reason_is_not_one_sentence_for_two_devices() {
-        let rtl = GainModel::RtlSingle {
-            gain_steps_db: vec![0, 49],
-        };
-        let soapy = GainModel::Soapy {
-            min_db: 0,
-            max_db: 116,
-            stages: vec![],
-            boost: None,
-        };
+        let rtl = rtlsdr::gain_model(&[0, 49]);
+        let soapy = GainModel::new(vec![], "RF", "RF").with_gauge_fallback(116);
         assert!(rtl.no_cascade_reason().contains("single tuner"));
         assert!(!soapy.no_cascade_reason().contains("single tuner"));
     }
