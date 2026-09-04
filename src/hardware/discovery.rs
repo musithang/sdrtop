@@ -15,7 +15,7 @@
 use std::sync::Arc;
 
 use super::native::{hackrf, rtlsdr};
-use super::{soapy, SdrDevice};
+use super::{soapy, sysfs, DeviceCapabilities, SdrDevice};
 
 /// Which backend a [`DeviceListing`] / open request targets.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -23,6 +23,50 @@ pub enum DeviceKind {
     HackRf,
     RtlSdr,
     Soapy,
+}
+
+/// What observer mode needs in order to describe a device it cannot open.
+///
+/// **One answer rather than two questions.** A backend either has both a sysfs
+/// scan and a capability profile or it has neither, and two methods that must
+/// agree are two facts that eventually will not.
+#[derive(Clone, Copy)]
+pub struct ObserverProfile {
+    /// Finds this backend's device in sysfs, by USB vendor and product id.
+    pub scan: fn() -> Option<sysfs::HackRfSysInfo>,
+    /// Placeholder capabilities, so the panels keep this radio's labels rather
+    /// than another radio's.
+    ///
+    /// Placeholders in the literal sense: `rtlsdr::observer_caps` carries an
+    /// empty gain table, which is why `Boot::observer` does not clamp against
+    /// it. See the comment there.
+    pub caps: fn() -> DeviceCapabilities,
+}
+
+impl DeviceKind {
+    /// How observer mode describes this backend, when it can.
+    ///
+    /// Observer mode reads sysfs for a USB device sdrtop knows by vendor and
+    /// product id. There is no generic equivalent for "whatever SoapySDR was
+    /// talking to", so a Soapy device that will not open simply will not open,
+    /// and says why.
+    ///
+    /// `None` **is** that refusal, and it is why nothing downstream carries an
+    /// unreachable match arm any more: a caller that has a profile got it from
+    /// here, and one that did not never reached the code that needs it.
+    pub fn observer_profile(&self) -> Option<ObserverProfile> {
+        match self {
+            DeviceKind::HackRf => Some(ObserverProfile {
+                scan: sysfs::find_hackrf,
+                caps: hackrf::caps,
+            }),
+            DeviceKind::RtlSdr => Some(ObserverProfile {
+                scan: sysfs::find_rtlsdr,
+                caps: rtlsdr::observer_caps,
+            }),
+            DeviceKind::Soapy => None,
+        }
+    }
 }
 
 /// One enumerated device, before it is opened. `index` is the per-backend index
@@ -335,6 +379,41 @@ mod tests {
             normalise_serial("0000000000000000955c64dc2a3d89c3"),
             "and the two backends may not agree on case"
         );
+    }
+
+    /// Observer mode reads sysfs for a USB device sdrtop knows by vendor and
+    /// product id, and only the two native backends are such devices.
+    ///
+    /// This used to be a comment in three files and a `debug_assert!` in one of
+    /// them. A refusal that only fires in a debug build is not a tested fact.
+    #[test]
+    fn only_the_native_backends_can_be_observed() {
+        assert!(DeviceKind::HackRf.observer_profile().is_some());
+        assert!(DeviceKind::RtlSdr.observer_profile().is_some());
+        assert!(
+            DeviceKind::Soapy.observer_profile().is_none(),
+            "there is no sysfs profile for whatever SoapySDR was talking to"
+        );
+    }
+
+    /// The failure the deleted assertion existed to prevent: a user staring at
+    /// one radio's gain labels while looking at another.
+    ///
+    /// A profile pairs a scan with the capabilities that belong beside it, so
+    /// the way to get this wrong is to swap the two halves of one arm. Naming
+    /// the labels is what catches that; asserting merely that both are `Some`
+    /// would not.
+    #[test]
+    fn an_observer_profile_carries_its_own_backends_labels() {
+        let hackrf = (DeviceKind::HackRf.observer_profile().unwrap().caps)();
+        let rtl = (DeviceKind::RtlSdr.observer_profile().unwrap().caps)();
+        assert_eq!(hackrf.gain.primary_label(), "LNA");
+        assert!(
+            hackrf.gain.has_second_stage(),
+            "a HackRF has an LNA and a VGA"
+        );
+        assert_eq!(rtl.gain.primary_label(), "Tuner");
+        assert!(!rtl.gain.has_second_stage(), "an RTL-SDR is one tuner");
     }
 
     /// The case that would otherwise make every unprogrammed device look like

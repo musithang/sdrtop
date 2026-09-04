@@ -165,11 +165,11 @@ impl App {
         cfg: AppConfig,
         config_path: Option<PathBuf>,
         sysinfo: hardware::sysfs::HackRfSysInfo,
-        kind: hardware::DeviceKind,
+        profile: hardware::discovery::ObserverProfile,
     ) -> anyhow::Result<Self> {
         let state = Arc::new(Mutex::new(initial_metrics(
             &cfg,
-            Boot::observer(&cfg, &sysinfo, kind),
+            Boot::observer(&cfg, &sysinfo, profile),
         )));
 
         {
@@ -182,7 +182,7 @@ impl App {
             m.push_log("Device is in use by another process — hardware controls disabled");
         }
 
-        tasks::spawn_observer_task(Arc::clone(&state), sysinfo.bus, sysinfo.dev, kind);
+        tasks::spawn_observer_task(Arc::clone(&state), sysinfo.bus, sysinfo.dev, profile);
         tasks::spawn_sys_resource_task(Arc::clone(&state));
 
         Ok(Self::assemble(

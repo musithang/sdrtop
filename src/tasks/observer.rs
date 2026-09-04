@@ -5,27 +5,27 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use super::fmt_duration;
-use crate::hardware::{self, DeviceKind};
+use crate::hardware::{self, discovery::ObserverProfile};
 use crate::state::SdrMetrics;
 
 /// Polls sysfs/proc every 1 s to track which process owns the SDR device
 /// (observer mode only).  Writes device identity and owner info to `state`.
-pub fn spawn_observer_task(state: Arc<Mutex<SdrMetrics>>, bus: u32, dev: u32, kind: DeviceKind) {
+///
+/// `profile` carries the scan, so this task never asks which backend it is
+/// watching. A backend with no profile cannot get here: observer mode is
+/// refused for it before the task is spawned.
+pub fn spawn_observer_task(
+    state: Arc<Mutex<SdrMetrics>>,
+    bus: u32,
+    dev: u32,
+    profile: ObserverProfile,
+) {
     tokio::spawn(async move {
         let ticks_per_sec = unsafe { libc::sysconf(libc::_SC_CLK_TCK) } as f64;
         let mut last_owner_cpu: Option<(u64, Instant)> = None;
 
         loop {
-            let found = match kind {
-                DeviceKind::HackRf => hardware::sysfs::find_hackrf(),
-                DeviceKind::RtlSdr => hardware::sysfs::find_rtlsdr(),
-                // Never spawned for a Soapy device: `App::new` refuses observer
-                // mode there because there is no sysfs profile to read. None
-                // keeps the loop honest rather than reporting a HackRF's USB
-                // statistics for something else entirely.
-                DeviceKind::Soapy => None,
-            };
-            if let Some(info) = found {
+            if let Some(info) = (profile.scan)() {
                 let owner = hardware::sysfs::find_owner(info.bus, info.dev);
                 let mut m = state.lock().unwrap_or_else(|e| e.into_inner());
 

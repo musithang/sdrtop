@@ -59,20 +59,16 @@ impl App {
             Ok(device) => Self::new_normal(cfg, config_path, device),
             Err(open_err) => {
                 // Device is present but couldn't be opened (e.g. busy) - fall back
-                // to read-only observer mode via the matching backend's sysfs scan.
-                let sysinfo = match listing.kind {
-                    hardware::DeviceKind::HackRf => hardware::sysfs::find_hackrf(),
-                    hardware::DeviceKind::RtlSdr => hardware::sysfs::find_rtlsdr(),
-                    // Observer mode reads sysfs for a USB device sdrtop knows
-                    // by name. There is no generic equivalent for "whatever
-                    // SoapySDR was talking to", so a Soapy device that will not
-                    // open simply will not open, and says why.
-                    hardware::DeviceKind::Soapy => None,
-                };
-                let Some(sysinfo) = sysinfo else {
+                // to read-only observer mode via the matching backend's sysfs
+                // scan. A backend that cannot be observed has no profile, and
+                // then the open error is the answer.
+                let Some(profile) = listing.kind.observer_profile() else {
                     return Err(open_err);
                 };
-                Self::new_observer(cfg, config_path, sysinfo, listing.kind)
+                let Some(sysinfo) = (profile.scan)() else {
+                    return Err(open_err);
+                };
+                Self::new_observer(cfg, config_path, sysinfo, profile)
             }
         }
     }

@@ -122,25 +122,18 @@ impl Boot {
     pub(super) fn observer(
         cfg: &AppConfig,
         sysinfo: &hardware::sysfs::HackRfSysInfo,
-        kind: hardware::DeviceKind,
+        profile: hardware::discovery::ObserverProfile,
     ) -> Self {
         Self {
-            // Observer mode has no open device to query; use the matching
-            // backend's capability profile so the UI labels stay correct.
-            caps: Arc::new(match kind {
-                hardware::DeviceKind::HackRf => hardware::native::hackrf::caps(),
-                hardware::DeviceKind::RtlSdr => hardware::native::rtlsdr::observer_caps(),
-                // Unreachable: `App::new` refuses observer mode for a Soapy
-                // device, because there is no sysfs profile for "whatever
-                // SoapySDR was talking to". The arm exists to satisfy the match,
-                // and the assert exists so a future edit that removes that
-                // refusal is caught by the test suite rather than by a user
-                // staring at a HackRF's gain labels on an Airspy.
-                hardware::DeviceKind::Soapy => {
-                    debug_assert!(false, "observer mode has no SoapySDR profile");
-                    hardware::native::hackrf::caps()
-                }
-            }),
+            // Observer mode has no open device to query; the profile carries the
+            // matching backend's capabilities so the UI labels stay correct.
+            //
+            // There is no arm here for a backend that cannot be observed, and no
+            // assertion that we are not in one. `App::new` cannot reach this
+            // function without a profile, and a profile only exists for a
+            // backend that has one, so the case a `DeviceKind` match had to
+            // handle is now one the type system does not offer.
+            caps: Arc::new((profile.caps)()),
             tuning: Tuning {
                 frequency_hz: cfg.radio.frequency_hz,
                 sample_rate: cfg.radio.sample_rate,
@@ -521,13 +514,21 @@ mod tests {
             "the placeholder profile's table holds only 0, so everything snaps there"
         );
 
-        let boot = Boot::observer(&cfg, &sysinfo(), hardware::DeviceKind::RtlSdr);
+        let boot = Boot::observer(&cfg, &sysinfo(), profile(hardware::DeviceKind::RtlSdr));
         assert_eq!(
             boot.tuning.gains,
             vec![24.0, 30.0],
             "so observer mode shows the config"
         );
         assert_eq!(boot.tuning.frequency_hz, 2_400_000_000);
+    }
+
+    /// The observer profile for a backend that has one. The `expect` is the
+    /// point: a test naming a backend that cannot be observed should say so
+    /// loudly rather than quietly testing something else.
+    fn profile(kind: hardware::DeviceKind) -> hardware::discovery::ObserverProfile {
+        kind.observer_profile()
+            .expect("this backend can be observed")
     }
 
     fn sysinfo() -> hardware::sysfs::HackRfSysInfo {
@@ -551,7 +552,7 @@ mod tests {
         for m in [
             initial_metrics(
                 &cfg,
-                Boot::observer(&cfg, &sysinfo(), hardware::DeviceKind::HackRf),
+                Boot::observer(&cfg, &sysinfo(), profile(hardware::DeviceKind::HackRf)),
             ),
             initial_metrics(
                 &cfg,
@@ -587,7 +588,7 @@ mod tests {
         cfg.display.waterfall_max_rows = 64;
         let m = initial_metrics(
             &cfg,
-            Boot::observer(&cfg, &sysinfo(), hardware::DeviceKind::HackRf),
+            Boot::observer(&cfg, &sysinfo(), profile(hardware::DeviceKind::HackRf)),
         );
         assert_eq!(
             m.waterfall.buffer.max_rows,
@@ -602,7 +603,7 @@ mod tests {
         cfg.display.waterfall_max_rows = 4_096;
         let m = initial_metrics(
             &cfg,
-            Boot::observer(&cfg, &sysinfo(), hardware::DeviceKind::HackRf),
+            Boot::observer(&cfg, &sysinfo(), profile(hardware::DeviceKind::HackRf)),
         );
         assert_eq!(m.waterfall.buffer.max_rows, 4_096);
     }
@@ -632,7 +633,7 @@ mod tests {
 
         let obs = initial_metrics(
             &cfg,
-            Boot::observer(&cfg, &sysinfo(), hardware::DeviceKind::HackRf),
+            Boot::observer(&cfg, &sysinfo(), profile(hardware::DeviceKind::HackRf)),
         );
         assert!(obs.spectrum.markers.is_empty());
         assert!(obs.ui.recall.iter().all(|s| s.is_none()));
