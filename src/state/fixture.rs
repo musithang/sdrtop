@@ -367,7 +367,7 @@ impl SdrMetrics {
                 crate::hardware::StageSpec::ranged("LNA", 0.0, 40.0, 8.0),
                 crate::hardware::StageSpec::ranged("VGA", 0.0, 62.0, 2.0),
             ],
-            boost: Some(crate::hardware::SoapyBoost::Element(
+            boost: Some(crate::hardware::Boost::Element(
                 crate::hardware::StageSpec::ranged("AMP", 0.0, 14.0, 14.0),
             )),
         };

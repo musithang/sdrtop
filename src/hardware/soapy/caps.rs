@@ -17,8 +17,7 @@
 use std::fmt;
 
 use crate::hardware::{
-    DeliveryModel, DeviceCapabilities, GainModel, SampleFormat, SampleGeometry, SoapyBoost,
-    StageSpec,
+    Boost, DeliveryModel, DeviceCapabilities, GainModel, SampleFormat, SampleGeometry, StageSpec,
 };
 
 /// Pairs read out of one `readStream` call.
@@ -114,7 +113,7 @@ pub struct Built {
 /// Only the **first** switch becomes the boost. sdrtop has one boost concept and
 /// one key for it; a second switch stays in the list as a stage it can still set,
 /// rather than being silently dropped or quietly stealing the key.
-fn split_elements(elements: &[StageSpec]) -> (Vec<StageSpec>, Option<SoapyBoost>, Vec<String>) {
+fn split_elements(elements: &[StageSpec]) -> (Vec<StageSpec>, Option<Boost>, Vec<String>) {
     let mut stages = Vec::new();
     let mut boost = None;
     let mut notes = Vec::new();
@@ -128,7 +127,7 @@ fn split_elements(elements: &[StageSpec]) -> (Vec<StageSpec>, Option<SoapyBoost>
             continue;
         }
         if e.is_switch() && boost.is_none() {
-            boost = Some(SoapyBoost::Element(e.clone()));
+            boost = Some(Boost::Element(e.clone()));
             continue;
         }
         stages.push(e.clone());
@@ -161,7 +160,7 @@ pub fn capabilities(a: &DriverAnswers) -> Result<Built, Unsupported> {
     // `hasGainMode` is automatic gain control; a two-position element is a
     // manual switch. Both land on sdrtop's one boost concept, and the element
     // wins because it is the one the user can actually set.
-    let boost = element_boost.or(a.has_gain_mode.then_some(SoapyBoost::GainMode));
+    let boost = element_boost.or(a.has_gain_mode.then_some(Boost::GainMode));
 
     let caps = DeviceCapabilities {
         freq_min_hz: freq_min.max(0.0) as u64,
@@ -347,7 +346,7 @@ mod tests {
                 assert_eq!(stages[0].step_db, 8.0, "the driver's own grid");
                 assert_eq!(stages[1].max_db, 62.0);
                 match boost {
-                    Some(SoapyBoost::Element(e)) => {
+                    Some(Boost::Element(e)) => {
                         assert_eq!(e.name, "AMP");
                         assert_eq!((e.min_db, e.max_db), (0.0, 14.0));
                     }
@@ -464,7 +463,7 @@ mod tests {
             GainModel::Soapy { stages, boost, .. } => {
                 let names: Vec<&str> = stages.iter().map(|s| s.name.as_str()).collect();
                 assert_eq!(names, ["LNA", "VGA", "PREAMP"]);
-                assert!(matches!(boost, Some(SoapyBoost::Element(e)) if e.name == "AMP"));
+                assert!(matches!(boost, Some(Boost::Element(e)) if e.name == "AMP"));
             }
             other => panic!("{other:?}"),
         }

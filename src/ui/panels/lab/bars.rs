@@ -1231,7 +1231,7 @@ mod tests {
             min_db: 0,
             max_db: 0,
             stages: vec![],
-            boost: Some(crate::hardware::SoapyBoost::GainMode),
+            boost: Some(crate::hardware::Boost::GainMode),
         };
         assert_eq!(rf_chain_str(&mute, false, false), "ANT\u{25B8}?\u{25B8}ADC");
     }

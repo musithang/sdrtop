@@ -287,20 +287,41 @@ impl StageSpec {
     }
 }
 
-/// What a SoapySDR device offers as a front-end boost, if anything.
+/// How a device's front-end boost is reached, when it has one.
 ///
 /// Two different mechanisms, and the distinction is the driver's, not ours. A
 /// HackRF through `SoapyHackRF` reports `Supports AGC: NO` and yet has an `AMP`
 /// element with exactly two positions, which is the same physical switch the
 /// native backend drives. Treating "no gain mode" as "no boost" cost that device
 /// its amp key.
+///
+/// **Not named after a backend.** Both mechanisms are ideas any driver could
+/// present, and the type was called `Boost` only because SoapySDR was the
+/// first to need the distinction. The two native backends have a boost too;
+/// they cannot hold one of these yet, because `GainModel::HackRf` is a unit
+/// variant with nowhere to put it.
 #[derive(Clone, Debug, PartialEq)]
-pub enum SoapyBoost {
-    /// `setGainMode`: the driver's own automatic gain control.
+pub enum Boost {
+    /// An automatic gain mode, set as a flag. SoapySDR's `setGainMode`.
     GainMode,
-    /// A two-position element, driven to one end or the other with
+    /// A two-position gain element, driven to one end or the other. SoapySDR's
     /// `setGainElement`.
     Element(StageSpec),
+}
+
+impl Boost {
+    /// What to call this boost on screen, when the device named it.
+    ///
+    /// An element carries the driver's own word, which is the whole reason to
+    /// prefer one: `SoapyHackRF` calls its switch `AMP` and so does the native
+    /// backend, so the same radio reads the same either way round. A gain mode
+    /// is a flag and has no name of its own.
+    pub fn label(&self) -> Option<&str> {
+        match self {
+            Boost::GainMode => None,
+            Boost::Element(s) => Some(&s.name),
+        }
+    }
 }
 
 /// The gain "shape" a device exposes - drives UI rendering and key bindings.
@@ -326,7 +347,7 @@ pub enum GainModel {
         min_db: u32,
         max_db: u32,
         stages: Vec<StageSpec>,
-        boost: Option<SoapyBoost>,
+        boost: Option<Boost>,
     },
 }
 
@@ -402,14 +423,15 @@ impl GainModel {
         match self {
             GainModel::HackRf => "AMP",
             GainModel::RtlSingle { .. } => "AGC",
-            // The driver's own name for the switch, when the boost is one. A
-            // `SoapyHackRF` calls it AMP, which is what the native backend calls
-            // it too, so the same radio reads the same either way round.
-            GainModel::Soapy {
-                boost: Some(SoapyBoost::Element(s)),
-                ..
-            } => &s.name,
-            GainModel::Soapy { .. } => "AGC",
+            // Whatever the boost calls itself, when it has a name of its own.
+            //
+            // "AGC" covers both fallbacks, and neither is a guess. A gain mode
+            // genuinely is an automatic gain control. A device with no boost at
+            // all never reaches this line, because every one of the nine call
+            // sites is gated on `has_boost()` first.
+            GainModel::Soapy { boost, .. } => {
+                boost.as_ref().and_then(Boost::label).unwrap_or("AGC")
+            }
         }
     }
 
@@ -808,6 +830,60 @@ mod tests {
 
     fn stage(name: &str, min: f64, max: f64, step: f64) -> StageSpec {
         StageSpec::ranged(name, min, max, step)
+    }
+
+    fn chain_with_boost(boost: Option<Boost>) -> GainModel {
+        GainModel::Soapy {
+            min_db: 0,
+            max_db: 102,
+            stages: vec![stage("LNA", 0.0, 40.0, 8.0)],
+            boost,
+        }
+    }
+
+    /// The four answers `boost_label` can give, pinned before anything moves
+    /// where they come from.
+    ///
+    /// The two native ones are string constants in a match arm today. They are
+    /// about to become fields of a `Boost` each backend builds for itself, and
+    /// a refactor that quietly changes what the rail and the header print is
+    /// exactly what a test naming the strings catches and a structural one does
+    /// not.
+    #[test]
+    fn each_backend_names_its_own_boost() {
+        assert_eq!(GainModel::HackRf.boost_label(), "AMP");
+        assert_eq!(
+            GainModel::RtlSingle {
+                gain_steps_db: vec![0, 15, 28]
+            }
+            .boost_label(),
+            "AGC"
+        );
+
+        // A driver that named its switch: its own word wins. `SoapyHackRF` says
+        // AMP for the same physical amplifier the native path calls AMP, so one
+        // radio reads the same whichever way it was reached.
+        let named = chain_with_boost(Some(Boost::Element(stage("AMP", 0.0, 14.0, 14.0))));
+        assert_eq!(named.boost_label(), "AMP");
+
+        // A gain mode is a flag with no name, and an automatic gain control is
+        // what it is. Not a fallback standing in for something unknown.
+        assert_eq!(chain_with_boost(Some(Boost::GainMode)).boost_label(), "AGC");
+    }
+
+    /// A device that declines a boost says so, and nothing asks it for a label.
+    ///
+    /// The label is still `&str` rather than `Option<&str>` because all nine
+    /// call sites are gated on this method. If that ever stops being true, this
+    /// test is the one that should start looking wrong.
+    #[test]
+    fn a_device_with_no_boost_reports_none_to_offer() {
+        assert!(!chain_with_boost(None).has_boost());
+        assert!(GainModel::HackRf.has_boost());
+        assert!(GainModel::RtlSingle {
+            gain_steps_db: vec![0]
+        }
+        .has_boost());
     }
 
     #[test]

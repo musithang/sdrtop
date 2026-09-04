@@ -94,14 +94,14 @@ impl SoapyDevice {
         };
         match boost {
             None => Ok(()),
-            Some(crate::hardware::SoapyBoost::GainMode) => {
+            Some(crate::hardware::Boost::GainMode) => {
                 unsafe { self.api.set_gain_mode(self.dev, on) }
                     .map_err(|e| anyhow::anyhow!("{}: {e}", self.args))
             }
             // A two-position element: driven to one end or the other. Its own
             // reported bounds decide which, rather than 0 and 14 from knowing
             // what a HackRF is.
-            Some(crate::hardware::SoapyBoost::Element(s)) => {
+            Some(crate::hardware::Boost::Element(s)) => {
                 let db = if on { s.max_db } else { s.min_db };
                 unsafe { self.api.set_gain_element(self.dev, &s.name, db) }
                     .map_err(|e| anyhow::anyhow!("{}: {e}", self.args))

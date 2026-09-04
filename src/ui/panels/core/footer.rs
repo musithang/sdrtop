@@ -760,7 +760,7 @@ mod tests {
             min_db: 0,
             max_db: 116,
             stages: vec![],
-            boost: Some(crate::hardware::SoapyBoost::Element(
+            boost: Some(crate::hardware::Boost::Element(
                 crate::hardware::StageSpec::ranged("AMP", 0.0, 14.0, 14.0),
             )),
         };
@@ -773,7 +773,7 @@ mod tests {
             min_db: 0,
             max_db: 0,
             stages: vec![],
-            boost: Some(crate::hardware::SoapyBoost::GainMode),
+            boost: Some(crate::hardware::Boost::GainMode),
         };
         assert!(base_normal_items(&agc).join(" ").contains("[A] AGC"));
 
