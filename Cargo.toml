@@ -3,7 +3,7 @@
 
 [package]
 name = "sdrtop"
-version = "0.5.0"
+version = "0.5.1"
 edition = "2021"
 license = "GPL-3.0-or-later"
 description = "Terminal monitor for HackRF One, RTL-SDR and any SoapySDR radio: live spectrum, waterfall, and IQ/RF/timing/signal diagnostics"

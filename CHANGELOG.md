@@ -14,6 +14,57 @@ For the same story told as narrative rather than as a list, see
 [`user_docs/whats-new.md`](user_docs/whats-new.md), which is organised by
 checkpoint instead of by version.
 
+## [0.5.1] - 2026-09-04
+
+**A separation, and one number that was wrong because of it.**
+
+0.5.0 taught sdrtop to speak SoapySDR, and it did that by adding a variant to
+the type the two native backends already shared. That worked, and it meant a
+fact about one radio's gain chain lived in the file the other two read. This
+release moves the wall: the backends are separated in the source tree, and one
+module is allowed to know both sides exist because deciding what to show when
+two of them find the same radio is a question neither can answer alone.
+
+Nothing on screen moved. That is checked rather than hoped: the panel tests
+render through the real registry, and not one of them needed its expected text
+edited.
+
+### Fixed
+
+- **Gain on a SoapySDR device clamped against the wrong range.** The primary
+  gain was held inside the whole chain's span rather than inside the stage the
+  value actually goes into. On a HackRF reached through `SoapyHackRF` the driver
+  reports 0 to 116 dB for the chain while the front stage stops at 40, so asking
+  for 100 stored 100, displayed it as legal, and only the radio disagreed. Every
+  device now clamps through its own stage list, which is what the two native
+  backends always did.
+- Three stale intra-doc links, and `src/hardware/buffer.rs`, which held a licence
+  header, no code, and no module declaration to compile it.
+
+### Changed
+
+- **The hardware layer is reorganised.** `native/hackrf/` and `native/rtlsdr/`
+  are the backends sdrtop drives itself and has tested on real hardware;
+  `soapy/` is everything reached through libSoapySDR, under the replacement rule
+  described in its own directory. `discovery.rs` owns enumeration and is the one
+  module permitted to see both. `main.rs` names no backend module at all.
+- `GainModel` is a struct each backend fills in rather than an enum with a
+  variant per backend, so a driver that has to describe itself differently
+  changes its own constructor and nothing else. The eleven questions the UI asks
+  it are unchanged.
+- Stepping a gain stage now reads the stage's own grid. HackRF's 8 dB LNA and
+  2 dB VGA were constants in the input layer; they are the model's statement
+  now, and they step exactly as they did.
+
+### Note on RTL-SDR
+
+The two native backends are the ones sdrtop's own rule says land only after
+physical testing, and an RTL-SDR was not available for this one. The change to
+that path is narrower than the diff suggests: **not one line of its `SdrDevice`
+implementation changed**, only how it describes its gain chain and which trait
+call the boost key selects, both of which are covered by tests. It is said here
+rather than left for anyone to find out, and a report either way is welcome.
+
 ## [0.5.0] - 2026-09-03
 
 **This was going to be 0.4.5**, and the gain work is what changed that: `[radio]` now stores one `gain` line in place of `lna_gain` and
@@ -549,7 +600,8 @@ sdrtop stopped being a one-radio program.
   image rejection ratio, wavelength and antenna metrics.
 - Config file with atomic save on quit, and the CLI flags that override it.
 
-[Unreleased]: https://github.com/musithang/sdrtop/compare/v0.5.0...HEAD
+[Unreleased]: https://github.com/musithang/sdrtop/compare/v0.5.1...HEAD
+[0.5.1]: https://github.com/musithang/sdrtop/compare/v0.5.0...v0.5.1
 [0.5.0]: https://github.com/musithang/sdrtop/compare/v0.4.2...v0.5.0
 [0.4.2]: https://github.com/musithang/sdrtop/compare/v0.4.1...v0.4.2
 [0.4.1]: https://github.com/musithang/sdrtop/compare/v0.4.0...v0.4.1
