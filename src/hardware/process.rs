@@ -3,9 +3,12 @@
 
 //! Device-agnostic per-block sample accumulation. Both backends funnel their
 //! raw USB byte blocks through [`process_block`]: HackRF from its `extern "C"`
-//! callback, RTL-SDR from its owned read thread. Only the byte→sample decode and
-//! the saturation test branch on [`SampleFormat`]; every accumulator, the
+//! callback, RTL-SDR from its owned read thread. Only the byte→sample decode
+//! branches on [`SampleFormat`]; the saturation test, every accumulator, the
 //! histogram, drops, jitter, and the hand-off to the FFT worker are identical.
+//! The rail a sample is tested against is the *declared full scale*, which is
+//! also what the histogram bins and the peak level use, so the ADC bench's three
+//! readings of one sample cannot disagree.
 
 use std::time::Instant;
 
@@ -93,12 +96,20 @@ pub fn process_block(
     match format {
         SampleFormat::Int8 | SampleFormat::Uint8 => {
             for (idx, c) in buf.as_chunks::<2>().0.iter().enumerate() {
-                acc.fold(idx, decode(format, c[0]), decode(format, c[1]));
+                acc.fold(
+                    idx,
+                    decode(format, fs_counts, c[0]),
+                    decode(format, fs_counts, c[1]),
+                );
             }
         }
         SampleFormat::Int16 => {
             for (idx, c) in buf.as_chunks::<4>().0.iter().enumerate() {
-                acc.fold(idx, decode_i16([c[0], c[1]]), decode_i16([c[2], c[3]]));
+                acc.fold(
+                    idx,
+                    decode_i16(fs_counts, [c[0], c[1]]),
+                    decode_i16(fs_counts, [c[2], c[3]]),
+                );
             }
         }
     }
@@ -297,6 +308,31 @@ fn encode_into(out: &mut Vec<u8>, i: f32, q: f32, g: &SampleGeometry) {
     }
 }
 
+/// Whether a centered sample sits on the converter's own rail.
+///
+/// **Against the declared full scale, not against the container.** A twelve-bit
+/// converter handing over sixteen-bit words rails at 2047 counts and never comes
+/// near 32767, so a test written against `i16::MAX` cannot fire on one - and
+/// every SoapySDR radio that reports `CS16` with a full scale below 32768 is
+/// exactly that. The saturation reading stayed at 0.00 % for the whole session
+/// while the signed histogram was slammed into its top bucket and the peak read
+/// 0 dBFS: three accounts of one sample, and only this one said the front end
+/// was fine.
+///
+/// `full_scale - 1` on the positive side and `-full_scale` on the negative,
+/// which is what two's complement gives at every width: 127 / -128 at eight
+/// bits, 2047 / -2048 at twelve, 32767 / -32768 at sixteen.
+///
+/// A full scale below one count locates no rail at all, and a clip cannot be
+/// asserted against a rail nobody can find. `soapy::caps::geometry_for` refuses
+/// such a scale before it can reach here and both native backends report 128, so
+/// this is the unreachable case declining to answer rather than calling every
+/// sample in the block a clip.
+#[inline]
+fn on_rail(full_scale: i64, v: i64) -> bool {
+    full_scale >= 1 && (v >= full_scale - 1 || v <= -full_scale)
+}
+
 /// Decode one raw byte of an 8-bit format into a centered signed value in
 /// [-128, 127], and say whether it sits on a rail.
 ///
@@ -307,14 +343,15 @@ fn encode_into(out: &mut Vec<u8>, i: f32, q: f32, g: &SampleGeometry) {
 ///
 /// `#[inline]` because this runs twice per sample in the RX callback.
 #[inline]
-fn decode(format: SampleFormat, b: u8) -> (i64, bool) {
-    match format {
-        SampleFormat::Int8 => (b as i8 as i64, b == 0x80 || b == 0x7F),
-        SampleFormat::Uint8 => (b as i64 - 128, b == 0x00 || b == 0xFF),
+fn decode(format: SampleFormat, full_scale: i64, b: u8) -> (i64, bool) {
+    let v = match format {
+        SampleFormat::Int8 => b as i8 as i64,
+        SampleFormat::Uint8 => b as i64 - 128,
         // Unreachable: `process_block` sends 16-bit blocks down the other arm,
         // where a pair is four bytes and one byte on its own means nothing.
-        SampleFormat::Int16 => (0, false),
-    }
+        SampleFormat::Int16 => return (0, false),
+    };
+    (v, on_rail(full_scale, v))
 }
 
 /// Decode one little-endian signed 16-bit component, and say whether it sits on
@@ -326,9 +363,9 @@ fn decode(format: SampleFormat, b: u8) -> (i64, bool) {
 /// bug to notice, so the test asserts against a literal byte pair rather than
 /// against another expression that could be wrong the same way.
 #[inline]
-fn decode_i16(bytes: [u8; 2]) -> (i64, bool) {
-    let v = i16::from_le_bytes(bytes);
-    (v as i64, v == i16::MIN || v == i16::MAX)
+fn decode_i16(full_scale: i64, bytes: [u8; 2]) -> (i64, bool) {
+    let v = i16::from_le_bytes(bytes) as i64;
+    (v, on_rail(full_scale, v))
 }
 
 #[cfg(test)]
@@ -345,11 +382,14 @@ mod tests {
         // This used to assert `0x7F == 0x7F || 0x7F == 0x80`, which is true of
         // any program. It now asks `decode` itself.
         for b in [0x7Fu8, 0x80] {
-            assert!(super::decode(SampleFormat::Int8, b).1, "{b:#04x} is a rail");
+            assert!(
+                super::decode(SampleFormat::Int8, 128, b).1,
+                "{b:#04x} is a rail"
+            );
         }
         for b in [0x00u8, 0x40, 0x7E, 0x81, 0xC0] {
             assert!(
-                !super::decode(SampleFormat::Int8, b).1,
+                !super::decode(SampleFormat::Int8, 128, b).1,
                 "{b:#04x} is not a rail"
             );
         }
@@ -408,20 +448,96 @@ mod tests {
     /// of mistake to spot on a screen.
     #[test]
     fn int16_is_little_endian() {
-        assert_eq!(super::decode_i16([0x00, 0x01]).0, 256, "low byte first");
-        assert_eq!(super::decode_i16([0x01, 0x00]).0, 1);
-        assert_eq!(super::decode_i16([0xFF, 0xFF]).0, -1, "two's complement");
-        assert_eq!(super::decode_i16([0x00, 0x80]).0, -32768);
+        assert_eq!(
+            super::decode_i16(32768, [0x00, 0x01]).0,
+            256,
+            "low byte first"
+        );
+        assert_eq!(super::decode_i16(32768, [0x01, 0x00]).0, 1);
+        assert_eq!(
+            super::decode_i16(32768, [0xFF, 0xFF]).0,
+            -1,
+            "two's complement"
+        );
+        assert_eq!(super::decode_i16(32768, [0x00, 0x80]).0, -32768);
+    }
+
+    /// The rail is the converter's, not the container's.
+    ///
+    /// An Airspy R2 through SoapySDR reports `CS16` with a full scale of 2048:
+    /// twelve bits handed over in sixteen-bit words. Its ADC rails at 2047
+    /// counts and can never reach 32767, so a clip test written against
+    /// `i16::MAX` cannot fire on one - and the same is true of every 12- and
+    /// 14-bit radio this backend exists for. The saturation reading sat at
+    /// 0.00 % for the whole session while the front end was slamming its rails.
+    #[test]
+    fn a_twelve_bit_converter_clips_at_its_own_rail() {
+        // The converter pinned at each rail in turn.
+        for v in [2047i16, -2048] {
+            assert!(
+                super::decode_i16(2048, v.to_le_bytes()).1,
+                "{v} is the rail of a converter whose full scale is 2048"
+            );
+        }
+        // One count inside either rail is not clipping, at this scale as at any.
+        for v in [2046i16, -2047, 0] {
+            assert!(
+                !super::decode_i16(2048, v.to_le_bytes()).1,
+                "{v} is not a rail"
+            );
+        }
+    }
+
+    /// The three readings of one fact must agree at every declared scale.
+    ///
+    /// The clip flag, the signed histogram and the peak level are three accounts
+    /// of the same sample, and they were taken against two different notions of
+    /// full scale: the histogram and the peak followed the geometry, the clip
+    /// flag followed the container. A sample can sit in the histogram's top
+    /// bucket, read 0 dBFS, and report as unclipped - which is what the ADC bench
+    /// showed on every 12-bit radio.
+    #[test]
+    fn the_clip_flag_agrees_with_the_histogram_and_the_peak() {
+        for (format, fs) in [
+            (SampleFormat::Int8, 128i64),
+            (SampleFormat::Int16, 2048),
+            (SampleFormat::Int16, 32768),
+        ] {
+            let g = SampleGeometry {
+                format,
+                full_scale: fs as f32,
+            };
+            let flagged = |v: i64| match format {
+                SampleFormat::Int16 => super::decode_i16(fs, (v as i16).to_le_bytes()).1,
+                _ => super::decode(format, fs, v as i8 as u8).1,
+            };
+            // The positive rail: top histogram bucket, 0 dBFS, and clipping.
+            assert_eq!(super::signed_bin(&g, fs - 1), 31, "{format:?}/{fs}");
+            assert!(
+                (20.0 * ((fs - 1) as f32 / fs as f32).log10()).abs() < 0.1,
+                "{format:?}/{fs}: the peak reading does not call this full scale"
+            );
+            assert!(
+                flagged(fs - 1),
+                "{format:?}/{fs}: +rail must read as clipping"
+            );
+            // The negative rail, the same three ways.
+            assert_eq!(super::signed_bin(&g, -fs), 0, "{format:?}/{fs}");
+            assert!(flagged(-fs), "{format:?}/{fs}: -rail must read as clipping");
+            // Mid-scale is none of those things.
+            assert_eq!(super::signed_bin(&g, 0), 16, "{format:?}/{fs}");
+            assert!(!flagged(0), "{format:?}/{fs}: mid-scale is not clipping");
+        }
     }
 
     #[test]
     fn int16_flags_both_rails_and_nothing_inside_them() {
-        assert!(super::decode_i16([0xFF, 0x7F]).1, "+32767 is a rail");
-        assert!(super::decode_i16([0x00, 0x80]).1, "-32768 is a rail");
+        assert!(super::decode_i16(32768, [0xFF, 0x7F]).1, "+32767 is a rail");
+        assert!(super::decode_i16(32768, [0x00, 0x80]).1, "-32768 is a rail");
         // One count inside either rail is not clipping.
-        assert!(!super::decode_i16([0xFE, 0x7F]).1);
-        assert!(!super::decode_i16([0x01, 0x80]).1);
-        assert!(!super::decode_i16([0x00, 0x00]).1);
+        assert!(!super::decode_i16(32768, [0xFE, 0x7F]).1);
+        assert!(!super::decode_i16(32768, [0x01, 0x80]).1);
+        assert!(!super::decode_i16(32768, [0x00, 0x00]).1);
     }
 
     /// A 16-bit pair is four bytes, so a block holds half as many pairs as an
@@ -466,14 +582,14 @@ mod tests {
         let mut out = Vec::new();
         super::encode_into(&mut out, 1234.0, -5678.0, &wide);
         assert_eq!(out.len(), 4, "one 16-bit pair is four bytes");
-        assert_eq!(super::decode_i16([out[0], out[1]]).0, 1234);
-        assert_eq!(super::decode_i16([out[2], out[3]]).0, -5678);
+        assert_eq!(super::decode_i16(32768, [out[0], out[1]]).0, 1234);
+        assert_eq!(super::decode_i16(32768, [out[2], out[3]]).0, -5678);
 
         let narrow = eight_bit();
         out.clear();
         super::encode_into(&mut out, 100.0, -100.0, &narrow);
         assert_eq!(out.len(), 2);
-        assert_eq!(super::decode(SampleFormat::Int8, out[0]).0, 100);
+        assert_eq!(super::decode(SampleFormat::Int8, 128, out[0]).0, 100);
     }
 
     /// Clamping follows the declared full scale, so a correction that overshoots
@@ -486,8 +602,8 @@ mod tests {
         };
         let mut out = Vec::new();
         super::encode_into(&mut out, 90_000.0, -90_000.0, &wide);
-        assert_eq!(super::decode_i16([out[0], out[1]]).0, 32767);
-        assert_eq!(super::decode_i16([out[2], out[3]]).0, -32768);
+        assert_eq!(super::decode_i16(32768, [out[0], out[1]]).0, 32767);
+        assert_eq!(super::decode_i16(32768, [out[2], out[3]]).0, -32768);
     }
 
     /// A driver reporting a tiny full scale must not divide by zero inside the
@@ -505,9 +621,30 @@ mod tests {
         let _ = super::signed_bin(&g, 0);
     }
 
+    /// ...and it must not call the whole block a clip either.
+    ///
+    /// The rail test is a comparison rather than a division, so it fails the
+    /// other way: at a full scale of zero, `v >= -1` is true of very nearly
+    /// every sample, and the ADC bench would report 100 % saturation on a
+    /// perfectly healthy stream. A rail that cannot be located is declined.
+    #[test]
+    fn a_full_scale_that_locates_no_rail_reports_no_clipping() {
+        for fs in [0i64, -1] {
+            for v in [0i64, 1, -1, 127, -128, 32767] {
+                assert!(
+                    !super::on_rail(fs, v),
+                    "full scale {fs} locates no rail, so {v} cannot be on one"
+                );
+            }
+        }
+        // One count is a degenerate but locatable scale: 0 and -1 are its rails.
+        assert!(super::on_rail(1, 0));
+        assert!(super::on_rail(1, -1));
+    }
+
     #[test]
     fn int8_centered_value() {
-        let v = |b| super::decode(SampleFormat::Int8, b).0;
+        let v = |b| super::decode(SampleFormat::Int8, 128, b).0;
         assert_eq!(v(0x7F), 127);
         assert_eq!(v(0x80), -128);
         assert_eq!(v(0x00), 0);
@@ -517,7 +654,7 @@ mod tests {
     #[test]
     fn uint8_centered_value() {
         // 0x00 → -128, 0x80 → 0, 0xFF → +127
-        let v = |b| super::decode(SampleFormat::Uint8, b).0;
+        let v = |b| super::decode(SampleFormat::Uint8, 128, b).0;
         assert_eq!(v(0x00), -128);
         assert_eq!(v(0x80), 0);
         assert_eq!(v(0xFF), 127);
@@ -527,12 +664,12 @@ mod tests {
     fn uint8_flags_the_unsigned_extremes() {
         for b in [0x00u8, 0xFF] {
             assert!(
-                super::decode(SampleFormat::Uint8, b).1,
+                super::decode(SampleFormat::Uint8, 128, b).1,
                 "{b:#04x} is a rail"
             );
         }
         assert!(
-            !super::decode(SampleFormat::Uint8, 0x80).1,
+            !super::decode(SampleFormat::Uint8, 128, 0x80).1,
             "the DC-bias midpoint must not read as clipping"
         );
     }
