@@ -196,8 +196,20 @@ pub fn process_block(
     // The demod sees the same corrected stream as the FFT: a residual DC offset
     // would otherwise land straight on the discriminator's carrier-offset reading,
     // since a centre-tuned channel sits exactly on the DC spike.
+    //
+    // `dropped_pairs` travels with it. The sequence number is stamped in this
+    // function, so it can only record a block lost after this point; samples the
+    // driver threw away never became a block and leave the numbers consecutive.
+    // Without the flag the demod read the run as unbroken straight across the
+    // hole, and CTCSS reported a tone measured over the join.
     if demod_enabled {
-        ctx.demod_tx.try_send((block_seq, forward.clone())).ok();
+        ctx.demod_tx
+            .try_send(super::DemodBlock {
+                seq: block_seq,
+                gap_before: dropped_pairs > 0,
+                bytes: forward.clone(),
+            })
+            .ok();
     }
     ctx.sample_tx.try_send(forward).ok();
 }
@@ -370,11 +382,88 @@ fn decode_i16(full_scale: i64, bytes: [u8; 2]) -> (i64, bool) {
 
 #[cfg(test)]
 mod tests {
+    use std::sync::{Arc, Mutex};
+    use std::time::Instant;
+
     use super::{SampleFormat, SampleGeometry};
+    use crate::hardware::{DemodBlock, RxContext};
+    use crate::state::SdrMetrics;
 
     // These exercise the decode/saturation/histogram arithmetic that
     // `process_block` performs inline; constructing a full RxContext is left to
     // the hardware-in-the-loop verification.
+
+    /// A live `RxContext` with the demod switched on, and the two receiving ends.
+    ///
+    /// The module comment used to say building one of these was left to the
+    /// hardware-in-the-loop verification. It is not: every field is plain data
+    /// and two channels, so what `process_block` forwards can be read back here
+    /// with no radio anywhere.
+    /// Both receivers come back so the caller holds them: a dropped receiver
+    /// disconnects its channel and every `try_send` after that silently fails,
+    /// which is the same shape as the bug being tested for.
+    fn rx_ctx() -> (
+        Arc<RxContext>,
+        crossbeam_channel::Receiver<Vec<u8>>,
+        crossbeam_channel::Receiver<DemodBlock>,
+    ) {
+        let (sample_tx, sample_rx) = crossbeam_channel::bounded(8);
+        let (demod_tx, demod_rx) = crossbeam_channel::bounded(8);
+        let mut m = SdrMetrics::fixture();
+        m.demod.enabled = true;
+        let ctx = RxContext {
+            metrics: Arc::new(Mutex::new(m)),
+            sample_tx,
+            demod_tx,
+            geometry: eight_bit(),
+        };
+        (Arc::new(ctx), sample_rx, demod_rx)
+    }
+
+    /// The block a driver-side loss precedes is marked as such.
+    ///
+    /// This is the fact the sequence number cannot carry. It is stamped inside
+    /// this function, so it counts blocks that reached it; samples the driver
+    /// threw away never became a block and leave no gap in the numbers. Both
+    /// backends have a way to lose them - a HackRF short transfer
+    /// (`valid_length < buffer_length`) and a SoapySDR overflow - and both report
+    /// it through `dropped_pairs`, which until now went only to the drop counter.
+    #[test]
+    fn a_driver_side_loss_marks_the_forwarded_demod_block() {
+        let (ctx, _fft_rx, demod_rx) = rx_ctx();
+        let block = vec![0u8; 8]; // four Int8 pairs, contents irrelevant
+
+        super::process_block(&block, eight_bit(), 0, &ctx, Instant::now());
+        let clean = demod_rx.recv().expect("the first block was not forwarded");
+        assert!(!clean.gap_before, "nothing was lost before this one");
+
+        super::process_block(&block, eight_bit(), 64, &ctx, Instant::now());
+        let after_loss = demod_rx.recv().expect("the second block was not forwarded");
+        assert!(
+            after_loss.gap_before,
+            "the driver reported 64 lost pairs and the demod was not told"
+        );
+        assert_eq!(
+            after_loss.seq,
+            clean.seq + 1,
+            "the numbers stay consecutive across the loss, which is exactly why \
+             the flag has to exist"
+        );
+    }
+
+    /// A SoapySDR overflow forwards nothing but the fact of the loss.
+    ///
+    /// The overflow path has no samples to hand over - it calls `process_block`
+    /// with an empty slice purely so the drop is counted. That block still has to
+    /// break the run, or the audio either side of the overflow is spliced.
+    #[test]
+    fn an_empty_overflow_block_still_carries_the_gap() {
+        let (ctx, _fft_rx, demod_rx) = rx_ctx();
+        super::process_block(&[], eight_bit(), 16_384, &ctx, Instant::now());
+        let b = demod_rx.recv().expect("the overflow was not forwarded");
+        assert!(b.bytes.is_empty());
+        assert!(b.gap_before, "an overflow is a gap by definition");
+    }
 
     // --- Int8 (HackRF) decode -------------------------------------------------
     #[test]

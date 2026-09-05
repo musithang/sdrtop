@@ -153,7 +153,7 @@ pub struct DemodState {
     /// Monotonic counter stamped on each forwarded block, so the worker can tell
     /// a contiguous run from one interrupted by a dropped block.
     pub block_seq: u64,
-    /// Blocks the demod channel dropped on this channel, and when the last one went.
+    /// Audio missing from the run on this channel, and when the last of it went.
     ///
     /// `process` forwards with `try_send` on a bounded channel, so a worker that
     /// falls behind loses blocks silently - and RDS and CTCSS both need unbroken
@@ -162,6 +162,14 @@ pub struct DemodState {
     /// in [`Self::block_seq`] rather than at the `try_send` itself: the sequence is
     /// stamped under the lock that already runs, and a gap catches anything that
     /// loses a block anywhere between there and the worker, not just a full channel.
+    ///
+    /// It also counts the losses the sequence number cannot see, which happen on
+    /// the other side of the stamp: samples the driver itself threw away, from a
+    /// HackRF short transfer or a SoapySDR overflow. Those arrive as
+    /// `DemodBlock::gap_before` and count one each - a floor, because the driver
+    /// reports that samples went and never how many blocks' worth. Both kinds
+    /// answer the same question, which is why they share a field: the run has a
+    /// hole in it and the station is not to blame.
     pub blocks_dropped: u64,
     pub last_drop: Option<Instant>,
     pub last_update: Option<Instant>,
