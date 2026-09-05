@@ -25,7 +25,6 @@ const FRAME_FRESH_MS: u128 = 200;
 pub fn spawn_sweep_task(state: Arc<Mutex<SdrMetrics>>, device: Arc<dyn SdrDevice>) {
     tokio::spawn(async move {
         let mut was_active = false;
-        let mut saved_freq: u64 = 0;
         let mut saved_rx_enabled = false;
 
         loop {
@@ -44,7 +43,11 @@ pub fn spawn_sweep_task(state: Arc<Mutex<SdrMetrics>>, device: Arc<dyn SdrDevice
             if active && !was_active {
                 was_active = true;
                 let mut m = state.lock().unwrap_or_else(|e| e.into_inner());
-                saved_freq = m.radio.frequency;
+                // The interrupted tuning goes into the shared state rather than
+                // a local here, because this task is not the only one that has to
+                // put it back: quitting mid-sweep never reaches another iteration
+                // of this loop, so `App` has to be able to find it too.
+                m.sweep.pre_sweep_hz = Some(m.radio.frequency);
                 saved_rx_enabled = m.radio.rx_enabled;
                 m.radio.rx_enabled = true;
                 m.sweep.cycle_count = 0;
@@ -62,23 +65,22 @@ pub fn spawn_sweep_task(state: Arc<Mutex<SdrMetrics>>, device: Arc<dyn SdrDevice
                 if was_active {
                     was_active = false;
                     // An [Enter] jump lands the radio on the cursor frequency;
-                    // otherwise restore the pre-sweep tuning.
-                    let target = {
+                    // otherwise restore the pre-sweep tuning. Both answers come
+                    // from `SweepState::end`, which is also what the quit path
+                    // calls, so there is one account of where a sweep leaves the
+                    // radio rather than two that can disagree.
+                    let exit = {
                         let mut m = state.lock().unwrap_or_else(|e| e.into_inner());
-                        m.sweep.pending_tune.take().unwrap_or(saved_freq)
+                        let tuned = m.radio.frequency;
+                        m.sweep.end(tuned)
                     };
-                    let _ = device.set_frequency(target);
+                    let _ = device.set_frequency(exit.tune_hz);
                     let mut m = state.lock().unwrap_or_else(|e| e.into_inner());
-                    m.radio.frequency = target;
+                    m.radio.frequency = exit.tune_hz;
                     // A jump resumes normal RX; a plain stop restores the prior state.
-                    m.radio.rx_enabled = if target != saved_freq {
-                        true
-                    } else {
-                        saved_rx_enabled
-                    };
-                    m.sweep.cursor_frac = None;
-                    m.push_log(if target != saved_freq {
-                        format!("Tuned to {:.3} MHz from sweep", target as f64 / 1e6)
+                    m.radio.rx_enabled = if exit.jumped { true } else { saved_rx_enabled };
+                    m.push_log(if exit.jumped {
+                        format!("Tuned to {:.3} MHz from sweep", exit.tune_hz as f64 / 1e6)
                     } else {
                         "Sweep stopped".to_string()
                     });

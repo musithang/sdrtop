@@ -95,6 +95,7 @@ impl App {
                     ) {
                         input::KeyAction::Quit => {
                             self.restore_noise_sweep();
+                            self.restore_sweep_tuning();
                             self.save_config();
                             return Ok(());
                         }
@@ -227,6 +228,37 @@ impl App {
         }
     }
 
+    /// Put the tuner back before the app goes away.
+    ///
+    /// The same problem as `restore_noise_sweep`, one field along. A frequency
+    /// sweep parks the radio at each position in turn and writes each one to
+    /// `radio.frequency`, because that is the field the FFT worker stamps its
+    /// frames with. The `sweep_task` restores the interrupted tuning when it
+    /// notices `sweep.active` has gone false, but quitting never gives it
+    /// another iteration: the process ends first, and `save_config` writes out
+    /// whichever position the scan was parked on. Quitting from `lab_sweep` or
+    /// `micro_sweep` therefore reopened the app somewhere in the middle of the
+    /// swept band, one band-width further along each time.
+    ///
+    /// Harmless on a state that was not sweeping, so it is not conditional.
+    fn restore_sweep_tuning(&self) {
+        let moved = {
+            let mut m = self.state.lock().unwrap_or_else(|e| e.into_inner());
+            let tuned = m.radio.frequency;
+            let exit = m.sweep.end(tuned);
+            m.radio.frequency = exit.tune_hz;
+            (exit.tune_hz != tuned).then_some(exit.tune_hz)
+        };
+        // Only when the sweep had actually moved the radio: every quit comes
+        // through here, and a retune to the frequency the radio is already on is
+        // one more device call during teardown for nothing.
+        let (Some(hz), Some(device)) = (moved, self.device.as_ref()) else {
+            return;
+        };
+        // Device call with no lock held, as everywhere else.
+        let _ = device.set_frequency(hz);
+    }
+
     fn save_config(&self) {
         if self.device.is_none() {
             return;
@@ -289,6 +321,37 @@ impl App {
 
 #[cfg(test)]
 mod tests {
+    /// Quitting must give the tuner back before the config is written.
+    ///
+    /// `save_config` persists `radio.frequency`, and while a sweep is running
+    /// that field holds the position the scan has reached, not anything the user
+    /// tuned. The ordering of the two calls is the whole of the fix, and nothing
+    /// in the type system holds it: both are `&self` methods returning `()`, so
+    /// swapping them or dropping one still compiles and quietly puts the bug
+    /// back. Read as source text for the same reason the dispatch table is.
+    #[test]
+    fn quitting_gives_the_tuner_back_before_saving_the_config() {
+        let arm = include_str!("mod.rs")
+            .split_once("KeyAction::Quit => {")
+            .expect("the quit arm has been renamed")
+            .1
+            .split_once("return Ok(());")
+            .expect("the quit arm no longer returns")
+            .0;
+        let restore = arm.find("self.restore_sweep_tuning()").expect(
+            "quitting no longer ends the sweep, so save_config writes out \
+             whichever position the scan was parked on as the tuned frequency",
+        );
+        let save = arm
+            .find("self.save_config()")
+            .expect("the quit arm no longer saves the config");
+        assert!(
+            restore < save,
+            "restore_sweep_tuning must run before save_config, or the config \
+             still records the scan position"
+        );
+    }
+
     #[test]
     fn iq_imbalance_zero_for_balanced() {
         let n = 1000_f64;

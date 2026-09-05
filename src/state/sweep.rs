@@ -162,6 +162,28 @@ pub struct SweepState {
     /// Set by the `[Enter]` jump: the frequency to return to when sweep stops, so
     /// the radio lands on the cursor instead of the pre-sweep frequency.
     pub pending_tune: Option<u64>,
+    /// The tuning the sweep interrupted, held for the whole run so it can be
+    /// given back.
+    ///
+    /// `radio.frequency` follows the scanner from position to position, because
+    /// the FFT worker stamps frames with it. So while a sweep runs, the field
+    /// that normally means "where the user tuned" means "where the scan has got
+    /// to" instead, and this is the only copy of the answer left. `Some` exactly
+    /// while a sweep owns the tuner.
+    pub pre_sweep_hz: Option<u64>,
+}
+
+/// What is left to do once a sweep gives the tuner back.
+///
+/// Not re-exported from `state`: it exists to be destructured at the two call
+/// sites of `SweepState::end`, and neither of them has to name it.
+pub struct SweepExit {
+    /// Where the radio belongs now.
+    pub tune_hz: u64,
+    /// True when this was an `[Enter]` jump to the cursor rather than a plain
+    /// stop, which is the difference between resuming RX and restoring whatever
+    /// RX state the sweep interrupted.
+    pub jumped: bool,
 }
 
 impl Default for SweepState {
@@ -178,6 +200,35 @@ impl Default for SweepState {
             show_peak: true,
             cursor_frac: None,
             pending_tune: None,
+            pre_sweep_hz: None,
+        }
+    }
+}
+
+impl SweepState {
+    /// Give the tuner back, and say where the radio belongs.
+    ///
+    /// Both ways out of a sweep come through here: the `sweep_task` noticing
+    /// `active` went false, and `App` quitting while the scan is still running.
+    /// The second one is why this returns the frequency rather than just
+    /// restoring it - on quit there is no further loop iteration for the task to
+    /// notice anything, the process simply ends, and `save_config` would write
+    /// out whichever position the scan happened to be parked on as the user's
+    /// tuned frequency. Quitting from `lab_sweep` would then reopen the app
+    /// somewhere in the middle of the swept band.
+    ///
+    /// `tuned_hz` is `radio.frequency`, used only when no sweep was running, so
+    /// this is safe to call unconditionally on a state that never swept.
+    /// Calling it twice is safe too: the second call has nothing left to take
+    /// and answers with whatever the caller wrote back after the first.
+    pub fn end(&mut self, tuned_hz: u64) -> SweepExit {
+        self.active = false;
+        self.cursor_frac = None;
+        let jump = self.pending_tune.take();
+        let pre = self.pre_sweep_hz.take();
+        SweepExit {
+            tune_hz: jump.or(pre).unwrap_or(tuned_hz),
+            jumped: jump.is_some(),
         }
     }
 }
@@ -292,5 +343,78 @@ mod tests {
         assert_eq!(f.freq_at_fraction(1.0), 500_000_000);
         // Clamps out-of-range fractions.
         assert_eq!(f.freq_at_fraction(-1.0), 400_000_000);
+    }
+
+    /// A sweep in progress, parked on the position 12 MHz into the band, having
+    /// interrupted a radio tuned to 145.5 MHz.
+    fn mid_sweep() -> SweepState {
+        SweepState {
+            active: true,
+            current_hz: 412_000_000,
+            cursor_frac: Some(0.5),
+            pre_sweep_hz: Some(145_500_000),
+            ..SweepState::default()
+        }
+    }
+
+    #[test]
+    fn ending_a_sweep_gives_back_the_frequency_it_interrupted() {
+        let mut sw = mid_sweep();
+        // 412 MHz is where the scan is, not where anyone tuned.
+        let exit = sw.end(412_000_000);
+        assert_eq!(exit.tune_hz, 145_500_000);
+        assert!(!exit.jumped);
+        assert!(!sw.active);
+        assert_eq!(sw.cursor_frac, None);
+        assert_eq!(sw.pre_sweep_hz, None);
+    }
+
+    #[test]
+    fn an_enter_jump_beats_the_pre_sweep_frequency() {
+        let mut sw = mid_sweep();
+        sw.pending_tune = Some(433_920_000);
+        let exit = sw.end(412_000_000);
+        assert_eq!(exit.tune_hz, 433_920_000);
+        assert!(exit.jumped);
+        assert_eq!(sw.pending_tune, None);
+    }
+
+    /// The cursor landing exactly on the pre-sweep frequency is still a jump.
+    ///
+    /// It used to be told apart by comparing the two frequencies, which made
+    /// this case read as a plain stop and restored the RX state the sweep had
+    /// interrupted instead of resuming. Asking whether a jump was requested
+    /// answers the question that was actually being asked.
+    #[test]
+    fn a_jump_back_to_the_pre_sweep_frequency_is_still_a_jump() {
+        let mut sw = mid_sweep();
+        sw.pending_tune = Some(145_500_000);
+        let exit = sw.end(412_000_000);
+        assert_eq!(exit.tune_hz, 145_500_000);
+        assert!(exit.jumped);
+    }
+
+    /// Quitting from a preset that never started a sweep must not retune.
+    #[test]
+    fn ending_without_a_sweep_keeps_the_tuned_frequency() {
+        let mut sw = SweepState::default();
+        let exit = sw.end(100_000_000);
+        assert_eq!(exit.tune_hz, 100_000_000);
+        assert!(!exit.jumped);
+    }
+
+    /// `App` on quit and the `sweep_task` can both reach the same state.
+    ///
+    /// Whichever gets there first takes the answer; the second must not then
+    /// hand back a stale frequency, so it reads what the first wrote back.
+    #[test]
+    fn ending_twice_does_not_resurrect_the_scan_position() {
+        let mut sw = mid_sweep();
+        let first = sw.end(412_000_000);
+        assert_eq!(first.tune_hz, 145_500_000);
+        // The caller writes the answer back to radio.frequency, and passes it in.
+        let second = sw.end(first.tune_hz);
+        assert_eq!(second.tune_hz, 145_500_000);
+        assert!(!second.jumped);
     }
 }
