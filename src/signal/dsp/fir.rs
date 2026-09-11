@@ -205,6 +205,52 @@ pub fn design_lowpass_to_spec(fc: f64, transition: f64, stopband_db: f64) -> Vec
     )
 }
 
+/// A Gaussian low-pass kernel, for pulse-shaping a GFSK/GMSK modulator.
+///
+/// `bt` is the filter's bandwidth-time product - its own -3 dB bandwidth times
+/// the symbol period - which is the number a specification actually states
+/// (0.5 for Bluetooth BR and for BLE; see the arc documents for the clause).
+/// `sps` is samples per symbol and `span_symbols` is how many symbol periods
+/// the kernel spans, centred on zero. `sps * span_symbols` is forced odd, the
+/// same convention [`windowed_sinc`] uses, so the group delay is a whole
+/// number of samples.
+///
+/// Closed form: `alpha = sqrt(ln 2 / 2) / bt`, `h(t) = (sqrt(pi) / alpha) *
+/// exp(-(pi t / alpha)^2)` for `t` in symbol periods, normalised to unit sum
+/// so filtering a constant NRZ run leaves its level unchanged - the same
+/// DC-gain convention [`design_lowpass`] uses, for the same reason: a
+/// modulator's deviation is set by that level, not by the filter's own gain.
+/// This is the standard Gaussian pulse for GFSK/GMSK (the closed form MATLAB's
+/// Communications Toolbox `gaussdesign` documents); the mathematics is not
+/// itself a specification clause, only `bt` is, and
+/// `the_dash_3db_point_sits_at_bt_over_sps` measures the filter this produces
+/// rather than trusting the formula on faith.
+///
+/// No production consumer yet: `signal::ble::testkit`'s synthetic transmitter
+/// is a test-only fixture, so this is presently only reached from `cfg(test)`
+/// code, the same shape as [`design_lowpass_to_spec`] above.
+#[allow(dead_code)]
+pub fn gaussian_taps(bt: f64, sps: usize, span_symbols: usize) -> Vec<f32> {
+    use std::f64::consts::PI;
+    let n = (sps * span_symbols).max(1) | 1;
+    let m = (n - 1) as f64 / 2.0;
+    let alpha = (2f64.ln() / 2.0).sqrt() / bt;
+    let mut h = Vec::with_capacity(n);
+    let mut sum = 0.0f64;
+    for i in 0..n {
+        let t = (i as f64 - m) / sps as f64;
+        let v = (PI.sqrt() / alpha) * (-(PI * t / alpha).powi(2)).exp();
+        sum += v;
+        h.push(v);
+    }
+    if sum.abs() > 1e-12 {
+        for v in h.iter_mut() {
+            *v /= sum;
+        }
+    }
+    h.into_iter().map(|v| v as f32).collect()
+}
+
 /// A decimating FIR that keeps its state between calls, so successive blocks
 /// produce one seamless output stream.
 ///
@@ -635,6 +681,62 @@ mod tests {
             (hamming - kaiser).abs() < 3.0,
             "hamming gives {hamming:.2} dB and kaiser asked for 53 gives {kaiser:.2} dB"
         );
+    }
+
+    /// A Gaussian kernel has unit sum (DC gain), the way every filter in this
+    /// module normalises, so a constant NRZ run through it survives at level.
+    #[test]
+    fn a_gaussian_kernel_has_unit_dc_gain() {
+        for (bt, sps, span) in [(0.5f64, 4usize, 4usize), (0.3, 8, 6), (1.0, 4, 2)] {
+            let h = gaussian_taps(bt, sps, span);
+            let dc: f32 = h.iter().sum();
+            assert!((dc - 1.0).abs() < 1e-4, "bt={bt} sps={sps}: DC gain = {dc}");
+        }
+    }
+
+    /// Symmetric, the way an odd-length linear-phase kernel must be, so
+    /// filtering introduces a whole-sample delay and nothing else.
+    #[test]
+    fn a_gaussian_kernel_is_symmetric() {
+        let h = gaussian_taps(0.5, 4, 4);
+        let n = h.len();
+        assert_eq!(n % 2, 1, "kernel length must be odd");
+        for (i, &t) in h.iter().enumerate() {
+            assert!((t - h[n - 1 - i]).abs() < 1e-7, "tap {i} breaks symmetry");
+        }
+    }
+
+    /// The bandwidth-time product's own definition, measured rather than
+    /// assumed: `bt`'s -3 dB point sits at `bt / sps` cycles per sample, since
+    /// a symbol period is `sps` samples and `bt` is bandwidth times symbol
+    /// period.
+    #[test]
+    fn the_dash_3db_point_sits_at_bt_over_sps() {
+        for (bt, sps) in [(0.5f64, 8usize), (0.3, 8), (0.7, 4)] {
+            let h = gaussian_taps(bt, sps, 8);
+            let at = response(&h, bt / sps as f64);
+            assert!(
+                (at - std::f64::consts::FRAC_1_SQRT_2).abs() < 0.1,
+                "bt={bt} sps={sps}: |H(bt/sps)| = {at:.4}, expected about -3 dB (0.707)"
+            );
+        }
+    }
+
+    /// A wider `bt` is a wider filter: at a frequency fixed in cycles per
+    /// sample, the response only grows as `bt` grows. This is the ordering
+    /// invariant a wrong sign or an inverted formula would break even if the
+    /// -3 dB point happened to land right by coincidence.
+    #[test]
+    fn a_wider_bt_passes_more_at_a_fixed_frequency() {
+        let sps = 8;
+        let f = 0.05;
+        let mut last = 0.0;
+        for bt in [0.2f64, 0.4, 0.6, 0.8, 1.0] {
+            let h = gaussian_taps(bt, sps, 8);
+            let at = response(&h, f);
+            assert!(at > last, "bt={bt}: response {at} did not grow from {last}");
+            last = at;
+        }
     }
 
     /// The tap count follows the two things it is a function of, and refuses a

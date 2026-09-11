@@ -13,3 +13,5 @@
 //! a step in the receive chain.
 
 pub mod channel;
+#[cfg(test)]
+pub mod testkit;

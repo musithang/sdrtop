@@ -29,6 +29,7 @@
 //! only knows how to build the filter it is asked for.
 
 pub mod correlate;
+pub mod discriminate;
 pub mod estimate;
 pub mod fir;
 pub mod nco;

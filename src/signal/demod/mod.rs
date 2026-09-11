@@ -173,10 +173,13 @@ const ENVELOPE_GATE: f32 = 0.35;
 
 /// Polar discriminator: instantaneous frequency in Hz.
 ///
-/// `f[n] = arg(z[n+1] · conj(z[n])) · rate / 2π`, unambiguous to ±`rate`/2 - at a
-/// 333 kHz channel rate that is ±166 kHz, comfortably clear of the 75 kHz WFM
-/// limit. Always yields `len − 1` outputs: the missing first sample is precisely
-/// the block-splice guard, since the previous block's last phase is not usable.
+/// The per-pair arithmetic is [`crate::signal::dsp::discriminate::instantaneous_freq_hz`],
+/// unambiguous to ±`rate`/2 - at a 333 kHz channel rate that is ±166 kHz,
+/// comfortably clear of the 75 kHz WFM limit. Always yields `len − 1` outputs:
+/// the missing first sample is precisely the block-splice guard, since the
+/// previous block's last phase is not usable. What is FM-specific, and stays
+/// here rather than living in `dsp`, is everything below about a sample not
+/// being trustworthy.
 ///
 /// Samples failing [`ENVELOPE_GATE`] are replaced by the previous trustworthy
 /// value rather than removed. Dropping them would leave a non-uniform time base,
@@ -185,7 +188,6 @@ const ENVELOPE_GATE: f32 = 0.35;
 /// intact, and since the gate only fires on rare envelope collapses, the
 /// spectral cost is far smaller than the aliasing that dropping would cause.
 pub fn fm_discriminate(iq: &[Complex<f32>], rate: f64, out: &mut Vec<f32>) {
-    use std::f64::consts::PI;
     out.clear();
     if iq.len() < 2 {
         return;
@@ -200,7 +202,6 @@ pub fn fm_discriminate(iq: &[Complex<f32>], rate: f64, out: &mut Vec<f32>) {
     let floor_sq = (mean_sq * (ENVELOPE_GATE * ENVELOPE_GATE) as f64) as f32;
 
     out.reserve(iq.len() - 1);
-    let scale = (rate / (2.0 * PI)) as f32;
     let mut held = 0.0f32;
     let mut have_held = false;
     for w in iq.windows(2) {
@@ -209,8 +210,7 @@ pub fn fm_discriminate(iq: &[Complex<f32>], rate: f64, out: &mut Vec<f32>) {
             out.push(held);
             continue;
         }
-        let prod = w[1] * w[0].conj();
-        let f = prod.im.atan2(prod.re) * scale;
+        let f = crate::signal::dsp::discriminate::instantaneous_freq_hz(w[0], w[1], rate);
         if !have_held {
             // Backfill any leading run gated out before the first valid sample,
             // so the block never opens with a fabricated zero.
