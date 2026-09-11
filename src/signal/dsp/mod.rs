@@ -28,6 +28,7 @@
 //! filter has to be and what decimation reaches its target rate; this module
 //! only knows how to build the filter it is asked for.
 
+pub mod code;
 pub mod correlate;
 pub mod discriminate;
 pub mod estimate;
