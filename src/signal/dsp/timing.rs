@@ -122,22 +122,24 @@ pub fn recover(x: &[f32], start: f64, sps: f64, gain: f64, symbols: usize) -> Ve
 /// Called for real by `signal::ble::sync::slice` (B4) - but that function's
 /// own caller has no path from `main` yet, the same position `dsp::correlate`
 /// and `ble::gfsk` were in until B6 wires a live capture into this arc.
-#[allow(dead_code)]
 ///
-/// **Scored on the nearest raw sample, never an interpolated one - measured,
-/// not a stylistic choice.** Linear interpolation between two independent
-/// noisy samples has less variance than either sample alone - at the
-/// midpoint, exactly half - so a search that scores interpolated amplitude
-/// is biased toward whichever candidates land on a real, unblended sample:
-/// on real hardware every phase this function returned was an exact integer
-/// number of samples, never one of the fractional candidates `resolution`
-/// was supposed to also try, which is the signature of exactly this bias
-/// rather than of those candidates genuinely being worse. A clean synthetic
-/// test never showed it, because the effect is proportional to how noisy the
-/// two neighbouring samples are relative to the signal, and a noiseless test
-/// signal has none. Rounding to the nearest sample scores every candidate on
-/// an unblended value, at the cost of `resolution` values finer than `sps`
-/// buying nothing real cannot already tell apart.
+/// **Open lead from B6's real-hardware testing, not yet acted on here.**
+/// Every phase this function returned on a real HackRF capture was an exact
+/// integer number of samples - never one of the fractional candidates
+/// `resolution` is supposed to also try. The likely cause: interpolating
+/// between two independent noisy samples has less variance than either
+/// sample alone (half, at the midpoint), so scoring interpolated amplitude
+/// is biased toward whichever candidates land on a real, unblended sample -
+/// an effect proportional to noise, which is why no synthetic test here
+/// caught it. A first fix (score the nearest raw sample instead of an
+/// interpolated one) removed that bias but cost `a_noiseless_packet_slices_
+/// to_exactly_its_own_bits` its exact match, because the coarser, integer-
+/// only resolution loses real precision this arc's own clean signal needs.
+/// Reverted rather than landed half-verified: the right fix likely scores a
+/// small window around each candidate rather than a single point, trading
+/// neither noise robustness nor precision, but that is untested and B6's
+/// own plan is where this is recorded rather than guessed at further here.
+#[allow(dead_code)]
 pub fn find_phase(x: &[f32], sps: f64, symbols: usize, resolution: usize) -> f64 {
     let resolution = resolution.max(1);
     let mut best_phase = 0.0;
@@ -145,24 +147,14 @@ pub fn find_phase(x: &[f32], sps: f64, symbols: usize, resolution: usize) -> f64
     for step in 0..resolution {
         let phase = sps * step as f64 / resolution as f64;
         let score: f64 = (0..symbols)
-            .map(|k| {
-                let pos = (phase + k as f64 * sps).round();
-                let idx = pos.clamp(0.0, (x.len().max(1) - 1) as f64) as usize;
-                x.get(idx).copied().unwrap_or(0.0).abs() as f64
-            })
+            .map(|k| interpolate(x, phase + k as f64 * sps).abs() as f64)
             .sum();
         if score > best_score {
             best_score = score;
             best_phase = phase;
         }
     }
-    // Several candidates within one sample of each other round to the same
-    // index and therefore tie on score; snapping the winner to the nearest
-    // whole sample picks the middle of that tie rather than whichever one
-    // the search happened to reach first, and keeps a caller that samples
-    // the result with real interpolation from reintroducing the very
-    // smoothing this function exists to avoid.
-    best_phase.round()
+    best_phase
 }
 
 #[cfg(test)]

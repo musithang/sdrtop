@@ -34,7 +34,9 @@
 ///
 /// No consumer yet outside this module's own tests; a real one arrives with
 /// B11's survey mode, the same way `net::band`'s edges feed the occupancy
-/// ruler.
+/// ruler. Still true after B6 wired the rest of this arc into a live
+/// capture: detection and decode both work at a single fixed channel, and
+/// have no reason to know the band's own edges.
 #[allow(dead_code)]
 pub const LOW_HZ: u64 = 2_402_000_000;
 #[allow(dead_code)]
@@ -73,7 +75,6 @@ const TOLERANCE_HZ: u64 = SPACING_HZ / 4;
 /// No consumer yet: every later step in this arc, from B3's burst detection
 /// onward, needs a channel's frequency to tune to it or a hop event's
 /// frequency to name its channel, but B1 lands the table alone.
-#[allow(dead_code)]
 pub fn centre_hz(channel: u8) -> Option<u64> {
     match channel {
         0..=DATA_LOW_LAST => Some(DATA_LOW_START_HZ + SPACING_HZ * channel as u64),
@@ -90,7 +91,6 @@ pub fn centre_hz(channel: u8) -> Option<u64> {
 /// The BLE channel index a frequency is the centre of, if it is one.
 ///
 /// No consumer yet, same reason as [`centre_hz`].
-#[allow(dead_code)]
 pub fn channel_of(freq_hz: u64) -> Option<u8> {
     (0..=39).find(|&channel| {
         centre_hz(channel).is_some_and(|centre| centre.abs_diff(freq_hz) <= TOLERANCE_HZ)

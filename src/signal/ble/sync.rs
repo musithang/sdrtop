@@ -22,29 +22,25 @@ use crate::signal::dsp::timing::{find_phase, interpolate};
 /// worst-case phase error at 1/32 of a symbol - a sixteenth either side of
 /// the best candidate tried - comfortably finer than the bias
 /// `dsp::timing`'s own tests measured Gardner settling to on this signal.
-///
-/// No path from `main` yet - see [`slice`]'s own doc for why this whole
-/// module is presently dead together.
-#[allow(dead_code)]
 const PHASE_RESOLUTION: usize = 16;
 
 /// Recover one bit per symbol from a discriminator's instantaneous-frequency
 /// output, finding the symbol phase once over the whole span given and
-/// slicing every symbol at it.
+/// slicing every symbol against `threshold`.
 ///
-/// A bit is `true` when the recovered sample is positive - the same
-/// convention [`super::gfsk::modulate`] uses to map a `true` bit to positive
-/// deviation, so a bit slices back to itself with no sign flip to remember at
-/// the call site.
-///
-/// No caller in this arc's own code yet: nothing in `tasks` or `ui` feeds
-/// this a live stream until B6 puts a real packet on screen, the same
-/// position `signal::ble::detect::Detector` and `gfsk::modulate` are in.
-#[allow(dead_code)]
-pub fn slice(discriminator: &[f32], sps: f64, symbols: usize) -> Vec<bool> {
+/// A bit is `true` when the recovered sample is above `threshold` - `0.0`
+/// for a caller with nothing else to go on, matching the convention
+/// [`super::gfsk::modulate`] uses to map a `true` bit to positive deviation.
+/// `signal::ble::receive::Receiver` passes its own capture's mean instead:
+/// real hardware measured a real device's crystal offset (or this radio's
+/// own LO leakage) sitting exactly at the tuned centre this arc never mixes
+/// off, which shifts every discriminator sample by a constant a fixed zero
+/// would slice against wrongly. See `dsp::uncertainty::mean_with_uncertainty`
+/// for how that same mean becomes B7's reported frequency offset.
+pub fn slice(discriminator: &[f32], sps: f64, symbols: usize, threshold: f32) -> Vec<bool> {
     let phase = find_phase(discriminator, sps, symbols, PHASE_RESOLUTION);
     (0..symbols)
-        .map(|k| interpolate(discriminator, phase + k as f64 * sps) > 0.0)
+        .map(|k| interpolate(discriminator, phase + k as f64 * sps) > threshold)
         .collect()
 }
 
@@ -125,7 +121,7 @@ mod tests {
             let mut inst = Vec::new();
             discriminate(&noisy, params.sample_rate, &mut inst);
 
-            let recovered = slice(&inst, params.sps as f64, n_bits - guard);
+            let recovered = slice(&inst, params.sps as f64, n_bits - guard, 0.0);
 
             let errors = recovered
                 .iter()
@@ -182,7 +178,7 @@ mod tests {
         let noisy = at_snr(&clean, snr_db, &mut Rng::new(4));
         let mut inst = Vec::new();
         discriminate(&noisy, params.sample_rate, &mut inst);
-        let recovered = slice(&inst, params.sps as f64, n_bits - 5);
+        let recovered = slice(&inst, params.sps as f64, n_bits - 5, 0.0);
 
         let errors = recovered
             .iter()
@@ -214,7 +210,7 @@ mod tests {
         );
         let mut inst = Vec::new();
         discriminate(&clean, params.sample_rate, &mut inst);
-        let recovered = slice(&inst, params.sps as f64, bits.len() - 5);
+        let recovered = slice(&inst, params.sps as f64, bits.len() - 5, 0.0);
         assert_eq!(&recovered[..], &bits[..recovered.len()]);
     }
 }

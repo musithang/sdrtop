@@ -4,9 +4,9 @@
 //! `NetBlePacketsPanel` - what this device is advertising.
 //!
 //! B6's exit condition, on screen: real advertising channel PDUs, CRC-checked,
-//! newest first. No sorting and no cursor - a live packet feed is already in
-//! the order that matters, arrival order, and B6 does not yet decode enough
-//! (no SNR, no frequency offset - both B7's) to make a second ordering useful.
+//! newest first. B7 added the SNR and CFO columns. No sorting and no cursor -
+//! a live packet feed is already in the order that matters, arrival order,
+//! and a second ordering has not earned its own column yet.
 //!
 //! **Three states, not two.** Design section 13.2's lesson for this section:
 //! silence has more than one cause, and printing zero for all of them is a
@@ -24,8 +24,10 @@ use ratatui::{
     Frame,
 };
 
+use crate::signal::dsp::uncertainty::Uncertain;
 use crate::state::{BlePacket, SdrMetrics};
 use crate::ui::panel::{Panel, PanelChrome, Staleness};
+use crate::ui::widgets::reading::Reading;
 
 pub struct NetBlePacketsPanel;
 
@@ -35,16 +37,44 @@ const ADDR_W: usize = 17;
 const ATYP_W: usize = 4;
 const LEN_W: usize = 4;
 const CRC_W: usize = 4;
+const SNR_W: usize = 7;
+const CFO_W: usize = 15;
 const AGE_W: usize = 6;
 
 fn header_line(theme: &crate::Theme) -> Line<'static> {
     Line::from(Span::styled(
         format!(
-            "{:<CH_W$} {:<TYPE_W$} {:<ADDR_W$} {:<ATYP_W$} {:>LEN_W$} {:>CRC_W$} {:>AGE_W$}",
-            "CH", "TYPE", "ADDRESS", "ATYP", "LEN", "CRC", "AGE"
+            "{:<CH_W$} {:<TYPE_W$} {:<ADDR_W$} {:<ATYP_W$} {:>LEN_W$} {:>CRC_W$} {:>SNR_W$} {:>CFO_W$} {:>AGE_W$}",
+            "CH", "TYPE", "ADDRESS", "ATYP", "LEN", "CRC", "SNR", "CFO", "AGE"
         ),
         Style::default().fg(theme.label),
     ))
+}
+
+/// `12.3` or a dash - B7's per-packet SNR, in dB. No unit in the cell itself;
+/// the column header carries it, the way every table in this deck does.
+fn fmt_snr(snr_db: Option<f64>) -> String {
+    match snr_db {
+        Some(db) => format!("{db:.1}"),
+        None => "-".to_string(),
+    }
+}
+
+/// `37.0 ±1.2 kHz` - B7's frequency offset, through the same value-with-
+/// uncertainty cell every measurement in the app uses. Scaled to kHz because
+/// a crystal's error is tens to hundreds of kHz at 2.4 GHz and a raw Hz
+/// figure would be seven digits of which the last five are noise.
+///
+/// **Uncorrected for this radio's own oscillator, and the cell does not
+/// pretend otherwise** - see `state::BlePacket::freq_offset_hz`'s own doc.
+fn fmt_cfo(offset: Option<Uncertain>) -> String {
+    match offset {
+        // No resolution threshold of our own yet to dash against, so this
+        // reads the same way a caller with none of its own does everywhere
+        // else in the app: always show the value.
+        Some(u) => Reading::new(u.scale(0.001), "kHz", f64::INFINITY).text(),
+        None => "-".to_string(),
+    }
 }
 
 /// `2 s` / `4 min` - how long ago, at the resolution anybody reads it at.
@@ -104,6 +134,16 @@ fn row(p: &BlePacket, now: std::time::Instant, theme: &crate::Theme) -> Line<'st
         ),
         Span::raw(" "),
         Span::styled(format!("{crc_text:>CRC_W$}"), Style::default().fg(crc_ink)),
+        Span::raw(" "),
+        Span::styled(
+            format!("{:>SNR_W$}", fmt_snr(p.snr_db)),
+            Style::default().fg(theme.value),
+        ),
+        Span::raw(" "),
+        Span::styled(
+            format!("{:>CFO_W$}", truncate(&fmt_cfo(p.freq_offset_hz), CFO_W)),
+            Style::default().fg(theme.value),
+        ),
         Span::raw(" "),
         Span::styled(format!("{age:>AGE_W$}"), Style::default().fg(theme.label)),
     ])
@@ -203,6 +243,8 @@ mod tests {
             length: 9,
             adv_addr: Some([0xaa, 0xbb, 0xcc, 0x11, 0x22, 0x33]),
             crc_ok,
+            snr_db: Some(12.3),
+            freq_offset_hz: Some(Uncertain::from_sigma(37_000.0, 1_200.0)),
             seen: Instant::now(),
         }
     }

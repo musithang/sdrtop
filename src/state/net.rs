@@ -199,6 +199,19 @@ pub struct BlePacket {
     pub length: u8,
     pub adv_addr: Option<[u8; 6]>,
     pub crc_ok: bool,
+    /// B7: read from the detector's own coherence at the moment this
+    /// packet's sync word was found. `None` only at a coherence of one -
+    /// noiseless, which does not happen on a radio - never because nothing
+    /// was measured.
+    pub snr_db: Option<f64>,
+    /// B7: the discriminator's own mean over the whole capture, with its
+    /// proper uncertainty - see `dsp::uncertainty::mean_with_uncertainty`.
+    /// This one number is both our own receiver's LO error and the
+    /// transmitter's own crystal offset, added together and not yet
+    /// separated; a radio with its own frequency reference (design section
+    /// 7) could subtract the first and leave the second, and nothing here
+    /// does that yet.
+    pub freq_offset_hz: Option<crate::signal::dsp::uncertainty::Uncertain>,
     pub seen: std::time::Instant,
 }
 

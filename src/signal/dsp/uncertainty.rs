@@ -229,6 +229,35 @@ pub fn efficiency(variance: f64, bound: f64) -> f64 {
     bound / variance
 }
 
+/// The sample mean of `x`, with its own Cramer-Rao-achieving uncertainty.
+///
+/// **A different bound from [`crlb_frequency`], for a different problem, not
+/// a substitute for it.** That bound is Moose's: a frequency read from the
+/// phase ramp of a repeated complex sequence, and its `M(M^2-1)` denominator
+/// is specific to a phase estimator's geometry. This is the elementary case
+/// instead, a constant buried in additive noise and estimated by averaging
+/// real-valued samples directly, and for i.i.d. Gaussian noise the sample
+/// mean is itself the minimum-variance unbiased estimator, achieving its own
+/// bound exactly: `Var(mean) = sigma^2 / N`, with `sigma^2` the sample
+/// variance around that mean. B7 is the reasoned first consumer: a GFSK
+/// discriminator's output over a run of whitened (so, on average, balanced)
+/// data has this exact shape, a constant carrier-frequency offset sitting in
+/// noise, and no repeated sequence a phase-ramp method could use instead.
+///
+/// `Uncertain::exact(0.0)` for fewer than two samples, where there is no
+/// variance to estimate from - not zero uncertainty, which `is_resolved`
+/// would then read as an unusually good measurement instead of a missing one.
+pub fn mean_with_uncertainty(x: &[f32]) -> Uncertain {
+    let n = x.len();
+    if n < 2 {
+        return Uncertain::from_variance(x.first().copied().unwrap_or(0.0) as f64, f64::INFINITY);
+    }
+    let mean = x.iter().map(|&v| v as f64).sum::<f64>() / n as f64;
+    let sample_variance =
+        x.iter().map(|&v| (v as f64 - mean).powi(2)).sum::<f64>() / (n - 1) as f64;
+    Uncertain::from_variance(mean, sample_variance / n as f64)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -417,5 +446,69 @@ mod tests {
         assert_eq!(u.value(), 7.0);
         assert_eq!(u.sigma(), 0.5);
         assert_eq!(Uncertain::from_sigma(1.0, 0.5).expanded(2.0), 1.0);
+    }
+
+    /// A known constant buried in noise is recovered close to its true value,
+    /// within the uncertainty this function reports for itself - the basic
+    /// claim any estimator's own error bar has to make good on.
+    #[test]
+    fn the_mean_recovers_a_known_constant_within_its_own_uncertainty() {
+        let mut rng = Rng::new(1);
+        let true_value = 37_000.0f64;
+        let sigma = 5_000.0f64;
+        let samples: Vec<f32> = (0..2000)
+            .map(|_| (true_value + rng.normal_pair().0 * sigma) as f32)
+            .collect();
+        let u = mean_with_uncertainty(&samples);
+        assert!(
+            (u.value() - true_value).abs() < 4.0 * u.sigma(),
+            "value {} sigma {} true {}",
+            u.value(),
+            u.sigma(),
+            true_value
+        );
+    }
+
+    /// This is what "the uncertainty tracks SNR" means for a mean estimator:
+    /// twice as many samples of the same noisy signal, or half the noise on
+    /// the same number of samples, both halve the variance the classical
+    /// `sigma^2 / N` way - `1/sqrt(2)` on `sigma`, not on the variance itself.
+    #[test]
+    fn the_uncertainty_shrinks_with_more_samples_and_with_less_noise() {
+        let mut rng = Rng::new(2);
+        let noisy = |n: usize, sigma: f64, rng: &mut Rng| -> Vec<f32> {
+            (0..n)
+                .map(|_| (rng.normal_pair().0 * sigma) as f32)
+                .collect()
+        };
+
+        let base = mean_with_uncertainty(&noisy(1000, 1.0, &mut rng));
+        let more_samples = mean_with_uncertainty(&noisy(4000, 1.0, &mut rng));
+        let less_noise = mean_with_uncertainty(&noisy(1000, 0.5, &mut rng));
+
+        // Four times the samples: half the sigma.
+        assert!(
+            (more_samples.sigma() / base.sigma() - 0.5).abs() < 0.1,
+            "base {} more_samples {}",
+            base.sigma(),
+            more_samples.sigma()
+        );
+        // Half the per-sample noise: half the sigma too.
+        assert!(
+            (less_noise.sigma() / base.sigma() - 0.5).abs() < 0.1,
+            "base {} less_noise {}",
+            base.sigma(),
+            less_noise.sigma()
+        );
+    }
+
+    /// Fewer than two samples has no variance to estimate from, and says so
+    /// with an infinite uncertainty rather than the zero a missing variance
+    /// would otherwise default to - the same reasoning `is_resolved`'s own
+    /// tests hold every other estimator in this module to.
+    #[test]
+    fn fewer_than_two_samples_is_infinitely_uncertain_not_perfectly_known() {
+        assert_eq!(mean_with_uncertainty(&[]).sigma(), f64::INFINITY);
+        assert_eq!(mean_with_uncertainty(&[3.0]).sigma(), f64::INFINITY);
     }
 }

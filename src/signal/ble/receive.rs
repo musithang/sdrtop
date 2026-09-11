@@ -6,17 +6,20 @@
 //! Four stages, run in order over every sample: [`Detector`] (a matched
 //! filter over raw IQ) finds the sync word; once it does, the samples that
 //! follow are captured; [`discriminate`] turns the capture into instantaneous
-//! frequency; and [`pdu::decode`], fed bits sliced from it and de-whitened,
-//! either returns a packet or says there was not enough of one yet.
+//! frequency; [`super::sync::slice`] finds the symbol phase and slices it to
+//! bits; and [`pdu::decode`], fed those bits de-whitened, either returns a
+//! packet or says there was not enough of one yet.
 //!
-//! **No phase search here, deliberately - the detector's own peak already
-//! is one.** `signal::ble::detect`'s tests measured the matched filter's
-//! peak landing at the exact sample the sync word's last symbol ends on, so
-//! the header's first symbol begins at the very next sample: a known,
-//! symbol-aligned position, not an estimate. `dsp::timing::find_phase`
-//! stays the right tool for a burst whose alignment is not already known
-//! this precisely - which is not the position this arc's own detector
-//! leaves a caller in.
+//! **Started as a deterministic peak-derived index, not a search - and real
+//! hardware is why it no longer is one.** `signal::ble::detect`'s own tests
+//! measured the matched filter's peak landing at the exact sample a
+//! synthetic sync word's last symbol ends on, so indexing directly from it
+//! looked like a known position rather than an estimate. True only because
+//! that synthetic transmitter and the detector's own reference come from
+//! the same call to [`super::gfsk::modulate`] at the same sample phase - a
+//! real transmitter's clock has no reason to share it. `[super::sync::slice]`
+//! is B4's own answer for a burst whose alignment is not known this
+//! precisely, which turned out to be every real one.
 
 use num_complex::Complex;
 
@@ -25,8 +28,8 @@ use crate::signal::demod::decode as decode_iq;
 use crate::signal::dsp::code::lfsr::whiten;
 use crate::signal::dsp::correlate::threshold_for_false_alarm;
 use crate::signal::dsp::discriminate::discriminate;
+use crate::signal::dsp::estimate::snr_from_metric;
 use crate::signal::dsp::fir::StreamingDecimator;
-use crate::signal::dsp::timing::{find_phase, interpolate};
 
 use super::detect::{Detector, Le1mParams, ADVERTISING_ACCESS_ADDRESS, REFERENCE_SYMBOLS};
 use super::pdu::{self, Packet};
@@ -210,6 +213,14 @@ impl Receiver {
     /// algorithm. `find_phase` is the same tool B4 built for exactly this;
     /// the deterministic shortcut only worked on the test signal that could
     /// never have shown the bug.
+    ///
+    /// **Real hardware's CRC still fails even with this fixed** - the
+    /// working hypothesis after B6 is a real device's own crystal offset
+    /// (BLE allows up to ±150 ppm, which at 2.4 GHz is up to ±360 kHz,
+    /// larger than the ±250 kHz deviation itself), uncorrected. B7's
+    /// `freq_offset_hz` below is that same offset, finally measured and
+    /// reported rather than only corrected for blindly - the honest first
+    /// step toward deciding whether that hypothesis is the right one.
     fn try_decode(&self) -> Option<Packet> {
         let mut inst = Vec::new();
         discriminate(&self.capture, WORKING_RATE_HZ, &mut inst);
@@ -217,24 +228,39 @@ impl Receiver {
         if symbols < pdu::HEADER_BITS {
             return None;
         }
-        let phase = find_phase(&inst, WORKING_SPS as f64, symbols, 16);
         // A tuning sitting exactly on the channel's own centre - which this
         // arc's is, since it never mixes off it - is exactly where a real
-        // front end's LO leakage and IQ DC offset concentrate. That is a
-        // constant added to every discriminator sample, not to the signal
-        // this arc's tests build, which is why no synthetic test caught it:
-        // slicing against a fixed zero silently moves the decision boundary
-        // by however large that offset is. The capture's own mean is the
-        // honest estimate of it - GFSK data is balanced over any real
-        // stretch of bits - so the threshold is that mean, not zero.
-        let bias = inst.iter().sum::<f32>() / inst.len() as f32;
-        let mut bits: Vec<bool> = (0..symbols)
-            .map(|k| interpolate(&inst, phase + k as f64 * WORKING_SPS as f64) > bias)
-            .collect();
+        // front end's LO leakage and IQ DC offset concentrate, and where a
+        // real transmitter's own crystal error shows up too: both are a
+        // constant added to every discriminator sample, indistinguishable
+        // from each other at this stage and not present in this arc's own
+        // synthetic tests, which is why slicing against a fixed zero passed
+        // every one of them and no real capture. The capture's own mean is
+        // the honest estimate of that constant - GFSK data is balanced over
+        // any real stretch of bits - and B7 gives it a proper uncertainty:
+        // see `dsp::uncertainty::mean_with_uncertainty`'s own doc for why
+        // the sample mean is the right estimator here, not an approximation
+        // of one.
+        let offset = crate::signal::dsp::uncertainty::mean_with_uncertainty(&inst);
+        let mut bits =
+            super::sync::slice(&inst, WORKING_SPS as f64, symbols, offset.value() as f32);
         whiten(&mut bits, self.channel);
         let mut packet = pdu::decode(&bits)?;
-        packet.debug_coherence = self.last_coherence; // TEMP DEBUG
-        packet.debug_phase = phase; // TEMP DEBUG
+        packet.freq_offset_hz = Some(offset);
+        // `snr_from_metric` was derived for `Coherence::metric` - two noisy
+        // copies of the same unknown signal correlated against each other -
+        // and `Match::coherence` is a different measurement, a noisy signal
+        // correlated against a known, noiseless reference. Worked through
+        // for a unit-power reference: at the window lengths this arc uses
+        // the two converge to the same `rho = snr / (1 + snr)` relationship
+        // in the limit, so this reuses the already-tested inverse rather
+        // than deriving and separately validating a second one - reasoned
+        // to be a close approximation at `REFERENCE_SYMBOLS * WORKING_SPS`
+        // samples, not proven exact for a matched filter's own statistics.
+        // `None` only at a coherence of one, which the false-alarm threshold
+        // already keeps every real reading comfortably under.
+        packet.snr_db = snr_from_metric(self.last_coherence, REFERENCE_SYMBOLS * WORKING_SPS)
+            .map(|snr| 10.0 * snr.log10());
         Some(packet)
     }
 }

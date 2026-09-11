@@ -177,17 +177,14 @@ impl DelayedAutocorrelator {
 
 /// One reading from [`MatchedFilter`].
 ///
-/// Has a real caller now: `signal::ble::detect::Detector` (B3) builds a
-/// combined preamble-and-access-address reference and reads this back,
-/// since the advertising access address is known in advance and a known
-/// sequence correlated against the live stream is exactly what a matched
-/// filter is for. The lint still fires because `Detector` itself has no path
-/// from `main` yet - nothing in `tasks` or `ui` feeds it a live stream until
-/// B6 puts a real packet on screen - so the whole chain is dead together and
-/// lights up together. Design section 10's F4 (symbol timing from the L-LTF
-/// cross-correlation) is a second identified consumer, not yet built.
+/// Reaches `main` since B6: `signal::ble::detect::Detector` builds a
+/// combined preamble-and-access-address reference and reads this back on
+/// every sample of a live capture, since the advertising access address is
+/// known in advance and a known sequence correlated against the live stream
+/// is exactly what a matched filter is for. Design section 10's F4 (symbol
+/// timing from the L-LTF cross-correlation) is a second identified consumer,
+/// not yet built.
 #[derive(Clone, Copy, Debug)]
-#[allow(dead_code)]
 pub struct Match {
     /// The correlation with the reference sequence.
     pub value: Complex<f64>,
@@ -196,7 +193,6 @@ pub struct Match {
     reference_energy: f64,
 }
 
-#[allow(dead_code)]
 impl Match {
     /// `|y|^2 / (E_reference * E_window)`, in `[0, 1]` by Cauchy-Schwarz.
     ///
@@ -215,8 +211,7 @@ impl Match {
 
 /// Correlation of a signal with a sequence known in advance.
 ///
-/// See [`Match`] for who uses it and why the dead-code lint still fires.
-#[allow(dead_code)]
+/// See [`Match`] for who uses it.
 pub struct MatchedFilter {
     /// The reference, conjugated and reversed, so applying it is a forward walk
     /// back through the history.
@@ -228,7 +223,6 @@ pub struct MatchedFilter {
     energy: f64,
 }
 
-#[allow(dead_code)]
 impl MatchedFilter {
     pub fn new(reference: &[Complex<f32>]) -> Self {
         let wide: Vec<Complex<f64>> = reference
@@ -328,12 +322,13 @@ impl MatchedFilter {
 /// than from a level that happened to work on one recording.
 /// `noise_alone_obeys_the_false_alarm_law` measures it rather than trusting it.
 ///
-/// **Still no production consumer**, and that is now a more precise claim
-/// than it used to be: `signal::ble::detect`'s tests (B3) measure this exact
-/// law against a real reference, but through [`threshold_for_false_alarm`],
-/// the direction a caller actually thinks in - "I want this false-alarm rate,
-/// what threshold gives it" - not this function's own direction. F2 (Wi-Fi
-/// burst detection) is a second identified future consumer of the same kind.
+/// **Still no production consumer.** `signal::ble::detect`'s live path (B6
+/// onward) reaches for [`threshold_for_false_alarm`] instead, the direction
+/// a caller actually thinks in - "I want this false-alarm rate, what
+/// threshold gives it" - not this function's own direction. Only this
+/// module's own tests call it, checking the law it states rather than
+/// living by it. F2 (Wi-Fi burst detection) is a second identified future
+/// consumer of the same kind.
 #[allow(dead_code)]
 pub fn false_alarm_rate(taps: usize, threshold: f64) -> f64 {
     if taps < 2 {

@@ -81,6 +81,11 @@ impl PduType {
 /// A decoded advertising channel PDU: the header, `AdvA` where the PDU type
 /// says the payload starts with one, and whether the CRC that followed it
 /// over the air actually checked out.
+///
+/// `snr_db` and `freq_offset_hz` are `None` here always - `decode` sees only
+/// bits, never the discriminator samples or the detector's own coherence
+/// that B7's measurements are taken from - and are filled in by
+/// `signal::ble::receive::Receiver::try_decode`, the caller that has both.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Packet {
     pub pdu_type: PduType,
@@ -89,11 +94,8 @@ pub struct Packet {
     pub length: u8,
     pub adv_addr: Option<[u8; 6]>,
     pub crc_ok: bool,
-    // TEMP DEBUG
-    pub debug_pdu_bytes: Vec<u8>,
-    pub debug_crc_bytes: Vec<u8>,
-    pub debug_coherence: f64,
-    pub debug_phase: f64,
+    pub snr_db: Option<f64>,
+    pub freq_offset_hz: Option<crate::signal::dsp::uncertainty::Uncertain>,
 }
 
 /// How many trailing bits `decode` needs beyond the header to have a whole
@@ -173,10 +175,8 @@ pub fn decode(bits: &[bool]) -> Option<Packet> {
         length,
         adv_addr,
         crc_ok,
-        debug_pdu_bytes: pdu_bytes,
-        debug_crc_bytes: crc_bytes,
-        debug_coherence: 0.0,
-        debug_phase: 0.0,
+        snr_db: None,
+        freq_offset_hz: None,
     })
 }
 

@@ -34,7 +34,6 @@ pub fn instantaneous_freq_hz(a: Complex<f32>, b: Complex<f32>, rate: f64) -> f32
 /// envelope gate applied between the two calls, not around the whole block.
 /// B2's own tests are the only caller until a step in this arc needs the
 /// gate-free block form.
-#[allow(dead_code)]
 pub fn discriminate(iq: &[Complex<f32>], rate: f64, out: &mut Vec<f32>) {
     out.clear();
     if iq.len() < 2 {

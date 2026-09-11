@@ -73,8 +73,9 @@ pub fn design_lowpass(taps: usize, fc: f64) -> Vec<f32> {
 /// factorial or a power, and the loop stops when a term no longer moves the sum.
 /// Sixty-four terms cover every `beta` a filter design will ask for; `beta = 20`
 /// is a 190 dB stopband and converges in about thirty.
-/// No consumer yet outside this file; see [`design_lowpass_to_spec`].
-#[allow(dead_code)]
+///
+/// Called from [`design_lowpass_kaiser`], which `super::resample::Resampler::new`
+/// reaches directly.
 fn bessel_i0(x: f64) -> f64 {
     let mut term = 1.0f64;
     let mut sum = 1.0f64;
@@ -103,8 +104,10 @@ fn bessel_i0(x: f64) -> f64 {
 /// Below 21 dB the window is rectangular. That is not a special case bolted on:
 /// truncating the sinc alone already gives about 21 dB, so there is nothing left
 /// for a window to do.
-/// No production consumer yet; see [`design_lowpass_to_spec`].
-#[allow(dead_code)]
+///
+/// `super::resample::Resampler::new` calls this directly, alongside
+/// [`kaiser_taps`] and [`design_lowpass_kaiser`], rather than through
+/// [`design_lowpass_to_spec`].
 pub fn kaiser_beta(stopband_db: f64) -> f64 {
     if stopband_db > 50.0 {
         0.1102 * (stopband_db - 8.7)
@@ -141,8 +144,8 @@ pub fn kaiser_beta(stopband_db: f64) -> f64 {
 /// is no upper clamp. A transition of a millionth of the sample rate really does
 /// need millions of taps, and whether that is affordable is the caller's
 /// question, not this function's to answer with a number nobody asked for.
-/// No production consumer yet; see [`design_lowpass_to_spec`].
-#[allow(dead_code)]
+///
+/// `super::resample::Resampler::new` calls this directly; see [`kaiser_beta`].
 pub fn kaiser_taps(transition: f64, stopband_db: f64) -> usize {
     use std::f64::consts::TAU;
     if !transition.is_finite() || transition <= 0.0 || !stopband_db.is_finite() {
@@ -158,10 +161,10 @@ pub fn kaiser_taps(transition: f64, stopband_db: f64) -> usize {
 /// -6 dB at `fc`. `beta` comes from [`kaiser_beta`], and pairing it with a tap
 /// count from [`kaiser_taps`] for the *same* attenuation is the caller's job.
 /// [`design_lowpass_to_spec`] exists so that job can be skipped.
-/// No production consumer yet; see [`design_lowpass_to_spec`], which calls
-/// this, and [`super::resample::Resampler::new`], which calls the same three
-/// primitives directly rather than through it.
-#[allow(dead_code)]
+///
+/// `super::resample::Resampler::new` calls this directly, alongside
+/// [`kaiser_beta`] and [`kaiser_taps`], rather than through
+/// [`design_lowpass_to_spec`].
 pub fn design_lowpass_kaiser(taps: usize, fc: f64, beta: f64) -> Vec<f32> {
     let denom = bessel_i0(beta);
     windowed_sinc(taps, fc, |i, taps| {
@@ -192,10 +195,11 @@ pub fn design_lowpass_kaiser(taps: usize, fc: f64, beta: f64) -> Vec<f32> {
 /// 80 dB as 79.96 dB in 253. The design rule is that close to calibrated, which
 /// is why `the_requested_stopband_is_delivered` holds it to half a dB either
 /// way rather than only checking that the filter is good enough.
-/// **No production consumer yet.** Design section 12.3's resample case - "the
-/// device's rate is a rational multiple of what a mode needs" - is the
-/// identified future need; no arc has reached the point of building a feed at a
-/// rate the radio cannot produce directly.
+/// **No production consumer.** `super::resample::Resampler::new` needs this
+/// same design rule but calls [`kaiser_taps`], [`design_lowpass_kaiser`] and
+/// [`kaiser_beta`] directly rather than through this one-call wrapper -
+/// nothing else has yet needed "ask for a stopband and a transition width, get
+/// a filter" as a single step.
 #[allow(dead_code)]
 pub fn design_lowpass_to_spec(fc: f64, transition: f64, stopband_db: f64) -> Vec<f32> {
     design_lowpass_kaiser(
@@ -226,10 +230,9 @@ pub fn design_lowpass_to_spec(fc: f64, transition: f64, stopband_db: f64) -> Vec
 /// `the_dash_3db_point_sits_at_bt_over_sps` measures the filter this produces
 /// rather than trusting the formula on faith.
 ///
-/// No production consumer yet: `signal::ble::testkit`'s synthetic transmitter
-/// is a test-only fixture, so this is presently only reached from `cfg(test)`
-/// code, the same shape as [`design_lowpass_to_spec`] above.
-#[allow(dead_code)]
+/// Reaches `main` since B6: `signal::ble::gfsk::modulate` calls this to build
+/// the pulse-shaping kernel every GFSK transmit and every reference
+/// correlation goes through, live in `signal::ble::detect::Detector`.
 pub fn gaussian_taps(bt: f64, sps: usize, span_symbols: usize) -> Vec<f32> {
     use std::f64::consts::PI;
     let n = (sps * span_symbols).max(1) | 1;

@@ -33,14 +33,13 @@ use crate::signal::dsp::correlate::MatchedFilter;
 /// transmission-order rule below, which rests on the same page read through a
 /// search summary rather than the page itself.
 ///
-/// No path from `main` yet - see [`Detector`]'s own doc for why this whole
-/// file is presently dead together.
-#[allow(dead_code)]
+/// Reaches `main` since B6: `signal::ble::receive::Receiver` builds its own
+/// [`Detector`] against exactly this constant, the fixed address every
+/// advertising channel PDU uses.
 pub const ADVERTISING_ACCESS_ADDRESS: u32 = 0x8E89_BED6;
 
 /// How many symbols the combined reference below is: 8 for the preamble, 32
 /// for the access address.
-#[allow(dead_code)]
 pub const REFERENCE_SYMBOLS: usize = 8 + 32;
 
 /// `access_address`'s 32 bits, in the order the specification transmits
@@ -54,7 +53,6 @@ pub const REFERENCE_SYMBOLS: usize = 8 + 32;
 /// own worked example - which is exactly what this function computes, and
 /// `the_advertising_address_matches_its_own_worked_example` pins it against
 /// that example rather than trusting the rule restated in prose.
-#[allow(dead_code)]
 pub fn access_address_bits(access_address: u32) -> [bool; 32] {
     let mut out = [false; 32];
     for octet in 0..4usize {
@@ -75,7 +73,6 @@ pub fn access_address_bits(access_address: u32) -> [bool; 32] {
 /// specification names the rule by the bit relationship, not by a byte value,
 /// and naming it "0xAA" or "0x55" would silently commit to a bit order this
 /// function does not need to take a position on.
-#[allow(dead_code)]
 pub fn preamble_bits(access_address: u32) -> [bool; 8] {
     let mut bit = access_address & 1 != 0;
     let mut out = [false; 8];
@@ -92,7 +89,6 @@ pub fn preamble_bits(access_address: u32) -> [bool; 8] {
 /// symbol_rate`); the Gaussian filter's own bandwidth-time product is the
 /// same 0.5.
 #[derive(Clone, Copy)]
-#[allow(dead_code)]
 pub struct Le1mParams {
     pub sps: usize,
     pub sample_rate: f64,
@@ -100,11 +96,18 @@ pub struct Le1mParams {
     pub bt: f64,
 }
 
-#[allow(dead_code)]
 impl Le1mParams {
     /// LE 1M at the given samples per symbol. The symbol rate is always
     /// 1 Mb/s on this PHY, so `sample_rate` follows from `sps` rather than
     /// being a second number that could disagree with it.
+    ///
+    /// Only this arc's own tests call it: `signal::ble::receive::Receiver`
+    /// needs `sample_rate` set to the *decimated* working rate it actually
+    /// runs at, not derived fresh from `sps` by this convenience
+    /// constructor, so it builds `Le1mParams` as a plain struct literal
+    /// instead. Still a real constructor for a test that wants LE 1M's own
+    /// numbers with no decimation in the picture.
+    #[allow(dead_code)]
     pub fn at(sps: usize) -> Self {
         const SYMBOL_RATE: f64 = 1_000_000.0;
         Self {
@@ -119,17 +122,14 @@ impl Le1mParams {
 /// A detector for one access address on the LE 1M PHY: the preamble and the
 /// address, correlated as a single known reference.
 ///
-/// No consumer yet in this arc's own code: nothing in `tasks` or `ui` feeds
-/// this a live stream, because there is no capture pipeline wired to `ble`
-/// until B6 puts a real packet on screen. Until then this is reached only
-/// from this module's own tests, exactly the position `dsp::correlate`'s
-/// `MatchedFilter` itself was in before this step gave it a real caller.
-#[allow(dead_code)]
+/// `signal::ble::receive::Receiver` owns one of these and feeds it every
+/// sample of a live capture - the first stage of B6's four-stage pipeline,
+/// the same position `dsp::correlate`'s `MatchedFilter` itself was promoted
+/// out of when this struct was built to wrap it.
 pub struct Detector {
     filter: MatchedFilter,
 }
 
-#[allow(dead_code)]
 impl Detector {
     pub fn new(access_address: u32, params: Le1mParams) -> Self {
         let mut bits = Vec::with_capacity(REFERENCE_SYMBOLS);
@@ -151,10 +151,17 @@ impl Detector {
     /// is the figure [`crate::signal::dsp::correlate::threshold_for_false_alarm`]
     /// needs to turn a stated false-alarm rate into a threshold for this
     /// detector specifically.
+    ///
+    /// This arc's own tests are the only caller: `receive.rs` needs the same
+    /// figure but already has `REFERENCE_SYMBOLS * WORKING_SPS` in hand as
+    /// plain constants at the point it needs it, with no `Detector` value
+    /// alive to ask.
+    #[allow(dead_code)]
     pub fn len(&self) -> usize {
         self.filter.len()
     }
 
+    #[allow(dead_code)]
     pub fn is_empty(&self) -> bool {
         self.filter.is_empty()
     }

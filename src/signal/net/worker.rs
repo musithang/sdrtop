@@ -206,18 +206,6 @@ impl NetWorker {
                         if !packets.is_empty() {
                             let mut m = self.state.lock().unwrap_or_else(|e| e.into_inner());
                             for p in packets {
-                                // TEMP DEBUG
-                                let hex: String = p
-                                    .debug_pdu_bytes
-                                    .iter()
-                                    .chain(p.debug_crc_bytes.iter())
-                                    .map(|b| format!("{b:02x}"))
-                                    .collect::<Vec<_>>()
-                                    .join(" ");
-                                m.push_log(format!(
-                                    "DEBUG coh={:.3} phase={:.2} pdu+crc: {hex}",
-                                    p.debug_coherence, p.debug_phase
-                                ));
                                 m.net.ble_packets.push_front(BlePacket {
                                     channel: ch,
                                     pdu_type: p.pdu_type,
@@ -225,6 +213,8 @@ impl NetWorker {
                                     length: p.length,
                                     adv_addr: p.adv_addr,
                                     crc_ok: p.crc_ok,
+                                    snr_db: p.snr_db,
+                                    freq_offset_hz: p.freq_offset_hz,
                                     seen: now,
                                 });
                             }

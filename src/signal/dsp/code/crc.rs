@@ -34,15 +34,11 @@
 /// No consumer yet outside this module's own tests: nothing decodes a full
 /// PDU to check against a CRC until B6 puts a real packet on screen. Applies
 /// to every item below.
-#[allow(dead_code)]
 const POLY: u32 = 0x00065B;
-#[allow(dead_code)]
 const INIT: u32 = 0x555555;
-#[allow(dead_code)]
 const MASK: u32 = 0x00FF_FFFF;
 
 /// Reverse the low 24 bits of `x`.
-#[allow(dead_code)]
 fn reflect24(mut x: u32) -> u32 {
     let mut r = 0u32;
     for _ in 0..24 {
@@ -54,7 +50,6 @@ fn reflect24(mut x: u32) -> u32 {
 
 /// CRC-24/BLE of `data`: reflected input and output, the advertising-channel
 /// and test-packet initial value.
-#[allow(dead_code)]
 pub fn crc24_ble(data: &[u8]) -> u32 {
     let rev_poly = reflect24(POLY);
     let mut reg = reflect24(INIT);

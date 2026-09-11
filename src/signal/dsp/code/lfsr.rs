@@ -31,13 +31,11 @@
 /// No consumer yet outside this module's own tests: nothing de-whitens a
 /// real payload until B6 puts a real packet on screen. Applies to every item
 /// below.
-#[allow(dead_code)]
 pub fn seed(channel: u8) -> u8 {
     0x40 | (channel & 0x3F)
 }
 
 /// One step: the bit whitened out, and the LFSR's next state.
-#[allow(dead_code)]
 fn step(state: u8) -> (bool, u8) {
     let out = state & 1 != 0;
     let feedback = ((state >> 4) ^ state) & 1;
@@ -53,7 +51,6 @@ fn step(state: u8) -> (bool, u8) {
 /// with the same channel is the identity - whitening and de-whitening are
 /// the same XOR run once each way, which is why there is one function here
 /// rather than two that would have to agree.
-#[allow(dead_code)]
 pub fn whiten(bits: &mut [bool], channel: u8) {
     let mut state = seed(channel);
     for bit in bits.iter_mut() {

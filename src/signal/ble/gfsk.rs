@@ -23,7 +23,6 @@ use crate::signal::dsp::fir::gaussian_taps;
 ///
 /// No path from `main` yet - see [`modulate`]'s own doc for why the whole
 /// chain is presently dead together.
-#[allow(dead_code)]
 const FILTER_SPAN_SYMBOLS: usize = 4;
 
 /// A GFSK-modulated baseband signal for the given bits, at `sps` samples per
@@ -45,7 +44,6 @@ const FILTER_SPAN_SYMBOLS: usize = 4;
 /// the reference it correlates against - but `Detector` itself has no path
 /// from `main` yet, so the lint still fires here too. Wired in when B6 puts a
 /// real packet on screen.
-#[allow(dead_code)]
 pub fn modulate(
     bits: &[bool],
     sps: usize,
