@@ -36,6 +36,7 @@ pub mod nco;
 pub mod resample;
 #[cfg(test)]
 pub mod testkit;
+pub mod timing;
 pub mod uncertainty;
 pub mod window;
 

@@ -18,3 +18,4 @@
 pub mod channel;
 pub mod detect;
 pub mod gfsk;
+pub mod sync;
