@@ -218,6 +218,11 @@ pub struct BlePacket {
     /// content, to contain a settled run of either kind - see
     /// `signal::ble::measure`'s own doc for what "settled" means here.
     pub modulation: Option<crate::signal::ble::measure::ModulationQuality>,
+    /// B9: this packet's own frequency offset, read early and late, and the
+    /// drift between them. `None` under the same conditions as
+    /// `modulation` - too short a capture to give each half its own
+    /// variance.
+    pub drift: Option<crate::signal::ble::measure::Drift>,
     pub seen: std::time::Instant,
 }
 

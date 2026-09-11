@@ -105,6 +105,22 @@ impl Uncertain {
         }
     }
 
+    /// `self - other`, for two independent measurements.
+    ///
+    /// Exact, unlike [`Self::ratio`]: for independent `A` and `B`,
+    /// `Var(A - B) = Var(A) + Var(B)` is not a linearisation of anything, it
+    /// is the definition of variance under a linear combination. B9 is the
+    /// reasoned first consumer - a packet's own frequency offset measured
+    /// early versus late, the two ends of a drift `signal::ble::measure`
+    /// reports as a single number and its own honest uncertainty rather
+    /// than two numbers a reader has to subtract by eye.
+    pub fn difference(&self, other: &Uncertain) -> Self {
+        Self::from_variance(
+            self.value - other.value,
+            self.sigma * self.sigma + other.sigma * other.sigma,
+        )
+    }
+
     /// `self / other`, for two independent measurements, with the uncertainty
     /// propagated by first-order (delta-method) error propagation.
     ///
@@ -541,6 +557,40 @@ mod tests {
             "base {} less_noise {}",
             base.sigma(),
             less_noise.sigma()
+        );
+    }
+
+    /// `Var(A - B) = Var(A) + Var(B)`, checked against a Monte Carlo
+    /// simulation of the same two independent measurements - a formula this
+    /// simple is still worth measuring rather than trusting, the same
+    /// discipline `moose_does_not_beat_its_bound` and the ratio's own test
+    /// below hold their closed forms to.
+    #[test]
+    fn the_difference_matches_a_monte_carlo_simulation_of_the_same_two_measurements() {
+        let a = Uncertain::from_sigma(10.0, 0.6);
+        let b = Uncertain::from_sigma(4.0, 0.3);
+        let z = a.difference(&b);
+        assert!((z.value() - 6.0).abs() < 1e-12);
+        assert!((z.sigma() - (0.6f64.powi(2) + 0.3f64.powi(2)).sqrt()).abs() < 1e-12);
+
+        let mut rng = Rng::new(43);
+        const TRIALS: usize = 200_000;
+        let samples: Vec<f64> = (0..TRIALS)
+            .map(|_| {
+                let da = rng.normal_pair().0 * a.sigma();
+                let db = rng.normal_pair().0 * b.sigma();
+                (a.value() + da) - (b.value() + db)
+            })
+            .collect();
+        let mean = samples.iter().sum::<f64>() / TRIALS as f64;
+        let variance =
+            samples.iter().map(|x| (x - mean).powi(2)).sum::<f64>() / (TRIALS - 1) as f64;
+        assert!((mean - z.value()).abs() < 0.01, "simulated mean {mean}");
+        assert!(
+            (variance.sqrt() / z.sigma() - 1.0).abs() < 0.02,
+            "simulated sigma {} against {}",
+            variance.sqrt(),
+            z.sigma()
         );
     }
 

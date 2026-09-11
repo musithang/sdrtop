@@ -237,13 +237,16 @@ impl Receiver {
         // synthetic tests, which is why slicing against a fixed zero passed
         // every one of them and no real capture. The capture's own mean is
         // the honest estimate of that constant - GFSK data is balanced over
-        // any real stretch of bits - and B7 gives it a proper uncertainty:
-        // see `dsp::uncertainty::mean_with_uncertainty`'s own doc for why
-        // the sample mean is the right estimator here, not an approximation
-        // of one.
-        let offset = crate::signal::dsp::uncertainty::mean_with_uncertainty(&inst);
-        let (mut bits, raw_symbols) =
-            super::sync::slice(&inst, WORKING_SPS as f64, symbols, offset.value() as f32);
+        // any real stretch of bits - and this only needs a point estimate:
+        // a threshold decision does not need a calibrated uncertainty, only
+        // the displayed reading below does, and gets its own.
+        let rough_offset = crate::signal::dsp::uncertainty::mean_with_uncertainty(&inst);
+        let (mut bits, raw_symbols) = super::sync::slice(
+            &inst,
+            WORKING_SPS as f64,
+            symbols,
+            rough_offset.value() as f32,
+        );
         // B8's modulation-quality measurement needs the physically
         // transmitted (still-whitened) symbols and their raw discriminator
         // readings - exactly what `bits` and `raw_symbols` are before the
@@ -253,6 +256,26 @@ impl Receiver {
         let raw_bits = bits.clone();
         whiten(&mut bits, self.channel);
         let mut packet = pdu::decode(&bits)?;
+        // Trimmed to exactly this packet's own bits before measuring: `bits`
+        // and `raw_symbols` run to the end of whatever has been captured,
+        // which is deliberately more than one packet's worth (see this
+        // struct's own `push`), and letting the search wander into trailing
+        // noise or the next packet's preamble would mix an unrelated
+        // signal's deviation into this one's own reading.
+        let used = pdu::used_bits(packet.length).min(raw_bits.len());
+        let raw_bits = &raw_bits[..used];
+        let raw_symbols = &raw_symbols[..used];
+        // The *reported* offset, unlike `rough_offset` above, is read from
+        // one sample per symbol rather than the raw four-per-symbol trace.
+        // B9's own `measure::drift` found why that distinction is load-
+        // bearing: `mean_with_uncertainty` assumes independent samples, and
+        // four samples spanning one Gaussian-filtered symbol are one
+        // slowly-varying value read four times, not four independent ones -
+        // feeding it the raw trace divides by an `N` four times too large
+        // and understates the uncertainty by about half. `rough_offset`
+        // above never had to be exact, only good enough to slice against;
+        // this one is what a reader sees a `+/-` on.
+        let offset = crate::signal::dsp::uncertainty::mean_with_uncertainty(raw_symbols);
         packet.freq_offset_hz = Some(offset);
         // `snr_from_metric` was derived for `Coherence::metric` - two noisy
         // copies of the same unknown signal correlated against each other -
@@ -268,15 +291,8 @@ impl Receiver {
         // already keeps every real reading comfortably under.
         packet.snr_db = snr_from_metric(self.last_coherence, REFERENCE_SYMBOLS * WORKING_SPS)
             .map(|snr| 10.0 * snr.log10());
-        // Trimmed to exactly this packet's own bits before measuring: `bits`
-        // and `raw_symbols` run to the end of whatever has been captured,
-        // which is deliberately more than one packet's worth (see this
-        // struct's own `push`), and letting the search wander into trailing
-        // noise or the next packet's preamble would mix an unrelated
-        // signal's deviation into this one's own reading.
-        let used = pdu::used_bits(packet.length).min(raw_bits.len());
-        packet.modulation =
-            super::measure::modulation_quality(&raw_bits[..used], &raw_symbols[..used]);
+        packet.modulation = super::measure::modulation_quality(raw_bits, raw_symbols);
+        packet.drift = super::measure::drift(raw_symbols);
         Some(packet)
     }
 }

@@ -82,11 +82,11 @@ impl PduType {
 /// says the payload starts with one, and whether the CRC that followed it
 /// over the air actually checked out.
 ///
-/// `snr_db`, `freq_offset_hz` and `modulation` are `None` here always -
-/// `decode` sees only bits, never the discriminator samples or the
-/// detector's own coherence B7's and B8's measurements are taken from - and
-/// are filled in by `signal::ble::receive::Receiver::try_decode`, the caller
-/// that has both.
+/// `snr_db`, `freq_offset_hz`, `modulation` and `drift` are `None` here
+/// always - `decode` sees only bits, never the discriminator samples or the
+/// detector's own coherence B7, B8 and B9's measurements are taken from -
+/// and are filled in by `signal::ble::receive::Receiver::try_decode`, the
+/// caller that has both.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Packet {
     pub pdu_type: PduType,
@@ -97,6 +97,7 @@ pub struct Packet {
     pub crc_ok: bool,
     pub snr_db: Option<f64>,
     pub freq_offset_hz: Option<crate::signal::dsp::uncertainty::Uncertain>,
+    pub drift: Option<super::measure::Drift>,
     pub modulation: Option<super::measure::ModulationQuality>,
 }
 
@@ -191,6 +192,7 @@ pub fn decode(bits: &[bool]) -> Option<Packet> {
         snr_db: None,
         freq_offset_hz: None,
         modulation: None,
+        drift: None,
     })
 }
 

@@ -38,6 +38,13 @@
 //! run of identical or alternating *on-air* bits is. `signal::ble::receive`
 //! calls this before its own call to [`crate::signal::dsp::code::lfsr::whiten`],
 //! on the same bits [`super::sync::slice`] sliced.
+//!
+//! [`drift`] is B9's own addition, and needs none of the pattern-search
+//! machinery above - a frequency drift within a packet is a property of the
+//! per-symbol discriminator readings themselves, not of any particular bit
+//! pattern - but it reads the *same* per-symbol `samples` array
+//! [`modulation_quality`] does, for a reason [`drift`]'s own doc explains:
+//! the raw, oversampled trace turned out to be the wrong input for it.
 
 use crate::signal::dsp::uncertainty::Uncertain;
 
@@ -135,6 +142,78 @@ pub fn modulation_quality(bits: &[bool], samples: &[f32]) -> Option<ModulationQu
         delta_f2_max_hz,
         modulation_index,
         ratio,
+    })
+}
+
+/// A packet's own frequency offset, measured early and late, and the drift
+/// between them - design section 2.2's measurements 6 through 8, read as one
+/// structure rather than two numbers a reader has to subtract by hand.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Drift {
+    /// The mean discriminator reading over the first half of the capture.
+    pub initial_hz: Uncertain,
+    /// The mean discriminator reading over the second half.
+    pub final_hz: Uncertain,
+    /// `final_hz - initial_hz`.
+    pub drift_hz: Uncertain,
+    /// `drift_hz`, divided by the time between the two halves' own centres.
+    pub drift_rate_hz_per_us: Uncertain,
+}
+
+/// Frequency drift within one packet, from the **per-symbol** discriminator
+/// readings [`super::sync::slice`] already produced - the same `samples`
+/// array [`modulation_quality`] reads, one value per on-air symbol.
+///
+/// **Not the raw oversampled trace, and that is a finding of its own, not a
+/// preference.** A first version read straight from `receive.rs`'s raw
+/// `inst` array at the working sample rate (four samples per symbol here),
+/// the same array B7's own CFO figure is built from. Its own "no drift
+/// injected" test failed: [`crate::signal::dsp::uncertainty::mean_with_uncertainty`]
+/// assumes independent samples to turn a sample variance into `Var(mean) =
+/// sigma^2 / N`, and four samples spanning one symbol of a Gaussian-filtered
+/// waveform are not independent draws - they are one slowly-varying value
+/// sampled four times. Feeding it the raw trace divides by an `N` four times
+/// too large and reports a sigma roughly half what the data can actually
+/// support, which a null-drift signal then reliably clears by several times
+/// its own reported uncertainty - a measurement that looks more precise than
+/// it is, which is exactly the failure this whole arc's uncertainty
+/// discipline exists to catch. One value per symbol removes the
+/// oversampling correlation the same way slicing to bits already does for
+/// [`modulation_quality`]; the residual correlation between *adjacent
+/// symbols*, from the Gaussian filter's own few-symbol impulse response, is
+/// smaller and not accounted for here either, so this is a improvement, not
+/// a claim of statistical purity.
+///
+/// **Splits the capture in half and reads the mean of each half.** A single
+/// mean answers "what was the average offset"; two means, early and late,
+/// answer "did it move" - design section 2.2's measurement 8 ("initial
+/// frequency offset versus final") asked for directly, and what a drifting
+/// PLL or a thermally pulling crystal actually does to a burst.
+///
+/// The two halves' own centres sit `n / 2` symbols apart regardless of
+/// which half is longer when `n` is odd, which is close enough: a legacy
+/// advertising PDU is at most a few hundred symbols, and one symbol's worth
+/// of that is a rounding error next to the drift this measures. `None`
+/// under four symbols, where a half would have fewer than the two
+/// [`crate::signal::dsp::uncertainty::mean_with_uncertainty`] needs to
+/// report a variance rather than an unknown one.
+pub fn drift(samples: &[f32]) -> Option<Drift> {
+    let n = samples.len();
+    let half = n / 2;
+    if half < 2 {
+        return None;
+    }
+    let initial_hz = crate::signal::dsp::uncertainty::mean_with_uncertainty(&samples[..half]);
+    let final_hz = crate::signal::dsp::uncertainty::mean_with_uncertainty(&samples[n - half..]);
+    let drift_hz = final_hz.difference(&initial_hz);
+    let separation_us = half as f64 / SYMBOL_RATE_HZ * 1e6;
+    let drift_rate_hz_per_us = drift_hz.scale(1.0 / separation_us);
+
+    Some(Drift {
+        initial_hz,
+        final_hz,
+        drift_hz,
+        drift_rate_hz_per_us,
     })
 }
 
@@ -302,5 +381,110 @@ mod tests {
         let all_settled = vec![true; 20];
         let samples = vec![1.0f32; 20];
         assert!(modulation_quality(&all_settled, &samples).is_none());
+    }
+
+    /// A clean IQ signal with an added linear frequency ramp on top of
+    /// whatever it is already modulating: `drift_rate_hz_per_s * t` more
+    /// frequency at time `t`, the same effect a thermally pulling crystal or
+    /// a still-settling PLL has on a real transmitter within one burst.
+    /// Multiplying by a chirp is exact here because frequency is additive
+    /// under complex multiplication: the discriminator recovers the sum of
+    /// the two phase derivatives, not some mixture of them.
+    fn with_drift(
+        iq: &[num_complex::Complex<f32>],
+        sample_rate_hz: f64,
+        drift_rate_hz_per_s: f64,
+    ) -> Vec<num_complex::Complex<f32>> {
+        use num_complex::Complex;
+        iq.iter()
+            .enumerate()
+            .map(|(n, &s)| {
+                let t = n as f64 / sample_rate_hz;
+                let phase = std::f64::consts::TAU * 0.5 * drift_rate_hz_per_s * t * t;
+                s * Complex::new(phase.cos() as f32, phase.sin() as f32)
+            })
+            .collect()
+    }
+
+    /// B9's exit condition: a synthetic drift of a known rate is recovered
+    /// to within its own uncertainty.
+    #[test]
+    fn a_known_drift_rate_is_recovered_within_its_own_uncertainty() {
+        let params = Le1mParams {
+            sps: 4,
+            sample_rate: 4_000_000.0,
+            deviation_hz: 250_000.0,
+            bt: 0.5,
+        };
+        let mut rng = Rng::new(20);
+        let bits: Vec<bool> = (0..3000).map(|_| rng.next_u64() & 1 == 1).collect();
+        let clean = modulate(
+            &bits,
+            params.sps,
+            params.deviation_hz,
+            params.sample_rate,
+            params.bt,
+        );
+        let drift_rate_hz_per_us = 20.0;
+        let drifted = with_drift(&clean, params.sample_rate, drift_rate_hz_per_us * 1e6);
+        let mut inst = Vec::new();
+        discriminate(&drifted, params.sample_rate, &mut inst);
+        let (_, samples) =
+            crate::signal::ble::sync::slice(&inst, params.sps as f64, bits.len(), 0.0);
+
+        let d = drift(&samples).expect("plenty of samples at 3000 bits");
+        assert!(
+            (d.drift_rate_hz_per_us.value() - drift_rate_hz_per_us).abs()
+                < 4.0 * d.drift_rate_hz_per_us.sigma(),
+            "measured {} +/- {}, injected {}",
+            d.drift_rate_hz_per_us.value(),
+            d.drift_rate_hz_per_us.sigma(),
+            drift_rate_hz_per_us
+        );
+        // The two ends of the same measurement, design section 2.2's own
+        // framing: final must read higher than initial for a positive
+        // drift, not just the rate derived from their difference.
+        assert!(d.final_hz.value() > d.initial_hz.value());
+    }
+
+    /// No injected drift measures as no drift, within the same uncertainty
+    /// a real one would have to clear - the null result this measurement
+    /// has to get right before its own "yes, this moved" means anything.
+    #[test]
+    fn no_injected_drift_measures_as_none_within_uncertainty() {
+        let params = Le1mParams {
+            sps: 4,
+            sample_rate: 4_000_000.0,
+            deviation_hz: 250_000.0,
+            bt: 0.5,
+        };
+        let mut rng = Rng::new(21);
+        let bits: Vec<bool> = (0..3000).map(|_| rng.next_u64() & 1 == 1).collect();
+        let clean = modulate(
+            &bits,
+            params.sps,
+            params.deviation_hz,
+            params.sample_rate,
+            params.bt,
+        );
+        let mut inst = Vec::new();
+        discriminate(&clean, params.sample_rate, &mut inst);
+        let (_, samples) =
+            crate::signal::ble::sync::slice(&inst, params.sps as f64, bits.len(), 0.0);
+
+        let d = drift(&samples).unwrap();
+        assert!(
+            d.drift_rate_hz_per_us.value().abs() < 4.0 * d.drift_rate_hz_per_us.sigma(),
+            "measured {} +/- {} with nothing injected",
+            d.drift_rate_hz_per_us.value(),
+            d.drift_rate_hz_per_us.sigma()
+        );
+    }
+
+    /// Too few samples to give each half its own variance refuses rather
+    /// than inventing a drift from a handful of points.
+    #[test]
+    fn too_few_samples_refuses_rather_than_inventing_a_reading() {
+        assert!(drift(&[1.0, 2.0, 3.0]).is_none());
     }
 }

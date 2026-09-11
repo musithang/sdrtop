@@ -216,6 +216,7 @@ impl NetWorker {
                                     snr_db: p.snr_db,
                                     freq_offset_hz: p.freq_offset_hz,
                                     modulation: p.modulation,
+                                    drift: p.drift,
                                     seen: now,
                                 });
                             }

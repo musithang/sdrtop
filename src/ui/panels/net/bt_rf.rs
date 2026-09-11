@@ -8,14 +8,19 @@
 //! most recently decoded advertising packet. Design section 9.1's idiom B
 //! (`ui::widgets::limit`) is drawn here for the first time - see that
 //! module's own doc for the row shape and why the word "pass" never
-//! appears.
+//! appears. B9 adds two more rows, drift and drift rate, the same panel
+//! design section 3's own table names for both.
 //!
 //! **The three states `net_ble_packets` already established, reused
 //! here.** Not decoding, nothing decoded yet, and - a fourth this panel
 //! adds of its own - a real packet whose own random content happened not
 //! to contain a settled run of one of the two kinds this measurement needs
 //! (`signal::ble::measure`'s own doc explains which). All three are
-//! refusals, never a zeroed or invented row.
+//! refusals, never a zeroed or invented row. B9's drift rows are simpler:
+//! they need only two symbols per half rather than a lucky run of either
+//! kind, so in practice they are present whenever modulation quality is,
+//! and this panel shows them only then rather than inventing a fourth
+//! refusal state for a gap that has not been observed to occur on its own.
 
 use ratatui::{
     layout::Rect,
@@ -25,7 +30,7 @@ use ratatui::{
     Frame,
 };
 
-use crate::signal::ble::measure::ModulationQuality;
+use crate::signal::ble::measure::{Drift, ModulationQuality};
 use crate::signal::dsp::uncertainty::Uncertain;
 use crate::state::SdrMetrics;
 use crate::ui::panel::{Panel, PanelChrome, Staleness};
@@ -66,6 +71,24 @@ const DELTA_F2_MAX_FLOOR_KHZ: Limit = Limit::Min(185.0);
 /// between delta-f2 and delta-f1 averages.
 const RATIO_FLOOR: Limit = Limit::Min(0.8);
 
+/// Recalled from the RF-PHY test specification's own drift limit for LE 1M,
+/// **not checked against a primary source this session** - design section
+/// 6's own facts-to-verify table lists "BLE drift and drift-rate limits,
+/// and the patterns they are measured over" as an open item, unresolved by
+/// B9 same as it was left by B1. A symmetric band, because a burst can
+/// drift either warmer or colder than its own start.
+const DRIFT_BAND_KHZ: Limit = Limit::Band {
+    low: -50.0,
+    high: 50.0,
+};
+
+/// Recalled under the same caveat as [`DRIFT_BAND_KHZ`]: the specification's
+/// own drift-rate limit, in Hz per microsecond.
+const DRIFT_RATE_BAND: Limit = Limit::Band {
+    low: -400.0,
+    high: 400.0,
+};
+
 /// How much uncertainty each reading can carry before it dashes rather than
 /// prints - a judgement call in the absence of a specification-stated
 /// figure, made the same way `Uncertain::is_resolved`'s own doc asks for:
@@ -75,9 +98,11 @@ const RATIO_FLOOR: Limit = Limit::Min(0.8);
 const MOD_INDEX_RESOLUTION: f64 = 0.02;
 const DELTA_F1_RESOLUTION_KHZ: f64 = 10.0;
 const RATIO_RESOLUTION: f64 = 0.1;
+const DRIFT_RESOLUTION_KHZ: f64 = 10.0;
+const DRIFT_RATE_RESOLUTION: f64 = 80.0;
 
-fn rows(q: &ModulationQuality) -> Vec<LimitRow<'static>> {
-    vec![
+fn rows(q: &ModulationQuality, d: Option<&Drift>) -> Vec<LimitRow<'static>> {
+    let mut out = vec![
         LimitRow::new(
             "Mod index",
             Reading::new(q.modulation_index, "", MOD_INDEX_RESOLUTION),
@@ -111,7 +136,20 @@ fn rows(q: &ModulationQuality) -> Vec<LimitRow<'static>> {
             Reading::new(q.ratio, "", RATIO_RESOLUTION),
             RATIO_FLOOR,
         ),
-    ]
+    ];
+    if let Some(d) = d {
+        out.push(LimitRow::new(
+            "Drift",
+            Reading::new(d.drift_hz.scale(0.001), "kHz", DRIFT_RESOLUTION_KHZ),
+            DRIFT_BAND_KHZ,
+        ));
+        out.push(LimitRow::new(
+            "Drift rate",
+            Reading::new(d.drift_rate_hz_per_us, "Hz/us", DRIFT_RATE_RESOLUTION),
+            DRIFT_RATE_BAND,
+        ));
+    }
+    out
 }
 
 /// The widest bar that still keeps every row inside `width` columns.
@@ -207,7 +245,7 @@ impl Panel for NetBtRfPanel {
             return;
         };
 
-        let rows = rows(&q);
+        let rows = rows(&q, latest.drift.as_ref());
         let w = fit(&rows, width);
         let lines: Vec<Line> = rows.iter().map(|r| Line::from(r.spans(theme, w))).collect();
         f.render_widget(Paragraph::new(lines), inner);
@@ -231,7 +269,26 @@ mod tests {
         }
     }
 
+    fn drift(drift_hz: f64) -> Drift {
+        let initial_hz = Uncertain::from_sigma(0.0, 500.0);
+        let final_hz = Uncertain::from_sigma(drift_hz, 500.0);
+        let drift = final_hz.difference(&initial_hz);
+        Drift {
+            initial_hz,
+            final_hz,
+            drift_hz: drift,
+            drift_rate_hz_per_us: drift.scale(0.01),
+        }
+    }
+
     fn packet(modulation: Option<ModulationQuality>) -> BlePacket {
+        packet_with_drift(modulation, None)
+    }
+
+    fn packet_with_drift(
+        modulation: Option<ModulationQuality>,
+        drift: Option<crate::signal::ble::measure::Drift>,
+    ) -> BlePacket {
         BlePacket {
             channel: 37,
             pdu_type: PduType::AdvInd,
@@ -242,6 +299,7 @@ mod tests {
             snr_db: Some(12.0),
             freq_offset_hz: None,
             modulation,
+            drift,
             seen: Instant::now(),
         }
     }
@@ -291,13 +349,44 @@ mod tests {
         }
     }
 
+    /// B9's exit condition on screen: a packet with drift measured shows
+    /// two more rows than one without, and neither row's word is "pass".
+    #[test]
+    fn a_packet_with_drift_draws_two_more_rows() {
+        let mut m = SdrMetrics::fixture().streaming();
+        m.net.ble_packets.push_back(packet_with_drift(
+            Some(quality(250_000.0)),
+            Some(drift(5_000.0)),
+        ));
+        let out = draw(NetBtRfPanel, 70, 10, &m).join("\n");
+        assert!(out.contains("Drift"), "{out}");
+        assert!(out.contains("Drift rate"), "{out}");
+        let lower = out.to_ascii_lowercase();
+        for word in ["pass", "fail"] {
+            assert!(!lower.contains(word), "{word} in {out:?}");
+        }
+    }
+
+    /// Modulation quality without a drift reading draws its own four rows
+    /// and nothing more, rather than a fifth refusal state for a gap this
+    /// arc has not observed to occur on its own.
+    #[test]
+    fn modulation_without_drift_draws_no_drift_rows() {
+        let mut m = SdrMetrics::fixture().streaming();
+        m.net
+            .ble_packets
+            .push_back(packet(Some(quality(250_000.0))));
+        let out = draw(NetBtRfPanel, 70, 8, &m).join("\n");
+        assert!(!out.contains("Drift"), "{out}");
+    }
+
     #[test]
     fn it_fits_every_size_the_layout_can_hand_it() {
         let mut populated = SdrMetrics::fixture().streaming();
-        populated
-            .net
-            .ble_packets
-            .push_back(packet(Some(quality(250_000.0))));
+        populated.net.ble_packets.push_back(packet_with_drift(
+            Some(quality(250_000.0)),
+            Some(drift(5_000.0)),
+        ));
         for w in 20..90u16 {
             for h in 4..16u16 {
                 for m in [populated.clone(), SdrMetrics::fixture()] {
