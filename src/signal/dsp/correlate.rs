@@ -177,10 +177,15 @@ impl DelayedAutocorrelator {
 
 /// One reading from [`MatchedFilter`].
 ///
-/// No consumer yet. Design section 10's F4 (symbol timing from the L-LTF
-/// cross-correlation) is the plan's own answer for where this lands - a known
-/// preamble sequence correlated against the live stream is exactly what a
-/// matched filter is for.
+/// Has a real caller now: `signal::ble::detect::Detector` (B3) builds a
+/// combined preamble-and-access-address reference and reads this back,
+/// since the advertising access address is known in advance and a known
+/// sequence correlated against the live stream is exactly what a matched
+/// filter is for. The lint still fires because `Detector` itself has no path
+/// from `main` yet - nothing in `tasks` or `ui` feeds it a live stream until
+/// B6 puts a real packet on screen - so the whole chain is dead together and
+/// lights up together. Design section 10's F4 (symbol timing from the L-LTF
+/// cross-correlation) is a second identified consumer, not yet built.
 #[derive(Clone, Copy, Debug)]
 #[allow(dead_code)]
 pub struct Match {
@@ -210,7 +215,7 @@ impl Match {
 
 /// Correlation of a signal with a sequence known in advance.
 ///
-/// No consumer yet; see [`Match`].
+/// See [`Match`] for who uses it and why the dead-code lint still fires.
 #[allow(dead_code)]
 pub struct MatchedFilter {
     /// The reference, conjugated and reversed, so applying it is a forward walk
@@ -322,9 +327,13 @@ impl MatchedFilter {
 /// false-alarm rate it is required to have, which is a specification, rather
 /// than from a level that happened to work on one recording.
 /// `noise_alone_obeys_the_false_alarm_law` measures it rather than trusting it.
-/// No consumer yet: F2 (Wi-Fi burst detection over `dsp::correlate`) and B3
-/// (Bluetooth preamble correlation) both name a measured false-alarm rate as
-/// their exit criterion.
+///
+/// **Still no production consumer**, and that is now a more precise claim
+/// than it used to be: `signal::ble::detect`'s tests (B3) measure this exact
+/// law against a real reference, but through [`threshold_for_false_alarm`],
+/// the direction a caller actually thinks in - "I want this false-alarm rate,
+/// what threshold gives it" - not this function's own direction. F2 (Wi-Fi
+/// burst detection) is a second identified future consumer of the same kind.
 #[allow(dead_code)]
 pub fn false_alarm_rate(taps: usize, threshold: f64) -> f64 {
     if taps < 2 {

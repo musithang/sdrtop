@@ -1,24 +1,29 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright (C) 2026 MusiThang <viktor.laszlo92@protonmail.com>
 
-//! A synthetic GFSK transmitter, for testing this arc against a signal whose
-//! bits are known - the role [`crate::signal::dsp::testkit`] plays for the
-//! shared layer, and the reason this exists separately from it: that module
-//! knows no protocol, and a GFSK modulator with a modulation index and a
-//! Gaussian filter baked in is BLE-specific policy, not a shared primitive.
+//! The GFSK waveform: turning bits into the IQ samples LE 1M actually
+//! transmits.
 //!
-//! Compiled only under `cfg(test)`, and reused from B2 onward: every later
-//! step that checks a bit error rate, a timing recovery, or a decode against
-//! a known signal starts here rather than re-deriving its own.
+//! **One function, two callers.** [`detect`](super::detect) calls it to build
+//! the known reference a matched filter correlates against - real production
+//! use, since the advertising access address is fixed and known in advance.
+//! This module's own tests call it to check the round trip. Neither role
+//! needs its own copy: a wrong deviation or a wrong filter would be wrong for
+//! both at once, which is the point of there being one function rather than a
+//! production one and a test one that quietly drift apart.
 
 use num_complex::Complex;
 
 use crate::signal::dsp::fir::gaussian_taps;
 
 /// How many symbol periods the shaping filter spans. 4 is the common choice
-/// in the references [`gaussian_taps`] cites; nothing in this file depends on
-/// the exact figure, only on the filter it produces being the one B2's own
-/// tests measure.
+/// in the references [`gaussian_taps`] cites; nothing here depends on the
+/// exact figure, only on the filter it produces being the one this module's
+/// own tests measure.
+///
+/// No path from `main` yet - see [`modulate`]'s own doc for why the whole
+/// chain is presently dead together.
+#[allow(dead_code)]
 const FILTER_SPAN_SYMBOLS: usize = 4;
 
 /// A GFSK-modulated baseband signal for the given bits, at `sps` samples per
@@ -35,6 +40,12 @@ const FILTER_SPAN_SYMBOLS: usize = 4;
 /// construction, and the reason [`gaussian_taps`]'s own unit-sum
 /// normalisation matters here - an unnormalised kernel would scale the
 /// deviation along with it.
+///
+/// Called for real by `signal::ble::detect::Detector::new` (B3), to build
+/// the reference it correlates against - but `Detector` itself has no path
+/// from `main` yet, so the lint still fires here too. Wired in when B6 puts a
+/// real packet on screen.
+#[allow(dead_code)]
 pub fn modulate(
     bits: &[bool],
     sps: usize,

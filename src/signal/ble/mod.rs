@@ -10,8 +10,11 @@
 //! own file, with none of it knowing classic Bluetooth (`signal::bt`, not yet
 //! built) or Wi-Fi exist. [`channel`] comes before any of those stages: it is
 //! arithmetic the whole arc needs (which frequency a channel index names), not
-//! a step in the receive chain.
+//! a step in the receive chain. [`gfsk`] sits beside it for the same reason:
+//! turning bits into the waveform LE 1M transmits is not itself a receive
+//! stage, but [`detect`] needs it to build the reference it correlates
+//! against, since the advertising access address is known in advance.
 
 pub mod channel;
-#[cfg(test)]
-pub mod testkit;
+pub mod detect;
+pub mod gfsk;
