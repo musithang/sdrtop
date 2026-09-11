@@ -82,6 +82,18 @@ pub struct NetState {
     pub census: CensusState,
     pub health: NetDecodeHealth,
     pub band: BandOccupancy,
+    /// Advertising channel PDUs decoded so far this session, newest first,
+    /// capped at [`BLE_PACKET_LIMIT`].
+    pub ble_packets: std::collections::VecDeque<BlePacket>,
+    /// Why nothing is being decoded, when the radio can otherwise stream.
+    ///
+    /// B6's decoder needs the working rate `signal::ble::receive::front_end`
+    /// states, and needs the tuning to actually be one of the three
+    /// advertising channels - two conditions `net_survey`'s occupancy
+    /// measurement does not share, so this is its own refusal rather than
+    /// reusing `survey_refused`. Same reasoning as that field's own doc: a
+    /// refusal nobody can see is a silence.
+    pub ble_refused: Option<String>,
     /// The tuning the survey interrupted, so it can be given back.
     ///
     /// **In the state rather than in the task**, for the reason
@@ -166,6 +178,28 @@ pub struct NetDecodeHealth {
     pub peak_depth: u64,
     /// When the last block arrived. `None` before the first one.
     pub last_block: Option<std::time::Instant>,
+}
+
+/// How many recent PDUs [`NetState::ble_packets`] keeps. A bench instrument
+/// is read a screenful at a time, not scrolled back through a session's
+/// worth of advertising traffic; old rows fall off the end rather than
+/// growing the list forever.
+pub const BLE_PACKET_LIMIT: usize = 200;
+
+/// One decoded advertising channel PDU, as a panel shows it.
+///
+/// `crate::signal::ble::pdu::Packet` is the decode itself, pure and knowing
+/// nothing about a screen; this adds the two facts a panel needs that decode
+/// alone does not carry - which channel it arrived on and when.
+#[derive(Clone, Debug)]
+pub struct BlePacket {
+    pub channel: u8,
+    pub pdu_type: crate::signal::ble::pdu::PduType,
+    pub tx_add_random: bool,
+    pub length: u8,
+    pub adv_addr: Option<[u8; 6]>,
+    pub crc_ok: bool,
+    pub seen: std::time::Instant,
 }
 
 /// How the census table is being read: what orders it, and where the cursor is.

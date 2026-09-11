@@ -1,0 +1,19 @@
+# NET BLE — what is this device advertising? Design section 9's question for
+# this preset. Real advertising channel PDUs, CRC-checked, as they arrive.
+#
+# Needs the radio parked on one of the three fixed advertising frequencies -
+# 2402, 2426 or 2480 MHz - and a sample rate B6's decoder can reach 4 Msps
+# from. The panel says so when either is not true, rather than showing an
+# empty table that could be mistaken for a quiet room.
+
+section = "net"
+slot    = 5
+title   = "BLE"
+blurb   = "what is this device advertising"
+
+panels = [
+    { name = "header",          position = "top", height = 5 },
+    { name = "net_ble_packets", position = "body" },
+    { name = "log",             position = "bottom", height = 5 },
+    { name = "footer",          position = "bottom" },
+]

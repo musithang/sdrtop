@@ -1,31 +1,37 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright (C) 2026 MusiThang <viktor.laszlo92@protonmail.com>
 
-//! The 2.4 GHz worker: one thread, one block at a time, and at this point no
-//! decoder behind it.
+//! The 2.4 GHz worker: one thread, one block at a time.
 //!
 //! Same shape as [`crate::signal::DemodWorker`], for the same reason: a thread
 //! that owns the state carried between blocks, so that everything below it can
 //! be a pure function of its arguments and be tested with no radio anywhere.
 //!
-//! **It counts what arrived and measures what was in the band, and it decodes
-//! nothing.** Design section 13.2 makes what the receiver missed a first-class
-//! displayed number rather than an inference, and a feed whose losses are only
-//! visible once there is something to lose is a feed nobody will trust when the
-//! losses matter - so the counting was built and shown before any measurement
-//! sat on top of it. The band measurement is [`super::scan`] over
-//! [`super::occupancy`]; the decoders arrive with the arcs. Nothing here reports
-//! a burst, a preamble or a frame, and the panel says so rather than printing a
-//! zero that would read as "we looked".
+//! **It counts what arrived and measures what was in the band.** Design
+//! section 13.2 makes what the receiver missed a first-class displayed number
+//! rather than an inference, and a feed whose losses are only visible once
+//! there is something to lose is a feed nobody will trust when the losses
+//! matter - so the counting was built and shown before any measurement sat on
+//! top of it. The band measurement is [`super::scan`] over
+//! [`super::occupancy`].
+//!
+//! **B6 added the first decoder: BLE, on whichever of the three advertising
+//! frequencies the radio is tuned to.** It runs here rather than in its own
+//! task because it needs the same per-block bytes the occupancy scan already
+//! has - a second worker reading the same channel would need its own copy of
+//! the geometry and the retune-detection logic this one already carries. Wi-Fi
+//! and classic Bluetooth arrive the same way when their own arcs reach this
+//! point.
 
 use std::sync::{Arc, Mutex};
 use std::time::Instant;
 
-use crossbeam_channel::Receiver;
+use crossbeam_channel::Receiver as SampleReceiver;
 
 use crate::hardware::{SampleGeometry, StreamBlock};
+use crate::signal::ble::receive::Receiver as BleReceiver;
 use crate::signal::stream::plan_block;
-use crate::state::SdrMetrics;
+use crate::state::{BlePacket, SdrMetrics};
 
 use super::scan::Scan;
 
@@ -47,7 +53,7 @@ use super::scan::Scan;
 const DWELL_S: f64 = 0.05;
 
 pub struct NetWorker {
-    pub sample_rx: Receiver<StreamBlock>,
+    pub sample_rx: SampleReceiver<StreamBlock>,
     pub state: Arc<Mutex<SdrMetrics>>,
     pub geometry: SampleGeometry,
 }
@@ -82,7 +88,7 @@ impl Run {
 
 impl NetWorker {
     pub fn new(
-        sample_rx: Receiver<StreamBlock>,
+        sample_rx: SampleReceiver<StreamBlock>,
         state: Arc<Mutex<SdrMetrics>>,
         geometry: SampleGeometry,
     ) -> Self {
@@ -97,6 +103,7 @@ impl NetWorker {
         let mut run = Run::default();
         let pair_bytes = self.geometry.bytes_per_pair() as u64;
         let mut scan: Option<Scan> = None;
+        let mut ble: Option<BleReceiver> = None;
 
         while let Ok(StreamBlock {
             seq,
@@ -172,6 +179,72 @@ impl NetWorker {
                 }
             }
 
+            // BLE decode: only possible on one of the three fixed advertising
+            // frequencies, and only at a sample rate `receive::front_end` can
+            // reach the working rate from. Neither condition is `net_survey`'s
+            // to share, so this keeps its own refusal rather than reusing
+            // `survey_refused`.
+            let channel = crate::signal::ble::channel::channel_of(centre_hz as u64);
+            match channel {
+                Some(ch) if still_open => {
+                    if !ble.as_ref().is_some_and(|r| r.matches(ch, rate_hz)) {
+                        ble = match BleReceiver::new(rate_hz, ch) {
+                            Ok(r) => {
+                                let mut m = self.state.lock().unwrap_or_else(|e| e.into_inner());
+                                m.net.ble_refused = None;
+                                Some(r)
+                            }
+                            Err(reason) => {
+                                let mut m = self.state.lock().unwrap_or_else(|e| e.into_inner());
+                                m.net.ble_refused = Some(reason);
+                                None
+                            }
+                        };
+                    }
+                    if let Some(rx) = ble.as_mut() {
+                        let packets = rx.push(&bytes, self.geometry);
+                        if !packets.is_empty() {
+                            let mut m = self.state.lock().unwrap_or_else(|e| e.into_inner());
+                            for p in packets {
+                                // TEMP DEBUG
+                                let hex: String = p
+                                    .debug_pdu_bytes
+                                    .iter()
+                                    .chain(p.debug_crc_bytes.iter())
+                                    .map(|b| format!("{b:02x}"))
+                                    .collect::<Vec<_>>()
+                                    .join(" ");
+                                m.push_log(format!(
+                                    "DEBUG coh={:.3} phase={:.2} pdu+crc: {hex}",
+                                    p.debug_coherence, p.debug_phase
+                                ));
+                                m.net.ble_packets.push_front(BlePacket {
+                                    channel: ch,
+                                    pdu_type: p.pdu_type,
+                                    tx_add_random: p.tx_add_random,
+                                    length: p.length,
+                                    adv_addr: p.adv_addr,
+                                    crc_ok: p.crc_ok,
+                                    seen: now,
+                                });
+                            }
+                            m.net.ble_packets.truncate(crate::state::BLE_PACKET_LIMIT);
+                        }
+                    }
+                }
+                Some(_) => {
+                    // Section closed; nothing decodes while it is.
+                    ble = None;
+                }
+                None => {
+                    ble = None;
+                    let mut m = self.state.lock().unwrap_or_else(|e| e.into_inner());
+                    m.net.ble_refused = Some(
+                        "not tuned to an advertising channel (2402, 2426 or 2480 MHz)".to_string(),
+                    );
+                }
+            }
+
             // Closing the section stops `process_block` forwarding, but blocks
             // already in the channel still arrive - and the run they belong to
             // is over whether or not they are the last of it.
@@ -183,6 +256,7 @@ impl NetWorker {
                 // rule 4 exists to prevent; the chrome's staleness marks it, and
                 // dropping the scan means the next dwell starts clean.
                 scan = None;
+                ble = None;
             }
         }
     }
@@ -418,5 +492,91 @@ mod tests {
             (0, 0),
             "and the pause is not a loss"
         );
+    }
+
+    /// B6's exit condition, run through the actual worker rather than
+    /// `Receiver` directly: tuned to an advertising channel at a rate the
+    /// decoder can reach, a synthetic packet in the block stream ends up in
+    /// `net.ble_packets`, CRC-checked.
+    #[test]
+    fn a_synthetic_advertising_packet_reaches_ble_packets() {
+        use crate::signal::ble::detect::{
+            access_address_bits, preamble_bits, ADVERTISING_ACCESS_ADDRESS,
+        };
+        use crate::signal::ble::gfsk::modulate;
+        use crate::signal::ble::pdu::encode;
+        use crate::signal::dsp::testkit::{at_snr, Rng};
+        use num_complex::Complex;
+
+        const SPS: usize = 4;
+        const SAMPLE_RATE: f64 = 4_000_000.0;
+        const CHANNEL: u8 = 37; // 2402 MHz
+
+        let addr = [0x11u8, 0x22, 0x33, 0x44, 0x55, 0x66];
+        let mut bits = preamble_bits(ADVERTISING_ACCESS_ADDRESS).to_vec();
+        bits.extend_from_slice(&access_address_bits(ADVERTISING_ACCESS_ADDRESS));
+        bits.extend_from_slice(&encode(CHANNEL, 0x00, &addr));
+        let mut rng = Rng::new(1);
+        bits.extend((0..16).map(|_| rng.next_u64() & 1 == 1));
+        let clean = modulate(&bits, SPS, 250_000.0, SAMPLE_RATE, 0.5);
+        let noisy = at_snr(&clean, 20.0, &mut Rng::new(2));
+
+        let geometry = eight_bit();
+        let bytes: Vec<u8> = noisy
+            .iter()
+            .flat_map(|s: &Complex<f32>| {
+                let re = (s.re * geometry.full_scale).clamp(-127.0, 127.0) as i8;
+                let im = (s.im * geometry.full_scale).clamp(-127.0, 127.0) as i8;
+                [re as u8, im as u8]
+            })
+            .collect();
+
+        let mut m = SdrMetrics::fixture().streaming();
+        m.ui.section = crate::signal::net::SECTION.to_string();
+        m.radio.frequency = 2_402_000_000;
+        m.radio.config_sample_rate = SAMPLE_RATE;
+        m.radio.bb_filter_hz = 0;
+        let state = Arc::new(Mutex::new(m));
+
+        let (tx, rx) = crossbeam_channel::unbounded();
+        tx.send(StreamBlock {
+            seq: 1,
+            gap_before: false,
+            bytes,
+        })
+        .unwrap();
+        drop(tx);
+        NetWorker::new(rx, Arc::clone(&state), geometry).run();
+
+        let m = state.lock().unwrap();
+        assert!(m.net.ble_refused.is_none(), "{:?}", m.net.ble_refused);
+        assert_eq!(m.net.ble_packets.len(), 1, "{:?}", m.net.ble_packets);
+        let p = &m.net.ble_packets[0];
+        assert_eq!(p.channel, CHANNEL);
+        assert_eq!(p.adv_addr, Some(addr));
+        assert!(p.crc_ok);
+    }
+
+    /// Tuned off any advertising frequency, the worker says so rather than
+    /// silently decoding nothing.
+    #[test]
+    fn an_off_channel_tuning_is_refused_with_a_reason() {
+        let mut m = SdrMetrics::fixture().streaming();
+        m.ui.section = crate::signal::net::SECTION.to_string();
+        m.radio.frequency = 2_437_000_000; // Wi-Fi channel 6, not a BLE one
+        m.radio.config_sample_rate = 4_000_000.0;
+        let state = Arc::new(Mutex::new(m));
+        let (tx, rx) = crossbeam_channel::unbounded();
+        tx.send(StreamBlock {
+            seq: 1,
+            gap_before: false,
+            bytes: vec![0u8; 256],
+        })
+        .unwrap();
+        drop(tx);
+        NetWorker::new(rx, Arc::clone(&state), eight_bit()).run();
+        let m = state.lock().unwrap();
+        assert!(m.net.ble_refused.is_some());
+        assert!(m.net.ble_packets.is_empty());
     }
 }

@@ -8,6 +8,7 @@
 //! presets naming these panels are dropped when it refuses. So nothing in here
 //! has to check whether it should be on screen. If it is drawing, it may.
 
+pub mod ble_packets;
 pub mod capability;
 pub mod census;
 pub mod coexist;
