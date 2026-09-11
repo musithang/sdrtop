@@ -65,17 +65,23 @@ const COVERAGE_K: f64 = 2.0;
 
 /// What a standard states about a value.
 #[derive(Clone, Copy, Debug, PartialEq)]
-#[allow(dead_code)] // idiom B, built ahead of its consumers: B8 is the first stated limit
 pub(crate) enum Limit {
     /// Both sides stated: the value belongs between them.
     Band { low: f64, high: f64 },
     /// A ceiling: the value belongs at or below it.
+    ///
+    /// B8 gave this widget its first real consumer, and every one of its
+    /// four rows is a band or a floor - no ceiling among them. Kept rather
+    /// than removed: a one-sided limit that names a maximum is exactly as
+    /// real a shape as one that names a minimum, and this widget's own
+    /// `carrier_leak` test fixture is what still exercises it, the same
+    /// design-sketch row the module doc's own worked example draws.
+    #[allow(dead_code)]
     Max(f64),
     /// A floor: the value belongs at or above it.
     Min(f64),
 }
 
-#[allow(dead_code)] // idiom B, built ahead of its consumers: B8 is the first stated limit
 impl Limit {
     /// The floor and the ceiling, either of which a one-sided limit lacks.
     fn bounds(&self) -> (Option<f64>, Option<f64>) {
@@ -103,7 +109,6 @@ impl Limit {
 
 /// The four column widths a row is drawn into.
 #[derive(Clone, Copy, Debug, PartialEq)]
-#[allow(dead_code)] // idiom B, built ahead of its consumers: B8 is the first stated limit
 pub(crate) struct RowWidths {
     label: usize,
     value: usize,
@@ -111,7 +116,6 @@ pub(crate) struct RowWidths {
     bar: usize,
 }
 
-#[allow(dead_code)] // idiom B, built ahead of its consumers: B8 is the first stated limit
 impl RowWidths {
     /// Measured from a block of rows, so a column of them lines up.
     ///
@@ -136,14 +140,12 @@ impl RowWidths {
 }
 
 /// One measurement against one stated limit.
-#[allow(dead_code)] // idiom B, built ahead of its consumers: B8 is the first stated limit
 pub(crate) struct LimitRow<'a> {
     label: &'a str,
     reading: Reading<'a>,
     limit: Limit,
 }
 
-#[allow(dead_code)] // idiom B, built ahead of its consumers: B8 is the first stated limit
 impl<'a> LimitRow<'a> {
     pub(crate) fn new(label: &'a str, reading: Reading<'a>, limit: Limit) -> Self {
         Self {

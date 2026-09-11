@@ -82,10 +82,11 @@ impl PduType {
 /// says the payload starts with one, and whether the CRC that followed it
 /// over the air actually checked out.
 ///
-/// `snr_db` and `freq_offset_hz` are `None` here always - `decode` sees only
-/// bits, never the discriminator samples or the detector's own coherence
-/// that B7's measurements are taken from - and are filled in by
-/// `signal::ble::receive::Receiver::try_decode`, the caller that has both.
+/// `snr_db`, `freq_offset_hz` and `modulation` are `None` here always -
+/// `decode` sees only bits, never the discriminator samples or the
+/// detector's own coherence B7's and B8's measurements are taken from - and
+/// are filled in by `signal::ble::receive::Receiver::try_decode`, the caller
+/// that has both.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Packet {
     pub pdu_type: PduType,
@@ -96,6 +97,7 @@ pub struct Packet {
     pub crc_ok: bool,
     pub snr_db: Option<f64>,
     pub freq_offset_hz: Option<crate::signal::dsp::uncertainty::Uncertain>,
+    pub modulation: Option<super::measure::ModulationQuality>,
 }
 
 /// How many trailing bits `decode` needs beyond the header to have a whole
@@ -107,6 +109,17 @@ fn body_bits(length: u8) -> usize {
 /// How many bits, past the access address, `decode` needs to see before it
 /// can be called at all: the 16-bit header alone.
 pub const HEADER_BITS: usize = 16;
+
+/// The whole PDU's own length in bits, header through CRC, once `length` is
+/// known - the same figure `decode` requires before it returns `Some`.
+///
+/// `signal::ble::receive::Receiver` uses this to trim its own capture to
+/// exactly the packet before measuring B8's modulation quality from it,
+/// rather than re-deriving [`body_bits`]'s arithmetic a second time and
+/// risking the two silently disagreeing.
+pub fn used_bits(length: u8) -> usize {
+    HEADER_BITS + body_bits(length)
+}
 
 /// Decode one advertising channel PDU from its de-whitened bits, in
 /// transmission order, starting at the header's own first bit and running
@@ -138,7 +151,7 @@ pub fn decode(bits: &[bool]) -> Option<Packet> {
     let rx_add_random = (byte0 >> 7) & 1 != 0;
     let length = byte1 & 0x3F;
 
-    let needed = HEADER_BITS + body_bits(length);
+    let needed = used_bits(length);
     if bits.len() < needed {
         return None;
     }
@@ -177,6 +190,7 @@ pub fn decode(bits: &[bool]) -> Option<Packet> {
         crc_ok,
         snr_db: None,
         freq_offset_hz: None,
+        modulation: None,
     })
 }
 

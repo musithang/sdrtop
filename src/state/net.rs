@@ -212,6 +212,12 @@ pub struct BlePacket {
     /// 7) could subtract the first and leave the second, and nothing here
     /// does that yet.
     pub freq_offset_hz: Option<crate::signal::dsp::uncertainty::Uncertain>,
+    /// B8: modulation index, delta-f1 average, delta-f2 maximum and their
+    /// ratio, measured from this packet's own on-air symbols. `None` when
+    /// the packet was too short, or too unlucky in its particular random
+    /// content, to contain a settled run of either kind - see
+    /// `signal::ble::measure`'s own doc for what "settled" means here.
+    pub modulation: Option<crate::signal::ble::measure::ModulationQuality>,
     pub seen: std::time::Instant,
 }
 

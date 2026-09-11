@@ -37,11 +37,26 @@ const PHASE_RESOLUTION: usize = 16;
 /// off, which shifts every discriminator sample by a constant a fixed zero
 /// would slice against wrongly. See `dsp::uncertainty::mean_with_uncertainty`
 /// for how that same mean becomes B7's reported frequency offset.
-pub fn slice(discriminator: &[f32], sps: f64, symbols: usize, threshold: f32) -> Vec<bool> {
+///
+/// **Returns the raw sample at each symbol alongside the bit it became.**
+/// The threshold decision throws away exactly the number
+/// `signal::ble::measure::modulation_quality` needs - how far the
+/// discriminator actually swung, not just which side of the line it landed
+/// on - so this hands both back rather than making a second caller re-run
+/// [`find_phase`] and [`interpolate`] to recover what this call already
+/// computed.
+pub fn slice(
+    discriminator: &[f32],
+    sps: f64,
+    symbols: usize,
+    threshold: f32,
+) -> (Vec<bool>, Vec<f32>) {
     let phase = find_phase(discriminator, sps, symbols, PHASE_RESOLUTION);
-    (0..symbols)
-        .map(|k| interpolate(discriminator, phase + k as f64 * sps) > threshold)
-        .collect()
+    let raw: Vec<f32> = (0..symbols)
+        .map(|k| interpolate(discriminator, phase + k as f64 * sps))
+        .collect();
+    let bits = raw.iter().map(|&s| s > threshold).collect();
+    (bits, raw)
 }
 
 #[cfg(test)]
@@ -121,7 +136,7 @@ mod tests {
             let mut inst = Vec::new();
             discriminate(&noisy, params.sample_rate, &mut inst);
 
-            let recovered = slice(&inst, params.sps as f64, n_bits - guard, 0.0);
+            let (recovered, _) = slice(&inst, params.sps as f64, n_bits - guard, 0.0);
 
             let errors = recovered
                 .iter()
@@ -178,7 +193,7 @@ mod tests {
         let noisy = at_snr(&clean, snr_db, &mut Rng::new(4));
         let mut inst = Vec::new();
         discriminate(&noisy, params.sample_rate, &mut inst);
-        let recovered = slice(&inst, params.sps as f64, n_bits - 5, 0.0);
+        let (recovered, _) = slice(&inst, params.sps as f64, n_bits - 5, 0.0);
 
         let errors = recovered
             .iter()
@@ -210,7 +225,7 @@ mod tests {
         );
         let mut inst = Vec::new();
         discriminate(&clean, params.sample_rate, &mut inst);
-        let recovered = slice(&inst, params.sps as f64, bits.len() - 5, 0.0);
+        let (recovered, _) = slice(&inst, params.sps as f64, bits.len() - 5, 0.0);
         assert_eq!(&recovered[..], &bits[..recovered.len()]);
     }
 }

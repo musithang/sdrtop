@@ -63,10 +63,10 @@ impl Uncertain {
     /// A number that carries no uncertainty of its own: a specification limit, a
     /// channel centre, a count.
     ///
-    /// No production consumer yet. `Reading::new` accepts one, and both current
-    /// callers (the occupancy profile and the frequency reference card) always
-    /// have a real variance to hand, so neither has needed this.
-    #[allow(dead_code)]
+    /// Reaches `main` since B8: `ui::panels::net::bt_rf` reads
+    /// `ModulationQuality::delta_f2_max_hz` this way, a maximum of several
+    /// noisy readings with no closed-form sigma the way a mean gets one -
+    /// see that struct's own doc.
     pub fn exact(value: f64) -> Self {
         Self { value, sigma: 0.0 }
     }
@@ -103,6 +103,48 @@ impl Uncertain {
             value: self.value + delta,
             sigma: self.sigma,
         }
+    }
+
+    /// `self / other`, for two independent measurements, with the uncertainty
+    /// propagated by first-order (delta-method) error propagation.
+    ///
+    /// `scale` and `shift` are exact because multiplying or shifting by a
+    /// known constant is linear; a ratio of two *measured* quantities is not,
+    /// so this is the first combinator here that is an approximation rather
+    /// than an identity. To first order, for independent `A` and `B`:
+    ///
+    /// ```text
+    /// Var(A/B) ~= Var(A) / B^2 + A^2 * Var(B) / B^4
+    /// ```
+    ///
+    /// the same linearisation the Guide to the Expression of Uncertainty in
+    /// Measurement uses for any combination of uncorrelated inputs. Exact in
+    /// the limit of small relative uncertainty on `other`; B8 is the reasoned
+    /// first consumer, a ratio of two deviation measurements whose own
+    /// relative uncertainty is a few percent at a workable SNR, well inside
+    /// where the linearisation holds.
+    ///
+    /// `other` at exactly zero has no meaningful ratio and gets an infinite
+    /// uncertainty rather than a divide silently producing infinity or NaN -
+    /// the same "unknown becomes infinite, not invented" rule
+    /// [`Self::from_variance`] already follows for a NaN variance.
+    ///
+    /// **The value itself carries a small bias this does not correct.**
+    /// `E[A/B]` is not exactly `E[A]/E[B]` for a ratio of two random
+    /// quantities - Jensen's inequality gives it a second-order pull of
+    /// about `(sigma_b / b)^2` relative, which this first-order expansion
+    /// does not remove. Negligible next to the reported uncertainty itself
+    /// at the relative uncertainties this arc's own measurements run at, and
+    /// measured rather than assumed:
+    /// `the_ratio_matches_a_monte_carlo_simulation_of_the_same_two_measurements`.
+    pub fn ratio(&self, other: &Uncertain) -> Self {
+        if other.value == 0.0 {
+            return Self::from_variance(f64::INFINITY, f64::INFINITY);
+        }
+        let value = self.value / other.value;
+        let variance = (self.sigma * self.sigma) / (other.value * other.value)
+            + (self.value * self.value) * (other.sigma * other.sigma) / other.value.powi(4);
+        Self::from_variance(value, variance)
     }
 
     /// Relative uncertainty, `sigma / |value|`. `None` at a value of zero, where
@@ -500,6 +542,56 @@ mod tests {
             base.sigma(),
             less_noise.sigma()
         );
+    }
+
+    /// The delta-method formula, checked against a Monte Carlo simulation of
+    /// the same two independent measurements - the same discipline
+    /// `moose_does_not_beat_its_bound` holds a closed form to, rather than
+    /// trusting the algebra on its own.
+    #[test]
+    fn the_ratio_matches_a_monte_carlo_simulation_of_the_same_two_measurements() {
+        let a = Uncertain::from_sigma(10.0, 0.6);
+        let b = Uncertain::from_sigma(4.0, 0.3);
+        let z = a.ratio(&b);
+        assert!((z.value() - 2.5).abs() < 1e-12);
+
+        let mut rng = Rng::new(42);
+        const TRIALS: usize = 200_000;
+        let samples: Vec<f64> = (0..TRIALS)
+            .map(|_| {
+                let da = rng.normal_pair().0 * a.sigma();
+                let db = rng.normal_pair().0 * b.sigma();
+                (a.value() + da) / (b.value() + db)
+            })
+            .collect();
+        let mean = samples.iter().sum::<f64>() / TRIALS as f64;
+        let variance =
+            samples.iter().map(|x| (x - mean).powi(2)).sum::<f64>() / (TRIALS - 1) as f64;
+        // Not the tight match variance gets: E[A/B] carries its own small
+        // second-order (Jensen's inequality) bias from B's own spread, which
+        // a first-order expansion around the mean does not capture - real
+        // and expected, at about `(sigma_b / b)^2` relative here, not a
+        // defect in the variance formula this test actually exists to check.
+        assert!(
+            (mean - z.value()).abs() < 0.02,
+            "simulated mean {mean} against the ratio's own {}",
+            z.value()
+        );
+        assert!(
+            (variance.sqrt() / z.sigma() - 1.0).abs() < 0.03,
+            "simulated sigma {} against the delta-method {}",
+            variance.sqrt(),
+            z.sigma()
+        );
+    }
+
+    /// A zero denominator has no ratio, and says so with an infinite
+    /// uncertainty rather than the divide's own infinity or NaN.
+    #[test]
+    fn a_zero_denominator_gives_an_unknown_ratio_not_an_invented_one() {
+        let a = Uncertain::from_sigma(10.0, 0.6);
+        let zero = Uncertain::from_sigma(0.0, 0.3);
+        assert!(a.ratio(&zero).sigma().is_infinite());
     }
 
     /// Fewer than two samples has no variance to estimate from, and says so

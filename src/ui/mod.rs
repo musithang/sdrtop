@@ -63,6 +63,7 @@ pub use panels::lab::timing_stripchart::TimingStripchartPanel;
 pub use panels::lab::timing_vitals::TimingVitalsPanel;
 
 pub use panels::net::ble_packets::NetBlePacketsPanel;
+pub use panels::net::bt_rf::NetBtRfPanel;
 pub use panels::net::capability::NetCapabilityPanel;
 pub use panels::net::census::NetCensusPanel;
 pub use panels::net::coexist::NetCoexistPanel;

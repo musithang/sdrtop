@@ -18,6 +18,7 @@
 pub mod channel;
 pub mod detect;
 pub mod gfsk;
+pub mod measure;
 pub mod pdu;
 pub mod receive;
 pub mod sync;

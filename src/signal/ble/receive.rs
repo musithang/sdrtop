@@ -242,8 +242,15 @@ impl Receiver {
         // the sample mean is the right estimator here, not an approximation
         // of one.
         let offset = crate::signal::dsp::uncertainty::mean_with_uncertainty(&inst);
-        let mut bits =
+        let (mut bits, raw_symbols) =
             super::sync::slice(&inst, WORKING_SPS as f64, symbols, offset.value() as f32);
+        // B8's modulation-quality measurement needs the physically
+        // transmitted (still-whitened) symbols and their raw discriminator
+        // readings - exactly what `bits` and `raw_symbols` are before the
+        // next line undoes whitening to recover the data underneath them.
+        // See `measure`'s own module doc for why the physical bits, not the
+        // decoded ones, are what a Gaussian filter's settling depends on.
+        let raw_bits = bits.clone();
         whiten(&mut bits, self.channel);
         let mut packet = pdu::decode(&bits)?;
         packet.freq_offset_hz = Some(offset);
@@ -261,6 +268,15 @@ impl Receiver {
         // already keeps every real reading comfortably under.
         packet.snr_db = snr_from_metric(self.last_coherence, REFERENCE_SYMBOLS * WORKING_SPS)
             .map(|snr| 10.0 * snr.log10());
+        // Trimmed to exactly this packet's own bits before measuring: `bits`
+        // and `raw_symbols` run to the end of whatever has been captured,
+        // which is deliberately more than one packet's worth (see this
+        // struct's own `push`), and letting the search wander into trailing
+        // noise or the next packet's preamble would mix an unrelated
+        // signal's deviation into this one's own reading.
+        let used = pdu::used_bits(packet.length).min(raw_bits.len());
+        packet.modulation =
+            super::measure::modulation_quality(&raw_bits[..used], &raw_symbols[..used]);
         Some(packet)
     }
 }

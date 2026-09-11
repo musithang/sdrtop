@@ -9,6 +9,7 @@
 //! has to check whether it should be on screen. If it is drawing, it may.
 
 pub mod ble_packets;
+pub mod bt_rf;
 pub mod capability;
 pub mod census;
 pub mod coexist;

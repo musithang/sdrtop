@@ -72,14 +72,12 @@ impl Ink {
 }
 
 /// A measurement, ready to be drawn or written out.
-#[allow(dead_code)] // idiom A, drawn by idiom B, whose own consumer is B8
 pub(crate) struct Reading<'a> {
     value: Uncertain,
     unit: &'a str,
     resolution: f64,
 }
 
-#[allow(dead_code)] // idiom A, drawn by idiom B, whose own consumer is B8
 impl<'a> Reading<'a> {
     /// `resolution` is the smallest difference that matters for this reading: a
     /// specification tolerance, a channel spacing, a ppm budget. An uncertainty

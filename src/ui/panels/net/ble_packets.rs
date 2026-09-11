@@ -245,6 +245,7 @@ mod tests {
             crc_ok,
             snr_db: Some(12.3),
             freq_offset_hz: Some(Uncertain::from_sigma(37_000.0, 1_200.0)),
+            modulation: None,
             seen: Instant::now(),
         }
     }
