@@ -139,9 +139,9 @@ Measured the awkward way rather than the easy way. Bandwidth about the carrier, 
 curl -fsSL https://raw.githubusercontent.com/musithang/sdrtop/main/packaging/install.sh | sh
 ```
 
-It works out your distribution, installs the libraries under whatever names that distribution gives them (apt, dnf, pacman, zypper, apk, xbps, emerge and nix are all handled), grabs the prebuilt binary if it can actually run on your box, and quietly falls back to compiling if it can't. The nice bit: it decides by **running the thing**, not by reading your distro's name off a list and hoping.
+The installer tries the prebuilt binary on your machine. It compiles from source if the binary cannot run there. Native SDR libraries are optional runtime dependencies.
 
-Add `--soapy` if you want the SoapySDR library and driver modules too; without it the installer leaves them alone and just tells you at the end what you're missing out on.
+Add `--hackrf` or `--rtlsdr` to install the runtime for your radio. `--soapy` adds SoapySDR and its driver modules. A plain install adds none of these libraries.
 
 <details>
 <summary>Every flag it takes, and installing without root</summary>
@@ -154,13 +154,17 @@ sh install.sh --version v0.4.1      # a specific release instead of the latest
 sh install.sh --from-source         # skip the prebuilt binary, always compile
 sh install.sh --git                 # compile the main branch, live dangerously
 sh install.sh --no-verify           # skip the checksum check (say why first)
+sh install.sh --hackrf              # Install the HackRF runtime
+sh install.sh --rtlsdr              # Install the RTL-SDR runtime
 sh install.sh --soapy               # add SoapySDR and its driver modules
-sh install.sh --deps-only           # the libraries and nothing else
+sh install.sh --deps-only --hackrf   # Install only the selected runtime
 sh install.sh --uninstall           # remove what a previous run installed
 sh install.sh --help                # this list, from the script itself
 ```
 
 Piped straight into a shell they go after `sh -s --`. `--no-verify` turns off the checksum check on a download, which is the one thing standing between you and a tarball that isn't the one I published, so have a reason. The rest are explained in [Getting started](user_docs/getting-started.md#every-flag-it-takes).
+
+`--deps-only` requires a runtime flag. It never installs build tools.
 
 </details>
 
@@ -168,17 +172,19 @@ Piping a script into `sh` means running code you haven't read. You should read i
 
 ### Or cargo, the boring one that always works
 
-sdrtop is on [crates.io](https://crates.io/crates/sdrtop). Cargo compiles it *on your machine*, so it links what your machine actually has and doesn't care about your architecture or distribution.
+sdrtop is on [crates.io](https://crates.io/crates/sdrtop). Cargo compiles it for your machine.
 
 ```sh
-sudo apt install libhackrf-dev librtlsdr-dev pkg-config          # Debian / Ubuntu / Mint
-sudo pacman -S hackrf rtl-sdr pkgconf                            # Arch / Manjaro
-sudo dnf install hackrf-devel rtl-sdr-devel pkgconf-pkg-config   # Fedora
+sudo apt install build-essential    # Debian / Ubuntu / Mint
+sudo pacman -S base-devel           # Arch / Manjaro
+sudo dnf install gcc               # Fedora
 
 cargo install sdrtop --locked
 ```
 
-You need both libraries at build time even if you only own one radio. Sorry. Wants **Rust 1.88+**, and your distro's Rust is quite possibly ancient (Debian 12 ships 1.63, bless it), which [rustup](https://rustup.rs) fixes in one line.
+Building needs Rust 1.88+ and a C compiler/linker. Install Rust with [rustup](https://rustup.rs). No SDR libraries, development headers or pkg-config are required. At runtime, HackRF needs libhackrf 2023.01.1+ and RTL-SDR needs librtlsdr. A missing or incompatible library disables only its backend.
+
+tinySA builds and runs without libhackrf or librtlsdr. Install native SDR runtimes only for the backends you use.
 
 Then go make coffee: a few minutes on a laptop, considerably more on a Raspberry Pi. It's not frozen, it's just Rust.
 
@@ -193,7 +199,7 @@ SoapySDRUtil --find     # if this can't see your radio, sdrtop can't either
 
 That last command is the whole diagnostic. If your radio isn't in that list, the missing piece is a driver module, and no amount of shouting at sdrtop will conjure one up.
 
-<sub>Prefer a prebuilt binary, or on something unusual? <b><a href="user_docs/getting-started.md#the-prebuilt-tarball-by-hand">Getting started</a></b> has the release tarball, the checksum and the provenance attestation to check it against, plus the distro-by-distro package names. Short version on the tarball: it's x86_64 and it wants Debian's <code>librtlsdr.so.0</code>, so it won't start on Ubuntu or Mint, who package the identical library as <code>.so.2</code> because of course they do.</sub>
+<sub><a href="user_docs/getting-started.md#the-prebuilt-tarball-by-hand">Getting started</a> covers the release tarball, checksums and provenance attestation. The tarball needs x86_64 Linux with glibc 2.36+. Runtime loading supports both Debian's <code>librtlsdr.so.0</code> and Ubuntu's <code>librtlsdr.so.2</code>.</sub>
 
 **First run:** sdrtop opens on its menu. `Enter` takes a layout, `Space` starts receiving, `Esc` brings the menu back, `q` quits and saves.
 

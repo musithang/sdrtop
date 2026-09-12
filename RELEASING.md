@@ -320,19 +320,31 @@ and it will happily eat yours.
 
 ## 🔵 The Ubuntu One: "it works on my machine, but not on my other machine"
 
-Debian ships the rtl-sdr runtime as **`librtlsdr0`**. Ubuntu packages the
-*identical upstream source* as **`librtlsdr2`**, soname `.so.2`. Kali and
-Raspberry Pi OS follow Debian. Mint follows Ubuntu. Nobody is wrong. Everybody
-is incompatible.
+The prebuilt tarball needs x86_64 Linux with glibc 2.36+. The installer runs
+the binary to check compatibility. Other architectures, musl and older glibc
+systems use the source-build fallback.
 
-This is why exactly one prebuilt tarball is published, why `install.sh` decides
-whether to use it by **running the binary** instead of reading your distribution
-off a list, and why the fallback to `cargo install` is the design rather than an
-error path.
+Native SDR libraries are optional runtime loads. Linux candidates are
+`libhackrf.so.0` / `libhackrf.so` and
+`librtlsdr.so.0` / `librtlsdr.so.2` / `librtlsdr.so`.
+Debian's `librtlsdr0` and Ubuntu's `librtlsdr2` are both supported.
+HackRF requires libhackrf 2023.01.1+ with all required symbols.
 
-It was also got wrong once, from memory, in a comment. The fix was to go and
-read `packages.debian.org` and `packages.ubuntu.com` like an adult. Do that
-before editing any package name in `install.sh`.
+The release container builds without native SDR libraries or development headers.
+The release workflow requires exactly `libc.so.6`, `libgcc_s.so.1` and
+`libm.so.6` in `DT_NEEDED`. It explicitly rejects libhackrf and librtlsdr links.
+`cargo publish` retains its verification build without installing SDR libraries.
+
+`install.sh` installs native runtimes for current releases only with `--hackrf` or `--rtlsdr`.
+`--soapy` selects SoapySDR and its driver modules. `--deps-only` installs only
+selected runtimes. With no runtime flags it exits with a usage error.
+Source-build packages contain compiler/linker tools.
+Older releases can still need SDR development packages.
+The installer recognizes sdrtop's missing-libhackrf build-script panic and
+linker errors for missing `-lhackrf` or `-lrtlsdr`.
+Only these failures trigger development package installation and one retry.
+The retry pins the same release version. `--git` receives no legacy retry.
+A built binary must pass its startup check before it replaces an existing installation.
 
 ---
 

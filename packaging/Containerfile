@@ -5,16 +5,12 @@
 # The only reason this is a container and not the CI runner: glibc is forward
 # compatible only, so a binary is usable on every distribution at least as new
 # as the one that built it and on none that are older. Debian 12 puts the floor
-# at glibc 2.36, which reaches Debian 12 and 13, Ubuntu 22.04 and up, Mint,
+# at glibc 2.36, which reaches Debian 12 and 13, Ubuntu 24.04 and up, Mint 22+,
 # Kali and Raspberry Pi OS Bookworm. Built on the runner's Ubuntu 24.04 it would
 # demand glibc 2.39 and lose the older half for nothing.
 #
-# glibc is not the only floor, and packaging/install.sh is what handles the
-# other one. The binary also needs librtlsdr.so.0, which Debian ships (through
-# trixie, as `librtlsdr0`) but Ubuntu does not (it packages the same upstream as
-# `librtlsdr2`, soname .so.2). install.sh runs `ldd` over the downloaded binary
-# and builds from source when that check fails, so the tarball never has to be
-# the answer everywhere. See dev_docs/release-packaging-plan.md.
+# SDR libraries are loaded at runtime. This image needs only the build tools
+#
 # Pinned by digest, not by the `debian:12` tag. A tag is a moving pointer: it
 # advances on every Debian point release, so the same commit built two months
 # apart would come out of two different base images and produce two different
@@ -35,8 +31,7 @@ ENV CARGO_TERM_COLOR=never
 
 RUN apt-get update -qq \
  && apt-get install -y -qq --no-install-recommends \
-        curl ca-certificates build-essential pkg-config \
-        libhackrf-dev librtlsdr-dev \
+        curl ca-certificates build-essential \
  && rm -rf /var/lib/apt/lists/*
 
 # Debian ships rustc 1.63; sdrtop needs 1.88 (`slice::as_chunks`). The distro

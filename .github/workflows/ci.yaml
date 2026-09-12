@@ -50,12 +50,12 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
 
-      - name: Install system dependencies
-        # librtlsdr-dev matters as much as libhackrf-dev: build.rs falls back to a
-        # bare `-lrtlsdr` link directive when it finds no .pc file, so a missing
-        # librtlsdr passes the build script and fails at link time instead.
-        run: sudo apt-get update && sudo apt-get install -y libhackrf-dev librtlsdr-dev pkg-config libusb-1.0-0-dev
+      - name: Install native runtimes
+        # Keep coverage with both native runtime libraries installed
+        run: sudo apt-get update && sudo apt-get install -y libhackrf0 librtlsdr2
 
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
@@ -76,6 +76,9 @@ jobs:
       - name: Test
         run: cargo test --all --locked
 
+      - name: Resolve installed native libraries
+        run: cargo test --locked hardware::native::tests::installed_native_libraries_resolve -- --ignored --exact
+
       # sdrtop is published to crates.io, and a publish cannot be undone: a
       # version that fails to package can only be fixed by burning the version
       # number. So the packaging is checked on every push, not at tag time.
@@ -90,6 +93,26 @@ jobs:
       - name: The crate still packages
         run: cargo package --locked
 
+  no-native-libraries:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    container:
+      image: debian:12@sha256:6ebd97fa83deb272194a2cf015b3d26a4d538e9ad3a7a79d544c8af5b0a01443
+      # Hide host radios so discovery cannot enter the TUI
+      options: --tmpfs /sys:ro
+    steps:
+      - name: Install build tools
+        run: |
+          apt-get update -qq
+          apt-get install -y --no-install-recommends build-essential ca-certificates curl git
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Build and start without native libraries
+        run: sh packaging/check-no-native.sh
+
   # rust-version = "1.88" in Cargo.toml is a promise to everyone installing from
   # crates.io, where the user's own toolchain does the compiling. Without this
   # job it is a comment: a transitive dependency raising its own MSRV would
@@ -101,9 +124,6 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-
-      - name: Install system dependencies
-        run: sudo apt-get update && sudo apt-get install -y libhackrf-dev librtlsdr-dev pkg-config libusb-1.0-0-dev
 
       - name: Install Rust 1.88
         uses: dtolnay/rust-toolchain@stable

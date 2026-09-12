@@ -231,10 +231,24 @@ which is the honest answer rather than a guess dressed as two.
 | Raspberry Pi (Pi 2 and newer, 64-bit Raspberry Pi OS Bookworm) | Supported, with lower sample rates on older Pis |
 | ARM / Android (Termux) | Builds and runs; needs a root-capable USB stack to reach the device |
 
-sdrtop needs **libhackrf 2023.01.1 or newer**, which is what ships in Raspberry Pi
-OS Bookworm and Ubuntu 24.04. Older distributions need it built from source. It
-also links **librtlsdr** (`librtlsdr-dev` on Debian and Ubuntu, `rtl-sdr` on
-Arch), and both are needed at build time regardless of which radio you own.
+sdrtop loads libhackrf and librtlsdr at runtime. Neither library is required
+to build sdrtop. A missing or incompatible library disables only
+its backend.
+
+HackRF needs libhackrf 2023.01.1+ with all required symbols, including
+`hackrf_board_rev_read` and `hackrf_usb_api_version_read`. Linux candidates are
+`libhackrf.so.0` and `libhackrf.so`. Firmware metadata reads may fail without
+preventing the device from opening.
+
+RTL-SDR needs librtlsdr with all required symbols. Linux candidates are
+`librtlsdr.so.0`, `librtlsdr.so.2` and `librtlsdr.so`. Runtime packages include
+`librtlsdr0` on Debian, `librtlsdr2` on Ubuntu and `rtl-sdr` on Arch.
+
+Library loading results are cached for the process lifetime. Unavailable-backend
+diagnostics appear on explicit selection or when automatic discovery finds no devices.
+Successful discovery stays quiet about unused native backends.
+Loaded library handles stay open until process exit.
+Restart sdrtop after installing or updating a library.
 
 **libSoapySDR is not needed to build and not needed to run.** It is opened at
 runtime if it happens to be there, which is why the same binary serves people who

@@ -21,11 +21,8 @@
 # It decides by asking rather than by guessing: it unpacks the binary, tries to
 # run it, and falls through to cargo if that fails for any reason at all.
 #
-# That fallback is the whole design. sdrtop links `librtlsdr`, and Debian ships
-# it as `librtlsdr.so.0` while Ubuntu ships the same upstream as `.so.2`, so no
-# single prebuilt binary can serve both. Running the binary catches that, and
-# also catches musl, aarch64, a missing loader and every future soname bump,
-# none of which a list of distribution names would have covered.
+# Running the binary checks the host's loader and glibc compatibility
+# Native SDR libraries are loaded at runtime during discovery or selection
 #
 # What this script does NOT do, deliberately: build sdrtop itself. It used to
 # carry its own download-and-compile pipeline, which was a second unmaintained
@@ -35,6 +32,8 @@ set -eu
 
 REPO=musithang/sdrtop
 CRATE=sdrtop
+WANT_HACKRF=0
+WANT_RTLSDR=0
 WANT_SOAPY=0
 RAW_DEPS_ONLY=0
 FROM_SOURCE=0
@@ -58,10 +57,19 @@ sdrtop installer
   --from-source   compile with cargo even on x86_64, skipping the prebuilt binary
   --git           compile the main branch instead of a release (unversioned)
   --no-verify     install a download without checking its checksum (say why first)
+  --hackrf        also install the optional libhackrf runtime
+  --rtlsdr        also install the optional librtlsdr runtime
   --soapy         also install libSoapySDR and its driver modules (optional)
-  --deps-only     install the library dependencies and stop
+  --deps-only     install only runtimes selected by --hackrf, --rtlsdr, --soapy
   --uninstall     remove what a previous run installed
   --help          this
+
+Runtime libraries are opt-in for current releases.
+--deps-only requires a runtime flag. It never installs build tools.
+Source builds need Rust 1.88+ and a C compiler/linker.
+SDR headers are unnecessary for runtime-loading builds.
+Recognized native-link failures in older releases install SDR development
+packages and retry the same version once. --git builds main.
 EOF
 }
 
@@ -72,6 +80,8 @@ while [ $# -gt 0 ]; do
         --from-source) FROM_SOURCE=1; shift ;;
         --git)         FROM_GIT=1; FROM_SOURCE=1; shift ;;
         --no-verify)   NO_VERIFY=1; shift ;;
+        --hackrf)      WANT_HACKRF=1; shift ;;
+        --rtlsdr)      WANT_RTLSDR=1; shift ;;
         --soapy)       WANT_SOAPY=1; shift ;;
         --deps-only)   RAW_DEPS_ONLY=1; shift ;;
         --uninstall)   UNINSTALL=1; shift ;;
@@ -79,6 +89,12 @@ while [ $# -gt 0 ]; do
         *) die "unknown option: $1 (try --help)" ;;
     esac
 done
+
+if [ "$RAW_DEPS_ONLY" -eq 1 ] && [ "$WANT_HACKRF" -eq 0 ] \
+   && [ "$WANT_RTLSDR" -eq 0 ] && [ "$WANT_SOAPY" -eq 0 ]; then
+    usage >&2
+    die "--deps-only requires --hackrf, --rtlsdr or --soapy"
+fi
 
 [ "$(uname -s)" = Linux ] || die "sdrtop is Linux only; this is $(uname -s)"
 
@@ -140,7 +156,8 @@ done
 # upstream as `librtlsdr2` with soname .so.2. Kali and Raspberry Pi OS follow
 # Debian, Mint follows Ubuntu. Both names are in the list, so neither family
 # needs to be detected.
-UDEV_PKGS=""
+HACKRF_UDEV=""
+RTLSDR_UDEV=""
 # SoapySDR is optional: sdrtop opens it at runtime and works without it, so
 # these are only used by --soapy. Two lists, because the library alone finds no
 # devices: SOAPY_LIB is what sdrtop loads, SOAPY_MODULES is what actually talks
@@ -155,31 +172,36 @@ UDEV_PKGS=""
 # and correct the list, not to add another guess.
 SOAPY_LIB=""
 SOAPY_MODULES=""
+LEGACY_DEV_PKGS=""
 case "$PM" in
     apt-get)
         LIB_HACKRF="libhackrf0 libhackrf-dev"
         LIB_RTLSDR="librtlsdr0 librtlsdr2 librtlsdr-dev"
         SOAPY_LIB="libsoapysdr0.8 libsoapysdr0.7 libsoapysdr-dev"
         SOAPY_MODULES="soapysdr-module-all"
-        DEV_PKGS="libhackrf-dev librtlsdr-dev pkg-config build-essential" ;;
+        LEGACY_DEV_PKGS="libhackrf-dev librtlsdr-dev pkg-config"
+        DEV_PKGS="build-essential" ;;
     dnf|yum)
         LIB_HACKRF="hackrf hackrf-devel"
         LIB_RTLSDR="rtl-sdr rtl-sdr-devel"
         SOAPY_LIB="SoapySDR"
         SOAPY_MODULES="SoapySDR-hackrf SoapySDR-rtlsdr SoapySDR-airspy SoapySDR-plutosdr"
-        DEV_PKGS="hackrf-devel rtl-sdr-devel pkgconf-pkg-config gcc" ;;
+        LEGACY_DEV_PKGS="hackrf-devel rtl-sdr-devel pkgconf-pkg-config"
+        DEV_PKGS="gcc" ;;
     pacman)
         LIB_HACKRF="hackrf"
         LIB_RTLSDR="rtl-sdr"
         SOAPY_LIB="soapysdr"
         SOAPY_MODULES="soapyhackrf soapyrtlsdr soapyairspy soapyplutosdr"
-        DEV_PKGS="hackrf rtl-sdr pkgconf base-devel" ;;
+        LEGACY_DEV_PKGS="hackrf rtl-sdr pkgconf"
+        DEV_PKGS="base-devel" ;;
     zypper)
         LIB_HACKRF="libhackrf0 hackrf libhackrf-devel"
         LIB_RTLSDR="librtlsdr0 rtl-sdr rtl-sdr-devel"
         SOAPY_LIB="libSoapySDR0_8 SoapySDR SoapySDR-devel"
         SOAPY_MODULES="SoapySDR-module-hackrf SoapySDR-module-rtlsdr"
-        DEV_PKGS="libhackrf-devel rtl-sdr-devel pkg-config gcc" ;;
+        LEGACY_DEV_PKGS="libhackrf-devel rtl-sdr-devel pkg-config"
+        DEV_PKGS="gcc" ;;
     apk)
         # Alpine splits further than anyone else: the library, the headers and
         # the udev rules are three packages.
@@ -187,26 +209,31 @@ case "$PM" in
         LIB_RTLSDR="librtlsdr librtlsdr-dev"
         SOAPY_LIB="soapysdr soapysdr-dev"
         SOAPY_MODULES="soapysdr-hackrf soapysdr-rtlsdr"
-        UDEV_PKGS="hackrf-udev librtlsdr-udev"
-        DEV_PKGS="hackrf-dev librtlsdr-dev pkgconf build-base" ;;
+        HACKRF_UDEV="hackrf-udev"
+        RTLSDR_UDEV="librtlsdr-udev"
+        LEGACY_DEV_PKGS="hackrf-dev librtlsdr-dev pkgconf"
+        DEV_PKGS="build-base" ;;
     xbps-install)
         LIB_HACKRF="hackrf hackrf-devel"
         LIB_RTLSDR="rtl-sdr rtl-sdr-devel"
         SOAPY_LIB="SoapySDR SoapySDR-devel"
         SOAPY_MODULES="SoapyHackRF SoapyRTLSDR"
-        DEV_PKGS="hackrf-devel rtl-sdr-devel pkg-config base-devel" ;;
+        LEGACY_DEV_PKGS="hackrf-devel rtl-sdr-devel pkg-config"
+        DEV_PKGS="base-devel" ;;
     emerge)
         LIB_HACKRF="net-wireless/hackrf"
         LIB_RTLSDR="net-wireless/rtl-sdr"
         SOAPY_LIB="net-wireless/soapysdr"
         SOAPY_MODULES="net-wireless/soapyhackrf net-wireless/soapyrtlsdr"
-        DEV_PKGS="net-wireless/hackrf net-wireless/rtl-sdr" ;;
+        LEGACY_DEV_PKGS="net-wireless/hackrf net-wireless/rtl-sdr"
+        DEV_PKGS="sys-devel/gcc" ;;
     nix-env)
         LIB_HACKRF="hackrf"
         LIB_RTLSDR="rtl-sdr"
         SOAPY_LIB="soapysdr-with-plugins soapysdr"
         SOAPY_MODULES=""
-        DEV_PKGS="hackrf rtl-sdr pkg-config" ;;
+        LEGACY_DEV_PKGS="hackrf rtl-sdr pkg-config"
+        DEV_PKGS="gcc" ;;
     "")
         LIB_HACKRF=""; LIB_RTLSDR=""; DEV_PKGS="" ;;
 esac
@@ -236,9 +263,8 @@ install_first() {
     return 1
 }
 
-have_libs() {
-    ldconfig -p 2>/dev/null | grep -q 'libhackrf\.so' \
-        && ldconfig -p 2>/dev/null | grep -q 'librtlsdr\.so'
+have_native_lib() {
+    ldconfig -p 2>/dev/null | grep -Fq "$1.so"
 }
 
 # SoapySDR is not a dependency. sdrtop opens it at runtime if it is there and
@@ -268,34 +294,44 @@ install_soapy() {
 }
 
 install_runtime_deps() {
-    if have_libs; then
-        say "libhackrf and librtlsdr are already present"
+    if [ "$WANT_HACKRF" -eq 0 ] && [ "$WANT_RTLSDR" -eq 0 ]; then
+        return 0
+    fi
+    if { [ "$WANT_HACKRF" -eq 0 ] || have_native_lib libhackrf; } \
+       && { [ "$WANT_RTLSDR" -eq 0 ] || have_native_lib librtlsdr; }; then
+        say "the selected native SDR libraries are already present"
         return 0
     fi
     if [ -z "$PM" ]; then
-        warn "no known package manager; install libhackrf and librtlsdr yourself"
+        warn "no known package manager; install the selected SDR libraries yourself"
         return 0
     fi
-    step "Installing libhackrf and librtlsdr with $PM"
-    say "(this can take a moment, and is the only step that needs root)"
+    step "Installing selected native SDR libraries with $PM"
+    say "(this may ask for your password)"
     # Not fatal. A stale or unreachable mirror must not end the installation
     # before the libraries have even been tried, and they may be cached already.
     if [ "$PM" = apt-get ]; then
         as_root apt-get update -qq || warn "apt-get update failed, trying anyway"
     fi
-    install_first "$LIB_HACKRF" || warn "could not install libhackrf automatically"
-    install_first "$LIB_RTLSDR" || warn "could not install librtlsdr automatically"
-    # Where a distribution ships the udev rules as their own package, take them.
-    # This is the only udev handling here, and it is a package install like any
-    # other. See "Device access" at the bottom for why nothing is hand-written.
-    for p in $UDEV_PKGS; do
+    udev_pkgs=""
+    if [ "$WANT_HACKRF" -eq 1 ]; then
+        install_first "$LIB_HACKRF" || warn "could not install libhackrf automatically"
+        udev_pkgs="$udev_pkgs $HACKRF_UDEV"
+    fi
+    if [ "$WANT_RTLSDR" -eq 1 ]; then
+        install_first "$LIB_RTLSDR" || warn "could not install librtlsdr automatically"
+        udev_pkgs="$udev_pkgs $RTLSDR_UDEV"
+    fi
+    for p in $udev_pkgs; do
         if pm_install "$p" >/dev/null 2>&1; then say "  $p"; fi
     done
 }
 
 install_runtime_deps
 [ "$WANT_SOAPY" -eq 1 ] && install_soapy
-[ "$RAW_DEPS_ONLY" -eq 1 ] && exit 0
+if [ "$RAW_DEPS_ONLY" -eq 1 ]; then
+    exit 0
+fi
 
 BINARY=""
 SRC_DIR=""
@@ -406,7 +442,7 @@ if [ -z "$BINARY" ] && [ "$FROM_SOURCE" -eq 0 ]; then
                 say "the prebuilt binary does not run on this system:"
                 ldd "$WORK/$NAME/sdrtop" 2>&1 | grep -E 'not found|Error|error' \
                     | sed 's/^/    /' || say "    (it failed to start)"
-                say "compiling instead, which links what you do have"
+                say "compiling for this system"
             fi
         fi
     fi
@@ -416,22 +452,15 @@ fi
 if [ -z "$BINARY" ]; then
     step "Compiling with cargo"
 
-    # Only if they are not already there. Someone who has built sdrtop before,
-    # or who has any SDR development environment, should not be asked for a root
-    # password to install packages they have. pkg-config is asked first, but
-    # librtlsdr ships no .pc file on some distributions, so the header is the
-    # fallback question.
-    have_dev() {
-        { pkg-config --exists libhackrf 2>/dev/null \
-            || [ -e /usr/include/libhackrf/hackrf.h ] || [ -e /usr/include/hackrf.h ]; } \
-        && { pkg-config --exists librtlsdr 2>/dev/null \
-            || [ -e /usr/include/rtl-sdr.h ]; }
-    }
-    if have_dev; then
-        say "the build dependencies are already installed"
+    if command -v cc >/dev/null 2>&1; then
+        say "a C compiler/linker is already installed"
     elif [ -n "$PM" ]; then
-        say "installing the build dependencies (this will ask for your password)"
-        for p in $DEV_PKGS; do pm_install "$p" >/dev/null 2>&1 || true; done
+        say "installing C build tools (this may ask for your password)"
+        for p in $DEV_PKGS; do
+            pm_install "$p" >/dev/null 2>&1 || warn "could not install build tool package $p"
+        done
+    else
+        warn "no known package manager; install a C compiler/linker yourself"
     fi
 
     # Distribution Rust is usually too old: sdrtop needs 1.88 for
@@ -475,7 +504,7 @@ if [ -z "$BINARY" ]; then
         src_args="--git https://github.com/$REPO"
         src_label="the main branch from git"
     elif [ -n "$TAG" ]; then
-        src_args="--version ${TAG#v}"
+        src_args="--version =${TAG#v}"
         src_label="$CRATE ${TAG#v} from crates.io"
     fi
     say "building $src_label"
@@ -484,13 +513,61 @@ if [ -z "$BINARY" ]; then
     # temporary directory, which stops existing seconds later, and this script
     # prints the correct PATH line about $BIN_DIR at the end anyway. Two pieces
     # of contradictory advice is worse than one.
-    # shellcheck disable=SC2086 # deliberate: $src_args is an argument list
-    PATH="$WORK/cargo/bin:$PATH" \
-        cargo install "$CRATE" --locked --root "$WORK/cargo" $src_args \
-        || die "the build failed; see the output above"
+    run_cargo_install() {
+        (
+            # The status file preserves Cargo's result across the tee pipeline
+            # shellcheck disable=SC2086 # deliberate: $src_args is an argument list
+            if PATH="$WORK/cargo/bin:$PATH" CARGO_TERM_COLOR=never \
+                cargo install "$CRATE" --locked --root "$WORK/cargo" $src_args; then
+                echo 0 > "$WORK/cargo.status"
+            else
+                echo "$?" > "$WORK/cargo.status"
+            fi
+        ) 2>&1 | tee "$WORK/cargo.log"
+        return "$(cat "$WORK/cargo.status")"
+    }
+
+    legacy_native_failure() {
+        if grep -Fq 'error: failed to run custom build command for `sdrtop v' "$WORK/cargo.log" \
+           && grep -Eq 'panicked at .*build\.rs:[0-9]+:' "$WORK/cargo.log" \
+           && grep -Fq 'libhackrf not found (' "$WORK/cargo.log" \
+           && grep -Fq 'Install: apt install libhackrf-dev' "$WORK/cargo.log"; then
+            return 0
+        fi
+        grep -Fq 'error: could not compile `sdrtop` (bin "sdrtop")' "$WORK/cargo.log" \
+            && grep -Eq '(cannot find|unable to find library|library not found for) -l(hackrf|rtlsdr)(:|[[:space:]]|$)' "$WORK/cargo.log"
+    }
+
+    if ! run_cargo_install; then
+        if [ "$FROM_GIT" -eq 1 ] || ! legacy_native_failure; then
+            die "the build failed; see the output above"
+        fi
+        if [ -z "$TAG" ]; then
+            # Pin Cargo's resolved release before retrying an unversioned install
+            TAG=$(sed -n 's/^error: failed to compile `sdrtop v\([0-9][0-9A-Za-z.+-]*\)`.*/\1/p' \
+                "$WORK/cargo.log" | head -1)
+            printf '%s\n' "$TAG" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?(\+[0-9A-Za-z.-]+)?$' \
+                || die "could not identify the failed release; retry with --version"
+            src_args="--version =$TAG"
+        fi
+        [ -n "$LEGACY_DEV_PKGS" ] \
+            || die "this release needs libhackrf and librtlsdr development packages plus pkg-config; install them and retry"
+        step "Installing native development packages for $CRATE ${TAG#v}"
+        say "(this may ask for your password)"
+        if [ "$PM" = apt-get ]; then
+            as_root apt-get update -qq || warn "apt-get update failed, trying anyway"
+        fi
+        for p in $LEGACY_DEV_PKGS; do
+            pm_install "$p" || die "could not install $p; the existing installation was left unchanged"
+        done
+        say "retrying $CRATE ${TAG#v}"
+        run_cargo_install || die "the build failed; see the output above"
+    fi
 
     BINARY="$WORK/cargo/bin/sdrtop"
     [ -x "$BINARY" ] || die "cargo reported success but produced no binary"
+    "$BINARY" --version >/dev/null 2>&1 \
+        || die "the built binary does not run; the existing installation was left unchanged"
     # No SRC_DIR: `cargo install` delivers a binary and nothing else, so this
     # path installs no README, man page or user_docs. That is what the command
     # means, and the documentation lives at github.com/musithang/sdrtop.
@@ -538,32 +615,28 @@ else
 fi
 
 # ── The radio has to be openable ────────────────────────────────────────────
-# Reported, never written. The libhackrf and rtl-sdr packages ship their own
-# udev rules, so a machine with the libraries has the permissions, and a second
-# set of rules written here would be a second answer to one question that agrees
-# with the first only until someone edits one of them.
-#
-# On Alpine the rules are separate packages, and those were installed above with
-# the libraries, which is the same mechanism rather than an exception to it.
-step "Device access"
-if grep -rqs -e 'idVendor.*1d50' -e 'idVendor.*0bda' \
-     /usr/lib/udev/rules.d /lib/udev/rules.d /etc/udev/rules.d; then
-    say "udev rules for SDR hardware are installed"
-else
-    warn "no udev rules for SDR hardware were found on this system"
-    say "  sdrtop will need root to open the radio until they exist. They come"
-    say "  with the libhackrf and rtl-sdr packages on most distributions; see"
-    say "  user_docs/troubleshooting.md if installing those did not supply any."
-fi
+# Distribution packages supply native SDR udev rules
+if [ "$WANT_HACKRF" -eq 1 ] || [ "$WANT_RTLSDR" -eq 1 ]; then
+    step "Device access"
+    if grep -rqs -e 'idVendor.*1d50' -e 'idVendor.*0bda' \
+         /usr/lib/udev/rules.d /lib/udev/rules.d /etc/udev/rules.d; then
+        say "udev rules for SDR hardware are installed"
+    else
+        warn "no udev rules for SDR hardware were found on this system"
+        say "  HackRF/RTL-SDR access may need udev rules. They come"
+        say "  with the libhackrf and rtl-sdr packages on most distributions; see"
+        say "  user_docs/troubleshooting.md if installing those did not supply any."
+    fi
 
-if ! id -nG 2>/dev/null | tr ' ' '\n' | grep -qx plugdev; then
-    if getent group plugdev >/dev/null 2>&1; then
-        say ""
-        say "You are not in the plugdev group, which those rules usually grant"
-        say "access through. To join it:"
-        say "    sudo usermod -aG plugdev $(id -un)"
-        say "then log out and back in, because group membership only applies to"
-        say "new sessions."
+    if ! id -nG 2>/dev/null | tr ' ' '\n' | grep -qx plugdev; then
+        if getent group plugdev >/dev/null 2>&1; then
+            say ""
+            say "You are not in the plugdev group, which those rules usually grant"
+            say "access through. To join it:"
+            say "    sudo usermod -aG plugdev $(id -un)"
+            say "then log out and back in, because group membership only applies to"
+            say "new sessions."
+        fi
     fi
 fi
 
@@ -582,5 +655,6 @@ case ":$PATH:" in
 esac
 
 say ""
+say "For a HackRF or RTL-SDR, re-run this installer with --hackrf or --rtlsdr."
 say "Run 'sdrtop'. It opens on its menu: Enter takes a layout, Space starts"
 say "receiving, Esc brings the menu back, q quits and saves."

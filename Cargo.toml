@@ -52,14 +52,11 @@ clap = { version = "4", features = ["derive"] }
 crossbeam-channel = "0.5"
 rustfft = "6"
 num-complex = "0.4"
-# SoapySDR is opened at runtime rather than linked, so a machine without it runs
-# exactly the binary it runs today and simply sees no Soapy devices. See
-# dev_docs/soapy-design.md, decision 1.
+# HackRF, RTL-SDR and SoapySDR runtimes are optional
 libloading = "0.8"
 serialport = { version = "4", default-features = false }
 
 [build-dependencies]
-pkg-config = "0.3"
 # The man page is generated from the same `Parser` derive `main.rs` parses with,
 # so it cannot describe a flag the binary does not have. See `src/cli.rs`.
 clap = { version = "4", features = ["derive"] }

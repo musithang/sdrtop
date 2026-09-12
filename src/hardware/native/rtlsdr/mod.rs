@@ -34,6 +34,7 @@ const RTL_BUF_LEN: u32 = 65_536;
 const RTL_BUF_NUM: u32 = 0;
 
 pub struct RtlDevice {
+    api: &'static RtlSdrApi,
     ptr: *mut c_void,
     caps: DeviceCapabilities,
     info: DeviceInfo,
@@ -52,6 +53,7 @@ unsafe impl Sync for RtlDevice {}
 /// Serializes the fd-2 redirect dance so two control calls on different threads
 /// (e.g. the input handler and the sweep task) can't clobber each other's saved
 /// descriptor and leave stderr pointing at /dev/null permanently.
+#[cfg(not(test))]
 static STDERR_LOCK: Mutex<()> = Mutex::new(());
 
 /// Run `f` with the process's stderr redirected to /dev/null, then restore it.
@@ -62,6 +64,7 @@ static STDERR_LOCK: Mutex<()> = Mutex::new(());
 /// control call is wrapped in this; the long-lived async read is not (it runs on
 /// its own thread). Best-effort: if the redirect can't be set up, `f` runs
 /// unsilenced.
+#[cfg(not(test))]
 fn with_stderr_silenced<R>(f: impl FnOnce() -> R) -> R {
     let _guard = STDERR_LOCK.lock().unwrap_or_else(|e| e.into_inner());
     unsafe {
@@ -81,6 +84,11 @@ fn with_stderr_silenced<R>(f: impl FnOnce() -> R) -> R {
         libc::close(saved);
         result
     }
+}
+
+#[cfg(test)]
+fn with_stderr_silenced<R>(f: impl FnOnce() -> R) -> R {
+    f()
 }
 
 // ── Async read callback (our read thread) ─────────────────────────────────────
@@ -114,19 +122,20 @@ impl SdrDevice for RtlDevice {
             return Ok(()); // already streaming
         }
         with_stderr_silenced(|| unsafe {
-            rtlsdr_reset_buffer(self.ptr);
+            (self.api.rtlsdr_reset_buffer)(self.ptr);
         });
 
         // `rtlsdr_read_async` blocks until cancelled, so it gets its own thread.
         // The thread owns `cb_ctx`, keeping the pointer handed to the callback
         // valid for the entire call; `stop_rx` joins before that Arc drops.
         let ptr_usize = self.ptr as usize;
+        let api = self.api;
         let flag = Arc::clone(&self.streaming);
         let cb_ctx = ctx;
         let handle = std::thread::spawn(move || {
             let user = Arc::as_ptr(&cb_ctx) as *mut c_void;
             unsafe {
-                rtlsdr_read_async(
+                (api.rtlsdr_read_async)(
                     ptr_usize as *mut c_void,
                     rtl_rx_callback,
                     user,
@@ -144,7 +153,7 @@ impl SdrDevice for RtlDevice {
 
     fn stop_rx(&self) -> anyhow::Result<()> {
         unsafe {
-            rtlsdr_cancel_async(self.ptr);
+            (self.api.rtlsdr_cancel_async)(self.ptr);
         }
         // Join so the read thread (and the Arc<RxContext> it holds) is fully gone
         // before we return - no callback can fire afterward.
@@ -160,7 +169,9 @@ impl SdrDevice for RtlDevice {
     }
 
     fn set_frequency(&self, hz: u64) -> anyhow::Result<()> {
-        let res = with_stderr_silenced(|| unsafe { rtlsdr_set_center_freq(self.ptr, hz as u32) });
+        let res = with_stderr_silenced(|| unsafe {
+            (self.api.rtlsdr_set_center_freq)(self.ptr, hz as u32)
+        });
         if res != 0 {
             anyhow::bail!("Failed to set RTL-SDR frequency");
         }
@@ -179,11 +190,13 @@ impl SdrDevice for RtlDevice {
     /// No baseband filter on this radio, so the width is zero rather than a
     /// number that would have to mean something.
     fn set_sample_rate(&self, hz: f64) -> anyhow::Result<RateSet> {
-        let res = with_stderr_silenced(|| unsafe { rtlsdr_set_sample_rate(self.ptr, hz as u32) });
+        let res = with_stderr_silenced(|| unsafe {
+            (self.api.rtlsdr_set_sample_rate)(self.ptr, hz as u32)
+        });
         if res != 0 {
             anyhow::bail!("Failed to set RTL-SDR sample rate");
         }
-        let got = with_stderr_silenced(|| unsafe { rtlsdr_get_sample_rate(self.ptr) });
+        let got = with_stderr_silenced(|| unsafe { (self.api.rtlsdr_get_sample_rate)(self.ptr) });
         Ok(RateSet::new(hz, Some(got as f64), 0))
     }
 
@@ -199,8 +212,8 @@ impl SdrDevice for RtlDevice {
             .unwrap_or(target);
         // Force manual gain mode, then set the nearest table value (both chatter).
         let res = with_stderr_silenced(|| unsafe {
-            rtlsdr_set_tuner_gain_mode(self.ptr, 1);
-            rtlsdr_set_tuner_gain(self.ptr, nearest)
+            (self.api.rtlsdr_set_tuner_gain_mode)(self.ptr, 1);
+            (self.api.rtlsdr_set_tuner_gain)(self.ptr, nearest)
         });
         if res != 0 {
             anyhow::bail!("Failed to set RTL-SDR tuner gain");
@@ -211,7 +224,7 @@ impl SdrDevice for RtlDevice {
     /// Tuner AGC: on → automatic gain (mode 0), off → manual (mode 1).
     fn set_tuner_agc(&self, on: bool) -> anyhow::Result<()> {
         let res = with_stderr_silenced(|| unsafe {
-            rtlsdr_set_tuner_gain_mode(self.ptr, if on { 0 } else { 1 })
+            (self.api.rtlsdr_set_tuner_gain_mode)(self.ptr, if on { 0 } else { 1 })
         });
         if res != 0 {
             anyhow::bail!("Failed to set RTL-SDR tuner AGC");
@@ -224,14 +237,14 @@ impl Drop for RtlDevice {
     fn drop(&mut self) {
         if self.streaming.load(Ordering::SeqCst) {
             unsafe {
-                rtlsdr_cancel_async(self.ptr);
-            }
-            if let Some(h) = self.thread.lock().unwrap_or_else(|e| e.into_inner()).take() {
-                let _ = h.join();
+                (self.api.rtlsdr_cancel_async)(self.ptr);
             }
         }
+        if let Some(h) = self.thread.lock().unwrap_or_else(|e| e.into_inner()).take() {
+            let _ = h.join();
+        }
         unsafe {
-            rtlsdr_close(self.ptr);
+            (self.api.rtlsdr_close)(self.ptr);
         }
     }
 }
@@ -240,19 +253,23 @@ impl Drop for RtlDevice {
 
 impl RtlDevice {
     pub fn open(index: usize) -> anyhow::Result<Self> {
+        Self::open_with_api(api()?, index)
+    }
+
+    fn open_with_api(api: &'static RtlSdrApi, index: usize) -> anyhow::Result<Self> {
         let mut ptr: *mut c_void = std::ptr::null_mut();
         // Open + tuner probe print kernel-driver / tuner lines to stderr; silence
         // them so they don't corrupt the TUI we've already switched into.
         let (res, tuner, gains_tenths) = with_stderr_silenced(|| {
-            let res = unsafe { rtlsdr_open(&mut ptr, index as u32) };
+            let res = unsafe { (api.rtlsdr_open)(&mut ptr, index as u32) };
             if res != 0 || ptr.is_null() {
                 return (res, 0, Vec::new());
             }
-            let tuner = unsafe { rtlsdr_get_tuner_type(ptr) };
-            let gains = unsafe { read_tuner_gains(ptr) };
+            let tuner = unsafe { (api.rtlsdr_get_tuner_type)(ptr) };
+            let gains = unsafe { read_tuner_gains(api, ptr) };
             // Default to manual gain so the gain controls take effect immediately.
             unsafe {
-                rtlsdr_set_tuner_gain_mode(ptr, 1);
+                (api.rtlsdr_set_tuner_gain_mode)(ptr, 1);
             }
             (res, tuner, gains)
         });
@@ -261,8 +278,8 @@ impl RtlDevice {
         }
 
         let info = DeviceInfo {
-            board_name: device_name(index as u32),
-            serial: device_serial(index as u32).unwrap_or_else(|| format!("rtlsdr-{index}")),
+            board_name: device_name(api, index as u32),
+            serial: device_serial(api, index as u32).unwrap_or_else(|| format!("rtlsdr-{index}")),
             fw_version: None,
             board_rev: None,
             usb_api_version: None,
@@ -277,6 +294,7 @@ impl RtlDevice {
         };
 
         Ok(Self {
+            api,
             ptr,
             caps: rtl_caps(tuner, &gains_tenths),
             info,
@@ -290,22 +308,25 @@ impl RtlDevice {
 /// Enumerates connected RTL-SDR dongles. Never fails - returns an empty list
 /// when librtlsdr finds none.
 pub fn list() -> Vec<DeviceListing> {
+    let Ok(api) = api() else {
+        return Vec::new();
+    };
+    list_with_api(api)
+}
+
+fn list_with_api(api: &RtlSdrApi) -> Vec<DeviceListing> {
     let mut out = Vec::new();
-    let count = unsafe { rtlsdr_get_device_count() };
+    let count = unsafe { (api.rtlsdr_get_device_count)() };
     for i in 0..count {
-        let name = device_name(i);
-        let serial = device_serial(i).unwrap_or_default();
-        let shown = if serial.is_empty() {
-            format!("#{i}")
-        } else {
-            serial
-        };
+        let name = device_name(api, i);
+        let serial = device_serial(api, i);
+        let shown = serial.clone().unwrap_or_else(|| format!("#{i}"));
         out.push(DeviceListing {
             kind: DeviceKind::RtlSdr,
             index: i as usize,
             label: format!("RTL-SDR · {} · {}", name, shown),
             args: None,
-            serial: device_serial(i),
+            serial,
             path: None,
             tiny_sa_input: None,
         });
@@ -398,13 +419,13 @@ fn rtl_caps(tuner: c_int, gains_tenths: &[i32]) -> DeviceCapabilities {
     }
 }
 
-unsafe fn read_tuner_gains(ptr: *mut c_void) -> Vec<i32> {
-    let n = rtlsdr_get_tuner_gains(ptr, std::ptr::null_mut());
+unsafe fn read_tuner_gains(api: &RtlSdrApi, ptr: *mut c_void) -> Vec<i32> {
+    let n = (api.rtlsdr_get_tuner_gains)(ptr, std::ptr::null_mut());
     if n <= 0 {
         return Vec::new();
     }
     let mut buf = vec![0i32; n as usize];
-    let got = rtlsdr_get_tuner_gains(ptr, buf.as_mut_ptr());
+    let got = (api.rtlsdr_get_tuner_gains)(ptr, buf.as_mut_ptr());
     if got <= 0 {
         return Vec::new();
     }
@@ -412,9 +433,9 @@ unsafe fn read_tuner_gains(ptr: *mut c_void) -> Vec<i32> {
     buf
 }
 
-fn device_name(index: u32) -> String {
+fn device_name(api: &RtlSdrApi, index: u32) -> String {
     unsafe {
-        let p = rtlsdr_get_device_name(index);
+        let p = (api.rtlsdr_get_device_name)(index);
         if p.is_null() {
             "RTL-SDR".to_string()
         } else {
@@ -423,7 +444,7 @@ fn device_name(index: u32) -> String {
     }
 }
 
-fn device_serial(index: u32) -> Option<String> {
+fn device_serial(api: &RtlSdrApi, index: u32) -> Option<String> {
     // `libc::c_char` is `i8` on x86_64 but `u8` on ARM Linux; tying the buffer
     // element type to it keeps `.as_ptr()` matching the FFI's `*mut c_char`
     // (and `CStr::from_ptr`'s `*const c_char`) on every platform.
@@ -431,7 +452,7 @@ fn device_serial(index: u32) -> Option<String> {
     let mut product = [0 as libc::c_char; 256];
     let mut serial = [0 as libc::c_char; 256];
     unsafe {
-        if rtlsdr_get_device_usb_strings(
+        if (api.rtlsdr_get_device_usb_strings)(
             index,
             manufact.as_mut_ptr(),
             product.as_mut_ptr(),
@@ -466,7 +487,83 @@ fn tuner_name(tuner: c_int) -> Option<String> {
 
 #[cfg(test)]
 mod tests {
+    use super::super::test_support::TestLibrary;
     use super::*;
+
+    #[test]
+    fn loader_rejects_missing_required_symbol() {
+        let fixture = TestLibrary::new(true);
+        let err = match super::super::loader::load("librtlsdr", &[fixture.path()], ffi::resolve) {
+            Ok(_) => panic!("accepted an incomplete librtlsdr"),
+            Err(err) => err,
+        };
+        assert!(err.contains(fixture.path()));
+        assert!(err.contains("missing required symbol rtlsdr_cancel_async"));
+    }
+
+    #[test]
+    fn loaded_api_owns_its_library() {
+        let fixture = TestLibrary::new(false);
+        let api = ffi::resolve(fixture.library()).unwrap();
+        drop(fixture);
+        assert_eq!(unsafe { (api.rtlsdr_get_device_count)() }, 1);
+    }
+
+    #[test]
+    fn loaded_device_preserves_discovery_metadata_and_control_errors() {
+        let fixture = TestLibrary::new(false);
+        let api = Box::leak(Box::new(ffi::resolve(fixture.library()).unwrap()));
+        let devices = list_with_api(api);
+        assert_eq!(devices.len(), 1);
+        assert_eq!(devices[0].index, 0);
+        assert_eq!(devices[0].serial.as_deref(), Some("00000001"));
+        assert_eq!(fixture.calls(0), 1, "enumeration reads USB strings once");
+        let device = RtlDevice::open_with_api(api, 0).unwrap();
+        assert_eq!(device.info().board_name, "Fixture RTL-SDR");
+        assert_eq!(device.info().tuner_name.as_deref(), Some("R820T"));
+        assert_eq!(device.gains_tenths, vec![0, 197, 496]);
+        let rate = device.set_sample_rate(2_400_000.0).unwrap();
+        assert_eq!(rate.rate_hz, 2_399_999.0);
+        assert_eq!(rate.bb_filter_hz, 0);
+        fixture.mode(6);
+        assert!(device.set_sample_rate(2_400_000.0).is_err());
+        assert!(device.set_frequency(100_000_000).is_err());
+        assert!(device.set_lna_gain(20).is_err());
+        assert!(device.set_tuner_agc(true).is_err());
+        drop(device);
+        assert_eq!(fixture.calls(3), 1);
+    }
+
+    #[test]
+    fn open_rejects_error_and_null_handles() {
+        let fixture = TestLibrary::new(false);
+        let api = Box::leak(Box::new(ffi::resolve(fixture.library()).unwrap()));
+        for mode in [4, 5] {
+            fixture.mode(mode);
+            let err = match RtlDevice::open_with_api(api, 0) {
+                Ok(_) => panic!("accepted failing mode {mode}"),
+                Err(err) => err,
+            };
+            assert!(err.to_string().contains("Failed to open RTL-SDR device"));
+        }
+        assert_eq!(fixture.calls(3), 0);
+    }
+
+    #[test]
+    fn drop_joins_reader_even_after_streaming_flag_clears() {
+        let fixture = TestLibrary::new(false);
+        let api = Box::leak(Box::new(ffi::resolve(fixture.library()).unwrap()));
+        let device = RtlDevice::open_with_api(api, 0).unwrap();
+        let finished = Arc::new(AtomicBool::new(false));
+        let flag = Arc::clone(&finished);
+        *device.thread.lock().unwrap() = Some(std::thread::spawn(move || {
+            std::thread::sleep(std::time::Duration::from_millis(20));
+            flag.store(true, Ordering::SeqCst);
+        }));
+        drop(device);
+        assert!(finished.load(Ordering::SeqCst));
+        assert_eq!(fixture.calls(3), 1);
+    }
 
     #[test]
     fn caps_round_and_dedupe_gain_steps() {

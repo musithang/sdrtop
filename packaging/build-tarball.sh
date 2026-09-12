@@ -11,9 +11,7 @@
 # the oldest glibc floor worth supporting instead of whatever the build machine
 # happens to have. See packaging/Containerfile.
 #
-# x86_64 only, on purpose. Every other architecture, and every distribution
-# whose librtlsdr soname does not match, is served by packaging/install.sh
-# building from source, which links what the target machine actually has.
+# packaging/install.sh builds from source for other architectures or libcs
 set -eu
 
 REPO="$(cd "$(dirname "$0")/.." && pwd)"
@@ -99,10 +97,7 @@ exec "$CONTAINER" run --rm --platform linux/amd64 $CONTAINER_USER \
     # gets exercised is the exact one that goes into the archive rather than the
     # one it was copied from.
     #
-    # It has to happen inside the container: Debian 12 is the only place this
-    # binary is expected to start, and on the Ubuntu CI runner it fails for the
-    # librtlsdr soname reason that install.sh exists to handle. Both flags
-    # return before any device is opened, so neither needs a radio.
+    # Test startup at the supported glibc floor without native SDR libraries
     reported=$("$OUT/sdrtop" --version)
     echo "$reported"
     "$OUT/sdrtop" --help >/dev/null

@@ -42,10 +42,40 @@ sdrtop prints this and exits before the TUI starts.
    dongle something like `Realtek Semiconductor Corp. RTL2838 DVB-T`. If nothing
    appears, the problem is below sdrtop, and no amount of software configuration
    will help.
-3. **If it appears in `lsusb` but sdrtop can't open it**, that's permissions. See
-   below.
-4. **If something else already has it**, sdrtop enters observer mode rather than
+3. **Check the runtime library.** Select `--device hackrf` or `--device rtlsdr`
+   for a diagnostic naming the unavailable library. See below.
+4. **Check device permissions.** See [Permission denied](#permission-denied).
+5. **If something else already has it**, sdrtop enters observer mode rather than
    failing. See [Advanced Features](advanced.md#observer-mode-when-another-app-owns-the-radio).
+
+### A native backend's library is unavailable
+
+```sh
+sdrtop --device hackrf
+sdrtop --device rtlsdr
+```
+
+Explicit selection reports the library and candidate filename that failed.
+A missing-symbol error names the symbol too.
+Errors include runtime package names.
+HackRF errors also state the libhackrf 2023.01.1+ requirement.
+Automatic discovery skips unavailable backends quietly.
+An empty automatic device list reports cached native failures in its error hint.
+Explicit native selection reports failures for that backend only.
+Explicit tinySA or SoapySDR selection produces no native-library diagnostics.
+
+1. **Install the selected runtime.** Use `sh install.sh --deps-only --hackrf`
+   or `sh install.sh --deps-only --rtlsdr`. Distribution package names are in
+   [Getting started](getting-started.md#what-you-need).
+2. **Check the filename and search path.** HackRF tries `libhackrf.so.0` and
+   `libhackrf.so`. RTL-SDR tries `librtlsdr.so.0`, `librtlsdr.so.2` and
+   `librtlsdr.so`. Custom installations need a loader search path such as
+   `LD_LIBRARY_PATH`. Installing headers alone does not make a runtime loadable.
+3. **Upgrade an incompatible library.** HackRF needs libhackrf 2023.01.1+
+   with `hackrf_board_rev_read`, `hackrf_usb_api_version_read` and the other
+   required symbols. Firmware metadata read errors remain optional.
+4. **Restart sdrtop.** Load results are cached for the process.
+   Loaded handles remain open until process exit.
 
 ### A SoapySDR device doesn't appear
 
@@ -361,15 +391,13 @@ You can also write them by hand; see
 
 Not a failure. That's the installer doing its job.
 
-One prebuilt tarball is published, for x86_64 with glibc 2.36 or newer and
-`librtlsdr.so.0`. Debian, Kali and Raspberry Pi OS Bookworm match that. Ubuntu
-and Mint package the identical upstream library as `.so.2`, and a Raspberry Pi
-isn't x86_64 at all, so on those machines the binary can't start.
+The prebuilt tarball needs x86_64 Linux with glibc 2.36+. Raspberry Pi,
+musl-based systems and older glibc systems need a source build. Ubuntu's
+`librtlsdr.so.2` is supported through runtime loading. Neither libhackrf nor
+librtlsdr is needed for startup.
 
-The installer finds this out by **running the binary** rather than by guessing
-from your distribution's name, prints what `ldd` says is missing, and then
-compiles from source with `cargo install` instead. That links what your machine
-actually has. It takes a few minutes and needs nothing from you.
+The installer runs the binary to check compatibility. A failed check prints
+`ldd` diagnostics and triggers a source build with `cargo install`.
 
 ### "checksum mismatch" or "could not download SHA256SUMS"
 
@@ -393,8 +421,9 @@ which doesn't need it.
 
 ### `cargo install sdrtop` fails on libhackrf
 
-Same cause as the build failure below: both libraries have to be present at
-build time. See [The build fails looking for libhackrf](#the-build-fails-looking-for-libhackrf).
+Current source builds require no native SDR libraries or headers. Check the
+version being installed. Older releases linked both libraries at build time.
+See [The build fails looking for libhackrf](#the-build-fails-looking-for-libhackrf).
 
 ### Which build am I actually running?
 
@@ -427,13 +456,26 @@ the fix is the same command above: `rustup update stable`.
 
 ### The build fails looking for libhackrf
 
-sdrtop links **both** backends at build time, so you need `libhackrf` and
-`librtlsdr` present even if you only own one radio. At runtime it's happy with
-whichever you plug in. Package names per distribution are in
-[Getting Started](getting-started.md).
+Current source builds need Rust 1.88+ and a C compiler/linker. They need no
+libhackrf, librtlsdr, SDR development headers or pkg-config.
 
-libhackrf must be **2023.01.1 or newer**. That's what ships in Raspberry Pi OS
-Bookworm and Ubuntu 24.04; older distributions need it built from source.
+Older releases may still require both development libraries.
+The installer recognizes sdrtop's missing-libhackrf `build.rs` panic and native
+linker errors for missing `-lhackrf` or `-lrtlsdr`.
+It installs the distribution's development packages and retries the same
+release once. Unrelated build failures receive no retry.
+On Debian or Ubuntu, the packages are `libhackrf-dev librtlsdr-dev pkg-config`.
+Install these by hand if automatic package installation fails.
+
+The installer from `main` may also select an older version through the latest
+release URL. It checks downloaded binaries before installation. An old binary
+with missing libraries triggers a source build of that same release.
+Use `sh install.sh --git` to select `main` explicitly.
+Git builds receive no legacy dependency retry.
+A failed build or startup check leaves an existing installation unchanged.
+
+For a runtime loading error, follow
+[A native backend's library is unavailable](#a-native-backends-library-is-unavailable).
 
 ---
 

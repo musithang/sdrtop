@@ -46,6 +46,15 @@ pub struct ObserverProfile {
 }
 
 impl DeviceKind {
+    /// Reports a missing or incompatible native runtime library
+    pub fn check_available(self) -> anyhow::Result<()> {
+        match self {
+            Self::HackRf => hackrf::ffi::api().map(|_| ()),
+            Self::RtlSdr => rtlsdr::ffi::api().map(|_| ()),
+            _ => Ok(()),
+        }
+    }
+
     /// How observer mode describes this backend, when it can.
     ///
     /// Observer mode reads sysfs for a USB device sdrtop knows by vendor and
@@ -145,20 +154,21 @@ pub fn parse_device_arg(spec: &str) -> anyhow::Result<(DeviceKind, Option<String
     Ok((kind, filter))
 }
 
-/// What else the operator could look at, when enumeration found nothing.
-///
-/// Empty when there is nothing useful to add. Mentioning SoapySDR to someone who
-/// does not have it installed is a wild goose chase, and they have enough to
-/// check already.
-///
-/// Asked here rather than in `main` so that finding out costs the caller no
-/// knowledge of which backends exist or how one reports itself present.
-pub fn no_device_hint() -> &'static str {
-    if soapy::api::api().is_some() {
-        " SoapySDR is installed: `SoapySDRUtil --find` lists what it can see."
-    } else {
-        ""
+/// Reports relevant backend diagnostics after empty discovery
+pub fn no_device_hint(want: Option<DeviceKind>) -> String {
+    let mut hint = String::new();
+    for kind in [DeviceKind::HackRf, DeviceKind::RtlSdr] {
+        if want.is_none() || want == Some(kind) {
+            if let Err(err) = kind.check_available() {
+                hint.push('\n');
+                hint.push_str(&err.to_string());
+            }
+        }
     }
+    if (want.is_none() || want == Some(DeviceKind::Soapy)) && soapy::api::api().is_some() {
+        hint.push_str("\nSoapySDR is installed: `SoapySDRUtil --find` lists what it can see.");
+    }
+    hint
 }
 
 /// Every connected device across all compiled-in backends. Never fails: a
@@ -278,6 +288,17 @@ pub fn open_device(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn native_availability_check_accepts_non_native_backends() {
+        assert!(DeviceKind::Soapy.check_available().is_ok());
+        assert!(DeviceKind::TinySa.check_available().is_ok());
+    }
+
+    #[test]
+    fn tiny_sa_empty_discovery_has_no_native_library_hint() {
+        assert!(no_device_hint(Some(DeviceKind::TinySa)).is_empty());
+    }
 
     fn listing(
         kind: DeviceKind,

@@ -142,11 +142,17 @@ async fn main() -> Result<()> {
         },
     };
 
+    if let Some(kind) = want {
+        if let Err(err) = kind.check_available() {
+            eprintln!("{err}");
+            std::process::exit(1);
+        }
+    }
     let devices = hardware::list_all_devices(want, soapy_filter.as_deref());
     if devices.is_empty() {
         eprintln!(
             "No device found. Connect a HackRF, RTL-SDR, or tinySA and try again.{}",
-            hardware::discovery::no_device_hint()
+            hardware::discovery::no_device_hint(want)
         );
         std::process::exit(1);
     }

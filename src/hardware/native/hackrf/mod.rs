@@ -24,6 +24,7 @@ use crate::hardware::traits::RateSet;
 use ffi::*;
 
 pub struct HackRfDevice {
+    api: &'static HackrfApi,
     ptr: *mut c_void,
     caps: DeviceCapabilities,
     info: DeviceInfo,
@@ -103,7 +104,7 @@ impl SdrDevice for HackRfDevice {
     fn start_rx(&self, ctx: Arc<RxContext>) -> anyhow::Result<()> {
         let user_param = Arc::as_ptr(&ctx) as *mut c_void;
         unsafe {
-            if hackrf_start_rx(self.ptr, rx_callback, user_param) != 0 {
+            if (self.api.hackrf_start_rx)(self.ptr, rx_callback, user_param) != 0 {
                 anyhow::bail!("Failed to start RX streaming");
             }
         }
@@ -113,7 +114,7 @@ impl SdrDevice for HackRfDevice {
 
     fn stop_rx(&self) -> anyhow::Result<()> {
         unsafe {
-            if hackrf_stop_rx(self.ptr) != 0 {
+            if (self.api.hackrf_stop_rx)(self.ptr) != 0 {
                 anyhow::bail!("Failed to stop RX streaming");
             }
         }
@@ -124,12 +125,12 @@ impl SdrDevice for HackRfDevice {
     }
 
     fn is_streaming(&self) -> bool {
-        unsafe { hackrf_is_streaming(self.ptr) == 1 }
+        unsafe { (self.api.hackrf_is_streaming)(self.ptr) == 1 }
     }
 
     fn set_frequency(&self, hz: u64) -> anyhow::Result<()> {
         unsafe {
-            if hackrf_set_freq(self.ptr, hz) != 0 {
+            if (self.api.hackrf_set_freq)(self.ptr, hz) != 0 {
                 anyhow::bail!("Failed to set frequency");
             }
         }
@@ -144,10 +145,10 @@ impl SdrDevice for HackRfDevice {
     fn set_sample_rate(&self, hz: f64) -> anyhow::Result<RateSet> {
         let bw = compute_bb_filter_bw(hz);
         unsafe {
-            if hackrf_set_sample_rate(self.ptr, hz) != 0 {
+            if (self.api.hackrf_set_sample_rate)(self.ptr, hz) != 0 {
                 anyhow::bail!("Failed to set sample rate");
             }
-            if hackrf_set_baseband_filter_bandwidth(self.ptr, bw) != 0 {
+            if (self.api.hackrf_set_baseband_filter_bandwidth)(self.ptr, bw) != 0 {
                 anyhow::bail!("Failed to set baseband filter bandwidth");
             }
         }
@@ -156,7 +157,7 @@ impl SdrDevice for HackRfDevice {
 
     fn set_lna_gain(&self, db: u32) -> anyhow::Result<()> {
         unsafe {
-            if hackrf_set_lna_gain(self.ptr, db) != 0 {
+            if (self.api.hackrf_set_lna_gain)(self.ptr, db) != 0 {
                 anyhow::bail!("Failed to set LNA gain");
             }
         }
@@ -165,7 +166,7 @@ impl SdrDevice for HackRfDevice {
 
     fn set_vga_gain(&self, db: u32) -> anyhow::Result<()> {
         unsafe {
-            if hackrf_set_vga_gain(self.ptr, db) != 0 {
+            if (self.api.hackrf_set_vga_gain)(self.ptr, db) != 0 {
                 anyhow::bail!("Failed to set VGA gain");
             }
         }
@@ -174,7 +175,7 @@ impl SdrDevice for HackRfDevice {
 
     fn set_amp_enable(&self, on: bool) -> anyhow::Result<()> {
         unsafe {
-            if hackrf_set_amp_enable(self.ptr, on as u8) != 0 {
+            if (self.api.hackrf_set_amp_enable)(self.ptr, on as u8) != 0 {
                 anyhow::bail!("Failed to set AMP enable");
             }
         }
@@ -185,11 +186,11 @@ impl SdrDevice for HackRfDevice {
 impl Drop for HackRfDevice {
     fn drop(&mut self) {
         unsafe {
-            if hackrf_is_streaming(self.ptr) == 1 {
-                let _ = hackrf_stop_rx(self.ptr);
+            if (self.api.hackrf_is_streaming)(self.ptr) == 1 {
+                let _ = (self.api.hackrf_stop_rx)(self.ptr);
             }
-            hackrf_close(self.ptr);
-            hackrf_exit();
+            (self.api.hackrf_close)(self.ptr);
+            (self.api.hackrf_exit)();
         }
     }
 }
@@ -197,33 +198,37 @@ impl Drop for HackRfDevice {
 // ── Open / enumerate ─────────────────────────────────────────────────────────
 
 impl HackRfDevice {
-    /// Opens the HackRF at `index` and reads its metadata once. Only a failed
-    /// libhackrf open fails here; missing optional metadata reads degrade to
-    /// fallbacks rather than aborting (so a quirky unit still comes up).
+    /// Opens the HackRF at `index` and reads its metadata once.
+    /// The library must export every required symbol. Firmware metadata read
+    /// failures leave the corresponding fields unavailable.
     pub fn open(index: usize) -> anyhow::Result<Self> {
+        Self::open_with_api(api()?, index)
+    }
+
+    fn open_with_api(api: &'static HackrfApi, index: usize) -> anyhow::Result<Self> {
         unsafe {
-            let init_res = hackrf_init();
+            let init_res = (api.hackrf_init)();
             if init_res != 0 {
-                let err = CStr::from_ptr(hackrf_error_name(init_res)).to_string_lossy();
+                let err = CStr::from_ptr((api.hackrf_error_name)(init_res)).to_string_lossy();
                 anyhow::bail!("Failed to initialize libhackrf: {}", err);
             }
 
-            let list_ptr = hackrf_device_list();
+            let list_ptr = (api.hackrf_device_list)();
             if list_ptr.is_null() {
-                hackrf_exit();
+                (api.hackrf_exit)();
                 anyhow::bail!("Failed to retrieve HackRF device list.");
             }
 
             let list = &*list_ptr;
             let count = list.devicecount as usize;
             if count == 0 {
-                hackrf_device_list_free(list_ptr);
-                hackrf_exit();
+                (api.hackrf_device_list_free)(list_ptr);
+                (api.hackrf_exit)();
                 anyhow::bail!("No HackRF device found. Please connect your device and try again.");
             }
             if index >= count {
-                hackrf_device_list_free(list_ptr);
-                hackrf_exit();
+                (api.hackrf_device_list_free)(list_ptr);
+                (api.hackrf_exit)();
                 anyhow::bail!(
                     "Device index {} out of range ({} device(s) found).",
                     index,
@@ -232,27 +237,28 @@ impl HackRfDevice {
             }
 
             let mut ptr = std::ptr::null_mut();
-            let res = hackrf_device_list_open(list_ptr, index as c_int, &mut ptr);
-            hackrf_device_list_free(list_ptr);
-            if res != 0 {
-                let err = CStr::from_ptr(hackrf_error_name(res)).to_string_lossy();
-                hackrf_exit();
+            let res = (api.hackrf_device_list_open)(list_ptr, index as c_int, &mut ptr);
+            (api.hackrf_device_list_free)(list_ptr);
+            if res != 0 || ptr.is_null() {
+                let err = CStr::from_ptr((api.hackrf_error_name)(res)).to_string_lossy();
+                (api.hackrf_exit)();
                 anyhow::bail!("Failed to open HackRF device: {} (code {})", err, res);
             }
 
-            let board_id = read_board_id(ptr).unwrap_or(0);
+            let board_id = read_board_id(api, ptr).unwrap_or(0);
             let info = DeviceInfo {
-                board_name: read_board_name(board_id),
-                serial: read_serial(ptr).unwrap_or_else(|| "unknown".into()),
-                fw_version: read_version(ptr),
-                board_rev: read_board_rev(ptr),
-                usb_api_version: read_usb_api(ptr),
+                board_name: read_board_name(api, board_id),
+                serial: read_serial(api, ptr).unwrap_or_else(|| "unknown".into()),
+                fw_version: read_version(api, ptr),
+                board_rev: read_board_rev(api, ptr),
+                usb_api_version: read_usb_api(api, ptr),
                 tuner_name: None,
                 // A HackRF reports its own firmware, so the header shows that.
                 stack: None,
             };
 
             Ok(Self {
+                api,
                 ptr,
                 caps: caps(),
                 info,
@@ -266,14 +272,21 @@ impl HackRfDevice {
 /// enumeration errors (returns an empty list) - the caller unions backends and
 /// reports "no device" only when every backend is empty.
 pub fn list() -> Vec<DeviceListing> {
+    let Ok(api) = api() else {
+        return Vec::new();
+    };
+    list_with_api(api)
+}
+
+fn list_with_api(api: &HackrfApi) -> Vec<DeviceListing> {
     let mut out = Vec::new();
     unsafe {
-        if hackrf_init() != 0 {
+        if (api.hackrf_init)() != 0 {
             return out;
         }
-        let list_ptr = hackrf_device_list();
+        let list_ptr = (api.hackrf_device_list)();
         if list_ptr.is_null() {
-            hackrf_exit();
+            (api.hackrf_exit)();
             return out;
         }
         let list = &*list_ptr;
@@ -299,8 +312,8 @@ pub fn list() -> Vec<DeviceListing> {
                 });
             }
         }
-        hackrf_device_list_free(list_ptr);
-        hackrf_exit();
+        (api.hackrf_device_list_free)(list_ptr);
+        (api.hackrf_exit)();
     }
     out
 }
@@ -362,13 +375,13 @@ pub fn caps() -> DeviceCapabilities {
 
 // ── Metadata readers (open-time only) ─────────────────────────────────────────
 
-unsafe fn read_board_id(ptr: *mut c_void) -> Option<u8> {
+unsafe fn read_board_id(api: &HackrfApi, ptr: *mut c_void) -> Option<u8> {
     let mut id = 0u8;
-    (hackrf_board_id_read(ptr, &mut id) == 0).then_some(id)
+    ((api.hackrf_board_id_read)(ptr, &mut id) == 0).then_some(id)
 }
 
-unsafe fn read_board_name(id: u8) -> String {
-    let p = hackrf_board_id_name(id);
+unsafe fn read_board_name(api: &HackrfApi, id: u8) -> String {
+    let p = (api.hackrf_board_id_name)(c_int::from(id));
     if p.is_null() {
         "Unknown".to_string()
     } else {
@@ -376,36 +389,36 @@ unsafe fn read_board_name(id: u8) -> String {
     }
 }
 
-unsafe fn read_version(ptr: *mut c_void) -> Option<String> {
+unsafe fn read_version(api: &HackrfApi, ptr: *mut c_void) -> Option<String> {
     // u8 buffer + .cast() so the pointer converts to *mut c_char on both glibc
     // (c_char = i8) and Android Bionic (c_char = u8).
     let mut buf = [0u8; 64];
-    (hackrf_version_string_read(ptr, buf.as_mut_ptr().cast(), 63) == 0).then(|| {
+    ((api.hackrf_version_string_read)(ptr, buf.as_mut_ptr().cast(), 63) == 0).then(|| {
         CStr::from_ptr(buf.as_ptr().cast())
             .to_string_lossy()
             .into_owned()
     })
 }
 
-unsafe fn read_serial(ptr: *mut c_void) -> Option<String> {
+unsafe fn read_serial(api: &HackrfApi, ptr: *mut c_void) -> Option<String> {
     let mut data = ReadPartidSerialno {
         part_id: [0; 2],
         serial_no: [0; 4],
     };
-    (hackrf_board_partid_serialno_read(ptr, &mut data) == 0).then(|| {
+    ((api.hackrf_board_partid_serialno_read)(ptr, &mut data) == 0).then(|| {
         let s = data.serial_no;
         format!("{:08x}{:08x}{:08x}{:08x}", s[0], s[1], s[2], s[3])
     })
 }
 
-unsafe fn read_board_rev(ptr: *mut c_void) -> Option<u8> {
+unsafe fn read_board_rev(api: &HackrfApi, ptr: *mut c_void) -> Option<u8> {
     let mut rev = 0u8;
-    (hackrf_board_rev_read(ptr, &mut rev) == 0).then_some(rev)
+    ((api.hackrf_board_rev_read)(ptr, &mut rev) == 0).then_some(rev)
 }
 
-unsafe fn read_usb_api(ptr: *mut c_void) -> Option<u16> {
+unsafe fn read_usb_api(api: &HackrfApi, ptr: *mut c_void) -> Option<u16> {
     let mut ver = 0u16;
-    (hackrf_usb_api_version_read(ptr, &mut ver) == 0).then_some(ver)
+    ((api.hackrf_usb_api_version_read)(ptr, &mut ver) == 0).then_some(ver)
 }
 
 /// Maps a HackRF board-revision code to a human label.
@@ -440,7 +453,124 @@ pub fn compute_bb_filter_bw(sample_rate_hz: f64) -> u32 {
 
 #[cfg(test)]
 mod tests {
+    use super::super::test_support::TestLibrary;
     use super::*;
+
+    #[test]
+    fn loader_rejects_missing_required_symbol() {
+        let fixture = TestLibrary::new(true);
+        let err = match super::super::loader::load("libhackrf", &[fixture.path()], ffi::resolve) {
+            Ok(_) => panic!("accepted an incomplete libhackrf"),
+            Err(err) => err,
+        };
+        assert!(err.contains(fixture.path()));
+        assert!(err.contains("missing required symbol hackrf_usb_api_version_read"));
+    }
+
+    #[test]
+    fn loaded_api_owns_its_library() {
+        let fixture = TestLibrary::new(false);
+        let incompatible = TestLibrary::new(true);
+        let api = super::super::loader::load(
+            "libhackrf",
+            &[
+                "/sdrtop-nonexistent-test-directory/libmissing.so",
+                incompatible.path(),
+                fixture.path(),
+            ],
+            ffi::resolve,
+        )
+        .unwrap();
+        drop(fixture);
+        assert_eq!(unsafe { (api.hackrf_init)() }, 0);
+        assert_eq!(unsafe { (api.hackrf_exit)() }, 0);
+    }
+
+    #[test]
+    fn discovery_uses_hackrf_count_and_balances_initialization() {
+        let fixture = TestLibrary::new(false);
+        assert_eq!(
+            std::mem::size_of::<HackrfDeviceList>(),
+            fixture.list_layout(0)
+        );
+        assert_eq!(
+            std::mem::offset_of!(HackrfDeviceList, usb_device_index),
+            fixture.list_layout(1)
+        );
+        assert_eq!(
+            std::mem::offset_of!(HackrfDeviceList, devicecount),
+            fixture.list_layout(2)
+        );
+        assert_eq!(
+            std::mem::offset_of!(HackrfDeviceList, usb_devices),
+            fixture.list_layout(3)
+        );
+        assert_eq!(
+            std::mem::offset_of!(HackrfDeviceList, usb_devicecount),
+            fixture.list_layout(4)
+        );
+        let api = ffi::resolve(fixture.library()).unwrap();
+        let devices = list_with_api(&api);
+        assert_eq!(devices.len(), 1);
+        assert_eq!(devices[0].index, 0);
+        assert_eq!(
+            devices[0].serial.as_deref(),
+            Some("0000000000000000123456789abcdef0")
+        );
+        assert_eq!(fixture.calls(0), 1);
+        assert_eq!(fixture.calls(1), 1);
+        assert_eq!(fixture.calls(2), 1);
+    }
+
+    #[test]
+    fn open_errors_release_lists_and_initialized_library() {
+        let fixture = TestLibrary::new(false);
+        let api = Box::leak(Box::new(ffi::resolve(fixture.library()).unwrap()));
+        for (mode, message, exits, freed) in [
+            (1, "Failed to initialize", 0, 0),
+            (2, "Failed to retrieve", 1, 0),
+            (3, "No HackRF device found", 2, 1),
+            (4, "Failed to open HackRF", 3, 2),
+            (5, "Failed to open HackRF", 4, 3),
+        ] {
+            fixture.mode(mode);
+            let err = match HackRfDevice::open_with_api(api, 0) {
+                Ok(_) => panic!("accepted failing mode {mode}"),
+                Err(err) => err,
+            };
+            assert!(err.to_string().contains(message), "{err}");
+            assert_eq!(fixture.calls(1), exits);
+            assert_eq!(fixture.calls(2), freed);
+        }
+        fixture.mode(0);
+        assert!(HackRfDevice::open_with_api(api, 1).is_err());
+        assert_eq!(fixture.calls(1), 5);
+        assert_eq!(fixture.calls(2), 4);
+        assert_eq!(fixture.calls(3), 0);
+    }
+
+    #[test]
+    fn loaded_device_preserves_optional_metadata_and_control_errors() {
+        let fixture = TestLibrary::new(false);
+        let api = Box::leak(Box::new(ffi::resolve(fixture.library()).unwrap()));
+        let device = HackRfDevice::open_with_api(api, 0).unwrap();
+        assert_eq!(device.info().board_name, "Fixture HackRF");
+        assert_eq!(device.info().fw_version, None);
+        assert_eq!(device.info().board_rev, None);
+        assert_eq!(device.info().usb_api_version, None);
+        let rate = device.set_sample_rate(10_000_000.0).unwrap();
+        assert_eq!(rate.rate_hz, 10_000_000.0);
+        assert_eq!(rate.bb_filter_hz, 10_000_000);
+        fixture.mode(6);
+        assert!(device.set_sample_rate(10_000_000.0).is_err());
+        assert!(device.set_frequency(100_000_000).is_err());
+        assert!(device.set_lna_gain(8).is_err());
+        assert!(device.set_vga_gain(2).is_err());
+        assert!(device.set_amp_enable(true).is_err());
+        drop(device);
+        assert_eq!(fixture.calls(3), 1);
+        assert_eq!(fixture.calls(1), 1);
+    }
 
     #[test]
     fn drop_detection_arithmetic() {

@@ -12,48 +12,44 @@ If you already have Rust, this is the whole thing:
 cargo install sdrtop --locked
 ```
 
-sdrtop is on [crates.io](https://crates.io/crates/sdrtop), so cargo compiles it
-on your machine and links whatever your machine actually has. Works on every
-architecture and every distribution. You still need the two libraries first,
-which is the "What you need" section below.
+sdrtop is on [crates.io](https://crates.io/crates/sdrtop). Building needs Rust
+1.88+ and a C compiler/linker. Native SDR libraries are optional at runtime.
 
 ## The shorter way, if you don't want to think about it
 
 ```sh
 curl -fsSL https://raw.githubusercontent.com/musithang/sdrtop/main/packaging/install.sh | sh
 
+# Install the runtime for a HackRF
+curl -fsSL https://raw.githubusercontent.com/musithang/sdrtop/main/packaging/install.sh | sh -s -- --hackrf
+
 # ...and with SoapySDR, if you have an Airspy, an RSP, a Pluto or a Lime
 curl -fsSL https://raw.githubusercontent.com/musithang/sdrtop/main/packaging/install.sh | sh -s -- --soapy
 ```
 
-The installer covers everything the rest of this page describes: it finds your
-package manager, installs the two libraries under whatever names your
-distribution gives them, and puts sdrtop into `/usr/local/bin` (or `~/.local`
-with `--prefix` if you would rather not use root). Then it runs the result to
-prove it works.
+The installer puts sdrtop into `/usr/local/bin`. Use `--prefix ~/.local` for
+a user-local install. It runs the binary to check compatibility with your machine.
+An incompatible architecture or libc triggers a source build through
+`cargo install sdrtop --locked`.
 
-It uses the prebuilt binary only when that binary can run on your machine, and
-it decides that by **running it**, not by guessing from your distribution's
-name. When it cannot, on a Raspberry Pi or on Ubuntu and Mint, which package the
-exact same `librtlsdr` as Debian under a different soname because of course they
-do, it makes sure Rust is present and hands over to `cargo install sdrtop
---locked` instead. That takes a few minutes and needs no
-decisions from you.
+Runtime installation is opt-in. `--hackrf` adds libhackrf. `--rtlsdr` adds
+librtlsdr. `--soapy` adds SoapySDR and its driver modules. These flags can be
+combined. A plain install of a runtime-loading release adds none of these libraries.
+Missing or incompatible libraries disable only their respective backends.
 
-**SoapySDR is not installed unless you ask.** sdrtop opens it at runtime and
-works perfectly well without it, so a plain run leaves it alone and just tells
-you at the end whether you have it and what it would buy you. `--soapy` adds the
-library and the driver modules your distribution ships. If your distribution's
-packages are named something this script has not heard of, it says so rather
-than failing, and the fix is one line in
-[`packaging/install.sh`](https://github.com/musithang/sdrtop/blob/main/packaging/install.sh)
-plus an issue so I can correct it for everyone else.
+Older releases can require native SDR development packages.
+After a recognized native-link build failure, the installer adds those packages
+and retries the same release once. It never switches to `main`.
+Use `sh install.sh --git` to select `main` explicitly. See
+[older-release build failures](troubleshooting.md#the-build-fails-looking-for-libhackrf).
 
-What it does **not** do is set up device permissions. It reports on them, and
-that is deliberate: the `libhackrf` and `rtl-sdr` packages ship their own udev
-rules, so installing the libraries is what grants access. If your radio still
-needs root afterwards, [troubleshooting](troubleshooting.md#permission-denied)
-has the fix.
+Runtime package installation is best-effort. Check warnings for packages that
+could not be installed. The runtime package lists fall back to development
+packages on some distributions. Those packages include the runtime library.
+
+The installer uses distribution packages for native SDR udev rules. It reports
+device-access advice when `--hackrf` or `--rtlsdr` is selected. See
+[troubleshooting](troubleshooting.md#permission-denied) for access problems.
 
 Read it before you pipe it into a shell if you like:
 [`packaging/install.sh`](https://github.com/musithang/sdrtop/blob/main/packaging/install.sh).
@@ -66,8 +62,10 @@ sh install.sh --version v0.4.1      # a specific release instead of the latest
 sh install.sh --from-source         # skip the prebuilt binary, always compile
 sh install.sh --git                 # compile the main branch, live dangerously
 sh install.sh --no-verify           # skip the checksum check (say why first)
+sh install.sh --hackrf              # Install the HackRF runtime
+sh install.sh --rtlsdr              # Install the RTL-SDR runtime
 sh install.sh --soapy               # add SoapySDR and its driver modules
-sh install.sh --deps-only           # the libraries and nothing else
+sh install.sh --deps-only --rtlsdr   # Install only the selected runtime
 sh install.sh --uninstall           # remove what a previous run installed
 sh install.sh --help                # this list, from the script itself
 ```
@@ -75,6 +73,10 @@ sh install.sh --help                # this list, from the script itself
 Piped straight into a shell they go after `sh -s --`, the way `--soapy` does
 higher up. `--help` is the authority here: the script prints its own flags, and
 that list cannot drift out of date the way this page can.
+
+`--deps-only` installs only the runtimes selected by `--hackrf`, `--rtlsdr`
+and `--soapy`. It never installs sdrtop or build tools. Without a runtime flag
+it exits with a usage error.
 
 `--no-verify` earns a warning of its own. It turns off the checksum check on a
 download, which is the one thing standing between you and a tarball that isn't
@@ -87,40 +89,55 @@ Everything below is the same job done by hand.
 
 ## What you need
 
-- A Linux machine
-- A HackRF One **or** an RTL-SDR dongle connected via USB
-- The `libhackrf` and `librtlsdr` libraries
-- Rust stable 1.88 or newer. Most distributions ship something older, so
-  install it with [rustup](https://rustup.rs) rather than from your package
-  manager
+- **Host:** A Linux machine.
+- **Radio:** A HackRF One, RTL-SDR or a supported SoapySDR device.
+- **Source builds:** Rust 1.88+ and a C compiler/linker. Install Rust with
+  [rustup](https://rustup.rs). Runtime-loading releases need no SDR development
+  headers or pkg-config. Older releases can require both native development libraries.
+- **Runtime:** Install only the library for the backend you use.
+
+Build tools by distribution:
 
 ```sh
 # Arch Linux / Manjaro
-sudo pacman -S hackrf rtl-sdr pkgconf
+sudo pacman -S base-devel
 
 # Debian / Ubuntu / Linux Mint / Pop!_OS
-sudo apt install libhackrf-dev librtlsdr-dev pkg-config
+sudo apt install build-essential
 
 # Fedora
-sudo dnf install hackrf-devel rtl-sdr-devel pkgconf-pkg-config
+sudo dnf install gcc
 
 # openSUSE Tumbleweed / Leap
-sudo zypper install libhackrf-devel rtl-sdr-devel pkg-config
+sudo zypper install gcc
 
 # Void Linux
-sudo xbps-install hackrf-devel rtl-sdr-devel pkg-config
+sudo xbps-install base-devel
 
 # Gentoo
-sudo emerge net-wireless/hackrf net-wireless/rtl-sdr
+sudo emerge sys-devel/gcc
 
 # NixOS: add to configuration.nix, or use a dev shell
-nix-shell -p hackrf rtl-sdr pkg-config
+nix-shell -p gcc
 ```
 
-> **Install both libraries even if you only own one radio.** sdrtop links both
-> backends at build time, so a missing `librtlsdr` breaks the build for a HackRF
-> owner and vice versa. At runtime it's perfectly happy with whichever radio you
-> actually plug in.
+Install runtime packages separately for your radio:
+
+| Distribution | HackRF | RTL-SDR |
+|---|---|---|
+| Debian / Kali / Raspberry Pi OS | `libhackrf0` | `librtlsdr0` |
+| Ubuntu / Mint / Pop!_OS | `libhackrf0` | `librtlsdr2` |
+| Arch / Manjaro / Fedora / Void | `hackrf` | `rtl-sdr` |
+| openSUSE | `libhackrf0` | `librtlsdr0` |
+| Alpine | `hackrf-libs`, `hackrf-udev` | `librtlsdr`, `librtlsdr-udev` |
+| Gentoo | `net-wireless/hackrf` | `net-wireless/rtl-sdr` |
+| Nixpkgs | `hackrf` | `rtl-sdr` |
+
+HackRF requires libhackrf 2023.01.1+ with all required symbols. RTL-SDR supports
+`librtlsdr.so.0`, `librtlsdr.so.2` and `librtlsdr.so`. HackRF supports
+`libhackrf.so.0` and `libhackrf.so`. See [hardware](hardware.md#host-platforms)
+for the runtime contract. Custom library locations must be on the dynamic
+loader's search path, for example through `LD_LIBRARY_PATH`.
 
 Rust, if you don't have it:
 
@@ -135,7 +152,7 @@ about `lock file version 4`, that's what happened, and rustup is the fix.
 
 ## Install and run
 
-With the libraries in place, either of these gets you a working `sdrtop`:
+Build and install sdrtop:
 
 ```sh
 # From crates.io, straight onto your PATH
@@ -171,11 +188,10 @@ sha256sum -c <(grep sdrtop- ../SHA256SUMS)   # check it before you trust it
 sudo install -Dm755 sdrtop /usr/local/bin/sdrtop
 ```
 
-It is x86_64 only, and it wants **glibc 2.36 or newer** plus `librtlsdr.so.0`.
-In practice that means Debian 12 and 13, Kali, and Raspberry Pi OS Bookworm.
-Ubuntu and Mint package the identical upstream library as `.so.2`, so it will
-not start there, and a Raspberry Pi is not x86_64 in the first place. On those,
-compile. It is one command, it takes a few minutes, and it always works.
+The tarball needs x86_64 Linux with glibc 2.36+. Debian 12+ and Ubuntu 24.04+
+meet that floor. Both Debian's `librtlsdr.so.0` and Ubuntu's `librtlsdr.so.2`
+are supported at runtime. Neither library is needed to start sdrtop.
+Raspberry Pi, musl-based systems and older glibc systems need a source build.
 
 From 0.4.2 onward every release also carries a signed build provenance
 attestation. The checksum only tells you the download arrived intact. This tells
