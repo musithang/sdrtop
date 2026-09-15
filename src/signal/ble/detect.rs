@@ -40,6 +40,15 @@ pub const ADVERTISING_ACCESS_ADDRESS: u32 = 0x8E89_BED6;
 
 /// How many symbols the combined reference below is: 8 for the preamble, 32
 /// for the access address.
+///
+/// No production consumer since the anti-alias filter fix to `receive.rs`:
+/// `signal::ble::receive::Receiver` builds its own reference at its own
+/// working length now (`matched_reference`, filtered through the identical
+/// pipeline the live signal goes through), rather than trusting this raw
+/// symbol count or the [`Detector`] built from it. This module's own tests
+/// below are the only remaining caller, testing the detection algorithm on
+/// its own, deliberately with no front end in the picture.
+#[allow(dead_code)]
 pub const REFERENCE_SYMBOLS: usize = 8 + 32;
 
 /// `access_address`'s 32 bits, in the order the specification transmits
@@ -88,6 +97,11 @@ pub fn preamble_bits(access_address: u32) -> [bool; 8] {
 /// 1 Mb/s symbol rate is 250 kHz of peak deviation (`h = 2 * deviation /
 /// symbol_rate`); the Gaussian filter's own bandwidth-time product is the
 /// same 0.5.
+///
+/// No production consumer, for the same reason [`REFERENCE_SYMBOLS`] has
+/// none: this arc's own tests (`receive.rs`, `measure.rs`, `sync.rs`
+/// included) are the only callers now.
+#[allow(dead_code)]
 #[derive(Clone, Copy)]
 pub struct Le1mParams {
     pub sps: usize,
@@ -122,14 +136,23 @@ impl Le1mParams {
 /// A detector for one access address on the LE 1M PHY: the preamble and the
 /// address, correlated as a single known reference.
 ///
-/// `signal::ble::receive::Receiver` owns one of these and feeds it every
-/// sample of a live capture - the first stage of B6's four-stage pipeline,
-/// the same position `dsp::correlate`'s `MatchedFilter` itself was promoted
-/// out of when this struct was built to wrap it.
+/// **No longer what the live receiver runs on.** `signal::ble::receive::
+/// Receiver` owned one of these from B6 through B9, feeding it every sample
+/// of a live capture. It stopped: a matched filter's coherence is an inner
+/// product, and correlating a signal that has been through `front_end`'s
+/// anti-alias filter against this struct's own *unfiltered* reference -
+/// exactly what building a `Detector` here would still do - collapsed a
+/// clean packet's peak coherence from 0.9998 to 0.22 in the session that
+/// found it, comfortably under threshold. `Receiver` now builds its own
+/// reference (`matched_reference`) through the identical filter instead.
+/// This struct is unchanged and stays exactly what B3 built it as: the
+/// detection algorithm's own tests, below, with no front end in the picture.
+#[allow(dead_code)]
 pub struct Detector {
     filter: MatchedFilter,
 }
 
+#[allow(dead_code)]
 impl Detector {
     pub fn new(access_address: u32, params: Le1mParams) -> Self {
         let mut bits = Vec::with_capacity(REFERENCE_SYMBOLS);
@@ -152,16 +175,14 @@ impl Detector {
     /// needs to turn a stated false-alarm rate into a threshold for this
     /// detector specifically.
     ///
-    /// This arc's own tests are the only caller: `receive.rs` needs the same
-    /// figure but already has `REFERENCE_SYMBOLS * WORKING_SPS` in hand as
-    /// plain constants at the point it needs it, with no `Detector` value
-    /// alive to ask.
-    #[allow(dead_code)]
+    /// This arc's own tests are the only caller now: `receive.rs`'s live
+    /// `Receiver` measures its own reference's length directly instead
+    /// (`matched_reference`), rather than trusting this figure or building a
+    /// `Detector` to ask it.
     pub fn len(&self) -> usize {
         self.filter.len()
     }
 
-    #[allow(dead_code)]
     pub fn is_empty(&self) -> bool {
         self.filter.is_empty()
     }

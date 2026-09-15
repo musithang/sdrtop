@@ -195,12 +195,11 @@ pub fn design_lowpass_kaiser(taps: usize, fc: f64, beta: f64) -> Vec<f32> {
 /// 80 dB as 79.96 dB in 253. The design rule is that close to calibrated, which
 /// is why `the_requested_stopband_is_delivered` holds it to half a dB either
 /// way rather than only checking that the filter is good enough.
-/// **No production consumer.** `super::resample::Resampler::new` needs this
-/// same design rule but calls [`kaiser_taps`], [`design_lowpass_kaiser`] and
-/// [`kaiser_beta`] directly rather than through this one-call wrapper -
-/// nothing else has yet needed "ask for a stopband and a transition width, get
-/// a filter" as a single step.
-#[allow(dead_code)]
+/// `super::resample::Resampler::new` needs this same design rule but calls
+/// [`kaiser_taps`], [`design_lowpass_kaiser`] and [`kaiser_beta`] directly
+/// rather than through this one-call wrapper. `signal::ble::receive::front_end`
+/// is the first caller that wants "ask for a stopband and a transition width,
+/// get a filter" as a single step: its anti-alias filter.
 pub fn design_lowpass_to_spec(fc: f64, transition: f64, stopband_db: f64) -> Vec<f32> {
     design_lowpass_kaiser(
         kaiser_taps(transition, stopband_db),

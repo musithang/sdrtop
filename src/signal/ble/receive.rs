@@ -26,12 +26,13 @@ use num_complex::Complex;
 use crate::hardware::SampleGeometry;
 use crate::signal::demod::decode as decode_iq;
 use crate::signal::dsp::code::lfsr::whiten;
-use crate::signal::dsp::correlate::threshold_for_false_alarm;
+use crate::signal::dsp::correlate::{threshold_for_false_alarm, MatchedFilter};
 use crate::signal::dsp::discriminate::discriminate;
 use crate::signal::dsp::estimate::snr_from_metric;
-use crate::signal::dsp::fir::StreamingDecimator;
+use crate::signal::dsp::fir::{design_lowpass_to_spec, StreamingDecimator};
 
-use super::detect::{Detector, Le1mParams, ADVERTISING_ACCESS_ADDRESS, REFERENCE_SYMBOLS};
+use super::detect::{access_address_bits, preamble_bits, ADVERTISING_ACCESS_ADDRESS};
+use super::gfsk;
 use super::pdu::{self, Packet};
 
 /// Samples per symbol this arc demodulates at. Not a specification
@@ -44,6 +45,21 @@ const WORKING_RATE_HZ: f64 = 1_000_000.0 * WORKING_SPS as f64;
 /// The longest a legacy advertising PDU can be: 2-byte header, up to 37
 /// bytes of payload, 3-byte CRC.
 const MAX_PDU_BYTES: usize = 2 + 37 + 3;
+
+/// How many symbols of context [`Receiver`] keeps *before* a trigger fires -
+/// see `Receiver::history` and `Receiver::try_decode`'s own docs for why the
+/// true header boundary can land on either side of the trigger sample
+/// itself, not only after it.
+const LOOKBACK_SYMBOLS: usize = 8;
+const LOOKBACK_SAMPLES: usize = LOOKBACK_SYMBOLS * WORKING_SPS;
+
+/// How many symbols either side of the nominal boundary
+/// (`Receiver::history`'s own length) `Receiver::try_decode` searches for a
+/// clean CRC. Generous relative to the few symbols of smearing `front_end`'s
+/// anti-alias filter measurably costs at the sync/header boundary - see
+/// `front_end`'s own doc - with room to spare rather than tuned to the exact
+/// worst case measured so far.
+const HEADER_SEARCH_SYMBOLS: usize = 6;
 
 /// How rare a false trigger has to be to live with continuously, at 4
 /// million matched-filter evaluations a second.
@@ -64,6 +80,22 @@ const MAX_PDU_BYTES: usize = 2 + 37 + 3;
 /// comfortably while the marginal real-air ones measured here do not.
 const FALSE_ALARM_RATE: f64 = 1e-30;
 
+/// The anti-alias filter's passband edge, in Hz: comfortably beyond LE 1M's
+/// own occupied bandwidth (250 kHz peak deviation on a 1 Mb/s, BT=0.5
+/// Gaussian-shaped symbol rate) so the matched filter's own waveform
+/// correlation is not the thing narrowed, and comfortably inside the working
+/// Nyquist ([`WORKING_RATE_HZ`] / 2 = 2 MHz) so there is real stopband left
+/// before that boundary. See `front_end`'s own doc for why this number, not
+/// a narrower one, is the one to try first.
+const ANTI_ALIAS_CUTOFF_HZ: f64 = 1_500_000.0;
+/// Transition width, in Hz, either side of the cutoff.
+const ANTI_ALIAS_TRANSITION_HZ: f64 = 500_000.0;
+/// Stopband attenuation the transition band settles to. Chosen for real
+/// rejection of what a wideband capture actually carries - neighbouring BLE
+/// channels, Wi-Fi - without the tap count a much deeper stopband would cost
+/// for no measured benefit here.
+const ANTI_ALIAS_STOPBAND_DB: f64 = 40.0;
+
 /// Build the decimator from `raw_rate` to [`WORKING_RATE_HZ`], or say why it
 /// cannot be built.
 ///
@@ -74,21 +106,58 @@ const FALSE_ALARM_RATE: f64 = 1e-30;
 /// nothing on screen to say so - the same reasoning N15's survey refusal
 /// follows for a span too narrow to plan a sweep across.
 ///
-/// **No anti-alias filter, and that is a measured choice rather than an
-/// oversight.** A Kaiser-windowed lowpass sized well inside the working
-/// Nyquist was tried here first; on this arc's own synthetic signal it
-/// measured the detector's matched-filter coherence collapsing from about
-/// 0.99 to under 0.15, for a cause this step did not run down to ground -
-/// the filter passes a plain in-band tone at unity gain, so the loss is
-/// specific to the GFSK waveform and the matched-filter comparison, not a
-/// gain or scaling bug. Plain decimation - keep every `d`th sample, filter
-/// nothing - measured 0.99 on the same signal, so that is what is here.
-/// The real cost this defers rather than removes: energy from outside the
-/// working Nyquist that a real wideband capture carries can alias into the
-/// band the detector searches, and nothing here has been measured against
-/// that on real hardware yet. HackRF's own baseband filter already narrows
-/// what reaches the ADC before this ever runs, which is why this is a
-/// deferred question and not a known-broken one.
+/// **Now carries an anti-alias filter; it did not for B6 through B9, and a
+/// real-hardware session is why it does now.** Every step through B9 shipped
+/// with plain decimation - keep every `d`th sample, filter nothing - because
+/// a first attempt at a Kaiser lowpass here, sized narrow ("well inside the
+/// working Nyquist"), collapsed this arc's own synthetic matched-filter
+/// coherence from about 0.99 to under 0.15, for a cause that attempt did not
+/// run to ground, and the plain-decimation version was what shipped instead.
+/// A real HackRF session locked continuously on channel 37 at 20 Msps, after
+/// B9, found the failure that leaving this out was always a risk for rather
+/// than a known-broken one: a flood of detector triggers, several a second,
+/// every one failing CRC, with no two decoding to consistent-looking fields -
+/// the signature of the detector matching noise and out-of-channel energy
+/// aliased back into the working band, not of a timing or CFO error on real
+/// packets (B6 and B7's own real-hardware notes describe a *different*
+/// symptom: plausible, repeatable fields with a consistent CRC failure,
+/// which is what a small timing or CFO error looks like). The two symptoms
+/// are different enough to be different bugs, so this was pursued as a
+/// second, separate fix, not a retry of B6's.
+///
+/// **The cause the first attempt did not run to ground, found this session
+/// by measuring rather than guessing again.** A second attempt at a filter
+/// here - the same shape, a cutoff reasoned to be wide enough this time -
+/// reproduced the first attempt's failure exactly, at a size that should not
+/// have: even a bare 19-tap filter with its cutoff at 0.375 cycles/sample,
+/// on an unchanged (undecimated) working-rate signal, collapsed a clean
+/// packet's peak coherence from 0.9998 to 0.22 against this receiver's own
+/// threshold of 0.35. That ruled out "too narrow a cutoff" as the
+/// explanation for either attempt. What a side-by-side measurement found
+/// instead: [`super::detect::Detector`]'s reference comes straight from
+/// `gfsk::modulate`, unfiltered, and correlating a *filtered* signal against
+/// an *unfiltered* reference is what collapses coherence - a matched
+/// filter's coherence is an inner product, far less forgiving of a shape
+/// mismatch between its two sides than an ordinary demodulator is, and it does
+/// not matter how generous the filter's own passband is if only one side of
+/// the correlation goes through it. Filtering the reference through the
+/// identical pipeline restored the same clean packet's coherence to
+/// 0.99999997. [`matched_reference`] is that fix: not a differently-sized
+/// filter, a differently-built reference.
+///
+/// **What is left honestly open.** [`ANTI_ALIAS_CUTOFF_HZ`] itself is still
+/// reasoned rather than swept - wide enough to pass LE 1M's own waveform
+/// comfortably (this fix's own tests confirm that) and narrow enough to
+/// give the aliasing case real stopband before [`WORKING_RATE_HZ`]'s Nyquist,
+/// but no measurement here says it is the *right* number, only a defensible
+/// one. Verified against this arc's synthetic coherence tests (unchanged
+/// pass/fail, same peak positions) and against a new one this fix added -
+/// `a_strong_out_of_channel_interferer_no_longer_defeats_detection` - that
+/// puts a second, unrelated GFSK signal at a raw offset chosen to fold
+/// straight onto this receiver's own passband under decimation, and checks
+/// detection survives it. **Not yet re-verified against real hardware** -
+/// that is the next real-hardware session's job, the same honest gap B6
+/// through B9 each left behind them.
 pub fn front_end(raw_rate: f64) -> Result<StreamingDecimator, String> {
     if raw_rate < WORKING_RATE_HZ {
         return Err(format!(
@@ -106,17 +175,133 @@ pub fn front_end(raw_rate: f64) -> Result<StreamingDecimator, String> {
             raw_rate / 1e6
         ));
     }
-    Ok(StreamingDecimator::new(vec![1.0], d))
+    let taps = design_lowpass_to_spec(
+        ANTI_ALIAS_CUTOFF_HZ / raw_rate,
+        ANTI_ALIAS_TRANSITION_HZ / raw_rate,
+        ANTI_ALIAS_STOPBAND_DB,
+    );
+    Ok(StreamingDecimator::new(taps, d))
 }
 
-/// One channel's live receiver: the decimator, the detector, and the capture
-/// in progress, if any.
+/// The sync-word reference to correlate against, built the way it will
+/// actually be received rather than the way [`super::detect::Detector`]
+/// builds its own.
+///
+/// **Why this cannot reuse `Detector`.** A matched filter's coherence is an
+/// inner product, not an energy measurement, and it is far less forgiving of
+/// a shape mismatch between the two sides than an ordinary demodulator is:
+/// measured directly while diagnosing the false-alarm flood `front_end`'s own
+/// doc describes, correlating this receiver's now-filtered signal against
+/// `Detector`'s unfiltered reference collapsed a clean packet's peak
+/// coherence from 0.9998 to 0.22 - comfortably under this receiver's own
+/// threshold - while filtering the reference through the identical pipeline
+/// restored it to 0.99999996. `Detector` stays exactly as it was for
+/// `signal::ble::detect`'s own tests, which deliberately test the detection
+/// algorithm with no front end in the picture; this is the front end's own
+/// reference, filtered exactly as the signal it correlates against will be.
+///
+/// Generated at the raw rate and put through [`front_end`]'s own filter and
+/// decimation - not a separately-tuned equivalent at [`WORKING_RATE_HZ`] -
+/// so the two literally cannot drift out of step with each other the way a
+/// hand-matched pair of filter designs eventually would.
+///
+/// **Built with margin on both sides, and trimmed back afterwards - not
+/// modulated as a bare 40 symbols.** The first version did exactly that, and
+/// measured two whole symbols of garbage ahead of every real header: a
+/// finite-length signal has nothing before its own first sample or after its
+/// last, so both `gfsk::modulate`'s own Gaussian filter and this front end's
+/// anti-alias filter taper their two ends toward that edge rather than
+/// toward what a real, continuing transmission would actually put there. On
+/// air the sync word is never alone - something real precedes and follows
+/// it - so [`margin_bits`] stands in for that, and only the middle, once both
+/// filters have had real context to settle against, is kept.
+///
+/// **Where to cut is exact, not swept for.** [`front_end`]'s decimator starts
+/// every fresh instance at raw sample 0 with its grid phase at 0, so decimated
+/// output index `k` is always the window starting at raw sample `k * d` -
+/// meaning [`MARGIN_SYMBOLS`] worth of *decimated* samples is exactly
+/// `MARGIN_SYMBOLS * WORKING_SPS`, independent of `raw_rate`, `d`, or the
+/// filter's own tap count: decimation preserves symbol timing exactly
+/// whenever `d` divides the raw samples per symbol evenly, which every
+/// `raw_rate` [`front_end`] accepts does by construction (`clean_multiples_
+/// of_the_working_rate_are_accepted`already holds it to that).
+///
+/// **The window's length is measured, not assumed to be
+/// `REFERENCE_SYMBOLS * WORKING_SPS`.** That figure is the *raw*, unfiltered
+/// symbol count;
+/// [`front_end`]'s filter costs `taps - 1` samples of length wherever it
+/// meets a real edge, which the margin moves away from the sync word's own
+/// edges but does not make disappear - it still costs samples in total, at
+/// the padded array's own two ends instead. Filtering the sync word alone
+/// (with no margin, discarding *only its length*, not this copy's content)
+/// gives the exact number of fully-real-context output samples to keep;
+/// asking for more than that would run the extracted window past the true
+/// sync content and into the suffix margin at its far edge - measured
+/// directly during this fix's own development, and the second of the two
+/// bugs finding this reference construction cost.
+fn matched_reference(raw_rate: f64) -> Result<Vec<Complex<f32>>, String> {
+    let sps = (raw_rate / 1_000_000.0).round().max(1.0) as usize;
+    let sample_rate = sps as f64 * 1_000_000.0;
+    let mut sync_bits = preamble_bits(ADVERTISING_ACCESS_ADDRESS).to_vec();
+    sync_bits.extend_from_slice(&access_address_bits(ADVERTISING_ACCESS_ADDRESS));
+
+    let mut padded_bits = margin_bits(MARGIN_SYMBOLS);
+    padded_bits.extend_from_slice(&sync_bits);
+    padded_bits.extend_from_slice(&margin_bits(MARGIN_SYMBOLS));
+    let padded_raw = gfsk::modulate(&padded_bits, sps, 250_000.0, sample_rate, 0.5);
+    let mut padded_filtered = Vec::new();
+    front_end(raw_rate)?.process(&padded_raw, &mut padded_filtered);
+
+    let sync_raw = gfsk::modulate(&sync_bits, sps, 250_000.0, sample_rate, 0.5);
+    let mut sync_filtered = Vec::new();
+    front_end(raw_rate)?.process(&sync_raw, &mut sync_filtered);
+    let want = sync_filtered.len();
+
+    let skip = MARGIN_SYMBOLS * WORKING_SPS;
+    if skip + want > padded_filtered.len() {
+        return Err(
+            "BLE anti-alias reference construction produced a shorter capture than expected"
+                .to_string(),
+        );
+    }
+    Ok(padded_filtered[skip..skip + want].to_vec())
+}
+
+/// How many symbols of [`margin_bits`] pad each side of [`matched_reference`]'s
+/// sync word: enough for `gfsk::modulate`'s own Gaussian filter and
+/// [`front_end`]'s own anti-alias filter to both settle into real content
+/// well before the sync word starts, with room to spare.
+const MARGIN_SYMBOLS: usize = 16;
+
+/// A fixed, non-degenerate bit pattern for [`matched_reference`]'s own
+/// margin - alternating, the same character as the preamble it sits next
+/// to, chosen only to give the shaping and anti-alias filters real content
+/// to settle against rather than to be decoded as anything itself.
+fn margin_bits(len: usize) -> Vec<bool> {
+    (0..len).map(|i| i % 2 == 0).collect()
+}
+
+/// One channel's live receiver: the decimator, the matched filter, and the
+/// capture in progress, if any.
 pub struct Receiver {
     decim: StreamingDecimator,
-    detector: Detector,
+    filter: MatchedFilter,
     threshold: f64,
+    /// The reference's own length, once filtered and decimated: not
+    /// [`super::detect::REFERENCE_SYMBOLS`] `*` [`WORKING_SPS`], because
+    /// [`front_end`]'s filter changes how many samples the reference comes
+    /// out to. Both [`threshold_for_false_alarm`] and `snr_from_metric`
+    /// below need the window length the coherence was actually measured
+    /// over, not the unfiltered figure.
+    window_len: usize,
     channel: u8,
     raw_rate: f64,
+    /// The last [`LOOKBACK_SAMPLES`] filtered samples, kept continuously
+    /// regardless of `capturing` - see `try_decode`'s own doc for why a
+    /// trigger's own position is not trusted to be the header's own first
+    /// sample, and needs samples from *before* the trigger to search
+    /// against as well as after it.
+    history: Vec<Complex<f32>>,
     capture: Vec<Complex<f32>>,
     capturing: bool,
     last_coherence: f64,
@@ -125,20 +310,17 @@ pub struct Receiver {
 impl Receiver {
     pub fn new(raw_rate: f64, channel: u8) -> Result<Self, String> {
         let decim = front_end(raw_rate)?;
-        let params = Le1mParams {
-            sps: WORKING_SPS,
-            sample_rate: WORKING_RATE_HZ,
-            deviation_hz: 250_000.0,
-            bt: 0.5,
-        };
-        let threshold =
-            threshold_for_false_alarm(REFERENCE_SYMBOLS * WORKING_SPS, FALSE_ALARM_RATE);
+        let reference = matched_reference(raw_rate)?;
+        let window_len = reference.len();
+        let threshold = threshold_for_false_alarm(window_len, FALSE_ALARM_RATE);
         Ok(Self {
             decim,
-            detector: Detector::new(ADVERTISING_ACCESS_ADDRESS, params),
+            filter: MatchedFilter::new(&reference),
             threshold,
+            window_len,
             channel,
             raw_rate,
+            history: Vec::new(),
             capture: Vec::new(),
             capturing: false,
             last_coherence: 0.0,
@@ -165,6 +347,11 @@ impl Receiver {
         let cap_limit = (16 + MAX_PDU_BYTES * 8) * WORKING_SPS;
         let mut found = Vec::new();
         for &sample in &working {
+            self.history.push(sample);
+            if self.history.len() > LOOKBACK_SAMPLES {
+                let excess = self.history.len() - LOOKBACK_SAMPLES;
+                self.history.drain(..excess);
+            }
             if self.capturing {
                 self.capture.push(sample);
                 match self.try_decode() {
@@ -176,17 +363,25 @@ impl Receiver {
                     None if self.capture.len() > cap_limit => {
                         // Either a corrupt length field or a false trigger
                         // with nothing real behind it. Either way, waiting
-                        // longer only spends memory: give up and search
-                        // again.
+                        // longer only spends memory: give up. One last,
+                        // honest attempt at the trigger's own nominal
+                        // boundary before giving up entirely - not to widen
+                        // the search further, only so a real packet that
+                        // truly was aligned there, and genuinely failed its
+                        // CRC, still shows up as that rather than vanishing
+                        // silently the way a wrong-alignment guess would.
+                        if let Some(packet) = self.try_decode_from(LOOKBACK_SAMPLES) {
+                            found.push(packet);
+                        }
                         self.capturing = false;
                         self.capture.clear();
                     }
                     None => {}
                 }
-            } else if let Some(coherence) = self.detector.push(sample) {
+            } else if let Some(coherence) = self.filter.push(sample).and_then(|m| m.coherence()) {
                 if coherence > self.threshold {
                     self.capturing = true;
-                    self.capture.clear();
+                    self.capture = self.history.clone();
                     self.last_coherence = coherence;
                 }
             }
@@ -194,9 +389,60 @@ impl Receiver {
         found
     }
 
-    /// Try to decode whatever has been captured so far. `None` means either
-    /// "not enough yet" or "the header itself is not readable yet" - both
+    /// Search a small range of candidate header start positions around the
+    /// trigger's own nominal boundary, and return the first one whose CRC
+    /// actually passes. `None` means either "not enough captured yet for
+    /// any candidate" or "no candidate in range has a clean CRC yet" - both
     /// are the same instruction to the caller: keep capturing.
+    ///
+    /// **Why a search, and not a single trusted position.** `try_decode_from`
+    /// does the real work at one candidate boundary; this exists because
+    /// the boundary itself is not a single sample, on this receiver. Design
+    /// intent was "the sample right after the trigger is the header's own
+    /// first sample" - true with no filtering in the path (B6 through B9),
+    /// and false once `front_end` gained its anti-alias filter: a filter
+    /// with any real transition band smears the sync word's own energy into
+    /// its neighbours over roughly its own settling time, on both sides of
+    /// the true boundary, and a matched filter's own peak inside that
+    /// smeared region can land on whichever nearby sample happens to
+    /// correlate best for a given capture's own noise and content - a real,
+    /// data-dependent few symbols, not a fixed offset a formula could give
+    /// back. Measured directly while chasing this: the same construction,
+    /// changed only in incidental ways (adding sixteen realistic symbols of
+    /// lead-in before the sync word, which no earlier step's synthetic
+    /// tests ever included), moved the boundary from two symbols early to
+    /// three. `find_phase` already solves the identical problem one layer
+    /// down, for the *sub-symbol* phase within one candidate; this is that
+    /// same idea at the symbol grid above it, over [`HEADER_SEARCH_SYMBOLS`]
+    /// either side of [`LOOKBACK_SAMPLES`], which is `self.capture`'s own
+    /// nominal boundary once `push` starts seeding it from
+    /// [`Receiver::history`] rather than empty.
+    fn try_decode(&self) -> Option<Packet> {
+        let center = LOOKBACK_SAMPLES as isize;
+        let step = WORKING_SPS as isize;
+        let span = HEADER_SEARCH_SYMBOLS as isize;
+        for k in -span..=span {
+            let skip = center + k * step;
+            if skip < 0 {
+                continue;
+            }
+            if let Some(packet) = self.try_decode_from(skip as usize) {
+                if packet.crc_ok {
+                    return Some(packet);
+                }
+            }
+        }
+        None
+    }
+
+    /// The actual decode, from one candidate header-start position:
+    /// `self.capture[skip..]` is treated as running from the header's own
+    /// first bit. [`try_decode`] is the search over candidate `skip`
+    /// values; `push`'s own give-up path is the other caller, once, at
+    /// exactly [`LOOKBACK_SAMPLES`] - the nominal boundary - so a real
+    /// packet that really was aligned there and genuinely failed its CRC
+    /// still gets reported as that, rather than the search silently
+    /// discarding it for lack of any clean candidate.
     ///
     /// **Runs `find_phase` on the capture, and does not trust the detector's
     /// peak position for anything beyond where the capture starts.** The
@@ -221,9 +467,13 @@ impl Receiver {
     /// `freq_offset_hz` below is that same offset, finally measured and
     /// reported rather than only corrected for blindly - the honest first
     /// step toward deciding whether that hypothesis is the right one.
-    fn try_decode(&self) -> Option<Packet> {
+    fn try_decode_from(&self, skip: usize) -> Option<Packet> {
+        if skip >= self.capture.len() {
+            return None;
+        }
+        let capture = &self.capture[skip..];
         let mut inst = Vec::new();
-        discriminate(&self.capture, WORKING_RATE_HZ, &mut inst);
+        discriminate(capture, WORKING_RATE_HZ, &mut inst);
         let symbols = inst.len() / WORKING_SPS;
         if symbols < pdu::HEADER_BITS {
             return None;
@@ -285,12 +535,12 @@ impl Receiver {
         // the two converge to the same `rho = snr / (1 + snr)` relationship
         // in the limit, so this reuses the already-tested inverse rather
         // than deriving and separately validating a second one - reasoned
-        // to be a close approximation at `REFERENCE_SYMBOLS * WORKING_SPS`
-        // samples, not proven exact for a matched filter's own statistics.
-        // `None` only at a coherence of one, which the false-alarm threshold
+        // to be a close approximation at this receiver's own window length,
+        // not proven exact for a matched filter's own statistics. `None`
+        // only at a coherence of one, which the false-alarm threshold
         // already keeps every real reading comfortably under.
-        packet.snr_db = snr_from_metric(self.last_coherence, REFERENCE_SYMBOLS * WORKING_SPS)
-            .map(|snr| 10.0 * snr.log10());
+        packet.snr_db =
+            snr_from_metric(self.last_coherence, self.window_len).map(|snr| 10.0 * snr.log10());
         packet.modulation = super::measure::modulation_quality(raw_bits, raw_symbols);
         packet.drift = super::measure::drift(raw_symbols);
         Some(packet)
@@ -302,6 +552,7 @@ mod tests {
     use super::*;
     use crate::hardware::{SampleFormat, StreamBlock};
     use crate::signal::ble::channel;
+    use crate::signal::ble::detect::Le1mParams;
     use crate::signal::ble::gfsk::modulate;
     use crate::signal::dsp::testkit::{at_snr, Rng};
 
@@ -327,7 +578,19 @@ mod tests {
             deviation_hz: 250_000.0,
             bt: 0.5,
         };
-        let mut bits = super::super::detect::preamble_bits(ADVERTISING_ACCESS_ADDRESS).to_vec();
+        // A real capture never starts the instant a packet's own first bit
+        // begins either - there is always earlier stream before it, whether
+        // the channel's own noise floor or another packet's tail. Leading
+        // padding stands in for that, the same reason the trailing padding
+        // below exists: [`front_end`]'s anti-alias filter and `gfsk::modulate`'s
+        // own Gaussian filter both taper toward a real edge, and a synthetic
+        // signal with no lead-in hands the detector exactly the edge
+        // [`matched_reference`]'s own margin exists to avoid needing.
+        let mut rng = Rng::new(4242);
+        let mut bits: Vec<bool> = (0..16).map(|_| rng.next_u64() & 1 == 1).collect();
+        bits.extend_from_slice(&super::super::detect::preamble_bits(
+            ADVERTISING_ACCESS_ADDRESS,
+        ));
         bits.extend_from_slice(&super::super::detect::access_address_bits(
             ADVERTISING_ACCESS_ADDRESS,
         ));
@@ -473,6 +736,87 @@ mod tests {
         let mut rx = Receiver::new(raw_rate, 38).unwrap();
         let packets = rx.push(&bytes, geometry);
         assert_eq!(packets.len(), 1, "expected exactly one packet");
+        assert!(packets[0].crc_ok);
+        assert_eq!(packets[0].adv_addr, Some(addr));
+    }
+
+    /// `front_end`'s anti-alias filter's own exit condition: a second,
+    /// unrelated GFSK burst riding in the same wideband capture at a raw
+    /// offset this front end's own decimate-by-5 folds straight onto DC (8
+    /// MHz, a whole multiple of the 4 MHz working rate) must not defeat
+    /// detection of the wanted packet. This is the failure a real HackRF
+    /// session found after B9 - a flood of false triggers on channel 37 with
+    /// no two decoding to consistent fields - that no earlier synthetic test
+    /// exercised, because every one of them put exactly one signal in the
+    /// capture.
+    #[test]
+    fn a_strong_out_of_channel_interferer_no_longer_defeats_detection() {
+        let addr = [0x11, 0x22, 0x33, 0x44, 0x55, 0x66];
+        let mut payload = addr.to_vec();
+        payload.push(0x01);
+        let raw_rate = 20_000_000.0;
+        let params = Le1mParams {
+            sps: (raw_rate / 1_000_000.0) as usize,
+            sample_rate: raw_rate,
+            deviation_hz: 250_000.0,
+            bt: 0.5,
+        };
+        let mut bits = super::super::detect::preamble_bits(ADVERTISING_ACCESS_ADDRESS).to_vec();
+        bits.extend_from_slice(&super::super::detect::access_address_bits(
+            ADVERTISING_ACCESS_ADDRESS,
+        ));
+        bits.extend_from_slice(&pdu::encode(37, 0x00, &payload));
+        let mut rng = Rng::new(555);
+        bits.extend((0..64).map(|_| rng.next_u64() & 1 == 1));
+        let wanted = modulate(
+            &bits,
+            params.sps,
+            params.deviation_hz,
+            params.sample_rate,
+            params.bt,
+        );
+
+        // An unrelated burst, same shape and same amplitude as the wanted
+        // signal - equal-power interference is the harder case, not a
+        // softened one - carrying its own random content over the same
+        // span, then mixed up to the aliasing offset.
+        let mut irng = Rng::new(9001);
+        let interferer_bits: Vec<bool> = (0..wanted.len() / params.sps)
+            .map(|_| irng.next_u64() & 1 == 1)
+            .collect();
+        let interferer_baseband = modulate(
+            &interferer_bits,
+            params.sps,
+            params.deviation_hz,
+            params.sample_rate,
+            params.bt,
+        );
+        const INTERFERER_OFFSET_HZ: f64 = 8_000_000.0;
+        let mixed: Vec<Complex<f32>> = wanted
+            .iter()
+            .zip(interferer_baseband.iter())
+            .enumerate()
+            .map(|(n, (&w, &i))| {
+                let phase = 2.0 * std::f64::consts::PI * INTERFERER_OFFSET_HZ * n as f64 / raw_rate;
+                let rot = Complex::new(phase.cos() as f32, phase.sin() as f32);
+                // Each half amplitude, so the combined peak sits where the
+                // single-signal tests already do rather than clipping
+                // `bytes_for`'s own eight-bit scale in a way that would
+                // confound saturation with the aliasing this test targets.
+                w * 0.5 + i * rot * 0.5
+            })
+            .collect();
+        let noisy = at_snr(&mixed, 20.0, &mut Rng::new(77));
+        let geometry = eight_bit();
+        let bytes = bytes_for(&noisy, geometry);
+
+        let mut rx = Receiver::new(raw_rate, 37).unwrap();
+        let packets = rx.push(&bytes, geometry);
+        assert_eq!(
+            packets.len(),
+            1,
+            "expected exactly one packet despite the interferer"
+        );
         assert!(packets[0].crc_ok);
         assert_eq!(packets[0].adv_addr, Some(addr));
     }
