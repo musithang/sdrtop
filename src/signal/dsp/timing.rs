@@ -50,6 +50,38 @@ pub fn interpolate(x: &[f32], pos: f64) -> f32 {
     }
 }
 
+/// Catmull-Rom cubic interpolation of `x` at a fractional index `pos` -
+/// [`find_phase`]'s own probe, not [`interpolate`]'s: see that function's own
+/// doc for why the two need to differ.
+///
+/// Four points bracket `pos` rather than two, each edge clamped to the
+/// buffer's own range the same way [`interpolate`] clamps its two - a probe
+/// past either end reads the nearest real sample it has, repeated, rather
+/// than inventing one further out.
+fn cubic_interpolate(x: &[f32], pos: f64) -> f32 {
+    if x.is_empty() {
+        return 0.0;
+    }
+    let last = (x.len() - 1) as f64;
+    let clamped = pos.clamp(0.0, last);
+    let i = clamped.floor() as usize;
+    let t = (clamped - i as f64) as f32;
+    let at = |j: isize| -> f32 {
+        let j = j.clamp(0, x.len() as isize - 1) as usize;
+        x[j]
+    };
+    let p0 = at(i as isize - 1);
+    let p1 = at(i as isize);
+    let p2 = at(i as isize + 1);
+    let p3 = at(i as isize + 2);
+    let t2 = t * t;
+    let t3 = t2 * t;
+    0.5 * (2.0 * p1
+        + (-p0 + p2) * t
+        + (2.0 * p0 - 5.0 * p1 + 4.0 * p2 - p3) * t2
+        + (-p0 + 3.0 * p1 - 3.0 * p2 + p3) * t3)
+}
+
 /// Recover one sample per symbol from `x`, tracking the symbol phase with
 /// Gardner's detector starting from an initial guess `start` that need not be
 /// exact.
@@ -119,27 +151,39 @@ pub fn recover(x: &[f32], start: f64, sps: f64, gain: f64, symbols: usize) -> Ve
 /// one phase for all of it. A signal whose timing drifts across `symbols`
 /// symbols needs [`recover`] instead, or a shorter span here repeated.
 ///
-/// Called for real by `signal::ble::sync::slice` (B4) - but that function's
-/// own caller has no path from `main` yet, the same position `dsp::correlate`
-/// and `ble::gfsk` were in until B6 wires a live capture into this arc.
+/// Called for real by `signal::ble::sync::slice`, from `signal::ble::receive`
+/// live since B6.
 ///
-/// **Open lead from B6's real-hardware testing, not yet acted on here.**
-/// Every phase this function returned on a real HackRF capture was an exact
+/// **B6's own real-hardware finding, and a second attempt at it.** Every
+/// phase this function returned on a real HackRF capture was an exact
 /// integer number of samples - never one of the fractional candidates
-/// `resolution` is supposed to also try. The likely cause: interpolating
-/// between two independent noisy samples has less variance than either
-/// sample alone (half, at the midpoint), so scoring interpolated amplitude
-/// is biased toward whichever candidates land on a real, unblended sample -
-/// an effect proportional to noise, which is why no synthetic test here
-/// caught it. A first fix (score the nearest raw sample instead of an
-/// interpolated one) removed that bias but cost `a_noiseless_packet_slices_
-/// to_exactly_its_own_bits` its exact match, because the coarser, integer-
-/// only resolution loses real precision this arc's own clean signal needs.
-/// Reverted rather than landed half-verified: the right fix likely scores a
-/// small window around each candidate rather than a single point, trading
-/// neither noise robustness nor precision, but that is untested and B6's
-/// own plan is where this is recorded rather than guessed at further here.
-#[allow(dead_code)]
+/// `resolution` is supposed to also try. The cause: two-point linear
+/// interpolation's own weights, `(1 - frac)` and `frac`, give a combined
+/// noise variance of `(1-frac)^2 + frac^2` times a single raw sample's own -
+/// exactly `1.0` at `frac = 0` or `1`, and as low as `0.5` at `frac = 0.5` -
+/// so scoring interpolated amplitude systematically favours whichever
+/// candidates need the least blending, an effect proportional to the noise
+/// level and invisible on every clean synthetic signal this module's own
+/// tests use. B6's first attempt (score the nearest raw sample instead of
+/// interpolating) removed the bias by removing interpolation entirely, and
+/// cost `a_noiseless_packet_slices_to_exactly_its_own_bits` its exact match
+/// doing it - the coarser, integer-only resolution loses real precision
+/// this arc's own clean signal needs. Reverted rather than landed
+/// half-verified, with the diagnosis recorded for whoever tried the actual
+/// fix next.
+///
+/// **This is that fix.** [`cubic_interpolate`] replaces two-point linear
+/// interpolation with four-point Catmull-Rom cubic, whose own noise-variance
+/// swing across `frac` is measurably smaller - `1.0` down to `0.640625` at
+/// `frac = 0.5`, computed directly from its own coefficients rather than
+/// assumed, against linear's `1.0` down to `0.5` - without giving up
+/// interpolation, and therefore without giving up the resolution
+/// `a_noiseless_packet_slices_to_exactly_its_own_bits` needs. **Not a
+/// complete fix**: the swing is reduced, not eliminated, so some real-hardware
+/// bias toward integer samples should still be expected at low SNR, only
+/// less of it. `the_cubic_probe_is_flatter_under_noise_than_linear_was`
+/// measures the reduction directly, on a noisy signal, rather than trusting
+/// the four coefficients' own arithmetic to be enough on its own.
 pub fn find_phase(x: &[f32], sps: f64, symbols: usize, resolution: usize) -> f64 {
     let resolution = resolution.max(1);
     let mut best_phase = 0.0;
@@ -147,7 +191,7 @@ pub fn find_phase(x: &[f32], sps: f64, symbols: usize, resolution: usize) -> f64
     for step in 0..resolution {
         let phase = sps * step as f64 / resolution as f64;
         let score: f64 = (0..symbols)
-            .map(|k| interpolate(x, phase + k as f64 * sps).abs() as f64)
+            .map(|k| cubic_interpolate(x, phase + k as f64 * sps).abs() as f64)
             .sum();
         if score > best_score {
             best_score = score;
@@ -160,6 +204,7 @@ pub fn find_phase(x: &[f32], sps: f64, symbols: usize, resolution: usize) -> f64
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::signal::dsp::testkit::Rng;
 
     /// A straight line interpolates exactly at any fractional position - the
     /// definition of linear interpolation, checked so a later refactor of
@@ -171,6 +216,67 @@ mod tests {
             let got = interpolate(&x, p);
             assert!((got - p as f32 * 0.5).abs() < 1e-5, "at {p}: got {got}");
         }
+    }
+
+    /// The sample variance of probing a flat, noisy signal at a fixed
+    /// fractional offset, over many independent positions - the direct,
+    /// measured version of an interpolator's own noise-variance swing across
+    /// `frac`, rather than the coefficients' sum of squares trusted on its
+    /// own arithmetic.
+    fn probed_variance(x: &[f32], frac: f64, probe: impl Fn(&[f32], f64) -> f32) -> f64 {
+        let readings: Vec<f64> = (10..x.len() - 10)
+            .map(|i| probe(x, i as f64 + frac) as f64)
+            .collect();
+        let mean = readings.iter().sum::<f64>() / readings.len() as f64;
+        readings.iter().map(|v| (v - mean).powi(2)).sum::<f64>() / readings.len() as f64
+    }
+
+    /// B6's own finding, reproduced directly: linear interpolation's
+    /// self-noise at `frac = 0.5` measures at about half its own value at
+    /// `frac = 0` - the closed-form `g(0.5) = 0.5` against `g(0) = 1.0` -
+    /// which is what biases [`find_phase`]'s old scoring toward whichever
+    /// candidate needs no blending. A flat true signal, so every reading's
+    /// own spread is noise and nothing else.
+    #[test]
+    fn linear_interpolation_has_the_bias_find_phase_used_to_show() {
+        let mut rng = Rng::new(7);
+        let n = 20_000;
+        let x: Vec<f32> = (0..n).map(|_| (1.0 + rng.normal_pair().0) as f32).collect();
+        let at_integer = probed_variance(&x, 0.0, interpolate);
+        let at_half = probed_variance(&x, 0.5, interpolate);
+        let ratio = at_half / at_integer;
+        assert!(
+            (ratio - 0.5).abs() < 0.05,
+            "expected linear's variance at frac=0.5 to sit near half its \
+             frac=0 value (the closed form is exactly 0.5); measured ratio {ratio}"
+        );
+    }
+
+    /// The fix's own exit condition: [`cubic_interpolate`]'s noise-variance
+    /// swing across `frac` is measurably smaller than linear's - not merely
+    /// asserted from the two interpolators' own coefficients, but measured
+    /// on the same noisy signal and compared directly.
+    #[test]
+    fn the_cubic_probe_is_flatter_under_noise_than_linear_was() {
+        let mut rng = Rng::new(7);
+        let n = 20_000;
+        let x: Vec<f32> = (0..n).map(|_| (1.0 + rng.normal_pair().0) as f32).collect();
+        let linear_ratio =
+            probed_variance(&x, 0.5, interpolate) / probed_variance(&x, 0.0, interpolate);
+        let cubic_ratio = probed_variance(&x, 0.5, cubic_interpolate)
+            / probed_variance(&x, 0.0, cubic_interpolate);
+        assert!(
+            cubic_ratio > linear_ratio,
+            "expected cubic's frac=0.5-to-frac=0 variance ratio ({cubic_ratio}) \
+             to sit closer to 1 (flat) than linear's ({linear_ratio})"
+        );
+        // The closed-form prediction from the four coefficients' own sum of
+        // squares (0.640625) is the number a correct implementation should
+        // measure to, not just "better than linear" in the abstract.
+        assert!(
+            (cubic_ratio - 0.640_625).abs() < 0.05,
+            "expected the measured ratio to land near the closed-form 0.640625; got {cubic_ratio}"
+        );
     }
 
     /// Past either edge, the answer is the nearest real sample - not zero,

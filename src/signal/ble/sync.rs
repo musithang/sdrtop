@@ -146,10 +146,22 @@ mod tests {
             let measured = errors as f64 / recovered.len() as f64;
             let ideal = ideal_noncoherent_fsk_ber(eb_n0_db);
 
-            assert!(
-                measured >= ideal * 0.5,
-                "eb/n0={eb_n0_db} dB: measured BER {measured:e} is implausibly below the ideal bound {ideal:e}"
-            );
+            // Zero errors at the highest Eb/N0 tested is not a floor
+            // violation to catch: `ideal_noncoherent_fsk_ber` falls so
+            // steeply (1e-15 at 18 dB to 1e-55 at 24 dB) that the roughly
+            // 12-15 dB implementation loss this comment already cites, on
+            // `n_bits` bits, can genuinely see none at the top end even
+            // while every other point on the curve keeps measuring the same
+            // loss it always did - a sample-size limit, not a claim the
+            // receiver beat the floor. `the_measured_ber_never_beats_the_
+            // ideal_bound` still holds the floor itself, at an Eb/N0 low
+            // enough for errors to be certain.
+            if errors > 0 {
+                assert!(
+                    measured >= ideal * 0.5,
+                    "eb/n0={eb_n0_db} dB: measured BER {measured:e} is implausibly below the ideal bound {ideal:e}"
+                );
+            }
             // Twenty dB of implementation loss as the ceiling: generous
             // against the roughly 12-15 dB actually measured, wide enough to
             // absorb run-to-run statistical noise, still tight enough that a
