@@ -63,10 +63,10 @@ impl Uncertain {
     /// A number that carries no uncertainty of its own: a specification limit, a
     /// channel centre, a count.
     ///
-    /// No production consumer yet. `Reading::new` accepts one, and both current
-    /// callers (the occupancy profile and the frequency reference card) always
-    /// have a real variance to hand, so neither has needed this.
-    #[allow(dead_code)]
+    /// Reaches `main` since B8: `ui::panels::net::bt_rf` reads
+    /// `ModulationQuality::delta_f2_max_hz` this way, a maximum of several
+    /// noisy readings with no closed-form sigma the way a mean gets one -
+    /// see that struct's own doc.
     pub fn exact(value: f64) -> Self {
         Self { value, sigma: 0.0 }
     }
@@ -103,6 +103,64 @@ impl Uncertain {
             value: self.value + delta,
             sigma: self.sigma,
         }
+    }
+
+    /// `self - other`, for two independent measurements.
+    ///
+    /// Exact, unlike [`Self::ratio`]: for independent `A` and `B`,
+    /// `Var(A - B) = Var(A) + Var(B)` is not a linearisation of anything, it
+    /// is the definition of variance under a linear combination. B9 is the
+    /// reasoned first consumer - a packet's own frequency offset measured
+    /// early versus late, the two ends of a drift `signal::ble::measure`
+    /// reports as a single number and its own honest uncertainty rather
+    /// than two numbers a reader has to subtract by eye.
+    pub fn difference(&self, other: &Uncertain) -> Self {
+        Self::from_variance(
+            self.value - other.value,
+            self.sigma * self.sigma + other.sigma * other.sigma,
+        )
+    }
+
+    /// `self / other`, for two independent measurements, with the uncertainty
+    /// propagated by first-order (delta-method) error propagation.
+    ///
+    /// `scale` and `shift` are exact because multiplying or shifting by a
+    /// known constant is linear; a ratio of two *measured* quantities is not,
+    /// so this is the first combinator here that is an approximation rather
+    /// than an identity. To first order, for independent `A` and `B`:
+    ///
+    /// ```text
+    /// Var(A/B) ~= Var(A) / B^2 + A^2 * Var(B) / B^4
+    /// ```
+    ///
+    /// the same linearisation the Guide to the Expression of Uncertainty in
+    /// Measurement uses for any combination of uncorrelated inputs. Exact in
+    /// the limit of small relative uncertainty on `other`; B8 is the reasoned
+    /// first consumer, a ratio of two deviation measurements whose own
+    /// relative uncertainty is a few percent at a workable SNR, well inside
+    /// where the linearisation holds.
+    ///
+    /// `other` at exactly zero has no meaningful ratio and gets an infinite
+    /// uncertainty rather than a divide silently producing infinity or NaN -
+    /// the same "unknown becomes infinite, not invented" rule
+    /// [`Self::from_variance`] already follows for a NaN variance.
+    ///
+    /// **The value itself carries a small bias this does not correct.**
+    /// `E[A/B]` is not exactly `E[A]/E[B]` for a ratio of two random
+    /// quantities - Jensen's inequality gives it a second-order pull of
+    /// about `(sigma_b / b)^2` relative, which this first-order expansion
+    /// does not remove. Negligible next to the reported uncertainty itself
+    /// at the relative uncertainties this arc's own measurements run at, and
+    /// measured rather than assumed:
+    /// `the_ratio_matches_a_monte_carlo_simulation_of_the_same_two_measurements`.
+    pub fn ratio(&self, other: &Uncertain) -> Self {
+        if other.value == 0.0 {
+            return Self::from_variance(f64::INFINITY, f64::INFINITY);
+        }
+        let value = self.value / other.value;
+        let variance = (self.sigma * self.sigma) / (other.value * other.value)
+            + (self.value * self.value) * (other.sigma * other.sigma) / other.value.powi(4);
+        Self::from_variance(value, variance)
     }
 
     /// Relative uncertainty, `sigma / |value|`. `None` at a value of zero, where
@@ -227,6 +285,35 @@ pub fn efficiency(variance: f64, bound: f64) -> f64 {
         return 0.0;
     }
     bound / variance
+}
+
+/// The sample mean of `x`, with its own Cramer-Rao-achieving uncertainty.
+///
+/// **A different bound from [`crlb_frequency`], for a different problem, not
+/// a substitute for it.** That bound is Moose's: a frequency read from the
+/// phase ramp of a repeated complex sequence, and its `M(M^2-1)` denominator
+/// is specific to a phase estimator's geometry. This is the elementary case
+/// instead, a constant buried in additive noise and estimated by averaging
+/// real-valued samples directly, and for i.i.d. Gaussian noise the sample
+/// mean is itself the minimum-variance unbiased estimator, achieving its own
+/// bound exactly: `Var(mean) = sigma^2 / N`, with `sigma^2` the sample
+/// variance around that mean. B7 is the reasoned first consumer: a GFSK
+/// discriminator's output over a run of whitened (so, on average, balanced)
+/// data has this exact shape, a constant carrier-frequency offset sitting in
+/// noise, and no repeated sequence a phase-ramp method could use instead.
+///
+/// `Uncertain::exact(0.0)` for fewer than two samples, where there is no
+/// variance to estimate from - not zero uncertainty, which `is_resolved`
+/// would then read as an unusually good measurement instead of a missing one.
+pub fn mean_with_uncertainty(x: &[f32]) -> Uncertain {
+    let n = x.len();
+    if n < 2 {
+        return Uncertain::from_variance(x.first().copied().unwrap_or(0.0) as f64, f64::INFINITY);
+    }
+    let mean = x.iter().map(|&v| v as f64).sum::<f64>() / n as f64;
+    let sample_variance =
+        x.iter().map(|&v| (v as f64 - mean).powi(2)).sum::<f64>() / (n - 1) as f64;
+    Uncertain::from_variance(mean, sample_variance / n as f64)
 }
 
 #[cfg(test)]
@@ -417,5 +504,153 @@ mod tests {
         assert_eq!(u.value(), 7.0);
         assert_eq!(u.sigma(), 0.5);
         assert_eq!(Uncertain::from_sigma(1.0, 0.5).expanded(2.0), 1.0);
+    }
+
+    /// A known constant buried in noise is recovered close to its true value,
+    /// within the uncertainty this function reports for itself - the basic
+    /// claim any estimator's own error bar has to make good on.
+    #[test]
+    fn the_mean_recovers_a_known_constant_within_its_own_uncertainty() {
+        let mut rng = Rng::new(1);
+        let true_value = 37_000.0f64;
+        let sigma = 5_000.0f64;
+        let samples: Vec<f32> = (0..2000)
+            .map(|_| (true_value + rng.normal_pair().0 * sigma) as f32)
+            .collect();
+        let u = mean_with_uncertainty(&samples);
+        assert!(
+            (u.value() - true_value).abs() < 4.0 * u.sigma(),
+            "value {} sigma {} true {}",
+            u.value(),
+            u.sigma(),
+            true_value
+        );
+    }
+
+    /// This is what "the uncertainty tracks SNR" means for a mean estimator:
+    /// twice as many samples of the same noisy signal, or half the noise on
+    /// the same number of samples, both halve the variance the classical
+    /// `sigma^2 / N` way - `1/sqrt(2)` on `sigma`, not on the variance itself.
+    #[test]
+    fn the_uncertainty_shrinks_with_more_samples_and_with_less_noise() {
+        let mut rng = Rng::new(2);
+        let noisy = |n: usize, sigma: f64, rng: &mut Rng| -> Vec<f32> {
+            (0..n)
+                .map(|_| (rng.normal_pair().0 * sigma) as f32)
+                .collect()
+        };
+
+        let base = mean_with_uncertainty(&noisy(1000, 1.0, &mut rng));
+        let more_samples = mean_with_uncertainty(&noisy(4000, 1.0, &mut rng));
+        let less_noise = mean_with_uncertainty(&noisy(1000, 0.5, &mut rng));
+
+        // Four times the samples: half the sigma.
+        assert!(
+            (more_samples.sigma() / base.sigma() - 0.5).abs() < 0.1,
+            "base {} more_samples {}",
+            base.sigma(),
+            more_samples.sigma()
+        );
+        // Half the per-sample noise: half the sigma too.
+        assert!(
+            (less_noise.sigma() / base.sigma() - 0.5).abs() < 0.1,
+            "base {} less_noise {}",
+            base.sigma(),
+            less_noise.sigma()
+        );
+    }
+
+    /// `Var(A - B) = Var(A) + Var(B)`, checked against a Monte Carlo
+    /// simulation of the same two independent measurements - a formula this
+    /// simple is still worth measuring rather than trusting, the same
+    /// discipline `moose_does_not_beat_its_bound` and the ratio's own test
+    /// below hold their closed forms to.
+    #[test]
+    fn the_difference_matches_a_monte_carlo_simulation_of_the_same_two_measurements() {
+        let a = Uncertain::from_sigma(10.0, 0.6);
+        let b = Uncertain::from_sigma(4.0, 0.3);
+        let z = a.difference(&b);
+        assert!((z.value() - 6.0).abs() < 1e-12);
+        assert!((z.sigma() - (0.6f64.powi(2) + 0.3f64.powi(2)).sqrt()).abs() < 1e-12);
+
+        let mut rng = Rng::new(43);
+        const TRIALS: usize = 200_000;
+        let samples: Vec<f64> = (0..TRIALS)
+            .map(|_| {
+                let da = rng.normal_pair().0 * a.sigma();
+                let db = rng.normal_pair().0 * b.sigma();
+                (a.value() + da) - (b.value() + db)
+            })
+            .collect();
+        let mean = samples.iter().sum::<f64>() / TRIALS as f64;
+        let variance =
+            samples.iter().map(|x| (x - mean).powi(2)).sum::<f64>() / (TRIALS - 1) as f64;
+        assert!((mean - z.value()).abs() < 0.01, "simulated mean {mean}");
+        assert!(
+            (variance.sqrt() / z.sigma() - 1.0).abs() < 0.02,
+            "simulated sigma {} against {}",
+            variance.sqrt(),
+            z.sigma()
+        );
+    }
+
+    /// The delta-method formula, checked against a Monte Carlo simulation of
+    /// the same two independent measurements - the same discipline
+    /// `moose_does_not_beat_its_bound` holds a closed form to, rather than
+    /// trusting the algebra on its own.
+    #[test]
+    fn the_ratio_matches_a_monte_carlo_simulation_of_the_same_two_measurements() {
+        let a = Uncertain::from_sigma(10.0, 0.6);
+        let b = Uncertain::from_sigma(4.0, 0.3);
+        let z = a.ratio(&b);
+        assert!((z.value() - 2.5).abs() < 1e-12);
+
+        let mut rng = Rng::new(42);
+        const TRIALS: usize = 200_000;
+        let samples: Vec<f64> = (0..TRIALS)
+            .map(|_| {
+                let da = rng.normal_pair().0 * a.sigma();
+                let db = rng.normal_pair().0 * b.sigma();
+                (a.value() + da) / (b.value() + db)
+            })
+            .collect();
+        let mean = samples.iter().sum::<f64>() / TRIALS as f64;
+        let variance =
+            samples.iter().map(|x| (x - mean).powi(2)).sum::<f64>() / (TRIALS - 1) as f64;
+        // Not the tight match variance gets: E[A/B] carries its own small
+        // second-order (Jensen's inequality) bias from B's own spread, which
+        // a first-order expansion around the mean does not capture - real
+        // and expected, at about `(sigma_b / b)^2` relative here, not a
+        // defect in the variance formula this test actually exists to check.
+        assert!(
+            (mean - z.value()).abs() < 0.02,
+            "simulated mean {mean} against the ratio's own {}",
+            z.value()
+        );
+        assert!(
+            (variance.sqrt() / z.sigma() - 1.0).abs() < 0.03,
+            "simulated sigma {} against the delta-method {}",
+            variance.sqrt(),
+            z.sigma()
+        );
+    }
+
+    /// A zero denominator has no ratio, and says so with an infinite
+    /// uncertainty rather than the divide's own infinity or NaN.
+    #[test]
+    fn a_zero_denominator_gives_an_unknown_ratio_not_an_invented_one() {
+        let a = Uncertain::from_sigma(10.0, 0.6);
+        let zero = Uncertain::from_sigma(0.0, 0.3);
+        assert!(a.ratio(&zero).sigma().is_infinite());
+    }
+
+    /// Fewer than two samples has no variance to estimate from, and says so
+    /// with an infinite uncertainty rather than the zero a missing variance
+    /// would otherwise default to - the same reasoning `is_resolved`'s own
+    /// tests hold every other estimator in this module to.
+    #[test]
+    fn fewer_than_two_samples_is_infinitely_uncertain_not_perfectly_known() {
+        assert_eq!(mean_with_uncertainty(&[]).sigma(), f64::INFINITY);
+        assert_eq!(mean_with_uncertainty(&[3.0]).sigma(), f64::INFINITY);
     }
 }

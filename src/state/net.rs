@@ -82,6 +82,18 @@ pub struct NetState {
     pub census: CensusState,
     pub health: NetDecodeHealth,
     pub band: BandOccupancy,
+    /// Advertising channel PDUs decoded so far this session, newest first,
+    /// capped at [`BLE_PACKET_LIMIT`].
+    pub ble_packets: std::collections::VecDeque<BlePacket>,
+    /// Why nothing is being decoded, when the radio can otherwise stream.
+    ///
+    /// B6's decoder needs the working rate `signal::ble::receive::front_end`
+    /// states, and needs the tuning to actually be one of the three
+    /// advertising channels - two conditions `net_survey`'s occupancy
+    /// measurement does not share, so this is its own refusal rather than
+    /// reusing `survey_refused`. Same reasoning as that field's own doc: a
+    /// refusal nobody can see is a silence.
+    pub ble_refused: Option<String>,
     /// The tuning the survey interrupted, so it can be given back.
     ///
     /// **In the state rather than in the task**, for the reason
@@ -166,6 +178,52 @@ pub struct NetDecodeHealth {
     pub peak_depth: u64,
     /// When the last block arrived. `None` before the first one.
     pub last_block: Option<std::time::Instant>,
+}
+
+/// How many recent PDUs [`NetState::ble_packets`] keeps. A bench instrument
+/// is read a screenful at a time, not scrolled back through a session's
+/// worth of advertising traffic; old rows fall off the end rather than
+/// growing the list forever.
+pub const BLE_PACKET_LIMIT: usize = 200;
+
+/// One decoded advertising channel PDU, as a panel shows it.
+///
+/// `crate::signal::ble::pdu::Packet` is the decode itself, pure and knowing
+/// nothing about a screen; this adds the two facts a panel needs that decode
+/// alone does not carry - which channel it arrived on and when.
+#[derive(Clone, Debug)]
+pub struct BlePacket {
+    pub channel: u8,
+    pub pdu_type: crate::signal::ble::pdu::PduType,
+    pub tx_add_random: bool,
+    pub length: u8,
+    pub adv_addr: Option<[u8; 6]>,
+    pub crc_ok: bool,
+    /// B7: read from the detector's own coherence at the moment this
+    /// packet's sync word was found. `None` only at a coherence of one -
+    /// noiseless, which does not happen on a radio - never because nothing
+    /// was measured.
+    pub snr_db: Option<f64>,
+    /// B7: the discriminator's own mean over the whole capture, with its
+    /// proper uncertainty - see `dsp::uncertainty::mean_with_uncertainty`.
+    /// This one number is both our own receiver's LO error and the
+    /// transmitter's own crystal offset, added together and not yet
+    /// separated; a radio with its own frequency reference (design section
+    /// 7) could subtract the first and leave the second, and nothing here
+    /// does that yet.
+    pub freq_offset_hz: Option<crate::signal::dsp::uncertainty::Uncertain>,
+    /// B8: modulation index, delta-f1 average, delta-f2 maximum and their
+    /// ratio, measured from this packet's own on-air symbols. `None` when
+    /// the packet was too short, or too unlucky in its particular random
+    /// content, to contain a settled run of either kind - see
+    /// `signal::ble::measure`'s own doc for what "settled" means here.
+    pub modulation: Option<crate::signal::ble::measure::ModulationQuality>,
+    /// B9: this packet's own frequency offset, read early and late, and the
+    /// drift between them. `None` under the same conditions as
+    /// `modulation` - too short a capture to give each half its own
+    /// variance.
+    pub drift: Option<crate::signal::ble::measure::Drift>,
+    pub seen: std::time::Instant,
 }
 
 /// How the census table is being read: what orders it, and where the cursor is.

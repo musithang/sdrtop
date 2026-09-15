@@ -28,13 +28,16 @@
 //! filter has to be and what decimation reaches its target rate; this module
 //! only knows how to build the filter it is asked for.
 
+pub mod code;
 pub mod correlate;
+pub mod discriminate;
 pub mod estimate;
 pub mod fir;
 pub mod nco;
 pub mod resample;
 #[cfg(test)]
 pub mod testkit;
+pub mod timing;
 pub mod uncertainty;
 pub mod window;
 
