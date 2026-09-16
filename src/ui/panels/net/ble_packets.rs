@@ -149,6 +149,30 @@ fn row(p: &BlePacket, now: std::time::Instant, theme: &crate::Theme) -> Line<'st
     ])
 }
 
+/// B11's own exit condition, on screen: packet counts per advertising
+/// channel, with the dwell fraction stated. `None` outside survey - a radio
+/// locked to one channel is not dividing its time between three, so a dwell
+/// fraction would be a claim this mode does not make.
+fn channel_summary(
+    state: &SdrMetrics,
+    theme: &crate::Theme,
+    width: usize,
+) -> Option<Line<'static>> {
+    if state.net.mode != crate::state::NetMode::Survey {
+        return None;
+    }
+    let n = crate::signal::ble::channel::advertising_channels_hz().len();
+    let c = state.net.ble_channel_packets;
+    let text = format!(
+        "CH37 {}  CH38 {}  CH39 {}  (1/{n} dwell each)",
+        c[0], c[1], c[2]
+    );
+    Some(Line::from(Span::styled(
+        truncate(&text, width),
+        Style::default().fg(theme.label),
+    )))
+}
+
 fn truncate(s: &str, width: usize) -> String {
     if s.chars().count() <= width {
         s.to_string()
@@ -219,10 +243,16 @@ impl Panel for NetBlePacketsPanel {
             return;
         }
 
-        let body = (inner.height as usize).saturating_sub(1);
+        let summary = channel_summary(state, theme, inner.width as usize);
+        let body = (inner.height as usize)
+            .saturating_sub(1)
+            .saturating_sub(summary.is_some() as usize);
         let now = std::time::Instant::now();
         for p in state.net.ble_packets.iter().take(body) {
             lines.push(row(p, now, theme));
+        }
+        if let Some(summary) = summary {
+            lines.push(summary);
         }
         f.render_widget(Paragraph::new(lines), inner);
     }
@@ -292,15 +322,56 @@ mod tests {
         assert!(bad_line < ok_line, "channel 38 (bad) should draw first");
     }
 
+    /// B11's own exit condition: packet counts per advertising channel, with
+    /// the dwell fraction stated, on the same screen as the packets
+    /// themselves - and only while surveying, since a locked radio is not
+    /// dividing its time between the three at all.
+    #[test]
+    fn survey_mode_shows_per_channel_counts_and_the_dwell_fraction() {
+        let mut m = SdrMetrics::fixture().streaming();
+        m.net.mode = crate::state::NetMode::Survey;
+        m.net.ble_channel_packets = [4, 0, 9];
+        m.net.ble_packets.push_back(packet(37, true));
+        let out = draw(NetBlePacketsPanel, 70, 10, &m).join("\n");
+        assert!(out.contains("CH37 4"), "{out}");
+        assert!(out.contains("CH38 0"), "{out}");
+        assert!(out.contains("CH39 9"), "{out}");
+        assert!(out.contains("1/3 dwell"), "{out}");
+    }
+
+    /// A radio locked to one channel is not dividing its time between three,
+    /// so the dwell fraction the survey summary states would be a claim
+    /// this mode does not make.
+    #[test]
+    fn lock_mode_hides_the_dwell_summary() {
+        let mut m = SdrMetrics::fixture().streaming();
+        m.net.mode = crate::state::NetMode::Lock;
+        m.net.ble_channel_packets = [4, 0, 9];
+        m.net.ble_packets.push_back(packet(37, true));
+        let out = draw(NetBlePacketsPanel, 70, 10, &m).join("\n");
+        assert!(!out.contains("dwell"), "{out}");
+    }
+
     #[test]
     fn it_fits_every_size_the_layout_can_hand_it() {
-        let mut populated = SdrMetrics::fixture().streaming();
+        let mut populated_survey = SdrMetrics::fixture().streaming();
+        populated_survey.net.mode = crate::state::NetMode::Survey;
+        populated_survey.net.ble_channel_packets = [4, 0, 9];
         for i in 0..5 {
-            populated.net.ble_packets.push_back(packet(37, i % 2 == 0));
+            populated_survey
+                .net
+                .ble_packets
+                .push_back(packet(37, i % 2 == 0));
         }
+        let mut populated_lock = populated_survey.clone();
+        populated_lock.net.mode = crate::state::NetMode::Lock;
         for w in 48..90u16 {
             for h in 6..20u16 {
-                for m in [populated.clone(), SdrMetrics::fixture()] {
+                for m in [
+                    populated_survey.clone(),
+                    populated_lock.clone(),
+                    SdrMetrics::fixture(),
+                ] {
                     for line in draw(NetBlePacketsPanel, w, h, &m) {
                         assert!(line.chars().count() <= w as usize, "{w}x{h}: {line:?}");
                     }

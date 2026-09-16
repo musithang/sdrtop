@@ -72,9 +72,10 @@ const TOLERANCE_HZ: u64 = SPACING_HZ / 4;
 
 /// The centre frequency of a BLE RF channel index, 0 to 39.
 ///
-/// No consumer yet: every later step in this arc, from B3's burst detection
-/// onward, needs a channel's frequency to tune to it or a hop event's
-/// frequency to name its channel, but B1 lands the table alone.
+/// Reaches `main` since B11: [`advertising_channels_hz`] calls this for
+/// exactly 37, 38 and 39 to build the rotation `tasks::net::spawn_net_survey_
+/// task` steers through; before that, [`channel_of`] was this arc's only
+/// real caller.
 pub fn centre_hz(channel: u8) -> Option<u64> {
     match channel {
         0..=DATA_LOW_LAST => Some(DATA_LOW_START_HZ + SPACING_HZ * channel as u64),
@@ -90,11 +91,40 @@ pub fn centre_hz(channel: u8) -> Option<u64> {
 
 /// The BLE channel index a frequency is the centre of, if it is one.
 ///
-/// No consumer yet, same reason as [`centre_hz`].
+/// Reaches `main` since B6: `signal::net::worker` calls this every block to
+/// learn which advertising or data channel the radio is tuned to.
 pub fn channel_of(freq_hz: u64) -> Option<u8> {
     (0..=39).find(|&channel| {
         centre_hz(channel).is_some_and(|centre| centre.abs_diff(freq_hz) <= TOLERANCE_HZ)
     })
+}
+
+/// The three advertising channels' own centres, 37 then 38 then 39 - the
+/// rotation B11's survey mode steers the tuner through, low edge to middle
+/// to high edge of the band, one at a time.
+///
+/// `.unwrap()` is safe: 37, 38 and 39 are exactly the three channels
+/// [`centre_hz`] always answers `Some` for, checked directly by
+/// `every_advertising_channel_answers` rather than trusted on the match
+/// arms above never having drifted out of sync with this list.
+pub fn advertising_channels_hz() -> [u64; 3] {
+    [
+        centre_hz(37).unwrap(),
+        centre_hz(38).unwrap(),
+        centre_hz(39).unwrap(),
+    ]
+}
+
+/// Which slot of [`advertising_channels_hz`] (and of
+/// `state::net::NetState::ble_channel_packets`) an advertising channel is -
+/// `None` for a data channel, which has no slot to tally into.
+pub fn advertising_channel_index(channel: u8) -> Option<usize> {
+    match channel {
+        37 => Some(0),
+        38 => Some(1),
+        39 => Some(2),
+        _ => None,
+    }
 }
 
 #[cfg(test)]
@@ -108,6 +138,29 @@ mod tests {
         assert_eq!(centre_hz(37), Some(2_402_000_000));
         assert_eq!(centre_hz(38), Some(2_426_000_000));
         assert_eq!(centre_hz(39), Some(2_480_000_000));
+    }
+
+    /// [`advertising_channels_hz`]'s own exit condition: the same three
+    /// frequencies, in the same low-to-high order, that
+    /// [`centre_hz`] gives each channel individually - the `.unwrap()`
+    /// inside it is safe because these three never answer `None`.
+    #[test]
+    fn every_advertising_channel_answers() {
+        assert_eq!(
+            advertising_channels_hz(),
+            [2_402_000_000, 2_426_000_000, 2_480_000_000]
+        );
+    }
+
+    /// The index matches the order [`advertising_channels_hz`] itself
+    /// returns them in, and a data channel has no slot.
+    #[test]
+    fn the_advertising_index_matches_the_frequency_order() {
+        assert_eq!(advertising_channel_index(37), Some(0));
+        assert_eq!(advertising_channel_index(38), Some(1));
+        assert_eq!(advertising_channel_index(39), Some(2));
+        assert_eq!(advertising_channel_index(0), None);
+        assert_eq!(advertising_channel_index(36), None);
     }
 
     /// The data channels either side of the jump: 10 is the last of the low

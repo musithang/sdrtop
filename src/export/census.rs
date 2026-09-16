@@ -17,7 +17,7 @@
 use crate::signal::net::census::order;
 use crate::state::SdrMetrics;
 
-pub const HEADER: &str = "address,packets,best_snr_db,crystal_offset_hz,last_seen_s";
+pub const HEADER: &str = "address,packets,best_snr_db,crystal_offset_hz,first_seen_s,last_seen_s";
 
 /// The census as CSV rows, in the order the panel is showing it.
 ///
@@ -42,11 +42,12 @@ pub fn rows(state: &SdrMetrics) -> Vec<String> {
                 .map(|u| format!("{:.1}", u.value()))
                 .unwrap_or_default();
             format!(
-                "{},{},{:.1},{},{}",
+                "{},{},{:.1},{},{},{}",
                 d.address_text(),
                 d.packets,
                 d.best_snr_db,
                 cfo,
+                now.saturating_duration_since(d.first_seen).as_secs(),
                 now.saturating_duration_since(d.last_seen).as_secs()
             )
         })
@@ -63,9 +64,9 @@ mod tests {
     fn an_empty_census_exports_a_header_and_no_rows() {
         let m = SdrMetrics::fixture().streaming();
         assert!(rows(&m).is_empty());
-        // The header still names five columns: the shape of the answer is
+        // The header still names six columns: the shape of the answer is
         // visible even when there is no answer yet.
-        assert_eq!(HEADER.split(',').count(), 5);
+        assert_eq!(HEADER.split(',').count(), 6);
     }
 
     #[test]
@@ -77,6 +78,7 @@ mod tests {
                 address: [0xf0, 0x18, 0x98, 0, 0x11, 0x22],
                 packets: 7,
                 best_snr_db: -88.0,
+                first_seen: now - Duration::from_secs(300),
                 last_seen: now - Duration::from_secs(240),
                 crystal_offset_hz: None,
             },
@@ -84,6 +86,7 @@ mod tests {
                 address: [0xa4, 0x83, 0xe7, 0x1c, 9, 0xbe],
                 packets: 1_204,
                 best_snr_db: -41.2,
+                first_seen: now - Duration::from_secs(600),
                 last_seen: now - Duration::from_secs(2),
                 crystal_offset_hz: Some(crate::signal::dsp::uncertainty::Uncertain::exact(150.0)),
             },

@@ -38,6 +38,11 @@ pub struct Device {
     /// The strongest it has been heard. See the module doc for why this is
     /// an SNR, not an RSSI.
     pub best_snr_db: f32,
+    /// When this address was first heard this session. B13's own reason to
+    /// exist: address-rotation observation needs to know when a row's
+    /// address *appeared*, not only that it exists, to say how many new
+    /// ones are showing up per unit time.
+    pub first_seen: Instant,
     /// When it was last heard.
     pub last_seen: Instant,
     /// This device's own crystal error, refined ([`Uncertain::combine`])
@@ -145,6 +150,7 @@ pub fn observe(
                 address,
                 packets: 0,
                 best_snr_db: f32::NEG_INFINITY,
+                first_seen: now,
                 last_seen: now,
                 crystal_offset_hz: None,
             });
@@ -164,6 +170,35 @@ pub fn observe(
     }
 }
 
+/// How many *new* addresses have appeared in the last `window` - design
+/// section 2.5's measurement 19, address rotation observation.
+///
+/// **A measurement about the protocol, not about a person.** BLE privacy
+/// rotates a device's own advertising address every so often; this counts
+/// how many distinct addresses are showing up, and how fast, without ever
+/// claiming two of them are the same device wearing a new one - that would
+/// need the resolving key a passive receiver does not have, and rule 1
+/// refuses to reason past what was actually measured. "Rotations per
+/// device" is not answerable from this vantage point; "how many distinct
+/// addresses appear per unit time" - the design document's own, more
+/// careful phrasing of the same measurement - is, and is what this computes.
+///
+/// A rate, not a running total: `new in the last window / window`, per
+/// minute. A device rotating on the specification's own cadence (roughly
+/// every 15 minutes for a resolvable private address) shows up as a small,
+/// intermittent bump in this number rather than a step in an ever-climbing
+/// total that never says whether the room emptied or just went quiet.
+pub fn turnover_per_minute(devices: &[Device], window: std::time::Duration, now: Instant) -> f64 {
+    if window.is_zero() {
+        return 0.0;
+    }
+    let new_count = devices
+        .iter()
+        .filter(|d| now.saturating_duration_since(d.first_seen) <= window)
+        .count();
+    new_count as f64 / (window.as_secs_f64() / 60.0)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -174,6 +209,7 @@ mod tests {
             address: [0xa4, 0x83, 0xe7, 0x1c, 0x09, last],
             packets,
             best_snr_db: snr,
+            first_seen: now - Duration::from_secs(ago_s),
             last_seen: now - Duration::from_secs(ago_s),
             crystal_offset_hz: None,
         }
@@ -299,6 +335,22 @@ mod tests {
         assert_eq!(d.packets, 1);
         assert_eq!(d.best_snr_db, 4.0);
         assert_eq!(d.crystal_offset_hz.unwrap().value(), 120.0);
+        assert_eq!(d.first_seen, now);
+    }
+
+    /// `first_seen` is set once, at the row's own birth, and does not move
+    /// on later sightings - B13's own turnover measurement needs to know
+    /// when an address *appeared*, which a `first_seen` that kept sliding
+    /// forward with every packet could never answer.
+    #[test]
+    fn first_seen_does_not_move_on_a_repeat_sighting() {
+        let born = Instant::now();
+        let later = born + Duration::from_secs(90);
+        let mut devices = Vec::new();
+        observe(&mut devices, [1, 2, 3, 4, 5, 6], None, None, born);
+        observe(&mut devices, [1, 2, 3, 4, 5, 6], None, None, later);
+        assert_eq!(devices[0].first_seen, born);
+        assert_eq!(devices[0].last_seen, later);
     }
 
     /// A second sighting of the same address updates the one row rather than
@@ -339,5 +391,33 @@ mod tests {
         assert_eq!(combined.sigma(), direct.sigma());
         // Two equal-variance readings: tighter than either alone.
         assert!(combined.sigma() < a.sigma());
+    }
+
+    /// B13's own exit condition: a rate, not a running total. Three
+    /// addresses appeared inside the window, one appeared before it, so the
+    /// count is three, turned into a per-minute rate by the window's own
+    /// length.
+    #[test]
+    fn turnover_counts_only_what_appeared_inside_the_window() {
+        let now = Instant::now();
+        let window = Duration::from_secs(120);
+        let devices = vec![
+            device(0x01, 1, 0.0, 10, now),  // 10 s ago: inside
+            device(0x02, 1, 0.0, 60, now),  // 60 s ago: inside
+            device(0x03, 1, 0.0, 119, now), // 119 s ago: inside
+            device(0x04, 1, 0.0, 200, now), // 200 s ago: outside
+        ];
+        // Three new addresses in a two-minute window is 1.5 a minute.
+        assert!((turnover_per_minute(&devices, window, now) - 1.5).abs() < 1e-9);
+    }
+
+    /// No devices, or a window of zero, is a rate of zero - not a division
+    /// by zero and not an invented figure.
+    #[test]
+    fn turnover_is_zero_with_nothing_to_count() {
+        let now = Instant::now();
+        assert_eq!(turnover_per_minute(&[], Duration::from_secs(60), now), 0.0);
+        let devices = vec![device(0x01, 1, 0.0, 5, now)];
+        assert_eq!(turnover_per_minute(&devices, Duration::ZERO, now), 0.0);
     }
 }

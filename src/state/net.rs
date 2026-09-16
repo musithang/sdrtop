@@ -94,6 +94,21 @@ pub struct NetState {
     /// reusing `survey_refused`. Same reasoning as that field's own doc: a
     /// refusal nobody can see is a silence.
     pub ble_refused: Option<String>,
+    /// How many packets the receiver has decoded on each advertising
+    /// channel this session - index 0, 1, 2 for channel 37, 38, 39, the
+    /// same low-to-high order [`crate::signal::ble::channel::
+    /// advertising_channels_hz`] returns them in.
+    ///
+    /// **Every decode attempt, not only the CRC-clean ones
+    /// [`crate::signal::net::census`] counts.** This answers "how much is
+    /// happening on this channel", which a corrupted decode still is real
+    /// evidence of; the census answers "which devices are confirmed here",
+    /// where an unconfirmed address would be an invented reading. Different
+    /// questions, so a different gate. B11's own exit condition - "packet
+    /// counts per channel, with the dwell fraction stated" - is this field
+    /// plus [`NetMode::Survey`]'s rotation always dwelling `1 /
+    /// advertising_channels_hz().len()` of a pass on each.
+    pub ble_channel_packets: [u64; 3],
     /// The tuning the survey interrupted, so it can be given back.
     ///
     /// **In the state rather than in the task**, for the reason
