@@ -86,6 +86,31 @@ impl Run {
     }
 }
 
+/// Fold one decoded BLE packet into the shared census, if it earns a place
+/// there.
+///
+/// **The census counts confirmed transmitters, not decode attempts.** An
+/// address from a packet whose CRC did not pass is not a device this
+/// receiver has actually confirmed, and counting it would be exactly the
+/// invented reading rule 2 refuses. B10's own exit condition is "every
+/// device in the room" - CRC-clean ones, which is the only kind this can
+/// honestly claim to have found. Pulled out of [`NetWorker::run`]'s own loop
+/// as a plain function of a packet and a clock, rather than tested only by
+/// building a real, noisy capture through the whole receive chain to get
+/// one - `census::observe`'s own tests already hold the census half of this
+/// to account; what only this function does is decide *whether* to call it.
+fn census_from_ble(
+    devices: &mut Vec<crate::signal::net::census::Device>,
+    p: &crate::signal::ble::pdu::Packet,
+    now: Instant,
+) {
+    if p.crc_ok {
+        if let Some(addr) = p.adv_addr {
+            crate::signal::net::census::observe(devices, addr, p.snr_db, p.freq_offset_hz, now);
+        }
+    }
+}
+
 impl NetWorker {
     pub fn new(
         sample_rx: SampleReceiver<StreamBlock>,
@@ -206,6 +231,7 @@ impl NetWorker {
                         if !packets.is_empty() {
                             let mut m = self.state.lock().unwrap_or_else(|e| e.into_inner());
                             for p in packets {
+                                census_from_ble(&mut m.net.census.devices, &p, now);
                                 m.net.ble_packets.push_front(BlePacket {
                                     channel: ch,
                                     pdu_type: p.pdu_type,
@@ -547,6 +573,54 @@ mod tests {
         assert_eq!(p.channel, CHANNEL);
         assert_eq!(p.adv_addr, Some(addr));
         assert!(p.crc_ok);
+
+        // B10's own exit condition: a confirmed device reaches the shared
+        // census too, keyed by the same address `net_ble_packets` shows.
+        assert_eq!(m.net.census.devices.len(), 1, "{:?}", m.net.census.devices);
+        assert_eq!(m.net.census.devices[0].address, addr);
+        assert_eq!(m.net.census.devices[0].packets, 1);
+    }
+
+    /// A packet whose CRC did not pass is not a confirmed transmitter - rule
+    /// 2 refuses to count an address this receiver has not actually
+    /// verified. A plain function of a packet and a clock, tested directly
+    /// as one rather than by building a real, noisy capture through the
+    /// whole receive chain to get a CRC-failing decode out the other end -
+    /// see [`census_from_ble`]'s own doc for why.
+    #[test]
+    fn a_failed_crc_does_not_reach_the_census() {
+        let mut devices = Vec::new();
+        let mut packet = crate::signal::ble::pdu::decode(&[false; 40]).unwrap();
+        packet.crc_ok = false;
+        packet.adv_addr = Some([1, 2, 3, 4, 5, 6]);
+        census_from_ble(&mut devices, &packet, Instant::now());
+        assert!(devices.is_empty(), "{devices:?}");
+    }
+
+    /// The other half of the same gate: a confirmed packet with an address
+    /// does reach the census.
+    #[test]
+    fn a_passed_crc_with_an_address_reaches_the_census() {
+        let mut devices = Vec::new();
+        let mut packet = crate::signal::ble::pdu::decode(&[false; 40]).unwrap();
+        packet.crc_ok = true;
+        packet.adv_addr = Some([1, 2, 3, 4, 5, 6]);
+        census_from_ble(&mut devices, &packet, Instant::now());
+        assert_eq!(devices.len(), 1);
+        assert_eq!(devices[0].address, [1, 2, 3, 4, 5, 6]);
+    }
+
+    /// A confirmed packet with no address at all - a PDU type that carries
+    /// none, per `pdu::decode`'s own contract - has nothing to key a census
+    /// row on, and is skipped rather than inventing an address.
+    #[test]
+    fn a_passed_crc_with_no_address_is_skipped() {
+        let mut devices = Vec::new();
+        let mut packet = crate::signal::ble::pdu::decode(&[false; 40]).unwrap();
+        packet.crc_ok = true;
+        packet.adv_addr = None;
+        census_from_ble(&mut devices, &packet, Instant::now());
+        assert!(devices.is_empty(), "{devices:?}");
     }
 
     /// Tuned off any advertising frequency, the worker says so rather than
