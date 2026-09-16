@@ -23,9 +23,11 @@ use ratatui::{
     Frame,
 };
 
+use crate::signal::dsp::uncertainty::Uncertain;
 use crate::signal::net::census::{order, Device, SORT_KEYS};
 use crate::state::SdrMetrics;
 use crate::ui::panel::{Panel, PanelChrome, Staleness, Tag};
+use crate::ui::widgets::reading::Reading;
 use crate::ui::widgets::table::{
     columns_that_fit, header, row, viewport_start, Align, Column, Sort,
 };
@@ -52,11 +54,28 @@ const COLUMNS: &[Column] = &[
         align: Align::Right,
     },
     Column {
-        title: "RSSI",
-        width: 9,
+        title: "SNR",
+        width: 8,
+        align: Align::Right,
+    },
+    Column {
+        title: "CFO",
+        width: 15,
         align: Align::Right,
     },
 ];
+
+/// `37.0 ±1.2 kHz` - a device's own refined crystal-error estimate
+/// ([`crate::signal::net::census::observe`]), through the same
+/// value-with-uncertainty cell every measurement in the app uses. `-`
+/// before any packet from this device has reported one: an absent
+/// measurement, not a zero-error clock.
+fn fmt_cfo(offset: Option<Uncertain>) -> String {
+    match offset {
+        Some(u) => Reading::new(u.scale(0.001), "kHz", f64::INFINITY).text(),
+        None => "-".to_string(),
+    }
+}
 
 /// `2 s` / `4 min` - how long ago, at the resolution anybody reads it at.
 fn ago(secs: u64) -> String {
@@ -72,7 +91,8 @@ fn cells(d: &Device, now: std::time::Instant) -> Vec<String> {
         d.address_text(),
         ago(now.saturating_duration_since(d.last_seen).as_secs()),
         d.packets.to_string(),
-        format!("{:.1} dBm", d.best_rssi_dbm),
+        format!("{:.1} dB", d.best_snr_db),
+        fmt_cfo(d.crystal_offset_hz),
     ]
 }
 
@@ -184,20 +204,23 @@ mod tests {
             Device {
                 address: [0xa4, 0x83, 0xe7, 0x1c, 0x09, 0xbe],
                 packets: 1_204,
-                best_rssi_dbm: -41.2,
+                best_snr_db: 12.3,
                 last_seen: now - Duration::from_secs(2),
+                crystal_offset_hz: Some(Uncertain::exact(85_000.0)),
             },
             Device {
                 address: [0xf0, 0x18, 0x98, 0x00, 0x11, 0x22],
                 packets: 7,
-                best_rssi_dbm: -88.0,
+                best_snr_db: 2.4,
                 last_seen: now - Duration::from_secs(240),
+                crystal_offset_hz: None,
             },
             Device {
                 address: [0x00, 0x1a, 0x11, 0xaa, 0xbb, 0xcc],
                 packets: 96,
-                best_rssi_dbm: -63.5,
+                best_snr_db: 6.9,
                 last_seen: now - Duration::from_secs(31),
+                crystal_offset_hz: Some(Uncertain::exact(-12_000.0)),
             },
         ];
         m
@@ -215,7 +238,27 @@ mod tests {
         assert!(out.contains("not an empty room"), "{out}");
         // The columns are still shown, so the shape of the answer is visible.
         assert!(out.contains("ADDRESS"), "{out}");
-        assert!(out.contains("RSSI"), "{out}");
+        assert!(out.contains("SNR"), "{out}");
+        assert!(out.contains("CFO"), "{out}");
+    }
+
+    /// The CFO cell shows the value once a device has one, and dashes when it
+    /// does not - an absent measurement, not a zero-error clock.
+    #[test]
+    fn cfo_shows_when_measured_and_dashes_when_not() {
+        let out = draw(NetCensusPanel, 70, 10, &populated()).join("\n");
+        assert!(out.contains("85.0"), "measured CFO should show: {out}");
+        assert!(out.contains("-12.0"), "a negative CFO should show: {out}");
+        // The unmeasured device's row still has a dash, not a blank cell
+        // that could be misread as zero.
+        let f0_row = out
+            .lines()
+            .find(|l| l.contains("f0:18:98"))
+            .expect("the unmeasured device's row");
+        assert!(
+            f0_row.trim_end_matches(['│', ' ']).ends_with('-'),
+            "{f0_row:?}"
+        );
     }
 
     /// The chrome says how the table is ordered, so the answer does not depend

@@ -121,6 +121,59 @@ impl Uncertain {
         )
     }
 
+    /// Combine two independent measurements of the same quantity by
+    /// inverse-variance weighting - the minimum-variance unbiased combination
+    /// of two independent, unbiased estimates whose own sigmas are already
+    /// known going in (Aitken, 1935; the standard result for combining
+    /// independent measurements, e.g. Bevington and Robinson, *Data
+    /// Reduction and Error Analysis*). A different question from
+    /// [`mean_with_uncertainty`]'s, which *estimates* the variance from the
+    /// sample itself rather than taking it as given - the two agree only in
+    /// the limit of a sigma estimated from enough samples to trust, not for
+    /// any two arbitrary numbers.
+    ///
+    /// `value = (a / sigma_a^2 + b / sigma_b^2) / (1 / sigma_a^2 + 1 /
+    /// sigma_b^2)`, `Var = 1 / (1 / sigma_a^2 + 1 / sigma_b^2)`. An exact
+    /// input (`sigma = 0`) gets infinite weight, so combining anything with
+    /// an exact value returns that exact value unchanged - two disagreeing
+    /// exact values are a caller error, not something to average away
+    /// silently, so the one already held wins rather than inventing a
+    /// compromise neither measurement actually reported. Combining two
+    /// unknown (`sigma` infinite) measurements stays unknown rather than
+    /// dividing zero total weight into a value from nothing, the same
+    /// "unknown does not become known by adding another unknown"
+    /// [`Self::from_variance`] already holds for a `NaN` variance.
+    ///
+    /// `signal::net::census` is the reasoned first consumer: refining one
+    /// device's own crystal-offset estimate as more of its packets are
+    /// heard, rather than keeping only the latest reading or discarding
+    /// every one but the first.
+    pub fn combine(&self, other: &Uncertain) -> Self {
+        let weight = |sigma: f64| -> f64 {
+            if sigma > 0.0 {
+                1.0 / (sigma * sigma)
+            } else {
+                f64::INFINITY
+            }
+        };
+        let wa = weight(self.sigma);
+        let wb = weight(other.sigma);
+        if wa.is_infinite() {
+            return *self;
+        }
+        if wb.is_infinite() {
+            return *other;
+        }
+        let total = wa + wb;
+        if total <= 0.0 {
+            // Both inputs are already unknown (infinite sigma): the weighted
+            // value would be zero divided by zero, not a real answer.
+            return Self::from_variance(self.value, f64::INFINITY);
+        }
+        let value = (self.value * wa + other.value * wb) / total;
+        Self::from_variance(value, 1.0 / total)
+    }
+
     /// `self / other`, for two independent measurements, with the uncertainty
     /// propagated by first-order (delta-method) error propagation.
     ///
@@ -592,6 +645,63 @@ mod tests {
             variance.sqrt(),
             z.sigma()
         );
+    }
+
+    /// Two independent estimates with the same, externally known sigma: the
+    /// combined value is their plain mean, and the combined sigma shrinks by
+    /// `sqrt(2)`, not by `2` - the textbook closed form for equal-variance
+    /// inverse-variance weighting, checked directly rather than only cited.
+    /// Not the same claim as `mean_with_uncertainty` over the same two
+    /// numbers: that function *estimates* the variance from the sample
+    /// itself (Bessel-corrected, noisy at `N = 2`), where this combines two
+    /// sigmas already known going in - related ideas, not one formula.
+    #[test]
+    fn combining_two_equal_variance_estimates_halves_the_variance() {
+        let a = Uncertain::from_sigma(10.0, 2.0);
+        let b = Uncertain::from_sigma(14.0, 2.0);
+        let combined = a.combine(&b);
+        assert!((combined.value() - 12.0).abs() < 1e-12);
+        assert!((combined.sigma() - 2.0 / 2.0f64.sqrt()).abs() < 1e-9);
+    }
+
+    /// A tighter estimate should pull the combined value further toward
+    /// itself than a looser one does - inverse-variance weighting's whole
+    /// point, checked on an asymmetric pair rather than only the equal-
+    /// variance case above.
+    #[test]
+    fn a_tighter_estimate_outweighs_a_looser_one() {
+        let tight = Uncertain::from_sigma(0.0, 1.0);
+        let loose = Uncertain::from_sigma(100.0, 50.0);
+        let combined = tight.combine(&loose);
+        assert!(
+            combined.value() < 5.0,
+            "expected the combination to sit close to the tight estimate, got {}",
+            combined.value()
+        );
+        assert!(
+            combined.sigma() < tight.sigma(),
+            "combining can only tighten, never loosen"
+        );
+    }
+
+    /// An exact input has infinite weight, so it wins outright rather than
+    /// being averaged with something less certain - two disagreeing exact
+    /// values are a caller error, not something to split the difference on.
+    #[test]
+    fn an_exact_value_overrides_an_uncertain_one() {
+        let exact = Uncertain::exact(5.0);
+        let uncertain = Uncertain::from_sigma(3.0, 2.0);
+        assert_eq!(exact.combine(&uncertain), exact);
+        assert_eq!(uncertain.combine(&exact), exact);
+    }
+
+    /// Two unknowns combine to an unknown, not to a value invented from
+    /// dividing zero total weight.
+    #[test]
+    fn combining_two_unknowns_stays_unknown() {
+        let a = Uncertain::from_variance(1.0, f64::NAN);
+        let b = Uncertain::from_variance(2.0, f64::NAN);
+        assert!(a.combine(&b).sigma().is_infinite());
     }
 
     /// The delta-method formula, checked against a Monte Carlo simulation of
