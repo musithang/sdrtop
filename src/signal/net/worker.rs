@@ -230,6 +230,11 @@ impl NetWorker {
                         let packets = rx.push(&bytes, self.geometry);
                         if !packets.is_empty() {
                             let mut m = self.state.lock().unwrap_or_else(|e| e.into_inner());
+                            if let Some(i) =
+                                crate::signal::ble::channel::advertising_channel_index(ch)
+                            {
+                                m.net.ble_channel_packets[i] += packets.len() as u64;
+                            }
                             for p in packets {
                                 census_from_ble(&mut m.net.census.devices, &p, now);
                                 m.net.ble_packets.push_front(BlePacket {

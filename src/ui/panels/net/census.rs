@@ -96,6 +96,30 @@ fn cells(d: &Device, now: std::time::Instant) -> Vec<String> {
     ]
 }
 
+/// B13's own window for "per unit time": five minutes, long enough to see a
+/// handful of rotations from a device turning its address over on the
+/// specification's own cadence (roughly every 15 minutes) without the
+/// figure jumping to zero every time nobody new has shown up in the last
+/// few seconds.
+const TURNOVER_WINDOW: std::time::Duration = std::time::Duration::from_secs(300);
+
+/// B13's exit condition, on screen: how many distinct addresses have
+/// appeared per unit time - a measurement about the protocol's own address
+/// rotation, not a claim about which of them are the same device wearing a
+/// new one. See [`crate::signal::net::census::turnover_per_minute`]'s own
+/// doc for why that claim is not this measurement's to make.
+fn turnover_line(
+    devices: &[Device],
+    now: std::time::Instant,
+    theme: &crate::Theme,
+) -> Line<'static> {
+    let rate = crate::signal::net::census::turnover_per_minute(devices, TURNOVER_WINDOW, now);
+    Line::from(Span::styled(
+        format!("{rate:.1} new addresses/min (last 5 min)"),
+        Style::default().fg(theme.label),
+    ))
+}
+
 impl Panel for NetCensusPanel {
     fn name(&self) -> &'static str {
         "net_census"
@@ -179,13 +203,15 @@ impl Panel for NetCensusPanel {
             return;
         }
 
-        // One row for the header, so the list gets the rest.
-        let body = inner.height.saturating_sub(1) as usize;
+        // One row for the header and one for the turnover summary, so the
+        // list gets the rest.
+        let body = (inner.height as usize).saturating_sub(2);
         let cursor = census.cursor(&addresses).unwrap_or(0);
         let start = viewport_start(census.first_visible, cursor, devices.len(), body);
         for (i, d) in devices.iter().enumerate().skip(start).take(body) {
             lines.push(row(COLUMNS, fit, &cells(d, now), i == cursor, theme));
         }
+        lines.push(turnover_line(&devices, now, theme));
         f.render_widget(Paragraph::new(lines), inner);
     }
 }
@@ -205,6 +231,7 @@ mod tests {
                 address: [0xa4, 0x83, 0xe7, 0x1c, 0x09, 0xbe],
                 packets: 1_204,
                 best_snr_db: 12.3,
+                first_seen: now - Duration::from_secs(600),
                 last_seen: now - Duration::from_secs(2),
                 crystal_offset_hz: Some(Uncertain::exact(85_000.0)),
             },
@@ -212,6 +239,12 @@ mod tests {
                 address: [0xf0, 0x18, 0x98, 0x00, 0x11, 0x22],
                 packets: 7,
                 best_snr_db: 2.4,
+                // Clearly inside the five-minute turnover window, not on
+                // its boundary: the panel calls `Instant::now()` again at
+                // render time, later than this fixture's own `now`, so a
+                // value exactly at the window's edge could land either side
+                // of it depending on how much time the test itself takes.
+                first_seen: now - Duration::from_secs(250),
                 last_seen: now - Duration::from_secs(240),
                 crystal_offset_hz: None,
             },
@@ -219,6 +252,7 @@ mod tests {
                 address: [0x00, 0x1a, 0x11, 0xaa, 0xbb, 0xcc],
                 packets: 96,
                 best_snr_db: 6.9,
+                first_seen: now - Duration::from_secs(90),
                 last_seen: now - Duration::from_secs(31),
                 crystal_offset_hz: Some(Uncertain::exact(-12_000.0)),
             },
@@ -259,6 +293,15 @@ mod tests {
             f0_row.trim_end_matches(['│', ' ']).ends_with('-'),
             "{f0_row:?}"
         );
+    }
+
+    /// B13's own exit condition: two of `populated`'s three devices were
+    /// first seen inside the five-minute window (-250 s and -90 s; -600 s
+    /// was not), so the rate is `2 / 5 minutes`.
+    #[test]
+    fn the_turnover_line_counts_only_recent_first_sightings() {
+        let out = draw(NetCensusPanel, 70, 12, &populated()).join("\n");
+        assert!(out.contains("0.4 new addresses/min"), "{out}");
     }
 
     /// The chrome says how the table is ordered, so the answer does not depend

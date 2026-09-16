@@ -228,11 +228,16 @@ impl App {
                 .scope()
                 .map(|s| s.id.clone())
                 .unwrap_or_default();
+            // On the shared side, not only the snapshot below - `tasks::net`'s
+            // survey task reads this off this thread to decide whether a BLE
+            // preset means rotating the three advertising channels instead of
+            // the wideband occupancy grid (B11). Setting it only on `m`, the
+            // clone, was exactly the bug `section` above already had and was
+            // fixed for: it looked right on every screen and meant the one
+            // reader on another thread saw an empty string for ever.
+            guard.ui.active_preset = active_preset.clone();
             guard.clone()
         };
-        // Mirror the engine's active preset into the cloned snapshot so the
-        // footer can render it without reaching into the engine.
-        m.ui.active_preset = active_preset;
         m.ui.preset_names = self.engine.preset_names();
         // The footer names the keys that work right now, and the digits are
         // scoped, so it reads the active section rather than keeping a table.
@@ -1068,6 +1073,37 @@ mod tests {
             !snapshot_side.contains("ui.section ="),
             "ui.section is written to the snapshot after the clone, so every \
              reader off the UI thread sees an empty string"
+        );
+    }
+
+    /// **The same bug, in the same shape, found the same way `ui.section`'s
+    /// own bug was.** B11 made `tasks::net`'s survey task the first reader of
+    /// `active_preset` off the UI thread - to decide whether a BLE preset
+    /// means rotating the three advertising channels rather than covering the
+    /// wideband occupancy grid - and it read an empty string every time,
+    /// because `active_preset` was written to `m`, the snapshot, one line
+    /// after `guard.clone()`, exactly where `ui.section` used to be written
+    /// before the test above existed. Every screen still looked right, for
+    /// the same reason: every panel renders from the snapshot, and the one
+    /// consumer that does not is off this thread.
+    #[test]
+    fn the_active_preset_is_mirrored_into_the_shared_state_and_not_only_the_snapshot() {
+        let src = include_str!("mod.rs");
+        let body = src
+            .split_once("let demod_preset = self.engine.is_panel_visible(\"fm_demod\");")
+            .expect("the frame composition has been rewritten")
+            .1
+            .split_once("self.engine.render(")
+            .map(|(before, _)| before)
+            .unwrap_or(src);
+        let (guard_side, _snapshot_side) = body
+            .split_once("guard.clone()")
+            .expect("the snapshot is no longer a clone of the guard");
+        assert!(
+            guard_side.contains("guard.ui.active_preset ="),
+            "active_preset must be written to the shared state: tasks::net's \
+             survey task reads it from there, not from the frame, to tell a \
+             BLE preset's rotation from the wideband survey"
         );
     }
 

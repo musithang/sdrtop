@@ -19,6 +19,13 @@
 //! different sections and only one section is on screen at a time. It can fight
 //! the user, who may retune while a pass is running; the pass wins until the
 //! mode is switched to lock, which is what lock is for.
+//!
+//! **B11: one preset gets a different plan, not a different mode.** On the
+//! `net_ble` preset, survey means rotating `signal::ble::channel::
+//! advertising_channels_hz`'s three fixed channels rather than covering the
+//! wideband occupancy grid `signal::net::survey::Plan` computes - design
+//! section 13.1's survey-versus-lock claim still applies unchanged, it is
+//! only the positions that differ.
 
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
@@ -38,9 +45,14 @@ pub fn spawn_net_survey_task(state: Arc<Mutex<SdrMetrics>>, device: Arc<dyn SdrD
         let mut pass = 0u64;
         // Said once, not once a poll.
         let mut refused = false;
+        // Tracked separately from `surveying`, which only says whether *some*
+        // survey is running: switching presets mid-survey, from the wideband
+        // one to BLE's rotation or back, needs its own announcement even
+        // though a survey was already under way either side of the switch.
+        let mut was_ble = false;
 
         loop {
-            let (active, span_hz, rate_hz, tuned) = {
+            let (active, span_hz, rate_hz, tuned, is_ble) = {
                 let m = state.lock().unwrap_or_else(|e| e.into_inner());
                 let span = if m.radio.bb_filter_hz > 0 {
                     (m.radio.bb_filter_hz as f64).min(m.radio.config_sample_rate)
@@ -52,6 +64,7 @@ pub fn spawn_net_survey_task(state: Arc<Mutex<SdrMetrics>>, device: Arc<dyn SdrD
                     span,
                     m.radio.config_sample_rate,
                     m.radio.frequency,
+                    m.ui.active_preset == "net_ble",
                 )
             };
 
@@ -81,6 +94,55 @@ pub fn spawn_net_survey_task(state: Arc<Mutex<SdrMetrics>>, device: Arc<dyn SdrD
                 tokio::time::sleep(IDLE_POLL).await;
                 continue;
             }
+
+            // **B11's rotation is a different plan under the same mode, not a
+            // different mode.** Design section 13.1 makes survey-or-lock part
+            // of what a reading claims, and that claim is unaffected by
+            // *which* positions a survey visits - a BLE preset asking Survey
+            // to rotate the three advertising channels instead of the whole
+            // band is still "hop across the band, dwell, gather statistics";
+            // it just has a different band to cover. Kept out of `Plan`
+            // itself, whose own `covered()` answers a cell-occupancy question
+            // this rotation has no matching answer for.
+            if is_ble {
+                if !was_ble {
+                    let mut m = state.lock().unwrap_or_else(|e| e.into_inner());
+                    if !surveying {
+                        m.net.pre_survey_hz = Some(tuned);
+                    }
+                    m.net.survey_refused = None;
+                    let hops = crate::signal::ble::channel::advertising_channels_hz();
+                    m.push_log(format!(
+                        "NET survey: BLE advertising rotation, {} channels (37/38/39), \
+                         {} ms a pass, 1/{} dwell each",
+                        hops.len(),
+                        ((SETTLE + DWELL) * hops.len() as u32).as_millis(),
+                        hops.len()
+                    ));
+                }
+                surveying = true;
+                was_ble = true;
+                for hz in crate::signal::ble::channel::advertising_channels_hz() {
+                    {
+                        let m = state.lock().unwrap_or_else(|e| e.into_inner());
+                        if !m.ui.is_net_section()
+                            || m.net.mode != NetMode::Survey
+                            || m.ui.active_preset != "net_ble"
+                        {
+                            break;
+                        }
+                    }
+                    let _ = device.set_frequency(hz);
+                    {
+                        let mut m = state.lock().unwrap_or_else(|e| e.into_inner());
+                        m.radio.frequency = hz;
+                    }
+                    tokio::time::sleep(SETTLE + DWELL).await;
+                }
+                pass = pass.wrapping_add(1);
+                continue;
+            }
+            was_ble = false;
 
             let plan = Plan::for_span(span_hz, pass);
             let bins = crate::signal::net::scan::bins_for(rate_hz);
