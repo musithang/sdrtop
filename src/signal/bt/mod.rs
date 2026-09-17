@@ -17,7 +17,15 @@
 //! yields the LAP for free, with no piconet membership required first.
 //!
 //! Split the same way `signal::ble` is - detect, sync, decode, measure -
-//! as each stage arrives; B14 is [`access_code`] alone, the piece every
-//! later stage in this module needs and none of them has yet.
+//! as each stage arrives; B14 landed [`access_code`] alone. B15 adds
+//! [`channel`] (which of the 79 channels a capture can see at all),
+//! [`detect`] (the same access-code check, made incremental for a live bit
+//! stream with no end) and [`receive`] (the per-channel front end that
+//! actually produces one), and wires classic Bluetooth into
+//! `signal::net::worker` for the first time - `net_bt_hops`, not a payload
+//! decode, which is a later stage still.
 
 pub mod access_code;
+pub mod channel;
+pub mod detect;
+pub mod receive;

@@ -19,9 +19,16 @@
 //! frequencies the radio is tuned to.** It runs here rather than in its own
 //! task because it needs the same per-block bytes the occupancy scan already
 //! has - a second worker reading the same channel would need its own copy of
-//! the geometry and the retune-detection logic this one already carries. Wi-Fi
-//! and classic Bluetooth arrive the same way when their own arcs reach this
-//! point.
+//! the geometry and the retune-detection logic this one already carries.
+//!
+//! **B15 added the second: classic Bluetooth, on the `net_bt` preset.**
+//! Unlike BLE, there is no fixed set of channels to gate on - every one of
+//! the 79 is valid - so this worker builds one `signal::bt::receive::
+//! Receiver` per channel `signal::bt::channel::channels_in_span` and the
+//! configured [`SAFE_BT_CHANNELS`]-guarded cap together let it watch, closest
+//! to the tuned centre first, and rebuilds the fleet whenever the tuning or
+//! the wanted channel list changes. Wi-Fi arrives the same way when that arc
+//! reaches this point.
 
 use std::sync::{Arc, Mutex};
 use std::time::Instant;
@@ -30,10 +37,25 @@ use crossbeam_channel::Receiver as SampleReceiver;
 
 use crate::hardware::{SampleGeometry, StreamBlock};
 use crate::signal::ble::receive::Receiver as BleReceiver;
+use crate::signal::bt::receive::Receiver as BtReceiver;
 use crate::signal::stream::plan_block;
-use crate::state::{BlePacket, SdrMetrics};
+use crate::state::{BlePacket, BtHop, SdrMetrics};
 
 use super::scan::Scan;
+
+/// The name `net_bt`'s own preset carries in the menu, gating this worker's
+/// classic Bluetooth branch the same way `signal::net::gate` gates whole
+/// presets elsewhere - a plain string comparison because that is what the
+/// menu itself is keyed by (`app/builder/registry.rs`'s own structural
+/// tests hold this string and the preset file's name to agreeing).
+const NET_BT_PRESET: &str = "net_bt";
+
+/// Above this many simultaneous classic BT channels, `NetWorker::new` logs a
+/// warning naming the cost rather than staying quiet about it -
+/// `signal::bt::receive`'s own doc has the measured tap counts this is
+/// guarding against. Matches `config::default_bt_channels`, so a default
+/// config never warns; only a config that deliberately asks for more does.
+pub const SAFE_BT_CHANNELS: usize = 8;
 
 /// How much *observation* a dwell is, before it is published and started again.
 ///
@@ -56,6 +78,10 @@ pub struct NetWorker {
     pub sample_rx: SampleReceiver<StreamBlock>,
     pub state: Arc<Mutex<SdrMetrics>>,
     pub geometry: SampleGeometry,
+    /// How many classic BT channels to give a live receiver at once - see
+    /// [`SAFE_BT_CHANNELS`] and `signal::bt::receive`'s own doc for why this
+    /// is capped rather than left to follow the full view.
+    pub bt_channels: usize,
 }
 
 /// What the worker carries from one block to the next.
@@ -116,11 +142,22 @@ impl NetWorker {
         sample_rx: SampleReceiver<StreamBlock>,
         state: Arc<Mutex<SdrMetrics>>,
         geometry: SampleGeometry,
+        bt_channels: usize,
     ) -> Self {
+        if bt_channels > SAFE_BT_CHANNELS {
+            let mut m = state.lock().unwrap_or_else(|e| e.into_inner());
+            m.push_log(format!(
+                "NET: [net].bt_channels = {bt_channels} asks for real capacity - \
+                 classic Bluetooth's own 1 MHz channel spacing makes each watched \
+                 channel expensive (see signal::bt::receive's own doc); the \
+                 default of {SAFE_BT_CHANNELS} is the reasoned-safe figure"
+            ));
+        }
         Self {
             sample_rx,
             state,
             geometry,
+            bt_channels,
         }
     }
 
@@ -129,6 +166,7 @@ impl NetWorker {
         let pair_bytes = self.geometry.bytes_per_pair() as u64;
         let mut scan: Option<Scan> = None;
         let mut ble: Option<BleReceiver> = None;
+        let mut bt: Vec<BtReceiver> = Vec::new();
 
         while let Ok(StreamBlock {
             seq,
@@ -159,7 +197,7 @@ impl NetWorker {
             let broke = started && !plan.contiguous;
             run.blocks = if broke || !started { 1 } else { run.blocks + 1 };
 
-            let (still_open, centre_hz, rate_hz, span_hz) = {
+            let (still_open, centre_hz, rate_hz, span_hz, is_net_bt) = {
                 let mut m = self.state.lock().unwrap_or_else(|e| e.into_inner());
                 let h = &mut m.net.health;
                 h.blocks_in = h.blocks_in.saturating_add(1);
@@ -183,6 +221,7 @@ impl NetWorker {
                     m.radio.frequency as f64,
                     m.radio.config_sample_rate,
                     span.min(m.radio.config_sample_rate),
+                    m.ui.active_preset == NET_BT_PRESET,
                 )
             };
 
@@ -268,21 +307,74 @@ impl NetWorker {
                 }
             }
 
-            // `net_bt`: B14 landed `signal::bt::access_code`'s own detection
-            // primitive, not a live receiver to feed it - so this preset is
-            // always refused today, honestly, rather than reusing the
-            // census's own "quiet room" wording for a state that is not
-            // that. See `NetState::bt_refused`'s own doc.
-            {
+            // `net_bt`: B15's own live receiver, one per channel the current
+            // tuning and `self.bt_channels` together let it watch. Not
+            // gated on `still_open` the way BLE's block above is guarded
+            // twice over (once by `channel_of` returning `None`, once by
+            // this preset's own name) - classic BT has no fixed channel set
+            // to fall back on, so the preset name is the only gate there is.
+            if is_net_bt && still_open {
+                let mut wanted = crate::signal::bt::channel::channels_in_span(centre_hz, span_hz);
+                wanted.sort_by_key(|&ch| {
+                    let f = crate::signal::bt::channel::centre_hz(ch).unwrap_or(0) as f64;
+                    (f - centre_hz).abs() as u64
+                });
+                wanted.truncate(self.bt_channels);
+                wanted.sort_unstable();
+
+                let current: Vec<u8> = bt.iter().map(|r| r.channel()).collect();
+                let stale_tuning = bt
+                    .first()
+                    .is_some_and(|r| !r.matches(r.channel(), rate_hz, centre_hz));
+                if current != wanted || stale_tuning {
+                    let mut fleet = Vec::with_capacity(wanted.len());
+                    let mut refusal = None;
+                    for &ch in &wanted {
+                        match BtReceiver::new(rate_hz, ch, centre_hz) {
+                            Ok(r) => fleet.push(r),
+                            Err(e) => {
+                                refusal.get_or_insert(e);
+                            }
+                        }
+                    }
+                    bt = fleet;
+                    let mut m = self.state.lock().unwrap_or_else(|e| e.into_inner());
+                    m.net.bt_refused = if wanted.is_empty() {
+                        Some(format!(
+                            "no classic Bluetooth channel fits inside the current {:.1} MHz view",
+                            span_hz / 1e6
+                        ))
+                    } else {
+                        refusal
+                    };
+                    m.net.bt_channels_watched = bt.iter().map(|r| r.channel()).collect();
+                }
+
+                let mut hits = Vec::new();
+                for rx in bt.iter_mut() {
+                    for lap in rx.push(&bytes, self.geometry) {
+                        hits.push((rx.channel(), lap));
+                    }
+                }
+                if !hits.is_empty() {
+                    let mut m = self.state.lock().unwrap_or_else(|e| e.into_inner());
+                    for (channel, lap) in hits {
+                        m.net.bt_hops.push_front(BtHop {
+                            channel,
+                            lap,
+                            seen: now,
+                        });
+                    }
+                    m.net.bt_hops.truncate(crate::state::BT_HOP_LIMIT);
+                }
+            } else {
+                // Not on this preset: no receiver to run, and a refusal or a
+                // watched-channel list from a previous visit must not linger
+                // onto a screen that never claimed to be this one.
+                bt.clear();
                 let mut m = self.state.lock().unwrap_or_else(|e| e.into_inner());
-                m.net.bt_refused = if m.ui.active_preset == "net_bt" {
-                    Some(
-                        "classic Bluetooth access code correlation has no live receiver yet"
-                            .to_string(),
-                    )
-                } else {
-                    None
-                };
+                m.net.bt_refused = None;
+                m.net.bt_channels_watched.clear();
             }
 
             // Closing the section stops `process_block` forwarding, but blocks
@@ -297,6 +389,10 @@ impl NetWorker {
                 // dropping the scan means the next dwell starts clean.
                 scan = None;
                 ble = None;
+                bt.clear();
+                let mut m = self.state.lock().unwrap_or_else(|e| e.into_inner());
+                m.net.bt_refused = None;
+                m.net.bt_channels_watched.clear();
             }
         }
     }
@@ -338,7 +434,7 @@ mod tests {
             .unwrap();
         }
         drop(tx);
-        NetWorker::new(rx, Arc::clone(&state), eight_bit()).run();
+        NetWorker::new(rx, Arc::clone(&state), eight_bit(), SAFE_BT_CHANNELS).run();
         let m = state.lock().unwrap();
         m.net.health.clone()
     }
@@ -454,7 +550,7 @@ mod tests {
             .unwrap();
         }
         drop(tx);
-        NetWorker::new(rx, Arc::clone(&state), eight_bit()).run();
+        NetWorker::new(rx, Arc::clone(&state), eight_bit(), SAFE_BT_CHANNELS).run();
 
         let m = state.lock().unwrap();
         let band = &m.net.band;
@@ -510,7 +606,7 @@ mod tests {
         })
         .unwrap();
         drop(tx);
-        NetWorker::new(rx, Arc::clone(&state), eight_bit()).run();
+        NetWorker::new(rx, Arc::clone(&state), eight_bit(), SAFE_BT_CHANNELS).run();
 
         let m = state.lock().unwrap();
         assert_eq!(m.net.health.blocks_in, 1, "the block arrived");
@@ -586,7 +682,7 @@ mod tests {
         })
         .unwrap();
         drop(tx);
-        NetWorker::new(rx, Arc::clone(&state), geometry).run();
+        NetWorker::new(rx, Arc::clone(&state), geometry, SAFE_BT_CHANNELS).run();
 
         let m = state.lock().unwrap();
         assert!(m.net.ble_refused.is_none(), "{:?}", m.net.ble_refused);
@@ -662,22 +758,24 @@ mod tests {
         })
         .unwrap();
         drop(tx);
-        NetWorker::new(rx, Arc::clone(&state), eight_bit()).run();
+        NetWorker::new(rx, Arc::clone(&state), eight_bit(), SAFE_BT_CHANNELS).run();
         let m = state.lock().unwrap();
         assert!(m.net.ble_refused.is_some());
         assert!(m.net.ble_packets.is_empty());
     }
 
-    /// The `net_bt` preset always refuses today: B14 landed the access code
-    /// primitive, not a receiver to feed it. Distinct from `ble_refused`,
-    /// which this preset's blocks never touch.
+    /// B15's own exit condition: a view too narrow for
+    /// `signal::bt::receive::front_end`'s own working rate is refused, with
+    /// a reason - the same "refused, not silent" discipline `ble_refused`
+    /// already follows, now genuinely exercised by classic Bluetooth rather
+    /// than being B14's unconditional placeholder.
     #[test]
-    fn the_net_bt_preset_is_always_refused() {
+    fn a_view_too_narrow_for_the_working_rate_is_refused() {
         let mut m = SdrMetrics::fixture().streaming();
         m.ui.section = crate::signal::net::SECTION.to_string();
         m.ui.active_preset = "net_bt".to_string();
         m.radio.frequency = 2_437_000_000;
-        m.radio.config_sample_rate = 4_000_000.0;
+        m.radio.config_sample_rate = 2_000_000.0; // below the 4 Msps working rate
         let state = Arc::new(Mutex::new(m));
         let (tx, rx) = crossbeam_channel::unbounded();
         tx.send(StreamBlock {
@@ -687,9 +785,107 @@ mod tests {
         })
         .unwrap();
         drop(tx);
-        NetWorker::new(rx, Arc::clone(&state), eight_bit()).run();
+        NetWorker::new(rx, Arc::clone(&state), eight_bit(), SAFE_BT_CHANNELS).run();
         let m = state.lock().unwrap();
         assert!(m.net.bt_refused.is_some(), "{:?}", m.net.bt_refused);
+        assert!(m.net.bt_hops.is_empty());
+        assert!(m.net.bt_channels_watched.is_empty());
+    }
+
+    /// A view wide enough to hold real classic BT channels clears the
+    /// refusal and says which channels it is actually watching - capped at
+    /// [`SAFE_BT_CHANNELS`] here, not the full count a 20 MHz view could
+    /// otherwise see, because the default config asks for no more.
+    #[test]
+    fn a_wide_enough_view_clears_the_refusal_and_names_the_watched_channels() {
+        let mut m = SdrMetrics::fixture().streaming();
+        m.ui.section = crate::signal::net::SECTION.to_string();
+        m.ui.active_preset = "net_bt".to_string();
+        m.radio.frequency = 2_441_000_000;
+        m.radio.config_sample_rate = 20_000_000.0;
+        m.radio.bb_filter_hz = 0;
+        let state = Arc::new(Mutex::new(m));
+        let (tx, rx) = crossbeam_channel::unbounded();
+        tx.send(StreamBlock {
+            seq: 1,
+            gap_before: false,
+            bytes: vec![0u8; 256],
+        })
+        .unwrap();
+        drop(tx);
+        NetWorker::new(rx, Arc::clone(&state), eight_bit(), SAFE_BT_CHANNELS).run();
+        let m = state.lock().unwrap();
+        assert!(m.net.bt_refused.is_none(), "{:?}", m.net.bt_refused);
+        assert_eq!(m.net.bt_channels_watched.len(), SAFE_BT_CHANNELS);
+    }
+
+    /// B15's own exit condition, run through the actual worker rather than
+    /// `signal::bt::receive::Receiver` directly: a synthetic classic BT
+    /// access code sitting on one channel of a wideband capture reaches
+    /// `net.bt_hops`, tagged with the channel it was found on.
+    #[test]
+    fn a_synthetic_classic_bt_access_code_reaches_bt_hops() {
+        use crate::signal::ble::gfsk::modulate;
+        use crate::signal::bt::access_code::access_code_bits;
+        use crate::signal::dsp::testkit::{at_snr, Rng};
+        use num_complex::Complex;
+
+        const RAW_RATE: f64 = 20_000_000.0;
+        // The channel IS the tuned centre - zero offset, so it lands inside
+        // the watched cap regardless of how the nearest-first sort breaks
+        // ties, the same worked-example shape
+        // `signal::bt::receive::the_channel_and_the_tuning_can_both_vary`
+        // already exercises directly.
+        let ch = 45u8;
+        let channel_hz = crate::signal::bt::channel::centre_hz(ch).unwrap();
+        let lap = 0x0044_5566;
+
+        // Forty settling symbols either side - see
+        // `signal::bt::receive`'s own test-module doc (`SETTLE_SYMBOLS`)
+        // for why a bare few bits of margin let the modulator's own pulse
+        // shaping and this receiver's own channel-select filter corrupt the
+        // access code under test rather than merely surrounding it.
+        let mut bits: Vec<bool> = (0..40).map(|i| i % 2 == 0).collect();
+        bits.extend(access_code_bits(lap));
+        bits.extend((0..40).map(|i| i % 2 == 1));
+        let sps = (RAW_RATE / 1_000_000.0) as usize;
+        let clean = modulate(&bits, sps, 160_000.0, RAW_RATE, 0.5);
+        let placed = at_snr(&clean, 40.0, &mut Rng::new(7));
+
+        let geometry = eight_bit();
+        let bytes: Vec<u8> = placed
+            .iter()
+            .flat_map(|s: &Complex<f32>| {
+                let re = (s.re * geometry.full_scale).clamp(-127.0, 127.0) as i8;
+                let im = (s.im * geometry.full_scale).clamp(-127.0, 127.0) as i8;
+                [re as u8, im as u8]
+            })
+            .collect();
+
+        let mut m = SdrMetrics::fixture().streaming();
+        m.ui.section = crate::signal::net::SECTION.to_string();
+        m.ui.active_preset = "net_bt".to_string();
+        m.radio.frequency = channel_hz;
+        m.radio.config_sample_rate = RAW_RATE;
+        m.radio.bb_filter_hz = 0;
+        let state = Arc::new(Mutex::new(m));
+
+        let (tx, rx) = crossbeam_channel::unbounded();
+        tx.send(StreamBlock {
+            seq: 1,
+            gap_before: false,
+            bytes,
+        })
+        .unwrap();
+        drop(tx);
+        NetWorker::new(rx, Arc::clone(&state), geometry, SAFE_BT_CHANNELS).run();
+
+        let m = state.lock().unwrap();
+        assert!(m.net.bt_refused.is_none(), "{:?}", m.net.bt_refused);
+        assert_eq!(m.net.bt_hops.len(), 1, "{:?}", m.net.bt_hops);
+        let hop = &m.net.bt_hops[0];
+        assert_eq!(hop.channel, ch);
+        assert_eq!(hop.lap, lap);
     }
 
     /// Any other preset's blocks leave `bt_refused` unset, so a stale
@@ -711,7 +907,7 @@ mod tests {
         })
         .unwrap();
         drop(tx);
-        NetWorker::new(rx, Arc::clone(&state), eight_bit()).run();
+        NetWorker::new(rx, Arc::clone(&state), eight_bit(), SAFE_BT_CHANNELS).run();
         let m = state.lock().unwrap();
         assert!(m.net.bt_refused.is_none(), "{:?}", m.net.bt_refused);
     }

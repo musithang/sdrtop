@@ -4,10 +4,13 @@
 # picks to mean "point the radio at classic Bluetooth" - the same job
 # `net_ble`'s own preset name already does for BLE.
 #
-# Not yet listening for anything: B14 landed the access code correlation
-# primitive (`signal::bt::access_code`), not the live receiver that would
-# feed it a capture. The panel says so plainly, rather than reusing the
-# census's own "quiet room" wording for a state that is not that.
+# B15 gave this preset a live receiver: `net_bt_hops` is the exit condition
+# made visible, a time-versus-channel scatter of access-code hits across
+# however many of the 79 channels `[net].bt_channels` and the current view
+# together let the worker watch. `net_bt_census` stays beside it, still
+# saying plainly that a hit's LAP is not yet folded into a census entry -
+# a different, narrower gap than B14's own "no receiver at all", and one
+# B15 does not close.
 
 section = "net"
 slot    = 6
@@ -16,7 +19,8 @@ blurb   = "who is here, the old way"
 
 panels = [
     { name = "header",        position = "top", height = 5 },
-    { name = "net_bt_census", position = "body" },
+    { name = "net_bt_hops",   position = "body" },
+    { name = "net_bt_census", position = "right", width_pct = 34 },
     { name = "log",           position = "bottom", height = 5 },
     { name = "footer",        position = "bottom" },
 ]

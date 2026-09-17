@@ -49,6 +49,11 @@ pub struct App {
     /// to write back.
     pub(super) theme_config: crate::config::ThemeConfig,
     pub(super) tinysa_config: crate::config::TinySaSettings,
+    /// The `[net]` block exactly as it was loaded - `[net].bt_channels`
+    /// has no in-app control that would change it while running, so the
+    /// only way `save_config` can carry it forward is to hold the loaded
+    /// value, the same reasoning `tinysa_config` already follows.
+    pub(super) net_config: crate::config::NetSettings,
 }
 
 impl App {
@@ -472,6 +477,7 @@ impl App {
                 dwell_ms: sweep_cfg.dwell_ms,
             },
             tinysa: self.tinysa_config.clone(),
+            net: self.net_config.clone(),
             presets: self.user_presets.clone(),
         };
         let mut candidate = cfg.clone();

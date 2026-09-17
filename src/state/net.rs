@@ -109,20 +109,35 @@ pub struct NetState {
     /// plus [`NetMode::Survey`]'s rotation always dwelling `1 /
     /// advertising_channels_hz().len()` of a pass on each.
     pub ble_channel_packets: [u64; 3],
-    /// Why nothing is being decoded on the `net_bt` preset - always `Some`
-    /// today, the same "refused, not silent" discipline [`ble_refused`]
-    /// already follows.
+    /// Why classic Bluetooth has no live receiver at all right now, on the
+    /// `net_bt` preset - the same "refused, not silent" discipline
+    /// [`ble_refused`] already follows.
     ///
-    /// **B14 landed `signal::bt::access_code`, the specification-precision
-    /// primitive; it did not land a live receiver.** Reusing
-    /// `signal::net::census`'s own empty-state message for this preset
-    /// would have blurred two different claims into one: "nothing decodes
-    /// an address yet" (BLE's honest quiet-room state, per that panel's
-    /// own doc) and "nothing is even trying to decode" (classic
-    /// Bluetooth's actual, current state) are not the same sentence, and
-    /// [`ui::panels::net::bt_census::NetBtCensusPanel`] exists specifically
-    /// so the second one is never mistaken for the first.
+    /// **Narrowed by B15.** B14 landed `signal::bt::access_code`, the
+    /// specification-precision primitive, with no live receiver behind it,
+    /// so this was `Some` unconditionally. B15 gives it one -
+    /// `signal::bt::receive::Receiver`, one per channel
+    /// `signal::bt::channel::channels_in_span` and `[net].bt_channels`
+    /// together let the worker watch - so this is now `Some` only when that
+    /// receiver genuinely cannot exist (the current tuning's span holds no
+    /// classic BT channel at all), and `None` while it is running, the same
+    /// as [`ble_refused`]. It says nothing about whether any *hit* has been
+    /// found yet, and nothing about a census, which B15 deliberately does
+    /// not build - see [`ui::panels::net::bt_census::NetBtCensusPanel`]'s
+    /// own doc for that narrower, still-permanent gap.
     pub bt_refused: Option<String>,
+    /// Classic Bluetooth access-code hits since the section opened, newest
+    /// first, capped at [`BT_HOP_LIMIT`] - B15's own record, one entry per
+    /// clean access code any watched channel's
+    /// `signal::bt::receive::Receiver` found.
+    pub bt_hops: std::collections::VecDeque<BtHop>,
+    /// Which classic BT channels the current tuning, span and
+    /// `[net].bt_channels` together let the receiver actually watch, low to
+    /// high - what `net_bt_hops` reports itself as watching, honestly
+    /// narrower than the full 79 (or even the full count a wider capture
+    /// could see) whenever the cap is binding. Empty exactly when
+    /// [`bt_refused`] is `Some`.
+    pub bt_channels_watched: Vec<u8>,
     /// The tuning the survey interrupted, so it can be given back.
     ///
     /// **In the state rather than in the task**, for the reason
@@ -214,6 +229,32 @@ pub struct NetDecodeHealth {
 /// worth of advertising traffic; old rows fall off the end rather than
 /// growing the list forever.
 pub const BLE_PACKET_LIMIT: usize = 200;
+
+/// How many recent hits [`NetState::bt_hops`] keeps - a scatter plots a
+/// recent time window, not a session's worth of hops, and old rows fall off
+/// the end the same way [`BLE_PACKET_LIMIT`] already does for advertising
+/// PDUs.
+pub const BT_HOP_LIMIT: usize = 500;
+
+/// One classic Bluetooth access-code hit, as [`ui::panels::net::bt_hops::
+/// NetBtHopsPanel`] plots it: which channel found it, the LAP the access
+/// code carries (free at detection time - see
+/// `signal::bt::access_code::find_access_code`'s own doc), and when.
+#[derive(Clone, Copy, Debug)]
+pub struct BtHop {
+    pub channel: u8,
+    /// No reader yet: `net_bt_hops` plots *that* a channel was hit, not
+    /// which LAP it carried - telling two overlapping piconets apart by
+    /// colour is a real future addendum, not B15's own exit condition
+    /// (design section 2.3's measurement 11 asks for the scatter, not for
+    /// piconet identity). Carried anyway because
+    /// `crate::signal::bt::access_code::find_access_code` already returns it
+    /// for free, and dropping a fact that costs nothing to keep would be its
+    /// own kind of invented gap.
+    #[allow(dead_code)]
+    pub lap: u32,
+    pub seen: std::time::Instant,
+}
 
 /// One decoded advertising channel PDU, as a panel shows it.
 ///

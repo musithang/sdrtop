@@ -10,6 +10,7 @@
 
 pub mod ble_packets;
 pub mod bt_census;
+pub mod bt_hops;
 pub mod bt_rf;
 pub mod capability;
 pub mod census;

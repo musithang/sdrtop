@@ -161,6 +161,37 @@ impl Default for SweepSettings {
     }
 }
 
+/// How many classic Bluetooth channels [`crate::signal::net::worker::
+/// NetWorker`] gives a live receiver at once, of however many the current
+/// tuning and sample rate let it see at all (`signal::bt::channel::
+/// channels_in_span`). Small on purpose - see `signal::bt::receive`'s own
+/// doc for the measured cost a channel-select filter at 1 MHz spacing
+/// carries per channel, well past design section 12.4's "a few operations
+/// per sample" budget for always-on detection once more than a handful run
+/// at once. Raising this is a real request for more CPU, not a free wider
+/// view, and `NetWorker::new` logs as much once when it is asked for more
+/// than [`crate::signal::net::worker::SAFE_BT_CHANNELS`].
+fn default_bt_channels() -> usize {
+    8
+}
+
+/// `[net]` config for the NET section shared by the Bluetooth and Wi-Fi
+/// arcs. Small on purpose, the same reasoning `NetState`'s own doc gives:
+/// only a setting that has to survive a restart belongs here at all.
+#[derive(Deserialize, Serialize, Clone, Debug, PartialEq, Eq)]
+pub struct NetSettings {
+    #[serde(default = "default_bt_channels")]
+    pub bt_channels: usize,
+}
+
+impl Default for NetSettings {
+    fn default() -> Self {
+        Self {
+            bt_channels: default_bt_channels(),
+        }
+    }
+}
+
 fn default_tinysa_points() -> u32 {
     450
 }
@@ -215,6 +246,8 @@ pub struct AppConfig {
     pub theme: ThemeConfig,
     #[serde(default)]
     pub sweep: SweepSettings,
+    #[serde(default)]
+    pub net: NetSettings,
     #[serde(default)]
     pub tinysa: TinySaSettings,
     /// User-defined layout presets, merged into the built-in set at startup.

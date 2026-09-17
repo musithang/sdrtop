@@ -64,6 +64,7 @@ pub use panels::lab::timing_vitals::TimingVitalsPanel;
 
 pub use panels::net::ble_packets::NetBlePacketsPanel;
 pub use panels::net::bt_census::NetBtCensusPanel;
+pub use panels::net::bt_hops::NetBtHopsPanel;
 pub use panels::net::bt_rf::NetBtRfPanel;
 pub use panels::net::capability::NetCapabilityPanel;
 pub use panels::net::census::NetCensusPanel;

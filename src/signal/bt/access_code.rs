@@ -119,6 +119,26 @@ fn pack(window: &[bool]) -> u64 {
     word
 }
 
+/// The core check both [`find_access_code`] (a finished slice) and
+/// [`super::detect::Detector`] (a live bit stream with no end to be handed a
+/// slice of) make against one 64-bit window: does it, taken at face value,
+/// come from a real access code?
+///
+/// **`O(1)`, not a search over LAPs.** The candidate LAP is read directly off
+/// the window's own bits 34 to 57 (the systematic property
+/// `the_lap_is_recoverable_from_its_own_sync_word` checks), and accepted only
+/// if regenerating that LAP's own access code reproduces the window exactly -
+/// never a blind search over the `2^24` possible LAPs, which a live receiver
+/// has no time for.
+pub(super) fn check_window(word: u64) -> Option<u32> {
+    let candidate_lap = ((word >> 34) & 0x00ff_ffff) as u32;
+    if gen_syncword(candidate_lap) == word {
+        Some(candidate_lap)
+    } else {
+        None
+    }
+}
+
 /// Search `bits` for a classic Bluetooth access code with no LAP known in
 /// advance, and return the LAP and the index one past its last bit if one
 /// is found.
@@ -133,14 +153,10 @@ fn pack(window: &[bool]) -> u64 {
 /// *clean* access code yields the LAP for free, with no piconet
 /// membership required first.
 ///
-/// **`O(1)` per candidate position, not a search over LAPs.** The
-/// candidate LAP is read directly off the window's own bits 34 to 57 (the
-/// systematic property `the_lap_is_recoverable_from_its_own_sync_word`
-/// checks), and accepted only if regenerating that LAP's own access code
-/// reproduces the window exactly - never a blind search over the `2^24`
-/// possible LAPs, which a live receiver has no time for.
-///
-/// No consumer from `main` yet; see [`DEFAULT_CODEWORD`]'s own note.
+/// No consumer from `main` yet; see [`DEFAULT_CODEWORD`]'s own note. B15's
+/// own consumer, [`super::detect::Detector`], cannot reuse this directly -
+/// it has no finished slice to scan, only one more bit at a time - so it
+/// shares [`check_window`] instead.
 #[allow(dead_code)]
 pub fn find_access_code(bits: &[bool]) -> Option<(u32, usize)> {
     if bits.len() < 64 {
@@ -149,9 +165,8 @@ pub fn find_access_code(bits: &[bool]) -> Option<(u32, usize)> {
     for end in 64..=bits.len() {
         let window = &bits[end - 64..end];
         let word = pack(window);
-        let candidate_lap = ((word >> 34) & 0x00ff_ffff) as u32;
-        if gen_syncword(candidate_lap) == word {
-            return Some((candidate_lap, end));
+        if let Some(lap) = check_window(word) {
+            return Some((lap, end));
         }
     }
     None

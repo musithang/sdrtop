@@ -159,6 +159,10 @@ impl App {
         // thread, and anything deeper starts hiding the losses rather than
         // absorbing them.
         let (net_tx, net_rx) = crossbeam_channel::bounded::<crate::hardware::StreamBlock>(4);
+        // Read out before `cfg` is moved into `Self::assemble` below - a
+        // plain `usize`, not worth threading the whole config through the
+        // worker for.
+        let bt_channels = cfg.net.bt_channels;
         let (power_tx, power_rx) = crossbeam_channel::bounded::<hardware::PowerTrace>(4);
         let rx_ctx = Arc::new(hardware::RxContext {
             metrics: Arc::clone(&state),
@@ -193,7 +197,9 @@ impl App {
                 // `recv`. Deciding here would mean two places that know what admits the
                 // feature, and the one that already knows is `net::gate`.
                 let net_state = Arc::clone(&state);
-                std::thread::spawn(move || NetWorker::new(net_rx, net_state, geometry).run());
+                std::thread::spawn(move || {
+                    NetWorker::new(net_rx, net_state, geometry, bt_channels).run()
+                });
 
                 tasks::spawn_rx_task(Arc::clone(&state), Arc::clone(&device), Arc::clone(&rx_ctx));
                 tasks::spawn_net_survey_task(Arc::clone(&state), Arc::clone(&device));
@@ -340,6 +346,7 @@ impl App {
             focus_keys,
             theme_config: cfg.theme.clone(),
             tinysa_config: cfg.tinysa.clone(),
+            net_config: cfg.net.clone(),
             user_presets: cfg.presets,
         })
     }
