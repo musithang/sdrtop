@@ -268,6 +268,23 @@ impl NetWorker {
                 }
             }
 
+            // `net_bt`: B14 landed `signal::bt::access_code`'s own detection
+            // primitive, not a live receiver to feed it - so this preset is
+            // always refused today, honestly, rather than reusing the
+            // census's own "quiet room" wording for a state that is not
+            // that. See `NetState::bt_refused`'s own doc.
+            {
+                let mut m = self.state.lock().unwrap_or_else(|e| e.into_inner());
+                m.net.bt_refused = if m.ui.active_preset == "net_bt" {
+                    Some(
+                        "classic Bluetooth access code correlation has no live receiver yet"
+                            .to_string(),
+                    )
+                } else {
+                    None
+                };
+            }
+
             // Closing the section stops `process_block` forwarding, but blocks
             // already in the channel still arrive - and the run they belong to
             // is over whether or not they are the last of it.
@@ -649,5 +666,53 @@ mod tests {
         let m = state.lock().unwrap();
         assert!(m.net.ble_refused.is_some());
         assert!(m.net.ble_packets.is_empty());
+    }
+
+    /// The `net_bt` preset always refuses today: B14 landed the access code
+    /// primitive, not a receiver to feed it. Distinct from `ble_refused`,
+    /// which this preset's blocks never touch.
+    #[test]
+    fn the_net_bt_preset_is_always_refused() {
+        let mut m = SdrMetrics::fixture().streaming();
+        m.ui.section = crate::signal::net::SECTION.to_string();
+        m.ui.active_preset = "net_bt".to_string();
+        m.radio.frequency = 2_437_000_000;
+        m.radio.config_sample_rate = 4_000_000.0;
+        let state = Arc::new(Mutex::new(m));
+        let (tx, rx) = crossbeam_channel::unbounded();
+        tx.send(StreamBlock {
+            seq: 1,
+            gap_before: false,
+            bytes: vec![0u8; 256],
+        })
+        .unwrap();
+        drop(tx);
+        NetWorker::new(rx, Arc::clone(&state), eight_bit()).run();
+        let m = state.lock().unwrap();
+        assert!(m.net.bt_refused.is_some(), "{:?}", m.net.bt_refused);
+    }
+
+    /// Any other preset's blocks leave `bt_refused` unset, so a stale
+    /// refusal from a previous `net_bt` visit does not linger onto a screen
+    /// that never claimed to be that preset.
+    #[test]
+    fn a_different_preset_leaves_bt_refused_unset() {
+        let mut m = SdrMetrics::fixture().streaming();
+        m.ui.section = crate::signal::net::SECTION.to_string();
+        m.ui.active_preset = "net_ble".to_string();
+        m.radio.frequency = 2_402_000_000;
+        m.radio.config_sample_rate = 4_000_000.0;
+        let state = Arc::new(Mutex::new(m));
+        let (tx, rx) = crossbeam_channel::unbounded();
+        tx.send(StreamBlock {
+            seq: 1,
+            gap_before: false,
+            bytes: vec![0u8; 256],
+        })
+        .unwrap();
+        drop(tx);
+        NetWorker::new(rx, Arc::clone(&state), eight_bit()).run();
+        let m = state.lock().unwrap();
+        assert!(m.net.bt_refused.is_none(), "{:?}", m.net.bt_refused);
     }
 }

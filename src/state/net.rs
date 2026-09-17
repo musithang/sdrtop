@@ -109,6 +109,20 @@ pub struct NetState {
     /// plus [`NetMode::Survey`]'s rotation always dwelling `1 /
     /// advertising_channels_hz().len()` of a pass on each.
     pub ble_channel_packets: [u64; 3],
+    /// Why nothing is being decoded on the `net_bt` preset - always `Some`
+    /// today, the same "refused, not silent" discipline [`ble_refused`]
+    /// already follows.
+    ///
+    /// **B14 landed `signal::bt::access_code`, the specification-precision
+    /// primitive; it did not land a live receiver.** Reusing
+    /// `signal::net::census`'s own empty-state message for this preset
+    /// would have blurred two different claims into one: "nothing decodes
+    /// an address yet" (BLE's honest quiet-room state, per that panel's
+    /// own doc) and "nothing is even trying to decode" (classic
+    /// Bluetooth's actual, current state) are not the same sentence, and
+    /// [`ui::panels::net::bt_census::NetBtCensusPanel`] exists specifically
+    /// so the second one is never mistaken for the first.
+    pub bt_refused: Option<String>,
     /// The tuning the survey interrupted, so it can be given back.
     ///
     /// **In the state rather than in the task**, for the reason

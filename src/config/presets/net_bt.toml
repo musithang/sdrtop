@@ -1,0 +1,22 @@
+# NET Classic — who is here, the old way? B14's own question: classic
+# Bluetooth has no small, fixed set of channels to gate on the way BLE's
+# three advertising ones do, so this preset exists to be the thing a user
+# picks to mean "point the radio at classic Bluetooth" - the same job
+# `net_ble`'s own preset name already does for BLE.
+#
+# Not yet listening for anything: B14 landed the access code correlation
+# primitive (`signal::bt::access_code`), not the live receiver that would
+# feed it a capture. The panel says so plainly, rather than reusing the
+# census's own "quiet room" wording for a state that is not that.
+
+section = "net"
+slot    = 6
+title   = "Classic"
+blurb   = "who is here, the old way"
+
+panels = [
+    { name = "header",        position = "top", height = 5 },
+    { name = "net_bt_census", position = "body" },
+    { name = "log",           position = "bottom", height = 5 },
+    { name = "footer",        position = "bottom" },
+]
