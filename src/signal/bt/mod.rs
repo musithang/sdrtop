@@ -28,4 +28,5 @@
 pub mod access_code;
 pub mod channel;
 pub mod detect;
+pub mod header;
 pub mod receive;
