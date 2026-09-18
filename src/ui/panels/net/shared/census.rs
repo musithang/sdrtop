@@ -24,7 +24,7 @@ use ratatui::{
 };
 
 use crate::signal::dsp::uncertainty::Uncertain;
-use crate::signal::net::census::{order, Device, SORT_KEYS};
+use crate::signal::net::census::{Device, SORT_KEYS};
 use crate::state::SdrMetrics;
 use crate::ui::panel::{Panel, PanelChrome, Staleness, Tag};
 use crate::ui::widgets::reading::Reading;
@@ -171,8 +171,7 @@ impl Panel for NetCensusPanel {
         let census = &state.net.census;
         let now = std::time::Instant::now();
 
-        let mut devices: Vec<Device> = census.devices.clone();
-        order(&mut devices, census.sort, census.descending, now);
+        let devices: Vec<Device> = census.ordered(now);
         let addresses: Vec<[u8; 6]> = devices.iter().map(|d| d.address).collect();
 
         let mut lines = vec![header(
@@ -206,10 +205,17 @@ impl Panel for NetCensusPanel {
         // One row for the header and one for the turnover summary, so the
         // list gets the rest.
         let body = (inner.height as usize).saturating_sub(2);
-        let cursor = census.cursor(&addresses).unwrap_or(0);
-        let start = viewport_start(census.first_visible, cursor, devices.len(), body);
+        // No selection highlights no row: a highlight on row zero that nobody
+        // chose would claim a selection that does not exist.
+        let cursor = census.selection.cursor(&addresses);
+        let start = viewport_start(
+            census.selection.first_visible,
+            cursor.unwrap_or(0),
+            devices.len(),
+            body,
+        );
         for (i, d) in devices.iter().enumerate().skip(start).take(body) {
-            lines.push(row(COLUMNS, fit, &cells(d, now), i == cursor, theme));
+            lines.push(row(COLUMNS, fit, &cells(d, now), Some(i) == cursor, theme));
         }
         lines.push(turnover_line(&devices, now, theme));
         f.render_widget(Paragraph::new(lines), inner);
@@ -267,7 +273,8 @@ mod tests {
     /// would let a reader take the first, which is the flattering one.
     #[test]
     fn an_empty_census_says_nothing_is_counting_rather_than_nobody_is_there() {
-        let out = draw(NetCensusPanel, 60, 10, &SdrMetrics::fixture().streaming()).join("\n");
+        // Wide enough for every column, the selection gutter included.
+        let out = draw(NetCensusPanel, 64, 10, &SdrMetrics::fixture().streaming()).join("\n");
         assert!(out.contains("no census yet"), "{out}");
         assert!(out.contains("not an empty room"), "{out}");
         // The columns are still shown, so the shape of the answer is visible.
@@ -348,29 +355,37 @@ mod tests {
     fn the_cursor_stays_on_its_device_across_a_resort() {
         let busiest = [0xa4, 0x83, 0xe7, 0x1c, 0x09, 0xbe];
         let mut m = populated();
-        m.net.census.selected = Some(busiest);
+        m.net.census.selection.selected = Some(busiest);
 
         m.net.census.sort = 2;
         m.net.census.descending = true;
         let rows = draw(NetCensusPanel, 60, 10, &m);
         let picked = rows.iter().position(|l| l.contains("a4:83:e7")).unwrap();
+        assert_eq!(marked(&rows), vec![picked], "the mark is on its row");
 
         m.net.census.sort = 0;
         m.net.census.descending = false;
         let rows = draw(NetCensusPanel, 60, 10, &m);
         let moved = rows.iter().position(|l| l.contains("a4:83:e7")).unwrap();
         assert_eq!(moved, picked + 1, "the re-sort moved it down one");
+        assert_eq!(marked(&rows), vec![moved], "and the mark went with it");
+    }
 
-        // And the state still points at it: the cursor is an address, so
-        // nothing in the panel had to follow the row.
-        let by_address = [
-            [0x00, 0x1a, 0x11, 0xaa, 0xbb, 0xcc],
-            busiest,
-            [0xf0, 0x18, 0x98, 0x00, 0x11, 0x22],
-        ];
-        assert_eq!(m.net.census.cursor(&by_address), Some(1));
-        let by_packets = [busiest, by_address[0], by_address[2]];
-        assert_eq!(m.net.census.cursor(&by_packets), Some(0));
+    /// The rows carrying the selection mark.
+    fn marked(rows: &[String]) -> Vec<usize> {
+        rows.iter()
+            .enumerate()
+            .filter(|(_, l)| l.contains('\u{258c}'))
+            .map(|(i, _)| i)
+            .collect()
+    }
+
+    /// Nothing selected, nothing marked. It used to mark the first row
+    /// regardless, which claimed a selection nobody had made.
+    #[test]
+    fn no_selection_marks_no_row() {
+        let rows = draw(NetCensusPanel, 60, 10, &populated());
+        assert!(marked(&rows).is_empty(), "{}", rows.join("\n"));
     }
 
     #[test]

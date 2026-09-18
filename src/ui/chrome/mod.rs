@@ -81,6 +81,40 @@ pub fn field(name: &str, width: usize, theme: &crate::Theme) -> Span<'static> {
     Span::styled(format!(" {name:<width$}"), Style::default().fg(theme.label))
 }
 
+/// Columns every selectable row reserves at its left edge for
+/// [`selection_gutter`], selected or not, so picking a row never moves the
+/// columns beside it.
+pub const SELECTION_GUTTER: usize = 1;
+
+/// The mark a selected row carries: a half block in the accent colour, one
+/// column wide, or a blank of the same width on every other row.
+///
+/// One mark for every selectable list in the app - census rows, packets,
+/// piconets, the menu - so a selection looks like the same idea wherever it
+/// is. A glyph rather than a background: the deck never paints a background
+/// (the terminal's own shows through everywhere), and a reversed row turns a
+/// line of measurements into a solid bar that is harder to read than the rows
+/// around it, which is the opposite of what selecting it is for.
+pub fn selection_gutter(selected: bool, theme: &crate::Theme) -> Span<'static> {
+    if selected {
+        Span::styled("\u{258c}", Style::default().fg(theme.border_accent))
+    } else {
+        Span::raw(" ".repeat(SELECTION_GUTTER))
+    }
+}
+
+/// The style of a selectable row's text: bright and bold when selected,
+/// the ordinary value colour otherwise. Paired with [`selection_gutter`].
+pub fn selection_style(selected: bool, theme: &crate::Theme) -> Style {
+    if selected {
+        Style::default()
+            .fg(theme.value_hi)
+            .add_modifier(Modifier::BOLD)
+    } else {
+        Style::default().fg(theme.value)
+    }
+}
+
 /// Break `text` into at most `max_rows` rows of `width` columns, preferring a
 /// space to break on but never collapsing the spaces *inside* a row.
 ///

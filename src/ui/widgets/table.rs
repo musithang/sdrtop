@@ -23,9 +23,11 @@
 //! declaration puts the identifying ones first.
 
 use ratatui::{
-    style::{Modifier, Style},
+    style::Style,
     text::{Line, Span},
 };
+
+use crate::ui::chrome::{selection_gutter, selection_style, SELECTION_GUTTER};
 
 /// Which way a column's text sits in its width.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -71,8 +73,10 @@ const GAP: usize = 1;
 ///
 /// A column earns its place only if the whole of it fits, gap included. Nothing
 /// is truncated and nothing is squeezed: a table that shrank its address column
-/// would still be showing addresses, just not ones anybody could use.
+/// would still be showing addresses, just not ones anybody could use. The
+/// selection gutter comes off the top first: every row has one.
 pub(crate) fn columns_that_fit(columns: &[Column], width: usize) -> usize {
+    let width = width.saturating_sub(SELECTION_GUTTER);
     let mut used = 0usize;
     for (i, c) in columns.iter().enumerate() {
         let need = if i == 0 { c.width } else { GAP + c.width };
@@ -125,7 +129,10 @@ pub(crate) fn header(
     sort: Sort,
     theme: &crate::Theme,
 ) -> Line<'static> {
-    let mut spans = Vec::with_capacity(fit * 2);
+    let mut spans = Vec::with_capacity(fit * 2 + 1);
+    // The header is never selected, but it keeps the gutter so its titles sit
+    // over their columns.
+    spans.push(Span::raw(" ".repeat(SELECTION_GUTTER)));
     for (i, column) in columns.iter().take(fit).enumerate() {
         if i > 0 {
             spans.push(Span::raw(" ".repeat(GAP)));
@@ -156,17 +163,12 @@ pub(crate) fn row(
     selected: bool,
     theme: &crate::Theme,
 ) -> Line<'static> {
-    // Reversed rather than a cursor glyph in a column of its own: the cursor
-    // must not move the columns, or every row would shift when one is picked.
-    let style = if selected {
-        Style::default()
-            .fg(theme.value_hi)
-            .add_modifier(Modifier::REVERSED)
-    } else {
-        Style::default().fg(theme.value)
-    };
+    // The mark sits in a gutter every row has, so picking a row never moves the
+    // columns beside it.
+    let style = selection_style(selected, theme);
     let empty = String::new();
-    let mut spans = Vec::with_capacity(fit * 2);
+    let mut spans = Vec::with_capacity(fit * 2 + 1);
+    spans.push(selection_gutter(selected, theme));
     for (i, column) in columns.iter().take(fit).enumerate() {
         if i > 0 {
             spans.push(Span::styled(" ".repeat(GAP), style));
@@ -223,18 +225,18 @@ mod tests {
     /// A column is dropped whole or drawn whole.
     #[test]
     fn a_column_that_does_not_fit_is_not_drawn_at_all() {
-        // 17 + 1 + 6 + 1 + 6 + 1 + 8 = 40 for the lot.
-        assert_eq!(columns_that_fit(COLUMNS, 40), 4);
+        // 1 (gutter) + 17 + 1 + 6 + 1 + 6 + 1 + 8 = 41 for the lot.
+        assert_eq!(columns_that_fit(COLUMNS, 41), 4);
         assert_eq!(
-            columns_that_fit(COLUMNS, 39),
+            columns_that_fit(COLUMNS, 40),
             3,
             "the last one does not fit"
         );
-        assert_eq!(columns_that_fit(COLUMNS, 31), 3);
-        assert_eq!(columns_that_fit(COLUMNS, 30), 2);
-        assert_eq!(columns_that_fit(COLUMNS, 17), 1);
+        assert_eq!(columns_that_fit(COLUMNS, 32), 3);
+        assert_eq!(columns_that_fit(COLUMNS, 31), 2);
+        assert_eq!(columns_that_fit(COLUMNS, 18), 1);
         // Not even the first: better to draw nothing than a sliced address.
-        assert_eq!(columns_that_fit(COLUMNS, 16), 0);
+        assert_eq!(columns_that_fit(COLUMNS, 17), 0);
         assert_eq!(columns_that_fit(COLUMNS, 0), 0);
         // Extra width does not add a fifth column out of nowhere.
         assert_eq!(columns_that_fit(COLUMNS, 200), 4);
@@ -347,22 +349,53 @@ mod tests {
             true,
             &theme,
         );
+        let (tp, tk) = (text(&plain), text(&picked));
         assert_eq!(
-            text(&plain).chars().count(),
-            text(&picked).chars().count(),
+            tp.chars().count(),
+            tk.chars().count(),
             "the cursor must not move the columns"
         );
-        assert!(
-            picked
-                .spans
-                .iter()
-                .any(|s| s.style.add_modifier.contains(Modifier::REVERSED)),
-            "nothing marks the selected row"
+        // Columns, not bytes: the mark is one column and three bytes.
+        let column = |t: &str| t.find("a4:83").map(|b| t[..b].chars().count());
+        assert_eq!(
+            column(&tp),
+            column(&tk),
+            "and the first cell starts in the same column either way"
         );
-        assert!(!plain
-            .spans
-            .iter()
-            .any(|s| s.style.add_modifier.contains(Modifier::REVERSED)));
+        assert!(tk.starts_with('\u{258c}'), "the gutter marks it: {tk:?}");
+        assert!(tp.starts_with(' '), "and marks nothing else: {tp:?}");
+        let bold = |l: &Line| {
+            l.spans.iter().any(|s| {
+                s.style
+                    .add_modifier
+                    .contains(ratatui::style::Modifier::BOLD)
+            })
+        };
+        assert!(bold(&picked), "the selected row reads brighter");
+        assert!(!bold(&plain));
+    }
+
+    /// The header's titles sit over their columns, gutter included.
+    #[test]
+    fn the_header_keeps_the_gutter_so_titles_sit_over_their_columns() {
+        let theme = crate::Theme::sdr();
+        let h = text(&header(
+            COLUMNS,
+            4,
+            Sort {
+                column: 0,
+                descending: false,
+            },
+            &theme,
+        ));
+        let r = text(&row(
+            COLUMNS,
+            4,
+            &cells("a4:83:e7:1c:09:be", "2 s", "12", "-41.2"),
+            false,
+            &theme,
+        ));
+        assert_eq!(h.find("ADDRESS"), r.find("a4:83"), "{h:?}\n{r:?}");
     }
 
     /// The viewport follows the cursor, by the least that works.

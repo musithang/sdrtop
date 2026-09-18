@@ -11,6 +11,7 @@ mod micro;
 mod net;
 mod observer;
 mod radio;
+mod selection;
 mod signal;
 mod spectrum;
 mod sweep;
@@ -35,6 +36,7 @@ pub use net::{
 };
 pub use observer::ObserverState;
 pub use radio::{FrequencyReference, Provenance, RadioState, REFERENCE_STALE_S};
+pub use selection::Selection;
 pub use signal::{
     acpr_offset_hz, classify, Modulation, SignalState, ADC_COMFORT_DBFS, CLASSIFY_MIN_SNR_DB,
     SAT_CLIP_PCT, SAT_CRIT_PCT, SAT_WARN_PCT,

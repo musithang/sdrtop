@@ -309,11 +309,9 @@ pub struct BlePacket {
 
 /// How the census table is being read: what orders it, and where the cursor is.
 ///
-/// **The cursor is an address, not a row number.** Rows move: a re-sort
-/// reorders them, and a live census reorders them anyway as packet counts
-/// change. A cursor stored as an index would slide onto whichever device
-/// happened to land in that row, which is the sort of bug that looks like the
-/// user's own mistake.
+/// The cursor is an address, not a row number - see [`super::Selection`],
+/// which the census was the first to need and which every other NET list now
+/// shares.
 #[derive(Clone, Debug, Default)]
 pub struct CensusState {
     /// The population, unordered.
@@ -325,10 +323,8 @@ pub struct CensusState {
     /// Index into `signal::net::census::SORT_KEYS`.
     pub sort: usize,
     pub descending: bool,
-    /// The device the cursor is on. `None` before anything has been selected.
-    pub selected: Option<[u8; 6]>,
-    /// Where the viewport starts, so a long list does not jump under the cursor.
-    pub first_visible: usize,
+    /// The device the cursor is on, and where the view starts.
+    pub selection: super::Selection<[u8; 6]>,
 }
 
 impl CensusState {
@@ -341,41 +337,32 @@ impl CensusState {
         let keys = crate::signal::net::census::SORT_KEYS.len().max(1);
         self.sort = (self.sort + 1) % keys;
         // Back to the top of the new column rather than wherever the last one
-        // left the cursor: the rows underneath are different rows now.
-        self.first_visible = 0;
+        // left the view: the rows underneath are different rows now.
+        self.selection.reset_view();
     }
 
     pub fn reverse(&mut self) {
         self.descending = !self.descending;
-        self.first_visible = 0;
+        self.selection.reset_view();
     }
 
-    /// Move the cursor `delta` rows through `ordered`, and remember the device
-    /// rather than the position.
-    pub fn move_cursor(&mut self, ordered: &[[u8; 6]], delta: isize) {
-        if ordered.is_empty() {
-            self.selected = None;
-            return;
-        }
-        let at = self
-            .selected
-            .and_then(|a| ordered.iter().position(|x| *x == a))
-            .map(|i| i as isize)
-            .unwrap_or(if delta < 0 {
-                ordered.len() as isize
-            } else {
-                -1
-            });
-        let next = (at + delta).clamp(0, ordered.len() as isize - 1) as usize;
-        self.selected = Some(ordered[next]);
+    /// The population in the order the table shows it.
+    ///
+    /// **The one ordering both the panel and its keys read.** The cursor moves
+    /// through rows as drawn; if the key handler ordered the census on its own
+    /// terms, or not at all, the cursor would step through a list nobody can
+    /// see. It once did exactly that: the handler moved through an empty list,
+    /// so the arrows never selected anything.
+    pub fn ordered(&self, now: std::time::Instant) -> Vec<crate::signal::net::census::Device> {
+        let mut devices = self.devices.clone();
+        crate::signal::net::census::order(&mut devices, self.sort, self.descending, now);
+        devices
     }
 
-    /// Where the cursor is now, in this ordering. `None` when the device it was
-    /// on is no longer in the list - which is an answer, not an error: it means
-    /// that transmitter has gone.
-    pub fn cursor(&self, ordered: &[[u8; 6]]) -> Option<usize> {
-        let a = self.selected?;
-        ordered.iter().position(|x| *x == a)
+    /// The addresses of [`Self::ordered`], which is what the cursor moves
+    /// through.
+    pub fn ordered_addresses(&self, now: std::time::Instant) -> Vec<[u8; 6]> {
+        self.ordered(now).iter().map(|d| d.address).collect()
     }
 }
 
@@ -646,58 +633,22 @@ mod tests {
         assert_eq!(net.end(2_442_000_000).tune_hz, 2_442_000_000);
     }
 
-    fn addr(tail: u8) -> [u8; 6] {
-        [0xa4, 0x83, 0xe7, 0x1c, 0x09, tail]
-    }
-
-    /// **The one that matters: the cursor stays on the device, not the row.**
-    ///
-    /// Rows move. A re-sort reorders them, and a live census reorders them
-    /// anyway as counts change. A cursor stored as an index slides onto whatever
-    /// lands in that row, which reads as the user's own mistake.
+    /// A new column or a reversed one puts different rows under the view, so
+    /// the view goes back to the top - but the device the cursor is on is
+    /// still that device, and stays selected.
     #[test]
-    fn the_cursor_follows_the_device_through_a_resort() {
-        let by_packets = [addr(3), addr(1), addr(2)];
-        let by_address = [addr(1), addr(2), addr(3)];
+    fn a_resort_resets_the_view_and_keeps_the_device() {
+        let device = [0xa4, 0x83, 0xe7, 0x1c, 0x09, 0x01];
         let mut c = CensusState::default();
-
-        c.move_cursor(&by_packets, 1);
-        assert_eq!(c.selected, Some(addr(3)), "the first row of this ordering");
-        assert_eq!(c.cursor(&by_packets), Some(0));
-
-        // The table is re-sorted. The cursor is on the same device, further down.
-        assert_eq!(c.cursor(&by_address), Some(2));
-
-        // And a device that has gone leaves the cursor nowhere rather than on
-        // whatever took its place.
-        assert_eq!(c.cursor(&[addr(1), addr(2)]), None);
-    }
-
-    #[test]
-    fn the_cursor_stops_at_the_ends_rather_than_wrapping() {
-        let rows = [addr(1), addr(2), addr(3)];
-        let mut c = CensusState::default();
-        c.move_cursor(&rows, 1);
-        assert_eq!(c.selected, Some(addr(1)));
-        for _ in 0..5 {
-            c.move_cursor(&rows, 1);
-        }
-        assert_eq!(c.selected, Some(addr(3)), "the bottom, and it stays there");
-        for _ in 0..5 {
-            c.move_cursor(&rows, -1);
-        }
-        assert_eq!(c.selected, Some(addr(1)), "and the top");
-
-        // Up from nothing lands on the last row, down from nothing on the first:
-        // the cursor enters the list from the direction it was moving.
-        let mut c = CensusState::default();
-        c.move_cursor(&rows, -1);
-        assert_eq!(c.selected, Some(addr(3)));
-
-        // An empty census has nothing to be on.
-        let mut c = CensusState::default();
-        c.move_cursor(&[], 1);
-        assert_eq!(c.selected, None);
+        c.selection.move_by(&[device], 1);
+        c.selection.first_visible = 5;
+        c.cycle_sort();
+        assert_eq!(c.selection.first_visible, 0);
+        assert_eq!(c.selection.selected, Some(device));
+        c.selection.first_visible = 5;
+        c.reverse();
+        assert_eq!(c.selection.first_visible, 0);
+        assert_eq!(c.selection.selected, Some(device));
     }
 
     #[test]
