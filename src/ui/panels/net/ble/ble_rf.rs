@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright (C) 2026 MusiThang <viktor.laszlo92@protonmail.com>
 
-//! `NetBtRfPanel` - is this transmitter's own modulation any good?
+//! `NetBleRfPanel` - is this transmitter's own modulation any good?
 //!
 //! B8's exit condition, on screen: modulation index, delta-f1 average,
 //! delta-f2 maximum and their ratio, each against its stated limit, for the
@@ -37,7 +37,7 @@ use crate::ui::panel::{Panel, PanelChrome, Staleness};
 use crate::ui::widgets::limit::{Limit, LimitRow, RowWidths};
 use crate::ui::widgets::reading::Reading;
 
-pub struct NetBtRfPanel;
+pub struct NetBleRfPanel;
 
 /// Design section 2.1: "roughly 0.45 to 0.55 for BLE". Cross-checked
 /// informally, not read from a primary copy of the specification this
@@ -174,9 +174,9 @@ fn fit(rows: &[LimitRow], width: usize) -> RowWidths {
     }
 }
 
-impl Panel for NetBtRfPanel {
+impl Panel for NetBleRfPanel {
     fn name(&self) -> &'static str {
-        "net_bt_rf"
+        "net_ble_rf"
     }
 
     fn min_size(&self) -> (u16, u16) {
@@ -308,14 +308,14 @@ mod tests {
     fn a_refusal_is_shown_rather_than_an_empty_panel() {
         let mut m = SdrMetrics::fixture().streaming();
         m.net.ble_refused = Some("not tuned to an advertising channel".to_string());
-        let out = draw(NetBtRfPanel, 40, 8, &m).join("\n");
+        let out = draw(NetBleRfPanel, 40, 8, &m).join("\n");
         assert!(out.contains("not decoding"), "{out}");
         assert!(out.contains("not tuned"), "{out}");
     }
 
     #[test]
     fn an_empty_feed_says_nothing_decoded_yet() {
-        let out = draw(NetBtRfPanel, 40, 8, &SdrMetrics::fixture().streaming()).join("\n");
+        let out = draw(NetBleRfPanel, 40, 8, &SdrMetrics::fixture().streaming()).join("\n");
         assert!(out.contains("no packets yet"), "{out}");
     }
 
@@ -323,7 +323,7 @@ mod tests {
     fn a_packet_with_nothing_measured_refuses_rather_than_inventing_rows() {
         let mut m = SdrMetrics::fixture().streaming();
         m.net.ble_packets.push_back(packet(None));
-        let out = draw(NetBtRfPanel, 40, 8, &m).join("\n");
+        let out = draw(NetBleRfPanel, 40, 8, &m).join("\n");
         assert!(out.contains("not measured"), "{out}");
         assert!(!out.contains("Mod index"), "{out}");
     }
@@ -338,7 +338,7 @@ mod tests {
         m.net
             .ble_packets
             .push_back(packet(Some(quality(250_000.0))));
-        let out = draw(NetBtRfPanel, 70, 8, &m).join("\n");
+        let out = draw(NetBleRfPanel, 70, 8, &m).join("\n");
         assert!(out.contains("Mod index"), "{out}");
         assert!(out.contains("df1 avg"), "{out}");
         assert!(out.contains("df2 max"), "{out}");
@@ -358,7 +358,7 @@ mod tests {
             Some(quality(250_000.0)),
             Some(drift(5_000.0)),
         ));
-        let out = draw(NetBtRfPanel, 70, 10, &m).join("\n");
+        let out = draw(NetBleRfPanel, 70, 10, &m).join("\n");
         assert!(out.contains("Drift"), "{out}");
         assert!(out.contains("Drift rate"), "{out}");
         let lower = out.to_ascii_lowercase();
@@ -376,7 +376,7 @@ mod tests {
         m.net
             .ble_packets
             .push_back(packet(Some(quality(250_000.0))));
-        let out = draw(NetBtRfPanel, 70, 8, &m).join("\n");
+        let out = draw(NetBleRfPanel, 70, 8, &m).join("\n");
         assert!(!out.contains("Drift"), "{out}");
     }
 
@@ -390,7 +390,7 @@ mod tests {
         for w in 20..90u16 {
             for h in 4..16u16 {
                 for m in [populated.clone(), SdrMetrics::fixture()] {
-                    for line in draw(NetBtRfPanel, w, h, &m) {
+                    for line in draw(NetBleRfPanel, w, h, &m) {
                         assert!(line.chars().count() <= w as usize, "{w}x{h}: {line:?}");
                     }
                 }

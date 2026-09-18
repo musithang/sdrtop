@@ -63,7 +63,7 @@ impl Uncertain {
     /// A number that carries no uncertainty of its own: a specification limit, a
     /// channel centre, a count.
     ///
-    /// Reaches `main` since B8: `ui::panels::net::bt_rf` reads
+    /// Reaches `main` since B8: `ui::panels::net::ble::ble_rf` reads
     /// `ModulationQuality::delta_f2_max_hz` this way, a maximum of several
     /// noisy readings with no closed-form sigma the way a mean gets one -
     /// see that struct's own doc.

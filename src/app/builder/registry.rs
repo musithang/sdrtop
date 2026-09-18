@@ -83,7 +83,7 @@ impl App {
         registry.register(ui::NetBlePacketsPanel);
         registry.register(ui::NetBtCensusPanel);
         registry.register(ui::NetBtHopsPanel);
-        registry.register(ui::NetBtRfPanel);
+        registry.register(ui::NetBleRfPanel);
         registry.register(ui::NetCensusPanel);
         registry.register(ui::NetCoexistPanel);
         registry.register(ui::NetDecodeHealthPanel);

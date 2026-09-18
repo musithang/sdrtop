@@ -62,15 +62,15 @@ pub use panels::lab::timing_diagnostics::TimingDiagnosticsPanel;
 pub use panels::lab::timing_stripchart::TimingStripchartPanel;
 pub use panels::lab::timing_vitals::TimingVitalsPanel;
 
-pub use panels::net::ble_packets::NetBlePacketsPanel;
-pub use panels::net::bt_census::NetBtCensusPanel;
-pub use panels::net::bt_hops::NetBtHopsPanel;
-pub use panels::net::bt_rf::NetBtRfPanel;
-pub use panels::net::capability::NetCapabilityPanel;
-pub use panels::net::census::NetCensusPanel;
-pub use panels::net::coexist::NetCoexistPanel;
-pub use panels::net::decode_health::NetDecodeHealthPanel;
-pub use panels::net::occupancy::NetOccupancyPanel;
+pub use panels::net::ble::ble_packets::NetBlePacketsPanel;
+pub use panels::net::ble::ble_rf::NetBleRfPanel;
+pub use panels::net::bt::bt_census::NetBtCensusPanel;
+pub use panels::net::bt::bt_hops::NetBtHopsPanel;
+pub use panels::net::shared::capability::NetCapabilityPanel;
+pub use panels::net::shared::census::NetCensusPanel;
+pub use panels::net::shared::coexist::NetCoexistPanel;
+pub use panels::net::shared::decode_health::NetDecodeHealthPanel;
+pub use panels::net::shared::occupancy::NetOccupancyPanel;
 
 pub use panels::micro::entry::MicroPanel;
 pub use panels::micro::gain::MicroGainPanel;

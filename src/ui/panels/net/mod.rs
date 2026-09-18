@@ -7,13 +7,15 @@
 //! the cheapest mode; `signal::net::gate` decides that once at startup and the
 //! presets naming these panels are dropped when it refuses. So nothing in here
 //! has to check whether it should be on screen. If it is drawing, it may.
+//!
+//! Split by protocol, not left flat: [`ble`] is BLE-only, [`bt`] is classic
+//! Bluetooth-only, and [`shared`] is protocol-agnostic and band-wide. This
+//! mirrors `signal::ble` / `signal::bt` below it, which already made this
+//! split - the panel layer had drifted out of step with it (one BLE panel
+//! was named `bt_rf` until `dev_docs/net-ux-polish-plan.md`'s Tier 0 fixed
+//! it), and the subdirectories exist so that drift cannot happen unnoticed
+//! again: a panel's own path now says which group it belongs to.
 
-pub mod ble_packets;
-pub mod bt_census;
-pub mod bt_hops;
-pub mod bt_rf;
-pub mod capability;
-pub mod census;
-pub mod coexist;
-pub mod decode_health;
-pub mod occupancy;
+pub mod ble;
+pub mod bt;
+pub mod shared;

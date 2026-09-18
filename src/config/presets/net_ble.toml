@@ -16,7 +16,7 @@ blurb   = "what is this device advertising"
 panels = [
     { name = "header",          position = "top", height = 5 },
     { name = "net_ble_packets", position = "body" },
-    { name = "net_bt_rf",       position = "right", width_pct = 34 },
+    { name = "net_ble_rf",      position = "right", width_pct = 34 },
     { name = "log",             position = "bottom", height = 5 },
     { name = "footer",          position = "bottom" },
 ]
