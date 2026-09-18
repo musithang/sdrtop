@@ -130,7 +130,7 @@ const WHITENING_DATA: [bool; 127] = {
 /// `libbtbb`'s own `unwhiten(..., skip=0, ...)` for a header, as opposed to
 /// a payload, which starts further into the same LFSR sequence.
 #[allow(dead_code)]
-fn unwhiten_header(bits: &[bool; HEADER_BITS], clk6: u8) -> [bool; HEADER_BITS] {
+pub(crate) fn unwhiten_header(bits: &[bool; HEADER_BITS], clk6: u8) -> [bool; HEADER_BITS] {
     let mut index = WHITENING_INDICES[(clk6 & 0x3f) as usize] as usize;
     let mut out = [false; HEADER_BITS];
     for (slot, &bit) in out.iter_mut().zip(bits.iter()) {
@@ -165,7 +165,7 @@ fn reverse_bits(byte: u8) -> u8 {
 /// recurring UAP apart from the essentially random answer a wrong CLK1-6
 /// guess or a corrupted capture produces.
 #[allow(dead_code)]
-fn uap_from_hec(data: u16, hec: u8) -> u8 {
+pub(crate) fn uap_from_hec(data: u16, hec: u8) -> u8 {
     let mut hec = hec;
     for i in (0..10).rev() {
         if hec & 0x80 != 0 {

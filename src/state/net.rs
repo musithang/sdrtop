@@ -138,6 +138,15 @@ pub struct NetState {
     /// could see) whenever the cap is binding. Empty exactly when
     /// [`bt_refused`] is `Some`.
     pub bt_channels_watched: Vec<u8>,
+    /// Per-LAP UAP narrowing, B16's own live state: the distinct UAP
+    /// values `signal::bt::header::PiconetClock` still cannot rule out for
+    /// that piconet, from every header captured on it so far this
+    /// session. Usually settles at exactly two, not one - `PiconetClock`'s
+    /// own doc has the measurement that found that floor and why a header
+    /// alone cannot go lower without decoding the payload's own CRC too, a
+    /// real, separate piece of work `bluetooth-bench-plan.md` names rather
+    /// than leaves implicit.
+    pub bt_uap: std::collections::HashMap<u32, Vec<u8>>,
     /// The tuning the survey interrupted, so it can be given back.
     ///
     /// **In the state rather than in the task**, for the reason

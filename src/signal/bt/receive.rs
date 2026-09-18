@@ -62,11 +62,52 @@ use crate::signal::dsp::nco::Nco;
 
 use super::channel;
 use super::detect::Detector;
+use super::header;
 
 /// Classic BT's own symbol rate: 1 Mb/s, fixed for the basic rate physical
 /// layer this arc's GFSK chain targets (design section 1.1's "BR payload is
 /// the same GFSK chain as BLE").
 const SYMBOL_RATE_HZ: f64 = 1_000_000.0;
+
+/// Convert a count of this receiver's own symbols into CLK1-6 ticks
+/// (`header::CLOCK_HZ`, 3200 Hz) - exact integer arithmetic rather than a
+/// floating-point ratio that would drift: `SYMBOL_RATE_HZ / header::
+/// CLOCK_HZ == 312.5` symbols per tick, so 625 symbols is exactly 2 ticks,
+/// the smallest whole-symbol multiple, and every real symbol count this
+/// receiver ever produces is measured in exactly that unit.
+fn ticks_from_symbols(symbols: u64) -> i64 {
+    (symbols * 2 / 625) as i64
+}
+
+/// One header captured and FEC-decoded after some lane's own access-code
+/// hit - still whitened, not yet attributable to a UAP. `signal::net::
+/// worker` owns the per-LAP `header::PiconetClock` that turns a run of
+/// these into one, the same way it (not this receiver) owns `signal::net::
+/// census`'s own per-address aggregation.
+pub struct HeaderHit {
+    pub lap: u32,
+    pub whitened: [bool; header::HEADER_BITS],
+    /// CLK1-6 ticks since this receiver was built - not since any
+    /// particular header - `header::PiconetClock::observe` only ever
+    /// needs differences between these, and finds its own reference the
+    /// first time it is called for a given LAP.
+    pub tick: i64,
+}
+
+/// One lane's own header capture in progress: the bits collected so far
+/// after that lane's `Detector` last fired, and which LAP it was for.
+struct PendingHeader {
+    lap: u32,
+    /// This lane's own symbol count at the moment the access code that
+    /// triggered this capture completed - the trailer and header follow
+    /// starting at the very next symbol, so this is also the tick
+    /// [`HeaderHit::tick`] is measured from.
+    start_symbol: u64,
+    /// Trailer bits first (discarded once the capture is complete),
+    /// header air bits after - `header::TRAILER_BITS` plus `header::
+    /// HEADER_AIR_BITS` in total once done.
+    bits: Vec<bool>,
+}
 
 /// Samples per symbol this receiver decimates to, and so also the number of
 /// independent free-running phase lanes it runs - see the module doc's own
@@ -182,6 +223,16 @@ pub struct Receiver {
     /// `p` slices the sample whose position (mod [`PHASES`]) equals `p`.
     lane: usize,
     detectors: [Detector; PHASES],
+    /// How many symbols each lane has ever sliced - this receiver's own
+    /// clock, in the only unit `header::PiconetClock` needs: a count that
+    /// never resets and never drifts, since it is exact integer arithmetic
+    /// the whole way from raw samples down to here.
+    lane_symbols: [u64; PHASES],
+    /// One header capture in progress per lane, if any. A second hit on a
+    /// lane that already has one pending does not restart it - finishing
+    /// the older capture first is a small, honest simplification, not a
+    /// claim that this could never lose a genuinely new packet to it.
+    pending: [Option<PendingHeader>; PHASES],
 }
 
 impl Receiver {
@@ -208,6 +259,8 @@ impl Receiver {
             bias: 0.0,
             lane: 0,
             detectors: [Detector::new(); PHASES],
+            lane_symbols: [0; PHASES],
+            pending: std::array::from_fn(|_| None),
         })
     }
 
@@ -244,7 +297,13 @@ impl Receiver {
     /// condition is a scatter that makes a piconet's *rhythm* visible, not
     /// an exact packet count, and a coarser count in exchange for not
     /// tripling every real one is the trade worth making here.
-    pub fn push(&mut self, bytes: &[u8], geometry: SampleGeometry) -> Vec<u32> {
+    ///
+    /// **Header capture rides alongside the same loop.** A lane with a
+    /// capture already in progress appends this bit to it before anything
+    /// else happens this iteration; a lane whose `Detector` fires this bit
+    /// starts a fresh capture, empty, so the access code's own last bit is
+    /// never mistaken for the trailer's first one.
+    pub fn push(&mut self, bytes: &[u8], geometry: SampleGeometry) -> (Vec<u32>, Vec<HeaderHit>) {
         let mut iq = Vec::new();
         decode_iq(bytes, geometry, usize::MAX, &mut iq);
         self.mixer.mix(&mut iq);
@@ -252,20 +311,53 @@ impl Receiver {
         self.decim.process(&iq, &mut working);
 
         let mut found = Vec::new();
+        let mut headers = Vec::new();
+        const CAPTURE_LEN: usize = header::TRAILER_BITS + header::HEADER_AIR_BITS;
         for &sample in &working {
             let prev = self.last_sample.replace(sample);
             let Some(prev) = prev else { continue };
             let freq = instantaneous_freq_hz(prev, sample, WORKING_RATE_HZ);
             self.bias += (freq - self.bias) * BIAS_ALPHA;
             let bit = freq > self.bias;
+
+            if let Some(pending) = &mut self.pending[self.lane] {
+                pending.bits.push(bit);
+                if pending.bits.len() == CAPTURE_LEN {
+                    let pending = self.pending[self.lane].take().unwrap();
+                    if let Some(whitened) = header::unfec13(&pending.bits[header::TRAILER_BITS..]) {
+                        // Deduplicated by LAP within the call, the same
+                        // reasoning `found`'s own doc gives: more than one
+                        // lane routinely captures the same real header
+                        // cleanly, and reporting each separately would
+                        // over-count one real packet as several.
+                        if !headers.iter().any(|h: &HeaderHit| h.lap == pending.lap) {
+                            headers.push(HeaderHit {
+                                lap: pending.lap,
+                                whitened,
+                                tick: ticks_from_symbols(pending.start_symbol),
+                            });
+                        }
+                    }
+                }
+            }
+
             if let Some(lap) = self.detectors[self.lane].push(bit) {
                 if !found.contains(&lap) {
                     found.push(lap);
                 }
+                if self.pending[self.lane].is_none() {
+                    self.pending[self.lane] = Some(PendingHeader {
+                        lap,
+                        start_symbol: self.lane_symbols[self.lane],
+                        bits: Vec::with_capacity(CAPTURE_LEN),
+                    });
+                }
             }
+
+            self.lane_symbols[self.lane] += 1;
             self.lane = (self.lane + 1) % PHASES;
         }
-        found
+        (found, headers)
     }
 }
 
@@ -342,7 +434,7 @@ mod tests {
         let bytes = to_bytes(&placed, geometry);
 
         let mut rx = Receiver::new(RAW_RATE, ch, TUNED_CENTRE).unwrap();
-        let found = rx.push(&bytes, geometry);
+        let (found, _headers) = rx.push(&bytes, geometry);
         assert_eq!(found, vec![lap], "{found:?}");
     }
 
@@ -363,13 +455,77 @@ mod tests {
             let geometry = eight_bit();
             let bytes = to_bytes(&placed, geometry);
             let mut rx = Receiver::new(RAW_RATE, ch, tuned_centre).unwrap();
-            let found = rx.push(&bytes, geometry);
+            let (found, _headers) = rx.push(&bytes, geometry);
             assert_eq!(
                 found,
                 vec![lap],
                 "channel {ch} at tuning {tuned_centre}: {found:?}"
             );
         }
+    }
+
+    /// B16's own exit condition, wired: a synthetic classic-BT packet -
+    /// access code, a 4-bit trailer, and a real FEC(1/3)-encoded, whitened
+    /// header - produces exactly one `HeaderHit`, whose own `whitened`
+    /// bits, dewhitened with the header's real CLK1-6 and the UAP that HEC
+    /// implies, give back exactly the fields it was built from.
+    #[test]
+    fn a_full_packet_produces_a_decodable_header_hit() {
+        const RAW_RATE: f64 = 20_000_000.0;
+        const TUNED_CENTRE: f64 = 2_441_000_000.0;
+        let ch = 39u8;
+        let lap = 0x0055_aa11u32;
+        let clk6 = 17u8;
+        let lt_addr = 0b101u8;
+        let packet_type = 0b0100u8; // DH1
+        let flags = 0b011u8;
+        let data10 = (lt_addr as u16) | ((packet_type as u16) << 3) | ((flags as u16) << 7);
+        let hec = 0x5au8; // arbitrary; the UAP is whatever this and data10 imply
+        let uap = header::uap_from_hec(data10, hec);
+
+        let mut host = [false; header::HEADER_BITS];
+        for (i, slot) in host[0..10].iter_mut().enumerate() {
+            *slot = (data10 >> i) & 1 != 0;
+        }
+        for (i, slot) in host[10..18].iter_mut().enumerate() {
+            *slot = (hec >> i) & 1 != 0;
+        }
+        let whitened_header = header::unwhiten_header(&host, clk6);
+
+        let mut bits: Vec<bool> = (0..SETTLE_SYMBOLS).map(|i| i % 2 == 0).collect();
+        bits.extend(access_code_bits(lap));
+        bits.extend([true, false, true, false]); // 4-bit trailer, content unread
+        for &b in &whitened_header {
+            bits.extend([b, b, b]); // FEC(1/3): each bit sent three times
+        }
+        bits.extend((0..SETTLE_SYMBOLS).map(|i| i % 2 == 1));
+
+        let sps = (RAW_RATE / SYMBOL_RATE_HZ) as usize;
+        let clean = modulate(&bits, sps, 160_000.0, RAW_RATE, 0.5);
+        let noisy = at_snr(&clean, 40.0, &mut Rng::new(1));
+        let mut placed = noisy;
+        let channel_hz = channel::centre_hz(ch).unwrap() as f64;
+        Nco::new(channel_hz - TUNED_CENTRE, RAW_RATE).mix(&mut placed);
+
+        let geometry = eight_bit();
+        let bytes = to_bytes(&placed, geometry);
+
+        let mut rx = Receiver::new(RAW_RATE, ch, TUNED_CENTRE).unwrap();
+        let (found, headers) = rx.push(&bytes, geometry);
+        assert_eq!(found, vec![lap], "{found:?}");
+        assert_eq!(
+            headers.len(),
+            1,
+            "{:?}",
+            headers.iter().map(|h| h.lap).collect::<Vec<_>>()
+        );
+        let hit = &headers[0];
+        assert_eq!(hit.lap, lap);
+
+        let decoded = header::decode_with_uap(&hit.whitened, uap).expect("should decode");
+        assert_eq!(decoded.lt_addr, lt_addr);
+        assert_eq!(decoded.packet_type, header::PacketType::Dh1);
+        assert_eq!(decoded.flags, flags);
     }
 
     /// `push`'s own exit condition: a single real access code, found on more
@@ -387,7 +543,7 @@ mod tests {
         let bytes = to_bytes(&placed, geometry);
 
         let mut rx = Receiver::new(RAW_RATE, ch, TUNED_CENTRE).unwrap();
-        let found = rx.push(&bytes, geometry);
+        let (found, _headers) = rx.push(&bytes, geometry);
         assert_eq!(found.len(), 1, "{found:?}");
     }
 
@@ -408,7 +564,7 @@ mod tests {
             })
             .collect();
         let mut rx = Receiver::new(RAW_RATE, 20, 2_441_000_000.0).unwrap();
-        let found = rx.push(&bytes, geometry);
+        let (found, _headers) = rx.push(&bytes, geometry);
         assert!(found.is_empty(), "{found:?}");
     }
 

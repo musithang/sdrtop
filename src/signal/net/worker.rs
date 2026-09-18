@@ -27,9 +27,15 @@
 //! Receiver` per channel `signal::bt::channel::channels_in_span` and the
 //! configured [`SAFE_BT_CHANNELS`]-guarded cap together let it watch, closest
 //! to the tuned centre first, and rebuilds the fleet whenever the tuning or
-//! the wanted channel list changes. Wi-Fi arrives the same way when that arc
-//! reaches this point.
+//! the wanted channel list changes.
+//!
+//! **B16 added the third: one `signal::bt::header::PiconetClock` per LAP**,
+//! fed every `HeaderHit` the fleet's own receivers capture, narrowing each
+//! piconet's own UAP as far as a header alone ever can - `PiconetClock`'s
+//! own doc has the measured floor (two candidates, not one) and why. Wi-Fi
+//! arrives the same way when that arc reaches this point.
 
+use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 use std::time::Instant;
 
@@ -37,6 +43,7 @@ use crossbeam_channel::Receiver as SampleReceiver;
 
 use crate::hardware::{SampleGeometry, StreamBlock};
 use crate::signal::ble::receive::Receiver as BleReceiver;
+use crate::signal::bt::header::PiconetClock;
 use crate::signal::bt::receive::Receiver as BtReceiver;
 use crate::signal::stream::plan_block;
 use crate::state::{BlePacket, BtHop, SdrMetrics};
@@ -167,6 +174,7 @@ impl NetWorker {
         let mut scan: Option<Scan> = None;
         let mut ble: Option<BleReceiver> = None;
         let mut bt: Vec<BtReceiver> = Vec::new();
+        let mut piconet_clocks: HashMap<u32, PiconetClock> = HashMap::new();
 
         while let Ok(StreamBlock {
             seq,
@@ -351,12 +359,26 @@ impl NetWorker {
                 }
 
                 let mut hits = Vec::new();
+                let mut header_hits = Vec::new();
                 for rx in bt.iter_mut() {
-                    for lap in rx.push(&bytes, self.geometry) {
+                    let (laps, headers) = rx.push(&bytes, self.geometry);
+                    for lap in laps {
                         hits.push((rx.channel(), lap));
                     }
+                    header_hits.extend(headers);
                 }
-                if !hits.is_empty() {
+                // Fed to each LAP's own `PiconetClock` outside the lock -
+                // narrowing does real work (64 dewhitenings per header),
+                // the same reasoning every other float or device-free
+                // computation in this worker stays outside the lock block
+                // for.
+                let mut narrowed_by_lap = Vec::new();
+                for hit in &header_hits {
+                    let clock = piconet_clocks.entry(hit.lap).or_default();
+                    clock.observe(hit.tick, &hit.whitened);
+                    narrowed_by_lap.push((hit.lap, clock.narrowed()));
+                }
+                if !hits.is_empty() || !narrowed_by_lap.is_empty() {
                     let mut m = self.state.lock().unwrap_or_else(|e| e.into_inner());
                     for (channel, lap) in hits {
                         m.net.bt_hops.push_front(BtHop {
@@ -366,6 +388,9 @@ impl NetWorker {
                         });
                     }
                     m.net.bt_hops.truncate(crate::state::BT_HOP_LIMIT);
+                    for (lap, narrowed) in narrowed_by_lap {
+                        m.net.bt_uap.insert(lap, narrowed);
+                    }
                 }
             } else {
                 // Not on this preset: no receiver to run, and a refusal or a

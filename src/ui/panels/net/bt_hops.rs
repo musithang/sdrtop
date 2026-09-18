@@ -17,6 +17,13 @@
 //! `state.net.bt_refused` first, because "no receiver exists" and "a
 //! receiver exists and has heard nothing in the last window" are different
 //! sentences.
+//!
+//! **B16 adds one more line: the most recent hop's own piconet, narrowed as
+//! far as a header alone ever gets.** `signal::bt::header::PiconetClock`'s
+//! own doc has the measurement: usually two UAP candidates survive, not
+//! one, and closing that gap needs the payload's own CRC - a real, separate
+//! piece of work, not built yet. This panel reports the honest floor rather
+//! than picking one of the two and calling it confirmed.
 
 use ratatui::{
     layout::Rect,
@@ -118,8 +125,36 @@ impl Panel for NetBtHopsPanel {
             return;
         }
 
+        // The most recent hop's own piconet, narrowed as far as a header
+        // alone ever gets - `signal::bt::header::PiconetClock`'s own doc
+        // has the measured floor. `None` before any header has narrowed
+        // anything yet, rather than claiming a UAP that is not there -
+        // computed before the grid so its own row can be reserved rather
+        // than fought over with the grid for space.
+        let uap_line = state.net.bt_hops.front().and_then(|newest| {
+            state
+                .net
+                .bt_uap
+                .get(&newest.lap)
+                .filter(|uaps| !uaps.is_empty())
+                .map(|uaps| {
+                    let list = uaps
+                        .iter()
+                        .map(|u| format!("{u:#04x}"))
+                        .collect::<Vec<_>>()
+                        .join(", ");
+                    let word = if uaps.len() == 1 {
+                        "UAP"
+                    } else {
+                        "UAP candidates"
+                    };
+                    format!("LAP {:#010x}: {word} {list}", newest.lap)
+                })
+        });
+        let summary_rows: u16 = if uap_line.is_some() { 1 } else { 0 };
+
         let width = (inner.width - SCALE_COLS) as usize;
-        let rows = (inner.height - AXIS_ROWS) as usize;
+        let rows = inner.height.saturating_sub(AXIS_ROWS + summary_rows).max(1) as usize;
         let now = std::time::Instant::now();
 
         let mut grid = vec![vec![false; width]; rows];
@@ -169,6 +204,15 @@ impl Panel for NetBtHopsPanel {
             ),
             Style::default().fg(theme.label),
         )));
+
+        if let Some(line) = uap_line {
+            if let Some(chunk) = crate::ui::chrome::wrap(&line, inner.width as usize, 1).first() {
+                lines.push(Line::from(Span::styled(
+                    chunk.clone(),
+                    Style::default().fg(theme.label),
+                )));
+            }
+        }
 
         f.render_widget(Paragraph::new(lines), inner);
     }
@@ -279,6 +323,40 @@ mod tests {
         assert!(!out.contains('\u{25cf}'), "{out}");
     }
 
+    /// B16's own exit condition for this panel: the most recent hop's own
+    /// LAP, once its UAP has narrowed, shows the honest floor - two
+    /// candidates, not a confirmed single answer picked from them.
+    #[test]
+    fn the_newest_hops_narrowed_uap_is_shown() {
+        let mut m = SdrMetrics::fixture().streaming();
+        m.net.bt_channels_watched = vec![10];
+        let lap = 0x0055_aa11u32;
+        m.net.bt_hops.push_back(BtHop {
+            channel: 10,
+            lap,
+            seen: Instant::now(),
+        });
+        m.net.bt_uap.insert(lap, vec![0x4c, 0x9a]);
+        let out = draw(NetBtHopsPanel, 60, 12, &m).join("\n");
+        assert!(out.contains("UAP candidates"), "{out}");
+        assert!(out.contains("0x4c"), "{out}");
+        assert!(out.contains("0x9a"), "{out}");
+    }
+
+    /// No narrowing has happened yet for this LAP - nothing is claimed.
+    #[test]
+    fn no_uap_line_before_any_narrowing() {
+        let mut m = SdrMetrics::fixture().streaming();
+        m.net.bt_channels_watched = vec![10];
+        m.net.bt_hops.push_back(BtHop {
+            channel: 10,
+            lap: 0x0055_aa11,
+            seen: Instant::now(),
+        });
+        let out = draw(NetBtHopsPanel, 60, 12, &m).join("\n");
+        assert!(!out.contains("UAP"), "{out}");
+    }
+
     #[test]
     fn it_fits_every_size_the_layout_can_hand_it() {
         let mut m = SdrMetrics::fixture().streaming();
@@ -290,6 +368,7 @@ mod tests {
                 seen: Instant::now() - Duration::from_secs(i as u64),
             });
         }
+        m.net.bt_uap.insert(0, vec![0x4c, 0x9a]);
         for w in 30..70u16 {
             for h in 6..20u16 {
                 for line in draw(NetBtHopsPanel, w, h, &m) {
