@@ -34,13 +34,27 @@ use crate::signal::dsp::fir::{design_lowpass_to_spec, StreamingDecimator};
 use super::detect::{access_address_bits, preamble_bits, ADVERTISING_ACCESS_ADDRESS};
 use super::gfsk;
 use super::pdu::{self, Packet};
+use super::Phy;
 
 /// Samples per symbol this arc demodulates at. Not a specification
-/// requirement - LE 1M's symbol rate is fixed at 1 Mb/s, and this is
-/// comfortably enough resolution for the matched filter and the discriminator
-/// slice both, without decimating a wide capture further than it has to.
+/// requirement - a PHY's own symbol rate ([`Phy::symbol_rate_hz`]) is fixed,
+/// and this is comfortably enough resolution for the matched filter and the
+/// discriminator slice both, without decimating a wide capture further than
+/// it has to. The same for both PHYs B17 supports: `LOOKBACK_SAMPLES`,
+/// `HEADER_SEARCH_SYMBOLS` and every other constant counted in symbols below
+/// stays correct unchanged when the PHY changes, because it is this figure -
+/// not the PHY's own absolute rate - that fixes the conversion between the
+/// two units.
 const WORKING_SPS: usize = 4;
-const WORKING_RATE_HZ: f64 = 1_000_000.0 * WORKING_SPS as f64;
+
+/// The actual working rate a receiver on `phy` runs at, once decimated -
+/// B6 through B16's own fixed `WORKING_RATE_HZ` constant, now one number
+/// per PHY rather than one for the whole file, since [`Phy::TwoM`] transmits
+/// at twice [`Phy::OneM`]'s own symbol rate (design section 1.2's own "the
+/// same chain at twice the symbol rate").
+fn working_rate_hz(phy: Phy) -> f64 {
+    phy.symbol_rate_hz() * WORKING_SPS as f64
+}
 
 /// The longest a legacy advertising PDU can be: 2-byte header, up to 37
 /// bytes of payload, 3-byte CRC.
@@ -80,23 +94,38 @@ const HEADER_SEARCH_SYMBOLS: usize = 6;
 /// comfortably while the marginal real-air ones measured here do not.
 const FALSE_ALARM_RATE: f64 = 1e-30;
 
-/// The anti-alias filter's passband edge, in Hz: comfortably beyond LE 1M's
-/// own occupied bandwidth (250 kHz peak deviation on a 1 Mb/s, BT=0.5
-/// Gaussian-shaped symbol rate) so the matched filter's own waveform
-/// correlation is not the thing narrowed, and comfortably inside the working
-/// Nyquist ([`WORKING_RATE_HZ`] / 2 = 2 MHz) so there is real stopband left
-/// before that boundary. See `front_end`'s own doc for why this number, not
-/// a narrower one, is the one to try first.
-const ANTI_ALIAS_CUTOFF_HZ: f64 = 1_500_000.0;
+/// The anti-alias filter's passband edge, in Hz: comfortably beyond this
+/// PHY's own occupied bandwidth (`Phy::deviation_hz`'s own peak deviation on
+/// a BT=0.5 Gaussian-shaped symbol rate) so the matched filter's own
+/// waveform correlation is not the thing narrowed, and comfortably inside
+/// the working Nyquist ([`working_rate_hz`] / 2) so there is real stopband
+/// left before that boundary. See `front_end`'s own doc for why LE 1M's
+/// figure, not a narrower one, is the one that was tried first; LE 2M's own
+/// is the identical reasoning at twice the numbers - not separately
+/// measured against real hardware, the same honest gap the whole of B17 has
+/// (this arc's own doc).
+fn anti_alias_cutoff_hz(phy: Phy) -> f64 {
+    match phy {
+        Phy::OneM => 1_500_000.0,
+        Phy::TwoM => 3_000_000.0,
+    }
+}
 /// Transition width, in Hz, either side of the cutoff.
-const ANTI_ALIAS_TRANSITION_HZ: f64 = 500_000.0;
+fn anti_alias_transition_hz(phy: Phy) -> f64 {
+    match phy {
+        Phy::OneM => 500_000.0,
+        Phy::TwoM => 1_000_000.0,
+    }
+}
 /// Stopband attenuation the transition band settles to. Chosen for real
 /// rejection of what a wideband capture actually carries - neighbouring BLE
 /// channels, Wi-Fi - without the tap count a much deeper stopband would cost
-/// for no measured benefit here.
+/// for no measured benefit here. The same figure for both PHYs: it is a
+/// property of how much rejection is worth paying for, not of the signal's
+/// own bandwidth.
 const ANTI_ALIAS_STOPBAND_DB: f64 = 40.0;
 
-/// Build the decimator from `raw_rate` to [`WORKING_RATE_HZ`], or say why it
+/// Build the decimator from `raw_rate` to [`working_rate_hz`], or say why it
 /// cannot be built.
 ///
 /// Refuses rather than approximating when `raw_rate` is narrower than the
@@ -145,39 +174,40 @@ const ANTI_ALIAS_STOPBAND_DB: f64 = 40.0;
 /// 0.99999997. [`matched_reference`] is that fix: not a differently-sized
 /// filter, a differently-built reference.
 ///
-/// **What is left honestly open.** [`ANTI_ALIAS_CUTOFF_HZ`] itself is still
-/// reasoned rather than swept - wide enough to pass LE 1M's own waveform
-/// comfortably (this fix's own tests confirm that) and narrow enough to
-/// give the aliasing case real stopband before [`WORKING_RATE_HZ`]'s Nyquist,
-/// but no measurement here says it is the *right* number, only a defensible
-/// one. Verified against this arc's synthetic coherence tests (unchanged
-/// pass/fail, same peak positions) and against a new one this fix added -
-/// `a_strong_out_of_channel_interferer_no_longer_defeats_detection` - that
-/// puts a second, unrelated GFSK signal at a raw offset chosen to fold
+/// **What is left honestly open.** [`anti_alias_cutoff_hz`] itself is still
+/// reasoned rather than swept - wide enough to pass a PHY's own waveform
+/// comfortably (this fix's own tests confirm that for LE 1M) and narrow
+/// enough to give the aliasing case real stopband before [`working_rate_hz`]'s
+/// Nyquist, but no measurement here says it is the *right* number, only a
+/// defensible one. Verified against this arc's synthetic coherence tests
+/// (unchanged pass/fail, same peak positions) and against a new one this fix
+/// added - `a_strong_out_of_channel_interferer_no_longer_defeats_detection` -
+/// that puts a second, unrelated GFSK signal at a raw offset chosen to fold
 /// straight onto this receiver's own passband under decimation, and checks
 /// detection survives it. **Not yet re-verified against real hardware** -
 /// that is the next real-hardware session's job, the same honest gap B6
-/// through B9 each left behind them.
-pub fn front_end(raw_rate: f64) -> Result<StreamingDecimator, String> {
-    if raw_rate < WORKING_RATE_HZ {
+/// through B9 each left behind them, and B17's own LE 2M numbers besides.
+pub fn front_end(raw_rate: f64, phy: Phy) -> Result<StreamingDecimator, String> {
+    let rate_hz = working_rate_hz(phy);
+    if raw_rate < rate_hz {
         return Err(format!(
             "BLE decode needs at least {:.1} Msps; the radio is at {:.3} Msps",
-            WORKING_RATE_HZ / 1e6,
+            rate_hz / 1e6,
             raw_rate / 1e6
         ));
     }
-    let d = (raw_rate / WORKING_RATE_HZ).round().max(1.0) as usize;
+    let d = (raw_rate / rate_hz).round().max(1.0) as usize;
     let achieved = raw_rate / d as f64;
-    if (achieved - WORKING_RATE_HZ).abs() > WORKING_RATE_HZ * 0.01 {
+    if (achieved - rate_hz).abs() > rate_hz * 0.01 {
         return Err(format!(
             "BLE decode needs a sample rate near a whole multiple of {:.1} Msps; {:.3} Msps is not one",
-            WORKING_RATE_HZ / 1e6,
+            rate_hz / 1e6,
             raw_rate / 1e6
         ));
     }
     let taps = design_lowpass_to_spec(
-        ANTI_ALIAS_CUTOFF_HZ / raw_rate,
-        ANTI_ALIAS_TRANSITION_HZ / raw_rate,
+        anti_alias_cutoff_hz(phy) / raw_rate,
+        anti_alias_transition_hz(phy) / raw_rate,
         ANTI_ALIAS_STOPBAND_DB,
     );
     Ok(StreamingDecimator::new(taps, d))
@@ -201,7 +231,7 @@ pub fn front_end(raw_rate: f64) -> Result<StreamingDecimator, String> {
 /// reference, filtered exactly as the signal it correlates against will be.
 ///
 /// Generated at the raw rate and put through [`front_end`]'s own filter and
-/// decimation - not a separately-tuned equivalent at [`WORKING_RATE_HZ`] -
+/// decimation - not a separately-tuned equivalent at [`working_rate_hz`] -
 /// so the two literally cannot drift out of step with each other the way a
 /// hand-matched pair of filter designs eventually would.
 ///
@@ -239,22 +269,22 @@ pub fn front_end(raw_rate: f64) -> Result<StreamingDecimator, String> {
 /// sync content and into the suffix margin at its far edge - measured
 /// directly during this fix's own development, and the second of the two
 /// bugs finding this reference construction cost.
-fn matched_reference(raw_rate: f64) -> Result<Vec<Complex<f32>>, String> {
-    let sps = (raw_rate / 1_000_000.0).round().max(1.0) as usize;
-    let sample_rate = sps as f64 * 1_000_000.0;
-    let mut sync_bits = preamble_bits(ADVERTISING_ACCESS_ADDRESS).to_vec();
+fn matched_reference(raw_rate: f64, phy: Phy) -> Result<Vec<Complex<f32>>, String> {
+    let sps = (raw_rate / phy.symbol_rate_hz()).round().max(1.0) as usize;
+    let sample_rate = sps as f64 * phy.symbol_rate_hz();
+    let mut sync_bits = preamble_bits(ADVERTISING_ACCESS_ADDRESS, phy);
     sync_bits.extend_from_slice(&access_address_bits(ADVERTISING_ACCESS_ADDRESS));
 
     let mut padded_bits = margin_bits(MARGIN_SYMBOLS);
     padded_bits.extend_from_slice(&sync_bits);
     padded_bits.extend_from_slice(&margin_bits(MARGIN_SYMBOLS));
-    let padded_raw = gfsk::modulate(&padded_bits, sps, 250_000.0, sample_rate, 0.5);
+    let padded_raw = gfsk::modulate(&padded_bits, sps, phy.deviation_hz(), sample_rate, 0.5);
     let mut padded_filtered = Vec::new();
-    front_end(raw_rate)?.process(&padded_raw, &mut padded_filtered);
+    front_end(raw_rate, phy)?.process(&padded_raw, &mut padded_filtered);
 
-    let sync_raw = gfsk::modulate(&sync_bits, sps, 250_000.0, sample_rate, 0.5);
+    let sync_raw = gfsk::modulate(&sync_bits, sps, phy.deviation_hz(), sample_rate, 0.5);
     let mut sync_filtered = Vec::new();
-    front_end(raw_rate)?.process(&sync_raw, &mut sync_filtered);
+    front_end(raw_rate, phy)?.process(&sync_raw, &mut sync_filtered);
     let want = sync_filtered.len();
 
     let skip = MARGIN_SYMBOLS * WORKING_SPS;
@@ -296,6 +326,12 @@ pub struct Receiver {
     window_len: usize,
     channel: u8,
     raw_rate: f64,
+    /// Which PHY this receiver decodes - B17's own addition. Fixed for the
+    /// receiver's own lifetime the same way `channel` and `raw_rate` are:
+    /// a change on any of the three invalidates the matched filter's own
+    /// reference and the decimator's own filter, so [`Self::matches`] holds
+    /// all three to account and the caller rebuilds rather than reusing.
+    phy: Phy,
     /// The last [`LOOKBACK_SAMPLES`] filtered samples, kept continuously
     /// regardless of `capturing` - see `try_decode`'s own doc for why a
     /// trigger's own position is not trusted to be the header's own first
@@ -308,9 +344,9 @@ pub struct Receiver {
 }
 
 impl Receiver {
-    pub fn new(raw_rate: f64, channel: u8) -> Result<Self, String> {
-        let decim = front_end(raw_rate)?;
-        let reference = matched_reference(raw_rate)?;
+    pub fn new(raw_rate: f64, channel: u8, phy: Phy) -> Result<Self, String> {
+        let decim = front_end(raw_rate, phy)?;
+        let reference = matched_reference(raw_rate, phy)?;
         let window_len = reference.len();
         let threshold = threshold_for_false_alarm(window_len, FALSE_ALARM_RATE);
         Ok(Self {
@@ -320,6 +356,7 @@ impl Receiver {
             window_len,
             channel,
             raw_rate,
+            phy,
             history: Vec::new(),
             capture: Vec::new(),
             capturing: false,
@@ -328,11 +365,11 @@ impl Receiver {
     }
 
     /// Whether this receiver is still the right one for `channel` at
-    /// `raw_rate` - a retune or a sample-rate change invalidates the
-    /// detector's own reference and the capture in progress alike, so the
-    /// caller rebuilds rather than reusing.
-    pub fn matches(&self, channel: u8, raw_rate: f64) -> bool {
-        self.channel == channel && (self.raw_rate - raw_rate).abs() < 1.0
+    /// `raw_rate` on `phy` - a retune, a sample-rate change or a PHY change
+    /// invalidates the detector's own reference and the capture in
+    /// progress alike, so the caller rebuilds rather than reusing.
+    pub fn matches(&self, channel: u8, raw_rate: f64, phy: Phy) -> bool {
+        self.channel == channel && (self.raw_rate - raw_rate).abs() < 1.0 && self.phy == phy
     }
 
     /// Feed one block of raw device bytes. Returns every packet fully
@@ -473,7 +510,7 @@ impl Receiver {
         }
         let capture = &self.capture[skip..];
         let mut inst = Vec::new();
-        discriminate(capture, WORKING_RATE_HZ, &mut inst);
+        discriminate(capture, working_rate_hz(self.phy), &mut inst);
         let symbols = inst.len() / WORKING_SPS;
         if symbols < pdu::HEADER_BITS {
             return None;
@@ -552,7 +589,6 @@ mod tests {
     use super::*;
     use crate::hardware::{SampleFormat, StreamBlock};
     use crate::signal::ble::channel;
-    use crate::signal::ble::detect::Le1mParams;
     use crate::signal::ble::gfsk::modulate;
     use crate::signal::dsp::testkit::{at_snr, Rng};
 
@@ -563,21 +599,20 @@ mod tests {
         }
     }
 
-    /// A synthetic packet, preamble through CRC, at the working rate - the
-    /// same construction B3's own detection tests use, extended with a real
-    /// PDU instead of random bits after the sync word.
+    /// A synthetic packet, preamble through CRC, at `phy`'s own working
+    /// rate - the same construction B3's own detection tests use, extended
+    /// with a real PDU instead of random bits after the sync word. B17's
+    /// own addition: `phy`, so the identical construction proves both PHYs
+    /// rather than a second, separately-written one for LE 2M.
     fn synthetic_packet_iq(
+        phy: Phy,
         ch: u8,
         header_byte0: u8,
         payload: &[u8],
         noise_snr_db: f64,
     ) -> Vec<Complex<f32>> {
-        let params = Le1mParams {
-            sps: WORKING_SPS,
-            sample_rate: WORKING_RATE_HZ,
-            deviation_hz: 250_000.0,
-            bt: 0.5,
-        };
+        let sps = WORKING_SPS;
+        let sample_rate = working_rate_hz(phy);
         // A real capture never starts the instant a packet's own first bit
         // begins either - there is always earlier stream before it, whether
         // the channel's own noise floor or another packet's tail. Leading
@@ -588,8 +623,9 @@ mod tests {
         // [`matched_reference`]'s own margin exists to avoid needing.
         let mut rng = Rng::new(4242);
         let mut bits: Vec<bool> = (0..16).map(|_| rng.next_u64() & 1 == 1).collect();
-        bits.extend_from_slice(&super::super::detect::preamble_bits(
+        bits.extend(super::super::detect::preamble_bits(
             ADVERTISING_ACCESS_ADDRESS,
+            phy,
         ));
         bits.extend_from_slice(&super::super::detect::access_address_bits(
             ADVERTISING_ACCESS_ADDRESS,
@@ -602,13 +638,7 @@ mod tests {
         // waits on a sample this test would otherwise never provide.
         let mut rng = Rng::new(1234);
         bits.extend((0..16).map(|_| rng.next_u64() & 1 == 1));
-        let clean = modulate(
-            &bits,
-            params.sps,
-            params.deviation_hz,
-            params.sample_rate,
-            params.bt,
-        );
+        let clean = modulate(&bits, sps, phy.deviation_hz(), sample_rate, 0.5);
         if noise_snr_db.is_finite() {
             at_snr(&clean, noise_snr_db, &mut Rng::new(99))
         } else {
@@ -635,11 +665,34 @@ mod tests {
         let addr = [0xAA, 0xBB, 0xCC, 0x11, 0x22, 0x33];
         let mut payload = addr.to_vec();
         payload.extend_from_slice(&[0x02, 0x01, 0x06]);
-        let iq = synthetic_packet_iq(37, 0x00, &payload, 20.0);
+        let iq = synthetic_packet_iq(Phy::OneM, 37, 0x00, &payload, 20.0);
         let geometry = eight_bit();
         let bytes = bytes_for(&iq, geometry);
 
-        let mut rx = Receiver::new(WORKING_RATE_HZ, 37).unwrap();
+        let mut rx = Receiver::new(working_rate_hz(Phy::OneM), 37, Phy::OneM).unwrap();
+        let packets = rx.push(&bytes, geometry);
+        assert_eq!(packets.len(), 1, "expected exactly one packet");
+        let p = &packets[0];
+        assert_eq!(p.pdu_type, pdu::PduType::AdvInd);
+        assert_eq!(p.adv_addr, Some(addr));
+        assert!(p.crc_ok);
+    }
+
+    /// B17's own exit condition: the identical chain, on LE 2M, at twice
+    /// the symbol rate and twice the preamble length - design section
+    /// 1.2's own "nothing new except the numbers" - decodes a real ADV_IND
+    /// whole. Not a second, hand-duplicated test: [`synthetic_packet_iq`],
+    /// [`Receiver::new`] and everything downstream take `phy` as data.
+    #[test]
+    fn a_synthetic_adv_ind_is_received_whole_on_le_2m() {
+        let addr = [0xAA, 0xBB, 0xCC, 0x11, 0x22, 0x33];
+        let mut payload = addr.to_vec();
+        payload.extend_from_slice(&[0x02, 0x01, 0x06]);
+        let iq = synthetic_packet_iq(Phy::TwoM, 37, 0x00, &payload, 20.0);
+        let geometry = eight_bit();
+        let bytes = bytes_for(&iq, geometry);
+
+        let mut rx = Receiver::new(working_rate_hz(Phy::TwoM), 37, Phy::TwoM).unwrap();
         let packets = rx.push(&bytes, geometry);
         assert_eq!(packets.len(), 1, "expected exactly one packet");
         let p = &packets[0];
@@ -655,11 +708,11 @@ mod tests {
     fn a_packet_split_across_many_small_blocks_still_arrives() {
         let addr = [0x01, 0x02, 0x03, 0x04, 0x05, 0x06];
         let payload = addr.to_vec();
-        let iq = synthetic_packet_iq(37, 0x02, &payload, 20.0); // ADV_NONCONN_IND
+        let iq = synthetic_packet_iq(Phy::OneM, 37, 0x02, &payload, 20.0); // ADV_NONCONN_IND
         let geometry = eight_bit();
         let bytes = bytes_for(&iq, geometry);
 
-        let mut rx = Receiver::new(WORKING_RATE_HZ, 37).unwrap();
+        let mut rx = Receiver::new(working_rate_hz(Phy::OneM), 37, Phy::OneM).unwrap();
         let mut found = Vec::new();
         for chunk in bytes.chunks(6) {
             found.extend(rx.push(chunk, geometry));
@@ -677,7 +730,7 @@ mod tests {
         let noise = rng.noise(200_000, 1.0);
         let geometry = eight_bit();
         let bytes = bytes_for(&noise, geometry);
-        let mut rx = Receiver::new(WORKING_RATE_HZ, 37).unwrap();
+        let mut rx = Receiver::new(working_rate_hz(Phy::OneM), 37, Phy::OneM).unwrap();
         assert!(rx.push(&bytes, geometry).is_empty());
     }
 
@@ -685,7 +738,7 @@ mod tests {
     /// mis-scaled.
     #[test]
     fn a_sample_rate_below_the_working_rate_is_refused() {
-        assert!(front_end(2_000_000.0).is_err());
+        assert!(front_end(2_000_000.0, Phy::OneM).is_err());
     }
 
     /// A sample rate that decimates cleanly to the working rate is accepted,
@@ -693,8 +746,19 @@ mod tests {
     #[test]
     fn clean_multiples_of_the_working_rate_are_accepted() {
         for rate in [4_000_000.0, 8_000_000.0, 20_000_000.0] {
-            assert!(front_end(rate).is_ok(), "rate {rate} should be accepted");
+            assert!(
+                front_end(rate, Phy::OneM).is_ok(),
+                "rate {rate} should be accepted"
+            );
         }
+    }
+
+    /// LE 2M needs twice LE 1M's own minimum sample rate - the same
+    /// refusal shape, at the doubled working rate.
+    #[test]
+    fn le_2m_needs_twice_the_minimum_sample_rate() {
+        assert!(front_end(4_000_000.0, Phy::TwoM).is_err());
+        assert!(front_end(8_000_000.0, Phy::TwoM).is_ok());
     }
 
     /// A real capture at 20 Msps, decimated down, still finds the packet -
@@ -706,13 +770,8 @@ mod tests {
         let mut payload = addr.to_vec();
         payload.push(0xFF);
         let raw_rate = 20_000_000.0;
-        let params = Le1mParams {
-            sps: (raw_rate / 1_000_000.0) as usize,
-            sample_rate: raw_rate,
-            deviation_hz: 250_000.0,
-            bt: 0.5,
-        };
-        let mut bits = super::super::detect::preamble_bits(ADVERTISING_ACCESS_ADDRESS).to_vec();
+        let sps = (raw_rate / Phy::OneM.symbol_rate_hz()) as usize;
+        let mut bits = super::super::detect::preamble_bits(ADVERTISING_ACCESS_ADDRESS, Phy::OneM);
         bits.extend_from_slice(&super::super::detect::access_address_bits(
             ADVERTISING_ACCESS_ADDRESS,
         ));
@@ -722,18 +781,12 @@ mod tests {
         // needs a few dozen more samples of margin besides.
         let mut rng = Rng::new(4321);
         bits.extend((0..64).map(|_| rng.next_u64() & 1 == 1));
-        let clean = modulate(
-            &bits,
-            params.sps,
-            params.deviation_hz,
-            params.sample_rate,
-            params.bt,
-        );
+        let clean = modulate(&bits, sps, Phy::OneM.deviation_hz(), raw_rate, 0.5);
         let noisy = at_snr(&clean, 25.0, &mut Rng::new(7));
         let geometry = eight_bit();
         let bytes = bytes_for(&noisy, geometry);
 
-        let mut rx = Receiver::new(raw_rate, 38).unwrap();
+        let mut rx = Receiver::new(raw_rate, 38, Phy::OneM).unwrap();
         let packets = rx.push(&bytes, geometry);
         assert_eq!(packets.len(), 1, "expected exactly one packet");
         assert!(packets[0].crc_ok);
@@ -755,41 +808,30 @@ mod tests {
         let mut payload = addr.to_vec();
         payload.push(0x01);
         let raw_rate = 20_000_000.0;
-        let params = Le1mParams {
-            sps: (raw_rate / 1_000_000.0) as usize,
-            sample_rate: raw_rate,
-            deviation_hz: 250_000.0,
-            bt: 0.5,
-        };
-        let mut bits = super::super::detect::preamble_bits(ADVERTISING_ACCESS_ADDRESS).to_vec();
+        let sps = (raw_rate / Phy::OneM.symbol_rate_hz()) as usize;
+        let mut bits = super::super::detect::preamble_bits(ADVERTISING_ACCESS_ADDRESS, Phy::OneM);
         bits.extend_from_slice(&super::super::detect::access_address_bits(
             ADVERTISING_ACCESS_ADDRESS,
         ));
         bits.extend_from_slice(&pdu::encode(37, 0x00, &payload));
         let mut rng = Rng::new(555);
         bits.extend((0..64).map(|_| rng.next_u64() & 1 == 1));
-        let wanted = modulate(
-            &bits,
-            params.sps,
-            params.deviation_hz,
-            params.sample_rate,
-            params.bt,
-        );
+        let wanted = modulate(&bits, sps, Phy::OneM.deviation_hz(), raw_rate, 0.5);
 
         // An unrelated burst, same shape and same amplitude as the wanted
         // signal - equal-power interference is the harder case, not a
         // softened one - carrying its own random content over the same
         // span, then mixed up to the aliasing offset.
         let mut irng = Rng::new(9001);
-        let interferer_bits: Vec<bool> = (0..wanted.len() / params.sps)
+        let interferer_bits: Vec<bool> = (0..wanted.len() / sps)
             .map(|_| irng.next_u64() & 1 == 1)
             .collect();
         let interferer_baseband = modulate(
             &interferer_bits,
-            params.sps,
-            params.deviation_hz,
-            params.sample_rate,
-            params.bt,
+            sps,
+            Phy::OneM.deviation_hz(),
+            raw_rate,
+            0.5,
         );
         const INTERFERER_OFFSET_HZ: f64 = 8_000_000.0;
         let mixed: Vec<Complex<f32>> = wanted
@@ -810,7 +852,7 @@ mod tests {
         let geometry = eight_bit();
         let bytes = bytes_for(&noisy, geometry);
 
-        let mut rx = Receiver::new(raw_rate, 37).unwrap();
+        let mut rx = Receiver::new(raw_rate, 37, Phy::OneM).unwrap();
         let packets = rx.push(&bytes, geometry);
         assert_eq!(
             packets.len(),
@@ -832,8 +874,12 @@ mod tests {
             gap_before: false,
             bytes: vec![0u8; 64],
         };
-        let mut rx =
-            Receiver::new(WORKING_RATE_HZ, channel::channel_of(2_426_000_000).unwrap()).unwrap();
+        let mut rx = Receiver::new(
+            working_rate_hz(Phy::OneM),
+            channel::channel_of(2_426_000_000).unwrap(),
+            Phy::OneM,
+        )
+        .unwrap();
         assert!(rx.push(&block.bytes, geometry).is_empty());
     }
 }

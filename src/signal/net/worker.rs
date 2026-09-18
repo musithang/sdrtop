@@ -276,8 +276,14 @@ impl NetWorker {
             let channel = crate::signal::ble::channel::channel_of(centre_hz as u64);
             match channel {
                 Some(ch) if still_open => {
-                    if !ble.as_ref().is_some_and(|r| r.matches(ch, rate_hz)) {
-                        ble = match BleReceiver::new(rate_hz, ch) {
+                    // LE 1M only, for now: B17 gave `Receiver` real,
+                    // tested LE 2M support, but nothing here yet lets a
+                    // user ask this worker to listen for it - that PHY
+                    // selection is real remaining wiring, not assumed
+                    // done by this default.
+                    let phy = crate::signal::ble::Phy::OneM;
+                    if !ble.as_ref().is_some_and(|r| r.matches(ch, rate_hz, phy)) {
+                        ble = match BleReceiver::new(rate_hz, ch, phy) {
                             Ok(r) => {
                                 let mut m = self.state.lock().unwrap_or_else(|e| e.into_inner());
                                 m.net.ble_refused = None;
@@ -713,6 +719,7 @@ mod tests {
         };
         use crate::signal::ble::gfsk::modulate;
         use crate::signal::ble::pdu::encode;
+        use crate::signal::ble::Phy;
         use crate::signal::dsp::testkit::{at_snr, Rng};
         use num_complex::Complex;
 
@@ -721,7 +728,7 @@ mod tests {
         const CHANNEL: u8 = 37; // 2402 MHz
 
         let addr = [0x11u8, 0x22, 0x33, 0x44, 0x55, 0x66];
-        let mut bits = preamble_bits(ADVERTISING_ACCESS_ADDRESS).to_vec();
+        let mut bits = preamble_bits(ADVERTISING_ACCESS_ADDRESS, Phy::OneM);
         bits.extend_from_slice(&access_address_bits(ADVERTISING_ACCESS_ADDRESS));
         bits.extend_from_slice(&encode(CHANNEL, 0x00, &addr));
         let mut rng = Rng::new(1);

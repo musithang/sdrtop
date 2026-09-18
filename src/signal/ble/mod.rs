@@ -22,3 +22,91 @@ pub mod measure;
 pub mod pdu;
 pub mod receive;
 pub mod sync;
+
+/// Which of BLE's two uncoded PHYs a chain is built for. LE 1M is every
+/// step from B6 through B16's own PHY; B17 adds LE 2M, design section 1.2's
+/// own "the same chain at twice the symbol rate... nothing new except the
+/// numbers" - a receiver parameterised by this rather than a second,
+/// separately-maintained copy of [`receive::Receiver`].
+///
+/// **Not read from the Bluetooth Core Specification itself this session** -
+/// the same standing every fact in this arc has (design section 6's own
+/// facts-to-verify table, which gains rows for LE 2M's own preamble length
+/// and deviation figure alongside the ones already there). [`Phy::OneM`]'s
+/// own numbers already had that citation from B1 onward; [`Phy::TwoM`]'s
+/// are reasoned by direct analogy - the same modulation index formula
+/// (`h = 2 * deviation / symbol_rate`) held at the same `h = 0.5`, and the
+/// same alternating-preamble rule run for twice as long - not independently
+/// looked up.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Phy {
+    OneM,
+    /// `signal::ble::receive::Receiver` and this whole module's own tests
+    /// support it fully; nothing in `signal::net::worker` yet lets a user
+    /// ask to listen for it - real remaining wiring, not assumed done by
+    /// this variant existing (`worker.rs`'s own `BleReceiver::new` call
+    /// site names this honestly rather than leaving it implicit).
+    #[allow(dead_code)]
+    TwoM,
+}
+
+impl Phy {
+    /// The symbol rate this PHY transmits at - fixed by the PHY itself, not
+    /// a free parameter a caller picks.
+    pub fn symbol_rate_hz(self) -> f64 {
+        match self {
+            Phy::OneM => 1_000_000.0,
+            Phy::TwoM => 2_000_000.0,
+        }
+    }
+
+    /// The nominal peak frequency deviation a modulation index of 0.5
+    /// implies at this PHY's own symbol rate - 250 kHz at 1 Mb/s, 500 kHz
+    /// at 2 Mb/s, both numbers moving together so the index itself does
+    /// not.
+    pub fn deviation_hz(self) -> f64 {
+        match self {
+            Phy::OneM => 250_000.0,
+            Phy::TwoM => 500_000.0,
+        }
+    }
+
+    /// How many bits the preamble is on this PHY - 8 for LE 1M, 16 for LE
+    /// 2M, the same alternating rule ([`detect::preamble_bits`]'s own doc)
+    /// run for twice as long.
+    pub fn preamble_bits_len(self) -> usize {
+        match self {
+            Phy::OneM => 8,
+            Phy::TwoM => 16,
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Both PHYs hold the same modulation-index relationship design
+    /// section 2.1 states for LE 1M - `h = 2 * deviation / symbol_rate`
+    /// equal to 0.5 - checked directly rather than trusted from the two
+    /// numbers having been chosen by eye to look proportional.
+    #[test]
+    fn both_phys_hold_the_same_modulation_index() {
+        for phy in [Phy::OneM, Phy::TwoM] {
+            let h = 2.0 * phy.deviation_hz() / phy.symbol_rate_hz();
+            assert!((h - 0.5).abs() < 1e-9, "{phy:?}: h = {h}");
+        }
+    }
+
+    /// LE 2M runs at exactly twice LE 1M's own symbol rate and preamble
+    /// length - design section 1.2's own claim, held to account rather
+    /// than trusted from the doc comment alone.
+    #[test]
+    fn two_m_is_exactly_double_one_m() {
+        assert_eq!(Phy::TwoM.symbol_rate_hz(), Phy::OneM.symbol_rate_hz() * 2.0);
+        assert_eq!(
+            Phy::TwoM.preamble_bits_len(),
+            Phy::OneM.preamble_bits_len() * 2
+        );
+    }
+}

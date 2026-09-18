@@ -21,6 +21,7 @@
 use num_complex::Complex;
 
 use super::gfsk;
+use super::Phy;
 use crate::signal::dsp::correlate::MatchedFilter;
 
 /// The fixed access address every advertising channel PDU begins with.
@@ -73,23 +74,26 @@ pub fn access_address_bits(access_address: u32) -> [bool; 32] {
     out
 }
 
-/// The 8-bit preamble that precedes every LE 1M packet, as the bit sequence
-/// in transmission order.
+/// The preamble that precedes every packet on `phy` - 8 bits for LE 1M, 16
+/// for LE 2M ([`Phy::preamble_bits_len`]) - as the bit sequence in
+/// transmission order.
 ///
 /// Its first transmitted bit equals the access address's own least
 /// significant bit - equivalently, [`access_address_bits`]'s element 0 - and
 /// then strictly alternates. Stated this way round deliberately: the
 /// specification names the rule by the bit relationship, not by a byte value,
 /// and naming it "0xAA" or "0x55" would silently commit to a bit order this
-/// function does not need to take a position on.
-pub fn preamble_bits(access_address: u32) -> [bool; 8] {
+/// function does not need to take a position on. `Vec<bool>` rather than a
+/// fixed-size array since B17: the length itself now varies by PHY.
+pub fn preamble_bits(access_address: u32, phy: Phy) -> Vec<bool> {
     let mut bit = access_address & 1 != 0;
-    let mut out = [false; 8];
-    for slot in out.iter_mut() {
-        *slot = bit;
-        bit = !bit;
-    }
-    out
+    (0..phy.preamble_bits_len())
+        .map(|_| {
+            let out = bit;
+            bit = !bit;
+            out
+        })
+        .collect()
 }
 
 /// GFSK parameters for the LE 1M PHY, gathered so a caller states the working
@@ -156,7 +160,7 @@ pub struct Detector {
 impl Detector {
     pub fn new(access_address: u32, params: Le1mParams) -> Self {
         let mut bits = Vec::with_capacity(REFERENCE_SYMBOLS);
-        bits.extend_from_slice(&preamble_bits(access_address));
+        bits.extend(preamble_bits(access_address, Phy::OneM));
         bits.extend_from_slice(&access_address_bits(access_address));
         let reference = gfsk::modulate(
             &bits,
@@ -220,8 +224,23 @@ mod tests {
     /// preamble here is 0, 1, 0, 1, 0, 1, 0, 1.
     #[test]
     fn the_advertising_preamble_alternates_from_the_address_lsb() {
-        let p = preamble_bits(ADVERTISING_ACCESS_ADDRESS);
-        assert_eq!(p, [false, true, false, true, false, true, false, true]);
+        let p = preamble_bits(ADVERTISING_ACCESS_ADDRESS, Phy::OneM);
+        assert_eq!(p, vec![false, true, false, true, false, true, false, true]);
+    }
+
+    /// LE 2M's own preamble is the identical alternating rule, run for
+    /// twice as long - [`Phy::preamble_bits_len`]'s own claim, held to
+    /// account directly.
+    #[test]
+    fn the_two_m_preamble_is_the_same_rule_run_twice_as_long() {
+        let p = preamble_bits(ADVERTISING_ACCESS_ADDRESS, Phy::TwoM);
+        assert_eq!(
+            p,
+            vec![
+                false, true, false, true, false, true, false, true, false, true, false, true,
+                false, true, false, true,
+            ]
+        );
     }
 
     /// The reference is exactly `REFERENCE_SYMBOLS * sps` samples long, which
@@ -248,7 +267,7 @@ mod tests {
                 .map(|_| rng.next_u64() & 1 == 1)
                 .collect();
             let sync_start = bits.len();
-            bits.extend_from_slice(&preamble_bits(ADVERTISING_ACCESS_ADDRESS));
+            bits.extend(preamble_bits(ADVERTISING_ACCESS_ADDRESS, Phy::OneM));
             bits.extend_from_slice(&access_address_bits(ADVERTISING_ACCESS_ADDRESS));
             bits.extend((0..200).map(|_| rng.next_u64() & 1 == 1));
 
