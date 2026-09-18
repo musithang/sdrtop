@@ -21,9 +21,17 @@
 //! **B16 adds one more line: the most recent hop's own piconet, narrowed as
 //! far as a header alone ever gets.** `signal::bt::header::PiconetClock`'s
 //! own doc has the measurement: usually two UAP candidates survive, not
-//! one, and closing that gap needs the payload's own CRC - a real, separate
-//! piece of work, not built yet. This panel reports the honest floor rather
-//! than picking one of the two and calling it confirmed.
+//! one, and closing that gap needs the payload's own CRC. This panel reports
+//! the honest floor rather than picking one of the two and calling it
+//! confirmed - unless it actually has been: **B17 adds a real tie-break.**
+//! `signal::net::worker`'s own `payload::break_uap_tie`, run against a real
+//! DH1/DH3/DH5 payload's own CRC-16 when one follows a header, can resolve
+//! the floor for good - `state.net.bt_uap` then holds exactly one element,
+//! shown as "UAP 0x.." rather than "UAP candidates 0x.., 0x..", and stays
+//! that way for the rest of the session (a piconet's real UAP does not
+//! change). The two labels are otherwise indistinguishable on screen from
+//! the older, rarer case a very short capture happens to land on one by
+//! coincidence - both are equally honest about what is actually known.
 
 use ratatui::{
     layout::Rect,

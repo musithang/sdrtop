@@ -23,11 +23,15 @@
 //! `payload_crc`), GPL-2.0-or-later, the same standing [`super::header`]'s
 //! own port already has.
 //!
-//! **Not yet wired to a live receiver.** Nothing in `signal::bt::receive`
-//! yet captures the bits after a header hit far enough to reach a payload's
-//! own CRC, or knows how many bits that even is before the payload header
-//! (captured first, one byte or two, packet-type dependent) says so -
-//! [`super::header`]'s own "not yet wired" gap, one level up again.
+//! **Wired to a live receiver the same day, unlike [`super::header`]'s own
+//! first landing.** `signal::bt::receive::Receiver` captures a fixed,
+//! generous window of raw bits after every header (DH5's own worst-case
+//! payload length, regardless of what type the header actually turns out
+//! to name - a lane cannot know that without a confirmed UAP), and
+//! `signal::net::worker` calls [`break_uap_tie`] whenever a LAP's own
+//! `PiconetClock` has more than one candidate still standing, keeping the
+//! answer once it resolves rather than re-deriving it every header
+//! (`resolved_bt_uap`'s own doc there says why).
 
 use super::header::{self, HEADER_BITS};
 
@@ -37,7 +41,6 @@ use super::header::{self, HEADER_BITS};
 /// [`verify_crc`] actually needs (LLID and FLOW are carried through for a
 /// future consumer; nothing here reads them yet).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-#[allow(dead_code)]
 pub struct PayloadHeader {
     pub llid: u8,
     pub flow: bool,
@@ -54,7 +57,6 @@ pub struct PayloadHeader {
 /// `libbtbb`'s own reading of the field, not something this port adds
 /// meaning to). `None` for every packet type this module does not decode -
 /// this session's own scope decision, not a limit of the algorithm itself.
-#[allow(dead_code)]
 pub fn payload_header_bits(packet_type: header::PacketType) -> Option<usize> {
     match packet_type {
         header::PacketType::Dh1 => Some(8),
@@ -67,7 +69,6 @@ pub fn payload_header_bits(packet_type: header::PacketType) -> Option<usize> {
 /// for each supported type - `libbtbb`'s own per-type `max_length`, guarding
 /// against a corrupted LENGTH field claiming an impossible size rather than
 /// trusting it outright.
-#[allow(dead_code)]
 pub fn max_payload_length(packet_type: header::PacketType) -> Option<usize> {
     match packet_type {
         header::PacketType::Dh1 => Some(30),
@@ -79,7 +80,6 @@ pub fn max_payload_length(packet_type: header::PacketType) -> Option<usize> {
 
 /// Decode a payload header already dewhitened - `bits.len()` must be
 /// exactly 8 or 16, [`payload_header_bits`]'s own two legal answers.
-#[allow(dead_code)]
 pub fn decode_payload_header(bits: &[bool]) -> Option<PayloadHeader> {
     let llid = header::pack_bits(&bits[0..2]) as u8;
     let flow = bits[2];
@@ -100,9 +100,11 @@ pub fn decode_payload_header(bits: &[bool]) -> Option<PayloadHeader> {
 /// all-one start, run bit by bit over the payload's own header and body.
 /// The register's final value is compared directly against the trailing 16
 /// bits the packet itself carries - [`verify_crc`]'s own job, not this
-/// function's.
-#[allow(dead_code)]
-fn crcgen(bits: &[bool], uap: u8) -> u16 {
+/// function's. `pub(crate)` rather than private so `signal::bt::receive`'s
+/// own tests can build a real, correctly-CRC'd synthetic payload through
+/// the full GFSK chain, the same reason `header::uap_from_hec` and
+/// friends are `pub(crate)` rather than private.
+pub(crate) fn crcgen(bits: &[bool], uap: u8) -> u16 {
     let mut reg: u16 = (header::reverse_bits(uap) as u16) << 8;
     for &bit in bits {
         let fed_bit = (reg & 0x0001) ^ (bit as u16);
@@ -130,7 +132,6 @@ fn crcgen(bits: &[bool], uap: u8) -> u16 {
 /// possible - never invented when the data to compute it is simply
 /// missing, `POLICY.md` rule 2's own "what cannot be asked is refused, not
 /// answered".
-#[allow(dead_code)]
 pub fn verify_crc(
     raw: &[bool],
     clk6: u8,
@@ -169,7 +170,6 @@ pub fn verify_crc(
 /// with only two real candidates surviving `PiconetClock` in the first
 /// place) neither one's own payload actually checks out - every one of
 /// those is "still tied, honestly", never a guessed answer.
-#[allow(dead_code)]
 pub fn break_uap_tie(
     candidates: &[u8],
     header_whitened: &[bool; HEADER_BITS],

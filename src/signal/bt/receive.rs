@@ -92,10 +92,36 @@ pub struct HeaderHit {
     /// needs differences between these, and finds its own reference the
     /// first time it is called for a given LAP.
     pub tick: i64,
+    /// The raw, still-whitened bits captured immediately after the
+    /// header, up to [`PAYLOAD_CAPTURE_BITS`] of them regardless of what
+    /// packet type this header turns out to name - this lane has no way
+    /// to know that without a confirmed UAP, which only `signal::net::
+    /// worker`'s own `header::PiconetClock` computes. `payload::
+    /// verify_crc`/`break_uap_tie`'s own `raw` parameter, unchanged.
+    pub payload_raw: Vec<bool>,
 }
 
-/// One lane's own header capture in progress: the bits collected so far
-/// after that lane's `Detector` last fired, and which LAP it was for.
+/// How many raw, still-whitened bits after a header this receiver keeps
+/// capturing alongside it. `343 * 8` is DH5's own worst-case total
+/// payload length in bits - `payload::max_payload_length`'s largest
+/// answer among the three packet types B17 supports -
+/// `payload_capture_covers_every_supported_types_own_worst_case` (below)
+/// holds this number to that function directly rather than trusting the
+/// two figures to stay in step by hand. A real payload shorter than this
+/// (DH1's own 30-byte ceiling, most of the time) simply leaves this
+/// capture's own tail sitting past the payload's real end, which `verify_
+/// crc` never reads: it trusts the payload header's own LENGTH field, not
+/// how much this receiver happened to buffer.
+const PAYLOAD_CAPTURE_BITS: usize = 343 * 8;
+
+/// How many raw air bits a header itself occupies after the access
+/// code - the 4-bit trailer this arc never reads, plus FEC(1/3)'s own
+/// 54 air bits for [`header::HEADER_BITS`] host bits.
+const HEADER_CAPTURE_BITS: usize = header::TRAILER_BITS + header::HEADER_AIR_BITS;
+
+/// One lane's own header-plus-payload capture in progress: the bits
+/// collected so far after that lane's `Detector` last fired, and which
+/// LAP it was for.
 struct PendingHeader {
     lap: u32,
     /// This lane's own symbol count at the moment the access code that
@@ -103,10 +129,18 @@ struct PendingHeader {
     /// starting at the very next symbol, so this is also the tick
     /// [`HeaderHit::tick`] is measured from.
     start_symbol: u64,
-    /// Trailer bits first (discarded once the capture is complete),
-    /// header air bits after - `header::TRAILER_BITS` plus `header::
-    /// HEADER_AIR_BITS` in total once done.
+    /// Trailer bits first, header air bits next
+    /// ([`HEADER_CAPTURE_BITS`] in total), the raw payload region after
+    /// that ([`PAYLOAD_CAPTURE_BITS`] more, once [`Self::header_whitened`]
+    /// is set).
     bits: Vec<bool>,
+    /// Set the moment the header's own air bits complete and pass FEC -
+    /// `None` while still capturing the header itself. A header that
+    /// fails FEC never sets this; that capture is abandoned right there
+    /// instead ([`Receiver::push`]'s own doc), since no amount of payload
+    /// afterward can be attributed to a header this arc could not even
+    /// read.
+    header_whitened: Option<[bool; header::HEADER_BITS]>,
 }
 
 /// Samples per symbol this receiver decimates to, and so also the number of
@@ -298,11 +332,17 @@ impl Receiver {
     /// an exact packet count, and a coarser count in exchange for not
     /// tripling every real one is the trade worth making here.
     ///
-    /// **Header capture rides alongside the same loop.** A lane with a
+    /// **Header capture rides alongside the same loop, and now runs past
+    /// the header itself into the raw payload region.** A lane with a
     /// capture already in progress appends this bit to it before anything
     /// else happens this iteration; a lane whose `Detector` fires this bit
     /// starts a fresh capture, empty, so the access code's own last bit is
-    /// never mistaken for the trailer's first one.
+    /// never mistaken for the trailer's first one. The moment
+    /// [`HEADER_CAPTURE_BITS`] completes, the header's own FEC(1/3) is
+    /// decoded once and cached (a header that fails it abandons the
+    /// capture right there - no payload capture is kept for a header this
+    /// arc could not even read); once [`PAYLOAD_CAPTURE_BITS`] more
+    /// arrive, a [`HeaderHit`] carrying both is emitted.
     pub fn push(&mut self, bytes: &[u8], geometry: SampleGeometry) -> (Vec<u32>, Vec<HeaderHit>) {
         let mut iq = Vec::new();
         decode_iq(bytes, geometry, usize::MAX, &mut iq);
@@ -312,7 +352,7 @@ impl Receiver {
 
         let mut found = Vec::new();
         let mut headers = Vec::new();
-        const CAPTURE_LEN: usize = header::TRAILER_BITS + header::HEADER_AIR_BITS;
+        const TOTAL_CAPTURE_BITS: usize = HEADER_CAPTURE_BITS + PAYLOAD_CAPTURE_BITS;
         for &sample in &working {
             let prev = self.last_sample.replace(sample);
             let Some(prev) = prev else { continue };
@@ -320,23 +360,30 @@ impl Receiver {
             self.bias += (freq - self.bias) * BIAS_ALPHA;
             let bit = freq > self.bias;
 
-            if let Some(pending) = &mut self.pending[self.lane] {
+            if let Some(pending) = self.pending[self.lane].as_mut() {
                 pending.bits.push(bit);
-                if pending.bits.len() == CAPTURE_LEN {
+                if pending.header_whitened.is_none() && pending.bits.len() == HEADER_CAPTURE_BITS {
+                    match header::unfec13(&pending.bits[header::TRAILER_BITS..]) {
+                        Some(whitened) => pending.header_whitened = Some(whitened),
+                        None => self.pending[self.lane] = None,
+                    }
+                } else if pending.bits.len() == TOTAL_CAPTURE_BITS {
                     let pending = self.pending[self.lane].take().unwrap();
-                    if let Some(whitened) = header::unfec13(&pending.bits[header::TRAILER_BITS..]) {
-                        // Deduplicated by LAP within the call, the same
-                        // reasoning `found`'s own doc gives: more than one
-                        // lane routinely captures the same real header
-                        // cleanly, and reporting each separately would
-                        // over-count one real packet as several.
-                        if !headers.iter().any(|h: &HeaderHit| h.lap == pending.lap) {
-                            headers.push(HeaderHit {
-                                lap: pending.lap,
-                                whitened,
-                                tick: ticks_from_symbols(pending.start_symbol),
-                            });
-                        }
+                    let whitened = pending.header_whitened.expect(
+                        "reaching the total capture length implies the header already decoded",
+                    );
+                    // Deduplicated by LAP within the call, the same
+                    // reasoning `found`'s own doc gives: more than one
+                    // lane routinely captures the same real header
+                    // cleanly, and reporting each separately would
+                    // over-count one real packet as several.
+                    if !headers.iter().any(|h: &HeaderHit| h.lap == pending.lap) {
+                        headers.push(HeaderHit {
+                            lap: pending.lap,
+                            whitened,
+                            tick: ticks_from_symbols(pending.start_symbol),
+                            payload_raw: pending.bits[HEADER_CAPTURE_BITS..].to_vec(),
+                        });
                     }
                 }
             }
@@ -349,7 +396,8 @@ impl Receiver {
                     self.pending[self.lane] = Some(PendingHeader {
                         lap,
                         start_symbol: self.lane_symbols[self.lane],
-                        bits: Vec::with_capacity(CAPTURE_LEN),
+                        bits: Vec::with_capacity(TOTAL_CAPTURE_BITS),
+                        header_whitened: None,
                     });
                 }
             }
@@ -363,6 +411,7 @@ impl Receiver {
 
 #[cfg(test)]
 mod tests {
+    use super::super::payload;
     use super::*;
     use crate::hardware::SampleFormat;
     use crate::signal::ble::gfsk::modulate;
@@ -466,9 +515,14 @@ mod tests {
 
     /// B16's own exit condition, wired: a synthetic classic-BT packet -
     /// access code, a 4-bit trailer, and a real FEC(1/3)-encoded, whitened
-    /// header - produces exactly one `HeaderHit`, whose own `whitened`
-    /// bits, dewhitened with the header's real CLK1-6 and the UAP that HEC
-    /// implies, give back exactly the fields it was built from.
+    /// header, followed by enough further content to complete the
+    /// payload capture window too - produces exactly one `HeaderHit`,
+    /// whose own `whitened` bits, dewhitened with the header's real
+    /// CLK1-6 and the UAP that HEC implies, give back exactly the fields
+    /// it was built from. The payload content here is arbitrary filler,
+    /// not a real DH1 payload - `a_real_dh1_payload_lets_break_uap_tie_
+    /// resolve_the_floor` (below) is the test that exercises `payload_
+    /// raw` for real.
     #[test]
     fn a_full_packet_produces_a_decodable_header_hit() {
         const RAW_RATE: f64 = 20_000_000.0;
@@ -498,6 +552,10 @@ mod tests {
         for &b in &whitened_header {
             bits.extend([b, b, b]); // FEC(1/3): each bit sent three times
         }
+        // Arbitrary filler, exactly `PAYLOAD_CAPTURE_BITS` long, so the
+        // capture window completes and a `HeaderHit` is actually emitted -
+        // this test does not care what the payload says.
+        bits.extend((0..PAYLOAD_CAPTURE_BITS).map(|i| i % 2 == 0));
         bits.extend((0..SETTLE_SYMBOLS).map(|i| i % 2 == 1));
 
         let sps = (RAW_RATE / SYMBOL_RATE_HZ) as usize;
@@ -526,6 +584,132 @@ mod tests {
         assert_eq!(decoded.lt_addr, lt_addr);
         assert_eq!(decoded.packet_type, header::PacketType::Dh1);
         assert_eq!(decoded.flags, flags);
+    }
+
+    /// [`PAYLOAD_CAPTURE_BITS`]'s own doc claims it covers every packet
+    /// type B17's own `payload` module supports - checked directly rather
+    /// than trusted from the arithmetic in the comment alone, the same
+    /// discipline every other cited-but-hand-computed constant in this
+    /// arc is held to.
+    #[test]
+    fn payload_capture_covers_every_supported_types_own_worst_case() {
+        for pt in [
+            header::PacketType::Dh1,
+            header::PacketType::Dh3,
+            header::PacketType::Dh5,
+        ] {
+            let max_bytes = payload::max_payload_length(pt).unwrap();
+            assert!(
+                max_bytes * 8 <= PAYLOAD_CAPTURE_BITS,
+                "{pt:?}: {max_bytes} bytes needs {} bits, capture only holds {PAYLOAD_CAPTURE_BITS}",
+                max_bytes * 8
+            );
+        }
+    }
+
+    /// The reason this wiring exists, proven end to end through the real
+    /// GFSK/decimate/slice chain rather than built directly as bits: a
+    /// `HeaderHit`'s own `payload_raw`, captured immediately after the
+    /// header the same call decoded, is exactly what `payload::
+    /// break_uap_tie` needs. Fed two candidate UAPs - the true one and a
+    /// genuine decoy this same header's own 64-candidate set actually
+    /// produces under some other CLK1-6 - it picks the true one, which is
+    /// `header::PiconetClock`'s own measured two-candidate floor actually
+    /// broken, not just the primitive that can break it landing untested.
+    #[test]
+    fn a_real_dh1_payload_lets_break_uap_tie_resolve_the_floor() {
+        const RAW_RATE: f64 = 20_000_000.0;
+        const TUNED_CENTRE: f64 = 2_441_000_000.0;
+        let ch = 39u8;
+        let lap = 0x0044_bb22u32;
+        let clk6 = 9u8;
+        let true_uap = 0x5cu8;
+
+        // A real DH1 header - fields chosen freely, the UAP derived from
+        // them by `uap_from_hec` itself, the same discipline `header.rs`'s
+        // own tests hold to rather than a second, uncited forward
+        // algorithm.
+        let lt_addr = 0b011u8;
+        let flags = 0b101u8;
+        let type_bits = 0b0100u8; // DH1
+        let data10 = (lt_addr as u16) | ((type_bits as u16) << 3) | ((flags as u16) << 7);
+        let hec = (0u16..256)
+            .map(|h| h as u8)
+            .find(|&h| header::uap_from_hec(data10, h) == true_uap)
+            .expect("uap_from_hec is a bijection in hec for a fixed data10");
+        let mut header_host = [false; header::HEADER_BITS];
+        for (i, slot) in header_host[0..10].iter_mut().enumerate() {
+            *slot = (data10 >> i) & 1 != 0;
+        }
+        for (i, slot) in header_host[10..18].iter_mut().enumerate() {
+            *slot = (hec >> i) & 1 != 0;
+        }
+        let whitened_header = header::unwhiten_header(&header_host, clk6);
+
+        // A real DH1 payload - one-byte payload header (LLID/FLOW/LENGTH),
+        // three bytes of body, a genuine CRC-16 trailer - built in host
+        // (dewhitened) form, then whitened the same way the header
+        // already is: XOR with the same LFSR, continued from bit 18
+        // (`header::unwhiten_at`'s own doc).
+        let body = [0x11u8, 0x22, 0x33];
+        let mut payload_host = vec![false, true, false]; // LLID, FLOW
+        for i in 0..5 {
+            payload_host.push((body.len() as u8 >> i) & 1 != 0); // LENGTH
+        }
+        for &byte in &body {
+            for i in 0..8 {
+                payload_host.push((byte >> i) & 1 != 0);
+            }
+        }
+        let crc = payload::crcgen(&payload_host, true_uap);
+        for i in 0..16 {
+            payload_host.push((crc >> i) & 1 != 0);
+        }
+        let payload_whitened = header::unwhiten_at(&payload_host, clk6, header::HEADER_BITS);
+
+        let mut bits: Vec<bool> = (0..SETTLE_SYMBOLS).map(|i| i % 2 == 0).collect();
+        bits.extend(access_code_bits(lap));
+        bits.extend([true, false, true, false]); // 4-bit trailer, content unread
+        for &b in &whitened_header {
+            bits.extend([b, b, b]); // FEC(1/3): each bit sent three times
+        }
+        bits.extend(payload_whitened.iter().copied());
+        // Pad out to the full capture window with arbitrary filler -
+        // `PAYLOAD_CAPTURE_BITS`'s own doc explains why a real payload
+        // shorter than the window is safe - then a settle tail.
+        bits.extend((0..(PAYLOAD_CAPTURE_BITS - payload_whitened.len())).map(|i| i % 2 == 1));
+        bits.extend((0..SETTLE_SYMBOLS).map(|i| i % 2 == 0));
+
+        let sps = (RAW_RATE / SYMBOL_RATE_HZ) as usize;
+        let clean = modulate(&bits, sps, 160_000.0, RAW_RATE, 0.5);
+        let noisy = at_snr(&clean, 40.0, &mut Rng::new(2));
+        let mut placed = noisy;
+        let channel_hz = channel::centre_hz(ch).unwrap() as f64;
+        Nco::new(channel_hz - TUNED_CENTRE, RAW_RATE).mix(&mut placed);
+
+        let geometry = eight_bit();
+        let bytes = to_bytes(&placed, geometry);
+
+        let mut rx = Receiver::new(RAW_RATE, ch, TUNED_CENTRE).unwrap();
+        let (_found, headers) = rx.push(&bytes, geometry);
+        assert_eq!(
+            headers.len(),
+            1,
+            "{:?}",
+            headers.iter().map(|h| h.lap).collect::<Vec<_>>()
+        );
+        let hit = &headers[0];
+
+        let all_candidates = header::candidate_uaps(&hit.whitened);
+        let decoy_uap = all_candidates
+            .iter()
+            .copied()
+            .find(|&u| u != true_uap)
+            .expect("64 candidates for one header must include more than one distinct value");
+
+        let winner =
+            payload::break_uap_tie(&[true_uap, decoy_uap], &hit.whitened, &hit.payload_raw);
+        assert_eq!(winner, Some(true_uap));
     }
 
     /// `push`'s own exit condition: a single real access code, found on more

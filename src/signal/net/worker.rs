@@ -34,6 +34,14 @@
 //! piconet's own UAP as far as a header alone ever can - `PiconetClock`'s
 //! own doc has the measured floor (two candidates, not one) and why. Wi-Fi
 //! arrives the same way when that arc reaches this point.
+//!
+//! **B17 breaks that floor, live.** Each `HeaderHit` now carries a captured
+//! payload region alongside its header; whenever a LAP's own `PiconetClock`
+//! has not settled on one UAP, this worker tries `signal::bt::payload::
+//! break_uap_tie` against it. `resolved_bt_uap` remembers a LAP that
+//! resolves this way for the rest of the session - a piconet's real UAP does
+//! not change, so a later header this arc cannot read the payload of (a
+//! POLL or an FHS, say) must not undo an answer already earned.
 
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
@@ -44,6 +52,7 @@ use crossbeam_channel::Receiver as SampleReceiver;
 use crate::hardware::{SampleGeometry, StreamBlock};
 use crate::signal::ble::receive::Receiver as BleReceiver;
 use crate::signal::bt::header::PiconetClock;
+use crate::signal::bt::payload;
 use crate::signal::bt::receive::Receiver as BtReceiver;
 use crate::signal::stream::plan_block;
 use crate::state::{BlePacket, BtHop, SdrMetrics};
@@ -175,6 +184,14 @@ impl NetWorker {
         let mut ble: Option<BleReceiver> = None;
         let mut bt: Vec<BtReceiver> = Vec::new();
         let mut piconet_clocks: HashMap<u32, PiconetClock> = HashMap::new();
+        // B17's own live tie-break, one LAP at a time: once resolved, a
+        // LAP's real UAP does not change (it comes from the piconet
+        // master's own fixed address), so this sticks the same way
+        // `signal::net::census::Device::first_seen` never moves on a
+        // repeat sighting - a later header from a packet type `payload::
+        // break_uap_tie` cannot read (POLL, FHS, ...) must not flip a
+        // resolved answer back to two candidates.
+        let mut resolved_bt_uap: HashMap<u32, u8> = HashMap::new();
 
         while let Ok(StreamBlock {
             seq,
@@ -372,11 +389,41 @@ impl NetWorker {
                 // the same reasoning every other float or device-free
                 // computation in this worker stays outside the lock block
                 // for.
+                //
+                // **B17's own tie-break rides alongside it.** A LAP
+                // already resolved shows its one confirmed UAP and does
+                // no further work at all - `resolved_bt_uap`'s own doc
+                // says why a later, unresolvable header must not undo
+                // this. Otherwise, a header narrowed to more than one
+                // candidate gets one attempt at `payload::break_uap_tie`
+                // using this same hit's own captured payload; success
+                // resolves the LAP for good, failure (an unsupported
+                // packet type, or simply not enough real payload behind
+                // this particular header) falls back to showing the
+                // still-honest candidate set `PiconetClock` itself
+                // reports, exactly as before this step.
                 let mut narrowed_by_lap = Vec::new();
                 for hit in &header_hits {
                     let clock = piconet_clocks.entry(hit.lap).or_default();
                     clock.observe(hit.tick, &hit.whitened);
-                    narrowed_by_lap.push((hit.lap, clock.narrowed()));
+                    let shown = if let Some(&uap) = resolved_bt_uap.get(&hit.lap) {
+                        vec![uap]
+                    } else {
+                        let narrowed = clock.narrowed();
+                        if narrowed.len() > 1 {
+                            match payload::break_uap_tie(&narrowed, &hit.whitened, &hit.payload_raw)
+                            {
+                                Some(uap) => {
+                                    resolved_bt_uap.insert(hit.lap, uap);
+                                    vec![uap]
+                                }
+                                None => narrowed,
+                            }
+                        } else {
+                            narrowed
+                        }
+                    };
+                    narrowed_by_lap.push((hit.lap, shown));
                 }
                 if !hits.is_empty() || !narrowed_by_lap.is_empty() {
                     let mut m = self.state.lock().unwrap_or_else(|e| e.into_inner());
@@ -911,6 +958,117 @@ mod tests {
         let hop = &m.net.bt_hops[0];
         assert_eq!(hop.channel, ch);
         assert_eq!(hop.lap, lap);
+    }
+
+    /// B17's own exit condition, run through the actual worker: a synthetic
+    /// classic BT packet carrying a real DH1 header and a real DH1
+    /// payload (its own genuine CRC-16) resolves `net.bt_uap` to exactly
+    /// one confirmed UAP - not the two-candidate floor a header alone
+    /// reaches - the same day `signal::bt::payload::break_uap_tie` proved
+    /// it could, wired here instead of left standing untested.
+    #[test]
+    fn a_real_dh1_payload_resolves_bt_uap_to_one_confirmed_value() {
+        use crate::signal::ble::gfsk::modulate;
+        use crate::signal::bt::access_code::access_code_bits;
+        use crate::signal::bt::header;
+        use crate::signal::bt::payload;
+        use crate::signal::dsp::testkit::{at_snr, Rng};
+        use num_complex::Complex;
+
+        const RAW_RATE: f64 = 20_000_000.0;
+        let ch = 45u8;
+        let channel_hz = crate::signal::bt::channel::centre_hz(ch).unwrap();
+        let lap = 0x0033_2211u32;
+        let clk6 = 22u8;
+        let true_uap = 0x7bu8;
+
+        let lt_addr = 0b010u8;
+        let flags = 0b110u8;
+        let type_bits = 0b0100u8; // DH1
+        let data10 = (lt_addr as u16) | ((type_bits as u16) << 3) | ((flags as u16) << 7);
+        let hec = (0u16..256)
+            .map(|h| h as u8)
+            .find(|&h| header::uap_from_hec(data10, h) == true_uap)
+            .expect("uap_from_hec is a bijection in hec for a fixed data10");
+        let mut header_host = [false; header::HEADER_BITS];
+        for (i, slot) in header_host[0..10].iter_mut().enumerate() {
+            *slot = (data10 >> i) & 1 != 0;
+        }
+        for (i, slot) in header_host[10..18].iter_mut().enumerate() {
+            *slot = (hec >> i) & 1 != 0;
+        }
+        let whitened_header = header::unwhiten_header(&header_host, clk6);
+
+        let body = [0x44u8, 0x55, 0x66];
+        let mut payload_host = vec![false, true, false]; // LLID, FLOW
+        for i in 0..5 {
+            payload_host.push((body.len() as u8 >> i) & 1 != 0); // LENGTH
+        }
+        for &byte in &body {
+            for i in 0..8 {
+                payload_host.push((byte >> i) & 1 != 0);
+            }
+        }
+        let crc = payload::crcgen(&payload_host, true_uap);
+        for i in 0..16 {
+            payload_host.push((crc >> i) & 1 != 0);
+        }
+        let payload_whitened = header::unwhiten_at(&payload_host, clk6, header::HEADER_BITS);
+        // A generous, arbitrary window past the real payload's own end -
+        // this worker's own receiver always captures a fixed maximum
+        // regardless of the real payload's shorter length
+        // (`signal::bt::receive::PAYLOAD_CAPTURE_BITS`'s own doc).
+        const PAYLOAD_CAPTURE_BITS: usize = 343 * 8;
+
+        let mut bits: Vec<bool> = (0..40).map(|i| i % 2 == 0).collect();
+        bits.extend(access_code_bits(lap));
+        bits.extend([true, false, true, false]); // 4-bit trailer, content unread
+        for &b in &whitened_header {
+            bits.extend([b, b, b]); // FEC(1/3): each bit sent three times
+        }
+        bits.extend(payload_whitened.iter().copied());
+        bits.extend((0..(PAYLOAD_CAPTURE_BITS - payload_whitened.len())).map(|i| i % 2 == 1));
+        bits.extend((0..40).map(|i| i % 2 == 0));
+
+        let sps = (RAW_RATE / 1_000_000.0) as usize;
+        let clean = modulate(&bits, sps, 160_000.0, RAW_RATE, 0.5);
+        let placed = at_snr(&clean, 40.0, &mut Rng::new(11));
+
+        let geometry = eight_bit();
+        let bytes: Vec<u8> = placed
+            .iter()
+            .flat_map(|s: &Complex<f32>| {
+                let re = (s.re * geometry.full_scale).clamp(-127.0, 127.0) as i8;
+                let im = (s.im * geometry.full_scale).clamp(-127.0, 127.0) as i8;
+                [re as u8, im as u8]
+            })
+            .collect();
+
+        let mut m = SdrMetrics::fixture().streaming();
+        m.ui.section = crate::signal::net::SECTION.to_string();
+        m.ui.active_preset = "net_bt".to_string();
+        m.radio.frequency = channel_hz;
+        m.radio.config_sample_rate = RAW_RATE;
+        m.radio.bb_filter_hz = 0;
+        let state = Arc::new(Mutex::new(m));
+
+        let (tx, rx) = crossbeam_channel::unbounded();
+        tx.send(StreamBlock {
+            seq: 1,
+            gap_before: false,
+            bytes,
+        })
+        .unwrap();
+        drop(tx);
+        NetWorker::new(rx, Arc::clone(&state), geometry, SAFE_BT_CHANNELS).run();
+
+        let m = state.lock().unwrap();
+        let narrowed = m
+            .net
+            .bt_uap
+            .get(&lap)
+            .expect("this LAP's header should have arrived");
+        assert_eq!(narrowed, &vec![true_uap], "{narrowed:?}");
     }
 
     /// Any other preset's blocks leave `bt_refused` unset, so a stale

@@ -29,9 +29,11 @@
 //! two candidates - a measured floor, not one) and wires it into
 //! [`receive`] the same day. B17 adds [`payload`] (a DH1/DH3/DH5 payload's
 //! own CRC-16, able to break that two-candidate floor down to one, given a
-//! captured payload) as a primitive layer only - not yet wired to
-//! [`receive`], the same honest gap B14 and B16 each left one step behind
-//! them.
+//! captured payload) and, in a later step, wires it too: [`receive`]
+//! captures a raw payload region alongside every header, and `signal::net::
+//! worker` calls [`payload::break_uap_tie`] whenever a LAP's own UAP has not
+//! resolved yet - the first stage in this whole arc, BLE included, where a
+//! primitive and its live wiring did not land the same session.
 
 pub mod access_code;
 pub mod channel;
