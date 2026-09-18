@@ -23,10 +23,19 @@
 //! stream with no end) and [`receive`] (the per-channel front end that
 //! actually produces one), and wires classic Bluetooth into
 //! `signal::net::worker` for the first time - `net_bt_hops`, not a payload
-//! decode, which is a later stage still.
+//! decode, which is a later stage still. B16 adds [`header`] (FEC(1/3),
+//! dewhitening, and the HEC/UAP relationship needed to decode a captured
+//! header, plus the elapsed-clock inference that narrows a LAP's UAP to
+//! two candidates - a measured floor, not one) and wires it into
+//! [`receive`] the same day. B17 adds [`payload`] (a DH1/DH3/DH5 payload's
+//! own CRC-16, able to break that two-candidate floor down to one, given a
+//! captured payload) as a primitive layer only - not yet wired to
+//! [`receive`], the same honest gap B14 and B16 each left one step behind
+//! them.
 
 pub mod access_code;
 pub mod channel;
 pub mod detect;
 pub mod header;
+pub mod payload;
 pub mod receive;

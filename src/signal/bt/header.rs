@@ -131,10 +131,23 @@ const WHITENING_DATA: [bool; 127] = {
 /// a payload, which starts further into the same LFSR sequence.
 #[allow(dead_code)]
 pub(crate) fn unwhiten_header(bits: &[bool; HEADER_BITS], clk6: u8) -> [bool; HEADER_BITS] {
-    let mut index = WHITENING_INDICES[(clk6 & 0x3f) as usize] as usize;
-    let mut out = [false; HEADER_BITS];
-    for (slot, &bit) in out.iter_mut().zip(bits.iter()) {
-        *slot = bit ^ WHITENING_DATA[index];
+    unwhiten_at(bits, clk6, 0).try_into().unwrap()
+}
+
+/// Remove the whitening from an arbitrary run of bits starting `skip` bits
+/// into the same LFSR sequence [`unwhiten_header`] always starts at 0 -
+/// `libbtbb`'s own `unwhiten(..., skip, ...)`, generalised for
+/// [`super::payload`]'s own need: a classic BT payload is whitened by the
+/// *same* stream as its own header, continuing from bit 18 rather than
+/// restarting - every `libbtbb` call site that dewhitens a payload or a
+/// payload header passes `skip = 18` (`HEADER_BITS`), never a fresh origin.
+#[allow(dead_code)]
+pub(crate) fn unwhiten_at(bits: &[bool], clk6: u8, skip: usize) -> Vec<bool> {
+    let mut index =
+        (WHITENING_INDICES[(clk6 & 0x3f) as usize] as usize + skip) % WHITENING_DATA.len();
+    let mut out = Vec::with_capacity(bits.len());
+    for &bit in bits {
+        out.push(bit ^ WHITENING_DATA[index]);
         index = (index + 1) % WHITENING_DATA.len();
     }
     out
@@ -144,7 +157,7 @@ pub(crate) fn unwhiten_header(bits: &[bool; HEADER_BITS], clk6: u8) -> [bool; HE
 /// because [`uap_from_hec`]'s LFSR runs the opposite bit order the rest of
 /// this arc's convention does.
 #[allow(dead_code)]
-fn reverse_bits(byte: u8) -> u8 {
+pub(crate) fn reverse_bits(byte: u8) -> u8 {
     let mut out = 0u8;
     for i in 0..8 {
         if byte & (1 << i) != 0 {
@@ -197,7 +210,7 @@ pub fn candidate_uaps(whitened: &[bool; HEADER_BITS]) -> [u8; 64] {
 /// `libbtbb`'s own `air_to_host16`/`air_to_host8`, and
 /// `signal::bt::access_code::pack`'s own convention already.
 #[allow(dead_code)]
-fn pack_bits(bits: &[bool]) -> u16 {
+pub(crate) fn pack_bits(bits: &[bool]) -> u16 {
     let mut word = 0u16;
     for (i, &bit) in bits.iter().enumerate().take(16) {
         if bit {
@@ -288,6 +301,11 @@ pub struct Header {
     pub packet_type: PacketType,
     pub flags: u8,
     pub hec: u8,
+    /// The CLK1-6 that reproduced this header under the UAP it was decoded
+    /// with - not part of any wire format, but needed by [`super::payload`]
+    /// to dewhiten this same packet's payload, which continues the header's
+    /// own whitening stream rather than starting a fresh one.
+    pub clk6: u8,
 }
 
 /// Try every CLK1-6 against a confirmed UAP, and decode the header fully
@@ -309,6 +327,7 @@ pub fn decode_with_uap(whitened: &[bool; HEADER_BITS], uap: u8) -> Option<Header
                 packet_type,
                 flags,
                 hec,
+                clk6,
             });
         }
     }
@@ -621,6 +640,7 @@ mod tests {
         assert_eq!(decoded.packet_type, PacketType::Dh1);
         assert_eq!(decoded.flags, flags);
         assert_eq!(decoded.hec, hec);
+        assert_eq!(decoded.clk6, clk6);
     }
 
     /// The wrong UAP finds no CLK1-6 that reproduces it - vanishingly
