@@ -94,6 +94,15 @@ pub struct NetState {
     /// reusing `survey_refused`. Same reasoning as that field's own doc: a
     /// refusal nobody can see is a silence.
     pub ble_refused: Option<String>,
+    /// The BLE channel a receiver is running on right now, `None` when none
+    /// is.
+    ///
+    /// **Not the same fact as `ble_refused` being `None`.** That field starts
+    /// `None` before the first block has arrived and stays `None` while the
+    /// section is closed, so reading "not refused" as "running" would put a
+    /// decoder on the header that does not exist. This is set only where the
+    /// worker actually builds a receiver, and cleared wherever it drops one.
+    pub ble_channel: Option<u8>,
     /// How many packets the receiver has decoded on each advertising
     /// channel this session - index 0, 1, 2 for channel 37, 38, 39, the
     /// same low-to-high order [`crate::signal::ble::channel::
@@ -241,6 +250,15 @@ pub struct NetDecodeHealth {
     /// drop ten minutes ago undercounts a session's census and says nothing
     /// about the dwell that just finished.
     pub last_loss: Option<std::time::Instant>,
+    /// How much of real time the worker spends processing the stream: the
+    /// wall time it took to handle the last stretch of blocks, over the
+    /// stream time those blocks covered. `0.62` is 62 %; above `1.0` the
+    /// worker is falling behind and the bounded feed will start refusing
+    /// blocks. `None` until a stretch has been measured.
+    ///
+    /// Foundation design 12.4 makes this a displayed number rather than a
+    /// hidden one: every decoder added to the worker spends from it.
+    pub decode_load: Option<f64>,
 }
 
 /// How many recent PDUs [`NetState::ble_packets`] keeps. A bench instrument

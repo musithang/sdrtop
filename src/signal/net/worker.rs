@@ -128,6 +128,55 @@ impl Run {
     }
 }
 
+/// How long one decode-load reading averages over: half a second of stream,
+/// or half a second of work, whichever comes first.
+///
+/// Half a second: at the block sizes the native radios deliver that is dozens
+/// of blocks, enough that one slow block (a page fault, a scheduler hiccup)
+/// does not read as a worker in trouble, and short enough that the figure
+/// follows the user opening a heavier preset within a glance.
+///
+/// **Either clock closes the window, and the second one is not optional.** A
+/// window counted in stream time alone takes longer to fill the slower the
+/// worker is, because a worker that cannot keep up only ever sees the blocks
+/// the bounded feed had room for. The first live run showed exactly that: a
+/// worker in trouble whose load never appeared at all, twenty seconds in. So
+/// the figure that matters most arrived last, or not at all. Closing the
+/// window on work time too means an overloaded worker reports within half a
+/// second, at whatever it really is.
+const LOAD_WINDOW_S: f64 = 0.5;
+
+/// The decode-load accumulator: wall time spent against stream time covered.
+///
+/// Pure, with the clock read by the caller, so the arithmetic is testable
+/// without a radio or a real stopwatch.
+#[derive(Default)]
+struct Load {
+    busy: std::time::Duration,
+    stream_s: f64,
+}
+
+impl Load {
+    /// Add one block: `spent` handling it, `pairs` I/Q pairs of it at
+    /// `rate_hz`. Returns a reading once a whole window has been covered, and
+    /// starts the next one.
+    fn add(&mut self, spent: std::time::Duration, pairs: u64, rate_hz: f64) -> Option<f64> {
+        // A rate that is not a positive number covers no stream time, and
+        // dividing by it would invent a load.
+        if rate_hz.is_nan() || rate_hz <= 0.0 {
+            return None;
+        }
+        self.busy += spent;
+        self.stream_s += pairs as f64 / rate_hz;
+        if self.stream_s < LOAD_WINDOW_S && self.busy.as_secs_f64() < LOAD_WINDOW_S {
+            return None;
+        }
+        let load = self.busy.as_secs_f64() / self.stream_s;
+        *self = Load::default();
+        Some(load)
+    }
+}
+
 /// Fold one decoded BLE packet into the shared census, if it earns a place
 /// there.
 ///
@@ -192,6 +241,7 @@ impl NetWorker {
         // break_uap_tie` cannot read (POLL, FHS, ...) must not flip a
         // resolved answer back to two candidates.
         let mut resolved_bt_uap: HashMap<u32, u8> = HashMap::new();
+        let mut load = Load::default();
 
         while let Ok(StreamBlock {
             seq,
@@ -290,11 +340,13 @@ impl NetWorker {
                             Ok(r) => {
                                 let mut m = self.state.lock().unwrap_or_else(|e| e.into_inner());
                                 m.net.ble_refused = None;
+                                m.net.ble_channel = Some(ch);
                                 Some(r)
                             }
                             Err(reason) => {
                                 let mut m = self.state.lock().unwrap_or_else(|e| e.into_inner());
                                 m.net.ble_refused = Some(reason);
+                                m.net.ble_channel = None;
                                 None
                             }
                         };
@@ -338,6 +390,7 @@ impl NetWorker {
                     m.net.ble_refused = Some(
                         "not tuned to an advertising channel (2402, 2426 or 2480 MHz)".to_string(),
                     );
+                    m.net.ble_channel = None;
                 }
             }
 
@@ -471,9 +524,20 @@ impl NetWorker {
                 scan = None;
                 ble = None;
                 bt.clear();
+                load = Load::default();
                 let mut m = self.state.lock().unwrap_or_else(|e| e.into_inner());
                 m.net.bt_refused = None;
                 m.net.bt_channels_watched.clear();
+                m.net.ble_channel = None;
+                // Nothing is being decoded, so there is no load to report -
+                // and a figure from before the section closed must not be
+                // shown on reopening as if it were current.
+                m.net.health.decode_load = None;
+            } else if let Some(reading) = load.add(now.elapsed(), pairs, rate_hz) {
+                // The clock read and the division both happened above, outside
+                // the lock; only the finished figure goes in.
+                let mut m = self.state.lock().unwrap_or_else(|e| e.into_inner());
+                m.net.health.decode_load = Some(reading);
             }
         }
     }
@@ -774,6 +838,11 @@ mod tests {
 
         let m = state.lock().unwrap();
         assert!(m.net.ble_refused.is_none(), "{:?}", m.net.ble_refused);
+        assert_eq!(
+            m.net.ble_channel,
+            Some(CHANNEL),
+            "the receiver says where it is running"
+        );
         assert_eq!(m.net.ble_packets.len(), 1, "{:?}", m.net.ble_packets);
         let p = &m.net.ble_packets[0];
         assert_eq!(p.channel, CHANNEL);
@@ -849,7 +918,119 @@ mod tests {
         NetWorker::new(rx, Arc::clone(&state), eight_bit(), SAFE_BT_CHANNELS).run();
         let m = state.lock().unwrap();
         assert!(m.net.ble_refused.is_some());
+        assert_eq!(m.net.ble_channel, None, "no receiver, no channel");
         assert!(m.net.ble_packets.is_empty());
+    }
+
+    /// Closing the section drops the receiver and the load figure with it,
+    /// so neither is shown on reopening as if it were still true.
+    #[test]
+    fn a_closed_section_leaves_no_receiver_or_load_behind() {
+        let mut m = SdrMetrics::fixture().streaming();
+        m.ui.section = "lab".to_string();
+        m.radio.frequency = 2_402_000_000;
+        m.radio.config_sample_rate = 4_000_000.0;
+        m.net.ble_channel = Some(37);
+        m.net.health.decode_load = Some(0.4);
+        let state = Arc::new(Mutex::new(m));
+        let (tx, rx) = crossbeam_channel::unbounded();
+        tx.send(StreamBlock {
+            seq: 1,
+            gap_before: false,
+            bytes: vec![0u8; 256],
+        })
+        .unwrap();
+        drop(tx);
+        NetWorker::new(rx, Arc::clone(&state), eight_bit(), SAFE_BT_CHANNELS).run();
+        let m = state.lock().unwrap();
+        assert_eq!(m.net.ble_channel, None);
+        assert_eq!(m.net.health.decode_load, None);
+    }
+
+    /// End to end through the worker: enough stream to cover a load window
+    /// publishes a load. The unit tests above hold the arithmetic; this holds
+    /// the wiring, which they cannot see.
+    #[test]
+    fn the_worker_publishes_a_load_once_a_window_of_stream_has_passed() {
+        let mut m = SdrMetrics::fixture().streaming();
+        m.ui.section = crate::signal::net::SECTION.to_string();
+        m.radio.frequency = 2_437_000_000;
+        m.radio.config_sample_rate = 1_000_000.0;
+        let state = Arc::new(Mutex::new(m));
+        let (tx, rx) = crossbeam_channel::unbounded();
+        // Eight 100 000-pair blocks at 1 Msps: 0.8 s of stream.
+        for seq in 1..=8 {
+            tx.send(StreamBlock {
+                seq,
+                gap_before: false,
+                bytes: vec![0u8; 200_000],
+            })
+            .unwrap();
+        }
+        drop(tx);
+        NetWorker::new(rx, Arc::clone(&state), eight_bit(), SAFE_BT_CHANNELS).run();
+        let load = state.lock().unwrap().net.health.decode_load;
+        assert!(load.is_some_and(|l| l > 0.0), "{load:?}");
+    }
+
+    /// Wall time over stream time, reported once a window is covered.
+    #[test]
+    fn the_load_is_wall_time_over_the_stream_time_it_covered() {
+        use std::time::Duration;
+        let mut load = Load::default();
+        // 1 MHz, 100 000 pairs a block: 0.1 s of stream each, 25 ms to handle.
+        for _ in 0..4 {
+            assert_eq!(
+                load.add(Duration::from_millis(25), 100_000, 1e6),
+                None,
+                "under half a second of stream, no reading yet"
+            );
+        }
+        let reading = load
+            .add(Duration::from_millis(25), 100_000, 1e6)
+            .expect("five blocks cover the window");
+        assert!((reading - 0.25).abs() < 1e-9, "{reading}");
+        // And the next window starts from nothing.
+        assert_eq!(load.add(Duration::from_millis(25), 100_000, 1e6), None);
+    }
+
+    /// Above one means the worker cannot keep up with the stream, and the
+    /// figure must be free to say so rather than be clamped.
+    #[test]
+    fn a_load_above_one_is_reported_not_clamped() {
+        use std::time::Duration;
+        let mut load = Load::default();
+        let reading = load
+            .add(Duration::from_millis(900), 600_000, 1e6)
+            .expect("0.6 s of stream covers the window");
+        assert!((reading - 1.5).abs() < 1e-9, "{reading}");
+    }
+
+    /// A worker too slow to cover a window of stream still reports within
+    /// half a second of work, at the figure it really is - the case a
+    /// stream-time window alone would hide longest.
+    #[test]
+    fn an_overloaded_worker_reports_on_work_time_alone() {
+        use std::time::Duration;
+        let mut load = Load::default();
+        // 10 000 pairs at 1 Msps is 10 ms of stream; each takes 200 ms.
+        assert_eq!(load.add(Duration::from_millis(200), 10_000, 1e6), None);
+        assert_eq!(load.add(Duration::from_millis(200), 10_000, 1e6), None);
+        let reading = load
+            .add(Duration::from_millis(200), 10_000, 1e6)
+            .expect("0.6 s of work closes the window");
+        assert!((reading - 20.0).abs() < 1e-9, "{reading}");
+    }
+
+    /// A rate that is not a positive number covers no stream time: no
+    /// reading, rather than a division that invents one.
+    #[test]
+    fn no_rate_means_no_load() {
+        use std::time::Duration;
+        let mut load = Load::default();
+        for rate in [0.0, -1.0, f64::NAN] {
+            assert_eq!(load.add(Duration::from_secs(1), 1_000_000, rate), None);
+        }
     }
 
     /// B15's own exit condition: a view too narrow for

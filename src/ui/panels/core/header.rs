@@ -401,53 +401,140 @@ fn band_strip_line(state: &SdrMetrics, theme: &crate::Theme, outer_width: u16) -
 /// Design section 9.2. In this section the tuning and the gain are the least
 /// interesting things on the screen, and they have a panel of their own; what
 /// the user needs continuously is the mode, because `SURVEY` and `LOCK` mean
-/// different things about every number below them.
+/// different things about every number below them - then which decoder is
+/// running and on what channel, whether the feed has been interrupted, and how
+/// much of the worker's time the decoding costs.
 fn net_band_line(state: &SdrMetrics, theme: &crate::Theme, inner_width: u16) -> Line<'static> {
-    compose_net_band(
-        state.net.mode,
-        crate::signal::net::band::wifi_channel(state.radio.frequency),
-        state.radio.frequency,
-        state.radio.config_sample_rate,
-        theme,
-        inner_width,
-    )
+    let value = Style::default().fg(theme.value);
+    let health = &state.net.health;
+    let mut fields = Vec::new();
+    if let Some(channel) = channel_label(state) {
+        fields.push(BandField::new(channel, value, 5));
+    }
+    fields.push(BandField::new(
+        format!("{:.3} MHz", state.radio.frequency as f64 / 1e6),
+        value,
+        2,
+    ));
+    fields.push(BandField::new(
+        format!("{:.3} Msps", state.radio.config_sample_rate / 1e6),
+        value,
+        1,
+    ));
+    if let Some(load) = health.decode_load {
+        // Past one the worker is falling behind the stream and the feed will
+        // start refusing blocks: that is a fault, not a figure to note.
+        let style = if load > 1.0 {
+            Style::default().fg(theme.status_crit)
+        } else {
+            value
+        };
+        fields.push(BandField::new(
+            format!("decode {}", load_text(load)),
+            style,
+            3,
+        ));
+    }
+    // Before the first block there is no feed to have been interrupted, and
+    // "gaps 0" would claim a look that has not happened.
+    if health.last_block.is_some() {
+        let style = if health.gaps > 0 {
+            Style::default().fg(theme.status_warn)
+        } else {
+            value
+        };
+        fields.push(BandField::new(format!("gaps {}", health.gaps), style, 4));
+    }
+    compose_net_band(state.net.mode, &fields, theme, inner_width)
 }
 
-/// Pure core of [`net_band_line`], taking primitives so the widths can be tested
-/// without a `SdrMetrics`.
+/// A decode load as the band shows it: a percentage while it is one a reader
+/// can take in, a multiple of real time once it is not.
 ///
-/// **Fields are dropped from the right as the terminal narrows**, and the order
-/// is the order of least use: the sample rate goes first, then the frequency,
-/// then the channel. `NET` and the mode never go, because a header that has
-/// stopped saying which mode is running is worse than no header.
+/// The first live run read `decode 180742%` - true, and useless at a glance.
+/// Past ten times real time the digits of a percentage are all a reader sees;
+/// `1807×` says the same thing in the size a header field has room for, and
+/// keeps the magnitude that tells a steady overload from a stall.
+fn load_text(load: f64) -> String {
+    if load < 10.0 {
+        format!("{:.0}%", load * 100.0)
+    } else {
+        format!("{load:.0}\u{d7}")
+    }
+}
+
+/// The channel, in the numbering of whatever is being received on it.
+///
+/// A radio parked on 2402 MHz for BLE is on BLE channel 37; calling it by the
+/// nearest Wi-Fi number, as the band line once did, names a channel nobody is
+/// listening to. So a running decoder names its own channel - BLE's single
+/// one, or the span of classic Bluetooth channels the fleet is watching - and
+/// only with no decoder running does the band fall back to Wi-Fi's numbering,
+/// the one everyone reads 2.4 GHz in. Between channels of every scheme there
+/// is no channel, and nothing is said rather than the nearest one rounded to.
+fn channel_label(state: &SdrMetrics) -> Option<String> {
+    let mut running = Vec::new();
+    if let Some(ch) = state.net.ble_channel {
+        running.push(format!("BLE ch {ch}"));
+    }
+    let watched = &state.net.bt_channels_watched;
+    if let (Some(lo), Some(hi)) = (watched.iter().min(), watched.iter().max()) {
+        running.push(if lo == hi {
+            format!("BT ch {lo}")
+        } else {
+            format!("BT ch {lo}-{hi}")
+        });
+    }
+    if !running.is_empty() {
+        return Some(running.join(" + "));
+    }
+    crate::signal::net::band::wifi_channel(state.radio.frequency).map(|ch| format!("Wi-Fi ch {ch}"))
+}
+
+/// One field of the NET band: its text, its style, and how long it holds its
+/// place as the line narrows - higher holds longer.
+struct BandField {
+    text: String,
+    style: Style,
+    keep: u8,
+}
+
+impl BandField {
+    fn new(text: String, style: Style, keep: u8) -> Self {
+        Self { text, style, keep }
+    }
+}
+
+/// Pure core of [`net_band_line`], taking the fields already built so the
+/// widths can be tested without a `SdrMetrics`.
+///
+/// **Fields give way least-important first, not simply from the right.** They
+/// are drawn in reading order, but when the line is short the ones that
+/// matter least go first: the sample rate, then the frequency (both are on
+/// the radio's own panel), then the decode load, then the gap count. The
+/// channel goes last, and `NET` and the mode never go, because a header that
+/// has stopped saying which mode is running is worse than no header.
 fn compose_net_band(
     mode: crate::state::NetMode,
-    channel: Option<u8>,
-    freq_hz: u64,
-    sample_rate_hz: f64,
+    fields: &[BandField],
     theme: &crate::Theme,
     inner_width: u16,
 ) -> Line<'static> {
     use ratatui::style::Modifier;
 
-    let mut optional: Vec<String> = Vec::new();
-    if let Some(ch) = channel {
-        optional.push(format!("ch {ch}"));
-    }
-    optional.push(format!("{:.3} MHz", freq_hz as f64 / 1e6));
-    optional.push(format!("{:.3} Msps", sample_rate_hz / 1e6));
+    const SEP: &str = " \u{b7} ";
+    let sep_w = SEP.chars().count();
+    let mut width = 1 + 3 + sep_w + mode.label().len(); // " NET" + sep + mode
 
-    const SEP: &str = " · ";
-    let fixed = 1 + 3 + 3 + mode.label().len(); // " NET" + sep + mode
-    let mut width = fixed;
-    let mut shown = 0usize;
-    for field in &optional {
-        let next = width + SEP.len() + field.chars().count();
-        if next > inner_width as usize {
-            break;
+    let mut by_importance: Vec<usize> = (0..fields.len()).collect();
+    by_importance.sort_by_key(|&i| std::cmp::Reverse(fields[i].keep));
+    let mut kept = vec![false; fields.len()];
+    for i in by_importance {
+        let next = width + sep_w + fields[i].text.chars().count();
+        if next <= inner_width as usize {
+            width = next;
+            kept[i] = true;
         }
-        width = next;
-        shown += 1;
     }
 
     let mut spans = vec![
@@ -460,9 +547,9 @@ fn compose_net_band(
                 .add_modifier(Modifier::BOLD),
         ),
     ];
-    for field in optional.into_iter().take(shown) {
+    for (field, _) in fields.iter().zip(&kept).filter(|(_, k)| **k) {
         spans.push(Span::styled(SEP, Style::default().fg(theme.label)));
-        spans.push(Span::styled(field, Style::default().fg(theme.value)));
+        spans.push(Span::styled(field.text.clone(), field.style));
     }
     Line::from(spans)
 }
@@ -1134,31 +1221,41 @@ mod tests {
         assert!(out.contains("2439.500 MHz"), "{out}");
     }
 
-    /// N10's exit condition. Three widths, and at each one what is left is what
-    /// matters most: the mode survives to the last column.
+    /// N10's exit condition, reworked when the band grew: at every width what is
+    /// left is what matters most. The rate goes first, then the frequency, and
+    /// the mode survives to the last column.
     #[test]
-    fn the_band_degrades_from_the_right_as_the_terminal_narrows() {
+    fn the_band_gives_way_least_important_first() {
         let theme = crate::Theme::sdr();
+        let v = Style::default();
+        let fields = [
+            BandField::new("Wi-Fi ch 6".to_string(), v, 5),
+            BandField::new("2437.000 MHz".to_string(), v, 2),
+            BandField::new("20.000 Msps".to_string(), v, 1),
+            BandField::new("decode 12%".to_string(), v, 3),
+            BandField::new("gaps 0".to_string(), v, 4),
+        ];
         let render = |w: u16| -> String {
-            compose_net_band(
-                crate::state::NetMode::Lock,
-                Some(6),
-                2_437_000_000,
-                20_000_000.0,
-                &theme,
-                w,
-            )
-            .spans
-            .iter()
-            .map(|s| s.content.as_ref())
-            .collect::<String>()
+            compose_net_band(crate::state::NetMode::Lock, &fields, &theme, w)
+                .spans
+                .iter()
+                .map(|s| s.content.as_ref())
+                .collect::<String>()
         };
 
-        let wide = render(100);
-        assert!(wide.contains("ch 6") && wide.contains("MHz") && wide.contains("Msps"));
+        let wide = render(120);
+        for f in &fields {
+            assert!(wide.contains(&f.text), "{} missing: {wide}", f.text);
+        }
+        // Reading order is kept whatever survives.
+        assert!(wide.find("MHz") < wide.find("Msps"));
+        assert!(wide.find("decode") < wide.find("gaps"));
 
-        let middle = render(30);
-        assert!(middle.contains("LOCK") && middle.contains("ch 6"));
+        let middle = render(50);
+        assert!(
+            middle.contains("Wi-Fi ch 6") && middle.contains("gaps 0"),
+            "{middle}"
+        );
         assert!(
             !middle.contains("Msps"),
             "the rate should go first: {middle}"
@@ -1168,13 +1265,62 @@ mod tests {
         assert!(narrow.contains("LOCK"), "the mode must survive: {narrow}");
         assert!(!narrow.contains("ch 6"), "{narrow}");
 
-        for w in [12u16, 30, 100] {
+        for w in [12u16, 30, 50, 120] {
             assert!(
                 render(w).chars().count() <= w as usize,
                 "width {w} overflowed: {:?}",
                 render(w)
             );
         }
+    }
+
+    /// A radio parked on a BLE channel with the BLE decoder running is on BLE
+    /// channel 37, not on whatever Wi-Fi number 2402 MHz is nearest to.
+    #[test]
+    fn a_running_decoder_names_its_own_channel() {
+        let mut m = net_fixture();
+        m.radio.frequency = 2_402_000_000;
+        m.net.ble_channel = Some(37);
+        let out = crate::state::fixture::draw(HeaderPanel, 120, 5, &m).join("\n");
+        assert!(out.contains("BLE ch 37"), "{out}");
+        assert!(!out.contains("Wi-Fi"), "{out}");
+
+        // Classic Bluetooth watches a span of channels, and says which.
+        m.net.ble_channel = None;
+        m.net.bt_channels_watched = vec![38, 39, 40, 41];
+        let out = crate::state::fixture::draw(HeaderPanel, 120, 5, &m).join("\n");
+        assert!(out.contains("BT ch 38-41"), "{out}");
+
+        // Both at once, when both are running.
+        m.net.ble_channel = Some(37);
+        let out = crate::state::fixture::draw(HeaderPanel, 120, 5, &m).join("\n");
+        assert!(out.contains("BLE ch 37 + BT ch 38-41"), "{out}");
+    }
+
+    /// Before the feed has delivered a block there is nothing to have been
+    /// interrupted, and before a load has been measured there is no load: both
+    /// are absent, never zero.
+    #[test]
+    fn gaps_and_load_appear_only_once_there_is_something_to_report() {
+        let mut m = net_fixture();
+        let out = crate::state::fixture::draw(HeaderPanel, 140, 5, &m).join("\n");
+        assert!(!out.contains("gaps"), "{out}");
+        assert!(!out.contains("decode"), "{out}");
+
+        m.net.health.last_block = Some(std::time::Instant::now());
+        m.net.health.gaps = 3;
+        m.net.health.decode_load = Some(0.42);
+        let out = crate::state::fixture::draw(HeaderPanel, 140, 5, &m).join("\n");
+        assert!(out.contains("gaps 3"), "{out}");
+        assert!(out.contains("decode 42%"), "{out}");
+    }
+
+    /// A percentage while it reads as one, a multiple of real time after.
+    #[test]
+    fn a_heavy_load_is_shown_as_a_multiple_of_real_time() {
+        assert_eq!(load_text(0.42), "42%");
+        assert_eq!(load_text(8.4), "840%");
+        assert_eq!(load_text(1807.42), "1807\u{d7}");
     }
 
     /// The rail spans the band being worked, not the radio's whole range. On a
