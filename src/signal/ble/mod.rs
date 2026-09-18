@@ -16,6 +16,7 @@
 //! against, since the advertising access address is known in advance.
 
 pub mod channel;
+pub mod coded;
 pub mod detect;
 pub mod gfsk;
 pub mod measure;
