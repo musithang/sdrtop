@@ -26,7 +26,7 @@ use ratatui::{
 use crate::signal::dsp::uncertainty::Uncertain;
 use crate::signal::net::census::{Device, SORT_KEYS};
 use crate::state::SdrMetrics;
-use crate::ui::panel::{Panel, PanelChrome, Staleness, Tag};
+use crate::ui::panel::{FeedSpan, Panel, PanelChrome, Staleness, Tag};
 use crate::ui::widgets::reading::Reading;
 use crate::ui::widgets::table::{
     columns_that_fit, header, row, viewport_start, Align, Column, Sort,
@@ -148,6 +148,9 @@ impl Panel for NetCensusPanel {
         let c = &state.net.census;
         PanelChrome::new("Band Cens_us")
             .stale_when(Staleness::NotStreaming)
+            // Packet counts and first/last sightings accumulate for the whole
+            // session, so a drop at any point in it undercounts them.
+            .counts_from_feed(FeedSpan::Session)
             .tag_if(true, state.net.mode.tag())
             .tag_if(
                 true,
@@ -378,6 +381,19 @@ mod tests {
             .filter(|(_, l)| l.contains('\u{258c}'))
             .map(|(i, _)| i)
             .collect()
+    }
+
+    /// The census accumulates for the session, so any loss in it - however
+    /// long ago - makes its counts lower bounds, and the frame says so.
+    #[test]
+    fn a_session_loss_marks_the_census_as_a_lower_bound() {
+        let mut m = populated();
+        let clean = draw(NetCensusPanel, 70, 10, &m);
+        assert!(!clean[0].contains("FEED LOSS"), "{}", clean[0]);
+
+        m.net.health.last_loss = Some(Instant::now() - Duration::from_secs(600));
+        let lossy = draw(NetCensusPanel, 90, 10, &m);
+        assert!(lossy[0].contains("[FEED LOSS]"), "{}", lossy[0]);
     }
 
     /// Nothing selected, nothing marked. It used to mark the first row

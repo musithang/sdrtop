@@ -49,7 +49,7 @@ impl PanelRegistry {
         focused: bool,
     ) {
         let Some(panel) = self.get(name) else { return };
-        let chrome = panel.chrome(state);
+        let chrome = panel.chrome(state).with_engine_tags(state);
         if chrome.frame == FrameStyle::SelfFramed {
             panel.render(f, area, state, theme, focused);
             return;

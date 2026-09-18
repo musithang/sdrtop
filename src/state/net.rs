@@ -233,6 +233,14 @@ pub struct NetDecodeHealth {
     pub peak_depth: u64,
     /// When the last block arrived. `None` before the first one.
     pub last_block: Option<std::time::Instant>,
+    /// When the feed last lost anything: an interruption, a block the driver
+    /// dropped, or a block the bounded feed refused. `None` if it never has.
+    ///
+    /// The counters above say *how much* went missing; this says *when*, which
+    /// is what a panel's feed-loss caveat turns on (`ui::panel::FeedSpan`): a
+    /// drop ten minutes ago undercounts a session's census and says nothing
+    /// about the dwell that just finished.
+    pub last_loss: Option<std::time::Instant>,
 }
 
 /// How many recent PDUs [`NetState::ble_packets`] keeps. A bench instrument
@@ -419,11 +427,11 @@ pub struct CellReading {
     pub coverage: Option<f64>,
     /// When this cell was last measured.
     ///
-    /// Written but not yet read: rule 4 says all testimony is dated, and a
-    /// survey that has not come back to a cell for a minute is showing a
-    /// minute-old reading with nothing on screen saying so. The panel needs this
-    /// to say it, and does not yet.
-    #[allow(dead_code)]
+    /// Rule 4 says all testimony is dated, and a survey that has not come back
+    /// to a cell for a minute is showing a minute-old reading. The occupancy
+    /// panel reads the oldest of these as the span its numbers cover, for the
+    /// feed-loss caveat; putting each cell's own age on screen is still to do
+    /// (`dev_docs/net-ux-polish-plan.md` Stop 3.2).
     pub measured: Option<std::time::Instant>,
     /// Seconds this cell has been under observation since the watch began.
     ///

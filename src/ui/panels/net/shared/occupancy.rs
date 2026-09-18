@@ -33,7 +33,7 @@ use ratatui::{
 
 use crate::signal::net::{band, occupancy};
 use crate::state::{CellReading, SdrMetrics};
-use crate::ui::panel::{Panel, PanelChrome, Staleness};
+use crate::ui::panel::{FeedSpan, Panel, PanelChrome, Staleness};
 use crate::ui::widgets::reading::Reading;
 
 pub struct NetOccupancyPanel;
@@ -299,6 +299,19 @@ fn lines(state: &SdrMetrics, theme: &crate::Theme, width: usize) -> Vec<Line<'st
     out
 }
 
+/// How long ago the oldest cell on screen was measured. `None` when no cell
+/// has been.
+fn oldest_reading_age(state: &SdrMetrics) -> Option<std::time::Duration> {
+    let oldest = state
+        .net
+        .band
+        .cells
+        .iter()
+        .filter_map(|c| c.measured)
+        .min()?;
+    Some(oldest.elapsed())
+}
+
 impl Panel for NetOccupancyPanel {
     fn name(&self) -> &'static str {
         "net_occupancy"
@@ -309,9 +322,16 @@ impl Panel for NetOccupancyPanel {
     }
 
     fn chrome(&self, state: &SdrMetrics) -> PanelChrome {
-        PanelChrome::new("Band Occupancy")
+        let chrome = PanelChrome::new("Band Occupancy")
             .stale_when(Staleness::NotStreaming)
-            .tag_if(true, state.net.mode.tag())
+            .tag_if(true, state.net.mode.tag());
+        // The bars are the latest reading of each cell, so what they span is
+        // back to the oldest of those readings: a whole pass while surveying,
+        // moments while locked. No measured cell, no numbers, nothing to caveat.
+        match oldest_reading_age(state) {
+            Some(age) => chrome.counts_from_feed(FeedSpan::Window(age)),
+            None => chrome,
+        }
     }
 
     fn render(

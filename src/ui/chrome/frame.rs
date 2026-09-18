@@ -315,6 +315,10 @@ pub fn title_spans(
                 format!("{}{key}", if *descending { "\u{2193}" } else { "\u{2191}" }),
                 theme.label,
             ),
+            // Amber, like FRZ and HOLD: not an error, but the numbers under it
+            // are not what they would be on a clean feed, and the reader must
+            // not take them at face value.
+            Tag::FeedLoss => ("FEED LOSS".to_string(), theme.status_warn),
         };
         spans.push(Span::styled(
             format!(" [{text}]"),

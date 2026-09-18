@@ -175,6 +175,9 @@ pub(super) fn drain(
     m.net.health.peak_depth = net_depth;
     m.net.health.refused = net_drops;
     m.net.health.refused_session += net_drops;
+    if net_drops > 0 {
+        m.net.health.last_loss = Some(now);
+    }
     let buf_sample = (m.iq.buf_fill_pct * 10.0) as u64;
     if m.iq.buf_fill_history.len() >= THROUGHPUT_HISTORY_LEN {
         m.iq.buf_fill_history.pop_front();
@@ -243,5 +246,28 @@ mod tests {
         let m = state.lock().unwrap();
         assert_eq!(m.iq.buf_fill_pct, 0.0);
         assert_eq!((m.iq.fft_drops, m.iq.fft_drops_session), (0, 1));
+    }
+
+    /// A block the NET feed refused is a loss, and the loss is dated at the
+    /// window that reported it - which is what the panels' feed-loss caveat
+    /// reads. A clean window does not move the date.
+    #[test]
+    fn a_refused_net_block_dates_the_loss() {
+        let (state, ctx, _fft_rx, _demod_rx, _net_rx) = ctx_and_state();
+
+        drain(&state, &ctx, Instant::now(), true);
+        assert!(state.lock().unwrap().net.health.last_loss.is_none());
+
+        ctx.net_feed.record(4, false);
+        let when = Instant::now();
+        drain(&state, &ctx, when, true);
+        assert_eq!(state.lock().unwrap().net.health.last_loss, Some(when));
+
+        drain(&state, &ctx, when + std::time::Duration::from_secs(1), true);
+        assert_eq!(
+            state.lock().unwrap().net.health.last_loss,
+            Some(when),
+            "a clean window leaves the last loss where it was"
+        );
     }
 }

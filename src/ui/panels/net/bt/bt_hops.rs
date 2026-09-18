@@ -42,7 +42,7 @@ use ratatui::{
 };
 
 use crate::state::SdrMetrics;
-use crate::ui::panel::{Panel, PanelChrome, Staleness};
+use crate::ui::panel::{FeedSpan, Panel, PanelChrome, Staleness};
 
 pub struct NetBtHopsPanel;
 
@@ -85,6 +85,11 @@ impl Panel for NetBtHopsPanel {
         PanelChrome::new("Classic Bluetooth Hops")
             .stale_when(Staleness::NotStreaming)
             .tag_if(true, state.net.mode.tag())
+            // The scatter is the last WINDOW_S seconds: a drop inside them is
+            // dots that should be there and are not.
+            .counts_from_feed(FeedSpan::Window(std::time::Duration::from_secs_f64(
+                WINDOW_S,
+            )))
     }
 
     fn render(
@@ -244,6 +249,23 @@ mod tests {
         assert!(out.contains("not watching"), "{out}");
         assert!(out.contains("2.0"), "{out}");
         assert!(out.contains("MHz"), "{out}");
+    }
+
+    /// The scatter spans the last WINDOW_S seconds only: a loss minutes ago
+    /// says nothing about the dots now on screen, and a loss inside the
+    /// window means dots that should be there are not.
+    #[test]
+    fn only_a_loss_inside_the_window_is_a_caveat_on_the_scatter() {
+        let mut m = SdrMetrics::fixture().streaming();
+        m.net.bt_channels_watched = vec![10, 20, 30];
+
+        m.net.health.last_loss = Some(Instant::now() - Duration::from_secs(300));
+        let old = draw(NetBtHopsPanel, 80, 10, &m);
+        assert!(!old[0].contains("FEED LOSS"), "{}", old[0]);
+
+        m.net.health.last_loss = Some(Instant::now() - Duration::from_secs(2));
+        let recent = draw(NetBtHopsPanel, 80, 10, &m);
+        assert!(recent[0].contains("[FEED LOSS]"), "{}", recent[0]);
     }
 
     /// A live receiver with nothing heard yet says how many channels it is

@@ -30,7 +30,7 @@ use ratatui::{
 
 use crate::signal::net::{band, occupancy};
 use crate::state::{SdrMetrics, COLUMN_INTERVAL};
-use crate::ui::panel::{Panel, PanelChrome, Staleness};
+use crate::ui::panel::{FeedSpan, Panel, PanelChrome, Staleness};
 use crate::ui::widgets::canvas::{fold, ink, row, Duty};
 
 pub struct NetCoexistPanel;
@@ -81,6 +81,11 @@ impl Panel for NetCoexistPanel {
         PanelChrome::new("Coexistence")
             .stale_when(Staleness::NotStreaming)
             .tag_if(true, state.net.mode.tag())
+            // The canvas holds the band's last HISTORY_COLUMNS columns, one
+            // every COLUMN_INTERVAL: a drop inside that stretch thins a column.
+            .counts_from_feed(FeedSpan::Window(
+                crate::state::COLUMN_INTERVAL * crate::state::HISTORY_COLUMNS as u32,
+            ))
     }
 
     fn render(

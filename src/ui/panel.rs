@@ -62,6 +62,47 @@ impl Staleness {
     }
 }
 
+/// How far back into the sample feed a panel's numbers reach - declared so the
+/// engine can say, in one place, whether the feed lost anything inside that
+/// span.
+///
+/// Foundation design 13.2: every count in the NET section is a lower bound
+/// once the feed has dropped samples, because the three ways a block goes
+/// missing are invisible downstream. But "the feed lost something" is only a
+/// caveat on the numbers that span the loss: a census accumulated over the
+/// session is undercounted by a drop ten minutes ago, the duty cycle of the
+/// dwell just finished is not. So a panel declares the span its numbers
+/// cover, and the engine tags it [`Tag::FeedLoss`] only when the last loss
+/// falls inside it - never computed in the panel, the same rule as
+/// [`Staleness`].
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum FeedSpan {
+    /// Accumulated for as long as the feed's own account runs: totals, the
+    /// census, per-channel counts.
+    Session,
+    /// Measured over the most recent stretch of this length only: a dwell, a
+    /// scrolling window.
+    Window(std::time::Duration),
+}
+
+impl FeedSpan {
+    /// Resolve against a metrics snapshot: did the feed lose anything inside
+    /// this span?
+    pub fn resolve(self, state: &SdrMetrics) -> bool {
+        self.decide(state.net.health.last_loss.map(|t| t.elapsed()))
+    }
+
+    /// The rule on plain inputs: `since_loss` is how long ago the feed last
+    /// lost anything, `None` if it never has.
+    fn decide(self, since_loss: Option<std::time::Duration>) -> bool {
+        match (self, since_loss) {
+            (_, None) => false,
+            (FeedSpan::Session, Some(_)) => true,
+            (FeedSpan::Window(span), Some(age)) => age <= span,
+        }
+    }
+}
+
 /// A live-state tag the engine appends to a panel's title after the name.
 ///
 /// Semantic rather than textual on purpose: the panel says *what is true*, the
@@ -107,6 +148,14 @@ pub enum Tag {
     /// whose order is only visible in a marker halfway across the header is one
     /// people read wrong from the other side of the room.
     Sorted(&'static str, bool),
+    /// `[FEED LOSS]` - the sample feed dropped blocks inside the span this
+    /// panel's numbers cover, so its counts are lower bounds.
+    ///
+    /// **Never pushed by a panel.** A panel declares its [`FeedSpan`] and the
+    /// engine adds this tag when the last loss falls inside it, the way it adds
+    /// `[STALE]`: a caveat a panel had to remember to print is one the next
+    /// panel would forget.
+    FeedLoss,
 }
 
 /// The *shape* of a panel's frame. Its colour is [`FrameTone`]; the two are
@@ -211,6 +260,9 @@ pub struct PanelChrome {
     /// e.g. the sweep panel's band and dwell. Appended **verbatim**, so a panel
     /// that wants a separating space writes one.
     pub suffix: Option<String>,
+    /// How far back into the sample feed this panel's numbers reach, when they
+    /// come from it at all. `None` for anything the feed does not count.
+    pub feed: Option<FeedSpan>,
 }
 
 impl PanelChrome {
@@ -223,6 +275,7 @@ impl PanelChrome {
             tone: FrameTone::Default,
             tags: Vec::new(),
             suffix: None,
+            feed: None,
         }
     }
 
@@ -275,6 +328,22 @@ impl PanelChrome {
 
     pub fn suffix(mut self, suffix: impl Into<String>) -> Self {
         self.suffix = Some(suffix.into());
+        self
+    }
+
+    /// Declare that this panel's numbers are counted from the sample feed over
+    /// `span`. The engine decides from that whether to add [`Tag::FeedLoss`].
+    pub fn counts_from_feed(mut self, span: FeedSpan) -> Self {
+        self.feed = Some(span);
+        self
+    }
+
+    /// Add the tags the engine owns - the ones a panel declares the grounds for
+    /// but never pushes itself. Called once, where the frame is drawn.
+    pub fn with_engine_tags(mut self, state: &SdrMetrics) -> Self {
+        if self.feed.is_some_and(|span| span.resolve(state)) {
+            self.tags.push(Tag::FeedLoss);
+        }
         self
     }
 }
@@ -380,6 +449,57 @@ mod tests {
             "only the true condition adds a tag"
         );
         assert_eq!(built.suffix.as_deref(), Some(" · held"));
+    }
+
+    /// A loss is a caveat only on the numbers whose span it falls inside.
+    #[test]
+    fn a_feed_loss_caveats_only_the_spans_it_falls_inside() {
+        use std::time::Duration;
+        let ten_min_ago = Some(Duration::from_secs(600));
+        let just_now = Some(Duration::from_millis(300));
+        let window = FeedSpan::Window(Duration::from_secs(20));
+
+        // Never lost anything: nothing is caveated, whatever the span.
+        assert!(!FeedSpan::Session.decide(None));
+        assert!(!window.decide(None));
+
+        // A session total spans every loss there has been.
+        assert!(FeedSpan::Session.decide(ten_min_ago));
+        assert!(FeedSpan::Session.decide(just_now));
+
+        // A window spans only the recent ones: an old drop says nothing about
+        // what was measured since.
+        assert!(!window.decide(ten_min_ago));
+        assert!(window.decide(just_now));
+        assert!(
+            window.decide(Some(Duration::from_secs(20))),
+            "the edge is inside"
+        );
+    }
+
+    /// The engine adds the tag; a panel only declares the span. A panel that
+    /// declares nothing is never tagged, however lossy the feed.
+    #[test]
+    fn the_engine_adds_the_feed_loss_tag_from_the_declaration() {
+        let mut m = SdrMetrics::fixture();
+        m.net.health.last_loss = Some(std::time::Instant::now());
+
+        let declared = PanelChrome::new("Census")
+            .counts_from_feed(FeedSpan::Session)
+            .with_engine_tags(&m);
+        assert!(declared.tags.contains(&Tag::FeedLoss));
+
+        let silent = PanelChrome::new("Capability").with_engine_tags(&m);
+        assert!(!silent.tags.contains(&Tag::FeedLoss));
+
+        m.net.health.last_loss = None;
+        let clean = PanelChrome::new("Census")
+            .counts_from_feed(FeedSpan::Session)
+            .with_engine_tags(&m);
+        assert!(
+            !clean.tags.contains(&Tag::FeedLoss),
+            "a clean feed caveats nothing"
+        );
     }
 
     #[test]

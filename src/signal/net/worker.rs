@@ -231,6 +231,9 @@ impl NetWorker {
                 h.blocks_lost = h.blocks_lost.saturating_add(plan.dropped);
                 h.run_blocks = run.blocks;
                 h.last_block = Some(now);
+                if broke || plan.dropped > 0 {
+                    h.last_loss = Some(now);
+                }
                 // The usable span is the baseband filter's where the radio has
                 // one, because the bins the front end rolled off carry no
                 // measurement and averaging them in would drag every cell at the
@@ -525,6 +528,10 @@ mod tests {
         assert_eq!((h.gaps, h.blocks_lost), (0, 0));
         assert_eq!(h.run_blocks, 3);
         assert!(h.last_block.is_some());
+        assert!(
+            h.last_loss.is_none(),
+            "nothing was lost, so there is no when"
+        );
     }
 
     /// Opening the section on a radio that is already streaming is the normal
@@ -541,6 +548,7 @@ mod tests {
         let h = feed(&[(9_412, false, 64), (9_413, false, 64)], true);
         assert_eq!(h.gaps, 0, "nothing was interrupted; nothing had started");
         assert_eq!(h.blocks_lost, 0);
+        assert!(h.last_loss.is_none(), "and no loss is dated either");
         assert_eq!(
             h.run_blocks, 2,
             "and the run is the two blocks that arrived"
@@ -562,6 +570,7 @@ mod tests {
         assert_eq!(h.gaps, 1);
         assert_eq!(h.blocks_lost, 1, "the floor: samples went, count unknown");
         assert_eq!(h.run_blocks, 1, "and the new run is one block long");
+        assert!(h.last_loss.is_some(), "a loss says when it happened");
     }
 
     #[test]

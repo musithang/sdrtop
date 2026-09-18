@@ -26,7 +26,7 @@ use ratatui::{
 
 use crate::signal::dsp::uncertainty::Uncertain;
 use crate::state::{BlePacket, SdrMetrics};
-use crate::ui::panel::{Panel, PanelChrome, Staleness};
+use crate::ui::panel::{FeedSpan, Panel, PanelChrome, Staleness};
 use crate::ui::widgets::reading::Reading;
 
 pub struct NetBlePacketsPanel;
@@ -194,6 +194,9 @@ impl Panel for NetBlePacketsPanel {
         PanelChrome::new("BLE Advertising")
             .stale_when(Staleness::NotStreaming)
             .tag_if(true, state.net.mode.tag())
+            // The per-channel packet counts run for the session; a dropped
+            // block is packets this feed never saw.
+            .counts_from_feed(FeedSpan::Session)
     }
 
     fn render(

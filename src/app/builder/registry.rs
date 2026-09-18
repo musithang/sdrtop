@@ -361,6 +361,65 @@ mod tests {
         assert!(seen >= 4, "only {seen} net panels were checked");
     }
 
+    /// Every NET panel whose numbers are counted from the sample feed says how
+    /// far back they reach, so the engine can caveat them when the feed lost
+    /// something inside that span (foundation design 13.2). A panel that
+    /// forgot would show a lower bound as a total on a lossy link, with
+    /// nothing on screen to say so.
+    ///
+    /// The exemptions are named, each with its reason, so adding a panel
+    /// means deciding which it is rather than falling through silently.
+    #[test]
+    fn every_net_panel_that_counts_from_the_feed_says_over_what_span() {
+        use crate::state::{CellReading, SdrMetrics};
+        use crate::ui::panel::Staleness;
+
+        // Not counts from the feed, for the stated reason.
+        const EXEMPT: &[(&str, &str)] = &[
+            (
+                "net_decode_health",
+                "it is the account of the loss itself; caveating it with its own subject is circular",
+            ),
+            (
+                "net_ble_rf",
+                "one received packet's modulation, not a count: a block lost elsewhere does not change it",
+            ),
+            (
+                "net_bt_census",
+                "a placeholder that shows no numbers (removed in net-ux-polish-plan Stop 6)",
+            ),
+        ];
+
+        let (engine, _) = App::build_ui("net", &HashMap::new(), None, true);
+        let mut m = SdrMetrics::fixture().streaming();
+        // One measured cell, so the occupancy panel has numbers to span.
+        m.net.band.cells.push(CellReading {
+            measured: Some(std::time::Instant::now()),
+            ..Default::default()
+        });
+        let mut checked = 0;
+        for panel in engine.registered_panels() {
+            let name = panel.name();
+            if !name.starts_with("net_") {
+                continue;
+            }
+            let chrome = panel.chrome(&m);
+            if chrome.staleness == Staleness::Never || EXEMPT.iter().any(|(n, _)| *n == name) {
+                assert!(
+                    chrome.feed.is_none(),
+                    "{name} is exempt but declares a feed span anyway"
+                );
+                continue;
+            }
+            checked += 1;
+            assert!(
+                chrome.feed.is_some(),
+                "{name} counts from the feed but does not say over what span"
+            );
+        }
+        assert!(checked >= 5, "only {checked} net panels were checked");
+    }
+
     /// Two panels claiming one key must be *reported*, not silently resolved.
     ///
     /// `HashMap::insert` would drop one of them, which is exactly how `v` and `t`
