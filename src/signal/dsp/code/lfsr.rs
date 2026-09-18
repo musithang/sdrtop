@@ -11,15 +11,33 @@
 //! - [`seed`]'s formula is pinned against a worked numeric example found in
 //!   independent public documentation: channel `0x25` seeds to `0x65`. See
 //!   `the_seed_matches_its_own_worked_example`.
-//! - The feedback taps are pinned by their own mathematical signature, not
-//!   by citation alone. Several different tap pairs on a 7-bit register give
-//!   a maximal-length (127-state) sequence, and a maximal length alone does
-//!   not say *which* primitive polynomial produced it - so
-//!   `the_output_satisfies_its_own_recurrence` checks that this sequence
-//!   obeys the specific linear recurrence `x^7 + x^4 + 1` implies,
-//!   `o[t] = o[t-3] xor o[t-7]`, which only the correct tap pair can satisfy.
-//!   Found by brute-force search over every tap pair during this step's own
-//!   development, not assumed from the first plausible-looking pair.
+//! - The feedback taps are pinned by their own mathematical signature:
+//!   `the_output_satisfies_its_own_recurrence` checks the sequence obeys the
+//!   recurrence `x^7 + x^4 + 1` implies, `o[t] = o[t-3] xor o[t-7]`.
+//! - **And the structure is pinned by real packets, which is the check that
+//!   matters.** The register is the specification's own figure: positions 0
+//!   to 6, the output taken from position 6 and fed back into position 0, and
+//!   an exclusive-or on the way into position 4 (a Galois register). Until
+//!   2026-09-18 this file stepped a *Fibonacci* register instead - feedback
+//!   from positions 2 and 6 into position 0 - found by searching tap pairs
+//!   for one that passed the two tests above. It passed both: a Fibonacci and
+//!   a Galois register with the same polynomial produce the same sequence,
+//!   only from a different point in it for the same starting contents. The
+//!   specification gives the starting contents for the Galois register, so
+//!   the Fibonacci one whitened with the right sequence at the wrong phase:
+//!   the first few bits agreed, everything after them did not, and not one
+//!   real packet ever passed its CRC while every synthetic one, whitened by
+//!   this same function on the way out, did. The maximal-length and
+//!   recurrence tests cannot tell the two structures apart; bits from a real
+//!   transmitter can, and `signal::ble::pdu`'s
+//!   `a_real_over_the_air_packet_dewhitens_to_a_clean_crc` holds this file
+//!   to them.
+//!
+//! **The mapping from the specification's positions to this `u8`**: bit `j`
+//! holds position `6 - j`. So bit 0 is position 6, the output; bit 6 is
+//! position 0, which the specification sets to one; and bits 5 down to 0
+//! hold positions 1 to 6, which it sets to the channel index most
+//! significant bit first - which is the channel index itself, unshifted.
 
 /// The whitening LFSR's initial state for `channel`, 0 to 39.
 ///
@@ -28,19 +46,22 @@
 /// since whitening has no way to refuse an out-of-range channel of its own -
 /// the channel plan in `signal::ble::channel` is what enforces 0 to 39.
 ///
-/// No consumer yet outside this module's own tests: nothing de-whitens a
-/// real payload until B6 puts a real packet on screen. Applies to every item
-/// below.
+/// See the module doc for why bit 6 and the unshifted channel are exactly the
+/// specification's positions 0 to 6.
 pub fn seed(channel: u8) -> u8 {
     0x40 | (channel & 0x3F)
 }
 
 /// One step: the bit whitened out, and the LFSR's next state.
+///
+/// Every position moves one along (bit `j` to bit `j - 1`), the output goes
+/// round into position 0 (bit 6), and on its way into position 4 (bit 2) the
+/// bit from position 3 is exclusive-ored with the output - the
+/// specification's figure, in the module doc's mapping.
 fn step(state: u8) -> (bool, u8) {
-    let out = state & 1 != 0;
-    let feedback = ((state >> 4) ^ state) & 1;
-    let next = (state >> 1) | (feedback << 6);
-    (out, next)
+    let out = state & 1;
+    let next = ((state >> 1) | (out << 6)) ^ (out << 2);
+    (out != 0, next)
 }
 
 /// Whiten `bits` in place, using the sequence [`seed`] generates for

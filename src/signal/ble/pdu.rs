@@ -161,15 +161,19 @@ pub fn decode(bits: &[bool]) -> Option<Packet> {
     let crc_bytes: Vec<u8> = (0..3)
         .map(|i| byte(HEADER_BITS + (length as usize) * 8 + i * 8))
         .collect();
-    // The CRC is the one multi-octet field this specification sends most-
-    // significant-octet-first - the stated exception to the rule every other
-    // field here follows (see the module doc and `access_address_bits`).
-    // `encode`'s own tests caught nothing because it wrote the same wrong
-    // order it read back; only a real transmitter, which correctly follows
-    // the exception, exposed it - every CRC failed on real hardware until
-    // this matched.
+    // The specification shifts the CRC out of its register highest position
+    // first. `crc24_ble` computes the reflected form of that register, so the
+    // bit that goes out first is its *lowest* bit, and read back in this
+    // module's least-significant-bit-first octets the lowest octet arrives
+    // first. An earlier version read it the other way round, with a comment
+    // saying real hardware had confirmed it; it had not - no real packet had
+    // ever passed, because the whitening was wrong too (see
+    // `signal::dsp::code::lfsr`). `encode` wrote the same order it read, so
+    // every synthetic packet agreed with it. What settles it is
+    // `a_real_over_the_air_packet_dewhitens_to_a_clean_crc`, on bits a real
+    // device sent.
     let received_crc =
-        (crc_bytes[0] as u32) << 16 | (crc_bytes[1] as u32) << 8 | crc_bytes[2] as u32;
+        crc_bytes[0] as u32 | (crc_bytes[1] as u32) << 8 | (crc_bytes[2] as u32) << 16;
     let crc_ok = crc24_ble(&pdu_bytes) == received_crc;
 
     let adv_addr = if pdu_type.carries_adv_addr_first() && length >= 6 {
@@ -215,11 +219,10 @@ pub fn encode(channel: u8, header_byte0: u8, payload: &[u8]) -> Vec<bool> {
     pdu_bytes.extend_from_slice(payload);
     let crc = crc24_ble(&pdu_bytes);
     let mut all_bytes = pdu_bytes;
-    // Most-significant-octet-first: see `decode`'s own comment on the same
-    // exception.
-    all_bytes.push(((crc >> 16) & 0xFF) as u8);
-    all_bytes.push(((crc >> 8) & 0xFF) as u8);
+    // Lowest octet first: see `decode`'s own comment on why.
     all_bytes.push((crc & 0xFF) as u8);
+    all_bytes.push(((crc >> 8) & 0xFF) as u8);
+    all_bytes.push(((crc >> 16) & 0xFF) as u8);
 
     let mut bits = Vec::with_capacity(all_bytes.len() * 8);
     for byte in all_bytes {
@@ -234,6 +237,57 @@ pub fn encode(channel: u8, header_byte0: u8, payload: &[u8]) -> Vec<bool> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// **A real packet from the air, not one this module built.** Recorded
+    /// 2026-09-18 on advertising channel 37 with `hackrf_transfer`
+    /// (2402 MHz, 8 Msps, AMP off, LNA 32, VGA 24) in a flat in a panel
+    /// building, and sliced by an independent reference receiver written
+    /// apart from this crate, whose whitening and CRC-24 passed ten of twelve
+    /// packets in the same recording - a false CRC pass is a 2^-24 event, so
+    /// those bits are known good. These are the air bits after the access
+    /// address, still whitened, exactly as a receiver hands them over.
+    ///
+    /// Every test before this one built its packet with this crate's own
+    /// `encode` and `whiten`, so a whitening sequence wrong in the same way on
+    /// both sides round-tripped perfectly while no real packet ever passed
+    /// its CRC. Only bits this crate did not produce can catch that.
+    const REAL_CH37_SCAN_RSP_AIR_BITS: &str =
+        "1001001100101011111111001110111101101000100011111001000111010101010100110001110011001110";
+
+    /// A second real packet from the same recording: a different PDU type,
+    /// a longer payload, and a real advertiser address, so the test does not
+    /// rest on one packet's particular bits.
+    const REAL_CH37_ADV_NONCONN_IND_AIR_BITS: &str = "11110011001110111001001101100001001101011001101100111111100001100100111001110011101110100001001000100001101011100001111110000111111001111111100000100101";
+
+    #[test]
+    fn a_real_over_the_air_packet_dewhitens_to_a_clean_crc() {
+        let mut bits: Vec<bool> = REAL_CH37_SCAN_RSP_AIR_BITS
+            .chars()
+            .map(|c| c == '1')
+            .collect();
+        whiten(&mut bits, 37);
+        let packet = decode(&bits).expect("the whole PDU and CRC are here");
+        assert_eq!(packet.length, 6, "a six-byte payload: AdvA alone");
+        assert_eq!(packet.pdu_type, PduType::ScanRsp);
+        assert!(
+            packet.crc_ok,
+            "a packet a real device sent must pass its CRC"
+        );
+    }
+
+    #[test]
+    fn a_second_real_packet_of_another_type_also_passes() {
+        let mut bits: Vec<bool> = REAL_CH37_ADV_NONCONN_IND_AIR_BITS
+            .chars()
+            .map(|c| c == '1')
+            .collect();
+        whiten(&mut bits, 37);
+        let packet = decode(&bits).expect("the whole PDU and CRC are here");
+        assert_eq!(packet.pdu_type, PduType::AdvNonconnInd);
+        assert_eq!(packet.length, 14);
+        assert_eq!(packet.adv_addr, Some([158, 39, 145, 126, 154, 209]));
+        assert!(packet.crc_ok);
+    }
 
     /// A round trip through `encode` and `decode` recovers every field, on
     /// the PDU type that carries an address.
