@@ -17,6 +17,7 @@
 
 pub mod channel;
 pub mod coded;
+pub mod connect;
 pub mod detect;
 pub mod gfsk;
 pub mod measure;
