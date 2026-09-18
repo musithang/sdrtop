@@ -337,6 +337,7 @@ mod power_control_tests {
             net_feed: FeedHealth::default(),
             power_tx,
             geometry: SampleGeometry::default(),
+            blocks_seen: Arc::new(std::sync::atomic::AtomicU64::new(0)),
         })
     }
 

@@ -963,6 +963,15 @@ pub struct RxContext {
     #[allow(dead_code)]
     pub power_tx: crossbeam_channel::Sender<PowerTrace>,
     pub geometry: SampleGeometry,
+    /// How many blocks [`crate::hardware::process::process_block`] has ever
+    /// processed - incremented once, unconditionally, on every call. B19's
+    /// own retune-latency probe (`hardware::retune`) is the reason this
+    /// exists: it is the cheapest possible answer to "has a new block
+    /// arrived since I retuned", checked from a thread that is not the
+    /// backend's own callback or read thread, without reopening `metrics`'s
+    /// mutex on the hot path to ask - the same reasoning [`FeedHealth`]'s
+    /// own atomics already follow.
+    pub blocks_seen: Arc<AtomicU64>,
 }
 
 /// What the FFT feed did with the blocks handed to it since the last poll.

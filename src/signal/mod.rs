@@ -16,6 +16,7 @@ pub mod power;
 pub mod rds;
 pub mod rds_demod;
 pub mod reference;
+pub mod retune;
 mod stats;
 pub mod stream;
 
