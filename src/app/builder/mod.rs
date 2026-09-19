@@ -34,10 +34,14 @@ use boot::{initial_metrics, resolve_tuning, Boot};
 use super::App;
 
 impl App {
+    /// `observable` is whether observer mode could watch this radio were
+    /// another process to hold it: `DeviceKind::observer_profile`, asked by
+    /// `App::new`, which has the listing.
     pub(super) fn new_normal(
         cfg: AppConfig,
         config_path: Option<PathBuf>,
         device: Arc<dyn hardware::SdrDevice>,
+        observable: bool,
     ) -> anyhow::Result<Self> {
         let info = device.info();
         let caps = Arc::new(device.capabilities().clone());
@@ -88,8 +92,10 @@ impl App {
 
         let device_options = device.options();
         hardware::debug_assert_device_options(&device_options);
-        let mut initial =
-            initial_metrics(&cfg, Boot::normal(&cfg, Arc::clone(&caps), tuning, &info))?;
+        let mut initial = initial_metrics(
+            &cfg,
+            Boot::normal(&cfg, Arc::clone(&caps), tuning, &info, observable),
+        )?;
         initial.device_options = Arc::new(device_options);
         let state = Arc::new(Mutex::new(initial));
 

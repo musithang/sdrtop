@@ -22,6 +22,7 @@ use ratatui::{
     Frame,
 };
 
+use crate::hardware::DeliveryModel;
 use crate::signal::net::gate::{HIGHEST_CENTRE_HZ, LOWEST_CENTRE_HZ};
 use crate::state::SdrMetrics;
 use crate::ui::panel::{Panel, PanelChrome, Staleness};
@@ -55,6 +56,48 @@ fn fact<'a>(
         ));
     }
     Line::from(spans)
+}
+
+/// How blocks reach sdrtop, and so what every timing figure measures.
+///
+/// `hardware::DeliveryModel`'s own finding: a pull loop's gaps between reads
+/// are our rhythm, not the link's, and a timing number that does not say which
+/// it is will be read as the link's.
+fn delivery<'a>(model: DeliveryModel, iw: usize, theme: &crate::Theme) -> Line<'a> {
+    let (word, note) = match model {
+        DeliveryModel::Push => ("push", "the driver paces blocks: timing is the link's"),
+        DeliveryModel::Pull => ("pull", "sdrtop paces reads: timing is its own loop"),
+    };
+    fact(
+        "DELIVERY",
+        word.to_string(),
+        Some(note.to_string()),
+        iw,
+        theme,
+    )
+}
+
+/// Whether sdrtop could still watch this radio, read-only, while another
+/// program holds it (`state::SystemState::observable`).
+fn observer<'a>(observable: bool, iw: usize, theme: &crate::Theme) -> Line<'a> {
+    let (word, note) = if observable {
+        (
+            "available",
+            "watches it read-only when another program holds it",
+        )
+    } else {
+        (
+            "not available",
+            "no read-only view when another program holds it",
+        )
+    };
+    fact(
+        "OBSERVER",
+        word.to_string(),
+        Some(note.to_string()),
+        iw,
+        theme,
+    )
 }
 
 impl Panel for NetCapabilityPanel {
@@ -93,8 +136,10 @@ impl Panel for NetCapabilityPanel {
 
         let iw = inner.width as usize;
         lines.extend(span::lines(caps, iw, theme));
+        let legend = lines.len() - 1;
         // What `signal::net::gate` actually holds the tuner to: every centre
         // the section tunes to, which is narrower than the ISM band drawn above.
+        let needs = lines.len();
         lines.push(fact(
             "NEEDS",
             format!(
@@ -107,6 +152,7 @@ impl Panel for NetCapabilityPanel {
             theme,
         ));
         lines.push(Line::from(""));
+        lines.push(crate::ui::chrome::section("radio", "", iw, theme));
         lines.push(fact(
             "RATE",
             format!("{:.3} Msps ceiling", caps.sample_rate_max_hz / 1e6),
@@ -121,8 +167,27 @@ impl Panel for NetCapabilityPanel {
             iw,
             theme,
         ));
+        lines.push(delivery(caps.delivery, iw, theme));
+        lines.push(observer(state.system.observable, iw, theme));
 
         lines.extend(modes::lines(caps, iw, theme));
+
+        // Breathe like the Lab panels (`chrome::fit_spacers`): spacers grow to
+        // fill a tall panel and go first on a short one. When that is not
+        // enough, the ruler's key, the NEEDS row, and then the band ruler's
+        // two rows give way, in that order, so the modes, which are the
+        // panel's answer, stay on screen longest.
+        let avail = inner.height as usize;
+        let blank = |l: &Line| l.spans.iter().all(|s| s.content.trim().is_empty());
+        let spacers = lines.iter().filter(|l| blank(l)).count();
+        let over = lines.len().saturating_sub(spacers).saturating_sub(avail);
+        let mut optional = [legend, needs, legend - 1, legend - 2];
+        let n = over.min(optional.len());
+        optional[..n].sort_unstable_by(|a, b| b.cmp(a));
+        for &i in &optional[..n] {
+            lines.remove(i);
+        }
+        crate::ui::chrome::fit_spacers(&mut lines, avail);
 
         f.render_widget(Paragraph::new(lines), inner);
     }
@@ -133,10 +198,12 @@ mod tests {
     use crate::state::fixture::draw;
     use crate::ui::NetCapabilityPanel;
 
+    /// At full height. What a short panel gives up first is
+    /// `a_short_panel_gives_up_the_key_and_needs_before_any_mode`.
     #[test]
     fn the_band_and_the_radios_own_range_are_both_named() {
         let m = crate::state::SdrMetrics::fixture();
-        let out = draw(NetCapabilityPanel, 72, 22, &m).join("\n");
+        let out = draw(NetCapabilityPanel, 72, 32, &m).join("\n");
         assert!(out.contains("2402.000 to 2483.500 MHz"), "{out}");
         // The fixture is a HackRF: 1 MHz to 6 GHz, 20 Msps.
         assert!(out.contains("6000.000 MHz"), "{out}");
@@ -163,6 +230,50 @@ mod tests {
         let ht40 = out.find("802.11n HT40").expect("HT40 listed");
         assert!(ht20 < cannot, "HT20 fits in 20 Msps and must be above");
         assert!(ht40 > cannot, "HT40 needs 40 Msps and must be below");
+    }
+
+    /// **The modes are the panel's answer, so they are the last to go.** Tall,
+    /// everything shows with room to breathe; short, the spacers go, then the
+    /// ruler's key, then the NEEDS row, then the ruler, and every mode row is
+    /// still there.
+    #[test]
+    fn a_short_panel_gives_up_the_key_and_needs_before_any_mode() {
+        let m = crate::state::SdrMetrics::fixture();
+        let tall = draw(NetCapabilityPanel, 90, 40, &m).join("\n");
+        assert!(
+            tall.contains("BLE advertising") && tall.contains("NEEDS"),
+            "{tall}"
+        );
+        let short = draw(NetCapabilityPanel, 90, 21, &m).join("\n");
+        assert!(!short.contains("BLE advertising"), "{short}");
+        assert!(!short.contains("NEEDS"), "{short}");
+        assert!(
+            short.contains("RANGE"),
+            "the tuner's range outlasts its ruler: {short}"
+        );
+        for phy in crate::signal::net::gate::PHYS {
+            assert!(short.contains(phy.name), "{} lost:\n{short}", phy.name);
+        }
+    }
+
+    /// The transport and observer facts, both ways round. The fixture is a
+    /// HackRF: a push driver, and a radio observer mode can watch.
+    #[test]
+    fn the_radio_says_how_its_blocks_arrive_and_whether_it_can_be_watched() {
+        let mut m = crate::state::SdrMetrics::fixture();
+        let out = draw(NetCapabilityPanel, 90, 30, &m).join("\n");
+        assert!(out.contains("DELIVERY push"), "{out}");
+        assert!(out.contains("timing is the link's"), "{out}");
+        assert!(out.contains("OBSERVER available"), "{out}");
+
+        let mut caps = (*m.caps).clone();
+        caps.delivery = crate::hardware::DeliveryModel::Pull;
+        m.caps = std::sync::Arc::new(caps);
+        m.system.observable = false;
+        let out = draw(NetCapabilityPanel, 90, 30, &m).join("\n");
+        assert!(out.contains("DELIVERY pull"), "{out}");
+        assert!(out.contains("timing is its own loop"), "{out}");
+        assert!(out.contains("OBSERVER not available"), "{out}");
     }
 
     #[test]

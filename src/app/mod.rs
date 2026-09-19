@@ -63,7 +63,10 @@ impl App {
         listing: &hardware::DeviceListing,
     ) -> anyhow::Result<Self> {
         match hardware::open_device(listing, &cfg.tinysa) {
-            Ok(device) => Self::new_normal(cfg, config_path, device),
+            Ok(device) => {
+                let observable = listing.kind.observer_profile().is_some();
+                Self::new_normal(cfg, config_path, device, observable)
+            }
             Err(open_err) => {
                 // Device is present but couldn't be opened (e.g. busy) - fall back
                 // to read-only observer mode via the matching backend's sysfs

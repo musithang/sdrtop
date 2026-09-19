@@ -95,6 +95,8 @@ impl SdrMetrics {
                 caps.level_max_db,
             ),
             system: SystemState {
+                // The fixture is a HackRF, which observer mode can watch.
+                observable: true,
                 // The HackRF fixture reports its own firmware, so no stack row.
                 stack: None,
                 board_name: Arc::from("HackRF One"),

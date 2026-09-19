@@ -59,6 +59,8 @@ pub(super) struct Identity {
     pub stack: Option<crate::hardware::SoftwareStack>,
     pub board_rev: u8,
     pub usb_api_version: u16,
+    /// See `state::SystemState::observable`.
+    pub observable: bool,
 }
 
 /// Everything that differs between a live device and observer mode.
@@ -89,6 +91,7 @@ impl Boot {
         caps: Arc<DeviceCapabilities>,
         tuning: Tuning,
         info: &hardware::DeviceInfo,
+        observable: bool,
     ) -> Self {
         Self {
             caps,
@@ -103,6 +106,7 @@ impl Boot {
                 stack: info.stack.clone(),
                 board_rev: info.board_rev.unwrap_or(0xFE),
                 usb_api_version: info.usb_api_version.unwrap_or(0),
+                observable,
             },
             observer: ObserverState::default(),
             markers: cfg.display.spectrum_markers.clone(),
@@ -156,6 +160,8 @@ impl Boot {
                 stack: None,
                 board_rev: 0xFE,
                 usb_api_version: 0,
+                // A radio observed is, by definition, one observer mode can watch.
+                observable: true,
             },
             observer: ObserverState {
                 active: true,
@@ -389,6 +395,7 @@ pub(super) fn initial_metrics(cfg: &AppConfig, boot: Boot) -> anyhow::Result<Sdr
             stack: identity.stack,
             board_rev: identity.board_rev,
             usb_api_version: identity.usb_api_version,
+            observable: identity.observable,
             process_cpu_pct: 0.0,
             process_rss_mb: 0,
             cpu_history: VecDeque::with_capacity(THROUGHPUT_HISTORY_LEN),
@@ -568,6 +575,7 @@ mod tests {
                     Arc::new(hardware::native::hackrf::caps()),
                     resolve_tuning(&cfg.radio, &hardware::native::hackrf::caps()),
                     &hardware::DeviceInfo::default(),
+                    true,
                 ),
             ),
         ] {
@@ -599,6 +607,7 @@ mod tests {
                     Arc::new(caps),
                     tuning,
                     &hardware::DeviceInfo::default(),
+                    true,
                 ),
             )
             .unwrap();
@@ -628,6 +637,7 @@ mod tests {
                 Arc::new(caps),
                 tuning,
                 &hardware::DeviceInfo::default(),
+                true,
             ),
         )
         .unwrap();
@@ -664,6 +674,7 @@ mod tests {
                     Arc::new(caps),
                     tuning,
                     &hardware::DeviceInfo::default(),
+                    true,
                 ),
             );
             assert!(result
@@ -690,6 +701,7 @@ mod tests {
                     Arc::new(caps),
                     tuning,
                     &hardware::DeviceInfo::default(),
+                    true,
                 ),
             )
             .unwrap();
@@ -761,6 +773,7 @@ mod tests {
                 Arc::new(caps),
                 tuning,
                 &hardware::DeviceInfo::default(),
+                true,
             ),
         )
         .unwrap();
@@ -790,6 +803,7 @@ mod tests {
                 Arc::new(hardware::native::hackrf::caps()),
                 resolve_tuning(&cfg.radio, &hardware::native::hackrf::caps()),
                 &hardware::DeviceInfo::default(),
+                true,
             ),
         )
         .unwrap();

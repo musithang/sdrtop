@@ -20,6 +20,11 @@ pub struct SystemState {
     pub board_rev: u8,
     #[allow(dead_code)]
     pub usb_api_version: u16,
+    /// Whether sdrtop could watch this radio read-only while another process
+    /// holds it (observer mode). Decided once at open from the backend's
+    /// `hardware::DeviceKind::observer_profile`, the one place that knows,
+    /// and carried here so a panel can say it without matching on a backend.
+    pub observable: bool,
     pub process_cpu_pct: f32,
     pub process_rss_mb: u64,
     /// CPU % × 10 per sample (0.1 % resolution), one entry per system task poll (1 s).
