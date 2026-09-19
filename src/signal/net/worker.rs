@@ -391,6 +391,11 @@ impl NetWorker {
                     }
                     if let Some(rx) = ble.as_mut() {
                         let packets = rx.push(&bytes, self.geometry);
+                        let funnel = rx.take_funnel();
+                        if !funnel.is_empty() {
+                            let mut m = self.state.lock().unwrap_or_else(|e| e.into_inner());
+                            m.net.health.ble.add(funnel);
+                        }
                         if !packets.is_empty() {
                             let mut m = self.state.lock().unwrap_or_else(|e| e.into_inner());
                             if let Some(i) =
@@ -532,6 +537,7 @@ impl NetWorker {
                 }
                 if !hits.is_empty() || !narrowed_by_lap.is_empty() {
                     let mut m = self.state.lock().unwrap_or_else(|e| e.into_inner());
+                    m.net.health.bt_hits += hits.len() as u64;
                     for (channel, lap) in hits {
                         m.net.bt_hops.push_front(BtHop {
                             channel,

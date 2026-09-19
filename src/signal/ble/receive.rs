@@ -394,9 +394,51 @@ pub struct Receiver {
     history: std::collections::VecDeque<Complex<f32>>,
     capture: Vec<Complex<f32>>,
     capturing: bool,
+    /// What happened to each trigger since the worker last asked
+    /// ([`Self::take_funnel`]).
+    funnel: Funnel,
+}
+
+/// What the receiver did with the samples it was given, counted as it went:
+/// the decode funnel the decode-health panel reads.
+///
+/// **Every trigger ends one of three ways, and each is counted once.** The
+/// capture yields a packet whose CRC passed at one of the alignments searched
+/// (`decoded`); or it reaches the longest a PDU can be without one, and the
+/// last attempt, at the nominal boundary only, either decodes a packet whose
+/// CRC failed (`crc_failed`) or not (`gave_up`). Measured: a real packet with a
+/// bit error almost always ends as `gave_up`, because its true boundary is a
+/// few symbols from the nominal one
+/// (`the_funnel_counts_each_trigger_by_how_it_ended`). There is no separate "header parsed" stage to
+/// count: the search returns only a position whose CRC passes, and a counter
+/// for a stage the receiver does not have would be an invented one.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct Funnel {
+    pub triggered: u64,
+    pub decoded: u64,
+    pub crc_failed: u64,
+    pub gave_up: u64,
+}
+
+impl Funnel {
+    pub fn add(&mut self, other: Funnel) {
+        self.triggered += other.triggered;
+        self.decoded += other.decoded;
+        self.crc_failed += other.crc_failed;
+        self.gave_up += other.gave_up;
+    }
+
+    pub fn is_empty(&self) -> bool {
+        *self == Funnel::default()
+    }
 }
 
 impl Receiver {
+    /// The funnel counted since the last call, and a fresh one started.
+    pub fn take_funnel(&mut self) -> Funnel {
+        std::mem::take(&mut self.funnel)
+    }
+
     pub fn new(raw_rate: f64, channel: u8, phy: Phy) -> Result<Self, String> {
         let decim = front_end(raw_rate, phy)?;
         let reference = matched_reference(raw_rate, phy)?;
@@ -419,6 +461,7 @@ impl Receiver {
             history: std::collections::VecDeque::with_capacity(LOOKBACK_SAMPLES + 1),
             capture: Vec::new(),
             capturing: false,
+            funnel: Funnel::default(),
         })
     }
 
@@ -635,6 +678,7 @@ impl Receiver {
                 let due = self.capture.len().is_multiple_of(DECODE_EVERY_SAMPLES);
                 match due.then(|| self.try_decode()).flatten() {
                     Some(packet) => {
+                        self.funnel.decoded += 1;
                         found.push(packet);
                         self.capturing = false;
                         self.capture.clear();
@@ -649,8 +693,16 @@ impl Receiver {
                         // truly was aligned there, and genuinely failed its
                         // CRC, still shows up as that rather than vanishing
                         // silently the way a wrong-alignment guess would.
-                        if let Some(packet) = self.try_decode_from(LOOKBACK_SAMPLES) {
-                            found.push(packet);
+                        match self.try_decode_from(LOOKBACK_SAMPLES) {
+                            Some(packet) => {
+                                if packet.crc_ok {
+                                    self.funnel.decoded += 1;
+                                } else {
+                                    self.funnel.crc_failed += 1;
+                                }
+                                found.push(packet);
+                            }
+                            None => self.funnel.gave_up += 1,
                         }
                         self.capturing = false;
                         self.capture.clear();
@@ -659,6 +711,7 @@ impl Receiver {
                 }
             } else if let Some(rho) = *reading {
                 if rho > self.threshold {
+                    self.funnel.triggered += 1;
                     self.capturing = true;
                     self.capture = self.history.iter().copied().collect();
                     self.trigger_len = self.capture.len();
@@ -943,6 +996,65 @@ mod tests {
         assert_eq!(p.pdu_type, pdu::PduType::AdvInd);
         assert_eq!(p.adv_addr, Some(addr));
         assert!(p.crc_ok);
+    }
+
+    /// **Every trigger is counted once, by how it ended.** A clean packet is
+    /// one trigger and one CRC-good decode, and taking the funnel resets it.
+    ///
+    /// **And what a bit error really costs, measured.** A packet with one bit
+    /// flipped in its PDU triggers the same way and is never accepted during
+    /// the capture (the search wants a passing CRC). At the longest a PDU can
+    /// be, the last attempt decodes at the nominal boundary only, and the real
+    /// boundary sits a few symbols from it (`try_decode`'s doc), so the packet
+    /// ends as "gave up", not "CRC failed". Pinned as it is, so the funnel's
+    /// labels say what the receiver does; whether the give-up should report
+    /// its best candidate instead is an open decision
+    /// (`net-ux-polish-plan.md` Stop 3.4).
+    #[test]
+    fn the_funnel_counts_each_trigger_by_how_it_ended() {
+        let rate = working_rate_hz(Phy::OneM);
+        let geometry = eight_bit();
+        let addr = [0x11, 0x22, 0x33, 0x44, 0x55, 0x66];
+        let mut payload = crate::signal::ble::pdu::air_octets(addr).to_vec();
+        payload.extend_from_slice(&[0x02, 0x01, 0x06]);
+
+        let iq = synthetic_packet_iq(Phy::OneM, 37, 0x00, &payload, 25.0);
+        let mut rx = Receiver::new(rate, 37, Phy::OneM).unwrap();
+        let packets = rx.push(&bytes_for(&iq, geometry), geometry);
+        assert_eq!(packets.len(), 1);
+        let f = rx.take_funnel();
+        assert_eq!(
+            (f.triggered, f.decoded, f.crc_failed, f.gave_up),
+            (1, 1, 0, 0)
+        );
+        assert!(rx.take_funnel().is_empty(), "taken, and started again");
+
+        // The same packet with one PDU bit flipped, then enough further stream
+        // for the capture to reach the longest a PDU can be.
+        let sps = WORKING_SPS;
+        let mut rng = Rng::new(4242);
+        let mut bits: Vec<bool> = (0..16).map(|_| rng.next_u64() & 1 == 1).collect();
+        bits.extend(super::super::detect::preamble_bits(
+            ADVERTISING_ACCESS_ADDRESS,
+            Phy::OneM,
+        ));
+        bits.extend_from_slice(&super::super::detect::access_address_bits(
+            ADVERTISING_ACCESS_ADDRESS,
+        ));
+        let mut pdu_bits = pdu::encode(37, 0x00, &payload);
+        pdu_bits[40] = !pdu_bits[40];
+        bits.extend_from_slice(&pdu_bits);
+        let mut tail = Rng::new(7);
+        bits.extend((0..(16 + MAX_PDU_BYTES * 8) + 64).map(|_| tail.next_u64() & 1 == 1));
+        let clean = modulate(&bits, sps, Phy::OneM.deviation_hz(), rate, 0.5);
+        let iq = at_snr(&clean, 25.0, &mut Rng::new(99));
+        let mut rx = Receiver::new(rate, 37, Phy::OneM).unwrap();
+        let packets = rx.push(&bytes_for(&iq, geometry), geometry);
+        let f = rx.take_funnel();
+        assert_eq!(f.triggered, 1, "{f:?}");
+        assert_eq!(f.decoded, 0, "{f:?}");
+        assert_eq!((f.crc_failed, f.gave_up), (0, 1), "{f:?}");
+        assert!(packets.is_empty(), "{packets:?}");
     }
 
     /// **Hearing does not depend on what the packet says.** At the standard's

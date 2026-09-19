@@ -12,12 +12,16 @@
 //! whole block under load, and a run broken in the middle takes with it whatever
 //! was being assembled. None of the three is visible from downstream.
 //!
-//! **Nothing here is decoded yet, and the panel says so rather than printing
-//! zeroes.** A row reading `bursts 0` is a claim that we looked and found none.
-//! At this point nothing looks. The counters that exist are the ones something
-//! actually maintains, and the decode section is one line saying what is not
-//! running - which is rule 2 in the small: what cannot be asked is refused,
-//! never invented.
+//! **What was decoded, and what nothing decodes.** Two decoders run now, and
+//! their funnels are counted where they happen: every BLE trigger ends as a
+//! packet whose CRC passed, one whose CRC failed, or a capture nothing could be
+//! decoded from (`signal::ble::receive::Funnel`); classic Bluetooth counts
+//! access-code hits and the piconets whose UAP is resolved. A decoder that has
+//! not run this session shows `—` and "not decoding", never a zero: a row
+//! reading `0` is a claim that it looked and found none. There is still no
+//! protocol-agnostic burst detector (the foundation plan's N14 gap), and its
+//! row says so the same way - rule 2 in the small: what cannot be asked is
+//! refused, never invented.
 
 use ratatui::{
     layout::Rect,
@@ -27,7 +31,8 @@ use ratatui::{
     Frame,
 };
 
-use crate::state::{NetDecodeHealth, SdrMetrics};
+use crate::state::SdrMetrics;
+use crate::ui::chrome::{fit_spacers, section};
 use crate::ui::panel::{Panel, PanelChrome, Staleness};
 
 pub struct NetDecodeHealthPanel;
@@ -68,14 +73,6 @@ fn count<'a>(
     Line::from(spans)
 }
 
-/// A heading, in the same ink the other section headings in this deck use.
-fn heading<'a>(text: &str, theme: &crate::Theme) -> Line<'a> {
-    Line::from(Span::styled(
-        text.to_string(),
-        Style::default().fg(theme.label),
-    ))
-}
-
 /// `1 234 567` - grouped, because these run to seven digits inside a minute and
 /// an ungrouped one cannot be read at a glance, which is the only way anybody
 /// reads this panel.
@@ -108,15 +105,26 @@ fn samples(pairs: u64) -> String {
     format!("{pairs} samp")
 }
 
-/// The whole panel body, as a function of the counts and the width alone.
+/// The whole panel body, as a function of the state and the width alone.
 ///
 /// Split out because nothing on this panel is a function of anything else: no
 /// device, no clock, no lock. The same split `signal::fft` makes, for the same
 /// reason.
-fn lines(h: &NetDecodeHealth, theme: &crate::Theme, width: usize) -> Vec<Line<'static>> {
+fn lines(state: &SdrMetrics, theme: &crate::Theme, width: usize) -> Vec<Line<'static>> {
+    let h = &state.net.health;
     let row = |label, value, note| count(label, value, theme.value, note, theme, width);
-    vec![
-        heading("WHAT ARRIVED", theme),
+    let dash = |label, note| {
+        count(
+            label,
+            "—".to_string(),
+            theme.stale,
+            Some(note),
+            theme,
+            width,
+        )
+    };
+    let mut out = vec![
+        section("what arrived", "", width, theme),
         row("blocks", grouped(h.blocks_in), None),
         row("I/Q pairs", samples(h.pairs_in), None),
         row(
@@ -125,7 +133,7 @@ fn lines(h: &NetDecodeHealth, theme: &crate::Theme, width: usize) -> Vec<Line<'s
             Some("since the last break"),
         ),
         Line::from(""),
-        heading("WHAT DID NOT", theme),
+        section("what did not", "", width, theme),
         row("interruptions", grouped(h.gaps), Some("runs broken")),
         // The floor is stated on the line it qualifies rather than in a footnote
         // somewhere else: the driver reports that samples went, never how many,
@@ -142,20 +150,68 @@ fn lines(h: &NetDecodeHealth, theme: &crate::Theme, width: usize) -> Vec<Line<'s
             Some("of 4, last window"),
         ),
         Line::from(""),
-        heading("WHAT WAS DECODED", theme),
-        // Not a zero. A zero on this line would say we looked and found nothing,
-        // and nothing looks yet. See the module header. Drawn through the same
-        // row builder as everything else, so its note obeys the same rule: this
-        // one was hand-built and was the only note on the panel that truncated.
-        count(
-            "bursts",
-            "—".to_string(),
-            theme.stale,
-            Some("no detector yet"),
+        section("what was decoded", "", width, theme),
+    ];
+
+    // BLE: every trigger, and how it ended. Shown once the decoder has run this
+    // session; before that, a dash, because a zero would say it looked.
+    let f = h.ble;
+    if state.net.ble_channel.is_some() || f.triggered > 0 {
+        out.push(row(
+            "BLE triggers",
+            grouped(f.triggered),
+            Some("the detector fired"),
+        ));
+        out.push(row("CRC good", grouped(f.decoded), None));
+        out.push(row(
+            "CRC failed",
+            grouped(f.crc_failed),
+            Some("at the nominal boundary"),
+        ));
+        out.push(row(
+            "gave up",
+            grouped(f.gave_up),
+            Some("no alignment passed"),
+        ));
+    } else {
+        out.push(dash("BLE", "not decoding"));
+    }
+
+    // Classic: hits, and how many of the piconets they came from have a UAP.
+    if !state.net.bt_channels_watched.is_empty() || h.bt_hits > 0 {
+        let resolved = state.net.bt_uap.values().filter(|c| c.len() == 1).count();
+        out.push(row("BT hits", grouped(h.bt_hits), Some("access codes")));
+        out.push(row(
+            "UAPs resolved",
+            format!("{resolved} of {}", state.net.bt_uap.len()),
+            Some("piconets named"),
+        ));
+    } else {
+        out.push(dash("classic BT", "not decoding"));
+    }
+
+    // What it cost: the same figure the header band shows (Stop 1.3), red
+    // above the stream's own pace, where the worker is falling behind.
+    out.push(match h.decode_load {
+        Some(load) => count(
+            "decode load",
+            format!("{:.0} %", load * 100.0),
+            if load > 1.0 {
+                theme.status_crit
+            } else {
+                theme.value
+            },
+            (load > 1.0).then_some("falling behind"),
             theme,
             width,
         ),
-    ]
+        None => dash("decode load", "not measured yet"),
+    });
+
+    // Not a zero. A zero on this line would say we looked and found nothing,
+    // and nothing looks yet. See the module header.
+    out.push(dash("bursts", "no detector yet"));
+    out
 }
 
 impl Panel for NetDecodeHealthPanel {
@@ -187,7 +243,10 @@ impl Panel for NetDecodeHealthPanel {
         if inner.width == 0 || inner.height == 0 {
             return;
         }
-        let lines = lines(&state.net.health, theme, inner.width as usize);
+        let mut lines = lines(state, theme, inner.width as usize);
+        // Breathe like the Lab panels: the blank rows between the three
+        // accounts grow on a tall panel and go first on a short one.
+        fit_spacers(&mut lines, inner.height as usize);
         f.render_widget(Paragraph::new(lines), inner);
     }
 }
@@ -242,6 +301,56 @@ mod tests {
         assert!(bursts.contains("no detector yet"), "{bursts}");
     }
 
+    /// **The funnels, once the decoders have run.** BLE: triggers and how
+    /// each ended; classic: hits and the piconets whose UAP is resolved; and
+    /// what it all cost, red above the stream's own pace.
+    #[test]
+    fn the_decode_funnels_reach_the_screen() {
+        let mut m = streaming();
+        m.net.ble_channel = Some(37);
+        m.net.health.ble = crate::signal::ble::receive::Funnel {
+            triggered: 1_204,
+            decoded: 951,
+            crc_failed: 3,
+            gave_up: 250,
+        };
+        m.net.bt_channels_watched = vec![38, 39, 40];
+        m.net.health.bt_hits = 312;
+        m.net.bt_uap.insert(0x9e8b33, vec![0x47]);
+        m.net.bt_uap.insert(0x123456, vec![0x10, 0x90]);
+        m.net.health.decode_load = Some(1.07);
+        let out = draw(NetDecodeHealthPanel, 64, 30, &m).join("\n");
+        let line = |label: &str| {
+            out.lines()
+                .find(|l| l.contains(label))
+                .unwrap_or_else(|| panic!("{label}:\n{out}"))
+                .to_string()
+        };
+        assert!(line("BLE triggers").contains("1 204"), "{out}");
+        assert!(line("CRC good").contains("951"), "{out}");
+        assert!(line("gave up").contains("250"), "{out}");
+        assert!(line("BT hits").contains("312"), "{out}");
+        assert!(line("UAPs resolved").contains("1 of 2"), "{out}");
+        assert!(line("decode load").contains("107 %"), "{out}");
+        assert!(line("decode load").contains("falling behind"), "{out}");
+        // Still true, still said.
+        assert!(line("bursts").contains("no detector yet"), "{out}");
+    }
+
+    /// A decoder that has not run this session is a dash, never a zero.
+    #[test]
+    fn a_decoder_that_never_ran_is_a_dash_not_a_zero() {
+        let out = draw(NetDecodeHealthPanel, 64, 30, &streaming()).join("\n");
+        for label in ["BLE", "classic BT", "decode load"] {
+            let row = out
+                .lines()
+                .find(|l| l.trim_start_matches(['│', ' ']).starts_with(label))
+                .unwrap_or_else(|| panic!("{label}:\n{out}"));
+            assert!(row.contains('—'), "{row}");
+            assert!(!row.contains('0'), "{row}");
+        }
+    }
+
     /// A radio that has delivered nothing says nothing, and the chrome carries
     /// the reason.
     #[test]
@@ -261,12 +370,19 @@ mod tests {
     /// detector is r". Anchored to the end of the line's content instead.
     #[test]
     fn it_fits_every_size_the_layout_can_hand_it() {
-        const NOTES: [&str; 5] = [
+        const NOTES: [&str; 12] = [
             "since the last break",
             "runs broken",
             "a floor",
             "never reached a decoder",
             "no detector yet",
+            "the detector fired",
+            "at the nominal boundary",
+            "no alignment passed",
+            "access codes",
+            "piconets named",
+            "not decoding",
+            "not measured yet",
         ];
         for w in 20..90u16 {
             for h in 4..24u16 {

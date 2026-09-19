@@ -501,6 +501,12 @@ pub struct NetDecodeHealth {
     /// Foundation design 12.4 makes this a displayed number rather than a
     /// hidden one: every decoder added to the worker spends from it.
     pub decode_load: Option<f64>,
+    /// The BLE decode funnel since the section opened
+    /// (`signal::ble::receive::Funnel`): triggers, and how each one ended.
+    pub ble: crate::signal::ble::receive::Funnel,
+    /// Classic access-code hits since the section opened, every one, where
+    /// `bt_hops` keeps only the latest few hundred.
+    pub bt_hits: u64,
 }
 
 /// How many recent PDUs [`NetState::ble_packets`] keeps. A bench instrument
