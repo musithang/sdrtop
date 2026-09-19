@@ -23,4 +23,5 @@ pub mod gate;
 pub mod occupancy;
 pub mod scan;
 pub mod survey;
+pub mod vendor;
 pub mod worker;
