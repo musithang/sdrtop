@@ -84,7 +84,14 @@ pub(super) fn net_capability(key: KeyEvent, ctx: &mut InputCtx<'_>) -> KeyAction
 }
 
 /// The occupancy profile: a cursor across the band, one megahertz cell at a
-/// time, and `B` to put it on the busiest cell (the headline it replaces).
+/// time, `B` to put it on the busiest cell (the headline it replaces), and `L`
+/// to lock the receiver where the cursor stands.
+///
+/// **`L` only asks.** It switches NET to lock and leaves the target
+/// (`survey::lock_target`: off the cell's centre, or a BLE advertising
+/// channel's exact centre) in `NetState::lock_at`; the survey task, the one
+/// place NET retunes from, applies it and logs where the radio went and why.
+/// Refused, with the reason, in observer mode or with no cursor set.
 ///
 /// Moves through every cell, observed or not, because a cell nobody looked at
 /// is a place on the band too, and its readout says so.
@@ -94,6 +101,30 @@ pub(super) fn net_occupancy(key: KeyEvent, ctx: &mut InputCtx<'_>) -> KeyAction 
     match key.code {
         KeyCode::Left => m.net.band_cursor.move_by(&cells, -1),
         KeyCode::Right => m.net.band_cursor.move_by(&cells, 1),
+        KeyCode::Char('l') => {
+            let Some(cell) = m.net.band_cursor.selected else {
+                m.push_log(
+                    "Lock: put the cursor on a cell first (\u{2190}\u{2192} or B)".to_string(),
+                );
+                return KeyAction::Continue;
+            };
+            if ctx.device.is_none() {
+                m.push_log("Lock: no radio to retune in observer mode".to_string());
+                return KeyAction::Continue;
+            }
+            let target = crate::signal::net::survey::lock_target(cell);
+            m.push_log(format!(
+                "NET locking for {} MHz",
+                crate::signal::net::occupancy::cell_centre_hz(cell) / 1_000_000
+            ));
+            if m.net.mode != crate::state::NetMode::Lock {
+                m.net.mode = crate::state::NetMode::Lock;
+                // The same restart the `m` key makes: survey and lock are
+                // different regimes for how often a megahertz is watched.
+                m.net.band.restart_watch();
+            }
+            m.net.lock_at = Some(target);
+        }
         KeyCode::Char('b') => {
             let busiest = m
                 .net
@@ -473,6 +504,63 @@ mod tests {
             metrics(&state).net.band_scrub,
             None,
             "forward past the newest is now"
+        );
+    }
+
+    /// `L` locks where the cursor stands, by asking: the mode goes to lock
+    /// and the target waits in `lock_at` for the survey task. With no cursor,
+    /// or no radio, it says why and asks nothing.
+    #[test]
+    fn l_asks_for_a_lock_where_the_cursor_stands() {
+        let state = Arc::new(Mutex::new(SdrMetrics::fixture().streaming()));
+        let concrete = Arc::new(Tuner {
+            caps: crate::hardware::native::hackrf::caps(),
+            calls: Mutex::new(Vec::new()),
+        });
+        let tuner: Arc<dyn crate::hardware::SdrDevice> = concrete.clone();
+        let mut engine = LayoutEngine::new(
+            crate::config::LayoutConfig::default_config(),
+            PanelRegistry::new(),
+        );
+        let mut show_footer = true;
+        let focus_keys = HashMap::new();
+        let mut press = |device: Option<&Arc<dyn crate::hardware::SdrDevice>>| {
+            let mut ctx = InputCtx {
+                state: &state,
+                device,
+                engine: &mut engine,
+                show_footer: &mut show_footer,
+                focus_keys: &focus_keys,
+            };
+            net_occupancy(
+                KeyEvent::new(KeyCode::Char('l'), KeyModifiers::NONE),
+                &mut ctx,
+            );
+        };
+
+        press(Some(&tuner));
+        assert!(
+            log(&state).contains("put the cursor on a cell first"),
+            "{}",
+            log(&state)
+        );
+        assert!(metrics(&state).net.lock_at.is_none());
+
+        metrics(&state).net.band_cursor.selected = Some(41);
+        press(None);
+        assert!(log(&state).contains("observer mode"), "{}", log(&state));
+        assert!(metrics(&state).net.lock_at.is_none());
+
+        press(Some(&tuner));
+        let m = metrics(&state);
+        assert_eq!(m.net.mode, crate::state::NetMode::Lock);
+        assert_eq!(
+            m.net.lock_at,
+            Some(crate::signal::net::survey::lock_target(41))
+        );
+        assert!(
+            concrete.calls.lock().unwrap().is_empty(),
+            "the key asks; the survey task tunes"
         );
     }
 }

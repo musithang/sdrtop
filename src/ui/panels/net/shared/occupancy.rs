@@ -549,6 +549,7 @@ impl Panel for NetOccupancyPanel {
         &[
             ("\u{2190}\u{2192}", "move the cursor 1 MHz"),
             ("B", "cursor to the busiest cell"),
+            ("L", "lock the receiver here"),
         ]
     }
 

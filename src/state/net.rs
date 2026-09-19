@@ -229,12 +229,22 @@ impl AddressBook {
 }
 
 /// Where the radio belongs once the survey gives the tuner back.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct NetExit {
     pub tune_hz: u64,
     /// Whether the radio stays where the pass left it, rather than going back
     /// where the survey found it.
     pub locked: bool,
+    /// Why there, when it was the occupancy cursor's `L` that chose it.
+    pub why: Option<String>,
+}
+
+/// A lock the occupancy cursor asked for (`signal::net::survey::lock_target`):
+/// the frequency and the sentence the log gives for it.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct LockTarget {
+    pub tune_hz: u64,
+    pub why: String,
 }
 
 #[derive(Clone, Debug, Default)]
@@ -343,6 +353,12 @@ pub struct NetState {
     pub address_display: AddressDisplay,
     /// The session's masked numbers. See [`AddressBook`].
     pub address_book: AddressBook,
+    /// A lock the occupancy cursor's `L` asked for and the survey task has not
+    /// applied yet. **The task applies it**, as the survey's hand-back when a
+    /// survey is running (`Self::end`) or on its next idle poll when the radio
+    /// is already locked, so NET has one path that retunes the radio, never a
+    /// second one behind the survey's back.
+    pub lock_at: Option<LockTarget>,
     /// The Survey's time cursor: the identity of the history column it is on
     /// (`BandOccupancy::columns_taken`), `None` for now. Shared by both halves
     /// of the instrument: the heatmap moves it, the profile shows that moment.
@@ -402,14 +418,25 @@ impl NetState {
     pub fn end(&mut self, tuned_hz: u64) -> NetExit {
         let pre = self.pre_survey_hz.take();
         if self.mode == NetMode::Lock {
-            NetExit {
-                tune_hz: tuned_hz,
-                locked: true,
+            // Locked by the cursor: where it asked for, not the hop the pass
+            // happened to be on.
+            match self.lock_at.take() {
+                Some(target) => NetExit {
+                    tune_hz: target.tune_hz,
+                    locked: true,
+                    why: Some(target.why),
+                },
+                None => NetExit {
+                    tune_hz: tuned_hz,
+                    locked: true,
+                    why: None,
+                },
             }
         } else {
             NetExit {
                 tune_hz: pre.unwrap_or(tuned_hz),
                 locked: false,
+                why: None,
             }
         }
     }
@@ -839,6 +866,33 @@ impl BandOccupancy {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A lock the cursor asked for is where the survey hands the tuner back,
+    /// with its reason; without one, a lock stays where the pass left it.
+    #[test]
+    fn a_cursor_lock_is_where_the_survey_hands_the_tuner_back() {
+        let mut net = NetState {
+            mode: NetMode::Lock,
+            pre_survey_hz: Some(100_000_000),
+            ..Default::default()
+        };
+        net.lock_at = Some(LockTarget {
+            tune_hz: 2_442_500_000,
+            why: "clear of DC".to_string(),
+        });
+        let exit = net.end(2_437_000_000);
+        assert_eq!(exit.tune_hz, 2_442_500_000);
+        assert!(exit.locked);
+        assert_eq!(exit.why.as_deref(), Some("clear of DC"));
+        assert!(net.lock_at.is_none(), "taken, not left to be applied twice");
+
+        let mut net = NetState {
+            mode: NetMode::Lock,
+            ..Default::default()
+        };
+        let exit = net.end(2_437_000_000);
+        assert_eq!((exit.tune_hz, exit.why), (2_437_000_000, None));
+    }
 
     /// **A column keeps its identity while the history scrolls under it.**
     /// A new column pushes it one step further back, the same id finds the

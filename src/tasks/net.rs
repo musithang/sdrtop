@@ -37,6 +37,14 @@ use crate::state::{NetMode, SdrMetrics};
 /// How often to look again when there is nothing to do.
 const IDLE_POLL: Duration = Duration::from_millis(100);
 
+/// `NET locked to 2442.500 MHz`, and why there when the cursor chose it.
+fn locked_line(tune_hz: u64, why: Option<&str>) -> String {
+    match why {
+        Some(why) => format!("NET locked to {:.3} MHz: {why}", tune_hz as f64 / 1e6),
+        None => format!("NET locked to {:.3} MHz", tune_hz as f64 / 1e6),
+    }
+}
+
 pub fn spawn_net_survey_task(state: Arc<Mutex<SdrMetrics>>, device: Arc<dyn SdrDevice>) {
     tokio::spawn(async move {
         let mut surveying = false;
@@ -83,13 +91,35 @@ pub fn spawn_net_survey_task(state: Arc<Mutex<SdrMetrics>>, device: Arc<dyn SdrD
                     let mut m = state.lock().unwrap_or_else(|e| e.into_inner());
                     m.radio.frequency = exit.tune_hz;
                     m.push_log(if exit.locked {
-                        format!("NET locked to {:.3} MHz", exit.tune_hz as f64 / 1e6)
+                        locked_line(exit.tune_hz, exit.why.as_deref())
                     } else {
                         format!(
                             "NET survey stopped, back to {:.3} MHz",
                             exit.tune_hz as f64 / 1e6
                         )
                     });
+                }
+                // A lock the cursor asked for while the radio was already
+                // locked: no survey to hand back, so it is applied here, the
+                // one place NET retunes from.
+                let pending = {
+                    let mut m = state.lock().unwrap_or_else(|e| e.into_inner());
+                    if m.net.mode == NetMode::Lock {
+                        m.net.lock_at.take()
+                    } else {
+                        None
+                    }
+                };
+                if let Some(target) = pending {
+                    let result = device.set_frequency(target.tune_hz);
+                    let mut m = state.lock().unwrap_or_else(|e| e.into_inner());
+                    match result {
+                        Ok(()) => {
+                            m.radio.frequency = target.tune_hz;
+                            m.push_log(locked_line(target.tune_hz, Some(&target.why)));
+                        }
+                        Err(e) => m.push_log(format!("NET lock refused by the radio: {e}")),
+                    }
                 }
                 tokio::time::sleep(IDLE_POLL).await;
                 continue;
@@ -310,5 +340,72 @@ mod tests {
         // Refused once more, and it is said again.
         apply_refusal(&mut m, &why, logged);
         assert!(m.ui.log.len() > said);
+    }
+
+    /// A radio that records where it was tuned.
+    struct Recorder {
+        caps: crate::hardware::DeviceCapabilities,
+        tuned: Mutex<Vec<u64>>,
+    }
+
+    impl SdrDevice for Recorder {
+        fn capabilities(&self) -> &crate::hardware::DeviceCapabilities {
+            &self.caps
+        }
+        fn info(&self) -> crate::hardware::DeviceInfo {
+            crate::hardware::DeviceInfo::default()
+        }
+        fn start_rx(&self, _: Arc<crate::hardware::RxContext>) -> anyhow::Result<()> {
+            Ok(())
+        }
+        fn stop_rx(&self) -> anyhow::Result<()> {
+            Ok(())
+        }
+        fn is_streaming(&self) -> bool {
+            false
+        }
+        fn set_frequency(&self, hz: u64) -> anyhow::Result<()> {
+            self.tuned.lock().unwrap().push(hz);
+            Ok(())
+        }
+        fn set_sample_rate(&self, hz: f64) -> anyhow::Result<crate::hardware::RateSet> {
+            Ok(crate::hardware::RateSet::new(hz, Some(hz), 0))
+        }
+        fn set_lna_gain(&self, _: u32) -> anyhow::Result<()> {
+            Ok(())
+        }
+    }
+
+    /// **A lock asked for while already locked is applied by the task**, the
+    /// one place NET retunes from: the radio goes to the target, the tuning
+    /// record follows, the request is consumed, and the log says why there.
+    #[tokio::test]
+    async fn the_task_applies_a_lock_asked_for_while_already_locked() {
+        let mut m = SdrMetrics::fixture();
+        m.ui.section = crate::signal::net::SECTION.to_string();
+        m.net.mode = NetMode::Lock;
+        let target = crate::signal::net::survey::lock_target(41);
+        m.net.lock_at = Some(target.clone());
+        let state = Arc::new(Mutex::new(m));
+        let radio = Arc::new(Recorder {
+            caps: crate::hardware::native::hackrf::caps(),
+            tuned: Mutex::new(Vec::new()),
+        });
+        spawn_net_survey_task(Arc::clone(&state), radio.clone());
+
+        let deadline = std::time::Instant::now() + Duration::from_secs(2);
+        while state.lock().unwrap().net.lock_at.is_some() {
+            assert!(std::time::Instant::now() < deadline, "never applied");
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+        assert_eq!(*radio.tuned.lock().unwrap(), vec![target.tune_hz]);
+        let m = state.lock().unwrap();
+        assert_eq!(m.radio.frequency, target.tune_hz);
+        let log: Vec<String> = m.ui.log.iter().map(|e| e.text.to_string()).collect();
+        assert!(
+            log.iter()
+                .any(|l| l.contains("NET locked to") && l.contains("clear of the radio's own DC")),
+            "{log:?}"
+        );
     }
 }

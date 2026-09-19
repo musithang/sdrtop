@@ -56,11 +56,12 @@ pub struct NetCoexistPanel;
 const AXIS_ROWS: u16 = 2;
 
 /// The canvas: `rows` character rows, two moments each (a half block's upper
-/// and lower halves), newest at the top, each moment folded into `width`
-/// columns by the band axis. A moment older than the history holds is `None`
-/// throughout, drawn as unlooked-at rather than as a quiet band.
-fn canvas(history: &[Vec<f32>], rows: usize, width: usize) -> Vec<Vec<Duty>> {
-    (0..rows * 2)
+/// and lower halves), `offset` moments back at the top (0: now), each moment
+/// folded into `width` columns by the band axis. A moment older than the
+/// history holds is `None` throughout, drawn as unlooked-at rather than as a
+/// quiet band.
+fn canvas(history: &[Vec<f32>], rows: usize, width: usize, offset: usize) -> Vec<Vec<Duty>> {
+    (offset..offset + rows * 2)
         .map(|step| {
             history
                 .len()
@@ -139,14 +140,18 @@ fn marks(state: &SdrMetrics, moments: usize, width: usize) -> Vec<(usize, usize,
 /// part only when it fits whole between the edges.
 fn footer(
     width: usize,
-    span_s: f64,
+    (top_s, bottom_s): (f64, f64),
     counts: (usize, usize),
     theme: &crate::Theme,
 ) -> Line<'static> {
     let dim = Style::default().fg(theme.label);
     let (left, right) = ("2400 MHz", "2483 MHz");
     let mut middle: Vec<Span<'static>> = Vec::new();
-    let time = format!("now at the top, {span_s:.0} s down");
+    let time = if top_s == 0.0 {
+        format!("now at the top, {bottom_s:.0} s down")
+    } else {
+        format!("{top_s:.1} s ago at the top, {bottom_s:.0} s down")
+    };
     let room = width.saturating_sub(left.len() + right.len() + 4);
     let mut used = 0;
     if time.len() <= room {
@@ -300,7 +305,17 @@ fn draw(f: &mut Frame, inner: Rect, state: &SdrMetrics, theme: &crate::Theme, ru
         return;
     }
 
-    let moments = canvas(&history, rows, width);
+    // The time cursor, and how far the canvas has to scroll to keep it in
+    // view: while it is on a moment the canvas already shows, nothing moves;
+    // past the bottom, the canvas follows it back, so the profile above and
+    // the history below always show the same moment.
+    let cursor = state
+        .net
+        .band_scrub
+        .and_then(|id| state.net.band.back_of(id));
+    let visible = rows * 2;
+    let offset = cursor.map_or(0, |b| (b + 1).saturating_sub(visible));
+    let moments = canvas(&history, rows, width, offset);
     let mut lines: Vec<Line<'static>> = moments
         .chunks(2)
         .map(|pair| row(&pair[0], &pair[1], theme))
@@ -308,7 +323,10 @@ fn draw(f: &mut Frame, inner: Rect, state: &SdrMetrics, theme: &crate::Theme, ru
 
     // The marks, each on the half of its row that is its moment, keeping that
     // half's duty colour behind it so the energy still shows.
-    let placed = marks(state, rows * 2, width);
+    let placed: Vec<(usize, usize, Proto)> = marks(state, offset + visible, width)
+        .into_iter()
+        .filter_map(|(s, x, p)| Some((s.checked_sub(offset)?, x, p)))
+        .collect();
     for &(step, x, proto) in &placed {
         let Some(span) = lines.get_mut(step / 2).and_then(|l| l.spans.get_mut(x)) else {
             continue;
@@ -327,12 +345,8 @@ fn draw(f: &mut Frame, inner: Rect, state: &SdrMetrics, theme: &crate::Theme, ru
     // The time cursor's moment, marked on the left edge of its row: outside
     // the canvas, so it hides no cell. Drawn over the frame the engine or the
     // bond already drew, one column left of the canvas.
-    if let Some(back) = state
-        .net
-        .band_scrub
-        .and_then(|id| state.net.band.back_of(id))
-    {
-        let row = back / 2;
+    if let Some(back) = cursor {
+        let row = (back - offset) / 2;
         if row < rows && inner.x > 0 {
             f.render_widget(
                 Paragraph::new(Span::styled(
@@ -353,10 +367,11 @@ fn draw(f: &mut Frame, inner: Rect, state: &SdrMetrics, theme: &crate::Theme, ru
         placed.iter().filter(|m| m.2 == Proto::Bt).count(),
     );
 
-    // How far back the bottom of the canvas reaches: the moments it holds, not
-    // the ones it has room for, so a short history says it is short.
-    let shown = history.len().min(rows * 2);
-    let span_s = shown as f64 * COLUMN_INTERVAL.as_secs_f64();
+    // How far back the top and the bottom of the canvas reach: the moments it
+    // holds, not the ones it has room for, so a short history says it is short.
+    let interval = COLUMN_INTERVAL.as_secs_f64();
+    let shown = history.len().saturating_sub(offset).min(visible);
+    let span_s = (offset as f64 * interval, (offset + shown) as f64 * interval);
     let dim = Style::default().fg(theme.label);
     if ruler {
         lines.push(Line::from(Span::styled(band_axis::ruler(width), dim)));
@@ -538,6 +553,49 @@ mod tests {
         let buf = terminal.backend().buffer();
         assert_eq!(buf.get(0, 1).symbol(), "\u{25b6}");
         assert_eq!(buf.get(0, 0).symbol(), " ");
+    }
+
+    /// **The history follows the cursor back.** Past the moments the canvas
+    /// shows, it scrolls so the cursor's moment stays in view: the cursor 50
+    /// moments back on an 18-row canvas (36 moments) puts the moment 15 back
+    /// at the top, the marker on the last row, and the footer says how old
+    /// the top is. Found by Viktor's two-metre check (Stop 3.3.d): the profile
+    /// went back and the history under it did not.
+    #[test]
+    fn the_history_scrolls_to_keep_the_cursors_moment_in_view() {
+        let theme = crate::Theme::sdr();
+        let mut columns = vec![column(0); 60];
+        // The moment 15 back: busy at cell 20 alone.
+        columns[60 - 1 - 15] = column(20);
+        let mut m = with(columns);
+        m.net.band.columns_taken = 60;
+        m.net.band_scrub = m.net.band.id_back(50);
+        let mut terminal = Terminal::new(TestBackend::new(61, 20)).unwrap();
+        terminal
+            .draw(|f| {
+                let inner = Rect {
+                    x: 1,
+                    y: 0,
+                    width: 60,
+                    height: 20,
+                };
+                NetCoexistPanel.render(f, inner, &m, &theme, false)
+            })
+            .unwrap();
+        let buf = terminal.backend().buffer();
+        let x = 1 + band_axis::column_of(20, 60) as u16;
+        assert_eq!(
+            buf.get(x, 0).style().fg,
+            Some(ink(Some(1.0), &theme)),
+            "the top is 15 back"
+        );
+        assert_eq!(
+            buf.get(0, 17).symbol(),
+            "\u{25b6}",
+            "the cursor's row is in view"
+        );
+        let footer: String = (0..61).map(|x| buf.get(x, 19).symbol()).collect();
+        assert!(footer.contains("7.5 s ago at the top"), "{footer}");
     }
 
     /// Every colour is the theme's.

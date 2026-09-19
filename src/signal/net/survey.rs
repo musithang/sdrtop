@@ -141,9 +141,78 @@ impl Plan {
     }
 }
 
+/// Where to lock the radio so the megahertz `cell` is received, and why there.
+///
+/// **Never on the cell's own centre, unless the decoder needs it.** Every
+/// tuning is blind in its own DC: the front end's leakage sits on the tuned
+/// frequency and `occupancy` drops those bins (`DC_GUARD_BINS`). Locking a cell
+/// on its centre would put the one megahertz the user asked about in that
+/// shadow. So the radio goes one cell along ([`Plan::DODGE_HZ`], the step the
+/// survey dodges its own DC with), up, or down at the top of the band.
+///
+/// **Except on a BLE advertising channel**, where the receiver decodes only when
+/// tuned to the channel's exact centre (`signal::ble::channel::channel_of`,
+/// `ble_refused` otherwise). There the centre is what locking is for, and the
+/// reason says so.
+pub fn lock_target(cell: usize) -> crate::state::LockTarget {
+    let cell = cell.min(occupancy::CELLS - 1);
+    let lo = band::LOW_HZ + cell as u64 * occupancy::CELL_HZ;
+    let hi = lo + occupancy::CELL_HZ;
+    if let Some((channel, hz)) = [37u8, 38, 39]
+        .into_iter()
+        .zip(crate::signal::ble::channel::advertising_channels_hz())
+        .find(|(_, hz)| (lo..hi).contains(hz))
+    {
+        return crate::state::LockTarget {
+            tune_hz: hz,
+            why: format!("on BLE advertising channel {channel}'s centre, where the decoder runs"),
+        };
+    }
+    let centre = occupancy::cell_centre_hz(cell);
+    let (tune_hz, side) = if centre + Plan::DODGE_HZ < band::HIGH_HZ {
+        (centre + Plan::DODGE_HZ, "above")
+    } else {
+        (centre - Plan::DODGE_HZ, "below")
+    };
+    crate::state::LockTarget {
+        tune_hz,
+        why: format!(
+            "{} MHz {side} {:.1} MHz, so the cell is clear of the radio's own DC",
+            Plan::DODGE_HZ / 1_000_000,
+            centre as f64 / 1e6
+        ),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A lock lands one cell away from the cell asked for, up or, at the top
+    /// of the band, down, so the cell is out of the tuned DC; on a BLE
+    /// advertising channel's cell it lands on the channel's exact centre.
+    #[test]
+    fn a_lock_dodges_its_own_dc_except_where_the_decoder_needs_the_centre() {
+        let t = lock_target(41);
+        assert_eq!(t.tune_hz, occupancy::cell_centre_hz(41) + Plan::DODGE_HZ);
+        assert!(t.why.contains("above 2441.5 MHz"), "{}", t.why);
+        let top = lock_target(occupancy::CELLS - 1);
+        assert_eq!(
+            top.tune_hz,
+            occupancy::cell_centre_hz(occupancy::CELLS - 1) - Plan::DODGE_HZ
+        );
+        assert!(top.why.contains("below"), "{}", top.why);
+        for (cell, ch, hz) in [
+            (2usize, 37u8, 2_402_000_000u64),
+            (26, 38, 2_426_000_000),
+            (80, 39, 2_480_000_000),
+        ] {
+            let t = lock_target(cell);
+            assert_eq!(t.tune_hz, hz, "cell {cell}");
+            assert!(t.why.contains(&format!("channel {ch}")), "{}", t.why);
+            assert_eq!(crate::signal::ble::channel::channel_of(t.tune_hz), Some(ch));
+        }
+    }
 
     /// **The one that matters.** A gap here is a stretch of band the survey
     /// reports as unobserved for ever, with nothing on screen saying why.
