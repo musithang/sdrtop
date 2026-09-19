@@ -28,10 +28,8 @@
 
 /// The band classic BT's 79 channels cover exactly.
 pub const LOW_HZ: u64 = 2_402_000_000;
-/// No consumer from `main` yet - `LOW_HZ`'s own pairing, kept for the same
-/// reason `signal::ble::channel::HIGH_HZ` is: the band's own upper edge, for
-/// whichever future reader needs it stated rather than recomputed.
-#[allow(dead_code)]
+/// The band's upper edge, `LOW_HZ`'s pairing: the classic grid's span on the
+/// Capability panel's band ruler (`ui::panels::net::shared::capability`).
 pub const HIGH_HZ: u64 = 2_480_000_000;
 
 /// Every channel is this far from its neighbour, and (unlike BLE) this is

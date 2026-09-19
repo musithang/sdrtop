@@ -22,21 +22,29 @@ use ratatui::{
     Frame,
 };
 
-use crate::signal::net::gate::{admits, reaches_band, Phy, HIGHEST_CENTRE_HZ, LOWEST_CENTRE_HZ};
+use crate::signal::net::gate::{admits, Phy, HIGHEST_CENTRE_HZ, LOWEST_CENTRE_HZ};
 use crate::state::SdrMetrics;
 use crate::ui::panel::{Panel, PanelChrome, Staleness};
 
 pub struct NetCapabilityPanel;
 
-/// Label column width, so the four facts line up under each other.
-const LABEL: usize = 10;
+mod span;
 
-fn fact<'a>(label: &str, value: String, note: Option<String>, theme: &crate::Theme) -> Line<'a> {
+/// Label column width, so every `label value` row on the panel lines up.
+const LABEL: usize = 9;
+
+/// `LABEL    value   note`, the note drawn only when all of it fits in `iw`.
+fn fact<'a>(
+    label: &str,
+    value: String,
+    note: Option<String>,
+    iw: usize,
+    theme: &crate::Theme,
+) -> Line<'a> {
+    let used = LABEL + 1 + value.chars().count();
+    let note = note.filter(|n| used + 3 + n.chars().count() <= iw);
     let mut spans = vec![
-        Span::styled(
-            format!("{:<LABEL$}", label),
-            Style::default().fg(theme.label),
-        ),
+        crate::ui::chrome::field(label, LABEL, theme),
         Span::styled(value, Style::default().fg(theme.value)),
     ];
     if let Some(note) = note {
@@ -102,43 +110,34 @@ impl Panel for NetCapabilityPanel {
         let caps = &state.caps;
         let mut lines = Vec::new();
 
+        let iw = inner.width as usize;
+        lines.extend(span::lines(caps, iw, theme));
+        // What `signal::net::gate` actually holds the tuner to: every centre
+        // the section tunes to, which is narrower than the ISM band drawn above.
         lines.push(fact(
-            "BAND",
+            "NEEDS",
             format!(
                 "{:.3} to {:.3} MHz",
                 LOWEST_CENTRE_HZ as f64 / 1e6,
                 HIGHEST_CENTRE_HZ as f64 / 1e6
             ),
-            None,
+            Some("every centre NET tunes to".to_string()),
+            iw,
             theme,
         ));
-        lines.push(fact(
-            "TUNER",
-            format!(
-                "{:.3} to {:.3} MHz",
-                caps.freq_min_hz as f64 / 1e6,
-                caps.freq_max_hz as f64 / 1e6
-            ),
-            Some(
-                if reaches_band(caps) {
-                    "covers the band"
-                } else {
-                    "does not cover the band"
-                }
-                .to_string(),
-            ),
-            theme,
-        ));
+        lines.push(Line::from(""));
         lines.push(fact(
             "RATE",
             format!("{:.3} Msps ceiling", caps.sample_rate_max_hz / 1e6),
             None,
+            iw,
             theme,
         ));
         lines.push(fact(
             "SAMPLES",
             format!("{} bit", caps.sample_geometry.bits()),
             None,
+            iw,
             theme,
         ));
 
