@@ -193,11 +193,19 @@ impl Load {
 fn census_from_ble(
     devices: &mut Vec<crate::signal::net::census::Device>,
     p: &crate::signal::ble::pdu::Packet,
+    channel: u8,
     now: Instant,
 ) {
     if p.crc_ok {
         if let Some(addr) = p.adv_addr {
-            crate::signal::net::census::observe(devices, addr, p.snr_db, p.freq_offset_hz, now);
+            // In ppm of the channel it was heard on, so readings from all three
+            // advertising channels can be combined: see `Device::crystal_offset_ppm`.
+            let carrier = crate::signal::ble::channel::centre_hz(channel);
+            let ppm = p
+                .freq_offset_hz
+                .zip(carrier)
+                .map(|(hz, c)| crate::state::offset_ppm(hz, c as f64));
+            crate::signal::net::census::observe(devices, addr, p.snr_db, ppm, now);
         }
     }
 }
@@ -391,7 +399,7 @@ impl NetWorker {
                                 m.net.ble_channel_packets[i] += packets.len() as u64;
                             }
                             for p in packets {
-                                census_from_ble(&mut m.net.census.devices, &p, now);
+                                census_from_ble(&mut m.net.census.devices, &p, ch, now);
                                 m.net.ble_packets.push_front(BlePacket {
                                     channel: ch,
                                     pdu_type: p.pdu_type,
@@ -1008,7 +1016,7 @@ mod tests {
         let mut packet = crate::signal::ble::pdu::decode(&[false; 40]).unwrap();
         packet.crc_ok = false;
         packet.adv_addr = Some([1, 2, 3, 4, 5, 6]);
-        census_from_ble(&mut devices, &packet, Instant::now());
+        census_from_ble(&mut devices, &packet, 37, Instant::now());
         assert!(devices.is_empty(), "{devices:?}");
     }
 
@@ -1020,9 +1028,28 @@ mod tests {
         let mut packet = crate::signal::ble::pdu::decode(&[false; 40]).unwrap();
         packet.crc_ok = true;
         packet.adv_addr = Some([1, 2, 3, 4, 5, 6]);
-        census_from_ble(&mut devices, &packet, Instant::now());
+        census_from_ble(&mut devices, &packet, 37, Instant::now());
         assert_eq!(devices.len(), 1);
         assert_eq!(devices[0].address, [1, 2, 3, 4, 5, 6]);
+    }
+
+    /// **The census keeps ppm of the channel a packet was heard on**, so one
+    /// crystal reads one number on all three advertising channels: 10 ppm is
+    /// 24.02 kHz on channel 37 (2402 MHz) and 24.80 kHz on 39 (2480 MHz).
+    /// Combined in Hz, the two would have disagreed by 3 % about one clock.
+    #[test]
+    fn one_crystal_reads_one_ppm_on_every_channel() {
+        use crate::signal::dsp::uncertainty::Uncertain;
+        let mut devices = Vec::new();
+        let mut packet = crate::signal::ble::pdu::decode(&[false; 40]).unwrap();
+        packet.crc_ok = true;
+        packet.adv_addr = Some([1, 2, 3, 4, 5, 6]);
+        packet.freq_offset_hz = Some(Uncertain::from_sigma(24_020.0, 100.0));
+        census_from_ble(&mut devices, &packet, 37, Instant::now());
+        packet.freq_offset_hz = Some(Uncertain::from_sigma(24_800.0, 100.0));
+        census_from_ble(&mut devices, &packet, 39, Instant::now());
+        let ppm = devices[0].crystal_offset_ppm.unwrap();
+        assert!((ppm.value() - 10.0).abs() < 1e-9, "got {}", ppm.value());
     }
 
     /// A confirmed packet with no address at all - a PDU type that carries
@@ -1034,7 +1061,7 @@ mod tests {
         let mut packet = crate::signal::ble::pdu::decode(&[false; 40]).unwrap();
         packet.crc_ok = true;
         packet.adv_addr = None;
-        census_from_ble(&mut devices, &packet, Instant::now());
+        census_from_ble(&mut devices, &packet, 37, Instant::now());
         assert!(devices.is_empty(), "{devices:?}");
     }
 

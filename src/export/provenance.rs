@@ -247,6 +247,7 @@ mod tests {
             provenance: crate::state::Provenance::Traceable,
             source: "WWV 10 MHz".to_string(),
             at: now - std::time::Duration::from_secs(843),
+            efficiency: None,
         });
         let traceable = reference_line(&m, now);
         assert!(traceable.contains("traceable"), "{traceable}");

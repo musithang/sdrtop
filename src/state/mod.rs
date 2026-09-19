@@ -35,7 +35,9 @@ pub use net::{
     BLE_PACKET_LIMIT, BT_HOP_LIMIT, COLUMN_INTERVAL, HISTORY_COLUMNS,
 };
 pub use observer::ObserverState;
-pub use radio::{FrequencyReference, Provenance, RadioState, REFERENCE_STALE_S};
+pub use radio::{
+    offset_ppm, FrequencyReference, OffsetBasis, Provenance, RadioState, REFERENCE_STALE_S,
+};
 pub use selection::Selection;
 pub use signal::{
     acpr_offset_hz, classify, Modulation, SignalState, ADC_COMFORT_DBFS, CLASSIFY_MIN_SNR_DB,

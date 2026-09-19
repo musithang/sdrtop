@@ -461,6 +461,73 @@ mod tests {
         assert!(checked >= 5, "only {checked} net panels were checked");
     }
 
+    /// **Every NET panel that prints a ppm declares that it shows offsets**, so
+    /// the engine can say what they are worth (`Tag::Offsets`: relative,
+    /// traceable, or a reference that has expired). A ppm on screen without
+    /// that tag is an absolute-looking number that may be our own oscillator's
+    /// error in disguise, which is the claim `net-ux-polish-plan` 1.5.b exists
+    /// to stop. Checked by rendering, against a state where every panel has an
+    /// offset to show, rather than by a list of names the next panel would not
+    /// be on. And the other way round: a panel that declares offsets and prints
+    /// none carries a tag about numbers that are not there.
+    #[test]
+    fn every_net_panel_showing_a_ppm_says_what_it_is_worth() {
+        use crate::signal::dsp::uncertainty::Uncertain;
+        use crate::state::{BlePacket, SdrMetrics};
+
+        let (engine, _) = App::build_ui("net", &HashMap::new(), None, true);
+        let now = std::time::Instant::now();
+        let mut m = SdrMetrics::fixture().streaming();
+        m.net.ble_channel = Some(37);
+        m.net.ble_packets.push_front(BlePacket {
+            channel: 37,
+            pdu_type: crate::signal::ble::pdu::PduType::AdvInd,
+            tx_add_random: false,
+            length: 20,
+            adv_addr: Some([1, 2, 3, 4, 5, 6]),
+            crc_ok: true,
+            snr_db: Some(12.0),
+            freq_offset_hz: Some(Uncertain::from_sigma(24_020.0, 500.0)),
+            modulation: None,
+            drift: None,
+            seen: now,
+        });
+        crate::signal::net::census::observe(
+            &mut m.net.census.devices,
+            [1, 2, 3, 4, 5, 6],
+            Some(12.0),
+            Some(Uncertain::from_sigma(10.0, 0.2)),
+            now,
+        );
+
+        let theme = crate::Theme::sdr();
+        let mut checked = 0;
+        for panel in engine.registered_panels() {
+            if !panel.name().starts_with("net_") {
+                continue;
+            }
+            let backend = ratatui::backend::TestBackend::new(140, 30);
+            let mut terminal = ratatui::Terminal::new(backend).unwrap();
+            terminal
+                .draw(|f| panel.render(f, f.size(), &m, &theme, false))
+                .unwrap();
+            let buffer = terminal.backend().buffer();
+            let text: String = buffer.content().iter().map(|c| c.symbol()).collect();
+            let prints_ppm = text.contains(" ppm");
+            let declares = panel.chrome(&m).offsets;
+            if prints_ppm || declares {
+                checked += 1;
+            }
+            assert_eq!(
+                prints_ppm,
+                declares,
+                "{}: prints a ppm {prints_ppm}, declares offsets {declares}",
+                panel.name()
+            );
+        }
+        assert!(checked >= 2, "only {checked} net panels showed an offset");
+    }
+
     /// Two panels claiming one key must be *reported*, not silently resolved.
     ///
     /// `HashMap::insert` would drop one of them, which is exactly how `v` and `t`

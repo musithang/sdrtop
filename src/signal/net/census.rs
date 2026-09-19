@@ -45,11 +45,21 @@ pub struct Device {
     pub first_seen: Instant,
     /// When it was last heard.
     pub last_seen: Instant,
-    /// This device's own crystal error, refined ([`Uncertain::combine`])
-    /// across every packet that reported one - design section 2.5's
-    /// "crystal-error histogram" measurement, per device. `None` until at
-    /// least one packet from this device has reported a frequency offset.
-    pub crystal_offset_hz: Option<Uncertain>,
+    /// This device's own crystal error in ppm, refined
+    /// ([`Uncertain::combine`]) across every packet that reported one -
+    /// design section 2.5's "crystal-error histogram" measurement, per
+    /// device. `None` until at least one packet from this device has
+    /// reported a frequency offset.
+    ///
+    /// **As the air delivered it: their error minus ours**, never corrected
+    /// here. A reference can be captured, or expire, while the row lives;
+    /// storing the raw figure and correcting on the way to the screen
+    /// (`RadioState::corrected_ppm`) keeps every packet already folded in
+    /// right either way. **ppm, not Hz**, because a device advertises on
+    /// three channels 78 MHz apart and the same crystal reads 3 % more Hz
+    /// on the highest than the lowest; Hz from different channels cannot be
+    /// combined, ppm can.
+    pub crystal_offset_ppm: Option<Uncertain>,
 }
 
 impl Device {
@@ -79,14 +89,23 @@ pub const SORT_KEYS: &[&str] = &["ADDRESS", "SEEN", "PKTS", "SNR", "CFO"];
 /// section 2.5's own "sorted by how bad its clock is" - so the key is the
 /// *magnitude* of the offset. A device with no CFO measurement yet sorts
 /// last regardless of direction: rule 2 refuses to rank an absent reading
-/// as if it were a good one.
-pub fn order(devices: &mut [Device], sort: usize, descending: bool, now: Instant) {
+/// as if it were a good one. The magnitude is of the offset as the panel
+/// shows it, corrected through `radio` when a reference allows: our own
+/// error shifts every device the same way, so ranking the raw figures
+/// would put a clock that is dead on below one that happens to cancel ours.
+pub fn order(
+    devices: &mut [Device],
+    sort: usize,
+    descending: bool,
+    now: Instant,
+    radio: &crate::state::RadioState,
+) {
     devices.sort_by(|a, b| {
         // CFO's "absent sorts last" is not reversed by `descending` - only
         // the ordering *between two measured* devices is - so it is kept
         // out of the generic reversal below rather than folded into it.
         let key = if sort == 4 {
-            cfo_key(a, b, descending)
+            cfo_key(a, b, descending, |u| radio.corrected_ppm(u, now).0.value())
         } else {
             let key = match sort {
                 1 => now
@@ -109,8 +128,13 @@ pub fn order(devices: &mut [Device], sort: usize, descending: bool, now: Instant
 /// The CFO sort key: by magnitude between two measured devices, reversed
 /// when `descending` asks for worst-first, but a device with no measurement
 /// yet sorts last either way - see [`order`]'s own doc for why.
-fn cfo_key(a: &Device, b: &Device, descending: bool) -> std::cmp::Ordering {
-    let mag = |d: &Device| d.crystal_offset_hz.map(|u| u.value().abs());
+fn cfo_key(
+    a: &Device,
+    b: &Device,
+    descending: bool,
+    corrected: impl Fn(Uncertain) -> f64,
+) -> std::cmp::Ordering {
+    let mag = |d: &Device| d.crystal_offset_ppm.map(|u| corrected(u).abs());
     match (mag(a), mag(b)) {
         (Some(x), Some(y)) => {
             let cmp = x.total_cmp(&y);
@@ -131,7 +155,7 @@ fn cfo_key(a: &Device, b: &Device, descending: bool) -> std::cmp::Ordering {
 ///
 /// **`snr_db` replaces the stored reading only when it is stronger** - the
 /// "best it has been heard" the field's own name promises, not the most
-/// recent. **`crystal_offset_hz` is refined, not replaced** -
+/// recent. **`crystal_offset_ppm` is refined, not replaced** -
 /// [`Uncertain::combine`] folds a new packet's own CFO reading into
 /// whatever this device's estimate already was, the same way more samples
 /// tighten any other measurement in this app, rather than keeping only the
@@ -140,7 +164,7 @@ pub fn observe(
     devices: &mut Vec<Device>,
     address: [u8; 6],
     snr_db: Option<f64>,
-    crystal_offset_hz: Option<Uncertain>,
+    crystal_offset_ppm: Option<Uncertain>,
     now: Instant,
 ) {
     let device = match devices.iter_mut().find(|d| d.address == address) {
@@ -152,7 +176,7 @@ pub fn observe(
                 best_snr_db: f32::NEG_INFINITY,
                 first_seen: now,
                 last_seen: now,
-                crystal_offset_hz: None,
+                crystal_offset_ppm: None,
             });
             devices.last_mut().expect("just pushed")
         }
@@ -162,8 +186,8 @@ pub fn observe(
     if let Some(snr) = snr_db {
         device.best_snr_db = device.best_snr_db.max(snr as f32);
     }
-    if let Some(offset) = crystal_offset_hz {
-        device.crystal_offset_hz = Some(match device.crystal_offset_hz {
+    if let Some(offset) = crystal_offset_ppm {
+        device.crystal_offset_ppm = Some(match device.crystal_offset_ppm {
             Some(existing) => existing.combine(&offset),
             None => offset,
         });
@@ -204,6 +228,10 @@ mod tests {
     use super::*;
     use std::time::Duration;
 
+    fn radio() -> crate::state::RadioState {
+        crate::state::SdrMetrics::fixture().radio
+    }
+
     fn device(last: u8, packets: u64, snr: f32, ago_s: u64, now: Instant) -> Device {
         Device {
             address: [0xa4, 0x83, 0xe7, 0x1c, 0x09, last],
@@ -211,7 +239,7 @@ mod tests {
             best_snr_db: snr,
             first_seen: now - Duration::from_secs(ago_s),
             last_seen: now - Duration::from_secs(ago_s),
-            crystal_offset_hz: None,
+            crystal_offset_ppm: None,
         }
     }
 
@@ -246,19 +274,19 @@ mod tests {
         let tails = |d: &[Device]| d.iter().map(|x| x.address[5]).collect::<Vec<_>>();
 
         let mut d = make();
-        order(&mut d, 0, false, now);
+        order(&mut d, 0, false, now, &radio());
         assert_eq!(tails(&d), vec![1, 2, 3], "by address, ascending");
 
         let mut d = make();
-        order(&mut d, 1, false, now);
+        order(&mut d, 1, false, now, &radio());
         assert_eq!(tails(&d), vec![1, 3, 2], "most recently seen first");
 
         let mut d = make();
-        order(&mut d, 2, true, now);
+        order(&mut d, 2, true, now, &radio());
         assert_eq!(tails(&d), vec![1, 3, 2], "busiest first");
 
         let mut d = make();
-        order(&mut d, 3, true, now);
+        order(&mut d, 3, true, now, &radio());
         assert_eq!(tails(&d), vec![1, 2, 3], "strongest first");
     }
 
@@ -275,8 +303,8 @@ mod tests {
         ];
         let mut b = a.clone();
         b.reverse();
-        order(&mut a, 2, true, now);
-        order(&mut b, 2, true, now);
+        order(&mut a, 2, true, now, &radio());
+        order(&mut b, 2, true, now, &radio());
         let tails = |d: &[Device]| d.iter().map(|x| x.address[5]).collect::<Vec<_>>();
         assert_eq!(
             tails(&a),
@@ -292,22 +320,52 @@ mod tests {
     #[test]
     fn cfo_orders_by_magnitude_and_puts_the_unmeasured_last() {
         let now = Instant::now();
-        let with = |tail: u8, hz: f64| Device {
-            crystal_offset_hz: Some(Uncertain::exact(hz)),
+        let with = |tail: u8, ppm: f64| Device {
+            crystal_offset_ppm: Some(Uncertain::exact(ppm)),
             ..device(tail, 0, 0.0, 0, now)
         };
         let mut d = vec![
-            with(0x01, -300.0),           // worst clock, negative
+            with(0x01, -30.0),            // worst clock, negative
             device(0x02, 0, 0.0, 0, now), // unmeasured
-            with(0x03, 50.0),             // best clock
+            with(0x03, 5.0),              // best clock
         ];
         let tails = |d: &[Device]| d.iter().map(|x| x.address[5]).collect::<Vec<_>>();
 
-        order(&mut d, 4, true, now); // worst first
+        order(&mut d, 4, true, now, &radio()); // worst first
         assert_eq!(tails(&d), vec![1, 3, 2]);
 
-        order(&mut d, 4, false, now); // best first
+        order(&mut d, 4, false, now, &radio()); // best first
         assert_eq!(tails(&d), vec![3, 1, 2]);
+    }
+
+    /// **With a reference, the ranking is of the clocks, not of the
+    /// readings.** Our oscillator 10 ppm fast shifts every reading down by
+    /// ten: a device reading -10 is dead on, one reading +8 is 18 out.
+    /// Ranked raw, the perfect clock would come out worse.
+    #[test]
+    fn cfo_ranks_the_corrected_clocks_when_a_reference_allows() {
+        let now = Instant::now();
+        let with = |tail: u8, ppm: f64| Device {
+            crystal_offset_ppm: Some(Uncertain::exact(ppm)),
+            ..device(tail, 0, 0.0, 0, now)
+        };
+        let mut d = vec![with(0x01, -10.0), with(0x02, 8.0)];
+        let tails = |d: &[Device]| d.iter().map(|x| x.address[5]).collect::<Vec<_>>();
+
+        order(&mut d, 4, true, now, &radio()); // worst first, raw
+        assert_eq!(tails(&d), vec![1, 2]);
+
+        let mut referenced = radio();
+        referenced.reference = Some(crate::state::FrequencyReference {
+            ppm: 10.0,
+            sigma_ppm: 0.1,
+            provenance: crate::state::Provenance::Traceable,
+            source: "WWV 10 MHz".to_string(),
+            at: now,
+            efficiency: None,
+        });
+        order(&mut d, 4, true, now, &referenced);
+        assert_eq!(tails(&d), vec![2, 1], "the dead-on clock is the best one");
     }
 
     /// The keys and the columns are one list, so the chrome tag and the header
@@ -334,7 +392,7 @@ mod tests {
         let d = &devices[0];
         assert_eq!(d.packets, 1);
         assert_eq!(d.best_snr_db, 4.0);
-        assert_eq!(d.crystal_offset_hz.unwrap().value(), 120.0);
+        assert_eq!(d.crystal_offset_ppm.unwrap().value(), 120.0);
         assert_eq!(d.first_seen, now);
     }
 
@@ -385,7 +443,7 @@ mod tests {
         let b = Uncertain::from_sigma(140.0, 20.0);
         observe(&mut devices, addr, None, Some(a), now);
         observe(&mut devices, addr, None, Some(b), now);
-        let combined = devices[0].crystal_offset_hz.unwrap();
+        let combined = devices[0].crystal_offset_ppm.unwrap();
         let direct = a.combine(&b);
         assert_eq!(combined.value(), direct.value());
         assert_eq!(combined.sigma(), direct.sigma());

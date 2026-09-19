@@ -156,6 +156,16 @@ pub enum Tag {
     /// `[STALE]`: a caveat a panel had to remember to print is one the next
     /// panel would forget.
     FeedLoss,
+    /// `[RELATIVE]`, `[TRACEABLE]`, `[REFERENCED]` or `[RELATIVE: REF
+    /// EXPIRED]` - what the frequency offsets on this panel are worth, from
+    /// the reference the RF bench establishes (`state::RadioState::
+    /// offset_basis`). The same words its FREQUENCY REFERENCE card uses, so
+    /// one reference reads one way wherever it is shown (rule 5).
+    ///
+    /// **Never pushed by a panel**, for [`Tag::FeedLoss`]'s reason: a panel
+    /// declares that it shows offsets ([`PanelChrome::shows_offsets`]) and
+    /// the engine says what they are worth.
+    Offsets(crate::state::OffsetBasis),
 }
 
 /// The *shape* of a panel's frame. Its colour is [`FrameTone`]; the two are
@@ -263,6 +273,9 @@ pub struct PanelChrome {
     /// How far back into the sample feed this panel's numbers reach, when they
     /// come from it at all. `None` for anything the feed does not count.
     pub feed: Option<FeedSpan>,
+    /// Whether this panel shows a transmitter's frequency offset, which
+    /// earns it the engine's [`Tag::Offsets`].
+    pub offsets: bool,
 }
 
 impl PanelChrome {
@@ -276,6 +289,7 @@ impl PanelChrome {
             tags: Vec::new(),
             suffix: None,
             feed: None,
+            offsets: false,
         }
     }
 
@@ -338,11 +352,22 @@ impl PanelChrome {
         self
     }
 
+    /// Declare that this panel shows a transmitter's frequency offset, so the
+    /// engine tags it with what that offset is worth ([`Tag::Offsets`]).
+    pub fn shows_offsets(mut self) -> Self {
+        self.offsets = true;
+        self
+    }
+
     /// Add the tags the engine owns - the ones a panel declares the grounds for
     /// but never pushes itself. Called once, where the frame is drawn.
     pub fn with_engine_tags(mut self, state: &SdrMetrics) -> Self {
         if self.feed.is_some_and(|span| span.resolve(state)) {
             self.tags.push(Tag::FeedLoss);
+        }
+        if self.offsets {
+            let basis = state.radio.offset_basis(std::time::Instant::now());
+            self.tags.push(Tag::Offsets(basis));
         }
         self
     }
@@ -500,6 +525,49 @@ mod tests {
             !clean.tags.contains(&Tag::FeedLoss),
             "a clean feed caveats nothing"
         );
+    }
+
+    /// The engine says what the offsets are worth; a panel only declares that
+    /// it shows some. A panel that shows none is never tagged, reference or
+    /// not.
+    #[test]
+    fn the_engine_adds_the_offset_tag_from_the_declaration() {
+        use crate::state::{OffsetBasis, Provenance};
+        let mut m = SdrMetrics::fixture();
+        let tag = |m: &SdrMetrics| {
+            PanelChrome::new("Census")
+                .shows_offsets()
+                .with_engine_tags(m)
+                .tags
+                .into_iter()
+                .find(|t| matches!(t, Tag::Offsets(_)))
+        };
+        assert_eq!(
+            tag(&m),
+            Some(Tag::Offsets(OffsetBasis {
+                provenance: Provenance::Unreferenced,
+                expired: false
+            }))
+        );
+
+        m.radio.reference = Some(crate::state::FrequencyReference {
+            ppm: 1.0,
+            sigma_ppm: 0.1,
+            provenance: Provenance::Traceable,
+            source: "WWV 10 MHz".to_string(),
+            at: std::time::Instant::now(),
+            efficiency: None,
+        });
+        assert_eq!(
+            tag(&m),
+            Some(Tag::Offsets(OffsetBasis {
+                provenance: Provenance::Traceable,
+                expired: false
+            }))
+        );
+
+        let silent = PanelChrome::new("Capability").with_engine_tags(&m);
+        assert!(!silent.tags.iter().any(|t| matches!(t, Tag::Offsets(_))));
     }
 
     #[test]

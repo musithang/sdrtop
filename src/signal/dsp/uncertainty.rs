@@ -309,11 +309,11 @@ impl Uncertain {
 ///
 /// Infinite below two samples, where there is no frequency to estimate, and at
 /// or below zero SNR, where there is nothing to estimate it from.
-/// No consumer yet. Design section 5.4 wants this beside a frequency
-/// measurement - "the Cramer-Rao bound is the floor, and it is displayed" - and
-/// N16's reference card does not yet show it: the card states the estimator's
-/// own uncertainty but not how close that sits to the physical limit.
-#[allow(dead_code)]
+///
+/// Design section 5.4: "the Cramer-Rao bound is the floor, and it is
+/// displayed". `signal::reference::carrier_offset_hz` computes it beside its
+/// own estimate, and the RF bench's FREQUENCY REFERENCE card shows how far
+/// above it the reference sits.
 pub fn crlb_frequency(snr: f64, samples: usize) -> f64 {
     if snr.is_nan() || snr <= 0.0 || samples < 2 {
         return f64::INFINITY;
@@ -331,8 +331,6 @@ pub fn crlb_frequency(snr: f64, samples: usize) -> f64 {
 ///
 /// Above one is impossible for an unbiased estimator, so a caller seeing it has
 /// found a bug rather than a good day.
-/// No consumer yet; see [`crlb_frequency`].
-#[allow(dead_code)]
 pub fn efficiency(variance: f64, bound: f64) -> f64 {
     if variance <= 0.0 || !variance.is_finite() || !bound.is_finite() {
         return 0.0;

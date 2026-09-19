@@ -46,6 +46,29 @@ const LABEL_W: usize = 8;
 /// coarse to matter dashes rather than printing digits it has not earned.
 const RESOLUTION_PPM: f64 = 0.1;
 
+/// How close to the Cramer-Rao bound counts as "as good as this SNR allows".
+///
+/// **A policy, stated as one.** One dB of variance is about 12 % of sigma: an
+/// estimator that close has nothing worth taking back from the signal, and one
+/// further out is leaving precision on the table that a better estimator over
+/// the same samples could have had. The figure itself is always printed, so the
+/// sentence beside it is a reading aid and not the measurement.
+const EFFICIENT_DB: f64 = 1.0;
+
+/// `0.4 dB over the CRB`, and whether that is the signal's limit or ours.
+///
+/// In dB of variance, the form `dsp::uncertainty::efficiency`'s own doc argues
+/// for: "1.2 dB from the bound" is a sentence a person can act on.
+fn bound_row(efficiency: f64) -> (String, String) {
+    let db = 10.0 * (1.0 / efficiency).log10();
+    let verdict = if db <= EFFICIENT_DB {
+        "as good as this SNR allows"
+    } else {
+        "the estimator is the limit"
+    };
+    (format!("{db:.1} dB over CRB"), verdict.to_string())
+}
+
 fn colour(p: &Provenance, theme: &crate::Theme) -> Color {
     match p {
         // Not a warning. Relative readings are correct and useful; they are
@@ -126,6 +149,24 @@ pub(super) fn draw(
         theme,
     ));
 
+    // Design section 5.4: the bound is the floor, and it is displayed. Only on
+    // a live reference: an expired one is a thing to redo, not to grade.
+    if let Some(efficiency) = r.efficiency.filter(|e| !stale && *e > 0.0) {
+        let (mid, right) = bound_row(efficiency);
+        lines.push(row(
+            Row {
+                label: "LIMIT",
+                label_w: LABEL_W,
+                mid,
+                mid_col: theme.value,
+                right,
+                right_col: theme.label,
+            },
+            iw,
+            theme,
+        ));
+    }
+
     if stale {
         lines.push(hint(iw, theme));
     }
@@ -185,6 +226,7 @@ mod tests {
             provenance: Provenance::Traceable,
             source: "WWV 10 MHz".to_string(),
             at: Instant::now() - age,
+            efficiency: None,
         }
     }
 
@@ -192,7 +234,7 @@ mod tests {
         draw(RfChainPanel, 70, 40, m)
             .into_iter()
             .skip_while(|l| !l.contains("FREQUENCY REFERENCE"))
-            .take(4)
+            .take(5)
             .collect::<Vec<_>>()
             .join("\n")
     }
@@ -236,6 +278,30 @@ mod tests {
         assert!(out.contains("was TRACEABLE"), "{out}");
         assert!(out.contains("expired at 15 min"), "{out}");
         assert!(out.contains("press [Y]"), "{out}");
+    }
+
+    /// **The bound is displayed** (design 5.4), and the card says whose limit
+    /// the reference is up against: the signal's, or the estimator's.
+    #[test]
+    fn the_card_says_how_far_above_the_bound_the_reference_sits() {
+        let mut r = traceable(Duration::from_secs(10));
+        r.efficiency = Some(0.9);
+        let out = card(&with(Some(r.clone())));
+        assert!(out.contains("0.5 dB over CRB"), "{out}");
+        assert!(out.contains("as good as this SNR allows"), "{out}");
+
+        r.efficiency = Some(0.01);
+        let out = card(&with(Some(r.clone())));
+        assert!(out.contains("20.0 dB over CRB"), "{out}");
+        assert!(out.contains("the estimator is the limit"), "{out}");
+
+        // No bounded estimator, no row: nothing is claimed about a bound.
+        r.efficiency = None;
+        assert!(!card(&with(Some(r.clone()))).contains("CRB"));
+        // An expired reference is not graded.
+        let mut old = traceable(Duration::from_secs(REFERENCE_STALE_S + 60));
+        old.efficiency = Some(0.9);
+        assert!(!card(&with(Some(old))).contains("CRB"));
     }
 
     /// A reference too coarse to be worth applying dashes, rather than printing

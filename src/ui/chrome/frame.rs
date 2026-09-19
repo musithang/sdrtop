@@ -17,6 +17,7 @@ use ratatui::{
     Frame,
 };
 
+use crate::state::Provenance;
 use crate::ui::panel::{FrameStyle, PanelChrome, Tag};
 
 /// A panel frame in the schematic deck language: square corners, single rule.
@@ -319,6 +320,22 @@ pub fn title_spans(
             // are not what they would be on a clean feed, and the reader must
             // not take them at face value.
             Tag::FeedLoss => ("FEED LOSS".to_string(), theme.status_warn),
+            // The RF bench's FREQUENCY REFERENCE card's words and colours:
+            // relative is not a warning, it is a different claim.
+            // The words are `Provenance::label`'s, the ones the RF bench's
+            // FREQUENCY REFERENCE card prints, and so are the colours:
+            // relative is not a warning, it is a different claim.
+            Tag::Offsets(basis) => {
+                let word = basis.provenance.label();
+                match (basis.provenance, basis.expired) {
+                    (Provenance::Unreferenced, true) => {
+                        (format!("{word}: REF EXPIRED"), theme.stale)
+                    }
+                    (Provenance::Unreferenced, false) => (word.to_string(), theme.label),
+                    (Provenance::Referenced, _) => (word.to_string(), theme.value),
+                    (Provenance::Traceable, _) => (word.to_string(), theme.status_ok),
+                }
+            }
         };
         spans.push(Span::styled(
             format!(" [{text}]"),

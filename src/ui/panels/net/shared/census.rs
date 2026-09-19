@@ -25,7 +25,7 @@ use ratatui::{
 
 use crate::signal::dsp::uncertainty::Uncertain;
 use crate::signal::net::census::{Device, SORT_KEYS};
-use crate::state::SdrMetrics;
+use crate::state::{RadioState, SdrMetrics};
 use crate::ui::panel::{FeedSpan, Panel, PanelChrome, Staleness, Tag};
 use crate::ui::widgets::reading::Reading;
 use crate::ui::widgets::table::{
@@ -65,14 +65,17 @@ const COLUMNS: &[Column] = &[
     },
 ];
 
-/// `37.0 ±1.2 kHz` - a device's own refined crystal-error estimate
-/// ([`crate::signal::net::census::observe`]), through the same
-/// value-with-uncertainty cell every measurement in the app uses. `-`
+/// `+15.4 ±0.5 ppm` - a device's own refined crystal-error estimate
+/// ([`crate::signal::net::census::observe`]), corrected for our oscillator
+/// when a reference allows, through the same value-with-uncertainty cell
+/// every measurement in the app uses. What the number is worth is the
+/// chrome's tag, not this cell's. ppm only, no kHz beside it: a device is
+/// heard on three channels, and a kHz figure would have to pick one. `-`
 /// before any packet from this device has reported one: an absent
 /// measurement, not a zero-error clock.
-fn fmt_cfo(offset: Option<Uncertain>) -> String {
+fn fmt_cfo(offset: Option<Uncertain>, radio: &RadioState, now: std::time::Instant) -> String {
     match offset {
-        Some(u) => Reading::new(u.scale(0.001), "kHz", f64::INFINITY).text(),
+        Some(u) => Reading::new(radio.corrected_ppm(u, now).0, "ppm", f64::INFINITY).text(),
         None => "-".to_string(),
     }
 }
@@ -86,13 +89,13 @@ fn ago(secs: u64) -> String {
     }
 }
 
-fn cells(d: &Device, now: std::time::Instant) -> Vec<String> {
+fn cells(d: &Device, radio: &RadioState, now: std::time::Instant) -> Vec<String> {
     vec![
         d.address_text(),
         ago(now.saturating_duration_since(d.last_seen).as_secs()),
         d.packets.to_string(),
         format!("{:.1} dB", d.best_snr_db),
-        fmt_cfo(d.crystal_offset_hz),
+        fmt_cfo(d.crystal_offset_ppm, radio, now),
     ]
 }
 
@@ -151,6 +154,7 @@ impl Panel for NetCensusPanel {
             // Packet counts and first/last sightings accumulate for the whole
             // session, so a drop at any point in it undercounts them.
             .counts_from_feed(FeedSpan::Session)
+            .shows_offsets()
             .tag_if(true, state.net.mode.tag())
             .tag_if(
                 true,
@@ -174,7 +178,7 @@ impl Panel for NetCensusPanel {
         let census = &state.net.census;
         let now = std::time::Instant::now();
 
-        let devices: Vec<Device> = census.ordered(now);
+        let devices: Vec<Device> = census.ordered(now, &state.radio);
         let addresses: Vec<[u8; 6]> = devices.iter().map(|d| d.address).collect();
 
         let mut lines = vec![header(
@@ -218,7 +222,13 @@ impl Panel for NetCensusPanel {
             body,
         );
         for (i, d) in devices.iter().enumerate().skip(start).take(body) {
-            lines.push(row(COLUMNS, fit, &cells(d, now), Some(i) == cursor, theme));
+            lines.push(row(
+                COLUMNS,
+                fit,
+                &cells(d, &state.radio, now),
+                Some(i) == cursor,
+                theme,
+            ));
         }
         lines.push(turnover_line(&devices, now, theme));
         f.render_widget(Paragraph::new(lines), inner);
@@ -242,7 +252,7 @@ mod tests {
                 best_snr_db: 12.3,
                 first_seen: now - Duration::from_secs(600),
                 last_seen: now - Duration::from_secs(2),
-                crystal_offset_hz: Some(Uncertain::exact(85_000.0)),
+                crystal_offset_ppm: Some(Uncertain::from_sigma(35.4, 0.5)),
             },
             Device {
                 address: [0xf0, 0x18, 0x98, 0x00, 0x11, 0x22],
@@ -255,7 +265,7 @@ mod tests {
                 // of it depending on how much time the test itself takes.
                 first_seen: now - Duration::from_secs(250),
                 last_seen: now - Duration::from_secs(240),
-                crystal_offset_hz: None,
+                crystal_offset_ppm: None,
             },
             Device {
                 address: [0x00, 0x1a, 0x11, 0xaa, 0xbb, 0xcc],
@@ -263,7 +273,7 @@ mod tests {
                 best_snr_db: 6.9,
                 first_seen: now - Duration::from_secs(90),
                 last_seen: now - Duration::from_secs(31),
-                crystal_offset_hz: Some(Uncertain::exact(-12_000.0)),
+                crystal_offset_ppm: Some(Uncertain::from_sigma(-5.0, 0.5)),
             },
         ];
         m
@@ -291,8 +301,14 @@ mod tests {
     #[test]
     fn cfo_shows_when_measured_and_dashes_when_not() {
         let out = draw(NetCensusPanel, 70, 10, &populated()).join("\n");
-        assert!(out.contains("85.0"), "measured CFO should show: {out}");
-        assert!(out.contains("-12.0"), "a negative CFO should show: {out}");
+        assert!(
+            out.contains("35.4 ±0.5 ppm"),
+            "measured CFO should show: {out}"
+        );
+        assert!(
+            out.contains("-5.0 ±0.5 ppm"),
+            "a negative CFO should show: {out}"
+        );
         // The unmeasured device's row still has a dash, not a blank cell
         // that could be misread as zero.
         let f0_row = out

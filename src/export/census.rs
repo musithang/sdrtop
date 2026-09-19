@@ -14,10 +14,12 @@
 //! counted"; the sentence that says *why* nobody was counted belongs in the
 //! provenance header, where a reader six months later will look.
 
-use crate::signal::net::census::order;
 use crate::state::SdrMetrics;
 
-pub const HEADER: &str = "address,packets,best_snr_db,crystal_offset_hz,first_seen_s,last_seen_s";
+/// `crystal_offset_ppm` is corrected for our oscillator exactly as the panel
+/// shows it, and the provenance header's `reference` line says what it is
+/// worth: relative without a reference, absolute with one.
+pub const HEADER: &str = "address,packets,best_snr_db,crystal_offset_ppm,first_seen_s,last_seen_s";
 
 /// The census as CSV rows, in the order the panel is showing it.
 ///
@@ -25,10 +27,10 @@ pub const HEADER: &str = "address,packets,best_snr_db,crystal_offset_hz,first_se
 /// taken from can be read side by side.
 pub fn rows(state: &SdrMetrics) -> Vec<String> {
     let now = std::time::Instant::now();
-    let census = &state.net.census;
-    let mut devices = census.devices.clone();
-    order(&mut devices, census.sort, census.descending, now);
-    devices
+    state
+        .net
+        .census
+        .ordered(now, &state.radio)
         .iter()
         .map(|d| {
             // A blank field, not a zero: a device with no CFO measurement
@@ -38,8 +40,8 @@ pub fn rows(state: &SdrMetrics) -> Vec<String> {
             // reason [`crate::export::occupancy`] never writes a bare
             // number for a cell nothing has covered.
             let cfo = d
-                .crystal_offset_hz
-                .map(|u| format!("{:.1}", u.value()))
+                .crystal_offset_ppm
+                .map(|u| format!("{:.2}", state.radio.corrected_ppm(u, now).0.value()))
                 .unwrap_or_default();
             format!(
                 "{},{},{:.1},{},{},{}",
@@ -80,7 +82,7 @@ mod tests {
                 best_snr_db: -88.0,
                 first_seen: now - Duration::from_secs(300),
                 last_seen: now - Duration::from_secs(240),
-                crystal_offset_hz: None,
+                crystal_offset_ppm: None,
             },
             Device {
                 address: [0xa4, 0x83, 0xe7, 0x1c, 9, 0xbe],
@@ -88,7 +90,7 @@ mod tests {
                 best_snr_db: -41.2,
                 first_seen: now - Duration::from_secs(600),
                 last_seen: now - Duration::from_secs(2),
-                crystal_offset_hz: Some(crate::signal::dsp::uncertainty::Uncertain::exact(150.0)),
+                crystal_offset_ppm: Some(crate::signal::dsp::uncertainty::Uncertain::exact(15.0)),
             },
         ];
         m.net.census.sort = 2;
@@ -97,7 +99,7 @@ mod tests {
         let by_packets = rows(&m);
         assert_eq!(by_packets.len(), 2);
         assert!(
-            by_packets[0].starts_with("a4:83:e7:1c:09:be,1204,-41.2,150.0,"),
+            by_packets[0].starts_with("a4:83:e7:1c:09:be,1204,-41.2,15.00,"),
             "{}",
             by_packets[0]
         );

@@ -126,7 +126,7 @@ pub const REFERENCE_STALE_S: u64 = 15 * 60;
 /// they are three different quantities that happen to share a unit, and a panel
 /// showing one while meaning another is the failure this enum exists to make
 /// impossible.
-#[derive(Clone, Debug, PartialEq, Eq, Default)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
 pub enum Provenance {
     /// No reference has been established. **Relative only**: differences between
     /// devices are valid, absolute values are not, and the panel says so.
@@ -173,6 +173,11 @@ pub struct FrequencyReference {
     pub source: String,
     /// When it was captured.
     pub at: std::time::Instant,
+    /// How close the estimate came to the Cramer-Rao bound for the block and
+    /// SNR it was measured from (`signal::reference::CarrierOffset`), `None`
+    /// for a reference no bounded estimator produced. Design section 5.4:
+    /// the bound is the floor, and it is displayed.
+    pub efficiency: Option<f64>,
 }
 
 impl FrequencyReference {
@@ -196,7 +201,7 @@ impl FrequencyReference {
         if self.is_stale(now) {
             Provenance::Unreferenced
         } else {
-            self.provenance.clone()
+            self.provenance
         }
     }
 }
@@ -206,15 +211,23 @@ impl RadioState {
     /// is worth.
     ///
     /// **Provenance travels with the number, and that is the whole function.**
-    /// Every ppm reading in the app is our error plus theirs; subtracting ours
-    /// is arithmetic, and the interesting part is that the answer's meaning
-    /// changes with what we know. With no reference, or a stale one, the raw
-    /// reading comes back untouched and marked relative - untouched rather than
-    /// corrected-by-zero, because a correction of zero is a claim and this is
-    /// the absence of one.
+    /// Every ppm reading in the app is their error *minus* ours; taking ours
+    /// back out is arithmetic, and the interesting part is that the answer's
+    /// meaning changes with what we know. With no reference, or a stale one,
+    /// the raw reading comes back untouched and marked relative - untouched
+    /// rather than corrected-by-zero, because a correction of zero is a claim
+    /// and this is the absence of one.
+    ///
+    /// **The sign is `signal::reference`'s, followed through.** Our synthesiser
+    /// lands at `nominal(1 + e)`, where `e` is [`FrequencyReference::ppm`]; a
+    /// transmitter whose crystal is off by `t` sends on `nominal(1 + t)`. The
+    /// difference, which is all a receiver ever sees, is `nominal(t - e)`, so
+    /// the transmitter's own error is the reading *plus* ours. Written as a
+    /// subtraction until the first caller arrived, with a test that checked
+    /// the subtraction against itself; `the_correction_undoes_what_the_air_did`
+    /// now builds both numbers from the physics instead.
     ///
     /// The uncertainties add in quadrature: ours and theirs are independent.
-    #[allow(dead_code)] // the first ppm reading to correct arrives with an arc
     pub fn corrected_ppm(
         &self,
         raw: crate::signal::dsp::uncertainty::Uncertain,
@@ -225,11 +238,80 @@ impl RadioState {
             return (raw, Provenance::Unreferenced);
         };
         let corrected = Uncertain::from_variance(
-            raw.value() - r.ppm,
+            raw.value() + r.ppm,
             raw.sigma().powi(2) + r.sigma_ppm.powi(2),
         );
         (corrected, r.effective(now))
     }
+
+    /// A transmitter's frequency offset as the receiver measured it, turned
+    /// into what it says about the transmitter's own crystal: the ppm, and
+    /// the same error in kHz at `carrier_hz`. What both are worth is
+    /// [`Self::offset_basis`], which the engine puts on the panel's chrome.
+    ///
+    /// **The one conversion every offset in the NET section goes through**,
+    /// so a packet row, a census row and an export cannot come to three
+    /// different answers about one clock. ppm first because a crystal's error
+    /// is fractional: the same device reads 3 % more kHz on 2480 MHz than on
+    /// 2402 MHz, and only ppm can be compared, or combined, across channels.
+    pub fn transmitter_offset(
+        &self,
+        offset_hz: crate::signal::dsp::uncertainty::Uncertain,
+        carrier_hz: f64,
+        now: std::time::Instant,
+    ) -> TransmitterOffset {
+        let (ppm, _) = self.corrected_ppm(offset_ppm(offset_hz, carrier_hz), now);
+        TransmitterOffset {
+            khz: ppm.scale(carrier_hz * 1e-9),
+            ppm,
+        }
+    }
+
+    /// What every offset on screen is worth right now, for the chrome tag:
+    /// the reference's provenance, and whether one was established and has
+    /// since expired, which reads the same as none for the numbers but is a
+    /// different thing to tell the user.
+    pub fn offset_basis(&self, now: std::time::Instant) -> OffsetBasis {
+        match self.reference.as_ref() {
+            None => OffsetBasis {
+                provenance: Provenance::Unreferenced,
+                expired: false,
+            },
+            Some(r) => OffsetBasis {
+                provenance: r.effective(now),
+                expired: r.is_stale(now),
+            },
+        }
+    }
+}
+
+/// A frequency offset in Hz at `carrier_hz`, as the fraction of the carrier it
+/// is, in ppm. Uncorrected: what the air delivered, their error minus ours.
+///
+/// Its own function because two places need it and must agree: the census
+/// stores offsets in ppm as they arrive (`signal::net::worker`), and
+/// [`RadioState::transmitter_offset`] converts one for display.
+pub fn offset_ppm(
+    offset_hz: crate::signal::dsp::uncertainty::Uncertain,
+    carrier_hz: f64,
+) -> crate::signal::dsp::uncertainty::Uncertain {
+    offset_hz.scale(1e6 / carrier_hz)
+}
+
+/// A transmitter's crystal error, from [`RadioState::transmitter_offset`].
+#[derive(Clone, Copy, Debug)]
+pub struct TransmitterOffset {
+    pub ppm: crate::signal::dsp::uncertainty::Uncertain,
+    pub khz: crate::signal::dsp::uncertainty::Uncertain,
+}
+
+/// What the offsets on screen are worth, from [`RadioState::offset_basis`].
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct OffsetBasis {
+    pub provenance: Provenance,
+    /// A reference was established and has expired, so `provenance` has
+    /// fallen back to [`Provenance::Unreferenced`].
+    pub expired: bool,
 }
 
 #[cfg(test)]
@@ -245,6 +327,7 @@ mod tests {
             provenance,
             source: "WWV 10 MHz".to_string(),
             at,
+            efficiency: None,
         }
     }
 
@@ -281,7 +364,10 @@ mod tests {
 
         let (out, p) = radio.corrected_ppm(raw, now);
         assert_eq!(p, Provenance::Traceable);
-        assert!((out.value() - 10.0).abs() < 1e-12, "ours comes off theirs");
+        assert!(
+            (out.value() - 14.0).abs() < 1e-12,
+            "ours goes back onto theirs"
+        );
         // Independent, so in quadrature and never by simple addition.
         let want = (0.4f64.powi(2) + 0.3f64.powi(2)).sqrt();
         assert!((out.sigma() - want).abs() < 1e-12, "got {}", out.sigma());
@@ -289,6 +375,70 @@ mod tests {
             out.sigma() > 0.4,
             "correcting cannot make a reading sharper"
         );
+    }
+
+    /// **The correction undoes what the air did**, with both numbers built
+    /// from the physics rather than from the function under test: a
+    /// reference captured the way `signal::reference::capture` captures one,
+    /// and a transmitter's offset arriving the way `nominal(t - e)` says it
+    /// must. The earlier test checked the correction against its own
+    /// arithmetic and passed with the sign backwards.
+    #[test]
+    fn the_correction_undoes_what_the_air_did() {
+        let now = Instant::now();
+        let ours = 3.0; // ppm, fast
+        let theirs = 20.0; // ppm, the transmitter's crystal
+
+        // The reference: WWV at 10 MHz, which a fast oscillator sees below
+        // centre, through the capture's own conversion.
+        let wwv = crate::signal::reference::standard_at(10_000_000).unwrap();
+        let station_hz = 10e6 * (0.0 - ours) * 1e-6;
+        let e = crate::signal::reference::lo_error_ppm(Uncertain::exact(station_hz), wwv);
+        let mut radio = radio(Some(reference(e.value(), now, Provenance::Traceable)));
+        radio.reference.as_mut().unwrap().sigma_ppm = 0.0;
+
+        // The transmitter on BLE channel 37, as the receiver sees it.
+        let carrier = 2402e6;
+        let seen_hz = carrier * (theirs - ours) * 1e-6;
+        let got = radio.transmitter_offset(Uncertain::exact(seen_hz), carrier, now);
+        assert!(
+            (got.ppm.value() - theirs).abs() < 1e-9,
+            "got {}",
+            got.ppm.value()
+        );
+        assert!((got.khz.value() - carrier * theirs * 1e-9).abs() < 1e-6);
+        assert_eq!(radio.offset_basis(now).provenance, Provenance::Traceable);
+
+        // With no reference the same reading is what the air delivered,
+        // relative, and the kHz is the receiver's own figure unchanged.
+        let bare = radio_none().transmitter_offset(Uncertain::exact(seen_hz), carrier, now);
+        assert!((bare.ppm.value() - (theirs - ours)).abs() < 1e-9);
+        assert!((bare.khz.value() * 1e3 - seen_hz).abs() < 1e-6);
+        assert_eq!(
+            radio_none().offset_basis(now).provenance,
+            Provenance::Unreferenced
+        );
+    }
+
+    fn radio_none() -> RadioState {
+        radio(None)
+    }
+
+    #[test]
+    fn the_basis_tells_an_expired_reference_from_none() {
+        let now = Instant::now();
+        let none = radio(None).offset_basis(now);
+        assert_eq!(none.provenance, Provenance::Unreferenced);
+        assert!(!none.expired);
+
+        let fresh = radio(Some(reference(2.0, now, Provenance::Traceable))).offset_basis(now);
+        assert_eq!(fresh.provenance, Provenance::Traceable);
+        assert!(!fresh.expired);
+
+        let old = now - Duration::from_secs(REFERENCE_STALE_S);
+        let gone = radio(Some(reference(2.0, old, Provenance::Traceable))).offset_basis(now);
+        assert_eq!(gone.provenance, Provenance::Unreferenced);
+        assert!(gone.expired);
     }
 
     /// **A stale reference falls back rather than quietly going on being

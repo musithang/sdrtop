@@ -17,7 +17,10 @@ pub(super) fn net_census(key: KeyEvent, ctx: &mut InputCtx<'_>) -> KeyAction {
     let mut m = metrics(ctx.state);
     // The same ordering the panel draws, from the same function, so the cursor
     // steps through the rows on screen and not through a list of its own.
-    let ordered = m.net.census.ordered_addresses(std::time::Instant::now());
+    let ordered = m
+        .net
+        .census
+        .ordered_addresses(std::time::Instant::now(), &m.radio);
     match key.code {
         KeyCode::Up => m.net.census.selection.move_by(&ordered, -1),
         KeyCode::Down => m.net.census.selection.move_by(&ordered, 1),
@@ -52,7 +55,7 @@ mod tests {
             best_snr_db: 10.0,
             first_seen: now - Duration::from_secs(60),
             last_seen: now,
-            crystal_offset_hz: None,
+            crystal_offset_ppm: None,
         }
     }
 

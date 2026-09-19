@@ -311,13 +311,12 @@ pub struct BlePacket {
     /// noiseless, which does not happen on a radio - never because nothing
     /// was measured.
     pub snr_db: Option<f64>,
-    /// B7: the discriminator's own mean over the whole capture, with its
-    /// proper uncertainty - see `dsp::uncertainty::mean_with_uncertainty`.
-    /// This one number is both our own receiver's LO error and the
-    /// transmitter's own crystal offset, added together and not yet
-    /// separated; a radio with its own frequency reference (design section
-    /// 7) could subtract the first and leave the second, and nothing here
-    /// does that yet.
+    /// The carrier offset as received, in Hz: estimated from the sync word
+    /// against its known waveform (`signal::ble::receive`'s data-aided
+    /// estimate), with its uncertainty. **Their crystal's error minus our
+    /// oscillator's**, never corrected here: the panels take it through
+    /// `RadioState::transmitter_offset`, which removes ours when a reference
+    /// allows, and the chrome says which of the two the number on screen is.
     pub freq_offset_hz: Option<crate::signal::dsp::uncertainty::Uncertain>,
     /// B8: modulation index, delta-f1 average, delta-f2 maximum and their
     /// ratio, measured from this packet's own on-air symbols. `None` when
@@ -379,16 +378,24 @@ impl CensusState {
     /// terms, or not at all, the cursor would step through a list nobody can
     /// see. It once did exactly that: the handler moved through an empty list,
     /// so the arrows never selected anything.
-    pub fn ordered(&self, now: std::time::Instant) -> Vec<crate::signal::net::census::Device> {
+    pub fn ordered(
+        &self,
+        now: std::time::Instant,
+        radio: &super::RadioState,
+    ) -> Vec<crate::signal::net::census::Device> {
         let mut devices = self.devices.clone();
-        crate::signal::net::census::order(&mut devices, self.sort, self.descending, now);
+        crate::signal::net::census::order(&mut devices, self.sort, self.descending, now, radio);
         devices
     }
 
     /// The addresses of [`Self::ordered`], which is what the cursor moves
     /// through.
-    pub fn ordered_addresses(&self, now: std::time::Instant) -> Vec<[u8; 6]> {
-        self.ordered(now).iter().map(|d| d.address).collect()
+    pub fn ordered_addresses(
+        &self,
+        now: std::time::Instant,
+        radio: &super::RadioState,
+    ) -> Vec<[u8; 6]> {
+        self.ordered(now, radio).iter().map(|d| d.address).collect()
     }
 }
 

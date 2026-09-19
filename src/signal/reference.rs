@@ -44,7 +44,7 @@ use rustfft::num_complex::Complex;
 
 use crate::signal::dsp::correlate::{threshold_for_false_alarm, DelayedAutocorrelator};
 use crate::signal::dsp::estimate::{moose_offset, moose_variance, snr_from_metric};
-use crate::signal::dsp::uncertainty::Uncertain;
+use crate::signal::dsp::uncertainty::{crlb_frequency, efficiency, Uncertain};
 
 /// A transmitter whose carrier we are willing to measure ourselves against.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -171,7 +171,7 @@ pub fn carrier_offset_hz(
     samples: &[Complex<f32>],
     sample_rate_hz: f64,
     max_offset_hz: f64,
-) -> Option<Uncertain> {
+) -> Option<CarrierOffset> {
     if !sample_rate_hz.is_finite() || sample_rate_hz <= 0.0 {
         return None;
     }
@@ -214,7 +214,24 @@ pub fn carrier_offset_hz(
     let snr = snr_from_metric(metric, window)?;
     let offset = moose_offset(reading.p, lag);
     let variance = moose_variance(snr, window, lag);
-    Some(Uncertain::from_variance(offset, variance).scale(sample_rate_hz))
+    // The floor for the same block at the same SNR: every sample the
+    // correlator saw, `window + lag` of them, which is the whole block.
+    let bound = crlb_frequency(snr, window + lag);
+    Some(CarrierOffset {
+        offset_hz: Uncertain::from_variance(offset, variance).scale(sample_rate_hz),
+        efficiency: efficiency(variance, bound),
+    })
+}
+
+/// A carrier's offset, and how close the estimate came to the physical limit.
+#[derive(Clone, Copy, Debug)]
+pub struct CarrierOffset {
+    pub offset_hz: Uncertain,
+    /// `crlb / variance`, in `(0, 1]` (`dsp::uncertainty::efficiency`): one
+    /// is as good as the samples and the SNR allow. Well below one says the
+    /// estimator is what limits the reference, not the signal, which is
+    /// design section 5.4's reason to display the bound at all.
+    pub efficiency: f64,
 }
 
 /// How far off our oscillator is allowed to be before the search gives up.
@@ -243,7 +260,7 @@ pub fn capture(
     geometry: crate::hardware::SampleGeometry,
     tuned_hz: u64,
     sample_rate_hz: f64,
-) -> Result<(Uncertain, &'static Standard), String> {
+) -> Result<(Uncertain, f64, &'static Standard), String> {
     let Some(standard) = standard_at(tuned_hz) else {
         return Err(format!(
             "no standard station at {:.3} MHz: tune to one of {} first",
@@ -277,7 +294,11 @@ pub fn capture(
             range, standard.name
         )
     })?;
-    Ok((lo_error_ppm(offset, standard), standard))
+    Ok((
+        lo_error_ppm(offset.offset_hz, standard),
+        offset.efficiency,
+        standard,
+    ))
 }
 
 /// A specification bound turned into a variance.
@@ -405,8 +426,9 @@ mod tests {
                         Complex::new(ph.cos() as f32, ph.sin() as f32) + noise[n]
                     })
                     .collect();
-                let got =
-                    carrier_offset_hz(&samples, RATE, 2_000.0).expect("a clean tone measures");
+                let got = carrier_offset_hz(&samples, RATE, 2_000.0)
+                    .expect("a clean tone measures")
+                    .offset_hz;
                 worst = worst.max((got.value() - want_hz).abs());
                 claimed = got.sigma();
             }
@@ -417,6 +439,37 @@ mod tests {
             // And the claim is not so wide as to be useless: at 10 MHz this has
             // to resolve a part per million, which is 10 Hz.
             assert!(claimed < 3.0, "{want_hz} Hz: claimed sigma {claimed}");
+        }
+    }
+
+    /// **The estimate never claims to beat its own floor.** Moose's variance
+    /// and the Cramer-Rao bound are two formulas from two papers; an
+    /// efficiency above one would mean they disagree about the same block,
+    /// and whichever is wrong, the card would print a flattering lie.
+    #[test]
+    fn the_reference_never_claims_to_beat_the_bound() {
+        use crate::signal::dsp::testkit::Rng;
+        use std::f64::consts::TAU;
+        const RATE: f64 = 2_000_000.0;
+        for (n, range, amp) in [
+            (8_192, 2_000.0, 0.01),
+            (4_096, 20_000.0, 0.1),
+            (32_768, 500.0, 0.3),
+        ] {
+            let mut rng = Rng::new(n as u64);
+            let noise = rng.noise(n, amp);
+            let samples: Vec<Complex<f32>> = (0..n)
+                .map(|k| {
+                    let ph = TAU * 120.0 * k as f64 / RATE;
+                    Complex::new(ph.cos() as f32, ph.sin() as f32) + noise[k]
+                })
+                .collect();
+            let got = carrier_offset_hz(&samples, RATE, range).expect("a tone measures");
+            assert!(
+                got.efficiency > 0.0 && got.efficiency <= 1.0,
+                "{n} samples, {range} Hz: efficiency {}",
+                got.efficiency
+            );
         }
     }
 
