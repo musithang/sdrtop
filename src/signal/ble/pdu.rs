@@ -195,11 +195,11 @@ pub fn decode(bits: &[bool]) -> Option<Packet> {
     let crc_ok = crc24_ble(&pdu_bytes) == received_crc;
 
     let adv_addr = if pdu_type.carries_adv_addr_first() && length >= 6 {
-        let mut addr = [0u8; 6];
-        for (i, a) in addr.iter_mut().enumerate() {
+        let mut air = [0u8; 6];
+        for (i, a) in air.iter_mut().enumerate() {
             *a = byte(HEADER_BITS + i * 8);
         }
-        Some(addr)
+        Some(air_octets(air))
     } else {
         None
     };
@@ -216,6 +216,26 @@ pub fn decode(bits: &[bool]) -> Option<Packet> {
         modulation: None,
         drift: None,
     })
+}
+
+/// A 48-bit device address between the order it is written in and the order
+/// it is sent in. Its own inverse, so it goes either way.
+///
+/// **Written most significant octet first, sent least significant first.**
+/// Core 5.4 Vol 6 Part B 1.2: "the 48-bit addresses in the advertising
+/// physical channel PDUs shall be transmitted with the least significant
+/// octet first". Every address this app holds (`Packet::adv_addr`, the
+/// census, `connect::ConnectIndData`) is in the written order, which is the
+/// one the Core specification's own `Address [47:46]` sub-type table
+/// (`super::address::kind`) and every other tool read addresses in.
+///
+/// Until 2026-09-19 `decode` kept the octets in air order and every panel
+/// printed addresses reversed. A real packet settled it rather than a
+/// reading of the text: `a_real_random_address_reads_as_a_sub_type_that_exists`.
+pub fn air_octets(addr: [u8; 6]) -> [u8; 6] {
+    let mut out = addr;
+    out.reverse();
+    out
 }
 
 /// A synthetic advertising channel PDU's bit stream, whitened and CRC'd
@@ -303,7 +323,10 @@ mod tests {
         let packet = decode(&bits).expect("the whole PDU and CRC are here");
         assert_eq!(packet.pdu_type, PduType::AdvNonconnInd);
         assert_eq!(packet.length, 14);
-        assert_eq!(packet.adv_addr, Some([158, 39, 145, 126, 154, 209]));
+        assert!(packet.tx_add_random, "the header says random");
+        // In the written order, most significant octet first: see
+        // `air_octets` and `address::a_real_random_address_reads_as_a_sub_type_that_exists`.
+        assert_eq!(packet.adv_addr, Some([209, 154, 126, 145, 39, 158]));
         assert!(packet.crc_ok);
     }
 
@@ -312,7 +335,7 @@ mod tests {
     #[test]
     fn a_synthetic_adv_ind_round_trips() {
         let addr = [0x11, 0x22, 0x33, 0x44, 0x55, 0x66];
-        let mut payload = addr.to_vec();
+        let mut payload = air_octets(addr).to_vec();
         payload.extend_from_slice(&[0x02, 0x01, 0x06]); // a plausible AD structure
         let mut bits = encode(37, 0x00, &payload); // 0x00 = ADV_IND, both address bits clear
         whiten(&mut bits, 37); // the air interface's own bits, de-whitened

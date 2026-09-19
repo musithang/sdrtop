@@ -15,6 +15,7 @@
 //! stage, but [`detect`] needs it to build the reference it correlates
 //! against, since the advertising access address is known in advance.
 
+pub mod address;
 pub mod channel;
 pub mod coded;
 pub mod connect;

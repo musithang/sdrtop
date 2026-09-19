@@ -146,14 +146,18 @@ pub fn decode(payload_bits: &[bool]) -> Option<ConnectIndData> {
     if payload_bits.len() < PAYLOAD_BITS {
         return None;
     }
+    // Sent least significant octet first, held in the written order: see
+    // `pdu::air_octets`.
     let mut init_a = [0u8; 6];
     for (i, slot) in init_a.iter_mut().enumerate() {
         *slot = byte_at(payload_bits, i * 8);
     }
+    let init_a = super::pdu::air_octets(init_a);
     let mut adv_a = [0u8; 6];
     for (i, slot) in adv_a.iter_mut().enumerate() {
         *slot = byte_at(payload_bits, (6 + i) * 8);
     }
+    let adv_a = super::pdu::air_octets(adv_a);
     let access_address = u32_at(payload_bits, 12);
     let crc_init = u24_at(payload_bits, 16);
     let win_size = byte_at(payload_bits, 19 * 8);
@@ -262,8 +266,8 @@ mod tests {
     /// convention throughout.
     fn synthetic_payload(data: &ConnectIndData) -> Vec<bool> {
         let mut bytes = Vec::with_capacity(34);
-        bytes.extend_from_slice(&data.init_a);
-        bytes.extend_from_slice(&data.adv_a);
+        bytes.extend_from_slice(&super::super::pdu::air_octets(data.init_a));
+        bytes.extend_from_slice(&super::super::pdu::air_octets(data.adv_a));
         bytes.extend_from_slice(&data.access_address.to_le_bytes());
         bytes.extend_from_slice(&data.crc_init.to_le_bytes()[..3]);
         bytes.push(data.win_size);

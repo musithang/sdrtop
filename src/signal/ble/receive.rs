@@ -930,7 +930,7 @@ mod tests {
     #[test]
     fn a_synthetic_adv_ind_is_received_whole() {
         let addr = [0xAA, 0xBB, 0xCC, 0x11, 0x22, 0x33];
-        let mut payload = addr.to_vec();
+        let mut payload = crate::signal::ble::pdu::air_octets(addr).to_vec();
         payload.extend_from_slice(&[0x02, 0x01, 0x06]);
         let iq = synthetic_packet_iq(Phy::OneM, 37, 0x00, &payload, 20.0);
         let geometry = eight_bit();
@@ -945,19 +945,69 @@ mod tests {
         assert!(p.crc_ok);
     }
 
+    /// **Hearing does not depend on what the packet says.** At the standard's
+    /// offset edge plus our own oscillator's share (±200 kHz, see
+    /// `a_packet_with_a_crystal_offset_is_still_heard`), eight different
+    /// payloads at 20 dB all decode. One payload is one draw of the slicer's
+    /// data-dependent threshold; several are a claim about the receiver.
+    #[test]
+    fn hearing_does_not_depend_on_what_the_packet_says() {
+        let rate = working_rate_hz(Phy::OneM);
+        let geometry = eight_bit();
+        for seed in 0..8u8 {
+            let addr = [
+                seed.wrapping_mul(37),
+                seed ^ 0x5a,
+                0x11u8.wrapping_add(seed),
+                0xcc,
+                seed.wrapping_mul(91),
+                0xaa ^ seed,
+            ];
+            let mut payload = crate::signal::ble::pdu::air_octets(addr).to_vec();
+            payload.extend_from_slice(&[0x02, 0x01, 0x06]);
+            for cfo_hz in [-200_000.0, 200_000.0] {
+                let mut iq = synthetic_packet_iq(Phy::OneM, 37, 0x40, &payload, 20.0);
+                for (n, s) in iq.iter_mut().enumerate() {
+                    let ph = std::f64::consts::TAU * cfo_hz * n as f64 / rate;
+                    *s *= Complex::new(ph.cos() as f32, ph.sin() as f32);
+                }
+                let mut rx = Receiver::new(rate, 37, Phy::OneM).unwrap();
+                let packets = rx.push(&bytes_for(&iq, geometry), geometry);
+                assert!(
+                    packets.len() == 1 && packets[0].crc_ok,
+                    "payload {seed} at {cfo_hz} Hz: {} packets",
+                    packets.len()
+                );
+                assert_eq!(packets[0].adv_addr, Some(addr));
+            }
+        }
+    }
+
     /// **A transmitter's crystal is never exactly on frequency, and the
-    /// receiver must hear it anyway.** BLE allows ±150 ppm, about ±360 kHz
-    /// at 2.4 GHz. The first detector correlated coherently across the whole
+    /// receiver must hear it anyway.** Core 5.4 Vol 6 Part A 3.3: "The
+    /// deviation of the center frequency during the packet shall not exceed
+    /// ±150 kHz, including both the initial frequency offset and drift."
+    /// What arrives is that plus our own oscillator's error, about ±50 kHz
+    /// more for a ±20 ppm radio at 2.4 GHz, so the receiver is held to
+    /// ±200 kHz. The first detector correlated coherently across the whole
     /// 40-symbol sync word, and an offset of 15 kHz - one real device in the
     /// test flat - turned the phase far enough across it to put the packet
     /// under the trigger threshold nine times in ten (`dev_docs/
     /// case-study-ble-crc.md`, section 13). The offsets here: that device,
-    /// an ordinary crystal, and one near the edge of what the standard
-    /// allows. The offset the packet reports is the one it was sent with.
+    /// an ordinary crystal, and the far edge. The offset the packet reports
+    /// is the one it was sent with.
+    ///
+    /// This test once used -300 kHz, twice the standard's limit, and passed
+    /// on its payload's particular bits: measured over 24 payloads at 20 dB,
+    /// ±300 kHz loses 8 of 48 packets while ±150 and ±200 kHz lose none of
+    /// 96. It surfaced when addresses moved to the written octet order and
+    /// the same payload put different bits on the air.
+    /// `hearing_does_not_depend_on_what_the_packet_says` holds the ±200 kHz
+    /// edge over several payloads so the next one cannot pass by luck.
     #[test]
     fn a_packet_with_a_crystal_offset_is_still_heard() {
         let addr = [0xAA, 0xBB, 0xCC, 0x11, 0x22, 0x33];
-        let mut payload = addr.to_vec();
+        let mut payload = crate::signal::ble::pdu::air_octets(addr).to_vec();
         payload.extend_from_slice(&[0x02, 0x01, 0x06]);
         let rate = working_rate_hz(Phy::OneM);
         let snr_at = |cfo_hz: f64| -> f64 {
@@ -975,14 +1025,14 @@ mod tests {
         // The SNR is the signal's, not the crystal's: a transmitter off
         // frequency reads the same as one on it.
         let on_frequency = snr_at(0.0);
-        for cfo_hz in [15_000.0, 100_000.0, -300_000.0] {
+        for cfo_hz in [15_000.0, 100_000.0, -200_000.0] {
             let off = snr_at(cfo_hz);
             assert!(
                 (off - on_frequency).abs() < 1.5,
                 "{cfo_hz} Hz: SNR {off} dB against {on_frequency} dB on frequency"
             );
         }
-        for cfo_hz in [15_000.0, 100_000.0, -300_000.0] {
+        for cfo_hz in [15_000.0, 100_000.0, -200_000.0] {
             let mut iq = synthetic_packet_iq(Phy::OneM, 37, 0x00, &payload, 20.0);
             for (n, s) in iq.iter_mut().enumerate() {
                 let ph = std::f64::consts::TAU * cfo_hz * n as f64 / rate;
@@ -1015,7 +1065,7 @@ mod tests {
     #[test]
     fn the_offset_s_uncertainty_matches_its_scatter() {
         let addr = [0xAA, 0xBB, 0xCC, 0x11, 0x22, 0x33];
-        let mut payload = addr.to_vec();
+        let mut payload = crate::signal::ble::pdu::air_octets(addr).to_vec();
         payload.extend_from_slice(&[0x02, 0x01, 0x06]);
         let rate = working_rate_hz(Phy::OneM);
         let clean = synthetic_packet_iq(Phy::OneM, 37, 0x00, &payload, f64::INFINITY);
@@ -1120,7 +1170,7 @@ mod tests {
     #[test]
     fn a_synthetic_adv_ind_is_received_whole_on_le_2m() {
         let addr = [0xAA, 0xBB, 0xCC, 0x11, 0x22, 0x33];
-        let mut payload = addr.to_vec();
+        let mut payload = crate::signal::ble::pdu::air_octets(addr).to_vec();
         payload.extend_from_slice(&[0x02, 0x01, 0x06]);
         let iq = synthetic_packet_iq(Phy::TwoM, 37, 0x00, &payload, 20.0);
         let geometry = eight_bit();
@@ -1141,7 +1191,7 @@ mod tests {
     #[test]
     fn a_packet_split_across_many_small_blocks_still_arrives() {
         let addr = [0x01, 0x02, 0x03, 0x04, 0x05, 0x06];
-        let payload = addr.to_vec();
+        let payload = crate::signal::ble::pdu::air_octets(addr).to_vec();
         let iq = synthetic_packet_iq(Phy::OneM, 37, 0x02, &payload, 20.0); // ADV_NONCONN_IND
         let geometry = eight_bit();
         let bytes = bytes_for(&iq, geometry);
@@ -1201,7 +1251,7 @@ mod tests {
     #[test]
     fn a_packet_survives_decimation_from_a_wider_capture_rate() {
         let addr = [0x10, 0x20, 0x30, 0x40, 0x50, 0x60];
-        let mut payload = addr.to_vec();
+        let mut payload = crate::signal::ble::pdu::air_octets(addr).to_vec();
         payload.push(0xFF);
         let raw_rate = 20_000_000.0;
         let sps = (raw_rate / Phy::OneM.symbol_rate_hz()) as usize;
@@ -1239,7 +1289,7 @@ mod tests {
     #[test]
     fn a_strong_out_of_channel_interferer_no_longer_defeats_detection() {
         let addr = [0x11, 0x22, 0x33, 0x44, 0x55, 0x66];
-        let mut payload = addr.to_vec();
+        let mut payload = crate::signal::ble::pdu::air_octets(addr).to_vec();
         payload.push(0x01);
         let raw_rate = 20_000_000.0;
         let sps = (raw_rate / Phy::OneM.symbol_rate_hz()) as usize;

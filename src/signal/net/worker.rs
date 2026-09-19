@@ -851,7 +851,11 @@ mod tests {
         let addr = [0x11u8, 0x22, 0x33, 0x44, 0x55, 0x66];
         let mut bits = preamble_bits(ADVERTISING_ACCESS_ADDRESS, Phy::OneM);
         bits.extend_from_slice(&access_address_bits(ADVERTISING_ACCESS_ADDRESS));
-        bits.extend_from_slice(&encode(CHANNEL, 0x00, &addr));
+        bits.extend_from_slice(&encode(
+            CHANNEL,
+            0x00,
+            &crate::signal::ble::pdu::air_octets(addr),
+        ));
         let mut rng = Rng::new(1);
         bits.extend((0..16).map(|_| rng.next_u64() & 1 == 1));
         let clean = modulate(&bits, SPS, 250_000.0, SAMPLE_RATE, 0.5);
@@ -914,7 +918,11 @@ mod tests {
         let addr = [0x11u8, 0x22, 0x33, 0x44, 0x55, 0x66];
         let mut bits = preamble_bits(ADVERTISING_ACCESS_ADDRESS, Phy::OneM);
         bits.extend_from_slice(&access_address_bits(ADVERTISING_ACCESS_ADDRESS));
-        bits.extend_from_slice(&encode(37, 0x00, &addr));
+        bits.extend_from_slice(&encode(
+            37,
+            0x00,
+            &crate::signal::ble::pdu::air_octets(addr),
+        ));
         let mut rng = Rng::new(1);
         bits.extend((0..16).map(|_| rng.next_u64() & 1 == 1));
         let clean = modulate(&bits, 4, 250_000.0, 4_000_000.0, 0.5);
