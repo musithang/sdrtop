@@ -3,22 +3,28 @@
 
 //! `NetCoexistPanel` - what is stepping on your link, and when.
 //!
-//! The band down the side, time across the bottom, and each cell coloured by how
-//! busy that megahertz was at that moment. Design section 9.1 calls it the
-//! single most immediately legible thing either arc produces, and section 8's
-//! acceptance criterion for it is not a test: **readable at two metres.**
+//! The band across, time running down from now at the top, and each cell
+//! coloured by how busy that megahertz was at that moment: the waterfall's
+//! orientation, so the occupancy profile above it and this history below it
+//! read as one instrument with one frequency ruler (net-ux-polish-plan Stop 3).
+//! Design section 9.1 calls it the single most immediately legible thing either
+//! arc produces, and section 8's acceptance criterion for it is not a test:
+//! **readable at two metres.**
+//!
+//! **Frequency through the band axis, never its own.** A column covers the
+//! cells `band_axis::cells_of` says, the same cells the occupancy profile's
+//! column above it covers, because a shared ruler is only honest if a column
+//! means the same megahertz in both. It was frequency down the side until
+//! 2026-09-19, which gave the two panels no axis in common.
 //!
 //! **What it is fed on, and what the plan said it would be fed on.** The plan
 //! has this panel drawing bursts from N14, colour-coded by protocol. N14 landed
 //! per-cell duty cycle and no burst detector - "no demodulation anywhere" was
 //! its own instruction - so there are no bursts to draw and there will be none
 //! until an arc lands one. What there is instead is real and is the same
-//! picture at a coarser grain: the occupancy history, half a second to a column.
-//! Colour carries the duty cycle where it will eventually carry the protocol.
-//!
-//! That is a deviation from the plan, and it is written here rather than left to
-//! be discovered: this panel is finished when a burst overlay replaces the ramp,
-//! not before.
+//! picture at a coarser grain: the occupancy history, half a second to a row
+//! half. Colour carries the duty cycle; decoded packets are marked over it in
+//! Stop 3.3.b.
 
 use ratatui::{
     layout::Rect,
@@ -28,44 +34,48 @@ use ratatui::{
     Frame,
 };
 
-use crate::signal::net::{band, occupancy};
+use super::band_axis;
 use crate::state::{SdrMetrics, COLUMN_INTERVAL};
 use crate::ui::panel::{FeedSpan, Panel, PanelChrome, Staleness};
-use crate::ui::widgets::canvas::{fold, ink, row, Duty};
+use crate::ui::widgets::canvas::{fold, row, Duty};
 
 pub struct NetCoexistPanel;
 
-/// Rows reserved under the canvas for the time axis.
-const AXIS_ROWS: u16 = 1;
-/// Columns reserved to the left for the frequency scale.
-const SCALE_COLS: u16 = 5;
+/// Rows reserved under the canvas: the channel ruler and the band's edges with
+/// the time the canvas spans.
+const AXIS_ROWS: u16 = 2;
 
-/// `2400` down the left edge, on the rows a label lands on.
-///
-/// Spaced by **row**, not by frequency band: a row carries two bands and only
-/// its upper one has a line to be written on, so labelling every nth band put
-/// labels on an irregular handful of rows and left the rest blank.
-fn scale_label(row: usize, rows: usize, bands: usize) -> Option<String> {
-    // Four labels down the side, which is as many as a forty-row panel carries
-    // without them running together.
-    //
-    // **Counted from the bottom**, so the bottom row always carries one. Counted
-    // from the top, the lowest label landed on whichever row happened to be a
-    // multiple of the spacing, and the scale read 2407 at the foot of a band
-    // that starts at 2400.
-    let step = rows.div_ceil(4).max(1);
-    if !(rows.saturating_sub(1 + row)).is_multiple_of(step) {
-        return None;
+/// The canvas: `rows` character rows, two moments each (a half block's upper
+/// and lower halves), newest at the top, each moment folded into `width`
+/// columns by the band axis. A moment older than the history holds is `None`
+/// throughout, drawn as unlooked-at rather than as a quiet band.
+fn canvas(history: &[Vec<f32>], rows: usize, width: usize) -> Vec<Vec<Duty>> {
+    (0..rows * 2)
+        .map(|step| {
+            history
+                .len()
+                .checked_sub(1 + step)
+                .map(|i| fold(&history[i], width))
+                .unwrap_or_else(|| vec![None; width])
+        })
+        .collect()
+}
+
+/// `2400 MHz   now at the top, 12 s down   2483 MHz`: the band's edges, and
+/// how far back the bottom of the canvas reaches, when it fits between them.
+fn edges_and_time(width: usize, span_s: f64) -> String {
+    let edges = band_axis::edges(width);
+    let note = format!("now at the top, {span_s:.0} s down");
+    let (left, right) = ("2400 MHz".len(), "2483 MHz".len());
+    if left + right + note.len() + 4 > width {
+        return edges;
     }
-    // The row's *lower* band: a label marks the bottom edge of its row, the way
-    // a ruler does, and it is what makes the bottom row read as the bottom of
-    // the band rather than one cell above it.
-    let band = bands.saturating_sub(2 + row * 2);
-    let cell = band * occupancy::CELLS / bands.max(1);
-    Some(format!(
-        "{:>4}",
-        (band::LOW_HZ + cell as u64 * occupancy::CELL_HZ) / 1_000_000
-    ))
+    let start = left + (width - left - right - note.len()) / 2;
+    let mut chars: Vec<char> = edges.chars().collect();
+    for (i, c) in note.chars().enumerate() {
+        chars[start + i] = c;
+    }
+    chars.into_iter().collect()
 }
 
 impl Panel for NetCoexistPanel {
@@ -81,8 +91,8 @@ impl Panel for NetCoexistPanel {
         PanelChrome::new("Coexistence")
             .stale_when(Staleness::NotStreaming)
             .tag_if(true, state.net.mode.tag())
-            // The canvas holds the band's last HISTORY_COLUMNS columns, one
-            // every COLUMN_INTERVAL: a drop inside that stretch thins a column.
+            // The canvas holds the band's last HISTORY_COLUMNS moments, one
+            // every COLUMN_INTERVAL: a drop inside that stretch thins a moment.
             .counts_from_feed(FeedSpan::Window(
                 crate::state::COLUMN_INTERVAL * crate::state::HISTORY_COLUMNS as u32,
             ))
@@ -96,15 +106,12 @@ impl Panel for NetCoexistPanel {
         theme: &crate::Theme,
         _focused: bool,
     ) {
-        if inner.width <= SCALE_COLS || inner.height <= AXIS_ROWS {
+        if inner.width == 0 || inner.height <= AXIS_ROWS {
             return;
         }
-        let width = (inner.width - SCALE_COLS) as usize;
+        let width = inner.width as usize;
         let rows = (inner.height - AXIS_ROWS) as usize;
-        // Two frequency bands to a character row: that is what a half block buys
-        // and it is why this panel can hold the whole band in twenty rows.
-        let bands = rows * 2;
-        let history = &state.net.band.history;
+        let history: Vec<Vec<f32>> = state.net.band.history.iter().cloned().collect();
 
         if history.is_empty() {
             // A pass that will never come is not a pass to wait for. The same
@@ -123,52 +130,19 @@ impl Panel for NetCoexistPanel {
             return;
         }
 
-        // The newest column on the right, so time runs the way it is read. A
-        // history shorter than the panel leaves the left dark rather than
-        // stretching what there is across it.
-        let shown: Vec<&Vec<f32>> = history.iter().rev().take(width).rev().collect();
-        let pad = width.saturating_sub(shown.len());
-        let folded: Vec<Vec<Duty>> = shown.iter().map(|c| fold(c, bands)).collect();
+        let moments = canvas(&history, rows, width);
+        let mut lines: Vec<Line<'static>> = moments
+            .chunks(2)
+            .map(|pair| row(&pair[0], &pair[1], theme))
+            .collect();
 
-        let at = |band: usize, column: usize| -> Duty {
-            column
-                .checked_sub(pad)
-                .and_then(|i| folded.get(i))
-                .and_then(|f| f.get(band).copied())
-                .flatten()
-        };
-
-        let mut lines = Vec::with_capacity(rows + 1);
-        for r in 0..rows {
-            // Low frequency at the bottom, the way a band is drawn everywhere
-            // else in this app, so the top row is the top of the band.
-            let upper: Vec<Duty> = (0..width).map(|x| at(bands - 1 - r * 2, x)).collect();
-            let lower: Vec<Duty> = (0..width).map(|x| at(bands - 2 - r * 2, x)).collect();
-            let mut spans = vec![Span::styled(
-                format!(
-                    "{:<width$}",
-                    scale_label(r, rows, bands).unwrap_or_default(),
-                    width = SCALE_COLS as usize
-                ),
-                Style::default().fg(theme.label),
-            )];
-            spans.extend(row(&upper, &lower, theme).spans);
-            lines.push(Line::from(spans));
-        }
-
-        // The time axis: how far back the left edge is.
-        let span_s = shown.len() as f64 * COLUMN_INTERVAL.as_secs_f64();
-        lines.push(Line::from(Span::styled(
-            format!(
-                "{:<width$}-{span_s:.0} s{:>right$}now",
-                "",
-                "",
-                width = SCALE_COLS as usize,
-                right = width.saturating_sub(9)
-            ),
-            Style::default().fg(theme.label),
-        )));
-        let _ = ink(None, theme);
+        // How far back the bottom of the canvas reaches: the moments it holds,
+        // not the ones it has room for, so a short history says it is short.
+        let shown = history.len().min(rows * 2);
+        let span_s = shown as f64 * COLUMN_INTERVAL.as_secs_f64();
+        let dim = Style::default().fg(theme.label);
+        lines.push(Line::from(Span::styled(band_axis::ruler(width), dim)));
+        lines.push(Line::from(Span::styled(edges_and_time(width, span_s), dim)));
         f.render_widget(Paragraph::new(lines), inner);
     }
 }
@@ -176,16 +150,19 @@ impl Panel for NetCoexistPanel {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::signal::net::occupancy;
     use crate::state::{fixture::draw, CellReading};
+    use crate::ui::widgets::canvas::ink;
     use ratatui::{backend::TestBackend, Terminal};
 
-    /// One column of the band with `busy` set on exactly `cell`.
+    /// One moment of the band with `busy` set on exactly `cell`.
     fn column(cell: usize) -> Vec<f32> {
         let mut c = vec![0.0f32; occupancy::CELLS];
         c[cell] = 1.0;
         c
     }
 
+    /// `columns` oldest first, the way the history holds them.
     fn with(columns: Vec<Vec<f32>>) -> SdrMetrics {
         let mut m = SdrMetrics::fixture().streaming();
         m.net.band.cells = vec![CellReading::default(); occupancy::CELLS];
@@ -205,60 +182,46 @@ mod tests {
         terminal.backend().buffer().clone()
     }
 
-    /// **A burst at a known time and frequency lands in the known cell**, at
-    /// three canvas sizes. The plan's test for this panel, and the one that
-    /// catches an axis drawn upside down or off by a row.
+    /// **A burst at a known frequency and moment lands in the known cell**, at
+    /// three sizes: the column the band axis gives its megahertz, the upper
+    /// half of the top row for the newest moment and the lower half for the
+    /// one before. Catches an axis drawn upside down, off by a row, or mapped
+    /// differently from the occupancy profile above it.
     #[test]
-    fn a_busy_cell_lands_where_the_band_says_it_should() {
+    fn a_busy_cell_lands_where_the_band_axis_says_it_should() {
         let theme = crate::Theme::sdr();
         let busy = ink(Some(1.0), &theme);
-
-        for (w, h) in [(40u16, 12u16), (90, 24), (60, 45)] {
-            let rows = (h - AXIS_ROWS) as usize;
-            let bands = rows * 2;
+        for (w, h) in [(40u16, 12u16), (90, 24), (120, 45)] {
             for cell in [0usize, occupancy::CELLS / 2, occupancy::CELLS - 1] {
-                let buf = cells(&with(vec![column(cell)]), w, h);
-                // Where it should be: the low end of the band at the bottom.
-                let band = crate::ui::widgets::canvas::band_of(cell, occupancy::CELLS, bands);
-                let row = (bands - 1 - band) / 2;
-                let upper = (bands - 1 - row * 2) == band;
-                let x = w - 1; // the newest column, on the right
-                let style = buf.get(x, row as u16).style();
-                let got = if upper { style.fg } else { style.bg };
+                let other = (cell + 30) % occupancy::CELLS;
+                // Oldest first: `other` a moment ago, `cell` now.
+                let buf = cells(&with(vec![column(other), column(cell)]), w, h);
+                let x = band_axis::column_of(cell, w as usize) as u16;
+                assert_eq!(buf.get(x, 0).style().fg, Some(busy), "{w}x{h}: now, {cell}");
+                let x = band_axis::column_of(other, w as usize) as u16;
                 assert_eq!(
-                    got,
+                    buf.get(x, 0).style().bg,
                     Some(busy),
-                    "{w}x{h}: cell {cell} should be at row {row} ({}), \
-                     but that half is not busy",
-                    if upper { "upper" } else { "lower" }
+                    "{w}x{h}: before, {other}"
                 );
             }
         }
     }
 
-    /// The band edges are the band edges: the frequency scale starts and ends
-    /// where `band` says the band does, and nothing is drawn past the axis.
+    /// The ruler and the band's edges are the band axis's, and the time the
+    /// canvas reaches back is said in seconds.
     #[test]
-    fn the_scale_covers_the_band_and_no_more() {
-        let m = with(vec![column(0)]);
-        let lines = draw(NetCoexistPanel, 60, 24, &m);
+    fn the_axis_is_the_band_axis_and_the_time_is_said() {
+        let m = with(vec![column(0); 20]);
+        let lines = draw(NetCoexistPanel, 90, 24, &m);
         let text = lines.join("\n");
-        // The lowest label is the bottom of the band.
+        assert!(text.contains(&band_axis::ruler(88)), "{text}");
         assert!(
-            text.contains(&format!("{}", band::LOW_HZ / 1_000_000)),
-            "the bottom of the band is not on the scale:\n{text}"
+            text.contains("2400 MHz") && text.contains("2483 MHz"),
+            "{text}"
         );
-        // And no label is above the top of it.
-        for line in &lines {
-            for word in line.split_whitespace() {
-                if let Ok(mhz) = word.parse::<u64>() {
-                    assert!(
-                        (band::LOW_HZ / 1_000_000..=band::HIGH_HZ / 1_000_000).contains(&mhz),
-                        "{mhz} MHz is outside the band"
-                    );
-                }
-            }
-        }
+        // Twenty moments at half a second each.
+        assert!(text.contains("now at the top, 10 s down"), "{text}");
     }
 
     /// Every colour is the theme's.
@@ -270,8 +233,8 @@ mod tests {
             .chain([theme.border_dim, theme.label, theme.stale])
             .collect();
         let buf = cells(&with(vec![column(10), column(40), column(70)]), 60, 20);
-        for y in 0..19u16 {
-            for x in SCALE_COLS..60 {
+        for y in 0..20u16 {
+            for x in 0..60 {
                 let style = buf.get(x, y).style();
                 for c in [style.fg, style.bg] {
                     if let Some(c) = c.filter(|c| *c != ratatui::style::Color::Reset) {
@@ -301,20 +264,21 @@ mod tests {
         assert!(!out.contains("waiting"), "{out}");
     }
 
-    /// A history shorter than the panel leaves the old end dark rather than
-    /// stretching what there is across it.
+    /// A history shorter than the canvas leaves the old end, the bottom, dark
+    /// rather than stretching what there is down it.
     #[test]
     fn a_short_history_does_not_pretend_to_fill_the_panel() {
         let theme = crate::Theme::sdr();
         let buf = cells(&with(vec![column(40); 4]), 60, 20);
-        // The newest four columns carry the reading; the left edge does not.
-        assert_ne!(buf.get(59, 9).style().fg, Some(ink(None, &theme)));
-        assert_eq!(buf.get(SCALE_COLS, 9).style().fg, Some(ink(None, &theme)));
+        let x = band_axis::column_of(40, 60) as u16;
+        // Four moments fill the top two rows; the bottom of the canvas is dark.
+        assert_ne!(buf.get(x, 0).style().fg, Some(ink(None, &theme)));
+        assert_eq!(buf.get(x, 17).style().fg, Some(ink(None, &theme)));
     }
 
     #[test]
     fn it_fits_every_size_the_layout_can_hand_it() {
-        for w in 10..70u16 {
+        for w in 10..130u16 {
             for h in 3..30u16 {
                 for line in draw(NetCoexistPanel, w, h, &with(vec![column(40); 10])) {
                     assert!(line.chars().count() <= w as usize, "{w}x{h}: {line:?}");

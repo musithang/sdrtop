@@ -59,8 +59,9 @@ pub(crate) fn ink(duty: Duty, theme: &crate::Theme) -> Color {
     }
 }
 
-/// One row of the canvas: `upper` and `lower` are the two frequency cells this
-/// row of characters carries, oldest column first.
+/// One row of the canvas: `upper` and `lower` are the two lines of cells this
+/// row of characters carries in its half blocks, one duty per column. On the
+/// coexistence heatmap they are two moments, the newer on top.
 pub(crate) fn row(upper: &[Duty], lower: &[Duty], theme: &crate::Theme) -> Line<'static> {
     let spans = (0..upper.len())
         .map(|x| {
@@ -79,15 +80,17 @@ pub(crate) fn row(upper: &[Duty], lower: &[Duty], theme: &crate::Theme) -> Line<
     Line::from(spans)
 }
 
-/// Fold `cells` frequency cells into `bands` rows of the canvas.
+/// Fold a column of frequency cells into `bands` bins, one per canvas column on
+/// the coexistence heatmap.
 ///
 /// **The busiest, not the mean**, for the reason the occupancy profile folds the
 /// same way: averaging a saturated megahertz with a quiet one produces two
 /// half-busy ones and hides the thing the panel exists to show. A band of cells
 /// nobody looked at stays unlooked-at.
 /// The range of cells one band covers. The single account of the mapping, so
-/// [`fold`] and anything that needs its inverse cannot disagree.
-fn band_range(cells: usize, bands: usize, band: usize) -> std::ops::Range<usize> {
+/// [`fold`] and anything that needs its inverse cannot disagree: the NET band
+/// axis (`ui::panels::net::shared::band_axis`) is this function, not a copy.
+pub(crate) fn band_range(cells: usize, bands: usize, band: usize) -> std::ops::Range<usize> {
     let lo = band * cells / bands.max(1);
     let hi = ((band + 1) * cells / bands.max(1)).max(lo + 1).min(cells);
     lo..hi

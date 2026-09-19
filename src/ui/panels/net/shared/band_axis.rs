@@ -17,11 +17,11 @@
 use crate::signal::net::{band, occupancy};
 
 /// The cells column `x` of a `width`-column band covers. Never empty.
+///
+/// `widgets::canvas::band_range`, so the heatmap's `canvas::fold` into `width`
+/// columns and this mapping are one function rather than two that agree.
 pub fn cells_of(x: usize, width: usize) -> std::ops::Range<usize> {
-    let n = occupancy::CELLS;
-    let lo = (x * n / width.max(1)).min(n - 1);
-    let hi = ((x + 1) * n / width.max(1)).max(lo + 1).min(n);
-    lo..hi
+    crate::ui::widgets::canvas::band_range(occupancy::CELLS, width.max(1), x)
 }
 
 /// The column cell `cell` is drawn in: the first whose cells include it.
