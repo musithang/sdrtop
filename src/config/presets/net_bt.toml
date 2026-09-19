@@ -13,7 +13,7 @@
 # B15 does not close.
 
 section = "net"
-slot    = 6
+slot    = 5
 title   = "Classic"
 blurb   = "who is here, the old way"
 

@@ -32,10 +32,12 @@ use ratatui::{
 };
 
 use super::band_axis;
+use super::band_axis::bonded_frame;
 use crate::signal::net::occupancy;
 use crate::state::{CellReading, SdrMetrics};
-use crate::ui::panel::{FeedSpan, Panel, PanelChrome, Staleness};
+use crate::ui::panel::{Bond, Bonding, FeedSpan, Panel, PanelChrome, Staleness};
 use crate::ui::widgets::reading::Reading;
+use ratatui::widgets::Borders;
 
 pub struct NetOccupancyPanel;
 
@@ -107,7 +109,15 @@ fn columns(cells: &[CellReading], width: usize) -> Vec<CellReading> {
         .collect()
 }
 
-fn lines(state: &SdrMetrics, theme: &crate::Theme, width: usize) -> Vec<Line<'static>> {
+/// The panel's lines, `width` wide. Bonded over the coexistence heatmap the
+/// ruler and the band's edges are not drawn here: the seam below carries the
+/// ruler for both halves (`render_bonded`).
+fn lines(
+    state: &SdrMetrics,
+    theme: &crate::Theme,
+    width: usize,
+    bonded: bool,
+) -> Vec<Line<'static>> {
     let occ = &state.net.band;
     let mut out = Vec::new();
     let dim = Style::default().fg(theme.label);
@@ -285,8 +295,10 @@ fn lines(state: &SdrMetrics, theme: &crate::Theme, width: usize) -> Vec<Line<'st
             Span::styled("\u{25b2}", Style::default().fg(theme.value_hi)),
         ]));
     }
-    out.push(Line::from(Span::styled(band_axis::ruler(width), dim)));
-    out.push(Line::from(Span::styled(band_axis::edges(width), dim)));
+    if !bonded {
+        out.push(Line::from(Span::styled(band_axis::ruler(width), dim)));
+        out.push(Line::from(Span::styled(band_axis::edges(width), dim)));
+    }
     out
 }
 
@@ -404,6 +416,53 @@ impl Panel for NetOccupancyPanel {
         ]
     }
 
+    /// The upper half of the survey instrument: the profile over the
+    /// coexistence heatmap, one ruler between them.
+    fn bonding(&self) -> Option<Bonding> {
+        Some(Bonding {
+            role: Bond::Below,
+            partner: "net_coexist",
+        })
+    }
+
+    /// Bonded: the frame without its bottom edge, and the profile pushed down
+    /// against the seam so the bars stand on the ruler they are read by.
+    fn render_bonded(
+        &self,
+        f: &mut Frame,
+        area: Rect,
+        state: &SdrMetrics,
+        theme: &crate::Theme,
+        focused: bool,
+        _bond: Bond,
+    ) {
+        let Some(inner) = bonded_frame(
+            self,
+            f,
+            area,
+            state,
+            theme,
+            focused,
+            Borders::TOP | Borders::LEFT | Borders::RIGHT,
+            false,
+        ) else {
+            return;
+        };
+        let mut out = lines(state, theme, inner.width as usize, true);
+        // Blank rows go above the profile, not below it: the bars belong on
+        // the seam.
+        let band = &state.net.band;
+        if band.trusted && !band.cells.is_empty() {
+            let spare = (inner.height as usize).saturating_sub(out.len());
+            let cursor_row = usize::from(state.net.band_cursor.selected.is_some());
+            let profile = out.len().saturating_sub(ROWS + cursor_row);
+            for _ in 0..spare {
+                out.insert(profile, Line::from(""));
+            }
+        }
+        f.render_widget(Paragraph::new(out), inner);
+    }
+
     fn chrome(&self, state: &SdrMetrics) -> PanelChrome {
         let chrome = PanelChrome::new("Band Occupancy")
             .stale_when(Staleness::NotStreaming)
@@ -429,7 +488,7 @@ impl Panel for NetOccupancyPanel {
             return;
         }
         f.render_widget(
-            Paragraph::new(lines(state, theme, inner.width as usize)),
+            Paragraph::new(lines(state, theme, inner.width as usize, false)),
             inner,
         );
     }

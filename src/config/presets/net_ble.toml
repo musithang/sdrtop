@@ -9,7 +9,7 @@
 # empty table that could be mistaken for a quiet room.
 
 section = "net"
-slot    = 5
+slot    = 4
 title   = "BLE"
 blurb   = "what is this device advertising"
 

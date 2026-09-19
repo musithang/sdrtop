@@ -321,7 +321,7 @@ mod tests {
             .filter(|(_, p)| p.section.as_deref() == Some(ui::menu::model::NET))
             .collect();
         net.sort_by_key(|(name, _)| name.as_str());
-        assert!(net.len() >= 6, "the NET section went missing: {net:?}");
+        assert!(net.len() >= 5, "the NET section went missing: {net:?}");
 
         let shape = |s: &crate::config::PanelSpec| (s.name.clone(), s.position.clone(), s.height);
         let mut wrong = Vec::new();
@@ -884,6 +884,70 @@ mod tests {
         .unwrap();
         engine.set_preset("spectrum_waterfall");
         assert_eq!(engine.saved_active_preset(), "spectrum_waterfall");
+    }
+
+    #[test]
+    fn a_saved_coexistence_preset_falls_back_like_any_unknown_one() {
+        // `net_coexist` was its own preset until Stop 3.3.a2 folded it into
+        // the Survey. A config saved on it names a preset that no longer
+        // exists, and must land on a drawable layout and say why, the path
+        // every unknown preset takes, checked rather than assumed.
+        let (engine, _) = App::build_ui("net_coexist", &HashMap::new(), None, true);
+        assert!(!engine.has_preset("net_coexist"));
+        assert_eq!(engine.active_preset(), "spectrum_waterfall");
+        assert!(engine.startup_warnings().iter().any(|w| {
+            w.contains("Preset 'net_coexist' is unavailable")
+                && w.contains("using 'spectrum_waterfall'")
+        }));
+    }
+
+    /// **The Survey is one instrument.** The occupancy profile and the
+    /// coexistence heatmap bond: one frame round both, the seam between them
+    /// is the channel ruler let into the rule, and the heatmap's nameplate is
+    /// on the bottom edge, since its top edge is the ruler.
+    #[test]
+    fn the_survey_draws_the_profile_and_the_history_as_one_instrument() {
+        let (engine, _) = App::build_ui("net_survey", &HashMap::new(), None, true);
+        let mut m = crate::state::SdrMetrics::fixture().streaming();
+        m.net.band.cells = vec![Default::default(); crate::signal::net::occupancy::CELLS];
+        m.net.band.trusted = true;
+        m.net.band.history = vec![vec![0.1f32; crate::signal::net::occupancy::CELLS]; 8].into();
+        let (w, h) = (140u16, 50u16);
+        let backend = ratatui::backend::TestBackend::new(w, h);
+        let mut term = ratatui::Terminal::new(backend).unwrap();
+        term.draw(|f| engine.draw(f, &m, &crate::Theme::sdr()))
+            .unwrap();
+        let buf = term.backend().buffer();
+        let rows: Vec<String> = (0..h)
+            .map(|y| (0..w).map(|x| buf.get(x, y).symbol()).collect())
+            .collect();
+        let all = rows.join("\n");
+        let seam = rows
+            .iter()
+            // A junction on the left and the last channel number: the header
+            // has junctions too, but no channel ruler.
+            .find(|r| r.contains('\u{251c}') && r.contains("13"))
+            .unwrap_or_else(|| panic!("no seam row:\n{all}"));
+        for ch in ["1", "6", "11", "13"] {
+            assert!(seam.contains(ch), "channel {ch} not on the seam: {seam}");
+        }
+        assert!(seam.contains('\u{2500}'), "the seam is a rule: {seam}");
+        // The ruler is drawn once, on the seam, not also inside either half.
+        assert_eq!(
+            all.matches(" 13 ").count() + all.matches("\u{2500}13\u{2500}").count(),
+            1,
+            "{all}"
+        );
+        assert!(
+            rows.iter()
+                .any(|r| r.contains('\u{2570}') && r.contains("Coexistence")),
+            "the heatmap's plate is not on its bottom edge:\n{all}"
+        );
+        assert!(
+            rows.iter()
+                .any(|r| r.contains('\u{256d}') && r.contains("Band Occupancy")),
+            "the profile's plate is not on the top edge:\n{all}"
+        );
     }
 
     #[test]

@@ -35,9 +35,11 @@ use ratatui::{
 };
 
 use super::band_axis;
+use super::band_axis::bonded_frame;
 use crate::state::{SdrMetrics, COLUMN_INTERVAL};
-use crate::ui::panel::{FeedSpan, Panel, PanelChrome, Staleness};
+use crate::ui::panel::{Bond, Bonding, FeedSpan, Panel, PanelChrome, Staleness};
 use crate::ui::widgets::canvas::{fold, row, Duty};
+use ratatui::widgets::Borders;
 
 pub struct NetCoexistPanel;
 
@@ -98,6 +100,57 @@ impl Panel for NetCoexistPanel {
             ))
     }
 
+    /// The lower half of the survey instrument, under the occupancy profile.
+    fn bonding(&self) -> Option<Bonding> {
+        Some(Bonding {
+            role: Bond::Above,
+            partner: "net_occupancy",
+        })
+    }
+
+    /// Bonded: the top edge is the shared ruler, the channel numbers let into
+    /// the rule the way the waterfall's frequency axis is, and the nameplate
+    /// moves to the bottom edge.
+    fn render_bonded(
+        &self,
+        f: &mut Frame,
+        area: Rect,
+        state: &SdrMetrics,
+        theme: &crate::Theme,
+        focused: bool,
+        _bond: Bond,
+    ) {
+        let sides = Borders::LEFT | Borders::RIGHT | Borders::BOTTOM;
+        let Some(inner) = bonded_frame(self, f, area, state, theme, focused, sides, true) else {
+            return;
+        };
+        let rule = crate::ui::chrome::frame::frame_color(
+            &self.chrome(state).with_engine_tags(state),
+            state,
+            focused,
+            theme,
+        );
+        let seam: Vec<Span<'static>> = band_axis::ruler(inner.width as usize)
+            .chars()
+            .map(|c| match c {
+                ' ' => Span::styled("\u{2500}", Style::default().fg(rule)),
+                d => Span::styled(d.to_string(), Style::default().fg(theme.label)),
+            })
+            .collect();
+        f.render_widget(
+            Paragraph::new(Line::from(seam)),
+            Rect { height: 1, ..inner },
+        );
+        if inner.height > 1 {
+            let body = Rect {
+                y: inner.y + 1,
+                height: inner.height - 1,
+                ..inner
+            };
+            draw(f, body, state, theme, false);
+        }
+    }
+
     fn render(
         &self,
         f: &mut Frame,
@@ -106,45 +159,54 @@ impl Panel for NetCoexistPanel {
         theme: &crate::Theme,
         _focused: bool,
     ) {
-        if inner.width == 0 || inner.height <= AXIS_ROWS {
-            return;
-        }
-        let width = inner.width as usize;
-        let rows = (inner.height - AXIS_ROWS) as usize;
-        let history: Vec<Vec<f32>> = state.net.band.history.iter().cloned().collect();
-
-        if history.is_empty() {
-            // A pass that will never come is not a pass to wait for. The same
-            // distinction the occupancy profile makes, for the same reason.
-            let said = match &state.net.survey_refused {
-                Some(why) => format!("no pass is possible: {why}"),
-                None => "waiting for the first pass".to_string(),
-            };
-            f.render_widget(
-                Paragraph::new(vec![Line::from(Span::styled(
-                    said,
-                    Style::default().fg(theme.stale),
-                ))]),
-                inner,
-            );
-            return;
-        }
-
-        let moments = canvas(&history, rows, width);
-        let mut lines: Vec<Line<'static>> = moments
-            .chunks(2)
-            .map(|pair| row(&pair[0], &pair[1], theme))
-            .collect();
-
-        // How far back the bottom of the canvas reaches: the moments it holds,
-        // not the ones it has room for, so a short history says it is short.
-        let shown = history.len().min(rows * 2);
-        let span_s = shown as f64 * COLUMN_INTERVAL.as_secs_f64();
-        let dim = Style::default().fg(theme.label);
-        lines.push(Line::from(Span::styled(band_axis::ruler(width), dim)));
-        lines.push(Line::from(Span::styled(edges_and_time(width, span_s), dim)));
-        f.render_widget(Paragraph::new(lines), inner);
+        draw(f, inner, state, theme, true);
     }
+}
+
+/// The canvas and what is under it, into `inner`. `ruler` is false when the
+/// panel is bonded and the seam above already carries it.
+fn draw(f: &mut Frame, inner: Rect, state: &SdrMetrics, theme: &crate::Theme, ruler: bool) {
+    let axis_rows = if ruler { AXIS_ROWS } else { AXIS_ROWS - 1 };
+    if inner.width == 0 || inner.height <= axis_rows {
+        return;
+    }
+    let width = inner.width as usize;
+    let rows = (inner.height - axis_rows) as usize;
+    let history: Vec<Vec<f32>> = state.net.band.history.iter().cloned().collect();
+
+    if history.is_empty() {
+        // A pass that will never come is not a pass to wait for. The same
+        // distinction the occupancy profile makes, for the same reason.
+        let said = match &state.net.survey_refused {
+            Some(why) => format!("no pass is possible: {why}"),
+            None => "waiting for the first pass".to_string(),
+        };
+        f.render_widget(
+            Paragraph::new(vec![Line::from(Span::styled(
+                said,
+                Style::default().fg(theme.stale),
+            ))]),
+            inner,
+        );
+        return;
+    }
+
+    let moments = canvas(&history, rows, width);
+    let mut lines: Vec<Line<'static>> = moments
+        .chunks(2)
+        .map(|pair| row(&pair[0], &pair[1], theme))
+        .collect();
+
+    // How far back the bottom of the canvas reaches: the moments it holds, not
+    // the ones it has room for, so a short history says it is short.
+    let shown = history.len().min(rows * 2);
+    let span_s = shown as f64 * COLUMN_INTERVAL.as_secs_f64();
+    let dim = Style::default().fg(theme.label);
+    if ruler {
+        lines.push(Line::from(Span::styled(band_axis::ruler(width), dim)));
+    }
+    lines.push(Line::from(Span::styled(edges_and_time(width, span_s), dim)));
+    f.render_widget(Paragraph::new(lines), inner);
 }
 
 #[cfg(test)]

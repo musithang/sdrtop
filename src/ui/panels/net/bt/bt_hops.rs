@@ -59,7 +59,7 @@ const AXIS_ROWS: u16 = 1;
 
 /// Which row a channel at position `idx` of `n` watched channels (low to
 /// high) lands on, across `rows` available - the lowest channel at the
-/// bottom, the same convention `net_coexist`'s own frequency scale uses.
+/// bottom, the way frequency runs up any side of a plot.
 ///
 /// When there are more watched channels than rows, several channels share a
 /// row rather than one being silently dropped - an honest loss of
@@ -190,9 +190,8 @@ impl Panel for NetBtHopsPanel {
 
         let mut lines = Vec::with_capacity(rows + 1);
         for (r, cells) in grid.iter().enumerate() {
-            // The lowest channel that lands on this row, if any - the same
-            // "one label per row, from the bottom edge" shape
-            // `net_coexist::scale_label` uses for its own frequency scale.
+            // The lowest channel that lands on this row, if any: one label per
+            // row, read from the bottom edge the way a ruler is.
             let label = (0..channels.len())
                 .find(|&idx| row_for(idx, channels.len(), rows) == r)
                 .map(|idx| format!("{:>width$}", channels[idx], width = SCALE_COLS as usize))

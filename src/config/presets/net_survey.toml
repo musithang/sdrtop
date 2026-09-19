@@ -6,6 +6,12 @@
 # fraction of the windows that arrived, so a feed dropping blocks makes every
 # one of them a lower bound, and design 13.2 puts the two on the same bench for
 # exactly that reason.
+#
+# The profile and the history are one instrument: the occupancy profile over
+# the coexistence heatmap, bonded (they declare each other), one frequency
+# ruler on the seam between them, the way spectrum and waterfall are. They
+# were two presets asking one question, "what is in this band", across
+# frequency and across time.
 
 section = "net"
 slot    = 2
@@ -15,6 +21,7 @@ blurb   = "what is in this band"
 panels = [
     { name = "header",            position = "top", height = 5 },
     { name = "net_occupancy",     position = "body" },
+    { name = "net_coexist",       position = "body" },
     { name = "net_decode_health", position = "right", width_pct = 30 },
     { name = "log",               position = "bottom", height = 5 },
     { name = "footer",            position = "bottom" },

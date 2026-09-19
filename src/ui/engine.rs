@@ -360,10 +360,12 @@ impl LayoutEngine {
                     (focused == Some(upper.name()), focused == Some(lower.name()));
                 upper.render_bonded(f, halves[0], state, theme, up_focus, Bond::Below);
                 lower.render_bonded(f, halves[1], state, theme, low_focus, Bond::Above);
+                // The seam's junctions in the lower half's declared tone, the
+                // colour its side borders are drawn in when nothing outranks it.
                 let seam = if up_focus || low_focus {
                     theme.border_focused
                 } else {
-                    theme.border_accent
+                    lower.chrome(state).tone.color(theme)
                 };
                 chrome::junction_caps(f, halves[1], seam);
             } else {
