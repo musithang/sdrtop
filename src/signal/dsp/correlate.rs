@@ -224,24 +224,21 @@ pub struct MatchedFilter {
     /// and to `i % n + n`. Whatever the write position, the whole window in
     /// time order is then one contiguous slice, `hist[pos + 1..pos + 1 + n]`.
     ///
-    /// **This is the receiver's hot loop, and the layout is the speed.** The
-    /// first version kept an ordinary ring and indexed it with a modulo per
-    /// tap: for BLE's 142-tap reference at 4 Msps that is 570 million
-    /// divisions a second, and it measured at 1.4 us a sample - the matched
-    /// filter alone ran at a fifth of real time and took the whole receiver
-    /// with it. A contiguous window costs one extra write a sample and lets
-    /// the dot product run straight through memory.
+    /// **The layout is the speed.** The first version kept an ordinary ring
+    /// and indexed it with a modulo per tap: when BLE's detector ran on this
+    /// filter, its 142-tap reference at 4 Msps was 570 million divisions a
+    /// second, measured at 1.4 us a sample - a fifth of real time. A
+    /// contiguous window costs one extra write a sample and lets the dot
+    /// product run straight through memory.
     hist: Vec<Complex<f64>>,
     /// Where the newest sample was written, in `0..n`.
     pos: usize,
     count: usize,
     energy: f64,
-    /// The FFT plan [`Self::process_block`] uses, built the first time it is
-    /// called - a caller that only ever calls [`Self::push`] never pays for it.
-    block: Option<BlockPlan>,
 }
 
-/// Overlap-save correlation: the plan and the reference, transformed once.
+/// Overlap-save correlation, for [`ShapeMatcher`]: the plan and the shape,
+/// transformed once.
 struct BlockPlan {
     size: usize,
     forward: Arc<dyn Fft<f64>>,
@@ -301,7 +298,6 @@ impl MatchedFilter {
             pos: n - 1,
             count: 0,
             energy: 0.0,
-            block: None,
         }
     }
 
@@ -327,103 +323,6 @@ impl MatchedFilter {
         self.pos = self.taps.len().max(1) - 1;
         self.count = 0;
         self.energy = 0.0;
-    }
-
-    /// Feed a block of samples at once: one reading per sample, exactly what
-    /// [`Self::push`] would have returned for each of them in turn.
-    ///
-    /// **The same answer by a cheaper road.** `push` recomputes the whole
-    /// correlation for every sample, `n` multiply-adds each, because a
-    /// correlation against an arbitrary sequence has no running form. Over a
-    /// block it has a fast one: overlap-save, a transform per few hundred
-    /// samples instead of `n` operations per sample. For BLE's 142-tap
-    /// reference that is most of an order of magnitude, and it is the step
-    /// that put the receiver inside real time. The window energy is kept by
-    /// the same running sum, refreshed at the same points, as `push` keeps
-    /// it; `the_block_path_is_the_sample_path` holds the two to agreeing
-    /// sample by sample, and `push` may carry on after a block as if every
-    /// sample had gone through it.
-    pub fn process_block(&mut self, x: &[Complex<f32>], out: &mut Vec<Option<Match>>) {
-        out.clear();
-        if x.is_empty() {
-            return;
-        }
-        let n = self.taps.len().max(1);
-        if self.block.is_none() {
-            self.block = Some(BlockPlan::new(&self.taps));
-        }
-
-        // The stream this block's windows reach into: the whole window before
-        // it, oldest first, then the block. The first of those `n` samples is
-        // read only as the one leaving the first new window, for the running
-        // energy. Before `n` samples have been seen the missing ones are
-        // zeros, and every window that would read one is a warm-up reading
-        // `push` returns `None` for.
-        let mut stream: Vec<Complex<f64>> = Vec::with_capacity(n + x.len());
-        stream.extend_from_slice(&self.hist[self.pos + 1..self.pos + 1 + n]);
-        stream.extend(x.iter().map(|s| Complex::new(s.re as f64, s.im as f64)));
-
-        // Correlations, one per new sample: window `i` is
-        // `stream[1 + i..1 + i + n]`, ending on new sample `i`.
-        let mut values = vec![Complex::new(0.0, 0.0); x.len()];
-        let plan = self.block.as_mut().expect("built above");
-        let step = plan.size - n + 1;
-        let mut start = 0;
-        while start < x.len() {
-            for (j, slot) in plan.buffer.iter_mut().enumerate() {
-                *slot = stream
-                    .get(1 + start + j)
-                    .copied()
-                    .unwrap_or(Complex::new(0.0, 0.0));
-            }
-            plan.forward
-                .process_with_scratch(&mut plan.buffer, &mut plan.scratch);
-            for (b, k) in plan.buffer.iter_mut().zip(&plan.kernel) {
-                *b *= k;
-            }
-            plan.inverse
-                .process_with_scratch(&mut plan.buffer, &mut plan.scratch);
-            // Circular outputs `n - 1..size` are the linear ones: window
-            // `start + m - (n - 1)` for each.
-            for m in (n - 1)..plan.size {
-                let i = start + m - (n - 1);
-                if i >= x.len() {
-                    break;
-                }
-                values[i] = plan.buffer[m];
-            }
-            start += step;
-        }
-
-        out.reserve(x.len());
-        for (i, value) in values.into_iter().enumerate() {
-            let t = self.count;
-            self.count += 1;
-            self.energy += stream[n + i].norm_sqr();
-            if t >= n {
-                self.energy -= stream[i].norm_sqr();
-            }
-            if t + 1 < n {
-                out.push(None);
-                continue;
-            }
-            if self.count.is_multiple_of(REFRESH) {
-                self.energy = stream[1 + i..1 + i + n].iter().map(|s| s.norm_sqr()).sum();
-            }
-            out.push(Some(Match {
-                value,
-                window_energy: self.energy,
-                reference_energy: self.reference_energy,
-            }));
-        }
-
-        // Leave the history as `push` would have: the last `n` samples, in
-        // order, so the next `push` or block sees the right window.
-        for &s in &stream[stream.len().saturating_sub(n)..] {
-            self.pos = if self.pos + 1 == n { 0 } else { self.pos + 1 };
-            self.hist[self.pos] = s;
-            self.hist[self.pos + n] = s;
-        }
     }
 
     /// Feed one sample. Returns a reading once `reference.len()` samples have
@@ -509,6 +408,138 @@ pub fn threshold_for_false_alarm(taps: usize, rate: f64) -> f64 {
         return 1.0;
     }
     1.0 - rate.clamp(0.0, 1.0).powf(1.0 / (taps - 1) as f64)
+}
+
+/// Correlation of a real signal's *shape* with a known real sequence:
+/// Pearson's coefficient between each window and the sequence, in `[-1, 1]`.
+///
+/// **Blind to any constant added to the signal, by construction.** The
+/// sequence is centred once (its own mean removed), so a constant added to
+/// the window contributes nothing to the numerator, and the window's own
+/// spread is taken about its own mean in the denominator. A frequency
+/// discriminator turns a transmitter's carrier offset into exactly such a
+/// constant, which is why BLE's detector correlates here rather than
+/// coherently: a coherent correlation across a 40-microsecond sync word
+/// falls apart at an offset of a few tens of kilohertz, and BLE allows
+/// ±360 (`dev_docs/case-study-ble-crc.md`, section 13). Blind to the
+/// signal's scale too, so the discriminator's units do not matter.
+///
+/// The correlation runs by overlap-save, two stretches of signal to a
+/// transform (see [`Self::process_block`]), and the window sums alongside it.
+pub struct ShapeMatcher {
+    plan: BlockPlan,
+    n: usize,
+    shape_energy: f64,
+    /// The last `n` values seen, oldest first, for the window sums.
+    tail: Vec<f64>,
+    /// Values seen so far, for the warm-up.
+    seen: usize,
+}
+
+impl ShapeMatcher {
+    pub fn new(shape: &[f32]) -> Self {
+        let n = shape.len().max(1);
+        let mean = shape.iter().map(|&v| v as f64).sum::<f64>() / n as f64;
+        let centred: Vec<Complex<f64>> = shape
+            .iter()
+            .map(|&v| Complex::new(v as f64 - mean, 0.0))
+            .collect();
+        let shape_energy = centred.iter().map(|c| c.re * c.re).sum();
+        Self {
+            plan: BlockPlan::new(&centred),
+            n,
+            shape_energy,
+            tail: vec![0.0; n],
+            seen: 0,
+        }
+    }
+
+    /// One reading per value: `None` until a full window has been seen,
+    /// then the correlation of the window ending at that value. A window
+    /// with no spread at all (a constant) has no shape to compare and reads
+    /// as zero.
+    ///
+    /// **Two stretches of signal per transform.** The signal is real and so
+    /// is the shape, so one stretch put in the real part of a transform and
+    /// the next in the imaginary part come back out of the correlation
+    /// cleanly separated - the real part of the result is the first
+    /// stretch's, the imaginary the second's. Correlating a real signal
+    /// through a complex transform one stretch at a time left the imaginary
+    /// half of every transform holding zeros, and was the largest single
+    /// cost of the BLE receiver on a busy channel.
+    pub fn process_block(&mut self, x: &[f32], out: &mut Vec<Option<f64>>) {
+        out.clear();
+        if x.is_empty() {
+            return;
+        }
+        let n = self.n;
+        // The whole window before this block, then the block: new value `i`
+        // is `stream[n + i]`, its window `stream[1 + i..=n + i]`, and
+        // `stream[i]` the value that has just left it.
+        let mut stream = std::mem::take(&mut self.tail);
+        stream.extend(x.iter().map(|&v| v as f64));
+
+        let mut values = vec![0.0f64; x.len()];
+        let plan = &mut self.plan;
+        let size = plan.size;
+        let step = size - n + 1;
+        let at = |i: usize| stream.get(1 + i).copied().unwrap_or(0.0);
+        let mut start = 0;
+        while start < x.len() {
+            let second = start + step;
+            for (j, slot) in plan.buffer.iter_mut().enumerate() {
+                let b = if second < x.len() {
+                    at(second + j)
+                } else {
+                    0.0
+                };
+                *slot = Complex::new(at(start + j), b);
+            }
+            plan.forward
+                .process_with_scratch(&mut plan.buffer, &mut plan.scratch);
+            for (b, k) in plan.buffer.iter_mut().zip(&plan.kernel) {
+                *b *= k;
+            }
+            plan.inverse
+                .process_with_scratch(&mut plan.buffer, &mut plan.scratch);
+            for m in (n - 1)..size {
+                let i = start + m - (n - 1);
+                if i < x.len() {
+                    values[i] = plan.buffer[m].re;
+                }
+                let i = second + m - (n - 1);
+                if second < x.len() && i < x.len() {
+                    values[i] = plan.buffer[m].im;
+                }
+            }
+            start += 2 * step;
+        }
+
+        // The window sums from scratch at the top of every block and running
+        // within it: exact at each start, and a block is far too short for a
+        // running sum's rounding to matter.
+        let mut sum: f64 = stream[..n].iter().sum();
+        let mut energy: f64 = stream[..n].iter().map(|v| v * v).sum();
+        out.reserve(x.len());
+        for (i, value) in values.iter().enumerate() {
+            let (new, old) = (stream[n + i], stream[i]);
+            sum += new - old;
+            energy += new * new - old * old;
+            let seen = self.seen + i;
+            if seen + 1 < n {
+                out.push(None);
+                continue;
+            }
+            let spread = energy - sum * sum / n as f64;
+            out.push(Some(if spread > 0.0 && self.shape_energy > 0.0 {
+                value / (self.shape_energy * spread).sqrt()
+            } else {
+                0.0
+            }));
+        }
+        self.seen += x.len();
+        self.tail = stream[stream.len() - n..].to_vec();
+    }
 }
 
 #[cfg(test)]
@@ -635,53 +666,72 @@ mod tests {
         }
     }
 
-    /// The block path is the sample path by another road: the same reading
-    /// for every sample, whatever the blocks happen to be cut into - blocks
-    /// shorter than the reference, a first block that ends mid warm-up, and
-    /// a run long enough to cross the energy refresh - and `push` carries on
-    /// after a block exactly as if every sample had gone through it.
+    /// Pearson's coefficient against the definition, window by window,
+    /// across blocks of awkward sizes - and unchanged, to rounding, when a
+    /// constant is added to the whole signal.
     #[test]
-    fn the_block_path_is_the_sample_path() {
-        const N: usize = 142;
-        let mut rng = Rng::new(31);
-        let reference = rng.qpsk(N);
-        let x = rng.qpsk(REFRESH + 20_000);
-
-        let mut by_sample = MatchedFilter::new(&reference);
-        let expected: Vec<Option<Match>> = x.iter().map(|s| by_sample.push(*s)).collect();
-
-        let mut by_block = MatchedFilter::new(&reference);
-        let mut got = Vec::new();
-        let mut out = Vec::new();
-        let sizes = [1usize, 7, 100, 1000, 5000, 3];
-        let mut at = 0;
-        let mut k = 0;
-        // Stop short of the end, so the tail goes through `push`.
-        while at < x.len() - 500 {
-            let len = sizes[k % sizes.len()].min(x.len() - 500 - at);
-            by_block.process_block(&x[at..at + len], &mut out);
-            got.extend(out.iter().copied());
-            at += len;
-            k += 1;
-        }
-        got.extend(x[at..].iter().map(|s| by_block.push(*s)));
-
-        assert_eq!(got.len(), expected.len());
-        for (t, (g, e)) in got.iter().zip(&expected).enumerate() {
-            match (g, e) {
-                (None, None) => {}
-                (Some(g), Some(e)) => {
-                    assert!(
-                        (g.value - e.value).norm() < 1e-9,
-                        "t={t}: {} vs {}",
-                        g.value,
-                        e.value
-                    );
-                    assert!((g.window_energy - e.window_energy).abs() < 1e-9, "t={t}");
+    fn the_shape_matcher_is_pearsons_correlation_and_blind_to_an_offset() {
+        const N: usize = 40;
+        let mut rng = Rng::new(41);
+        let shape: Vec<f32> = rng.qpsk(N).iter().map(|c| c.re).collect();
+        let x: Vec<f32> = rng.qpsk(3000).iter().map(|c| c.re * 3.0 + c.im).collect();
+        let run = |offset: f32| -> Vec<Option<f64>> {
+            let mut m = ShapeMatcher::new(&shape);
+            let mut got = Vec::new();
+            let mut out = Vec::new();
+            let shifted: Vec<f32> = x.iter().map(|v| v + offset).collect();
+            let mut at = 0;
+            for len in [1usize, 17, 39, 400, 2543].iter().cycle() {
+                if at >= shifted.len() {
+                    break;
                 }
-                _ => panic!("t={t}: one path has a reading and the other does not"),
+                let end = (at + len).min(shifted.len());
+                m.process_block(&shifted[at..end], &mut out);
+                got.extend(out.iter().copied());
+                at = end;
             }
+            got
+        };
+        let plain = run(0.0);
+        let offset = run(1000.0);
+        let mean = |v: &[f64]| v.iter().sum::<f64>() / v.len() as f64;
+        let g: Vec<f64> = shape.iter().map(|&v| v as f64).collect();
+        let gm = mean(&g);
+        for t in 0..x.len() {
+            if t + 1 < N {
+                assert!(plain[t].is_none() && offset[t].is_none(), "t={t}");
+                continue;
+            }
+            let w: Vec<f64> = x[t + 1 - N..=t].iter().map(|&v| v as f64).collect();
+            let wm = mean(&w);
+            let num: f64 = w.iter().zip(&g).map(|(a, b)| (a - wm) * (b - gm)).sum();
+            let da: f64 = w.iter().map(|a| (a - wm).powi(2)).sum();
+            let db: f64 = g.iter().map(|b| (b - gm).powi(2)).sum();
+            let rho = num / (da * db).sqrt();
+            let p = plain[t].unwrap();
+            assert!((p - rho).abs() < 1e-6, "t={t}: {p} vs {rho}");
+            assert!(
+                (offset[t].unwrap() - rho).abs() < 1e-3,
+                "t={t}: offset moved it"
+            );
         }
+    }
+
+    /// The shape itself, scaled and shifted, correlates perfectly; the shape
+    /// upside down, perfectly the other way.
+    #[test]
+    fn the_shape_itself_reads_one_and_its_negative_minus_one() {
+        let mut rng = Rng::new(43);
+        let shape: Vec<f32> = rng.qpsk(64).iter().map(|c| c.re).collect();
+        let mut out = Vec::new();
+        let mut m = ShapeMatcher::new(&shape);
+        let scaled: Vec<f32> = shape.iter().map(|v| 250_000.0 * v - 30_000.0).collect();
+        m.process_block(&scaled, &mut out);
+        assert!((out.last().unwrap().unwrap() - 1.0).abs() < 1e-6);
+        let mut m = ShapeMatcher::new(&shape);
+        let negated: Vec<f32> = shape.iter().map(|v| -v).collect();
+        m.process_block(&negated, &mut out);
+        assert!((out.last().unwrap().unwrap() + 1.0).abs() < 1e-6);
     }
 
     #[test]

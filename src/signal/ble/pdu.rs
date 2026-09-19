@@ -122,6 +122,25 @@ pub fn used_bits(length: u8) -> usize {
     HEADER_BITS + body_bits(length)
 }
 
+/// The PDU's length field, from its de-whitened header alone: `None` with
+/// fewer than [`HEADER_BITS`] bits.
+///
+/// What a receiver needs to know before the rest of the packet has arrived -
+/// whether it has, yet - without slicing and decoding bits it cannot use.
+/// [`decode`] reads the field through this too, so the two cannot disagree.
+pub fn length(header: &[bool]) -> Option<u8> {
+    if header.len() < HEADER_BITS {
+        return None;
+    }
+    let mut byte1 = 0u8;
+    for i in 0..8 {
+        if header[8 + i] {
+            byte1 |= 1 << i;
+        }
+    }
+    Some(byte1 & 0x3F)
+}
+
 /// Decode one advertising channel PDU from its de-whitened bits, in
 /// transmission order, starting at the header's own first bit and running
 /// through the header, the payload and the CRC.
@@ -146,11 +165,10 @@ pub fn decode(bits: &[bool]) -> Option<Packet> {
         b
     };
     let byte0 = byte(0);
-    let byte1 = byte(8);
     let pdu_type = PduType::from_bits(byte0);
     let tx_add_random = (byte0 >> 6) & 1 != 0;
     let rx_add_random = (byte0 >> 7) & 1 != 0;
-    let length = byte1 & 0x3F;
+    let length = self::length(bits)?;
 
     let needed = used_bits(length);
     if bits.len() < needed {

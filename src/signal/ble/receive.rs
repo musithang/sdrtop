@@ -26,8 +26,8 @@ use num_complex::Complex;
 use crate::hardware::SampleGeometry;
 use crate::signal::demod::decode as decode_iq;
 use crate::signal::dsp::code::lfsr::whiten;
-use crate::signal::dsp::correlate::{threshold_for_false_alarm, MatchedFilter};
-use crate::signal::dsp::discriminate::discriminate;
+use crate::signal::dsp::correlate::ShapeMatcher;
+use crate::signal::dsp::discriminate::{discriminate, instantaneous_freq_hz};
 use crate::signal::dsp::estimate::snr_from_metric;
 use crate::signal::dsp::fir::{design_lowpass_to_spec, StreamingDecimator};
 
@@ -88,24 +88,45 @@ const HEADER_SEARCH_SYMBOLS: usize = 6;
 /// time (`dev_docs/case-study-ble-crc.md`, section 11).
 const DECODE_EVERY_SAMPLES: usize = 8 * WORKING_SPS;
 
-/// How rare a false trigger has to be to live with continuously, at 4
-/// million matched-filter evaluations a second.
+/// The sync word's detector statistic, Pearson's correlation between the
+/// discriminator's frequency track and the ideal one (`ShapeMatcher`), has
+/// under noise alone a distribution close to normal about zero with variance
+/// `1 / N_eff`. `N_eff` is this PHY's, measured: complex Gaussian noise
+/// through this module's own [`front_end`] and discriminator, correlated
+/// against the PHY's own frequency template - 107.8 for LE 1M (the same at 4,
+/// 8 and 20 Msps raw, since the front end fixes what reaches the working
+/// rate) and 133.1 for LE 2M. The normal approximation was measured to hold
+/// out to 4.5 standard deviations (exceedances within 30 % of prediction);
+/// `the_shape_detector_s_noise_statistics_are_the_ones_measured` re-measures
+/// both, so a change to the front end that moves them fails a test rather
+/// than silently moving the threshold's meaning.
+fn shape_n_eff(phy: Phy) -> f64 {
+    match phy {
+        Phy::OneM => 107.8,
+        Phy::TwoM => 133.1,
+    }
+}
+
+/// Standard deviations above zero the statistic must reach to trigger: the
+/// one-sided normal tail at `1e-9` a sample, about one false trigger every
+/// four minutes of pure noise at 4 Msps.
 ///
-/// **Measured against real air, not just the model.** `1e-9` - about one
-/// false trigger every four minutes under `false_alarm_rate`'s assumption of
-/// circularly symmetric Gaussian noise - was tried first on a real HackRF
-/// capture and found the coherence at every real trigger sitting at 0.12 to
-/// 0.17, a hair above that rate's own 0.122 threshold, on a busy real
-/// channel. Real RF is not the model: correlated interference, ADC
-/// artefacts and genuine nearby transmissions on other protocols give a
-/// matched filter far more near-misses than white Gaussian noise would, so
-/// the same formula's rate needs to be pushed much further to buy a
-/// threshold that actually rejects them. This is that adjustment - a rate
-/// with no claim to being the true false-alarm probability of a live
-/// receiver, only to producing a threshold high enough that this arc's own
-/// clean synthetic detections (coherence 0.85 upward) still clear it
-/// comfortably while the marginal real-air ones measured here do not.
-const FALSE_ALARM_RATE: f64 = 1e-30;
+/// **Replaces a coherent detector whose threshold had to be forced.** The
+/// matched filter this detector took over from correlated coherently across
+/// the whole 40-microsecond sync word, and its false-alarm rate had been
+/// pushed to `1e-30` after real triggers were measured at coherences of 0.12
+/// to 0.17 - which was a transmitter's carrier offset turning the phase
+/// across the window, not interference. Here an offset is a constant the
+/// statistic removes, and the threshold means what it says.
+const SHAPE_Z: f64 = 6.0;
+
+/// The detector threshold for `phy`: [`SHAPE_Z`] standard deviations of its
+/// noise statistic. About 0.58 for LE 1M; on a recording of real traffic
+/// every CRC-clean packet an independent receiver found peaked at 0.68 or
+/// more (`dev_docs/case-study-ble-crc.md`, section 13).
+fn shape_threshold(phy: Phy) -> f64 {
+    SHAPE_Z / shape_n_eff(phy).sqrt()
+}
 
 /// The anti-alias filter's passband edge, in Hz: comfortably beyond this
 /// PHY's own occupied bandwidth (`Phy::deviation_hz`'s own peak deviation on
@@ -282,6 +303,15 @@ pub fn front_end(raw_rate: f64, phy: Phy) -> Result<StreamingDecimator, String> 
 /// sync content and into the suffix margin at its far edge - measured
 /// directly during this fix's own development, and the second of the two
 /// bugs finding this reference construction cost.
+/// The sync word's ideal frequency track: [`matched_reference`] - the sync
+/// word as it arrives through the front end - through the discriminator.
+/// What the detector correlates against.
+fn frequency_template(reference: &[Complex<f32>], phy: Phy) -> Vec<f32> {
+    let mut track = Vec::new();
+    discriminate(reference, working_rate_hz(phy), &mut track);
+    track
+}
+
 fn matched_reference(raw_rate: f64, phy: Phy) -> Result<Vec<Complex<f32>>, String> {
     let sps = (raw_rate / phy.symbol_rate_hz()).round().max(1.0) as usize;
     let sample_rate = sps as f64 * phy.symbol_rate_hz();
@@ -324,19 +354,30 @@ fn margin_bits(len: usize) -> Vec<bool> {
     (0..len).map(|i| i % 2 == 0).collect()
 }
 
-/// One channel's live receiver: the decimator, the matched filter, and the
-/// capture in progress, if any.
+/// One channel's live receiver: the decimator, the sync-word detector, and
+/// the capture in progress, if any.
 pub struct Receiver {
     decim: StreamingDecimator,
-    filter: MatchedFilter,
+    /// The detector: the discriminator's frequency track against the sync
+    /// word's ideal one. See [`shape_threshold`].
+    shape: ShapeMatcher,
     threshold: f64,
-    /// The reference's own length, once filtered and decimated: not
-    /// [`super::detect::REFERENCE_SYMBOLS`] `*` [`WORKING_SPS`], because
-    /// [`front_end`]'s filter changes how many samples the reference comes
-    /// out to. Both [`threshold_for_false_alarm`] and `snr_from_metric`
-    /// below need the window length the coherence was actually measured
-    /// over, not the unfiltered figure.
-    window_len: usize,
+    /// The last working sample, so the discriminator runs straight across
+    /// block boundaries.
+    last_sample: Option<Complex<f32>>,
+    /// The sync word as it should arrive, filtered and decimated: not for
+    /// detection any more, but for the packet's SNR once its carrier offset
+    /// is known (see [`Self::corrected_snr_db`]).
+    reference: Vec<Complex<f32>>,
+    reference_energy: f64,
+    /// The last `reference.len()` working samples.
+    recent: std::collections::VecDeque<Complex<f32>>,
+    /// The samples of the sync word this capture was triggered on, taken at
+    /// the strongest reading in the first two symbols after the trigger.
+    sync_window: Vec<Complex<f32>>,
+    sync_rho: f64,
+    /// `capture.len()` at the trigger, to count samples since it.
+    trigger_len: usize,
     channel: u8,
     raw_rate: f64,
     /// Which PHY this receiver decodes - B17's own addition. Fixed for the
@@ -350,30 +391,34 @@ pub struct Receiver {
     /// trigger's own position is not trusted to be the header's own first
     /// sample, and needs samples from *before* the trigger to search
     /// against as well as after it.
-    history: Vec<Complex<f32>>,
+    history: std::collections::VecDeque<Complex<f32>>,
     capture: Vec<Complex<f32>>,
     capturing: bool,
-    last_coherence: f64,
 }
 
 impl Receiver {
     pub fn new(raw_rate: f64, channel: u8, phy: Phy) -> Result<Self, String> {
         let decim = front_end(raw_rate, phy)?;
         let reference = matched_reference(raw_rate, phy)?;
-        let window_len = reference.len();
-        let threshold = threshold_for_false_alarm(window_len, FALSE_ALARM_RATE);
+        let shape = frequency_template(&reference, phy);
+        let reference_energy = reference.iter().map(|s| s.norm_sqr() as f64).sum();
         Ok(Self {
             decim,
-            filter: MatchedFilter::new(&reference),
-            threshold,
-            window_len,
+            shape: ShapeMatcher::new(&shape),
+            threshold: shape_threshold(phy),
+            last_sample: None,
+            recent: std::collections::VecDeque::with_capacity(reference.len() + 1),
+            reference,
+            reference_energy,
+            sync_window: Vec::new(),
+            sync_rho: 0.0,
+            trigger_len: 0,
             channel,
             raw_rate,
             phy,
-            history: Vec::new(),
+            history: std::collections::VecDeque::with_capacity(LOOKBACK_SAMPLES + 1),
             capture: Vec::new(),
             capturing: false,
-            last_coherence: 0.0,
         })
     }
 
@@ -381,6 +426,155 @@ impl Receiver {
     /// `raw_rate` on `phy` - a retune, a sample-rate change or a PHY change
     /// invalidates the detector's own reference and the capture in
     /// progress alike, so the caller rebuilds rather than reusing.
+    /// The carrier offset, read from the sync word this capture was triggered
+    /// on.
+    ///
+    /// **Data-aided, because the data is not balanced.** B7 took the mean of
+    /// the packet's own symbols, on the reasoning that whitened data has as
+    /// many ones as zeros. Over a real stretch of bits it has roughly as many,
+    /// and a short packet's surplus of either moves the mean by the deviation
+    /// times the surplus fraction: a synthetic packet sent 15 kHz off was
+    /// reported at 35. The preamble and access address are known exactly.
+    ///
+    /// **And read as a tone, not as a mean of frequencies.** Multiplying the
+    /// received sync word by the conjugate of the reference strips the
+    /// modulation off and leaves `z[k]`, a constant-amplitude tone at the
+    /// carrier offset. Its frequency is the slope of its phase, fitted by
+    /// least squares - every sample of the sync word contributing, rather
+    /// than one discriminator
+    /// reading per symbol, and precise enough that turning the sync word back
+    /// by it leaves the coherence the SNR is read from intact (see
+    /// [`Self::corrected_snr_db`]). A first version read the offset from one
+    /// discriminator reading per symbol; its ±20 kHz of scatter was enough
+    /// to spin the phase across the window again and report CRC-clean
+    /// packets at -7 dB.
+    ///
+    /// The uncertainty is the fit's: the scatter of the tone's phase about the
+    /// line, through as many independent points as the residuals'
+    /// autocorrelation says there are. Two earlier versions each got this
+    /// wrong in a different direction - the scatter of per-sample phase steps
+    /// overstated it several times (neighbouring steps share a sample, so
+    /// their errors cancel along the line), and one point per symbol
+    /// overstated it by two thirds. `the_offset_s_uncertainty_matches_its_
+    /// scatter` holds the stated figure to the measured one.
+    fn sync_offset(&self) -> Option<crate::signal::dsp::uncertainty::Uncertain> {
+        let n = self.reference.len();
+        if self.sync_window.len() != n || n < 2 * WORKING_SPS {
+            return None;
+        }
+        let tone: Vec<Complex<f64>> = self
+            .sync_window
+            .iter()
+            .zip(&self.reference)
+            .map(|(w, r)| {
+                Complex::new(w.re as f64, w.im as f64) * Complex::new(r.re as f64, -(r.im as f64))
+            })
+            .collect();
+        let steps: Vec<Complex<f64>> = tone.windows(2).map(|p| p[1] * p[0].conj()).collect();
+        let sum: Complex<f64> = steps.iter().sum();
+        if sum.norm() == 0.0 {
+            return None;
+        }
+        let mean_step = sum.arg();
+        // The tone's phase, unwrapped about the mean step so a large offset
+        // never wraps, then a least-squares line through it: its slope is the
+        // offset, its scatter about the line the noise the slope was read
+        // through.
+        let mut phase = Vec::with_capacity(tone.len());
+        let mut acc = 0.0f64;
+        phase.push(0.0);
+        for (k, step) in steps.iter().enumerate() {
+            acc += (step * Complex::from_polar(1.0, -mean_step)).arg();
+            phase.push(acc + mean_step * (k + 1) as f64);
+        }
+        let n_pts = phase.len() as f64;
+        let k_mean = (n_pts - 1.0) / 2.0;
+        let p_mean = phase.iter().sum::<f64>() / n_pts;
+        let sxx: f64 = (0..phase.len()).map(|k| (k as f64 - k_mean).powi(2)).sum();
+        let sxy: f64 = phase
+            .iter()
+            .enumerate()
+            .map(|(k, p)| (k as f64 - k_mean) * (p - p_mean))
+            .sum();
+        let slope = sxy / sxx;
+        let residual: Vec<f64> = phase
+            .iter()
+            .enumerate()
+            .map(|(k, p)| p - p_mean - slope * (k as f64 - k_mean))
+            .collect();
+        let residual_var = residual.iter().map(|r| r * r).sum::<f64>() / (n_pts - 2.0).max(1.0);
+        if residual_var <= 0.0 {
+            return Some(crate::signal::dsp::uncertainty::Uncertain::exact(
+                slope * working_rate_hz(self.phy) / std::f64::consts::TAU,
+            ));
+        }
+        // How many independent points the line was really fitted through.
+        // The samples are not independent - the front end and the Gaussian
+        // shaping both spread each error over its neighbours - and assuming
+        // they were understates the uncertainty; assuming one per symbol
+        // overstated it. The residuals' own autocorrelation says: the usual
+        // effective sample size, `n / (1 + 2 sum rho_lag)`, over the lags a
+        // symbol or two spans.
+        let lag_sum: f64 = (1..=2 * WORKING_SPS)
+            .map(|lag| {
+                residual
+                    .iter()
+                    .zip(&residual[lag..])
+                    .map(|(a, b)| a * b)
+                    .sum::<f64>()
+                    / ((residual.len() - lag) as f64 * residual_var)
+            })
+            .sum();
+        let n_eff = (n_pts / (1.0 + 2.0 * lag_sum)).clamp(2.0, n_pts);
+        // A line's slope through `n_eff` independent points spread over the
+        // same span has variance `12 sigma^2 / (n (n^2 - 1))` per spacing
+        // squared; the spacing is `n_pts / n_eff` samples.
+        let spacing = n_pts / n_eff;
+        let per_sample = (12.0 * residual_var / (n_eff * (n_eff * n_eff - 1.0))).sqrt() / spacing;
+        let rate = working_rate_hz(self.phy);
+        let to_hz = rate / std::f64::consts::TAU;
+        Some(crate::signal::dsp::uncertainty::Uncertain::from_sigma(
+            slope * to_hz,
+            per_sample * to_hz,
+        ))
+    }
+
+    /// The packet's SNR, from the sync word it was triggered on, once its
+    /// carrier offset is known.
+    ///
+    /// The sync word's samples are turned back by `offset_hz` and correlated
+    /// coherently with the reference, and the coherence goes through
+    /// `snr_from_metric`, as B7 set out. Before the offset was taken out, the
+    /// coherence - and so the SNR - was pulled down by the transmitter's own
+    /// crystal error, reporting an offset device as a weak one.
+    ///
+    /// `snr_from_metric` was derived for `Coherence::metric` - two noisy
+    /// copies of the same unknown signal correlated against each other - and
+    /// this is a noisy signal against a known, noiseless reference. For a
+    /// unit-power reference at this window length the two converge to the
+    /// same `rho = snr / (1 + snr)` relationship, so the tested inverse is
+    /// reused: a close approximation here, not proven exact.
+    fn corrected_snr_db(&self, offset_hz: f64) -> Option<f64> {
+        let n = self.reference.len();
+        if self.sync_window.len() != n || self.reference_energy <= 0.0 {
+            return None;
+        }
+        let rate = working_rate_hz(self.phy);
+        let mut value = Complex::new(0.0f64, 0.0);
+        let mut window_energy = 0.0f64;
+        for (k, (r, w)) in self.reference.iter().zip(&self.sync_window).enumerate() {
+            let ph = -std::f64::consts::TAU * offset_hz * k as f64 / rate;
+            let w = Complex::new(w.re as f64, w.im as f64) * Complex::new(ph.cos(), ph.sin());
+            value += Complex::new(r.re as f64, -(r.im as f64)) * w;
+            window_energy += w.norm_sqr();
+        }
+        if window_energy <= 0.0 {
+            return None;
+        }
+        let coherence = value.norm_sqr() / (self.reference_energy * window_energy);
+        snr_from_metric(coherence, n).map(|snr| 10.0 * snr.log10())
+    }
+
     pub fn matches(&self, channel: u8, raw_rate: f64, phy: Phy) -> bool {
         self.channel == channel && (self.raw_rate - raw_rate).abs() < 1.0 && self.phy == phy
     }
@@ -395,24 +589,49 @@ impl Receiver {
         self.decim.process(&iq, &mut working);
 
         let cap_limit = (16 + MAX_PDU_BYTES * 8) * WORKING_SPS;
-        // Every sample through the matched filter, capturing or not, as one
-        // block. Two reasons, both measured: the block path is most of an
-        // order of magnitude cheaper (`MatchedFilter::process_block`), and a
-        // filter fed only between captures used to resume after each one with
-        // a window joining samples from before the capture to samples after
-        // it - a splice of its own, on every trigger.
-        let mut matches = Vec::new();
-        self.filter.process_block(&working, &mut matches);
+        // Every sample through the detector, capturing or not, as one block:
+        // the discriminator first, straight across the block boundary, then
+        // the correlation against the sync word's frequency track. A
+        // detector fed only between captures used to resume after each one
+        // with a window joining samples from before the capture to samples
+        // after it - a splice of its own, on every trigger.
+        let rate = working_rate_hz(self.phy);
+        let mut track = Vec::with_capacity(working.len());
+        for &s in &working {
+            track.push(match self.last_sample {
+                Some(prev) => instantaneous_freq_hz(prev, s, rate),
+                None => 0.0,
+            });
+            self.last_sample = Some(s);
+        }
+        let mut readings = Vec::new();
+        self.shape.process_block(&track, &mut readings);
 
         let mut found = Vec::new();
-        for (&sample, reading) in working.iter().zip(&matches) {
-            self.history.push(sample);
+        for (&sample, reading) in working.iter().zip(&readings) {
+            self.recent.push_back(sample);
+            if self.recent.len() > self.reference.len() {
+                self.recent.pop_front();
+            }
+            // A ring: one push and at most one pop a sample, where a `Vec`
+            // trimmed from the front moved every sample it held, every time.
+            self.history.push_back(sample);
             if self.history.len() > LOOKBACK_SAMPLES {
-                let excess = self.history.len() - LOOKBACK_SAMPLES;
-                self.history.drain(..excess);
+                self.history.pop_front();
             }
             if self.capturing {
                 self.capture.push(sample);
+                // The trigger fires on the way up; the sync word's own
+                // samples are taken where the reading peaks, within two
+                // symbols of it.
+                if self.capture.len() - self.trigger_len <= 2 * WORKING_SPS {
+                    if let Some(rho) = *reading {
+                        if rho > self.sync_rho {
+                            self.sync_rho = rho;
+                            self.sync_window = self.recent.iter().copied().collect();
+                        }
+                    }
+                }
                 let due = self.capture.len().is_multiple_of(DECODE_EVERY_SAMPLES);
                 match due.then(|| self.try_decode()).flatten() {
                     Some(packet) => {
@@ -438,11 +657,13 @@ impl Receiver {
                     }
                     None => {}
                 }
-            } else if let Some(coherence) = reading.and_then(|m| m.coherence()) {
-                if coherence > self.threshold {
+            } else if let Some(rho) = *reading {
+                if rho > self.threshold {
                     self.capturing = true;
-                    self.capture = self.history.clone();
-                    self.last_coherence = coherence;
+                    self.capture = self.history.iter().copied().collect();
+                    self.trigger_len = self.capture.len();
+                    self.sync_rho = rho;
+                    self.sync_window = self.recent.iter().copied().collect();
                 }
             }
         }
@@ -586,8 +807,19 @@ impl Receiver {
         let rough_offset = crate::signal::dsp::uncertainty::mean_with_uncertainty(inst);
         let sps = WORKING_SPS as f64;
         let phase = phase.unwrap_or_else(|| super::sync::phase(inst, sps, symbols));
-        let (mut bits, raw_symbols) =
-            super::sync::slice_at(inst, sps, symbols, rough_offset.value() as f32, phase);
+        let threshold = rough_offset.value() as f32;
+        // The header first, alone. Most attempts come before the packet has
+        // finished arriving, and its length says so from sixteen bits;
+        // slicing and decoding the rest only to find it short was most of
+        // what a busy channel cost. The same bits either way - at a fixed
+        // phase and threshold each symbol is sliced on its own - so this
+        // only skips work whose answer was already `None`.
+        let (mut header, _) = super::sync::slice_at(inst, sps, pdu::HEADER_BITS, threshold, phase);
+        whiten(&mut header, self.channel);
+        if pdu::used_bits(pdu::length(&header)?) > symbols {
+            return None;
+        }
+        let (mut bits, raw_symbols) = super::sync::slice_at(inst, sps, symbols, threshold, phase);
         // B8's modulation-quality measurement needs the physically
         // transmitted (still-whitened) symbols and their raw discriminator
         // readings - exactly what `bits` and `raw_symbols` are before the
@@ -606,32 +838,13 @@ impl Receiver {
         let used = pdu::used_bits(packet.length).min(raw_bits.len());
         let raw_bits = &raw_bits[..used];
         let raw_symbols = &raw_symbols[..used];
-        // The *reported* offset, unlike `rough_offset` above, is read from
-        // one sample per symbol rather than the raw four-per-symbol trace.
-        // B9's own `measure::drift` found why that distinction is load-
-        // bearing: `mean_with_uncertainty` assumes independent samples, and
-        // four samples spanning one Gaussian-filtered symbol are one
-        // slowly-varying value read four times, not four independent ones -
-        // feeding it the raw trace divides by an `N` four times too large
-        // and understates the uncertainty by about half. `rough_offset`
-        // above never had to be exact, only good enough to slice against;
-        // this one is what a reader sees a `+/-` on.
-        let offset = crate::signal::dsp::uncertainty::mean_with_uncertainty(raw_symbols);
-        packet.freq_offset_hz = Some(offset);
-        // `snr_from_metric` was derived for `Coherence::metric` - two noisy
-        // copies of the same unknown signal correlated against each other -
-        // and `Match::coherence` is a different measurement, a noisy signal
-        // correlated against a known, noiseless reference. Worked through
-        // for a unit-power reference: at the window lengths this arc uses
-        // the two converge to the same `rho = snr / (1 + snr)` relationship
-        // in the limit, so this reuses the already-tested inverse rather
-        // than deriving and separately validating a second one - reasoned
-        // to be a close approximation at this receiver's own window length,
-        // not proven exact for a matched filter's own statistics. `None`
-        // only at a coherence of one, which the false-alarm threshold
-        // already keeps every real reading comfortably under.
-        packet.snr_db =
-            snr_from_metric(self.last_coherence, self.window_len).map(|snr| 10.0 * snr.log10());
+        // The *reported* offset is read against the sync word, not the
+        // packet's data: see `sync_offset`. `rough_offset` above never had to
+        // be exact, only good enough to slice against; this one is what a
+        // reader sees a `+/-` on.
+        let offset = self.sync_offset();
+        packet.freq_offset_hz = offset;
+        packet.snr_db = offset.and_then(|o| self.corrected_snr_db(o.value()));
         packet.modulation = super::measure::modulation_quality(raw_bits, raw_symbols);
         packet.drift = super::measure::drift(raw_symbols);
         Some(packet)
@@ -730,6 +943,173 @@ mod tests {
         assert_eq!(p.pdu_type, pdu::PduType::AdvInd);
         assert_eq!(p.adv_addr, Some(addr));
         assert!(p.crc_ok);
+    }
+
+    /// **A transmitter's crystal is never exactly on frequency, and the
+    /// receiver must hear it anyway.** BLE allows ±150 ppm, about ±360 kHz
+    /// at 2.4 GHz. The first detector correlated coherently across the whole
+    /// 40-symbol sync word, and an offset of 15 kHz - one real device in the
+    /// test flat - turned the phase far enough across it to put the packet
+    /// under the trigger threshold nine times in ten (`dev_docs/
+    /// case-study-ble-crc.md`, section 13). The offsets here: that device,
+    /// an ordinary crystal, and one near the edge of what the standard
+    /// allows. The offset the packet reports is the one it was sent with.
+    #[test]
+    fn a_packet_with_a_crystal_offset_is_still_heard() {
+        let addr = [0xAA, 0xBB, 0xCC, 0x11, 0x22, 0x33];
+        let mut payload = addr.to_vec();
+        payload.extend_from_slice(&[0x02, 0x01, 0x06]);
+        let rate = working_rate_hz(Phy::OneM);
+        let snr_at = |cfo_hz: f64| -> f64 {
+            let mut iq = synthetic_packet_iq(Phy::OneM, 37, 0x00, &payload, 20.0);
+            for (n, s) in iq.iter_mut().enumerate() {
+                let ph = std::f64::consts::TAU * cfo_hz * n as f64 / rate;
+                *s *= Complex::new(ph.cos() as f32, ph.sin() as f32);
+            }
+            let geometry = eight_bit();
+            let mut rx = Receiver::new(rate, 37, Phy::OneM).unwrap();
+            rx.push(&bytes_for(&iq, geometry), geometry)[0]
+                .snr_db
+                .expect("an SNR is measured")
+        };
+        // The SNR is the signal's, not the crystal's: a transmitter off
+        // frequency reads the same as one on it.
+        let on_frequency = snr_at(0.0);
+        for cfo_hz in [15_000.0, 100_000.0, -300_000.0] {
+            let off = snr_at(cfo_hz);
+            assert!(
+                (off - on_frequency).abs() < 1.5,
+                "{cfo_hz} Hz: SNR {off} dB against {on_frequency} dB on frequency"
+            );
+        }
+        for cfo_hz in [15_000.0, 100_000.0, -300_000.0] {
+            let mut iq = synthetic_packet_iq(Phy::OneM, 37, 0x00, &payload, 20.0);
+            for (n, s) in iq.iter_mut().enumerate() {
+                let ph = std::f64::consts::TAU * cfo_hz * n as f64 / rate;
+                *s *= Complex::new(ph.cos() as f32, ph.sin() as f32);
+            }
+            let geometry = eight_bit();
+            let bytes = bytes_for(&iq, geometry);
+            let mut rx = Receiver::new(rate, 37, Phy::OneM).unwrap();
+            let packets = rx.push(&bytes, geometry);
+            assert_eq!(packets.len(), 1, "{cfo_hz} Hz: expected exactly one packet");
+            let p = &packets[0];
+            assert!(p.crc_ok, "{cfo_hz} Hz: CRC failed");
+            assert_eq!(p.adv_addr, Some(addr));
+            let reported = p.freq_offset_hz.expect("an offset is measured").value();
+            assert!(
+                (reported - cfo_hz).abs() < 10_000.0,
+                "{cfo_hz} Hz: reported {reported} Hz"
+            );
+        }
+    }
+
+    /// The carrier offset's stated uncertainty is the one it actually has.
+    ///
+    /// Forty packets, each with its own noise, all sent 50 kHz off: the
+    /// scatter of the offsets they report must agree with the uncertainty
+    /// they each report. An uncertainty several times too large is not
+    /// caution - it dashes readings that are good and weighs every device's
+    /// crystal estimate in the census wrongly - and one too small is a claim
+    /// the measurement cannot pay for.
+    #[test]
+    fn the_offset_s_uncertainty_matches_its_scatter() {
+        let addr = [0xAA, 0xBB, 0xCC, 0x11, 0x22, 0x33];
+        let mut payload = addr.to_vec();
+        payload.extend_from_slice(&[0x02, 0x01, 0x06]);
+        let rate = working_rate_hz(Phy::OneM);
+        let clean = synthetic_packet_iq(Phy::OneM, 37, 0x00, &payload, f64::INFINITY);
+        for snr_db in [14.0, 16.0, 22.0] {
+            let mut values = Vec::new();
+            let mut sigmas = Vec::new();
+            for seed in 0..40u64 {
+                let mut iq = at_snr(&clean, snr_db, &mut Rng::new(1000 + seed));
+                for (n, s) in iq.iter_mut().enumerate() {
+                    let ph = std::f64::consts::TAU * 50_000.0 * n as f64 / rate;
+                    *s *= Complex::new(ph.cos() as f32, ph.sin() as f32);
+                }
+                let geometry = eight_bit();
+                let mut rx = Receiver::new(rate, 37, Phy::OneM).unwrap();
+                if let Some(p) = rx.push(&bytes_for(&iq, geometry), geometry).first() {
+                    if let Some(u) = p.freq_offset_hz {
+                        values.push(u.value());
+                        sigmas.push(u.sigma());
+                    }
+                }
+            }
+            assert!(
+                values.len() >= 25,
+                "{snr_db} dB: only {} of 40 decoded",
+                values.len()
+            );
+            let m = values.len() as f64;
+            let mean = values.iter().sum::<f64>() / m;
+            let scatter =
+                (values.iter().map(|v| (v - mean).powi(2)).sum::<f64>() / (m - 1.0)).sqrt();
+            let stated = sigmas.iter().sum::<f64>() / m;
+            let ratio = stated / scatter;
+            eprintln!(
+                "{snr_db} dB: stated {stated:.0} Hz, scatter {scatter:.0} Hz, ratio {ratio:.2}"
+            );
+            assert!(
+                (0.6..1.6).contains(&ratio),
+                "{snr_db} dB: stated sigma {stated:.0} Hz against a scatter of {scatter:.0} Hz (ratio {ratio:.2})"
+            );
+            assert!(
+                (mean - 50_000.0).abs() < 3.0 * scatter.max(stated),
+                "{snr_db} dB: mean {mean:.0} Hz"
+            );
+        }
+    }
+
+    /// The detector threshold is `SHAPE_Z` standard deviations of a noise
+    /// statistic whose spread, `1 / N_eff`, was measured - so it is measured
+    /// again here. Complex Gaussian noise through each PHY's own front end,
+    /// discriminator and template: the variance must match the constant the
+    /// threshold is built from, and the tail at four standard deviations must
+    /// look like the normal one the threshold extrapolates. A front-end change
+    /// that moves either fails here instead of quietly changing what the
+    /// threshold means.
+    #[test]
+    fn the_shape_detector_s_noise_statistics_are_the_ones_measured() {
+        for (phy, raw_rate) in [(Phy::OneM, 4e6), (Phy::TwoM, 8e6)] {
+            let reference = matched_reference(raw_rate, phy).unwrap();
+            let template = frequency_template(&reference, phy);
+            let mut rng = Rng::new(17);
+            let raw: Vec<Complex<f32>> = (0..400_000)
+                .map(|_| {
+                    let (a, b) = rng.normal_pair();
+                    Complex::new(a as f32, b as f32)
+                })
+                .collect();
+            let mut working = Vec::new();
+            front_end(raw_rate, phy)
+                .unwrap()
+                .process(&raw, &mut working);
+            let mut track = Vec::new();
+            discriminate(&working, working_rate_hz(phy), &mut track);
+            let mut matcher = ShapeMatcher::new(&template);
+            let mut out = Vec::new();
+            matcher.process_block(&track, &mut out);
+            let rho: Vec<f64> = out.into_iter().flatten().collect();
+            let n = rho.len() as f64;
+            let mean = rho.iter().sum::<f64>() / n;
+            let var = rho.iter().map(|r| (r - mean).powi(2)).sum::<f64>() / n;
+            let measured = 1.0 / var;
+            let stated = shape_n_eff(phy);
+            assert!(
+                (measured / stated - 1.0).abs() < 0.1,
+                "{phy:?}: N_eff measured {measured:.1}, the threshold assumes {stated}"
+            );
+            let four_sigma = 4.0 / stated.sqrt();
+            let exceed = rho.iter().filter(|&&r| r > four_sigma).count() as f64 / n;
+            // One-sided normal tail at 4 sigma.
+            let normal = 3.17e-5;
+            assert!(
+                (0.3..3.0).contains(&(exceed / normal)),
+                "{phy:?}: {exceed:.2e} above 4 sigma against the normal {normal:.2e}"
+            );
+        }
     }
 
     /// B17's own exit condition: the identical chain, on LE 2M, at twice
