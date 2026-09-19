@@ -166,13 +166,9 @@ fn lines(state: &SdrMetrics, theme: &crate::Theme, width: usize) -> Vec<Line<'st
         out.push(row(
             "CRC failed",
             grouped(f.crc_failed),
-            Some("at the nominal boundary"),
+            Some("length matches the signal"),
         ));
-        out.push(row(
-            "gave up",
-            grouped(f.gave_up),
-            Some("no alignment passed"),
-        ));
+        out.push(row("gave up", grouped(f.gave_up), Some("nothing matched")));
     } else {
         out.push(dash("BLE", "not decoding"));
     }
@@ -377,8 +373,8 @@ mod tests {
             "never reached a decoder",
             "no detector yet",
             "the detector fired",
-            "at the nominal boundary",
-            "no alignment passed",
+            "length matches the signal",
+            "nothing matched",
             "access codes",
             "piconets named",
             "not decoding",

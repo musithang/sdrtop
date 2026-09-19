@@ -75,6 +75,61 @@ const LOOKBACK_SAMPLES: usize = LOOKBACK_SYMBOLS * WORKING_SPS;
 /// worst case measured so far.
 const HEADER_SEARCH_SYMBOLS: usize = 6;
 
+/// Silence, in symbols, that ends a packet: well past a Gaussian pulse's own
+/// tail (about a symbol) and short of the 150 us gap before a reply on the
+/// same channel, so the end found is this packet's, not the next one's.
+const END_GAP_SYMBOLS: usize = 8;
+
+/// How far a candidate's own end may sit from the measured one and still be
+/// the packet that was there: a symbol of pulse tail either side, and a
+/// symbol or two of where the silence detector calls the drop.
+const END_TOLERANCE_SYMBOLS: usize = 4;
+
+/// Where the signal in `capture[from..]` stops: the start of the first run of
+/// [`END_GAP_SYMBOLS`] symbols whose power is nearer the capture's noise than
+/// its signal. `None` when there is no clear signal to have stopped (less than
+/// 6 dB between the two) or it never stops inside the capture.
+///
+/// The levels come from the capture itself: the signal from the first forty
+/// symbols after `from` (the header and address, which every PDU has), the
+/// noise from the quietest tenth of all its symbols. The threshold between
+/// them is their geometric mean.
+fn energy_end(capture: &[Complex<f32>], from: usize) -> Option<usize> {
+    let sps = WORKING_SPS;
+    let symbols: Vec<f32> = capture
+        .chunks(sps)
+        .map(|c| c.iter().map(|s| s.norm_sqr()).sum::<f32>() / c.len() as f32)
+        .collect();
+    let start = from / sps;
+    let lead = symbols.get(start..start + 40)?;
+    let median = |v: &[f32]| {
+        let mut v = v.to_vec();
+        v.sort_by(f32::total_cmp);
+        v[v.len() / 2]
+    };
+    let signal = median(lead);
+    let mut all = symbols.clone();
+    all.sort_by(f32::total_cmp);
+    let noise = all[all.len() / 10];
+    // A NaN level is no contrast either.
+    if signal.is_nan() || signal <= 4.0 * noise {
+        return None;
+    }
+    let threshold = (signal * noise).sqrt();
+    let mut run = 0;
+    for (i, &p) in symbols.iter().enumerate().skip(start) {
+        if p < threshold {
+            run += 1;
+            if run == END_GAP_SYMBOLS {
+                return Some((i + 1 - run) * sps);
+            }
+        } else {
+            run = 0;
+        }
+    }
+    None
+}
+
 /// How often a capture in progress is tried for a finished packet: once an
 /// octet's worth of samples, not once a sample.
 ///
@@ -405,11 +460,9 @@ pub struct Receiver {
 /// **Every trigger ends one of three ways, and each is counted once.** The
 /// capture yields a packet whose CRC passed at one of the alignments searched
 /// (`decoded`); or it reaches the longest a PDU can be without one, and the
-/// last attempt, at the nominal boundary only, either decodes a packet whose
-/// CRC failed (`crc_failed`) or not (`gave_up`). Measured: a real packet with a
-/// bit error almost always ends as `gave_up`, because its true boundary is a
-/// few symbols from the nominal one
-/// (`the_funnel_counts_each_trigger_by_how_it_ended`). There is no separate "header parsed" stage to
+/// alignment whose length agrees with where the signal actually stopped is
+/// reported as a failed CRC (`crc_failed`), or, when none agrees, nothing is
+/// (`gave_up`). See `Receiver::best_failed_candidate`. There is no separate "header parsed" stage to
 /// count: the search returns only a position whose CRC passes, and a counter
 /// for a stage the receiver does not have would be an invented one.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -693,7 +746,7 @@ impl Receiver {
                         // truly was aligned there, and genuinely failed its
                         // CRC, still shows up as that rather than vanishing
                         // silently the way a wrong-alignment guess would.
-                        match self.try_decode_from(LOOKBACK_SAMPLES) {
+                        match self.best_failed_candidate() {
                             Some(packet) => {
                                 if packet.crc_ok {
                                     self.funnel.decoded += 1;
@@ -729,7 +782,7 @@ impl Receiver {
     /// any candidate" or "no candidate in range has a clean CRC yet" - both
     /// are the same instruction to the caller: keep capturing.
     ///
-    /// **Why a search, and not a single trusted position.** `try_decode_from`
+    /// **Why a search, and not a single trusted position.** `decode_at`
     /// does the real work at one candidate boundary; this exists because
     /// the boundary itself is not a single sample, on this receiver. Design
     /// intent was "the sample right after the trigger is the header's own
@@ -752,6 +805,14 @@ impl Receiver {
     /// nominal boundary once `push` starts seeding it from
     /// [`Receiver::history`] rather than empty.
     fn try_decode(&self) -> Option<Packet> {
+        self.candidates()
+            .into_iter()
+            .find_map(|(_, packet)| packet.crc_ok.then_some(packet))
+    }
+
+    /// Every alignment [`Self::try_decode`] searches, in order, decoded: the
+    /// header start it was read from and the packet, CRC passed or not.
+    fn candidates(&self) -> Vec<(usize, Packet)> {
         let center = LOOKBACK_SAMPLES as isize;
         let step = WORKING_SPS as isize;
         let span = HEADER_SEARCH_SYMBOLS as isize;
@@ -769,54 +830,59 @@ impl Receiver {
             WORKING_SPS as f64,
             from_earliest.len() / WORKING_SPS,
         );
+        let mut out = Vec::new();
         for k in -span..=span {
             let skip = center + k * step;
             if skip < 0 {
                 continue;
             }
             if let Some(packet) = self.decode_at(&inst, skip as usize, Some(phase)) {
-                if packet.crc_ok {
-                    return Some(packet);
+                let passed = packet.crc_ok;
+                out.push((skip as usize, packet));
+                // The search stops at the first CRC that passes, as it
+                // always has: later alignments cannot beat a passing one.
+                if passed {
+                    break;
                 }
             }
         }
-        None
+        out
     }
 
-    /// The actual decode, from one candidate header-start position:
-    /// `self.capture[skip..]` is treated as running from the header's own
-    /// first bit. [`try_decode`] is the search over candidate `skip`
-    /// values; `push`'s own give-up path is the other caller, once, at
-    /// exactly [`LOOKBACK_SAMPLES`] - the nominal boundary - so a real
-    /// packet that really was aligned there and genuinely failed its CRC
-    /// still gets reported as that, rather than the search silently
-    /// discarding it for lack of any clean candidate.
+    /// At give-up, the one alignment the capture itself vouches for, reported
+    /// as the packet it decodes to, CRC and all.
     ///
-    /// **Runs `find_phase` on the capture, and does not trust the detector's
-    /// peak position for anything beyond where the capture starts.** The
-    /// first version indexed directly from the peak, reasoning that
-    /// `signal::ble::detect`'s own tests measured it landing exactly on the
-    /// symbol boundary - true for a synthetic packet built by the same
-    /// `gfsk::modulate` call the detector's own reference comes from, and
-    /// false for a real transmitter: a real symbol clock has no reason to
-    /// share a sample-aligned phase with this receiver's, only an
-    /// unsynchronised, arbitrary one. Real hardware measured this directly -
-    /// every field decoded correctly (plausible PDU types, real advertiser
-    /// addresses) while every CRC failed, which is exactly the signature of
-    /// a small, consistent sub-sample timing error rather than a wrong
-    /// algorithm. `find_phase` is the same tool B4 built for exactly this;
-    /// the deterministic shortcut only worked on the test signal that could
-    /// never have shown the bug.
+    /// **No alignment passed its CRC, so which to believe is chosen by
+    /// something other than the CRC: the energy.** Each candidate's header
+    /// says how long its packet is, which says where the packet ends; the
+    /// capture says where the signal actually stopped ([`energy_end`]). The
+    /// candidate whose end agrees, within [`END_TOLERANCE_SYMBOLS`], is the
+    /// packet that was on the air with a bit error in it, and is counted and
+    /// listed as a failed CRC. If none agrees (a false trigger, or energy that
+    /// never stops because the next transmission follows), nothing is
+    /// reported: choosing among alignments that nothing vouches for would be
+    /// an invented packet (Viktor's decision, `net-ux-polish-plan.md` 3.4.c).
     ///
-    /// **Real hardware's CRC still fails even with this fixed** - the
-    /// working hypothesis after B6 is a real device's own crystal offset
-    /// (BLE allows up to ±150 ppm, which at 2.4 GHz is up to ±360 kHz,
-    /// larger than the ±250 kHz deviation itself), uncorrected. B7's
-    /// `freq_offset_hz` below is that same offset, finally measured and
-    /// reported rather than only corrected for blindly - the honest first
-    /// step toward deciding whether that hypothesis is the right one.
-    fn try_decode_from(&self, skip: usize) -> Option<Packet> {
-        self.decode_at(&self.discriminated(), skip, None)
+    /// The one this replaced decoded at the nominal boundary alone, a few
+    /// symbols from where the receiver's own measurements put the real one.
+    /// On the 2026-09-19 channel 37 recording it reported 41 failed CRCs, every
+    /// one a reserved PDU type from a recurring non-BLE source, and none of
+    /// the three bit-error packets from a device heard fifteen times cleanly
+    /// on the same recording. This reports those three (one address bit
+    /// flipped in each) and 9 of the 41, where their length agrees with the
+    /// signal; the CRC-good output is byte-identical on both recordings.
+    fn best_failed_candidate(&self) -> Option<Packet> {
+        let end = energy_end(&self.capture, LOOKBACK_SAMPLES)?;
+        let tolerance = END_TOLERANCE_SYMBOLS * WORKING_SPS;
+        self.candidates()
+            .into_iter()
+            .filter_map(|(skip, packet)| {
+                let ends = skip + pdu::used_bits(packet.length) * WORKING_SPS;
+                let off = ends.abs_diff(end);
+                (off <= tolerance).then_some((off, packet))
+            })
+            .min_by_key(|(off, _)| *off)
+            .map(|(_, packet)| packet)
     }
 
     /// The whole capture through the discriminator, once.
@@ -826,8 +892,8 @@ impl Receiver {
         inst
     }
 
-    /// [`Self::try_decode_from`]'s work, given the whole capture already
-    /// discriminated.
+    /// The decode at one candidate header start, `skip` samples into the
+    /// capture, given the whole capture already discriminated.
     ///
     /// **The discriminator of a capture started `skip` samples in is exactly
     /// the whole capture's discriminator from `skip` on** - each reading is a
@@ -1001,15 +1067,16 @@ mod tests {
     /// **Every trigger is counted once, by how it ended.** A clean packet is
     /// one trigger and one CRC-good decode, and taking the funnel resets it.
     ///
-    /// **And what a bit error really costs, measured.** A packet with one bit
-    /// flipped in its PDU triggers the same way and is never accepted during
-    /// the capture (the search wants a passing CRC). At the longest a PDU can
-    /// be, the last attempt decodes at the nominal boundary only, and the real
-    /// boundary sits a few symbols from it (`try_decode`'s doc), so the packet
-    /// ends as "gave up", not "CRC failed". Pinned as it is, so the funnel's
-    /// labels say what the receiver does; whether the give-up should report
-    /// its best candidate instead is an open decision
-    /// (`net-ux-polish-plan.md` Stop 3.4).
+    /// **And a bit error is a failed CRC, not a disappearance.** A packet with
+    /// one bit flipped in its PDU triggers the same way and is never accepted
+    /// during the capture (the search wants a passing CRC). At the longest a
+    /// PDU can be, the candidate whose length agrees with where the signal
+    /// stopped is reported: a failed CRC, with the packet's own header. Until
+    /// 2026-09-19 the give-up decoded at the nominal boundary alone and this
+    /// packet came back as nothing ("gave up"); this test is what measured it.
+    ///
+    /// And where no candidate's length agrees, because the signal never stops
+    /// (a transmission that runs the whole capture), nothing is reported.
     #[test]
     fn the_funnel_counts_each_trigger_by_how_it_ended() {
         let rate = working_rate_hz(Phy::OneM);
@@ -1029,8 +1096,8 @@ mod tests {
         );
         assert!(rx.take_funnel().is_empty(), "taken, and started again");
 
-        // The same packet with one PDU bit flipped, then enough further stream
-        // for the capture to reach the longest a PDU can be.
+        // The same packet with one PDU bit flipped, then silence (noise only)
+        // for long enough that the capture reaches the longest a PDU can be.
         let sps = WORKING_SPS;
         let mut rng = Rng::new(4242);
         let mut bits: Vec<bool> = (0..16).map(|_| rng.next_u64() & 1 == 1).collect();
@@ -1044,6 +1111,35 @@ mod tests {
         let mut pdu_bits = pdu::encode(37, 0x00, &payload);
         pdu_bits[40] = !pdu_bits[40];
         bits.extend_from_slice(&pdu_bits);
+        let mut clean = modulate(&bits, sps, Phy::OneM.deviation_hz(), rate, 0.5);
+        let signal = clean.len();
+        clean.extend(vec![
+            Complex::new(0.0, 0.0);
+            (16 + MAX_PDU_BYTES * 8 + 64) * sps
+        ]);
+        // Noise at 25 dB under the packet, over the silence as well.
+        let noise_power = clean[..signal]
+            .iter()
+            .map(|s| s.norm_sqr() as f64)
+            .sum::<f64>()
+            / signal as f64
+            / 10f64.powf(2.5);
+        let noise = Rng::new(99).noise(clean.len(), noise_power);
+        let iq: Vec<Complex<f32>> = clean.iter().zip(&noise).map(|(s, z)| s + z).collect();
+        let mut rx = Receiver::new(rate, 37, Phy::OneM).unwrap();
+        let packets = rx.push(&bytes_for(&iq, geometry), geometry);
+        let f = rx.take_funnel();
+        assert_eq!(f.triggered, 1, "{f:?}");
+        assert_eq!(f.decoded, 0, "{f:?}");
+        assert_eq!((f.crc_failed, f.gave_up), (1, 0), "{f:?}");
+        assert_eq!(packets.len(), 1, "{packets:?}");
+        assert!(!packets[0].crc_ok);
+        assert_eq!(packets[0].length, 9, "the packet's own header");
+
+        // The same broken packet followed by more transmission, not silence:
+        // the signal never stops inside the capture, no candidate's length
+        // can be checked against it, and nothing is reported.
+        let mut bits = bits.clone();
         let mut tail = Rng::new(7);
         bits.extend((0..(16 + MAX_PDU_BYTES * 8) + 64).map(|_| tail.next_u64() & 1 == 1));
         let clean = modulate(&bits, sps, Phy::OneM.deviation_hz(), rate, 0.5);
@@ -1051,9 +1147,7 @@ mod tests {
         let mut rx = Receiver::new(rate, 37, Phy::OneM).unwrap();
         let packets = rx.push(&bytes_for(&iq, geometry), geometry);
         let f = rx.take_funnel();
-        assert_eq!(f.triggered, 1, "{f:?}");
-        assert_eq!(f.decoded, 0, "{f:?}");
-        assert_eq!((f.crc_failed, f.gave_up), (0, 1), "{f:?}");
+        assert_eq!((f.triggered, f.crc_failed, f.gave_up), (1, 0, 1), "{f:?}");
         assert!(packets.is_empty(), "{packets:?}");
     }
 
