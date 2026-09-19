@@ -12,8 +12,7 @@ use crate::config::{LayoutConfig, Position};
 use crate::state::SdrMetrics;
 use crate::ui::chrome;
 use crate::ui::menu;
-use crate::ui::panel::Bond;
-use crate::ui::panels::core::{spectrum, waterfall};
+use crate::ui::panel::{Bond, Bonding, Panel};
 use crate::ui::registry::PanelRegistry;
 
 pub struct LayoutEngine {
@@ -347,35 +346,21 @@ impl LayoutEngine {
                 theme,
                 focused,
             );
-            // Bond: a center column that is exactly [spectrum, waterfall] renders as
-            // one instrument - the spectrum drops its bottom border + own freq axis,
-            // the waterfall's top border becomes the shared frequency ruler, and a
-            // `├`/`┤` junction overlay ties the seam into the continuous side borders.
-            let is_bond_pair = center_specs.len() == 2
-                && center_specs[0].name == "spectrum"
-                && center_specs[1].name == "waterfall";
-            if is_bond_pair {
+            // Bond: a centre column of two panels that declare each other as the
+            // halves of one instrument renders as that instrument - the upper
+            // half drops its bottom border and its own axis, the lower half's top
+            // border becomes the shared ruler, and a `├`/`┤` junction overlay
+            // ties the seam into the continuous side borders. See `Bonding`.
+            if let Some((upper, lower)) = self.bonded_pair(&center_specs) {
                 let halves = Layout::default()
                     .direction(Direction::Vertical)
                     .constraints([Constraint::Min(0), Constraint::Min(0)])
                     .split(columns[1]);
-                spectrum::render(
-                    f,
-                    halves[0],
-                    state,
-                    theme,
-                    focused == Some("spectrum"),
-                    Bond::Below,
-                );
-                waterfall::render(
-                    f,
-                    halves[1],
-                    state,
-                    theme,
-                    focused == Some("waterfall"),
-                    Bond::Above,
-                );
-                let seam = if focused == Some("spectrum") || focused == Some("waterfall") {
+                let (up_focus, low_focus) =
+                    (focused == Some(upper.name()), focused == Some(lower.name()));
+                upper.render_bonded(f, halves[0], state, theme, up_focus, Bond::Below);
+                lower.render_bonded(f, halves[1], state, theme, low_focus, Bond::Above);
+                let seam = if up_focus || low_focus {
                     theme.border_focused
                 } else {
                     theme.border_accent
@@ -402,6 +387,26 @@ impl LayoutEngine {
                 focused,
             );
         }
+    }
+}
+
+impl LayoutEngine {
+    /// The two panels of `centre` when they declare each other as the upper and
+    /// lower halves of one instrument, and `None` for any other column.
+    fn bonded_pair(
+        &self,
+        centre: &[&&crate::config::PanelSpec],
+    ) -> Option<(&dyn Panel, &dyn Panel)> {
+        let [upper, lower] = centre else {
+            return None;
+        };
+        let (upper, lower) = (
+            self.registry.get(&upper.name)?,
+            self.registry.get(&lower.name)?,
+        );
+        let wants = |p: &dyn Panel, role, partner| p.bonding() == Some(Bonding { role, partner });
+        (wants(upper, Bond::Below, lower.name()) && wants(lower, Bond::Above, upper.name()))
+            .then_some((upper, lower))
     }
 }
 
@@ -488,6 +493,114 @@ mod tests {
         registry.register(Stub("one", &[("A", "do a thing")]));
         registry.register(Stub("two", &[]));
         LayoutEngine::new(cfg, registry)
+    }
+
+    /// A stand-in that writes, into whatever it is given, whether it was drawn
+    /// as a bonded half or on its own, and declares whatever bonding it is told.
+    struct Half(&'static str, Option<crate::ui::panel::Bonding>);
+    impl Panel for Half {
+        fn name(&self) -> &'static str {
+            self.0
+        }
+        fn min_size(&self) -> (u16, u16) {
+            (1, 1)
+        }
+        fn bonding(&self) -> Option<crate::ui::panel::Bonding> {
+            self.1
+        }
+        fn render(&self, f: &mut Frame, area: Rect, _: &SdrMetrics, _: &crate::Theme, _: bool) {
+            let text = format!("{}:plain", self.0);
+            f.render_widget(ratatui::widgets::Paragraph::new(text), area);
+        }
+        fn render_bonded(
+            &self,
+            f: &mut Frame,
+            area: Rect,
+            _: &SdrMetrics,
+            _: &crate::Theme,
+            _: bool,
+            bond: Bond,
+        ) {
+            // Indented: the engine draws the seam's junction over the first
+            // and last cell of the lower half's top row.
+            let text = format!(" {}:bonded:{bond:?}", self.0);
+            f.render_widget(ratatui::widgets::Paragraph::new(text), area);
+        }
+    }
+
+    fn draw_preset(preset: &str) -> String {
+        use crate::ui::panel::Bonding;
+        let below = |partner| {
+            Some(Bonding {
+                role: Bond::Below,
+                partner,
+            })
+        };
+        let above = |partner| {
+            Some(Bonding {
+                role: Bond::Above,
+                partner,
+            })
+        };
+        let mut presets = HashMap::new();
+        for (name, panels) in [
+            ("pair", vec![spec("top"), spec("bottom")]),
+            ("one_sided", vec![spec("top"), spec("silent")]),
+            ("wrong_partner", vec![spec("top"), spec("stranger")]),
+        ] {
+            presets.insert(
+                name.to_string(),
+                PresetConfig {
+                    panels,
+                    ..Default::default()
+                },
+            );
+        }
+        let cfg = LayoutConfig {
+            active_preset: preset.into(),
+            presets,
+        };
+        let mut registry = PanelRegistry::new();
+        registry.register(Half("top", below("bottom")));
+        registry.register(Half("bottom", above("top")));
+        registry.register(Half("silent", None));
+        registry.register(Half("stranger", above("someone_else")));
+        let engine = LayoutEngine::new(cfg, registry);
+        let backend = ratatui::backend::TestBackend::new(60, 20);
+        let mut term = ratatui::Terminal::new(backend).unwrap();
+        term.draw(|f| engine.draw(f, &SdrMetrics::fixture(), &crate::Theme::sdr()))
+            .unwrap();
+        let buf = term.backend().buffer();
+        (0..20)
+            .map(|y| (0..60).map(|x| buf.get(x, y).symbol()).collect::<String>())
+            .collect::<Vec<_>>()
+            .join("\n")
+    }
+
+    /// **Bonding is declared by both halves and nothing else.** Two panels
+    /// that name each other bond, whatever they are called; a panel stacked
+    /// on one that says nothing, or on one that names a different partner,
+    /// stands alone. The spectrum and waterfall pair bonds by this rule too,
+    /// with no name of theirs anywhere in the engine.
+    #[test]
+    fn two_panels_bond_only_when_each_declares_the_other() {
+        let pair = draw_preset("pair");
+        assert!(pair.contains("top:bonded:Below"), "{pair}");
+        assert!(pair.contains("bottom:bonded:Above"), "{pair}");
+
+        let one_sided = draw_preset("one_sided");
+        assert!(one_sided.contains("top:plain"), "{one_sided}");
+        assert!(one_sided.contains("silent:plain"), "{one_sided}");
+
+        let wrong = draw_preset("wrong_partner");
+        assert!(wrong.contains("top:plain"), "{wrong}");
+        assert!(wrong.contains("stranger:plain"), "{wrong}");
+
+        let engine_src = include_str!("engine.rs");
+        let code = &engine_src[..engine_src.find("#[cfg(test)]").unwrap()];
+        for name in ["\"spectrum\"", "\"waterfall\""] {
+            assert!(!code.contains(name), "the engine names {name} again");
+        }
     }
 
     /// A preset name that resolves to nothing must not become the active layout.

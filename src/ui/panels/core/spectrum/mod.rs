@@ -36,7 +36,7 @@ use ratatui::{
 use crate::state::SdrMetrics;
 use crate::ui::chrome;
 use crate::ui::chrome::frame;
-use crate::ui::panel::{Bond, FrameTone, Panel, PanelChrome, Staleness, Tag};
+use crate::ui::panel::{Bond, Bonding, FrameTone, Panel, PanelChrome, Staleness, Tag};
 
 pub(crate) use labels::detect_peaks;
 pub use scale::{fmt_spectrum_step, freq_scale_spans, next_spectrum_step, prev_spectrum_step};
@@ -80,6 +80,26 @@ impl Panel for SpectrumPanel {
             .tag_if(state.spectrum.hold.is_some(), Tag::Hold)
     }
 
+    /// The upper half of the spectrum-over-waterfall instrument.
+    fn bonding(&self) -> Option<Bonding> {
+        Some(Bonding {
+            role: Bond::Below,
+            partner: "waterfall",
+        })
+    }
+
+    fn render_bonded(
+        &self,
+        f: &mut Frame,
+        area: Rect,
+        state: &SdrMetrics,
+        theme: &crate::Theme,
+        focused: bool,
+        bond: Bond,
+    ) {
+        render(f, area, state, theme, focused, bond);
+    }
+
     /// Engine-framed: `area` is the inner rect. The axes are tinted to match the
     /// border, so the colour is asked for by the same rule the frame was drawn
     /// with rather than re-derived here.
@@ -96,14 +116,14 @@ impl Panel for SpectrumPanel {
     }
 }
 
-/// Free render entry point for the **bonded** case, which the layout engine calls
-/// directly instead of going through the registry.
+/// The **bonded** case, reached through [`Panel::render_bonded`] when the engine
+/// stacks this panel over its declared partner.
 ///
 /// `Bond::Below` drops the bottom border and the panel's own frequency-axis row -
 /// the waterfall's top border becomes the shared ruler. Only the border *set* is
 /// drawn here; the nameplate and the colour still come from the panel's own
 /// [`PanelChrome`], so the bonded and standalone plates cannot drift apart.
-pub fn render(
+fn render(
     f: &mut Frame,
     area: Rect,
     state: &SdrMetrics,

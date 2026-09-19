@@ -16,6 +16,23 @@ pub enum Bond {
     Above,
 }
 
+/// A panel's half of a bonded instrument: which half it draws as, and which
+/// panel is the other half.
+///
+/// **Declared by both halves, never inferred from names.** The engine bonds a
+/// centre column of exactly two panels when the upper one declares
+/// `Bond::Below` with the lower as its partner and the lower declares
+/// `Bond::Above` with the upper as its partner. Either declaration alone is not
+/// enough: a panel that can be the top of one instrument must not bond with
+/// whatever happens to be stacked under it. Spectrum over waterfall was the only
+/// pair, and the engine used to check for their two names; the NET survey's
+/// occupancy over coexistence is the second (net-ux-polish-plan Stop 3.1).
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub struct Bonding {
+    pub role: Bond,
+    pub partner: &'static str,
+}
+
 /// What makes a panel's readings go stale, i.e. when the engine tags its title
 /// `[STALE]` and cools its border.
 ///
@@ -424,6 +441,28 @@ pub trait Panel: Send + Sync {
     /// default frames nothing and hands the panel its outer rect.
     fn chrome(&self, _state: &SdrMetrics) -> PanelChrome {
         PanelChrome::self_framed()
+    }
+
+    /// Which half of a bonded instrument this panel can be, if any. See
+    /// [`Bonding`]. `None`, the default, is a panel that always stands alone.
+    fn bonding(&self) -> Option<Bonding> {
+        None
+    }
+
+    /// Draw as one half of a bonded pair. `area` is the **outer** rect: a bonded
+    /// half draws its own reduced border set, because the seam between the two
+    /// halves is the one frame the engine cannot draw from a single chrome.
+    /// Called only for a panel whose [`Self::bonding`] is `Some` and whose
+    /// partner is stacked with it, with `bond` equal to its declared role.
+    fn render_bonded(
+        &self,
+        _f: &mut Frame,
+        _area: Rect,
+        _state: &SdrMetrics,
+        _theme: &crate::Theme,
+        _focused: bool,
+        _bond: Bond,
+    ) {
     }
 
     /// Single character that activates panel-focus mode for this panel.

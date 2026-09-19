@@ -31,7 +31,7 @@ use ratatui::{
 use crate::state::SdrMetrics;
 use crate::ui::chrome;
 use crate::ui::chrome::frame;
-use crate::ui::panel::{Bond, FrameTone, Panel, PanelChrome, Staleness, Tag};
+use crate::ui::panel::{Bond, Bonding, FrameTone, Panel, PanelChrome, Staleness, Tag};
 
 use axes::DB_COL;
 use bond::Window;
@@ -137,6 +137,26 @@ impl Panel for WaterfallPanel {
             .tag_if(wf.scroll_offset > 0, Tag::Scroll(wf.scroll_offset))
     }
 
+    /// The lower half of the spectrum-over-waterfall instrument.
+    fn bonding(&self) -> Option<Bonding> {
+        Some(Bonding {
+            role: Bond::Above,
+            partner: "spectrum",
+        })
+    }
+
+    fn render_bonded(
+        &self,
+        f: &mut Frame,
+        area: Rect,
+        state: &SdrMetrics,
+        theme: &crate::Theme,
+        focused: bool,
+        bond: Bond,
+    ) {
+        render(f, area, state, theme, focused, bond);
+    }
+
     /// Engine-framed: `area` is the inner rect.
     fn render(
         &self,
@@ -151,13 +171,13 @@ impl Panel for WaterfallPanel {
     }
 }
 
-/// Free render entry point for the **bonded** case, which the layout engine calls
-/// directly instead of going through the registry.
+/// The **bonded** case, reached through [`Panel::render_bonded`] when the engine
+/// stacks this panel under its declared partner.
 ///
 /// `Bond::Above` drops the nameplate - its identity and live tags move to the
 /// shared ruler's end-cap tabs - and overlays that ruler on the top border so the
 /// two panels read as one instrument.
-pub fn render(
+fn render(
     f: &mut Frame,
     area: Rect,
     state: &SdrMetrics,
