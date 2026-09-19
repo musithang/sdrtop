@@ -83,6 +83,40 @@ pub(super) fn net_capability(key: KeyEvent, ctx: &mut InputCtx<'_>) -> KeyAction
     KeyAction::Continue
 }
 
+/// The occupancy profile: a cursor across the band, one megahertz cell at a
+/// time, and `B` to put it on the busiest cell (the headline it replaces).
+///
+/// Moves through every cell, observed or not, because a cell nobody looked at
+/// is a place on the band too, and its readout says so.
+pub(super) fn net_occupancy(key: KeyEvent, ctx: &mut InputCtx<'_>) -> KeyAction {
+    let cells: Vec<usize> = (0..crate::signal::net::occupancy::CELLS).collect();
+    let mut m = metrics(ctx.state);
+    match key.code {
+        KeyCode::Left => m.net.band_cursor.move_by(&cells, -1),
+        KeyCode::Right => m.net.band_cursor.move_by(&cells, 1),
+        KeyCode::Char('b') => {
+            let busiest = m
+                .net
+                .band
+                .cells
+                .iter()
+                .enumerate()
+                .filter(|(_, c)| c.observed() && c.duty > 0.0)
+                .max_by(|a, b| a.1.duty.total_cmp(&b.1.duty))
+                .map(|(i, _)| i);
+            match busiest {
+                Some(cell) => m.net.band_cursor.selected = Some(cell),
+                None => m.push_log("Occupancy: nothing above the floor yet".to_string()),
+            }
+        }
+        _ => {
+            drop(m);
+            return global::handle(key, ctx);
+        }
+    }
+    KeyAction::Continue
+}
+
 /// The census table: move the cursor, change what orders it.
 ///
 /// **The cursor moves through the ordering, not through the census**, which is
@@ -309,5 +343,46 @@ mod tests {
         press_k(&state, None);
         assert!(log(&state).contains("observer mode"), "{}", log(&state));
         assert!(metrics(&state).net.retune.is_none());
+    }
+
+    /// The occupancy cursor: the arrows walk the band a megahertz at a time
+    /// and stop at its ends, and `B` lands on the busiest observed cell.
+    #[test]
+    fn the_occupancy_cursor_walks_the_band_and_finds_the_busiest_cell() {
+        let mut m = SdrMetrics::fixture().streaming();
+        let mut cells =
+            vec![crate::state::CellReading::default(); crate::signal::net::occupancy::CELLS];
+        for (i, duty) in [(10usize, 0.2), (40, 0.9), (60, 0.5)] {
+            cells[i].windows = 100;
+            cells[i].duty = duty;
+        }
+        m.net.band.cells = cells;
+        let state = Arc::new(Mutex::new(m));
+        let mut engine = LayoutEngine::new(
+            crate::config::LayoutConfig::default_config(),
+            PanelRegistry::new(),
+        );
+        let mut show_footer = true;
+        let focus_keys = HashMap::new();
+        let mut ctx = InputCtx {
+            state: &state,
+            device: None,
+            engine: &mut engine,
+            show_footer: &mut show_footer,
+            focus_keys: &focus_keys,
+        };
+        let mut press = |code| {
+            net_occupancy(KeyEvent::new(code, KeyModifiers::NONE), &mut ctx);
+        };
+        let at = |s: &Arc<Mutex<SdrMetrics>>| metrics(s).net.band_cursor.selected;
+
+        press(KeyCode::Right);
+        assert_eq!(at(&state), Some(0), "the first press starts at 2400 MHz");
+        press(KeyCode::Left);
+        assert_eq!(at(&state), Some(0), "and stops at the band's edge");
+        press(KeyCode::Char('b'));
+        assert_eq!(at(&state), Some(40), "the busiest observed cell");
+        press(KeyCode::Right);
+        assert_eq!(at(&state), Some(41));
     }
 }

@@ -130,12 +130,7 @@ fn retune<'a>(run: Option<&RetuneRun>, iw: usize, theme: &crate::Theme) -> Line<
                 .worst_ms
                 .map(|w| format!("worst {w:.2} ms, "))
                 .unwrap_or_default();
-            let secs = at.elapsed().as_secs();
-            let ago = if secs < 90 {
-                format!("{secs} s ago")
-            } else {
-                format!("{} min ago", secs / 60)
-            };
+            let ago = crate::ui::widgets::timing_fmt::ago(at.elapsed());
             (
                 format!("{} call", reading.text()),
                 format!(

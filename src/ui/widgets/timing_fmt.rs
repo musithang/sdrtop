@@ -15,6 +15,17 @@ use ratatui::{style::Style, text::Span};
 use crate::state::TimingQuality;
 
 /// Microseconds rendered as `ms` once they pass 1000 µs, else plain `µs`.
+/// How long ago something was measured, at the resolution a reading's age is
+/// read at: `3 s ago`, then `4 min ago` from ninety seconds on.
+pub(crate) fn ago(elapsed: std::time::Duration) -> String {
+    let secs = elapsed.as_secs();
+    if secs < 90 {
+        format!("{secs} s ago")
+    } else {
+        format!("{} min ago", secs / 60)
+    }
+}
+
 pub(crate) fn fmt_us(us: u64) -> String {
     if us >= 1_000 {
         format!("{:.3} ms", us as f64 / 1_000.0)

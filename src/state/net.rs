@@ -343,6 +343,10 @@ pub struct NetState {
     pub address_display: AddressDisplay,
     /// The session's masked numbers. See [`AddressBook`].
     pub address_book: AddressBook,
+    /// The occupancy profile's cursor, a megahertz cell index (0 is
+    /// 2400 MHz). Stop 1.1's one selection model, keyed by the cell so it stays
+    /// on its megahertz however the panel is resized.
+    pub band_cursor: crate::state::Selection<usize>,
     /// The tuning-call measurement the Capability panel's `K` runs
     /// (`signal::retune::measure_calls`): `None` until someone asks, which
     /// the panel shows as "not measured" and never as a default. Kept for the
@@ -662,8 +666,8 @@ pub struct CellReading {
     /// Rule 4 says all testimony is dated, and a survey that has not come back
     /// to a cell for a minute is showing a minute-old reading. The occupancy
     /// panel reads the oldest of these as the span its numbers cover, for the
-    /// feed-loss caveat; putting each cell's own age on screen is still to do
-    /// (`dev_docs/net-ux-polish-plan.md` Stop 3.2).
+    /// feed-loss caveat, and prints the selected cell's own age in its cursor
+    /// readout.
     pub measured: Option<std::time::Instant>,
     /// Seconds this cell has been under observation since the watch began.
     ///

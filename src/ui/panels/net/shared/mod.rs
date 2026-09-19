@@ -6,6 +6,7 @@
 //! None of these belong to BLE or to classic Bluetooth exclusively, which is
 //! why they sit apart from both in their own module rather than in either.
 
+pub mod band_axis;
 pub mod capability;
 pub mod census;
 pub mod coexist;

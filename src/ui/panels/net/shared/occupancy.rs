@@ -31,7 +31,8 @@ use ratatui::{
     Frame,
 };
 
-use crate::signal::net::{band, occupancy};
+use super::band_axis;
+use crate::signal::net::occupancy;
 use crate::state::{CellReading, SdrMetrics};
 use crate::ui::panel::{FeedSpan, Panel, PanelChrome, Staleness};
 use crate::ui::widgets::reading::Reading;
@@ -90,9 +91,8 @@ fn columns(cells: &[CellReading], width: usize) -> Vec<CellReading> {
     }
     (0..width)
         .map(|x| {
-            let lo = x * cells.len() / width;
-            let hi = ((x + 1) * cells.len() / width).max(lo + 1).min(cells.len());
-            cells[lo..hi]
+            let range = band_axis::cells_of(x, width);
+            cells[range.start.min(cells.len())..range.end.min(cells.len())]
                 .iter()
                 .copied()
                 .reduce(|a, b| {
@@ -105,34 +105,6 @@ fn columns(cells: &[CellReading], width: usize) -> Vec<CellReading> {
                 .unwrap_or_default()
         })
         .collect()
-}
-
-/// The channel numbers written under the columns they are centred on.
-fn ruler(width: usize) -> String {
-    let mut row = vec![b' '; width];
-    for ch in 1..=13u8 {
-        let Some(hz) = band::wifi_centre_hz(ch) else {
-            continue;
-        };
-        let Some(cell) = occupancy::cell_of(hz as f64) else {
-            continue;
-        };
-        let at = cell * width / occupancy::CELLS;
-        let label = ch.to_string();
-        // Centred on the channel, and only when it does not tread on the number
-        // beside it: a ruler that overwrites its own labels is worse than one
-        // with gaps.
-        let start = at.saturating_sub(label.len() / 2);
-        if start + label.len() > width {
-            continue;
-        }
-        if row[start..start + label.len()].iter().all(|c| *c == b' ')
-            && (start == 0 || row[start - 1] == b' ')
-        {
-            row[start..start + label.len()].copy_from_slice(label.as_bytes());
-        }
-    }
-    String::from_utf8(row).unwrap_or_default()
 }
 
 fn lines(state: &SdrMetrics, theme: &crate::Theme, width: usize) -> Vec<Line<'static>> {
@@ -219,47 +191,64 @@ fn lines(state: &SdrMetrics, theme: &crate::Theme, width: usize) -> Vec<Line<'st
         .enumerate()
         .filter(|(_, c)| c.observed() && c.duty > 0.0)
         .max_by(|a, b| a.1.duty.total_cmp(&b.1.duty));
-    out.push(match busiest {
-        Some((cell, c)) => {
-            let mut spans = vec![
-                Span::styled("busiest      ", dim),
-                Span::styled(
-                    format!("{:.0} MHz", occupancy::cell_centre_hz(cell) / 1_000_000),
-                    Style::default().fg(theme.value_hi),
-                ),
-                Span::raw("  "),
-            ];
-            // The duty cycle through idiom A, with the spread its window count
-            // supports: a cell watched for a sixth of the time is not a sixth as
-            // busy, it is as busy with a wider bar. `resolution` is the tenth of
-            // a percent the reading is shown to, which is the difference that
-            // matters here by construction.
-            spans.extend(
-                Reading::new(
-                    occupancy::duty_uncertain(c.duty, c.windows).scale(100.0),
-                    "% busy",
-                    occupancy::DUTY_RESOLUTION * 100.0,
-                )
-                .spans(theme),
-            );
-            spans.push(Span::styled(
-                format!("   {:.1} peak, {:.1} mean dBFS", c.peak_dbfs, c.mean_dbfs),
-                dim,
-            ));
-            Line::from(spans)
-        }
-        None => Line::from(Span::styled("busiest      nothing above the floor", dim)),
-    });
+    // With a cursor set, the selected cell takes the headline's place: it is
+    // the cell the reader chose, and `B` puts the cursor on the busiest one.
+    let selected = state
+        .net
+        .band_cursor
+        .selected
+        .and_then(|cell| occ.cells.get(cell).map(|c| (cell, c)));
+    if let Some((cell, c)) = selected {
+        out.push(cursor_line(cell, c, occ.window_s, width, theme));
+    } else {
+        out.push(match busiest {
+            Some((cell, c)) => {
+                let mut spans = vec![
+                    Span::styled("busiest      ", dim),
+                    Span::styled(
+                        format!("{:.0} MHz", occupancy::cell_centre_hz(cell) / 1_000_000),
+                        Style::default().fg(theme.value_hi),
+                    ),
+                    Span::raw("  "),
+                ];
+                // The duty cycle through idiom A, with the spread its window count
+                // supports: a cell watched for a sixth of the time is not a sixth as
+                // busy, it is as busy with a wider bar. `resolution` is the tenth of
+                // a percent the reading is shown to, which is the difference that
+                // matters here by construction.
+                spans.extend(
+                    Reading::new(
+                        occupancy::duty_uncertain(c.duty, c.windows).scale(100.0),
+                        "% busy",
+                        occupancy::DUTY_RESOLUTION * 100.0,
+                    )
+                    .spans(theme),
+                );
+                spans.push(Span::styled(
+                    format!("   {:.1} peak, {:.1} mean dBFS", c.peak_dbfs, c.mean_dbfs),
+                    dim,
+                ));
+                Line::from(spans)
+            }
+            None => Line::from(Span::styled("busiest      nothing above the floor", dim)),
+        });
+    }
 
     // How much of the time the band was actually under the receiver, which is
     // what the mode costs and the one number that says it in figures rather than
     // as a word in the chrome.
     let covered: Vec<f64> = occ.cells.iter().filter_map(|c| c.coverage).collect();
+    // Over how long: the watch this coverage was accumulated across, which is
+    // held in the state and was never shown.
+    let over = occ
+        .watch_start
+        .map(|t| format!(", over {}", seconds(t.elapsed().as_secs_f64())))
+        .unwrap_or_default();
     out.push(Line::from(Span::styled(
         match covered.len() {
             0 => "coverage     — · every cell measured once so far".to_string(),
             n => format!(
-                "coverage     {:.0} % of the time, on {n} of {} cells",
+                "coverage     {:.0} % of the time, on {n} of {} cells{over}",
                 covered.iter().sum::<f64>() / n as f64 * 100.0,
                 occupancy::CELLS
             ),
@@ -287,16 +276,97 @@ fn lines(state: &SdrMetrics, theme: &crate::Theme, width: usize) -> Vec<Line<'st
             .collect::<Vec<_>>();
         out.push(Line::from(spans));
     }
-    out.push(Line::from(Span::styled(ruler(width), dim)));
-    out.push(Line::from(Span::styled(
-        format!(
-            "{:<width$}",
-            format!("{} MHz", band::LOW_HZ / 1_000_000),
-            width = width.saturating_sub(8)
-        ) + &format!("{} MHz", band::HIGH_HZ / 1_000_000),
-        dim,
-    )));
+    // The cursor, under the column its cell is drawn in: on its own row so it
+    // never hides a bar or a channel number.
+    if let Some(cell) = state.net.band_cursor.selected {
+        let x = band_axis::column_of(cell, width);
+        out.push(Line::from(vec![
+            Span::raw(" ".repeat(x)),
+            Span::styled("\u{25b2}", Style::default().fg(theme.value_hi)),
+        ]));
+    }
+    out.push(Line::from(Span::styled(band_axis::ruler(width), dim)));
+    out.push(Line::from(Span::styled(band_axis::edges(width), dim)));
     out
+}
+
+/// The selected cell, read out: where it is, how busy with the uncertainty its
+/// window count supports, its power, how much it was watched and when.
+///
+/// A cell nobody looked at says so and gives no figures (rule 2); its
+/// neighbours' are not borrowed.
+fn cursor_line(
+    cell: usize,
+    c: &CellReading,
+    window_s: f64,
+    width: usize,
+    theme: &crate::Theme,
+) -> Line<'static> {
+    let dim = Style::default().fg(theme.label);
+    let head = vec![
+        Span::styled("cursor       ", dim),
+        Span::styled(
+            format!("{} MHz", occupancy::cell_centre_hz(cell) / 1_000_000),
+            Style::default().fg(theme.value_hi),
+        ),
+    ];
+    // Each group is drawn whole or not at all, in this order: a readout cut
+    // mid-figure reads as a different figure.
+    let groups: Vec<Vec<Span<'static>>> = if !c.observed() {
+        vec![vec![Span::styled(
+            "not observed: nobody looked here",
+            Style::default().fg(theme.stale),
+        )]]
+    } else {
+        let watched = c.windows as f64 * window_s;
+        let ago = c
+            .measured
+            .map(|t| crate::ui::widgets::timing_fmt::ago(t.elapsed()))
+            .unwrap_or_else(|| "—".to_string());
+        vec![
+            Reading::new(
+                occupancy::duty_uncertain(c.duty, c.windows).scale(100.0),
+                "% busy",
+                occupancy::DUTY_RESOLUTION * 100.0,
+            )
+            .spans(theme),
+            vec![Span::styled(
+                format!("{:.1} peak, {:.1} mean dBFS", c.peak_dbfs, c.mean_dbfs),
+                dim,
+            )],
+            vec![Span::styled(
+                format!("{} windows, {} watched", c.windows, seconds(watched)),
+                dim,
+            )],
+            vec![Span::styled(ago, dim)],
+        ]
+    };
+    let len = |g: &[Span<'_>]| g.iter().map(|s| s.content.chars().count()).sum::<usize>();
+    let mut used = len(&head);
+    let mut spans = head;
+    for group in groups {
+        let need = 3 + len(&group);
+        if used + need > width {
+            break;
+        }
+        used += need;
+        spans.push(Span::raw("   "));
+        spans.extend(group);
+    }
+    Line::from(spans)
+}
+
+/// A span of time at the resolution it is worth reading at.
+fn seconds(s: f64) -> String {
+    if s < 1e-3 {
+        format!("{:.0} us", s * 1e6)
+    } else if s < 1.0 {
+        format!("{:.0} ms", s * 1e3)
+    } else if s < 120.0 {
+        format!("{s:.0} s")
+    } else {
+        format!("{:.0} min", s / 60.0)
+    }
 }
 
 /// How long ago the oldest cell on screen was measured. `None` when no cell
@@ -319,6 +389,19 @@ impl Panel for NetOccupancyPanel {
 
     fn min_size(&self) -> (u16, u16) {
         (40, 8)
+    }
+
+    /// `j`: every letter of the panel's name is another panel's focus key or a
+    /// global one, so the engine draws `[J]`.
+    fn focus_key(&self) -> Option<char> {
+        Some('j')
+    }
+
+    fn focus_bindings(&self) -> &'static [(&'static str, &'static str)] {
+        &[
+            ("\u{2190}\u{2192}", "move the cursor 1 MHz"),
+            ("B", "cursor to the busiest cell"),
+        ]
     }
 
     fn chrome(&self, state: &SdrMetrics) -> PanelChrome {
@@ -552,10 +635,72 @@ mod tests {
     }
 
     /// The ruler never writes a channel number over its neighbour, at any width.
+    /// The cursor's readout: the selected cell's frequency, its duty with
+    /// the uncertainty its windows support, its power, how long it was watched
+    /// and when, and a mark under the column the cell is drawn in.
+    #[test]
+    fn the_cursor_reads_out_the_cell_it_is_on() {
+        let mut m = surveyed();
+        m.net.band.cells[24].measured = Some(std::time::Instant::now());
+        m.net.band_cursor.selected = Some(24);
+        let out = draw(NetOccupancyPanel, 120, 14, &m);
+        let all = out.join("\n");
+        let readout = out.iter().find(|l| l.contains("cursor")).expect(&all);
+        assert!(readout.contains("2424 MHz"), "{readout}");
+        assert!(readout.contains("% busy"), "{readout}");
+        assert!(readout.contains("-32.0 peak"), "{readout}");
+        assert!(readout.contains("8000 windows, 51 ms watched"), "{readout}");
+        assert!(readout.contains("0 s ago"), "{readout}");
+        assert!(
+            !all.contains("busiest"),
+            "the readout takes the headline's place"
+        );
+        // The mark sits under the column cell 24 is drawn in.
+        let mark = out.iter().find(|l| l.contains('\u{25b2}')).expect(&all);
+        let col = mark.chars().position(|c| c == '\u{25b2}').unwrap() - 1;
+        assert_eq!(col, band_axis::column_of(24, 118), "{mark}");
+    }
+
+    /// A cell nobody looked at says so and borrows nobody's figures.
+    #[test]
+    fn a_cursor_on_an_unobserved_cell_says_nobody_looked() {
+        let mut m = surveyed();
+        m.net.band_cursor.selected = Some(3);
+        let all = draw(NetOccupancyPanel, 100, 14, &m).join("\n");
+        assert!(all.contains("2403 MHz"), "{all}");
+        assert!(all.contains("not observed"), "{all}");
+        assert!(!all.contains("% busy"), "{all}");
+    }
+
+    /// The readout is built of whole groups: at any width the panel can have,
+    /// its visible text ends at the end of a group, never inside a figure.
+    #[test]
+    fn the_readout_drops_whole_groups_on_a_narrow_panel() {
+        let mut m = surveyed();
+        m.net.band_cursor.selected = Some(24);
+        // From the panel's declared minimum width, 40, frame included.
+        for w in 40..140u16 {
+            let theme = crate::Theme::sdr();
+            let line = cursor_line(24, &m.net.band.cells[24], 6.4e-6, (w - 2) as usize, &theme);
+            let text: String = line.spans.iter().map(|s| s.content.as_ref()).collect();
+            assert!(text.chars().count() <= (w - 2) as usize, "{w}: {text:?}");
+            assert!(
+                text.ends_with(" MHz")
+                    || text.ends_with("% busy")
+                    || text.ends_with("dBFS")
+                    || text.ends_with("watched")
+                    || text.ends_with('\u{2014}')
+                    || text.ends_with("ago"),
+                "{w}: {text:?}"
+            );
+        }
+        m.net.band_cursor.selected = None;
+    }
+
     #[test]
     fn it_fits_every_size_the_layout_can_hand_it() {
         for w in 20..120u16 {
-            let r = ruler(w as usize);
+            let r = band_axis::ruler(w as usize);
             assert_eq!(r.chars().count(), w as usize);
             // Every run of digits in the ruler is a whole channel number, so
             // "12" is never a 1 and a 2 from different channels touching.
