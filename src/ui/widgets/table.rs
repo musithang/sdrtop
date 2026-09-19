@@ -88,6 +88,28 @@ pub(crate) fn columns_that_fit(columns: &[Column], width: usize) -> usize {
     columns.len()
 }
 
+/// `columns` with column `index` grown towards `want`, from whatever `width`
+/// has left once every column is laid at its narrowest.
+///
+/// For a column whose contents have a natural length that varies with the data
+/// and the terminal, an address with its registrant's name above all: on a wide
+/// screen it gets the whole name, on a narrow one it keeps its declared width
+/// and its contents are cut to fit, by the panel that knows how. Never
+/// narrower than declared, so [`columns_that_fit`] decides exactly what it did
+/// before, and never wider than asked, so the other columns do not drift away
+/// across an empty stretch.
+pub(crate) fn widen(columns: &[Column], width: usize, index: usize, want: usize) -> Vec<Column> {
+    let mut out = columns.to_vec();
+    let used: usize = SELECTION_GUTTER
+        + columns.iter().map(|c| c.width).sum::<usize>()
+        + GAP * columns.len().saturating_sub(1);
+    let spare = width.saturating_sub(used);
+    if let Some(c) = out.get_mut(index) {
+        c.width += want.saturating_sub(c.width).min(spare);
+    }
+    out
+}
+
 /// A cell laid into its column.
 fn cell(text: &str, column: &Column) -> String {
     let n = text.chars().count();

@@ -113,31 +113,91 @@ impl AddressDisplay {
     }
 
     /// `addr`, sent with TxAdd = `random`, as this mode shows it; `number` is
-    /// its [`AddressBook`] number, which only `Masked` reads. At most 17
-    /// columns in every mode, the width of a full address, so no table has to
-    /// make room for a mode.
+    /// its [`AddressBook`] number, which only `Masked` reads.
+    ///
+    /// **`width` is the column the table has for it, not a fixed size.** A
+    /// table gives the address column what the terminal can spare
+    /// (`ui::widgets::table::widen`), up to [`Self::natural_width`]: on a wide
+    /// screen a registrant's whole name fits, on a narrow one it is cut and
+    /// marked `…` (`signal::net::vendor::short_name`), and the rest of the
+    /// address (`..09:be`, `#17`) is always whole and at the column's end, so
+    /// the rows line up. `None` is the natural form with no padding, for the
+    /// export, which is never cut.
     ///
     /// A masked address with no number shows `#-`: every address that reaches
     /// the state is numbered as it arrives, so this is a gap to see, not a
     /// number to invent.
-    pub fn show(self, addr: [u8; 6], random: bool, number: Option<u32>) -> String {
-        use crate::signal::ble::address::{kind, AddressKind};
-        let who = || match kind(addr, random) {
-            AddressKind::Public => format!("{:02X}-{:02X}-{:02X}", addr[0], addr[1], addr[2]),
-            other => other.label().to_string(),
-        };
-        match self {
-            Self::Full => addr
-                .iter()
-                .map(|b| format!("{b:02x}"))
-                .collect::<Vec<_>>()
-                .join(":"),
-            Self::Oui => format!("{:<8} ..{:02x}:{:02x}", who(), addr[4], addr[5]),
+    pub fn show(
+        self,
+        addr: [u8; 6],
+        random: bool,
+        number: Option<u32>,
+        width: Option<usize>,
+    ) -> String {
+        let tail = match self {
+            Self::Full => {
+                return addr
+                    .iter()
+                    .map(|b| format!("{b:02x}"))
+                    .collect::<Vec<_>>()
+                    .join(":")
+            }
+            Self::Oui => format!("..{:02x}:{:02x}", addr[4], addr[5]),
             Self::Masked => match number {
-                Some(n) => format!("{:<8} #{n}", who()),
-                None => format!("{:<8} #-", who()),
+                Some(n) => format!("#{n}"),
+                None => "#-".to_string(),
             },
+        };
+        let who = who(addr, random);
+        match width {
+            None => format!("{who} {tail}"),
+            Some(w) => {
+                let room = w.saturating_sub(tail.chars().count() + 1).max(1);
+                let cut = crate::signal::net::vendor::short_name(&who, room);
+                format!("{cut:<room$} {tail}")
+            }
         }
+    }
+
+    /// The columns `show` needs to print `addr` without cutting anything, and
+    /// never less than a full address's 17, so a table sized for the widest
+    /// row holds every mode.
+    pub fn natural_width(self, addr: [u8; 6], random: bool, number: Option<u32>) -> usize {
+        self.show(addr, random, number, None)
+            .chars()
+            .count()
+            .max(FULL_ADDRESS_WIDTH)
+    }
+}
+
+/// `a4:83:e7:1c:09:be`: the narrowest an address column is ever drawn.
+pub const FULL_ADDRESS_WIDTH: usize = 17;
+
+/// Whose address this is, as far as anything we hold can say.
+///
+/// A public address is looked up in the IEEE's listing
+/// (`signal::net::vendor`): the registrant with its legal form dropped, every
+/// registrant where the listing gives several, `private` where the holder hid
+/// it, and the block itself in the IEEE's hyphenated form (`A4-83-E7`) where
+/// the snapshot does not list it, which is the honest answer and cannot pass
+/// for a name. A random address has no block, so it is its kind
+/// (`signal::ble::address::kind`) and never a vendor.
+fn who(addr: [u8; 6], random: bool) -> String {
+    use crate::signal::ble::address::{kind, AddressKind};
+    use crate::signal::net::vendor::{registrant, short_name, Registrant};
+    match kind(addr, random) {
+        AddressKind::Public => match registrant(addr) {
+            Registrant::Listed(names) => names
+                .iter()
+                .map(|n| short_name(n, usize::MAX))
+                .collect::<Vec<_>>()
+                .join(" / "),
+            Registrant::Private => "private".to_string(),
+            Registrant::NotListed => {
+                format!("{:02X}-{:02X}-{:02X}", addr[0], addr[1], addr[2])
+            }
+        },
+        other => other.label().to_string(),
     }
 }
 
@@ -289,9 +349,19 @@ impl NetState {
     /// `addr`, sent with TxAdd = `random`, in the section's display mode: the
     /// one call every panel and export makes, so a device reads the same way
     /// everywhere.
-    pub fn show_address(&self, addr: [u8; 6], random: bool) -> String {
+    ///
+    /// `width` as [`AddressDisplay::show`] takes it: the column the table has,
+    /// or `None` for the uncut form an export writes.
+    pub fn show_address(&self, addr: [u8; 6], random: bool, width: Option<usize>) -> String {
         self.address_display
-            .show(addr, random, self.address_book.get(addr))
+            .show(addr, random, self.address_book.get(addr), width)
+    }
+
+    /// What [`Self::show_address`] needs to print `addr` uncut: the width a
+    /// table asks for when it sizes its address column.
+    pub fn address_width(&self, addr: [u8; 6], random: bool) -> usize {
+        self.address_display
+            .natural_width(addr, random, self.address_book.get(addr))
     }
 
     /// Give the tuner back, and say where the radio belongs.
@@ -723,47 +793,59 @@ impl BandOccupancy {
 mod tests {
     use super::*;
 
-    /// Every mode fits the width of a full address, so a table sized for one
-    /// holds all of them, and each says what foundation design 1.1 promises.
+    /// Each mode shows what foundation design 1.1 promises, uncut for an
+    /// export, and laid exactly into whatever column a table gives it: the
+    /// name grows into a wide column and is cut and marked in a narrow one,
+    /// while the rest of the address stays whole at the column's end.
     #[test]
-    fn each_address_mode_shows_what_it_promises_in_the_same_width() {
-        let public = [0xa4, 0x83, 0xe7, 0x1c, 0x09, 0xbe];
+    fn each_address_mode_shows_what_it_promises_in_any_width() {
+        use AddressDisplay::{Full, Masked, Oui};
+        let apple = [0xa4, 0x83, 0xe7, 0x1c, 0x09, 0xbe];
+        let samsung = [0x00, 0x00, 0xf0, 0x12, 0x34, 0x56];
+        let hidden = [0xe4, 0xf1, 0x4c, 0x00, 0x00, 0x01];
+        let unlisted = [0x02, 0x00, 0x00, 0x00, 0x00, 0x01];
         let static_random = [0xd1, 0x9a, 0x7e, 0x91, 0x27, 0x9e];
         let rpa = [0x4f, 0x00, 0x11, 0x22, 0x33, 0x44];
-        let show = |mode: AddressDisplay, a, r, n| mode.show(a, r, n);
+
+        assert_eq!(Full.show(apple, false, None, Some(40)), "a4:83:e7:1c:09:be");
+        // Uncut, for the export.
+        assert_eq!(Oui.show(apple, false, None, None), "Apple ..09:be");
         assert_eq!(
-            show(AddressDisplay::Full, public, false, None),
-            "a4:83:e7:1c:09:be"
+            Oui.show(samsung, false, None, None),
+            "Samsung Electronics ..34:56"
+        );
+        assert_eq!(Oui.show(hidden, false, None, None), "private ..00:01");
+        assert_eq!(Oui.show(unlisted, false, None, None), "02-00-00 ..00:01");
+        assert_eq!(Oui.show(static_random, true, None, None), "static ..27:9e");
+        assert_eq!(Masked.show(rpa, true, Some(3), None), "RPA #3");
+        assert_eq!(Masked.show(rpa, true, None, None), "RPA #-");
+        // In a full address's width the name is cut and marked...
+        assert_eq!(
+            Oui.show(samsung, false, None, Some(17)),
+            "Samsung…  ..34:56"
         );
         assert_eq!(
-            show(AddressDisplay::Oui, public, false, None),
-            "A4-83-E7 ..09:be"
+            Masked.show(apple, false, Some(17), Some(17)),
+            "Apple         #17"
         );
+        // ...and on a wider screen it is whole.
         assert_eq!(
-            show(AddressDisplay::Oui, static_random, true, None),
-            "static   ..27:9e"
+            Oui.show(samsung, false, None, Some(30)),
+            "Samsung Electronics    ..34:56"
         );
-        assert_eq!(
-            show(AddressDisplay::Oui, rpa, true, None),
-            "RPA      ..33:44"
-        );
-        assert_eq!(
-            show(AddressDisplay::Masked, public, false, Some(17)),
-            "A4-83-E7 #17"
-        );
-        assert_eq!(
-            show(AddressDisplay::Masked, rpa, true, Some(3)),
-            "RPA      #3"
-        );
-        assert_eq!(show(AddressDisplay::Masked, rpa, true, None), "RPA      #-");
-        for mode in [
-            AddressDisplay::Full,
-            AddressDisplay::Oui,
-            AddressDisplay::Masked,
-        ] {
-            for (a, r) in [(public, false), (static_random, true), (rpa, true)] {
-                let shown = show(mode, a, r, Some(99_999));
-                assert!(shown.chars().count() <= 17, "{mode:?}: {shown}");
+        for mode in [Full, Oui, Masked] {
+            for (a, r) in [
+                (apple, false),
+                (samsung, false),
+                (static_random, true),
+                (rpa, true),
+            ] {
+                for w in [17, 20, 26, 40] {
+                    let shown = mode.show(a, r, Some(99_999), Some(w));
+                    let want = if mode == Full { 17 } else { w };
+                    assert_eq!(shown.chars().count(), want, "{mode:?} at {w}: {shown:?}");
+                }
+                assert!(mode.natural_width(a, r, Some(1)) >= FULL_ADDRESS_WIDTH);
             }
         }
     }

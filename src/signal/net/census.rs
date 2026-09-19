@@ -68,9 +68,10 @@ pub struct Device {
 
 impl Device {
     /// The address as the section's display mode shows it, with this
-    /// device's own kind and masked number.
-    pub fn address_text(&self, net: &crate::state::NetState) -> String {
-        net.show_address(self.address, self.random)
+    /// device's own kind and masked number, in a column `width` wide (`None`:
+    /// uncut, for an export). See `state::AddressDisplay::show`.
+    pub fn address_text(&self, net: &crate::state::NetState, width: Option<usize>) -> String {
+        net.show_address(self.address, self.random, width)
     }
 }
 
@@ -251,7 +252,7 @@ mod tests {
     fn an_address_reads_as_an_address() {
         let now = Instant::now();
         assert_eq!(
-            device(0xbe, 0, 0.0, 0, now).address_text(&crate::state::NetState::default()),
+            device(0xbe, 0, 0.0, 0, now).address_text(&crate::state::NetState::default(), Some(17)),
             "a4:83:e7:1c:09:be"
         );
         assert_eq!(
@@ -259,7 +260,7 @@ mod tests {
                 address: [0, 0, 0, 0, 0, 0],
                 ..device(0, 0, 0.0, 0, now)
             }
-            .address_text(&crate::state::NetState::default()),
+            .address_text(&crate::state::NetState::default(), Some(17)),
             "00:00:00:00:00:00"
         );
     }

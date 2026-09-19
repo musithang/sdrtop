@@ -29,7 +29,7 @@ use crate::state::{RadioState, SdrMetrics};
 use crate::ui::panel::{FeedSpan, Panel, PanelChrome, Staleness, Tag};
 use crate::ui::widgets::reading::Reading;
 use crate::ui::widgets::table::{
-    columns_that_fit, header, row, viewport_start, Align, Column, Sort,
+    columns_that_fit, header, row, viewport_start, widen, Align, Column, Sort,
 };
 
 pub struct NetCensusPanel;
@@ -89,10 +89,15 @@ fn ago(secs: u64) -> String {
     }
 }
 
-fn cells(d: &Device, state: &SdrMetrics, now: std::time::Instant) -> Vec<String> {
+fn cells(
+    d: &Device,
+    state: &SdrMetrics,
+    now: std::time::Instant,
+    address_width: usize,
+) -> Vec<String> {
     let radio = &state.radio;
     vec![
-        d.address_text(&state.net),
+        d.address_text(&state.net, Some(address_width)),
         ago(now.saturating_duration_since(d.last_seen).as_secs()),
         d.packets.to_string(),
         format!("{:.1} dB", d.best_snr_db),
@@ -176,15 +181,24 @@ impl Panel for NetCensusPanel {
             return;
         }
         let width = inner.width as usize;
-        let fit = columns_that_fit(COLUMNS, width);
         let census = &state.net.census;
         let now = std::time::Instant::now();
 
         let devices: Vec<Device> = census.ordered(now, &state.radio);
+        // The address column takes what the terminal can spare, up to the
+        // widest address on the list: a registrant's whole name on a wide
+        // screen, cut and marked on a narrow one.
+        let want = devices
+            .iter()
+            .map(|d| state.net.address_width(d.address, d.random))
+            .max()
+            .unwrap_or(0);
+        let columns = widen(COLUMNS, width, 0, want);
+        let fit = columns_that_fit(&columns, width);
         let addresses: Vec<[u8; 6]> = devices.iter().map(|d| d.address).collect();
 
         let mut lines = vec![header(
-            COLUMNS,
+            &columns,
             fit,
             Sort {
                 column: census.sort,
@@ -225,9 +239,9 @@ impl Panel for NetCensusPanel {
         );
         for (i, d) in devices.iter().enumerate().skip(start).take(body) {
             lines.push(row(
-                COLUMNS,
+                &columns,
                 fit,
-                &cells(d, state, now),
+                &cells(d, state, now, columns[0].width),
                 Some(i) == cursor,
                 theme,
             ));

@@ -32,7 +32,7 @@ pub use micro::MicroView;
 // to be returned and destructured, and no call site has to name it.
 pub use net::{
     AddressDisplay, BandOccupancy, BlePacket, BtHop, CellReading, NetDecodeHealth, NetMode,
-    NetState, BLE_PACKET_LIMIT, BT_HOP_LIMIT, COLUMN_INTERVAL, HISTORY_COLUMNS,
+    NetState, BLE_PACKET_LIMIT, BT_HOP_LIMIT, COLUMN_INTERVAL, FULL_ADDRESS_WIDTH, HISTORY_COLUMNS,
 };
 pub use observer::ObserverState;
 pub use radio::{

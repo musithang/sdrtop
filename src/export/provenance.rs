@@ -110,10 +110,24 @@ pub fn block(state: &SdrMetrics, unix_secs: i64) -> Vec<String> {
         ),
         field("mode", format!("NET / {}", state.net.mode.label())),
         // The rows below show addresses in this mode, so the file says which.
-        field("addresses", state.net.address_display.label().to_string()),
+        field("addresses", addresses_line(state)),
         field("reference", reference_line(state, now)),
         field("session", session),
     ]
+}
+
+/// How the addresses below are shown, and, when a registrant's name can be
+/// in them, which snapshot of the IEEE's listing it came from.
+fn addresses_line(state: &SdrMetrics) -> String {
+    let mode = state.net.address_display;
+    match mode {
+        crate::state::AddressDisplay::Full => mode.label().to_string(),
+        _ => format!(
+            "{}, registrants from the IEEE listing of {}",
+            mode.label(),
+            crate::signal::net::vendor::fetched()
+        ),
+    }
 }
 
 /// How the frequency reference is described, or why it is not.

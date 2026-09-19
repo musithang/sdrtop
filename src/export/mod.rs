@@ -100,9 +100,31 @@ fn one(
     })
 }
 
+/// One CSV field, quoted when it has to be (RFC 4180 2.6 and 2.7): a field
+/// holding a comma, a double quote or a line break goes in double quotes, with
+/// every quote inside doubled. Anything else is written as it is.
+///
+/// Needed since addresses can carry a registrant's name: 21,696 of the IEEE's
+/// names hold a comma and 78 a quote, and one written bare would shift every
+/// column after it in that row.
+pub fn csv_field(text: &str) -> std::borrow::Cow<'_, str> {
+    if text.contains([',', '"', '\n', '\r']) {
+        std::borrow::Cow::Owned(format!("\"{}\"", text.replace('"', "\"\"")))
+    } else {
+        std::borrow::Cow::Borrowed(text)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_field_is_quoted_only_when_it_must_be() {
+        assert_eq!(csv_field("Apple ..09:be"), "Apple ..09:be");
+        assert_eq!(csv_field("Foo, Bar ..09:be"), "\"Foo, Bar ..09:be\"");
+        assert_eq!(csv_field("The \"Q\" Co"), "\"The \"\"Q\"\" Co\"");
+    }
 
     fn scratch() -> PathBuf {
         let dir = std::env::temp_dir().join(format!(

@@ -98,14 +98,12 @@ fn parse(text: &'static str) -> Table {
 }
 
 /// The day the snapshot was taken from the IEEE's listing, `YYYY-MM-DD`.
-#[allow(dead_code)] // shown beside the names by the address display (1.6.d, d2)
 pub fn fetched() -> &'static str {
     table().fetched
 }
 
 /// Who the block holding `addr` is registered to. `addr` is in the written
 /// octet order (`signal::ble::pdu::air_octets`).
-#[allow(dead_code)] // called by the address display (net-ux-polish-plan 1.6.d, d2)
 pub fn registrant(addr: [u8; 6]) -> Registrant {
     let whole = addr.iter().fold(0u64, |acc, b| acc << 8 | *b as u64);
     let t = table();
@@ -125,6 +123,87 @@ pub fn registrant(addr: [u8; 6]) -> Registrant {
         }
     }
     Registrant::NotListed
+}
+
+/// The trailing words that say what kind of company a name is rather than
+/// which one: legal forms, lower case, longest first so `co.,ltd` goes before
+/// `ltd`. The IEEE's names carry them in every spelling a registrant typed;
+/// these are the ones the listing actually uses, measured on the snapshot.
+/// `corporate` is not a legal form, but a name ending in it ("Intel
+/// Corporate") says nothing more with it than without.
+const LEGAL_FORMS: &[&str] = &[
+    "incorporated",
+    "corporation",
+    "corp.,ltd",
+    "co., ltd",
+    "co.,ltd",
+    "corporate",
+    "co.ltd",
+    "co ltd",
+    "limited",
+    "company",
+    "s.p.a",
+    "s.r.l",
+    "gmbh",
+    "ltda",
+    "corp",
+    "a/s",
+    "b.v",
+    "inc",
+    "ltd",
+    "llc",
+    "srl",
+    "sas",
+    "spa",
+    "s.a",
+    "s.l",
+    "plc",
+    "pty",
+    "pte",
+    "ag",
+    "ab",
+    "kg",
+    "oy",
+    "sa",
+    "bv",
+    "nv",
+    "as",
+    "co",
+];
+
+/// A registrant's name cut to `width` columns for a table cell.
+///
+/// The legal form comes off first ("Apple, Inc." is "Apple", "Samsung
+/// Electronics Co.,Ltd" is "Samsung Electronics"), as often as one is found,
+/// since the listing stacks them. What still does not fit is cut and marked
+/// with `…`, never abbreviated by a rule that would sometimes guess wrong:
+/// "Samsung…" is visibly cut, a made-up short form would not be. The full name
+/// belongs where there is room for it: the detail views and the export.
+pub fn short_name(name: &str, width: usize) -> String {
+    let mut s = name.trim();
+    'strip: loop {
+        let trimmed = s.trim_end_matches([' ', ',', '.']);
+        let lower = trimmed.to_ascii_lowercase();
+        for form in LEGAL_FORMS {
+            if let Some(head) = lower.strip_suffix(form) {
+                // Only a whole word: "Nordic Semiconductor ASA" loses "ASA"
+                // only if "asa" is listed, never an "as" off its end.
+                let rest = trimmed[..head.len()].trim_end_matches([' ', ',']);
+                if head.ends_with([' ', ',']) && !rest.is_empty() {
+                    s = rest;
+                    continue 'strip;
+                }
+            }
+        }
+        s = trimmed;
+        break;
+    }
+    if s.chars().count() <= width {
+        s.to_string()
+    } else {
+        let kept: String = s.chars().take(width.saturating_sub(1)).collect();
+        format!("{}…", kept.trim_end())
+    }
 }
 
 /// The records of a CSV file as the IEEE writes them: comma-separated, a field
@@ -359,6 +438,40 @@ mod tests {
                 assert!(names.contains(&"CERN"), "{names:?}");
             }
             other => panic!("{other:?}"),
+        }
+    }
+
+    /// The legal form comes off, as often as it is stacked, and only as a whole
+    /// word; what still does not fit is cut and marked, not abbreviated.
+    #[test]
+    fn a_short_name_drops_the_legal_form_and_marks_a_cut() {
+        assert_eq!(short_name("Apple, Inc.", 9), "Apple");
+        assert_eq!(short_name("Sony Corporation", 9), "Sony");
+        assert_eq!(short_name("Intel Corporate", 9), "Intel");
+        assert_eq!(short_name("Espressif Inc.", 9), "Espressif");
+        assert_eq!(short_name("Bose Corporation", 9), "Bose");
+        assert_eq!(short_name("Samsung Electronics Co.,Ltd", 9), "Samsung…");
+        assert_eq!(short_name("HUAWEI TECHNOLOGIES CO.,LTD", 9), "HUAWEI T…");
+        assert_eq!(
+            short_name("Foo Holdings Co., Ltd. Inc.", 20),
+            "Foo Holdings"
+        );
+        // Whole words only: a name ending in letters that spell a form keeps them.
+        assert_eq!(short_name("Texas", 9), "Texas");
+        assert_eq!(
+            short_name("Nordic Semiconductor ASA", 30),
+            "Nordic Semiconductor ASA"
+        );
+        // A name that is nothing but a legal form keeps it rather than vanishing.
+        assert_eq!(short_name("Inc.", 9), "Inc");
+        for list in &table().blocks {
+            for (_, name) in list {
+                let short = short_name(name, 9);
+                assert!(
+                    !short.is_empty() && short.chars().count() <= 9,
+                    "{name}: {short:?}"
+                );
+            }
         }
     }
 

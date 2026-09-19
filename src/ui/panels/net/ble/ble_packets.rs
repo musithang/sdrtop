@@ -32,7 +32,9 @@ pub struct NetBlePacketsPanel;
 
 const CH_W: usize = 3;
 const TYPE_W: usize = 15;
-const ADDR_W: usize = 17;
+/// The narrowest the address column is drawn: a full address. It grows from
+/// the spare width towards the widest address shown (`addr_width`).
+const ADDR_W: usize = crate::state::FULL_ADDRESS_WIDTH;
 const ATYP_W: usize = 4;
 const LEN_W: usize = 4;
 const CRC_W: usize = 4;
@@ -43,10 +45,33 @@ const CFO_W: usize = 15;
 const PPM_W: usize = 17;
 const AGE_W: usize = 6;
 
-fn header_line(theme: &crate::Theme) -> Line<'static> {
+/// Every column at its narrowest, with the single spaces between them.
+const FIXED_W: usize =
+    CH_W + TYPE_W + ADDR_W + ATYP_W + LEN_W + CRC_W + SNR_W + CFO_W + PPM_W + AGE_W + 9;
+
+/// The address column's width for this frame: what the panel can spare beyond
+/// every column at its narrowest, up to the widest address among `shown`, so
+/// a registrant's whole name appears when there is room and is cut and marked
+/// when there is not (`state::AddressDisplay::show`).
+fn addr_width<'a>(
+    shown: impl Iterator<Item = &'a BlePacket>,
+    net: &crate::state::NetState,
+    width: usize,
+) -> usize {
+    let want = shown
+        .filter_map(|p| p.adv_addr.map(|a| net.address_width(a, p.tx_add_random)))
+        .max()
+        .unwrap_or(ADDR_W);
+    ADDR_W
+        + want
+            .saturating_sub(ADDR_W)
+            .min(width.saturating_sub(FIXED_W))
+}
+
+fn header_line(addr_w: usize, theme: &crate::Theme) -> Line<'static> {
     Line::from(Span::styled(
         format!(
-            "{:<CH_W$} {:<TYPE_W$} {:<ADDR_W$} {:<ATYP_W$} {:>LEN_W$} {:>CRC_W$} {:>SNR_W$} {:>CFO_W$} {:>PPM_W$} {:>AGE_W$}",
+            "{:<CH_W$} {:<TYPE_W$} {:<addr_w$} {:<ATYP_W$} {:>LEN_W$} {:>CRC_W$} {:>SNR_W$} {:>CFO_W$} {:>PPM_W$} {:>AGE_W$}",
             "CH", "TYPE", "ADDRESS", "ATYP", "LEN", "CRC", "SNR", "CFO", "PPM", "AGE"
         ),
         Style::default().fg(theme.label),
@@ -102,9 +127,9 @@ fn ago(secs: u64) -> String {
 
 /// The advertiser's address as the section's display mode shows it, or a
 /// dash for a PDU type that carries none.
-fn address_text(p: &BlePacket, net: &crate::state::NetState) -> String {
+fn address_text(p: &BlePacket, net: &crate::state::NetState, width: usize) -> String {
     match p.adv_addr {
-        Some(a) => net.show_address(a, p.tx_add_random),
+        Some(a) => net.show_address(a, p.tx_add_random, Some(width)),
         None => "-".to_string(),
     }
 }
@@ -113,6 +138,7 @@ fn row(
     p: &BlePacket,
     state: &SdrMetrics,
     now: std::time::Instant,
+    addr_w: usize,
     theme: &crate::Theme,
 ) -> Line<'static> {
     let radio = &state.radio;
@@ -136,7 +162,7 @@ fn row(
         ),
         Span::raw(" "),
         Span::styled(
-            format!("{:<ADDR_W$}", address_text(p, &state.net)),
+            format!("{:<addr_w$}", address_text(p, &state.net, addr_w)),
             Style::default().fg(theme.value),
         ),
         Span::raw(" "),
@@ -234,7 +260,14 @@ impl Panel for NetBlePacketsPanel {
         if inner.width == 0 || inner.height == 0 {
             return;
         }
-        let mut lines = vec![header_line(theme)];
+        // Sized over every row the panel could show, so the header and the
+        // rows agree on one width for the frame.
+        let addr_w = addr_width(
+            state.net.ble_packets.iter().take(inner.height as usize),
+            &state.net,
+            inner.width as usize,
+        );
+        let mut lines = vec![header_line(addr_w, theme)];
 
         if let Some(reason) = &state.net.ble_refused {
             lines.push(Line::from(""));
@@ -276,7 +309,7 @@ impl Panel for NetBlePacketsPanel {
             .saturating_sub(summary.is_some() as usize);
         let now = std::time::Instant::now();
         for p in state.net.ble_packets.iter().take(body) {
-            lines.push(row(p, state, now, theme));
+            lines.push(row(p, state, now, addr_w, theme));
         }
         if let Some(summary) = summary {
             lines.push(summary);
