@@ -22,12 +22,13 @@ use ratatui::{
     Frame,
 };
 
-use crate::signal::net::gate::{admits, Phy, HIGHEST_CENTRE_HZ, LOWEST_CENTRE_HZ};
+use crate::signal::net::gate::{HIGHEST_CENTRE_HZ, LOWEST_CENTRE_HZ};
 use crate::state::SdrMetrics;
 use crate::ui::panel::{Panel, PanelChrome, Staleness};
 
 pub struct NetCapabilityPanel;
 
+mod modes;
 mod span;
 
 /// Label column width, so every `label value` row on the panel lines up.
@@ -54,26 +55,6 @@ fn fact<'a>(
         ));
     }
     Line::from(spans)
-}
-
-fn mode_line<'a>(phy: &Phy, available: bool, theme: &crate::Theme) -> Line<'a> {
-    let (marker, colour) = if available {
-        ("▸ ", theme.value)
-    } else {
-        ("· ", theme.stale)
-    };
-    Line::from(vec![
-        Span::styled(marker, Style::default().fg(colour)),
-        Span::styled(format!("{:<20}", phy.name), Style::default().fg(colour)),
-        Span::styled(
-            format!("{:>6.1} Msps", phy.rate_hz / 1e6),
-            Style::default().fg(colour),
-        ),
-        Span::styled(
-            format!("   {:>5.1} MHz occupied", phy.occupied_hz / 1e6),
-            Style::default().fg(theme.label),
-        ),
-    ])
 }
 
 impl Panel for NetCapabilityPanel {
@@ -141,26 +122,7 @@ impl Panel for NetCapabilityPanel {
             theme,
         ));
 
-        let (available, out): (Vec<&Phy>, Vec<&Phy>) = crate::signal::net::gate::PHYS
-            .iter()
-            .partition(|p| admits(caps, p));
-
-        if !available.is_empty() {
-            lines.push(Line::from(""));
-            lines.push(Line::from(Span::styled(
-                "THIS RADIO CAN RECEIVE",
-                Style::default().fg(theme.label),
-            )));
-            lines.extend(available.iter().map(|p| mode_line(p, true, theme)));
-        }
-        if !out.is_empty() {
-            lines.push(Line::from(""));
-            lines.push(Line::from(Span::styled(
-                "BEYOND ITS SAMPLE RATE",
-                Style::default().fg(theme.label),
-            )));
-            lines.extend(out.iter().map(|p| mode_line(p, false, theme)));
-        }
+        lines.extend(modes::lines(caps, iw, theme));
 
         f.render_widget(Paragraph::new(lines), inner);
     }

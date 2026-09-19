@@ -152,26 +152,8 @@ fn rows(q: &ModulationQuality, d: Option<&Drift>) -> Vec<LimitRow<'static>> {
     out
 }
 
-/// The widest bar that still keeps every row inside `width` columns.
-///
-/// A row's overall length depends on the margin text too, which varies with
-/// the actual value - not just the label, value and sigma columns
-/// [`RowWidths::fit`] measures - so this checks the real rendered length
-/// rather than budgeting columns by hand and hoping.
 fn fit(rows: &[LimitRow], width: usize) -> RowWidths {
-    let mut bar = width;
-    loop {
-        let w = RowWidths::fit(rows, bar);
-        let longest = rows
-            .iter()
-            .map(|r| r.text(w).chars().count())
-            .max()
-            .unwrap_or(0);
-        if longest <= width || bar == 0 {
-            return w;
-        }
-        bar -= 1;
-    }
+    RowWidths::fit_within(rows, width)
 }
 
 impl Panel for NetBleRfPanel {

@@ -76,6 +76,8 @@ pub(crate) struct Reading<'a> {
     value: Uncertain,
     unit: &'a str,
     resolution: f64,
+    /// Places for an exact value, which has no uncertainty to take them from.
+    exact_places: i32,
 }
 
 impl<'a> Reading<'a> {
@@ -88,7 +90,25 @@ impl<'a> Reading<'a> {
             value,
             unit,
             resolution,
+            exact_places: 3,
         }
+    }
+
+    /// An exact value, stated to `places` decimal places rather than the
+    /// default three. For a number that is exact by definition, a declared
+    /// rate or a stated limit, whose meaningful precision is known to the
+    /// caller: `20.0 Msps` is the same exact figure as `20.000 Msps` without
+    /// the two digits that imply a precision nobody was asked for. A value with
+    /// an uncertainty ignores it; its places come from the uncertainty.
+    pub(crate) fn stated_to(mut self, places: i32) -> Self {
+        self.exact_places = places;
+        self
+    }
+
+    /// The places this cell prints its value at: the uncertainty's when there
+    /// is one, the stated ones when the value is exact.
+    pub(super) fn value_places(&self) -> i32 {
+        self.value.decimals().unwrap_or(self.exact_places)
     }
 
     /// The measurement behind the cell, for a caller that needs to compute with
@@ -119,7 +139,7 @@ impl<'a> Reading<'a> {
         // A value that is not a number, or one the uncertainty cannot support,
         // is not printed. The house dash says so in every other panel too.
         if let Some(value) = self.resolved_value() {
-            out.push((fmt_at(value, places.unwrap_or(3)), Ink::Value));
+            out.push((fmt_at(value, self.value_places()), Ink::Value));
         } else {
             out.push(("—".to_string(), Ink::Missing));
         }
@@ -265,6 +285,20 @@ mod tests {
         assert_eq!(r.text(), "— ppm");
         let r = Reading::new(Uncertain::from_sigma(1.5, f64::INFINITY), "ppm", 1.0);
         assert_eq!(r.text(), "— ppm");
+    }
+
+    #[test]
+    fn an_exact_value_can_be_stated_to_its_own_precision() {
+        let r = Reading::new(Uncertain::exact(20.0), "Msps", f64::INFINITY);
+        assert_eq!(r.text(), "20.000 Msps");
+        let r = Reading::new(Uncertain::exact(20.0), "Msps", f64::INFINITY).stated_to(1);
+        assert_eq!(r.text(), "20.0 Msps");
+        // A measured value keeps the places its uncertainty earns.
+        let r = Reading::new(Uncertain::from_sigma(20.0, 0.004), "Msps", 1.0).stated_to(1);
+        assert_eq!(
+            r.text(),
+            Reading::new(Uncertain::from_sigma(20.0, 0.004), "Msps", 1.0).text()
+        );
     }
 
     #[test]

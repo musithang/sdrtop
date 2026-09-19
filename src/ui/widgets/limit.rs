@@ -137,6 +137,29 @@ impl RowWidths {
         }
         w
     }
+
+    /// The widest bar that still keeps every row inside `width` columns.
+    ///
+    /// A row's overall length depends on the margin text too, which varies
+    /// with the actual value - not just the label, value and sigma columns
+    /// [`Self::fit`] measures - so this checks the real rendered length rather
+    /// than budgeting columns by hand and hoping. Moved here from
+    /// `net_ble_rf` when `net_capability` became its second caller.
+    pub(crate) fn fit_within(rows: &[LimitRow<'_>], width: usize) -> Self {
+        let mut bar = width;
+        loop {
+            let w = Self::fit(rows, bar);
+            let longest = rows
+                .iter()
+                .map(|r| r.text(w).chars().count())
+                .max()
+                .unwrap_or(0);
+            if longest <= width || bar == 0 {
+                return w;
+            }
+            bar -= 1;
+        }
+    }
 }
 
 /// One measurement against one stated limit.
@@ -311,8 +334,7 @@ impl<'a> LimitRow<'a> {
         let Some(margin) = self.margin().filter(|m| m.value().is_finite()) else {
             return "—".to_string();
         };
-        let places = self.reading.uncertain().decimals().unwrap_or(3);
-        let body = fmt_at(margin.value(), places);
+        let body = fmt_at(margin.value(), self.reading.value_places());
         let signed = if body.starts_with('-') {
             body
         } else {
