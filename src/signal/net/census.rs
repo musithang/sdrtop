@@ -31,8 +31,12 @@ use crate::signal::dsp::uncertainty::Uncertain;
 /// One transmitter, as the census knows it.
 #[derive(Clone, Debug)]
 pub struct Device {
-    /// The MAC or BD_ADDR, as transmitted.
+    /// The MAC or BD_ADDR, in the written octet order (most significant
+    /// first; see `signal::ble::pdu::air_octets`).
     pub address: [u8; 6],
+    /// Whether the address was sent as a random one (BLE's TxAdd = 1), which
+    /// decides what kind of address it is (`signal::ble::address::kind`).
+    pub random: bool,
     /// Packets attributed to it.
     pub packets: u64,
     /// The strongest it has been heard. See the module doc for why this is
@@ -63,13 +67,9 @@ pub struct Device {
 }
 
 impl Device {
-    /// `a4:83:e7:1c:09:be`, the form design section 1.1 makes the default.
-    pub fn address_text(&self) -> String {
-        self.address
-            .iter()
-            .map(|b| format!("{b:02x}"))
-            .collect::<Vec<_>>()
-            .join(":")
+    /// The address as `mode` shows it, with this device's own kind.
+    pub fn address_text(&self, mode: crate::state::AddressDisplay) -> String {
+        mode.show(self.address, self.random)
     }
 }
 
@@ -163,6 +163,7 @@ fn cfo_key(
 pub fn observe(
     devices: &mut Vec<Device>,
     address: [u8; 6],
+    random: bool,
     snr_db: Option<f64>,
     crystal_offset_ppm: Option<Uncertain>,
     now: Instant,
@@ -172,6 +173,7 @@ pub fn observe(
         None => {
             devices.push(Device {
                 address,
+                random,
                 packets: 0,
                 best_snr_db: f32::NEG_INFINITY,
                 first_seen: now,
@@ -235,6 +237,7 @@ mod tests {
     fn device(last: u8, packets: u64, snr: f32, ago_s: u64, now: Instant) -> Device {
         Device {
             address: [0xa4, 0x83, 0xe7, 0x1c, 0x09, last],
+            random: false,
             packets,
             best_snr_db: snr,
             first_seen: now - Duration::from_secs(ago_s),
@@ -247,7 +250,7 @@ mod tests {
     fn an_address_reads_as_an_address() {
         let now = Instant::now();
         assert_eq!(
-            device(0xbe, 0, 0.0, 0, now).address_text(),
+            device(0xbe, 0, 0.0, 0, now).address_text(crate::state::AddressDisplay::Full),
             "a4:83:e7:1c:09:be"
         );
         assert_eq!(
@@ -255,7 +258,7 @@ mod tests {
                 address: [0, 0, 0, 0, 0, 0],
                 ..device(0, 0, 0.0, 0, now)
             }
-            .address_text(),
+            .address_text(crate::state::AddressDisplay::Full),
             "00:00:00:00:00:00"
         );
     }
@@ -384,6 +387,7 @@ mod tests {
         observe(
             &mut devices,
             [1, 2, 3, 4, 5, 6],
+            false,
             Some(4.0),
             Some(Uncertain::from_sigma(120.0, 20.0)),
             now,
@@ -405,8 +409,8 @@ mod tests {
         let born = Instant::now();
         let later = born + Duration::from_secs(90);
         let mut devices = Vec::new();
-        observe(&mut devices, [1, 2, 3, 4, 5, 6], None, None, born);
-        observe(&mut devices, [1, 2, 3, 4, 5, 6], None, None, later);
+        observe(&mut devices, [1, 2, 3, 4, 5, 6], false, None, None, born);
+        observe(&mut devices, [1, 2, 3, 4, 5, 6], false, None, None, later);
         assert_eq!(devices[0].first_seen, born);
         assert_eq!(devices[0].last_seen, later);
     }
@@ -418,16 +422,16 @@ mod tests {
         let now = Instant::now();
         let mut devices = Vec::new();
         let addr = [1, 2, 3, 4, 5, 6];
-        observe(&mut devices, addr, Some(4.0), None, now);
-        observe(&mut devices, addr, Some(9.0), None, now);
+        observe(&mut devices, addr, false, Some(4.0), None, now);
+        observe(&mut devices, addr, false, Some(9.0), None, now);
         assert_eq!(devices.len(), 1);
         assert_eq!(devices[0].packets, 2);
         // Best-ever, not most-recent: 4.0 dB does not overwrite 9.0 dB.
         assert_eq!(devices[0].best_snr_db, 9.0);
 
         let mut devices2 = Vec::new();
-        observe(&mut devices2, addr, Some(9.0), None, now);
-        observe(&mut devices2, addr, Some(4.0), None, now);
+        observe(&mut devices2, addr, false, Some(9.0), None, now);
+        observe(&mut devices2, addr, false, Some(4.0), None, now);
         assert_eq!(devices2[0].best_snr_db, 9.0, "order must not matter");
     }
 
@@ -441,8 +445,8 @@ mod tests {
         let addr = [1, 2, 3, 4, 5, 6];
         let a = Uncertain::from_sigma(100.0, 20.0);
         let b = Uncertain::from_sigma(140.0, 20.0);
-        observe(&mut devices, addr, None, Some(a), now);
-        observe(&mut devices, addr, None, Some(b), now);
+        observe(&mut devices, addr, false, None, Some(a), now);
+        observe(&mut devices, addr, false, None, Some(b), now);
         let combined = devices[0].crystal_offset_ppm.unwrap();
         let direct = a.combine(&b);
         assert_eq!(combined.value(), direct.value());

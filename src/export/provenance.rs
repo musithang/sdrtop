@@ -109,6 +109,8 @@ pub fn block(state: &SdrMetrics, unix_secs: i64) -> Vec<String> {
             ),
         ),
         field("mode", format!("NET / {}", state.net.mode.label())),
+        // The rows below show addresses in this mode, so the file says which.
+        field("addresses", state.net.address_display.label().to_string()),
         field("reference", reference_line(state, now)),
         field("session", session),
     ]
@@ -216,6 +218,7 @@ mod tests {
             "device",
             "tuning",
             "mode",
+            "addresses",
             "reference",
             "session",
         ] {

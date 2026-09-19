@@ -322,6 +322,7 @@ pub fn title_spans(
             Tag::FeedLoss => ("FEED LOSS".to_string(), theme.status_warn),
             // The RF bench's FREQUENCY REFERENCE card's words and colours:
             // relative is not a warning, it is a different claim.
+            Tag::Addresses(mode) => (mode.label().to_uppercase(), theme.value_hi),
             // The words are `Provenance::label`'s, the ones the RF bench's
             // FREQUENCY REFERENCE card prints, and so are the colours:
             // relative is not a warning, it is a different claim.

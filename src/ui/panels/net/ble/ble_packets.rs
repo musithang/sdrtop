@@ -100,23 +100,22 @@ fn ago(secs: u64) -> String {
     }
 }
 
-fn address_text(addr: Option<[u8; 6]>) -> String {
-    match addr {
-        Some(a) => a
-            .iter()
-            .map(|b| format!("{b:02x}"))
-            .collect::<Vec<_>>()
-            .join(":"),
+/// The advertiser's address as the section's display mode shows it, or a
+/// dash for a PDU type that carries none.
+fn address_text(p: &BlePacket, mode: crate::state::AddressDisplay) -> String {
+    match p.adv_addr {
+        Some(a) => mode.show(a, p.tx_add_random),
         None => "-".to_string(),
     }
 }
 
 fn row(
     p: &BlePacket,
-    radio: &RadioState,
+    state: &SdrMetrics,
     now: std::time::Instant,
     theme: &crate::Theme,
 ) -> Line<'static> {
+    let radio = &state.radio;
     let (khz, ppm) = fmt_offset(p, radio, now);
     let crc_ink = if p.crc_ok {
         theme.status_ok
@@ -137,7 +136,7 @@ fn row(
         ),
         Span::raw(" "),
         Span::styled(
-            format!("{:<ADDR_W$}", address_text(p.adv_addr)),
+            format!("{:<ADDR_W$}", address_text(p, state.net.address_display)),
             Style::default().fg(theme.value),
         ),
         Span::raw(" "),
@@ -221,6 +220,7 @@ impl Panel for NetBlePacketsPanel {
             // block is packets this feed never saw.
             .counts_from_feed(FeedSpan::Session)
             .shows_offsets()
+            .shows_addresses()
     }
 
     fn render(
@@ -276,7 +276,7 @@ impl Panel for NetBlePacketsPanel {
             .saturating_sub(summary.is_some() as usize);
         let now = std::time::Instant::now();
         for p in state.net.ble_packets.iter().take(body) {
-            lines.push(row(p, &state.radio, now, theme));
+            lines.push(row(p, state, now, theme));
         }
         if let Some(summary) = summary {
             lines.push(summary);

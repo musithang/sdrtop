@@ -31,8 +31,8 @@ pub use micro::MicroView;
 // `NetExit` is not re-exported, for the reason `SweepExit` is not: it exists
 // to be returned and destructured, and no call site has to name it.
 pub use net::{
-    BandOccupancy, BlePacket, BtHop, CellReading, NetDecodeHealth, NetMode, NetState,
-    BLE_PACKET_LIMIT, BT_HOP_LIMIT, COLUMN_INTERVAL, HISTORY_COLUMNS,
+    AddressDisplay, BandOccupancy, BlePacket, BtHop, CellReading, NetDecodeHealth, NetMode,
+    NetState, BLE_PACKET_LIMIT, BT_HOP_LIMIT, COLUMN_INTERVAL, HISTORY_COLUMNS,
 };
 pub use observer::ObserverState;
 pub use radio::{

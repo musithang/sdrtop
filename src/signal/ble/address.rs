@@ -47,7 +47,6 @@ pub enum AddressKind {
 
 impl AddressKind {
     /// The short form a table column has room for.
-    #[allow(dead_code)] // the address display switch (net-ux-polish-plan 1.6.a) shows it
     pub fn label(self) -> &'static str {
         match self {
             Self::Public => "public",
@@ -60,7 +59,6 @@ impl AddressKind {
 }
 
 /// The kind of `addr`, sent with TxAdd = `random`.
-#[allow(dead_code)] // the address display switch (net-ux-polish-plan 1.6.a) calls it
 pub fn kind(addr: [u8; 6], random: bool) -> AddressKind {
     if !random {
         return AddressKind::Public;

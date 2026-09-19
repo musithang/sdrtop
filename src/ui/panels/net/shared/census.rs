@@ -89,9 +89,10 @@ fn ago(secs: u64) -> String {
     }
 }
 
-fn cells(d: &Device, radio: &RadioState, now: std::time::Instant) -> Vec<String> {
+fn cells(d: &Device, state: &SdrMetrics, now: std::time::Instant) -> Vec<String> {
+    let radio = &state.radio;
     vec![
-        d.address_text(),
+        d.address_text(state.net.address_display),
         ago(now.saturating_duration_since(d.last_seen).as_secs()),
         d.packets.to_string(),
         format!("{:.1} dB", d.best_snr_db),
@@ -155,6 +156,7 @@ impl Panel for NetCensusPanel {
             // session, so a drop at any point in it undercounts them.
             .counts_from_feed(FeedSpan::Session)
             .shows_offsets()
+            .shows_addresses()
             .tag_if(true, state.net.mode.tag())
             .tag_if(
                 true,
@@ -225,7 +227,7 @@ impl Panel for NetCensusPanel {
             lines.push(row(
                 COLUMNS,
                 fit,
-                &cells(d, &state.radio, now),
+                &cells(d, state, now),
                 Some(i) == cursor,
                 theme,
             ));
@@ -248,6 +250,7 @@ mod tests {
         m.net.census.devices = vec![
             Device {
                 address: [0xa4, 0x83, 0xe7, 0x1c, 0x09, 0xbe],
+                random: false,
                 packets: 1_204,
                 best_snr_db: 12.3,
                 first_seen: now - Duration::from_secs(600),
@@ -256,6 +259,7 @@ mod tests {
             },
             Device {
                 address: [0xf0, 0x18, 0x98, 0x00, 0x11, 0x22],
+                random: false,
                 packets: 7,
                 best_snr_db: 2.4,
                 // Clearly inside the five-minute turnover window, not on
@@ -269,6 +273,7 @@ mod tests {
             },
             Device {
                 address: [0x00, 0x1a, 0x11, 0xaa, 0xbb, 0xcc],
+                random: false,
                 packets: 96,
                 best_snr_db: 6.9,
                 first_seen: now - Duration::from_secs(90),

@@ -166,6 +166,12 @@ pub enum Tag {
     /// declares that it shows offsets ([`PanelChrome::shows_offsets`]) and
     /// the engine says what they are worth.
     Offsets(crate::state::OffsetBasis),
+    /// `[OUI]` - how addresses on this panel are shown, when it is not the
+    /// full address (`state::AddressDisplay`). Engine-owned like
+    /// [`Tag::Offsets`]: the panel declares that it prints addresses
+    /// ([`PanelChrome::shows_addresses`]), and a switch that changes every
+    /// panel at once is said on every panel at once.
+    Addresses(crate::state::AddressDisplay),
 }
 
 /// The *shape* of a panel's frame. Its colour is [`FrameTone`]; the two are
@@ -276,6 +282,9 @@ pub struct PanelChrome {
     /// Whether this panel shows a transmitter's frequency offset, which
     /// earns it the engine's [`Tag::Offsets`].
     pub offsets: bool,
+    /// Whether this panel prints device addresses, which earns it the
+    /// engine's [`Tag::Addresses`] whenever they are not shown in full.
+    pub addresses: bool,
 }
 
 impl PanelChrome {
@@ -290,6 +299,7 @@ impl PanelChrome {
             suffix: None,
             feed: None,
             offsets: false,
+            addresses: false,
         }
     }
 
@@ -359,6 +369,13 @@ impl PanelChrome {
         self
     }
 
+    /// Declare that this panel prints device addresses, so the engine can say
+    /// when they are not shown in full ([`Tag::Addresses`]).
+    pub fn shows_addresses(mut self) -> Self {
+        self.addresses = true;
+        self
+    }
+
     /// Add the tags the engine owns - the ones a panel declares the grounds for
     /// but never pushes itself. Called once, where the frame is drawn.
     pub fn with_engine_tags(mut self, state: &SdrMetrics) -> Self {
@@ -368,6 +385,10 @@ impl PanelChrome {
         if self.offsets {
             let basis = state.radio.offset_basis(std::time::Instant::now());
             self.tags.push(Tag::Offsets(basis));
+        }
+        let display = state.net.address_display;
+        if self.addresses && display != crate::state::AddressDisplay::Full {
+            self.tags.push(Tag::Addresses(display));
         }
         self
     }

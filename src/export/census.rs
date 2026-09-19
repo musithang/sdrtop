@@ -45,7 +45,7 @@ pub fn rows(state: &SdrMetrics) -> Vec<String> {
                 .unwrap_or_default();
             format!(
                 "{},{},{:.1},{},{},{}",
-                d.address_text(),
+                d.address_text(state.net.address_display),
                 d.packets,
                 d.best_snr_db,
                 cfo,
@@ -78,6 +78,7 @@ mod tests {
         m.net.census.devices = vec![
             Device {
                 address: [0xf0, 0x18, 0x98, 0, 0x11, 0x22],
+                random: false,
                 packets: 7,
                 best_snr_db: -88.0,
                 first_seen: now - Duration::from_secs(300),
@@ -86,6 +87,7 @@ mod tests {
             },
             Device {
                 address: [0xa4, 0x83, 0xe7, 0x1c, 9, 0xbe],
+                random: false,
                 packets: 1_204,
                 best_snr_db: -41.2,
                 first_seen: now - Duration::from_secs(600),
@@ -115,5 +117,11 @@ mod tests {
         m.net.census.descending = false;
         let by_address = rows(&m);
         assert!(by_address[0].starts_with("a4:"), "{:?}", by_address[0]);
+
+        // The file shows addresses the way the screen does, so an export taken
+        // with the switch away from `full` leaks no more than the screen did.
+        m.net.address_display = crate::state::AddressDisplay::Oui;
+        let shown = rows(&m);
+        assert!(shown[0].starts_with("A4-83-E7 ..09:be,"), "{:?}", shown[0]);
     }
 }

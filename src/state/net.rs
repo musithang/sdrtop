@@ -57,6 +57,73 @@ impl NetMode {
     }
 }
 
+/// How every address in the section is shown: foundation design 1.1's switch.
+///
+/// **It changes the presentation, never the measurement.** The census still
+/// keys devices by the full address and the cursor still follows one; only
+/// what reaches the screen and the export changes, and it changes everywhere
+/// at once (`show`), so a device keeps its identity from panel to panel
+/// whichever mode is on. The mode is on the chrome of every panel that
+/// prints an address (`ui::panel::Tag::Addresses`), except in `Full`, the
+/// default, where there is nothing to say.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
+pub enum AddressDisplay {
+    /// `d1:9a:7e:91:27:9e`: the address, in the written octet order.
+    #[default]
+    Full,
+    /// `A4-83-E7 ..09:be` or `static ..27:9e`: who the address says it
+    /// belongs to, and enough of the rest to tell two apart across a room.
+    ///
+    /// A public address's top three octets are its IEEE OUI, shown in the
+    /// IEEE's own hyphenated form so it cannot be mistaken for a whole
+    /// address; a vendor name replaces it once a cited registry snapshot
+    /// exists (net-ux-polish-plan 1.6.d). A random address has no OUI at all,
+    /// so it shows its kind (`signal::ble::address::kind`) instead of a
+    /// vendor that would be invented.
+    Oui,
+}
+
+impl AddressDisplay {
+    /// The next mode, for the one key that cycles them.
+    pub fn next(self) -> Self {
+        match self {
+            Self::Full => Self::Oui,
+            Self::Oui => Self::Full,
+        }
+    }
+
+    /// The word the chrome tag, the log and the export's provenance use.
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Full => "full",
+            Self::Oui => "oui",
+        }
+    }
+
+    /// `addr`, sent with TxAdd = `random`, as this mode shows it. At most 17
+    /// columns in every mode, the width of a full address, so no table has to
+    /// make room for a mode.
+    pub fn show(self, addr: [u8; 6], random: bool) -> String {
+        match self {
+            Self::Full => addr
+                .iter()
+                .map(|b| format!("{b:02x}"))
+                .collect::<Vec<_>>()
+                .join(":"),
+            Self::Oui => {
+                use crate::signal::ble::address::{kind, AddressKind};
+                let who = match kind(addr, random) {
+                    AddressKind::Public => {
+                        format!("{:02X}-{:02X}-{:02X}", addr[0], addr[1], addr[2])
+                    }
+                    other => other.label().to_string(),
+                };
+                format!("{who:<8} ..{:02x}:{:02x}", addr[4], addr[5])
+            }
+        }
+    }
+}
+
 /// Where the radio belongs once the survey gives the tuner back.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct NetExit {
@@ -168,6 +235,8 @@ pub struct NetState {
     /// the app would reopen somewhere in the middle of the band, one position
     /// further along each time.
     pub pre_survey_hz: Option<u64>,
+    /// How addresses are shown throughout the section. See [`AddressDisplay`].
+    pub address_display: AddressDisplay,
 }
 
 impl NetState {
@@ -599,6 +668,47 @@ impl BandOccupancy {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Every mode fits the width of a full address, so a table sized for one
+    /// holds all of them, and each says what foundation design 1.1 promises.
+    #[test]
+    fn each_address_mode_shows_what_it_promises_in_the_same_width() {
+        let public = [0xa4, 0x83, 0xe7, 0x1c, 0x09, 0xbe];
+        let static_random = [0xd1, 0x9a, 0x7e, 0x91, 0x27, 0x9e];
+        let rpa = [0x4f, 0x00, 0x11, 0x22, 0x33, 0x44];
+        assert_eq!(
+            AddressDisplay::Full.show(public, false),
+            "a4:83:e7:1c:09:be"
+        );
+        assert_eq!(AddressDisplay::Oui.show(public, false), "A4-83-E7 ..09:be");
+        assert_eq!(
+            AddressDisplay::Oui.show(static_random, true),
+            "static   ..27:9e"
+        );
+        assert_eq!(AddressDisplay::Oui.show(rpa, true), "RPA      ..33:44");
+        for mode in [AddressDisplay::Full, AddressDisplay::Oui] {
+            for (a, r) in [(public, false), (static_random, true), (rpa, true)] {
+                assert!(mode.show(a, r).chars().count() <= 17, "{mode:?} {a:02x?}");
+            }
+        }
+    }
+
+    /// The same device reads the same way in every mode switch cycle: `next`
+    /// visits every mode and comes back.
+    #[test]
+    fn the_address_modes_cycle_back_to_full() {
+        let mut m = AddressDisplay::Full;
+        let mut seen = vec![m];
+        loop {
+            m = m.next();
+            if m == AddressDisplay::Full {
+                break;
+            }
+            assert!(!seen.contains(&m), "{m:?} came round twice");
+            seen.push(m);
+        }
+        assert_eq!(seen.len(), 2);
+    }
     use std::time::{Duration, Instant};
 
     /// **Locking means "stay here". Leaving the section means "put it back".**

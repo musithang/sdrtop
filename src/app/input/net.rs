@@ -51,6 +51,7 @@ mod tests {
         let now = Instant::now();
         Device {
             address: [0xa4, 0x83, 0xe7, 0x1c, 0x09, tail],
+            random: false,
             packets,
             best_snr_db: 10.0,
             first_seen: now - Duration::from_secs(60),

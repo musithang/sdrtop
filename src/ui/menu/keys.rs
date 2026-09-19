@@ -147,6 +147,13 @@ pub const GLOBAL: &[(&str, &[Binding])] = &[
                 Some('o'),
                 "in NET: write the band and the census to a file",
             ),
+            // Spelled with the shift because this pane shows every letter in
+            // capitals, and a bare "A" already means the boost above.
+            b(
+                "Shift A",
+                Some('A'),
+                "in NET: show addresses in full or by vendor and kind",
+            ),
             b("W", Some('w'), "pause or resume the waterfall"),
             b("H", Some('h'), "freeze a ghost trace, or clear it"),
             b("Tab", None, "show or hide the footer"),

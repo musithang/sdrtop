@@ -205,7 +205,7 @@ fn census_from_ble(
                 .freq_offset_hz
                 .zip(carrier)
                 .map(|(hz, c)| crate::state::offset_ppm(hz, c as f64));
-            crate::signal::net::census::observe(devices, addr, p.snr_db, ppm, now);
+            crate::signal::net::census::observe(devices, addr, p.tx_add_random, p.snr_db, ppm, now);
         }
     }
 }

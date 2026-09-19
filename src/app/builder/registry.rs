@@ -472,12 +472,64 @@ mod tests {
     /// none carries a tag about numbers that are not there.
     #[test]
     fn every_net_panel_showing_a_ppm_says_what_it_is_worth() {
+        let rendered = net_panels_with_one_device(crate::state::AddressDisplay::Full);
+        let mut checked = 0;
+        for (name, text, chrome) in &rendered {
+            let prints_ppm = text.contains(" ppm");
+            let declares = chrome.offsets;
+            if prints_ppm || declares {
+                checked += 1;
+            }
+            assert_eq!(
+                prints_ppm, declares,
+                "{name}: prints a ppm {prints_ppm}, declares offsets {declares}"
+            );
+        }
+        assert!(checked >= 2, "only {checked} net panels showed an offset");
+    }
+
+    /// **Every NET panel that prints an address honours the display switch,
+    /// and says so** (foundation design 1.1: one key, every panel). A panel
+    /// printing the full address declares `shows_addresses`, so the engine
+    /// tags it when the mode is not `full`; and with the mode switched, no
+    /// panel anywhere in the section still prints the full address, which is
+    /// what makes a screenshot in a masked mode safe to share.
+    #[test]
+    fn every_net_panel_showing_an_address_follows_the_switch() {
+        use crate::state::AddressDisplay;
+        const FULL: &str = "01:02:03:04:05:06";
+        let mut checked = 0;
+        for (name, text, chrome) in &net_panels_with_one_device(AddressDisplay::Full) {
+            let prints = text.contains(FULL);
+            if prints || chrome.addresses {
+                checked += 1;
+            }
+            assert_eq!(
+                prints, chrome.addresses,
+                "{name}: prints an address {prints}, declares addresses {}",
+                chrome.addresses
+            );
+        }
+        assert!(checked >= 2, "only {checked} net panels showed an address");
+
+        for (name, text, _) in &net_panels_with_one_device(AddressDisplay::Oui) {
+            assert!(!text.contains(FULL), "{name} ignores the address switch");
+        }
+    }
+
+    /// Every NET panel rendered, as text beside its chrome, against a state in
+    /// which each has something to show: one advertiser, heard once, with an
+    /// offset, in the census and in the packet feed.
+    fn net_panels_with_one_device(
+        display: crate::state::AddressDisplay,
+    ) -> Vec<(String, String, ui::panel::PanelChrome)> {
         use crate::signal::dsp::uncertainty::Uncertain;
         use crate::state::{BlePacket, SdrMetrics};
 
         let (engine, _) = App::build_ui("net", &HashMap::new(), None, true);
         let now = std::time::Instant::now();
         let mut m = SdrMetrics::fixture().streaming();
+        m.net.address_display = display;
         m.net.ble_channel = Some(37);
         m.net.ble_packets.push_front(BlePacket {
             channel: 37,
@@ -495,37 +547,27 @@ mod tests {
         crate::signal::net::census::observe(
             &mut m.net.census.devices,
             [1, 2, 3, 4, 5, 6],
+            false,
             Some(12.0),
             Some(Uncertain::from_sigma(10.0, 0.2)),
             now,
         );
 
         let theme = crate::Theme::sdr();
-        let mut checked = 0;
-        for panel in engine.registered_panels() {
-            if !panel.name().starts_with("net_") {
-                continue;
-            }
-            let backend = ratatui::backend::TestBackend::new(140, 30);
-            let mut terminal = ratatui::Terminal::new(backend).unwrap();
-            terminal
-                .draw(|f| panel.render(f, f.size(), &m, &theme, false))
-                .unwrap();
-            let buffer = terminal.backend().buffer();
-            let text: String = buffer.content().iter().map(|c| c.symbol()).collect();
-            let prints_ppm = text.contains(" ppm");
-            let declares = panel.chrome(&m).offsets;
-            if prints_ppm || declares {
-                checked += 1;
-            }
-            assert_eq!(
-                prints_ppm,
-                declares,
-                "{}: prints a ppm {prints_ppm}, declares offsets {declares}",
-                panel.name()
-            );
-        }
-        assert!(checked >= 2, "only {checked} net panels showed an offset");
+        engine
+            .registered_panels()
+            .filter(|panel| panel.name().starts_with("net_"))
+            .map(|panel| {
+                let backend = ratatui::backend::TestBackend::new(140, 30);
+                let mut terminal = ratatui::Terminal::new(backend).unwrap();
+                terminal
+                    .draw(|f| panel.render(f, f.size(), &m, &theme, false))
+                    .unwrap();
+                let buffer = terminal.backend().buffer();
+                let text: String = buffer.content().iter().map(|c| c.symbol()).collect();
+                (panel.name().to_string(), text, panel.chrome(&m))
+            })
+            .collect()
     }
 
     /// Two panels claiming one key must be *reported*, not silently resolved.

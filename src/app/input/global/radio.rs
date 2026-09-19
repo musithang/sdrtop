@@ -146,6 +146,24 @@ pub(super) fn toggle_net_mode(ctx: &mut InputCtx<'_>) -> bool {
     true
 }
 
+/// `[A]` - cycle how addresses are shown throughout the NET section
+/// (foundation design 1.1: `full`, `oui`, and `masked` once it exists).
+///
+/// Section-scoped and declining, like [`toggle_net_mode`]: outside NET there
+/// are no addresses to show, and the key is left for whatever claims it next.
+/// Logged, because the switch changes every panel and the export at once and
+/// the log is where "why did the addresses change" gets answered.
+pub(super) fn cycle_address_display(ctx: &mut InputCtx<'_>) -> bool {
+    let mut m = metrics(ctx.state);
+    if !m.ui.is_net_section() {
+        return false;
+    }
+    let display = m.net.address_display.next();
+    m.net.address_display = display;
+    m.push_log(format!("NET addresses shown: {}", display.label()));
+    true
+}
+
 /// `[y]` - establish the frequency reference from what is on centre now.
 ///
 /// Design section 7: every ppm reading in the app contains our own oscillator's
