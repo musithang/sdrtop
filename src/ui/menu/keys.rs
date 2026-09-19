@@ -147,11 +147,9 @@ pub const GLOBAL: &[(&str, &[Binding])] = &[
                 Some('o'),
                 "in NET: write the band and the census to a file",
             ),
-            // Spelled with the shift because this pane shows every letter in
-            // capitals, and a bare "A" already means the boost above.
             b(
-                "Shift A",
-                Some('A'),
+                "I",
+                Some('i'),
                 "in NET: show addresses in full or by vendor and kind",
             ),
             b("W", Some('w'), "pause or resume the waterfall"),
@@ -285,6 +283,15 @@ mod tests {
         while let Some(i) = rest.find("KeyCode::Char('") {
             rest = &rest[i + "KeyCode::Char('".len()..];
             let Some(c) = rest.chars().next() else { break };
+            // `input::fold_key_case` lowers every letter before dispatch, so an
+            // arm on a capital can never fire: it would be a key that is
+            // documented, tested through a harness that skips the fold, and dead
+            // on a real keyboard. Shift+A was once added that way and would have
+            // toggled the amp instead.
+            assert!(
+                !c.is_ascii_uppercase(),
+                "global arm on '{c}' can never fire: letters are folded to lower case"
+            );
             if ('1'..='9').contains(&c) {
                 continue;
             }

@@ -57,9 +57,12 @@ pub(super) fn handle(key: KeyEvent, ctx: &mut InputCtx<'_>) -> KeyAction {
                 view::enter_focus(ctx, 'm');
             }
         }
-        // Section-scoped too, and nothing else claims it: see the function.
-        KeyCode::Char('A') => {
-            radio::cycle_address_display(ctx);
+        // Section-scoped and declining, like `m`: outside NET this is still the
+        // IQ diagnostics panel's focus key, and no NET preset shows that panel.
+        KeyCode::Char('i') => {
+            if !radio::cycle_address_display(ctx) {
+                view::enter_focus(ctx, 'i');
+            }
         }
 
         // ── Gain staging ────────────────────────────────────────────────────
@@ -211,20 +214,31 @@ mod tests {
         assert!(h.log().contains("surveying the band"), "{}", h.log());
     }
 
-    /// `A` cycles the address display inside NET, says so in the log, and
-    /// changes nothing outside it.
+    /// `i` cycles the address display inside NET and says so in the log;
+    /// outside it, `i` is still the IQ diagnostics focus key, the same
+    /// declining rule as `m` above.
     #[test]
-    fn the_address_key_cycles_inside_net_and_nowhere_else() {
+    fn the_address_key_cycles_inside_net_and_focuses_outside_it() {
         use crate::state::AddressDisplay;
         let mut h = Harness::new();
-        h.press('A');
+        h.focus_keys.insert('i', "iq_diagnostics");
+        h.engine.set_preset("lab_iq");
+        h.press('i');
         assert_eq!(metrics(&h.state).net.address_display, AddressDisplay::Full);
+        assert_eq!(
+            metrics(&h.state).ui.focused_panel.as_deref(),
+            Some("iq_diagnostics"),
+            "the address switch swallowed the focus key"
+        );
 
+        let mut h = Harness::new();
+        h.focus_keys.insert('i', "iq_diagnostics");
         metrics(&h.state).ui.section = crate::signal::net::SECTION.to_string();
-        h.press('A');
+        h.press('i');
         assert_eq!(metrics(&h.state).net.address_display, AddressDisplay::Oui);
+        assert_eq!(metrics(&h.state).ui.focused_panel, None);
         assert!(h.log().contains("addresses shown: oui"), "{}", h.log());
-        h.press('A');
+        h.press('i');
         assert_eq!(metrics(&h.state).net.address_display, AddressDisplay::Full);
     }
 

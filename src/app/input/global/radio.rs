@@ -146,7 +146,7 @@ pub(super) fn toggle_net_mode(ctx: &mut InputCtx<'_>) -> bool {
     true
 }
 
-/// `[A]` - cycle how addresses are shown throughout the NET section
+/// `[i]` - cycle how addresses are shown throughout the NET section
 /// (foundation design 1.1: `full`, `oui`, and `masked` once it exists).
 ///
 /// Section-scoped and declining, like [`toggle_net_mode`]: outside NET there
