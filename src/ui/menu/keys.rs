@@ -150,7 +150,7 @@ pub const GLOBAL: &[(&str, &[Binding])] = &[
             b(
                 "I",
                 Some('i'),
-                "in NET: show addresses in full or by vendor and kind",
+                "in NET: addresses in full, by vendor and kind, or masked",
             ),
             b("W", Some('w'), "pause or resume the waterfall"),
             b("H", Some('h'), "freeze a ghost trace, or clear it"),

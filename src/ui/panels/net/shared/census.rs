@@ -92,7 +92,7 @@ fn ago(secs: u64) -> String {
 fn cells(d: &Device, state: &SdrMetrics, now: std::time::Instant) -> Vec<String> {
     let radio = &state.radio;
     vec![
-        d.address_text(state.net.address_display),
+        d.address_text(&state.net),
         ago(now.saturating_duration_since(d.last_seen).as_secs()),
         d.packets.to_string(),
         format!("{:.1} dB", d.best_snr_db),

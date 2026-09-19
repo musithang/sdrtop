@@ -399,6 +399,11 @@ impl NetWorker {
                                 m.net.ble_channel_packets[i] += packets.len() as u64;
                             }
                             for p in packets {
+                                // Numbered as it arrives, so `masked` counts in
+                                // the order devices were heard: see `AddressBook`.
+                                if let Some(addr) = p.adv_addr {
+                                    m.net.address_book.number(addr);
+                                }
                                 census_from_ble(&mut m.net.census.devices, &p, ch, now);
                                 m.net.ble_packets.push_front(BlePacket {
                                     channel: ch,
@@ -895,6 +900,8 @@ mod tests {
         assert_eq!(p.channel, CHANNEL);
         assert_eq!(p.adv_addr, Some(addr));
         assert!(p.crc_ok);
+        // Numbered on arrival, so `masked` can show it (net-ux-polish-plan 1.6.b).
+        assert_eq!(m.net.address_book.get(addr), Some(1));
 
         // B10's own exit condition: a confirmed device reaches the shared
         // census too, keyed by the same address `net_ble_packets` shows.

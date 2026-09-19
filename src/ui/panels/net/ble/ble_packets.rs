@@ -102,9 +102,9 @@ fn ago(secs: u64) -> String {
 
 /// The advertiser's address as the section's display mode shows it, or a
 /// dash for a PDU type that carries none.
-fn address_text(p: &BlePacket, mode: crate::state::AddressDisplay) -> String {
+fn address_text(p: &BlePacket, net: &crate::state::NetState) -> String {
     match p.adv_addr {
-        Some(a) => mode.show(a, p.tx_add_random),
+        Some(a) => net.show_address(a, p.tx_add_random),
         None => "-".to_string(),
     }
 }
@@ -136,7 +136,7 @@ fn row(
         ),
         Span::raw(" "),
         Span::styled(
-            format!("{:<ADDR_W$}", address_text(p, state.net.address_display)),
+            format!("{:<ADDR_W$}", address_text(p, &state.net)),
             Style::default().fg(theme.value),
         ),
         Span::raw(" "),

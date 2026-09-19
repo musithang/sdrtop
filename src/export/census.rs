@@ -45,7 +45,7 @@ pub fn rows(state: &SdrMetrics) -> Vec<String> {
                 .unwrap_or_default();
             format!(
                 "{},{},{:.1},{},{},{}",
-                d.address_text(state.net.address_display),
+                d.address_text(&state.net),
                 d.packets,
                 d.best_snr_db,
                 cfo,
@@ -123,5 +123,12 @@ mod tests {
         m.net.address_display = crate::state::AddressDisplay::Oui;
         let shown = rows(&m);
         assert!(shown[0].starts_with("A4-83-E7 ..09:be,"), "{:?}", shown[0]);
+
+        // Masked, the file carries the session's number and nothing more.
+        m.net.address_display = crate::state::AddressDisplay::Masked;
+        m.net.address_book.number([0xa4, 0x83, 0xe7, 0x1c, 9, 0xbe]);
+        let masked = rows(&m);
+        assert!(masked[0].starts_with("A4-83-E7 #1,"), "{:?}", masked[0]);
+        assert!(!masked.join("\n").contains("09:be"), "{masked:?}");
     }
 }

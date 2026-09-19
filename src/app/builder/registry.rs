@@ -512,8 +512,19 @@ mod tests {
         }
         assert!(checked >= 2, "only {checked} net panels showed an address");
 
-        for (name, text, _) in &net_panels_with_one_device(AddressDisplay::Oui) {
-            assert!(!text.contains(FULL), "{name} ignores the address switch");
+        for display in [AddressDisplay::Oui, AddressDisplay::Masked] {
+            for (name, text, chrome) in &net_panels_with_one_device(display) {
+                assert!(
+                    !text.contains(FULL),
+                    "{name} ignores the {display:?} switch"
+                );
+                if display == AddressDisplay::Masked {
+                    assert!(!text.contains("..05:06"), "{name} leaks part of it");
+                    if chrome.addresses {
+                        assert!(text.contains("#1"), "{name} shows no masked number");
+                    }
+                }
+            }
         }
     }
 
@@ -530,6 +541,7 @@ mod tests {
         let now = std::time::Instant::now();
         let mut m = SdrMetrics::fixture().streaming();
         m.net.address_display = display;
+        m.net.address_book.number([1, 2, 3, 4, 5, 6]);
         m.net.ble_channel = Some(37);
         m.net.ble_packets.push_front(BlePacket {
             channel: 37,

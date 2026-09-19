@@ -239,6 +239,11 @@ mod tests {
         assert_eq!(metrics(&h.state).ui.focused_panel, None);
         assert!(h.log().contains("addresses shown: oui"), "{}", h.log());
         h.press('i');
+        assert_eq!(
+            metrics(&h.state).net.address_display,
+            AddressDisplay::Masked
+        );
+        h.press('i');
         assert_eq!(metrics(&h.state).net.address_display, AddressDisplay::Full);
     }
 

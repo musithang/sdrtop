@@ -81,6 +81,16 @@ pub enum AddressDisplay {
     /// so it shows its kind (`signal::ble::address::kind`) instead of a
     /// vendor that would be invented.
     Oui,
+    /// `A4-83-E7 #17` or `static   #3`: the same "who" as `Oui`, and a
+    /// number instead of any part of the address. For screenshots, demos and
+    /// a shared terminal.
+    ///
+    /// **The number is per session and is not derived from the address**
+    /// (foundation design 1.1): [`AddressBook`] hands them out in the order
+    /// addresses are first heard, so nothing in a screenshot can be turned
+    /// back into an address, and the same device reads `#17` in every panel
+    /// and the export for as long as the app runs.
+    Masked,
 }
 
 impl AddressDisplay {
@@ -88,7 +98,8 @@ impl AddressDisplay {
     pub fn next(self) -> Self {
         match self {
             Self::Full => Self::Oui,
-            Self::Oui => Self::Full,
+            Self::Oui => Self::Masked,
+            Self::Masked => Self::Full,
         }
     }
 
@@ -97,30 +108,63 @@ impl AddressDisplay {
         match self {
             Self::Full => "full",
             Self::Oui => "oui",
+            Self::Masked => "masked",
         }
     }
 
-    /// `addr`, sent with TxAdd = `random`, as this mode shows it. At most 17
+    /// `addr`, sent with TxAdd = `random`, as this mode shows it; `number` is
+    /// its [`AddressBook`] number, which only `Masked` reads. At most 17
     /// columns in every mode, the width of a full address, so no table has to
     /// make room for a mode.
-    pub fn show(self, addr: [u8; 6], random: bool) -> String {
+    ///
+    /// A masked address with no number shows `#-`: every address that reaches
+    /// the state is numbered as it arrives, so this is a gap to see, not a
+    /// number to invent.
+    pub fn show(self, addr: [u8; 6], random: bool, number: Option<u32>) -> String {
+        use crate::signal::ble::address::{kind, AddressKind};
+        let who = || match kind(addr, random) {
+            AddressKind::Public => format!("{:02X}-{:02X}-{:02X}", addr[0], addr[1], addr[2]),
+            other => other.label().to_string(),
+        };
         match self {
             Self::Full => addr
                 .iter()
                 .map(|b| format!("{b:02x}"))
                 .collect::<Vec<_>>()
                 .join(":"),
-            Self::Oui => {
-                use crate::signal::ble::address::{kind, AddressKind};
-                let who = match kind(addr, random) {
-                    AddressKind::Public => {
-                        format!("{:02X}-{:02X}-{:02X}", addr[0], addr[1], addr[2])
-                    }
-                    other => other.label().to_string(),
-                };
-                format!("{who:<8} ..{:02x}:{:02x}", addr[4], addr[5])
-            }
+            Self::Oui => format!("{:<8} ..{:02x}:{:02x}", who(), addr[4], addr[5]),
+            Self::Masked => match number {
+                Some(n) => format!("{:<8} #{n}", who()),
+                None => format!("{:<8} #-", who()),
+            },
         }
+    }
+}
+
+/// The session's masked numbers: each address gets the next one the first
+/// time it is heard, and keeps it (foundation design 1.1).
+///
+/// **Assigned on arrival, not on display**, by `signal::net::worker` as each
+/// packet reaches the state, so the number says the order devices were heard
+/// in whichever panel happens to be on screen, and switching to `masked`
+/// halfway through a session does not number them in the order of one table's
+/// sort. Never saved: a number is only meaningful inside the session that
+/// gave it.
+#[derive(Clone, Debug, Default)]
+pub struct AddressBook {
+    numbers: std::collections::HashMap<[u8; 6], u32>,
+}
+
+impl AddressBook {
+    /// `addr`'s number, handing out the next one if this is its first time.
+    pub fn number(&mut self, addr: [u8; 6]) -> u32 {
+        let next = self.numbers.len() as u32 + 1;
+        *self.numbers.entry(addr).or_insert(next)
+    }
+
+    /// `addr`'s number, if it has been heard.
+    pub fn get(&self, addr: [u8; 6]) -> Option<u32> {
+        self.numbers.get(&addr).copied()
     }
 }
 
@@ -237,9 +281,19 @@ pub struct NetState {
     pub pre_survey_hz: Option<u64>,
     /// How addresses are shown throughout the section. See [`AddressDisplay`].
     pub address_display: AddressDisplay,
+    /// The session's masked numbers. See [`AddressBook`].
+    pub address_book: AddressBook,
 }
 
 impl NetState {
+    /// `addr`, sent with TxAdd = `random`, in the section's display mode: the
+    /// one call every panel and export makes, so a device reads the same way
+    /// everywhere.
+    pub fn show_address(&self, addr: [u8; 6], random: bool) -> String {
+        self.address_display
+            .show(addr, random, self.address_book.get(addr))
+    }
+
     /// Give the tuner back, and say where the radio belongs.
     ///
     /// **The two ways out of a survey want opposite answers, and treating them
@@ -676,19 +730,40 @@ mod tests {
         let public = [0xa4, 0x83, 0xe7, 0x1c, 0x09, 0xbe];
         let static_random = [0xd1, 0x9a, 0x7e, 0x91, 0x27, 0x9e];
         let rpa = [0x4f, 0x00, 0x11, 0x22, 0x33, 0x44];
+        let show = |mode: AddressDisplay, a, r, n| mode.show(a, r, n);
         assert_eq!(
-            AddressDisplay::Full.show(public, false),
+            show(AddressDisplay::Full, public, false, None),
             "a4:83:e7:1c:09:be"
         );
-        assert_eq!(AddressDisplay::Oui.show(public, false), "A4-83-E7 ..09:be");
         assert_eq!(
-            AddressDisplay::Oui.show(static_random, true),
+            show(AddressDisplay::Oui, public, false, None),
+            "A4-83-E7 ..09:be"
+        );
+        assert_eq!(
+            show(AddressDisplay::Oui, static_random, true, None),
             "static   ..27:9e"
         );
-        assert_eq!(AddressDisplay::Oui.show(rpa, true), "RPA      ..33:44");
-        for mode in [AddressDisplay::Full, AddressDisplay::Oui] {
+        assert_eq!(
+            show(AddressDisplay::Oui, rpa, true, None),
+            "RPA      ..33:44"
+        );
+        assert_eq!(
+            show(AddressDisplay::Masked, public, false, Some(17)),
+            "A4-83-E7 #17"
+        );
+        assert_eq!(
+            show(AddressDisplay::Masked, rpa, true, Some(3)),
+            "RPA      #3"
+        );
+        assert_eq!(show(AddressDisplay::Masked, rpa, true, None), "RPA      #-");
+        for mode in [
+            AddressDisplay::Full,
+            AddressDisplay::Oui,
+            AddressDisplay::Masked,
+        ] {
             for (a, r) in [(public, false), (static_random, true), (rpa, true)] {
-                assert!(mode.show(a, r).chars().count() <= 17, "{mode:?} {a:02x?}");
+                let shown = show(mode, a, r, Some(99_999));
+                assert!(shown.chars().count() <= 17, "{mode:?}: {shown}");
             }
         }
     }
@@ -707,7 +782,29 @@ mod tests {
             assert!(!seen.contains(&m), "{m:?} came round twice");
             seen.push(m);
         }
-        assert_eq!(seen.len(), 2);
+        assert_eq!(seen.len(), 3);
+    }
+
+    /// **A masked number is the order of first hearing, and nothing about the
+    /// address.** The same two addresses heard in the other order get each
+    /// other's numbers, which is the proof the number carries no trace of the
+    /// address; and hearing one again does not renumber it.
+    #[test]
+    fn a_masked_number_is_the_order_of_first_hearing() {
+        let a = [0xa4, 0x83, 0xe7, 0x1c, 0x09, 0xbe];
+        let b = [0xd1, 0x9a, 0x7e, 0x91, 0x27, 0x9e];
+
+        let mut book = AddressBook::default();
+        assert_eq!(book.number(a), 1);
+        assert_eq!(book.number(b), 2);
+        assert_eq!(book.number(a), 1, "heard again, same number");
+        assert_eq!(book.get(b), Some(2));
+
+        let mut other = AddressBook::default();
+        assert_eq!(other.number(b), 1);
+        assert_eq!(other.number(a), 2);
+
+        assert_eq!(AddressBook::default().get(a), None);
     }
     use std::time::{Duration, Instant};
 
