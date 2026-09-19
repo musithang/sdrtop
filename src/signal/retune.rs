@@ -35,6 +35,12 @@ use std::time::Instant;
 use crate::hardware::SdrDevice;
 use crate::signal::dsp::uncertainty::{mean_with_uncertainty, Uncertain};
 
+/// The shortest interval a BLE connection may hop at: Core 5.4 Vol 6 Part B,
+/// the connection state (4.5): "The connInterval shall be a multiple of 1.25 ms
+/// in the range 7.5 ms to 4.0 s." A follower has to be on the next channel
+/// within it, so a tuning call longer than this rules following out.
+pub const MIN_CONNECTION_INTERVAL_MS: f64 = 7.5;
+
 /// Where a measurement retunes to, in order: across the 2.4 GHz band and back,
 /// so the synthesiser moves by 78 MHz, 54 MHz and smaller steps rather than
 /// between two neighbours. Ten calls, the BLE advertising channels among them.

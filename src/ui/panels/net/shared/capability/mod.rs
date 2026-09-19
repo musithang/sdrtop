@@ -4,10 +4,16 @@
 //! `NetCapabilityPanel` - what this radio can and cannot do in the 2.4 GHz band.
 //!
 //! The first panel of the section, and deliberately the one that needs no
-//! stream. Everything on it comes from the capability record built when the
-//! device was opened, so it is as true before the first sample as after the
-//! millionth. That is why its staleness is [`Staleness::Never`]: nothing here
-//! goes out of date while the radio is the radio.
+//! stream. Almost everything on it comes from the capability record built when
+//! the device was opened, so it is as true before the first sample as after the
+//! millionth. The one exception is the RETUNE row, a measurement of the radio
+//! itself taken when the user presses `K`, and dated on the row rather than
+//! aged by the stream. That is why its staleness is [`Staleness::Never`]:
+//! nothing here goes out of date because blocks stopped arriving.
+//!
+//! Zones, top to bottom: the verdict (`verdict`), TUNER (`span`), RADIO, and
+//! the MODES limit rows (`modes`). On a short panel the detail gives way in a
+//! stated order and the verdict and the modes stay longest.
 //!
 //! **It is a list of what is possible, not a promise about what will work.** A
 //! mode is shown as available when the radio's declared sample-rate ceiling can
@@ -32,6 +38,7 @@ pub struct NetCapabilityPanel;
 
 mod modes;
 mod span;
+mod verdict;
 
 /// Label column width, so every `label value` row on the panel lines up.
 const LABEL: usize = 9;
@@ -162,13 +169,12 @@ impl Panel for NetCapabilityPanel {
     }
 
     fn chrome(&self, _state: &SdrMetrics) -> PanelChrome {
-        // Nothing here is a reading, so nothing here can go stale. The record it
-        // draws was written when the device was opened and is true until it is
-        // closed.
+        // Nothing here ages with the stream. The record was written when the
+        // device was opened and is true until it is closed; the one measurement,
+        // the tuning call, is of the radio, taken on request and dated on its row.
         // No mode tag, and this is the panel that proves the rule has an edge
-        // rather than being applied by habit: nothing here is a reading. It is
-        // the capability record built when the device was opened, and it is the
-        // same record whether the radio is hopping or parked.
+        // rather than being applied by habit: nothing here was gathered from the
+        // band, so there is no survey or lock to have gathered it in.
         PanelChrome::new("Band Capability").stale_when(Staleness::Never)
     }
 
@@ -187,6 +193,8 @@ impl Panel for NetCapabilityPanel {
         let mut lines = Vec::new();
 
         let iw = inner.width as usize;
+        lines.extend(verdict::lines(caps, state.net.retune.as_ref(), iw, theme));
+        lines.push(Line::from(""));
         lines.extend(span::lines(caps, iw, theme));
         let legend = lines.len() - 1;
         // What `signal::net::gate` actually holds the tuner to: every centre
@@ -219,7 +227,9 @@ impl Panel for NetCapabilityPanel {
             iw,
             theme,
         ));
+        let delivery_row = lines.len();
         lines.push(delivery(caps.delivery, iw, theme));
+        let observer_row = lines.len();
         lines.push(observer(state.system.observable, iw, theme));
         lines.push(retune(state.net.retune.as_ref(), iw, theme));
 
@@ -227,14 +237,23 @@ impl Panel for NetCapabilityPanel {
 
         // Breathe like the Lab panels (`chrome::fit_spacers`): spacers grow to
         // fill a tall panel and go first on a short one. When that is not
-        // enough, the ruler's key, the NEEDS row, and then the band ruler's
-        // two rows give way, in that order, so the modes, which are the
-        // panel's answer, stay on screen longest.
+        // enough, detail gives way in this order: the ruler's key, NEEDS, the
+        // band ruler's two rows, the headroom row (the verdict says it), and
+        // the observer and delivery rows. The verdict and the mode rows, which
+        // are the panel's answer, stay on screen longest.
         let avail = inner.height as usize;
         let blank = |l: &Line| l.spans.iter().all(|s| s.content.trim().is_empty());
         let spacers = lines.iter().filter(|l| blank(l)).count();
         let over = lines.len().saturating_sub(spacers).saturating_sub(avail);
-        let mut optional = [legend, needs, legend - 1, legend - 2];
+        let mut optional = [
+            legend,
+            needs,
+            legend - 1,
+            legend - 2,
+            legend - 3,
+            observer_row,
+            delivery_row,
+        ];
         let n = over.min(optional.len());
         optional[..n].sort_unstable_by(|a, b| b.cmp(a));
         for &i in &optional[..n] {
@@ -285,10 +304,10 @@ mod tests {
         assert!(ht40 > cannot, "HT40 needs 40 Msps and must be below");
     }
 
-    /// **The modes are the panel's answer, so they are the last to go.** Tall,
-    /// everything shows with room to breathe; short, the spacers go, then the
-    /// ruler's key, then the NEEDS row, then the ruler, and every mode row is
-    /// still there.
+    /// **The verdict and the modes are the panel's answer, so they are the
+    /// last to go.** Tall, everything shows with room to breathe; short, the
+    /// spacers go, then the detail in its stated order, and the verdict and
+    /// every mode row are still there.
     #[test]
     fn a_short_panel_gives_up_the_key_and_needs_before_any_mode() {
         let m = crate::state::SdrMetrics::fixture();
@@ -297,7 +316,8 @@ mod tests {
             tall.contains("BLE advertising") && tall.contains("NEEDS"),
             "{tall}"
         );
-        let short = draw(NetCapabilityPanel, 90, 21, &m).join("\n");
+        let short = draw(NetCapabilityPanel, 90, 24, &m).join("\n");
+        assert!(short.contains("5 OF 8 MODES"), "the verdict stays: {short}");
         assert!(!short.contains("BLE advertising"), "{short}");
         assert!(!short.contains("NEEDS"), "{short}");
         assert!(
