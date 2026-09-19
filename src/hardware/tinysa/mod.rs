@@ -1906,7 +1906,6 @@ mod tests {
             net_feed: crate::hardware::FeedHealth::default(),
             power_tx,
             geometry: capabilities(Model::Basic, BasicInput::Low).sample_geometry,
-            blocks_seen: Arc::new(std::sync::atomic::AtomicU64::new(0)),
             stream_pairs: std::sync::atomic::AtomicU64::new(0),
         });
 
@@ -3046,7 +3045,6 @@ mod tests {
                 net_feed: crate::hardware::FeedHealth::default(),
                 power_tx,
                 geometry: device.capabilities().sample_geometry,
-                blocks_seen: Arc::new(std::sync::atomic::AtomicU64::new(0)),
                 stream_pairs: std::sync::atomic::AtomicU64::new(0),
             });
 

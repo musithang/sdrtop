@@ -24,8 +24,9 @@ use ratatui::{
 
 use crate::hardware::DeliveryModel;
 use crate::signal::net::gate::{HIGHEST_CENTRE_HZ, LOWEST_CENTRE_HZ};
-use crate::state::SdrMetrics;
+use crate::state::{RetuneRun, SdrMetrics};
 use crate::ui::panel::{Panel, PanelChrome, Staleness};
+use crate::ui::widgets::reading::Reading;
 
 pub struct NetCapabilityPanel;
 
@@ -100,6 +101,47 @@ fn observer<'a>(observable: bool, iw: usize, theme: &crate::Theme) -> Line<'a> {
     )
 }
 
+/// The tuning call's measured duration, or that it has not been measured.
+///
+/// Never a default: before `K` it says "not measured" and how to measure it.
+/// The figure is the call only (`signal::retune`'s doc says what that leaves
+/// out), with the worst call beside the mean because a follower has to survive
+/// the worst one, and dated, because it was taken once.
+fn retune<'a>(run: Option<&RetuneRun>, iw: usize, theme: &crate::Theme) -> Line<'a> {
+    let (value, note) = match run {
+        None => (
+            "not measured".to_string(),
+            "[K] times the tuning call".to_string(),
+        ),
+        Some(RetuneRun::Measuring) => (
+            "measuring".to_string(),
+            "retuning across the band".to_string(),
+        ),
+        Some(RetuneRun::Done(m, at)) => {
+            let reading = Reading::new(m.call_ms, "ms", f64::INFINITY).stated_to(2);
+            let worst = m
+                .worst_ms
+                .map(|w| format!("worst {w:.2} ms, "))
+                .unwrap_or_default();
+            let secs = at.elapsed().as_secs();
+            let ago = if secs < 90 {
+                format!("{secs} s ago")
+            } else {
+                format!("{} min ago", secs / 60)
+            };
+            (
+                format!("{} call", reading.text()),
+                format!(
+                    "{worst}{} of {} calls, {ago}",
+                    m.attempts - m.failed,
+                    m.attempts
+                ),
+            )
+        }
+    };
+    fact("RETUNE", value, Some(note), iw, theme)
+}
+
 impl Panel for NetCapabilityPanel {
     fn name(&self) -> &'static str {
         "net_capability"
@@ -107,6 +149,16 @@ impl Panel for NetCapabilityPanel {
 
     fn min_size(&self) -> (u16, u16) {
         (48, 16)
+    }
+
+    /// `k`, the panel's own action letter: every letter of its name is some
+    /// other panel's focus key or a global one, so the engine draws `[K]`.
+    fn focus_key(&self) -> Option<char> {
+        Some('k')
+    }
+
+    fn focus_bindings(&self) -> &'static [(&'static str, &'static str)] {
+        &[("K", "time the tuning call")]
     }
 
     fn chrome(&self, _state: &SdrMetrics) -> PanelChrome {
@@ -169,6 +221,7 @@ impl Panel for NetCapabilityPanel {
         ));
         lines.push(delivery(caps.delivery, iw, theme));
         lines.push(observer(state.system.observable, iw, theme));
+        lines.push(retune(state.net.retune.as_ref(), iw, theme));
 
         lines.extend(modes::lines(caps, iw, theme));
 
@@ -254,6 +307,34 @@ mod tests {
         for phy in crate::signal::net::gate::PHYS {
             assert!(short.contains(phy.name), "{} lost:\n{short}", phy.name);
         }
+    }
+
+    /// Before `K`, "not measured" and how to measure, never a default; after,
+    /// the call's mean with its uncertainty, the worst call and the count,
+    /// said to be the call only.
+    #[test]
+    fn the_retune_row_is_not_measured_until_it_is() {
+        use crate::signal::dsp::uncertainty::Uncertain;
+        use crate::signal::retune::CallMeasurement;
+        let mut m = crate::state::SdrMetrics::fixture();
+        let out = draw(NetCapabilityPanel, 90, 32, &m).join("\n");
+        assert!(out.contains("RETUNE   not measured"), "{out}");
+        assert!(out.contains("[K] times the tuning call"), "{out}");
+
+        m.net.retune = Some(crate::state::RetuneRun::Done(
+            CallMeasurement {
+                call_ms: Uncertain::from_sigma(1.84, 0.05),
+                worst_ms: Some(2.1),
+                attempts: 10,
+                failed: 0,
+                first_error: None,
+            },
+            std::time::Instant::now(),
+        ));
+        let out = draw(NetCapabilityPanel, 90, 32, &m).join("\n");
+        assert!(out.contains("1.84 ±0.05 ms call"), "{out}");
+        assert!(out.contains("worst 2.10 ms, 10 of 10 calls"), "{out}");
+        assert!(!out.contains("not measured"), "{out}");
     }
 
     /// The transport and observer facts, both ways round. The fixture is a

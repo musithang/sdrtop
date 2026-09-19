@@ -220,7 +220,6 @@ mod tests {
                 format: SampleFormat::Int8,
                 full_scale: 128.0,
             },
-            blocks_seen: Arc::new(std::sync::atomic::AtomicU64::new(0)),
             stream_pairs: std::sync::atomic::AtomicU64::new(0),
         };
         (state, Arc::new(ctx), sample_rx, demod_rx, net_rx)

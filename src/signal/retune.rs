@@ -1,155 +1,111 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright (C) 2026 MusiThang <viktor.laszlo92@protonmail.com>
 
-//! B19's own retune-latency probe: how long a backend actually takes, from
-//! [`crate::hardware::SdrDevice::set_frequency`] returning to a real block
-//! reflecting the new frequency - design section 1.3's own "the backend's
-//! retune latency [as] a measured quantity rather than an assumption,
-//! which is itself a worthwhile thing for this app to know about its own
-//! radios." Connection following (B20) is the reason this matters at all:
-//! the shortest legal connection interval is 7.5 ms, so a backend whose
-//! own retune takes longer than that cannot follow one, and nothing before
-//! this module could say which backends that is true of.
+//! How long a backend's tuning call takes: from just before
+//! [`SdrDevice::set_frequency`] is called to the moment it returns, timed over
+//! several real retunes.
 //!
-//! **What "arrived" means here, and why it needs no new hot-path work
-//! beyond one atomic counter.** `RxContext::blocks_seen`'s own doc explains
-//! the mechanism: incremented once, unconditionally, by
-//! `hardware::process::process_block` - the same per-block granularity
-//! every backend's own callback or read thread already runs at, not the
-//! 200 ms RX poll, which is far too coarse to resolve a latency this
-//! arc's own design section cares about down to single-digit
-//! milliseconds. A probe on a thread that is not that callback or read
-//! thread only has to watch this one counter for it to move.
+//! **That, and only that, is what is measured, and the name says so.** B19 first
+//! built this as "retune latency": set the frequency, then wait for the next
+//! block to arrive, and call the wait the time to a block "reflecting the new
+//! frequency". Nothing checked that it did. The next block is as likely to
+//! carry samples captured before the retune and still queued, and the wait was
+//! dominated by where the stream happened to be in its current block: a HackRF
+//! block is 131,072 samples, 6.55 ms at 20 Msps and 32.8 ms at 4 Msps. The
+//! figure would have been mostly block phase, labelled as the radio's retune
+//! time, right where it decides whether a connection can be followed. Replaced
+//! 2026-09-19 before anything had shown it (POLICY rule 5: the label names what
+//! was measured).
 //!
-//! **Measurement only - nothing here changes how retuning behaves.** B19
-//! was explicitly scoped this way: `state::sweep::SWEEP_SETTLING_MS`, the
-//! one place in this codebase that already assumes a settling time (a
-//! fixed 25 ms, guessed rather than measured) is untouched. Feeding a real
-//! measurement back into that assumption is real, physically-tested
-//! timing code (`CLAUDE.md`'s own caution about the two native gain
-//! paths applies to the same spirit of "obliges a hardware rehearsal
-//! before release") and is deliberately a separate, later decision, not
-//! bundled into landing the measurement itself.
+//! **What the call time does and does not tell you.** It is the host-to-radio
+//! part: the driver, the USB control transfer, whatever the firmware does before
+//! it answers. It does not include the synthesiser settling after the answer, if
+//! the firmware does not wait for lock, and it says nothing about samples
+//! already in flight. So it bounds from one side only: a call that alone takes
+//! longer than a 7.5 ms BLE connection interval rules following out; a call
+//! that is shorter is necessary, not sufficient. When the radio actually changes
+//! frequency in the sample stream is a different measurement, and a research
+//! step of its own (`dev_docs/net-ux-polish-plan.md`, after the plan).
 //!
-//! **Primitive only - nothing calls this yet.** No keybinding, no panel
-//! row, no automatic background measurement. The same honest scope every
-//! large piece of the Bluetooth arc has landed with first (B14's own
-//! `access_code`, B16's own `header`, B18's own `coded`) applies here too,
-//! for a foundation-level feature rather than a protocol one.
+//! No streaming is needed and none is assumed: the call is timed whether or not
+//! blocks are flowing.
 
-use std::sync::atomic::{AtomicU64, Ordering};
-use std::time::{Duration, Instant};
+use std::time::Instant;
 
 use crate::hardware::SdrDevice;
 use crate::signal::dsp::uncertainty::{mean_with_uncertainty, Uncertain};
 
-/// Why one attempt at [`measure_one`] did not produce a duration.
-#[derive(Debug, Clone, PartialEq, Eq)]
-#[allow(dead_code)]
-pub enum RetuneError {
-    /// `set_frequency` itself refused - the backend's own error message.
-    SetFrequency(String),
-    /// `set_frequency` succeeded, but [`RxContext::blocks_seen`] never
-    /// moved within the given timeout - either this backend is far slower
-    /// than expected, or nothing is actually streaming to move it at all
-    /// (checked at the call site, not assumed here: this function has no
-    /// way to tell "slow" from "not running").
-    TimedOut,
-}
+/// Where a measurement retunes to, in order: across the 2.4 GHz band and back,
+/// so the synthesiser moves by 78 MHz, 54 MHz and smaller steps rather than
+/// between two neighbours. Ten calls, the BLE advertising channels among them.
+pub const BAND_HOPS_HZ: [u64; 10] = [
+    2_402_000_000,
+    2_480_000_000,
+    2_426_000_000,
+    2_440_000_000,
+    2_402_000_000,
+    2_480_000_000,
+    2_412_000_000,
+    2_462_000_000,
+    2_426_000_000,
+    2_480_000_000,
+];
 
-/// One retune, timed: from just before [`SdrDevice::set_frequency`] is
-/// called to the moment `blocks_seen` is next observed to have moved.
-///
-/// **Polls rather than blocks on a channel, deliberately.** The whole
-/// point of `blocks_seen` (see this module's own doc) is that a probe
-/// needs no channel, no lock, and no cooperation from the backend's own
-/// callback or read thread at all - just a plain atomic load, cheap
-/// enough to poll on a short, fixed interval without meaningfully
-/// distorting the very latency being measured.
-#[allow(dead_code)]
-pub fn measure_one(
-    device: &dyn SdrDevice,
-    blocks_seen: &AtomicU64,
-    target_hz: u64,
-    timeout: Duration,
-    poll_interval: Duration,
-) -> Result<Duration, RetuneError> {
-    let before = blocks_seen.load(Ordering::Relaxed);
-    let start = Instant::now();
-    device
-        .set_frequency(target_hz)
-        .map_err(|e| RetuneError::SetFrequency(e.to_string()))?;
-    loop {
-        if blocks_seen.load(Ordering::Relaxed) != before {
-            return Ok(start.elapsed());
-        }
-        if start.elapsed() > timeout {
-            return Err(RetuneError::TimedOut);
-        }
-        std::thread::sleep(poll_interval);
-    }
-}
-
-/// How long [`measure_one`] is allowed to wait for one retune before
-/// giving up - generous relative to the 7.5 ms connection interval design
-/// section 1.3 cares about, since a backend far slower than that is
-/// exactly the honest answer this probe exists to report, not a case to
-/// refuse.
-#[allow(dead_code)]
-pub const DEFAULT_TIMEOUT: Duration = Duration::from_secs(2);
-/// How often [`measure_one`] checks `blocks_seen` while waiting - fine
-/// enough not to itself be the dominant source of measured latency at the
-/// scale this arc cares about, coarse enough not to spend the probing
-/// thread's own time doing nothing else.
-#[allow(dead_code)]
-pub const DEFAULT_POLL_INTERVAL: Duration = Duration::from_micros(200);
-
-/// A backend's own retune latency, measured across several real retunes
-/// rather than trusted from one - the same reason every other timing
-/// figure in this app (B7's CFO, B9's drift) is an [`Uncertain`], not a
-/// single point reading.
+/// The tuning call's duration, over several calls.
 #[derive(Debug, Clone, PartialEq)]
-#[allow(dead_code)]
-pub struct RetuneMeasurement {
-    /// Milliseconds, from a real sample of successful retunes only - see
-    /// [`Self::timed_out`]/[`Self::failed`] for the ones that were not.
-    /// [`mean_with_uncertainty`]'s own "fewer than two readings" case
-    /// (infinite variance) is exactly what a caller sees if every attempt
-    /// failed or timed out, the same honest "unresolved" shape every
-    /// other reading in this app uses rather than a fabricated number.
-    pub latency_ms: Uncertain,
+pub struct CallMeasurement {
+    /// Milliseconds, mean and its standard uncertainty, over the calls that
+    /// succeeded. Unresolved (infinite variance) with fewer than two, the
+    /// shape every reading in the app takes when it has nothing to stand on.
+    pub call_ms: Uncertain,
+    /// The slowest successful call, because a follower has to survive the
+    /// worst one, not the average. `None` when no call succeeded.
+    pub worst_ms: Option<f64>,
     pub attempts: usize,
-    pub timed_out: usize,
+    /// Calls the backend refused, with the first refusal's own words.
     pub failed: usize,
+    pub first_error: Option<String>,
 }
 
-/// Measure retune latency across `frequencies`, one retune per entry, in
-/// the order given - a caller building the list decides the hop pattern
-/// (alternating between two nearby frequencies is the closest analogue to
-/// B20's own connection-following need; a caller measuring something else
-/// about a backend might want a different one).
-#[allow(dead_code)]
-pub fn measure(
+/// Time `set_frequency` once per entry of `frequencies`, in order.
+///
+/// `tuned` is called after each successful call, **outside the timed span**,
+/// with the frequency the radio is now on, so a caller can keep its own record
+/// of the tuning in step (the RX pipeline stamps every block with it) without
+/// that bookkeeping landing in the figure.
+pub fn measure_calls(
     device: &dyn SdrDevice,
-    blocks_seen: &AtomicU64,
     frequencies: &[u64],
-    timeout: Duration,
-) -> RetuneMeasurement {
-    let mut durations_ms = Vec::with_capacity(frequencies.len());
-    let mut timed_out = 0usize;
-    let mut failed = 0usize;
+    mut tuned: impl FnMut(u64),
+) -> CallMeasurement {
+    let mut calls_ms = Vec::with_capacity(frequencies.len());
+    let mut failed = 0;
+    let mut first_error = None;
     for &hz in frequencies {
-        match measure_one(device, blocks_seen, hz, timeout, DEFAULT_POLL_INTERVAL) {
-            Ok(d) => durations_ms.push(d.as_secs_f32() * 1000.0),
-            Err(RetuneError::TimedOut) => timed_out += 1,
-            Err(RetuneError::SetFrequency(_)) => failed += 1,
+        let start = Instant::now();
+        let result = device.set_frequency(hz);
+        let elapsed = start.elapsed();
+        match result {
+            Ok(()) => {
+                calls_ms.push(elapsed.as_secs_f32() * 1000.0);
+                tuned(hz);
+            }
+            Err(e) => {
+                failed += 1;
+                first_error.get_or_insert_with(|| e.to_string());
+            }
         }
     }
-    RetuneMeasurement {
-        latency_ms: mean_with_uncertainty(&durations_ms),
+    CallMeasurement {
+        call_ms: mean_with_uncertainty(&calls_ms),
+        worst_ms: calls_ms
+            .iter()
+            .copied()
+            .fold(None, |w: Option<f32>, x| Some(w.map_or(x, |w| w.max(x))))
+            .map(f64::from),
         attempts: frequencies.len(),
-        timed_out,
         failed,
+        first_error,
     }
 }
 
@@ -157,17 +113,15 @@ pub fn measure(
 mod tests {
     use super::*;
     use crate::hardware::{DeviceCapabilities, DeviceInfo, RxContext};
-    use std::sync::Arc;
+    use std::sync::{Arc, Mutex};
+    use std::time::Duration;
 
-    /// A device whose own `set_frequency` never fails and whose "retune
-    /// latency" is exactly the fixed delay it was built with - spawning a
-    /// thread that sleeps that long before moving the shared counter,
-    /// standing in for the real gap between issuing a retune and a real
-    /// backend's own next block reflecting it.
+    /// A device whose tuning call takes a known time, and refuses the
+    /// frequencies it is told to.
     struct FakeDevice {
         caps: DeviceCapabilities,
-        blocks_seen: Arc<AtomicU64>,
         delay: Duration,
+        refuse: Vec<u64>,
     }
 
     impl SdrDevice for FakeDevice {
@@ -184,49 +138,14 @@ mod tests {
             Ok(())
         }
         fn is_streaming(&self) -> bool {
-            true
-        }
-        fn set_frequency(&self, _hz: u64) -> anyhow::Result<()> {
-            let blocks_seen = Arc::clone(&self.blocks_seen);
-            let delay = self.delay;
-            std::thread::spawn(move || {
-                std::thread::sleep(delay);
-                blocks_seen.fetch_add(1, Ordering::Relaxed);
-            });
-            Ok(())
-        }
-        fn set_sample_rate(&self, hz: f64) -> anyhow::Result<crate::hardware::RateSet> {
-            Ok(crate::hardware::RateSet::new(hz, Some(hz), 0))
-        }
-        fn set_lna_gain(&self, _db: u32) -> anyhow::Result<()> {
-            Ok(())
-        }
-    }
-
-    /// A device that always refuses to retune - `measure_one`'s own
-    /// `SetFrequency` error path, not the timeout one.
-    struct RefusingDevice {
-        caps: DeviceCapabilities,
-    }
-
-    impl SdrDevice for RefusingDevice {
-        fn capabilities(&self) -> &DeviceCapabilities {
-            &self.caps
-        }
-        fn info(&self) -> DeviceInfo {
-            DeviceInfo::default()
-        }
-        fn start_rx(&self, _ctx: Arc<RxContext>) -> anyhow::Result<()> {
-            Ok(())
-        }
-        fn stop_rx(&self) -> anyhow::Result<()> {
-            Ok(())
-        }
-        fn is_streaming(&self) -> bool {
             false
         }
-        fn set_frequency(&self, _hz: u64) -> anyhow::Result<()> {
-            anyhow::bail!("injected refusal")
+        fn set_frequency(&self, hz: u64) -> anyhow::Result<()> {
+            if self.refuse.contains(&hz) {
+                anyhow::bail!("injected refusal at {hz}");
+            }
+            std::thread::sleep(self.delay);
+            Ok(())
         }
         fn set_sample_rate(&self, hz: f64) -> anyhow::Result<crate::hardware::RateSet> {
             Ok(crate::hardware::RateSet::new(hz, Some(hz), 0))
@@ -236,128 +155,52 @@ mod tests {
         }
     }
 
-    /// [`measure_one`]'s own exit condition: the reported duration is
-    /// close to the fake device's own real, known delay - not exact
-    /// (scheduling jitter is real), but nowhere near zero or the timeout.
-    #[test]
-    fn measure_one_reports_close_to_the_real_injected_delay() {
-        let blocks_seen = Arc::new(AtomicU64::new(0));
-        let device = FakeDevice {
+    fn device(delay_ms: u64, refuse: &[u64]) -> FakeDevice {
+        FakeDevice {
             caps: crate::hardware::native::hackrf::caps(),
-            blocks_seen: Arc::clone(&blocks_seen),
-            delay: Duration::from_millis(20),
-        };
-        let got = measure_one(
-            &device,
-            &blocks_seen,
-            2_400_000_000,
-            Duration::from_secs(1),
-            Duration::from_micros(200),
-        )
-        .expect("should succeed");
-        assert!(
-            got >= Duration::from_millis(20) && got < Duration::from_millis(100),
-            "got {got:?}"
-        );
+            delay: Duration::from_millis(delay_ms),
+            refuse: refuse.to_vec(),
+        }
     }
 
-    /// A device whose own `set_frequency` refuses reports that refusal,
-    /// not a timeout - the two `RetuneError` variants mean different
-    /// things and this checks the right one fires.
+    /// The figure is the call's own duration: close to the fake's known delay,
+    /// never below it, and the worst call is at least the mean.
     #[test]
-    fn a_refused_retune_is_reported_as_such_not_a_timeout() {
-        let blocks_seen = Arc::new(AtomicU64::new(0));
-        let device = RefusingDevice {
-            caps: crate::hardware::native::hackrf::caps(),
-        };
-        let err = measure_one(
-            &device,
-            &blocks_seen,
-            2_400_000_000,
-            Duration::from_millis(50),
-            Duration::from_micros(200),
-        )
-        .unwrap_err();
-        assert!(matches!(err, RetuneError::SetFrequency(_)), "{err:?}");
+    fn the_call_time_is_the_calls_own_duration() {
+        let got = measure_calls(&device(5, &[]), &BAND_HOPS_HZ, |_| {});
+        assert_eq!(got.attempts, 10);
+        assert_eq!(got.failed, 0);
+        let ms = got.call_ms.value();
+        assert!((5.0..30.0).contains(&ms), "{ms}");
+        assert!(got.call_ms.sigma().is_finite());
+        assert!(got.worst_ms.unwrap() >= ms);
     }
 
-    /// A device that never moves the counter at all times out rather than
-    /// hanging forever - `measure_one`'s own refusal to wait past `timeout`.
+    /// The caller's bookkeeping runs once per successful call, with the
+    /// frequency just set, and its cost is not in the figure: a slow callback
+    /// on a fast device still reads fast.
     #[test]
-    fn a_counter_that_never_moves_times_out() {
-        let blocks_seen = Arc::new(AtomicU64::new(0));
-        let device = FakeDevice {
-            caps: crate::hardware::native::hackrf::caps(),
-            blocks_seen: Arc::clone(&blocks_seen),
-            delay: Duration::from_secs(60), // effectively never, within this test
-        };
-        let err = measure_one(
-            &device,
-            &blocks_seen,
-            2_400_000_000,
-            Duration::from_millis(30),
-            Duration::from_micros(200),
-        )
-        .unwrap_err();
-        assert_eq!(err, RetuneError::TimedOut);
+    fn the_callback_follows_the_tuning_and_stays_out_of_the_figure() {
+        let seen = Mutex::new(Vec::new());
+        let got = measure_calls(&device(0, &[2_480_000_000]), &BAND_HOPS_HZ, |hz| {
+            seen.lock().unwrap().push(hz);
+            std::thread::sleep(Duration::from_millis(20));
+        });
+        let seen = seen.into_inner().unwrap();
+        assert_eq!(seen.len(), 7, "three calls to 2480 MHz were refused");
+        assert!(!seen.contains(&2_480_000_000));
+        assert!(got.call_ms.value() < 10.0, "{:?}", got.call_ms);
+        assert_eq!(got.failed, 3);
+        assert!(got.first_error.unwrap().contains("2480000000"));
     }
 
-    /// [`measure`]'s own exit condition: several real retunes fold into
-    /// one resolved [`Uncertain`] reading, close to the fake device's own
-    /// known delay, with every attempt counted as a success.
+    /// Every call refused: nothing to average, and it says so rather than
+    /// reporting a zero.
     #[test]
-    fn measure_folds_several_retunes_into_one_resolved_reading() {
-        let blocks_seen = Arc::new(AtomicU64::new(0));
-        let device = FakeDevice {
-            caps: crate::hardware::native::hackrf::caps(),
-            blocks_seen: Arc::clone(&blocks_seen),
-            delay: Duration::from_millis(10),
-        };
-        let frequencies = [
-            2_400_000_000u64,
-            2_410_000_000,
-            2_400_000_000,
-            2_410_000_000,
-        ];
-        let result = measure(&device, &blocks_seen, &frequencies, Duration::from_secs(1));
-        assert_eq!(result.attempts, 4);
-        assert_eq!(result.timed_out, 0);
-        assert_eq!(result.failed, 0);
-        assert!(
-            result.latency_ms.is_resolved(1.0),
-            "{:?}",
-            result.latency_ms
-        );
-        assert!(
-            result.latency_ms.value() >= 10.0 && result.latency_ms.value() < 50.0,
-            "{:?}",
-            result.latency_ms
-        );
-    }
-
-    /// Every attempt failing is reported honestly - an unresolved
-    /// reading, the same shape [`mean_with_uncertainty`] already gives an
-    /// empty sample, not a fabricated number.
-    #[test]
-    fn measure_reports_unresolved_when_every_attempt_fails() {
-        let blocks_seen = Arc::new(AtomicU64::new(0));
-        let device = RefusingDevice {
-            caps: crate::hardware::native::hackrf::caps(),
-        };
-        let frequencies = [2_400_000_000u64, 2_410_000_000];
-        let result = measure(
-            &device,
-            &blocks_seen,
-            &frequencies,
-            Duration::from_millis(50),
-        );
-        assert_eq!(result.attempts, 2);
-        assert_eq!(result.failed, 2);
-        assert_eq!(result.timed_out, 0);
-        assert!(
-            !result.latency_ms.is_resolved(1.0),
-            "{:?}",
-            result.latency_ms
-        );
+    fn a_backend_that_refuses_every_call_has_no_figure() {
+        let got = measure_calls(&device(0, &BAND_HOPS_HZ), &BAND_HOPS_HZ, |_| {});
+        assert_eq!(got.failed, 10);
+        assert_eq!(got.worst_ms, None);
+        assert!(!got.call_ms.sigma().is_finite(), "{:?}", got.call_ms);
     }
 }

@@ -189,6 +189,7 @@ fn handle_normal(key: KeyEvent, ctx: &mut InputCtx<'_>) -> KeyAction {
         Some("fm_demod") => signal::fm_demod(key, ctx),
         Some("sweep_panel") => sweep::sweep_panel(key, ctx),
         Some("net_census") => net::net_census(key, ctx),
+        Some("net_capability") => net::net_capability(key, ctx),
         Some("command_rail") => rail::command_rail(key, ctx),
         _ => global::handle(key, ctx),
     }

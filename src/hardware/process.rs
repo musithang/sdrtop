@@ -85,11 +85,6 @@ pub fn process_block(
     ctx: &RxContext,
     now: Instant,
 ) {
-    // Unconditional, `Relaxed`, and first: `RxContext::blocks_seen`'s own
-    // doc explains why this exists (B19's retune-latency probe) and why an
-    // atomic rather than a second `metrics` lock acquisition.
-    ctx.blocks_seen
-        .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
     let format = geometry.format;
     let full_scale = geometry.full_scale;
     let fs_counts = full_scale as i64;
@@ -531,7 +526,6 @@ mod tests {
             net_feed: crate::hardware::FeedHealth::default(),
             power_tx,
             geometry: eight_bit(),
-            blocks_seen: Arc::new(std::sync::atomic::AtomicU64::new(0)),
             stream_pairs: std::sync::atomic::AtomicU64::new(0),
         };
         (Arc::new(ctx), sample_rx, demod_rx, net_rx)

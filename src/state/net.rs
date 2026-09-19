@@ -343,6 +343,20 @@ pub struct NetState {
     pub address_display: AddressDisplay,
     /// The session's masked numbers. See [`AddressBook`].
     pub address_book: AddressBook,
+    /// The tuning-call measurement the Capability panel's `K` runs
+    /// (`signal::retune::measure_calls`): `None` until someone asks, which
+    /// the panel shows as "not measured" and never as a default. Kept for the
+    /// session: it is a fact about this radio on this host.
+    pub retune: Option<RetuneRun>,
+}
+
+/// Where the tuning-call measurement stands.
+#[derive(Clone, Debug)]
+pub enum RetuneRun {
+    /// Running on its own thread: the radio is being retuned across the band.
+    Measuring,
+    /// Finished, and when.
+    Done(crate::signal::retune::CallMeasurement, std::time::Instant),
 }
 
 impl NetState {
