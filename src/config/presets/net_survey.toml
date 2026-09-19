@@ -16,5 +16,6 @@ panels = [
     { name = "header",            position = "top", height = 5 },
     { name = "net_occupancy",     position = "body" },
     { name = "net_decode_health", position = "right", width_pct = 30 },
+    { name = "log",               position = "bottom", height = 5 },
     { name = "footer",            position = "bottom" },
 ]

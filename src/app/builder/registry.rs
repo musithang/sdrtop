@@ -304,6 +304,47 @@ mod tests {
         );
     }
 
+    /// **Every NET preset stands in the same frame**: the header band on top,
+    /// the log and the footer at the bottom, at the same heights. Switching
+    /// presets inside the section should change the question on screen, not
+    /// where the log went. Two of six presets had no log before this test
+    /// existed, and nothing noticed, because a preset is TOML and a missing
+    /// strip is a layout that still draws. Bands in between (a Lab-style
+    /// banner or marker line) stay allowed; the frame is the outside edge.
+    #[test]
+    fn every_net_preset_stands_in_the_same_frame() {
+        use crate::config::Position;
+        let cfg = crate::config::LayoutConfig::default_config();
+        let mut net: Vec<_> = cfg
+            .presets
+            .iter()
+            .filter(|(_, p)| p.section.as_deref() == Some(ui::menu::model::NET))
+            .collect();
+        net.sort_by_key(|(name, _)| name.as_str());
+        assert!(net.len() >= 6, "the NET section went missing: {net:?}");
+
+        let shape = |s: &crate::config::PanelSpec| (s.name.clone(), s.position.clone(), s.height);
+        let mut wrong = Vec::new();
+        for (name, preset) in net {
+            let panels: Vec<_> = preset.panels.iter().map(shape).collect();
+            let first = panels.first().cloned();
+            let tail: Vec<_> = panels.iter().rev().take(2).rev().cloned().collect();
+            if first != Some(("header".into(), Position::Top, Some(5)))
+                || tail
+                    != [
+                        ("log".into(), Position::Bottom, Some(5)),
+                        ("footer".into(), Position::Bottom, None),
+                    ]
+            {
+                wrong.push(format!("{name}: {panels:?}"));
+            }
+        }
+        assert!(
+            wrong.is_empty(),
+            "NET presets outside the frame: {wrong:#?}"
+        );
+    }
+
     /// **Every panel in the NET section says how its numbers were gathered.**
     ///
     /// Design section 13.1 makes the mode part of the reading rather than a
