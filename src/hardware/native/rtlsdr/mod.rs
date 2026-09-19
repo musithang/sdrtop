@@ -132,7 +132,8 @@ impl SdrDevice for RtlDevice {
         let api = self.api;
         let flag = Arc::clone(&self.streaming);
         let cb_ctx = ctx;
-        let handle = std::thread::spawn(move || {
+        let spawned = std::thread::Builder::new().name("rtlsdr-reader".to_string());
+        let handle = spawned.spawn(move || {
             let user = Arc::as_ptr(&cb_ctx) as *mut c_void;
             unsafe {
                 (api.rtlsdr_read_async)(
@@ -146,7 +147,7 @@ impl SdrDevice for RtlDevice {
             // read_async returned (cancelled, or a USB error): no longer streaming.
             flag.store(false, Ordering::SeqCst);
             drop(cb_ctx);
-        });
+        })?;
         *self.thread.lock().unwrap_or_else(|e| e.into_inner()) = Some(handle);
         Ok(())
     }

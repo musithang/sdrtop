@@ -189,17 +189,21 @@ impl App {
         match caps.acquisition {
             hardware::AcquisitionKind::IqSamples => {
                 let fft_state = Arc::clone(&state);
-                std::thread::spawn(move || FftWorker::new(sample_rx, fft_state, geometry).run());
+                spawn_worker("fft-worker", move || {
+                    FftWorker::new(sample_rx, fft_state, geometry).run()
+                });
 
                 let demod_state = Arc::clone(&state);
-                std::thread::spawn(move || DemodWorker::new(demod_rx, demod_state, geometry).run());
+                spawn_worker("demod-worker", move || {
+                    DemodWorker::new(demod_rx, demod_state, geometry).run()
+                });
 
                 // Spawned whether or not the gate admitted the section: with no section
                 // on screen nothing is forwarded, so the thread costs one blocked
                 // `recv`. Deciding here would mean two places that know what admits the
                 // feature, and the one that already knows is `net::gate`.
                 let net_state = Arc::clone(&state);
-                std::thread::spawn(move || {
+                spawn_worker("net-worker", move || {
                     NetWorker::new(net_rx, net_state, geometry, bt_channels).run()
                 });
 
@@ -208,7 +212,9 @@ impl App {
             }
             hardware::AcquisitionKind::PowerTrace => {
                 let power_state = Arc::clone(&state);
-                std::thread::spawn(move || PowerWorker::new(power_rx, power_state).run());
+                spawn_worker("power-worker", move || {
+                    PowerWorker::new(power_rx, power_state).run()
+                });
                 tasks::spawn_power_rx_task(
                     Arc::clone(&state),
                     Arc::clone(&device),
@@ -352,4 +358,16 @@ impl App {
             user_presets: cfg.presets,
         })
     }
+}
+
+/// Spawns one of the long-lived DSP workers under a name, so `top -H` and btop
+/// can say which of them is spending the CPU. Linux keeps the first 15 bytes.
+/// An unnamed thread shows only the process name, and then the NET, FFT and
+/// demod workers cannot be told apart from each other or from the driver's own
+/// USB thread. Failing to spawn is as fatal here as in `std::thread::spawn`.
+fn spawn_worker(name: &str, run: impl FnOnce() + Send + 'static) {
+    std::thread::Builder::new()
+        .name(name.to_string())
+        .spawn(run)
+        .unwrap_or_else(|e| panic!("cannot start the {name} thread: {e}"));
 }

@@ -35,9 +35,11 @@ impl EventStream {
     pub fn new(tick_rate: Duration) -> Self {
         let (tx, rx) = mpsc::channel();
         let event_tx = tx.clone();
-        thread::spawn(move || loop {
-            if event::poll(tick_rate).unwrap_or(false) {
-                match event::read() {
+        let spawned = thread::Builder::new()
+            .name("key-input".to_string())
+            .spawn(move || loop {
+                if event::poll(tick_rate).unwrap_or(false) {
+                    match event::read() {
                     Ok(Event::Key(key)) => {
                         if event_tx.send(AppEvent::Key(key)).is_err() {
                             break;
@@ -50,10 +52,11 @@ impl EventStream {
                         }
                     _ => {}
                 }
-            } else if event_tx.send(AppEvent::Tick).is_err() {
-                break;
-            }
-        });
+                } else if event_tx.send(AppEvent::Tick).is_err() {
+                    break;
+                }
+            });
+        spawned.expect("cannot start the key-input thread");
         Self { tx, rx }
     }
 

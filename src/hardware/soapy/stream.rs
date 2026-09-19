@@ -247,7 +247,8 @@ impl Streaming {
         // this thread once it starts. The same usize hop `rtlsdr/mod.rs` makes.
         let dev_addr = dev as usize;
         let stream_addr = stream as usize;
-        let handle = std::thread::spawn(move || {
+        let spawned = std::thread::Builder::new().name("soapy-reader".to_string());
+        let handle = spawned.spawn(move || {
             let dev = dev_addr as *mut SoapySDRDevice;
             let stream = stream_addr as *mut SoapySDRStream;
             run(
@@ -266,7 +267,7 @@ impl Streaming {
                 api.close_stream(dev, stream);
             }
             active.store(false, Ordering::SeqCst);
-        });
+        })?;
         *self.thread.lock().unwrap_or_else(|e| e.into_inner()) = Some(handle);
         Ok(())
     }
