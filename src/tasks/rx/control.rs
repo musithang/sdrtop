@@ -90,7 +90,12 @@ pub(super) fn apply_rx_request(
     match request_transition(
         rx_enabled,
         hw_rx_active,
-        || device.start_rx(Arc::clone(rx_ctx)),
+        || {
+            // A new stream counts its positions from zero, so its first block
+            // is never mistaken for the continuation of the last stream's.
+            rx_ctx.begin_stream();
+            device.start_rx(Arc::clone(rx_ctx))
+        },
         || device.stop_rx(),
     ) {
         RxRequestTransition::Started => {

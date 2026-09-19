@@ -174,6 +174,7 @@ impl App {
             power_tx,
             geometry,
             blocks_seen: Arc::new(std::sync::atomic::AtomicU64::new(0)),
+            stream_pairs: std::sync::atomic::AtomicU64::new(0),
         });
 
         let app = Self::assemble(

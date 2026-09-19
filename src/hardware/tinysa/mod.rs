@@ -1907,6 +1907,7 @@ mod tests {
             power_tx,
             geometry: capabilities(Model::Basic, BasicInput::Low).sample_geometry,
             blocks_seen: Arc::new(std::sync::atomic::AtomicU64::new(0)),
+            stream_pairs: std::sync::atomic::AtomicU64::new(0),
         });
 
         let (start_tx, start_rx) = bounded(1);
@@ -3046,6 +3047,7 @@ mod tests {
                 power_tx,
                 geometry: device.capabilities().sample_geometry,
                 blocks_seen: Arc::new(std::sync::atomic::AtomicU64::new(0)),
+                stream_pairs: std::sync::atomic::AtomicU64::new(0),
             });
 
             device.start_rx(context).unwrap();

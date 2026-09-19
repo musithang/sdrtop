@@ -116,10 +116,25 @@ pub fn process_block(
     // The NET gate is the section on screen rather than a switch of its own:
     // that section is the only consumer, and a preset the user is not looking at
     // is not a reason to copy every block off the USB callback.
-    let (cal, demod_enabled, net_enabled) = {
+    // The tuning is read in the same lock: it travels with the block, so a
+    // worker that processes it later still knows where it was captured.
+    let (cal, demod_enabled, net_enabled, centre_hz, rate_hz) = {
         let m = ctx.metrics.lock().unwrap_or_else(|e| e.into_inner());
-        (m.iq.cal, m.demod.enabled, m.ui.is_net_section())
+        (
+            m.iq.cal,
+            m.demod.enabled,
+            m.ui.is_net_section(),
+            m.radio.frequency,
+            m.radio.config_sample_rate,
+        )
     };
+    // Where this block sits in the stream. The pairs the driver lost come
+    // first - they happened before this block - and then the block itself, so
+    // the next block's position is exactly past both.
+    let first_pair = ctx.stream_pairs.fetch_add(
+        dropped_pairs + pairs as u64,
+        std::sync::atomic::Ordering::Relaxed,
+    ) + dropped_pairs;
     let correcting = cal.correcting();
     acc.correcting = correcting;
     acc.cal = cal;
@@ -245,6 +260,9 @@ pub fn process_block(
                 seq: block_seq,
                 gap_before: dropped_pairs > 0,
                 bytes: forward.clone(),
+                first_pair,
+                centre_hz,
+                rate_hz,
             })
             .ok();
     }
@@ -260,6 +278,9 @@ pub fn process_block(
                 seq: block_seq,
                 gap_before: dropped_pairs > 0,
                 bytes: forward.clone(),
+                first_pair,
+                centre_hz,
+                rate_hz,
             })
             .is_ok();
         ctx.net_feed.record(ctx.net_tx.len(), taken);
@@ -511,6 +532,7 @@ mod tests {
             power_tx,
             geometry: eight_bit(),
             blocks_seen: Arc::new(std::sync::atomic::AtomicU64::new(0)),
+            stream_pairs: std::sync::atomic::AtomicU64::new(0),
         };
         (Arc::new(ctx), sample_rx, demod_rx, net_rx)
     }
@@ -571,6 +593,44 @@ mod tests {
         let block = net_rx.try_recv().expect("one block");
         assert!(!block.gap_before);
         assert_eq!(block.bytes.len(), 64);
+    }
+
+    /// Every block carries where it sits in the stream and the tuning it was
+    /// captured at, and the position counts what the driver lost as well as
+    /// what arrived - so two positions alone say whether blocks are
+    /// contiguous. A new stream starts again from zero.
+    #[test]
+    fn blocks_carry_their_stream_position_and_capture_tuning() {
+        let (ctx, _sample_rx, _demod_rx, net_rx) = rx_ctx_holding(8, 8);
+        {
+            let mut m = ctx.metrics.lock().unwrap();
+            m.radio.frequency = 2_402_000_000;
+            m.radio.config_sample_rate = 4_000_000.0;
+        }
+        // 32 pairs, then 32 more after the driver reports 10 lost.
+        super::process_block(&[0u8; 64], eight_bit(), 0, &ctx, Instant::now());
+        super::process_block(&[0u8; 64], eight_bit(), 10, &ctx, Instant::now());
+        let a = net_rx.try_recv().unwrap();
+        let b = net_rx.try_recv().unwrap();
+        assert_eq!(a.first_pair, 0);
+        assert_eq!(
+            b.first_pair,
+            32 + 10,
+            "past the first block and the lost pairs"
+        );
+        assert_eq!((a.centre_hz, a.rate_hz), (2_402_000_000, 4_000_000.0));
+
+        // Retuned between blocks: each carries the tuning it was captured at.
+        ctx.metrics.lock().unwrap().radio.frequency = 2_480_000_000;
+        super::process_block(&[0u8; 64], eight_bit(), 0, &ctx, Instant::now());
+        let c = net_rx.try_recv().unwrap();
+        assert_eq!(c.centre_hz, 2_480_000_000);
+        assert_eq!(c.first_pair, 32 + 10 + 32, "and the stream carried on");
+
+        // A restarted stream counts from zero again.
+        ctx.begin_stream();
+        super::process_block(&[0u8; 64], eight_bit(), 0, &ctx, Instant::now());
+        assert_eq!(net_rx.try_recv().unwrap().first_pair, 0);
     }
 
     /// The block the NET feed could not take is counted.

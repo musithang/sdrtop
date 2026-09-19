@@ -272,6 +272,33 @@ pub struct StreamingDecimator {
     phase: usize,
 }
 
+/// One real dot product of the filter: `window` against `taps`.
+///
+/// **Eight running sums, not one.** A single accumulator is one long chain of
+/// dependent additions that floating-point rules forbid the compiler to
+/// reorder, so it runs one tap at a time. Eight independent lanes, added
+/// together at the end, are the same sum in a different order - equal to
+/// rounding - and let the loop run as vector arithmetic. Measured on the BLE
+/// front end at 20 Msps, this loop was the largest remaining cost in the
+/// receive chain once the matched filter moved to the FFT.
+#[inline]
+fn dot(window: &[f32], taps: &[f32]) -> f32 {
+    const LANES: usize = 8;
+    let (w_chunks, w_rest) = window.as_chunks::<LANES>();
+    let (h_chunks, h_rest) = taps.as_chunks::<LANES>();
+    let mut lanes = [0.0f32; LANES];
+    for (w, h) in w_chunks.iter().zip(h_chunks) {
+        for l in 0..LANES {
+            lanes[l] += w[l] * h[l];
+        }
+    }
+    let mut acc: f32 = lanes.iter().sum();
+    for (s, &h) in w_rest.iter().zip(h_rest) {
+        acc += s * h;
+    }
+    acc
+}
+
 impl StreamingDecimator {
     pub fn new(taps: Vec<f32>, d: usize) -> Self {
         Self {
@@ -304,18 +331,18 @@ impl StreamingDecimator {
             return;
         }
 
+        // Real and imaginary parts as two plain arrays, once per block: the
+        // taps are real, so each output is two independent real dot products,
+        // and contiguous `f32` is what the vector units read without shuffling.
+        let re: Vec<f32> = buf.iter().map(|s| s.re).collect();
+        let im: Vec<f32> = buf.iter().map(|s| s.im).collect();
         let mut start = self.phase;
+        out.reserve((buf.len().saturating_sub(start) / self.d) + 1);
         while start + n <= buf.len() {
-            let w = &buf[start..start + n];
-            let mut acc = Complex {
-                re: 0.0f32,
-                im: 0.0f32,
-            };
-            for (s, &h) in w.iter().zip(self.taps.iter()) {
-                acc.re += s.re * h;
-                acc.im += s.im * h;
-            }
-            out.push(acc);
+            out.push(Complex {
+                re: dot(&re[start..start + n], &self.taps),
+                im: dot(&im[start..start + n], &self.taps),
+            });
             start += self.d;
         }
 

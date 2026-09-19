@@ -75,6 +75,19 @@ const LOOKBACK_SAMPLES: usize = LOOKBACK_SYMBOLS * WORKING_SPS;
 /// worst case measured so far.
 const HEADER_SEARCH_SYMBOLS: usize = 6;
 
+/// How often a capture in progress is tried for a finished packet: once an
+/// octet's worth of samples, not once a sample.
+///
+/// A PDU grows an octet at a time, so trying between octets can only find a
+/// packet a few microseconds sooner than trying at them. Trying every sample
+/// did find it sooner - and paid for it with a full search of
+/// [`HEADER_SEARCH_SYMBOLS`] candidate boundaries, each a discriminator, a
+/// phase search and a decode over the whole capture, on every one of the
+/// ~1300 samples a capture runs to: tens of thousands of decodes per trigger.
+/// On a busy real channel that put the receiver at around 280 times real
+/// time (`dev_docs/case-study-ble-crc.md`, section 11).
+const DECODE_EVERY_SAMPLES: usize = 8 * WORKING_SPS;
+
 /// How rare a false trigger has to be to live with continuously, at 4
 /// million matched-filter evaluations a second.
 ///
@@ -382,8 +395,17 @@ impl Receiver {
         self.decim.process(&iq, &mut working);
 
         let cap_limit = (16 + MAX_PDU_BYTES * 8) * WORKING_SPS;
+        // Every sample through the matched filter, capturing or not, as one
+        // block. Two reasons, both measured: the block path is most of an
+        // order of magnitude cheaper (`MatchedFilter::process_block`), and a
+        // filter fed only between captures used to resume after each one with
+        // a window joining samples from before the capture to samples after
+        // it - a splice of its own, on every trigger.
+        let mut matches = Vec::new();
+        self.filter.process_block(&working, &mut matches);
+
         let mut found = Vec::new();
-        for &sample in &working {
+        for (&sample, reading) in working.iter().zip(&matches) {
             self.history.push(sample);
             if self.history.len() > LOOKBACK_SAMPLES {
                 let excess = self.history.len() - LOOKBACK_SAMPLES;
@@ -391,7 +413,8 @@ impl Receiver {
             }
             if self.capturing {
                 self.capture.push(sample);
-                match self.try_decode() {
+                let due = self.capture.len().is_multiple_of(DECODE_EVERY_SAMPLES);
+                match due.then(|| self.try_decode()).flatten() {
                     Some(packet) => {
                         found.push(packet);
                         self.capturing = false;
@@ -415,7 +438,7 @@ impl Receiver {
                     }
                     None => {}
                 }
-            } else if let Some(coherence) = self.filter.push(sample).and_then(|m| m.coherence()) {
+            } else if let Some(coherence) = reading.and_then(|m| m.coherence()) {
                 if coherence > self.threshold {
                     self.capturing = true;
                     self.capture = self.history.clone();
@@ -458,12 +481,26 @@ impl Receiver {
         let center = LOOKBACK_SAMPLES as isize;
         let step = WORKING_SPS as isize;
         let span = HEADER_SEARCH_SYMBOLS as isize;
+        // One discriminator pass for every candidate: see `decode_at`.
+        let inst = self.discriminated();
+        // And one phase search. The candidates are whole symbols apart, so
+        // they share where inside a symbol to sample; searching from the
+        // earliest one uses every symbol any of them will read. Thirteen
+        // searches, each over nearly the same samples, were most of what a
+        // capture that never passed its CRC cost.
+        let earliest = (center - span * step).max(0) as usize;
+        let from_earliest = &inst[earliest.min(inst.len())..];
+        let phase = super::sync::phase(
+            from_earliest,
+            WORKING_SPS as f64,
+            from_earliest.len() / WORKING_SPS,
+        );
         for k in -span..=span {
             let skip = center + k * step;
             if skip < 0 {
                 continue;
             }
-            if let Some(packet) = self.try_decode_from(skip as usize) {
+            if let Some(packet) = self.decode_at(&inst, skip as usize, Some(phase)) {
                 if packet.crc_ok {
                     return Some(packet);
                 }
@@ -505,12 +542,31 @@ impl Receiver {
     /// reported rather than only corrected for blindly - the honest first
     /// step toward deciding whether that hypothesis is the right one.
     fn try_decode_from(&self, skip: usize) -> Option<Packet> {
+        self.decode_at(&self.discriminated(), skip, None)
+    }
+
+    /// The whole capture through the discriminator, once.
+    fn discriminated(&self) -> Vec<f32> {
+        let mut inst = Vec::new();
+        discriminate(&self.capture, working_rate_hz(self.phy), &mut inst);
+        inst
+    }
+
+    /// [`Self::try_decode_from`]'s work, given the whole capture already
+    /// discriminated.
+    ///
+    /// **The discriminator of a capture started `skip` samples in is exactly
+    /// the whole capture's discriminator from `skip` on** - each reading is a
+    /// function of two neighbouring samples and nothing else - so the search
+    /// over candidate boundaries slices one pass rather than making thirteen.
+    ///
+    /// `phase`, when given, is the sub-symbol sampling phase already found
+    /// for this capture (see `try_decode`); `None` searches for it here.
+    fn decode_at(&self, whole: &[f32], skip: usize, phase: Option<f64>) -> Option<Packet> {
         if skip >= self.capture.len() {
             return None;
         }
-        let capture = &self.capture[skip..];
-        let mut inst = Vec::new();
-        discriminate(capture, working_rate_hz(self.phy), &mut inst);
+        let inst = &whole[skip.min(whole.len())..];
         let symbols = inst.len() / WORKING_SPS;
         if symbols < pdu::HEADER_BITS {
             return None;
@@ -527,13 +583,11 @@ impl Receiver {
         // any real stretch of bits - and this only needs a point estimate:
         // a threshold decision does not need a calibrated uncertainty, only
         // the displayed reading below does, and gets its own.
-        let rough_offset = crate::signal::dsp::uncertainty::mean_with_uncertainty(&inst);
-        let (mut bits, raw_symbols) = super::sync::slice(
-            &inst,
-            WORKING_SPS as f64,
-            symbols,
-            rough_offset.value() as f32,
-        );
+        let rough_offset = crate::signal::dsp::uncertainty::mean_with_uncertainty(inst);
+        let sps = WORKING_SPS as f64;
+        let phase = phase.unwrap_or_else(|| super::sync::phase(inst, sps, symbols));
+        let (mut bits, raw_symbols) =
+            super::sync::slice_at(inst, sps, symbols, rough_offset.value() as f32, phase);
         // B8's modulation-quality measurement needs the physically
         // transmitted (still-whitened) symbols and their raw discriminator
         // readings - exactly what `bits` and `raw_symbols` are before the
@@ -873,6 +927,9 @@ mod tests {
             seq: 1,
             gap_before: false,
             bytes: vec![0u8; 64],
+            first_pair: 0,
+            centre_hz: 2_426_000_000,
+            rate_hz: working_rate_hz(Phy::OneM),
         };
         let mut rx = Receiver::new(
             working_rate_hz(Phy::OneM),

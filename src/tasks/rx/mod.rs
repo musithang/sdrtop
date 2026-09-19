@@ -172,7 +172,12 @@ fn power_control_step(
     let transition = control::request_transition(
         requested,
         active,
-        || device.start_rx(Arc::clone(rx_ctx)),
+        || {
+            // A new stream counts its positions from zero, so its first block
+            // is never mistaken for the continuation of the last stream's.
+            rx_ctx.begin_stream();
+            device.start_rx(Arc::clone(rx_ctx))
+        },
         || device.stop_rx(),
     );
     let unchanged_active = matches!(transition, control::RxRequestTransition::Unchanged(true));
@@ -338,6 +343,7 @@ mod power_control_tests {
             power_tx,
             geometry: SampleGeometry::default(),
             blocks_seen: Arc::new(std::sync::atomic::AtomicU64::new(0)),
+            stream_pairs: std::sync::atomic::AtomicU64::new(0),
         })
     }
 

@@ -24,9 +24,36 @@ use crate::signal::dsp::timing::{find_phase, interpolate};
 /// `dsp::timing`'s own tests measured Gardner settling to on this signal.
 const PHASE_RESOLUTION: usize = 16;
 
+/// Find the symbol phase over `discriminator`, then [`slice_at`] it.
+///
+/// The one-call form, for a caller slicing a single span. The receiver
+/// slices thirteen candidate spans of the same capture, so it searches once
+/// with [`phase`] and calls [`slice_at`] for each; this stays for the tests
+/// that exercise a whole slice at a time.
+#[cfg(test)]
+pub fn slice(
+    discriminator: &[f32],
+    sps: f64,
+    symbols: usize,
+    threshold: f32,
+) -> (Vec<bool>, Vec<f32>) {
+    let phase = find_phase(discriminator, sps, symbols, PHASE_RESOLUTION);
+    slice_at(discriminator, sps, symbols, threshold, phase)
+}
+
+/// The sampling phase within a symbol that [`slice`] would search for,
+/// found once over `discriminator`.
+///
+/// Exposed so a caller slicing the same signal from several starting points
+/// a whole number of symbols apart can search once: a shift by whole symbols
+/// moves where the slicing starts, not where inside each symbol it samples.
+pub fn phase(discriminator: &[f32], sps: f64, symbols: usize) -> f64 {
+    find_phase(discriminator, sps, symbols, PHASE_RESOLUTION)
+}
+
 /// Recover one bit per symbol from a discriminator's instantaneous-frequency
-/// output, finding the symbol phase once over the whole span given and
-/// slicing every symbol against `threshold`.
+/// output, sampling each symbol at `phase` and slicing it against
+/// `threshold`.
 ///
 /// A bit is `true` when the recovered sample is above `threshold` - `0.0`
 /// for a caller with nothing else to go on, matching the convention
@@ -43,15 +70,14 @@ const PHASE_RESOLUTION: usize = 16;
 /// `signal::ble::measure::modulation_quality` needs - how far the
 /// discriminator actually swung, not just which side of the line it landed
 /// on - so this hands both back rather than making a second caller re-run
-/// [`find_phase`] and [`interpolate`] to recover what this call already
-/// computed.
-pub fn slice(
+/// [`interpolate`] to recover what this call already computed.
+pub fn slice_at(
     discriminator: &[f32],
     sps: f64,
     symbols: usize,
     threshold: f32,
+    phase: f64,
 ) -> (Vec<bool>, Vec<f32>) {
-    let phase = find_phase(discriminator, sps, symbols, PHASE_RESOLUTION);
     let raw: Vec<f32> = (0..symbols)
         .map(|k| interpolate(discriminator, phase + k as f64 * sps))
         .collect();

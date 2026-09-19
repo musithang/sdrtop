@@ -29,7 +29,10 @@
 //! written against: [`false_alarm_rate`] turns a threshold into the probability
 //! that noise alone will trip it.
 
+use std::sync::Arc;
+
 use num_complex::Complex;
+use rustfft::{Fft, FftPlanner};
 
 /// How often a running sum is rebuilt from the history it still holds.
 ///
@@ -213,14 +216,73 @@ impl Match {
 ///
 /// See [`Match`] for who uses it.
 pub struct MatchedFilter {
-    /// The reference, conjugated and reversed, so applying it is a forward walk
-    /// back through the history.
+    /// The reference, conjugated, in its own order: applying it is a dot
+    /// product with the window oldest sample first.
     taps: Vec<Complex<f64>>,
     reference_energy: f64,
+    /// The last `n` samples, **written twice**: sample `i` goes to `i % n`
+    /// and to `i % n + n`. Whatever the write position, the whole window in
+    /// time order is then one contiguous slice, `hist[pos + 1..pos + 1 + n]`.
+    ///
+    /// **This is the receiver's hot loop, and the layout is the speed.** The
+    /// first version kept an ordinary ring and indexed it with a modulo per
+    /// tap: for BLE's 142-tap reference at 4 Msps that is 570 million
+    /// divisions a second, and it measured at 1.4 us a sample - the matched
+    /// filter alone ran at a fifth of real time and took the whole receiver
+    /// with it. A contiguous window costs one extra write a sample and lets
+    /// the dot product run straight through memory.
     hist: Vec<Complex<f64>>,
+    /// Where the newest sample was written, in `0..n`.
     pos: usize,
     count: usize,
     energy: f64,
+    /// The FFT plan [`Self::process_block`] uses, built the first time it is
+    /// called - a caller that only ever calls [`Self::push`] never pays for it.
+    block: Option<BlockPlan>,
+}
+
+/// Overlap-save correlation: the plan and the reference, transformed once.
+struct BlockPlan {
+    size: usize,
+    forward: Arc<dyn Fft<f64>>,
+    inverse: Arc<dyn Fft<f64>>,
+    /// The reference as a filter kernel, transformed, with the inverse
+    /// transform's `1 / size` folded in.
+    kernel: Vec<Complex<f64>>,
+    buffer: Vec<Complex<f64>>,
+    scratch: Vec<Complex<f64>>,
+}
+
+impl BlockPlan {
+    fn new(taps: &[Complex<f64>]) -> Self {
+        let n = taps.len().max(1);
+        // Four taps' worth or more per transform keeps most of each one's
+        // output valid: `size - n + 1` of every `size` samples.
+        let size = (4 * n).next_power_of_two().max(256);
+        let mut planner = FftPlanner::<f64>::new();
+        let forward = planner.plan_fft_forward(size);
+        let inverse = planner.plan_fft_inverse(size);
+        // Correlating with `taps` (applied oldest sample first) is convolving
+        // with `taps` reversed.
+        let scale = 1.0 / size as f64;
+        let mut kernel = vec![Complex::new(0.0, 0.0); size];
+        for (j, slot) in kernel.iter_mut().take(n).enumerate() {
+            *slot = taps[n - 1 - j] * scale;
+        }
+        let scratch_len = forward
+            .get_inplace_scratch_len()
+            .max(inverse.get_inplace_scratch_len());
+        let mut scratch = vec![Complex::new(0.0, 0.0); scratch_len];
+        forward.process_with_scratch(&mut kernel, &mut scratch);
+        Self {
+            size,
+            forward,
+            inverse,
+            kernel,
+            buffer: vec![Complex::new(0.0, 0.0); size],
+            scratch,
+        }
+    }
 }
 
 impl MatchedFilter {
@@ -232,12 +294,14 @@ impl MatchedFilter {
         let reference_energy = wide.iter().map(|s| s.norm_sqr()).sum();
         let n = wide.len().max(1);
         Self {
-            taps: wide.iter().rev().map(|s| s.conj()).collect(),
+            taps: wide.iter().map(|s| s.conj()).collect(),
             reference_energy,
-            hist: vec![Complex::new(0.0, 0.0); n + 1],
-            pos: 0,
+            hist: vec![Complex::new(0.0, 0.0); 2 * n],
+            // One behind the first slot, so the first write lands on 0.
+            pos: n - 1,
             count: 0,
             energy: 0.0,
+            block: None,
         }
     }
 
@@ -260,14 +324,106 @@ impl MatchedFilter {
         self.hist
             .iter_mut()
             .for_each(|s| *s = Complex::new(0.0, 0.0));
-        self.pos = 0;
+        self.pos = self.taps.len().max(1) - 1;
         self.count = 0;
         self.energy = 0.0;
     }
 
-    fn at(&self, k: usize) -> Complex<f64> {
-        let cap = self.hist.len();
-        self.hist[(self.pos + cap - k) % cap]
+    /// Feed a block of samples at once: one reading per sample, exactly what
+    /// [`Self::push`] would have returned for each of them in turn.
+    ///
+    /// **The same answer by a cheaper road.** `push` recomputes the whole
+    /// correlation for every sample, `n` multiply-adds each, because a
+    /// correlation against an arbitrary sequence has no running form. Over a
+    /// block it has a fast one: overlap-save, a transform per few hundred
+    /// samples instead of `n` operations per sample. For BLE's 142-tap
+    /// reference that is most of an order of magnitude, and it is the step
+    /// that put the receiver inside real time. The window energy is kept by
+    /// the same running sum, refreshed at the same points, as `push` keeps
+    /// it; `the_block_path_is_the_sample_path` holds the two to agreeing
+    /// sample by sample, and `push` may carry on after a block as if every
+    /// sample had gone through it.
+    pub fn process_block(&mut self, x: &[Complex<f32>], out: &mut Vec<Option<Match>>) {
+        out.clear();
+        if x.is_empty() {
+            return;
+        }
+        let n = self.taps.len().max(1);
+        if self.block.is_none() {
+            self.block = Some(BlockPlan::new(&self.taps));
+        }
+
+        // The stream this block's windows reach into: the whole window before
+        // it, oldest first, then the block. The first of those `n` samples is
+        // read only as the one leaving the first new window, for the running
+        // energy. Before `n` samples have been seen the missing ones are
+        // zeros, and every window that would read one is a warm-up reading
+        // `push` returns `None` for.
+        let mut stream: Vec<Complex<f64>> = Vec::with_capacity(n + x.len());
+        stream.extend_from_slice(&self.hist[self.pos + 1..self.pos + 1 + n]);
+        stream.extend(x.iter().map(|s| Complex::new(s.re as f64, s.im as f64)));
+
+        // Correlations, one per new sample: window `i` is
+        // `stream[1 + i..1 + i + n]`, ending on new sample `i`.
+        let mut values = vec![Complex::new(0.0, 0.0); x.len()];
+        let plan = self.block.as_mut().expect("built above");
+        let step = plan.size - n + 1;
+        let mut start = 0;
+        while start < x.len() {
+            for (j, slot) in plan.buffer.iter_mut().enumerate() {
+                *slot = stream
+                    .get(1 + start + j)
+                    .copied()
+                    .unwrap_or(Complex::new(0.0, 0.0));
+            }
+            plan.forward
+                .process_with_scratch(&mut plan.buffer, &mut plan.scratch);
+            for (b, k) in plan.buffer.iter_mut().zip(&plan.kernel) {
+                *b *= k;
+            }
+            plan.inverse
+                .process_with_scratch(&mut plan.buffer, &mut plan.scratch);
+            // Circular outputs `n - 1..size` are the linear ones: window
+            // `start + m - (n - 1)` for each.
+            for m in (n - 1)..plan.size {
+                let i = start + m - (n - 1);
+                if i >= x.len() {
+                    break;
+                }
+                values[i] = plan.buffer[m];
+            }
+            start += step;
+        }
+
+        out.reserve(x.len());
+        for (i, value) in values.into_iter().enumerate() {
+            let t = self.count;
+            self.count += 1;
+            self.energy += stream[n + i].norm_sqr();
+            if t >= n {
+                self.energy -= stream[i].norm_sqr();
+            }
+            if t + 1 < n {
+                out.push(None);
+                continue;
+            }
+            if self.count.is_multiple_of(REFRESH) {
+                self.energy = stream[1 + i..1 + i + n].iter().map(|s| s.norm_sqr()).sum();
+            }
+            out.push(Some(Match {
+                value,
+                window_energy: self.energy,
+                reference_energy: self.reference_energy,
+            }));
+        }
+
+        // Leave the history as `push` would have: the last `n` samples, in
+        // order, so the next `push` or block sees the right window.
+        for &s in &stream[stream.len().saturating_sub(n)..] {
+            self.pos = if self.pos + 1 == n { 0 } else { self.pos + 1 };
+            self.hist[self.pos] = s;
+            self.hist[self.pos + n] = s;
+        }
     }
 
     /// Feed one sample. Returns a reading once `reference.len()` samples have
@@ -278,28 +434,37 @@ impl MatchedFilter {
     /// Only the window energy is a running sum, and it is the only part of this
     /// structure that can drift.
     pub fn push(&mut self, x: Complex<f32>) -> Option<Match> {
-        let cap = self.hist.len();
-        let n = self.taps.len();
-        self.pos = (self.pos + 1) % cap;
-        self.hist[self.pos] = Complex::new(x.re as f64, x.im as f64);
+        let n = self.taps.len().max(1);
+        self.pos = if self.pos + 1 == n { 0 } else { self.pos + 1 };
+        let sample = Complex::new(x.re as f64, x.im as f64);
+        // The slot being overwritten holds the sample leaving the window.
+        let leaving = self.hist[self.pos];
+        self.hist[self.pos] = sample;
+        self.hist[self.pos + n] = sample;
         let t = self.count;
         self.count += 1;
 
-        self.energy += self.at(0).norm_sqr();
+        self.energy += sample.norm_sqr();
         if t >= n {
-            self.energy -= self.at(n).norm_sqr();
+            self.energy -= leaving.norm_sqr();
         }
 
         if t + 1 < n {
             return None;
         }
+        let window = &self.hist[self.pos + 1..self.pos + 1 + n];
         if self.count.is_multiple_of(REFRESH) {
-            self.energy = (0..n).map(|k| self.at(k).norm_sqr()).sum();
+            self.energy = window.iter().map(|s| s.norm_sqr()).sum();
         }
-        let mut value = Complex::new(0.0, 0.0);
-        for (u, tap) in self.taps.iter().enumerate() {
-            value += tap * self.at(u);
+        // Real and imaginary parts accumulated separately, so the loop is
+        // four independent multiply-adds per tap with nothing to stop the
+        // compiler vectorising it.
+        let (mut re, mut im) = (0.0f64, 0.0f64);
+        for (tap, s) in self.taps.iter().zip(window) {
+            re += tap.re * s.re - tap.im * s.im;
+            im += tap.re * s.im + tap.im * s.re;
         }
+        let value = Complex::new(re, im);
         Some(Match {
             value,
             window_energy: self.energy,
@@ -432,6 +597,91 @@ mod tests {
         // repeat at this lag, so what is left is the correlation of noise.
         let far = m[G + 2 * L..].iter().cloned().fold(0.0f64, f64::max);
         assert!(far < 0.5, "the metric stays at {far} on unrelated data");
+    }
+
+    /// The matched filter is exactly a correlation, checked against the
+    /// definition computed the slowest way there is: every window, summed
+    /// out in full, for every sample - across the energy refresh too, where
+    /// a running sum and a recomputed one have to agree.
+    #[test]
+    fn the_matched_filter_is_the_correlation_it_claims_to_be() {
+        const N: usize = 16;
+        let mut rng = Rng::new(21);
+        let reference = rng.qpsk(N);
+        let x = rng.qpsk(REFRESH + 3 * N);
+        let mut mf = MatchedFilter::new(&reference);
+        for (t, s) in x.iter().enumerate() {
+            let got = mf.push(*s);
+            if t + 1 < N {
+                assert!(got.is_none(), "no reading before a full window, t={t}");
+                continue;
+            }
+            let got = got.expect("a reading once the window is full");
+            let window = &x[t + 1 - N..=t];
+            let mut value = Complex::new(0.0f64, 0.0);
+            let mut energy = 0.0f64;
+            for (r, w) in reference.iter().zip(window) {
+                let r = Complex::new(r.re as f64, r.im as f64);
+                let w = Complex::new(w.re as f64, w.im as f64);
+                value += r.conj() * w;
+                energy += w.norm_sqr();
+            }
+            assert!(
+                (got.value - value).norm() < 1e-9,
+                "t={t}: {} vs {value}",
+                got.value
+            );
+            assert!((got.window_energy - energy).abs() < 1e-9, "t={t}");
+        }
+    }
+
+    /// The block path is the sample path by another road: the same reading
+    /// for every sample, whatever the blocks happen to be cut into - blocks
+    /// shorter than the reference, a first block that ends mid warm-up, and
+    /// a run long enough to cross the energy refresh - and `push` carries on
+    /// after a block exactly as if every sample had gone through it.
+    #[test]
+    fn the_block_path_is_the_sample_path() {
+        const N: usize = 142;
+        let mut rng = Rng::new(31);
+        let reference = rng.qpsk(N);
+        let x = rng.qpsk(REFRESH + 20_000);
+
+        let mut by_sample = MatchedFilter::new(&reference);
+        let expected: Vec<Option<Match>> = x.iter().map(|s| by_sample.push(*s)).collect();
+
+        let mut by_block = MatchedFilter::new(&reference);
+        let mut got = Vec::new();
+        let mut out = Vec::new();
+        let sizes = [1usize, 7, 100, 1000, 5000, 3];
+        let mut at = 0;
+        let mut k = 0;
+        // Stop short of the end, so the tail goes through `push`.
+        while at < x.len() - 500 {
+            let len = sizes[k % sizes.len()].min(x.len() - 500 - at);
+            by_block.process_block(&x[at..at + len], &mut out);
+            got.extend(out.iter().copied());
+            at += len;
+            k += 1;
+        }
+        got.extend(x[at..].iter().map(|s| by_block.push(*s)));
+
+        assert_eq!(got.len(), expected.len());
+        for (t, (g, e)) in got.iter().zip(&expected).enumerate() {
+            match (g, e) {
+                (None, None) => {}
+                (Some(g), Some(e)) => {
+                    assert!(
+                        (g.value - e.value).norm() < 1e-9,
+                        "t={t}: {} vs {}",
+                        g.value,
+                        e.value
+                    );
+                    assert!((g.window_energy - e.window_energy).abs() < 1e-9, "t={t}");
+                }
+                _ => panic!("t={t}: one path has a reading and the other does not"),
+            }
+        }
     }
 
     #[test]

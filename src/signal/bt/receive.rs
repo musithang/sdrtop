@@ -87,10 +87,16 @@ fn ticks_from_symbols(symbols: u64) -> i64 {
 pub struct HeaderHit {
     pub lap: u32,
     pub whitened: [bool; header::HEADER_BITS],
-    /// CLK1-6 ticks since this receiver was built - not since any
-    /// particular header - `header::PiconetClock::observe` only ever
-    /// needs differences between these, and finds its own reference the
-    /// first time it is called for a given LAP.
+    /// CLK1-6 ticks on the **stream's own clock**, counted from the start
+    /// of the stream - not from when this receiver was built, and not from
+    /// any particular header. `header::PiconetClock::observe` only ever
+    /// needs differences between these, but it needs them across receivers:
+    /// the worker rebuilds its fleet whenever the tuning moves or the feed
+    /// breaks, and a piconet's clock has to keep counting straight through
+    /// both. A count local to each receiver restarted at zero on every
+    /// rebuild and fell behind real time on every dropped block, and the
+    /// UAP narrowing, which divides elapsed time into clock ticks, then
+    /// discarded the right candidate on the strength of the wrong interval.
     pub tick: i64,
     /// The raw, still-whitened bits captured immediately after the
     /// header, up to [`PAYLOAD_CAPTURE_BITS`] of them regardless of what
@@ -257,11 +263,15 @@ pub struct Receiver {
     /// `p` slices the sample whose position (mod [`PHASES`]) equals `p`.
     lane: usize,
     detectors: [Detector; PHASES],
-    /// How many symbols each lane has ever sliced - this receiver's own
-    /// clock, in the only unit `header::PiconetClock` needs: a count that
-    /// never resets and never drifts, since it is exact integer arithmetic
-    /// the whole way from raw samples down to here.
+    /// How many symbols each lane has sliced since this receiver was built.
+    /// Exact integer arithmetic, but only valid while the samples are
+    /// unbroken - which is why the worker rebuilds the receiver at every
+    /// break, and why a hit's tick adds [`Self::anchor_symbols`].
     lane_symbols: [u64; PHASES],
+    /// Where on the stream's own clock this receiver's first sample sits, in
+    /// symbol periods: the stream position it was built at, converted. Adding
+    /// it turns this receiver's local count into the stream's.
+    anchor_symbols: u64,
     /// One header capture in progress per lane, if any. A second hit on a
     /// lane that already has one pending does not restart it - finishing
     /// the older capture first is a small, honest simplification, not a
@@ -274,7 +284,21 @@ impl Receiver {
     /// `tuned_centre_hz` - the offset the mixer needs, since a classic BT
     /// channel's own absolute frequency is fixed but its position inside
     /// *this* capture depends on where the radio is tuned right now.
-    pub fn new(raw_rate: f64, ch: u8, tuned_centre_hz: f64) -> Result<Self, String> {
+    ///
+    /// `first_pair` is the stream position of the first block this receiver
+    /// will be given ([`crate::hardware::StreamBlock::first_pair`]); it
+    /// anchors the receiver's symbol count to the stream's own clock. Its
+    /// conversion to symbols is rounded to the nearest one, so an anchor can
+    /// sit up to half a symbol - 0.16 % of a clock tick - off the true
+    /// position; it can move a hit across a tick boundary only when the hit
+    /// is already within half a microsecond of one, and `PiconetClock`
+    /// reseeds itself when an observation leaves it no candidate.
+    pub fn new(
+        raw_rate: f64,
+        ch: u8,
+        tuned_centre_hz: f64,
+        first_pair: u64,
+    ) -> Result<Self, String> {
         let channel_hz = channel::centre_hz(ch)
             .ok_or_else(|| format!("classic Bluetooth has no channel {ch}"))?;
         let decim = front_end(raw_rate)?;
@@ -294,6 +318,7 @@ impl Receiver {
             lane: 0,
             detectors: [Detector::new(); PHASES],
             lane_symbols: [0; PHASES],
+            anchor_symbols: (first_pair as f64 * SYMBOL_RATE_HZ / raw_rate).round() as u64,
             pending: std::array::from_fn(|_| None),
         })
     }
@@ -381,7 +406,7 @@ impl Receiver {
                         headers.push(HeaderHit {
                             lap: pending.lap,
                             whitened,
-                            tick: ticks_from_symbols(pending.start_symbol),
+                            tick: ticks_from_symbols(self.anchor_symbols + pending.start_symbol),
                             payload_raw: pending.bits[HEADER_CAPTURE_BITS..].to_vec(),
                         });
                     }
@@ -482,7 +507,7 @@ mod tests {
         let geometry = eight_bit();
         let bytes = to_bytes(&placed, geometry);
 
-        let mut rx = Receiver::new(RAW_RATE, ch, TUNED_CENTRE).unwrap();
+        let mut rx = Receiver::new(RAW_RATE, ch, TUNED_CENTRE, 0).unwrap();
         let (found, _headers) = rx.push(&bytes, geometry);
         assert_eq!(found, vec![lap], "{found:?}");
     }
@@ -503,7 +528,7 @@ mod tests {
             let placed = place_on_channel(RAW_RATE, ch, tuned_centre, lap);
             let geometry = eight_bit();
             let bytes = to_bytes(&placed, geometry);
-            let mut rx = Receiver::new(RAW_RATE, ch, tuned_centre).unwrap();
+            let mut rx = Receiver::new(RAW_RATE, ch, tuned_centre, 0).unwrap();
             let (found, _headers) = rx.push(&bytes, geometry);
             assert_eq!(
                 found,
@@ -568,7 +593,7 @@ mod tests {
         let geometry = eight_bit();
         let bytes = to_bytes(&placed, geometry);
 
-        let mut rx = Receiver::new(RAW_RATE, ch, TUNED_CENTRE).unwrap();
+        let mut rx = Receiver::new(RAW_RATE, ch, TUNED_CENTRE, 0).unwrap();
         let (found, headers) = rx.push(&bytes, geometry);
         assert_eq!(found, vec![lap], "{found:?}");
         assert_eq!(
@@ -584,6 +609,16 @@ mod tests {
         assert_eq!(decoded.lt_addr, lt_addr);
         assert_eq!(decoded.packet_type, header::PacketType::Dh1);
         assert_eq!(decoded.flags, flags);
+
+        // **The tick is on the stream's clock, not the receiver's.** The same
+        // samples, handed to a receiver built one second into the stream
+        // (20 million pairs at 20 Msps), put the same header exactly one
+        // second - 3200 CLK1-6 ticks - later. A receiver-local count put it
+        // at the same tick whenever the receiver happened to be rebuilt.
+        let mut later = Receiver::new(RAW_RATE, ch, TUNED_CENTRE, 20_000_000).unwrap();
+        let (_, later_headers) = later.push(&bytes, geometry);
+        assert_eq!(later_headers.len(), 1);
+        assert_eq!(later_headers[0].tick - hit.tick, 3200);
     }
 
     /// [`PAYLOAD_CAPTURE_BITS`]'s own doc claims it covers every packet
@@ -690,7 +725,7 @@ mod tests {
         let geometry = eight_bit();
         let bytes = to_bytes(&placed, geometry);
 
-        let mut rx = Receiver::new(RAW_RATE, ch, TUNED_CENTRE).unwrap();
+        let mut rx = Receiver::new(RAW_RATE, ch, TUNED_CENTRE, 0).unwrap();
         let (_found, headers) = rx.push(&bytes, geometry);
         assert_eq!(
             headers.len(),
@@ -726,7 +761,7 @@ mod tests {
         let geometry = eight_bit();
         let bytes = to_bytes(&placed, geometry);
 
-        let mut rx = Receiver::new(RAW_RATE, ch, TUNED_CENTRE).unwrap();
+        let mut rx = Receiver::new(RAW_RATE, ch, TUNED_CENTRE, 0).unwrap();
         let (found, _headers) = rx.push(&bytes, geometry);
         assert_eq!(found.len(), 1, "{found:?}");
     }
@@ -747,7 +782,7 @@ mod tests {
                 (a * 20.0).clamp(-127.0, 127.0) as i8 as u8
             })
             .collect();
-        let mut rx = Receiver::new(RAW_RATE, 20, 2_441_000_000.0).unwrap();
+        let mut rx = Receiver::new(RAW_RATE, 20, 2_441_000_000.0, 0).unwrap();
         let (found, _headers) = rx.push(&bytes, geometry);
         assert!(found.is_empty(), "{found:?}");
     }
@@ -755,13 +790,13 @@ mod tests {
     /// A rate under the working rate is refused rather than decoded wrongly.
     #[test]
     fn a_rate_too_low_is_refused() {
-        assert!(Receiver::new(1_000_000.0, 10, 2_440_000_000.0).is_err());
+        assert!(Receiver::new(1_000_000.0, 10, 2_440_000_000.0, 0).is_err());
     }
 
     /// A channel that does not exist is refused.
     #[test]
     fn an_unknown_channel_is_refused() {
-        assert!(Receiver::new(20_000_000.0, 200, 2_440_000_000.0).is_err());
+        assert!(Receiver::new(20_000_000.0, 200, 2_440_000_000.0, 0).is_err());
     }
 
     /// Retuning, or a channel or rate change, is a different receiver - the
@@ -769,7 +804,7 @@ mod tests {
     /// no longer matches.
     #[test]
     fn matches_is_false_after_any_of_the_three_change() {
-        let rx = Receiver::new(20_000_000.0, 10, 2_440_000_000.0).unwrap();
+        let rx = Receiver::new(20_000_000.0, 10, 2_440_000_000.0, 0).unwrap();
         assert!(rx.matches(10, 20_000_000.0, 2_440_000_000.0));
         assert!(!rx.matches(11, 20_000_000.0, 2_440_000_000.0));
         assert!(!rx.matches(10, 8_000_000.0, 2_440_000_000.0));

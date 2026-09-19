@@ -208,6 +208,7 @@ impl DemodWorker {
             seq,
             gap_before,
             bytes: chunk,
+            ..
         }) = self.sample_rx.recv()
         {
             let plan = plan_block(seq, gap_before, s.last_seq, s.drop_ref);

@@ -242,11 +242,17 @@ impl NetWorker {
         // resolved answer back to two candidates.
         let mut resolved_bt_uap: HashMap<u32, u8> = HashMap::new();
         let mut load = Load::default();
+        // Where the next block must start for the stream to be unbroken. `None`
+        // until a block has been seen, and again after the section closes.
+        let mut next_pair: Option<u64> = None;
 
         while let Ok(StreamBlock {
             seq,
             gap_before,
             bytes,
+            first_pair,
+            centre_hz,
+            rate_hz,
         }) = self.sample_rx.recv()
         {
             let started = run.drop_ref.is_some();
@@ -272,7 +278,33 @@ impl NetWorker {
             let broke = started && !plan.contiguous;
             run.blocks = if broke || !started { 1 } else { run.blocks + 1 };
 
-            let (still_open, centre_hz, rate_hz, span_hz, is_net_bt) = {
+            // **No receiver is ever carried across a break in the samples.** A
+            // decimator's filter state, a capture half-filled with the start of
+            // a packet, a classic receiver's symbol count - all of them assume
+            // the next sample follows the last one. Across a refused block, a
+            // driver drop or a restarted stream it does not, and carrying on
+            // joins two moments milliseconds apart into one signal that never
+            // existed. The position the block carries says whether it follows;
+            // when it does not, the receivers start again from this block.
+            let continuous = next_pair == Some(first_pair);
+            // A position *behind* the expected one is a new stream (RX was
+            // restarted, `RxContext::begin_stream`): its clock starts again,
+            // so what each piconet's clock learned from the old one's timing
+            // no longer applies. A resolved UAP does - a piconet's address does
+            // not change - so `resolved_bt_uap` is kept.
+            if next_pair.is_some_and(|n| first_pair < n) {
+                piconet_clocks.clear();
+            }
+            if !continuous {
+                ble = None;
+                bt.clear();
+            }
+            next_pair = Some(first_pair + pairs);
+            // The tuning and rate these samples were captured at, from the
+            // block rather than the state: see `StreamBlock::centre_hz`.
+            let centre_hz = centre_hz as f64;
+
+            let (still_open, span_hz, is_net_bt) = {
                 let mut m = self.state.lock().unwrap_or_else(|e| e.into_inner());
                 let h = &mut m.net.health;
                 h.blocks_in = h.blocks_in.saturating_add(1);
@@ -292,13 +324,11 @@ impl NetWorker {
                 let span = if m.radio.bb_filter_hz > 0 {
                     m.radio.bb_filter_hz as f64
                 } else {
-                    m.radio.config_sample_rate
+                    rate_hz
                 };
                 (
                     m.ui.is_net_section(),
-                    m.radio.frequency as f64,
-                    m.radio.config_sample_rate,
-                    span.min(m.radio.config_sample_rate),
+                    span.min(rate_hz),
                     m.ui.active_preset == NET_BT_PRESET,
                 )
             };
@@ -417,7 +447,7 @@ impl NetWorker {
                     let mut fleet = Vec::with_capacity(wanted.len());
                     let mut refusal = None;
                     for &ch in &wanted {
-                        match BtReceiver::new(rate_hz, ch, centre_hz) {
+                        match BtReceiver::new(rate_hz, ch, centre_hz, first_pair) {
                             Ok(r) => fleet.push(r),
                             Err(e) => {
                                 refusal.get_or_insert(e);
@@ -525,6 +555,7 @@ impl NetWorker {
                 ble = None;
                 bt.clear();
                 load = Load::default();
+                next_pair = None;
                 let mut m = self.state.lock().unwrap_or_else(|e| e.into_inner());
                 m.net.bt_refused = None;
                 m.net.bt_channels_watched.clear();
@@ -547,6 +578,28 @@ impl NetWorker {
 mod tests {
     use super::*;
     use crate::hardware::SampleFormat;
+
+    /// A block as `hardware::process::process_block` would stamp it: its
+    /// position is the `seq`-th block of this size, so a jump in `seq` is a
+    /// jump in the stream, and its tuning is whatever the test put in the
+    /// state - read now, at capture, the way the real stamp is.
+    fn stamped(
+        state: &Arc<Mutex<SdrMetrics>>,
+        seq: u64,
+        gap_before: bool,
+        bytes: Vec<u8>,
+    ) -> StreamBlock {
+        let m = state.lock().unwrap();
+        let pairs = bytes.len() as u64 / 2;
+        StreamBlock {
+            seq,
+            gap_before,
+            first_pair: seq.saturating_sub(1) * pairs,
+            centre_hz: m.radio.frequency,
+            rate_hz: m.radio.config_sample_rate,
+            bytes,
+        }
+    }
 
     fn eight_bit() -> SampleGeometry {
         SampleGeometry {
@@ -571,12 +624,8 @@ mod tests {
         let state = Arc::new(Mutex::new(m));
         let (tx, rx) = crossbeam_channel::unbounded();
         for &(seq, gap_before, pairs) in blocks {
-            tx.send(StreamBlock {
-                seq,
-                gap_before,
-                bytes: vec![0u8; pairs * 2],
-            })
-            .unwrap();
+            tx.send(stamped(&state, seq, gap_before, vec![0u8; pairs * 2]))
+                .unwrap();
         }
         drop(tx);
         NetWorker::new(rx, Arc::clone(&state), eight_bit(), SAFE_BT_CHANNELS).run();
@@ -693,12 +742,7 @@ mod tests {
                 bytes.push((re + a).clamp(-127.0, 127.0) as i8 as u8);
                 bytes.push((im + b).clamp(-127.0, 127.0) as i8 as u8);
             }
-            tx.send(StreamBlock {
-                seq,
-                gap_before: false,
-                bytes,
-            })
-            .unwrap();
+            tx.send(stamped(&state, seq, false, bytes)).unwrap();
         }
         drop(tx);
         NetWorker::new(rx, Arc::clone(&state), eight_bit(), SAFE_BT_CHANNELS).run();
@@ -750,12 +794,8 @@ mod tests {
         let (tx, rx) = crossbeam_channel::unbounded();
         // One block: four hundred windows of six and a half microseconds, which
         // is under three milliseconds of the fifty a dwell is.
-        tx.send(StreamBlock {
-            seq: 1,
-            gap_before: false,
-            bytes: vec![0x05u8; 128 * 400 * 2],
-        })
-        .unwrap();
+        tx.send(stamped(&state, 1, false, vec![0x05u8; 128 * 400 * 2]))
+            .unwrap();
         drop(tx);
         NetWorker::new(rx, Arc::clone(&state), eight_bit(), SAFE_BT_CHANNELS).run();
 
@@ -827,12 +867,7 @@ mod tests {
         let state = Arc::new(Mutex::new(m));
 
         let (tx, rx) = crossbeam_channel::unbounded();
-        tx.send(StreamBlock {
-            seq: 1,
-            gap_before: false,
-            bytes,
-        })
-        .unwrap();
+        tx.send(stamped(&state, 1, false, bytes)).unwrap();
         drop(tx);
         NetWorker::new(rx, Arc::clone(&state), geometry, SAFE_BT_CHANNELS).run();
 
@@ -854,6 +889,111 @@ mod tests {
         assert_eq!(m.net.census.devices.len(), 1, "{:?}", m.net.census.devices);
         assert_eq!(m.net.census.devices[0].address, addr);
         assert_eq!(m.net.census.devices[0].packets, 1);
+    }
+
+    /// The same synthetic ADV_IND the test above sends, as raw 4 Msps
+    /// channel-37 bytes, and the state that goes with it.
+    fn ble_packet_bytes() -> (Vec<u8>, [u8; 6], Arc<Mutex<SdrMetrics>>) {
+        use crate::signal::ble::detect::{
+            access_address_bits, preamble_bits, ADVERTISING_ACCESS_ADDRESS,
+        };
+        use crate::signal::ble::gfsk::modulate;
+        use crate::signal::ble::pdu::encode;
+        use crate::signal::ble::Phy;
+        use crate::signal::dsp::testkit::{at_snr, Rng};
+        use num_complex::Complex;
+
+        let addr = [0x11u8, 0x22, 0x33, 0x44, 0x55, 0x66];
+        let mut bits = preamble_bits(ADVERTISING_ACCESS_ADDRESS, Phy::OneM);
+        bits.extend_from_slice(&access_address_bits(ADVERTISING_ACCESS_ADDRESS));
+        bits.extend_from_slice(&encode(37, 0x00, &addr));
+        let mut rng = Rng::new(1);
+        bits.extend((0..16).map(|_| rng.next_u64() & 1 == 1));
+        let clean = modulate(&bits, 4, 250_000.0, 4_000_000.0, 0.5);
+        let noisy = at_snr(&clean, 20.0, &mut Rng::new(2));
+        let geometry = eight_bit();
+        let bytes: Vec<u8> = noisy
+            .iter()
+            .flat_map(|s: &Complex<f32>| {
+                let re = (s.re * geometry.full_scale).clamp(-127.0, 127.0) as i8;
+                let im = (s.im * geometry.full_scale).clamp(-127.0, 127.0) as i8;
+                [re as u8, im as u8]
+            })
+            .collect();
+
+        let mut m = SdrMetrics::fixture().streaming();
+        m.ui.section = crate::signal::net::SECTION.to_string();
+        m.radio.frequency = 2_402_000_000;
+        m.radio.config_sample_rate = 4_000_000.0;
+        m.radio.bb_filter_hz = 0;
+        (bytes, addr, Arc::new(Mutex::new(m)))
+    }
+
+    /// Run the worker over the packet cut in two, the second half placed at
+    /// `second_at` in the stream, and count the packets that came out.
+    fn split_packet(second_at_offset: u64) -> usize {
+        let (bytes, _, state) = ble_packet_bytes();
+        // Cut inside the header: the preamble and access address are in the
+        // first half, the rest of the packet in the second.
+        let cut = (8 + 32 + 8) * 4 * 2;
+        let first_pairs = cut as u64 / 2;
+        let (tx, rx) = crossbeam_channel::unbounded();
+        for (seq, first_pair, part) in [
+            (1, 0, bytes[..cut].to_vec()),
+            (2, first_pairs + second_at_offset, bytes[cut..].to_vec()),
+        ] {
+            tx.send(StreamBlock {
+                seq,
+                gap_before: false,
+                bytes: part,
+                first_pair,
+                centre_hz: 2_402_000_000,
+                rate_hz: 4_000_000.0,
+            })
+            .unwrap();
+        }
+        drop(tx);
+        NetWorker::new(rx, Arc::clone(&state), eight_bit(), SAFE_BT_CHANNELS).run();
+        let n = state.lock().unwrap().net.ble_packets.len();
+        n
+    }
+
+    /// Control: a packet cut across two *contiguous* blocks is still one
+    /// packet - the receiver carries its state across a block boundary, as it
+    /// must, since packets straddle boundaries all the time.
+    #[test]
+    fn a_packet_across_two_contiguous_blocks_is_still_decoded() {
+        assert_eq!(split_packet(0), 1);
+    }
+
+    /// **The regression.** The same bytes, but the second block sits a
+    /// thousand pairs further on in the stream - a refused block in between.
+    /// The worker used to carry the capture straight across, and here that
+    /// even yields a clean CRC, because this test's second half happens to be
+    /// the true continuation; on a real radio it never is, and the splice was
+    /// a packet made of two moments. A capture must never span a break.
+    #[test]
+    fn a_capture_never_spans_a_break_in_the_stream() {
+        assert_eq!(split_packet(1_000), 0);
+    }
+
+    /// A block is decoded at the tuning it was captured at, not at wherever
+    /// the radio has moved to by the time the worker reaches it.
+    #[test]
+    fn a_block_is_decoded_at_the_tuning_it_was_captured_at() {
+        let (bytes, addr, state) = ble_packet_bytes();
+        let block = stamped(&state, 1, false, bytes);
+        // The survey moves on before the worker gets to the block.
+        state.lock().unwrap().radio.frequency = 2_480_000_000;
+        let (tx, rx) = crossbeam_channel::unbounded();
+        tx.send(block).unwrap();
+        drop(tx);
+        NetWorker::new(rx, Arc::clone(&state), eight_bit(), SAFE_BT_CHANNELS).run();
+        let m = state.lock().unwrap();
+        assert_eq!(m.net.ble_packets.len(), 1, "{:?}", m.net.ble_packets);
+        assert_eq!(m.net.ble_packets[0].channel, 37, "the capture's channel");
+        assert_eq!(m.net.ble_packets[0].adv_addr, Some(addr));
+        assert!(m.net.ble_packets[0].crc_ok);
     }
 
     /// A packet whose CRC did not pass is not a confirmed transmitter - rule
@@ -908,12 +1048,7 @@ mod tests {
         m.radio.config_sample_rate = 4_000_000.0;
         let state = Arc::new(Mutex::new(m));
         let (tx, rx) = crossbeam_channel::unbounded();
-        tx.send(StreamBlock {
-            seq: 1,
-            gap_before: false,
-            bytes: vec![0u8; 256],
-        })
-        .unwrap();
+        tx.send(stamped(&state, 1, false, vec![0u8; 256])).unwrap();
         drop(tx);
         NetWorker::new(rx, Arc::clone(&state), eight_bit(), SAFE_BT_CHANNELS).run();
         let m = state.lock().unwrap();
@@ -934,12 +1069,7 @@ mod tests {
         m.net.health.decode_load = Some(0.4);
         let state = Arc::new(Mutex::new(m));
         let (tx, rx) = crossbeam_channel::unbounded();
-        tx.send(StreamBlock {
-            seq: 1,
-            gap_before: false,
-            bytes: vec![0u8; 256],
-        })
-        .unwrap();
+        tx.send(stamped(&state, 1, false, vec![0u8; 256])).unwrap();
         drop(tx);
         NetWorker::new(rx, Arc::clone(&state), eight_bit(), SAFE_BT_CHANNELS).run();
         let m = state.lock().unwrap();
@@ -960,12 +1090,8 @@ mod tests {
         let (tx, rx) = crossbeam_channel::unbounded();
         // Eight 100 000-pair blocks at 1 Msps: 0.8 s of stream.
         for seq in 1..=8 {
-            tx.send(StreamBlock {
-                seq,
-                gap_before: false,
-                bytes: vec![0u8; 200_000],
-            })
-            .unwrap();
+            tx.send(stamped(&state, seq, false, vec![0u8; 200_000]))
+                .unwrap();
         }
         drop(tx);
         NetWorker::new(rx, Arc::clone(&state), eight_bit(), SAFE_BT_CHANNELS).run();
@@ -1047,12 +1173,7 @@ mod tests {
         m.radio.config_sample_rate = 2_000_000.0; // below the 4 Msps working rate
         let state = Arc::new(Mutex::new(m));
         let (tx, rx) = crossbeam_channel::unbounded();
-        tx.send(StreamBlock {
-            seq: 1,
-            gap_before: false,
-            bytes: vec![0u8; 256],
-        })
-        .unwrap();
+        tx.send(stamped(&state, 1, false, vec![0u8; 256])).unwrap();
         drop(tx);
         NetWorker::new(rx, Arc::clone(&state), eight_bit(), SAFE_BT_CHANNELS).run();
         let m = state.lock().unwrap();
@@ -1075,12 +1196,7 @@ mod tests {
         m.radio.bb_filter_hz = 0;
         let state = Arc::new(Mutex::new(m));
         let (tx, rx) = crossbeam_channel::unbounded();
-        tx.send(StreamBlock {
-            seq: 1,
-            gap_before: false,
-            bytes: vec![0u8; 256],
-        })
-        .unwrap();
+        tx.send(stamped(&state, 1, false, vec![0u8; 256])).unwrap();
         drop(tx);
         NetWorker::new(rx, Arc::clone(&state), eight_bit(), SAFE_BT_CHANNELS).run();
         let m = state.lock().unwrap();
@@ -1140,12 +1256,7 @@ mod tests {
         let state = Arc::new(Mutex::new(m));
 
         let (tx, rx) = crossbeam_channel::unbounded();
-        tx.send(StreamBlock {
-            seq: 1,
-            gap_before: false,
-            bytes,
-        })
-        .unwrap();
+        tx.send(stamped(&state, 1, false, bytes)).unwrap();
         drop(tx);
         NetWorker::new(rx, Arc::clone(&state), geometry, SAFE_BT_CHANNELS).run();
 
@@ -1250,12 +1361,7 @@ mod tests {
         let state = Arc::new(Mutex::new(m));
 
         let (tx, rx) = crossbeam_channel::unbounded();
-        tx.send(StreamBlock {
-            seq: 1,
-            gap_before: false,
-            bytes,
-        })
-        .unwrap();
+        tx.send(stamped(&state, 1, false, bytes)).unwrap();
         drop(tx);
         NetWorker::new(rx, Arc::clone(&state), geometry, SAFE_BT_CHANNELS).run();
 
@@ -1280,12 +1386,7 @@ mod tests {
         m.radio.config_sample_rate = 4_000_000.0;
         let state = Arc::new(Mutex::new(m));
         let (tx, rx) = crossbeam_channel::unbounded();
-        tx.send(StreamBlock {
-            seq: 1,
-            gap_before: false,
-            bytes: vec![0u8; 256],
-        })
-        .unwrap();
+        tx.send(stamped(&state, 1, false, vec![0u8; 256])).unwrap();
         drop(tx);
         NetWorker::new(rx, Arc::clone(&state), eight_bit(), SAFE_BT_CHANNELS).run();
         let m = state.lock().unwrap();

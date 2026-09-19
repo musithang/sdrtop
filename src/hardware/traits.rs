@@ -972,6 +972,30 @@ pub struct RxContext {
     /// mutex on the hot path to ask - the same reasoning [`FeedHealth`]'s
     /// own atomics already follow.
     pub blocks_seen: Arc<AtomicU64>,
+    /// Where the stream is: how many I/Q pairs the radio has delivered since
+    /// this stream began, counting the ones the driver itself lost. Stamped
+    /// onto every [`StreamBlock`] as its [`StreamBlock::first_pair`].
+    ///
+    /// **A position, not a count of what arrived.** A block the bounded feed
+    /// refuses still advances it, and so do samples the driver reports as
+    /// dropped, so a receiver downstream can tell from two positions alone
+    /// whether the second block continues the first - and by how much it does
+    /// not. Reset by [`RxContext::begin_stream`], so a restarted stream starts
+    /// again from zero rather than appearing to continue across the pause.
+    pub stream_pairs: AtomicU64,
+}
+
+impl RxContext {
+    /// A new stream is about to start: its positions count from zero again.
+    ///
+    /// Called just before `start_rx`, wherever a stream is started. Without
+    /// it, stopping and restarting RX would carry the old position on, and the
+    /// first block of the new stream would look like the continuation of the
+    /// last block of the old one - seconds apart, joined as if contiguous.
+    pub fn begin_stream(&self) {
+        self.stream_pairs
+            .store(0, std::sync::atomic::Ordering::Relaxed);
+    }
 }
 
 /// What the FFT feed did with the blocks handed to it since the last poll.
@@ -1042,6 +1066,24 @@ pub struct StreamBlock {
     /// The driver reported lost samples immediately before this block.
     pub gap_before: bool,
     pub bytes: Vec<u8>,
+    /// Where this block's first pair sits in the stream: every pair the
+    /// radio has delivered since the stream began, lost ones included (see
+    /// [`RxContext::stream_pairs`]). A block continues the one before it
+    /// exactly when this equals the previous block's position plus its
+    /// length; anything else is a gap, or - smaller than expected - a new
+    /// stream.
+    pub first_pair: u64,
+    /// The tuning these samples were captured at.
+    ///
+    /// **Stamped at capture, not read at processing.** A worker behind the
+    /// stream processes a block after the tuner may have moved on - a survey
+    /// retunes every tenth of a second - and reading the tuning from the state
+    /// at that point attributes the block to where the radio is now rather
+    /// than where it was. On BLE that meant decoding one channel's samples
+    /// with another channel's whitening.
+    pub centre_hz: u64,
+    /// The sample rate these samples were captured at, for the same reason.
+    pub rate_hz: f64,
 }
 
 /// What a radio settled on after a rate change.
