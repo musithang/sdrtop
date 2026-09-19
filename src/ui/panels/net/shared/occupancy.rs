@@ -54,29 +54,133 @@ const FLOOR: char = '▁';
 /// Bar rows, so the duty cycle has more than eight levels to sit on.
 const ROWS: usize = 3;
 
-/// One column of the profile: the glyph for each of the [`ROWS`] rows.
+/// One column of the profile: the glyph for each of `rows` rows, top first.
 ///
 /// The duty cycle is spread over the rows from the bottom up, so a cell busy a
 /// third of the time fills the bottom row and no more. Eight levels a row and
 /// three rows is twenty-four, which is finer than a terminal column deserves and
 /// is what stops a band of quiet channels reading as a flat run of identical
 /// stubs.
-fn column(cell: &CellReading) -> [char; ROWS] {
+fn column(cell: &CellReading, rows: usize) -> Vec<char> {
     if !cell.observed() {
-        return [UNSEEN; ROWS];
+        return vec![UNSEEN; rows];
     }
-    let filled = cell.duty.clamp(0.0, 1.0) * (ROWS * 8) as f64;
-    let mut out = [' '; ROWS];
+    let filled = cell.duty.clamp(0.0, 1.0) * (rows * 8) as f64;
+    let mut out = vec![' '; rows];
     for (i, slot) in out.iter_mut().enumerate() {
         // Row 0 is the top, so the bottom row is the last one.
-        let from_bottom = ROWS - 1 - i;
+        let from_bottom = rows - 1 - i;
         let here = (filled - (from_bottom * 8) as f64).clamp(0.0, 8.0);
         *slot = BARS[here.round() as usize];
     }
     // An observed cell with nothing in it still shows where the floor is.
-    if out[ROWS - 1] == ' ' {
-        out[ROWS - 1] = FLOOR;
+    if out[rows - 1] == ' ' {
+        out[rows - 1] = FLOOR;
     }
+    out
+}
+
+/// `head` and then as many of `groups` as fit in `width`, each whole or not at
+/// all, three spaces apart: a readout cut mid-figure reads as another figure.
+fn fit_groups(
+    head: Vec<Span<'static>>,
+    groups: Vec<Vec<Span<'static>>>,
+    width: usize,
+) -> Line<'static> {
+    let len = |g: &[Span<'_>]| g.iter().map(|s| s.content.chars().count()).sum::<usize>();
+    let mut used = len(&head);
+    let mut spans = head;
+    for group in groups {
+        let need = 3 + len(&group);
+        if used + need > width {
+            break;
+        }
+        used += need;
+        spans.push(Span::raw("   "));
+        spans.extend(group);
+    }
+    Line::from(spans)
+}
+
+/// The profile at a past moment, from the history: each cell's duty as it
+/// was, and nothing else, because nothing else is kept. Observed-ness comes
+/// from the history's own mark (negative: nobody looked).
+fn cells_then(column: &[f32]) -> Vec<CellReading> {
+    column
+        .iter()
+        .map(|&v| CellReading {
+            windows: u64::from(v >= 0.0),
+            duty: f64::from(v.max(0.0)),
+            ..Default::default()
+        })
+        .collect()
+}
+
+/// What the profile says at a past moment, above its bars: when it was, what
+/// the history keeps, and the cursor's cell or the busiest one then, duty only
+/// and without a spread (the window counts that would give one are not kept,
+/// and a spread made up for them would be the invented number rule 2 forbids).
+fn moment_lines(
+    state: &SdrMetrics,
+    cells: &[CellReading],
+    back: usize,
+    width: usize,
+    theme: &crate::Theme,
+) -> Vec<Line<'static>> {
+    let dim = Style::default().fg(theme.label);
+    let hi = Style::default().fg(theme.value_hi);
+    let ago = back as f64 * crate::state::COLUMN_INTERVAL.as_secs_f64();
+    let mut out = vec![fit_groups(
+        vec![
+            Span::styled("moment       ", dim),
+            Span::styled(format!("{ago:.1} s ago"), hi),
+        ],
+        vec![vec![Span::styled(
+            "duty only, as the history keeps it",
+            dim,
+        )]],
+        width,
+    )];
+    let pick = match state.net.band_cursor.selected {
+        Some(cell) => Some(("cursor       ", cell)),
+        None => cells
+            .iter()
+            .enumerate()
+            .filter(|(_, c)| c.observed() && c.duty > 0.0)
+            .max_by(|a, b| a.1.duty.total_cmp(&b.1.duty))
+            .map(|(cell, _)| ("busiest      ", cell)),
+    };
+    out.push(match pick {
+        None => Line::from(Span::styled(
+            "busiest      nothing above the floor then",
+            dim,
+        )),
+        Some((label, cell)) => {
+            let c = cells.get(cell).copied().unwrap_or_default();
+            let said = if c.observed() {
+                vec![Span::styled(
+                    format!("{:.0} % busy", c.duty * 100.0),
+                    Style::default().fg(theme.value),
+                )]
+            } else {
+                vec![Span::styled(
+                    "not observed then",
+                    Style::default().fg(theme.stale),
+                )]
+            };
+            fit_groups(
+                vec![
+                    Span::styled(label, dim),
+                    Span::styled(
+                        format!("{} MHz", occupancy::cell_centre_hz(cell) / 1_000_000),
+                        hi,
+                    ),
+                ],
+                vec![said],
+                width,
+            )
+        }
+    });
     out
 }
 
@@ -117,6 +221,7 @@ fn lines(
     theme: &crate::Theme,
     width: usize,
     bonded: bool,
+    bar_rows: usize,
 ) -> Vec<Line<'static>> {
     let occ = &state.net.band;
     let mut out = Vec::new();
@@ -189,6 +294,30 @@ fn lines(
             "a saturated front end, or a band busy everywhere".to_string(),
             dim,
         )));
+        return out;
+    }
+
+    // The time cursor on the history below: the profile shows that moment,
+    // from what the history kept. A moment that has scrolled out of it is no
+    // longer there to show, and the profile goes back to now.
+    let past = state
+        .net
+        .band_scrub
+        .and_then(|id| Some((occ.back_of(id)?, cells_then(occ.column(id)?))));
+    if let Some((back, cells)) = past {
+        // The floor line above is today's; the history kept no floor for the
+        // moment shown, so the line says whose it is rather than passing for it.
+        if let Some(first) = out.first_mut() {
+            if let Some(label) = first.spans.first_mut() {
+                *label = Span::styled("floor (now)  ", dim);
+            }
+        }
+        out.extend(moment_lines(state, &cells, back, width, theme));
+        bars(&mut out, state, &cells, width, bar_rows, theme, true);
+        if !bonded {
+            out.push(Line::from(Span::styled(band_axis::ruler(width), dim)));
+            out.push(Line::from(Span::styled(band_axis::edges(width), dim)));
+        }
         return out;
     }
 
@@ -266,19 +395,43 @@ fn lines(
         dim,
     )));
 
-    let cols = columns(&occ.cells, width);
-    for row in 0..ROWS {
+    bars(&mut out, state, &occ.cells, width, bar_rows, theme, false);
+    if !bonded {
+        out.push(Line::from(Span::styled(band_axis::ruler(width), dim)));
+        out.push(Line::from(Span::styled(band_axis::edges(width), dim)));
+    }
+    out
+}
+
+/// The bars for `cells`, `rows` tall, and the cursor's mark under them.
+///
+/// Duty is the height. Live, the power colours it on the waterfall's ramp;
+/// at a past moment (`by_duty`) there is no power to colour by, the history
+/// keeps none, so the duty colours it on the same ramp the heatmap below uses.
+fn bars(
+    out: &mut Vec<Line<'static>>,
+    state: &SdrMetrics,
+    cells: &[CellReading],
+    width: usize,
+    rows: usize,
+    theme: &crate::Theme,
+    by_duty: bool,
+) {
+    let cols = columns(cells, width);
+    let glyphs: Vec<Vec<char>> = cols.iter().map(|c| column(c, rows)).collect();
+    for row in 0..rows {
         let spans = cols
             .iter()
-            .map(|c| {
-                let ch = column(c)[row];
+            .zip(&glyphs)
+            .map(|(c, g)| {
+                let ch = g[row];
                 let colour = if !c.observed() {
                     theme.stale
                 } else if ch == ' ' || ch == FLOOR {
                     theme.label
+                } else if by_duty {
+                    theme.palette_color(c.duty.clamp(0.0, 1.0) as f32)
                 } else {
-                    // Duty is the height; the power is what colours it, on the
-                    // same ramp the waterfall uses.
                     theme.palette_color(((c.peak_dbfs + 90.0) / 90.0).clamp(0.0, 1.0) as f32)
                 };
                 Span::styled(ch.to_string(), Style::default().fg(colour))
@@ -295,11 +448,6 @@ fn lines(
             Span::styled("\u{25b2}", Style::default().fg(theme.value_hi)),
         ]));
     }
-    if !bonded {
-        out.push(Line::from(Span::styled(band_axis::ruler(width), dim)));
-        out.push(Line::from(Span::styled(band_axis::edges(width), dim)));
-    }
-    out
 }
 
 /// The selected cell, read out: where it is, how busy with the uncertainty its
@@ -353,19 +501,7 @@ fn cursor_line(
             vec![Span::styled(ago, dim)],
         ]
     };
-    let len = |g: &[Span<'_>]| g.iter().map(|s| s.content.chars().count()).sum::<usize>();
-    let mut used = len(&head);
-    let mut spans = head;
-    for group in groups {
-        let need = 3 + len(&group);
-        if used + need > width {
-            break;
-        }
-        used += need;
-        spans.push(Span::raw("   "));
-        spans.extend(group);
-    }
-    Line::from(spans)
+    fit_groups(head, groups, width)
 }
 
 /// A span of time at the resolution it is worth reading at.
@@ -448,18 +584,13 @@ impl Panel for NetOccupancyPanel {
         ) else {
             return;
         };
-        let mut out = lines(state, theme, inner.width as usize, true);
-        // Blank rows go above the profile, not below it: the bars belong on
-        // the seam.
-        let band = &state.net.band;
-        if band.trusted && !band.cells.is_empty() {
-            let spare = (inner.height as usize).saturating_sub(out.len());
-            let cursor_row = usize::from(state.net.band_cursor.selected.is_some());
-            let profile = out.len().saturating_sub(ROWS + cursor_row);
-            for _ in 0..spare {
-                out.insert(profile, Line::from(""));
-            }
-        }
+        // The bars grow into the height the bond gives the profile: more rows
+        // are finer duty levels (eight to a row), standing on the seam, rather
+        // than three rows under an empty band.
+        let width = inner.width as usize;
+        let spare =
+            (inner.height as usize).saturating_sub(lines(state, theme, width, true, ROWS).len());
+        let out = lines(state, theme, width, true, ROWS + spare);
         f.render_widget(Paragraph::new(out), inner);
     }
 
@@ -488,7 +619,7 @@ impl Panel for NetOccupancyPanel {
             return;
         }
         f.render_widget(
-            Paragraph::new(lines(state, theme, inner.width as usize, false)),
+            Paragraph::new(lines(state, theme, inner.width as usize, false, ROWS)),
             inner,
         );
     }
@@ -526,6 +657,7 @@ mod tests {
             // owns it.
             history: Default::default(),
             last_column: None,
+            columns_taken: 0,
         };
         m
     }
@@ -606,30 +738,42 @@ mod tests {
     /// A duty cycle is a height, and a bigger one is taller.
     #[test]
     fn a_busier_cell_is_a_taller_bar() {
-        let quiet = column(&CellReading {
-            windows: 10,
-            duty: 0.1,
-            ..Default::default()
-        });
-        let busy = column(&CellReading {
-            windows: 10,
-            duty: 0.9,
-            ..Default::default()
-        });
-        let height = |c: [char; ROWS]| c.iter().filter(|ch| **ch != ' ').count();
-        assert!(height(busy) > height(quiet), "{busy:?} vs {quiet:?}");
+        let quiet = column(
+            &CellReading {
+                windows: 10,
+                duty: 0.1,
+                ..Default::default()
+            },
+            ROWS,
+        );
+        let busy = column(
+            &CellReading {
+                windows: 10,
+                duty: 0.9,
+                ..Default::default()
+            },
+            ROWS,
+        );
+        let height = |c: &Vec<char>| c.iter().filter(|ch| **ch != ' ').count();
+        assert!(height(&busy) > height(&quiet), "{busy:?} vs {quiet:?}");
         // Full is full, and empty still shows where the floor is.
-        let full = column(&CellReading {
-            windows: 10,
-            duty: 1.0,
-            ..Default::default()
-        });
-        assert_eq!(full, ['█'; ROWS]);
-        let empty = column(&CellReading {
-            windows: 10,
-            duty: 0.0,
-            ..Default::default()
-        });
+        let full = column(
+            &CellReading {
+                windows: 10,
+                duty: 1.0,
+                ..Default::default()
+            },
+            ROWS,
+        );
+        assert_eq!(full, vec!['█'; ROWS]);
+        let empty = column(
+            &CellReading {
+                windows: 10,
+                duty: 0.0,
+                ..Default::default()
+            },
+            ROWS,
+        );
         assert_eq!(empty, [' ', ' ', FLOOR]);
     }
 
@@ -718,6 +862,57 @@ mod tests {
         let mark = out.iter().find(|l| l.contains('\u{25b2}')).expect(&all);
         let col = mark.chars().position(|c| c == '\u{25b2}').unwrap() - 1;
         assert_eq!(col, band_axis::column_of(24, 118), "{mark}");
+    }
+
+    /// **At a past moment the profile shows what the history kept, and says
+    /// so.** The bars are that moment's duties; the headline is when it was
+    /// and that only duty is kept; the busiest cell then is named with its
+    /// duty and no spread, since no window count survives to give one.
+    #[test]
+    fn a_past_moment_shows_the_history_duty_only() {
+        let mut m = surveyed();
+        let mut then = vec![-1.0f32; occupancy::CELLS];
+        then[30] = 0.75;
+        then[31] = 0.0;
+        m.net.band.history = vec![then, vec![0.1; occupancy::CELLS]].into();
+        m.net.band.columns_taken = 2;
+        m.net.band_scrub = m.net.band.id_back(1);
+        let all = draw(NetOccupancyPanel, 100, 14, &m).join("\n");
+        assert!(all.contains("moment       0.5 s ago"), "{all}");
+        assert!(all.contains("floor (now)"), "the floor is today's: {all}");
+        assert!(all.contains("duty only"), "{all}");
+        assert!(all.contains("busiest      2430 MHz   75 % busy"), "{all}");
+        assert!(!all.contains('\u{00b1}'), "no spread is invented: {all}");
+        assert!(!all.contains("coverage"), "coverage is about now: {all}");
+
+        m.net.band_cursor.selected = Some(5);
+        let all = draw(NetOccupancyPanel, 100, 14, &m).join("\n");
+        assert!(all.contains("2405 MHz   not observed then"), "{all}");
+    }
+
+    /// Bonded, the bars grow into the height the bond gives the profile, and
+    /// stand on the seam: the last row of the half is a bar row.
+    #[test]
+    fn bonded_bars_fill_the_half_they_are_given() {
+        use ratatui::{backend::TestBackend, Terminal};
+        let m = surveyed();
+        let theme = crate::Theme::sdr();
+        let mut term = Terminal::new(TestBackend::new(100, 20)).unwrap();
+        term.draw(|f| NetOccupancyPanel.render_bonded(f, f.size(), &m, &theme, false, Bond::Below))
+            .unwrap();
+        let buf = term.backend().buffer();
+        let bar_rows = (0..20u16)
+            .filter(|&y| {
+                let row: String = (1..99).map(|x| buf.get(x, y).symbol()).collect();
+                row.contains(UNSEEN)
+            })
+            .count();
+        assert!(bar_rows > ROWS, "{bar_rows} bar rows in a 20-row half");
+        let last: String = (1..99).map(|x| buf.get(x, 19).symbol()).collect();
+        assert!(
+            last.contains(UNSEEN),
+            "the bars stand on the seam: {last:?}"
+        );
     }
 
     /// A cell nobody looked at says so and borrows nobody's figures.

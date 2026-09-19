@@ -117,6 +117,35 @@ pub(super) fn net_occupancy(key: KeyEvent, ctx: &mut InputCtx<'_>) -> KeyAction 
     KeyAction::Continue
 }
 
+/// The coexistence history's time cursor, shared with the profile above it:
+/// `↓` goes back a moment, `↑` forward, and forward past the newest, or `N`,
+/// is now again.
+///
+/// **It remembers the moment, not the row.** The cursor holds the column's
+/// identity (`BandOccupancy::columns_taken`), so as new columns arrive every
+/// half second it stays on the moment it was put on and moves down the canvas
+/// with it, until the moment scrolls out of the history and the profile goes
+/// back to now.
+pub(super) fn net_coexist(key: KeyEvent, ctx: &mut InputCtx<'_>) -> KeyAction {
+    let mut m = metrics(ctx.state);
+    let band = &m.net.band;
+    let back = m.net.band_scrub.and_then(|id| band.back_of(id));
+    let next = match key.code {
+        KeyCode::Down => Some(back.map_or(0, |b| b + 1)),
+        KeyCode::Up => back.and_then(|b| b.checked_sub(1)),
+        KeyCode::Char('n') => None,
+        _ => {
+            drop(m);
+            return global::handle(key, ctx);
+        }
+    };
+    // Past the oldest column there is nothing to go back to: stay on it.
+    let oldest = band.history.len().checked_sub(1);
+    let next = next.map(|b| oldest.map_or(b, |o| b.min(o)));
+    m.net.band_scrub = next.and_then(|b| m.net.band.id_back(b));
+    KeyAction::Continue
+}
+
 /// The census table: move the cursor, change what orders it.
 ///
 /// **The cursor moves through the ordering, not through the census**, which is
@@ -384,5 +413,66 @@ mod tests {
         assert_eq!(at(&state), Some(40), "the busiest observed cell");
         press(KeyCode::Right);
         assert_eq!(at(&state), Some(41));
+    }
+
+    /// The time cursor: down goes back, up comes forward and past the newest
+    /// is now again, `N` is now, and the cursor stays on its moment when a new
+    /// column arrives.
+    #[test]
+    fn the_time_cursor_walks_the_history_and_keeps_its_moment() {
+        let mut m = SdrMetrics::fixture().streaming();
+        for v in [0.1f32, 0.2, 0.3] {
+            m.net.band.history.push_back(vec![v; 4]);
+            m.net.band.columns_taken += 1;
+        }
+        let state = Arc::new(Mutex::new(m));
+        let mut engine = LayoutEngine::new(
+            crate::config::LayoutConfig::default_config(),
+            PanelRegistry::new(),
+        );
+        let mut show_footer = true;
+        let focus_keys = HashMap::new();
+        let mut ctx = InputCtx {
+            state: &state,
+            device: None,
+            engine: &mut engine,
+            show_footer: &mut show_footer,
+            focus_keys: &focus_keys,
+        };
+        let mut press = |code| {
+            net_coexist(KeyEvent::new(code, KeyModifiers::NONE), &mut ctx);
+        };
+        let back = |s: &Arc<Mutex<SdrMetrics>>| {
+            let m = metrics(s);
+            m.net.band_scrub.and_then(|id| m.net.band.back_of(id))
+        };
+
+        press(KeyCode::Down);
+        assert_eq!(back(&state), Some(0), "the first step lands on the newest");
+        press(KeyCode::Down);
+        press(KeyCode::Down);
+        press(KeyCode::Down);
+        assert_eq!(back(&state), Some(2), "and stops at the oldest");
+        press(KeyCode::Up);
+        assert_eq!(back(&state), Some(1));
+
+        // A new column arrives: the cursor is one step further back, on the
+        // same moment.
+        {
+            let mut m = metrics(&state);
+            m.net.band.history.push_back(vec![0.4; 4]);
+            m.net.band.columns_taken += 1;
+        }
+        assert_eq!(back(&state), Some(2));
+
+        press(KeyCode::Char('n'));
+        assert_eq!(metrics(&state).net.band_scrub, None);
+        press(KeyCode::Down);
+        press(KeyCode::Up);
+        assert_eq!(
+            metrics(&state).net.band_scrub,
+            None,
+            "forward past the newest is now"
+        );
     }
 }

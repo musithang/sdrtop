@@ -195,6 +195,20 @@ impl Panel for NetCoexistPanel {
             ))
     }
 
+    /// `z`: every letter of the panel's name is another panel's focus key or a
+    /// global one, so the engine draws `[Z]`.
+    fn focus_key(&self) -> Option<char> {
+        Some('z')
+    }
+
+    fn focus_bindings(&self) -> &'static [(&'static str, &'static str)] {
+        &[
+            ("\u{2193}", "back in time: the profile shows that moment"),
+            ("\u{2191}", "forward in time"),
+            ("N", "back to now"),
+        ]
+    }
+
     /// The lower half of the survey instrument, under the occupancy profile.
     fn bonding(&self) -> Option<Bonding> {
         Some(Bonding {
@@ -309,6 +323,30 @@ fn draw(f: &mut Frame, inner: Rect, state: &SdrMetrics, theme: &crate::Theme, ru
             style = style.bg(c);
         }
         *span = Span::styled(proto.glyph(), style);
+    }
+    // The time cursor's moment, marked on the left edge of its row: outside
+    // the canvas, so it hides no cell. Drawn over the frame the engine or the
+    // bond already drew, one column left of the canvas.
+    if let Some(back) = state
+        .net
+        .band_scrub
+        .and_then(|id| state.net.band.back_of(id))
+    {
+        let row = back / 2;
+        if row < rows && inner.x > 0 {
+            f.render_widget(
+                Paragraph::new(Span::styled(
+                    "\u{25b6}",
+                    Style::default().fg(theme.value_hi),
+                )),
+                Rect {
+                    x: inner.x - 1,
+                    y: inner.y + row as u16,
+                    width: 1,
+                    height: 1,
+                },
+            );
+        }
     }
     let counts = (
         placed.iter().filter(|m| m.2 == Proto::Ble).count(),
@@ -475,6 +513,31 @@ mod tests {
             footer.contains("BLE 1") && footer.contains("BT 1"),
             "{footer}"
         );
+    }
+
+    /// The time cursor's moment is marked on the left edge of its row, the
+    /// fourth moment back on the second row.
+    #[test]
+    fn the_time_cursor_is_marked_beside_its_row() {
+        let mut m = with(vec![column(0); 10]);
+        m.net.band.columns_taken = 10;
+        m.net.band_scrub = m.net.band.id_back(3);
+        let theme = crate::Theme::sdr();
+        let mut terminal = Terminal::new(TestBackend::new(60, 20)).unwrap();
+        terminal
+            .draw(|f| {
+                let inner = Rect {
+                    x: 1,
+                    y: 0,
+                    width: 59,
+                    height: 20,
+                };
+                NetCoexistPanel.render(f, inner, &m, &theme, false)
+            })
+            .unwrap();
+        let buf = terminal.backend().buffer();
+        assert_eq!(buf.get(0, 1).symbol(), "\u{25b6}");
+        assert_eq!(buf.get(0, 0).symbol(), " ");
     }
 
     /// Every colour is the theme's.

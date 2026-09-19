@@ -191,6 +191,7 @@ fn handle_normal(key: KeyEvent, ctx: &mut InputCtx<'_>) -> KeyAction {
         Some("net_census") => net::net_census(key, ctx),
         Some("net_capability") => net::net_capability(key, ctx),
         Some("net_occupancy") => net::net_occupancy(key, ctx),
+        Some("net_coexist") => net::net_coexist(key, ctx),
         Some("command_rail") => rail::command_rail(key, ctx),
         _ => global::handle(key, ctx),
     }

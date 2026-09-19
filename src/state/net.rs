@@ -343,6 +343,10 @@ pub struct NetState {
     pub address_display: AddressDisplay,
     /// The session's masked numbers. See [`AddressBook`].
     pub address_book: AddressBook,
+    /// The Survey's time cursor: the identity of the history column it is on
+    /// (`BandOccupancy::columns_taken`), `None` for now. Shared by both halves
+    /// of the instrument: the heatmap moves it, the profile shows that moment.
+    pub band_scrub: Option<u64>,
     /// The occupancy profile's cursor, a megahertz cell index (0 is
     /// 2400 MHz). Stop 1.1's one selection model, keyed by the cell so it stays
     /// on its megahertz however the panel is resized.
@@ -710,6 +714,11 @@ pub struct BandOccupancy {
     pub history: std::collections::VecDeque<Vec<f32>>,
     /// When the newest column was taken.
     pub last_column: Option<std::time::Instant>,
+    /// How many columns have ever been taken, so a column has an identity
+    /// that survives the history scrolling: the newest is `columns_taken - 1`,
+    /// and one `back` steps before it is `columns_taken - 1 - back`. The time
+    /// cursor remembers a moment by this, not by its place on screen.
+    pub columns_taken: u64,
     /// When the coverage accounting began.
     ///
     /// Restarted when the mode changes, because survey and lock are different
@@ -788,9 +797,29 @@ impl BandOccupancy {
                 .map(|c| if c.observed() { c.duty as f32 } else { -1.0 })
                 .collect(),
         );
+        self.columns_taken += 1;
         while self.history.len() > HISTORY_COLUMNS {
             self.history.pop_front();
         }
+    }
+
+    /// How many steps back from the newest column the column `id` is, while
+    /// the history still holds it.
+    pub fn back_of(&self, id: u64) -> Option<usize> {
+        let back = self.columns_taken.checked_sub(1)?.checked_sub(id)? as usize;
+        (back < self.history.len()).then_some(back)
+    }
+
+    /// The identity of the column `back` steps before the newest.
+    pub fn id_back(&self, back: usize) -> Option<u64> {
+        (back < self.history.len()).then(|| self.columns_taken - 1 - back as u64)
+    }
+
+    /// The column `id`, while the history holds it: each cell's duty, negative
+    /// where nobody looked.
+    pub fn column(&self, id: u64) -> Option<&Vec<f32>> {
+        let back = self.back_of(id)?;
+        self.history.get(self.history.len() - 1 - back)
     }
 
     /// Start the coverage accounting again.
@@ -810,6 +839,43 @@ impl BandOccupancy {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// **A column keeps its identity while the history scrolls under it.**
+    /// A new column pushes it one step further back, the same id finds the
+    /// same values, and once it falls off the end it is gone rather than
+    /// quietly naming its neighbour.
+    #[test]
+    fn a_history_column_is_found_by_its_identity_as_the_history_scrolls() {
+        let mut band = BandOccupancy::default();
+        let push = |band: &mut BandOccupancy, v: f32| {
+            band.history.push_back(vec![v; 3]);
+            band.columns_taken += 1;
+            while band.history.len() > 4 {
+                band.history.pop_front();
+            }
+        };
+        for v in [0.1, 0.2, 0.3] {
+            push(&mut band, v);
+        }
+        let id = band.id_back(1).unwrap();
+        assert_eq!(band.column(id).unwrap()[0], 0.2);
+        push(&mut band, 0.4);
+        assert_eq!(band.back_of(id), Some(2), "one step further back");
+        assert_eq!(
+            band.column(id).unwrap()[0],
+            0.2,
+            "and still the same moment"
+        );
+        push(&mut band, 0.5);
+        push(&mut band, 0.6);
+        assert_eq!(
+            band.back_of(id),
+            None,
+            "scrolled out of a four-column history"
+        );
+        assert!(band.column(id).is_none());
+        assert_eq!(band.id_back(4), None);
+    }
 
     /// Each mode shows what foundation design 1.1 promises, uncut for an
     /// export, and laid exactly into whatever column a table gives it: the
@@ -1024,6 +1090,7 @@ mod tests {
             // owns it.
             history: Default::default(),
             last_column: None,
+            columns_taken: 0,
         };
         for &(c, duty, windows) in cells {
             out.cells[c] = CellReading {

@@ -253,6 +253,7 @@ impl Scan {
             // owns it.
             history: Default::default(),
             last_column: None,
+            columns_taken: 0,
         };
         self.reset();
         out
