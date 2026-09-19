@@ -35,6 +35,11 @@ pub struct Theme {
     // Misc
     pub stale: Color,    // [STALE] title + dim border when FFT frame is old
     pub observer: Color, // observer mode status dot + accent
+
+    // Decoded protocols, marked over the coexistence heatmap's duty ramp. Chosen
+    // to stand off every palette's gradient, so a mark never reads as a duty.
+    pub net_ble: Color,
+    pub net_bt: Color,
 }
 
 /// Shift a colour ~25% toward a cool steel-blue anchor, leaving 256/16-colour
@@ -237,6 +242,71 @@ mod tests {
                 );
             }
         }
+    }
+
+    /// **A protocol mark never reads as a duty.** Every built-in states its
+    /// two mark colours outright (not the fallback), and each sits at least
+    /// 80 (Euclidean, 0-255 RGB) from every point of that theme's own
+    /// gradient, which is what the coexistence heatmap draws them over.
+    /// Measured when chosen: catppuccin's first two picks and nord's first BLE
+    /// colour sat 56 to 67 away and were replaced.
+    #[test]
+    fn the_protocol_marks_stand_off_every_gradient() {
+        for name in Theme::builtin_names() {
+            let text = BUILTIN.iter().find(|(n, _)| *n == name).unwrap().1;
+            let file = data::ThemeFile::parse(text).unwrap();
+            assert!(file.net_ble.is_some() && file.net_bt.is_some(), "{name}");
+            let t = Theme::builtin(name).unwrap();
+            for (field, c) in [("net_ble", t.net_ble), ("net_bt", t.net_bt)] {
+                let Color::Rgb(r, g, b) = c else {
+                    panic!("{name}.{field} is not truecolor")
+                };
+                let nearest = (0..=100)
+                    .map(|i| match t.palette_color(i as f32 / 100.0) {
+                        Color::Rgb(pr, pg, pb) => {
+                            let d = |a: u8, b: u8| (a as f64 - b as f64).powi(2);
+                            (d(r, pr) + d(g, pg) + d(b, pb)).sqrt()
+                        }
+                        _ => f64::INFINITY,
+                    })
+                    .fold(f64::INFINITY, f64::min);
+                assert!(
+                    nearest >= 80.0,
+                    "{name}.{field} is {nearest:.0} from its gradient"
+                );
+            }
+        }
+    }
+
+    /// A user theme written before the marks existed still loads, and draws
+    /// them in its own `border_focused` and `value_hi`.
+    #[test]
+    fn a_theme_without_mark_colours_still_loads() {
+        let mut text = String::from("name = \"older\"\n");
+        for (f, hex) in [
+            ("border_dim", "#010101"),
+            ("border_default", "#020202"),
+            ("border_accent", "#030303"),
+            ("border_focused", "#aabbcc"),
+            ("label", "#050505"),
+            ("value", "#060606"),
+            ("value_hi", "#ddeeff"),
+            ("status_ok", "#080808"),
+            ("status_warn", "#090909"),
+            ("status_crit", "#0a0a0a"),
+            ("peak_hold", "#0b0b0b"),
+            ("noise_floor", "#0c0c0c"),
+            ("stale", "#0d0d0d"),
+            ("observer", "#0e0e0e"),
+        ] {
+            text.push_str(&format!("{f} = \"{hex}\"\n"));
+        }
+        text.push_str(
+            "palette = [{ at = 0.0, color = \"#000000\" }, { at = 1.0, color = \"#ffffff\" }]\n",
+        );
+        let t = data::ThemeFile::parse(&text).unwrap().into_theme().unwrap();
+        assert_eq!(t.net_ble, Color::Rgb(0xaa, 0xbb, 0xcc));
+        assert_eq!(t.net_bt, Color::Rgb(0xdd, 0xee, 0xff));
     }
 
     #[test]

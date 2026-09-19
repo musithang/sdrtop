@@ -16,6 +16,8 @@ peak_hold      = "#ebcb8b"   # the spectrum's peak-hold trace
 noise_floor    = "#3b4252"   # the measured noise-floor rule
 stale          = "#3b4252"   # [STALE] plates and the borders they cool
 observer       = "#81a1c1"   # observer mode, when another process holds the radio
+net_ble        = "#d8a0e8"   # decoded BLE packets, marked over the coexistence heatmap
+net_bt         = "#eceff4"   # decoded classic Bluetooth hits, the same way
 
 # The spectrum and waterfall gradient, cold (weak) to hot (strong).
 # `at` is the position in 0.0..1.0; the stops must climb.

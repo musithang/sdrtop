@@ -74,6 +74,8 @@ The full set of fields:
 | `noise_floor` | The spectrum's noise-floor line |
 | `stale` | `[STALE]` titles and their dimmed borders |
 | `observer` | Observer mode's status dot and accent |
+| `net_ble` | Decoded BLE packets, marked on the NET Survey's history. Optional in a theme file: left out, it takes `border_focused` |
+| `net_bt` | Decoded classic Bluetooth hits, marked the same way. Optional: left out, it takes `value_hi` |
 
 Overrides are preserved when you quit with `q`, along with everything else in
 your config.
@@ -102,7 +104,8 @@ sdrtop --theme tokyonight
 That is the whole installation step. There is no list to register the name in and
 nothing to rebuild.
 
-A theme file names itself, gives all fourteen colours from the table above, and
+A theme file names itself, gives the fourteen required colours from the table
+above (`net_ble` and `net_bt` may be left out), and
 lists the gradient the spectrum and waterfall are painted with:
 
 ```toml

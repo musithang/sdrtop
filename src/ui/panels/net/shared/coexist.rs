@@ -23,8 +23,16 @@
 //! its own instruction - so there are no bursts to draw and there will be none
 //! until an arc lands one. What there is instead is real and is the same
 //! picture at a coarser grain: the occupancy history, half a second to a row
-//! half. Colour carries the duty cycle; decoded packets are marked over it in
-//! Stop 3.3.b.
+//! half. Colour carries the duty cycle.
+//!
+//! **What is identified, and what is only energy.** Over the ramp, every BLE
+//! packet that passed its CRC and every classic-BT access-code hit is marked at
+//! its moment and its channel, in the theme's per-protocol colour (`●` BLE,
+//! `■` BT). Everything unmarked is energy nobody decoded: the ramp does not
+//! imply Wi-Fi, or anything else. A failed-CRC packet is not marked, because it
+//! is not identified. The marks go back as far as the packet and hit lists
+//! hold (`BLE_PACKET_LIMIT`, `BT_HOP_LIMIT`), and the legend counts what is
+//! drawn, so an old stretch without marks reads as "not kept", not "none".
 
 use ratatui::{
     layout::Rect,
@@ -63,21 +71,108 @@ fn canvas(history: &[Vec<f32>], rows: usize, width: usize) -> Vec<Vec<Duty>> {
         .collect()
 }
 
-/// `2400 MHz   now at the top, 12 s down   2483 MHz`: the band's edges, and
-/// how far back the bottom of the canvas reaches, when it fits between them.
-fn edges_and_time(width: usize, span_s: f64) -> String {
-    let edges = band_axis::edges(width);
-    let note = format!("now at the top, {span_s:.0} s down");
-    let (left, right) = ("2400 MHz".len(), "2483 MHz".len());
-    if left + right + note.len() + 4 > width {
-        return edges;
+/// A decoded protocol, marked over the ramp.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Proto {
+    Ble,
+    Bt,
+}
+
+impl Proto {
+    fn glyph(self) -> &'static str {
+        match self {
+            Proto::Ble => "\u{25cf}",
+            Proto::Bt => "\u{25a0}",
+        }
     }
-    let start = left + (width - left - right - note.len()) / 2;
-    let mut chars: Vec<char> = edges.chars().collect();
-    for (i, c) in note.chars().enumerate() {
-        chars[start + i] = c;
+
+    fn colour(self, theme: &crate::Theme) -> ratatui::style::Color {
+        match self {
+            Proto::Ble => theme.net_ble,
+            Proto::Bt => theme.net_bt,
+        }
     }
-    chars.into_iter().collect()
+}
+
+/// Every decoded packet the canvas has room for, as `(moment, column, proto)`:
+/// the moment counted back from the newest column (`BandOccupancy::last_column`,
+/// one every `COLUMN_INTERVAL`), the column the channel's centre falls in on the
+/// band axis. Nothing is placed before the first column exists: without it
+/// there is no time to place a mark at.
+fn marks(state: &SdrMetrics, moments: usize, width: usize) -> Vec<(usize, usize, Proto)> {
+    let Some(last) = state.net.band.last_column else {
+        return Vec::new();
+    };
+    let step = |seen: std::time::Instant| {
+        let back = last.saturating_duration_since(seen).as_secs_f64();
+        (back / COLUMN_INTERVAL.as_secs_f64()) as usize
+    };
+    let at = |hz: Option<u64>| {
+        hz.and_then(|hz| crate::signal::net::occupancy::cell_of(hz as f64))
+            .map(|cell| band_axis::column_of(cell, width))
+    };
+    let ble = state
+        .net
+        .ble_packets
+        .iter()
+        .filter(|p| p.crc_ok)
+        .filter_map(|p| {
+            Some((
+                step(p.seen),
+                at(crate::signal::ble::channel::centre_hz(p.channel))?,
+                Proto::Ble,
+            ))
+        });
+    let bt = state.net.bt_hops.iter().filter_map(|h| {
+        Some((
+            step(h.seen),
+            at(crate::signal::bt::channel::centre_hz(h.channel))?,
+            Proto::Bt,
+        ))
+    });
+    // Classic first, so a BLE mark in the same cell is the one drawn.
+    bt.chain(ble).filter(|(s, _, _)| *s < moments).collect()
+}
+
+/// `2400 MHz   now at the top, 12 s down   ● BLE 14  ■ BT 3   2483 MHz`: the
+/// band's edges, how far back the bottom reaches, and what the marks are, each
+/// part only when it fits whole between the edges.
+fn footer(
+    width: usize,
+    span_s: f64,
+    counts: (usize, usize),
+    theme: &crate::Theme,
+) -> Line<'static> {
+    let dim = Style::default().fg(theme.label);
+    let (left, right) = ("2400 MHz", "2483 MHz");
+    let mut middle: Vec<Span<'static>> = Vec::new();
+    let time = format!("now at the top, {span_s:.0} s down");
+    let room = width.saturating_sub(left.len() + right.len() + 4);
+    let mut used = 0;
+    if time.len() <= room {
+        used += time.len();
+        middle.push(Span::styled(time, dim));
+    }
+    for (proto, name, n) in [(Proto::Ble, "BLE", counts.0), (Proto::Bt, "BT", counts.1)] {
+        let text = format!("{name} {n}");
+        let need = 3 + proto.glyph().chars().count() + 1 + text.len();
+        if used + need > room {
+            break;
+        }
+        used += need;
+        middle.push(Span::raw("   "));
+        middle.push(Span::styled(
+            proto.glyph(),
+            Style::default().fg(proto.colour(theme)),
+        ));
+        middle.push(Span::styled(format!(" {text}"), dim));
+    }
+    let gap = width.saturating_sub(left.len() + right.len() + used);
+    let mut spans = vec![Span::styled(left, dim), Span::raw(" ".repeat(gap / 2))];
+    spans.extend(middle);
+    spans.push(Span::raw(" ".repeat(gap - gap / 2)));
+    spans.push(Span::styled(right, dim));
+    Line::from(spans)
 }
 
 impl Panel for NetCoexistPanel {
@@ -197,6 +292,29 @@ fn draw(f: &mut Frame, inner: Rect, state: &SdrMetrics, theme: &crate::Theme, ru
         .map(|pair| row(&pair[0], &pair[1], theme))
         .collect();
 
+    // The marks, each on the half of its row that is its moment, keeping that
+    // half's duty colour behind it so the energy still shows.
+    let placed = marks(state, rows * 2, width);
+    for &(step, x, proto) in &placed {
+        let Some(span) = lines.get_mut(step / 2).and_then(|l| l.spans.get_mut(x)) else {
+            continue;
+        };
+        let behind = if step % 2 == 0 {
+            span.style.fg
+        } else {
+            span.style.bg
+        };
+        let mut style = Style::default().fg(proto.colour(theme));
+        if let Some(c) = behind {
+            style = style.bg(c);
+        }
+        *span = Span::styled(proto.glyph(), style);
+    }
+    let counts = (
+        placed.iter().filter(|m| m.2 == Proto::Ble).count(),
+        placed.iter().filter(|m| m.2 == Proto::Bt).count(),
+    );
+
     // How far back the bottom of the canvas reaches: the moments it holds, not
     // the ones it has room for, so a short history says it is short.
     let shown = history.len().min(rows * 2);
@@ -205,7 +323,7 @@ fn draw(f: &mut Frame, inner: Rect, state: &SdrMetrics, theme: &crate::Theme, ru
     if ruler {
         lines.push(Line::from(Span::styled(band_axis::ruler(width), dim)));
     }
-    lines.push(Line::from(Span::styled(edges_and_time(width, span_s), dim)));
+    lines.push(footer(width, span_s, counts, theme));
     f.render_widget(Paragraph::new(lines), inner);
 }
 
@@ -284,6 +402,79 @@ mod tests {
         );
         // Twenty moments at half a second each.
         assert!(text.contains("now at the top, 10 s down"), "{text}");
+        assert!(text.contains("BLE 0") && text.contains("BT 0"), "{text}");
+    }
+
+    fn packet(channel: u8, crc_ok: bool, seen: std::time::Instant) -> crate::state::BlePacket {
+        crate::state::BlePacket {
+            channel,
+            pdu_type: crate::signal::ble::pdu::PduType::AdvInd,
+            tx_add_random: false,
+            length: 20,
+            adv_addr: Some([1, 2, 3, 4, 5, 6]),
+            crc_ok,
+            snr_db: None,
+            freq_offset_hz: None,
+            modulation: None,
+            drift: None,
+            seen,
+        }
+    }
+
+    /// **Identified traffic is marked where and when it was heard.** A BLE
+    /// packet that passed its CRC now, on channel 37, is a `●` in the BLE
+    /// colour on the top row's upper half at 2402 MHz's column; a classic hit
+    /// on channel 39 1.1 s ago is a `■` two moments down; a failed-CRC packet
+    /// is not marked; one older than the canvas is not placed. The legend
+    /// counts what was drawn.
+    #[test]
+    fn decoded_traffic_is_marked_at_its_channel_and_moment() {
+        let theme = crate::Theme::sdr();
+        let now = std::time::Instant::now();
+        let mut m = with(vec![column(0); 10]);
+        m.net.band.last_column = Some(now);
+        m.net.ble_packets.push_front(packet(37, true, now));
+        m.net.ble_packets.push_front(packet(38, false, now));
+        m.net
+            .ble_packets
+            .push_front(packet(39, true, now - std::time::Duration::from_secs(600)));
+        m.net.bt_hops.push_front(crate::state::BtHop {
+            channel: 39,
+            lap: 0x9e8b33,
+            seen: now - std::time::Duration::from_millis(1100),
+        });
+        let (w, h) = (90u16, 20u16);
+        let buf = cells(&m, w, h);
+        let col = |hz: u64| {
+            band_axis::column_of(occupancy::cell_of(hz as f64).unwrap(), w as usize) as u16
+        };
+
+        let ble = buf.get(col(2_402_000_000), 0);
+        assert_eq!(ble.symbol(), "\u{25cf}");
+        assert_eq!(ble.style().fg, Some(theme.net_ble));
+
+        // 1.1 s back is the third moment: row 1, its upper half.
+        let bt = buf.get(col(2_441_000_000), 1);
+        assert_eq!(bt.symbol(), "\u{25a0}");
+        assert_eq!(bt.style().fg, Some(theme.net_bt));
+
+        assert_ne!(
+            buf.get(col(2_426_000_000), 0).symbol(),
+            "\u{25cf}",
+            "a failed CRC is not identified"
+        );
+        for y in 0..h - 2 {
+            assert_ne!(
+                buf.get(col(2_480_000_000), y).symbol(),
+                "\u{25cf}",
+                "ten minutes back is off the canvas"
+            );
+        }
+        let footer: String = (0..w).map(|x| buf.get(x, h - 1).symbol()).collect();
+        assert!(
+            footer.contains("BLE 1") && footer.contains("BT 1"),
+            "{footer}"
+        );
     }
 
     /// Every colour is the theme's.
@@ -292,7 +483,13 @@ mod tests {
         let theme = crate::Theme::sdr();
         let allowed: Vec<_> = (0..=20)
             .map(|i| theme.palette_color(i as f32 / 20.0))
-            .chain([theme.border_dim, theme.label, theme.stale])
+            .chain([
+                theme.border_dim,
+                theme.label,
+                theme.stale,
+                theme.net_ble,
+                theme.net_bt,
+            ])
             .collect();
         let buf = cells(&with(vec![column(10), column(40), column(70)]), 60, 20);
         for y in 0..20u16 {

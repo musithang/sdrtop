@@ -121,6 +121,8 @@ pub struct ThemeConfig {
     pub noise_floor: Option<String>,
     pub stale: Option<String>,
     pub observer: Option<String>,
+    pub net_ble: Option<String>,
+    pub net_bt: Option<String>,
 }
 
 impl ThemeConfig {
@@ -312,6 +314,8 @@ impl AppConfig {
         apply!(noise_floor);
         apply!(stale);
         apply!(observer);
+        apply!(net_ble);
+        apply!(net_bt);
         t
     }
 

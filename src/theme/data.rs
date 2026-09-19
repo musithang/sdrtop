@@ -48,6 +48,15 @@ pub struct ThemeFile {
     pub stale: String,
     pub observer: String,
 
+    /// The decoded-protocol marks. Optional, because a user theme written
+    /// before they existed must still load: absent, they are drawn in the
+    /// theme's own `border_focused` and `value_hi`, which every theme already
+    /// sets to stand out.
+    #[serde(default)]
+    pub net_ble: Option<String>,
+    #[serde(default)]
+    pub net_bt: Option<String>,
+
     pub palette: Vec<Stop>,
 }
 
@@ -90,6 +99,16 @@ impl ThemeFile {
             noise_floor: hex!(noise_floor),
             stale: hex!(stale),
             observer: hex!(observer),
+            net_ble: match &self.net_ble {
+                Some(hex) => Theme::parse_hex(hex)
+                    .ok_or_else(|| format!("net_ble: '{hex}' is not a #rrggbb colour"))?,
+                None => hex!(border_focused),
+            },
+            net_bt: match &self.net_bt {
+                Some(hex) => Theme::parse_hex(hex)
+                    .ok_or_else(|| format!("net_bt: '{hex}' is not a #rrggbb colour"))?,
+                None => hex!(value_hi),
+            },
             palette: self
                 .palette
                 .iter()
