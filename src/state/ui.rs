@@ -170,12 +170,20 @@ impl DeviceOptionUpdate {
 #[derive(Clone, PartialEq)]
 pub enum InputMode {
     Normal,
-    DeviceOptionInput { id: String, error: Option<String> },
+    DeviceOptionInput {
+        id: String,
+        error: Option<String>,
+    },
     FrequencyInput,
     SampleRateInput,
     MarkerNameInput,
     SweepStartInput,
     SweepStopInput,
+    /// How far the user trusts the census device at `address` as a frequency
+    /// reference, in ppm (net-ux-polish-plan 4.7).
+    ReferenceAccuracyInput {
+        address: [u8; 6],
+    },
 }
 
 #[derive(Clone)]

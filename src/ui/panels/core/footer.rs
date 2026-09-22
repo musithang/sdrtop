@@ -446,6 +446,20 @@ impl Panel for FooterPanel {
                         freq_str, m.ui.input_buf
                     ))
                 }
+                InputMode::ReferenceAccuracyInput { address } => {
+                    let name = m
+                        .net
+                        .census
+                        .devices
+                        .iter()
+                        .find(|d| d.address == address)
+                        .map(|d| d.address_text(&m.net, None))
+                        .unwrap_or_default();
+                    prompt(format!(
+                        " Trust {name} as the frequency reference, to ±ppm: [{}▌]  [Enter] Confirm  [Esc] Cancel",
+                        m.ui.input_buf
+                    ))
+                }
                 InputMode::Normal | InputMode::DeviceOptionInput { .. } => {
                     if let Some(panel_name) = &m.ui.focused_panel {
                         let items = focus_items(m);
@@ -554,6 +568,7 @@ mod tests {
             InputMode::SweepStartInput,
             InputMode::SweepStopInput,
             InputMode::MarkerNameInput,
+            InputMode::ReferenceAccuracyInput { address: [0; 6] },
         ] {
             assert_eq!(tone_for(false, &mode, false), FrameTone::Warn);
         }

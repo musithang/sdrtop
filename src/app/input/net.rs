@@ -6,6 +6,7 @@
 use crossterm::event::{KeyCode, KeyEvent};
 
 use super::{global, metrics, InputCtx, KeyAction};
+use crate::state::{InputMode, SdrMetrics};
 
 /// The Capability panel's one action: `K` times the radio's tuning call across
 /// the band (`signal::retune::measure_calls`).
@@ -196,12 +197,41 @@ pub(super) fn net_census(key: KeyEvent, ctx: &mut InputCtx<'_>) -> KeyAction {
         KeyCode::Down => m.net.census.selection.move_by(&ordered, 1),
         KeyCode::Char('s') => m.net.census.cycle_sort(),
         KeyCode::Char('r') => m.net.census.reverse(),
+        // Trust the selected transmitter as the frequency reference: ask how
+        // far, through the same text entry frequency uses. `t` is the timing
+        // diagnostics panel's focus letter, which no NET preset holds.
+        KeyCode::Char('t') => trust_selected(&mut m),
         _ => {
             drop(m);
             return global::handle(key, ctx);
         }
     }
     KeyAction::Continue
+}
+
+/// Start the reference-accuracy entry for the selected census device, or say
+/// why not: nothing selected, or no offset measured to reference against.
+fn trust_selected(m: &mut SdrMetrics) {
+    let device = m
+        .net
+        .census
+        .selection
+        .selected
+        .and_then(|a| m.net.census.devices.iter().find(|d| d.address == a));
+    match device {
+        None => m.push_log("Reference: select a device in the census first"),
+        Some(d) if d.crystal_offset_ppm.is_none() => {
+            let name = d.address_text(&m.net, None);
+            m.push_log(format!(
+                "Reference: no offset measured for {name} yet, nothing to reference against"
+            ));
+        }
+        Some(d) => {
+            let address = d.address;
+            m.ui.input_buf.clear();
+            m.ui.input_mode = InputMode::ReferenceAccuracyInput { address };
+        }
+    }
 }
 
 #[cfg(test)]
@@ -277,6 +307,91 @@ mod tests {
             metrics(&state).net.census.selection.selected.map(|a| a[5]),
             Some(3)
         );
+    }
+
+    /// **`T` on a selected device, a figure, Enter: the reference is set**,
+    /// through the same dispatch every key takes (`handle_key`), with the
+    /// provenance naming whose word it is. Our oscillator 10 ppm fast and the
+    /// trusted device dead on: the air shows it at -10, so ours reads +10.
+    #[test]
+    fn t_then_a_figure_makes_the_selected_device_the_reference() {
+        use crate::signal::dsp::uncertainty::Uncertain;
+        let mut m = SdrMetrics::fixture().streaming();
+        let trusted = Device {
+            crystal_offset_ppm: Some(Uncertain::from_sigma(-10.0, 0.3)),
+            ..device(1, 50)
+        };
+        m.net.census.devices = vec![trusted, device(2, 5)];
+        m.net.census.selection.selected = Some([0xa4, 0x83, 0xe7, 0x1c, 0x09, 1]);
+        let state = Arc::new(Mutex::new(m));
+        let mut engine = LayoutEngine::new(
+            crate::config::LayoutConfig::default_config(),
+            PanelRegistry::new(),
+        );
+        let mut show_footer = true;
+        let focus_keys = HashMap::new();
+        let key = |c| KeyEvent::new(c, KeyModifiers::NONE);
+
+        {
+            let mut ctx = InputCtx {
+                state: &state,
+                device: None,
+                engine: &mut engine,
+                show_footer: &mut show_footer,
+                focus_keys: &focus_keys,
+            };
+            net_census(key(KeyCode::Char('t')), &mut ctx);
+        }
+        assert!(matches!(
+            metrics(&state).ui.input_mode,
+            InputMode::ReferenceAccuracyInput { .. }
+        ));
+
+        let mut type_ = |code| {
+            super::super::handle_key(
+                key(code),
+                &state,
+                None,
+                &mut engine,
+                &mut show_footer,
+                &focus_keys,
+            );
+        };
+        // Zero is refused and the entry stays open to be corrected.
+        type_(KeyCode::Char('0'));
+        type_(KeyCode::Enter);
+        assert!(metrics(&state).radio.reference.is_none());
+        assert!(matches!(
+            metrics(&state).ui.input_mode,
+            InputMode::ReferenceAccuracyInput { .. }
+        ));
+        type_(KeyCode::Backspace);
+        type_(KeyCode::Char('2'));
+        type_(KeyCode::Enter);
+
+        let m = metrics(&state);
+        assert!(m.ui.input_mode == InputMode::Normal);
+        let r = m.radio.reference.as_ref().expect("a reference");
+        assert!((r.ppm - 10.0).abs() < 1e-12, "{}", r.ppm);
+        assert_eq!(r.provenance, crate::state::Provenance::Referenced);
+        assert_eq!(r.source, "a4:83:e7:1c:09:01 (user-stated ±2 ppm)");
+    }
+
+    /// A device with no offset cannot be a reference: `T` says so in the log
+    /// and opens no entry.
+    #[test]
+    fn t_on_a_device_without_an_offset_says_why_and_asks_nothing() {
+        let mut m = SdrMetrics::fixture().streaming();
+        m.net.census.devices = vec![device(1, 50)];
+        m.net.census.selection.selected = Some([0xa4, 0x83, 0xe7, 0x1c, 0x09, 1]);
+        trust_selected(&mut m);
+        assert!(m.ui.input_mode == InputMode::Normal);
+        let said = |m: &SdrMetrics, text: &str| m.ui.log.iter().any(|l| l.text.contains(text));
+        assert!(said(&m, "nothing to reference against"));
+
+        m.net.census.selection.selected = None;
+        trust_selected(&mut m);
+        assert!(said(&m, "select a device"));
     }
 
     /// A radio whose tuning call takes 1 ms and remembers where it was sent.

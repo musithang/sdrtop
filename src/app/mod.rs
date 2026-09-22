@@ -861,6 +861,7 @@ mod tests {
                 InputMode::SweepStartInput,
                 InputMode::SweepStopInput,
                 InputMode::MarkerNameInput,
+                InputMode::ReferenceAccuracyInput { address: [0; 6] },
             ] {
                 let expected = show_footer
                     || !matches!(

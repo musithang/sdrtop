@@ -131,6 +131,10 @@ pub fn handle_key(
             text::sweep_range(key, state, false);
             KeyAction::Continue
         }
+        InputMode::ReferenceAccuracyInput { address } => {
+            text::reference_accuracy(key, state, address);
+            KeyAction::Continue
+        }
     }
 }
 

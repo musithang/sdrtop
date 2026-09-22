@@ -602,6 +602,7 @@ impl Panel for NetCensusPanel {
             ("↑↓", "select"),
             ("S", "sort by the next column"),
             ("R", "reverse"),
+            ("T", "trust as frequency reference"),
         ]
     }
 
@@ -1592,6 +1593,31 @@ mod tests {
         let out = text(&fixed);
         assert!(out.contains("adv delay  none"), "{out}");
         assert!(out.contains("no random delay"), "{out}");
+    }
+
+    /// **With a trusted device as the reference, every offset in the panel
+    /// says so**: the frame's tag, the detail's "against" line naming the
+    /// device and the user's figure, and the numbers corrected by it.
+    #[test]
+    fn a_trusted_reference_is_named_wherever_an_offset_is_shown() {
+        let mut m = selected();
+        // The busiest device (35.4 raw) trusted at ±2 ppm: ours is -35.4.
+        m.radio.reference = Some(crate::state::FrequencyReference::from_trusted(
+            Uncertain::from_sigma(35.4, 0.5),
+            2.0,
+            "a4:83:e7:1c:09:be",
+            Instant::now(),
+        ));
+        let out = draw(NetCensusPanel, 120, 16, &m);
+        assert!(out[0].contains("[REFERENCED]"), "{}", out[0]);
+        let text = out.join("\n");
+        assert!(
+            text.contains("against a4:83:e7:1c:09:be (user-stated ±2 ppm)"),
+            "{text}"
+        );
+        // The trusted device reads zero, and the other one moves with it.
+        assert!(text.contains("0.0 ±2.1 ppm"), "{text}");
+        assert!(text.contains("-40.4 ±2.1 ppm"), "{text}");
     }
 
     #[test]

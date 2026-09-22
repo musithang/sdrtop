@@ -132,14 +132,15 @@ pub enum Provenance {
     /// devices are valid, absolute values are not, and the panel says so.
     #[default]
     Unreferenced,
-    /// The user parked on a transmitter they trust and called its offset zero.
-    /// Relative to that transmitter, which is named on screen.
+    /// The user named a transmitter they trust, and how far: its error is
+    /// taken as zero within their stated accuracy. Relative to that
+    /// transmitter, which is named on screen with the figure the user gave.
     ///
-    /// Nothing sets this yet: the `[Y]` capture only recognises the standard
-    /// stations, which are traceable, and "a transmitter I trust" needs the user
-    /// to say which and how far they trust it. That control belongs with the
-    /// census work, where naming a transmitter is already the idiom.
-    #[allow(dead_code)]
+    /// Set from the census (`T` on a selected device, net-ux-polish-plan 4.7,
+    /// [`FrequencyReference::from_trusted`]), where naming a transmitter is
+    /// already the idiom. **Never promoted to [`Self::Traceable`]**: a
+    /// user's statement about a device is not a standard station, however
+    /// confident the statement.
     Referenced,
     /// Measured against a source whose accuracy is guaranteed by regulation.
     /// Absolute, within the stated uncertainty.
@@ -181,6 +182,33 @@ pub struct FrequencyReference {
 }
 
 impl FrequencyReference {
+    /// Our oscillator's error, from a transmitter the user trusts: `raw` is
+    /// its offset as the air delivered it (their error minus ours, how the
+    /// census keeps it), `stated_ppm` how far the user says its crystal can be
+    /// off, `name` how the device is shown.
+    ///
+    /// **Their error is taken as zero, so ours is minus the reading.** The
+    /// reading is `t - e`; with `t = 0 ± stated`, `e = -raw`, and its
+    /// uncertainty is the reading's and the statement's in quadrature, the
+    /// two being independent. The provenance is [`Provenance::Referenced`]
+    /// and says whose word it rests on, `user-stated ±x ppm`, in the source
+    /// every panel and export names.
+    pub fn from_trusted(
+        raw: crate::signal::dsp::uncertainty::Uncertain,
+        stated_ppm: f64,
+        name: &str,
+        at: std::time::Instant,
+    ) -> Self {
+        Self {
+            ppm: -raw.value(),
+            sigma_ppm: (raw.sigma().powi(2) + stated_ppm.powi(2)).sqrt(),
+            provenance: Provenance::Referenced,
+            source: format!("{name} (user-stated ±{stated_ppm} ppm)"),
+            at,
+            efficiency: None,
+        }
+    }
+
     pub fn age(&self, now: std::time::Instant) -> std::time::Duration {
         now.saturating_duration_since(self.at)
     }
@@ -504,5 +532,33 @@ mod tests {
         assert_eq!(p, Provenance::Referenced);
         assert_eq!(p.label(), "REFERENCED");
         assert_eq!(Provenance::Unreferenced.label(), "RELATIVE");
+    }
+
+    /// **A trusted transmitter corrects every other clock, built from the
+    /// physics rather than from the arithmetic under test.** Our oscillator
+    /// 10 ppm fast, a trusted device dead on, another device 25 ppm fast: the
+    /// air shows them at -10 and +15. Trusting the first recovers our +10,
+    /// and the second corrects to its true +25. The provenance says whose word
+    /// it rests on and is never traceable.
+    #[test]
+    fn a_trusted_transmitter_recovers_our_error_and_corrects_the_rest() {
+        use crate::signal::dsp::uncertainty::Uncertain;
+        let (ours, trusted_true, other_true) = (10.0, 0.0, 25.0);
+        let seen = |t: f64| Uncertain::from_sigma(t - ours, 0.3);
+        let now = std::time::Instant::now();
+        let r = FrequencyReference::from_trusted(seen(trusted_true), 2.0, "a4:83:e7:1c:09:be", now);
+        assert!((r.ppm - ours).abs() < 1e-12, "{}", r.ppm);
+        assert!((r.sigma_ppm - (0.3f64.powi(2) + 4.0).sqrt()).abs() < 1e-12);
+        assert_eq!(r.provenance, Provenance::Referenced);
+        assert_eq!(r.source, "a4:83:e7:1c:09:be (user-stated ±2 ppm)");
+
+        let mut radio = crate::state::SdrMetrics::fixture().radio;
+        radio.reference = Some(r);
+        let (corrected, provenance) = radio.corrected_ppm(seen(other_true), now);
+        assert!(
+            (corrected.value() - other_true).abs() < 1e-12,
+            "{corrected:?}"
+        );
+        assert_eq!(provenance, Provenance::Referenced);
     }
 }

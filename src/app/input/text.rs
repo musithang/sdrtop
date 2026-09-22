@@ -348,3 +348,62 @@ pub(super) fn marker_name(key: KeyEvent, state: &Arc<Mutex<SdrMetrics>>) {
         _ => {}
     }
 }
+/// How far the user trusts the census device at `address` as a frequency
+/// reference, typed in ppm (net-ux-polish-plan 4.7, `T` in the census).
+///
+/// **A positive figure or nothing.** Zero would claim a crystal known
+/// exactly, which no user can state; a refusal keeps the entry open so the
+/// figure can be corrected rather than retyped. On Enter the reference is
+/// built by [`crate::state::FrequencyReference::from_trusted`] from the
+/// device's offset as it stands, replaces whatever reference there was, and
+/// expires on the same declared interval every reference does.
+pub(super) fn reference_accuracy(key: KeyEvent, state: &Arc<Mutex<SdrMetrics>>, address: [u8; 6]) {
+    match key.code {
+        KeyCode::Esc => {
+            let mut m = metrics(state);
+            m.ui.input_mode = InputMode::Normal;
+            m.ui.input_buf.clear();
+            m.push_log("Reference: cancelled");
+        }
+        KeyCode::Backspace => {
+            metrics(state).ui.input_buf.pop();
+        }
+        KeyCode::Char(c) if c.is_ascii_digit() || c == '.' => {
+            metrics(state).ui.input_buf.push(c);
+        }
+        KeyCode::Enter => {
+            let now = std::time::Instant::now();
+            let mut m = metrics(state);
+            let stated =
+                m.ui.input_buf
+                    .parse::<f64>()
+                    .ok()
+                    .filter(|p| p.is_finite() && *p > 0.0);
+            let Some(stated) = stated else {
+                m.push_log("Reference: give the device's accuracy as a positive figure in ppm");
+                return;
+            };
+            let found = m
+                .net
+                .census
+                .devices
+                .iter()
+                .find(|d| d.address == address)
+                .and_then(|d| Some((d.crystal_offset_ppm?, d.address_text(&m.net, None))));
+            m.ui.input_mode = InputMode::Normal;
+            m.ui.input_buf.clear();
+            match found {
+                Some((raw, name)) => {
+                    let r = crate::state::FrequencyReference::from_trusted(raw, stated, &name, now);
+                    m.push_log(format!(
+                        "Reference: {} = {:+.2} ±{:.2} ppm, REFERENCED",
+                        r.source, r.ppm, r.sigma_ppm
+                    ));
+                    m.radio.reference = Some(r);
+                }
+                None => m.push_log("Reference: the device has no offset measured, nothing set"),
+            }
+        }
+        _ => {}
+    }
+}
