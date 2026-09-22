@@ -21,6 +21,10 @@ pub mod coded;
 pub mod connect;
 pub mod detect;
 pub mod gfsk;
+// Read by the census panel from 4.5.b (net-ux-polish-plan); until then only
+// by the census and the tests, and this line goes with that step.
+#[cfg_attr(not(test), allow(dead_code))]
+pub mod interval;
 pub mod measure;
 pub mod pdu;
 pub mod receive;

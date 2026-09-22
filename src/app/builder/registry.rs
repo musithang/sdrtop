@@ -565,6 +565,7 @@ mod tests {
                 crystal_offset_ppm: Some(Uncertain::from_sigma(10.0, 0.2)),
                 ble_pdu_code: Some(0x0),
                 modulation_index: None,
+                arrival: None,
             },
             now,
         );

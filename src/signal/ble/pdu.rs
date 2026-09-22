@@ -100,7 +100,7 @@ impl PduType {
 /// says the payload starts with one, and whether the CRC that followed it
 /// over the air actually checked out.
 ///
-/// `snr_db`, `freq_offset_hz`, `modulation` and `drift` are `None` here
+/// `snr_db`, `freq_offset_hz`, `modulation`, `drift` and `at_pair` are `None` here
 /// always - `decode` sees only bits, never the discriminator samples or the
 /// detector's own coherence B7, B8 and B9's measurements are taken from -
 /// and are filled in by `signal::ble::receive::Receiver::try_decode`, the
@@ -117,6 +117,12 @@ pub struct Packet {
     pub freq_offset_hz: Option<crate::signal::dsp::uncertainty::Uncertain>,
     pub drift: Option<super::measure::Drift>,
     pub modulation: Option<super::measure::ModulationQuality>,
+    /// Where in the stream the packet's sync word triggered the receiver, in
+    /// I/Q pairs since the stream began (`hardware::StreamBlock::first_pair`,
+    /// lost pairs counted): the radio's own sample clock, for timing one
+    /// packet against the next finer than any block could (`signal::ble::
+    /// interval`). `None` from `decode`, which sees only bits.
+    pub at_pair: Option<u64>,
 }
 
 /// How many trailing bits `decode` needs beyond the header to have a whole
@@ -233,6 +239,7 @@ pub fn decode(bits: &[bool]) -> Option<Packet> {
         freq_offset_hz: None,
         modulation: None,
         drift: None,
+        at_pair: None,
     })
 }
 

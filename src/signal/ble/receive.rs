@@ -452,6 +452,15 @@ pub struct Receiver {
     /// What happened to each trigger since the worker last asked
     /// ([`Self::take_funnel`]).
     funnel: Funnel,
+    /// Raw I/Q pairs per working sample: how a position in the working
+    /// stream becomes one in the radio's.
+    raw_per_working: f64,
+    /// Where the next block is assumed to start when the caller does not say
+    /// ([`Self::push`]): straight after the last one.
+    next_pair: u64,
+    /// Where the capture now under way triggered, in stream pairs: the time
+    /// its packet is stamped with (`pdu::Packet::at_pair`).
+    trigger_pair: u64,
 }
 
 /// What the receiver did with the samples it was given, counted as it went:
@@ -515,6 +524,9 @@ impl Receiver {
             capture: Vec::new(),
             capturing: false,
             funnel: Funnel::default(),
+            raw_per_working: raw_rate / working_rate_hz(phy),
+            next_pair: 0,
+            trigger_pair: 0,
         })
     }
 
@@ -678,7 +690,31 @@ impl Receiver {
     /// Feed one block of raw device bytes. Returns every packet fully
     /// decoded from it - almost always zero, and rarely more than one: a
     /// legacy advertising PDU is under a third of a millisecond of air time.
+    /// [`Self::push_at`] for a block assumed to follow the last one without a
+    /// gap: what a test feeding a capture in pieces means, and nothing a live
+    /// stream should rely on, which is why only the tests have it.
+    #[cfg(test)]
     pub fn push(&mut self, bytes: &[u8], geometry: SampleGeometry) -> Vec<Packet> {
+        self.push_at(bytes, geometry, self.next_pair)
+    }
+
+    /// Feed one block whose first pair sits at `first_pair` in the stream
+    /// (`hardware::StreamBlock::first_pair`), and return the packets it
+    /// completed, each stamped with where its sync word triggered.
+    ///
+    /// **The stamp is the trigger's, not the decode's.** A packet completes
+    /// blocks after it began, and the trigger is where it began: the same
+    /// place in every packet to within the few samples `candidates` searches
+    /// over, microseconds at most, which is what timing one packet against the
+    /// next needs. A trigger in the working stream maps back to the radio's
+    /// pairs through the decimation ratio; the decimator's own delay is the
+    /// same for every packet, so it cancels from any difference of two.
+    pub fn push_at(
+        &mut self,
+        bytes: &[u8],
+        geometry: SampleGeometry,
+        first_pair: u64,
+    ) -> Vec<Packet> {
         let mut iq = Vec::new();
         decode_iq(bytes, geometry, usize::MAX, &mut iq);
         let mut working = Vec::new();
@@ -703,8 +739,9 @@ impl Receiver {
         let mut readings = Vec::new();
         self.shape.process_block(&track, &mut readings);
 
+        self.next_pair = first_pair + iq.len() as u64;
         let mut found = Vec::new();
-        for (&sample, reading) in working.iter().zip(&readings) {
+        for (j, (&sample, reading)) in working.iter().zip(&readings).enumerate() {
             self.recent.push_back(sample);
             if self.recent.len() > self.reference.len() {
                 self.recent.pop_front();
@@ -730,8 +767,9 @@ impl Receiver {
                 }
                 let due = self.capture.len().is_multiple_of(DECODE_EVERY_SAMPLES);
                 match due.then(|| self.try_decode()).flatten() {
-                    Some(packet) => {
+                    Some(mut packet) => {
                         self.funnel.decoded += 1;
+                        packet.at_pair = Some(self.trigger_pair);
                         found.push(packet);
                         self.capturing = false;
                         self.capture.clear();
@@ -747,7 +785,8 @@ impl Receiver {
                         // CRC, still shows up as that rather than vanishing
                         // silently the way a wrong-alignment guess would.
                         match self.best_failed_candidate() {
-                            Some(packet) => {
+                            Some(mut packet) => {
+                                packet.at_pair = Some(self.trigger_pair);
                                 if packet.crc_ok {
                                     self.funnel.decoded += 1;
                                 } else {
@@ -766,6 +805,7 @@ impl Receiver {
                 if rho > self.threshold {
                     self.funnel.triggered += 1;
                     self.capturing = true;
+                    self.trigger_pair = first_pair + (j as f64 * self.raw_per_working) as u64;
                     self.capture = self.history.iter().copied().collect();
                     self.trigger_len = self.capture.len();
                     self.sync_rho = rho;
@@ -1062,6 +1102,50 @@ mod tests {
         assert_eq!(p.pdu_type, pdu::PduType::AdvInd);
         assert_eq!(p.adv_addr, Some(addr));
         assert!(p.crc_ok);
+    }
+
+    /// **A packet is stamped with where it began in the radio's own sample
+    /// clock**, lost pairs included: identical packets in blocks placed with
+    /// gaps between them (driver drops) are as far apart as their blocks say.
+    /// The timing of one advertising event against the next rests on this
+    /// (`signal::ble::interval`).
+    ///
+    /// Once running, to within a symbol. The very first packet a new
+    /// receiver hears triggers 18 working samples (4.5 µs at 4 Msps) earlier
+    /// than every later one, measured here: the detector settling from a cold
+    /// start. A thousandth of the advertising delay being measured, so it is
+    /// bounded here rather than designed away.
+    #[test]
+    fn packets_are_stamped_in_stream_pairs_across_a_gap() {
+        let addr = [0xAA, 0xBB, 0xCC, 0x11, 0x22, 0x33];
+        let mut payload = crate::signal::ble::pdu::air_octets(addr).to_vec();
+        payload.extend_from_slice(&[0x02, 0x01, 0x06]);
+        let one = synthetic_packet_iq(Phy::OneM, 37, 0x00, &payload, 25.0);
+        let geometry = eight_bit();
+        // The same quiet lead-in before each, so every trigger finds the
+        // detector in the same state.
+        let quiet = vec![Complex::new(0.0, 0.0); 20_000];
+        let block: Vec<Complex<f32>> = quiet.iter().chain(&one).copied().collect();
+        let tail = vec![Complex::new(0.0, 0.0); 4_000];
+
+        let mut rx = Receiver::new(working_rate_hz(Phy::OneM), 37, Phy::OneM).unwrap();
+        let mut at = 0u64;
+        let mut stamps = Vec::new();
+        for gap in [50_000u64, 70_000, 3] {
+            let mut got = rx.push_at(&bytes_for(&block, geometry), geometry, at);
+            got.extend(rx.push(&bytes_for(&tail, geometry), geometry));
+            assert_eq!(got.len(), 1, "{got:?}");
+            stamps.push((at, got[0].at_pair.unwrap()));
+            at += (block.len() + tail.len()) as u64 + gap;
+        }
+        let apart = |i: usize| {
+            let ((b0, s0), (b1, s1)) = (stamps[i], stamps[i + 1]);
+            (s1 - s0) as i64 - (b1 - b0) as i64
+        };
+        let rate = working_rate_hz(Phy::OneM);
+        assert!(apart(1).abs() <= WORKING_SPS as i64, "running: {stamps:?}");
+        let cold_us = apart(0).abs() as f64 / rate * 1e6;
+        assert!(cold_us <= 10.0, "first packet {cold_us} us off: {stamps:?}");
     }
 
     /// **Every trigger is counted once, by how it ended.** A clean packet is

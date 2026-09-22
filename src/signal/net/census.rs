@@ -77,6 +77,11 @@ pub struct Device {
     /// every packet B8 could measure one from. `None` until one could: B8
     /// needs settled runs a short packet does not always contain.
     pub modulation_index: Option<Uncertain>,
+    /// When its periodic advertising arrived on the one channel a LOCK sat
+    /// on: what its advertising interval and random delay are read from
+    /// (`signal::ble::interval`, [`Self::advertising`]). `None` until a
+    /// packet arrived in LOCK.
+    pub arrivals: Option<Arrivals>,
     /// Packets whose CRC failed and whose address field read exactly this
     /// address. See [`observe_crc_failure`] for what that can claim and what
     /// it cannot.
@@ -120,6 +125,7 @@ impl Device {
             snr_sum_sq: 0.0,
             ble_pdu_types: 0,
             modulation_index: None,
+            arrivals: None,
             crc_failed: 0,
             first_seen: now,
             last_seen: now,
@@ -184,6 +190,21 @@ impl Device {
     /// TxAdd bit it came with.
     pub fn kind(&self) -> AddressKind {
         crate::signal::ble::address::kind(self.address, self.random)
+    }
+
+    /// Its advertising interval and random delay, or why they cannot be
+    /// said yet. `None` when it has never been heard in LOCK. Computed when
+    /// asked, outside the state lock: the record keeps positions, never a
+    /// fitted figure.
+    // Drawn by the census panel from 4.5.b; this line goes with that step.
+    #[cfg_attr(not(test), allow(dead_code))]
+    pub fn advertising(
+        &self,
+    ) -> Option<Result<crate::signal::ble::interval::Estimate, crate::signal::ble::interval::Refusal>>
+    {
+        let a = self.arrivals.as_ref()?;
+        let pairs: Vec<u64> = a.pairs.iter().copied().collect();
+        Some(crate::signal::ble::interval::estimate(&pairs, a.rate_hz))
     }
 
     /// How many distinct PDU types it has been heard sending.
@@ -347,6 +368,33 @@ fn absent_last(a: Option<f64>, b: Option<f64>, descending: bool) -> std::cmp::Or
     }
 }
 
+/// How many arrivals a device keeps: enough single events for the delay's
+/// edges to be pinned to a fraction of a millisecond, and a bounded cost, since
+/// the whole state is cloned every frame.
+pub const ARRIVALS_KEPT: usize = 64;
+
+/// A device's periodic advertising arrivals on one channel, as stream
+/// positions at one rate (`pdu::Packet::at_pair`), oldest first.
+///
+/// **One run, never a splice.** A different channel, a different rate, or a
+/// position that does not follow the last (a new stream) starts the log again:
+/// gaps across any of those would be gaps in our listening, not in the
+/// device's advertising.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Arrivals {
+    pub channel: u8,
+    pub rate_hz: f64,
+    pub pairs: std::collections::VecDeque<u64>,
+}
+
+/// One arrival, as [`Sighting::arrival`] carries it.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Arrival {
+    pub channel: u8,
+    pub rate_hz: f64,
+    pub pair: u64,
+}
+
 /// One packet's worth of facts about the device that sent it, as [`observe`]
 /// takes them. Everything but the address may be missing: each is a
 /// measurement a given packet may not have supported.
@@ -360,6 +408,9 @@ pub struct Sighting {
     /// The BLE PDU type's four-bit code (`signal::ble::pdu::PduType::code`).
     pub ble_pdu_code: Option<u8>,
     pub modulation_index: Option<Uncertain>,
+    /// When it arrived, if it counts towards the interval: set by the caller
+    /// only in LOCK and only for periodic advertising.
+    pub arrival: Option<Arrival>,
 }
 
 /// Record one packet whose CRC passed: a new row if this is the first time
@@ -394,6 +445,32 @@ pub fn observe(devices: &mut Vec<Device>, s: &Sighting, now: Instant) {
     }
     refine(&mut device.crystal_offset_ppm, s.crystal_offset_ppm);
     refine(&mut device.modulation_index, s.modulation_index);
+    if let Some(a) = s.arrival {
+        record(&mut device.arrivals, a);
+    }
+}
+
+/// Add `a` to `log`, or start the log again from it when it does not
+/// continue the run ([`Arrivals`]).
+fn record(log: &mut Option<Arrivals>, a: Arrival) {
+    let continues = log.as_ref().is_some_and(|l| {
+        l.channel == a.channel
+            && l.rate_hz == a.rate_hz
+            && l.pairs.back().is_some_and(|p| a.pair > *p)
+    });
+    if !continues {
+        *log = Some(Arrivals {
+            channel: a.channel,
+            rate_hz: a.rate_hz,
+            pairs: std::collections::VecDeque::with_capacity(ARRIVALS_KEPT),
+        });
+    }
+    if let Some(l) = log.as_mut() {
+        if l.pairs.len() == ARRIVALS_KEPT {
+            l.pairs.pop_front();
+        }
+        l.pairs.push_back(a.pair);
+    }
 }
 
 /// Fold `reading` into `estimate`, or start it.
@@ -527,6 +604,7 @@ mod tests {
             crystal_offset_ppm: None,
             ble_pdu_code: None,
             modulation_index: None,
+            arrival: None,
         }
     }
 
@@ -991,5 +1069,70 @@ mod tests {
         assert!((split[1].1 - 0.5).abs() < 1e-9, "{split:?}");
         assert!((turnover_per_minute(&devices, window, now) - 2.0).abs() < 1e-9);
         assert!(turnover_by_kind(&devices, Duration::ZERO, now).is_empty());
+    }
+
+    /// **Arrivals are one run on one channel, bounded.** They accumulate
+    /// while they continue each other, start again on a new channel or a
+    /// position that goes backwards (a new stream), and keep the last
+    /// [`ARRIVALS_KEPT`].
+    #[test]
+    fn arrivals_are_one_run_on_one_channel() {
+        let now = Instant::now();
+        let at = |channel, pair| Sighting {
+            arrival: Some(Arrival {
+                channel,
+                rate_hz: 8e6,
+                pair,
+            }),
+            ..heard([1; 6], None)
+        };
+        let mut devices = Vec::new();
+        for k in 1..=100u64 {
+            observe(&mut devices, &at(37, k * 800_000), now);
+        }
+        let log = devices[0].arrivals.clone().unwrap();
+        assert_eq!(log.pairs.len(), ARRIVALS_KEPT);
+        assert_eq!(log.pairs.back(), Some(&80_000_000));
+
+        observe(&mut devices, &at(38, 90_000_000), now);
+        assert_eq!(
+            devices[0].arrivals.as_ref().unwrap().pairs.len(),
+            1,
+            "new channel"
+        );
+        observe(&mut devices, &at(38, 5), now);
+        let log = devices[0].arrivals.as_ref().unwrap();
+        assert_eq!((log.pairs.len(), log.pairs[0]), (1, 5), "a new stream");
+        // A packet not in LOCK leaves the run as it was.
+        observe(&mut devices, &heard([1; 6], None), now);
+        assert_eq!(devices[0].arrivals.as_ref().unwrap().pairs.len(), 1);
+    }
+
+    /// **From the record to the reading**: a device heard in LOCK every
+    /// 100 ms plus a delay reads back as 100 ms through its own log; one never
+    /// heard in LOCK has nothing to say, which is not the same as too little.
+    #[test]
+    fn a_locked_device_s_arrivals_read_back_as_its_interval() {
+        let now = Instant::now();
+        let mut devices = Vec::new();
+        let mut t = 0.0;
+        for k in 0..40u64 {
+            t += 0.100 + (k * 37 % 10) as f64 * 1e-3;
+            let s = Sighting {
+                arrival: Some(Arrival {
+                    channel: 37,
+                    rate_hz: 8e6,
+                    pair: (t * 8e6) as u64,
+                }),
+                ..heard([1; 6], None)
+            };
+            observe(&mut devices, &s, now);
+        }
+        let got = devices[0].advertising().unwrap().unwrap();
+        assert!((got.interval_s.value() - 0.100).abs() < 1e-3, "{got:?}");
+
+        let mut unlocked = Vec::new();
+        observe(&mut unlocked, &heard([2; 6], None), now);
+        assert!(unlocked[0].advertising().is_none());
     }
 }

@@ -199,12 +199,22 @@ impl Load {
 /// Runs inside the state lock, once per packet: a lookup, a few additions
 /// and an inverse-variance fold, and nothing that waits on a square root
 /// (the census module doc).
+///
+/// **An arrival is kept only in LOCK, and only from periodic advertising.**
+/// While surveying, the dwell schedule decides which packets are heard, so
+/// gaps between them would time the survey (`signal::ble::interval`). And a
+/// scan response is an answer to a scanner, sent whenever it asked, so it
+/// times the scanner: only the four advertising PDUs, which the Link Layer
+/// sends once an event, are timed.
 fn census_from_ble(
     devices: &mut Vec<crate::signal::net::census::Device>,
     p: &crate::signal::ble::pdu::Packet,
     channel: u8,
+    locked: bool,
+    rate_hz: f64,
     now: Instant,
 ) {
+    use crate::signal::ble::pdu::PduType;
     let Some(address) = p.adv_addr else {
         return;
     };
@@ -226,6 +236,23 @@ fn census_from_ble(
         crystal_offset_ppm,
         ble_pdu_code: Some(p.pdu_type.code()),
         modulation_index: p.modulation.map(|m| m.modulation_index),
+        arrival: p
+            .at_pair
+            .filter(|_| {
+                locked
+                    && matches!(
+                        p.pdu_type,
+                        PduType::AdvInd
+                            | PduType::AdvDirectInd
+                            | PduType::AdvNonconnInd
+                            | PduType::AdvScanInd
+                    )
+            })
+            .map(|pair| crate::signal::net::census::Arrival {
+                channel,
+                rate_hz,
+                pair,
+            }),
     };
     crate::signal::net::census::observe(devices, &sighting, now);
 }
@@ -410,7 +437,7 @@ impl NetWorker {
                         };
                     }
                     if let Some(rx) = ble.as_mut() {
-                        let packets = rx.push(&bytes, self.geometry);
+                        let packets = rx.push_at(&bytes, self.geometry, first_pair);
                         let funnel = rx.take_funnel();
                         if !funnel.is_empty() {
                             let mut m = self.state.lock().unwrap_or_else(|e| e.into_inner());
@@ -429,7 +456,15 @@ impl NetWorker {
                                 if let Some(addr) = p.adv_addr {
                                     m.net.address_book.number(addr);
                                 }
-                                census_from_ble(&mut m.net.census.devices, &p, ch, now);
+                                let locked = m.net.mode == crate::state::NetMode::Lock;
+                                census_from_ble(
+                                    &mut m.net.census.devices,
+                                    &p,
+                                    ch,
+                                    locked,
+                                    rate_hz,
+                                    now,
+                                );
                                 m.net.ble_packets.push_front(BlePacket {
                                     channel: ch,
                                     pdu_type: p.pdu_type,
@@ -1057,7 +1092,7 @@ mod tests {
         let mut packet = crate::signal::ble::pdu::decode(&[false; 40]).unwrap();
         packet.crc_ok = false;
         packet.adv_addr = Some([1, 2, 3, 4, 5, 6]);
-        census_from_ble(&mut devices, &packet, 37, Instant::now());
+        census_from_ble(&mut devices, &packet, 37, false, 8e6, Instant::now());
         assert!(devices.is_empty(), "{devices:?}");
     }
 
@@ -1069,9 +1104,38 @@ mod tests {
         let mut packet = crate::signal::ble::pdu::decode(&[false; 40]).unwrap();
         packet.crc_ok = true;
         packet.adv_addr = Some([1, 2, 3, 4, 5, 6]);
-        census_from_ble(&mut devices, &packet, 37, Instant::now());
+        census_from_ble(&mut devices, &packet, 37, false, 8e6, Instant::now());
         assert_eq!(devices.len(), 1);
         assert_eq!(devices[0].address, [1, 2, 3, 4, 5, 6]);
+    }
+
+    /// **Only LOCK's periodic advertising is timed.** An ADV_IND in LOCK
+    /// is kept with its stream position and channel; the same packet while
+    /// surveying is not, and neither is a scan response in LOCK, which is
+    /// timed by whoever scanned.
+    #[test]
+    fn only_periodic_advertising_in_lock_is_timed() {
+        use crate::signal::ble::pdu::PduType;
+        let mut packet = crate::signal::ble::pdu::decode(&[false; 40]).unwrap();
+        packet.crc_ok = true;
+        packet.adv_addr = Some([1, 2, 3, 4, 5, 6]);
+        packet.at_pair = Some(123_456);
+        let now = Instant::now();
+
+        packet.pdu_type = PduType::AdvInd;
+        let mut devices = Vec::new();
+        census_from_ble(&mut devices, &packet, 38, true, 8e6, now);
+        let log = devices[0].arrivals.clone().expect("timed in LOCK");
+        assert_eq!((log.channel, log.pairs[0]), (38, 123_456));
+
+        let mut surveying = Vec::new();
+        census_from_ble(&mut surveying, &packet, 38, false, 8e6, now);
+        assert!(surveying[0].arrivals.is_none());
+
+        packet.pdu_type = PduType::ScanRsp;
+        let mut answered = Vec::new();
+        census_from_ble(&mut answered, &packet, 38, true, 8e6, now);
+        assert!(answered[0].arrivals.is_none());
     }
 
     /// **What the packet measured reaches the record**: its PDU type and,
@@ -1091,12 +1155,12 @@ mod tests {
             modulation_index: Uncertain::from_sigma(0.5, 0.01),
             ratio: Uncertain::from_sigma(0.9, 0.02),
         });
-        census_from_ble(&mut devices, &packet, 37, Instant::now());
+        census_from_ble(&mut devices, &packet, 37, false, 8e6, Instant::now());
         assert_eq!(devices[0].ble_pdu_codes().collect::<Vec<_>>(), vec![0x4]);
         assert_eq!(devices[0].modulation_index.unwrap().value(), 0.5);
 
         packet.crc_ok = false;
-        census_from_ble(&mut devices, &packet, 37, Instant::now());
+        census_from_ble(&mut devices, &packet, 37, false, 8e6, Instant::now());
         assert_eq!((devices[0].packets, devices[0].crc_failed), (1, 1));
     }
 
@@ -1112,9 +1176,9 @@ mod tests {
         packet.crc_ok = true;
         packet.adv_addr = Some([1, 2, 3, 4, 5, 6]);
         packet.freq_offset_hz = Some(Uncertain::from_sigma(24_020.0, 100.0));
-        census_from_ble(&mut devices, &packet, 37, Instant::now());
+        census_from_ble(&mut devices, &packet, 37, false, 8e6, Instant::now());
         packet.freq_offset_hz = Some(Uncertain::from_sigma(24_800.0, 100.0));
-        census_from_ble(&mut devices, &packet, 39, Instant::now());
+        census_from_ble(&mut devices, &packet, 39, false, 8e6, Instant::now());
         let ppm = devices[0].crystal_offset_ppm.unwrap();
         assert!((ppm.value() - 10.0).abs() < 1e-9, "got {}", ppm.value());
     }
@@ -1128,7 +1192,7 @@ mod tests {
         let mut packet = crate::signal::ble::pdu::decode(&[false; 40]).unwrap();
         packet.crc_ok = true;
         packet.adv_addr = None;
-        census_from_ble(&mut devices, &packet, 37, Instant::now());
+        census_from_ble(&mut devices, &packet, 37, false, 8e6, Instant::now());
         assert!(devices.is_empty(), "{devices:?}");
     }
 
