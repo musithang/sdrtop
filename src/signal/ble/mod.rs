@@ -20,6 +20,10 @@
 #[cfg_attr(not(test), allow(dead_code))]
 pub mod ad;
 pub mod address;
+// Read by the packet list and detail view from 5.3, like `ad` above; this
+// line goes with that step.
+#[cfg_attr(not(test), allow(dead_code))]
+pub mod assigned;
 pub mod channel;
 pub mod coded;
 pub mod connect;
