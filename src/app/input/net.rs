@@ -220,13 +220,14 @@ mod tests {
     fn device(tail: u8, packets: u64) -> Device {
         let now = Instant::now();
         Device {
-            address: [0xa4, 0x83, 0xe7, 0x1c, 0x09, tail],
-            random: false,
             packets,
-            best_snr_db: 10.0,
-            first_seen: now - Duration::from_secs(60),
+            best_snr_db: Some(10.0),
             last_seen: now,
-            crystal_offset_ppm: None,
+            ..Device::heard(
+                [0xa4, 0x83, 0xe7, 0x1c, 0x09, tail],
+                false,
+                now - Duration::from_secs(60),
+            )
         }
     }
 

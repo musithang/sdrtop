@@ -55,13 +55,33 @@ const COLUMNS: &[Column] = &[
         align: Align::Right,
     },
     Column {
-        title: "SNR",
-        width: 8,
+        title: "BEST SNR",
+        width: 9,
+        align: Align::Right,
+    },
+    Column {
+        title: "CRC",
+        width: 6,
         align: Align::Right,
     },
     Column {
         title: "CFO",
         width: 15,
+        align: Align::Right,
+    },
+    Column {
+        title: "MEAN SNR",
+        width: 14,
+        align: Align::Right,
+    },
+    Column {
+        title: "TYPES",
+        width: 6,
+        align: Align::Right,
+    },
+    Column {
+        title: "MOD",
+        width: 12,
         align: Align::Right,
     },
 ];
@@ -101,9 +121,60 @@ fn cells(
         d.address_text(&state.net, Some(address_width)),
         ago(now.saturating_duration_since(d.last_seen).as_secs()),
         d.packets.to_string(),
-        format!("{:.1} dB", d.best_snr_db),
+        fmt_best_snr(d),
+        fmt_crc(d),
         fmt_cfo(d.crystal_offset_ppm, radio, now),
+        fmt_mean_snr(d),
+        d.ble_pdu_type_count().to_string(),
+        fmt_modulation(d),
     ]
+}
+
+/// `12.3 dB`, or `-` before any packet reported an SNR.
+fn fmt_best_snr(d: &Device) -> String {
+    d.best_snr_db
+        .map(|db| format!("{db:.1} dB"))
+        .unwrap_or_else(|| "-".to_string())
+}
+
+/// `98 %`: the pass rate, rounded *down*, so a device that failed once in a
+/// thousand never reads `100 %`. The rate is already a ceiling
+/// (`census::Device::crc_pass_rate`); rounding it up as well would print a
+/// perfect link nobody measured.
+fn fmt_crc(d: &Device) -> String {
+    format!("{:.0} %", (d.crc_pass_rate() * 100.0).floor())
+}
+
+/// `8.4 ±0.6 dB`, through the reading cell. The resolution is infinite
+/// because no SNR difference is too small to show; what dashes it is a mean
+/// from one packet, whose uncertainty is unknown (`Device::mean_snr_db`).
+fn fmt_mean_snr(d: &Device) -> String {
+    match d.mean_snr_db() {
+        Some(u) => Reading::new(u, "dB", f64::INFINITY).text(),
+        None => "-".to_string(),
+    }
+}
+
+/// `0.50 ±0.01`, the index B8 measured, refined across packets. `-` until a
+/// packet had the settled runs B8 needs.
+fn fmt_modulation(d: &Device) -> String {
+    match d.modulation_index {
+        Some(u) => Reading::new(u, "", f64::INFINITY).text(),
+        None => "-".to_string(),
+    }
+}
+
+/// `ADV_IND, SCAN_RSP`: the PDU types the census kept as codes, named.
+fn pdu_types(d: &Device) -> String {
+    let names: Vec<String> = d
+        .ble_pdu_codes()
+        .map(|c| crate::signal::ble::pdu::PduType::from_bits(c).label())
+        .collect();
+    if names.is_empty() {
+        "-".to_string()
+    } else {
+        names.join(", ")
+    }
 }
 
 /// B13's own window for "per unit time": five minutes, long enough to see a
@@ -224,13 +295,51 @@ fn detail(
             ("first seen", seen(d.first_seen)),
             ("packets", d.packets.to_string()),
             ("last seen", seen(d.last_seen)),
-            ("best SNR", format!("{:.1} dB", d.best_snr_db)),
+            ("best SNR", fmt_best_snr(d)),
+            ("mean SNR", fmt_mean_snr(d)),
+            ("mod index", fmt_modulation(d)),
         ],
         iw,
         theme,
     ));
     out.push(crystal_line(d, state, now, iw, theme));
+    out.push(noted(
+        "CRC",
+        format!("{} passed, {} failed", fmt_crc(d), d.crc_failed),
+        // Said where it fits: a failure is only ever credited to an address
+        // that survived it, so the rate can only flatter.
+        "a ceiling: a corrupted address is nobody's failure",
+        iw,
+        theme,
+    ));
+    for (i, row) in crate::ui::chrome::wrap(&pdu_types(d), iw.saturating_sub(DETAIL_LABEL_W + 1), 2)
+        .into_iter()
+        .enumerate()
+    {
+        out.push(Line::from(vec![
+            crate::ui::chrome::field(if i == 0 { "PDU types" } else { "" }, DETAIL_LABEL_W, theme),
+            Span::styled(row, Style::default().fg(theme.value)),
+        ]));
+    }
     out
+}
+
+/// `label  value  note`: a field whose value wants a sentence beside it,
+/// with the sentence dropped whole where it does not fit whole - half a
+/// sentence about provenance is worse than none.
+fn noted(label: &str, value: String, note: &str, iw: usize, theme: &crate::Theme) -> Line<'static> {
+    let used = DETAIL_LABEL_W + 1 + value.chars().count();
+    let mut spans = vec![
+        crate::ui::chrome::field(label, DETAIL_LABEL_W, theme),
+        Span::styled(value, Style::default().fg(theme.value)),
+    ];
+    if iw >= used + note.chars().count() + 2 {
+        spans.push(Span::styled(
+            format!("  {note}"),
+            Style::default().fg(theme.label),
+        ));
+    }
+    Line::from(spans)
 }
 
 /// The fields two to a line where the width allows it and one to a line where
@@ -292,20 +401,7 @@ fn crystal_line(
         },
     };
     let value = fmt_cfo(d.crystal_offset_ppm, &state.radio, now);
-    let mut spans = vec![
-        crate::ui::chrome::field("crystal", DETAIL_LABEL_W, theme),
-        Span::styled(value.clone(), Style::default().fg(theme.value)),
-    ];
-    // The note only where there is room for it whole: half a sentence about
-    // provenance is worse than none.
-    let used = DETAIL_LABEL_W + 1 + value.chars().count();
-    if iw >= used + against.chars().count() + 2 {
-        spans.push(Span::styled(
-            format!("  {against}"),
-            Style::default().fg(theme.label),
-        ));
-    }
-    Line::from(spans)
+    noted("crystal", value, &against, iw, theme)
 }
 
 impl Panel for NetCensusPanel {
@@ -438,42 +534,84 @@ mod tests {
     use crate::state::fixture::draw;
     use std::time::{Duration, Instant};
 
+    /// `d` with `n` SNR readings of mean `mean` and sample spread `spread`,
+    /// as the sums `census::observe` would have left.
+    fn with_snr(d: Device, n: u64, mean: f64, spread: f64) -> Device {
+        let k = n as f64;
+        Device {
+            snr_count: n,
+            snr_sum: k * mean,
+            snr_sum_sq: (k - 1.0) * spread * spread + k * mean * mean,
+            ..d
+        }
+    }
+
     fn populated() -> SdrMetrics {
         let now = Instant::now();
         let mut m = SdrMetrics::fixture().streaming();
         m.net.census.devices = vec![
-            Device {
-                address: [0xa4, 0x83, 0xe7, 0x1c, 0x09, 0xbe],
-                random: false,
-                packets: 1_204,
-                best_snr_db: 12.3,
-                first_seen: now - Duration::from_secs(600),
-                last_seen: now - Duration::from_secs(2),
-                crystal_offset_ppm: Some(Uncertain::from_sigma(35.4, 0.5)),
-            },
-            Device {
-                address: [0xf0, 0x18, 0x98, 0x00, 0x11, 0x22],
-                random: false,
-                packets: 7,
-                best_snr_db: 2.4,
-                // Clearly inside the five-minute turnover window, not on
-                // its boundary: the panel calls `Instant::now()` again at
-                // render time, later than this fixture's own `now`, so a
-                // value exactly at the window's edge could land either side
-                // of it depending on how much time the test itself takes.
-                first_seen: now - Duration::from_secs(250),
-                last_seen: now - Duration::from_secs(240),
-                crystal_offset_ppm: None,
-            },
-            Device {
-                address: [0x00, 0x1a, 0x11, 0xaa, 0xbb, 0xcc],
-                random: false,
-                packets: 96,
-                best_snr_db: 6.9,
-                first_seen: now - Duration::from_secs(90),
-                last_seen: now - Duration::from_secs(31),
-                crystal_offset_ppm: Some(Uncertain::from_sigma(-5.0, 0.5)),
-            },
+            // Everything measured: two PDU types, a modulation index, and 22
+            // failures credited against 1204 good packets.
+            with_snr(
+                Device {
+                    packets: 1_204,
+                    best_snr_db: Some(12.3),
+                    last_seen: now - Duration::from_secs(2),
+                    crystal_offset_ppm: Some(Uncertain::from_sigma(35.4, 0.5)),
+                    ble_pdu_types: 1 << 0x0 | 1 << 0x4,
+                    modulation_index: Some(Uncertain::from_sigma(0.50, 0.01)),
+                    crc_failed: 22,
+                    ..Device::heard(
+                        [0xa4, 0x83, 0xe7, 0x1c, 0x09, 0xbe],
+                        false,
+                        now - Duration::from_secs(600),
+                    )
+                },
+                1_204,
+                8.4,
+                3.0,
+            ),
+            // Nearly nothing: one SNR reading, so a mean nobody can vouch
+            // for, and none of the other measurements.
+            with_snr(
+                Device {
+                    packets: 7,
+                    best_snr_db: Some(2.4),
+                    last_seen: now - Duration::from_secs(240),
+                    ble_pdu_types: 1 << 0x2,
+                    // Clearly inside the five-minute turnover window, not on
+                    // its boundary: the panel calls `Instant::now()` again at
+                    // render time, later than this fixture's own `now`, so a
+                    // value exactly at the window's edge could land either
+                    // side of it depending on how much time the test takes.
+                    ..Device::heard(
+                        [0xf0, 0x18, 0x98, 0x00, 0x11, 0x22],
+                        false,
+                        now - Duration::from_secs(250),
+                    )
+                },
+                1,
+                2.4,
+                0.0,
+            ),
+            with_snr(
+                Device {
+                    packets: 96,
+                    best_snr_db: Some(6.9),
+                    last_seen: now - Duration::from_secs(31),
+                    crystal_offset_ppm: Some(Uncertain::from_sigma(-5.0, 0.5)),
+                    ble_pdu_types: 1 << 0x0,
+                    crc_failed: 4,
+                    ..Device::heard(
+                        [0x00, 0x1a, 0x11, 0xaa, 0xbb, 0xcc],
+                        false,
+                        now - Duration::from_secs(90),
+                    )
+                },
+                96,
+                5.1,
+                2.0,
+            ),
         ];
         m
     }
@@ -485,8 +623,9 @@ mod tests {
     /// empty table would let a reader take the flattering one.
     #[test]
     fn an_empty_census_with_no_decoder_says_nobody_is_counting() {
-        // Wide enough for every column, the selection gutter included.
-        let out = draw(NetCensusPanel, 64, 10, &SdrMetrics::fixture().streaming()).join("\n");
+        // Wide enough for the columns through CFO, the selection gutter
+        // included.
+        let out = draw(NetCensusPanel, 70, 10, &SdrMetrics::fixture().streaming()).join("\n");
         assert!(out.contains("no census yet"), "{out}");
         assert!(out.contains("not an empty room"), "{out}");
         // The columns are still shown, so the shape of the answer is visible.
@@ -717,7 +856,7 @@ mod tests {
             "the rows are still there:\n{short}"
         );
 
-        let tall = draw(NetCensusPanel, 76, 12, &selected()).join("\n");
+        let tall = draw(NetCensusPanel, 76, 14, &selected()).join("\n");
         assert!(tall.contains("SELECTED"), "{tall}");
     }
 
@@ -730,6 +869,63 @@ mod tests {
         let out = draw(NetCensusPanel, 76, 14, &m).join("\n");
         assert!(out.contains("SELECTED"), "{out}");
         assert!(!out.contains("a4:83:e7"), "the address leaked:\n{out}");
+    }
+
+    /// **Measurement 17's record, on screen.** Every new column shows what
+    /// the record holds, each in the form its uncertainty earns, on a
+    /// terminal wide enough for all of them.
+    #[test]
+    fn the_new_columns_show_what_the_record_holds() {
+        let out = draw(NetCensusPanel, 150, 10, &populated());
+        for title in ["BEST SNR", "CRC", "MEAN SNR", "TYPES", "MOD"] {
+            assert!(out[1].contains(title), "{title}: {}", out[1]);
+        }
+        let busiest = out.iter().find(|l| l.contains("a4:83:e7")).unwrap();
+        assert!(busiest.contains("98 %"), "{busiest}");
+        assert!(busiest.contains("8.40 ±0.09 dB"), "{busiest}");
+        assert!(busiest.contains("0.500 ±0.010"), "{busiest}");
+    }
+
+    /// A mean from one packet dashes, rather than passing its one reading
+    /// off as an average; a device with no modulation index dashes too.
+    #[test]
+    fn a_mean_from_one_packet_is_a_dash_not_a_number() {
+        let out = draw(NetCensusPanel, 150, 10, &populated());
+        let quiet = out.iter().find(|l| l.contains("f0:18:98")).unwrap();
+        assert!(quiet.contains("— dB"), "{quiet}");
+        assert!(!quiet.contains("2.40"), "{quiet}");
+        assert!(quiet.trim_end_matches(['│', ' ']).ends_with('-'), "{quiet}");
+    }
+
+    /// One failure in a thousand is not a perfect link, and the column never
+    /// rounds it into one.
+    #[test]
+    fn one_failure_in_a_thousand_never_reads_as_a_perfect_link() {
+        let now = Instant::now();
+        let d = Device {
+            packets: 999,
+            crc_failed: 1,
+            ..Device::heard([1; 6], false, now)
+        };
+        assert_eq!(fmt_crc(&d), "99 %");
+        let clean = Device {
+            packets: 999,
+            ..Device::heard([1; 6], false, now)
+        };
+        assert_eq!(fmt_crc(&clean), "100 %");
+    }
+
+    /// The detail block names the PDU types, gives the mean and the index
+    /// with their uncertainties, and says which way the CRC rate can be
+    /// wrong where there is room to say it.
+    #[test]
+    fn the_detail_block_carries_the_record() {
+        let out = draw(NetCensusPanel, 120, 16, &selected()).join("\n");
+        assert!(out.contains("PDU types  ADV_IND, SCAN_RSP"), "{out}");
+        assert!(out.contains("mean SNR   8.40 ±0.09 dB"), "{out}");
+        assert!(out.contains("mod index  0.500 ±0.010"), "{out}");
+        assert!(out.contains("98 % passed, 22 failed"), "{out}");
+        assert!(out.contains("a ceiling"), "{out}");
     }
 
     #[test]

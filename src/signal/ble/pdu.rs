@@ -35,7 +35,9 @@ pub enum PduType {
 }
 
 impl PduType {
-    fn from_bits(bits: u8) -> Self {
+    /// The type from the header's low four bits; the rest of `bits` is ignored,
+    /// so a whole header byte and a bare code both work.
+    pub fn from_bits(bits: u8) -> Self {
         match bits & 0x0F {
             0x0 => Self::AdvInd,
             0x1 => Self::AdvDirectInd,
@@ -45,6 +47,22 @@ impl PduType {
             0x5 => Self::ConnectInd,
             0x6 => Self::AdvScanInd,
             other => Self::Other(other),
+        }
+    }
+
+    /// The four-bit code the header carries, `0x0` to `0xF`: the inverse of
+    /// [`Self::from_bits`], for a record that keeps which types it has seen as
+    /// one bit each (`signal::net::census::Device::ble_pdu_types`).
+    pub fn code(self) -> u8 {
+        match self {
+            Self::AdvInd => 0x0,
+            Self::AdvDirectInd => 0x1,
+            Self::AdvNonconnInd => 0x2,
+            Self::ScanReq => 0x3,
+            Self::ScanRsp => 0x4,
+            Self::ConnectInd => 0x5,
+            Self::AdvScanInd => 0x6,
+            Self::Other(b) => b & 0x0F,
         }
     }
 
@@ -397,5 +415,14 @@ mod tests {
         whiten(&mut bits, 0);
         let packet = decode(&bits).unwrap();
         assert_eq!(packet.pdu_type, PduType::Other(7));
+    }
+
+    /// Every one of the sixteen codes survives the round trip, so a record
+    /// that keeps codes can always name what it kept.
+    #[test]
+    fn every_code_names_the_type_it_came_from() {
+        for code in 0..16u8 {
+            assert_eq!(PduType::from_bits(code).code(), code);
+        }
     }
 }

@@ -185,29 +185,49 @@ impl Load {
 /// receiver has actually confirmed, and counting it would be exactly the
 /// invented reading rule 2 refuses. B10's own exit condition is "every
 /// device in the room" - CRC-clean ones, which is the only kind this can
-/// honestly claim to have found. Pulled out of [`NetWorker::run`]'s own loop
-/// as a plain function of a packet and a clock, rather than tested only by
-/// building a real, noisy capture through the whole receive chain to get
-/// one - `census::observe`'s own tests already hold the census half of this
-/// to account; what only this function does is decide *whether* to call it.
+/// honestly claim to have found. A failed packet can still count *against*
+/// a device already confirmed, as a CRC failure on an exact address match
+/// (`census::observe_crc_failure` says why that much is safe); it never
+/// makes a row.
+///
+/// Pulled out of [`NetWorker::run`]'s own loop as a plain function of a
+/// packet and a clock, rather than tested only by building a real, noisy
+/// capture through the whole receive chain to get one - `census::observe`'s
+/// own tests already hold the census half of this to account; what only this
+/// function does is decide *whether*, and *which*, to call.
+///
+/// Runs inside the state lock, once per packet: a lookup, a few additions
+/// and an inverse-variance fold, and nothing that waits on a square root
+/// (the census module doc).
 fn census_from_ble(
     devices: &mut Vec<crate::signal::net::census::Device>,
     p: &crate::signal::ble::pdu::Packet,
     channel: u8,
     now: Instant,
 ) {
-    if p.crc_ok {
-        if let Some(addr) = p.adv_addr {
-            // In ppm of the channel it was heard on, so readings from all three
-            // advertising channels can be combined: see `Device::crystal_offset_ppm`.
-            let carrier = crate::signal::ble::channel::centre_hz(channel);
-            let ppm = p
-                .freq_offset_hz
-                .zip(carrier)
-                .map(|(hz, c)| crate::state::offset_ppm(hz, c as f64));
-            crate::signal::net::census::observe(devices, addr, p.tx_add_random, p.snr_db, ppm, now);
-        }
+    let Some(address) = p.adv_addr else {
+        return;
+    };
+    if !p.crc_ok {
+        crate::signal::net::census::observe_crc_failure(devices, address);
+        return;
     }
+    // In ppm of the channel it was heard on, so readings from all three
+    // advertising channels can be combined: see `Device::crystal_offset_ppm`.
+    let carrier = crate::signal::ble::channel::centre_hz(channel);
+    let crystal_offset_ppm = p
+        .freq_offset_hz
+        .zip(carrier)
+        .map(|(hz, c)| crate::state::offset_ppm(hz, c as f64));
+    let sighting = crate::signal::net::census::Sighting {
+        address,
+        random: p.tx_add_random,
+        snr_db: p.snr_db,
+        crystal_offset_ppm,
+        ble_pdu_code: Some(p.pdu_type.code()),
+        modulation_index: p.modulation.map(|m| m.modulation_index),
+    };
+    crate::signal::net::census::observe(devices, &sighting, now);
 }
 
 impl NetWorker {
@@ -1052,6 +1072,32 @@ mod tests {
         census_from_ble(&mut devices, &packet, 37, Instant::now());
         assert_eq!(devices.len(), 1);
         assert_eq!(devices[0].address, [1, 2, 3, 4, 5, 6]);
+    }
+
+    /// **What the packet measured reaches the record**: its PDU type and,
+    /// where B8 could take one, its modulation index; and a later packet
+    /// from the same address whose CRC failed counts against it.
+    #[test]
+    fn a_packet_carries_its_type_and_modulation_and_a_failure_counts_against_it() {
+        use crate::signal::dsp::uncertainty::Uncertain;
+        let mut devices = Vec::new();
+        let mut packet = crate::signal::ble::pdu::decode(&[false; 40]).unwrap();
+        packet.crc_ok = true;
+        packet.adv_addr = Some([1, 2, 3, 4, 5, 6]);
+        packet.pdu_type = crate::signal::ble::pdu::PduType::ScanRsp;
+        packet.modulation = Some(crate::signal::ble::measure::ModulationQuality {
+            delta_f1_avg_hz: Uncertain::from_sigma(250e3, 5e3),
+            delta_f2_max_hz: 230e3,
+            modulation_index: Uncertain::from_sigma(0.5, 0.01),
+            ratio: Uncertain::from_sigma(0.9, 0.02),
+        });
+        census_from_ble(&mut devices, &packet, 37, Instant::now());
+        assert_eq!(devices[0].ble_pdu_codes().collect::<Vec<_>>(), vec![0x4]);
+        assert_eq!(devices[0].modulation_index.unwrap().value(), 0.5);
+
+        packet.crc_ok = false;
+        census_from_ble(&mut devices, &packet, 37, Instant::now());
+        assert_eq!((devices[0].packets, devices[0].crc_failed), (1, 1));
     }
 
     /// **The census keeps ppm of the channel a packet was heard on**, so one

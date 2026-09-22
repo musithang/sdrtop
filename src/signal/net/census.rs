@@ -21,8 +21,22 @@
 //! a real calibrated RSSI will need to settle how the two coexist in one
 //! column; that is its own question, not answered here ahead of having it.
 //!
-//! Design section 1.1's address display switch (`full`, `oui`, `masked`)
-//! arrives with whichever arc needs it; none does yet.
+//! **The same reasoning names two of the fields net-ux-polish-plan 4.2.b
+//! added.** Bluetooth design measurement 17 asks for "PDU types used" and
+//! "measured modulation index"; both are BLE's own quantities, so the fields
+//! say so (`ble_pdu_types`, `modulation_index` from B8's LE 1M measurement)
+//! rather than taking general names a second arc's different type space would
+//! then have to squeeze into. The census stays protocol-neutral in the sense
+//! that matters: it keeps codes and numbers and imports nothing from `ble`;
+//! naming them is the panel's job.
+//!
+//! **Sums in the record, statistics on the screen.** The mean SNR is kept as
+//! a count and two running sums, and turned into a mean and its uncertainty
+//! only when something reads it ([`Device::mean_snr_db`]). A record is
+//! updated inside the state lock, once per packet; a square root there is
+//! paid on every packet for a figure the panel reads thirty times a second at
+//! most, and the `tasks/rx` discipline keeps that kind of work outside the
+//! lock for a reason that holds here too.
 
 use std::time::Instant;
 
@@ -37,11 +51,33 @@ pub struct Device {
     /// Whether the address was sent as a random one (BLE's TxAdd = 1), which
     /// decides what kind of address it is (`signal::ble::address::kind`).
     pub random: bool,
-    /// Packets attributed to it.
+    /// Packets attributed to it: every one of them passed its CRC, so this is
+    /// also the pass count [`Self::crc_pass_rate`] divides.
     pub packets: u64,
     /// The strongest it has been heard. See the module doc for why this is
-    /// an SNR, not an RSSI.
-    pub best_snr_db: f32,
+    /// an SNR, not an RSSI. `None` until a packet has reported one: an absent
+    /// reading, never a sentinel that prints as `-inf dB`.
+    pub best_snr_db: Option<f32>,
+    /// Packets that reported an SNR, and the sum and sum of squares of those
+    /// readings in dB: what [`Self::mean_snr_db`] is computed from. See the
+    /// module doc for why sums rather than the mean.
+    pub snr_count: u64,
+    pub snr_sum: f64,
+    pub snr_sum_sq: f64,
+    /// Which BLE PDU types this address has been heard sending, one bit per
+    /// four-bit type code (`signal::ble::pdu::PduType::code`). Sixteen codes,
+    /// sixteen bits: the whole of the header's type space, the extended
+    /// advertising codes included, so nothing heard is dropped for not being
+    /// on a list.
+    pub ble_pdu_types: u16,
+    /// This device's modulation index, refined ([`Uncertain::combine`]) across
+    /// every packet B8 could measure one from. `None` until one could: B8
+    /// needs settled runs a short packet does not always contain.
+    pub modulation_index: Option<Uncertain>,
+    /// Packets whose CRC failed and whose address field read exactly this
+    /// address. See [`observe_crc_failure`] for what that can claim and what
+    /// it cannot.
+    pub crc_failed: u64,
     /// When this address was first heard this session. B13's own reason to
     /// exist: address-rotation observation needs to know when a row's
     /// address *appeared*, not only that it exists, to say how many new
@@ -67,19 +103,130 @@ pub struct Device {
 }
 
 impl Device {
+    /// A row for an address heard for the first time at `now`, with nothing
+    /// counted yet: what [`observe`] starts from, and what a test builds a
+    /// device on with `..Device::heard(..)`.
+    pub fn heard(address: [u8; 6], random: bool, now: Instant) -> Self {
+        Self {
+            address,
+            random,
+            packets: 0,
+            best_snr_db: None,
+            snr_count: 0,
+            snr_sum: 0.0,
+            snr_sum_sq: 0.0,
+            ble_pdu_types: 0,
+            modulation_index: None,
+            crc_failed: 0,
+            first_seen: now,
+            last_seen: now,
+            crystal_offset_ppm: None,
+        }
+    }
+
     /// The address as the section's display mode shows it, with this
     /// device's own kind and masked number, in a column `width` wide (`None`:
     /// uncut, for an export). See `state::AddressDisplay::show`.
     pub fn address_text(&self, net: &crate::state::NetState, width: Option<usize>) -> String {
         net.show_address(self.address, self.random, width)
     }
+
+    /// The mean SNR over every packet that reported one, with the standard
+    /// uncertainty of that mean. `None` before any did.
+    ///
+    /// **The same estimator as `dsp::uncertainty::mean_with_uncertainty`,
+    /// from sums instead of a slice**, because a census cannot keep every
+    /// packet's reading for a session; a test holds the two to the same
+    /// answer. And the same answer for one reading: a mean, with an infinite
+    /// uncertainty, because one reading has no spread to estimate one from,
+    /// and a zero there would read as a perfect measurement.
+    ///
+    /// The mean of dB values, not the dB of a mean power: the figure
+    /// measurement 17 asks for sits beside the best SNR in the same unit, and
+    /// averaging in dB is what makes a device that fades in and out read as
+    /// fading rather than as its loudest moments.
+    pub fn mean_snr_db(&self) -> Option<Uncertain> {
+        if self.snr_count == 0 {
+            return None;
+        }
+        let n = self.snr_count as f64;
+        let mean = self.snr_sum / n;
+        if self.snr_count < 2 {
+            return Some(Uncertain::from_variance(mean, f64::INFINITY));
+        }
+        // Clamped at zero: identical readings cancel the two sums to a hair
+        // below it in floating point, and a negative variance is not a figure.
+        let sample_variance = ((self.snr_sum_sq - self.snr_sum * mean) / (n - 1.0)).max(0.0);
+        Some(Uncertain::from_variance(mean, sample_variance / n))
+    }
+
+    /// The fraction of this address's packets whose CRC passed, `0.0` to
+    /// `1.0`, over the packets it could be credited with either way.
+    ///
+    /// **An upper bound, and the panel says so.** A packet whose CRC failed
+    /// is credited here only when its address field survived intact
+    /// ([`observe_crc_failure`]); one whose address took the bit errors is
+    /// no device's failure, so every device's failures are a floor and its
+    /// pass rate a ceiling.
+    pub fn crc_pass_rate(&self) -> f64 {
+        let total = self.packets + self.crc_failed;
+        if total == 0 {
+            return 0.0;
+        }
+        self.packets as f64 / total as f64
+    }
+
+    /// How many distinct PDU types it has been heard sending.
+    pub fn ble_pdu_type_count(&self) -> u32 {
+        self.ble_pdu_types.count_ones()
+    }
+
+    /// The codes of the PDU types it has sent, lowest first.
+    pub fn ble_pdu_codes(&self) -> impl Iterator<Item = u8> + '_ {
+        (0..16u8).filter(|c| self.ble_pdu_types & (1 << c) != 0)
+    }
 }
 
 /// What the table can be ordered by, in the order the columns are drawn.
 ///
 /// The names are the column titles, so the chrome tag and the header cannot
-/// disagree about what the table is sorted by.
-pub const SORT_KEYS: &[&str] = &["ADDRESS", "SEEN", "PKTS", "SNR", "CFO"];
+/// disagree about what the table is sorted by. **The order is also the order
+/// the columns give way in** on a narrow terminal (`ui::widgets::table::
+/// columns_that_fit` drops from the right), so the measurements a reader is
+/// most likely to need come first and the ones that need the most room last.
+pub const SORT_KEYS: &[&str] = &[
+    "ADDRESS", "SEEN", "PKTS", "SNR", "CRC", "CFO", "MEAN SNR", "TYPES", "MOD",
+];
+
+/// One entry of [`SORT_KEYS`], by what it orders on rather than where it is.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Key {
+    Address,
+    Seen,
+    Packets,
+    BestSnr,
+    Crc,
+    Cfo,
+    MeanSnr,
+    Types,
+    Modulation,
+}
+
+impl Key {
+    /// Every key, in [`SORT_KEYS`] order: a test holds the two lists to one
+    /// length, and one title each.
+    const ALL: [Key; 9] = [
+        Key::Address,
+        Key::Seen,
+        Key::Packets,
+        Key::BestSnr,
+        Key::Crc,
+        Key::Cfo,
+        Key::MeanSnr,
+        Key::Types,
+        Key::Modulation,
+    ];
+}
 
 /// Put `devices` in the order the panel asked for.
 ///
@@ -87,14 +234,18 @@ pub const SORT_KEYS: &[&str] = &["ADDRESS", "SEEN", "PKTS", "SNR", "CFO"];
 /// number of times must not swap places between frames, so the address breaks
 /// every tie: it is the one field that is unique by definition.
 ///
+/// **A device with no reading sorts last, in either direction.** The best
+/// SNR, the mean SNR, the modulation index and the CFO are all absent until
+/// a packet supplies one, and rule 2 refuses to rank an absent reading as if
+/// it were a good one or a bad one; only the order *between* two measured
+/// devices is reversed.
+///
 /// **Sorting by CFO ranks by how bad the clock is, not by its sign** - design
 /// section 2.5's own "sorted by how bad its clock is" - so the key is the
-/// *magnitude* of the offset. A device with no CFO measurement yet sorts
-/// last regardless of direction: rule 2 refuses to rank an absent reading
-/// as if it were a good one. The magnitude is of the offset as the panel
-/// shows it, corrected through `radio` when a reference allows: our own
-/// error shifts every device the same way, so ranking the raw figures
-/// would put a clock that is dead on below one that happens to cancel ours.
+/// *magnitude* of the offset, as the panel shows it, corrected through
+/// `radio` when a reference allows: our own error shifts every device the same
+/// way, so ranking the raw figures would put a clock that is dead on below one
+/// that happens to cancel ours.
 pub fn order(
     devices: &mut [Device],
     sort: usize,
@@ -102,42 +253,49 @@ pub fn order(
     now: Instant,
     radio: &crate::state::RadioState,
 ) {
+    let key = Key::ALL.get(sort).copied().unwrap_or(Key::Address);
+    let measured = |d: &Device| -> Option<f64> {
+        match key {
+            Key::BestSnr => d.best_snr_db.map(f64::from),
+            Key::MeanSnr => d.mean_snr_db().map(|u| u.value()),
+            Key::Modulation => d.modulation_index.map(|u| u.value()),
+            Key::Cfo => d
+                .crystal_offset_ppm
+                .map(|u| radio.corrected_ppm(u, now).0.value().abs()),
+            _ => None,
+        }
+    };
     devices.sort_by(|a, b| {
-        // CFO's "absent sorts last" is not reversed by `descending` - only
-        // the ordering *between two measured* devices is - so it is kept
-        // out of the generic reversal below rather than folded into it.
-        let key = if sort == 4 {
-            cfo_key(a, b, descending, |u| radio.corrected_ppm(u, now).0.value())
-        } else {
-            let key = match sort {
-                1 => now
-                    .saturating_duration_since(a.last_seen)
-                    .cmp(&now.saturating_duration_since(b.last_seen)),
-                2 => a.packets.cmp(&b.packets),
-                3 => a.best_snr_db.total_cmp(&b.best_snr_db),
-                _ => std::cmp::Ordering::Equal,
-            };
-            if descending {
-                key.reverse()
-            } else {
-                key
+        let ordering = match key {
+            Key::BestSnr | Key::MeanSnr | Key::Modulation | Key::Cfo => {
+                absent_last(measured(a), measured(b), descending)
+            }
+            _ => {
+                let plain = match key {
+                    Key::Seen => now
+                        .saturating_duration_since(a.last_seen)
+                        .cmp(&now.saturating_duration_since(b.last_seen)),
+                    Key::Packets => a.packets.cmp(&b.packets),
+                    Key::Crc => a.crc_pass_rate().total_cmp(&b.crc_pass_rate()),
+                    Key::Types => a.ble_pdu_type_count().cmp(&b.ble_pdu_type_count()),
+                    _ => std::cmp::Ordering::Equal,
+                };
+                if descending {
+                    plain.reverse()
+                } else {
+                    plain
+                }
             }
         };
-        key.then_with(|| a.address.cmp(&b.address))
+        ordering.then_with(|| a.address.cmp(&b.address))
     });
 }
 
-/// The CFO sort key: by magnitude between two measured devices, reversed
-/// when `descending` asks for worst-first, but a device with no measurement
-/// yet sorts last either way - see [`order`]'s own doc for why.
-fn cfo_key(
-    a: &Device,
-    b: &Device,
-    descending: bool,
-    corrected: impl Fn(Uncertain) -> f64,
-) -> std::cmp::Ordering {
-    let mag = |d: &Device| d.crystal_offset_ppm.map(|u| corrected(u).abs());
-    match (mag(a), mag(b)) {
+/// Two optional readings compared: by value when both exist, reversed when
+/// `descending` asks, and a missing one after a present one either way. See
+/// [`order`]'s own doc for why.
+fn absent_last(a: Option<f64>, b: Option<f64>, descending: bool) -> std::cmp::Ordering {
+    match (a, b) {
         (Some(x), Some(y)) => {
             let cmp = x.total_cmp(&y);
             if descending {
@@ -152,49 +310,88 @@ fn cfo_key(
     }
 }
 
-/// Record one packet from `address`: a new row if this is the first time
-/// it has been heard, otherwise an update to the existing one.
+/// One packet's worth of facts about the device that sent it, as [`observe`]
+/// takes them. Everything but the address may be missing: each is a
+/// measurement a given packet may not have supported.
+#[derive(Clone, Copy, Debug)]
+pub struct Sighting {
+    pub address: [u8; 6],
+    pub random: bool,
+    pub snr_db: Option<f64>,
+    /// In ppm, as the air delivered it: see [`Device::crystal_offset_ppm`].
+    pub crystal_offset_ppm: Option<Uncertain>,
+    /// The BLE PDU type's four-bit code (`signal::ble::pdu::PduType::code`).
+    pub ble_pdu_code: Option<u8>,
+    pub modulation_index: Option<Uncertain>,
+}
+
+/// Record one packet whose CRC passed: a new row if this is the first time
+/// its address has been heard, otherwise an update to the existing one.
 ///
-/// **`snr_db` replaces the stored reading only when it is stronger** - the
+/// **`snr_db` replaces the best reading only when it is stronger** - the
 /// "best it has been heard" the field's own name promises, not the most
-/// recent. **`crystal_offset_ppm` is refined, not replaced** -
-/// [`Uncertain::combine`] folds a new packet's own CFO reading into
-/// whatever this device's estimate already was, the same way more samples
-/// tighten any other measurement in this app, rather than keeping only the
-/// latest packet's own noisy single reading.
-pub fn observe(
-    devices: &mut Vec<Device>,
-    address: [u8; 6],
-    random: bool,
-    snr_db: Option<f64>,
-    crystal_offset_ppm: Option<Uncertain>,
-    now: Instant,
-) {
-    let device = match devices.iter_mut().find(|d| d.address == address) {
-        Some(d) => d,
+/// recent - and is added to the sums the mean comes from either way.
+/// **The crystal offset and the modulation index are refined, not replaced**:
+/// [`Uncertain::combine`] folds a new packet's reading into the device's
+/// estimate, the same way more samples tighten any other measurement in this
+/// app, rather than keeping only the latest packet's own noisy reading.
+pub fn observe(devices: &mut Vec<Device>, s: &Sighting, now: Instant) {
+    let device = match devices.iter_mut().position(|d| d.address == s.address) {
+        Some(i) => &mut devices[i],
         None => {
-            devices.push(Device {
-                address,
-                random,
-                packets: 0,
-                best_snr_db: f32::NEG_INFINITY,
-                first_seen: now,
-                last_seen: now,
-                crystal_offset_ppm: None,
-            });
+            devices.push(Device::heard(s.address, s.random, now));
             devices.last_mut().expect("just pushed")
         }
     };
     device.packets += 1;
     device.last_seen = now;
-    if let Some(snr) = snr_db {
-        device.best_snr_db = device.best_snr_db.max(snr as f32);
+    if let Some(snr) = s.snr_db {
+        let best = device.best_snr_db.map_or(snr as f32, |b| b.max(snr as f32));
+        device.best_snr_db = Some(best);
+        device.snr_count += 1;
+        device.snr_sum += snr;
+        device.snr_sum_sq += snr * snr;
     }
-    if let Some(offset) = crystal_offset_ppm {
-        device.crystal_offset_ppm = Some(match device.crystal_offset_ppm {
-            Some(existing) => existing.combine(&offset),
-            None => offset,
+    if let Some(code) = s.ble_pdu_code {
+        device.ble_pdu_types |= 1 << (code & 0x0F);
+    }
+    refine(&mut device.crystal_offset_ppm, s.crystal_offset_ppm);
+    refine(&mut device.modulation_index, s.modulation_index);
+}
+
+/// Fold `reading` into `estimate`, or start it.
+fn refine(estimate: &mut Option<Uncertain>, reading: Option<Uncertain>) {
+    if let Some(r) = reading {
+        *estimate = Some(match *estimate {
+            Some(e) => e.combine(&r),
+            None => r,
         });
+    }
+}
+
+/// Credit a packet whose CRC failed to the device whose address its address
+/// field reads, if the census already holds one. Returns whether it did.
+///
+/// **Only an exact match on a device already confirmed, and never a new
+/// row.** A failed CRC says some bit between the header and the CRC is
+/// wrong and not which, so the address itself is under suspicion; what makes
+/// an exact match worth crediting is that corruption landing on one of the
+/// few dozen 48-bit addresses a room holds is not a coincidence worth
+/// designing for, while corruption landing anywhere else simply leaves the
+/// packet uncredited. So every device's failures are a floor and its pass rate
+/// a ceiling (`Device::crc_pass_rate`), which is the honest side to err on:
+/// the rate can flatter a device and cannot slander one.
+///
+/// **It does not touch `last_seen`.** The sightings the census dates are the
+/// ones it confirmed; a packet it cannot vouch for has no business moving the
+/// SEEN column, or keeping a device that went quiet looking present.
+pub fn observe_crc_failure(devices: &mut [Device], address: [u8; 6]) -> bool {
+    match devices.iter_mut().find(|d| d.address == address) {
+        Some(d) => {
+            d.crc_failed += 1;
+            true
+        }
+        None => false,
     }
 }
 
@@ -238,13 +435,25 @@ mod tests {
 
     fn device(last: u8, packets: u64, snr: f32, ago_s: u64, now: Instant) -> Device {
         Device {
-            address: [0xa4, 0x83, 0xe7, 0x1c, 0x09, last],
-            random: false,
             packets,
-            best_snr_db: snr,
-            first_seen: now - Duration::from_secs(ago_s),
-            last_seen: now - Duration::from_secs(ago_s),
+            best_snr_db: Some(snr),
+            ..Device::heard(
+                [0xa4, 0x83, 0xe7, 0x1c, 0x09, last],
+                false,
+                now - Duration::from_secs(ago_s),
+            )
+        }
+    }
+
+    /// A packet with only an SNR, for the tests that are about nothing else.
+    fn heard(address: [u8; 6], snr_db: Option<f64>) -> Sighting {
+        Sighting {
+            address,
+            random: false,
+            snr_db,
             crystal_offset_ppm: None,
+            ble_pdu_code: None,
+            modulation_index: None,
         }
     }
 
@@ -336,10 +545,10 @@ mod tests {
         ];
         let tails = |d: &[Device]| d.iter().map(|x| x.address[5]).collect::<Vec<_>>();
 
-        order(&mut d, 4, true, now, &radio()); // worst first
+        order(&mut d, 5, true, now, &radio()); // worst first
         assert_eq!(tails(&d), vec![1, 3, 2]);
 
-        order(&mut d, 4, false, now, &radio()); // best first
+        order(&mut d, 5, false, now, &radio()); // best first
         assert_eq!(tails(&d), vec![3, 1, 2]);
     }
 
@@ -357,7 +566,7 @@ mod tests {
         let mut d = vec![with(0x01, -10.0), with(0x02, 8.0)];
         let tails = |d: &[Device]| d.iter().map(|x| x.address[5]).collect::<Vec<_>>();
 
-        order(&mut d, 4, true, now, &radio()); // worst first, raw
+        order(&mut d, 5, true, now, &radio()); // worst first, raw
         assert_eq!(tails(&d), vec![1, 2]);
 
         let mut referenced = radio();
@@ -369,17 +578,22 @@ mod tests {
             at: now,
             efficiency: None,
         });
-        order(&mut d, 4, true, now, &referenced);
+        order(&mut d, 5, true, now, &referenced);
         assert_eq!(tails(&d), vec![2, 1], "the dead-on clock is the best one");
     }
 
-    /// The keys and the columns are one list, so the chrome tag and the header
-    /// cannot name different things.
+    /// The titles and the keys `order` switches on are one list each, of one
+    /// length, so a new column cannot be drawn without something to sort it
+    /// by, and the index the state keeps names the same thing in both.
     #[test]
     fn the_sort_keys_are_the_column_titles() {
-        assert_eq!(SORT_KEYS.len(), 5);
-        assert!(SORT_KEYS.contains(&"PKTS"));
-        assert!(SORT_KEYS.contains(&"CFO"));
+        assert_eq!(SORT_KEYS.len(), Key::ALL.len());
+        assert_eq!(SORT_KEYS[2], "PKTS");
+        assert_eq!(Key::ALL[2], Key::Packets);
+        assert_eq!(SORT_KEYS[5], "CFO");
+        assert_eq!(Key::ALL[5], Key::Cfo);
+        assert_eq!(SORT_KEYS[8], "MOD");
+        assert_eq!(Key::ALL[8], Key::Modulation);
     }
 
     #[test]
@@ -388,16 +602,16 @@ mod tests {
         let mut devices = Vec::new();
         observe(
             &mut devices,
-            [1, 2, 3, 4, 5, 6],
-            false,
-            Some(4.0),
-            Some(Uncertain::from_sigma(120.0, 20.0)),
+            &Sighting {
+                crystal_offset_ppm: Some(Uncertain::from_sigma(120.0, 20.0)),
+                ..heard([1, 2, 3, 4, 5, 6], Some(4.0))
+            },
             now,
         );
         assert_eq!(devices.len(), 1);
         let d = &devices[0];
         assert_eq!(d.packets, 1);
-        assert_eq!(d.best_snr_db, 4.0);
+        assert_eq!(d.best_snr_db, Some(4.0));
         assert_eq!(d.crystal_offset_ppm.unwrap().value(), 120.0);
         assert_eq!(d.first_seen, now);
     }
@@ -411,8 +625,8 @@ mod tests {
         let born = Instant::now();
         let later = born + Duration::from_secs(90);
         let mut devices = Vec::new();
-        observe(&mut devices, [1, 2, 3, 4, 5, 6], false, None, None, born);
-        observe(&mut devices, [1, 2, 3, 4, 5, 6], false, None, None, later);
+        observe(&mut devices, &heard([1, 2, 3, 4, 5, 6], None), born);
+        observe(&mut devices, &heard([1, 2, 3, 4, 5, 6], None), later);
         assert_eq!(devices[0].first_seen, born);
         assert_eq!(devices[0].last_seen, later);
     }
@@ -424,17 +638,17 @@ mod tests {
         let now = Instant::now();
         let mut devices = Vec::new();
         let addr = [1, 2, 3, 4, 5, 6];
-        observe(&mut devices, addr, false, Some(4.0), None, now);
-        observe(&mut devices, addr, false, Some(9.0), None, now);
+        observe(&mut devices, &heard(addr, Some(4.0)), now);
+        observe(&mut devices, &heard(addr, Some(9.0)), now);
         assert_eq!(devices.len(), 1);
         assert_eq!(devices[0].packets, 2);
         // Best-ever, not most-recent: 4.0 dB does not overwrite 9.0 dB.
-        assert_eq!(devices[0].best_snr_db, 9.0);
+        assert_eq!(devices[0].best_snr_db, Some(9.0));
 
         let mut devices2 = Vec::new();
-        observe(&mut devices2, addr, false, Some(9.0), None, now);
-        observe(&mut devices2, addr, false, Some(4.0), None, now);
-        assert_eq!(devices2[0].best_snr_db, 9.0, "order must not matter");
+        observe(&mut devices2, &heard(addr, Some(9.0)), now);
+        observe(&mut devices2, &heard(addr, Some(4.0)), now);
+        assert_eq!(devices2[0].best_snr_db, Some(9.0), "order must not matter");
     }
 
     /// A device's own CFO estimate tightens as more packets report one,
@@ -447,8 +661,13 @@ mod tests {
         let addr = [1, 2, 3, 4, 5, 6];
         let a = Uncertain::from_sigma(100.0, 20.0);
         let b = Uncertain::from_sigma(140.0, 20.0);
-        observe(&mut devices, addr, false, None, Some(a), now);
-        observe(&mut devices, addr, false, None, Some(b), now);
+        for ppm in [a, b] {
+            let s = Sighting {
+                crystal_offset_ppm: Some(ppm),
+                ..heard(addr, None)
+            };
+            observe(&mut devices, &s, now);
+        }
         let combined = devices[0].crystal_offset_ppm.unwrap();
         let direct = a.combine(&b);
         assert_eq!(combined.value(), direct.value());
@@ -483,5 +702,170 @@ mod tests {
         assert_eq!(turnover_per_minute(&[], Duration::from_secs(60), now), 0.0);
         let devices = vec![device(0x01, 1, 0.0, 5, now)];
         assert_eq!(turnover_per_minute(&devices, Duration::ZERO, now), 0.0);
+    }
+
+    /// **The streaming mean is the house mean.** The record keeps sums
+    /// because it cannot keep every reading; this holds the sums to the
+    /// estimator that takes the readings, value and uncertainty both.
+    #[test]
+    fn the_mean_snr_from_sums_is_the_mean_from_the_readings() {
+        let now = Instant::now();
+        let readings = [12.0f32, 9.5, 14.25, 11.0, 7.75, 13.5];
+        let mut devices = Vec::new();
+        for r in readings {
+            observe(&mut devices, &heard([1; 6], Some(r as f64)), now);
+        }
+        let got = devices[0].mean_snr_db().unwrap();
+        let want = crate::signal::dsp::uncertainty::mean_with_uncertainty(&readings);
+        assert!(
+            (got.value() - want.value()).abs() < 1e-9,
+            "{got:?} {want:?}"
+        );
+        assert!(
+            (got.sigma() - want.sigma()).abs() < 1e-9,
+            "{got:?} {want:?}"
+        );
+        assert_eq!(devices[0].best_snr_db, Some(14.25));
+    }
+
+    /// One reading is a mean with no spread to estimate from: an infinite
+    /// uncertainty, which the reading cell dashes, never a zero that would
+    /// read as a perfect measurement. None at all is no mean.
+    #[test]
+    fn one_reading_is_a_mean_nobody_can_vouch_for_and_none_is_no_mean() {
+        let now = Instant::now();
+        let mut devices = Vec::new();
+        observe(&mut devices, &heard([1; 6], None), now);
+        assert!(devices[0].mean_snr_db().is_none());
+        assert_eq!(devices[0].best_snr_db, None);
+
+        observe(&mut devices, &heard([1; 6], Some(8.0)), now);
+        let one = devices[0].mean_snr_db().unwrap();
+        assert_eq!(one.value(), 8.0);
+        assert!(one.sigma().is_infinite());
+
+        // Identical readings: a zero spread, not a negative one from rounding.
+        observe(&mut devices, &heard([1; 6], Some(8.0)), now);
+        observe(&mut devices, &heard([1; 6], Some(8.0)), now);
+        assert_eq!(devices[0].mean_snr_db().unwrap().sigma(), 0.0);
+    }
+
+    /// **A failed CRC is credited only to a device already confirmed, on an
+    /// exact match.** It never makes a row, and never moves the SEEN column:
+    /// the census dates what it confirmed.
+    #[test]
+    fn a_failed_crc_is_credited_only_to_an_address_already_confirmed() {
+        let born = Instant::now();
+        let mut devices = Vec::new();
+        observe(&mut devices, &heard([1; 6], None), born);
+        observe(&mut devices, &heard([1; 6], None), born);
+        observe(&mut devices, &heard([1; 6], None), born);
+
+        assert!(observe_crc_failure(&mut devices, [1; 6]));
+        assert!(
+            !observe_crc_failure(&mut devices, [2; 6]),
+            "an unknown address"
+        );
+        assert_eq!(devices.len(), 1, "no row for an address nobody confirmed");
+        assert_eq!(devices[0].crc_failed, 1);
+        assert_eq!(devices[0].last_seen, born);
+        // Three good, one failed.
+        assert!((devices[0].crc_pass_rate() - 0.75).abs() < 1e-12);
+    }
+
+    /// The PDU types are kept as the set heard, whatever order and however
+    /// often, the extended-advertising codes included.
+    #[test]
+    fn the_pdu_types_are_the_set_heard() {
+        let now = Instant::now();
+        let mut devices = Vec::new();
+        for code in [0x0, 0x4, 0x0, 0x0, 0x7] {
+            let s = Sighting {
+                ble_pdu_code: Some(code),
+                ..heard([1; 6], None)
+            };
+            observe(&mut devices, &s, now);
+        }
+        assert_eq!(devices[0].ble_pdu_type_count(), 3);
+        assert_eq!(
+            devices[0].ble_pdu_codes().collect::<Vec<_>>(),
+            vec![0, 4, 7]
+        );
+    }
+
+    /// The modulation index tightens with packets the way the crystal offset
+    /// does, and a packet B8 could not measure leaves it alone.
+    #[test]
+    fn the_modulation_index_is_refined_and_an_unmeasured_packet_leaves_it() {
+        let now = Instant::now();
+        let a = Uncertain::from_sigma(0.49, 0.02);
+        let b = Uncertain::from_sigma(0.51, 0.02);
+        let mut devices = Vec::new();
+        for m in [Some(a), None, Some(b)] {
+            let s = Sighting {
+                modulation_index: m,
+                ..heard([1; 6], None)
+            };
+            observe(&mut devices, &s, now);
+        }
+        let got = devices[0].modulation_index.unwrap();
+        let want = a.combine(&b);
+        assert_eq!((got.value(), got.sigma()), (want.value(), want.sigma()));
+    }
+
+    /// Every column that can be absent sorts its absent rows last, ascending
+    /// and descending: best SNR, mean SNR and modulation index as well as the
+    /// CFO the rule was first written for.
+    #[test]
+    fn every_optional_column_puts_the_unmeasured_last_both_ways() {
+        let now = Instant::now();
+        let measured = |tail: u8, v: f64| {
+            let mut d = Device {
+                best_snr_db: Some(v as f32),
+                modulation_index: Some(Uncertain::exact(v)),
+                ..Device::heard([0, 0, 0, 0, 0, tail], false, now)
+            };
+            for _ in 0..2 {
+                d.snr_count += 1;
+                d.snr_sum += v;
+                d.snr_sum_sq += v * v;
+            }
+            d
+        };
+        let tails = |d: &[Device]| d.iter().map(|x| x.address[5]).collect::<Vec<_>>();
+        for sort in [3, 6, 8] {
+            let mut d = vec![
+                Device::heard([0, 0, 0, 0, 0, 1], false, now),
+                measured(2, 1.0),
+                measured(3, 5.0),
+            ];
+            order(&mut d, sort, true, now, &radio());
+            assert_eq!(tails(&d), vec![3, 2, 1], "{} descending", SORT_KEYS[sort]);
+            order(&mut d, sort, false, now, &radio());
+            assert_eq!(tails(&d), vec![2, 3, 1], "{} ascending", SORT_KEYS[sort]);
+        }
+    }
+
+    /// CRC orders by pass rate and TYPES by how many were heard: worst link
+    /// first when ascending, the chattiest device first when descending.
+    #[test]
+    fn crc_and_types_order_by_what_they_name() {
+        let now = Instant::now();
+        let d = |tail: u8, good: u64, bad: u64, types: u16| Device {
+            packets: good,
+            crc_failed: bad,
+            ble_pdu_types: types,
+            ..Device::heard([0, 0, 0, 0, 0, tail], false, now)
+        };
+        let tails = |d: &[Device]| d.iter().map(|x| x.address[5]).collect::<Vec<_>>();
+        let make = || vec![d(1, 10, 0, 0b1), d(2, 5, 5, 0b10011), d(3, 9, 1, 0b11)];
+
+        let mut v = make();
+        order(&mut v, 4, false, now, &radio());
+        assert_eq!(tails(&v), vec![2, 3, 1], "50 %, 90 %, 100 %");
+
+        let mut v = make();
+        order(&mut v, 7, true, now, &radio());
+        assert_eq!(tails(&v), vec![2, 3, 1], "3 types, 2, 1");
     }
 }

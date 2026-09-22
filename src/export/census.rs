@@ -43,11 +43,16 @@ pub fn rows(state: &SdrMetrics) -> Vec<String> {
                 .crystal_offset_ppm
                 .map(|u| format!("{:.2}", state.radio.corrected_ppm(u, now).0.value()))
                 .unwrap_or_default();
+            // Blank for the same reason: no packet from it reported an SNR.
+            let snr = d
+                .best_snr_db
+                .map(|db| format!("{db:.1}"))
+                .unwrap_or_default();
             format!(
-                "{},{},{:.1},{},{},{}",
+                "{},{},{},{},{},{}",
                 super::csv_field(&d.address_text(&state.net, None)),
                 d.packets,
-                d.best_snr_db,
+                snr,
                 cfo,
                 now.saturating_duration_since(d.first_seen).as_secs(),
                 now.saturating_duration_since(d.last_seen).as_secs()
@@ -77,22 +82,25 @@ mod tests {
         let mut m = SdrMetrics::fixture().streaming();
         m.net.census.devices = vec![
             Device {
-                address: [0xf0, 0x18, 0x98, 0, 0x11, 0x22],
-                random: false,
                 packets: 7,
-                best_snr_db: -88.0,
-                first_seen: now - Duration::from_secs(300),
+                best_snr_db: Some(-88.0),
                 last_seen: now - Duration::from_secs(240),
-                crystal_offset_ppm: None,
+                ..Device::heard(
+                    [0xf0, 0x18, 0x98, 0, 0x11, 0x22],
+                    false,
+                    now - Duration::from_secs(300),
+                )
             },
             Device {
-                address: [0xa4, 0x83, 0xe7, 0x1c, 9, 0xbe],
-                random: false,
                 packets: 1_204,
-                best_snr_db: -41.2,
-                first_seen: now - Duration::from_secs(600),
+                best_snr_db: Some(-41.2),
                 last_seen: now - Duration::from_secs(2),
                 crystal_offset_ppm: Some(crate::signal::dsp::uncertainty::Uncertain::exact(15.0)),
+                ..Device::heard(
+                    [0xa4, 0x83, 0xe7, 0x1c, 9, 0xbe],
+                    false,
+                    now - Duration::from_secs(600),
+                )
             },
         ];
         m.net.census.sort = 2;

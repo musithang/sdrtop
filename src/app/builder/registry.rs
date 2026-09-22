@@ -558,10 +558,14 @@ mod tests {
         });
         crate::signal::net::census::observe(
             &mut m.net.census.devices,
-            [1, 2, 3, 4, 5, 6],
-            false,
-            Some(12.0),
-            Some(Uncertain::from_sigma(10.0, 0.2)),
+            &crate::signal::net::census::Sighting {
+                address: [1, 2, 3, 4, 5, 6],
+                random: false,
+                snr_db: Some(12.0),
+                crystal_offset_ppm: Some(Uncertain::from_sigma(10.0, 0.2)),
+                ble_pdu_code: Some(0x0),
+                modulation_index: None,
+            },
             now,
         );
 
