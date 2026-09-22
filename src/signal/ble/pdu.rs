@@ -108,10 +108,20 @@ impl PduType {
 #[derive(Clone, Debug, PartialEq)]
 pub struct Packet {
     pub pdu_type: PduType,
+    /// Byte 0 bit 5, ChSel: the advertiser (on ADV_IND and ADV_DIRECT_IND)
+    /// or initiator (on CONNECT_IND) supports channel selection algorithm #2.
+    /// Reserved on every other legacy type, so read, kept and shown only
+    /// where it means something (net-ux-polish-plan 5.1).
+    pub ch_sel: bool,
     pub tx_add_random: bool,
     pub rx_add_random: bool,
     pub length: u8,
     pub adv_addr: Option<[u8; 6]>,
+    /// The PDU's payload, `length` octets after the header, as sent: AdvA
+    /// and the advertising data behind it, or whatever the type carries.
+    /// Kept whether or not the CRC passed; what reads it (the AD structures,
+    /// `connect::decode`) is what refuses a failed one.
+    pub payload: Vec<u8>,
     pub crc_ok: bool,
     pub snr_db: Option<f64>,
     pub freq_offset_hz: Option<crate::signal::dsp::uncertainty::Uncertain>,
@@ -190,6 +200,7 @@ pub fn decode(bits: &[bool]) -> Option<Packet> {
     };
     let byte0 = byte(0);
     let pdu_type = PduType::from_bits(byte0);
+    let ch_sel = (byte0 >> 5) & 1 != 0;
     let tx_add_random = (byte0 >> 6) & 1 != 0;
     let rx_add_random = (byte0 >> 7) & 1 != 0;
     let length = self::length(bits)?;
@@ -230,10 +241,12 @@ pub fn decode(bits: &[bool]) -> Option<Packet> {
 
     Some(Packet {
         pdu_type,
+        ch_sel,
         tx_add_random,
         rx_add_random,
         length,
         adv_addr,
+        payload: pdu_bytes[2..].to_vec(),
         crc_ok,
         snr_db: None,
         freq_offset_hz: None,
@@ -371,6 +384,45 @@ mod tests {
         assert_eq!(packet.length, payload.len() as u8);
         assert_eq!(packet.adv_addr, Some(addr));
         assert!(packet.crc_ok);
+    }
+
+    /// **What was decoded is kept**: the payload whole, AdvA included, and
+    /// ChSel and RxAdd from byte 0, each read from its own bit so a decoder
+    /// reading a neighbour cannot pass.
+    #[test]
+    fn the_payload_and_the_header_bits_are_kept() {
+        let addr = [0x11, 0x22, 0x33, 0x44, 0x55, 0x66];
+        let mut payload = air_octets(addr).to_vec();
+        payload.extend_from_slice(&[0x02, 0x01, 0x06]);
+        // ADV_IND with ChSel (bit 5) and RxAdd (bit 7), TxAdd (bit 6) clear.
+        let mut bits = encode(37, 0x20 | 0x80, &payload);
+        whiten(&mut bits, 37);
+        let packet = decode(&bits).unwrap();
+        assert!(packet.ch_sel);
+        assert!(packet.rx_add_random);
+        assert!(!packet.tx_add_random);
+        assert_eq!(packet.payload, payload);
+
+        let mut plain = encode(37, 0x00, &payload);
+        whiten(&mut plain, 37);
+        assert!(!decode(&plain).unwrap().ch_sel);
+    }
+
+    /// The real ADV_NONCONN_IND's payload is its fourteen octets: the
+    /// address, in air order, then eight of advertising data.
+    #[test]
+    fn a_real_packet_keeps_its_fourteen_octets() {
+        let mut bits: Vec<bool> = REAL_CH37_ADV_NONCONN_IND_AIR_BITS
+            .chars()
+            .map(|c| c == '1')
+            .collect();
+        whiten(&mut bits, 37);
+        let packet = decode(&bits).unwrap();
+        assert_eq!(packet.payload.len(), 14);
+        assert_eq!(
+            packet.payload[..6],
+            air_octets([209, 154, 126, 145, 39, 158])
+        );
     }
 
     /// `TxAdd` set is a random address, and the type without an `AdvA` at

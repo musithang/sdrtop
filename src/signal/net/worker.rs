@@ -468,9 +468,12 @@ impl NetWorker {
                                 m.net.ble_packets.push_front(BlePacket {
                                     channel: ch,
                                     pdu_type: p.pdu_type,
+                                    ch_sel: p.ch_sel,
                                     tx_add_random: p.tx_add_random,
+                                    rx_add_random: p.rx_add_random,
                                     length: p.length,
                                     adv_addr: p.adv_addr,
+                                    payload: p.payload,
                                     crc_ok: p.crc_ok,
                                     snr_db: p.snr_db,
                                     freq_offset_hz: p.freq_offset_hz,
@@ -965,6 +968,14 @@ mod tests {
         assert_eq!(m.net.address_book.get(addr), Some(1));
 
         // B10's own exit condition: a confirmed device reaches the shared
+        // What was decoded reaches the state whole: the payload the AD
+        // structures will be read from, the address in air order inside it.
+        assert_eq!(
+            p.payload,
+            crate::signal::ble::pdu::air_octets(addr).to_vec(),
+            "{p:?}"
+        );
+        assert!(!p.ch_sel && !p.rx_add_random);
         // census too, keyed by the same address `net_ble_packets` shows.
         assert_eq!(m.net.census.devices.len(), 1, "{:?}", m.net.census.devices);
         assert_eq!(m.net.census.devices[0].address, addr);

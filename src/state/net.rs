@@ -565,9 +565,21 @@ pub struct BtHop {
 pub struct BlePacket {
     pub channel: u8,
     pub pdu_type: crate::signal::ble::pdu::PduType,
+    /// ChSel, where the type defines it (`pdu::Packet::ch_sel`).
+    // Read by the packet detail view (net-ux-polish-plan 5.3-5.4); until
+    // then only by the tests, and these allows go with that step.
+    #[cfg_attr(not(test), allow(dead_code))]
+    pub ch_sel: bool,
     pub tx_add_random: bool,
+    #[cfg_attr(not(test), allow(dead_code))]
+    pub rx_add_random: bool,
     pub length: u8,
     pub adv_addr: Option<[u8; 6]>,
+    /// The PDU's payload as decoded (`pdu::Packet::payload`): what the AD
+    /// structures and a CONNECT_IND's parameters are read from. Bounded by
+    /// the ring (`BLE_PACKET_LIMIT`) and by the length field's 6 bits.
+    #[cfg_attr(not(test), allow(dead_code))]
+    pub payload: Vec<u8>,
     pub crc_ok: bool,
     /// B7: read from the detector's own coherence at the moment this
     /// packet's sync word was found. `None` only at a coherence of one -
