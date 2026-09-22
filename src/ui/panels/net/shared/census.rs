@@ -15,10 +15,6 @@
 //! state reads the same condition the feed-health panel dashes its BLE rows on,
 //! and says either that the room was quiet or that nobody was counting.
 //! Printing a bare empty table would let a reader take the flattering one.
-//!
-//! **Three blocks under the table, in the order they give way:** the table
-//! itself, the selected device's detail, and the room's clocks (`clocks`),
-//! each drawn only when the panel has room for it whole.
 
 use ratatui::{
     layout::Rect,
@@ -37,13 +33,7 @@ use crate::ui::widgets::table::{
     columns_that_fit, header, row, viewport_start, widen, Align, Column, Sort,
 };
 
-mod clocks;
-
 pub struct NetCensusPanel;
-
-/// Rows the table keeps before the clocks picture may take any: enough to
-/// read the room's top few, which is what the panel is for.
-const TABLE_KEEPS: usize = 5;
 
 /// The columns, in the order they are drawn and in the same order as
 /// [`SORT_KEYS`], so the header, the chrome tag and the ordering cannot disagree
@@ -76,12 +66,15 @@ const COLUMNS: &[Column] = &[
     },
     Column {
         title: "CFO",
-        width: 15,
+        // `-100.43 ±0.07 ppm`: three integer digits and a sign, which a
+        // cheap crystal reaches (a live room had two at -95).
+        width: 17,
         align: Align::Right,
     },
     Column {
         title: "MEAN SNR",
-        width: 14,
+        // `-12.34 ±0.15 dB`.
+        width: 15,
         align: Align::Right,
     },
     Column {
@@ -91,7 +84,9 @@ const COLUMNS: &[Column] = &[
     },
     Column {
         title: "MOD",
-        width: 12,
+        // `0.4828 ±0.0015`: a tight uncertainty with a leading 1 earns
+        // four places.
+        width: 14,
         align: Align::Right,
     },
 ];
@@ -513,14 +508,9 @@ impl Panel for NetCensusPanel {
         if height < extra.len() + 4 {
             extra.clear();
         }
-        // The clocks picture illustrates the table and gives way to both it
-        // and the detail: it takes what is left once the table has kept a
-        // handful of rows, and draws nothing rather than a squashed picture.
-        let room = height.saturating_sub(2 + extra.len() + devices.len().min(TABLE_KEEPS));
-        let picture = clocks::lines(&devices, state, now, width, room, theme);
         // One row for the header and one for the turnover summary, plus
-        // whatever the two blocks took, so the list gets the rest.
-        let body = height.saturating_sub(2 + extra.len() + picture.len());
+        // whatever the detail block took, so the list gets the rest.
+        let body = height.saturating_sub(2 + extra.len());
         let start = viewport_start(
             census.selection.first_visible,
             cursor.unwrap_or(0),
@@ -537,7 +527,6 @@ impl Panel for NetCensusPanel {
             ));
         }
         lines.push(turnover_line(&devices, now, theme));
-        lines.extend(picture);
         lines.extend(extra);
         f.render_widget(Paragraph::new(lines), inner);
     }
@@ -641,7 +630,7 @@ mod tests {
     fn an_empty_census_with_no_decoder_says_nobody_is_counting() {
         // Wide enough for the columns through CFO, the selection gutter
         // included.
-        let out = draw(NetCensusPanel, 70, 10, &SdrMetrics::fixture().streaming()).join("\n");
+        let out = draw(NetCensusPanel, 72, 10, &SdrMetrics::fixture().streaming()).join("\n");
         assert!(out.contains("no census yet"), "{out}");
         assert!(out.contains("not an empty room"), "{out}");
         // The columns are still shown, so the shape of the answer is visible.
@@ -679,7 +668,7 @@ mod tests {
     /// does not - an absent measurement, not a zero-error clock.
     #[test]
     fn cfo_shows_when_measured_and_dashes_when_not() {
-        let out = draw(NetCensusPanel, 70, 10, &populated()).join("\n");
+        let out = draw(NetCensusPanel, 72, 10, &populated()).join("\n");
         assert!(
             out.contains("35.4 ±0.5 ppm"),
             "measured CFO should show: {out}"
@@ -799,8 +788,7 @@ mod tests {
         assert!(marked(&rows).is_empty(), "{}", rows.join("\n"));
     }
 
-    /// Twenty clocks, bunched the way a real room bunches: most within a
-    /// few ppm of each other, a tail of cheap crystals, one badly known.
+    /// Twenty devices, for the size sweep: a list longer than any panel.
     fn crowded() -> SdrMetrics {
         let now = Instant::now();
         let mut m = SdrMetrics::fixture().streaming();
@@ -968,59 +956,31 @@ mod tests {
         assert!(out.contains("a ceiling"), "{out}");
     }
 
-    /// A line that is the clocks ruler: zero on it, and the unit at its end.
-    fn ruler_line(l: &str) -> bool {
-        l.trim_end_matches(['│', ' ']).ends_with(" ppm") && l.contains(" 0 ")
-    }
-
-    /// **The room's clocks under the table**: how many are measured out of
-    /// how many there are, and the selected one's bar drawn heavy.
+    /// **No cell is cut.** The widest readings a live room produced (two
+    /// crystals near -95 ppm, a modulation index whose uncertainty earned four
+    /// places) printed as `-94.43 ±0.07 pp` and `0.4828 ±0.00` with the
+    /// columns 4.2.b first gave them: the table widget cuts a cell wider than
+    /// its column, and a cut reading reads as a different reading.
     #[test]
-    fn the_clocks_picture_shows_the_room_and_marks_the_selected_clock() {
-        let out = draw(NetCensusPanel, 100, 30, &selected()).join("\n");
-        assert!(out.contains("CLOCKS"), "{out}");
-        assert!(out.contains("2 of 3 measured"), "{out}");
-        assert!(out.contains("┣●┫"), "the selected bar, heavy:\n{out}");
-        assert!(
-            out.lines().any(ruler_line),
-            "the ruler names its unit:\n{out}"
-        );
-        // The picture sits between the table and the detail block.
-        assert!(out.find("CLOCKS") < out.find("SELECTED"), "{out}");
-    }
-
-    /// A census whose devices have reported no offset says so, rather than
-    /// drawing an empty axis that would read as a room of perfect clocks.
-    #[test]
-    fn a_census_with_no_offsets_says_so_instead_of_drawing_an_empty_axis() {
-        let mut m = populated();
-        for d in &mut m.net.census.devices {
-            d.crystal_offset_ppm = None;
+    fn the_widest_live_readings_fit_their_columns_whole() {
+        let now = Instant::now();
+        let mut m = SdrMetrics::fixture().streaming();
+        m.net.census.devices = vec![with_snr(
+            Device {
+                packets: 11,
+                best_snr_db: Some(-12.3),
+                crystal_offset_ppm: Some(Uncertain::from_sigma(-100.43, 0.07)),
+                modulation_index: Some(Uncertain::from_sigma(0.4828, 0.0015)),
+                ..Device::heard([0x51, 0x7f, 0xa9, 0xca, 0xf7, 0x65], true, now)
+            },
+            11,
+            -12.34,
+            0.5,
+        )];
+        let out = draw(NetCensusPanel, 150, 8, &m).join("\n");
+        for cell in ["-100.43 ±0.07 ppm", "0.4828 ±0.0015", "-12.34 ±0.15 dB"] {
+            assert!(out.contains(cell), "{cell}:\n{out}");
         }
-        let out = draw(NetCensusPanel, 90, 24, &m).join("\n");
-        assert!(
-            out.contains("no packet has reported an offset yet"),
-            "{out}"
-        );
-        assert!(!out.lines().any(ruler_line), "{out}");
-    }
-
-    /// **The picture gives way to the table.** On a short panel it is not
-    /// drawn at all and the rows keep the space.
-    #[test]
-    fn the_clocks_picture_gives_way_to_the_table() {
-        let out = draw(NetCensusPanel, 90, 10, &crowded()).join("\n");
-        assert!(!out.contains("CLOCKS"), "{out}");
-        assert_eq!(out.matches("10:00:00:00:00:").count(), 6, "{out}");
-    }
-
-    /// Bars that do not fit are counted, never dropped silently: with room
-    /// for one row of bars only, the count goes on the section rule.
-    #[test]
-    fn bars_left_off_a_short_picture_are_counted() {
-        let out = draw(NetCensusPanel, 70, 14, &crowded()).join("\n");
-        assert!(out.contains("CLOCKS"), "{out}");
-        assert!(out.contains("not drawn"), "{out}");
     }
 
     #[test]
