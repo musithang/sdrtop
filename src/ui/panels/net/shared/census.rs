@@ -29,6 +29,7 @@ use ratatui::{
     Frame,
 };
 
+use crate::signal::ble::address::AddressKind;
 use crate::signal::dsp::uncertainty::Uncertain;
 use crate::signal::net::census::{Device, SORT_KEYS};
 use crate::state::{RadioState, SdrMetrics};
@@ -54,6 +55,13 @@ const COLUMNS: &[Column] = &[
     Column {
         title: "ADDRESS",
         width: 17,
+        align: Align::Left,
+    },
+    Column {
+        title: "KIND",
+        // `reserved`, the longest of `signal::ble::address::AddressKind`'s
+        // labels.
+        width: 8,
         align: Align::Left,
     },
     Column {
@@ -136,6 +144,7 @@ fn cells(
     let radio = &state.radio;
     vec![
         d.address_text(&state.net, Some(address_width)),
+        d.kind().label().to_string(),
         ago(now.saturating_duration_since(d.last_seen).as_secs()),
         d.packets.to_string(),
         fmt_best_snr(d),
@@ -201,19 +210,57 @@ fn pdu_types(d: &Device) -> String {
 /// few seconds.
 const TURNOVER_WINDOW: std::time::Duration = std::time::Duration::from_secs(300);
 
-/// B13's exit condition, on screen: how many distinct addresses have
-/// appeared per unit time - a measurement about the protocol's own address
-/// rotation, not a claim about which of them are the same device wearing a
-/// new one. See [`crate::signal::net::census::turnover_per_minute`]'s own
-/// doc for why that claim is not this measurement's to make.
+/// B13's exit condition, on screen, split by kind (4.4): how many distinct
+/// addresses have appeared per minute, and of which kind, so the line says
+/// whether it is a rotation rate. `1.2 new/min: 0.8 resolvable private, 0.4
+/// public` reads as devices here changing their addresses and one device
+/// arriving; a bare `1.2` could be either. Still a measurement about the
+/// protocol, not a claim that two addresses are one device (see
+/// [`crate::signal::net::census::turnover_by_kind`]).
+///
+/// The kinds' full names where they fit, the table's abbreviations where they
+/// do not, the total alone where neither does: a kind cut in half would read
+/// as a different kind.
+fn turnover_text(devices: &[Device], now: std::time::Instant, width: usize) -> String {
+    let split = crate::signal::net::census::turnover_by_kind(devices, TURNOVER_WINDOW, now);
+    let total: f64 = split.iter().map(|(_, r)| r).sum();
+    let tail = " (last 5 min)";
+    let candidates: Vec<String> = match split.as_slice() {
+        [] => vec!["no new addresses in the last 5 min".to_string()],
+        [(k, r)] => vec![
+            format!("{r:.1} new/min, all {}{tail}", k.name()),
+            format!("{r:.1} new/min, all {}{tail}", k.label()),
+            format!("{r:.1} new/min{tail}"),
+        ],
+        many => {
+            let list = |name: fn(AddressKind) -> &'static str| {
+                many.iter()
+                    .map(|(k, r)| format!("{r:.1} {}", name(*k)))
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            };
+            vec![
+                format!("{total:.1} new/min: {}{tail}", list(AddressKind::name)),
+                format!("{total:.1} new/min: {}{tail}", list(AddressKind::label)),
+                format!("{total:.1} new/min{tail}"),
+            ]
+        }
+    };
+    let last = candidates.last().cloned().unwrap_or_default();
+    candidates
+        .into_iter()
+        .find(|c| c.chars().count() < width)
+        .unwrap_or(last)
+}
+
 fn turnover_line(
     devices: &[Device],
     now: std::time::Instant,
+    width: usize,
     theme: &crate::Theme,
 ) -> Line<'static> {
-    let rate = crate::signal::net::census::turnover_per_minute(devices, TURNOVER_WINDOW, now);
     Line::from(Span::styled(
-        format!("{rate:.1} new addresses/min (last 5 min)"),
+        format!(" {}", turnover_text(devices, now, width)),
         Style::default().fg(theme.label),
     ))
 }
@@ -575,7 +622,7 @@ impl Panel for NetCensusPanel {
                 theme,
             ));
         }
-        lines.push(turnover_line(&devices, now, theme));
+        lines.push(turnover_line(&devices, now, width, theme));
         // The first line under the block's section rule.
         let dial_row = lines.len() + 1;
         lines.extend(meters);
@@ -693,9 +740,15 @@ mod tests {
     fn an_empty_census_with_no_decoder_says_nobody_is_counting() {
         // Wide enough for the columns through CFO, the selection gutter
         // included.
-        let out = draw(NetCensusPanel, 72, 10, &SdrMetrics::fixture().streaming()).join("\n");
+        let out = draw(NetCensusPanel, 90, 10, &SdrMetrics::fixture().streaming()).join("\n");
         assert!(out.contains("no census yet"), "{out}");
-        assert!(out.contains("not an empty room"), "{out}");
+        // Read as prose, so where the sentence wraps is not the test.
+        let prose = out
+            .lines()
+            .map(|l| l.trim_matches(['│', ' ']))
+            .collect::<Vec<_>>()
+            .join(" ");
+        assert!(prose.contains("this is not an empty room"), "{out}");
         // The columns are still shown, so the shape of the answer is visible.
         assert!(out.contains("ADDRESS"), "{out}");
         assert!(out.contains("SNR"), "{out}");
@@ -731,7 +784,7 @@ mod tests {
     /// does not - an absent measurement, not a zero-error clock.
     #[test]
     fn cfo_shows_when_measured_and_dashes_when_not() {
-        let out = draw(NetCensusPanel, 72, 10, &populated()).join("\n");
+        let out = draw(NetCensusPanel, 81, 10, &populated()).join("\n");
         assert!(
             out.contains("35.4 ±0.5 ppm"),
             "measured CFO should show: {out}"
@@ -758,7 +811,10 @@ mod tests {
     #[test]
     fn the_turnover_line_counts_only_recent_first_sightings() {
         let out = draw(NetCensusPanel, 70, 12, &populated()).join("\n");
-        assert!(out.contains("0.4 new addresses/min"), "{out}");
+        assert!(
+            out.contains("0.4 new/min, all public (last 5 min)"),
+            "{out}"
+        );
     }
 
     /// The chrome says how the table is ordered, so the answer does not depend
@@ -766,13 +822,13 @@ mod tests {
     #[test]
     fn the_chrome_says_what_orders_the_table() {
         let mut m = populated();
-        m.net.census.sort = 2;
+        m.net.census.sort = crate::signal::net::census::column("PKTS");
         m.net.census.descending = true;
         let out = draw(NetCensusPanel, 60, 10, &m);
         assert!(out[0].contains("\u{2193}PKTS"), "{}", out[0]);
         assert!(out[1].contains("PKTS\u{25be}"), "{}", out[1]);
 
-        m.net.census.sort = 0;
+        m.net.census.sort = crate::signal::net::census::column("ADDRESS");
         m.net.census.descending = false;
         let out = draw(NetCensusPanel, 60, 10, &m);
         assert!(out[0].contains("\u{2191}ADDRESS"), "{}", out[0]);
@@ -781,7 +837,7 @@ mod tests {
     #[test]
     fn the_rows_come_out_in_the_order_the_state_asked_for() {
         let mut m = populated();
-        m.net.census.sort = 2;
+        m.net.census.sort = crate::signal::net::census::column("PKTS");
         m.net.census.descending = true;
         let out = draw(NetCensusPanel, 60, 10, &m).join("\n");
         let at = |s: &str| out.find(s).unwrap_or(usize::MAX);
@@ -789,7 +845,7 @@ mod tests {
         assert!(at("00:1a:11") < at("f0:18:98"), "96 before 7:\n{out}");
 
         // Ascending by address is a different order, and the panel follows it.
-        m.net.census.sort = 0;
+        m.net.census.sort = crate::signal::net::census::column("ADDRESS");
         m.net.census.descending = false;
         let out = draw(NetCensusPanel, 60, 10, &m).join("\n");
         let at = |s: &str| out.find(s).unwrap_or(usize::MAX);
@@ -807,13 +863,13 @@ mod tests {
         let mut m = populated();
         m.net.census.selection.selected = Some(busiest);
 
-        m.net.census.sort = 2;
+        m.net.census.sort = crate::signal::net::census::column("PKTS");
         m.net.census.descending = true;
         let rows = draw(NetCensusPanel, 60, 10, &m);
         let picked = rows.iter().position(|l| l.contains("a4:83:e7")).unwrap();
         assert_eq!(marked(&rows), vec![picked], "the mark is on its row");
 
-        m.net.census.sort = 0;
+        m.net.census.sort = crate::signal::net::census::column("ADDRESS");
         m.net.census.descending = false;
         let rows = draw(NetCensusPanel, 60, 10, &m);
         let moved = rows.iter().position(|l| l.contains("a4:83:e7")).unwrap();
@@ -1276,6 +1332,62 @@ mod tests {
             "{out}"
         );
         assert!(!out.contains('◄'), "{out}");
+    }
+
+    /// **KIND is read from the address, and sorts.** A public address, a
+    /// resolvable private one and a static one, each labelled as the table
+    /// abbreviates it, and ordered public first.
+    #[test]
+    fn the_kind_column_names_each_address_and_sorts_by_it() {
+        let now = Instant::now();
+        let mut m = SdrMetrics::fixture().streaming();
+        m.net.census.devices = vec![
+            Device::heard([0x4a, 1, 2, 3, 4, 5], true, now),
+            Device::heard([0xc7, 1, 2, 3, 4, 6], true, now),
+            Device::heard([0xa4, 0x83, 0xe7, 3, 4, 7], false, now),
+        ];
+        m.net.census.sort = crate::signal::net::census::column("KIND");
+        let out = draw(NetCensusPanel, 90, 10, &m);
+        assert!(out[1].contains("KIND"), "{}", out[1]);
+        let row = |tail: &str| out.iter().position(|l| l.contains(tail)).unwrap();
+        assert!(out[row("04:07")].contains(" public "), "{}", out.join("\n"));
+        assert!(out[row("04:05")].contains(" RPA "), "{}", out.join("\n"));
+        assert!(out[row("04:06")].contains(" static "), "{}", out.join("\n"));
+        assert!(row("04:07") < row("04:06") && row("04:06") < row("04:05"));
+    }
+
+    /// **The turnover line says which kind is turning over.** Full names
+    /// where they fit, the table's abbreviations where they do not, the total
+    /// alone where neither does, and plain words when nothing is new.
+    #[test]
+    fn the_turnover_line_splits_by_kind_and_narrows_whole() {
+        let now = Instant::now();
+        let ago = |s| now - Duration::from_secs(s);
+        let devices = vec![
+            Device::heard([0x40, 0, 0, 0, 0, 1], true, ago(10)),
+            Device::heard([0x41, 0, 0, 0, 0, 2], true, ago(20)),
+            Device::heard([0x11, 0, 0, 0, 0, 3], false, ago(30)),
+        ];
+        assert_eq!(
+            turnover_text(&devices, now, 120),
+            "0.6 new/min: 0.4 resolvable private, 0.2 public (last 5 min)"
+        );
+        assert_eq!(
+            turnover_text(&devices, now, 50),
+            "0.6 new/min: 0.4 RPA, 0.2 public (last 5 min)"
+        );
+        assert_eq!(turnover_text(&devices, now, 30), "0.6 new/min (last 5 min)");
+
+        let rpa_only = &devices[..2];
+        assert_eq!(
+            turnover_text(rpa_only, now, 120),
+            "0.4 new/min, all resolvable private (last 5 min)"
+        );
+        let old = vec![Device::heard([0x40, 0, 0, 0, 0, 1], true, ago(900))];
+        assert_eq!(
+            turnover_text(&old, now, 120),
+            "no new addresses in the last 5 min"
+        );
     }
 
     #[test]

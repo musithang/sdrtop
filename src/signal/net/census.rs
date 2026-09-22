@@ -27,8 +27,10 @@
 //! say so (`ble_pdu_types`, `modulation_index` from B8's LE 1M measurement)
 //! rather than taking general names a second arc's different type space would
 //! then have to squeeze into. The census stays protocol-neutral in the sense
-//! that matters: it keeps codes and numbers and imports nothing from `ble`;
-//! naming them is the panel's job.
+//! that matters: it keeps codes and numbers, and naming them is the panel's
+//! job. The one thing it asks of `ble` is the address kind (4.4), which is not
+//! a new fact about a device but a reading of two it already holds: the
+//! address and the TxAdd bit it was sent with (`random`).
 //!
 //! **Sums in the record, statistics on the screen.** The mean SNR is kept as
 //! a count and two running sums, and turned into a mean and its uncertainty
@@ -40,6 +42,7 @@
 
 use std::time::Instant;
 
+use crate::signal::ble::address::AddressKind;
 use crate::signal::dsp::uncertainty::Uncertain;
 
 /// One transmitter, as the census knows it.
@@ -176,6 +179,13 @@ impl Device {
         self.packets as f64 / total as f64
     }
 
+    /// What kind of address this is (`signal::ble::address::kind`): public,
+    /// static, or one of the private kinds, read from the address and the
+    /// TxAdd bit it came with.
+    pub fn kind(&self) -> AddressKind {
+        crate::signal::ble::address::kind(self.address, self.random)
+    }
+
     /// How many distinct PDU types it has been heard sending.
     pub fn ble_pdu_type_count(&self) -> u32 {
         self.ble_pdu_types.count_ones()
@@ -195,13 +205,25 @@ impl Device {
 /// columns_that_fit` drops from the right), so the measurements a reader is
 /// most likely to need come first and the ones that need the most room last.
 pub const SORT_KEYS: &[&str] = &[
-    "ADDRESS", "SEEN", "PKTS", "SNR", "CRC", "CFO", "MEAN SNR", "TYPES", "MOD",
+    "ADDRESS", "KIND", "SEEN", "PKTS", "SNR", "CRC", "CFO", "MEAN SNR", "TYPES", "MOD",
 ];
+
+/// The index of the column titled `title` in [`SORT_KEYS`], for the tests
+/// that set a sort: by name, so a column added in the middle does not
+/// silently turn every one of them into a test of the column beside it.
+#[cfg(test)]
+pub fn column(title: &str) -> usize {
+    SORT_KEYS
+        .iter()
+        .position(|k| *k == title)
+        .unwrap_or_else(|| panic!("no column {title}"))
+}
 
 /// One entry of [`SORT_KEYS`], by what it orders on rather than where it is.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum Key {
     Address,
+    Kind,
     Seen,
     Packets,
     BestSnr,
@@ -215,8 +237,9 @@ enum Key {
 impl Key {
     /// Every key, in [`SORT_KEYS`] order: a test holds the two lists to one
     /// length, and one title each.
-    const ALL: [Key; 9] = [
+    const ALL: [Key; 10] = [
         Key::Address,
+        Key::Kind,
         Key::Seen,
         Key::Packets,
         Key::BestSnr,
@@ -275,6 +298,7 @@ pub fn order(
                     Key::Seen => now
                         .saturating_duration_since(a.last_seen)
                         .cmp(&now.saturating_duration_since(b.last_seen)),
+                    Key::Kind => kind_rank(a.kind()).cmp(&kind_rank(b.kind())),
                     Key::Packets => a.packets.cmp(&b.packets),
                     Key::Crc => a.crc_pass_rate().total_cmp(&b.crc_pass_rate()),
                     Key::Types => a.ble_pdu_type_count().cmp(&b.ble_pdu_type_count()),
@@ -289,6 +313,19 @@ pub fn order(
         };
         ordering.then_with(|| a.address.cmp(&b.address))
     });
+}
+
+/// The order KIND sorts in: from the address that says most about who sent
+/// it to the one that says least - public, static, resolvable, non-resolvable
+/// - with the reserved kind, which no compliant device sends, last.
+fn kind_rank(k: AddressKind) -> u8 {
+    match k {
+        AddressKind::Public => 0,
+        AddressKind::Static => 1,
+        AddressKind::ResolvablePrivate => 2,
+        AddressKind::NonResolvablePrivate => 3,
+        AddressKind::Reserved => 4,
+    }
 }
 
 /// Two optional readings compared: by value when both exist, reversed when
@@ -413,21 +450,57 @@ pub fn observe_crc_failure(devices: &mut [Device], address: [u8; 6]) -> bool {
 /// every 15 minutes for a resolvable private address) shows up as a small,
 /// intermittent bump in this number rather than a step in an ever-climbing
 /// total that never says whether the room emptied or just went quiet.
-pub fn turnover_per_minute(devices: &[Device], window: std::time::Duration, now: Instant) -> f64 {
+///
+/// **Split by address kind (net-ux-polish-plan 4.4), busiest kind first**,
+/// the kind breaking a tie in [`kind_rank`]'s order. Only the private kinds
+/// are regenerated while a device runs (the Generic Access Profile's
+/// private-address timer, Core Vol 3 Part C 10.7, fifteen minutes
+/// recommended; a static address changes only across a power cycle, Vol 6
+/// Part B 1.3.2.1; cited from the specification's structure, not quoted from
+/// a copy read this session). So a total that mixes kinds is not the rotation
+/// rate B13 set out to show: a new public address is a device walking in, a
+/// new resolvable one may be a device already here wearing a new address.
+/// Split, the line can say which. Empty when nothing new appeared, or the
+/// window is zero.
+pub fn turnover_by_kind(
+    devices: &[Device],
+    window: std::time::Duration,
+    now: Instant,
+) -> Vec<(AddressKind, f64)> {
     if window.is_zero() {
-        return 0.0;
+        return Vec::new();
     }
-    let new_count = devices
+    let minutes = window.as_secs_f64() / 60.0;
+    let mut counts: Vec<(AddressKind, usize)> = Vec::new();
+    for d in devices
         .iter()
         .filter(|d| now.saturating_duration_since(d.first_seen) <= window)
-        .count();
-    new_count as f64 / (window.as_secs_f64() / 60.0)
+    {
+        let k = d.kind();
+        match counts.iter_mut().find(|(c, _)| *c == k) {
+            Some((_, n)) => *n += 1,
+            None => counts.push((k, 1)),
+        }
+    }
+    counts.sort_by(|a, b| b.1.cmp(&a.1).then(kind_rank(a.0).cmp(&kind_rank(b.0))));
+    counts
+        .into_iter()
+        .map(|(k, n)| (k, n as f64 / minutes))
+        .collect()
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use std::time::Duration;
+
+    /// All the new addresses a minute, every kind together.
+    fn turnover_per_minute(devices: &[Device], window: Duration, now: Instant) -> f64 {
+        turnover_by_kind(devices, window, now)
+            .iter()
+            .map(|(_, r)| r)
+            .sum()
+    }
 
     fn radio() -> crate::state::RadioState {
         crate::state::SdrMetrics::fixture().radio
@@ -488,19 +561,19 @@ mod tests {
         let tails = |d: &[Device]| d.iter().map(|x| x.address[5]).collect::<Vec<_>>();
 
         let mut d = make();
-        order(&mut d, 0, false, now, &radio());
+        order(&mut d, column("ADDRESS"), false, now, &radio());
         assert_eq!(tails(&d), vec![1, 2, 3], "by address, ascending");
 
         let mut d = make();
-        order(&mut d, 1, false, now, &radio());
+        order(&mut d, column("SEEN"), false, now, &radio());
         assert_eq!(tails(&d), vec![1, 3, 2], "most recently seen first");
 
         let mut d = make();
-        order(&mut d, 2, true, now, &radio());
+        order(&mut d, column("PKTS"), true, now, &radio());
         assert_eq!(tails(&d), vec![1, 3, 2], "busiest first");
 
         let mut d = make();
-        order(&mut d, 3, true, now, &radio());
+        order(&mut d, column("SNR"), true, now, &radio());
         assert_eq!(tails(&d), vec![1, 2, 3], "strongest first");
     }
 
@@ -517,8 +590,8 @@ mod tests {
         ];
         let mut b = a.clone();
         b.reverse();
-        order(&mut a, 2, true, now, &radio());
-        order(&mut b, 2, true, now, &radio());
+        order(&mut a, column("PKTS"), true, now, &radio());
+        order(&mut b, column("PKTS"), true, now, &radio());
         let tails = |d: &[Device]| d.iter().map(|x| x.address[5]).collect::<Vec<_>>();
         assert_eq!(
             tails(&a),
@@ -545,10 +618,10 @@ mod tests {
         ];
         let tails = |d: &[Device]| d.iter().map(|x| x.address[5]).collect::<Vec<_>>();
 
-        order(&mut d, 5, true, now, &radio()); // worst first
+        order(&mut d, column("CFO"), true, now, &radio()); // worst first
         assert_eq!(tails(&d), vec![1, 3, 2]);
 
-        order(&mut d, 5, false, now, &radio()); // best first
+        order(&mut d, column("CFO"), false, now, &radio()); // best first
         assert_eq!(tails(&d), vec![3, 1, 2]);
     }
 
@@ -566,7 +639,7 @@ mod tests {
         let mut d = vec![with(0x01, -10.0), with(0x02, 8.0)];
         let tails = |d: &[Device]| d.iter().map(|x| x.address[5]).collect::<Vec<_>>();
 
-        order(&mut d, 5, true, now, &radio()); // worst first, raw
+        order(&mut d, column("CFO"), true, now, &radio()); // worst first, raw
         assert_eq!(tails(&d), vec![1, 2]);
 
         let mut referenced = radio();
@@ -578,7 +651,7 @@ mod tests {
             at: now,
             efficiency: None,
         });
-        order(&mut d, 5, true, now, &referenced);
+        order(&mut d, column("CFO"), true, now, &referenced);
         assert_eq!(tails(&d), vec![2, 1], "the dead-on clock is the best one");
     }
 
@@ -588,12 +661,14 @@ mod tests {
     #[test]
     fn the_sort_keys_are_the_column_titles() {
         assert_eq!(SORT_KEYS.len(), Key::ALL.len());
-        assert_eq!(SORT_KEYS[2], "PKTS");
-        assert_eq!(Key::ALL[2], Key::Packets);
-        assert_eq!(SORT_KEYS[5], "CFO");
-        assert_eq!(Key::ALL[5], Key::Cfo);
-        assert_eq!(SORT_KEYS[8], "MOD");
-        assert_eq!(Key::ALL[8], Key::Modulation);
+        for (title, key) in [
+            ("KIND", Key::Kind),
+            ("PKTS", Key::Packets),
+            ("CFO", Key::Cfo),
+            ("MOD", Key::Modulation),
+        ] {
+            assert_eq!(Key::ALL[column(title)], key, "{title}");
+        }
     }
 
     #[test]
@@ -833,7 +908,7 @@ mod tests {
             d
         };
         let tails = |d: &[Device]| d.iter().map(|x| x.address[5]).collect::<Vec<_>>();
-        for sort in [3, 6, 8] {
+        for sort in ["SNR", "MEAN SNR", "MOD"].map(column) {
             let mut d = vec![
                 Device::heard([0, 0, 0, 0, 0, 1], false, now),
                 measured(2, 1.0),
@@ -861,11 +936,60 @@ mod tests {
         let make = || vec![d(1, 10, 0, 0b1), d(2, 5, 5, 0b10011), d(3, 9, 1, 0b11)];
 
         let mut v = make();
-        order(&mut v, 4, false, now, &radio());
+        order(&mut v, column("CRC"), false, now, &radio());
         assert_eq!(tails(&v), vec![2, 3, 1], "50 %, 90 %, 100 %");
 
         let mut v = make();
-        order(&mut v, 7, true, now, &radio());
+        order(&mut v, column("TYPES"), true, now, &radio());
         assert_eq!(tails(&v), vec![2, 3, 1], "3 types, 2, 1");
+    }
+
+    /// KIND orders from the address that says most about its sender to the
+    /// one that says least, and the reserved kind last.
+    #[test]
+    fn kind_orders_from_public_to_private() {
+        let now = Instant::now();
+        let with = |top: u8, random: bool| Device::heard([top, 0, 0, 0, 0, top], random, now);
+        let mut d = vec![
+            with(0x00, true),  // non-resolvable
+            with(0x80, true),  // reserved
+            with(0x40, true),  // resolvable
+            with(0xc0, true),  // static
+            with(0x11, false), // public
+        ];
+        order(&mut d, column("KIND"), false, now, &radio());
+        let kinds: Vec<&str> = d.iter().map(|x| x.kind().label()).collect();
+        assert_eq!(kinds, ["public", "static", "RPA", "NRPA", "reserved"]);
+    }
+
+    /// **The turnover split by kind**: three resolvable addresses and one
+    /// public appeared in two minutes, one static before the window; the
+    /// rates are per kind, busiest first, and still sum to the total.
+    #[test]
+    fn turnover_splits_by_kind_and_sums_to_the_total() {
+        let now = Instant::now();
+        let at = |top: u8, tail: u8, random: bool, ago: u64| {
+            Device::heard(
+                [top, 0, 0, 0, 0, tail],
+                random,
+                now - Duration::from_secs(ago),
+            )
+        };
+        let devices = vec![
+            at(0x40, 1, true, 10),
+            at(0x41, 2, true, 50),
+            at(0x42, 3, true, 100),
+            at(0x11, 4, false, 30),
+            at(0xc0, 5, true, 500),
+        ];
+        let window = Duration::from_secs(120);
+        let split = turnover_by_kind(&devices, window, now);
+        assert_eq!(split.len(), 2, "{split:?}");
+        assert_eq!(split[0].0, AddressKind::ResolvablePrivate);
+        assert!((split[0].1 - 1.5).abs() < 1e-9, "{split:?}");
+        assert_eq!(split[1].0, AddressKind::Public);
+        assert!((split[1].1 - 0.5).abs() < 1e-9, "{split:?}");
+        assert!((turnover_per_minute(&devices, window, now) - 2.0).abs() < 1e-9);
+        assert!(turnover_by_kind(&devices, Duration::ZERO, now).is_empty());
     }
 }

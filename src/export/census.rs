@@ -103,7 +103,7 @@ mod tests {
                 )
             },
         ];
-        m.net.census.sort = 2;
+        m.net.census.sort = crate::signal::net::census::column("PKTS");
         m.net.census.descending = true;
 
         let by_packets = rows(&m);
@@ -121,7 +121,7 @@ mod tests {
         assert_eq!(HEADER.split(',').count(), by_packets[0].split(',').count());
 
         // Ordered by address instead, and the file follows.
-        m.net.census.sort = 0;
+        m.net.census.sort = crate::signal::net::census::column("ADDRESS");
         m.net.census.descending = false;
         let by_address = rows(&m);
         assert!(by_address[0].starts_with("a4:"), "{:?}", by_address[0]);

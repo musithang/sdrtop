@@ -241,7 +241,7 @@ mod tests {
     fn the_arrows_select_the_rows_as_the_panel_orders_them() {
         let mut m = SdrMetrics::fixture().streaming();
         m.net.census.devices = vec![device(2, 5), device(1, 50), device(3, 500)];
-        m.net.census.sort = 2; // PKTS
+        m.net.census.sort = crate::signal::net::census::column("PKTS");
         m.net.census.descending = true;
         let state = Arc::new(Mutex::new(m));
         let mut engine = LayoutEngine::new(

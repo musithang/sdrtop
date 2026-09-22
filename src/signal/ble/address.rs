@@ -56,6 +56,18 @@ impl AddressKind {
             Self::Reserved => "reserved",
         }
     }
+
+    /// The name a sentence uses, where [`Self::label`]'s abbreviations would
+    /// have to be looked up.
+    pub fn name(self) -> &'static str {
+        match self {
+            Self::Public => "public",
+            Self::Static => "static random",
+            Self::ResolvablePrivate => "resolvable private",
+            Self::NonResolvablePrivate => "non-resolvable private",
+            Self::Reserved => "reserved",
+        }
+    }
 }
 
 /// The kind of `addr`, sent with TxAdd = `random`.
@@ -124,5 +136,20 @@ mod tests {
             kind(super::super::pdu::air_octets(addr), true),
             AddressKind::Reserved
         );
+    }
+
+    /// Every kind has a name a sentence can use.
+    #[test]
+    fn every_kind_has_a_sentence_name() {
+        use AddressKind::*;
+        for k in [
+            Public,
+            Static,
+            ResolvablePrivate,
+            NonResolvablePrivate,
+            Reserved,
+        ] {
+            assert!(!k.name().is_empty(), "{k:?}");
+        }
     }
 }
