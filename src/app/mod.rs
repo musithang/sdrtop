@@ -19,6 +19,17 @@ use crate::hardware::{self, RxContext, SdrDevice};
 use crate::state::SdrMetrics;
 use crate::ui;
 
+/// Focus letter → the panels that claim it, in name order.
+///
+/// **A letter may belong to more than one panel**, as long as no layout shows
+/// two of them: a Lab bench's letter means nothing on a NET screen, and every
+/// letter of the alphabet was taken before the NET section needed its own
+/// (Viktor's rule, 2026-09-22, generalising the one that let `i` and `m` be
+/// reused there). The key handler focuses the first of them that is on screen
+/// (`input::global::view::enter_focus`); the name order makes that
+/// deterministic even where a user preset does show two.
+pub(crate) type FocusKeys = HashMap<char, Vec<&'static str>>;
+
 pub struct App {
     pub(super) state: Arc<Mutex<SdrMetrics>>,
     pub(super) device: Option<Arc<dyn SdrDevice>>,
@@ -36,7 +47,7 @@ pub struct App {
     pub(super) deck_shown: bool,
     pub(super) engine: ui::LayoutEngine,
     pub(super) theme: crate::Theme,
-    pub(super) focus_keys: HashMap<char, &'static str>,
+    pub(super) focus_keys: FocusKeys,
     /// User-defined presets as loaded from config.toml, kept so save_config can
     /// write them back verbatim instead of erasing hand-edited presets.
     pub(super) user_presets: HashMap<String, crate::config::PresetConfig>,

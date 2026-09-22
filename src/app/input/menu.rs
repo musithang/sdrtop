@@ -346,7 +346,7 @@ mod tests {
         state: Arc<Mutex<SdrMetrics>>,
         engine: ui::LayoutEngine,
         show_footer: bool,
-        focus_keys: HashMap<char, &'static str>,
+        focus_keys: crate::app::FocusKeys,
     }
 
     impl Harness {

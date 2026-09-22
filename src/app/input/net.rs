@@ -209,6 +209,23 @@ pub(super) fn net_census(key: KeyEvent, ctx: &mut InputCtx<'_>) -> KeyAction {
     KeyAction::Continue
 }
 
+/// The BLE packet list: the arrows move the cursor through the packets in the
+/// order the panel draws them, newest first; anything else goes on to the
+/// global keys.
+pub(super) fn net_ble_packets(key: KeyEvent, ctx: &mut InputCtx<'_>) -> KeyAction {
+    let mut m = metrics(ctx.state);
+    let order: Vec<u64> = m.net.ble_packets.iter().map(|p| p.seq).collect();
+    match key.code {
+        KeyCode::Up => m.net.ble_view.selection.move_by(&order, -1),
+        KeyCode::Down => m.net.ble_view.selection.move_by(&order, 1),
+        _ => {
+            drop(m);
+            return global::handle(key, ctx);
+        }
+    }
+    KeyAction::Continue
+}
+
 /// Start the reference-accuracy entry for the selected census device, or say
 /// why not: nothing selected, or no offset measured to reference against.
 fn trust_selected(m: &mut SdrMetrics) {
@@ -392,6 +409,97 @@ mod tests {
         m.net.census.selection.selected = None;
         trust_selected(&mut m);
         assert!(said(&m, "select a device"));
+    }
+
+    /// **The arrows walk the packets in the order the list draws them**,
+    /// newest first: the first press lands on the newest.
+    #[test]
+    fn the_arrows_select_packets_newest_first() {
+        let mut m = SdrMetrics::fixture().streaming();
+        for seq in 1..=3u64 {
+            m.net.ble_packets.push_front(crate::state::BlePacket {
+                seq,
+                ..sample_packet()
+            });
+        }
+        let state = Arc::new(Mutex::new(m));
+        let mut engine = LayoutEngine::new(
+            crate::config::LayoutConfig::default_config(),
+            PanelRegistry::new(),
+        );
+        let mut show_footer = true;
+        let focus_keys = HashMap::new();
+        let mut ctx = InputCtx {
+            state: &state,
+            device: None,
+            engine: &mut engine,
+            show_footer: &mut show_footer,
+            focus_keys: &focus_keys,
+        };
+        let mut press = |code| {
+            net_ble_packets(KeyEvent::new(code, KeyModifiers::NONE), &mut ctx);
+        };
+        let selected = |s: &Arc<Mutex<SdrMetrics>>| metrics(s).net.ble_view.selection.selected;
+        press(KeyCode::Down);
+        assert_eq!(selected(&state), Some(3));
+        press(KeyCode::Down);
+        assert_eq!(selected(&state), Some(2));
+        press(KeyCode::Up);
+        assert_eq!(selected(&state), Some(3));
+    }
+
+    fn sample_packet() -> crate::state::BlePacket {
+        crate::state::BlePacket {
+            seq: 0,
+            channel: 37,
+            pdu_type: crate::signal::ble::pdu::PduType::AdvInd,
+            ch_sel: false,
+            tx_add_random: false,
+            rx_add_random: false,
+            length: 6,
+            adv_addr: Some([1, 2, 3, 4, 5, 6]),
+            payload: Vec::new(),
+            crc_ok: true,
+            snr_db: None,
+            freq_offset_hz: None,
+            modulation: None,
+            drift: None,
+            seen: Instant::now(),
+        }
+    }
+
+    /// **One letter, two panels, never on one screen**: on the BLE layout `v`
+    /// focuses the packet list, on the Lab timing bench the same `v` still
+    /// focuses timing vitals. Built the way the app builds, keys and all.
+    #[test]
+    fn a_shared_focus_letter_focuses_the_panel_on_screen() {
+        let (mut engine, focus_keys) =
+            crate::app::App::build_ui("net_ble", &HashMap::new(), None, true);
+        let state = Arc::new(Mutex::new(SdrMetrics::fixture()));
+        let mut show_footer = true;
+        let mut focus = |engine: &mut LayoutEngine, preset: &str| {
+            engine.set_preset(preset);
+            let mut ctx = InputCtx {
+                state: &state,
+                device: None,
+                engine,
+                show_footer: &mut show_footer,
+                focus_keys: &focus_keys,
+            };
+            super::global::handle(
+                KeyEvent::new(KeyCode::Char('v'), KeyModifiers::NONE),
+                &mut ctx,
+            );
+            metrics(&state).ui.focused_panel.clone()
+        };
+        assert_eq!(
+            focus(&mut engine, "net_ble").as_deref(),
+            Some("net_ble_packets")
+        );
+        assert_eq!(
+            focus(&mut engine, "lab_timing").as_deref(),
+            Some("timing_vitals")
+        );
     }
 
     /// A radio whose tuning call takes 1 ms and remembers where it was sent.

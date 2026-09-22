@@ -31,7 +31,6 @@ mod signal;
 mod sweep;
 mod text;
 
-use std::collections::HashMap;
 use std::sync::{Arc, Mutex, MutexGuard};
 
 use crossterm::event::{KeyCode, KeyEvent};
@@ -68,7 +67,7 @@ pub(super) struct InputCtx<'a> {
     pub engine: &'a mut ui::LayoutEngine,
     pub show_footer: &'a mut bool,
     /// Focus key → panel name, harvested from the registry by `App::build_ui`.
-    pub focus_keys: &'a HashMap<char, &'static str>,
+    pub focus_keys: &'a crate::app::FocusKeys,
 }
 
 /// The metrics, locked.
@@ -88,7 +87,7 @@ pub fn handle_key(
     device: Option<&Arc<dyn hardware::SdrDevice>>,
     engine: &mut ui::LayoutEngine,
     show_footer: &mut bool,
-    focus_keys: &HashMap<char, &'static str>,
+    focus_keys: &crate::app::FocusKeys,
 ) -> KeyAction {
     let mut ctx = InputCtx {
         state,
@@ -193,6 +192,7 @@ fn handle_normal(key: KeyEvent, ctx: &mut InputCtx<'_>) -> KeyAction {
         Some("fm_demod") => signal::fm_demod(key, ctx),
         Some("sweep_panel") => sweep::sweep_panel(key, ctx),
         Some("net_census") => net::net_census(key, ctx),
+        Some("net_ble_packets") => net::net_ble_packets(key, ctx),
         Some("net_capability") => net::net_capability(key, ctx),
         Some("net_occupancy") => net::net_occupancy(key, ctx),
         Some("net_coexist") => net::net_coexist(key, ctx),

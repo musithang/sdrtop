@@ -14,16 +14,16 @@ use std::collections::HashMap;
 use crate::config::LayoutConfig;
 use crate::ui;
 
-use crate::app::App;
+use crate::app::{App, FocusKeys};
 
 impl App {
     #[cfg(test)]
-    pub(super) fn build_ui(
+    pub(crate) fn build_ui(
         active_preset: &str,
         user_presets: &HashMap<String, crate::config::PresetConfig>,
         presets_dir: Option<&std::path::Path>,
         net_admitted: bool,
-    ) -> (ui::LayoutEngine, HashMap<char, &'static str>) {
+    ) -> (ui::LayoutEngine, FocusKeys) {
         Self::build_ui_for(
             active_preset,
             user_presets,
@@ -45,7 +45,7 @@ impl App {
         presets_dir: Option<&std::path::Path>,
         net_admitted: bool,
         acquisition: crate::hardware::AcquisitionKind,
-    ) -> anyhow::Result<(ui::LayoutEngine, HashMap<char, &'static str>)> {
+    ) -> anyhow::Result<(ui::LayoutEngine, FocusKeys)> {
         let mut registry = ui::PanelRegistry::new();
         registry.register(ui::HeaderPanel);
         registry.register(ui::SlimHeaderPanel);
@@ -89,16 +89,6 @@ impl App {
         registry.register(ui::NetDecodeHealthPanel);
         registry.register(ui::NetOccupancyPanel);
 
-        let (focus_keys, collisions) = harvest_focus_keys(&registry);
-        // A key claimed twice does not merely shadow. The registry is a HashMap, so
-        // iteration order is randomised per process and the winner changes between
-        // launches: the key then works on some runs and silently does nothing on
-        // others. Loud in debug, and pinned by a test, so it can never ship quietly.
-        debug_assert!(
-            collisions.is_empty(),
-            "focus key claimed by more than one panel: {collisions:?}",
-        );
-
         let mut layout = LayoutConfig::with_user_presets(user_presets, presets_dir);
         if !net_admitted {
             layout
@@ -106,6 +96,21 @@ impl App {
                 .retain(|_, p| p.section.as_deref() != Some(ui::menu::model::NET));
         }
         let mut warnings = Self::filter_incompatible_layouts(&mut layout, &registry, acquisition)?;
+        // Harvested against the presets that will actually be offered, user
+        // presets included: a letter two panels share is only a clash where one
+        // layout shows both. The built-in presets are held clear of that by a
+        // test; a user preset that brings two together is told about it here,
+        // and the letter goes to the first of them that is visible.
+        let (focus_keys, collisions) = harvest_focus_keys(&registry, &layout.presets);
+        for c in &collisions {
+            warnings.push(format!(
+                "Preset '{}' shows {} with the same focus key '{}'; it focuses '{}'",
+                c.preset,
+                c.panels.join(" and "),
+                c.key,
+                c.panels[0]
+            ));
+        }
         let selected = if layout
             .presets
             .get(active_preset)
@@ -205,39 +210,53 @@ fn has_registered_panel(
         .any(|spec| registry.get(&spec.name).is_some())
 }
 
-/// The focus-key lookup, plus every key more than one panel claims.
-type FocusHarvest = (HashMap<char, &'static str>, Vec<(char, Vec<&'static str>)>);
+/// A preset that shows two panels claiming one focus letter.
+#[derive(Debug, PartialEq)]
+struct Collision {
+    key: char,
+    preset: String,
+    panels: Vec<&'static str>,
+}
 
-/// Collect each panel's focus key into the lookup the key handler uses, and report
-/// any key more than one panel claims.
+/// Collect each panel's focus letter into the lookup the key handler uses, and
+/// report every preset that shows two panels claiming the same letter.
 ///
-/// Split out so the collision is *visible*: `HashMap::insert` would silently drop
-/// one of the two, which is exactly how `v` and `t` came to work only on some
-/// launches. See the tests at the foot of this file.
-fn harvest_focus_keys(registry: &ui::PanelRegistry) -> FocusHarvest {
-    let mut claims: HashMap<char, Vec<&'static str>> = HashMap::new();
+/// The report is the point of this being split out. A letter two panels on one
+/// screen both claim is the bug that once made `v` and `t` work only on some
+/// launches, when the lookup was a map from a letter to one panel and the
+/// registry's iteration order picked the winner. Sharing is safe exactly where
+/// no screen holds both, so that is what is checked.
+fn harvest_focus_keys(
+    registry: &ui::PanelRegistry,
+    presets: &HashMap<String, crate::config::PresetConfig>,
+) -> (FocusKeys, Vec<Collision>) {
+    let mut keys: FocusKeys = HashMap::new();
     for panel in registry.panels_iter() {
         if let Some(key) = panel.focus_key() {
-            claims.entry(key).or_default().push(panel.name());
+            keys.entry(key).or_default().push(panel.name());
         }
     }
-    let mut collisions: Vec<(char, Vec<&'static str>)> = claims
-        .iter()
-        .filter(|(_, v)| v.len() > 1)
-        .map(|(k, v)| {
-            let mut v = v.clone();
-            v.sort();
-            (*k, v)
-        })
-        .collect();
-    collisions.sort();
-    let keys = claims
-        .into_iter()
-        .map(|(k, mut v)| {
-            v.sort();
-            (k, v[0])
-        })
-        .collect();
+    for claimants in keys.values_mut() {
+        claimants.sort();
+    }
+    let mut collisions = Vec::new();
+    for (preset, config) in presets {
+        for (key, claimants) in &keys {
+            let shown: Vec<&'static str> = claimants
+                .iter()
+                .copied()
+                .filter(|name| config.panels.iter().any(|spec| spec.name == *name))
+                .collect();
+            if shown.len() > 1 {
+                collisions.push(Collision {
+                    key: *key,
+                    preset: preset.clone(),
+                    panels: shown,
+                });
+            }
+        }
+    }
+    collisions.sort_by(|a, b| (a.key, &a.preset).cmp(&(b.key, &b.preset)));
     (keys, collisions)
 }
 
@@ -266,13 +285,15 @@ mod tests {
             !focus_keys.is_empty(),
             "no focus keys were harvested at all"
         );
-        for (key, panel) in &focus_keys {
-            let arm = format!("Some(\"{panel}\")");
-            assert!(
-                dispatch.contains(&arm),
-                "panel '{panel}' claims focus key '{key}' but handle_normal has no \
-                 `{arm}` arm, so its keys fall through to the global handler",
-            );
+        for (key, panels) in &focus_keys {
+            for panel in panels {
+                let arm = format!("Some(\"{panel}\")");
+                assert!(
+                    dispatch.contains(&arm),
+                    "panel '{panel}' claims focus key '{key}' but handle_normal has no \
+                     `{arm}` arm, so its keys fall through to the global handler",
+                );
+            }
         }
     }
 
@@ -544,6 +565,7 @@ mod tests {
         m.net.address_book.number([1, 2, 3, 4, 5, 6]);
         m.net.ble_channel = Some(37);
         m.net.ble_packets.push_front(BlePacket {
+            seq: 0,
             channel: 37,
             pdu_type: crate::signal::ble::pdu::PduType::AdvInd,
             tx_add_random: false,
@@ -590,15 +612,14 @@ mod tests {
             .collect()
     }
 
-    /// Two panels claiming one key must be *reported*, not silently resolved.
+    /// Two panels claiming one letter are a clash **where one preset shows
+    /// both**, and only there: the same pair kept on separate screens is the
+    /// sharing that lets a NET panel reuse a Lab letter.
     ///
-    /// `HashMap::insert` would drop one of them, which is exactly how `v` and `t`
-    /// came to work only on some launches: the registry is a HashMap, iteration
-    /// order is randomised per process, and the winner changed between runs. Two
-    /// stand-in panels here prove the detector fires, so the assertion on the real
-    /// registry below means something.
+    /// Two stand-in panels prove the detector fires, so the assertion on the real
+    /// presets below means something.
     #[test]
-    fn a_duplicate_focus_key_is_reported() {
+    fn a_shared_focus_letter_clashes_only_where_one_preset_shows_both() {
         struct First;
         struct Second;
         impl ui::panel::Panel for First {
@@ -642,28 +663,54 @@ mod tests {
             }
         }
         let mut registry = ui::PanelRegistry::new();
-        registry.register(First);
         registry.register(Second);
-        let (_, collisions) = harvest_focus_keys(&registry);
-        assert_eq!(collisions, vec![('z', vec!["first", "second"])]);
+        registry.register(First);
+        let preset = |names: &[&str]| -> crate::config::PresetConfig {
+            let panels: Vec<String> = names
+                .iter()
+                .map(|n| format!("{{ name = \"{n}\", position = \"body\" }}"))
+                .collect();
+            toml::from_str(&format!("panels = [{}]", panels.join(", "))).unwrap()
+        };
+
+        let apart: HashMap<String, _> = [
+            ("one".to_string(), preset(&["first"])),
+            ("two".to_string(), preset(&["second"])),
+        ]
+        .into();
+        let (keys, collisions) = harvest_focus_keys(&registry, &apart);
+        assert!(collisions.is_empty(), "{collisions:?}");
+        assert_eq!(keys[&'z'], ["first", "second"], "in name order");
+
+        let together: HashMap<String, _> =
+            [("both".to_string(), preset(&["first", "second"]))].into();
+        let (_, collisions) = harvest_focus_keys(&registry, &together);
+        assert_eq!(
+            collisions,
+            [Collision {
+                key: 'z',
+                preset: "both".to_string(),
+                panels: vec!["first", "second"],
+            }]
+        );
     }
 
-    /// The full registry, which is the one that actually ships.
+    /// The built-in presets, which are what ships: no screen shows two panels
+    /// with one letter, and the startup warnings say nothing about it.
     #[test]
-    fn the_real_registry_has_no_focus_key_collisions() {
-        // `build_ui` debug-asserts this too; the test states it as a fact rather
-        // than relying on someone running a debug build.
-        let (_engine, keys) = App::build_ui("command_rail", &HashMap::new(), None, true);
-        let mut by_key: HashMap<char, usize> = HashMap::new();
-        for k in keys.keys() {
-            *by_key.entry(*k).or_default() += 1;
-        }
-        assert!(by_key.values().all(|&n| n == 1));
+    fn no_builtin_preset_shows_two_panels_with_one_focus_letter() {
+        let (engine, keys) = App::build_ui("command_rail", &HashMap::new(), None, true);
+        let registry_panels: usize = keys.values().map(Vec::len).sum();
         assert!(
-            keys.len() >= 10,
-            "expected the full focus set, got {}",
-            keys.len()
+            registry_panels >= 10,
+            "expected the full focus set, got {registry_panels}"
         );
+        let clash = engine
+            .startup_warnings()
+            .iter()
+            .filter(|w| w.contains("same focus key"))
+            .count();
+        assert_eq!(clash, 0, "{:?}", engine.startup_warnings());
     }
 
     /// The preset a config asks for is the one the engine comes up in - and a

@@ -101,12 +101,16 @@ pub(super) fn toggle_hold(ctx: &mut InputCtx<'_>) {
 /// does not draw - the footer would then advertise bindings for something the
 /// user cannot see.
 pub(super) fn enter_focus(ctx: &mut InputCtx<'_>, key: char) {
-    let Some(&panel) = ctx.focus_keys.get(&key) else {
+    // The first panel claiming the letter that is on screen: a letter may be
+    // shared by panels no one layout shows together (`app::FocusKeys`).
+    let Some(panel) = ctx.focus_keys.get(&key).and_then(|panels| {
+        panels
+            .iter()
+            .copied()
+            .find(|p| ctx.engine.is_panel_visible(p))
+    }) else {
         return;
     };
-    if !ctx.engine.is_panel_visible(panel) {
-        return;
-    }
     ctx.engine.focus(panel);
     let bindings = ctx.engine.get_panel_bindings(panel);
     let mut m = metrics(ctx.state);

@@ -270,6 +270,11 @@ pub struct NetState {
     /// Advertising channel PDUs decoded so far this session, newest first,
     /// capped at [`BLE_PACKET_LIMIT`].
     pub ble_packets: std::collections::VecDeque<BlePacket>,
+    /// Packets that have entered [`Self::ble_packets`] this session: each
+    /// one's [`BlePacket::seq`] is the count at its arrival.
+    pub ble_heard: u64,
+    /// How the packet list is being read: which packet the cursor is on.
+    pub ble_view: BlePacketView,
     /// Why nothing is being decoded, when the radio can otherwise stream.
     ///
     /// B6's decoder needs the working rate `signal::ble::receive::front_end`
@@ -563,6 +568,10 @@ pub struct BtHop {
 /// alone does not carry - which channel it arrived on and when.
 #[derive(Clone, Debug)]
 pub struct BlePacket {
+    /// Its place in the session's arrivals, from 1: what a selection holds on
+    /// to, since the ring's positions shift with every packet
+    /// (`NetState::ble_heard`).
+    pub seq: u64,
     pub channel: u8,
     pub pdu_type: crate::signal::ble::pdu::PduType,
     /// ChSel, where the type defines it (`pdu::Packet::ch_sel`).
@@ -605,6 +614,16 @@ pub struct BlePacket {
     /// variance.
     pub drift: Option<crate::signal::ble::measure::Drift>,
     pub seen: std::time::Instant,
+}
+
+/// How the BLE packet list is being read (net-ux-polish-plan 5.3).
+///
+/// The cursor holds a packet's [`BlePacket::seq`], not a row: the list is
+/// newest first, so every arrival moves every row, and a cursor on a row
+/// number would slide to a different packet each time one came in.
+#[derive(Clone, Debug, Default)]
+pub struct BlePacketView {
+    pub selection: super::Selection<u64>,
 }
 
 /// How the census table is being read: what orders it, and where the cursor is.

@@ -272,6 +272,7 @@ mod tests {
         drift: Option<crate::signal::ble::measure::Drift>,
     ) -> BlePacket {
         BlePacket {
+            seq: 0,
             channel: 37,
             pdu_type: PduType::AdvInd,
             tx_add_random: false,

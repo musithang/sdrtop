@@ -132,7 +132,7 @@ mod tests {
         state: Arc<Mutex<SdrMetrics>>,
         engine: ui::LayoutEngine,
         show_footer: bool,
-        focus_keys: HashMap<char, &'static str>,
+        focus_keys: crate::app::FocusKeys,
     }
 
     impl Harness {
@@ -189,7 +189,7 @@ mod tests {
     #[test]
     fn a_section_scoped_key_does_not_shadow_a_panel_focus_key() {
         let mut h = Harness::new();
-        h.focus_keys.insert('m', "fm_demod");
+        h.focus_keys.insert('m', vec!["fm_demod"]);
         h.engine.set_preset("lab_signal");
 
         // Outside NET, `m` is still the focus key it has always been.
@@ -204,7 +204,7 @@ mod tests {
 
         // Inside it, the same key is the mode and nothing gets focused.
         let mut h = Harness::new();
-        h.focus_keys.insert('m', "fm_demod");
+        h.focus_keys.insert('m', vec!["fm_demod"]);
         metrics(&h.state).ui.section = crate::signal::net::SECTION.to_string();
         h.press('m');
         assert_eq!(metrics(&h.state).net.mode, crate::state::NetMode::Lock);
@@ -221,7 +221,7 @@ mod tests {
     fn the_address_key_cycles_inside_net_and_focuses_outside_it() {
         use crate::state::AddressDisplay;
         let mut h = Harness::new();
-        h.focus_keys.insert('i', "iq_diagnostics");
+        h.focus_keys.insert('i', vec!["iq_diagnostics"]);
         h.engine.set_preset("lab_iq");
         h.press('i');
         assert_eq!(metrics(&h.state).net.address_display, AddressDisplay::Full);
@@ -232,7 +232,7 @@ mod tests {
         );
 
         let mut h = Harness::new();
-        h.focus_keys.insert('i', "iq_diagnostics");
+        h.focus_keys.insert('i', vec!["iq_diagnostics"]);
         metrics(&h.state).ui.section = crate::signal::net::SECTION.to_string();
         h.press('i');
         assert_eq!(metrics(&h.state).net.address_display, AddressDisplay::Oui);

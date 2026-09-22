@@ -4,9 +4,14 @@
 //! `NetBlePacketsPanel` - what this device is advertising.
 //!
 //! B6's exit condition, on screen: real advertising channel PDUs, CRC-checked,
-//! newest first. B7 added the SNR and CFO columns. No sorting and no cursor -
-//! a live packet feed is already in the order that matters, arrival order,
-//! and a second ordering has not earned its own column yet.
+//! newest first. B7 added the SNR and CFO columns. No sorting - a live packet
+//! feed is already in the order that matters, arrival order, and a second
+//! ordering has not earned its own column yet.
+//!
+//! **A cursor since net-ux-polish-plan 5.3**, on the packet rather than the
+//! row (`state::BlePacketView`): the list is newest first, so each arrival
+//! moves every row down one, and the mark goes with its packet, the view
+//! following it down.
 //!
 //! **Three states, not two.** Design section 13.2's lesson for this section:
 //! silence has more than one cause, and printing zero for all of them is a
@@ -45,9 +50,20 @@ const CFO_W: usize = 15;
 const PPM_W: usize = 17;
 const AGE_W: usize = 6;
 
-/// Every column at its narrowest, with the single spaces between them.
-const FIXED_W: usize =
-    CH_W + TYPE_W + ADDR_W + ATYP_W + LEN_W + CRC_W + SNR_W + CFO_W + PPM_W + AGE_W + 9;
+/// Every column at its narrowest, with the single spaces between them and the
+/// selection gutter every row keeps (`chrome::SELECTION_GUTTER`).
+const FIXED_W: usize = crate::ui::chrome::SELECTION_GUTTER
+    + CH_W
+    + TYPE_W
+    + ADDR_W
+    + ATYP_W
+    + LEN_W
+    + CRC_W
+    + SNR_W
+    + CFO_W
+    + PPM_W
+    + AGE_W
+    + 9;
 
 /// The address column's width for this frame: what the panel can spare beyond
 /// every column at its narrowest, up to the widest address among `shown`, so
@@ -71,7 +87,8 @@ fn addr_width<'a>(
 fn header_line(addr_w: usize, theme: &crate::Theme) -> Line<'static> {
     Line::from(Span::styled(
         format!(
-            "{:<CH_W$} {:<TYPE_W$} {:<addr_w$} {:<ATYP_W$} {:>LEN_W$} {:>CRC_W$} {:>SNR_W$} {:>CFO_W$} {:>PPM_W$} {:>AGE_W$}",
+            "{}{:<CH_W$} {:<TYPE_W$} {:<addr_w$} {:<ATYP_W$} {:>LEN_W$} {:>CRC_W$} {:>SNR_W$} {:>CFO_W$} {:>PPM_W$} {:>AGE_W$}",
+            " ".repeat(crate::ui::chrome::SELECTION_GUTTER),
             "CH", "TYPE", "ADDRESS", "ATYP", "LEN", "CRC", "SNR", "CFO", "PPM", "AGE"
         ),
         Style::default().fg(theme.label),
@@ -139,6 +156,7 @@ fn row(
     state: &SdrMetrics,
     now: std::time::Instant,
     addr_w: usize,
+    selected: bool,
     theme: &crate::Theme,
 ) -> Line<'static> {
     let radio = &state.radio;
@@ -150,7 +168,8 @@ fn row(
     };
     let crc_text = if p.crc_ok { "ok" } else { "bad" };
     let age = ago(now.saturating_duration_since(p.seen).as_secs());
-    Line::from(vec![
+    let mut spans = vec![crate::ui::chrome::selection_gutter(selected, theme)];
+    spans.extend([
         Span::styled(
             format!("{:<CH_W$}", p.channel),
             Style::default().fg(theme.value),
@@ -194,7 +213,15 @@ fn row(
         ),
         Span::raw(" "),
         Span::styled(format!("{age:>AGE_W$}"), Style::default().fg(theme.label)),
-    ])
+    ]);
+    // The selected packet in bold, its cells keeping their colours: the CRC
+    // column's red or green is a reading, and a selection must not hide it.
+    if selected {
+        for span in spans.iter_mut().skip(1) {
+            span.style = span.style.add_modifier(ratatui::style::Modifier::BOLD);
+        }
+    }
+    Line::from(spans)
 }
 
 /// B11's own exit condition, on screen: packet counts per advertising
@@ -238,8 +265,19 @@ impl Panel for NetBlePacketsPanel {
         (48, 6)
     }
 
+    fn focus_key(&self) -> Option<char> {
+        // The Lab timing vitals panel's letter too: no layout shows both, so
+        // the letter is shared (`app::FocusKeys`), and it is the one in the
+        // title.
+        Some('v')
+    }
+
+    fn focus_bindings(&self) -> &'static [(&'static str, &'static str)] {
+        &[("↑↓", "select a packet")]
+    }
+
     fn chrome(&self, state: &SdrMetrics) -> PanelChrome {
-        PanelChrome::new("BLE Advertising")
+        PanelChrome::new("BLE Ad_vertising")
             .stale_when(Staleness::NotStreaming)
             .tag_if(true, state.net.mode.tag())
             // The per-channel packet counts run for the session; a dropped
@@ -308,8 +346,24 @@ impl Panel for NetBlePacketsPanel {
             .saturating_sub(1)
             .saturating_sub(summary.is_some() as usize);
         let now = std::time::Instant::now();
-        for p in state.net.ble_packets.iter().take(body) {
-            lines.push(row(p, state, now, addr_w, theme));
+        let order: Vec<u64> = state.net.ble_packets.iter().map(|p| p.seq).collect();
+        let view = &state.net.ble_view.selection;
+        let cursor = view.cursor(&order);
+        let start = crate::ui::widgets::table::viewport_start(
+            view.first_visible,
+            cursor.unwrap_or(0),
+            order.len(),
+            body,
+        );
+        for (i, p) in state
+            .net
+            .ble_packets
+            .iter()
+            .enumerate()
+            .skip(start)
+            .take(body)
+        {
+            lines.push(row(p, state, now, addr_w, Some(i) == cursor, theme));
         }
         if let Some(summary) = summary {
             lines.push(summary);
@@ -328,6 +382,7 @@ mod tests {
 
     fn packet(channel: u8, crc_ok: bool) -> BlePacket {
         BlePacket {
+            seq: 0,
             channel,
             pdu_type: PduType::AdvInd,
             tx_add_random: false,
@@ -442,5 +497,72 @@ mod tests {
                 }
             }
         }
+    }
+
+    /// `n` packets, newest first, each from its own address so a row can be
+    /// found by it: seq `n` is on top.
+    fn feed(n: u64) -> SdrMetrics {
+        let mut m = SdrMetrics::fixture().streaming();
+        m.net.ble_channel = Some(37);
+        for seq in 1..=n {
+            let mut p = packet(37, true);
+            p.seq = seq;
+            p.adv_addr = Some([0xaa, 0, 0, 0, 0, seq as u8]);
+            m.net.ble_packets.push_front(p);
+        }
+        m.net.ble_heard = n;
+        m
+    }
+
+    fn marked(rows: &[String]) -> Vec<usize> {
+        rows.iter()
+            .enumerate()
+            .filter(|(_, l)| l.contains('\u{258c}'))
+            .map(|(i, _)| i)
+            .collect()
+    }
+
+    /// **The mark is on the packet, not the row.** A new arrival pushes every
+    /// row down one, and the mark goes down with its packet.
+    #[test]
+    fn the_selection_follows_its_packet_as_new_ones_arrive() {
+        let mut m = feed(5);
+        m.net.ble_view.selection.selected = Some(3);
+        let rows = draw(NetBlePacketsPanel, 130, 12, &m);
+        let at = rows
+            .iter()
+            .position(|l| l.contains("00:00:00:00:03"))
+            .unwrap();
+        assert_eq!(marked(&rows), vec![at]);
+
+        let mut newer = packet(37, true);
+        newer.seq = 6;
+        newer.adv_addr = Some([0xaa, 0, 0, 0, 0, 6]);
+        m.net.ble_packets.push_front(newer);
+        let rows = draw(NetBlePacketsPanel, 130, 12, &m);
+        let moved = rows
+            .iter()
+            .position(|l| l.contains("00:00:00:00:03"))
+            .unwrap();
+        assert_eq!(moved, at + 1, "a row down");
+        assert_eq!(marked(&rows), vec![moved], "and the mark with it");
+    }
+
+    /// Nothing selected, nothing marked; and a selection that has aged out of
+    /// the ring marks nothing rather than whatever took its row.
+    #[test]
+    fn no_selection_and_an_aged_out_one_mark_no_row() {
+        let mut m = feed(5);
+        assert!(marked(&draw(NetBlePacketsPanel, 130, 12, &m)).is_empty());
+        m.net.ble_view.selection.selected = Some(99);
+        assert!(marked(&draw(NetBlePacketsPanel, 130, 12, &m)).is_empty());
+    }
+
+    /// The focus letter is the one the title shows.
+    #[test]
+    fn the_title_shows_the_focus_letter() {
+        let chrome = NetBlePacketsPanel.chrome(&feed(1));
+        assert!(chrome.title.contains("Ad_vertising"), "{}", chrome.title);
+        assert_eq!(NetBlePacketsPanel.focus_key(), Some('v'));
     }
 }

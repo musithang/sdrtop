@@ -465,7 +465,10 @@ impl NetWorker {
                                     rate_hz,
                                     now,
                                 );
+                                m.net.ble_heard += 1;
+                                let seq = m.net.ble_heard;
                                 m.net.ble_packets.push_front(BlePacket {
+                                    seq,
                                     channel: ch,
                                     pdu_type: p.pdu_type,
                                     ch_sel: p.ch_sel,
