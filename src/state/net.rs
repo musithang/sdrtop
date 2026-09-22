@@ -397,6 +397,32 @@ impl NetState {
     /// one call every panel and export makes, so a device reads the same way
     /// everywhere.
     ///
+    /// The packets the BLE list shows, newest first: the held copy while the
+    /// list is held, the live ring otherwise, narrowed to the filter's
+    /// address when there is one.
+    ///
+    /// **The one account of the list**, read by the panel that draws it and
+    /// the keys that move through it, so the arrows step through exactly the
+    /// rows on screen.
+    pub fn ble_shown(&self) -> Vec<&BlePacket> {
+        let source = match &self.ble_view.held {
+            Some((held, _)) => held,
+            None => &self.ble_packets,
+        };
+        source
+            .iter()
+            .filter(|p| self.ble_view.filter.is_none_or(|a| p.adv_addr == Some(a)))
+            .collect()
+    }
+
+    /// Packets that have arrived since the list was held; zero when it is not.
+    pub fn ble_behind(&self) -> u64 {
+        self.ble_view
+            .held
+            .as_ref()
+            .map_or(0, |(_, at)| self.ble_heard.saturating_sub(*at))
+    }
+
     /// Whether anything is reading addresses into the census: a BLE decoder
     /// with a channel, or one that has fired this session.
     ///
@@ -587,7 +613,6 @@ pub struct BlePacket {
     /// The PDU's payload as decoded (`pdu::Packet::payload`): what the AD
     /// structures and a CONNECT_IND's parameters are read from. Bounded by
     /// the ring (`BLE_PACKET_LIMIT`) and by the length field's 6 bits.
-    #[cfg_attr(not(test), allow(dead_code))]
     pub payload: Vec<u8>,
     pub crc_ok: bool,
     /// B7: read from the detector's own coherence at the moment this
@@ -624,6 +649,12 @@ pub struct BlePacket {
 #[derive(Clone, Debug, Default)]
 pub struct BlePacketView {
     pub selection: super::Selection<u64>,
+    /// Only packets from this advertiser address, when set.
+    pub filter: Option<[u8; 6]>,
+    /// The list as it stood when it was held, and [`NetState::ble_heard`] at
+    /// that moment: a copy, so holding the list stops nothing else. The
+    /// coexistence marks and the census go on taking every packet.
+    pub held: Option<(std::collections::VecDeque<BlePacket>, u64)>,
 }
 
 /// How the census table is being read: what orders it, and where the cursor is.

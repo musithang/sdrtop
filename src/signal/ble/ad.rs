@@ -52,6 +52,8 @@ pub fn adv_data(pdu_type: super::pdu::PduType, payload: &[u8]) -> Option<&[u8]> 
 /// The registry's name for an AD type code, for the ones this parser does not
 /// decode as well as the ones it does. `None` for a code the registry does not
 /// list.
+// Drawn by the packet detail view (net-ux-polish-plan 5.4); goes with it.
+#[cfg_attr(not(test), allow(dead_code))]
 pub fn type_name(code: u8) -> Option<&'static str> {
     Some(match code {
         0x01 => "Flags",
@@ -111,6 +113,8 @@ pub fn type_name(code: u8) -> Option<&'static str> {
 /// The Flags bits, CSS v11 Part A 1.3: bit 4 is "Previously Used", and
 /// bits 5 to 7 are not defined there, so they are shown as set bits rather
 /// than named.
+// Drawn by the packet detail view (net-ux-polish-plan 5.4); goes with it.
+#[cfg_attr(not(test), allow(dead_code))]
 pub const FLAG_BITS: [(u8, &str); 5] = [
     (0, "LE Limited Discoverable"),
     (1, "LE General Discoverable"),
@@ -122,6 +126,8 @@ pub const FLAG_BITS: [(u8, &str); 5] = [
 /// The set bits of a flags octet, named where CSS v11 names them and by
 /// number where it does not: `["LE General Discoverable", "BR/EDR Not
 /// Supported", "bit 6"]`.
+// Drawn by the packet detail view (net-ux-polish-plan 5.4); goes with it.
+#[cfg_attr(not(test), allow(dead_code))]
 pub fn flag_names(flags: u8) -> Vec<String> {
     (0..8u8)
         .filter(|b| flags & (1 << b) != 0)

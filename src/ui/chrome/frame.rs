@@ -306,6 +306,8 @@ pub fn title_spans(
             Tag::Hold => ("HOLD".to_string(), theme.status_warn),
             Tag::Paused => ("PAUSED".to_string(), theme.status_warn),
             Tag::Stride(n) => (format!("\u{00D7}{n}"), theme.label),
+            Tag::Filtered => ("FILTERED".to_string(), theme.value_hi),
+            Tag::Behind(n) => (format!("+{n} NEW"), theme.label),
             Tag::Scroll(n) => (format!("\u{2191}{n}"), theme.value_hi),
             // Neither is a warning: both are correct ways to gather a number
             // and the tag says which, so they are drawn in the value colour

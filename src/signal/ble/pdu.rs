@@ -76,6 +76,10 @@ impl PduType {
             Self::ScanRsp => "SCAN_RSP".to_string(),
             Self::ConnectInd => "CONNECT_IND".to_string(),
             Self::AdvScanInd => "ADV_SCAN_IND".to_string(),
+            // Bluetooth 5's extended advertising on a primary channel: named,
+            // because a named type that is not decoded is a different fact
+            // from an unknown one (net-ux-polish-plan 5.3).
+            Self::Other(0x07) => "ADV_EXT_IND".to_string(),
             Self::Other(b) => format!("TYPE {b:#04x}"),
         }
     }
@@ -474,6 +478,8 @@ mod tests {
         whiten(&mut bits, 0);
         let packet = decode(&bits).unwrap();
         assert_eq!(packet.pdu_type, PduType::Other(7));
+        assert_eq!(packet.pdu_type.label(), "ADV_EXT_IND");
+        assert_eq!(PduType::Other(8).label(), "TYPE 0x08");
     }
 
     /// Every one of the sixteen codes survives the round trip, so a record

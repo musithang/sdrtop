@@ -210,20 +210,56 @@ pub(super) fn net_census(key: KeyEvent, ctx: &mut InputCtx<'_>) -> KeyAction {
 }
 
 /// The BLE packet list: the arrows move the cursor through the packets in the
-/// order the panel draws them, newest first; anything else goes on to the
-/// global keys.
+/// order the panel draws them (`NetState::ble_shown`), newest first; `Enter`
+/// narrows the list to the selected packet's address and back; `h` holds the
+/// list and lets it run again. Anything else goes on to the global keys.
 pub(super) fn net_ble_packets(key: KeyEvent, ctx: &mut InputCtx<'_>) -> KeyAction {
     let mut m = metrics(ctx.state);
-    let order: Vec<u64> = m.net.ble_packets.iter().map(|p| p.seq).collect();
+    let order: Vec<u64> = m.net.ble_shown().iter().map(|p| p.seq).collect();
     match key.code {
         KeyCode::Up => m.net.ble_view.selection.move_by(&order, -1),
         KeyCode::Down => m.net.ble_view.selection.move_by(&order, 1),
+        KeyCode::Enter => filter_to_selected(&mut m),
+        // `h` is the spectrum's hold everywhere else; no NET layout shows a
+        // spectrum, and holding a list is the same idea.
+        KeyCode::Char('h') => {
+            let held = match m.net.ble_view.held.take() {
+                Some(_) => None,
+                None => Some((m.net.ble_packets.clone(), m.net.ble_heard)),
+            };
+            m.net.ble_view.held = held;
+        }
         _ => {
             drop(m);
             return global::handle(key, ctx);
         }
     }
     KeyAction::Continue
+}
+
+/// `Enter` on the packet list: show only the selected packet's advertiser, or,
+/// when already filtered, everything again. A packet that carries no
+/// advertiser address (a SCAN_REQ, a CONNECT_IND) has nothing to filter by,
+/// and the log says so.
+fn filter_to_selected(m: &mut SdrMetrics) {
+    if m.net.ble_view.filter.take().is_some() {
+        return;
+    }
+    let selected = m.net.ble_view.selection.selected;
+    let address = m
+        .net
+        .ble_shown()
+        .into_iter()
+        .find(|p| Some(p.seq) == selected)
+        .map(|p| p.adv_addr);
+    match address {
+        None => m.push_log("BLE list: select a packet first"),
+        Some(None) => m.push_log("BLE list: that packet carries no advertiser address"),
+        Some(Some(a)) => {
+            m.net.ble_view.filter = Some(a);
+            m.net.ble_view.selection.reset_view();
+        }
+    }
 }
 
 /// Start the reference-accuracy entry for the selected census device, or say
@@ -446,6 +482,80 @@ mod tests {
         assert_eq!(selected(&state), Some(2));
         press(KeyCode::Up);
         assert_eq!(selected(&state), Some(3));
+    }
+
+    /// **`Enter` narrows to the selected packet's address and widens again;
+    /// `h` holds the list and lets it run**, both through the handler.
+    #[test]
+    fn enter_filters_and_h_holds_the_packet_list() {
+        let mut m = SdrMetrics::fixture().streaming();
+        for seq in 1..=3u64 {
+            m.net.ble_packets.push_front(crate::state::BlePacket {
+                seq,
+                adv_addr: Some([seq as u8; 6]),
+                ..sample_packet()
+            });
+        }
+        m.net.ble_heard = 3;
+        m.net.ble_view.selection.selected = Some(2);
+        let state = Arc::new(Mutex::new(m));
+        let mut engine = LayoutEngine::new(
+            crate::config::LayoutConfig::default_config(),
+            PanelRegistry::new(),
+        );
+        let mut show_footer = true;
+        let focus_keys = HashMap::new();
+        let mut ctx = InputCtx {
+            state: &state,
+            device: None,
+            engine: &mut engine,
+            show_footer: &mut show_footer,
+            focus_keys: &focus_keys,
+        };
+        let mut press = |code| {
+            net_ble_packets(KeyEvent::new(code, KeyModifiers::NONE), &mut ctx);
+        };
+
+        press(KeyCode::Enter);
+        assert_eq!(metrics(&state).net.ble_view.filter, Some([2; 6]));
+        assert_eq!(metrics(&state).net.ble_shown().len(), 1);
+        press(KeyCode::Enter);
+        assert_eq!(metrics(&state).net.ble_view.filter, None);
+
+        press(KeyCode::Char('h'));
+        assert!(metrics(&state).net.ble_view.held.is_some());
+        {
+            let mut m = metrics(&state);
+            m.net.ble_heard = 4;
+            m.net.ble_packets.push_front(crate::state::BlePacket {
+                seq: 4,
+                ..sample_packet()
+            });
+            assert_eq!(m.net.ble_shown().len(), 3, "the held copy");
+            assert_eq!(m.net.ble_behind(), 1);
+        }
+        press(KeyCode::Char('h'));
+        assert!(metrics(&state).net.ble_view.held.is_none());
+        assert_eq!(metrics(&state).net.ble_shown().len(), 4, "live again");
+    }
+
+    /// A packet with no advertiser address has nothing to filter by.
+    #[test]
+    fn filtering_on_a_packet_without_an_address_says_why() {
+        let mut m = SdrMetrics::fixture().streaming();
+        m.net.ble_packets.push_front(crate::state::BlePacket {
+            seq: 1,
+            adv_addr: None,
+            ..sample_packet()
+        });
+        m.net.ble_view.selection.selected = Some(1);
+        filter_to_selected(&mut m);
+        assert_eq!(m.net.ble_view.filter, None);
+        assert!(m
+            .ui
+            .log
+            .iter()
+            .any(|l| l.text.contains("no advertiser address")));
     }
 
     fn sample_packet() -> crate::state::BlePacket {

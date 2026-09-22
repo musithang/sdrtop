@@ -30,7 +30,7 @@ use ratatui::{
 };
 
 use crate::state::{BlePacket, RadioState, SdrMetrics};
-use crate::ui::panel::{FeedSpan, Panel, PanelChrome, Staleness};
+use crate::ui::panel::{FeedSpan, Panel, PanelChrome, Staleness, Tag};
 use crate::ui::widgets::reading::Reading;
 
 pub struct NetBlePacketsPanel;
@@ -40,6 +40,10 @@ const TYPE_W: usize = 15;
 /// The narrowest the address column is drawn: a full address. It grows from
 /// the spare width towards the widest address shown (`addr_width`).
 const ADDR_W: usize = crate::state::FULL_ADDRESS_WIDTH;
+/// The advertised name, cut and marked beyond this: long enough for most
+/// device names, and a column that grew with them would push the physics off
+/// the screen.
+const NAME_W: usize = 16;
 const ATYP_W: usize = 4;
 const LEN_W: usize = 4;
 const CRC_W: usize = 4;
@@ -56,6 +60,7 @@ const FIXED_W: usize = crate::ui::chrome::SELECTION_GUTTER
     + CH_W
     + TYPE_W
     + ADDR_W
+    + NAME_W
     + ATYP_W
     + LEN_W
     + CRC_W
@@ -63,7 +68,7 @@ const FIXED_W: usize = crate::ui::chrome::SELECTION_GUTTER
     + CFO_W
     + PPM_W
     + AGE_W
-    + 9;
+    + 10;
 
 /// The address column's width for this frame: what the panel can spare beyond
 /// every column at its narrowest, up to the widest address among `shown`, so
@@ -87,9 +92,9 @@ fn addr_width<'a>(
 fn header_line(addr_w: usize, theme: &crate::Theme) -> Line<'static> {
     Line::from(Span::styled(
         format!(
-            "{}{:<CH_W$} {:<TYPE_W$} {:<addr_w$} {:<ATYP_W$} {:>LEN_W$} {:>CRC_W$} {:>SNR_W$} {:>CFO_W$} {:>PPM_W$} {:>AGE_W$}",
+            "{}{:<CH_W$} {:<TYPE_W$} {:<addr_w$} {:<NAME_W$} {:<ATYP_W$} {:>LEN_W$} {:>CRC_W$} {:>SNR_W$} {:>CFO_W$} {:>PPM_W$} {:>AGE_W$}",
             " ".repeat(crate::ui::chrome::SELECTION_GUTTER),
-            "CH", "TYPE", "ADDRESS", "ATYP", "LEN", "CRC", "SNR", "CFO", "PPM", "AGE"
+            "CH", "TYPE", "ADDRESS", "NAME", "ATYP", "LEN", "CRC", "SNR", "CFO", "PPM", "AGE"
         ),
         Style::default().fg(theme.label),
     ))
@@ -142,6 +147,41 @@ fn ago(secs: u64) -> String {
     }
 }
 
+/// What the packet says its device is called (`signal::ble::ad`), made safe
+/// to print, cut and marked at [`NAME_W`]; `-` where it names nothing.
+///
+/// **Only from a packet whose CRC passed.** A failed CRC says some octet is
+/// wrong and not which, and a name read from one could be a name nobody sent
+/// (rule 2). An extended advertising header says `(not decoded)`: its payload
+/// is a different format, and a dash would read as "no name advertised".
+fn name_text(p: &BlePacket) -> String {
+    use crate::signal::ble::ad;
+    if p.pdu_type == crate::signal::ble::pdu::PduType::Other(0x07) {
+        return "(not decoded)".to_string();
+    }
+    if !p.crc_ok {
+        return "-".to_string();
+    }
+    let structures = ad::adv_data(p.pdu_type, &p.payload)
+        .map(ad::parse)
+        .unwrap_or_default();
+    match ad::name(&structures) {
+        Some((name, _)) => cut(&ad::printable(name), NAME_W),
+        None => "-".to_string(),
+    }
+}
+
+/// `text` in at most `width` columns, with `…` in the last where it was cut.
+fn cut(text: &str, width: usize) -> String {
+    if text.chars().count() <= width {
+        text.to_string()
+    } else {
+        let mut out: String = text.chars().take(width.saturating_sub(1)).collect();
+        out.push('\u{2026}');
+        out
+    }
+}
+
 /// The advertiser's address as the section's display mode shows it, or a
 /// dash for a PDU type that carries none.
 fn address_text(p: &BlePacket, net: &crate::state::NetState, width: usize) -> String {
@@ -182,6 +222,11 @@ fn row(
         Span::raw(" "),
         Span::styled(
             format!("{:<addr_w$}", address_text(p, &state.net, addr_w)),
+            Style::default().fg(theme.value),
+        ),
+        Span::raw(" "),
+        Span::styled(
+            format!("{:<NAME_W$}", name_text(p)),
             Style::default().fg(theme.value),
         ),
         Span::raw(" "),
@@ -273,7 +318,11 @@ impl Panel for NetBlePacketsPanel {
     }
 
     fn focus_bindings(&self) -> &'static [(&'static str, &'static str)] {
-        &[("↑↓", "select a packet")]
+        &[
+            ("↑↓", "select a packet"),
+            ("Enter", "only this address, or all again"),
+            ("H", "hold the list, or let it run"),
+        ]
     }
 
     fn chrome(&self, state: &SdrMetrics) -> PanelChrome {
@@ -285,6 +334,14 @@ impl Panel for NetBlePacketsPanel {
             .counts_from_feed(FeedSpan::Session)
             .shows_offsets()
             .shows_addresses()
+            .tag_if(state.net.ble_view.filter.is_some(), Tag::Filtered)
+            // Held, the list is paused by the user, which the engine draws
+            // cooled and never as stale; and it says what the pause costs.
+            .tag_if(state.net.ble_view.held.is_some(), Tag::Paused)
+            .tag_if(
+                state.net.ble_behind() > 0,
+                Tag::Behind(state.net.ble_behind()),
+            )
     }
 
     fn render(
@@ -300,8 +357,9 @@ impl Panel for NetBlePacketsPanel {
         }
         // Sized over every row the panel could show, so the header and the
         // rows agree on one width for the frame.
+        let shown = state.net.ble_shown();
         let addr_w = addr_width(
-            state.net.ble_packets.iter().take(inner.height as usize),
+            shown.iter().copied().take(inner.height as usize),
             &state.net,
             inner.width as usize,
         );
@@ -341,12 +399,24 @@ impl Panel for NetBlePacketsPanel {
             return;
         }
 
+        if shown.is_empty() {
+            // Only reachable filtered: the address has no packets in the list
+            // any more, which is a fact about the ring, not a quiet device.
+            lines.push(Line::from(""));
+            lines.push(Line::from(Span::styled(
+                "no packets from this address in the list; Enter shows all".to_string(),
+                Style::default().fg(theme.label),
+            )));
+            f.render_widget(Paragraph::new(lines), inner);
+            return;
+        }
+
         let summary = channel_summary(state, theme, inner.width as usize);
         let body = (inner.height as usize)
             .saturating_sub(1)
             .saturating_sub(summary.is_some() as usize);
         let now = std::time::Instant::now();
-        let order: Vec<u64> = state.net.ble_packets.iter().map(|p| p.seq).collect();
+        let order: Vec<u64> = shown.iter().map(|p| p.seq).collect();
         let view = &state.net.ble_view.selection;
         let cursor = view.cursor(&order);
         let start = crate::ui::widgets::table::viewport_start(
@@ -355,14 +425,7 @@ impl Panel for NetBlePacketsPanel {
             order.len(),
             body,
         );
-        for (i, p) in state
-            .net
-            .ble_packets
-            .iter()
-            .enumerate()
-            .skip(start)
-            .take(body)
-        {
+        for (i, p) in shown.iter().enumerate().skip(start).take(body) {
             lines.push(row(p, state, now, addr_w, Some(i) == cursor, theme));
         }
         if let Some(summary) = summary {
@@ -433,7 +496,7 @@ mod tests {
         let mut m = SdrMetrics::fixture().streaming();
         m.net.ble_packets.push_back(packet(37, true));
         m.net.ble_packets.push_front(packet(38, false));
-        let out = draw(NetBlePacketsPanel, 60, 10, &m).join("\n");
+        let out = draw(NetBlePacketsPanel, 90, 10, &m).join("\n");
         assert!(out.contains("bad"), "{out}");
         assert!(out.contains("ok"), "{out}");
         let bad_line = out.find("bad").unwrap();
@@ -564,5 +627,82 @@ mod tests {
         let chrome = NetBlePacketsPanel.chrome(&feed(1));
         assert!(chrome.title.contains("Ad_vertising"), "{}", chrome.title);
         assert_eq!(NetBlePacketsPanel.focus_key(), Some('v'));
+    }
+
+    /// A packet whose payload is `ad` behind its address.
+    fn advertising(ad: &[u8], crc_ok: bool) -> BlePacket {
+        let mut p = packet(37, crc_ok);
+        p.payload =
+            crate::signal::ble::pdu::air_octets([0xaa, 0xbb, 0xcc, 0x11, 0x22, 0x33]).to_vec();
+        p.payload.extend_from_slice(ad);
+        p
+    }
+
+    /// **The name the device advertises, and only where it can be believed.**
+    /// Read from its AD structures when the CRC passed; a dash when it failed,
+    /// however readable the octets; control characters never reach the
+    /// terminal; and an extended advertising header says it was not decoded.
+    #[test]
+    fn the_name_column_shows_what_was_advertised_and_can_be_believed() {
+        let name = [0x05, 0x09, b'S', b'e', b'n', b's'];
+        assert_eq!(name_text(&advertising(&name, true)), "Sens");
+        assert_eq!(name_text(&advertising(&name, false)), "-");
+        let hostile = [0x04, 0x09, b'A', 0x1b, b'B'];
+        assert_eq!(name_text(&advertising(&hostile, true)), "A\u{fffd}B");
+        let long = [
+            0x15, 0x09, b'A', b'A', b'A', b'A', b'A', b'A', b'A', b'A', b'A', b'A', b'A', b'A',
+            b'A', b'A', b'A', b'A', b'A', b'A', b'A', b'A',
+        ];
+        let cut_name = name_text(&advertising(&long, true));
+        assert_eq!(cut_name.chars().count(), NAME_W);
+        assert!(cut_name.ends_with('\u{2026}'));
+        assert_eq!(name_text(&advertising(&[0x02, 0x01, 0x06], true)), "-");
+
+        let mut ext = packet(37, true);
+        ext.pdu_type = PduType::Other(0x07);
+        assert_eq!(name_text(&ext), "(not decoded)");
+        let mut m = feed(0);
+        m.net.ble_packets.push_front(ext);
+        let out = draw(NetBlePacketsPanel, 130, 8, &m).join("\n");
+        assert!(out.contains("ADV_EXT_IND"), "{out}");
+        assert!(out.contains("(not decoded)"), "{out}");
+    }
+
+    /// **Filtered, the list is one address and the frame says so.**
+    #[test]
+    fn a_filtered_list_shows_one_address_and_says_so() {
+        let mut m = feed(4);
+        m.net.ble_view.filter = Some([0xaa, 0, 0, 0, 0, 2]);
+        let out = draw(NetBlePacketsPanel, 130, 10, &m);
+        assert!(out[0].contains("[FILTERED]"), "{}", out[0]);
+        let text = out.join("\n");
+        assert!(text.contains("00:00:00:00:02"), "{text}");
+        assert!(!text.contains("00:00:00:00:03"), "{text}");
+
+        // An address gone from the ring says that, rather than a quiet room.
+        m.net.ble_view.filter = Some([0xaa, 0, 0, 0, 0, 9]);
+        let gone = draw(NetBlePacketsPanel, 130, 10, &m).join("\n");
+        assert!(gone.contains("no packets from this address"), "{gone}");
+    }
+
+    /// **Held, the list stops and counts what it is missing**, and says it is
+    /// paused rather than stale; the live ring goes on underneath.
+    #[test]
+    fn a_held_list_stays_put_and_counts_what_it_misses() {
+        let mut m = feed(3);
+        m.net.ble_view.held = Some((m.net.ble_packets.clone(), m.net.ble_heard));
+        let mut newer = packet(37, true);
+        newer.seq = 4;
+        newer.adv_addr = Some([0xaa, 0, 0, 0, 0, 4]);
+        m.net.ble_packets.push_front(newer);
+        m.net.ble_heard = 4;
+
+        let out = draw(NetBlePacketsPanel, 130, 10, &m);
+        assert!(out[0].contains("[PAUSED]"), "{}", out[0]);
+        assert!(out[0].contains("[+1 NEW]"), "{}", out[0]);
+        assert!(!out[0].contains("STALE"), "{}", out[0]);
+        let text = out.join("\n");
+        assert!(!text.contains("00:00:00:00:04"), "held: {text}");
+        assert!(text.contains("00:00:00:00:03"), "{text}");
     }
 }

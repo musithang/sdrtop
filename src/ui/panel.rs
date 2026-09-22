@@ -145,6 +145,12 @@ pub enum Tag {
     Paused,
     /// `[×N]` - frames averaged into each history row. Absent at 1.
     Stride(usize),
+    /// `[FILTERED]` - a list narrowed to one thing the user picked; the rows
+    /// say which, and the tag says the list is not everything.
+    Filtered,
+    /// `[+N NEW]` - arrivals a paused list is not showing, so its pause says
+    /// what it is costing.
+    Behind(u64),
     /// `[↑N]` - how far back through the history the view is scrolled. Absent at 0.
     Scroll(usize),
     /// `[SURVEY]` - the numbers on this panel were gathered by sampling the
