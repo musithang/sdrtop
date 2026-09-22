@@ -324,13 +324,14 @@ pub fn title_spans(
             Tag::FeedLoss => ("FEED LOSS".to_string(), theme.status_warn),
             // The RF bench's FREQUENCY REFERENCE card's words and colours:
             // relative is not a warning, it is a different claim.
-            // Dated, because the names come from a snapshot of the IEEE's
-            // listing and all testimony is (rule 4).
+            // Dated, because the names come from snapshots of the IEEE's
+            // listing and the SIG's registry, and all testimony is (rule 4).
             Tag::Addresses(mode) => (
                 format!(
-                    "{} \u{00b7} IEEE {}",
+                    "{} \u{00b7} IEEE {} \u{00b7} SIG {}",
                     mode.label().to_uppercase(),
-                    crate::signal::net::vendor::fetched()
+                    crate::signal::net::vendor::fetched(),
+                    crate::signal::ble::assigned::fetched()
                 ),
                 theme.value_hi,
             ),

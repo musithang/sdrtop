@@ -257,6 +257,27 @@ fn census_from_ble(
     crate::signal::net::census::observe(devices, &sighting, now);
 }
 
+/// The address a packet came from and the company its manufacturer data
+/// names (`signal::ble::ad`), for `NetState::companies`.
+///
+/// **Only from a packet whose CRC passed**: a failed one could name a company
+/// nobody sent, and then name it for every packet that device sends after.
+fn company_of(p: &crate::signal::ble::pdu::Packet) -> Option<([u8; 6], u16)> {
+    use crate::signal::ble::ad;
+    if !p.crc_ok {
+        return None;
+    }
+    let address = p.adv_addr?;
+    let data = ad::adv_data(p.pdu_type, &p.payload)?;
+    ad::parse(data).into_iter().find_map(|s| match s {
+        ad::Structure::Ad {
+            ad: ad::Ad::Manufacturer { company, .. },
+            ..
+        } => Some((address, company)),
+        _ => None,
+    })
+}
+
 impl NetWorker {
     pub fn new(
         sample_rx: SampleReceiver<StreamBlock>,
@@ -444,7 +465,12 @@ impl NetWorker {
                             m.net.health.ble.add(funnel);
                         }
                         if !packets.is_empty() {
+                            // Read before the lock: parsing is work the UI
+                            // thread should not wait behind.
+                            let companies: Vec<([u8; 6], u16)> =
+                                packets.iter().filter_map(company_of).collect();
                             let mut m = self.state.lock().unwrap_or_else(|e| e.into_inner());
+                            m.net.companies.extend(companies);
                             if let Some(i) =
                                 crate::signal::ble::channel::advertising_channel_index(ch)
                             {
@@ -1121,6 +1147,29 @@ mod tests {
         census_from_ble(&mut devices, &packet, 37, false, 8e6, Instant::now());
         assert_eq!(devices.len(), 1);
         assert_eq!(devices[0].address, [1, 2, 3, 4, 5, 6]);
+    }
+
+    /// **The company comes from CRC-good manufacturer data only**: the real
+    /// ADV_NONCONN_IND's 0x004C is taken, the same octets with a failed CRC
+    /// are not, and a packet with no manufacturer data names nothing.
+    #[test]
+    fn a_company_is_read_only_from_a_packet_whose_crc_passed() {
+        use crate::signal::ble::pdu::{air_octets, PduType};
+        let addr = [0xd1, 0x9a, 0x7e, 0x91, 0x27, 0x9e];
+        let mut packet = crate::signal::ble::pdu::decode(&[false; 40]).unwrap();
+        packet.pdu_type = PduType::AdvNonconnInd;
+        packet.adv_addr = Some(addr);
+        packet.payload = air_octets(addr).to_vec();
+        packet
+            .payload
+            .extend_from_slice(&[0x07, 0xff, 0x4c, 0x00, 0x12, 0x02, 0x00, 0x02]);
+        packet.crc_ok = true;
+        assert_eq!(company_of(&packet), Some((addr, 0x004C)));
+        packet.crc_ok = false;
+        assert_eq!(company_of(&packet), None);
+        packet.crc_ok = true;
+        packet.payload.truncate(6);
+        assert_eq!(company_of(&packet), None);
     }
 
     /// **Only LOCK's periodic advertising is timed.** An ADV_IND in LOCK

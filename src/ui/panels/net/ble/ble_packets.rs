@@ -705,4 +705,34 @@ mod tests {
         assert!(!text.contains("00:00:00:00:04"), "held: {text}");
         assert!(text.contains("00:00:00:00:03"), "{text}");
     }
+
+    /// **One device, one name, in every panel**: an RPA whose manufacturer
+    /// data named Apple reads `Apple·mfr` in the packet list and in the
+    /// census alike, from the section's one record of it.
+    #[test]
+    fn the_list_and_the_census_name_a_random_device_by_its_company_alike() {
+        let rpa = [0x4a, 0x11, 0x22, 0x33, 0x09, 0xbe];
+        let mut m = feed(0);
+        m.net.address_display = crate::state::AddressDisplay::Oui;
+        m.net.companies.insert(rpa, 0x004C);
+        let mut p = packet(37, true);
+        p.seq = 1;
+        p.adv_addr = Some(rpa);
+        p.tx_add_random = true;
+        m.net.ble_packets.push_front(p);
+        m.net
+            .census
+            .devices
+            .push(crate::signal::net::census::Device::heard(
+                rpa,
+                true,
+                Instant::now(),
+            ));
+
+        let list = draw(NetBlePacketsPanel, 140, 8, &m).join("\n");
+        let census = draw(crate::ui::NetCensusPanel, 120, 10, &m).join("\n");
+        for out in [&list, &census] {
+            assert!(out.contains("Apple\u{00b7}mfr ..09:be"), "{out}");
+        }
+    }
 }

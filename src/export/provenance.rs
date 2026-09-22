@@ -123,9 +123,10 @@ fn addresses_line(state: &SdrMetrics) -> String {
     match mode {
         crate::state::AddressDisplay::Full => mode.label().to_string(),
         _ => format!(
-            "{}, registrants from the IEEE listing of {}",
+            "{}, registrants from the IEEE listing of {}, companies from the SIG registry of {}",
             mode.label(),
-            crate::signal::net::vendor::fetched()
+            crate::signal::net::vendor::fetched(),
+            crate::signal::ble::assigned::fetched()
         ),
     }
 }

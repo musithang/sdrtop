@@ -127,11 +127,29 @@ impl AddressDisplay {
     /// A masked address with no number shows `#-`: every address that reaches
     /// the state is numbered as it arrives, so this is a gap to see, not a
     /// number to invent.
+    ///
+    /// Without a company: the tests' form; the section calls [`Self::show_with`].
+    #[cfg(test)]
     pub fn show(
         self,
         addr: [u8; 6],
         random: bool,
         number: Option<u32>,
+        width: Option<usize>,
+    ) -> String {
+        self.show_with(addr, random, number, None, width)
+    }
+
+    /// [`Self::show`], knowing the company the address's manufacturer data
+    /// named (`NetState::companies`): for a random address, which has no
+    /// IEEE block, that company takes the kind's place, marked with where it
+    /// came from ([`who_with`]).
+    pub fn show_with(
+        self,
+        addr: [u8; 6],
+        random: bool,
+        number: Option<u32>,
+        company: Option<u16>,
         width: Option<usize>,
     ) -> String {
         let tail = match self {
@@ -148,13 +166,17 @@ impl AddressDisplay {
                 None => "#-".to_string(),
             },
         };
-        let who = who(addr, random);
+        let (name, mark) = who_parts(addr, random, company);
         match width {
-            None => format!("{who} {tail}"),
+            None => format!("{name}{mark} {tail}"),
             Some(w) => {
+                // The name gives way, never the mark: `Apple·m…` would have
+                // lost the one thing saying where the name came from.
                 let room = w.saturating_sub(tail.chars().count() + 1).max(1);
-                let cut = crate::signal::net::vendor::short_name(&who, room);
-                format!("{cut:<room$} {tail}")
+                let name_room = room.saturating_sub(mark.chars().count()).max(1);
+                let cut = crate::signal::net::vendor::short_name(&name, name_room);
+                let who = format!("{cut}{mark}");
+                format!("{who:<room$} {tail}")
             }
         }
     }
@@ -162,8 +184,20 @@ impl AddressDisplay {
     /// The columns `show` needs to print `addr` without cutting anything, and
     /// never less than a full address's 17, so a table sized for the widest
     /// row holds every mode.
+    #[cfg(test)]
     pub fn natural_width(self, addr: [u8; 6], random: bool, number: Option<u32>) -> usize {
-        self.show(addr, random, number, None)
+        self.natural_width_with(addr, random, number, None)
+    }
+
+    /// [`Self::natural_width`] for [`Self::show_with`].
+    pub fn natural_width_with(
+        self,
+        addr: [u8; 6],
+        random: bool,
+        number: Option<u32>,
+        company: Option<u16>,
+    ) -> usize {
+        self.show_with(addr, random, number, company, None)
             .chars()
             .count()
             .max(FULL_ADDRESS_WIDTH)
@@ -173,6 +207,11 @@ impl AddressDisplay {
 /// `a4:83:e7:1c:09:be`: the narrowest an address column is ever drawn.
 pub const FULL_ADDRESS_WIDTH: usize = 17;
 
+/// What [`who_with`] appends to a name read from manufacturer data: where it
+/// came from, since it is a different source from the IEEE listing with a
+/// different meaning (rule 5).
+pub const MFR_MARK: &str = "\u{00b7}mfr";
+
 /// Whose address this is, as far as anything we hold can say.
 ///
 /// A public address is looked up in the IEEE's listing
@@ -180,13 +219,48 @@ pub const FULL_ADDRESS_WIDTH: usize = 17;
 /// registrant where the listing gives several, `private` where the holder hid
 /// it, and the block itself in the IEEE's hyphenated form (`A4-83-E7`) where
 /// the snapshot does not list it, which is the honest answer and cannot pass
-/// for a name. A random address has no block, so it is its kind
-/// (`signal::ble::address::kind`) and never a vendor.
+/// for a name.
 ///
-/// [`AddressDisplay::show`] prints it in every mode but `Full`, where the whole
-/// address takes its place; a panel with room for both (the census detail
-/// block) calls this directly rather than deriving a second answer.
-pub fn who(addr: [u8; 6], random: bool) -> String {
+/// **A random address has no IEEE block, but its manufacturer data may name
+/// a company** (net-ux-polish-plan 5.4, Viktor's decision of 2026-09-22):
+/// `company` is that identifier, shown as the SIG's name for it
+/// (`signal::ble::assigned`, its legal form dropped) or the number itself
+/// where the snapshot does not list it, marked [`MFR_MARK`] - `Apple·mfr`.
+/// It says whose data format the device sends, which for a phone is its
+/// maker and for a module may not be; the mark keeps that distinct from an
+/// IEEE registrant. Without one a random address is its kind
+/// (`signal::ble::address::kind`), never a guessed vendor, and a
+/// reserved-kind address keeps saying `reserved` either way: that is the
+/// more important fact about it.
+///
+/// [`AddressDisplay::show_with`] prints it in every mode but `Full`, where the
+/// whole address takes its place; a panel with room for both (the census
+/// detail block) calls this directly rather than deriving a second answer.
+pub fn who_with(addr: [u8; 6], random: bool, company: Option<u16>) -> String {
+    let (name, mark) = who_parts(addr, random, company);
+    format!("{name}{mark}")
+}
+
+/// [`who_with`] as its name and its source mark, apart, so a table can cut
+/// the one and keep the other.
+fn who_parts(addr: [u8; 6], random: bool, company: Option<u16>) -> (String, &'static str) {
+    use crate::signal::ble::address::{kind, AddressKind};
+    use crate::signal::net::vendor::short_name;
+    match (kind(addr, random), company) {
+        (AddressKind::Public | AddressKind::Reserved, _) | (_, None) => {
+            (registrant_or_kind(addr, random), "")
+        }
+        (_, Some(id)) => {
+            let name = crate::signal::ble::assigned::company(id)
+                .map(|n| short_name(n, usize::MAX))
+                .unwrap_or_else(|| format!("0x{id:04X}"));
+            (name, MFR_MARK)
+        }
+    }
+}
+
+/// The IEEE registrant of a public address, or a random address's kind.
+fn registrant_or_kind(addr: [u8; 6], random: bool) -> String {
     use crate::signal::ble::address::{kind, AddressKind};
     use crate::signal::net::vendor::{registrant, short_name, Registrant};
     match kind(addr, random) {
@@ -362,6 +436,12 @@ pub struct NetState {
     pub address_display: AddressDisplay,
     /// The session's masked numbers. See [`AddressBook`].
     pub address_book: AddressBook,
+    /// The company each address's manufacturer data named, the latest from a
+    /// packet whose CRC passed (`signal::net::worker`): per address, not per
+    /// packet, so a device reads the same in every panel and the export, and
+    /// a scan response without manufacturer data does not turn it back into
+    /// its kind.
+    pub companies: std::collections::HashMap<[u8; 6], u16>,
     /// A lock the occupancy cursor's `L` asked for and the survey task has not
     /// applied yet. **The task applies it**, as the survey's hand-back when a
     /// survey is running (`Self::end`) or on its next idle poll when the radio
@@ -437,15 +517,24 @@ impl NetState {
     /// `width` as [`AddressDisplay::show`] takes it: the column the table has,
     /// or `None` for the uncut form an export writes.
     pub fn show_address(&self, addr: [u8; 6], random: bool, width: Option<usize>) -> String {
-        self.address_display
-            .show(addr, random, self.address_book.get(addr), width)
+        self.address_display.show_with(
+            addr,
+            random,
+            self.address_book.get(addr),
+            self.companies.get(&addr).copied(),
+            width,
+        )
     }
 
     /// What [`Self::show_address`] needs to print `addr` uncut: the width a
     /// table asks for when it sizes its address column.
     pub fn address_width(&self, addr: [u8; 6], random: bool) -> usize {
-        self.address_display
-            .natural_width(addr, random, self.address_book.get(addr))
+        self.address_display.natural_width_with(
+            addr,
+            random,
+            self.address_book.get(addr),
+            self.companies.get(&addr).copied(),
+        )
     }
 
     /// Give the tuner back, and say where the radio belongs.
@@ -1387,5 +1476,69 @@ mod tests {
         band.absorb(second, t0 + Duration::from_millis(300));
         assert_eq!(band.noise_dbfs, Some(-71.0));
         assert!(!band.trusted, "a front end on its rails is on its rails");
+    }
+
+    /// **A random address with manufacturer data says whose format it is**,
+    /// marked as coming from there: the SIG's name with its legal form off,
+    /// or the number where the snapshot does not list it. Without the data it
+    /// stays its kind; a public address keeps its IEEE registrant; a reserved
+    /// kind keeps saying so.
+    #[test]
+    fn a_random_address_names_its_manufacturer_data_s_company() {
+        use AddressDisplay::*;
+        let rpa = [0x4a, 0x11, 0x22, 0x33, 0x09, 0xbe];
+        assert_eq!(
+            Oui.show_with(rpa, true, None, Some(0x004C), None),
+            "Apple\u{00b7}mfr ..09:be"
+        );
+        assert_eq!(
+            Oui.show_with(rpa, true, None, Some(0x7FFF), None),
+            "0x7FFF\u{00b7}mfr ..09:be"
+        );
+        assert_eq!(Oui.show_with(rpa, true, None, None, None), "RPA ..09:be");
+        assert_eq!(
+            Masked.show_with(rpa, true, Some(3), Some(0x004C), None),
+            "Apple\u{00b7}mfr #3"
+        );
+
+        let public = [0xa4, 0x83, 0xe7, 0x1c, 0x09, 0xbe];
+        assert_eq!(
+            Oui.show_with(public, false, None, Some(0x0006), None),
+            "Apple ..09:be"
+        );
+        let reserved = [0x80, 0, 0, 0, 0x09, 0xbe];
+        assert_eq!(
+            Oui.show_with(reserved, true, None, Some(0x004C), None),
+            "reserved ..09:be"
+        );
+    }
+
+    /// **The name gives way to a narrow column, the mark never does**: cut
+    /// to fit, `…` at the cut, `·mfr` whole after it.
+    #[test]
+    fn a_cut_company_keeps_its_source_mark() {
+        let rpa = [0x4a, 0x11, 0x22, 0x33, 0x09, 0xbe];
+        // 0x0075: Samsung Electronics Co. Ltd., long enough to be cut.
+        let shown = AddressDisplay::Oui.show_with(rpa, true, None, Some(0x0075), Some(17));
+        assert_eq!(shown.chars().count(), 17, "{shown}");
+        assert!(shown.contains("\u{2026}\u{00b7}mfr ..09:be"), "{shown}");
+    }
+
+    /// Through the section's own account: what the worker learned about an
+    /// address is how every panel shows it.
+    #[test]
+    fn the_section_shows_an_address_with_the_company_it_learned() {
+        let rpa = [0x4a, 0x11, 0x22, 0x33, 0x09, 0xbe];
+        let mut net = NetState {
+            address_display: AddressDisplay::Oui,
+            ..NetState::default()
+        };
+        assert_eq!(net.show_address(rpa, true, None), "RPA ..09:be");
+        net.companies.insert(rpa, 0x004C);
+        assert_eq!(
+            net.show_address(rpa, true, None),
+            "Apple\u{00b7}mfr ..09:be"
+        );
+        assert!(net.address_width(rpa, true) >= "Apple\u{00b7}mfr ..09:be".chars().count());
     }
 }

@@ -449,7 +449,10 @@ fn detail(
     let shown = net.show_address(d.address, d.random, None);
     let identity = match net.address_display {
         crate::state::AddressDisplay::Full => {
-            format!("{shown}  {}", crate::state::who(d.address, d.random))
+            format!(
+                "{shown}  {}",
+                crate::state::who_with(d.address, d.random, net.companies.get(&d.address).copied())
+            )
         }
         _ => shown,
     };
