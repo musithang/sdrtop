@@ -143,6 +143,13 @@ pub fn null_meter(
     color: Color,
     dim: Color,
 ) -> Vec<Span<'static>> {
+    null_meter_marked(value, full_scale, width, color, dim, &[])
+}
+
+/// The track column `value` lands on in a [`null_meter`] `width` wide: the one
+/// mapping the needle, the limit marks and any ruler under the meter share, so a
+/// label cannot sit a column away from the tick it names.
+pub fn null_meter_column(value: f64, full_scale: f64, width: usize) -> usize {
     let w = width.max(3);
     let center = w / 2;
     let frac = if full_scale > 0.0 {
@@ -150,9 +157,28 @@ pub fn null_meter(
     } else {
         0.0
     };
-    let needle =
-        ((center as f64 + frac * center as f64).round() as isize).clamp(0, w as isize - 1) as usize;
+    ((center as f64 + frac * center as f64).round() as isize).clamp(0, w as isize - 1) as usize
+}
+
+/// A [`null_meter`] with limit marks (`╎`) at each of `marks`, in the `dim` ink.
+/// A mark is drawn only on empty track: the needle and the fill are the reading,
+/// and a limit drawn over them would hide the thing it is there to judge.
+pub fn null_meter_marked(
+    value: f64,
+    full_scale: f64,
+    width: usize,
+    color: Color,
+    dim: Color,
+    marks: &[f64],
+) -> Vec<Span<'static>> {
+    let w = width.max(3);
+    let center = w / 2;
+    let needle = null_meter_column(value, full_scale, width);
     let (lo, hi) = (center.min(needle), center.max(needle));
+    let marked: Vec<usize> = marks
+        .iter()
+        .map(|&m| null_meter_column(m, full_scale, width))
+        .collect();
 
     let mut spans = Vec::with_capacity(w + 2);
     spans.push(Span::styled("◄".to_string(), Style::default().fg(dim)));
@@ -163,6 +189,8 @@ pub fn null_meter(
             ('┃', dim)
         } else if x > lo && x < hi {
             ('▓', color) // filled deviation between centre and needle
+        } else if marked.contains(&x) {
+            ('╎', dim)
         } else {
             ('·', dim) // empty track
         };
@@ -648,6 +676,26 @@ mod tests {
         );
         let s: String = spans.iter().map(|s| s.content.as_ref()).collect();
         assert!(s.chars().all(|c| c == ' '), "got {s:?}");
+    }
+
+    /// A limit mark sits on the track where the mapping says, and never over
+    /// the reading: past the needle it shows, under the fill it does not.
+    #[test]
+    fn null_meter_marks_sit_on_empty_track_only() {
+        let text = |spans: Vec<Span>| {
+            spans
+                .iter()
+                .map(|s| s.content.to_string())
+                .collect::<String>()
+        };
+        let (c, d) = (Color::Rgb(0, 200, 0), Color::Rgb(20, 20, 20));
+        // Track of 21: centre 10, one column per tenth of full scale.
+        let m = text(null_meter_marked(-0.3, 1.0, 21, c, d, &[-0.6, 0.6]));
+        assert_eq!(m.chars().nth(1 + 4).unwrap(), '╎', "{m}");
+        assert_eq!(m.chars().nth(1 + 16).unwrap(), '╎', "{m}");
+        let hidden = text(null_meter_marked(-0.9, 1.0, 21, c, d, &[-0.6]));
+        assert_eq!(hidden.chars().nth(1 + 4).unwrap(), '▓', "{hidden}");
+        assert_eq!(null_meter_column(0.6, 1.0, 21), 16);
     }
 
     #[test]

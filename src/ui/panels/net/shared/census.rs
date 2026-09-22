@@ -15,6 +15,11 @@
 //! state reads the same condition the feed-health panel dashes its BLE rows on,
 //! and says either that the room was quiet or that nobody was counting.
 //! Printing a bare empty table would let a reader take the flattering one.
+//!
+//! **Under the table, the room's clocks and then the selected device**
+//! (`clock_error`, `detail`), in the order they give way: the table keeps its
+//! rows first, the detail next, and the meters take what is left or are not
+//! drawn.
 
 use ratatui::{
     layout::Rect,
@@ -33,7 +38,13 @@ use crate::ui::widgets::table::{
     columns_that_fit, header, row, viewport_start, widen, Align, Column, Sort,
 };
 
+mod clock_error;
+
 pub struct NetCensusPanel;
+
+/// Rows the table keeps before the clock meters may take any: the panel is
+/// the table, and the meters illustrate it.
+const TABLE_KEEPS: usize = 5;
 
 /// The columns, in the order they are drawn and in the same order as
 /// [`SORT_KEYS`], so the header, the chrome tag and the ordering cannot disagree
@@ -508,9 +519,14 @@ impl Panel for NetCensusPanel {
         if height < extra.len() + 4 {
             extra.clear();
         }
+        // The clock meters give way to both the table and the detail: they
+        // take what is left once the table has kept its rows, and draw
+        // nothing rather than a squeezed block.
+        let room = height.saturating_sub(2 + extra.len() + devices.len().min(TABLE_KEEPS));
+        let meters = clock_error::lines(&devices, state, now, width, room, theme);
         // One row for the header and one for the turnover summary, plus
-        // whatever the detail block took, so the list gets the rest.
-        let body = height.saturating_sub(2 + extra.len());
+        // whatever the two blocks took, so the list gets the rest.
+        let body = height.saturating_sub(2 + extra.len() + meters.len());
         let start = viewport_start(
             census.selection.first_visible,
             cursor.unwrap_or(0),
@@ -527,6 +543,7 @@ impl Panel for NetCensusPanel {
             ));
         }
         lines.push(turnover_line(&devices, now, theme));
+        lines.extend(meters);
         lines.extend(extra);
         f.render_widget(Paragraph::new(lines), inner);
     }
@@ -983,11 +1000,156 @@ mod tests {
         }
     }
 
+    /// The seven clocks a live room gave on 2026-09-22, two of them near
+    /// -95 ppm, with the Gree device selected.
+    fn live_room() -> SdrMetrics {
+        let now = Instant::now();
+        let mut m = SdrMetrics::fixture().streaming();
+        let live = [
+            ([0x20, 0xc9, 0x70, 0x44, 0x40, 0x13], -0.32, 0.12),
+            ([0x36, 0x9a, 0x90, 0xcd, 0x23, 0x00], -40.36, 0.04),
+            ([0x50, 0x2c, 0xc6, 0xc2, 0xaf, 0x64], -9.30, 0.23),
+            ([0x51, 0x7f, 0xa9, 0xca, 0xf7, 0x65], -94.43, 0.07),
+            ([0x6c, 0x93, 0x70, 0x77, 0x66, 0xd7], -2.50, 0.11),
+            ([0xb0, 0x99, 0xd7, 0x40, 0xb3, 0x8b], -1.32, 0.06),
+            ([0xe7, 0xc1, 0xf2, 0xd3, 0x7b, 0x09], -95.59, 0.09),
+        ];
+        m.net.census.devices = live
+            .iter()
+            .map(|&(a, v, sigma)| Device {
+                packets: 5,
+                best_snr_db: Some(15.0),
+                crystal_offset_ppm: Some(Uncertain::from_sigma(v, sigma)),
+                ..Device::heard(a, false, now)
+            })
+            .collect();
+        m.net.census.selection.selected = Some([0x50, 0x2c, 0xc6, 0xc2, 0xaf, 0x64]);
+        m
+    }
+
+    fn referenced(mut m: SdrMetrics) -> SdrMetrics {
+        m.radio.reference = Some(crate::state::FrequencyReference {
+            ppm: 38.0,
+            sigma_ppm: 0.3,
+            provenance: crate::state::Provenance::Traceable,
+            source: "WWV 10 MHz".to_string(),
+            at: Instant::now(),
+            efficiency: None,
+        });
+        m
+    }
+
+    /// The meter rows, top to bottom, as the addresses they are labelled with.
+    fn meter_rows(out: &[String]) -> Vec<String> {
+        out.iter()
+            .filter(|l| l.contains('◄'))
+            .map(|l| l.chars().skip(2).take(17).collect())
+            .collect()
+    }
+
+    /// **Worst clock first, every row labelled, the selected one marked**,
+    /// and each meter's reading beside it.
+    #[test]
+    fn the_clock_meters_rank_the_room_worst_first() {
+        let out = draw(NetCensusPanel, 120, 30, &live_room());
+        let rows = meter_rows(&out);
+        assert_eq!(rows.len(), 7, "{}", out.join("\n"));
+        assert_eq!(rows[0], "e7:c1:f2:d3:7b:09");
+        assert_eq!(rows[1], "51:7f:a9:ca:f7:65");
+        assert_eq!(rows[6], "20:c9:70:44:40:13");
+        let picked = out
+            .iter()
+            .find(|l| l.contains('◄') && l.contains("50:2c:c6"))
+            .unwrap();
+        assert!(picked.contains('\u{258c}'), "{picked}");
+        assert!(picked.contains("-9.30 ±0.23 ppm"), "{picked}");
+    }
+
+    /// **Without a reference, no limit.** Every offset still carries our own
+    /// oscillator's error, so no marks are drawn, and the rule says why.
+    #[test]
+    fn relative_meters_draw_no_limit_and_say_why() {
+        let out = draw(NetCensusPanel, 120, 30, &live_room()).join("\n");
+        assert!(out.contains("no limit without a reference"), "{out}");
+        assert!(!out.contains('╎'), "{out}");
+    }
+
+    /// With one, the limit is marked on every track and labelled on the
+    /// scale, and the rule names the specification's figure.
+    #[test]
+    fn referenced_meters_mark_the_limit_and_label_it() {
+        let out = draw(NetCensusPanel, 120, 30, &referenced(live_room()));
+        let text = out.join("\n");
+        assert!(text.contains("spec ±150 kHz"), "{text}");
+        let meters: Vec<&String> = out.iter().filter(|l| l.contains('◄')).collect();
+        assert!(meters.iter().all(|l| l.matches('╎').count() == 2), "{text}");
+        assert!(text.contains("+60"), "{text}");
+    }
+
+    /// **The scale reads the meters above it.** Zero on the scale is in the
+    /// column of every meter's `┃`, and the limit's label under its marks: a
+    /// scale one column off reads a different number off every row.
+    #[test]
+    fn the_scale_sits_under_the_meters_it_labels() {
+        let out = draw(NetCensusPanel, 120, 30, &referenced(live_room()));
+        let col = |l: &str, ch: char| l.chars().position(|c| c == ch);
+        let meter = out.iter().find(|l| l.contains('┃')).unwrap();
+        let scale = out
+            .iter()
+            .find(|l| l.trim_end_matches(['│', ' ']).ends_with(" ppm") && l.contains("+60"))
+            .unwrap();
+        let zero = scale
+            .chars()
+            .collect::<Vec<_>>()
+            .windows(3)
+            .position(|w| w == [' ', '0', ' '])
+            .map(|p| p + 1);
+        assert_eq!(zero, col(meter, '┃'), "{meter}\n{scale}");
+        let right_mark = meter
+            .chars()
+            .enumerate()
+            .filter(|(_, c)| *c == '╎')
+            .map(|(i, _)| i)
+            .last();
+        assert_eq!(
+            col(scale, '+').map(|p| p + 1),
+            right_mark,
+            "{meter}\n{scale}"
+        );
+    }
+
+    /// What does not fit is counted, worst first so it is the better clocks,
+    /// and the meters give way entirely on a panel too short for the table.
+    #[test]
+    fn the_meters_count_what_they_leave_off_and_give_way_to_the_table() {
+        let out = draw(NetCensusPanel, 120, 21, &live_room()).join("\n");
+        assert!(out.contains("more, better clocks"), "{out}");
+
+        // A device without an offset is not a good clock, and is counted as
+        // what it is.
+        let some = draw(NetCensusPanel, 120, 30, &populated()).join("\n");
+        assert!(some.contains("1 not measured yet"), "{some}");
+
+        let short = draw(NetCensusPanel, 120, 12, &live_room()).join("\n");
+        assert!(!short.contains("CLOCK ERROR"), "{short}");
+        assert!(
+            short.contains("e7:c1:f2"),
+            "the table keeps its rows:\n{short}"
+        );
+    }
+
     #[test]
     fn it_fits_every_size_the_layout_can_hand_it() {
         for w in 20..90u16 {
             for h in 4..20u16 {
-                for m in [populated(), selected(), crowded(), SdrMetrics::fixture()] {
+                for m in [
+                    populated(),
+                    selected(),
+                    crowded(),
+                    live_room(),
+                    referenced(live_room()),
+                    SdrMetrics::fixture(),
+                ] {
                     for line in draw(NetCensusPanel, w, h, &m) {
                         assert!(line.chars().count() <= w as usize, "{w}x{h}: {line:?}");
                     }
