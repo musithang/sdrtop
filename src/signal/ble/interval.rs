@@ -91,8 +91,10 @@ pub enum Refusal {
 /// What the delay looks like.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum Delay {
-    /// Narrower than [`NO_DELAY_S`]: the device adds no random delay.
-    Absent,
+    /// Narrower than [`NO_DELAY_S`]: the device adds no random delay. The
+    /// width measured all the same (s), since a few microseconds of spread is
+    /// a reading, not an absence of one.
+    Absent { width_s: f64 },
     /// A width (s), and whether the gaps fit a uniform draw over it, with the
     /// test's statistic and its 5 % critical value.
     Spread {
@@ -165,7 +167,7 @@ pub fn estimate(pairs: &[u64], rate_hz: f64) -> Result<Estimate, Refusal> {
     let interval = Uncertain::from_sigma(a, sigma);
 
     let delay = if width < NO_DELAY_S {
-        Delay::Absent
+        Delay::Absent { width_s: width }
     } else {
         let ks = single
             .iter()
@@ -265,7 +267,7 @@ mod tests {
     #[test]
     fn a_device_without_the_random_delay_is_seen_to_have_none() {
         let got = estimate(&arrivals(0.050, 60, 0, |_| 0.0), RATE).unwrap();
-        assert_eq!(got.delay, Delay::Absent, "{got:?}");
+        assert!(matches!(got.delay, Delay::Absent { .. }), "{got:?}");
         assert_eq!(got.grid, Grid::On(80));
     }
 

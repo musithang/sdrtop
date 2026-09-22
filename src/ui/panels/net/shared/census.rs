@@ -217,7 +217,7 @@ fn advertising_lines(
         Grid::CannotTell => format!("too long to tell the {step_ms} ms grid from clock drift"),
     };
     let (delay, delay_note) = match e.delay {
-        Delay::Absent => (
+        Delay::Absent { .. } => (
             "none".to_string(),
             format!(
                 "no random delay; the specification asks for 0 to {:.0} ms",
@@ -381,7 +381,7 @@ fn turnover_line(
 /// where to read it.
 fn empty_state(state: &SdrMetrics, width: usize, theme: &crate::Theme) -> Vec<Line<'static>> {
     let net = &state.net;
-    let counting = net.ble_channel.is_some() || net.health.ble.triggered > 0;
+    let counting = net.counting_addresses();
     let (headline, body) = if counting {
         (
             "nothing heard yet",

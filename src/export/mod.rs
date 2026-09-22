@@ -49,9 +49,16 @@ pub fn net_section(
         Err(why) => (Vec::new(), Some(why)),
     };
     let census = census::rows(state);
-    let census_note = census
-        .is_empty()
-        .then(|| "no device has been counted: nothing decodes an address yet".to_string());
+    // The same two empties the panel tells apart (`NetState::
+    // counting_addresses`): a quiet room is a finding, nobody counting is not.
+    let census_note = census.is_empty().then(|| {
+        if state.net.counting_addresses() {
+            "no device has been counted: the decoder was reading addresses and none passed a CRC"
+                .to_string()
+        } else {
+            "no device has been counted: nothing was decoding addresses".to_string()
+        }
+    });
 
     vec![
         one(

@@ -156,7 +156,7 @@ fn lines(state: &SdrMetrics, theme: &crate::Theme, width: usize) -> Vec<Line<'st
     // BLE: every trigger, and how it ended. Shown once the decoder has run this
     // session; before that, a dash, because a zero would say it looked.
     let f = h.ble;
-    if state.net.ble_channel.is_some() || f.triggered > 0 {
+    if state.net.counting_addresses() {
         out.push(row(
             "BLE triggers",
             grouped(f.triggered),

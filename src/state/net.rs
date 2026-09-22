@@ -392,6 +392,17 @@ impl NetState {
     /// one call every panel and export makes, so a device reads the same way
     /// everywhere.
     ///
+    /// Whether anything is reading addresses into the census: a BLE decoder
+    /// with a channel, or one that has fired this session.
+    ///
+    /// **The one condition an empty census is read by**, so the panel's empty
+    /// state, the decode-health panel's dashes and the export's note cannot
+    /// disagree about whether an empty table means a quiet room or nobody
+    /// counting.
+    pub fn counting_addresses(&self) -> bool {
+        self.ble_channel.is_some() || self.health.ble.triggered > 0
+    }
+
     /// `width` as [`AddressDisplay::show`] takes it: the column the table has,
     /// or `None` for the uncut form an export writes.
     pub fn show_address(&self, addr: [u8; 6], random: bool, width: Option<usize>) -> String {
