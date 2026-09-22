@@ -8,12 +8,13 @@
 //! the user picked. The table itself is `ui::widgets::table`; what is here is
 //! the column list, the empty state, and the keys.
 //!
-//! **Nothing fills it yet, and the panel says which of two things that means.**
-//! An empty census could be "we listened and nobody transmitted" or "nothing is
-//! listening". Those are different claims and only the second is true today, so
-//! that is the one it makes. Printing a bare empty table would let a reader
-//! infer the first - the same reason the feed-health panel dashes its burst
-//! count instead of showing zero.
+//! **An empty table says which of two empties it is.** "We listened and nobody
+//! transmitted" and "nothing is listening" are different claims, and which one
+//! holds now depends on whether a decoder is reading addresses: BLE has filled
+//! this table since B10, and does so only while it has a channel. So the empty
+//! state reads the same condition the feed-health panel dashes its BLE rows on,
+//! and says either that the room was quiet or that nobody was counting.
+//! Printing a bare empty table would let a reader take the flattering one.
 
 use ratatui::{
     layout::Rect,
@@ -129,6 +130,184 @@ fn turnover_line(
     ))
 }
 
+/// The empty table's own account of itself: quiet room, or nobody counting.
+///
+/// **The same condition the feed-health panel dashes its BLE rows on**
+/// (`decode_health`): a decoder that has a channel, or has fired this
+/// session, is one that was listening, and only then is an empty list a
+/// statement about the room. What became of the triggers that never reached
+/// a row is that panel's account, not restated here (rule 6); this one says
+/// where to read it.
+fn empty_state(state: &SdrMetrics, width: usize, theme: &crate::Theme) -> Vec<Line<'static>> {
+    let net = &state.net;
+    let counting = net.ble_channel.is_some() || net.health.ble.triggered > 0;
+    let (headline, body) = if counting {
+        (
+            "nothing heard yet",
+            "the decoder is reading addresses and none has passed a CRC yet; \
+             what happened to the triggers is on Feed Health"
+                .to_string(),
+        )
+    } else {
+        (
+            "no census yet",
+            match &net.ble_refused {
+                Some(why) => format!(
+                    "nothing is decoding addresses here ({why}), so nobody has \
+                     been counted - this is not an empty room"
+                ),
+                None => "nothing is decoding addresses here, so nobody has been \
+                         counted - this is not an empty room"
+                    .to_string(),
+            },
+        )
+    };
+    // Indented one column, like the header row above it, so the empty state
+    // lines up with the table it stands in for.
+    let mut out = vec![Line::from(vec![
+        Span::raw(" "),
+        Span::styled(headline.to_string(), Style::default().fg(theme.stale)),
+    ])];
+    for row in crate::ui::chrome::wrap(&body, width.saturating_sub(1), 4) {
+        out.push(Line::from(vec![
+            Span::raw(" "),
+            Span::styled(row, Style::default().fg(theme.label)),
+        ]));
+    }
+    out
+}
+
+/// The label column of the detail block's fields, wide enough for the longest
+/// of them (`first seen`) and the same on both halves of a two-up line.
+const DETAIL_LABEL_W: usize = 11;
+
+/// What the cursor is on, spelled out: the fields the table's columns cut
+/// short, and the one thing the table cannot show at all - what the crystal
+/// offset is worth.
+///
+/// **It says who as well as where.** In `Full` the table prints the address
+/// and nothing else, so the holder is named here (`state::who`); in the other
+/// modes the address as shown already carries it, and repeating it would be
+/// the same fact twice on one screen.
+///
+/// What the device advertises belongs in this block too and is not here yet:
+/// payloads arrive in Stop 5.9, and a placeholder for them would be a promise
+/// (rule 2).
+fn detail(
+    d: &Device,
+    state: &SdrMetrics,
+    now: std::time::Instant,
+    iw: usize,
+    theme: &crate::Theme,
+) -> Vec<Line<'static>> {
+    let net = &state.net;
+    let shown = net.show_address(d.address, d.random, None);
+    let identity = match net.address_display {
+        crate::state::AddressDisplay::Full => {
+            format!("{shown}  {}", crate::state::who(d.address, d.random))
+        }
+        _ => shown,
+    };
+
+    let mut out = vec![
+        crate::ui::chrome::section("selected", "", iw, theme),
+        Line::from(vec![
+            Span::raw(" "),
+            Span::styled(identity, Style::default().fg(theme.value)),
+        ]),
+    ];
+    let seen = |at: std::time::Instant| {
+        format!("{} ago", ago(now.saturating_duration_since(at).as_secs()))
+    };
+    out.extend(pairs(
+        &[
+            ("first seen", seen(d.first_seen)),
+            ("packets", d.packets.to_string()),
+            ("last seen", seen(d.last_seen)),
+            ("best SNR", format!("{:.1} dB", d.best_snr_db)),
+        ],
+        iw,
+        theme,
+    ));
+    out.push(crystal_line(d, state, now, iw, theme));
+    out
+}
+
+/// The fields two to a line where the width allows it and one to a line where
+/// it does not, in the order given: a detail block that grew a scroll bar on a
+/// narrow terminal would be a list, and this is meant to be read at a glance.
+fn pairs(fields: &[(&str, String)], iw: usize, theme: &crate::Theme) -> Vec<Line<'static>> {
+    // Two columns of the same width, so the second half of every line starts
+    // in the same place whatever the values are.
+    let widest = fields
+        .iter()
+        .map(|(_, v)| v.chars().count() + 2)
+        .max()
+        .unwrap_or(0);
+    let half = DETAIL_LABEL_W + 1 + widest;
+    let per_line = if iw >= half * 2 { 2 } else { 1 };
+    let mut out = Vec::new();
+    for chunk in fields.chunks(per_line) {
+        let mut spans = Vec::new();
+        for (name, value) in chunk {
+            spans.push(crate::ui::chrome::field(name, DETAIL_LABEL_W, theme));
+            spans.push(Span::styled(
+                format!("{value:<widest$}"),
+                Style::default().fg(theme.value),
+            ));
+        }
+        out.push(Line::from(spans));
+    }
+    out
+}
+
+/// `crystal  +35.4 ±0.5 ppm  relative to our own oscillator` - the offset and,
+/// beside it, what it was measured against.
+///
+/// **The provenance names the source, where the chrome's tag names the
+/// class.** `[RELATIVE]` on the frame says what every offset in the panel is
+/// worth; this says which oscillator this one is a difference from, which is
+/// the fact a reader needs to know whether the device's clock or ours is the
+/// one that is out. A device no packet has reported an offset for dashes,
+/// exactly as its cell in the table does.
+fn crystal_line(
+    d: &Device,
+    state: &SdrMetrics,
+    now: std::time::Instant,
+    iw: usize,
+    theme: &crate::Theme,
+) -> Line<'static> {
+    let basis = state.radio.offset_basis(now);
+    let against = match (d.crystal_offset_ppm, basis.provenance) {
+        (None, _) => "no packet from it has reported one".to_string(),
+        (Some(_), crate::state::Provenance::Unreferenced) if basis.expired => {
+            "relative to our own oscillator, the reference expired".to_string()
+        }
+        (Some(_), crate::state::Provenance::Unreferenced) => {
+            "relative to our own oscillator".to_string()
+        }
+        (Some(_), _) => match state.radio.reference.as_ref() {
+            Some(r) => format!("against {}", r.source),
+            None => "relative to our own oscillator".to_string(),
+        },
+    };
+    let value = fmt_cfo(d.crystal_offset_ppm, &state.radio, now);
+    let mut spans = vec![
+        crate::ui::chrome::field("crystal", DETAIL_LABEL_W, theme),
+        Span::styled(value.clone(), Style::default().fg(theme.value)),
+    ];
+    // The note only where there is room for it whole: half a sentence about
+    // provenance is worse than none.
+    let used = DETAIL_LABEL_W + 1 + value.chars().count();
+    if iw >= used + against.chars().count() + 2 {
+        spans.push(Span::styled(
+            format!("  {against}"),
+            Style::default().fg(theme.label),
+        ));
+    }
+    Line::from(spans)
+}
+
 impl Panel for NetCensusPanel {
     fn name(&self) -> &'static str {
         "net_census"
@@ -209,28 +388,28 @@ impl Panel for NetCensusPanel {
 
         if devices.is_empty() {
             lines.push(Line::from(""));
-            lines.push(Line::from(Span::styled(
-                "no census yet".to_string(),
-                Style::default().fg(theme.stale),
-            )));
-            lines.push(Line::from(Span::styled(
-                "nothing decodes an address on this band yet, so nobody has".to_string(),
-                Style::default().fg(theme.label),
-            )));
-            lines.push(Line::from(Span::styled(
-                "been counted - this is not an empty room".to_string(),
-                Style::default().fg(theme.label),
-            )));
+            lines.extend(empty_state(state, width, theme));
             f.render_widget(Paragraph::new(lines), inner);
             return;
         }
 
-        // One row for the header and one for the turnover summary, so the
-        // list gets the rest.
-        let body = (inner.height as usize).saturating_sub(2);
         // No selection highlights no row: a highlight on row zero that nobody
         // chose would claim a selection that does not exist.
         let cursor = census.selection.cursor(&addresses);
+        // The detail block is a footnote to the table, so it gives way to it:
+        // on a panel too short to hold both it and a couple of rows, the rows
+        // win and the block is not drawn.
+        let mut extra = cursor
+            .and_then(|i| devices.get(i))
+            .map(|d| detail(d, state, now, width, theme))
+            .unwrap_or_default();
+        let height = inner.height as usize;
+        if height < extra.len() + 4 {
+            extra.clear();
+        }
+        // One row for the header and one for the turnover summary, plus
+        // whatever the detail block took, so the list gets the rest.
+        let body = height.saturating_sub(2 + extra.len());
         let start = viewport_start(
             census.selection.first_visible,
             cursor.unwrap_or(0),
@@ -247,6 +426,7 @@ impl Panel for NetCensusPanel {
             ));
         }
         lines.push(turnover_line(&devices, now, theme));
+        lines.extend(extra);
         f.render_widget(Paragraph::new(lines), inner);
     }
 }
@@ -300,11 +480,11 @@ mod tests {
 
     /// **An empty census says which of the two empties it is.**
     ///
-    /// "We listened and nobody transmitted" and "nothing is listening" are
-    /// different claims and only the second is true today. A bare empty table
-    /// would let a reader take the first, which is the flattering one.
+    /// With nothing decoding addresses, "we listened and nobody transmitted"
+    /// is not a claim this panel can make, so it makes the other one. A bare
+    /// empty table would let a reader take the flattering one.
     #[test]
-    fn an_empty_census_says_nothing_is_counting_rather_than_nobody_is_there() {
+    fn an_empty_census_with_no_decoder_says_nobody_is_counting() {
         // Wide enough for every column, the selection gutter included.
         let out = draw(NetCensusPanel, 64, 10, &SdrMetrics::fixture().streaming()).join("\n");
         assert!(out.contains("no census yet"), "{out}");
@@ -313,6 +493,31 @@ mod tests {
         assert!(out.contains("ADDRESS"), "{out}");
         assert!(out.contains("SNR"), "{out}");
         assert!(out.contains("CFO"), "{out}");
+    }
+
+    /// With a decoder on a channel, the same empty table is the other claim:
+    /// the room was listened to and stayed quiet. The two must not read the
+    /// same, because they are not the same fact.
+    #[test]
+    fn an_empty_census_with_a_decoder_running_says_the_room_was_quiet() {
+        let mut m = SdrMetrics::fixture().streaming();
+        m.net.ble_channel = Some(37);
+        let out = draw(NetCensusPanel, 64, 10, &m).join("\n");
+        assert!(out.contains("nothing heard yet"), "{out}");
+        assert!(!out.contains("not an empty room"), "{out}");
+        // Where the triggers went is the feed-health panel's account.
+        assert!(out.contains("Feed Health"), "{out}");
+    }
+
+    /// A refused decoder says why in the same breath, rather than leaving the
+    /// reader to find the refusal on another panel.
+    #[test]
+    fn a_refused_decoder_gives_its_reason_in_the_empty_state() {
+        let mut m = SdrMetrics::fixture().streaming();
+        m.net.ble_refused = Some("2.0 Msps is below the 4 Msps BLE needs".to_string());
+        let out = draw(NetCensusPanel, 64, 12, &m).join("\n");
+        assert!(out.contains("no census yet"), "{out}");
+        assert!(out.contains("2.0 Msps is below"), "{out}");
     }
 
     /// The CFO cell shows the value once a device has one, and dashes when it
@@ -439,11 +644,99 @@ mod tests {
         assert!(marked(&rows).is_empty(), "{}", rows.join("\n"));
     }
 
+    fn selected() -> SdrMetrics {
+        let mut m = populated();
+        m.net.census.selection.selected = Some([0xa4, 0x83, 0xe7, 0x1c, 0x09, 0xbe]);
+        m
+    }
+
+    /// **The table cuts, the block spells out.** Every field the plan asked
+    /// for is in it, the crystal offset with its uncertainty, and the holder
+    /// named beside an address the table shows bare.
+    #[test]
+    fn the_detail_block_spells_out_the_selected_device() {
+        let out = draw(NetCensusPanel, 76, 14, &selected()).join("\n");
+        assert!(out.contains("SELECTED"), "{out}");
+        assert!(out.contains("a4:83:e7:1c:09:be  Apple"), "{out}");
+        assert!(out.contains("first seen 10 min ago"), "{out}");
+        assert!(out.contains("last seen  2 s ago"), "{out}");
+        assert!(out.contains("packets    1204"), "{out}");
+        assert!(out.contains("best SNR   12.3 dB"), "{out}");
+        assert!(out.contains("crystal    35.4 ±0.5 ppm"), "{out}");
+
+        // Nothing selected, no block: it describes a choice, and there is none.
+        let none = draw(NetCensusPanel, 76, 14, &populated()).join("\n");
+        assert!(!none.contains("SELECTED"), "{none}");
+    }
+
+    /// The offset's provenance is what it was measured *against*, named: the
+    /// chrome's tag says what class of claim it is, and this says whose
+    /// oscillator the difference is from.
+    #[test]
+    fn the_detail_block_says_what_the_offset_was_measured_against() {
+        let mut m = selected();
+        let relative = draw(NetCensusPanel, 90, 14, &m).join("\n");
+        assert!(
+            relative.contains("relative to our own oscillator"),
+            "{relative}"
+        );
+
+        m.radio.reference = Some(crate::state::FrequencyReference {
+            ppm: 10.0,
+            sigma_ppm: 0.1,
+            provenance: crate::state::Provenance::Traceable,
+            source: "WWV 10 MHz".to_string(),
+            at: Instant::now(),
+            efficiency: None,
+        });
+        let referenced = draw(NetCensusPanel, 90, 14, &m).join("\n");
+        assert!(referenced.contains("against WWV 10 MHz"), "{referenced}");
+        // And the number is the corrected one, the same arithmetic the CFO
+        // column does: 35.4 read plus our own 10 ppm.
+        assert!(referenced.contains("45.4"), "{referenced}");
+    }
+
+    /// A device no packet has reported an offset for says that, rather than
+    /// leaving a dash whose reason the reader has to guess.
+    #[test]
+    fn a_device_with_no_offset_says_why_the_cell_is_a_dash() {
+        let mut m = populated();
+        m.net.census.selection.selected = Some([0xf0, 0x18, 0x98, 0x00, 0x11, 0x22]);
+        let out = draw(NetCensusPanel, 90, 14, &m).join("\n");
+        assert!(out.contains("no packet from it has reported one"), "{out}");
+    }
+
+    /// **The block is a footnote to the table and gives way to it.** On a
+    /// panel too short for both, the rows are what the panel is for.
+    #[test]
+    fn the_detail_block_gives_way_when_there_is_no_room_for_the_rows() {
+        let short = draw(NetCensusPanel, 76, 10, &selected()).join("\n");
+        assert!(!short.contains("SELECTED"), "{short}");
+        assert!(
+            short.contains("a4:83:e7"),
+            "the rows are still there:\n{short}"
+        );
+
+        let tall = draw(NetCensusPanel, 76, 12, &selected()).join("\n");
+        assert!(tall.contains("SELECTED"), "{tall}");
+    }
+
+    /// The masked display mode is a promise about every address on screen, and
+    /// the detail block keeps it: it shows what the mode shows and no more.
+    #[test]
+    fn the_detail_block_masks_when_the_section_masks() {
+        let mut m = selected();
+        m.net.address_display = crate::state::AddressDisplay::Masked;
+        let out = draw(NetCensusPanel, 76, 14, &m).join("\n");
+        assert!(out.contains("SELECTED"), "{out}");
+        assert!(!out.contains("a4:83:e7"), "the address leaked:\n{out}");
+    }
+
     #[test]
     fn it_fits_every_size_the_layout_can_hand_it() {
         for w in 20..90u16 {
             for h in 4..20u16 {
-                for m in [populated(), SdrMetrics::fixture()] {
+                for m in [populated(), selected(), SdrMetrics::fixture()] {
                     for line in draw(NetCensusPanel, w, h, &m) {
                         assert!(line.chars().count() <= w as usize, "{w}x{h}: {line:?}");
                     }

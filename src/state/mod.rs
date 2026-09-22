@@ -31,8 +31,8 @@ pub use micro::MicroView;
 // `NetExit` is not re-exported, for the reason `SweepExit` is not: it exists
 // to be returned and destructured, and no call site has to name it.
 pub use net::{
-    AddressDisplay, BandOccupancy, BlePacket, BtHop, CellReading, LockTarget, NetMode, NetState,
-    RetuneRun, BLE_PACKET_LIMIT, BT_HOP_LIMIT, COLUMN_INTERVAL, FULL_ADDRESS_WIDTH,
+    who, AddressDisplay, BandOccupancy, BlePacket, BtHop, CellReading, LockTarget, NetMode,
+    NetState, RetuneRun, BLE_PACKET_LIMIT, BT_HOP_LIMIT, COLUMN_INTERVAL, FULL_ADDRESS_WIDTH,
     HISTORY_COLUMNS,
 };
 // Named by the NET worker's tests; the panel reads it through `SdrMetrics`.

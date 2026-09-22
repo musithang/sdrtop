@@ -182,7 +182,11 @@ pub const FULL_ADDRESS_WIDTH: usize = 17;
 /// the snapshot does not list it, which is the honest answer and cannot pass
 /// for a name. A random address has no block, so it is its kind
 /// (`signal::ble::address::kind`) and never a vendor.
-fn who(addr: [u8; 6], random: bool) -> String {
+///
+/// [`AddressDisplay::show`] prints it in every mode but `Full`, where the whole
+/// address takes its place; a panel with room for both (the census detail
+/// block) calls this directly rather than deriving a second answer.
+pub fn who(addr: [u8; 6], random: bool) -> String {
     use crate::signal::ble::address::{kind, AddressKind};
     use crate::signal::net::vendor::{registrant, short_name, Registrant};
     match kind(addr, random) {
