@@ -15,6 +15,10 @@
 //! stage, but [`detect`] needs it to build the reference it correlates
 //! against, since the advertising access address is known in advance.
 
+// Read by the packet list and detail view from 5.3 (net-ux-polish-plan);
+// until then only by its tests, and this line goes with that step.
+#[cfg_attr(not(test), allow(dead_code))]
+pub mod ad;
 pub mod address;
 pub mod channel;
 pub mod coded;
