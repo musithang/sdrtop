@@ -2,8 +2,9 @@
 # population of the band, one row per transmitter, ordered by whichever column
 # you pick.
 #
-# Empty until an arc decodes an address. The panel says which of the two empties
-# it is: nothing is listening yet, rather than nobody transmitting.
+# Filled by BLE while it has a channel. Empty, the panel says which of the two
+# empties it is: nobody counting, or a room that stayed quiet. Under the table,
+# the room's clocks and the selected device's detail, each drawn when it fits.
 
 section = "net"
 slot    = 3

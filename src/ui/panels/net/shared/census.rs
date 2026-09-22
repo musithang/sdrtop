@@ -15,6 +15,10 @@
 //! state reads the same condition the feed-health panel dashes its BLE rows on,
 //! and says either that the room was quiet or that nobody was counting.
 //! Printing a bare empty table would let a reader take the flattering one.
+//!
+//! **Three blocks under the table, in the order they give way:** the table
+//! itself, the selected device's detail, and the room's clocks (`clocks`),
+//! each drawn only when the panel has room for it whole.
 
 use ratatui::{
     layout::Rect,
@@ -33,7 +37,13 @@ use crate::ui::widgets::table::{
     columns_that_fit, header, row, viewport_start, widen, Align, Column, Sort,
 };
 
+mod clocks;
+
 pub struct NetCensusPanel;
+
+/// Rows the table keeps before the clocks picture may take any: enough to
+/// read the room's top few, which is what the panel is for.
+const TABLE_KEEPS: usize = 5;
 
 /// The columns, in the order they are drawn and in the same order as
 /// [`SORT_KEYS`], so the header, the chrome tag and the ordering cannot disagree
@@ -503,9 +513,14 @@ impl Panel for NetCensusPanel {
         if height < extra.len() + 4 {
             extra.clear();
         }
+        // The clocks picture illustrates the table and gives way to both it
+        // and the detail: it takes what is left once the table has kept a
+        // handful of rows, and draws nothing rather than a squashed picture.
+        let room = height.saturating_sub(2 + extra.len() + devices.len().min(TABLE_KEEPS));
+        let picture = clocks::lines(&devices, state, now, width, room, theme);
         // One row for the header and one for the turnover summary, plus
-        // whatever the detail block took, so the list gets the rest.
-        let body = height.saturating_sub(2 + extra.len());
+        // whatever the two blocks took, so the list gets the rest.
+        let body = height.saturating_sub(2 + extra.len() + picture.len());
         let start = viewport_start(
             census.selection.first_visible,
             cursor.unwrap_or(0),
@@ -522,6 +537,7 @@ impl Panel for NetCensusPanel {
             ));
         }
         lines.push(turnover_line(&devices, now, theme));
+        lines.extend(picture);
         lines.extend(extra);
         f.render_widget(Paragraph::new(lines), inner);
     }
@@ -783,6 +799,30 @@ mod tests {
         assert!(marked(&rows).is_empty(), "{}", rows.join("\n"));
     }
 
+    /// Twenty clocks, bunched the way a real room bunches: most within a
+    /// few ppm of each other, a tail of cheap crystals, one badly known.
+    fn crowded() -> SdrMetrics {
+        let now = Instant::now();
+        let mut m = SdrMetrics::fixture().streaming();
+        let offsets = [
+            -3.1, -2.4, -1.9, -1.2, -0.8, -0.3, 0.2, 0.6, 1.1, 1.4, 2.0, 2.6, 3.3, 4.8, 7.5, 12.0,
+            18.4, -22.0, 31.0, 9.0,
+        ];
+        m.net.census.devices = offsets
+            .iter()
+            .enumerate()
+            .map(|(i, &ppm)| Device {
+                packets: 10 + i as u64,
+                crystal_offset_ppm: Some(Uncertain::from_sigma(
+                    ppm,
+                    if i == 19 { 6.0 } else { 0.4 + i as f64 * 0.05 },
+                )),
+                ..Device::heard([0x10, 0, 0, 0, 0, i as u8], false, now)
+            })
+            .collect();
+        m
+    }
+
     fn selected() -> SdrMetrics {
         let mut m = populated();
         m.net.census.selection.selected = Some([0xa4, 0x83, 0xe7, 0x1c, 0x09, 0xbe]);
@@ -928,11 +968,66 @@ mod tests {
         assert!(out.contains("a ceiling"), "{out}");
     }
 
+    /// A line that is the clocks ruler: zero on it, and the unit at its end.
+    fn ruler_line(l: &str) -> bool {
+        l.trim_end_matches(['│', ' ']).ends_with(" ppm") && l.contains(" 0 ")
+    }
+
+    /// **The room's clocks under the table**: how many are measured out of
+    /// how many there are, and the selected one's bar drawn heavy.
+    #[test]
+    fn the_clocks_picture_shows_the_room_and_marks_the_selected_clock() {
+        let out = draw(NetCensusPanel, 100, 30, &selected()).join("\n");
+        assert!(out.contains("CLOCKS"), "{out}");
+        assert!(out.contains("2 of 3 measured"), "{out}");
+        assert!(out.contains("┣●┫"), "the selected bar, heavy:\n{out}");
+        assert!(
+            out.lines().any(ruler_line),
+            "the ruler names its unit:\n{out}"
+        );
+        // The picture sits between the table and the detail block.
+        assert!(out.find("CLOCKS") < out.find("SELECTED"), "{out}");
+    }
+
+    /// A census whose devices have reported no offset says so, rather than
+    /// drawing an empty axis that would read as a room of perfect clocks.
+    #[test]
+    fn a_census_with_no_offsets_says_so_instead_of_drawing_an_empty_axis() {
+        let mut m = populated();
+        for d in &mut m.net.census.devices {
+            d.crystal_offset_ppm = None;
+        }
+        let out = draw(NetCensusPanel, 90, 24, &m).join("\n");
+        assert!(
+            out.contains("no packet has reported an offset yet"),
+            "{out}"
+        );
+        assert!(!out.lines().any(ruler_line), "{out}");
+    }
+
+    /// **The picture gives way to the table.** On a short panel it is not
+    /// drawn at all and the rows keep the space.
+    #[test]
+    fn the_clocks_picture_gives_way_to_the_table() {
+        let out = draw(NetCensusPanel, 90, 10, &crowded()).join("\n");
+        assert!(!out.contains("CLOCKS"), "{out}");
+        assert_eq!(out.matches("10:00:00:00:00:").count(), 6, "{out}");
+    }
+
+    /// Bars that do not fit are counted, never dropped silently: with room
+    /// for one row of bars only, the count goes on the section rule.
+    #[test]
+    fn bars_left_off_a_short_picture_are_counted() {
+        let out = draw(NetCensusPanel, 70, 14, &crowded()).join("\n");
+        assert!(out.contains("CLOCKS"), "{out}");
+        assert!(out.contains("not drawn"), "{out}");
+    }
+
     #[test]
     fn it_fits_every_size_the_layout_can_hand_it() {
         for w in 20..90u16 {
             for h in 4..20u16 {
-                for m in [populated(), selected(), SdrMetrics::fixture()] {
+                for m in [populated(), selected(), crowded(), SdrMetrics::fixture()] {
                     for line in draw(NetCensusPanel, w, h, &m) {
                         assert!(line.chars().count() <= w as usize, "{w}x{h}: {line:?}");
                     }
