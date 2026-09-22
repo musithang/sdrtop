@@ -1,7 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright (C) 2026 MusiThang <viktor.laszlo92@protonmail.com>
 
-//! Three-row block-glyph digits for the Command Rail's frequency hero.
+//! Three-row block-glyph digits for the Command Rail's frequency hero and the
+//! census clock dial's reading, which is signed, hence `-` and `+`.
 //!
 //! Each character is a 3×3 cell sprite drawn with the half-block elements
 //! `▀ ▄ █` (each exactly one terminal column), so `92.800` renders as a big,
@@ -27,6 +28,8 @@ pub fn glyph(c: char) -> [&'static str; 3] {
         '8' => ["█▀█", "█▀█", "▀▀▀"],
         '9' => ["█▀█", "▀▀█", "▀▀▀"],
         '.' => ["   ", "   ", " ▄ "],
+        '-' => ["   ", "▀▀▀", "   "],
+        '+' => [" ▄ ", "▀█▀", "   "],
         _ => ["   ", "   ", "   "],
     }
 }
@@ -52,7 +55,7 @@ mod tests {
 
     #[test]
     fn every_glyph_row_is_three_columns() {
-        for c in "0123456789. ".chars() {
+        for c in "0123456789.-+ ".chars() {
             for (r, row) in glyph(c).iter().enumerate() {
                 assert_eq!(
                     row.chars().count(),

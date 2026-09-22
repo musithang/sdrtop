@@ -4,8 +4,9 @@
 #
 # Filled by BLE while it has a channel. Empty, the panel says which of the two
 # empties it is: nobody counting, or a room that stayed quiet. Under the table,
-# every clock on a null meter, worst first, and the selected device's detail,
-# each drawn when it fits.
+# every clock on a null meter, worst first; with a device selected, its clock
+# alone as a dial (or its one meter where the dial does not fit), then its
+# detail. Each drawn when it fits.
 
 section = "net"
 slot    = 3

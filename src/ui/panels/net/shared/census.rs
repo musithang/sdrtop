@@ -38,6 +38,7 @@ use crate::ui::widgets::table::{
     columns_that_fit, header, row, viewport_start, widen, Align, Column, Sort,
 };
 
+mod clock_dial;
 mod clock_error;
 
 pub struct NetCensusPanel;
@@ -280,11 +281,15 @@ const DETAIL_LABEL_W: usize = 11;
 /// What the device advertises belongs in this block too and is not here yet:
 /// payloads arrive in Stop 5.9, and a placeholder for them would be a promise
 /// (rule 2).
+///
+/// `with_crystal` is false while the clock dial is drawn above it
+/// (`clock_dial`), which shows the same offset and its basis.
 fn detail(
     d: &Device,
     state: &SdrMetrics,
     now: std::time::Instant,
     iw: usize,
+    with_crystal: bool,
     theme: &crate::Theme,
 ) -> Vec<Line<'static>> {
     let net = &state.net;
@@ -318,7 +323,9 @@ fn detail(
         iw,
         theme,
     ));
-    out.push(crystal_line(d, state, now, iw, theme));
+    if with_crystal {
+        out.push(crystal_line(d, state, now, iw, theme));
+    }
     out.push(noted(
         "CRC",
         format!("{} passed, {} failed", fmt_crc(d), d.crc_failed),
@@ -508,22 +515,48 @@ impl Panel for NetCensusPanel {
         // No selection highlights no row: a highlight on row zero that nobody
         // chose would claim a selection that does not exist.
         let cursor = census.selection.cursor(&addresses);
+        let picked = cursor.and_then(|i| devices.get(i));
         // The detail block is a footnote to the table, so it gives way to it:
         // on a panel too short to hold both it and a couple of rows, the rows
         // win and the block is not drawn.
-        let mut extra = cursor
-            .and_then(|i| devices.get(i))
-            .map(|d| detail(d, state, now, width, theme))
+        let mut extra = picked
+            .map(|d| detail(d, state, now, width, true, theme))
             .unwrap_or_default();
         let height = inner.height as usize;
         if height < extra.len() + 4 {
             extra.clear();
         }
-        // The clock meters give way to both the table and the detail: they
-        // take what is left once the table has kept its rows, and draw
-        // nothing rather than a squeezed block.
+        // The clock block gives way to both the table and the detail: it
+        // takes what is left once the table has kept its rows, and draws
+        // nothing rather than a squeezed block. A selected device gets the
+        // dial where it fits and its one meter where it does not; the whole
+        // room only when nothing is selected.
         let room = height.saturating_sub(2 + extra.len() + devices.len().min(TABLE_KEEPS));
-        let meters = clock_error::lines(&devices, state, now, width, room, theme);
+        let view = picked
+            .and_then(|d| clock_dial::view(&devices, d.address, state, now, width, room, theme));
+        let (meters, dial) = match view {
+            Some((block, dial)) => {
+                // The dial carries the crystal offset and what it was
+                // measured against, so the detail block does not say it
+                // twice.
+                if let (Some(d), false) = (picked, extra.is_empty()) {
+                    extra = detail(d, state, now, width, false, theme);
+                }
+                (block, Some(dial))
+            }
+            None => (
+                clock_error::lines(
+                    &devices,
+                    state,
+                    now,
+                    width,
+                    room,
+                    picked.map(|d| d.address),
+                    theme,
+                ),
+                None,
+            ),
+        };
         // One row for the header and one for the turnover summary, plus
         // whatever the two blocks took, so the list gets the rest.
         let body = height.saturating_sub(2 + extra.len() + meters.len());
@@ -543,9 +576,22 @@ impl Panel for NetCensusPanel {
             ));
         }
         lines.push(turnover_line(&devices, now, theme));
+        // The first line under the block's section rule.
+        let dial_row = lines.len() + 1;
         lines.extend(meters);
         lines.extend(extra);
         f.render_widget(Paragraph::new(lines), inner);
+        // The dial goes over the space its text was indented to leave.
+        if let Some(d) = dial {
+            let area = Rect {
+                x: inner.x + 1,
+                y: inner.y + dial_row as u16,
+                width: clock_dial::DIAL_COLS as u16,
+                height: clock_dial::DIAL_ROWS as u16,
+            }
+            .intersection(inner);
+            d.render(f, area, theme);
+        }
     }
 }
 
@@ -1027,6 +1073,12 @@ mod tests {
         m
     }
 
+    /// `m` with nothing selected: the room's meters, not one clock's dial.
+    fn unselected(mut m: SdrMetrics) -> SdrMetrics {
+        m.net.census.selection.selected = None;
+        m
+    }
+
     fn referenced(mut m: SdrMetrics) -> SdrMetrics {
         m.radio.reference = Some(crate::state::FrequencyReference {
             ppm: 38.0,
@@ -1047,29 +1099,28 @@ mod tests {
             .collect()
     }
 
-    /// **Worst clock first, every row labelled, the selected one marked**,
-    /// and each meter's reading beside it.
+    /// **With nothing selected, the room: worst clock first, every row
+    /// labelled**, and each meter's reading beside it.
     #[test]
     fn the_clock_meters_rank_the_room_worst_first() {
-        let out = draw(NetCensusPanel, 120, 30, &live_room());
+        let out = draw(NetCensusPanel, 120, 30, &unselected(live_room()));
         let rows = meter_rows(&out);
         assert_eq!(rows.len(), 7, "{}", out.join("\n"));
         assert_eq!(rows[0], "e7:c1:f2:d3:7b:09");
         assert_eq!(rows[1], "51:7f:a9:ca:f7:65");
         assert_eq!(rows[6], "20:c9:70:44:40:13");
-        let picked = out
+        let gree = out
             .iter()
             .find(|l| l.contains('◄') && l.contains("50:2c:c6"))
             .unwrap();
-        assert!(picked.contains('\u{258c}'), "{picked}");
-        assert!(picked.contains("-9.30 ±0.23 ppm"), "{picked}");
+        assert!(gree.contains("-9.30 ±0.23 ppm"), "{gree}");
     }
 
     /// **Without a reference, no limit.** Every offset still carries our own
     /// oscillator's error, so no marks are drawn, and the rule says why.
     #[test]
     fn relative_meters_draw_no_limit_and_say_why() {
-        let out = draw(NetCensusPanel, 120, 30, &live_room()).join("\n");
+        let out = draw(NetCensusPanel, 120, 30, &unselected(live_room())).join("\n");
         assert!(out.contains("no limit without a reference"), "{out}");
         assert!(!out.contains('╎'), "{out}");
     }
@@ -1078,7 +1129,12 @@ mod tests {
     /// scale, and the rule names the specification's figure.
     #[test]
     fn referenced_meters_mark_the_limit_and_label_it() {
-        let out = draw(NetCensusPanel, 120, 30, &referenced(live_room()));
+        let out = draw(
+            NetCensusPanel,
+            120,
+            30,
+            &referenced(unselected(live_room())),
+        );
         let text = out.join("\n");
         assert!(text.contains("spec ±150 kHz"), "{text}");
         let meters: Vec<&String> = out.iter().filter(|l| l.contains('◄')).collect();
@@ -1091,7 +1147,12 @@ mod tests {
     /// scale one column off reads a different number off every row.
     #[test]
     fn the_scale_sits_under_the_meters_it_labels() {
-        let out = draw(NetCensusPanel, 120, 30, &referenced(live_room()));
+        let out = draw(
+            NetCensusPanel,
+            120,
+            30,
+            &referenced(unselected(live_room())),
+        );
         let col = |l: &str, ch: char| l.chars().position(|c| c == ch);
         let meter = out.iter().find(|l| l.contains('┃')).unwrap();
         let scale = out
@@ -1122,20 +1183,99 @@ mod tests {
     /// and the meters give way entirely on a panel too short for the table.
     #[test]
     fn the_meters_count_what_they_leave_off_and_give_way_to_the_table() {
-        let out = draw(NetCensusPanel, 120, 21, &live_room()).join("\n");
+        let out = draw(NetCensusPanel, 120, 17, &unselected(live_room())).join("\n");
         assert!(out.contains("more, better clocks"), "{out}");
 
         // A device without an offset is not a good clock, and is counted as
         // what it is.
-        let some = draw(NetCensusPanel, 120, 30, &populated()).join("\n");
+        let some = draw(NetCensusPanel, 120, 30, &unselected(populated())).join("\n");
         assert!(some.contains("1 not measured yet"), "{some}");
 
-        let short = draw(NetCensusPanel, 120, 12, &live_room()).join("\n");
+        let short = draw(NetCensusPanel, 120, 12, &unselected(live_room())).join("\n");
         assert!(!short.contains("CLOCK ERROR"), "{short}");
         assert!(
             short.contains("e7:c1:f2"),
             "the table keeps its rows:\n{short}"
         );
+    }
+
+    /// Characters of the braille block: what the dial is drawn in.
+    fn braille(out: &str) -> usize {
+        out.chars()
+            .filter(|c| ('\u{2801}'..='\u{28ff}').contains(c))
+            .count()
+    }
+
+    /// **A selection gets its own clock, as a dial, and none of the room's
+    /// meters.** Beside it the reading, the rank, the kHz on each advertising
+    /// channel, the watch line and the basis; below it the detail block,
+    /// without the crystal line the dial now carries.
+    #[test]
+    fn a_selected_clock_is_a_dial_and_only_its_own() {
+        let out = draw(NetCensusPanel, 120, 34, &live_room()).join("\n");
+        assert!(out.contains("CLOCK ERROR"), "{out}");
+        assert!(braille(&out) > 50, "the dial is drawn:\n{out}");
+        assert!(
+            !out.contains('◄'),
+            "no room meters beside a selection:\n{out}"
+        );
+        assert!(out.contains("±0.23 ppm"), "{out}");
+        assert!(out.contains("4th worst of 7"), "{out}");
+        assert!(out.contains("-22.3 · -22.6 · -23.1 kHz"), "{out}");
+        assert!(
+            out.contains("0.804 ±0.020 s a day slower than ours"),
+            "{out}"
+        );
+        assert!(out.contains("no limit without a reference"), "{out}");
+        assert!(out.contains("vs      our own oscillator"), "{out}");
+        assert!(out.contains("SELECTED"), "{out}");
+        assert!(!out.contains("crystal "), "said once, on the dial:\n{out}");
+    }
+
+    /// With a reference the dial judges: the worst clock loses its seconds as
+    /// its own, is outside the limit by a stated margin, and names what it was
+    /// measured against.
+    #[test]
+    fn a_referenced_dial_judges_against_the_spec() {
+        let mut m = referenced(live_room());
+        if let Some(r) = m.radio.reference.as_mut() {
+            r.ppm = 0.0;
+        }
+        m.net.census.selection.selected = Some([0xe7, 0xc1, 0xf2, 0xd3, 0x7b, 0x09]);
+        let out = draw(NetCensusPanel, 120, 34, &m).join("\n");
+        assert!(out.contains("worst of 7"), "{out}");
+        assert!(out.contains("loses 8.2"), "{out}");
+        assert!(out.contains("outside by 33.1 ppm"), "{out}");
+        assert!(out.contains("against WWV 10 MHz"), "{out}");
+    }
+
+    /// **No room for the dial: the selected device's one meter, never the
+    /// room's.** The detail block keeps its crystal line, since nothing
+    /// above it carries the basis.
+    #[test]
+    fn a_selection_without_room_for_the_dial_gets_its_one_meter() {
+        let out = draw(NetCensusPanel, 92, 26, &live_room());
+        let meters: Vec<&String> = out.iter().filter(|l| l.contains('◄')).collect();
+        assert_eq!(meters.len(), 1, "{}", out.join("\n"));
+        assert!(meters[0].contains("50:2c:c6:c2:af:64"), "{}", meters[0]);
+        let text = out.join("\n");
+        assert!(text.contains("selected ·"), "{text}");
+        assert_eq!(braille(&text), 0, "{text}");
+        assert!(text.contains("crystal "), "{text}");
+    }
+
+    /// A selected device no packet has given an offset says so, rather than
+    /// falling back to everyone else's.
+    #[test]
+    fn a_selected_device_without_an_offset_says_so() {
+        let mut m = populated();
+        m.net.census.selection.selected = Some([0xf0, 0x18, 0x98, 0x00, 0x11, 0x22]);
+        let out = draw(NetCensusPanel, 120, 30, &m).join("\n");
+        assert!(
+            out.contains("no packet has reported an offset yet"),
+            "{out}"
+        );
+        assert!(!out.contains('◄'), "{out}");
     }
 
     #[test]

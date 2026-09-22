@@ -64,7 +64,7 @@ const MIN_TRACK: usize = 15;
 
 /// The limit in ppm, as `(inside on every channel, outside on every channel)`:
 /// ±150 kHz of the highest advertising channel and of the lowest.
-fn limit_ppm() -> (f64, f64) {
+pub(super) fn limit_ppm() -> (f64, f64) {
     let ppm = |ch: u8| {
         crate::signal::ble::channel::centre_hz(ch)
             .map(|hz| CENTRE_TOLERANCE_HZ / hz as f64 * 1e6)
@@ -75,7 +75,7 @@ fn limit_ppm() -> (f64, f64) {
 
 /// Where a clock sits against the limit.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum Verdict {
+pub(super) enum Verdict {
     /// Inside on every channel, by more than the reading's uncertainty.
     Inside,
     /// Too close to call: within the uncertainty of the line, or between the
@@ -85,7 +85,7 @@ enum Verdict {
     Outside,
 }
 
-fn verdict(u: Uncertain) -> Verdict {
+pub(super) fn verdict(u: Uncertain) -> Verdict {
     let (inside, outside) = limit_ppm();
     let (v, k) = (u.value().abs(), u.expanded(COVERAGE_K));
     if v + k <= inside {
@@ -98,11 +98,32 @@ fn verdict(u: Uncertain) -> Verdict {
 }
 
 /// The smallest of a short list of round full scales that holds `worst`.
-fn full_scale(worst: f64) -> f64 {
+pub(super) fn full_scale(worst: f64) -> f64 {
     [5.0, 10.0, 20.0, 50.0, 100.0, 200.0, 500.0, 1000.0]
         .into_iter()
         .find(|s| *s >= worst)
         .unwrap_or(worst.ceil())
+}
+
+/// The measured clocks, corrected as the table corrects them, worst first;
+/// the address breaks a tie so rows do not trade places.
+pub(super) fn ranked<'a>(
+    devices: &'a [Device],
+    state: &SdrMetrics,
+    now: std::time::Instant,
+) -> Vec<(&'a Device, Uncertain)> {
+    let mut clocks: Vec<(&Device, Uncertain)> = devices
+        .iter()
+        .filter_map(|d| Some((d, state.radio.corrected_ppm(d.crystal_offset_ppm?, now).0)))
+        .filter(|(_, u)| u.value().is_finite())
+        .collect();
+    clocks.sort_by(|a, b| {
+        b.1.value()
+            .abs()
+            .total_cmp(&a.1.value().abs())
+            .then_with(|| a.0.address.cmp(&b.0.address))
+    });
+    clocks
 }
 
 /// The block, worst clock first, at most `max_lines` tall and `iw` wide, or
@@ -114,22 +135,17 @@ pub(super) fn lines(
     now: std::time::Instant,
     iw: usize,
     max_lines: usize,
+    only: Option<[u8; 6]>,
     theme: &crate::Theme,
 ) -> Vec<Line<'static>> {
     use crate::ui::chrome::{section, selection_gutter};
 
-    let mut clocks: Vec<(&Device, Uncertain)> = devices
-        .iter()
-        .filter_map(|d| Some((d, state.radio.corrected_ppm(d.crystal_offset_ppm?, now).0)))
-        .filter(|(_, u)| u.value().is_finite())
+    // With a device selected, its meter alone: the room is the answer to "who
+    // is worst" and the selection has asked a narrower question.
+    let clocks: Vec<(&Device, Uncertain)> = ranked(devices, state, now)
+        .into_iter()
+        .filter(|(d, _)| only.is_none_or(|a| d.address == a))
         .collect();
-    // Worst first; the address breaks a tie so rows do not trade places.
-    clocks.sort_by(|a, b| {
-        b.1.value()
-            .abs()
-            .total_cmp(&a.1.value().abs())
-            .then_with(|| a.0.address.cmp(&b.0.address))
-    });
 
     if clocks.is_empty() {
         if max_lines < 2 {
@@ -169,16 +185,25 @@ pub(super) fn lines(
         Vec::new()
     };
 
-    let unmeasured = devices.len() - clocks.len();
+    let unmeasured = if only.is_some() {
+        0
+    } else {
+        devices.len() - clocks.len()
+    };
     let basis = if judged {
         "spec ±150 kHz"
     } else {
         "relative, no limit without a reference"
     };
+    let order = if only.is_some() {
+        "selected"
+    } else {
+        "worst first"
+    };
     let hint = [
-        format!("worst first · {basis}"),
+        format!("{order} · {basis}"),
         basis.to_string(),
-        "worst first".to_string(),
+        order.to_string(),
     ]
     .into_iter()
     .find(|h| h.chars().count() + 17 <= iw)
@@ -199,7 +224,9 @@ pub(super) fn lines(
         room.saturating_sub(1).max(1)
     };
     for ((d, u), value) in clocks.iter().zip(&values).take(shown) {
-        let selected = state.net.census.selection.selected == Some(d.address);
+        // Marked only among others: a lone meter is the selection already,
+        // and the rule says so.
+        let selected = only.is_none() && state.net.census.selection.selected == Some(d.address);
         let ink = meter_ink(*u, judged, theme);
         let text = if selected {
             Style::default()
@@ -260,7 +287,7 @@ pub(super) fn lines(
 
 /// The meter's colour: the verdict's where there is a limit to judge by, the
 /// accent where there is not.
-fn meter_ink(u: Uncertain, judged: bool, theme: &crate::Theme) -> Color {
+pub(super) fn meter_ink(u: Uncertain, judged: bool, theme: &crate::Theme) -> Color {
     if !judged {
         return theme.border_accent;
     }
