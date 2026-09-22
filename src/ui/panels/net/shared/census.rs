@@ -109,6 +109,12 @@ const COLUMNS: &[Column] = &[
         width: 14,
         align: Align::Right,
     },
+    Column {
+        title: "INTERVAL",
+        // `100.000 ±0.005 ms`: the estimate at the timebase's own floor.
+        width: 17,
+        align: Align::Right,
+    },
 ];
 
 /// `+15.4 ±0.5 ppm` - a device's own refined crystal-error estimate
@@ -153,6 +159,106 @@ fn cells(
         fmt_mean_snr(d),
         d.ble_pdu_type_count().to_string(),
         fmt_modulation(d),
+        fmt_interval(d),
+    ]
+}
+
+/// `100.02 ±0.03 ms`, the advertising interval where one has been read
+/// (`signal::ble::interval`); `-` otherwise, and the detail block says why.
+fn fmt_interval(d: &Device) -> String {
+    match d.advertising() {
+        Some(Ok(e)) => Reading::new(e.interval_s.scale(1e3), "ms", f64::INFINITY).text(),
+        _ => "-".to_string(),
+    }
+}
+
+/// The detail block's advertising timing (net-ux-polish-plan 4.5): the
+/// interval and where it sits on the 0.625 ms grid, the random delay, and
+/// what it was timed on; or, where there is no estimate, why not.
+///
+/// **In SURVEY the reading stays, marked as not updating.** Arrivals are
+/// only ever recorded in LOCK (`signal::net::worker::census_from_ble`), so a
+/// log that exists was measured the right way; leaving the survey does not
+/// make it wrong, only old, and the line says so (rule 4). Without one,
+/// SURVEY refuses as the plan put it: the interval needs LOCK on one channel.
+fn advertising_lines(
+    d: &Device,
+    state: &SdrMetrics,
+    iw: usize,
+    theme: &crate::Theme,
+) -> Vec<Line<'static>> {
+    use crate::signal::ble::interval::{Delay, Grid, Refusal, ADV_DELAY_MAX_S, INTERVAL_STEP_S};
+    let locked = state.net.mode == crate::state::NetMode::Lock;
+    let dash = || "-".to_string();
+    let why = |text: String| vec![noted("interval", dash(), &text, iw, theme)];
+    let e = match d.advertising() {
+        None if locked => return why("none of its advertising heard in this LOCK yet".to_string()),
+        None => return why("needs LOCK on one channel".to_string()),
+        Some(Err(Refusal::Collecting { have, need })) => {
+            return why(format!("collecting: {have} of {need} events"))
+        }
+        Some(Err(Refusal::BelowMinimum(gap))) => {
+            return why(format!(
+                "packets {:.2} ms apart: faster than any legacy interval",
+                gap * 1e3
+            ))
+        }
+        Some(Err(Refusal::NoSingleEvents(_))) => {
+            return why("no two consecutive events heard".to_string())
+        }
+        Some(Ok(e)) => e,
+    };
+    let step_ms = INTERVAL_STEP_S * 1e3;
+    let grid = match e.grid {
+        Grid::On(n) => format!("{n} × {step_ms} ms"),
+        Grid::Off { by_s, .. } => {
+            format!("off the {step_ms} ms grid by {:.2} ms", by_s.abs() * 1e3)
+        }
+        Grid::CannotTell => format!("too long to tell the {step_ms} ms grid from clock drift"),
+    };
+    let (delay, delay_note) = match e.delay {
+        Delay::Absent => (
+            "none".to_string(),
+            format!(
+                "no random delay; the specification asks for 0 to {:.0} ms",
+                ADV_DELAY_MAX_S * 1e3
+            ),
+        ),
+        Delay::Spread {
+            width_s,
+            uniform: true,
+            ..
+        } => (
+            format!("{:.1} ms wide", width_s * 1e3),
+            format!("of {:.0} allowed, a uniform draw", ADV_DELAY_MAX_S * 1e3),
+        ),
+        Delay::Spread {
+            width_s,
+            ks,
+            critical,
+            ..
+        } => (
+            format!("{:.1} ms wide", width_s * 1e3),
+            format!("not a uniform draw (KS {ks:.2} over {critical:.2})"),
+        ),
+    };
+    let channel = d.arrivals.as_ref().map(|a| a.channel).unwrap_or_default();
+    vec![
+        noted(
+            "interval",
+            Reading::new(e.interval_s.scale(1e3), "ms", f64::INFINITY).text(),
+            &grid,
+            iw,
+            theme,
+        ),
+        noted("adv delay", delay, &delay_note, iw, theme),
+        noted(
+            "timed on",
+            format!("ch {channel}, {} events", e.events),
+            if locked { "" } else { "not updating in SURVEY" },
+            iw,
+            theme,
+        ),
     ]
 }
 
@@ -382,6 +488,7 @@ fn detail(
         iw,
         theme,
     ));
+    out.extend(advertising_lines(d, state, iw, theme));
     for (i, row) in crate::ui::chrome::wrap(&pdu_types(d), iw.saturating_sub(DETAIL_LABEL_W + 1), 2)
         .into_iter()
         .enumerate()
@@ -403,7 +510,7 @@ fn noted(label: &str, value: String, note: &str, iw: usize, theme: &crate::Theme
         crate::ui::chrome::field(label, DETAIL_LABEL_W, theme),
         Span::styled(value, Style::default().fg(theme.value)),
     ];
-    if iw >= used + note.chars().count() + 2 {
+    if !note.is_empty() && iw >= used + note.chars().count() + 2 {
         spans.push(Span::styled(
             format!("  {note}"),
             Style::default().fg(theme.label),
@@ -941,7 +1048,7 @@ mod tests {
     /// named beside an address the table shows bare.
     #[test]
     fn the_detail_block_spells_out_the_selected_device() {
-        let out = draw(NetCensusPanel, 76, 14, &selected()).join("\n");
+        let out = draw(NetCensusPanel, 76, 15, &selected()).join("\n");
         assert!(out.contains("SELECTED"), "{out}");
         assert!(out.contains("a4:83:e7:1c:09:be  Apple"), "{out}");
         assert!(out.contains("first seen 10 min ago"), "{out}");
@@ -961,7 +1068,7 @@ mod tests {
     #[test]
     fn the_detail_block_says_what_the_offset_was_measured_against() {
         let mut m = selected();
-        let relative = draw(NetCensusPanel, 90, 14, &m).join("\n");
+        let relative = draw(NetCensusPanel, 90, 15, &m).join("\n");
         assert!(
             relative.contains("relative to our own oscillator"),
             "{relative}"
@@ -975,7 +1082,7 @@ mod tests {
             at: Instant::now(),
             efficiency: None,
         });
-        let referenced = draw(NetCensusPanel, 90, 14, &m).join("\n");
+        let referenced = draw(NetCensusPanel, 90, 15, &m).join("\n");
         assert!(referenced.contains("against WWV 10 MHz"), "{referenced}");
         // And the number is the corrected one, the same arithmetic the CFO
         // column does: 35.4 read plus our own 10 ppm.
@@ -988,7 +1095,7 @@ mod tests {
     fn a_device_with_no_offset_says_why_the_cell_is_a_dash() {
         let mut m = populated();
         m.net.census.selection.selected = Some([0xf0, 0x18, 0x98, 0x00, 0x11, 0x22]);
-        let out = draw(NetCensusPanel, 90, 14, &m).join("\n");
+        let out = draw(NetCensusPanel, 90, 15, &m).join("\n");
         assert!(out.contains("no packet from it has reported one"), "{out}");
     }
 
@@ -1003,7 +1110,7 @@ mod tests {
             "the rows are still there:\n{short}"
         );
 
-        let tall = draw(NetCensusPanel, 76, 14, &selected()).join("\n");
+        let tall = draw(NetCensusPanel, 76, 15, &selected()).join("\n");
         assert!(tall.contains("SELECTED"), "{tall}");
     }
 
@@ -1013,7 +1120,7 @@ mod tests {
     fn the_detail_block_masks_when_the_section_masks() {
         let mut m = selected();
         m.net.address_display = crate::state::AddressDisplay::Masked;
-        let out = draw(NetCensusPanel, 76, 14, &m).join("\n");
+        let out = draw(NetCensusPanel, 76, 15, &m).join("\n");
         assert!(out.contains("SELECTED"), "{out}");
         assert!(!out.contains("a4:83:e7"), "the address leaked:\n{out}");
     }
@@ -1388,6 +1495,103 @@ mod tests {
             turnover_text(&old, now, 120),
             "no new addresses in the last 5 min"
         );
+    }
+
+    /// One device, selected, heard `events` times on channel 37 every
+    /// `interval_s` plus a delay spread evenly over `delay_s`, in `mode`.
+    fn advertiser(
+        interval_s: f64,
+        delay_s: f64,
+        events: u64,
+        mode: crate::state::NetMode,
+    ) -> SdrMetrics {
+        use crate::signal::net::census::{observe, Arrival, Sighting};
+        let now = Instant::now();
+        let mut m = SdrMetrics::fixture().streaming();
+        m.net.mode = mode;
+        let addr = [0x4a, 1, 2, 3, 4, 5];
+        let mut t = 1.0;
+        for k in 0..events {
+            t += interval_s + (k * 7919 % 1000) as f64 / 1000.0 * delay_s;
+            let s = Sighting {
+                address: addr,
+                random: true,
+                snr_db: Some(12.0),
+                crystal_offset_ppm: None,
+                ble_pdu_code: Some(0x0),
+                modulation_index: None,
+                arrival: Some(Arrival {
+                    channel: 37,
+                    rate_hz: 8e6,
+                    pair: (t * 8e6) as u64,
+                }),
+            };
+            observe(&mut m.net.census.devices, &s, now);
+        }
+        m.net.census.selection.selected = Some(addr);
+        m
+    }
+
+    /// **In LOCK, the interval, its place on the 0.625 ms grid, the delay and
+    /// what it was timed on**, and the INTERVAL column carrying the same
+    /// reading.
+    #[test]
+    fn a_locked_advertiser_shows_its_interval_and_delay() {
+        // A full log: the grid is judged only once the interval is known to a
+        // small fraction of a step (`census::ARRIVALS_KEPT`).
+        let m = advertiser(0.100, 10e-3, 300, crate::state::NetMode::Lock);
+        let out = draw(NetCensusPanel, 150, 34, &m).join("\n");
+        assert!(out.contains("interval   100."), "{out}");
+        assert!(out.contains("160 × 0.625 ms"), "{out}");
+        assert!(out.contains("adv delay  10.0 ms wide"), "{out}");
+        assert!(out.contains("of 10 allowed, a uniform draw"), "{out}");
+        assert!(out.contains("timed on   ch 37, 255 events"), "{out}");
+        assert!(!out.contains("not updating"), "{out}");
+        assert!(out.contains("INTERVAL"), "{out}");
+        let row = out
+            .lines()
+            .find(|l| l.contains("4a:01:02") && l.contains("RPA"))
+            .unwrap();
+        assert!(row.contains(" ms"), "the column carries it: {row}");
+    }
+
+    /// Back in SURVEY the reading stays, marked as not updating: it was taken
+    /// in LOCK and is old, not wrong.
+    #[test]
+    fn a_reading_from_an_earlier_lock_is_kept_and_marked_in_survey() {
+        let m = advertiser(0.100, 10e-3, 300, crate::state::NetMode::Survey);
+        let out = draw(NetCensusPanel, 150, 34, &m).join("\n");
+        assert!(out.contains("interval   100."), "{out}");
+        assert!(out.contains("not updating in SURVEY"), "{out}");
+    }
+
+    /// **What cannot be read says why**: no LOCK yet, a LOCK that has not
+    /// heard it, too few events, and a device that adds no random delay.
+    #[test]
+    fn the_interval_line_says_why_when_it_has_no_reading() {
+        use crate::state::NetMode;
+        let mut m = advertiser(0.100, 10e-3, 0, NetMode::Survey);
+        m.net.census.devices = vec![Device::heard([0x4a, 1, 2, 3, 4, 5], true, Instant::now())];
+        let text = |m: &SdrMetrics| draw(NetCensusPanel, 150, 34, m).join("\n");
+        assert!(
+            text(&m).contains("needs LOCK on one channel"),
+            "{}",
+            text(&m)
+        );
+        m.net.mode = NetMode::Lock;
+        assert!(text(&m).contains("none of its advertising heard in this LOCK yet"));
+
+        let few = advertiser(0.100, 10e-3, 4, NetMode::Lock);
+        assert!(
+            text(&few).contains("collecting: 3 of 8 events"),
+            "{}",
+            text(&few)
+        );
+
+        let fixed = advertiser(0.100, 0.0, 30, NetMode::Lock);
+        let out = text(&fixed);
+        assert!(out.contains("adv delay  none"), "{out}");
+        assert!(out.contains("no random delay"), "{out}");
     }
 
     #[test]

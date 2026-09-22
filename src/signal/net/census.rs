@@ -196,8 +196,6 @@ impl Device {
     /// said yet. `None` when it has never been heard in LOCK. Computed when
     /// asked, outside the state lock: the record keeps positions, never a
     /// fitted figure.
-    // Drawn by the census panel from 4.5.b; this line goes with that step.
-    #[cfg_attr(not(test), allow(dead_code))]
     pub fn advertising(
         &self,
     ) -> Option<Result<crate::signal::ble::interval::Estimate, crate::signal::ble::interval::Refusal>>
@@ -226,7 +224,7 @@ impl Device {
 /// columns_that_fit` drops from the right), so the measurements a reader is
 /// most likely to need come first and the ones that need the most room last.
 pub const SORT_KEYS: &[&str] = &[
-    "ADDRESS", "KIND", "SEEN", "PKTS", "SNR", "CRC", "CFO", "MEAN SNR", "TYPES", "MOD",
+    "ADDRESS", "KIND", "SEEN", "PKTS", "SNR", "CRC", "CFO", "MEAN SNR", "TYPES", "MOD", "INTERVAL",
 ];
 
 /// The index of the column titled `title` in [`SORT_KEYS`], for the tests
@@ -253,12 +251,13 @@ enum Key {
     MeanSnr,
     Types,
     Modulation,
+    Interval,
 }
 
 impl Key {
     /// Every key, in [`SORT_KEYS`] order: a test holds the two lists to one
     /// length, and one title each.
-    const ALL: [Key; 10] = [
+    const ALL: [Key; 11] = [
         Key::Address,
         Key::Kind,
         Key::Seen,
@@ -269,6 +268,7 @@ impl Key {
         Key::MeanSnr,
         Key::Types,
         Key::Modulation,
+        Key::Interval,
     ];
 }
 
@@ -279,8 +279,8 @@ impl Key {
 /// every tie: it is the one field that is unique by definition.
 ///
 /// **A device with no reading sorts last, in either direction.** The best
-/// SNR, the mean SNR, the modulation index and the CFO are all absent until
-/// a packet supplies one, and rule 2 refuses to rank an absent reading as if
+/// SNR, the mean SNR, the modulation index, the CFO and the advertising
+/// interval are all absent until packets supply one, and rule 2 refuses to rank an absent reading as if
 /// it were a good one or a bad one; only the order *between* two measured
 /// devices is reversed.
 ///
@@ -303,6 +303,10 @@ pub fn order(
             Key::BestSnr => d.best_snr_db.map(f64::from),
             Key::MeanSnr => d.mean_snr_db().map(|u| u.value()),
             Key::Modulation => d.modulation_index.map(|u| u.value()),
+            Key::Interval => d
+                .advertising()
+                .and_then(Result::ok)
+                .map(|e| e.interval_s.value()),
             Key::Cfo => d
                 .crystal_offset_ppm
                 .map(|u| radio.corrected_ppm(u, now).0.value().abs()),
@@ -311,7 +315,7 @@ pub fn order(
     };
     devices.sort_by(|a, b| {
         let ordering = match key {
-            Key::BestSnr | Key::MeanSnr | Key::Modulation | Key::Cfo => {
+            Key::BestSnr | Key::MeanSnr | Key::Modulation | Key::Cfo | Key::Interval => {
                 absent_last(measured(a), measured(b), descending)
             }
             _ => {
@@ -368,10 +372,18 @@ fn absent_last(a: Option<f64>, b: Option<f64>, descending: bool) -> std::cmp::Or
     }
 }
 
-/// How many arrivals a device keeps: enough single events for the delay's
-/// edges to be pinned to a fraction of a millisecond, and a bounded cost, since
-/// the whole state is cloned every frame.
-pub const ARRIVALS_KEPT: usize = 64;
+/// How many arrivals a device keeps: enough for the 0.625 ms grid to be
+/// judged under the specification's 10 ms random delay, and a bounded cost.
+///
+/// **Sized by the grid, not by the interval.** The interval's uncertainty is
+/// about the delay's width over the number of single events, and the grid
+/// needs twice that, plus a sleep clock's drift, under a third of a
+/// millisecond (`signal::ble::interval`). At 64 it never was: 10 ms over 63
+/// is 0.16 ms, and every grid verdict came back "cannot tell" - found by the
+/// first panel test that asked for one. At 256 it is 0.04 ms, and the grid is
+/// judged up to about 0.4 s intervals. 2 KB a device, in a state cloned every
+/// frame: a tenth of a megabyte for a room of fifty, a memcpy of microseconds.
+pub const ARRIVALS_KEPT: usize = 256;
 
 /// A device's periodic advertising arrivals on one channel, as stream
 /// positions at one rate (`pdu::Packet::at_pair`), oldest first.
@@ -1087,14 +1099,14 @@ mod tests {
             ..heard([1; 6], None)
         };
         let mut devices = Vec::new();
-        for k in 1..=100u64 {
+        for k in 1..=300u64 {
             observe(&mut devices, &at(37, k * 800_000), now);
         }
         let log = devices[0].arrivals.clone().unwrap();
         assert_eq!(log.pairs.len(), ARRIVALS_KEPT);
-        assert_eq!(log.pairs.back(), Some(&80_000_000));
+        assert_eq!(log.pairs.back(), Some(&240_000_000));
 
-        observe(&mut devices, &at(38, 90_000_000), now);
+        observe(&mut devices, &at(38, 250_000_000), now);
         assert_eq!(
             devices[0].arrivals.as_ref().unwrap().pairs.len(),
             1,
@@ -1134,5 +1146,39 @@ mod tests {
         let mut unlocked = Vec::new();
         observe(&mut unlocked, &heard([2; 6], None), now);
         assert!(unlocked[0].advertising().is_none());
+    }
+
+    /// INTERVAL orders by the estimate, and a device without one (never
+    /// locked on, or still collecting) sorts last either way.
+    #[test]
+    fn interval_orders_by_the_estimate_and_puts_the_unmeasured_last() {
+        let now = Instant::now();
+        let every = |tail: u8, interval: f64, events: u64| {
+            let mut d = vec![Device::heard([0, 0, 0, 0, 0, tail], false, now)];
+            let mut t = 0.0;
+            for k in 0..events {
+                t += interval + (k * 7 % 10) as f64 * 1e-3;
+                let s = Sighting {
+                    arrival: Some(Arrival {
+                        channel: 37,
+                        rate_hz: 8e6,
+                        pair: (t * 8e6) as u64,
+                    }),
+                    ..heard([0, 0, 0, 0, 0, tail], None)
+                };
+                observe(&mut d, &s, now);
+            }
+            d.remove(0)
+        };
+        let tails = |d: &[Device]| d.iter().map(|x| x.address[5]).collect::<Vec<_>>();
+        let mut d = vec![
+            every(1, 0.5, 30),
+            every(2, 0.1, 3), // still collecting
+            every(3, 0.1, 30),
+        ];
+        order(&mut d, column("INTERVAL"), false, now, &radio());
+        assert_eq!(tails(&d), vec![3, 1, 2]);
+        order(&mut d, column("INTERVAL"), true, now, &radio());
+        assert_eq!(tails(&d), vec![1, 3, 2]);
     }
 }
