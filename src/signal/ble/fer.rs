@@ -42,6 +42,20 @@ pub const BIN_DB: f64 = 2.0;
 /// a quiet room's curve empty for minutes.
 pub const MIN_PACKETS: u32 = 10;
 
+/// `hits` of `n` as a fraction, `0.0` to `1.0`, with its Agresti-Coull
+/// uncertainty at one sigma; `None` below [`MIN_PACKETS`]. The one rule
+/// for every rate a packet count yields, so the error curve and the
+/// channels' pass rates refuse and round alike (rule 5).
+pub fn fraction(hits: u64, n: u64) -> Option<Uncertain> {
+    if n < MIN_PACKETS as u64 {
+        return None;
+    }
+    let (x, n) = (hits as f64, n as f64);
+    let p_tilde = (x + 0.5) / (n + 1.0);
+    let sigma = (p_tilde * (1.0 - p_tilde) / (n + 1.0)).sqrt();
+    Some(Uncertain::from_sigma(x / n, sigma))
+}
+
 /// One curve: good and failed packets per SNR bin.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct FerCurve {
@@ -91,14 +105,7 @@ impl FerCurve {
     /// The failure fraction in `bin`, `0.0` to `1.0`, with its uncertainty;
     /// `None` below [`MIN_PACKETS`].
     pub fn rate(&self, bin: usize) -> Option<Uncertain> {
-        let n = self.packets(bin);
-        if n < MIN_PACKETS {
-            return None;
-        }
-        let (x, n) = (self.failed[bin] as f64, n as f64);
-        let p_tilde = (x + 0.5) / (n + 1.0);
-        let sigma = (p_tilde * (1.0 - p_tilde) / (n + 1.0)).sqrt();
-        Some(Uncertain::from_sigma(x / n, sigma))
+        fraction(self.failed[bin] as u64, self.packets(bin) as u64)
     }
 
     /// The bins from the lowest to the highest that holds any packet: the

@@ -270,23 +270,46 @@ fn row(
 }
 
 /// B11's own exit condition, on screen: packet counts per advertising
-/// channel, with the dwell fraction stated. `None` outside survey - a radio
-/// locked to one channel is not dividing its time between three, so a dwell
-/// fraction would be a claim this mode does not make.
+/// channel, with the dwell fraction stated, and each channel's CRC pass
+/// rate beside its count (net-ux-polish-plan 5.8). In LOCK the one channel
+/// the radio sits on, with no dwell fraction - a radio locked to one channel
+/// is not dividing its time between three, so the fraction would be a claim
+/// this mode does not make.
+///
+/// The rate follows the frame error curve's rule
+/// ([`crate::signal::ble::fer::fraction`]): a channel under ten packets has
+/// its count and no rate.
 fn channel_summary(
     state: &SdrMetrics,
     theme: &crate::Theme,
     width: usize,
 ) -> Option<Line<'static>> {
-    if state.net.mode != crate::state::NetMode::Survey {
-        return None;
-    }
-    let n = crate::signal::ble::channel::advertising_channels_hz().len();
-    let c = state.net.ble_channel_packets;
-    let text = format!(
-        "CH37 {}  CH38 {}  CH39 {}  (1/{n} dwell each)",
-        c[0], c[1], c[2]
-    );
+    let one = |i: usize| {
+        let (n, ok) = (
+            state.net.ble_channel_packets[i],
+            state.net.ble_channel_crc_ok[i],
+        );
+        let rate = crate::signal::ble::fer::fraction(ok, n)
+            .map(|r| {
+                format!(
+                    " {} CRC ok",
+                    Reading::new(r.scale(100.0), "%", f64::INFINITY).text()
+                )
+            })
+            .unwrap_or_default();
+        format!("CH{} {n}{rate}", 37 + i)
+    };
+    let text = match state.net.mode {
+        crate::state::NetMode::Survey => {
+            let n = crate::signal::ble::channel::advertising_channels_hz().len();
+            format!("{}  {}  {}  (1/{n} dwell each)", one(0), one(1), one(2))
+        }
+        crate::state::NetMode::Lock => {
+            let ch = state.net.ble_channel?;
+            let i = crate::signal::ble::channel::advertising_channel_index(ch)?;
+            format!("{}  (this session)", one(i))
+        }
+    };
     Some(Line::from(Span::styled(
         truncate(&text, width),
         Style::default().fg(theme.label),
@@ -537,6 +560,44 @@ mod tests {
         assert!(!out.contains("dwell"), "{out}");
     }
 
+    /// **5.8: each advertising channel's CRC pass rate beside its count**,
+    /// under the error curve's rule: a rate once a channel has ten packets,
+    /// its count alone before that, never a rate from a handful.
+    #[test]
+    fn survey_mode_shows_each_channels_crc_pass_rate_where_it_stands() {
+        let mut m = SdrMetrics::fixture().streaming();
+        m.net.mode = crate::state::NetMode::Survey;
+        m.net.ble_channel_packets = [400, 9, 40];
+        m.net.ble_channel_crc_ok = [396, 9, 20];
+        m.net.ble_packets.push_back(packet(37, true));
+        let out = draw(NetBlePacketsPanel, 120, 10, &m).join("\n");
+        assert!(out.contains("CH37 400 99.0"), "{out}");
+        assert!(
+            out.contains("CH38 9  CH39"),
+            "a thin channel has no rate: {out}"
+        );
+        assert!(out.contains("CH39 40 50"), "{out}");
+        assert!(out.contains("CRC ok"), "{out}");
+        assert!(out.contains("1/3 dwell"), "{out}");
+    }
+
+    /// In LOCK the one channel the radio sits on, its count and its rate,
+    /// and no dwell fraction.
+    #[test]
+    fn lock_mode_shows_the_one_channels_rate() {
+        let mut m = SdrMetrics::fixture().streaming();
+        m.net.mode = crate::state::NetMode::Lock;
+        m.net.ble_channel = Some(38);
+        m.net.ble_channel_packets = [400, 30, 40];
+        m.net.ble_channel_crc_ok = [396, 15, 20];
+        m.net.ble_packets.push_back(packet(37, true));
+        let out = draw(NetBlePacketsPanel, 90, 10, &m).join("\n");
+        assert!(out.contains("CH38 30 50"), "{out}");
+        assert!(!out.contains("CH37"), "{out}");
+        assert!(!out.contains("CH39"), "{out}");
+        assert!(!out.contains("dwell"), "{out}");
+    }
+
     #[test]
     fn it_fits_every_size_the_layout_can_hand_it() {
         let mut populated_survey = SdrMetrics::fixture().streaming();
@@ -548,8 +609,10 @@ mod tests {
                 .ble_packets
                 .push_back(packet(37, i % 2 == 0));
         }
+        populated_survey.net.ble_channel_crc_ok = [3, 0, 7];
         let mut populated_lock = populated_survey.clone();
         populated_lock.net.mode = crate::state::NetMode::Lock;
+        populated_lock.net.ble_channel = Some(39);
         for w in 48..90u16 {
             for h in 6..20u16 {
                 for m in [

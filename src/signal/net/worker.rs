@@ -491,6 +491,8 @@ impl NetWorker {
                                 crate::signal::ble::channel::advertising_channel_index(ch)
                             {
                                 m.net.ble_channel_packets[i] += packets.len() as u64;
+                                m.net.ble_channel_crc_ok[i] +=
+                                    packets.iter().filter(|p| p.crc_ok).count() as u64;
                             }
                             for p in packets {
                                 // Numbered as it arrives, so `masked` counts in

@@ -389,6 +389,11 @@ pub struct NetState {
     /// plus [`NetMode::Survey`]'s rotation always dwelling `1 /
     /// advertising_channels_hz().len()` of a pass on each.
     pub ble_channel_packets: [u64; 3],
+    /// Of [`Self::ble_channel_packets`], the ones whose CRC passed, same
+    /// indexing: the pair gives each advertising channel its pass rate
+    /// (net-ux-polish-plan 5.8). A channel a Wi-Fi network sits on shows
+    /// it here first, as a rate that falls while the count keeps rising.
+    pub ble_channel_crc_ok: [u64; 3],
     /// Why classic Bluetooth has no live receiver at all right now, on the
     /// `net_bt` preset - the same "refused, not silent" discipline
     /// [`ble_refused`] already follows.
