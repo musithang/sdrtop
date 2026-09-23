@@ -23,8 +23,8 @@
 //! extreme, the pattern that gives the filter the least time to settle
 //! between transitions. Both conditions occur constantly in ordinary
 //! whitened traffic, which looks like uniformly random bits at the symbol
-//! level: [`SETTLED_RUN`] or more identical bits in a row, and
-//! [`SETTLED_RUN`] or more bits that strictly alternate, both happen many
+//! level: [`SETTLED_RUN`](crate::signal::dsp::deviation::SETTLED_RUN) or more identical bits in a row, and
+//! [`SETTLED_RUN`](crate::signal::dsp::deviation::SETTLED_RUN) or more bits that strictly alternate, both happen many
 //! times in a packet of any real length. This measures at every such
 //! occurrence and reports the same four numbers the specification's own
 //! procedure does, built from data this receiver already has instead of
@@ -55,12 +55,8 @@ use crate::signal::dsp::uncertainty::Uncertain;
 // design choice. It was a fixed LE 1M constant until net-ux-polish-plan 5.5
 // made LE 2M a PHY this app decodes as fully as LE 1M.
 
-/// How many like, or alternating, symbols in a row counts as "settled" for
-/// [`modulation_quality`]'s own purposes: `00001111`'s two four-symbol runs
-/// and `10101010`'s continuous alternation both generalise to this one
-/// number. See the module doc for why a literal search for either octet
-/// pattern is not what real advertising traffic can supply.
-const SETTLED_RUN: usize = 4;
+// The run shapes are GFSK's, not BLE's: `signal::dsp::deviation` holds
+// them since classic Bluetooth reads the same (net-ux-polish-plan 6.4).
 
 /// One packet's modulation quality, each figure carrying the uncertainty a
 /// caller needs to judge it against a stated limit - except
@@ -89,24 +85,6 @@ pub struct ModulationQuality {
     pub ratio: Uncertain,
 }
 
-/// Whether the window of `SETTLED_RUN` bits ending at `i` (inclusive) is all
-/// one value.
-fn ends_settled_run(bits: &[bool], i: usize) -> bool {
-    i + 1 >= SETTLED_RUN
-        && bits[i + 1 - SETTLED_RUN..=i]
-            .windows(2)
-            .all(|w| w[0] == w[1])
-}
-
-/// Whether the window of `SETTLED_RUN` bits ending at `i` (inclusive)
-/// strictly alternates.
-fn ends_alternating_run(bits: &[bool], i: usize) -> bool {
-    i + 1 >= SETTLED_RUN
-        && bits[i + 1 - SETTLED_RUN..=i]
-            .windows(2)
-            .all(|w| w[0] != w[1])
-}
-
 /// Modulation quality from one packet's own on-air symbols (`bits`) and the
 /// discriminator sample recovered at each one (`samples`, in Hz) - the same
 /// two arrays [`super::sync::slice`] returns, before whitening is undone.
@@ -119,14 +97,7 @@ pub fn modulation_quality(bits: &[bool], samples: &[f32], phy: Phy) -> Option<Mo
     debug_assert_eq!(bits.len(), samples.len());
     let n = bits.len().min(samples.len());
 
-    let settled: Vec<f32> = (0..n)
-        .filter(|&i| ends_settled_run(bits, i))
-        .map(|i| samples[i].abs())
-        .collect();
-    let alternating: Vec<f32> = (0..n)
-        .filter(|&i| ends_alternating_run(bits, i))
-        .map(|i| samples[i].abs())
-        .collect();
+    let (settled, alternating) = crate::signal::dsp::deviation::run_ends(&bits[..n], &samples[..n]);
 
     if settled.is_empty() || alternating.is_empty() {
         return None;

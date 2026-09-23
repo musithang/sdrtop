@@ -30,6 +30,7 @@
 
 pub mod code;
 pub mod correlate;
+pub mod deviation;
 pub mod discriminate;
 pub mod estimate;
 pub mod fir;

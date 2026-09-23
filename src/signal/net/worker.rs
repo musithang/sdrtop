@@ -656,7 +656,12 @@ impl NetWorker {
                         }
                         _ => crate::signal::bt::piconet::HeaderRead::Unresolved,
                     };
-                    headers_read.push((hit.lap, read, clock.hypotheses()));
+                    headers_read.push((
+                        hit.lap,
+                        read,
+                        clock.hypotheses(),
+                        crate::signal::bt::piconet::Deviation::of(&hit.air, &hit.deviation_hz),
+                    ));
                     narrowed_by_lap.push((hit.lap, shown));
                 }
                 if !hits.is_empty() || !narrowed_by_lap.is_empty() {
@@ -679,12 +684,13 @@ impl NetWorker {
                     for (lap, narrowed) in narrowed_by_lap {
                         m.net.bt_uap.insert(lap, narrowed);
                     }
-                    for (lap, read, hypotheses) in headers_read {
+                    for (lap, read, hypotheses, deviation) in headers_read {
                         crate::signal::bt::piconet::observe_header(
                             &mut m.net.bt_piconets,
                             lap,
                             read,
                             hypotheses,
+                            deviation,
                         );
                     }
                 }
@@ -1766,6 +1772,18 @@ mod tests {
         assert_eq!((h.captured, h.decoded, h.undecoded), (1, 1, 0), "{h:?}");
         assert_eq!(h.types[header::PacketType::Dh1.code() as usize], 1);
         assert_eq!(h.lt_addrs, 1 << lt_addr);
+
+        // 6.4: the header's own symbols give the modulation index the
+        // modulator was set to: 160 kHz at 1 Msym/s is h = 0.32. Read
+        // against the slicer's fast tracker it came out 0.297 (149 kHz); from
+        // the header's own settled centre, 0.322 (160.9 +/- 0.8 kHz).
+        let df1 = h
+            .deviation
+            .settled
+            .mean()
+            .expect("settled runs in a header");
+        let index = df1.value() * 2.0 / 1e6;
+        assert!((index - 0.32).abs() < 0.01, "h = {index} from {df1:?}");
     }
 
     /// Any other preset's blocks leave `bt_refused` unset, so a stale

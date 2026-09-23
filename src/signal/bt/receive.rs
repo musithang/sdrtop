@@ -105,6 +105,15 @@ pub struct HeaderHit {
     /// worker`'s own `header::PiconetClock` computes. `payload::
     /// verify_crc`/`break_uap_tie`'s own `raw` parameter, unchanged.
     pub payload_raw: Vec<bool>,
+    /// The trailer and header's own air bits ([`HEADER_CAPTURE_BITS`]), as
+    /// sliced, and the raw discriminator reading at each, in Hz: what a
+    /// piconet's modulation index is read
+    /// from (net-ux-polish-plan 6.4, `signal::dsp::deviation`). The header
+    /// region only, since it is the one part of a capture known to be this
+    /// packet's: the payload region runs to DH5's worst case whatever the
+    /// packet's real length.
+    pub air: Vec<bool>,
+    pub deviation_hz: Vec<f32>,
 }
 
 /// How many raw, still-whitened bits after a header this receiver keeps
@@ -147,6 +156,9 @@ struct PendingHeader {
     /// afterward can be attributed to a header this arc could not even
     /// read.
     header_whitened: Option<[bool; header::HEADER_BITS]>,
+    /// The raw discriminator reading at each of the first
+    /// [`HEADER_CAPTURE_BITS`] bits.
+    deviation_hz: Vec<f32>,
 }
 
 /// Samples per symbol this receiver decimates to, and so also the number of
@@ -386,6 +398,12 @@ impl Receiver {
             let bit = freq > self.bias;
 
             if let Some(pending) = self.pending[self.lane].as_mut() {
+                if pending.bits.len() < HEADER_CAPTURE_BITS {
+                    // Raw, not from the slicer's fast tracker: that follows a
+                    // long run and would shrink it (`piconet::Deviation::of`
+                    // takes its centre from the header's own runs).
+                    pending.deviation_hz.push(freq);
+                }
                 pending.bits.push(bit);
                 if pending.header_whitened.is_none() && pending.bits.len() == HEADER_CAPTURE_BITS {
                     match header::unfec13(&pending.bits[header::TRAILER_BITS..]) {
@@ -408,6 +426,8 @@ impl Receiver {
                             whitened,
                             tick: ticks_from_symbols(self.anchor_symbols + pending.start_symbol),
                             payload_raw: pending.bits[HEADER_CAPTURE_BITS..].to_vec(),
+                            air: pending.bits[..HEADER_CAPTURE_BITS].to_vec(),
+                            deviation_hz: pending.deviation_hz,
                         });
                     }
                 }
@@ -423,6 +443,7 @@ impl Receiver {
                         start_symbol: self.lane_symbols[self.lane],
                         bits: Vec::with_capacity(TOTAL_CAPTURE_BITS),
                         header_whitened: None,
+                        deviation_hz: Vec::with_capacity(HEADER_CAPTURE_BITS),
                     });
                 }
             }

@@ -23,13 +23,48 @@
 use std::time::Instant;
 
 use super::header::Header;
+use crate::signal::dsp::deviation::Sums;
+
+/// A piconet's deviation readings (net-ux-polish-plan 6.4), gathered from
+/// the trailer and header symbols of every header captured on its LAP, as
+/// sums (`signal::dsp::deviation`): the settled-run ends are delta-f1, the
+/// modulation index's own reading, and the alternating-run ends delta-f2.
+///
+/// **Every member's transmissions, not the master's alone**: a LAP names a
+/// piconet, and a slave answering in it sends the master's access code
+/// too, so this is the piconet's modulation, said so where it is shown.
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct Deviation {
+    pub settled: Sums,
+    pub alternating: Sums,
+}
+
+impl Deviation {
+    /// One header's readings: `air` its sliced symbols, `hz` the raw
+    /// discriminator at each. Measured from the centre the header's own
+    /// settled runs give (`dsp::deviation::settled_centre`); a header whose
+    /// runs are all of one polarity gives no reading at all rather than
+    /// one against a centre it cannot state.
+    pub fn of(air: &[bool], hz: &[f32]) -> Self {
+        use crate::signal::dsp::deviation::{run_ends, settled_centre};
+        let Some(centre) = settled_centre(air, hz) else {
+            return Self::default();
+        };
+        let from_centre: Vec<f32> = hz.iter().map(|f| f - centre).collect();
+        let (settled, alternating) = run_ends(air, &from_centre);
+        Self {
+            settled: Sums::of(&settled),
+            alternating: Sums::of(&alternating),
+        }
+    }
+}
 
 /// What a piconet's headers have said (net-ux-polish-plan 6.3): counted
 /// from every header captured on its LAP, and read only once its UAP has
 /// narrowed to one value. Before that a header's HEC cannot say which
 /// dewhitening is right, so nothing about its content is counted, not even
 /// a guess (rule 2).
-#[derive(Clone, Debug, Default, PartialEq, Eq)]
+#[derive(Clone, Debug, Default, PartialEq)]
 pub struct Headers {
     /// Headers captured after this LAP's access codes.
     pub captured: u64,
@@ -47,6 +82,9 @@ pub struct Headers {
     /// The CLK1-6 hypotheses still standing after the latest header
     /// (`header::PiconetClock::hypotheses`).
     pub clock_hypotheses: u8,
+    /// Deviation readings from every captured header's symbols, resolved
+    /// or not: the modulation does not need the UAP.
+    pub deviation: Deviation,
 }
 
 /// One header's outcome, as the worker hands it over.
@@ -118,13 +156,21 @@ pub fn observe(roster: &mut Vec<Piconet>, lap: u32, channel: u8, now: Instant) {
 /// Record one captured header of `lap`, with the clock hypotheses left
 /// standing after it. A LAP the roster has no row for is skipped: a header
 /// always follows an access code, which made the row.
-pub fn observe_header(roster: &mut [Piconet], lap: u32, read: HeaderRead, hypotheses: u8) {
+pub fn observe_header(
+    roster: &mut [Piconet],
+    lap: u32,
+    read: HeaderRead,
+    hypotheses: u8,
+    deviation: Deviation,
+) {
     let Some(p) = roster.iter_mut().find(|p| p.lap == lap) else {
         return;
     };
     let h = &mut p.headers;
     h.captured += 1;
     h.clock_hypotheses = hypotheses;
+    h.deviation.settled.add(deviation.settled);
+    h.deviation.alternating.add(deviation.alternating);
     match read {
         HeaderRead::Unresolved => {}
         HeaderRead::Undecoded => h.undecoded += 1,
@@ -175,10 +221,34 @@ mod tests {
             hec: 0,
             clk6: 0,
         };
-        observe_header(&mut roster, 0x9e8b33, HeaderRead::Unresolved, 2);
-        observe_header(&mut roster, 0x9e8b33, HeaderRead::Decoded(poll), 2);
-        observe_header(&mut roster, 0x9e8b33, HeaderRead::Undecoded, 2);
-        observe_header(&mut roster, 0xabcdef, HeaderRead::Undecoded, 2);
+        observe_header(
+            &mut roster,
+            0x9e8b33,
+            HeaderRead::Unresolved,
+            2,
+            Default::default(),
+        );
+        observe_header(
+            &mut roster,
+            0x9e8b33,
+            HeaderRead::Decoded(poll),
+            2,
+            Default::default(),
+        );
+        observe_header(
+            &mut roster,
+            0x9e8b33,
+            HeaderRead::Undecoded,
+            2,
+            Default::default(),
+        );
+        observe_header(
+            &mut roster,
+            0xabcdef,
+            HeaderRead::Undecoded,
+            2,
+            Default::default(),
+        );
         let h = &roster[0].headers;
         assert_eq!((h.captured, h.decoded, h.undecoded), (3, 1, 1));
         assert_eq!(h.types[PacketType::Poll.code() as usize], 1);

@@ -28,6 +28,8 @@ use ratatui::{
 use crate::signal::bt::piconet::{ordered, Piconet};
 use crate::state::SdrMetrics;
 use crate::ui::panel::{FeedSpan, Panel, PanelChrome, Staleness};
+use crate::ui::widgets::limit::{Limit, LimitRow, RowWidths};
+use crate::ui::widgets::reading::Reading;
 use crate::ui::widgets::table::{
     columns_that_fit, header, row, viewport_start, Align, Column, Sort,
 };
@@ -202,7 +204,108 @@ fn detail(
             out.push(field(if i == 0 { label } else { "" }, chunk));
         }
     }
+    out.extend(modulation_lines(p, iw, theme));
     out.extend(header_lines(p, state, iw, theme));
+    out
+}
+
+/// BR's modulation index band, **read from the Core Specification 5.4,
+/// Vol 2, Part A, 3.1.1** on the SIG's own site this session: "The
+/// Modulation index shall be between 0.28 and 0.35" (GFSK, BT = 0.5,
+/// 1 Msym/s).
+const BR_INDEX: Limit = Limit::Band {
+    low: 0.28,
+    high: 0.35,
+};
+
+/// The same band as a deviation: `h = 2 * delta_f / 1 Msym/s`, so 140 to
+/// 175 kHz. Derived from [`BR_INDEX`], not a second figure from the text.
+const BR_DELTA_F1_KHZ: Limit = Limit::Band {
+    low: 140.0,
+    high: 175.0,
+};
+
+/// The same section: "the minimum frequency deviation, Fmin ... which
+/// corresponds to 1010 sequence shall be no smaller than ±80% of the
+/// frequency deviation (fd) ... which corresponds to a 00001111 sequence".
+/// The text states it for the minimum; what is shown against it here is the
+/// ratio of the means, which is what a header's symbols support, and the
+/// row is labelled so.
+const BR_RATIO: Limit = Limit::Min(0.8);
+
+/// Resolutions a reading must beat before it prints, as the BLE rows'
+/// (`ble_detail`): a fraction of the band each limit states.
+const INDEX_RESOLUTION: f64 = 0.02;
+const DELTA_F1_RESOLUTION_KHZ: f64 = 10.0;
+const RATIO_RESOLUTION: f64 = 0.1;
+
+/// The MODULATION section (net-ux-polish-plan 6.4): the piconet's BR
+/// modulation index, read from the trailer and header symbols of every
+/// header captured on its LAP (`piconet::Deviation`), against the BR band,
+/// in the same `widgets::limit` rows the BLE packet detail uses, so the two
+/// protocols' transmitter quality reads alike. The header's FEC repeats
+/// each bit three times, so settled runs are plentiful and alternating
+/// ones are only the trailer's: the ratio row waits longer for its second
+/// reading, and says so.
+fn modulation_lines(p: &Piconet, iw: usize, theme: &crate::Theme) -> Vec<Line<'static>> {
+    let d = p.headers.deviation;
+    let mut out = vec![crate::ui::chrome::section(
+        "modulation",
+        "BR limits: Core 5.4 Vol 2 A 3.1.1",
+        iw,
+        theme,
+    )];
+    let quiet = |text: &str| {
+        Line::from(Span::styled(
+            format!(" {text}"),
+            Style::default().fg(theme.stale),
+        ))
+    };
+    let Some(df1) = d.settled.mean() else {
+        out.push(quiet(&format!(
+            "not measured: {} settled runs in {} headers, two needed",
+            d.settled.n, p.headers.captured
+        )));
+        return out;
+    };
+    let mut rows = vec![
+        LimitRow::new(
+            "Mod index",
+            Reading::new(df1.scale(2.0 / 1e6), "", INDEX_RESOLUTION),
+            BR_INDEX,
+        ),
+        LimitRow::new(
+            "df1 avg",
+            Reading::new(df1.scale(0.001), "kHz", DELTA_F1_RESOLUTION_KHZ),
+            BR_DELTA_F1_KHZ,
+        ),
+    ];
+    let ratio = d.alternating.mean().map(|df2| df2.ratio(&df1));
+    if let Some(r) = ratio {
+        rows.push(LimitRow::new(
+            "df2/df1",
+            Reading::new(r, "", RATIO_RESOLUTION),
+            BR_RATIO,
+        ));
+    }
+    let w = RowWidths::fit_within(&rows, iw);
+    out.extend(rows.iter().map(|r| Line::from(r.spans(theme, w))));
+    if ratio.is_none() {
+        out.push(quiet("df2/df1: fewer than two alternating runs yet"));
+    }
+    for chunk in crate::ui::chrome::wrap(
+        &format!(
+            "{} settled and {} alternating runs from {} headers, every member's",
+            d.settled.n, d.alternating.n, p.headers.captured
+        ),
+        iw.saturating_sub(1),
+        2,
+    ) {
+        out.push(Line::from(Span::styled(
+            format!(" {chunk}"),
+            Style::default().fg(theme.label),
+        )));
+    }
     out
 }
 
@@ -577,7 +680,13 @@ mod tests {
         let out = draw(NetBtPiconetsPanel, 70, 30, &m).join("\n");
         assert!(out.contains("none yet"), "{out}");
 
-        observe_header(&mut m.net.bt_piconets, 0x9e8b33, HeaderRead::Unresolved, 2);
+        observe_header(
+            &mut m.net.bt_piconets,
+            0x9e8b33,
+            HeaderRead::Unresolved,
+            2,
+            Default::default(),
+        );
         let out = draw(NetBtPiconetsPanel, 70, 30, &m).join("\n");
         assert!(
             out.contains("1, not read: UAP not resolved (2 candidates)"),
@@ -605,9 +714,16 @@ mod tests {
                 0x9e8b33,
                 HeaderRead::Decoded(header(t, a)),
                 1,
+                Default::default(),
             );
         }
-        observe_header(&mut m.net.bt_piconets, 0x9e8b33, HeaderRead::Undecoded, 1);
+        observe_header(
+            &mut m.net.bt_piconets,
+            0x9e8b33,
+            HeaderRead::Undecoded,
+            1,
+            Default::default(),
+        );
         let out = draw(NetBtPiconetsPanel, 70, 30, &m).join("\n");
         assert!(out.contains("HEADERS"), "{out}");
         assert!(out.contains("unchecked on air"), "{out}");
@@ -621,6 +737,46 @@ mod tests {
         );
         assert!(out.contains("0 (broadcast), 1, 2"), "{out}");
         assert!(out.contains("CLK1-6 found"), "{out}");
+    }
+
+    /// **The BR modulation index against the BR band** (6.4): refused
+    /// until two settled runs, then the index, delta-f1 and, once two
+    /// alternating runs are in, the ratio, in the limit rows BLE uses.
+    #[test]
+    fn the_modulation_index_is_read_against_the_br_band() {
+        use crate::signal::bt::piconet::{observe_header, Deviation, HeaderRead};
+        use crate::signal::dsp::deviation::Sums;
+        let mut m = heard();
+        m.net.bt_view.selected = Some(0x9e8b33);
+        let out = draw(NetBtPiconetsPanel, 80, 40, &m).join("\n");
+        assert!(out.contains("MODULATION"), "{out}");
+        assert!(
+            out.contains("not measured: 0 settled runs in 0 headers"),
+            "{out}"
+        );
+
+        // 160 kHz settled, h = 0.32; alternating at 150 kHz, ratio ~0.94.
+        let dev = Deviation {
+            settled: Sums::of(&[158_000.0, 160_000.0, 162_000.0, 160_000.0]),
+            alternating: Sums::of(&[149_000.0, 151_000.0]),
+        };
+        observe_header(
+            &mut m.net.bt_piconets,
+            0x9e8b33,
+            HeaderRead::Unresolved,
+            32,
+            dev,
+        );
+        let out = draw(NetBtPiconetsPanel, 80, 40, &m).join("\n");
+        assert!(out.contains("Mod index"), "{out}");
+        assert!(out.contains("0.32"), "{out}");
+        assert!(out.contains("0.28"), "the band is drawn: {out}");
+        assert!(out.contains("df2/df1"), "{out}");
+        assert!(
+            out.contains("4 settled and 2 alternating runs from 1 headers"),
+            "{out}"
+        );
+        assert!(out.contains("Core 5.4 Vol 2 A 3.1.1"), "{out}");
     }
 
     #[test]
