@@ -37,7 +37,7 @@ pub struct NetBtPiconetsPanel;
 const COLUMNS: &[Column] = &[
     Column {
         title: "LAP",
-        // `⣿ 0x9e8b33`: the scatter's colour chip, then 24 bits.
+        // `● 0x9e8b33`: the hop panel's colour chip, then 24 bits.
         width: 10,
         align: Align::Left,
     },
@@ -71,6 +71,10 @@ const COLUMNS: &[Column] = &[
 
 /// The column the roster is ordered by: the most recently heard first.
 const ORDERED_BY: usize = 1;
+
+/// The colour chip a piconet wears here and on the hop panel: solid, so the
+/// colour carries in any font (a braille block drew as faint dots).
+pub(crate) const CHIP: char = '\u{25cf}';
 
 /// Rows the table keeps before the detail block may take any.
 const TABLE_KEEPS: usize = 3;
@@ -121,7 +125,7 @@ fn uap_sentence(uaps: Option<&Vec<u8>>) -> String {
 fn cells(p: &Piconet, state: &SdrMetrics, now: std::time::Instant) -> Vec<String> {
     let since = |t: std::time::Instant| ago(now.saturating_duration_since(t).as_secs());
     vec![
-        format!("\u{28ff} {:#08x}", p.lap),
+        format!("{CHIP} {:#08x}", p.lap),
         since(p.last_seen),
         p.hits.to_string(),
         p.channels_hit().to_string(),
@@ -294,7 +298,10 @@ impl Panel for NetBtPiconetsPanel {
             },
             theme,
         )];
-        let body = height.saturating_sub(1 + extra.len());
+        // The rows the roster has, up to what the block leaves: the block
+        // follows the last row rather than the foot of the panel, so a short
+        // roster does not hold its detail a screen away from it.
+        let body = height.saturating_sub(1 + extra.len()).min(roster.len());
         let start = viewport_start(
             state.net.bt_view.first_visible,
             cursor.unwrap_or(0),
@@ -319,11 +326,11 @@ impl Panel for NetBtPiconetsPanel {
                 .map(|k| theme.series_color(k));
             if let (Some(colour), Some(cell)) = (colour, line.spans.get(1).cloned()) {
                 let text = cell.content.to_string();
-                if let Some(rest) = text.strip_prefix('\u{28ff}') {
+                if let Some(rest) = text.strip_prefix(CHIP) {
                     line.spans.splice(
                         1..2,
                         [
-                            Span::styled("\u{28ff}", cell.style.fg(colour)),
+                            Span::styled(CHIP.to_string(), cell.style.fg(colour)),
                             Span::styled(rest.to_string(), cell.style),
                         ],
                     );
@@ -331,12 +338,9 @@ impl Panel for NetBtPiconetsPanel {
             }
             lines.push(line);
         }
-        // The block sits at the foot, under whatever rows are left.
-        let used = lines.len() + extra.len();
-        lines.extend(std::iter::repeat_n(
-            Line::from(""),
-            height.saturating_sub(used),
-        ));
+        if !extra.is_empty() && lines.len() + extra.len() < height {
+            lines.push(Line::from(""));
+        }
         lines.extend(extra);
         f.render_widget(Paragraph::new(lines), inner);
     }
@@ -434,6 +438,18 @@ mod tests {
             "{out}"
         );
         assert!(!out.contains("0x09"), "no list: {out}");
+    }
+
+    /// The detail follows the last row, not the foot of the panel: a short
+    /// roster keeps its detail beside it.
+    #[test]
+    fn the_detail_follows_the_roster_rather_than_the_foot() {
+        let mut m = heard();
+        m.net.bt_view.selected = Some(0x9e8b33);
+        let out = draw(NetBtPiconetsPanel, 60, 30, &m);
+        let block = out.iter().position(|l| l.contains("PICONET")).unwrap();
+        // The frame, the header, two rows, a gap.
+        assert_eq!(block, 5, "{}", out.join("\n"));
     }
 
     #[test]

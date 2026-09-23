@@ -58,6 +58,7 @@ use ratatui::{
 
 use crate::state::SdrMetrics;
 use crate::ui::panel::{FeedSpan, Panel, PanelChrome, Staleness, Tag};
+use crate::ui::panels::net::bt::bt_piconets::CHIP;
 use crate::ui::widgets::timing_fmt::seconds_ms;
 
 pub struct NetBtHopsPanel;
@@ -70,6 +71,9 @@ const SCALE: usize = 4;
 const LANE_LEAD: usize = 12;
 /// A lane's right part: its hits in the window.
 const LANE_TAIL: usize = 6;
+/// The tallest the bars grow. Taller only magnified a count of one or two
+/// into half a panel of block; the rows it leaves go between the zones.
+const MAX_BAR_ROWS: usize = 8;
 /// Vertical eighths, empty to full.
 const EIGHTHS: [char; 9] = [' ', '▁', '▂', '▃', '▄', '▅', '▆', '▇', '█'];
 
@@ -85,19 +89,30 @@ fn colour_index(state: &SdrMetrics) -> HashMap<u32, usize> {
         .collect()
 }
 
-/// Channels per bar column at `cols` columns: one where 79 fit, more where
-/// they do not, so no channel is dropped.
-fn per_column(cols: usize) -> usize {
-    CHANNELS.div_ceil(cols.max(1))
+/// The channels bar column `c` of `cols` covers: one each where 79 fit,
+/// otherwise ranges in proportion, one or two channels wide, so the bars
+/// fill the width and no channel is dropped. (Whole multiples first halved
+/// the zone on a panel a few columns short of 79.)
+fn channels_of(c: usize, cols: usize) -> std::ops::Range<usize> {
+    let cols = cols.clamp(1, CHANNELS);
+    c * CHANNELS / cols..(c + 1) * CHANNELS / cols
+}
+
+/// The column channel `ch` falls in.
+fn column_of(ch: usize, cols: usize) -> usize {
+    let cols = cols.clamp(1, CHANNELS);
+    (0..cols)
+        .find(|&c| channels_of(c, cols).contains(&ch))
+        .unwrap_or(cols - 1)
 }
 
 /// The channel axis under the bars: every tenth channel labelled where the
 /// label fits without touching the one before, and 78 at the end.
-fn channel_axis(k: usize, cols: usize) -> String {
+fn channel_axis(cols: usize) -> String {
     let mut axis = vec![' '; cols];
     let mut free = 0;
     for ch in (0..CHANNELS).step_by(10).chain([CHANNELS - 1]) {
-        let at = ch / k;
+        let at = column_of(ch, cols);
         let text = ch.to_string();
         let at = at.min(cols.saturating_sub(text.len()));
         if at < free || at + text.len() > cols {
@@ -220,7 +235,15 @@ impl Panel for NetBtHopsPanel {
         let lane_rows = lanes + (more > 0) as usize;
         let spare = height - fixed - lane_rows;
         let watched_line = spare >= 4;
-        let bar_rows = spare - watched_line as usize;
+        let bar_rows = (spare - watched_line as usize).min(MAX_BAR_ROWS);
+        let leftover = spare - watched_line as usize - bar_rows;
+        // Past the row that parts the zones, the lanes grow taller, up to
+        // three rows: a tick three rows high reads across the room.
+        let lane_h = 1 + leftover
+            .saturating_sub(1)
+            .checked_div(lanes)
+            .unwrap_or(0)
+            .min(2);
 
         let mut lines = Vec::with_capacity(height);
         lines.push(crate::ui::chrome::section(
@@ -245,6 +268,11 @@ impl Panel for NetBtHopsPanel {
             ]));
         }
 
+        // What the capped bars leave: one row to part the zones, the rest
+        // under the lanes.
+        if leftover > 0 {
+            lines.push(Line::from(""));
+        }
         let view = state.net.hop_view;
         lines.push(crate::ui::chrome::section(
             "when",
@@ -281,26 +309,42 @@ impl Panel for NetBtHopsPanel {
                 (_, true) => Style::default().fg(theme.label),
                 _ => Style::default().fg(theme.value),
             };
-            let mut spans = vec![
-                crate::ui::chrome::selection_gutter(is, theme),
-                Span::styled("\u{28ff} ", Style::default().fg(ink)),
-                Span::styled(format!("{:#08x} ", p.lap), name_style),
-            ];
-            for (k, &t) in ticks.iter().enumerate() {
-                spans.push(match t {
-                    0 => Span::styled(
-                        if k % 10 == 0 { "\u{250a}" } else { "\u{00b7}" },
-                        Style::default().fg(theme.stale),
-                    ),
-                    1 => Span::styled("\u{2503}", tick_style),
-                    _ => Span::styled("\u{2588}", tick_style),
-                });
+            // The rows above the last carry the ticks only; the last carries
+            // the name, the dotted guide and the count, so a lane reads as a
+            // trace on its baseline.
+            for row in 0..lane_h {
+                let base = row + 1 == lane_h;
+                let mut spans = if base {
+                    vec![
+                        crate::ui::chrome::selection_gutter(is, theme),
+                        Span::styled(format!("{CHIP} "), Style::default().fg(ink)),
+                        Span::styled(format!("{:#08x} ", p.lap), name_style),
+                    ]
+                } else {
+                    vec![
+                        crate::ui::chrome::selection_gutter(is, theme),
+                        Span::raw(" ".repeat(LANE_LEAD - 1)),
+                    ]
+                };
+                for (k, &t) in ticks.iter().enumerate() {
+                    spans.push(match (t, base) {
+                        (0, true) => Span::styled(
+                            if k % 10 == 0 { "\u{250a}" } else { "\u{00b7}" },
+                            Style::default().fg(theme.stale),
+                        ),
+                        (0, false) => Span::raw(" "),
+                        (1, _) => Span::styled("\u{2503}", tick_style),
+                        _ => Span::styled("\u{2588}", tick_style),
+                    });
+                }
+                if base {
+                    spans.push(Span::styled(
+                        format!("{n:>LANE_TAIL$}"),
+                        Style::default().fg(theme.label),
+                    ));
+                }
+                lines.push(Line::from(spans));
             }
-            spans.push(Span::styled(
-                format!("{n:>LANE_TAIL$}"),
-                Style::default().fg(theme.label),
-            ));
-            lines.push(Line::from(spans));
         }
         if more > 0 {
             lines.push(Line::from(Span::styled(
@@ -349,19 +393,22 @@ fn where_zone(
     rows: usize,
     theme: &crate::Theme,
 ) -> Vec<Line<'static>> {
-    let cols_avail = width.saturating_sub(SCALE);
-    let k = per_column(cols_avail);
-    let cols = CHANNELS.div_ceil(k);
+    let cols = width.saturating_sub(SCALE).clamp(1, CHANNELS);
 
-    // Per column: all hits, the selected piconet's, and the piconet heard
-    // most there.
+    // Per column: all hits, the selected piconet's, the piconet heard most
+    // there, and the one heard most among the others (whose colour the
+    // faint part wears when one is selected).
     let mut total = vec![0u64; cols];
     let mut mine = vec![0u64; cols];
     let mut lead: Vec<Option<(u64, usize)>> = vec![None; cols];
+    let mut lead_other: Vec<Option<(u64, usize)>> = vec![None; cols];
     for p in &state.net.bt_piconets {
         let idx = colours.get(&p.lap).copied().unwrap_or(0);
-        for (c, chunk) in p.per_channel.chunks(k).enumerate() {
-            let n: u64 = chunk.iter().map(|&n| n as u64).sum();
+        for c in 0..cols {
+            let n: u64 = p.per_channel[channels_of(c, cols)]
+                .iter()
+                .map(|&n| n as u64)
+                .sum();
             if n == 0 {
                 continue;
             }
@@ -370,8 +417,13 @@ fn where_zone(
                 mine[c] += n;
             }
             // Most hits wins; a tie goes to the one heard first.
-            if lead[c].is_none_or(|(m, i)| n > m || (n == m && idx < i)) {
+            let wins =
+                |l: Option<(u64, usize)>| l.is_none_or(|(m, i)| n > m || (n == m && idx < i));
+            if wins(lead[c]) {
                 lead[c] = Some((n, idx));
+            }
+            if Some(p.lap) != selected && wins(lead_other[c]) {
+                lead_other[c] = Some((n, idx));
             }
         }
     }
@@ -408,10 +460,14 @@ fn where_zone(
             spans.push(if own > 0 {
                 Span::styled(EIGHTHS[own].to_string(), ink)
             } else if rest > 0 {
-                // The others' hits above the selected piconet's, faint.
+                // The others' hits above the selected piconet's, receded in
+                // the colour of the one heard most among them, so a faint
+                // bar still says whose it is.
                 Span::styled(
                     EIGHTHS[rest].to_string(),
-                    Style::default().fg(theme.receded(theme.label)),
+                    Style::default().fg(theme.receded(
+                        lead_other[c].map_or(theme.label, |(_, i)| theme.series_color(i)),
+                    )),
                 )
             } else {
                 Span::raw(" ")
@@ -423,7 +479,7 @@ fn where_zone(
     let watched = &state.net.bt_channels_watched;
     let mut under = vec![Span::raw(" ".repeat(SCALE))];
     for c in 0..cols {
-        let chans = c * k..((c + 1) * k).min(CHANNELS);
+        let chans = channels_of(c, cols);
         under.push(if watched.iter().any(|&w| chans.contains(&(w as usize))) {
             Span::styled("\u{2594}", Style::default().fg(theme.border_accent))
         } else if chans.clone().any(|ch| ch % 10 == 0) {
@@ -434,7 +490,7 @@ fn where_zone(
     }
     out.push(Line::from(under));
     out.push(Line::from(Span::styled(
-        format!("{}{}", " ".repeat(SCALE), channel_axis(k, cols)),
+        format!("{}{}", " ".repeat(SCALE), channel_axis(cols)),
         Style::default().fg(theme.label),
     )));
     out
@@ -457,7 +513,7 @@ mod tests {
 
     fn lane<'a>(out: &'a [String], lap: &str) -> &'a String {
         out.iter()
-            .find(|l| l.contains(lap) && l.contains('\u{28ff}'))
+            .find(|l| l.contains(lap) && l.contains(CHIP))
             .unwrap_or_else(|| panic!("no lane for {lap}:\n{}", out.join("\n")))
     }
 
@@ -501,7 +557,7 @@ mod tests {
         let out = draw(NetBtHopsPanel, 85, 16, &m);
         let bar = out
             .iter()
-            .find(|l| l.contains('\u{2588}') && !l.contains('\u{28ff}'))
+            .find(|l| l.contains('\u{2588}') && !l.contains(CHIP))
             .expect("a bar");
         let col = |line: &str, c: char| line.chars().position(|x| x == c);
         // Border, then the scale, then channel 0.
@@ -585,6 +641,54 @@ mod tests {
         assert_eq!(buf.get(0, y).symbol(), "\u{258c}", "the lane is marked");
     }
 
+    /// **A count of one is not half a panel.** On a tall panel the bars
+    /// stop at [`MAX_BAR_ROWS`], and with one piconet selected another's
+    /// faint bar wears its own colour, receded, so it still says whose it is.
+    #[test]
+    fn bars_are_capped_and_a_faint_bar_keeps_its_owners_colour() {
+        use ratatui::{backend::TestBackend, Terminal};
+        let mut m = SdrMetrics::fixture().streaming();
+        m.net.bt_channels_watched = vec![10];
+        hit(&mut m, 0xaaaaaa, 10, 0);
+        hit(&mut m, 0xbbbbbb, 20, 0);
+        let out = draw(NetBtHopsPanel, 90, 40, &m);
+        let bar_rows = out
+            .iter()
+            .filter(|l| l.contains('\u{2588}') && !l.contains(CHIP))
+            .count();
+        assert_eq!(bar_rows, MAX_BAR_ROWS, "{}", out.join("\n"));
+
+        m.net.bt_view.selected = Some(0xbbbbbb);
+        let theme = crate::Theme::sdr();
+        let mut t = Terminal::new(TestBackend::new(90, 20)).unwrap();
+        t.draw(|f| NetBtHopsPanel.render(f, f.size(), &m, &theme, false))
+            .unwrap();
+        let buf = t.backend().buffer().clone();
+        // Column of channel 10: the scale, then channel 0.
+        let x = (SCALE + 10) as u16;
+        let y = (0..20)
+            .find(|&y| buf.get(x, y).symbol() == "\u{2588}")
+            .expect("channel 10's bar");
+        assert_eq!(buf.get(x, y).fg, theme.receded(theme.series_color(0)));
+    }
+
+    /// **The room the capped bars leave goes to the lanes**: on a tall panel
+    /// a hit is a tick three rows high, its lane's name on the baseline.
+    #[test]
+    fn a_tall_panel_gives_the_lanes_three_rows() {
+        let mut m = SdrMetrics::fixture().streaming();
+        m.net.bt_channels_watched = vec![10];
+        hit(&mut m, 0xaaaaaa, 10, 1_000);
+        hit(&mut m, 0xbbbbbb, 20, 2_000);
+        let out = draw(NetBtHopsPanel, 90, 40, &m);
+        let base = out.iter().position(|l| l.contains("0xaaaaaa")).unwrap();
+        let col = out[base].chars().position(|c| c == '\u{2503}').unwrap();
+        let tall = (base - 2..=base)
+            .filter(|&y| out[y].chars().nth(col) == Some('\u{2503}'))
+            .count();
+        assert_eq!(tall, 3, "{}", out.join("\n"));
+    }
+
     /// With the capped list full and the window reaching before its oldest
     /// hit, the axis says the rest is not kept rather than letting the lanes
     /// read as quiet.
@@ -619,11 +723,30 @@ mod tests {
 
     #[test]
     fn the_channel_axis_labels_what_fits() {
-        assert!(channel_axis(1, 79).starts_with("0         10        20"));
-        assert!(channel_axis(1, 79).ends_with("78"));
-        let narrow = channel_axis(2, 40);
+        assert!(channel_axis(79).starts_with("0         10        20"));
+        assert!(channel_axis(79).ends_with("78"));
+        let narrow = channel_axis(40);
         assert_eq!(narrow.chars().count(), 40);
         assert!(narrow.starts_with("0    10"), "{narrow}");
+    }
+
+    /// **A panel a few columns short of 79 keeps its width**: every column
+    /// is used, every channel is in exactly one, and none is more than two
+    /// wide.
+    #[test]
+    fn channel_columns_fill_the_width_and_cover_every_channel() {
+        for cols in [20, 40, 76, 78, 79] {
+            let mut seen = [0; CHANNELS];
+            for c in 0..cols {
+                let r = channels_of(c, cols);
+                assert!((1..=4).contains(&r.len()), "{cols}: column {c} is {r:?}");
+                for ch in r {
+                    seen[ch] += 1;
+                }
+            }
+            assert!(seen.iter().all(|&n| n == 1), "{cols}: {seen:?}");
+        }
+        assert!(channels_of(10, 76).len() <= 2);
     }
 
     #[test]
