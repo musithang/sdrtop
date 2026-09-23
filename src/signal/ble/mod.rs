@@ -44,19 +44,36 @@ pub mod sync;
 /// (`h = 2 * deviation / symbol_rate`) held at the same `h = 0.5`, and the
 /// same alternating-preamble rule run for twice as long - not independently
 /// looked up.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
 pub enum Phy {
+    #[default]
     OneM,
-    /// `signal::ble::receive::Receiver` and this whole module's own tests
-    /// support it fully; nothing in `signal::net::worker` yet lets a user
-    /// ask to listen for it - real remaining wiring, not assumed done by
-    /// this variant existing (`worker.rs`'s own `BleReceiver::new` call
-    /// site names this honestly rather than leaving it implicit).
-    #[allow(dead_code)]
+    /// Received end to end by `signal::ble::receive::Receiver`, and
+    /// selectable since net-ux-polish-plan 5.5 (`NetState::ble_phy`). Never
+    /// used on the primary advertising channels, which carry only LE 1M and
+    /// LE Coded; the worker refuses it there rather than listening to
+    /// nothing.
     TwoM,
 }
 
 impl Phy {
+    /// `LE 1M` / `LE 2M`: the specification's names, for the chrome tag and
+    /// the detail view.
+    pub fn label(self) -> &'static str {
+        match self {
+            Phy::OneM => "LE 1M",
+            Phy::TwoM => "LE 2M",
+        }
+    }
+
+    /// The other one, for the key that switches between them.
+    pub fn toggled(self) -> Self {
+        match self {
+            Phy::OneM => Phy::TwoM,
+            Phy::TwoM => Phy::OneM,
+        }
+    }
+
     /// The symbol rate this PHY transmits at - fixed by the PHY itself, not
     /// a free parameter a caller picks.
     pub fn symbol_rate_hz(self) -> f64 {

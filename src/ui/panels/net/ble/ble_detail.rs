@@ -414,10 +414,11 @@ fn header_lines(
         field_line(
             "type",
             format!(
-                "{} \u{00b7} ch {} \u{00b7} {} octets",
+                "{} \u{00b7} ch {} \u{00b7} {} octets \u{00b7} {}",
                 p.pdu_type.label(),
                 p.channel,
-                p.length
+                p.length,
+                p.phy.label()
             ),
             theme,
         ),
@@ -631,6 +632,14 @@ fn modulation_lines(p: &BlePacket, iw: usize, theme: &crate::Theme) -> Vec<Line<
         );
         return out;
     }
+    if p.phy != crate::signal::ble::Phy::OneM {
+        out.push(Line::from(Span::styled(
+            format!(" not measured on {}", p.phy.label()),
+            Style::default().fg(theme.stale),
+        )));
+        out.push(note("the measurement and its limits are LE 1M's", theme));
+        return out;
+    }
     let Some(q) = p.modulation else {
         out.push(Line::from(Span::styled(
             " not measured".to_string(),
@@ -661,6 +670,7 @@ impl Panel for NetBleDetailPanel {
         PanelChrome::new("Packet Detail")
             .stale_when(Staleness::NotStreaming)
             .tag_if(true, state.net.mode.tag())
+            .tag_if(true, crate::ui::panel::Tag::Phy(state.net.ble_phy))
             .shows_offsets()
             .shows_addresses()
     }
@@ -751,6 +761,7 @@ mod tests {
         drift: Option<crate::signal::ble::measure::Drift>,
     ) -> BlePacket {
         BlePacket {
+            phy: crate::signal::ble::Phy::OneM,
             seq: 0,
             channel: 37,
             pdu_type: PduType::AdvInd,
@@ -1133,5 +1144,23 @@ mod tests {
         let failed = draw(NetBleDetailPanel, 90, 40, &connect_ind(false, false)).join("\n");
         assert!(failed.contains("not read: CRC failed"), "{failed}");
         assert!(!failed.contains("0xAF9AB12C"), "{failed}");
+    }
+
+    /// **The PHY on the frame and on the packet**: the tag says what the
+    /// decoder listens for, the type line what this packet came on, and an
+    /// LE 2M packet's modulation is not measured against LE 1M's limits.
+    #[test]
+    fn the_phy_is_named_and_2m_gets_no_1m_limits() {
+        let mut m = SdrMetrics::fixture().streaming();
+        let mut p = packet(Some(quality(500_000.0)));
+        p.phy = crate::signal::ble::Phy::TwoM;
+        m.net.ble_packets.push_front(p);
+        m.net.ble_phy = crate::signal::ble::Phy::TwoM;
+        let out = draw(NetBleDetailPanel, 80, 30, &m);
+        assert!(out[0].contains("[LE 2M]"), "{}", out[0]);
+        let text = out.join("\n");
+        assert!(text.contains("9 octets \u{00b7} LE 2M"), "{text}");
+        assert!(text.contains("not measured on LE 2M"), "{text}");
+        assert!(!text.contains("Mod index"), "{text}");
     }
 }

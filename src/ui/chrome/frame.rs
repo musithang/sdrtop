@@ -308,6 +308,9 @@ pub fn title_spans(
             Tag::Stride(n) => (format!("\u{00D7}{n}"), theme.label),
             Tag::Filtered => ("FILTERED".to_string(), theme.value_hi),
             Tag::Behind(n) => (format!("+{n} NEW"), theme.label),
+            // Not a warning: both are correct ways to listen, and the tag says
+            // which, in the mode tag's colour.
+            Tag::Phy(phy) => (phy.label().to_string(), theme.value_hi),
             Tag::Scroll(n) => (format!("\u{2191}{n}"), theme.value_hi),
             // Neither is a warning: both are correct ways to gather a number
             // and the tag says which, so they are drawn in the value colour

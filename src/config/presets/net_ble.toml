@@ -3,10 +3,13 @@
 # PDUs, CRC-checked, as they arrive, beside the detail of the one selected
 # (focus the list with v): its header, its physics and its modulation.
 #
-# Needs the radio parked on one of the three fixed advertising frequencies -
-# 2402, 2426 or 2480 MHz - and a sample rate B6's decoder can reach 4 Msps
-# from. Both panels say so when either is not true, rather than showing an
-# empty table that could be mistaken for a quiet room.
+# Needs the radio on a BLE channel - one of the three advertising
+# frequencies, 2402, 2426 or 2480 MHz, for ordinary advertising - and a sample
+# rate the decoder can reach its working rate from. P on the list switches
+# between LE 1M and LE 2M; LE 2M is never sent on the three advertising
+# channels, and the panels say so there. Both panels say when either
+# condition is not met, rather than showing an empty table that could be
+# mistaken for a quiet room.
 
 section = "net"
 slot    = 4

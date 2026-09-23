@@ -380,7 +380,7 @@ impl NetWorker {
             // block rather than the state: see `StreamBlock::centre_hz`.
             let centre_hz = centre_hz as f64;
 
-            let (still_open, span_hz, is_net_bt) = {
+            let (still_open, span_hz, is_net_bt, phy) = {
                 let mut m = self.state.lock().unwrap_or_else(|e| e.into_inner());
                 let h = &mut m.net.health;
                 h.blocks_in = h.blocks_in.saturating_add(1);
@@ -406,6 +406,7 @@ impl NetWorker {
                     m.ui.is_net_section(),
                     span.min(rate_hz),
                     m.ui.active_preset == NET_BT_PRESET,
+                    m.net.ble_phy,
                 )
             };
 
@@ -434,13 +435,28 @@ impl NetWorker {
             // `survey_refused`.
             let channel = crate::signal::ble::channel::channel_of(centre_hz as u64);
             match channel {
+                Some(ch)
+                    if still_open
+                        && phy == crate::signal::ble::Phy::TwoM
+                        && crate::signal::ble::channel::advertising_channel_index(ch).is_some() =>
+                {
+                    // The primary advertising channels carry LE 1M and LE
+                    // Coded only (legacy advertising is always LE 1M, and
+                    // extended advertising's primary channel is 1M or
+                    // Coded), so a 2M decoder here would listen to nothing
+                    // and an empty list would read as a quiet room. Said,
+                    // and not run (net-ux-polish-plan 5.5).
+                    ble = None;
+                    let mut m = self.state.lock().unwrap_or_else(|e| e.into_inner());
+                    m.net.ble_refused = Some(format!(
+                        "LE 2M is not used on the primary advertising channels (ch {ch} is one); \
+                         tune to a data or secondary channel, or switch back to LE 1M"
+                    ));
+                    m.net.ble_channel = None;
+                }
                 Some(ch) if still_open => {
-                    // LE 1M only, for now: B17 gave `Receiver` real,
-                    // tested LE 2M support, but nothing here yet lets a
-                    // user ask this worker to listen for it - that PHY
-                    // selection is real remaining wiring, not assumed
-                    // done by this default.
-                    let phy = crate::signal::ble::Phy::OneM;
+                    // The PHY the user chose (`NetState::ble_phy`): a switch
+                    // rebuilds the receiver, like a retune does.
                     if !ble.as_ref().is_some_and(|r| r.matches(ch, rate_hz, phy)) {
                         ble = match BleReceiver::new(rate_hz, ch, phy) {
                             Ok(r) => {
@@ -495,6 +511,7 @@ impl NetWorker {
                                 let seq = m.net.ble_heard;
                                 m.net.ble_packets.push_front(BlePacket {
                                     seq,
+                                    phy,
                                     channel: ch,
                                     pdu_type: p.pdu_type,
                                     ch_sel: p.ch_sel,
@@ -1009,6 +1026,94 @@ mod tests {
         assert_eq!(m.net.census.devices.len(), 1, "{:?}", m.net.census.devices);
         assert_eq!(m.net.census.devices[0].address, addr);
         assert_eq!(m.net.census.devices[0].packets, 1);
+    }
+
+    /// A synthetic ADV_IND on LE 2M, as raw 8 Msps bytes on data channel
+    /// `ch`: the advertising access address and the channel's own
+    /// whitening, as a secondary advertising channel carries them.
+    fn ble_2m_bytes(ch: u8) -> (Vec<u8>, [u8; 6]) {
+        use crate::signal::ble::detect::{
+            access_address_bits, preamble_bits, ADVERTISING_ACCESS_ADDRESS,
+        };
+        use crate::signal::ble::gfsk::modulate;
+        use crate::signal::ble::pdu::encode;
+        use crate::signal::ble::Phy;
+        use crate::signal::dsp::testkit::{at_snr, Rng};
+        use num_complex::Complex;
+
+        let addr = [0x11u8, 0x22, 0x33, 0x44, 0x55, 0x66];
+        let mut bits: Vec<bool> = (0..16).map(|i| i % 3 == 0).collect();
+        bits.extend(preamble_bits(ADVERTISING_ACCESS_ADDRESS, Phy::TwoM));
+        bits.extend_from_slice(&access_address_bits(ADVERTISING_ACCESS_ADDRESS));
+        bits.extend_from_slice(&encode(
+            ch,
+            0x00,
+            &crate::signal::ble::pdu::air_octets(addr),
+        ));
+        let mut rng = Rng::new(1);
+        bits.extend((0..32).map(|_| rng.next_u64() & 1 == 1));
+        let clean = modulate(&bits, 4, Phy::TwoM.deviation_hz(), 8_000_000.0, 0.5);
+        let noisy = at_snr(&clean, 20.0, &mut Rng::new(2));
+        let geometry = eight_bit();
+        let bytes = noisy
+            .iter()
+            .flat_map(|s: &Complex<f32>| {
+                let re = (s.re * geometry.full_scale).clamp(-127.0, 127.0) as i8;
+                let im = (s.im * geometry.full_scale).clamp(-127.0, 127.0) as i8;
+                [re as u8, im as u8]
+            })
+            .collect();
+        (bytes, addr)
+    }
+
+    /// **LE 2M, run through the worker**: on a data channel a 2M packet is
+    /// decoded, stamped as LE 2M, and carries no modulation reading (its
+    /// measurement and limits are LE 1M's); on an advertising channel the
+    /// decoder does not run at all and says why.
+    #[test]
+    fn le_2m_is_decoded_off_the_advertising_channels_and_refused_on_them() {
+        let data_ch = 10u8;
+        let (bytes, addr) = ble_2m_bytes(data_ch);
+        let mut m = SdrMetrics::fixture().streaming();
+        m.ui.section = crate::signal::net::SECTION.to_string();
+        m.radio.frequency = crate::signal::ble::channel::centre_hz(data_ch).unwrap();
+        m.radio.config_sample_rate = 8_000_000.0;
+        m.radio.bb_filter_hz = 0;
+        m.net.ble_phy = crate::signal::ble::Phy::TwoM;
+        let state = Arc::new(Mutex::new(m));
+        let (tx, rx) = crossbeam_channel::unbounded();
+        tx.send(stamped(&state, 1, false, bytes)).unwrap();
+        drop(tx);
+        NetWorker::new(rx, Arc::clone(&state), eight_bit(), SAFE_BT_CHANNELS).run();
+        {
+            let m = state.lock().unwrap();
+            assert!(m.net.ble_refused.is_none(), "{:?}", m.net.ble_refused);
+            assert_eq!(m.net.ble_packets.len(), 1, "{:?}", m.net.health.ble);
+            let p = &m.net.ble_packets[0];
+            assert_eq!(p.phy, crate::signal::ble::Phy::TwoM);
+            assert_eq!(p.adv_addr, Some(addr));
+            assert!(p.crc_ok);
+            assert!(p.modulation.is_none() && p.drift.is_none());
+        }
+
+        let (bytes, _) = ble_2m_bytes(37);
+        {
+            let mut m = state.lock().unwrap();
+            m.radio.frequency = crate::signal::ble::channel::centre_hz(37).unwrap();
+            m.net.ble_packets.clear();
+        }
+        let (tx, rx) = crossbeam_channel::unbounded();
+        tx.send(stamped(&state, 1, false, bytes)).unwrap();
+        drop(tx);
+        NetWorker::new(rx, Arc::clone(&state), eight_bit(), SAFE_BT_CHANNELS).run();
+        let m = state.lock().unwrap();
+        let why = m.net.ble_refused.clone().unwrap_or_default();
+        assert!(
+            why.contains("LE 2M is not used on the primary advertising channels"),
+            "{why}"
+        );
+        assert!(m.net.ble_packets.is_empty());
+        assert_eq!(m.net.ble_channel, None);
     }
 
     /// The same synthetic ADV_IND the test above sends, as raw 4 Msps

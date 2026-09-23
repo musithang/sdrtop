@@ -460,6 +460,7 @@ mod tests {
 
     fn packet(channel: u8, crc_ok: bool, seen: std::time::Instant) -> crate::state::BlePacket {
         crate::state::BlePacket {
+            phy: crate::signal::ble::Phy::OneM,
             seq: 0,
             channel,
             pdu_type: crate::signal::ble::pdu::PduType::AdvInd,

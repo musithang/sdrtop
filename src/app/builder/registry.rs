@@ -565,6 +565,7 @@ mod tests {
         m.net.address_book.number([1, 2, 3, 4, 5, 6]);
         m.net.ble_channel = Some(37);
         m.net.ble_packets.push_front(BlePacket {
+            phy: crate::signal::ble::Phy::OneM,
             seq: 0,
             channel: 37,
             pdu_type: crate::signal::ble::pdu::PduType::AdvInd,

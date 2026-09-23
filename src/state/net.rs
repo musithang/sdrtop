@@ -349,6 +349,9 @@ pub struct NetState {
     pub ble_heard: u64,
     /// How the packet list is being read: which packet the cursor is on.
     pub ble_view: BlePacketView,
+    /// The PHY the BLE decoder listens for (net-ux-polish-plan 5.5): LE 1M
+    /// unless the user switched, `P` on the packet list.
+    pub ble_phy: crate::signal::ble::Phy,
     /// Why nothing is being decoded, when the radio can otherwise stream.
     ///
     /// B6's decoder needs the working rate `signal::ble::receive::front_end`
@@ -689,6 +692,9 @@ pub struct BlePacket {
     pub seq: u64,
     pub channel: u8,
     pub pdu_type: crate::signal::ble::pdu::PduType,
+    /// The PHY it was received on: the packet's own, not whatever the
+    /// decoder is set to now, since the list outlives a switch.
+    pub phy: crate::signal::ble::Phy,
     /// ChSel, where the type defines it (`pdu::Packet::ch_sel`).
     pub ch_sel: bool,
     pub tx_add_random: bool,

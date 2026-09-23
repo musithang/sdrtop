@@ -212,7 +212,9 @@ pub(super) fn net_census(key: KeyEvent, ctx: &mut InputCtx<'_>) -> KeyAction {
 /// The BLE packet list: the arrows move the cursor through the packets in the
 /// order the panel draws them (`NetState::ble_shown`), newest first; `Enter`
 /// narrows the list to the selected packet's address and back; `h` holds the
-/// list and lets it run again. Anything else goes on to the global keys.
+/// list and lets it run again; `p` switches the PHY (it shadows the next
+/// layout only while the list is focused, as the census shadows `s` and
+/// `r`). Anything else goes on to the global keys.
 pub(super) fn net_ble_packets(key: KeyEvent, ctx: &mut InputCtx<'_>) -> KeyAction {
     let mut m = metrics(ctx.state);
     let order: Vec<u64> = m.net.ble_shown().iter().map(|p| p.seq).collect();
@@ -220,6 +222,14 @@ pub(super) fn net_ble_packets(key: KeyEvent, ctx: &mut InputCtx<'_>) -> KeyActio
         KeyCode::Up => m.net.ble_view.selection.move_by(&order, -1),
         KeyCode::Down => m.net.ble_view.selection.move_by(&order, 1),
         KeyCode::Enter => filter_to_selected(&mut m),
+        // The PHY: the worker rebuilds its receiver for the other one on the
+        // next block, and refuses LE 2M on an advertising channel, where it
+        // is never sent.
+        KeyCode::Char('p') => {
+            let phy = m.net.ble_phy.toggled();
+            m.net.ble_phy = phy;
+            m.push_log(format!("BLE: listening for {}", phy.label()));
+        }
         // `h` is the spectrum's hold everywhere else; no NET layout shows a
         // spectrum, and holding a list is the same idea.
         KeyCode::Char('h') => {
@@ -528,6 +538,7 @@ mod tests {
             let mut m = metrics(&state);
             m.net.ble_heard = 4;
             m.net.ble_packets.push_front(crate::state::BlePacket {
+                phy: crate::signal::ble::Phy::OneM,
                 seq: 4,
                 ..sample_packet()
             });
@@ -539,11 +550,49 @@ mod tests {
         assert_eq!(metrics(&state).net.ble_shown().len(), 4, "live again");
     }
 
+    /// `p` on the packet list switches the PHY and back, and says so.
+    #[test]
+    fn p_switches_the_phy() {
+        let mut m = SdrMetrics::fixture().streaming();
+        m.net.ble_packets.push_front(crate::state::BlePacket {
+            seq: 1,
+            ..sample_packet()
+        });
+        let state = Arc::new(Mutex::new(m));
+        let mut engine = LayoutEngine::new(
+            crate::config::LayoutConfig::default_config(),
+            PanelRegistry::new(),
+        );
+        let mut show_footer = true;
+        let focus_keys = HashMap::new();
+        let mut ctx = InputCtx {
+            state: &state,
+            device: None,
+            engine: &mut engine,
+            show_footer: &mut show_footer,
+            focus_keys: &focus_keys,
+        };
+        let mut press = |code| {
+            net_ble_packets(KeyEvent::new(code, KeyModifiers::NONE), &mut ctx);
+        };
+        use crate::signal::ble::Phy;
+        press(KeyCode::Char('p'));
+        assert_eq!(metrics(&state).net.ble_phy, Phy::TwoM);
+        assert!(metrics(&state)
+            .ui
+            .log
+            .iter()
+            .any(|l| l.text.contains("LE 2M")));
+        press(KeyCode::Char('p'));
+        assert_eq!(metrics(&state).net.ble_phy, Phy::OneM);
+    }
+
     /// A packet with no advertiser address has nothing to filter by.
     #[test]
     fn filtering_on_a_packet_without_an_address_says_why() {
         let mut m = SdrMetrics::fixture().streaming();
         m.net.ble_packets.push_front(crate::state::BlePacket {
+            phy: crate::signal::ble::Phy::OneM,
             seq: 1,
             adv_addr: None,
             ..sample_packet()
@@ -560,6 +609,7 @@ mod tests {
 
     fn sample_packet() -> crate::state::BlePacket {
         crate::state::BlePacket {
+            phy: crate::signal::ble::Phy::OneM,
             seq: 0,
             channel: 37,
             pdu_type: crate::signal::ble::pdu::PduType::AdvInd,

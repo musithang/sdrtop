@@ -151,6 +151,9 @@ pub enum Tag {
     /// `[+N NEW]` - arrivals a paused list is not showing, so its pause says
     /// what it is costing.
     Behind(u64),
+    /// `[LE 1M]` / `[LE 2M]` - the PHY the BLE decoder is listening for, so
+    /// every row is read against it (net-ux-polish-plan 5.5).
+    Phy(crate::signal::ble::Phy),
     /// `[↑N]` - how far back through the history the view is scrolled. Absent at 0.
     Scroll(usize),
     /// `[SURVEY]` - the numbers on this panel were gathered by sampling the

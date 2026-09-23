@@ -322,6 +322,7 @@ impl Panel for NetBlePacketsPanel {
             ("↑↓", "select a packet"),
             ("Enter", "only this address, or all again"),
             ("H", "hold the list, or let it run"),
+            ("P", "listen for LE 1M or LE 2M"),
         ]
     }
 
@@ -329,6 +330,7 @@ impl Panel for NetBlePacketsPanel {
         PanelChrome::new("BLE Ad_vertising")
             .stale_when(Staleness::NotStreaming)
             .tag_if(true, state.net.mode.tag())
+            .tag_if(true, Tag::Phy(state.net.ble_phy))
             // The per-channel packet counts run for the session; a dropped
             // block is packets this feed never saw.
             .counts_from_feed(FeedSpan::Session)
@@ -445,6 +447,7 @@ mod tests {
 
     fn packet(channel: u8, crc_ok: bool) -> BlePacket {
         BlePacket {
+            phy: crate::signal::ble::Phy::OneM,
             seq: 0,
             channel,
             pdu_type: PduType::AdvInd,
