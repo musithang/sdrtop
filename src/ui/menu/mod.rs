@@ -50,12 +50,16 @@ const TWO_COLUMN_MIN: u16 = 50;
 /// rule.
 const LEFT_WIDTH: u16 = 16;
 
+/// `controls` are the focus keys of the section the cursor is on
+/// (`ui::LayoutEngine::section_controls`), for the Keys pane and the views'
+/// heading.
 pub fn render(
     f: &mut Frame,
     area: Rect,
     m: &SdrMetrics,
     menu: &Menu,
     state: &MenuState,
+    controls: &[keys::Control],
     theme: &crate::Theme,
 ) {
     let block = chrome::deck_block(theme.border_accent).title(Line::from(chrome::nameplate(
@@ -108,9 +112,9 @@ pub fn render(
             .split(rows[1]);
         let row = sections::selected_row(menu, si, state.pane);
         sections::render(f, cols[0], menu, row, theme);
-        right_pane(f, cols[1], m, menu, si, ei, state, false, theme);
+        right_pane(f, cols[1], m, menu, si, ei, state, controls, false, theme);
     } else {
-        right_pane(f, rows[1], m, menu, si, ei, state, true, theme);
+        right_pane(f, rows[1], m, menu, si, ei, state, controls, true, theme);
     }
 }
 
@@ -131,6 +135,7 @@ fn right_pane(
     section: usize,
     cursor: usize,
     state: &MenuState,
+    controls: &[keys::Control],
     folded: bool,
     theme: &crate::Theme,
 ) {
@@ -152,12 +157,14 @@ fn right_pane(
             MenuPane::Views => {
                 let s = &menu.sections[section];
                 let n = s.entries.len();
-                let mut line = chrome::section(
-                    &s.title,
-                    &format!("{n} view{}", if n == 1 { "" } else { "s" }),
-                    heading.width as usize,
-                    theme,
-                );
+                // The section's focus keys beside its count: a letter
+                // belongs to its section, which is why keys never collide.
+                let keys: String = controls.iter().map(|c| format!(" {}", c.key)).collect();
+                let mut hint = format!("{n} view{}", if n == 1 { "" } else { "s" });
+                if !keys.is_empty() {
+                    hint.push_str(&format!(" \u{00b7} focus keys{keys}"));
+                }
+                let mut line = chrome::section(&s.title, &hint, heading.width as usize, theme);
                 // The section's name in the section's colour.
                 if let Some(name) = line.spans.get_mut(1) {
                     name.style = name.style.fg(accent);
@@ -174,7 +181,15 @@ fn right_pane(
         MenuPane::Views => {
             entries::render(f, body, m, &menu.sections[section], cursor, accent, theme)
         }
-        MenuPane::Keys => keys::render(f, body, &m.caps, state.scroll, theme),
+        MenuPane::Keys => keys::render(
+            f,
+            body,
+            &m.caps,
+            &menu.sections[section].title,
+            controls,
+            state.scroll,
+            theme,
+        ),
         MenuPane::Options => options::render(f, body, m, state.scroll, theme),
     }
 }
@@ -273,7 +288,17 @@ mod tests {
         let theme = crate::Theme::sdr();
         let mut terminal = Terminal::new(TestBackend::new(w, h)).unwrap();
         terminal
-            .draw(|f| render(f, f.size(), metrics, &menu, state, &theme))
+            .draw(|f| {
+                render(
+                    f,
+                    f.size(),
+                    metrics,
+                    &menu,
+                    state,
+                    &controls_for(state.section, metrics),
+                    &theme,
+                )
+            })
             .unwrap();
         let buf = terminal.backend().buffer().clone();
         (0..h)
@@ -285,6 +310,18 @@ mod tests {
                     .to_string()
             })
             .collect()
+    }
+
+    /// The section's controls as the app computes them: from a deck built
+    /// the way the app builds it, panels and all.
+    fn controls_for(section: usize, m: &SdrMetrics) -> Vec<keys::Control> {
+        let (engine, _) = crate::app::App::build_ui(
+            "command_rail",
+            &std::collections::HashMap::new(),
+            None,
+            true,
+        );
+        engine.section_controls(section, m)
     }
 
     fn at(section: usize, entry: usize) -> MenuState {
@@ -415,6 +452,80 @@ mod tests {
         }
     }
 
+    /// **Keys, scoped** (7.3): opened from NET, the Keys pane lists every
+    /// NET panel's focus key and bindings first, generated from the panels,
+    /// then the global keys; the views' heading names the same letters.
+    #[test]
+    fn keys_from_a_section_list_its_panels_controls_first() {
+        let menu = model::build(&LayoutConfig::default_config().presets);
+        let net = menu.sections.iter().position(|s| s.id == "net").unwrap();
+        let state = MenuState {
+            section: net,
+            entry: 0,
+            pane: MenuPane::Keys,
+            scroll: 0,
+        };
+        let all = draw(110, 40, &state).join("\n");
+        assert!(all.contains("NET: FOCUS KEYS"), "{all}");
+        for (key, title, what) in [
+            ('v', "BLE Advertising", "select a packet"),
+            ('c', "Piconets", "select a piconet"),
+            ('b', "Classic Bluetooth Hops", "zoom in time"),
+        ] {
+            let row = all
+                .lines()
+                .find(|l| l.contains(title))
+                .unwrap_or_else(|| panic!("{title} missing:\n{all}"));
+            assert!(row.contains(&format!("  {key}  ")), "{row}");
+            assert!(all.contains(what), "{what}:\n{all}");
+        }
+        let block = all.find("NET: FOCUS KEYS").unwrap();
+        let radio = all.find("THE RADIO").unwrap();
+        assert!(block < radio, "the section's block comes first");
+
+        let views = draw(110, 30, &at(net, 0)).join("\n");
+        let heading = views.lines().find(|l| l.contains("5 views")).unwrap();
+        for key in ['v', 'c', 'b', 'u'] {
+            assert!(heading.contains(&format!(" {key}")), "{key}: {heading}");
+        }
+    }
+
+    /// **Every focusable panel a section shows is in its block**: checked
+    /// against the presets and the registry directly, for every section, so
+    /// a new panel cannot be left out of the Keys pane.
+    #[test]
+    fn every_focusable_panel_is_in_its_sections_block() {
+        let (engine, _) = crate::app::App::build_ui(
+            "command_rail",
+            &std::collections::HashMap::new(),
+            None,
+            true,
+        );
+        let m = SdrMetrics::fixture();
+        let presets = &LayoutConfig::default_config().presets;
+        for (si, section) in engine.menu().sections.iter().enumerate() {
+            let controls = engine.section_controls(si, &m);
+            for entry in &section.entries {
+                for spec in &presets[&entry.preset].panels {
+                    let Some(panel) = engine.registered_panels().find(|p| p.name() == spec.name)
+                    else {
+                        continue;
+                    };
+                    if let Some(key) = panel.focus_key() {
+                        assert!(
+                            controls
+                                .iter()
+                                .any(|c| c.key == key && c.bindings == panel.focus_bindings()),
+                            "{} ({key}) missing from {}",
+                            spec.name,
+                            section.title
+                        );
+                    }
+                }
+            }
+        }
+    }
+
     /// The Keys pane is a row in the left column and the content of the right
     /// one, and it replaces an overlay that had drifted out of step with the
     /// dispatch. `keys.rs` owns the check that it cannot drift again.
@@ -460,12 +571,13 @@ mod tests {
                 section: 0,
                 entry: 0,
                 pane: MenuPane::Keys,
-                scroll: 8,
+                scroll: 30,
             },
         )
         .join("\n");
-        assert!(top.contains("start or stop RX"), "{top}");
-        assert!(!down.contains("start or stop RX"), "scrolled away:\n{down}");
+        // The section's own block leads, and scrolls away first.
+        assert!(top.contains("COMMAND RAIL: FOCUS KEYS"), "{top}");
+        assert!(!down.contains("FOCUS KEYS"), "scrolled away:\n{down}");
         assert_ne!(top, down);
     }
 

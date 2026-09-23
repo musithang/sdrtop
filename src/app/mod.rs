@@ -312,7 +312,16 @@ impl App {
                     full
                 };
                 f.render_widget(ratatui::widgets::Clear, area);
-                ui::menu::render(f, area, &m, self.engine.menu(), &menu_state, &frame_theme);
+                let controls = self.engine.section_controls(menu_state.section, &m);
+                ui::menu::render(
+                    f,
+                    area,
+                    &m,
+                    self.engine.menu(),
+                    &menu_state,
+                    &controls,
+                    &frame_theme,
+                );
             }
             if m.ui.device_option_update.quit_requested() {
                 let full = f.size();

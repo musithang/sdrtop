@@ -79,6 +79,44 @@ impl LayoutEngine {
     pub fn menu(&self) -> &menu::model::Menu {
         &self.menu
     }
+
+    /// The focus keys and bindings of every panel the layouts in menu
+    /// section `section` show, in layout order, each panel once
+    /// (net-ux-polish-plan 7.3): what the Keys pane lists for that section,
+    /// read from the registry so it cannot drift from the panels.
+    pub fn section_controls(
+        &self,
+        section: usize,
+        state: &crate::state::SdrMetrics,
+    ) -> Vec<menu::keys::Control> {
+        let Some(s) = self.menu.sections.get(section) else {
+            return Vec::new();
+        };
+        let mut out: Vec<menu::keys::Control> = Vec::new();
+        let mut seen = HashSet::new();
+        for entry in &s.entries {
+            let Some(preset) = self.config.presets.get(&entry.preset) else {
+                continue;
+            };
+            for spec in &preset.panels {
+                let Some(panel) = self.registry.get(&spec.name) else {
+                    continue;
+                };
+                let Some(key) = panel.focus_key() else {
+                    continue;
+                };
+                if !seen.insert(spec.name.clone()) {
+                    continue;
+                }
+                out.push(menu::keys::Control {
+                    key,
+                    title: panel.chrome(state).title.replace('_', ""),
+                    bindings: panel.focus_bindings(),
+                });
+            }
+        }
+        out
+    }
 }
 
 /// Where the deck is, and what a number key means there.

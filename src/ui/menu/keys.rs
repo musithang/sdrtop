@@ -177,6 +177,83 @@ fn lines(model: &GainModel, iw: usize, theme: &crate::Theme) -> Vec<Line<'static
     lines_for(model, false, iw, theme)
 }
 
+/// One panel's controls, as its section's block in the Keys pane lists
+/// them (net-ux-polish-plan 7.3): read from the registry at the moment the
+/// menu is drawn (`ui::LayoutEngine::section_controls`), never typed here,
+/// so a panel that gains a binding shows it without a second list to keep
+/// in step (POLICY rule 7).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Control {
+    pub key: char,
+    /// The panel's title, the focus-key marker taken out.
+    pub title: String,
+    pub bindings: &'static [(&'static str, &'static str)],
+}
+
+/// The column the bindings start in: the key, and the longest title a
+/// section has, within reason.
+const TITLE_W: usize = 24;
+
+/// The selected section's block: its panels' focus keys and what each does
+/// while focused, bindings wrapped under their panel rather than cut.
+fn section_block(
+    title: &str,
+    controls: &[Control],
+    iw: usize,
+    theme: &crate::Theme,
+) -> Vec<Line<'static>> {
+    if controls.is_empty() {
+        return Vec::new();
+    }
+    let key_style = Style::default()
+        .fg(theme.border_accent)
+        .add_modifier(Modifier::BOLD);
+    let mut out = vec![chrome::section(
+        &format!("{title}: focus keys"),
+        "from the panels",
+        iw,
+        theme,
+    )];
+    let lead = 5 + TITLE_W;
+    for c in controls {
+        let what = c
+            .bindings
+            .iter()
+            .map(|(k, w)| format!("{k} {w}"))
+            .collect::<Vec<_>>()
+            .join(" \u{00b7} ");
+        let mut name: String = c.title.chars().take(TITLE_W - 1).collect();
+        if c.title.chars().count() >= TITLE_W {
+            name.pop();
+            name.push('\u{2026}');
+        }
+        let chunks = if iw > lead + 10 {
+            chrome::wrap(&what, iw - lead, 4)
+        } else {
+            Vec::new()
+        };
+        out.push(Line::from(vec![
+            Span::styled(format!("  {}  ", c.key), key_style),
+            Span::styled(
+                format!("{name:<TITLE_W$}"),
+                Style::default().fg(theme.value),
+            ),
+            Span::styled(
+                chunks.first().cloned().unwrap_or_default(),
+                Style::default().fg(theme.label),
+            ),
+        ]));
+        for chunk in chunks.into_iter().skip(1) {
+            out.push(Line::from(vec![
+                Span::raw(" ".repeat(lead)),
+                Span::styled(chunk, Style::default().fg(theme.label)),
+            ]));
+        }
+    }
+    out.push(Line::from(""));
+    out
+}
+
 fn lines_for(
     model: &GainModel,
     sample_rate_is_span: bool,
@@ -226,22 +303,26 @@ fn lines_for(
     out
 }
 
+#[allow(clippy::too_many_arguments)]
 pub fn render(
     f: &mut Frame,
     area: Rect,
     caps: &DeviceCapabilities,
+    section: &str,
+    controls: &[Control],
     scroll: usize,
     theme: &crate::Theme,
 ) {
     if area.width == 0 || area.height == 0 {
         return;
     }
-    let all = lines_for(
+    let mut all = section_block(section, controls, area.width as usize, theme);
+    all.extend(lines_for(
         &caps.gain,
         caps.sample_rate_is_span,
         area.width as usize,
         theme,
-    );
+    ));
     let visible = area.height as usize;
     let first = scroll.min(all.len().saturating_sub(visible));
     let shown: Vec<Line> = all.into_iter().skip(first).take(visible).collect();
@@ -250,14 +331,10 @@ pub fn render(
 
 /// How many rows the reference needs, so the caller can tell whether scrolling
 /// is possible at all.
-pub fn row_count_for(caps: &DeviceCapabilities) -> usize {
-    lines_for(
-        &caps.gain,
-        caps.sample_rate_is_span,
-        40,
-        &crate::Theme::sdr(),
-    )
-    .len()
+pub fn row_count_for(caps: &DeviceCapabilities, controls: &[Control]) -> usize {
+    let theme = crate::Theme::sdr();
+    section_block("", controls, 40, &theme).len()
+        + lines_for(&caps.gain, caps.sample_rate_is_span, 40, &theme).len()
 }
 
 #[cfg(test)]
