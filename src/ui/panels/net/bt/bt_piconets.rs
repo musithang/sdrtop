@@ -58,8 +58,8 @@ const COLUMNS: &[Column] = &[
     },
     Column {
         title: "UAP",
-        // `2 left`.
-        width: 6,
+        // `32 left`: one header leaves 32 (`header::PiconetClock`).
+        width: 7,
         align: Align::Right,
     },
     Column {
@@ -100,13 +100,19 @@ fn uap_cell(uaps: Option<&Vec<u8>>) -> String {
 fn uap_sentence(uaps: Option<&Vec<u8>>) -> String {
     match uaps.map(|u| u.as_slice()) {
         Some([one]) => format!("{one:#04x}"),
-        Some(many) if !many.is_empty() => format!(
+        // Listed while a reader can take them in; a first header leaves 32,
+        // and 32 values are a wall, not a reading.
+        Some(many) if (2..=4).contains(&many.len()) => format!(
             "{} candidates ({}); a header alone does not choose",
             many.len(),
             many.iter()
                 .map(|u| format!("{u:#04x}"))
                 .collect::<Vec<_>>()
                 .join(", ")
+        ),
+        Some(many) if !many.is_empty() => format!(
+            "{} candidates; each further header narrows them",
+            many.len()
         ),
         _ => "not narrowed: no header of it decoded yet".to_string(),
     }
@@ -175,11 +181,12 @@ fn detail(
     for (label, text) in [
         (
             "channels",
+            // Of 79, not of the channels watched now: in SURVEY a piconet
+            // was heard wherever the survey stood at the time.
             format!(
-                "{} of {} watched: {}",
+                "{} of 79: {}",
                 p.channels_hit(),
-                state.net.bt_channels_watched.len(),
-                channel_runs(p.channels)
+                channel_runs(p.channel_mask())
             ),
         ),
         ("UAP", uap_sentence(state.net.bt_uap.get(&p.lap))),
@@ -403,11 +410,30 @@ mod tests {
         m.net.bt_view.selected = Some(0x9e8b33);
         let out = draw(NetBtPiconetsPanel, 60, 16, &m).join("\n");
         assert!(out.contains("PICONET"), "{out}");
-        assert!(out.contains("5 of 20 watched: 2-5, 17"), "{out}");
+        assert!(out.contains("5 of 79: 2-5, 17"), "{out}");
         assert!(out.contains("2 candidates (0x4c, 0x9a)"), "{out}");
 
         let none = draw(NetBtPiconetsPanel, 60, 16, &heard()).join("\n");
         assert!(!none.contains("PICONET"), "{none}");
+    }
+
+    /// **A first header leaves 32 candidates**, seen on the air: the cell
+    /// holds `32 left` whole, and the detail says how many rather than
+    /// listing a wall of values.
+    #[test]
+    fn many_candidates_are_counted_not_listed() {
+        let mut m = heard();
+        m.net
+            .bt_uap
+            .insert(0x9e8b33, (0..32).map(|i| i * 8 + 1).collect());
+        m.net.bt_view.selected = Some(0x9e8b33);
+        let out = draw(NetBtPiconetsPanel, 60, 16, &m).join("\n");
+        assert!(out.contains("32 left"), "{out}");
+        assert!(
+            out.contains("32 candidates; each further header narrows them"),
+            "{out}"
+        );
+        assert!(!out.contains("0x09"), "no list: {out}");
     }
 
     #[test]

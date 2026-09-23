@@ -18,23 +18,30 @@
 //! receiver exists and has heard nothing in the last window" are different
 //! sentences.
 //!
-//! **Piconets told apart (net-ux-polish-plan 6.2).** Each hit is drawn in
-//! its piconet's series colour (`Theme::series`), the colour given in the
-//! order piconets were first heard, so it holds for the session and the
-//! roster's rows wear the same one. With a piconet selected (here or in the
-//! roster: one selection) it is drawn bold and the rest recede toward the
-//! stale ink, so two overlapping hop patterns become one pattern and its
-//! background. The grid is braille, two dots across and four down a cell,
-//! and a hit fills its channel's whole band of dots, so twenty channels
-//! keep twenty rows of their own on a ten-row panel and a single hit is
-//! still visible at a glance. Where two piconets share a cell the selected
-//! one owns its colour, then the one heard first.
+//! **Two questions, two zones (net-ux-polish-plan 6.2).** The first
+//! version was a time-by-channel scatter, and on the air it showed almost
+//! nothing: in SURVEY the rows were only the channels watched *now*, so hits
+//! heard at an earlier survey position fell off the plot, and a live room
+//! gave a few hits a minute, which a scatter built for 1600 hops a second
+//! draws as a flicker. So the panel asks the two questions separately:
 //!
-//! **Zoomed and scrubbed through `state::HopView`**, from half a second to a
-//! minute, and back through what is kept; the chrome's `TimeWindow` tag says
-//! which stretch of the past is on screen. The list of hits is capped
-//! (`BT_HOP_LIMIT`), so a window reaching back before the oldest kept hit
-//! says "older hits not kept" rather than drawing that part as a quiet band.
+//! - **WHERE**: all 79 channels, bars of the session's hits on each, so a
+//!   piconet heard anywhere in the survey keeps its place. Each bar wears the
+//!   colour of the piconet heard most on it; with one selected, its own hits
+//!   are the coloured part and the rest stand faint above them. The channels
+//!   watched now are underlined, so the reader sees where the radio is
+//!   listening and where it is not.
+//! - **WHEN**: one lane per piconet, the roster's order and colours, each hit
+//!   a tick at its time in the window, like a logic analyser's traces. A few
+//!   hits a minute read as a few ticks, and a busy piconet as a dense lane.
+//!
+//! Each piconet's colour is `Theme::series` at its place in `bt_piconets`, the
+//! order first heard, so it holds for the session and the roster's rows wear
+//! the same one; one selection (`bt_view`) drives both panels. The window is
+//! zoomed and scrubbed through `state::HopView`, and the chrome's
+//! `TimeWindow` tag says which stretch of the past the lanes show. The list
+//! of hits is capped (`BT_HOP_LIMIT`), so a window reaching back before the
+//! oldest kept hit says "older hits not kept" rather than drawing quiet lanes.
 //!
 //! The UAP each piconet has narrowed to is the roster's to show
 //! (`net_bt_piconets`), one place for it (rule 6).
@@ -55,24 +62,16 @@ use crate::ui::widgets::timing_fmt::seconds_ms;
 
 pub struct NetBtHopsPanel;
 
-/// Columns reserved on the left for the channel-number scale, and the space
-/// after it.
-const SCALE_COLS: usize = 3;
-/// Rows under the grid: the time axis and the legend.
-const FOOT_ROWS: usize = 2;
-
-/// Braille dot bits by `[row][column]` inside one cell (U+2800 block).
-const DOT: [[u8; 2]; 4] = [[0x01, 0x08], [0x02, 0x10], [0x04, 0x20], [0x40, 0x80]];
-
-/// The band of dot rows, counted from the bottom, that channel `idx` of `n`
-/// watched ones fills across `dots` dot rows: at least one row each, the
-/// lowest channel at the bottom the way frequency runs up any plot.
-fn band(idx: usize, n: usize, dots: usize) -> std::ops::Range<usize> {
-    let n = n.max(1);
-    let lo = idx * dots / n;
-    let hi = ((idx + 1) * dots / n).max(lo + 1).min(dots.max(1));
-    lo..hi
-}
+/// Classic Bluetooth channels, 0 to 78.
+const CHANNELS: usize = 79;
+/// The bars' left gutter: the count scale.
+const SCALE: usize = 4;
+/// A lane's left part: gutter, chip, space, LAP, space.
+const LANE_LEAD: usize = 12;
+/// A lane's right part: its hits in the window.
+const LANE_TAIL: usize = 6;
+/// Vertical eighths, empty to full.
+const EIGHTHS: [char; 9] = [' ', '▁', '▂', '▃', '▄', '▅', '▆', '▇', '█'];
 
 /// Which colour index each LAP wears: its place in the roster, which is the
 /// order piconets were first heard.
@@ -86,13 +85,30 @@ fn colour_index(state: &SdrMetrics) -> HashMap<u32, usize> {
         .collect()
 }
 
-/// One grid cell: its dots, and which piconet's colour it takes.
-#[derive(Clone, Copy, Default)]
-struct Cell {
-    dots: u8,
-    /// `(rank, lap)`, lowest rank wins: the selected piconet first, then by
-    /// colour index.
-    owner: Option<(usize, u32)>,
+/// Channels per bar column at `cols` columns: one where 79 fit, more where
+/// they do not, so no channel is dropped.
+fn per_column(cols: usize) -> usize {
+    CHANNELS.div_ceil(cols.max(1))
+}
+
+/// The channel axis under the bars: every tenth channel labelled where the
+/// label fits without touching the one before, and 78 at the end.
+fn channel_axis(k: usize, cols: usize) -> String {
+    let mut axis = vec![' '; cols];
+    let mut free = 0;
+    for ch in (0..CHANNELS).step_by(10).chain([CHANNELS - 1]) {
+        let at = ch / k;
+        let text = ch.to_string();
+        let at = at.min(cols.saturating_sub(text.len()));
+        if at < free || at + text.len() > cols {
+            continue;
+        }
+        for (i, c) in text.chars().enumerate() {
+            axis[at + i] = c;
+        }
+        free = at + text.len() + 1;
+    }
+    axis.into_iter().collect()
 }
 
 impl Panel for NetBtHopsPanel {
@@ -101,7 +117,7 @@ impl Panel for NetBtHopsPanel {
     }
 
     fn min_size(&self) -> (u16, u16) {
-        (30, 6)
+        (40, 10)
     }
 
     fn focus_key(&self) -> Option<char> {
@@ -130,11 +146,9 @@ impl Panel for NetBtHopsPanel {
                     back_ms: v.back_ms,
                 },
             )
-            // A drop inside the stretch on screen is dots that should be
-            // there and are not.
-            .counts_from_feed(FeedSpan::Window(std::time::Duration::from_millis(
-                v.span_ms() + v.back_ms,
-            )))
+            // The bars count the whole session, so a drop at any point in it
+            // undercounts them.
+            .counts_from_feed(FeedSpan::Session)
     }
 
     fn render(
@@ -148,118 +162,154 @@ impl Panel for NetBtHopsPanel {
         if inner.width == 0 || inner.height == 0 {
             return;
         }
-        let width = inner.width as usize;
+        let (width, height) = (inner.width as usize, inner.height as usize);
+        let note = |text: &str, ink| {
+            crate::ui::chrome::wrap(text, width, 4)
+                .into_iter()
+                .map(move |chunk| Line::from(Span::styled(chunk, Style::default().fg(ink))))
+        };
 
         if let Some(reason) = &state.net.bt_refused {
-            let mut lines = vec![Line::from(Span::styled(
-                "not watching".to_string(),
-                Style::default().fg(theme.stale),
-            ))];
-            for chunk in crate::ui::chrome::wrap(reason, width, 4) {
-                lines.push(Line::from(Span::styled(
-                    chunk,
-                    Style::default().fg(theme.label),
-                )));
-            }
+            let mut lines: Vec<Line> = note("not watching", theme.stale).collect();
+            lines.extend(note(reason, theme.label));
             f.render_widget(Paragraph::new(lines), inner);
             return;
         }
-
-        let channels = &state.net.bt_channels_watched;
-        // "Nothing heard yet" and "too small to draw a grid" both fall back
-        // to the same one-line status - the receiver's own state is the
-        // thing worth saying either way, not an empty grid.
-        let rows = (inner.height as usize).saturating_sub(FOOT_ROWS);
-        let cols = width.saturating_sub(SCALE_COLS + 1);
-        if state.net.bt_hops.is_empty() || channels.is_empty() || rows == 0 || cols < 8 {
+        let watched = &state.net.bt_channels_watched;
+        // Nothing heard, or no room for two zones: the receiver's own state
+        // is the thing worth saying either way.
+        if state.net.bt_piconets.is_empty() || height < 8 || width < SCALE + 20 {
+            let text = if watched.is_empty() {
+                "no classic receiver running".to_string()
+            } else {
+                format!("watching {} channels - no access codes yet", watched.len())
+            };
             f.render_widget(
-                Paragraph::new(Line::from(Span::styled(
-                    format!("watching {} channels - no access codes yet", channels.len()),
-                    Style::default().fg(theme.stale),
-                ))),
+                Paragraph::new(note(&text, theme.stale).collect::<Vec<_>>()),
                 inner,
             );
             return;
         }
 
-        let now = std::time::Instant::now();
-        let view = state.net.hop_view;
-        let (span, back) = (view.span_ms() as f64, view.back_ms as f64);
-        let selected = state.net.bt_view.selected;
         let colours = colour_index(state);
-        let rank = |lap: u32| {
-            if Some(lap) == selected {
-                0
-            } else {
-                1 + colours.get(&lap).copied().unwrap_or(usize::MAX - 1)
-            }
+        let selected = state
+            .net
+            .bt_view
+            .selected
+            .filter(|s| colours.contains_key(s));
+        let colour_of = |lap: u32| {
+            colours
+                .get(&lap)
+                .map_or(theme.value_hi, |&i| theme.series_color(i))
         };
 
-        let (dots_x, dots_y) = (cols * 2, rows * 4);
-        let mut grid = vec![vec![Cell::default(); cols]; rows];
-        // Hits in view per LAP, for the legend: what the plot shows.
-        let mut in_view: HashMap<u32, u64> = HashMap::new();
-        for hop in &state.net.bt_hops {
-            let Some(idx) = channels.iter().position(|&c| c == hop.channel) else {
-                continue;
+        // Rows: WHERE heading, bars, underline, axis; WHEN heading, lanes,
+        // axis. The lanes are kept first, the bars take the rest, and the
+        // "watched now" line only where there is room to spare.
+        let roster = crate::signal::bt::piconet::ordered(&state.net.bt_piconets);
+        let fixed = 5;
+        let lane_room = height.saturating_sub(fixed + 2);
+        let (lanes, more) = if roster.len() <= lane_room {
+            (roster.len(), 0)
+        } else {
+            (
+                lane_room.saturating_sub(1),
+                roster.len() - lane_room.saturating_sub(1),
+            )
+        };
+        let lane_rows = lanes + (more > 0) as usize;
+        let spare = height - fixed - lane_rows;
+        let watched_line = spare >= 4;
+        let bar_rows = spare - watched_line as usize;
+
+        let mut lines = Vec::with_capacity(height);
+        lines.push(crate::ui::chrome::section(
+            "where",
+            "hits per channel, session",
+            width,
+            theme,
+        ));
+        lines.extend(where_zone(
+            state, &colours, selected, width, bar_rows, theme,
+        ));
+        if watched_line {
+            let text = match (watched.first(), watched.last()) {
+                (Some(lo), Some(hi)) if lo != hi => format!(" watched now: {lo}-{hi}"),
+                (Some(lo), _) => format!(" watched now: {lo}"),
+                _ => " watching nothing now".to_string(),
             };
-            let age = now.saturating_duration_since(hop.seen).as_secs_f64() * 1e3;
-            if age < back || age >= back + span {
-                continue;
-            }
-            *in_view.entry(hop.lap).or_default() += 1;
-            let x = dots_x - 1 - (((age - back) / span) * dots_x as f64) as usize;
-            for from_bottom in band(idx, channels.len(), dots_y) {
-                let y = dots_y - 1 - from_bottom;
-                let cell = &mut grid[y / 4][x / 2];
-                cell.dots |= DOT[y % 4][x % 2];
-                let claim = (rank(hop.lap), hop.lap);
-                if cell.owner.is_none_or(|o| claim < o) {
-                    cell.owner = Some(claim);
-                }
-            }
+            lines.push(Line::from(vec![
+                Span::raw(" ".repeat(SCALE)),
+                Span::styled("\u{2594}", Style::default().fg(theme.border_accent)),
+                Span::styled(text, Style::default().fg(theme.label)),
+            ]));
         }
 
-        let ink = |lap: u32| {
-            let c = colours
-                .get(&lap)
-                .map_or(theme.value_hi, |&i| theme.series_color(i));
-            match selected {
-                Some(s) if s != lap => Style::default().fg(theme.receded(c)),
-                Some(_) => Style::default().fg(c).add_modifier(Modifier::BOLD),
-                None => Style::default().fg(c),
+        let view = state.net.hop_view;
+        lines.push(crate::ui::chrome::section(
+            "when",
+            &format!("hits in the last {}", seconds_ms(view.span_ms())),
+            width,
+            theme,
+        ));
+        let lane_w = width.saturating_sub(LANE_LEAD + LANE_TAIL).max(1);
+        let now = std::time::Instant::now();
+        let (span, back) = (view.span_ms() as f64, view.back_ms as f64);
+        for p in roster.iter().take(lanes) {
+            let mut ticks = vec![0u32; lane_w];
+            for hop in state.net.bt_hops.iter().filter(|h| h.lap == p.lap) {
+                let age = now.saturating_duration_since(hop.seen).as_secs_f64() * 1e3;
+                if age < back || age >= back + span {
+                    continue;
+                }
+                ticks[lane_w - 1 - (((age - back) / span) * lane_w as f64) as usize] += 1;
             }
-        };
-
-        let mut lines = Vec::with_capacity(rows + FOOT_ROWS);
-        for (r, cells) in grid.iter().enumerate() {
-            // The channel whose band holds this row's lowest dot row.
-            let bottom = dots_y - 1 - (r * 4 + 3);
-            let label = (0..channels.len())
-                .find(|&i| band(i, channels.len(), dots_y).contains(&bottom))
-                .map(|i| channels[i].to_string())
-                .unwrap_or_default();
-            let mut spans = vec![Span::styled(
-                format!("{label:>SCALE_COLS$} "),
-                Style::default().fg(theme.label),
-            )];
-            for cell in cells {
-                spans.push(match cell.owner {
-                    Some((_, lap)) => Span::styled(
-                        char::from_u32(0x2800 + cell.dots as u32)
-                            .unwrap_or(' ')
-                            .to_string(),
-                        ink(lap),
+            let n: u32 = ticks.iter().sum();
+            let is = Some(p.lap) == selected;
+            let recede = selected.is_some() && !is;
+            let c = colour_of(p.lap);
+            let ink = if recede { theme.receded(c) } else { c };
+            let tick_style = if is {
+                Style::default().fg(ink).add_modifier(Modifier::BOLD)
+            } else {
+                Style::default().fg(ink)
+            };
+            let name_style = match (is, recede) {
+                (true, _) => Style::default()
+                    .fg(theme.value_hi)
+                    .add_modifier(Modifier::BOLD),
+                (_, true) => Style::default().fg(theme.label),
+                _ => Style::default().fg(theme.value),
+            };
+            let mut spans = vec![
+                crate::ui::chrome::selection_gutter(is, theme),
+                Span::styled("\u{28ff} ", Style::default().fg(ink)),
+                Span::styled(format!("{:#08x} ", p.lap), name_style),
+            ];
+            for (k, &t) in ticks.iter().enumerate() {
+                spans.push(match t {
+                    0 => Span::styled(
+                        if k % 10 == 0 { "\u{250a}" } else { "\u{00b7}" },
+                        Style::default().fg(theme.stale),
                     ),
-                    None => Span::raw(" "),
+                    1 => Span::styled("\u{2503}", tick_style),
+                    _ => Span::styled("\u{2588}", tick_style),
                 });
             }
+            spans.push(Span::styled(
+                format!("{n:>LANE_TAIL$}"),
+                Style::default().fg(theme.label),
+            ));
             lines.push(Line::from(spans));
         }
+        if more > 0 {
+            lines.push(Line::from(Span::styled(
+                format!(" +{more} more piconets in the roster"),
+                Style::default().fg(theme.label),
+            )));
+        }
 
-        // The time axis: where the window starts and where it ends, and, if
-        // it reaches before the oldest hit the capped list still holds, that
-        // the rest is not kept rather than quiet.
+        // The time axis, and whether the window reaches before what is kept.
         let left = format!("-{}", seconds_ms((back + span) as u64));
         let right = if back == 0.0 {
             "now".to_string()
@@ -273,87 +323,121 @@ impl Panel for NetBtHopsPanel {
             .map(|h| now.saturating_duration_since(h.seen).as_secs_f64() * 1e3);
         let truncated = state.net.bt_hops.len() >= crate::state::BT_HOP_LIMIT
             && oldest_age.is_some_and(|a| a < back + span);
-        let middle = if truncated { "older hits not kept" } else { "" };
-        let gap = cols.saturating_sub(left.chars().count() + right.chars().count());
-        let axis = format!(
-            "{:SCALE_COLS$} {left}{:^gap$}{right}",
-            "",
-            if middle.chars().count() + 2 <= gap {
-                middle
-            } else {
-                ""
-            },
-        );
+        let gap = lane_w.saturating_sub(left.chars().count() + right.chars().count());
+        let middle = if truncated && "older hits not kept".len() + 2 <= gap {
+            "older hits not kept"
+        } else {
+            ""
+        };
+        let axis = format!("{:LANE_LEAD$}{left}{middle:^gap$}{right}", "");
         lines.push(Line::from(Span::styled(
             axis.chars().take(width).collect::<String>(),
             Style::default().fg(theme.label),
         )));
 
-        lines.push(legend(&in_view, &colours, selected, width, theme));
         f.render_widget(Paragraph::new(lines), inner);
     }
 }
 
-/// `in view  ⣿ 0x9e8b33 145  ⣿ 0x123456 88`: each piconet on screen in its
-/// colour, with its hits in the window, in colour order; what does not fit
-/// is counted, and colours shared by two piconets in view are said.
-fn legend(
-    in_view: &HashMap<u32, u64>,
+/// The WHERE zone: `rows` of bars, the underline of channels watched now,
+/// and the channel axis.
+fn where_zone(
+    state: &SdrMetrics,
     colours: &HashMap<u32, usize>,
     selected: Option<u32>,
     width: usize,
+    rows: usize,
     theme: &crate::Theme,
-) -> Line<'static> {
-    let mut shown: Vec<(usize, u32, u64)> = in_view
-        .iter()
-        .map(|(&lap, &n)| (colours.get(&lap).copied().unwrap_or(usize::MAX), lap, n))
-        .collect();
-    shown.sort();
-    let repeats = {
-        let mut seen = std::collections::HashSet::new();
-        shown
-            .iter()
-            .any(|(i, ..)| !seen.insert(i % theme.series.len().max(1)))
-    };
-    let lead = if shown.is_empty() {
-        "nothing in view".to_string()
-    } else {
-        "in view".to_string()
-    };
-    let mut spans = vec![Span::styled(lead.clone(), Style::default().fg(theme.label))];
-    let mut used = lead.chars().count();
-    let tail = if repeats { "  colours repeat" } else { "" };
-    for (k, &(i, lap, n)) in shown.iter().enumerate() {
-        let text = format!(" {lap:#08x} {n}");
-        let more = shown.len() - k - 1;
-        let reserve = if more > 0 {
-            format!("  +{more}").chars().count()
-        } else {
-            0
-        } + tail.chars().count();
-        if used + 3 + text.chars().count() + reserve > width {
-            let rest = format!("  +{}", shown.len() - k);
-            if used + rest.chars().count() <= width {
-                spans.push(Span::styled(rest.clone(), Style::default().fg(theme.label)));
-                used += rest.chars().count();
+) -> Vec<Line<'static>> {
+    let cols_avail = width.saturating_sub(SCALE);
+    let k = per_column(cols_avail);
+    let cols = CHANNELS.div_ceil(k);
+
+    // Per column: all hits, the selected piconet's, and the piconet heard
+    // most there.
+    let mut total = vec![0u64; cols];
+    let mut mine = vec![0u64; cols];
+    let mut lead: Vec<Option<(u64, usize)>> = vec![None; cols];
+    for p in &state.net.bt_piconets {
+        let idx = colours.get(&p.lap).copied().unwrap_or(0);
+        for (c, chunk) in p.per_channel.chunks(k).enumerate() {
+            let n: u64 = chunk.iter().map(|&n| n as u64).sum();
+            if n == 0 {
+                continue;
             }
-            break;
+            total[c] += n;
+            if Some(p.lap) == selected {
+                mine[c] += n;
+            }
+            // Most hits wins; a tie goes to the one heard first.
+            if lead[c].is_none_or(|(m, i)| n > m || (n == m && idx < i)) {
+                lead[c] = Some((n, idx));
+            }
         }
-        let c = theme.series_color(i);
-        let (chip, word) = match selected {
-            Some(s) if s != lap => (theme.receded(c), theme.label),
-            Some(_) => (c, theme.value_hi),
-            None => (c, theme.value),
+    }
+    let max = total.iter().copied().max().unwrap_or(0).max(1);
+    let eighths = |n: u64| (n as f64 / max as f64 * rows as f64 * 8.0).round() as usize;
+
+    let mut out = Vec::with_capacity(rows + 2);
+    for r in 0..rows {
+        let base = (rows - 1 - r) * 8;
+        let scale = if r == 0 {
+            format!("{max:>3} ")
+        } else if r + 1 == rows {
+            format!("{:>3} ", 0)
+        } else {
+            " ".repeat(SCALE)
         };
-        spans.push(Span::raw("  "));
-        spans.push(Span::styled("\u{28ff}", Style::default().fg(chip)));
-        spans.push(Span::styled(text.clone(), Style::default().fg(word)));
-        used += 3 + text.chars().count();
+        let mut spans = vec![Span::styled(scale, Style::default().fg(theme.label))];
+        for c in 0..cols {
+            let fill = |n: u64| eighths(n).saturating_sub(base).min(8);
+            let (own, ink) = match selected {
+                Some(s) => (
+                    fill(mine[c]),
+                    Style::default()
+                        .fg(theme.series_color(colours.get(&s).copied().unwrap_or(0)))
+                        .add_modifier(Modifier::BOLD),
+                ),
+                None => (
+                    fill(total[c]),
+                    Style::default()
+                        .fg(lead[c].map_or(theme.label, |(_, i)| theme.series_color(i))),
+                ),
+            };
+            let rest = fill(total[c]);
+            spans.push(if own > 0 {
+                Span::styled(EIGHTHS[own].to_string(), ink)
+            } else if rest > 0 {
+                // The others' hits above the selected piconet's, faint.
+                Span::styled(
+                    EIGHTHS[rest].to_string(),
+                    Style::default().fg(theme.receded(theme.label)),
+                )
+            } else {
+                Span::raw(" ")
+            });
+        }
+        out.push(Line::from(spans));
     }
-    if repeats && used + tail.chars().count() <= width {
-        spans.push(Span::styled(tail, Style::default().fg(theme.label)));
+
+    let watched = &state.net.bt_channels_watched;
+    let mut under = vec![Span::raw(" ".repeat(SCALE))];
+    for c in 0..cols {
+        let chans = c * k..((c + 1) * k).min(CHANNELS);
+        under.push(if watched.iter().any(|&w| chans.contains(&(w as usize))) {
+            Span::styled("\u{2594}", Style::default().fg(theme.border_accent))
+        } else if chans.clone().any(|ch| ch % 10 == 0) {
+            Span::styled("\u{00b7}", Style::default().fg(theme.stale))
+        } else {
+            Span::raw(" ")
+        });
     }
-    Line::from(spans)
+    out.push(Line::from(under));
+    out.push(Line::from(Span::styled(
+        format!("{}{}", " ".repeat(SCALE), channel_axis(k, cols)),
+        Style::default().fg(theme.label),
+    )));
+    out
 }
 
 #[cfg(test)]
@@ -371,152 +455,139 @@ mod tests {
         m.net.bt_hops.push_front(BtHop { channel, lap, seen });
     }
 
-    fn braille(line: &str) -> usize {
+    fn lane<'a>(out: &'a [String], lap: &str) -> &'a String {
+        out.iter()
+            .find(|l| l.contains(lap) && l.contains('\u{28ff}'))
+            .unwrap_or_else(|| panic!("no lane for {lap}:\n{}", out.join("\n")))
+    }
+
+    fn ticks(line: &str) -> usize {
         line.chars()
-            .filter(|c| ('\u{2801}'..='\u{28ff}').contains(c))
+            .filter(|&c| c == '\u{2503}' || c == '\u{2588}')
             .count()
     }
 
     /// "No receiver at all" and "a receiver has heard nothing" are different
     /// claims, the same distinction the roster's refusal test makes.
     #[test]
-    fn a_refusal_is_shown_rather_than_a_scatter() {
+    fn a_refusal_is_shown_rather_than_the_zones() {
         let mut m = SdrMetrics::fixture().streaming();
         m.net.bt_refused =
             Some("no classic Bluetooth channel fits inside the current 2.0 MHz view".to_string());
-        let out = draw(NetBtHopsPanel, 60, 10, &m).join("\n");
+        let out = draw(NetBtHopsPanel, 60, 12, &m).join("\n");
         assert!(out.contains("not watching"), "{out}");
         assert!(out.contains("2.0") && out.contains("MHz"), "{out}");
-    }
-
-    /// The scatter spans the window on screen only: a loss minutes ago says
-    /// nothing about the dots now drawn, and a loss inside it means dots that
-    /// should be there are not.
-    #[test]
-    fn only_a_loss_inside_the_window_is_a_caveat_on_the_scatter() {
-        let mut m = SdrMetrics::fixture().streaming();
-        m.net.bt_channels_watched = vec![10, 20, 30];
-
-        m.net.health.last_loss = Some(Instant::now() - Duration::from_secs(300));
-        let old = draw(NetBtHopsPanel, 80, 10, &m);
-        assert!(!old[0].contains("FEED LOSS"), "{}", old[0]);
-
-        m.net.health.last_loss = Some(Instant::now() - Duration::from_secs(2));
-        let recent = draw(NetBtHopsPanel, 80, 10, &m);
-        assert!(recent[0].contains("[FEED LOSS]"), "{}", recent[0]);
     }
 
     #[test]
     fn no_hits_yet_says_how_many_channels_are_watched() {
         let mut m = SdrMetrics::fixture().streaming();
         m.net.bt_channels_watched = vec![10, 20, 30];
-        let out = draw(NetBtHopsPanel, 60, 10, &m).join("\n");
+        let out = draw(NetBtHopsPanel, 60, 12, &m).join("\n");
         assert!(out.contains("watching 3 channels"), "{out}");
-        assert!(!out.contains("not watching"), "{out}");
+        assert!(!out.contains("WHERE"), "{out}");
     }
 
-    /// **Each channel keeps its own band.** Eight channels on eight grid
-    /// rows: a hit just now on the fifth-lowest lands on the fourth row
-    /// from the top, at the right edge, and nowhere else.
+    /// **WHERE keeps every hit in its place**, on all 79 channels: in SURVEY
+    /// a hit heard at an earlier survey position is not lost because the
+    /// radio is listening elsewhere now. At 83 columns one channel is one
+    /// column, so a hit on channel 68 is a bar at column 68 while only 75 to
+    /// 78 are watched, and those four are underlined.
     #[test]
-    fn a_recent_hit_lands_on_its_own_channels_row_near_now() {
+    fn where_places_every_hit_on_its_channel_whatever_is_watched_now() {
         let mut m = SdrMetrics::fixture().streaming();
-        m.net.bt_channels_watched = (10..18).collect();
-        hit(&mut m, 0x112233, 14, 0);
-        // Inner 38 x 10: eight grid rows, the axis, the legend.
-        let lines = draw(NetBtHopsPanel, 40, 12, &m);
-        let grid: Vec<&String> = lines[1..9].iter().collect();
-        let marked: Vec<usize> = (0..8).filter(|&r| braille(grid[r]) > 0).collect();
-        assert_eq!(marked, vec![3], "{}", lines.join("\n"));
-        let row = grid[3];
-        let at = row
-            .chars()
-            .position(|c| ('\u{2801}'..='\u{28ff}').contains(&c))
-            .unwrap();
-        assert!(at + 4 >= row.chars().count(), "not near now: {row:?}");
+        m.net.bt_channels_watched = vec![75, 76, 77, 78];
+        hit(&mut m, 0xa4b109, 68, 43_000);
+        let out = draw(NetBtHopsPanel, 85, 16, &m);
+        let bar = out
+            .iter()
+            .find(|l| l.contains('\u{2588}') && !l.contains('\u{28ff}'))
+            .expect("a bar");
+        let col = |line: &str, c: char| line.chars().position(|x| x == c);
+        // Border, then the scale, then channel 0.
+        assert_eq!(col(bar, '\u{2588}'), Some(1 + SCALE + 68), "{bar}");
+        let under = out.iter().find(|l| l.contains('\u{2594}')).unwrap();
+        assert_eq!(col(under, '\u{2594}'), Some(1 + SCALE + 75), "{under}");
+        assert!(out.join("\n").contains("watched now: 75-78"));
     }
 
-    /// A hit older than the window is not drawn: it happened, but not in
-    /// the stretch on screen. Scrubbed back, it is.
+    /// **WHEN gives each piconet a lane**, a tick per hit in the window, and
+    /// counts them; a hit older than the window is in WHERE but not in WHEN.
     #[test]
-    fn the_window_decides_what_is_drawn_and_scrubbing_moves_it() {
+    fn when_gives_each_piconet_a_lane_of_its_hits_in_the_window() {
+        let mut m = SdrMetrics::fixture().streaming();
+        m.net.bt_channels_watched = (0..20).collect();
+        for i in 0..3 {
+            hit(&mut m, 0x0a3777, 5, 1_000 + i * 4_000);
+        }
+        hit(&mut m, 0xba5a11, 7, 2_000);
+        hit(&mut m, 0xba5a11, 8, 40_000);
+        let out = draw(NetBtHopsPanel, 80, 16, &m);
+        let a = lane(&out, "0x0a3777");
+        assert_eq!(ticks(a), 3, "{a}");
+        assert!(
+            a.trim_end_matches('\u{2502}').trim_end().ends_with('3'),
+            "{a}"
+        );
+        let b = lane(&out, "0xba5a11");
+        assert_eq!(ticks(b), 1, "the 40 s old hit is outside 20 s: {b}");
+
+        m.net.hop_view.zoom = 6;
+        let out = draw(NetBtHopsPanel, 80, 16, &m);
+        assert_eq!(ticks(lane(&out, "0xba5a11")), 2, "a minute holds both");
+        assert!(out[0].contains("60 s \u{25c2} now"), "{}", out[0]);
+    }
+
+    /// Scrubbed back, the window moves, the tag and the axis say where to.
+    #[test]
+    fn scrubbing_moves_the_window_and_says_where() {
         let mut m = SdrMetrics::fixture().streaming();
         m.net.bt_channels_watched = vec![10];
         hit(&mut m, 0x112233, 10, 30_000);
-        let out = draw(NetBtHopsPanel, 40, 8, &m).join("\n");
-        assert_eq!(braille(&out), 0, "{out}");
-        assert!(out.contains("nothing in view"), "{out}");
-
+        let out = draw(NetBtHopsPanel, 70, 14, &m);
+        assert_eq!(ticks(lane(&out, "0x112233")), 0);
         m.net.hop_view.back_ms = 20_000;
-        let out = draw(NetBtHopsPanel, 70, 8, &m);
-        assert!(braille(&out.join("\n")) > 0, "{}", out.join("\n"));
+        let out = draw(NetBtHopsPanel, 70, 14, &m);
+        assert_eq!(ticks(lane(&out, "0x112233")), 1);
         assert!(out[0].contains("20 s \u{25c2} -20 s"), "{}", out[0]);
         assert!(out.join("\n").contains("-40 s"), "the axis starts there");
     }
 
-    /// A hit on a channel no longer watched (a retune reshuffled the list)
-    /// is not drawn on some other channel's row.
+    /// **One selection, both zones.** With a piconet selected its lane is
+    /// marked and bold, and the other lanes and bars recede. Checked through
+    /// the buffer's styles, which is what colour is.
     #[test]
-    fn a_hit_on_an_unwatched_channel_is_not_drawn() {
-        let mut m = SdrMetrics::fixture().streaming();
-        m.net.bt_channels_watched = vec![10, 20];
-        hit(&mut m, 0x112233, 50, 0);
-        let out = draw(NetBtHopsPanel, 40, 8, &m).join("\n");
-        assert_eq!(braille(&out), 0, "{out}");
-    }
-
-    /// **The legend counts what is drawn**, each piconet in view with its
-    /// hits in the window, in the order they were first heard.
-    #[test]
-    fn the_legend_names_each_piconet_in_view_with_its_hits() {
-        let mut m = SdrMetrics::fixture().streaming();
-        m.net.bt_channels_watched = (10..20).collect();
-        for i in 0..5 {
-            hit(&mut m, 0x9e8b33, 10 + i, 100 * i as u64);
-        }
-        hit(&mut m, 0x123456, 15, 50);
-        hit(&mut m, 0x123456, 16, 60_000);
-        let out = draw(NetBtHopsPanel, 60, 10, &m);
-        let legend = out[out.len() - 2].clone();
-        assert!(legend.contains("in view"), "{legend}");
-        let a = legend.find("0x9e8b33 5").expect(&legend);
-        let b = legend.find("0x123456 1").expect(&legend);
-        assert!(a < b, "first heard first: {legend}");
-    }
-
-    /// **The selected piconet owns a shared cell.** Two piconets on one
-    /// channel at one moment: with the second selected, the cell is drawn
-    /// bold in its colour; with nothing selected, the one heard first owns
-    /// it. Checked through the buffer's styles, which is what colour is.
-    #[test]
-    fn the_selected_piconet_owns_a_cell_it_shares() {
+    fn a_selected_piconet_leads_and_the_rest_recede() {
         use ratatui::{backend::TestBackend, Terminal};
         let mut m = SdrMetrics::fixture().streaming();
         m.net.bt_channels_watched = vec![10];
         hit(&mut m, 0xaaaaaa, 10, 0);
-        hit(&mut m, 0xbbbbbb, 10, 0);
-        let theme = crate::Theme::sdr();
-        let cell_style = |m: &SdrMetrics| {
-            let mut t = Terminal::new(TestBackend::new(30, 8)).unwrap();
-            t.draw(|f| NetBtHopsPanel.render(f, f.size(), m, &theme, false))
-                .unwrap();
-            let buf = t.backend().buffer().clone();
-            let at = buf
-                .content()
-                .iter()
-                .find(|c| ('\u{2801}'..='\u{28ff}').contains(&c.symbol().chars().next().unwrap()))
-                .expect("a mark")
-                .clone();
-            (at.fg, at.modifier.contains(Modifier::BOLD))
-        };
-        assert_eq!(cell_style(&m), (theme.series_color(0), false));
+        hit(&mut m, 0xbbbbbb, 20, 0);
         m.net.bt_view.selected = Some(0xbbbbbb);
-        assert_eq!(cell_style(&m), (theme.series_color(1), true));
+        let theme = crate::Theme::sdr();
+        let mut t = Terminal::new(TestBackend::new(90, 16)).unwrap();
+        t.draw(|f| NetBtHopsPanel.render(f, f.size(), &m, &theme, false))
+            .unwrap();
+        let buf = t.backend().buffer().clone();
+        let row_text = |y: u16| (0..90).map(|x| buf.get(x, y).symbol()).collect::<String>();
+        let tick_on = |lap: &str| {
+            let y = (0..16).find(|&y| row_text(y).contains(lap)).unwrap();
+            let x = (0..90)
+                .find(|&x| buf.get(x, y).symbol() == "\u{2503}")
+                .unwrap();
+            buf.get(x, y).clone()
+        };
+        let sel = tick_on("0xbbbbbb");
+        assert_eq!(sel.fg, theme.series_color(1));
+        assert!(sel.modifier.contains(Modifier::BOLD));
+        assert_eq!(tick_on("0xaaaaaa").fg, theme.receded(theme.series_color(0)));
+        let y = (0..16).find(|&y| row_text(y).contains("0xbbbbbb")).unwrap();
+        assert_eq!(buf.get(0, y).symbol(), "\u{258c}", "the lane is marked");
     }
 
     /// With the capped list full and the window reaching before its oldest
-    /// hit, the axis says the rest is not kept rather than letting it read
-    /// as quiet.
+    /// hit, the axis says the rest is not kept rather than letting the lanes
+    /// read as quiet.
     #[test]
     fn a_window_older_than_what_is_kept_says_so() {
         let mut m = SdrMetrics::fixture().streaming();
@@ -524,14 +595,35 @@ mod tests {
         for i in 0..crate::state::BT_HOP_LIMIT as u64 {
             hit(&mut m, 0x112233, 10, 5_000 - i * 5);
         }
-        let out = draw(NetBtHopsPanel, 70, 8, &m).join("\n");
+        let out = draw(NetBtHopsPanel, 70, 12, &m).join("\n");
         assert!(out.contains("older hits not kept"), "{out}");
         m.net.hop_view.zoom = 0;
-        let out = draw(NetBtHopsPanel, 70, 8, &m).join("\n");
+        let out = draw(NetBtHopsPanel, 70, 12, &m).join("\n");
         assert!(
             !out.contains("not kept"),
             "half a second is all kept: {out}"
         );
+    }
+
+    /// More piconets than lanes: the rest are counted, not dropped quietly.
+    #[test]
+    fn piconets_beyond_the_lanes_are_counted() {
+        let mut m = SdrMetrics::fixture().streaming();
+        m.net.bt_channels_watched = vec![10];
+        for i in 0..12u32 {
+            hit(&mut m, 0x100000 + i, 10, i as u64 * 100);
+        }
+        let out = draw(NetBtHopsPanel, 70, 12, &m).join("\n");
+        assert!(out.contains("more piconets in the roster"), "{out}");
+    }
+
+    #[test]
+    fn the_channel_axis_labels_what_fits() {
+        assert!(channel_axis(1, 79).starts_with("0         10        20"));
+        assert!(channel_axis(1, 79).ends_with("78"));
+        let narrow = channel_axis(2, 40);
+        assert_eq!(narrow.chars().count(), 40);
+        assert!(narrow.starts_with("0    10"), "{narrow}");
     }
 
     #[test]
@@ -542,13 +634,13 @@ mod tests {
             hit(
                 &mut m,
                 0x100000 + (i % 9) as u32,
-                10 + (i % 20) as u8,
+                (i * 7 % 79) as u8,
                 i * 300,
             );
         }
         m.net.bt_view.selected = Some(0x100003);
-        for w in 30..80u16 {
-            for h in 6..20u16 {
+        for w in 30..100u16 {
+            for h in 6..24u16 {
                 for line in draw(NetBtHopsPanel, w, h, &m) {
                     assert!(line.chars().count() <= w as usize, "{w}x{h}: {line:?}");
                 }

@@ -29,8 +29,9 @@ pub struct Piconet {
     pub lap: u32,
     /// Access codes found carrying this LAP.
     pub hits: u64,
-    /// Which of the 79 channels a hit was found on, one bit per channel.
-    pub channels: u128,
+    /// Hits found on each of the 79 channels: where it hops, as the hop
+    /// panel's WHERE bars draw it.
+    pub per_channel: [u32; 79],
     pub first_seen: Instant,
     pub last_seen: Instant,
 }
@@ -38,7 +39,16 @@ pub struct Piconet {
 impl Piconet {
     /// How many different channels it has been heard on.
     pub fn channels_hit(&self) -> u32 {
-        self.channels.count_ones()
+        self.per_channel.iter().filter(|&&n| n > 0).count() as u32
+    }
+
+    /// The channels it has been heard on, one bit per channel.
+    pub fn channel_mask(&self) -> u128 {
+        self.per_channel
+            .iter()
+            .enumerate()
+            .filter(|(_, &n)| n > 0)
+            .fold(0, |m, (ch, _)| m | 1 << ch)
     }
 }
 
@@ -51,7 +61,7 @@ pub fn observe(roster: &mut Vec<Piconet>, lap: u32, channel: u8, now: Instant) {
             roster.push(Piconet {
                 lap,
                 hits: 0,
-                channels: 0,
+                per_channel: [0; 79],
                 first_seen: now,
                 last_seen: now,
             });
@@ -60,8 +70,8 @@ pub fn observe(roster: &mut Vec<Piconet>, lap: u32, channel: u8, now: Instant) {
     };
     p.hits += 1;
     p.last_seen = now;
-    if channel < 79 {
-        p.channels |= 1 << channel;
+    if let Some(n) = p.per_channel.get_mut(channel as usize) {
+        *n = n.saturating_add(1);
     }
 }
 
@@ -91,7 +101,8 @@ mod tests {
         assert_eq!((p.hits, p.channels_hit()), (3, 2));
         assert_eq!(p.first_seen, t0);
         assert_eq!(p.last_seen, t0 + Duration::from_millis(9));
-        assert_eq!(roster[1].channels, 1 << 78);
+        assert_eq!(roster[1].channel_mask(), 1 << 78);
+        assert_eq!(p.per_channel[10], 2);
 
         // Most recently heard first.
         let order: Vec<u32> = ordered(&roster).iter().map(|p| p.lap).collect();
