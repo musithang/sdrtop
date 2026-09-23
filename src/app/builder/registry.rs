@@ -1213,4 +1213,72 @@ mod tests {
         assert_ne!(dropped.active_preset(), "net");
         assert!(dropped.has_preset(dropped.active_preset()));
     }
+
+    /// The part of a user doc under `heading`, up to the next `## `.
+    fn doc_section<'a>(doc: &'a str, heading: &str) -> &'a str {
+        let start = doc
+            .find(heading)
+            .unwrap_or_else(|| panic!("no '{heading}' in the doc"));
+        let rest = &doc[start + heading.len()..];
+        &rest[..rest.find("\n## ").unwrap_or(rest.len())]
+    }
+
+    /// **The NET key table cannot fall behind the panels** (net-ux-polish-
+    /// plan 8.b, POLICY rule 7): every NET panel that takes focus has a row
+    /// in `user_docs/keys.md` with its letter, its title and every binding
+    /// its `focus_bindings` declares, word for word; and no row names a
+    /// letter no NET panel takes. Hand-written, checked against the source.
+    #[test]
+    fn the_net_key_table_matches_the_panels() {
+        let doc = include_str!("../../../user_docs/keys.md");
+        let table = doc_section(doc, "## NET panel focus modes");
+        let (engine, _) = App::build_ui("net", &HashMap::new(), None, true);
+        let m = crate::state::SdrMetrics::fixture();
+        let mut keys = Vec::new();
+        for panel in engine.registered_panels() {
+            if !panel.name().starts_with("net_") {
+                continue;
+            }
+            let Some(key) = panel.focus_key() else {
+                continue;
+            };
+            keys.push(key);
+            let title = panel.chrome(&m).title.replace('_', "");
+            let lead = format!("| `{key}` | {title} |");
+            let row = table
+                .lines()
+                .find(|l| l.starts_with(&lead))
+                .unwrap_or_else(|| panic!("no row '{lead}' in keys.md"));
+            for (k, what) in panel.focus_bindings() {
+                assert!(
+                    row.contains(&format!("`{k}` {what}")),
+                    "{}: '{k} {what}' missing from:\n{row}",
+                    panel.name()
+                );
+            }
+        }
+        for line in table.lines().filter(|l| l.starts_with("| `")) {
+            let key = line.chars().nth(3).unwrap();
+            assert!(
+                keys.contains(&key),
+                "a row for a letter no NET panel takes: {line}"
+            );
+        }
+        assert!(keys.len() >= 7, "only {} NET panels take focus", keys.len());
+    }
+
+    /// Every panel a preset can name is listed in `user_docs/presets.md`'s
+    /// panel names, so a new panel is not a name nobody can find.
+    #[test]
+    fn every_registered_panel_is_a_documented_name() {
+        let doc = include_str!("../../../user_docs/presets.md");
+        let names = doc_section(doc, "## Panel names");
+        let (engine, _) = App::build_ui("net", &HashMap::new(), None, true);
+        let missing: Vec<&str> = engine
+            .registered_panels()
+            .map(|p| p.name())
+            .filter(|n| !names.contains(&format!("`{n}`")))
+            .collect();
+        assert!(missing.is_empty(), "not in presets.md: {missing:?}");
+    }
 }

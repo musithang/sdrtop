@@ -6,7 +6,8 @@
 are saying, and how well their transmitters do it. It listens to Bluetooth
 Low Energy advertising and to classic Bluetooth, and it measures the band
 itself. It never transmits, never joins or follows a connection, and never
-plays audio.
+plays audio: the guest at the party who says nothing all evening and leaves
+knowing everyone's address.
 
 The section only appears on a radio that reaches the band and can sample fast
 enough for its cheapest mode. On one that cannot, the section is hidden and
@@ -88,7 +89,8 @@ once:
 
 The masked mode covers addresses only. An advertised device name and a
 classic piconet's LAP are shown as they are in every mode, so check both
-before sharing a screenshot.
+before sharing a screenshot: a perfectly masked `#17` sitting next to
+"Viktor's AirPods" has not protected anybody.
 
 The registrant and company names come from dated snapshots of the IEEE's and
 the Bluetooth SIG's registries. Whenever the mode is not **full**, the title
@@ -97,7 +99,8 @@ of every panel showing addresses says so and gives both dates.
 ### What an offset is worth
 
 Every frequency offset and ppm figure contains our own oscillator's error.
-The panels that show one carry a tag that says what it is worth:
+This is humbling, and it is also why the panels that show one carry a tag
+that says what it is worth:
 
 - **[RELATIVE]**: measured against our own oscillator, uncorrected. Good for
   comparing devices with each other, not for saying how far off one is.
@@ -122,7 +125,9 @@ signals. Where it matters, the screen says which:
 - BLE's modulation limits are recalled from test-specification documentation
   and not yet checked against the specification itself.
 - The classic Bluetooth header decode is a port of `libbtbb`, and its
-  section is headed "libbtbb port, unchecked on air".
+  section is headed "libbtbb port, unchecked on air". It has passed every
+  test I could write for it and has never met a real classic transmitter,
+  which are two different kinds of confidence.
 - **"predicted, not followed"** beside a BLE connection's hop sequence means
   sdrtop worked out which channels the connection will use from its own
   parameters, and did not follow it there. It never does.
@@ -143,7 +148,7 @@ only from the facts drawn below it:
   A call slower than the shortest BLE connection interval rules following a
   connection out; a faster one is necessary but not proof, because the call
   does not include the synthesiser settling. The panel says which of the two
-  it is and never "fast enough".
+  it is and never "fast enough", because optimism is not a measurement.
 
 ---
 
@@ -299,8 +304,9 @@ Each piconet wears one colour here and in the roster, and one selection
 ### Piconets *(focus `c`)*
 
 One row per LAP: when it was heard, hits, channels, and its **UAP**, the next
-8 bits of the master's address. The UAP is not sent; it is narrowed from the
-headers that follow the access code: a first header leaves 32 candidates,
+8 bits of the master's address. The UAP is not sent. Bluetooth keeps it to
+itself, and it has to be worked out from the headers that follow the access
+code, a little like a crossword where every clue has two answers: a first header leaves 32 candidates,
 more headers bring it down to two, and a DH1, DH3 or DH5 payload's own CRC
 settles it to one. The column shows `32 left`, `2 left` or the value.
 
@@ -313,7 +319,9 @@ The selected piconet's detail, in as many sections as the panel has room for
 - **Timing**: how far each hit lands from the piconet's own 625 µs slot grid,
   fitted to its hits, against the specification's 1 µs, with the spread drawn
   under it. Below eight hits it is collecting; hits that do not line up on a
-  grid beyond chance are refused as one, never forced onto it.
+  grid beyond chance are refused as one, never forced onto it. Given enough
+  periods to try, a dozen points will line up with almost anything, and the
+  panel would rather say "no grid" than find one it wanted to find.
 - **Headers**: once the UAP is one value, what the piconet's headers say: the
   packet types (`POLL 3 · NULL 1 · DH1 1`), the logical transport addresses
   in use, and headers that did not decode. Before that, nothing is read or
@@ -335,7 +343,8 @@ The selected piconet's detail, in as many sections as the panel has room for
 
 They go to `~/.local/share/sdrtop/` (or `$XDG_DATA_HOME/sdrtop/`), named with
 the second they were taken, and a second export in the same second is
-refused rather than overwriting the first.
+refused rather than overwriting the first. If you are exporting twice a
+second, it was probably the first one you wanted.
 
 Every file opens with the same header of `#` lines: the sdrtop version, when
 it was exported, the device and its serial, the tuning, SURVEY or LOCK, how

@@ -26,9 +26,12 @@ stops, so a number that has stopped updating never passes for a live one.
 
 The first thing sdrtop shows you, and `Esc` from anywhere brings it back.
 
-It is one screen in two columns. The left column lists the four **sections**, and
-below a dotted rule two panes that are not sections: **Keys** and **Options**. The
-right column shows whatever is selected on the left.
+It is one screen in two columns. The left column lists the five **sections**,
+each with its own colour dot, and below a dotted rule two panes that are not
+sections: **Keys** and **Options**. The right column shows whatever is selected
+on the left, under a heading in the section's colour that counts its views and
+names its focus letters. A selected row, here as on every list in sdrtop, is
+marked with a bar at its left edge.
 
 | Section | Holds |
 |---------|-------|
@@ -36,14 +39,21 @@ right column shows whatever is selected on the left.
 | **Lab** | The four measurement benches |
 | **Sweep** | The band sweep, full size and compact |
 | **Micro** | The four field views for a small screen |
+| **NET** | The 2.4 GHz band, BLE and classic Bluetooth: five views, on a radio that reaches the band ([the NET page](net.md)) |
 
 Each layout shows its **number** beside its name, and that number is the key that
 opens it while you are in that section. The number is the same one the footer
 shows you on the deck, because both read the same table. There is no second copy
 to go stale.
 
-**Keys** is the general key reference, scrollable with `↑` / `↓`. It replaces the
-old `?` overlay, and unlike that overlay it is checked against the app's own key
+Every NET view has a third line: what that screen would tell you now, built by
+the view's own rules. `●` means the receiver feeding it is running; `○` means it
+is not, and the line gives the session's figures as the session's.
+
+**Keys** is the key reference, scrollable with `↑` / `↓`. It opens with the focus
+keys of the section you came from, each panel's letter and what it adds, read
+from the panels themselves, then the general keys. It replaces the old `?`
+overlay, and unlike that overlay it is checked against the app's own key
 dispatch, so it cannot promise a key that does not exist.
 
 **Options** is empty on purpose so far, and says so when you open it.
@@ -309,7 +319,7 @@ plus one measurement panel that has no home preset of its own.
 
 ## Layouts
 
-The fifteen built-in layouts, by section. The key is the number to press while
+The twenty built-in layouts, by section. The key is the number to press while
 that section is active, which is what the menu shows beside each name.
 
 The menu labels them with a short title rather than the preset name, so
@@ -352,8 +362,18 @@ screen.
 | `3` | `micro_gain` | Gain |
 | `4` | `micro_health` | Health |
 
+**NET**
+
+| Key | Preset | What's in it |
+|-----|--------|--------------|
+| `1` | `net` | Band capability: what this radio can reach and receive |
+| `2` | `net_survey` | Occupancy over the coexistence heatmap, bonded · decode health |
+| `3` | `net_census` | The census of transmitters, their clocks and the selected one's detail |
+| `4` | `net_ble` | BLE advertising packets · packet detail |
+| `5` | `net_bt` | Classic Bluetooth hops (where and when) · the piconet roster |
+
 `p` steps to the next layout in whichever section you are in, and wraps at the
-end. A sixteenth preset, `observer`, is marked hidden, so it has no section and no
+end. A twenty-first preset, `observer`, is marked hidden, so it has no section and no
 key: sdrtop loads it by itself when [another app owns the
 radio](#observer-mode).
 

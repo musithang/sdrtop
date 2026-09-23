@@ -55,6 +55,9 @@ spectrum_style     = "braille"       # braille · fill · scatter
 [theme]
 base = "nord"                        # see themes.md for the six palettes
 
+[net]
+bt_channels = 8            # classic Bluetooth channels given a receiver at once
+
 [sweep]
 start_hz = 400000000       # scanner band start
 stop_hz  = 500000000       # scanner band end
@@ -221,7 +224,7 @@ real-time monitoring. Once you spot one, `Enter` tunes to it.
 ## Custom layout presets
 
 A *preset* is a named arrangement of panels: which ones are on screen and where.
-sdrtop ships with sixteen, and you can write your own, either as a
+sdrtop ships with twenty-one, and you can write your own, either as a
 `[presets.my_view]` block here or as a file of its own.
 
 That has its own page: **[Layout presets](presets.md)**.
