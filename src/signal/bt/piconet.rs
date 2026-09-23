@@ -111,6 +111,10 @@ pub struct Piconet {
     pub first_seen: Instant,
     pub last_seen: Instant,
     pub headers: Headers,
+    /// Its slot grid and jitter, or why there is none (`super::slots`),
+    /// refitted by the worker at most once a second; `None` before its
+    /// first hit was timed.
+    pub slots: Option<Result<super::slots::SlotFit, super::slots::SlotRefusal>>,
 }
 
 impl Piconet {
@@ -142,6 +146,7 @@ pub fn observe(roster: &mut Vec<Piconet>, lap: u32, channel: u8, now: Instant) {
                 first_seen: now,
                 last_seen: now,
                 headers: Headers::default(),
+                slots: None,
             });
             roster.last_mut().expect("just pushed")
         }

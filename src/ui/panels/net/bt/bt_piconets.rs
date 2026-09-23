@@ -26,6 +26,7 @@ use ratatui::{
 };
 
 use crate::signal::bt::piconet::{ordered, Piconet};
+use crate::signal::dsp::uncertainty::Uncertain;
 use crate::state::SdrMetrics;
 use crate::ui::panel::{FeedSpan, Panel, PanelChrome, Staleness};
 use crate::ui::widgets::limit::{Limit, LimitRow, RowWidths};
@@ -204,8 +205,49 @@ fn detail(
             out.push(field(if i == 0 { label } else { "" }, chunk));
         }
     }
-    out.extend(modulation_lines(p, iw, theme));
-    out.extend(header_lines(p, state, iw, theme));
+    out
+}
+
+/// The selected piconet's detail within `budget` rows: its core block, or
+/// nothing where even that does not fit (the table's rows come first, as
+/// the census's do), then each section in order while it fits whole. A
+/// section left out is named on a last line, so a short panel says what a
+/// taller one would show rather than stopping mid-sentence.
+fn detail_within(
+    p: &Piconet,
+    state: &SdrMetrics,
+    now: std::time::Instant,
+    iw: usize,
+    budget: usize,
+    theme: &crate::Theme,
+) -> Vec<Line<'static>> {
+    let mut out = detail(p, state, now, iw, theme);
+    if out.len() > budget {
+        return Vec::new();
+    }
+    let sections = [
+        ("MODULATION", modulation_lines(p, iw, theme)),
+        ("TIMING", timing_lines(p, iw, theme)),
+        ("HEADERS", header_lines(p, state, iw, theme)),
+    ];
+    let last = sections.len() - 1;
+    let mut left_out = Vec::new();
+    for (k, (name, lines)) in sections.into_iter().enumerate() {
+        // Whole, in order, and leaving a row for the line that names what
+        // is left out, unless this is the last section.
+        let reserve = usize::from(k < last);
+        if left_out.is_empty() && out.len() + lines.len() + reserve <= budget {
+            out.extend(lines);
+        } else {
+            left_out.push(name);
+        }
+    }
+    if !left_out.is_empty() && out.len() < budget {
+        out.push(Line::from(Span::styled(
+            format!(" + {} on a taller panel", left_out.join(", ")),
+            Style::default().fg(theme.label),
+        )));
+    }
     out
 }
 
@@ -297,6 +339,90 @@ fn modulation_lines(p: &Piconet, iw: usize, theme: &crate::Theme) -> Vec<Line<'s
         &format!(
             "{} settled and {} alternating runs from {} headers, every member's",
             d.settled.n, d.alternating.n, p.headers.captured
+        ),
+        iw.saturating_sub(1),
+        2,
+    ) {
+        out.push(Line::from(Span::styled(
+            format!(" {chunk}"),
+            Style::default().fg(theme.label),
+        )));
+    }
+    out
+}
+
+/// Slot jitter's limit, **read from the Core Specification 5.4, Vol 2,
+/// Part B, 2.2.5**: "The instantaneous timing shall not deviate more than
+/// 1 μs from the average timing."
+const JITTER_LIMIT_US: Limit = Limit::Max(1.0);
+
+/// A jitter reading must beat this before it prints: a quarter of the
+/// limit, which a few dozen hits reach.
+const JITTER_RESOLUTION_US: f64 = 0.25;
+
+/// The TIMING section (net-ux-polish-plan 6.5): each access code's offset
+/// from the piconet's own fitted 625 µs grid (`signal::bt::slots`). The
+/// largest against the specification's 1 µs, the root mean square as a
+/// reading, and what they rest on: how many hits over how long. Refused
+/// below `signal::bt::slots::MIN_HITS` hits and when the hits line up on no grid
+/// beyond chance; never a figure from three points.
+///
+/// **Every member's packets, and our own resolution in it.** A LAP is the
+/// piconet, so slaves' transmissions are on the grid too, timed from what
+/// they received; and a hit is dated to a quarter symbol, 0.25 µs, which a
+/// residual includes.
+fn timing_lines(p: &Piconet, iw: usize, theme: &crate::Theme) -> Vec<Line<'static>> {
+    use crate::signal::bt::slots::SlotRefusal;
+    let mut out = vec![crate::ui::chrome::section(
+        "timing",
+        "625 us slots: Core 5.4 Vol 2 B 2.2.5",
+        iw,
+        theme,
+    )];
+    let quiet = |text: String| {
+        Line::from(Span::styled(
+            format!(" {text}"),
+            Style::default().fg(theme.stale),
+        ))
+    };
+    let f = match &p.slots {
+        None => {
+            out.push(quiet("no hit timed yet".to_string()));
+            return out;
+        }
+        Some(Err(SlotRefusal::Collecting { have, need })) => {
+            out.push(quiet(format!(
+                "collecting: {have} of {need} hits to fit a slot grid"
+            )));
+            return out;
+        }
+        Some(Err(SlotRefusal::NoGrid { hits })) => {
+            out.push(quiet(format!(
+                "no slot grid: {hits} hits do not line up at 625 us beyond chance"
+            )));
+            return out;
+        }
+        Some(Ok(f)) => f,
+    };
+    let rows = vec![LimitRow::new(
+        "Jitter max",
+        Reading::new(Uncertain::exact(f.max_us), "us", f64::INFINITY),
+        JITTER_LIMIT_US,
+    )];
+    let w = RowWidths::fit_within(&rows, iw);
+    out.extend(rows.iter().map(|r| Line::from(r.spans(theme, w))));
+    out.push(Line::from(vec![
+        crate::ui::chrome::field("rms", LABEL_W, theme),
+        Span::styled(
+            Reading::new(f.rms_us, "us", JITTER_RESOLUTION_US).text(),
+            Style::default().fg(theme.value),
+        ),
+    ]));
+    let span = crate::ui::widgets::timing_fmt::seconds_ms((f.span_us / 1e3) as u64);
+    for chunk in crate::ui::chrome::wrap(
+        &format!(
+            "{} hits over {span} on their own grid, every member's; hits dated to 0.25 us",
+            f.hits
         ),
         iw.saturating_sub(1),
         2,
@@ -498,12 +624,12 @@ impl Panel for NetBtPiconetsPanel {
         let height = inner.height as usize;
 
         // The detail block gives way to the table, as the census's does.
-        let mut extra = cursor
-            .map(|i| detail(roster[i], state, now, width, theme))
+        // What the table keeps (header, its first rows, a gap) comes
+        // first; the detail takes what is left.
+        let budget = height.saturating_sub(2 + roster.len().min(TABLE_KEEPS));
+        let extra = cursor
+            .map(|i| detail_within(roster[i], state, now, width, budget, theme))
             .unwrap_or_default();
-        if height < 1 + roster.len().min(TABLE_KEEPS) + extra.len() {
-            extra.clear();
-        }
 
         let mut lines = vec![header(
             COLUMNS,
@@ -777,6 +903,59 @@ mod tests {
             "{out}"
         );
         assert!(out.contains("Core 5.4 Vol 2 A 3.1.1"), "{out}");
+    }
+
+    /// **Slot jitter against the specification's 1 µs** (6.5): refused
+    /// while collecting and when no grid is found, then the largest
+    /// residual against the limit, the rms beside it, and what they rest on.
+    #[test]
+    fn slot_jitter_is_shown_against_the_one_microsecond_limit() {
+        use crate::signal::bt::slots::{SlotFit, SlotRefusal};
+        let mut m = heard();
+        m.net.bt_view.selected = Some(0x9e8b33);
+        let at = |m: &SdrMetrics| draw(NetBtPiconetsPanel, 80, 50, m).join("\n");
+        assert!(at(&m).contains("no hit timed yet"), "{}", at(&m));
+
+        let set = |m: &mut SdrMetrics, s| m.net.bt_piconets[0].slots = Some(s);
+        set(&mut m, Err(SlotRefusal::Collecting { have: 5, need: 8 }));
+        assert!(at(&m).contains("collecting: 5 of 8 hits"), "{}", at(&m));
+        set(&mut m, Err(SlotRefusal::NoGrid { hits: 30 }));
+        assert!(at(&m).contains("30 hits do not line up"), "{}", at(&m));
+
+        set(
+            &mut m,
+            Ok(SlotFit {
+                hits: 60,
+                span_us: 60e6,
+                rate_ppm: 12.0,
+                rms_us: Uncertain::from_sigma(0.31, 0.03),
+                max_us: 0.82,
+                residuals_us: vec![0.0; 60],
+            }),
+        );
+        let out = at(&m);
+        assert!(out.contains("TIMING"), "{out}");
+        assert!(out.contains("Jitter max"), "{out}");
+        assert!(out.contains("0.82"), "{out}");
+        assert!(out.contains("0.31"), "{out}");
+        assert!(out.contains("60 hits over 60 s"), "{out}");
+        assert!(out.contains("Core 5.4 Vol 2 B 2.2.5"), "{out}");
+    }
+
+    /// **A short panel keeps what fits and names the rest**: the core
+    /// block and the sections that fit whole, then one line saying which
+    /// a taller panel would show.
+    #[test]
+    fn a_short_panel_keeps_whole_sections_and_names_the_rest() {
+        let mut m = heard();
+        m.net.bt_view.selected = Some(0x9e8b33);
+        let out = draw(NetBtPiconetsPanel, 60, 16, &m).join("\n");
+        assert!(out.contains("PICONET"), "{out}");
+        assert!(out.contains("on a taller panel"), "{out}");
+        assert!(out.contains("HEADERS on a taller panel"), "{out}");
+        let tall = draw(NetBtPiconetsPanel, 60, 60, &m).join("\n");
+        assert!(!tall.contains("taller panel"), "{tall}");
+        assert!(tall.contains("HEADERS"), "{tall}");
     }
 
     #[test]

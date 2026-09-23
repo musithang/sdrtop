@@ -42,3 +42,4 @@ pub mod header;
 pub mod payload;
 pub mod piconet;
 pub mod receive;
+pub mod slots;

@@ -98,6 +98,10 @@ pub struct NetWorker {
     /// [`SAFE_BT_CHANNELS`] and `signal::bt::receive`'s own doc for why this
     /// is capped rather than left to follow the full view.
     pub bt_channels: usize,
+    /// How often one piconet's slot grid may be refitted
+    /// (`signal::bt::slots`): the rate search is real work, and a jitter
+    /// figure does not need refreshing faster. A test sets it to zero.
+    pub slot_fit_every: std::time::Duration,
 }
 
 /// What the worker carries from one block to the next.
@@ -294,6 +298,7 @@ impl NetWorker {
             ));
         }
         Self {
+            slot_fit_every: std::time::Duration::from_secs(1),
             sample_rx,
             state,
             geometry,
@@ -316,6 +321,18 @@ impl NetWorker {
         // break_uap_tie` cannot read (POLL, FHS, ...) must not flip a
         // resolved answer back to two candidates.
         let mut resolved_bt_uap: HashMap<u32, u8> = HashMap::new();
+        // 6.5: each piconet's access-code times, µs on the stream's clock,
+        // for its slot grid (`signal::bt::slots`), kept here rather than in
+        // the state because only the fit is shown; with the rate they were
+        // dated at, and when each was last fitted. A new stream or a new
+        // rate restarts the logs: their times are then on another clock.
+        let mut bt_arrivals: HashMap<u32, std::collections::VecDeque<f64>> = HashMap::new();
+        let mut arrivals_rate = 0.0f64;
+        let mut last_fit: HashMap<u32, Instant> = HashMap::new();
+        // Piconets with hits their last fit has not seen: refitted once the
+        // interval allows, whether or not another hit comes, so a piconet
+        // that falls silent still has its last hits in its figure.
+        let mut unfitted: std::collections::HashSet<u32> = std::collections::HashSet::new();
         let mut load = Load::default();
         // Where the next block must start for the stream to be unbroken. `None`
         // until a block has been seen, and again after the section closes.
@@ -369,6 +386,13 @@ impl NetWorker {
             // not change - so `resolved_bt_uap` is kept.
             if next_pair.is_some_and(|n| first_pair < n) {
                 piconet_clocks.clear();
+                bt_arrivals.clear();
+                unfitted.clear();
+            }
+            if rate_hz != arrivals_rate {
+                bt_arrivals.clear();
+                unfitted.clear();
+                arrivals_rate = rate_hz;
             }
             if !continuous {
                 ble = None;
@@ -599,8 +623,14 @@ impl NetWorker {
                 let mut header_hits = Vec::new();
                 for rx in bt.iter_mut() {
                     let (laps, headers) = rx.push(&bytes, self.geometry);
-                    for lap in laps {
-                        hits.push((rx.channel(), lap));
+                    for hit in laps {
+                        hits.push((rx.channel(), hit.lap));
+                        let log = bt_arrivals.entry(hit.lap).or_default();
+                        if log.len() == crate::signal::bt::slots::KEPT {
+                            log.pop_front();
+                        }
+                        log.push_back(hit.at_us);
+                        unfitted.insert(hit.lap);
                     }
                     header_hits.extend(headers);
                 }
@@ -664,7 +694,29 @@ impl NetWorker {
                     ));
                     narrowed_by_lap.push((hit.lap, shown));
                 }
-                if !hits.is_empty() || !narrowed_by_lap.is_empty() {
+                // The slot fit, outside the lock and at most once a second a
+                // piconet: a rate search over hundreds of hits is real work,
+                // and a jitter figure does not need refreshing faster.
+                let due: Vec<u32> = unfitted
+                    .iter()
+                    .copied()
+                    .filter(|lap| {
+                        last_fit.get(lap).is_none_or(|t| {
+                            now.saturating_duration_since(*t) >= self.slot_fit_every
+                        })
+                    })
+                    .collect();
+                let mut fits = Vec::with_capacity(due.len());
+                for lap in due {
+                    let times: Vec<f64> = bt_arrivals
+                        .get(&lap)
+                        .map(|l| l.iter().copied().collect())
+                        .unwrap_or_default();
+                    fits.push((lap, crate::signal::bt::slots::fit(&times)));
+                    last_fit.insert(lap, now);
+                    unfitted.remove(&lap);
+                }
+                if !hits.is_empty() || !narrowed_by_lap.is_empty() || !fits.is_empty() {
                     let mut m = self.state.lock().unwrap_or_else(|e| e.into_inner());
                     m.net.health.bt_hits += hits.len() as u64;
                     for (channel, lap) in hits {
@@ -683,6 +735,11 @@ impl NetWorker {
                     m.net.bt_hops.truncate(crate::state::BT_HOP_LIMIT);
                     for (lap, narrowed) in narrowed_by_lap {
                         m.net.bt_uap.insert(lap, narrowed);
+                    }
+                    for (lap, fit) in fits {
+                        if let Some(p) = m.net.bt_piconets.iter_mut().find(|p| p.lap == lap) {
+                            p.slots = Some(fit);
+                        }
                     }
                     for (lap, read, hypotheses, deviation) in headers_read {
                         crate::signal::bt::piconet::observe_header(
@@ -1784,6 +1841,85 @@ mod tests {
             .expect("settled runs in a header");
         let index = df1.value() * 2.0 / 1e6;
         assert!((index - 0.32).abs() < 0.01, "h = {index} from {df1:?}");
+    }
+
+    /// **Slot timing end to end** (6.5): twelve access codes of one LAP,
+    /// each on a slot of a piconet whose slots run 30 ppm long on our clock,
+    /// across equal blocks of one continuous stream. The worker dates them
+    /// on the stream's clock and fits a grid whose leftover is well inside
+    /// the specification's 1 µs.
+    #[test]
+    fn a_piconets_access_codes_give_its_slot_grid() {
+        use crate::signal::ble::gfsk::modulate;
+        use crate::signal::bt::access_code::access_code_bits;
+        use crate::signal::dsp::testkit::Rng;
+        use num_complex::Complex;
+
+        const RAW_RATE: f64 = 4_000_000.0;
+        const BLOCK: usize = 10_000; // 2.5 ms: one access code a block at most
+        let ch = 45u8;
+        let channel_hz = crate::signal::bt::channel::centre_hz(ch).unwrap();
+        let lap = 0x0012_3456u32;
+        let slot_samples = 625e-6 * (1.0 + 30e-6) * RAW_RATE;
+        let slots = [0u32, 5, 11, 16, 22, 28, 33, 40, 46, 51, 57, 63];
+
+        let mut bits: Vec<bool> = (0..40).map(|i| i % 2 == 0).collect();
+        bits.extend(access_code_bits(lap));
+        bits.extend((0..40).map(|i| i % 2 == 1));
+        let burst = modulate(&bits, 4, 160_000.0, RAW_RATE, 0.5);
+        let total = ((*slots.last().unwrap() as f64 + 4.0) * slot_samples) as usize;
+        let total = total.div_ceil(BLOCK) * BLOCK;
+        let mut rng = Rng::new(9);
+        let mut iq: Vec<Complex<f32>> = rng.noise(total, 1e-4);
+        for &k in &slots {
+            let at = (5_000.0 + k as f64 * slot_samples).round() as usize;
+            for (i, s) in burst.iter().enumerate() {
+                iq[at + i] += s;
+            }
+        }
+        let geometry = eight_bit();
+        let bytes: Vec<u8> = iq
+            .iter()
+            .flat_map(|s| {
+                let re = (s.re * geometry.full_scale).clamp(-127.0, 127.0) as i8;
+                let im = (s.im * geometry.full_scale).clamp(-127.0, 127.0) as i8;
+                [re as u8, im as u8]
+            })
+            .collect();
+
+        let mut m = SdrMetrics::fixture().streaming();
+        m.ui.section = crate::signal::net::SECTION.to_string();
+        m.ui.active_preset = "net_bt".to_string();
+        m.radio.frequency = channel_hz;
+        m.radio.config_sample_rate = RAW_RATE;
+        m.radio.bb_filter_hz = 0;
+        let state = Arc::new(Mutex::new(m));
+        let (tx, rx) = crossbeam_channel::unbounded();
+        for (i, chunk) in bytes.chunks(BLOCK * 2).enumerate() {
+            tx.send(stamped(&state, i as u64 + 1, false, chunk.to_vec()))
+                .unwrap();
+        }
+        drop(tx);
+        let mut worker = NetWorker::new(rx, Arc::clone(&state), geometry, SAFE_BT_CHANNELS);
+        worker.slot_fit_every = std::time::Duration::ZERO;
+        worker.run();
+
+        let m = state.lock().unwrap();
+        let p = m
+            .net
+            .bt_piconets
+            .iter()
+            .find(|p| p.lap == lap)
+            .expect("a row");
+        assert_eq!(p.hits, slots.len() as u64);
+        let fit = p.slots.as_ref().expect("fitted").as_ref().expect("a grid");
+        assert_eq!(fit.hits, slots.len());
+        // Measured when written: 27.1 ppm (40 ms is short to resolve a
+        // rate), rms 0.15 +/- 0.03 us, max 0.21 us - our own quarter-symbol
+        // dating and the rounding of each burst to a sample, nothing more.
+        assert!((fit.rate_ppm - 30.0).abs() < 5.0, "{fit:?}");
+        assert!(fit.rms_us.value() < 0.3, "{fit:?}");
+        assert!(fit.max_us < 0.5, "{fit:?}");
     }
 
     /// Any other preset's blocks leave `bt_refused` unset, so a stale

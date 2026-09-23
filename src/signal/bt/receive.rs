@@ -79,6 +79,19 @@ fn ticks_from_symbols(symbols: u64) -> i64 {
     (symbols * 2 / 625) as i64
 }
 
+/// One access code found: its LAP, and when its last bit was sliced, in µs
+/// on the stream's own sample clock (net-ux-polish-plan 6.5). To a quarter
+/// symbol: the working-rate sample the lane sliced, not the symbol count,
+/// so a slot grid can be fitted to it (`super::slots`). A constant delay
+/// (the decimator's, the discriminator's first sample, the access code's
+/// own length) sits in every hit alike and does not move a grid's
+/// residuals.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct AccessHit {
+    pub lap: u32,
+    pub at_us: f64,
+}
+
 /// One header captured and FEC-decoded after some lane's own access-code
 /// hit - still whitened, not yet attributable to a UAP. `signal::net::
 /// worker` owns the per-LAP `header::PiconetClock` that turns a run of
@@ -284,6 +297,10 @@ pub struct Receiver {
     /// symbol periods: the stream position it was built at, converted. Adding
     /// it turns this receiver's local count into the stream's.
     anchor_symbols: u64,
+    /// The same anchor, exact, in µs: [`AccessHit::at_us`]'s origin. The
+    /// symbol anchor is rounded to a whole symbol, which a grid fitted to a
+    /// fraction of a microsecond cannot afford.
+    anchor_us: f64,
     /// One header capture in progress per lane, if any. A second hit on a
     /// lane that already has one pending does not restart it - finishing
     /// the older capture first is a small, honest simplification, not a
@@ -331,6 +348,7 @@ impl Receiver {
             detectors: [Detector::new(); PHASES],
             lane_symbols: [0; PHASES],
             anchor_symbols: (first_pair as f64 * SYMBOL_RATE_HZ / raw_rate).round() as u64,
+            anchor_us: first_pair as f64 * 1e6 / raw_rate,
             pending: std::array::from_fn(|_| None),
         })
     }
@@ -380,7 +398,11 @@ impl Receiver {
     /// capture right there - no payload capture is kept for a header this
     /// arc could not even read); once [`PAYLOAD_CAPTURE_BITS`] more
     /// arrive, a [`HeaderHit`] carrying both is emitted.
-    pub fn push(&mut self, bytes: &[u8], geometry: SampleGeometry) -> (Vec<u32>, Vec<HeaderHit>) {
+    pub fn push(
+        &mut self,
+        bytes: &[u8],
+        geometry: SampleGeometry,
+    ) -> (Vec<AccessHit>, Vec<HeaderHit>) {
         let mut iq = Vec::new();
         decode_iq(bytes, geometry, usize::MAX, &mut iq);
         self.mixer.mix(&mut iq);
@@ -434,8 +456,13 @@ impl Receiver {
             }
 
             if let Some(lap) = self.detectors[self.lane].push(bit) {
-                if !found.contains(&lap) {
-                    found.push(lap);
+                if !found.iter().any(|h: &AccessHit| h.lap == lap) {
+                    // The working-rate sample this lane just sliced.
+                    let sample = self.lane_symbols[self.lane] * PHASES as u64 + self.lane as u64;
+                    found.push(AccessHit {
+                        lap,
+                        at_us: self.anchor_us + sample as f64 * 1e6 / WORKING_RATE_HZ,
+                    });
                 }
                 if self.pending[self.lane].is_none() {
                     self.pending[self.lane] = Some(PendingHeader {
@@ -530,7 +557,36 @@ mod tests {
 
         let mut rx = Receiver::new(RAW_RATE, ch, TUNED_CENTRE, 0).unwrap();
         let (found, _headers) = rx.push(&bytes, geometry);
+        let found: Vec<u32> = found.iter().map(|h| h.lap).collect();
         assert_eq!(found, vec![lap], "{found:?}");
+    }
+
+    /// **A hit is dated to a quarter symbol on the stream's clock** (6.5):
+    /// the same access code placed 250 µs later in the capture is found
+    /// 250 µs later, and a receiver built at a later stream position dates
+    /// the same sample alike, since the anchor is exact rather than rounded
+    /// to a symbol.
+    #[test]
+    fn a_hit_is_dated_on_the_streams_own_clock() {
+        const RAW_RATE: f64 = 20_000_000.0;
+        const TUNED_CENTRE: f64 = 2_441_000_000.0;
+        let (ch, lap) = (39u8, 0x0055_aa11);
+        let geometry = eight_bit();
+        let at = |lead_us: usize, first_pair: u64| {
+            let mut iq = vec![Complex::new(0.0f32, 0.0); lead_us * 20];
+            iq.extend(place_on_channel(RAW_RATE, ch, TUNED_CENTRE, lap));
+            let mut rx = Receiver::new(RAW_RATE, ch, TUNED_CENTRE, first_pair).unwrap();
+            let (found, _) = rx.push(&to_bytes(&iq, geometry), geometry);
+            found.first().expect("found").at_us
+        };
+        let base = at(0, 0);
+        assert!(
+            (at(250, 0) - base - 250.0).abs() < 0.3,
+            "{} vs {base}",
+            at(250, 0)
+        );
+        // Built 7 samples (0.35 us) into the stream: dated 0.35 us later.
+        assert!((at(0, 7) - base - 0.35).abs() < 1e-9);
     }
 
     /// The same signal is found regardless of which of the 79 classic BT
@@ -551,6 +607,7 @@ mod tests {
             let bytes = to_bytes(&placed, geometry);
             let mut rx = Receiver::new(RAW_RATE, ch, tuned_centre, 0).unwrap();
             let (found, _headers) = rx.push(&bytes, geometry);
+            let found: Vec<u32> = found.iter().map(|h| h.lap).collect();
             assert_eq!(
                 found,
                 vec![lap],
@@ -616,6 +673,7 @@ mod tests {
 
         let mut rx = Receiver::new(RAW_RATE, ch, TUNED_CENTRE, 0).unwrap();
         let (found, headers) = rx.push(&bytes, geometry);
+        let found: Vec<u32> = found.iter().map(|h| h.lap).collect();
         assert_eq!(found, vec![lap], "{found:?}");
         assert_eq!(
             headers.len(),
