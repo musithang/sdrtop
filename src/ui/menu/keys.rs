@@ -145,7 +145,7 @@ pub const GLOBAL: &[(&str, &[Binding])] = &[
             b(
                 "O",
                 Some('o'),
-                "in NET: write the band and the census to a file",
+                "in NET: write the band, the census and the BLE packets to files",
             ),
             b(
                 "I",

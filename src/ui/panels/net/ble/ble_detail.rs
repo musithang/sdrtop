@@ -41,6 +41,7 @@ use ratatui::{
     Frame,
 };
 
+use crate::signal::ble::ad::hex;
 use crate::signal::ble::measure::{Drift, ModulationQuality};
 use crate::signal::ble::pdu::PduType;
 use crate::signal::dsp::uncertainty::Uncertain;
@@ -269,41 +270,16 @@ fn ch_sel(p: &BlePacket) -> Option<&'static str> {
     })
 }
 
-/// `55 66 a0`: octets as the air carried them.
-fn hex(data: &[u8]) -> String {
-    data.iter()
-        .map(|b| format!("{b:02x}"))
-        .collect::<Vec<_>>()
-        .join(" ")
-}
-
-/// A UUID as it is written: `0x180F` for 16 and 32 bits (with the SIG's
-/// name for a 16-bit one it lists), the 8-4-4-4-12 form for 128.
+/// A UUID as it is written (`ad::uuid_text`), with the SIG's name beside a
+/// 16-bit one the snapshot lists.
 fn uuid(written: &[u8]) -> String {
+    let text = crate::signal::ble::ad::uuid_text(written);
     match written {
-        [hi, lo] => {
-            let n = u16::from_be_bytes([*hi, *lo]);
-            match crate::signal::ble::assigned::service16(n) {
-                Some(name) => format!("0x{n:04X} {name}"),
-                None => format!("0x{n:04X}"),
-            }
-        }
-        [_, _, _, _] => format!("0x{}", hex(written).replace(' ', "").to_uppercase()),
-        _ => {
-            let h = hex(written).replace(' ', "");
-            if h.len() == 32 {
-                format!(
-                    "{}-{}-{}-{}-{}",
-                    &h[0..8],
-                    &h[8..12],
-                    &h[12..16],
-                    &h[16..20],
-                    &h[20..32]
-                )
-            } else {
-                h
-            }
-        }
+        [hi, lo] => match crate::signal::ble::assigned::service16(u16::from_be_bytes([*hi, *lo])) {
+            Some(name) => format!("{text} {name}"),
+            None => text,
+        },
+        _ => text,
     }
 }
 

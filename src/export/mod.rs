@@ -14,6 +14,7 @@
 //! are the first two things that needed them, and there are two of them on
 //! purpose: one body proves nothing about a seam.
 
+pub mod ble;
 pub mod census;
 pub mod destination;
 pub mod occupancy;
@@ -31,7 +32,8 @@ pub struct Written {
     pub rows: usize,
 }
 
-/// Write both bodies of the NET section.
+/// Write every body of the NET section: the band, the census and the BLE
+/// packets.
 ///
 /// **Two files, one header, one destination answer.** The bodies know nothing
 /// about each other; what they share is the part built to be shared. A body that
@@ -60,6 +62,19 @@ pub fn net_section(
         }
     });
 
+    let ble = ble::rows(state);
+    // An empty file says which empty it is, as the packet list does; a held
+    // or filtered list says what the file is short of.
+    let ble_note = if ble.is_empty() {
+        Some(match &state.net.ble_refused {
+            Some(why) => format!("no packet: the BLE decoder was not running ({why})"),
+            None if state.net.ble_heard > 0 => "no packet in the list as it was shown".to_string(),
+            None => "no packet has been decoded this session".to_string(),
+        })
+    } else {
+        ble::note(state)
+    };
+
     vec![
         one(
             state,
@@ -79,6 +94,7 @@ pub fn net_section(
             census,
             census_note,
         ),
+        one(state, dir, unix_secs, "net-ble", ble::HEADER, ble, ble_note),
     ]
 }
 
@@ -143,15 +159,16 @@ mod tests {
         dir
     }
 
-    /// **The seam, demonstrated.** Two bodies that know nothing about each other
-    /// produce two files with the same header and the same naming, which is the
-    /// property a later IQ-sample export needs.
+    /// **The seam, demonstrated.** Bodies that know nothing about each other
+    /// produce files with the same header and the same naming, which is the
+    /// property a later IQ-sample export needs; the BLE packets were the third
+    /// to use it (net-ux-polish-plan 5.6).
     #[test]
-    fn two_bodies_share_one_header_and_one_naming() {
+    fn every_body_shares_one_header_and_one_naming() {
         let dir = scratch();
         let m = SdrMetrics::fixture().streaming();
         let out = net_section(&m, &dir, 1_788_632_561);
-        assert_eq!(out.len(), 2);
+        assert_eq!(out.len(), 3);
 
         let paths: Vec<_> = out
             .iter()
@@ -165,6 +182,10 @@ mod tests {
             paths[1].ends_with("net-census-20260905-182241.csv"),
             "{paths:?}"
         );
+        assert!(
+            paths[2].ends_with("net-ble-20260905-182241.csv"),
+            "{paths:?}"
+        );
 
         let head = |p: &PathBuf| {
             std::fs::read_to_string(p)
@@ -176,6 +197,7 @@ mod tests {
         };
         let a = head(&paths[0]);
         let b = head(&paths[1]);
+        let c = head(&paths[2]);
         // The provenance is identical up to each file's own note line.
         let common = |v: &[String]| {
             v.iter()
@@ -184,6 +206,7 @@ mod tests {
                 .collect::<Vec<_>>()
         };
         assert_eq!(common(&a), common(&b));
+        assert_eq!(common(&a), common(&c));
         assert!(a.iter().any(|l| l.contains("exported")), "{a:?}");
         let _ = std::fs::remove_dir_all(&dir);
     }

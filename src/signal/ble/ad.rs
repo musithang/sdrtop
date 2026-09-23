@@ -271,6 +271,34 @@ fn decode(code: u8, value: &[u8]) -> Result<Ad, &'static str> {
     }
 }
 
+/// `55 66 a0`: octets as the air carried them, the one form the detail view
+/// and the export both write.
+pub fn hex(data: &[u8]) -> String {
+    data.iter()
+        .map(|b| format!("{b:02x}"))
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
+/// A UUID as the specification writes it, from its written-order octets:
+/// `0x180F` for 16 bits, `0x0000FE9F` for 32, the 8-4-4-4-12 form for 128.
+/// The number only; a name for it is the SIG snapshot's to add.
+pub fn uuid_text(written: &[u8]) -> String {
+    let h: String = written.iter().map(|b| format!("{b:02x}")).collect();
+    match written.len() {
+        2 | 4 => format!("0x{}", h.to_uppercase()),
+        16 => format!(
+            "{}-{}-{}-{}-{}",
+            &h[0..8],
+            &h[8..12],
+            &h[12..16],
+            &h[16..20],
+            &h[20..32]
+        ),
+        _ => h,
+    }
+}
+
 /// `text` as it may reach a terminal or a file: every control character
 /// replaced with U+FFFD, so an advertised name cannot move the cursor, clear
 /// the screen or break a CSV row, and the replacement shows that something
