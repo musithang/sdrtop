@@ -227,7 +227,7 @@ fn detail_within(
     }
     let sections = [
         ("MODULATION", modulation_lines(p, iw, theme)),
-        ("TIMING", timing_lines(p, iw, theme)),
+        ("TIMING", timing_lines(p, state, iw, theme)),
         ("HEADERS", header_lines(p, state, iw, theme)),
     ];
     let last = sections.len() - 1;
@@ -371,7 +371,12 @@ const JITTER_RESOLUTION_US: f64 = 0.25;
 /// piconet, so slaves' transmissions are on the grid too, timed from what
 /// they received; and a hit is dated to a quarter symbol, 0.25 µs, which a
 /// residual includes.
-fn timing_lines(p: &Piconet, iw: usize, theme: &crate::Theme) -> Vec<Line<'static>> {
+fn timing_lines(
+    p: &Piconet,
+    state: &SdrMetrics,
+    iw: usize,
+    theme: &crate::Theme,
+) -> Vec<Line<'static>> {
     use crate::signal::bt::slots::SlotRefusal;
     let mut out = vec![crate::ui::chrome::section(
         "timing",
@@ -418,10 +423,24 @@ fn timing_lines(p: &Piconet, iw: usize, theme: &crate::Theme) -> Vec<Line<'stati
             Style::default().fg(theme.value),
         ),
     ]));
+    // The piconet's own colour, as on the hop panel and its roster chip.
+    let colour = state
+        .net
+        .bt_piconets
+        .iter()
+        .position(|q| q.lap == p.lap)
+        .map_or(theme.value_hi, |k| theme.series_color(k));
+    let (bars, beyond) = residual_histogram(&f.residuals_us, iw, colour, theme);
+    out.extend(bars);
     let span = crate::ui::widgets::timing_fmt::seconds_ms((f.span_us / 1e3) as u64);
+    let beyond = if beyond > 0 {
+        format!(", {beyond} beyond the plot's 1.5")
+    } else {
+        String::new()
+    };
     for chunk in crate::ui::chrome::wrap(
         &format!(
-            "{} hits over {span} on their own grid, every member's; hits dated to 0.25 us",
+            "residual from the grid, us{beyond}: {} hits over {span}, every member's; hits dated to 0.25 us",
             f.hits
         ),
         iw.saturating_sub(1),
@@ -433,6 +452,97 @@ fn timing_lines(p: &Piconet, iw: usize, theme: &crate::Theme) -> Vec<Line<'stati
         )));
     }
     out
+}
+
+/// The residual plot's reach either side of the grid, µs: past the 1 µs
+/// limit, so a residual beyond it shows as one.
+const PLOT_US: f64 = 1.5;
+/// Its height in rows of eighth blocks.
+const PLOT_ROWS: usize = 3;
+
+/// Where each hit sat against the grid (net-ux-polish-plan 6.5.b):
+/// residuals from −[`PLOT_US`] to +[`PLOT_US`] in bars of the piconet's
+/// own colour, the specification's ±1 µs (2.2.5) as `┊` rules in the
+/// warning ink, zero as a dim one, and a tick and label row under them. The
+/// numbers say how wide the spread is; the shape says whether it is one
+/// spread or two, as when a peripheral answers a little late on every slot
+/// and stands as its own hump. Returns the lines, empty where the width
+/// cannot hold a readable plot, and how many residuals fell beyond it.
+fn residual_histogram(
+    residuals: &[f32],
+    iw: usize,
+    colour: ratatui::style::Color,
+    theme: &crate::Theme,
+) -> (Vec<Line<'static>>, usize) {
+    const EIGHTHS: [char; 9] = [' ', '▁', '▂', '▃', '▄', '▅', '▆', '▇', '█'];
+    let cols = iw.saturating_sub(4);
+    let beyond = residuals
+        .iter()
+        .filter(|r| (r.abs() as f64) >= PLOT_US)
+        .count();
+    if cols < 15 {
+        return (Vec::new(), beyond);
+    }
+    let col_of = |x: f64| {
+        (((x + PLOT_US) / (2.0 * PLOT_US)) * cols as f64)
+            .floor()
+            .clamp(0.0, cols as f64 - 1.0) as usize
+    };
+    let mut bins = vec![0u32; cols];
+    for &r in residuals.iter().filter(|r| (r.abs() as f64) < PLOT_US) {
+        bins[col_of(r as f64)] += 1;
+    }
+    let most = bins.iter().copied().max().unwrap_or(0).max(1);
+    let limits = [col_of(-1.0), col_of(1.0)];
+    let zero = col_of(0.0);
+    let mut out = Vec::with_capacity(PLOT_ROWS + 2);
+    for row in 0..PLOT_ROWS {
+        let base = (PLOT_ROWS - 1 - row) * 8;
+        let mut spans = vec![Span::raw("  ")];
+        for (c, &n) in bins.iter().enumerate() {
+            let fill = ((n as f64 / most as f64 * (PLOT_ROWS * 8) as f64).round() as usize)
+                .saturating_sub(base)
+                .min(8);
+            spans.push(if fill > 0 {
+                Span::styled(EIGHTHS[fill].to_string(), Style::default().fg(colour))
+            } else if limits.contains(&c) {
+                Span::styled("\u{250a}", Style::default().fg(theme.status_warn))
+            } else if c == zero {
+                Span::styled("\u{250a}", Style::default().fg(theme.border_dim))
+            } else {
+                Span::raw(" ")
+            });
+        }
+        out.push(Line::from(spans));
+    }
+    let ticks: String = (0..cols)
+        .map(|c| {
+            if limits.contains(&c) || c == zero {
+                '\u{2534}'
+            } else {
+                '\u{2500}'
+            }
+        })
+        .collect();
+    out.push(Line::from(vec![
+        Span::raw("  "),
+        Span::styled(ticks, Style::default().fg(theme.border_dim)),
+    ]));
+    let mut labels = vec![' '; cols];
+    for (c, text) in [(limits[0], "-1"), (zero, "0"), (limits[1], "+1")] {
+        let at = c.saturating_sub(text.len() / 2).min(cols - text.len());
+        for (i, ch) in text.chars().enumerate() {
+            labels[at + i] = ch;
+        }
+    }
+    out.push(Line::from(vec![
+        Span::raw("  "),
+        Span::styled(
+            labels.into_iter().collect::<String>(),
+            Style::default().fg(theme.label),
+        ),
+    ]));
+    (out, beyond)
 }
 
 /// What the piconet's headers say (net-ux-polish-plan 6.3), under its own
@@ -939,6 +1049,7 @@ mod tests {
         assert!(out.contains("0.82"), "{out}");
         assert!(out.contains("0.31"), "{out}");
         assert!(out.contains("60 hits over 60 s"), "{out}");
+        assert!(out.contains("residual from the grid"), "{out}");
         assert!(out.contains("Core 5.4 Vol 2 B 2.2.5"), "{out}");
     }
 
@@ -956,6 +1067,52 @@ mod tests {
         let tall = draw(NetBtPiconetsPanel, 60, 60, &m).join("\n");
         assert!(!tall.contains("taller panel"), "{tall}");
         assert!(tall.contains("HEADERS"), "{tall}");
+    }
+
+    /// **The residuals as a shape** (6.5.b): each lands in its column, the
+    /// ±1 µs limits and zero are ruled and labelled, and a residual past
+    /// the plot is counted rather than dropped.
+    #[test]
+    fn the_residual_histogram_places_each_hit_and_the_limits() {
+        let theme = crate::Theme::sdr();
+        let colour = theme.series_color(1);
+        // 40 columns across 3 us: 0.075 us each.
+        let (lines, beyond) =
+            residual_histogram(&[0.0, 0.01, 0.02, 0.9, -0.5, 2.0], 44, colour, &theme);
+        assert_eq!(beyond, 1);
+        assert_eq!(lines.len(), PLOT_ROWS + 2);
+        let text = |l: &Line| {
+            l.spans
+                .iter()
+                .map(|s| s.content.as_ref())
+                .collect::<String>()
+        };
+        // The tallest bar (three residuals near zero) reaches the top row.
+        let top = text(&lines[0]);
+        assert_eq!(top.chars().nth(2 + 20), Some('\u{2588}'), "{top:?}");
+        // Limits ruled at -1 and +1 (columns 6 and 33), labelled below.
+        assert_eq!(top.chars().nth(2 + 6), Some('\u{250a}'), "{top:?}");
+        assert_eq!(top.chars().nth(2 + 33), Some('\u{250a}'), "{top:?}");
+        let labels = text(&lines[PLOT_ROWS + 1]);
+        assert!(labels.contains("-1") && labels.contains("+1"), "{labels:?}");
+        // The limit rules are in the warning ink, the bars in the colour.
+        let limit_span = lines[0]
+            .spans
+            .iter()
+            .find(|s| s.content == "\u{250a}")
+            .unwrap();
+        assert_eq!(limit_span.style.fg, Some(theme.status_warn));
+        let bar = lines[2]
+            .spans
+            .iter()
+            .find(|s| s.content != " " && s.content != "\u{250a}" && s.content != "  ")
+            .unwrap();
+        assert_eq!(bar.style.fg, Some(colour));
+        // Too narrow for a readable plot: none, and still the count.
+        assert_eq!(
+            residual_histogram(&[3.0], 16, colour, &theme),
+            (Vec::new(), 1)
+        );
     }
 
     #[test]
