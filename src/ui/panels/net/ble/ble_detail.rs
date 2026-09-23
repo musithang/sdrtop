@@ -1,8 +1,10 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright (C) 2026 MusiThang <viktor.laszlo92@protonmail.com>
 
-//! `NetBleDetailPanel` - everything about one packet: the one selected in the
-//! list, or the latest when none is (net-ux-polish-plan 5.4).
+//! `NetBleDetailPanel` - everything about one packet, the one selected in the
+//! list (net-ux-polish-plan 5.4); with none selected, the session's frame
+//! error rate against SNR (5.7), for all traffic or for the one advertiser
+//! the list is filtered to.
 //!
 //! **It replaced `net_ble_rf`, which showed the latest packet's modulation
 //! beside a list whose cursor could be on a different one.** The detail
@@ -204,18 +206,36 @@ fn fit(rows: &[LimitRow], width: usize) -> RowWidths {
 /// The label column of the detail's fields.
 const LABEL_W: usize = 9;
 
-/// The packet the detail is about: the selected one, or the latest shown
-/// when nothing is selected, and whether it was selected. `Err` with the
-/// reason when there is none to show.
-fn subject(state: &SdrMetrics) -> Result<(&BlePacket, bool), &'static str> {
-    let shown = state.net.ble_shown();
-    match state.net.ble_view.selection.selected {
-        Some(seq) => shown
+/// The selected packet, or why it cannot be shown. `None` when nothing is
+/// selected: the detail is then the session's frame error curve
+/// ([`fer_view`]), not a packet the reader did not choose.
+fn subject(state: &SdrMetrics) -> Option<Result<&BlePacket, &'static str>> {
+    let seq = state.net.ble_view.selection.selected?;
+    Some(
+        state
+            .net
+            .ble_shown()
             .into_iter()
             .find(|p| p.seq == seq)
-            .map(|p| (p, true))
             .ok_or("the selected packet has left the list"),
-        None => shown.first().map(|p| (*p, false)).ok_or("no packets yet"),
+    )
+}
+
+/// Nothing selected: the frame error curve of what the list is showing, all
+/// traffic, or the one advertiser the list is filtered to (its own curve,
+/// from the census record).
+fn fer_view(state: &SdrMetrics, iw: usize, theme: &crate::Theme) -> Vec<Line<'static>> {
+    match state.net.ble_view.filter {
+        None => fer_lines(&state.net.fer, "all traffic", iw, theme),
+        Some(a) => match state.net.census.devices.iter().find(|d| d.address == a) {
+            Some(d) => fer_lines(
+                &d.fer,
+                &state.net.show_address(a, d.random, None),
+                iw,
+                theme,
+            ),
+            None => vec![note("the filtered address is not in the census", theme)],
+        },
     }
 }
 
@@ -405,7 +425,6 @@ fn advertised_lines(p: &BlePacket, iw: usize, theme: &crate::Theme) -> Vec<Line<
 /// The PACKET, ADVERTISED and PHYSICS sections.
 fn header_lines(
     p: &BlePacket,
-    selected: bool,
     state: &SdrMetrics,
     iw: usize,
     theme: &crate::Theme,
@@ -413,10 +432,7 @@ fn header_lines(
     use crate::ui::chrome::section;
     let now = std::time::Instant::now();
     let age = now.saturating_duration_since(p.seen).as_secs();
-    let hint = format!(
-        "{} \u{00b7} {age} s ago",
-        if selected { "selected" } else { "latest" }
-    );
+    let hint = format!("selected \u{00b7} {age} s ago");
     let mut out = vec![
         section("packet", &hint, iw, theme),
         field_line(
@@ -681,6 +697,108 @@ fn unlimited_drift(d: Option<&Drift>, theme: &crate::Theme) -> Vec<Line<'static>
     ]
 }
 
+/// The frame error curve as rows (net-ux-polish-plan 5.7): one SNR bin a
+/// row, from the lowest bin with packets to the highest, each a bar as long as
+/// its failure fraction with the rate and its uncertainty beside it and how
+/// many packets it rests on; a thin bin says it is thin instead of drawing.
+fn fer_lines(
+    curve: &crate::signal::ble::fer::FerCurve,
+    scope: &str,
+    iw: usize,
+    theme: &crate::Theme,
+) -> Vec<Line<'static>> {
+    use crate::signal::ble::fer::{edges, MIN_PACKETS};
+    let hint = format!("{scope} \u{00b7} {} packets", curve.total());
+    let mut out = vec![crate::ui::chrome::section(
+        "frame errors by SNR",
+        &hint,
+        iw,
+        theme,
+    )];
+    let Some(span) = curve.span() else {
+        out.push(note("no packet with an SNR yet", theme));
+        return out;
+    };
+    const RANGE_W: usize = 10;
+    const VALUE_W: usize = 14;
+    const COUNT_W: usize = 7;
+    let bar_w = iw
+        .saturating_sub(1 + RANGE_W + 1 + 1 + VALUE_W + 1 + COUNT_W)
+        .max(4);
+    let range_of = |first: usize, last: usize| match (edges(first).0, edges(last).1) {
+        (None, Some(hi)) => format!("<{hi:.0} dB"),
+        (Some(lo), None) => format!("\u{2265}{lo:.0} dB"),
+        (Some(lo), Some(hi)) => format!("{lo:.0}-{hi:.0} dB"),
+        (None, None) => String::new(),
+    };
+    let bins: Vec<usize> = span.collect();
+    let mut i = 0;
+    while i < bins.len() {
+        let bin = bins[i];
+        let n = curve.packets(bin);
+        // A run of empty bins is one row: the gap shows, the list stays short.
+        if n == 0 {
+            let mut last = i;
+            while last + 1 < bins.len() && curve.packets(bins[last + 1]) == 0 {
+                last += 1;
+            }
+            out.push(Line::from(vec![
+                Span::styled(
+                    format!(" {:>RANGE_W$} ", range_of(bin, bins[last])),
+                    Style::default().fg(theme.label),
+                ),
+                Span::styled("no packets".to_string(), Style::default().fg(theme.label)),
+            ]));
+            i = last + 1;
+            continue;
+        }
+        i += 1;
+        let range = range_of(bin, bin);
+        let mut spans = vec![Span::styled(
+            format!(" {range:>RANGE_W$} "),
+            Style::default().fg(theme.label),
+        )];
+        match curve.rate(bin) {
+            Some(rate) => {
+                let (filled, empty) = crate::ui::widgets::charts::eighth_block_bar(
+                    (rate.value() * 1000.0).round() as u32,
+                    1000,
+                    bar_w,
+                );
+                spans.push(Span::styled(
+                    filled,
+                    Style::default().fg(theme.border_accent),
+                ));
+                spans.push(Span::styled(empty, Style::default().fg(theme.border_dim)));
+                spans.push(Span::styled(
+                    format!(
+                        " {:>VALUE_W$}",
+                        Reading::new(rate.scale(100.0), "%", f64::INFINITY).text()
+                    ),
+                    Style::default().fg(theme.value),
+                ));
+                spans.push(Span::styled(
+                    format!(" {:>COUNT_W$}", format!("({n})")),
+                    Style::default().fg(theme.label),
+                ));
+            }
+            None => spans.push(Span::styled(
+                format!("{n} packets, fewer than {MIN_PACKETS}"),
+                Style::default().fg(theme.stale),
+            )),
+        }
+        out.push(Line::from(spans));
+    }
+    for row in crate::ui::chrome::wrap(
+        "CRC failures among packets whose length matched; gave-ups are on Feed Health",
+        iw.saturating_sub(1).max(1),
+        3,
+    ) {
+        out.push(note(&row, theme));
+    }
+    out
+}
+
 impl Panel for NetBleDetailPanel {
     fn name(&self) -> &'static str {
         "net_ble_detail"
@@ -691,12 +809,21 @@ impl Panel for NetBleDetailPanel {
     }
 
     fn chrome(&self, state: &SdrMetrics) -> PanelChrome {
-        PanelChrome::new("Packet Detail")
+        let mut chrome = PanelChrome::new("Packet Detail")
             .stale_when(Staleness::NotStreaming)
             .tag_if(true, state.net.mode.tag())
-            .tag_if(true, crate::ui::panel::Tag::Phy(state.net.ble_phy))
-            .shows_offsets()
-            .shows_addresses()
+            .tag_if(true, crate::ui::panel::Tag::Phy(state.net.ble_phy));
+        // The declarations follow what the view prints: a packet carries a
+        // ppm and addresses, the error curve carries neither, except that a
+        // filtered curve is headed by its address.
+        if state.net.ble_refused.is_none() {
+            if matches!(subject(state), Some(Ok(_))) {
+                chrome = chrome.shows_offsets().shows_addresses();
+            } else if subject(state).is_none() && state.net.ble_view.filter.is_some() {
+                chrome = chrome.shows_addresses();
+            }
+        }
+        chrome
     }
 
     fn render(
@@ -727,9 +854,13 @@ impl Panel for NetBleDetailPanel {
             return;
         }
 
-        let (p, selected) = match subject(state) {
-            Ok(found) => found,
-            Err(why) => {
+        let p = match subject(state) {
+            None => {
+                f.render_widget(Paragraph::new(fer_view(state, width, theme)), inner);
+                return;
+            }
+            Some(Ok(found)) => found,
+            Some(Err(why)) => {
                 f.render_widget(
                     Paragraph::new(Line::from(Span::styled(
                         why.to_string(),
@@ -741,7 +872,7 @@ impl Panel for NetBleDetailPanel {
             }
         };
 
-        let mut lines = header_lines(p, selected, state, width, theme);
+        let mut lines = header_lines(p, state, width, theme);
         lines.extend(modulation_lines(p, width, theme));
         f.render_widget(Paragraph::new(lines), inner);
     }
@@ -754,6 +885,17 @@ mod tests {
     use crate::state::fixture::draw;
     use crate::state::BlePacket;
     use std::time::Instant;
+
+    /// `m` with its newest packet selected, where nothing was: the packet
+    /// view these tests are about, which since 5.7 needs a selection (with
+    /// none the detail is the frame error curve).
+    fn sel(m: &SdrMetrics) -> SdrMetrics {
+        let mut m = m.clone();
+        if m.net.ble_view.selection.selected.is_none() {
+            m.net.ble_view.selection.selected = m.net.ble_packets.front().map(|p| p.seq);
+        }
+        m
+    }
 
     fn quality(deviation_hz: f64) -> ModulationQuality {
         ModulationQuality {
@@ -808,22 +950,28 @@ mod tests {
     fn a_refusal_is_shown_rather_than_an_empty_panel() {
         let mut m = SdrMetrics::fixture().streaming();
         m.net.ble_refused = Some("not tuned to an advertising channel".to_string());
-        let out = draw(NetBleDetailPanel, 40, 24, &m).join("\n");
+        let out = draw(NetBleDetailPanel, 40, 24, &sel(&m)).join("\n");
         assert!(out.contains("not decoding"), "{out}");
         assert!(out.contains("not tuned"), "{out}");
     }
 
     #[test]
     fn an_empty_feed_says_nothing_decoded_yet() {
-        let out = draw(NetBleDetailPanel, 40, 8, &SdrMetrics::fixture().streaming()).join("\n");
-        assert!(out.contains("no packets yet"), "{out}");
+        let out = draw(
+            NetBleDetailPanel,
+            40,
+            8,
+            &sel(&SdrMetrics::fixture().streaming()),
+        )
+        .join("\n");
+        assert!(out.contains("no packet with an SNR yet"), "{out}");
     }
 
     #[test]
     fn a_packet_with_nothing_measured_refuses_rather_than_inventing_rows() {
         let mut m = SdrMetrics::fixture().streaming();
         m.net.ble_packets.push_back(packet(None));
-        let out = draw(NetBleDetailPanel, 40, 24, &m).join("\n");
+        let out = draw(NetBleDetailPanel, 40, 24, &sel(&m)).join("\n");
         assert!(out.contains("not measured"), "{out}");
         assert!(!out.contains("Mod index"), "{out}");
     }
@@ -838,7 +986,7 @@ mod tests {
         m.net
             .ble_packets
             .push_back(packet(Some(quality(250_000.0))));
-        let out = draw(NetBleDetailPanel, 70, 24, &m).join("\n");
+        let out = draw(NetBleDetailPanel, 70, 24, &sel(&m)).join("\n");
         assert!(out.contains("Mod index"), "{out}");
         assert!(out.contains("df1 avg"), "{out}");
         assert!(out.contains("df2 max"), "{out}");
@@ -858,7 +1006,7 @@ mod tests {
             Some(quality(250_000.0)),
             Some(drift(5_000.0)),
         ));
-        let out = draw(NetBleDetailPanel, 70, 24, &m).join("\n");
+        let out = draw(NetBleDetailPanel, 70, 24, &sel(&m)).join("\n");
         assert!(out.contains("Drift"), "{out}");
         assert!(out.contains("Drift rate"), "{out}");
         let lower = out.to_ascii_lowercase();
@@ -876,7 +1024,7 @@ mod tests {
         m.net
             .ble_packets
             .push_back(packet(Some(quality(250_000.0))));
-        let out = draw(NetBleDetailPanel, 70, 24, &m).join("\n");
+        let out = draw(NetBleDetailPanel, 70, 24, &sel(&m)).join("\n");
         assert!(!out.contains("Drift"), "{out}");
     }
 
@@ -890,7 +1038,7 @@ mod tests {
         for w in 20..90u16 {
             for h in 4..16u16 {
                 for m in [populated.clone(), SdrMetrics::fixture()] {
-                    for line in draw(NetBleDetailPanel, w, h, &m) {
+                    for line in draw(NetBleDetailPanel, w, h, &sel(&m)) {
                         assert!(line.chars().count() <= w as usize, "{w}x{h}: {line:?}");
                     }
                 }
@@ -920,9 +1068,10 @@ mod tests {
     #[test]
     fn the_detail_follows_the_selection() {
         let mut m = two();
-        let latest = draw(NetBleDetailPanel, 70, 24, &m).join("\n");
-        assert!(latest.contains("latest"), "{latest}");
-        assert!(latest.contains("ch 39"), "{latest}");
+        // Nothing selected: the frame error curve, not a packet nobody chose.
+        let none = draw(NetBleDetailPanel, 70, 24, &m).join("\n");
+        assert!(none.contains("FRAME ERRORS BY SNR"), "{none}");
+        assert!(!none.contains("PACKET"), "{none}");
 
         m.net.ble_view.selection.selected = Some(1);
         let out = draw(NetBleDetailPanel, 70, 24, &m).join("\n");
@@ -945,7 +1094,7 @@ mod tests {
         let mut p = packet_with_drift(Some(quality(250_000.0)), Some(drift(5_000.0)));
         p.crc_ok = false;
         m.net.ble_packets.push_front(p);
-        let out = draw(NetBleDetailPanel, 70, 24, &m).join("\n");
+        let out = draw(NetBleDetailPanel, 70, 24, &sel(&m)).join("\n");
         assert!(out.contains("not measured: CRC failed"), "{out}");
         assert!(!out.contains("Mod index"), "{out}");
         assert!(!out.contains("Drift"), "{out}");
@@ -983,7 +1132,7 @@ mod tests {
         let mut p = packet(None);
         p.freq_offset_hz = Some(Uncertain::from_sigma(-22_300.0, 500.0));
         m.net.ble_packets.push_front(p);
-        let out = draw(NetBleDetailPanel, 80, 24, &m);
+        let out = draw(NetBleDetailPanel, 80, 24, &sel(&m));
         assert!(out[0].contains("[RELATIVE]"), "{}", out[0]);
         let text = out.join("\n");
         assert!(text.contains("-22.3 ±0.5 kHz"), "{text}");
@@ -1008,7 +1157,7 @@ mod tests {
     #[test]
     fn the_real_packet_s_advertising_reads_as_apple_with_its_octets() {
         let m = advertising(&[0x07, 0xff, 0x4c, 0x00, 0x12, 0x02, 0x00, 0x02]);
-        let out = draw(NetBleDetailPanel, 70, 30, &m).join("\n");
+        let out = draw(NetBleDetailPanel, 70, 30, &sel(&m)).join("\n");
         assert!(out.contains("ADVERTISED"), "{out}");
         assert!(out.contains("company  Apple, Inc. (0x004C)"), "{out}");
         assert!(out.contains("mfr data 12 02 00 02"), "{out}");
@@ -1025,7 +1174,7 @@ mod tests {
             0x02, 0x0a, 0xf4, // TX power -12
             0x05, 0x16, 0x0f, 0x18, 0x55, 0x66, // service data
         ]);
-        let out = draw(NetBleDetailPanel, 90, 34, &m).join("\n");
+        let out = draw(NetBleDetailPanel, 90, 34, &sel(&m)).join("\n");
         for want in [
             "flags    LE General Discoverable, BR/EDR Not Supported",
             "name     Senso (shortened)",
@@ -1043,7 +1192,7 @@ mod tests {
     #[test]
     fn what_cannot_be_read_says_why() {
         let broken = advertising(&[0x02, 0x01, 0x06, 0x09, 0xff, 0x4c]);
-        let out = draw(NetBleDetailPanel, 90, 30, &broken).join("\n");
+        let out = draw(NetBleDetailPanel, 90, 30, &sel(&broken)).join("\n");
         assert!(out.contains("flags"), "{out}");
         assert!(
             out.contains("malformed at octet 3: length runs past the end"),
@@ -1052,17 +1201,17 @@ mod tests {
 
         let mut failed = advertising(&[0x05, 0x09, b'S', b'e', b'n', b's']);
         failed.net.ble_packets[0].crc_ok = false;
-        let out = draw(NetBleDetailPanel, 90, 30, &failed).join("\n");
+        let out = draw(NetBleDetailPanel, 90, 30, &sel(&failed)).join("\n");
         assert!(out.contains("not read: CRC failed"), "{out}");
         assert!(!out.contains("Sens"), "{out}");
 
         let mut ext = advertising(&[]);
         ext.net.ble_packets[0].pdu_type = PduType::Other(0x07);
-        let out = draw(NetBleDetailPanel, 90, 30, &ext).join("\n");
+        let out = draw(NetBleDetailPanel, 90, 30, &sel(&ext)).join("\n");
         assert!(out.contains("extended advertising"), "{out}");
 
         let bare = advertising(&[]);
-        let out = draw(NetBleDetailPanel, 90, 30, &bare).join("\n");
+        let out = draw(NetBleDetailPanel, 90, 30, &sel(&bare)).join("\n");
         assert!(out.contains("nothing beyond the address"), "{out}");
     }
 
@@ -1084,15 +1233,15 @@ mod tests {
             Some(quality(250_000.0)),
             Some(drift(5_000.0)),
         ));
-        let out = draw(NetBleDetailPanel, 80, 30, &m).join("\n");
+        let out = draw(NetBleDetailPanel, 80, 30, &sel(&m)).join("\n");
         assert!(out.contains("start    0.0 ±0.5 kHz"), "{out}");
         assert!(out.contains("end      5.0 ±0.5 kHz"), "{out}");
 
         m.net.ble_packets[0].crc_ok = false;
-        let failed = draw(NetBleDetailPanel, 80, 30, &m).join("\n");
+        let failed = draw(NetBleDetailPanel, 80, 30, &sel(&m)).join("\n");
         assert!(!failed.contains("start"), "{failed}");
         m.net.ble_packets[0] = packet(Some(quality(250_000.0)));
-        let none = draw(NetBleDetailPanel, 80, 30, &m).join("\n");
+        let none = draw(NetBleDetailPanel, 80, 30, &sel(&m)).join("\n");
         assert!(!none.contains("start"), "{none}");
     }
 
@@ -1131,7 +1280,7 @@ mod tests {
     /// it, said to be predicted.
     #[test]
     fn a_connect_ind_shows_its_parameters_and_predicted_hops() {
-        let out = draw(NetBleDetailPanel, 90, 40, &connect_ind(false, true)).join("\n");
+        let out = draw(NetBleDetailPanel, 90, 40, &sel(&connect_ind(false, true))).join("\n");
         for want in [
             "CONNECTION",
             "read, not followed",
@@ -1157,7 +1306,7 @@ mod tests {
     /// connection's Access Address; and a failed CRC reads no parameters.
     #[test]
     fn a_connect_ind_on_csa2_is_predicted_by_csa2_and_a_failed_one_is_not_read() {
-        let csa2 = draw(NetBleDetailPanel, 90, 40, &connect_ind(true, true)).join("\n");
+        let csa2 = draw(NetBleDetailPanel, 90, 40, &sel(&connect_ind(true, true))).join("\n");
         let expected = crate::signal::ble::connect::Csa2::new(0xAF9A_B12C, 0x1F_FFFF_FFFF).unwrap();
         let first: Vec<String> = (0..8).map(|n| expected.channel(n).0.to_string()).collect();
         let want = format!("CSA #2: {} ... predicted, not followed", first.join(" "));
@@ -1165,7 +1314,7 @@ mod tests {
         assert!(!csa2.contains("7 14 21"), "{csa2}");
         assert!(csa2.contains("ChSel    supports CSA #2"), "{csa2}");
 
-        let failed = draw(NetBleDetailPanel, 90, 40, &connect_ind(false, false)).join("\n");
+        let failed = draw(NetBleDetailPanel, 90, 40, &sel(&connect_ind(false, false))).join("\n");
         assert!(failed.contains("not read: CRC failed"), "{failed}");
         assert!(!failed.contains("0xAF9AB12C"), "{failed}");
     }
@@ -1182,7 +1331,7 @@ mod tests {
         p.phy = crate::signal::ble::Phy::TwoM;
         m.net.ble_packets.push_front(p);
         m.net.ble_phy = crate::signal::ble::Phy::TwoM;
-        let out = draw(NetBleDetailPanel, 90, 34, &m);
+        let out = draw(NetBleDetailPanel, 90, 34, &sel(&m));
         assert!(out[0].contains("[LE 2M]"), "{}", out[0]);
         let text = out.join("\n");
         assert!(text.contains("9 octets \u{00b7} LE 2M"), "{text}");
@@ -1197,5 +1346,44 @@ mod tests {
             "{text}"
         );
         assert!(!text.contains("Drift rate"), "{text}");
+    }
+
+    /// **Nothing selected: the session's frame error curve**, all traffic,
+    /// each bin's rate with its uncertainty and count, a thin bin said to be
+    /// thin; filtered to one address, that device's own curve under its name.
+    #[test]
+    fn nothing_selected_shows_the_frame_error_curve() {
+        let mut m = SdrMetrics::fixture().streaming();
+        for i in 0..30 {
+            m.net.fer.record(5.0, i >= 3);
+        }
+        for _ in 0..4 {
+            m.net.fer.record(20.0, true);
+        }
+        let out = draw(NetBleDetailPanel, 80, 24, &m).join("\n");
+        assert!(out.contains("FRAME ERRORS BY SNR"), "{out}");
+        assert!(out.contains("all traffic \u{00b7} 34 packets"), "{out}");
+        assert!(out.contains("4-6 dB"), "{out}");
+        assert!(out.contains("10 ±6 %"), "{out}");
+        assert!(out.contains("(30)"), "{out}");
+        assert!(out.contains("4 packets, fewer than 10"), "{out}");
+        assert!(
+            out.contains("no packets"),
+            "the empty run between them: {out}"
+        );
+
+        let addr = [0xaa, 0xbb, 0xcc, 0x11, 0x22, 0x33];
+        let mut d = crate::signal::net::census::Device::heard(addr, false, Instant::now());
+        for _ in 0..12 {
+            d.fer.record(30.0, true);
+        }
+        m.net.census.devices.push(d);
+        m.net.ble_view.filter = Some(addr);
+        let one = draw(NetBleDetailPanel, 80, 24, &m).join("\n");
+        assert!(
+            one.contains("aa:bb:cc:11:22:33 \u{00b7} 12 packets"),
+            "{one}"
+        );
+        assert!(!one.contains("34 packets"), "{one}");
     }
 }

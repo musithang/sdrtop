@@ -82,6 +82,11 @@ pub struct Device {
     /// (`signal::ble::interval`, [`Self::advertising`]). `None` until a
     /// packet arrived in LOCK.
     pub arrivals: Option<Arrivals>,
+    /// This device's own frame error rate against SNR (`signal::ble::fer`):
+    /// its good packets, and its failed ones on the same exact-address rule
+    /// as [`Self::crc_failed`], so, like that count, a ceiling on how well
+    /// its link does.
+    pub fer: crate::signal::ble::fer::FerCurve,
     /// Packets whose CRC failed and whose address field read exactly this
     /// address. See [`observe_crc_failure`] for what that can claim and what
     /// it cannot.
@@ -126,6 +131,7 @@ impl Device {
             ble_pdu_types: 0,
             modulation_index: None,
             arrivals: None,
+            fer: Default::default(),
             crc_failed: 0,
             first_seen: now,
             last_seen: now,
@@ -446,6 +452,7 @@ pub fn observe(devices: &mut Vec<Device>, s: &Sighting, now: Instant) {
     device.packets += 1;
     device.last_seen = now;
     if let Some(snr) = s.snr_db {
+        device.fer.record(snr, true);
         let best = device.best_snr_db.map_or(snr as f32, |b| b.max(snr as f32));
         device.best_snr_db = Some(best);
         device.snr_count += 1;
@@ -511,10 +518,16 @@ fn refine(estimate: &mut Option<Uncertain>, reading: Option<Uncertain>) {
 /// **It does not touch `last_seen`.** The sightings the census dates are the
 /// ones it confirmed; a packet it cannot vouch for has no business moving the
 /// SEEN column, or keeping a device that went quiet looking present.
-pub fn observe_crc_failure(devices: &mut [Device], address: [u8; 6]) -> bool {
+///
+/// Its SNR, where the packet has one, goes into the device's own frame error
+/// curve as a failure (`Device::fer`).
+pub fn observe_crc_failure(devices: &mut [Device], address: [u8; 6], snr_db: Option<f64>) -> bool {
     match devices.iter_mut().find(|d| d.address == address) {
         Some(d) => {
             d.crc_failed += 1;
+            if let Some(snr) = snr_db {
+                d.fer.record(snr, false);
+            }
             true
         }
         None => false,
@@ -926,9 +939,9 @@ mod tests {
         observe(&mut devices, &heard([1; 6], None), born);
         observe(&mut devices, &heard([1; 6], None), born);
 
-        assert!(observe_crc_failure(&mut devices, [1; 6]));
+        assert!(observe_crc_failure(&mut devices, [1; 6], None));
         assert!(
-            !observe_crc_failure(&mut devices, [2; 6]),
+            !observe_crc_failure(&mut devices, [2; 6], None),
             "an unknown address"
         );
         assert_eq!(devices.len(), 1, "no row for an address nobody confirmed");

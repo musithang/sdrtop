@@ -352,6 +352,10 @@ pub struct NetState {
     /// The PHY the BLE decoder listens for (net-ux-polish-plan 5.5): LE 1M
     /// unless the user switched, `P` on the packet list.
     pub ble_phy: crate::signal::ble::Phy,
+    /// The session's frame error rate against SNR over all BLE traffic
+    /// (`signal::ble::fer`, net-ux-polish-plan 5.7): every packet decoded to
+    /// its length, good or failed, in its SNR bin.
+    pub fer: crate::signal::ble::fer::FerCurve,
     /// Why nothing is being decoded, when the radio can otherwise stream.
     ///
     /// B6's decoder needs the working rate `signal::ble::receive::front_end`

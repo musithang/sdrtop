@@ -219,7 +219,7 @@ fn census_from_ble(
         return;
     };
     if !p.crc_ok {
-        crate::signal::net::census::observe_crc_failure(devices, address);
+        crate::signal::net::census::observe_crc_failure(devices, address, p.snr_db);
         return;
     }
     // In ppm of the channel it was heard on, so readings from all three
@@ -499,6 +499,9 @@ impl NetWorker {
                                     m.net.address_book.number(addr);
                                 }
                                 let locked = m.net.mode == crate::state::NetMode::Lock;
+                                if let Some(snr) = p.snr_db {
+                                    m.net.fer.record(snr, p.crc_ok);
+                                }
                                 census_from_ble(
                                     &mut m.net.census.devices,
                                     &p,
@@ -1022,6 +1025,8 @@ mod tests {
             "{p:?}"
         );
         assert!(!p.ch_sel && !p.rx_add_random);
+        // The section's frame error curve took it, in its SNR bin.
+        assert_eq!(m.net.fer.total(), 1, "{:?}", m.net.fer);
         // census too, keyed by the same address `net_ble_packets` shows.
         assert_eq!(m.net.census.devices.len(), 1, "{:?}", m.net.census.devices);
         assert_eq!(m.net.census.devices[0].address, addr);
@@ -1275,6 +1280,24 @@ mod tests {
         packet.crc_ok = true;
         packet.payload.truncate(6);
         assert_eq!(company_of(&packet), None);
+    }
+
+    /// **Every packet counts in its SNR bin, good or failed**: a good one in
+    /// the device's curve and the section's, a failed one from the same
+    /// address in both too (the exact-address rule).
+    #[test]
+    fn packets_fill_the_frame_error_curves_by_snr() {
+        use crate::signal::ble::fer::bin_of;
+        let mut devices = Vec::new();
+        let mut packet = crate::signal::ble::pdu::decode(&[false; 40]).unwrap();
+        packet.adv_addr = Some([1, 2, 3, 4, 5, 6]);
+        packet.snr_db = Some(13.0);
+        packet.crc_ok = true;
+        census_from_ble(&mut devices, &packet, 37, false, 8e6, Instant::now());
+        packet.crc_ok = false;
+        census_from_ble(&mut devices, &packet, 37, false, 8e6, Instant::now());
+        let fer = &devices[0].fer;
+        assert_eq!((fer.good[bin_of(13.0)], fer.failed[bin_of(13.0)]), (1, 1));
     }
 
     /// **Only LOCK's periodic advertising is timed.** An ADV_IND in LOCK

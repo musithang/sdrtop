@@ -22,6 +22,7 @@ pub mod channel;
 pub mod coded;
 pub mod connect;
 pub mod detect;
+pub mod fer;
 pub mod gfsk;
 pub mod interval;
 pub mod measure;
