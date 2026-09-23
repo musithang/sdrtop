@@ -272,6 +272,36 @@ fn filter_to_selected(m: &mut SdrMetrics) {
     }
 }
 
+/// A device selected in the census arrives in the BLE packet list with the
+/// list already narrowed to it (net-ux-polish-plan 5.9): the same filter
+/// `Enter` sets there, from the census's own selection. Called on a switch
+/// from a layout showing the census to one showing the list, so leaving the
+/// census is what carries the choice; a filter cleared in the list stays
+/// cleared until the census is visited again.
+///
+/// Nothing selected carries nothing, and leaves whatever filter the list
+/// had. The log says it happened, the address shown as the section shows
+/// addresses, because a list that arrives narrowed without a word reads as
+/// a quiet room.
+pub(super) fn carry_census_selection(m: &mut SdrMetrics) {
+    let Some(address) = m.net.census.selection.selected else {
+        return;
+    };
+    let random = m
+        .net
+        .census
+        .devices
+        .iter()
+        .find(|d| d.address == address)
+        .is_some_and(|d| d.random);
+    m.net.ble_view.filter = Some(address);
+    m.net.ble_view.selection.reset_view();
+    let shown = m.net.show_address(address, random, None);
+    m.push_log(format!(
+        "BLE list: only {shown}, as selected in the census (Enter shows all)"
+    ));
+}
+
 /// Start the reference-accuracy entry for the selected census device, or say
 /// why not: nothing selected, or no offset measured to reference against.
 fn trust_selected(m: &mut SdrMetrics) {
@@ -626,6 +656,44 @@ mod tests {
             drift: None,
             seen: Instant::now(),
         }
+    }
+
+    /// **A census choice travels with the user** (5.9): leaving the census
+    /// for the BLE layout narrows the packet list to the selected device;
+    /// arriving from anywhere else, or with nothing selected, leaves the
+    /// list as it was. Through the one function every layout switch takes.
+    #[test]
+    fn a_device_selected_in_the_census_arrives_in_the_list_filtered_to_it() {
+        let (mut engine, _) = crate::app::App::build_ui("net_census", &HashMap::new(), None, true);
+        let device = [0xa4, 0x83, 0xe7, 0x1c, 0x09, 0xbe];
+        let state = Arc::new(Mutex::new(SdrMetrics::fixture()));
+        metrics(&state).net.census.selection.selected = Some(device);
+        let switch = |engine: &mut LayoutEngine, to: &str| {
+            super::global::presets::try_set_preset(engine, &state, to);
+        };
+
+        switch(&mut engine, "net_ble");
+        assert_eq!(metrics(&state).net.ble_view.filter, Some(device));
+        assert!(metrics(&state)
+            .ui
+            .log
+            .iter()
+            .any(|l| l.text.contains("as selected in the census")));
+
+        // Cleared in the list, it stays cleared on a switch that does not
+        // come from the census.
+        metrics(&state).net.ble_view.filter = None;
+        switch(&mut engine, "net_survey");
+        switch(&mut engine, "net_ble");
+        assert_eq!(metrics(&state).net.ble_view.filter, None);
+
+        // Nothing selected carries nothing, and leaves the list's own filter.
+        let other = [1, 2, 3, 4, 5, 6];
+        metrics(&state).net.ble_view.filter = Some(other);
+        metrics(&state).net.census.selection.selected = None;
+        switch(&mut engine, "net_census");
+        switch(&mut engine, "net_ble");
+        assert_eq!(metrics(&state).net.ble_view.filter, Some(other));
     }
 
     /// **One letter, two panels, never on one screen**: on the BLE layout `v`

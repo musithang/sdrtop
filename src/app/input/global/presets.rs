@@ -31,8 +31,12 @@ pub(in crate::app::input) fn try_set_preset(
 ) -> KeyAction {
     let mut m = metrics(state);
     if engine.has_preset(name) {
+        let from_census = engine.is_panel_visible("net_census");
         engine.set_preset(name);
         m.push_log(format!("Preset: {}", name));
+        if from_census && engine.is_panel_visible("net_ble_packets") {
+            super::super::net::carry_census_selection(&mut m);
+        }
     } else {
         m.push_log(format!("Preset '{}' not yet available", name));
     }
