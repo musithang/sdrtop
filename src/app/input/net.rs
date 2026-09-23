@@ -725,6 +725,9 @@ mod tests {
                 channel: 10,
                 lap: 0x9e8b33,
                 seen,
+                at_us: 0.0,
+                stream: 0,
+                header: None,
             });
         }
         let mut engine = LayoutEngine::new(

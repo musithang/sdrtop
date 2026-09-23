@@ -1041,6 +1041,14 @@ mod tests {
                 rms_us: Uncertain::from_sigma(0.31, 0.03),
                 max_us: 0.82,
                 residuals_us: vec![0.0; 60],
+                model: crate::signal::bt::slots::Model {
+                    t0_us: 0.0,
+                    period_us: 625.0,
+                    offset_us: 0.0,
+                    mean_x: 0.0,
+                    mean_y: 0.0,
+                    slope: 0.0,
+                },
             }),
         );
         let out = at(&m);

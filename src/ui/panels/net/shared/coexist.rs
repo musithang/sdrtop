@@ -500,6 +500,9 @@ mod tests {
             channel: 39,
             lap: 0x9e8b33,
             seen: now - std::time::Duration::from_millis(1100),
+            at_us: 0.0,
+            stream: 0,
+            header: None,
         });
         let (w, h) = (90u16, 20u16);
         let buf = cells(&m, w, h);

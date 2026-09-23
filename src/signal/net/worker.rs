@@ -328,6 +328,10 @@ impl NetWorker {
         // rate restarts the logs: their times are then on another clock.
         let mut bt_arrivals: HashMap<u32, std::collections::VecDeque<f64>> = HashMap::new();
         let mut arrivals_rate = 0.0f64;
+        // Which stream the times are on: bumped with every restart of the
+        // clock they count on, so a hop, a header and a grid are compared
+        // only within one (net-ux-polish-plan 6.6).
+        let mut stream_id = 0u32;
         let mut last_fit: HashMap<u32, Instant> = HashMap::new();
         // Piconets with hits their last fit has not seen: refitted once the
         // interval allows, whether or not another hit comes, so a piconet
@@ -388,11 +392,13 @@ impl NetWorker {
                 piconet_clocks.clear();
                 bt_arrivals.clear();
                 unfitted.clear();
+                stream_id = stream_id.wrapping_add(1);
             }
             if rate_hz != arrivals_rate {
                 bt_arrivals.clear();
                 unfitted.clear();
                 arrivals_rate = rate_hz;
+                stream_id = stream_id.wrapping_add(1);
             }
             if !continuous {
                 ble = None;
@@ -624,7 +630,7 @@ impl NetWorker {
                 for rx in bt.iter_mut() {
                     let (laps, headers) = rx.push(&bytes, self.geometry);
                     for hit in laps {
-                        hits.push((rx.channel(), hit.lap));
+                        hits.push((rx.channel(), hit.lap, hit.at_us));
                         let log = bt_arrivals.entry(hit.lap).or_default();
                         if log.len() == crate::signal::bt::slots::KEPT {
                             log.pop_front();
@@ -688,6 +694,7 @@ impl NetWorker {
                     };
                     headers_read.push((
                         hit.lap,
+                        hit.at_us,
                         read,
                         clock.hypotheses(),
                         crate::signal::bt::piconet::Deviation::of(&hit.air, &hit.deviation_hz),
@@ -719,7 +726,7 @@ impl NetWorker {
                 if !hits.is_empty() || !narrowed_by_lap.is_empty() || !fits.is_empty() {
                     let mut m = self.state.lock().unwrap_or_else(|e| e.into_inner());
                     m.net.health.bt_hits += hits.len() as u64;
-                    for (channel, lap) in hits {
+                    for (channel, lap, at_us) in hits {
                         crate::signal::bt::piconet::observe(
                             &mut m.net.bt_piconets,
                             lap,
@@ -730,6 +737,9 @@ impl NetWorker {
                             channel,
                             lap,
                             seen: now,
+                            at_us,
+                            stream: stream_id,
+                            header: None,
                         });
                     }
                     m.net.bt_hops.truncate(crate::state::BT_HOP_LIMIT);
@@ -739,9 +749,19 @@ impl NetWorker {
                     for (lap, fit) in fits {
                         if let Some(p) = m.net.bt_piconets.iter_mut().find(|p| p.lap == lap) {
                             p.slots = Some(fit);
+                            p.slots_stream = stream_id;
                         }
                     }
-                    for (lap, read, hypotheses, deviation) in headers_read {
+                    for (lap, at_us, read, hypotheses, deviation) in headers_read {
+                        // Joined to its hit by LAP and time: the header's
+                        // capture starts on the lane that found the access
+                        // code, which may be a quarter-symbol lane off the
+                        // one the hit was dated by.
+                        if let Some(hop) = m.net.bt_hops.iter_mut().find(|h| {
+                            h.lap == lap && h.stream == stream_id && (h.at_us - at_us).abs() < 2.0
+                        }) {
+                            hop.header = Some(read);
+                        }
                         crate::signal::bt::piconet::observe_header(
                             &mut m.net.bt_piconets,
                             lap,
@@ -1841,6 +1861,23 @@ mod tests {
             .expect("settled runs in a header");
         let index = df1.value() * 2.0 / 1e6;
         assert!((index - 0.32).abs() < 0.01, "h = {index} from {df1:?}");
+
+        // 6.6: the header joins its own hit, so the export can say what the
+        // hit carried.
+        let hop = m
+            .net
+            .bt_hops
+            .iter()
+            .find(|h| h.lap == lap)
+            .expect("the hit");
+        assert!(
+            matches!(
+                hop.header,
+                Some(crate::signal::bt::piconet::HeaderRead::Decoded(h))
+                    if h.packet_type == header::PacketType::Dh1
+            ),
+            "{hop:?}"
+        );
     }
 
     /// **Slot timing end to end** (6.5): twelve access codes of one LAP,
@@ -1920,6 +1957,18 @@ mod tests {
         assert!((fit.rate_ppm - 30.0).abs() < 5.0, "{fit:?}");
         assert!(fit.rms_us.value() < 0.3, "{fit:?}");
         assert!(fit.max_us < 0.5, "{fit:?}");
+
+        // 6.6: every one of those hits exports its residual from that grid.
+        let rows = crate::export::bt::rows(&m);
+        let col = crate::export::bt::HEADER
+            .split(',')
+            .position(|h| h == "slot_residual_us")
+            .unwrap();
+        assert_eq!(rows.len(), slots.len());
+        for row in &rows {
+            let r: f64 = row.split(',').nth(col).unwrap().parse().expect(row);
+            assert!(r.abs() < 0.5, "{row}");
+        }
     }
 
     /// Any other preset's blocks leave `bt_refused` unset, so a stale

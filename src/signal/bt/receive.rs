@@ -127,6 +127,10 @@ pub struct HeaderHit {
     /// packet's real length.
     pub air: Vec<bool>,
     pub deviation_hz: Vec<f32>,
+    /// When the access code before it ended, dated as
+    /// [`AccessHit::at_us`] is: what joins a header to its hit in the
+    /// export (net-ux-polish-plan 6.6).
+    pub at_us: f64,
 }
 
 /// How many raw, still-whitened bits after a header this receiver keeps
@@ -172,6 +176,8 @@ struct PendingHeader {
     /// The raw discriminator reading at each of the first
     /// [`HEADER_CAPTURE_BITS`] bits.
     deviation_hz: Vec<f32>,
+    /// When the access code that started it ended ([`AccessHit::at_us`]).
+    at_us: f64,
 }
 
 /// Samples per symbol this receiver decimates to, and so also the number of
@@ -450,19 +456,18 @@ impl Receiver {
                             payload_raw: pending.bits[HEADER_CAPTURE_BITS..].to_vec(),
                             air: pending.bits[..HEADER_CAPTURE_BITS].to_vec(),
                             deviation_hz: pending.deviation_hz,
+                            at_us: pending.at_us,
                         });
                     }
                 }
             }
 
             if let Some(lap) = self.detectors[self.lane].push(bit) {
+                // The working-rate sample this lane just sliced.
+                let sample = self.lane_symbols[self.lane] * PHASES as u64 + self.lane as u64;
+                let at_us = self.anchor_us + sample as f64 * 1e6 / WORKING_RATE_HZ;
                 if !found.iter().any(|h: &AccessHit| h.lap == lap) {
-                    // The working-rate sample this lane just sliced.
-                    let sample = self.lane_symbols[self.lane] * PHASES as u64 + self.lane as u64;
-                    found.push(AccessHit {
-                        lap,
-                        at_us: self.anchor_us + sample as f64 * 1e6 / WORKING_RATE_HZ,
-                    });
+                    found.push(AccessHit { lap, at_us });
                 }
                 if self.pending[self.lane].is_none() {
                     self.pending[self.lane] = Some(PendingHeader {
@@ -471,6 +476,7 @@ impl Receiver {
                         bits: Vec::with_capacity(TOTAL_CAPTURE_BITS),
                         header_whitened: None,
                         deviation_hz: Vec::with_capacity(HEADER_CAPTURE_BITS),
+                        at_us,
                     });
                 }
             }

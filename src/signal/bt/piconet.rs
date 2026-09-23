@@ -115,6 +115,8 @@ pub struct Piconet {
     /// refitted by the worker at most once a second; `None` before its
     /// first hit was timed.
     pub slots: Option<Result<super::slots::SlotFit, super::slots::SlotRefusal>>,
+    /// The stream `slots` was fitted on (`state::BtHop::stream`).
+    pub slots_stream: u32,
 }
 
 impl Piconet {
@@ -147,6 +149,7 @@ pub fn observe(roster: &mut Vec<Piconet>, lap: u32, channel: u8, now: Instant) {
                 last_seen: now,
                 headers: Headers::default(),
                 slots: None,
+                slots_stream: 0,
             });
             roster.last_mut().expect("just pushed")
         }

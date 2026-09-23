@@ -508,7 +508,14 @@ mod tests {
     fn hit(m: &mut SdrMetrics, lap: u32, channel: u8, ago_ms: u64) {
         let seen = Instant::now() - Duration::from_millis(ago_ms);
         observe(&mut m.net.bt_piconets, lap, channel, seen);
-        m.net.bt_hops.push_front(BtHop { channel, lap, seen });
+        m.net.bt_hops.push_front(BtHop {
+            channel,
+            lap,
+            seen,
+            at_us: 0.0,
+            stream: 0,
+            header: None,
+        });
     }
 
     fn lane<'a>(out: &'a [String], lap: &str) -> &'a String {

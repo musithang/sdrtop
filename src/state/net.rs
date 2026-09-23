@@ -739,13 +739,22 @@ pub const BT_HOP_LIMIT: usize = 500;
 /// NetBtHopsPanel`] plots it: which channel found it, the LAP the access
 /// code carries (free at detection time - see
 /// `signal::bt::access_code::find_access_code`'s own doc), and when.
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, PartialEq)]
 pub struct BtHop {
     pub channel: u8,
     /// The piconet it belongs to: what `net_bt_hops` colours it by
     /// (net-ux-polish-plan 6.2), free at detection time.
     pub lap: u32,
     pub seen: std::time::Instant,
+    /// When its access code ended, µs on the stream's sample clock
+    /// (`signal::bt::receive::AccessHit::at_us`), and which stream: a new
+    /// stream or rate starts that clock again, so a time is only comparable
+    /// to one of the same `stream` (net-ux-polish-plan 6.6).
+    pub at_us: f64,
+    pub stream: u32,
+    /// What its header said, once one was captured and joined to it: the
+    /// export's header columns. `None` when no header followed.
+    pub header: Option<crate::signal::bt::piconet::HeaderRead>,
 }
 
 /// One decoded advertising channel PDU, as a panel shows it.

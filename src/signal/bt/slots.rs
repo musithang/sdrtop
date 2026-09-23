@@ -72,6 +72,38 @@ pub struct SlotFit {
     pub max_us: f64,
     /// Every residual, µs, in time order.
     pub residuals_us: Vec<f32>,
+    /// The fitted model, so a hit's residual can be read again
+    /// ([`Self::residual_at`]): the first hit's time, the trial period, the
+    /// phase it gave, and the least-squares line through the unwrapped
+    /// residuals.
+    pub model: Model,
+}
+
+/// The grid as fitted: see [`SlotFit::residual_at`].
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Model {
+    pub t0_us: f64,
+    pub period_us: f64,
+    pub offset_us: f64,
+    pub mean_x: f64,
+    pub mean_y: f64,
+    pub slope: f64,
+}
+
+impl SlotFit {
+    /// The residual of a hit at `t_us` on the same clock, or `None` outside
+    /// the span the grid was fitted over: inside it the grid is a
+    /// measurement, beyond it an extrapolation (rule 2).
+    pub fn residual_at(&self, t_us: f64) -> Option<f64> {
+        let m = &self.model;
+        let x = t_us - m.t0_us;
+        if !(-1.0..=self.span_us + 1.0).contains(&x) {
+            return None;
+        }
+        let d = x - m.offset_us;
+        let raw = d - (d / m.period_us).round() * m.period_us;
+        Some(raw - m.mean_y - m.slope * (x - m.mean_x))
+    }
 }
 
 /// Why there is no fit.
@@ -173,6 +205,14 @@ pub fn fit(times_us: &[f64]) -> Result<SlotFit, SlotRefusal> {
         rms_us: Uncertain::from_sigma(rms, rms / (2.0 * dof).sqrt()),
         max_us: max,
         residuals_us: residuals.iter().map(|&e| e as f32).collect(),
+        model: Model {
+            t0_us: t0,
+            period_us: period,
+            offset_us: offset,
+            mean_x: mx,
+            mean_y: my,
+            slope,
+        },
     })
 }
 
@@ -205,6 +245,21 @@ mod tests {
         let rms = f.rms_us.value();
         assert!((rms - 0.3).abs() < 3.0 * f.rms_us.sigma() + 0.02, "{f:?}");
         assert!(f.max_us < 1.2, "{f:?}");
+    }
+
+    /// A hit's residual read again from the model is the one the fit
+    /// computed, and a time outside the fitted span has none.
+    #[test]
+    fn the_model_gives_back_each_hits_residual() {
+        let mut t = piconet(30, -8.0, 20.0, 0.4, 5);
+        t.sort_by(f64::total_cmp);
+        let f = fit(&t).expect("a grid");
+        for (x, r) in t.iter().zip(&f.residuals_us) {
+            let again = f.residual_at(*x).unwrap();
+            assert!((again - *r as f64).abs() < 1e-3, "{again} vs {r}");
+        }
+        assert_eq!(f.residual_at(t[0] - 1_000.0), None);
+        assert_eq!(f.residual_at(t[29] + 1_000.0), None);
     }
 
     /// Sparse and long, as the air gave it: twenty hits over five minutes

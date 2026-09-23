@@ -15,6 +15,7 @@
 //! purpose: one body proves nothing about a seam.
 
 pub mod ble;
+pub mod bt;
 pub mod census;
 pub mod destination;
 pub mod fer;
@@ -34,7 +35,7 @@ pub struct Written {
 }
 
 /// Write every body of the NET section: the band, the census, the BLE
-/// packets and the frame error curve.
+/// packets, the frame error curve and the classic hits.
 ///
 /// **Two files, one header, one destination answer.** The bodies know nothing
 /// about each other; what they share is the part built to be shared. A body that
@@ -113,6 +114,22 @@ pub fn net_section(
                 Some(note),
             )
         },
+        {
+            let bt = bt::rows(state);
+            // The same empties the hop panel tells apart.
+            let note = if bt.is_empty() {
+                match &state.net.bt_refused {
+                    Some(why) => format!("no hit: the classic receiver was not running ({why})"),
+                    None if state.net.bt_channels_watched.is_empty() => {
+                        "no hit: no classic receiver ran this session".to_string()
+                    }
+                    None => "no access code has been found this session".to_string(),
+                }
+            } else {
+                bt::note(state)
+            };
+            one(state, dir, unix_secs, "net-bt", bt::HEADER, bt, Some(note))
+        },
     ]
 }
 
@@ -186,7 +203,7 @@ mod tests {
         let dir = scratch();
         let m = SdrMetrics::fixture().streaming();
         let out = net_section(&m, &dir, 1_788_632_561);
-        assert_eq!(out.len(), 4);
+        assert_eq!(out.len(), 5);
 
         let paths: Vec<_> = out
             .iter()
@@ -208,6 +225,10 @@ mod tests {
             paths[3].ends_with("net-fer-20260905-182241.csv"),
             "{paths:?}"
         );
+        assert!(
+            paths[4].ends_with("net-bt-20260905-182241.csv"),
+            "{paths:?}"
+        );
 
         let head = |p: &PathBuf| {
             std::fs::read_to_string(p)
@@ -221,6 +242,7 @@ mod tests {
         let b = head(&paths[1]);
         let c = head(&paths[2]);
         let d = head(&paths[3]);
+        let e = head(&paths[4]);
         // The provenance is identical up to each file's own note line.
         let common = |v: &[String]| {
             v.iter()
@@ -231,6 +253,7 @@ mod tests {
         assert_eq!(common(&a), common(&b));
         assert_eq!(common(&a), common(&c));
         assert_eq!(common(&a), common(&d));
+        assert_eq!(common(&a), common(&e));
         assert!(a.iter().any(|l| l.contains("exported")), "{a:?}");
         let _ = std::fs::remove_dir_all(&dir);
     }
