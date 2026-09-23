@@ -4,10 +4,12 @@
 # picks to mean "point the radio at classic Bluetooth" - the same job
 # `net_ble`'s own preset name already does for BLE.
 #
-# B15 gave this preset a live receiver: `net_bt_hops` is the exit condition
-# made visible, a time-versus-channel scatter of access-code hits across
-# however many of the 79 channels `[net].bt_channels` and the current view
-# together let the worker watch. `net_bt_piconets` beside it is the roster,
+# B15 gave this preset a live receiver. `net_bt_hops` shows its access-code
+# hits as two answers: WHERE, all 79 channels with each one's hits this
+# session and the channels watched now underlined, and WHEN, one lane per
+# piconet ticking its hits in a window that zooms and scrubs (net-ux-polish-
+# plan 6.2, rebuilt from a scatter that a sparse live room left nearly
+# empty). `net_bt_piconets` beside it is the roster,
 # one row per LAP heard, and the selected piconet spelled out
 # (net-ux-polish-plan 6.1); it replaced a placeholder that only said the
 # LAPs were not yet counted. Each piconet wears one colour in both, and one
