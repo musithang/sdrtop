@@ -490,9 +490,9 @@ fn header_lines(
 /// said about the connection being opened (`signal::ble::connect`).
 ///
 /// **Read, not followed** (rule 1). The parameters are the packet's; the
-/// hop sequence is a prediction from them by Channel Selection Algorithm #1,
-/// labelled so, and a connection using #2 (ChSel set) says it is not
-/// predicted rather than being shown #1's sequence, which would be wrong.
+/// hop sequence is a prediction from them, by the algorithm ChSel names
+/// (#1, or #2 since 5.4.b4, each tested against the specification's own
+/// numbers), labelled so and never presented as observed.
 /// Units are the Link Layer's own (Core 5.4 Vol 6 Part B 2.3.3.1):
 /// `Interval` and the window in 1.25 ms steps, `Timeout` in 10 ms, the SCA
 /// by Table 2.11.
@@ -502,7 +502,7 @@ fn connection_lines(
     iw: usize,
     theme: &crate::Theme,
 ) -> Vec<Line<'static>> {
-    use crate::signal::ble::connect::{decode_octets, sca_ppm, Csa1};
+    use crate::signal::ble::connect::{decode_octets, sca_ppm, Csa1, Csa2};
     if p.pdu_type != PduType::ConnectInd {
         return Vec::new();
     }
@@ -587,16 +587,26 @@ fn connection_lines(
         theme,
     ));
     out.push(field_line("hop", c.hop_increment.to_string(), theme));
-    let hops = if p.ch_sel {
-        "CSA #2: not predicted".to_string()
+    // ChSel says which algorithm the connection uses: #2 only when both
+    // ends support it (`pdu::Packet::ch_sel`), and each is predicted by its
+    // own rule rather than one standing in for the other.
+    let first: Option<(&str, Vec<u8>)> = if p.ch_sel {
+        Csa2::new(c.access_address, c.channel_map)
+            .map(|csa| ("CSA #2", (0..8).map(|n| csa.channel(n).0).collect()))
     } else {
-        match Csa1::new(c.hop_increment, c.channel_map) {
-            Some(mut csa) => {
-                let first: Vec<String> = (0..8).map(|_| csa.next().to_string()).collect();
-                format!("{} ... predicted, not followed", first.join(" "))
-            }
-            None => "no channel used: nothing to predict".to_string(),
-        }
+        Csa1::new(c.hop_increment, c.channel_map)
+            .map(|mut csa| ("CSA #1", (0..8).map(|_| csa.next()).collect()))
+    };
+    let hops = match first {
+        Some((algorithm, channels)) => format!(
+            "{algorithm}: {} ... predicted, not followed",
+            channels
+                .iter()
+                .map(u8::to_string)
+                .collect::<Vec<_>>()
+                .join(" ")
+        ),
+        None => "no channel used: nothing to predict".to_string(),
     };
     out.extend(wrapped("hops", &hops, iw, theme));
     out
@@ -1101,20 +1111,24 @@ mod tests {
             "channels 37 of 37 used",
             "SCA      5 (31 to 50 ppm)",
             "hop      7",
-            "7 14 21 28 35 5 12 19 ... predicted, not followed",
+            "CSA #1: 7 14 21 28 35 5 12 19 ... predicted, not followed",
         ] {
             assert!(out.contains(want), "{want}:\n{out}");
         }
         assert!(out.contains("ChSel    CSA #1 only"), "{out}");
     }
 
-    /// Algorithm #2 is not predicted with #1's sequence, and a failed CRC
-    /// reads no parameters.
+    /// **ChSel set: Algorithm #2's sequence, never #1's**, from this
+    /// connection's Access Address; and a failed CRC reads no parameters.
     #[test]
-    fn a_connect_ind_it_cannot_predict_or_trust_says_so() {
+    fn a_connect_ind_on_csa2_is_predicted_by_csa2_and_a_failed_one_is_not_read() {
         let csa2 = draw(NetBleDetailPanel, 90, 40, &connect_ind(true, true)).join("\n");
-        assert!(csa2.contains("CSA #2: not predicted"), "{csa2}");
+        let expected = crate::signal::ble::connect::Csa2::new(0xAF9A_B12C, 0x1F_FFFF_FFFF).unwrap();
+        let first: Vec<String> = (0..8).map(|n| expected.channel(n).0.to_string()).collect();
+        let want = format!("CSA #2: {} ... predicted, not followed", first.join(" "));
+        assert!(csa2.contains(&want), "{want}:\n{csa2}");
         assert!(!csa2.contains("7 14 21"), "{csa2}");
+        assert!(csa2.contains("ChSel    supports CSA #2"), "{csa2}");
 
         let failed = draw(NetBleDetailPanel, 90, 40, &connect_ind(false, false)).join("\n");
         assert!(failed.contains("not read: CRC failed"), "{failed}");

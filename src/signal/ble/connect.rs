@@ -32,16 +32,20 @@
 //! 5-bit width is confirmed by the text's own stated range, "5 to 16",
 //! which needs at least 5 bits and no more.
 //!
+//! **Algorithm #2 was added later** ([`Csa2`], net-ux-polish-plan 5.4.b4, at
+//! Viktor's request), held to the specification's own sample data; the
+//! paragraph below is B20's original scoping, kept as the record of why it
+//! was first left out.
+//!
 //! **Scope, decided before landing anything: Channel Selection Algorithm
 //! #1 only, not Algorithm #2.** Algorithm #2 is real, separate work - a
 //! PRNG-like permutation function with several more inputs, not a
 //! generalisation of Algorithm #1's own plain modular arithmetic.
 //! `CONNECT_IND`'s own header carries a `ChSel` bit saying which one a
 //! connection actually uses (set to 1 only if both the initiator and the
-//! advertiser support Algorithm #2); reading that bit and honestly
-//! declining a connection this module cannot follow, rather than
-//! following it incorrectly, is real remaining wiring - `pdu::decode`
-//! does not yet expose the bit at all.
+//! advertiser support Algorithm #2); `pdu::decode` reads it since
+//! net-ux-polish-plan 5.1, and the packet detail view predicts each
+//! connection by the algorithm the bit names.
 //!
 //! **Read, not followed.** Since net-ux-polish-plan 5.4.b3 the packet
 //! detail view decodes a received `CONNECT_IND` ([`decode_octets`]) and shows
@@ -276,6 +280,85 @@ impl Csa1 {
     }
 }
 
+/// Channel Selection Algorithm #2 (Core 5.4 Vol 6 Part B 4.5.8.3), for the
+/// event channel of an ACL connection: net-ux-polish-plan 5.4.b4, scoped out
+/// of B20 and added at Viktor's request.
+///
+/// **What was read, and what was reconstructed.** Read from the text on the
+/// SIG's site, 2026-09-23: `channelIdentifier = (Access Address 31-16) XOR
+/// (Access Address 15-0)`; the permutation "separately bit-reversing the
+/// lower 8 input bits and upper 8 input bits"; MAM's `output = (17 x a + b)
+/// mod 2^16`; `unmappedChannel = prn_e mod 37`; a used unmapped channel is
+/// the event's, an unused one is remapped by `remappingIndex = floor(N x
+/// prn_e / 2^16)` into the ascending table of used channels. **Not text:**
+/// Figure 4.53, the order the event PRN is built in, is an image. The order
+/// here is the one public descriptions give (counter XOR the identifier,
+/// three rounds of permute-then-MAM with the identifier, XOR the identifier
+/// again), and it is **held to the specification's own sample data** (Vol 6
+/// Part C 3, both tables, read the same day): every `prn_e`, unmapped and
+/// mapped channel there, for 37 and for 9 used channels. That is what makes
+/// the reconstruction trustworthy rather than plausible.
+///
+/// Subevent selection (isochronous, PAwR) is left out: nothing here has
+/// subevents.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Csa2 {
+    channel_id: u16,
+    channel_map: u64,
+    used_channels: Vec<u8>,
+}
+
+impl Csa2 {
+    /// `None` when the map names no used channel, for [`Csa1::new`]'s reason.
+    pub fn new(access_address: u32, channel_map: u64) -> Option<Self> {
+        let used_channels: Vec<u8> = (0u8..37)
+            .filter(|&c| channel_map & (1u64 << c) != 0)
+            .collect();
+        if used_channels.is_empty() {
+            return None;
+        }
+        Some(Self {
+            channel_id: ((access_address >> 16) as u16) ^ (access_address as u16),
+            channel_map,
+            used_channels,
+        })
+    }
+
+    fn perm(x: u16) -> u16 {
+        let lo = (x as u8).reverse_bits() as u16;
+        let hi = ((x >> 8) as u8).reverse_bits() as u16;
+        (hi << 8) | lo
+    }
+
+    fn mam(a: u16, b: u16) -> u16 {
+        (17u32 * a as u32 + b as u32) as u16
+    }
+
+    /// The event pseudo-random number for connection event `counter`.
+    pub fn prn_e(&self, counter: u16) -> u16 {
+        let id = self.channel_id;
+        let mut x = counter ^ id;
+        for _ in 0..3 {
+            x = Self::mam(Self::perm(x), id);
+        }
+        x ^ id
+    }
+
+    /// Connection event `counter`'s data channel index, and its unmapped
+    /// channel before any remapping.
+    pub fn channel(&self, counter: u16) -> (u8, u8) {
+        let prn = self.prn_e(counter);
+        let unmapped = (prn % 37) as u8;
+        if self.channel_map & (1u64 << unmapped) != 0 {
+            (unmapped, unmapped)
+        } else {
+            let n = self.used_channels.len() as u32;
+            let index = (n * prn as u32) >> 16;
+            (self.used_channels[index as usize], unmapped)
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -442,5 +525,32 @@ mod tests {
         assert_eq!(sca_ppm(0), (251, 500));
         assert_eq!(sca_ppm(3), (76, 100));
         assert_eq!(sca_ppm(7), (0, 20));
+    }
+
+    /// **The specification's own sample data, Vol 6 Part C 3.1**: Access
+    /// Address 0x8E89BED6 (channelIdentifier 0x305F), all 37 channels used,
+    /// events 0 to 3.
+    #[test]
+    fn csa2_matches_sample_data_1() {
+        let csa = Csa2::new(0x8E89_BED6, 0x1F_FFFF_FFFF).unwrap();
+        assert_eq!(csa.channel_id, 0x305F);
+        let prn: Vec<u16> = (0..4).map(|c| csa.prn_e(c)).collect();
+        assert_eq!(prn, [56857, 1685, 38301, 27475]);
+        let ch: Vec<(u8, u8)> = (0..4).map(|c| csa.channel(c)).collect();
+        assert_eq!(ch, [(25, 25), (20, 20), (6, 6), (21, 21)]);
+    }
+
+    /// **Sample data 2, Vol 6 Part C 3.2**: nine used channels, so the
+    /// remapping is exercised: events 6 to 8 unmap to 23, 14, 17 and map to
+    /// 23, 9, 34.
+    #[test]
+    fn csa2_matches_sample_data_2() {
+        let map = 0b11110_00000000_11100000_00000110_00000000u64;
+        let csa = Csa2::new(0x8E89_BED6, map).unwrap();
+        assert_eq!(csa.used_channels, [9, 10, 21, 22, 23, 33, 34, 35, 36]);
+        let prn: Vec<u16> = (6..9).map(|c| csa.prn_e(c)).collect();
+        assert_eq!(prn, [10975, 5490, 46970]);
+        let ch: Vec<(u8, u8)> = (6..9).map(|c| csa.channel(c)).collect();
+        assert_eq!(ch, [(23, 23), (9, 14), (34, 17)]);
     }
 }
