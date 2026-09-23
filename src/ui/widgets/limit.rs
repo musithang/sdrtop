@@ -144,7 +144,7 @@ impl RowWidths {
     /// with the actual value - not just the label, value and sigma columns
     /// [`Self::fit`] measures - so this checks the real rendered length rather
     /// than budgeting columns by hand and hoping. Moved here from
-    /// `net_ble_rf` when `net_capability` became its second caller.
+    /// `net_ble_rf` (now `net_ble_detail`) when `net_capability` became its second caller.
     pub(crate) fn fit_within(rows: &[LimitRow<'_>], width: usize) -> Self {
         let mut bar = width;
         loop {
