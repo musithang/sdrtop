@@ -18,6 +18,7 @@ stale          = "#44475a"   # [STALE] plates and the borders they cool
 observer       = "#8be9fd"   # observer mode, when another process holds the radio
 net_ble        = "#ff79c6"   # decoded BLE packets, marked over the coexistence heatmap
 net_bt         = "#f8f8f2"   # decoded classic Bluetooth hits, the same way
+series         = ["#8be9fd", "#f1fa8c", "#ff79c6", "#50fa7b", "#bd93f9", "#ffb86c"]   # one colour per piconet on the classic hop scatter, told apart from each other
 
 # The spectrum and waterfall gradient, cold (weak) to hot (strong).
 # `at` is the position in 0.0..1.0; the stops must climb.

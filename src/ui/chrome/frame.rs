@@ -312,6 +312,24 @@ pub fn title_spans(
             // which, in the mode tag's colour.
             Tag::Phy(phy) => (phy.label().to_string(), theme.value_hi),
             Tag::Scroll(n) => (format!("\u{2191}{n}"), theme.value_hi),
+            // In the label ink while it ends now, the way the list's own
+            // scroll tag is absent at 0; in the value ink once it does not.
+            Tag::TimeWindow { span_ms, back_ms } => (
+                format!(
+                    "{} \u{25c2} {}",
+                    crate::ui::widgets::timing_fmt::seconds_ms(*span_ms),
+                    if *back_ms == 0 {
+                        "now".to_string()
+                    } else {
+                        format!("-{}", crate::ui::widgets::timing_fmt::seconds_ms(*back_ms))
+                    }
+                ),
+                if *back_ms == 0 {
+                    theme.label
+                } else {
+                    theme.value_hi
+                },
+            ),
             // Neither is a warning: both are correct ways to gather a number
             // and the tag says which, so they are drawn in the value colour
             // rather than the amber that means something is wrong.

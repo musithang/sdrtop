@@ -10,7 +10,8 @@
 # together let the worker watch. `net_bt_piconets` beside it is the roster,
 # one row per LAP heard, and the selected piconet spelled out
 # (net-ux-polish-plan 6.1); it replaced a placeholder that only said the
-# LAPs were not yet counted.
+# LAPs were not yet counted. Each piconet wears one colour in both, and one
+# selection drives both (6.2).
 
 section = "net"
 slot    = 5

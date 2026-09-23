@@ -436,8 +436,11 @@ pub struct NetState {
     /// (`signal::bt::piconet`): what the roster draws, counted over the
     /// whole session where [`Self::bt_hops`] keeps a window.
     pub bt_piconets: Vec<crate::signal::bt::piconet::Piconet>,
-    /// The roster's cursor, on a LAP: the piconet selected.
+    /// The roster's cursor, on a LAP: the piconet selected. The hop scatter
+    /// shares it, so a piconet picked in either is the one both show.
     pub bt_view: super::Selection<u32>,
+    /// How much of the past the hop scatter shows, and how far back it ends.
+    pub hop_view: HopView,
     /// The tuning the survey interrupted, so it can be given back.
     ///
     /// **In the state rather than in the task**, for the reason
@@ -672,6 +675,60 @@ pub struct NetDecodeHealth {
 /// growing the list forever.
 pub const BLE_PACKET_LIMIT: usize = 200;
 
+/// The hop scatter's zoom steps, in milliseconds: from half a second, where
+/// single hops of one piconet separate, to a minute, where piconets come and
+/// go.
+pub const HOP_WINDOWS_MS: [u64; 7] = [500, 1_000, 2_000, 5_000, 10_000, 20_000, 60_000];
+
+/// Which stretch of time the classic hop scatter shows
+/// (net-ux-polish-plan 6.2): a zoom step, and how far before now it ends.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct HopView {
+    /// Index into [`HOP_WINDOWS_MS`].
+    pub zoom: usize,
+    /// How far before now the view ends, ms; `0` is live.
+    pub back_ms: u64,
+}
+
+impl Default for HopView {
+    /// Twenty seconds ending now: what the scatter showed before it could
+    /// zoom.
+    fn default() -> Self {
+        Self {
+            zoom: 5,
+            back_ms: 0,
+        }
+    }
+}
+
+impl HopView {
+    pub fn span_ms(&self) -> u64 {
+        HOP_WINDOWS_MS[self.zoom.min(HOP_WINDOWS_MS.len() - 1)]
+    }
+
+    /// A shorter window, keeping where it ends.
+    pub fn zoom_in(&mut self) {
+        self.zoom = self.zoom.saturating_sub(1);
+    }
+
+    /// A longer window, keeping where it ends.
+    pub fn zoom_out(&mut self) {
+        self.zoom = (self.zoom + 1).min(HOP_WINDOWS_MS.len() - 1);
+    }
+
+    /// Move a quarter of a window back in time, but not past `oldest_ms`,
+    /// the age of the oldest hit kept: a view that ends before anything was
+    /// kept would show an empty plot of nothing known.
+    pub fn back(&mut self, oldest_ms: u64) {
+        self.back_ms = (self.back_ms + self.span_ms() / 4).min(oldest_ms);
+    }
+
+    /// Move a quarter of a window toward now.
+    pub fn forward(&mut self) {
+        self.back_ms = self.back_ms.saturating_sub(self.span_ms() / 4);
+    }
+}
+
 /// How many recent hits [`NetState::bt_hops`] keeps - a scatter plots a
 /// recent time window, not a session's worth of hops, and old rows fall off
 /// the end the same way [`BLE_PACKET_LIMIT`] already does for advertising
@@ -685,15 +742,8 @@ pub const BT_HOP_LIMIT: usize = 500;
 #[derive(Clone, Copy, Debug)]
 pub struct BtHop {
     pub channel: u8,
-    /// No reader yet: `net_bt_hops` plots *that* a channel was hit, not
-    /// which LAP it carried - telling two overlapping piconets apart by
-    /// colour is a real future addendum, not B15's own exit condition
-    /// (design section 2.3's measurement 11 asks for the scatter, not for
-    /// piconet identity). Carried anyway because
-    /// `crate::signal::bt::access_code::find_access_code` already returns it
-    /// for free, and dropping a fact that costs nothing to keep would be its
-    /// own kind of invented gap.
-    #[allow(dead_code)]
+    /// The piconet it belongs to: what `net_bt_hops` colours it by
+    /// (net-ux-polish-plan 6.2), free at detection time.
     pub lap: u32,
     pub seen: std::time::Instant,
 }

@@ -26,6 +26,16 @@ pub(crate) fn ago(elapsed: std::time::Duration) -> String {
     }
 }
 
+/// A stretch of seconds given in milliseconds, at the resolution a plot's
+/// time axis is read at: `0.5 s`, `2.0 s`, then whole seconds from ten on.
+pub(crate) fn seconds_ms(ms: u64) -> String {
+    if ms < 10_000 {
+        format!("{:.1} s", ms as f64 / 1e3)
+    } else {
+        format!("{} s", ms / 1_000)
+    }
+}
+
 pub(crate) fn fmt_us(us: u64) -> String {
     if us >= 1_000 {
         format!("{:.3} ms", us as f64 / 1_000.0)

@@ -156,6 +156,11 @@ pub enum Tag {
     Phy(crate::signal::ble::Phy),
     /// `[↑N]` - how far back through the history the view is scrolled. Absent at 0.
     Scroll(usize),
+    /// `[20 s ◂ now]` / `[2.0 s ◂ -8.0 s]` - the stretch of time a plot
+    /// shows and where it ends, in milliseconds: a zoomed or scrubbed plot
+    /// says which piece of the past it is, so a gap in it is not read as a
+    /// quiet now.
+    TimeWindow { span_ms: u64, back_ms: u64 },
     /// `[SURVEY]` - the numbers on this panel were gathered by sampling the
     /// band, not by watching all of it.
     ///

@@ -37,8 +37,8 @@ pub struct NetBtPiconetsPanel;
 const COLUMNS: &[Column] = &[
     Column {
         title: "LAP",
-        // `0x9e8b33`: 24 bits.
-        width: 8,
+        // `⣿ 0x9e8b33`: the scatter's colour chip, then 24 bits.
+        width: 10,
         align: Align::Left,
     },
     Column {
@@ -115,7 +115,7 @@ fn uap_sentence(uaps: Option<&Vec<u8>>) -> String {
 fn cells(p: &Piconet, state: &SdrMetrics, now: std::time::Instant) -> Vec<String> {
     let since = |t: std::time::Instant| ago(now.saturating_duration_since(t).as_secs());
     vec![
-        format!("{:#08x}", p.lap),
+        format!("\u{28ff} {:#08x}", p.lap),
         since(p.last_seen),
         p.hits.to_string(),
         p.channels_hit().to_string(),
@@ -295,13 +295,34 @@ impl Panel for NetBtPiconetsPanel {
             body,
         );
         for (i, p) in roster.iter().enumerate().skip(start).take(body) {
-            lines.push(row(
+            let mut line = row(
                 COLUMNS,
                 fit,
                 &cells(p, state, now),
                 Some(i) == cursor,
                 theme,
-            ));
+            );
+            // The chip wears the colour the scatter draws this piconet in:
+            // its place in `bt_piconets`, the order first heard.
+            let colour = state
+                .net
+                .bt_piconets
+                .iter()
+                .position(|q| q.lap == p.lap)
+                .map(|k| theme.series_color(k));
+            if let (Some(colour), Some(cell)) = (colour, line.spans.get(1).cloned()) {
+                let text = cell.content.to_string();
+                if let Some(rest) = text.strip_prefix('\u{28ff}') {
+                    line.spans.splice(
+                        1..2,
+                        [
+                            Span::styled("\u{28ff}", cell.style.fg(colour)),
+                            Span::styled(rest.to_string(), cell.style),
+                        ],
+                    );
+                }
+            }
+            lines.push(line);
         }
         // The block sits at the foot, under whatever rows are left.
         let used = lines.len() + extra.len();

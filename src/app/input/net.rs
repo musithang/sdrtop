@@ -230,6 +230,37 @@ pub(super) fn net_bt_piconets(key: KeyEvent, ctx: &mut InputCtx<'_>) -> KeyActio
     KeyAction::Continue
 }
 
+/// The classic hop scatter: `↑↓` move the piconet selection the roster
+/// shares, in the roster's order; `+`/`-` zoom the window; `←`/`→` move it
+/// back and forward in time, no further back than the oldest hit kept;
+/// `End` returns to now.
+pub(super) fn net_bt_hops(key: KeyEvent, ctx: &mut InputCtx<'_>) -> KeyAction {
+    let mut m = metrics(ctx.state);
+    let order: Vec<u32> = crate::signal::bt::piconet::ordered(&m.net.bt_piconets)
+        .iter()
+        .map(|p| p.lap)
+        .collect();
+    let oldest_ms = m
+        .net
+        .bt_hops
+        .back()
+        .map_or(0, |h| h.seen.elapsed().as_millis() as u64);
+    match key.code {
+        KeyCode::Up => m.net.bt_view.move_by(&order, -1),
+        KeyCode::Down => m.net.bt_view.move_by(&order, 1),
+        KeyCode::Char('+') | KeyCode::Char('=') => m.net.hop_view.zoom_in(),
+        KeyCode::Char('-') => m.net.hop_view.zoom_out(),
+        KeyCode::Left => m.net.hop_view.back(oldest_ms),
+        KeyCode::Right => m.net.hop_view.forward(),
+        KeyCode::End => m.net.hop_view.back_ms = 0,
+        _ => {
+            drop(m);
+            return global::handle(key, ctx);
+        }
+    }
+    KeyAction::Continue
+}
+
 /// The BLE packet list: the arrows move the cursor through the packets in the
 /// order the panel draws them (`NetState::ble_shown`), newest first; `Enter`
 /// narrows the list to the selected packet's address and back; `h` holds the
@@ -677,6 +708,67 @@ mod tests {
             drift: None,
             seen: Instant::now(),
         }
+    }
+
+    /// **The scatter's keys** (6.2): `+`/`-` step the zoom and stop at the
+    /// ends, `←` moves back a quarter window but no further than the oldest
+    /// hit kept, `End` returns to now, and `↓` selects the piconet the
+    /// roster shows first.
+    #[test]
+    fn the_hop_scatter_zooms_scrubs_and_selects() {
+        let state = Arc::new(Mutex::new(SdrMetrics::fixture()));
+        {
+            let mut m = metrics(&state);
+            let seen = Instant::now() - Duration::from_secs(12);
+            crate::signal::bt::piconet::observe(&mut m.net.bt_piconets, 0x9e8b33, 10, seen);
+            m.net.bt_hops.push_back(crate::state::BtHop {
+                channel: 10,
+                lap: 0x9e8b33,
+                seen,
+            });
+        }
+        let mut engine = LayoutEngine::new(
+            crate::config::LayoutConfig::default_config(),
+            PanelRegistry::new(),
+        );
+        let mut show_footer = true;
+        let focus_keys = HashMap::new();
+        let mut ctx = InputCtx {
+            state: &state,
+            device: None,
+            engine: &mut engine,
+            show_footer: &mut show_footer,
+            focus_keys: &focus_keys,
+        };
+        let mut press = |code| {
+            net_bt_hops(KeyEvent::new(code, KeyModifiers::NONE), &mut ctx);
+        };
+        let view = |s: &Arc<Mutex<SdrMetrics>>| metrics(s).net.hop_view;
+
+        press(KeyCode::Char('+'));
+        assert_eq!(view(&state).span_ms(), 10_000);
+        for _ in 0..9 {
+            press(KeyCode::Char('+'));
+        }
+        assert_eq!(view(&state).span_ms(), 500, "stops at the shortest");
+        for _ in 0..3 {
+            press(KeyCode::Char('-'));
+        }
+        assert_eq!(view(&state).span_ms(), 5_000);
+
+        for _ in 0..20 {
+            press(KeyCode::Left);
+        }
+        let back = view(&state).back_ms;
+        assert!(
+            (11_900..=12_500).contains(&back),
+            "held at the oldest hit: {back}"
+        );
+        press(KeyCode::End);
+        assert_eq!(view(&state).back_ms, 0);
+
+        press(KeyCode::Down);
+        assert_eq!(metrics(&state).net.bt_view.selected, Some(0x9e8b33));
     }
 
     /// **A census choice travels with the user** (5.9): leaving the census

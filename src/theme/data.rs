@@ -56,6 +56,10 @@ pub struct ThemeFile {
     pub net_ble: Option<String>,
     #[serde(default)]
     pub net_bt: Option<String>,
+    /// The series colours. Optional for the same reason: absent, a theme's
+    /// own accents stand in, in an order that keeps neighbours apart.
+    #[serde(default)]
+    pub series: Option<Vec<String>>,
 
     pub palette: Vec<Stop>,
 }
@@ -108,6 +112,24 @@ impl ThemeFile {
                 Some(hex) => Theme::parse_hex(hex)
                     .ok_or_else(|| format!("net_bt: '{hex}' is not a #rrggbb colour"))?,
                 None => hex!(value_hi),
+            },
+            series: match &self.series {
+                Some(list) if !list.is_empty() => list
+                    .iter()
+                    .enumerate()
+                    .map(|(i, hex)| {
+                        Theme::parse_hex(hex)
+                            .ok_or_else(|| format!("series {i}: '{hex}' is not a #rrggbb colour"))
+                    })
+                    .collect::<Result<Vec<_>, _>>()?,
+                Some(_) => return Err("series: the list is empty".to_string()),
+                None => vec![
+                    hex!(border_accent),
+                    hex!(value_hi),
+                    hex!(status_ok),
+                    hex!(observer),
+                    hex!(status_crit),
+                ],
             },
             palette: self
                 .palette

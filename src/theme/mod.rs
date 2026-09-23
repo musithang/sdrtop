@@ -40,6 +40,11 @@ pub struct Theme {
     // to stand off every palette's gradient, so a mark never reads as a duty.
     pub net_ble: Color,
     pub net_bt: Color,
+
+    // Series: one colour per thing told apart on one plot, in order (the
+    // classic hop scatter's piconets). Never empty; a plot with more things
+    // than colours reuses them in order, and says so.
+    pub series: Vec<Color>,
 }
 
 /// Shift a colour ~25% toward a cool steel-blue anchor, leaving 256/16-colour
@@ -56,6 +61,28 @@ fn steel_color(c: Color) -> Color {
 }
 
 impl Theme {
+    /// The `i`th series colour, wrapping round the list.
+    pub fn series_color(&self, i: usize) -> Color {
+        self.series
+            .get(i % self.series.len().max(1))
+            .copied()
+            .unwrap_or(self.value_hi)
+    }
+
+    /// `c` pushed most of the way toward the theme's `stale` ink: what a plot
+    /// draws a thing in when another is selected, so the selection stands out
+    /// and the rest still shows where it was. Only the truecolor path mixes; a
+    /// 256/16-colour value is returned as it is.
+    pub fn receded(&self, c: Color) -> Color {
+        match (c, self.stale) {
+            (Color::Rgb(r, g, b), Color::Rgb(sr, sg, sb)) => {
+                let mix = |ch: u8, to: u8| ((ch as u16 * 35 + to as u16 * 65) / 100) as u8;
+                Color::Rgb(mix(r, sr), mix(g, sg), mix(b, sb))
+            }
+            (other, _) => other,
+        }
+    }
+
     /// A copy with the resting border tiers cooled toward steel-blue, for the
     /// measurement labs' "instrument mode". The focus border, text and status
     /// colours are left untouched so focus stays crisp and meaning stays readable.
@@ -241,6 +268,41 @@ mod tests {
                     "{name}.{field} is not truecolor"
                 );
             }
+        }
+    }
+
+    /// **Series colours are told apart at a glance.** Every built-in states
+    /// its own six (not the fallback), and no two of them sit closer than 60
+    /// (Euclidean, 0-255 RGB): two piconets in near colours would read as one
+    /// on the scatter. Measured when chosen: the pastel themes cannot find six
+    /// of their own further apart (nord 61, solarized 62, catppuccin and
+    /// gruvbox 65, where sdr has 98). Red reads as an alarm, so where a theme
+    /// needed its red to reach six (nord, catppuccin) it comes last, the
+    /// colour a sixth piconet gets.
+    #[test]
+    fn every_builtin_series_is_six_colours_told_apart() {
+        for name in Theme::builtin_names() {
+            let text = BUILTIN.iter().find(|(n, _)| *n == name).unwrap().1;
+            let file = data::ThemeFile::parse(text).unwrap();
+            assert!(
+                file.series.is_some(),
+                "{name} leaves series to the fallback"
+            );
+            let t = Theme::builtin(name).unwrap();
+            assert_eq!(t.series.len(), 6, "{name}");
+            let rgb = |c: Color| match c {
+                Color::Rgb(r, g, b) => (r as f64, g as f64, b as f64),
+                _ => panic!("{name}: series colour is not truecolor"),
+            };
+            for (i, a) in t.series.iter().enumerate() {
+                for b in &t.series[i + 1..] {
+                    let (a, b) = (rgb(*a), rgb(*b));
+                    let d =
+                        ((a.0 - b.0).powi(2) + (a.1 - b.1).powi(2) + (a.2 - b.2).powi(2)).sqrt();
+                    assert!(d >= 60.0, "{name}: two series colours {d:.0} apart");
+                }
+            }
+            assert_eq!(t.series_color(6), t.series[0], "wraps in order");
         }
     }
 

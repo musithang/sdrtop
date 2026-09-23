@@ -18,58 +18,81 @@
 //! receiver exists and has heard nothing in the last window" are different
 //! sentences.
 //!
-//! **B16 adds one more line: the most recent hop's own piconet, narrowed as
-//! far as a header alone ever gets.** `signal::bt::header::PiconetClock`'s
-//! own doc has the measurement: usually two UAP candidates survive, not
-//! one, and closing that gap needs the payload's own CRC. This panel reports
-//! the honest floor rather than picking one of the two and calling it
-//! confirmed - unless it actually has been: **B17 adds a real tie-break.**
-//! `signal::net::worker`'s own `payload::break_uap_tie`, run against a real
-//! DH1/DH3/DH5 payload's own CRC-16 when one follows a header, can resolve
-//! the floor for good - `state.net.bt_uap` then holds exactly one element,
-//! shown as "UAP 0x.." rather than "UAP candidates 0x.., 0x..", and stays
-//! that way for the rest of the session (a piconet's real UAP does not
-//! change). The two labels are otherwise indistinguishable on screen from
-//! the older, rarer case a very short capture happens to land on one by
-//! coincidence - both are equally honest about what is actually known.
+//! **Piconets told apart (net-ux-polish-plan 6.2).** Each hit is drawn in
+//! its piconet's series colour (`Theme::series`), the colour given in the
+//! order piconets were first heard, so it holds for the session and the
+//! roster's rows wear the same one. With a piconet selected (here or in the
+//! roster: one selection) it is drawn bold and the rest recede toward the
+//! stale ink, so two overlapping hop patterns become one pattern and its
+//! background. The grid is braille, two dots across and four down a cell,
+//! and a hit fills its channel's whole band of dots, so twenty channels
+//! keep twenty rows of their own on a ten-row panel and a single hit is
+//! still visible at a glance. Where two piconets share a cell the selected
+//! one owns its colour, then the one heard first.
+//!
+//! **Zoomed and scrubbed through `state::HopView`**, from half a second to a
+//! minute, and back through what is kept; the chrome's `TimeWindow` tag says
+//! which stretch of the past is on screen. The list of hits is capped
+//! (`BT_HOP_LIMIT`), so a window reaching back before the oldest kept hit
+//! says "older hits not kept" rather than drawing that part as a quiet band.
+//!
+//! The UAP each piconet has narrowed to is the roster's to show
+//! (`net_bt_piconets`), one place for it (rule 6).
+
+use std::collections::HashMap;
 
 use ratatui::{
     layout::Rect,
-    style::Style,
+    style::{Modifier, Style},
     text::{Line, Span},
     widgets::Paragraph,
     Frame,
 };
 
 use crate::state::SdrMetrics;
-use crate::ui::panel::{FeedSpan, Panel, PanelChrome, Staleness};
+use crate::ui::panel::{FeedSpan, Panel, PanelChrome, Staleness, Tag};
+use crate::ui::widgets::timing_fmt::seconds_ms;
 
 pub struct NetBtHopsPanel;
 
-/// How much of the past the scatter shows at once. Long enough to see a
-/// piconet's own rhythm - 1600 hops a second is a blur inside any one
-/// second - short enough that the dots stay legible rather than smearing
-/// into a solid band.
-const WINDOW_S: f64 = 20.0;
+/// Columns reserved on the left for the channel-number scale, and the space
+/// after it.
+const SCALE_COLS: usize = 3;
+/// Rows under the grid: the time axis and the legend.
+const FOOT_ROWS: usize = 2;
 
-/// Columns reserved on the left for the channel-number scale.
-const SCALE_COLS: u16 = 3;
-/// Rows reserved under the grid for the time axis caption.
-const AXIS_ROWS: u16 = 1;
+/// Braille dot bits by `[row][column]` inside one cell (U+2800 block).
+const DOT: [[u8; 2]; 4] = [[0x01, 0x08], [0x02, 0x10], [0x04, 0x20], [0x40, 0x80]];
 
-/// Which row a channel at position `idx` of `n` watched channels (low to
-/// high) lands on, across `rows` available - the lowest channel at the
-/// bottom, the way frequency runs up any side of a plot.
-///
-/// When there are more watched channels than rows, several channels share a
-/// row rather than one being silently dropped - an honest loss of
-/// resolution, not a loss of a channel's own hits.
-fn row_for(idx: usize, n: usize, rows: usize) -> usize {
-    if rows == 0 {
-        return 0;
-    }
-    let scaled = idx * rows / n.max(1);
-    rows - 1 - scaled.min(rows - 1)
+/// The band of dot rows, counted from the bottom, that channel `idx` of `n`
+/// watched ones fills across `dots` dot rows: at least one row each, the
+/// lowest channel at the bottom the way frequency runs up any plot.
+fn band(idx: usize, n: usize, dots: usize) -> std::ops::Range<usize> {
+    let n = n.max(1);
+    let lo = idx * dots / n;
+    let hi = ((idx + 1) * dots / n).max(lo + 1).min(dots.max(1));
+    lo..hi
+}
+
+/// Which colour index each LAP wears: its place in the roster, which is the
+/// order piconets were first heard.
+fn colour_index(state: &SdrMetrics) -> HashMap<u32, usize> {
+    state
+        .net
+        .bt_piconets
+        .iter()
+        .enumerate()
+        .map(|(i, p)| (p.lap, i))
+        .collect()
+}
+
+/// One grid cell: its dots, and which piconet's colour it takes.
+#[derive(Clone, Copy, Default)]
+struct Cell {
+    dots: u8,
+    /// `(rank, lap)`, lowest rank wins: the selected piconet first, then by
+    /// colour index.
+    owner: Option<(usize, u32)>,
 }
 
 impl Panel for NetBtHopsPanel {
@@ -81,14 +104,36 @@ impl Panel for NetBtHopsPanel {
         (30, 6)
     }
 
+    fn focus_key(&self) -> Option<char> {
+        // The Lab bars' letter too: no layout shows both (`app::FocusKeys`).
+        Some('b')
+    }
+
+    fn focus_bindings(&self) -> &'static [(&'static str, &'static str)] {
+        &[
+            ("↑↓", "select a piconet"),
+            ("+ -", "zoom in time"),
+            ("← →", "back and forward in time"),
+            ("End", "back to now"),
+        ]
+    }
+
     fn chrome(&self, state: &SdrMetrics) -> PanelChrome {
-        PanelChrome::new("Classic Bluetooth Hops")
+        let v = state.net.hop_view;
+        PanelChrome::new("Classic _Bluetooth Hops")
             .stale_when(Staleness::NotStreaming)
             .tag_if(true, state.net.mode.tag())
-            // The scatter is the last WINDOW_S seconds: a drop inside them is
-            // dots that should be there and are not.
-            .counts_from_feed(FeedSpan::Window(std::time::Duration::from_secs_f64(
-                WINDOW_S,
+            .tag_if(
+                true,
+                Tag::TimeWindow {
+                    span_ms: v.span_ms(),
+                    back_ms: v.back_ms,
+                },
+            )
+            // A drop inside the stretch on screen is dots that should be
+            // there and are not.
+            .counts_from_feed(FeedSpan::Window(std::time::Duration::from_millis(
+                v.span_ms() + v.back_ms,
             )))
     }
 
@@ -103,13 +148,14 @@ impl Panel for NetBtHopsPanel {
         if inner.width == 0 || inner.height == 0 {
             return;
         }
+        let width = inner.width as usize;
 
         if let Some(reason) = &state.net.bt_refused {
             let mut lines = vec![Line::from(Span::styled(
                 "not watching".to_string(),
                 Style::default().fg(theme.stale),
             ))];
-            for chunk in crate::ui::chrome::wrap(reason, inner.width as usize, 4) {
+            for chunk in crate::ui::chrome::wrap(reason, width, 4) {
                 lines.push(Line::from(Span::styled(
                     chunk,
                     Style::default().fg(theme.label),
@@ -123,11 +169,9 @@ impl Panel for NetBtHopsPanel {
         // "Nothing heard yet" and "too small to draw a grid" both fall back
         // to the same one-line status - the receiver's own state is the
         // thing worth saying either way, not an empty grid.
-        if state.net.bt_hops.is_empty()
-            || channels.is_empty()
-            || inner.width <= SCALE_COLS
-            || inner.height <= AXIS_ROWS
-        {
+        let rows = (inner.height as usize).saturating_sub(FOOT_ROWS);
+        let cols = width.saturating_sub(SCALE_COLS + 1);
+        if state.net.bt_hops.is_empty() || channels.is_empty() || rows == 0 || cols < 8 {
             f.render_widget(
                 Paragraph::new(Line::from(Span::styled(
                     format!("watching {} channels - no access codes yet", channels.len()),
@@ -138,107 +182,203 @@ impl Panel for NetBtHopsPanel {
             return;
         }
 
-        // The most recent hop's own piconet, narrowed as far as a header
-        // alone ever gets - `signal::bt::header::PiconetClock`'s own doc
-        // has the measured floor. `None` before any header has narrowed
-        // anything yet, rather than claiming a UAP that is not there -
-        // computed before the grid so its own row can be reserved rather
-        // than fought over with the grid for space.
-        let uap_line = state.net.bt_hops.front().and_then(|newest| {
-            state
-                .net
-                .bt_uap
-                .get(&newest.lap)
-                .filter(|uaps| !uaps.is_empty())
-                .map(|uaps| {
-                    let list = uaps
-                        .iter()
-                        .map(|u| format!("{u:#04x}"))
-                        .collect::<Vec<_>>()
-                        .join(", ");
-                    let word = if uaps.len() == 1 {
-                        "UAP"
-                    } else {
-                        "UAP candidates"
-                    };
-                    format!("LAP {:#08x}: {word} {list}", newest.lap)
-                })
-        });
-        let summary_rows: u16 = if uap_line.is_some() { 1 } else { 0 };
-
-        let width = (inner.width - SCALE_COLS) as usize;
-        let rows = inner.height.saturating_sub(AXIS_ROWS + summary_rows).max(1) as usize;
         let now = std::time::Instant::now();
+        let view = state.net.hop_view;
+        let (span, back) = (view.span_ms() as f64, view.back_ms as f64);
+        let selected = state.net.bt_view.selected;
+        let colours = colour_index(state);
+        let rank = |lap: u32| {
+            if Some(lap) == selected {
+                0
+            } else {
+                1 + colours.get(&lap).copied().unwrap_or(usize::MAX - 1)
+            }
+        };
 
-        let mut grid = vec![vec![false; width]; rows];
+        let (dots_x, dots_y) = (cols * 2, rows * 4);
+        let mut grid = vec![vec![Cell::default(); cols]; rows];
+        // Hits in view per LAP, for the legend: what the plot shows.
+        let mut in_view: HashMap<u32, u64> = HashMap::new();
         for hop in &state.net.bt_hops {
             let Some(idx) = channels.iter().position(|&c| c == hop.channel) else {
                 continue;
             };
-            let elapsed = now.saturating_duration_since(hop.seen).as_secs_f64();
-            if elapsed > WINDOW_S {
+            let age = now.saturating_duration_since(hop.seen).as_secs_f64() * 1e3;
+            if age < back || age >= back + span {
                 continue;
             }
-            let from_right = ((elapsed / WINDOW_S) * width as f64) as usize;
-            if from_right >= width {
-                continue;
+            *in_view.entry(hop.lap).or_default() += 1;
+            let x = dots_x - 1 - (((age - back) / span) * dots_x as f64) as usize;
+            for from_bottom in band(idx, channels.len(), dots_y) {
+                let y = dots_y - 1 - from_bottom;
+                let cell = &mut grid[y / 4][x / 2];
+                cell.dots |= DOT[y % 4][x % 2];
+                let claim = (rank(hop.lap), hop.lap);
+                if cell.owner.is_none_or(|o| claim < o) {
+                    cell.owner = Some(claim);
+                }
             }
-            let col = width - 1 - from_right;
-            let row = row_for(idx, channels.len(), rows);
-            grid[row][col] = true;
         }
 
-        let mut lines = Vec::with_capacity(rows + 1);
-        for (r, cells) in grid.iter().enumerate() {
-            // The lowest channel that lands on this row, if any: one label per
-            // row, read from the bottom edge the way a ruler is.
-            let label = (0..channels.len())
-                .find(|&idx| row_for(idx, channels.len(), rows) == r)
-                .map(|idx| format!("{:>width$}", channels[idx], width = SCALE_COLS as usize))
-                .unwrap_or_else(|| " ".repeat(SCALE_COLS as usize));
+        let ink = |lap: u32| {
+            let c = colours
+                .get(&lap)
+                .map_or(theme.value_hi, |&i| theme.series_color(i));
+            match selected {
+                Some(s) if s != lap => Style::default().fg(theme.receded(c)),
+                Some(_) => Style::default().fg(c).add_modifier(Modifier::BOLD),
+                None => Style::default().fg(c),
+            }
+        };
 
-            let mut spans = vec![Span::styled(label, Style::default().fg(theme.label))];
-            let dots: String = cells
-                .iter()
-                .map(|&hit| if hit { '\u{25cf}' } else { ' ' })
-                .collect();
-            spans.push(Span::styled(dots, Style::default().fg(theme.value_hi)));
+        let mut lines = Vec::with_capacity(rows + FOOT_ROWS);
+        for (r, cells) in grid.iter().enumerate() {
+            // The channel whose band holds this row's lowest dot row.
+            let bottom = dots_y - 1 - (r * 4 + 3);
+            let label = (0..channels.len())
+                .find(|&i| band(i, channels.len(), dots_y).contains(&bottom))
+                .map(|i| channels[i].to_string())
+                .unwrap_or_default();
+            let mut spans = vec![Span::styled(
+                format!("{label:>SCALE_COLS$} "),
+                Style::default().fg(theme.label),
+            )];
+            for cell in cells {
+                spans.push(match cell.owner {
+                    Some((_, lap)) => Span::styled(
+                        char::from_u32(0x2800 + cell.dots as u32)
+                            .unwrap_or(' ')
+                            .to_string(),
+                        ink(lap),
+                    ),
+                    None => Span::raw(" "),
+                });
+            }
             lines.push(Line::from(spans));
         }
 
+        // The time axis: where the window starts and where it ends, and, if
+        // it reaches before the oldest hit the capped list still holds, that
+        // the rest is not kept rather than quiet.
+        let left = format!("-{}", seconds_ms((back + span) as u64));
+        let right = if back == 0.0 {
+            "now".to_string()
+        } else {
+            format!("-{}", seconds_ms(back as u64))
+        };
+        let oldest_age = state
+            .net
+            .bt_hops
+            .back()
+            .map(|h| now.saturating_duration_since(h.seen).as_secs_f64() * 1e3);
+        let truncated = state.net.bt_hops.len() >= crate::state::BT_HOP_LIMIT
+            && oldest_age.is_some_and(|a| a < back + span);
+        let middle = if truncated { "older hits not kept" } else { "" };
+        let gap = cols.saturating_sub(left.chars().count() + right.chars().count());
+        let axis = format!(
+            "{:SCALE_COLS$} {left}{:^gap$}{right}",
+            "",
+            if middle.chars().count() + 2 <= gap {
+                middle
+            } else {
+                ""
+            },
+        );
         lines.push(Line::from(Span::styled(
-            format!(
-                "{:<width$}-{WINDOW_S:.0} s{:>right$}now",
-                "",
-                "",
-                width = SCALE_COLS as usize,
-                right = width.saturating_sub(9)
-            ),
+            axis.chars().take(width).collect::<String>(),
             Style::default().fg(theme.label),
         )));
 
-        if let Some(line) = uap_line {
-            if let Some(chunk) = crate::ui::chrome::wrap(&line, inner.width as usize, 1).first() {
-                lines.push(Line::from(Span::styled(
-                    chunk.clone(),
-                    Style::default().fg(theme.label),
-                )));
-            }
-        }
-
+        lines.push(legend(&in_view, &colours, selected, width, theme));
         f.render_widget(Paragraph::new(lines), inner);
     }
+}
+
+/// `in view  ⣿ 0x9e8b33 145  ⣿ 0x123456 88`: each piconet on screen in its
+/// colour, with its hits in the window, in colour order; what does not fit
+/// is counted, and colours shared by two piconets in view are said.
+fn legend(
+    in_view: &HashMap<u32, u64>,
+    colours: &HashMap<u32, usize>,
+    selected: Option<u32>,
+    width: usize,
+    theme: &crate::Theme,
+) -> Line<'static> {
+    let mut shown: Vec<(usize, u32, u64)> = in_view
+        .iter()
+        .map(|(&lap, &n)| (colours.get(&lap).copied().unwrap_or(usize::MAX), lap, n))
+        .collect();
+    shown.sort();
+    let repeats = {
+        let mut seen = std::collections::HashSet::new();
+        shown
+            .iter()
+            .any(|(i, ..)| !seen.insert(i % theme.series.len().max(1)))
+    };
+    let lead = if shown.is_empty() {
+        "nothing in view".to_string()
+    } else {
+        "in view".to_string()
+    };
+    let mut spans = vec![Span::styled(lead.clone(), Style::default().fg(theme.label))];
+    let mut used = lead.chars().count();
+    let tail = if repeats { "  colours repeat" } else { "" };
+    for (k, &(i, lap, n)) in shown.iter().enumerate() {
+        let text = format!(" {lap:#08x} {n}");
+        let more = shown.len() - k - 1;
+        let reserve = if more > 0 {
+            format!("  +{more}").chars().count()
+        } else {
+            0
+        } + tail.chars().count();
+        if used + 3 + text.chars().count() + reserve > width {
+            let rest = format!("  +{}", shown.len() - k);
+            if used + rest.chars().count() <= width {
+                spans.push(Span::styled(rest.clone(), Style::default().fg(theme.label)));
+                used += rest.chars().count();
+            }
+            break;
+        }
+        let c = theme.series_color(i);
+        let (chip, word) = match selected {
+            Some(s) if s != lap => (theme.receded(c), theme.label),
+            Some(_) => (c, theme.value_hi),
+            None => (c, theme.value),
+        };
+        spans.push(Span::raw("  "));
+        spans.push(Span::styled("\u{28ff}", Style::default().fg(chip)));
+        spans.push(Span::styled(text.clone(), Style::default().fg(word)));
+        used += 3 + text.chars().count();
+    }
+    if repeats && used + tail.chars().count() <= width {
+        spans.push(Span::styled(tail, Style::default().fg(theme.label)));
+    }
+    Line::from(spans)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::signal::bt::piconet::observe;
     use crate::state::{fixture::draw, BtHop};
     use std::time::{Duration, Instant};
 
+    /// A hit on `channel` from `lap`, `ago_ms` before now, counted in the
+    /// roster too, the way the worker does both.
+    fn hit(m: &mut SdrMetrics, lap: u32, channel: u8, ago_ms: u64) {
+        let seen = Instant::now() - Duration::from_millis(ago_ms);
+        observe(&mut m.net.bt_piconets, lap, channel, seen);
+        m.net.bt_hops.push_front(BtHop { channel, lap, seen });
+    }
+
+    fn braille(line: &str) -> usize {
+        line.chars()
+            .filter(|c| ('\u{2801}'..='\u{28ff}').contains(c))
+            .count()
+    }
+
     /// "No receiver at all" and "a receiver has heard nothing" are different
-    /// claims - the same distinction `net_bt_piconets`'s own refusal test
-    /// makes.
+    /// claims, the same distinction the roster's refusal test makes.
     #[test]
     fn a_refusal_is_shown_rather_than_a_scatter() {
         let mut m = SdrMetrics::fixture().streaming();
@@ -246,13 +386,12 @@ mod tests {
             Some("no classic Bluetooth channel fits inside the current 2.0 MHz view".to_string());
         let out = draw(NetBtHopsPanel, 60, 10, &m).join("\n");
         assert!(out.contains("not watching"), "{out}");
-        assert!(out.contains("2.0"), "{out}");
-        assert!(out.contains("MHz"), "{out}");
+        assert!(out.contains("2.0") && out.contains("MHz"), "{out}");
     }
 
-    /// The scatter spans the last WINDOW_S seconds only: a loss minutes ago
-    /// says nothing about the dots now on screen, and a loss inside the
-    /// window means dots that should be there are not.
+    /// The scatter spans the window on screen only: a loss minutes ago says
+    /// nothing about the dots now drawn, and a loss inside it means dots that
+    /// should be there are not.
     #[test]
     fn only_a_loss_inside_the_window_is_a_caveat_on_the_scatter() {
         let mut m = SdrMetrics::fixture().streaming();
@@ -267,10 +406,6 @@ mod tests {
         assert!(recent[0].contains("[FEED LOSS]"), "{}", recent[0]);
     }
 
-    /// A live receiver with nothing heard yet says how many channels it is
-    /// actually watching, which is the honest scope of what the scatter
-    /// could show - not the full 79, and not silently the whole span
-    /// either.
     #[test]
     fn no_hits_yet_says_how_many_channels_are_watched() {
         let mut m = SdrMetrics::fixture().streaming();
@@ -280,125 +415,139 @@ mod tests {
         assert!(!out.contains("not watching"), "{out}");
     }
 
-    /// B15's own exit condition for this panel: a hit on a known channel,
-    /// seen just now, lands on that channel's own row, at the right edge
-    /// (`now`).
+    /// **Each channel keeps its own band.** Eight channels on eight grid
+    /// rows: a hit just now on the fifth-lowest lands on the fourth row
+    /// from the top, at the right edge, and nowhere else.
     #[test]
     fn a_recent_hit_lands_on_its_own_channels_row_near_now() {
         let mut m = SdrMetrics::fixture().streaming();
-        // Eight channels and eight rows: a 1:1 mapping, so the row a hit on
-        // channel 14 lands on is exactly predictable.
         m.net.bt_channels_watched = (10..18).collect();
-        m.net.bt_hops.push_back(BtHop {
-            channel: 14,
-            lap: 0x0011_2233,
-            seen: Instant::now(),
-        });
-        let lines = draw(NetBtHopsPanel, 40, 9, &m); // 8 grid rows + 1 axis row
-        let want_row = row_for(
-            m.net
-                .bt_channels_watched
-                .iter()
-                .position(|&c| c == 14)
-                .unwrap(),
-            8,
-            8,
-        );
-        assert!(
-            lines[want_row].contains('\u{25cf}'),
-            "row {want_row} should carry the hit:\n{}",
-            lines.join("\n")
-        );
-        // The dot sits near the right edge - `now`.
-        let dot_at = lines[want_row]
+        hit(&mut m, 0x112233, 14, 0);
+        // Inner 38 x 10: eight grid rows, the axis, the legend.
+        let lines = draw(NetBtHopsPanel, 40, 12, &m);
+        let grid: Vec<&String> = lines[1..9].iter().collect();
+        let marked: Vec<usize> = (0..8).filter(|&r| braille(grid[r]) > 0).collect();
+        assert_eq!(marked, vec![3], "{}", lines.join("\n"));
+        let row = grid[3];
+        let at = row
             .chars()
-            .position(|c| c == '\u{25cf}')
+            .position(|c| ('\u{2801}'..='\u{28ff}').contains(&c))
             .unwrap();
-        assert!(
-            dot_at as isize >= lines[want_row].chars().count() as isize - 4,
-            "expected the dot near the right edge, got column {dot_at} of {:?}",
-            lines[want_row]
-        );
+        assert!(at + 4 >= row.chars().count(), "not near now: {row:?}");
     }
 
-    /// A hit older than the window is not drawn at all - it happened, but
-    /// not inside the picture this panel is currently showing.
+    /// A hit older than the window is not drawn: it happened, but not in
+    /// the stretch on screen. Scrubbed back, it is.
     #[test]
-    fn a_hit_older_than_the_window_is_not_drawn() {
+    fn the_window_decides_what_is_drawn_and_scrubbing_moves_it() {
         let mut m = SdrMetrics::fixture().streaming();
         m.net.bt_channels_watched = vec![10];
-        m.net.bt_hops.push_back(BtHop {
-            channel: 10,
-            lap: 0x0011_2233,
-            seen: Instant::now() - Duration::from_secs(60),
-        });
-        let out = draw(NetBtHopsPanel, 40, 6, &m).join("\n");
-        assert!(!out.contains('\u{25cf}'), "{out}");
+        hit(&mut m, 0x112233, 10, 30_000);
+        let out = draw(NetBtHopsPanel, 40, 8, &m).join("\n");
+        assert_eq!(braille(&out), 0, "{out}");
+        assert!(out.contains("nothing in view"), "{out}");
+
+        m.net.hop_view.back_ms = 20_000;
+        let out = draw(NetBtHopsPanel, 70, 8, &m);
+        assert!(braille(&out.join("\n")) > 0, "{}", out.join("\n"));
+        assert!(out[0].contains("20 s \u{25c2} -20 s"), "{}", out[0]);
+        assert!(out.join("\n").contains("-40 s"), "the axis starts there");
     }
 
-    /// A hit on a channel that is not in the watched list - a stale hop from
-    /// before the last retune reshuffled which channels are watched - is not
-    /// drawn either, rather than landing on some other channel's row.
+    /// A hit on a channel no longer watched (a retune reshuffled the list)
+    /// is not drawn on some other channel's row.
     #[test]
     fn a_hit_on_an_unwatched_channel_is_not_drawn() {
         let mut m = SdrMetrics::fixture().streaming();
         m.net.bt_channels_watched = vec![10, 20];
-        m.net.bt_hops.push_back(BtHop {
-            channel: 50,
-            lap: 0x0011_2233,
-            seen: Instant::now(),
-        });
-        let out = draw(NetBtHopsPanel, 40, 6, &m).join("\n");
-        assert!(!out.contains('\u{25cf}'), "{out}");
+        hit(&mut m, 0x112233, 50, 0);
+        let out = draw(NetBtHopsPanel, 40, 8, &m).join("\n");
+        assert_eq!(braille(&out), 0, "{out}");
     }
 
-    /// B16's own exit condition for this panel: the most recent hop's own
-    /// LAP, once its UAP has narrowed, shows the honest floor - two
-    /// candidates, not a confirmed single answer picked from them.
+    /// **The legend counts what is drawn**, each piconet in view with its
+    /// hits in the window, in the order they were first heard.
     #[test]
-    fn the_newest_hops_narrowed_uap_is_shown() {
+    fn the_legend_names_each_piconet_in_view_with_its_hits() {
         let mut m = SdrMetrics::fixture().streaming();
-        m.net.bt_channels_watched = vec![10];
-        let lap = 0x0055_aa11u32;
-        m.net.bt_hops.push_back(BtHop {
-            channel: 10,
-            lap,
-            seen: Instant::now(),
-        });
-        m.net.bt_uap.insert(lap, vec![0x4c, 0x9a]);
-        let out = draw(NetBtHopsPanel, 60, 12, &m).join("\n");
-        assert!(out.contains("UAP candidates"), "{out}");
-        assert!(out.contains("0x4c"), "{out}");
-        assert!(out.contains("0x9a"), "{out}");
+        m.net.bt_channels_watched = (10..20).collect();
+        for i in 0..5 {
+            hit(&mut m, 0x9e8b33, 10 + i, 100 * i as u64);
+        }
+        hit(&mut m, 0x123456, 15, 50);
+        hit(&mut m, 0x123456, 16, 60_000);
+        let out = draw(NetBtHopsPanel, 60, 10, &m);
+        let legend = out[out.len() - 2].clone();
+        assert!(legend.contains("in view"), "{legend}");
+        let a = legend.find("0x9e8b33 5").expect(&legend);
+        let b = legend.find("0x123456 1").expect(&legend);
+        assert!(a < b, "first heard first: {legend}");
     }
 
-    /// No narrowing has happened yet for this LAP - nothing is claimed.
+    /// **The selected piconet owns a shared cell.** Two piconets on one
+    /// channel at one moment: with the second selected, the cell is drawn
+    /// bold in its colour; with nothing selected, the one heard first owns
+    /// it. Checked through the buffer's styles, which is what colour is.
     #[test]
-    fn no_uap_line_before_any_narrowing() {
+    fn the_selected_piconet_owns_a_cell_it_shares() {
+        use ratatui::{backend::TestBackend, Terminal};
         let mut m = SdrMetrics::fixture().streaming();
         m.net.bt_channels_watched = vec![10];
-        m.net.bt_hops.push_back(BtHop {
-            channel: 10,
-            lap: 0x0055_aa11,
-            seen: Instant::now(),
-        });
-        let out = draw(NetBtHopsPanel, 60, 12, &m).join("\n");
-        assert!(!out.contains("UAP"), "{out}");
+        hit(&mut m, 0xaaaaaa, 10, 0);
+        hit(&mut m, 0xbbbbbb, 10, 0);
+        let theme = crate::Theme::sdr();
+        let cell_style = |m: &SdrMetrics| {
+            let mut t = Terminal::new(TestBackend::new(30, 8)).unwrap();
+            t.draw(|f| NetBtHopsPanel.render(f, f.size(), m, &theme, false))
+                .unwrap();
+            let buf = t.backend().buffer().clone();
+            let at = buf
+                .content()
+                .iter()
+                .find(|c| ('\u{2801}'..='\u{28ff}').contains(&c.symbol().chars().next().unwrap()))
+                .expect("a mark")
+                .clone();
+            (at.fg, at.modifier.contains(Modifier::BOLD))
+        };
+        assert_eq!(cell_style(&m), (theme.series_color(0), false));
+        m.net.bt_view.selected = Some(0xbbbbbb);
+        assert_eq!(cell_style(&m), (theme.series_color(1), true));
+    }
+
+    /// With the capped list full and the window reaching before its oldest
+    /// hit, the axis says the rest is not kept rather than letting it read
+    /// as quiet.
+    #[test]
+    fn a_window_older_than_what_is_kept_says_so() {
+        let mut m = SdrMetrics::fixture().streaming();
+        m.net.bt_channels_watched = vec![10];
+        for i in 0..crate::state::BT_HOP_LIMIT as u64 {
+            hit(&mut m, 0x112233, 10, 5_000 - i * 5);
+        }
+        let out = draw(NetBtHopsPanel, 70, 8, &m).join("\n");
+        assert!(out.contains("older hits not kept"), "{out}");
+        m.net.hop_view.zoom = 0;
+        let out = draw(NetBtHopsPanel, 70, 8, &m).join("\n");
+        assert!(
+            !out.contains("not kept"),
+            "half a second is all kept: {out}"
+        );
     }
 
     #[test]
     fn it_fits_every_size_the_layout_can_hand_it() {
         let mut m = SdrMetrics::fixture().streaming();
-        m.net.bt_channels_watched = (10..18).collect();
-        for i in 0..8 {
-            m.net.bt_hops.push_back(BtHop {
-                channel: 10 + i,
-                lap: i as u32,
-                seen: Instant::now() - Duration::from_secs(i as u64),
-            });
+        m.net.bt_channels_watched = (10..30).collect();
+        for i in 0..40u64 {
+            hit(
+                &mut m,
+                0x100000 + (i % 9) as u32,
+                10 + (i % 20) as u8,
+                i * 300,
+            );
         }
-        m.net.bt_uap.insert(0, vec![0x4c, 0x9a]);
-        for w in 30..70u16 {
+        m.net.bt_view.selected = Some(0x100003);
+        for w in 30..80u16 {
             for h in 6..20u16 {
                 for line in draw(NetBtHopsPanel, w, h, &m) {
                     assert!(line.chars().count() <= w as usize, "{w}x{h}: {line:?}");
