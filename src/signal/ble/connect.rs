@@ -43,8 +43,11 @@
 //! following it incorrectly, is real remaining wiring - `pdu::decode`
 //! does not yet expose the bit at all.
 //!
-//! **Primitive layer only - nothing calls this yet.** No live receiver
-//! captures a `CONNECT_IND` and starts hopping; `signal::ble::receive`
+//! **Read, not followed.** Since net-ux-polish-plan 5.4.b3 the packet
+//! detail view decodes a received `CONNECT_IND` ([`decode_octets`]) and shows
+//! its parameters and, for Algorithm #1, the first channels [`Csa1`]
+//! predicts, labelled "predicted, not followed". No live receiver captures
+//! a `CONNECT_IND` and starts hopping; `signal::ble::receive`
 //! only ever demodulates whichever one channel the radio is tuned to.
 //! The same honest scope every large piece of this arc has landed with
 //! first (B14's own `access_code`, B16's own `header`, B18's own
@@ -58,7 +61,6 @@
 /// initiator's and the advertiser's own addresses, and the ten `LLData`
 /// fields section 2.3.3.1 names.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-#[allow(dead_code)]
 pub struct ConnectIndData {
     pub init_a: [u8; 6],
     pub adv_a: [u8; 6],
@@ -92,10 +94,8 @@ pub struct ConnectIndData {
 
 /// `CONNECT_IND`/`AUX_CONNECT_REQ`'s own fixed payload length: `InitA`(6)
 /// + `AdvA`(6) + `LLData`(22), in bits.
-#[allow(dead_code)]
 pub const PAYLOAD_BITS: usize = 34 * 8;
 
-#[allow(dead_code)]
 fn byte_at(bits: &[bool], bit_offset: usize) -> u8 {
     let mut b = 0u8;
     for i in 0..8 {
@@ -106,26 +106,22 @@ fn byte_at(bits: &[bool], bit_offset: usize) -> u8 {
     b
 }
 
-#[allow(dead_code)]
 fn u16_at(bits: &[bool], byte_offset: usize) -> u16 {
     (byte_at(bits, byte_offset * 8) as u16) | ((byte_at(bits, (byte_offset + 1) * 8) as u16) << 8)
 }
 
-#[allow(dead_code)]
 fn u24_at(bits: &[bool], byte_offset: usize) -> u32 {
     (0..3)
         .map(|i| (byte_at(bits, (byte_offset + i) * 8) as u32) << (8 * i))
         .fold(0, |a, b| a | b)
 }
 
-#[allow(dead_code)]
 fn u32_at(bits: &[bool], byte_offset: usize) -> u32 {
     (0..4)
         .map(|i| (byte_at(bits, (byte_offset + i) * 8) as u32) << (8 * i))
         .fold(0, |a, b| a | b)
 }
 
-#[allow(dead_code)]
 fn u40_at(bits: &[bool], byte_offset: usize) -> u64 {
     (0..5)
         .map(|i| (byte_at(bits, (byte_offset + i) * 8) as u64) << (8 * i))
@@ -141,7 +137,6 @@ fn u40_at(bits: &[bool], byte_offset: usize) -> u64 {
 /// same "an incomplete PDU is not a wrong one" refusal `pdu::decode`
 /// already holds itself to, not a claim that a full-length payload is
 /// necessarily a genuine one.
-#[allow(dead_code)]
 pub fn decode(payload_bits: &[bool]) -> Option<ConnectIndData> {
     if payload_bits.len() < PAYLOAD_BITS {
         return None;
@@ -185,6 +180,33 @@ pub fn decode(payload_bits: &[bool]) -> Option<ConnectIndData> {
     })
 }
 
+/// A `CONNECT_IND` payload as the packet ring keeps it, octets in the order
+/// they were sent: [`decode`] over its bits, least significant first in each
+/// octet, which is the order the air carried them.
+pub fn decode_octets(payload: &[u8]) -> Option<ConnectIndData> {
+    let bits: Vec<bool> = payload
+        .iter()
+        .flat_map(|b| (0..8).map(move |i| (b >> i) & 1 == 1))
+        .collect();
+    decode(&bits)
+}
+
+/// The central's worst-case sleep clock accuracy an SCA value states, as the
+/// range in ppm, from Core 5.4 Vol 6 Part B Table 2.11, read on the SIG's
+/// site 2026-09-23: 0 is 251 to 500 ppm, down to 7, 0 to 20 ppm.
+pub fn sca_ppm(sca: u8) -> (u16, u16) {
+    match sca & 0x07 {
+        0 => (251, 500),
+        1 => (151, 250),
+        2 => (101, 150),
+        3 => (76, 100),
+        4 => (51, 75),
+        5 => (31, 50),
+        6 => (21, 30),
+        _ => (0, 20),
+    }
+}
+
 /// Channel Selection Algorithm #1's own persistent state - one
 /// `lastUnmappedChannel`, carried from connection event to connection
 /// event, exactly the cited text's own "shall be 0 for the first
@@ -192,7 +214,6 @@ pub fn decode(payload_bits: &[bool]) -> Option<ConnectIndData> {
 /// `lastUnmappedChannel` shall be set to the value of the
 /// `unmappedChannel`."
 #[derive(Clone, Debug, PartialEq, Eq)]
-#[allow(dead_code)]
 pub struct Csa1 {
     last_unmapped: u8,
     hop_increment: u8,
@@ -204,7 +225,6 @@ pub struct Csa1 {
     used_channels: Vec<u8>,
 }
 
-#[allow(dead_code)]
 impl Csa1 {
     /// `None` when `channel_map` names no used channel at all - not
     /// something a real transmitter is ever supposed to send (the cited
@@ -397,5 +417,30 @@ mod tests {
     #[test]
     fn an_empty_channel_map_is_refused() {
         assert!(Csa1::new(11, 0).is_none());
+    }
+
+    /// **The octets the ring keeps decode the same as the bits the air
+    /// carried**: built bit by bit here, least significant first, and read
+    /// back through both entry points.
+    #[test]
+    fn octets_and_bits_decode_alike() {
+        let payload: Vec<u8> = (0u8..34)
+            .map(|i| i.wrapping_mul(37).wrapping_add(11))
+            .collect();
+        let bits: Vec<bool> = payload
+            .iter()
+            .flat_map(|b| (0..8).map(move |i| (b >> i) & 1 == 1))
+            .collect();
+        assert_eq!(decode_octets(&payload), decode(&bits));
+        assert!(decode_octets(&payload).is_some());
+        assert_eq!(decode_octets(&payload[..33]), None, "one octet short");
+    }
+
+    /// Table 2.11's eight rows, the ends of the scale checked.
+    #[test]
+    fn sca_reads_as_table_2_11_states() {
+        assert_eq!(sca_ppm(0), (251, 500));
+        assert_eq!(sca_ppm(3), (76, 100));
+        assert_eq!(sca_ppm(7), (0, 20));
     }
 }

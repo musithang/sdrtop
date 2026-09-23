@@ -442,6 +442,7 @@ fn header_lines(
         out.push(field_line("ChSel", text.to_string(), theme));
     }
     out.extend(advertised_lines(p, iw, theme));
+    out.extend(connection_lines(p, state, iw, theme));
 
     out.push(section("physics", "", iw, theme));
     out.push(field_line(
@@ -452,21 +453,152 @@ fn header_lines(
         theme,
     ));
     let carrier = crate::signal::ble::channel::centre_hz(p.channel);
+    // The one conversion every NET offset takes, so the three lines below
+    // and the CFO column in the list are one scale (rule 5).
+    let offset = |hz: Uncertain| carrier.map(|c| state.radio.transmitter_offset(hz, c as f64, now));
     out.push(field_line(
         "CFO",
-        match p.freq_offset_hz.zip(carrier) {
-            Some((hz, c)) => {
-                let t = state.radio.transmitter_offset(hz, c as f64, now);
-                format!(
-                    "{}  {}",
-                    Reading::new(t.khz, "kHz", f64::INFINITY).text(),
-                    Reading::new(t.ppm, "ppm", f64::INFINITY).text()
-                )
-            }
+        match p.freq_offset_hz.and_then(offset) {
+            Some(t) => format!(
+                "{}  {}",
+                Reading::new(t.khz, "kHz", f64::INFINITY).text(),
+                Reading::new(t.ppm, "ppm", f64::INFINITY).text()
+            ),
             None => "-".to_string(),
         },
         theme,
     ));
+    // Bluetooth design measurement 8: the two ends of B9's drift
+    // measurement, which is how the specification frames it; the drift row
+    // below is their difference. Only where the drift was measured, and only
+    // from a CRC-good packet, for the modulation section's reason (5.4.c).
+    if let (Some(d), true) = (p.drift.as_ref(), p.crc_ok) {
+        for (label, hz) in [("start", d.initial_hz), ("end", d.final_hz)] {
+            if let Some(t) = offset(hz) {
+                out.push(field_line(
+                    label,
+                    Reading::new(t.khz, "kHz", f64::INFINITY).text(),
+                    theme,
+                ));
+            }
+        }
+    }
+    out
+}
+
+/// The CONNECTION section of a `CONNECT_IND`: what the advertising channel
+/// said about the connection being opened (`signal::ble::connect`).
+///
+/// **Read, not followed** (rule 1). The parameters are the packet's; the
+/// hop sequence is a prediction from them by Channel Selection Algorithm #1,
+/// labelled so, and a connection using #2 (ChSel set) says it is not
+/// predicted rather than being shown #1's sequence, which would be wrong.
+/// Units are the Link Layer's own (Core 5.4 Vol 6 Part B 2.3.3.1):
+/// `Interval` and the window in 1.25 ms steps, `Timeout` in 10 ms, the SCA
+/// by Table 2.11.
+fn connection_lines(
+    p: &BlePacket,
+    state: &SdrMetrics,
+    iw: usize,
+    theme: &crate::Theme,
+) -> Vec<Line<'static>> {
+    use crate::signal::ble::connect::{decode_octets, sca_ppm, Csa1};
+    if p.pdu_type != PduType::ConnectInd {
+        return Vec::new();
+    }
+    let mut out = vec![crate::ui::chrome::section(
+        "connection",
+        "read, not followed",
+        iw,
+        theme,
+    )];
+    if !p.crc_ok {
+        out.push(Line::from(Span::styled(
+            " not read: CRC failed".to_string(),
+            Style::default().fg(theme.stale),
+        )));
+        return out;
+    }
+    let Some(c) = decode_octets(&p.payload) else {
+        out.push(note(
+            "payload shorter than a CONNECT_IND's 34 octets",
+            theme,
+        ));
+        return out;
+    };
+    // TxAdd names the initiator's address on a CONNECT_IND, RxAdd the
+    // advertiser's.
+    // The Link Layer's own field names: short, and exactly what the
+    // specification calls them.
+    out.push(field_line(
+        "InitA",
+        state.net.show_address(c.init_a, p.tx_add_random, None),
+        theme,
+    ));
+    out.push(field_line(
+        "AdvA",
+        state.net.show_address(c.adv_a, p.rx_add_random, None),
+        theme,
+    ));
+    out.push(field_line(
+        "access",
+        format!("0x{:08X}", c.access_address),
+        theme,
+    ));
+    out.push(field_line(
+        "CRC init",
+        format!("0x{:06X}", c.crc_init),
+        theme,
+    ));
+    out.push(field_line(
+        "interval",
+        format!("{:.2} ms", c.interval as f64 * 1.25),
+        theme,
+    ));
+    out.push(field_line(
+        "latency",
+        format!("{} events", c.latency),
+        theme,
+    ));
+    out.push(field_line(
+        "timeout",
+        format!("{} ms", c.timeout as u32 * 10),
+        theme,
+    ));
+    out.push(field_line(
+        "window",
+        format!(
+            "{:.2} ms at +{:.2} ms",
+            c.win_size as f64 * 1.25,
+            c.win_offset as f64 * 1.25
+        ),
+        theme,
+    ));
+    let used = (c.channel_map & 0x1F_FFFF_FFFF).count_ones();
+    out.push(field_line(
+        "channels",
+        format!("{used} of 37 used (map 0x{:010X})", c.channel_map),
+        theme,
+    ));
+    let (lo, hi) = sca_ppm(c.sca);
+    out.push(field_line(
+        "SCA",
+        format!("{} ({lo} to {hi} ppm)", c.sca),
+        theme,
+    ));
+    out.push(field_line("hop", c.hop_increment.to_string(), theme));
+    let hops = if p.ch_sel {
+        "CSA #2: not predicted".to_string()
+    } else {
+        match Csa1::new(c.hop_increment, c.channel_map) {
+            Some(mut csa) => {
+                let first: Vec<String> = (0..8).map(|_| csa.next().to_string()).collect();
+                format!("{} ... predicted, not followed", first.join(" "))
+            }
+            None => "no channel used: nothing to predict".to_string(),
+        }
+    };
+    out.extend(wrapped("hops", &hops, iw, theme));
     out
 }
 
@@ -896,5 +1028,96 @@ mod tests {
         assert_eq!(uuid(&[0x12, 0x34, 0x56, 0x78]), "0x12345678");
         let long: Vec<u8> = (0..16).collect();
         assert_eq!(uuid(&long), "00010203-0405-0607-0809-0a0b0c0d0e0f");
+    }
+
+    /// **The two ends of the drift, on the CFO's scale**, only where the
+    /// drift was measured and the CRC passed.
+    #[test]
+    fn start_and_end_frequency_sit_under_the_cfo() {
+        let mut m = SdrMetrics::fixture().streaming();
+        m.net.ble_packets.push_front(packet_with_drift(
+            Some(quality(250_000.0)),
+            Some(drift(5_000.0)),
+        ));
+        let out = draw(NetBleDetailPanel, 80, 30, &m).join("\n");
+        assert!(out.contains("start    0.0 ±0.5 kHz"), "{out}");
+        assert!(out.contains("end      5.0 ±0.5 kHz"), "{out}");
+
+        m.net.ble_packets[0].crc_ok = false;
+        let failed = draw(NetBleDetailPanel, 80, 30, &m).join("\n");
+        assert!(!failed.contains("start"), "{failed}");
+        m.net.ble_packets[0] = packet(Some(quality(250_000.0)));
+        let none = draw(NetBleDetailPanel, 80, 30, &m).join("\n");
+        assert!(!none.contains("start"), "{none}");
+    }
+
+    /// A CONNECT_IND's 34 octets, as sent: InitA and AdvA in air order, then
+    /// LLData: AA, CRCInit, WinSize 2, WinOffset 4, Interval 24, Latency 0,
+    /// Timeout 72, every channel used, hop 7 with SCA 5.
+    fn connect_ind(ch_sel: bool, crc_ok: bool) -> SdrMetrics {
+        use crate::signal::ble::pdu::air_octets;
+        let mut payload = air_octets([0x11, 0x22, 0x33, 0x44, 0x55, 0x66]).to_vec();
+        payload.extend(air_octets([0xaa, 0xbb, 0xcc, 0x11, 0x22, 0x33]));
+        payload.extend(0xAF9A_B12Cu32.to_le_bytes());
+        payload.extend(&0x55_5555u32.to_le_bytes()[..3]);
+        payload.push(2);
+        payload.extend(4u16.to_le_bytes());
+        payload.extend(24u16.to_le_bytes());
+        payload.extend(0u16.to_le_bytes());
+        payload.extend(72u16.to_le_bytes());
+        payload.extend(&0x1F_FFFF_FFFFu64.to_le_bytes()[..5]);
+        payload.push(7 | (5 << 5));
+        assert_eq!(payload.len(), 34);
+
+        let mut m = SdrMetrics::fixture().streaming();
+        let mut p = packet(None);
+        p.pdu_type = PduType::ConnectInd;
+        p.adv_addr = None;
+        p.length = 34;
+        p.payload = payload;
+        p.ch_sel = ch_sel;
+        p.crc_ok = crc_ok;
+        m.net.ble_packets.push_front(p);
+        m
+    }
+
+    /// **What the advertising channel told us about the connection**, in
+    /// the Link Layer's units, and the first hops Algorithm #1 predicts from
+    /// it, said to be predicted.
+    #[test]
+    fn a_connect_ind_shows_its_parameters_and_predicted_hops() {
+        let out = draw(NetBleDetailPanel, 90, 40, &connect_ind(false, true)).join("\n");
+        for want in [
+            "CONNECTION",
+            "read, not followed",
+            "InitA    11:22:33:44:55:66",
+            "AdvA     aa:bb:cc:11:22:33",
+            "access   0xAF9AB12C",
+            "CRC init 0x555555",
+            "interval 30.00 ms",
+            "latency  0 events",
+            "timeout  720 ms",
+            "window   2.50 ms at +5.00 ms",
+            "channels 37 of 37 used",
+            "SCA      5 (31 to 50 ppm)",
+            "hop      7",
+            "7 14 21 28 35 5 12 19 ... predicted, not followed",
+        ] {
+            assert!(out.contains(want), "{want}:\n{out}");
+        }
+        assert!(out.contains("ChSel    CSA #1 only"), "{out}");
+    }
+
+    /// Algorithm #2 is not predicted with #1's sequence, and a failed CRC
+    /// reads no parameters.
+    #[test]
+    fn a_connect_ind_it_cannot_predict_or_trust_says_so() {
+        let csa2 = draw(NetBleDetailPanel, 90, 40, &connect_ind(true, true)).join("\n");
+        assert!(csa2.contains("CSA #2: not predicted"), "{csa2}");
+        assert!(!csa2.contains("7 14 21"), "{csa2}");
+
+        let failed = draw(NetBleDetailPanel, 90, 40, &connect_ind(false, false)).join("\n");
+        assert!(failed.contains("not read: CRC failed"), "{failed}");
+        assert!(!failed.contains("0xAF9AB12C"), "{failed}");
     }
 }
