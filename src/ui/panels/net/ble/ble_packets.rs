@@ -780,7 +780,7 @@ mod tests {
         let rpa = [0x4a, 0x11, 0x22, 0x33, 0x09, 0xbe];
         let mut m = feed(0);
         m.net.address_display = crate::state::AddressDisplay::Oui;
-        m.net.companies.insert(rpa, 0x004C);
+        m.net.advertised.entry(rpa).or_default().company = Some(0x004C);
         let mut p = packet(37, true);
         p.seq = 1;
         p.adv_addr = Some(rpa);

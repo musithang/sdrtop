@@ -257,25 +257,24 @@ fn census_from_ble(
     crate::signal::net::census::observe(devices, &sighting, now);
 }
 
-/// The address a packet came from and the company its manufacturer data
-/// names (`signal::ble::ad`), for `NetState::companies`.
+/// The address a packet came from and what it advertised about itself
+/// (`signal::ble::ad::Advertised`), for `NetState::advertised`; `None` where
+/// it said nothing beyond its address.
 ///
 /// **Only from a packet whose CRC passed**: a failed one could name a company
-/// nobody sent, and then name it for every packet that device sends after.
-fn company_of(p: &crate::signal::ble::pdu::Packet) -> Option<([u8; 6], u16)> {
+/// or a device nobody sent, and then name it for every packet that device
+/// sends after.
+fn advertised_of(
+    p: &crate::signal::ble::pdu::Packet,
+) -> Option<([u8; 6], crate::signal::ble::ad::Advertised)> {
     use crate::signal::ble::ad;
     if !p.crc_ok {
         return None;
     }
     let address = p.adv_addr?;
     let data = ad::adv_data(p.pdu_type, &p.payload)?;
-    ad::parse(data).into_iter().find_map(|s| match s {
-        ad::Structure::Ad {
-            ad: ad::Ad::Manufacturer { company, .. },
-            ..
-        } => Some((address, company)),
-        _ => None,
-    })
+    let said = ad::Advertised::from_structures(&ad::parse(data));
+    (!said.is_empty()).then_some((address, said))
 }
 
 impl NetWorker {
@@ -483,10 +482,12 @@ impl NetWorker {
                         if !packets.is_empty() {
                             // Read before the lock: parsing is work the UI
                             // thread should not wait behind.
-                            let companies: Vec<([u8; 6], u16)> =
-                                packets.iter().filter_map(company_of).collect();
+                            let advertised: Vec<_> =
+                                packets.iter().filter_map(advertised_of).collect();
                             let mut m = self.state.lock().unwrap_or_else(|e| e.into_inner());
-                            m.net.companies.extend(companies);
+                            for (address, said) in advertised {
+                                m.net.advertised.entry(address).or_default().merge(said);
+                            }
                             if let Some(i) =
                                 crate::signal::ble::channel::advertising_channel_index(ch)
                             {
@@ -1265,7 +1266,7 @@ mod tests {
     /// ADV_NONCONN_IND's 0x004C is taken, the same octets with a failed CRC
     /// are not, and a packet with no manufacturer data names nothing.
     #[test]
-    fn a_company_is_read_only_from_a_packet_whose_crc_passed() {
+    fn what_is_advertised_is_read_only_from_a_packet_whose_crc_passed() {
         use crate::signal::ble::pdu::{air_octets, PduType};
         let addr = [0xd1, 0x9a, 0x7e, 0x91, 0x27, 0x9e];
         let mut packet = crate::signal::ble::pdu::decode(&[false; 40]).unwrap();
@@ -1276,12 +1277,13 @@ mod tests {
             .payload
             .extend_from_slice(&[0x07, 0xff, 0x4c, 0x00, 0x12, 0x02, 0x00, 0x02]);
         packet.crc_ok = true;
-        assert_eq!(company_of(&packet), Some((addr, 0x004C)));
+        let company = |p| advertised_of(p).and_then(|(a, said)| said.company.map(|c| (a, c)));
+        assert_eq!(company(&packet), Some((addr, 0x004C)));
         packet.crc_ok = false;
-        assert_eq!(company_of(&packet), None);
+        assert_eq!(advertised_of(&packet), None);
         packet.crc_ok = true;
         packet.payload.truncate(6);
-        assert_eq!(company_of(&packet), None);
+        assert_eq!(advertised_of(&packet), None);
     }
 
     /// **Every packet counts in its SNR bin, good or failed**: a good one in

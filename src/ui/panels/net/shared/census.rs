@@ -451,7 +451,7 @@ fn detail(
         crate::state::AddressDisplay::Full => {
             format!(
                 "{shown}  {}",
-                crate::state::who_with(d.address, d.random, net.companies.get(&d.address).copied())
+                crate::state::who_with(d.address, d.random, net.company(d.address))
             )
         }
         _ => shown,
@@ -464,6 +464,7 @@ fn detail(
             Span::styled(identity, Style::default().fg(theme.value)),
         ]),
     ];
+    out.extend(advertised_lines(d, net, iw, theme));
     let seen = |at: std::time::Instant| {
         format!("{} ago", ago(now.saturating_duration_since(at).as_secs()))
     };
@@ -502,6 +503,57 @@ fn detail(
         ]));
     }
     out
+}
+
+/// What the device said about itself (`NetState::advertised`), on one
+/// line under the address it belongs with: `"Kitchen" · TX +4 dBm · Apple,
+/// Inc. 0x004C`. Beside the address rather than among the readings, because
+/// it is a claim and not a measurement (rule 3). Only what it has sent is
+/// listed, the name quoted since it is the device's own text, marked
+/// `(short)` when it sent only the shortened one; a device that has sent
+/// none of the three says so rather than leaving the line out, so an empty
+/// line cannot be read as "not looked".
+fn advertised_lines(
+    d: &Device,
+    net: &crate::state::NetState,
+    iw: usize,
+    theme: &crate::Theme,
+) -> Vec<Line<'static>> {
+    use crate::signal::ble::ad;
+    let said = net.advertised.get(&d.address);
+    let mut parts = Vec::new();
+    if let Some((text, complete)) = said.and_then(|a| a.name.as_ref()) {
+        let short = if *complete { "" } else { " (short)" };
+        parts.push(format!("\"{}\"{short}", ad::printable(text)));
+    }
+    if let Some(dbm) = said.and_then(|a| a.tx_power_dbm) {
+        parts.push(format!("TX {dbm:+} dBm"));
+    }
+    if let Some(id) = said.and_then(|a| a.company) {
+        parts.push(match crate::signal::ble::assigned::company(id) {
+            Some(n) => format!("{n} 0x{id:04X}"),
+            None => format!("company 0x{id:04X}"),
+        });
+    }
+    let text = if parts.is_empty() {
+        "nothing beyond its address".to_string()
+    } else {
+        parts.join(" \u{00b7} ")
+    };
+    crate::ui::chrome::wrap(&text, iw.saturating_sub(DETAIL_LABEL_W + 1), 2)
+        .into_iter()
+        .enumerate()
+        .map(|(i, row)| {
+            Line::from(vec![
+                crate::ui::chrome::field(
+                    if i == 0 { "advertised" } else { "" },
+                    DETAIL_LABEL_W,
+                    theme,
+                ),
+                Span::styled(row, Style::default().fg(theme.value)),
+            ])
+        })
+        .collect()
 }
 
 /// `label  value  note`: a field whose value wants a sentence beside it,
@@ -1052,7 +1104,7 @@ mod tests {
     /// named beside an address the table shows bare.
     #[test]
     fn the_detail_block_spells_out_the_selected_device() {
-        let out = draw(NetCensusPanel, 76, 15, &selected()).join("\n");
+        let out = draw(NetCensusPanel, 76, 16, &selected()).join("\n");
         assert!(out.contains("SELECTED"), "{out}");
         assert!(out.contains("a4:83:e7:1c:09:be  Apple"), "{out}");
         assert!(out.contains("first seen 10 min ago"), "{out}");
@@ -1060,6 +1112,10 @@ mod tests {
         assert!(out.contains("packets    1204"), "{out}");
         assert!(out.contains("best SNR   12.3 dB"), "{out}");
         assert!(out.contains("crystal    35.4 ±0.5 ppm"), "{out}");
+        assert!(
+            out.contains("advertised nothing beyond its address"),
+            "{out}"
+        );
 
         // Nothing selected, no block: it describes a choice, and there is none.
         let none = draw(NetCensusPanel, 76, 14, &populated()).join("\n");
@@ -1072,7 +1128,7 @@ mod tests {
     #[test]
     fn the_detail_block_says_what_the_offset_was_measured_against() {
         let mut m = selected();
-        let relative = draw(NetCensusPanel, 90, 15, &m).join("\n");
+        let relative = draw(NetCensusPanel, 90, 16, &m).join("\n");
         assert!(
             relative.contains("relative to our own oscillator"),
             "{relative}"
@@ -1086,7 +1142,7 @@ mod tests {
             at: Instant::now(),
             efficiency: None,
         });
-        let referenced = draw(NetCensusPanel, 90, 15, &m).join("\n");
+        let referenced = draw(NetCensusPanel, 90, 16, &m).join("\n");
         assert!(referenced.contains("against WWV 10 MHz"), "{referenced}");
         // And the number is the corrected one, the same arithmetic the CFO
         // column does: 35.4 read plus our own 10 ppm.
@@ -1099,8 +1155,33 @@ mod tests {
     fn a_device_with_no_offset_says_why_the_cell_is_a_dash() {
         let mut m = populated();
         m.net.census.selection.selected = Some([0xf0, 0x18, 0x98, 0x00, 0x11, 0x22]);
-        let out = draw(NetCensusPanel, 90, 15, &m).join("\n");
+        let out = draw(NetCensusPanel, 90, 16, &m).join("\n");
         assert!(out.contains("no packet from it has reported one"), "{out}");
+    }
+
+    /// **What it said, beside who it is** (5.9): the name quoted as its own
+    /// text and marked short, the TX power as the claim it is, and the
+    /// company by its SIG name and identifier; a control character in the
+    /// name reaches the screen as a replacement mark, never as a command.
+    #[test]
+    fn the_detail_block_says_what_the_device_advertised() {
+        let mut m = selected();
+        m.net.advertised.insert(
+            [0xa4, 0x83, 0xe7, 0x1c, 0x09, 0xbe],
+            crate::signal::ble::ad::Advertised {
+                company: Some(0x004C),
+                name: Some(("Kit\u{1b}".to_string(), false)),
+                tx_power_dbm: Some(-8),
+            },
+        );
+        let out = draw(NetCensusPanel, 120, 17, &m).join("\n");
+        assert!(
+            out.contains(
+                "advertised \"Kit\u{fffd}\" (short) \u{00b7} TX -8 dBm \u{00b7} Apple, Inc. 0x004C"
+            ),
+            "{out}"
+        );
+        assert!(!out.contains('\u{1b}'), "{out}");
     }
 
     /// **The block is a footnote to the table and gives way to it.** On a
@@ -1114,7 +1195,7 @@ mod tests {
             "the rows are still there:\n{short}"
         );
 
-        let tall = draw(NetCensusPanel, 76, 15, &selected()).join("\n");
+        let tall = draw(NetCensusPanel, 76, 16, &selected()).join("\n");
         assert!(tall.contains("SELECTED"), "{tall}");
     }
 
@@ -1124,7 +1205,7 @@ mod tests {
     fn the_detail_block_masks_when_the_section_masks() {
         let mut m = selected();
         m.net.address_display = crate::state::AddressDisplay::Masked;
-        let out = draw(NetCensusPanel, 76, 15, &m).join("\n");
+        let out = draw(NetCensusPanel, 76, 16, &m).join("\n");
         assert!(out.contains("SELECTED"), "{out}");
         assert!(!out.contains("a4:83:e7"), "the address leaked:\n{out}");
     }
@@ -1178,7 +1259,7 @@ mod tests {
     /// wrong where there is room to say it.
     #[test]
     fn the_detail_block_carries_the_record() {
-        let out = draw(NetCensusPanel, 120, 16, &selected()).join("\n");
+        let out = draw(NetCensusPanel, 120, 17, &selected()).join("\n");
         assert!(out.contains("PDU types  ADV_IND, SCAN_RSP"), "{out}");
         assert!(out.contains("mean SNR   8.40 ±0.09 dB"), "{out}");
         assert!(out.contains("mod index  0.500 ±0.010"), "{out}");

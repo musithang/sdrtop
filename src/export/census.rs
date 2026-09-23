@@ -28,13 +28,44 @@ use crate::state::SdrMetrics;
 /// The columns, in order. Offsets are corrected for our oscillator exactly as
 /// the panel shows them, and the provenance header's `reference` line says
 /// what they are worth; `addresses` says how the first column is shown.
-pub const HEADER: &str = "address,kind,packets,crc_failed,crc_pass_pct,\
+pub const HEADER: &str = "address,kind,\
+name,name_complete,tx_power_dbm,company_id,company,\
+packets,crc_failed,crc_pass_pct,\
 best_snr_db,mean_snr_db,mean_snr_sigma_db,\
 crystal_offset_ppm,crystal_offset_sigma_ppm,\
 modulation_index,modulation_index_sigma,pdu_types,\
 adv_status,adv_interval_ms,adv_interval_sigma_ms,adv_events,adv_channel,\
 adv_delay,adv_delay_width_ms,adv_grid,adv_grid_steps,adv_grid_off_ms,\
 first_seen_s,last_seen_s";
+
+/// What the device advertised about itself (`NetState::advertised`), in
+/// the BLE export's own column names so the two files join on them: blank
+/// where it has not sent that field.
+fn advertised(state: &SdrMetrics, d: &Device) -> [String; 5] {
+    let said = state.net.advertised.get(&d.address);
+    let (name, complete) = said
+        .and_then(|a| a.name.as_ref())
+        .map(|(text, complete)| {
+            (
+                super::csv_field(&crate::signal::ble::ad::printable(text)).into_owned(),
+                complete.to_string(),
+            )
+        })
+        .unwrap_or_default();
+    let company = said.and_then(|a| a.company);
+    [
+        name,
+        complete,
+        said.and_then(|a| a.tx_power_dbm)
+            .map(|dbm| dbm.to_string())
+            .unwrap_or_default(),
+        company.map(|id| format!("0x{id:04X}")).unwrap_or_default(),
+        company
+            .and_then(crate::signal::ble::assigned::company)
+            .map(|n| super::csv_field(n).into_owned())
+            .unwrap_or_default(),
+    ]
+}
 
 /// A value and its sigma at `places`, or two blanks where the panel dashes:
 /// no reading, or one whose uncertainty cannot be stated (a mean from one
@@ -135,13 +166,16 @@ pub fn rows(state: &SdrMetrics) -> Vec<String> {
             let mut fields = vec![
                 super::csv_field(&d.address_text(&state.net, None)).into_owned(),
                 d.kind().label().to_string(),
+            ];
+            fields.extend(advertised(state, d));
+            fields.extend([
                 d.packets.to_string(),
                 d.crc_failed.to_string(),
                 format!("{:.2}", d.crc_pass_rate() * 100.0),
                 d.best_snr_db
                     .map(|db| format!("{db:.1}"))
                     .unwrap_or_default(),
-            ];
+            ]);
             fields.extend(with_sigma(d.mean_snr_db(), 2));
             fields.extend(with_sigma(offset, 2));
             fields.extend(with_sigma(d.modulation_index, 4));
@@ -183,13 +217,50 @@ mod tests {
             .unwrap_or_else(|| panic!("{row}"))
     }
 
+    /// **What the device advertised, under the BLE export's own column
+    /// names**, so the two files join on them; blank where it sent nothing,
+    /// and a name with a comma quoted whole.
+    #[test]
+    fn the_advertised_columns_carry_what_the_device_said() {
+        let now = Instant::now();
+        let mut m = SdrMetrics::fixture().streaming();
+        let (said, quiet) = ([0xa4, 0x83, 0xe7, 0x1c, 9, 0xbe], [1, 2, 3, 4, 5, 6]);
+        m.net.census.devices = vec![
+            Device {
+                packets: 2,
+                ..Device::heard(said, false, now)
+            },
+            Device {
+                packets: 1,
+                ..Device::heard(quiet, false, now)
+            },
+        ];
+        m.net.census.sort = column("PKTS");
+        m.net.census.descending = true;
+        m.net.advertised.insert(
+            said,
+            crate::signal::ble::ad::Advertised {
+                company: Some(0x004C),
+                name: Some(("Kitchen, left".to_string(), true)),
+                tx_power_dbm: Some(-8),
+            },
+        );
+        let out = rows(&m);
+        assert!(
+            out[0].contains(",\"Kitchen, left\",true,-8,0x004C,\"Apple, Inc.\","),
+            "{}",
+            out[0]
+        );
+        assert!(out[1].contains(",public,,,,,,1,"), "{}", out[1]);
+    }
+
     #[test]
     fn an_empty_census_exports_a_header_and_no_rows() {
         let m = SdrMetrics::fixture().streaming();
         assert!(rows(&m).is_empty());
         // The header names every column: the shape of the answer is visible
         // even when there is no answer yet.
-        assert_eq!(HEADER.split(',').count(), 25);
+        assert_eq!(HEADER.split(',').count(), 30);
     }
 
     /// A census as a room gives one: a device with every reading, one heard
@@ -351,7 +422,7 @@ mod tests {
         let by_packets = rows(&m);
         assert_eq!(by_packets.len(), 2);
         assert!(
-            by_packets[0].starts_with("a4:83:e7:1c:09:be,public,1204,"),
+            by_packets[0].starts_with("a4:83:e7:1c:09:be,public,,,,,,1204,"),
             "{}",
             by_packets[0]
         );

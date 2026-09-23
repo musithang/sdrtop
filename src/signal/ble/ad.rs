@@ -322,10 +322,109 @@ pub fn name(structures: &[Structure]) -> Option<(&str, bool)> {
     names.max_by_key(|(_, complete)| *complete)
 }
 
+/// What an address has said about itself, gathered across its packets whose
+/// CRC passed (net-ux-polish-plan 5.9): the company its manufacturer data
+/// names, its name, its TX power level.
+///
+/// **Per address, not per packet.** A device splits what it says between its
+/// advertising and its scan response, so no one packet holds all of it; each
+/// packet adds what it carries ([`Self::merge`]) and leaves the rest.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct Advertised {
+    pub company: Option<u16>,
+    /// The name as sent (see [`printable`]), and whether it was the complete
+    /// one.
+    pub name: Option<(String, bool)>,
+    /// The TX power level it advertised, dBm: its own claim, not a reading.
+    pub tx_power_dbm: Option<i8>,
+}
+
+impl Advertised {
+    /// What one packet's structures say, the complete name winning as in
+    /// [`name`].
+    pub fn from_structures(structures: &[Structure]) -> Self {
+        let mut out = Self {
+            name: name(structures).map(|(text, complete)| (text.to_string(), complete)),
+            ..Self::default()
+        };
+        for s in structures {
+            match s {
+                Structure::Ad {
+                    ad: Ad::Manufacturer { company, .. },
+                    ..
+                } => out.company = out.company.or(Some(*company)),
+                Structure::Ad {
+                    ad: Ad::TxPower(dbm),
+                    ..
+                } => out.tx_power_dbm = Some(*dbm),
+                _ => {}
+            }
+        }
+        out
+    }
+
+    /// Nothing said beyond the address.
+    pub fn is_empty(&self) -> bool {
+        self.company.is_none() && self.name.is_none() && self.tx_power_dbm.is_none()
+    }
+
+    /// Take what a newer packet said, field by field; a field it did not
+    /// carry keeps what was said before. **A shortened name never replaces a
+    /// complete one**: a device sending its short name in the advertising and
+    /// its whole name in the scan response would otherwise flicker between
+    /// the two.
+    pub fn merge(&mut self, newer: Advertised) {
+        if newer.company.is_some() {
+            self.company = newer.company;
+        }
+        if newer.tx_power_dbm.is_some() {
+            self.tx_power_dbm = newer.tx_power_dbm;
+        }
+        if let Some((text, complete)) = newer.name {
+            let had_complete = self.name.as_ref().is_some_and(|(_, c)| *c);
+            if complete || !had_complete {
+                self.name = Some((text, complete));
+            }
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::signal::ble::pdu::PduType;
+
+    /// **A device's account, across the packets it splits it between**: the
+    /// advertising names a company and a short name, the scan response the
+    /// complete name and a TX power; a later advertising's short name does
+    /// not take the complete one's place.
+    #[test]
+    fn an_address_gathers_what_its_packets_each_said() {
+        // ADV: manufacturer 0x004C, shortened name "Kit".
+        let adv = parse(&[
+            0x05, 0xFF, 0x4C, 0x00, 0x10, 0x05, 0x04, 0x08, b'K', b'i', b't',
+        ]);
+        // SCAN_RSP: complete name "Kitchen", TX power -8 dBm.
+        let rsp = parse(&[
+            0x08, 0x09, b'K', b'i', b't', b'c', b'h', b'e', b'n', 0x02, 0x0A, 0xF8,
+        ]);
+        let mut a = Advertised::from_structures(&adv);
+        assert_eq!(a.company, Some(0x004C));
+        assert_eq!(a.name, Some(("Kit".to_string(), false)));
+        assert_eq!(a.tx_power_dbm, None);
+
+        a.merge(Advertised::from_structures(&rsp));
+        a.merge(Advertised::from_structures(&adv));
+        assert_eq!(
+            a,
+            Advertised {
+                company: Some(0x004C),
+                name: Some(("Kitchen".to_string(), true)),
+                tx_power_dbm: Some(-8),
+            }
+        );
+        assert!(Advertised::from_structures(&parse(&[0x02, 0x01, 0x06])).is_empty());
+    }
 
     /// **The real ADV_NONCONN_IND from the air** (`pdu`'s recorded one):
     /// its eight octets of advertising data are one structure, manufacturer

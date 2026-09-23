@@ -141,7 +141,7 @@ impl AddressDisplay {
     }
 
     /// [`Self::show`], knowing the company the address's manufacturer data
-    /// named (`NetState::companies`): for a random address, which has no
+    /// named (`NetState::company`): for a random address, which has no
     /// IEEE block, that company takes the kind's place, marked with where it
     /// came from ([`who_with`]).
     pub fn show_with(
@@ -448,12 +448,13 @@ pub struct NetState {
     pub address_display: AddressDisplay,
     /// The session's masked numbers. See [`AddressBook`].
     pub address_book: AddressBook,
-    /// The company each address's manufacturer data named, the latest from a
-    /// packet whose CRC passed (`signal::net::worker`): per address, not per
-    /// packet, so a device reads the same in every panel and the export, and
-    /// a scan response without manufacturer data does not turn it back into
-    /// its kind.
-    pub companies: std::collections::HashMap<[u8; 6], u16>,
+    /// What each address has advertised about itself, from its packets whose
+    /// CRC passed (`signal::net::worker`, `signal::ble::ad::Advertised`):
+    /// the company its manufacturer data named, its name, its TX power. Per
+    /// address, not per packet, so a device reads the same in every panel and
+    /// the export, and a scan response without manufacturer data does not
+    /// turn it back into its kind.
+    pub advertised: std::collections::HashMap<[u8; 6], crate::signal::ble::ad::Advertised>,
     /// A lock the occupancy cursor's `L` asked for and the survey task has not
     /// applied yet. **The task applies it**, as the survey's hand-back when a
     /// survey is running (`Self::end`) or on its next idle poll when the radio
@@ -526,6 +527,11 @@ impl NetState {
         self.ble_channel.is_some() || self.health.ble.triggered > 0
     }
 
+    /// The company `addr`'s manufacturer data named, if it has named one.
+    pub fn company(&self, addr: [u8; 6]) -> Option<u16> {
+        self.advertised.get(&addr).and_then(|a| a.company)
+    }
+
     /// `width` as [`AddressDisplay::show`] takes it: the column the table has,
     /// or `None` for the uncut form an export writes.
     pub fn show_address(&self, addr: [u8; 6], random: bool, width: Option<usize>) -> String {
@@ -533,7 +539,7 @@ impl NetState {
             addr,
             random,
             self.address_book.get(addr),
-            self.companies.get(&addr).copied(),
+            self.company(addr),
             width,
         )
     }
@@ -545,7 +551,7 @@ impl NetState {
             addr,
             random,
             self.address_book.get(addr),
-            self.companies.get(&addr).copied(),
+            self.company(addr),
         )
     }
 
@@ -1545,7 +1551,7 @@ mod tests {
             ..NetState::default()
         };
         assert_eq!(net.show_address(rpa, true, None), "RPA ..09:be");
-        net.companies.insert(rpa, 0x004C);
+        net.advertised.entry(rpa).or_default().company = Some(0x004C);
         assert_eq!(
             net.show_address(rpa, true, None),
             "Apple\u{00b7}mfr ..09:be"
