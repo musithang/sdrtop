@@ -1004,15 +1004,10 @@ impl Receiver {
         let offset = self.sync_offset();
         packet.freq_offset_hz = offset;
         packet.snr_db = offset.and_then(|o| self.corrected_snr_db(o.value()));
-        // LE 1M only: `measure` reads the index and the drift rate against
-        // LE 1M's symbol rate, and its limits are LE 1M's. On LE 2M it would
-        // print a number with the wrong scale beside the wrong limit, so it
-        // is not measured (net-ux-polish-plan 5.5), and the detail view says
-        // why.
-        if self.phy == Phy::OneM {
-            packet.modulation = super::measure::modulation_quality(raw_bits, raw_symbols);
-            packet.drift = super::measure::drift(raw_symbols);
-        }
+        // On either PHY, each scaled by its own symbol rate
+        // (net-ux-polish-plan 5.5).
+        packet.modulation = super::measure::modulation_quality(raw_bits, raw_symbols, self.phy);
+        packet.drift = super::measure::drift(raw_symbols, self.phy);
         Some(packet)
     }
 }

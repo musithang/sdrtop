@@ -101,6 +101,21 @@ const DRIFT_RATE_BAND: Limit = Limit::Band {
     high: 400.0,
 };
 
+/// LE 2M's delta-f1 band: the same 0.45 to 0.55 index at 2 Mb/s, so twice
+/// LE 1M's, derived from the index band exactly as [`DELTA_F1_BAND_KHZ`] is
+/// (`h = 2 * delta_f / symbol_rate`), and matching public documentation of
+/// the RF-PHY tests ("these limits double for LE 2M PHY", EDN).
+const DELTA_F1_BAND_2M_KHZ: Limit = Limit::Band {
+    low: 450.0,
+    high: 550.0,
+};
+
+/// LE 2M's delta-f2 floor: [`DELTA_F2_MAX_FLOOR_KHZ`] doubled, on the same
+/// public statement that the modulation limits double on LE 2M. **Under the
+/// same caveat as the LE 1M figure**: not read from the RF-PHY test
+/// specification itself this session.
+const DELTA_F2_MAX_FLOOR_2M_KHZ: Limit = Limit::Min(370.0);
+
 /// How much uncertainty each reading can carry before it dashes rather than
 /// prints - a judgement call in the absence of a specification-stated
 /// figure, made the same way `Uncertain::is_resolved`'s own doc asks for:
@@ -113,7 +128,24 @@ const RATIO_RESOLUTION: f64 = 0.1;
 const DRIFT_RESOLUTION_KHZ: f64 = 10.0;
 const DRIFT_RATE_RESOLUTION: f64 = 80.0;
 
-fn rows(q: &ModulationQuality, d: Option<&Drift>) -> Vec<LimitRow<'static>> {
+/// The limit rows for a packet on `phy`: the modulation index band is the
+/// PHY's own ratio and the same on both, delta-f1 and delta-f2 scale with the
+/// symbol rate, the ratio does not. **Drift rows only on LE 1M**, where its
+/// limits are recalled: no LE 2M drift limit was found this session, and a
+/// band borrowed from LE 1M would be a limit nobody stated (rule 2), so on
+/// LE 2M the drift is shown as a reading ([`unlimited_drift`]).
+fn rows(
+    q: &ModulationQuality,
+    d: Option<&Drift>,
+    phy: crate::signal::ble::Phy,
+) -> Vec<LimitRow<'static>> {
+    let two_m = phy == crate::signal::ble::Phy::TwoM;
+    let (df1_band, df2_floor) = if two_m {
+        (DELTA_F1_BAND_2M_KHZ, DELTA_F2_MAX_FLOOR_2M_KHZ)
+    } else {
+        (DELTA_F1_BAND_KHZ, DELTA_F2_MAX_FLOOR_KHZ)
+    };
+    let d = if two_m { None } else { d };
     let mut out = vec![
         LimitRow::new(
             "Mod index",
@@ -127,7 +159,7 @@ fn rows(q: &ModulationQuality, d: Option<&Drift>) -> Vec<LimitRow<'static>> {
                 "kHz",
                 DELTA_F1_RESOLUTION_KHZ,
             ),
-            DELTA_F1_BAND_KHZ,
+            df1_band,
         ),
         LimitRow::new(
             "df2 max",
@@ -141,7 +173,7 @@ fn rows(q: &ModulationQuality, d: Option<&Drift>) -> Vec<LimitRow<'static>> {
                 "kHz",
                 f64::INFINITY,
             ),
-            DELTA_F2_MAX_FLOOR_KHZ,
+            df2_floor,
         ),
         LimitRow::new(
             "df2/df1",
@@ -632,14 +664,6 @@ fn modulation_lines(p: &BlePacket, iw: usize, theme: &crate::Theme) -> Vec<Line<
         );
         return out;
     }
-    if p.phy != crate::signal::ble::Phy::OneM {
-        out.push(Line::from(Span::styled(
-            format!(" not measured on {}", p.phy.label()),
-            Style::default().fg(theme.stale),
-        )));
-        out.push(note("the measurement and its limits are LE 1M's", theme));
-        return out;
-    }
     let Some(q) = p.modulation else {
         out.push(Line::from(Span::styled(
             " not measured".to_string(),
@@ -651,10 +675,34 @@ fn modulation_lines(p: &BlePacket, iw: usize, theme: &crate::Theme) -> Vec<Line<
         ));
         return out;
     };
-    let rows = rows(&q, p.drift.as_ref());
+    let rows = rows(&q, p.drift.as_ref(), p.phy);
     let w = fit(&rows, iw);
     out.extend(rows.iter().map(|r| Line::from(r.spans(theme, w))));
+    if p.phy == crate::signal::ble::Phy::TwoM {
+        out.extend(unlimited_drift(p.drift.as_ref(), theme));
+    }
     out
+}
+
+/// LE 2M's drift, measured on its own clock, shown as readings without a
+/// limit beside them, and a line saying why there is none.
+fn unlimited_drift(d: Option<&Drift>, theme: &crate::Theme) -> Vec<Line<'static>> {
+    let Some(d) = d else {
+        return Vec::new();
+    };
+    vec![
+        field_line(
+            "Drift",
+            Reading::new(d.drift_hz.scale(0.001), "kHz", DRIFT_RESOLUTION_KHZ).text(),
+            theme,
+        ),
+        field_line(
+            "rate",
+            Reading::new(d.drift_rate_hz_per_us, "Hz/us", DRIFT_RATE_RESOLUTION).text(),
+            theme,
+        ),
+        note("no LE 2M drift limit established here", theme),
+    ]
 }
 
 impl Panel for NetBleDetailPanel {
@@ -1150,17 +1198,28 @@ mod tests {
     /// decoder listens for, the type line what this packet came on, and an
     /// LE 2M packet's modulation is not measured against LE 1M's limits.
     #[test]
-    fn the_phy_is_named_and_2m_gets_no_1m_limits() {
+    fn the_phy_is_named_and_2m_is_judged_by_its_own_limits() {
         let mut m = SdrMetrics::fixture().streaming();
-        let mut p = packet(Some(quality(500_000.0)));
+        let mut q = quality(500_000.0);
+        q.modulation_index = Uncertain::from_sigma(0.5, 0.005);
+        let mut p = packet_with_drift(Some(q), Some(drift(5_000.0)));
         p.phy = crate::signal::ble::Phy::TwoM;
         m.net.ble_packets.push_front(p);
         m.net.ble_phy = crate::signal::ble::Phy::TwoM;
-        let out = draw(NetBleDetailPanel, 80, 30, &m);
+        let out = draw(NetBleDetailPanel, 90, 34, &m);
         assert!(out[0].contains("[LE 2M]"), "{}", out[0]);
         let text = out.join("\n");
         assert!(text.contains("9 octets \u{00b7} LE 2M"), "{text}");
-        assert!(text.contains("not measured on LE 2M"), "{text}");
-        assert!(!text.contains("Mod index"), "{text}");
+        assert!(text.contains("Mod index"), "{text}");
+        // LE 2M's own delta-f1 band and delta-f2 floor, not LE 1M's.
+        assert!(text.contains("450") && text.contains("550"), "{text}");
+        assert!(text.contains("370"), "{text}");
+        assert!(!text.contains("225"), "{text}");
+        // Drift measured, shown without a limit, and why.
+        assert!(
+            text.contains("no LE 2M drift limit established here"),
+            "{text}"
+        );
+        assert!(!text.contains("Drift rate"), "{text}");
     }
 }

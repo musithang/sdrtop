@@ -1067,9 +1067,8 @@ mod tests {
     }
 
     /// **LE 2M, run through the worker**: on a data channel a 2M packet is
-    /// decoded, stamped as LE 2M, and carries no modulation reading (its
-    /// measurement and limits are LE 1M's); on an advertising channel the
-    /// decoder does not run at all and says why.
+    /// decoded, stamped as LE 2M, and measured like any other; on an
+    /// advertising channel the decoder does not run at all and says why.
     #[test]
     fn le_2m_is_decoded_off_the_advertising_channels_and_refused_on_them() {
         let data_ch = 10u8;
@@ -1093,7 +1092,8 @@ mod tests {
             assert_eq!(p.phy, crate::signal::ble::Phy::TwoM);
             assert_eq!(p.adv_addr, Some(addr));
             assert!(p.crc_ok);
-            assert!(p.modulation.is_none() && p.drift.is_none());
+            // Measured on LE 2M's own clock (net-ux-polish-plan 5.5).
+            assert!(p.drift.is_some(), "{p:?}");
         }
 
         let (bytes, _) = ble_2m_bytes(37);

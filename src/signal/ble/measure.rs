@@ -46,13 +46,14 @@
 //! [`modulation_quality`] does, for a reason [`drift`]'s own doc explains:
 //! the raw, oversampled trace turned out to be the wrong input for it.
 
+use super::Phy;
 use crate::signal::dsp::uncertainty::Uncertain;
 
-/// LE 1M's symbol rate, fixed at 1 Mb/s by the PHY itself. Not derived from
-/// a receiver's own `sps` - that is a demodulator design choice, this is a
-/// specification fact, and the two must never be confused into agreeing by
-/// coincidence.
-const SYMBOL_RATE_HZ: f64 = 1_000_000.0;
+// The symbol rate both measurements scale by is the PHY's own
+// (`Phy::symbol_rate_hz`: 1 Mb/s on LE 1M, 2 Mb/s on LE 2M), a specification
+// fact, never derived from a receiver's own `sps`, which is a demodulator
+// design choice. It was a fixed LE 1M constant until net-ux-polish-plan 5.5
+// made LE 2M a PHY this app decodes as fully as LE 1M.
 
 /// How many like, or alternating, symbols in a row counts as "settled" for
 /// [`modulation_quality`]'s own purposes: `00001111`'s two four-symbol runs
@@ -74,7 +75,7 @@ pub struct ModulationQuality {
     /// or more alternating on-air symbols, in Hz. Not an [`Uncertain`]: see
     /// this struct's own doc for why a maximum does not get one.
     pub delta_f2_max_hz: f64,
-    /// `2 * delta_f1_avg_hz / SYMBOL_RATE_HZ` - the modulation index
+    /// `2 * delta_f1_avg_hz / symbol rate` - the modulation index
     /// design section 2.1 states a band for, derived from delta-f1 because
     /// that is the settled, filter-independent deviation a device's own
     /// deviation setting actually controls.
@@ -114,7 +115,7 @@ fn ends_alternating_run(bits: &[bool], i: usize) -> bool {
 /// whose particular random content happened to lack a settled run of either
 /// kind. Rule 2: a measurement with nothing behind it is refused, not
 /// invented from zero occurrences.
-pub fn modulation_quality(bits: &[bool], samples: &[f32]) -> Option<ModulationQuality> {
+pub fn modulation_quality(bits: &[bool], samples: &[f32], phy: Phy) -> Option<ModulationQuality> {
     debug_assert_eq!(bits.len(), samples.len());
     let n = bits.len().min(samples.len());
 
@@ -134,7 +135,7 @@ pub fn modulation_quality(bits: &[bool], samples: &[f32]) -> Option<ModulationQu
     let delta_f1_avg_hz = crate::signal::dsp::uncertainty::mean_with_uncertainty(&settled);
     let delta_f2_avg_hz = crate::signal::dsp::uncertainty::mean_with_uncertainty(&alternating);
     let delta_f2_max_hz = alternating.iter().cloned().fold(f32::MIN, f32::max) as f64;
-    let modulation_index = delta_f1_avg_hz.scale(2.0 / SYMBOL_RATE_HZ);
+    let modulation_index = delta_f1_avg_hz.scale(2.0 / phy.symbol_rate_hz());
     let ratio = delta_f2_avg_hz.ratio(&delta_f1_avg_hz);
 
     Some(ModulationQuality {
@@ -197,7 +198,7 @@ pub struct Drift {
 /// under four symbols, where a half would have fewer than the two
 /// [`crate::signal::dsp::uncertainty::mean_with_uncertainty`] needs to
 /// report a variance rather than an unknown one.
-pub fn drift(samples: &[f32]) -> Option<Drift> {
+pub fn drift(samples: &[f32], phy: Phy) -> Option<Drift> {
     let n = samples.len();
     let half = n / 2;
     if half < 2 {
@@ -206,7 +207,7 @@ pub fn drift(samples: &[f32]) -> Option<Drift> {
     let initial_hz = crate::signal::dsp::uncertainty::mean_with_uncertainty(&samples[..half]);
     let final_hz = crate::signal::dsp::uncertainty::mean_with_uncertainty(&samples[n - half..]);
     let drift_hz = final_hz.difference(&initial_hz);
-    let separation_us = half as f64 / SYMBOL_RATE_HZ * 1e6;
+    let separation_us = half as f64 / phy.symbol_rate_hz() * 1e6;
     let drift_rate_hz_per_us = drift_hz.scale(1.0 / separation_us);
 
     Some(Drift {
@@ -268,7 +269,7 @@ mod tests {
     /// more, down for less - rather than only "close to the deviation
     /// asked for".
     ///
-    /// **Not compared against `2 * deviation_hz / SYMBOL_RATE_HZ` to a
+    /// **Not compared against `2 * deviation_hz / symbol rate` to a
     /// tight tolerance, and that is a finding of its own kind.** A first
     /// version of this test did exactly that, at three deviations, and
     /// failed at 200 kHz while passing at 250 kHz - not because the
@@ -291,7 +292,7 @@ mod tests {
             .into_iter()
             .map(|deviation_hz| {
                 let (bits, samples) = symbols_and_samples(deviation_hz, 4000, f64::INFINITY, 10);
-                let q = modulation_quality(&bits, &samples)
+                let q = modulation_quality(&bits, &samples, Phy::OneM)
                     .expect("plenty of settled runs at 4000 bits");
                 (deviation_hz, q.modulation_index.value())
             })
@@ -340,7 +341,7 @@ mod tests {
     #[test]
     fn the_nominal_deviation_measures_inside_the_modulation_index_band() {
         let (bits, samples) = symbols_and_samples(250_000.0, 4000, 25.0, 11);
-        let q = modulation_quality(&bits, &samples).unwrap();
+        let q = modulation_quality(&bits, &samples, Phy::OneM).unwrap();
         assert!(
             q.modulation_index.value() > 0.45 && q.modulation_index.value() < 0.55,
             "measured index {}",
@@ -355,7 +356,7 @@ mod tests {
     #[test]
     fn alternation_never_reaches_further_than_a_settled_run_does() {
         let (bits, samples) = symbols_and_samples(250_000.0, 4000, f64::INFINITY, 12);
-        let q = modulation_quality(&bits, &samples).unwrap();
+        let q = modulation_quality(&bits, &samples, Phy::OneM).unwrap();
         assert!(
             q.ratio.value() <= 1.01,
             "ratio {} implies alternation reached further than settling does",
@@ -370,7 +371,7 @@ mod tests {
     fn too_short_a_run_refuses_rather_than_inventing_a_reading() {
         let bits = vec![true, false, true];
         let samples = vec![1.0f32, -1.0, 1.0];
-        assert!(modulation_quality(&bits, &samples).is_none());
+        assert!(modulation_quality(&bits, &samples, Phy::OneM).is_none());
     }
 
     /// A packet with settled runs but no alternation - or the reverse -
@@ -380,7 +381,7 @@ mod tests {
     fn one_pattern_present_without_the_other_still_refuses() {
         let all_settled = vec![true; 20];
         let samples = vec![1.0f32; 20];
-        assert!(modulation_quality(&all_settled, &samples).is_none());
+        assert!(modulation_quality(&all_settled, &samples, Phy::OneM).is_none());
     }
 
     /// A clean IQ signal with an added linear frequency ramp on top of
@@ -432,7 +433,7 @@ mod tests {
         let (_, samples) =
             crate::signal::ble::sync::slice(&inst, params.sps as f64, bits.len(), 0.0);
 
-        let d = drift(&samples).expect("plenty of samples at 3000 bits");
+        let d = drift(&samples, Phy::OneM).expect("plenty of samples at 3000 bits");
         assert!(
             (d.drift_rate_hz_per_us.value() - drift_rate_hz_per_us).abs()
                 < 4.0 * d.drift_rate_hz_per_us.sigma(),
@@ -472,7 +473,7 @@ mod tests {
         let (_, samples) =
             crate::signal::ble::sync::slice(&inst, params.sps as f64, bits.len(), 0.0);
 
-        let d = drift(&samples).unwrap();
+        let d = drift(&samples, Phy::OneM).unwrap();
         assert!(
             d.drift_rate_hz_per_us.value().abs() < 4.0 * d.drift_rate_hz_per_us.sigma(),
             "measured {} +/- {} with nothing injected",
@@ -485,6 +486,69 @@ mod tests {
     /// than inventing a drift from a handful of points.
     #[test]
     fn too_few_samples_refuses_rather_than_inventing_a_reading() {
-        assert!(drift(&[1.0, 2.0, 3.0]).is_none());
+        assert!(drift(&[1.0, 2.0, 3.0], Phy::OneM).is_none());
+    }
+
+    /// Symbols and samples at LE 2M: 2 Mb/s, four samples a symbol, 8 Msps.
+    fn le2m_symbols_and_samples(
+        deviation_hz: f64,
+        n_bits: usize,
+        seed: u64,
+    ) -> (Vec<bool>, Vec<f32>) {
+        let (sps, rate) = (4usize, 8_000_000.0);
+        let mut rng = Rng::new(seed);
+        let bits: Vec<bool> = (0..n_bits).map(|_| rng.next_u64() & 1 == 1).collect();
+        let clean = modulate(&bits, sps, deviation_hz, rate, 0.5);
+        let iq = at_snr(&clean, 30.0, &mut Rng::new(seed + 1));
+        let mut inst = Vec::new();
+        discriminate(&iq, rate, &mut inst);
+        let (_, samples) = crate::signal::ble::sync::slice(&inst, sps as f64, n_bits, 0.0);
+        (bits, samples)
+    }
+
+    /// **LE 2M measured as fully as LE 1M** (net-ux-polish-plan 5.5): the
+    /// nominal 500 kHz deviation, twice LE 1M's at twice the symbol rate,
+    /// reads inside the same 0.45 to 0.55 index band, with delta-f1 near
+    /// 500 kHz; a transmitter still using LE 1M's 250 kHz reads far below
+    /// it. The index is scaled by 2 Mb/s, not 1: read at 1 Mb/s the nominal
+    /// signal would have shown an index near 1.
+    #[test]
+    fn le_2m_is_measured_on_its_own_symbol_rate() {
+        let (bits, samples) = le2m_symbols_and_samples(500_000.0, 4000, 30);
+        let q = modulation_quality(&bits, &samples, Phy::TwoM).unwrap();
+        let h = q.modulation_index.value();
+        assert!(h > 0.45 && h < 0.55, "LE 2M nominal index {h}");
+        let df1 = q.delta_f1_avg_hz.value();
+        assert!(df1 > 450e3 && df1 < 550e3, "delta-f1 {df1}");
+
+        let (bits, samples) = le2m_symbols_and_samples(250_000.0, 4000, 31);
+        let low = modulation_quality(&bits, &samples, Phy::TwoM).unwrap();
+        assert!(
+            low.modulation_index.value() < 0.45,
+            "{:?}",
+            low.modulation_index
+        );
+    }
+
+    /// B9's drift, on LE 2M's clock: a known rate comes back within its own
+    /// uncertainty, which it would not if the halves were timed at 1 Mb/s.
+    #[test]
+    fn le_2m_drift_is_timed_at_its_own_symbol_rate() {
+        let (sps, rate) = (4usize, 8_000_000.0);
+        let mut rng = Rng::new(32);
+        let bits: Vec<bool> = (0..6000).map(|_| rng.next_u64() & 1 == 1).collect();
+        let clean = modulate(&bits, sps, 500_000.0, rate, 0.5);
+        let injected = 20.0;
+        let drifted = with_drift(&clean, rate, injected * 1e6);
+        let mut inst = Vec::new();
+        discriminate(&drifted, rate, &mut inst);
+        let (_, samples) = crate::signal::ble::sync::slice(&inst, sps as f64, bits.len(), 0.0);
+        let d = drift(&samples, Phy::TwoM).unwrap();
+        assert!(
+            (d.drift_rate_hz_per_us.value() - injected).abs()
+                < 4.0 * d.drift_rate_hz_per_us.sigma(),
+            "measured {:?}, injected {injected}",
+            d.drift_rate_hz_per_us
+        );
     }
 }
