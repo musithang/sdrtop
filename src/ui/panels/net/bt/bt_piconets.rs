@@ -202,7 +202,120 @@ fn detail(
             out.push(field(if i == 0 { label } else { "" }, chunk));
         }
     }
+    out.extend(header_lines(p, state, iw, theme));
     out
+}
+
+/// What the piconet's headers say (net-ux-polish-plan 6.3), under its own
+/// heading, marked as the port it is: the header decode is `libbtbb`'s,
+/// read from its source and never yet checked against a classic
+/// transmitter on the air (`signal::bt::header`, rule 1).
+///
+/// **Read only under one UAP.** Before the UAP is one value the heading
+/// says so and how many headers are waiting; no type is guessed from a
+/// candidate (rule 2). A header that did not decode under the resolved UAP
+/// is counted beside the ones that did, because a rising count is how a
+/// wrong resolution would show.
+fn header_lines(
+    p: &Piconet,
+    state: &SdrMetrics,
+    iw: usize,
+    theme: &crate::Theme,
+) -> Vec<Line<'static>> {
+    use crate::signal::bt::header::PacketType;
+    let h = &p.headers;
+    let field = |label: &str, value: String| {
+        Line::from(vec![
+            crate::ui::chrome::field(label, LABEL_W, theme),
+            Span::styled(value, Style::default().fg(theme.value)),
+        ])
+    };
+    let mut out = vec![crate::ui::chrome::section(
+        "headers",
+        "libbtbb port, unchecked on air",
+        iw,
+        theme,
+    )];
+    if h.captured == 0 {
+        out.push(field(
+            "captured",
+            "none yet: no header followed a hit".to_string(),
+        ));
+        return out;
+    }
+    let uap = match state.net.bt_uap.get(&p.lap).map(|u| u.as_slice()) {
+        Some([one]) => *one,
+        other => {
+            let n = other.map_or(0, |u| u.len());
+            out.push(field(
+                "captured",
+                format!(
+                    "{}, not read: UAP not resolved ({n} candidates)",
+                    h.captured
+                ),
+            ));
+            out.push(field("clock", clock_text(h.clock_hypotheses)));
+            return out;
+        }
+    };
+    let mut read = format!("{} of {} captured", h.decoded, h.captured);
+    if h.undecoded > 0 {
+        read.push_str(&format!(
+            ", {} did not decode under {uap:#04x}",
+            h.undecoded
+        ));
+    }
+    out.push(field("read", read));
+    let mut mix: Vec<(u32, u8)> = (0..16u8)
+        .map(|c| (h.types[c as usize], c))
+        .filter(|(n, _)| *n > 0)
+        .collect();
+    mix.sort_by(|a, b| b.0.cmp(&a.0).then(a.1.cmp(&b.1)));
+    let room = iw.saturating_sub(LABEL_W + 1);
+    let types = if mix.is_empty() {
+        "-".to_string()
+    } else {
+        mix.iter()
+            .map(|(n, c)| format!("{} {n}", PacketType::from_code(*c).label()))
+            .collect::<Vec<_>>()
+            .join(" \u{00b7} ")
+    };
+    for (i, chunk) in crate::ui::chrome::wrap(&types, room, 2)
+        .into_iter()
+        .enumerate()
+    {
+        out.push(field(if i == 0 { "types" } else { "" }, chunk));
+    }
+    let addrs: Vec<String> = (0..8u8)
+        .filter(|a| h.lt_addrs & (1 << a) != 0)
+        .map(|a| {
+            if a == 0 {
+                "0 (broadcast)".to_string()
+            } else {
+                a.to_string()
+            }
+        })
+        .collect();
+    out.push(field(
+        "LT_ADDR",
+        if addrs.is_empty() {
+            "-".to_string()
+        } else {
+            addrs.join(", ")
+        },
+    ));
+    out.push(field("clock", clock_text(h.clock_hypotheses)));
+    out
+}
+
+/// The CLK1-6 hunt, in words: the whitening every header is read through
+/// depends on it.
+fn clock_text(hypotheses: u8) -> String {
+    match hypotheses {
+        0 => "CLK1-6 not tracked yet".to_string(),
+        1 => "CLK1-6 found (1 of 64 hypotheses left)".to_string(),
+        n => format!("CLK1-6: {n} of 64 hypotheses left"),
+    }
 }
 
 impl Panel for NetBtPiconetsPanel {
@@ -450,6 +563,64 @@ mod tests {
         let block = out.iter().position(|l| l.contains("PICONET")).unwrap();
         // The frame, the header, two rows, a gap.
         assert_eq!(block, 5, "{}", out.join("\n"));
+    }
+
+    /// **Headers are read only under one UAP** (6.3): before, the block
+    /// says how many wait and why; after, the type mix (most first), the
+    /// LT_ADDRs, and the clock, under a heading that says it is a port.
+    #[test]
+    fn headers_are_read_only_once_the_uap_is_one_value() {
+        use crate::signal::bt::header::{Header, PacketType};
+        use crate::signal::bt::piconet::{observe_header, HeaderRead};
+        let mut m = heard();
+        m.net.bt_view.selected = Some(0x9e8b33);
+        let out = draw(NetBtPiconetsPanel, 70, 30, &m).join("\n");
+        assert!(out.contains("none yet"), "{out}");
+
+        observe_header(&mut m.net.bt_piconets, 0x9e8b33, HeaderRead::Unresolved, 2);
+        let out = draw(NetBtPiconetsPanel, 70, 30, &m).join("\n");
+        assert!(
+            out.contains("1, not read: UAP not resolved (2 candidates)"),
+            "{out}"
+        );
+        assert!(!out.contains("types"), "{out}");
+
+        m.net.bt_uap.insert(0x9e8b33, vec![0x4c]);
+        let header = |t, a| Header {
+            lt_addr: a,
+            packet_type: t,
+            flags: 0,
+            hec: 0,
+            clk6: 0,
+        };
+        for (t, a) in [
+            (PacketType::Poll, 1),
+            (PacketType::Poll, 1),
+            (PacketType::Null, 0),
+            (PacketType::Dh1, 2),
+            (PacketType::Poll, 2),
+        ] {
+            observe_header(
+                &mut m.net.bt_piconets,
+                0x9e8b33,
+                HeaderRead::Decoded(header(t, a)),
+                1,
+            );
+        }
+        observe_header(&mut m.net.bt_piconets, 0x9e8b33, HeaderRead::Undecoded, 1);
+        let out = draw(NetBtPiconetsPanel, 70, 30, &m).join("\n");
+        assert!(out.contains("HEADERS"), "{out}");
+        assert!(out.contains("unchecked on air"), "{out}");
+        assert!(
+            out.contains("5 of 7 captured, 1 did not decode under 0x4c"),
+            "{out}"
+        );
+        assert!(
+            out.contains("POLL 3 \u{00b7} NULL 1 \u{00b7} DH1 1"),
+            "{out}"
+        );
+        assert!(out.contains("0 (broadcast), 1, 2"), "{out}");
+        assert!(out.contains("CLK1-6 found"), "{out}");
     }
 
     #[test]

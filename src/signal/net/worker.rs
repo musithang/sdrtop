@@ -623,6 +623,7 @@ impl NetWorker {
                 // still-honest candidate set `PiconetClock` itself
                 // reports, exactly as before this step.
                 let mut narrowed_by_lap = Vec::new();
+                let mut headers_read = Vec::new();
                 for hit in &header_hits {
                     let clock = piconet_clocks.entry(hit.lap).or_default();
                     clock.observe(hit.tick, &hit.whitened);
@@ -643,6 +644,19 @@ impl NetWorker {
                             narrowed
                         }
                     };
+                    // 6.3: a header is read once its piconet's UAP is one
+                    // value, and only then; the decode tries all 64 clocks,
+                    // so it too stays out of the lock.
+                    let read = match shown.as_slice() {
+                        [uap] => {
+                            match crate::signal::bt::header::decode_with_uap(&hit.whitened, *uap) {
+                                Some(h) => crate::signal::bt::piconet::HeaderRead::Decoded(h),
+                                None => crate::signal::bt::piconet::HeaderRead::Undecoded,
+                            }
+                        }
+                        _ => crate::signal::bt::piconet::HeaderRead::Unresolved,
+                    };
+                    headers_read.push((hit.lap, read, clock.hypotheses()));
                     narrowed_by_lap.push((hit.lap, shown));
                 }
                 if !hits.is_empty() || !narrowed_by_lap.is_empty() {
@@ -664,6 +678,14 @@ impl NetWorker {
                     m.net.bt_hops.truncate(crate::state::BT_HOP_LIMIT);
                     for (lap, narrowed) in narrowed_by_lap {
                         m.net.bt_uap.insert(lap, narrowed);
+                    }
+                    for (lap, read, hypotheses) in headers_read {
+                        crate::signal::bt::piconet::observe_header(
+                            &mut m.net.bt_piconets,
+                            lap,
+                            read,
+                            hypotheses,
+                        );
                     }
                 }
             } else {
@@ -1731,6 +1753,19 @@ mod tests {
             .get(&lap)
             .expect("this LAP's header should have arrived");
         assert_eq!(narrowed, &vec![true_uap], "{narrowed:?}");
+
+        // 6.3: resolved by this very payload, the same header is then read
+        // under the UAP: a DH1 from LT_ADDR 2, counted on the roster.
+        let p = m
+            .net
+            .bt_piconets
+            .iter()
+            .find(|p| p.lap == lap)
+            .expect("the access code made a row");
+        let h = &p.headers;
+        assert_eq!((h.captured, h.decoded, h.undecoded), (1, 1, 0), "{h:?}");
+        assert_eq!(h.types[header::PacketType::Dh1.code() as usize], 1);
+        assert_eq!(h.lt_addrs, 1 << lt_addr);
     }
 
     /// Any other preset's blocks leave `bt_refused` unset, so a stale

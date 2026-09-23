@@ -22,6 +22,44 @@
 
 use std::time::Instant;
 
+use super::header::Header;
+
+/// What a piconet's headers have said (net-ux-polish-plan 6.3): counted
+/// from every header captured on its LAP, and read only once its UAP has
+/// narrowed to one value. Before that a header's HEC cannot say which
+/// dewhitening is right, so nothing about its content is counted, not even
+/// a guess (rule 2).
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct Headers {
+    /// Headers captured after this LAP's access codes.
+    pub captured: u64,
+    /// Of those, captured while the UAP was one value and read under it.
+    pub decoded: u64,
+    /// Captured while the UAP was one value and no CLK1-6 reproduced its
+    /// HEC under it: a damaged capture, or a UAP that is wrong. Counted,
+    /// since a rising count is how a wrong resolution would show.
+    pub undecoded: u64,
+    /// Decoded headers per 4-bit `TYPE` (`header::PacketType::code`).
+    pub types: [u32; 16],
+    /// Which LT_ADDRs decoded headers carried, one bit each (0 is the
+    /// master's broadcast).
+    pub lt_addrs: u8,
+    /// The CLK1-6 hypotheses still standing after the latest header
+    /// (`header::PiconetClock::hypotheses`).
+    pub clock_hypotheses: u8,
+}
+
+/// One header's outcome, as the worker hands it over.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum HeaderRead {
+    /// The UAP is not one value yet: the header is captured, not read.
+    Unresolved,
+    /// Read under the resolved UAP.
+    Decoded(Header),
+    /// The UAP is one value and no clock reproduced this header under it.
+    Undecoded,
+}
+
 /// One piconet, as its hits describe it.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Piconet {
@@ -34,6 +72,7 @@ pub struct Piconet {
     pub per_channel: [u32; 79],
     pub first_seen: Instant,
     pub last_seen: Instant,
+    pub headers: Headers,
 }
 
 impl Piconet {
@@ -64,6 +103,7 @@ pub fn observe(roster: &mut Vec<Piconet>, lap: u32, channel: u8, now: Instant) {
                 per_channel: [0; 79],
                 first_seen: now,
                 last_seen: now,
+                headers: Headers::default(),
             });
             roster.last_mut().expect("just pushed")
         }
@@ -72,6 +112,28 @@ pub fn observe(roster: &mut Vec<Piconet>, lap: u32, channel: u8, now: Instant) {
     p.last_seen = now;
     if let Some(n) = p.per_channel.get_mut(channel as usize) {
         *n = n.saturating_add(1);
+    }
+}
+
+/// Record one captured header of `lap`, with the clock hypotheses left
+/// standing after it. A LAP the roster has no row for is skipped: a header
+/// always follows an access code, which made the row.
+pub fn observe_header(roster: &mut [Piconet], lap: u32, read: HeaderRead, hypotheses: u8) {
+    let Some(p) = roster.iter_mut().find(|p| p.lap == lap) else {
+        return;
+    };
+    let h = &mut p.headers;
+    h.captured += 1;
+    h.clock_hypotheses = hypotheses;
+    match read {
+        HeaderRead::Unresolved => {}
+        HeaderRead::Undecoded => h.undecoded += 1,
+        HeaderRead::Decoded(header) => {
+            h.decoded += 1;
+            let t = &mut h.types[header.packet_type.code() as usize & 0x0f];
+            *t = t.saturating_add(1);
+            h.lt_addrs |= 1 << (header.lt_addr & 0x07);
+        }
     }
 }
 
@@ -103,6 +165,24 @@ mod tests {
         assert_eq!(p.last_seen, t0 + Duration::from_millis(9));
         assert_eq!(roster[1].channel_mask(), 1 << 78);
         assert_eq!(p.per_channel[10], 2);
+
+        // A header counts once, and is read only when resolved.
+        use crate::signal::bt::header::PacketType;
+        let poll = Header {
+            lt_addr: 3,
+            packet_type: PacketType::Poll,
+            flags: 0,
+            hec: 0,
+            clk6: 0,
+        };
+        observe_header(&mut roster, 0x9e8b33, HeaderRead::Unresolved, 2);
+        observe_header(&mut roster, 0x9e8b33, HeaderRead::Decoded(poll), 2);
+        observe_header(&mut roster, 0x9e8b33, HeaderRead::Undecoded, 2);
+        observe_header(&mut roster, 0xabcdef, HeaderRead::Undecoded, 2);
+        let h = &roster[0].headers;
+        assert_eq!((h.captured, h.decoded, h.undecoded), (3, 1, 1));
+        assert_eq!(h.types[PacketType::Poll.code() as usize], 1);
+        assert_eq!(h.lt_addrs, 1 << 3);
 
         // Most recently heard first.
         let order: Vec<u32> = ordered(&roster).iter().map(|p| p.lap).collect();

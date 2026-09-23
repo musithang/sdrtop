@@ -225,7 +225,6 @@ pub(crate) fn pack_bits(bits: &[bool]) -> u16 {
 /// mapping: every possible 4-bit value names a real packet type, so
 /// decoding one never needs an "unknown" case.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-#[allow(dead_code)]
 pub enum PacketType {
     Null,
     Poll,
@@ -245,8 +244,18 @@ pub enum PacketType {
     Dh5,
 }
 
-#[allow(dead_code)]
 impl PacketType {
+    /// The 4-bit `TYPE` value, the inverse of [`Self::from_code`]: the
+    /// declaration order is the field's order.
+    pub fn code(self) -> u8 {
+        self as u8
+    }
+
+    /// The type a 4-bit `TYPE` value names; the upper bits are ignored.
+    pub fn from_code(bits: u8) -> Self {
+        Self::from_bits(bits)
+    }
+
     /// The short label a panel shows - upper case, four characters or
     /// fewer, so a row of them lines up.
     pub fn label(self) -> &'static str {
@@ -295,7 +304,6 @@ impl PacketType {
 /// A fully decoded header: dewhitened with the confirmed CLK1-6 that made
 /// its own HEC agree with the piconet's already-confirmed UAP.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-#[allow(dead_code)]
 pub struct Header {
     pub lt_addr: u8,
     pub packet_type: PacketType,
@@ -312,7 +320,6 @@ pub struct Header {
 /// under whichever one reproduces it - `None` if none does, which on a
 /// clean capture and a genuinely confirmed UAP should not happen, and is
 /// treated as one more honest "not this time" rather than a panic.
-#[allow(dead_code)]
 pub fn decode_with_uap(whitened: &[bool; HEADER_BITS], uap: u8) -> Option<Header> {
     for clk6 in 0u8..64 {
         let bits = unwhiten_header(whitened, clk6);
@@ -392,11 +399,11 @@ pub const CLOCK_HZ: f64 = 3200.0;
 /// floor a header-only receiver can reach, honestly, rather than picking
 /// one of the two and hoping.
 ///
-/// **Not yet wired to a live receiver.** Nothing in `signal::bt::receive`
-/// yet captures the 58 bits after a `Detector` hit (4-bit trailer plus the
-/// 54-bit FEC-coded header) or tracks a sample-accurate elapsed-tick count
-/// between hits sharing a LAP - the same honest gap B14 left between
-/// `access_code` and a live receiver, now one level up.
+/// **Wired live since B16**: `signal::bt::receive` captures each header and
+/// its stream tick, and `signal::net::worker` folds them in per LAP. Once a
+/// LAP's UAP is one value the worker reads its headers with
+/// [`decode_with_uap`] (net-ux-polish-plan 6.3), and the hypotheses still
+/// standing ([`Self::hypotheses`]) are shown beside what they say.
 #[allow(dead_code)]
 pub struct PiconetClock {
     /// The tick the very first header this instance saw arrived on -
@@ -428,6 +435,13 @@ impl PiconetClock {
     /// (`Self`'s own doc explains why one is not the guaranteed floor
     /// exactly two is), otherwise settling at exactly two once enough
     /// headers have been observed to eliminate everything else.
+    /// How many of the 64 CLK1-6 hypotheses are still standing: 64 before
+    /// the first header has been folded in against a second, fewer as
+    /// elapsed time rules them out, `0` before any header at all.
+    pub fn hypotheses(&self) -> u8 {
+        self.candidates.iter().flatten().count() as u8
+    }
+
     pub fn narrowed(&self) -> Vec<u8> {
         let mut uaps: Vec<u8> = self.candidates.iter().flatten().copied().collect();
         uaps.sort_unstable();
