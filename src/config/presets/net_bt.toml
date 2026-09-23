@@ -7,10 +7,10 @@
 # B15 gave this preset a live receiver: `net_bt_hops` is the exit condition
 # made visible, a time-versus-channel scatter of access-code hits across
 # however many of the 79 channels `[net].bt_channels` and the current view
-# together let the worker watch. `net_bt_census` stays beside it, still
-# saying plainly that a hit's LAP is not yet folded into a census entry -
-# a different, narrower gap than B14's own "no receiver at all", and one
-# B15 does not close.
+# together let the worker watch. `net_bt_piconets` beside it is the roster,
+# one row per LAP heard, and the selected piconet spelled out
+# (net-ux-polish-plan 6.1); it replaced a placeholder that only said the
+# LAPs were not yet counted.
 
 section = "net"
 slot    = 5
@@ -20,7 +20,7 @@ blurb   = "who is here, the old way"
 panels = [
     { name = "header",        position = "top", height = 5 },
     { name = "net_bt_hops",   position = "body" },
-    { name = "net_bt_census", position = "right", width_pct = 34 },
+    { name = "net_bt_piconets", position = "right", width_pct = 38 },
     { name = "log",           position = "bottom", height = 5 },
     { name = "footer",        position = "bottom" },
 ]

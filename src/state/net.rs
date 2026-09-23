@@ -407,9 +407,7 @@ pub struct NetState {
     /// receiver genuinely cannot exist (the current tuning's span holds no
     /// classic BT channel at all), and `None` while it is running, the same
     /// as [`ble_refused`]. It says nothing about whether any *hit* has been
-    /// found yet, and nothing about a census, which B15 deliberately does
-    /// not build - see [`ui::panels::net::bt_census::NetBtCensusPanel`]'s
-    /// own doc for that narrower, still-permanent gap.
+    /// found yet; [`Self::bt_piconets`] is what has been.
     pub bt_refused: Option<String>,
     /// Classic Bluetooth access-code hits since the section opened, newest
     /// first, capped at [`BT_HOP_LIMIT`] - B15's own record, one entry per
@@ -434,6 +432,12 @@ pub struct NetState {
     /// sticky from then on for that LAP, since a piconet's real UAP does
     /// not change mid-session.
     pub bt_uap: std::collections::HashMap<u32, Vec<u8>>,
+    /// Every piconet heard this session, one record per LAP
+    /// (`signal::bt::piconet`): what the roster draws, counted over the
+    /// whole session where [`Self::bt_hops`] keeps a window.
+    pub bt_piconets: Vec<crate::signal::bt::piconet::Piconet>,
+    /// The roster's cursor, on a LAP: the piconet selected.
+    pub bt_view: super::Selection<u32>,
     /// The tuning the survey interrupted, so it can be given back.
     ///
     /// **In the state rather than in the task**, for the reason

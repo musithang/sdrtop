@@ -13,7 +13,7 @@
 //! channels" line is not decoration, it is the honest scope of what the dots
 //! below it could possibly show.
 //!
-//! Shares the refused-state shape `net_bt_census` already uses: check
+//! Shares the refused-state shape `net_bt_piconets` uses: check
 //! `state.net.bt_refused` first, because "no receiver exists" and "a
 //! receiver exists and has heard nothing in the last window" are different
 //! sentences.
@@ -161,7 +161,7 @@ impl Panel for NetBtHopsPanel {
                     } else {
                         "UAP candidates"
                     };
-                    format!("LAP {:#010x}: {word} {list}", newest.lap)
+                    format!("LAP {:#08x}: {word} {list}", newest.lap)
                 })
         });
         let summary_rows: u16 = if uap_line.is_some() { 1 } else { 0 };
@@ -237,7 +237,7 @@ mod tests {
     use std::time::{Duration, Instant};
 
     /// "No receiver at all" and "a receiver has heard nothing" are different
-    /// claims - the same distinction `net_bt_census`'s own refusal test
+    /// claims - the same distinction `net_bt_piconets`'s own refusal test
     /// makes.
     #[test]
     fn a_refusal_is_shown_rather_than_a_scatter() {

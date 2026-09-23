@@ -81,8 +81,8 @@ impl App {
         registry.register(ui::MicroSweepPanel);
         registry.register(ui::NetCapabilityPanel);
         registry.register(ui::NetBlePacketsPanel);
-        registry.register(ui::NetBtCensusPanel);
         registry.register(ui::NetBtHopsPanel);
+        registry.register(ui::NetBtPiconetsPanel);
         registry.register(ui::NetBleDetailPanel);
         registry.register(ui::NetCensusPanel);
         registry.register(ui::NetCoexistPanel);
@@ -445,10 +445,6 @@ mod tests {
             (
                 "net_ble_detail",
                 "one received packet's detail, not a count: a block lost elsewhere does not change it",
-            ),
-            (
-                "net_bt_census",
-                "a placeholder that shows no numbers (removed in net-ux-polish-plan Stop 6)",
             ),
         ];
 

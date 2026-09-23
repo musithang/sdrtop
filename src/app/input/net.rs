@@ -209,6 +209,27 @@ pub(super) fn net_census(key: KeyEvent, ctx: &mut InputCtx<'_>) -> KeyAction {
     KeyAction::Continue
 }
 
+/// The piconet roster: the arrows move the cursor through the piconets in the
+/// order the panel draws them (`signal::bt::piconet::ordered`), the most
+/// recently heard first; the cursor holds a LAP, so a piconet heard again
+/// keeps it as it moves to the top.
+pub(super) fn net_bt_piconets(key: KeyEvent, ctx: &mut InputCtx<'_>) -> KeyAction {
+    let mut m = metrics(ctx.state);
+    let order: Vec<u32> = crate::signal::bt::piconet::ordered(&m.net.bt_piconets)
+        .iter()
+        .map(|p| p.lap)
+        .collect();
+    match key.code {
+        KeyCode::Up => m.net.bt_view.move_by(&order, -1),
+        KeyCode::Down => m.net.bt_view.move_by(&order, 1),
+        _ => {
+            drop(m);
+            return global::handle(key, ctx);
+        }
+    }
+    KeyAction::Continue
+}
+
 /// The BLE packet list: the arrows move the cursor through the packets in the
 /// order the panel draws them (`NetState::ble_shown`), newest first; `Enter`
 /// narrows the list to the selected packet's address and back; `h` holds the

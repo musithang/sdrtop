@@ -40,4 +40,5 @@ pub mod channel;
 pub mod detect;
 pub mod header;
 pub mod payload;
+pub mod piconet;
 pub mod receive;

@@ -649,6 +649,12 @@ impl NetWorker {
                     let mut m = self.state.lock().unwrap_or_else(|e| e.into_inner());
                     m.net.health.bt_hits += hits.len() as u64;
                     for (channel, lap) in hits {
+                        crate::signal::bt::piconet::observe(
+                            &mut m.net.bt_piconets,
+                            lap,
+                            channel,
+                            now,
+                        );
                         m.net.bt_hops.push_front(BtHop {
                             channel,
                             lap,
