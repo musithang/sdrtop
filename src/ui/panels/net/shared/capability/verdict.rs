@@ -104,6 +104,14 @@ fn compose(caps: &DeviceCapabilities, retune: Option<&RetuneRun>) -> (Grade, Str
     (grade, word, body)
 }
 
+/// The verdict's word and the ceiling it was judged at, as the menu's live
+/// line for this layout says it (net-ux-polish-plan 7.2): the word from the
+/// same composition the panel draws, so the two cannot disagree.
+pub(crate) fn headline(caps: &DeviceCapabilities, retune: Option<&RetuneRun>) -> String {
+    let (_, word, _) = compose(caps, retune);
+    format!("{word} at {:.1} Msps", caps.sample_rate_max_hz / 1e6)
+}
+
 /// The verdict block, wrapped to `iw` columns.
 pub(super) fn lines(
     caps: &DeviceCapabilities,

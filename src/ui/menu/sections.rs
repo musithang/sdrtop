@@ -22,9 +22,12 @@ use crate::state::MenuPane;
 
 use super::model::Menu;
 
-/// The marker in front of the selected row. A glyph rather than a background
-/// highlight, so the selection reads the same on a 16 colour terminal.
-const CURSOR: &str = "\u{25B8} "; // ▸
+/// Each section's colour: the theme's series colours in section order
+/// (net-ux-polish-plan 7.1), so every palette has one and the chip in the
+/// list, the heading over the views and their number keys agree.
+pub fn accent(section: usize, theme: &crate::Theme) -> ratatui::style::Color {
+    theme.series_color(section)
+}
 
 /// The rows that are not sections, in the order they appear under the rule.
 pub const PANES: &[(MenuPane, &str)] = &[(MenuPane::Keys, "Keys"), (MenuPane::Options, "Options")];
@@ -65,7 +68,12 @@ pub fn render(f: &mut Frame, area: Rect, menu: &Menu, selected: usize, theme: &c
 
     let mut lines: Vec<Line> = Vec::with_capacity(row_count(menu) + 1);
     for (i, section) in menu.sections.iter().enumerate() {
-        lines.push(row(&section.title, i == selected, theme));
+        lines.push(row(
+            &section.title,
+            Some(accent(i, theme)),
+            i == selected,
+            theme,
+        ));
     }
     // The rule is what says the rows below are a different kind of thing.
     lines.push(Line::from(Span::styled(
@@ -73,14 +81,22 @@ pub fn render(f: &mut Frame, area: Rect, menu: &Menu, selected: usize, theme: &c
         Style::default().fg(theme.border_dim),
     )));
     for (i, (_, label)) in PANES.iter().enumerate() {
-        lines.push(row(label, menu.sections.len() + i == selected, theme));
+        lines.push(row(label, None, menu.sections.len() + i == selected, theme));
     }
 
     lines.truncate(inner.height as usize);
     f.render_widget(Paragraph::new(lines), inner);
 }
 
-fn row(label: &str, chosen: bool, theme: &crate::Theme) -> Line<'static> {
+/// A row: the selection bar every selectable list in the app uses
+/// (`chrome::selection_gutter`, 7.4), a section's colour chip or a pane's
+/// blank, and the label.
+fn row(
+    label: &str,
+    chip: Option<ratatui::style::Color>,
+    chosen: bool,
+    theme: &crate::Theme,
+) -> Line<'static> {
     let style = if chosen {
         Style::default()
             .fg(theme.value_hi)
@@ -89,10 +105,11 @@ fn row(label: &str, chosen: bool, theme: &crate::Theme) -> Line<'static> {
         Style::default().fg(theme.label)
     };
     Line::from(vec![
-        Span::styled(
-            if chosen { CURSOR } else { "  " },
-            Style::default().fg(theme.border_accent),
-        ),
+        crate::ui::chrome::selection_gutter(chosen, theme),
+        match chip {
+            Some(c) => Span::styled("\u{25cf} ", Style::default().fg(c)),
+            None => Span::raw("  "),
+        },
         Span::styled(label.to_string(), style),
     ])
 }

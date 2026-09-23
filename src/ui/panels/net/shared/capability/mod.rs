@@ -40,6 +40,8 @@ mod modes;
 mod span;
 mod verdict;
 
+pub(crate) use verdict::headline;
+
 /// Label column width, so every `label value` row on the panel lines up.
 const LABEL: usize = 9;
 

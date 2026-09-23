@@ -22,6 +22,7 @@
 
 pub mod entries;
 pub mod keys;
+pub mod live;
 pub mod model;
 pub mod options;
 pub mod sections;
@@ -134,8 +135,9 @@ fn right_pane(
     theme: &crate::Theme,
 ) {
     // In the folded single-column form the pane names itself, because the list
-    // that would otherwise name it is not on screen.
-    let (heading, body) = if folded {
+    // that would otherwise name it is not on screen. The views always carry
+    // their section's heading, in its colour (7.1).
+    let (heading, body) = if folded || state.pane == MenuPane::Views {
         let split = Layout::default()
             .direction(Direction::Vertical)
             .constraints([Constraint::Length(1), Constraint::Min(1)])
@@ -144,20 +146,34 @@ fn right_pane(
     } else {
         (None, area)
     };
+    let accent = sections::accent(section, theme);
     if let Some(heading) = heading {
-        let title = match state.pane {
-            MenuPane::Views => menu.sections[section].title.as_str(),
-            MenuPane::Keys => "Keys",
-            MenuPane::Options => "Options",
+        let line = match state.pane {
+            MenuPane::Views => {
+                let s = &menu.sections[section];
+                let n = s.entries.len();
+                let mut line = chrome::section(
+                    &s.title,
+                    &format!("{n} view{}", if n == 1 { "" } else { "s" }),
+                    heading.width as usize,
+                    theme,
+                );
+                // The section's name in the section's colour.
+                if let Some(name) = line.spans.get_mut(1) {
+                    name.style = name.style.fg(accent);
+                }
+                line
+            }
+            MenuPane::Keys => chrome::section("Keys", "", heading.width as usize, theme),
+            MenuPane::Options => chrome::section("Options", "", heading.width as usize, theme),
         };
-        f.render_widget(
-            Paragraph::new(chrome::section(title, "", heading.width as usize, theme)),
-            heading,
-        );
+        f.render_widget(Paragraph::new(line), heading);
     }
 
     match state.pane {
-        MenuPane::Views => entries::render(f, body, &menu.sections[section], cursor, theme),
+        MenuPane::Views => {
+            entries::render(f, body, m, &menu.sections[section], cursor, accent, theme)
+        }
         MenuPane::Keys => keys::render(f, body, &m.caps, state.scroll, theme),
         MenuPane::Options => options::render(f, body, m, state.scroll, theme),
     }
@@ -166,6 +182,13 @@ fn right_pane(
 /// Who you are and where the radio is pointing, so the menu is not a screen that
 /// hides the one number you were watching.
 fn header(f: &mut Frame, area: Rect, m: &SdrMetrics, theme: &crate::Theme) {
+    // Whether the radio is streaming, beside where it is pointed: the live
+    // lines under the views are only ever as live as this (7.2).
+    let (dot, ink, word) = if m.radio.hw_streaming {
+        ("\u{25cf}", theme.status_ok, "RX")
+    } else {
+        ("\u{25cb}", theme.stale, "stopped")
+    };
     let line = Line::from(vec![
         Span::styled(
             format!(" {}", m.system.board_name),
@@ -178,6 +201,9 @@ fn header(f: &mut Frame, area: Rect, m: &SdrMetrics, theme: &crate::Theme) {
                 .fg(theme.value_hi)
                 .add_modifier(Modifier::BOLD),
         ),
+        Span::raw("   "),
+        Span::styled(dot, Style::default().fg(ink)),
+        Span::styled(format!(" {word}"), Style::default().fg(theme.label)),
     ]);
     f.render_widget(Paragraph::new(line), area);
 }
@@ -319,30 +345,74 @@ mod tests {
         );
     }
 
-    /// The folded heading belongs to the folded form only.
+    /// The fold is decided by the whole width, not the remaining column.
     ///
-    /// Found by running the real binary at 70 columns, not by this suite: the
-    /// narrow test above folds properly and the wide one never folds, so the
-    /// middle was the gap. There the menu still had both columns while the right
-    /// one, being only the remainder, measured below the threshold and drew the
-    /// heading anyway. The widths here bracket that gap on both sides.
+    /// Found by running the real binary at 70 columns: the menu still had
+    /// both columns while the right one, being only the remainder, measured
+    /// below the threshold and drew the folded form's heading beside the list.
+    /// The views now carry their section's heading in both forms (7.1), so
+    /// what is checked is the fold itself, across that gap: the list on
+    /// screen at every width from 56, gone below the threshold, and the
+    /// heading naming the section either way.
     #[test]
-    fn the_section_heading_appears_only_when_the_list_is_gone() {
+    fn the_fold_follows_the_whole_width_and_the_heading_names_the_section() {
         for w in [56, 60, 70, 80, 120] {
             let all = draw(w, 20, &at(0, 0)).join("\n");
             assert!(
                 all.contains("Command Rail"),
                 "the section list must be on screen at {w}:\n{all}"
             );
-            assert!(
-                !all.contains("COMMAND RAIL"),
-                "the folded heading must not be drawn beside the list at {w}:\n{all}"
-            );
+            assert!(all.contains("COMMAND RAIL"), "no heading at {w}:\n{all}");
         }
-        // And the folded form does still name its section.
         let folded = draw(44, 16, &at(0, 0)).join("\n");
         assert!(!folded.contains("Command Rail"), "{folded}");
         assert!(folded.contains("COMMAND RAIL"), "{folded}");
+    }
+
+    /// **Every NET view carries a live line** (7.2), `●` for the view
+    /// running now and `○` with the session's figures otherwise; a section
+    /// with nothing live keeps its two rows a view.
+    #[test]
+    fn net_views_carry_a_live_line() {
+        let menu = model::build(&LayoutConfig::default_config().presets);
+        let net = menu.sections.iter().position(|s| s.id == "net").unwrap();
+        let mut m = SdrMetrics::fixture().streaming();
+        m.ui.active_preset = "net_ble".to_string();
+        m.net.ble_channel = Some(37);
+        m.net.ble_channel_packets = [300, 100, 12];
+        m.net.ble_channel_crc_ok = [290, 95, 11];
+        let all = draw_with_metrics(100, 30, &at(net, 3), &m).join("\n");
+        assert!(
+            all.contains("\u{25cf} 412 packets this session, 96 % CRC ok"),
+            "{all}"
+        );
+        assert!(
+            all.contains("\u{25cb} no piconet heard this session; not listening now"),
+            "{all}"
+        );
+        assert!(all.contains("NET"), "{all}");
+        assert!(all.contains("5 views"), "{all}");
+        // The selected view wears the bar, not a triangle.
+        assert!(all.contains("\u{258c} 4  BLE"), "{all}");
+        assert!(!all.contains("\u{25b8}"), "{all}");
+        let lab = draw(100, 30, &at(1, 0)).join("\n");
+        // Only the header's own stopped mark; no view line.
+        assert_eq!(lab.matches('\u{25cb}').count(), 1, "{lab}");
+        assert!(!lab.contains("not listening"), "{lab}");
+    }
+
+    /// The menu fits every width either side of the fold.
+    #[test]
+    fn the_menu_fits_every_width() {
+        let menu = model::build(&LayoutConfig::default_config().presets);
+        let net = menu.sections.iter().position(|s| s.id == "net").unwrap();
+        for w in 30..130u16 {
+            for h in [12u16, 20, 30] {
+                for line in draw(w, h, &at(net, 4)) {
+                    assert!(line.chars().count() <= w as usize, "{w}x{h}: {line:?}");
+                }
+            }
+        }
     }
 
     /// The Keys pane is a row in the left column and the content of the right

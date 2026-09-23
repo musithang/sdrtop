@@ -15,22 +15,46 @@ use ratatui::{
     Frame,
 };
 
+use super::live::Live;
 use super::model::Section;
+use crate::state::SdrMetrics;
 
-const CURSOR: &str = "\u{25B8} "; // ▸
+/// How many terminal rows one view occupies: the title and its blurb, and a
+/// live line under them in a section that has one (`super::live`).
+fn rows_per_entry(live: bool) -> usize {
+    if live {
+        3
+    } else {
+        2
+    }
+}
 
-/// How many terminal rows one view occupies: the title, and its blurb under it.
-const ROWS_PER_ENTRY: usize = 2;
-
-pub fn render(f: &mut Frame, area: Rect, section: &Section, cursor: usize, theme: &crate::Theme) {
+#[allow(clippy::too_many_arguments)]
+pub fn render(
+    f: &mut Frame,
+    area: Rect,
+    m: &SdrMetrics,
+    section: &Section,
+    cursor: usize,
+    accent: ratatui::style::Color,
+    theme: &crate::Theme,
+) {
     if area.width == 0 || area.height == 0 {
         return;
     }
+    let now = std::time::Instant::now();
+    let lives: Vec<Option<Live>> = section
+        .entries
+        .iter()
+        .map(|e| super::live::line(&e.preset, m, now))
+        .collect();
+    let per = rows_per_entry(lives.iter().any(Option::is_some));
+    let width = area.width as usize;
 
-    let visible = (area.height as usize / ROWS_PER_ENTRY).max(1);
+    let visible = (area.height as usize / per).max(1);
     let first = scroll_offset(cursor, section.entries.len(), visible);
 
-    let mut lines: Vec<Line> = Vec::with_capacity(visible * ROWS_PER_ENTRY);
+    let mut lines: Vec<Line> = Vec::with_capacity(visible * per);
     for (i, entry) in section.entries.iter().enumerate().skip(first).take(visible) {
         let chosen = i == cursor;
         let title_style = if chosen {
@@ -47,17 +71,41 @@ pub fn render(f: &mut Frame, area: Rect, section: &Section, cursor: usize, theme
             None => "   ".to_string(),
         };
         lines.push(Line::from(vec![
-            Span::styled(
-                if chosen { CURSOR } else { "  " },
-                Style::default().fg(theme.border_accent),
-            ),
-            Span::styled(key, Style::default().fg(theme.border_accent)),
+            crate::ui::chrome::selection_gutter(chosen, theme),
+            Span::raw(" "),
+            Span::styled(key, Style::default().fg(accent)),
             Span::styled(entry.title.clone(), title_style),
         ]));
         lines.push(Line::from(Span::styled(
             format!("     {}", entry.blurb.clone().unwrap_or_default()),
             Style::default().fg(theme.label),
         )));
+        if per == 3 {
+            lines.push(match &lives[i] {
+                // Cut, not wrapped: one line under one view.
+                Some(l) => {
+                    let room = width.saturating_sub(7);
+                    let text: String = if l.text.chars().count() > room {
+                        let mut t: String = l.text.chars().take(room.saturating_sub(1)).collect();
+                        t.push('\u{2026}');
+                        t
+                    } else {
+                        l.text.clone()
+                    };
+                    let (dot, ink, words) = if l.running {
+                        ("\u{25cf} ", theme.status_ok, theme.value)
+                    } else {
+                        ("\u{25cb} ", theme.stale, theme.label)
+                    };
+                    Line::from(vec![
+                        Span::raw("     "),
+                        Span::styled(dot, Style::default().fg(ink)),
+                        Span::styled(text, Style::default().fg(words)),
+                    ])
+                }
+                None => Line::from(""),
+            });
+        }
     }
 
     f.render_widget(Paragraph::new(lines), area);
