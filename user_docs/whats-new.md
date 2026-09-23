@@ -24,13 +24,60 @@ in time.
 > chain is driven per stage instead of being handed to a driver, the timing bench
 > measures what a pull backend actually does, and the RF bench measures its own
 > noise knee rather than only modelling one.
+> Since 0.6.0 there is a whole second arc beside the benches: **NET**, the
+> 2.4 GHz band and Bluetooth, measured to the same standard.
 > The ongoing work is polishing the UI, sharpening the radio math, and squashing
 > bugs. So if something looks off or behaves oddly, that's exactly what we're
 > hunting.
 
 ---
 
-## 📐 Checkpoint 21: Believing the instrument *(you are here)*
+## 📶 Checkpoint 22: Bluetooth, measured *(you are here)*
+
+**0.6.0.** This one started as "list the Bluetooth devices in the room" and
+ended somewhere rather more serious, because I could not stop at the list.
+
+A new menu section, **NET**, points everything the Lab benches taught sdrtop
+at the 2.4 GHz band. It decodes BLE advertising, finds classic Bluetooth
+piconets by the access code at the start of every packet, and then does what a
+bench instrument does with a transmitter: it measures it. Modulation index,
+deviation and drift against the specification's limits. Each device's crystal
+error in ppm, with an uncertainty, and a clear statement of whether that is
+against my own oscillator or against a reference. Its advertising interval,
+and whether it keeps the 0.625 ms grid. The room's frame error rate against
+SNR. For a classic piconet, its address bits it never sends, worked out from
+its headers, and how far each of its packets lands from its own 625 µs slot
+grid.
+
+None of it transmits, joins or follows anything. A connection's hop sequence
+is predicted from its own parameters and labelled **predicted, not followed**.
+Anything that could be chance is refused as chance, and anything not yet
+checked against a real transmitter says so on the panel. Some of it, honestly,
+has not been: the classic header decode has passed every test I could write
+and has never met a piconet that let it resolve.
+
+Five views, `NET 1` to `NET 5`: Capability, Survey, Census, BLE and Classic.
+`o` exports all of it. The whole tour is on [the NET page](net.md).
+
+### A tinySA, and fewer libraries
+
+[@AlCalzone](https://github.com/AlCalzone) taught sdrtop the **tinySA and
+tinySA Ultra**, in calibrated dBm, sweeps and all, with device controls in the
+menu's **Options** pane, and made libhackrf and librtlsdr something sdrtop
+loads when it starts instead of something it cannot start without. The
+prebuilt tarball now works on a machine with no radio library at all, which is
+exactly the machine a tinySA owner has. See [hardware](hardware.md#tinysa).
+
+### And the menu
+
+Every section has a colour, every list marks its selection the same way, and
+each NET view shows a line of what it would tell you right now, only as live
+as the receiver behind it. `Keys` opens with the focus keys of the section you
+came from, read from the panels themselves, so it cannot fall behind them.
+
+---
+
+## 📐 Checkpoint 21: Believing the instrument
 
 Checkpoint 20 got sdrtop talking to a lot more radios. Then I actually sat down
 with one of them, and three things were wrong.

@@ -14,6 +14,83 @@ For the same story told as narrative rather than as a list, see
 [`user_docs/whats-new.md`](user_docs/whats-new.md), which is organised by
 checkpoint instead of by version.
 
+## [Unreleased]
+
+## [0.6.0] - 2026-09-24
+
+**Bluetooth, measured. And a tinySA.**
+
+A new section, **NET**, points the Lab's habits at the 2.4 GHz band: it decodes
+BLE advertising and finds classic Bluetooth piconets, and then measures their
+transmitters the way an RF test set would, without ever transmitting. Every
+figure carries its uncertainty or a dash, limits read from the Bluetooth Core
+Specification cite their section, and a reading that could be chance is refused
+as one. It is not a device list with extra steps; the device list is the part
+that was easy.
+
+And [@AlCalzone](https://github.com/AlCalzone) taught sdrtop the tinySA, and
+made the native radio libraries something it loads rather than links.
+
+### Added
+
+- **The NET section**, five views, on any radio that reaches the band
+  ([`user_docs/net.md`](user_docs/net.md)):
+  - **Capability**: what the radio can tune and sample here, and how fast it
+    retunes.
+  - **Survey**: duty cycle per megahertz against a noise floor that must pass
+    its own checks, over a coexistence history with decoded traffic marked,
+    beside the feed's health.
+  - **Census**: one row per confirmed BLE transmitter, with SNR, CRC share,
+    crystal error in ppm, modulation index and advertising interval (on or off
+    the 0.625 ms grid), every clock in the room on a null meter against the
+    specification.
+  - **BLE**: CRC-checked advertising packets on LE 1M and LE 2M, every
+    advertised structure decoded, company and service names from dated SIG
+    snapshots, a `CONNECT_IND`'s parameters with its hop sequence predicted by
+    Channel Selection Algorithm #1 or #2 (held to the specification's sample
+    data) and never followed, per-packet modulation and drift against limits,
+    and the frame error rate against SNR.
+  - **Classic**: access-code search across the watched channels, a piconet
+    roster with the UAP narrowed from headers (and settled by a payload's CRC),
+    hops shown as where and when, and for a piconet with enough traffic its BR
+    modulation index and slot jitter against Core 5.4's 1 µs.
+- **Frequency references**: `y` on a WWV station, or `T` on a census device you
+  trust, takes our own oscillator's error out of every offset; every panel says
+  whether an offset is relative, referenced or traceable, and a reference
+  expires after fifteen minutes.
+- **Address privacy**: `i` shows addresses in full, by registrant or kind, or
+  masked with session numbers, on every panel and export at once.
+- **`o` exports** the band, the census, the BLE packets, the error curve and the
+  classic hits as CSV, each file opening with its provenance; a field the screen
+  would dash is blank, never zero.
+- **tinySA and tinySA Ultra backend**: calibrated power traces on the spectrum
+  and waterfall, native band sweeps, and device controls in the menu's
+  **Options** pane, typed numbers included. Verified on a tinySA Ultra ZS405.
+
+### Changed
+
+- **libhackrf and librtlsdr are loaded at runtime**, not linked. The release
+  tarball needs no SDR library; a missing one disables only its backend, and
+  `install.sh --hackrf`, `--rtlsdr` or `--soapy` installs the runtime your radio
+  needs. Building no longer needs SDR development packages.
+- **The config file gains `[net]` and `[tinysa]`**, which is the new shape this
+  minor bump is for. Old files load unchanged.
+- **The menu**: a colour per section, one selection mark shared with every list
+  in the app, a live line under each NET view, and a Keys pane that opens with
+  the section's own focus keys, generated from the panels.
+
+### Known limits
+
+- The classic header decode, BR modulation and slot jitter pass their synthetic
+  tests but have not yet met a piconet whose UAP resolved on the air; they are
+  marked "unchecked on air" where they appear. BLE's modulation limits are
+  recalled from test documentation rather than read from the specification.
+- Decoding BLE and classic together is real work: on an old dual-core i3, 4 Msps
+  runs at about 1.5 times real time, and the panels say `[FEED LOSS]` when
+  blocks are dropped.
+- The masked address mode masks addresses only; an advertised name or a
+  piconet's LAP is shown as sent.
+
 ## [0.5.1] - 2026-09-04
 
 **A separation, and one number that was wrong because of it.**
@@ -600,7 +677,8 @@ sdrtop stopped being a one-radio program.
   image rejection ratio, wavelength and antenna metrics.
 - Config file with atomic save on quit, and the CLI flags that override it.
 
-[Unreleased]: https://github.com/musithang/sdrtop/compare/v0.5.1...HEAD
+[Unreleased]: https://github.com/musithang/sdrtop/compare/v0.6.0...HEAD
+[0.6.0]: https://github.com/musithang/sdrtop/compare/v0.5.1...v0.6.0
 [0.5.1]: https://github.com/musithang/sdrtop/compare/v0.5.0...v0.5.1
 [0.5.0]: https://github.com/musithang/sdrtop/compare/v0.4.2...v0.5.0
 [0.4.2]: https://github.com/musithang/sdrtop/compare/v0.4.1...v0.4.2
