@@ -88,8 +88,6 @@ pub fn company(id: u16) -> Option<&'static str> {
 
 /// The SIG's name for a 16-bit service UUID, or `None` where the snapshot does
 /// not list it.
-// Drawn by the packet detail view (net-ux-polish-plan 5.4); goes with it.
-#[cfg_attr(not(test), allow(dead_code))]
 pub fn service16(uuid: u16) -> Option<&'static str> {
     lookup(&table().services, uuid)
 }

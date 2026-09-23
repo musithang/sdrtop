@@ -12,11 +12,13 @@
 //! and their tests.
 //!
 //! **In the order a reader asks.** What the packet is (its header, its
-//! addresses, what ChSel says where the type defines it); then how it
-//! arrived (SNR, and the transmitter's crystal error in kHz and ppm, with the
-//! frame's tag saying what that offset is worth); then how well it was sent
-//! (B8's modulation quality and B9's drift, each against its limit, idiom B).
-//! What the device advertises joins between the first two in 5.4.b2.
+//! addresses, what ChSel says where the type defines it); what the device
+//! advertises in it (its AD structures, named, the company from the SIG
+//! snapshot with its number beside it); then how it arrived (SNR, and the
+//! transmitter's crystal error in kHz and ppm, with the frame's tag saying
+//! what that offset is worth); then how well it was sent (B8's modulation
+//! quality and B9's drift, each against its limit, idiom B). What it
+//! claims sits beside how it sent it, never instead of it (rule 3).
 //!
 //! **Modulation quality only from a packet whose CRC passed** (5.4.c,
 //! Viktor's decision of 2026-09-22). The measurement reads the deviation at
@@ -235,7 +237,164 @@ fn ch_sel(p: &BlePacket) -> Option<&'static str> {
     })
 }
 
-/// The PACKET and PHYSICS sections.
+/// `55 66 a0`: octets as the air carried them.
+fn hex(data: &[u8]) -> String {
+    data.iter()
+        .map(|b| format!("{b:02x}"))
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
+/// A UUID as it is written: `0x180F` for 16 and 32 bits (with the SIG's
+/// name for a 16-bit one it lists), the 8-4-4-4-12 form for 128.
+fn uuid(written: &[u8]) -> String {
+    match written {
+        [hi, lo] => {
+            let n = u16::from_be_bytes([*hi, *lo]);
+            match crate::signal::ble::assigned::service16(n) {
+                Some(name) => format!("0x{n:04X} {name}"),
+                None => format!("0x{n:04X}"),
+            }
+        }
+        [_, _, _, _] => format!("0x{}", hex(written).replace(' ', "").to_uppercase()),
+        _ => {
+            let h = hex(written).replace(' ', "");
+            if h.len() == 32 {
+                format!(
+                    "{}-{}-{}-{}-{}",
+                    &h[0..8],
+                    &h[8..12],
+                    &h[12..16],
+                    &h[16..20],
+                    &h[20..32]
+                )
+            } else {
+                h
+            }
+        }
+    }
+}
+
+/// A field whose value may run long, wrapped under its label so a long list
+/// of services or octets is read whole rather than cut.
+fn wrapped(label: &str, value: &str, iw: usize, theme: &crate::Theme) -> Vec<Line<'static>> {
+    crate::ui::chrome::wrap(value, iw.saturating_sub(LABEL_W + 1).max(1), 6)
+        .into_iter()
+        .enumerate()
+        .map(|(i, row)| field_line(if i == 0 { label } else { "" }, row, theme))
+        .collect()
+}
+
+/// The ADVERTISED section: every AD structure the payload carries, in order,
+/// named and made readable (net-ux-polish-plan 5.2's decode, drawn).
+///
+/// **Only from a packet whose CRC passed**, as the list's NAME column: a
+/// failed CRC's octets could spell structures nobody sent. A malformed
+/// structure is shown where it is, in the warning ink, and nothing after it
+/// (the parser stops there, and so does this). A company is named from the
+/// SIG snapshot, with its number beside it: the number is the reading, the
+/// name is the registry's.
+fn advertised_lines(p: &BlePacket, iw: usize, theme: &crate::Theme) -> Vec<Line<'static>> {
+    use crate::signal::ble::ad::{self, Ad, Structure};
+    let mut out = vec![crate::ui::chrome::section("advertised", "", iw, theme)];
+    if p.pdu_type == PduType::Other(0x07) {
+        out.push(note(
+            "extended advertising: its payload is not decoded",
+            theme,
+        ));
+        return out;
+    }
+    let Some(data) = ad::adv_data(p.pdu_type, &p.payload) else {
+        return Vec::new();
+    };
+    if !p.crc_ok {
+        out.push(Line::from(Span::styled(
+            " not read: CRC failed".to_string(),
+            Style::default().fg(theme.stale),
+        )));
+        return out;
+    }
+    let structures = ad::parse(data);
+    if structures.is_empty() {
+        out.push(note("nothing beyond the address", theme));
+        return out;
+    }
+    for structure in structures {
+        match structure {
+            Structure::Malformed { offset, why } => {
+                for row in crate::ui::chrome::wrap(
+                    &format!("malformed at octet {offset}: {why}"),
+                    iw.saturating_sub(1).max(1),
+                    3,
+                ) {
+                    out.push(Line::from(Span::styled(
+                        format!(" {row}"),
+                        Style::default().fg(theme.status_crit),
+                    )));
+                }
+            }
+            Structure::Ad { ad, .. } => match ad {
+                Ad::Flags(bits) => {
+                    let names = ad::flag_names(bits);
+                    let text = if names.is_empty() {
+                        "none set".to_string()
+                    } else {
+                        names.join(", ")
+                    };
+                    out.extend(wrapped("flags", &text, iw, theme));
+                }
+                Ad::Name { complete, text } => out.extend(wrapped(
+                    "name",
+                    &format!(
+                        "{}{}",
+                        ad::printable(&text),
+                        if complete { "" } else { " (shortened)" }
+                    ),
+                    iw,
+                    theme,
+                )),
+                Ad::TxPower(dbm) => out.push(field_line("TX power", format!("{dbm} dBm"), theme)),
+                Ad::Uuids {
+                    complete, uuids, ..
+                } => {
+                    let list = uuids.iter().map(|u| uuid(u)).collect::<Vec<_>>().join(", ");
+                    let tail = if complete { "" } else { " (incomplete)" };
+                    out.extend(wrapped("services", &format!("{list}{tail}"), iw, theme));
+                }
+                Ad::ServiceData { uuid: u, data } => out.extend(wrapped(
+                    "svc data",
+                    &format!("{}: {}", uuid(&u), hex(&data)),
+                    iw,
+                    theme,
+                )),
+                Ad::Manufacturer { company, data } => {
+                    let name = crate::signal::ble::assigned::company(company)
+                        .map(|n| format!("{n} (0x{company:04X})"))
+                        .unwrap_or_else(|| format!("0x{company:04X}, not in the SIG snapshot"));
+                    out.extend(wrapped("company", &name, iw, theme));
+                    if !data.is_empty() {
+                        out.extend(wrapped("mfr data", &hex(&data), iw, theme));
+                    }
+                }
+                Ad::Other { code, data } => {
+                    let what = match ad::type_name(code) {
+                        Some(name) => format!("{name} (0x{code:02X})"),
+                        None => format!("AD type 0x{code:02X}"),
+                    };
+                    out.extend(wrapped(
+                        "other",
+                        &format!("{what}: {}", hex(&data)),
+                        iw,
+                        theme,
+                    ));
+                }
+            },
+        }
+    }
+    out
+}
+
+/// The PACKET, ADVERTISED and PHYSICS sections.
 fn header_lines(
     p: &BlePacket,
     selected: bool,
@@ -282,6 +441,7 @@ fn header_lines(
     if let Some(text) = ch_sel(p) {
         out.push(field_line("ChSel", text.to_string(), theme));
     }
+    out.extend(advertised_lines(p, iw, theme));
 
     out.push(section("physics", "", iw, theme));
     out.push(field_line(
@@ -651,5 +811,90 @@ mod tests {
         let text = out.join("\n");
         assert!(text.contains("-22.3 ±0.5 kHz"), "{text}");
         assert!(text.contains("-9.28 ±0.21 ppm"), "{text}");
+    }
+
+    /// A CRC-good ADV_NONCONN_IND whose advertising data is `ad`.
+    fn advertising(ad: &[u8]) -> SdrMetrics {
+        let mut m = SdrMetrics::fixture().streaming();
+        let mut p = packet(None);
+        p.pdu_type = PduType::AdvNonconnInd;
+        p.payload =
+            crate::signal::ble::pdu::air_octets([0xaa, 0xbb, 0xcc, 0x11, 0x22, 0x33]).to_vec();
+        p.payload.extend_from_slice(ad);
+        m.net.ble_packets.push_front(p);
+        m
+    }
+
+    /// **The real packet from the air**: its manufacturer data names Apple
+    /// from the SIG snapshot, the number beside it, and the four octets
+    /// after the identifier as they were sent.
+    #[test]
+    fn the_real_packet_s_advertising_reads_as_apple_with_its_octets() {
+        let m = advertising(&[0x07, 0xff, 0x4c, 0x00, 0x12, 0x02, 0x00, 0x02]);
+        let out = draw(NetBleDetailPanel, 70, 30, &m).join("\n");
+        assert!(out.contains("ADVERTISED"), "{out}");
+        assert!(out.contains("company  Apple, Inc. (0x004C)"), "{out}");
+        assert!(out.contains("mfr data 12 02 00 02"), "{out}");
+    }
+
+    /// Every decoded kind in readable form: flags by name, the name marked
+    /// shortened, TX power, services with the SIG's names, service data.
+    #[test]
+    fn every_structure_reads_in_plain_words() {
+        let m = advertising(&[
+            0x02, 0x01, 0x06, // flags
+            0x05, 0x03, 0x0f, 0x18, 0x0a, 0x18, // services 0x180F, 0x180A
+            0x06, 0x08, b'S', b'e', b'n', b's', b'o', // shortened name
+            0x02, 0x0a, 0xf4, // TX power -12
+            0x05, 0x16, 0x0f, 0x18, 0x55, 0x66, // service data
+        ]);
+        let out = draw(NetBleDetailPanel, 90, 34, &m).join("\n");
+        for want in [
+            "flags    LE General Discoverable, BR/EDR Not Supported",
+            "name     Senso (shortened)",
+            "TX power -12 dBm",
+            "services 0x180F Battery, 0x180A Device Information",
+            "svc data 0x180F Battery: 55 66",
+        ] {
+            assert!(out.contains(want), "{want}:\n{out}");
+        }
+    }
+
+    /// **Malformed at its place, in the warning ink, and nothing after it**;
+    /// a failed CRC reads nothing at all; extended advertising says it is
+    /// not decoded; an address alone says so.
+    #[test]
+    fn what_cannot_be_read_says_why() {
+        let broken = advertising(&[0x02, 0x01, 0x06, 0x09, 0xff, 0x4c]);
+        let out = draw(NetBleDetailPanel, 90, 30, &broken).join("\n");
+        assert!(out.contains("flags"), "{out}");
+        assert!(
+            out.contains("malformed at octet 3: length runs past the end"),
+            "{out}"
+        );
+
+        let mut failed = advertising(&[0x05, 0x09, b'S', b'e', b'n', b's']);
+        failed.net.ble_packets[0].crc_ok = false;
+        let out = draw(NetBleDetailPanel, 90, 30, &failed).join("\n");
+        assert!(out.contains("not read: CRC failed"), "{out}");
+        assert!(!out.contains("Sens"), "{out}");
+
+        let mut ext = advertising(&[]);
+        ext.net.ble_packets[0].pdu_type = PduType::Other(0x07);
+        let out = draw(NetBleDetailPanel, 90, 30, &ext).join("\n");
+        assert!(out.contains("extended advertising"), "{out}");
+
+        let bare = advertising(&[]);
+        let out = draw(NetBleDetailPanel, 90, 30, &bare).join("\n");
+        assert!(out.contains("nothing beyond the address"), "{out}");
+    }
+
+    #[test]
+    fn uuids_are_written_the_way_the_specification_writes_them() {
+        assert_eq!(uuid(&[0x18, 0x0f]), "0x180F Battery");
+        assert_eq!(uuid(&[0x00, 0x01]), "0x0001");
+        assert_eq!(uuid(&[0x12, 0x34, 0x56, 0x78]), "0x12345678");
+        let long: Vec<u8> = (0..16).collect();
+        assert_eq!(uuid(&long), "00010203-0405-0607-0809-0a0b0c0d0e0f");
     }
 }
