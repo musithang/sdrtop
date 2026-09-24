@@ -627,6 +627,7 @@ impl NetWorker {
                         refusal
                     };
                     m.net.bt_channels_watched = bt.iter().map(|r| r.channel()).collect();
+                    m.net.bt_capacity = self.bt_channels;
                 }
 
                 let mut hits = Vec::new();

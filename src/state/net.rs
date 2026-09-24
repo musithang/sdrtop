@@ -421,6 +421,11 @@ pub struct NetState {
     /// could see) whenever the cap is binding. Empty exactly when
     /// [`bt_refused`] is `Some`.
     pub bt_channels_watched: Vec<u8>,
+    /// The most classic channels the worker watches at once
+    /// (`[net].bt_channels`), published by the worker so a locked step on
+    /// the classic view moves by a constant block: the watched list itself
+    /// is shorter at the band's edges. `0` before the worker has run.
+    pub bt_capacity: usize,
     /// Per-LAP UAP narrowing, B16's own live state, refined by B17's own
     /// payload tie-break: the distinct UAP values `signal::bt::header::
     /// PiconetClock` still cannot rule out for that piconet, from every

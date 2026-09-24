@@ -89,14 +89,16 @@ each layout, and the footer shows the numbers for the section you are in.
 `q` **saves**. Quitting is how your frequency, gains, markers and sweep band
 persist to the [config file](config.md); `Ctrl+C` exits without saving anything.
 
-**In the NET section** three letters mean something of their own, and do
-nothing outside it, so they never get in the way of the same letter elsewhere:
+**In the NET section** three letters and the side arrows mean something of
+their own, and do nothing outside it, so they never get in the way of the same
+key elsewhere:
 
 | Key | In NET |
 |-----|--------|
 | `m` | Survey the band, or lock where you are ([survey or lock](net.md#survey-or-lock-m)) |
 | `i` | Show addresses in full, by vendor and kind, or masked ([addresses](net.md#addresses-i)) |
 | `o` | Write the band, the census, the BLE packets, their error curve and the classic hits to files ([taking the data away](net.md#taking-the-data-away-o)) |
+| `←` `→` | Locked: the previous or next place this view listens. On BLE and Census, advertising channel 37, 38, 39 and round again; elsewhere one block of the band along ([stepping](net.md#stepping-while-locked)) |
 
 `p` stays inside the section. It used to walk every preset in the app in
 alphabetical order, which meant leaving the benches for a micro view halfway

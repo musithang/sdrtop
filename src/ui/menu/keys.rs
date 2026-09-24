@@ -204,6 +204,12 @@ pub const GLOBAL: &[(&str, &[Binding])] = &[
                 Footer::Section(&["net"], "addresses"),
             ),
             f(
+                "\u{2190} \u{2192}",
+                None,
+                "in NET, locked: the next advertising channel, or the next block of the band",
+                Footer::Section(&["net"], "channel"),
+            ),
+            f(
                 "O",
                 Some('o'),
                 "in NET: write the band, the census, the BLE packets, their error curve and the classic hits to files",

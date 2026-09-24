@@ -952,6 +952,7 @@ mod tests {
             vec![
                 "[M] mode=LOCK",
                 "[I] addresses=masked",
+                "[\u{2190} \u{2192}] channel",
                 "[O] Export",
                 "[Y] Reference"
             ]

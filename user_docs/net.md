@@ -48,6 +48,23 @@ A surveyed count is a sample of the band, not a complete record. A few
 readings only exist in LOCK: a BLE device's advertising interval, for one,
 needs arrivals that were never interrupted by a hop.
 
+### Stepping while locked
+
+`←` and `→` move a locked radio without typing a frequency. On the BLE and
+Census views a step is the next advertising channel, 37, 38, 39 and round
+again, because that is the only place advertising happens and anywhere in
+between is an expensive way to hear nothing. On the other views it is one
+block of the band along: the span, or on the Classic view the most channels
+it watches at once (`[net].bt_channels`) if that is fewer, wrapping round at
+the ends. Surveying, the survey owns the tuning, and the keys
+just remind you that `m` locks.
+
+A lock carries across views, so a Survey locked on a Wi-Fi channel would
+arrive at the BLE view parked where no advertising ever comes. Opening an
+advertising view off the three channels therefore moves the radio to the
+nearest of them, once, and the log says so. Tune somewhere else afterwards
+(a data channel for LE 2M, say) and it stays where you put it.
+
 ### The three silences
 
 An empty panel always says which kind of empty it is:

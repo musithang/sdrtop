@@ -20,6 +20,7 @@ pub const SECTION: &str = "net";
 pub mod band;
 pub mod census;
 pub mod gate;
+pub mod lock;
 pub mod occupancy;
 pub mod scan;
 pub mod survey;

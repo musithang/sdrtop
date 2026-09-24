@@ -146,6 +146,45 @@ pub(super) fn toggle_net_mode(ctx: &mut InputCtx<'_>) -> bool {
     true
 }
 
+/// `[←]` `[→]` - in NET and locked, the previous or next place this view
+/// listens (`signal::net::lock`): the next advertising channel on the views
+/// the advertising decoder feeds, the next block of the band elsewhere.
+/// Surveying, the survey owns the tuning, so the key says what it is for
+/// rather than fighting it. Outside NET it does nothing.
+pub(super) fn step_net_channel(ctx: &mut InputCtx<'_>, forward: bool) {
+    use crate::signal::net::lock;
+    let mut m = metrics(ctx.state);
+    if !m.ui.is_net_section() {
+        return;
+    }
+    if m.net.mode != crate::state::NetMode::Lock {
+        m.push_log("NET: ← → step the channel while locked; [M] locks".to_string());
+        return;
+    }
+    // From a step already asked for and not yet applied, so two quick
+    // presses go two places rather than one twice.
+    let from = m
+        .net
+        .lock_at
+        .as_ref()
+        .map_or(m.radio.frequency, |t| t.tune_hz);
+    // A constant block: the span, or on the classic view the most channels
+    // it watches at once where that is fewer. The watched list itself is
+    // shorter at the band's edges and would make the steps uneven.
+    let span = if m.radio.bb_filter_hz > 0 {
+        (m.radio.bb_filter_hz as f64).min(m.radio.config_sample_rate)
+    } else {
+        m.radio.config_sample_rate
+    };
+    let span_mhz = (span / 1e6).floor() as u64;
+    let block_mhz = match (m.ui.active_preset.as_str(), m.net.bt_capacity as u64) {
+        ("net_bt", cap) if cap > 0 => span_mhz.min(cap),
+        _ => span_mhz,
+    };
+    let how = lock::stepping(&m.ui.active_preset, block_mhz);
+    m.net.lock_at = Some(lock::step(from, how, forward));
+}
+
 /// `[i]` - cycle how addresses are shown throughout the NET section
 /// (foundation design 1.1: `full`, `oui`, and `masked` once it exists).
 ///

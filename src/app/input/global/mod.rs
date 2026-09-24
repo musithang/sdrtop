@@ -48,6 +48,10 @@ pub(super) fn handle(key: KeyEvent, ctx: &mut InputCtx<'_>) -> KeyAction {
                 view::enter_focus(ctx, 'o');
             }
         }
+        // NET, locked: the next or previous place this view listens.
+        KeyCode::Left | KeyCode::Right => {
+            radio::step_net_channel(ctx, key.code == KeyCode::Right);
+        }
         KeyCode::Char('f') => radio::begin_frequency_input(ctx),
         KeyCode::Char('s') => radio::begin_sample_rate_input(ctx),
         // Section-scoped, and it declines rather than absorbing: outside NET
@@ -192,6 +196,38 @@ mod tests {
     /// The rule generalises past this key, which is why it is written as one: a
     /// global arm added for one section must fall through when that section is
     /// not on screen, or it quietly takes a key away from the rest of the deck.
+    /// Locked on the BLE view, `→` asks for the next advertising channel,
+    /// and a second press before the first is applied goes on from it;
+    /// surveying, the key says what it is for and asks for nothing.
+    #[test]
+    fn the_arrows_step_a_locked_view_and_explain_themselves_otherwise() {
+        let mut h = Harness::new();
+        {
+            let mut m = metrics(&h.state);
+            m.ui.section = crate::signal::net::SECTION.to_string();
+            m.ui.active_preset = "net_ble".to_string();
+            m.radio.frequency = 2_402_000_000;
+        }
+        h.key(KeyCode::Right);
+        assert!(metrics(&h.state).net.lock_at.is_none());
+        assert!(h.log().contains("[M] locks"), "{}", h.log());
+
+        metrics(&h.state).net.mode = crate::state::NetMode::Lock;
+        h.key(KeyCode::Right);
+        let first = metrics(&h.state).net.lock_at.clone().unwrap();
+        assert_eq!(first.tune_hz, 2_426_000_000);
+        h.key(KeyCode::Right);
+        assert_eq!(
+            metrics(&h.state).net.lock_at.clone().unwrap().tune_hz,
+            2_480_000_000
+        );
+        h.key(KeyCode::Left);
+        assert_eq!(
+            metrics(&h.state).net.lock_at.clone().unwrap().tune_hz,
+            2_426_000_000
+        );
+    }
+
     #[test]
     fn a_section_scoped_key_does_not_shadow_a_panel_focus_key() {
         let mut h = Harness::new();

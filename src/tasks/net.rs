@@ -58,6 +58,9 @@ pub fn spawn_net_survey_task(state: Arc<Mutex<SdrMetrics>>, device: Arc<dyn SdrD
         // one to BLE's rotation or back, needs its own announcement even
         // though a survey was already under way either side of the switch.
         let mut was_ble = false;
+        // The view a lock was last seen on, so opening an advertising view
+        // moves the radio once, not every poll (`signal::net::lock`).
+        let mut locked_view = String::new();
 
         loop {
             let (active, span_hz, rate_hz, tuned, is_ble) = {
@@ -99,14 +102,25 @@ pub fn spawn_net_survey_task(state: Arc<Mutex<SdrMetrics>>, device: Arc<dyn SdrD
                         )
                     });
                 }
-                // A lock the cursor asked for while the radio was already
-                // locked: no survey to hand back, so it is applied here, the
-                // one place NET retunes from.
+                // A lock the cursor or a step asked for while the radio was
+                // already locked, or the move an advertising view needs when
+                // it is opened off the advertising channels: no survey to hand
+                // back, so it is applied here, the one place NET retunes from.
                 let pending = {
                     let mut m = state.lock().unwrap_or_else(|e| e.into_inner());
-                    if m.net.mode == NetMode::Lock {
+                    if m.net.mode == NetMode::Lock && m.ui.is_net_section() {
+                        if m.ui.active_preset != locked_view {
+                            locked_view = m.ui.active_preset.clone();
+                            if m.net.lock_at.is_none() {
+                                m.net.lock_at = crate::signal::net::lock::entering_view(
+                                    &locked_view,
+                                    m.radio.frequency,
+                                );
+                            }
+                        }
                         m.net.lock_at.take()
                     } else {
+                        locked_view.clear();
                         None
                     }
                 };
@@ -374,6 +388,44 @@ mod tests {
         fn set_lna_gain(&self, _: u32) -> anyhow::Result<()> {
             Ok(())
         }
+    }
+
+    /// A lock inherited onto the BLE view off the advertising channels moves
+    /// to the nearest one, once, and says why.
+    #[tokio::test]
+    async fn opening_the_ble_view_locked_off_channel_moves_to_advertising() {
+        let mut m = SdrMetrics::fixture();
+        m.ui.section = crate::signal::net::SECTION.to_string();
+        m.ui.active_preset = "net_ble".to_string();
+        m.net.mode = NetMode::Lock;
+        m.radio.frequency = 2_435_500_000;
+        let state = Arc::new(Mutex::new(m));
+        let radio = Arc::new(Recorder {
+            caps: crate::hardware::native::hackrf::caps(),
+            tuned: Mutex::new(Vec::new()),
+        });
+        spawn_net_survey_task(Arc::clone(&state), radio.clone());
+
+        let deadline = std::time::Instant::now() + Duration::from_secs(2);
+        while state.lock().unwrap().radio.frequency != 2_426_000_000 {
+            assert!(std::time::Instant::now() < deadline, "never moved");
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+        tokio::time::sleep(Duration::from_millis(300)).await;
+        assert_eq!(
+            *radio.tuned.lock().unwrap(),
+            vec![2_426_000_000],
+            "moved once"
+        );
+        let log: Vec<String> = state
+            .lock()
+            .unwrap()
+            .ui
+            .log
+            .iter()
+            .map(|e| e.text.to_string())
+            .collect();
+        assert!(log.iter().any(|l| l.contains("carries none")), "{log:?}");
     }
 
     /// **A lock asked for while already locked is applied by the task**, the
