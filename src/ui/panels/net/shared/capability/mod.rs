@@ -230,11 +230,15 @@ impl Panel for NetCapabilityPanel {
         lines.push(observer(state.system.observable, iw, theme));
         lines.push(retune(state.net.retune.as_ref(), iw, theme));
 
-        lines.extend(modes::lines(caps, iw, theme));
+        let modes_at = lines.len();
+        let (mode_lines, mode_optional) = modes::lines(caps, iw, theme);
+        lines.extend(mode_lines);
 
         // Breathe like the Lab panels (`chrome::fit_spacers`): spacers grow to
         // fill a tall panel and go first on a short one. When that is not
-        // enough, detail gives way in this order: the ruler's key, NEEDS, the
+        // enough, detail gives way in this order: the modes' ceiling tag and
+        // axis rule (the RATE row and the tick numbers say the same), the
+        // ruler's key, NEEDS, the
         // band ruler's two rows, the headroom row (the verdict says it), and
         // the observer and delivery rows. The verdict and the mode rows, which
         // are the panel's answer, stay on screen longest.
@@ -242,15 +246,19 @@ impl Panel for NetCapabilityPanel {
         let blank = |l: &Line| l.spans.iter().all(|s| s.content.trim().is_empty());
         let spacers = lines.iter().filter(|l| blank(l)).count();
         let over = lines.len().saturating_sub(spacers).saturating_sub(avail);
-        let mut optional = [
-            legend,
-            needs,
-            legend - 1,
-            legend - 2,
-            legend - 3,
-            observer_row,
-            delivery_row,
-        ];
+        let mut optional: Vec<usize> = mode_optional
+            .iter()
+            .map(|i| modes_at + i)
+            .chain([
+                legend,
+                needs,
+                legend - 1,
+                legend - 2,
+                legend - 3,
+                observer_row,
+                delivery_row,
+            ])
+            .collect();
         let n = over.min(optional.len());
         optional[..n].sort_unstable_by(|a, b| b.cmp(a));
         for &i in &optional[..n] {

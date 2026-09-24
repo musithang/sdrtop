@@ -145,7 +145,11 @@ only from the facts drawn below it:
 - **Tuner**: whether the tuning range covers the whole band, and with how
   much to spare either side.
 - **Modes**: which Bluetooth and Wi-Fi modes the sample-rate ceiling can
-  carry, and how far short the nearest one out of reach is.
+  carry. Every mode is a line out to the rate it needs, on one log scale,
+  and the radio's ceiling is a single orange rule down all of them: a green
+  line that stops short of it fits, and one that runs past it turns red for
+  exactly as far as it is short. 802.11b misses by a whisker on a HackRF;
+  VHT80 misses by a postcode.
 - **Retune** (`K`, focus `k`): times the radio's tuning call across the band.
   A call slower than the shortest BLE connection interval rules following a
   connection out; a faster one is necessary but not proof, because the call
