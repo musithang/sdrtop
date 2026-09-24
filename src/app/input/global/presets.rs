@@ -37,6 +37,13 @@ pub(in crate::app::input) fn try_set_preset(
         if from_census && engine.is_panel_visible("net_ble_packets") {
             super::super::net::carry_census_selection(&mut m);
         }
+        // A focus whose panel this layout does not show has ended.
+        if engine
+            .focused_panel_name()
+            .is_some_and(|p| !engine.is_panel_visible(p))
+        {
+            super::view::end_focus(engine, &mut m);
+        }
     } else {
         m.push_log(format!("Preset '{}' not yet available", name));
     }

@@ -27,7 +27,7 @@ mod gain;
 // a layout the same way, or the two could drift.
 pub(super) mod presets;
 mod radio;
-mod view;
+pub(super) mod view;
 
 use crossterm::event::{KeyCode, KeyEvent};
 

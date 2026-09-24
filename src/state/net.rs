@@ -844,6 +844,12 @@ pub struct CensusState {
     pub descending: bool,
     /// The device the cursor is on, and where the view starts.
     pub selection: super::Selection<[u8; 6]>,
+    /// The device selected when the census last lost focus, kept for one
+    /// thing only: a layout switch into the BLE list carries it as the
+    /// list's filter (`input::net::carry_census_selection`). Leaving focus
+    /// clears the selection itself (bluetooth-next-plan Stop 1), and the
+    /// carry reads this instead; it is spent by the carry that uses it.
+    pub chosen: Option<[u8; 6]>,
 }
 
 impl CensusState {

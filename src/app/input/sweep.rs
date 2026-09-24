@@ -116,11 +116,9 @@ pub(super) fn sweep_panel(key: KeyEvent, ctx: &mut InputCtx<'_>) -> KeyAction {
                     let mut m = metrics(state);
                     m.sweep.pending_tune = Some(hz);
                 }
-                ctx.engine.clear_focus();
-                ctx.engine.set_preset("spectrum_waterfall");
                 let mut m = metrics(state);
-                m.ui.focused_panel = None;
-                m.ui.focused_panel_bindings = &[];
+                super::global::view::end_focus(ctx.engine, &mut m);
+                ctx.engine.set_preset("spectrum_waterfall");
                 m.push_log(format!("Jumping to {:.3} MHz from sweep…", hz as f64 / 1e6));
             }
         }

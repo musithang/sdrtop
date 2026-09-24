@@ -46,17 +46,81 @@ pub(super) fn open_menu(ctx: &mut InputCtx<'_>) {
 /// that has no way to clear it: the keys that would move it belong to a focus
 /// handler that is no longer running.
 pub(super) fn leave_focus(ctx: &mut InputCtx<'_>) {
-    if ctx.engine.focused_panel_name().is_none() {
-        return;
-    }
-    ctx.engine.clear_focus();
     let mut m = metrics(ctx.state);
+    end_focus(ctx.engine, &mut m);
+}
+
+/// End whatever focus there is, and put the panel back as it was before the
+/// first key (bluetooth-next-plan Stop 1). The one path every way out of a
+/// focus takes: `Esc`, a letter that focuses another panel, a layout switch
+/// that takes the panel off screen, the sweep's jump to the spectrum.
+pub(in crate::app::input) fn end_focus(
+    engine: &mut crate::ui::LayoutEngine,
+    m: &mut crate::state::SdrMetrics,
+) {
+    let Some(panel) = engine.focused_panel_name().map(str::to_string) else {
+        return;
+    };
+    engine.clear_focus();
     m.ui.focused_panel = None;
     m.ui.focused_panel_bindings = &[];
     m.ui.log_overlay = false;
+    reset_positions(&panel, m);
+}
+
+/// Panels whose focus moves nothing that stays on screen: their keys set a
+/// mode (a freeze, a marker, the demod channel, a reference level) or run a
+/// measurement, and a mode is a setting the user chose, not a cursor left
+/// behind. The structural test holds every focusable panel to either this
+/// list or an arm of [`reset_positions`].
+#[cfg(test)]
+pub(in crate::app::input) const NO_POSITION: &[&str] = &[
+    "iq_diagnostics",
+    "rf_chain",
+    "timing_vitals",
+    "timing_diagnostics",
+    "lab_banner",
+    "signal_metrics",
+    "signal_characterization",
+    "fm_demod",
+    "net_capability",
+];
+
+/// What "as it was before the first key" means, panel by panel: every
+/// **position** (a cursor, a selection, a scrubbed time, a scrolled history)
+/// goes; every **mode** chosen on purpose (the BLE filter and hold, the PHY,
+/// the census sort, the hop zoom, the waterfall pause) stays. Decided with
+/// Viktor, 2026-09-24: a cursor nobody is using any more "olyan, mintha ott
+/// ragadna".
+///
+/// The spectrum and waterfall cursors go whatever was focused, as they always
+/// did: the spectrum's focus places the waterfall's cursor too.
+pub(in crate::app::input) fn reset_positions(panel: &str, m: &mut crate::state::SdrMetrics) {
     m.spectrum.cursor_freq = None;
     m.waterfall.scroll_offset = 0;
     m.waterfall.cursor_freq = None;
+    match panel {
+        "sweep_panel" => m.sweep.cursor_frac = None,
+        // The knob goes back to the whole chain; the stage values stay.
+        "command_rail" => m.ui.gain_stage = None,
+        "net_occupancy" => m.net.band_cursor = Default::default(),
+        "net_coexist" => m.net.band_scrub = None,
+        // Kept for the carry into the BLE list before it is cleared: the
+        // one selection that outlives its focus, because it is on its way
+        // somewhere.
+        "net_census" => {
+            m.net.census.chosen = m.net.census.selection.selected;
+            m.net.census.selection = Default::default();
+        }
+        "net_ble_packets" => m.net.ble_view.selection = Default::default(),
+        "net_bt_piconets" => m.net.bt_view = Default::default(),
+        // The zoom is a mode; where in time the window ends is a position.
+        "net_bt_hops" => {
+            m.net.bt_view = Default::default();
+            m.net.hop_view.back_ms = 0;
+        }
+        _ => {}
+    }
 }
 
 /// `[W]` - pause the waterfall in place.
@@ -111,6 +175,11 @@ pub(super) fn enter_focus(ctx: &mut InputCtx<'_>, key: char) {
     }) else {
         return;
     };
+    // Moving focus straight to another panel ends the first one's properly.
+    if ctx.engine.focused_panel_name() != Some(panel) {
+        let mut m = metrics(ctx.state);
+        end_focus(ctx.engine, &mut m);
+    }
     ctx.engine.focus(panel);
     let bindings = ctx.engine.get_panel_bindings(panel);
     let mut m = metrics(ctx.state);

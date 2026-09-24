@@ -336,9 +336,19 @@ fn filter_to_selected(m: &mut SdrMetrics) {
 /// addresses, because a list that arrives narrowed without a word reads as
 /// a quiet room.
 pub(super) fn carry_census_selection(m: &mut SdrMetrics) {
-    let Some(address) = m.net.census.selection.selected else {
+    // The selection while the census is still focused; the choice it left
+    // behind once focus ended (Stop 1). Spent either way, so an old choice
+    // does not come back on a later visit that chose nothing.
+    let Some(address) = m
+        .net
+        .census
+        .selection
+        .selected
+        .or(m.net.census.chosen.take())
+    else {
         return;
     };
+    m.net.census.chosen = None;
     let random = m
         .net
         .census
@@ -772,6 +782,182 @@ mod tests {
 
         press(KeyCode::Down);
         assert_eq!(metrics(&state).net.bt_view.selected, Some(0x9e8b33));
+    }
+
+    /// A deck built as the app builds it, on `preset`, with `panel` focused
+    /// the way its letter focuses it.
+    fn focused_on(
+        preset: &str,
+        panel: &str,
+    ) -> (LayoutEngine, crate::app::FocusKeys, Arc<Mutex<SdrMetrics>>) {
+        let (mut engine, keys) = crate::app::App::build_ui(preset, &HashMap::new(), None, true);
+        engine.focus(panel);
+        let state = Arc::new(Mutex::new(SdrMetrics::fixture().streaming()));
+        metrics(&state).ui.focused_panel = Some(panel.to_string());
+        (engine, keys, state)
+    }
+
+    fn key(
+        engine: &mut LayoutEngine,
+        keys: &crate::app::FocusKeys,
+        state: &Arc<Mutex<SdrMetrics>>,
+        code: KeyCode,
+    ) {
+        let mut show_footer = true;
+        crate::app::input::handle_key(
+            KeyEvent::new(code, KeyModifiers::NONE),
+            state,
+            None,
+            engine,
+            &mut show_footer,
+            keys,
+        );
+    }
+
+    /// **Leaving focus leaves no trace** (bluetooth-next-plan Stop 1):
+    /// every NET position goes on `Esc`, every mode chosen on purpose stays.
+    #[test]
+    fn leaving_focus_clears_every_position_and_keeps_every_mode() {
+        // A layout, the panel focused on it, what puts a position (and a
+        // mode) there, and whether leaving cleared the one and kept the other.
+        type Case = (
+            &'static str,
+            &'static str,
+            fn(&mut SdrMetrics),
+            fn(&SdrMetrics) -> bool,
+        );
+        let cases: [Case; 6] = [
+            (
+                "net_survey",
+                "net_occupancy",
+                |m| m.net.band_cursor.selected = Some(37),
+                |m| m.net.band_cursor.selected.is_none(),
+            ),
+            (
+                "net_survey",
+                "net_coexist",
+                |m| m.net.band_scrub = Some(12),
+                |m| m.net.band_scrub.is_none(),
+            ),
+            (
+                "net_census",
+                "net_census",
+                |m| {
+                    m.net.census.selection.selected = Some([1; 6]);
+                    m.net.census.sort = 3;
+                },
+                // The sort is a mode and stays.
+                |m| m.net.census.selection.selected.is_none() && m.net.census.sort == 3,
+            ),
+            (
+                "net_ble",
+                "net_ble_packets",
+                |m| {
+                    m.net.ble_view.selection.selected = Some(7);
+                    m.net.ble_view.filter = Some([2; 6]);
+                },
+                // The filter is a mode and stays.
+                |m| {
+                    m.net.ble_view.selection.selected.is_none()
+                        && m.net.ble_view.filter == Some([2; 6])
+                },
+            ),
+            (
+                "net_bt",
+                "net_bt_hops",
+                |m| {
+                    m.net.bt_view.selected = Some(0x9e8b33);
+                    m.net.hop_view.back_ms = 8_000;
+                    m.net.hop_view.zoom = 2;
+                },
+                // Where the window ends goes; the zoom stays.
+                |m| {
+                    m.net.bt_view.selected.is_none()
+                        && m.net.hop_view.back_ms == 0
+                        && m.net.hop_view.zoom == 2
+                },
+            ),
+            (
+                "net_bt",
+                "net_bt_piconets",
+                |m| m.net.bt_view.selected = Some(0x9e8b33),
+                |m| m.net.bt_view.selected.is_none(),
+            ),
+        ];
+        for (preset, panel, set, cleared) in cases {
+            let (mut engine, keys, state) = focused_on(preset, panel);
+            set(&mut metrics(&state));
+            key(&mut engine, &keys, &state, KeyCode::Esc);
+            assert!(
+                engine.focused_panel_name().is_none(),
+                "{panel} still focused"
+            );
+            assert!(cleared(&metrics(&state)), "{panel} kept a position");
+        }
+    }
+
+    /// **The one selection that outlives its focus**: a census device chosen,
+    /// `Esc`, then the BLE layout, still arrives filtered to it; the choice is
+    /// spent, so a later visit that chose nothing carries nothing.
+    #[test]
+    fn a_census_choice_still_carries_after_leaving_focus() {
+        let device = [0xa4, 0x83, 0xe7, 0x1c, 0x09, 0xbe];
+        let (mut engine, keys, state) = focused_on("net_census", "net_census");
+        metrics(&state).net.census.selection.selected = Some(device);
+        key(&mut engine, &keys, &state, KeyCode::Esc);
+        assert_eq!(metrics(&state).net.census.selection.selected, None);
+        super::global::presets::try_set_preset(&mut engine, &state, "net_ble");
+        assert_eq!(metrics(&state).net.ble_view.filter, Some(device));
+
+        metrics(&state).net.ble_view.filter = None;
+        super::global::presets::try_set_preset(&mut engine, &state, "net_census");
+        super::global::presets::try_set_preset(&mut engine, &state, "net_ble");
+        assert_eq!(metrics(&state).net.ble_view.filter, None, "spent");
+    }
+
+    /// A layout switch that takes the focused panel off screen ends its
+    /// focus the same way `Esc` does; the carry reads the selection first.
+    #[test]
+    fn switching_layout_ends_a_focus_it_hides() {
+        let device = [1, 2, 3, 4, 5, 6];
+        let (mut engine, _, state) = focused_on("net_census", "net_census");
+        metrics(&state).net.census.selection.selected = Some(device);
+        super::global::presets::try_set_preset(&mut engine, &state, "net_ble");
+        assert!(engine.focused_panel_name().is_none());
+        assert_eq!(metrics(&state).ui.focused_panel, None);
+        assert_eq!(metrics(&state).net.ble_view.filter, Some(device));
+        assert_eq!(metrics(&state).net.census.selection.selected, None);
+    }
+
+    /// **Every focusable panel is accounted for**: its name is either an arm
+    /// of `reset_positions` or on the `NO_POSITION` list, read from the
+    /// source the way the registry tests read the dispatch. A new panel with
+    /// a cursor cannot be added without saying what leaving it resets.
+    #[test]
+    fn every_focusable_panel_says_what_leaving_it_resets() {
+        let dispatch = include_str!("mod.rs");
+        let view = include_str!("global/view.rs");
+        let resets = &view[view.find("fn reset_positions").unwrap()..];
+        // Reset whatever is focused, not by arm.
+        let always = ["spectrum", "waterfall"];
+        let focusable: Vec<&str> = dispatch
+            .lines()
+            .filter_map(|l| l.trim().strip_prefix("Some(\""))
+            .filter_map(|l| l.split('"').next())
+            .collect();
+        assert!(focusable.len() >= 15, "{focusable:?}");
+        for name in focusable {
+            let armed = resets.contains(&format!("\"{name}\""));
+            let listed = super::global::view::NO_POSITION.contains(&name);
+            assert!(
+                armed || listed || always.contains(&name),
+                "{name}: neither reset on leaving focus nor listed as having no position"
+            );
+            assert!(
+                !(armed && listed),
+                "{name} is both reset and listed as positionless"
+            );
+        }
     }
 
     /// **A census choice travels with the user** (5.9): leaving the census

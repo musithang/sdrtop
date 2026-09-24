@@ -156,7 +156,15 @@ it with a **highlighted letter in the panel title**: the **I** in "**I**Q
 Diagnostics", the **D** in "RF **D**iagnostics". Press that letter to enter.
 
 While a panel is focused its border lights up, the footer lists exactly the keys
-that panel adds, and `Esc` leaves. Anything the focused panel does not claim falls
+that panel adds, and `Esc` leaves.
+
+Leaving puts the panel back the way it was before the first key: a cursor, a
+selection, a history scrolled back or a time scrubbed away all go, so nothing
+is left hanging on a panel you have stopped steering. What you *chose* stays: a
+filter, a hold, a sort, a zoom. The one selection that survives is the
+Census's, and only long enough to travel: switch to the BLE view and the list
+arrives filtered to the device you had picked. Switching to a layout that does
+not show the focused panel leaves its focus the same way. Anything the focused panel does not claim falls
 straight through to the general keys above, so you can still change gain, retune,
 or switch presets without leaving focus first.
 
