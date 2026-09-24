@@ -357,7 +357,8 @@ fn wrap_items_grouped<S: AsRef<str>>(items: &[S], sep: &str, inner_w: usize) -> 
     lines
 }
 
-/// Break `items` into joined lines (used for height measurement).
+/// Break `items` into joined lines: the wrapping rule as text, for the tests.
+#[cfg(test)]
 fn wrap_items<S: AsRef<str>>(items: &[S], sep: &str, inner_w: usize) -> Vec<String> {
     let mut lines: Vec<String> = wrap_items_grouped(items, sep, inner_w)
         .into_iter()
@@ -439,7 +440,9 @@ fn styled_lines(
         .map(|g| {
             let mut spans: Vec<Span> = Vec::new();
             for (i, item) in g.iter().enumerate() {
-                if i > 0 {
+                if i > 0 && item.starts_with(NAME_MARK) {
+                    spans.push(Span::raw(NAME_GAP));
+                } else if i > 0 {
                     spans.push(Span::styled(
                         sep.to_string(),
                         Style::default().fg(theme.border_dim),
@@ -450,10 +453,6 @@ fn styled_lines(
             Line::from(spans)
         })
         .collect()
-}
-
-fn count_lines<S: AsRef<str>>(items: &[S], sep: &str, inner_w: usize) -> usize {
-    wrap_items(items, sep, inner_w).len()
 }
 
 /// Public free function - called directly from the engine (bypasses dyn dispatch).
@@ -467,7 +466,7 @@ pub fn compute_footer_height(available_width: u16, state: &SdrMetrics) -> u16 {
     }
     let inner_w = available_width.saturating_sub(2) as usize;
     let n = if state.ui.focused_panel.is_some() {
-        count_lines(&focus_items(state), FOCUS_SEP, inner_w)
+        focus_lines(state, inner_w).len()
     } else {
         wrap_groups(&normal_groups(state, available_width), inner_w).len()
     };
@@ -580,17 +579,8 @@ impl Panel for FooterPanel {
                     ))
                 }
                 InputMode::Normal | InputMode::DeviceOptionInput { .. } => {
-                    if let Some(panel_name) = &m.ui.focused_panel {
-                        let items = focus_items(m);
-                        let groups = wrap_items_grouped(&items, FOCUS_SEP, inner_w);
-                        let mut wrapped = styled_lines(groups, FOCUS_SEP, theme, max_lines);
-                        if let Some(last) = wrapped.last_mut() {
-                            last.spans.push(Span::styled(
-                                format!("  — {}", panel_name),
-                                Style::default().fg(theme.label),
-                            ));
-                        }
-                        wrapped
+                    if m.ui.focused_panel.is_some() {
+                        styled_lines(focus_lines(m, inner_w), FOCUS_SEP, theme, max_lines)
                     } else {
                         let groups = normal_groups(m, frame::outer_of(inner).width);
                         styled_group_lines(wrap_groups(&groups, inner_w), theme, max_lines)
@@ -636,6 +626,38 @@ fn tone_for(observer: bool, mode: &InputMode, panel_focused: bool) -> FrameTone 
         _ => FrameTone::Warn,
     }
 }
+
+/// What names the focused panel at the end of its keys: the dash marks it as
+/// a name rather than a key, and `styled_lines` gives it a plain gap instead
+/// of the separator.
+const NAME_MARK: char = '\u{2014}';
+
+/// The focus footer's lines: the panel's keys, wrapped, and the panel's name
+/// after the last of them, or on a line of its own when the last is full.
+/// Wrapped here rather than appended after, which cut the name off at the
+/// frame on a long footer (`net_ble_packets` lost its last letter); the
+/// height is counted from the same lines, so the two cannot disagree.
+fn focus_lines(m: &SdrMetrics, inner_w: usize) -> Vec<Vec<String>> {
+    let mut lines = wrap_items_grouped(&focus_items(m), FOCUS_SEP, inner_w);
+    let Some(panel) = &m.ui.focused_panel else {
+        return lines;
+    };
+    let name = format!("{NAME_MARK} {panel}");
+    let used = |line: &Vec<String>| {
+        line.iter().map(|i| i.chars().count()).sum::<usize>()
+            + FOCUS_SEP.chars().count() * line.len().saturating_sub(1)
+    };
+    match lines.last_mut() {
+        Some(last) if used(last) + NAME_GAP.len() + name.chars().count() <= inner_w => {
+            last.push(name)
+        }
+        _ => lines.push(vec![name]),
+    }
+    lines
+}
+
+/// The gap before the panel's name, where keys get the separator.
+const NAME_GAP: &str = "  ";
 
 /// Build the ordered items list for focus-mode footer.
 fn focus_items(m: &SdrMetrics) -> Vec<String> {
@@ -778,6 +800,51 @@ mod tests {
 
     /// The footer a layout would get: `preset` active, filed under `section`,
     /// whose layouts are `scope`, on a HackRF (the fixture's radio).
+    /// A focus footer too long for one line keeps the panel's name whole:
+    /// after the last key where it fits, on its own line where it does not,
+    /// and the height the engine gives the footer counts that line.
+    #[test]
+    fn the_focused_panel_name_is_never_cut() {
+        let mut m = SdrMetrics::fixture();
+        m.ui.focused_panel = Some("net_ble_packets".to_string());
+        m.ui.focused_panel_bindings = &[
+            ("↑↓", "select a packet"),
+            ("Enter", "filter to its address"),
+            ("h", "hold the list"),
+            ("2", "LE 1M or LE 2M"),
+        ];
+        for inner_w in 40..140 {
+            let lines = focus_lines(&m, inner_w);
+            let joined: Vec<String> = lines
+                .iter()
+                .map(|l| {
+                    l.iter().enumerate().fold(String::new(), |acc, (i, item)| {
+                        let sep = match (i, item.starts_with(NAME_MARK)) {
+                            (0, _) => "",
+                            (_, true) => NAME_GAP,
+                            _ => FOCUS_SEP,
+                        };
+                        acc + sep + item
+                    })
+                })
+                .collect();
+            let last = joined.last().unwrap();
+            assert!(
+                last.ends_with("\u{2014} net_ble_packets"),
+                "{inner_w}: {joined:?}"
+            );
+            assert!(
+                joined.iter().all(|l| l.chars().count() <= inner_w),
+                "{inner_w}: {joined:?}"
+            );
+            let height = compute_footer_height(inner_w as u16 + 2, &m) as usize;
+            assert_eq!(
+                height,
+                (lines.len() + 2).clamp(3, MAX_CONTENT_LINES as usize + 2)
+            );
+        }
+    }
+
     fn footer_at(
         preset: &str,
         section: &str,
