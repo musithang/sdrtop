@@ -32,7 +32,7 @@ use ratatui::{
 };
 
 use crate::state::SdrMetrics;
-use crate::ui::chrome::{fit_spacers, section};
+use crate::ui::chrome::{collapse_spacers, section};
 use crate::ui::panel::{Panel, PanelChrome, Staleness};
 
 pub struct NetDecodeHealthPanel;
@@ -105,12 +105,122 @@ fn samples(pairs: u64) -> String {
     format!("{pairs} samp")
 }
 
-/// The whole panel body, as a function of the state and the width alone.
+/// Where the decode load's 100 % stands along its bar: past it is room to
+/// show a worker falling behind by up to a quarter before the bar runs out.
+const LOAD_FULL: f64 = 0.8;
+
+/// How the BLE triggers ended, as one bar: good, CRC failed and gave up in
+/// their shares of the ones that have ended, and a key under it with the
+/// percentages. Empty before any has ended.
+///
+/// The counts above say how many; the bar says which way the detector is
+/// leaning at a glance, and a room where half the triggers give up reads
+/// differently from one where half fail their CRC.
+fn funnel_bar(
+    f: &crate::signal::ble::receive::Funnel,
+    width: usize,
+    theme: &crate::Theme,
+) -> Vec<Line<'static>> {
+    let ended = f.decoded + f.crc_failed + f.gave_up;
+    let bw = width.saturating_sub(2);
+    if ended == 0 || bw < 10 {
+        return Vec::new();
+    }
+    let parts = [
+        (f.decoded, theme.status_ok, "good"),
+        (f.crc_failed, theme.status_crit, "CRC failed"),
+        (f.gave_up, theme.border_dim, "gave up"),
+    ];
+    // Each share rounded, a share that is not zero kept visible, and the
+    // last part taking what rounding left so the bar is always whole.
+    let mut cells: Vec<usize> = parts
+        .iter()
+        .map(|(n, _, _)| {
+            let c = (*n as f64 / ended as f64 * bw as f64).round() as usize;
+            if *n > 0 {
+                c.max(1)
+            } else {
+                0
+            }
+        })
+        .collect();
+    let used: usize = cells[..2].iter().sum();
+    cells[2] = if f.gave_up > 0 {
+        bw.saturating_sub(used).max(1)
+    } else {
+        0
+    };
+    let mut bar = vec![Span::raw(" ")];
+    let mut key = vec![Span::raw(" ")];
+    for ((n, colour, name), c) in parts.iter().zip(&cells) {
+        if *c > 0 {
+            bar.push(Span::styled(
+                "\u{2501}".repeat(*c),
+                Style::default().fg(*colour),
+            ));
+        }
+        if key.len() > 1 {
+            key.push(Span::raw("   "));
+        }
+        key.push(Span::styled(
+            format!("\u{25a0} {name} {:.0} %", *n as f64 / ended as f64 * 100.0),
+            Style::default().fg(*colour),
+        ));
+    }
+    vec![Line::from(bar), Line::from(key)]
+}
+
+/// The decode load as a bar against a rule at 100 %, red past it; a load
+/// beyond the bar's end is marked `›` at the end rather than drawn off it.
+fn load_bar(load: f64, width: usize, theme: &crate::Theme) -> Option<Line<'static>> {
+    let bw = width.saturating_sub(2 + " 100 %".len());
+    if bw < 10 {
+        return None;
+    }
+    let rule = (bw as f64 * LOAD_FULL) as usize;
+    let fill = ((load * rule as f64).round() as usize).min(bw);
+    let mut spans = vec![Span::raw(" ")];
+    for c in 0..bw {
+        spans.push(if c == rule {
+            Span::styled(
+                "\u{2503}",
+                Style::default()
+                    .fg(theme.value_hi)
+                    .add_modifier(ratatui::style::Modifier::BOLD),
+            )
+        } else if c < fill {
+            let over = c > rule;
+            let ink = if over { theme.status_crit } else { theme.value };
+            let ch = if c + 1 == bw && load * rule as f64 > bw as f64 {
+                "\u{203a}"
+            } else {
+                "\u{2501}"
+            };
+            Span::styled(ch, Style::default().fg(ink))
+        } else {
+            Span::styled(
+                if c % 2 == 0 { "\u{00b7}" } else { " " },
+                Style::default().fg(theme.stale),
+            )
+        });
+    }
+    spans.push(Span::styled(" 100 %", Style::default().fg(theme.label)));
+    Some(Line::from(spans))
+}
+
+/// The whole panel body, as a function of the state and the width alone, and
+/// which of its lines are drawings that may go on a short panel before any
+/// count does.
 ///
 /// Split out because nothing on this panel is a function of anything else: no
 /// device, no clock, no lock. The same split `signal::fft` makes, for the same
 /// reason.
-fn lines(state: &SdrMetrics, theme: &crate::Theme, width: usize) -> Vec<Line<'static>> {
+fn lines(
+    state: &SdrMetrics,
+    theme: &crate::Theme,
+    width: usize,
+) -> (Vec<Line<'static>>, Vec<usize>) {
+    let mut drawings = Vec::new();
     let h = &state.net.health;
     let row = |label, value, note| count(label, value, theme.value, note, theme, width);
     let dash = |label, note| {
@@ -162,6 +272,10 @@ fn lines(state: &SdrMetrics, theme: &crate::Theme, width: usize) -> Vec<Line<'st
             grouped(f.triggered),
             Some("the detector fired"),
         ));
+        for line in funnel_bar(&f, width, theme) {
+            drawings.push(out.len());
+            out.push(line);
+        }
         out.push(row("CRC good", grouped(f.decoded), None));
         out.push(row(
             "CRC failed",
@@ -203,11 +317,15 @@ fn lines(state: &SdrMetrics, theme: &crate::Theme, width: usize) -> Vec<Line<'st
         ),
         None => dash("decode load", "not measured yet"),
     });
+    if let Some(bar) = h.decode_load.and_then(|l| load_bar(l, width, theme)) {
+        drawings.push(out.len());
+        out.push(bar);
+    }
 
     // Not a zero. A zero on this line would say we looked and found nothing,
     // and nothing looks yet. See the module header.
     out.push(dash("bursts", "no detector yet"));
-    out
+    (out, drawings)
 }
 
 impl Panel for NetDecodeHealthPanel {
@@ -239,10 +357,17 @@ impl Panel for NetDecodeHealthPanel {
         if inner.width == 0 || inner.height == 0 {
             return;
         }
-        let mut lines = lines(state, theme, inner.width as usize);
-        // Breathe like the Lab panels: the blank rows between the three
-        // accounts grow on a tall panel and go first on a short one.
-        fit_spacers(&mut lines, inner.height as usize);
+        let (mut lines, drawings) = lines(state, theme, inner.width as usize);
+        // Packed at the top with a row between the three accounts, the spare
+        // height left below them: grown spacers used to push the accounts
+        // apart into three islands. On a short panel the bars go first, the
+        // counts they draw are still there, and then the spacers.
+        let avail = inner.height as usize;
+        let over = lines.len().saturating_sub(avail);
+        for &i in drawings.iter().rev().take(over) {
+            lines.remove(i);
+        }
+        collapse_spacers(&mut lines, avail);
         f.render_widget(Paragraph::new(lines), inner);
     }
 }
@@ -253,6 +378,60 @@ mod tests {
     use crate::state::SdrMetrics;
 
     use super::NetDecodeHealthPanel;
+
+    /// A decoding room: 377 triggers, most given up, a few failed, and a
+    /// worker at 91 %.
+    fn decoding() -> SdrMetrics {
+        let mut m = streaming();
+        m.net.ble_channel = Some(38);
+        m.net.health.ble = crate::signal::ble::receive::Funnel {
+            triggered: 377,
+            decoded: 166,
+            crc_failed: 11,
+            gave_up: 196,
+        };
+        m.net.health.decode_load = Some(0.91);
+        m
+    }
+
+    /// The funnel's ends as one bar with its key, and the load against its
+    /// 100 % rule, drawn under the counts they belong to.
+    #[test]
+    fn the_funnel_and_the_load_are_drawn_under_their_counts() {
+        let out = draw(NetDecodeHealthPanel, 64, 40, &decoding());
+        let text = out.join("\n");
+        assert!(text.contains("\u{25a0} good 45 %"), "{text}");
+        assert!(text.contains("\u{25a0} CRC failed 3 %"), "{text}");
+        assert!(text.contains("\u{25a0} gave up 53 %"), "{text}");
+        let bar = out
+            .iter()
+            .position(|l| l.contains("\u{2501}"))
+            .expect(&text);
+        let triggers = out.iter().position(|l| l.contains("BLE triggers")).unwrap();
+        assert_eq!(bar, triggers + 1, "{text}");
+        let load = out.iter().position(|l| l.contains("decode load")).unwrap();
+        assert!(out[load + 1].contains("100 %"), "{text}");
+        assert!(out[load + 1].contains('\u{2503}'), "{text}");
+    }
+
+    /// The accounts are packed at the top: a tall panel leaves its spare
+    /// height below them rather than prising them apart.
+    #[test]
+    fn a_tall_panel_keeps_its_accounts_together() {
+        let out = draw(NetDecodeHealthPanel, 64, 60, &decoding());
+        let at = |s: &str| out.iter().position(|l| l.contains(s)).unwrap();
+        assert_eq!(at("WHAT DID NOT"), at("current run") + 2, "{out:#?}");
+        assert_eq!(at("WHAT WAS DECODED"), at("queue peak") + 2, "{out:#?}");
+    }
+
+    /// On a short panel the drawings go before any count does.
+    #[test]
+    fn a_short_panel_gives_up_the_bars_first() {
+        let out = draw(NetDecodeHealthPanel, 64, 22, &decoding()).join("\n");
+        assert!(out.contains("decode load"), "{out}");
+        assert!(out.contains("gave up"), "{out}");
+        assert!(!out.contains("\u{2503}"), "{out}");
+    }
 
     fn streaming() -> SdrMetrics {
         let mut m = SdrMetrics::fixture().streaming();
@@ -324,7 +503,7 @@ mod tests {
         };
         assert!(line("BLE triggers").contains("1 204"), "{out}");
         assert!(line("CRC good").contains("951"), "{out}");
-        assert!(line("gave up").contains("250"), "{out}");
+        assert!(line("nothing matched").contains("250"), "{out}");
         assert!(line("BT hits").contains("312"), "{out}");
         assert!(line("UAPs resolved").contains("1 of 2"), "{out}");
         assert!(line("decode load").contains("107 %"), "{out}");

@@ -54,18 +54,54 @@ const FLOOR: char = '▁';
 /// Bar rows, so the duty cycle has more than eight levels to sit on.
 const ROWS: usize = 3;
 
-/// One column of the profile: the glyph for each of `rows` rows, top first.
+/// The duty the profile's full height stands for: the first of these at or
+/// above the busiest cell drawn.
+const SCALES: [f64; 5] = [0.05, 0.1, 0.2, 0.5, 1.0];
+
+/// The full scale for `cells`: the smallest step that holds the busiest.
+///
+/// **A stated scale, not a fixed one.** At a fixed 100 % a room whose busiest
+/// megahertz is 8 % busy drew bars one row tall under ten empty ones; at a
+/// scale that fits it they fill the panel, and the scale is written on the
+/// top gridline so a tall bar is never read as a busy band. Steps rather
+/// than the exact maximum, so the scale holds still while the readings
+/// wander, and never below 5 %, so a quiet room's noise is not drawn as a
+/// wall.
+fn full_scale(cells: &[CellReading]) -> f64 {
+    let busiest = cells
+        .iter()
+        .filter(|c| c.observed())
+        .map(|c| c.duty)
+        .fold(0.0f64, f64::max);
+    SCALES
+        .iter()
+        .copied()
+        .find(|s| busiest <= *s)
+        .unwrap_or(1.0)
+}
+
+/// `10 %`, `0.5 %`: a duty as the gridline labels it.
+fn percent(duty: f64) -> String {
+    let p = duty * 100.0;
+    if p >= 1.0 {
+        format!("{p:.0} %")
+    } else {
+        format!("{p:.1} %")
+    }
+}
+
+/// One column of the profile: the glyph for each of `rows` rows, top first,
+/// with `scale` the duty the full height stands for.
 ///
 /// The duty cycle is spread over the rows from the bottom up, so a cell busy a
-/// third of the time fills the bottom row and no more. Eight levels a row and
-/// three rows is twenty-four, which is finer than a terminal column deserves and
-/// is what stops a band of quiet channels reading as a flat run of identical
-/// stubs.
-fn column(cell: &CellReading, rows: usize) -> Vec<char> {
+/// third of the scale fills the bottom third and no more. Eight levels a row,
+/// which is what stops a band of quiet channels reading as a flat run of
+/// identical stubs.
+fn column(cell: &CellReading, rows: usize, scale: f64) -> Vec<char> {
     if !cell.observed() {
         return vec![UNSEEN; rows];
     }
-    let filled = cell.duty.clamp(0.0, 1.0) * (rows * 8) as f64;
+    let filled = (cell.duty / scale).clamp(0.0, 1.0) * (rows * 8) as f64;
     let mut out = vec![' '; rows];
     for (i, slot) in out.iter_mut().enumerate() {
         // Row 0 is the top, so the bottom row is the last one.
@@ -403,11 +439,14 @@ fn lines(
     out
 }
 
-/// The bars for `cells`, `rows` tall, and the cursor's mark under them.
+/// The bars for `cells`, `rows` tall against their [`full_scale`], the
+/// scale's gridline and labels, and the cursor's mark under them.
 ///
-/// Duty is the height. Live, the power colours it on the waterfall's ramp;
-/// at a past moment (`by_duty`) there is no power to colour by, the history
-/// keeps none, so the duty colours it on the same ramp the heatmap below uses.
+/// Duty is the height. Live, the power colours it on the waterfall's ramp.
+/// At a past moment (`by_duty`) there is no power to colour by, the history
+/// keeps none, so the bars wear one plain ink: colouring the duty on the
+/// ramp instead drew a room at 8 % in the ramp's darkest blue, nearly
+/// invisible, and said nothing the height does not.
 fn bars(
     out: &mut Vec<Line<'static>>,
     state: &SdrMetrics,
@@ -418,19 +457,49 @@ fn bars(
     by_duty: bool,
 ) {
     let cols = columns(cells, width);
-    let glyphs: Vec<Vec<char>> = cols.iter().map(|c| column(c, rows)).collect();
+    let scale = full_scale(cells);
+    let glyphs: Vec<Vec<char>> = cols.iter().map(|c| column(c, rows, scale)).collect();
+    // The scale, written where there is no bar: the full scale on the top
+    // row with a dotted gridline across it, half of it at the middle row of
+    // a profile tall enough to have one.
+    let top = percent(scale);
+    let half = (rows >= 4).then(|| (rows / 2, percent(scale / 2.0)));
+    let is_bar = |ch: char| ch != ' ' && ch != FLOOR && ch != UNSEEN;
     for row in 0..rows {
+        let label: Option<&str> = match (&half, row) {
+            (_, 0) => Some(&top),
+            (Some((r, text)), row) if row == *r => Some(text),
+            _ => None,
+        };
+        // A label is written whole or not at all: a bar standing where it
+        // would go leaves a stray `%` that reads as part of the picture.
+        let label = label.filter(|text| {
+            glyphs
+                .iter()
+                .take(text.chars().count())
+                .all(|g| !is_bar(g[row]))
+        });
         let spans = cols
             .iter()
             .zip(&glyphs)
-            .map(|(c, g)| {
+            .enumerate()
+            .map(|(x, (c, g))| {
                 let ch = g[row];
+                let bar = is_bar(ch);
+                if let (false, Some(text)) = (bar, label) {
+                    if let Some(l) = text.chars().nth(x) {
+                        return Span::styled(l.to_string(), Style::default().fg(theme.label));
+                    }
+                    if row == 0 && ch == ' ' {
+                        return Span::styled("\u{2508}", Style::default().fg(theme.stale));
+                    }
+                }
                 let colour = if !c.observed() {
                     theme.stale
-                } else if ch == ' ' || ch == FLOOR {
+                } else if !bar {
                     theme.label
                 } else if by_duty {
-                    theme.palette_color(c.duty.clamp(0.0, 1.0) as f32)
+                    theme.value
                 } else {
                     theme.palette_color(((c.peak_dbfs + 90.0) / 90.0).clamp(0.0, 1.0) as f32)
                 };
@@ -746,6 +815,7 @@ mod tests {
                 ..Default::default()
             },
             ROWS,
+            1.0,
         );
         let busy = column(
             &CellReading {
@@ -754,6 +824,7 @@ mod tests {
                 ..Default::default()
             },
             ROWS,
+            1.0,
         );
         let height = |c: &Vec<char>| c.iter().filter(|ch| **ch != ' ').count();
         assert!(height(&busy) > height(&quiet), "{busy:?} vs {quiet:?}");
@@ -765,6 +836,7 @@ mod tests {
                 ..Default::default()
             },
             ROWS,
+            1.0,
         );
         assert_eq!(full, vec!['█'; ROWS]);
         let empty = column(
@@ -774,8 +846,80 @@ mod tests {
                 ..Default::default()
             },
             ROWS,
+            1.0,
         );
         assert_eq!(empty, [' ', ' ', FLOOR]);
+    }
+
+    /// The full scale is the first step that holds the busiest cell, never
+    /// under 5 %, and an 8 % room draws its busiest bar most of the way up
+    /// rather than one row out of ten.
+    #[test]
+    fn the_profile_is_drawn_against_a_scale_that_fits_the_room() {
+        let cell = |duty| CellReading {
+            windows: 10,
+            duty,
+            ..Default::default()
+        };
+        assert_eq!(full_scale(&[cell(0.081), cell(0.02)]), 0.1);
+        assert_eq!(full_scale(&[cell(0.001)]), 0.05);
+        assert_eq!(full_scale(&[cell(0.3)]), 0.5);
+        assert_eq!(full_scale(&[cell(1.0)]), 1.0);
+        let height = |c: &Vec<char>| c.iter().filter(|ch| !matches!(**ch, ' ' | FLOOR)).count();
+        let at_fixed = column(&cell(0.081), 10, 1.0);
+        let at_scale = column(&cell(0.081), 10, 0.1);
+        assert!(height(&at_fixed) <= 1, "{at_fixed:?}");
+        assert!(height(&at_scale) >= 8, "{at_scale:?}");
+    }
+
+    /// The scale is written on the profile: the full scale at the top, and
+    /// half of it midway on a profile tall enough.
+    #[test]
+    fn the_scale_is_written_on_the_profile() {
+        let mut m = surveyed();
+        for c in m.net.band.cells.iter_mut() {
+            c.duty = c.duty.min(0.08);
+        }
+        let mut out = Vec::new();
+        bars(
+            &mut out,
+            &m,
+            &m.net.band.cells.clone(),
+            80,
+            10,
+            &crate::Theme::sdr(),
+            false,
+        );
+        let text: Vec<String> = out
+            .iter()
+            .map(|l| l.spans.iter().map(|s| s.content.as_ref()).collect())
+            .collect();
+        assert!(text[0].starts_with("10 %"), "{text:?}");
+        assert!(text[0].contains('\u{2508}'), "{text:?}");
+        assert!(text[5].starts_with("5 %"), "{text:?}");
+    }
+
+    /// A bar standing where a scale label would go takes the label away
+    /// whole, rather than leaving a stray `%` between the bars.
+    #[test]
+    fn a_label_under_a_bar_is_not_written_in_pieces() {
+        let mut m = surveyed();
+        for (i, c) in m.net.band.cells.iter_mut().enumerate() {
+            c.windows = 10;
+            c.duty = if i < 2 { 0.06 } else { 0.0 };
+        }
+        let mut out = Vec::new();
+        bars(
+            &mut out,
+            &m,
+            &m.net.band.cells.clone(),
+            83,
+            10,
+            &crate::Theme::sdr(),
+            false,
+        );
+        let mid: String = out[5].spans.iter().map(|s| s.content.as_ref()).collect();
+        assert!(!mid.contains('%'), "{mid:?}");
     }
 
     /// Squeezing the band into fewer columns keeps the worst cell, not the mean.

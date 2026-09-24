@@ -175,6 +175,14 @@ SURVEY about one position in the plan's hop count, in LOCK all of it. Coverage
 is reported beside the duty, never multiplied into it. A cell never watched is
 shown as not observed, which is different from a quiet one.
 
+The profile's height is scaled to the room: the top of it is the first of 5,
+10, 20, 50 or 100 % that holds the busiest cell, written on the dotted line
+across the top (with half of it midway). A quiet office at 8 % gets bars that
+fill the panel instead of a row of stubs, and the number on the line keeps
+you from mistaking a tall bar for a busy band. Stepped back in time, the
+bars are one plain colour: the history keeps duty, not power, so there is
+nothing to colour them by, and pretending otherwise would be decoration.
+
 The cursor (`←` `→` a megahertz at a time, `B` to the busiest cell) reads out
 one cell, and `L` locks the receiver there.
 
@@ -189,8 +197,10 @@ moment; `↑` forward; `N` back to now.
 ### Decode health
 
 The account of the feed and the decoders: blocks in, blocks lost, gaps, and
-the BLE decode funnel (triggers, and how each one ended). Every count on the
-other NET panels is only as complete as this panel says the feed was.
+the BLE decode funnel (triggers, and how each one ended). The funnel is also
+one bar, good, CRC failed and gave up in their shares, and the decode load
+is a bar against a rule at 100 %, red past it. Every count on the other NET
+panels is only as complete as this panel says the feed was.
 
 ---
 
