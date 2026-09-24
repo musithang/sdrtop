@@ -730,10 +730,10 @@ mod tests {
         {
             let mut m = metrics(&state);
             let seen = Instant::now() - Duration::from_secs(12);
-            crate::signal::bt::piconet::observe(&mut m.net.bt_piconets, 0x9e8b33, 10, seen);
+            crate::signal::bt::piconet::observe(&mut m.net.bt_piconets, 0x5a3c71, 10, seen);
             m.net.bt_hops.push_back(crate::state::BtHop {
                 channel: 10,
-                lap: 0x9e8b33,
+                lap: 0x5a3c71,
                 seen,
                 at_us: 0.0,
                 stream: 0,
@@ -781,7 +781,7 @@ mod tests {
         assert_eq!(view(&state).back_ms, 0);
 
         press(KeyCode::Down);
-        assert_eq!(metrics(&state).net.bt_view.selected, Some(0x9e8b33));
+        assert_eq!(metrics(&state).net.bt_view.selected, Some(0x5a3c71));
     }
 
     /// A deck built as the app builds it, on `preset`, with `panel` focused
@@ -866,7 +866,7 @@ mod tests {
                 "net_bt",
                 "net_bt_hops",
                 |m| {
-                    m.net.bt_view.selected = Some(0x9e8b33);
+                    m.net.bt_view.selected = Some(0x5a3c71);
                     m.net.hop_view.back_ms = 8_000;
                     m.net.hop_view.zoom = 2;
                 },
@@ -880,7 +880,7 @@ mod tests {
             (
                 "net_bt",
                 "net_bt_piconets",
-                |m| m.net.bt_view.selected = Some(0x9e8b33),
+                |m| m.net.bt_view.selected = Some(0x5a3c71),
                 |m| m.net.bt_view.selected.is_none(),
             ),
         ];

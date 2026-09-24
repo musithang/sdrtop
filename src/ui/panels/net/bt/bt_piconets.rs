@@ -25,7 +25,7 @@ use ratatui::{
     Frame,
 };
 
-use crate::signal::bt::piconet::{ordered, Piconet};
+use crate::signal::bt::piconet::{ordered, Inquiry, Piconet, DCI};
 use crate::signal::dsp::uncertainty::Uncertain;
 use crate::state::SdrMetrics;
 use crate::ui::panel::{FeedSpan, Panel, PanelChrome, Staleness};
@@ -40,7 +40,7 @@ pub struct NetBtPiconetsPanel;
 const COLUMNS: &[Column] = &[
     Column {
         title: "LAP",
-        // `● 0x9e8b33`: the hop panel's colour chip, then 24 bits.
+        // `● 0x5a3c71`: the hop panel's colour chip, then 24 bits.
         width: 10,
         align: Align::Left,
     },
@@ -125,14 +125,28 @@ fn uap_sentence(uaps: Option<&Vec<u8>>) -> String {
     }
 }
 
+/// A LAP as the roster and the hop lanes name it: an inquiry code by its
+/// abbreviation, since a searching device is not a piconet and its bits
+/// are not a master's address; every other LAP in hex.
+pub(crate) fn lap_name(lap: u32) -> String {
+    match Inquiry::of(lap) {
+        Some(i) => format!("{:<8}", i.short()),
+        None => format!("{lap:#08x}"),
+    }
+}
+
 fn cells(p: &Piconet, state: &SdrMetrics, now: std::time::Instant) -> Vec<String> {
     let since = |t: std::time::Instant| ago(now.saturating_duration_since(t).as_secs());
     vec![
-        format!("{CHIP} {:#08x}", p.lap),
+        format!("{CHIP} {}", lap_name(p.lap)),
         since(p.last_seen),
         p.hits.to_string(),
         p.channels_hit().to_string(),
-        uap_cell(state.net.bt_uap.get(&p.lap)),
+        match Inquiry::of(p.lap) {
+            // Fixed by the specification, not narrowed from anything.
+            Some(_) => "DCI".to_string(),
+            None => uap_cell(state.net.bt_uap.get(&p.lap)),
+        },
         since(p.first_seen),
     ]
 }
@@ -175,9 +189,25 @@ fn detail(
     };
     let since =
         |t: std::time::Instant| format!("{} ago", ago(now.saturating_duration_since(t).as_secs()));
+    let inquiry = Inquiry::of(p.lap);
     let mut out = vec![
-        crate::ui::chrome::section("piconet", "", iw, theme),
-        field("LAP", format!("{:#08x}  the master's", p.lap)),
+        crate::ui::chrome::section(
+            if inquiry.is_some() {
+                "inquiry"
+            } else {
+                "piconet"
+            },
+            "",
+            iw,
+            theme,
+        ),
+        field(
+            "LAP",
+            match inquiry {
+                Some(i) => format!("{:#08x}  {}, no one's address", p.lap, i.short()),
+                None => format!("{:#08x}  the master's", p.lap),
+            },
+        ),
         field("hits", p.hits.to_string()),
         field(
             "heard",
@@ -196,7 +226,10 @@ fn detail(
                 channel_runs(p.channel_mask())
             ),
         ),
-        ("UAP", uap_sentence(state.net.bt_uap.get(&p.lap))),
+        match inquiry {
+            Some(i) => ("meaning", i.meaning().to_string()),
+            None => ("UAP", uap_sentence(state.net.bt_uap.get(&p.lap))),
+        },
     ] {
         for (i, chunk) in crate::ui::chrome::wrap(&text, room, 3)
             .into_iter()
@@ -224,6 +257,23 @@ fn detail_within(
     let mut out = detail(p, state, now, iw, theme);
     if out.len() > budget {
         return Vec::new();
+    }
+    if Inquiry::of(p.lap).is_some() {
+        // Every searching device sends the same code, so the sections below
+        // would mix them all into one reading: said once, and not drawn.
+        let text = format!(
+            "UAP fixed at the DCI, {DCI:#04x}. Every device inquiring sends this code, \
+             so there is no one clock, modulation or header stream to read"
+        );
+        for chunk in crate::ui::chrome::wrap(&text, iw.saturating_sub(1), 3) {
+            if out.len() < budget {
+                out.push(Line::from(Span::styled(
+                    format!(" {chunk}"),
+                    Style::default().fg(theme.label),
+                )));
+            }
+        }
+        return out;
     }
     let sections = [
         ("MODULATION", modulation_lines(p, iw, theme)),
@@ -812,13 +862,13 @@ mod tests {
         for (i, ch) in [2u8, 3, 4, 5, 17].into_iter().enumerate() {
             observe(
                 &mut m.net.bt_piconets,
-                0x9e8b33,
+                0x5a3c71,
                 ch,
                 t + Duration::from_secs(i as u64),
             );
         }
         observe(&mut m.net.bt_piconets, 0x123456, 9, Instant::now());
-        m.net.bt_uap.insert(0x9e8b33, vec![0x4c, 0x9a]);
+        m.net.bt_uap.insert(0x5a3c71, vec![0x4c, 0x9a]);
         m.net.bt_uap.insert(0x123456, vec![0x21]);
         m
     }
@@ -842,6 +892,27 @@ mod tests {
         assert!(out.contains("watching 2 channels"), "{out}");
     }
 
+    /// An inquiry code wears its own name and a UAP fixed by the
+    /// specification, and its detail stops before the sections that would
+    /// average every searching device into one.
+    #[test]
+    fn an_inquiry_code_is_named_and_not_read_as_a_piconet() {
+        let mut m = heard();
+        observe(&mut m.net.bt_piconets, 0x9E_8B33, 40, Instant::now());
+        m.net.bt_view.selected = Some(0x9E_8B33);
+        let out = draw(NetBtPiconetsPanel, 60, 24, &m);
+        let text = out.join("\n");
+        let row = out.iter().find(|l| l.contains("GIAC")).expect(&text);
+        assert!(row.contains("DCI"), "{row}");
+        assert!(!text.contains("0x9e8b33  the master's"), "{text}");
+        assert!(text.contains("INQUIRY"), "{text}");
+        assert!(text.contains("no one's address"), "{text}");
+        assert!(text.contains("general inquiry"), "{text}");
+        assert!(!text.contains("MODULATION"), "{text}");
+        assert!(!text.contains("TIMING"), "{text}");
+        assert!(!text.contains("HEADERS"), "{text}");
+    }
+
     /// **One row per piconet, the most recently heard first**, with its
     /// hits, how many channels, and how far its UAP has narrowed.
     #[test]
@@ -849,9 +920,9 @@ mod tests {
         let out = draw(NetBtPiconetsPanel, 50, 8, &heard());
         let text = out.join("\n");
         let newest = text.find("0x123456").expect(&text);
-        let older = text.find("0x9e8b33").expect(&text);
+        let older = text.find("0x5a3c71").expect(&text);
         assert!(newest < older, "{text}");
-        let row = out.iter().find(|l| l.contains("0x9e8b33")).unwrap();
+        let row = out.iter().find(|l| l.contains("0x5a3c71")).unwrap();
         assert!(row.contains("2 left"), "{row}");
         assert!(row.contains(" 5 "), "five hits: {row}");
         let row = out.iter().find(|l| l.contains("0x123456")).unwrap();
@@ -863,7 +934,7 @@ mod tests {
     #[test]
     fn the_selected_piconet_is_spelled_out() {
         let mut m = heard();
-        m.net.bt_view.selected = Some(0x9e8b33);
+        m.net.bt_view.selected = Some(0x5a3c71);
         let out = draw(NetBtPiconetsPanel, 60, 16, &m).join("\n");
         assert!(out.contains("PICONET"), "{out}");
         assert!(out.contains("5 of 79: 2-5, 17"), "{out}");
@@ -881,8 +952,8 @@ mod tests {
         let mut m = heard();
         m.net
             .bt_uap
-            .insert(0x9e8b33, (0..32).map(|i| i * 8 + 1).collect());
-        m.net.bt_view.selected = Some(0x9e8b33);
+            .insert(0x5a3c71, (0..32).map(|i| i * 8 + 1).collect());
+        m.net.bt_view.selected = Some(0x5a3c71);
         let out = draw(NetBtPiconetsPanel, 60, 16, &m).join("\n");
         assert!(out.contains("32 left"), "{out}");
         assert!(
@@ -897,7 +968,7 @@ mod tests {
     #[test]
     fn the_detail_follows_the_roster_rather_than_the_foot() {
         let mut m = heard();
-        m.net.bt_view.selected = Some(0x9e8b33);
+        m.net.bt_view.selected = Some(0x5a3c71);
         let out = draw(NetBtPiconetsPanel, 60, 30, &m);
         let block = out.iter().position(|l| l.contains("PICONET")).unwrap();
         // The frame, the header, two rows, a gap.
@@ -912,13 +983,13 @@ mod tests {
         use crate::signal::bt::header::{Header, PacketType};
         use crate::signal::bt::piconet::{observe_header, HeaderRead};
         let mut m = heard();
-        m.net.bt_view.selected = Some(0x9e8b33);
+        m.net.bt_view.selected = Some(0x5a3c71);
         let out = draw(NetBtPiconetsPanel, 70, 30, &m).join("\n");
         assert!(out.contains("none yet"), "{out}");
 
         observe_header(
             &mut m.net.bt_piconets,
-            0x9e8b33,
+            0x5a3c71,
             HeaderRead::Unresolved,
             2,
             Default::default(),
@@ -930,7 +1001,7 @@ mod tests {
         );
         assert!(!out.contains("types"), "{out}");
 
-        m.net.bt_uap.insert(0x9e8b33, vec![0x4c]);
+        m.net.bt_uap.insert(0x5a3c71, vec![0x4c]);
         let header = |t, a| Header {
             lt_addr: a,
             packet_type: t,
@@ -947,7 +1018,7 @@ mod tests {
         ] {
             observe_header(
                 &mut m.net.bt_piconets,
-                0x9e8b33,
+                0x5a3c71,
                 HeaderRead::Decoded(header(t, a)),
                 1,
                 Default::default(),
@@ -955,7 +1026,7 @@ mod tests {
         }
         observe_header(
             &mut m.net.bt_piconets,
-            0x9e8b33,
+            0x5a3c71,
             HeaderRead::Undecoded,
             1,
             Default::default(),
@@ -983,7 +1054,7 @@ mod tests {
         use crate::signal::bt::piconet::{observe_header, Deviation, HeaderRead};
         use crate::signal::dsp::deviation::Sums;
         let mut m = heard();
-        m.net.bt_view.selected = Some(0x9e8b33);
+        m.net.bt_view.selected = Some(0x5a3c71);
         let out = draw(NetBtPiconetsPanel, 80, 40, &m).join("\n");
         assert!(out.contains("MODULATION"), "{out}");
         assert!(
@@ -998,7 +1069,7 @@ mod tests {
         };
         observe_header(
             &mut m.net.bt_piconets,
-            0x9e8b33,
+            0x5a3c71,
             HeaderRead::Unresolved,
             32,
             dev,
@@ -1022,7 +1093,7 @@ mod tests {
     fn slot_jitter_is_shown_against_the_one_microsecond_limit() {
         use crate::signal::bt::slots::{SlotFit, SlotRefusal};
         let mut m = heard();
-        m.net.bt_view.selected = Some(0x9e8b33);
+        m.net.bt_view.selected = Some(0x5a3c71);
         let at = |m: &SdrMetrics| draw(NetBtPiconetsPanel, 80, 50, m).join("\n");
         assert!(at(&m).contains("no hit timed yet"), "{}", at(&m));
 
@@ -1067,7 +1138,7 @@ mod tests {
     #[test]
     fn a_short_panel_keeps_whole_sections_and_names_the_rest() {
         let mut m = heard();
-        m.net.bt_view.selected = Some(0x9e8b33);
+        m.net.bt_view.selected = Some(0x5a3c71);
         let out = draw(NetBtPiconetsPanel, 60, 16, &m).join("\n");
         assert!(out.contains("PICONET"), "{out}");
         assert!(out.contains("on a taller panel"), "{out}");
@@ -1132,7 +1203,7 @@ mod tests {
     #[test]
     fn it_fits_every_size_the_layout_can_hand_it() {
         let mut m = heard();
-        m.net.bt_view.selected = Some(0x9e8b33);
+        m.net.bt_view.selected = Some(0x5a3c71);
         for w in 30..70u16 {
             for h in 6..24u16 {
                 for s in [&m, &SdrMetrics::fixture()] {

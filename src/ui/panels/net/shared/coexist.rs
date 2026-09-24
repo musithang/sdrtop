@@ -498,7 +498,7 @@ mod tests {
             .push_front(packet(39, true, now - std::time::Duration::from_secs(600)));
         m.net.bt_hops.push_front(crate::state::BtHop {
             channel: 39,
-            lap: 0x9e8b33,
+            lap: 0x5a3c71,
             seen: now - std::time::Duration::from_millis(1100),
             at_us: 0.0,
             stream: 0,

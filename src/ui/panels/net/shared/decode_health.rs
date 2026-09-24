@@ -312,7 +312,7 @@ mod tests {
         };
         m.net.bt_channels_watched = vec![38, 39, 40];
         m.net.health.bt_hits = 312;
-        m.net.bt_uap.insert(0x9e8b33, vec![0x47]);
+        m.net.bt_uap.insert(0x5a3c71, vec![0x47]);
         m.net.bt_uap.insert(0x123456, vec![0x10, 0x90]);
         m.net.health.decode_load = Some(1.07);
         let out = draw(NetDecodeHealthPanel, 64, 30, &m).join("\n");

@@ -22,6 +22,63 @@
 
 use std::time::Instant;
 
+/// A LAP the specification keeps for inquiry, which names no piconet.
+///
+/// **Read from the primary sources**: Core 5.4 Vol 2 Part B 1.2.1 reserves
+/// 0x9E8B00 to 0x9E8B3F, one of them (0x9E8B33) for general inquiry and the
+/// other 63 for dedicated inquiry, and says none can be part of a device's
+/// own address; the Assigned Numbers document (2.2, Special LAPs) names
+/// 0x9E8B00 the Limited Inquiry Access Code. A device looking for others
+/// sends one of these, and so does every other device looking, so a hit
+/// on one is somebody searching, not a master's piconet: there is no one
+/// clock to fit, no member's modulation, and no UAP to narrow, because the
+/// same section fixes it at the DCI, 0x00.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Inquiry {
+    /// GIAC, 0x9E8B33: any device inquiring for any other.
+    General,
+    /// LIAC, 0x9E8B00: inquiry for devices in limited discoverable mode.
+    Limited,
+    /// One of the other 62 dedicated codes.
+    Dedicated,
+}
+
+/// The first and last reserved LAP (Core 5.4 Vol 2 Part B 1.2.1).
+const RESERVED: std::ops::RangeInclusive<u32> = 0x9E_8B00..=0x9E_8B3F;
+
+/// The UAP every reserved LAP is sent with, the default check
+/// initialisation (Core 5.4 Vol 2 Part B 1.2.1).
+pub const DCI: u8 = 0x00;
+
+impl Inquiry {
+    pub fn of(lap: u32) -> Option<Self> {
+        match lap {
+            0x9E_8B33 => Some(Self::General),
+            0x9E_8B00 => Some(Self::Limited),
+            l if RESERVED.contains(&l) => Some(Self::Dedicated),
+            _ => None,
+        }
+    }
+
+    /// The code's own abbreviation, as the specification writes it.
+    pub fn short(self) -> &'static str {
+        match self {
+            Self::General => "GIAC",
+            Self::Limited => "LIAC",
+            Self::Dedicated => "DIAC",
+        }
+    }
+
+    /// What a hit on it means, in a few words.
+    pub fn meaning(self) -> &'static str {
+        match self {
+            Self::General => "general inquiry: a device looking for any other",
+            Self::Limited => "limited inquiry: a device looking for ones briefly discoverable",
+            Self::Dedicated => "dedicated inquiry: a device looking for one class of others",
+        }
+    }
+}
+
 use super::header::Header;
 use crate::signal::dsp::deviation::Sums;
 
@@ -202,15 +259,27 @@ pub fn ordered(roster: &[Piconet]) -> Vec<&Piconet> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The reserved block, its two named codes, and its edges.
+    #[test]
+    fn inquiry_codes_are_the_reserved_block() {
+        assert_eq!(Inquiry::of(0x9E_8B33), Some(Inquiry::General));
+        assert_eq!(Inquiry::of(0x9E_8B00), Some(Inquiry::Limited));
+        assert_eq!(Inquiry::of(0x9E_8B01), Some(Inquiry::Dedicated));
+        assert_eq!(Inquiry::of(0x9E_8B3F), Some(Inquiry::Dedicated));
+        assert_eq!(Inquiry::of(0x9E_8B40), None);
+        assert_eq!(Inquiry::of(0x9E_8AFF), None);
+        assert_eq!(Inquiry::of(0x12_3456), None);
+    }
     use std::time::Duration;
 
     #[test]
     fn a_lap_gathers_its_hits_and_the_channels_they_were_on() {
         let t0 = Instant::now();
         let mut roster = Vec::new();
-        observe(&mut roster, 0x9e8b33, 10, t0);
-        observe(&mut roster, 0x9e8b33, 40, t0 + Duration::from_millis(5));
-        observe(&mut roster, 0x9e8b33, 10, t0 + Duration::from_millis(9));
+        observe(&mut roster, 0x5a3c71, 10, t0);
+        observe(&mut roster, 0x5a3c71, 40, t0 + Duration::from_millis(5));
+        observe(&mut roster, 0x5a3c71, 10, t0 + Duration::from_millis(9));
         observe(&mut roster, 0x123456, 78, t0 + Duration::from_millis(7));
         assert_eq!(roster.len(), 2);
         let p = &roster[0];
@@ -231,21 +300,21 @@ mod tests {
         };
         observe_header(
             &mut roster,
-            0x9e8b33,
+            0x5a3c71,
             HeaderRead::Unresolved,
             2,
             Default::default(),
         );
         observe_header(
             &mut roster,
-            0x9e8b33,
+            0x5a3c71,
             HeaderRead::Decoded(poll),
             2,
             Default::default(),
         );
         observe_header(
             &mut roster,
-            0x9e8b33,
+            0x5a3c71,
             HeaderRead::Undecoded,
             2,
             Default::default(),
@@ -264,6 +333,6 @@ mod tests {
 
         // Most recently heard first.
         let order: Vec<u32> = ordered(&roster).iter().map(|p| p.lap).collect();
-        assert_eq!(order, vec![0x9e8b33, 0x123456]);
+        assert_eq!(order, vec![0x5a3c71, 0x123456]);
     }
 }

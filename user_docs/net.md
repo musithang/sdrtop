@@ -285,6 +285,17 @@ a LAP on screen was sent.
 A LAP names a **piconet**, not a device: every member of the piconet sends its
 master's access code. The panels say piconet throughout.
 
+With one exception, and it is usually the busiest row. The specification
+keeps 64 LAPs, 0x9E8B00 to 0x9E8B3F, for **inquiry**: a device looking for
+others sends one of them, and so does every other device looking. The
+roster and the lanes name them by their own abbreviations, `GIAC` (general
+inquiry, 0x9E8B33, the one you will actually see), `LIAC` (limited, 0x9E8B00)
+and `DIAC` (the dedicated rest). A GIAC row hopping over dozens of channels
+is not a very chatty piconet; it is your phone asking the room who is there.
+Its UAP is fixed at `DCI` (0x00) by the specification rather than worked
+out, and it gets no modulation, timing or header sections: those would be
+every searching device's at once, averaged into one confident fiction.
+
 ### Hops *(focus `b`)*
 
 Two answers:
@@ -339,7 +350,7 @@ The selected piconet's detail, in as many sections as the panel has room for
 | `net-census-*.csv` | counted device, in the order the Census shows them |
 | `net-ble-*.csv` | packet, in the list's order, as it was shown (held or filtered) |
 | `net-fer-*.csv` | SNR bin of the frame error curve, for all traffic and each device |
-| `net-bt-*.csv` | classic hit, oldest first, with its slot residual and header |
+| `net-bt-*.csv` | classic hit, oldest first, with its slot residual and header; `lap_kind` says piconet or inquiry code |
 
 They go to `~/.local/share/sdrtop/` (or `$XDG_DATA_HOME/sdrtop/`), named with
 the second they were taken, and a second export in the same second is

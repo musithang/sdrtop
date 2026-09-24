@@ -53,6 +53,7 @@ use crate::hardware::{SampleGeometry, StreamBlock};
 use crate::signal::ble::receive::Receiver as BleReceiver;
 use crate::signal::bt::header::PiconetClock;
 use crate::signal::bt::payload;
+use crate::signal::bt::piconet::Inquiry;
 use crate::signal::bt::receive::Receiver as BtReceiver;
 use crate::signal::stream::plan_block;
 use crate::state::{BlePacket, BtHop, SdrMetrics};
@@ -634,6 +635,12 @@ impl NetWorker {
                     let (laps, headers) = rx.push(&bytes, self.geometry);
                     for hit in laps {
                         hits.push((rx.channel(), hit.lap, hit.at_us));
+                        // An inquiry code is every searching device's at
+                        // once: counted and placed, never fitted to one
+                        // clock or narrowed to a UAP it does not have.
+                        if Inquiry::of(hit.lap).is_some() {
+                            continue;
+                        }
                         let log = bt_arrivals.entry(hit.lap).or_default();
                         if log.len() == crate::signal::bt::slots::KEPT {
                             log.pop_front();
@@ -641,7 +648,8 @@ impl NetWorker {
                         log.push_back(hit.at_us);
                         unfitted.insert(hit.lap);
                     }
-                    header_hits.extend(headers);
+                    header_hits
+                        .extend(headers.into_iter().filter(|h| Inquiry::of(h.lap).is_none()));
                 }
                 // Fed to each LAP's own `PiconetClock` outside the lock -
                 // narrowing does real work (64 dewhitenings per header),
@@ -1735,14 +1743,11 @@ mod tests {
         assert_eq!(hop.lap, lap);
     }
 
-    /// B17's own exit condition, run through the actual worker: a synthetic
-    /// classic BT packet carrying a real DH1 header and a real DH1
-    /// payload (its own genuine CRC-16) resolves `net.bt_uap` to exactly
-    /// one confirmed UAP - not the two-candidate floor a header alone
-    /// reaches - the same day `signal::bt::payload::break_uap_tie` proved
-    /// it could, wired here instead of left standing untested.
-    #[test]
-    fn a_real_dh1_payload_resolves_bt_uap_to_one_confirmed_value() {
+    /// A classic packet on channel 45 of a 20 Msps capture tuned to it:
+    /// `lap`'s access code, a real DH1 header whose HEC is `true_uap`'s, and
+    /// a real DH1 payload with its own CRC-16. Returns the device bytes and
+    /// the tuning.
+    fn dh1_capture(lap: u32, true_uap: u8) -> (Vec<u8>, u64) {
         use crate::signal::ble::gfsk::modulate;
         use crate::signal::bt::access_code::access_code_bits;
         use crate::signal::bt::header;
@@ -1753,9 +1758,7 @@ mod tests {
         const RAW_RATE: f64 = 20_000_000.0;
         let ch = 45u8;
         let channel_hz = crate::signal::bt::channel::centre_hz(ch).unwrap();
-        let lap = 0x0033_2211u32;
         let clk6 = 22u8;
-        let true_uap = 0x7bu8;
 
         let lt_addr = 0b010u8;
         let flags = 0b110u8;
@@ -1819,6 +1822,26 @@ mod tests {
             })
             .collect();
 
+        (bytes, channel_hz)
+    }
+
+    /// B17's own exit condition, run through the actual worker: a synthetic
+    /// classic BT packet carrying a real DH1 header and a real DH1
+    /// payload (its own genuine CRC-16) resolves `net.bt_uap` to exactly
+    /// one confirmed UAP - not the two-candidate floor a header alone
+    /// reaches - the same day `signal::bt::payload::break_uap_tie` proved
+    /// it could, wired here instead of left standing untested.
+    #[test]
+    fn a_real_dh1_payload_resolves_bt_uap_to_one_confirmed_value() {
+        const RAW_RATE: f64 = 20_000_000.0;
+        let lap = 0x0033_2211u32;
+        let true_uap = 0x7bu8;
+        use crate::signal::bt::header;
+        let (bytes, channel_hz) = dh1_capture(lap, true_uap);
+        let geometry = eight_bit();
+        // What `dh1_capture` puts in the header.
+        let lt_addr = 0b010u8;
+
         let mut m = SdrMetrics::fixture().streaming();
         m.ui.section = crate::signal::net::SECTION.to_string();
         m.ui.active_preset = "net_bt".to_string();
@@ -1881,6 +1904,42 @@ mod tests {
             ),
             "{hop:?}"
         );
+    }
+
+    /// An inquiry code is counted and placed, and nothing more: the same
+    /// capture that resolves an ordinary LAP's UAP and reads its header
+    /// leaves the GIAC with no UAP, no header read and no slot fit, since
+    /// every searching device sends it and none of those would be one
+    /// device's.
+    #[test]
+    fn an_inquiry_code_is_counted_but_never_narrowed_or_fitted() {
+        const RAW_RATE: f64 = 20_000_000.0;
+        let giac = 0x9E_8B33;
+        let (bytes, channel_hz) = dh1_capture(giac, 0x7b);
+        let mut m = SdrMetrics::fixture().streaming();
+        m.ui.section = crate::signal::net::SECTION.to_string();
+        m.ui.active_preset = "net_bt".to_string();
+        m.radio.frequency = channel_hz;
+        m.radio.config_sample_rate = RAW_RATE;
+        m.radio.bb_filter_hz = 0;
+        let state = Arc::new(Mutex::new(m));
+        let (tx, rx) = crossbeam_channel::unbounded();
+        tx.send(stamped(&state, 1, false, bytes)).unwrap();
+        drop(tx);
+        NetWorker::new(rx, Arc::clone(&state), eight_bit(), SAFE_BT_CHANNELS).run();
+
+        let m = state.lock().unwrap();
+        let p = m
+            .net
+            .bt_piconets
+            .iter()
+            .find(|p| p.lap == giac)
+            .expect("the hit is still counted");
+        assert_eq!(p.hits, 1);
+        assert!(!m.net.bt_uap.contains_key(&giac), "{:?}", m.net.bt_uap);
+        assert_eq!(p.headers.captured, 0);
+        assert!(p.slots.is_none());
+        assert!(m.net.bt_hops.iter().all(|h| h.header.is_none()));
     }
 
     /// **Slot timing end to end** (6.5): twelve access codes of one LAP,

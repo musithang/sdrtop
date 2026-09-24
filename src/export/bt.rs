@@ -23,14 +23,17 @@
 //! and the note says so beside the columns it fills (rule 1).
 
 use crate::signal::bt::header::PacketType;
-use crate::signal::bt::piconet::HeaderRead;
+use crate::signal::bt::piconet::{HeaderRead, Inquiry};
 use crate::state::SdrMetrics;
 
-/// The columns, in order. `stream_us` is the hit's time on the stream's
+/// The columns, in order. `lap_kind` is `piconet`, or `GIAC`, `LIAC` or
+/// `DIAC` for an inquiry code, which is somebody searching and has neither a
+/// UAP to narrow nor a slot grid to be timed against
+/// (`signal::bt::piconet::Inquiry`). `stream_us` is the hit's time on the stream's
 /// sample clock, µs, comparable only within one run of the stream; the
 /// header's `flow`, `arqn` and `seqn` are its flag bits in the order Core
 /// 5.4 Vol 2 Part B 6.4 lists them.
-pub const HEADER: &str = "age_s,stream_us,channel,lap,uap,uap_candidates,\
+pub const HEADER: &str = "age_s,stream_us,channel,lap,lap_kind,uap,uap_candidates,\
 slot_residual_us,header,lt_addr,packet_type,flow,arqn,seqn";
 
 /// What the file says about itself when it has rows: where the header
@@ -79,6 +82,9 @@ pub fn rows(state: &SdrMetrics) -> Vec<String> {
                 format!("{:.2}", h.at_us),
                 h.channel.to_string(),
                 format!("{:#08x}", h.lap),
+                Inquiry::of(h.lap)
+                    .map_or("piconet", |i| i.short())
+                    .to_string(),
                 match uaps.map(|u| u.as_slice()) {
                     Some([one]) => format!("{one:#04x}"),
                     _ => String::new(),
@@ -134,7 +140,7 @@ mod tests {
     #[test]
     fn a_hit_exports_its_residual_and_its_header_where_known() {
         let mut m = SdrMetrics::fixture().streaming();
-        let lap = 0x9e8b33;
+        let lap = 0x5a3c71;
         // Twelve hits on a clean grid, the last with a decoded DH1 header.
         let times: Vec<f64> = [0u32, 5, 11, 16, 22, 28, 33, 40, 46, 51, 57, 63]
             .iter()
@@ -165,7 +171,8 @@ mod tests {
             assert_eq!(row.split(',').count(), HEADER.split(',').count(), "{row}");
         }
         let first = &out[0];
-        assert_eq!(get(first, "lap"), "0x9e8b33");
+        assert_eq!(get(first, "lap"), "0x5a3c71");
+        assert_eq!(get(first, "lap_kind"), "piconet");
         assert_eq!(get(first, "stream_us"), "1000.00");
         assert_eq!(get(first, "uap"), "0x4c");
         let r: f64 = get(first, "slot_residual_us").parse().unwrap();

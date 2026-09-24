@@ -318,7 +318,10 @@ impl Panel for NetBtHopsPanel {
                     vec![
                         crate::ui::chrome::selection_gutter(is, theme),
                         Span::styled(format!("{CHIP} "), Style::default().fg(ink)),
-                        Span::styled(format!("{:#08x} ", p.lap), name_style),
+                        Span::styled(
+                            format!("{} ", super::bt_piconets::lap_name(p.lap)),
+                            name_style,
+                        ),
                     ]
                 } else {
                     vec![
