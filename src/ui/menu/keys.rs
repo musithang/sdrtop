@@ -44,6 +44,8 @@ pub enum Needs {
     Always,
     SecondStage,
     Boost,
+    /// More than one stage reported, so picking one means something.
+    SeveralStages,
 }
 
 impl Needs {
@@ -52,6 +54,7 @@ impl Needs {
             Needs::Always => true,
             Needs::SecondStage => model.has_second_stage(),
             Needs::Boost => model.has_boost(),
+            Needs::SeveralStages => model.stages().len() > 1,
         }
     }
 }
@@ -166,6 +169,23 @@ pub const GLOBAL: &[(&str, &[Binding])] = &[
                 needs: Needs::Boost,
                 footer: Footer::Gain,
             },
+            Binding {
+                key: ",",
+                ch: Some(','),
+                what: "pick the previous gain stage, or the whole chain",
+                single: OnSingle::Same,
+                needs: Needs::SeveralStages,
+                // `.` names the pair on the footer.
+                footer: Footer::No,
+            },
+            Binding {
+                key: ".",
+                ch: Some('.'),
+                what: "pick the next gain stage, or the whole chain",
+                single: OnSingle::Same,
+                needs: Needs::SeveralStages,
+                footer: Footer::Gain,
+            },
         ],
     ),
     (
@@ -233,6 +253,29 @@ pub const GLOBAL: &[(&str, &[Binding])] = &[
 #[cfg(test)]
 fn lines(model: &GainModel, iw: usize, theme: &crate::Theme) -> Vec<Line<'static>> {
     lines_for(model, false, iw, theme)
+}
+
+/// A gain row in the device's own words: the stage the arrows move, the
+/// second stage by the name the device gave it, the boost by its own name.
+/// `None` for every other row, which reads the same on every radio.
+fn gain_wording(model: &GainModel, binding: &Binding) -> Option<String> {
+    let stages = model.stages();
+    Some(match (binding.footer_is_gain(), binding.ch) {
+        (true, None) => match (model.has_second_stage(), stages.first()) {
+            (true, Some(first)) => format!("{} gain, down and up", first.name),
+            _ => "gain, down and up: the whole chain, or the stage picked with , and .".to_string(),
+        },
+        (true, Some('[')) => format!("{} gain down", stages.get(1)?.name),
+        (_, Some(']')) => format!("{} gain up", stages.get(1)?.name),
+        (true, Some('a')) => format!("front end boost: {}", model.boost_label()),
+        _ => return None,
+    })
+}
+
+impl Binding {
+    fn footer_is_gain(&self) -> bool {
+        matches!(self.footer, Footer::Gain)
+    }
 }
 
 /// One panel's controls, as its section's block in the Keys pane lists
@@ -347,11 +390,14 @@ fn lines_for(
         }
         out.push(chrome::section(group, "", iw, theme));
         for binding in shown {
-            let what = match (sample_rate_is_span, binding.ch, single, &binding.single) {
-                (true, Some('s'), _, _) => "type a span",
-                (_, _, true, OnSingle::Reword(text)) => *text,
-                _ => binding.what,
-            };
+            let what = gain_wording(model, binding).unwrap_or_else(|| {
+                match (sample_rate_is_span, binding.ch, single, &binding.single) {
+                    (true, Some('s'), _, _) => "type a span",
+                    (_, _, true, OnSingle::Reword(text)) => text,
+                    _ => binding.what,
+                }
+                .to_string()
+            });
             out.push(Line::from(vec![
                 Span::styled(format!("  {:<7}", binding.key), key_style),
                 Span::styled(what.to_string(), what_style),
@@ -502,7 +548,13 @@ mod tests {
             text(&chain)
         );
         assert!(!text(&chain).contains("VGA"), "and no second stage either");
-        assert_eq!(chain.len(), hackrf.len() - 3, "two VGA rows and the boost");
+        // Two VGA rows, the boost, and the two stage-picking rows, which need
+        // more than one stage and this chain reports none.
+        assert_eq!(
+            chain.len(),
+            hackrf.len() - 5,
+            "two VGA rows, the boost, and , ."
+        );
         // The group survives, because the primary gain key is still there.
         assert!(text(&chain).contains("GAIN"), "{}", text(&chain));
     }
@@ -514,7 +566,8 @@ mod tests {
         let theme = crate::Theme::sdr();
         let hackrf = lines(&hackrf::gain_model(), 40, &theme).len();
         let rtl = lines(&rtlsdr::gain_model(&[0, 10, 20]), 40, &theme).len();
-        assert_eq!(rtl, hackrf - 2, "the two VGA rows should be gone");
+        // The two VGA rows, and `,` / `.`: one tuner stage is nothing to pick.
+        assert_eq!(rtl, hackrf - 4, "the two VGA rows and , . should be gone");
     }
 
     #[test]
@@ -534,5 +587,43 @@ mod tests {
         assert!(text.contains("type a span"));
         assert!(!text.contains("GAIN"));
         assert!(!text.contains("survey the band"));
+    }
+
+    /// **The reference speaks the device's words**: three stages the driver
+    /// called LNA, TIA and PGA and an automatic gain mode read as one chain,
+    /// its stages to pick, and an AGC, with no VGA anywhere.
+    #[test]
+    fn the_gain_rows_use_the_devices_names() {
+        let theme = crate::Theme::sdr();
+        let lime = GainModel::new(
+            vec![
+                crate::hardware::StageSpec::ranged("LNA", 0.0, 30.0, 1.0),
+                crate::hardware::StageSpec::ranged("TIA", 0.0, 12.0, 1.0),
+                crate::hardware::StageSpec::ranged("PGA", -12.0, 19.0, 1.0),
+            ],
+            "RF",
+            "RF",
+        )
+        .with_boost(crate::hardware::Boost::GainMode);
+        let text = lines(&lime, 90, &theme)
+            .iter()
+            .map(|l| l.to_string())
+            .collect::<Vec<_>>()
+            .join("\n");
+        assert!(
+            text.contains("the whole chain, or the stage picked"),
+            "{text}"
+        );
+        assert!(text.contains("pick the next gain stage"), "{text}");
+        assert!(text.contains("front end boost: AGC"), "{text}");
+        assert!(!text.contains("VGA"), "{text}");
+        let hackrf = lines(&hackrf::gain_model(), 90, &theme)
+            .iter()
+            .map(|l| l.to_string())
+            .collect::<Vec<_>>()
+            .join("\n");
+        assert!(hackrf.contains("LNA gain, down and up"), "{hackrf}");
+        assert!(hackrf.contains("VGA gain down"), "{hackrf}");
+        assert!(hackrf.contains("front end boost: AMP"), "{hackrf}");
     }
 }

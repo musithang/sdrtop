@@ -120,6 +120,7 @@ whole session, because the alternate screen has no room for a stack trace. See
 |-----|-------------|
 | `↑` / `↓` | Gain up or down: HackRF LNA (±8 dB) / RTL-SDR tuner (next table step) / SoapySDR the whole chain |
 | `[` / `]` | VGA gain up or down by 2 dB (HackRF only) |
+| `,` / `.` | Pick one gain stage for `↑` / `↓`, or step past the ends for the whole chain. Any layout |
 
 On a **HackRF**, LNA (Low Noise Amplifier) is the first gain stage, how much you
 amplify before the signal reaches the chip, and VGA (Variable Gain Amplifier) is
@@ -138,10 +139,25 @@ for you. Whether `a` exists at all still depends on the driver: if it reports no
 automatic gain mode, the key is not offered and the panels leave the row out
 rather than showing you an `OFF` you cannot change.
 
-**To set one stage on its own, on any device**, focus the Command Rail with `c`,
-pick the stage with `,` and `.`, then use `↑`/`↓`. That works on a radio with
-three gain elements as well as on a HackRF, and it is the only way to reach the
-third one. See [Command Rail focus mode](#command-rail-focus-mode).
+### Setting one stage at a time
+
+`,` and `.` walk the gain stages your device reports, in its order and by its
+names, from any layout. `↑` and `↓` then move **that stage alone**, by its own
+step: 8 dB on a HackRF LNA, 2 dB on its VGA, one table entry on an RTL-SDR
+tuner, and whatever the driver says everywhere else. Nothing is redistributed.
+That works on a radio with three gain elements as well as on a HackRF, and it
+is the only way to reach the third one.
+
+"The whole chain" is a real stop on the ring rather than a thing you have to
+remember. Keep pressing `.` past the last stage and the selection comes back
+off, and `↑`/`↓` go back to being the ordinary gain keys. Until then it stays
+picked, across layouts, and the footer says so: `[↑↓] VGA` and `[, .] stage VGA`
+while the VGA is picked, `stage chain` when nothing is. A radio with one stage
+has nothing to pick, and is not offered the keys.
+
+The names are the ones your driver reports, never a table sdrtop keeps: a
+radio that calls its stages `LNA`, `TIA` and `PGA` shows those three, and one
+with no second stage shows no VGA.
 
 Either way: if the spectrum is maxed out (everything near 0 dBFS), turn it down.
 If it's all noise at the bottom, try turning it up.
@@ -232,8 +248,6 @@ Press `c` to drive the Command Rail, the instrument rail in the default
 | Key | What it does |
 |-----|-------------|
 | `←` / `→` | Tune the center frequency by one step (auto-switches the mode strip to Hunt) |
-| `,` / `.` | Pick which gain stage the arrows drive, or step past the ends for the whole chain |
-| `↑` / `↓` | Move the picked stage by its own step. With no stage picked, the usual gain keys |
 | `1` / `2` / `3` | Jump to recall slot 1, 2 or 3 |
 | `M` | Save the current tuning to the next recall slot |
 | `Tab` | Cycle the HUNT · MONITOR · BENCH mode manually (otherwise it auto-follows your actions) |
@@ -244,22 +258,6 @@ Press `c` to drive the Command Rail, the instrument rail in the default
 focused panel is offered every key first, and the rail claims those three. The
 rest of the digits fall through as usual, so `4` and `5` still switch layout from
 inside rail focus. `Esc` gives the digits back.
-
-### Setting one stage at a time
-
-`,` and `.` walk the gain rows in the rail, in the order your device reports
-them, and the selected row's name lights up. `↑` and `↓` then move **that stage
-alone**, by that stage's own step: 8 dB on a HackRF LNA, 2 dB on its VGA, one
-table entry on an RTL-SDR tuner, and whatever the driver says everywhere else.
-Nothing is redistributed. That is the entire point of the mode.
-
-"The whole chain" is a real stop on the ring rather than a thing you have to
-remember `Esc` for. Keep pressing `.` past the last stage and the selection comes
-back off, and `↑`/`↓` go back to being the ordinary gain keys.
-
-Leaving focus with `Esc` also puts the selection back to the whole chain. It does
-**not** put the gains back: undoing a setting you deliberately made, on the way
-out, would be the surprising half of that.
 
 ---
 

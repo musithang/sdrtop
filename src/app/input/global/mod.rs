@@ -66,8 +66,14 @@ pub(super) fn handle(key: KeyEvent, ctx: &mut InputCtx<'_>) -> KeyAction {
         }
 
         // ── Gain staging ────────────────────────────────────────────────────
+        // With one stage picked (`,` / `.`), the arrows move that stage alone.
+        KeyCode::Up | KeyCode::Down if super::metrics(ctx.state).ui.gain_stage.is_some() => {
+            gain::step_selected_stage(ctx, matches!(key.code, KeyCode::Up))
+        }
         KeyCode::Up => gain::step_primary(ctx, true),
         KeyCode::Down => gain::step_primary(ctx, false),
+        KeyCode::Char(',') => gain::select_stage(ctx, false),
+        KeyCode::Char('.') => gain::select_stage(ctx, true),
         KeyCode::Char('[') => gain::step_vga(ctx, false),
         KeyCode::Char(']') => gain::step_vga(ctx, true),
         KeyCode::Char('a') => gain::toggle_boost(ctx),

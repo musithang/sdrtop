@@ -99,8 +99,8 @@ to its right. From top to bottom:
 - **STREAM**: drops, buffer fill, USB throughput, and a one-line log foot.
 
 Press `c` to focus the rail: `←`/`→` tune, `1` `2` `3` recall, `M` save, `L` for
-the full log overlay, and `,` / `.` to pick one gain stage for the `↑`/`↓` keys.
-With a stage picked its name lights up in the GAIN card and the arrows move that
+the full log overlay. A gain stage picked with `,` / `.` (a key every layout
+has) lights up its name in the GAIN card, and the arrows move that
 stage alone, by its own step, leaving the others where they are. Step past either
 end of the list and you are back to driving the whole chain.
 

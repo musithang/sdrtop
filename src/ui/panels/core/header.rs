@@ -745,13 +745,18 @@ fn bottom_band_line(state: &SdrMetrics, theme: &crate::Theme, inner_width: u16) 
         Span::raw("    "),
     ]);
 
-    if gm.has_second_stage() {
-        // Secondary stage (HackRF VGA only) - cyan → orange gradient.
+    if let (true, Some(second)) = (gm.has_second_stage(), gm.stages().get(1)) {
+        // The second stage, by the name and the range the device gave it,
+        // in the same four columns whatever it is called.
         let vga_str = format!("{:2}", state.radio.secondary_gain());
-        spans.push(Span::styled("VGA ", Style::default().fg(theme.label)));
+        let name: String = second.name.chars().take(3).collect();
+        spans.push(Span::styled(
+            format!("{name:<3} "),
+            Style::default().fg(theme.label),
+        ));
         spans.extend(gain_bar_spans(
             state.radio.secondary_gain(),
-            62,
+            second.max_db.max(1.0).round() as u32,
             theme.border_accent,
             theme.status_warn,
         ));

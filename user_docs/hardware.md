@@ -174,7 +174,7 @@ problem is a missing driver module rather than anything in here.
 | Your HackRF or RTL-SDR appears **once**, not twice, even with the Soapy module installed | On purpose. sdrtop's own driver for those two knows more about them than the generic path does, so the native one wins. Force the other with `--device soapy` |
 | The **RF bench is missing** its noise figure, MDS and linearity card | Also on purpose. Those model a specific front end stage by stage. SoapySDR does not publish that, and inventing it would be worse than leaving it out |
 | **No `[A]` boost** on your device | sdrtop asks the driver whether there is an automatic gain mode and only offers the key if there is. A HackRF reached through SoapySDR reports there is not, which surprised me too |
-| `[` and `]` do nothing | Those two are the HackRF's VGA keys. Everywhere else, pick a stage in the Command Rail with `,` / `.` and use `↑` / `↓`. See below |
+| `[` and `]` do nothing | Those two are the HackRF's VGA keys. Everywhere else, pick a stage with `,` / `.` and use `↑` / `↓`. See below |
 | "its native sample format is CF32" in the log | sdrtop's pipeline is integer, so it handles `CS8`, `CU8` and `CS16` and refuses the rest by name rather than guessing at a conversion. Open an issue with the driver name |
 | The frequency range looks **too optimistic** | It is the driver's number, not mine. `SoapyHackRF` claims 0 to 7.25 GHz where the datasheet says 1 MHz to 6 GHz. sdrtop reports what it is told; the radio will refuse the rest, and the log will say so |
 
@@ -182,7 +182,7 @@ problem is a missing driver module rather than anything in here.
 
 | | Native HackRF / RTL-SDR | Through SoapySDR |
 |---|---|---|
-| Gain | LNA and VGA on their own keys | Every element the driver names, each on its own range. `↑` / `↓` move the whole chain; `,` / `.` in the Command Rail pick one stage |
+| Gain | LNA and VGA on their own keys | Every element the driver names, each on its own range. `↑` / `↓` move the whole chain; `,` / `.` pick one stage, from any layout |
 | Front-end boost | Always there | Only if the driver reports an automatic gain mode |
 | Friis noise figure, MDS | Modelled per stage | Not shown. We do not know the chain |
 | Linearity card (IIP3, IMD3, SFDR) | Shown | Not shown. Those are one front end's datasheet |
@@ -205,7 +205,7 @@ element the device names and every element's own range, and places gain itself:
   ceiling, then the next. Front-first is the arrangement with the best noise
   figure, which is the arrangement you want unless you have a specific reason to
   want another one.
-- **`,` / `.` in the Command Rail** (`c` to focus) pick one element by name, and
+- **`,` / `.`**, from any layout, pick one element by name, and
   then `↑` / `↓` move that one alone, by its own step, leaving the rest exactly
   where they are. This is the only way to reach a third gain element, and some
   radios have one.

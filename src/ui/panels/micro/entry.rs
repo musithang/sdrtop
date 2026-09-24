@@ -104,7 +104,16 @@ fn status_line(state: &SdrMetrics, theme: &crate::Theme, mode: Mode) -> Line<'st
     };
     let freq_mhz = r.frequency as f64 / 1_000_000.0;
     let sr_msps = r.config_sample_rate / 1_000_000.0;
+    // The boost by its own name, and not at all on a radio without one.
+    let gm = &state.caps.gain;
     let amp = if r.amp_enabled { "ON" } else { "OFF" };
+    let boost = |sep: &str| {
+        if gm.has_boost() {
+            format!("{}{sep}{amp}", gm.boost_label())
+        } else {
+            String::new()
+        }
+    };
 
     let badge = Span::styled(dot, Style::default().fg(dot_col));
     let freq_style = Style::default()
@@ -122,7 +131,7 @@ fn status_line(state: &SdrMetrics, theme: &crate::Theme, mode: Mode) -> Line<'st
             Span::raw("   "),
             dim(format!("{:.1} Msps", sr_msps)),
             Span::raw("   "),
-            dim(format!("AMP {}", amp)),
+            dim(boost(" ")),
         ]),
         Mode::Narrow => Line::from(vec![
             Span::raw(" "),
@@ -132,7 +141,7 @@ fn status_line(state: &SdrMetrics, theme: &crate::Theme, mode: Mode) -> Line<'st
             Span::raw("  "),
             dim(format!("{:.1}M", sr_msps)),
             Span::raw("  "),
-            dim(format!("AMP:{}", amp)),
+            dim(boost(":")),
         ]),
         Mode::Minimum => Line::from(vec![
             Span::raw(" "),
@@ -143,66 +152,89 @@ fn status_line(state: &SdrMetrics, theme: &crate::Theme, mode: Mode) -> Line<'st
     }
 }
 
-/// FREQ zone, row 2: LNA / VGA gain. Compact draws side-by-side bars; the
-/// narrower modes fall back to text so nothing is lost on tiny terminals.
+/// FREQ zone, row 2: the gain, as the device describes it. Two bars where it
+/// has a second stage with a key of its own (a HackRF's LNA and VGA, by the
+/// names and ranges the model gives), one for the whole chain everywhere else.
+/// The narrower modes fall back to text so nothing is lost on tiny terminals.
 fn render_gain(f: &mut Frame, area: Rect, state: &SdrMetrics, theme: &crate::Theme, mode: Mode) {
     if area.height == 0 {
         return;
     }
-    let r = &state.radio;
+    let gm = &state.caps.gain;
+    let stages = gm.stages();
+    // (name, value dB, full scale dB) for each bar drawn.
+    let bars: Vec<(String, u32, f64)> = match (gm.has_second_stage(), stages.first(), stages.get(1))
+    {
+        (true, Some(first), Some(second)) => vec![
+            (first.name.clone(), state.radio.primary_gain(), first.max_db),
+            (
+                second.name.clone(),
+                state.radio.secondary_gain(),
+                second.max_db,
+            ),
+        ],
+        _ => vec![(
+            "Gain".to_string(),
+            state.shown_gain(),
+            gm.primary_max_db() as f64,
+        )],
+    };
     match mode {
         Mode::Compact => {
+            let n = bars.len() as u32;
             let halves = Layout::default()
                 .direction(Direction::Horizontal)
-                .constraints([Constraint::Percentage(50), Constraint::Percentage(50)])
+                .constraints(vec![Constraint::Ratio(1, n); bars.len()])
                 .split(area);
-            draw_hbar(
-                f,
-                halves[0],
-                r.primary_gain() as f64 / 40.0,
-                " LNA ",
-                &format!("{} dB", r.primary_gain()),
-                theme.value,
-                theme,
-            );
-            draw_hbar(
-                f,
-                halves[1],
-                r.secondary_gain() as f64 / 62.0,
-                " VGA ",
-                &format!("{} dB", r.secondary_gain()),
-                theme.value,
-                theme,
-            );
+            for (i, (name, db, full)) in bars.iter().enumerate() {
+                draw_hbar(
+                    f,
+                    halves[i],
+                    *db as f64 / full.max(1.0),
+                    &format!(" {name} "),
+                    &format!("{db} dB"),
+                    theme.value,
+                    theme,
+                );
+            }
         }
         Mode::Narrow => {
-            let line = Line::from(vec![
-                Span::raw(" "),
-                Span::styled("LNA:", Style::default().fg(theme.label)),
-                Span::styled(
-                    format!("{}dB", r.primary_gain()),
+            let mut spans = vec![Span::raw(" ")];
+            for (i, (name, db, _)) in bars.iter().enumerate() {
+                if i > 0 {
+                    spans.push(Span::raw("  "));
+                }
+                spans.push(Span::styled(
+                    format!("{name}:"),
+                    Style::default().fg(theme.label),
+                ));
+                spans.push(Span::styled(
+                    format!("{db}dB"),
                     Style::default().fg(theme.value),
-                ),
-                Span::raw("  "),
-                Span::styled("VGA:", Style::default().fg(theme.label)),
-                Span::styled(
-                    format!("{}dB", r.secondary_gain()),
-                    Style::default().fg(theme.value),
-                ),
-            ]);
-            f.render_widget(Paragraph::new(line), area);
+                ));
+            }
+            f.render_widget(Paragraph::new(Line::from(spans)), area);
         }
         Mode::Minimum => {
-            let amp = if r.amp_enabled { "ON" } else { "OFF" };
-            let line = Line::from(vec![
+            let values: Vec<String> = bars
+                .iter()
+                .map(|(name, db, _)| format!("{}:{}", name.chars().next().unwrap_or('G'), db))
+                .collect();
+            let mut spans = vec![
                 Span::raw(" "),
                 Span::styled(
-                    format!("L:{} V:{} ", r.primary_gain(), r.secondary_gain()),
+                    format!("{} ", values.join(" ")),
                     Style::default().fg(theme.value),
                 ),
-                Span::styled(format!("AMP:{}", amp), Style::default().fg(theme.label)),
-            ]);
-            f.render_widget(Paragraph::new(line), area);
+            ];
+            if gm.has_boost() {
+                let on = if state.radio.amp_enabled { "ON" } else { "OFF" };
+                spans.push(Span::styled(
+                    format!("{}:{on}", gm.boost_label()),
+                    Style::default().fg(theme.label),
+                ));
+            }
+            f.render_widget(Paragraph::new(Line::from(spans)), area);
         }
     }
 }
@@ -422,5 +454,29 @@ mod tests {
         assert!(matches!(Mode::from_width(59), Mode::Narrow));
         assert!(matches!(Mode::from_width(40), Mode::Narrow));
         assert!(matches!(Mode::from_width(39), Mode::Minimum));
+    }
+
+    /// **The gain row is the device's**: a HackRF shows its LNA and VGA and
+    /// its amp; an RTL-SDR one tuner knob and its AGC, never a VGA it does
+    /// not have; a radio with no boost shows no boost at all.
+    #[test]
+    fn the_gain_row_names_what_the_device_has() {
+        use crate::state::fixture::draw;
+        let hackrf = draw(MicroPanel, 80, 6, &SdrMetrics::fixture()).join("\n");
+        assert!(hackrf.contains("LNA") && hackrf.contains("VGA"), "{hackrf}");
+        assert!(hackrf.contains("AMP"), "{hackrf}");
+
+        let rtl = draw(MicroPanel, 80, 6, &SdrMetrics::fixture().rtlsdr()).join("\n");
+        assert!(!rtl.contains("VGA") && !rtl.contains("LNA"), "{rtl}");
+        assert!(rtl.contains("Gain"), "{rtl}");
+        assert!(!rtl.contains("AMP"), "{rtl}");
+
+        let mut none = SdrMetrics::fixture();
+        std::sync::Arc::make_mut(&mut none.caps).gain =
+            crate::hardware::GainModel::new(Vec::new(), "RF", "RF").with_gauge_fallback(40);
+        for w in [80, 50, 30] {
+            let out = draw(MicroPanel, w, 6, &none).join("\n");
+            assert!(!out.contains("AMP") && !out.contains("AGC"), "{w}: {out}");
+        }
     }
 }

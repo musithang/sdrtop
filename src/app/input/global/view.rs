@@ -85,6 +85,9 @@ pub(in crate::app::input) const NO_POSITION: &[&str] = &[
     "signal_characterization",
     "fm_demod",
     "net_capability",
+    // Its keys tune, cycle the lead card and recall; the gain stage it once
+    // picked is a mode every section has now, not a Rail position.
+    "command_rail",
 ];
 
 /// What "as it was before the first key" means, panel by panel: every
@@ -102,8 +105,6 @@ pub(in crate::app::input) fn reset_positions(panel: &str, m: &mut crate::state::
     m.waterfall.cursor_freq = None;
     match panel {
         "sweep_panel" => m.sweep.cursor_frac = None,
-        // The knob goes back to the whole chain; the stage values stay.
-        "command_rail" => m.ui.gain_stage = None,
         "net_occupancy" => m.net.band_cursor = Default::default(),
         "net_coexist" => m.net.band_scrub = None,
         // Kept for the carry into the BLE list before it is cleared: the

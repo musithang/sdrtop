@@ -215,8 +215,8 @@ quirks. If yours behaves oddly in a way `rtl_test` doesn't explain,
    is inert.
 2. **`[` and `]` are the HackRF's VGA keys and nothing else.** An RTL-SDR has no
    VGA stage; use `a` for the tuner AGC instead. A device reached through
-   SoapySDR may well have a second stage, but you reach it a different way: focus
-   the Command Rail with `c`, pick the stage with `,` / `.`, then use `↑` / `↓`.
+   SoapySDR may well have a second stage, but you reach it a different way: pick
+   the stage with `,` / `.`, then use `↑` / `↓`.
 3. **`a` does nothing on some SoapySDR devices.** sdrtop asks the driver whether
    there is an automatic gain mode and only offers the key if there is. Where
    there is not, the key says so in the log and the panels leave the row out

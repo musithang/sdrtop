@@ -1,8 +1,9 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright (C) 2026 MusiThang <viktor.laszlo92@protonmail.com>
 
-//! The gain keys: `↑`/`↓` on the primary stage, `[`/`]` on the VGA, `[A]` on the
-//! front-end boost.
+//! The gain keys: `↑`/`↓` on the primary stage (or on the one stage `,` / `.`
+//! picked), `[`/`]` on the second stage, `[A]` on the front-end boost, and
+//! `,` / `.` to pick a stage, from any section.
 //!
 //! All four share one shape - read the current value, ask the device to change
 //! it, and only write the state back if the device agreed. The device call
@@ -72,6 +73,90 @@ pub(super) fn next_primary_gain(gain: &GainModel, current: u32, up: bool) -> u32
         Some(front) => next_on_stage(front, current, up),
         None => current,
     }
+}
+
+/// Walk the stage selection one place, with "the whole chain" as a real stop.
+///
+/// `None` is not a missing value here, it is the default position of the knob:
+/// the ring runs `chain, stage 0, stage 1, ... , chain` so a user can always get
+/// back to the one-knob control by pressing on rather than by remembering `Esc`.
+pub(super) fn next_stage(current: Option<usize>, count: usize, forward: bool) -> Option<usize> {
+    if count == 0 {
+        return None;
+    }
+    match (current, forward) {
+        (None, true) => Some(0),
+        (None, false) => Some(count - 1),
+        (Some(i), true) if i + 1 < count => Some(i + 1),
+        (Some(_), true) => None,
+        (Some(0), false) => None,
+        (Some(i), false) => Some(i - 1),
+    }
+}
+
+/// Move one stage by its own step, leaving every other stage where it is.
+///
+/// The device's own grid decides the step: a HackRF's LNA moves in 8 dB and its
+/// VGA in 2, and a driver that reports no step gets 1 dB. Nothing is
+/// redistributed, which is the whole point of the mode.
+pub(super) fn step_selected_stage(ctx: &mut InputCtx<'_>, up: bool) {
+    let Some(device) = ctx.device else { return };
+    let stages = device.capabilities().gain.stages();
+    let Some(index) = metrics(ctx.state).ui.gain_stage else {
+        return;
+    };
+    let Some(spec) = stages.get(index) else {
+        return;
+    };
+
+    let current = metrics(ctx.state).radio.stage_gain(index);
+    let step = if spec.step_db > 0.0 {
+        spec.step_db
+    } else {
+        1.0
+    };
+    let target = if up { current + step } else { current - step };
+    // Snap towards the direction of travel, so a value that started off the grid
+    // still moves rather than snapping back onto where it already was.
+    let next = if up {
+        spec.snap(target.max(current + step * 0.5))
+    } else {
+        spec.snap_down(target)
+    };
+    let next = next.clamp(spec.min_db, spec.max_db);
+
+    let result = device.set_stage_gain(index, &spec.name, next);
+    let mut m = metrics(ctx.state);
+    match result {
+        Ok(()) => {
+            m.radio.set_stage_gain(index, next);
+            m.lab.rf_autotrack = false;
+            m.ui.note_mode_action(RailMode::Bench);
+            m.push_log(format!("{} \u{2192} {next:.0} dB", spec.name));
+        }
+        Err(e) => m.push_log(format!("Gain error: {e}")),
+    }
+}
+
+/// `,` / `.`: pick the previous or next gain stage the device reported, with
+/// "the whole chain" as a stop in the ring. A mode, not a cursor: it stays
+/// picked across layouts and focus until the ring comes back round, and the
+/// footer says which stage `↑` / `↓` are moving.
+pub(super) fn select_stage(ctx: &mut InputCtx<'_>, forward: bool) {
+    let count = ctx.device.map(|d| d.capabilities().gain.stages().len());
+    let Some(count) = count.filter(|n| *n > 1) else {
+        return;
+    };
+    let mut m = metrics(ctx.state);
+    m.ui.gain_stage = next_stage(m.ui.gain_stage, count, forward);
+    let name =
+        m.ui.gain_stage
+            .and_then(|i| m.caps.gain.stages().get(i).map(|s| s.name.clone()));
+    let msg = match name {
+        Some(n) => format!("Gain: {n} alone"),
+        None => "Gain: the whole chain".to_string(),
+    };
+    m.push_log(msg);
 }
 
 /// `↑` / `↓` - step the primary front-end stage.
@@ -352,5 +437,46 @@ mod tests {
             v = next_primary_gain(&g, v, true);
         }
         assert_eq!(v, 40, "stepping up should reach the maximum exactly");
+    }
+
+    /// The ring includes "the whole chain", so pressing on always gets back to
+    /// the default knob without having to remember that `Esc` also does it.
+    #[test]
+    fn the_stage_ring_passes_through_the_whole_chain() {
+        // Two stages, forwards: chain, 0, 1, chain.
+        let mut at = None;
+        let seen: Vec<Option<usize>> = (0..4)
+            .map(|_| {
+                at = next_stage(at, 2, true);
+                at
+            })
+            .collect();
+        assert_eq!(seen, vec![Some(0), Some(1), None, Some(0)]);
+
+        // And backwards is the exact reverse.
+        let mut at = None;
+        let seen: Vec<Option<usize>> = (0..4)
+            .map(|_| {
+                at = next_stage(at, 2, false);
+                at
+            })
+            .collect();
+        assert_eq!(seen, vec![Some(1), Some(0), None, Some(1)]);
+    }
+
+    /// One stage is still a ring, just a shorter one.
+    #[test]
+    fn a_single_stage_device_toggles_between_it_and_the_chain() {
+        assert_eq!(next_stage(None, 1, true), Some(0));
+        assert_eq!(next_stage(Some(0), 1, true), None);
+        assert_eq!(next_stage(Some(0), 1, false), None);
+    }
+
+    /// A device with no stages has nothing to point at, and the mode must not
+    /// offer a selection that would then index nothing.
+    #[test]
+    fn a_device_with_no_stages_cannot_be_pointed_at_one() {
+        assert_eq!(next_stage(None, 0, true), None);
+        assert_eq!(next_stage(Some(3), 0, false), None);
     }
 }
