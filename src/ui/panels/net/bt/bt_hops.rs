@@ -29,8 +29,10 @@
 //!   piconet heard anywhere in the survey keeps its place. Each bar wears the
 //!   colour of the piconet heard most on it; with one selected, its own hits
 //!   are the coloured part and the rest stand faint above them. The channels
-//!   watched now are underlined, so the reader sees where the radio is
-//!   listening and where it is not.
+//!   watched now are bracketed under the bars (`╰──╯`, `▲` for one), so the
+//!   reader sees where the radio is listening and where it is not. A line,
+//!   not a block: an eighth-block underline stood against the bars and read
+//!   as the foot of them.
 //! - **WHEN**: one lane per piconet, the roster's order and colours, each hit
 //!   a tick at its time in the window, like a logic analyser's traces. A few
 //!   hits a minute read as a few ticks, and a busy piconet as a dense lane.
@@ -261,9 +263,16 @@ impl Panel for NetBtHopsPanel {
                 (Some(lo), _) => format!(" watched now: {lo}"),
                 _ => " watching nothing now".to_string(),
             };
+            // The key draws the mark as the zone does: a bracket for a run,
+            // the arrow for one channel.
+            let key = if watched.len() > 1 {
+                "\u{2570}\u{2500}\u{256f}"
+            } else {
+                "\u{25b2}"
+            };
             lines.push(Line::from(vec![
                 Span::raw(" ".repeat(SCALE)),
-                Span::styled("\u{2594}", Style::default().fg(theme.border_accent)),
+                Span::styled(key, Style::default().fg(theme.border_accent)),
                 Span::styled(text, Style::default().fg(theme.label)),
             ]));
         }
@@ -386,8 +395,8 @@ impl Panel for NetBtHopsPanel {
     }
 }
 
-/// The WHERE zone: `rows` of bars, the underline of channels watched now,
-/// and the channel axis.
+/// The WHERE zone: `rows` of bars, the bracket under the channels watched
+/// now ([`watched_marks`]), and the channel axis.
 fn where_zone(
     state: &SdrMetrics,
     colours: &HashMap<u32, usize>,
@@ -480,15 +489,21 @@ fn where_zone(
     }
 
     let watched = &state.net.bt_channels_watched;
+    let is_watched: Vec<bool> = (0..cols)
+        .map(|c| {
+            let chans = channels_of(c, cols);
+            watched.iter().any(|&w| chans.contains(&(w as usize)))
+        })
+        .collect();
+    let marks = watched_marks(&is_watched);
     let mut under = vec![Span::raw(" ".repeat(SCALE))];
-    for c in 0..cols {
-        let chans = channels_of(c, cols);
-        under.push(if watched.iter().any(|&w| chans.contains(&(w as usize))) {
-            Span::styled("\u{2594}", Style::default().fg(theme.border_accent))
-        } else if chans.clone().any(|ch| ch % 10 == 0) {
-            Span::styled("\u{00b7}", Style::default().fg(theme.stale))
-        } else {
-            Span::raw(" ")
+    for (c, mark) in marks.into_iter().enumerate() {
+        under.push(match mark {
+            Some(ch) => Span::styled(ch.to_string(), Style::default().fg(theme.border_accent)),
+            None if channels_of(c, cols).any(|ch| ch % 10 == 0) => {
+                Span::styled("\u{00b7}", Style::default().fg(theme.stale))
+            }
+            None => Span::raw(" "),
         });
     }
     out.push(Line::from(under));
@@ -497,6 +512,26 @@ fn where_zone(
         Style::default().fg(theme.label),
     )));
     out
+}
+
+/// The bracket under each run of watched columns: `╰─…─╯` over two or
+/// more, `▲` under one; `None` where nothing is watched.
+fn watched_marks(watched: &[bool]) -> Vec<Option<char>> {
+    (0..watched.len())
+        .map(|c| {
+            if !watched[c] {
+                return None;
+            }
+            let before = c > 0 && watched[c - 1];
+            let after = c + 1 < watched.len() && watched[c + 1];
+            Some(match (before, after) {
+                (false, false) => '\u{25b2}',
+                (false, true) => '\u{2570}',
+                (true, true) => '\u{2500}',
+                (true, false) => '\u{256f}',
+            })
+        })
+        .collect()
 }
 
 #[cfg(test)]
@@ -519,6 +554,17 @@ mod tests {
             stream: 0,
             header: None,
         });
+    }
+
+    /// A run is bracketed end to end, a lone channel gets the arrow, and a
+    /// gap starts a new bracket.
+    #[test]
+    fn watched_runs_are_bracketed_and_a_lone_one_is_an_arrow() {
+        let marks: String = watched_marks(&[false, true, true, true, false, true, false])
+            .iter()
+            .map(|m| m.unwrap_or(' '))
+            .collect();
+        assert_eq!(marks, " \u{2570}\u{2500}\u{256f} \u{25b2} ");
     }
 
     fn lane<'a>(out: &'a [String], lap: &str) -> &'a String {
@@ -558,7 +604,7 @@ mod tests {
     /// a hit heard at an earlier survey position is not lost because the
     /// radio is listening elsewhere now. At 83 columns one channel is one
     /// column, so a hit on channel 68 is a bar at column 68 while only 75 to
-    /// 78 are watched, and those four are underlined.
+    /// 78 are watched, and those four are bracketed.
     #[test]
     fn where_places_every_hit_on_its_channel_whatever_is_watched_now() {
         let mut m = SdrMetrics::fixture().streaming();
@@ -572,8 +618,12 @@ mod tests {
         let col = |line: &str, c: char| line.chars().position(|x| x == c);
         // Border, then the scale, then channel 0.
         assert_eq!(col(bar, '\u{2588}'), Some(1 + SCALE + 68), "{bar}");
-        let under = out.iter().find(|l| l.contains('\u{2594}')).unwrap();
-        assert_eq!(col(under, '\u{2594}'), Some(1 + SCALE + 75), "{under}");
+        let under = out
+            .iter()
+            .find(|l| l.contains('\u{2570}') && !l.contains("watched"))
+            .unwrap();
+        assert_eq!(col(under, '\u{2570}'), Some(1 + SCALE + 75), "{under}");
+        assert_eq!(col(under, '\u{256f}'), Some(1 + SCALE + 78), "{under}");
         assert!(out.join("\n").contains("watched now: 75-78"));
     }
 

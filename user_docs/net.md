@@ -328,7 +328,7 @@ Two answers:
 
 - **WHERE**: all 79 channels, with bars of each channel's hits this session,
   in the colour of the piconet heard most there, and the channels watched
-  now underlined. A piconet heard at an earlier survey position keeps its
+  now bracketed underneath (`╰──╯`, or `▲` for a single one). A piconet heard at an earlier survey position keeps its
   place.
 - **WHEN**: one lane per piconet, a tick at each hit's time. `+` / `-` zoom
   from half a second to a minute, `←` `→` move back and forward in time,
