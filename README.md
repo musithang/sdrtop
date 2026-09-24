@@ -52,7 +52,7 @@
 It's a hobby project built in my spare time, and honestly, I made it for *you* ❤️. Use it however you like, beat on it, and don't be shy: open issues, dig through the code, and if you've got a good idea, send it my way as a pull request or just a message. This is an open table, not my private garage.
 
 > [!IMPORTANT]
-> **Project status: early development.** The TUI is feature-complete and the arc now is polish, sharper radio math and bug fixing, not more features.
+> **Project status: early development.** The TUI is feature-complete and the arc now is polish, sharper radio math and bug fixing, not more features. (I said that before 0.6.0 too, and then Bluetooth happened.)
 >
 > HackRF One, RTL-SDR and a tinySA Ultra ZS405 are **verified on hardware**. Anything with a **SoapySDR** driver also works, and that backend is **beta**: it was written from the API rather than from owning the radios, so treat it as "should work, nobody has confirmed it yet". [The docs say exactly which parts are confirmed](user_docs/hardware.md#soapysdr-the-honest-version). If you own one of those, an issue either way is worth a lot to me.
 >
@@ -108,7 +108,8 @@ Everything your radio knows about itself, in real time, without leaving the term
 - **A band sweep** wider than one window, stitched into a single curve with band-plan labels, `Enter` on a peak to tune straight to it.
 - **Micro field views**, because sdrtop shouldn't need a full terminal to be useful. When the panels stop being readable, each concern strips down to the one number that matters, big enough to read across the room.
 - **Observer mode**: if another app already holds the radio, sdrtop tells you which one, shows device identity and USB stats, and waits. No error dialog, no fight over the USB handle, and it takes the radio back the moment it's free.
-- **Six themes and a layout system**: presets grouped into four sections, `Esc` for the menu, or define your own out of any panel sdrtop draws.
+- **NET: the 2.4 GHz band, measured.** BLE advertising and classic Bluetooth piconets, decoded and then treated like any other transmitter on the bench: modulation index, drift, crystal error in ppm, advertising interval, frame error rate against SNR, slot jitter, each with its uncertainty and against the specification's limits. Not a device list with extra steps; the list was the easy part. It never transmits and never follows a connection. [The details](user_docs/net.md).
+- **Six themes and a layout system**: presets grouped into five sections, `Esc` for the menu, or define your own out of any panel sdrtop draws.
 
 Measured the awkward way rather than the easy way. Bandwidth about the carrier, not across whatever span you happened to capture, so a mistuned radio confesses instead of faking a good number. The noise floor as a density, so the same receiver reads as the same receiver whatever the sample rate. And every lab panel marks itself **[STALE]** the moment RX stops, so a frozen number is never mistaken for a live one.
 
@@ -126,12 +127,13 @@ Measured the awkward way rather than the easy way. Bandwidth about the carrier, 
 | [The Lab presets](user_docs/lab.md): the bench-engineer views | [Configuration](user_docs/config.md): config.toml &amp; [layouts](user_docs/presets.md) | [Advanced features](user_docs/advanced.md): workflows & limits |
 | [Tips & tricks](user_docs/tips-and-tricks.md): gain, markers, workflows | [Troubleshooting](user_docs/troubleshooting.md): when things go sideways | [Supported hardware](user_docs/hardware.md): what works today |
 | [Themes](user_docs/themes.md): the six palettes | [What's new](user_docs/whats-new.md): the checkpoint log | [The demodulator](user_docs/demodulator.md): how it was built |
+| [The NET section](user_docs/net.md): BLE & classic Bluetooth, measured | [Layout presets](user_docs/presets.md): the 21 built-ins | [Changelog](CHANGELOG.md): version by version |
 
 ---
 
 ## 📦 Install
 
-**Requirements:** Linux · a HackRF One, an RTL-SDR, or anything SoapySDR speaks to
+**Requirements:** Linux · a HackRF One, an RTL-SDR, a tinySA, or anything SoapySDR speaks to
 
 ### The one-liner
 
@@ -150,7 +152,7 @@ Add `--hackrf` or `--rtlsdr` to install the runtime for your radio. `--soapy` ad
 
 ```sh
 sh install.sh --prefix ~/.local     # install under a directory, no root anywhere
-sh install.sh --version v0.4.1      # a specific release instead of the latest
+sh install.sh --version v0.5.1      # a specific release instead of the latest
 sh install.sh --from-source         # skip the prebuilt binary, always compile
 sh install.sh --git                 # compile the main branch, live dangerously
 sh install.sh --no-verify           # skip the checksum check (say why first)
@@ -207,7 +209,7 @@ That last command is the whole diagnostic. If your radio isn't in that list, the
 
 ## Keys
 
-Layouts are grouped into four sections and **each section has its own numbers**: `Command Rail` for the general views, `Lab` for the benches, `Sweep` for the band scan, `Micro` for the field views. So `2` is the RF bench inside Lab and the spectrum inside Command Rail. `Esc` opens the menu, which shows you the sections, the layouts in the one you're on, and the number that opens each. Nine keys, four times over, rather than one long row to memorise.
+Layouts are grouped into five sections and **each section has its own numbers**: `Command Rail` for the general views, `Lab` for the benches, `Sweep` for the band scan, `Micro` for the field views, `NET` for the 2.4 GHz band and Bluetooth. So `2` is the RF bench inside Lab and the spectrum inside Command Rail. `Esc` opens the menu, which shows you the sections, the layouts in the one you're on, and the number that opens each. Nine keys, five times over, rather than one long row to memorise.
 
 The eight that get you everywhere:
 
@@ -253,6 +255,8 @@ Frequency, gains, sample rate, markers, the sweep band, your theme and your layo
 - PortaPack H4M in HackRF mode
 - Per-stage gain control on any radio, placed front to back rather than by the driver
 - A measured noise-step sweep on the RF bench, not just the modelled figure
+- tinySA / tinySA Ultra: calibrated dBm spectrum and native sweeps (thanks, [@AlCalzone](https://github.com/AlCalzone))
+- **NET**: BLE and classic Bluetooth, decoded and measured against the Core Specification, exported with provenance
 
 ### 🔧 In progress
 
@@ -265,7 +269,7 @@ Frequency, gains, sample rate, markers, the sweep band, your theme and your layo
 - Signal recording to file
 - In-app config editing
 - Native backends for hardware that lands on the desk
-- **Digital signal demodulation done properly**: WiFi, Bluetooth, ADS-B, AIS, LoRa, DMR. Each gets its own UI and its own detailed info panel. Still no audio, still just data
+- **Digital signal demodulation done properly**, the way Bluetooth now is: WiFi, ADS-B, AIS, LoRa, DMR. Each gets its own UI and its own detailed info panel. Still no audio, still just data
 
 The whole story, in order: [What's new](user_docs/whats-new.md).
 
