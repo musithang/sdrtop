@@ -51,7 +51,8 @@ pub(super) fn leave_focus(ctx: &mut InputCtx<'_>) {
 }
 
 /// End whatever focus there is, and put the panel back as it was before the
-/// first key (bluetooth-next-plan Stop 1). The one path every way out of a
+/// first key: a cursor nobody is steering any more should not stay on
+/// screen. The one path every way out of a
 /// focus takes: `Esc`, a letter that focuses another panel, a layout switch
 /// that takes the panel off screen, the sweep's jump to the spectrum.
 pub(in crate::app::input) fn end_focus(

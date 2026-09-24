@@ -337,7 +337,7 @@ fn filter_to_selected(m: &mut SdrMetrics) {
 /// a quiet room.
 pub(super) fn carry_census_selection(m: &mut SdrMetrics) {
     // The selection while the census is still focused; the choice it left
-    // behind once focus ended (Stop 1). Spent either way, so an old choice
+    // behind once focus ended and cleared the selection. Spent either way, so an old choice
     // does not come back on a later visit that chose nothing.
     let Some(address) = m
         .net
@@ -814,7 +814,7 @@ mod tests {
         );
     }
 
-    /// **Leaving focus leaves no trace** (bluetooth-next-plan Stop 1):
+    /// **Leaving focus leaves no trace**:
     /// every NET position goes on `Esc`, every mode chosen on purpose stays.
     #[test]
     fn leaving_focus_clears_every_position_and_keeps_every_mode() {
