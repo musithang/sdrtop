@@ -40,7 +40,7 @@ name,name_complete,flags,tx_power_dbm,services,service_data,\
 company_id,company,mfr_data,other_ad,malformed,\
 snr_db,cfo_khz,cfo_khz_sigma,cfo_ppm,cfo_ppm_sigma,\
 start_khz,start_khz_sigma,end_khz,end_khz_sigma,\
-mod_index,mod_index_sigma,df1_avg_khz,df1_avg_khz_sigma,df2_max_khz,\
+mod_index,mod_index_sigma,df1_avg_khz,df1_avg_khz_sigma,df2_avg_khz,df2_avg_khz_sigma,\
 df2_df1_ratio,df2_df1_ratio_sigma,drift_khz,drift_khz_sigma,\
 drift_rate_hz_per_us,drift_rate_hz_per_us_sigma";
 
@@ -203,11 +203,10 @@ pub fn rows(state: &SdrMetrics) -> Vec<String> {
                 quality.map(|q| q.delta_f1_avg_hz.scale(1e-3)),
                 2,
             ));
-            f.push(
-                quality
-                    .map(|q| format!("{:.2}", q.delta_f2_max_hz * 1e-3))
-                    .unwrap_or_default(),
-            );
+            f.extend(with_sigma(
+                quality.map(|q| q.delta_f2_avg_hz.scale(1e-3)),
+                2,
+            ));
             f.extend(with_sigma(quality.map(|q| q.ratio), 3));
             f.extend(with_sigma(drift.map(|d| d.drift_hz.scale(1e-3)), 2));
             f.extend(with_sigma(drift.map(|d| d.drift_rate_hz_per_us), 2));
@@ -281,7 +280,7 @@ mod tests {
             freq_offset_hz: Some(Uncertain::from_sigma(-21_000.0, 500.0)),
             modulation: Some(ModulationQuality {
                 delta_f1_avg_hz: Uncertain::from_sigma(248_000.0, 1_500.0),
-                delta_f2_max_hz: 231_000.0,
+                delta_f2_avg_hz: Uncertain::from_sigma(231_000.0, 4_000.0),
                 modulation_index: Uncertain::from_sigma(0.496, 0.003),
                 ratio: Uncertain::from_sigma(0.91, 0.02),
             }),
@@ -349,7 +348,7 @@ mod tests {
             "company_id",
             "mod_index",
             "df1_avg_khz",
-            "df2_max_khz",
+            "df2_avg_khz",
             "drift_khz",
             "start_khz",
             "end_khz",

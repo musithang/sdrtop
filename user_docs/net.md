@@ -122,8 +122,10 @@ signals. Where it matters, the screen says which:
 
 - A limit **read from the Bluetooth Core Specification** names its section,
   for example `Core 5.4 Vol 2 A 3.1.1` beside the classic modulation rows.
-- BLE's modulation limits are recalled from test-specification documentation
-  and not yet checked against the specification itself.
+- BLE's modulation index and deviation limits are read from the Core
+  Specification (`Core 5.4 Vol 6 A 3.1`); its drift limits are still
+  recalled from test-specification documentation, and the section heading
+  says so.
 - The classic Bluetooth header decode is a port of `libbtbb`, and its
   section is headed "libbtbb port, unchecked on air". It has passed every
   test I could write for it and has never met a real classic transmitter,
@@ -261,7 +263,14 @@ The selected packet, spelled out:
   against the specification's limits, each drawn as a bar with the limit
   marked. Read from the packet's own symbols; a packet whose CRC failed is
   not measured, because which symbols were ones decides where deviation is
-  read.
+  read. `df2 avg` is the average deviation the packet reached while
+  alternating, held against the specification's 185 kHz floor (370 on LE
+  2M). The floor is on the *minimum*, and both obvious ways of reading one
+  from live traffic measured the noise instead: the largest reading could
+  never fail, and the smallest nearly always did. A transmitter's
+  alternating peaks are all the same peak, so the average stands in for
+  them, which means an average under the floor is a real finding and one
+  over it is not a promise.
 
 With **no packet selected**, the detail shows the session's **frame error
 rate against SNR**: for each 2 dB of SNR, what share of packets failed their

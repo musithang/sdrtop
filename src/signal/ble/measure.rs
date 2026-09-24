@@ -2,7 +2,7 @@
 // Copyright (C) 2026 MusiThang <viktor.laszlo92@protonmail.com>
 
 //! Transmitter modulation quality: modulation index, delta-f1 average,
-//! delta-f2 maximum and their ratio, from a packet this arc already
+//! delta-f2 average and the ratio of the averages, from a packet this arc already
 //! recovered rather than a dedicated test transmission.
 //!
 //! Design section 2.1's four numbers are specified as read from a *known*
@@ -59,18 +59,29 @@ use crate::signal::dsp::uncertainty::Uncertain;
 // them since classic Bluetooth reads the same (net-ux-polish-plan 6.4).
 
 /// One packet's modulation quality, each figure carrying the uncertainty a
-/// caller needs to judge it against a stated limit - except
-/// [`Self::delta_f2_max_hz`], a maximum of several noisy readings, which has
-/// no closed-form uncertainty the way a mean does and is reported as read.
+/// caller needs to judge it against a stated limit.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct ModulationQuality {
     /// The average peak deviation reached at the end of a settled run of
     /// four or more identical on-air symbols, in Hz.
     pub delta_f1_avg_hz: Uncertain,
-    /// The largest single peak deviation seen during a settled run of four
-    /// or more alternating on-air symbols, in Hz. Not an [`Uncertain`]: see
-    /// this struct's own doc for why a maximum does not get one.
-    pub delta_f2_max_hz: f64,
+    /// The average peak deviation reached in alternating runs, in Hz, held
+    /// against the floor Core 5.4 Vol 6 Part A 3.1 puts on the *minimum*
+    /// deviation ("shall never be less than 185 kHz" at 1 Msym/s).
+    ///
+    /// **Why the average, when the floor is on the minimum.** Two other
+    /// readings were tried on live traffic and both measured the noise
+    /// instead of the transmitter. The largest reading could never fail:
+    /// noise only pushed it further above the floor (668 kHz from a 7 dB
+    /// packet). The smallest nearly always did: the least of twenty noisy
+    /// readings sits about two of their sigma below their mean, so healthy
+    /// transmitters read 150 kHz against a floor of 185. A GFSK transmitter's
+    /// alternating peaks are all the same peak, shaped by the same filter,
+    /// so its minimum is its average, and the average is what a packet can
+    /// measure with a real uncertainty. What that costs is stated where it
+    /// is shown: an average under the floor is a transmitter under it, and
+    /// one over it could still dip on a run the average hides.
+    pub delta_f2_avg_hz: Uncertain,
     /// `2 * delta_f1_avg_hz / symbol rate` - the modulation index
     /// design section 2.1 states a band for, derived from delta-f1 because
     /// that is the settled, filter-independent deviation a device's own
@@ -105,13 +116,12 @@ pub fn modulation_quality(bits: &[bool], samples: &[f32], phy: Phy) -> Option<Mo
 
     let delta_f1_avg_hz = crate::signal::dsp::uncertainty::mean_with_uncertainty(&settled);
     let delta_f2_avg_hz = crate::signal::dsp::uncertainty::mean_with_uncertainty(&alternating);
-    let delta_f2_max_hz = alternating.iter().cloned().fold(f32::MIN, f32::max) as f64;
     let modulation_index = delta_f1_avg_hz.scale(2.0 / phy.symbol_rate_hz());
     let ratio = delta_f2_avg_hz.ratio(&delta_f1_avg_hz);
 
     Some(ModulationQuality {
         delta_f1_avg_hz,
-        delta_f2_max_hz,
+        delta_f2_avg_hz,
         modulation_index,
         ratio,
     })
@@ -333,7 +343,41 @@ mod tests {
             "ratio {} implies alternation reached further than settling does",
             q.ratio.value()
         );
-        assert!(q.delta_f2_max_hz <= q.delta_f1_avg_hz.value() * 1.2);
+        assert!(q.delta_f2_avg_hz.value() <= q.delta_f1_avg_hz.value());
+    }
+
+    /// The alternating deviation can fall below the specification's floor,
+    /// which the maximum it replaced never could: a transmitter at 150 kHz
+    /// deviation reads under 185 kHz, a nominal one over it.
+    ///
+    /// **And noise is either inside its sigma or too loud to print.**
+    /// Discriminator clicks push an average of peak readings up, as they
+    /// pushed the maximum: measured on this construction, about 220 kHz
+    /// clean, 260 to 320 at 8 dB. At 20 dB the reading stays within two
+    /// sigma of its clean value; at 8 dB its sigma is past the 10 kHz the
+    /// panel prints a delta-f reading at, so it shows as a dash rather than
+    /// as the inflated figure.
+    #[test]
+    fn the_alternating_deviation_can_fail_its_floor_and_noise_alone_does_not() {
+        const FLOOR_HZ: f64 = 185_000.0;
+        const PRINTS_BELOW_HZ: f64 = 10_000.0;
+        let df2 = |dev: f64, snr: f64| {
+            let (bits, samples) = symbols_and_samples(dev, 300, snr, 21);
+            modulation_quality(&bits, &samples, Phy::OneM)
+                .unwrap()
+                .delta_f2_avg_hz
+        };
+        let clean = df2(250_000.0, f64::INFINITY);
+        assert!(clean.value() > FLOOR_HZ, "{clean:?}");
+        assert!(df2(150_000.0, f64::INFINITY).value() < FLOOR_HZ);
+        let fair = df2(250_000.0, 20.0);
+        assert!(fair.sigma() < PRINTS_BELOW_HZ, "{fair:?}");
+        assert!(
+            (fair.value() - clean.value()).abs() < 2.0 * fair.sigma(),
+            "noise moved a printed reading: {fair:?} against {clean:?}"
+        );
+        let loud = df2(250_000.0, 8.0);
+        assert!(loud.sigma() > PRINTS_BELOW_HZ, "{loud:?}");
     }
 
     /// A run too short to contain either pattern refuses rather than

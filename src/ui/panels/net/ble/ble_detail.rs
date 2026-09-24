@@ -25,7 +25,7 @@
 //! **Modulation quality only from a packet whose CRC passed** (5.4.c,
 //! Viktor's decision of 2026-09-22). The measurement reads the deviation at
 //! the symbols it believes were ones and zeros, and a failed CRC says some of
-//! them were not: the live screen once showed `df2 max 1589 kHz` for such a
+//! them were not: the live screen once showed a 1589 kHz alternating deviation for such a
 //! packet. It says "not measured: CRC failed" instead of a number built on
 //! wrong bits (rule 2).
 //!
@@ -54,11 +54,8 @@ use crate::ui::widgets::reading::Reading;
 
 pub struct NetBleDetailPanel;
 
-/// Design section 2.1: "roughly 0.45 to 0.55 for BLE". Cross-checked
-/// informally, not read from a primary copy of the specification this
-/// session - the same standing `signal::ble::channel`'s own table has, and
-/// the same figure `ui::widgets::limit`'s own tests were written against
-/// before this panel gave the widget a real consumer.
+/// **Read from Core 5.4 Vol 6 Part A 3.1**: "The modulation index shall be
+/// between 0.45 and 0.55."
 const MOD_INDEX_BAND: Limit = Limit::Band {
     low: 0.45,
     high: 0.55,
@@ -72,18 +69,18 @@ const DELTA_F1_BAND_KHZ: Limit = Limit::Band {
     high: 275.0,
 };
 
-/// Recalled from the BLE RF-PHY test specification's own delta-f2 floor,
-/// **not checked against a primary source this session** - design section
-/// 6's own "facts to verify before building" table lists this exact figure
-/// as open. Kept as a stated limit rather than left out, on the same
-/// reasoning `signal::ble::channel`'s table gives for shipping a
-/// cross-checked-but-unread number: real, and owed a real read before
-/// anything downstream trusts it to the last kHz.
-const DELTA_F2_MAX_FLOOR_KHZ: Limit = Limit::Min(185.0);
+/// **Read from Core 5.4 Vol 6 Part A 3.1**: "The minimum frequency
+/// deviation shall never be less than 185 kHz when transmitting at 1
+/// megasymbol per second". A floor on the minimum, held against the
+/// alternating average; `ModulationQuality::delta_f2_avg_hz` says why, and
+/// what that can and cannot conclude.
+const DELTA_F2_MIN_FLOOR_KHZ: Limit = Limit::Min(185.0);
 
-/// Recalled from the same source and under the same caveat as
-/// [`DELTA_F2_MAX_FLOOR_KHZ`]: the specification's own ratio requirement
-/// between delta-f2 and delta-f1 averages.
+/// The same section: the minimum deviation, from a 1010 sequence, "shall be
+/// no smaller than ±80% of the frequency deviation ... which corresponds to
+/// a 00001111 sequence". What is held against it here is the ratio of the
+/// two averages, the form a passive listener's many short runs support; the
+/// row's reading says which it is.
 const RATIO_FLOOR: Limit = Limit::Min(0.8);
 
 /// Recalled from the RF-PHY test specification's own drift limit for LE 1M,
@@ -113,11 +110,9 @@ const DELTA_F1_BAND_2M_KHZ: Limit = Limit::Band {
     high: 550.0,
 };
 
-/// LE 2M's delta-f2 floor: [`DELTA_F2_MAX_FLOOR_KHZ`] doubled, on the same
-/// public statement that the modulation limits double on LE 2M. **Under the
-/// same caveat as the LE 1M figure**: not read from the RF-PHY test
-/// specification itself this session.
-const DELTA_F2_MAX_FLOOR_2M_KHZ: Limit = Limit::Min(370.0);
+/// LE 2M's floor, **read from the same sentence**: "never be less than 370
+/// kHz when transmitting at 2 Msym/s".
+const DELTA_F2_MIN_FLOOR_2M_KHZ: Limit = Limit::Min(370.0);
 
 /// How much uncertainty each reading can carry before it dashes rather than
 /// prints - a judgement call in the absence of a specification-stated
@@ -128,6 +123,8 @@ const DELTA_F2_MAX_FLOOR_2M_KHZ: Limit = Limit::Min(370.0);
 const MOD_INDEX_RESOLUTION: f64 = 0.02;
 const DELTA_F1_RESOLUTION_KHZ: f64 = 10.0;
 const RATIO_RESOLUTION: f64 = 0.1;
+/// As delta-f1's, and doubled with the floor on LE 2M.
+const DELTA_F2_RESOLUTION_KHZ: f64 = 10.0;
 const DRIFT_RESOLUTION_KHZ: f64 = 10.0;
 const DRIFT_RATE_RESOLUTION: f64 = 80.0;
 
@@ -143,10 +140,18 @@ fn rows(
     phy: crate::signal::ble::Phy,
 ) -> Vec<LimitRow<'static>> {
     let two_m = phy == crate::signal::ble::Phy::TwoM;
-    let (df1_band, df2_floor) = if two_m {
-        (DELTA_F1_BAND_2M_KHZ, DELTA_F2_MAX_FLOOR_2M_KHZ)
+    let (df1_band, df2_floor, df2_resolution) = if two_m {
+        (
+            DELTA_F1_BAND_2M_KHZ,
+            DELTA_F2_MIN_FLOOR_2M_KHZ,
+            2.0 * DELTA_F2_RESOLUTION_KHZ,
+        )
     } else {
-        (DELTA_F1_BAND_KHZ, DELTA_F2_MAX_FLOOR_KHZ)
+        (
+            DELTA_F1_BAND_KHZ,
+            DELTA_F2_MIN_FLOOR_KHZ,
+            DELTA_F2_RESOLUTION_KHZ,
+        )
     };
     let d = if two_m { None } else { d };
     let mut out = vec![
@@ -165,17 +170,8 @@ fn rows(
             df1_band,
         ),
         LimitRow::new(
-            "df2 max",
-            // Not an `Uncertain` this measurement carries - see
-            // `ModulationQuality::delta_f2_max_hz`'s own doc for why a
-            // maximum gets none - so this reads it as exact rather than
-            // inventing a sigma, and `f64::INFINITY` so it is never dashed
-            // for a reason it did not earn.
-            Reading::new(
-                Uncertain::exact(q.delta_f2_max_hz * 0.001),
-                "kHz",
-                f64::INFINITY,
-            ),
+            "df2 avg",
+            Reading::new(q.delta_f2_avg_hz.scale(0.001), "kHz", df2_resolution),
             df2_floor,
         ),
         LimitRow::new(
@@ -639,7 +635,14 @@ fn connection_lines(
 
 /// The MODULATION section: the limit rows, or why there are none.
 fn modulation_lines(p: &BlePacket, iw: usize, theme: &crate::Theme) -> Vec<Line<'static>> {
-    let mut out = vec![crate::ui::chrome::section("modulation", "", iw, theme)];
+    // Where the limits come from, as the classic rows say theirs: the
+    // modulation rows are read, the drift rows still recalled.
+    let mut out = vec![crate::ui::chrome::section(
+        "modulation",
+        "LE limits: Core 5.4 Vol 6 A 3.1; drift recalled",
+        iw,
+        theme,
+    )];
     if !p.crc_ok {
         out.push(Line::from(Span::styled(
             " not measured: CRC failed".to_string(),
@@ -900,7 +903,7 @@ mod tests {
     fn quality(deviation_hz: f64) -> ModulationQuality {
         ModulationQuality {
             delta_f1_avg_hz: Uncertain::from_sigma(deviation_hz, deviation_hz * 0.01),
-            delta_f2_max_hz: deviation_hz * 0.9,
+            delta_f2_avg_hz: Uncertain::from_sigma(deviation_hz * 0.9, deviation_hz * 0.01),
             modulation_index: Uncertain::from_sigma(2.0 * deviation_hz / 1_000_000.0, 0.005),
             ratio: Uncertain::from_sigma(0.9, 0.02),
         }
@@ -989,7 +992,7 @@ mod tests {
         let out = draw(NetBleDetailPanel, 70, 24, &sel(&m)).join("\n");
         assert!(out.contains("Mod index"), "{out}");
         assert!(out.contains("df1 avg"), "{out}");
-        assert!(out.contains("df2 max"), "{out}");
+        assert!(out.contains("df2 avg"), "{out}");
         assert!(out.contains("df2/df1"), "{out}");
         let lower = out.to_ascii_lowercase();
         for word in ["pass", "fail"] {

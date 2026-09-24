@@ -1468,7 +1468,7 @@ mod tests {
         packet.pdu_type = crate::signal::ble::pdu::PduType::ScanRsp;
         packet.modulation = Some(crate::signal::ble::measure::ModulationQuality {
             delta_f1_avg_hz: Uncertain::from_sigma(250e3, 5e3),
-            delta_f2_max_hz: 230e3,
+            delta_f2_avg_hz: crate::signal::dsp::uncertainty::Uncertain::from_sigma(230e3, 4e3),
             modulation_index: Uncertain::from_sigma(0.5, 0.01),
             ratio: Uncertain::from_sigma(0.9, 0.02),
         });
