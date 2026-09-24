@@ -225,7 +225,8 @@ pub struct UiState {
     /// became section-relative that table started advertising keys that do
     /// nothing. Mirroring the real thing is the same trick `active_preset`
     /// already uses to keep the footer out of the engine.
-    pub scope: Vec<(Option<u8>, String)>,
+    /// Each entry is `(slot, preset name, the menu's title for it)`.
+    pub scope: Vec<(Option<u8>, String, String)>,
     pub log: VecDeque<LogEntry>,
     /// Command Rail lead-view mode (Hunt/Monitor/Bench). See [`RailMode`].
     pub rail_mode: RailMode,

@@ -18,47 +18,94 @@ const FOCUS_SEP: &str = "  ·  ";
 const NORMAL_SEP: &str = " · ";
 const MAX_CONTENT_LINES: u16 = 5;
 
-const NORMAL_ITEMS: &[&str] = &[
-    "[Q] Quit",
-    "[Space] RX",
-    "[↑↓] LNA",
-    "[[] VGA",
-    "[A] AMP",
-    "[F] Freq",
-    "[S] Rate",
-    "[R] Reset",
-    "[Esc] Menu",
-    "[Tab] Hide",
-];
+/// Between groups: the radio, the section, the layouts and the way out read as
+/// four things, not one long list.
+const GROUP_SEP: &str = "  \u{2502}  ";
 
-/// Base normal-mode key hints, adapted to the device's gain model: HackRF shows
-/// LNA/VGA/AMP; a single-tuner device (RTL-SDR) shows one gain, no VGA.
-///
-/// **The boost is named by the model, not by this list**, and is omitted for a
-/// device that has none. Both used to be hardcoded here: every single-gain
-/// device was offered `[A] AGC` whether or not it had anything to toggle, and a
-/// HackRF reached through SoapySDR ended up with `AMP OFF` in the gain block and
-/// `[A] AGC` in the footer, two names for one switch on one screen.
-fn base_normal_items(gm: &GainModel) -> Vec<String> {
-    if !gm.is_single() {
-        return NORMAL_ITEMS.iter().map(|s| s.to_string()).collect();
+/// One group of footer items, drawn together. A group moves to the next line
+/// whole, and breaks inside itself only when it is wider than the footer.
+type Group = Vec<String>;
+
+/// The radio group every section's footer opens with, from the key table
+/// (`ui::menu::keys::GLOBAL`) and the gain model: the gain keys are named by
+/// the stages the device reported and its boost by its own name, and a key
+/// the device cannot use is not offered. A power-trace device (a tinySA)
+/// takes a span where the others take a rate, and has no gain keys here.
+fn radio_group(gm: &GainModel, span: bool) -> Group {
+    use crate::ui::menu::keys::{Footer, GLOBAL};
+    let stages = gm.stages();
+    let mut out = Vec::new();
+    for (_, rows) in GLOBAL {
+        for row in rows.iter() {
+            match row.footer {
+                Footer::Radio(label) => {
+                    let label = if span && row.ch == Some('s') {
+                        "Span"
+                    } else {
+                        label
+                    };
+                    out.push(format!("[{}] {label}", row.key));
+                }
+                Footer::Gain if !span => match row.ch {
+                    // The primary knob: the front stage where the second has
+                    // a key of its own, the whole chain where it does not.
+                    None => out.push(match (gm.has_second_stage(), stages.first()) {
+                        (true, Some(first)) => format!("[\u{2191}\u{2193}] {}", first.name),
+                        _ => "[\u{2191}\u{2193}] Gain".to_string(),
+                    }),
+                    Some('[') if gm.has_second_stage() => {
+                        if let Some(second) = stages.get(1) {
+                            out.push(format!("[[ ]] {}", second.name));
+                        }
+                    }
+                    Some('a') if gm.has_boost() => {
+                        out.push(format!("[{}] {}", row.key, gm.boost_label()));
+                    }
+                    _ => {}
+                },
+                _ => {}
+            }
+        }
     }
-    let mut items: Vec<String> = vec!["[Q] Quit".into(), "[Space] RX".into(), "[↑↓] Gain".into()];
-    if gm.has_boost() {
-        items.push(format!("[A] {}", gm.boost_label()));
+    out
+}
+
+/// The section's own group: the keys the key table files under this menu
+/// section, with the NET modes' current state beside their keys. Focus keys
+/// are not here: every panel that takes focus names its letter in its own
+/// title.
+fn section_group(m: &SdrMetrics) -> Group {
+    use crate::ui::menu::keys::{Footer, GLOBAL};
+    let mut out = Vec::new();
+    for (_, rows) in GLOBAL {
+        for row in rows.iter() {
+            let Footer::Section(sections, label) = row.footer else {
+                continue;
+            };
+            if !sections.contains(&m.ui.section.as_str()) {
+                continue;
+            }
+            out.push(match row.ch {
+                Some('m') => format!("[{}] {label}={}", row.key, m.net.mode.label()),
+                Some('i') => format!("[{}] {label}={}", row.key, m.net.address_display.label()),
+                _ => format!("[{}] {label}", row.key),
+            });
+        }
     }
-    items.extend(
-        [
-            "[F] Freq",
-            "[S] Rate",
-            "[R] Reset",
-            "[Esc] Menu",
-            "[Tab] Hide",
-        ]
+    out
+}
+
+/// The group every footer ends with.
+fn tail_group() -> Group {
+    use crate::ui::menu::keys::{Footer, GLOBAL};
+    GLOBAL
         .iter()
-        .map(|s| s.to_string()),
-    );
-    items
+        .flat_map(|(_, rows)| rows.iter())
+        .filter_map(|row| match row.footer {
+            Footer::Tail(label) => Some(format!("[{}] {label}", row.key)),
+            _ => None,
+        })
+        .collect()
 }
 
 /// Width (terminal columns) below which the preset name is shown in short form.
@@ -79,15 +126,6 @@ fn preset_label(name: &str, narrow: bool) -> &str {
     }
 }
 
-/// Whether `name` belongs to the lab preset family.
-///
-/// The prefix rather than a table of four names: the same prefix already drives
-/// `UiState::is_lab_mode` and the steel frame, so one rule decides. `lab_sweep`
-/// is deliberately included by it, which is what it always was on screen.
-fn is_lab_preset(name: &str) -> bool {
-    name.starts_with("lab_")
-}
-
 /// Whether `name` is a micro ecosystem preset.
 fn is_micro_preset(name: &str) -> bool {
     name.starts_with("micro_")
@@ -101,14 +139,14 @@ fn is_micro_preset(name: &str) -> bool {
 /// footer names the range that actually works.
 fn micro_items(
     view: MicroView,
-    scope: &[(Option<u8>, String)],
+    scope: &[(Option<u8>, String, String)],
     narrow: bool,
     gm: &GainModel,
 ) -> Vec<String> {
     let sweep_active = true;
     let total = MicroView::total(sweep_active);
     let pos = view.position();
-    let keys = match scope.iter().filter(|(slot, _)| slot.is_some()).count() {
+    let keys = match scope.iter().filter(|(slot, _, _)| slot.is_some()).count() {
         0 => "[1-9]".to_string(),
         n => format!("[1-{n}]"),
     };
@@ -122,11 +160,14 @@ fn micro_items(
         ]
     } else {
         let mut v: Vec<String> = vec!["[Q]".into(), "[Spc]RX".into()];
-        if gm.is_single() {
-            v.push("[↑↓]Gain".into());
-        } else {
-            v.push("[↑↓]LNA".into());
-            v.push("[[]VGA".into());
+        // Named by the model, as on every other footer.
+        let stages = gm.stages();
+        match (gm.has_second_stage(), stages.first(), stages.get(1)) {
+            (true, Some(first), Some(second)) => {
+                v.push(format!("[↑↓]{}", first.name));
+                v.push(format!("[[]{}", second.name));
+            }
+            _ => v.push("[↑↓]Gain".into()),
         }
         v.push("[F]req".into());
         v.push(keys);
@@ -136,7 +177,7 @@ fn micro_items(
 }
 
 /// Navigation map for the active section: one entry per layout that has a number
-/// key, with the current one marked `▸`.
+/// key, under the title the menu gives it, with the current one marked `▸`.
 ///
 /// Built from `UiState::scope`, which mirrors the engine's section into the frame
 /// snapshot. It used to be built from a `LAB_FAMILY` table hard-coding
@@ -144,72 +185,128 @@ fn micro_items(
 /// section-relative: the footer would have gone on advertising four keys that do
 /// nothing, which is the same way the old help overlay came to claim `[1]` meant
 /// `main`. A footer that names keys has to read the keys.
-fn scope_map_items(active: &str, scope: &[(Option<u8>, String)]) -> Vec<String> {
+fn scope_map_items(active: &str, scope: &[(Option<u8>, String, String)]) -> Vec<String> {
     scope
         .iter()
         // A layout with no slot has no number key, so the map has nothing to
         // teach about it.
-        .filter_map(|(slot, name)| slot.map(|s| (s, name)))
-        .map(|(slot, name)| {
+        .filter_map(|(slot, name, title)| slot.map(|s| (s, name, title)))
+        .map(|(slot, name, title)| {
             if name == active {
-                format!("[{}]\u{25B8}{}", slot, name)
+                format!("[{}]\u{25B8}{}", slot, title)
             } else {
-                format!("[{}] {}", slot, name)
+                format!("[{}] {}", slot, title)
             }
         })
         .collect()
 }
 
-/// The normal-mode footer items for the active preset:
-/// - micro presets → a condensed field-key set and the position in the family;
-/// - lab presets   → the fixed keys plus the section's navigation map;
-/// - everything else → the fixed keys plus the `[P] {preset}` hint.
-///
-/// `scope` is the active section, mirrored into the snapshot each frame. The
-/// footer names keys, and the keys are section-relative, so it has to read the
-/// section rather than a table of its own.
-fn normal_items(
-    active_preset: &str,
-    scope: &[(Option<u8>, String)],
-    micro_view: MicroView,
-    available_width: u16,
-    gm: &GainModel,
-) -> Vec<String> {
+/// The footer for the active layout, in groups: the radio, the section's own
+/// keys, the section's layouts, and the way out. Each section gets a footer of
+/// its own this way, because the middle two groups are the section's. Micro
+/// keeps its condensed field footer.
+fn normal_groups(m: &SdrMetrics, available_width: u16) -> Vec<Group> {
     let narrow = available_width < NARROW_COLS;
-    if is_micro_preset(active_preset) {
-        return micro_items(micro_view, scope, narrow, gm);
+    let preset = m.ui.active_preset.as_str();
+    if is_micro_preset(preset) {
+        return vec![micro_items(
+            m.ui.micro_view(),
+            &m.ui.scope,
+            narrow,
+            &m.caps.gain,
+        )];
     }
-    let mut items: Vec<String> = base_normal_items(gm);
-    if is_lab_preset(active_preset) {
-        items.extend(scope_map_items(active_preset, scope));
+    let mut groups = vec![radio_group(&m.caps.gain, m.caps.sample_rate_is_span)];
+    let section = section_group(m);
+    if !section.is_empty() {
+        groups.push(section);
+    }
+    let map = scope_map_items(preset, &m.ui.scope);
+    groups.push(if map.is_empty() {
+        // A layout the menu does not list has no number keys to map.
+        vec![format!("[P] {}", preset_label(preset, narrow))]
     } else {
-        items.push(format!("[P] {}", preset_label(active_preset, narrow)));
-    }
-    items
+        map
+    });
+    groups.push(tail_group());
+    groups
 }
 
-fn normal_items_for(
-    active_preset: &str,
-    scope: &[(Option<u8>, String)],
-    micro_view: MicroView,
-    available_width: u16,
-    gm: &GainModel,
-    sample_rate_is_span: bool,
-) -> Vec<String> {
-    if sample_rate_is_span {
-        let narrow = available_width < NARROW_COLS;
-        return vec![
-            "[Q] Quit".into(),
-            "[Space] RX".into(),
-            "[F] Freq".into(),
-            "[S] Span".into(),
-            "[R] Reset".into(),
-            "[Esc] Menu".into(),
-            "[Tab] Hide".into(),
-            format!("[P] {}", preset_label(active_preset, narrow)),
-        ];
+/// Lay the groups out in lines no wider than `inner_w`: each item paired with
+/// whether it opens a group (drawn after the group rule rather than the item
+/// dot). A group that fits goes whole onto the current line or the next.
+fn wrap_groups(groups: &[Group], inner_w: usize) -> Vec<Vec<(bool, String)>> {
+    let item_w = |s: &str| s.chars().count();
+    let group_w = |g: &Group| {
+        g.iter().map(|s| item_w(s)).sum::<usize>()
+            + NORMAL_SEP.chars().count() * g.len().saturating_sub(1)
+    };
+    let (gsep, isep) = (GROUP_SEP.chars().count(), NORMAL_SEP.chars().count());
+    let mut lines: Vec<Vec<(bool, String)>> = vec![Vec::new()];
+    let mut w = 0usize;
+    for g in groups.iter().filter(|g| !g.is_empty()) {
+        let gw = group_w(g);
+        if w > 0 && w + gsep + gw > inner_w {
+            lines.push(Vec::new());
+            w = 0;
+        }
+        for (k, item) in g.iter().enumerate() {
+            let sep = match (w, k) {
+                (0, _) => 0,
+                (_, 0) => gsep,
+                _ => isep,
+            };
+            // Inside a group wider than the line, break between its items.
+            if w > 0 && w + sep + item_w(item) > inner_w {
+                lines.push(Vec::new());
+                w = 0;
+            }
+            let opens = k == 0 && w > 0;
+            let sep = if w == 0 {
+                0
+            } else if k == 0 {
+                gsep
+            } else {
+                isep
+            };
+            lines
+                .last_mut()
+                .expect("a line")
+                .push((opens, item.clone()));
+            w += sep + item_w(item);
+        }
     }
-    normal_items(active_preset, scope, micro_view, available_width, gm)
+    lines.retain(|l| !l.is_empty());
+    if lines.is_empty() {
+        lines.push(Vec::new());
+    }
+    lines
+}
+
+/// The wrapped groups as styled lines: a dim dot between items, a dim rule
+/// between groups.
+fn styled_group_lines(
+    lines: Vec<Vec<(bool, String)>>,
+    theme: &crate::Theme,
+    max_lines: usize,
+) -> Vec<Line<'static>> {
+    lines
+        .into_iter()
+        .take(max_lines.max(1))
+        .map(|line| {
+            let mut spans: Vec<Span> = Vec::new();
+            for (i, (opens, item)) in line.iter().enumerate() {
+                if i > 0 {
+                    spans.push(Span::styled(
+                        if *opens { GROUP_SEP } else { NORMAL_SEP }.to_string(),
+                        Style::default().fg(theme.border_dim),
+                    ));
+                }
+                spans.extend(item_spans(item, theme));
+            }
+            Line::from(spans)
+        })
+        .collect()
 }
 
 /// Break `items` into lines (groups) where no line exceeds `inner_w` display
@@ -280,6 +377,19 @@ fn item_spans(item: &str, theme: &crate::Theme) -> Vec<Span<'static>> {
                     name.to_string(),
                     Style::default().fg(theme.value_hi),
                 ));
+            } else if let Some((word, state)) = rest.split_once('=') {
+                // A key with its state beside it (`[M] mode=SURVEY`): the
+                // word in the label ink, the state as a value.
+                spans.push(Span::styled(
+                    format!("{word} "),
+                    Style::default().fg(theme.label),
+                ));
+                spans.push(Span::styled(
+                    state.to_string(),
+                    Style::default()
+                        .fg(theme.value)
+                        .add_modifier(Modifier::BOLD),
+                ));
             } else if !rest.is_empty() {
                 spans.push(Span::styled(
                     rest.to_string(),
@@ -339,18 +449,7 @@ pub fn compute_footer_height(available_width: u16, state: &SdrMetrics) -> u16 {
     let n = if state.ui.focused_panel.is_some() {
         count_lines(&focus_items(state), FOCUS_SEP, inner_w)
     } else {
-        count_lines(
-            &normal_items_for(
-                &state.ui.active_preset,
-                &state.ui.scope,
-                state.ui.micro_view(),
-                available_width,
-                &state.caps.gain,
-                state.caps.sample_rate_is_span,
-            ),
-            NORMAL_SEP,
-            inner_w,
-        )
+        wrap_groups(&normal_groups(state, available_width), inner_w).len()
     };
     (n as u16 + 2).clamp(3, MAX_CONTENT_LINES + 2)
 }
@@ -473,16 +572,8 @@ impl Panel for FooterPanel {
                         }
                         wrapped
                     } else {
-                        let items = normal_items_for(
-                            &m.ui.active_preset,
-                            &m.ui.scope,
-                            m.ui.micro_view(),
-                            frame::outer_of(inner).width,
-                            &m.caps.gain,
-                            m.caps.sample_rate_is_span,
-                        );
-                        let groups = wrap_items_grouped(&items, NORMAL_SEP, inner_w);
-                        styled_lines(groups, NORMAL_SEP, theme, max_lines)
+                        let groups = normal_groups(m, frame::outer_of(inner).width);
+                        styled_group_lines(wrap_groups(&groups, inner_w), theme, max_lines)
                     }
                 }
             }
@@ -665,24 +756,216 @@ mod tests {
         assert_eq!(lines[0], "aaa  bbb");
     }
 
-    #[test]
-    fn normal_items_wrap_at_80_cols() {
-        let n = count_lines(NORMAL_ITEMS, NORMAL_SEP, 78);
-        assert!(
-            n >= 2,
-            "normal items at inner_w=78 should need >=2 lines, got {}",
-            n
-        );
+    /// The footer a layout would get: `preset` active, filed under `section`,
+    /// whose layouts are `scope`, on a HackRF (the fixture's radio).
+    fn footer_at(
+        preset: &str,
+        section: &str,
+        scope: Vec<(Option<u8>, String, String)>,
+        width: u16,
+    ) -> Vec<Group> {
+        let mut m = SdrMetrics::fixture();
+        m.ui.active_preset = preset.to_string();
+        m.ui.section = section.to_string();
+        m.ui.scope = scope;
+        normal_groups(&m, width)
     }
 
+    fn slots(entries: &[(&str, &str)]) -> Vec<(Option<u8>, String, String)> {
+        entries
+            .iter()
+            .enumerate()
+            .map(|(i, (preset, title))| (Some(i as u8 + 1), preset.to_string(), title.to_string()))
+            .collect()
+    }
+
+    fn rail_scope() -> Vec<(Option<u8>, String, String)> {
+        slots(&[
+            ("command_rail", "Rail"),
+            ("spectrum", "Spectrum"),
+            ("waterfall", "Waterfall"),
+        ])
+    }
+
+    fn lab_scope() -> Vec<(Option<u8>, String, String)> {
+        slots(&[
+            ("lab_iq", "IQ"),
+            ("lab_rf", "RF"),
+            ("lab_timing", "Timing"),
+            ("lab_signal", "Signal"),
+        ])
+    }
+
+    fn net_scope() -> Vec<(Option<u8>, String, String)> {
+        slots(&[
+            ("net", "Capability"),
+            ("net_survey", "Survey"),
+            ("net_census", "Census"),
+            ("net_ble", "BLE"),
+            ("net_bt", "Classic"),
+        ])
+    }
+
+    /// The Micro section as the engine mirrors it: four layouts, slots 1 to 4.
+    fn micro_scope() -> Vec<(Option<u8>, String, String)> {
+        slots(&[
+            ("micro_main", "Overview"),
+            ("micro_signal", "Signal"),
+            ("micro_gain", "Gain"),
+            ("micro_health", "Health"),
+        ])
+    }
+
+    /// **Each section's footer is its own**: the same radio group and way
+    /// out, and between them the section's keys and its layouts, by the
+    /// titles the menu uses, the current one marked.
     #[test]
-    fn normal_items_fit_at_200_cols() {
-        let n = count_lines(NORMAL_ITEMS, NORMAL_SEP, 198);
+    fn each_section_gets_its_own_footer() {
+        let rail = footer_at("command_rail", "command_rail", rail_scope(), 200);
+        assert_eq!(rail.len(), 4, "{rail:?}");
         assert_eq!(
-            n, 1,
-            "normal items at inner_w=198 should fit on 1 line, got {}",
-            n
+            rail[0],
+            vec![
+                "[Space] RX",
+                "[F] Freq",
+                "[S] Rate",
+                "[↑↓] LNA",
+                "[[ ]] VGA",
+                "[A] AMP"
+            ]
         );
+        assert_eq!(rail[1], vec!["[W] Pause", "[H] Hold"]);
+        assert_eq!(rail[2], vec!["[1]▸Rail", "[2] Spectrum", "[3] Waterfall"]);
+        assert_eq!(rail[3], vec!["[Esc] Menu", "[Q] Quit"]);
+
+        let lab = footer_at("lab_rf", "lab", lab_scope(), 200);
+        assert_eq!(lab[1], vec!["[Y] Reference", "[W] Pause", "[H] Hold"]);
+        assert_eq!(lab[2], vec!["[1] IQ", "[2]▸RF", "[3] Timing", "[4] Signal"]);
+
+        // A section with no keys of its own has no middle group.
+        let sweep = footer_at("lab_sweep", "sweep", slots(&[("lab_sweep", "Sweep")]), 200);
+        assert_eq!(sweep.len(), 3, "{sweep:?}");
+    }
+
+    /// **NET's footer says its modes as they stand**: survey or lock and how
+    /// addresses are shown, beside the keys that change them, and the export
+    /// and reference keys that were nowhere on screen before.
+    #[test]
+    fn the_net_footer_carries_its_keys_and_their_state() {
+        let mut m = SdrMetrics::fixture();
+        m.ui.active_preset = "net_ble".to_string();
+        m.ui.section = "net".to_string();
+        m.ui.scope = net_scope();
+        m.net.mode = crate::state::NetMode::Lock;
+        m.net.address_display = crate::state::AddressDisplay::Masked;
+        let groups = normal_groups(&m, 200);
+        assert_eq!(
+            groups[1],
+            vec![
+                "[M] mode=LOCK",
+                "[I] addresses=masked",
+                "[O] Export",
+                "[Y] Reference"
+            ]
+        );
+        assert!(groups[2].contains(&"[4]▸BLE".to_string()), "{groups:?}");
+        // The value is drawn apart from its word.
+        let spans = item_spans("[M] mode=LOCK", &crate::Theme::sdr());
+        let text: String = spans.iter().map(|s| s.content.as_ref()).collect();
+        assert_eq!(text, "[M] mode LOCK");
+    }
+
+    /// **No focus letters on the footer**: every panel that takes focus names
+    /// its letter in its own title, so the footer holds only keys that are
+    /// not a panel's.
+    #[test]
+    fn the_footer_names_only_keys_the_table_files_there() {
+        use crate::ui::menu::keys::{Footer, GLOBAL};
+        let filed: Vec<&str> = GLOBAL
+            .iter()
+            .flat_map(|(_, rows)| rows.iter())
+            .filter(|r| !matches!(r.footer, Footer::No))
+            .map(|r| r.key)
+            .collect();
+        for (preset, section, scope) in [
+            ("command_rail", "command_rail", rail_scope()),
+            ("lab_iq", "lab", lab_scope()),
+            ("net_bt", "net", net_scope()),
+        ] {
+            for group in footer_at(preset, section, scope, 200) {
+                for item in group {
+                    let key = &item[1..item.find(']').unwrap()];
+                    let ok = key.chars().all(|c| c.is_ascii_digit())
+                        || matches!(key, "↑↓" | "[ ")
+                        || filed.contains(&key);
+                    assert!(
+                        ok,
+                        "{preset}: '{item}' is not a key the table files on the footer"
+                    );
+                }
+            }
+        }
+    }
+
+    /// **The gain keys are the device's**: named by the stages it reported
+    /// and its boost by its own name, a single-knob device offered one knob,
+    /// and a key it cannot use not offered at all.
+    #[test]
+    fn the_gain_keys_are_named_by_the_model() {
+        let amp = GainModel::new(vec![], "RF", "RF")
+            .with_gauge_fallback(116)
+            .with_boost(crate::hardware::Boost::Element(
+                crate::hardware::StageSpec::ranged("AMP", 0.0, 14.0, 14.0),
+            ));
+        assert_eq!(
+            radio_group(&amp, false),
+            vec!["[Space] RX", "[F] Freq", "[S] Rate", "[↑↓] Gain", "[A] AMP"]
+        );
+        // Three stages the driver called LNA, TIA and PGA, one knob, and an
+        // automatic gain mode: no VGA anywhere, and an AGC that is one.
+        let lime = GainModel::new(
+            vec![
+                crate::hardware::StageSpec::ranged("LNA", 0.0, 30.0, 1.0),
+                crate::hardware::StageSpec::ranged("TIA", 0.0, 12.0, 1.0),
+                crate::hardware::StageSpec::ranged("PGA", -12.0, 19.0, 1.0),
+            ],
+            "RF",
+            "RF",
+        )
+        .with_boost(crate::hardware::Boost::GainMode);
+        let items = radio_group(&lime, false).join(" ");
+        assert!(
+            items.contains("[↑↓] Gain") && items.contains("[A] AGC"),
+            "{items}"
+        );
+        assert!(!items.contains("VGA") && !items.contains("LNA"), "{items}");
+        let none = GainModel::new(vec![], "RF", "RF").with_gauge_fallback(45);
+        assert!(!radio_group(&none, false).join(" ").contains("[A]"));
+    }
+
+    /// A power-trace device (a tinySA) takes a span, and has no gain keys here.
+    #[test]
+    fn power_trace_footer_keeps_only_supported_radio_controls() {
+        let items = radio_group(&hackrf::gain_model(), true).join(" ");
+        assert_eq!(items, "[Space] RX [F] Freq [S] Span");
+    }
+
+    /// **A group moves whole**: where two fit on a line they share it, and
+    /// where they do not the second starts the next line rather than
+    /// breaking in the middle.
+    #[test]
+    fn groups_wrap_whole() {
+        let groups = vec![
+            vec!["[A] aaaa".to_string(), "[B] bbbb".to_string()],
+            vec!["[C] cccc".to_string(), "[D] dddd".to_string()],
+        ];
+        // "[A] aaaa · [B] bbbb" is 19; with the rule and the second, 43.
+        assert_eq!(wrap_groups(&groups, 43).len(), 1);
+        let two = wrap_groups(&groups, 30);
+        assert_eq!(two.len(), 2);
+        assert_eq!(two[1][0], (false, "[C] cccc".to_string()));
+        // A group wider than the line breaks inside itself.
+        assert_eq!(wrap_groups(&groups[..1], 10).len(), 2);
     }
 
     #[test]
@@ -695,93 +978,34 @@ mod tests {
         assert_eq!(preset_label("lab_iq", true), "lab_iq");
     }
 
+    /// A layout the menu does not list has no number keys, and names itself.
     #[test]
-    fn normal_items_appends_preset_entry() {
-        let items = normal_items("main", &[], MicroView::Main, 120, &hackrf::gain_model());
-        assert_eq!(items.last().map(String::as_str), Some("[P] main"));
-        assert_eq!(items.len(), NORMAL_ITEMS.len() + 1);
-    }
-
-    #[test]
-    fn power_trace_footer_keeps_only_supported_radio_controls() {
-        let items = normal_items_for(
-            "spectrum_waterfall",
-            &[],
-            MicroView::Main,
-            120,
-            &hackrf::gain_model(),
-            true,
-        );
-        let text = items.join(" ");
-        assert!(text.contains("[Space] RX"));
-        assert!(text.contains("[F] Freq"));
-        assert!(text.contains("[S] Span"));
-        assert!(text.contains("[R] Reset"));
-        assert!(!text.contains("Gain"));
-        assert!(!text.contains("LNA"));
-        assert!(!text.contains("VGA"));
-        assert!(!text.contains("AMP"));
-    }
-
-    #[test]
-    fn normal_items_uses_short_preset_when_narrow() {
-        let items = normal_items(
-            "spectrum_waterfall",
-            &[],
-            MicroView::Main,
-            50,
-            &hackrf::gain_model(),
-        );
-        assert_eq!(items.last().map(String::as_str), Some("[P] spec+wf"));
-    }
-
-    /// The Micro section as the engine mirrors it: four layouts, slots 1 to 4.
-    fn micro_scope() -> Vec<(Option<u8>, String)> {
-        vec![
-            (Some(1), "micro_main".to_string()),
-            (Some(2), "micro_signal".to_string()),
-            (Some(3), "micro_gain".to_string()),
-            (Some(4), "micro_health".to_string()),
-        ]
-    }
-
-    /// The Lab section, likewise.
-    fn lab_scope() -> Vec<(Option<u8>, String)> {
-        vec![
-            (Some(1), "lab_iq".to_string()),
-            (Some(2), "lab_rf".to_string()),
-            (Some(3), "lab_timing".to_string()),
-            (Some(4), "lab_signal".to_string()),
-        ]
+    fn a_layout_outside_the_menu_names_itself() {
+        let groups = footer_at("spectrum_waterfall", "", Vec::new(), 50);
+        assert_eq!(groups[groups.len() - 2], vec!["[P] spec+wf"]);
     }
 
     #[test]
     fn micro_preset_shows_the_working_keys_and_the_position() {
-        let items = normal_items(
-            "micro_main",
-            &micro_scope(),
-            MicroView::Main,
-            120,
-            &hackrf::gain_model(),
-        );
+        let groups = footer_at("micro_main", "micro", micro_scope(), 120);
+        assert_eq!(groups.len(), 1);
+        let items = &groups[0];
         // The hint names the range of keys that work, not the retired [0] cycle.
         assert!(items.iter().any(|i| i == "[1-4]"), "{items:?}");
         assert!(items.iter().all(|i| !i.starts_with("[0]")), "{items:?}");
         assert!(items.iter().any(|i| i == "micro 1/5"));
-        // No [P] hint and none of the long normal items in micro mode.
         assert!(items.iter().all(|i| !i.starts_with("[P]")));
-        assert!(!items.contains(&"[R] Reset".to_string()));
+        // Named by the model, not a fixed LNA and VGA.
+        assert!(items.contains(&"[↑↓]LNA".to_string()), "{items:?}");
     }
 
     #[test]
     fn micro_footer_narrow_is_more_compact() {
-        let items = normal_items(
-            "micro_signal",
-            &micro_scope(),
-            MicroView::Signal,
-            50,
-            &hackrf::gain_model(),
-        );
+        let mut m = SdrMetrics::fixture();
+        m.ui.active_preset = "micro_signal".to_string();
+        m.ui.section = "micro".to_string();
+        m.ui.scope = micro_scope();
+        let items = &normal_groups(&m, 50)[0];
         assert!(items.iter().any(|i| i == "[1-4]"), "{items:?}");
         assert!(items.iter().any(|i| i == "2/5"));
     }
@@ -791,15 +1015,9 @@ mod tests {
     /// nothing now, and a footer that names keys has to read the keys.
     #[test]
     fn the_section_map_uses_the_real_slots_with_the_active_one_marked() {
-        let map = scope_map_items("lab_rf", &lab_scope());
         assert_eq!(
-            map,
-            vec![
-                "[1] lab_iq",
-                "[2]▸lab_rf",
-                "[3] lab_timing",
-                "[4] lab_signal"
-            ]
+            scope_map_items("lab_rf", &lab_scope()),
+            vec!["[1] IQ", "[2]▸RF", "[3] Timing", "[4] Signal"]
         );
     }
 
@@ -808,77 +1026,26 @@ mod tests {
     #[test]
     fn the_section_map_skips_a_layout_with_no_slot() {
         let scope = vec![
-            (Some(1), "lab_iq".to_string()),
-            (None, "mine".to_string()),
-            (Some(2), "lab_rf".to_string()),
+            (Some(1), "lab_iq".to_string(), "IQ".to_string()),
+            (None, "mine".to_string(), "Mine".to_string()),
+            (Some(2), "lab_rf".to_string(), "RF".to_string()),
         ];
-        assert_eq!(
-            scope_map_items("lab_iq", &scope),
-            vec!["[1]▸lab_iq", "[2] lab_rf"]
-        );
-    }
-
-    #[test]
-    fn normal_items_shows_the_section_map_in_a_lab_preset() {
-        let items = normal_items(
-            "lab_iq",
-            &lab_scope(),
-            MicroView::Main,
-            120,
-            &hackrf::gain_model(),
-        );
-        // No [P] entry in lab mode; the map entries are appended instead.
-        assert!(items.iter().all(|i| !i.starts_with("[P]")));
-        assert!(items.contains(&"[1]▸lab_iq".to_string()));
-        assert!(items.contains(&"[2] lab_rf".to_string()));
+        assert_eq!(scope_map_items("lab_iq", &scope), vec!["[1]▸IQ", "[2] RF"]);
     }
 
     /// The footer must not advertise a key that does nothing. `[?]` and `[0]`
     /// are both retired, and this is the surface that used to name them.
     #[test]
     fn the_footer_names_no_retired_key() {
-        for (preset, scope) in [
-            ("main", Vec::new()),
-            ("lab_iq", lab_scope()),
-            ("micro_main", micro_scope()),
+        for (preset, section, scope) in [
+            ("main", "command_rail", Vec::new()),
+            ("lab_iq", "lab", lab_scope()),
+            ("micro_main", "micro", micro_scope()),
         ] {
-            let items = normal_items(preset, &scope, MicroView::Main, 120, &hackrf::gain_model());
-            for item in &items {
+            for item in footer_at(preset, section, scope, 120).concat() {
                 assert!(!item.contains("[?]"), "{preset}: {item}");
                 assert!(!item.starts_with("[0]"), "{preset}: {item}");
             }
         }
-    }
-
-    /// The footer names the boost the same way every other panel does, and
-    /// offers no key for a device that has none.
-    #[test]
-    fn the_boost_hint_is_named_by_the_model_and_omitted_when_absent() {
-        // A SoapySDR device whose boost is a two-position element: the driver's
-        // own name for it, not a generic AGC.
-        let amp = GainModel::new(vec![], "RF", "RF")
-            .with_gauge_fallback(116)
-            .with_boost(crate::hardware::Boost::Element(
-                crate::hardware::StageSpec::ranged("AMP", 0.0, 14.0, 14.0),
-            ));
-        let items = base_normal_items(&amp).join(" ");
-        assert!(items.contains("[A] AMP"), "{items}");
-        assert!(!items.contains("AGC"), "two names for one switch: {items}");
-
-        // An automatic gain mode really is an AGC.
-        let agc = GainModel::new(vec![], "RF", "RF")
-            .with_gauge_fallback(0)
-            .with_boost(crate::hardware::Boost::GainMode);
-        assert!(base_normal_items(&agc).join(" ").contains("[A] AGC"));
-
-        // And a device with neither is offered no key at all, rather than one
-        // that does nothing.
-        let none = GainModel::new(vec![], "RF", "RF").with_gauge_fallback(45);
-        let items = base_normal_items(&none).join(" ");
-        assert!(
-            !items.contains("[A]"),
-            "offered a key it cannot use: {items}"
-        );
-        assert!(items.contains("[F] Freq"), "and kept the rest: {items}");
     }
 }

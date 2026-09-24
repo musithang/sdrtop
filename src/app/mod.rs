@@ -268,7 +268,7 @@ impl App {
             .map(|s| {
                 s.entries
                     .iter()
-                    .map(|e| (e.slot, e.preset.clone()))
+                    .map(|e| (e.slot, e.preset.clone(), e.title.clone()))
                     .collect()
             })
             .unwrap_or_default();

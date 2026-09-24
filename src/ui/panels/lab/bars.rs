@@ -48,11 +48,11 @@ pub fn lab_label(preset: &str) -> Option<&'static str> {
 /// The number key that selects `preset` right now, from the active section as
 /// mirrored into the frame snapshot. `None` when the layout has no number key,
 /// in which case the banner simply shows no bracket.
-fn slot_for(preset: &str, scope: &[(Option<u8>, String)]) -> Option<u8> {
+fn slot_for(preset: &str, scope: &[(Option<u8>, String, String)]) -> Option<u8> {
     scope
         .iter()
-        .find(|(_, name)| name == preset)
-        .and_then(|(slot, _)| *slot)
+        .find(|(_, name, _)| name == preset)
+        .and_then(|(slot, _, _)| *slot)
 }
 
 /// Precise marker-readout frequency: `92.800 MHz` / `433.920 MHz` / `1.234500 GHz`.
@@ -1124,15 +1124,18 @@ mod tests {
     #[test]
     fn the_banner_number_comes_from_the_active_section() {
         let scope = vec![
-            (Some(1), "lab_iq".to_string()),
-            (Some(2), "lab_rf".to_string()),
-            (Some(3), "lab_timing".to_string()),
+            (Some(1), "lab_iq".to_string(), String::new()),
+            (Some(2), "lab_rf".to_string(), String::new()),
+            (Some(3), "lab_timing".to_string(), String::new()),
         ];
         assert_eq!(slot_for("lab_timing", &scope), Some(3));
         assert_eq!(slot_for("lab_iq", &scope), Some(1));
         // Not in this section, and a layout with no number key.
         assert_eq!(slot_for("spectrum", &scope), None);
-        assert_eq!(slot_for("mine", &[(None, "mine".to_string())]), None);
+        assert_eq!(
+            slot_for("mine", &[(None, "mine".to_string(), String::new())]),
+            None
+        );
     }
 
     #[test]

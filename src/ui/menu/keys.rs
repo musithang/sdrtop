@@ -56,6 +56,25 @@ impl Needs {
     }
 }
 
+/// Where a key is named on the deck's footer, if anywhere: the footer is
+/// built from this table, the same one the Keys pane draws and the dispatch
+/// check reads, so the three cannot disagree.
+pub enum Footer {
+    /// Not on the footer; the Keys pane and `keys.md` have it.
+    No,
+    /// The radio group every section's footer opens with, under this short
+    /// label.
+    Radio(&'static str),
+    /// A gain row: its label is the gain model's (the stage the driver named,
+    /// the boost's own name), never this table's.
+    Gain,
+    /// The section's own group, in the sections named (menu section ids),
+    /// under this short label.
+    Section(&'static [&'static str], &'static str),
+    /// The group every footer ends with.
+    Tail(&'static str),
+}
+
 /// A global key and what it does.
 pub struct Binding {
     pub key: &'static str,
@@ -72,6 +91,8 @@ pub struct Binding {
     pub single: OnSingle,
     /// What the device must have for this key to exist at all.
     pub needs: Needs,
+    /// Where the deck's footer names it.
+    pub footer: Footer,
 }
 
 const fn b(key: &'static str, ch: Option<char>, what: &'static str) -> Binding {
@@ -81,6 +102,19 @@ const fn b(key: &'static str, ch: Option<char>, what: &'static str) -> Binding {
         what,
         single: OnSingle::Same,
         needs: Needs::Always,
+        footer: Footer::No,
+    }
+}
+
+/// [`b`], named on the footer.
+const fn f(key: &'static str, ch: Option<char>, what: &'static str, footer: Footer) -> Binding {
+    Binding {
+        key,
+        ch,
+        what,
+        single: OnSingle::Same,
+        needs: Needs::Always,
+        footer,
     }
 }
 
@@ -90,10 +124,10 @@ pub const GLOBAL: &[(&str, &[Binding])] = &[
     (
         "The radio",
         &[
-            b("Space", Some(' '), "start or stop RX"),
+            f("Space", Some(' '), "start or stop RX", Footer::Radio("RX")),
             b("R", Some('r'), "reset everything to defaults"),
-            b("F", Some('f'), "type a frequency"),
-            b("S", Some('s'), "type a sample rate"),
+            f("F", Some('f'), "type a frequency", Footer::Radio("Freq")),
+            f("S", Some('s'), "type a sample rate", Footer::Radio("Rate")),
         ],
     ),
     (
@@ -105,6 +139,7 @@ pub const GLOBAL: &[(&str, &[Binding])] = &[
                 what: "LNA gain, down and up",
                 single: OnSingle::Reword("tuner gain, down and up, in steps"),
                 needs: Needs::Always,
+                footer: Footer::Gain,
             },
             Binding {
                 key: "[",
@@ -112,6 +147,7 @@ pub const GLOBAL: &[(&str, &[Binding])] = &[
                 what: "VGA gain down",
                 single: OnSingle::Same,
                 needs: Needs::SecondStage,
+                footer: Footer::Gain,
             },
             Binding {
                 key: "]",
@@ -119,6 +155,8 @@ pub const GLOBAL: &[(&str, &[Binding])] = &[
                 what: "VGA gain up",
                 single: OnSingle::Same,
                 needs: Needs::SecondStage,
+                // `[` names the pair on the footer.
+                footer: Footer::No,
             },
             Binding {
                 key: "A",
@@ -126,34 +164,49 @@ pub const GLOBAL: &[(&str, &[Binding])] = &[
                 what: "front end boost: the RF amp",
                 single: OnSingle::Reword("front end boost: the tuner AGC"),
                 needs: Needs::Boost,
+                footer: Footer::Gain,
             },
         ],
     ),
     (
         "The view",
         &[
-            b(
+            f(
                 "M",
                 Some('m'),
                 "NET: survey the band, or lock where you are",
+                Footer::Section(&["net"], "mode"),
             ),
-            b(
-                "Y",
-                Some('y'),
-                "on a standard station: set the frequency reference",
-            ),
-            b(
-                "O",
-                Some('o'),
-                "in NET: write the band, the census, the BLE packets, their error curve and the classic hits to files",
-            ),
-            b(
+            f(
                 "I",
                 Some('i'),
                 "in NET: addresses in full, by vendor and kind, or masked",
+                Footer::Section(&["net"], "addresses"),
             ),
-            b("W", Some('w'), "pause or resume the waterfall"),
-            b("H", Some('h'), "freeze a ghost trace, or clear it"),
+            f(
+                "O",
+                Some('o'),
+                "in NET: write the band, the census, the BLE packets, their error curve and the classic hits to files",
+                Footer::Section(&["net"], "Export"),
+            ),
+            f(
+                "Y",
+                Some('y'),
+                "on a standard station: set the frequency reference",
+                Footer::Section(&["lab", "net"], "Reference"),
+            ),
+            f(
+                "W",
+                Some('w'),
+                "pause or resume the waterfall",
+                Footer::Section(&["command_rail", "lab"], "Pause"),
+            ),
+            f(
+                "H",
+                Some('h'),
+                "freeze a ghost trace, or clear it",
+                Footer::Section(&["command_rail", "lab"], "Hold"),
+            ),
             b("Tab", None, "show or hide the footer"),
         ],
     ),
@@ -162,8 +215,13 @@ pub const GLOBAL: &[(&str, &[Binding])] = &[
         &[
             b("1-9", None, "the nth layout of this section"),
             b("P", Some('p'), "next layout in this section"),
-            b("Esc", None, "up one level, or open this menu"),
-            b("Q", Some('q'), "quit, saving the config"),
+            f(
+                "Esc",
+                None,
+                "up one level, or open this menu",
+                Footer::Tail("Menu"),
+            ),
+            f("Q", Some('q'), "quit, saving the config", Footer::Tail("Quit")),
         ],
     ),
 ];

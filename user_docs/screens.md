@@ -313,7 +313,7 @@ plus one measurement panel that has no home preset of its own.
 | `iq_histogram` | IQ amplitude distribution across 32 bins with a Low/Mid/Clip breakdown and PAPR |
 | `signal_strip` | The eight-reading bar described above |
 | `log` | The scrollable message log, with a severity lamp in the gutter |
-| `footer` | Key hints for the current mode. `Tab` hides it |
+| `footer` | Key hints, one set per section: the radio keys (with the gain stages your radio actually reports), the section's own keys (in NET, survey or lock and the address mode with their current state, export and the reference), the section's layouts with the current one marked, and the way out. Focus letters are not repeated here: every panel names its own in its title. While a panel is focused, its keys instead. `Tab` hides it |
 
 ---
 
