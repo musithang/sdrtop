@@ -30,6 +30,7 @@ use crate::signal::dsp::correlate::ShapeMatcher;
 use crate::signal::dsp::discriminate::{discriminate, instantaneous_freq_hz};
 use crate::signal::dsp::estimate::snr_from_metric;
 use crate::signal::dsp::fir::{design_lowpass_to_spec, StreamingDecimator};
+use crate::signal::dsp::nco::Nco;
 
 use super::detect::{access_address_bits, preamble_bits, ADVERTISING_ACCESS_ADDRESS};
 use super::gfsk;
@@ -412,6 +413,15 @@ fn margin_bits(len: usize) -> Vec<bool> {
 /// One channel's live receiver: the decimator, the sync-word detector, and
 /// the capture in progress, if any.
 pub struct Receiver {
+    /// Brings the channel to baseband when the radio is not tuned exactly to
+    /// it; `None` when it is. `channel::channel_of` accepts a tuning up to a
+    /// quarter of the channel spacing away, and a survey dwell at `x.500 MHz`
+    /// sits right at that edge: without this, the half megahertz between the
+    /// tuning and the channel was read as the transmitter's own carrier
+    /// offset, 200 ppm on every device, and the deviation it widened as a
+    /// modulation index near 1.
+    mixer: Option<Nco>,
+    tuned_centre_hz: f64,
     decim: StreamingDecimator,
     /// The detector: the discriminator's frequency track against the sync
     /// word's ideal one. See [`shape_threshold`].
@@ -501,12 +511,22 @@ impl Receiver {
         std::mem::take(&mut self.funnel)
     }
 
-    pub fn new(raw_rate: f64, channel: u8, phy: Phy) -> Result<Self, String> {
+    /// A receiver for `channel` on `phy`, with the radio at `raw_rate` and
+    /// tuned to `tuned_centre_hz`, which need not be the channel's own centre.
+    pub fn new(raw_rate: f64, channel: u8, phy: Phy, tuned_centre_hz: f64) -> Result<Self, String> {
+        let channel_hz = super::channel::centre_hz(channel)
+            .ok_or_else(|| format!("BLE channel {channel} does not exist"))?;
+        // The channel sits at `+offset` in the raw stream, so the oscillator
+        // runs at `-offset` to bring it to zero.
+        let offset_hz = channel_hz as f64 - tuned_centre_hz;
+        let mixer = (offset_hz.abs() >= 1.0).then(|| Nco::new(-offset_hz, raw_rate));
         let decim = front_end(raw_rate, phy)?;
         let reference = matched_reference(raw_rate, phy)?;
         let shape = frequency_template(&reference, phy);
         let reference_energy = reference.iter().map(|s| s.norm_sqr() as f64).sum();
         Ok(Self {
+            mixer,
+            tuned_centre_hz,
             decim,
             shape: ShapeMatcher::new(&shape),
             threshold: shape_threshold(phy),
@@ -530,10 +550,6 @@ impl Receiver {
         })
     }
 
-    /// Whether this receiver is still the right one for `channel` at
-    /// `raw_rate` on `phy` - a retune, a sample-rate change or a PHY change
-    /// invalidates the detector's own reference and the capture in
-    /// progress alike, so the caller rebuilds rather than reusing.
     /// The carrier offset, read from the sync word this capture was triggered
     /// on.
     ///
@@ -683,8 +699,14 @@ impl Receiver {
         snr_from_metric(coherence, n).map(|snr| 10.0 * snr.log10())
     }
 
-    pub fn matches(&self, channel: u8, raw_rate: f64, phy: Phy) -> bool {
-        self.channel == channel && (self.raw_rate - raw_rate).abs() < 1.0 && self.phy == phy
+    /// Whether this receiver is still the right one: a change of channel,
+    /// sample rate, PHY or tuning each invalidates the mixer, the reference or
+    /// the capture in progress, so the caller rebuilds rather than reusing.
+    pub fn matches(&self, channel: u8, raw_rate: f64, phy: Phy, tuned_centre_hz: f64) -> bool {
+        self.channel == channel
+            && (self.raw_rate - raw_rate).abs() < 1.0
+            && self.phy == phy
+            && (self.tuned_centre_hz - tuned_centre_hz).abs() < 1.0
     }
 
     /// Feed one block of raw device bytes. Returns every packet fully
@@ -717,6 +739,9 @@ impl Receiver {
     ) -> Vec<Packet> {
         let mut iq = Vec::new();
         decode_iq(bytes, geometry, usize::MAX, &mut iq);
+        if let Some(mixer) = self.mixer.as_mut() {
+            mixer.mix(&mut iq);
+        }
         let mut working = Vec::new();
         self.decim.process(&iq, &mut working);
 
@@ -1020,6 +1045,13 @@ mod tests {
     use crate::signal::ble::gfsk::modulate;
     use crate::signal::dsp::testkit::{at_snr, Rng};
 
+    /// A receiver with the radio tuned exactly to the channel: what every test
+    /// here means unless it says otherwise.
+    fn centred(raw_rate: f64, ch: u8, phy: Phy) -> Result<Receiver, String> {
+        let tuned = channel::centre_hz(ch).expect("a real channel") as f64;
+        Receiver::new(raw_rate, ch, phy, tuned)
+    }
+
     fn eight_bit() -> SampleGeometry {
         SampleGeometry {
             format: SampleFormat::Int8,
@@ -1097,7 +1129,7 @@ mod tests {
         let geometry = eight_bit();
         let bytes = bytes_for(&iq, geometry);
 
-        let mut rx = Receiver::new(working_rate_hz(Phy::OneM), 37, Phy::OneM).unwrap();
+        let mut rx = centred(working_rate_hz(Phy::OneM), 37, Phy::OneM).unwrap();
         let packets = rx.push(&bytes, geometry);
         assert_eq!(packets.len(), 1, "expected exactly one packet");
         let p = &packets[0];
@@ -1130,7 +1162,7 @@ mod tests {
         let block: Vec<Complex<f32>> = quiet.iter().chain(&one).copied().collect();
         let tail = vec![Complex::new(0.0, 0.0); 4_000];
 
-        let mut rx = Receiver::new(working_rate_hz(Phy::OneM), 37, Phy::OneM).unwrap();
+        let mut rx = centred(working_rate_hz(Phy::OneM), 37, Phy::OneM).unwrap();
         let mut at = 0u64;
         let mut stamps = Vec::new();
         for gap in [50_000u64, 70_000, 3] {
@@ -1172,7 +1204,7 @@ mod tests {
         payload.extend_from_slice(&[0x02, 0x01, 0x06]);
 
         let iq = synthetic_packet_iq(Phy::OneM, 37, 0x00, &payload, 25.0);
-        let mut rx = Receiver::new(rate, 37, Phy::OneM).unwrap();
+        let mut rx = centred(rate, 37, Phy::OneM).unwrap();
         let packets = rx.push(&bytes_for(&iq, geometry), geometry);
         assert_eq!(packets.len(), 1);
         let f = rx.take_funnel();
@@ -1212,7 +1244,7 @@ mod tests {
             / 10f64.powf(2.5);
         let noise = Rng::new(99).noise(clean.len(), noise_power);
         let iq: Vec<Complex<f32>> = clean.iter().zip(&noise).map(|(s, z)| s + z).collect();
-        let mut rx = Receiver::new(rate, 37, Phy::OneM).unwrap();
+        let mut rx = centred(rate, 37, Phy::OneM).unwrap();
         let packets = rx.push(&bytes_for(&iq, geometry), geometry);
         let f = rx.take_funnel();
         assert_eq!(f.triggered, 1, "{f:?}");
@@ -1230,7 +1262,7 @@ mod tests {
         bits.extend((0..(16 + MAX_PDU_BYTES * 8) + 64).map(|_| tail.next_u64() & 1 == 1));
         let clean = modulate(&bits, sps, Phy::OneM.deviation_hz(), rate, 0.5);
         let iq = at_snr(&clean, 25.0, &mut Rng::new(99));
-        let mut rx = Receiver::new(rate, 37, Phy::OneM).unwrap();
+        let mut rx = centred(rate, 37, Phy::OneM).unwrap();
         let packets = rx.push(&bytes_for(&iq, geometry), geometry);
         let f = rx.take_funnel();
         assert_eq!((f.triggered, f.crc_failed, f.gave_up), (1, 0, 1), "{f:?}");
@@ -1263,7 +1295,7 @@ mod tests {
                     let ph = std::f64::consts::TAU * cfo_hz * n as f64 / rate;
                     *s *= Complex::new(ph.cos() as f32, ph.sin() as f32);
                 }
-                let mut rx = Receiver::new(rate, 37, Phy::OneM).unwrap();
+                let mut rx = centred(rate, 37, Phy::OneM).unwrap();
                 let packets = rx.push(&bytes_for(&iq, geometry), geometry);
                 assert!(
                     packets.len() == 1 && packets[0].crc_ok,
@@ -1309,7 +1341,7 @@ mod tests {
                 *s *= Complex::new(ph.cos() as f32, ph.sin() as f32);
             }
             let geometry = eight_bit();
-            let mut rx = Receiver::new(rate, 37, Phy::OneM).unwrap();
+            let mut rx = centred(rate, 37, Phy::OneM).unwrap();
             rx.push(&bytes_for(&iq, geometry), geometry)[0]
                 .snr_db
                 .expect("an SNR is measured")
@@ -1332,7 +1364,7 @@ mod tests {
             }
             let geometry = eight_bit();
             let bytes = bytes_for(&iq, geometry);
-            let mut rx = Receiver::new(rate, 37, Phy::OneM).unwrap();
+            let mut rx = centred(rate, 37, Phy::OneM).unwrap();
             let packets = rx.push(&bytes, geometry);
             assert_eq!(packets.len(), 1, "{cfo_hz} Hz: expected exactly one packet");
             let p = &packets[0];
@@ -1371,7 +1403,7 @@ mod tests {
                     *s *= Complex::new(ph.cos() as f32, ph.sin() as f32);
                 }
                 let geometry = eight_bit();
-                let mut rx = Receiver::new(rate, 37, Phy::OneM).unwrap();
+                let mut rx = centred(rate, 37, Phy::OneM).unwrap();
                 if let Some(p) = rx.push(&bytes_for(&iq, geometry), geometry).first() {
                     if let Some(u) = p.freq_offset_hz {
                         values.push(u.value());
@@ -1468,7 +1500,7 @@ mod tests {
         let geometry = eight_bit();
         let bytes = bytes_for(&iq, geometry);
 
-        let mut rx = Receiver::new(working_rate_hz(Phy::TwoM), 37, Phy::TwoM).unwrap();
+        let mut rx = centred(working_rate_hz(Phy::TwoM), 37, Phy::TwoM).unwrap();
         let packets = rx.push(&bytes, geometry);
         assert_eq!(packets.len(), 1, "expected exactly one packet");
         let p = &packets[0];
@@ -1488,7 +1520,7 @@ mod tests {
         let geometry = eight_bit();
         let bytes = bytes_for(&iq, geometry);
 
-        let mut rx = Receiver::new(working_rate_hz(Phy::OneM), 37, Phy::OneM).unwrap();
+        let mut rx = centred(working_rate_hz(Phy::OneM), 37, Phy::OneM).unwrap();
         let mut found = Vec::new();
         for chunk in bytes.chunks(6) {
             found.extend(rx.push(chunk, geometry));
@@ -1506,8 +1538,69 @@ mod tests {
         let noise = rng.noise(200_000, 1.0);
         let geometry = eight_bit();
         let bytes = bytes_for(&noise, geometry);
-        let mut rx = Receiver::new(working_rate_hz(Phy::OneM), 37, Phy::OneM).unwrap();
+        let mut rx = centred(working_rate_hz(Phy::OneM), 37, Phy::OneM).unwrap();
         assert!(rx.push(&bytes, geometry).is_empty());
+    }
+
+    /// A channel half a megahertz off the tuning, where a survey dwell puts
+    /// channel 37, reads the transmitter's own carrier offset and deviation,
+    /// not the tuning's. Before the mixer, the same packet reported the half
+    /// megahertz as a 200 ppm crystal.
+    #[test]
+    fn a_channel_off_the_tuned_centre_is_measured_from_its_own_centre() {
+        let addr = [0x0A, 0x1B, 0x2C, 0x3D, 0x4E, 0x5F];
+        let mut payload = crate::signal::ble::pdu::air_octets(addr).to_vec();
+        payload.push(0xFF);
+        let raw_rate = 8_000_000.0;
+        let sps = (raw_rate / Phy::OneM.symbol_rate_hz()) as usize;
+        let mut bits = super::super::detect::preamble_bits(ADVERTISING_ACCESS_ADDRESS, Phy::OneM);
+        bits.extend_from_slice(&super::super::detect::access_address_bits(
+            ADVERTISING_ACCESS_ADDRESS,
+        ));
+        bits.extend_from_slice(&pdu::encode(37, 0x00, &payload));
+        let mut rng = Rng::new(8642);
+        bits.extend((0..64).map(|_| rng.next_u64() & 1 == 1));
+        let mut lead: Vec<bool> = (0..32).map(|_| rng.next_u64() & 1 == 1).collect();
+        lead.extend(bits);
+        let clean = modulate(&lead, sps, Phy::OneM.deviation_hz(), raw_rate, 0.5);
+        let ch_hz = channel::centre_hz(37).unwrap() as f64;
+        for offset_hz in [500_000.0, -500_000.0, 250_000.0] {
+            // The radio is tuned `offset_hz` below the channel, so the packet
+            // arrives `offset_hz` above zero.
+            let mut placed = clean.clone();
+            Nco::new(offset_hz, raw_rate).mix(&mut placed);
+            let noisy = at_snr(&placed, 25.0, &mut Rng::new(11));
+            let geometry = eight_bit();
+            let bytes = bytes_for(&noisy, geometry);
+
+            let mut rx = Receiver::new(raw_rate, 37, Phy::OneM, ch_hz - offset_hz).unwrap();
+            let packets = rx.push(&bytes, geometry);
+            assert_eq!(packets.len(), 1, "{offset_hz} Hz off: expected one packet");
+            let p = &packets[0];
+            assert!(p.crc_ok, "{offset_hz} Hz off: CRC failed");
+            let cfo = p.freq_offset_hz.expect("an offset is measured").value();
+            assert!(cfo.abs() < 10_000.0, "{offset_hz} Hz off: CFO {cfo} Hz");
+            let index = p
+                .modulation
+                .as_ref()
+                .expect("the modulation is measured")
+                .modulation_index
+                .value();
+            assert!(
+                (0.45..=0.55).contains(&index),
+                "{offset_hz} Hz off: index {index}"
+            );
+        }
+    }
+
+    /// A retune rebuilds the receiver: the mixer's offset belongs to the
+    /// tuning it was made for.
+    #[test]
+    fn a_retune_does_not_match_the_old_receiver() {
+        let ch_hz = channel::centre_hz(37).unwrap() as f64;
+        let rx = Receiver::new(8_000_000.0, 37, Phy::OneM, ch_hz - 500_000.0).unwrap();
+        assert!(rx.matches(37, 8_000_000.0, Phy::OneM, ch_hz - 500_000.0));
+        assert!(!rx.matches(37, 8_000_000.0, Phy::OneM, ch_hz));
     }
 
     /// A sample rate below the working rate is refused, not silently
@@ -1562,7 +1655,7 @@ mod tests {
         let geometry = eight_bit();
         let bytes = bytes_for(&noisy, geometry);
 
-        let mut rx = Receiver::new(raw_rate, 38, Phy::OneM).unwrap();
+        let mut rx = centred(raw_rate, 38, Phy::OneM).unwrap();
         let packets = rx.push(&bytes, geometry);
         assert_eq!(packets.len(), 1, "expected exactly one packet");
         assert!(packets[0].crc_ok);
@@ -1628,7 +1721,7 @@ mod tests {
         let geometry = eight_bit();
         let bytes = bytes_for(&noisy, geometry);
 
-        let mut rx = Receiver::new(raw_rate, 37, Phy::OneM).unwrap();
+        let mut rx = centred(raw_rate, 37, Phy::OneM).unwrap();
         let packets = rx.push(&bytes, geometry);
         assert_eq!(
             packets.len(),
@@ -1653,7 +1746,7 @@ mod tests {
             centre_hz: 2_426_000_000,
             rate_hz: working_rate_hz(Phy::OneM),
         };
-        let mut rx = Receiver::new(
+        let mut rx = centred(
             working_rate_hz(Phy::OneM),
             channel::channel_of(2_426_000_000).unwrap(),
             Phy::OneM,

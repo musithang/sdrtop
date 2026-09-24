@@ -486,8 +486,11 @@ impl NetWorker {
                 Some(ch) if still_open => {
                     // The PHY the user chose (`NetState::ble_phy`): a switch
                     // rebuilds the receiver, like a retune does.
-                    if !ble.as_ref().is_some_and(|r| r.matches(ch, rate_hz, phy)) {
-                        ble = match BleReceiver::new(rate_hz, ch, phy) {
+                    if !ble
+                        .as_ref()
+                        .is_some_and(|r| r.matches(ch, rate_hz, phy, centre_hz))
+                    {
+                        ble = match BleReceiver::new(rate_hz, ch, phy, centre_hz) {
                             Ok(r) => {
                                 let mut m = self.state.lock().unwrap_or_else(|e| e.into_inner());
                                 m.net.ble_refused = None;
