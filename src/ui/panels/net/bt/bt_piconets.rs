@@ -32,7 +32,7 @@ use crate::ui::panel::{FeedSpan, Panel, PanelChrome, Staleness};
 use crate::ui::widgets::limit::{Limit, LimitRow, RowWidths};
 use crate::ui::widgets::reading::Reading;
 use crate::ui::widgets::table::{
-    columns_that_fit, header, row, viewport_start, Align, Column, Sort,
+    columns_that_fit, grow_to_contents, header, row, viewport_start, Align, Column, Sort,
 };
 
 pub struct NetBtPiconetsPanel;
@@ -778,7 +778,10 @@ impl Panel for NetBtPiconetsPanel {
         }
 
         let now = std::time::Instant::now();
-        let fit = columns_that_fit(COLUMNS, width);
+        // A column holds its widest cell whole (a long session's hit count).
+        let all: Vec<Vec<String>> = roster.iter().map(|p| cells(p, state, now)).collect();
+        let columns = grow_to_contents(COLUMNS, &all, &[]);
+        let fit = columns_that_fit(&columns, width);
         let laps: Vec<u32> = roster.iter().map(|p| p.lap).collect();
         let cursor = state.net.bt_view.cursor(&laps);
         let height = inner.height as usize;
@@ -792,7 +795,7 @@ impl Panel for NetBtPiconetsPanel {
             .unwrap_or_default();
 
         let mut lines = vec![header(
-            COLUMNS,
+            &columns,
             fit,
             Sort {
                 column: ORDERED_BY,
@@ -812,7 +815,7 @@ impl Panel for NetBtPiconetsPanel {
         );
         for (i, p) in roster.iter().enumerate().skip(start).take(body) {
             let mut line = row(
-                COLUMNS,
+                &columns,
                 fit,
                 &cells(p, state, now),
                 Some(i) == cursor,

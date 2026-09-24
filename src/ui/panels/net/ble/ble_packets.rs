@@ -38,7 +38,7 @@ pub struct NetBlePacketsPanel;
 const CH_W: usize = 3;
 const TYPE_W: usize = 15;
 /// The narrowest the address column is drawn: a full address. It grows from
-/// the spare width towards the widest address shown (`addr_width`).
+/// the spare width towards the widest address shown ([`Widths`]).
 const ADDR_W: usize = crate::state::FULL_ADDRESS_WIDTH;
 /// The advertised name, cut and marked beyond this: long enough for most
 /// device names, and a column that grew with them would push the physics off
@@ -48,9 +48,11 @@ const ATYP_W: usize = 4;
 const LEN_W: usize = 4;
 const CRC_W: usize = 4;
 const SNR_W: usize = 7;
+/// The offset columns at their narrowest, `-111.8 ±1.6 kHz` and
+/// `-123.45 ±0.21 ppm`. They grow to the widest reading on screen
+/// ([`Widths`]): a declared width is a guess, and a live room outgrew
+/// this one (`-10.21 ±0.26 kH`).
 const CFO_W: usize = 15;
-/// Room for `-123.45 ±0.21 ppm`: a crystal can be a hundred ppm out, and
-/// `Reading` keeps two decimals when the uncertainty is a fraction of one.
 const PPM_W: usize = 17;
 const AGE_W: usize = 6;
 
@@ -70,29 +72,53 @@ const FIXED_W: usize = crate::ui::chrome::SELECTION_GUTTER
     + AGE_W
     + 10;
 
-/// The address column's width for this frame: what the panel can spare beyond
-/// every column at its narrowest, up to the widest address among `shown`, so
-/// a registrant's whole name appears when there is room and is cut and marked
-/// when there is not (`state::AddressDisplay::show`).
-fn addr_width<'a>(
-    shown: impl Iterator<Item = &'a BlePacket>,
-    net: &crate::state::NetState,
-    width: usize,
-) -> usize {
-    let want = shown
-        .filter_map(|p| p.adv_addr.map(|a| net.address_width(a, p.tx_add_random)))
-        .max()
-        .unwrap_or(ADDR_W);
-    ADDR_W
-        + want
-            .saturating_sub(ADDR_W)
-            .min(width.saturating_sub(FIXED_W))
+/// This frame's widths for the columns whose contents vary, measured over the
+/// rows on screen so the header and the rows agree.
+struct Widths {
+    addr: usize,
+    cfo: usize,
+    ppm: usize,
 }
 
-fn header_line(addr_w: usize, theme: &crate::Theme) -> Line<'static> {
+impl Widths {
+    /// The offset columns hold their widest reading whole. The address takes
+    /// what the panel can spare beyond every other column, up to the widest
+    /// address shown, so a registrant's whole name appears when there is room
+    /// and is cut and marked when there is not (`state::AddressDisplay::show`).
+    fn of(
+        visible: &[&BlePacket],
+        state: &SdrMetrics,
+        now: std::time::Instant,
+        width: usize,
+    ) -> Self {
+        let (mut cfo, mut ppm) = (CFO_W, PPM_W);
+        for p in visible {
+            let (k, pp) = fmt_offset(p, &state.radio, now);
+            cfo = cfo.max(k.chars().count());
+            ppm = ppm.max(pp.chars().count());
+        }
+        let fixed = FIXED_W + (cfo - CFO_W) + (ppm - PPM_W);
+        let want = visible
+            .iter()
+            .filter_map(|p| {
+                p.adv_addr
+                    .map(|a| state.net.address_width(a, p.tx_add_random))
+            })
+            .max()
+            .unwrap_or(ADDR_W);
+        Self {
+            addr: ADDR_W + want.saturating_sub(ADDR_W).min(width.saturating_sub(fixed)),
+            cfo,
+            ppm,
+        }
+    }
+}
+
+fn header_line(w: &Widths, theme: &crate::Theme) -> Line<'static> {
+    let (addr_w, cfo_w, ppm_w) = (w.addr, w.cfo, w.ppm);
     Line::from(Span::styled(
         format!(
-            "{}{:<CH_W$} {:<TYPE_W$} {:<addr_w$} {:<NAME_W$} {:<ATYP_W$} {:>LEN_W$} {:>CRC_W$} {:>SNR_W$} {:>CFO_W$} {:>PPM_W$} {:>AGE_W$}",
+            "{}{:<CH_W$} {:<TYPE_W$} {:<addr_w$} {:<NAME_W$} {:<ATYP_W$} {:>LEN_W$} {:>CRC_W$} {:>SNR_W$} {:>cfo_w$} {:>ppm_w$} {:>AGE_W$}",
             " ".repeat(crate::ui::chrome::SELECTION_GUTTER),
             "CH", "TYPE", "ADDRESS", "NAME", "ATYP", "LEN", "CRC", "SNR", "CFO", "PPM", "AGE"
         ),
@@ -195,10 +221,11 @@ fn row(
     p: &BlePacket,
     state: &SdrMetrics,
     now: std::time::Instant,
-    addr_w: usize,
+    w: &Widths,
     selected: bool,
     theme: &crate::Theme,
 ) -> Line<'static> {
+    let (addr_w, cfo_w, ppm_w) = (w.addr, w.cfo, w.ppm);
     let radio = &state.radio;
     let (khz, ppm) = fmt_offset(p, radio, now);
     let crc_ink = if p.crc_ok {
@@ -247,15 +274,9 @@ fn row(
             Style::default().fg(theme.value),
         ),
         Span::raw(" "),
-        Span::styled(
-            format!("{:>CFO_W$}", truncate(&khz, CFO_W)),
-            Style::default().fg(theme.value),
-        ),
+        Span::styled(format!("{khz:>cfo_w$}"), Style::default().fg(theme.value)),
         Span::raw(" "),
-        Span::styled(
-            format!("{:>PPM_W$}", truncate(&ppm, PPM_W)),
-            Style::default().fg(theme.value),
-        ),
+        Span::styled(format!("{ppm:>ppm_w$}"), Style::default().fg(theme.value)),
         Span::raw(" "),
         Span::styled(format!("{age:>AGE_W$}"), Style::default().fg(theme.label)),
     ]);
@@ -380,15 +401,27 @@ impl Panel for NetBlePacketsPanel {
         if inner.width == 0 || inner.height == 0 {
             return;
         }
-        // Sized over every row the panel could show, so the header and the
-        // rows agree on one width for the frame.
         let shown = state.net.ble_shown();
-        let addr_w = addr_width(
-            shown.iter().copied().take(inner.height as usize),
-            &state.net,
-            inner.width as usize,
+        let now = std::time::Instant::now();
+        let summary = channel_summary(state, theme, inner.width as usize);
+        let body = (inner.height as usize)
+            .saturating_sub(1)
+            .saturating_sub(summary.is_some() as usize);
+        let order: Vec<u64> = shown.iter().map(|p| p.seq).collect();
+        let view = &state.net.ble_view.selection;
+        let cursor = view.cursor(&order);
+        let start = crate::ui::widgets::table::viewport_start(
+            view.first_visible,
+            cursor.unwrap_or(0),
+            order.len(),
+            body,
         );
-        let mut lines = vec![header_line(addr_w, theme)];
+        // Sized over the rows actually on screen, so the header and the rows
+        // agree on one width for the frame, and a scrolled list is measured
+        // where it is scrolled to.
+        let visible: Vec<&BlePacket> = shown.iter().copied().skip(start).take(body).collect();
+        let widths = Widths::of(&visible, state, now, inner.width as usize);
+        let mut lines = vec![header_line(&widths, theme)];
 
         if let Some(reason) = &state.net.ble_refused {
             lines.push(Line::from(""));
@@ -436,22 +469,8 @@ impl Panel for NetBlePacketsPanel {
             return;
         }
 
-        let summary = channel_summary(state, theme, inner.width as usize);
-        let body = (inner.height as usize)
-            .saturating_sub(1)
-            .saturating_sub(summary.is_some() as usize);
-        let now = std::time::Instant::now();
-        let order: Vec<u64> = shown.iter().map(|p| p.seq).collect();
-        let view = &state.net.ble_view.selection;
-        let cursor = view.cursor(&order);
-        let start = crate::ui::widgets::table::viewport_start(
-            view.first_visible,
-            cursor.unwrap_or(0),
-            order.len(),
-            body,
-        );
         for (i, p) in shown.iter().enumerate().skip(start).take(body) {
-            lines.push(row(p, state, now, addr_w, Some(i) == cursor, theme));
+            lines.push(row(p, state, now, &widths, Some(i) == cursor, theme));
         }
         if let Some(summary) = summary {
             lines.push(summary);
@@ -487,6 +506,31 @@ mod tests {
             drift: None,
             seen: Instant::now(),
         }
+    }
+
+    /// An offset wider than the column's declared width widens the column
+    /// rather than losing its unit, and the header's title stays over it.
+    #[test]
+    fn a_wide_offset_is_shown_whole_under_its_title() {
+        let mut m = SdrMetrics::fixture().streaming();
+        let mut wide = packet(37, true);
+        wide.freq_offset_hz = Some(Uncertain::from_sigma(-499_880.0, 240.0));
+        let mut narrow = packet(38, true);
+        narrow.freq_offset_hz = Some(Uncertain::from_sigma(-10_210.0, 260.0));
+        m.net.ble_packets.push_back(wide);
+        m.net.ble_packets.push_back(narrow);
+        let out = draw(NetBlePacketsPanel, 170, 8, &m);
+        let text = out.join("\n");
+        assert!(text.contains("-499.88 ±0.24 kHz"), "{text}");
+        assert!(text.contains("-10.21 ±0.26 kHz"), "{text}");
+        let ends = |line: &str, s: &str| {
+            line.find(s)
+                .map(|i| line[..i].chars().count() + s.chars().count())
+        };
+        let header = out.iter().find(|l| l.contains("CFO")).unwrap();
+        let row = out.iter().find(|l| l.contains("-499.88")).unwrap();
+        assert_eq!(ends(header, "CFO"), ends(row, "kHz"), "{text}");
+        assert_eq!(ends(header, "PPM"), ends(row, "ppm"), "{text}");
     }
 
     /// Nothing decoding because the tuning is wrong says so, distinctly from

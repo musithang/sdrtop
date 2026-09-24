@@ -110,13 +110,43 @@ pub(crate) fn widen(columns: &[Column], width: usize, index: usize, want: usize)
     out
 }
 
+/// `columns` with each one grown to the widest of its cells in `rows`, the
+/// columns in `skip` left as declared (one a panel sizes itself, as
+/// [`widen`] does the address).
+///
+/// **A reading is never cut.** A declared width is a guess at the widest
+/// value, and a live room outgrew every guess: `-10.21 ±0.26 kH`, a ppm
+/// figure losing its unit. So the column takes what its readings need, and
+/// when the table then no longer fits, [`columns_that_fit`] leaves whole
+/// columns off the right instead, as it always has.
+pub(crate) fn grow_to_contents(
+    columns: &[Column],
+    rows: &[Vec<String>],
+    skip: &[usize],
+) -> Vec<Column> {
+    let mut out = columns.to_vec();
+    for (i, c) in out.iter_mut().enumerate() {
+        if skip.contains(&i) {
+            continue;
+        }
+        let widest = rows
+            .iter()
+            .filter_map(|r| r.get(i))
+            .map(|t| t.chars().count())
+            .max()
+            .unwrap_or(0);
+        c.width = c.width.max(widest);
+    }
+    out
+}
+
 /// A cell laid into its column.
 fn cell(text: &str, column: &Column) -> String {
     let n = text.chars().count();
     if n > column.width {
-        // The panel declares a column wide enough for what it puts in it, so
-        // this is its bug rather than a case to design for. Truncating keeps the
-        // table readable while it is being got wrong.
+        // Unreachable through `grow_to_contents`; a panel that lays cells
+        // into declared widths without it gets a cut cell, which keeps the
+        // table readable while that is being got wrong.
         return text.chars().take(column.width).collect();
     }
     let pad = " ".repeat(column.width - n);
@@ -235,6 +265,30 @@ mod tests {
             pkts.to_string(),
             rssi.to_string(),
         ]
+    }
+
+    /// A reading wider than its column widens the column instead of losing
+    /// its unit, and a column that then no longer fits drops whole.
+    #[test]
+    fn a_wide_reading_grows_its_column_and_is_never_cut() {
+        let rows = vec![
+            cells("aa:bb", "2 s", "10", "-10.21 ±0.26 kHz"),
+            cells("cc:dd", "3 s", "4", "-3 dB"),
+        ];
+        let grown = grow_to_contents(COLUMNS, &rows, &[0]);
+        assert_eq!(grown[3].width, "-10.21 ±0.26 kHz".chars().count());
+        assert_eq!(grown[0].width, 17, "a skipped column keeps its width");
+        assert_eq!(grown[1].width, 6, "a narrower cell never shrinks one");
+        let wide = SELECTION_GUTTER + 17 + 6 + 6 + 16 + 3;
+        let line = row(
+            &grown,
+            columns_that_fit(&grown, wide),
+            &rows[0],
+            false,
+            &crate::Theme::sdr(),
+        );
+        assert!(text(&line).ends_with("-10.21 ±0.26 kHz"), "{}", text(&line));
+        assert_eq!(columns_that_fit(&grown, wide - 1), 3);
     }
 
     fn text(line: &Line<'static>) -> String {

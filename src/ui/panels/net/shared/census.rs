@@ -36,7 +36,7 @@ use crate::state::{RadioState, SdrMetrics};
 use crate::ui::panel::{FeedSpan, Panel, PanelChrome, Staleness, Tag};
 use crate::ui::widgets::reading::Reading;
 use crate::ui::widgets::table::{
-    columns_that_fit, header, row, viewport_start, widen, Align, Column, Sort,
+    columns_that_fit, grow_to_contents, header, row, viewport_start, widen, Align, Column, Sort,
 };
 
 mod clock_dial;
@@ -701,7 +701,13 @@ impl Panel for NetCensusPanel {
             .map(|d| state.net.address_width(d.address, d.random))
             .max()
             .unwrap_or(0);
-        let columns = widen(COLUMNS, width, 0, want);
+        // Every other column holds its widest reading whole; the address
+        // then takes what is left, so it is measured at its declared width.
+        let measured: Vec<Vec<String>> = devices
+            .iter()
+            .map(|d| cells(d, state, now, COLUMNS[0].width))
+            .collect();
+        let columns = widen(&grow_to_contents(COLUMNS, &measured, &[0]), width, 0, want);
         let fit = columns_that_fit(&columns, width);
         let addresses: Vec<[u8; 6]> = devices.iter().map(|d| d.address).collect();
 
@@ -1147,6 +1153,16 @@ mod tests {
         // And the number is the corrected one, the same arithmetic the CFO
         // column does: 35.4 read plus our own 10 ppm.
         assert!(referenced.contains("45.4"), "{referenced}");
+    }
+
+    /// A crystal offset refined over many packets to three decimals, and a
+    /// large one, is shown whole rather than losing its unit.
+    #[test]
+    fn a_long_offset_is_shown_whole() {
+        let mut m = populated();
+        m.net.census.devices[0].crystal_offset_ppm = Some(Uncertain::from_sigma(-203.767, 0.017));
+        let out = draw(NetCensusPanel, 190, 12, &m).join("\n");
+        assert!(out.contains("-203.767 ±0.017 ppm"), "{out}");
     }
 
     /// A device no packet has reported an offset for says that, rather than
