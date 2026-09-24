@@ -48,6 +48,46 @@ pub struct NetCensusPanel;
 /// the table, and the meters illustrate it.
 const TABLE_KEEPS: usize = 5;
 
+/// Columns between the dial's own text and a detail block set beside it.
+const BESIDE_GAP: usize = 3;
+
+/// The narrowest the detail block is set beside the dial: its paired
+/// fields and their notes, which read badly folded any narrower.
+const BESIDE_MIN: usize = 56;
+
+/// The dial's block with the detail block set beside it, from the row under
+/// the block's section rule: the dial's text stops `left` columns in, and
+/// the detail runs on below the block when it is the longer of the two.
+fn beside(
+    block: Vec<Line<'static>>,
+    detail: Vec<Line<'static>>,
+    left: usize,
+) -> Vec<Line<'static>> {
+    let width = |l: &Line| {
+        l.spans
+            .iter()
+            .map(|s| s.content.chars().count())
+            .sum::<usize>()
+    };
+    let rows = block.len().max(detail.len() + 1);
+    let mut block = block.into_iter();
+    let mut detail = detail.into_iter();
+    let mut out = Vec::with_capacity(rows);
+    if let Some(rule) = block.next() {
+        out.push(rule);
+    }
+    for _ in 1..rows {
+        let mut line = block.next().unwrap_or_default();
+        if let Some(d) = detail.next() {
+            let pad = left.saturating_sub(width(&line));
+            line.spans.push(Span::raw(" ".repeat(pad)));
+            line.spans.extend(d.spans);
+        }
+        out.push(line);
+    }
+    out
+}
+
 /// The columns, in the order they are drawn and in the same order as
 /// [`SORT_KEYS`], so the header, the chrome tag and the ordering cannot disagree
 /// about which column is which.
@@ -735,10 +775,24 @@ impl Panel for NetCensusPanel {
         // The detail block is a footnote to the table, so it gives way to it:
         // on a panel too short to hold both it and a couple of rows, the rows
         // win and the block is not drawn.
+        let height = inner.height as usize;
+        // Beside the dial where the panel is wide enough. The dial's block
+        // leaves its right-hand columns empty, and the detail stacked under
+        // it was what pushed the dial off a panel of ordinary height, leaving
+        // one meter over rows of nothing.
+        let left = clock_dial::DIAL_COLS + clock_dial::SIDE_COLS + BESIDE_GAP;
+        let side_w = width.saturating_sub(left);
+        let side_by_side = picked.filter(|_| side_w >= BESIDE_MIN).and_then(|d| {
+            let room = height.saturating_sub(2 + devices.len().min(TABLE_KEEPS));
+            let (block, dial) =
+                clock_dial::view(&devices, d.address, state, now, width, room, theme)?;
+            let merged = beside(block, detail(d, state, now, side_w, false, theme), left);
+            (merged.len() <= room).then_some((merged, dial))
+        });
         let mut extra = picked
+            .filter(|_| side_by_side.is_none())
             .map(|d| detail(d, state, now, width, true, theme))
             .unwrap_or_default();
-        let height = inner.height as usize;
         if height < extra.len() + 4 {
             extra.clear();
         }
@@ -748,8 +802,12 @@ impl Panel for NetCensusPanel {
         // dial where it fits and its one meter where it does not; the whole
         // room only when nothing is selected.
         let room = height.saturating_sub(2 + extra.len() + devices.len().min(TABLE_KEEPS));
-        let view = picked
-            .and_then(|d| clock_dial::view(&devices, d.address, state, now, width, room, theme));
+        let view = match side_by_side {
+            Some(v) => Some(v),
+            None => picked.and_then(|d| {
+                clock_dial::view(&devices, d.address, state, now, width, room, theme)
+            }),
+        };
         let (meters, dial) = match view {
             Some((block, dial)) => {
                 // The dial carries the crystal offset and what it was
@@ -1097,6 +1155,105 @@ mod tests {
             })
             .collect();
         m
+    }
+
+    /// Nine devices as a live room had them, the first selected: the height
+    /// and width at which the dial used to lose its place to the detail.
+    fn room_of_nine() -> SdrMetrics {
+        let now = Instant::now();
+        let mut m = SdrMetrics::fixture().streaming();
+        let rows = [
+            (
+                [0x00, 0xb4, 0xae, 0x91, 0x4a, 0x51],
+                -1.702,
+                0.028,
+                17u64,
+                0.4868,
+            ),
+            ([0x1c, 0x12, 0x31, 0x13, 0xc9, 0x4c], -1.84, 0.04, 7, 0.4810),
+            ([0x27, 0xaf, 0x42, 0x09, 0x96, 0xf8], -1.71, 0.10, 2, 0.485),
+            ([0x65, 0xb9, 0x04, 0xc9, 0xf5, 0x58], -0.86, 0.07, 2, 0.51),
+            ([0x76, 0x72, 0xbf, 0x9b, 0x5d, 0xd5], -3.36, 0.04, 13, 0.469),
+            ([0x7c, 0x6a, 0x37, 0x96, 0xe6, 0xa9], -3.61, 0.16, 1, 0.483),
+            (
+                [0xb0, 0x99, 0xd7, 0x40, 0xb3, 0x8b],
+                -1.177,
+                0.018,
+                54,
+                0.4785,
+            ),
+            ([0xce, 0x89, 0x45, 0x32, 0x3f, 0x35], -3.36, 0.13, 2, 0.49),
+            ([0xfe, 0x9f, 0x4f, 0x82, 0xf8, 0x72], -1.19, 0.10, 2, 0.504),
+        ];
+        m.net.census.devices = rows
+            .iter()
+            .map(|(a, ppm, sd, n, mi)| {
+                with_snr(
+                    Device {
+                        packets: *n,
+                        best_snr_db: Some(21.0),
+                        last_seen: now - Duration::from_secs(240),
+                        crystal_offset_ppm: Some(Uncertain::from_sigma(*ppm, *sd)),
+                        ble_pdu_types: 1,
+                        modulation_index: Some(Uncertain::from_sigma(*mi, 0.002)),
+                        ..Device::heard(*a, a[0] & 0xc0 != 0x80, now - Duration::from_secs(300))
+                    },
+                    *n,
+                    20.0,
+                    2.0,
+                )
+            })
+            .collect();
+        m.net.census.selection.selected = Some(rows[0].0);
+        m
+    }
+
+    /// Wide enough, the detail sits beside the dial rather than under it,
+    /// so the dial is drawn at a height where it used to give way to one
+    /// meter over empty rows, and the whole table stays.
+    #[test]
+    fn the_detail_sits_beside_the_dial_where_the_panel_is_wide() {
+        let out = draw(NetCensusPanel, 191, 28, &room_of_nine());
+        let text = out.join("\n");
+        assert!(text.contains("worst of 9"), "the dial's own text: {text}");
+        let rule = out
+            .iter()
+            .position(|l| l.contains("CLOCK ERROR"))
+            .expect(&text);
+        let selected = out
+            .iter()
+            .position(|l| l.contains("SELECTED"))
+            .expect(&text);
+        assert_eq!(selected, rule + 1, "{text}");
+        let line = &out[selected];
+        let col = line[..line.find("SELECTED").unwrap()].chars().count();
+        assert!(
+            col > clock_dial::DIAL_COLS + clock_dial::SIDE_COLS,
+            "{text}"
+        );
+        for addr in [
+            "00:b4:ae:91:4a:51",
+            "fe:9f:4f:82:f8:72",
+            "b0:99:d7:40:b3:8b",
+        ] {
+            assert!(
+                out.iter().filter(|l| l.contains(addr)).count() >= 1,
+                "{addr}: {text}"
+            );
+        }
+    }
+
+    /// Too narrow for both side by side, the detail goes back under the
+    /// clock block, at the panel's left edge.
+    #[test]
+    fn a_narrow_panel_stacks_the_detail_again() {
+        let out = draw(NetCensusPanel, 150, 40, &room_of_nine());
+        let text = out.join("\n");
+        let selected = out.iter().find(|l| l.contains("SELECTED")).expect(&text);
+        let col = selected[..selected.find("SELECTED").unwrap()]
+            .chars()
+            .count();
+        assert!(col < 10, "{text}");
     }
 
     fn selected() -> SdrMetrics {

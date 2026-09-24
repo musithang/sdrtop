@@ -230,7 +230,10 @@ asked how far its crystal can be off, and every offset in the app is then
 Under the table every device's clock error sits on a null meter, worst first.
 Select a device and it gets a dial of its own and a detail block: when it was
 first and last heard, what it advertised (its name, TX power and company, as
-it said them), its readings and the PDU types it sent.
+it said them), its readings and the PDU types it sent. On a wide terminal
+the detail sits beside the dial; on a narrower one it goes under it, and on
+a short one the dial steps aside for a single meter rather than squeezing
+the table.
 
 ---
 
