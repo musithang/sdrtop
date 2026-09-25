@@ -47,7 +47,7 @@ fn advertised(state: &SdrMetrics, d: &Device) -> [String; 5] {
         .and_then(|a| a.name.as_ref())
         .map(|(text, complete)| {
             (
-                super::csv_field(&crate::signal::ble::ad::printable(text)).into_owned(),
+                super::csv_field(&state.net.show_name(text)).into_owned(),
                 complete.to_string(),
             )
         })

@@ -566,6 +566,57 @@ impl NetState {
         )
     }
 
+    /// An advertised name as the address mode allows it: in full, made
+    /// printable, except in `masked`, where it is only its length. A name is
+    /// often a person's ("Viktor's AirPods"), and masking the address beside
+    /// it would otherwise be for show.
+    pub fn show_name(&self, name: &str) -> String {
+        match self.address_display {
+            AddressDisplay::Masked => format!("name, {} chars", name.chars().count()),
+            _ => crate::signal::ble::ad::printable(name),
+        }
+    }
+
+    /// Raw advertising bytes as the address mode allows them: spaced hex, or
+    /// in `masked` only how many there are. Manufacturer and service data
+    /// can carry an identifier of their own; the company or the service they
+    /// belong to is shown beside them either way, as the "who", not the
+    /// "which".
+    pub fn show_bytes(&self, data: &[u8]) -> String {
+        match self.address_display {
+            AddressDisplay::Masked => format!("{} bytes", data.len()),
+            _ => crate::signal::ble::ad::hex(data),
+        }
+    }
+
+    /// A classic LAP as the address mode allows it: an inquiry code by its
+    /// name in every mode (it is no one's address), any other in hex, or in
+    /// `masked` as `#n`, its place in the roster (`bt_piconets` is kept in
+    /// the order first heard, the order the hop panel colours by), so one
+    /// piconet is one number in every panel and the export, and nothing in a
+    /// screenshot turns back into 24 bits of an address.
+    pub fn show_lap(&self, lap: u32) -> String {
+        if let Some(i) = crate::signal::bt::piconet::Inquiry::of(lap) {
+            return i.short().to_string();
+        }
+        match self.address_display {
+            AddressDisplay::Masked => match self.bt_piconets.iter().position(|p| p.lap == lap) {
+                Some(k) => format!("#{}", k + 1),
+                None => "#?".to_string(),
+            },
+            _ => format!("{lap:#08x}"),
+        }
+    }
+
+    /// A UAP value as the address mode allows it: the next 8 bits of the
+    /// master's address after its LAP, so masked with it.
+    pub fn show_uap(&self, uap: u8) -> String {
+        match self.address_display {
+            AddressDisplay::Masked => "found".to_string(),
+            _ => format!("{uap:#04x}"),
+        }
+    }
+
     /// What [`Self::show_address`] needs to print `addr` uncut: the width a
     /// table asks for when it sizes its address column.
     pub fn address_width(&self, addr: [u8; 6], random: bool) -> usize {
@@ -1139,6 +1190,31 @@ impl BandOccupancy {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Masked hides every part of an address, not the address alone: the
+    /// advertised name, the raw bytes, a LAP and a UAP. The other modes show
+    /// them, and an inquiry code is named in every mode.
+    #[test]
+    fn masked_hides_names_bytes_laps_and_uaps() {
+        let t0 = std::time::Instant::now();
+        let mut net = NetState::default();
+        crate::signal::bt::piconet::observe(&mut net.bt_piconets, 0x5a_3c71, 3, t0);
+        crate::signal::bt::piconet::observe(&mut net.bt_piconets, 0x12_3456, 9, t0);
+        for mode in [AddressDisplay::Full, AddressDisplay::Oui] {
+            net.address_display = mode;
+            assert_eq!(net.show_name("Viktor's AirPods"), "Viktor's AirPods");
+            assert_eq!(net.show_bytes(&[0x4c, 0x00]), "4c 00");
+            assert_eq!(net.show_lap(0x12_3456), "0x123456");
+            assert_eq!(net.show_uap(0x4c), "0x4c");
+        }
+        net.address_display = AddressDisplay::Masked;
+        assert_eq!(net.show_name("Viktor's AirPods"), "name, 16 chars");
+        assert_eq!(net.show_bytes(&[0x4c, 0x00]), "2 bytes");
+        assert_eq!(net.show_lap(0x12_3456), "#2");
+        assert_eq!(net.show_lap(0x5a_3c71), "#1");
+        assert_eq!(net.show_uap(0x4c), "found");
+        assert_eq!(net.show_lap(0x9E_8B33), "GIAC");
+    }
 
     /// A lock the cursor asked for is where the survey hands the tuner back,
     /// with its reason; without one, a lock stays where the pass left it.

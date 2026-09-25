@@ -180,7 +180,7 @@ fn ago(secs: u64) -> String {
 /// wrong and not which, and a name read from one could be a name nobody sent
 /// (rule 2). An extended advertising header says `(not decoded)`: its payload
 /// is a different format, and a dash would read as "no name advertised".
-fn name_text(p: &BlePacket) -> String {
+fn name_text(p: &BlePacket, net: &crate::state::NetState) -> String {
     use crate::signal::ble::ad;
     if p.pdu_type == crate::signal::ble::pdu::PduType::Other(0x07) {
         return "(not decoded)".to_string();
@@ -192,7 +192,7 @@ fn name_text(p: &BlePacket) -> String {
         .map(ad::parse)
         .unwrap_or_default();
     match ad::name(&structures) {
-        Some((name, _)) => cut(&ad::printable(name), NAME_W),
+        Some((name, _)) => cut(&net.show_name(name), NAME_W),
         None => "-".to_string(),
     }
 }
@@ -253,7 +253,7 @@ fn row(
         ),
         Span::raw(" "),
         Span::styled(
-            format!("{:<NAME_W$}", name_text(p)),
+            format!("{:<NAME_W$}", name_text(p, &state.net)),
             Style::default().fg(theme.value),
         ),
         Span::raw(" "),
@@ -772,22 +772,52 @@ mod tests {
     #[test]
     fn the_name_column_shows_what_was_advertised_and_can_be_believed() {
         let name = [0x05, 0x09, b'S', b'e', b'n', b's'];
-        assert_eq!(name_text(&advertising(&name, true)), "Sens");
-        assert_eq!(name_text(&advertising(&name, false)), "-");
+        assert_eq!(
+            name_text(
+                &advertising(&name, true),
+                &crate::state::NetState::default()
+            ),
+            "Sens"
+        );
+        assert_eq!(
+            name_text(
+                &advertising(&name, false),
+                &crate::state::NetState::default()
+            ),
+            "-"
+        );
         let hostile = [0x04, 0x09, b'A', 0x1b, b'B'];
-        assert_eq!(name_text(&advertising(&hostile, true)), "A\u{fffd}B");
+        assert_eq!(
+            name_text(
+                &advertising(&hostile, true),
+                &crate::state::NetState::default()
+            ),
+            "A\u{fffd}B"
+        );
         let long = [
             0x15, 0x09, b'A', b'A', b'A', b'A', b'A', b'A', b'A', b'A', b'A', b'A', b'A', b'A',
             b'A', b'A', b'A', b'A', b'A', b'A', b'A', b'A',
         ];
-        let cut_name = name_text(&advertising(&long, true));
+        let cut_name = name_text(
+            &advertising(&long, true),
+            &crate::state::NetState::default(),
+        );
         assert_eq!(cut_name.chars().count(), NAME_W);
         assert!(cut_name.ends_with('\u{2026}'));
-        assert_eq!(name_text(&advertising(&[0x02, 0x01, 0x06], true)), "-");
+        assert_eq!(
+            name_text(
+                &advertising(&[0x02, 0x01, 0x06], true),
+                &crate::state::NetState::default()
+            ),
+            "-"
+        );
 
         let mut ext = packet(37, true);
         ext.pdu_type = PduType::Other(0x07);
-        assert_eq!(name_text(&ext), "(not decoded)");
+        assert_eq!(
+            name_text(&ext, &crate::state::NetState::default()),
+            "(not decoded)"
+        );
         let mut m = feed(0);
         m.net.ble_packets.push_front(ext);
         let out = draw(NetBlePacketsPanel, 130, 8, &m).join("\n");

@@ -155,6 +155,7 @@ impl Panel for NetBtHopsPanel {
         let v = state.net.hop_view;
         PanelChrome::new("Classic _Bluetooth Hops")
             .stale_when(Staleness::NotStreaming)
+            .shows_laps()
             .tag_if(true, state.net.mode.tag())
             .tag_if(
                 true,
@@ -328,7 +329,7 @@ impl Panel for NetBtHopsPanel {
                         crate::ui::chrome::selection_gutter(is, theme),
                         Span::styled(format!("{CHIP} "), Style::default().fg(ink)),
                         Span::styled(
-                            format!("{} ", super::bt_piconets::lap_name(p.lap)),
+                            format!("{} ", super::bt_piconets::lap_name(p.lap, &state.net)),
                             name_style,
                         ),
                     ]

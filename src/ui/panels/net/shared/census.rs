@@ -559,12 +559,16 @@ fn advertised_lines(
     iw: usize,
     theme: &crate::Theme,
 ) -> Vec<Line<'static>> {
-    use crate::signal::ble::ad;
     let said = net.advertised.get(&d.address);
     let mut parts = Vec::new();
     if let Some((text, complete)) = said.and_then(|a| a.name.as_ref()) {
         let short = if *complete { "" } else { " (short)" };
-        parts.push(format!("\"{}\"{short}", ad::printable(text)));
+        // Quoted as the device said it, or its length alone in masked mode
+        // (`NetState::show_name`), which is not a name and is not quoted.
+        parts.push(match net.address_display {
+            crate::state::AddressDisplay::Masked => net.show_name(text),
+            _ => format!("\"{}\"{short}", net.show_name(text)),
+        });
     }
     if let Some(dbm) = said.and_then(|a| a.tx_power_dbm) {
         parts.push(format!("TX {dbm:+} dBm"));

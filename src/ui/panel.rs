@@ -316,6 +316,11 @@ pub struct PanelChrome {
     /// Whether this panel prints device addresses, which earns it the
     /// engine's [`Tag::Addresses`] whenever they are not shown in full.
     pub addresses: bool,
+    /// Whether this panel prints classic LAPs, which only the masked mode
+    /// changes (`NetState::show_lap`), so it earns [`Tag::Addresses`] then
+    /// and only then: in `oui` a LAP is shown as it is, and a tag saying
+    /// otherwise would be wrong.
+    pub laps: bool,
 }
 
 impl PanelChrome {
@@ -331,6 +336,7 @@ impl PanelChrome {
             feed: None,
             offsets: false,
             addresses: false,
+            laps: false,
         }
     }
 
@@ -400,6 +406,13 @@ impl PanelChrome {
         self
     }
 
+    /// Declare that this panel prints classic LAPs, so the engine can say
+    /// when they are masked ([`Tag::Addresses`]).
+    pub fn shows_laps(mut self) -> Self {
+        self.laps = true;
+        self
+    }
+
     /// Declare that this panel prints device addresses, so the engine can say
     /// when they are not shown in full ([`Tag::Addresses`]).
     pub fn shows_addresses(mut self) -> Self {
@@ -418,7 +431,10 @@ impl PanelChrome {
             self.tags.push(Tag::Offsets(basis));
         }
         let display = state.net.address_display;
-        if self.addresses && display != crate::state::AddressDisplay::Full {
+        let masked = display == crate::state::AddressDisplay::Masked;
+        if (self.addresses && display != crate::state::AddressDisplay::Full)
+            || (self.laps && masked)
+        {
             self.tags.push(Tag::Addresses(display));
         }
         self

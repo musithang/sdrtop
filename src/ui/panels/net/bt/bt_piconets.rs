@@ -100,22 +100,25 @@ fn ago(secs: u64) -> String {
     }
 }
 
-/// The UAP cell: one value, candidates left, or a dash before any header.
-fn uap_cell(uaps: Option<&Vec<u8>>) -> String {
+/// The UAP cell: one value (as the address mode shows it,
+/// `NetState::show_uap`), candidates left, or a dash before any header.
+fn uap_cell(uaps: Option<&Vec<u8>>, net: &crate::state::NetState) -> String {
     match uaps.map(|u| u.as_slice()) {
-        Some([one]) => format!("{one:#04x}"),
+        Some([one]) => net.show_uap(*one),
         Some(many) if !many.is_empty() => format!("{} left", many.len()),
         _ => "-".to_string(),
     }
 }
 
 /// The UAP as a sentence, for the detail block.
-fn uap_sentence(uaps: Option<&Vec<u8>>) -> String {
+fn uap_sentence(uaps: Option<&Vec<u8>>, net: &crate::state::NetState) -> String {
+    let masked = net.address_display == crate::state::AddressDisplay::Masked;
     match uaps.map(|u| u.as_slice()) {
-        Some([one]) => format!("{one:#04x}"),
+        Some([one]) => net.show_uap(*one),
         // Listed while a reader can take them in; a first header leaves 32,
-        // and 32 values are a wall, not a reading.
-        Some(many) if (2..=4).contains(&many.len()) => format!(
+        // and 32 values are a wall, not a reading. Masked, two candidates
+        // are half an address byte away from one, so none are listed.
+        Some(many) if (2..=4).contains(&many.len()) && !masked => format!(
             "{} candidates ({}); a header alone does not choose",
             many.len(),
             many.iter()
@@ -131,20 +134,17 @@ fn uap_sentence(uaps: Option<&Vec<u8>>) -> String {
     }
 }
 
-/// A LAP as the roster and the hop lanes name it: an inquiry code by its
-/// abbreviation, since a searching device is not a piconet and its bits
-/// are not a master's address; every other LAP in hex.
-pub(crate) fn lap_name(lap: u32) -> String {
-    match Inquiry::of(lap) {
-        Some(i) => format!("{:<8}", i.short()),
-        None => format!("{lap:#08x}"),
-    }
+/// A LAP as the roster and the hop lanes name it, padded to one width:
+/// `NetState::show_lap`, so an inquiry code by its abbreviation, a masked
+/// one by its roster number, every other in hex.
+pub(crate) fn lap_name(lap: u32, net: &crate::state::NetState) -> String {
+    format!("{:<8}", net.show_lap(lap))
 }
 
 fn cells(p: &Piconet, state: &SdrMetrics, now: std::time::Instant) -> Vec<String> {
     let since = |t: std::time::Instant| ago(now.saturating_duration_since(t).as_secs());
     vec![
-        format!("{CHIP} {}", lap_name(p.lap)),
+        format!("{CHIP} {}", lap_name(p.lap, &state.net)),
         p.kind().word().to_string(),
         since(p.last_seen),
         p.hits.to_string(),
@@ -152,7 +152,7 @@ fn cells(p: &Piconet, state: &SdrMetrics, now: std::time::Instant) -> Vec<String
         match Inquiry::of(p.lap) {
             // Fixed by the specification, not narrowed from anything.
             Some(_) => "DCI".to_string(),
-            None => uap_cell(state.net.bt_uap.get(&p.lap)),
+            None => uap_cell(state.net.bt_uap.get(&p.lap), &state.net),
         },
         since(p.first_seen),
     ]
@@ -239,8 +239,11 @@ fn detail(
             "LAP",
             match kind {
                 Kind::Inquiry(i) => format!("{:#08x}  {}, no one's address", p.lap, i.short()),
-                Kind::Paged => format!("{:#08x}  the paged device's, not a master's", p.lap),
-                Kind::Piconet => format!("{:#08x}  the master's", p.lap),
+                Kind::Paged => format!(
+                    "{}  the paged device's, not a master's",
+                    state.net.show_lap(p.lap)
+                ),
+                Kind::Piconet => format!("{}  the master's", state.net.show_lap(p.lap)),
             },
         ),
         field("hits", p.hits.to_string()),
@@ -267,7 +270,10 @@ fn detail(
                 "meaning",
                 "someone is calling the device this LAP belongs to".to_string(),
             ),
-            Kind::Piconet => ("UAP", uap_sentence(state.net.bt_uap.get(&p.lap))),
+            Kind::Piconet => (
+                "UAP",
+                uap_sentence(state.net.bt_uap.get(&p.lap), &state.net),
+            ),
         },
     ]
     .into_iter()
@@ -701,8 +707,9 @@ fn header_lines(
     let mut read = format!("{} of {} captured", h.decoded, h.captured);
     if h.undecoded > 0 {
         read.push_str(&format!(
-            ", {} did not decode under {uap:#04x}",
-            h.undecoded
+            ", {} did not decode under {}",
+            h.undecoded,
+            state.net.show_uap(uap)
         ));
     }
     out.push(field("read", read));
@@ -780,6 +787,7 @@ impl Panel for NetBtPiconetsPanel {
     fn chrome(&self, state: &SdrMetrics) -> PanelChrome {
         PanelChrome::new("Pi_conets")
             .stale_when(Staleness::NotStreaming)
+            .shows_laps()
             .tag_if(true, state.net.mode.tag())
             // Hits and first sightings accumulate for the session, so a drop
             // at any point in it undercounts them.
@@ -981,6 +989,32 @@ mod tests {
         assert!(text.contains("pace"), "{text}");
         assert!(
             text.contains("20 of 40 close spacings on odd half"),
+            "{text}"
+        );
+    }
+
+    /// Masked, no LAP and no UAP value reaches the screen: a piconet is its
+    /// roster number, a resolved UAP says it was found, and the detail's LAP
+    /// line follows.
+    #[test]
+    fn masked_the_roster_shows_numbers_not_address_bits() {
+        let mut m = heard();
+        m.net.address_display = crate::state::AddressDisplay::Masked;
+        m.net.bt_view.selected = Some(0x123456);
+        let text = draw(NetBtPiconetsPanel, 70, 24, &m).join("\n");
+        assert!(
+            !text.contains("5a3c71") && !text.contains("123456"),
+            "{text}"
+        );
+        assert!(!text.contains("0x21"), "{text}");
+        assert!(text.contains("#2") && text.contains("found"), "{text}");
+        assert!(text.contains("#2  the master's"), "{text}");
+        assert!(text.contains("[MASKED"), "the frame says so: {text}");
+        // In oui a LAP is shown as it is, and the frame claims nothing.
+        m.net.address_display = crate::state::AddressDisplay::Oui;
+        let text = draw(NetBtPiconetsPanel, 70, 24, &m).join("\n");
+        assert!(
+            text.contains("0x123456") && !text.contains("[OUI"),
             "{text}"
         );
     }

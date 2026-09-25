@@ -43,7 +43,6 @@ use ratatui::{
     Frame,
 };
 
-use crate::signal::ble::ad::hex;
 use crate::signal::ble::measure::{Drift, ModulationQuality};
 use crate::signal::ble::pdu::PduType;
 use crate::signal::dsp::uncertainty::Uncertain;
@@ -318,7 +317,15 @@ fn wrapped(label: &str, value: &str, iw: usize, theme: &crate::Theme) -> Vec<Lin
 /// (the parser stops there, and so does this). A company is named from the
 /// SIG snapshot, with its number beside it: the number is the reading, the
 /// name is the registry's.
-fn advertised_lines(p: &BlePacket, iw: usize, theme: &crate::Theme) -> Vec<Line<'static>> {
+/// What the packet advertised, each value as the address mode allows it
+/// (`NetState::show_name`, `show_bytes`): masking the address and printing
+/// the name beside it would be a mask for show.
+fn advertised_lines(
+    p: &BlePacket,
+    net: &crate::state::NetState,
+    iw: usize,
+    theme: &crate::Theme,
+) -> Vec<Line<'static>> {
     use crate::signal::ble::ad::{self, Ad, Structure};
     let mut out = vec![crate::ui::chrome::section("advertised", "", iw, theme)];
     if p.pdu_type == PduType::Other(0x07) {
@@ -371,7 +378,7 @@ fn advertised_lines(p: &BlePacket, iw: usize, theme: &crate::Theme) -> Vec<Line<
                     "name",
                     &format!(
                         "{}{}",
-                        ad::printable(&text),
+                        net.show_name(&text),
                         if complete { "" } else { " (shortened)" }
                     ),
                     iw,
@@ -387,7 +394,7 @@ fn advertised_lines(p: &BlePacket, iw: usize, theme: &crate::Theme) -> Vec<Line<
                 }
                 Ad::ServiceData { uuid: u, data } => out.extend(wrapped(
                     "svc data",
-                    &format!("{}: {}", uuid(&u), hex(&data)),
+                    &format!("{}: {}", uuid(&u), net.show_bytes(&data)),
                     iw,
                     theme,
                 )),
@@ -397,7 +404,7 @@ fn advertised_lines(p: &BlePacket, iw: usize, theme: &crate::Theme) -> Vec<Line<
                         .unwrap_or_else(|| format!("0x{company:04X}, not in the SIG snapshot"));
                     out.extend(wrapped("company", &name, iw, theme));
                     if !data.is_empty() {
-                        out.extend(wrapped("mfr data", &hex(&data), iw, theme));
+                        out.extend(wrapped("mfr data", &net.show_bytes(&data), iw, theme));
                     }
                 }
                 Ad::Other { code, data } => {
@@ -407,7 +414,7 @@ fn advertised_lines(p: &BlePacket, iw: usize, theme: &crate::Theme) -> Vec<Line<
                     };
                     out.extend(wrapped(
                         "other",
-                        &format!("{what}: {}", hex(&data)),
+                        &format!("{what}: {}", net.show_bytes(&data)),
                         iw,
                         theme,
                     ));
@@ -462,7 +469,7 @@ fn header_lines(
     if let Some(text) = ch_sel(p) {
         out.push(field_line("ChSel", text.to_string(), theme));
     }
-    out.extend(advertised_lines(p, iw, theme));
+    out.extend(advertised_lines(p, &state.net, iw, theme));
     out.extend(connection_lines(p, state, iw, theme));
 
     out.push(section("physics", "", iw, theme));

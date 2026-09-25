@@ -128,10 +128,17 @@ once:
   addresses are heard and are not derived from them, so nothing in a
   screenshot can be turned back into an address.
 
-The masked mode covers addresses only. An advertised device name and a
-classic piconet's LAP are shown as they are in every mode, so check both
-before sharing a screenshot: a perfectly masked `#17` sitting next to
-"Viktor's AirPods" has not protected anybody.
+The masked mode covers everything that would give a device away, not just
+its address. An advertised name shows only its length (`name, 16 chars`),
+because a perfectly masked `#17` sitting next to "Viktor's AirPods" would
+have protected nobody. Manufacturer and service data show their size
+(`23 bytes`) beside the company or service they belong to, since some of
+those payloads carry an identifier of their own. A classic piconet's LAP
+becomes its place in the roster (`#3`, the same number on the hop lanes and
+in the export), and a resolved UAP just says `found`. Inquiry codes stay
+named (`GIAC`), because they are nobody's address. The **oui** mode still
+shows names, LAPs and bytes: it is for telling devices apart, and masked is
+for letting other people look.
 
 The registrant and company names come from dated snapshots of the IEEE's and
 the Bluetooth SIG's registries. Whenever the mode is not **full**, the title

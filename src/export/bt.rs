@@ -83,7 +83,13 @@ pub fn rows(state: &SdrMetrics) -> Vec<String> {
                 now.saturating_duration_since(h.seen).as_secs().to_string(),
                 format!("{:.2}", h.at_us),
                 h.channel.to_string(),
-                format!("{:#08x}", h.lap),
+                // As the address mode allows, as on screen: an inquiry code
+                // in hex still (it is no one's address), a masked LAP by its
+                // roster number, and the UAP value hidden with it.
+                match crate::signal::bt::piconet::Inquiry::of(h.lap) {
+                    Some(_) => format!("{:#08x}", h.lap),
+                    None => state.net.show_lap(h.lap),
+                },
                 match piconet.map(|p| p.kind()) {
                     Some(Kind::Inquiry(i)) => i.short(),
                     Some(k) => k.word(),
@@ -91,7 +97,7 @@ pub fn rows(state: &SdrMetrics) -> Vec<String> {
                 }
                 .to_string(),
                 match uaps.map(|u| u.as_slice()) {
-                    Some([one]) => format!("{one:#04x}"),
+                    Some([one]) => state.net.show_uap(*one),
                     _ => String::new(),
                 },
                 uaps.map(|u| u.len().to_string()).unwrap_or_default(),

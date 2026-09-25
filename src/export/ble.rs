@@ -73,8 +73,18 @@ fn with_sigma(u: Option<Uncertain>, places: usize) -> [String; 2] {
 
 /// The eleven advertising columns, `name` through `malformed`, flattened from
 /// the packet's AD structures; blank where the packet carries none, or where
-/// its CRC failed.
-fn advertised(p: &BlePacket) -> Vec<String> {
+/// its CRC failed. The name and the raw bytes as the address mode allows
+/// them, as on screen (`NetState::show_name`, `show_bytes`); the bytes
+/// compact, without the screen's spaces.
+fn advertised(p: &BlePacket, net: &crate::state::NetState) -> Vec<String> {
+    let masked = net.address_display == crate::state::AddressDisplay::Masked;
+    let bytes = |data: &[u8]| {
+        if masked {
+            net.show_bytes(data)
+        } else {
+            ad::hex(data).replace(' ', "")
+        }
+    };
     let mut name = String::new();
     let mut complete = String::new();
     let mut flags = Vec::new();
@@ -96,7 +106,7 @@ fn advertised(p: &BlePacket) -> Vec<String> {
                 Ad::Name { complete: c, text } => {
                     // The complete name wins, as on screen (`ad::name`).
                     if name.is_empty() || c {
-                        name = ad::printable(&text);
+                        name = net.show_name(&text);
                         complete = c.to_string();
                     }
                 }
@@ -104,21 +114,17 @@ fn advertised(p: &BlePacket) -> Vec<String> {
                 Ad::Uuids { uuids, .. } => {
                     services.extend(uuids.iter().map(|u| ad::uuid_text(u)));
                 }
-                Ad::ServiceData { uuid, data } => service_data.push(format!(
-                    "{}={}",
-                    ad::uuid_text(&uuid),
-                    ad::hex(&data).replace(' ', "")
-                )),
+                Ad::ServiceData { uuid, data } => {
+                    service_data.push(format!("{}={}", ad::uuid_text(&uuid), bytes(&data)))
+                }
                 Ad::Manufacturer { company: id, data } => {
                     company_id = format!("0x{id:04X}");
                     company = crate::signal::ble::assigned::company(id)
                         .unwrap_or_default()
                         .to_string();
-                    mfr_data.push(ad::hex(&data).replace(' ', ""));
+                    mfr_data.push(bytes(&data));
                 }
-                Ad::Other { code, data } => {
-                    other.push(format!("0x{code:02X}={}", ad::hex(&data).replace(' ', "")))
-                }
+                Ad::Other { code, data } => other.push(format!("0x{code:02X}={}", bytes(&data))),
             },
         }
     }
@@ -191,7 +197,7 @@ pub fn rows(state: &SdrMetrics) -> Vec<String> {
                     String::new()
                 },
             ];
-            f.extend(advertised(p));
+            f.extend(advertised(p, &state.net));
             f.push(p.snr_db.map(|db| format!("{db:.1}")).unwrap_or_default());
             f.extend(with_sigma(cfo.map(|t| t.khz), 2));
             f.extend(with_sigma(cfo.map(|t| t.ppm), 2));
@@ -336,6 +342,25 @@ mod tests {
     /// its SNR and CFO (the list shows them) and loses everything read from
     /// its bits: the advertised structures, the modulation, the drift, the
     /// start and end.
+    /// Masked, the file carries a name's length and a payload's size, as the
+    /// screen does, never the name or the bytes.
+    #[test]
+    fn masked_the_file_carries_no_name_and_no_bytes() {
+        let p = packet(
+            1,
+            &[
+                0x05, 0x09, b'S', b'e', b'n', b's', 0x05, 0xFF, 0x4C, 0x00, 0x12, 0x34,
+            ],
+        );
+        let mut m = state_with(vec![p]);
+        m.net.address_display = crate::state::AddressDisplay::Masked;
+        let row = fields(&rows(&m)[0]);
+        assert_eq!(get(&row, "name"), "name, 4 chars");
+        assert_eq!(get(&row, "mfr_data"), "2 bytes");
+        assert_eq!(get(&row, "company_id"), "0x004C");
+        assert!(!rows(&m)[0].contains("Sens") && !rows(&m)[0].contains("1234"));
+    }
+
     #[test]
     fn a_failed_crc_exports_its_arrival_and_nothing_read_from_its_bits() {
         let mut p = packet(1, &[0x05, 0x09, b'S', b'e', b'n', b's']);
