@@ -376,6 +376,19 @@ Its UAP is fixed at `DCI` (0x00) by the specification rather than worked
 out, and it gets no modulation, timing or header sections: those would be
 every searching device's at once, averaged into one confident fiction.
 
+The other row that is not a piconet is a **page**: one device calling
+another to connect. The caller sends the *called* device's own access code
+as short ID packets, with no header, in trains that hop 3200 times a second,
+so the spacing between two of its hits is often an odd number of half slots
+(312.5 µs, 937.5 µs, ...). A piconet's packets start on whole slots and
+never do that. When a LAP has had no header after any of at least 16 hits
+*and* its spacings include odd half slots beyond what chance gives, the
+roster calls it `paged`: that LAP belongs to the device being called, not to
+anyone's piconet. With either sign missing it stays a plain piconet row; a
+page that was answered carries headers and is missed rather than named
+wrongly. The `pace` line in the detail shows the counts either way, and the
+Classic export's `lap_kind` says `paged` too.
+
 ### Hops *(focus `b`)*
 
 Two answers:

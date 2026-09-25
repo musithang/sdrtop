@@ -25,7 +25,7 @@ use ratatui::{
     Frame,
 };
 
-use crate::signal::bt::piconet::{ordered, Inquiry, Piconet, DCI};
+use crate::signal::bt::piconet::{ordered, Inquiry, Kind, Piconet, DCI};
 use crate::signal::dsp::uncertainty::Uncertain;
 use crate::state::SdrMetrics;
 use crate::ui::panel::{FeedSpan, Panel, PanelChrome, Staleness};
@@ -42,6 +42,12 @@ const COLUMNS: &[Column] = &[
         title: "LAP",
         // `● 0x5a3c71`: the hop panel's colour chip, then 24 bits.
         width: 10,
+        align: Align::Left,
+    },
+    Column {
+        title: "KIND",
+        // `inquiry`, `piconet`, `paged` (`piconet::Kind::word`).
+        width: 7,
         align: Align::Left,
     },
     Column {
@@ -73,7 +79,7 @@ const COLUMNS: &[Column] = &[
 ];
 
 /// The column the roster is ordered by: the most recently heard first.
-const ORDERED_BY: usize = 1;
+const ORDERED_BY: usize = 2;
 
 /// The colour chip a piconet wears here and on the hop panel: solid, so the
 /// colour carries in any font (a braille block drew as faint dots).
@@ -139,6 +145,7 @@ fn cells(p: &Piconet, state: &SdrMetrics, now: std::time::Instant) -> Vec<String
     let since = |t: std::time::Instant| ago(now.saturating_duration_since(t).as_secs());
     vec![
         format!("{CHIP} {}", lap_name(p.lap)),
+        p.kind().word().to_string(),
         since(p.last_seen),
         p.hits.to_string(),
         p.channels_hit().to_string(),
@@ -216,13 +223,13 @@ fn detail(
     };
     let since =
         |t: std::time::Instant| format!("{} ago", ago(now.saturating_duration_since(t).as_secs()));
-    let inquiry = Inquiry::of(p.lap);
+    let kind = p.kind();
     let mut out = vec![
         crate::ui::chrome::section(
-            if inquiry.is_some() {
-                "inquiry"
-            } else {
-                "piconet"
+            match kind {
+                Kind::Inquiry(_) => "inquiry",
+                Kind::Paged => "page",
+                Kind::Piconet => "piconet",
             },
             "",
             iw,
@@ -230,9 +237,10 @@ fn detail(
         ),
         field(
             "LAP",
-            match inquiry {
-                Some(i) => format!("{:#08x}  {}, no one's address", p.lap, i.short()),
-                None => format!("{:#08x}  the master's", p.lap),
+            match kind {
+                Kind::Inquiry(i) => format!("{:#08x}  {}, no one's address", p.lap, i.short()),
+                Kind::Paged => format!("{:#08x}  the paged device's, not a master's", p.lap),
+                Kind::Piconet => format!("{:#08x}  the master's", p.lap),
             },
         ),
         field("hits", p.hits.to_string()),
@@ -253,9 +261,13 @@ fn detail(
                 channel_runs(p.channel_mask())
             ),
         ),
-        match inquiry {
-            Some(i) => ("meaning", i.meaning().to_string()),
-            None => ("UAP", uap_sentence(state.net.bt_uap.get(&p.lap))),
+        match kind {
+            Kind::Inquiry(i) => ("meaning", i.meaning().to_string()),
+            Kind::Paged => (
+                "meaning",
+                "someone is calling the device this LAP belongs to".to_string(),
+            ),
+            Kind::Piconet => ("UAP", uap_sentence(state.net.bt_uap.get(&p.lap))),
         },
     ]
     .into_iter()
@@ -288,13 +300,22 @@ fn detail_within(
     if out.len() > budget {
         return Vec::new();
     }
-    if Inquiry::of(p.lap).is_some() {
-        // Every searching device sends the same code, so the sections below
-        // would mix them all into one reading: said once, and not drawn.
-        let text = format!(
+    // Neither an inquiry nor a page is a piconet, so the sections below
+    // would read a piconet that is not there: said once, and not drawn.
+    let not_a_piconet = match p.kind() {
+        Kind::Inquiry(_) => Some(format!(
             "UAP fixed at the DCI, {DCI:#04x}. Every device inquiring sends this code, \
              so there is no one clock, modulation or header stream to read"
-        );
+        )),
+        Kind::Paged => Some(format!(
+            "ID packets only: no header after any of {} hits. A page is a caller's \
+             ID packets, not a piconet, so there is no clock, modulation or header \
+             stream of one to read",
+            p.hits
+        )),
+        Kind::Piconet => None,
+    };
+    if let Some(text) = not_a_piconet {
         for chunk in crate::ui::chrome::wrap(&text, iw.saturating_sub(1), 3) {
             if out.len() < budget {
                 out.push(Line::from(Span::styled(
@@ -962,6 +983,55 @@ mod tests {
             text.contains("20 of 40 close spacings on odd half"),
             "{text}"
         );
+    }
+
+    /// The sort mark stands on the column the rows are ordered by, LAST,
+    /// whatever columns are added before it.
+    #[test]
+    fn the_sort_mark_is_on_last() {
+        assert_eq!(COLUMNS[ORDERED_BY].title, "LAST");
+        let out = draw(NetBtPiconetsPanel, 70, 8, &heard());
+        let head = out.iter().find(|l| l.contains("LAP")).unwrap();
+        assert!(head.contains("LAST\u{25b4}"), "{head}");
+    }
+
+    /// A LAP with both signs of a page is named so, in the table and the
+    /// detail, and its detail stops before the piconet's sections.
+    #[test]
+    fn a_page_is_named_and_not_read_as_a_piconet() {
+        let mut m = heard();
+        for _ in 0..20 {
+            observe(&mut m.net.bt_piconets, 0x9a_0af4, 12, Instant::now());
+        }
+        let page = m
+            .net
+            .bt_piconets
+            .iter_mut()
+            .find(|p| p.lap == 0x9a_0af4)
+            .unwrap();
+        page.pace = crate::signal::bt::slots::Pace {
+            close: 57,
+            whole: 20,
+            odd_half: 37,
+        };
+        m.net.bt_view.selected = Some(0x9a_0af4);
+        let out = draw(NetBtPiconetsPanel, 70, 26, &m);
+        let text = out.join("\n");
+        let row = out
+            .iter()
+            .find(|l| l.contains("0x9a0af4") && l.contains('\u{25cf}'))
+            .expect(&text);
+        assert!(row.contains("paged"), "{row}");
+        assert!(text.contains("PAGE"), "{text}");
+        assert!(
+            text.contains("the paged device's, not a master's"),
+            "{text}"
+        );
+        assert!(text.contains("no header after any of 20 hits"), "{text}");
+        assert!(!text.contains("MODULATION"), "{text}");
+        // The piconets keep their word.
+        let other = out.iter().find(|l| l.contains("0x123456")).expect(&text);
+        assert!(other.contains("piconet"), "{other}");
     }
 
     /// **One row per piconet, the most recently heard first**, with its

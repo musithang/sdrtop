@@ -180,7 +180,58 @@ pub struct Piconet {
     pub pace: super::slots::Pace,
 }
 
+/// What a LAP's hits are, as far as they can say.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Kind {
+    /// A master's piconet: the default, and all that is claimed without
+    /// evidence otherwise.
+    Piconet,
+    /// A reserved inquiry code (`Inquiry`), known from the LAP alone.
+    Inquiry(Inquiry),
+    /// Somebody paging the device this LAP belongs to: see [`Piconet::kind`].
+    Paged,
+}
+
+impl Kind {
+    /// One word for a table cell and the export.
+    pub fn word(self) -> &'static str {
+        match self {
+            Kind::Piconet => "piconet",
+            Kind::Inquiry(_) => "inquiry",
+            Kind::Paged => "paged",
+        }
+    }
+}
+
+/// Hits with no header after any of them before that absence is taken as
+/// ID packets: a header passes its FEC on noise about once in 7·10^10, so
+/// the risk is a weak real piconet whose headers all failed, which this
+/// many hits makes unlikely.
+const PAGED_MIN_HITS: u64 = 16;
+
 impl Piconet {
+    /// What these hits are.
+    ///
+    /// **Paged only on both signs, measured.** Paging sends the paged
+    /// device's own access code as ID packets, which carry no header (Core
+    /// 5.4 Vol 2 Part B 8.3.2, 5.1), at inquiry's and paging's 3200-a-second
+    /// pace, so their spacings include odd half slots, which a piconet's
+    /// never do (`slots::pace`). Without a header after any of
+    /// [`PAGED_MIN_HITS`] hits and with that pace beyond chance, the LAP is
+    /// the *called* device's, not a master's; with either sign missing it
+    /// stays a piconet, which is what every row was before. An answered
+    /// page carries headers under the same code (the FHS) and so stays a
+    /// piconet: missed, rather than named wrongly.
+    pub fn kind(&self) -> Kind {
+        if let Some(i) = Inquiry::of(self.lap) {
+            return Kind::Inquiry(i);
+        }
+        if self.headers.captured == 0 && self.hits >= PAGED_MIN_HITS && self.pace.is_half_slot() {
+            return Kind::Paged;
+        }
+        Kind::Piconet
+    }
+
     /// How many different channels it has been heard on.
     pub fn channels_hit(&self) -> u32 {
         self.per_channel.iter().filter(|&&n| n > 0).count() as u32
@@ -264,6 +315,43 @@ pub fn ordered(roster: &[Piconet]) -> Vec<&Piconet> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Paged needs both signs and enough hits; either missing, a piconet.
+    #[test]
+    fn paged_needs_no_header_and_the_half_slot_pace() {
+        use super::super::slots::Pace;
+        let t0 = Instant::now();
+        let mut roster = Vec::new();
+        for _ in 0..20 {
+            observe(&mut roster, 0x9a_0af4, 10, t0);
+        }
+        let half = Pace {
+            close: 57,
+            whole: 20,
+            odd_half: 37,
+        };
+        roster[0].pace = half;
+        assert_eq!(roster[0].kind(), Kind::Paged);
+        // A header after one of them: a piconet after all.
+        roster[0].headers.captured = 1;
+        assert_eq!(roster[0].kind(), Kind::Piconet);
+        roster[0].headers.captured = 0;
+        // Whole slots only: a piconet whose headers were missed.
+        roster[0].pace = Pace {
+            close: 57,
+            whole: 57,
+            odd_half: 0,
+        };
+        assert_eq!(roster[0].kind(), Kind::Piconet);
+        // Too few hits to trust the absence of headers.
+        let mut few = Vec::new();
+        for _ in 0..10 {
+            observe(&mut few, 0x12_3456, 3, t0);
+        }
+        few[0].pace = half;
+        assert_eq!(few[0].kind(), Kind::Piconet);
+        assert_eq!(Kind::Paged.word(), "paged");
+    }
 
     /// The reserved block, its two named codes, and its edges.
     #[test]

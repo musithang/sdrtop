@@ -23,13 +23,15 @@
 //! and the note says so beside the columns it fills (rule 1).
 
 use crate::signal::bt::header::PacketType;
-use crate::signal::bt::piconet::{HeaderRead, Inquiry};
+use crate::signal::bt::piconet::{HeaderRead, Inquiry, Kind};
 use crate::state::SdrMetrics;
 
-/// The columns, in order. `lap_kind` is `piconet`, or `GIAC`, `LIAC` or
-/// `DIAC` for an inquiry code, which is somebody searching and has neither a
-/// UAP to narrow nor a slot grid to be timed against
-/// (`signal::bt::piconet::Inquiry`). `stream_us` is the hit's time on the stream's
+/// The columns, in order. `lap_kind` is `piconet`; `GIAC`, `LIAC` or `DIAC`
+/// for an inquiry code, which is somebody searching and has neither a UAP to
+/// narrow nor a slot grid to be timed against
+/// (`signal::bt::piconet::Inquiry`); or `paged` for a device being called
+/// (`signal::bt::piconet::Piconet::kind`), as the roster had it when the
+/// file was written. `stream_us` is the hit's time on the stream's
 /// sample clock, µs, comparable only within one run of the stream; the
 /// header's `flow`, `arqn` and `seqn` are its flag bits in the order Core
 /// 5.4 Vol 2 Part B 6.4 lists them.
@@ -82,9 +84,12 @@ pub fn rows(state: &SdrMetrics) -> Vec<String> {
                 format!("{:.2}", h.at_us),
                 h.channel.to_string(),
                 format!("{:#08x}", h.lap),
-                Inquiry::of(h.lap)
-                    .map_or("piconet", |i| i.short())
-                    .to_string(),
+                match piconet.map(|p| p.kind()) {
+                    Some(Kind::Inquiry(i)) => i.short(),
+                    Some(k) => k.word(),
+                    None => Inquiry::of(h.lap).map_or("piconet", |i| i.short()),
+                }
+                .to_string(),
                 match uaps.map(|u| u.as_slice()) {
                     Some([one]) => format!("{one:#04x}"),
                     _ => String::new(),
