@@ -467,6 +467,18 @@ const JITTER_LIMIT_US: Limit = Limit::Max(1.0);
 /// limit, which a few dozen hits reach.
 const JITTER_RESOLUTION_US: f64 = 0.25;
 
+/// The slot clock's limit, **read from the Core Specification 5.4, Vol 2,
+/// Part B, 2.2.5**: "the average timing of packet transmission shall not
+/// drift faster than 20 ppm relative to the ideal slot timing of 625 μs".
+const CLOCK_LIMIT_PPM: Limit = Limit::Band {
+    low: -20.0,
+    high: 20.0,
+};
+
+/// A clock reading must beat this before it prints: a twentieth of the
+/// limit, which a minute of hits passes by far.
+const CLOCK_RESOLUTION_PPM: f64 = 1.0;
+
 /// The TIMING section (net-ux-polish-plan 6.5): each access code's offset
 /// from the piconet's own fitted 625 µs grid (`signal::bt::slots`). The
 /// largest against the specification's 1 µs, the root mean square as a
@@ -521,8 +533,40 @@ fn timing_lines(
         Reading::new(Uncertain::exact(f.max_us), "us", f64::INFINITY),
         JITTER_LIMIT_US,
     )];
+    // The piconet's own clock, the classic twin of the census's crystal
+    // error: its slots run `rate_ppm` long on our clock, so its clock runs
+    // that much slow, less our own oscillator's error, which a reference
+    // takes out exactly as it does for a BLE offset (`corrected_ppm`: the
+    // radio's LO and its sample clock come from one crystal). Held against
+    // 2.2.5's 20 ppm only when a reference makes it absolute; without one
+    // it is a reading, and the frame's [RELATIVE] says what it is worth.
+    let now = std::time::Instant::now();
+    let raw = Uncertain::from_sigma(-f.rate_ppm, f.rate_sigma_ppm);
+    let (clock, provenance) = state.radio.corrected_ppm(raw, now);
+    let judged = provenance != crate::state::Provenance::Unreferenced;
+    let mut rows = rows;
+    if judged {
+        rows.push(LimitRow::new(
+            "Clock",
+            Reading::new(clock, "ppm", CLOCK_RESOLUTION_PPM),
+            CLOCK_LIMIT_PPM,
+        ));
+    }
     let w = RowWidths::fit_within(&rows, iw);
     out.extend(rows.iter().map(|r| Line::from(r.spans(theme, w))));
+    if !judged {
+        out.push(Line::from(vec![
+            crate::ui::chrome::field("clock", LABEL_W, theme),
+            Span::styled(
+                Reading::new(clock, "ppm", CLOCK_RESOLUTION_PPM).text(),
+                Style::default().fg(theme.value),
+            ),
+            Span::styled(
+                "  relative to our own oscillator".to_string(),
+                Style::default().fg(theme.label),
+            ),
+        ]));
+    }
     out.push(Line::from(vec![
         crate::ui::chrome::field("rms", LABEL_W, theme),
         Span::styled(
@@ -788,6 +832,9 @@ impl Panel for NetBtPiconetsPanel {
         PanelChrome::new("Pi_conets")
             .stale_when(Staleness::NotStreaming)
             .shows_laps()
+            // The TIMING block's clock error is an offset like a BLE one,
+            // and worth what the reference makes it.
+            .shows_offsets()
             .tag_if(true, state.net.mode.tag())
             // Hits and first sightings accumulate for the session, so a drop
             // at any point in it undercounts them.
@@ -1017,6 +1064,39 @@ mod tests {
             text.contains("0x123456") && !text.contains("[OUI"),
             "{text}"
         );
+    }
+
+    /// The piconet's clock error, from its slot grid: a reading relative to
+    /// our own oscillator with no reference, and held against 2.2.5's 20 ppm
+    /// once a reference makes it absolute, corrected by it.
+    #[test]
+    fn the_piconet_clock_is_relative_until_a_reference_judges_it() {
+        let mut m = heard();
+        let lap = 0x123456;
+        let times: Vec<f64> = (0..40u32)
+            .map(|k| f64::from(k * 5) * crate::signal::bt::slots::SLOT_US * (1.0 + 6e-6))
+            .collect();
+        let p = m.net.bt_piconets.iter_mut().find(|p| p.lap == lap).unwrap();
+        p.slots = Some(crate::signal::bt::slots::fit(&times));
+        m.net.bt_view.selected = Some(lap);
+        let text = draw(NetBtPiconetsPanel, 80, 40, &m).join("\n");
+        // Slots 6 ppm long: a clock 6 ppm slow.
+        assert!(text.contains("clock    -6"), "{text}");
+        assert!(text.contains("relative to our own oscillator"), "{text}");
+        assert!(text.contains("[RELATIVE]"), "{text}");
+
+        m.radio.reference = Some(crate::state::FrequencyReference {
+            ppm: 2.0,
+            sigma_ppm: 0.1,
+            provenance: crate::state::Provenance::Traceable,
+            source: "WWV 10 MHz".to_string(),
+            at: std::time::Instant::now(),
+            efficiency: None,
+        });
+        let text = draw(NetBtPiconetsPanel, 80, 40, &m).join("\n");
+        assert!(text.contains("Clock"), "{text}");
+        assert!(text.contains("-4"), "corrected by the reference: {text}");
+        assert!(text.contains("-20") && text.contains("20"), "{text}");
     }
 
     /// The sort mark stands on the column the rows are ordered by, LAST,
@@ -1264,6 +1344,7 @@ mod tests {
                 hits: 60,
                 span_us: 60e6,
                 rate_ppm: 12.0,
+                rate_sigma_ppm: 0.1,
                 rms_us: Uncertain::from_sigma(0.31, 0.03),
                 max_us: 0.82,
                 residuals_us: vec![0.0; 60],

@@ -24,6 +24,7 @@
 
 use crate::signal::bt::header::PacketType;
 use crate::signal::bt::piconet::{HeaderRead, Inquiry, Kind};
+use crate::signal::dsp::uncertainty::Uncertain;
 use crate::state::SdrMetrics;
 
 /// The columns, in order. `lap_kind` is `piconet`; `GIAC`, `LIAC` or `DIAC`
@@ -36,7 +37,7 @@ use crate::state::SdrMetrics;
 /// header's `flow`, `arqn` and `seqn` are its flag bits in the order Core
 /// 5.4 Vol 2 Part B 6.4 lists them.
 pub const HEADER: &str = "age_s,stream_us,channel,lap,lap_kind,uap,uap_candidates,\
-slot_residual_us,header,lt_addr,packet_type,flow,arqn,seqn";
+slot_residual_us,clock_ppm,clock_ppm_sigma,header,lt_addr,packet_type,flow,arqn,seqn";
 
 /// What the file says about itself when it has rows: where the header
 /// fields come from, and whether the session heard more than it keeps.
@@ -46,6 +47,8 @@ pub fn note(state: &SdrMetrics) -> String {
     let mut parts = vec![
         "header fields from a libbtbb port, unchecked on the air".to_string(),
         "residuals from each piconet's own fitted 625 us grid".to_string(),
+        "clock_ppm is the piconet's slot clock from the same fit, worth what the reference line says"
+            .to_string(),
     ];
     if heard > kept {
         parts.push(format!(
@@ -73,6 +76,18 @@ pub fn rows(state: &SdrMetrics) -> Vec<String> {
                 .and_then(|fit| fit.residual_at(h.at_us))
                 .map(|r| format!("{r:.3}"))
                 .unwrap_or_default();
+            // The piconet's clock error from the same fit, as the roster's
+            // TIMING block shows it: corrected by the reference where there
+            // is one, relative where not, which the file's note says. Blank
+            // where the residual is: no fit on this hit's stream.
+            let clock = piconet
+                .filter(|p| p.slots_stream == h.stream)
+                .and_then(|p| p.slots.as_ref())
+                .and_then(|s| s.as_ref().ok())
+                .map(|fit| {
+                    let raw = Uncertain::from_sigma(-fit.rate_ppm, fit.rate_sigma_ppm);
+                    state.radio.corrected_ppm(raw, now).0
+                });
             let (status, fields) = match h.header {
                 None => ("none", None),
                 Some(HeaderRead::Unresolved) => ("not read: UAP unresolved", None),
@@ -102,6 +117,12 @@ pub fn rows(state: &SdrMetrics) -> Vec<String> {
                 },
                 uaps.map(|u| u.len().to_string()).unwrap_or_default(),
                 residual,
+                clock
+                    .map(|c| format!("{:.3}", c.value()))
+                    .unwrap_or_default(),
+                clock
+                    .map(|c| format!("{:.3}", c.sigma()))
+                    .unwrap_or_default(),
                 status.to_string(),
             ];
             match fields {
@@ -187,6 +208,10 @@ mod tests {
         assert_eq!(get(first, "stream_us"), "1000.00");
         assert_eq!(get(first, "uap"), "0x4c");
         let r: f64 = get(first, "slot_residual_us").parse().unwrap();
+        // The piconet's clock from the same fit, relative with no reference.
+        let c: f64 = get(first, "clock_ppm").parse().unwrap();
+        assert!(c.is_finite(), "{first}");
+        assert!(get(first, "clock_ppm_sigma").parse::<f64>().unwrap() >= 0.0);
         assert!(r.abs() < 0.01, "{first}");
         assert_eq!(get(first, "header"), "none");
         assert_eq!(get(first, "packet_type"), "");

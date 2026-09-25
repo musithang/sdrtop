@@ -432,7 +432,13 @@ The selected piconet's detail, in as many sections as the panel has room for
   under it. Below eight hits it is collecting; hits that do not line up on a
   grid beyond chance are refused as one, never forced onto it. Given enough
   periods to try, a dozen points will line up with almost anything, and the
-  panel would rather say "no grid" than find one it wanted to find.
+  panel would rather say "no grid" than find one it wanted to find. The same
+  fit gives the piconet's **clock**: slots that run long on our clock mean a
+  master whose crystal runs slow. Without a frequency reference it is shown
+  relative to our own oscillator, like every other ppm here; with one it is
+  corrected and held against the specification's 20 ppm. This assumes the
+  radio's tuner and its sample clock share one crystal, which is true of a
+  HackRF and an RTL-SDR. The Classic export carries it as `clock_ppm`.
 - **Headers**: once the UAP is one value, what the piconet's headers say: the
   packet types (`POLL 3 · NULL 1 · DH1 1`), the logical transport addresses
   in use, and headers that did not decode. Before that, nothing is read or

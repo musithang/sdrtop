@@ -39,6 +39,11 @@ pub const SLOT_US: f64 = 625.0;
 /// start on whole slots.
 pub const HALF_SLOT_US: f64 = 312.5;
 
+/// How finely a hit is dated, µs: a quarter symbol. Rounding to it alone
+/// scatters a time by `QUANTUM_US / sqrt(12)`, the floor under any spread
+/// the fit states, however clean the hits line up.
+const QUANTUM_US: f64 = 0.25;
+
 /// Hits needed before a fit is tried: two numbers are fitted and a spread
 /// is stated, and fewer than this cannot pass the chance test anyway.
 pub const MIN_HITS: usize = 8;
@@ -74,6 +79,9 @@ pub struct SlotFit {
     /// Their slot period against our sample clock, ppm from 625 µs:
     /// positive when their slots are longer on our clock.
     pub rate_ppm: f64,
+    /// Its standard error, ppm: the slope's, from the residuals' scatter
+    /// over the span the hits cover.
+    pub rate_sigma_ppm: f64,
     /// The residuals' root mean square, µs, with its standard error.
     pub rms_us: Uncertain,
     /// The largest residual, µs.
@@ -211,6 +219,11 @@ pub fn fit(times_us: &[f64]) -> Result<SlotFit, SlotRefusal> {
         span_us: span,
         // A residual growing by `slope` µs per µs is a period that long.
         rate_ppm: best_ppm + slope * 1e6,
+        rate_sigma_ppm: if sxx > 0.0 {
+            rms.max(QUANTUM_US / 12f64.sqrt()) / sxx.sqrt() * 1e6
+        } else {
+            f64::INFINITY
+        },
         rms_us: Uncertain::from_sigma(rms, rms / (2.0 * dof).sqrt()),
         max_us: max,
         residuals_us: residuals.iter().map(|&e| e as f32).collect(),
@@ -378,9 +391,32 @@ mod tests {
         let f = fit(&piconet(60, 12.0, 60.0, 0.3, 1)).expect("a grid");
         assert_eq!(f.hits, 60);
         assert!((f.rate_ppm - 12.0).abs() < 0.05, "{f:?}");
+        // The stated uncertainty covers the error it has.
+        assert!(f.rate_sigma_ppm > 0.0 && f.rate_sigma_ppm < 0.05, "{f:?}");
+        assert!(
+            (f.rate_ppm - 12.0).abs() < 4.0 * f.rate_sigma_ppm + 0.005,
+            "{f:?}"
+        );
         let rms = f.rms_us.value();
         assert!((rms - 0.3).abs() < 3.0 * f.rms_us.sigma() + 0.02, "{f:?}");
         assert!(f.max_us < 1.2, "{f:?}");
+    }
+
+    /// The rate's stated uncertainty is the one it has: over many piconets,
+    /// each with its own jitter, the rate error sits within two stated
+    /// sigma about as often as a normal error does, neither far more (a
+    /// sigma too wide) nor far less (too narrow).
+    #[test]
+    fn the_rates_uncertainty_matches_its_scatter() {
+        let trials = 200;
+        let inside = (0..trials)
+            .filter(|&k| {
+                let f = fit(&piconet(40, -7.0, 10.0, 0.5, 100 + k)).expect("a grid");
+                (f.rate_ppm + 7.0).abs() <= 2.0 * f.rate_sigma_ppm
+            })
+            .count();
+        let share = inside as f64 / trials as f64;
+        assert!((0.88..=0.99).contains(&share), "{share}");
     }
 
     /// A hit's residual read again from the model is the one the fit

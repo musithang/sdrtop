@@ -592,6 +592,16 @@ mod tests {
             now,
         );
 
+        // A classic piconet with a fitted slot grid, selected, so the roster's
+        // TIMING block shows its clock error, a ppm like the census's.
+        let lap = 0x5a_3c71;
+        crate::signal::bt::piconet::observe(&mut m.net.bt_piconets, lap, 10, now);
+        let times: Vec<f64> = (0..40u32)
+            .map(|k| f64::from(k * 7) * crate::signal::bt::slots::SLOT_US * (1.0 + 4e-6))
+            .collect();
+        m.net.bt_piconets[0].slots = Some(crate::signal::bt::slots::fit(&times));
+        m.net.bt_view.selected = Some(lap);
+
         let theme = crate::Theme::sdr();
         engine
             .registered_panels()
