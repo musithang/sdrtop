@@ -174,6 +174,10 @@ pub struct Piconet {
     pub slots: Option<Result<super::slots::SlotFit, super::slots::SlotRefusal>>,
     /// The stream `slots` was fitted on (`state::BtHop::stream`).
     pub slots_stream: u32,
+    /// How its hits are spaced burst by burst (`slots::pace`): whole slots
+    /// for a piconet, odd half slots too for inquiry and paging. Refreshed
+    /// with `slots`.
+    pub pace: super::slots::Pace,
 }
 
 impl Piconet {
@@ -207,6 +211,7 @@ pub fn observe(roster: &mut Vec<Piconet>, lap: u32, channel: u8, now: Instant) {
                 headers: Headers::default(),
                 slots: None,
                 slots_stream: 0,
+                pace: Default::default(),
             });
             roster.last_mut().expect("just pushed")
         }

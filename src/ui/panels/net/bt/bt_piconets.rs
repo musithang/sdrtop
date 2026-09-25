@@ -151,6 +151,33 @@ fn cells(p: &Piconet, state: &SdrMetrics, now: std::time::Instant) -> Vec<String
     ]
 }
 
+/// How the hits are spaced, in words (`Piconet::pace`), for the rows it can
+/// say something about: an inquiry code, and a LAP no header has followed.
+/// A piconet with headers is a piconet, and its pace would only repeat it.
+/// A fact about timing only; the name it may earn is decided elsewhere.
+fn pace_text(p: &Piconet) -> Option<String> {
+    let pace = p.pace;
+    if pace.close == 0 || (Inquiry::of(p.lap).is_none() && p.headers.captured > 0) {
+        return None;
+    }
+    Some(if pace.is_half_slot() {
+        format!(
+            "{} of {} close spacings on odd half slots: the 3200/s pace of inquiry and paging",
+            pace.odd_half, pace.close
+        )
+    } else if pace.odd_half == 0 && pace.whole > 0 {
+        format!(
+            "{} close spacings, all whole slots, as a piconet's are",
+            pace.close
+        )
+    } else {
+        format!(
+            "{} close spacings, {} on odd half slots: not enough to say",
+            pace.close, pace.odd_half
+        )
+    })
+}
+
 /// The channels a piconet was heard on, as runs: `2-5, 17, 40-41`.
 fn channel_runs(mask: u128) -> String {
     let mut runs = Vec::new();
@@ -230,7 +257,10 @@ fn detail(
             Some(i) => ("meaning", i.meaning().to_string()),
             None => ("UAP", uap_sentence(state.net.bt_uap.get(&p.lap))),
         },
-    ] {
+    ]
+    .into_iter()
+    .chain(pace_text(p).map(|t| ("pace", t)))
+    {
         for (i, chunk) in crate::ui::chrome::wrap(&text, room, 3)
             .into_iter()
             .enumerate()
@@ -914,6 +944,24 @@ mod tests {
         assert!(!text.contains("MODULATION"), "{text}");
         assert!(!text.contains("TIMING"), "{text}");
         assert!(!text.contains("HEADERS"), "{text}");
+        // Its pace, when the worker has read it.
+        let giac = m
+            .net
+            .bt_piconets
+            .iter_mut()
+            .find(|p| p.lap == 0x9E_8B33)
+            .unwrap();
+        giac.pace = crate::signal::bt::slots::Pace {
+            close: 40,
+            whole: 18,
+            odd_half: 20,
+        };
+        let text = draw(NetBtPiconetsPanel, 60, 24, &m).join("\n");
+        assert!(text.contains("pace"), "{text}");
+        assert!(
+            text.contains("20 of 40 close spacings on odd half"),
+            "{text}"
+        );
     }
 
     /// **One row per piconet, the most recently heard first**, with its

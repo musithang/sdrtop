@@ -31,6 +31,14 @@ use crate::signal::dsp::uncertainty::Uncertain;
 /// The nominal slot, µs (2.2.3).
 pub const SLOT_US: f64 = 625.0;
 
+/// Half a slot, µs: the tick of the Bluetooth clock ("the LSB shall tick in
+/// units of 312.5 μs (i.e. half a time slot)", Core 5.4 Vol 2 Part B 1.1)
+/// and the pace of inquiry and paging, which hop at up to 3200 times a
+/// second (2.1, both read 2026-09-25). A device inquiring or paging sends
+/// its ID packets on this grid, two to a slot, where a piconet's packets
+/// start on whole slots.
+pub const HALF_SLOT_US: f64 = 312.5;
+
 /// Hits needed before a fit is tried: two numbers are fitted and a spread
 /// is stated, and fewer than this cannot pass the chance test anyway.
 pub const MIN_HITS: usize = 8;
@@ -117,6 +125,7 @@ pub enum SlotRefusal {
 
 /// Fit a slot grid to access-code times, µs on one continuous clock.
 pub fn fit(times_us: &[f64]) -> Result<SlotFit, SlotRefusal> {
+    let period_us = SLOT_US;
     let mut t: Vec<f64> = times_us.iter().copied().filter(|x| x.is_finite()).collect();
     t.sort_by(f64::total_cmp);
     if t.len() < MIN_HITS {
@@ -127,7 +136,7 @@ pub fn fit(times_us: &[f64]) -> Result<SlotFit, SlotRefusal> {
     }
     // The longest span the step budget resolves; older hits are left out.
     let step_floor = 2.0 * SEARCH_PPM / MAX_STEPS as f64;
-    let max_span = STEP_CYCLES * SLOT_US / (step_floor * 1e-6);
+    let max_span = STEP_CYCLES * period_us / (step_floor * 1e-6);
     let last = *t.last().expect("non-empty");
     t.retain(|&x| last - x <= max_span);
     if t.len() < MIN_HITS {
@@ -138,15 +147,15 @@ pub fn fit(times_us: &[f64]) -> Result<SlotFit, SlotRefusal> {
     }
     let t0 = t[0];
     let rel: Vec<f64> = t.iter().map(|x| x - t0).collect();
-    let span = rel.last().copied().unwrap_or(0.0).max(SLOT_US);
+    let span = rel.last().copied().unwrap_or(0.0).max(period_us);
     let n = rel.len() as f64;
 
     // The rate search: the concentration of the hits' phases on each trial
     // period, the best kept.
-    let step = (STEP_CYCLES * SLOT_US / (span * 1e-6)).clamp(step_floor, 1.0);
+    let step = (STEP_CYCLES * period_us / (span * 1e-6)).clamp(step_floor, 1.0);
     let steps = (2.0 * SEARCH_PPM / step).ceil() as usize + 1;
     let phases = |ppm: f64| {
-        let period = SLOT_US * (1.0 + ppm * 1e-6);
+        let period = period_us * (1.0 + ppm * 1e-6);
         let (mut c, mut s) = (0.0, 0.0);
         for &x in &rel {
             let a = std::f64::consts::TAU * (x / period);
@@ -175,7 +184,7 @@ pub fn fit(times_us: &[f64]) -> Result<SlotFit, SlotRefusal> {
 
     // Unwrap each hit onto its slot, then refine rate and phase together by
     // least squares on the residuals.
-    let period = SLOT_US * (1.0 + best_ppm * 1e-6);
+    let period = period_us * (1.0 + best_ppm * 1e-6);
     let offset = best.1.atan2(best.0) / std::f64::consts::TAU * period;
     let raw: Vec<f64> = rel
         .iter()
@@ -216,6 +225,89 @@ pub fn fit(times_us: &[f64]) -> Result<SlotFit, SlotRefusal> {
     })
 }
 
+/// Consecutive hits closer than this are one burst's: a page or inquiry
+/// train of 16 frequencies lasts 16 slots, 10 ms (Vol 2 Part B 8.3.2).
+const CLOSE_US: f64 = 10_000.0;
+
+/// How near a grid line a spacing must fall to count as on it: twice the
+/// 1 µs a transmitter's instantaneous timing is held to (2.2.5), plus our
+/// quarter-symbol resolution.
+const ON_GRID_US: f64 = 2.25;
+
+/// Odd half-slot spacings needed before a pace is called inquiry's or
+/// paging's at all, whatever the odds say about fewer.
+const MIN_ODD: usize = 4;
+
+/// How a LAP's hits are spaced, one burst at a time.
+///
+/// **The spacing, not a grid.** A grid fitted to minutes of hits mixes
+/// every source that sent the code and every burst they sent it in: the
+/// GIAC, sent by every device searching, fitted a half-slot grid at 80 µs
+/// rms. The spacing between one hit and the next in the same burst is
+/// clean whatever else is on the air (0.5 µs rms live, 2026-09-25), and it
+/// separates the two kinds of traffic outright: a piconet's packets start
+/// on whole slots (2.2.3), so its spacings are whole slots; inquiry and
+/// paging send ID packets at up to 3200 a second (2.1), two to a slot, so
+/// theirs include odd half slots, 312.5, 937.5 µs and so on, which no
+/// piconet ever produces.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct Pace {
+    /// Spacings between consecutive hits of one burst.
+    pub close: usize,
+    /// Of those, on a whole number of slots.
+    pub whole: usize,
+    /// Of those, on an odd number of half slots.
+    pub odd_half: usize,
+}
+
+impl Pace {
+    /// Whether the hits keep inquiry's and paging's pace: more odd
+    /// half-slot spacings than chance gives, at the same odds the slot fit
+    /// refuses a grid at ([`FALSE_GRID`]).
+    ///
+    /// **Odds, not a share.** A random spacing lands within [`ON_GRID_US`]
+    /// of an odd half slot about once in 140; a piconet's never does. How
+    /// many of a LAP's spacings are odd depends on which of a train's
+    /// frequencies the view holds, so a share threshold missed the GIAC live
+    /// (14 of 156, 9 %, against about one expected by chance). The tail of
+    /// the count expected by chance (Poisson, `n p` small) is what decides.
+    pub fn is_half_slot(&self) -> bool {
+        if self.odd_half < MIN_ODD {
+            return false;
+        }
+        let p = 2.0 * ON_GRID_US / SLOT_US;
+        let lambda = self.close as f64 * p;
+        // P(X >= k) = 1 - sum_{i<k} e^-l l^i / i!
+        let mut term = (-lambda).exp();
+        let mut below = 0.0;
+        for i in 0..self.odd_half {
+            below += term;
+            term *= lambda / (i + 1) as f64;
+        }
+        1.0 - below < FALSE_GRID
+    }
+}
+
+/// The spacings of `times_us` (µs on one clock), burst by burst.
+pub fn pace(times_us: &[f64]) -> Pace {
+    let mut t: Vec<f64> = times_us.iter().copied().filter(|x| x.is_finite()).collect();
+    t.sort_by(f64::total_cmp);
+    let mut p = Pace::default();
+    for d in t.windows(2).map(|w| w[1] - w[0]).filter(|d| *d < CLOSE_US) {
+        p.close += 1;
+        let halves = (d / HALF_SLOT_US).round();
+        if (d - halves * HALF_SLOT_US).abs() > ON_GRID_US {
+            continue;
+        }
+        if halves as i64 % 2 == 0 {
+            p.whole += 1;
+        } else {
+            p.odd_half += 1;
+        }
+    }
+    p
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -232,6 +324,50 @@ mod tests {
             .iter()
             .map(|k| 1_234.5 + k * SLOT_US * (1.0 + ppm * 1e-6) + rng.normal_pair().0 * jitter_us)
             .collect()
+    }
+
+    /// **A page train's spacings include odd half slots, a piconet's never
+    /// do.** Bursts of ID packets on random half slots of a pager's clock,
+    /// against a piconet's hits on whole slots; and random times, which
+    /// fall on odd half slots about once in 140.
+    #[test]
+    fn a_page_train_is_told_from_a_piconet_by_its_spacings() {
+        let mut rng = Rng::new(9);
+        let mut page = Vec::new();
+        for burst in 0..6 {
+            let start = burst as f64 * 2e6;
+            let mut k = 0.0;
+            for _ in 0..20 {
+                k += 1.0 + (rng.unit() * 6.0).floor();
+                page.push(start + k * HALF_SLOT_US + rng.normal_pair().0 * 0.4);
+            }
+        }
+        let p = pace(&page);
+        assert!(p.is_half_slot(), "{p:?}");
+        assert!(p.odd_half >= 40, "{p:?}");
+
+        let whole = pace(&piconet(80, 12.0, 0.5, 0.3, 4));
+        assert_eq!(whole.odd_half, 0, "{whole:?}");
+        assert!(whole.whole > 20, "{whole:?}");
+        assert!(!whole.is_half_slot());
+
+        let random: Vec<f64> = (0..400).map(|_| rng.unit() * 2e6).collect();
+        assert!(!pace(&random).is_half_slot(), "{:?}", pace(&random));
+
+        // The GIAC as it was live: few odd spacings in many, and still far
+        // past chance.
+        let giac = Pace {
+            close: 156,
+            whole: 139,
+            odd_half: 14,
+        };
+        assert!(giac.is_half_slot());
+        let chance = Pace {
+            close: 156,
+            whole: 100,
+            odd_half: 3,
+        };
+        assert!(!chance.is_half_slot());
     }
 
     /// **The grid its own hits imply**: sixty hits over a minute from a

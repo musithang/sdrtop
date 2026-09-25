@@ -644,12 +644,6 @@ impl NetWorker {
                     let (laps, headers) = rx.push(&bytes, self.geometry);
                     for hit in laps {
                         hits.push((rx.channel(), hit.lap, hit.at_us));
-                        // An inquiry code is every searching device's at
-                        // once: counted and placed, never fitted to one
-                        // clock or narrowed to a UAP it does not have.
-                        if Inquiry::of(hit.lap).is_some() {
-                            continue;
-                        }
                         let log = bt_arrivals.entry(hit.lap).or_default();
                         if log.len() == crate::signal::bt::slots::KEPT {
                             log.pop_front();
@@ -733,13 +727,20 @@ impl NetWorker {
                         })
                     })
                     .collect();
+                // An inquiry code is every searching device's at once, so it
+                // gets no slot grid of one piconet. Every LAP gets its pace
+                // (`slots::pace`), cheap and burst by burst: the timing half
+                // of telling inquiry and paging from a piconet's traffic.
                 let mut fits = Vec::with_capacity(due.len());
                 for lap in due {
+                    use crate::signal::bt::slots;
                     let times: Vec<f64> = bt_arrivals
                         .get(&lap)
                         .map(|l| l.iter().copied().collect())
                         .unwrap_or_default();
-                    fits.push((lap, crate::signal::bt::slots::fit(&times)));
+                    let inquiry = Inquiry::of(lap).is_some();
+                    let whole = (!inquiry).then(|| slots::fit(&times));
+                    fits.push((lap, whole, slots::pace(&times)));
                     last_fit.insert(lap, now);
                     unfitted.remove(&lap);
                 }
@@ -766,10 +767,13 @@ impl NetWorker {
                     for (lap, narrowed) in narrowed_by_lap {
                         m.net.bt_uap.insert(lap, narrowed);
                     }
-                    for (lap, fit) in fits {
+                    for (lap, whole, pace) in fits {
                         if let Some(p) = m.net.bt_piconets.iter_mut().find(|p| p.lap == lap) {
-                            p.slots = Some(fit);
-                            p.slots_stream = stream_id;
+                            if let Some(fit) = whole {
+                                p.slots = Some(fit);
+                                p.slots_stream = stream_id;
+                            }
+                            p.pace = pace;
                         }
                     }
                     for (lap, at_us, read, hypotheses, deviation) in headers_read {
@@ -2013,6 +2017,8 @@ mod tests {
         assert!(!m.net.bt_uap.contains_key(&giac), "{:?}", m.net.bt_uap);
         assert_eq!(p.headers.captured, 0);
         assert!(p.slots.is_none());
+        // Its pace is still read: one hit, no spacing yet.
+        assert_eq!(p.pace, crate::signal::bt::slots::Pace::default());
         assert!(m.net.bt_hops.iter().all(|h| h.header.is_none()));
     }
 
