@@ -811,7 +811,7 @@ mod tests {
             ("↑↓", "select a packet"),
             ("Enter", "filter to its address"),
             ("h", "hold the list"),
-            ("2", "LE 1M or LE 2M"),
+            ("\u{2190}\u{2192}", "step the advertising channel"),
         ];
         for inner_w in 40..140 {
             let lines = focus_lines(&m, inner_w);

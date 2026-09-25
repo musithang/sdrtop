@@ -67,14 +67,6 @@ impl Phy {
         }
     }
 
-    /// The other one, for the key that switches between them.
-    pub fn toggled(self) -> Self {
-        match self {
-            Phy::OneM => Phy::TwoM,
-            Phy::TwoM => Phy::OneM,
-        }
-    }
-
     /// The symbol rate this PHY transmits at - fixed by the PHY itself, not
     /// a free parameter a caller picks.
     pub fn symbol_rate_hz(self) -> f64 {

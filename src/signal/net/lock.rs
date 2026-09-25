@@ -17,8 +17,8 @@
 //! review found the BLE list silent on a lock inherited from the Survey,
 //! which had stopped on a data channel where no advertising ever comes. A
 //! tuning chosen after the view is open is left alone: a data channel is
-//! where LE 2M lives, and moving someone off it every time would be the
-//! instrument overruling its user.
+//! where secondary advertising is sent, and moving someone off it every
+//! time would be the instrument overruling its user.
 //!
 //! Plain data in, plain data out, no radio: the task in `tasks::net` applies
 //! the answer through `NetState::lock_at`, the same way the occupancy

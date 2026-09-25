@@ -366,7 +366,6 @@ impl Panel for NetBlePacketsPanel {
             ("↑↓", "select a packet"),
             ("Enter", "only this address, or all again"),
             ("H", "hold the list, or let it run"),
-            ("P", "listen for LE 1M or LE 2M"),
         ]
     }
 
@@ -531,6 +530,24 @@ mod tests {
         let row = out.iter().find(|l| l.contains("-499.88")).unwrap();
         assert_eq!(ends(header, "CFO"), ends(row, "kHz"), "{text}");
         assert_eq!(ends(header, "PPM"), ends(row, "ppm"), "{text}");
+    }
+
+    /// No key on the list offers a PHY: LE 1M is what it hears, and the
+    /// frame says so (`NetState::ble_phy` has why there is no switch).
+    #[test]
+    fn the_list_offers_no_phy_switch_and_names_its_phy() {
+        assert!(NetBlePacketsPanel
+            .focus_bindings()
+            .iter()
+            .all(|(k, what)| *k != "P" && !what.contains("LE 2M")));
+        let out = draw(
+            NetBlePacketsPanel,
+            90,
+            8,
+            &SdrMetrics::fixture().streaming(),
+        )
+        .join("\n");
+        assert!(out.contains("[LE 1M]"), "{out}");
     }
 
     /// Nothing decoding because the tuning is wrong says so, distinctly from

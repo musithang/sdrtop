@@ -368,7 +368,7 @@ each panel's numbers mean is on [the NET page](net.md).
 | `j` | Band Occupancy | `NET 2` | `←→` move the cursor 1 MHz · `B` cursor to the busiest cell · `L` lock the receiver here |
 | `z` | Coexistence | `NET 2` | `↓` back in time: the profile shows that moment · `↑` forward in time · `N` back to now |
 | `u` | Band Census | `NET 3` | `↑↓` select · `S` sort by the next column · `R` reverse · `T` trust as frequency reference |
-| `v` | BLE Advertising | `NET 4` | `↑↓` select a packet · `Enter` only this address, or all again · `H` hold the list, or let it run · `P` listen for LE 1M or LE 2M |
+| `v` | BLE Advertising | `NET 4` | `↑↓` select a packet · `Enter` only this address, or all again · `H` hold the list, or let it run |
 | `b` | Classic Bluetooth Hops | `NET 5` | `↑↓` select a piconet · `+ -` zoom in time · `← →` back and forward in time · `End` back to now |
 | `c` | Piconets | `NET 5` | `↑↓` select a piconet |
 

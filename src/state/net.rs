@@ -349,8 +349,18 @@ pub struct NetState {
     pub ble_heard: u64,
     /// How the packet list is being read: which packet the cursor is on.
     pub ble_view: BlePacketView,
-    /// The PHY the BLE decoder listens for (net-ux-polish-plan 5.5): LE 1M
-    /// unless the user switched, `P` on the packet list.
+    /// The PHY the BLE decoder listens for: LE 1M, and nothing on screen
+    /// changes it.
+    ///
+    /// **Why there is no switch.** The decoder looks for the advertising
+    /// access address, so off the advertising channels it hears secondary
+    /// advertising and never a connection, whose packets carry an address
+    /// of their own. LE 2M lives in connections (after a PHY update) and in
+    /// a rare secondary advertisement, and the advertising channels never
+    /// carry it, so a key that switched to it either was refused or found
+    /// almost nothing. The worker still decodes LE 2M end to end: following
+    /// a connection, which knows its address and when it changes PHY, is
+    /// what will set this.
     pub ble_phy: crate::signal::ble::Phy,
     /// The session's frame error rate against SNR over all BLE traffic
     /// (`signal::ble::fer`, net-ux-polish-plan 5.7): every packet decoded to

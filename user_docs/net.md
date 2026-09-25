@@ -63,7 +63,8 @@ A lock carries across views, so a Survey locked on a Wi-Fi channel would
 arrive at the BLE view parked where no advertising ever comes. Opening an
 advertising view off the three channels therefore moves the radio to the
 nearest of them, once, and the log says so. Tune somewhere else afterwards
-(a data channel for LE 2M, say) and it stays where you put it.
+(a data channel, to catch secondary advertising, say) and it stays where you
+put it.
 
 ### The header
 
@@ -85,8 +86,7 @@ running, the Wi-Fi channel number, because that is how everyone else reads
 An empty panel always says which kind of empty it is:
 
 - **Refused, and why.** The receiver cannot run here, for a stated reason:
-  the view holds no Bluetooth channel, the sample rate is too low, LE 2M was
-  asked for on an advertising channel where it is never sent.
+  the view holds no Bluetooth channel, the sample rate is too low.
 - **Listening, nothing heard yet.** The receiver runs; the room has been
   quiet, or not quiet for long.
 - **Not listening.** Nothing is running for this panel right now: RX is
@@ -287,9 +287,17 @@ terminal.
   **[FILTERED]** says the list is not everything. Selecting a device in the
   Census and switching here narrows the list to it for you.
 - `H` holds the list still; the title counts what has arrived since.
-- `P` switches between LE 1M and LE 2M. LE 2M is never sent on the three
-  advertising channels, and the panels refuse it there rather than showing a
-  quiet list.
+
+The list hears **LE 1M**, and the frame says so. There used to be a key for
+LE 2M, and it has gone on purpose. The decoder listens for the advertising
+access address, so parked on a data channel it hears secondary advertising
+and never a connection, whose packets carry an address of their own. LE 2M
+lives almost entirely in connections, and never on the three advertising
+channels, so the key was either refused or listened very carefully to
+nothing. LE 2M comes back with connection following, which learns a
+connection's address and sees the moment it changes PHY, and then it will
+switch by itself, as it should. The decoder is already written and tested;
+it is only waiting for something worth decoding.
 
 In SURVEY the line under the list gives each advertising channel's packet
 count and CRC pass rate; in LOCK, the one channel's.
