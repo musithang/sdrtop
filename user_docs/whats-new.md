@@ -32,7 +32,38 @@ in time.
 
 ---
 
-## 📶 Checkpoint 22: Bluetooth, measured *(you are here)*
+## 🔍 Checkpoint 23: A second look *(you are here)*
+
+**0.6.1.** The day after a release is a good day to sit in front of it and
+simply watch. So I did, live, on the old i3, with a HackRF and a notepad,
+and wrote down everything that read wrong. Two things were not a matter of
+taste: they were false.
+
+Every BLE device in the census had a crystal about 205 ppm off, which would
+make them the worst oscillators ever sold. They were fine. The survey tunes
+half a megahertz beside the advertising channel, and the receiver had been
+reading that half megahertz as each transmitter's fault. And the survey was
+hearing advertising about a tenth of the time and channel 37 never, because
+it only decoded the channel that happened to sit dead centre. Both fixed,
+and the Census now fills up on its own.
+
+The rest is the instrument getting more honest about what it hears. A
+classic LAP that everyone sends is now called what it is, an **inquiry**,
+and a device being called by another is recognised as a **page** by the
+rhythm of its packets, never guessed. A piconet's **clock error** comes out
+of its own slot timing. The **masked** mode now hides names and the rest of
+the address too, because a masked `#17` next to "Viktor's AirPods" protected
+nobody. And every BLE limit on screen is now one I actually read in the
+specification, not one I remembered.
+
+Also: a footer per section that shows the keys you can press there, gain
+stages from anywhere, `←` `→` to step a locked radio across channels, a header
+that shows what the radio can see, and a handful of panels that finally use
+their space. The full list is in the [changelog](../CHANGELOG.md).
+
+---
+
+## 📶 Checkpoint 22: Bluetooth, measured
 
 **0.6.0.** This one started as "list the Bluetooth devices in the room" and
 ended somewhere rather more serious, because I could not stop at the list.

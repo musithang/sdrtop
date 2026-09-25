@@ -111,6 +111,13 @@ impl App {
                             return Err(self.forced_option_quit_error());
                         }
                         true
+                    } else if Self::is_unsaved_quit_key(key) {
+                        // Ctrl+C: out, with the radio put back as `q` puts
+                        // it, and nothing written. It reached the key
+                        // handlers as a plain `c` before, and focused a panel.
+                        self.restore_noise_sweep();
+                        self.restore_sweep_tuning();
+                        return Ok(());
                     } else {
                         match input::handle_key(
                             key,
@@ -179,6 +186,14 @@ impl App {
     fn device_option_pending(&self) -> bool {
         let m = self.state.lock().unwrap_or_else(|error| error.into_inner());
         m.ui.device_option_update.is_pending()
+    }
+
+    /// `Ctrl+C`: quit without saving, as `user_docs/keys.md` promises and
+    /// `config.md` and `troubleshooting.md` tell a reader to rely on when a
+    /// hand-edited config must survive the session.
+    fn is_unsaved_quit_key(key: KeyEvent) -> bool {
+        matches!(key.code, KeyCode::Char('c') | KeyCode::Char('C'))
+            && key.modifiers.contains(KeyModifiers::CONTROL)
     }
 
     fn is_option_quit_key(key: KeyEvent) -> bool {
@@ -920,6 +935,33 @@ mod tests {
             .text
             .contains("Bandwidth error: device rejected choice")));
         drop(m);
+        std::fs::remove_file(path).unwrap();
+    }
+
+    /// **Ctrl+C quits and saves nothing**, as the key guide says: no
+    /// config file is written, where `q` writes one. Before, it reached the
+    /// key handlers as a plain `c` and focused a panel.
+    #[test]
+    fn control_c_quits_without_saving() {
+        let (mut app, tx, _device, path) = quit_test_app();
+        app.state.lock().unwrap().ui.device_option_update = DeviceOptionUpdate::Idle;
+        tx.send(AppEvent::Key(KeyEvent::new(
+            KeyCode::Char('c'),
+            KeyModifiers::CONTROL,
+        )))
+        .unwrap();
+        let mut terminal = Terminal::new(ratatui::backend::TestBackend::new(80, 24)).unwrap();
+        app.run(&mut terminal).unwrap();
+        assert!(!path.exists(), "Ctrl+C wrote the config");
+        assert_eq!(app.state.lock().unwrap().ui.focused_panel, None);
+
+        // And `q`, for contrast, does write it.
+        let (mut app, tx, _device, path) = quit_test_app();
+        app.state.lock().unwrap().ui.device_option_update = DeviceOptionUpdate::Idle;
+        tx.send(AppEvent::Key(KeyEvent::from(KeyCode::Char('q'))))
+            .unwrap();
+        app.run(&mut terminal).unwrap();
+        assert!(path.exists(), "q did not write the config");
         std::fs::remove_file(path).unwrap();
     }
 

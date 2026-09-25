@@ -16,6 +16,79 @@ checkpoint instead of by version.
 
 ## [Unreleased]
 
+## [0.6.1] - 2026-09-25
+
+**NET, a second look.**
+
+0.6.0 put a Bluetooth bench on the screen; this release sat in front of it,
+live, and wrote down everything that read wrong, behaved oddly or measured
+the wrong thing. Two of those were numbers that were simply false, and they
+are the reason this is a release and not a note to self.
+
+### Fixed
+
+- **BLE carrier offset and modulation index off the tuned centre.** The
+  survey tunes to `x.500 MHz`, putting an advertising channel half a
+  megahertz off centre, and the receiver read that half megahertz as every
+  transmitter's crystal error: about -205 ppm and a modulation index near 1,
+  averaged into the census. The receiver now mixes the channel down to its
+  own centre.
+- **Surveying decoded advertising about a tenth of the time, and channel 37
+  never.** The decoder took only the channel at a survey stop's centre; it
+  now takes the advertising channel anywhere in view. The Census view
+  rotates the three advertising channels itself, as the BLE view does.
+- **`df2 max` could not fail.** A maximum of noisy readings held against a
+  floor only ever rose above it. The floor is on the minimum (Core 5.4 Vol 6
+  A 3.1); the row is now `df2 avg` with its standard error.
+- **Ctrl+C** reached the key handlers as a plain `c` and focused a panel; it
+  now quits without saving, as the key guide always said.
+- Table columns cut readings (`-10.21 ±0.26 kH`); they grow to their widest
+  value now. A long focused footer cut the panel's name.
+- LOCK inherited from the Survey could leave the BLE list on a data channel,
+  where advertising never comes: opening an advertising view locked moves
+  the radio to the nearest advertising channel, once, and says so.
+
+### Added
+
+- **Classic Bluetooth says what a LAP is.** Inquiry codes are named (`GIAC`,
+  `LIAC`, `DIAC`) instead of shown as piconets; a **page** is recognised by
+  its two signs (no header after any hit, and odd half-slot spacings beyond
+  chance) and named `paged`; the roster has a KIND column. A piconet's
+  **clock error** comes from its slot grid, relative until a reference
+  corrects it and holds it to 20 ppm.
+- **A footer per section**, built from the key table, with live state
+  (`mode SURVEY`, `addresses full`, `stage chain`).
+- **Any gain stage from any layout**: `,` `.` pick one, named by the device's
+  own driver, and `↑` `↓` move it alone.
+- **`←` `→` step a locked NET radio**: the three advertising channels on BLE
+  and Census, a block of the band elsewhere.
+- **The NET header** shows the window the radio sees on the band strip, the
+  watched classic channels and the BLE decoder's channel, and names each
+  decoder's channels (`● BLE 17 data · ■ BT 34–41`).
+- Leaving a focused panel puts its cursor back where it started; the
+  Census-to-BLE carry stays.
+
+### Changed
+
+- **Masked** hides advertised names, payload bytes, LAPs and UAPs too, not
+  only addresses, on screen and in every export. `oui` still shows them.
+- **Every BLE limit is read from the Core Specification**, drift and drift
+  rate included (Vol 6 A 3.3), and LE 2M is now held to its drift limits.
+- The **`P` key (LE 2M) is gone**: the decoder listens for the advertising
+  access address, which LE 2M traffic in a connection does not carry. LE 2M
+  returns with connection following.
+- **Exports**: `net-ble` has `df2_avg_khz`, `df2_avg_khz_sigma` in place of
+  `df2_max_khz`; `net-bt` gains `lap_kind`, `clock_ppm`, `clock_ppm_sigma`.
+- The gain-stage keys moved from the Command Rail's focus mode to every
+  layout.
+- The look of several NET panels: the Capability modes on one log scale with
+  the ceiling as one rule, the Survey drawn against a stated scale, the
+  coexistence history coloured on the same scale, Feed Health's funnel and
+  load as bars, the census detail beside the clock dial, and the watched
+  classic channels bracketed.
+
+No config change.
+
 ## [0.6.0] - 2026-09-24
 
 **Bluetooth, measured. And a tinySA.**
@@ -677,7 +750,8 @@ sdrtop stopped being a one-radio program.
   image rejection ratio, wavelength and antenna metrics.
 - Config file with atomic save on quit, and the CLI flags that override it.
 
-[Unreleased]: https://github.com/musithang/sdrtop/compare/v0.6.0...HEAD
+[Unreleased]: https://github.com/musithang/sdrtop/compare/v0.6.1...HEAD
+[0.6.1]: https://github.com/musithang/sdrtop/compare/v0.6.0...v0.6.1
 [0.6.0]: https://github.com/musithang/sdrtop/compare/v0.5.1...v0.6.0
 [0.5.1]: https://github.com/musithang/sdrtop/compare/v0.5.0...v0.5.1
 [0.5.0]: https://github.com/musithang/sdrtop/compare/v0.4.2...v0.5.0
