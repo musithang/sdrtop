@@ -232,7 +232,10 @@ one cell, and `L` locks the receiver there.
 The same band over time, as a heatmap under the occupancy profile, sharing
 its frequency ruler. Decoded BLE packets and classic hits are marked over it
 in their own colours, so "something is here" and "this is Bluetooth" read
-from one picture. `↓` steps back in time and the profile above shows that
+from one picture. The colour runs on the same scale as the profile above it,
+written in the footer (`colour 0–10 % busy`): an ordinary room used to sit in
+the darkest tenth of a 0–100 % ramp, which made the whole history one
+tasteful shade of navy. `↓` steps back in time and the profile above shows that
 moment; `↑` forward; `N` back to now.
 
 ### Decode health

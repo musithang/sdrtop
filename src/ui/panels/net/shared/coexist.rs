@@ -142,6 +142,7 @@ fn footer(
     width: usize,
     (top_s, bottom_s): (f64, f64),
     counts: (usize, usize),
+    scale: f64,
     theme: &crate::Theme,
 ) -> Line<'static> {
     let dim = Style::default().fg(theme.label);
@@ -157,6 +158,14 @@ fn footer(
     if time.len() <= room {
         used += time.len();
         middle.push(Span::styled(time, dim));
+    }
+    // The colour's scale, after the time and before the marks: what a hot
+    // cell means is the next thing a reader needs after when it was.
+    let scale_text = format!("colour 0\u{2013}{} busy", band_axis::percent(scale));
+    if used + 3 + scale_text.chars().count() <= room {
+        used += 3 + scale_text.chars().count();
+        middle.push(Span::raw("   "));
+        middle.push(Span::styled(scale_text, dim));
     }
     for (proto, name, n) in [(Proto::Ble, "BLE", counts.0), (Proto::Bt, "BT", counts.1)] {
         let text = format!("{name} {n}");
@@ -315,7 +324,18 @@ fn draw(f: &mut Frame, inner: Rect, state: &SdrMetrics, theme: &crate::Theme, ru
         .and_then(|id| state.net.band.back_of(id));
     let visible = rows * 2;
     let offset = cursor.map_or(0, |b| (b + 1).saturating_sub(visible));
-    let moments = canvas(&history, rows, width, offset);
+    // Coloured against the band's duty scale, the one the profile above is
+    // drawn and labelled on: at a fixed 100 % an ordinary room sat in the
+    // ramp's darkest tenth and the heatmap read as one blue.
+    let scale = band_axis::duty_scale(state);
+    let moments: Vec<Vec<crate::ui::widgets::canvas::Duty>> = canvas(&history, rows, width, offset)
+        .into_iter()
+        .map(|m| {
+            m.into_iter()
+                .map(|d| d.map(|v| (v / scale as f32).min(1.0)))
+                .collect()
+        })
+        .collect();
     let mut lines: Vec<Line<'static>> = moments
         .chunks(2)
         .map(|pair| row(&pair[0], &pair[1], theme))
@@ -376,7 +396,7 @@ fn draw(f: &mut Frame, inner: Rect, state: &SdrMetrics, theme: &crate::Theme, ru
     if ruler {
         lines.push(Line::from(Span::styled(band_axis::ruler(width), dim)));
     }
-    lines.push(footer(width, span_s, counts, theme));
+    lines.push(footer(width, span_s, counts, scale, theme));
     f.render_widget(Paragraph::new(lines), inner);
 }
 
@@ -413,6 +433,28 @@ mod tests {
             .draw(|f| NetCoexistPanel.render(f, f.size(), m, &theme, false))
             .unwrap();
         terminal.backend().buffer().clone()
+    }
+
+    /// An ordinary room is coloured on the band's scale, not on 100 %: an 8 %
+    /// cell in a room whose busiest is 8 % is drawn at the top of the ramp,
+    /// where on a fixed 100 % it sat in the darkest tenth, and the footer says
+    /// what the colour's top means.
+    #[test]
+    fn the_heatmap_is_coloured_on_the_band_scale_and_says_it() {
+        let theme = crate::Theme::sdr();
+        let mut now = vec![0.0f32; occupancy::CELLS];
+        now[20] = 0.08;
+        let m = with(vec![now]);
+        assert_eq!(band_axis::duty_scale(&m), 0.1);
+        let buf = cells(&m, 90, 12);
+        let x = band_axis::column_of(20, 90) as u16;
+        assert_eq!(
+            buf.get(x, 0).style().fg,
+            Some(ink(Some(0.08f32 / 0.1f32), &theme))
+        );
+        assert_ne!(buf.get(x, 0).style().fg, Some(ink(Some(0.08), &theme)));
+        let text = draw(NetCoexistPanel, 120, 12, &m).join("\n");
+        assert!(text.contains("colour 0\u{2013}10 % busy"), "{text}");
     }
 
     /// **A burst at a known frequency and moment lands in the known cell**, at

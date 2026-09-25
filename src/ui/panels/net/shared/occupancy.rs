@@ -54,42 +54,6 @@ const FLOOR: char = '▁';
 /// Bar rows, so the duty cycle has more than eight levels to sit on.
 const ROWS: usize = 3;
 
-/// The duty the profile's full height stands for: the first of these at or
-/// above the busiest cell drawn.
-const SCALES: [f64; 5] = [0.05, 0.1, 0.2, 0.5, 1.0];
-
-/// The full scale for `cells`: the smallest step that holds the busiest.
-///
-/// **A stated scale, not a fixed one.** At a fixed 100 % a room whose busiest
-/// megahertz is 8 % busy drew bars one row tall under ten empty ones; at a
-/// scale that fits it they fill the panel, and the scale is written on the
-/// top gridline so a tall bar is never read as a busy band. Steps rather
-/// than the exact maximum, so the scale holds still while the readings
-/// wander, and never below 5 %, so a quiet room's noise is not drawn as a
-/// wall.
-fn full_scale(cells: &[CellReading]) -> f64 {
-    let busiest = cells
-        .iter()
-        .filter(|c| c.observed())
-        .map(|c| c.duty)
-        .fold(0.0f64, f64::max);
-    SCALES
-        .iter()
-        .copied()
-        .find(|s| busiest <= *s)
-        .unwrap_or(1.0)
-}
-
-/// `10 %`, `0.5 %`: a duty as the gridline labels it.
-fn percent(duty: f64) -> String {
-    let p = duty * 100.0;
-    if p >= 1.0 {
-        format!("{p:.0} %")
-    } else {
-        format!("{p:.1} %")
-    }
-}
-
 /// One column of the profile: the glyph for each of `rows` rows, top first,
 /// with `scale` the duty the full height stands for.
 ///
@@ -439,7 +403,8 @@ fn lines(
     out
 }
 
-/// The bars for `cells`, `rows` tall against their [`full_scale`], the
+/// The bars for `cells`, `rows` tall against the band's duty scale
+/// (`band_axis::duty_scale`, which the heatmap under them shares), the
 /// scale's gridline and labels, and the cursor's mark under them.
 ///
 /// Duty is the height. Live, the power colours it on the waterfall's ramp.
@@ -457,13 +422,13 @@ fn bars(
     by_duty: bool,
 ) {
     let cols = columns(cells, width);
-    let scale = full_scale(cells);
+    let scale = band_axis::duty_scale(state);
     let glyphs: Vec<Vec<char>> = cols.iter().map(|c| column(c, rows, scale)).collect();
     // The scale, written where there is no bar: the full scale on the top
     // row with a dotted gridline across it, half of it at the middle row of
     // a profile tall enough to have one.
-    let top = percent(scale);
-    let half = (rows >= 4).then(|| (rows / 2, percent(scale / 2.0)));
+    let top = band_axis::percent(scale);
+    let half = (rows >= 4).then(|| (rows / 2, band_axis::percent(scale / 2.0)));
     let is_bar = |ch: char| ch != ' ' && ch != FLOOR && ch != UNSEEN;
     for row in 0..rows {
         let label: Option<&str> = match (&half, row) {
@@ -861,10 +826,11 @@ mod tests {
             duty,
             ..Default::default()
         };
-        assert_eq!(full_scale(&[cell(0.081), cell(0.02)]), 0.1);
-        assert_eq!(full_scale(&[cell(0.001)]), 0.05);
-        assert_eq!(full_scale(&[cell(0.3)]), 0.5);
-        assert_eq!(full_scale(&[cell(1.0)]), 1.0);
+        use band_axis::full_scale;
+        assert_eq!(full_scale(0.081), 0.1);
+        assert_eq!(full_scale(0.001), 0.05);
+        assert_eq!(full_scale(0.3), 0.5);
+        assert_eq!(full_scale(1.0), 1.0);
         let height = |c: &Vec<char>| c.iter().filter(|ch| !matches!(**ch, ' ' | FLOOR)).count();
         let at_fixed = column(&cell(0.081), 10, 1.0);
         let at_scale = column(&cell(0.081), 10, 0.1);

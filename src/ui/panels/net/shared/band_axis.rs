@@ -16,6 +16,54 @@
 
 use crate::signal::net::{band, occupancy};
 
+/// The duty the band's full scale stands for: the first of these at or above
+/// the busiest cell.
+const DUTY_SCALES: [f64; 5] = [0.05, 0.1, 0.2, 0.5, 1.0];
+
+/// The smallest step of [`DUTY_SCALES`] that holds `busiest`.
+///
+/// **A stated scale, not a fixed one.** At a fixed 100 % a room whose busiest
+/// megahertz is 8 % busy drew the profile's bars one row tall under ten empty
+/// ones and the heatmap in the ramp's darkest tenth, nearly one colour; at a
+/// scale that fits the room both use the whole of their range, and the scale
+/// is written on the panel so a tall bar or a hot colour is never read as a
+/// saturated channel. Steps rather than the exact maximum, so it holds still
+/// while the readings wander, and never below 5 %, so a quiet room's noise is
+/// not drawn as a wall.
+pub fn full_scale(busiest: f64) -> f64 {
+    DUTY_SCALES
+        .iter()
+        .copied()
+        .find(|s| busiest <= *s)
+        .unwrap_or(1.0)
+}
+
+/// The band's duty scale: one for the profile and the heatmap under it,
+/// since they are one instrument and one quantity has one scale (rule 5).
+/// It holds the busiest cell now and the busiest moment the history keeps,
+/// so scrubbing back or scrolling never shows a colour or a bar past it.
+pub fn duty_scale(state: &crate::state::SdrMetrics) -> f64 {
+    let band = &state.net.band;
+    let now = band.cells.iter().filter(|c| c.observed()).map(|c| c.duty);
+    let kept = band
+        .history
+        .iter()
+        .flat_map(|col| col.iter())
+        .filter(|d| **d >= 0.0)
+        .map(|d| f64::from(*d));
+    full_scale(now.chain(kept).fold(0.0, f64::max))
+}
+
+/// `10 %`, `0.5 %`: a duty as the scale is written.
+pub fn percent(duty: f64) -> String {
+    let p = duty * 100.0;
+    if p >= 1.0 {
+        format!("{p:.0} %")
+    } else {
+        format!("{p:.1} %")
+    }
+}
+
 /// The cells column `x` of a `width`-column band covers. Never empty.
 ///
 /// `widgets::canvas::band_range`, so the heatmap's `canvas::fold` into `width`
@@ -111,6 +159,25 @@ pub fn bonded_frame(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// One scale for the profile and the heatmap: it holds the busiest cell
+    /// now and the busiest moment kept, so a burst a minute ago is not drawn
+    /// past the top of either.
+    #[test]
+    fn the_duty_scale_holds_now_and_the_history() {
+        let mut m = crate::state::SdrMetrics::fixture();
+        m.net.band.cells = vec![crate::state::CellReading::default(); occupancy::CELLS];
+        assert_eq!(duty_scale(&m), 0.05);
+        m.net.band.cells[3].windows = 10;
+        m.net.band.cells[3].duty = 0.07;
+        assert_eq!(duty_scale(&m), 0.1);
+        let mut then = vec![-1.0f32; occupancy::CELLS];
+        then[40] = 0.3;
+        m.net.band.history = vec![then].into();
+        assert_eq!(duty_scale(&m), 0.5);
+        assert_eq!(percent(0.1), "10 %");
+        assert_eq!(percent(0.005), "0.5 %");
+    }
 
     /// Every cell is drawn in a column that covers it, and every column
     /// covers at least one cell, at every width a panel can have: the
