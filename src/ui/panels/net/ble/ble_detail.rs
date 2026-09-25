@@ -82,28 +82,25 @@ const DELTA_F2_MIN_FLOOR_KHZ: Limit = Limit::Min(185.0);
 /// row's reading says which it is.
 const RATIO_FLOOR: Limit = Limit::Min(0.8);
 
-/// Recalled from the RF-PHY test specification's own drift limit for LE 1M,
-/// **not checked against a primary source this session** - design section
-/// 6's own facts-to-verify table lists "BLE drift and drift-rate limits,
-/// and the patterns they are measured over" as an open item, unresolved by
-/// B9 same as it was left by B1. A symmetric band, because a burst can
-/// drift either warmer or colder than its own start.
+/// **Read from Core 5.4 Vol 6 Part A 3.3** (Table 3.4): "The frequency
+/// drift during any packet shall be less than 50 kHz", ±50 kHz, for LE as a
+/// whole, so on every PHY. A symmetric band, because a burst can drift
+/// either warmer or colder than its own start.
 const DRIFT_BAND_KHZ: Limit = Limit::Band {
     low: -50.0,
     high: 50.0,
 };
 
-/// Recalled under the same caveat as [`DRIFT_BAND_KHZ`]: the specification's
-/// own drift-rate limit, in Hz per microsecond.
+/// **Read from the same section**: "The drift rate shall be less than
+/// 400 Hz/µs", allowed "anywhere in a packet".
 const DRIFT_RATE_BAND: Limit = Limit::Band {
     low: -400.0,
     high: 400.0,
 };
 
-/// LE 2M's delta-f1 band: the same 0.45 to 0.55 index at 2 Mb/s, so twice
-/// LE 1M's, derived from the index band exactly as [`DELTA_F1_BAND_KHZ`] is
-/// (`h = 2 * delta_f / symbol_rate`), and matching public documentation of
-/// the RF-PHY tests ("these limits double for LE 2M PHY", EDN).
+/// LE 2M's delta-f1 band: the 0.45 to 0.55 index 3.1 states for every LE
+/// PHY, at 2 Msym/s, so twice LE 1M's, derived from the read band exactly as
+/// [`DELTA_F1_BAND_KHZ`] is (`h = 2 * delta_f / symbol_rate`).
 const DELTA_F1_BAND_2M_KHZ: Limit = Limit::Band {
     low: 450.0,
     high: 550.0,
@@ -129,10 +126,9 @@ const DRIFT_RATE_RESOLUTION: f64 = 80.0;
 
 /// The limit rows for a packet on `phy`: the modulation index band is the
 /// PHY's own ratio and the same on both, delta-f1 and delta-f2 scale with the
-/// symbol rate, the ratio does not. **Drift rows only on LE 1M**, where its
-/// limits are recalled: no LE 2M drift limit was found this session, and a
-/// band borrowed from LE 1M would be a limit nobody stated (rule 2), so on
-/// LE 2M the drift is shown as a reading ([`unlimited_drift`]).
+/// symbol rate, the ratio does not, and the drift limits are LE's as a whole
+/// (3.3), the same on both. LE 2M's drift was once shown without a limit,
+/// for want of one read; 3.3 states it for every LE PHY.
 fn rows(
     q: &ModulationQuality,
     d: Option<&Drift>,
@@ -152,7 +148,6 @@ fn rows(
             DELTA_F2_RESOLUTION_KHZ,
         )
     };
-    let d = if two_m { None } else { d };
     let mut out = vec![
         LimitRow::new(
             "Mod index",
@@ -642,11 +637,11 @@ fn connection_lines(
 
 /// The MODULATION section: the limit rows, or why there are none.
 fn modulation_lines(p: &BlePacket, iw: usize, theme: &crate::Theme) -> Vec<Line<'static>> {
-    // Where the limits come from, as the classic rows say theirs: the
-    // modulation rows are read, the drift rows still recalled.
+    // Where the limits come from, as the classic rows say theirs: every row
+    // read, the modulation from 3.1 and the drift from 3.3.
     let mut out = vec![crate::ui::chrome::section(
         "modulation",
-        "LE limits: Core 5.4 Vol 6 A 3.1; drift recalled",
+        "LE limits: Core 5.4 Vol 6 A 3.1, 3.3",
         iw,
         theme,
     )];
@@ -680,31 +675,7 @@ fn modulation_lines(p: &BlePacket, iw: usize, theme: &crate::Theme) -> Vec<Line<
     let rows = rows(&q, p.drift.as_ref(), p.phy);
     let w = fit(&rows, iw);
     out.extend(rows.iter().map(|r| Line::from(r.spans(theme, w))));
-    if p.phy == crate::signal::ble::Phy::TwoM {
-        out.extend(unlimited_drift(p.drift.as_ref(), theme));
-    }
     out
-}
-
-/// LE 2M's drift, measured on its own clock, shown as readings without a
-/// limit beside them, and a line saying why there is none.
-fn unlimited_drift(d: Option<&Drift>, theme: &crate::Theme) -> Vec<Line<'static>> {
-    let Some(d) = d else {
-        return Vec::new();
-    };
-    vec![
-        field_line(
-            "Drift",
-            Reading::new(d.drift_hz.scale(0.001), "kHz", DRIFT_RESOLUTION_KHZ).text(),
-            theme,
-        ),
-        field_line(
-            "rate",
-            Reading::new(d.drift_rate_hz_per_us, "Hz/us", DRIFT_RATE_RESOLUTION).text(),
-            theme,
-        ),
-        note("no LE 2M drift limit established here", theme),
-    ]
 }
 
 /// The frame error curve as rows (net-ux-polish-plan 5.7): one SNR bin a
@@ -1350,12 +1321,11 @@ mod tests {
         assert!(text.contains("450") && text.contains("550"), "{text}");
         assert!(text.contains("370"), "{text}");
         assert!(!text.contains("225"), "{text}");
-        // Drift measured, shown without a limit, and why.
-        assert!(
-            text.contains("no LE 2M drift limit established here"),
-            "{text}"
-        );
-        assert!(!text.contains("Drift rate"), "{text}");
+        // Drift against the limits 3.3 states for every LE PHY, not left
+        // without one as it was before they were read.
+        assert!(text.contains("Drift rate"), "{text}");
+        assert!(text.contains("-50") && text.contains("400"), "{text}");
+        assert!(text.contains("Core 5.4 Vol 6 A 3.1, 3.3"), "{text}");
     }
 
     /// **Nothing selected: the session's frame error curve**, all traffic,

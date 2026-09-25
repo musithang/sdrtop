@@ -170,10 +170,10 @@ signals. Where it matters, the screen says which:
 
 - A limit **read from the Bluetooth Core Specification** names its section,
   for example `Core 5.4 Vol 2 A 3.1.1` beside the classic modulation rows.
-- BLE's modulation index and deviation limits are read from the Core
-  Specification (`Core 5.4 Vol 6 A 3.1`); its drift limits are still
-  recalled from test-specification documentation, and the section heading
-  says so.
+- BLE's limits are all read from the Core Specification: the modulation
+  index and the deviations from `Core 5.4 Vol 6 A 3.1`, the drift and the
+  drift rate from `3.3`, on LE 1M and LE 2M alike. The section heading
+  names both.
 - The classic Bluetooth header decode is a port of `libbtbb`, and its
   section is headed "libbtbb port, unchecked on air". It has passed every
   test I could write for it and has never met a real classic transmitter,
