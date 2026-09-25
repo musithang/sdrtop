@@ -21,8 +21,10 @@
 //! mode is switched to lock, which is what lock is for.
 //!
 //! **B11: one preset gets a different plan, not a different mode.** On the
-//! `net_ble` preset, survey means rotating `signal::ble::channel::
-//! advertising_channels_hz`'s three fixed channels rather than covering the
+//! views the advertising decoder feeds (`signal::net::lock::
+//! ADVERTISING_VIEWS`: the BLE list and the census), survey means rotating
+//! `signal::ble::channel::advertising_channels_hz`'s three fixed channels
+//! rather than covering the
 //! wideband occupancy grid `signal::net::survey::Plan` computes - design
 //! section 13.1's survey-versus-lock claim still applies unchanged, it is
 //! only the positions that differ.
@@ -75,7 +77,8 @@ pub fn spawn_net_survey_task(state: Arc<Mutex<SdrMetrics>>, device: Arc<dyn SdrD
                     span,
                     m.radio.config_sample_rate,
                     m.radio.frequency,
-                    m.ui.active_preset == "net_ble",
+                    crate::signal::net::lock::ADVERTISING_VIEWS
+                        .contains(&m.ui.active_preset.as_str()),
                 )
             };
 
@@ -171,7 +174,8 @@ pub fn spawn_net_survey_task(state: Arc<Mutex<SdrMetrics>>, device: Arc<dyn SdrD
                         let m = state.lock().unwrap_or_else(|e| e.into_inner());
                         if !m.ui.is_net_section()
                             || m.net.mode != NetMode::Survey
-                            || m.ui.active_preset != "net_ble"
+                            || !crate::signal::net::lock::ADVERTISING_VIEWS
+                                .contains(&m.ui.active_preset.as_str())
                         {
                             break;
                         }

@@ -127,9 +127,66 @@ pub fn advertising_channel_index(channel: u8) -> Option<usize> {
     }
 }
 
+/// How far inside the edge of the view a channel's centre must sit to be
+/// decoded off the tuning: its own half megahertz of occupied bandwidth, and
+/// as much again for the radio's baseband roll-off. Reasoned from the
+/// signal's width, not measured against a filter's shape.
+const IN_VIEW_MARGIN_HZ: f64 = 1_000_000.0;
+
+/// The channel to decode with the radio tuned to `tuned_hz` and seeing
+/// `span_hz` of the band.
+///
+/// **Surveying, an advertising channel anywhere in view before the channel
+/// at the tuning.** The survey's positions are laid out for the band, not
+/// for Bluetooth, so the channel at a position's centre is almost always a
+/// data channel: at 8 Msps no position ever put 2402 MHz there, and the
+/// odd passes put none of the three there at all, so advertising was
+/// decoded about a tenth of the time. The receiver mixes any channel in
+/// view to baseband (`receive::Receiver::new`), so it takes the advertising
+/// one the position holds, the nearest to the centre if it holds two.
+///
+/// **Locked, the tuning's own channel**, where it is one: the radio is
+/// where the user put it, and a data channel chosen on purpose is not
+/// swapped for an advertising one beside it. Where the tuning is between
+/// channels, the advertising rule applies locked too.
+pub fn to_decode(tuned_hz: u64, span_hz: f64, locked: bool) -> Option<u8> {
+    let tuned = channel_of(tuned_hz);
+    if locked && tuned.is_some() {
+        return tuned;
+    }
+    let reach = span_hz / 2.0 - IN_VIEW_MARGIN_HZ;
+    let in_view = (37u8..=39)
+        .filter_map(|ch| centre_hz(ch).map(|hz| (ch, hz.abs_diff(tuned_hz))))
+        .filter(|(_, off)| (*off as f64) <= reach)
+        .min_by_key(|(_, off)| *off)
+        .map(|(ch, _)| ch);
+    in_view.or(tuned)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Every survey position at 8 Msps that holds an advertising channel
+    /// decodes it, 37 included, which the tuning alone never reached;
+    /// locked on a data channel, that channel stays.
+    #[test]
+    fn surveying_decodes_the_advertising_channel_in_view() {
+        let span = 8_000_000.0;
+        assert_eq!(to_decode(2_403_500_000, span, false), Some(37));
+        assert_eq!(to_decode(2_404_500_000, span, false), Some(37));
+        assert_eq!(to_decode(2_427_500_000, span, false), Some(38));
+        assert_eq!(to_decode(2_481_500_000, span, false), Some(39));
+        // No advertising channel in view: the tuning's own, or none.
+        assert_eq!(to_decode(2_441_500_000, span, false), Some(18));
+        assert_eq!(to_decode(2_441_000_000, span, false), None);
+        // Too near the edge to be decoded whole.
+        assert_eq!(to_decode(2_405_500_000, span, false), Some(1));
+        // Locked on a data channel beside 37: the data channel.
+        assert_eq!(to_decode(2_404_000_000, span, true), Some(0));
+        // Locked between channels: the advertising one in view.
+        assert_eq!(to_decode(2_403_000_000, span, true), Some(37));
+    }
 
     /// The three anchors named in the spec, in the order and at the
     /// frequencies the design document cites.

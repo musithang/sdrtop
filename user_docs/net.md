@@ -48,6 +48,15 @@ A surveyed count is a sample of the band, not a complete record. A few
 readings only exist in LOCK: a BLE device's advertising interval, for one,
 needs arrivals that were never interrupted by a hop.
 
+What SURVEY walks depends on the view. The BLE list and the Census are fed
+by the advertising decoder, so there it rotates the three advertising
+channels and nothing else. Everywhere else it walks the whole band, and the
+BLE decoder takes whichever advertising channel is in view at each stop,
+not just the channel the stop happens to be centred on. (It used to take
+the latter, which at 8 Msps meant channel 37 was never heard in a survey
+at all: the band's layout and Bluetooth's had simply never been
+introduced.)
+
 ### Stepping while locked
 
 `←` and `→` move a locked radio without typing a frequency. On the BLE and
@@ -240,7 +249,9 @@ panels is only as complete as this panel says the feed was.
 
 One row per transmitter the BLE decoder has confirmed: an address is only
 counted from a packet whose CRC passed, because a corrupted address would be
-a device that does not exist.
+a device that does not exist. Surveying, the Census rotates the three
+advertising channels itself, so it fills on its own, with no need to have
+the BLE list open beside it.
 
 | Column | What it is |
 |--------|------------|

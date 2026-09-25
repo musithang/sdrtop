@@ -410,7 +410,7 @@ impl NetWorker {
             // block rather than the state: see `StreamBlock::centre_hz`.
             let centre_hz = centre_hz as f64;
 
-            let (still_open, span_hz, is_net_bt, phy) = {
+            let (still_open, span_hz, is_net_bt, phy, locked) = {
                 let mut m = self.state.lock().unwrap_or_else(|e| e.into_inner());
                 let h = &mut m.net.health;
                 h.blocks_in = h.blocks_in.saturating_add(1);
@@ -437,6 +437,7 @@ impl NetWorker {
                     span.min(rate_hz),
                     m.ui.active_preset == NET_BT_PRESET,
                     m.net.ble_phy,
+                    m.net.mode == crate::state::NetMode::Lock,
                 )
             };
 
@@ -463,7 +464,14 @@ impl NetWorker {
             // reach the working rate from. Neither condition is `net_survey`'s
             // to share, so this keeps its own refusal rather than reusing
             // `survey_refused`.
-            let channel = crate::signal::ble::channel::channel_of(centre_hz as u64);
+            // Surveying, the advertising channel in view; locked, the
+            // tuning's own (`channel::to_decode`). LE 2M is never sent on the
+            // advertising channels, so for it the tuning's own channel it is.
+            let channel = if phy == crate::signal::ble::Phy::TwoM {
+                crate::signal::ble::channel::channel_of(centre_hz as u64)
+            } else {
+                crate::signal::ble::channel::to_decode(centre_hz as u64, span_hz, locked)
+            };
             match channel {
                 Some(ch)
                     if still_open
@@ -1195,6 +1203,71 @@ mod tests {
             })
             .collect();
         (bytes, addr)
+    }
+
+    /// Surveying, a position whose centre is not a BLE channel still decodes
+    /// the advertising channel it holds: tuned to 2403.5 MHz, the first
+    /// position of an 8 Msps pass, a channel-37 packet 1.5 MHz below the
+    /// centre is heard as channel 37. The tuning alone gave data channel 0
+    /// there, and 37 was never decoded in a survey.
+    #[test]
+    fn a_survey_position_decodes_the_advertising_channel_it_holds() {
+        use crate::signal::ble::detect::{
+            access_address_bits, preamble_bits, ADVERTISING_ACCESS_ADDRESS,
+        };
+        use crate::signal::ble::gfsk::modulate;
+        use crate::signal::ble::pdu::encode;
+        use crate::signal::ble::Phy;
+        use crate::signal::dsp::nco::Nco;
+        use crate::signal::dsp::testkit::{at_snr, Rng};
+        use num_complex::Complex;
+
+        const RATE: f64 = 8_000_000.0;
+        let tuned = 2_403_500_000u64;
+        let addr = [0x21u8, 0x32, 0x43, 0x54, 0x65, 0x76];
+        let mut bits: Vec<bool> = (0..32).map(|i| i % 3 == 0).collect();
+        bits.extend(preamble_bits(ADVERTISING_ACCESS_ADDRESS, Phy::OneM));
+        bits.extend_from_slice(&access_address_bits(ADVERTISING_ACCESS_ADDRESS));
+        bits.extend_from_slice(&encode(
+            37,
+            0x00,
+            &crate::signal::ble::pdu::air_octets(addr),
+        ));
+        let mut rng = Rng::new(3);
+        bits.extend((0..64).map(|_| rng.next_u64() & 1 == 1));
+        let mut iq = modulate(&bits, 8, Phy::OneM.deviation_hz(), RATE, 0.5);
+        let offset = crate::signal::ble::channel::centre_hz(37).unwrap() as f64 - tuned as f64;
+        Nco::new(offset, RATE).mix(&mut iq);
+        let noisy = at_snr(&iq, 25.0, &mut Rng::new(4));
+        let geometry = eight_bit();
+        let bytes: Vec<u8> = noisy
+            .iter()
+            .flat_map(|s: &Complex<f32>| {
+                let re = (s.re * geometry.full_scale).clamp(-127.0, 127.0) as i8;
+                let im = (s.im * geometry.full_scale).clamp(-127.0, 127.0) as i8;
+                [re as u8, im as u8]
+            })
+            .collect();
+
+        let mut m = SdrMetrics::fixture().streaming();
+        m.ui.section = crate::signal::net::SECTION.to_string();
+        m.ui.active_preset = "net_survey".to_string();
+        m.radio.frequency = tuned;
+        m.radio.config_sample_rate = RATE;
+        m.radio.bb_filter_hz = 0;
+        let state = Arc::new(Mutex::new(m));
+        let (tx, rx) = crossbeam_channel::unbounded();
+        tx.send(stamped(&state, 1, false, bytes)).unwrap();
+        drop(tx);
+        NetWorker::new(rx, Arc::clone(&state), geometry, SAFE_BT_CHANNELS).run();
+
+        let m = state.lock().unwrap();
+        assert_eq!(m.net.ble_channel, Some(37));
+        assert_eq!(m.net.ble_packets.len(), 1, "{:?}", m.net.health.ble);
+        let p = &m.net.ble_packets[0];
+        assert_eq!(p.channel, 37);
+        assert!(p.crc_ok);
+        assert_eq!(p.adv_addr, Some(addr));
     }
 
     /// **LE 2M, run through the worker**: on a data channel a 2M packet is
