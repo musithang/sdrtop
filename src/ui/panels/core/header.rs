@@ -360,6 +360,9 @@ fn plain_separator(theme: &crate::Theme, outer_width: u16) -> Line<'static> {
 /// `◆╴2m╶`), so the band you're in sits exactly where the eye lands. `outer_width`
 /// is the FULL panel width; rendered at the outer Rect so `├`/`┤` overwrite `│`.
 fn band_strip_line(state: &SdrMetrics, theme: &crate::Theme, outer_width: u16) -> Line<'static> {
+    if state.ui.is_net_section() {
+        return net_band_strip(state, theme, outer_width);
+    }
     // Inside NET the rail spans the band being worked, not the radio's whole
     // tuning range. A HackRF reaches 6 GHz, so on its own rail every channel in
     // the 2.4 GHz band lands in the same column and the marker never moves. The
@@ -395,6 +398,88 @@ fn band_strip_line(state: &SdrMetrics, theme: &crate::Theme, outer_width: u16) -
     )
 }
 
+/// The NET section's band strip: the 2.4 GHz band, with what the radio sees
+/// of it now and which of that the decoders are listening to.
+///
+/// **What is seen, not only where the needle is.** Elsewhere the strip is a
+/// dial, lit up to the tuning. In NET the question is what the receiver is
+/// covering, so the window it sees (the tuning, give or take half the span)
+/// is the lit stretch; the classic channels being watched are drawn over it
+/// in their own ink and the BLE decoder's channel is a dot in its own, the
+/// same two inks and the same `●` the coexistence history marks their hits
+/// with. In SURVEY the window walks the band as the survey does.
+fn net_band_strip(state: &SdrMetrics, theme: &crate::Theme, outer_width: u16) -> Line<'static> {
+    use crate::signal::net::band::{HIGH_HZ, LOW_HZ};
+    let lo_lbl = format!("{}", LOW_HZ / 1_000_000);
+    let hi_lbl = format!("{}", HIGH_HZ / 1_000_000);
+    let left_w = 1 + 1 + 1 + lo_lbl.chars().count() + 1;
+    let right_w = 1 + hi_lbl.chars().count() + 1 + 1 + 1;
+    let track_w = (outer_width as usize).saturating_sub(left_w + right_w);
+    if track_w < 8 {
+        return plain_separator(theme, outer_width);
+    }
+    let col = |hz: f64| -> usize {
+        ((range_frac(hz.max(0.0) as u64, LOW_HZ, HIGH_HZ) * (track_w - 1) as f64).round() as usize)
+            .min(track_w - 1)
+    };
+    let tuned = state.radio.frequency as f64;
+    let span = if state.radio.bb_filter_hz > 0 {
+        (state.radio.bb_filter_hz as f64).min(state.radio.config_sample_rate)
+    } else {
+        state.radio.config_sample_rate
+    };
+    let (a, b) = (col(tuned - span / 2.0), col(tuned + span / 2.0));
+    let watched = &state.net.bt_channels_watched;
+    let bt_cols = match (watched.iter().min(), watched.iter().max()) {
+        (Some(&lo), Some(&hi)) => {
+            let edge = |ch: u8| crate::signal::bt::channel::centre_hz(ch).map(|hz| hz as f64);
+            match (edge(lo), edge(hi)) {
+                (Some(l), Some(h)) => Some((col(l - 400e3), col(h + 400e3))),
+                _ => None,
+            }
+        }
+        _ => None,
+    };
+    let ble_col = state
+        .net
+        .ble_channel
+        .and_then(crate::signal::ble::channel::centre_hz)
+        .map(|hz| col(hz as f64));
+
+    let bold = |c| {
+        Style::default()
+            .fg(c)
+            .add_modifier(ratatui::style::Modifier::BOLD)
+    };
+    let mut spans = vec![
+        Span::styled("├", Style::default().fg(theme.border_dim)),
+        Span::styled("─", Style::default().fg(theme.border_default)),
+        Span::raw(" "),
+        Span::styled(lo_lbl, Style::default().fg(theme.label)),
+        Span::raw(" "),
+    ];
+    for c in 0..track_w {
+        let in_view = (a..=b).contains(&c);
+        spans.push(if Some(c) == ble_col {
+            Span::styled("\u{25cf}", bold(theme.net_ble))
+        } else if in_view && bt_cols.is_some_and(|(l, h)| (l..=h).contains(&c)) {
+            Span::styled("\u{2501}", bold(theme.net_bt))
+        } else if in_view {
+            Span::styled("\u{2501}", bold(theme.border_accent))
+        } else {
+            Span::styled("\u{2508}", Style::default().fg(theme.border_dim))
+        });
+    }
+    spans.extend([
+        Span::raw(" "),
+        Span::styled(hi_lbl, Style::default().fg(theme.label)),
+        Span::raw(" "),
+        Span::styled("─", Style::default().fg(theme.border_default)),
+        Span::styled("┤", Style::default().fg(theme.border_dim)),
+    ]);
+    Line::from(spans)
+}
+
 /// The NET section's bottom band: what the receiver is doing, in place of the
 /// gain staging and tuning the normal header shows.
 ///
@@ -407,10 +492,7 @@ fn band_strip_line(state: &SdrMetrics, theme: &crate::Theme, outer_width: u16) -
 fn net_band_line(state: &SdrMetrics, theme: &crate::Theme, inner_width: u16) -> Line<'static> {
     let value = Style::default().fg(theme.value);
     let health = &state.net.health;
-    let mut fields = Vec::new();
-    if let Some(channel) = channel_label(state) {
-        fields.push(BandField::new(channel, value, 5));
-    }
+    let mut fields = channel_fields(state, theme);
     fields.push(BandField::new(
         format!("{:.3} MHz", state.radio.frequency as f64 / 1e6),
         value,
@@ -463,45 +545,84 @@ fn load_text(load: f64) -> String {
     }
 }
 
-/// The channel, in the numbering of whatever is being received on it.
+/// The channels, in the numbering of whatever is being received on them.
 ///
 /// A radio parked on 2402 MHz for BLE is on BLE channel 37; calling it by the
 /// nearest Wi-Fi number, as the band line once did, names a channel nobody is
-/// listening to. So a running decoder names its own channel - BLE's single
-/// one, or the span of classic Bluetooth channels the fleet is watching - and
-/// only with no decoder running does the band fall back to Wi-Fi's numbering,
-/// the one everyone reads 2.4 GHz in. Between channels of every scheme there
-/// is no channel, and nothing is said rather than the nearest one rounded to.
-fn channel_label(state: &SdrMetrics) -> Option<String> {
-    let mut running = Vec::new();
+/// listening to. So a running decoder names its own channel, each as its own
+/// field: BLE's single one with whether it is an advertising or a data channel
+/// (which is why a list can be quiet), and the span of classic channels being
+/// watched. Each wears the mark and ink the coexistence history gives that
+/// decoder's hits, `●` and `■`, as the band strip above does. Only with no
+/// decoder running does the band fall back to Wi-Fi's numbering, the one
+/// everyone reads 2.4 GHz in. Between channels of every scheme there is no
+/// channel, and nothing is said rather than the nearest one rounded to.
+fn channel_fields(state: &SdrMetrics, theme: &crate::Theme) -> Vec<BandField> {
+    let value = Style::default().fg(theme.value);
+    let label = Style::default().fg(theme.label);
+    let mut out = Vec::new();
     if let Some(ch) = state.net.ble_channel {
-        running.push(format!("BLE ch {ch}"));
+        let kind = if crate::signal::ble::channel::advertising_channel_index(ch).is_some() {
+            "adv"
+        } else {
+            "data"
+        };
+        out.push(BandField::spans(
+            vec![
+                Span::styled("\u{25cf}", Style::default().fg(theme.net_ble)),
+                Span::styled(format!(" BLE {ch} "), value),
+                Span::styled(kind, label),
+            ],
+            5,
+        ));
     }
     let watched = &state.net.bt_channels_watched;
     if let (Some(lo), Some(hi)) = (watched.iter().min(), watched.iter().max()) {
-        running.push(if lo == hi {
-            format!("BT ch {lo}")
+        let span = if lo == hi {
+            format!(" BT {lo}")
         } else {
-            format!("BT ch {lo}-{hi}")
-        });
+            format!(" BT {lo}\u{2013}{hi}")
+        };
+        out.push(BandField::spans(
+            vec![
+                Span::styled("\u{25a0}", Style::default().fg(theme.net_bt)),
+                Span::styled(span, value),
+            ],
+            5,
+        ));
     }
-    if !running.is_empty() {
-        return Some(running.join(" + "));
+    if out.is_empty() {
+        if let Some(ch) = crate::signal::net::band::wifi_channel(state.radio.frequency) {
+            out.push(BandField::new(format!("Wi-Fi ch {ch}"), value, 5));
+        }
     }
-    crate::signal::net::band::wifi_channel(state.radio.frequency).map(|ch| format!("Wi-Fi ch {ch}"))
+    out
 }
 
 /// One field of the NET band: its text, its style, and how long it holds its
 /// place as the line narrows - higher holds longer.
 struct BandField {
-    text: String,
-    style: Style,
+    spans: Vec<Span<'static>>,
     keep: u8,
 }
 
 impl BandField {
     fn new(text: String, style: Style, keep: u8) -> Self {
-        Self { text, style, keep }
+        Self::spans(vec![Span::styled(text, style)], keep)
+    }
+
+    /// A field in more than one ink, kept or dropped whole.
+    fn spans(spans: Vec<Span<'static>>, keep: u8) -> Self {
+        Self { spans, keep }
+    }
+
+    fn width(&self) -> usize {
+        self.spans.iter().map(|s| s.content.chars().count()).sum()
+    }
+
+    #[cfg(test)]
+    fn text(&self) -> String {
+        self.spans.iter().map(|s| s.content.as_ref()).collect()
     }
 }
 
@@ -530,7 +651,7 @@ fn compose_net_band(
     by_importance.sort_by_key(|&i| std::cmp::Reverse(fields[i].keep));
     let mut kept = vec![false; fields.len()];
     for i in by_importance {
-        let next = width + sep_w + fields[i].text.chars().count();
+        let next = width + sep_w + fields[i].width();
         if next <= inner_width as usize {
             width = next;
             kept[i] = true;
@@ -549,7 +670,7 @@ fn compose_net_band(
     ];
     for (field, _) in fields.iter().zip(&kept).filter(|(_, k)| **k) {
         spans.push(Span::styled(SEP, Style::default().fg(theme.label)));
-        spans.push(Span::styled(field.text.clone(), field.style));
+        spans.extend(field.spans.iter().cloned());
     }
     Line::from(spans)
 }
@@ -1184,6 +1305,45 @@ mod tests {
         m
     }
 
+    /// In NET the strip lights what the radio sees: the window around the
+    /// tuning, the watched classic channels in their ink within it, and the
+    /// BLE decoder's channel as a dot, the whole strip exactly the frame wide.
+    #[test]
+    fn the_net_strip_lights_the_window_and_marks_the_decoders() {
+        let theme = crate::Theme::sdr();
+        let mut m = net_fixture();
+        m.radio.frequency = 2_410_000_000;
+        m.radio.config_sample_rate = 8_000_000.0;
+        // No baseband filter narrowing it: the span is the rate.
+        m.radio.bb_filter_hz = 0;
+        m.net.ble_channel = Some(3);
+        m.net.bt_channels_watched = (5..=11).collect();
+        let line = net_band_strip(&m, &theme, 191);
+        let text: String = line.spans.iter().map(|s| s.content.as_ref()).collect();
+        assert_eq!(text.chars().count(), 191, "{text}");
+        let lit = |c: ratatui::style::Color| {
+            line.spans
+                .iter()
+                .filter(|s| s.content == "\u{2501}" && s.style.fg == Some(c))
+                .count()
+        };
+        // Eight megahertz of an 83.5 MHz band on a ~174-column track.
+        let window = lit(theme.border_accent) + lit(theme.net_bt) + 1;
+        assert!((15..=19).contains(&window), "{window}: {text}");
+        assert!(lit(theme.net_bt) >= 12, "{text}");
+        let dots: Vec<_> = line
+            .spans
+            .iter()
+            .filter(|s| s.content == "\u{25cf}")
+            .collect();
+        assert_eq!(dots.len(), 1, "{text}");
+        assert_eq!(dots[0].style.fg, Some(theme.net_ble));
+        // The dot sits inside the lit window, not somewhere on the dashes.
+        let at = text.chars().position(|c| c == '\u{25cf}').unwrap();
+        let first = text.chars().position(|c| c == '\u{2501}').unwrap();
+        assert!(at > first && at < first + window, "{text}");
+    }
+
     /// The mode is the first thing the header says and it is never ambiguous:
     /// exactly one of the two words is on screen, whichever mode is running.
     #[test]
@@ -1250,7 +1410,7 @@ mod tests {
 
         let wide = render(120);
         for f in &fields {
-            assert!(wide.contains(&f.text), "{} missing: {wide}", f.text);
+            assert!(wide.contains(&f.text()), "{} missing: {wide}", f.text());
         }
         // Reading order is kept whatever survives.
         assert!(wide.find("MHz") < wide.find("Msps"));
@@ -1287,19 +1447,27 @@ mod tests {
         m.radio.frequency = 2_402_000_000;
         m.net.ble_channel = Some(37);
         let out = crate::state::fixture::draw(HeaderPanel, 120, 5, &m).join("\n");
-        assert!(out.contains("BLE ch 37"), "{out}");
+        assert!(out.contains("\u{25cf} BLE 37 adv"), "{out}");
         assert!(!out.contains("Wi-Fi"), "{out}");
+        // A data channel says so: advertising never comes there.
+        m.net.ble_channel = Some(3);
+        let out = crate::state::fixture::draw(HeaderPanel, 120, 5, &m).join("\n");
+        assert!(out.contains("BLE 3 data"), "{out}");
+        m.net.ble_channel = Some(37);
 
         // Classic Bluetooth watches a span of channels, and says which.
         m.net.ble_channel = None;
         m.net.bt_channels_watched = vec![38, 39, 40, 41];
         let out = crate::state::fixture::draw(HeaderPanel, 120, 5, &m).join("\n");
-        assert!(out.contains("BT ch 38-41"), "{out}");
+        assert!(out.contains("\u{25a0} BT 38\u{2013}41"), "{out}");
 
         // Both at once, when both are running.
         m.net.ble_channel = Some(37);
         let out = crate::state::fixture::draw(HeaderPanel, 120, 5, &m).join("\n");
-        assert!(out.contains("BLE ch 37 + BT ch 38-41"), "{out}");
+        assert!(
+            out.contains("\u{25cf} BLE 37 adv \u{b7} \u{25a0} BT 38\u{2013}41"),
+            "{out}"
+        );
     }
 
     /// Before the feed has delivered a block there is nothing to have been

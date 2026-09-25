@@ -65,6 +65,21 @@ advertising view off the three channels therefore moves the radio to the
 nearest of them, once, and the log says so. Tune somewhere else afterwards
 (a data channel for LE 2M, say) and it stays where you put it.
 
+### The header
+
+In NET the strip under the radio's name is the band, 2400 to 2483 MHz, and
+the lit stretch is what the radio can see right now: the tuning, give or
+take half the span. The classic channels being watched are drawn over it in
+white, and the channel the BLE decoder is on is a pink `●`, the same marks
+and inks the coexistence history puts on their hits. In SURVEY the lit
+stretch walks the band with the survey.
+
+The line under it says the same in words: `● BLE 38 adv` or `● BLE 3 data`
+(a data channel is where advertising never comes, which is the usual reason
+for a quiet list), `■ BT 5–11` for the classic channels, and with no decoder
+running, the Wi-Fi channel number, because that is how everyone else reads
+2.4 GHz.
+
 ### The three silences
 
 An empty panel always says which kind of empty it is:
@@ -258,7 +273,7 @@ the table.
 
 Real BLE advertising packets, CRC-checked, as they arrive. The radio has to be
 on an advertising channel (2402, 2426 or 2480 MHz); the header says which
-channel the decoder has.
+channel the decoder has, and whether it is one ([the header](#the-header)).
 
 ### The packet list *(focus `v`)*
 
