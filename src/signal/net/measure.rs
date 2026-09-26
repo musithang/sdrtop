@@ -58,6 +58,51 @@ const MEASURE_STOP_HZ: f64 = 1_750_000.0;
 /// short enough that Kaiser's rule lands a stopband peak at 39.3 dB.
 const MEASURE_STOPBAND_DB: f64 = 42.0;
 
+/// A classic header is not measured when one side of the channel carries
+/// this much more power, a channel away, than the other side does, over
+/// the channel's own power in the same bandwidth, in dB. What a neighbour
+/// does to the readings through the wide filter was measured
+/// (`conformance::a_neighbour_25_db_down_moves_the_readings_under_one_
+/// percent`): under 1 % to 20 dB down, 4 % at 15. The other side is the
+/// yardstick because the transmitter's own spectrum a channel away, 40 to
+/// 44 dB down depending on its deviation, and the noise are the same on both
+/// sides, where a neighbour is on one.
+const NEIGHBOUR_LIMIT_DB: f64 = -20.0;
+
+/// Classic channels are this far apart, so a neighbour's centre is here.
+const CLASSIC_SPACING_HZ: f64 = 1_000_000.0;
+
+/// The bandwidth a neighbour's power is read in, either side of its centre:
+/// its main lobe, and little of the transmitter's own spectrum.
+const GUARD_PASS_HZ: f64 = 100_000.0;
+const GUARD_STOP_HZ: f64 = 250_000.0;
+const GUARD_STOPBAND_DB: f64 = 50.0;
+
+/// How much more power one side of the channel carries, `spacing` away,
+/// than the other, over the channel's own power in the same bandwidth, in
+/// dB: `iq` at `rate`, the channel at baseband. Minus infinity when the two
+/// sides are equal. [`NEIGHBOUR_LIMIT_DB`] has why one side against the
+/// other.
+pub fn neighbour_excess_db(iq: &[Complex<f32>], rate: f64, spacing: f64) -> f64 {
+    let taps = design_lowpass_to_spec(
+        (GUARD_PASS_HZ + GUARD_STOP_HZ) / 2.0 / rate,
+        (GUARD_STOP_HZ - GUARD_PASS_HZ) / rate,
+        GUARD_STOPBAND_DB,
+    );
+    // A power needs no more than the band's own rate.
+    let factor = (rate / (4.0 * GUARD_STOP_HZ)).floor().max(1.0) as usize;
+    let band = |offset: f64| {
+        let mut shifted = iq.to_vec();
+        Nco::new(-offset, rate).mix(&mut shifted);
+        let mut filter = StreamingDecimator::new(taps.clone(), factor);
+        let mut out = Vec::new();
+        filter.process(&shifted, &mut out);
+        out.iter().map(|z| z.norm_sqr() as f64).sum::<f64>() / out.len().max(1) as f64
+    };
+    let (own, up, down) = (band(0.0), band(spacing), band(-spacing));
+    10.0 * ((up - down).abs() / own).log10()
+}
+
 /// The rate the measurement filter decimates to: four samples a symbol at
 /// 1 Msym/s, read between by [`Oversampled`].
 const MEASURE_RATE_HZ: f64 = 4_000_000.0;
@@ -123,13 +168,25 @@ struct Tester {
     delay: f64,
     /// The decimation factor.
     factor: f64,
+    /// [`neighbour_excess_db`] over `from..to`, when asked for.
+    neighbour_db: Option<f64>,
 }
 
 impl Tester {
     /// The tester over stream positions `from` to `to` of a channel
     /// `offset_hz` from the tuning, at `rate`; `None` when the rate is not a
     /// whole multiple of [`MEASURE_RATE_HZ`] or the samples are not held.
-    fn new(recent: &Recent, rate: f64, offset_hz: f64, from: f64, to: f64) -> Option<Self> {
+    ///
+    /// `neighbours`, when given, is the channel spacing whose neighbours'
+    /// power is read over `from..to` ([`neighbour_excess_db`]).
+    fn new(
+        recent: &Recent,
+        rate: f64,
+        offset_hz: f64,
+        from: f64,
+        to: f64,
+        neighbours: Option<f64>,
+    ) -> Option<Self> {
         let factor = (rate / MEASURE_RATE_HZ).round().max(1.0);
         if (rate / factor - MEASURE_RATE_HZ).abs() > MEASURE_RATE_HZ * 0.01 {
             return None;
@@ -147,6 +204,10 @@ impl Tester {
         // Frequency is measured, not phase, so the oscillator may start at
         // any phase: fresh for every burst.
         Nco::new(-offset_hz, rate).mix(&mut iq);
+        let neighbour_db = neighbours.map(|spacing| {
+            let burst = (from - start) as usize..((to - start) as usize).min(iq.len());
+            neighbour_excess_db(&iq[burst], rate, spacing)
+        });
         let mut filter = StreamingDecimator::new(taps, factor as usize);
         let delay = filter.delay();
         let mut out = Vec::new();
@@ -156,6 +217,7 @@ impl Tester {
             start,
             delay,
             factor,
+            neighbour_db,
         })
     }
 
@@ -217,6 +279,13 @@ fn timing(tester: &Tester, first: f64, bit: f64, known: &[bool]) -> f64 {
 /// measure from.
 type Readings = ((Vec<f32>, Vec<f32>), Vec<f32>);
 
+/// What reading a burst came to.
+enum Read {
+    Readings(Readings),
+    /// A neighbour was louder than [`NEIGHBOUR_LIMIT_DB`] allows.
+    NeighbourBusy,
+}
+
 fn read_after_known(
     recent: &Recent,
     rate: f64,
@@ -224,10 +293,24 @@ fn read_after_known(
     known: &[bool],
     first: f64,
     after: &[bool],
-) -> Option<Readings> {
+    neighbours: Option<f64>,
+) -> Option<Read> {
     let bit = rate / 1e6;
     let last = first + (known.len() + after.len()) as f64 * bit;
-    let tester = Tester::new(recent, rate, offset_hz, first - 2.0 * bit, last + 2.0 * bit)?;
+    let tester = Tester::new(
+        recent,
+        rate,
+        offset_hz,
+        first - 2.0 * bit,
+        last + 2.0 * bit,
+        neighbours,
+    )?;
+    if tester
+        .neighbour_db
+        .is_some_and(|db| db >= NEIGHBOUR_LIMIT_DB)
+    {
+        return Some(Read::NeighbourBusy);
+    }
     let tau = timing(&tester, first, bit, known);
     // Bit position `x` (bit `k` spans `k..k + 1`) as a stream position.
     let at = |x: f64| tester.at(first + (x - 0.5 + tau) * bit);
@@ -236,7 +319,7 @@ fn read_after_known(
     let centres = (0..after.len())
         .map(|i| at((known.len() + i) as f64 + 0.5))
         .collect();
-    Some((readings, centres))
+    Some(Read::Readings((readings, centres)))
 }
 
 /// A classic header's modulation readings, as a tester reads them: `lap`'s
@@ -255,8 +338,20 @@ pub fn classic(
 ) -> Option<Deviation> {
     let sync = crate::signal::bt::access_code::access_code_bits(lap);
     let first = sync_end_pair - (sync.len() - 1) as f64 * rate / 1e6;
-    let ((settled, alternating), _) = read_after_known(recent, rate, offset_hz, &sync, first, air)?;
-    Some(Deviation::from_readings(&settled, &alternating))
+    match read_after_known(
+        recent,
+        rate,
+        offset_hz,
+        &sync,
+        first,
+        air,
+        Some(CLASSIC_SPACING_HZ),
+    )? {
+        Read::Readings(((settled, alternating), _)) => {
+            Some(Deviation::from_readings(&settled, &alternating))
+        }
+        Read::NeighbourBusy => Some(Deviation::neighbour_busy()),
+    }
 }
 
 /// An LE 1M packet's modulation and drift, as a tester reads them: `air`
@@ -281,8 +376,15 @@ pub fn le_1m(
     let mut known = preamble_bits(ADVERTISING_ACCESS_ADDRESS, Phy::OneM);
     known.extend(access_address_bits(ADVERTISING_ACCESS_ADDRESS));
     let first = pdu_pair - known.len() as f64 * rate / 1e6;
-    let ((settled, alternating), centres) =
-        read_after_known(recent, rate, offset_hz, &known, first, air)?;
+    // No guard: LE's neighbours are 2 MHz away, in the measurement filter's
+    // stopband, and one 15 dB down moves the readings 0.3 %
+    // (`conformance::a_neighbour_25_db_down_moves_the_readings_under_one_
+    // percent`, which also runs LE at 15).
+    let Read::Readings(((settled, alternating), centres)) =
+        read_after_known(recent, rate, offset_hz, &known, first, air, None)?
+    else {
+        return None;
+    };
     Some((
         modulation_from(&settled, &alternating, Phy::OneM),
         drift(&centres, Phy::OneM),
@@ -312,6 +414,64 @@ mod tests {
                 let db = reference::response_db(&taps, hz, rate);
                 assert!(db <= -40.0, "{rate}: {db} dB at {hz}");
                 hz += 25e3;
+            }
+        }
+    }
+
+    /// The guard against the channel's own spectrum, noise, and neighbours
+    /// either side of its limit, over a header's worth of bits (130) at
+    /// 8 Msps, for transmitters across BR's deviation band.
+    #[test]
+    fn the_neighbour_guard_sees_the_next_channel_and_not_the_channel_itself() {
+        let rate = 8e6;
+        let mut rng = Rng::new(60);
+        let bits: Vec<bool> = (0..130).map(|_| rng.next_u64() & 1 == 1).collect();
+        let other_bits: Vec<bool> = (0..130).map(|_| rng.next_u64() & 1 == 1).collect();
+        let to_f32 = |v: Vec<Complex<f64>>| -> Vec<Complex<f32>> {
+            v.iter()
+                .map(|z| Complex::new(z.re as f32, z.im as f32))
+                .collect()
+        };
+        for deviation in [140e3, 160e3, 175e3] {
+            let own = Burst::new(Gfsk::new(1e6, deviation, 0.5), &bits);
+            let n = own.len_at(rate);
+            let own = to_f32(own.iq(rate, n));
+            for side in [1e6, -1e6] {
+                let other = to_f32(
+                    Burst::new(Gfsk::new(1e6, 160e3, 0.5).with_cfo(side), &other_bits).iq(rate, n),
+                );
+                // Measured: the channel alone -54 to -56 dB, with noise at
+                // 20 dB in 1 MHz -30 to -31, a neighbour 25 dB down -23 to
+                // -30, one 15 dB down -14 to -16.
+                // (neighbour, SNR, the range the guard must read in).
+                let (low, limit, high) = (f64::NEG_INFINITY, NEIGHBOUR_LIMIT_DB, f64::INFINITY);
+                let cases = [
+                    (None, f64::INFINITY, low, -45.0),
+                    (None, 20.0, low, -26.0),
+                    (Some(-25.0), 20.0, low, limit),
+                    (Some(-15.0), 20.0, limit, high),
+                    (Some(-15.0), f64::INFINITY, limit, high),
+                ];
+                for (neighbour_db, snr_db, from, below) in cases {
+                    let a = neighbour_db.map_or(0.0, |db: f64| 10f32.powf(db as f32 / 20.0));
+                    let noise = if snr_db.is_finite() {
+                        10f64.powf(-snr_db / 10.0) * rate / 1e6
+                    } else {
+                        0.0
+                    };
+                    let z = Rng::new(61).noise(n, noise);
+                    let iq: Vec<Complex<f32>> = own
+                        .iter()
+                        .zip(&other)
+                        .zip(&z)
+                        .map(|((x, y), w)| x + y * a + w)
+                        .collect();
+                    let db = neighbour_excess_db(&iq, rate, 1e6);
+                    assert!(
+                        from <= db && db < below,
+                        "{deviation} Hz, side {side}, neighbour {neighbour_db:?}, SNR {snr_db}: {db} dB"
+                    );
+                }
             }
         }
     }
@@ -411,5 +571,24 @@ mod tests {
         // Not held: refused, not read from somewhere else.
         let short = Recent::new([(base, &iq[..cut])]);
         assert!(classic(&short, rate, offset, lap, true_end, air).is_none());
+
+        // A neighbour a channel above, 15 dB down: counted, not read.
+        let mut rng = Rng::new(10);
+        let other_bits: Vec<bool> = (0..bits.len()).map(|_| rng.next_u64() & 1 == 1).collect();
+        let other = Burst::new(
+            Gfsk::new(1e6, 160_000.0, 0.5).with_cfo(offset + 1e6),
+            &other_bits,
+        )
+        .iq(rate, n);
+        let a = 0.5 * 10f64.powf(-15.0 / 20.0);
+        let loud: Vec<Complex<f32>> = iq
+            .iter()
+            .zip(&other)
+            .map(|(x, y)| x + Complex::new((y.re * a) as f32, (y.im * a) as f32))
+            .collect();
+        let held = Recent::new([(base, &loud[..])]);
+        let got = classic(&held, rate, offset, lap, true_end, air).expect("held");
+        assert_eq!(got.neighbour_busy, 1);
+        assert_eq!((got.settled.n, got.alternating.n), (0, 0));
     }
 }

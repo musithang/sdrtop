@@ -410,11 +410,20 @@ fn modulation_lines(p: &Piconet, iw: usize, theme: &crate::Theme) -> Vec<Line<'s
             Style::default().fg(theme.stale),
         ))
     };
+    // Headers a busy neighbour kept from being read (`signal::net::
+    // measure`), said wherever the figures stand or fail to.
+    let busy = (d.neighbour_busy > 0).then(|| {
+        quiet(&format!(
+            "{} headers not read: the next channel was busy at the time",
+            d.neighbour_busy
+        ))
+    });
     let Some(df1) = d.settled.mean() else {
         out.push(quiet(&format!(
             "not measured: {} settled bits in {} headers, two needed",
             d.settled.n, p.headers.captured
         )));
+        out.extend(busy);
         return out;
     };
     let mut rows = vec![
@@ -456,6 +465,7 @@ fn modulation_lines(p: &Piconet, iw: usize, theme: &crate::Theme) -> Vec<Line<'s
             Style::default().fg(theme.label),
         )));
     }
+    out.extend(busy);
     out
 }
 
@@ -1303,6 +1313,7 @@ mod tests {
         let dev = Deviation {
             settled: Sums::of(&[158_000.0, 160_000.0, 162_000.0, 160_000.0]),
             alternating: Sums::of(&[149_000.0, 151_000.0]),
+            neighbour_busy: 2,
         };
         observe_header(
             &mut m.net.bt_piconets,
@@ -1324,6 +1335,10 @@ mod tests {
         assert!(
             out.contains("test suite defines them"),
             "said how it was read: {out}"
+        );
+        assert!(
+            out.contains("2 headers not read: the next channel was busy"),
+            "{out}"
         );
     }
 

@@ -747,14 +747,17 @@ mod tests {
     }
 
     /// What the wide filter gives up, measured: a second transmitter one
-    /// channel away (1 MHz on BR, 2 on LE), 25 dB down, moves the readings
-    /// by under 1 %. The per-bit mean averages its ripple away and the
+    /// channel away, 25 dB down on BR (1 MHz away, guarded above 20 dB by
+    /// `measure`) and 15 dB down on LE (2 MHz away, in the filter's
+    /// stopband, unguarded), moves the readings by under 1 %. The per-bit mean averages its ripple away and the
     /// centre reading only scatters with it, where the suites' per-bit
     /// maximum rode it 18 % high.
     #[test]
     fn a_neighbour_25_db_down_moves_the_readings_under_one_percent() {
         let rate = 32e6;
-        for (deviation, spacing) in [(BR_DEVIATION_HZ, 1e6), (LE_DEVIATION_HZ, 2e6)] {
+        for (deviation, spacing, down_db) in
+            [(BR_DEVIATION_HZ, 1e6, 25.0), (LE_DEVIATION_HZ, 2e6, 15.0)]
+        {
             let (bits, from, len, tx) = traffic(deviation, 41);
             let (s1, s2) = suites_on_patterns(tx);
             let burst = Burst::new(tx, &bits);
@@ -766,7 +769,7 @@ mod tests {
                 &other_bits,
             )
             .iq(rate, n);
-            let a = 10f64.powf(-25.0 / 20.0);
+            let a = 10f64.powf(-down_db / 20.0);
             let iq: Vec<Complex<f64>> = burst
                 .iq(rate, n)
                 .iter()

@@ -95,6 +95,9 @@ use crate::signal::dsp::deviation::Sums;
 pub struct Deviation {
     pub settled: Sums,
     pub alternating: Sums,
+    /// Headers not read because the next channel was busy at the same
+    /// moment (`signal::net::measure`).
+    pub neighbour_busy: u64,
 }
 
 impl Deviation {
@@ -105,6 +108,15 @@ impl Deviation {
         Self {
             settled: Sums::of(settled),
             alternating: Sums::of(alternating),
+            neighbour_busy: 0,
+        }
+    }
+
+    /// One header not read, because a neighbour was too loud to read past.
+    pub fn neighbour_busy() -> Self {
+        Self {
+            neighbour_busy: 1,
+            ..Self::default()
         }
     }
 }
@@ -285,6 +297,7 @@ pub fn observe_header(
     h.clock_hypotheses = hypotheses;
     h.deviation.settled.add(deviation.settled);
     h.deviation.alternating.add(deviation.alternating);
+    h.deviation.neighbour_busy += deviation.neighbour_busy;
     match read {
         HeaderRead::Unresolved => {}
         HeaderRead::Undecoded => h.undecoded += 1,

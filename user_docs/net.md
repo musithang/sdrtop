@@ -448,9 +448,15 @@ The selected piconet's detail, in as many sections as the panel has room for
   check itself against a reference first. The suite's own recommended
   filter turned out to be the wrong one for traffic (it is built for a
   tester reading its own test patterns, and bends ordinary traffic by a
-  few percent), so the reading uses a wider one; a strong transmitter on
-  the next channel at the same moment is the price, and below about 20 dB
-  under the one being measured it moves the figures by less than 1 %.
+  few percent), so the reading uses a wider one. The price is the next
+  channel: up to 20 dB below the transmitter being measured it moves the
+  figures by less than 1 %, and a header with anything louder next door at
+  the same moment is not read at all, just counted ("headers not read: the
+  next channel was busy"). A weak signal makes `df2` scatter, one reading
+  per bit at its centre carrying all the noise; the `±` beside it says how
+  much, and at 20 dB above the noise it also leans a percent or so, which
+  the `±` does not cover. Stronger is better, as with most things in
+  radio.
 - **Timing**: how far each hit lands from the piconet's own 625 µs slot grid,
   fitted to its hits, against the specification's 1 µs, with the spread drawn
   under it. Below eight hits it is collecting; hits that do not line up on a
