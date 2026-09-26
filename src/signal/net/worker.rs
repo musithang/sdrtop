@@ -865,6 +865,70 @@ mod tests {
         }
     }
 
+    /// **What the receive chain costs, measured.** Not a check: run it by
+    /// hand, in release, on the machine the question is about
+    /// (`cargo test --release measure_the_receive_chain -- --ignored
+    /// --nocapture`), and it prints each view's wall time over the stream
+    /// time it covered, the figure the header calls the decode load. Fed
+    /// noise, so it measures the chain's floor, not a busy room's.
+    #[test]
+    #[ignore]
+    fn measure_the_receive_chain() {
+        use crate::signal::dsp::testkit::Rng;
+        const SECONDS: f64 = 4.0;
+        const BLOCK_PAIRS: usize = 131_072;
+        let cases: [(&str, f64, u64); 6] = [
+            ("net_survey", 8e6, 2_426_500_000),
+            ("net_ble", 8e6, 2_426_000_000),
+            ("net_bt", 4e6, 2_440_000_000),
+            ("net_bt", 8e6, 2_440_000_000),
+            ("net_bt", 20e6, 2_440_000_000),
+            ("net_survey", 20e6, 2_426_500_000),
+        ];
+        // Noise at a level an ADC sees in a quiet band: well clear of clipping.
+        let block: Vec<u8> = Rng::new(7)
+            .noise(BLOCK_PAIRS, 0.02)
+            .iter()
+            .flat_map(|z| {
+                let q = |v: f32| (v * 128.0).clamp(-127.0, 127.0) as i8 as u8;
+                [q(z.re), q(z.im)]
+            })
+            .collect();
+        // `SDRTOP_MEASURE=net_bt@8` runs that one case alone, for a profiler.
+        let only = std::env::var("SDRTOP_MEASURE").ok();
+        for (preset, rate, tuned) in cases {
+            let name = format!("{preset}@{}", rate / 1e6);
+            if only.as_ref().is_some_and(|o| *o != name) {
+                continue;
+            }
+            let mut m = SdrMetrics::fixture().streaming();
+            m.ui.section = crate::signal::net::SECTION.to_string();
+            m.ui.active_preset = preset.to_string();
+            m.radio.frequency = tuned;
+            m.radio.config_sample_rate = rate;
+            m.radio.bb_filter_hz = 0;
+            let state = Arc::new(Mutex::new(m));
+            let blocks = (SECONDS * rate / BLOCK_PAIRS as f64).ceil() as u64;
+            let (tx, rx) = crossbeam_channel::unbounded();
+            for seq in 1..=blocks {
+                tx.send(stamped(&state, seq, false, block.clone())).unwrap();
+            }
+            drop(tx);
+            let start = std::time::Instant::now();
+            NetWorker::new(rx, Arc::clone(&state), eight_bit(), SAFE_BT_CHANNELS).run();
+            let wall = start.elapsed().as_secs_f64();
+            let stream = blocks as f64 * BLOCK_PAIRS as f64 / rate;
+            let m = state.lock().unwrap();
+            eprintln!(
+                "{preset:<11} {:>5.1} Msps  BLE ch {:?}  BT {} ch  {:.2}x real time",
+                rate / 1e6,
+                m.net.ble_channel,
+                m.net.bt_channels_watched.len(),
+                wall / stream
+            );
+        }
+    }
+
     fn eight_bit() -> SampleGeometry {
         SampleGeometry {
             format: SampleFormat::Int8,
