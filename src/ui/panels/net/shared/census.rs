@@ -701,7 +701,7 @@ impl Panel for NetCensusPanel {
             ("↑↓", "select"),
             ("S", "sort by the next column"),
             ("R", "reverse"),
-            ("T", "trust as frequency reference"),
+            ("T", "trust as frequency reference, or let it go"),
         ]
     }
 
@@ -1308,6 +1308,7 @@ mod tests {
             source: "WWV 10 MHz".to_string(),
             at: Instant::now(),
             efficiency: None,
+            trusted: None,
         });
         let referenced = draw(NetCensusPanel, 90, 16, &m).join("\n");
         assert!(referenced.contains("against WWV 10 MHz"), "{referenced}");
@@ -1512,6 +1513,7 @@ mod tests {
             source: "WWV 10 MHz".to_string(),
             at: Instant::now(),
             efficiency: None,
+            trusted: None,
         });
         m
     }
@@ -1867,6 +1869,7 @@ mod tests {
             Uncertain::from_sigma(35.4, 0.5),
             2.0,
             "a4:83:e7:1c:09:be",
+            [0xa4, 0x83, 0xe7, 0x1c, 0x09, 0xbe],
             Instant::now(),
         ));
         let out = draw(NetCensusPanel, 120, 16, &m);

@@ -160,7 +160,10 @@ that says what it is worth:
   takes our error out of every reading at once.
 
 A reference expires after fifteen minutes, because oscillators drift, and the
-tag then says so.
+tag then says so. A trusted device you regret trusting does not have to wait
+that long: `T` on it again lets it go, and every tag reads **[RELATIVE]** at
+once. `T` on a different device replaces it. A station reference just
+expires, or a fresh `y` renews it.
 
 ### Reasoned, not verified
 

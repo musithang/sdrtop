@@ -179,6 +179,9 @@ pub struct FrequencyReference {
     /// for a reference no bounded estimator produced. Design section 5.4:
     /// the bound is the floor, and it is displayed.
     pub efficiency: Option<f64>,
+    /// The census device a user-stated reference rests on, so the same `T`
+    /// that trusted it can let it go; `None` for a standard station.
+    pub trusted: Option<[u8; 6]>,
 }
 
 impl FrequencyReference {
@@ -197,6 +200,7 @@ impl FrequencyReference {
         raw: crate::signal::dsp::uncertainty::Uncertain,
         stated_ppm: f64,
         name: &str,
+        address: [u8; 6],
         at: std::time::Instant,
     ) -> Self {
         Self {
@@ -206,6 +210,7 @@ impl FrequencyReference {
             source: format!("{name} (user-stated ±{stated_ppm} ppm)"),
             at,
             efficiency: None,
+            trusted: Some(address),
         }
     }
 
@@ -356,6 +361,7 @@ mod tests {
             source: "WWV 10 MHz".to_string(),
             at,
             efficiency: None,
+            trusted: None,
         }
     }
 
@@ -546,7 +552,13 @@ mod tests {
         let (ours, trusted_true, other_true) = (10.0, 0.0, 25.0);
         let seen = |t: f64| Uncertain::from_sigma(t - ours, 0.3);
         let now = std::time::Instant::now();
-        let r = FrequencyReference::from_trusted(seen(trusted_true), 2.0, "a4:83:e7:1c:09:be", now);
+        let r = FrequencyReference::from_trusted(
+            seen(trusted_true),
+            2.0,
+            "a4:83:e7:1c:09:be",
+            [0xa4, 0x83, 0xe7, 0x1c, 0x09, 0xbe],
+            now,
+        );
         assert!((r.ppm - ours).abs() < 1e-12, "{}", r.ppm);
         assert!((r.sigma_ppm - (0.3f64.powi(2) + 4.0).sqrt()).abs() < 1e-12);
         assert_eq!(r.provenance, Provenance::Referenced);

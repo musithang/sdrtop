@@ -647,6 +647,7 @@ mod tests {
             source: "WWV 10 MHz".to_string(),
             at: std::time::Instant::now(),
             efficiency: None,
+            trusted: None,
         });
         assert_eq!(
             tag(&m),

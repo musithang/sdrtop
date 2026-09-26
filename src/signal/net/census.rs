@@ -753,6 +753,7 @@ mod tests {
             source: "WWV 10 MHz".to_string(),
             at: now,
             efficiency: None,
+            trusted: None,
         });
         order(&mut d, column("CFO"), true, now, &referenced);
         assert_eq!(tails(&d), vec![2, 1], "the dead-on clock is the best one");

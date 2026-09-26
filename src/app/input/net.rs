@@ -365,6 +365,25 @@ fn trust_selected(m: &mut SdrMetrics) {
         .selection
         .selected
         .and_then(|a| m.net.census.devices.iter().find(|d| d.address == a));
+    // `T` on the device the reference rests on lets it go: a wrong choice
+    // used to stay applied for up to fifteen minutes, with nothing but the
+    // expiry to end it. Every tag reads [RELATIVE] again on the next frame.
+    let is_reference = device.is_some_and(|d| {
+        m.radio
+            .reference
+            .as_ref()
+            .is_some_and(|r| r.trusted == Some(d.address))
+    });
+    if is_reference {
+        let name = device
+            .map(|d| d.address_text(&m.net, None))
+            .unwrap_or_default();
+        m.radio.reference = None;
+        m.push_log(format!(
+            "Reference: {name} no longer trusted; offsets are relative again"
+        ));
+        return;
+    }
     match device {
         None => m.push_log("Reference: select a device in the census first"),
         Some(d) if d.crystal_offset_ppm.is_none() => {
@@ -522,6 +541,43 @@ mod tests {
         assert!((r.ppm - 10.0).abs() < 1e-12, "{}", r.ppm);
         assert_eq!(r.provenance, crate::state::Provenance::Referenced);
         assert_eq!(r.source, "a4:83:e7:1c:09:01 (user-stated ±2 ppm)");
+        assert_eq!(r.trusted, Some([0xa4, 0x83, 0xe7, 0x1c, 0x09, 1]));
+        drop(m);
+
+        // `T` again on the same device lets it go, at once and logged, with
+        // no entry opened.
+        trust_selected(&mut metrics(&state));
+        {
+            let m = metrics(&state);
+            assert!(m.radio.reference.is_none());
+            assert!(m.ui.input_mode == InputMode::Normal);
+            assert!(m
+                .ui
+                .log
+                .iter()
+                .any(|l| l.text.contains("no longer trusted")));
+        }
+
+        // On another device, with a reference in place, it asks to replace it
+        // rather than clearing it.
+        trust_selected(&mut metrics(&state));
+        type_(KeyCode::Char('2'));
+        type_(KeyCode::Enter);
+        {
+            let mut m = metrics(&state);
+            m.net.census.devices[1].crystal_offset_ppm = Some(Uncertain::from_sigma(4.0, 0.3));
+            m.net.census.selection.selected = Some([0xa4, 0x83, 0xe7, 0x1c, 0x09, 2]);
+        }
+        trust_selected(&mut metrics(&state));
+        let m = metrics(&state);
+        assert!(
+            m.radio.reference.is_some(),
+            "kept until a new figure is typed"
+        );
+        assert!(matches!(
+            m.ui.input_mode,
+            InputMode::ReferenceAccuracyInput { .. }
+        ));
     }
 
     /// A device with no offset cannot be a reference: `T` says so in the log

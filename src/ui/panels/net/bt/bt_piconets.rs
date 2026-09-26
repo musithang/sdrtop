@@ -1092,6 +1092,7 @@ mod tests {
             source: "WWV 10 MHz".to_string(),
             at: std::time::Instant::now(),
             efficiency: None,
+            trusted: None,
         });
         let text = draw(NetBtPiconetsPanel, 80, 40, &m).join("\n");
         assert!(text.contains("Clock"), "{text}");

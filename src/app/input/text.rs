@@ -394,7 +394,9 @@ pub(super) fn reference_accuracy(key: KeyEvent, state: &Arc<Mutex<SdrMetrics>>, 
             m.ui.input_buf.clear();
             match found {
                 Some((raw, name)) => {
-                    let r = crate::state::FrequencyReference::from_trusted(raw, stated, &name, now);
+                    let r = crate::state::FrequencyReference::from_trusted(
+                        raw, stated, &name, address, now,
+                    );
                     m.push_log(format!(
                         "Reference: {} = {:+.2} ±{:.2} ppm, REFERENCED",
                         r.source, r.ppm, r.sigma_ppm

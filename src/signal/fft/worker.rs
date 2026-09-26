@@ -101,6 +101,7 @@ impl FftWorker {
                     source: standard.name.to_string(),
                     at: Instant::now(),
                     efficiency: Some(efficiency),
+                    trusted: None,
                 });
             }
             Err(why) => m.push_log(format!("Frequency reference: {why}")),

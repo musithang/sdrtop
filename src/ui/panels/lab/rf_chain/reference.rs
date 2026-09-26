@@ -227,6 +227,7 @@ mod tests {
             source: "WWV 10 MHz".to_string(),
             at: Instant::now() - age,
             efficiency: None,
+            trusted: None,
         }
     }
 
