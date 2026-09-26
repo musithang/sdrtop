@@ -213,6 +213,18 @@ impl Nco {
     /// The product is formed in `f32`, which is the width the sample stream
     /// already has; the oscillator itself stays in `f64` so the phase reference
     /// the product is measured against is better than the samples being mixed.
+    /// [`Self::mix`] into `out`, leaving `input` as it was: for a block several
+    /// receivers share, each mixing it to its own channel.
+    pub fn mix_into(&mut self, input: &[Complex<f32>], out: &mut Vec<Complex<f32>>) {
+        out.clear();
+        out.reserve(input.len());
+        self.walk(input.len(), |k, o| {
+            let (c, q) = (o.re as f32, o.im as f32);
+            let s = input[k];
+            out.push(Complex::new(s.re * c - s.im * q, s.re * q + s.im * c));
+        });
+    }
+
     pub fn mix(&mut self, block: &mut [Complex<f32>]) {
         self.walk(block.len(), |k, o| {
             let (c, q) = (o.re as f32, o.im as f32);
@@ -257,7 +269,11 @@ mod tests {
                 .map(|k| Complex::new((k as f32).sin(), 0.5))
                 .collect();
             let input = block.clone();
+            let mut into = Vec::new();
+            Nco::new(f, FS).mix_into(&input, &mut into);
             a.mix(&mut block);
+            // Into a buffer is the same as in place, to the bit.
+            assert_eq!(into, block, "{f} Hz");
             for (x, y) in input.iter().zip(&block) {
                 let o = b.next_sample();
                 let want = Complex::new(f64::from(x.re), f64::from(x.im)) * o;

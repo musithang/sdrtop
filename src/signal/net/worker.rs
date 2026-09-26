@@ -67,6 +67,20 @@ use super::scan::Scan;
 /// tests hold this string and the preset file's name to agreeing).
 const NET_BT_PRESET: &str = "net_bt";
 
+/// `bytes` as samples, decoded into `slot` the first time a receiver asks
+/// and handed out as they are after that.
+fn decoded_block<'a>(
+    slot: &'a mut Option<Vec<num_complex::Complex<f32>>>,
+    bytes: &[u8],
+    geometry: SampleGeometry,
+) -> &'a [num_complex::Complex<f32>] {
+    slot.get_or_insert_with(|| {
+        let mut out = Vec::new();
+        crate::signal::demod::decode(bytes, geometry, usize::MAX, &mut out);
+        out
+    })
+}
+
 /// Above this many simultaneous classic BT channels, `NetWorker::new` logs a
 /// warning naming the cost rather than staying quiet about it -
 /// `signal::bt::receive`'s own doc has the measured tap counts this is
@@ -459,6 +473,11 @@ impl NetWorker {
                 }
             }
 
+            // Decoded once, by the first receiver that needs it, and shared by
+            // the BLE receiver and every classic channel: each used to turn the
+            // same bytes into the same samples for itself.
+            let mut iq: Option<Vec<num_complex::Complex<f32>>> = None;
+
             // BLE decode: only possible on one of the three fixed advertising
             // frequencies, and only at a sample rate `receive::front_end` can
             // reach the working rate from. Neither condition is `net_survey`'s
@@ -515,7 +534,8 @@ impl NetWorker {
                         };
                     }
                     if let Some(rx) = ble.as_mut() {
-                        let packets = rx.push_at(&bytes, self.geometry, first_pair);
+                        let packets = rx
+                            .push_iq_at(decoded_block(&mut iq, &bytes, self.geometry), first_pair);
                         let funnel = rx.take_funnel();
                         if !funnel.is_empty() {
                             let mut m = self.state.lock().unwrap_or_else(|e| e.into_inner());
@@ -641,7 +661,7 @@ impl NetWorker {
                 let mut hits = Vec::new();
                 let mut header_hits = Vec::new();
                 for rx in bt.iter_mut() {
-                    let (laps, headers) = rx.push(&bytes, self.geometry);
+                    let (laps, headers) = rx.push_iq(decoded_block(&mut iq, &bytes, self.geometry));
                     for hit in laps {
                         hits.push((rx.channel(), hit.lap, hit.at_us));
                         let log = bt_arrivals.entry(hit.lap).or_default();

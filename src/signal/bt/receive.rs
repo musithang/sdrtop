@@ -54,7 +54,9 @@
 
 use num_complex::Complex;
 
+#[cfg(test)]
 use crate::hardware::SampleGeometry;
+#[cfg(test)]
 use crate::signal::demod::decode as decode_iq;
 use crate::signal::dsp::discriminate::instantaneous_freq_hz;
 use crate::signal::dsp::fir::{design_lowpass_to_spec, StreamingDecimator};
@@ -404,6 +406,7 @@ impl Receiver {
     /// capture right there - no payload capture is kept for a header this
     /// arc could not even read); once [`PAYLOAD_CAPTURE_BITS`] more
     /// arrive, a [`HeaderHit`] carrying both is emitted.
+    #[cfg(test)]
     pub fn push(
         &mut self,
         bytes: &[u8],
@@ -411,9 +414,17 @@ impl Receiver {
     ) -> (Vec<AccessHit>, Vec<HeaderHit>) {
         let mut iq = Vec::new();
         decode_iq(bytes, geometry, usize::MAX, &mut iq);
-        self.mixer.mix(&mut iq);
+        self.push_iq(&iq)
+    }
+
+    /// [`Self::push`] on a block already decoded, mixed into this channel's
+    /// own buffer: the worker decodes each block once for every watched
+    /// channel, where each channel used to decode its own copy.
+    pub fn push_iq(&mut self, iq: &[Complex<f32>]) -> (Vec<AccessHit>, Vec<HeaderHit>) {
+        let mut mixed = Vec::new();
+        self.mixer.mix_into(iq, &mut mixed);
         let mut working = Vec::new();
-        self.decim.process(&iq, &mut working);
+        self.decim.process(&mixed, &mut working);
 
         let mut found = Vec::new();
         let mut headers = Vec::new();

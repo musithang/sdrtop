@@ -23,7 +23,9 @@
 
 use num_complex::Complex;
 
+#[cfg(test)]
 use crate::hardware::SampleGeometry;
+#[cfg(test)]
 use crate::signal::demod::decode as decode_iq;
 use crate::signal::dsp::code::lfsr::whiten;
 use crate::signal::dsp::correlate::ShapeMatcher;
@@ -731,6 +733,7 @@ impl Receiver {
     /// next needs. A trigger in the working stream maps back to the radio's
     /// pairs through the decimation ratio; the decimator's own delay is the
     /// same for every packet, so it cancels from any difference of two.
+    #[cfg(test)]
     pub fn push_at(
         &mut self,
         bytes: &[u8],
@@ -739,11 +742,25 @@ impl Receiver {
     ) -> Vec<Packet> {
         let mut iq = Vec::new();
         decode_iq(bytes, geometry, usize::MAX, &mut iq);
-        if let Some(mixer) = self.mixer.as_mut() {
-            mixer.mix(&mut iq);
-        }
+        self.push_iq_at(&iq, first_pair)
+    }
+
+    /// [`Self::push_at`] on a block already decoded: the worker decodes each
+    /// block once and hands the same samples to every receiver, where each
+    /// used to decode its own copy of the same bytes.
+    pub fn push_iq_at(&mut self, iq: &[Complex<f32>], first_pair: u64) -> Vec<Packet> {
+        let mixed;
+        let iq = match self.mixer.as_mut() {
+            Some(mixer) => {
+                let mut out = Vec::new();
+                mixer.mix_into(iq, &mut out);
+                mixed = out;
+                &mixed[..]
+            }
+            None => iq,
+        };
         let mut working = Vec::new();
-        self.decim.process(&iq, &mut working);
+        self.decim.process(iq, &mut working);
 
         let cap_limit = (16 + MAX_PDU_BYTES * 8) * WORKING_SPS;
         // Every sample through the detector, capturing or not, as one block:
