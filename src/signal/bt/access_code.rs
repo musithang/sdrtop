@@ -68,22 +68,58 @@ const SW_MATRIX: [u64; 24] = [
     0x0000_0022_a41a_abb3, 0x0000_0013_90b5_cb0d, 0x0000_000b_0ae2_7b52, 0x0000_0005_8571_3da9,
 ];
 
+/// [`SW_MATRIX`] folded eight LAP bits at a time: entry `v` of table `k` is
+/// the XOR of the rows for LAP bits `8k..8k+8` set in `v`. The code is
+/// linear, so three lookups give the same word the 24-row loop does.
+const fn chunk_table(low_bit: usize) -> [u64; 256] {
+    let mut table = [0u64; 256];
+    let mut v = 0;
+    while v < 256 {
+        let mut word = 0u64;
+        let mut b = 0;
+        while b < 8 {
+            if v & (1 << b) != 0 {
+                // Row 0 is LAP bit 23, the most significant.
+                word ^= SW_MATRIX[23 - (low_bit + b)];
+            }
+            b += 1;
+        }
+        table[v] = word;
+        v += 1;
+    }
+    table
+}
+
+static LAP_LOW: [u64; 256] = chunk_table(0);
+static LAP_MID: [u64; 256] = chunk_table(8);
+static LAP_HIGH: [u64; 256] = chunk_table(16);
+
+/// The sync word's top six bits, the Barker part, for a LAP whose top bit
+/// is clear and set: no other LAP bit reaches them (only [`SW_MATRIX`]'s
+/// first row has bits there), so they are the whole of what a window's top
+/// needs to be once its bit 57, the LAP's top bit, is read.
+const BARKER: [u64; 2] = [
+    DEFAULT_CODEWORD >> 58,
+    (DEFAULT_CODEWORD ^ SW_MATRIX[0]) >> 58,
+];
+
 /// The 64-bit access code (sync word) for `lap`'s own piconet.
 ///
 /// `lap` is used as a 24-bit value; any bits above that are ignored, the
 /// same way a LAP is defined as the low 24 bits of a BD_ADDR.
 ///
-/// No consumer from `main` yet; see [`DEFAULT_CODEWORD`]'s own note.
-#[allow(dead_code)]
+/// **Three table lookups, not a loop over the LAP's bits.** The live
+/// receiver checks every bit of every lane of every watched channel against
+/// a candidate LAP, tens of millions of times a second, and the loop was an
+/// eighth of the whole Classic view's time on the i3. The tables are
+/// [`SW_MATRIX`] regrouped, built at compile time, and a test holds them to
+/// the loop.
 pub fn gen_syncword(lap: u32) -> u64 {
     let lap = lap & 0x00ff_ffff;
-    let mut codeword = DEFAULT_CODEWORD;
-    for (i, term) in SW_MATRIX.iter().enumerate() {
-        if lap & (0x0080_0000 >> i) != 0 {
-            codeword ^= term;
-        }
-    }
-    codeword
+    DEFAULT_CODEWORD
+        ^ LAP_LOW[(lap & 0xff) as usize]
+        ^ LAP_MID[((lap >> 8) & 0xff) as usize]
+        ^ LAP_HIGH[(lap >> 16) as usize]
 }
 
 /// `gen_syncword(lap)`'s own bits, in transmission order - bit 0 (the
@@ -131,6 +167,11 @@ fn pack(window: &[bool]) -> u64 {
 /// never a blind search over the `2^24` possible LAPs, which a live receiver
 /// has no time for.
 pub(super) fn check_window(word: u64) -> Option<u32> {
+    // The Barker bits first: they depend on nothing but bit 57, so a window
+    // of noise fails here 63 times in 64 without a lookup.
+    if word >> 58 != BARKER[((word >> 57) & 1) as usize] {
+        return None;
+    }
     let candidate_lap = ((word >> 34) & 0x00ff_ffff) as u32;
     if gen_syncword(candidate_lap) == word {
         Some(candidate_lap)
@@ -206,6 +247,37 @@ mod tests {
     /// with nothing XORed in - and every entry of [`SW_MATRIX`] is used:
     /// asking for a LAP with every bit set must differ from the zero-LAP
     /// case in a way only the full table, not a subset of it, can produce.
+    /// The 24-row loop the tables replace, kept as the reference they are
+    /// held to.
+    fn gen_syncword_by_rows(lap: u32) -> u64 {
+        let lap = lap & 0x00ff_ffff;
+        let mut codeword = DEFAULT_CODEWORD;
+        for (i, term) in SW_MATRIX.iter().enumerate() {
+            if lap & (0x0080_0000 >> i) != 0 {
+                codeword ^= term;
+            }
+        }
+        codeword
+    }
+
+    /// **The tables give the loop's word**, for every value of each eight
+    /// bit chunk and across the LAP space; and the Barker prefilter never
+    /// turns a real access code away, while it turns away windows whose top
+    /// does not match their bit 57.
+    #[test]
+    fn the_tables_are_the_matrix_and_the_prefilter_loses_nothing() {
+        let laps = (0u32..0x0100_0000)
+            .step_by(7919)
+            .chain((0..256u32).flat_map(|v| [v, v << 8, v << 16, v * 0x0001_0101]));
+        for lap in laps {
+            let word = gen_syncword_by_rows(lap);
+            assert_eq!(gen_syncword(lap), word, "lap {lap:06x}");
+            assert_eq!(check_window(word), Some(lap & 0x00ff_ffff), "lap {lap:06x}");
+            // The same word with a Barker bit flipped is not a code.
+            assert_eq!(check_window(word ^ (1 << 60)), None, "lap {lap:06x}");
+        }
+    }
+
     #[test]
     fn the_zero_lap_is_the_default_codeword_untouched() {
         assert_eq!(gen_syncword(0), DEFAULT_CODEWORD);
