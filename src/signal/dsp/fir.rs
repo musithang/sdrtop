@@ -361,6 +361,61 @@ mod tests {
     use super::*;
     use std::f64::consts::PI;
 
+    /// The streaming sum in `f32` against the same taps summed in `f64`, on
+    /// 8-bit samples as a radio delivers them, through the receive chain's
+    /// own channel filters: the arithmetic's error, stated against the
+    /// output it is an error in and against what the 8 bits themselves
+    /// already cost.
+    #[test]
+    fn the_f32_sum_is_the_f64_sum() {
+        use crate::signal::dsp::testkit::Rng;
+        let mut rng = Rng::new(21);
+        // A tone and noise, quantised to the 8-bit grid at half scale.
+        let x: Vec<Complex<f32>> = rng
+            .noise(200_000, 0.05)
+            .iter()
+            .enumerate()
+            .map(|(i, z)| {
+                let tone = Complex::from_polar(0.4f32, i as f32 * 0.37);
+                let q = |v: f32| (v * 128.0).round().clamp(-127.0, 127.0) / 128.0;
+                Complex::new(q(z.re + tone.re), q(z.im + tone.im))
+            })
+            .collect();
+        // (raw rate, cutoff, transition, stopband): the classic channel
+        // filter at 8 and 20 Msps, the BLE front end at 20.
+        let filters = [
+            (8e6, 500e3, 200e3, 25.0, 2),
+            (20e6, 500e3, 200e3, 25.0, 5),
+            (20e6, 1.5e6, 0.5e6, 40.0, 5),
+        ];
+        for (rate, fc, tw, db, d) in filters {
+            let taps = design_lowpass_to_spec(fc / rate, tw / rate, db);
+            let mut f = StreamingDecimator::new(taps.clone(), d);
+            let mut out = Vec::new();
+            for chunk in x.chunks(65_536) {
+                let mut part = Vec::new();
+                f.process(chunk, &mut part);
+                out.extend(part);
+            }
+            let (mut worst, mut power) = (0.0f64, 0.0f64);
+            for (j, y) in out.iter().enumerate() {
+                let (mut re, mut im) = (0.0f64, 0.0f64);
+                for (k, &h) in taps.iter().enumerate() {
+                    let s = x[j * d + k];
+                    re += h as f64 * s.re as f64;
+                    im += h as f64 * s.im as f64;
+                }
+                worst = worst.max((y.re as f64 - re).hypot(y.im as f64 - im));
+                power += re * re + im * im;
+            }
+            // Measured 127 to 131 dB under the output. Eight bits carry about
+            // 48 dB, so the sum is some 80 dB below what its input can say.
+            let rms = (power / out.len() as f64).sqrt();
+            let under_db = 20.0 * (worst / rms).log10();
+            assert!(under_db < -120.0, "{} taps: {under_db:.1} dB", taps.len());
+        }
+    }
+
     /// Magnitude response at `f` cycles/sample. The kernel is real, so this is
     /// the plain DTFT sum and needs nothing from the FFT.
     fn response(h: &[f32], f: f64) -> f64 {

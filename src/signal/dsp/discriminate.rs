@@ -116,6 +116,45 @@ impl Oversampled {
 mod tests {
     use super::*;
 
+    /// The discriminator in `f32` against the same two samples in `f64`, on
+    /// the 8-bit grid at three amplitudes: the arithmetic's error in hertz,
+    /// beside what the 8 bits themselves already cost at that amplitude.
+    #[test]
+    fn the_f32_discriminator_is_the_f64_one() {
+        use crate::signal::dsp::testkit::Rng;
+        use std::f64::consts::TAU;
+        let rate = 4e6;
+        let mut rng = Rng::new(8);
+        for amplitude in [0.5f64, 0.1, 0.02] {
+            let q = |v: f64| (v * 128.0).round().clamp(-127.0, 127.0) as f32 / 128.0;
+            let mut worst = 0.0f64;
+            for _ in 0..200_000 {
+                let (p, step) = (rng.unit() * TAU, (rng.unit() - 0.5) * 1.2);
+                let a = Complex::new(q(amplitude * p.cos()), q(amplitude * p.sin()));
+                let b = Complex::new(
+                    q(amplitude * (p + step).cos()),
+                    q(amplitude * (p + step).sin()),
+                );
+                if a.norm() == 0.0 || b.norm() == 0.0 {
+                    continue;
+                }
+                let got = instantaneous_freq_hz(a, b, rate) as f64;
+                let (a64, b64) = (
+                    Complex::new(a.re as f64, a.im as f64),
+                    Complex::new(b.re as f64, b.im as f64),
+                );
+                let exact = (b64 * a64.conj()).arg() * rate / TAU;
+                worst = worst.max((got - exact).abs());
+            }
+            // Measured 0.03 to 0.05 Hz. One 8-bit step of phase at these
+            // amplitudes is 10, 50 and 250 kHz: five orders of magnitude and
+            // more between the arithmetic and what the samples can say.
+            let grid = (1.0 / 128.0) / amplitude * rate / TAU;
+            assert!(worst < 0.1, "amplitude {amplitude}: {worst} Hz");
+            assert!(worst < grid * 1e-5);
+        }
+    }
+
     /// An FM tone read at the midpoints between samples, where a straight
     /// line between two plain readings runs under the curve: the oversampled
     /// reading is the exact frequency, the chord is not.
