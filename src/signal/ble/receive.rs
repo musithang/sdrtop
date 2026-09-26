@@ -29,7 +29,7 @@ use crate::hardware::SampleGeometry;
 use crate::signal::demod::decode as decode_iq;
 use crate::signal::dsp::code::lfsr::whiten;
 use crate::signal::dsp::correlate::ShapeMatcher;
-use crate::signal::dsp::discriminate::{discriminate, instantaneous_freq_hz};
+use crate::signal::dsp::discriminate::{discriminate, instantaneous_freq_hz, Oversampled};
 use crate::signal::dsp::estimate::snr_from_metric;
 use crate::signal::dsp::fir::{design_lowpass_to_spec, StreamingDecimator};
 use crate::signal::dsp::nco::Nco;
@@ -912,13 +912,14 @@ impl Receiver {
             WORKING_SPS as f64,
             from_earliest.len() / WORKING_SPS,
         );
+        let fine = std::cell::OnceCell::new();
         let mut out = Vec::new();
         for k in -span..=span {
             let skip = center + k * step;
             if skip < 0 {
                 continue;
             }
-            if let Some(packet) = self.decode_at(&inst, skip as usize, Some(phase)) {
+            if let Some(packet) = self.decode_at(&inst, &fine, skip as usize, Some(phase)) {
                 let passed = packet.crc_ok;
                 out.push((skip as usize, packet));
                 // The search stops at the first CRC that passes, as it
@@ -984,7 +985,16 @@ impl Receiver {
     ///
     /// `phase`, when given, is the sub-symbol sampling phase already found
     /// for this capture (see `try_decode`); `None` searches for it here.
-    fn decode_at(&self, whole: &[f32], skip: usize, phase: Option<f64>) -> Option<Packet> {
+    ///
+    /// `fine` is the capture read between its samples ([`Oversampled`]),
+    /// built by the first alignment that decodes and shared by the rest.
+    fn decode_at(
+        &self,
+        whole: &[f32],
+        fine: &std::cell::OnceCell<Oversampled>,
+        skip: usize,
+        phase: Option<f64>,
+    ) -> Option<Packet> {
         if skip >= self.capture.len() {
             return None;
         }
@@ -1020,25 +1030,34 @@ impl Receiver {
         if pdu::used_bits(pdu::length(&header)?) > symbols {
             return None;
         }
-        let (mut bits, raw_symbols) = super::sync::slice_at(inst, sps, symbols, threshold, phase);
-        // B8's modulation-quality measurement needs the physically
-        // transmitted (still-whitened) symbols and their raw discriminator
-        // readings - exactly what `bits` and `raw_symbols` are before the
-        // next line undoes whitening to recover the data underneath them.
+        let (mut bits, _) = super::sync::slice_at(inst, sps, symbols, threshold, phase);
+        // The modulation-quality measurement needs the physically
+        // transmitted (still-whitened) symbols - exactly what `bits` is
+        // before the next line undoes whitening to recover the data
+        // underneath them.
         // See `measure`'s own module doc for why the physical bits, not the
         // decoded ones, are what a Gaussian filter's settling depends on.
         let raw_bits = bits.clone();
         whiten(&mut bits, self.channel);
         let mut packet = pdu::decode(&bits)?;
         // Trimmed to exactly this packet's own bits before measuring: `bits`
-        // and `raw_symbols` run to the end of whatever has been captured,
+        // runs to the end of whatever has been captured,
         // which is deliberately more than one packet's worth (see this
         // struct's own `push`), and letting the search wander into trailing
         // noise or the next packet's preamble would mix an unrelated
         // signal's deviation into this one's own reading.
         let used = pdu::used_bits(packet.length).min(raw_bits.len());
         let raw_bits = &raw_bits[..used];
-        let raw_symbols = &raw_symbols[..used];
+        // The figures are read at the same instants the slicer sampled, but
+        // from the rebuilt waveform, not from a straight line between two
+        // readings a quarter of a symbol apart (`Oversampled`'s doc for what
+        // that cost). The slicer keeps the plain readings: a bit is decided by
+        // which side of the line it falls, and that the chord gets right.
+        // `inst[i]` sits halfway between capture samples `i` and `i + 1`.
+        let fine = fine.get_or_init(|| Oversampled::new(&self.capture, working_rate_hz(self.phy)));
+        let readings: Vec<f32> = (0..used)
+            .map(|k| fine.at(skip as f64 + phase + k as f64 * sps + 0.5))
+            .collect();
         // The *reported* offset is read against the sync word, not the
         // packet's data: see `sync_offset`. `rough_offset` above never had to
         // be exact, only good enough to slice against; this one is what a
@@ -1048,8 +1067,8 @@ impl Receiver {
         packet.snr_db = offset.and_then(|o| self.corrected_snr_db(o.value()));
         // On either PHY, each scaled by its own symbol rate
         // (net-ux-polish-plan 5.5).
-        packet.modulation = super::measure::modulation_quality(raw_bits, raw_symbols, self.phy);
-        packet.drift = super::measure::drift(raw_symbols, self.phy);
+        packet.modulation = super::measure::modulation_quality(raw_bits, &readings, self.phy);
+        packet.drift = super::measure::drift(&readings, self.phy);
         Some(packet)
     }
 }

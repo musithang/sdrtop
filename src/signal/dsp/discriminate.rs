@@ -45,9 +45,112 @@ pub fn discriminate(iq: &[Complex<f32>], rate: f64, out: &mut Vec<f32>) {
     }
 }
 
+/// How finely [`Oversampled`] reads between the samples it is given.
+const OVERSAMPLE: usize = 8;
+/// The share of the input's Nyquist band the interpolation filter spends on
+/// its transition: flat to three quarters of it.
+const OVERSAMPLE_ROLLOFF: f64 = 0.25;
+/// How far down the interpolation filter puts the images it removes.
+const OVERSAMPLE_STOPBAND_DB: f64 = 60.0;
+
+/// Instantaneous frequency at any instant of an IQ block, not only between
+/// two of its samples.
+///
+/// **Why a measurement cannot read between readings.** [`discriminate`]
+/// gives one reading per pair of samples. A figure taken at an instant that
+/// falls between two readings, such as the centre of a symbol, is not
+/// their straight-line blend: a frequency trace is curved, most of all at
+/// the peak a deviation is read from, and the chord of a curve runs below
+/// it. At four samples a symbol the centre of a GFSK symbol sits exactly
+/// between two readings, and that chord read an ideal BLE transmitter's
+/// alternating peaks 8.7 % low and its settled ones 3.5 % low.
+///
+/// **The IQ is interpolated instead, which is exact.** A block that has
+/// passed a channel filter is band-limited, so its samples fix the whole
+/// waveform between them: [`super::resample::Resampler`] rebuilds it
+/// [`OVERSAMPLE`] times more finely, and the discriminator reads that. The
+/// readings are then an eighth of a sample apart, where a straight line
+/// between two of them is as good as the arithmetic (measured against the
+/// exact frequency in this module's tests). Exact for content within three
+/// quarters of the input's Nyquist frequency; a caller's channel filter is
+/// what keeps it there.
+pub struct Oversampled {
+    inst: Vec<f32>,
+    /// The input-sample instant of `inst[0]`.
+    origin: f64,
+}
+
+impl Oversampled {
+    /// Build from `iq`, sampled at `rate`. Costs one polyphase interpolation
+    /// and one discriminator pass over the block, so it is for a block worth
+    /// measuring, not for every block that arrives.
+    pub fn new(iq: &[Complex<f32>], rate: f64) -> Self {
+        let mut up = super::resample::Resampler::new(
+            OVERSAMPLE,
+            1,
+            OVERSAMPLE_ROLLOFF,
+            OVERSAMPLE_STOPBAND_DB,
+        );
+        let delay = up.delay_input_samples();
+        let mut fine = Vec::new();
+        up.process(iq, &mut fine);
+        let mut inst = Vec::new();
+        discriminate(&fine, rate * OVERSAMPLE as f64, &mut inst);
+        // `fine[k]` stands for input instant `delay + k / OVERSAMPLE`, and a
+        // reading sits halfway between the two samples it compares.
+        Self {
+            inst,
+            origin: delay + 0.5 / OVERSAMPLE as f64,
+        }
+    }
+
+    /// The frequency, in Hz, at instant `t`, in input samples: `t = i` is the
+    /// instant of `iq[i]`. Clamped to the readings there are, as
+    /// [`super::timing::interpolate`] clamps.
+    pub fn at(&self, t: f64) -> f32 {
+        super::timing::interpolate(&self.inst, (t - self.origin) * OVERSAMPLE as f64)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// An FM tone read at the midpoints between samples, where a straight
+    /// line between two plain readings runs under the curve: the oversampled
+    /// reading is the exact frequency, the chord is not.
+    #[test]
+    fn the_oversampled_reading_is_the_exact_frequency() {
+        use std::f64::consts::TAU;
+        let rate = 4e6;
+        // 250 kHz peak deviation, modulated at 500 kHz: a GFSK alternation's
+        // fundamental, band-limited well inside the rebuilt band.
+        let (peak, fm) = (250e3, 500e3);
+        let iq: Vec<Complex<f32>> = (0..4000)
+            .map(|i| {
+                let t = i as f64 / rate;
+                let ph = peak / fm * (TAU * fm * t).sin();
+                Complex::new(ph.cos() as f32, ph.sin() as f32)
+            })
+            .collect();
+        let fine = Oversampled::new(&iq, rate);
+        let mut plain = Vec::new();
+        discriminate(&iq, rate, &mut plain);
+        let (mut worst_fine, mut worst_chord) = (0.0f64, 0.0f64);
+        for i in 400..3600 {
+            // The instant midway between plain readings i and i + 1.
+            let t = i as f64 + 1.0;
+            let exact = peak * (TAU * fm * t / rate).cos();
+            worst_fine = worst_fine.max((fine.at(t) as f64 - exact).abs());
+            let chord = super::super::timing::interpolate(&plain, i as f64 + 0.5);
+            worst_chord = worst_chord.max((chord as f64 - exact).abs());
+        }
+        // 182 Hz measured, 0.07 % of the peak: what is left is the tone's own
+        // sidebands past Nyquist, which a plain FM tone has and a signal
+        // behind a channel filter does not. The chord: 24.9 kHz, 10 %.
+        assert!(worst_fine < 250.0, "oversampled worst {worst_fine} Hz");
+        assert!(worst_chord > 10_000.0, "the chord was {worst_chord} Hz off");
+    }
 
     /// A tone offset from DC by a constant frequency reads back as exactly
     /// that offset, everywhere except the ambiguity limit.
