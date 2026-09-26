@@ -23,6 +23,7 @@ pub mod census;
 pub mod conformance;
 pub mod gate;
 pub mod lock;
+pub mod measure;
 pub mod occupancy;
 pub mod scan;
 pub mod survey;

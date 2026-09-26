@@ -261,6 +261,18 @@ impl Trace {
         trace
     }
 
+    /// The reading at `at` bit periods, on the straight line between the
+    /// two readings either side; `None` outside them.
+    pub fn at(&self, at: f64) -> Option<f64> {
+        let i = self.at.partition_point(|&a| a <= at);
+        if i == 0 || i == self.at.len() {
+            return None;
+        }
+        let (a0, a1) = (self.at[i - 1], self.at[i]);
+        let w = (at - a0) / (a1 - a0);
+        Some(self.hz[i - 1] + (self.hz[i] - self.hz[i - 1]) * w)
+    }
+
     /// The readings placed in `[from, to)` bit periods.
     fn span(&self, from: f64, to: f64) -> &[f64] {
         let lo = self.at.partition_point(|&a| a < from);
@@ -1057,16 +1069,19 @@ mod chain {
             ts_f2 / ts_f1
         );
         eprintln!(
-            "{:>5} {:>4} {:>6} {:>5} | {:>17} {:>8} | {:>17} {:>8} | {:>7} {:>7}",
+            "{:>5} {:>4} {:>6} {:>5} | {:>17} {:>8} {:>8} | {:>17} {:>8} {:>8} | {:>7} {:>7} {:>7}",
             "Msps",
             "SNR",
             "CFO",
             "heads",
             "df1 chain",
+            "mask",
             "ideal",
             "df2 chain",
+            "mask",
             "ideal",
             "ratio",
+            "mask",
             "ideal"
         );
         for rate in RATES {
@@ -1084,18 +1099,38 @@ mod chain {
                     let bytes = stream(&bursts, rate, 300e-6, 3.2e-3, snr, 29 + snr as u64);
                     let m = run("net_bt", tuned, rate, &bytes);
 
-                    // sdrtop's definition on the exact frequency, pooled over
-                    // the same headers the chain pools.
+                    // sdrtop's definition on the exact frequency, and on the
+                    // reference's compliant tester, pooled over the same
+                    // headers the chain pools.
                     let mut ideal = crate::signal::bt::piconet::Deviation::default();
+                    let mut mask = crate::signal::bt::piconet::Deviation::default();
+                    let fine = 32e6;
+                    let taps = mask_filter(fine);
                     for (burst, (bits, trailer)) in bursts.iter().zip(&packets) {
                         let end = trailer + 4 + 54;
+                        let air = &bits[*trailer..end];
                         let one = crate::signal::bt::piconet::Deviation::of(
-                            &bits[*trailer..end],
+                            air,
                             &centres(burst, *trailer, end),
                         );
                         ideal.settled.add(one.settled);
                         ideal.alternating.add(one.alternating);
+                        let trace = Trace::from_iq(
+                            &filter(&burst.iq(fine, burst.len_at(fine)), &taps),
+                            fine,
+                            burst.tx.symbol_rate,
+                        );
+                        let hz: Vec<f32> = (*trailer..end)
+                            .map(|k| trace.at(k as f64 + 0.5).unwrap_or(f64::NAN) as f32)
+                            .collect();
+                        let one = crate::signal::bt::piconet::Deviation::of(air, &hz);
+                        mask.settled.add(one.settled);
+                        mask.alternating.add(one.alternating);
                     }
+                    let mean_of = |s: &crate::signal::dsp::deviation::Sums| {
+                        s.mean().map(|u| u.value()).unwrap_or(f64::NAN)
+                    };
+                    let (m1, m2) = (mean_of(&mask.settled), mean_of(&mask.alternating));
                     let (i1, i2) = (
                         ideal.settled.mean().map(|u| u.value()).unwrap_or(f64::NAN),
                         ideal
@@ -1117,17 +1152,20 @@ mod chain {
                         _ => format!("{:>7}", "-"),
                     };
                     eprintln!(
-                        "{:>5} {:>4} {:>6} {:>2}/{:<2} | {} {} | {} {} | {} {:7.4}",
+                        "{:>5} {:>4} {:>6} {:>2}/{:<2} | {} {} {} | {} {} {} | {} {:7.4} {:7.4}",
                         rate / 1e6,
                         snr,
                         cfo / 1e3,
                         captured,
                         PACKETS,
                         show(&d.settled),
+                        khz(m1),
                         khz(i1),
                         show(&d.alternating),
+                        khz(m2),
                         khz(i2),
                         ratio,
+                        m2 / m1,
                         i2 / i1,
                     );
                 }

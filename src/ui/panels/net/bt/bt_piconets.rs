@@ -390,7 +390,8 @@ const RATIO_RESOLUTION: f64 = 0.1;
 
 /// The MODULATION section (net-ux-polish-plan 6.4): the piconet's BR
 /// modulation index, read from the trailer and header symbols of every
-/// header captured on its LAP (`piconet::Deviation`), against the BR band,
+/// header captured on its LAP (`piconet::Deviation`) through a tester's own
+/// filter (`signal::net::measure`), against the BR band,
 /// in the same `widgets::limit` rows the BLE packet detail uses, so the two
 /// protocols' transmitter quality reads alike. The header's FEC repeats
 /// each bit three times, so settled runs are plentiful and alternating
@@ -444,7 +445,8 @@ fn modulation_lines(p: &Piconet, iw: usize, theme: &crate::Theme) -> Vec<Line<'s
     }
     for chunk in crate::ui::chrome::wrap(
         &format!(
-            "{} settled and {} alternating runs from {} headers, every member's",
+            "{} settled and {} alternating runs from {} headers, every member's, \
+             read as a tester reads them: 550 kHz filter, bits timed by the sync word",
             d.settled.n, d.alternating.n, p.headers.captured
         ),
         iw.saturating_sub(1),
@@ -1320,6 +1322,10 @@ mod tests {
             "{out}"
         );
         assert!(out.contains("Core 5.4 Vol 2 A 3.1.1"), "{out}");
+        assert!(
+            out.contains("550 kHz filter"),
+            "said how it was read: {out}"
+        );
     }
 
     /// **Slot jitter against the specification's 1 µs** (6.5): refused

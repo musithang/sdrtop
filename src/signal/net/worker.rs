@@ -356,6 +356,12 @@ impl NetWorker {
         // Where the next block must start for the stream to be unbroken. `None`
         // until a block has been seen, and again after the section closes.
         let mut next_pair: Option<u64> = None;
+        // The last few decoded blocks, with their stream positions: what the
+        // measurement path cuts a burst's raw samples from
+        // (`measure::Recent`), moved here as each block finishes rather than
+        // copied, and dropped at any break.
+        let mut recent: std::collections::VecDeque<(u64, Vec<num_complex::Complex<f32>>)> =
+            std::collections::VecDeque::new();
 
         while let Ok(StreamBlock {
             seq,
@@ -418,6 +424,7 @@ impl NetWorker {
             if !continuous {
                 ble = None;
                 bt.clear();
+                recent.clear();
             }
             next_pair = Some(first_pair + pairs);
             // The tuning and rate these samples were captured at, from the
@@ -694,6 +701,14 @@ impl NetWorker {
                 // reports, exactly as before this step.
                 let mut narrowed_by_lap = Vec::new();
                 let mut headers_read = Vec::new();
+                // Each header measured again from the raw samples, through
+                // the tester's filter (`measure`), here outside the lock.
+                let window = super::measure::Recent::new(
+                    recent
+                        .iter()
+                        .map(|(p, v)| (*p, v.as_slice()))
+                        .chain(iq.as_deref().map(|v| (first_pair, v))),
+                );
                 for hit in &header_hits {
                     let clock = piconet_clocks.entry(hit.lap).or_default();
                     clock.observe(hit.tick, &hit.whitened);
@@ -731,7 +746,18 @@ impl NetWorker {
                         hit.at_us,
                         read,
                         clock.hypotheses(),
-                        crate::signal::bt::piconet::Deviation::of(&hit.air, &hit.deviation_hz),
+                        crate::signal::bt::channel::centre_hz(hit.ch)
+                            .and_then(|hz| {
+                                super::measure::classic(
+                                    &window,
+                                    rate_hz,
+                                    hz as f64 - centre_hz,
+                                    hit.lap,
+                                    hit.sync_end_pair,
+                                    &hit.air,
+                                )
+                            })
+                            .unwrap_or_default(),
                     ));
                     narrowed_by_lap.push((hit.lap, shown));
                 }
@@ -823,6 +849,22 @@ impl NetWorker {
                 let mut m = self.state.lock().unwrap_or_else(|e| e.into_inner());
                 m.net.bt_refused = None;
                 m.net.bt_channels_watched.clear();
+            }
+
+            // Held for the measurement path, as much as `measure::HELD_S`
+            // asks and no more; a block nothing decoded leaves a hole, so what
+            // was held before it can no longer be joined to what comes after.
+            match iq.take() {
+                Some(block) if still_open => {
+                    recent.push_back((first_pair, block));
+                    let keep = (super::measure::HELD_S * rate_hz) as usize;
+                    while recent.len() > 1
+                        && recent.iter().skip(1).map(|(_, b)| b.len()).sum::<usize>() >= keep
+                    {
+                        recent.pop_front();
+                    }
+                }
+                _ => recent.clear(),
             }
 
             // Closing the section stops `process_block` forwarding, but blocks

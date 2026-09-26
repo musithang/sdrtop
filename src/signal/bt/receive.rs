@@ -121,14 +121,19 @@ pub struct HeaderHit {
     /// verify_crc`/`break_uap_tie`'s own `raw` parameter, unchanged.
     pub payload_raw: Vec<bool>,
     /// The trailer and header's own air bits ([`HEADER_CAPTURE_BITS`]), as
-    /// sliced, and the raw discriminator reading at each, in Hz: what a
-    /// piconet's modulation index is read
-    /// from (net-ux-polish-plan 6.4, `signal::dsp::deviation`). The header
-    /// region only, since it is the one part of a capture known to be this
-    /// packet's: the payload region runs to DH5's worst case whatever the
-    /// packet's real length.
+    /// sliced: the symbols a piconet's modulation is read at
+    /// (`signal::net::measure`). The header region only, since it is the one
+    /// part of a capture known to be this packet's: the payload region runs
+    /// to DH5's worst case whatever the packet's real length.
     pub air: Vec<bool>,
-    pub deviation_hz: Vec<f32>,
+    /// The channel it was heard on.
+    pub ch: u8,
+    /// Where on the stream the last sync-word bit was sliced, in raw sample
+    /// pairs ([`crate::hardware::StreamBlock::first_pair`]'s clock),
+    /// fractional: where the measurement finds the burst in the raw samples.
+    /// Taken at the lane that fired, so within a symbol of the bit's centre,
+    /// not at it; the measurement times the burst from its own sync word.
+    pub sync_end_pair: f64,
     /// When the access code before it ended, dated as
     /// [`AccessHit::at_us`] is: what joins a header to its hit in the
     /// export (net-ux-polish-plan 6.6).
@@ -175,9 +180,8 @@ struct PendingHeader {
     /// afterward can be attributed to a header this arc could not even
     /// read.
     header_whitened: Option<[bool; header::HEADER_BITS]>,
-    /// The raw discriminator reading at each of the first
-    /// [`HEADER_CAPTURE_BITS`] bits.
-    deviation_hz: Vec<f32>,
+    /// [`HeaderHit::sync_end_pair`].
+    sync_end_pair: f64,
     /// When the access code that started it ended ([`AccessHit::at_us`]).
     at_us: f64,
 }
@@ -309,6 +313,8 @@ pub struct Receiver {
     /// symbol anchor is rounded to a whole symbol, which a grid fitted to a
     /// fraction of a microsecond cannot afford.
     anchor_us: f64,
+    /// The stream position of this receiver's first raw sample.
+    first_pair: u64,
     /// One header capture in progress per lane, if any. A second hit on a
     /// lane that already has one pending does not restart it - finishing
     /// the older capture first is a small, honest simplification, not a
@@ -357,6 +363,7 @@ impl Receiver {
             lane_symbols: [0; PHASES],
             anchor_symbols: (first_pair as f64 * SYMBOL_RATE_HZ / raw_rate).round() as u64,
             anchor_us: first_pair as f64 * 1e6 / raw_rate,
+            first_pair,
             pending: std::array::from_fn(|_| None),
         })
     }
@@ -437,12 +444,6 @@ impl Receiver {
             let bit = freq > self.bias;
 
             if let Some(pending) = self.pending[self.lane].as_mut() {
-                if pending.bits.len() < HEADER_CAPTURE_BITS {
-                    // Raw, not from the slicer's fast tracker: that follows a
-                    // long run and would shrink it (`piconet::Deviation::of`
-                    // takes its centre from the header's own runs).
-                    pending.deviation_hz.push(freq);
-                }
                 pending.bits.push(bit);
                 if pending.header_whitened.is_none() && pending.bits.len() == HEADER_CAPTURE_BITS {
                     match header::unfec13(&pending.bits[header::TRAILER_BITS..]) {
@@ -466,7 +467,8 @@ impl Receiver {
                             tick: ticks_from_symbols(self.anchor_symbols + pending.start_symbol),
                             payload_raw: pending.bits[HEADER_CAPTURE_BITS..].to_vec(),
                             air: pending.bits[..HEADER_CAPTURE_BITS].to_vec(),
-                            deviation_hz: pending.deviation_hz,
+                            ch: self.ch,
+                            sync_end_pair: pending.sync_end_pair,
                             at_us: pending.at_us,
                         });
                     }
@@ -477,6 +479,13 @@ impl Receiver {
                 // The working-rate sample this lane just sliced.
                 let sample = self.lane_symbols[self.lane] * PHASES as u64 + self.lane as u64;
                 let at_us = self.anchor_us + sample as f64 * 1e6 / WORKING_RATE_HZ;
+                // That reading sits between working samples `sample` and
+                // `sample + 1` (the first sample only primes the
+                // discriminator), and working sample `j` stands for raw
+                // instant `delay + j * factor` from this receiver's first.
+                let sync_end_pair = self.first_pair as f64
+                    + self.decim.delay()
+                    + (sample as f64 + 0.5) * self.decim.factor() as f64;
                 if !found.iter().any(|h: &AccessHit| h.lap == lap) {
                     found.push(AccessHit { lap, at_us });
                 }
@@ -486,7 +495,7 @@ impl Receiver {
                         start_symbol: self.lane_symbols[self.lane],
                         bits: Vec::with_capacity(TOTAL_CAPTURE_BITS),
                         header_whitened: None,
-                        deviation_hz: Vec::with_capacity(HEADER_CAPTURE_BITS),
+                        sync_end_pair,
                         at_us,
                     });
                 }

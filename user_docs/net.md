@@ -429,7 +429,17 @@ The selected piconet's detail, in as many sections as the panel has room for
 
 - **Modulation**: the piconet's BR modulation index and deviation against
   0.28 to 0.35, read from the Core Specification, from every header's
-  symbols.
+  symbols. Read the way a Bluetooth tester reads them: each header is taken
+  again from the raw samples, through the measurement filter the SIG's test
+  suite recommends (flat to 550 kHz), and read at the centre of each bit,
+  timed from the packet's own sync word. The receiver that finds the
+  packets uses a narrower filter and guesses where a bit's centre is,
+  which is fine for finding packets and was not fine for measuring them:
+  until this was built, it read a perfectly healthy transmitter's `df2/df1`
+  as about 0.45, which is how this whole section learned to check itself
+  against a reference first. A steep filter like this one reads `df2` a few
+  percent above a tester with no filter at all; that is the price of
+  keeping the channel next door out of the reading.
 - **Timing**: how far each hit lands from the piconet's own 625 µs slot grid,
   fitted to its hits, against the specification's 1 µs, with the spread drawn
   under it. Below eight hits it is collecting; hits that do not line up on a

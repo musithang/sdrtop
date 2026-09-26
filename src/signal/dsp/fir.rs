@@ -309,6 +309,19 @@ impl StreamingDecimator {
         }
     }
 
+    /// The decimation factor: one output for every this many inputs.
+    pub fn factor(&self) -> usize {
+        self.d
+    }
+
+    /// The input instant, in input samples from the first sample after
+    /// construction or [`Self::reset`], that output 0 stands for: output
+    /// `j` stands for `delay() + j * factor()`. A linear-phase kernel delays
+    /// every frequency alike, by half its length.
+    pub fn delay(&self) -> f64 {
+        self.taps.len().saturating_sub(1) as f64 / 2.0
+    }
+
     /// Forget the carried state - after a dropped block, or a parameter change.
     /// The next output block starts a fresh contiguous run.
     pub fn reset(&mut self) {
