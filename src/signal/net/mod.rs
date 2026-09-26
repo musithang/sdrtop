@@ -19,6 +19,8 @@ pub const SECTION: &str = "net";
 
 pub mod band;
 pub mod census;
+#[cfg(test)]
+pub mod conformance;
 pub mod gate;
 pub mod lock;
 pub mod occupancy;
