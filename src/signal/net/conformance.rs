@@ -693,3 +693,445 @@ mod tests {
         }
     }
 }
+
+/// The real receive chain, `NetWorker` and all, held to the reference: the
+/// report the accuracy work is judged by. Fed synthetic packets from
+/// [`Gfsk`] as 8-bit bytes, as a radio would deliver them, and read back
+/// from the state the panels show.
+///
+/// Three columns per figure, so an error can be placed:
+/// - **chain**: what sdrtop reports, through its filters, mixer, slicer and
+///   noise;
+/// - **ideal**: sdrtop's own definition of the figure applied to the exact
+///   frequency, no filter and no noise. Chain against ideal is the chain's
+///   error; ideal against the suites is the definition's;
+/// - **suites**: the test definitions of RF.TS.p35 / RF-PHY.TS.4.2.1 on the
+///   exact frequency (the [`Trace::analytic`] figures).
+///
+/// SNR is stated in 1 MHz around the carrier, so it means the same thing at
+/// every sample rate.
+#[cfg(test)]
+mod chain {
+    use super::*;
+    use crate::hardware::{SampleFormat, SampleGeometry, StreamBlock};
+    use crate::signal::dsp::testkit::Rng;
+    use crate::signal::net::worker::{NetWorker, SAFE_BT_CHANNELS};
+    use crate::state::SdrMetrics;
+    use std::sync::{Arc, Mutex};
+
+    /// The signal's amplitude in the converter's full scale: room for the
+    /// noise above it before the 8 bits clip.
+    const AMPLITUDE: f64 = 0.5;
+    /// The unmodulated carrier ramped up before the first bit and down after
+    /// the last, as a transmitter does, so no filter sees a step.
+    const RAMP_S: f64 = 4e-6;
+    const PAIRS_PER_BLOCK: usize = 65_536;
+
+    fn geometry() -> SampleGeometry {
+        SampleGeometry {
+            format: SampleFormat::Int8,
+            full_scale: 128.0,
+        }
+    }
+
+    /// Bursts in a stream of noise, one starting every `spacing_s` after
+    /// `lead_s`, as bytes. Each burst is ramped carrier, its bits, ramped
+    /// carrier.
+    fn stream(
+        bursts: &[Burst],
+        rate: f64,
+        lead_s: f64,
+        spacing_s: f64,
+        snr_db: f64,
+        seed: u64,
+    ) -> Vec<u8> {
+        let total_s = lead_s + spacing_s * bursts.len() as f64;
+        let n = (total_s * rate).ceil() as usize;
+        // Noise power per complex sample for `snr_db` in 1 MHz.
+        let noise = AMPLITUDE * AMPLITUDE / 10f64.powf(snr_db / 10.0) * rate / 1e6;
+        let mut rng = Rng::new(seed);
+        let mut iq: Vec<Complex<f64>> = rng
+            .noise(n, noise)
+            .iter()
+            .map(|z| Complex::new(z.re as f64, z.im as f64))
+            .collect();
+        for (b, burst) in bursts.iter().enumerate() {
+            let start = lead_s + spacing_s * b as f64 + RAMP_S;
+            let bits_s = burst.bits.len() as f64 / burst.tx.symbol_rate;
+            let first = ((start - RAMP_S) * rate).ceil() as usize;
+            let last = (((start + bits_s + RAMP_S) * rate).floor() as usize).min(n - 1);
+            for (i, slot) in iq.iter_mut().enumerate().take(last + 1).skip(first) {
+                let t = i as f64 / rate - start;
+                let edge = (t + RAMP_S).min(bits_s + RAMP_S - t) / RAMP_S;
+                let envelope = if edge >= 1.0 {
+                    1.0
+                } else {
+                    0.5 - 0.5 * (PI * edge.max(0.0)).cos()
+                };
+                *slot += Complex::from_polar(AMPLITUDE * envelope, burst.phase(t));
+            }
+        }
+        iq.iter()
+            .flat_map(|z| {
+                let q = |v: f64| (v * 128.0).round().clamp(-127.0, 127.0) as i8 as u8;
+                [q(z.re), q(z.im)]
+            })
+            .collect()
+    }
+
+    /// `bytes` through a fresh `NetWorker` on `preset`, tuned to `tuned`.
+    fn run(preset: &str, tuned: u64, rate: f64, bytes: &[u8]) -> SdrMetrics {
+        let mut m = SdrMetrics::fixture().streaming();
+        m.ui.section = crate::signal::net::SECTION.to_string();
+        m.ui.active_preset = preset.to_string();
+        m.radio.frequency = tuned;
+        m.radio.config_sample_rate = rate;
+        m.radio.bb_filter_hz = 0;
+        let state = Arc::new(Mutex::new(m));
+        let (tx, rx) = crossbeam_channel::unbounded();
+        for (k, chunk) in bytes.chunks(2 * PAIRS_PER_BLOCK).enumerate() {
+            tx.send(StreamBlock {
+                seq: k as u64 + 1,
+                gap_before: false,
+                first_pair: (k * PAIRS_PER_BLOCK) as u64,
+                centre_hz: tuned,
+                rate_hz: rate,
+                bytes: chunk.to_vec(),
+            })
+            .unwrap();
+        }
+        drop(tx);
+        NetWorker::new(rx, Arc::clone(&state), geometry(), SAFE_BT_CHANNELS).run();
+        let m = state.lock().unwrap_or_else(|e| e.into_inner()).clone();
+        m
+    }
+
+    /// The exact frequency at the centre of each of `bits` (`from..to`), the
+    /// reading a slicer at the ideal phase would take.
+    fn centres(burst: &Burst, from: usize, to: usize) -> Vec<f32> {
+        let period = burst.tx.period();
+        (from..to)
+            .map(|k| burst.frequency((k as f64 + 0.5) * period) as f32)
+            .collect()
+    }
+
+    /// Mean and sample standard deviation.
+    fn spread(values: &[f64]) -> (f64, f64) {
+        let n = values.len() as f64;
+        let m = values.iter().sum::<f64>() / n;
+        let v = values.iter().map(|x| (x - m).powi(2)).sum::<f64>() / (n - 1.0).max(1.0);
+        (m, v.sqrt())
+    }
+
+    fn khz(v: f64) -> String {
+        format!("{:8.2}", v / 1e3)
+    }
+
+    fn khz_pm((m, s): (f64, f64)) -> String {
+        format!("{:8.2} +-{:5.2}", m / 1e3, s / 1e3)
+    }
+
+    const PATTERN_F1: [bool; 8] = [true, true, true, true, false, false, false, false];
+
+    /// One LE 1M ADV_IND on channel 37 whose payload, after the six address
+    /// octets, is on the air as the suites' patterns: 15 octets of
+    /// `11110000`, then 16 of `10101010`, with the whitening undone into the
+    /// data so the CRC is right. Returns the bits from the preamble on, and
+    /// where the two pattern stretches and the PDU start.
+    fn le_packet(address: [u8; 6]) -> (Vec<bool>, usize, (usize, usize), (usize, usize)) {
+        use crate::signal::ble::detect::{
+            access_address_bits, preamble_bits, ADVERTISING_ACCESS_ADDRESS,
+        };
+        use crate::signal::ble::Phy;
+        use crate::signal::dsp::code::lfsr::whiten;
+        const CHANNEL: u8 = 37;
+        const LENGTH: usize = 37;
+
+        let mut on_air = Vec::new();
+        for _ in 0..15 {
+            on_air.extend(PATTERN_F1);
+        }
+        for _ in 0..16 {
+            on_air.extend([true, false, true, false, true, false, true, false]);
+        }
+        let mut sequence = vec![false; (2 + LENGTH + 3) * 8];
+        whiten(&mut sequence, CHANNEL);
+        let mut payload = address.to_vec();
+        for (octet, chunk) in on_air.chunks(8).enumerate() {
+            let at = 16 + 8 * (6 + octet);
+            let byte = chunk.iter().enumerate().fold(0u8, |acc, (i, &b)| {
+                acc | (((b ^ sequence[at + i]) as u8) << i)
+            });
+            payload.push(byte);
+        }
+        let pdu = crate::signal::ble::pdu::encode(CHANNEL, 0x00, &payload);
+        let pattern_at = 16 + 48;
+        assert_eq!(&pdu[pattern_at..pattern_at + on_air.len()], &on_air[..]);
+
+        let mut bits = preamble_bits(ADVERTISING_ACCESS_ADDRESS, Phy::OneM);
+        bits.extend(access_address_bits(ADVERTISING_ACCESS_ADDRESS));
+        let pdu_at = bits.len();
+        bits.extend(pdu);
+        let f1 = (pdu_at + pattern_at, pdu_at + pattern_at + 120);
+        (bits, pdu_at, f1, (f1.1, f1.1 + 128))
+    }
+
+    /// One classic packet: preamble, `lap`'s sync word, trailer, a random
+    /// whitened header in FEC(1/3), and random payload bits. The preamble and
+    /// trailer alternate on from the sync word's ends. Returns the bits and
+    /// where the trailer starts.
+    fn br_packet(lap: u32, rng: &mut Rng) -> (Vec<bool>, usize) {
+        let sync = crate::signal::bt::access_code::access_code_bits(lap);
+        let (s0, s63) = (sync[0], sync[63]);
+        let mut bits = vec![s0, !s0, s0, !s0];
+        bits.extend(sync);
+        let trailer = bits.len();
+        bits.extend([!s63, s63, !s63, s63]);
+        for _ in 0..18 {
+            let b = rng.next_u64() & 1 == 1;
+            bits.extend([b, b, b]);
+        }
+        bits.extend((0..240).map(|_| rng.next_u64() & 1 == 1));
+        (bits, trailer)
+    }
+
+    /// The suites' delta-f1, delta-f2 and their ratio for a transmitter, from
+    /// a burst of their own test patterns.
+    fn suites_figures(tx: Gfsk) -> (f64, f64) {
+        let mut bits: Vec<bool> = (0..24).map(|i| i % 2 == 0).collect();
+        let f1_at = bits.len();
+        for _ in 0..20 {
+            bits.extend(PATTERN_F1);
+        }
+        let f2_at = bits.len();
+        bits.extend((0..160).map(|i| i % 2 == 0));
+        let end = bits.len();
+        bits.extend((0..24).map(|i| i % 2 == 0));
+        let burst = Burst::new(tx, &bits);
+        let trace = Trace::analytic(&burst, 32);
+        (
+            mean(&delta_f1(&trace, &bits, f1_at, f2_at)).unwrap(),
+            mean(&delta_f2(&trace, &bits, f2_at, end)).unwrap(),
+        )
+    }
+
+    const RATES: [f64; 3] = [4e6, 8e6, 20e6];
+    const SNRS_DB: [f64; 2] = [40.0, 20.0];
+    const CFOS_HZ: [f64; 2] = [0.0, 40_000.0];
+    const PACKETS: usize = 12;
+
+    /// **The report.** Run by hand, in release:
+    /// `cargo test --release --locked the_chain_against_the_reference --
+    /// --ignored --nocapture`.
+    #[test]
+    #[ignore]
+    fn the_chain_against_the_reference() {
+        le_report();
+        br_report();
+    }
+
+    fn le_report() {
+        const TUNED: u64 = 2_402_000_000;
+        let deviation = 250_000.0;
+        let (ts_f1, ts_f2) = suites_figures(Gfsk::new(1e6, deviation, 0.5));
+        eprintln!(
+            "\nLE 1M, ADV_IND on channel 37, deviation {} kHz, BT 0.5, {PACKETS} packets a case",
+            deviation / 1e3
+        );
+        eprintln!(
+            "suites (exact frequency): df1avg {} kHz  df2avg {} kHz  df2/df1 {:.4}",
+            khz(ts_f1),
+            khz(ts_f2),
+            ts_f2 / ts_f1
+        );
+        eprintln!(
+            "{:>5} {:>4} {:>6} {:>5} | {:>17} {:>8} | {:>17} {:>8} | {:>15} {:>6} | {:>17} {:>8}",
+            "Msps",
+            "SNR",
+            "CFO",
+            "found",
+            "df1 chain",
+            "ideal",
+            "df2 chain",
+            "ideal",
+            "ratio chain",
+            "ideal",
+            "CFO chain",
+            "suites f0"
+        );
+        for rate in RATES {
+            for snr in SNRS_DB {
+                for cfo in CFOS_HZ {
+                    let tx = Gfsk::new(1e6, deviation, 0.5).with_cfo(cfo);
+                    let packets: Vec<_> = (0..PACKETS)
+                        .map(|p| le_packet([0x10 + p as u8, 0x22, 0x33, 0x44, 0x55, 0xC6]))
+                        .collect();
+                    let bursts: Vec<Burst> = packets
+                        .iter()
+                        .map(|(bits, ..)| Burst::new(tx, bits))
+                        .collect();
+                    let bytes = stream(&bursts, rate, 300e-6, 700e-6, snr, 17 + snr as u64);
+                    let m = run("net_ble", TUNED, rate, &bytes);
+
+                    // sdrtop's definition on the exact frequency, and the
+                    // suites' f0, per packet.
+                    let (mut i1, mut i2, mut ir, mut f0) = (vec![], vec![], vec![], vec![]);
+                    for (burst, (bits, pdu_at, ..)) in bursts.iter().zip(&packets) {
+                        let used = crate::signal::ble::pdu::used_bits(37);
+                        let air = &bits[*pdu_at..*pdu_at + used];
+                        let hz = centres(burst, *pdu_at, *pdu_at + used);
+                        let q = crate::signal::ble::measure::modulation_quality(
+                            air,
+                            &hz,
+                            crate::signal::ble::Phy::OneM,
+                        )
+                        .expect("patterns give both runs");
+                        i1.push(q.delta_f1_avg_hz.value());
+                        i2.push(q.delta_f2_avg_hz.value());
+                        ir.push(q.ratio.value());
+                        let trace = Trace::analytic(burst, 32);
+                        f0.push(initial_carrier(&trace, 0, 8).unwrap());
+                    }
+
+                    let got: Vec<_> = m.net.ble_packets.iter().filter(|p| p.crc_ok).collect();
+                    let c1: Vec<f64> = got
+                        .iter()
+                        .filter_map(|p| p.modulation.map(|q| q.delta_f1_avg_hz.value()))
+                        .collect();
+                    let c2: Vec<f64> = got
+                        .iter()
+                        .filter_map(|p| p.modulation.map(|q| q.delta_f2_avg_hz.value()))
+                        .collect();
+                    let cr: Vec<f64> = got
+                        .iter()
+                        .filter_map(|p| p.modulation.map(|q| q.ratio.value()))
+                        .collect();
+                    let co: Vec<f64> = got
+                        .iter()
+                        .filter_map(|p| p.freq_offset_hz.map(|o| o.value()))
+                        .collect();
+                    let or_dash = |v: &[f64], f: &dyn Fn((f64, f64)) -> String| {
+                        if v.is_empty() {
+                            format!("{:>17}", "-")
+                        } else {
+                            f(spread(v))
+                        }
+                    };
+                    eprintln!(
+                        "{:>5} {:>4} {:>6} {:>2}/{:<2} | {} {} | {} {} | {} {:6.4} | {} {}",
+                        rate / 1e6,
+                        snr,
+                        cfo / 1e3,
+                        got.len(),
+                        PACKETS,
+                        or_dash(&c1, &khz_pm),
+                        khz(spread(&i1).0),
+                        or_dash(&c2, &khz_pm),
+                        khz(spread(&i2).0),
+                        or_dash(&cr, &|(m, s)| format!("{m:7.4} +-{s:6.4}")),
+                        spread(&ir).0,
+                        or_dash(&co, &khz_pm),
+                        khz(spread(&f0).0),
+                    );
+                }
+            }
+        }
+    }
+
+    fn br_report() {
+        const CHANNEL: u8 = 39;
+        let tuned = crate::signal::bt::channel::centre_hz(CHANNEL).unwrap();
+        let deviation = 160_000.0;
+        // Not the general inquiry code, so it is counted as a piconet.
+        let lap = 0x0044_5566;
+        let (ts_f1, ts_f2) = suites_figures(Gfsk::new(1e6, deviation, 0.5));
+        eprintln!(
+            "\nBR, trailer and header of {PACKETS} packets a case on channel {CHANNEL}, \
+             deviation {} kHz, BT 0.5",
+            deviation / 1e3
+        );
+        eprintln!(
+            "suites (exact frequency): df1avg {} kHz  df2avg {} kHz  df2/df1 {:.4}",
+            khz(ts_f1),
+            khz(ts_f2),
+            ts_f2 / ts_f1
+        );
+        eprintln!(
+            "{:>5} {:>4} {:>6} {:>5} | {:>17} {:>8} | {:>17} {:>8} | {:>7} {:>7}",
+            "Msps",
+            "SNR",
+            "CFO",
+            "heads",
+            "df1 chain",
+            "ideal",
+            "df2 chain",
+            "ideal",
+            "ratio",
+            "ideal"
+        );
+        for rate in RATES {
+            for snr in SNRS_DB {
+                for cfo in CFOS_HZ {
+                    let tx = Gfsk::new(1e6, deviation, 0.5).with_cfo(cfo);
+                    let mut rng = Rng::new(5);
+                    let packets: Vec<_> = (0..PACKETS).map(|_| br_packet(lap, &mut rng)).collect();
+                    let bursts: Vec<Burst> = packets
+                        .iter()
+                        .map(|(bits, _)| Burst::new(tx, bits))
+                        .collect();
+                    // Each header hit waits for the receiver's full payload
+                    // capture, 2744 bits, before it is emitted.
+                    let bytes = stream(&bursts, rate, 300e-6, 3.2e-3, snr, 29 + snr as u64);
+                    let m = run("net_bt", tuned, rate, &bytes);
+
+                    // sdrtop's definition on the exact frequency, pooled over
+                    // the same headers the chain pools.
+                    let mut ideal = crate::signal::bt::piconet::Deviation::default();
+                    for (burst, (bits, trailer)) in bursts.iter().zip(&packets) {
+                        let end = trailer + 4 + 54;
+                        let one = crate::signal::bt::piconet::Deviation::of(
+                            &bits[*trailer..end],
+                            &centres(burst, *trailer, end),
+                        );
+                        ideal.settled.add(one.settled);
+                        ideal.alternating.add(one.alternating);
+                    }
+                    let (i1, i2) = (
+                        ideal.settled.mean().map(|u| u.value()).unwrap_or(f64::NAN),
+                        ideal
+                            .alternating
+                            .mean()
+                            .map(|u| u.value())
+                            .unwrap_or(f64::NAN),
+                    );
+
+                    let row = m.net.bt_piconets.iter().find(|p| p.lap == lap);
+                    let captured = row.map(|p| p.headers.captured).unwrap_or(0);
+                    let d = row.map(|p| p.headers.deviation).unwrap_or_default();
+                    let show = |s: &crate::signal::dsp::deviation::Sums| match s.mean() {
+                        Some(u) => format!("{:8.2} +-{:5.2}", u.value() / 1e3, u.sigma() / 1e3),
+                        None => format!("{:>17}", "-"),
+                    };
+                    let ratio = match (d.settled.mean(), d.alternating.mean()) {
+                        (Some(a), Some(b)) => format!("{:7.4}", b.value() / a.value()),
+                        _ => format!("{:>7}", "-"),
+                    };
+                    eprintln!(
+                        "{:>5} {:>4} {:>6} {:>2}/{:<2} | {} {} | {} {} | {} {:7.4}",
+                        rate / 1e6,
+                        snr,
+                        cfo / 1e3,
+                        captured,
+                        PACKETS,
+                        show(&d.settled),
+                        khz(i1),
+                        show(&d.alternating),
+                        khz(i2),
+                        ratio,
+                        i2 / i1,
+                    );
+                }
+            }
+        }
+    }
+}
