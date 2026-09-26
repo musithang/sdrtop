@@ -1082,22 +1082,27 @@ impl Receiver {
     /// every alignment that decoded, CRC or not, on every attempt while a
     /// packet was still arriving, put a clean channel at 35 times real time.
     ///
-    /// The figures are read at the instants the slicer sampled, but from the
+    /// The figures are read on the slicer's own bit grid, but from the
     /// rebuilt waveform, not from a straight line between two readings a
-    /// quarter of a symbol apart (`Oversampled`'s doc for what that cost).
+    /// quarter of a symbol apart (`Oversampled`'s doc for what that cost),
+    /// and as the test suites define them (`dsp::deviation::suite_readings`).
     /// The slicer keeps the plain readings: a bit is decided by which side
     /// of the line it falls, and that the chord gets right. `inst[i]` sits
     /// halfway between capture samples `i` and `i + 1`. On either PHY, each
     /// scaled by its own symbol rate; for LE 1M the worker reads them again
-    /// as a tester does (`signal::net::measure`).
+    /// from the raw samples (`signal::net::measure`).
     fn measured(&self, skip: usize, phase: f64, mut packet: Packet) -> Packet {
         let fine = Oversampled::new(&self.capture, working_rate_hz(self.phy));
         let sps = WORKING_SPS as f64;
-        let readings: Vec<f32> = (0..packet.air.len())
-            .map(|k| fine.at(skip as f64 + phase + k as f64 * sps + 0.5))
-            .collect();
-        packet.modulation = super::measure::modulation_quality(&packet.air, &readings, self.phy);
-        packet.drift = super::measure::drift(&readings, self.phy);
+        // Bit `x` periods into the PDU, as a capture instant: bit `k`'s
+        // centre, `k + 0.5`, is where the slicer sampled it.
+        let at = |x: f64| fine.at(skip as f64 + phase + (x - 0.5) * sps + 0.5);
+        packet.modulation = crate::signal::dsp::deviation::suite_readings(&packet.air, at)
+            .and_then(|(settled, alternating)| {
+                super::measure::modulation_from(&settled, &alternating, self.phy)
+            });
+        let centres: Vec<f32> = (0..packet.air.len()).map(|k| at(k as f64 + 0.5)).collect();
+        packet.drift = super::measure::drift(&centres, self.phy);
         packet
     }
 }

@@ -675,15 +675,15 @@ fn modulation_lines(p: &BlePacket, iw: usize, theme: &crate::Theme) -> Vec<Line<
     let rows = rows(&q, p.drift.as_ref(), p.phy);
     let w = fit(&rows, iw);
     out.extend(rows.iter().map(|r| Line::from(r.spans(theme, w))));
-    // How it was read, as the classic section says its own: LE 1M through
-    // the test suite's filter (`signal::net::measure`), LE 2M, which that
-    // filter is not written for, through the receiver's.
+    // How it was read, as the classic section says its own: LE 1M again
+    // from the raw samples (`signal::net::measure`), LE 2M through the
+    // receiver's own filter, both by the suites' definitions.
     let how = match p.phy {
         crate::signal::ble::Phy::OneM => {
-            "read as a tester reads them: 550 kHz filter, bits timed by the access address"
+            "read as the test suite defines them, from any bits: timed by the access address"
         }
         crate::signal::ble::Phy::TwoM => {
-            "read through the receiver's own filter: the test suite's LE 2M filter is not read yet"
+            "read through the receiver's own filter, as the test suite defines them"
         }
     };
     out.extend(
@@ -988,7 +988,7 @@ mod tests {
         assert!(out.contains("df1 avg"), "{out}");
         assert!(out.contains("df2 avg"), "{out}");
         assert!(
-            out.contains("550 kHz filter"),
+            out.contains("as the test suite defines them"),
             "said how it was read: {out}"
         );
         assert!(out.contains("df2/df1"), "{out}");

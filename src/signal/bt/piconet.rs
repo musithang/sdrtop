@@ -83,9 +83,10 @@ use super::header::Header;
 use crate::signal::dsp::deviation::Sums;
 
 /// A piconet's deviation readings (net-ux-polish-plan 6.4), gathered from
-/// the trailer and header symbols of every header captured on its LAP, as
-/// sums (`signal::dsp::deviation`): the settled-run ends are delta-f1, the
-/// modulation index's own reading, and the alternating-run ends delta-f2.
+/// the access code, trailer and header of every header captured on its
+/// LAP, as sums (`signal::dsp::deviation`): bits whose neighbours both
+/// equal them give delta-f1, the modulation index's own reading, and bits
+/// whose neighbours both differ give delta-f2.
 ///
 /// **Every member's transmissions, not the master's alone**: a LAP names a
 /// piconet, and a slave answering in it sends the master's access code
@@ -97,21 +98,13 @@ pub struct Deviation {
 }
 
 impl Deviation {
-    /// One header's readings: `air` its sliced symbols, `hz` the raw
-    /// discriminator at each. Measured from the centre the header's own
-    /// settled runs give (`dsp::deviation::settled_centre`); a header whose
-    /// runs are all of one polarity gives no reading at all rather than
-    /// one against a centre it cannot state.
-    pub fn of(air: &[bool], hz: &[f32]) -> Self {
-        use crate::signal::dsp::deviation::{run_ends, settled_centre};
-        let Some(centre) = settled_centre(air, hz) else {
-            return Self::default();
-        };
-        let from_centre: Vec<f32> = hz.iter().map(|f| f - centre).collect();
-        let (settled, alternating) = run_ends(air, &from_centre);
+    /// One header's readings, delta-f1 and delta-f2 in Hz, as the test
+    /// suites define them (`dsp::deviation::suite_readings`, read by
+    /// `signal::net::measure`).
+    pub fn from_readings(settled: &[f32], alternating: &[f32]) -> Self {
         Self {
-            settled: Sums::of(&settled),
-            alternating: Sums::of(&alternating),
+            settled: Sums::of(settled),
+            alternating: Sums::of(alternating),
         }
     }
 }

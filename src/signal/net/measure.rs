@@ -33,26 +33,32 @@
 
 use num_complex::Complex;
 
-use crate::signal::ble::measure::{drift, modulation_quality, Drift, ModulationQuality};
+use crate::signal::ble::measure::{drift, modulation_from, Drift, ModulationQuality};
 use crate::signal::ble::Phy;
 use crate::signal::bt::piconet::Deviation;
 use crate::signal::dsp::discriminate::Oversampled;
 use crate::signal::dsp::fir::{design_lowpass_to_spec, StreamingDecimator};
 use crate::signal::dsp::nco::Nco;
 
-/// The tester's filter: flat to here, within a few hundredths of a dB. The
-/// suites ask for at most 0.5 dB of ripple to 550 kHz.
-const TESTER_PASS_HZ: f64 = 550_000.0;
-/// ...and [`TESTER_STOPBAND_DB`] down from here on. The suites recommend at
-/// least 3 dB at 650 kHz, 14 dB at 1 MHz and 44 dB at 2 MHz; the steep
-/// filter was chosen (Viktor, 2026-09-26) because classic channels are 1 MHz
-/// apart, and the looser one lets a busy neighbour into every reading. It
-/// reads df2 3 to 4.5 % above an ideal tester with no filter at all
-/// (`conformance`'s reference figures).
-const TESTER_STOP_HZ: f64 = 740_000.0;
-const TESTER_STOPBAND_DB: f64 = 52.0;
+/// The measurement filter: flat to here...
+const MEASURE_PASS_HZ: f64 = 1_250_000.0;
+/// ...and at least 40 dB down from here on: the BLE receiver's own front
+/// end's edges. The test suites' recommended filter (flat to 550 kHz, steep
+/// by 650 kHz) is right for a tester reading its own patterns and wrong for
+/// traffic: every filter it allows cuts into BR's spectrum, which lifts
+/// df2 3 % on a continuous `1010` and lowers it 3 to 4 % on whitened
+/// traffic. Through this one an ideal transmitter's traffic reads within
+/// 0.5 % of the suites' own figures on their own patterns
+/// (`conformance::traffic_reads_as_the_suites_test_patterns`); chosen by
+/// Viktor, 2026-09-26. What it gives up, a BR neighbour 1 MHz away, moves
+/// the figures under 1 % at 25 dB down (`conformance::a_neighbour_25_db_
+/// down_moves_the_readings_under_one_percent`).
+const MEASURE_STOP_HZ: f64 = 1_750_000.0;
+/// Designed 2 dB past the 40 the test holds it to: at 4 Msps the filter is
+/// short enough that Kaiser's rule lands a stopband peak at 39.3 dB.
+const MEASURE_STOPBAND_DB: f64 = 42.0;
 
-/// The rate the tester's filter decimates to: four samples a symbol at
+/// The rate the measurement filter decimates to: four samples a symbol at
 /// 1 Msym/s, read between by [`Oversampled`].
 const MEASURE_RATE_HZ: f64 = 4_000_000.0;
 
@@ -61,14 +67,14 @@ const MEASURE_RATE_HZ: f64 = 4_000_000.0;
 /// after it: the header then lies about 3 ms back.
 pub const HELD_S: f64 = 0.008;
 
-/// The tester's filter at `rate`: the suites' recommendation, built to the
-/// edges above. `tests::the_tester_filter_meets_the_recommendation` measures
-/// it against the four points at each rate the chain runs at.
-pub fn tester_filter(rate: f64) -> Vec<f32> {
+/// The measurement filter at `rate`, built to the edges above;
+/// `tests::the_measurement_filter_is_flat_to_its_edge_and_down_past_it`
+/// measures it at each rate the chain runs at.
+pub fn measurement_filter(rate: f64) -> Vec<f32> {
     design_lowpass_to_spec(
-        (TESTER_PASS_HZ + TESTER_STOP_HZ) / 2.0 / rate,
-        (TESTER_STOP_HZ - TESTER_PASS_HZ) / rate,
-        TESTER_STOPBAND_DB,
+        (MEASURE_PASS_HZ + MEASURE_STOP_HZ) / 2.0 / rate,
+        (MEASURE_STOP_HZ - MEASURE_PASS_HZ) / rate,
+        MEASURE_STOPBAND_DB,
     )
 }
 
@@ -128,7 +134,7 @@ impl Tester {
         if (rate / factor - MEASURE_RATE_HZ).abs() > MEASURE_RATE_HZ * 0.01 {
             return None;
         }
-        let taps = tester_filter(rate);
+        let taps = measurement_filter(rate);
         // The filter's whole span either side, and the rebuilt waveform's
         // own few samples at each end.
         let reach = taps.len() as f64 + 16.0 * factor;
@@ -202,28 +208,35 @@ fn timing(tester: &Tester, first: f64, bit: f64, known: &[bool]) -> f64 {
     steps[best].0 + shift / TIMING_STEPS as f64
 }
 
-/// The readings at the centres of `count` bits that follow `known` bits on
-/// the air, as the tester reads them: `first` is the estimated stream
+/// The suites' readings (`dsp::deviation::suite_readings`) of `known`
+/// bits and the `after` bits that follow them on the air, and each of the
+/// `after` bits' reading at its centre: `first` is the estimated stream
 /// position of `known[0]`'s centre, `rate` the stream's, `offset_hz` the
 /// channel's distance from the tuning. The timing comes from `known`
-/// ([`timing`]). `None` as [`Tester::new`] refuses.
+/// ([`timing`]). `None` as [`Tester::new`] refuses, or with no carrier to
+/// measure from.
+type Readings = ((Vec<f32>, Vec<f32>), Vec<f32>);
+
 fn read_after_known(
     recent: &Recent,
     rate: f64,
     offset_hz: f64,
     known: &[bool],
     first: f64,
-    count: usize,
-) -> Option<Vec<f32>> {
+    after: &[bool],
+) -> Option<Readings> {
     let bit = rate / 1e6;
-    let last = first + (known.len() + count) as f64 * bit;
+    let last = first + (known.len() + after.len()) as f64 * bit;
     let tester = Tester::new(recent, rate, offset_hz, first - 2.0 * bit, last + 2.0 * bit)?;
     let tau = timing(&tester, first, bit, known);
-    Some(
-        (0..count)
-            .map(|i| tester.at(first + ((known.len() + i) as f64 + tau) * bit))
-            .collect(),
-    )
+    // Bit position `x` (bit `k` spans `k..k + 1`) as a stream position.
+    let at = |x: f64| tester.at(first + (x - 0.5 + tau) * bit);
+    let all: Vec<bool> = known.iter().chain(after).copied().collect();
+    let readings = crate::signal::dsp::deviation::suite_readings(&all, at)?;
+    let centres = (0..after.len())
+        .map(|i| at((known.len() + i) as f64 + 0.5))
+        .collect();
+    Some((readings, centres))
 }
 
 /// A classic header's modulation readings, as a tester reads them: `lap`'s
@@ -242,8 +255,8 @@ pub fn classic(
 ) -> Option<Deviation> {
     let sync = crate::signal::bt::access_code::access_code_bits(lap);
     let first = sync_end_pair - (sync.len() - 1) as f64 * rate / 1e6;
-    let hz = read_after_known(recent, rate, offset_hz, &sync, first, air.len())?;
-    Some(Deviation::of(air, &hz))
+    let ((settled, alternating), _) = read_after_known(recent, rate, offset_hz, &sync, first, air)?;
+    Some(Deviation::from_readings(&settled, &alternating))
 }
 
 /// An LE 1M packet's modulation and drift, as a tester reads them: `air`
@@ -268,10 +281,11 @@ pub fn le_1m(
     let mut known = preamble_bits(ADVERTISING_ACCESS_ADDRESS, Phy::OneM);
     known.extend(access_address_bits(ADVERTISING_ACCESS_ADDRESS));
     let first = pdu_pair - known.len() as f64 * rate / 1e6;
-    let hz = read_after_known(recent, rate, offset_hz, &known, first, air.len())?;
+    let ((settled, alternating), centres) =
+        read_after_known(recent, rate, offset_hz, &known, first, air)?;
     Some((
-        modulation_quality(air, &hz, Phy::OneM),
-        drift(&hz, Phy::OneM),
+        modulation_from(&settled, &alternating, Phy::OneM),
+        drift(&centres, Phy::OneM),
     ))
 }
 
@@ -281,27 +295,23 @@ mod tests {
     use crate::signal::dsp::testkit::Rng;
     use crate::signal::net::conformance::{self as reference, Burst, Gfsk, Trace};
 
-    /// The production filter against the suites' four points, at every rate
-    /// the chain runs at: measured, not trusted to its design formula.
+    /// The production filter against its edges, at every rate the chain runs
+    /// at: within 0.15 dB to 1.25 MHz (a 40 dB Kaiser ripples about 0.09 dB,
+    /// 0.10 at the edge), 40 dB down from 1.75 MHz to the Nyquist frequency.
+    /// Measured, not trusted to the design formula.
     #[test]
-    fn the_tester_filter_meets_the_recommendation() {
+    fn the_measurement_filter_is_flat_to_its_edge_and_down_past_it() {
         for rate in [4e6, 8e6, 20e6] {
-            let taps: Vec<f64> = tester_filter(rate).iter().map(|&t| t as f64).collect();
-            let pass: Vec<f64> = (0..=110)
-                .map(|i| reference::response_db(&taps, i as f64 * 5_000.0, rate))
-                .collect();
-            let ripple = pass.iter().copied().fold(f64::MIN, f64::max)
-                - pass.iter().copied().fold(f64::MAX, f64::min);
-            assert!(ripple <= 0.5, "{rate}: ripple {ripple} dB");
-            assert!(reference::response_db(&taps, 650e3, rate) <= -3.0);
-            assert!(reference::response_db(&taps, 1e6, rate) <= -14.0);
-            let mut hz = 2e6;
+            let taps: Vec<f64> = measurement_filter(rate).iter().map(|&t| t as f64).collect();
+            for i in 0..=125 {
+                let db = reference::response_db(&taps, i as f64 * 10_000.0, rate);
+                assert!(db.abs() < 0.15, "{rate}: {db} dB at {} kHz", i * 10);
+            }
+            let mut hz = 1.75e6;
             while hz <= rate / 2.0 {
-                assert!(
-                    reference::response_db(&taps, hz, rate) <= -44.0,
-                    "{rate}: {hz}"
-                );
-                hz += 50e3;
+                let db = reference::response_db(&taps, hz, rate);
+                assert!(db <= -40.0, "{rate}: {db} dB at {hz}");
+                hz += 25e3;
             }
         }
     }
@@ -325,9 +335,10 @@ mod tests {
     /// A classic burst off the tuned centre, handed over with its sync end
     /// misplaced by up to 0.4 of a bit either way, as a lane can: the
     /// timing comes back from the sync word, and the readings are the
-    /// reference's own tester at the same bit centres.
+    /// suites' own, as the reference reads the same bits through the same
+    /// filter.
     #[test]
-    fn a_classic_header_reads_as_the_reference_tester_does() {
+    fn a_classic_header_reads_as_the_suites_define() {
         let rate = 20e6;
         let offset = 2e6;
         let lap = 0x0044_5566;
@@ -360,19 +371,22 @@ mod tests {
         let cut = n / 3;
         let recent = Recent::new([(base, &iq[..cut]), (base + cut as u64, &iq[cut..])]);
 
-        // The reference: its own tester (at baseband) at the bit centres.
+        // The reference: the suites' readings of the same bits (sync word,
+        // trailer, header), through its own copy of the measurement filter.
         let ref_tx = Gfsk::new(1e6, 160_000.0, 0.5);
         let ref_burst = Burst::new(ref_tx, &bits);
         let fine = 32e6;
         let ref_iq = reference::filter(
             &ref_burst.iq(fine, ref_burst.len_at(fine)),
-            &reference::mask_filter(fine),
+            &reference::wide_filter(fine),
         );
         let trace = Trace::from_iq(&ref_iq, fine, 1e6);
-        let ref_hz: Vec<f32> = (air_at..air_at + 58)
-            .map(|k| trace.at(k as f64 + 0.5).unwrap() as f32)
-            .collect();
-        let want = Deviation::of(air, &ref_hz);
+        let (settled, alternating) =
+            crate::signal::dsp::deviation::suite_readings(&bits[sync_at..air_at + 58], |x| {
+                trace.at(sync_at as f64 + x).unwrap() as f32
+            })
+            .unwrap();
+        let want = Deviation::from_readings(&settled, &alternating);
 
         let bit = rate / 1e6;
         let true_end = base as f64 + (sync_at as f64 + 63.5) * bit;
@@ -385,12 +399,13 @@ mod tests {
                 "{wrong}: df1 {g1:?} vs {w1:?}"
             );
             assert_eq!(got.alternating.n, want.alternating.n);
-            let per = |d: &Deviation| d.alternating.sum / d.alternating.n as f64;
+            let (g2, w2) = (
+                got.alternating.mean().unwrap(),
+                want.alternating.mean().unwrap(),
+            );
             assert!(
-                (per(&got) - per(&want)).abs() < 0.01 * per(&want),
-                "{wrong}: df2 {} vs {}",
-                per(&got),
-                per(&want)
+                (g2.value() - w2.value()).abs() < 0.01 * w2.value(),
+                "{wrong}: df2 {g2:?} vs {w2:?}"
             );
         }
         // Not held: refused, not read from somewhere else.

@@ -14,37 +14,29 @@
 //! traffic from devices it does not control, and rule 8 (`POLICY.md`) rules
 //! out ever transmitting to ask for one.
 //!
-//! **What the two patterns are *for* is what this measures instead of the
-//! patterns themselves.** `00001111` is chosen because four symbol periods
-//! of the same value is enough for a BT=0.5 Gaussian filter to reach
-//! whatever deviation it settles at - the measurement point is the *last*
-//! symbol of the run, as far from the last transition as the pattern gets.
-//! `10101010` is chosen because continuous alternation is the opposite
-//! extreme, the pattern that gives the filter the least time to settle
-//! between transitions. Both conditions occur constantly in ordinary
-//! whitened traffic, which looks like uniformly random bits at the symbol
-//! level: [`SETTLED_RUN`](crate::signal::dsp::deviation::SETTLED_RUN) or more identical bits in a row, and
-//! [`SETTLED_RUN`](crate::signal::dsp::deviation::SETTLED_RUN) or more bits that strictly alternate, both happen many
-//! times in a packet of any real length. This measures at every such
-//! occurrence and reports the same four numbers the specification's own
-//! procedure does, built from data this receiver already has instead of
-//! data it has no way to ask for.
+//! **What makes those patterns' bits the right ones is their neighbours,
+//! and ordinary traffic has plenty of them.** The suites read bits 2, 3, 6
+//! and 7 of `00001111`, each with the same bit either side, and every bit of
+//! `10101010`, each with the opposite bit either side. A GFSK symbol moves
+//! the frequency two bits away by about 1e-8 of the deviation, so every
+//! such bit in whitened traffic is read exactly as the suites read theirs:
+//! `signal::dsp::deviation::suite_readings` takes them, and
+//! `signal::net::conformance` holds its figures to the suites' own on their
+//! own patterns. This module turns those readings into the four numbers.
 //!
 //! **Measured against the physically transmitted bits, not the decoded
 //! ones.** Whitening is a logical operation applied before modulation and
 //! undone after slicing; the Gaussian filter and the discriminator only
-//! ever see the *whitened* symbol sequence, so a run of identical or
-//! alternating *data* bits is not what settles or unsettles the filter - a
-//! run of identical or alternating *on-air* bits is. `signal::ble::receive`
-//! calls this before its own call to [`crate::signal::dsp::code::lfsr::whiten`],
-//! on the same bits [`super::sync::slice`] sliced.
+//! ever see the *whitened* symbol sequence, so what qualifies a bit is its
+//! on-air neighbours, not its data neighbours. The receivers pass the air
+//! bits (`pdu::Packet::air`).
 //!
 //! [`drift`] is B9's own addition, and needs none of the pattern-search
 //! machinery above - a frequency drift within a packet is a property of the
 //! per-symbol discriminator readings themselves, not of any particular bit
-//! pattern - but it reads the *same* per-symbol `samples` array
-//! [`modulation_quality`] does, for a reason [`drift`]'s own doc explains:
-//! the raw, oversampled trace turned out to be the wrong input for it.
+//! pattern - but it reads one value per symbol, the reading at each bit's
+//! centre, for a reason [`drift`]'s own doc explains: the raw, oversampled
+//! trace turned out to be the wrong input for it.
 
 use super::Phy;
 use crate::signal::dsp::uncertainty::Uncertain;
@@ -62,10 +54,12 @@ use crate::signal::dsp::uncertainty::Uncertain;
 /// caller needs to judge it against a stated limit.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct ModulationQuality {
-    /// The average peak deviation reached at the end of a settled run of
-    /// four or more identical on-air symbols, in Hz.
+    /// The average deviation of every on-air bit whose neighbours both
+    /// equal it, each the mean over the bit (the suites' delta-f1), in Hz.
     pub delta_f1_avg_hz: Uncertain,
-    /// The average peak deviation reached in alternating runs, in Hz, held
+    /// The average deviation of every on-air bit whose neighbours both
+    /// differ from it, each read at the bit's centre where an alternation
+    /// peaks (the suites' delta-f2), in Hz, held
     /// against the floor Core 5.4 Vol 6 Part A 3.1 puts on the *minimum*
     /// deviation ("shall never be less than 185 kHz" at 1 Msym/s).
     ///
@@ -96,26 +90,24 @@ pub struct ModulationQuality {
     pub ratio: Uncertain,
 }
 
-/// Modulation quality from one packet's own on-air symbols (`bits`) and the
-/// discriminator sample recovered at each one (`samples`, in Hz) - the same
-/// two arrays [`super::sync::slice`] returns, before whitening is undone.
+/// Modulation quality from one packet's delta-f1 and delta-f2 readings
+/// (`signal::dsp::deviation::suite_readings`), in Hz.
 ///
-/// `None` when either pattern never occurred - a packet too short, or one
-/// whose particular random content happened to lack a settled run of either
+/// `None` when either kind never occurred - a packet too short, or one
+/// whose particular content happened to lack a qualifying bit of either
 /// kind. Rule 2: a measurement with nothing behind it is refused, not
 /// invented from zero occurrences.
-pub fn modulation_quality(bits: &[bool], samples: &[f32], phy: Phy) -> Option<ModulationQuality> {
-    debug_assert_eq!(bits.len(), samples.len());
-    let n = bits.len().min(samples.len());
-
-    let (settled, alternating) = crate::signal::dsp::deviation::run_ends(&bits[..n], &samples[..n]);
-
+pub fn modulation_from(
+    settled: &[f32],
+    alternating: &[f32],
+    phy: Phy,
+) -> Option<ModulationQuality> {
     if settled.is_empty() || alternating.is_empty() {
         return None;
     }
 
-    let delta_f1_avg_hz = crate::signal::dsp::uncertainty::mean_with_uncertainty(&settled);
-    let delta_f2_avg_hz = crate::signal::dsp::uncertainty::mean_with_uncertainty(&alternating);
+    let delta_f1_avg_hz = crate::signal::dsp::uncertainty::mean_with_uncertainty(settled);
+    let delta_f2_avg_hz = crate::signal::dsp::uncertainty::mean_with_uncertainty(alternating);
     let modulation_index = delta_f1_avg_hz.scale(2.0 / phy.symbol_rate_hz());
     let ratio = delta_f2_avg_hz.ratio(&delta_f1_avg_hz);
 
@@ -143,8 +135,7 @@ pub struct Drift {
 }
 
 /// Frequency drift within one packet, from the **per-symbol** discriminator
-/// readings [`super::sync::slice`] already produced - the same `samples`
-/// array [`modulation_quality`] reads, one value per on-air symbol.
+/// readings: one value per on-air symbol, each at the bit's centre.
 ///
 /// **Not the raw oversampled trace, and that is a finding of its own, not a
 /// preference.** A first version read straight from `receive.rs`'s raw
@@ -160,8 +151,8 @@ pub struct Drift {
 /// its own reported uncertainty - a measurement that looks more precise than
 /// it is, which is exactly the failure this whole arc's uncertainty
 /// discipline exists to catch. One value per symbol removes the
-/// oversampling correlation the same way slicing to bits already does for
-/// [`modulation_quality`]; the residual correlation between *adjacent
+/// oversampling correlation the same way reading one value a bit does for
+/// [`modulation_from`]; the residual correlation between *adjacent
 /// symbols*, from the Gaussian filter's own few-symbol impulse response, is
 /// smaller and not accounted for here either, so this is a improvement, not
 /// a claim of statistical purity.
@@ -212,6 +203,16 @@ mod tests {
     /// `receive.rs` hands this module, built without any of that module's
     /// own detection or timing-search machinery, which this measurement
     /// does not touch.
+    /// The suites' readings of per-symbol `samples`, each held across its
+    /// bit, aggregated: what the receivers do with a rebuilt waveform, on
+    /// the one reading a bit these tests build.
+    fn modulation_quality(bits: &[bool], samples: &[f32], phy: Phy) -> Option<ModulationQuality> {
+        let (settled, alternating) = crate::signal::dsp::deviation::suite_readings(bits, |x| {
+            samples[(x as usize).min(samples.len() - 1)]
+        })?;
+        modulation_from(&settled, &alternating, phy)
+    }
+
     fn symbols_and_samples(
         deviation_hz: f64,
         n_bits: usize,
@@ -260,7 +261,7 @@ mod tests {
     /// different deviations can legitimately settle on phases a fraction of
     /// a sample apart - benign in itself, but enough to move which exact
     /// sample a transition-region symbol reads, which this generalised
-    /// measurement (any settled run of four, not only a repeated
+    /// measurement (any bit its neighbours qualify, not only a repeated
     /// specification octet) is more exposed to than a single hand-picked
     /// symbol would be. Comparing two independently-simulated captures to
     /// each other, rather than either to a fixed theoretical fraction, is

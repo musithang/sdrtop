@@ -388,24 +388,22 @@ pub fn share_above(values: &[f64], limit: f64) -> f64 {
     values.iter().filter(|&&v| v > limit).count() as f64 / values.len() as f64
 }
 
-/// The measurement filter both suites recommend (RF.TS.p35 RF/TRM/CA/BV-07-C
-/// to -09-C; RF-PHY.TS.4.2.1 TP/TRM-LE/CA/BV-05-C, -06-C): passband ripple
-/// at most 0.5 dB peak to peak to 550 kHz, and at least 3 dB down at
-/// 650 kHz, 14 dB at 1 MHz, 44 dB at 2 MHz, either side of the carrier.
-///
-/// A Kaiser-windowed sinc, passband edge 550 kHz, 52 dB reached by 740 kHz:
-/// a ripple of a few hundredths of a dB and every recommended attenuation
-/// beaten. The suites give minimums, so a steeper filter is as compliant as
-/// the loosest; `the_mask_filter_meets_the_recommendation` measures this one
-/// against the four points rather than trusting the design formulas.
-pub fn mask_filter(rate: f64) -> Vec<f64> {
-    const PASS_HZ: f64 = 550_000.0;
-    const STOP_HZ: f64 = 740_000.0;
-    const ATTEN_DB: f64 = 52.0;
-    let fc = (PASS_HZ + STOP_HZ) / 2.0 / rate;
-    let width = (STOP_HZ - PASS_HZ) / rate;
-    let beta = 0.1102 * (ATTEN_DB - 8.7);
-    let taps = (((ATTEN_DB - 7.95) / (2.285 * TAU * width)).ceil() as usize + 1) | 1;
+/// A Kaiser-windowed sinc low-pass at `rate`: flat to `pass_hz`, at least
+/// `atten_db` down from `stop_hz`, unit gain at DC. Kaiser's own design
+/// rules (the tap count and the window's beta for the attenuation); each
+/// filter built from it is measured against what it is for by a test, not
+/// trusted to the formulas.
+pub fn kaiser_lowpass(pass_hz: f64, stop_hz: f64, atten_db: f64, rate: f64) -> Vec<f64> {
+    let fc = (pass_hz + stop_hz) / 2.0 / rate;
+    let width = (stop_hz - pass_hz) / rate;
+    let beta = if atten_db > 50.0 {
+        0.1102 * (atten_db - 8.7)
+    } else if atten_db > 21.0 {
+        0.5842 * (atten_db - 21.0).powf(0.4) + 0.07886 * (atten_db - 21.0)
+    } else {
+        0.0
+    };
+    let taps = (((atten_db - 7.95) / (2.285 * TAU * width)).ceil() as usize + 1) | 1;
     let m = (taps - 1) as f64 / 2.0;
     let mut h: Vec<f64> = (0..taps)
         .map(|i| {
@@ -422,6 +420,34 @@ pub fn mask_filter(rate: f64) -> Vec<f64> {
     let sum: f64 = h.iter().sum();
     h.iter_mut().for_each(|v| *v /= sum);
     h
+}
+
+/// The measurement filter both suites recommend (RF.TS.p35 RF/TRM/CA/BV-07-C
+/// to -09-C; RF-PHY.TS.4.2.1 TP/TRM-LE/CA/BV-05-C, -06-C): passband ripple
+/// at most 0.5 dB peak to peak to 550 kHz, and at least 3 dB down at
+/// 650 kHz, 14 dB at 1 MHz, 44 dB at 2 MHz, either side of the carrier.
+/// Built steep (550 kHz edge, 52 dB by 740 kHz); `the_mask_filter_meets_the_
+/// recommendation` measures it against the four points.
+///
+/// **Right for a tester's own patterns, wrong for traffic.** Every filter
+/// the suites allow must fall steeply between 550 and 650 kHz, which cuts
+/// into BR's spectrum; on a continuous `1010` that lifts df2 3 %, on
+/// whitened traffic it lowers it 3 to 4 %. sdrtop measures traffic, so its
+/// measurement filter is [`wide_filter`]; this one stays as the reference
+/// a tester on a cable would read.
+pub fn mask_filter(rate: f64) -> Vec<f64> {
+    kaiser_lowpass(550_000.0, 740_000.0, 52.0, rate)
+}
+
+/// The filter traffic is measured through (Viktor, 2026-09-26): flat to
+/// 1.25 MHz, 40 dB down from 1.75 MHz, the BLE receiver's own front end.
+/// Through it an ideal transmitter's traffic reads within 0.5 % of the
+/// suites' own figures on their own patterns, BR and LE alike
+/// (`traffic_reads_as_the_suites_test_patterns`). What it gives up, a BR
+/// neighbour 1 MHz away, is measured in `a_neighbour_25_db_down_moves_the_
+/// readings_under_one_percent` and guarded where the figures are made.
+pub fn wide_filter(rate: f64) -> Vec<f64> {
+    kaiser_lowpass(1_250_000.0, 1_750_000.0, 40.0, rate)
 }
 
 /// The modified Bessel function of the first kind, order zero, by its power
@@ -640,6 +666,120 @@ mod tests {
         assert!((a - b).abs() < 100.0, "df2 {a} vs {b}");
     }
 
+    /// Random bits, as whitened traffic is, from a transmitter with an
+    /// offset and a drift, padded for the filters.
+    fn traffic(deviation: f64, seed: u64) -> (Vec<bool>, usize, usize, Gfsk) {
+        let mut rng = Rng::new(seed);
+        let random: Vec<bool> = (0..1500).map(|_| rng.next_u64() & 1 == 1).collect();
+        let (bits, from) = padded(&random);
+        let tx = Gfsk::new(1e6, deviation, 0.5)
+            .with_cfo(31_000.0)
+            .with_drift(2e6);
+        (bits, from, random.len(), tx)
+    }
+
+    /// The suites' own figures for `tx`, on their own patterns, ideally read.
+    fn suites_on_patterns(tx: Gfsk) -> (f64, f64) {
+        let mut body = repeat(ON_F0, 20);
+        let f2_at = body.len();
+        body.extend(alternating(160, true));
+        let (bits, at) = padded(&body);
+        let trace = Trace::analytic(&Burst::new(tx, &bits), 32);
+        (
+            mean(&delta_f1(&trace, &bits, at, at + f2_at)).unwrap(),
+            mean(&delta_f2(&trace, &bits, at + f2_at, at + body.len())).unwrap(),
+        )
+    }
+
+    /// `dsp::deviation::suite_readings` over `bits[from..from + len]`, as
+    /// `trace` reads them, averaged.
+    fn suite_means(bits: &[bool], from: usize, len: usize, at: &dyn Fn(f64) -> f64) -> (f64, f64) {
+        let (f1, f2) =
+            crate::signal::dsp::deviation::suite_readings(&bits[from..from + len], |x| {
+                at(from as f64 + x) as f32
+            })
+            .expect("settled bits of both kinds");
+        let avg = |v: &[f32]| v.iter().map(|&x| x as f64).sum::<f64>() / v.len() as f64;
+        (avg(&f1), avg(&f2))
+    }
+
+    /// **The suites' readings, from any traffic.** Every bit whose
+    /// neighbours qualify it, read from random bits, gives what the suites
+    /// give on their own test patterns from the same transmitter: to their
+    /// own resolution when read ideally, and within 0.5 % through the
+    /// measurement filter.
+    ///
+    /// Their own resolution, because the suites' 32 readings a bit sit at
+    /// `(j + 0.5) / 32`, so none is at the centre where an alternation
+    /// peaks, and their maximum reads the peak 0.1 % low (140.92 kHz against
+    /// the centre's 141.06 for BR). df1, a mean, agrees to 0.02 %.
+    #[test]
+    fn traffic_reads_as_the_suites_test_patterns() {
+        let rate = 32e6;
+        for deviation in [BR_DEVIATION_HZ, LE_DEVIATION_HZ] {
+            let (bits, from, len, tx) = traffic(deviation, 40);
+            let (s1, s2) = suites_on_patterns(tx);
+            let burst = Burst::new(tx, &bits);
+            let (i1, i2) = suite_means(&bits, from, len, &|x| burst.frequency(x * 1e-6));
+            assert!(
+                (i1 - s1).abs() < 0.0005 * s1,
+                "{deviation}: df1 {i1} vs {s1}"
+            );
+            assert!(
+                (i2 - s2).abs() < 0.0015 * s2,
+                "{deviation}: df2 {i2} vs {s2}"
+            );
+            let wide = Trace::from_iq(
+                &filter(&burst.iq(rate, burst.len_at(rate)), &wide_filter(rate)),
+                rate,
+                1e6,
+            );
+            let (w1, w2) = suite_means(&bits, from, len, &|x| wide.at(x).unwrap_or(f64::NAN));
+            assert!(
+                (w1 - s1).abs() < 0.005 * s1,
+                "{deviation}: wide df1 {w1} vs {s1}"
+            );
+            assert!(
+                (w2 - s2).abs() < 0.005 * s2,
+                "{deviation}: wide df2 {w2} vs {s2}"
+            );
+        }
+    }
+
+    /// What the wide filter gives up, measured: a second transmitter one
+    /// channel away (1 MHz on BR, 2 on LE), 25 dB down, moves the readings
+    /// by under 1 %. The per-bit mean averages its ripple away and the
+    /// centre reading only scatters with it, where the suites' per-bit
+    /// maximum rode it 18 % high.
+    #[test]
+    fn a_neighbour_25_db_down_moves_the_readings_under_one_percent() {
+        let rate = 32e6;
+        for (deviation, spacing) in [(BR_DEVIATION_HZ, 1e6), (LE_DEVIATION_HZ, 2e6)] {
+            let (bits, from, len, tx) = traffic(deviation, 41);
+            let (s1, s2) = suites_on_patterns(tx);
+            let burst = Burst::new(tx, &bits);
+            let n = burst.len_at(rate);
+            let mut rng = Rng::new(42);
+            let other_bits: Vec<bool> = (0..bits.len()).map(|_| rng.next_u64() & 1 == 1).collect();
+            let other = Burst::new(
+                Gfsk::new(1e6, deviation, 0.5).with_cfo(spacing),
+                &other_bits,
+            )
+            .iq(rate, n);
+            let a = 10f64.powf(-25.0 / 20.0);
+            let iq: Vec<Complex<f64>> = burst
+                .iq(rate, n)
+                .iter()
+                .zip(&other)
+                .map(|(x, y)| x + y * a)
+                .collect();
+            let wide = Trace::from_iq(&filter(&iq, &wide_filter(rate)), rate, 1e6);
+            let (w1, w2) = suite_means(&bits, from, len, &|x| wide.at(x).unwrap_or(f64::NAN));
+            assert!((w1 - s1).abs() < 0.01 * s1, "{deviation}: df1 {w1} vs {s1}");
+            assert!((w2 - s2).abs() < 0.01 * s2, "{deviation}: df2 {w2} vs {s2}");
+        }
+    }
+
     /// The measurement filter against the suites' four points, measured.
     #[test]
     fn the_mask_filter_meets_the_recommendation() {
@@ -827,29 +967,6 @@ mod chain {
         (m, load)
     }
 
-    /// Our definition's readings of `burst` at the centres of bits
-    /// `from..to`, as the reference's compliant tester reads them.
-    fn mask_centres(burst: &Burst, from: usize, to: usize) -> Vec<f32> {
-        let fine = 32e6;
-        let trace = Trace::from_iq(
-            &filter(&burst.iq(fine, burst.len_at(fine)), &mask_filter(fine)),
-            fine,
-            burst.tx.symbol_rate,
-        );
-        (from..to)
-            .map(|k| trace.at(k as f64 + 0.5).unwrap_or(f64::NAN) as f32)
-            .collect()
-    }
-
-    /// The exact frequency at the centre of each of `bits` (`from..to`), the
-    /// reading a slicer at the ideal phase would take.
-    fn centres(burst: &Burst, from: usize, to: usize) -> Vec<f32> {
-        let period = burst.tx.period();
-        (from..to)
-            .map(|k| burst.frequency((k as f64 + 0.5) * period) as f32)
-            .collect()
-    }
-
     /// Mean and sample standard deviation.
     fn spread(values: &[f64]) -> (f64, f64) {
         let n = values.len() as f64;
@@ -962,21 +1079,21 @@ mod chain {
     const BR_LAP: u32 = 0x0044_5566;
 
     /// One LE case: each figure per packet, from the chain (packets that
-    /// passed their CRC), from our definition on the reference's compliant
-    /// tester, and on the exact frequency.
+    /// passed their CRC), and from the suites' definition on the exact
+    /// frequency over the same bits (`dsp::deviation::suite_readings`).
     struct LeCase {
         found: usize,
         chain: [Vec<f64>; 3],
         cfo: Vec<f64>,
-        mask: [Vec<f64>; 3],
         ideal: [Vec<f64>; 3],
         f0: Vec<f64>,
         load: f64,
     }
 
     fn le_case(rate: f64, snr: f64, cfo: f64, packets: usize) -> LeCase {
-        use crate::signal::ble::measure::{modulation_quality, ModulationQuality};
+        use crate::signal::ble::measure::{modulation_from, ModulationQuality};
         use crate::signal::ble::Phy;
+        use crate::signal::dsp::deviation::suite_readings;
         let tx = Gfsk::new(1e6, LE_DEVIATION_HZ, 0.5).with_cfo(cfo);
         let built: Vec<_> = (0..packets)
             .map(|p| le_packet([0x10 + p as u8, 0x22, 0x33, 0x44, 0x55, 0xC6]))
@@ -1003,25 +1120,20 @@ mod chain {
             found: 0,
             chain: Default::default(),
             cfo: Vec::new(),
-            mask: Default::default(),
             ideal: Default::default(),
             f0: Vec::new(),
             load,
         };
         let used = crate::signal::ble::pdu::used_bits(37);
         for (burst, (bits, pdu_at, ..)) in bursts.iter().zip(&built) {
-            let air = &bits[*pdu_at..*pdu_at + used];
-            let ideal =
-                modulation_quality(air, &centres(burst, *pdu_at, *pdu_at + used), Phy::OneM)
-                    .expect("patterns give both runs");
+            // What the chain reads: the preamble and access address, then
+            // the PDU, from bit 0 at t = 0.
+            let (settled, alternating) = suite_readings(&bits[..*pdu_at + used], |x| {
+                burst.frequency(x * 1e-6) as f32
+            })
+            .expect("settled bits of both kinds");
+            let ideal = modulation_from(&settled, &alternating, Phy::OneM).expect("both kinds");
             push(&mut case.ideal, three(&ideal));
-            let mask = modulation_quality(
-                air,
-                &mask_centres(burst, *pdu_at, *pdu_at + used),
-                Phy::OneM,
-            )
-            .expect("patterns give both runs");
-            push(&mut case.mask, three(&mask));
             case.f0
                 .push(initial_carrier(&Trace::analytic(burst, 32), 0, 8).unwrap());
         }
@@ -1037,13 +1149,12 @@ mod chain {
         case
     }
 
-    /// One BR case: the piconet's pooled readings from the chain, and our
-    /// definition on the same headers through the reference's compliant
-    /// tester and on the exact frequency.
+    /// One BR case: the piconet's pooled readings from the chain, and the
+    /// suites' definition on the exact frequency over the same bits (sync
+    /// word, trailer, header).
     struct BrCase {
         heads: u64,
         chain: crate::signal::bt::piconet::Deviation,
-        mask: crate::signal::bt::piconet::Deviation,
         ideal: crate::signal::bt::piconet::Deviation,
         load: f64,
     }
@@ -1059,22 +1170,22 @@ mod chain {
         // 2744 bits, before it is emitted.
         let bytes = stream(&bursts, rate, 300e-6, 3.2e-3, snr, 29 + snr as u64);
         let (m, load) = run("net_bt", tuned, rate, &bytes, channels);
-        let (mut ideal, mut mask) = (Deviation::default(), Deviation::default());
+        let mut ideal = Deviation::default();
         for (burst, (bits, trailer)) in bursts.iter().zip(&built) {
-            let end = trailer + 4 + 54;
-            let air = &bits[*trailer..end];
-            let one = Deviation::of(air, &centres(burst, *trailer, end));
+            let (from, end) = (trailer - 64, trailer + 4 + 54);
+            let (settled, alternating) =
+                crate::signal::dsp::deviation::suite_readings(&bits[from..end], |x| {
+                    burst.frequency((from as f64 + x) * 1e-6) as f32
+                })
+                .expect("settled bits of both kinds");
+            let one = Deviation::from_readings(&settled, &alternating);
             ideal.settled.add(one.settled);
             ideal.alternating.add(one.alternating);
-            let one = Deviation::of(air, &mask_centres(burst, *trailer, end));
-            mask.settled.add(one.settled);
-            mask.alternating.add(one.alternating);
         }
         let row = m.net.bt_piconets.iter().find(|p| p.lap == BR_LAP);
         BrCase {
             heads: row.map(|p| p.headers.captured).unwrap_or(0),
             chain: row.map(|p| p.headers.deviation).unwrap_or_default(),
-            mask,
             ideal,
             load,
         }
@@ -1105,15 +1216,16 @@ mod chain {
             LE_DEVIATION_HZ / 1e3
         );
         eprintln!(
-            "suites (exact frequency): df1avg {} kHz  df2avg {} kHz  df2/df1 {:.4}",
+            "suites on their own patterns (exact frequency): df1avg {} kHz  df2avg {} kHz  \
+             df2/df1 {:.4}",
             khz(ts_f1),
             khz(ts_f2),
             ts_f2 / ts_f1
         );
         eprintln!(
-            "{:>5} {:>4} {:>6} {:>5} | {:>17} {:>8} {:>8} | {:>17} {:>8} {:>8} | {:>15} {:>6} {:>6} | {:>17} {:>8} {:>5}",
-            "Msps", "SNR", "CFO", "found", "df1 chain", "mask", "ideal", "df2 chain", "mask",
-            "ideal", "ratio chain", "mask", "ideal", "CFO chain", "suites f0", "load"
+            "{:>5} {:>4} {:>6} {:>5} | {:>17} {:>8} | {:>17} {:>8} | {:>15} {:>6} | {:>17} {:>8} {:>5}",
+            "Msps", "SNR", "CFO", "found", "df1 chain", "ideal", "df2 chain", "ideal",
+            "ratio chain", "ideal", "CFO chain", "suites f0", "load"
         );
         for rate in RATES {
             for snr in SNRS_DB {
@@ -1128,20 +1240,17 @@ mod chain {
                     };
                     let ratio = |(m, s): (f64, f64)| format!("{m:7.4} +-{s:6.4}");
                     eprintln!(
-                        "{:>5} {:>4} {:>6} {:>2}/{:<2} | {} {} {} | {} {} {} | {} {:6.4} {:6.4} | {} {} {:5.2}",
+                        "{:>5} {:>4} {:>6} {:>2}/{:<2} | {} {} | {} {} | {} {:6.4} | {} {} {:5.2}",
                         rate / 1e6,
                         snr,
                         cfo / 1e3,
                         c.found,
                         PACKETS,
                         or_dash(&c.chain[0], &khz_pm),
-                        khz(spread(&c.mask[0]).0),
                         khz(spread(&c.ideal[0]).0),
                         or_dash(&c.chain[1], &khz_pm),
-                        khz(spread(&c.mask[1]).0),
                         khz(spread(&c.ideal[1]).0),
                         or_dash(&c.chain[2], &ratio),
-                        spread(&c.mask[2]).0,
                         spread(&c.ideal[2]).0,
                         or_dash(&c.cfo, &khz_pm),
                         khz(spread(&c.f0).0),
@@ -1155,20 +1264,30 @@ mod chain {
     fn br_report() {
         let (ts_f1, ts_f2) = suites_figures(Gfsk::new(1e6, BR_DEVIATION_HZ, 0.5));
         eprintln!(
-            "\nBR, trailer and header of {PACKETS} packets a case on channel {BR_CHANNEL}, \
-             deviation {} kHz, BT 0.5",
+            "\nBR, sync word, trailer and header of {PACKETS} packets a case on channel \
+             {BR_CHANNEL}, deviation {} kHz, BT 0.5",
             BR_DEVIATION_HZ / 1e3
         );
         eprintln!(
-            "suites (exact frequency): df1avg {} kHz  df2avg {} kHz  df2/df1 {:.4}",
+            "suites on their own patterns (exact frequency): df1avg {} kHz  df2avg {} kHz  \
+             df2/df1 {:.4}",
             khz(ts_f1),
             khz(ts_f2),
             ts_f2 / ts_f1
         );
         eprintln!(
-            "{:>5} {:>4} {:>6} {:>5} | {:>17} {:>8} {:>8} | {:>17} {:>8} {:>8} | {:>7} {:>7} {:>7} {:>5}",
-            "Msps", "SNR", "CFO", "heads", "df1 chain", "mask", "ideal", "df2 chain", "mask",
-            "ideal", "ratio", "mask", "ideal", "load"
+            "{:>5} {:>4} {:>6} {:>5} | {:>17} {:>8} | {:>17} {:>8} | {:>7} {:>7} {:>5}",
+            "Msps",
+            "SNR",
+            "CFO",
+            "heads",
+            "df1 chain",
+            "ideal",
+            "df2 chain",
+            "ideal",
+            "ratio",
+            "ideal",
+            "load"
         );
         let mean_of = |s: &crate::signal::dsp::deviation::Sums| {
             s.mean().map(|u| u.value()).unwrap_or(f64::NAN)
@@ -1186,23 +1305,19 @@ mod chain {
                         (Some(a), Some(b)) => format!("{:7.4}", b.value() / a.value()),
                         _ => format!("{:>7}", "-"),
                     };
-                    let (m1, m2) = (mean_of(&c.mask.settled), mean_of(&c.mask.alternating));
                     let (i1, i2) = (mean_of(&c.ideal.settled), mean_of(&c.ideal.alternating));
                     eprintln!(
-                        "{:>5} {:>4} {:>6} {:>2}/{:<2} | {} {} {} | {} {} {} | {} {:7.4} {:7.4} {:5.2}",
+                        "{:>5} {:>4} {:>6} {:>2}/{:<2} | {} {} | {} {} | {} {:7.4} {:5.2}",
                         rate / 1e6,
                         snr,
                         cfo / 1e3,
                         c.heads,
                         PACKETS,
                         show(&d.settled),
-                        khz(m1),
                         khz(i1),
                         show(&d.alternating),
-                        khz(m2),
                         khz(i2),
                         ratio,
-                        m2 / m1,
                         i2 / i1,
                         c.load,
                     );
@@ -1213,25 +1328,22 @@ mod chain {
 
     /// **The chain held to the reference, on every run.** One clean case a
     /// protocol, small enough for the debug build: the figures sdrtop shows
-    /// are our definitions as the reference's compliant tester reads them,
-    /// within what a handful of packets can resolve, and every packet sent
-    /// is found. The ignored report above is the full picture; this is the
-    /// part of it that must never quietly go wrong again.
-    ///
-    /// Tolerances are the measured scatter, not a guess: at 40 dB the report
-    /// shows the chain within 0.6 % of the tester on LE df1 and df2 and
-    /// within 1.5 % on BR df2 (one alternating run a header).
+    /// are the suites' definitions of them, read from the transmitter's
+    /// exact frequency, within what a handful of packets can resolve, and
+    /// every packet sent is found. The ignored report above is the full
+    /// picture; this is the part of it that must never quietly go wrong
+    /// again.
     #[test]
-    fn the_chain_reads_as_the_reference_tester() {
+    fn the_chain_reads_as_the_suites_define() {
         let mean = |v: &[f64]| v.iter().sum::<f64>() / v.len() as f64;
         let le = le_case(8e6, 40.0, 40_000.0, 4);
         assert_eq!(le.found, 4, "every LE packet found");
         assert_eq!(le.chain[0].len(), 4, "and measured");
         for (i, name) in ["df1", "df2", "df2/df1"].iter().enumerate() {
-            let (chain, mask) = (mean(&le.chain[i]), mean(&le.mask[i]));
+            let (chain, ideal) = (mean(&le.chain[i]), mean(&le.ideal[i]));
             assert!(
-                (chain - mask).abs() < 0.015 * mask,
-                "LE {name}: chain {chain}, tester {mask}"
+                (chain - ideal).abs() < 0.015 * ideal,
+                "LE {name}: chain {chain}, ideal {ideal}"
             );
         }
         let cfo = mean(&le.cfo);
@@ -1242,23 +1354,17 @@ mod chain {
         let br = br_case(20e6, 40.0, 40_000.0, 4, 1);
         assert_eq!(br.heads, 4, "every BR header found at 20 Msps");
         let value = |s: &crate::signal::dsp::deviation::Sums| s.mean().unwrap().value();
-        for (name, chain, mask, tolerance) in [
-            (
-                "df1",
-                value(&br.chain.settled),
-                value(&br.mask.settled),
-                0.01,
-            ),
+        for (name, chain, ideal) in [
+            ("df1", value(&br.chain.settled), value(&br.ideal.settled)),
             (
                 "df2",
                 value(&br.chain.alternating),
-                value(&br.mask.alternating),
-                0.04,
+                value(&br.ideal.alternating),
             ),
         ] {
             assert!(
-                (chain - mask).abs() < tolerance * mask,
-                "BR {name}: chain {chain}, tester {mask}"
+                (chain - ideal).abs() < 0.015 * ideal,
+                "BR {name}: chain {chain}, ideal {ideal}"
             );
         }
     }

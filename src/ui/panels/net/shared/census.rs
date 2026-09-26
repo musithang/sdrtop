@@ -328,7 +328,7 @@ fn fmt_mean_snr(d: &Device) -> String {
 }
 
 /// `0.50 ±0.01`, the index B8 measured, refined across packets. `-` until a
-/// packet had the settled runs B8 needs.
+/// packet had settled and alternating bits of both kinds to read.
 fn fmt_modulation(d: &Device) -> String {
     match d.modulation_index {
         Some(u) => Reading::new(u, "", f64::INFINITY).text(),

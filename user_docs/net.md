@@ -351,11 +351,11 @@ The selected packet, spelled out:
   never fail, and the smallest nearly always did. A transmitter's
   alternating peaks are all the same peak, so the average stands in for
   them, which means an average under the floor is a real finding and one
-  over it is not a promise. On LE 1M the packet is read the way a tester
-  reads it, as the classic piconets' modulation is (see the Classic view's
-  detail below): through the test suite's filter, at bit centres timed from
-  the access address. LE 2M is read through the receiver's own filter, and
-  says so, because the suite's 2M filter has not been read yet.
+  over it is not a promise. Both are read as the test suite defines them,
+  from whatever bits the packet carried, the way the Classic view's
+  piconets are (see its detail below); on LE 1M the packet is taken again
+  from the raw samples and timed from the access address, on LE 2M read
+  through the receiver's own filter.
 
 With **no packet selected**, the detail shows the session's **frame error
 rate against SNR**: for each 2 dB of SNR, what share of packets failed their
@@ -433,17 +433,24 @@ The selected piconet's detail, in as many sections as the panel has room for
 
 - **Modulation**: the piconet's BR modulation index and deviation against
   0.28 to 0.35, read from the Core Specification, from every header's
-  symbols. Read the way a Bluetooth tester reads them: each header is taken
-  again from the raw samples, through the measurement filter the SIG's test
-  suite recommends (flat to 550 kHz), and read at the centre of each bit,
-  timed from the packet's own sync word. The receiver that finds the
-  packets uses a narrower filter and guesses where a bit's centre is,
+  symbols. Read the way the SIG's test suite defines them, which took some
+  doing. A tester commands the device to send `00001111` and `10101010`
+  and reads particular bits of them; sdrtop cannot ask a stranger's
+  headphones for anything, so it reads every bit whose two neighbours make
+  it one of those bits (same either side, or opposite either side), which
+  for this kind of modulation is the same measurement, and a test holds it
+  to the suite's own figures. Each header is taken again from the raw
+  samples and read at bit centres timed from the packet's own sync word.
+  The receiver that finds the packets guesses where a bit's centre is,
   which is fine for finding packets and was not fine for measuring them:
-  until this was built, it read a perfectly healthy transmitter's `df2/df1`
-  as about 0.45, which is how this whole section learned to check itself
-  against a reference first. A steep filter like this one reads `df2` a few
-  percent above a tester with no filter at all; that is the price of
-  keeping the channel next door out of the reading.
+  until this was built it read a perfectly healthy transmitter's
+  `df2/df1` as about 0.45, which is how this whole section learned to
+  check itself against a reference first. The suite's own recommended
+  filter turned out to be the wrong one for traffic (it is built for a
+  tester reading its own test patterns, and bends ordinary traffic by a
+  few percent), so the reading uses a wider one; a strong transmitter on
+  the next channel at the same moment is the price, and below about 20 dB
+  under the one being measured it moves the figures by less than 1 %.
 - **Timing**: how far each hit lands from the piconet's own 625 µs slot grid,
   fitted to its hits, against the specification's 1 µs, with the spread drawn
   under it. Below eight hits it is collecting; hits that do not line up on a

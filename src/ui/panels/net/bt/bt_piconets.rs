@@ -390,13 +390,12 @@ const RATIO_RESOLUTION: f64 = 0.1;
 
 /// The MODULATION section (net-ux-polish-plan 6.4): the piconet's BR
 /// modulation index, read from the trailer and header symbols of every
-/// header captured on its LAP (`piconet::Deviation`) through a tester's own
-/// filter (`signal::net::measure`), against the BR band,
+/// header captured on its LAP (`piconet::Deviation`), as the test suite
+/// defines them (`signal::net::measure`), against the BR band,
 /// in the same `widgets::limit` rows the BLE packet detail uses, so the two
 /// protocols' transmitter quality reads alike. The header's FEC repeats
-/// each bit three times, so settled runs are plentiful and alternating
-/// ones are only the trailer's: the ratio row waits longer for its second
-/// reading, and says so.
+/// each bit three times, so settled bits are plentiful there, and the
+/// alternating ones come mostly from the sync word and trailer.
 fn modulation_lines(p: &Piconet, iw: usize, theme: &crate::Theme) -> Vec<Line<'static>> {
     let d = p.headers.deviation;
     let mut out = vec![crate::ui::chrome::section(
@@ -413,7 +412,7 @@ fn modulation_lines(p: &Piconet, iw: usize, theme: &crate::Theme) -> Vec<Line<'s
     };
     let Some(df1) = d.settled.mean() else {
         out.push(quiet(&format!(
-            "not measured: {} settled runs in {} headers, two needed",
+            "not measured: {} settled bits in {} headers, two needed",
             d.settled.n, p.headers.captured
         )));
         return out;
@@ -441,12 +440,12 @@ fn modulation_lines(p: &Piconet, iw: usize, theme: &crate::Theme) -> Vec<Line<'s
     let w = RowWidths::fit_within(&rows, iw);
     out.extend(rows.iter().map(|r| Line::from(r.spans(theme, w))));
     if ratio.is_none() {
-        out.push(quiet("df2/df1: fewer than two alternating runs yet"));
+        out.push(quiet("df2/df1: fewer than two alternating bits yet"));
     }
     for chunk in crate::ui::chrome::wrap(
         &format!(
-            "{} settled and {} alternating runs from {} headers, every member's, \
-             read as a tester reads them: 550 kHz filter, bits timed by the sync word",
+            "{} settled and {} alternating bits from {} headers, every member's, \
+             read as the test suite defines them",
             d.settled.n, d.alternating.n, p.headers.captured
         ),
         iw.saturating_sub(1),
@@ -1285,8 +1284,8 @@ mod tests {
     }
 
     /// **The BR modulation index against the BR band** (6.4): refused
-    /// until two settled runs, then the index, delta-f1 and, once two
-    /// alternating runs are in, the ratio, in the limit rows BLE uses.
+    /// until two settled bits, then the index, delta-f1 and, once two
+    /// alternating bits are in, the ratio, in the limit rows BLE uses.
     #[test]
     fn the_modulation_index_is_read_against_the_br_band() {
         use crate::signal::bt::piconet::{observe_header, Deviation, HeaderRead};
@@ -1296,7 +1295,7 @@ mod tests {
         let out = draw(NetBtPiconetsPanel, 80, 40, &m).join("\n");
         assert!(out.contains("MODULATION"), "{out}");
         assert!(
-            out.contains("not measured: 0 settled runs in 0 headers"),
+            out.contains("not measured: 0 settled bits in 0 headers"),
             "{out}"
         );
 
@@ -1318,12 +1317,12 @@ mod tests {
         assert!(out.contains("0.28"), "the band is drawn: {out}");
         assert!(out.contains("df2/df1"), "{out}");
         assert!(
-            out.contains("4 settled and 2 alternating runs from 1 headers"),
+            out.contains("4 settled and 2 alternating bits from 1 headers"),
             "{out}"
         );
         assert!(out.contains("Core 5.4 Vol 2 A 3.1.1"), "{out}");
         assert!(
-            out.contains("550 kHz filter"),
+            out.contains("test suite defines them"),
             "said how it was read: {out}"
         );
     }
