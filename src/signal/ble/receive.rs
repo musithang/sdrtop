@@ -473,6 +473,15 @@ pub struct Receiver {
     /// Where the capture now under way triggered, in stream pairs: the time
     /// its packet is stamped with (`pdu::Packet::at_pair`).
     trigger_pair: u64,
+    /// The stream position of the first sample this receiver was given: the
+    /// origin of the decimator's own output stream.
+    first_pair: Option<u64>,
+    /// Working samples produced before the current block, since the first.
+    worked: u64,
+    /// The index, counted as [`Self::worked`] counts, of `capture[0]`: with
+    /// the decimator's delay and factor, where any capture sample sits in
+    /// the stream exactly (`pdu::Packet::pdu_pair`).
+    capture_origin: u64,
 }
 
 /// What the receiver did with the samples it was given, counted as it went:
@@ -549,6 +558,9 @@ impl Receiver {
             raw_per_working: raw_rate / working_rate_hz(phy),
             next_pair: 0,
             trigger_pair: 0,
+            first_pair: None,
+            worked: 0,
+            capture_origin: 0,
         })
     }
 
@@ -782,6 +794,9 @@ impl Receiver {
         self.shape.process_block(&track, &mut readings);
 
         self.next_pair = first_pair + iq.len() as u64;
+        self.first_pair.get_or_insert(first_pair);
+        let worked = self.worked;
+        self.worked += working.len() as u64;
         let mut found = Vec::new();
         for (j, (&sample, reading)) in working.iter().zip(&readings).enumerate() {
             self.recent.push_back(sample);
@@ -850,6 +865,8 @@ impl Receiver {
                     self.trigger_pair = first_pair + (j as f64 * self.raw_per_working) as u64;
                     self.capture = self.history.iter().copied().collect();
                     self.trigger_len = self.capture.len();
+                    // The history ends with this sample.
+                    self.capture_origin = worked + j as u64 + 1 - self.trigger_len as u64;
                     self.sync_rho = rho;
                     self.sync_window = self.recent.iter().copied().collect();
                 }
@@ -889,12 +906,14 @@ impl Receiver {
     fn try_decode(&self) -> Option<Packet> {
         self.candidates()
             .into_iter()
-            .find_map(|(_, packet)| packet.crc_ok.then_some(packet))
+            .find(|(.., packet)| packet.crc_ok)
+            .map(|(skip, phase, packet)| self.measured(skip, phase, packet))
     }
 
     /// Every alignment [`Self::try_decode`] searches, in order, decoded: the
-    /// header start it was read from and the packet, CRC passed or not.
-    fn candidates(&self) -> Vec<(usize, Packet)> {
+    /// header start it was read from, the phase it was sliced at, and the
+    /// packet, CRC passed or not, not yet measured ([`Self::measured`]).
+    fn candidates(&self) -> Vec<(usize, f64, Packet)> {
         let center = LOOKBACK_SAMPLES as isize;
         let step = WORKING_SPS as isize;
         let span = HEADER_SEARCH_SYMBOLS as isize;
@@ -912,16 +931,15 @@ impl Receiver {
             WORKING_SPS as f64,
             from_earliest.len() / WORKING_SPS,
         );
-        let fine = std::cell::OnceCell::new();
         let mut out = Vec::new();
         for k in -span..=span {
             let skip = center + k * step;
             if skip < 0 {
                 continue;
             }
-            if let Some(packet) = self.decode_at(&inst, &fine, skip as usize, Some(phase)) {
+            if let Some(packet) = self.decode_at(&inst, skip as usize, Some(phase)) {
                 let passed = packet.crc_ok;
-                out.push((skip as usize, packet));
+                out.push((skip as usize, phase, packet));
                 // The search stops at the first CRC that passes, as it
                 // always has: later alignments cannot beat a passing one.
                 if passed {
@@ -959,13 +977,13 @@ impl Receiver {
         let tolerance = END_TOLERANCE_SYMBOLS * WORKING_SPS;
         self.candidates()
             .into_iter()
-            .filter_map(|(skip, packet)| {
+            .filter_map(|(skip, phase, packet)| {
                 let ends = skip + pdu::used_bits(packet.length) * WORKING_SPS;
                 let off = ends.abs_diff(end);
-                (off <= tolerance).then_some((off, packet))
+                (off <= tolerance).then_some((off, skip, phase, packet))
             })
-            .min_by_key(|(off, _)| *off)
-            .map(|(_, packet)| packet)
+            .min_by_key(|(off, ..)| *off)
+            .map(|(_, skip, phase, packet)| self.measured(skip, phase, packet))
     }
 
     /// The whole capture through the discriminator, once.
@@ -985,16 +1003,7 @@ impl Receiver {
     ///
     /// `phase`, when given, is the sub-symbol sampling phase already found
     /// for this capture (see `try_decode`); `None` searches for it here.
-    ///
-    /// `fine` is the capture read between its samples ([`Oversampled`]),
-    /// built by the first alignment that decodes and shared by the rest.
-    fn decode_at(
-        &self,
-        whole: &[f32],
-        fine: &std::cell::OnceCell<Oversampled>,
-        skip: usize,
-        phase: Option<f64>,
-    ) -> Option<Packet> {
+    fn decode_at(&self, whole: &[f32], skip: usize, phase: Option<f64>) -> Option<Packet> {
         if skip >= self.capture.len() {
             return None;
         }
@@ -1048,16 +1057,6 @@ impl Receiver {
         // signal's deviation into this one's own reading.
         let used = pdu::used_bits(packet.length).min(raw_bits.len());
         let raw_bits = &raw_bits[..used];
-        // The figures are read at the same instants the slicer sampled, but
-        // from the rebuilt waveform, not from a straight line between two
-        // readings a quarter of a symbol apart (`Oversampled`'s doc for what
-        // that cost). The slicer keeps the plain readings: a bit is decided by
-        // which side of the line it falls, and that the chord gets right.
-        // `inst[i]` sits halfway between capture samples `i` and `i + 1`.
-        let fine = fine.get_or_init(|| Oversampled::new(&self.capture, working_rate_hz(self.phy)));
-        let readings: Vec<f32> = (0..used)
-            .map(|k| fine.at(skip as f64 + phase + k as f64 * sps + 0.5))
-            .collect();
         // The *reported* offset is read against the sync word, not the
         // packet's data: see `sync_offset`. `rough_offset` above never had to
         // be exact, only good enough to slice against; this one is what a
@@ -1065,11 +1064,41 @@ impl Receiver {
         let offset = self.sync_offset();
         packet.freq_offset_hz = offset;
         packet.snr_db = offset.and_then(|o| self.corrected_snr_db(o.value()));
-        // On either PHY, each scaled by its own symbol rate
-        // (net-ux-polish-plan 5.5).
-        packet.modulation = super::measure::modulation_quality(raw_bits, &readings, self.phy);
-        packet.drift = super::measure::drift(&readings, self.phy);
+        // Where the PDU sits in the stream, for the measurement to find it
+        // again in the raw samples: `inst[i]` stands for capture instant
+        // `i + 0.5`, and working sample `w` for raw instant `delay + w * d`
+        // after the receiver's first.
+        packet.air = raw_bits.to_vec();
+        packet.pdu_pair = self.first_pair.map(|first| {
+            let working = self.capture_origin as f64 + skip as f64 + phase + 0.5;
+            first as f64 + self.decim.delay() + working * self.decim.factor() as f64
+        });
         Some(packet)
+    }
+
+    /// `packet`, decoded at `skip` and `phase`, with its modulation and drift
+    /// read: once, for the packet the search settled on, never for the
+    /// alignments it tried on the way. Building the rebuilt waveform for
+    /// every alignment that decoded, CRC or not, on every attempt while a
+    /// packet was still arriving, put a clean channel at 35 times real time.
+    ///
+    /// The figures are read at the instants the slicer sampled, but from the
+    /// rebuilt waveform, not from a straight line between two readings a
+    /// quarter of a symbol apart (`Oversampled`'s doc for what that cost).
+    /// The slicer keeps the plain readings: a bit is decided by which side
+    /// of the line it falls, and that the chord gets right. `inst[i]` sits
+    /// halfway between capture samples `i` and `i + 1`. On either PHY, each
+    /// scaled by its own symbol rate; for LE 1M the worker reads them again
+    /// as a tester does (`signal::net::measure`).
+    fn measured(&self, skip: usize, phase: f64, mut packet: Packet) -> Packet {
+        let fine = Oversampled::new(&self.capture, working_rate_hz(self.phy));
+        let sps = WORKING_SPS as f64;
+        let readings: Vec<f32> = (0..packet.air.len())
+            .map(|k| fine.at(skip as f64 + phase + k as f64 * sps + 0.5))
+            .collect();
+        packet.modulation = super::measure::modulation_quality(&packet.air, &readings, self.phy);
+        packet.drift = super::measure::drift(&readings, self.phy);
+        packet
     }
 }
 

@@ -81,6 +81,20 @@ fn decoded_block<'a>(
     })
 }
 
+/// The blocks the measurement path may cut a burst from: those held from
+/// before, and this one.
+fn held<'a>(
+    recent: &'a std::collections::VecDeque<(u64, Vec<num_complex::Complex<f32>>)>,
+    current: Option<(u64, &'a [num_complex::Complex<f32>])>,
+) -> super::measure::Recent<'a> {
+    super::measure::Recent::new(
+        recent
+            .iter()
+            .map(|(p, v)| (*p, v.as_slice()))
+            .chain(current),
+    )
+}
+
 /// Above this many simultaneous classic BT channels, `NetWorker::new` logs a
 /// warning naming the cost rather than staying quiet about it -
 /// `signal::bt::receive`'s own doc has the measured tap counts this is
@@ -541,8 +555,23 @@ impl NetWorker {
                         };
                     }
                     if let Some(rx) = ble.as_mut() {
-                        let packets = rx
+                        let mut packets = rx
                             .push_iq_at(decoded_block(&mut iq, &bytes, self.geometry), first_pair);
+                        // LE 1M read again as a tester reads it
+                        // (`measure::le_1m`), outside the lock; a packet whose
+                        // window is not held keeps no figure rather than the
+                        // receiver's own. LE 2M keeps the receiver's.
+                        if phy == crate::signal::ble::Phy::OneM && !packets.is_empty() {
+                            let window = held(&recent, iq.as_deref().map(|v| (first_pair, v)));
+                            let offset = crate::signal::ble::channel::centre_hz(ch)
+                                .map(|hz| hz as f64 - centre_hz);
+                            for p in packets.iter_mut() {
+                                let read = offset.zip(p.pdu_pair).and_then(|(o, at)| {
+                                    super::measure::le_1m(&window, rate_hz, o, at, &p.air)
+                                });
+                                (p.modulation, p.drift) = read.unwrap_or((None, None));
+                            }
+                        }
                         let funnel = rx.take_funnel();
                         if !funnel.is_empty() {
                             let mut m = self.state.lock().unwrap_or_else(|e| e.into_inner());
@@ -703,12 +732,7 @@ impl NetWorker {
                 let mut headers_read = Vec::new();
                 // Each header measured again from the raw samples, through
                 // the tester's filter (`measure`), here outside the lock.
-                let window = super::measure::Recent::new(
-                    recent
-                        .iter()
-                        .map(|(p, v)| (*p, v.as_slice()))
-                        .chain(iq.as_deref().map(|v| (first_pair, v))),
-                );
+                let window = held(&recent, iq.as_deref().map(|v| (first_pair, v)));
                 for hit in &header_hits {
                     let clock = piconet_clocks.entry(hit.lap).or_default();
                     clock.observe(hit.tick, &hit.whitened);

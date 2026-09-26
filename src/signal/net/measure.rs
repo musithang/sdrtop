@@ -33,6 +33,8 @@
 
 use num_complex::Complex;
 
+use crate::signal::ble::measure::{drift, modulation_quality, Drift, ModulationQuality};
+use crate::signal::ble::Phy;
 use crate::signal::bt::piconet::Deviation;
 use crate::signal::dsp::discriminate::Oversampled;
 use crate::signal::dsp::fir::{design_lowpass_to_spec, StreamingDecimator};
@@ -200,6 +202,30 @@ fn timing(tester: &Tester, first: f64, bit: f64, known: &[bool]) -> f64 {
     steps[best].0 + shift / TIMING_STEPS as f64
 }
 
+/// The readings at the centres of `count` bits that follow `known` bits on
+/// the air, as the tester reads them: `first` is the estimated stream
+/// position of `known[0]`'s centre, `rate` the stream's, `offset_hz` the
+/// channel's distance from the tuning. The timing comes from `known`
+/// ([`timing`]). `None` as [`Tester::new`] refuses.
+fn read_after_known(
+    recent: &Recent,
+    rate: f64,
+    offset_hz: f64,
+    known: &[bool],
+    first: f64,
+    count: usize,
+) -> Option<Vec<f32>> {
+    let bit = rate / 1e6;
+    let last = first + (known.len() + count) as f64 * bit;
+    let tester = Tester::new(recent, rate, offset_hz, first - 2.0 * bit, last + 2.0 * bit)?;
+    let tau = timing(&tester, first, bit, known);
+    Some(
+        (0..count)
+            .map(|i| tester.at(first + ((known.len() + i) as f64 + tau) * bit))
+            .collect(),
+    )
+}
+
 /// A classic header's modulation readings, as a tester reads them: `lap`'s
 /// sync word ended near stream position `sync_end_pair` on a channel
 /// `offset_hz` from the tuning, and `air` is the trailer and header that
@@ -214,16 +240,39 @@ pub fn classic(
     sync_end_pair: f64,
     air: &[bool],
 ) -> Option<Deviation> {
-    let bit = rate / 1e6;
     let sync = crate::signal::bt::access_code::access_code_bits(lap);
-    let first = sync_end_pair - (sync.len() - 1) as f64 * bit;
-    let last = sync_end_pair + air.len() as f64 * bit;
-    let tester = Tester::new(recent, rate, offset_hz, first - 2.0 * bit, last + 2.0 * bit)?;
-    let tau = timing(&tester, first, bit, &sync);
-    let hz: Vec<f32> = (0..air.len())
-        .map(|i| tester.at(first + ((sync.len() + i) as f64 + tau) * bit))
-        .collect();
+    let first = sync_end_pair - (sync.len() - 1) as f64 * rate / 1e6;
+    let hz = read_after_known(recent, rate, offset_hz, &sync, first, air.len())?;
     Some(Deviation::of(air, &hz))
+}
+
+/// An LE 1M packet's modulation and drift, as a tester reads them: `air`
+/// is its PDU as sent (header through CRC, whitened), whose first bit the
+/// receiver's slicer centred at stream position `pdu_pair`, on a channel
+/// `offset_hz` from the tuning. Timed by the preamble and the advertising
+/// access address before it, the 40 bits every such packet starts with.
+///
+/// LE 1M only: the suites' filter is written for 1 Msym/s, and LE 2M, twice
+/// the rate and the deviation, would lose half its signal in it. `None` as
+/// [`classic`] refuses.
+pub fn le_1m(
+    recent: &Recent,
+    rate: f64,
+    offset_hz: f64,
+    pdu_pair: f64,
+    air: &[bool],
+) -> Option<(Option<ModulationQuality>, Option<Drift>)> {
+    use crate::signal::ble::detect::{
+        access_address_bits, preamble_bits, ADVERTISING_ACCESS_ADDRESS,
+    };
+    let mut known = preamble_bits(ADVERTISING_ACCESS_ADDRESS, Phy::OneM);
+    known.extend(access_address_bits(ADVERTISING_ACCESS_ADDRESS));
+    let first = pdu_pair - known.len() as f64 * rate / 1e6;
+    let hz = read_after_known(recent, rate, offset_hz, &known, first, air.len())?;
+    Some((
+        modulation_quality(air, &hz, Phy::OneM),
+        drift(&hz, Phy::OneM),
+    ))
 }
 
 #[cfg(test)]

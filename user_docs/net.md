@@ -351,7 +351,11 @@ The selected packet, spelled out:
   never fail, and the smallest nearly always did. A transmitter's
   alternating peaks are all the same peak, so the average stands in for
   them, which means an average under the floor is a real finding and one
-  over it is not a promise.
+  over it is not a promise. On LE 1M the packet is read the way a tester
+  reads it, as the classic piconets' modulation is (see the Classic view's
+  detail below): through the test suite's filter, at bit centres timed from
+  the access address. LE 2M is read through the receiver's own filter, and
+  says so, because the suite's 2M filter has not been read yet.
 
 With **no packet selected**, the detail shows the session's **frame error
 rate against SNR**: for each 2 dB of SNR, what share of packets failed their

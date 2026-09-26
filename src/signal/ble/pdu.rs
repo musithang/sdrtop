@@ -137,6 +137,16 @@ pub struct Packet {
     /// packet against the next finer than any block could (`signal::ble::
     /// interval`). `None` from `decode`, which sees only bits.
     pub at_pair: Option<u64>,
+    /// The PDU's bits as they went over the air, header through CRC, still
+    /// whitened: the symbols a modulation figure is read at
+    /// (`signal::net::measure`). Empty from `decode`, which is handed them
+    /// de-whitened.
+    pub air: Vec<bool>,
+    /// Where the centre of the PDU's first bit sits in the stream, in I/Q
+    /// pairs on [`Self::at_pair`]'s clock, fractional, as the slicer placed
+    /// it: where the measurement finds the packet in the raw samples. `None`
+    /// from `decode`.
+    pub pdu_pair: Option<f64>,
 }
 
 /// How many trailing bits `decode` needs beyond the header to have a whole
@@ -257,6 +267,8 @@ pub fn decode(bits: &[bool]) -> Option<Packet> {
         modulation: None,
         drift: None,
         at_pair: None,
+        air: Vec::new(),
+        pdu_pair: None,
     })
 }
 

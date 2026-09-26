@@ -667,7 +667,7 @@ fn modulation_lines(p: &BlePacket, iw: usize, theme: &crate::Theme) -> Vec<Line<
             Style::default().fg(theme.stale),
         )));
         out.push(note(
-            "packet too short, or too short a run of either kind",
+            "packet too short, too short a run of either kind, or its samples no longer held",
             theme,
         ));
         return out;
@@ -675,6 +675,22 @@ fn modulation_lines(p: &BlePacket, iw: usize, theme: &crate::Theme) -> Vec<Line<
     let rows = rows(&q, p.drift.as_ref(), p.phy);
     let w = fit(&rows, iw);
     out.extend(rows.iter().map(|r| Line::from(r.spans(theme, w))));
+    // How it was read, as the classic section says its own: LE 1M through
+    // the test suite's filter (`signal::net::measure`), LE 2M, which that
+    // filter is not written for, through the receiver's.
+    let how = match p.phy {
+        crate::signal::ble::Phy::OneM => {
+            "read as a tester reads them: 550 kHz filter, bits timed by the access address"
+        }
+        crate::signal::ble::Phy::TwoM => {
+            "read through the receiver's own filter: the test suite's LE 2M filter is not read yet"
+        }
+    };
+    out.extend(
+        crate::ui::chrome::wrap(how, iw.saturating_sub(1), 2)
+            .iter()
+            .map(|l| note(l, theme)),
+    );
     out
 }
 
@@ -971,6 +987,10 @@ mod tests {
         assert!(out.contains("Mod index"), "{out}");
         assert!(out.contains("df1 avg"), "{out}");
         assert!(out.contains("df2 avg"), "{out}");
+        assert!(
+            out.contains("550 kHz filter"),
+            "said how it was read: {out}"
+        );
         assert!(out.contains("df2/df1"), "{out}");
         let lower = out.to_ascii_lowercase();
         for word in ["pass", "fail"] {
