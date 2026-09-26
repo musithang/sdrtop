@@ -32,14 +32,25 @@
 //! * [`Nco::next_sample`] returns the sample *at* the current phase and then
 //!   advances, so the first sample out of a fresh oscillator is exactly `1 + 0j`.
 //!
-//! The cost is one `sin_cos` per sample, in `f64`. That is the accurate choice
-//! rather than the fast one: a quarter-wave table with interpolation would be
-//! several times quicker and would put its own error floor under every phase
-//! measurement built on top. If a measured hot path ever needs the table, it
-//! goes behind this same contract and answers to these same tests.
+//! [`Nco::sample`] costs one `sin_cos`, in `f64`: the accurate choice. **The
+//! block methods, [`Nco::mix`] and [`Nco::fill`], do not pay it per sample.**
+//! They became a measured hot path: every classic Bluetooth channel mixes its
+//! whole raw block, and `sin_cos` per raw sample was a fifth of the Classic
+//! view's time on the i3. So a block is walked [`RESYNC`] samples at a time:
+//! each run starts from the exact sample at the accumulator's phase, and
+//! within it the oscillator is rotated by one fixed `f64` step. The rounding
+//! of that recurrence grows by about one ulp a step, so a run ends within
+//! about `RESYNC * 1e-16` of the exact value, and the next run starts exact
+//! again: the integer accumulator still decides the phase, and nothing
+//! accumulates across runs. `the_block_methods_match_the_exact_oscillator`
+//! holds them to `sample` at frequencies that are no neat fraction of the
+//! rate, across calls of awkward lengths.
 
 use num_complex::Complex;
 use std::f64::consts::TAU;
+
+/// Samples between exact restarts of the block methods' rotation.
+const RESYNC: usize = 1024;
 
 /// One full turn, in accumulator units. The accumulator is `u64`, so a turn is
 /// its whole range and wrapping is exact.
@@ -170,12 +181,31 @@ impl Nco {
         s
     }
 
+    /// Walk `len` samples from the current phase, handing each oscillator
+    /// value to `each`, and advance the phase past them: exact at every
+    /// [`RESYNC`]th sample, a rotation by one fixed step in between (see the
+    /// module's own note).
+    fn walk(&mut self, len: usize, mut each: impl FnMut(usize, Complex<f64>)) {
+        let step = (self.step as f64) / TURN * TAU;
+        let rotation = Complex::new(step.cos(), step.sin());
+        let mut done = 0;
+        while done < len {
+            let run = RESYNC.min(len - done);
+            let mut o = self.sample();
+            for k in done..done + run {
+                each(k, o);
+                o *= rotation;
+            }
+            self.phase = self.phase.wrapping_add(self.step.wrapping_mul(run as u64));
+            done += run;
+        }
+    }
+
     /// Fill a block with the oscillator, continuing from the current phase.
     pub fn fill(&mut self, out: &mut [Complex<f32>]) {
-        for slot in out.iter_mut() {
-            let s = self.next_sample();
-            *slot = Complex::new(s.re as f32, s.im as f32);
-        }
+        self.walk(out.len(), |k, o| {
+            out[k] = Complex::new(o.re as f32, o.im as f32)
+        });
     }
 
     /// Multiply a block by the oscillator, in place.
@@ -184,17 +214,60 @@ impl Nco {
     /// already has; the oscillator itself stays in `f64` so the phase reference
     /// the product is measured against is better than the samples being mixed.
     pub fn mix(&mut self, block: &mut [Complex<f32>]) {
-        for s in block.iter_mut() {
-            let o = self.next_sample();
+        self.walk(block.len(), |k, o| {
             let (c, q) = (o.re as f32, o.im as f32);
-            *s = Complex::new(s.re * c - s.im * q, s.re * q + s.im * c);
-        }
+            let s = block[k];
+            block[k] = Complex::new(s.re * c - s.im * q, s.re * q + s.im * c);
+        });
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// **The block methods are the oscillator**, to within what a run of
+    /// [`RESYNC`] rotations can round: at frequencies that are no neat
+    /// fraction of the rate, positive and negative, over calls whose lengths
+    /// straddle a resync, and the phase they leave is the one `advance`
+    /// would have.
+    #[test]
+    fn the_block_methods_match_the_exact_oscillator() {
+        for f in [1_234_567.0, -3_000_000.0, 7_999_999.5, -123.25, 0.0] {
+            let mut exact = Nco::new(f, FS);
+            let mut fast = Nco::new(f, FS);
+            let mut worst = 0.0f64;
+            for len in [1usize, 1023, 1024, 1025, 5000, 7] {
+                let mut out = vec![Complex::new(0.0f32, 0.0); len];
+                fast.fill(&mut out);
+                for o in &out {
+                    let e = exact.next_sample();
+                    worst = worst.max((f64::from(o.re) - e.re).hypot(f64::from(o.im) - e.im));
+                }
+            }
+            // The f32 output's own rounding dominates; the recurrence adds
+            // far less.
+            assert!(worst < 2e-7, "{f} Hz: {worst:e}");
+            assert_eq!(fast.phase, exact.phase, "{f} Hz");
+
+            // Mixing is multiplying by the same values.
+            let mut a = Nco::new(f, FS);
+            let mut b = Nco::new(f, FS);
+            let mut block: Vec<Complex<f32>> = (0..3000)
+                .map(|k| Complex::new((k as f32).sin(), 0.5))
+                .collect();
+            let input = block.clone();
+            a.mix(&mut block);
+            for (x, y) in input.iter().zip(&block) {
+                let o = b.next_sample();
+                let want = Complex::new(f64::from(x.re), f64::from(x.im)) * o;
+                assert!(
+                    (f64::from(y.re) - want.re).hypot(f64::from(y.im) - want.im) < 2e-6,
+                    "{f} Hz"
+                );
+            }
+        }
+    }
 
     const FS: f64 = 20_000_000.0;
     /// Deliberately not a neat fraction of the sample rate: a frequency that
