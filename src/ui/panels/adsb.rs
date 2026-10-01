@@ -37,7 +37,7 @@ impl Panel for AdsbFramesPanel {
         _focused: bool,
     ) {
         let width = inner.width as usize;
-        let mut lines = vec![section("valid frames", "CRC checked", width, theme)];
+        let mut lines = vec![section("valid frames", "CRC · LO/DC tracked", width, theme)];
         let adsb = &state.adsb;
         lines.push(Line::from(Span::styled(
             format!(

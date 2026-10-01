@@ -78,7 +78,7 @@ impl AdsbWorker {
             }
 
             crate::signal::demod::decode(&bytes, self.geometry, usize::MAX, &mut iq);
-            let Some(frames) = receiver.push_iq(&iq, rate_hz) else {
+            let Some(frames) = receiver.push_iq(&mut iq, rate_hz) else {
                 continue;
             };
             if frames.is_empty() {
