@@ -16,6 +16,18 @@ checkpoint instead of by version.
 
 ## [Unreleased]
 
+### Added
+
+- **ADS-B: the decoded fields, not just the frame.** The `adsb_frames` panel
+  now reads the payload it was already validating and shows what each frame
+  actually carries: callsign and wake-vortex category, barometric or GNSS
+  altitude, groundspeed and track, vertical rate, squawk and emergency state,
+  and a position resolved from a CPR pair. A field a frame does not carry is
+  left blank, never filled with a zero, because a position frame has no
+  callsign and a callsign frame has no altitude. Positions come from the even
+  and odd halves of a CPR pair, so a lone position frame reports no position
+  rather than half of one.
+
 ## [0.6.2] - 2026-09-27
 
 **NET, measured the way the test suites measure.**

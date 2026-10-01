@@ -88,13 +88,6 @@ impl AdsbWorker {
             let now = Instant::now();
             let mut state = self.state.lock().unwrap_or_else(|error| error.into_inner());
             for frame in frames {
-                let summary = frame
-                    .summary
-                    .lines()
-                    .find(|line| !line.trim().is_empty())
-                    .unwrap_or("Mode S frame")
-                    .trim()
-                    .to_string();
                 let signal_dbfs = if frame.signal_level > 0.0 {
                     (10.0 * frame.signal_level.log10()).max(-120.0) as f32
                 } else {
@@ -105,7 +98,7 @@ impl AdsbWorker {
                     icao_address: frame.icao_address,
                     downlink_format: frame.downlink_format,
                     signal_dbfs,
-                    summary,
+                    details: frame.details,
                 });
             }
         }

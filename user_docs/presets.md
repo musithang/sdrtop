@@ -97,7 +97,7 @@ nothing to rebuild; open the menu and it is there. The file is just the
 `panels = [...]` part, without the `[presets.name]` header, because the file name
 is the preset name.
 
-The twenty-one built-in presets are written in exactly this format, so the quickest
+The twenty-four built-in presets are written in exactly this format, so the quickest
 way to build on one is to copy it rather than transcribe it from the docs. They
 live in the source tree under `src/config/presets/`.
 
@@ -153,7 +153,10 @@ trace overlays. If you want those, name accordingly.
 ## Panel names
 `adsb_frames` shows Mode S / ADS-B frames that passed CRC validation. Its preset
 is offered only when the radio reaches 1090 MHz and supports either the 2.4 MS/s
-RTL-SDR or 6 MS/s HackRF demodulator.
+RTL-SDR or 6 MS/s HackRF demodulator. Each row carries the ICAO address, the
+downlink format, the level, and whichever of callsign, altitude, groundspeed,
+track, vertical rate and position the frame's type code actually carries. A
+field the frame does not carry is left blank rather than filled with a zero.
 
 These are the valid values for `name`. What each one actually draws is in
 [What you see on screen](screens.md).

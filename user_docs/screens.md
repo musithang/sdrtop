@@ -40,6 +40,7 @@ marked with a bar at its left edge.
 | **Sweep** | The band sweep, full size and compact |
 | **Micro** | The four field views for a small screen |
 | **NET** | The 2.4 GHz band, BLE and classic Bluetooth: seven views, on a radio that reaches the band ([the NET page](net.md)) |
+| **ADSB** | 1090 MHz Mode S and ADS-B: one view, on a radio that reaches the band at 2.4 or 6 MS/s |
 
 Each layout shows its **number** beside its name, and that number is the key that
 opens it while you are in that section. The number is the same one the footer
@@ -284,6 +285,48 @@ progress.
 
 ---
 
+## The ADSB view
+
+The **ADSB** section of the menu, and the only section that is a single view.
+It appears on a radio that reaches 1090 MHz and can be sampled at 2.4 MS/s (the
+RTL-SDR rate) or 6 MS/s (the HackRF rate); a radio that can do neither gets no
+section rather than an empty one, and the log says which of the two it wanted.
+
+The panel is a list of the Mode S frames that passed CRC validation, newest
+first, beside the live spectrum and waterfall. Each row is one frame, and each
+column is a field the frame actually carries:
+
+| Column | What it is |
+|--------|------------|
+| `ICAO` | The 24-bit aircraft address, in hex |
+| `DF` | The downlink format, which is what the rest of the row depends on |
+| `level` | The frame's level in dBFS, measured at the receiver |
+| `callsign` | The flight identity, from an identification frame |
+| `alt` | The altitude in feet, and whether it was barometric or GNSS |
+| `spd` | The groundspeed in knots |
+| `trk` | The track over the ground, in degrees |
+| `vrate` | The vertical rate in feet per minute, signed |
+| `position` | Latitude and longitude, resolved from a CPR pair |
+
+**A field a frame does not carry is left blank, never filled with a zero.** A
+position frame has no callsign and an identification frame has no altitude, so
+printing `0 ft` for the second would be a claim the frame never made. This is
+[Rule Two](https://github.com/musithang/sdrtop/blob/main/POLICY.md) applied to a
+table: what cannot be read is refused, not invented.
+
+The position column is the one that needs two frames. ADS-B encodes a position
+in two halves, an even and an odd frame, and neither means anything alone. The
+receiver remembers the last of each per aircraft and resolves a position when a
+pair completes, so a lone position frame reports no position rather than half of
+one. The pair is consumed on resolution, so a stale half is never reused.
+
+The header line above the list says what the receiver is doing: the tuned
+frequency and sample rate, whether the rate is one the demodulator accepts, and
+how many frames the session has validated. When no frame has arrived yet it says
+so, and how long ago the last one was.
+
+---
+
 ## Observer mode
 
 If another app (GNU Radio, SDR++, `hackrf_transfer`) already holds your radio,
@@ -319,7 +362,7 @@ plus one measurement panel that has no home preset of its own.
 
 ## Layouts
 
-The twenty built-in layouts, by section. The key is the number to press while
+The twenty-four built-in layouts, by section. The key is the number to press while
 that section is active, which is what the menu shows beside each name.
 
 The menu labels them with a short title rather than the preset name, so
@@ -371,9 +414,17 @@ screen.
 | `3` | `net_census` | The census of transmitters, their clocks and the selected one's detail |
 | `4` | `net_ble` | BLE advertising packets · packet detail |
 | `5` | `net_bt` | Classic Bluetooth hops (where and when) · the piconet roster |
+| `6` | `net_piconet` | One piconet, packet by packet |
+| `7` | `net_bench` | The bench view of a piconet's timing |
+
+**ADSB**
+
+| Key | Preset | What's in it |
+|-----|--------|--------------|
+| `1` | `adsb` | Valid Mode S frames and the fields each one carries, beside the live spectrum |
 
 `p` steps to the next layout in whichever section you are in, and wraps at the
-end. A twenty-first preset, `observer`, is marked hidden, so it has no section and no
+end. A twenty-fifth preset, `observer`, is marked hidden, so it has no section and no
 key: sdrtop loads it by itself when [another app owns the
 radio](#observer-mode).
 

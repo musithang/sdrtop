@@ -8,6 +8,10 @@
 //! and keeps enough trailing samples to carry frames across input blocks.
 
 use num_complex::Complex;
+use rs1090::decode::adsb::ME;
+use rs1090::decode::bds::bds09::AirborneVelocitySubType;
+use rs1090::decode::cpr::{airborne_position, Position};
+use rs1090::decode::DF;
 use rs1090::source::demod::demod2400::demodulate2400;
 use rs1090::source::demod::demod6000::demodulate6000;
 use rs1090::source::demod::{
@@ -38,7 +42,121 @@ pub struct AdsbFrame {
     pub downlink_format: u8,
     pub icao_address: Option<u32>,
     pub signal_level: f64,
-    pub summary: String,
+    /// The decoded payload, kept so the worker can read fields the summary
+    /// string flattens away (callsign, altitude, velocity, CPR position).
+    pub message: Option<Box<DF>>,
+    /// The fields worth a column of their own, read once at decode time.
+    pub details: AdsbDetails,
+}
+
+/// The fields a Mode S frame carries that are worth a column of their own.
+///
+/// Every one is `Option` because a frame only carries what its type code says
+/// it carries: a position frame has no callsign, an identity frame has no
+/// altitude. `None` is printed as an absence, never as a plausible default.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct AdsbDetails {
+    pub callsign: Option<String>,
+    pub category: Option<String>,
+    pub altitude_ft: Option<i32>,
+    pub altitude_source: Option<String>,
+    pub groundspeed_kt: Option<f64>,
+    pub track_deg: Option<f64>,
+    pub vertical_rate_fpm: Option<i16>,
+    pub squawk: Option<String>,
+    pub emergency: Option<String>,
+    pub latitude: Option<f64>,
+    pub longitude: Option<f64>,
+}
+
+impl AdsbDetails {
+    /// Read every field this frame actually carries. A frame that carries none
+    /// of them yields an all-`None` value, which the panel renders as blanks.
+    pub fn from_message(message: &DF) -> Self {
+        let mut details = Self::default();
+        let DF::ExtendedSquitterADSB(adsb) = message else {
+            return details;
+        };
+        match &adsb.message {
+            ME::BDS08 { inner, .. } => {
+                let callsign = inner.callsign.trim();
+                if !callsign.is_empty() {
+                    details.callsign = Some(callsign.to_string());
+                }
+                details.category = Some(inner.wake_vortex.to_string());
+            }
+            ME::BDS05 { inner, .. } => {
+                details.altitude_ft = inner.alt;
+                details.altitude_source = Some(inner.source.to_string());
+            }
+            ME::BDS09(velocity) => {
+                details.vertical_rate_fpm = velocity.vertical_rate;
+                match &velocity.velocity {
+                    AirborneVelocitySubType::GroundSpeedDecoding(ground) => {
+                        details.groundspeed_kt = Some(ground.groundspeed);
+                        details.track_deg = Some(ground.track);
+                    }
+                    AirborneVelocitySubType::AirspeedSubsonic(airspeed) => {
+                        details.groundspeed_kt = airspeed.airspeed.map(f64::from);
+                    }
+                    AirborneVelocitySubType::AirspeedSupersonic(airspeed) => {
+                        details.groundspeed_kt = airspeed.airspeed.map(f64::from);
+                    }
+                    _ => {}
+                }
+            }
+            ME::BDS61(status) => {
+                details.squawk = Some(format!("{:?}", status.squawk));
+                details.emergency = Some(status.emergency_state.to_string());
+            }
+            _ => {}
+        }
+        details
+    }
+}
+
+/// The last even and odd airborne position a single aircraft sent, so a CPR
+/// pair can be resolved into a latitude and longitude.
+#[derive(Clone, Copy, Debug, Default)]
+struct CprPair {
+    even: Option<rs1090::decode::bds::bds05::AirbornePosition>,
+    odd: Option<rs1090::decode::bds::bds05::AirbornePosition>,
+}
+
+/// Per-aircraft CPR memory, keyed by ICAO address.
+///
+/// CPR encodes a position in two halves that only mean something together, so
+/// the receiver has to remember the previous half per aircraft. This is the
+/// smallest state that can do that and nothing else.
+#[derive(Default)]
+struct CprTracker {
+    aircraft: std::collections::HashMap<u32, CprPair>,
+}
+
+impl CprTracker {
+    fn clear(&mut self) {
+        self.aircraft.clear();
+    }
+
+    /// Record one airborne position frame and return a position if this frame
+    /// completed a pair. The pair is consumed so a stale half is never reused.
+    fn observe(
+        &mut self,
+        icao: u32,
+        position: &rs1090::decode::bds::bds05::AirbornePosition,
+    ) -> Option<Position> {
+        let pair = self.aircraft.entry(icao).or_default();
+        match position.parity {
+            rs1090::decode::cpr::CPRFormat::Even => pair.even = Some(*position),
+            rs1090::decode::cpr::CPRFormat::Odd => pair.odd = Some(*position),
+        }
+        let (even, odd) = (pair.even?, pair.odd?);
+        let resolved = airborne_position(&even, &odd);
+        if resolved.is_some() {
+            *pair = CprPair::default();
+        }
+        resolved
+    }
 }
 
 /// Stateful 2.4 or 6 MS/s receiver. It retains each demodulator's trailing
@@ -53,6 +171,7 @@ pub struct AdsbReceiver {
     dc_i: f32,
     dc_q: f32,
     dc_initialized: bool,
+    cpr: CprTracker,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -80,6 +199,7 @@ impl AdsbReceiver {
         self.dc_i = 0.0;
         self.dc_q = 0.0;
         self.dc_initialized = false;
+        self.cpr.clear();
     }
 
     /// Feed one contiguous 2.4 or 6 MS/s block. `None` means the rate is
@@ -117,7 +237,7 @@ impl AdsbReceiver {
             .filter_map(|message| {
                 let absolute_start = base + message.sample_position as u64;
                 (absolute_start >= first_new && absolute_start < scanned_end)
-                    .then(|| decode_frame(message))
+                    .then(|| self.decode_frame(message))
                     .flatten()
             })
             .collect();
@@ -174,28 +294,39 @@ impl AdsbReceiver {
             .extend_from_slice(&iq[(total_samples as usize - keep_samples) * 2..]);
         (messages, base, scanned_end)
     }
-}
 
-fn decode_frame(message: ModeSMessage) -> Option<AdsbFrame> {
-    let downlink_format = message.msg[0] >> 3;
-    let frame_len = if downlink_format & 0x10 == 0 { 7 } else { 14 };
-    let decoded = rs1090::decode::Message::try_from(&message.msg[..frame_len]).ok()?;
-    let icao_address = match downlink_format {
-        17 | 18 => Some(
-            (u32::from(message.msg[1]) << 16)
-                | (u32::from(message.msg[2]) << 8)
-                | u32::from(message.msg[3]),
-        ),
-        _ => None,
-    };
+    fn decode_frame(&mut self, message: ModeSMessage) -> Option<AdsbFrame> {
+        let downlink_format = message.msg[0] >> 3;
+        let frame_len = if downlink_format & 0x10 == 0 { 7 } else { 14 };
+        let decoded = rs1090::decode::Message::try_from(&message.msg[..frame_len]).ok()?;
+        let icao_address = match downlink_format {
+            17 | 18 => Some(
+                (u32::from(message.msg[1]) << 16)
+                    | (u32::from(message.msg[2]) << 8)
+                    | u32::from(message.msg[3]),
+            ),
+            _ => None,
+        };
 
-    Some(AdsbFrame {
-        bytes: message.msg,
-        downlink_format,
-        icao_address,
-        signal_level: message.signal_level,
-        summary: decoded.to_string(),
-    })
+        let mut details = AdsbDetails::from_message(&decoded.df);
+        if let (Some(icao), DF::ExtendedSquitterADSB(adsb)) = (icao_address, &decoded.df) {
+            if let ME::BDS05 { inner, .. } = &adsb.message {
+                if let Some(position) = self.cpr.observe(icao, inner) {
+                    details.latitude = Some(position.latitude);
+                    details.longitude = Some(position.longitude);
+                }
+            }
+        }
+
+        Some(AdsbFrame {
+            bytes: message.msg,
+            downlink_format,
+            icao_address,
+            signal_level: message.signal_level,
+            message: Some(Box::new(decoded.df)),
+            details,
+        })
+    }
 }
 
 #[cfg(test)]
@@ -254,7 +385,7 @@ mod tests {
                 .unwrap_or_else(|| panic!("no DF17 frame at {rate} samples/s"));
             assert_eq!(frame.icao_address, Some(0x4b_b463));
             assert_eq!(&frame.bytes[..REFERENCE_FRAME.len()], &REFERENCE_FRAME);
-            assert!(frame.summary.contains("Extended Squitter"));
+            assert!(frame.message.is_some());
         }
     }
 
@@ -294,6 +425,97 @@ mod tests {
                 .iter()
                 .any(|frame| frame.icao_address == Some(0x4b_b463)),
             "stationary center-frequency leakage hid the known frame"
+        );
+    }
+
+    /// The two halves of a CPR pair, from `rs1090`'s own reference vectors.
+    /// Neither frame alone carries a position; only the pair does.
+    const CPR_EVEN: [u8; 14] = [
+        0x8d, 0x40, 0x05, 0x8b, 0x58, 0xc9, 0x01, 0x37, 0x51, 0x47, 0xef, 0xd0, 0x93, 0x57,
+    ];
+    const CPR_ODD: [u8; 14] = [
+        0x8d, 0x40, 0x05, 0x8b, 0x58, 0xc9, 0x04, 0xa8, 0x7f, 0x40, 0x2d, 0x3b, 0x8c, 0x59,
+    ];
+
+    fn modulate_frame(frame: &[u8; 14], sample_rate_hz: f64) -> Vec<Complex<f32>> {
+        let samples_per_us = sample_rate_hz / 1e6;
+        let count = (300.0 * samples_per_us) as usize;
+        let mut samples = vec![Complex::new(0.02, 0.0); count];
+        for (index, sample) in samples.iter_mut().enumerate() {
+            let time_us = index as f64 / samples_per_us - (1.0 / samples_per_us);
+            let preamble = [0.0, 1.0, 3.5, 4.5]
+                .iter()
+                .any(|&start| (start..start + 0.5).contains(&time_us));
+            let data_time = time_us - 8.0;
+            let data_bit = if data_time >= 0.0 {
+                let bit_index = data_time.floor() as usize;
+                (bit_index < frame.len() * 8).then(|| {
+                    let byte = frame[bit_index / 8];
+                    let one = byte & (1 << (7 - bit_index % 8)) != 0;
+                    let phase = data_time - bit_index as f64;
+                    if one {
+                        phase < 0.5
+                    } else {
+                        (0.5..1.0).contains(&phase)
+                    }
+                })
+            } else {
+                None
+            };
+            if preamble || data_bit == Some(true) {
+                *sample = Complex::new(0.7, 0.0);
+            }
+        }
+        samples
+    }
+
+    #[test]
+    fn resolves_a_cpr_pair_into_a_position_across_two_frames() {
+        let mut receiver = AdsbReceiver::new();
+        let mut frames = Vec::new();
+        for frame in [CPR_EVEN, CPR_ODD] {
+            let mut iq = modulate_frame(&frame, RTL_SAMPLE_RATE_HZ);
+            for block in iq.chunks_mut(137) {
+                frames.extend(
+                    receiver
+                        .push_iq(block, RTL_SAMPLE_RATE_HZ)
+                        .expect("supported rate"),
+                );
+            }
+        }
+
+        let positioned = frames
+            .iter()
+            .find(|frame| frame.details.latitude.is_some())
+            .expect("the odd frame should complete the pair");
+        let latitude = positioned.details.latitude.unwrap();
+        let longitude = positioned.details.longitude.unwrap();
+        assert!(
+            (latitude - 49.81755).abs() < 0.01,
+            "latitude {latitude} is not near the reference"
+        );
+        assert!(
+            (longitude - 6.08442).abs() < 0.01,
+            "longitude {longitude} is not near the reference"
+        );
+    }
+
+    #[test]
+    fn a_lone_position_frame_reports_no_position() {
+        let mut receiver = AdsbReceiver::new();
+        let mut iq = modulate_frame(&CPR_EVEN, RTL_SAMPLE_RATE_HZ);
+        let mut frames = Vec::new();
+        for block in iq.chunks_mut(137) {
+            frames.extend(
+                receiver
+                    .push_iq(block, RTL_SAMPLE_RATE_HZ)
+                    .expect("supported rate"),
+            );
+        }
+
+        assert!(
+            frames.iter().all(|frame| frame.details.latitude.is_none()),
+            "half a CPR pair must not be reported as a position"
         );
     }
 }

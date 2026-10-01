@@ -386,6 +386,14 @@ you are in.
 
 ---
 
+## ADSB panel focus modes
+
+The 1090 MHz section has one panel and it takes no focus key of its own: it is
+a list that scrolls with the general keys, and nothing in it is selectable. What
+the columns mean is on [What you see on screen](screens.md#the-adsb-view).
+
+---
+
 ## Typing: frequency, sample rate, marker names
 
 Three keys put sdrtop into a text-entry mode: `f` (frequency in MHz), `s` (sample

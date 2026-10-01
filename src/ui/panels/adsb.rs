@@ -9,11 +9,71 @@ use ratatui::{
     Frame,
 };
 
-use crate::state::SdrMetrics;
+use crate::state::{AdsbFrameEntry, SdrMetrics};
 use crate::ui::chrome::section;
 use crate::ui::panel::{Panel, PanelChrome, Staleness};
 
 pub struct AdsbFramesPanel;
+
+/// One frame as a line of columns. Every field is optional and an absent one
+/// is a blank, never a zero: a position frame has no callsign and a callsign
+/// frame has no altitude, and printing `0` for either would be a claim the
+/// frame never made.
+fn frame_line(frame: &AdsbFrameEntry, theme: &crate::Theme) -> Line<'static> {
+    let address = frame
+        .icao_address
+        .map(|address| format!("{address:06X}"))
+        .unwrap_or_else(|| "------".to_string());
+    let details = &frame.details;
+
+    let callsign = details
+        .callsign
+        .clone()
+        .unwrap_or_else(|| "--------".to_string());
+    let altitude = details
+        .altitude_ft
+        .map(|feet| format!("{feet:>6} ft"))
+        .unwrap_or_else(|| "        ".to_string());
+    let speed = details
+        .groundspeed_kt
+        .map(|knots| format!("{knots:>4.0} kt"))
+        .unwrap_or_else(|| "       ".to_string());
+    let track = details
+        .track_deg
+        .map(|degrees| format!("{degrees:>3.0}°"))
+        .unwrap_or_else(|| "    ".to_string());
+    let vertical = details
+        .vertical_rate_fpm
+        .map(|rate| format!("{rate:>+6} fpm"))
+        .unwrap_or_else(|| "         ".to_string());
+    let position = match (details.latitude, details.longitude) {
+        (Some(latitude), Some(longitude)) => format!("{latitude:>8.4} {longitude:>9.4}"),
+        _ => "                 ".to_string(),
+    };
+
+    Line::from(vec![
+        Span::styled(
+            address,
+            Style::default()
+                .fg(theme.value_hi)
+                .add_modifier(Modifier::BOLD),
+        ),
+        Span::styled(
+            format!(" DF{:<2} ", frame.downlink_format),
+            Style::default().fg(theme.label),
+        ),
+        Span::styled(
+            format!("{:5.1} dBFS ", frame.signal_dbfs),
+            Style::default().fg(theme.value),
+        ),
+        Span::styled(callsign, Style::default().fg(theme.value_hi)),
+        Span::styled(altitude, Style::default().fg(theme.value)),
+        Span::styled(speed, Style::default().fg(theme.value)),
+        Span::styled(track, Style::default().fg(theme.label)),
+        Span::styled(vertical, Style::default().fg(theme.value)),
+        Span::styled(position, Style::default().fg(theme.label)),
+    ])
+}
 
 impl Panel for AdsbFramesPanel {
     fn name(&self) -> &'static str {
@@ -71,33 +131,17 @@ impl Panel for AdsbFramesPanel {
                 format!("{} valid frames this session", adsb.frames_session),
                 Style::default().fg(theme.status_ok),
             )));
+            lines.push(Line::from(Span::styled(
+                "ICAO   DF   level      callsign    alt      spd   trk    vrate    position",
+                Style::default().fg(theme.label),
+            )));
             for frame in adsb
                 .frames
                 .iter()
                 .rev()
-                .take(inner.height.saturating_sub(3) as usize)
+                .take(inner.height.saturating_sub(4) as usize)
             {
-                let address = frame
-                    .icao_address
-                    .map(|address| format!("{address:06X}"))
-                    .unwrap_or_else(|| "------".to_string());
-                lines.push(Line::from(vec![
-                    Span::styled(
-                        address,
-                        Style::default()
-                            .fg(theme.value_hi)
-                            .add_modifier(Modifier::BOLD),
-                    ),
-                    Span::styled(
-                        format!(" DF{} ", frame.downlink_format),
-                        Style::default().fg(theme.label),
-                    ),
-                    Span::styled(
-                        format!("{:5.1} dBFS ", frame.signal_dbfs),
-                        Style::default().fg(theme.value),
-                    ),
-                    Span::raw(frame.summary.clone()),
-                ]));
+                lines.push(frame_line(frame, theme));
             }
         }
 
@@ -108,9 +152,20 @@ impl Panel for AdsbFramesPanel {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::signal::adsb::AdsbDetails;
     use crate::state::fixture::draw;
     use crate::state::{AdsbFrameEntry, SdrMetrics};
     use std::time::Instant;
+
+    fn entry(details: AdsbDetails) -> AdsbFrameEntry {
+        AdsbFrameEntry {
+            received_at: Instant::now(),
+            icao_address: Some(0x4b_b463),
+            downlink_format: 17,
+            signal_dbfs: -42.0,
+            details,
+        }
+    }
 
     #[test]
     fn the_panel_explains_the_required_rtl_sample_rate() {
@@ -128,17 +183,54 @@ mod tests {
         state.adsb.rate_supported = true;
         state.adsb.tuned_hz = crate::signal::adsb::CENTER_FREQUENCY_HZ;
         state.adsb.sample_rate_hz = crate::signal::adsb::RTL_SAMPLE_RATE_HZ;
-        state.adsb.push_frame(AdsbFrameEntry {
-            received_at: Instant::now(),
-            icao_address: Some(0x4b_b463),
-            downlink_format: 17,
-            signal_dbfs: -42.0,
-            summary: "Extended Squitter Airborne position".into(),
-        });
+        state.adsb.push_frame(entry(AdsbDetails::default()));
 
         let out = draw(AdsbFramesPanel, 72, 12, &state).join("\n");
         assert!(out.contains("4BB463"), "{out}");
         assert!(out.contains("DF17"), "{out}");
-        assert!(out.contains("Extended Squitter"), "{out}");
+    }
+
+    #[test]
+    fn the_panel_shows_the_decoded_fields_a_frame_carries() {
+        let mut state = SdrMetrics::fixture().streaming();
+        state.adsb.rate_supported = true;
+        state.adsb.tuned_hz = crate::signal::adsb::CENTER_FREQUENCY_HZ;
+        state.adsb.sample_rate_hz = crate::signal::adsb::RTL_SAMPLE_RATE_HZ;
+        state.adsb.push_frame(entry(AdsbDetails {
+            callsign: Some("DLH123".into()),
+            altitude_ft: Some(37000),
+            groundspeed_kt: Some(452.0),
+            track_deg: Some(271.0),
+            vertical_rate_fpm: Some(-640),
+            latitude: Some(50.1234),
+            longitude: Some(8.5678),
+            ..AdsbDetails::default()
+        }));
+
+        let out = draw(AdsbFramesPanel, 100, 12, &state).join("\n");
+        assert!(out.contains("DLH123"), "{out}");
+        assert!(out.contains("37000 ft"), "{out}");
+        assert!(out.contains("452 kt"), "{out}");
+        assert!(out.contains("271°"), "{out}");
+        assert!(out.contains("-640 fpm"), "{out}");
+        assert!(out.contains("50.1234"), "{out}");
+        assert!(out.contains("8.5678"), "{out}");
+    }
+
+    #[test]
+    fn a_frame_without_a_field_leaves_it_blank_rather_than_zero() {
+        let mut state = SdrMetrics::fixture().streaming();
+        state.adsb.rate_supported = true;
+        state.adsb.tuned_hz = crate::signal::adsb::CENTER_FREQUENCY_HZ;
+        state.adsb.sample_rate_hz = crate::signal::adsb::RTL_SAMPLE_RATE_HZ;
+        state.adsb.push_frame(entry(AdsbDetails {
+            callsign: Some("DLH123".into()),
+            ..AdsbDetails::default()
+        }));
+
+        let out = draw(AdsbFramesPanel, 100, 12, &state).join("\n");
+        assert!(out.contains("DLH123"), "{out}");
+        assert!(!out.contains("0 ft"), "{out}");
+        assert!(!out.contains("0 kt"), "{out}");
     }
 }

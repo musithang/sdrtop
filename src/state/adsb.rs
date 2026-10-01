@@ -4,6 +4,8 @@
 use std::collections::VecDeque;
 use std::time::Instant;
 
+use crate::signal::adsb::AdsbDetails;
+
 pub const ADSB_FRAME_HISTORY_LIMIT: usize = 128;
 
 #[derive(Clone, Debug)]
@@ -12,7 +14,9 @@ pub struct AdsbFrameEntry {
     pub icao_address: Option<u32>,
     pub downlink_format: u8,
     pub signal_dbfs: f32,
-    pub summary: String,
+    /// The decoded fields worth a column of their own. Empty for a frame whose
+    /// type code carries none of them.
+    pub details: AdsbDetails,
 }
 
 #[derive(Clone)]
