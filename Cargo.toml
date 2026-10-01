@@ -53,6 +53,7 @@ clap = { version = "4", features = ["derive"] }
 crossbeam-channel = "0.5"
 rustfft = "6"
 num-complex = "0.4"
+rs1090 = "0.7.0"
 # HackRF, RTL-SDR and SoapySDR runtimes are optional
 libloading = "0.8"
 serialport = { version = "4", default-features = false }

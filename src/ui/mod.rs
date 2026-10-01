@@ -35,6 +35,7 @@ pub mod widgets;
 pub use engine::LayoutEngine;
 pub use registry::PanelRegistry;
 
+pub use panels::adsb::AdsbFramesPanel;
 pub use panels::core::command_rail::CommandRailPanel;
 pub use panels::core::footer::FooterPanel;
 pub use panels::core::header::{HeaderPanel, SlimHeaderPanel};

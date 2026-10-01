@@ -1,0 +1,14 @@
+# ADS-B receiver: validated 1090 MHz Mode S frames beside the live RF evidence.
+section = "adsb"
+slot    = 1
+title   = "Aircraft"
+blurb   = "valid Mode S and ADS-B frames"
+
+panels = [
+    { name = "header",       position = "top", height = 5 },
+    { name = "spectrum",     position = "body" },
+    { name = "waterfall",    position = "body" },
+    { name = "adsb_frames",  position = "right", width_pct = 45 },
+    { name = "log",          position = "bottom", height = 5 },
+    { name = "footer",       position = "bottom" },
+]

@@ -23,6 +23,11 @@ use crate::config::PresetConfig;
 /// would say otherwise.
 pub const HIDDEN: &str = "hidden";
 
+/// The ADSB section, named here because the startup path has to be able to drop
+/// it: `App::build_ui` removes every preset filed under it on a radio that
+/// cannot work at 1090 MHz, so the section is absent rather than empty.
+pub const ADSB: &str = "adsb";
+
 /// The section a preset lands in when it names none. Only exists when something
 /// is actually in it, so a default install never shows an empty row.
 pub const OTHER: &str = "other";
@@ -42,6 +47,9 @@ const KNOWN: &[(&str, &str)] = &[
     (crate::signal::net::SECTIONS[0], "NET"),
     (crate::signal::net::SECTIONS[1], "LE"),
     (crate::signal::net::SECTIONS[2], "Classic"),
+    // The ADSB feature's one, dropped the same way on a radio that cannot
+    // reach 1090 MHz.
+    (ADSB, "ADSB"),
 ];
 
 /// One layout, as the menu shows it.
@@ -206,9 +214,9 @@ mod tests {
         }
     }
 
-    /// The built-ins land in the seven sections, in order.
+    /// The built-ins land in the eight sections, in order.
     #[test]
-    fn the_builtins_build_seven_sections() {
+    fn the_builtins_build_eight_sections() {
         let menu = build(&LayoutConfig::default_config().presets);
         let ids: Vec<&str> = menu.sections.iter().map(|s| s.id.as_str()).collect();
         assert_eq!(
@@ -220,7 +228,8 @@ mod tests {
                 "micro",
                 "net",
                 "le",
-                "classic"
+                "classic",
+                "adsb"
             ]
         );
         assert!(menu.warnings.is_empty(), "{:?}", menu.warnings);
@@ -244,7 +253,8 @@ mod tests {
                 "micro",
                 "net",
                 "le",
-                "classic"
+                "classic",
+                "adsb"
             ]
         );
         assert_eq!(menu.section("le").unwrap().title, "LE");
@@ -364,6 +374,7 @@ mod tests {
                 "net",
                 "le",
                 "classic",
+                "adsb",
                 "nightwatch"
             ]
         );
@@ -404,7 +415,7 @@ mod tests {
     fn the_same_slot_in_two_sections_is_fine() {
         let menu = build(&LayoutConfig::default_config().presets);
         assert!(menu.warnings.is_empty());
-        for section in ["command_rail", "lab", "sweep", "micro", "net"] {
+        for section in ["command_rail", "lab", "sweep", "micro", "net", "adsb"] {
             let s = menu.section(section).unwrap();
             assert_eq!(s.entries[0].slot, Some(1), "{section} has no slot 1");
         }
@@ -439,8 +450,8 @@ mod tests {
     #[test]
     fn a_cursor_past_the_end_is_clamped() {
         let menu = build(&LayoutConfig::default_config().presets);
-        // Seven sections, and Sweep (index 2) has two entries.
-        assert_eq!(menu.clamp(99, 0), Some((6, 0)));
+        // Eight sections, and Sweep (index 2) has two entries.
+        assert_eq!(menu.clamp(99, 0), Some((7, 0)));
         assert_eq!(menu.clamp(2, 99), Some((2, 1)));
         assert_eq!(
             menu.at(2, 99).map(|e| e.preset.as_str()),

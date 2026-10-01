@@ -973,6 +973,11 @@ pub struct RxContext {
     pub net_tx: crossbeam_channel::Sender<StreamBlock>,
     /// What the NET feed did with the blocks handed to it, for the poll task.
     pub net_feed: FeedHealth,
+    /// Fourth, independently lossy feed to the 1090 MHz Mode S / ADS-B worker.
+    /// It is forwarded only while the ADS-B section is on screen.
+    pub adsb_tx: crossbeam_channel::Sender<StreamBlock>,
+    /// What the ADS-B feed did with the blocks handed to it.
+    pub adsb_feed: FeedHealth,
     /// Direct power-spectrum traces from backends that do not publish IQ.
     #[allow(dead_code)]
     pub power_tx: crossbeam_channel::Sender<PowerTrace>,

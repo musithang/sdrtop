@@ -12,6 +12,7 @@
 //! Every one of them implements [`crate::ui::panel::Panel`] and is registered in
 //! `app::builder`. A panel that is not registered cannot be named in a preset.
 
+pub mod adsb;
 pub mod core;
 pub mod lab;
 pub mod micro;

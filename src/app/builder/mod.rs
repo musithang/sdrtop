@@ -25,7 +25,7 @@ use std::time::Duration;
 use crate::config::AppConfig;
 use crate::event::EventStream;
 use crate::hardware;
-use crate::signal::{DemodWorker, FftWorker, NetWorker, PowerWorker};
+use crate::signal::{AdsbWorker, DemodWorker, FftWorker, NetWorker, PowerWorker};
 use crate::state::SdrMetrics;
 use crate::tasks;
 
@@ -165,6 +165,7 @@ impl App {
         // thread, and anything deeper starts hiding the losses rather than
         // absorbing them.
         let (net_tx, net_rx) = crossbeam_channel::bounded::<crate::hardware::StreamBlock>(4);
+        let (adsb_tx, adsb_rx) = crossbeam_channel::bounded::<crate::hardware::StreamBlock>(4);
         // Read out before `cfg` is moved into `Self::assemble` below - a
         // plain `usize`, not worth threading the whole config through the
         // worker for.
@@ -177,6 +178,8 @@ impl App {
             demod_tx,
             net_tx,
             net_feed: hardware::FeedHealth::default(),
+            adsb_tx,
+            adsb_feed: hardware::FeedHealth::default(),
             power_tx,
             geometry,
             stream_pairs: std::sync::atomic::AtomicU64::new(0),
@@ -215,6 +218,11 @@ impl App {
                 let net_state = Arc::clone(&state);
                 spawn_worker("net-worker", move || {
                     NetWorker::new(net_rx, net_state, geometry, bt_channels).run()
+                });
+
+                let adsb_state = Arc::clone(&state);
+                spawn_worker("adsb-worker", move || {
+                    AdsbWorker::new(adsb_rx, adsb_state, geometry).run()
                 });
 
                 tasks::spawn_rx_task(Arc::clone(&state), Arc::clone(&device), Arc::clone(&rx_ctx));
@@ -303,6 +311,10 @@ impl App {
             let m = state.lock().unwrap_or_else(|e| e.into_inner());
             crate::signal::net::gate::verdict(&m.caps)
         };
+        let adsb = {
+            let m = state.lock().unwrap_or_else(|e| e.into_inner());
+            crate::signal::adsb::gate::refusal(&m.caps)
+        };
 
         let active = preset_override.unwrap_or(&cfg.display.active_preset);
         let acquisition = state
@@ -315,6 +327,7 @@ impl App {
             &cfg.presets,
             presets_dir.as_deref(),
             net.is_ok(),
+            adsb.is_none(),
             acquisition,
         )?;
 
@@ -331,6 +344,9 @@ impl App {
                 m.push_log(warning.clone());
             }
             if let Err(why) = &net {
+                m.push_log(why.clone());
+            }
+            if let Some(why) = &adsb {
                 m.push_log(why.clone());
             }
 

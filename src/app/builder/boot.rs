@@ -417,6 +417,7 @@ pub(super) fn initial_metrics(cfg: &AppConfig, boot: Boot) -> anyhow::Result<Sdr
         lab: crate::state::LabState::default(),
         demod: crate::state::DemodState::default(),
         net: crate::state::NetState::default(),
+        adsb: crate::state::AdsbState::default(),
         record: crate::state::RecordState::default(),
         caps,
         device_options: Arc::new(Vec::new()),

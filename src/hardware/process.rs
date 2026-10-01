@@ -195,6 +195,7 @@ pub struct Arrival {
     cal: crate::state::IqCalState,
     demod_enabled: bool,
     net_enabled: bool,
+    adsb_enabled: bool,
     centre_hz: u64,
     rate_hz: f64,
     /// The block's place in the stream, after the pairs the driver lost.
@@ -235,7 +236,7 @@ pub fn arrive(
     // tuning, from the same lock, so the file's gain and frequency are the
     // settings of one moment.
     let recording = ctx.record.armed();
-    let (cal, demod_enabled, net_enabled, centre_hz, rate_hz, gain) = {
+    let (cal, demod_enabled, net_enabled, adsb_enabled, centre_hz, rate_hz, gain) = {
         let mut m = ctx.metrics.lock().unwrap_or_else(|e| e.into_inner());
         // What the radio delivered, counted where it arrives: a block the
         // intake later has no room for still crossed the USB link.
@@ -244,6 +245,7 @@ pub fn arrive(
             m.iq.cal,
             m.demod.enabled,
             m.ui.is_net_section(),
+            m.ui.is_adsb_section(),
             m.radio.frequency,
             m.radio.config_sample_rate,
             recording.then(|| (m.radio.gains.clone(), m.radio.amp_enabled)),
@@ -281,6 +283,7 @@ pub fn arrive(
         cal,
         demod_enabled,
         net_enabled,
+        adsb_enabled,
         centre_hz,
         rate_hz,
         first_pair,
@@ -350,6 +353,7 @@ pub fn digest(
         cal,
         demod_enabled,
         net_enabled,
+        adsb_enabled,
         centre_hz,
         rate_hz,
         first_pair,
@@ -477,6 +481,20 @@ pub fn digest(
             })
             .is_ok();
         ctx.net_feed.record(ctx.net_tx.len(), taken);
+    }
+    if adsb_enabled {
+        let taken = ctx
+            .adsb_tx
+            .try_send(super::StreamBlock {
+                seq: block_seq,
+                gap_before: dropped_pairs > 0,
+                bytes: forward.clone(),
+                first_pair,
+                centre_hz,
+                rate_hz,
+            })
+            .is_ok();
+        ctx.adsb_feed.record(ctx.adsb_tx.len(), taken);
     }
     // The one point where a lost block is observable. This channel is lossy by
     // design - dropping under load beats blocking the USB callback - but lossy
@@ -716,6 +734,7 @@ pub(crate) mod tests {
         let (sample_tx, sample_rx) = crossbeam_channel::bounded(fft_cap);
         let (demod_tx, demod_rx) = crossbeam_channel::bounded(8);
         let (net_tx, net_rx) = crossbeam_channel::bounded(net_cap);
+        let (adsb_tx, adsb_rx) = crossbeam_channel::bounded(4);
         let (power_tx, _) = crossbeam_channel::bounded(1);
         let mut m = SdrMetrics::fixture();
         m.demod.enabled = true;
@@ -727,12 +746,15 @@ pub(crate) mod tests {
             demod_tx,
             net_tx,
             net_feed: crate::hardware::FeedHealth::default(),
+            adsb_tx,
+            adsb_feed: crate::hardware::FeedHealth::default(),
             power_tx,
             geometry: eight_bit(),
             stream_pairs: std::sync::atomic::AtomicU64::new(0),
             record: Default::default(),
             intake: Default::default(),
         };
+        drop(adsb_rx);
         (Arc::new(ctx), sample_rx, demod_rx, net_rx)
     }
 

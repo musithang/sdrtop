@@ -2,6 +2,7 @@
 // Copyright (C) 2026 MusiThang <viktor.laszlo92@protonmail.com>
 
 mod acc;
+mod adsb;
 mod demod;
 #[cfg(test)]
 pub(crate) mod fixture;
@@ -22,6 +23,7 @@ mod ui;
 mod waterfall;
 
 pub(crate) use acc::Accumulators;
+pub use adsb::{AdsbFrameEntry, AdsbState};
 pub use demod::{
     deviation_limit_hz, strongest_offset_hz, AmMeasure, CtcssMeasure, DemodState, FmMeasure,
     MpxFrame, PilotState, RdsData, OFFSET_STEP_HZ, PTY_NAMES, RDS_AGED_AFTER, RDS_DROPPED_AFTER,
@@ -90,6 +92,8 @@ pub struct SdrMetrics {
     pub demod: DemodState,
     /// What the 2.4 GHz receiver is doing. See [`NetState`].
     pub net: NetState,
+    /// What the 1090 MHz Mode S / ADS-B receiver has decoded.
+    pub adsb: AdsbState,
     /// What the IQ recorder is doing. See [`RecordState`].
     pub record: RecordState,
     /// Active device's capability descriptor - drives capability-aware UI

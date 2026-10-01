@@ -207,6 +207,7 @@ mod tests {
         let (sample_tx, sample_rx) = crossbeam_channel::bounded(4);
         let (demod_tx, demod_rx) = crossbeam_channel::bounded(2);
         let (net_tx, net_rx) = crossbeam_channel::bounded(4);
+        let (adsb_tx, _) = crossbeam_channel::bounded(4);
         let (power_tx, _) = crossbeam_channel::bounded(1);
         let ctx = RxContext {
             metrics: Arc::clone(&state),
@@ -215,6 +216,8 @@ mod tests {
             demod_tx,
             net_tx,
             net_feed: FeedHealth::default(),
+            adsb_tx,
+            adsb_feed: FeedHealth::default(),
             power_tx,
             geometry: SampleGeometry {
                 format: SampleFormat::Int8,

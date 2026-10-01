@@ -3,8 +3,8 @@
 ← [Back](README.md)
 
 A *preset* is a named arrangement of panels: which ones are on screen, where they
-sit, and how much room each gets. sdrtop ships with twenty-one, grouped into the
-five sections of the [menu](screens.md#the-menu), and you can write your own.
+sit, and how much room each gets. sdrtop ships with twenty-four, grouped into the
+eight sections of the [menu](screens.md#the-menu), and you can write your own.
 
 There are two places to put one, and they behave identically:
 
@@ -22,7 +22,7 @@ name as a built-in (`command_rail`, `spectrum`, `waterfall`,
 `spectrum_waterfall`, `main`, `lab_iq`, `lab_rf`, `lab_timing`, `lab_signal`,
 `lab_sweep`, `micro_main`, `micro_signal`, `micro_gain`, `micro_health`,
 `micro_sweep`, `net`, `net_survey`, `net_census`, `net_ble`, `net_bt`,
-`net_piconet`, `net_bench`, `net_connection`, `observer`) and your version replaces it, so the number key that
+`net_piconet`, `net_bench`, `net_connection`, `observer`, `adsb`) and your version replaces it, so the number key that
 opens it now opens your layout. Those names are the whole list; a name that isn't
 on it is a new preset, which appears in the menu automatically rather than taking
 over a key.
@@ -57,7 +57,7 @@ panels  = [ ... ]   # exactly as above
 
 | Field | What it does |
 |-------|--------------|
-| `section` | Which family it belongs to: `command_rail`, `lab`, `sweep`, `micro`, `net`, `le`, `classic`, or a name of your own, which becomes a new section. `hidden` keeps it out of the menu entirely |
+| `section` | Which family it belongs to: `command_rail`, `lab`, `sweep`, `micro`, `net`, `le`, `classic`, `adsb`, or a name of your own, which becomes a new section. `hidden` keeps it out of the menu entirely |
 | `slot` | The number key, `1` to `9`, **within that section**. Leave it out and the layout is still listed, just without a shortcut |
 | `title` | What the menu calls it. Defaults to the preset name |
 | `blurb` | The half-line under the title. Optional, and worth writing: it is what tells you which of two similar layouts you want |
@@ -65,7 +65,7 @@ panels  = [ ... ]   # exactly as above
 A few things follow from how these are read:
 
 - **Numbers are per section**, so `slot = 5` in `lab` does not collide with
-  `slot = 5` in `micro`. That is the whole point of the sections: nine keys, five
+  `slot = 5` in `micro`. That is the whole point of the sections: nine keys, eight
   times over, instead of one exhausted row.
 - **Two presets wanting the same slot is not fatal.** The one whose *preset name*
   sorts first keeps the key, the other stays in the list without one, and the
@@ -151,6 +151,9 @@ and it's the only kind of preset that draws the reference level and reference
 trace overlays. If you want those, name accordingly.
 
 ## Panel names
+`adsb_frames` shows Mode S / ADS-B frames that passed CRC validation. Its preset
+is offered only when the radio reaches 1090 MHz and supports the 2.4 MS/s RTL
+demodulator.
 
 These are the valid values for `name`. What each one actually draws is in
 [What you see on screen](screens.md).
