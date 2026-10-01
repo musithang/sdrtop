@@ -73,7 +73,7 @@ It's a hobby project built in my spare time, and honestly, I made it for *you* â
 *It's a terminal app, so brace yourself for the visual spectacle of monospace text in color. The only special effects are honest dBFS numbers.*
 
 <details>
-  <summary><b>ðŸ“» More screenshots</b>: lab benches, RTL-SDR, the Command Rail cards</summary>
+  <summary><b>ðŸ“» More screenshots</b>: lab benches, RTL-SDR, ADS-B, the Command Rail cards</summary>
   <br>
   <table>
     <tr>
@@ -87,6 +87,10 @@ It's a hobby project built in my spare time, and honestly, I made it for *you* â
     <tr>
       <td width="50%"><img src="https://raw.githubusercontent.com/musithang/sdrtop/main/user_docs/pics/rtlsdr/rtl-sdr1.png" alt="RTL-SDR: spectrum & waterfall"></td>
       <td width="50%"><img src="https://raw.githubusercontent.com/musithang/sdrtop/main/user_docs/pics/rtlsdr/rtl-sdr2.png" alt="RTL-SDR: observer mode"></td>
+    </tr>
+    <tr>
+      <td width="50%"><img src="https://raw.githubusercontent.com/musithang/sdrtop/main/user_docs/pics/adsb/adsb.png" alt="RTL-SDR: 1090 MHz Mode S and ADS-B, decoded fields"></td>
+      <td width="50%"></td>
     </tr>
   </table>
 </details>
@@ -110,7 +114,7 @@ Everything your radio knows about itself, in real time, without leaving the term
 - **Observer mode**: if another app already holds the radio, sdrtop tells you which one, shows device identity and USB stats, and waits. No error dialog, no fight over the USB handle, and it takes the radio back the moment it's free.
 - **NET: the 2.4 GHz band, measured.** BLE advertising and classic Bluetooth piconets, decoded and then treated like any other transmitter on the bench: modulation index, drift, crystal error in ppm, advertising interval, frame error rate against SNR, slot jitter, each with its uncertainty and against the specification's limits. Not a device list with extra steps; the list was the easy part. It never transmits and never follows a connection. [The details](user_docs/net.md).
 - **ADS-B: 1090 MHz, decoded and then read.** Mode S frames that pass CRC validation, with the fields each one actually carries: callsign, altitude, groundspeed, track, vertical rate, squawk and a position resolved from a CPR pair. A field a frame does not carry is left blank rather than filled with a zero, and a position needs both halves of its pair. It never transmits. [The details](user_docs/screens.md#the-adsb-view).
-- **Six themes and a layout system**: presets grouped into six sections, `Esc` for the menu, or define your own out of any panel sdrtop draws.
+- **Six themes and a layout system**: presets grouped into eight sections, `Esc` for the menu, or define your own out of any panel sdrtop draws.
 
 Measured the awkward way rather than the easy way. Bandwidth about the carrier, not across whatever span you happened to capture, so a mistuned radio confesses instead of faking a good number. The noise floor as a density, so the same receiver reads as the same receiver whatever the sample rate. And every lab panel marks itself **[STALE]** the moment RX stops, so a frozen number is never mistaken for a live one.
 
@@ -210,7 +214,7 @@ That last command is the whole diagnostic. If your radio isn't in that list, the
 
 ## Keys
 
-Layouts are grouped into six sections and **each section has its own numbers**: `Command Rail` for the general views, `Lab` for the benches, `Sweep` for the band scan, `Micro` for the field views, `NET` for the 2.4 GHz band and Bluetooth, `ADSB` for 1090 MHz Mode S. So `2` is the RF bench inside Lab and the spectrum inside Command Rail. `Esc` opens the menu, which shows you the sections, the layouts in the one you're on, and the number that opens each. Nine keys, six times over, rather than one long row to memorise.
+Layouts are grouped into eight sections and **each section has its own numbers**: `Command Rail` for the general views, `Lab` for the benches, `Sweep` for the band scan, `Micro` for the field views, `NET` for the 2.4 GHz band, `LE` for BLE, `Classic` for classic Bluetooth piconets, `ADSB` for 1090 MHz Mode S. So `2` is the RF bench inside Lab and the spectrum inside Command Rail. `Esc` opens the menu, which shows you the sections, the layouts in the one you're on, and the number that opens each. Nine keys, eight times over, rather than one long row to memorise.
 
 The eight that get you everywhere:
 
@@ -271,7 +275,7 @@ Frequency, gains, sample rate, markers, the sweep band, your theme and your layo
 - Signal recording to file
 - In-app config editing
 - Native backends for hardware that lands on the desk
-- **Digital signal demodulation done properly**, the way Bluetooth now is: WiFi, ADS-B, AIS, LoRa, DMR. Each gets its own UI and its own detailed info panel. Still no audio, still just data
+- **Digital signal demodulation done properly**, the way Bluetooth now is: WiFi, AIS, LoRa, DMR. Each gets its own UI and its own detailed info panel. Still no audio, still just data
 
 The whole story, in order: [What's new](user_docs/whats-new.md).
 

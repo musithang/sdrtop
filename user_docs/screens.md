@@ -26,7 +26,7 @@ stops, so a number that has stopped updating never passes for a live one.
 
 The first thing sdrtop shows you, and `Esc` from anywhere brings it back.
 
-It is one screen in two columns. The left column lists the five **sections**,
+It is one screen in two columns. The left column lists the eight **sections**,
 each with its own colour dot, and below a dotted rule two panes that are not
 sections: **Keys** and **Options**. The right column shows whatever is selected
 on the left, under a heading in the section's colour that counts its views and
@@ -39,7 +39,9 @@ marked with a bar at its left edge.
 | **Lab** | The four measurement benches |
 | **Sweep** | The band sweep, full size and compact |
 | **Micro** | The four field views for a small screen |
-| **NET** | The 2.4 GHz band, BLE and classic Bluetooth: seven views, on a radio that reaches the band ([the NET page](net.md)) |
+| **NET** | The 2.4 GHz band: the survey and the census ([the NET page](net.md)) |
+| **LE** | Bluetooth Low Energy: the advertising views |
+| **Classic** | Classic Bluetooth piconets |
 | **ADSB** | 1090 MHz Mode S and ADS-B: one view, on a radio that reaches the band at 2.4 or 6 MS/s |
 
 Each layout shows its **number** beside its name, and that number is the key that
@@ -325,6 +327,12 @@ frequency and sample rate, whether the rate is one the demodulator accepts, and
 how many frames the session has validated. When no frame has arrived yet it says
 so, and how long ago the last one was.
 
+<p align="center">
+  <img src="https://raw.githubusercontent.com/musithang/sdrtop/main/user_docs/pics/adsb/adsb.png" width="100%" alt="The ADSB view: validated Mode S frames with their decoded fields, beside the live spectrum">
+  <br>
+  <sub>The ADSB view on an RTL-SDR: validated frames on the right, the spectrum they arrived on behind them.</sub>
+</p>
+
 ---
 
 ## Observer mode
@@ -411,11 +419,22 @@ screen.
 |-----|--------|--------------|
 | `1` | `net` | Band capability: what this radio can reach and receive |
 | `2` | `net_survey` | Occupancy over the coexistence heatmap, bonded · decode health |
-| `3` | `net_census` | The census of transmitters, their clocks and the selected one's detail |
-| `4` | `net_ble` | BLE advertising packets · packet detail |
-| `5` | `net_bt` | Classic Bluetooth hops (where and when) · the piconet roster |
-| `6` | `net_piconet` | One piconet, packet by packet |
-| `7` | `net_bench` | The bench view of a piconet's timing |
+
+**LE**
+
+| Key | Preset | What's in it |
+|-----|--------|--------------|
+| `1` | `net_census` | The census of transmitters, their clocks and the selected one's detail |
+| `2` | `net_ble` | BLE advertising packets · packet detail |
+| `3` | `net_connection` | One BLE connection, event by event |
+
+**Classic**
+
+| Key | Preset | What's in it |
+|-----|--------|--------------|
+| `1` | `net_bt` | Classic Bluetooth hops (where and when) · the piconet roster |
+| `2` | `net_piconet` | One piconet, packet by packet |
+| `3` | `net_bench` | The bench view of a piconet's timing |
 
 **ADSB**
 
