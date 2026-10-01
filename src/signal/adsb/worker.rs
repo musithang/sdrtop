@@ -66,8 +66,7 @@ impl AdsbWorker {
                 let mut state = self.state.lock().unwrap_or_else(|error| error.into_inner());
                 let active = state.ui.is_adsb_section() && state.radio.hw_streaming;
                 if active {
-                    state.adsb.rate_supported =
-                        (rate_hz - crate::signal::adsb::RTL_SAMPLE_RATE_HZ).abs() <= 1.0;
+                    state.adsb.rate_supported = crate::signal::adsb::supports_sample_rate(rate_hz);
                     state.adsb.tuned_hz = centre_hz;
                     state.adsb.sample_rate_hz = rate_hz;
                 }

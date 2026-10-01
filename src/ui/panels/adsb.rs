@@ -51,7 +51,7 @@ impl Panel for AdsbFramesPanel {
         if !adsb.rate_supported {
             lines.push(Line::from(Span::styled(
                 format!(
-                    "Set sample rate to 2.4 MS/s (now {:.3})",
+                    "Set rate to 2.4 MS/s (RTL) or 6.0 MS/s (HackRF); now {:.3}",
                     adsb.sample_rate_hz / 1e6
                 ),
                 Style::default().fg(theme.status_warn),
@@ -116,7 +116,10 @@ mod tests {
     fn the_panel_explains_the_required_rtl_sample_rate() {
         let state = SdrMetrics::fixture().streaming();
         let out = draw(AdsbFramesPanel, 54, 12, &state).join("\n");
-        assert!(out.contains("Set sample rate to 2.4 MS/s"), "{out}");
+        assert!(
+            out.contains("Set rate to 2.4 MS/s (RTL) or 6.0 MS/s (HackRF)"),
+            "{out}"
+        );
     }
 
     #[test]

@@ -152,8 +152,8 @@ trace overlays. If you want those, name accordingly.
 
 ## Panel names
 `adsb_frames` shows Mode S / ADS-B frames that passed CRC validation. Its preset
-is offered only when the radio reaches 1090 MHz and supports the 2.4 MS/s RTL
-demodulator.
+is offered only when the radio reaches 1090 MHz and supports either the 2.4 MS/s
+RTL-SDR or 6 MS/s HackRF demodulator.
 
 These are the valid values for `name`. What each one actually draws is in
 [What you see on screen](screens.md).

@@ -9,19 +9,25 @@
 
 use num_complex::Complex;
 use rs1090::source::demod::demod2400::demodulate2400;
-use rs1090::source::demod::{magnitude_u16, ModeSMessage, MODES_LONG_MSG_BYTES};
+use rs1090::source::demod::demod6000::demodulate6000;
+use rs1090::source::demod::{
+    convert_f32_to_i16_iq, magnitude_u16, ModeSMessage, MODES_LONG_MSG_BYTES,
+};
 
 pub mod gate;
 pub mod worker;
 
 /// The input rate used by `rs1090`'s RTL-SDR demodulator.
 pub const RTL_SAMPLE_RATE_HZ: f64 = 2_400_000.0;
+/// The input rate used by `rs1090`'s HackRF-capable demodulator.
+pub const HIGH_RATE_SAMPLE_RATE_HZ: f64 = 6_000_000.0;
 pub const CENTER_FREQUENCY_HZ: u64 = 1_090_000_000;
 pub const SECTION: &str = "adsb";
 
-/// The `rs1090` demodulator requires this many samples after a preamble to
-/// decode the longest Mode S frame. Retaining them lets a frame cross blocks.
-const DEMOD_TRAILING_SAMPLES: usize = 326;
+/// The 2.4-MS/s demodulator requires this many trailing samples.
+const DEMOD_2400_TRAILING_SAMPLES: usize = 326;
+/// At 6 MS/s a long frame is 48 preamble + 672 data samples; keep extra margin.
+const DEMOD_6000_TRAILING_SAMPLES: usize = 800;
 
 /// A validated Mode S frame and the ADS-B identity fields commonly shown first.
 #[derive(Clone, Debug, PartialEq)]
@@ -33,13 +39,26 @@ pub struct AdsbFrame {
     pub summary: String,
 }
 
-/// Stateful 2.4 MS/s receiver. It retains the demodulator's trailing window and
-/// only returns frames whose start position has not been scanned before.
+/// Stateful 2.4 or 6 MS/s receiver. It retains each demodulator's trailing
+/// window and only returns frames whose start position has not been scanned.
 #[derive(Default)]
 pub struct AdsbReceiver {
-    tail: Vec<u16>,
+    magnitude_tail: Vec<u16>,
+    iq_tail: Vec<i16>,
     total_samples: u64,
     scanned_until: u64,
+    mode: Option<DemodMode>,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum DemodMode {
+    Rtl2400,
+    HighRate6000,
+}
+
+pub fn supports_sample_rate(sample_rate_hz: f64) -> bool {
+    (sample_rate_hz - RTL_SAMPLE_RATE_HZ).abs() <= 1.0
+        || (sample_rate_hz - HIGH_RATE_SAMPLE_RATE_HZ).abs() <= 1.0
 }
 
 impl AdsbReceiver {
@@ -48,32 +67,43 @@ impl AdsbReceiver {
     }
 
     pub fn reset(&mut self) {
-        self.tail.clear();
+        self.magnitude_tail.clear();
+        self.iq_tail.clear();
         self.total_samples = 0;
         self.scanned_until = 0;
+        self.mode = None;
     }
 
-    /// Feed one contiguous 2.4 MS/s block. `None` means the block has the wrong
-    /// sample rate; an empty `Some` means no valid frame was found in it.
+    /// Feed one contiguous 2.4 or 6 MS/s block. `None` means the rate is
+    /// unsupported; an empty `Some` means no valid frame was found in it.
     pub fn push_iq(
         &mut self,
         samples: &[Complex<f32>],
         sample_rate_hz: f64,
     ) -> Option<Vec<AdsbFrame>> {
-        if (sample_rate_hz - RTL_SAMPLE_RATE_HZ).abs() > 1.0 {
+        let mode = if (sample_rate_hz - RTL_SAMPLE_RATE_HZ).abs() <= 1.0 {
+            DemodMode::Rtl2400
+        } else if (sample_rate_hz - HIGH_RATE_SAMPLE_RATE_HZ).abs() <= 1.0 {
+            DemodMode::HighRate6000
+        } else {
             return None;
-        }
+        };
         if samples.is_empty() {
             return Some(Vec::new());
         }
 
-        let mut magnitudes = self.tail.clone();
-        magnitudes.extend(magnitude_u16(samples));
-        let base = self.total_samples - self.tail.len() as u64;
-        let scanned_end = base + magnitudes.len().saturating_sub(DEMOD_TRAILING_SAMPLES) as u64;
+        if self.mode.is_some_and(|previous| previous != mode) {
+            self.reset();
+        }
+        self.mode = Some(mode);
+
+        let (messages, base, scanned_end) = match mode {
+            DemodMode::Rtl2400 => self.demodulate_2400(samples),
+            DemodMode::HighRate6000 => self.demodulate_6000(samples),
+        };
         let first_new = self.scanned_until.max(base);
 
-        let frames = demodulate2400(&magnitudes)
+        let frames = messages
             .into_iter()
             .filter_map(|message| {
                 let absolute_start = base + message.sample_position as u64;
@@ -85,12 +115,38 @@ impl AdsbReceiver {
 
         self.scanned_until = self.scanned_until.max(scanned_end);
         self.total_samples += samples.len() as u64;
-        let keep = magnitudes.len().min(DEMOD_TRAILING_SAMPLES);
-        self.tail.clear();
-        self.tail
-            .extend_from_slice(&magnitudes[magnitudes.len() - keep..]);
 
         Some(frames)
+    }
+
+    fn demodulate_2400(&mut self, samples: &[Complex<f32>]) -> (Vec<ModeSMessage>, u64, u64) {
+        let mut magnitudes = self.magnitude_tail.clone();
+        magnitudes.extend(magnitude_u16(samples));
+        let base = self.total_samples - self.magnitude_tail.len() as u64;
+        let scanned_end =
+            base + magnitudes.len().saturating_sub(DEMOD_2400_TRAILING_SAMPLES) as u64;
+        let messages = demodulate2400(&magnitudes);
+        let keep = magnitudes.len().min(DEMOD_2400_TRAILING_SAMPLES);
+        self.magnitude_tail.clear();
+        self.magnitude_tail
+            .extend_from_slice(&magnitudes[magnitudes.len() - keep..]);
+        (messages, base, scanned_end)
+    }
+
+    fn demodulate_6000(&mut self, samples: &[Complex<f32>]) -> (Vec<ModeSMessage>, u64, u64) {
+        let mut iq = self.iq_tail.clone();
+        iq.extend(convert_f32_to_i16_iq(samples));
+        let tail_samples = (self.iq_tail.len() / 2) as u64;
+        let total_samples = (iq.len() / 2) as u64;
+        let base = self.total_samples - tail_samples;
+        let trailing = DEMOD_6000_TRAILING_SAMPLES as u64;
+        let scanned_end = base + total_samples.saturating_sub(trailing);
+        let messages = demodulate6000(&iq);
+        let keep_samples = total_samples.min(trailing) as usize;
+        self.iq_tail.clear();
+        self.iq_tail
+            .extend_from_slice(&iq[(total_samples as usize - keep_samples) * 2..]);
+        (messages, base, scanned_end)
     }
 }
 
@@ -124,10 +180,12 @@ mod tests {
         0x8d, 0x4b, 0xb4, 0x63, 0x00, 0x3d, 0x10, 0x00, 0x00, 0x00, 0x00, 0x1b, 0x5b, 0xec,
     ];
 
-    fn modulate_reference_frame() -> Vec<Complex<f32>> {
-        let mut samples = vec![Complex::new(0.02, 0.0); 2_400];
+    fn modulate_reference_frame(sample_rate_hz: f64) -> Vec<Complex<f32>> {
+        let samples_per_us = sample_rate_hz / 1e6;
+        let count = (300.0 * samples_per_us) as usize;
+        let mut samples = vec![Complex::new(0.02, 0.0); count];
         for (index, sample) in samples.iter_mut().enumerate() {
-            let time_us = index as f64 / 2.4 - (1.0 / 2.4);
+            let time_us = index as f64 / samples_per_us - (1.0 / samples_per_us);
             let preamble = [0.0, 1.0, 3.5, 4.5]
                 .iter()
                 .any(|&start| (start..start + 0.5).contains(&time_us));
@@ -155,25 +213,23 @@ mod tests {
     }
 
     #[test]
-    fn decodes_a_known_adsb_frame_across_iq_block_boundaries() {
-        let iq = modulate_reference_frame();
-        let mut receiver = AdsbReceiver::new();
-        let mut frames = Vec::new();
-        for block in iq.chunks(137) {
-            frames.extend(
-                receiver
-                    .push_iq(block, RTL_SAMPLE_RATE_HZ)
-                    .expect("supported rate"),
-            );
-        }
+    fn decodes_a_known_adsb_frame_across_iq_block_boundaries_at_both_rates() {
+        for rate in [RTL_SAMPLE_RATE_HZ, HIGH_RATE_SAMPLE_RATE_HZ] {
+            let iq = modulate_reference_frame(rate);
+            let mut receiver = AdsbReceiver::new();
+            let mut frames = Vec::new();
+            for block in iq.chunks(137) {
+                frames.extend(receiver.push_iq(block, rate).expect("supported rate"));
+            }
 
-        let frame = frames
-            .iter()
-            .find(|frame| frame.downlink_format == 17)
-            .expect("reference DF17 frame");
-        assert_eq!(frame.icao_address, Some(0x4b_b463));
-        assert_eq!(&frame.bytes[..REFERENCE_FRAME.len()], &REFERENCE_FRAME);
-        assert!(frame.summary.contains("Extended Squitter"));
+            let frame = frames
+                .iter()
+                .find(|frame| frame.downlink_format == 17)
+                .unwrap_or_else(|| panic!("no DF17 frame at {rate} samples/s"));
+            assert_eq!(frame.icao_address, Some(0x4b_b463));
+            assert_eq!(&frame.bytes[..REFERENCE_FRAME.len()], &REFERENCE_FRAME);
+            assert!(frame.summary.contains("Extended Squitter"));
+        }
     }
 
     #[test]
@@ -181,5 +237,9 @@ mod tests {
         let mut receiver = AdsbReceiver::new();
         assert!(receiver.push_iq(&[], 2_000_000.0).is_none());
         assert_eq!(receiver.push_iq(&[], RTL_SAMPLE_RATE_HZ), Some(Vec::new()));
+        assert_eq!(
+            receiver.push_iq(&[], HIGH_RATE_SAMPLE_RATE_HZ),
+            Some(Vec::new())
+        );
     }
 }
