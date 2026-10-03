@@ -228,12 +228,45 @@ impl SoapyApi {
         unsafe { cstr_to_string((self.last_error)()) }
     }
 
-    /// Every device SoapySDR can see, as key/value maps.
-    pub fn enumerate(&self) -> Vec<Vec<(String, String)>> {
+    /// Every device SoapySDR can see, as key/value maps, optionally queried
+    /// with SoapySDR arguments such as `driver=remote,remote=tcp://host:55132`.
+    pub fn enumerate(&self, query: &[(String, String)]) -> Vec<Vec<(String, String)>> {
+        let Ok(key_storage) = query
+            .iter()
+            .map(|(key, _)| std::ffi::CString::new(key.as_str()))
+            .collect::<Result<Vec<_>, _>>()
+        else {
+            return Vec::new();
+        };
+        let Ok(value_storage) = query
+            .iter()
+            .map(|(_, value)| std::ffi::CString::new(value.as_str()))
+            .collect::<Result<Vec<_>, _>>()
+        else {
+            return Vec::new();
+        };
+        let mut keys: Vec<*mut c_char> = key_storage
+            .iter()
+            .map(|value| value.as_ptr() as *mut c_char)
+            .collect();
+        let mut values: Vec<*mut c_char> = value_storage
+            .iter()
+            .map(|value| value.as_ptr() as *mut c_char)
+            .collect();
+        let query_args = SoapySDRKwargs {
+            size: query.len(),
+            keys: keys.as_mut_ptr(),
+            vals: values.as_mut_ptr(),
+        };
         let mut len: usize = 0;
-        // Safety: a null argument means "no filter", which is what the C API
-        // example passes.
-        let list = unsafe { (self.enumerate)(std::ptr::null(), &mut len) };
+        // Safety: the strings and pointer arrays outlive the enumeration call;
+        // an empty query uses the C API's null-argument form.
+        let query_ptr = if query.is_empty() {
+            std::ptr::null()
+        } else {
+            &query_args
+        };
+        let list = unsafe { (self.enumerate)(query_ptr, &mut len) };
         if list.is_null() {
             return Vec::new();
         }
@@ -376,8 +409,20 @@ impl SoapyApi {
         self.check(unsafe { (self.set_bandwidth)(dev, RX, CHAN, hz) })
     }
 
+    /// The whole-chain gain call, kept for reference and **deliberately unused**.
+    ///
+    /// sdrtop does not call this. `setGain` is documented as distributing the
+    /// figure "automatically across available elements", and `SoapyHackRF` does
+    /// exactly that: it splits the value across LNA, VGA and AMP and switches
+    /// the AMP on its own threshold. That makes the AMP - a two-position switch
+    /// with a key of its own - move while the user turns the LNA, and it hands
+    /// the distribution policy to the driver, which is the opposite of what
+    /// [`crate::hardware::gain::distribute`] is for. Every gain path goes
+    /// through [`Self::set_gain_element`] instead.
+    ///
     /// # Safety
     /// See [`Self::driver_key`].
+    #[allow(dead_code)] // kept as the documented counter-example, never called
     pub unsafe fn set_gain(&self, dev: *mut SoapySDRDevice, db: f64) -> Result<(), String> {
         self.check(unsafe { (self.set_gain)(dev, RX, CHAN, db) })
     }

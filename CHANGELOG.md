@@ -92,6 +92,7 @@ On the i3 this is developed on:
 
 Config: a new `[record]` section (`max_seconds`, `max_gb`). Nothing else
 changes, and a config without it loads as before.
+>>>>>>> upstream/main
 
 ## [0.6.2] - 2026-09-27
 

@@ -124,6 +124,19 @@ pub fn matches_filter(markup: &str, filter: &str) -> bool {
         .all(|(k, v)| value_of(markup, k.trim()) == Some(v.trim()))
 }
 
+/// Parse the selector into the key/value query SoapySDR uses during
+/// enumeration. This lets `--device soapy=driver=remote,remote=...` query a
+/// SoapyRemote host directly instead of relying on LAN broadcast discovery.
+pub fn enumeration_args(filter: Option<&str>) -> Vec<(String, String)> {
+    filter
+        .into_iter()
+        .flat_map(|filter| filter.split(','))
+        .filter_map(|part| part.trim().split_once('='))
+        .map(|(key, value)| (key.trim().to_string(), value.trim().to_string()))
+        .filter(|(key, value)| !key.is_empty() && !value.is_empty())
+        .collect()
+}
+
 /// The driver key SoapySDR gives a sound card.
 const AUDIO_DRIVER: &str = "audio";
 
@@ -307,6 +320,21 @@ mod tests {
         // The audio device is reachable by naming it, which is the whole point.
         let a = open_markup(&built_in_audio(), 0);
         assert!(matches_filter(&a, "driver=audio"));
+    }
+
+    #[test]
+    fn an_enumeration_filter_preserves_a_remote_target() {
+        assert_eq!(
+            enumeration_args(Some("driver=remote, remote=tcp://192.168.178.66:55132")),
+            vec![
+                ("driver".to_string(), "remote".to_string()),
+                (
+                    "remote".to_string(),
+                    "tcp://192.168.178.66:55132".to_string()
+                ),
+            ]
+        );
+        assert!(enumeration_args(None).is_empty());
     }
 
     /// Which drivers hide themselves is SoapySDR's business, and this is where

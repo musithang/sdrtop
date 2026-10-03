@@ -200,7 +200,7 @@ pub fn list_all_devices(
     } else {
         &out[..]
     };
-    let soapy = offer_soapy(soapy::device::list(), native, soapy_filter);
+    let soapy = offer_soapy(soapy::device::list(soapy_filter), native, soapy_filter);
     out.extend(soapy);
     if let Some(want) = want {
         out.retain(|d| d.kind == want);

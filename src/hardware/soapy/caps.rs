@@ -48,6 +48,19 @@ pub struct DriverAnswers {
     /// `getGainElementRange`. The order is the driver's statement about its
     /// chain and is preserved exactly: nothing here sorts or renames.
     pub gain_elements: Vec<StageSpec>,
+    /// One entry per `gain_elements`, and only ever filled in for an element
+    /// whose step the driver did not give.
+    ///
+    /// **This is the answer to a question, not a table.** When
+    /// `getGainElementRange` comes back with `step = 0` the element is either
+    /// genuinely continuous or a two-position switch whose step was lost in
+    /// transit, and the range alone cannot tell the two apart: `[0, 40]` and
+    /// `[0, 14]` are the same shape. So the device is asked directly, by
+    /// setting the element to a value strictly between its bounds and reading
+    /// it back. A switch snaps to one of its two ends; a continuous control
+    /// keeps what it was given. `None` means the question was not asked (the
+    /// step was present) or could not be answered.
+    pub gain_element_is_switch: Vec<Option<bool>>,
     /// `hasGainMode`: whether there is an automatic gain mode to toggle.
     pub has_gain_mode: bool,
     /// `getBandwidthRange`. Empty means no programmable baseband filter.
@@ -98,6 +111,46 @@ pub struct Built {
     pub notes: Vec<String>,
 }
 
+/// Whether an element is a two-position switch, given what the driver said and
+/// what the device answered when it was asked.
+///
+/// **The step does not always survive the transport.** A HackRF reached through
+/// SoapyRemote reports `AMP [0, 14, step 0]` on this machine, while the same
+/// driver locally reports `[0, 14, 14]`. The step is packed by
+/// `SoapyRPCPacker` only when both the RPC version and
+/// `SOAPY_SDR_API_HAS_RANGE_TYPE_STEP` allow it, so a client or server built
+/// against an older SoapySDR silently sends `0.0` and the element arrives
+/// looking continuous. `is_switch` then answers `false`, the AMP stays a stage,
+/// and the user gets a 0-14 knob and "this device has no front end boost to
+/// toggle" for a radio that plainly has one.
+///
+/// The bounds cannot stand in for the missing step. `[0, 40, step 0]` (a real
+/// LNA) and `[0, 14, step 0]` (the AMP) are the same shape, so a rule that
+/// promoted one would promote the other and hand the boost key to the wrong
+/// element. That is not a hypothetical: it is what the first attempt at this
+/// did, and the test below is what caught it.
+///
+/// So the device is asked instead. `probed` is the answer to "can this element
+/// hold a value strictly between its bounds?", obtained by setting it and
+/// reading it back. A switch cannot; a continuous control can. `None` means the
+/// question was not needed (the step was there) or could not be answered, and
+/// then only the step is trusted.
+fn is_two_value_switch(e: &StageSpec, probed: Option<bool>) -> bool {
+    if !e.table.is_empty() {
+        return e.table.len() == 2;
+    }
+    if !e.is_usable() || e.max_db <= e.min_db {
+        return false;
+    }
+    if e.step_db > 0.0 {
+        // The driver gave a grid. A step that spans the range is two positions;
+        // anything else is a real grid and is left alone.
+        return e.is_switch();
+    }
+    // No step. Only the device's own answer counts.
+    probed == Some(true)
+}
+
 /// Split the driver's elements into stages to distribute across and a boost to
 /// toggle, dropping anything it described unusably.
 ///
@@ -107,17 +160,21 @@ pub struct Built {
 ///   silently pinned at its minimum looks exactly like one the user turned down.
 /// - **two positions** is a switch, so it becomes the boost. `SoapyHackRF`
 ///   reports `AMP [0, 14, 14]`, which is the same physical amp the native
-///   backend drives with its own key.
+///   backend drives with its own key. A transport that dropped the step is
+///   asked directly, and [`is_two_value_switch`] reads that answer.
 /// - anything else is a stage.
 ///
 /// Only the **first** switch becomes the boost. sdrtop has one boost concept and
 /// one key for it; a second switch stays in the list as a stage it can still set,
 /// rather than being silently dropped or quietly stealing the key.
-fn split_elements(elements: &[StageSpec]) -> (Vec<StageSpec>, Option<Boost>, Vec<String>) {
+fn split_elements(
+    elements: &[StageSpec],
+    probed: &[Option<bool>],
+) -> (Vec<StageSpec>, Option<Boost>, Vec<String>) {
     let mut stages = Vec::new();
     let mut boost = None;
     let mut notes = Vec::new();
-    for e in elements {
+    for (i, e) in elements.iter().enumerate() {
         if !e.is_usable() {
             notes.push(format!(
                 "SoapySDR: ignoring gain element {:?}, the driver reports its range as \
@@ -126,7 +183,7 @@ fn split_elements(elements: &[StageSpec]) -> (Vec<StageSpec>, Option<Boost>, Vec
             ));
             continue;
         }
-        if e.is_switch() && boost.is_none() {
+        if boost.is_none() && is_two_value_switch(e, probed.get(i).copied().flatten()) {
             boost = Some(Boost::Element(e.clone()));
             continue;
         }
@@ -144,7 +201,8 @@ pub fn capabilities(a: &DriverAnswers) -> Result<Built, Unsupported> {
     let min_db = gain_lo.max(0.0).round() as u32;
     let max_db = gain_hi.max(gain_lo).max(0.0).round() as u32;
 
-    let (mut stages, element_boost, mut notes) = split_elements(&a.gain_elements);
+    let (mut stages, element_boost, mut notes) =
+        split_elements(&a.gain_elements, &a.gain_element_is_switch);
     // A driver that names no elements, or names only unusable ones, still has
     // the whole-chain range. One unnamed stage over it is exactly what this
     // backend did before it could ask per element, so nothing regresses.
@@ -290,11 +348,33 @@ mod tests {
                 el("AMP", 0.0, 14.0, 14.0),
                 el("VGA", 0.0, 62.0, 2.0),
             ],
+            // Every step is present, so nothing had to be probed.
+            gain_element_is_switch: vec![None, None, None],
             has_gain_mode: false,
             bandwidth_ranges: vec![(1.75e6, 28e6)],
             native_format: "CS8".into(),
             native_full_scale: 128.0,
         }
+    }
+
+    /// The same HackRF, reached through SoapyRemote, where the step did not
+    /// survive the RPC.
+    ///
+    /// Copied from `soapy_probe` against `driver=remote` on this machine: the
+    /// bounds arrive intact and every step is `0`. This is the shape that made
+    /// the AMP a 0-14 knob and cost the radio its boost key, so it is the one
+    /// the tests below have to keep working.
+    fn soapy_hackrf_over_remote() -> DriverAnswers {
+        let mut a = soapy_hackrf();
+        a.gain_elements = vec![
+            el("LNA", 0.0, 40.0, 0.0),
+            el("AMP", 0.0, 14.0, 0.0),
+            el("VGA", 0.0, 62.0, 0.0),
+        ];
+        // The step is gone, so each element was asked directly. The LNA and the
+        // VGA kept the value they were given; the AMP snapped to an end.
+        a.gain_element_is_switch = vec![Some(false), Some(true), Some(false)];
+        a
     }
 
     /// Also verbatim, from `--probe="driver=audio"`. Kept because it is the
@@ -306,6 +386,7 @@ mod tests {
             rate_ranges: vec![(8e3, 8e3), (44.1e3, 44.1e3), (192e3, 192e3)],
             gain_range: (0.0, 0.0),
             gain_elements: vec![],
+            gain_element_is_switch: vec![],
             has_gain_mode: true,
             bandwidth_ranges: vec![],
             native_format: "CS16".into(),
@@ -325,6 +406,7 @@ mod tests {
                 el("MIX", 0.0, 15.0, 1.0),
                 el("VGA", 0.0, 15.0, 1.0),
             ],
+            gain_element_is_switch: vec![None, None, None],
             has_gain_mode: true,
             bandwidth_ranges: vec![],
             native_format: "CS16".into(),
@@ -381,6 +463,71 @@ mod tests {
                 }
             }
         }
+    }
+
+    /// The bug this file was fixed for: a transport that drops the step must not
+    /// cost the radio its amp.
+    ///
+    /// `soapy_probe` against `driver=remote` reported `AMP [0, 14, step 0]`,
+    /// `is_switch` answered `false`, and the user got a 0-14 AMP knob and "this
+    /// device has no front end boost to toggle" on a HackRF. The bounds are the
+    /// driver's own, and two bounds with nothing between them are a switch.
+    #[test]
+    fn a_switch_survives_a_transport_that_dropped_the_step() {
+        let c = capabilities(&soapy_hackrf_over_remote()).unwrap().caps;
+        let stages = c.gain.stages();
+        let names: Vec<&str> = stages.iter().map(|s| s.name.as_str()).collect();
+        assert_eq!(names, ["LNA", "VGA"], "AMP is not a stage");
+        assert!(
+            !names.contains(&"AMP"),
+            "the switch must not also be a stage: {names:?}"
+        );
+        match c.gain.boost() {
+            Some(Boost::Element(e)) => {
+                assert_eq!(e.name, "AMP");
+                assert_eq!((e.min_db, e.max_db), (0.0, 14.0));
+            }
+            other => panic!("AMP [0, 14, step 0] is still a switch, got {other:?}"),
+        }
+        assert_eq!(c.gain.boost_label(), "AMP");
+        assert_eq!(c.gain.primary_max_db(), 102, "LNA 40 + VGA 62, no AMP");
+    }
+
+    /// The narrowness of that rule, stated as a test: a real two-step control is
+    /// three positions and must stay a stage.
+    #[test]
+    fn a_two_step_control_is_not_mistaken_for_a_switch() {
+        let mut a = soapy_hackrf();
+        a.gain_elements = vec![el("LNA", 0.0, 40.0, 8.0), el("STEP", 0.0, 20.0, 10.0)];
+        a.gain_element_is_switch = vec![None, None];
+        let c = capabilities(&a).unwrap().caps;
+        let stages = c.gain.stages();
+        let names: Vec<&str> = stages.iter().map(|s| s.name.as_str()).collect();
+        assert_eq!(names, ["LNA", "STEP"], "three positions is a stage");
+        assert!(!c.gain.has_boost());
+    }
+
+    /// A step-less element the device would not answer about stays a stage.
+    ///
+    /// The bounds alone cannot tell a switch from a continuous control, so when
+    /// the probe comes back empty the honest answer is "not known", and an
+    /// unknown element is a stage the user can still set rather than a boost
+    /// guessed at. This is the case the first attempt at this fix got wrong: it
+    /// promoted the LNA, whose `[0, 40, step 0]` is the same shape as the AMP's.
+    #[test]
+    fn a_step_less_element_that_could_not_be_probed_is_not_a_switch() {
+        let mut a = soapy_hackrf();
+        a.gain_elements = vec![el("LNA", 0.0, 40.0, 0.0), el("VGA", 0.0, 62.0, 0.0)];
+        a.gain_element_is_switch = vec![None, None];
+        let c = capabilities(&a).unwrap().caps;
+        let stages = c.gain.stages();
+        let names: Vec<&str> = stages.iter().map(|s| s.name.as_str()).collect();
+        assert_eq!(
+            names,
+            ["LNA", "VGA"],
+            "nothing was answered, so nothing moved"
+        );
+        assert!(!c.gain.has_boost());
     }
 
     /// The number that matters most on the RF bench, and the one a rule reading
