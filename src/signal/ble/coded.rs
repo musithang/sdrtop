@@ -145,7 +145,7 @@ pub fn encode(bits: &[bool]) -> Vec<bool> {
 /// that could not have come from this encoder at all.
 #[allow(dead_code)]
 pub fn decode(coded: &[bool]) -> Option<Vec<bool>> {
-    viterbi(coded, true)
+    viterbi(coded.len(), true, |k, g0, g1| hamming(coded, k, g0, g1))
 }
 
 /// [`decode`] for a stream whose encoder has not yet been terminated: the
@@ -155,36 +155,71 @@ pub fn decode(coded: &[bool]) -> Option<Vec<bool>> {
 /// settled, so a caller decodes some way past what it needs.
 #[allow(dead_code)]
 pub fn decode_unterminated(coded: &[bool]) -> Option<Vec<bool>> {
-    viterbi(coded, false)
+    viterbi(coded.len(), false, |k, g0, g1| hamming(coded, k, g0, g1))
 }
 
-/// The trellis both decoders share. `terminated` ends the traceback at
-/// state zero (every FEC block of this PHY ends with a termination
-/// sequence); otherwise at the cheapest state, the earliest of equals.
-fn viterbi(coded: &[bool], terminated: bool) -> Option<Vec<bool>> {
-    if coded.is_empty() || !coded.len().is_multiple_of(2) {
+/// Soft-decision [`decode`]: one reading a coded bit, positive for a 1, its
+/// size the confidence. A branch costs the readings it contradicts and
+/// gains the ones it agrees with, so a faint reading on the wrong side of
+/// zero is outvoted by confident neighbours, where slicing it first would
+/// have counted it as a whole error.
+#[allow(dead_code)]
+pub fn decode_soft(readings: &[f32]) -> Option<Vec<bool>> {
+    viterbi(readings.len(), true, |k, g0, g1| {
+        correlation(readings, k, g0, g1)
+    })
+}
+
+/// [`decode_soft`] without termination, as [`decode_unterminated`].
+#[allow(dead_code)]
+pub fn decode_soft_unterminated(readings: &[f32]) -> Option<Vec<bool>> {
+    viterbi(readings.len(), false, |k, g0, g1| {
+        correlation(readings, k, g0, g1)
+    })
+}
+
+/// A branch's hard cost at step `k`: the coded bits it disagrees with.
+fn hamming(coded: &[bool], k: usize, g0: bool, g1: bool) -> f32 {
+    f32::from(u8::from(g0 != coded[2 * k]) + u8::from(g1 != coded[2 * k + 1]))
+}
+
+/// A branch's soft cost at step `k`: minus the readings it expects to be
+/// positive, plus the ones it expects negative.
+fn correlation(r: &[f32], k: usize, g0: bool, g1: bool) -> f32 {
+    let one = |expected: bool, v: f32| if expected { -v } else { v };
+    one(g0, r[2 * k]) + one(g1, r[2 * k + 1])
+}
+
+/// The trellis every decoder shares, over `len` coded bits with `cost`
+/// pricing each branch. `terminated` ends the traceback at state zero
+/// (every FEC block of this PHY ends with a termination sequence);
+/// otherwise at the cheapest state, the earliest of equals. Hard costs are
+/// small whole numbers, exact in an `f32`, so the hard decoders choose
+/// exactly as they did with integer metrics.
+fn viterbi(
+    len: usize,
+    terminated: bool,
+    cost: impl Fn(usize, bool, bool) -> f32,
+) -> Option<Vec<bool>> {
+    if len == 0 || !len.is_multiple_of(2) {
         return None;
     }
-    let steps = coded.len() / 2;
+    let steps = len / 2;
 
-    const UNREACHED: u32 = u32::MAX;
-    let mut metric = [UNREACHED; STATE_COUNT];
-    metric[0] = 0;
+    let mut metric = [f32::INFINITY; STATE_COUNT];
+    metric[0] = 0.0;
     let mut back: Vec<[Option<(usize, bool)>; STATE_COUNT]> = Vec::with_capacity(steps);
 
     for k in 0..steps {
-        let r0 = coded[2 * k];
-        let r1 = coded[2 * k + 1];
-        let mut next_metric = [UNREACHED; STATE_COUNT];
+        let mut next_metric = [f32::INFINITY; STATE_COUNT];
         let mut step_back: [Option<(usize, bool)>; STATE_COUNT] = [None; STATE_COUNT];
         for (s, &m) in metric.iter().enumerate() {
-            if m == UNREACHED {
+            if m.is_infinite() {
                 continue;
             }
             for input in [false, true] {
                 let (g0, g1, next) = step(index_to_state(s), input);
-                let dist = u32::from(g0 != r0) + u32::from(g1 != r1);
-                let candidate = m + dist;
+                let candidate = m + cost(k, g0, g1);
                 let next_idx = state_to_index(next);
                 if candidate < next_metric[next_idx] {
                     next_metric[next_idx] = candidate;
@@ -197,16 +232,16 @@ fn viterbi(coded: &[bool], terminated: bool) -> Option<Vec<bool>> {
     }
 
     // The all-zero-input path from state 0 always reaches state 0 again,
-    // at whatever cost the real received bits give it, so this is never
-    // actually `UNREACHED` - checked rather than assumed, since an
+    // at whatever cost the received readings give it, so this is never
+    // actually unreached - checked rather than assumed, since an
     // `.unwrap()` here would be a claim about the trellis this function
     // does not otherwise need to prove to itself.
     let end = if terminated {
         0
     } else {
-        (0..STATE_COUNT).min_by_key(|&i| metric[i])?
+        (0..STATE_COUNT).min_by(|&a, &b| metric[a].total_cmp(&metric[b]))?
     };
-    if metric[end] == UNREACHED {
+    if metric[end].is_infinite() {
         return None;
     }
 
@@ -365,12 +400,33 @@ pub struct Block1 {
     pub repairs: u32,
 }
 
+/// How the readers turn readings into a decision: sliced to bits first and
+/// decoded on their Hamming distance, or decoded on the readings
+/// themselves. Both are kept so one can be measured against the other
+/// (`coded_bench`); [`DECISIONS`] is the one the readers use.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[allow(dead_code)]
+pub enum Decisions {
+    Hard,
+    Soft,
+}
+
+/// The decisions [`read_block1`], [`peek_header`] and [`read_block2`] make.
+#[allow(dead_code)]
+pub const DECISIONS: Decisions = Decisions::Soft;
+
 /// FEC block 1 from its [`BLOCK1_SYMBOLS`] readings, one a symbol, positive
 /// for a 1. `None` when there are fewer.
 #[allow(dead_code)]
 pub fn read_block1(symbols: &[f32]) -> Option<Block1> {
+    read_block1_by(symbols, DECISIONS)
+}
+
+/// [`read_block1`] with the decisions named.
+#[allow(dead_code)]
+pub fn read_block1_by(symbols: &[f32], decisions: Decisions) -> Option<Block1> {
     let symbols = symbols.get(..BLOCK1_SYMBOLS)?;
-    let (bits, repairs) = read_block(symbols, Coding::S8, true)?;
+    let (bits, repairs) = read_block(symbols, Coding::S8, true, decisions)?;
     let mut access_address = 0u32;
     for (i, &b) in bits[..32].iter().enumerate() {
         access_address |= u32::from(b) << i;
@@ -387,9 +443,19 @@ pub fn read_block1(symbols: &[f32]) -> Option<Block1> {
 /// beyond it. `None` until that much has arrived.
 #[allow(dead_code)]
 pub fn peek_header(symbols: &[f32], coding: Coding, channel: u8) -> Option<[bool; 16]> {
+    peek_header_by(symbols, coding, channel, DECISIONS)
+}
+
+/// [`peek_header`] with the decisions named.
+#[allow(dead_code)]
+pub fn peek_header_by(
+    symbols: &[f32],
+    coding: Coding,
+    channel: u8,
+    decisions: Decisions,
+) -> Option<[bool; 16]> {
     let need = (16 + HEADER_LOOKAHEAD_BITS) * coding.symbols_per_bit();
-    let coded = demap(symbols.get(..need)?, coding);
-    let bits = decode_unterminated(&coded)?;
+    let (bits, _) = read_block(symbols.get(..need)?, coding, false, decisions)?;
     let mut header = [false; 16];
     header.copy_from_slice(&bits[..16]);
     whiten(&mut header, channel);
@@ -401,21 +467,46 @@ pub fn peek_header(symbols: &[f32], coding: Coding, channel: u8) -> Option<[bool
 /// readings themselves carry; `None` until that many have arrived.
 #[allow(dead_code)]
 pub fn read_block2(symbols: &[f32], coding: Coding, channel: u8) -> Option<(Vec<bool>, u32)> {
-    let header = peek_header(symbols, coding, channel)?;
+    read_block2_by(symbols, coding, channel, DECISIONS)
+}
+
+/// [`read_block2`] with the decisions named.
+#[allow(dead_code)]
+pub fn read_block2_by(
+    symbols: &[f32],
+    coding: Coding,
+    channel: u8,
+    decisions: Decisions,
+) -> Option<(Vec<bool>, u32)> {
+    let header = peek_header_by(symbols, coding, channel, decisions)?;
     let length = super::pdu::length(&header)? as usize;
     let need = block2_symbols(coding, 16 + 8 * length);
-    let (mut bits, repairs) = read_block(symbols.get(..need)?, coding, true)?;
+    let (mut bits, repairs) = read_block(symbols.get(..need)?, coding, true, decisions)?;
     bits.truncate(bits.len() - 3);
     whiten(&mut bits, channel);
     Some((bits, repairs))
 }
 
-/// One FEC block's readings to its uncoded bits (termination included) and
-/// the count of symbols whose sign disagrees with the decision once it is
-/// encoded and mapped again: what the code corrected.
-fn read_block(symbols: &[f32], coding: Coding, terminated: bool) -> Option<(Vec<bool>, u32)> {
-    let coded = demap(symbols, coding);
-    let bits = viterbi(&coded, terminated)?;
+/// One FEC block's readings to its uncoded bits (termination included when
+/// `terminated`) and the count of symbols whose sign disagrees with the
+/// decision once it is encoded and mapped again: what the code corrected.
+fn read_block(
+    symbols: &[f32],
+    coding: Coding,
+    terminated: bool,
+    decisions: Decisions,
+) -> Option<(Vec<bool>, u32)> {
+    let soft = demap(symbols, coding);
+    let bits = match decisions {
+        Decisions::Hard => {
+            let len = soft.len();
+            let hard: Vec<bool> = soft.iter().map(|&v| v > 0.0).collect();
+            viterbi(len, terminated, |k, g0, g1| hamming(&hard, k, g0, g1))?
+        }
+        Decisions::Soft => viterbi(soft.len(), terminated, |k, g0, g1| {
+            correlation(&soft, k, g0, g1)
+        })?,
+    };
     let again = map(&encode(&bits), coding);
     let repairs = again
         .iter()
@@ -434,17 +525,17 @@ fn map(coded: &[bool], coding: Coding) -> Vec<bool> {
     }
 }
 
-/// Readings to coded bits. At S=8 the four readings of a coded bit are
-/// weighed against Table 3.1's two patterns together (`1100` against
-/// `0011`), so one reading the noise pushed across zero does not decide the
-/// bit alone; at S=2 each reading is a coded bit.
-fn demap(symbols: &[f32], coding: Coding) -> Vec<bool> {
+/// Readings to one value a coded bit, positive for a 1. At S=8 the four
+/// readings of a coded bit are weighed against Table 3.1's two patterns
+/// together (`1100` against `0011`), so one reading the noise pushed across
+/// zero does not decide the bit alone; at S=2 each reading is a coded bit.
+fn demap(symbols: &[f32], coding: Coding) -> Vec<f32> {
     let p = coding.symbols_per_coded_bit();
     symbols
         .chunks_exact(p)
         .map(|c| match c {
-            [r0, r1, r2, r3] => r0 + r1 - r2 - r3 > 0.0,
-            [r] => *r > 0.0,
+            [r0, r1, r2, r3] => r0 + r1 - r2 - r3,
+            [r] => *r,
             _ => unreachable!("P is 1 or 4"),
         })
         .collect()
@@ -713,5 +804,39 @@ mod tests {
         let decoded = decode_unterminated(&encode(&bits)).unwrap();
         assert_eq!(decoded.len(), bits.len());
         assert_eq!(&decoded[..40], &bits[..40]);
+    }
+
+    /// With no noise, soft and hard agree bit for bit.
+    #[test]
+    fn soft_and_hard_agree_on_a_clean_stream() {
+        let mut rng = Rng::new(7);
+        let bits: Vec<bool> = (0..200)
+            .map(|_| rng.next_u64() & 1 == 1)
+            .chain([false; 3])
+            .collect();
+        let coded = encode(&bits);
+        let readings: Vec<f32> = coded.iter().map(|&b| if b { 1.0 } else { -1.0 }).collect();
+        assert_eq!(decode_soft(&readings), decode(&coded));
+        assert_eq!(decode_soft(&readings), Some(bits));
+    }
+
+    /// A faint wrong reading weighs less than the confident ones around it:
+    /// three coded bits within four read barely across zero are decoded
+    /// right from their neighbours' confidence, where slicing them hard
+    /// leaves the decoder three errors in a span too short for this code,
+    /// and it chooses wrong.
+    #[test]
+    fn soft_decisions_weigh_confidence() {
+        let bits = vec![
+            true, false, true, true, false, false, true, false, false, false,
+        ];
+        let coded = encode(&bits);
+        let mut r: Vec<f32> = coded.iter().map(|&b| if b { 1.0 } else { -1.0 }).collect();
+        for i in [2, 3, 5] {
+            r[i] *= -0.05;
+        }
+        assert_eq!(decode_soft(&r), Some(bits.clone()));
+        let hard: Vec<bool> = r.iter().map(|&v| v > 0.0).collect();
+        assert_ne!(decode(&hard), Some(bits), "hard decisions get this wrong");
     }
 }

@@ -20,6 +20,9 @@ pub mod address;
 pub mod assigned;
 pub mod channel;
 pub mod coded;
+#[cfg(test)]
+mod coded_bench;
+pub mod coded_rx;
 pub mod connect;
 pub mod data;
 pub mod detect;
