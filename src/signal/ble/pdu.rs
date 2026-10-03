@@ -179,6 +179,12 @@ pub fn used_bits(length: u8) -> usize {
 /// What a receiver needs to know before the rest of the packet has arrived -
 /// whether it has, yet - without slicing and decoding bits it cannot use.
 /// [`decode`] reads the field through this too, so the two cannot disagree.
+///
+/// **Eight bits, 1 to 255 octets** (Core 5.4 Vol 6 Part B 2.3, Figure 2.5).
+/// Earlier versions of the Core gave it six and two reserved bits, and this
+/// read six until extended advertising, whose PDUs run past 63 octets, made
+/// the difference matter. A legacy PDU is never longer than 37, and the
+/// legacy receiver still gives up at that length.
 pub fn length(header: &[bool]) -> Option<u8> {
     if header.len() < HEADER_BITS {
         return None;
@@ -189,7 +195,7 @@ pub fn length(header: &[bool]) -> Option<u8> {
             byte1 |= 1 << i;
         }
     }
-    Some(byte1 & 0x3F)
+    Some(byte1)
 }
 
 /// Decode one advertising channel PDU from its de-whitened bits, in
@@ -504,5 +510,16 @@ mod tests {
         for code in 0..16u8 {
             assert_eq!(PduType::from_bits(code).code(), code);
         }
+    }
+
+    /// Core 5.4 Vol 6 Part B 2.3, Figure 2.5: the Length field is 8 bits
+    /// (1 to 255 octets), not the 6 of earlier versions.
+    #[test]
+    fn the_length_field_is_eight_bits() {
+        let mut header = [false; 16];
+        for i in 0..8 {
+            header[8 + i] = (200u8 >> i) & 1 != 0;
+        }
+        assert_eq!(length(&header), Some(200));
     }
 }

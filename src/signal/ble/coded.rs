@@ -18,17 +18,19 @@
 //! encoder and the pattern mapper themselves), fetched from
 //! <https://www.bluetooth.com/wp-content/uploads/Files/Specification/HTML/Core-54/out/en/low-energy-controller/link-layer-specification.html>.
 //!
-//! **Primitives only - the same honest scope every large piece of this
-//! arc has landed with first.** This module encodes and decodes a bare
-//! bit stream; it does not yet know a packet's own preamble, Access
-//! Address, Coding Indicator or CRC, and nothing in `signal::ble::receive`
-//! calls it. Wiring an actual LE Coded live receiver - detecting a
-//! preamble and Access Address that are themselves FEC-encoded (256 air
-//! symbols for the 32-bit Access Address alone, not the 32 raw symbols LE
-//! 1M/2M correlate against), reading the Coding Indicator to learn which
-//! scheme FEC block 2 uses, and running this decoder on the result - is
-//! real remaining work, on the scale of B6's own first receiver, not
-//! assumed done here.
+//! **The packet, in bits, both ways.** Beside the primitives, the packet
+//! as section 2.2 lays it out: [`sync_symbols`] (the preamble and a known
+//! access address through FEC block 1, what a detector looks for),
+//! [`read_block1`] (the access address and the Coding Indicator, with how
+//! much the decoder repaired), [`peek_header`] (the PDU's length before the
+//! rest has arrived) and [`read_block2`] (the PDU and its CRC, de-whitened,
+//! for `pdu::decode`). They take one reading a symbol, positive for a 1, and
+//! never see a sample: finding the packet in a stream, its symbol timing
+//! and its carrier offset are the receiver's work. The test-only
+//! [`transmit`] builds a packet from the Core's text, so the readers are
+//! held to the specification rather than to themselves.
+
+use crate::signal::dsp::code::lfsr::whiten;
 
 /// The 8-symbol unit the Coded PHY's own preamble repeats ten times -
 /// section 2.2.1's own exact words: "10 repetitions of the symbol pattern
@@ -143,6 +145,23 @@ pub fn encode(bits: &[bool]) -> Vec<bool> {
 /// that could not have come from this encoder at all.
 #[allow(dead_code)]
 pub fn decode(coded: &[bool]) -> Option<Vec<bool>> {
+    viterbi(coded, true)
+}
+
+/// [`decode`] for a stream whose encoder has not yet been terminated: the
+/// traceback starts from whichever state the received bits reach most
+/// cheaply rather than from state zero. What reads a packet's header before
+/// the rest of FEC block 2 has arrived; its last few bits are the least
+/// settled, so a caller decodes some way past what it needs.
+#[allow(dead_code)]
+pub fn decode_unterminated(coded: &[bool]) -> Option<Vec<bool>> {
+    viterbi(coded, false)
+}
+
+/// The trellis both decoders share. `terminated` ends the traceback at
+/// state zero (every FEC block of this PHY ends with a termination
+/// sequence); otherwise at the cheapest state, the earliest of equals.
+fn viterbi(coded: &[bool], terminated: bool) -> Option<Vec<bool>> {
     if coded.is_empty() || !coded.len().is_multiple_of(2) {
         return None;
     }
@@ -182,12 +201,17 @@ pub fn decode(coded: &[bool]) -> Option<Vec<bool>> {
     // actually `UNREACHED` - checked rather than assumed, since an
     // `.unwrap()` here would be a claim about the trellis this function
     // does not otherwise need to prove to itself.
-    if metric[0] == UNREACHED {
+    let end = if terminated {
+        0
+    } else {
+        (0..STATE_COUNT).min_by_key(|&i| metric[i])?
+    };
+    if metric[end] == UNREACHED {
         return None;
     }
 
     let mut bits = vec![false; steps];
-    let mut state = 0usize;
+    let mut state = end;
     for k in (0..steps).rev() {
         let (prev, input) = back[k][state]?;
         bits[k] = input;
@@ -232,6 +256,226 @@ pub fn pattern_demap_s8(symbols: [bool; 4]) -> bool {
         .filter(|(a, b)| a != b)
         .count();
     dist_one <= dist_zero
+}
+
+/// FEC block 2's coding scheme, as the Coding Indicator names it (section
+/// 2.2.3, Table 2.2): `0b00` is S=8, `0b01` is S=2, and the other two values
+/// are reserved, which [`Coding::from_ci`] refuses rather than reads as
+/// either.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+#[allow(dead_code)]
+pub enum Coding {
+    S2,
+    S8,
+}
+
+#[allow(dead_code)]
+impl Coding {
+    /// The CI's two bits in transmission order, least significant first
+    /// (section 1.2); `None` for a reserved value.
+    pub fn from_ci(ci: [bool; 2]) -> Option<Self> {
+        match ci {
+            [false, false] => Some(Self::S8),
+            [true, false] => Some(Self::S2),
+            _ => None,
+        }
+    }
+
+    pub fn ci(self) -> [bool; 2] {
+        match self {
+            Self::S8 => [false, false],
+            Self::S2 => [true, false],
+        }
+    }
+
+    /// Symbols on the air per uncoded bit: two coded bits a bit, then one
+    /// symbol a coded bit at S=2 or four at S=8 (section 3.3.2, Table 3.1).
+    pub fn symbols_per_bit(self) -> usize {
+        match self {
+            Self::S2 => 2,
+            Self::S8 => 8,
+        }
+    }
+
+    /// Symbols per coded bit: the pattern mapper's P.
+    fn symbols_per_coded_bit(self) -> usize {
+        self.symbols_per_bit() / 2
+    }
+
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::S2 => "S2",
+            Self::S8 => "S8",
+        }
+    }
+}
+
+/// The preamble's length in symbols (section 2.2.1).
+#[allow(dead_code)]
+pub const PREAMBLE_SYMBOLS: usize = 80;
+
+/// FEC block 1's uncoded bits: the Access Address, the CI and TERM1
+/// (section 2.2, Table 2.1).
+#[allow(dead_code)]
+pub const BLOCK1_BITS: usize = 32 + 2 + 3;
+
+/// FEC block 1 on the air, always at S=8: 296 symbols.
+#[allow(dead_code)]
+pub const BLOCK1_SYMBOLS: usize = BLOCK1_BITS * 8;
+
+/// How far past the header [`peek_header`] decodes before trusting it, in
+/// uncoded bits: the traceback's last bits are the least settled, and five
+/// constraint lengths is the usual depth by which a K=4 code's paths have
+/// merged.
+#[allow(dead_code)]
+pub const HEADER_LOOKAHEAD_BITS: usize = 20;
+
+/// The 24-bit CRC and the 3-bit TERM2 that follow the PDU in FEC block 2.
+const BLOCK2_TRAILER_BITS: usize = 24 + 3;
+
+/// FEC block 2's length in symbols for a PDU of `pdu_bits` (header and
+/// payload); the CRC and TERM2 are added here.
+#[allow(dead_code)]
+pub fn block2_symbols(coding: Coding, pdu_bits: usize) -> usize {
+    (pdu_bits + BLOCK2_TRAILER_BITS) * coding.symbols_per_bit()
+}
+
+/// The symbols every packet on `access_address` starts with, whatever its
+/// CI and PDU: the preamble, then the access address's 256 symbols through
+/// the encoder and the S=8 mapper. The encoder is causal, so those cannot
+/// depend on the CI that follows them. On the advertising channels the
+/// address is a constant, so these are known in full before anything is
+/// heard: 336 symbols to look for.
+#[allow(dead_code)]
+pub fn sync_symbols(access_address: u32) -> Vec<bool> {
+    let mut out = preamble_bits().to_vec();
+    let aa = super::detect::access_address_bits(access_address);
+    out.extend(map(&encode(&aa), Coding::S8));
+    out
+}
+
+/// What FEC block 1 said: the access address, the coding of block 2 (`None`
+/// for a reserved CI) and how many of its symbols the decoder had to
+/// overrule.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[allow(dead_code)]
+pub struct Block1 {
+    pub access_address: u32,
+    pub coding: Option<Coding>,
+    pub repairs: u32,
+}
+
+/// FEC block 1 from its [`BLOCK1_SYMBOLS`] readings, one a symbol, positive
+/// for a 1. `None` when there are fewer.
+#[allow(dead_code)]
+pub fn read_block1(symbols: &[f32]) -> Option<Block1> {
+    let symbols = symbols.get(..BLOCK1_SYMBOLS)?;
+    let (bits, repairs) = read_block(symbols, Coding::S8, true)?;
+    let mut access_address = 0u32;
+    for (i, &b) in bits[..32].iter().enumerate() {
+        access_address |= u32::from(b) << i;
+    }
+    Some(Block1 {
+        access_address,
+        coding: Coding::from_ci([bits[32], bits[33]]),
+        repairs,
+    })
+}
+
+/// The PDU header's 16 bits, de-whitened, before FEC block 2 is complete:
+/// decoded without termination from the header and [`HEADER_LOOKAHEAD_BITS`]
+/// beyond it. `None` until that much has arrived.
+#[allow(dead_code)]
+pub fn peek_header(symbols: &[f32], coding: Coding, channel: u8) -> Option<[bool; 16]> {
+    let need = (16 + HEADER_LOOKAHEAD_BITS) * coding.symbols_per_bit();
+    let coded = demap(symbols.get(..need)?, coding);
+    let bits = decode_unterminated(&coded)?;
+    let mut header = [false; 16];
+    header.copy_from_slice(&bits[..16]);
+    whiten(&mut header, channel);
+    Some(header)
+}
+
+/// FEC block 2 whole: the PDU and its CRC, de-whitened, ready for
+/// `pdu::decode`, and the repairs. Its length comes from the header the
+/// readings themselves carry; `None` until that many have arrived.
+#[allow(dead_code)]
+pub fn read_block2(symbols: &[f32], coding: Coding, channel: u8) -> Option<(Vec<bool>, u32)> {
+    let header = peek_header(symbols, coding, channel)?;
+    let length = super::pdu::length(&header)? as usize;
+    let need = block2_symbols(coding, 16 + 8 * length);
+    let (mut bits, repairs) = read_block(symbols.get(..need)?, coding, true)?;
+    bits.truncate(bits.len() - 3);
+    whiten(&mut bits, channel);
+    Some((bits, repairs))
+}
+
+/// One FEC block's readings to its uncoded bits (termination included) and
+/// the count of symbols whose sign disagrees with the decision once it is
+/// encoded and mapped again: what the code corrected.
+fn read_block(symbols: &[f32], coding: Coding, terminated: bool) -> Option<(Vec<bool>, u32)> {
+    let coded = demap(symbols, coding);
+    let bits = viterbi(&coded, terminated)?;
+    let again = map(&encode(&bits), coding);
+    let repairs = again
+        .iter()
+        .zip(symbols)
+        .filter(|(&want, &got)| want != (got > 0.0))
+        .count() as u32;
+    Some((bits, repairs))
+}
+
+/// Coded bits to symbols: Table 3.1, the identity at S=2 and four symbols a
+/// bit at S=8.
+fn map(coded: &[bool], coding: Coding) -> Vec<bool> {
+    match coding {
+        Coding::S2 => coded.to_vec(),
+        Coding::S8 => coded.iter().flat_map(|&b| pattern_map_s8(b)).collect(),
+    }
+}
+
+/// Readings to coded bits. At S=8 the four readings of a coded bit are
+/// weighed against Table 3.1's two patterns together (`1100` against
+/// `0011`), so one reading the noise pushed across zero does not decide the
+/// bit alone; at S=2 each reading is a coded bit.
+fn demap(symbols: &[f32], coding: Coding) -> Vec<bool> {
+    let p = coding.symbols_per_coded_bit();
+    symbols
+        .chunks_exact(p)
+        .map(|c| match c {
+            [r0, r1, r2, r3] => r0 + r1 - r2 - r3 > 0.0,
+            [r] => *r > 0.0,
+            _ => unreachable!("P is 1 or 4"),
+        })
+        .collect()
+}
+
+/// A whole packet's symbols, built from the Core's text alone and never from
+/// the readers above: the preamble (2.2.1); FEC block 1, the access address,
+/// the CI and TERM1 through the encoder and the S=8 mapper (2.2, 3.3); FEC
+/// block 2, the PDU and its CRC whitened by `channel` (3.1.1, 3.2), then
+/// TERM2, through the encoder and `coding`'s mapper.
+#[cfg(test)]
+pub fn transmit(
+    access_address: u32,
+    coding: Coding,
+    channel: u8,
+    header_byte0: u8,
+    payload: &[u8],
+) -> Vec<bool> {
+    let mut out = preamble_bits().to_vec();
+
+    let mut block1: Vec<bool> = super::detect::access_address_bits(access_address).to_vec();
+    block1.extend(coding.ci());
+    block1.extend([false; 3]);
+    out.extend(map(&encode(&block1), Coding::S8));
+
+    // `pdu::encode` builds the PDU, its CRC and the whitening exactly as the
+    // uncoded PHYs send them; the Coded PHY's own part is what follows it.
+    let mut block2 = super::pdu::encode(channel, header_byte0, payload);
+    block2.extend([false; 3]);
+    out.extend(map(&encode(&block2), coding));
+    out
 }
 
 #[cfg(test)]
@@ -336,5 +580,138 @@ mod tests {
                 );
             }
         }
+    }
+
+    /// Table 2.2: 0b00 is S=8, 0b01 is S=2, sent least significant bit first.
+    #[test]
+    fn the_coding_indicator_reads_as_table_2_2() {
+        assert_eq!(Coding::from_ci([false, false]), Some(Coding::S8));
+        assert_eq!(Coding::from_ci([true, false]), Some(Coding::S2));
+        assert_eq!(Coding::S2.ci(), [true, false]);
+        assert_eq!(Coding::S8.ci(), [false, false]);
+    }
+
+    #[test]
+    fn a_reserved_coding_indicator_is_refused() {
+        assert_eq!(Coding::from_ci([false, true]), None);
+        assert_eq!(Coding::from_ci([true, true]), None);
+    }
+
+    /// Table 2.1's own extremes: 462 us (S=2, a 16-bit PDU) and 17040 us
+    /// (S=8, 2056 bits), at one symbol a microsecond.
+    #[test]
+    fn a_packet_lasts_what_table_2_1_says() {
+        let fixed = PREAMBLE_SYMBOLS + BLOCK1_SYMBOLS;
+        assert_eq!(fixed + block2_symbols(Coding::S2, 16), 462);
+        assert_eq!(fixed + block2_symbols(Coding::S8, 2056), 17040);
+    }
+
+    #[test]
+    fn the_sync_symbols_are_the_preamble_then_the_coded_address() {
+        let aa = crate::signal::ble::detect::ADVERTISING_ACCESS_ADDRESS;
+        let s = sync_symbols(aa);
+        assert_eq!(s.len(), 336);
+        assert_eq!(&s[..80], &preamble_bits()[..]);
+        // Whatever the CI and the PDU, the packet starts with them.
+        let sent = transmit(aa, Coding::S2, 37, 0x07, &[0x01, 0x00]);
+        assert_eq!(&sent[..336], &s[..]);
+    }
+
+    fn soft(symbols: &[bool]) -> Vec<f32> {
+        symbols
+            .iter()
+            .map(|&b| if b { 1.0 } else { -1.0 })
+            .collect()
+    }
+
+    /// Built from the Core's chain, read back through the receiver's: the
+    /// access address, the scheme, the PDU, a passing CRC, nothing repaired.
+    #[test]
+    fn a_coded_packet_reads_back_through_the_chain() {
+        let aa = crate::signal::ble::detect::ADVERTISING_ACCESS_ADDRESS;
+        for coding in [Coding::S8, Coding::S2] {
+            let payload = [0x05, 0x18, 0x23, 0x31, 0x09, 0x64, 0x40, 0x00];
+            let sym = transmit(aa, coding, 38, 0x07, &payload);
+            let pdu_bits = (2 + payload.len()) * 8;
+            assert_eq!(
+                sym.len(),
+                PREAMBLE_SYMBOLS + BLOCK1_SYMBOLS + block2_symbols(coding, pdu_bits)
+            );
+            let body = &sym[PREAMBLE_SYMBOLS..];
+            let b1 = read_block1(&soft(&body[..BLOCK1_SYMBOLS])).unwrap();
+            assert_eq!(
+                (b1.access_address, b1.coding, b1.repairs),
+                (aa, Some(coding), 0)
+            );
+            let b2 = &body[BLOCK1_SYMBOLS..];
+            let header = peek_header(&soft(b2), coding, 38).unwrap();
+            assert_eq!(
+                crate::signal::ble::pdu::length(&header),
+                Some(payload.len() as u8)
+            );
+            let (bits, repairs) = read_block2(&soft(b2), coding, 38).unwrap();
+            let p = crate::signal::ble::pdu::decode(&bits).unwrap();
+            assert!(p.crc_ok, "{coding:?}");
+            assert_eq!(p.payload, payload);
+            assert_eq!(repairs, 0);
+        }
+    }
+
+    /// The header can be read before block 2 is complete, from a lookahead
+    /// past it alone.
+    #[test]
+    fn the_header_is_read_before_the_packet_ends() {
+        let aa = crate::signal::ble::detect::ADVERTISING_ACCESS_ADDRESS;
+        for coding in [Coding::S8, Coding::S2] {
+            let payload = [0x42; 30];
+            let sym = transmit(aa, coding, 39, 0x07, &payload);
+            let b2 = &sym[PREAMBLE_SYMBOLS + BLOCK1_SYMBOLS..];
+            let enough = (16 + HEADER_LOOKAHEAD_BITS) * 2 * coding.symbols_per_bit() / 2;
+            let header = peek_header(&soft(&b2[..enough]), coding, 39).unwrap();
+            assert_eq!(crate::signal::ble::pdu::length(&header), Some(30));
+            assert_eq!(peek_header(&soft(&b2[..enough - 1]), coding, 39), None);
+        }
+    }
+
+    /// Three symbols of block 1 flipped: still read, and counted.
+    #[test]
+    fn block_one_repairs_what_it_fixes() {
+        let aa = crate::signal::ble::detect::ADVERTISING_ACCESS_ADDRESS;
+        let sym = transmit(aa, Coding::S8, 37, 0x07, &[0x01, 0x00]);
+        let mut b1 = soft(&sym[PREAMBLE_SYMBOLS..PREAMBLE_SYMBOLS + BLOCK1_SYMBOLS]);
+        for i in [5, 101, 230] {
+            b1[i] = -b1[i];
+        }
+        let read = read_block1(&b1).unwrap();
+        assert_eq!(
+            (read.access_address, read.coding, read.repairs),
+            (aa, Some(Coding::S8), 3)
+        );
+    }
+
+    /// Block 2 at S=2 has no pattern mapper to absorb an error: a flipped
+    /// symbol is a flipped coded bit, which the convolutional code repairs.
+    #[test]
+    fn block_two_repairs_at_s2_too() {
+        let aa = crate::signal::ble::detect::ADVERTISING_ACCESS_ADDRESS;
+        let payload = [0x11, 0x22, 0x33, 0x44, 0x55, 0x66];
+        let sym = transmit(aa, Coding::S2, 37, 0x07, &payload);
+        let mut b2 = soft(&sym[PREAMBLE_SYMBOLS + BLOCK1_SYMBOLS..]);
+        b2[40] = -b2[40];
+        let (bits, repairs) = read_block2(&b2, Coding::S2, 37).unwrap();
+        let p = crate::signal::ble::pdu::decode(&bits).unwrap();
+        assert!(p.crc_ok);
+        assert_eq!(repairs, 1);
+    }
+
+    /// An unterminated stream decodes to its best end state: everything but
+    /// the last few bits, which the traceback has not yet settled, is right.
+    #[test]
+    fn an_unterminated_stream_decodes_all_but_its_tail() {
+        let mut rng = Rng::new(31);
+        let bits: Vec<bool> = (0..60).map(|_| rng.next_u64() & 1 == 1).collect();
+        let decoded = decode_unterminated(&encode(&bits)).unwrap();
+        assert_eq!(decoded.len(), bits.len());
+        assert_eq!(&decoded[..40], &bits[..40]);
     }
 }
