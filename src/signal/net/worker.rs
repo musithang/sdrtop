@@ -2384,6 +2384,82 @@ mod tests {
         (m, seq - 1)
     }
 
+    /// Counts the LE 1M `ADV_EXT_IND`s on channel 38 in a recording
+    /// (`SDRTOP_REPLAY=path.sigmf-data`, ci8 at 20 Msps tuned to 2426 MHz)
+    /// and where their AuxPtrs point: how much following them would have to
+    /// listen to. By hand, in release.
+    #[test]
+    #[ignore]
+    fn count_1m_extended_advertising() {
+        use crate::signal::ble::aux::AuxPhy;
+        use std::io::Read;
+        let Ok(path) = std::env::var("SDRTOP_REPLAY") else {
+            return;
+        };
+        let mut rx = crate::signal::ble::receive::Receiver::new(
+            20e6,
+            38,
+            crate::signal::ble::Phy::OneM,
+            2_426e6,
+        )
+        .unwrap();
+        let mut f = std::fs::File::open(&path).unwrap();
+        let (mut at, mut all, mut ext, mut ok) = (0u64, 0u64, 0u64, 0u64);
+        let mut by_phy = std::collections::BTreeMap::new();
+        let (mut in_view, mut out_of_view, mut none) = (0u64, 0u64, 0u64);
+        let mut senders = std::collections::BTreeSet::new();
+        let mut buf = vec![0u8; 131_072 * 2];
+        let mut iq = Vec::new();
+        let started = std::time::Instant::now();
+        while f.read_exact(&mut buf).is_ok() {
+            crate::signal::demod::decode(&buf, eight_bit(), usize::MAX, &mut iq);
+            for p in rx.push_iq_at(&iq, at) {
+                all += 1;
+                if p.pdu_type != crate::signal::ble::pdu::PduType::Other(0x07) {
+                    continue;
+                }
+                ext += 1;
+                if !p.crc_ok {
+                    continue;
+                }
+                ok += 1;
+                let Ok(h) = crate::signal::ble::ext::parse(&p.payload) else {
+                    continue;
+                };
+                if let Some(a) = h.adi {
+                    senders.insert((a.sid, a.did));
+                }
+                match h.aux_ptr.filter(|a| !a.promises_nothing()) {
+                    None => none += 1,
+                    Some(a) => {
+                        let phy = match a.phy {
+                            Some(AuxPhy::OneM) => "1M",
+                            Some(AuxPhy::TwoM) => "2M",
+                            Some(AuxPhy::Coded) => "Coded",
+                            None => "reserved",
+                        };
+                        *by_phy.entry(phy).or_insert(0u64) += 1;
+                        if (7..=14).contains(&a.channel) {
+                            in_view += 1;
+                        } else {
+                            out_of_view += 1;
+                        }
+                    }
+                }
+            }
+            at += 131_072;
+        }
+        let secs = at as f64 / 20e6;
+        eprintln!(
+            "{secs:.1} s · {all} packets on 38 · {ext} ADV_EXT_IND ({ok} CRC good, {:.2}/s) · \
+             AuxPtr by PHY {by_phy:?} · to 7..=14 {in_view}, elsewhere {out_of_view}, none {none} · \
+             {} sets · {:.1} s to read",
+            ok as f64 / secs,
+            senders.len(),
+            started.elapsed().as_secs_f64()
+        );
+    }
+
     /// Replays a recording (`SDRTOP_REPLAY=path.sigmf-data`, ci8 at 20 Msps
     /// tuned to 2426 MHz) of a phone advertising on LE Coded through the
     /// worker on the LE Coded view, locked on channel 38, and prints what it

@@ -308,10 +308,6 @@ Every native backend needs the device to physically exist on my desk, and develo
 | Airspy HF+ Discovery | Best budget HF receiver, dedicated listener community | ~€150 |
 | LimeSDR Mini 2.0 | Full-duplex, wide range, and the obvious device to confirm the SoapySDR path on | ~€160 |
 
-No pressure, but if this scratches an itch for you, this is where it goes.
-
-[![Ko-fi](https://ko-fi.com/img/githubbutton_sm.svg)](https://ko-fi.com/musithang)
-
 ---
 
 <details>

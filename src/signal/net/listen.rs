@@ -257,4 +257,64 @@ mod tests {
         assert!(out.packets[0].crc_ok);
         assert_eq!(out.packets[0].coding, Some(Coding::S2));
     }
+
+    /// What one AuxPtr's listen costs, by the PHY it promises: noise, a
+    /// window as `aux::promise` opens it for an offset of 3 ms in 30 us
+    /// units, on a data channel in view, a receiver kept between listens as
+    /// the worker keeps it. By hand, in release, on the machine in question.
+    #[test]
+    #[ignore]
+    fn aux_listen_bench() {
+        use crate::signal::ble::aux::{promise, AuxPhy};
+        use crate::signal::dsp::testkit::Rng;
+        let rate = 20e6;
+        let noise = Rng::new(3).noise(1_000_000, 1e-3);
+        if let Err(why) = Receiver::for_link(rate, 12, Phy::TwoM, 2_426e6, Link::Advertising) {
+            eprintln!("LE 2M advertising receiver on 12: {why}");
+        }
+        let recent = Recent::new([(0, &noise[..])]);
+        for (phy_bits, ear, name) in [
+            (0b000u32, Ear::Link(Link::Advertising, Phy::OneM), "LE 1M"),
+            (0b001, Ear::Link(Link::Advertising, Phy::TwoM), "LE 2M"),
+            (0b010, Ear::Coded, "LE Coded"),
+        ] {
+            // AuxPtr: channel 12, CA 1 (50 ppm), 30 us units, 100 of them.
+            let v: u32 = 12 | 1 << 6 | 100 << 8 | phy_bits << 21;
+            let mut payload = vec![0, 0b0001_0000];
+            payload.extend([v as u8, (v >> 8) as u8, (v >> 16) as u8]);
+            payload[0] = (payload.len() - 1) as u8;
+            let header = crate::signal::ble::ext::parse(&payload).unwrap();
+            let p = promise(1, 0.0, &header, 0, rate).unwrap();
+            assert_eq!(
+                p.phy,
+                match phy_bits {
+                    0 => AuxPhy::OneM,
+                    1 => AuxPhy::TwoM,
+                    _ => AuxPhy::Coded,
+                }
+            );
+            let window_us = (p.to_pair - p.from_pair) / rate * 1e6;
+            let mut listener = Listener::default();
+            let runs = 50;
+            let started = std::time::Instant::now();
+            for _ in 0..runs {
+                let job = Job {
+                    ears: vec![ear],
+                    channel: 12,
+                    from_pair: p.from_pair,
+                    to_pair: p.to_pair,
+                };
+                let out = listener.listen(&job, &recent, rate, 2_426e6, rate);
+                if !out.in_view || out.feed_lost {
+                    eprintln!("{name}: not listened to (no receiver built here)");
+                    break;
+                }
+            }
+            let each_ms = started.elapsed().as_secs_f64() * 1e3 / runs as f64;
+            eprintln!(
+                "{name}: window {window_us:.0} us, {each_ms:.2} ms a listen ({:.2}x the window)",
+                each_ms * 1e3 / window_us
+            );
+        }
+    }
 }
