@@ -46,8 +46,8 @@ pub struct Outcome {
     /// In view, but not listened to: its samples were not held (lost to the
     /// feed, or older than what is kept).
     pub feed_lost: bool,
-    /// Held, but an ear's receiver cannot be built here (its PHY at this
-    /// sample rate), and why. Other ears may still have listened.
+    /// Held, but no ear's receiver can be built here (its PHY at this sample
+    /// rate), and why. `None` when any ear listened.
     pub refused: Option<String>,
     /// Data channel PDUs heard, placed on the stream.
     pub data: Vec<(DataPdu, DataTiming)>,
@@ -97,6 +97,7 @@ impl Listener {
             out.feed_lost = true;
             return out;
         };
+        let mut listened = false;
         for &ear in &job.ears {
             let key = (ear, job.channel);
             let fits = self.kept.get(&key).is_some_and(|k| match (k, ear) {
@@ -126,6 +127,7 @@ impl Listener {
                     }
                 }
             }
+            listened = true;
             match self.kept.get_mut(&key) {
                 Some(Kept::Link(rx)) => {
                     rx.reset();
@@ -140,6 +142,11 @@ impl Listener {
                 }
                 None => {}
             }
+        }
+        // Refused only where no ear could listen: one that did makes the
+        // window listened to, and what it heard or did not is the account.
+        if listened {
+            out.refused = None;
         }
         out
     }
@@ -227,6 +234,28 @@ mod tests {
                 .is_some_and(|w| w.contains("8.0 Msps")),
             "{out:?}"
         );
+    }
+
+    /// Two ears, mid PHY update, and only one can be built at this rate: the
+    /// window was listened to, by that one, so it is not refused; what it
+    /// heard, or did not, is the account.
+    #[test]
+    fn one_ear_that_listens_is_enough() {
+        let noise = crate::signal::dsp::testkit::Rng::new(4).noise(40_000, 1e-3);
+        let recent = Recent::new([(0, &noise[..])]);
+        let mut listener = Listener::default();
+        let job = Job {
+            ears: vec![
+                Ear::Link(Link::Advertising, Phy::OneM),
+                Ear::Link(Link::Advertising, Phy::TwoM),
+            ],
+            channel: 12,
+            from_pair: 0.0,
+            to_pair: 30_000.0,
+        };
+        let out = listener.listen(&job, &recent, 20e6, 2_426e6, 20e6);
+        assert!(out.in_view && !out.feed_lost, "{out:?}");
+        assert_eq!(out.refused, None, "{out:?}");
     }
 
     /// A link's packet inside its window is heard, placed on the stream.

@@ -611,6 +611,16 @@ impl Receiver {
         std::mem::take(&mut self.funnel)
     }
 
+    /// Put the receiver down: the funnel since the last [`Self::take_funnel`],
+    /// with a capture under way counted as given up, so every trigger ends
+    /// somewhere even when the receiver does not.
+    pub fn finish(mut self) -> Funnel {
+        if self.capturing {
+            self.funnel.gave_up += 1;
+        }
+        self.funnel
+    }
+
     /// A receiver for `channel` on `phy`, with the radio at `raw_rate` and
     /// tuned to `tuned_centre_hz`, which need not be the channel's own centre.
     pub fn new(raw_rate: f64, channel: u8, phy: Phy, tuned_centre_hz: f64) -> Result<Self, String> {
@@ -1572,6 +1582,24 @@ pub(crate) mod tests {
         assert_eq!(p.pdu_type, pdu::PduType::AdvInd);
         assert_eq!(p.adv_addr, Some(addr));
         assert!(p.crc_ok);
+    }
+
+    /// A receiver put down in the middle of a capture, as the worker does
+    /// at a break, a retune or a closing view, still ends that trigger: it
+    /// gave up, and the funnel it hands back says so.
+    #[test]
+    fn a_receiver_put_down_mid_capture_counts_it_given_up() {
+        let payload: Vec<u8> = (0..31u8).collect();
+        let iq = synthetic_packet_iq(Phy::OneM, 37, 0x02, &payload, 25.0);
+        let geometry = eight_bit();
+        let bytes = bytes_for(&iq, geometry);
+        let mut rx = centred(working_rate_hz(Phy::OneM), 37, Phy::OneM).unwrap();
+        // Through the sync word and into the payload, not to its end.
+        let cut = (bytes.len() * 2 / 3) & !1;
+        assert!(rx.push(&bytes[..cut], geometry).is_empty());
+        let f = rx.finish();
+        assert_eq!((f.triggered, f.gave_up), (1, 1), "{f:?}");
+        assert_eq!(f.triggered, f.decoded + f.crc_failed + f.gave_up);
     }
 
     /// **An auxiliary packet is read whole.** Extended advertising carries

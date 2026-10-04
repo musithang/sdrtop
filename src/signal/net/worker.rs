@@ -367,6 +367,17 @@ fn set_aux_outcome(
     }
 }
 
+/// Put the BLE receiver down, if there is one: a capture it had under way
+/// ends as given up in the funnel rather than with the receiver.
+fn put_down_ble(ble: &mut Option<BleReceiver>, state: &Arc<Mutex<SdrMetrics>>) {
+    let Some(rx) = ble.take() else { return };
+    let funnel = rx.finish();
+    if !funnel.is_empty() {
+        let mut m = state.lock().unwrap_or_else(|e| e.into_inner());
+        m.net.health.ble.add(funnel);
+    }
+}
+
 /// Put the LE Coded receiver down, if there is one: a capture it had under
 /// way ends as given up in the funnel rather than with the receiver.
 fn put_down(
@@ -884,7 +895,7 @@ impl NetWorker {
                 stream_id = stream_id.wrapping_add(1);
             }
             if !continuous {
-                ble = None;
+                put_down_ble(&mut ble, &self.state);
                 put_down(&mut coded, &self.state);
                 abandon(
                     &mut promises,
@@ -977,7 +988,7 @@ impl NetWorker {
             // other, and neither list shows the other's packets.
             let mut coded_on: Option<u8> = None;
             if is_coded && still_open {
-                ble = None;
+                put_down_ble(&mut ble, &self.state);
                 let advertising =
                     crate::signal::ble::channel::to_decode(centre_hz as u64, span_hz, locked)
                         .filter(|&ch| {
@@ -1043,7 +1054,7 @@ impl NetWorker {
                     // Coded), so a 2M decoder here would listen to nothing
                     // and an empty list would read as a quiet room. Said,
                     // and not run (net-ux-polish-plan 5.5).
-                    ble = None;
+                    put_down_ble(&mut ble, &self.state);
                     let mut m = self.state.lock().unwrap_or_else(|e| e.into_inner());
                     m.net.ble_refused = Some(format!(
                         "LE 2M is not used on the primary advertising channels (ch {ch} is one); \
@@ -1058,6 +1069,7 @@ impl NetWorker {
                         .as_ref()
                         .is_some_and(|r| r.matches(ch, rate_hz, phy, centre_hz))
                     {
+                        put_down_ble(&mut ble, &self.state);
                         ble = match BleReceiver::new(rate_hz, ch, phy, centre_hz) {
                             Ok(r) => {
                                 let mut m = self.state.lock().unwrap_or_else(|e| e.into_inner());
@@ -1079,10 +1091,10 @@ impl NetWorker {
                 }
                 Some(_) => {
                     // Section closed; nothing decodes while it is.
-                    ble = None;
+                    put_down_ble(&mut ble, &self.state);
                 }
                 None => {
-                    ble = None;
+                    put_down_ble(&mut ble, &self.state);
                     let mut m = self.state.lock().unwrap_or_else(|e| e.into_inner());
                     m.net.ble_refused = Some(
                         "not tuned to an advertising channel (2402, 2426 or 2480 MHz)".to_string(),
@@ -1903,7 +1915,7 @@ impl NetWorker {
                 // rule 4 exists to prevent; the chrome's staleness marks it, and
                 // dropping the scan means the next dwell starts clean.
                 scan = None;
-                ble = None;
+                put_down_ble(&mut ble, &self.state);
                 put_down(&mut coded, &self.state);
                 bt.clear();
                 load = Load::default();
@@ -3248,6 +3260,20 @@ mod tests {
         assert_eq!(m.net.health.aux.heard, 1);
         // Nothing on the LE Coded list: one advertisement, one list.
         assert!(m.net.coded_packets.is_empty());
+    }
+
+    /// An LE 1M capture the worker cuts short at a break still ends in the
+    /// funnel, as LE Coded's does: every trigger decoded, failed or given up.
+    #[test]
+    fn a_ble_capture_cut_by_a_break_still_ends_in_the_funnel() {
+        let payload: Vec<u8> = (0..31u8).collect();
+        // The packet (about 6 600 pairs) straddles the first block's end.
+        let blocks = le_scene(&[(38, 0x02, payload, 131_072 - 2_000)], 3);
+        let sent = vec![(1, blocks[0].clone()), (3, blocks[2].clone())];
+        let m = run_view("le", "net_ble", &sent);
+        let f = m.net.health.ble;
+        assert!(f.gave_up >= 1, "{f:?}");
+        assert_eq!(f.triggered, f.decoded + f.crc_failed + f.gave_up, "{f:?}");
     }
 
     /// **An extended advertiser is counted in the census.** Its address and
