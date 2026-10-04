@@ -78,7 +78,7 @@ each layout, and the footer shows the numbers for the section you are in.
 | `a` | Toggle the front end boost: RF amplifier (HackRF) / tuner AGC (RTL-SDR). Absent on a device that reports neither |
 | `w` | Pause or resume the waterfall |
 | `h` | Freeze the spectrum (hold the current frame behind the live one) |
-| a letter | Focus the panel whose title highlights it. `e` `l` `c` `i` `d` `t` `v` `x` `m` `n` `g` `b`, and in NET, LE and Classic `k` `j` `z` `u` `v` `b` `c`, all listed [below](#focus-modes) |
+| a letter | Focus the panel whose title highlights it. `e` `l` `c` `i` `d` `t` `v` `x` `m` `n` `g` `b`, and in NET, LE, Classic and LE Coded `k` `j` `z` `u` `e` `v` `b` `c`, all listed [below](#focus-modes) |
 | `y` | On a standard station (WWV at 2.5, 5, 10, 15 or 20 MHz): measure our own oscillator's error and take it out of every offset in the app. See [what an offset is worth](net.md#what-an-offset-is-worth) |
 | `1` to `9` | The nth layout **of the section you are in** |
 | `p` | Next layout in the same section, wrapping at the end |

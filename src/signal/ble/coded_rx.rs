@@ -352,10 +352,18 @@ impl CodedReceiver {
     /// [`Self::take_funnel`], with a capture under way counted as given up,
     /// so every trigger ends somewhere even when the receiver does not.
     pub fn finish(mut self) -> Funnel {
-        if self.capture.is_some() {
-            self.funnel.gave_up += 1;
-        }
+        self.give_up_capture();
         self.funnel
+    }
+
+    /// End the capture under way, counting it given up if it had been
+    /// counted a trigger: one still finding its peak was not.
+    fn give_up_capture(&mut self) {
+        if let Some(c) = self.capture.take() {
+            if !matches!(c.stage, Stage::Peaking) {
+                self.funnel.gave_up += 1;
+            }
+        }
     }
 
     /// Forget the stream: the next block is read as the first. A capture
@@ -386,9 +394,7 @@ impl CodedReceiver {
     /// packet across a gap.
     pub fn push_iq_at(&mut self, iq: &[Complex<f32>], first_pair: u64) -> Vec<Packet> {
         if self.next_pair.is_some_and(|next| next != first_pair) {
-            if self.capture.is_some() {
-                self.funnel.gave_up += 1;
-            }
+            self.give_up_capture();
             self.reset();
         }
         self.origin_pair.get_or_insert(first_pair);
@@ -1032,6 +1038,36 @@ mod tests {
         let f = rx.finish();
         assert_eq!((f.triggered, f.gave_up), (1, 1));
         assert_eq!(f.triggered, f.decoded + f.crc_failed + f.gave_up);
+    }
+
+    /// Wherever the stream is cut, put down or broken, every trigger ends
+    /// once and nothing ends that was never a trigger: a capture still
+    /// finding its peak has not been counted, so it is not given up either.
+    #[test]
+    fn a_cut_anywhere_ends_exactly_the_triggers() {
+        let mut rng = Rng::new(7);
+        let (iq, start) = on_air(
+            &coded_packet(Coding::S8, 12, &EXT_IND),
+            20e6,
+            12,
+            2_426e6,
+            0.0,
+            64,
+            &mut rng,
+        );
+        let balanced = |f: Funnel| f.triggered == f.decoded + f.crc_failed + f.gave_up;
+        for cut in (start as usize..start as usize + 900 * 20).step_by(100) {
+            let mut rx = CodedReceiver::new(20e6, 12, 2_426e6).unwrap();
+            rx.push_iq_at(&iq[..cut], 0);
+            let f = rx.finish();
+            assert!(balanced(f), "put down at {cut}: {f:?}");
+
+            let mut rx = CodedReceiver::new(20e6, 12, 2_426e6).unwrap();
+            rx.push_iq_at(&iq[..cut], 0);
+            rx.push_iq_at(&iq[cut..cut + 1000], cut as u64 + 131_072);
+            let f = rx.take_funnel();
+            assert!(balanced(f), "broken at {cut}: {f:?}");
+        }
     }
 
     /// After `reset`, a window far later is read as if it were the first.

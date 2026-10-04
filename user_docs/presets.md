@@ -22,7 +22,7 @@ name as a built-in (`command_rail`, `spectrum`, `waterfall`,
 `spectrum_waterfall`, `main`, `lab_iq`, `lab_rf`, `lab_timing`, `lab_signal`,
 `lab_sweep`, `micro_main`, `micro_signal`, `micro_gain`, `micro_health`,
 `micro_sweep`, `net`, `net_survey`, `net_census`, `net_ble`, `net_bt`,
-`net_piconet`, `net_bench`, `net_connection`, `observer`) and your version replaces it, so the number key that
+`net_piconet`, `net_bench`, `net_connection`, `net_coded`, `observer`) and your version replaces it, so the number key that
 opens it now opens your layout. Those names are the whole list; a name that isn't
 on it is a new preset, which appears in the menu automatically rather than taking
 over a key.
@@ -72,7 +72,7 @@ A few things follow from how these are read:
   reason is written to the log so you can see it happened. Losing a shortcut is a
   better answer than losing the layout.
 - **A section name sdrtop does not know becomes a section of its own**, listed
-  after the five built-in ones and titled with the name you gave it.
+  after the built-in ones and titled with the name you gave it.
 - **`hidden` is how the built-in `observer` preset stays out of the way.** It is
   loaded by sdrtop itself, so there is nothing to pick.
 

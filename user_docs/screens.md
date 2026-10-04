@@ -42,8 +42,9 @@ marked with a bar at its left edge.
 | **NET** | The 2.4 GHz band itself: what the radio can reach, and what is on the air |
 | **LE** | Bluetooth Low Energy: who is here, what they advertise, and one connection followed |
 | **Classic** | Classic Bluetooth: the piconets, one piconet's packets, and each end of it on a bench |
+| **LE Coded** | BLE's long-range PHY: who advertises on it, and where each advertisement pointed |
 
-The last three are one feature, shown only on a radio that reaches the band;
+The last four are one feature, shown only on a radio that reaches the band;
 [the NET page](net.md) is about all of them.
 
 Each layout shows its **number** beside its name, and that number is the key that

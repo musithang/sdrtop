@@ -639,6 +639,27 @@ panels = [
 ]
 "#;
 
+    /// `user_docs/presets.md` lists the built-in presets by name ("those
+    /// names are the whole list"), so a new one is a name the guide must
+    /// carry, and a name it carries must be one.
+    #[test]
+    fn the_guide_lists_exactly_the_builtin_presets() {
+        let doc = include_str!("../user_docs/presets.md");
+        let start = doc
+            .find("**Every preset is overridable, including the built-ins.**")
+            .expect("the paragraph naming the built-ins");
+        let end = start + doc[start..].find("Those names are the whole list").unwrap();
+        let listed: Vec<&str> = doc[start..end].split('`').skip(1).step_by(2).collect();
+        let builtin: Vec<&str> = BUILTIN_PRESETS.iter().map(|(n, _)| *n).collect();
+        let missing: Vec<_> = builtin.iter().filter(|n| !listed.contains(n)).collect();
+        let extra: Vec<_> = listed.iter().filter(|n| !builtin.contains(n)).collect();
+        assert!(
+            missing.is_empty(),
+            "built-in, not in presets.md: {missing:?}"
+        );
+        assert!(extra.is_empty(), "in presets.md, not built in: {extra:?}");
+    }
+
     /// **A key nobody reads is a key nobody notices.**
     ///
     /// `PanelSpec` is not `deny_unknown_fields`, deliberately - a user preset

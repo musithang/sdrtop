@@ -2,14 +2,14 @@
 
 Welcome. This is the plain-language guide to using sdrtop.
 
-> **Status:** the interactive TUI is feature-complete (spectrum, waterfall, the
-> four lab benches, the sweep scanner and the micro field views), and both the
-> HackRF One and the RTL-SDR are fully supported. Anything with a **SoapySDR**
-> driver now works too, written from the API rather than from owning the radio,
-> which is a different kind of "supported" and
-> [says so out loud](hardware.md#soapysdr-the-honest-version). The current arc is
-> polish: instrument-grade UI, sharper radio math, and bug fixing. See
-> [What's New](whats-new.md).
+> **Status:** spectrum, waterfall, the four lab benches, the sweep scanner, the
+> micro field views, IQ recording and the NET section (BLE, LE Coded and
+> classic Bluetooth, measured), with the HackRF One, the RTL-SDR and the tinySA
+> verified on hardware. Anything with a **SoapySDR** driver works too, written
+> from the API rather than from owning the radio, which is a different kind of
+> "supported" and [says so out loud](hardware.md#soapysdr-the-honest-version).
+> New features keep coming, and each is followed by its polish: a UI that reads
+> at a glance, sharper radio math, bug fixing. See [What's New](whats-new.md).
 
 ---
 
@@ -22,7 +22,7 @@ Welcome. This is the plain-language guide to using sdrtop.
 ## Going deeper
 
 - **[The Lab presets](lab.md)**: what each measurement means and how to act on it
-- **[The NET section](net.md)**: the 2.4 GHz band, BLE and classic Bluetooth:
+- **[The NET section](net.md)**: the 2.4 GHz band, BLE, LE Coded and classic Bluetooth:
   what each view answers, and how far each number can be trusted
 - **[Recording the IQ stream](recording.md)**: `Ctrl+R`, the SigMF files it
   writes, and how a recording says what it lost

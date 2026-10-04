@@ -2341,19 +2341,15 @@ mod tests {
         );
     }
 
-    /// Replays a recording (`SDRTOP_REPLAY=path.sigmf-data`, ci8 at 20 Msps
-    /// tuned to 2426 MHz) through the worker on LE 2, locked, and prints the
-    /// connections followed. By hand, in release.
-    #[test]
-    #[ignore]
-    fn replay_a_recording() {
+    /// A recording at `path` (ci8 at 20 Msps tuned to 2426 MHz) through the
+    /// worker on `section`'s `preset`, locked, every block taken: the feed
+    /// waits for the worker, so nothing is lost to load. The state it left,
+    /// and how many blocks went in.
+    fn replay(path: &str, section: &str, preset: &str) -> (SdrMetrics, u64) {
         use std::io::Read;
-        let Ok(path) = std::env::var("SDRTOP_REPLAY") else {
-            return;
-        };
         let mut m = SdrMetrics::fixture().streaming();
-        m.ui.section = "le".to_string();
-        m.ui.active_preset = "net_ble".to_string();
+        m.ui.section = section.to_string();
+        m.ui.active_preset = preset.to_string();
         m.net.mode = crate::state::NetMode::Lock;
         m.radio.frequency = 2_426_000_000;
         m.radio.config_sample_rate = 20e6;
@@ -2364,7 +2360,7 @@ mod tests {
         let worker = std::thread::spawn(move || {
             NetWorker::new(rx, st, eight_bit(), SAFE_BT_CHANNELS).run();
         });
-        let mut f = std::fs::File::open(&path).unwrap();
+        let mut f = std::fs::File::open(path).unwrap();
         let mut seq = 1u64;
         loop {
             let mut buf = vec![0u8; 131_072 * 2];
@@ -2384,7 +2380,105 @@ mod tests {
         }
         drop(tx);
         worker.join().unwrap();
-        let m = state.lock().unwrap();
+        let m = state.lock().unwrap().clone();
+        (m, seq - 1)
+    }
+
+    /// Replays a recording (`SDRTOP_REPLAY=path.sigmf-data`, ci8 at 20 Msps
+    /// tuned to 2426 MHz) of a phone advertising on LE Coded through the
+    /// worker on the LE Coded view, locked on channel 38, and prints what it
+    /// read. By hand, in release: the phone's `ADV_EXT_IND`s are decoded,
+    /// at least one AuxPtr is followed to its `AUX_ADV_IND`, the phone's
+    /// name is read from it, and every trigger ends once.
+    #[test]
+    #[ignore]
+    fn replay_a_coded_recording() {
+        let Ok(path) = std::env::var("SDRTOP_REPLAY") else {
+            return;
+        };
+        let (m, blocks) = replay(&path, "coded", "net_coded");
+        let f = m.net.health.coded;
+        let a = m.net.health.aux;
+        let kept: Vec<_> = m.net.coded_packets.iter().collect();
+        let role = |p: &&BlePacket| p.ext.as_ref().map(|e| e.role.label());
+        let primaries = kept
+            .iter()
+            .filter(|p| role(p) == Some("ADV_EXT_IND"))
+            .count();
+        let auxes: Vec<_> = kept
+            .iter()
+            .filter(|p| role(p) == Some("AUX_ADV_IND"))
+            .collect();
+        let names: std::collections::BTreeSet<String> = auxes
+            .iter()
+            .filter_map(|p| {
+                let e = p.ext.as_ref()?;
+                let structures = crate::signal::ble::ad::parse(&e.header.adv_data);
+                crate::signal::ble::ad::name(&structures).map(|(n, _)| n.to_string())
+            })
+            .collect();
+        let snr = |ps: &[&&BlePacket]| {
+            let v: Vec<f64> = ps.iter().filter_map(|p| p.snr_db).collect();
+            let lo = v.iter().cloned().fold(f64::INFINITY, f64::min);
+            let hi = v.iter().cloned().fold(f64::NEG_INFINITY, f64::max);
+            format!("{lo:.1} to {hi:.1} dB")
+        };
+        let prim: Vec<_> = kept
+            .iter()
+            .filter(|p| role(p) == Some("ADV_EXT_IND"))
+            .collect();
+        let repairs: Vec<u32> = kept
+            .iter()
+            .filter_map(|p| p.coded.as_ref().map(|c| c.fec_repairs))
+            .collect();
+        eprintln!(
+            "blocks {blocks} · heard {} · kept {} ({primaries} ADV_EXT_IND, {} AUX_ADV_IND)",
+            m.net.coded_heard,
+            kept.len(),
+            auxes.len()
+        );
+        eprintln!(
+            "funnel: {} triggers · {} CRC ok · {} CRC failed · {} gave up",
+            f.triggered, f.decoded, f.crc_failed, f.gave_up
+        );
+        eprintln!(
+            "aux: {} heard · {} missed · {} not in view · {} feed lost · {} none promised · {} refused",
+            a.heard, a.missed, a.not_in_view, a.feed_lost, a.none_promised, a.refused
+        );
+        eprintln!(
+            "SNR primary {} · aux {} · FEC repairs max {} mean {:.2}",
+            snr(&prim),
+            snr(&auxes),
+            repairs.iter().max().unwrap_or(&0),
+            repairs.iter().sum::<u32>() as f64 / repairs.len().max(1) as f64
+        );
+        for p in auxes.iter().take(3) {
+            eprintln!(
+                "aux ch {} · {} · SNR {:?} · CFO {:?}",
+                p.channel,
+                p.phy.label(),
+                p.snr_db,
+                p.freq_offset_hz
+            );
+        }
+        eprintln!("names {names:?}");
+        assert!(primaries > 0, "no ADV_EXT_IND");
+        assert!(a.heard > 0 && !auxes.is_empty(), "no AuxPtr followed");
+        assert!(!names.is_empty(), "no name read");
+        assert_eq!(f.triggered, f.decoded + f.crc_failed + f.gave_up, "{f:?}");
+    }
+
+    /// Replays a recording (`SDRTOP_REPLAY=path.sigmf-data`, ci8 at 20 Msps
+    /// tuned to 2426 MHz) through the worker on LE 2, locked, and prints the
+    /// connections followed. By hand, in release.
+    #[test]
+    #[ignore]
+    fn replay_a_recording() {
+        use std::io::Read;
+        let Ok(path) = std::env::var("SDRTOP_REPLAY") else {
+            return;
+        };
+        let (m, blocks) = replay(&path, "le", "net_ble");
         let connects = m
             .net
             .ble_packets
@@ -2392,8 +2486,7 @@ mod tests {
             .filter(|p| p.pdu_type == crate::signal::ble::pdu::PduType::ConnectInd)
             .count();
         eprintln!(
-            "blocks {} · packets kept {} · CONNECT_IND kept {connects}",
-            seq - 1,
+            "blocks {blocks} · packets kept {} · CONNECT_IND kept {connects}",
             m.net.ble_packets.len()
         );
         // A second pass, with no follower: every packet with the link's

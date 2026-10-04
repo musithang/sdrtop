@@ -13,8 +13,8 @@ in time.
 > [Keyboard shortcuts](keys.md); the entries below are a record of what happened,
 > not a reference.
 
-> **Where we are now:** the interactive TUI is feature-complete and both radios
-> are fully supported. The current arc is instrument-grade polish: the **Command
+> **Where we are now:** new features keep landing, and each one is followed by
+> its polish. The benches went that way first: the **Command
 > Rail** cockpit, the redrawn **Lab IQ**, the rebuilt **Lab RF** bench, the **Lab
 > Timing** real-time bench and the **FM MPX · Demod** instrument with RDS, most
 > recently gone over reading by reading for anything that was not strictly true,
@@ -26,8 +26,8 @@ in time.
 > noise knee rather than only modelling one.
 > Since 0.6.0 there is a whole second arc beside the benches: **NET**, the
 > 2.4 GHz band and Bluetooth, measured to the same standard.
-> The ongoing work is polishing the UI, sharpening the radio math, and squashing
-> bugs. So if something looks off or behaves oddly, that's exactly what we're
+> Between features the work is polishing the UI, sharpening the radio math, and
+> squashing bugs. So if something looks off or behaves oddly, that's exactly what we're
 > hunting.
 
 ---

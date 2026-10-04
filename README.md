@@ -52,7 +52,7 @@
 It's a hobby project built in my spare time, and honestly, I made it for *you* ❤️. Use it however you like, beat on it, and don't be shy: open issues, dig through the code, and if you've got a good idea, send it my way as a pull request or just a message. This is an open table, not my private garage.
 
 > [!IMPORTANT]
-> **Project status: early development.** The TUI is feature-complete and the arc now is polish, sharper radio math and bug fixing, not more features. (I said that before 0.6.0 too, and then Bluetooth happened.)
+> **Project status: early development.** New features keep coming, and each one goes the same way: built, measured against the specification, then polished until its screen reads at a glance. Between features the work is sharper radio math and bug fixing.
 >
 > HackRF One, RTL-SDR and a tinySA Ultra ZS405 are **verified on hardware**. Anything with a **SoapySDR** driver also works, and that backend is **beta**: it was written from the API rather than from owning the radios, so treat it as "should work, nobody has confirmed it yet". [The docs say exactly which parts are confirmed](user_docs/hardware.md#soapysdr-the-honest-version). If you own one of those, an issue either way is worth a lot to me.
 >
@@ -108,8 +108,9 @@ Everything your radio knows about itself, in real time, without leaving the term
 - **A band sweep** wider than one window, stitched into a single curve with band-plan labels, `Enter` on a peak to tune straight to it.
 - **Micro field views**, because sdrtop shouldn't need a full terminal to be useful. When the panels stop being readable, each concern strips down to the one number that matters, big enough to read across the room.
 - **Observer mode**: if another app already holds the radio, sdrtop tells you which one, shows device identity and USB stats, and waits. No error dialog, no fight over the USB handle, and it takes the radio back the moment it's free.
-- **NET: the 2.4 GHz band, measured.** BLE advertising and classic Bluetooth piconets, decoded and then treated like any other transmitter on the bench: modulation index, drift, crystal error in ppm, advertising interval, frame error rate against SNR, slot jitter, each with its uncertainty and against the specification's limits. Not a device list with extra steps; the list was the easy part. It never transmits and never follows a connection. [The details](user_docs/net.md).
-- **Six themes and a layout system**: presets grouped into five sections, `Esc` for the menu, or define your own out of any panel sdrtop draws.
+- **NET: the 2.4 GHz band, measured.** BLE advertising, LE Coded (BLE's long-range PHY) and classic Bluetooth piconets, decoded and then treated like any other transmitter on the bench: modulation index, drift, crystal error in ppm, advertising interval, frame error rate against SNR, slot jitter, each with its uncertainty and against the specification's limits. A BLE connection heard being set up is followed event by event, and an LE Coded advertisement to the auxiliary packet it points at, from the sidelines: it never transmits and never joins anything. Not a device list with extra steps; the list was the easy part. [The details](user_docs/net.md).
+- **Recording**: `Ctrl+R` from any layout writes the raw IQ stream as SigMF, with every sample the radio or the app lost marked where it happened, so a recording says how far it can be trusted. [The details](user_docs/recording.md).
+- **Six themes and a layout system**: presets grouped into sections, `Esc` for the menu, or define your own out of any panel sdrtop draws.
 
 Measured the awkward way rather than the easy way. Bandwidth about the carrier, not across whatever span you happened to capture, so a mistuned radio confesses instead of faking a good number. The noise floor as a density, so the same receiver reads as the same receiver whatever the sample rate. And every lab panel marks itself **[STALE]** the moment RX stops, so a frozen number is never mistaken for a live one.
 
@@ -127,7 +128,8 @@ Measured the awkward way rather than the easy way. Bandwidth about the carrier, 
 | [The Lab presets](user_docs/lab.md): the bench-engineer views | [Configuration](user_docs/config.md): config.toml &amp; [layouts](user_docs/presets.md) | [Advanced features](user_docs/advanced.md): workflows & limits |
 | [Tips & tricks](user_docs/tips-and-tricks.md): gain, markers, workflows | [Troubleshooting](user_docs/troubleshooting.md): when things go sideways | [Supported hardware](user_docs/hardware.md): what works today |
 | [Themes](user_docs/themes.md): the six palettes | [What's new](user_docs/whats-new.md): the checkpoint log | [The demodulator](user_docs/demodulator.md): how it was built |
-| [The NET section](user_docs/net.md): BLE & classic Bluetooth, measured | [Layout presets](user_docs/presets.md): the 21 built-ins | [Changelog](CHANGELOG.md): version by version |
+| [The NET section](user_docs/net.md): BLE, LE Coded & classic Bluetooth, measured | [Layout presets](user_docs/presets.md): the built-ins and your own | [Recording](user_docs/recording.md): the IQ stream as SigMF |
+| [Changelog](CHANGELOG.md): version by version | | |
 
 ---
 
@@ -209,9 +211,9 @@ That last command is the whole diagnostic. If your radio isn't in that list, the
 
 ## Keys
 
-Layouts are grouped into five sections and **each section has its own numbers**: `Command Rail` for the general views, `Lab` for the benches, `Sweep` for the band scan, `Micro` for the field views, `NET` for the 2.4 GHz band and Bluetooth. So `2` is the RF bench inside Lab and the spectrum inside Command Rail. `Esc` opens the menu, which shows you the sections, the layouts in the one you're on, and the number that opens each. Nine keys, five times over, rather than one long row to memorise.
+Layouts are grouped into sections and **each section has its own numbers**: `Command Rail` for the general views, `Lab` for the benches, `Sweep` for the band scan, `Micro` for the field views, and on a radio that reaches 2.4 GHz, `NET` for the band, `LE` for Bluetooth Low Energy, `Classic` for classic Bluetooth and `LE Coded` for BLE's long range. So `2` is the RF bench inside Lab and the spectrum inside Command Rail. `Esc` opens the menu, which shows you the sections, the layouts in the one you're on, and the number that opens each. Nine keys per section, rather than one long row to memorise.
 
-The eight that get you everywhere:
+The ones that get you everywhere:
 
 | Key | Action |
 |---|---|
@@ -222,6 +224,7 @@ The eight that get you everywhere:
 | `↑` / `↓` | Primary gain |
 | `f` / `s` | Type a frequency / a sample rate |
 | `c` / `e` / `l` | Focus the Command Rail / spectrum / waterfall |
+| `Ctrl+R` | Record the IQ stream, or stop |
 | `q` | Quit and save |
 
 Capitals work everywhere: `C` and `c` do the same thing, so you never have to think about whether Shift is down. The gain keys relabel themselves per device, and a control your radio doesn't have simply isn't offered rather than sitting there doing nothing.
@@ -242,7 +245,7 @@ Frequency, gains, sample rate, markers, the sweep band, your theme and your layo
 
 ## Roadmap
 
-**Polish over features.** I have said that before and then went and wrote a demodulator, so this time there's a list. ✨
+**Features, then polish.** New features keep landing, and when one is done its next step is always the same: polish, and a UI that reads at a glance. Here's where things stand. ✨
 
 ### ✅ Done
 
@@ -257,6 +260,9 @@ Frequency, gains, sample rate, markers, the sweep band, your theme and your layo
 - A measured noise-step sweep on the RF bench, not just the modelled figure
 - tinySA / tinySA Ultra: calibrated dBm spectrum and native sweeps (thanks, [@AlCalzone](https://github.com/AlCalzone))
 - **NET**: BLE and classic Bluetooth, decoded and measured against the Core Specification, exported with provenance
+- BLE connections followed event by event, from the sidelines
+- **LE Coded**: BLE's long-range PHY, S=8 and S=2, with its AuxPtr followed to the auxiliary packet
+- IQ recording to SigMF, every lost sample marked where it happened
 
 ### 🔧 In progress
 
@@ -266,7 +272,6 @@ Frequency, gains, sample rate, markers, the sweep band, your theme and your layo
 
 ### 🔜 Next
 
-- Signal recording to file
 - In-app config editing
 - Native backends for hardware that lands on the desk
 - **Digital signal demodulation done properly**, the way Bluetooth now is: WiFi, ADS-B, AIS, LoRa, DMR. Each gets its own UI and its own detailed info panel. Still no audio, still just data

@@ -14,11 +14,12 @@ The section only appears on a radio that reaches the band and can sample fast
 enough for its cheapest mode. On one that cannot, the section is hidden and
 the log says why in one line.
 
-It lives in three sections of the menu: **NET** for the band itself, **LE**
-for Bluetooth Low Energy and **Classic** for classic Bluetooth. They come and
-go together, because one radio requirement admits all three, and everything
-on this page holds in all of them. Eight views, one question each; the key is
-the number to press while that section is active:
+It lives in four sections of the menu: **NET** for the band itself, **LE**
+for Bluetooth Low Energy, **Classic** for classic Bluetooth and **LE Coded**
+for BLE's long-range PHY. They come and go together, because one radio
+requirement admits all four, and everything on this page holds in all of
+them. Nine views, one question each; the key is the number to press while
+that section is active:
 
 | Key | View | The question it answers |
 |-----|------|--------------------------|
@@ -30,6 +31,7 @@ the number to press while that section is active:
 | `Classic 1` | **Piconets** | Who is running a classic Bluetooth piconet near me? |
 | `Classic 2` | **Packets** | What is this one piconet saying, packet by packet? |
 | `Classic 3` | **Bench** | How good is each end of it, side by side? |
+| `LE Coded 1` | **Long range** | Who advertises on LE Coded, and where did each advertisement point? |
 
 The panels with controls announce them with a highlighted letter in the
 title; the full list is in [Keyboard Shortcuts](keys.md#net-panel-focus-modes).
@@ -73,8 +75,8 @@ A surveyed count is a sample of the band, not a complete record. A few
 readings only exist in LOCK: a BLE device's advertising interval, for one,
 needs arrivals that were never interrupted by a hop.
 
-What SURVEY walks depends on the view. The BLE list and the Census are fed
-by the advertising decoder, so there it rotates the three advertising
+What SURVEY walks depends on the view. The BLE list, the Census and LE Coded
+are fed by an advertising decoder, so there it rotates the three advertising
 channels and nothing else. Everywhere else it walks the whole band, and the
 BLE decoder takes whichever advertising channel is in view at each stop,
 not just the channel the stop happens to be centred on. (It used to take
@@ -84,8 +86,8 @@ introduced.)
 
 ### Stepping while locked
 
-`←` and `→` move a locked radio without typing a frequency. On the BLE and
-Census views a step is the next advertising channel, 37, 38, 39 and round
+`←` and `→` move a locked radio without typing a frequency. On the BLE,
+Census and LE Coded views a step is the next advertising channel, 37, 38, 39 and round
 again, because that is the only place advertising happens and anywhere in
 between is an expensive way to hear nothing. On the other views it is one
 block of the band along: the span, or on the classic views the most channels
@@ -111,9 +113,9 @@ stretch walks the band with the survey.
 
 The line under it says the same in words: `● BLE 38 adv` or `● BLE 3 data`
 (a data channel is where advertising never comes, which is the usual reason
-for a quiet list), `■ BT 5–11` for the classic channels, and with no decoder
-running, the Wi-Fi channel number, because that is how everyone else reads
-2.4 GHz.
+for a quiet list), `● CODED 38 adv` for the LE Coded receiver, `■ BT 5–11`
+for the classic channels, and with no decoder running, the Wi-Fi channel
+number, because that is how everyone else reads 2.4 GHz.
 
 ### The three silences
 
@@ -312,7 +314,9 @@ their full set.
 ### Decode health
 
 The account of the feed and the decoders: blocks in, blocks lost, gaps, and
-the BLE decode funnel (triggers, and how each one ended). The funnel is also
+the BLE decode funnel (triggers, and how each one ended). Once the LE Coded
+receiver has run this session, its funnel and its AuxPtrs are counted here
+too; before that it is not mentioned, because this view never starts it. The funnel is also
 one bar, good, CRC failed and gave up in their shares, and the decode load
 is a bar against a rule at 100 %, red past it. Every count on the other NET
 panels is only as complete as this panel says the feed was.
@@ -810,6 +814,83 @@ order, and names the rest ("+ TIMING on a wider panel"). Shorter than its
 sections, a column shrinks its plots first (six rows, then three, then
 none), keeps its readings whole, and says the plots are on a taller panel;
 only then do readings give way from the bottom, and it says that too.
+
+---
+
+## Long range · `LE Coded 1` *(focus `v`)*
+
+**LE Coded** is the PHY BLE uses to reach further: every bit goes out as
+eight symbols (S=8, 125 kbit/s) or two (S=2, 500 kbit/s), wrapped in a
+convolutional code, so a receiver can get the packet back from a signal
+LE 1M would lose. The price is time: an advertisement that takes 0.4 ms on
+LE 1M takes over a millisecond here, and a full one 17.
+
+The LE 1M receiver cannot hear any of it (a different preamble, and every
+bit coded), and running both on every block costs more than either is
+worth, so LE Coded has a section and a receiver of its own, which runs in
+LE 1M's place while this view is open. Like the Advertising view it wants
+the radio on an advertising channel, and moves it there if it is not.
+
+**Why most rows name nobody.** LE Coded advertises only the extended way:
+an `ADV_EXT_IND` on the advertising channel says almost nothing, not even
+who sent it, and points (its **AuxPtr**) at an `AUX_ADV_IND` on one of the
+37 data channels a few milliseconds later, which carries the address, the
+name and the rest. sdrtop follows the pointer: when that channel is in the
+radio's view it listens there at the promised moment, and the packet it
+hears joins the list under its own channel, named and addressed. The
+primary rows stay anonymous, as the advertiser sent them.
+
+### The packet list
+
+Newest first, in the Advertising list's columns: the TYPE is what the
+packet is (`ADV_EXT_IND`, `AUX_ADV_IND`, `AUX_CHAIN_IND`, which share one
+type code and are told apart by where they were heard) and the scheme
+(`S8` or `S2`). `↑↓` selects a packet, `H` holds the list.
+
+### Packet detail
+
+- **packet**: channel, CRC, and how many symbols the code had to repair:
+  what it took to get the bits, beside the bits. A strong packet needs
+  none.
+- **event**: the advertising mode, and the set (SID) and event (DID) it
+  belongs to; **from**, the advertiser and its name; **TxPower**, when it
+  states one.
+- **aux**: what became of the AuxPtr, each said as it happened:
+  - *heard N ms later*, on the scheme it actually came in;
+  - *not in the radio's view*: the channel is outside the stretch of band
+    the radio sees, which is most of the 37, so this is the common one;
+  - *listened, not heard*: in view, listened to, nothing there;
+  - *its samples were not held*: the feed lost the stretch where it would
+    have been (see [stale, and feed loss](#stale-and-feed-loss));
+  - *waiting for its window*; *no auxiliary packet promised*; *not
+    followed*, with why.
+
+  An auxiliary packet says which `ADV_EXT_IND` pointed at it instead.
+- **SNR**, and **f0**: the carrier at the start, from the preamble.
+- On **S=8**, the transmitter against the LE Coded tests: the average
+  deviation (225 to 275 kHz), the share of symbols above 185 kHz (the suite
+  asks 99.9 %), and the drift through the packet, each a bar with its limit
+  as on the Advertising detail. **S=2 has none of these**: the test suite
+  defines its LE Coded measurements on S=8 only, so the detail says so
+  rather than holding S=2 to a limit nobody wrote.
+
+With **no packet selected**, the detail gives the session's account: the
+decoder's triggers and how each ended, and every AuxPtr by how it ended.
+
+**Load.** The coded receiver is the most expensive thing in NET, and at
+20 Msps on a small machine it can cost more than real time. When it does,
+the header's `decode` goes past 100 %, the list wears `[FEED LOSS]`, and
+the AuxPtr account fills with *samples not held*. Those are honest counts of
+what was missed, not of what was there.
+
+**On the air**, a phone advertising on LE Coded S=8 from nRF Connect, 14.5 s
+recorded at 2426 MHz and read back with nothing dropped: 49 `ADV_EXT_IND`s
+on channel 38, every one through its CRC with no symbol repaired; 20 of
+them pointed at a channel in view (8 to 14) and all 20 auxiliary packets
+were heard, each naming the phone; the other 29 pointed out of view. The
+phone's carrier sat about 1 kHz high (0.5 ppm), its deviation 250.6 kHz.
+S=2 is decoded from packets built to the Core, and has not been heard on
+the air yet: the phone only sends S=8.
 
 ---
 
