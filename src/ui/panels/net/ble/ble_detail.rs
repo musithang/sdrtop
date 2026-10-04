@@ -523,7 +523,7 @@ fn extended_lines(
     let Some(ext) = &p.ext else {
         return Vec::new();
     };
-    let list = &state.net.ble_packets;
+    let list = state.net.ble_list();
     let mut out = vec![crate::ui::chrome::section("extended", "", iw, theme)];
     out.extend(wrapped(
         "event",
@@ -1353,6 +1353,19 @@ mod tests {
         assert!(out.contains("-10 dBm"), "{out}");
         assert!(out.contains("Pixel"), "{out}");
         assert!(!out.contains("not decoded"), "{out}");
+    }
+
+    /// A held list is what is read: the superior of an aux in it is found
+    /// there even after the live ring, still filling behind the hold, has
+    /// let it go.
+    #[test]
+    fn a_held_list_finds_the_superior_it_shows() {
+        let mut m = extended_pair();
+        m.net.ble_view.held = Some((m.net.ble_packets.clone(), 2));
+        m.net.ble_packets.retain(|p| p.seq != 1);
+        m.net.ble_view.selection.selected = Some(2);
+        let out = draw(NetBleDetailPanel, 70, 40, &m).join("\n");
+        assert!(out.contains("from the ADV_EXT_IND on ch 38"), "{out}");
     }
 
     /// **The detail is about the packet the mark is on**, not the latest:

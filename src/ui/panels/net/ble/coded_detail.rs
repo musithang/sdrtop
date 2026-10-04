@@ -87,12 +87,12 @@ fn ext_lines(
     if let Some(dbm) = ext.header.tx_power_dbm {
         out.push(row("TxPower", plain(format!("{dbm} dBm"), theme), theme));
     }
-    if let Some(said) = super::ext_text::pointed(ext, &state.net.coded_packets) {
+    if let Some(said) = super::ext_text::pointed(ext, state.net.coded_list()) {
         out.push(row("pointed", quiet(&said, theme), theme));
     }
     out.push(row(
         "aux",
-        plain(super::ext_text::aux(ext, &state.net.coded_packets), theme),
+        plain(super::ext_text::aux(ext, state.net.coded_list()), theme),
         theme,
     ));
     out

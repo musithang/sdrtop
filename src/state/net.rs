@@ -594,6 +594,25 @@ impl NetState {
         });
     }
 
+    /// The LE list's packets as the screen has them, unfiltered: the held
+    /// copy while it is held, the live ring otherwise. Where a packet's
+    /// superior or its aux is looked up: the live ring keeps filling behind
+    /// a hold, and can let go of what the held list still shows.
+    pub fn ble_list(&self) -> &std::collections::VecDeque<BlePacket> {
+        self.ble_view
+            .held
+            .as_ref()
+            .map_or(&self.ble_packets, |(held, _)| held)
+    }
+
+    /// [`Self::ble_list`] for the LE Coded list.
+    pub fn coded_list(&self) -> &std::collections::VecDeque<BlePacket> {
+        self.coded_view
+            .held
+            .as_ref()
+            .map_or(&self.coded_packets, |(held, _)| held)
+    }
+
     /// The packets the LE Coded list shows, newest first: the held copy while
     /// the list is held, the live ring otherwise. The one account of that
     /// list, as [`Self::ble_shown`] is of LE 1M's.
