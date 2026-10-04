@@ -109,6 +109,41 @@ const WANT_RATE_HZ: f64 = 2_400_000.0;
 pub struct Built {
     pub caps: DeviceCapabilities,
     pub notes: Vec<String>,
+    /// The one gain stage is the whole chain, "RF", which this module made up
+    /// because the driver named no usable stage of its own. It is set through
+    /// `setGain`; every other stage by the name the driver gave it ([`route`]).
+    pub whole_chain: bool,
+}
+
+/// How a gain stage, by its position, is set on this device.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum StageRoute {
+    /// By the element name the driver reported (`setGainElement`).
+    Element,
+    /// Through the whole-chain `setGain`: the stage is the made-up "RF".
+    WholeChain,
+    /// The device has no such stage, and nothing is sent.
+    Absent,
+}
+
+/// How stage `index` is set, on a device with `stages` stages whose one
+/// stage is the whole chain when `whole_chain`.
+///
+/// **Decided here, once.** Whether the stage is the made-up one is this
+/// module's decision ([`capabilities`] makes it), so the device reads it
+/// rather than working it out again by a rule of its own that could
+/// disagree. And a stage past the last is absent: the reset sets the first
+/// stage and then the second, and with the whole chain as the only stage,
+/// sending the second through `setGain` would overwrite the first with the
+/// second's value.
+pub fn route(whole_chain: bool, stages: usize, index: usize) -> StageRoute {
+    if index >= stages {
+        StageRoute::Absent
+    } else if whole_chain {
+        StageRoute::WholeChain
+    } else {
+        StageRoute::Element
+    }
 }
 
 /// Whether an element is a two-position switch, given what the driver said and
@@ -203,10 +238,12 @@ pub fn capabilities(a: &DriverAnswers) -> Result<Built, Unsupported> {
 
     let (mut stages, element_boost, mut notes) =
         split_elements(&a.gain_elements, &a.gain_element_is_switch);
-    // A driver that names no elements, or names only unusable ones, still has
-    // the whole-chain range. One unnamed stage over it is exactly what this
-    // backend did before it could ask per element, so nothing regresses.
-    if stages.is_empty() {
+    // A driver that names no elements, or names only unusable ones, or only a
+    // switch that became the boost, still has the whole-chain range. One
+    // unnamed stage over it is exactly what this backend did before it could
+    // ask per element, so nothing regresses.
+    let whole_chain = stages.is_empty();
+    if whole_chain {
         stages.push(StageSpec::ranged("RF", gain_lo, gain_hi.max(gain_lo), 0.0));
         if !a.gain_elements.is_empty() {
             notes.push(
@@ -267,7 +304,11 @@ pub fn capabilities(a: &DriverAnswers) -> Result<Built, Unsupported> {
         // so our loop sets the rhythm rather than measuring one.
         delivery: DeliveryModel::Pull,
     };
-    Ok(Built { caps, notes })
+    Ok(Built {
+        caps,
+        notes,
+        whole_chain,
+    })
 }
 
 /// The lowest minimum and the highest maximum across a list of ranges.
@@ -608,6 +649,49 @@ mod tests {
             "two refusals and the fallback: {:?}",
             built.notes
         );
+    }
+
+    /// A driver whose only usable element is a switch: the switch becomes the
+    /// boost, and the one stage left is the whole chain. It is set through
+    /// `setGain`, never by a name the driver did not give: "RF" is ours.
+    #[test]
+    fn a_lone_switch_leaves_the_whole_chain_as_the_stage() {
+        let mut a = soapy_hackrf();
+        a.gain_elements = vec![el("AMP", 0.0, 14.0, 14.0)];
+        a.gain_element_is_switch = vec![None];
+        let built = capabilities(&a).unwrap();
+        assert!(built.caps.gain.has_boost(), "the AMP is the boost");
+        assert!(built.whole_chain);
+        let stages = built.caps.gain.stages().len();
+        assert_eq!(route(built.whole_chain, stages, 0), StageRoute::WholeChain);
+    }
+
+    /// Named stages are set by their names; no elements at all, or none
+    /// usable, is the whole chain.
+    #[test]
+    fn whole_chain_is_said_exactly_when_the_stage_is_ours() {
+        assert!(!capabilities(&soapy_hackrf()).unwrap().whole_chain);
+        let mut none = soapy_hackrf();
+        none.gain_elements = vec![];
+        none.gain_element_is_switch = vec![];
+        assert!(capabilities(&none).unwrap().whole_chain);
+        let mut unusable = soapy_hackrf();
+        unusable.gain_elements = vec![el("A", f64::NAN, 10.0, 1.0)];
+        unusable.gain_element_is_switch = vec![None];
+        assert!(capabilities(&unusable).unwrap().whole_chain);
+    }
+
+    /// A stage the device does not have is sent nothing. The reset sets the
+    /// first stage and then the second; with the whole chain as the only
+    /// stage, sending the second through `setGain` would overwrite the first
+    /// with the second's value.
+    #[test]
+    fn a_stage_the_device_lacks_is_absent() {
+        assert_eq!(route(true, 1, 0), StageRoute::WholeChain);
+        assert_eq!(route(true, 1, 1), StageRoute::Absent);
+        assert_eq!(route(false, 2, 0), StageRoute::Element);
+        assert_eq!(route(false, 2, 1), StageRoute::Element);
+        assert_eq!(route(false, 2, 2), StageRoute::Absent);
     }
 
     /// Only the first switch takes the key. sdrtop has one boost concept, and a
