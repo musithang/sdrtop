@@ -257,17 +257,28 @@ const TIMING_STEPS: i32 = 64;
 /// offset at which the readings, less their mean, best agree with the known
 /// bits' signs. A tester times a packet from its known start the same way
 /// (the suites' "position of bit p0"); a lane never enters it.
+///
+/// **Scored on the known bits less one at each end**, so that a search a
+/// whole bit either way still reads inside the burst. Before a transmitter
+/// that does not ramp its carrier up there is only noise, whose
+/// instantaneous frequency has no bound, and one reading there outweighed
+/// forty bits: two clean packets in five were placed a bit off.
 fn timing(tester: &Tester, first: f64, bit: f64, known: &[bool]) -> f64 {
+    let inner = 1..known.len().saturating_sub(1);
     // Every step's readings into one buffer, reused: the same numbers, in
     // the same order, without a fresh allocation for each of 129 steps.
     let hz = std::cell::RefCell::new(Vec::with_capacity(known.len()));
     let score = |tau: f64| {
         let mut hz = hz.borrow_mut();
         hz.clear();
-        hz.extend((0..known.len()).map(|k| tester.at(first + (k as f64 + tau) * bit) as f64));
+        hz.extend(
+            inner
+                .clone()
+                .map(|k| tester.at(first + (k as f64 + tau) * bit) as f64),
+        );
         let mean = hz.iter().sum::<f64>() / hz.len() as f64;
         hz.iter()
-            .zip(known)
+            .zip(&known[inner.clone()])
             .map(|(f, &b)| if b { f - mean } else { mean - f })
             .sum::<f64>()
     };
@@ -637,6 +648,37 @@ pub fn le_coded(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// **A packet that starts from silence is timed on its own bits.** A
+    /// transmitter that does not ramp its carrier up before the preamble
+    /// leaves only noise a bit before it, whose instantaneous frequency has
+    /// no bound; the timing search reached a bit outside the packet either
+    /// way, and one wild reading there moved the whole packet by a bit:
+    /// about two clean packets in five read a df2 of -120 kHz. Over noise
+    /// draws and positions, every one reads its deviation.
+    #[test]
+    fn a_packet_that_starts_from_silence_is_timed_on_its_own_bits() {
+        use crate::signal::ble::detect::{
+            access_address_bits, preamble_bits, ADVERTISING_ACCESS_ADDRESS,
+        };
+        let air = crate::signal::ble::pdu::encode(38, 0x02, &(0..31u8).collect::<Vec<_>>());
+        let mut bits = preamble_bits(ADVERTISING_ACCESS_ADDRESS, Phy::OneM);
+        bits.extend_from_slice(&access_address_bits(ADVERTISING_ACCESS_ADDRESS));
+        bits.extend(air.iter().copied());
+        let wave = crate::signal::ble::gfsk::modulate(&bits, 20, 250e3, 20e6, 0.5);
+        for seed in 1..=8u64 {
+            for start in [20_000usize, 50_000, 90_000] {
+                let mut iq = crate::signal::dsp::testkit::Rng::new(seed).noise(131_072, 0.0005);
+                for (k, w) in wave.iter().enumerate() {
+                    iq[start + k] += w * 0.5;
+                }
+                let recent = Recent::new([(0u64, &iq[..])]);
+                let (quality, _) = le_1m(&recent, 20e6, 0.0, start as f64 + 810.0, &air).unwrap();
+                let df2 = quality.unwrap().delta_f2_avg_hz.value();
+                assert!(df2 > 185e3, "seed {seed} at {start}: df2 {df2:.0} Hz");
+            }
+        }
+    }
     use crate::signal::dsp::testkit::Rng;
     use crate::signal::net::conformance::{self as reference, Burst, Gfsk, Trace};
 
