@@ -42,16 +42,15 @@ snr_db,cfo_khz,cfo_khz_sigma,cfo_ppm,cfo_ppm_sigma,\
 start_khz,start_khz_sigma,end_khz,end_khz_sigma,\
 mod_index,mod_index_sigma,df1_avg_khz,df1_avg_khz_sigma,df2_avg_khz,df2_avg_khz_sigma,\
 df2_df1_ratio,df2_df1_ratio_sigma,drift_khz,drift_khz_sigma,\
-drift_rate_hz_per_us,drift_rate_hz_per_us_sigma";
+drift_rate_hz_per_us,drift_rate_hz_per_us_sigma,\
+fec_repairs,sid,aux";
 
 /// Why the list the file was taken from is not every packet, if it is not.
-pub fn note(state: &SdrMetrics) -> Option<String> {
-    let view = &state.net.ble_view;
+fn view_note(view: &crate::state::BlePacketView, behind: u64) -> Vec<String> {
     let mut parts = Vec::new();
     if view.held.is_some() {
         parts.push(format!(
-            "the list was held; {} packets arrived after it and are not in this file",
-            state.net.ble_behind()
+            "the list was held; {behind} packets arrived after it and are not in this file"
         ));
     }
     if view.filter.is_some() {
@@ -60,7 +59,40 @@ pub fn note(state: &SdrMetrics) -> Option<String> {
     if let Some(kind) = view.kind {
         parts.push(format!("the list was narrowed to {} packets", kind.label()));
     }
+    parts
+}
+
+/// Why the list the file was taken from is not every packet, if it is not.
+pub fn note(state: &SdrMetrics) -> Option<String> {
+    let parts = view_note(&state.net.ble_view, state.net.ble_behind());
     (!parts.is_empty()).then(|| parts.join("; "))
+}
+
+/// The LE Coded file's note, always: which list it is, and which tests its
+/// Δf1 and drift columns are, since the same columns in the BLE file are LE
+/// 1M's.
+pub fn coded_note(state: &SdrMetrics) -> String {
+    let mut parts = vec![
+        "the LE Coded list; df1 and the carrier columns are RFPHY/TRM/BV-13-C and \
+         BV-14-C, read on S=8 only"
+            .to_string(),
+    ];
+    parts.extend(view_note(&state.net.coded_view, state.net.coded_behind()));
+    parts.join("; ")
+}
+
+/// What became of an AuxPtr, one word to a row.
+fn aux_word(aux: crate::signal::ble::aux::AuxOutcome) -> String {
+    use crate::signal::ble::aux::AuxOutcome;
+    match aux {
+        AuxOutcome::Pending => "pending".to_string(),
+        AuxOutcome::Heard { .. } => "heard".to_string(),
+        AuxOutcome::Missed => "missed".to_string(),
+        AuxOutcome::NotInView => "not_in_view".to_string(),
+        AuxOutcome::FeedLost => "feed_lost".to_string(),
+        AuxOutcome::NonePromised => "none_promised".to_string(),
+        AuxOutcome::Refused(why) => format!("refused: {why}"),
+    }
 }
 
 /// A value and its sigma to `places`, or two blanks.
@@ -99,8 +131,13 @@ fn advertised(p: &BlePacket, net: &crate::state::NetState) -> Vec<String> {
     let mut mfr_data = Vec::new();
     let mut other = Vec::new();
     let mut malformed = String::new();
-    let readable = p.crc_ok && p.pdu_type != PduType::Other(0x07);
-    let data = ad::adv_data(p.pdu_type, &p.payload).filter(|_| readable);
+    // An extended PDU's advertising data follows its extended header; a type
+    // 7 not read as one carries none this file can find.
+    let data = match &p.ext {
+        Some(ext) => Some(ext.header.adv_data.as_slice()),
+        None => ad::adv_data(p.pdu_type, &p.payload).filter(|_| p.pdu_type != PduType::Other(0x07)),
+    }
+    .filter(|_| p.crc_ok);
     for structure in data.map(ad::parse).unwrap_or_default() {
         match structure {
             Structure::Malformed { offset, why } => malformed = format!("octet {offset}: {why}"),
@@ -146,12 +183,19 @@ fn advertised(p: &BlePacket, net: &crate::state::NetState) -> Vec<String> {
     ]
 }
 
-/// The packets as CSV rows, in the order the list is showing them.
+/// The LE 1M packets as CSV rows, in the order the list is showing them.
 pub fn rows(state: &SdrMetrics) -> Vec<String> {
+    rows_of(state, state.net.ble_shown())
+}
+
+/// The LE Coded packets as CSV rows, in the order their list is showing them.
+pub fn coded_rows(state: &SdrMetrics) -> Vec<String> {
+    rows_of(state, state.net.coded_shown())
+}
+
+fn rows_of(state: &SdrMetrics, packets: Vec<&BlePacket>) -> Vec<String> {
     let now = std::time::Instant::now();
-    state
-        .net
-        .ble_shown()
+    packets
         .into_iter()
         .map(|p| {
             let carrier = crate::signal::ble::channel::centre_hz(p.channel);
@@ -159,8 +203,18 @@ pub fn rows(state: &SdrMetrics) -> Vec<String> {
                 |hz: Uncertain| carrier.map(|c| state.radio.transmitter_offset(hz, c as f64, now));
             let cfo = p.freq_offset_hz.and_then(offset);
             let measured = p.crc_ok;
-            let drift = p.drift.filter(|_| measured);
+            // An LE Coded packet's readings are its own suite's; each packet
+            // carries one kind or the other, never both.
+            let coded = p
+                .coded
+                .as_ref()
+                .and_then(|c| c.reading)
+                .filter(|_| measured);
+            let drift = p.drift.or(coded.and_then(|r| r.drift)).filter(|_| measured);
             let quality = p.modulation.filter(|_| measured);
+            let df1 = quality
+                .map(|q| q.delta_f1_avg_hz)
+                .or(coded.and_then(|r| r.modulation).map(|m| m.delta_f1_avg_hz));
             let targeted = matches!(
                 p.pdu_type,
                 PduType::AdvDirectInd | PduType::ScanReq | PduType::ConnectInd
@@ -175,7 +229,11 @@ pub fn rows(state: &SdrMetrics) -> Vec<String> {
                 now.saturating_duration_since(p.seen).as_secs().to_string(),
                 p.channel.to_string(),
                 p.phy.label().to_string(),
-                p.pdu_type.label(),
+                // An extended PDU's type code is one for three; its role says
+                // which, as on screen.
+                p.ext
+                    .as_ref()
+                    .map_or(p.pdu_type.label(), |e| e.role.label().to_string()),
                 p.crc_ok.to_string(),
                 p.length.to_string(),
                 p.adv_addr
@@ -208,10 +266,7 @@ pub fn rows(state: &SdrMetrics) -> Vec<String> {
                 f.extend(with_sigma(end.and_then(offset).map(|t| t.khz), 2));
             }
             f.extend(with_sigma(quality.map(|q| q.modulation_index), 4));
-            f.extend(with_sigma(
-                quality.map(|q| q.delta_f1_avg_hz.scale(1e-3)),
-                2,
-            ));
+            f.extend(with_sigma(df1.map(|d| d.scale(1e-3)), 2));
             f.extend(with_sigma(
                 quality.map(|q| q.delta_f2_avg_hz.scale(1e-3)),
                 2,
@@ -219,6 +274,20 @@ pub fn rows(state: &SdrMetrics) -> Vec<String> {
             f.extend(with_sigma(quality.map(|q| q.ratio), 3));
             f.extend(with_sigma(drift.map(|d| d.drift_hz.scale(1e-3)), 2));
             f.extend(with_sigma(drift.map(|d| d.drift_rate_hz_per_us), 2));
+            f.push(
+                p.coded
+                    .as_ref()
+                    .map(|c| c.fec_repairs.to_string())
+                    .unwrap_or_default(),
+            );
+            f.push(
+                p.ext
+                    .as_ref()
+                    .and_then(|e| e.header.adi)
+                    .map(|a| a.sid.to_string())
+                    .unwrap_or_default(),
+            );
+            f.push(p.ext.as_ref().map(|e| aux_word(e.aux)).unwrap_or_default());
             f.iter()
                 .map(|field| super::csv_field(field).into_owned())
                 .collect::<Vec<_>>()
@@ -414,6 +483,124 @@ mod tests {
         assert_eq!(get(&row, "service_data"), "0x180F=5566");
         assert_eq!(get(&row, "other_ad"), "0x19=4103");
         assert_eq!(get(&row, "malformed"), "");
+    }
+
+    /// An `AUX_ADV_IND` heard in LE Coded S8: AdvA, ADI SID 3, TxPower -10
+    /// dBm, the name "Pixel"; five FEC repairs, and the S=8 readings.
+    fn coded_packet(seq: u64) -> BlePacket {
+        use crate::signal::ble::aux::AuxOutcome;
+        use crate::signal::ble::coded::Coding;
+        use crate::signal::ble::measure::CodedModulation;
+        let mut payload = vec![
+            10,
+            0b0100_1001,
+            0x11,
+            0x22,
+            0x33,
+            0x44,
+            0x55,
+            0x66,
+            0x23,
+            0x31,
+            0xF6,
+        ];
+        payload.extend([6, 0x09, b'P', b'i', b'x', b'e', b'l']);
+        let header = crate::signal::ble::ext::parse(&payload).unwrap();
+        let initial = Uncertain::from_sigma(-12_000.0, 300.0);
+        let fin = Uncertain::from_sigma(-10_000.0, 300.0);
+        let drift = fin.difference(&initial);
+        let mut p = packet(seq, &[]);
+        p.phy = Phy::Coded(Coding::S8);
+        p.pdu_type = PduType::Other(0x07);
+        p.channel = 9;
+        p.length = payload.len() as u8;
+        p.adv_addr = header.adv_a;
+        p.payload = payload;
+        p.freq_offset_hz = Some(initial);
+        p.modulation = None;
+        p.drift = None;
+        p.coded = Some(crate::state::CodedFacts {
+            fec_repairs: 5,
+            reading: Some(crate::signal::net::measure::CodedReading {
+                snr_db: Some(14.2),
+                modulation: Some(CodedModulation {
+                    delta_f1_avg_hz: Uncertain::from_sigma(252_000.0, 1_000.0),
+                    share_f1max_above_limit: 1.0,
+                }),
+                initial: None,
+                drift: Some(Drift {
+                    initial_hz: initial,
+                    final_hz: fin,
+                    drift_hz: drift,
+                    drift_rate_hz_per_us: drift.scale(0.02),
+                }),
+            }),
+        });
+        p.ext = Some(crate::state::ExtInfo {
+            header,
+            role: crate::state::ExtRole::AuxAdv {
+                superior_seq: Some(1),
+            },
+            aux: AuxOutcome::NonePromised,
+        });
+        p
+    }
+
+    fn coded_state(packets: Vec<BlePacket>) -> SdrMetrics {
+        let mut m = SdrMetrics::fixture().streaming();
+        m.net.coded_heard = packets.len() as u64;
+        for p in packets {
+            m.net.coded_packets.push_front(p);
+        }
+        m
+    }
+
+    /// **The LE Coded list, in the same columns.** Its scheme, the role its
+    /// type code stands for, the repairs it took, its set and what became of
+    /// its AuxPtr; the advertising data read from the extended header; and
+    /// the S=8 readings where the suites name the same quantity.
+    #[test]
+    fn a_coded_packet_exports_its_scheme_its_repairs_and_its_set() {
+        let m = coded_state(vec![coded_packet(2)]);
+        let rows = coded_rows(&m);
+        let row = fields(&rows[0]);
+        assert_eq!(row.len(), HEADER.split(',').count(), "{row:?}");
+        assert_eq!(get(&row, "phy"), "LE Coded S8");
+        assert_eq!(get(&row, "pdu_type"), "AUX_ADV_IND");
+        assert_eq!(get(&row, "fec_repairs"), "5");
+        assert_eq!(get(&row, "sid"), "3");
+        assert_eq!(get(&row, "aux"), "none_promised");
+        assert_eq!(get(&row, "name"), "Pixel");
+        assert_eq!(get(&row, "df1_avg_khz"), "252.00");
+        assert_eq!(get(&row, "start_khz"), "-12.00");
+        assert_eq!(get(&row, "drift_khz"), "2.00");
+        // LE 1M's tests only.
+        for blank in ["mod_index", "df2_avg_khz", "df2_df1_ratio"] {
+            assert_eq!(get(&row, blank), "", "{blank}: {row:?}");
+        }
+    }
+
+    /// The LE 1M list carries the three new columns blank: no FEC, no set.
+    #[test]
+    fn an_le_1m_row_leaves_the_coded_columns_blank() {
+        let row = fields(&rows(&state_with(vec![packet(1, &[])]))[0]);
+        assert_eq!(row.len(), HEADER.split(',').count(), "{row:?}");
+        for blank in ["fec_repairs", "sid", "aux"] {
+            assert_eq!(get(&row, blank), "", "{blank}: {row:?}");
+        }
+    }
+
+    /// A Coded file says which list it is, and which tests its Δf1 and
+    /// drift columns are.
+    #[test]
+    fn a_coded_file_says_it_is_the_coded_list() {
+        let mut m = coded_state(vec![coded_packet(1), coded_packet(2)]);
+        let said = coded_note(&m);
+        assert!(said.contains("the LE Coded list"), "{said}");
+        assert!(said.contains("BV-13-C"), "{said}");
+        m.net.coded_view.held = Some((m.net.coded_packets.clone(), 1));
+        let said = coded_note(&m);
+        assert!(said.contains("held; 1 packets arrived after it"), "{said}");
     }
 
     /// A file taken from a held or filtered list says what it is short of.

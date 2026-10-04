@@ -42,6 +42,7 @@ pub fn line(preset: &str, m: &SdrMetrics, now: Instant) -> Option<Live> {
         && match preset {
             "net_ble" | "net_census" => net.ble_channel.is_some(),
             "net_bt" | "net_piconet" | "net_bench" => !net.bt_channels_watched.is_empty(),
+            "net_coded" => net.coded_channel.is_some(),
             "net_connection" => net
                 .ble_connections
                 .iter()
@@ -108,6 +109,29 @@ pub fn line(preset: &str, m: &SdrMetrics, now: Instant) -> Option<Live> {
             Some(said(
                 format!("{packets} packets this session{share}"),
                 net.ble_refused.as_ref(),
+            ))
+        }
+        "net_coded" => {
+            if net.coded_heard == 0 {
+                return Some(said(
+                    "no LE Coded packet decoded this session".to_string(),
+                    net.coded_refused.as_ref(),
+                ));
+            }
+            let f = net.health.coded;
+            let share = crate::signal::ble::fer::fraction(f.decoded, f.decoded + f.crc_failed)
+                .map(|r| format!(", {:.0} % CRC ok", r.value() * 100.0))
+                .unwrap_or_default();
+            let aux = match net.health.aux.heard {
+                0 => String::new(),
+                n => format!(", {n} aux heard"),
+            };
+            Some(said(
+                format!(
+                    "{} LE Coded packets this session{share}{aux}",
+                    net.coded_heard
+                ),
+                net.coded_refused.as_ref(),
             ))
         }
         "net_bt" => {
@@ -282,6 +306,7 @@ mod tests {
             match preset {
                 "net_ble" | "net_census" => m.net.ble_channel = Some(37),
                 "net_bt" | "net_piconet" | "net_bench" => m.net.bt_channels_watched = vec![10, 11],
+                "net_coded" => m.net.coded_channel = Some(37),
                 _ => {}
             }
         }
@@ -312,6 +337,38 @@ mod tests {
         m.ui.active_preset = "net_bt".to_string();
         m.net.ble_channel = None;
         let l = line("net_ble", &m, Instant::now()).unwrap();
+        assert!(!l.running);
+        assert!(l.text.ends_with("; not listening now"), "{}", l.text);
+    }
+
+    /// **The LE Coded view**: its packets, their CRC share past the ten-
+    /// packet rule, and the AuxPtrs followed to a packet; its refusal when
+    /// refused; the session's figures when it is not running.
+    #[test]
+    fn the_coded_view_has_a_live_line() {
+        let now = Instant::now();
+        let mut m = at("net_coded", true);
+        let l = line("net_coded", &m, now).unwrap();
+        assert_eq!(l.text, "no LE Coded packet decoded this session");
+        assert!(l.running);
+
+        m.net.coded_heard = 24;
+        m.net.health.coded.decoded = 18;
+        m.net.health.coded.crc_failed = 6;
+        m.net.health.aux.heard = 5;
+        let l = line("net_coded", &m, now).unwrap();
+        assert_eq!(
+            l.text,
+            "24 LE Coded packets this session, 75 % CRC ok, 5 aux heard"
+        );
+
+        m.net.coded_refused = Some("no advertising channel in view".to_string());
+        let l = line("net_coded", &m, now).unwrap();
+        assert_eq!(l.text, "refused: no advertising channel in view");
+
+        m.net.coded_refused = None;
+        m.net.coded_channel = None;
+        let l = line("net_coded", &m, now).unwrap();
         assert!(!l.running);
         assert!(l.text.ends_with("; not listening now"), "{}", l.text);
     }

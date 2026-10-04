@@ -348,6 +348,16 @@ impl CodedReceiver {
         std::mem::take(&mut self.funnel)
     }
 
+    /// Put the receiver down: the trigger counts since the last
+    /// [`Self::take_funnel`], with a capture under way counted as given up,
+    /// so every trigger ends somewhere even when the receiver does not.
+    pub fn finish(mut self) -> Funnel {
+        if self.capture.is_some() {
+            self.funnel.gave_up += 1;
+        }
+        self.funnel
+    }
+
     /// Forget the stream: the next block is read as the first. A capture
     /// under way is abandoned without being counted; [`Self::push_iq_at`]
     /// counts one a break in the stream cuts short.
@@ -999,6 +1009,29 @@ mod tests {
         // second stage of detection does not take for a sync sequence.
         let f = rx.take_funnel();
         assert_eq!((f.triggered, f.gave_up), (1, 1));
+    }
+
+    /// A receiver put down in the middle of a capture, as the worker does at
+    /// a break it sees itself or on a retune, still ends that trigger: it
+    /// gave up, and the funnel it hands back says so.
+    #[test]
+    fn a_receiver_put_down_mid_capture_counts_it_given_up() {
+        let mut rng = Rng::new(7);
+        let (iq, start) = on_air(
+            &coded_packet(Coding::S8, 12, &EXT_IND),
+            20e6,
+            12,
+            2_426e6,
+            0.0,
+            64,
+            &mut rng,
+        );
+        let cut = start as usize + 600 * 20;
+        let mut rx = CodedReceiver::new(20e6, 12, 2_426e6).unwrap();
+        assert!(rx.push_iq_at(&iq[..cut], 0).is_empty());
+        let f = rx.finish();
+        assert_eq!((f.triggered, f.gave_up), (1, 1));
+        assert_eq!(f.triggered, f.decoded + f.crc_failed + f.gave_up);
     }
 
     /// After `reset`, a window far later is read as if it were the first.

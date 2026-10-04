@@ -33,6 +33,25 @@ checkpoint instead of by version.
   broadcast. And `cargo run --example soapy_probe -- "driver=..."` asks a
   SoapySDR device the questions sdrtop asks it, for a report. Contributed by
   @kajoty.
+- **LE Coded, a NET section of its own.** The long-range PHY, S=8 and S=2,
+  through its own receiver: a whole-preamble detector, symbol means and a
+  soft-decision Viterbi, with the symbols the FEC overruled counted beside
+  the bits. Its packets get a list and a detail: SNR, the initial carrier,
+  and on S=8 the Δf1 and drift the LE Coded tests define (S=2 has none, and
+  says so). An `ADV_EXT_IND`'s extended header is read (mode, SID and DID,
+  TxPower), and its AuxPtr is followed to the auxiliary packet it promises
+  when that channel is in view; every promise ends heard, missed, out of
+  view or with its samples not held, and is counted as such. The header
+  names the channel (`● CODED 37 adv`), the menu has its live line, and the
+  decode health counts its funnel and its AuxPtrs once it has run.
+
+### Changed
+
+- **The NET export writes six files.** `net-coded-*.csv` is the LE Coded
+  list in `net-ble`'s columns, with a note saying its `df1` and carrier
+  columns are the LE Coded tests', S=8 only. Both files gain three columns
+  at the end, `fec_repairs`, `sid` and `aux`, blank on an LE 1M packet; a
+  script that reads the BLE file by column name is unaffected.
 
 ## [0.6.3] - 2026-10-03
 

@@ -815,7 +815,7 @@ only then do readings give way from the bottom, and it says that too.
 
 ## Taking the data away (`o`)
 
-`o` anywhere in NET writes five files, one for each record the section keeps:
+`o` anywhere in NET writes six files, one for each record the section keeps:
 
 | File | One row per |
 |------|-------------|
@@ -824,6 +824,7 @@ only then do readings give way from the bottom, and it says that too.
 | `net-ble-*.csv` | packet, in the list's order, as it was shown (held or filtered) |
 | `net-fer-*.csv` | SNR bin of the frame error curve, for all traffic and each device |
 | `net-bt-*.csv` | classic hit, oldest first, with its slot residual and header; `lap_kind` says piconet or inquiry code |
+| `net-coded-*.csv` | LE Coded packet, in the same columns as `net-ble`; its `df1` and carrier columns are the LE Coded tests' (S=8 only), and its `note` says so |
 
 They go to `~/.local/share/sdrtop/` (or `$XDG_DATA_HOME/sdrtop/`), named with
 the second they were taken, and a second export in the same second is

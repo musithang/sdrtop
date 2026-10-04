@@ -36,7 +36,8 @@ pub struct Written {
 }
 
 /// Write every body of the NET section: the band, the census, the BLE
-/// packets, the frame error curve and the classic hits.
+/// packets, the frame error curve, the classic hits and the LE Coded
+/// packets.
 ///
 /// **Two files, one header, one destination answer.** The bodies know nothing
 /// about each other; what they share is the part built to be shared. A body that
@@ -131,6 +132,32 @@ pub fn net_section(
             };
             one(state, dir, unix_secs, "net-bt", bt::HEADER, bt, Some(note))
         },
+        {
+            let coded = ble::coded_rows(state);
+            // The same empties the Coded list tells apart.
+            let note = if coded.is_empty() {
+                match &state.net.coded_refused {
+                    Some(why) => {
+                        format!("no packet: the LE Coded receiver was not running ({why})")
+                    }
+                    None if state.net.coded_heard > 0 => {
+                        "no packet in the LE Coded list as it was shown".to_string()
+                    }
+                    None => "no LE Coded packet has been decoded this session".to_string(),
+                }
+            } else {
+                ble::coded_note(state)
+            };
+            one(
+                state,
+                dir,
+                unix_secs,
+                "net-coded",
+                ble::HEADER,
+                coded,
+                Some(note),
+            )
+        },
     ]
 }
 
@@ -204,7 +231,7 @@ mod tests {
         let dir = scratch();
         let m = SdrMetrics::fixture().streaming();
         let out = net_section(&m, &dir, 1_788_632_561);
-        assert_eq!(out.len(), 5);
+        assert_eq!(out.len(), 6);
 
         let paths: Vec<_> = out
             .iter()
@@ -228,6 +255,10 @@ mod tests {
         );
         assert!(
             paths[4].ends_with("net-bt-20260905-182241.csv"),
+            "{paths:?}"
+        );
+        assert!(
+            paths[5].ends_with("net-coded-20260905-182241.csv"),
             "{paths:?}"
         );
 
@@ -255,6 +286,7 @@ mod tests {
         assert_eq!(common(&a), common(&c));
         assert_eq!(common(&a), common(&d));
         assert_eq!(common(&a), common(&e));
+        assert_eq!(common(&a), common(&head(&paths[5])));
         assert!(a.iter().any(|l| l.contains("exported")), "{a:?}");
         let _ = std::fs::remove_dir_all(&dir);
     }

@@ -507,6 +507,7 @@ fn net_band_strip(state: &SdrMetrics, theme: &crate::Theme, outer_width: u16) ->
     let ble_col = state
         .net
         .ble_channel
+        .or(state.net.coded_channel)
         .and_then(crate::signal::ble::channel::centre_hz)
         .map(|hz| col(hz as f64));
 
@@ -648,7 +649,13 @@ fn channel_fields(state: &SdrMetrics, theme: &crate::Theme) -> Vec<BandField> {
     let value = Style::default().fg(theme.value);
     let label = Style::default().fg(theme.label);
     let mut out = Vec::new();
-    if let Some(ch) = state.net.ble_channel {
+    // The LE Coded receiver is BLE too, in BLE's ink, but named apart: the
+    // same channel number is a different receiver on a different PHY.
+    for (name, channel) in [
+        ("BLE", state.net.ble_channel),
+        ("CODED", state.net.coded_channel),
+    ] {
+        let Some(ch) = channel else { continue };
         let kind = if crate::signal::ble::channel::advertising_channel_index(ch).is_some() {
             "adv"
         } else {
@@ -657,7 +664,7 @@ fn channel_fields(state: &SdrMetrics, theme: &crate::Theme) -> Vec<BandField> {
         out.push(BandField::spans(
             vec![
                 Span::styled("\u{25cf}", Style::default().fg(theme.net_ble)),
-                Span::styled(format!(" BLE {ch} "), value),
+                Span::styled(format!(" {name} {ch} "), value),
                 Span::styled(kind, label),
             ],
             5,
@@ -1669,6 +1676,20 @@ mod tests {
             out.contains("\u{25cf} BLE 37 adv \u{b7} \u{25a0} BT 38\u{2013}41"),
             "{out}"
         );
+    }
+
+    /// The LE Coded receiver names its channel as BLE's does, in BLE's ink,
+    /// and says which receiver it is: the same channel number on the LE 1M
+    /// view is a different receiver listening for a different PHY.
+    #[test]
+    fn the_coded_receiver_names_its_own_channel() {
+        let mut m = net_fixture();
+        m.radio.frequency = 2_402_000_000;
+        m.net.coded_channel = Some(37);
+        let out = crate::state::fixture::draw(HeaderPanel, 120, 5, &m).join("\n");
+        assert!(out.contains("\u{25cf} CODED 37 adv"), "{out}");
+        assert!(!out.contains("BLE 37"), "{out}");
+        assert!(!out.contains("Wi-Fi"), "{out}");
     }
 
     /// Before the feed has delivered a block there is nothing to have been

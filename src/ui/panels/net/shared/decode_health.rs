@@ -16,7 +16,9 @@
 //! their funnels are counted where they happen: every BLE trigger ends as a
 //! packet whose CRC passed, one whose CRC failed, or a capture nothing could be
 //! decoded from (`signal::ble::receive::Funnel`); classic Bluetooth counts
-//! access-code hits and the piconets whose UAP is resolved. A decoder that has
+//! access-code hits and the piconets whose UAP is resolved; LE Coded, once its
+//! receiver has run, counts its funnel as BLE does and its AuxPtrs by how
+//! each ended. A decoder that has
 //! not run this session shows `—` and "not decoding", never a zero: a row
 //! reading `0` is a claim that it looked and found none. There is still no
 //! protocol-agnostic burst detector (the foundation plan's N14 gap), and its
@@ -287,6 +289,39 @@ fn lines(
         out.push(dash("BLE", "not decoding"));
     }
 
+    // LE Coded, only once its receiver has run: the view that starts it is
+    // its own section, and a dash here would offer a decoder this view does
+    // not start. Its AuxPtrs are heard of those promised in view; one whose
+    // channel the radio cannot see was never listened for, so it is apart.
+    let c = h.coded;
+    if state.net.coded_channel.is_some() || c.triggered > 0 {
+        out.push(row(
+            "Coded triggers",
+            grouped(c.triggered),
+            Some("the detector fired"),
+        ));
+        for line in funnel_bar(&c, width, theme) {
+            drawings.push(out.len());
+            out.push(line);
+        }
+        out.push(row("Coded CRC good", grouped(c.decoded), None));
+        let a = h.aux;
+        out.push(row(
+            "aux heard",
+            format!(
+                "{} of {}",
+                grouped(a.heard),
+                grouped(a.heard + a.missed + a.feed_lost)
+            ),
+            Some("promised in view"),
+        ));
+        out.push(row(
+            "aux elsewhere",
+            grouped(a.not_in_view),
+            Some("outside the view"),
+        ));
+    }
+
     // Classic: hits, and how many of the piconets they came from have a UAP.
     if !state.net.bt_channels_watched.is_empty() || h.bt_hits > 0 {
         let resolved = state.net.bt_uap.values().filter(|c| c.len() == 1).count();
@@ -510,6 +545,46 @@ mod tests {
         assert!(line("decode load").contains("falling behind"), "{out}");
         // Still true, still said.
         assert!(line("bursts").contains("no detector yet"), "{out}");
+    }
+
+    /// **LE Coded, once its receiver has run.** Its funnel as BLE's is, and
+    /// the AuxPtrs: heard of those promised in view, and the ones the radio
+    /// could not see counted apart, since nothing listened for them.
+    #[test]
+    fn health_counts_coded_and_aux() {
+        let mut m = streaming();
+        m.net.coded_channel = Some(37);
+        m.net.health.coded = crate::signal::ble::receive::Funnel {
+            triggered: 61,
+            decoded: 40,
+            crc_failed: 6,
+            gave_up: 15,
+        };
+        let aux = &mut m.net.health.aux;
+        aux.heard = 7;
+        aux.missed = 2;
+        aux.not_in_view = 25;
+        aux.feed_lost = 1;
+        let out = draw(NetDecodeHealthPanel, 64, 40, &m).join("\n");
+        let line = |label: &str| {
+            out.lines()
+                .find(|l| l.contains(label))
+                .unwrap_or_else(|| panic!("{label}:\n{out}"))
+                .to_string()
+        };
+        assert!(line("Coded triggers").contains("61"), "{out}");
+        assert!(line("Coded CRC good").contains("40"), "{out}");
+        assert!(line("aux heard").contains("7 of 10"), "{out}");
+        assert!(line("aux elsewhere").contains("25"), "{out}");
+    }
+
+    /// The survey never runs the LE Coded receiver, and its health says
+    /// nothing about one rather than offering a decoder it does not start.
+    #[test]
+    fn a_coded_receiver_that_never_ran_is_not_mentioned() {
+        let out = draw(NetDecodeHealthPanel, 64, 40, &streaming()).join("\n");
+        assert!(!out.contains("Coded"), "{out}");
+        assert!(!out.contains("aux"), "{out}");
     }
 
     /// A decoder that has not run this session is a dash, never a zero.

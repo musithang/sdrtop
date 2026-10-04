@@ -138,9 +138,10 @@ pub fn wrap(text: &str, width: usize, max_rows: usize) -> Vec<String> {
     while i < chars.len() && rows.len() < max_rows {
         let hard = (i + width).min(chars.len());
         // Break on a space when one falls in the back half of the row; breaking
-        // any earlier wastes more space than the tidier edge is worth.
+        // any earlier wastes more space than the tidier edge is worth. Only a
+        // plain space is a break: a no-break space holds a figure to its unit.
         let mut cut = hard;
-        if hard < chars.len() && !chars[hard].is_whitespace() {
+        if hard < chars.len() && chars[hard] != ' ' {
             if let Some(p) = chars[i..hard].iter().rposition(|c| *c == ' ') {
                 if p > width / 2 {
                     cut = i + p;

@@ -249,6 +249,20 @@ fn set_aux_outcome(m: &mut SdrMetrics, seq: u64, outcome: crate::signal::ble::au
     }
 }
 
+/// Put the LE Coded receiver down, if there is one: a capture it had under
+/// way ends as given up in the funnel rather than with the receiver.
+fn put_down(
+    coded: &mut Option<crate::signal::ble::coded_rx::CodedReceiver>,
+    state: &Arc<Mutex<SdrMetrics>>,
+) {
+    let Some(rx) = coded.take() else { return };
+    let funnel = rx.finish();
+    if funnel != crate::signal::ble::receive::Funnel::default() {
+        let mut m = state.lock().unwrap_or_else(|e| e.into_inner());
+        m.net.health.coded.add(funnel);
+    }
+}
+
 /// Promises that can no longer be kept, because the stream broke or the
 /// view that listens for them closed: each ends as lost to the feed, and is
 /// counted, rather than vanishing.
@@ -715,7 +729,7 @@ impl NetWorker {
             }
             if !continuous {
                 ble = None;
-                coded = None;
+                put_down(&mut coded, &self.state);
                 abandon(&mut promises, &self.state);
                 bt.clear();
                 recent.clear();
@@ -799,6 +813,7 @@ impl NetWorker {
                             .as_ref()
                             .is_some_and(|r| r.matches(ch, rate_hz, centre_hz))
                         {
+                            put_down(&mut coded, &self.state);
                             let built = crate::signal::ble::coded_rx::CodedReceiver::new(
                                 rate_hz, ch, centre_hz,
                             );
@@ -812,7 +827,6 @@ impl NetWorker {
                                 Err(reason) => {
                                     m.net.coded_refused = Some(reason);
                                     m.net.coded_channel = None;
-                                    coded = None;
                                 }
                             }
                         }
@@ -821,7 +835,7 @@ impl NetWorker {
                         }
                     }
                     None => {
-                        coded = None;
+                        put_down(&mut coded, &self.state);
                         let mut m = self.state.lock().unwrap_or_else(|e| e.into_inner());
                         m.net.coded_refused = Some(
                             "not tuned to an advertising channel (2402, 2426 or 2480 MHz)"
@@ -831,7 +845,7 @@ impl NetWorker {
                     }
                 }
             } else {
-                coded = None;
+                put_down(&mut coded, &self.state);
             }
             if coded.is_none() {
                 abandon(&mut promises, &self.state);
@@ -1641,7 +1655,7 @@ impl NetWorker {
                 // dropping the scan means the next dwell starts clean.
                 scan = None;
                 ble = None;
-                coded = None;
+                put_down(&mut coded, &self.state);
                 bt.clear();
                 load = Load::default();
                 survey_bt = self.survey_bt_start;
@@ -2757,6 +2771,18 @@ mod tests {
         let sent = vec![(1, blocks[0].clone()), (3, blocks[2].clone())];
         let m = run_view("coded", "net_coded", &sent);
         assert!(m.net.coded_packets.is_empty(), "{:?}", m.net.coded_packets);
+    }
+
+    /// A capture the worker cuts short at a break still ends in the funnel:
+    /// every trigger is decoded, failed or given up, and the counts add up.
+    #[test]
+    fn a_capture_cut_by_a_break_still_ends_in_the_funnel() {
+        let blocks = coded_on_the_air(120_000, 3);
+        let sent = vec![(1, blocks[0].clone()), (3, blocks[2].clone())];
+        let m = run_view("coded", "net_coded", &sent);
+        let f = m.net.health.coded;
+        assert!(f.gave_up >= 1, "{f:?}");
+        assert_eq!(f.triggered, f.decoded + f.crc_failed + f.gave_up, "{f:?}");
     }
 
     /// **A connection heard set up is followed.** Its CONNECT_IND on
