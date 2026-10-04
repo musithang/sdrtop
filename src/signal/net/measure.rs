@@ -33,7 +33,10 @@
 
 use num_complex::Complex;
 
-use crate::signal::ble::measure::{drift_from, modulation_from, Drift, ModulationQuality};
+use crate::signal::ble::measure::{
+    drift_from, modulation_from, CodedInitial, CodedModulation, Drift, ModulationQuality,
+    CODED_DELTA_F1_MAX_LIMIT_HZ,
+};
 use crate::signal::ble::Phy;
 use crate::signal::bt::piconet::Deviation;
 use crate::signal::dsp::deviation::{suite_readings_from, BitReadings};
@@ -163,6 +166,9 @@ impl<'a> Recent<'a> {
 /// inside the window it was built over.
 struct Tester {
     fine: Oversampled,
+    /// The window through the tester's filter, at [`MEASURE_RATE_HZ`]: what
+    /// [`Self::snr_db`] reads the envelope of.
+    iq: Vec<Complex<f32>>,
     /// The stream position of the window's first raw sample.
     start: f64,
     /// The filter's delay, in raw samples.
@@ -215,6 +221,7 @@ impl Tester {
         filter.process(&iq, &mut out);
         Some(Self {
             fine: Oversampled::new(&out, rate / factor),
+            iq: out,
             start,
             delay,
             factor,
@@ -225,6 +232,21 @@ impl Tester {
     /// The frequency at stream position `pos`, in Hz.
     fn at(&self, pos: f64) -> f32 {
         self.fine.at((pos - self.start - self.delay) / self.factor)
+    }
+
+    /// The SNR over stream positions `from` to `to`, in dB, from the
+    /// envelope through the tester's filter (`estimate::snr_m2m4`). The
+    /// filter has the BLE receiver's front end's edges, so this is read in
+    /// the band LE 1M's SNR is.
+    #[allow(dead_code)]
+    fn snr_db(&self, from: f64, to: f64) -> Option<f64> {
+        let index = |pos: f64| ((pos - self.start - self.delay) / self.factor).round();
+        let (a, b) = (index(from), index(to));
+        if a < 0.0 || b <= a {
+            return None;
+        }
+        let window = self.iq.get(a as usize..(b as usize).min(self.iq.len()))?;
+        crate::signal::dsp::estimate::snr_m2m4(window).map(|snr| 10.0 * snr.log10())
     }
 }
 
@@ -484,6 +506,101 @@ pub fn le_1m(
         modulation,
         drift_from(Some((f0, preamble.len())), &blocks, Phy::OneM),
     ))
+}
+
+/// What the measurement path reads of an LE Coded packet.
+#[derive(Clone, Copy, Debug, PartialEq)]
+#[allow(dead_code)]
+pub struct CodedReading {
+    /// Over the whole packet, in dB, in LE 1M's band ([`Tester::snr_db`]).
+    pub snr_db: Option<f64>,
+    /// RFPHY/TRM/BV-13-C; S=8 only.
+    pub modulation: Option<CodedModulation>,
+    /// RFPHY/TRM/BV-14-C's preamble groups; S=8 only.
+    pub initial: Option<CodedInitial>,
+}
+
+/// An LE Coded packet's readings: `symbols` is the whole packet as sent,
+/// preamble through TERM2 (the receiver's decode encoded again), whose
+/// first symbol starts near stream position `start_pair`, on a channel
+/// `offset_hz` from the tuning. Timed from the sync symbols (the preamble
+/// and the coded access address, the 336 every advertising packet starts
+/// with), through the tester's filter, as LE 1M's are.
+///
+/// **S=8 only for the suites' figures.** RFPHY.TS defines LE Coded's
+/// modulation (BV-13-C) and carrier (BV-14-C) for S=8 and nothing for S=2,
+/// so an S=2 packet gets its SNR and no figure a suite has not defined.
+///
+/// **The test packets' patterns, read from traffic.** BV-13-C reads Δf1 on
+/// a payload of `00111100` symbols; every `00001111` in a packet, preamble
+/// or data, is the same pattern, and its middle symbols are the ones whose
+/// neighbours both equal them (`dsp::deviation::suite_readings_from`, as
+/// LE 1M's traffic is read). BV-14-C's preamble groups need nothing but the
+/// preamble, which every Coded packet has. `None` as [`le_1m`] refuses.
+#[allow(dead_code)]
+pub fn le_coded(
+    recent: &Recent,
+    rate: f64,
+    offset_hz: f64,
+    start_pair: f64,
+    symbols: &[bool],
+    coding: crate::signal::ble::coded::Coding,
+) -> Option<CodedReading> {
+    use crate::signal::ble::coded::{self, Coding};
+    use crate::signal::dsp::uncertainty::mean_with_uncertainty;
+    let sync = coded::PREAMBLE_SYMBOLS + 256;
+    let known = symbols.get(..sync)?;
+    let symbol = rate / 1e6;
+    let first = start_pair + 0.5 * symbol;
+    let Lined::Up(aligned) = align(
+        recent,
+        rate,
+        offset_hz,
+        known,
+        first,
+        symbols.len() - sync,
+        None,
+    )?
+    else {
+        return None;
+    };
+    let start = aligned.first + (aligned.tau - 0.5) * symbol;
+    let snr_db = aligned
+        .tester
+        .snr_db(start, start + symbols.len() as f64 * symbol);
+    if coding == Coding::S2 {
+        return Some(CodedReading {
+            snr_db,
+            modulation: None,
+            initial: None,
+        });
+    }
+    let readings = BitReadings::read(symbols.len(), |x| aligned.at(x));
+    // BV-14-C: four groups of 16 from the preamble's third symbol.
+    let group = |g: usize| {
+        (2 + 16 * g..18 + 16 * g)
+            .map(|k| readings.mean(k))
+            .sum::<f64>()
+            / 16.0
+    };
+    let initial = CodedInitial {
+        groups_hz: [group(0), group(1), group(2), group(3)],
+    };
+    let modulation = suite_readings_from(symbols, &readings).and_then(|(settled, _)| {
+        (!settled.is_empty()).then(|| CodedModulation {
+            delta_f1_avg_hz: mean_with_uncertainty(&settled),
+            share_f1max_above_limit: settled
+                .iter()
+                .filter(|&&v| v as f64 > CODED_DELTA_F1_MAX_LIMIT_HZ)
+                .count() as f64
+                / settled.len() as f64,
+        })
+    });
+    Some(CodedReading {
+        snr_db,
+        modulation,
+        initial: Some(initial),
+    })
 }
 
 #[cfg(test)]
@@ -763,5 +880,167 @@ mod tests {
             .deviation;
         assert_eq!(got.neighbour_busy, 1);
         assert_eq!((got.settled.n, got.alternating.n), (0, 0));
+    }
+
+    /// A Coded packet's symbols at `rate` from a reference transmitter, with
+    /// `lead` symbols of settling either side, unit amplitude, plus noise of
+    /// `noise_power` (none at zero): the samples, and the stream position of
+    /// the packet's first symbol when they are held from `base`.
+    fn coded_burst(
+        tx: Gfsk,
+        symbols: &[bool],
+        rate: f64,
+        lead: usize,
+        noise_power: f64,
+        base: u64,
+        rng: &mut Rng,
+    ) -> (Vec<Complex<f32>>, f64) {
+        let mut all: Vec<bool> = (0..lead).map(|_| rng.next_u64() & 1 == 1).collect();
+        all.extend(symbols);
+        all.extend((0..lead).map(|_| rng.next_u64() & 1 == 1));
+        let burst = Burst::new(tx, &all);
+        let n = burst.len_at(rate);
+        let noise = if noise_power > 0.0 {
+            rng.noise(n, noise_power)
+        } else {
+            vec![Complex::new(0.0, 0.0); n]
+        };
+        let iq = burst
+            .iq(rate, n)
+            .iter()
+            .zip(&noise)
+            .map(|(z, w)| Complex::new(z.re as f32, z.im as f32) + w)
+            .collect();
+        (iq, base as f64 + lead as f64 * rate / 1e6)
+    }
+
+    /// An S=8 packet off the tuned centre: its four preamble groups read the
+    /// carrier as sent (RFPHY/TRM/BV-14-C), and its Δf1 reads as the suites'
+    /// readings of the same symbols do, ideally (BV-13-C), every Δf1max above
+    /// 185 kHz. Handed over a third of a symbol early or late, it times itself
+    /// from the sync symbols.
+    #[test]
+    fn a_coded_packet_reads_as_the_suites_define() {
+        use crate::signal::ble::coded::{self, Coding};
+        use crate::signal::ble::detect::ADVERTISING_ACCESS_ADDRESS;
+        let (rate, offset, base) = (8e6, 1e6, 400_000u64);
+        let mut rng = Rng::new(70);
+        let payload: Vec<u8> = (0..30).map(|_| rng.next_u64() as u8).collect();
+        let symbols = coded::transmit(ADVERTISING_ACCESS_ADDRESS, Coding::S8, 38, 0x07, &payload);
+        let tx = Gfsk::new(1e6, 250_000.0, 0.5).with_cfo(offset + 12_000.0);
+        let (iq, start) = coded_burst(tx, &symbols, rate, 20, 0.0, base, &mut rng);
+        let recent = Recent::new([(base, &iq[..])]);
+
+        let ideal = Burst::new(Gfsk::new(1e6, 250_000.0, 0.5), &symbols);
+        let (settled, _) = crate::signal::dsp::deviation::suite_readings(&symbols, |x| {
+            ideal.frequency(x * 1e-6) as f32
+        })
+        .unwrap();
+        let want = settled.iter().map(|&v| v as f64).sum::<f64>() / settled.len() as f64;
+
+        let symbol = rate / 1e6;
+        for wrong in [-0.3, 0.0, 0.3] {
+            let got = le_coded(
+                &recent,
+                rate,
+                offset,
+                start + wrong * symbol,
+                &symbols,
+                Coding::S8,
+            )
+            .expect("held");
+            let initial = got.initial.expect("S=8 has a preamble to read");
+            for (k, f) in initial.groups_hz.iter().enumerate() {
+                assert!((f - 12_000.0).abs() < 300.0, "{wrong}: f{k} {f}");
+            }
+            let m = got.modulation.expect("S=8 has settled symbols");
+            let df1 = m.delta_f1_avg_hz.value();
+            assert!(
+                (df1 - want).abs() < 0.01 * want,
+                "{wrong}: df1 {df1} vs {want}"
+            );
+            assert_eq!(m.share_f1max_above_limit, 1.0);
+        }
+    }
+
+    /// A carrier drifting 200 Hz a microsecond: the preamble's f0 and f3,
+    /// 48 us apart, differ by 9.6 kHz.
+    #[test]
+    fn the_preamble_reads_the_drift_between_its_groups() {
+        use crate::signal::ble::coded::{self, Coding};
+        use crate::signal::ble::detect::ADVERTISING_ACCESS_ADDRESS;
+        let (rate, base) = (8e6, 100_000u64);
+        let mut rng = Rng::new(71);
+        let symbols = coded::transmit(
+            ADVERTISING_ACCESS_ADDRESS,
+            Coding::S8,
+            38,
+            0x07,
+            &[1, 2, 3, 4],
+        );
+        let tx = Gfsk::new(1e6, 250_000.0, 0.5).with_drift(200e6);
+        let (iq, start) = coded_burst(tx, &symbols, rate, 20, 0.0, base, &mut rng);
+        let recent = Recent::new([(base, &iq[..])]);
+        let got = le_coded(&recent, rate, 0.0, start, &symbols, Coding::S8).expect("held");
+        let g = got.initial.expect("S=8").groups_hz;
+        let drift = g[3] - g[0];
+        assert!((drift - 9_600.0).abs() < 300.0, "f3 - f0 = {drift}");
+    }
+
+    /// S=2 has neither suite (both are defined for S=8 alone), so neither is
+    /// read; its SNR is.
+    #[test]
+    fn s2_has_no_suite_readings_but_an_snr() {
+        use crate::signal::ble::coded::{self, Coding};
+        use crate::signal::ble::detect::ADVERTISING_ACCESS_ADDRESS;
+        let (rate, base) = (8e6, 100_000u64);
+        let mut rng = Rng::new(72);
+        let symbols = coded::transmit(
+            ADVERTISING_ACCESS_ADDRESS,
+            Coding::S2,
+            38,
+            0x07,
+            &[1, 2, 3, 4],
+        );
+        let tx = Gfsk::new(1e6, 250_000.0, 0.5);
+        let (iq, start) = coded_burst(tx, &symbols, rate, 20, 0.01, base, &mut rng);
+        let recent = Recent::new([(base, &iq[..])]);
+        let got = le_coded(&recent, rate, 0.0, start, &symbols, Coding::S2).expect("held");
+        assert!(got.modulation.is_none() && got.initial.is_none(), "{got:?}");
+        assert!(got.snr_db.is_some());
+    }
+
+    /// The SNR is the one in the band the samples are measured in: the
+    /// signal's power over the noise's through the tester's filter, whose
+    /// equivalent noise bandwidth fixes how much of the added noise gets in.
+    /// Within a decibel of that at three noise levels.
+    #[test]
+    fn the_coded_snr_is_the_snr_in_the_measurement_band() {
+        use crate::signal::ble::coded::{self, Coding};
+        use crate::signal::ble::detect::ADVERTISING_ACCESS_ADDRESS;
+        let rate = 8e6;
+        let taps = measurement_filter(rate);
+        let (sum, sq) = taps.iter().fold((0.0f64, 0.0f64), |(a, b), &t| {
+            (a + t as f64, b + (t as f64).powi(2))
+        });
+        // The share of the added noise's power the filter lets through.
+        let passed = sq / (sum * sum);
+        for (k, noise) in [0.3, 0.1, 0.03].into_iter().enumerate() {
+            let mut rng = Rng::new(80 + k as u64);
+            let payload: Vec<u8> = (0..30).map(|_| rng.next_u64() as u8).collect();
+            let symbols =
+                coded::transmit(ADVERTISING_ACCESS_ADDRESS, Coding::S8, 38, 0x07, &payload);
+            let tx = Gfsk::new(1e6, 250_000.0, 0.5);
+            let (iq, start) = coded_burst(tx, &symbols, rate, 40, noise, 0, &mut rng);
+            let recent = Recent::new([(0, &iq[..])]);
+            let got = le_coded(&recent, rate, 0.0, start, &symbols, Coding::S8)
+                .and_then(|r| r.snr_db)
+                .expect("an SNR");
+            let want = -10.0 * (noise * passed).log10();
+            assert!(
+                (got - want).abs() < 1.0,
+                "noise {noise}: {got:.2} dB, in band {want:.2} dB"
+            );
+        }
     }
 }

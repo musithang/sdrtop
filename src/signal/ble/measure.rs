@@ -50,6 +50,36 @@ use crate::signal::dsp::uncertainty::Uncertain;
 // The run shapes are GFSK's, not BLE's: `signal::dsp::deviation` holds
 // them since classic Bluetooth reads the same (net-ux-polish-plan 6.4).
 
+/// RFPHY/TRM/BV-13-C's floor for Δf1max on LE Coded (S=8): 99.9 % of them
+/// above 185 kHz.
+#[allow(dead_code)]
+pub const CODED_DELTA_F1_MAX_LIMIT_HZ: f64 = 185_000.0;
+
+/// An LE Coded (S=8) packet's modulation as RFPHY/TRM/BV-13-C reads it:
+/// Δf1 alone, because S=8 sends only `0011` and `1100` and so never the
+/// alternating symbols Δf2 is read from.
+#[derive(Clone, Copy, Debug, PartialEq)]
+#[allow(dead_code)]
+pub struct CodedModulation {
+    /// The mean Δf1max over the packet's settled symbols, and its standard
+    /// error. Pass: 225 to 275 kHz.
+    pub delta_f1_avg_hz: Uncertain,
+    /// The share of Δf1max readings above [`CODED_DELTA_F1_MAX_LIMIT_HZ`];
+    /// the suite asks for 99.9 % over ten packets.
+    pub share_f1max_above_limit: f64,
+}
+
+/// An LE Coded (S=8) packet's initial carrier as RFPHY/TRM/BV-14-C reads
+/// it: the frequency integrated over four 16-symbol groups of the preamble
+/// from its third symbol, f0 to f3, in Hz from the channel's nominal centre.
+/// f0 is the initial carrier; f3 against f0 is the drift across 48 us
+/// (pass: within 19.2 kHz).
+#[derive(Clone, Copy, Debug, PartialEq)]
+#[allow(dead_code)]
+pub struct CodedInitial {
+    pub groups_hz: [f64; 4],
+}
+
 /// One packet's modulation quality, each figure carrying the uncertainty a
 /// caller needs to judge it against a stated limit.
 #[derive(Clone, Copy, Debug, PartialEq)]

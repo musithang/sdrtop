@@ -157,6 +157,40 @@ pub fn snr_from_metric(metric: f64, pairs: usize) -> Option<f64> {
     Some(rho / (1.0 - rho))
 }
 
+/// The SNR of a constant-envelope signal in complex Gaussian noise, from the
+/// second and fourth moments of the samples' magnitude (the M2M4 estimator):
+/// signal power over noise power, per sample, in the band the samples carry.
+///
+/// **Why the envelope.** A constant envelope `s` in noise of power `n` has
+/// `E|y|^2 = s + n` and `E|y|^4 = s^2 + 4sn + 2n^2`, so `s = sqrt(2 M2^2 -
+/// M4)` and `n = M2 - s`, whatever the phase does. GFSK's envelope is
+/// constant, so the estimate needs neither the carrier offset nor its drift,
+/// over as long a packet as there is, where a coherent correlation against a
+/// reference loses its coherence to the first kilohertz of error left over.
+///
+/// `None` when the moments do not admit a signal (noise alone, or too few
+/// samples to tell), or admit no noise (a test fixture's noiseless data):
+/// neither is a measurement to put a number on.
+#[allow(dead_code)]
+pub fn snr_m2m4(iq: &[Complex<f32>]) -> Option<f64> {
+    if iq.len() < 2 {
+        return None;
+    }
+    let n = iq.len() as f64;
+    let (m2, m4) = iq.iter().fold((0.0, 0.0), |(a, b), z| {
+        let p = z.norm_sqr() as f64;
+        (a + p, b + p * p)
+    });
+    let (m2, m4) = (m2 / n, m4 / n);
+    let s2 = 2.0 * m2 * m2 - m4;
+    if s2 <= 0.0 {
+        return None;
+    }
+    let s = s2.sqrt();
+    let noise = m2 - s;
+    (noise > 0.0).then(|| s / noise)
+}
+
 // ---------------------------------------------------------------------------
 // Coarse timing
 // ---------------------------------------------------------------------------
@@ -482,5 +516,29 @@ mod tests {
         assert!(moose_variance(0.0, D, D).is_infinite());
         assert!(moose_variance(-1.0, D, D).is_infinite());
         assert!(moose_variance(1.0, 0, D).is_infinite());
+    }
+
+    /// A constant envelope at a random phase walk, in complex Gaussian noise
+    /// of a known power: the moments give the SNR back, within half a decibel
+    /// from 0 to 20 dB.
+    #[test]
+    fn the_envelope_moments_give_the_snr_back() {
+        let mut rng = crate::signal::dsp::testkit::Rng::new(41);
+        let n = 200_000;
+        let mut phase = 0.0f64;
+        let signal: Vec<Complex<f32>> = (0..n)
+            .map(|_| {
+                phase += (rng.unit() - 0.5) * 0.8;
+                Complex::from_polar(1.0, phase as f32)
+            })
+            .collect();
+        for db in [0.0, 5.0, 10.0, 20.0] {
+            let noise = rng.noise(n, 10f64.powf(-db / 10.0));
+            let y: Vec<Complex<f32>> = signal.iter().zip(&noise).map(|(s, z)| s + z).collect();
+            let got = 10.0 * snr_m2m4(&y).unwrap().log10();
+            assert!((got - db).abs() < 0.5, "{db} dB in, {got:.2} out");
+        }
+        // No noise at all is no measurement: nothing to divide by.
+        assert_eq!(snr_m2m4(&signal), None);
     }
 }
