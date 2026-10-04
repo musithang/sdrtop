@@ -60,7 +60,9 @@ checkpoint instead of by version.
   AuxPtr is followed as LE Coded's is: the auxiliary packet joins the list
   named and addressed, and the detail has an EXTENDED section (the event
   and set, TxPower, the packet that pointed at it, what became of its own
-  AuxPtr). The ADV filter counts extended advertising as advertising.
+  AuxPtr). The ADV filter counts extended advertising as advertising, and
+  the Census counts an extended advertiser from its followed auxiliary
+  packet, the one that carries its address and name.
 
 ### Changed
 

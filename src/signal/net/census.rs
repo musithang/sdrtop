@@ -591,8 +591,29 @@ pub fn turnover_by_kind(
         .collect()
 }
 
+/// A BLE PDU type code as the census names it: the type's own name, but
+/// the extended advertising code as the family it is. One code is
+/// `ADV_EXT_IND` on a primary channel and `AUX_ADV_IND` or `AUX_CHAIN_IND`
+/// where an AuxPtr points, and a device is counted from its auxiliary
+/// packets, which carry its address.
+pub fn pdu_type_name(code: u8) -> String {
+    match code {
+        0x07 => "extended".to_string(),
+        c => crate::signal::ble::pdu::PduType::from_bits(c).label(),
+    }
+}
+
 #[cfg(test)]
 mod tests {
+
+    /// The extended advertising code names a family, not one PDU: the census
+    /// keeps codes, and an AUX_ADV_IND counted there is no ADV_EXT_IND.
+    #[test]
+    fn the_extended_code_is_named_as_a_family() {
+        assert_eq!(pdu_type_name(0x07), "extended");
+        assert_eq!(pdu_type_name(0x00), "ADV_IND");
+        assert_eq!(pdu_type_name(0x0e), "TYPE 0x0e");
+    }
     use super::*;
     use std::time::Duration;
 

@@ -356,6 +356,13 @@ the detail sits beside the dial; on a narrower one it goes under it, and on
 a short one the dial steps aside for a single meter rather than squeezing
 the table.
 
+**An extended advertiser** is counted from its auxiliary packet, the one
+that carries its address and its name: its `ADV_EXT_IND` names nobody. So
+it appears once an AuxPtr of its has been followed to a channel in view
+([extended advertising](#the-packet-list-focus-v)), its types say
+`extended`, and its interval stays unknown, because an auxiliary packet
+comes when its primary says, not on an interval of its own.
+
 ---
 
 ## Advertising · `LE 2`

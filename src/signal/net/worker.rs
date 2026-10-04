@@ -689,6 +689,31 @@ fn census_from_ble(
     crate::signal::net::census::observe(devices, &sighting, now);
 }
 
+/// An extended advertiser into the census, from the auxiliary packet its
+/// AuxPtr was followed to: the packet that carries its address (taken into
+/// `p`, which names none of its own) and its advertising data. Counted with
+/// no arrival, as `census_from_ble` counts any type but legacy advertising:
+/// an aux comes when its primary's offset says, not on an interval.
+fn census_from_aux(
+    m: &mut SdrMetrics,
+    p: &mut crate::signal::ble::pdu::Packet,
+    ext: &crate::state::ExtInfo,
+    channel: u8,
+    rate_hz: f64,
+    now: Instant,
+) {
+    p.adv_addr = p.adv_addr.or(ext.header.adv_a);
+    let Some(address) = p.adv_addr else { return };
+    let locked = m.net.mode == crate::state::NetMode::Lock;
+    census_from_ble(&mut m.net.census.devices, p, channel, locked, rate_hz, now);
+    let said = crate::signal::ble::ad::Advertised::from_structures(&crate::signal::ble::ad::parse(
+        &ext.header.adv_data,
+    ));
+    if p.crc_ok && !said.is_empty() {
+        m.net.advertised.entry(address).or_default().merge(said);
+    }
+}
+
 /// The address a packet came from and what it advertised about itself
 /// (`signal::ble::ad::Advertised`), for `NetState::advertised`; `None` where
 /// it said nothing beyond its address.
@@ -1813,6 +1838,14 @@ impl NetWorker {
                         );
                         match list {
                             AuxList::Le => {
+                                census_from_aux(
+                                    &mut m,
+                                    &mut p,
+                                    &ext,
+                                    promise.channel,
+                                    rate_hz,
+                                    now,
+                                );
                                 push_le_aux(&mut m, p, promise.channel, phy, reading, ext, now)
                             }
                             AuxList::Coded => {
@@ -3209,6 +3242,27 @@ mod tests {
         assert_eq!(m.net.health.aux.heard, 1);
         // Nothing on the LE Coded list: one advertisement, one list.
         assert!(m.net.coded_packets.is_empty());
+    }
+
+    /// **An extended advertiser is counted in the census.** Its address and
+    /// name are in the auxiliary packet, not the `ADV_EXT_IND`, so the
+    /// followed aux is what counts it: by its AdvA, with what its AdvData
+    /// says, and with no arrival, since an aux's timing is its primary's
+    /// offset, not an advertising interval.
+    #[test]
+    fn an_extended_advertiser_is_counted_in_the_census() {
+        let m = le_view(&[
+            (38, 0x07, adv_ext_ind_on(9, 0), 20_000),
+            (9, 0x47, aux_adv_ind(), 20_000 + 60_000),
+        ]);
+        let addr = [0x66, 0x55, 0x44, 0x33, 0x22, 0x11];
+        let devices = &m.net.census.devices;
+        assert_eq!(devices.len(), 1, "{devices:?}");
+        let d = &devices[0];
+        assert_eq!(d.address, addr);
+        assert_eq!(d.ble_pdu_codes().collect::<Vec<_>>(), [0x07]);
+        let said = m.net.advertised.get(&addr).expect("its AdvData read");
+        assert_eq!(said.name.as_ref().map(|n| n.0.as_str()), Some("Pixel"));
     }
 
     /// An LE 1M advertisement whose AuxPtr is out of view says so, on the

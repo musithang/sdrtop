@@ -160,7 +160,7 @@ pub fn rows(state: &SdrMetrics) -> Vec<String> {
                 .map(|u| state.radio.corrected_ppm(u, now).0);
             let pdu_types = d
                 .ble_pdu_codes()
-                .map(|c| crate::signal::ble::pdu::PduType::from_bits(c).label())
+                .map(crate::signal::net::census::pdu_type_name)
                 .collect::<Vec<_>>()
                 .join(";");
             let mut fields = vec![

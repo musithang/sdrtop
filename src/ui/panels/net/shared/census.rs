@@ -336,11 +336,12 @@ fn fmt_modulation(d: &Device) -> String {
     }
 }
 
-/// `ADV_IND, SCAN_RSP`: the PDU types the census kept as codes, named.
+/// `ADV_IND, SCAN_RSP`: the PDU types the census kept as codes, named
+/// (`census::pdu_type_name`: extended advertising as the family).
 fn pdu_types(d: &Device) -> String {
     let names: Vec<String> = d
         .ble_pdu_codes()
-        .map(|c| crate::signal::ble::pdu::PduType::from_bits(c).label())
+        .map(crate::signal::net::census::pdu_type_name)
         .collect();
     if names.is_empty() {
         "-".to_string()
