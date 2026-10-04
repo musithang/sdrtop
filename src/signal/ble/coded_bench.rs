@@ -399,3 +399,83 @@ fn coded_filter_bench() {
         println!("{:>6.0} kHz  {taps:>4}   {per_ms:.3}", f.cutoff_hz / 1e3);
     }
 }
+
+/// The receiver bench: the same curves as [`coded_filter_bench`]'s chosen
+/// filter, but through the whole `CodedReceiver`, detection and timing found
+/// rather than given, so what the chain loses to finding the packet shows
+/// beside what it would decode with the timing known.
+#[test]
+#[ignore = "a bench: slow, prints a table; run by hand in release"]
+fn coded_receiver_bench() {
+    const POINTS: [f64; 17] = [
+        9.0, 9.5, 10.0, 10.5, 11.0, 11.5, 12.0, 12.5, 13.0, 13.5, 14.0, 14.5, 15.0, 15.5, 16.0,
+        16.5, 17.0,
+    ];
+    const RX_PACKETS: usize = 150;
+    for (coding, seed) in [(Coding::S8, 31u64), (Coding::S2, 32)] {
+        let mut rng = Rng::new(seed);
+        let payload: Vec<u8> = (0..48).map(|_| rng.next_u64() as u8).collect();
+        let symbols = coded::transmit(
+            detect::ADVERTISING_ACCESS_ADDRESS,
+            coding,
+            CHANNEL,
+            0x07,
+            &payload,
+        );
+        let mut bits: Vec<bool> = (0..MARGIN_SYMBOLS * 4)
+            .map(|_| rng.next_u64() & 1 == 1)
+            .collect();
+        bits.extend(&symbols);
+        bits.extend((0..MARGIN_SYMBOLS * 4).map(|_| rng.next_u64() & 1 == 1));
+        let clean = gfsk::modulate(&bits, RAW_SPS, 250e3, RAW_RATE, 0.5);
+
+        let rows: Vec<(f64, f64)> = std::thread::scope(|s| {
+            let handles: Vec<_> = POINTS
+                .iter()
+                .enumerate()
+                .map(|(k, &db)| {
+                    let (clean, payload) = (&clean, &payload);
+                    s.spawn(move || {
+                        let mut rng = Rng::new(seed * 1000 + k as u64);
+                        let bit_rate = 1e6 / coding.symbols_per_bit() as f64;
+                        let snr = 10f64.powf(db / 10.0) * bit_rate / RAW_RATE;
+                        let mut lost = 0usize;
+                        for _ in 0..RX_PACKETS {
+                            let offset_hz =
+                                (rng.unit() * 2.0 - 1.0) * CRYSTAL_PPM * 1e-6 * CARRIER_HZ;
+                            let step = std::f64::consts::TAU * offset_hz / RAW_RATE;
+                            let noise = rng.noise(clean.len(), 1.0 / snr);
+                            let rx: Vec<Complex<f32>> = clean
+                                .iter()
+                                .zip(&noise)
+                                .enumerate()
+                                .map(|(n, (s, z))| {
+                                    s * Complex::from_polar(1.0, (step * n as f64) as f32) + z
+                                })
+                                .collect();
+                            let mut receiver =
+                                coded_rx::CodedReceiver::new(RAW_RATE, CHANNEL, CARRIER_HZ)
+                                    .expect("channel 38 at 20 Msps");
+                            let got = receiver.push_iq_at(&rx, 0);
+                            let ok = got.iter().any(|p| p.crc_ok && p.payload == *payload);
+                            lost += usize::from(!ok);
+                        }
+                        (db, lost as f64 / RX_PACKETS as f64)
+                    })
+                })
+                .collect();
+            handles.into_iter().map(|h| h.join().unwrap()).collect()
+        });
+        let mut out = format!(
+            "\n{} PDU 50 octets, through the receiver\n  Eb/N0   PER\n",
+            coding.label()
+        );
+        for (db, per) in &rows {
+            out += &format!("  {db:5.1}   {per:.3}\n");
+        }
+        out += &crossing(&rows).map_or("  PER 30.8 % not crossed\n".to_string(), |x| {
+            format!("  PER 30.8 % at {x:.2} dB\n")
+        });
+        println!("{out}");
+    }
+}

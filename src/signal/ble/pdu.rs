@@ -147,6 +147,12 @@ pub struct Packet {
     /// it: where the measurement finds the packet in the raw samples. `None`
     /// from `decode`.
     pub pdu_pair: Option<f64>,
+    /// On LE Coded, the scheme FEC block 2 was sent at; `None` on the
+    /// uncoded PHYs, and from `decode`, which sees only bits.
+    pub coding: Option<super::coded::Coding>,
+    /// On LE Coded, how many symbols the FEC decoder overruled across both
+    /// blocks: what it took to get these bits, beside the bits themselves.
+    pub fec_repairs: Option<u32>,
 }
 
 /// How many trailing bits `decode` needs beyond the header to have a whole
@@ -278,6 +284,8 @@ pub fn decode(bits: &[bool]) -> Option<Packet> {
         at_pair: None,
         air: Vec::new(),
         pdu_pair: None,
+        coding: None,
+        fec_repairs: None,
     })
 }
 
