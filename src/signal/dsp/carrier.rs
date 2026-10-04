@@ -226,6 +226,47 @@ pub fn drift_from(
     })
 }
 
+/// LE Coded (S=8)'s carrier as RFPHY/TRM/BV-14-C reads it, from its
+/// 16-symbol groups: `preamble`, f0 to f3, and `payload`, f4 on, each the
+/// mean frequency over 16 symbols. The same [`Drift`] LE 1M's carrier is,
+/// because the limits are the same ones in other units: 19.2 kHz over 48 us
+/// is LE 1M's 20 kHz over 50 us, 400 Hz/us, and 50 kHz from f0 is both.
+///
+/// The steepest change is over three groups, 48 us: f3 against f0 in the
+/// preamble, and every fn against fn-3 in the payload. Never across the gap
+/// between them (the access address, the CI and TERM1 lie there), whose
+/// groups are not 48 us apart. The furthest from f0 is over f2 on, as the
+/// suite reads `|f0 - fn|` for n from 2. The `±` is the payload groups'
+/// scatter about a straight line, as LE 1M's is its blocks'. `None` under
+/// four payload groups, where no 48 us step lies within the payload.
+pub fn coded_drift_from(preamble: [f64; 4], payload: &[f64]) -> Option<Drift> {
+    const SPAN: usize = 3;
+    const SPAN_US: f64 = 48.0;
+    if payload.len() <= SPAN {
+        return None;
+    }
+    let sigma = block_sigma(payload)?;
+    let f0 = preamble[0];
+    let initial_hz = Uncertain::from_sigma(f0, sigma);
+    let furthest = preamble[2..]
+        .iter()
+        .chain(payload)
+        .copied()
+        .max_by(|a, b| (a - f0).abs().total_cmp(&(b - f0).abs()))?;
+    let steepest = std::iter::once(preamble[SPAN] - preamble[0])
+        .chain(payload.windows(SPAN + 1).map(|w| w[SPAN] - w[0]))
+        .max_by(|a, b| a.abs().total_cmp(&b.abs()))?;
+    Some(Drift {
+        initial_hz,
+        final_hz: Uncertain::from_sigma(*payload.last()?, sigma),
+        drift_hz: Uncertain::from_sigma(furthest, sigma).difference(&initial_hz),
+        drift_rate_hz_per_us: Uncertain::from_sigma(
+            steepest / SPAN_US,
+            sigma * std::f64::consts::SQRT_2 / SPAN_US,
+        ),
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -259,5 +300,35 @@ mod tests {
     fn no_settled_bits_no_carrier() {
         let bits: Vec<bool> = (0..50).map(|i| i % 2 == 0).collect();
         assert!(by_bit(&bits, |_| 0.0).iter().all(Option::is_none));
+    }
+
+    /// LE Coded's carrier from its 16-symbol groups: f0 from the preamble,
+    /// the furthest group from it, and the steepest change over three groups
+    /// (48 us), never across the gap between the preamble's groups and the
+    /// payload's, which are not 48 us apart.
+    #[test]
+    fn coded_drift_reads_the_bv_14_c_figures() {
+        // A step between the preamble and the payload: furthest, not steep.
+        let flat: Vec<f64> = vec![30_000.0; 10];
+        let d = coded_drift_from([0.0; 4], &flat).unwrap();
+        assert_eq!(d.initial_hz.value(), 0.0);
+        assert_eq!(d.drift_hz.value(), 30_000.0);
+        assert_eq!(d.drift_rate_hz_per_us.value(), 0.0);
+        // A payload ramp of 1.2 kHz a group: 3.6 kHz over 48 us.
+        let ramp: Vec<f64> = (0..10).map(|i| 1_200.0 * i as f64).collect();
+        let d = coded_drift_from([0.0; 4], &ramp).unwrap();
+        assert!(
+            (d.drift_rate_hz_per_us.value() - 3_600.0 / 48.0).abs() < 1e-9,
+            "{d:?}"
+        );
+        assert_eq!(d.final_hz.value(), 10_800.0);
+        // The preamble's own f3 - f0 counts as a 48 us change.
+        let d = coded_drift_from([0.0, 0.0, 0.0, 9_600.0], &[9_600.0; 10]).unwrap();
+        assert!(
+            (d.drift_rate_hz_per_us.value() - 200.0).abs() < 1e-9,
+            "{d:?}"
+        );
+        // Too few payload groups for a 48 us step: refused.
+        assert!(coded_drift_from([0.0; 4], &[0.0; 3]).is_none());
     }
 }

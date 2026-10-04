@@ -518,6 +518,10 @@ pub struct CodedReading {
     pub modulation: Option<CodedModulation>,
     /// RFPHY/TRM/BV-14-C's preamble groups; S=8 only.
     pub initial: Option<CodedInitial>,
+    /// RFPHY/TRM/BV-14-C's carrier through the payload, in LE 1M's terms
+    /// (`dsp::carrier::coded_drift_from`); S=8 only, and `None` on a payload
+    /// too short for a 48 us step.
+    pub drift: Option<Drift>,
 }
 
 /// An LE Coded packet's readings: `symbols` is the whole packet as sent,
@@ -573,6 +577,7 @@ pub fn le_coded(
             snr_db,
             modulation: None,
             initial: None,
+            drift: None,
         });
     }
     let readings = BitReadings::read(symbols.len(), |x| aligned.at(x));
@@ -586,6 +591,34 @@ pub fn le_coded(
     let initial = CodedInitial {
         groups_hz: [group(0), group(1), group(2), group(3)],
     };
+    // BV-14-C's payload groups: 16 symbols each, from the PDU payload to the
+    // CRC, each the mean of the carrier under its symbols. The suite
+    // integrates the frequency itself, on a test payload of `00111100`
+    // repeated, whose every 16 symbols average to the carrier. On traffic
+    // they do not: the Gaussian filter spills each group's edge symbols into
+    // its neighbours, and a plain mean moved by about 3 kHz with the data,
+    // which the steepest 48 us change then found, reading 200 Hz/us as 400.
+    // So the carrier is read under each symbol, its own and its neighbours'
+    // pull taken out (`dsp::carrier::by_bit_from`, as LE 1M's blocks are), and
+    // averaged; on the suite's payload that is its integral. The groups start
+    // on the 4-symbol pattern boundaries, at the payload's 29th symbol, two
+    // after the suite's 27th.
+    let carrier = crate::signal::dsp::carrier::by_bit_from(symbols, &readings);
+    let block2 = coded::PREAMBLE_SYMBOLS + coded::BLOCK1_SYMBOLS;
+    let header = 16 * Coding::S8.symbols_per_bit();
+    let trailer = (24 + 3) * Coding::S8.symbols_per_bit();
+    let crc = symbols.len().saturating_sub(trailer);
+    let payload: Vec<f64> = (block2 + header + 28..)
+        .step_by(16)
+        .take_while(|&k| k + 16 <= crc)
+        // A group with a symbol whose carrier could not be read ends the
+        // groups there: the steps between them are taken as 16 us each.
+        .map_while(|k| {
+            let group: Option<Vec<f64>> = carrier[k..k + 16].iter().copied().collect();
+            group.map(|g| g.iter().sum::<f64>() / 16.0)
+        })
+        .collect();
+    let drift = crate::signal::dsp::carrier::coded_drift_from(initial.groups_hz, &payload);
     let modulation = suite_readings_from(symbols, &readings).and_then(|(settled, _)| {
         (!settled.is_empty()).then(|| CodedModulation {
             delta_f1_avg_hz: mean_with_uncertainty(&settled),
@@ -600,6 +633,7 @@ pub fn le_coded(
         snr_db,
         modulation,
         initial: Some(initial),
+        drift,
     })
 }
 
@@ -1006,7 +1040,10 @@ mod tests {
         let (iq, start) = coded_burst(tx, &symbols, rate, 20, 0.01, base, &mut rng);
         let recent = Recent::new([(base, &iq[..])]);
         let got = le_coded(&recent, rate, 0.0, start, &symbols, Coding::S2).expect("held");
-        assert!(got.modulation.is_none() && got.initial.is_none(), "{got:?}");
+        assert!(
+            got.modulation.is_none() && got.initial.is_none() && got.drift.is_none(),
+            "{got:?}"
+        );
         assert!(got.snr_db.is_some());
     }
 
@@ -1042,5 +1079,55 @@ mod tests {
                 "noise {noise}: {got:.2} dB, in band {want:.2} dB"
             );
         }
+    }
+
+    /// A carrier drifting 200 Hz a microsecond through a whole S=8 packet:
+    /// the payload's groups read that rate, and the furthest from f0 is the
+    /// last, on the side it drifted to.
+    #[test]
+    fn a_drifting_coded_packet_reads_its_drift_through_the_payload() {
+        use crate::signal::ble::coded::{self, Coding};
+        use crate::signal::ble::detect::ADVERTISING_ACCESS_ADDRESS;
+        let (rate, base) = (8e6, 100_000u64);
+        let mut rng = Rng::new(73);
+        let payload: Vec<u8> = (0..30).map(|_| rng.next_u64() as u8).collect();
+        let symbols = coded::transmit(ADVERTISING_ACCESS_ADDRESS, Coding::S8, 38, 0x07, &payload);
+        let tx = Gfsk::new(1e6, 250_000.0, 0.5).with_drift(200e6);
+        let (iq, start) = coded_burst(tx, &symbols, rate, 20, 0.0, base, &mut rng);
+        let recent = Recent::new([(base, &iq[..])]);
+        let got = le_coded(&recent, rate, 0.0, start, &symbols, Coding::S8).expect("held");
+        let drift = got.drift.expect("a payload long enough");
+        let rate_read = drift.drift_rate_hz_per_us.value();
+        assert!((rate_read - 200.0).abs() < 10.0, "{rate_read} Hz/us");
+        assert!(drift.drift_hz.value() > 0.0);
+        assert_eq!(
+            drift.drift_hz.value(),
+            drift.final_hz.value() - drift.initial_hz.value()
+        );
+    }
+
+    /// No drift, on traffic: the steepest 48 us change is the noise's, near
+    /// zero. A plain mean of 16 symbols moves about 3 kHz with the data at
+    /// the group's edges, and its steepest change would read over 100 Hz/us.
+    #[test]
+    fn a_steady_coded_carrier_reads_no_drift_on_traffic() {
+        use crate::signal::ble::coded::{self, Coding};
+        use crate::signal::ble::detect::ADVERTISING_ACCESS_ADDRESS;
+        let (rate, base) = (8e6, 100_000u64);
+        let mut rng = Rng::new(74);
+        let payload: Vec<u8> = (0..60).map(|_| rng.next_u64() as u8).collect();
+        let symbols = coded::transmit(ADVERTISING_ACCESS_ADDRESS, Coding::S8, 38, 0x07, &payload);
+        let tx = Gfsk::new(1e6, 250_000.0, 0.5).with_cfo(-20_000.0);
+        let (iq, start) = coded_burst(tx, &symbols, rate, 20, 0.0, base, &mut rng);
+        let recent = Recent::new([(base, &iq[..])]);
+        let drift = le_coded(&recent, rate, 0.0, start, &symbols, Coding::S8)
+            .and_then(|r| r.drift)
+            .expect("a payload long enough");
+        assert!(drift.drift_rate_hz_per_us.value().abs() < 10.0, "{drift:?}");
+        assert!(drift.drift_hz.value().abs() < 500.0, "{drift:?}");
+        assert!(
+            (drift.initial_hz.value() + 20_000.0).abs() < 300.0,
+            "{drift:?}"
+        );
     }
 }
