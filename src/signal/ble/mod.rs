@@ -26,6 +26,7 @@ pub mod coded_rx;
 pub mod connect;
 pub mod data;
 pub mod detect;
+pub mod ext;
 pub mod fer;
 pub mod follow;
 pub mod gfsk;
