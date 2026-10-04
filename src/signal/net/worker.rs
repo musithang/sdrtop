@@ -1447,15 +1447,23 @@ impl NetWorker {
                                 to_pair: to,
                             };
                             let heard = listener.listen(&job, &window, rate_hz, centre_hz, span_hz);
-                            let (in_view, feed_lost, heard) =
-                                (heard.in_view, heard.feed_lost, heard.data);
-                            done.push((aa, due.counter, in_view, feed_lost, heard));
+                            use crate::signal::ble::follow::Listened;
+                            let listened = if !heard.in_view {
+                                Listened::NotInView
+                            } else if heard.feed_lost {
+                                Listened::FeedLost
+                            } else if heard.refused.is_some() {
+                                Listened::CannotReceive
+                            } else {
+                                Listened::Yes
+                            };
+                            done.push((aa, due.counter, listened, heard.data));
                         }
                         if done.is_empty() {
                             break;
                         }
                         let mut m = self.state.lock().unwrap_or_else(|e| e.into_inner());
-                        for (aa, counter, in_view, feed_lost, heard) in done {
+                        for (aa, counter, listened, heard) in done {
                             if let Some(f) = m
                                 .net
                                 .ble_connections
@@ -1464,7 +1472,7 @@ impl NetWorker {
                             {
                                 // Still the event this was for.
                                 if f.connection.next_due().counter == counter {
-                                    f.connection.account(in_view, feed_lost, heard);
+                                    f.connection.account(listened, heard);
                                 }
                             }
                         }
@@ -1580,6 +1588,10 @@ impl NetWorker {
                         crate::signal::ble::aux::AuxOutcome::NotInView
                     } else if out.feed_lost {
                         crate::signal::ble::aux::AuxOutcome::FeedLost
+                    } else if out.refused.is_some() {
+                        crate::signal::ble::aux::AuxOutcome::Refused(
+                            "its PHY cannot be received at this sample rate",
+                        )
                     } else if let Some((p, mut ext)) = kept {
                         drop(m);
                         let reading =
@@ -2890,6 +2902,21 @@ mod tests {
         let ext = m.net.coded_packets[0].ext.as_ref().unwrap();
         assert_eq!(ext.aux, AuxOutcome::NotInView);
         assert_eq!(m.net.health.aux.not_in_view, 1);
+    }
+
+    /// An AuxPtr to LE 2M at 20 Msps, where no LE 2M receiver can be
+    /// built: not followed, and why, rather than "its samples were not held".
+    #[test]
+    fn an_aux_on_a_phy_this_rate_cannot_receive_is_refused() {
+        use crate::signal::ble::aux::AuxOutcome;
+        let mut payload = adv_ext_ind(9);
+        // The AuxPtr's PHY bits, 21 to 23 of its three octets: LE 2M.
+        payload[6] = (payload[6] & 0b0001_1111) | 0b001 << 5;
+        let m = scene_view(&[(38, 0x07, payload, 20_000)]);
+        let ext = m.net.coded_packets[0].ext.as_ref().unwrap();
+        assert!(matches!(ext.aux, AuxOutcome::Refused(_)), "{:?}", ext.aux);
+        assert_eq!(m.net.health.aux.feed_lost, 0);
+        assert_eq!(m.net.health.aux.refused, 1);
     }
 
     /// In view, listened to, and nothing there: missed.

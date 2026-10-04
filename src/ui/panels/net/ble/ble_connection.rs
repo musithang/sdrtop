@@ -118,6 +118,7 @@ fn account_words(a: Account) -> &'static str {
         Account::Missed => "missed",
         Account::NotInView => "not in view",
         Account::FeedLost => "feed lost",
+        Account::CannotReceive => "no receiver",
     }
 }
 
@@ -234,6 +235,7 @@ fn event_rows(
         Account::Missed => theme.label,
         Account::NotInView => theme.stale,
         Account::FeedLost => theme.status_warn,
+        Account::CannotReceive => theme.stale,
     };
     let encrypted = encrypted_from.is_some_and(|from| e.counter.wrapping_sub(from) < 0x8000);
     let first = |ink: &mut Vec<Option<Color>>| -> Vec<String> {
@@ -451,12 +453,17 @@ fn tally(
     let count = |a: Account| c.events().iter().filter(|e| e.account == a).count();
     let all = c.events().len();
     let in_view = all - count(Account::NotInView);
-    let text = format!(
+    let mut text = format!(
         " {all} events · {in_view} in view · {} followed · {} missed · {} feed lost",
         count(Account::Followed),
         count(Account::Missed),
         count(Account::FeedLost)
     );
+    // Only where it happens: an event no receiver here could hear.
+    let unheard = count(Account::CannotReceive);
+    if unheard > 0 {
+        text += &format!(" · {unheard} no receiver");
+    }
     let text: String = text.chars().take(width).collect();
     Line::from(Span::styled(text, Style::default().fg(theme.label)))
 }
@@ -652,16 +659,15 @@ mod tests {
         let version = at(a, 6);
         let empty = at(version.end_pair + 150e-6 * RATE, 0);
         conn.account(
-            true,
-            false,
+            crate::signal::ble::follow::Listened::Yes,
             vec![
                 (pdu(3, &[0x0c, 0x0c, 0x4c, 0x00, 0x34, 0x12]), version),
                 (pdu(1, &[]), empty),
             ],
         );
-        conn.account(false, false, Vec::new());
-        conn.account(true, false, Vec::new());
-        conn.account(true, true, Vec::new());
+        conn.account(crate::signal::ble::follow::Listened::NotInView, Vec::new());
+        conn.account(crate::signal::ble::follow::Listened::Yes, Vec::new());
+        conn.account(crate::signal::ble::follow::Listened::FeedLost, Vec::new());
         m
     }
 
@@ -708,7 +714,10 @@ mod tests {
         let conn = &mut m.net.ble_connections[0].connection;
         for _ in 0..4 {
             let a = conn.next_due().anchor_pair;
-            conn.account(true, false, vec![(pdu(1, &[]), at(a, 0))]);
+            conn.account(
+                crate::signal::ble::follow::Listened::Yes,
+                vec![(pdu(1, &[]), at(a, 0))],
+            );
         }
         let text = draw(NetBleConnectionPanel, 191, 24, &m).join("\n");
         assert!(
@@ -724,9 +733,9 @@ mod tests {
         let mut m = followed();
         let conn = &mut m.net.ble_connections[0].connection;
         for _ in 0..3 {
-            conn.account(false, false, Vec::new());
+            conn.account(crate::signal::ble::follow::Listened::NotInView, Vec::new());
         }
-        conn.account(true, false, Vec::new());
+        conn.account(crate::signal::ble::follow::Listened::Yes, Vec::new());
         let text = draw(NetBleConnectionPanel, 191, 24, &m).join("\n");
         assert!(text.contains("6-4"), "{text}");
         assert!(text.contains("not in view (3)"), "{text}");
@@ -765,7 +774,10 @@ mod tests {
         let mut m = followed();
         let conn = &mut m.net.ble_connections[0].connection;
         let a = conn.next_due().anchor_pair;
-        conn.account(true, false, vec![(pdu(3, &[0x02, 0x13]), at(a, 2))]);
+        conn.account(
+            crate::signal::ble::follow::Listened::Yes,
+            vec![(pdu(3, &[0x02, 0x13]), at(a, 2))],
+        );
         let text = draw(NetBleConnectionPanel, 191, 20, &m).join("\n");
         assert!(
             text.contains("terminated: Remote User Terminated Connection (0x13)"),

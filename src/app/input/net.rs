@@ -1217,7 +1217,7 @@ mod tests {
             for _ in 0..3 {
                 m.net.ble_connections[0]
                     .connection
-                    .account(true, false, Vec::new());
+                    .account(crate::signal::ble::follow::Listened::Yes, Vec::new());
             }
         }
         for _ in 0..5 {

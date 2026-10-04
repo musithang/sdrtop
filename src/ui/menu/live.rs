@@ -527,10 +527,10 @@ mod tests {
             .follow(&c, (Some(false), false, false), 0.0, 20e6, now);
         m.net.ble_connections[0]
             .connection
-            .account(true, false, Vec::new());
+            .account(crate::signal::ble::follow::Listened::Yes, Vec::new());
         m.net.ble_connections[0]
             .connection
-            .account(false, false, Vec::new());
+            .account(crate::signal::ble::follow::Listened::NotInView, Vec::new());
         let l = line("net_connection", &m, now).unwrap();
         assert_eq!(l.text, "0x50654b6a: 0 of 1 events in view followed");
         assert!(l.running);

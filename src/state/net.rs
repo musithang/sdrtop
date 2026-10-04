@@ -1673,7 +1673,10 @@ mod tests {
             start_pair: at,
             end_pair: at + 1_000.0,
         };
-        c.account(true, false, vec![(terminate, timing)]);
+        c.account(
+            crate::signal::ble::follow::Listened::Yes,
+            vec![(terminate, timing)],
+        );
         net.ble_connections[0].connection = c;
         for aa in 2..=(CONNECTIONS_KEPT as u32 + 1) {
             assert!(net.follow(

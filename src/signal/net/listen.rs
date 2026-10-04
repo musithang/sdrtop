@@ -44,8 +44,11 @@ pub struct Outcome {
     /// The channel was inside the radio's view.
     pub in_view: bool,
     /// In view, but not listened to: its samples were not held (lost to the
-    /// feed, or older than what is kept), or no receiver could be built.
+    /// feed, or older than what is kept).
     pub feed_lost: bool,
+    /// Held, but an ear's receiver cannot be built here (its PHY at this
+    /// sample rate), and why. Other ears may still have listened.
+    pub refused: Option<String>,
     /// Data channel PDUs heard, placed on the stream.
     pub data: Vec<(DataPdu, DataTiming)>,
     /// Advertising channel PDUs heard (an advertising link's, or LE Coded's).
@@ -116,9 +119,9 @@ impl Listener {
                     Ok(k) => {
                         self.kept.insert(key, k);
                     }
-                    // No receiver, no listening.
-                    Err(_) => {
-                        out.feed_lost = true;
+                    // No receiver, no listening; nothing was lost.
+                    Err(why) => {
+                        out.refused = Some(why);
                         continue;
                     }
                 }
@@ -200,6 +203,30 @@ mod tests {
             20e6,
         );
         assert!(out.in_view && out.feed_lost && out.data.is_empty());
+    }
+
+    /// In view and held, but no receiver for its PHY can be built at this
+    /// rate (LE 2M wants a multiple of 8 Msps): refused, with why, and not
+    /// called a feed loss, since nothing was lost.
+    #[test]
+    fn a_phy_this_rate_cannot_receive_is_refused_not_lost() {
+        let noise = crate::signal::dsp::testkit::Rng::new(4).noise(40_000, 1e-3);
+        let recent = Recent::new([(0, &noise[..])]);
+        let mut listener = Listener::default();
+        let job = Job {
+            ears: vec![Ear::Link(Link::Advertising, Phy::TwoM)],
+            channel: 12,
+            from_pair: 0.0,
+            to_pair: 30_000.0,
+        };
+        let out = listener.listen(&job, &recent, 20e6, 2_426e6, 20e6);
+        assert!(out.in_view && !out.feed_lost, "{out:?}");
+        assert!(
+            out.refused
+                .as_deref()
+                .is_some_and(|w| w.contains("8.0 Msps")),
+            "{out:?}"
+        );
     }
 
     /// A link's packet inside its window is heard, placed on the stream.
@@ -305,7 +332,7 @@ mod tests {
                     to_pair: p.to_pair,
                 };
                 let out = listener.listen(&job, &recent, rate, 2_426e6, rate);
-                if !out.in_view || out.feed_lost {
+                if !out.in_view || out.feed_lost || out.refused.is_some() {
                     eprintln!("{name}: not listened to (no receiver built here)");
                     break;
                 }

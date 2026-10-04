@@ -393,7 +393,9 @@ channels, so the key was either refused or listened very carefully to
 nothing. LE 2M is back where it lives, in connections: a connection
 followed on [LE 3](#connection--le-3-focus-e) that moves to LE 2M is
 received on it from the moment the two devices agreed, by itself, as it
-should be.
+should be, at a sample rate that is a multiple of 8 Msps (8 or 16). At
+20 Msps there is no LE 2M receiver, and its events say **no receiver**
+rather than pretend to have listened.
 
 In SURVEY the line under the list gives each advertising channel's packet
 count and CRC pass rate; in LOCK, the one channel's.
@@ -863,7 +865,8 @@ type code and are told apart by where they were heard) and the scheme
   - *its samples were not held*: the feed lost the stretch where it would
     have been (see [stale, and feed loss](#stale-and-feed-loss));
   - *waiting for its window*; *no auxiliary packet promised*; *not
-    followed*, with why.
+    followed*, with why (an LE 2M aux at 20 Msps, for one: there is no LE
+    2M receiver at that rate).
 
   An auxiliary packet says which `ADV_EXT_IND` pointed at it instead.
 - **SNR**, and **f0**: the carrier at the start, from the preamble.

@@ -109,6 +109,18 @@ pub enum Account {
     NotInView,
     /// The feed lost samples inside its window: not listened to.
     FeedLost,
+    /// Its samples were held, but no receiver for its PHY can run at this
+    /// sample rate: not listened to.
+    CannotReceive,
+}
+
+/// Whether an event's window was listened to, and if not, why.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Listened {
+    Yes,
+    NotInView,
+    FeedLost,
+    CannotReceive,
 }
 
 /// Who sent a packet: the Central opens each event at its anchor (4.5.1),
@@ -548,25 +560,20 @@ impl Connection {
     /// Account for the event due: whether it was in view, whether the feed
     /// lost samples in its window, and the packets heard there with the
     /// link's access address. Nothing is recorded once following has ended.
-    pub fn account(
-        &mut self,
-        in_view: bool,
-        feed_lost: bool,
-        mut heard: Vec<(DataPdu, DataTiming)>,
-    ) {
+    pub fn account(&mut self, listened: Listened, mut heard: Vec<(DataPdu, DataTiming)>) {
         if self.state != State::Following {
             return;
         }
         let due = self.next_due();
         heard.sort_by(|a, b| a.1.start_pair.total_cmp(&b.1.start_pair));
-        let account = if !in_view {
-            Account::NotInView
-        } else if feed_lost {
-            Account::FeedLost
-        } else if heard.is_empty() {
-            Account::Missed
-        } else {
-            Account::Followed
+        // A receiver that could run (one PHY of two, mid-update) may still
+        // have heard the event.
+        let account = match listened {
+            Listened::NotInView => Account::NotInView,
+            Listened::FeedLost => Account::FeedLost,
+            Listened::CannotReceive if heard.is_empty() => Account::CannotReceive,
+            _ if heard.is_empty() => Account::Missed,
+            _ => Account::Followed,
         };
         let opens = due.anchor_pair - due.widening_pairs;
         let closes = due.anchor_pair + due.window_pairs + due.widening_pairs;
@@ -644,7 +651,7 @@ impl Connection {
                 self.misses = 0;
             }
             Account::Missed => self.misses += 1,
-            Account::NotInView | Account::FeedLost => {}
+            Account::NotInView | Account::FeedLost | Account::CannotReceive => {}
         }
         if let Some(end) = ends {
             self.state = end;
@@ -864,7 +871,7 @@ mod tests {
     fn an_event_places_its_packets() {
         let mut c = Connection::new(&params(80, 0, 1), false, 0.0, RATE).unwrap();
         let heard = exchange(&c, 150.0);
-        c.account(true, false, heard);
+        c.account(Listened::Yes, heard);
         let e = &c.events()[0];
         assert_eq!(e.account, Account::Followed);
         assert_eq!(e.pdus[0].sender, Some(Sender::Central));
@@ -873,16 +880,33 @@ mod tests {
         assert_eq!(e.pdus[0].t_ifs_us, None);
     }
 
+    /// An event no receiver could be built for (its PHY at this sample
+    /// rate) was not listened to, and says so: not a miss, which would count
+    /// towards declaring the link lost, and not a feed loss, since its
+    /// samples were held.
+    #[test]
+    fn an_event_no_receiver_could_hear_says_so() {
+        let mut c = Connection::new(&params(80, 0, 1), false, 0.0, RATE).unwrap();
+        for _ in 0..50 {
+            c.account(Listened::CannotReceive, vec![]);
+        }
+        assert!(c
+            .events()
+            .iter()
+            .all(|e| e.account == Account::CannotReceive));
+        assert_eq!(*c.state(), State::Following);
+    }
+
     /// A PDU heard far from the anchor, with nothing before it, is heard
     /// but not placed, and does not move the timing.
     #[test]
     fn a_lone_late_packet_is_not_placed() {
         let mut c = Connection::new(&params(80, 0, 1), false, 0.0, RATE).unwrap();
         let heard = exchange(&c, 150.0);
-        c.account(true, false, heard);
+        c.account(Listened::Yes, heard);
         let due = c.next_due().anchor_pair;
         let late = at(due + 400e-6 * RATE, 0);
-        c.account(true, false, vec![(pdu(1, &[]), late)]);
+        c.account(Listened::Yes, vec![(pdu(1, &[]), late)]);
         let e = &c.events()[0];
         assert_eq!(e.account, Account::Followed);
         assert_eq!(e.pdus[0].sender, None);
@@ -898,17 +922,17 @@ mod tests {
         let a = c.next_due().anchor_pair;
         // LL_CHANNEL_MAP_IND: channels 0-9 only, instant 6.
         let ind = pdu(3, &[0x01, 0xff, 0x03, 0x00, 0x00, 0x00, 0x06, 0x00]);
-        c.account(true, false, vec![(ind, at(a, 8))]);
+        c.account(Listened::Yes, vec![(ind, at(a, 8))]);
         assert_eq!(
             c.events()[0].pdus[0].control.as_ref().map(|k| k.name),
             Some(Some("LL_CHANNEL_MAP_IND"))
         );
         while c.next_due().counter < 6 {
-            c.account(false, false, vec![]);
+            c.account(Listened::NotInView, vec![]);
         }
         for _ in 0..30 {
             assert!(c.next_due().channel < 10, "{:?}", c.next_due());
-            c.account(false, false, vec![]);
+            c.account(Listened::NotInView, vec![]);
         }
     }
 
@@ -919,13 +943,13 @@ mod tests {
         let a = c.next_due().anchor_pair;
         // LL_PHY_UPDATE_IND: C->P 2M, P->C 2M, instant 4.
         let ind = pdu(3, &[0x18, 0x02, 0x02, 0x04, 0x00]);
-        c.account(true, false, vec![(ind, at(a, 5))]);
+        c.account(Listened::Yes, vec![(ind, at(a, 5))]);
         assert_eq!(c.phy(), Phy::OneM);
         while c.next_due().counter < 4 {
-            c.account(false, false, vec![]);
+            c.account(Listened::NotInView, vec![]);
         }
         assert_eq!(c.phy(), Phy::TwoM);
-        c.account(false, false, vec![]);
+        c.account(Listened::NotInView, vec![]);
         assert_eq!(c.events()[0].phy, Phy::TwoM);
     }
 
@@ -940,9 +964,9 @@ mod tests {
         // LL_CONNECTION_UPDATE_IND: WinSize 2, WinOffset 4, Interval 160,
         // Latency 0, Timeout 300, Instant 3.
         let ind = pdu(3, &[0x00, 2, 4, 0, 160, 0, 0, 0, 0x2c, 0x01, 3, 0]);
-        c.account(true, false, vec![(ind, at(a, 12))]);
-        c.account(false, false, vec![]);
-        c.account(false, false, vec![]);
+        c.account(Listened::Yes, vec![(ind, at(a, 12))]);
+        c.account(Listened::NotInView, vec![]);
+        c.account(Listened::NotInView, vec![]);
         let d = c.next_due();
         assert_eq!(d.counter, 3);
         let expect = a + 3.0 * old_interval + 4.0 * 1.25e-3 * RATE;
@@ -951,7 +975,7 @@ mod tests {
         assert_eq!((c.params().interval, c.params().timeout), (160, 300));
         let heard = exchange(&c, 150.0);
         let new_anchor = heard[0].1.start_pair;
-        c.account(true, false, heard);
+        c.account(Listened::Yes, heard);
         let next = c.next_due();
         assert!((next.anchor_pair - new_anchor - 160.0 * 1.25e-3 * RATE).abs() < 1.0);
         assert_eq!(next.window_pairs, 0.0);
@@ -965,18 +989,18 @@ mod tests {
         let mut c = Connection::new(&params(80, 0, 1), false, 0.0, RATE).unwrap();
         for _ in 0..10 {
             let heard = exchange(&c, 150.0);
-            c.account(true, false, heard);
+            c.account(Listened::Yes, heard);
         }
         assert_eq!(c.state(), &State::Following);
         for _ in 0..10 {
-            c.account(true, false, vec![]);
+            c.account(Listened::Yes, vec![]);
         }
         assert_eq!(
             c.state(),
             &State::Following,
             "exactly the timeout is not past it"
         );
-        c.account(true, false, vec![]);
+        c.account(Listened::Yes, vec![]);
         assert_eq!(c.state(), &State::Lost { after: Some(9) });
     }
 
@@ -986,9 +1010,9 @@ mod tests {
     fn silence_out_of_view_is_not_loss() {
         let mut c = Connection::new(&params(80, 0, 1), false, 0.0, RATE).unwrap();
         let heard = exchange(&c, 150.0);
-        c.account(true, false, heard);
+        c.account(Listened::Yes, heard);
         for _ in 0..30 {
-            c.account(false, false, vec![]);
+            c.account(Listened::NotInView, vec![]);
         }
         assert_eq!(c.state(), &State::Following);
     }
@@ -998,9 +1022,9 @@ mod tests {
     fn terminate_ends_it() {
         let mut c = Connection::new(&params(80, 0, 1), false, 0.0, RATE).unwrap();
         let a = c.next_due().anchor_pair;
-        c.account(true, false, vec![(pdu(3, &[0x02, 0x13]), at(a, 2))]);
+        c.account(Listened::Yes, vec![(pdu(3, &[0x02, 0x13]), at(a, 2))]);
         assert_eq!(c.state(), &State::Terminated { reason: 0x13 });
-        c.account(true, false, vec![]);
+        c.account(Listened::Yes, vec![]);
         assert_eq!(c.events().len(), 1);
     }
 
@@ -1010,12 +1034,11 @@ mod tests {
     fn encryption_stops_the_reading() {
         let mut c = Connection::new(&params(80, 0, 1), false, 0.0, RATE).unwrap();
         let a = c.next_due().anchor_pair;
-        c.account(true, false, vec![(pdu(3, &[0x05]), at(a, 1))]);
+        c.account(Listened::Yes, vec![(pdu(3, &[0x05]), at(a, 1))]);
         assert_eq!(c.encrypted_from(), Some(0));
         let a = c.next_due().anchor_pair;
         c.account(
-            true,
-            false,
+            Listened::Yes,
             vec![(pdu(3, &[0x0c, 0x0c, 0x4c, 0x00, 0x34, 0x12]), at(a, 6))],
         );
         assert_eq!(c.events()[0].pdus[0].control, None);
@@ -1025,9 +1048,9 @@ mod tests {
     #[test]
     fn accounts_are_kept_apart() {
         let mut c = Connection::new(&params(80, 0, 1), false, 0.0, RATE).unwrap();
-        c.account(false, false, vec![]);
-        c.account(true, true, vec![]);
-        c.account(true, false, vec![]);
+        c.account(Listened::NotInView, vec![]);
+        c.account(Listened::FeedLost, vec![]);
+        c.account(Listened::Yes, vec![]);
         let accounts: Vec<Account> = c.events().iter().map(|e| e.account).collect();
         assert_eq!(
             accounts,
@@ -1040,7 +1063,7 @@ mod tests {
     fn the_newest_events_are_kept() {
         let mut c = Connection::new(&params(80, 0, 1), false, 0.0, RATE).unwrap();
         for _ in 0..EVENTS_KEPT + 20 {
-            c.account(false, false, vec![]);
+            c.account(Listened::NotInView, vec![]);
         }
         assert_eq!(c.events().len(), EVENTS_KEPT);
         assert_eq!(c.events()[0].counter, (EVENTS_KEPT + 19) as u16);
@@ -1059,7 +1082,7 @@ mod tests {
             // A little scatter, as a real anchor's timing has.
             let jitter = ((k * 37 % 11) as f64 - 5.0) * 0.5;
             let at_k = first + k as f64 * interval + jitter;
-            c.account(true, false, vec![(pdu(1, &[]), at(at_k, 0))]);
+            c.account(Listened::Yes, vec![(pdu(1, &[]), at(at_k, 0))]);
         }
         let clock = c.clock_ppm().unwrap();
         assert!((clock.value() - 12.0).abs() < 0.05, "{clock:?}");
@@ -1078,7 +1101,7 @@ mod tests {
         assert!(c.t_ifs().is_none());
         for t_ifs in [150.4, 149.8, 150.1, 153.0] {
             let heard = exchange(&c, t_ifs);
-            c.account(true, false, heard);
+            c.account(Listened::Yes, heard);
         }
         let t = c.t_ifs().unwrap();
         assert_eq!((t.count, t.outside), (4, 1));
@@ -1093,7 +1116,7 @@ mod tests {
         let ch = c.next_due().channel;
         let mut heard = exchange(&c, 150.0);
         heard[1].0.crc_ok = false;
-        c.account(true, false, heard);
+        c.account(Listened::Yes, heard);
         assert_eq!(c.per_channel()[ch as usize], (2, 1));
         assert_eq!(c.per_channel().iter().map(|p| p.0).sum::<u32>(), 2);
     }
