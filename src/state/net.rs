@@ -354,6 +354,19 @@ pub struct NetState {
     pub ble_heard: u64,
     /// How the packet list is being read: which packet the cursor is on.
     pub ble_view: BlePacketView,
+    /// LE Coded packets heard on the LE Coded view, newest first, kept as
+    /// `ble_packets` is, in a ring of their own so neither list pushes the
+    /// other's rows out.
+    pub coded_packets: std::collections::VecDeque<BlePacket>,
+    /// LE Coded packets heard this session, as `ble_heard` counts LE 1M's.
+    pub coded_heard: u64,
+    /// How the LE Coded list is being read.
+    pub coded_view: BlePacketView,
+    /// The advertising channel the LE Coded receiver has, when it has one.
+    pub coded_channel: Option<u8>,
+    /// Why the LE Coded receiver is not running, as `ble_refused` says LE
+    /// 1M's.
+    pub coded_refused: Option<String>,
     /// The PHY the BLE decoder listens for: LE 1M, and nothing on screen
     /// changes it.
     ///
@@ -585,6 +598,24 @@ impl NetState {
         });
     }
 
+    /// The packets the LE Coded list shows, newest first: the held copy while
+    /// the list is held, the live ring otherwise. The one account of that
+    /// list, as [`Self::ble_shown`] is of LE 1M's.
+    pub fn coded_shown(&self) -> Vec<&BlePacket> {
+        match &self.coded_view.held {
+            Some((held, _)) => held.iter().collect(),
+            None => self.coded_packets.iter().collect(),
+        }
+    }
+
+    /// LE Coded packets that have arrived since its list was held.
+    pub fn coded_behind(&self) -> u64 {
+        self.coded_view
+            .held
+            .as_ref()
+            .map_or(0, |(_, at)| self.coded_heard.saturating_sub(*at))
+    }
+
     /// Packets that have arrived since the list was held; zero when it is not.
     pub fn ble_behind(&self) -> u64 {
         self.ble_view
@@ -806,6 +837,8 @@ pub struct NetDecodeHealth {
     /// The BLE decode funnel since the section opened
     /// (`signal::ble::receive::Funnel`): triggers, and how each one ended.
     pub ble: crate::signal::ble::receive::Funnel,
+    /// LE Coded's decode funnel since the section opened, counted as LE 1M's.
+    pub coded: crate::signal::ble::receive::Funnel,
     /// Classic access-code hits since the section opened, every one, where
     /// `bt_hops` keeps only the latest few hundred.
     pub bt_hits: u64,
@@ -1040,6 +1073,19 @@ pub struct BlePacket {
     /// variance.
     pub drift: Option<crate::signal::ble::measure::Drift>,
     pub seen: std::time::Instant,
+    /// What only an LE Coded packet has; `None` on the uncoded PHYs.
+    pub coded: Option<CodedFacts>,
+}
+
+/// An LE Coded packet's facts beside the ones every BLE packet has.
+#[derive(Clone, Debug, PartialEq)]
+pub struct CodedFacts {
+    /// How many symbols the FEC decoder overruled across both blocks: what it
+    /// took to get the bits, beside the bits.
+    pub fec_repairs: u32,
+    /// What the measurement path read of it (`net::measure::le_coded`), when
+    /// its samples were still held.
+    pub reading: Option<crate::signal::net::measure::CodedReading>,
 }
 
 /// How the BLE packet list is being read (net-ux-polish-plan 5.3).
@@ -1457,6 +1503,7 @@ mod tests {
             modulation: None,
             drift: None,
             seen: std::time::Instant::now(),
+            coded: None,
         }
     }
 

@@ -29,7 +29,12 @@ use crate::state::LockTarget;
 
 /// The views a locked radio belongs on an advertising channel for: the ones
 /// the advertising decoder feeds.
-pub const ADVERTISING_VIEWS: &[&str] = &["net_ble", "net_census"];
+pub const ADVERTISING_VIEWS: &[&str] = &["net_ble", "net_census", "net_coded"];
+
+/// The views the LE Coded receiver runs for, and nothing of LE 1M's or
+/// classic's: LE Coded's own chain (`ble::coded_rx`), on the advertising
+/// channel in view.
+pub const CODED_VIEWS: &[&str] = &["net_coded"];
 
 /// The view the band is measured for: the survey's occupancy and
 /// coexistence panels are the only ones that show it, so elsewhere its cost

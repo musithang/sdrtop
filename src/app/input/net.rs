@@ -458,6 +458,31 @@ pub(super) fn net_ble_packets(key: KeyEvent, ctx: &mut InputCtx<'_>) -> KeyActio
     KeyAction::Continue
 }
 
+/// The LE Coded list: the arrows move the cursor through the packets in the
+/// order the panel draws them (`NetState::coded_shown`), newest first; `h`
+/// holds the list and lets it run again, as LE 2's does. Anything else goes on
+/// to the global keys.
+pub(super) fn net_coded_packets(key: KeyEvent, ctx: &mut InputCtx<'_>) -> KeyAction {
+    let mut m = metrics(ctx.state);
+    let order: Vec<u64> = m.net.coded_shown().iter().map(|p| p.seq).collect();
+    match key.code {
+        KeyCode::Up => m.net.coded_view.selection.move_by(&order, -1),
+        KeyCode::Down => m.net.coded_view.selection.move_by(&order, 1),
+        KeyCode::Char('h') => {
+            let held = match m.net.coded_view.held.take() {
+                Some(_) => None,
+                None => Some((m.net.coded_packets.clone(), m.net.coded_heard)),
+            };
+            m.net.coded_view.held = held;
+        }
+        _ => {
+            drop(m);
+            return global::handle(key, ctx);
+        }
+    }
+    KeyAction::Continue
+}
+
 /// The access address of the connection the selected packet set up, when it
 /// is a CONNECT_IND.
 fn selected_connection(m: &SdrMetrics) -> Option<u32> {
@@ -1065,6 +1090,7 @@ mod tests {
             modulation: None,
             drift: None,
             seen: Instant::now(),
+            coded: None,
         }
     }
 

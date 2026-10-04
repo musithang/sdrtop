@@ -13,10 +13,6 @@
 //! every LE 1M figure, and does not have to: the two chains share nothing
 //! but the samples.
 
-// Nothing runs the chain until the worker feeds it on the LE Coded view; the
-// attribute goes when it does.
-#![allow(dead_code)]
-
 use std::collections::VecDeque;
 
 use num_complex::Complex;
@@ -51,6 +47,7 @@ pub struct ChannelFilter {
     pub transition_hz: f64,
 }
 
+#[cfg(test)]
 impl ChannelFilter {
     /// Where the passband ends, Hz.
     pub fn passband_hz(self) -> f64 {
@@ -590,8 +587,17 @@ impl CodedReceiver {
                     return None;
                 }
                 let block2 = &body[coded::BLOCK1_SYMBOLS..symbols - coded::PREAMBLE_SYMBOLS];
-                let decoded = coded::read_block2(block2, coding, self.channel)
-                    .and_then(|(bits, more)| pdu::decode(&bits).map(|p| (p, more)));
+                let decoded =
+                    coded::read_block2(block2, coding, self.channel).and_then(|(bits, more)| {
+                        // The PDU and CRC as sent, whitened again: what the
+                        // measurement path rebuilds the packet's symbols from.
+                        let mut air = bits.clone();
+                        crate::signal::dsp::code::lfsr::whiten(&mut air, self.channel);
+                        pdu::decode(&bits).map(|mut p| {
+                            p.air = air;
+                            (p, more)
+                        })
+                    });
                 let origin = c.origin;
                 self.capture = None;
                 let Some((mut packet, more)) = decoded else {

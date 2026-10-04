@@ -117,6 +117,7 @@ pub(in crate::app::input) fn reset_positions(panel: &str, m: &mut crate::state::
             m.net.census.selection = Default::default();
         }
         "net_ble_packets" => m.net.ble_view.selection = Default::default(),
+        "net_coded_packets" => m.net.coded_view.selection = Default::default(),
         // Which connection is what the view is of; the scroll is a place.
         "net_ble_connection" => m.net.connection_view.first_visible = 0,
         "net_bt_piconets" => m.net.bt_view = Default::default(),

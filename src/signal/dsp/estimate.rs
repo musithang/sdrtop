@@ -171,7 +171,6 @@ pub fn snr_from_metric(metric: f64, pairs: usize) -> Option<f64> {
 /// `None` when the moments do not admit a signal (noise alone, or too few
 /// samples to tell), or admit no noise (a test fixture's noiseless data):
 /// neither is a measurement to put a number on.
-#[allow(dead_code)]
 pub fn snr_m2m4(iq: &[Complex<f32>]) -> Option<f64> {
     if iq.len() < 2 {
         return None;

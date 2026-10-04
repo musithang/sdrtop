@@ -10,14 +10,15 @@
 //! of them: **can this radio do any of this at all?**
 
 /// The menu sections this feature's presets are filed under: the band's own,
-/// then each Bluetooth's. One radio requirement admits or refuses all three.
+/// then each Bluetooth's, LE Coded's apart from LE's because it has a receive
+/// chain of its own. One radio requirement admits or refuses all four.
 ///
 /// Named here rather than in the menu because several unrelated places need to
 /// agree on them: the section table, the startup path that drops the sections
 /// when the gate refuses, the header that renders differently inside them, and
 /// the footer keys that only mean something there. A string literal in each
 /// would be that many chances to disagree.
-pub const SECTIONS: [&str; 3] = [SECTION, "le", "classic"];
+pub const SECTIONS: [&str; 4] = [SECTION, "le", "classic", "coded"];
 
 /// The band's own section (Capability, Survey), and the one a test sets when
 /// it only needs "a NET view".

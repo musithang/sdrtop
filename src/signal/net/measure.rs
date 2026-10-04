@@ -238,7 +238,6 @@ impl Tester {
     /// envelope through the tester's filter (`estimate::snr_m2m4`). The
     /// filter has the BLE receiver's front end's edges, so this is read in
     /// the band LE 1M's SNR is.
-    #[allow(dead_code)]
     fn snr_db(&self, from: f64, to: f64) -> Option<f64> {
         let index = |pos: f64| ((pos - self.start - self.delay) / self.factor).round();
         let (a, b) = (index(from), index(to));
@@ -510,7 +509,6 @@ pub fn le_1m(
 
 /// What the measurement path reads of an LE Coded packet.
 #[derive(Clone, Copy, Debug, PartialEq)]
-#[allow(dead_code)]
 pub struct CodedReading {
     /// Over the whole packet, in dB, in LE 1M's band ([`Tester::snr_db`]).
     pub snr_db: Option<f64>,
@@ -541,7 +539,6 @@ pub struct CodedReading {
 /// neighbours both equal them (`dsp::deviation::suite_readings_from`, as
 /// LE 1M's traffic is read). BV-14-C's preamble groups need nothing but the
 /// preamble, which every Coded packet has. `None` as [`le_1m`] refuses.
-#[allow(dead_code)]
 pub fn le_coded(
     recent: &Recent,
     rate: f64,

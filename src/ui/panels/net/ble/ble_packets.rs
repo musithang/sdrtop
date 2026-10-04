@@ -33,7 +33,78 @@ use crate::state::{BlePacket, RadioState, SdrMetrics};
 use crate::ui::panel::{FeedSpan, Panel, PanelChrome, Staleness, Tag};
 use crate::ui::widgets::reading::Reading;
 
-pub struct NetBlePacketsPanel;
+/// One list of BLE packets, drawn the same way whichever receiver heard them:
+/// LE 1M's advertising (LE 2) or LE Coded's (its own section). The rows, the
+/// widths, the selection and the hold are the same; what differs is where
+/// the packets come from and what an empty list says.
+pub struct NetBlePacketsPanel {
+    source: ListSource,
+}
+
+/// Which receiver's packets a list shows.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum ListSource {
+    /// LE 1M's, on the advertising channel (`NetState::ble_shown`).
+    Advertising,
+    /// LE Coded's own chain's (`NetState::coded_shown`).
+    Coded,
+}
+
+impl NetBlePacketsPanel {
+    /// LE 2's list.
+    pub const ADVERTISING: Self = Self {
+        source: ListSource::Advertising,
+    };
+    /// LE Coded's list.
+    pub const CODED: Self = Self {
+        source: ListSource::Coded,
+    };
+
+    fn shown<'a>(&self, state: &'a SdrMetrics) -> Vec<&'a BlePacket> {
+        match self.source {
+            ListSource::Advertising => state.net.ble_shown(),
+            ListSource::Coded => state.net.coded_shown(),
+        }
+    }
+
+    fn view<'a>(&self, state: &'a SdrMetrics) -> &'a crate::state::BlePacketView {
+        match self.source {
+            ListSource::Advertising => &state.net.ble_view,
+            ListSource::Coded => &state.net.coded_view,
+        }
+    }
+
+    fn refused<'a>(&self, state: &'a SdrMetrics) -> Option<&'a String> {
+        match self.source {
+            ListSource::Advertising => state.net.ble_refused.as_ref(),
+            ListSource::Coded => state.net.coded_refused.as_ref(),
+        }
+    }
+
+    fn nothing_heard(&self, state: &SdrMetrics) -> bool {
+        match self.source {
+            ListSource::Advertising => state.net.ble_packets.is_empty(),
+            ListSource::Coded => state.net.coded_packets.is_empty(),
+        }
+    }
+
+    fn behind(&self, state: &SdrMetrics) -> u64 {
+        match self.source {
+            ListSource::Advertising => state.net.ble_behind(),
+            ListSource::Coded => state.net.coded_behind(),
+        }
+    }
+}
+
+/// A packet's type as the list names it: on LE Coded, with the scheme its CI
+/// named beside it, because two packets of one type at S=2 and S=8 are heard
+/// at different ranges and the row should say which.
+fn type_text(p: &BlePacket) -> String {
+    match p.phy {
+        crate::signal::ble::Phy::Coded(c) => format!("{} {}", p.pdu_type.label(), c.label()),
+        _ => p.pdu_type.label(),
+    }
+}
 
 const CH_W: usize = 3;
 const TYPE_W: usize = 15;
@@ -243,7 +314,7 @@ fn row(
         ),
         Span::raw(" "),
         Span::styled(
-            format!("{:<TYPE_W$}", truncate(&p.pdu_type.label(), TYPE_W)),
+            format!("{:<TYPE_W$}", truncate(&type_text(p), TYPE_W)),
             Style::default().fg(theme.value),
         ),
         Span::raw(" "),
@@ -347,7 +418,10 @@ fn truncate(s: &str, width: usize) -> String {
 
 impl Panel for NetBlePacketsPanel {
     fn name(&self) -> &'static str {
-        "net_ble_packets"
+        match self.source {
+            ListSource::Advertising => "net_ble_packets",
+            ListSource::Coded => "net_coded_packets",
+        }
     }
 
     fn min_size(&self) -> (u16, u16) {
@@ -362,6 +436,12 @@ impl Panel for NetBlePacketsPanel {
     }
 
     fn focus_bindings(&self) -> &'static [(&'static str, &'static str)] {
+        if self.source == ListSource::Coded {
+            return &[
+                ("↑↓", "select a packet"),
+                ("H", "hold the list, or let it run"),
+            ];
+        }
         &[
             ("↑↓", "select a packet"),
             (
@@ -374,6 +454,18 @@ impl Panel for NetBlePacketsPanel {
     }
 
     fn chrome(&self, state: &SdrMetrics) -> PanelChrome {
+        if self.source == ListSource::Coded {
+            let view = &state.net.coded_view;
+            return PanelChrome::new("LE Coded Ad_vertising")
+                .stale_when(Staleness::NotStreaming)
+                .tag_if(true, state.net.mode.tag())
+                .tag_if(true, Tag::Listening("LE CODED"))
+                .counts_from_feed(FeedSpan::Session)
+                .shows_offsets()
+                .shows_addresses()
+                .tag_if(view.held.is_some(), Tag::Paused)
+                .tag_if(self.behind(state) > 0, Tag::Behind(self.behind(state)));
+        }
         PanelChrome::new("BLE Ad_vertising")
             .stale_when(Staleness::NotStreaming)
             .tag_if(true, state.net.mode.tag())
@@ -408,14 +500,19 @@ impl Panel for NetBlePacketsPanel {
         if inner.width == 0 || inner.height == 0 {
             return;
         }
-        let shown = state.net.ble_shown();
+        let shown = self.shown(state);
         let now = std::time::Instant::now();
-        let summary = channel_summary(state, theme, inner.width as usize);
+        // The per-channel counts are LE 1M's rotation across the three
+        // advertising channels; the Coded list has no such rotation to count.
+        let summary = match self.source {
+            ListSource::Advertising => channel_summary(state, theme, inner.width as usize),
+            ListSource::Coded => None,
+        };
         let body = (inner.height as usize)
             .saturating_sub(1)
             .saturating_sub(summary.is_some() as usize);
         let order: Vec<u64> = shown.iter().map(|p| p.seq).collect();
-        let view = &state.net.ble_view.selection;
+        let view = &self.view(state).selection;
         let cursor = view.cursor(&order);
         let start = crate::ui::widgets::table::viewport_start(
             view.first_visible,
@@ -430,7 +527,7 @@ impl Panel for NetBlePacketsPanel {
         let widths = Widths::of(&visible, state, now, inner.width as usize);
         let mut lines = vec![header_line(&widths, theme)];
 
-        if let Some(reason) = &state.net.ble_refused {
+        if let Some(reason) = self.refused(state) {
             lines.push(Line::from(""));
             lines.push(Line::from(Span::styled(
                 "not decoding".to_string(),
@@ -446,14 +543,22 @@ impl Panel for NetBlePacketsPanel {
             return;
         }
 
-        if state.net.ble_packets.is_empty() {
+        if self.nothing_heard(state) {
+            let watching = match self.source {
+                ListSource::Advertising => {
+                    "watching an advertising channel; nothing decoded so far this"
+                }
+                ListSource::Coded => {
+                    "watching an advertising channel for LE Coded; nothing decoded so far this"
+                }
+            };
             lines.push(Line::from(""));
             lines.push(Line::from(Span::styled(
                 "no packets yet".to_string(),
                 Style::default().fg(theme.stale),
             )));
             lines.push(Line::from(Span::styled(
-                "watching an advertising channel; nothing decoded so far this",
+                watching,
                 Style::default().fg(theme.label),
             )));
             lines.push(Line::from(Span::styled(
@@ -525,6 +630,7 @@ mod tests {
             modulation: None,
             drift: None,
             seen: Instant::now(),
+            coded: None,
         }
     }
 
@@ -539,7 +645,7 @@ mod tests {
         narrow.freq_offset_hz = Some(Uncertain::from_sigma(-10_210.0, 260.0));
         m.net.ble_packets.push_back(wide);
         m.net.ble_packets.push_back(narrow);
-        let out = draw(NetBlePacketsPanel, 170, 8, &m);
+        let out = draw(NetBlePacketsPanel::ADVERTISING, 170, 8, &m);
         let text = out.join("\n");
         assert!(text.contains("-499.88 ±0.24 kHz"), "{text}");
         assert!(text.contains("-10.21 ±0.26 kHz"), "{text}");
@@ -557,12 +663,12 @@ mod tests {
     /// frame says so (`NetState::ble_phy` has why there is no switch).
     #[test]
     fn the_list_offers_no_phy_switch_and_names_its_phy() {
-        assert!(NetBlePacketsPanel
+        assert!(NetBlePacketsPanel::ADVERTISING
             .focus_bindings()
             .iter()
             .all(|(k, what)| *k != "P" && !what.contains("LE 2M")));
         let out = draw(
-            NetBlePacketsPanel,
+            NetBlePacketsPanel::ADVERTISING,
             90,
             8,
             &SdrMetrics::fixture().streaming(),
@@ -577,7 +683,7 @@ mod tests {
     fn a_refusal_is_shown_rather_than_an_empty_table() {
         let mut m = SdrMetrics::fixture().streaming();
         m.net.ble_refused = Some("not tuned to an advertising channel".to_string());
-        let out = draw(NetBlePacketsPanel, 60, 10, &m).join("\n");
+        let out = draw(NetBlePacketsPanel::ADVERTISING, 60, 10, &m).join("\n");
         assert!(out.contains("not decoding"), "{out}");
         assert!(out.contains("not tuned"), "{out}");
     }
@@ -587,7 +693,7 @@ mod tests {
     #[test]
     fn an_empty_feed_says_nothing_decoded_yet_rather_than_a_refusal() {
         let out = draw(
-            NetBlePacketsPanel,
+            NetBlePacketsPanel::ADVERTISING,
             60,
             10,
             &SdrMetrics::fixture().streaming(),
@@ -604,7 +710,7 @@ mod tests {
         let mut m = SdrMetrics::fixture().streaming();
         m.net.ble_packets.push_back(packet(37, true));
         m.net.ble_packets.push_front(packet(38, false));
-        let out = draw(NetBlePacketsPanel, 90, 10, &m).join("\n");
+        let out = draw(NetBlePacketsPanel::ADVERTISING, 90, 10, &m).join("\n");
         assert!(out.contains("bad"), "{out}");
         assert!(out.contains("ok"), "{out}");
         let bad_line = out.find("bad").unwrap();
@@ -622,7 +728,7 @@ mod tests {
         m.net.mode = crate::state::NetMode::Survey;
         m.net.ble_channel_packets = [4, 0, 9];
         m.net.ble_packets.push_back(packet(37, true));
-        let out = draw(NetBlePacketsPanel, 70, 10, &m).join("\n");
+        let out = draw(NetBlePacketsPanel::ADVERTISING, 70, 10, &m).join("\n");
         assert!(out.contains("CH37 4"), "{out}");
         assert!(out.contains("CH38 0"), "{out}");
         assert!(out.contains("CH39 9"), "{out}");
@@ -638,7 +744,7 @@ mod tests {
         m.net.mode = crate::state::NetMode::Lock;
         m.net.ble_channel_packets = [4, 0, 9];
         m.net.ble_packets.push_back(packet(37, true));
-        let out = draw(NetBlePacketsPanel, 70, 10, &m).join("\n");
+        let out = draw(NetBlePacketsPanel::ADVERTISING, 70, 10, &m).join("\n");
         assert!(!out.contains("dwell"), "{out}");
     }
 
@@ -652,7 +758,7 @@ mod tests {
         m.net.ble_channel_packets = [400, 9, 40];
         m.net.ble_channel_crc_ok = [396, 9, 20];
         m.net.ble_packets.push_back(packet(37, true));
-        let out = draw(NetBlePacketsPanel, 120, 10, &m).join("\n");
+        let out = draw(NetBlePacketsPanel::ADVERTISING, 120, 10, &m).join("\n");
         assert!(out.contains("CH37 400 99.0"), "{out}");
         assert!(
             out.contains("CH38 9  CH39"),
@@ -673,7 +779,7 @@ mod tests {
         m.net.ble_channel_packets = [400, 30, 40];
         m.net.ble_channel_crc_ok = [396, 15, 20];
         m.net.ble_packets.push_back(packet(37, true));
-        let out = draw(NetBlePacketsPanel, 90, 10, &m).join("\n");
+        let out = draw(NetBlePacketsPanel::ADVERTISING, 90, 10, &m).join("\n");
         assert!(out.contains("CH38 30 50"), "{out}");
         assert!(!out.contains("CH37"), "{out}");
         assert!(!out.contains("CH39"), "{out}");
@@ -702,7 +808,7 @@ mod tests {
                     populated_lock.clone(),
                     SdrMetrics::fixture(),
                 ] {
-                    for line in draw(NetBlePacketsPanel, w, h, &m) {
+                    for line in draw(NetBlePacketsPanel::ADVERTISING, w, h, &m) {
                         assert!(line.chars().count() <= w as usize, "{w}x{h}: {line:?}");
                     }
                 }
@@ -739,7 +845,7 @@ mod tests {
     fn the_selection_follows_its_packet_as_new_ones_arrive() {
         let mut m = feed(5);
         m.net.ble_view.selection.selected = Some(3);
-        let rows = draw(NetBlePacketsPanel, 130, 12, &m);
+        let rows = draw(NetBlePacketsPanel::ADVERTISING, 130, 12, &m);
         let at = rows
             .iter()
             .position(|l| l.contains("00:00:00:00:03"))
@@ -750,7 +856,7 @@ mod tests {
         newer.seq = 6;
         newer.adv_addr = Some([0xaa, 0, 0, 0, 0, 6]);
         m.net.ble_packets.push_front(newer);
-        let rows = draw(NetBlePacketsPanel, 130, 12, &m);
+        let rows = draw(NetBlePacketsPanel::ADVERTISING, 130, 12, &m);
         let moved = rows
             .iter()
             .position(|l| l.contains("00:00:00:00:03"))
@@ -764,17 +870,17 @@ mod tests {
     #[test]
     fn no_selection_and_an_aged_out_one_mark_no_row() {
         let mut m = feed(5);
-        assert!(marked(&draw(NetBlePacketsPanel, 130, 12, &m)).is_empty());
+        assert!(marked(&draw(NetBlePacketsPanel::ADVERTISING, 130, 12, &m)).is_empty());
         m.net.ble_view.selection.selected = Some(99);
-        assert!(marked(&draw(NetBlePacketsPanel, 130, 12, &m)).is_empty());
+        assert!(marked(&draw(NetBlePacketsPanel::ADVERTISING, 130, 12, &m)).is_empty());
     }
 
     /// The focus letter is the one the title shows.
     #[test]
     fn the_title_shows_the_focus_letter() {
-        let chrome = NetBlePacketsPanel.chrome(&feed(1));
+        let chrome = NetBlePacketsPanel::ADVERTISING.chrome(&feed(1));
         assert!(chrome.title.contains("Ad_vertising"), "{}", chrome.title);
-        assert_eq!(NetBlePacketsPanel.focus_key(), Some('v'));
+        assert_eq!(NetBlePacketsPanel::ADVERTISING.focus_key(), Some('v'));
     }
 
     /// A packet whose payload is `ad` behind its address.
@@ -841,7 +947,7 @@ mod tests {
         );
         let mut m = feed(0);
         m.net.ble_packets.push_front(ext);
-        let out = draw(NetBlePacketsPanel, 130, 8, &m).join("\n");
+        let out = draw(NetBlePacketsPanel::ADVERTISING, 130, 8, &m).join("\n");
         assert!(out.contains("ADV_EXT_IND"), "{out}");
         assert!(out.contains("(not decoded)"), "{out}");
     }
@@ -851,7 +957,7 @@ mod tests {
     fn a_filtered_list_shows_one_address_and_says_so() {
         let mut m = feed(4);
         m.net.ble_view.filter = Some([0xaa, 0, 0, 0, 0, 2]);
-        let out = draw(NetBlePacketsPanel, 130, 10, &m);
+        let out = draw(NetBlePacketsPanel::ADVERTISING, 130, 10, &m);
         assert!(out[0].contains("[FILTERED]"), "{}", out[0]);
         let text = out.join("\n");
         assert!(text.contains("00:00:00:00:02"), "{text}");
@@ -859,7 +965,7 @@ mod tests {
 
         // An address gone from the ring says that, rather than a quiet room.
         m.net.ble_view.filter = Some([0xaa, 0, 0, 0, 0, 9]);
-        let gone = draw(NetBlePacketsPanel, 130, 10, &m).join("\n");
+        let gone = draw(NetBlePacketsPanel::ADVERTISING, 130, 10, &m).join("\n");
         assert!(gone.contains("no packets from this address"), "{gone}");
     }
 
@@ -870,12 +976,12 @@ mod tests {
     fn a_kind_filter_names_itself_and_its_empty_list() {
         let mut m = feed(4);
         m.net.ble_view.kind = Some(crate::state::PduKind::Advertising);
-        let out = draw(NetBlePacketsPanel, 130, 10, &m);
+        let out = draw(NetBlePacketsPanel::ADVERTISING, 130, 10, &m);
         assert!(out[0].contains("[ADV]"), "{}", out[0]);
         assert!(out.join("\n").contains("00:00:00:00:04"));
 
         m.net.ble_view.kind = Some(crate::state::PduKind::Connect);
-        let out = draw(NetBlePacketsPanel, 130, 10, &m);
+        let out = draw(NetBlePacketsPanel::ADVERTISING, 130, 10, &m);
         assert!(out[0].contains("[CONNECT]"), "{}", out[0]);
         let text = out.join("\n");
         assert!(
@@ -884,7 +990,7 @@ mod tests {
         );
 
         m.net.ble_view.filter = Some([0xaa, 0, 0, 0, 0, 2]);
-        let text = draw(NetBlePacketsPanel, 130, 10, &m).join("\n");
+        let text = draw(NetBlePacketsPanel::ADVERTISING, 130, 10, &m).join("\n");
         assert!(
             text.contains("no CONNECT packets from this address"),
             "{text}"
@@ -903,7 +1009,7 @@ mod tests {
         m.net.ble_packets.push_front(newer);
         m.net.ble_heard = 4;
 
-        let out = draw(NetBlePacketsPanel, 130, 10, &m);
+        let out = draw(NetBlePacketsPanel::ADVERTISING, 130, 10, &m);
         assert!(out[0].contains("[PAUSED]"), "{}", out[0]);
         assert!(out[0].contains("[+1 NEW]"), "{}", out[0]);
         assert!(!out[0].contains("STALE"), "{}", out[0]);
@@ -935,7 +1041,7 @@ mod tests {
                 Instant::now(),
             ));
 
-        let list = draw(NetBlePacketsPanel, 140, 8, &m).join("\n");
+        let list = draw(NetBlePacketsPanel::ADVERTISING, 140, 8, &m).join("\n");
         let census = draw(crate::ui::NetCensusPanel, 120, 10, &m).join("\n");
         for out in [&list, &census] {
             assert!(out.contains("Apple\u{00b7}mfr ..09:be"), "{out}");

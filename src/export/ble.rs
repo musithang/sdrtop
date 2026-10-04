@@ -300,6 +300,7 @@ mod tests {
                 drift_rate_hz_per_us: drift.scale(0.02),
             }),
             seen: Instant::now(),
+            coded: None,
         }
     }
 

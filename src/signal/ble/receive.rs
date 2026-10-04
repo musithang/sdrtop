@@ -161,7 +161,8 @@ const DECODE_EVERY_SAMPLES: usize = 8 * WORKING_SPS;
 /// than silently moving the threshold's meaning.
 fn shape_n_eff(phy: Phy) -> f64 {
     match phy {
-        Phy::OneM => 107.8,
+        // LE Coded never reaches this receiver ([`front_end`] refuses it).
+        Phy::OneM | Phy::Coded(_) => 107.8,
         Phy::TwoM => 133.1,
     }
 }
@@ -199,14 +200,14 @@ fn shape_threshold(phy: Phy) -> f64 {
 /// (this arc's own doc).
 fn anti_alias_cutoff_hz(phy: Phy) -> f64 {
     match phy {
-        Phy::OneM => 1_500_000.0,
+        Phy::OneM | Phy::Coded(_) => 1_500_000.0,
         Phy::TwoM => 3_000_000.0,
     }
 }
 /// Transition width, in Hz, either side of the cutoff.
 fn anti_alias_transition_hz(phy: Phy) -> f64 {
     match phy {
-        Phy::OneM => 500_000.0,
+        Phy::OneM | Phy::Coded(_) => 500_000.0,
         Phy::TwoM => 1_000_000.0,
     }
 }
@@ -281,6 +282,11 @@ const ANTI_ALIAS_STOPBAND_DB: f64 = 40.0;
 /// that is the next real-hardware session's job, the same honest gap B6
 /// through B9 each left behind them, and B17's own LE 2M numbers besides.
 pub fn front_end(raw_rate: f64, phy: Phy) -> Result<StreamingDecimator, String> {
+    // LE Coded has a chain of its own (`coded_rx`), with a filter chosen for
+    // its sensitivity; this one is LE 1M's and LE 2M's.
+    if matches!(phy, Phy::Coded(_)) {
+        return Err("LE Coded is received by its own chain, not this one".to_string());
+    }
     let rate_hz = working_rate_hz(phy);
     if raw_rate < rate_hz {
         return Err(format!(

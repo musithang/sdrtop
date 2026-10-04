@@ -80,13 +80,15 @@ impl App {
         registry.register(ui::SweepStripPanel);
         registry.register(ui::MicroSweepPanel);
         registry.register(ui::NetCapabilityPanel);
-        registry.register(ui::NetBlePacketsPanel);
+        registry.register(ui::NetBlePacketsPanel::ADVERTISING);
+        registry.register(ui::NetBlePacketsPanel::CODED);
         registry.register(ui::NetBtHopsPanel);
         registry.register(ui::NetBtPiconetsPanel);
         registry.register(ui::NetBtPacketsPanel);
         registry.register(ui::NetBleConnectionPanel);
         registry.register(ui::NetBtBenchPanel);
         registry.register(ui::NetBleDetailPanel);
+        registry.register(ui::NetCodedDetailPanel);
         registry.register(ui::NetCensusPanel);
         registry.register(ui::NetCoexistPanel);
         registry.register(ui::NetDecodeHealthPanel);
@@ -585,7 +587,20 @@ mod tests {
             modulation: None,
             drift: None,
             seen: now,
+            coded: None,
         });
+        // The same device heard on LE Coded, for the LE Coded list.
+        let coded = BlePacket {
+            phy: crate::signal::ble::Phy::Coded(crate::signal::ble::coded::Coding::S8),
+            pdu_type: crate::signal::ble::pdu::PduType::Other(0x07),
+            coded: Some(crate::state::CodedFacts {
+                fec_repairs: 0,
+                reading: None,
+            }),
+            ..m.net.ble_packets[0].clone()
+        };
+        m.net.coded_packets.push_front(coded);
+        m.net.coded_heard = 1;
         crate::signal::net::census::observe(
             &mut m.net.census.devices,
             &crate::signal::net::census::Sighting {
@@ -1265,7 +1280,7 @@ mod tests {
             assert!(admitted.has_preset(name), "{name} kept on an able radio");
             assert!(!refused.has_preset(name), "{name} dropped on a refused one");
         }
-        for section in ["net", "le", "classic"] {
+        for section in ["net", "le", "classic", "coded"] {
             assert!(admitted.menu().section(section).is_some(), "{section}");
             assert!(refused.menu().section(section).is_none(), "{section}");
         }

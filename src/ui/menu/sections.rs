@@ -123,10 +123,10 @@ mod tests {
         super::super::model::build(&LayoutConfig::default_config().presets)
     }
 
-    /// The column is the seven sections plus the panes under the rule.
+    /// The column is the eight sections plus the panes under the rule.
     #[test]
     fn the_column_counts_sections_and_panes() {
-        assert_eq!(row_count(&menu()), 7 + PANES.len());
+        assert_eq!(row_count(&menu()), 8 + PANES.len());
     }
 
     /// A pane selects its own row regardless of which section the cursor came
@@ -135,7 +135,7 @@ mod tests {
     fn a_pane_selects_a_row_below_the_sections() {
         let m = menu();
         assert_eq!(selected_row(&m, 2, MenuPane::Views), 2);
-        assert_eq!(selected_row(&m, 2, MenuPane::Keys), 7);
+        assert_eq!(selected_row(&m, 2, MenuPane::Keys), 8);
     }
 
     /// Every row resolves to exactly one thing, and the two directions agree.

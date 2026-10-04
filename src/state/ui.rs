@@ -467,7 +467,7 @@ mod tests {
     #[test]
     fn every_net_section_is_net() {
         let mut ui = UiState::default();
-        for s in ["net", "le", "classic"] {
+        for s in ["net", "le", "classic", "coded"] {
             ui.section = s.to_string();
             assert!(ui.is_net_section(), "{s}");
         }

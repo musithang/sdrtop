@@ -308,6 +308,7 @@ pub fn title_spans(
             Tag::Stride(n) => (format!("\u{00D7}{n}"), theme.label),
             Tag::Filtered => ("FILTERED".to_string(), theme.value_hi),
             Tag::Kind(kind) => (kind.to_string(), theme.value_hi),
+            Tag::Listening(what) => (what.to_string(), theme.value_hi),
             Tag::Behind(n) => (format!("+{n} NEW"), theme.label),
             // Not a warning: both are correct ways to listen, and the tag says
             // which, in the mode tag's colour.

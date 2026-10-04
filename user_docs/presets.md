@@ -178,7 +178,7 @@ These are the valid values for `name`. What each one actually draws is in
 
 **NET:** `net_capability` · `net_occupancy` · `net_coexist` ·
 `net_decode_health` · `net_census` · `net_ble_packets` · `net_ble_detail` ·
-`net_ble_connection` ·
+`net_ble_connection` · `net_coded_packets` · `net_coded_detail` ·
 `net_bt_hops` · `net_bt_piconets` · `net_bt_packets` · `net_bt_bench`. What each shows is on
 [the NET page](net.md); three of these were renamed or replaced, which that
 page's [last section](net.md#if-you-wrote-your-own-net-preset) lists.

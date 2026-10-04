@@ -1,0 +1,25 @@
+# LE Coded: long-range BLE advertising. LE Coded sends the same 1 Msym/s GFSK
+# as LE 1M with every bit spread over two or eight symbols, so it is heard
+# further away; its advertising starts with an ADV_EXT_IND on an advertising
+# channel, which names nobody and points at an auxiliary packet that does.
+# This view runs LE Coded's own receive chain (`signal::ble::coded_rx`), with
+# a filter chosen for its sensitivity, on the advertising channel in view,
+# and nothing else: LE 1M's views do not pay for it, and it does not see
+# their packets.
+#
+# Needs the radio on an advertising channel, 2402, 2426 or 2480 MHz, at a
+# sample rate that is a whole multiple of 4 Msps: the list says when either
+# is not met.
+
+section = "coded"
+slot    = 1
+title   = "Long range"
+blurb   = "who advertises on LE Coded"
+
+panels = [
+    { name = "header",            position = "top", height = 5 },
+    { name = "net_coded_packets", position = "body" },
+    { name = "net_coded_detail",  position = "right", width_pct = 34 },
+    { name = "log",               position = "bottom", height = 5 },
+    { name = "footer",            position = "bottom" },
+]

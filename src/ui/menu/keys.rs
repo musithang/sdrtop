@@ -194,32 +194,32 @@ pub const GLOBAL: &[(&str, &[Binding])] = &[
             f(
                 "M",
                 Some('m'),
-                "NET, LE and Classic: survey the band, or lock where you are",
+                "NET, LE, Classic and LE Coded: survey the band, or lock where you are",
                 Footer::Section(&crate::signal::net::SECTIONS, "mode"),
             ),
             f(
                 "I",
                 Some('i'),
-                "in NET, LE and Classic: addresses in full, by vendor and kind, or masked",
+                "in NET, LE, Classic and LE Coded: addresses in full, by vendor and kind, or masked",
                 Footer::Section(&crate::signal::net::SECTIONS, "addresses"),
             ),
             f(
                 "\u{2190} \u{2192}",
                 None,
-                "in NET, LE and Classic, locked: the next advertising channel, or the next block of the band",
+                "in NET, LE, Classic and LE Coded, locked: the next advertising channel, or the next block of the band",
                 Footer::Section(&crate::signal::net::SECTIONS, "channel"),
             ),
             f(
                 "O",
                 Some('o'),
-                "in NET, LE and Classic: write the band, the census, the BLE packets, their error curve and the classic hits to files",
+                "in NET, LE, Classic and LE Coded: write the band, the census, the BLE packets, their error curve and the classic hits to files",
                 Footer::Section(&crate::signal::net::SECTIONS, "Export"),
             ),
             f(
                 "Y",
                 Some('y'),
                 "on a standard station: set the frequency reference",
-                Footer::Section(&["lab", "net", "le", "classic"], "Reference"),
+                Footer::Section(&["lab", "net", "le", "classic", "coded"], "Reference"),
             ),
             f(
                 "W",

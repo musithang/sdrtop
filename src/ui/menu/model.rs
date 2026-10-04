@@ -36,12 +36,13 @@ const KNOWN: &[(&str, &str)] = &[
     ("lab", "Lab"),
     ("sweep", "Sweep"),
     ("micro", "Micro"),
-    // The NET feature's three (`signal::net::SECTIONS`): `App::build_ui`
+    // The NET feature's four (`signal::net::SECTIONS`): `App::build_ui`
     // removes every preset filed under them on a radio that cannot work in the
     // 2.4 GHz band, so they are absent rather than empty.
     (crate::signal::net::SECTIONS[0], "NET"),
     (crate::signal::net::SECTIONS[1], "LE"),
     (crate::signal::net::SECTIONS[2], "Classic"),
+    (crate::signal::net::SECTIONS[3], "LE Coded"),
 ];
 
 /// One layout, as the menu shows it.
@@ -209,9 +210,9 @@ mod tests {
         }
     }
 
-    /// The built-ins land in the seven sections, in order.
+    /// The built-ins land in the eight sections, in order.
     #[test]
-    fn the_builtins_build_seven_sections() {
+    fn the_builtins_build_eight_sections() {
         let menu = build(&LayoutConfig::default_config().presets);
         let ids: Vec<&str> = menu.sections.iter().map(|s| s.id.as_str()).collect();
         assert_eq!(
@@ -223,7 +224,8 @@ mod tests {
                 "micro",
                 "net",
                 "le",
-                "classic"
+                "classic",
+                "coded"
             ]
         );
         assert!(menu.warnings.is_empty(), "{:?}", menu.warnings);
@@ -247,11 +249,13 @@ mod tests {
                 "micro",
                 "net",
                 "le",
-                "classic"
+                "classic",
+                "coded"
             ]
         );
         assert_eq!(menu.section("le").unwrap().title, "LE");
         assert_eq!(menu.section("classic").unwrap().title, "Classic");
+        assert_eq!(menu.section("coded").unwrap().title, "LE Coded");
     }
 
     /// The NET feature's views, a section each for the band and the two
@@ -367,6 +371,7 @@ mod tests {
                 "net",
                 "le",
                 "classic",
+                "coded",
                 "nightwatch"
             ]
         );
@@ -442,8 +447,8 @@ mod tests {
     #[test]
     fn a_cursor_past_the_end_is_clamped() {
         let menu = build(&LayoutConfig::default_config().presets);
-        // Seven sections, and Sweep (index 2) has two entries.
-        assert_eq!(menu.clamp(99, 0), Some((6, 0)));
+        // Eight sections, and Sweep (index 2) has two entries.
+        assert_eq!(menu.clamp(99, 0), Some((7, 0)));
         assert_eq!(menu.clamp(2, 99), Some((2, 1)));
         assert_eq!(
             menu.at(2, 99).map(|e| e.preset.as_str()),

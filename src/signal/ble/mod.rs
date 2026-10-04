@@ -62,6 +62,11 @@ pub enum Phy {
     /// LE Coded; the worker refuses it there rather than listening to
     /// nothing.
     TwoM,
+    /// LE Coded, at the scheme its packet's Coding Indicator named. The same
+    /// 1 Msym/s GFSK as LE 1M, every bit sent as two or eight symbols;
+    /// received by `signal::ble::coded_rx`, its own chain, never by
+    /// `receive::Receiver`.
+    Coded(coded::Coding),
 }
 
 impl Phy {
@@ -71,6 +76,8 @@ impl Phy {
         match self {
             Phy::OneM => "LE 1M",
             Phy::TwoM => "LE 2M",
+            Phy::Coded(coded::Coding::S8) => "LE Coded S8",
+            Phy::Coded(coded::Coding::S2) => "LE Coded S2",
         }
     }
 
@@ -78,7 +85,7 @@ impl Phy {
     /// a free parameter a caller picks.
     pub fn symbol_rate_hz(self) -> f64 {
         match self {
-            Phy::OneM => 1_000_000.0,
+            Phy::OneM | Phy::Coded(_) => 1_000_000.0,
             Phy::TwoM => 2_000_000.0,
         }
     }
@@ -89,18 +96,20 @@ impl Phy {
     /// not.
     pub fn deviation_hz(self) -> f64 {
         match self {
-            Phy::OneM => 250_000.0,
+            Phy::OneM | Phy::Coded(_) => 250_000.0,
             Phy::TwoM => 500_000.0,
         }
     }
 
     /// How many bits the preamble is on this PHY - 8 for LE 1M, 16 for LE
     /// 2M, the same alternating rule ([`detect::preamble_bits`]'s own doc)
-    /// run for twice as long.
+    /// run for twice as long; 80 symbols of `00111100` for LE Coded (Core
+    /// 5.4 Vol 6 Part B 2.2.1).
     pub fn preamble_bits_len(self) -> usize {
         match self {
             Phy::OneM => 8,
             Phy::TwoM => 16,
+            Phy::Coded(_) => coded::PREAMBLE_SYMBOLS,
         }
     }
 }

@@ -40,12 +40,10 @@ use crate::signal::dsp::code::lfsr::whiten;
 /// follows it (which, unlike 1M/2M, is itself FEC-encoded before
 /// transmission - a real, structural difference this module's own doc
 /// names but does not yet build a detector for).
-#[allow(dead_code)]
 pub const PREAMBLE_SYMBOL: [bool; 8] = [false, false, true, true, true, true, false, false];
 
 /// The Coded PHY's own full preamble: [`PREAMBLE_SYMBOL`] repeated ten
 /// times, eighty symbols in total - section 2.2.1's own stated length.
-#[allow(dead_code)]
 pub fn preamble_bits() -> [bool; 80] {
     let mut out = [false; 80];
     for (i, slot) in out.iter_mut().enumerate() {
@@ -60,18 +58,14 @@ pub fn preamble_bits() -> [bool; 80] {
 /// `x^2` term, `state[2]` the `x^3` term. Eight possible values, since
 /// three bits of memory - the number [`decode`]'s own trellis has exactly
 /// that many states for.
-#[allow(dead_code)]
 type State = [bool; 3];
 
-#[allow(dead_code)]
 const STATE_COUNT: usize = 8;
 
-#[allow(dead_code)]
 fn state_to_index(s: State) -> usize {
     ((s[0] as usize) << 2) | ((s[1] as usize) << 1) | (s[2] as usize)
 }
 
-#[allow(dead_code)]
 fn index_to_state(i: usize) -> State {
     [(i >> 2) & 1 != 0, (i >> 1) & 1 != 0, i & 1 != 0]
 }
@@ -88,7 +82,6 @@ fn index_to_state(i: usize) -> State {
 /// polynomial `G1` (`a1`) is transmitted second" is section 3.3.1's own
 /// sentence, and is exactly the order returned here and consumed by
 /// [`encode`].
-#[allow(dead_code)]
 fn step(state: State, input: bool) -> (bool, bool, State) {
     let taps = [input, state[0], state[1], state[2]];
     let g0 = taps[0] ^ taps[1] ^ taps[2] ^ taps[3];
@@ -109,7 +102,6 @@ fn step(state: State, input: bool) -> (bool, bool, State) {
 /// building a real FEC block appends its own three zero bits (TERM1 or
 /// TERM2, section 2.2) before calling this, the same way it is the
 /// caller's job to know a block even needs one.
-#[allow(dead_code)]
 pub fn encode(bits: &[bool]) -> Vec<bool> {
     let mut state: State = [false; 3];
     let mut out = Vec::with_capacity(bits.len() * 2);
@@ -260,7 +252,6 @@ fn viterbi(
 /// becomes `0011`, a 1 becomes `1100`. S=2 has no equivalent function
 /// here because Table 3.1's own P=1 row is the identity - one input bit,
 /// one output symbol, unchanged.
-#[allow(dead_code)]
 pub fn pattern_map_s8(bit: bool) -> [bool; 4] {
     if bit {
         [true, true, false, false]
@@ -298,13 +289,11 @@ pub fn pattern_demap_s8(symbols: [bool; 4]) -> bool {
 /// are reserved, which [`Coding::from_ci`] refuses rather than reads as
 /// either.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
-#[allow(dead_code)]
 pub enum Coding {
     S2,
     S8,
 }
 
-#[allow(dead_code)]
 impl Coding {
     /// The CI's two bits in transmission order, least significant first
     /// (section 1.2); `None` for a reserved value.
@@ -346,23 +335,19 @@ impl Coding {
 }
 
 /// The preamble's length in symbols (section 2.2.1).
-#[allow(dead_code)]
 pub const PREAMBLE_SYMBOLS: usize = 80;
 
 /// FEC block 1's uncoded bits: the Access Address, the CI and TERM1
 /// (section 2.2, Table 2.1).
-#[allow(dead_code)]
 pub const BLOCK1_BITS: usize = 32 + 2 + 3;
 
 /// FEC block 1 on the air, always at S=8: 296 symbols.
-#[allow(dead_code)]
 pub const BLOCK1_SYMBOLS: usize = BLOCK1_BITS * 8;
 
 /// How far past the header [`peek_header`] decodes before trusting it, in
 /// uncoded bits: the traceback's last bits are the least settled, and five
 /// constraint lengths is the usual depth by which a K=4 code's paths have
 /// merged.
-#[allow(dead_code)]
 pub const HEADER_LOOKAHEAD_BITS: usize = 20;
 
 /// The 24-bit CRC and the 3-bit TERM2 that follow the PDU in FEC block 2.
@@ -370,7 +355,6 @@ const BLOCK2_TRAILER_BITS: usize = 24 + 3;
 
 /// FEC block 2's length in symbols for a PDU of `pdu_bits` (header and
 /// payload); the CRC and TERM2 are added here.
-#[allow(dead_code)]
 pub fn block2_symbols(coding: Coding, pdu_bits: usize) -> usize {
     (pdu_bits + BLOCK2_TRAILER_BITS) * coding.symbols_per_bit()
 }
@@ -381,7 +365,6 @@ pub fn block2_symbols(coding: Coding, pdu_bits: usize) -> usize {
 /// depend on the CI that follows them. On the advertising channels the
 /// address is a constant, so these are known in full before anything is
 /// heard: 336 symbols to look for.
-#[allow(dead_code)]
 pub fn sync_symbols(access_address: u32) -> Vec<bool> {
     let mut out = preamble_bits().to_vec();
     let aa = super::detect::access_address_bits(access_address);
@@ -393,7 +376,6 @@ pub fn sync_symbols(access_address: u32) -> Vec<bool> {
 /// for a reserved CI) and how many of its symbols the decoder had to
 /// overrule.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-#[allow(dead_code)]
 pub struct Block1 {
     pub access_address: u32,
     pub coding: Option<Coding>,
@@ -405,25 +387,23 @@ pub struct Block1 {
 /// themselves. Both are kept so one can be measured against the other
 /// (`coded_bench`); [`DECISIONS`] is the one the readers use.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-#[allow(dead_code)]
 pub enum Decisions {
+    /// The reference the bench holds soft decisions to.
+    #[allow(dead_code)]
     Hard,
     Soft,
 }
 
 /// The decisions [`read_block1`], [`peek_header`] and [`read_block2`] make.
-#[allow(dead_code)]
 pub const DECISIONS: Decisions = Decisions::Soft;
 
 /// FEC block 1 from its [`BLOCK1_SYMBOLS`] readings, one a symbol, positive
 /// for a 1. `None` when there are fewer.
-#[allow(dead_code)]
 pub fn read_block1(symbols: &[f32]) -> Option<Block1> {
     read_block1_by(symbols, DECISIONS)
 }
 
 /// [`read_block1`] with the decisions named.
-#[allow(dead_code)]
 pub fn read_block1_by(symbols: &[f32], decisions: Decisions) -> Option<Block1> {
     let symbols = symbols.get(..BLOCK1_SYMBOLS)?;
     let (bits, repairs) = read_block(symbols, Coding::S8, true, decisions)?;
@@ -441,13 +421,11 @@ pub fn read_block1_by(symbols: &[f32], decisions: Decisions) -> Option<Block1> {
 /// The PDU header's 16 bits, de-whitened, before FEC block 2 is complete:
 /// decoded without termination from the header and [`HEADER_LOOKAHEAD_BITS`]
 /// beyond it. `None` until that much has arrived.
-#[allow(dead_code)]
 pub fn peek_header(symbols: &[f32], coding: Coding, channel: u8) -> Option<[bool; 16]> {
     peek_header_by(symbols, coding, channel, DECISIONS)
 }
 
 /// [`peek_header`] with the decisions named.
-#[allow(dead_code)]
 pub fn peek_header_by(
     symbols: &[f32],
     coding: Coding,
@@ -465,13 +443,11 @@ pub fn peek_header_by(
 /// FEC block 2 whole: the PDU and its CRC, de-whitened, ready for
 /// `pdu::decode`, and the repairs. Its length comes from the header the
 /// readings themselves carry; `None` until that many have arrived.
-#[allow(dead_code)]
 pub fn read_block2(symbols: &[f32], coding: Coding, channel: u8) -> Option<(Vec<bool>, u32)> {
     read_block2_by(symbols, coding, channel, DECISIONS)
 }
 
 /// [`read_block2`] with the decisions named.
-#[allow(dead_code)]
 pub fn read_block2_by(
     symbols: &[f32],
     coding: Coding,
@@ -541,11 +517,27 @@ fn demap(symbols: &[f32], coding: Coding) -> Vec<f32> {
         .collect()
 }
 
+/// A packet's symbols on the air, from its PDU and CRC as sent (`air`:
+/// whitened, header through CRC): the preamble (2.2.1); FEC block 1, the
+/// access address, the CI and TERM1 through the encoder and the S=8 mapper;
+/// FEC block 2, `air` and TERM2 through the encoder and `coding`'s mapper
+/// (2.2, 3.3). What the measurement path times and reads a packet against,
+/// once the receiver has decoded what it carried.
+pub fn symbols_of(access_address: u32, coding: Coding, air: &[bool]) -> Vec<bool> {
+    let mut out = preamble_bits().to_vec();
+    let mut block1: Vec<bool> = super::detect::access_address_bits(access_address).to_vec();
+    block1.extend(coding.ci());
+    block1.extend([false; 3]);
+    out.extend(map(&encode(&block1), Coding::S8));
+    let mut block2 = air.to_vec();
+    block2.extend([false; 3]);
+    out.extend(map(&encode(&block2), coding));
+    out
+}
+
 /// A whole packet's symbols, built from the Core's text alone and never from
-/// the readers above: the preamble (2.2.1); FEC block 1, the access address,
-/// the CI and TERM1 through the encoder and the S=8 mapper (2.2, 3.3); FEC
-/// block 2, the PDU and its CRC whitened by `channel` (3.1.1, 3.2), then
-/// TERM2, through the encoder and `coding`'s mapper.
+/// the readers above: [`symbols_of`] on the PDU, its CRC and the whitening as
+/// `pdu::encode` builds them for the uncoded PHYs (3.1.1, 3.2).
 #[cfg(test)]
 pub fn transmit(
     access_address: u32,
@@ -554,19 +546,11 @@ pub fn transmit(
     header_byte0: u8,
     payload: &[u8],
 ) -> Vec<bool> {
-    let mut out = preamble_bits().to_vec();
-
-    let mut block1: Vec<bool> = super::detect::access_address_bits(access_address).to_vec();
-    block1.extend(coding.ci());
-    block1.extend([false; 3]);
-    out.extend(map(&encode(&block1), Coding::S8));
-
-    // `pdu::encode` builds the PDU, its CRC and the whitening exactly as the
-    // uncoded PHYs send them; the Coded PHY's own part is what follows it.
-    let mut block2 = super::pdu::encode(channel, header_byte0, payload);
-    block2.extend([false; 3]);
-    out.extend(map(&encode(&block2), coding));
-    out
+    symbols_of(
+        access_address,
+        coding,
+        &super::pdu::encode(channel, header_byte0, payload),
+    )
 }
 
 #[cfg(test)]

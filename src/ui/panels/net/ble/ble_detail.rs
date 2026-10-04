@@ -193,6 +193,53 @@ fn fit(rows: &[LimitRow], width: usize) -> RowWidths {
     RowWidths::fit_within(rows, width)
 }
 
+/// LE Coded (S=8)'s limit rows, on LE 1M's limits and resolutions because
+/// they are the same ones: Δf1 against 225 to 275 kHz (RFPHY/TRM/BV-13-C
+/// states that band for S=8, and Core 5.4 Vol 6 Part A 3.1's index band is
+/// it at 1 Msym/s), and the drift against 3.3's, which hold for every LE
+/// PHY. No index or Δf2 rows: S=8 never sends the alternating symbols Δf2 is
+/// read from.
+pub(crate) fn coded_rows(
+    m: Option<&crate::signal::ble::measure::CodedModulation>,
+    d: Option<&Drift>,
+) -> Vec<LimitRow<'static>> {
+    let mut out = Vec::new();
+    if let Some(m) = m {
+        out.push(LimitRow::new(
+            "df1 avg",
+            Reading::new(
+                m.delta_f1_avg_hz.scale(0.001),
+                "kHz",
+                DELTA_F1_RESOLUTION_KHZ,
+            ),
+            DELTA_F1_BAND_KHZ,
+        ));
+    }
+    if let Some(d) = d {
+        out.push(LimitRow::new(
+            "Drift",
+            Reading::new(d.drift_hz.scale(0.001), "kHz", DRIFT_RESOLUTION_KHZ),
+            DRIFT_BAND_KHZ,
+        ));
+        out.push(LimitRow::new(
+            "Drift rate",
+            Reading::new(d.drift_rate_hz_per_us, "Hz/us", DRIFT_RATE_RESOLUTION),
+            DRIFT_RATE_BAND,
+        ));
+    }
+    out
+}
+
+/// Limit rows as lines, their columns fitted to `width` together.
+pub(crate) fn limit_lines(
+    rows: &[LimitRow],
+    width: usize,
+    theme: &crate::Theme,
+) -> Vec<Line<'static>> {
+    let w = fit(rows, width);
+    rows.iter().map(|r| Line::from(r.spans(theme, w))).collect()
+}
+
 /// The label column of the detail's fields.
 const LABEL_W: usize = 9;
 
@@ -722,6 +769,9 @@ fn modulation_lines(p: &BlePacket, iw: usize, theme: &crate::Theme) -> Vec<Line<
         crate::signal::ble::Phy::TwoM => {
             "read through the receiver's own filter, as the test suite defines them"
         }
+        crate::signal::ble::Phy::Coded(_) => {
+            "read as the test suite defines them for LE Coded, timed by the sync symbols"
+        }
     };
     out.extend(
         crate::ui::chrome::wrap(how, iw.saturating_sub(1), 2)
@@ -977,6 +1027,7 @@ mod tests {
             modulation,
             drift,
             seen: Instant::now(),
+            coded: None,
         }
     }
 

@@ -490,6 +490,8 @@ impl NetWorker {
         let pair_bytes = self.geometry.bytes_per_pair() as u64;
         let mut scan: Option<Scan> = None;
         let mut ble: Option<BleReceiver> = None;
+        // LE Coded's own chain, on the LE Coded view alone.
+        let mut coded: Option<crate::signal::ble::coded_rx::CodedReceiver> = None;
         let mut bt: Vec<BtReceiver> = Vec::new();
         let mut piconet_clocks: HashMap<u32, PiconetClock> = HashMap::new();
         // B17's own live tie-break, one LAP at a time: once resolved, a
@@ -599,6 +601,7 @@ impl NetWorker {
             }
             if !continuous {
                 ble = None;
+                coded = None;
                 bt.clear();
                 recent.clear();
             }
@@ -607,7 +610,7 @@ impl NetWorker {
             // block rather than the state: see `StreamBlock::centre_hz`.
             let centre_hz = centre_hz as f64;
 
-            let (still_open, span_hz, is_net_bt, is_survey, phy, locked, following) = {
+            let (still_open, span_hz, is_net_bt, is_survey, is_coded, phy, locked, following) = {
                 let mut m = self.state.lock().unwrap_or_else(|e| e.into_inner());
                 let h = &mut m.net.health;
                 h.blocks_in = h.blocks_in.saturating_add(1);
@@ -634,6 +637,7 @@ impl NetWorker {
                     span.min(rate_hz),
                     CLASSIC_VIEWS.contains(&m.ui.active_preset.as_str()),
                     m.ui.active_preset == super::lock::SURVEY_VIEW,
+                    super::lock::CODED_VIEWS.contains(&m.ui.active_preset.as_str()),
                     m.net.ble_phy,
                     m.net.mode == crate::state::NetMode::Lock,
                     m.net.ble_connections.iter().any(|f| {
@@ -663,7 +667,58 @@ impl NetWorker {
             // The advertising channel the BLE receiver is to be fed this
             // block, if any: fed below, alongside the classic fleet.
             let mut ble_on: Option<u8> = None;
-            match channel {
+            // On the LE Coded view LE Coded's chain runs in LE 1M's place, on
+            // the advertising channel LE 1M would have: neither pays for the
+            // other, and neither list shows the other's packets.
+            let mut coded_on: Option<u8> = None;
+            if is_coded && still_open {
+                ble = None;
+                let advertising =
+                    crate::signal::ble::channel::to_decode(centre_hz as u64, span_hz, locked)
+                        .filter(|&ch| {
+                            crate::signal::ble::channel::advertising_channel_index(ch).is_some()
+                        });
+                match advertising {
+                    Some(ch) => {
+                        if !coded
+                            .as_ref()
+                            .is_some_and(|r| r.matches(ch, rate_hz, centre_hz))
+                        {
+                            let built = crate::signal::ble::coded_rx::CodedReceiver::new(
+                                rate_hz, ch, centre_hz,
+                            );
+                            let mut m = self.state.lock().unwrap_or_else(|e| e.into_inner());
+                            match built {
+                                Ok(r) => {
+                                    m.net.coded_refused = None;
+                                    m.net.coded_channel = Some(ch);
+                                    coded = Some(r);
+                                }
+                                Err(reason) => {
+                                    m.net.coded_refused = Some(reason);
+                                    m.net.coded_channel = None;
+                                    coded = None;
+                                }
+                            }
+                        }
+                        if coded.is_some() {
+                            coded_on = Some(ch);
+                        }
+                    }
+                    None => {
+                        coded = None;
+                        let mut m = self.state.lock().unwrap_or_else(|e| e.into_inner());
+                        m.net.coded_refused = Some(
+                            "not tuned to an advertising channel (2402, 2426 or 2480 MHz)"
+                                .to_string(),
+                        );
+                        m.net.coded_channel = None;
+                    }
+                }
+            } else {
+                coded = None;
+            }
+            match channel.filter(|_| !is_coded) {
                 Some(ch)
                     if still_open
                         && phy == crate::signal::ble::Phy::TwoM
@@ -730,7 +785,7 @@ impl NetWorker {
             // it; elsewhere its cost would buy nothing on screen, and its
             // time axis is kept moving with "nobody looked" instead.
             let scan_here = still_open && is_survey;
-            if ble_on.is_some() || classic_here || follow_here || scan_here {
+            if ble_on.is_some() || coded_on.is_some() || classic_here || follow_here || scan_here {
                 decoded_block(&mut iq, &bytes, self.geometry);
             }
             if scan_here {
@@ -1199,6 +1254,7 @@ impl NetWorker {
                             modulation: p.modulation,
                             drift: p.drift,
                             seen: now,
+                            coded: None,
                         });
                     }
                     m.net.trim_ble_packets();
@@ -1336,6 +1392,68 @@ impl NetWorker {
                 }
             }
 
+            // LE Coded's packets, measured as the test suite defines them
+            // (`measure::le_coded`) outside the lock, from the symbols their
+            // decoded bits were sent as.
+            if let (Some(ch), Some(rx), Some(this)) = (coded_on, coded.as_mut(), iq.as_deref()) {
+                let packets = rx.push_iq_at(this, first_pair);
+                let funnel = rx.take_funnel();
+                let readings: Vec<_> = if packets.is_empty() {
+                    Vec::new()
+                } else {
+                    let window = held(&recent, Some((first_pair, this)));
+                    let offset =
+                        crate::signal::ble::channel::centre_hz(ch).map(|hz| hz as f64 - centre_hz);
+                    packets
+                        .iter()
+                        .map(|p| {
+                            let coding = p.coding?;
+                            let symbols = crate::signal::ble::coded::symbols_of(
+                                crate::signal::ble::detect::ADVERTISING_ACCESS_ADDRESS,
+                                coding,
+                                &p.air,
+                            );
+                            let (o, at) = offset.zip(p.at_pair)?;
+                            super::measure::le_coded(
+                                &window, rate_hz, o, at as f64, &symbols, coding,
+                            )
+                        })
+                        .collect()
+                };
+                let mut m = self.state.lock().unwrap_or_else(|e| e.into_inner());
+                m.net.health.coded.add(funnel);
+                for (p, reading) in packets.into_iter().zip(readings) {
+                    let Some(coding) = p.coding else { continue };
+                    m.net.coded_heard += 1;
+                    let seq = m.net.coded_heard;
+                    m.net.coded_packets.push_front(BlePacket {
+                        seq,
+                        phy: crate::signal::ble::Phy::Coded(coding),
+                        channel: ch,
+                        pdu_type: p.pdu_type,
+                        ch_sel: p.ch_sel,
+                        tx_add_random: p.tx_add_random,
+                        rx_add_random: p.rx_add_random,
+                        length: p.length,
+                        adv_addr: p.adv_addr,
+                        payload: p.payload,
+                        crc_ok: p.crc_ok,
+                        snr_db: reading.and_then(|r| r.snr_db),
+                        // The preamble's f0, as BV-14-C reads it, is the
+                        // carrier offset the list's column shows.
+                        freq_offset_hz: reading.and_then(|r| r.drift).map(|d| d.initial_hz),
+                        modulation: None,
+                        drift: None,
+                        seen: now,
+                        coded: Some(crate::state::CodedFacts {
+                            fec_repairs: p.fec_repairs.unwrap_or(0),
+                            reading,
+                        }),
+                    });
+                    m.net.coded_packets.truncate(crate::state::BLE_PACKET_LIMIT);
+                }
+            }
+
             // Held for the measurement path, as much as `measure::HELD_S`
             // asks and no more, or a followed connection's event needs; a
             // block nothing decoded leaves a hole, so what was held before it
@@ -1343,7 +1461,9 @@ impl NetWorker {
             match iq.take() {
                 Some(block) if still_open => {
                     recent.push_back((first_pair, block));
-                    let held_s = if following {
+                    // An LE Coded packet at S=8 lasts up to 17 ms, and is
+                    // measured whole once it ends.
+                    let held_s = if following || is_coded {
                         FOLLOW_HELD_S.max(super::measure::HELD_S)
                     } else {
                         super::measure::HELD_S
@@ -1370,6 +1490,7 @@ impl NetWorker {
                 // dropping the scan means the next dwell starts clean.
                 scan = None;
                 ble = None;
+                coded = None;
                 bt.clear();
                 load = Load::default();
                 survey_bt = self.survey_bt_start;
@@ -2276,6 +2397,94 @@ mod tests {
         let ble = run("le", "net_ble");
         assert!(ble.net.band.cells.is_empty(), "LE 2 does not");
         assert_eq!(ble.net.ble_channel, Some(38), "and its receiver still runs");
+    }
+
+    /// An LE Coded S=8 `ADV_EXT_IND` on channel 38 at 20 Msps, the radio at
+    /// 2426 MHz, starting at pair `start` of `blocks` blocks of 131 072 pairs,
+    /// as the radio's eight-bit bytes.
+    fn coded_on_the_air(start: usize, blocks: usize) -> Vec<Vec<u8>> {
+        use crate::signal::ble::coded::{self, Coding};
+        use crate::signal::ble::detect::ADVERTISING_ACCESS_ADDRESS;
+        let symbols = coded::transmit(
+            ADVERTISING_ACCESS_ADDRESS,
+            Coding::S8,
+            38,
+            0x07,
+            &[6, 0b0001_1000, 0x23, 0x31, 0x09, 0x64, 0x40],
+        );
+        let wave = crate::signal::ble::gfsk::modulate(&symbols, 20, 250e3, 20e6, 0.5);
+        let len = 131_072;
+        let mut iq = vec![num_complex::Complex::new(0.0f32, 0.0); len * blocks];
+        let mut rng = crate::signal::dsp::testkit::Rng::new(5);
+        for (z, n) in iq.iter_mut().zip(rng.noise(len * blocks, 0.0005)) {
+            *z = n;
+        }
+        for (k, w) in wave.iter().enumerate() {
+            iq[start + k] += w * 0.5;
+        }
+        let q = |v: f32| (v * 128.0).clamp(-127.0, 127.0) as i8 as u8;
+        iq.chunks(len)
+            .map(|c| c.iter().flat_map(|z| [q(z.re), q(z.im)]).collect())
+            .collect()
+    }
+
+    fn run_view(section: &str, preset: &str, blocks: &[(u64, Vec<u8>)]) -> SdrMetrics {
+        let mut m = SdrMetrics::fixture().streaming();
+        m.ui.section = section.to_string();
+        m.ui.active_preset = preset.to_string();
+        m.radio.frequency = 2_426_000_000;
+        m.radio.config_sample_rate = 20e6;
+        m.radio.bb_filter_hz = 0;
+        let state = Arc::new(Mutex::new(m));
+        let (tx, rx) = crossbeam_channel::unbounded();
+        for (seq, bytes) in blocks {
+            tx.send(stamped(&state, *seq, false, bytes.clone()))
+                .unwrap();
+        }
+        drop(tx);
+        NetWorker::new(rx, Arc::clone(&state), eight_bit(), SAFE_BT_CHANNELS).run();
+        let m = state.lock().unwrap().clone();
+        m
+    }
+
+    /// **The LE Coded view runs LE Coded's receiver, and only it.** A Coded
+    /// advertisement on channel 38 is one row in the Coded list, its scheme,
+    /// repairs and measurement with it; the LE 1M list stays empty and its
+    /// receiver gets no channel. On LE 2 the same samples give no Coded row.
+    #[test]
+    fn the_coded_view_runs_the_coded_receiver_alone() {
+        let blocks: Vec<(u64, Vec<u8>)> = coded_on_the_air(20_000, 2)
+            .into_iter()
+            .enumerate()
+            .map(|(i, b)| (i as u64 + 1, b))
+            .collect();
+        let m = run_view("coded", "net_coded", &blocks);
+        assert_eq!(m.net.coded_channel, Some(38));
+        assert_eq!(m.net.coded_packets.len(), 1, "{:?}", m.net.coded_refused);
+        let p = &m.net.coded_packets[0];
+        assert_eq!(
+            p.phy,
+            crate::signal::ble::Phy::Coded(crate::signal::ble::coded::Coding::S8)
+        );
+        assert!(p.crc_ok);
+        let facts = p.coded.as_ref().expect("an LE Coded packet's facts");
+        assert!(facts.reading.and_then(|r| r.snr_db).is_some(), "measured");
+        assert!(m.net.ble_packets.is_empty());
+        assert_eq!(m.net.ble_channel, None);
+        assert_eq!(m.net.health.coded.decoded, 1);
+
+        let le2 = run_view("le", "net_ble", &blocks);
+        assert!(le2.net.coded_packets.is_empty());
+    }
+
+    /// **A gap inside a Coded packet is not stitched.** The block that held
+    /// its middle never arrives; what is left on either side is no packet.
+    #[test]
+    fn a_gap_inside_a_coded_capture_is_not_stitched() {
+        let blocks = coded_on_the_air(120_000, 3);
+        let sent = vec![(1, blocks[0].clone()), (3, blocks[2].clone())];
+        let m = run_view("coded", "net_coded", &sent);
+        assert!(m.net.coded_packets.is_empty(), "{:?}", m.net.coded_packets);
     }
 
     /// **A connection heard set up is followed.** Its CONNECT_IND on

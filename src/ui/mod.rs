@@ -65,6 +65,7 @@ pub use panels::lab::timing_vitals::TimingVitalsPanel;
 pub use panels::net::ble::ble_connection::NetBleConnectionPanel;
 pub use panels::net::ble::ble_detail::NetBleDetailPanel;
 pub use panels::net::ble::ble_packets::NetBlePacketsPanel;
+pub use panels::net::ble::coded_detail::NetCodedDetailPanel;
 pub use panels::net::bt::bt_bench::NetBtBenchPanel;
 pub use panels::net::bt::bt_hops::NetBtHopsPanel;
 pub use panels::net::bt::bt_packets::NetBtPacketsPanel;

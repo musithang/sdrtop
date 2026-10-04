@@ -152,6 +152,9 @@ pub enum Tag {
     /// own rather than [`Tag::Filtered`], because the two narrow together and
     /// one tag for both would hide which is on.
     Kind(&'static str),
+    /// `[LE CODED]` - what a list's receiver listens for, where no one PHY
+    /// says it (LE Coded's packets come at either of two schemes).
+    Listening(&'static str),
     /// `[+N NEW]` - arrivals a paused list is not showing, so its pause says
     /// what it is costing.
     Behind(u64),

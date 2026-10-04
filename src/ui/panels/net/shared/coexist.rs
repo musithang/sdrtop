@@ -553,6 +553,7 @@ mod tests {
             modulation: None,
             drift: None,
             seen,
+            coded: None,
         }
     }
 

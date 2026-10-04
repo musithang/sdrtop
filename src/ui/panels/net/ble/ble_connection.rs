@@ -312,10 +312,7 @@ fn parameter_lines(
         p.timeout as u32 * 10,
         used.len(),
     );
-    let phy = |x: crate::signal::ble::Phy| match x {
-        crate::signal::ble::Phy::OneM => "LE 1M",
-        crate::signal::ble::Phy::TwoM => "LE 2M",
-    };
+    let phy = |x: crate::signal::ble::Phy| x.label();
     let phys = if c.phy() == c.phy_peripheral() {
         format!("{} both ways", phy(c.phy()))
     } else {

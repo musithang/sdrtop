@@ -52,14 +52,12 @@ use crate::signal::dsp::uncertainty::Uncertain;
 
 /// RFPHY/TRM/BV-13-C's floor for Δf1max on LE Coded (S=8): 99.9 % of them
 /// above 185 kHz.
-#[allow(dead_code)]
 pub const CODED_DELTA_F1_MAX_LIMIT_HZ: f64 = 185_000.0;
 
 /// An LE Coded (S=8) packet's modulation as RFPHY/TRM/BV-13-C reads it:
 /// Δf1 alone, because S=8 sends only `0011` and `1100` and so never the
 /// alternating symbols Δf2 is read from.
 #[derive(Clone, Copy, Debug, PartialEq)]
-#[allow(dead_code)]
 pub struct CodedModulation {
     /// The mean Δf1max over the packet's settled symbols, and its standard
     /// error. Pass: 225 to 275 kHz.
@@ -75,7 +73,6 @@ pub struct CodedModulation {
 /// f0 is the initial carrier; f3 against f0 is the drift across 48 us
 /// (pass: within 19.2 kHz).
 #[derive(Clone, Copy, Debug, PartialEq)]
-#[allow(dead_code)]
 pub struct CodedInitial {
     pub groups_hz: [f64; 4],
 }
