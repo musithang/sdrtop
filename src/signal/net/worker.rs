@@ -187,7 +187,7 @@ fn extended(
     Some(crate::state::ExtInfo {
         header,
         role,
-        aux: crate::signal::ble::aux::AuxOutcome::NonePromised,
+        aux: crate::signal::ble::aux_ptr::AuxOutcome::NonePromised,
     })
 }
 
@@ -247,7 +247,7 @@ enum AuxList {
 /// packet will join.
 #[derive(Clone, Copy, Debug)]
 struct Pending {
-    promise: crate::signal::ble::aux::Promise,
+    promise: crate::signal::ble::aux_ptr::Promise,
     list: AuxList,
 }
 
@@ -276,9 +276,11 @@ fn keep_promise(
     m: &mut SdrMetrics,
     promises: &mut Vec<Pending>,
     list: AuxList,
-    made: Option<Result<crate::signal::ble::aux::Promise, crate::signal::ble::aux::AuxOutcome>>,
-) -> crate::signal::ble::aux::AuxOutcome {
-    use crate::signal::ble::aux::AuxOutcome;
+    made: Option<
+        Result<crate::signal::ble::aux_ptr::Promise, crate::signal::ble::aux_ptr::AuxOutcome>,
+    >,
+) -> crate::signal::ble::aux_ptr::AuxOutcome {
+    use crate::signal::ble::aux_ptr::AuxOutcome;
     match made {
         Some(Ok(promise)) => {
             promises.push(Pending { promise, list });
@@ -350,7 +352,7 @@ fn set_aux_outcome(
     m: &mut SdrMetrics,
     list: AuxList,
     seq: u64,
-    outcome: crate::signal::ble::aux::AuxOutcome,
+    outcome: crate::signal::ble::aux_ptr::AuxOutcome,
 ) {
     let packets = match list {
         AuxList::Le => &mut m.net.ble_packets,
@@ -386,7 +388,7 @@ fn put_down(
 fn abandon(
     promises: &mut Vec<Pending>,
     list: Option<AuxList>,
-    outcome: crate::signal::ble::aux::AuxOutcome,
+    outcome: crate::signal::ble::aux_ptr::AuxOutcome,
     state: &Arc<Mutex<SdrMetrics>>,
 ) {
     if !promises.iter().any(|p| list.is_none_or(|l| l == p.list)) {
@@ -887,7 +889,7 @@ impl NetWorker {
                 abandon(
                     &mut promises,
                     None,
-                    crate::signal::ble::aux::AuxOutcome::FeedLost,
+                    crate::signal::ble::aux_ptr::AuxOutcome::FeedLost,
                     &self.state,
                 );
                 bt.clear();
@@ -905,7 +907,7 @@ impl NetWorker {
                 abandon(
                     &mut promises,
                     None,
-                    crate::signal::ble::aux::AuxOutcome::Refused(
+                    crate::signal::ble::aux_ptr::AuxOutcome::Refused(
                         "the radio retuned before its window",
                     ),
                     &self.state,
@@ -1025,7 +1027,7 @@ impl NetWorker {
                 abandon(
                     &mut promises,
                     Some(AuxList::Coded),
-                    crate::signal::ble::aux::AuxOutcome::FeedLost,
+                    crate::signal::ble::aux_ptr::AuxOutcome::FeedLost,
                     &self.state,
                 );
             }
@@ -1095,7 +1097,7 @@ impl NetWorker {
                 abandon(
                     &mut promises,
                     Some(AuxList::Le),
-                    crate::signal::ble::aux::AuxOutcome::FeedLost,
+                    crate::signal::ble::aux_ptr::AuxOutcome::FeedLost,
                     &self.state,
                 );
             }
@@ -1565,7 +1567,9 @@ impl NetWorker {
                             .and_then(|_| extended(&p, crate::state::ExtRole::AdvExt))
                             .map(|mut e| {
                                 let made = packet_start(&p, phy, rate_hz).map(|s| {
-                                    crate::signal::ble::aux::promise(seq, s, &e.header, 0, rate_hz)
+                                    crate::signal::ble::aux_ptr::promise(
+                                        seq, s, &e.header, 0, rate_hz,
+                                    )
                                 });
                                 e.aux = keep_promise(&mut m, &mut promises, AuxList::Le, made);
                                 e
@@ -1730,7 +1734,9 @@ impl NetWorker {
                                 &mut promises,
                                 AuxList::Coded,
                                 start.map(|s| {
-                                    crate::signal::ble::aux::promise(seq, s, &e.header, 0, rate_hz)
+                                    crate::signal::ble::aux_ptr::promise(
+                                        seq, s, &e.header, 0, rate_hz,
+                                    )
                                 }),
                             );
                             e
@@ -1743,7 +1749,7 @@ impl NetWorker {
             // Every AuxPtr whose window this block completes, listened to
             // where it promised, its packet joining its advertisement's list.
             if let Some(this) = iq.as_deref().filter(|_| !promises.is_empty()) {
-                use crate::signal::ble::aux::{AuxOutcome, AuxPhy};
+                use crate::signal::ble::aux_ptr::{AuxOutcome, AuxPhy};
                 use crate::signal::ble::Phy;
                 let window = held(&recent, Some((first_pair, this)));
                 let held_end = (first_pair + this.len() as u64) as f64;
@@ -1786,7 +1792,7 @@ impl NetWorker {
                             }
                         };
                         let ext = extended(&p, role)?;
-                        crate::signal::ble::aux::keeps(&promise, phy, &ext.header)
+                        crate::signal::ble::aux_ptr::keeps(&promise, phy, &ext.header)
                             .then_some((p, phy, ext))
                     });
                     let outcome = if !out.in_view {
@@ -1827,7 +1833,7 @@ impl NetWorker {
                             &mut promises,
                             list,
                             start.map(|s| {
-                                crate::signal::ble::aux::promise(
+                                crate::signal::ble::aux_ptr::promise(
                                     seq,
                                     s,
                                     &ext.header,
@@ -2634,7 +2640,7 @@ mod tests {
     #[test]
     #[ignore]
     fn count_1m_extended_advertising() {
-        use crate::signal::ble::aux::AuxPhy;
+        use crate::signal::ble::aux_ptr::AuxPhy;
         use std::io::Read;
         let Ok(path) = std::env::var("SDRTOP_REPLAY") else {
             return;
@@ -3097,7 +3103,7 @@ mod tests {
     /// the AUX_ADV_IND there is heard, bound to it, and names the advertiser.
     #[test]
     fn a_coded_advertisement_is_followed_to_its_aux() {
-        use crate::signal::ble::aux::AuxOutcome;
+        use crate::signal::ble::aux_ptr::AuxOutcome;
         let m = scene_view(&[
             (38, 0x07, adv_ext_ind(9), 20_000),
             (9, 0x47, aux_adv_ind(), 20_000 + 60_000),
@@ -3127,7 +3133,7 @@ mod tests {
     /// An AuxPtr to a channel the radio does not see is said to be one.
     #[test]
     fn an_aux_out_of_view_is_said_to_be() {
-        use crate::signal::ble::aux::AuxOutcome;
+        use crate::signal::ble::aux_ptr::AuxOutcome;
         let m = scene_view(&[(38, 0x07, adv_ext_ind(30), 20_000)]);
         assert_eq!(m.net.coded_packets.len(), 1);
         let ext = m.net.coded_packets[0].ext.as_ref().unwrap();
@@ -3139,7 +3145,7 @@ mod tests {
     /// built: not followed, and why, rather than "its samples were not held".
     #[test]
     fn an_aux_on_a_phy_this_rate_cannot_receive_is_refused() {
-        use crate::signal::ble::aux::AuxOutcome;
+        use crate::signal::ble::aux_ptr::AuxOutcome;
         let mut payload = adv_ext_ind(9);
         // The AuxPtr's PHY bits, 21 to 23 of its three octets: LE 2M.
         payload[6] = (payload[6] & 0b0001_1111) | 0b001 << 5;
@@ -3153,7 +3159,7 @@ mod tests {
     /// In view, listened to, and nothing there: missed.
     #[test]
     fn an_aux_not_sent_is_missed() {
-        use crate::signal::ble::aux::AuxOutcome;
+        use crate::signal::ble::aux_ptr::AuxOutcome;
         let m = scene_view(&[(38, 0x07, adv_ext_ind(9), 20_000)]);
         let ext = m.net.coded_packets[0].ext.as_ref().unwrap();
         assert_eq!(ext.aux, AuxOutcome::Missed);
@@ -3211,7 +3217,7 @@ mod tests {
     /// list bound to it, and names the advertiser.
     #[test]
     fn a_1m_adv_ext_ind_is_followed_to_its_aux() {
-        use crate::signal::ble::aux::AuxOutcome;
+        use crate::signal::ble::aux_ptr::AuxOutcome;
         let m = le_view(&[
             (38, 0x07, adv_ext_ind_on(9, 0), 20_000),
             (9, 0x47, aux_adv_ind(), 20_000 + 60_000),
@@ -3269,7 +3275,7 @@ mod tests {
     /// LE list, and an LE 2M one at 20 Msps is not followed, and why.
     #[test]
     fn a_1m_adv_ext_ind_says_what_became_of_its_aux() {
-        use crate::signal::ble::aux::AuxOutcome;
+        use crate::signal::ble::aux_ptr::AuxOutcome;
         let m = le_view(&[(38, 0x07, adv_ext_ind_on(30, 0), 20_000)]);
         let ext = m.net.ble_packets[0].ext.as_ref().expect("read as extended");
         assert_eq!(ext.aux, AuxOutcome::NotInView);
@@ -3285,7 +3291,7 @@ mod tests {
     /// arrives retuned by 2 MHz, and the promise ends not followed, and why.
     #[test]
     fn a_promise_across_a_retune_is_not_followed() {
-        use crate::signal::ble::aux::AuxOutcome;
+        use crate::signal::ble::aux_ptr::AuxOutcome;
         let v: u32 = 9 | 1 << 6 | 1 << 7 | 20 << 8;
         let payload = vec![
             6,

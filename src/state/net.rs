@@ -1116,7 +1116,7 @@ pub struct ExtInfo {
     pub header: crate::signal::ble::ext::ExtHeader,
     pub role: ExtRole,
     /// What became of its AuxPtr's promise.
-    pub aux: crate::signal::ble::aux::AuxOutcome,
+    pub aux: crate::signal::ble::aux_ptr::AuxOutcome,
 }
 
 /// Which extended PDU a type 7 is: the type code is one for all three, and
@@ -1157,8 +1157,8 @@ pub struct AuxAccounts {
 
 impl AuxAccounts {
     /// Count one ended promise; a pending one is not ended.
-    pub fn count(&mut self, outcome: &crate::signal::ble::aux::AuxOutcome) {
-        use crate::signal::ble::aux::AuxOutcome;
+    pub fn count(&mut self, outcome: &crate::signal::ble::aux_ptr::AuxOutcome) {
+        use crate::signal::ble::aux_ptr::AuxOutcome;
         match outcome {
             AuxOutcome::Pending => {}
             AuxOutcome::Heard { .. } => self.heard += 1,
@@ -1662,7 +1662,7 @@ mod tests {
     /// failed) stays with the types no kind names.
     #[test]
     fn extended_advertising_is_advertising_to_the_filter() {
-        use crate::signal::ble::aux::AuxOutcome;
+        use crate::signal::ble::aux_ptr::AuxOutcome;
         use crate::signal::ble::pdu::PduType;
         let extended = |seq, role| BlePacket {
             ext: Some(ExtInfo {

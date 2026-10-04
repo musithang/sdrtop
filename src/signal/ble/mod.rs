@@ -18,7 +18,7 @@
 pub mod ad;
 pub mod address;
 pub mod assigned;
-pub mod aux;
+pub mod aux_ptr;
 pub mod channel;
 pub mod coded;
 #[cfg(test)]

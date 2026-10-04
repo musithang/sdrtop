@@ -82,8 +82,8 @@ pub fn coded_note(state: &SdrMetrics) -> String {
 }
 
 /// What became of an AuxPtr, one word to a row.
-fn aux_word(aux: crate::signal::ble::aux::AuxOutcome) -> String {
-    use crate::signal::ble::aux::AuxOutcome;
+fn aux_word(aux: crate::signal::ble::aux_ptr::AuxOutcome) -> String {
+    use crate::signal::ble::aux_ptr::AuxOutcome;
     match aux {
         AuxOutcome::Pending => "pending".to_string(),
         AuxOutcome::Heard { .. } => "heard".to_string(),
@@ -488,7 +488,7 @@ mod tests {
     /// An `AUX_ADV_IND` heard in LE Coded S8: AdvA, ADI SID 3, TxPower -10
     /// dBm, the name "Pixel"; five FEC repairs, and the S=8 readings.
     fn coded_packet(seq: u64) -> BlePacket {
-        use crate::signal::ble::aux::AuxOutcome;
+        use crate::signal::ble::aux_ptr::AuxOutcome;
         use crate::signal::ble::coded::Coding;
         use crate::signal::ble::measure::CodedModulation;
         let mut payload = vec![

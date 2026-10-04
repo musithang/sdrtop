@@ -292,7 +292,7 @@ mod tests {
     #[test]
     #[ignore]
     fn aux_listen_bench() {
-        use crate::signal::ble::aux::{promise, AuxPhy};
+        use crate::signal::ble::aux_ptr::{promise, AuxPhy};
         use crate::signal::dsp::testkit::Rng;
         let rate = 20e6;
         let noise = Rng::new(3).noise(1_000_000, 1e-3);

@@ -11,7 +11,7 @@
 
 use std::collections::VecDeque;
 
-use crate::signal::ble::aux::{AuxOutcome, AuxPhy};
+use crate::signal::ble::aux_ptr::{AuxOutcome, AuxPhy};
 use crate::signal::ble::ext::{AdvMode, ExtHeader};
 use crate::state::{BlePacket, ExtInfo, ExtRole};
 

@@ -295,7 +295,7 @@ impl Panel for NetCodedDetailPanel {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::signal::ble::aux::AuxOutcome;
+    use crate::signal::ble::aux_ptr::AuxOutcome;
     use crate::signal::ble::coded::Coding;
     use crate::signal::ble::pdu::PduType;
     use crate::state::fixture::draw;

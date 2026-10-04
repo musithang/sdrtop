@@ -1254,7 +1254,7 @@ mod tests {
     /// LE 1M) whose aux was heard, and that `AUX_ADV_IND` (AdvA, the ADI,
     /// TxPower -10 dBm, the name "Pixel"), as the worker lists them.
     fn extended_pair() -> SdrMetrics {
-        use crate::signal::ble::aux::AuxOutcome;
+        use crate::signal::ble::aux_ptr::AuxOutcome;
         use crate::state::{ExtInfo, ExtRole};
         let v: u32 = 9 | 1 << 6 | 100 << 8;
         let primary = vec![
