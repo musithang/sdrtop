@@ -35,6 +35,9 @@ pub struct SoapyDevice {
     /// The driver's own wire format, kept because `setupStream` wants the name
     /// and `caps` only kept what the name meant.
     native_format: String,
+    /// Whether the driver supplied a usable named gain element. If it did not,
+    /// the synthetic `RF` stage is backed by the whole-chain API instead.
+    named_gain_elements: bool,
     streaming: super::stream::Streaming,
     /// What `caps` declined to use, in words, for the startup log.
     notes: Vec<String>,
@@ -67,6 +70,10 @@ impl SoapyDevice {
                 anyhow::bail!("SoapySDR device {args} cannot be used: {why}");
             }
         };
+        let named_gain_elements = answers
+            .gain_elements
+            .iter()
+            .any(|element| element.is_usable());
         let caps = built.caps;
         let info = unsafe { describe(api, dev, args) };
 
@@ -77,6 +84,7 @@ impl SoapyDevice {
             info,
             args: args.to_string(),
             native_format: answers.native_format,
+            named_gain_elements,
             streaming: super::stream::Streaming::default(),
             // `caps` refuses an element by name rather than silently keeping it.
             // There is no log to say so to yet, so it is carried out to the
@@ -107,6 +115,37 @@ impl SoapyDevice {
                     .map_err(|e| anyhow::anyhow!("{}: {e}", self.args))
             }
         }
+    }
+
+    /// Set stage `index` by the name the driver gave it, or do nothing when the
+    /// device has no such stage.
+    ///
+    /// The shared body of the trait's `set_lna_gain` and `set_vga_gain`, which
+    /// are the two named setters the default `set_stage_gain` maps onto. A
+    /// device with fewer stages than the index asks for is left alone rather
+    /// than sent a name it never reported.
+    ///
+    /// **Not `setGain`.** The whole-chain call lets the driver distribute the
+    /// figure itself, and `SoapyHackRF` does: it splits the value across LNA,
+    /// VGA and AMP and switches the AMP on its own threshold. That is exactly
+    /// the behaviour `hardware::gain::distribute` exists to replace, and it
+    /// makes the AMP - a two-position switch with a key of its own - move while
+    /// the user is turning the LNA. Addressing the element by name keeps the
+    /// knob deterministic and the AMP a switch.
+    fn set_named_stage(&self, index: usize, db: f64) -> anyhow::Result<()> {
+        match self.caps.gain.stages().get(index) {
+            Some(spec) => unsafe { self.api.set_gain_element(self.dev, &spec.name, db) }
+                .map_err(|e| anyhow::anyhow!("{}: {e}", self.args)),
+            None => Ok(()),
+        }
+    }
+
+    /// Set the synthetic fallback stage through SoapySDR's whole-chain API.
+    /// Drivers that expose named elements use the exact element path instead;
+    /// drivers that expose none have no valid name to pass to setGainElement.
+    fn set_whole_gain(&self, db: f64) -> anyhow::Result<()> {
+        unsafe { self.api.set_gain(self.dev, db) }
+            .map_err(|e| anyhow::anyhow!("{}: {e}", self.args))
     }
 }
 
@@ -184,16 +223,35 @@ impl SdrDevice for SoapyDevice {
         Ok(settled)
     }
 
+    /// The front stage, by the name the driver gave it.
+    ///
+    /// **Not `setGain`.** The whole-chain call lets the driver distribute the
+    /// figure itself, and `SoapyHackRF` does: it splits the value across LNA,
+    /// VGA and AMP and switches the AMP on its own threshold. That is exactly
+    /// the behaviour `hardware::gain::distribute` exists to replace, and it
+    /// makes the AMP - a two-position switch with a key of its own - move while
+    /// the user is turning the LNA. Addressing the element by name keeps the
+    /// knob deterministic and the AMP a switch.
     fn set_lna_gain(&self, db: u32) -> anyhow::Result<()> {
         let (clamped, _) = self.caps.gain.clamp_gains(db, 0);
-        unsafe { self.api.set_gain(self.dev, clamped as f64) }
-            .map_err(|e| anyhow::anyhow!("{}: {e}", self.args))
+        if self.named_gain_elements {
+            self.set_named_stage(0, clamped as f64)
+        } else {
+            self.set_whole_gain(clamped as f64)
+        }
     }
 
-    /// There is no second stage. The trait's default would do, but saying it
-    /// here keeps the "why nothing happened" answer next to the key.
-    fn set_vga_gain(&self, _db: u32) -> anyhow::Result<()> {
-        Ok(())
+    /// The second stage, by the name the driver gave it.
+    ///
+    /// A Soapy device that reports a second stage has one to set: the old
+    /// `Ok(())` here was written when every Soapy device was assumed to be a
+    /// single knob, and it made `[` / `]` report success while moving nothing.
+    fn set_vga_gain(&self, db: u32) -> anyhow::Result<()> {
+        if self.named_gain_elements {
+            self.set_named_stage(1, db as f64)
+        } else {
+            self.set_whole_gain(db as f64)
+        }
     }
 
     /// Address the element by the name the driver gave it, with the exact value.
@@ -203,8 +261,12 @@ impl SdrDevice for SoapyDevice {
     /// reverses itself twice across the range, dropping the LNA by 13 dB at one
     /// point while the user is turning the gain **up**.
     fn set_stage_gain(&self, _index: usize, name: &str, db: f64) -> anyhow::Result<()> {
-        unsafe { self.api.set_gain_element(self.dev, name, db) }
-            .map_err(|e| anyhow::anyhow!("{}: {e}", self.args))
+        if self.named_gain_elements {
+            unsafe { self.api.set_gain_element(self.dev, name, db) }
+                .map_err(|e| anyhow::anyhow!("{}: {e}", self.args))
+        } else {
+            self.set_whole_gain(db)
+        }
     }
 
     fn set_amp_enable(&self, on: bool) -> anyhow::Result<()> {
@@ -248,11 +310,74 @@ unsafe fn ask(api: &SoapyApi, dev: *mut SoapySDRDevice) -> caps::DriverAnswers {
                 crate::hardware::StageSpec::ranged(&name, r.minimum, r.maximum, r.step)
             })
             .collect(),
+        gain_element_is_switch: {
+            let names = unsafe { api.gain_elements(dev) };
+            names
+                .iter()
+                .map(|name| {
+                    let r = unsafe { api.gain_element_range(dev, name) }.unwrap_or_default();
+                    // Only when the step is missing and the range is real. A
+                    // step that is present already answers the question, and a
+                    // range that is not a range has nothing to probe.
+                    if r.step > 0.0 || !(r.maximum.is_finite() && r.minimum.is_finite()) {
+                        return None;
+                    }
+                    if r.maximum <= r.minimum {
+                        return None;
+                    }
+                    unsafe { probe_two_value_switch(api, dev, name, r.minimum, r.maximum) }
+                })
+                .collect()
+        },
         has_gain_mode: unsafe { api.has_gain_mode(dev) },
         bandwidth_ranges: unsafe { api.bandwidth_ranges(dev) },
         native_format,
         native_full_scale,
     }
+}
+
+/// Ask the device whether one gain element is a two-position switch.
+///
+/// The question is put by setting the element to a value strictly between its
+/// bounds and reading it back. A switch has nowhere to put that value and snaps
+/// to one of its two ends; a continuous control keeps what it was given. The
+/// original setting is restored before returning, so opening a device does not
+/// move its gain.
+///
+/// This exists because the step does not always survive the transport. A HackRF
+/// through SoapyRemote reports `AMP [0, 14, step 0]`, and the bounds alone
+/// cannot tell that from a continuous `[0, 40]`. Asking is the only honest way
+/// left, and it is the same principle the rest of this backend follows: ask the
+/// device, do not tabulate it.
+///
+/// `None` when the device would not answer, which is a refusal rather than a
+/// `false`: an element we could not ask about is not an element we know to be
+/// continuous.
+///
+/// # Safety
+/// `dev` must be a live handle.
+unsafe fn probe_two_value_switch(
+    api: &SoapyApi,
+    dev: *mut SoapySDRDevice,
+    name: &str,
+    min_db: f64,
+    max_db: f64,
+) -> Option<bool> {
+    let before = unsafe { api.gain_element(dev, name) }?;
+    let middle = min_db + (max_db - min_db) / 2.0;
+    if unsafe { api.set_gain_element(dev, name, middle) }.is_err() {
+        return None;
+    }
+    let after = unsafe { api.gain_element(dev, name) };
+    // Put it back whatever the answer was. A failed restore is not worth
+    // failing the open over, but it is worth not pretending happened.
+    let _ = unsafe { api.set_gain_element(dev, name, before) };
+    let after = after?;
+    // A switch cannot hold the middle value: it lands on an end. A continuous
+    // control keeps it. The tolerance is a hair, because a driver is free to
+    // round the value it was handed.
+    let held_the_middle = (after - middle).abs() < 1e-6;
+    Some(!held_the_middle)
 }
 
 /// Identity for the header and the RF panels.
@@ -307,11 +432,12 @@ fn serial_from(args: &str) -> Option<String> {
 /// native backends and the audio driver's default exclusion are applied by
 /// [`crate::hardware::discovery`], not here: this backend answers for itself
 /// and knows nothing about the others.
-pub fn list() -> Vec<DeviceListing> {
+pub fn list(filter: Option<&str>) -> Vec<DeviceListing> {
     let Some(api) = api::api() else {
         return Vec::new();
     };
-    api.enumerate()
+    let query = args::enumeration_args(filter);
+    api.enumerate(&query)
         .into_iter()
         .enumerate()
         .map(|(i, kwargs)| DeviceListing {
@@ -350,7 +476,7 @@ mod tests {
     /// the mistake this backend's index-free addressing exists to avoid.
     #[test]
     fn every_listing_carries_what_it_takes_to_open_it() {
-        for l in list() {
+        for l in list(None) {
             assert_eq!(l.kind, DeviceKind::Soapy);
             assert!(!l.label.is_empty(), "a blank row in the device selector");
             let args = l
@@ -389,5 +515,32 @@ mod tests {
         // A driver reporting its range backwards must not produce a clamp that
         // panics on an inverted interval.
         assert_eq!(soapy(50, 10).clamp_gains(30, 0).0, 50);
+    }
+
+    /// The named setters address the stage the driver listed at that position.
+    ///
+    /// `set_lna_gain` and `set_vga_gain` are the two named setters the trait's
+    /// default `set_stage_gain` maps onto, and both now go through
+    /// `set_named_stage`. What this pins is the **index-to-name** half: a
+    /// SoapyHackRF lists `LNA` first and `VGA` second, so index 0 must name
+    /// `LNA` and index 1 `VGA`. Getting that backwards would move the wrong
+    /// stage while reporting success, which is the failure the old whole-chain
+    /// `setGain` call hid behind the driver's own distribution.
+    #[test]
+    fn the_named_setters_pick_the_stage_the_driver_listed() {
+        let gm = crate::hardware::GainModel::new(
+            vec![
+                crate::hardware::StageSpec::ranged("LNA", 0.0, 40.0, 8.0),
+                crate::hardware::StageSpec::ranged("VGA", 0.0, 62.0, 2.0),
+            ],
+            "RF",
+            "RF",
+        );
+        let stages = gm.stages();
+        assert_eq!(stages.first().map(|s| s.name.as_str()), Some("LNA"));
+        assert_eq!(stages.get(1).map(|s| s.name.as_str()), Some("VGA"));
+        // A device with fewer stages than the index asks for is left alone
+        // rather than sent a name it never reported.
+        assert!(stages.get(2).is_none());
     }
 }
