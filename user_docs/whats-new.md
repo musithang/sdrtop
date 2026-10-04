@@ -32,7 +32,38 @@ in time.
 
 ---
 
-## 🔗 Checkpoint 25: Following the conversation *(you are here)*
+## 📡 Checkpoint 26: The long way round *(you are here)*
+
+**0.6.4.** BLE has a long-range mode, LE Coded, which sends every bit as
+eight symbols wrapped in an error-correcting code, so it reaches further
+than anything else BLE does. sdrtop could not hear a word of it: the
+receiver for ordinary BLE does not even recognise its preamble. It has a
+section of its own now, **LE Coded**, with a receiver of its own, because
+the first attempt, bolted onto the ordinary one, needed a signal so strong
+that the range was gone before the decoding started.
+
+LE Coded only advertises the extended way, and that turned out to be a
+small treasure hunt. The packet on the advertising channel says almost
+nothing, not even who sent it; it points at a second packet, on another
+channel, a few milliseconds later, and that one has the name. sdrtop
+follows the pointer, listens where and when it was told to, and says what
+became of every one: heard, missed, out of view, or not listened to and
+why. The same following now works for ordinary BLE's extended advertising
+too, so a phone that advertises the modern way finally shows up named in
+the list and counted in the Census. The details are in the
+[NET notes](net.md#long-range--le-coded-1-focus-v).
+
+Following them also turned up three ways the app could say something
+untrue: a retune left old samples behind to be read as new ones, an LE 2M
+connection at 20 Msps was said to have lost samples it never lost, and a
+decoder's own count of what it tried did not add up. All three now say
+what happened. One thing it still says wrong, and says so: LE Coded's SNR
+reads low on the air, and that is the next hunt. The full list is in the
+[changelog](../CHANGELOG.md).
+
+---
+
+## 🔗 Checkpoint 25: Following the conversation
 
 **0.6.3.** Until now sdrtop listened to Bluetooth devices introducing
 themselves. This time it listens to two of them talking. A BLE connection

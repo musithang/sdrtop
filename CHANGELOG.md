@@ -16,6 +16,56 @@ checkpoint instead of by version.
 
 ## [Unreleased]
 
+## [0.6.4] - 2026-10-04
+
+**Long-range BLE, and extended advertising followed.**
+
+LE Coded, BLE's long-range PHY, has a section and a receiver of its own,
+and an extended advertisement is followed from the packet that announces it
+to the auxiliary packet that carries its address and name, on LE Coded and
+on LE 1M alike, with every promise accounted for.
+
+### Added
+
+- `--device soapy=driver=remote,remote=tcp://host:port` asks that
+  SoapyRemote host directly, rather than waiting for it to answer a LAN
+  broadcast. And `cargo run --example soapy_probe -- "driver=..."` asks a
+  SoapySDR device the questions sdrtop asks it, for a report. Contributed by
+  @kajoty.
+- **LE Coded, a NET section of its own.** The long-range PHY, S=8 and S=2,
+  through its own receiver: a whole-preamble detector, symbol means and a
+  soft-decision Viterbi, with the symbols the FEC overruled counted beside
+  the bits. Its packets get a list and a detail: SNR, the initial carrier,
+  and on S=8 the Δf1 and drift the LE Coded tests define (S=2 has none, and
+  says so). An `ADV_EXT_IND`'s extended header is read (mode, SID and DID,
+  TxPower), and its AuxPtr is followed to the auxiliary packet it promises
+  when that channel is in view; every promise ends heard, missed, out of
+  view or with its samples not held, and is counted as such. The header
+  names the channel (`● CODED 37 adv`), the menu has its live line, and the
+  decode health counts its funnel and its AuxPtrs once it has run. Two
+  known limits: at 20 Msps on a small machine the receiver costs more than
+  real time (the header's `decode` says so, and promises it could not keep
+  say "its samples were not held"), and on the air its SNR reads low: 13 to
+  31 dB on a phone whose packets sit near 40 dB over the noise. That one is
+  being chased.
+- **LE 1M extended advertising, followed.** On the LE views an
+  `ADV_EXT_IND` is read rather than shown as "(not decoded)", and its
+  AuxPtr is followed as LE Coded's is: the auxiliary packet joins the list
+  named and addressed, and the detail has an EXTENDED section (the event
+  and set, TxPower, the packet that pointed at it, what became of its own
+  AuxPtr). The ADV filter counts extended advertising as advertising, and
+  the Census counts an extended advertiser from its followed auxiliary
+  packet, the one that carries its address and name.
+
+### Changed
+
+- **The NET export writes six files.** `net-coded-*.csv` is the LE Coded
+  list in `net-ble`'s columns, with a note saying its `df1` and carrier
+  columns are the LE Coded tests', S=8 only. Both files gain three columns
+  at the end, `fec_repairs`, `sid` and `aux`, blank where they do not apply
+  (a legacy packet has no set, an uncoded one no FEC); a script that reads
+  the BLE file by column name is unaffected.
+
 ### Fixed
 
 - **The AMP is a switch through SoapyRemote too.** SoapyRemote can drop a
@@ -37,41 +87,7 @@ checkpoint instead of by version.
 - The BLE packet detail's reason for "not measured" is wrapped, not cut off
   at the panel's edge.
 
-### Added
-
-- `--device soapy=driver=remote,remote=tcp://host:port` asks that
-  SoapyRemote host directly, rather than waiting for it to answer a LAN
-  broadcast. And `cargo run --example soapy_probe -- "driver=..."` asks a
-  SoapySDR device the questions sdrtop asks it, for a report. Contributed by
-  @kajoty.
-- **LE Coded, a NET section of its own.** The long-range PHY, S=8 and S=2,
-  through its own receiver: a whole-preamble detector, symbol means and a
-  soft-decision Viterbi, with the symbols the FEC overruled counted beside
-  the bits. Its packets get a list and a detail: SNR, the initial carrier,
-  and on S=8 the Δf1 and drift the LE Coded tests define (S=2 has none, and
-  says so). An `ADV_EXT_IND`'s extended header is read (mode, SID and DID,
-  TxPower), and its AuxPtr is followed to the auxiliary packet it promises
-  when that channel is in view; every promise ends heard, missed, out of
-  view or with its samples not held, and is counted as such. The header
-  names the channel (`● CODED 37 adv`), the menu has its live line, and the
-  decode health counts its funnel and its AuxPtrs once it has run.
-- **LE 1M extended advertising, followed.** On the LE views an
-  `ADV_EXT_IND` is read rather than shown as "(not decoded)", and its
-  AuxPtr is followed as LE Coded's is: the auxiliary packet joins the list
-  named and addressed, and the detail has an EXTENDED section (the event
-  and set, TxPower, the packet that pointed at it, what became of its own
-  AuxPtr). The ADV filter counts extended advertising as advertising, and
-  the Census counts an extended advertiser from its followed auxiliary
-  packet, the one that carries its address and name.
-
-### Changed
-
-- **The NET export writes six files.** `net-coded-*.csv` is the LE Coded
-  list in `net-ble`'s columns, with a note saying its `df1` and carrier
-  columns are the LE Coded tests', S=8 only. Both files gain three columns
-  at the end, `fec_repairs`, `sid` and `aux`, blank where they do not apply
-  (a legacy packet has no set, an uncoded one no FEC); a script that reads
-  the BLE file by column name is unaffected.
+Config: unchanged; every config loads as before.
 
 ## [0.6.3] - 2026-10-03
 
@@ -960,7 +976,8 @@ sdrtop stopped being a one-radio program.
   image rejection ratio, wavelength and antenna metrics.
 - Config file with atomic save on quit, and the CLI flags that override it.
 
-[Unreleased]: https://github.com/musithang/sdrtop/compare/v0.6.3...HEAD
+[Unreleased]: https://github.com/musithang/sdrtop/compare/v0.6.4...HEAD
+[0.6.4]: https://github.com/musithang/sdrtop/compare/v0.6.3...v0.6.4
 [0.6.3]: https://github.com/musithang/sdrtop/compare/v0.6.2...v0.6.3
 [0.6.2]: https://github.com/musithang/sdrtop/compare/v0.6.1...v0.6.2
 [0.6.1]: https://github.com/musithang/sdrtop/compare/v0.6.0...v0.6.1
