@@ -23,6 +23,25 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # A merge resolved by hand can leave one of git's conflict markers in a
+      # file, and nothing else here reads every file: a marker in CHANGELOG.md
+      # compiles, tests and lints clean. Any tracked line that is a marker
+      # fails the run. A Markdown heading underlined with exactly seven `=`
+      # would match too; underline with another length.
+      #
+      # `git grep` exits 0 on a match, 1 on none, and higher when it could not
+      # search at all, which must fail as well: a check that passes when it
+      # never ran is no check.
+      - name: No merge conflict markers
+        run: |
+          status=0
+          git grep -n -E '^(<<<<<<<|>>>>>>>)( |$)|^=======$' || status=$?
+          if [ "$status" -eq 0 ]; then
+            echo "::error::a merge conflict marker was committed (the lines above)"
+            exit 1
+          fi
+          [ "$status" -eq 1 ]
+
       # packaging/install.sh is the one-liner in the README, so a syntax error
       # in it breaks installation for everyone while every Rust check stays
       # green.

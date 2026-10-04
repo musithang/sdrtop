@@ -50,9 +50,10 @@ impl ChannelFilter {
 }
 
 /// The filters the sensitivity bench weighs, narrowest first, to LE 1M's
-/// (-6 dB at 1.5 MHz, 0.5 MHz transition) as the reference. A narrower passband needs a narrower transition to keep the
-/// stopband where the neighbours are, and that costs taps: the bench's load
-/// column says how many.
+/// (-6 dB at 1.5 MHz, 0.5 MHz transition) as the reference. A narrower
+/// passband needs a narrower transition to keep the stopband where the
+/// neighbours are, and that costs taps: the bench's load column says how
+/// many.
 #[allow(dead_code)]
 pub const CANDIDATES: [ChannelFilter; 7] = [
     ChannelFilter {

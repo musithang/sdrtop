@@ -130,6 +130,9 @@ And check these by hand:
 - [ ] Commits look like the rest of the history: `type(scope): what it does`,
       lowercase, for example
       `fix(soapy): keep the remote address in the open markup`. The body says why.
+- [ ] After bringing `main` into your branch, no conflict marker is left
+      behind: `git grep -n -E '^(<<<<<<<|>>>>>>>)( |$)|^=======$'` prints
+      nothing. CI fails on one, wherever it is.
 - [ ] One topic per pull request. A big change goes in as a few smaller ones,
       each working on its own.
 - [ ] The description says what changed, why, and how you tested it.
