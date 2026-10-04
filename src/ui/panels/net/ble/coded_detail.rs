@@ -18,9 +18,8 @@ use ratatui::{
     Frame,
 };
 
-use crate::signal::ble::aux::{AuxOutcome, AuxPhy};
 use crate::signal::ble::Phy;
-use crate::state::{BlePacket, ExtInfo, ExtRole, SdrMetrics};
+use crate::state::{BlePacket, ExtInfo, SdrMetrics};
 use crate::ui::panel::{FeedSpan, Panel, PanelChrome, Staleness, Tag};
 use crate::ui::widgets::reading::Reading;
 
@@ -60,41 +59,6 @@ fn quiet(text: &str, theme: &crate::Theme) -> Vec<Span<'static>> {
     )]
 }
 
-/// What became of an AuxPtr, in words. A heard packet still in the list
-/// names the scheme it came in, which the AuxPtr itself does not.
-fn aux_text(ext: &ExtInfo, state: &SdrMetrics) -> String {
-    let promised = ext.header.aux_ptr.map(|a| {
-        let phy = match a.phy {
-            Some(AuxPhy::OneM) => "LE 1M",
-            Some(AuxPhy::TwoM) => "LE 2M",
-            Some(AuxPhy::Coded) => "LE Coded",
-            None => "a reserved PHY",
-        };
-        (a.channel, phy)
-    });
-    let (ch, phy) = promised.unwrap_or((0, ""));
-    match ext.aux {
-        AuxOutcome::Heard { seq, after_us } => {
-            let phy = state
-                .net
-                .coded_packets
-                .iter()
-                .find(|q| q.seq == seq)
-                .map_or(phy, |q| q.phy.label());
-            format!(
-                "aux on ch {ch}, {phy}, heard {:.2} ms later",
-                after_us / 1000.0
-            )
-        }
-        AuxOutcome::NotInView => format!("aux on ch {ch}: not in the radio's view"),
-        AuxOutcome::Missed => format!("aux on ch {ch}: listened, not heard"),
-        AuxOutcome::FeedLost => format!("aux on ch {ch}: its samples were not held"),
-        AuxOutcome::Pending => format!("aux on ch {ch}: waiting for its window"),
-        AuxOutcome::NonePromised => "no auxiliary packet promised".to_string(),
-        AuxOutcome::Refused(why) => format!("aux not followed: {why}"),
-    }
-}
-
 /// The extended header's lines: the event and set, the advertiser and its
 /// name, its power, where it came from, and what became of its own AuxPtr.
 fn ext_lines(
@@ -103,18 +67,12 @@ fn ext_lines(
     state: &SdrMetrics,
     theme: &crate::Theme,
 ) -> Vec<Line<'static>> {
-    use crate::signal::ble::ext::AdvMode;
     let mut out = Vec::new();
-    let mode = match ext.header.mode {
-        Some(AdvMode::NonConnectableNonScannable) => "non-connectable, non-scannable",
-        Some(AdvMode::Connectable) => "connectable",
-        Some(AdvMode::Scannable) => "scannable",
-        None => "a reserved AdvMode",
-    };
-    let set = ext.header.adi.map_or(String::new(), |a| {
-        format!(" · SID {} · DID 0x{:03x}", a.sid, a.did)
-    });
-    out.push(row("event", plain(format!("{mode}{set}"), theme), theme));
+    out.push(row(
+        "event",
+        plain(super::ext_text::event(&ext.header), theme),
+        theme,
+    ));
     if let Some(a) = ext.header.adv_a {
         let mut who = plain(state.net.show_address(a, p.tx_add_random, None), theme);
         let structures = crate::signal::ble::ad::parse(&ext.header.adv_data);
@@ -129,23 +87,14 @@ fn ext_lines(
     if let Some(dbm) = ext.header.tx_power_dbm {
         out.push(row("TxPower", plain(format!("{dbm} dBm"), theme), theme));
     }
-    let superior = match ext.role {
-        ExtRole::AdvExt => None,
-        ExtRole::AuxAdv { superior_seq } => Some(superior_seq),
-        ExtRole::AuxChain { superior_seq } => Some(Some(superior_seq)),
-    };
-    if let Some(seq) = superior {
-        let said = match seq.and_then(|s| state.net.coded_packets.iter().find(|q| q.seq == s)) {
-            Some(q) => {
-                let name = q.ext.as_ref().map_or("packet", |e| e.role.label());
-                format!("from the {name} on ch {}", q.channel)
-            }
-            None if seq.is_some() => "from a packet no longer in the list".to_string(),
-            None => "heard in another advertising set's window".to_string(),
-        };
+    if let Some(said) = super::ext_text::pointed(ext, &state.net.coded_packets) {
         out.push(row("pointed", quiet(&said, theme), theme));
     }
-    out.push(row("aux", plain(aux_text(ext, state), theme), theme));
+    out.push(row(
+        "aux",
+        plain(super::ext_text::aux(ext, &state.net.coded_packets), theme),
+        theme,
+    ));
     out
 }
 

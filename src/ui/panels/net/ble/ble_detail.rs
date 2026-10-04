@@ -292,10 +292,32 @@ fn note(text: &str, theme: &crate::Theme) -> Line<'static> {
     ))
 }
 
+/// [`note`], wrapped to the panel: a reason cut short reads as another one.
+fn notes(text: &str, iw: usize, theme: &crate::Theme) -> Vec<Line<'static>> {
+    crate::ui::chrome::wrap(text, iw.saturating_sub(1).max(1), 3)
+        .iter()
+        .map(|l| note(l, theme))
+        .collect()
+}
+
 /// `TxAdd` / `RxAdd` as the kind they name: the advertiser's kind from its
 /// address where it has one, the bit's plain meaning otherwise.
-fn address_kinds(p: &BlePacket) -> String {
+fn address_kinds(p: &BlePacket) -> Option<String> {
     use crate::signal::ble::address::kind;
+    // An extended PDU's TxAdd and RxAdd name the AdvA and TargetA its
+    // extended header carries, and nothing where it carries none (2.3.4).
+    if let Some(e) = &p.ext {
+        let tx = e
+            .header
+            .adv_a
+            .map(|a| format!("Tx {}", kind(a, p.tx_add_random).label()));
+        let rx = e
+            .header
+            .target_a
+            .map(|_| format!("Rx {}", if p.rx_add_random { "random" } else { "public" }));
+        let both: Vec<String> = tx.into_iter().chain(rx).collect();
+        return (!both.is_empty()).then(|| both.join(" \u{00b7} "));
+    }
     let tx = match p.adv_addr {
         Some(a) => kind(a, p.tx_add_random).label().to_string(),
         None => if p.tx_add_random { "random" } else { "public" }.to_string(),
@@ -307,9 +329,9 @@ fn address_kinds(p: &BlePacket) -> String {
         p.pdu_type,
         PduType::AdvDirectInd | PduType::ScanReq | PduType::ConnectInd
     ) {
-        format!("Tx {tx} \u{00b7} Rx {rx}")
+        Some(format!("Tx {tx} \u{00b7} Rx {rx}"))
     } else {
-        format!("Tx {tx}")
+        Some(format!("Tx {tx}"))
     }
 }
 
@@ -370,15 +392,37 @@ fn advertised_lines(
 ) -> Vec<Line<'static>> {
     use crate::signal::ble::ad::{self, Ad, Structure};
     let mut out = vec![crate::ui::chrome::section("advertised", "", iw, theme)];
-    if p.pdu_type == PduType::Other(0x07) {
-        out.push(note(
-            "extended advertising: its payload is not decoded",
-            theme,
-        ));
-        return out;
-    }
-    let Some(data) = ad::adv_data(p.pdu_type, &p.payload) else {
-        return Vec::new();
+    // An extended PDU read as one carries its advertising data after its
+    // extended header; one not read as one (its CRC failed, or it was heard
+    // on a data channel without the packet that points at it) says so.
+    let data = match &p.ext {
+        Some(e) if e.header.adv_data.is_empty() => {
+            out.extend(notes(
+                match e.role {
+                    crate::state::ExtRole::AdvExt => {
+                        "none in this packet: an ADV_EXT_IND carries it in its auxiliary packet"
+                    }
+                    _ => "none in this packet",
+                },
+                iw,
+                theme,
+            ));
+            return out;
+        }
+        Some(e) => e.header.adv_data.as_slice(),
+        None if p.pdu_type == PduType::Other(0x07) && p.crc_ok => {
+            out.extend(notes(
+                "extended advertising, heard without the packet that points at it: not read",
+                iw,
+                theme,
+            ));
+            return out;
+        }
+        None => match ad::adv_data(p.pdu_type, &p.payload) {
+            Some(data) => data,
+            None if p.pdu_type == PduType::Other(0x07) => &[],
+            None => return Vec::new(),
+        },
     };
     if !p.crc_ok {
         out.push(Line::from(Span::styled(
@@ -467,7 +511,37 @@ fn advertised_lines(
     out
 }
 
-/// The PACKET, ADVERTISED and PHYSICS sections.
+/// The EXTENDED section, for a packet read as an extended PDU: its event
+/// and set, its power, the packet that pointed at it, and what became of
+/// its own AuxPtr, worded as the LE Coded detail words them.
+fn extended_lines(
+    p: &BlePacket,
+    state: &SdrMetrics,
+    iw: usize,
+    theme: &crate::Theme,
+) -> Vec<Line<'static>> {
+    let Some(ext) = &p.ext else {
+        return Vec::new();
+    };
+    let list = &state.net.ble_packets;
+    let mut out = vec![crate::ui::chrome::section("extended", "", iw, theme)];
+    out.extend(wrapped(
+        "event",
+        &super::ext_text::event(&ext.header),
+        iw,
+        theme,
+    ));
+    if let Some(dbm) = ext.header.tx_power_dbm {
+        out.push(field_line("TxPower", format!("{dbm} dBm"), theme));
+    }
+    if let Some(said) = super::ext_text::pointed(ext, list) {
+        out.extend(wrapped("pointed", &said, iw, theme));
+    }
+    out.extend(wrapped("aux", &super::ext_text::aux(ext, list), iw, theme));
+    out
+}
+
+/// The PACKET, EXTENDED, ADVERTISED and PHYSICS sections.
 fn header_lines(
     p: &BlePacket,
     state: &SdrMetrics,
@@ -484,7 +558,11 @@ fn header_lines(
             "type",
             format!(
                 "{} \u{00b7} ch {} \u{00b7} {} octets \u{00b7} {}",
-                p.pdu_type.label(),
+                // An extended PDU's type code is one for three; its role
+                // says which.
+                p.ext
+                    .as_ref()
+                    .map_or(p.pdu_type.label(), |e| e.role.label().to_string()),
                 p.channel,
                 p.length,
                 p.phy.label()
@@ -507,10 +585,13 @@ fn header_lines(
             theme,
         ));
     }
-    out.push(field_line("kinds", address_kinds(p), theme));
+    if let Some(kinds) = address_kinds(p) {
+        out.push(field_line("kinds", kinds, theme));
+    }
     if let Some(text) = ch_sel(p) {
         out.push(field_line("ChSel", text.to_string(), theme));
     }
+    out.extend(extended_lines(p, state, iw, theme));
     out.extend(advertised_lines(p, &state.net, iw, theme));
     out.extend(connection_lines(p, state, iw, theme));
 
@@ -750,8 +831,9 @@ fn modulation_lines(p: &BlePacket, iw: usize, theme: &crate::Theme) -> Vec<Line<
             " not measured".to_string(),
             Style::default().fg(theme.stale),
         )));
-        out.push(note(
+        out.extend(notes(
             "packet too short, too short a run of either kind, or its samples no longer held",
+            iw,
             theme,
         ));
         return out;
@@ -970,6 +1052,19 @@ mod tests {
     use crate::state::BlePacket;
     use std::time::Instant;
 
+    /// The panel's text as one line, frame and wrapping gone: for sentences
+    /// the panel wraps wherever its width falls.
+    fn flat(lines: &[String]) -> String {
+        lines
+            .iter()
+            .map(|l| l.trim_matches(|c: char| c == '│' || c.is_whitespace()))
+            .collect::<Vec<_>>()
+            .join(" ")
+            .split_whitespace()
+            .collect::<Vec<_>>()
+            .join(" ")
+    }
+
     /// `m` with its newest packet selected, where nothing was: the packet
     /// view these tests are about, which since 5.7 needs a selection (with
     /// none the detail is the frame error curve).
@@ -1057,9 +1152,12 @@ mod tests {
     fn a_packet_with_nothing_measured_refuses_rather_than_inventing_rows() {
         let mut m = SdrMetrics::fixture().streaming();
         m.net.ble_packets.push_back(packet(None));
-        let out = draw(NetBleDetailPanel, 40, 24, &sel(&m)).join("\n");
+        let drawn = draw(NetBleDetailPanel, 40, 30, &sel(&m));
+        let out = drawn.join("\n");
         assert!(out.contains("not measured"), "{out}");
         assert!(!out.contains("Mod index"), "{out}");
+        // Why, whole: a reason cut short reads as a different reason.
+        assert!(flat(&drawn).contains("no longer held"), "{out}");
     }
 
     /// The nominal deviation's own modulation index draws inside its band,
@@ -1152,6 +1250,111 @@ mod tests {
         m
     }
 
+    /// An LE 1M `ADV_EXT_IND` on 38 (ADI SID 3, DID 0x123, AuxPtr to ch 9 on
+    /// LE 1M) whose aux was heard, and that `AUX_ADV_IND` (AdvA, the ADI,
+    /// TxPower -10 dBm, the name "Pixel"), as the worker lists them.
+    fn extended_pair() -> SdrMetrics {
+        use crate::signal::ble::aux::AuxOutcome;
+        use crate::state::{ExtInfo, ExtRole};
+        let v: u32 = 9 | 1 << 6 | 100 << 8;
+        let primary = vec![
+            6,
+            0b0001_1000,
+            0x23,
+            0x31,
+            v as u8,
+            (v >> 8) as u8,
+            (v >> 16) as u8,
+        ];
+        let mut aux = vec![
+            10,
+            0b0100_1001,
+            0x11,
+            0x22,
+            0x33,
+            0x44,
+            0x55,
+            0x66,
+            0x23,
+            0x31,
+            0xF6,
+        ];
+        aux.extend([6, 0x09, b'P', b'i', b'x', b'e', b'l']);
+        let mk = |seq, channel, payload: Vec<u8>, role, outcome| {
+            let header = crate::signal::ble::ext::parse(&payload).unwrap();
+            let mut p = packet(None);
+            p.seq = seq;
+            p.channel = channel;
+            p.pdu_type = PduType::Other(0x07);
+            p.length = payload.len() as u8;
+            p.adv_addr = header.adv_a;
+            p.payload = payload;
+            p.ext = Some(ExtInfo {
+                header,
+                role,
+                aux: outcome,
+            });
+            p
+        };
+        let mut m = SdrMetrics::fixture().streaming();
+        m.net.ble_packets.push_front(mk(
+            1,
+            38,
+            primary,
+            ExtRole::AdvExt,
+            AuxOutcome::Heard {
+                seq: 2,
+                after_us: 3001.0,
+            },
+        ));
+        m.net.ble_packets.push_front(mk(
+            2,
+            9,
+            aux,
+            ExtRole::AuxAdv {
+                superior_seq: Some(1),
+            },
+            AuxOutcome::NonePromised,
+        ));
+        m.net.ble_heard = 2;
+        m
+    }
+
+    /// **An extended packet is read, not "not decoded".** The `ADV_EXT_IND`
+    /// names itself, its set and what became of its AuxPtr, and claims no
+    /// address kind or advertising data it does not carry; the
+    /// `AUX_ADV_IND` names the packet that pointed at it, its power, and
+    /// its advertising data read from the extended header.
+    #[test]
+    fn an_extended_packet_is_read_on_the_le_detail() {
+        let mut m = extended_pair();
+        m.net.ble_view.selection.selected = Some(1);
+        let out = draw(NetBleDetailPanel, 70, 40, &m).join("\n");
+        assert!(out.contains("ADV_EXT_IND"), "{out}");
+        assert!(out.contains("SID 3"), "{out}");
+        assert!(
+            out.contains("aux on ch 9, LE 1M, heard 3.00 ms later"),
+            "{out}"
+        );
+        assert!(!out.contains("not decoded"), "{out}");
+        // No AdvA: no address kind to name. Its data is in its aux.
+        assert!(!out.contains("Tx public"), "{out}");
+        assert!(!out.contains("nothing beyond the address"), "{out}");
+        let drawn = draw(NetBleDetailPanel, 70, 40, &m);
+        assert!(
+            flat(&drawn).contains("carries it in its auxiliary packet"),
+            "{out}"
+        );
+
+        m.net.ble_view.selection.selected = Some(2);
+        let out = draw(NetBleDetailPanel, 70, 40, &m).join("\n");
+        assert!(out.contains("AUX_ADV_IND"), "{out}");
+        assert!(out.contains("from the ADV_EXT_IND on ch 38"), "{out}");
+        assert!(out.contains("-10 dBm"), "{out}");
+        assert!(out.contains("Pixel"), "{out}");
+        assert!(!out.contains("not decoded"), "{out}");
+    }
+
     /// **The detail is about the packet the mark is on**, not the latest:
     /// with the older one selected it reads that one's channel, SNR and
     /// modulation, and says it is the selected one.
@@ -1198,7 +1401,7 @@ mod tests {
         let mut adv = packet(None);
         adv.ch_sel = true;
         assert_eq!(ch_sel(&adv), Some("supports CSA #2"));
-        assert_eq!(address_kinds(&adv), "Tx public");
+        assert_eq!(address_kinds(&adv).as_deref(), Some("Tx public"));
 
         let mut scan_req = packet(None);
         scan_req.pdu_type = PduType::ScanReq;
@@ -1206,12 +1409,15 @@ mod tests {
         scan_req.rx_add_random = true;
         scan_req.ch_sel = true;
         assert_eq!(ch_sel(&scan_req), None, "reserved on SCAN_REQ");
-        assert_eq!(address_kinds(&scan_req), "Tx public \u{00b7} Rx random");
+        assert_eq!(
+            address_kinds(&scan_req).as_deref(),
+            Some("Tx public \u{00b7} Rx random")
+        );
 
         let mut rpa = packet(None);
         rpa.adv_addr = Some([0x4a, 1, 2, 3, 4, 5]);
         rpa.tx_add_random = true;
-        assert_eq!(address_kinds(&rpa), "Tx RPA");
+        assert_eq!(address_kinds(&rpa).as_deref(), Some("Tx RPA"));
     }
 
     /// The transmitter's offset in kHz and ppm, through the one conversion

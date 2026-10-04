@@ -400,11 +400,23 @@ rather than pretend to have listened.
 In SURVEY the line under the list gives each advertising channel's packet
 count and CRC pass rate; in LOCK, the one channel's.
 
+**Extended advertising** is followed here as it is on
+[LE Coded](#long-range--le-coded-1-focus-v): an `ADV_EXT_IND` on the
+advertising channel points at an `AUX_ADV_IND` on a data channel, and when
+that channel is in view the auxiliary packet joins the list, named and
+addressed, under its own channel. One sent on LE 2M is not followed at
+20 Msps, and says why: there is no LE 2M receiver at that rate. A retune
+(the survey's, or yours) drops whatever was waiting for its window, and
+says that too.
+
 ### Packet detail
 
 The selected packet, spelled out:
 
 - **Packet**: type, channel, length, PHY, CRC, addresses, the ChSel bit.
+- **Extended**, for an extended advertising packet: the event and set it
+  belongs to, its TxPower, the packet that pointed at it, and what became
+  of its own AuxPtr, worded as on LE Coded.
 - **Advertised**: every structure it carried: flags, name, TX power, service
   UUIDs, service data, manufacturer data with the company named, and
   anything malformed at the octet where it stopped making sense.

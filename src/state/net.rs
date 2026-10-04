@@ -553,11 +553,7 @@ impl NetState {
         source
             .iter()
             .filter(|p| self.ble_view.filter.is_none_or(|a| p.adv_addr == Some(a)))
-            .filter(|p| {
-                self.ble_view
-                    .kind
-                    .is_none_or(|k| PduKind::of(p.pdu_type) == Some(k))
-            })
+            .filter(|p| self.ble_view.kind.is_none_or(|k| p.kind() == Some(k)))
             .collect()
     }
 
@@ -573,7 +569,7 @@ impl NetState {
         let mut kept = [0usize; 4];
         let mut oldest = [None; 4];
         for p in &self.ble_packets {
-            let slot = kind_slot(p.pdu_type);
+            let slot = kind_slot(p.kind());
             kept[slot] += 1;
             oldest[slot] = Some(p.seen);
         }
@@ -592,7 +588,7 @@ impl NetState {
     pub fn trim_ble_packets(&mut self) {
         let mut kept = [0usize; 4];
         self.ble_packets.retain(|p| {
-            let slot = kind_slot(p.pdu_type);
+            let slot = kind_slot(p.kind());
             kept[slot] += 1;
             kept[slot] <= BLE_PACKET_LIMIT
         });
@@ -1083,6 +1079,18 @@ pub struct BlePacket {
     pub ext: Option<ExtInfo>,
 }
 
+impl BlePacket {
+    /// The kind the list's filter and its ring count it as: an extended PDU
+    /// read as one is advertising (its roles are all advertising PDUs), and
+    /// every other packet is its type's kind.
+    pub fn kind(&self) -> Option<PduKind> {
+        match self.ext {
+            Some(_) => Some(PduKind::Advertising),
+            None => PduKind::of(self.pdu_type),
+        }
+    }
+}
+
 /// An extended advertising PDU, read (Core 5.4 Vol 6 Part B 2.3.4).
 #[derive(Clone, Debug, PartialEq)]
 pub struct ExtInfo {
@@ -1183,7 +1191,8 @@ pub enum PduKind {
     Connect,
     /// SCAN_REQ and SCAN_RSP.
     Scan,
-    /// ADV_IND, ADV_DIRECT_IND, ADV_NONCONN_IND and ADV_SCAN_IND.
+    /// ADV_IND, ADV_DIRECT_IND, ADV_NONCONN_IND and ADV_SCAN_IND, and the
+    /// extended advertising PDUs read as such (`BlePacket::kind`).
     Advertising,
 }
 
@@ -1223,10 +1232,10 @@ impl PduKind {
     }
 }
 
-/// Where a PDU type is counted against [`BLE_PACKET_LIMIT`]: one slot per
+/// Where a packet's kind is counted against [`BLE_PACKET_LIMIT`]: one slot per
 /// [`PduKind`], and one for the types none of them names.
-fn kind_slot(pdu_type: crate::signal::ble::pdu::PduType) -> usize {
-    match PduKind::of(pdu_type) {
+fn kind_slot(kind: Option<PduKind>) -> usize {
+    match kind {
         Some(PduKind::Connect) => 0,
         Some(PduKind::Scan) => 1,
         Some(PduKind::Advertising) => 2,
@@ -1626,6 +1635,38 @@ mod tests {
         assert!(net.ble_packets.iter().any(|p| p.seq == 2));
         assert!(!net.ble_packets.iter().any(|p| p.seq == 102));
         assert!(net.ble_packets.iter().any(|p| p.seq == 103));
+    }
+
+    /// **Extended advertising is advertising.** An `ADV_EXT_IND` and its
+    /// `AUX_ADV_IND`, read as extended PDUs, are shown by the ADV filter and
+    /// counted with the advertising; a type 7 not read as one (its CRC
+    /// failed) stays with the types no kind names.
+    #[test]
+    fn extended_advertising_is_advertising_to_the_filter() {
+        use crate::signal::ble::aux::AuxOutcome;
+        use crate::signal::ble::pdu::PduType;
+        let extended = |seq, role| BlePacket {
+            ext: Some(ExtInfo {
+                header: crate::signal::ble::ext::parse(&[1, 0]).unwrap(),
+                role,
+                aux: AuxOutcome::NonePromised,
+            }),
+            ..ble_packet(seq, PduType::Other(0x07))
+        };
+        let mut net = NetState::default();
+        net.ble_packets.push_front(extended(1, ExtRole::AdvExt));
+        net.ble_packets.push_front(extended(
+            2,
+            ExtRole::AuxAdv {
+                superior_seq: Some(1),
+            },
+        ));
+        net.ble_packets
+            .push_front(ble_packet(3, PduType::Other(0x07)));
+        net.ble_view.kind = Some(PduKind::Advertising);
+        let shown: Vec<u64> = net.ble_shown().iter().map(|p| p.seq).collect();
+        assert_eq!(shown, [2, 1]);
+        assert_eq!(net.ble_packets[0].kind(), None);
     }
 
     fn connect_ind(aa: u32) -> crate::signal::ble::connect::ConnectIndData {

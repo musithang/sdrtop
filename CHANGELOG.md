@@ -25,6 +25,17 @@ checkpoint instead of by version.
   gave it, where they used to report success and move nothing, and the LNA
   no longer switches the AMP on through the whole-chain gain. Contributed by
   @kajoty.
+- **A followed connection that moves to LE 2M at 20 Msps says "no
+  receiver".** There is no LE 2M receiver at that rate (it wants a multiple
+  of 8 Msps), and its events were counted as feed lost, as if samples had
+  gone missing; nothing had.
+- **A retune no longer leaves the held samples behind.** The stream's
+  positions run on through a retune, so a connection's event or a
+  measurement just after one was read from samples mixed for the old
+  centre, and could say "missed". They are dropped at the retune now, and
+  what was waiting on them says so.
+- The BLE packet detail's reason for "not measured" is wrapped, not cut off
+  at the panel's edge.
 
 ### Added
 
@@ -44,14 +55,21 @@ checkpoint instead of by version.
   view or with its samples not held, and is counted as such. The header
   names the channel (`● CODED 37 adv`), the menu has its live line, and the
   decode health counts its funnel and its AuxPtrs once it has run.
+- **LE 1M extended advertising, followed.** On the LE views an
+  `ADV_EXT_IND` is read rather than shown as "(not decoded)", and its
+  AuxPtr is followed as LE Coded's is: the auxiliary packet joins the list
+  named and addressed, and the detail has an EXTENDED section (the event
+  and set, TxPower, the packet that pointed at it, what became of its own
+  AuxPtr). The ADV filter counts extended advertising as advertising.
 
 ### Changed
 
 - **The NET export writes six files.** `net-coded-*.csv` is the LE Coded
   list in `net-ble`'s columns, with a note saying its `df1` and carrier
   columns are the LE Coded tests', S=8 only. Both files gain three columns
-  at the end, `fec_repairs`, `sid` and `aux`, blank on an LE 1M packet; a
-  script that reads the BLE file by column name is unaffected.
+  at the end, `fec_repairs`, `sid` and `aux`, blank where they do not apply
+  (a legacy packet has no set, an uncoded one no FEC); a script that reads
+  the BLE file by column name is unaffected.
 
 ## [0.6.3] - 2026-10-03
 

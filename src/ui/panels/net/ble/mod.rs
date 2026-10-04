@@ -10,3 +10,4 @@ pub mod ble_connection;
 pub mod ble_detail;
 pub mod ble_packets;
 pub mod coded_detail;
+mod ext_text;
