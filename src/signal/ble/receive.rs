@@ -430,13 +430,19 @@ fn margin_bits(len: usize) -> Vec<bool> {
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum Link {
     Advertising,
-    Data { access_address: u32, crc_init: u32 },
+    /// Secondary advertising, where an AuxPtr points: the advertising
+    /// access address, and an extended PDU's 255 octets (2.3.4).
+    Auxiliary,
+    Data {
+        access_address: u32,
+        crc_init: u32,
+    },
 }
 
 impl Link {
     fn access_address(self) -> u32 {
         match self {
-            Link::Advertising => ADVERTISING_ACCESS_ADDRESS,
+            Link::Advertising | Link::Auxiliary => ADVERTISING_ACCESS_ADDRESS,
             Link::Data { access_address, .. } => access_address,
         }
     }
@@ -445,6 +451,7 @@ impl Link {
     fn longest_pdu_bits(self) -> usize {
         match self {
             Link::Advertising => MAX_PDU_BYTES * 8,
+            Link::Auxiliary => (2 + 255 + 3) * 8,
             // Header, CTEInfo and 255 octets of payload and MIC (2.4).
             Link::Data { .. } => data::HEADER_BITS + 8 + 255 * 8 + data::CRC_BITS,
         }
@@ -1210,7 +1217,7 @@ impl Receiver {
         let (mut header, _) = super::sync::slice_at(inst, sps, pdu::HEADER_BITS, threshold, phase);
         whiten(&mut header, self.channel);
         let wanted = match self.link {
-            Link::Advertising => pdu::used_bits(pdu::length(&header)?),
+            Link::Advertising | Link::Auxiliary => pdu::used_bits(pdu::length(&header)?),
             Link::Data { .. } => data::used_bits(&header)?,
         };
         if wanted > symbols {
@@ -1565,6 +1572,31 @@ pub(crate) mod tests {
         assert_eq!(p.pdu_type, pdu::PduType::AdvInd);
         assert_eq!(p.adv_addr, Some(addr));
         assert!(p.crc_ok);
+    }
+
+    /// **An auxiliary packet is read whole.** Extended advertising carries
+    /// up to 255 octets (2.3.4), where a legacy advertising PDU stops at 37:
+    /// an `AUX_ADV_IND` of 100 octets on data channel 12 is received by the
+    /// auxiliary link and not by the advertising one, which keeps its legacy
+    /// limit so a corrupt length on a primary channel costs no longer
+    /// capture.
+    #[test]
+    fn an_auxiliary_packet_longer_than_legacy_is_read_whole() {
+        let payload: Vec<u8> = (0..100u8).collect();
+        let iq = synthetic_packet_iq(Phy::OneM, 12, 0x07, &payload, 25.0);
+        let geometry = eight_bit();
+        let bytes = bytes_for(&iq, geometry);
+        let rate = working_rate_hz(Phy::OneM);
+        let tuned = channel::centre_hz(12).unwrap() as f64;
+
+        let mut aux = Receiver::for_link(rate, 12, Phy::OneM, tuned, Link::Auxiliary).unwrap();
+        let got = aux.push(&bytes, geometry);
+        assert_eq!(got.len(), 1, "{got:?}");
+        assert!(got[0].crc_ok);
+        assert_eq!(got[0].payload, payload);
+
+        let mut legacy = Receiver::for_link(rate, 12, Phy::OneM, tuned, Link::Advertising).unwrap();
+        assert!(legacy.push(&bytes, geometry).iter().all(|p| !p.crc_ok));
     }
 
     /// **A packet is stamped with where it began in the radio's own sample

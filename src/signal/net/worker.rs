@@ -235,12 +235,128 @@ fn push_coded(
     m.net.coded_packets.truncate(crate::state::BLE_PACKET_LIMIT);
 }
 
-/// What became of the AuxPtr of the Coded packet numbered `seq`, where it
-/// is still in the list.
-fn set_aux_outcome(m: &mut SdrMetrics, seq: u64, outcome: crate::signal::ble::aux::AuxOutcome) {
-    if let Some(e) = m
-        .net
-        .coded_packets
+/// Which list an advertisement and its auxiliary packets join: the one its
+/// primary packet was heard for. One advertisement, one list.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum AuxList {
+    Le,
+    Coded,
+}
+
+/// A promise waiting for the stream to reach its window, and the list its
+/// packet will join.
+#[derive(Clone, Copy, Debug)]
+struct Pending {
+    promise: crate::signal::ble::aux::Promise,
+    list: AuxList,
+}
+
+/// Where a packet started, its preamble's first symbol, in stream pairs:
+/// what an AuxPtr's offset is counted from. LE Coded's receiver stamps it;
+/// on LE 1M and LE 2M it is the PDU's first bit less the preamble and the
+/// access address (8 or 16 bits, and 32), and half a bit to its start.
+fn packet_start(
+    p: &crate::signal::ble::pdu::Packet,
+    phy: crate::signal::ble::Phy,
+    rate_hz: f64,
+) -> Option<f64> {
+    use crate::signal::ble::Phy;
+    let bit = rate_hz / phy.symbol_rate_hz();
+    match phy {
+        Phy::Coded(_) => p.at_pair.map(|a| a as f64),
+        Phy::OneM => p.pdu_pair.map(|c| c - (8.0 + 32.0 + 0.5) * bit),
+        Phy::TwoM => p.pdu_pair.map(|c| c - (16.0 + 32.0 + 0.5) * bit),
+    }
+}
+
+/// What became of an AuxPtr as it was read: `made`, the promise
+/// `aux::promise` made of it (`None` where the packet's start is unknown),
+/// waits in `list`; the outcome where it made none is counted.
+fn keep_promise(
+    m: &mut SdrMetrics,
+    promises: &mut Vec<Pending>,
+    list: AuxList,
+    made: Option<Result<crate::signal::ble::aux::Promise, crate::signal::ble::aux::AuxOutcome>>,
+) -> crate::signal::ble::aux::AuxOutcome {
+    use crate::signal::ble::aux::AuxOutcome;
+    match made {
+        Some(Ok(promise)) => {
+            promises.push(Pending { promise, list });
+            AuxOutcome::Pending
+        }
+        Some(Err(outcome)) => {
+            m.net.health.aux.count(&outcome);
+            outcome
+        }
+        None => AuxOutcome::NonePromised,
+    }
+}
+
+/// An auxiliary packet heard for an LE advertisement, into the LE list,
+/// numbered as it arrives: its readings the receiver's and the tester's on
+/// LE 1M and LE 2M, LE Coded's own on LE Coded.
+fn push_le_aux(
+    m: &mut SdrMetrics,
+    p: crate::signal::ble::pdu::Packet,
+    channel: u8,
+    phy: crate::signal::ble::Phy,
+    reading: Option<super::measure::CodedReading>,
+    ext: crate::state::ExtInfo,
+    now: Instant,
+) {
+    m.net.ble_heard += 1;
+    let seq = m.net.ble_heard;
+    let adv_addr = p.adv_addr.or(ext.header.adv_a);
+    if let Some(addr) = adv_addr {
+        m.net.address_book.number(addr);
+    }
+    let coded = p.coding.map(|_| crate::state::CodedFacts {
+        fec_repairs: p.fec_repairs.unwrap_or(0),
+        reading,
+    });
+    let (snr_db, freq_offset_hz) = match coded {
+        Some(_) => (
+            reading.and_then(|r| r.snr_db),
+            reading.and_then(|r| r.drift).map(|d| d.initial_hz),
+        ),
+        None => (p.snr_db, p.freq_offset_hz),
+    };
+    m.net.ble_packets.push_front(BlePacket {
+        seq,
+        phy,
+        channel,
+        pdu_type: p.pdu_type,
+        ch_sel: p.ch_sel,
+        tx_add_random: p.tx_add_random,
+        rx_add_random: p.rx_add_random,
+        length: p.length,
+        adv_addr,
+        payload: p.payload,
+        crc_ok: p.crc_ok,
+        snr_db,
+        freq_offset_hz,
+        modulation: p.modulation,
+        drift: p.drift,
+        seen: now,
+        coded,
+        ext: Some(ext),
+    });
+    m.net.trim_ble_packets();
+}
+
+/// What became of the AuxPtr of the packet numbered `seq` in `list`, where
+/// it is still there.
+fn set_aux_outcome(
+    m: &mut SdrMetrics,
+    list: AuxList,
+    seq: u64,
+    outcome: crate::signal::ble::aux::AuxOutcome,
+) {
+    let packets = match list {
+        AuxList::Le => &mut m.net.ble_packets,
+        AuxList::Coded => &mut m.net.coded_packets,
+    };
+    if let Some(e) = packets
         .iter_mut()
         .find(|p| p.seq == seq)
         .and_then(|p| p.ext.as_mut())
@@ -263,18 +379,27 @@ fn put_down(
     }
 }
 
-/// Promises that can no longer be kept, because the stream broke or the
-/// view that listens for them closed: each ends as lost to the feed, and is
-/// counted, rather than vanishing.
-fn abandon(promises: &mut Vec<crate::signal::ble::aux::Promise>, state: &Arc<Mutex<SdrMetrics>>) {
-    if promises.is_empty() {
+/// Promises that can no longer be kept, those of `list` or every one: each
+/// ends as `outcome`, and is counted, rather than vanishing. A break in the
+/// stream or a closed view loses their samples; a retune means the samples
+/// held are another tuning's.
+fn abandon(
+    promises: &mut Vec<Pending>,
+    list: Option<AuxList>,
+    outcome: crate::signal::ble::aux::AuxOutcome,
+    state: &Arc<Mutex<SdrMetrics>>,
+) {
+    if !promises.iter().any(|p| list.is_none_or(|l| l == p.list)) {
         return;
     }
+    let (gone, kept): (Vec<_>, Vec<_>) = promises
+        .drain(..)
+        .partition(|p| list.is_none_or(|l| l == p.list));
+    *promises = kept;
     let mut m = state.lock().unwrap_or_else(|e| e.into_inner());
-    for p in promises.drain(..) {
-        let outcome = crate::signal::ble::aux::AuxOutcome::FeedLost;
+    for p in gone {
         m.net.health.aux.count(&outcome);
-        set_aux_outcome(&mut m, p.superior_seq, outcome);
+        set_aux_outcome(&mut m, p.list, p.promise.superior_seq, outcome);
     }
 }
 
@@ -667,7 +792,11 @@ impl NetWorker {
         // receiver's cost.
         let mut listener = super::listen::Listener::default();
         // AuxPtr promises waiting for the stream to reach their windows.
-        let mut promises: Vec<crate::signal::ble::aux::Promise> = Vec::new();
+        let mut promises: Vec<Pending> = Vec::new();
+        // The tuning and rate of the samples held in `recent`: a retune
+        // keeps the stream's positions running, so only this says the held
+        // samples are another tuning's.
+        let mut held_tuning: Option<(f64, f64)> = None;
 
         while let Ok(StreamBlock {
             seq,
@@ -730,7 +859,12 @@ impl NetWorker {
             if !continuous {
                 ble = None;
                 put_down(&mut coded, &self.state);
-                abandon(&mut promises, &self.state);
+                abandon(
+                    &mut promises,
+                    None,
+                    crate::signal::ble::aux::AuxOutcome::FeedLost,
+                    &self.state,
+                );
                 bt.clear();
                 recent.clear();
             }
@@ -738,6 +872,21 @@ impl NetWorker {
             // The tuning and rate these samples were captured at, from the
             // block rather than the state: see `StreamBlock::centre_hz`.
             let centre_hz = centre_hz as f64;
+            // Samples held from another tuning are not this one's: a window
+            // or a measurement cut from them would be mixed to the wrong
+            // channel. Dropped, and the promises waiting on them said.
+            if held_tuning.is_some_and(|t| t != (centre_hz, rate_hz)) {
+                recent.clear();
+                abandon(
+                    &mut promises,
+                    None,
+                    crate::signal::ble::aux::AuxOutcome::Refused(
+                        "the radio retuned before its window",
+                    ),
+                    &self.state,
+                );
+            }
+            held_tuning = Some((centre_hz, rate_hz));
 
             let (still_open, span_hz, is_net_bt, is_survey, is_coded, phy, locked, following) = {
                 let mut m = self.state.lock().unwrap_or_else(|e| e.into_inner());
@@ -848,7 +997,12 @@ impl NetWorker {
                 put_down(&mut coded, &self.state);
             }
             if coded.is_none() {
-                abandon(&mut promises, &self.state);
+                abandon(
+                    &mut promises,
+                    Some(AuxList::Coded),
+                    crate::signal::ble::aux::AuxOutcome::FeedLost,
+                    &self.state,
+                );
             }
             match channel.filter(|_| !is_coded) {
                 Some(ch)
@@ -908,6 +1062,17 @@ impl NetWorker {
                     );
                     m.net.ble_channel = None;
                 }
+            }
+
+            // An LE advertisement's promises go with the receiver that heard
+            // it; LE Coded's with its own, above.
+            if ble.is_none() {
+                abandon(
+                    &mut promises,
+                    Some(AuxList::Le),
+                    crate::signal::ble::aux::AuxOutcome::FeedLost,
+                    &self.state,
+                );
             }
 
             // Decoded once, before either decoder runs, so both read it at once.
@@ -1369,6 +1534,20 @@ impl NetWorker {
                         census_from_ble(&mut m.net.census.devices, &p, ch, locked, rate_hz, now);
                         m.net.ble_heard += 1;
                         let seq = m.net.ble_heard;
+                        // On a primary channel, a type 7 is an ADV_EXT_IND,
+                        // and its AuxPtr is followed as LE Coded's is.
+                        let ext = crate::signal::ble::channel::advertising_channel_index(ch)
+                            .and_then(|_| extended(&p, crate::state::ExtRole::AdvExt))
+                            .map(|mut e| {
+                                let made = packet_start(&p, phy, rate_hz).map(|s| {
+                                    crate::signal::ble::aux::promise(seq, s, &e.header, 0, rate_hz)
+                                });
+                                e.aux = keep_promise(&mut m, &mut promises, AuxList::Le, made);
+                                e
+                            });
+                        let adv_addr = p
+                            .adv_addr
+                            .or_else(|| ext.as_ref().and_then(|e| e.header.adv_a));
                         m.net.ble_packets.push_front(BlePacket {
                             seq,
                             phy,
@@ -1378,7 +1557,7 @@ impl NetWorker {
                             tx_add_random: p.tx_add_random,
                             rx_add_random: p.rx_add_random,
                             length: p.length,
-                            adv_addr: p.adv_addr,
+                            adv_addr,
                             payload: p.payload,
                             crc_ok: p.crc_ok,
                             snr_db: p.snr_db,
@@ -1387,7 +1566,7 @@ impl NetWorker {
                             drift: p.drift,
                             seen: now,
                             coded: None,
-                            ext: None,
+                            ext,
                         });
                     }
                     m.net.trim_ble_packets();
@@ -1501,11 +1680,9 @@ impl NetWorker {
 
             // LE Coded's packets, measured as the test suite defines them
             // (`measure::le_coded`) outside the lock, from the symbols their
-            // decoded bits were sent as; then every AuxPtr whose window this
-            // block completes, listened to where it promised.
+            // decoded bits were sent as.
             if let (Some(ch), Some(rx), Some(this)) = (coded_on, coded.as_mut(), iq.as_deref()) {
                 let window = held(&recent, Some((first_pair, this)));
-                let held_end = (first_pair + this.len() as u64) as f64;
                 let primary: Vec<_> = rx
                     .push_iq_at(this, first_pair)
                     .into_iter()
@@ -1523,39 +1700,39 @@ impl NetWorker {
                         let ext = extended(&p, crate::state::ExtRole::AdvExt);
                         let seq = m.net.coded_heard + 1;
                         let ext = ext.map(|mut e| {
-                            e.aux = match start.map(|s| {
-                                crate::signal::ble::aux::promise(seq, s, &e.header, 0, rate_hz)
-                            }) {
-                                Some(Ok(promise)) => {
-                                    promises.push(promise);
-                                    crate::signal::ble::aux::AuxOutcome::Pending
-                                }
-                                Some(Err(outcome)) => {
-                                    m.net.health.aux.count(&outcome);
-                                    outcome
-                                }
-                                None => crate::signal::ble::aux::AuxOutcome::NonePromised,
-                            };
+                            e.aux = keep_promise(
+                                &mut m,
+                                &mut promises,
+                                AuxList::Coded,
+                                start.map(|s| {
+                                    crate::signal::ble::aux::promise(seq, s, &e.header, 0, rate_hz)
+                                }),
+                            );
                             e
                         });
                         push_coded(&mut m, p, ch, reading, ext, now);
                     }
                 }
+            }
+
+            // Every AuxPtr whose window this block completes, listened to
+            // where it promised, its packet joining its advertisement's list.
+            if let Some(this) = iq.as_deref().filter(|_| !promises.is_empty()) {
+                use crate::signal::ble::aux::{AuxOutcome, AuxPhy};
+                use crate::signal::ble::Phy;
+                let window = held(&recent, Some((first_pair, this)));
+                let held_end = (first_pair + this.len() as u64) as f64;
                 // Promises whose windows are now held, in the order made.
-                let (due, waiting): (Vec<_>, Vec<_>) =
-                    promises.drain(..).partition(|p| p.to_pair <= held_end);
+                let (due, waiting): (Vec<_>, Vec<_>) = promises
+                    .drain(..)
+                    .partition(|p| p.promise.to_pair <= held_end);
                 promises = waiting;
-                for promise in due {
+                for Pending { promise, list } in due {
+                    let link = crate::signal::ble::receive::Link::Auxiliary;
                     let ear = match promise.phy {
-                        crate::signal::ble::aux::AuxPhy::Coded => super::listen::Ear::Coded,
-                        crate::signal::ble::aux::AuxPhy::OneM => super::listen::Ear::Link(
-                            crate::signal::ble::receive::Link::Advertising,
-                            crate::signal::ble::Phy::OneM,
-                        ),
-                        crate::signal::ble::aux::AuxPhy::TwoM => super::listen::Ear::Link(
-                            crate::signal::ble::receive::Link::Advertising,
-                            crate::signal::ble::Phy::TwoM,
-                        ),
+                        AuxPhy::Coded => super::listen::Ear::Coded,
+                        AuxPhy::OneM => super::listen::Ear::Link(link, Phy::OneM),
+                        AuxPhy::TwoM => super::listen::Ear::Link(link, Phy::TwoM),
                     };
                     let job = super::listen::Job {
                         ears: vec![ear],
@@ -1569,7 +1746,11 @@ impl NetWorker {
                     // same window is not listed here: its own promise lists
                     // it, and a window it merely fell in would list it twice.
                     let kept = out.packets.into_iter().find_map(|p| {
-                        let phy = crate::signal::ble::Phy::Coded(p.coding?);
+                        let phy = match (p.coding, promise.phy) {
+                            (Some(c), _) => Phy::Coded(c),
+                            (None, AuxPhy::TwoM) => Phy::TwoM,
+                            (None, _) => Phy::OneM,
+                        };
                         let role = if promise.depth == 0 {
                             crate::state::ExtRole::AuxAdv {
                                 superior_seq: Some(promise.superior_seq),
@@ -1581,53 +1762,70 @@ impl NetWorker {
                         };
                         let ext = extended(&p, role)?;
                         crate::signal::ble::aux::keeps(&promise, phy, &ext.header)
-                            .then_some((p, ext))
+                            .then_some((p, phy, ext))
                     });
-                    let mut m = self.state.lock().unwrap_or_else(|e| e.into_inner());
                     let outcome = if !out.in_view {
-                        crate::signal::ble::aux::AuxOutcome::NotInView
+                        AuxOutcome::NotInView
                     } else if out.feed_lost {
-                        crate::signal::ble::aux::AuxOutcome::FeedLost
+                        AuxOutcome::FeedLost
                     } else if out.refused.is_some() {
-                        crate::signal::ble::aux::AuxOutcome::Refused(
-                            "its PHY cannot be received at this sample rate",
-                        )
-                    } else if let Some((p, mut ext)) = kept {
-                        drop(m);
-                        let reading =
-                            measure_coded(&p, promise.channel, &window, rate_hz, centre_hz);
-                        m = self.state.lock().unwrap_or_else(|e| e.into_inner());
-                        let seq = m.net.coded_heard + 1;
-                        let after_us = p.at_pair.map_or(0.0, |a| {
-                            (a as f64 - promise.superior_start_pair) / rate_hz * 1e6
-                        });
-                        // Its own AuxPtr, if any, is the chain's next link.
-                        ext.aux = match p.at_pair.map(|a| {
-                            crate::signal::ble::aux::promise(
-                                seq,
-                                a as f64,
-                                &ext.header,
-                                promise.depth + 1,
-                                rate_hz,
-                            )
-                        }) {
-                            Some(Ok(next)) => {
-                                promises.push(next);
-                                crate::signal::ble::aux::AuxOutcome::Pending
+                        AuxOutcome::Refused("its PHY cannot be received at this sample rate")
+                    } else if let Some((mut p, phy, mut ext)) = kept {
+                        // Read as the tester reads its PHY, outside the lock.
+                        let reading = match phy {
+                            Phy::Coded(_) => {
+                                measure_coded(&p, promise.channel, &window, rate_hz, centre_hz)
                             }
-                            Some(Err(o)) => {
-                                m.net.health.aux.count(&o);
-                                o
+                            Phy::OneM => {
+                                let offset =
+                                    crate::signal::ble::channel::centre_hz(promise.channel)
+                                        .map(|hz| hz as f64 - centre_hz);
+                                let read = offset.zip(p.pdu_pair).and_then(|(o, at)| {
+                                    super::measure::le_1m(&window, rate_hz, o, at, &p.air)
+                                });
+                                (p.modulation, p.drift) = read.unwrap_or((None, None));
+                                None
                             }
-                            None => crate::signal::ble::aux::AuxOutcome::NonePromised,
+                            Phy::TwoM => None,
                         };
-                        push_coded(&mut m, p, promise.channel, reading, Some(ext), now);
-                        crate::signal::ble::aux::AuxOutcome::Heard { seq, after_us }
+                        let start = packet_start(&p, phy, rate_hz);
+                        let after_us = start
+                            .map_or(0.0, |s| (s - promise.superior_start_pair) / rate_hz * 1e6);
+                        let mut m = self.state.lock().unwrap_or_else(|e| e.into_inner());
+                        let seq = match list {
+                            AuxList::Le => m.net.ble_heard,
+                            AuxList::Coded => m.net.coded_heard,
+                        } + 1;
+                        // Its own AuxPtr, if any, is the chain's next link.
+                        ext.aux = keep_promise(
+                            &mut m,
+                            &mut promises,
+                            list,
+                            start.map(|s| {
+                                crate::signal::ble::aux::promise(
+                                    seq,
+                                    s,
+                                    &ext.header,
+                                    promise.depth + 1,
+                                    rate_hz,
+                                )
+                            }),
+                        );
+                        match list {
+                            AuxList::Le => {
+                                push_le_aux(&mut m, p, promise.channel, phy, reading, ext, now)
+                            }
+                            AuxList::Coded => {
+                                push_coded(&mut m, p, promise.channel, reading, Some(ext), now)
+                            }
+                        }
+                        AuxOutcome::Heard { seq, after_us }
                     } else {
-                        crate::signal::ble::aux::AuxOutcome::Missed
+                        AuxOutcome::Missed
                     };
+                    let mut m = self.state.lock().unwrap_or_else(|e| e.into_inner());
                     m.net.health.aux.count(&outcome);
-                    set_aux_outcome(&mut m, promise.superior_seq, outcome);
+                    set_aux_outcome(&mut m, list, promise.superior_seq, outcome);
                 }
             }
 
@@ -1640,7 +1838,7 @@ impl NetWorker {
                     recent.push_back((first_pair, block));
                     // An LE Coded packet at S=8 lasts up to 17 ms, and is
                     // measured whole once it ends.
-                    let held_s = if following || is_coded {
+                    let held_s = if following || is_coded || !promises.is_empty() {
                         FOLLOW_HELD_S.max(super::measure::HELD_S)
                     } else {
                         super::measure::HELD_S
@@ -2927,6 +3125,150 @@ mod tests {
         let ext = m.net.coded_packets[0].ext.as_ref().unwrap();
         assert_eq!(ext.aux, AuxOutcome::Missed);
         assert_eq!(m.net.health.aux.missed, 1);
+    }
+
+    /// LE 1M advertising packets on the air at 20 Msps, the radio at 2426
+    /// MHz: `(channel, header octet 0, payload, first pair)` each, in
+    /// `blocks` blocks, as the radio's eight-bit bytes.
+    fn le_scene(packets: &[(u8, u8, Vec<u8>, usize)], blocks: usize) -> Vec<Vec<u8>> {
+        use crate::signal::ble::detect::{
+            access_address_bits, preamble_bits, ADVERTISING_ACCESS_ADDRESS,
+        };
+        let len = 131_072;
+        let mut iq = crate::signal::dsp::testkit::Rng::new(8).noise(len * blocks, 0.0005);
+        for (ch, byte0, payload, start) in packets {
+            let mut bits = preamble_bits(ADVERTISING_ACCESS_ADDRESS, crate::signal::ble::Phy::OneM);
+            bits.extend_from_slice(&access_address_bits(ADVERTISING_ACCESS_ADDRESS));
+            bits.extend(crate::signal::ble::pdu::encode(*ch, *byte0, payload));
+            let wave = crate::signal::ble::gfsk::modulate(&bits, 20, 250e3, 20e6, 0.5);
+            let shift = crate::signal::ble::channel::centre_hz(*ch).unwrap() as f64 - 2.426e9;
+            let step = std::f64::consts::TAU * shift / 20e6;
+            for (k, w) in wave.iter().enumerate() {
+                let rot = num_complex::Complex::from_polar(0.5, (step * (start + k) as f64) as f32);
+                iq[start + k] += w * rot;
+            }
+        }
+        let q = |v: f32| (v * 128.0).clamp(-127.0, 127.0) as i8 as u8;
+        iq.chunks(len)
+            .map(|c| c.iter().flat_map(|z| [q(z.re), q(z.im)]).collect())
+            .collect()
+    }
+
+    /// The LE Advertising view over `le_scene`'s packets, four blocks.
+    fn le_view(packets: &[(u8, u8, Vec<u8>, usize)]) -> SdrMetrics {
+        let blocks: Vec<(u64, Vec<u8>)> = le_scene(packets, 4)
+            .into_iter()
+            .enumerate()
+            .map(|(i, b)| (i as u64 + 1, b))
+            .collect();
+        run_view("le", "net_ble", &blocks)
+    }
+
+    /// `adv_ext_ind(channel)` with its AuxPtr's PHY set to `phy` (Table
+    /// 2.14's three bits: 0 LE 1M, 1 LE 2M, 2 LE Coded).
+    fn adv_ext_ind_on(channel: u8, phy: u8) -> Vec<u8> {
+        let mut payload = adv_ext_ind(channel);
+        payload[6] = (payload[6] & 0b0001_1111) | phy << 5;
+        payload
+    }
+
+    /// **An LE 1M advertisement is followed to its auxiliary packet**, as an
+    /// LE Coded one is: the `ADV_EXT_IND` on 38 points 3000 us on to data
+    /// channel 9 on LE 1M; the `AUX_ADV_IND` there is heard, joins the LE
+    /// list bound to it, and names the advertiser.
+    #[test]
+    fn a_1m_adv_ext_ind_is_followed_to_its_aux() {
+        use crate::signal::ble::aux::AuxOutcome;
+        let m = le_view(&[
+            (38, 0x07, adv_ext_ind_on(9, 0), 20_000),
+            (9, 0x47, aux_adv_ind(), 20_000 + 60_000),
+        ]);
+        let list: Vec<_> = m.net.ble_packets.iter().collect();
+        assert_eq!(list.len(), 2, "{list:?}");
+        let (aux, superior) = (list[0], list[1]);
+        assert_eq!(superior.channel, 38);
+        let aux_ext = aux.ext.as_ref().expect("read as extended");
+        assert_eq!(
+            aux_ext.role,
+            crate::state::ExtRole::AuxAdv {
+                superior_seq: Some(superior.seq)
+            }
+        );
+        assert_eq!(aux.channel, 9);
+        assert_eq!(aux.phy, crate::signal::ble::Phy::OneM);
+        assert_eq!(aux.adv_addr, Some([0x66, 0x55, 0x44, 0x33, 0x22, 0x11]));
+        let sup_ext = superior.ext.as_ref().expect("read as extended");
+        assert!(
+            matches!(
+                sup_ext.aux,
+                AuxOutcome::Heard { seq, after_us } if seq == aux.seq && (after_us - 3000.0).abs() < 5.0
+            ),
+            "{:?}",
+            sup_ext.aux
+        );
+        assert_eq!(m.net.health.aux.heard, 1);
+        // Nothing on the LE Coded list: one advertisement, one list.
+        assert!(m.net.coded_packets.is_empty());
+    }
+
+    /// An LE 1M advertisement whose AuxPtr is out of view says so, on the
+    /// LE list, and an LE 2M one at 20 Msps is not followed, and why.
+    #[test]
+    fn a_1m_adv_ext_ind_says_what_became_of_its_aux() {
+        use crate::signal::ble::aux::AuxOutcome;
+        let m = le_view(&[(38, 0x07, adv_ext_ind_on(30, 0), 20_000)]);
+        let ext = m.net.ble_packets[0].ext.as_ref().expect("read as extended");
+        assert_eq!(ext.aux, AuxOutcome::NotInView);
+        let m = le_view(&[(38, 0x07, adv_ext_ind_on(9, 1), 20_000)]);
+        let ext = m.net.ble_packets[0].ext.as_ref().expect("read as extended");
+        assert!(matches!(ext.aux, AuxOutcome::Refused(_)), "{:?}", ext.aux);
+    }
+
+    /// **Samples from another tuning are not listened to.** A retune keeps
+    /// the stream's positions running, so a promise whose window comes after
+    /// it would be cut from samples mixed for the old centre. The ADV_EXT_IND
+    /// points 6 ms on (20 units of 300 us), past its block; the next block
+    /// arrives retuned by 2 MHz, and the promise ends not followed, and why.
+    #[test]
+    fn a_promise_across_a_retune_is_not_followed() {
+        use crate::signal::ble::aux::AuxOutcome;
+        let v: u32 = 9 | 1 << 6 | 1 << 7 | 20 << 8;
+        let payload = vec![
+            6,
+            0b0001_1000,
+            0x23,
+            0x31,
+            v as u8,
+            (v >> 8) as u8,
+            (v >> 16) as u8,
+        ];
+        let mut m = SdrMetrics::fixture().streaming();
+        m.ui.section = "le".to_string();
+        m.ui.active_preset = "net_ble".to_string();
+        m.radio.frequency = 2_426_000_000;
+        m.radio.config_sample_rate = 20e6;
+        m.radio.bb_filter_hz = 0;
+        let state = Arc::new(Mutex::new(m));
+        let (tx, rx) = crossbeam_channel::unbounded();
+        for (i, bytes) in le_scene(&[(38, 0x07, payload, 20_000)], 3)
+            .into_iter()
+            .enumerate()
+        {
+            let mut block = stamped(&state, i as u64 + 1, false, bytes);
+            if i > 0 {
+                block.centre_hz = 2_428_000_000;
+            }
+            tx.send(block).unwrap();
+        }
+        drop(tx);
+        NetWorker::new(rx, Arc::clone(&state), eight_bit(), SAFE_BT_CHANNELS).run();
+        let m = state.lock().unwrap();
+        let ext = m.net.ble_packets[0].ext.as_ref().expect("read as extended");
+        assert_eq!(
+            ext.aux,
+            AuxOutcome::Refused("the radio retuned before its window")
+        );
+        assert_eq!(m.net.health.aux.refused, 1);
     }
 
     /// **The LE Coded view runs LE Coded's receiver, and only it.** A Coded
