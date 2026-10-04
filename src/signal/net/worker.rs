@@ -536,10 +536,11 @@ impl NetWorker {
         // copied, and dropped at any break.
         let mut recent: std::collections::VecDeque<(u64, Vec<num_complex::Complex<f32>>)> =
             std::collections::VecDeque::new();
-        // One receiver per followed connection, channel and PHY, each reset
-        // before an event's window: built once, since a matched filter and
-        // its reference are the receiver's cost.
-        let mut link_rx: HashMap<(u32, u8, crate::signal::ble::Phy), BleReceiver> = HashMap::new();
+        // The receivers a scheduled listen uses (a followed connection's event,
+        // per connection, channel and PHY), each reset before its window:
+        // built once, since a matched filter and its reference are the
+        // receiver's cost.
+        let mut listener = super::listen::Listener::default();
 
         while let Ok(StreamBlock {
             seq,
@@ -1299,63 +1300,23 @@ impl NetWorker {
                             if to > held_end {
                                 continue;
                             }
-                            let in_view = crate::signal::ble::channel::in_view(
-                                due.channel,
-                                centre_hz,
-                                span_hz,
-                            );
-                            let mut heard = Vec::new();
-                            let mut feed_lost = false;
-                            if in_view {
-                                let start = from.max(0.0).floor() as u64;
-                                let len = (to - start as f64).ceil() as usize;
-                                match window.slice(start, len) {
-                                    // Not held: lost to the feed, or older than
-                                    // what is kept. Not listened to either way.
-                                    None => feed_lost = true,
-                                    Some(samples) => {
-                                        let mut phys = vec![phy_c];
-                                        if phy_p != phy_c {
-                                            phys.push(phy_p);
-                                        }
-                                        for p in phys {
-                                            let key = (aa, due.channel, p);
-                                            let fits = link_rx.get(&key).is_some_and(|r| {
-                                                r.matches(due.channel, rate_hz, p, centre_hz)
-                                            });
-                                            if !fits {
-                                                let link =
-                                                    crate::signal::ble::receive::Link::Data {
-                                                        access_address: aa,
-                                                        crc_init,
-                                                    };
-                                                match BleReceiver::for_link(
-                                                    rate_hz,
-                                                    due.channel,
-                                                    p,
-                                                    centre_hz,
-                                                    link,
-                                                ) {
-                                                    Ok(r) => {
-                                                        link_rx.insert(key, r);
-                                                    }
-                                                    // No receiver, no listening.
-                                                    Err(_) => {
-                                                        feed_lost = true;
-                                                        continue;
-                                                    }
-                                                }
-                                            }
-                                            if let Some(rx) = link_rx.get_mut(&key) {
-                                                rx.reset();
-                                                rx.push_iq_at(&samples, start);
-                                                rx.take_funnel();
-                                                heard.extend(rx.take_data());
-                                            }
-                                        }
-                                    }
-                                }
+                            let link = crate::signal::ble::receive::Link::Data {
+                                access_address: aa,
+                                crc_init,
+                            };
+                            let mut ears = vec![super::listen::Ear::Link(link, phy_c)];
+                            if phy_p != phy_c {
+                                ears.push(super::listen::Ear::Link(link, phy_p));
                             }
+                            let job = super::listen::Job {
+                                ears,
+                                channel: due.channel,
+                                from_pair: from,
+                                to_pair: to,
+                            };
+                            let heard = listener.listen(&job, &window, rate_hz, centre_hz, span_hz);
+                            let (in_view, feed_lost, heard) =
+                                (heard.in_view, heard.feed_lost, heard.data);
                             done.push((aa, due.counter, in_view, feed_lost, heard));
                         }
                         if done.is_empty() {
@@ -1388,7 +1349,13 @@ impl NetWorker {
                         .map(|f| f.connection.access_address())
                         .collect();
                     drop(m);
-                    link_rx.retain(|k, _| alive.contains(&k.0));
+                    listener.retain(|ear| match ear {
+                        super::listen::Ear::Link(
+                            crate::signal::ble::receive::Link::Data { access_address, .. },
+                            _,
+                        ) => alive.contains(access_address),
+                        _ => true,
+                    });
                 }
             }
 

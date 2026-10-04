@@ -427,7 +427,7 @@ fn margin_bits(len: usize) -> Vec<bool> {
 /// connection's, by the access address and CRC initial value its
 /// CONNECT_IND set (Core 5.4 Vol 6 Part B 2.1.2, 3.1.1). The whitening is
 /// the channel index's either way.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum Link {
     Advertising,
     Data { access_address: u32, crc_init: u32 },
@@ -1335,7 +1335,7 @@ impl Receiver {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use crate::hardware::{SampleFormat, StreamBlock};
     use crate::signal::ble::channel;
@@ -1420,7 +1420,7 @@ mod tests {
     /// after `lead` pairs of silence, the preamble `aa` calls for, `aa`, the
     /// PDU CRC'd under `crc_init` and whitened for `ch`, a short tail. Returns
     /// the samples and where the preamble's first bit starts, in pairs.
-    fn synthetic_data_burst(
+    pub(crate) fn synthetic_data_burst(
         raw_rate: f64,
         ch: u8,
         tuned_hz: f64,
@@ -1450,7 +1450,7 @@ mod tests {
         (iq, (lead + 16 * sps) as f64)
     }
 
-    fn data_pdu(llid: u8, payload: &[u8]) -> DataPdu {
+    pub(crate) fn data_pdu(llid: u8, payload: &[u8]) -> DataPdu {
         DataPdu {
             llid,
             nesn: false,

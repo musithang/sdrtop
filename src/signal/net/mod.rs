@@ -34,6 +34,7 @@ pub mod census;
 #[cfg(test)]
 pub mod conformance;
 pub mod gate;
+pub mod listen;
 pub mod lock;
 pub mod measure;
 pub mod occupancy;
