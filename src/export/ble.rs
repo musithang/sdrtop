@@ -301,6 +301,7 @@ mod tests {
             }),
             seen: Instant::now(),
             coded: None,
+            ext: None,
         }
     }
 

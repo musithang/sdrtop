@@ -588,6 +588,7 @@ mod tests {
             drift: None,
             seen: now,
             coded: None,
+            ext: None,
         });
         // The same device heard on LE Coded, for the LE Coded list.
         let coded = BlePacket {

@@ -25,8 +25,6 @@ use crate::signal::net::measure::Recent;
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum Ear {
     Link(Link, Phy),
-    // Built by the AuxPtr follower, which comes next.
-    #[allow(dead_code)]
     Coded,
 }
 

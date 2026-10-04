@@ -100,9 +100,15 @@ impl NetBlePacketsPanel {
 /// named beside it, because two packets of one type at S=2 and S=8 are heard
 /// at different ranges and the row should say which.
 fn type_text(p: &BlePacket) -> String {
+    // An extended PDU's type code is one for three PDUs; where it was heard
+    // says which, and the role carries that.
+    let name = match &p.ext {
+        Some(e) => e.role.label().to_string(),
+        None => p.pdu_type.label(),
+    };
     match p.phy {
-        crate::signal::ble::Phy::Coded(c) => format!("{} {}", p.pdu_type.label(), c.label()),
-        _ => p.pdu_type.label(),
+        crate::signal::ble::Phy::Coded(c) => format!("{name} {}", c.label()),
+        _ => name,
     }
 }
 
@@ -253,15 +259,17 @@ fn ago(secs: u64) -> String {
 /// is a different format, and a dash would read as "no name advertised".
 fn name_text(p: &BlePacket, net: &crate::state::NetState) -> String {
     use crate::signal::ble::ad;
-    if p.pdu_type == crate::signal::ble::pdu::PduType::Other(0x07) {
-        return "(not decoded)".to_string();
-    }
-    if !p.crc_ok {
-        return "-".to_string();
-    }
-    let structures = ad::adv_data(p.pdu_type, &p.payload)
-        .map(ad::parse)
-        .unwrap_or_default();
+    // An extended PDU read as one carries its AdvData in its extended header.
+    let structures = match &p.ext {
+        Some(e) => ad::parse(&e.header.adv_data),
+        None if p.pdu_type == crate::signal::ble::pdu::PduType::Other(0x07) => {
+            return "(not decoded)".to_string();
+        }
+        None if !p.crc_ok => return "-".to_string(),
+        None => ad::adv_data(p.pdu_type, &p.payload)
+            .map(ad::parse)
+            .unwrap_or_default(),
+    };
     match ad::name(&structures) {
         Some((name, _)) => cut(&net.show_name(name), NAME_W),
         None => "-".to_string(),
@@ -631,6 +639,7 @@ mod tests {
             drift: None,
             seen: Instant::now(),
             coded: None,
+            ext: None,
         }
     }
 

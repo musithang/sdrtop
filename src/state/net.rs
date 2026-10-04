@@ -839,6 +839,8 @@ pub struct NetDecodeHealth {
     pub ble: crate::signal::ble::receive::Funnel,
     /// LE Coded's decode funnel since the section opened, counted as LE 1M's.
     pub coded: crate::signal::ble::receive::Funnel,
+    /// Every AuxPtr followed, by how it ended.
+    pub aux: AuxAccounts,
     /// Classic access-code hits since the section opened, every one, where
     /// `bt_hops` keeps only the latest few hundred.
     pub bt_hits: u64,
@@ -1075,6 +1077,71 @@ pub struct BlePacket {
     pub seen: std::time::Instant,
     /// What only an LE Coded packet has; `None` on the uncoded PHYs.
     pub coded: Option<CodedFacts>,
+    /// An extended advertising PDU's header, its place in its advertising
+    /// event, and what became of its AuxPtr; `None` on a legacy PDU, or an
+    /// extended one not read as such.
+    pub ext: Option<ExtInfo>,
+}
+
+/// An extended advertising PDU, read (Core 5.4 Vol 6 Part B 2.3.4).
+#[derive(Clone, Debug, PartialEq)]
+pub struct ExtInfo {
+    pub header: crate::signal::ble::ext::ExtHeader,
+    pub role: ExtRole,
+    /// What became of its AuxPtr's promise.
+    pub aux: crate::signal::ble::aux::AuxOutcome,
+}
+
+/// Which extended PDU a type 7 is: the type code is one for all three, and
+/// only where it was heard says which (2.3, Table 2.3).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ExtRole {
+    /// On a primary advertising channel.
+    AdvExt,
+    /// Where an `ADV_EXT_IND`'s AuxPtr promised it, that packet's `seq`; or
+    /// heard in such a window without being the one promised (`None`).
+    AuxAdv { superior_seq: Option<u64> },
+    /// Where an `AUX_ADV_IND`'s or another `AUX_CHAIN_IND`'s AuxPtr
+    /// promised it.
+    AuxChain { superior_seq: u64 },
+}
+
+impl ExtRole {
+    /// The PDU's name as the Core gives it.
+    pub fn label(self) -> &'static str {
+        match self {
+            ExtRole::AdvExt => "ADV_EXT_IND",
+            ExtRole::AuxAdv { .. } => "AUX_ADV_IND",
+            ExtRole::AuxChain { .. } => "AUX_CHAIN_IND",
+        }
+    }
+}
+
+/// Every AuxPtr's promise, by how it ended, since the section opened.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct AuxAccounts {
+    pub heard: u64,
+    pub missed: u64,
+    pub not_in_view: u64,
+    pub feed_lost: u64,
+    pub none_promised: u64,
+    pub refused: u64,
+}
+
+impl AuxAccounts {
+    /// Count one ended promise; a pending one is not ended.
+    pub fn count(&mut self, outcome: &crate::signal::ble::aux::AuxOutcome) {
+        use crate::signal::ble::aux::AuxOutcome;
+        match outcome {
+            AuxOutcome::Pending => {}
+            AuxOutcome::Heard { .. } => self.heard += 1,
+            AuxOutcome::Missed => self.missed += 1,
+            AuxOutcome::NotInView => self.not_in_view += 1,
+            AuxOutcome::FeedLost => self.feed_lost += 1,
+            AuxOutcome::NonePromised => self.none_promised += 1,
+            AuxOutcome::Refused(_) => self.refused += 1,
+        }
+    }
 }
 
 /// An LE Coded packet's facts beside the ones every BLE packet has.
@@ -1504,6 +1571,7 @@ mod tests {
             drift: None,
             seen: std::time::Instant::now(),
             coded: None,
+            ext: None,
         }
     }
 

@@ -554,6 +554,7 @@ mod tests {
             drift: None,
             seen,
             coded: None,
+            ext: None,
         }
     }
 

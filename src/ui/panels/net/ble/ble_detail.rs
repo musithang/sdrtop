@@ -1028,6 +1028,7 @@ mod tests {
             drift,
             seen: Instant::now(),
             coded: None,
+            ext: None,
         }
     }
 

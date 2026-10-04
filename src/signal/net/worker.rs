@@ -153,6 +153,117 @@ fn connect_end_pair(p: &crate::signal::ble::pdu::Packet, rate_hz: f64) -> Option
         .map(|centre| centre + (crate::signal::ble::pdu::used_bits(p.length) as f64 - 0.5) * bit)
 }
 
+/// An LE Coded packet measured as the test suite defines it, from the
+/// symbols its decoded bits were sent as: `None` when its samples are not
+/// held, or it is not a Coded packet.
+fn measure_coded(
+    p: &crate::signal::ble::pdu::Packet,
+    channel: u8,
+    window: &super::measure::Recent,
+    rate_hz: f64,
+    centre_hz: f64,
+) -> Option<super::measure::CodedReading> {
+    let coding = p.coding?;
+    let symbols = crate::signal::ble::coded::symbols_of(
+        crate::signal::ble::detect::ADVERTISING_ACCESS_ADDRESS,
+        coding,
+        &p.air,
+    );
+    let offset = crate::signal::ble::channel::centre_hz(channel)? as f64 - centre_hz;
+    super::measure::le_coded(window, rate_hz, offset, p.at_pair? as f64, &symbols, coding)
+}
+
+/// An extended advertising PDU's header, read, in `role`: `None` for any
+/// other type, a failed CRC (whose header bytes say nothing), or a payload
+/// that is not the extended format.
+fn extended(
+    p: &crate::signal::ble::pdu::Packet,
+    role: crate::state::ExtRole,
+) -> Option<crate::state::ExtInfo> {
+    if !p.crc_ok || p.pdu_type != crate::signal::ble::pdu::PduType::Other(0x07) {
+        return None;
+    }
+    let header = crate::signal::ble::ext::parse(&p.payload).ok()?;
+    Some(crate::state::ExtInfo {
+        header,
+        role,
+        aux: crate::signal::ble::aux::AuxOutcome::NonePromised,
+    })
+}
+
+/// An LE Coded packet into the LE Coded list, numbered as it arrives.
+fn push_coded(
+    m: &mut SdrMetrics,
+    p: crate::signal::ble::pdu::Packet,
+    channel: u8,
+    reading: Option<super::measure::CodedReading>,
+    ext: Option<crate::state::ExtInfo>,
+    now: Instant,
+) {
+    let Some(coding) = p.coding else { return };
+    m.net.coded_heard += 1;
+    let seq = m.net.coded_heard;
+    // An auxiliary packet names its advertiser in its extended header.
+    let adv_addr = p
+        .adv_addr
+        .or_else(|| ext.as_ref().and_then(|e| e.header.adv_a));
+    m.net.coded_packets.push_front(BlePacket {
+        seq,
+        phy: crate::signal::ble::Phy::Coded(coding),
+        channel,
+        pdu_type: p.pdu_type,
+        ch_sel: p.ch_sel,
+        tx_add_random: p.tx_add_random,
+        rx_add_random: p.rx_add_random,
+        length: p.length,
+        adv_addr,
+        payload: p.payload,
+        crc_ok: p.crc_ok,
+        snr_db: reading.and_then(|r| r.snr_db),
+        // The preamble's f0, as BV-14-C reads it, is the carrier offset the
+        // list's column shows.
+        freq_offset_hz: reading.and_then(|r| r.drift).map(|d| d.initial_hz),
+        modulation: None,
+        drift: None,
+        seen: now,
+        coded: Some(crate::state::CodedFacts {
+            fec_repairs: p.fec_repairs.unwrap_or(0),
+            reading,
+        }),
+        ext,
+    });
+    m.net.coded_packets.truncate(crate::state::BLE_PACKET_LIMIT);
+}
+
+/// What became of the AuxPtr of the Coded packet numbered `seq`, where it
+/// is still in the list.
+fn set_aux_outcome(m: &mut SdrMetrics, seq: u64, outcome: crate::signal::ble::aux::AuxOutcome) {
+    if let Some(e) = m
+        .net
+        .coded_packets
+        .iter_mut()
+        .find(|p| p.seq == seq)
+        .and_then(|p| p.ext.as_mut())
+    {
+        e.aux = outcome;
+    }
+}
+
+/// Promises that can no longer be kept, because the stream broke or the
+/// view that listens for them closed: each ends as lost to the feed, and is
+/// counted, rather than vanishing.
+fn abandon(promises: &mut Vec<crate::signal::ble::aux::Promise>, state: &Arc<Mutex<SdrMetrics>>) {
+    if promises.is_empty() {
+        return;
+    }
+    let mut m = state.lock().unwrap_or_else(|e| e.into_inner());
+    for p in promises.drain(..) {
+        let outcome = crate::signal::ble::aux::AuxOutcome::FeedLost;
+        m.net.health.aux.count(&outcome);
+        set_aux_outcome(&mut m, p.superior_seq, outcome);
+    }
+}
+
 fn held<'a>(
     recent: &'a std::collections::VecDeque<(u64, Vec<num_complex::Complex<f32>>)>,
     current: Option<(u64, &'a [num_complex::Complex<f32>])>,
@@ -541,6 +652,8 @@ impl NetWorker {
         // built once, since a matched filter and its reference are the
         // receiver's cost.
         let mut listener = super::listen::Listener::default();
+        // AuxPtr promises waiting for the stream to reach their windows.
+        let mut promises: Vec<crate::signal::ble::aux::Promise> = Vec::new();
 
         while let Ok(StreamBlock {
             seq,
@@ -603,6 +716,7 @@ impl NetWorker {
             if !continuous {
                 ble = None;
                 coded = None;
+                abandon(&mut promises, &self.state);
                 bt.clear();
                 recent.clear();
             }
@@ -718,6 +832,9 @@ impl NetWorker {
                 }
             } else {
                 coded = None;
+            }
+            if coded.is_none() {
+                abandon(&mut promises, &self.state);
             }
             match channel.filter(|_| !is_coded) {
                 Some(ch)
@@ -1256,6 +1373,7 @@ impl NetWorker {
                             drift: p.drift,
                             seen: now,
                             coded: None,
+                            ext: None,
                         });
                     }
                     m.net.trim_ble_packets();
@@ -1361,63 +1479,129 @@ impl NetWorker {
 
             // LE Coded's packets, measured as the test suite defines them
             // (`measure::le_coded`) outside the lock, from the symbols their
-            // decoded bits were sent as.
+            // decoded bits were sent as; then every AuxPtr whose window this
+            // block completes, listened to where it promised.
             if let (Some(ch), Some(rx), Some(this)) = (coded_on, coded.as_mut(), iq.as_deref()) {
-                let packets = rx.push_iq_at(this, first_pair);
+                let window = held(&recent, Some((first_pair, this)));
+                let held_end = (first_pair + this.len() as u64) as f64;
+                let primary: Vec<_> = rx
+                    .push_iq_at(this, first_pair)
+                    .into_iter()
+                    .map(|p| {
+                        let reading = measure_coded(&p, ch, &window, rate_hz, centre_hz);
+                        (p, reading)
+                    })
+                    .collect();
                 let funnel = rx.take_funnel();
-                let readings: Vec<_> = if packets.is_empty() {
-                    Vec::new()
-                } else {
-                    let window = held(&recent, Some((first_pair, this)));
-                    let offset =
-                        crate::signal::ble::channel::centre_hz(ch).map(|hz| hz as f64 - centre_hz);
-                    packets
-                        .iter()
-                        .map(|p| {
-                            let coding = p.coding?;
-                            let symbols = crate::signal::ble::coded::symbols_of(
-                                crate::signal::ble::detect::ADVERTISING_ACCESS_ADDRESS,
-                                coding,
-                                &p.air,
-                            );
-                            let (o, at) = offset.zip(p.at_pair)?;
-                            super::measure::le_coded(
-                                &window, rate_hz, o, at as f64, &symbols, coding,
-                            )
-                        })
-                        .collect()
-                };
-                let mut m = self.state.lock().unwrap_or_else(|e| e.into_inner());
-                m.net.health.coded.add(funnel);
-                for (p, reading) in packets.into_iter().zip(readings) {
-                    let Some(coding) = p.coding else { continue };
-                    m.net.coded_heard += 1;
-                    let seq = m.net.coded_heard;
-                    m.net.coded_packets.push_front(BlePacket {
-                        seq,
-                        phy: crate::signal::ble::Phy::Coded(coding),
-                        channel: ch,
-                        pdu_type: p.pdu_type,
-                        ch_sel: p.ch_sel,
-                        tx_add_random: p.tx_add_random,
-                        rx_add_random: p.rx_add_random,
-                        length: p.length,
-                        adv_addr: p.adv_addr,
-                        payload: p.payload,
-                        crc_ok: p.crc_ok,
-                        snr_db: reading.and_then(|r| r.snr_db),
-                        // The preamble's f0, as BV-14-C reads it, is the
-                        // carrier offset the list's column shows.
-                        freq_offset_hz: reading.and_then(|r| r.drift).map(|d| d.initial_hz),
-                        modulation: None,
-                        drift: None,
-                        seen: now,
-                        coded: Some(crate::state::CodedFacts {
-                            fec_repairs: p.fec_repairs.unwrap_or(0),
-                            reading,
-                        }),
+                {
+                    let mut m = self.state.lock().unwrap_or_else(|e| e.into_inner());
+                    m.net.health.coded.add(funnel);
+                    for (p, reading) in primary {
+                        let start = p.at_pair.map(|a| a as f64);
+                        let ext = extended(&p, crate::state::ExtRole::AdvExt);
+                        let seq = m.net.coded_heard + 1;
+                        let ext = ext.map(|mut e| {
+                            e.aux = match start.map(|s| {
+                                crate::signal::ble::aux::promise(seq, s, &e.header, 0, rate_hz)
+                            }) {
+                                Some(Ok(promise)) => {
+                                    promises.push(promise);
+                                    crate::signal::ble::aux::AuxOutcome::Pending
+                                }
+                                Some(Err(outcome)) => {
+                                    m.net.health.aux.count(&outcome);
+                                    outcome
+                                }
+                                None => crate::signal::ble::aux::AuxOutcome::NonePromised,
+                            };
+                            e
+                        });
+                        push_coded(&mut m, p, ch, reading, ext, now);
+                    }
+                }
+                // Promises whose windows are now held, in the order made.
+                let (due, waiting): (Vec<_>, Vec<_>) =
+                    promises.drain(..).partition(|p| p.to_pair <= held_end);
+                promises = waiting;
+                for promise in due {
+                    let ear = match promise.phy {
+                        crate::signal::ble::aux::AuxPhy::Coded => super::listen::Ear::Coded,
+                        crate::signal::ble::aux::AuxPhy::OneM => super::listen::Ear::Link(
+                            crate::signal::ble::receive::Link::Advertising,
+                            crate::signal::ble::Phy::OneM,
+                        ),
+                        crate::signal::ble::aux::AuxPhy::TwoM => super::listen::Ear::Link(
+                            crate::signal::ble::receive::Link::Advertising,
+                            crate::signal::ble::Phy::TwoM,
+                        ),
+                    };
+                    let job = super::listen::Job {
+                        ears: vec![ear],
+                        channel: promise.channel,
+                        from_pair: promise.from_pair,
+                        to_pair: promise.to_pair,
+                    };
+                    let out = listener.listen(&job, &window, rate_hz, centre_hz, span_hz);
+                    // The promised packet: CRC passing, an extended PDU whose
+                    // header keeps the promise. Another set's packet in the
+                    // same window is not listed here: its own promise lists
+                    // it, and a window it merely fell in would list it twice.
+                    let kept = out.packets.into_iter().find_map(|p| {
+                        let phy = crate::signal::ble::Phy::Coded(p.coding?);
+                        let role = if promise.depth == 0 {
+                            crate::state::ExtRole::AuxAdv {
+                                superior_seq: Some(promise.superior_seq),
+                            }
+                        } else {
+                            crate::state::ExtRole::AuxChain {
+                                superior_seq: promise.superior_seq,
+                            }
+                        };
+                        let ext = extended(&p, role)?;
+                        crate::signal::ble::aux::keeps(&promise, phy, &ext.header)
+                            .then_some((p, ext))
                     });
-                    m.net.coded_packets.truncate(crate::state::BLE_PACKET_LIMIT);
+                    let mut m = self.state.lock().unwrap_or_else(|e| e.into_inner());
+                    let outcome = if !out.in_view {
+                        crate::signal::ble::aux::AuxOutcome::NotInView
+                    } else if out.feed_lost {
+                        crate::signal::ble::aux::AuxOutcome::FeedLost
+                    } else if let Some((p, mut ext)) = kept {
+                        drop(m);
+                        let reading =
+                            measure_coded(&p, promise.channel, &window, rate_hz, centre_hz);
+                        m = self.state.lock().unwrap_or_else(|e| e.into_inner());
+                        let seq = m.net.coded_heard + 1;
+                        let after_us = p.at_pair.map_or(0.0, |a| {
+                            (a as f64 - promise.superior_start_pair) / rate_hz * 1e6
+                        });
+                        // Its own AuxPtr, if any, is the chain's next link.
+                        ext.aux = match p.at_pair.map(|a| {
+                            crate::signal::ble::aux::promise(
+                                seq,
+                                a as f64,
+                                &ext.header,
+                                promise.depth + 1,
+                                rate_hz,
+                            )
+                        }) {
+                            Some(Ok(next)) => {
+                                promises.push(next);
+                                crate::signal::ble::aux::AuxOutcome::Pending
+                            }
+                            Some(Err(o)) => {
+                                m.net.health.aux.count(&o);
+                                o
+                            }
+                            None => crate::signal::ble::aux::AuxOutcome::NonePromised,
+                        };
+                        push_coded(&mut m, p, promise.channel, reading, Some(ext), now);
+                        crate::signal::ble::aux::AuxOutcome::Heard { seq, after_us }
+                    } else {
+                        crate::signal::ble::aux::AuxOutcome::Missed
+                    };
+                    m.net.health.aux.count(&outcome);
+                    set_aux_outcome(&mut m, promise.superior_seq, outcome);
                 }
             }
 
@@ -2412,6 +2596,127 @@ mod tests {
         NetWorker::new(rx, Arc::clone(&state), eight_bit(), SAFE_BT_CHANNELS).run();
         let m = state.lock().unwrap().clone();
         m
+    }
+
+    /// Coded S=8 packets on the air at 20 Msps, the radio at 2426 MHz:
+    /// `(channel, header octet 0, payload, first pair)` each, in `blocks`
+    /// blocks of 131 072 pairs, as the radio's eight-bit bytes.
+    fn coded_scene(packets: &[(u8, u8, Vec<u8>, usize)], blocks: usize) -> Vec<Vec<u8>> {
+        use crate::signal::ble::coded::{self, Coding};
+        use crate::signal::ble::detect::ADVERTISING_ACCESS_ADDRESS;
+        let len = 131_072;
+        let mut rng = crate::signal::dsp::testkit::Rng::new(6);
+        let mut iq = rng.noise(len * blocks, 0.0005);
+        for (ch, byte0, payload, start) in packets {
+            let symbols =
+                coded::transmit(ADVERTISING_ACCESS_ADDRESS, Coding::S8, *ch, *byte0, payload);
+            let wave = crate::signal::ble::gfsk::modulate(&symbols, 20, 250e3, 20e6, 0.5);
+            let shift = crate::signal::ble::channel::centre_hz(*ch).unwrap() as f64 - 2.426e9;
+            let step = std::f64::consts::TAU * shift / 20e6;
+            for (k, w) in wave.iter().enumerate() {
+                let rot = num_complex::Complex::from_polar(0.5, (step * (start + k) as f64) as f32);
+                iq[start + k] += w * rot;
+            }
+        }
+        let q = |v: f32| (v * 128.0).clamp(-127.0, 127.0) as i8 as u8;
+        iq.chunks(len)
+            .map(|c| c.iter().flat_map(|z| [q(z.re), q(z.im)]).collect())
+            .collect()
+    }
+
+    /// An ADV_EXT_IND's payload: ADI 0x3123 (SID 3, DID 0x123) and an
+    /// AuxPtr to `channel`, 100 units of 30 us on, LE Coded, CA 1.
+    fn adv_ext_ind(channel: u8) -> Vec<u8> {
+        let v: u32 = channel as u32 | 1 << 6 | 100 << 8 | 0b010 << 21;
+        vec![
+            6,
+            0b0001_1000,
+            0x23,
+            0x31,
+            v as u8,
+            (v >> 8) as u8,
+            (v >> 16) as u8,
+        ]
+    }
+
+    /// Its AUX_ADV_IND's: AdvA 66:55:44:33:22:11, the same ADI, the name.
+    fn aux_adv_ind() -> Vec<u8> {
+        let mut payload = vec![
+            9,
+            0b0000_1001,
+            0x11,
+            0x22,
+            0x33,
+            0x44,
+            0x55,
+            0x66,
+            0x23,
+            0x31,
+        ];
+        payload.extend([6, 0x09, b'P', b'i', b'x', b'e', b'l']);
+        payload
+    }
+
+    fn scene_view(packets: &[(u8, u8, Vec<u8>, usize)]) -> SdrMetrics {
+        let blocks: Vec<(u64, Vec<u8>)> = coded_scene(packets, 4)
+            .into_iter()
+            .enumerate()
+            .map(|(i, b)| (i as u64 + 1, b))
+            .collect();
+        run_view("coded", "net_coded", &blocks)
+    }
+
+    /// **An LE Coded advertisement is followed to its auxiliary packet.**
+    /// The ADV_EXT_IND on 38 points 3000 us on to data channel 9, in view;
+    /// the AUX_ADV_IND there is heard, bound to it, and names the advertiser.
+    #[test]
+    fn a_coded_advertisement_is_followed_to_its_aux() {
+        use crate::signal::ble::aux::AuxOutcome;
+        let m = scene_view(&[
+            (38, 0x07, adv_ext_ind(9), 20_000),
+            (9, 0x47, aux_adv_ind(), 20_000 + 60_000),
+        ]);
+        assert_eq!(m.net.coded_packets.len(), 2, "{:?}", m.net.coded_packets);
+        let aux = &m.net.coded_packets[0];
+        let superior = &m.net.coded_packets[1];
+        let aux_ext = aux.ext.as_ref().expect("read as extended");
+        assert_eq!(
+            aux_ext.role,
+            crate::state::ExtRole::AuxAdv {
+                superior_seq: Some(superior.seq)
+            }
+        );
+        assert_eq!(aux.channel, 9);
+        assert_eq!(aux.adv_addr, Some([0x66, 0x55, 0x44, 0x33, 0x22, 0x11]));
+        match superior.ext.as_ref().expect("read as extended").aux {
+            AuxOutcome::Heard { seq, after_us } => {
+                assert_eq!(seq, aux.seq);
+                assert!((after_us - 3000.0).abs() < 31.0, "{after_us}");
+            }
+            other => panic!("{other:?}"),
+        }
+        assert_eq!(m.net.health.aux.heard, 1);
+    }
+
+    /// An AuxPtr to a channel the radio does not see is said to be one.
+    #[test]
+    fn an_aux_out_of_view_is_said_to_be() {
+        use crate::signal::ble::aux::AuxOutcome;
+        let m = scene_view(&[(38, 0x07, adv_ext_ind(30), 20_000)]);
+        assert_eq!(m.net.coded_packets.len(), 1);
+        let ext = m.net.coded_packets[0].ext.as_ref().unwrap();
+        assert_eq!(ext.aux, AuxOutcome::NotInView);
+        assert_eq!(m.net.health.aux.not_in_view, 1);
+    }
+
+    /// In view, listened to, and nothing there: missed.
+    #[test]
+    fn an_aux_not_sent_is_missed() {
+        use crate::signal::ble::aux::AuxOutcome;
+        let m = scene_view(&[(38, 0x07, adv_ext_ind(9), 20_000)]);
+        let ext = m.net.coded_packets[0].ext.as_ref().unwrap();
+        assert_eq!(ext.aux, AuxOutcome::Missed);
+        assert_eq!(m.net.health.aux.missed, 1);
     }
 
     /// **The LE Coded view runs LE Coded's receiver, and only it.** A Coded
