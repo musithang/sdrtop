@@ -1,11 +1,11 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright (C) 2026 MusiThang <viktor.laszlo92@protonmail.com>
 
-//! The BLE packets, one to a row (net-ux-polish-plan 5.6).
+//! The BLE packets, one to a row.
 //!
 //! The third body behind the section's one export key, beside the band and the
-//! census, sharing their provenance header and destination handling; N20 built
-//! the seam so a new body is one more file, not a new key.
+//! census, sharing their provenance header and destination handling: a new body
+//! is one more file, not a new key.
 //!
 //! **What the list shows, in its order.** The rows are `NetState::ble_shown`,
 //! the account the packet list draws from, so a file taken while the list was
@@ -16,7 +16,7 @@
 //! not state it.** Each uncertain figure is a value column and a sigma column.
 //! What the panels refuse, the file leaves blank: the advertised structures
 //! of a packet whose CRC failed (the list's NAME column and the detail's
-//! ADVERTISED section read nothing from one), its modulation and drift (5.4.c),
+//! ADVERTISED section read nothing from one), its modulation and drift,
 //! a start and end frequency where no drift was measured, ChSel on a type
 //! that reserves it, RxAdd on a type with no target address.
 //!

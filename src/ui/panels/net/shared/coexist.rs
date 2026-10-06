@@ -6,24 +6,22 @@
 //! The band across, time running down from now at the top, and each cell
 //! coloured by how busy that megahertz was at that moment: the waterfall's
 //! orientation, so the occupancy profile above it and this history below it
-//! read as one instrument with one frequency ruler (net-ux-polish-plan Stop 3).
-//! Design section 9.1 calls it the single most immediately legible thing either
-//! arc produces, and section 8's acceptance criterion for it is not a test:
-//! **readable at two metres.**
+//! read as one instrument with one frequency ruler. It is meant to be the most
+//! immediately legible thing in the section, and the measure of that is not a
+//! test: **readable at two metres.**
 //!
 //! **Frequency through the band axis, never its own.** A column covers the
 //! cells `band_axis::cells_of` says, the same cells the occupancy profile's
 //! column above it covers, because a shared ruler is only honest if a column
-//! means the same megahertz in both. It was frequency down the side until
-//! 2026-09-19, which gave the two panels no axis in common.
+//! means the same megahertz in both. With frequency down the side, the two
+//! panels would have no axis in common.
 //!
-//! **What it is fed on, and what the plan said it would be fed on.** The plan
-//! has this panel drawing bursts from N14, colour-coded by protocol. N14 landed
-//! per-cell duty cycle and no burst detector - "no demodulation anywhere" was
-//! its own instruction - so there are no bursts to draw and there will be none
-//! until an arc lands one. What there is instead is real and is the same
-//! picture at a coarser grain: the occupancy history, half a second to a row
-//! half. Colour carries the duty cycle.
+//! **What it is fed on.** Not bursts colour-coded by protocol: the band
+//! measurement is a per-cell duty cycle with no burst detector and no
+//! demodulation, so there are no bursts to draw, and there will be none until a
+//! protocol-agnostic burst detector exists. What there is instead is real and
+//! is the same picture at a coarser grain: the occupancy history, half a second
+//! to a row half. Colour carries the duty cycle.
 //!
 //! **What is identified, and what is only energy.** Over the ramp, every BLE
 //! packet that passed its CRC and every classic-BT access-code hit is marked at
@@ -683,8 +681,8 @@ mod tests {
     /// shows, it scrolls so the cursor's moment stays in view: the cursor 50
     /// moments back on an 18-row canvas (36 moments) puts the moment 15 back
     /// at the top, the marker on the last row, and the footer says how old
-    /// the top is. Found by Viktor's two-metre check (Stop 3.3.d): the profile
-    /// went back and the history under it did not.
+    /// the top is. Found at a two-metre reading: the profile went back and the
+    /// history under it did not.
     #[test]
     fn the_history_scrolls_to_keep_the_cursors_moment_in_view() {
         let theme = crate::Theme::sdr();

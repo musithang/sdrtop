@@ -8,11 +8,10 @@
 //! the actual thinking here be tested on a machine with no radio, no driver and
 //! no libSoapySDR, which is what CI has and what most contributors have.
 //!
-//! The rule this file exists to enforce, from `dev_docs/soapy-design.md`: **ask,
-//! do not tabulate; and what cannot be asked is refused, not guessed.** Every
-//! number below comes from the driver. Nothing is a constant somebody typed off
-//! a datasheet, because we do not have the datasheets for the radios this
-//! backend is for.
+//! The rule this file exists to enforce: **ask, do not tabulate; and what
+//! cannot be asked is refused, not guessed.** Every number below comes from the
+//! driver. Nothing is a constant somebody typed off a datasheet, because we do
+//! not have the datasheets for the radios this backend is for.
 
 use std::fmt;
 

@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright (C) 2026 MusiThang <viktor.laszlo92@protonmail.com>
 
-//! The classic Bluetooth hits, one to a row (net-ux-polish-plan 6.6).
+//! The classic Bluetooth hits, one to a row.
 //!
 //! The fifth body behind the section's one export key, sharing the
 //! provenance header and the destination handling with the others.

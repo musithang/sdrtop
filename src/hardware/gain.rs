@@ -45,7 +45,6 @@ use super::traits::StageSpec;
 /// Every stage starts at its **minimum**, which matters for an element whose
 /// range begins below zero. Such a stage is an attenuator, and the reachable
 /// total starts at the sum of the minimums rather than at zero.
-#[allow(dead_code)] // wired in at G8
 pub fn distribute(stages: &[StageSpec], total_db: f64) -> (Vec<f64>, f64) {
     let mut out: Vec<f64> = stages.iter().map(|s| s.min_db).collect();
     if stages.is_empty() {
@@ -70,7 +69,6 @@ pub fn distribute(stages: &[StageSpec], total_db: f64) -> (Vec<f64>, f64) {
 ///
 /// The knob's own limits. Without this the caller would have to add the
 /// maximums up itself, which is the same arithmetic in a second place.
-#[allow(dead_code)] // wired in at G8
 pub fn total_range(stages: &[StageSpec]) -> (f64, f64) {
     stages
         .iter()
@@ -88,7 +86,6 @@ pub fn total_range(stages: &[StageSpec]) -> (f64, f64) {
 /// by at least that much. A list of purely continuous stages has no grid, and
 /// 1 dB is the arbitrary-but-useful answer there, matching what the knob used to
 /// do before it distributed anything.
-#[allow(dead_code)] // wired in at G8
 pub fn next_total(stages: &[StageSpec], from: f64, up: bool) -> f64 {
     let (lo, hi) = total_range(stages);
     if stages.is_empty() || hi <= lo {
@@ -130,7 +127,6 @@ pub fn next_total(stages: &[StageSpec], from: f64, up: bool) -> f64 {
 /// matched without regard to case later, so `lna=28` works.
 ///
 /// Returns the pairs in the order given, plus anything worth telling the user.
-#[allow(dead_code)] // wired in at G10
 pub fn parse_named(text: &str) -> (Vec<(String, f64)>, Vec<String>) {
     let mut pairs = Vec::new();
     let mut notes = Vec::new();
@@ -163,7 +159,6 @@ pub fn parse_named(text: &str) -> (Vec<(String, f64)>, Vec<String>) {
 /// others where they were rather than zeroing them. A name the device does not
 /// have is **reported, not guessed at**: silently applying it to the nearest
 /// stage is how a config written for one radio quietly mis-sets another.
-#[allow(dead_code)] // wired in at G10
 pub fn apply_named(
     stages: &[StageSpec],
     pairs: &[(String, f64)],
@@ -201,7 +196,6 @@ pub fn apply_named(
 ///
 /// The round trip is the contract: what this writes, [`parse_named`] and
 /// [`apply_named`] must read back to the same values.
-#[allow(dead_code)] // wired in at G10
 pub fn format_named(stages: &[StageSpec], values: &[f64]) -> String {
     stages
         .iter()
@@ -429,8 +423,8 @@ mod tests {
         assert_eq!(next_total(&[], 10.0, true), 0.0);
     }
 
-    /// A second two-position element stays in the list after G3 gave the boost
-    /// key to the first. It is still a stage the knob can set, and its span is
+    /// A second two-position element stays in the list once the boost key has
+    /// gone to the first. It is still a stage the knob can set, and its span is
     /// simply large: it absorbs nothing until the remainder reaches it.
     #[test]
     fn a_switch_left_in_the_list_is_still_distributed_over() {

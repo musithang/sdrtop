@@ -3,8 +3,8 @@
 
 //! Taking the data away.
 //!
-//! Design section 15. Not under `signal`, because it is not DSP, and not under
-//! `ui`, because it is not drawing.
+//! Not under `signal`, because it is not DSP, and not under `ui`, because it is
+//! not drawing.
 //!
 //! **The reusable part is not the CSV writer.** It is [`provenance`], the header
 //! that says what radio measured this and against what, and [`destination`], the
@@ -224,8 +224,7 @@ mod tests {
 
     /// **The seam, demonstrated.** Bodies that know nothing about each other
     /// produce files with the same header and the same naming, which is the
-    /// property a later IQ-sample export needs; the BLE packets were the third
-    /// to use it (net-ux-polish-plan 5.6).
+    /// property a later IQ-sample export needs.
     #[test]
     fn every_body_shares_one_header_and_one_naming() {
         let dir = scratch();

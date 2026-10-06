@@ -4,9 +4,9 @@
 //! `NetOccupancyPanel` - who is spending the airtime, one megahertz at a time.
 //!
 //! The band across the width of the panel, with the duty cycle of each cell as
-//! the height of its bar and the Wi-Fi channel numbering underneath it. Design
-//! section 11 calls it `net_occupancy` and the question it answers is the one
-//! `net_survey` is built around: what is in this band?
+//! the height of its bar and the Wi-Fi channel numbering underneath it. The
+//! question it answers is the one `net_survey` is built around: what is in this
+//! band?
 //!
 //! **Three states, drawn three ways, and the distinction is the panel.**
 //!
@@ -350,7 +350,7 @@ fn lines(
                     ),
                     Span::raw("  "),
                 ];
-                // The duty cycle through idiom A, with the spread its window count
+                // The duty cycle through `widgets::reading`, with the spread its window count
                 // supports: a cell watched for a sixth of the time is not a sixth as
                 // busy, it is as busy with a wider bar. `resolution` is the tenth of
                 // a percent the reading is shown to, which is the difference that
@@ -732,8 +732,8 @@ mod tests {
     ///
     /// `Reading` dashes a value its uncertainty cannot support, so this passes
     /// only while the duty cycle's binomial error is inside the resolution the
-    /// panel shows it at. It was not, at first: N14 declared a tenth of a
-    /// percent that a fifty-millisecond dwell cannot pay for, and this is the
+    /// panel shows it at. It was not, at first: a tenth of a percent was
+    /// declared that a fifty-millisecond dwell cannot pay for, and this is the
     /// assertion that would have caught it.
     #[test]
     fn the_busiest_cell_prints_a_number_rather_than_a_dash() {

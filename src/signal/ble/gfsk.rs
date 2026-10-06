@@ -29,9 +29,9 @@ const FILTER_SPAN_SYMBOLS: usize = 4;
 /// symbol.
 ///
 /// `deviation_hz` is the peak frequency deviation - 250 kHz for BLE LE 1M's
-/// nominal modulation index of 0.5 at a 1 Mb/s symbol rate, since `h = 2 *
-/// deviation / symbol_rate`. Design section 2.1's measurement 1 is this same
-/// `h`, measured the other way around from a captured signal. `bt` is the
+/// nominal modulation index of 0.5 at a 1 Mb/s symbol rate, since
+/// `h = 2 * deviation / symbol_rate`. The measured modulation index is this
+/// same `h`, read the other way round from a captured signal. `bt` is the
 /// Gaussian filter's bandwidth-time product, 0.5 for BLE.
 ///
 /// NRZ maps each bit to ±1, held for `sps` samples, Gaussian-filtered to

@@ -9,18 +9,18 @@
 //! Carr leak   -21.3  ±0.8   dB   [       max -15         ]     +6.3 dB
 //! ```
 //!
-//! Design section 9.1 calls this idiom B. Label, the reading (idiom A, drawn by
-//! [`Reading`] so a number looks the same here as anywhere else), a bar showing
-//! where the value sits inside the allowed band, and the signed margin.
+//! Label, the reading (drawn by [`Reading`] so a number looks the same here as
+//! anywhere else), a bar showing where the value sits inside the allowed band,
+//! and the signed margin.
 //!
-//! **The word "pass" appears nowhere, and a test says so.** Design section 6:
-//! a conformance verdict is a claim about a measurement made with a calibrated
-//! instrument, a known cable and a specified test pattern. We have an
-//! uncalibrated 8-bit receiver and an antenna in a room. The number and its
-//! distance from the line are real and are the useful part; the verdict would be
-//! the only invented thing on the screen. This is rule 5 applied to a word.
+//! **The word "pass" appears nowhere, and a test says so.** A conformance
+//! verdict is a claim about a measurement made with a calibrated instrument, a
+//! known cable and a specified test pattern. We have an uncalibrated 8-bit
+//! receiver and an antenna in a room. The number and its distance from the line
+//! are real and are the useful part; the verdict would be the only invented
+//! thing on the screen. This is rule 5 applied to a word.
 //!
-//! **The margin is positive when the value is inside, by that much.** The design
+//! **The margin is positive when the value is inside, by that much.** A first
 //! sketch printed the two-sided row that way and the one-sided row as
 //! `value - limit`, which for a ceiling flips the sign of "good". One quantity
 //! gets one scale everywhere it appears (rule 5), and the convention that
@@ -73,11 +73,10 @@ pub(crate) enum Limit {
     Band { low: f64, high: f64 },
     /// A ceiling: the value belongs at or below it.
     ///
-    /// B8 gave this widget its first real consumer, and every one of its
-    /// four rows is a band or a floor - no ceiling among them. Kept rather
-    /// than removed: a one-sided limit that names a maximum is exactly as
-    /// real a shape as one that names a minimum, and this widget's own
-    /// `carrier_leak` test fixture is what still exercises it, the same
+    /// The BLE modulation rows are bands or floors - no ceiling among them.
+    /// Kept rather than removed: a one-sided limit that names a maximum is
+    /// exactly as real a shape as one that names a minimum, and this widget's
+    /// own `carrier_leak` test fixture is what still exercises it, the same
     /// design-sketch row the module doc's own worked example draws.
     #[allow(dead_code)]
     Max(f64),
@@ -355,7 +354,7 @@ impl<'a> LimitRow<'a> {
     }
 
     /// The reading split into the value and everything after it, because the
-    /// two are aligned in different directions. Idiom A puts the value first
+    /// two are aligned in different directions. `widgets::reading` puts the value first
     /// and its own tests hold it there.
     fn split(&self) -> ((String, Ink), String) {
         let mut pieces = self.reading.pieces().into_iter();
@@ -637,7 +636,7 @@ mod tests {
     #[test]
     fn a_value_the_cell_will_not_print_gets_no_marker_and_no_margin() {
         let w = widths(30);
-        // The uncertainty swamps the resolution, so idiom A dashes the value.
+        // The uncertainty swamps the resolution, so `widgets::reading` dashes the value.
         let row = LimitRow::new(
             "Mod index",
             Reading::new(Uncertain::from_sigma(0.502, 0.5), "", 0.05),

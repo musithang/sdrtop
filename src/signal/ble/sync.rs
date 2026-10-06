@@ -5,16 +5,15 @@
 //! instantaneous-frequency output into bits, once [`super::detect`] has
 //! already said a packet starts near here.
 //!
-//! Uses `dsp::timing::find_phase`, not `dsp::timing::recover` (Gardner).
-//! Design section 1.1 offers both and says to use whichever the test vectors
-//! say is enough; building this module's own test vectors found Gardner's
-//! detector converging to a phase measurably biased from the true one on a
-//! Gaussian-filtered GFSK discriminator's output - a real S-curve bias from
-//! feeding it a pulse shape its derivation does not assume, not a bug, and
-//! `dsp::timing`'s own module doc records the measurement. A BLE advertising
-//! packet is a short burst with a static phase, not a stream whose timing
-//! drifts, which is exactly what a search-once-and-hold method fits, so that
-//! is what this module uses.
+//! Uses `dsp::timing::find_phase`, not `dsp::timing::recover` (Gardner). Either
+//! would do where the test vectors say it is enough; building this module's own
+//! test vectors found Gardner's detector converging to a phase measurably
+//! biased from the true one on a Gaussian-filtered GFSK discriminator's
+//! output - a real S-curve bias from feeding it a pulse shape its derivation
+//! does not assume, not a bug, and `dsp::timing`'s own module doc records the
+//! measurement. A BLE advertising packet is a short burst with a static phase,
+//! not a stream whose timing drifts, which is exactly what a
+//! search-once-and-hold method fits, so that is what this module uses.
 
 #[cfg(test)]
 use crate::signal::dsp::timing::find_phase;

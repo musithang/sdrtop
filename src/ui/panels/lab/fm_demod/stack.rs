@@ -106,7 +106,7 @@ impl<'a> Stack<'a> {
 /// Remove any section nameplate left with nothing under it.
 ///
 /// Shedding works row by row and can empty a section completely - and a nameplate
-/// over blank space is exactly the failure B3 took out of the idle panel. Walked
+/// over blank space is exactly the failure taken out of the idle panel. Walked
 /// back to front so a run of newly emptied sections collapses in one pass.
 fn drop_orphan_headings(rows: &mut Vec<(Line<'_>, Prio)>) {
     let mut i = rows.len();
@@ -205,7 +205,7 @@ mod tests {
 
     #[test]
     fn fit_protects_the_foot_of_the_stack() {
-        // B5 itself: the RDS section is last and used to be the part that got cut.
+        // The RDS section is last and used to be the part that got cut.
         // Under pressure it must still be the part that survives.
         let full = wfm_stack().rows.iter().filter(|(l, _)| !is_gap(l)).count();
         let kept = names(&wfm_stack().fit(full - 4));
@@ -218,7 +218,7 @@ mod tests {
 
     #[test]
     fn fit_takes_an_emptied_sections_nameplate_with_it() {
-        // A heading over nothing is what B3 removed from the idle panel; the
+        // A heading over nothing was removed from the idle panel; the
         // shedding pass must not put one back.
         let mut s = Stack::new();
         s.push(Line::raw("lock"));

@@ -5,7 +5,7 @@
 //! delta-f2 average and the ratio of the averages, from a packet the receiver
 //! already recovered rather than a dedicated test transmission.
 //!
-//! Design section 2.1's four numbers are specified as read from a *known*
+//! The four numbers are specified as read from a *known*
 //! symbol pattern: `00001111` repeated for delta-f1, `10101010` repeated for
 //! delta-f2. Bluetooth's own conformance test procedure gets that known
 //! pattern by putting the device under test into Direct Test Mode and

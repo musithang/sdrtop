@@ -22,8 +22,8 @@ use crate::state::MenuPane;
 
 use super::model::Menu;
 
-/// Each section's colour: the theme's series colours in section order
-/// (net-ux-polish-plan 7.1), so every palette has one and the chip in the
+/// Each section's colour: the theme's series colours in section order, so
+/// every palette has one and the chip in the
 /// list, the heading over the views and their number keys agree.
 pub fn accent(section: usize, theme: &crate::Theme) -> ratatui::style::Color {
     theme.series_color(section)

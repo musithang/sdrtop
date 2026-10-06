@@ -8,9 +8,9 @@
 //! CFO   -3.2 ±0.4 ppm
 //! ```
 //!
-//! Value in the reading colour, uncertainty and unit dimmed. Design section 9.1
-//! calls this idiom A, and building it once is what will keep eleven panels from
-//! becoming eleven arguments about how to print a number.
+//! Value in the reading colour, uncertainty and unit dimmed. Building it once is
+//! what keeps a dozen panels from becoming a dozen arguments about how to print
+//! a number.
 //!
 //! **Two rules, and they are the whole widget.**
 //!

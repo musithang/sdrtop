@@ -548,7 +548,7 @@ fn net_band_strip(state: &SdrMetrics, theme: &crate::Theme, outer_width: u16) ->
 /// The NET section's bottom band: what the receiver is doing, in place of the
 /// gain staging and tuning the normal header shows.
 ///
-/// Design section 9.2. In this section the tuning and the gain are the least
+/// In this section the tuning and the gain are the least
 /// interesting things on the screen, and they have a panel of their own; what
 /// the user needs continuously is the mode, because `SURVEY` and `LOCK` mean
 /// different things about every number below them - then which decoder is
@@ -1393,8 +1393,7 @@ mod tests {
         );
     }
 
-    /// A `SdrMetrics` sitting in the NET section on Wi-Fi channel 6, which is
-    /// design section 9.2's own worked example.
+    /// A `SdrMetrics` sitting in the NET section on Wi-Fi channel 6.
     fn net_fixture() -> SdrMetrics {
         let mut m = SdrMetrics::fixture();
         m.ui.section = crate::signal::net::SECTION.to_string();
@@ -1594,9 +1593,8 @@ mod tests {
         assert!(out.contains("2439.500 MHz"), "{out}");
     }
 
-    /// N10's exit condition, reworked when the band grew: at every width what is
-    /// left is what matters most. The rate goes first, then the frequency, and
-    /// the mode survives to the last column.
+    /// At every width what is left is what matters most. The rate goes first,
+    /// then the frequency, and the mode survives to the last column.
     #[test]
     fn the_band_gives_way_least_important_first() {
         let theme = crate::Theme::sdr();

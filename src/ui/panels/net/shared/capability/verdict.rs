@@ -105,7 +105,7 @@ fn compose(caps: &DeviceCapabilities, retune: Option<&RetuneRun>) -> (Grade, Str
 }
 
 /// The verdict's word and the ceiling it was judged at, as the menu's live
-/// line for this layout says it (net-ux-polish-plan 7.2): the word from the
+/// line for this layout says it: the word from the
 /// same composition the panel draws, so the two cannot disagree.
 pub(crate) fn headline(caps: &DeviceCapabilities, retune: Option<&RetuneRun>) -> String {
     let (_, word, _) = compose(caps, retune);

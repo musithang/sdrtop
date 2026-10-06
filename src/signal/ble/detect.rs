@@ -94,7 +94,7 @@ pub fn preamble_bits(access_address: u32, phy: Phy) -> Vec<bool> {
 }
 
 /// GFSK parameters for the LE 1M PHY, gathered so a caller states the working
-/// rate once. Design section 2.1's nominal modulation index `h = 0.5` at a
+/// rate once. The nominal modulation index `h = 0.5` at a
 /// 1 Mb/s symbol rate is 250 kHz of peak deviation (`h = 2 * deviation /
 /// symbol_rate`); the Gaussian filter's own bandwidth-time product is the
 /// same 0.5.

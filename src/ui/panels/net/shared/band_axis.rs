@@ -6,9 +6,9 @@
 //!
 //! **One mapping for every panel that draws the band across.** The occupancy
 //! profile and the coexistence heatmap become the two halves of one instrument
-//! (net-ux-polish-plan Stop 3), and a shared ruler is only honest if a column
-//! means the same megahertz in both. Each computing its own would be two
-//! answers to one question that agree until a width where rounding differs.
+//! and a shared ruler is only honest if a column means the same megahertz in
+//! both. Each computing its own would be two answers to one question that agree
+//! until a width where rounding differs.
 //!
 //! A column covers `cells[lo..hi]`, `lo = x * CELLS / width`: when the panel is
 //! narrower than the band a column holds several cells, and when it is wider a

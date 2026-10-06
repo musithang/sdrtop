@@ -3,7 +3,7 @@
 
 //! `NetDecodeHealthPanel` - what the receiver missed.
 //!
-//! Design section 13.2: **this is not a debug panel, it is testimony.** Without
+//! **This is not a debug panel, it is testimony.** Without
 //! it, every count in the section is a lower bound presented as a total. A frame
 //! at 6 Mbps carrying 1500 bytes is two milliseconds, which at 20 Msps spans
 //! several driver blocks, and there are three separate ways for one of those
@@ -12,18 +12,16 @@
 //! whole block under load, and a run broken in the middle takes with it whatever
 //! was being assembled. None of the three is visible from downstream.
 //!
-//! **What was decoded, and what nothing decodes.** Two decoders run now, and
-//! their funnels are counted where they happen: every BLE trigger ends as a
-//! packet whose CRC passed, one whose CRC failed, or a capture nothing could be
-//! decoded from (`signal::ble::receive::Funnel`); classic Bluetooth counts
-//! access-code hits and the piconets whose UAP is resolved; LE Coded, once its
-//! receiver has run, counts its funnel as BLE does and its AuxPtrs by how
-//! each ended. A decoder that has
-//! not run this session shows `—` and "not decoding", never a zero: a row
-//! reading `0` is a claim that it looked and found none. There is still no
-//! protocol-agnostic burst detector (the foundation plan's N14 gap), and its
-//! row says so the same way - rule 2 in the small: what cannot be asked is
-//! refused, never invented.
+//! **What was decoded, and what nothing decodes.** Each decoder's funnel is
+//! counted where it happens: every BLE trigger ends as a packet whose CRC
+//! passed, one whose CRC failed, or a capture nothing could be decoded from
+//! (`signal::ble::receive::Funnel`); classic Bluetooth counts access-code hits
+//! and the piconets whose UAP is resolved; LE Coded, once its receiver has run,
+//! counts its funnel as BLE does and its AuxPtrs by how each ended. A decoder
+//! that has not run this session shows `—` and "not decoding", never a zero: a
+//! row reading `0` is a claim that it looked and found none. There is still no
+//! protocol-agnostic burst detector, and its row says so the same way - rule 2
+//! in the small: what cannot be asked is refused, never invented.
 
 use ratatui::{
     layout::Rect,
@@ -335,7 +333,7 @@ fn lines(
         out.push(dash("classic BT", "not decoding"));
     }
 
-    // What it cost: the same figure the header band shows (Stop 1.3), red
+    // What it cost: the same figure the header band shows, red
     // above the stream's own pace, where the worker is falling behind.
     out.push(match h.decode_load {
         Some(load) => count(

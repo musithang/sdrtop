@@ -81,8 +81,8 @@ impl LayoutEngine {
     }
 
     /// The focus keys and bindings of every panel the layouts in menu
-    /// section `section` show, in layout order, each panel once
-    /// (net-ux-polish-plan 7.3): what the Keys pane lists for that section,
+    /// section `section` show, in layout order, each panel once: what the Keys
+    /// pane lists for that section,
     /// read from the registry so it cannot drift from the panels.
     pub fn section_controls(
         &self,

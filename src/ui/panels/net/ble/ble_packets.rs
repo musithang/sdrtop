@@ -3,23 +3,20 @@
 
 //! `NetBlePacketsPanel` - what this device is advertising.
 //!
-//! B6's exit condition, on screen: real advertising channel PDUs, CRC-checked,
-//! newest first. B7 added the SNR and CFO columns. No sorting - a live packet
-//! feed is already in the order that matters, arrival order, and a second
-//! ordering has not earned its own column yet.
+//! Real advertising channel PDUs, CRC-checked, newest first, with their SNR and
+//! CFO. No sorting - a live packet feed is already in the order that matters,
+//! arrival order, and a second ordering has not earned its own column yet.
 //!
-//! **A cursor since net-ux-polish-plan 5.3**, on the packet rather than the
-//! row (`state::BlePacketView`): the list is newest first, so each arrival
-//! moves every row down one, and the mark goes with its packet, the view
-//! following it down.
+//! **A cursor**, on the packet rather than the row (`state::BlePacketView`):
+//! the list is newest first, so each arrival moves every row down one, and the
+//! mark goes with its packet, the view following it down.
 //!
-//! **Three states, not two.** Design section 13.2's lesson for this section:
-//! silence has more than one cause, and printing zero for all of them is a
-//! lie by omission. Nothing decoding because the radio is not on an
-//! advertising channel, nothing decoding because the sample rate cannot
-//! reach the working rate, and genuinely nothing heard yet on a channel that
-//! is being watched correctly, are three different claims - only the last one
-//! is "we listened and nobody transmitted".
+//! **Three states, not two.** Silence has more than one cause, and printing
+//! zero for all of them is a lie by omission. Nothing decoding because the
+//! radio is not on an advertising channel, nothing decoding because the sample
+//! rate cannot reach the working rate, and genuinely nothing heard yet on a
+//! channel that is being watched correctly, are three different claims - only
+//! the last one is "we listened and nobody transmitted".
 
 use ratatui::{
     layout::Rect,
@@ -203,7 +200,7 @@ fn header_line(w: &Widths, theme: &crate::Theme) -> Line<'static> {
     ))
 }
 
-/// `12.3` or a dash - B7's per-packet SNR, in dB. No unit in the cell itself;
+/// `12.3` or a dash - the per-packet SNR, in dB. No unit in the cell itself;
 /// the column header carries it, the way every table in this deck does.
 fn fmt_snr(snr_db: Option<f64>) -> String {
     match snr_db {
@@ -213,7 +210,7 @@ fn fmt_snr(snr_db: Option<f64>) -> String {
 }
 
 /// `37.0 ±1.2 kHz` and `+15.4 ±0.5 ppm` - the transmitter's crystal error
-/// from B7's frequency offset, through `RadioState::transmitter_offset`, the
+/// from the packet's frequency offset, through `RadioState::transmitter_offset`, the
 /// one conversion every NET offset goes through: corrected for our own
 /// oscillator when a reference allows, and what that makes it worth is the
 /// chrome's engine tag, not these cells. kHz because a crystal's error is
@@ -369,9 +366,8 @@ fn row(
     Line::from(spans)
 }
 
-/// B11's own exit condition, on screen: packet counts per advertising
-/// channel, with the dwell fraction stated, and each channel's CRC pass
-/// rate beside its count (net-ux-polish-plan 5.8). In LOCK the one channel
+/// Packet counts per advertising channel, with the dwell fraction stated,
+/// and each channel's CRC pass rate beside its count. In LOCK the one channel
 /// the radio sits on, with no dwell fraction - a radio locked to one channel
 /// is not dividing its time between three, so the fraction would be a claim
 /// this mode does not make.
@@ -727,7 +723,7 @@ mod tests {
         assert!(bad_line < ok_line, "channel 38 (bad) should draw first");
     }
 
-    /// B11's own exit condition: packet counts per advertising channel, with
+    /// Packet counts per advertising channel, with
     /// the dwell fraction stated, on the same screen as the packets
     /// themselves - and only while surveying, since a locked radio is not
     /// dividing its time between the three at all.

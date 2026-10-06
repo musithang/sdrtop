@@ -341,7 +341,6 @@ impl SampleGeometry {
 /// describing an attenuator rather than an amplifier. The previous model rounded
 /// both away and would have answered 0 dB for a stage sitting at -10.
 #[derive(Clone, Debug, PartialEq)]
-#[allow(dead_code)] // read from G3
 pub struct StageSpec {
     /// The driver's own name for it: `LNA`, `IFGR`, `TUNER`, whatever it said.
     /// Never one of ours, because a name we chose would be a claim about a chain
@@ -360,7 +359,6 @@ pub struct StageSpec {
     pub table: Vec<f64>,
 }
 
-#[allow(dead_code)] // read from G3
 impl StageSpec {
     /// Whether the driver said anything usable about this element.
     ///
@@ -423,6 +421,7 @@ impl StageSpec {
 
     /// One setting: the driver exposes the element but it cannot be moved.
     /// Not a fault, and not something to offer the user a control for.
+    #[allow(dead_code)] // only the tests ask it
     pub fn is_fixed(&self) -> bool {
         self.positions() == Some(1)
     }
@@ -961,15 +960,14 @@ pub struct RxContext {
     /// while the NET section is the one on screen, so a user who never opens it
     /// pays for none of it.
     ///
-    /// It has a [`FeedHealth`] where the demod feed does not, and the difference
-    /// is what the two workers do with a block they never receive. The demod
-    /// notices: it duty-cycles to four updates a second and reads its own
-    /// sequence numbers, so a hole shows up as a gap in the audio and is
-    /// counted. This worker is meant to run flat out on every block, and design
-    /// section 13.2 makes what it missed a displayed number rather than an
-    /// inference - which needs the count taken at the point of refusal, because
-    /// after `try_send` returns there is nothing left that knows the block
-    /// existed.
+    /// It has a [`FeedHealth`] where the demod feed does not, and the
+    /// difference is what the two workers do with a block they never receive.
+    /// The demod notices: it duty-cycles to four updates a second and reads its
+    /// own sequence numbers, so a hole shows up as a gap in the audio and is
+    /// counted. This worker is meant to run flat out on every block, and what
+    /// it missed is a displayed number rather than an inference - which needs
+    /// the count taken at the point of refusal, because after `try_send`
+    /// returns there is nothing left that knows the block existed.
     pub net_tx: crossbeam_channel::Sender<StreamBlock>,
     /// What the NET feed did with the blocks handed to it, for the poll task.
     pub net_feed: FeedHealth,
@@ -1563,7 +1561,7 @@ mod tests {
         assert!(!cont.is_switch());
     }
 
-    /// The G1 finding, and the reason `positions` exists: an element whose step
+    /// The reason `positions` exists: an element whose step
     /// spans its range has two settings and is a boost, not a stage.
     #[test]
     fn an_element_whose_step_spans_its_range_is_a_switch() {

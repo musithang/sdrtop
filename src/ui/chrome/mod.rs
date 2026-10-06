@@ -428,7 +428,7 @@ mod tests {
 
     #[test]
     fn wrap_keeps_a_verdict_headline_whole() {
-        // The B2 case: 120-column terminal → 29 inner → 28 for the copy. The
+        // A 120-column terminal → 29 inner → 28 for the copy. The
         // headline must break between words, not mid-word as the clip did.
         let rows = wrap("\u{26a0} WFM CARRIER \u{2014} ADJACENT SPLATTER", 28, 2);
         assert_eq!(

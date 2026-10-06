@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright (C) 2026 MusiThang <viktor.laszlo92@protonmail.com>
 
-//! `fm_demod` - the right column of the `lab_signal` preset's redesign
-//! (DSN-2026-07): the FM MPX · DEMOD instrument.
+//! `fm_demod` - the right column of the `lab_signal` preset: the FM MPX ·
+//! DEMOD instrument.
 //!
 //! The panel dispatches on modulation ([`sections_for`]) rather than showing a
 //! fixed grid: broadcast FM gets MPX baseband, the stereo pilot, deviation and

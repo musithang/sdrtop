@@ -180,7 +180,7 @@ pub enum InputMode {
     SweepStartInput,
     SweepStopInput,
     /// How far the user trusts the census device at `address` as a frequency
-    /// reference, in ppm (net-ux-polish-plan 4.7).
+    /// reference, in ppm.
     ReferenceAccuracyInput {
         address: [u8; 6],
     },

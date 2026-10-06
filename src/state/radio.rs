@@ -75,10 +75,8 @@ impl RadioState {
 
     /// One stage by position, exact.
     ///
-    /// The exact-value pair to [`Self::set_stage_gain`], read from G8 where the
-    /// knob starts distributing across stages. The two rounding views above are
-    /// what the panels use until then.
-    #[allow(dead_code)] // read from G8
+    /// The exact-value pair to [`Self::set_stage_gain`]; the two rounding
+    /// views above are what the panels show.
     pub fn stage_gain(&self, index: usize) -> f64 {
         self.gains.get(index).copied().unwrap_or(0.0)
     }
@@ -122,10 +120,9 @@ pub const REFERENCE_STALE_S: u64 = 15 * 60;
 /// What a ppm reading is worth, which depends entirely on what it was measured
 /// against.
 ///
-/// Design section 7.1. The three are not degrees of confidence in one quantity;
-/// they are three different quantities that happen to share a unit, and a panel
-/// showing one while meaning another is the failure this enum exists to make
-/// impossible.
+/// The three are not degrees of confidence in one quantity; they are three
+/// different quantities that happen to share a unit, and a panel showing one
+/// while meaning another is the failure this enum exists to make impossible.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
 pub enum Provenance {
     /// No reference has been established. **Relative only**: differences between
@@ -136,7 +133,7 @@ pub enum Provenance {
     /// taken as zero within their stated accuracy. Relative to that
     /// transmitter, which is named on screen with the figure the user gave.
     ///
-    /// Set from the census (`T` on a selected device, net-ux-polish-plan 4.7,
+    /// Set from the census (`T` on a selected device,
     /// [`FrequencyReference::from_trusted`]), where naming a transmitter is
     /// already the idiom. **Never promoted to [`Self::Traceable`]**: a
     /// user's statement about a device is not a standard station, however
@@ -159,8 +156,8 @@ impl Provenance {
 
 /// Our own oscillator's error, once somebody has established it.
 ///
-/// Design section 7.2: it carries its value, its uncertainty, its provenance
-/// **and its age**, and it expires. A reference measured an hour ago in a cold
+/// It carries its value, its uncertainty, its provenance **and its age**, and
+/// it expires. A reference measured an hour ago in a cold
 /// room is not a reference now, and the readings that depend on it fall back to
 /// [`Provenance::Unreferenced`] rather than silently going on being corrected.
 #[derive(Clone, Debug)]
@@ -176,8 +173,8 @@ pub struct FrequencyReference {
     pub at: std::time::Instant,
     /// How close the estimate came to the Cramer-Rao bound for the block and
     /// SNR it was measured from (`signal::reference::CarrierOffset`), `None`
-    /// for a reference no bounded estimator produced. Design section 5.4:
-    /// the bound is the floor, and it is displayed.
+    /// for a reference no bounded estimator produced. The bound is the floor,
+    /// and it is displayed.
     pub efficiency: Option<f64>,
     /// The census device a user-stated reference rests on, so the same `T`
     /// that trusted it can let it go; `None` for a standard station.
@@ -476,9 +473,9 @@ mod tests {
     }
 
     /// **A stale reference falls back rather than quietly going on being
-    /// applied.** Design section 7.2, and the failure it prevents is the quiet
-    /// one: an hour-old correction from a cold room, still subtracted, on a
-    /// number nobody will re-derive.
+    /// applied.** The failure it prevents is the quiet one: an hour-old
+    /// correction from a cold room, still subtracted, on a number nobody will
+    /// re-derive.
     #[test]
     fn a_stale_reference_falls_back_to_unreferenced() {
         let now = Instant::now();

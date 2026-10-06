@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright (C) 2026 MusiThang <viktor.laszlo92@protonmail.com>
 
-//! The live line under a view in the menu (net-ux-polish-plan 7.2): what that
+//! The live line under a view in the menu: what that
 //! screen would tell you now, in one line.
 //!
 //! **Never more than the screen delivers.** Each line is built from the

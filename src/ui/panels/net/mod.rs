@@ -12,8 +12,7 @@
 //! Bluetooth-only, and [`shared`] is protocol-agnostic and band-wide. This
 //! mirrors `signal::ble` / `signal::bt` below it, which already made this
 //! split - the panel layer had drifted out of step with it (one BLE panel
-//! was named `bt_rf` until `dev_docs/net-ux-polish-plan.md`'s Tier 0 fixed
-//! it), and the subdirectories exist so that drift cannot happen unnoticed
+//! was once named `bt_rf`), and the subdirectories exist so that drift cannot happen unnoticed
 //! again: a panel's own path now says which group it belongs to.
 
 pub mod ble;

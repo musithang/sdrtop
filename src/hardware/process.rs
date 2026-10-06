@@ -1063,12 +1063,12 @@ pub(crate) mod tests {
 
     /// The block the NET feed could not take is counted.
     ///
-    /// The same shape as the FFT feed's test above and for the same reason, with
-    /// one difference that matters: design section 13.2 makes this number
-    /// testimony rather than diagnostics. A Wi-Fi frame spans several driver
-    /// blocks, so a refusal here is a frame nobody will ever see, and a panel
-    /// that reported the frames it decoded without reporting these would be
-    /// presenting a lower bound as a total.
+    /// The same shape as the FFT feed's test above and for the same reason,
+    /// with one difference that matters: this number is testimony rather than
+    /// diagnostics. A Wi-Fi frame spans several driver blocks, so a refusal
+    /// here is a frame nobody will ever see, and a panel that reported the
+    /// frames it decoded without reporting these would be presenting a lower
+    /// bound as a total.
     #[test]
     fn a_block_the_net_feed_cannot_take_is_counted() {
         let (ctx, _sample_rx, _demod_rx, _net_rx) = rx_ctx_holding(8, 1);

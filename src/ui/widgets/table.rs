@@ -3,10 +3,9 @@
 
 //! The sortable table: columns, a sort key, and a selected row.
 //!
-//! Design section 9.1 calls this idiom D, and it is the one the app had no
-//! answer for. Both arcs need a population keyed by address - who is here, how
-//! much airtime each of them spends, how good their clock is - and a list of
-//! devices with no way to order it is a list nobody can read.
+//! A population keyed by address - who is here, how much airtime each of them
+//! spends, how good their clock is - needs one: a list of devices with no way
+//! to order it is a list nobody can read.
 //!
 //! **The widget draws; it does not sort.** Which column orders the rows, which
 //! way round, and which row the cursor is on are decisions with consequences

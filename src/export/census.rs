@@ -1,22 +1,20 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright (C) 2026 MusiThang <viktor.laszlo92@protonmail.com>
 
-//! The population, one transmitter to a row.
-//!
-//! The body design section 15 names first, and the second one written, which is
+//! The population, one transmitter to a row. The second body written, which is
 //! the point: **one body proves nothing about a seam.** This and
-//! [`super::occupancy`] share the provenance header and the destination handling
-//! without either knowing about the other, which is the property a later
-//! IQ-sample export needs to hold.
+//! [`super::occupancy`] share the provenance header and the destination
+//! handling without either knowing about the other, which is the property a
+//! later IQ-sample export needs to hold.
 //!
-//! **Every column the panel shows, and nothing it does not.** Each reading
-//! the census panel prints with its uncertainty is written as two columns, the
+//! **Every column the panel shows, and nothing it does not.** Each reading the
+//! census panel prints with its uncertainty is written as two columns, the
 //! value and its sigma, because a ppm figure without its uncertainty is the
-//! number six months later nobody can judge (design 15.1). **Blank wherever the
-//! panel dashes**, never a zero: a mean from one packet, an offset no packet
-//! reported, an interval not yet read. `the_export_is_blank_wherever_the_panel_
-//! dashes` holds the two to one rule on a populated census, which N20 could
-//! only promise while the census was empty.
+//! number six months later nobody can judge. **Blank wherever the panel
+//! dashes**, never a zero: a mean from one packet, an offset no packet
+//! reported, an interval not yet read.
+//! `the_export_is_blank_wherever_the_panel_ dashes` holds the two to one rule
+//! on a populated census.
 //!
 //! An empty census exports its emptiness as what it is, with the reason in the
 //! header: a quiet room, or nothing decoding addresses (`super::net_section`).
@@ -323,7 +321,7 @@ mod tests {
             .to_string()
     }
 
-    /// **N20's rule, on a populated census at last**: every reading the
+    /// **On a populated census**: every reading the
     /// panel dashes is blank in the file, and every one it prints is there,
     /// across the columns that can be absent.
     #[test]

@@ -349,7 +349,7 @@ pub(super) fn marker_name(key: KeyEvent, state: &Arc<Mutex<SdrMetrics>>) {
     }
 }
 /// How far the user trusts the census device at `address` as a frequency
-/// reference, typed in ppm (net-ux-polish-plan 4.7, `T` in the census).
+/// reference, typed in ppm (`T` in the census).
 ///
 /// **A positive figure or nothing.** Zero would claim a crystal known
 /// exactly, which no user can state; a refusal keeps the entry open so the

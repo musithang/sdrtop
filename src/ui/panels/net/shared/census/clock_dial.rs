@@ -235,7 +235,7 @@ fn watch(u: Uncertain, judged: bool) -> String {
 }
 
 /// The margin to the specification, in the verdict's own terms: inside or
-/// outside by how much, or why it cannot be called. Never "pass" (idiom B).
+/// outside by how much, or why it cannot be called. Never "pass" (`widgets::limit`).
 fn spec(u: Uncertain) -> String {
     let (inside, outside) = limit_ppm();
     let v = u.value().abs();

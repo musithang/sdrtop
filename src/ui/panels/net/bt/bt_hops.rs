@@ -1,10 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright (C) 2026 MusiThang <viktor.laszlo92@protonmail.com>
 
-//! `NetBtHopsPanel` - B15's own exit condition made visible: a
-//! time-versus-channel scatter of classic Bluetooth access-code hits,
-//! design section 2.3's measurement 11 ("Bluetooth hop timing... makes a
-//! piconet's existence obvious without decoding anything").
+//! `NetBtHopsPanel` - classic Bluetooth access-code hits, where and when.
+//! Hop timing makes a piconet's existence obvious without decoding anything.
 //!
 //! **What is actually on screen is capped, and says so.** `signal::net::
 //! worker` watches at most `[net].bt_channels` of however many classic BT
@@ -18,12 +16,12 @@
 //! receiver exists and has heard nothing in the last window" are different
 //! sentences.
 //!
-//! **Two questions, two zones (net-ux-polish-plan 6.2).** The first
-//! version was a time-by-channel scatter, and on the air it showed almost
-//! nothing: in SURVEY the rows were only the channels watched *now*, so hits
-//! heard at an earlier survey position fell off the plot, and a live room
-//! gave a few hits a minute, which a scatter built for 1600 hops a second
-//! draws as a flicker. So the panel asks the two questions separately:
+//! **Two questions, two zones.** The first version was a time-by-channel
+//! scatter, and on the air it showed almost nothing: in SURVEY the rows were
+//! only the channels watched *now*, so hits heard at an earlier survey position
+//! fell off the plot, and a live room gave a few hits a minute, which a scatter
+//! built for 1600 hops a second draws as a flicker. So the panel asks the two
+//! questions separately:
 //!
 //! - **WHERE**: all 79 channels, bars of the session's hits on each, so a
 //!   piconet heard anywhere in the survey keeps its place. Each bar wears the

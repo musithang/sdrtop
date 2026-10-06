@@ -2,7 +2,7 @@
 // Copyright (C) 2026 MusiThang <viktor.laszlo92@protonmail.com>
 
 //! `DemodState` - the measurement the demodulator produces, and the gating that
-//! decides whether it runs at all. See `dev_docs/demod-plan.md`.
+//! decides whether it runs at all.
 //!
 //! The demod is a measurement instrument, not a receiver: it produces numbers
 //! about the signal, never audio. Phase 2 carries the FM discriminator's output

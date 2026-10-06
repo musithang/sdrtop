@@ -522,7 +522,7 @@ fn filter_to_selected(m: &mut SdrMetrics) {
 }
 
 /// A device selected in the census arrives in the BLE packet list with the
-/// list already narrowed to it (net-ux-polish-plan 5.9): the same filter
+/// list already narrowed to it: the same filter
 /// `Enter` sets there, from the census's own selection. Called on a switch
 /// from a layout showing the census to one showing the list, so leaving the
 /// census is what carries the choice; a filter cleared in the list stays

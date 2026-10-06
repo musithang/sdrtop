@@ -1,11 +1,9 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright (C) 2026 MusiThang <viktor.laszlo92@protonmail.com>
 
-//! The band, one megahertz to a row.
-//!
-//! The first body that has data, and the one that tests the rule design section
-//! 15.1 puts on all of them: **an export never contains a number the panel would
-//! have dashed.**
+//! The band, one megahertz to a row. The first body that has data, and the one
+//! that tests the rule every body keeps: **an export never contains a number
+//! the panel would have dashed.**
 //!
 //! Three ways that bites here, and they are three different absences:
 //!
@@ -26,9 +24,8 @@ use crate::state::SdrMetrics;
 
 /// The columns, and the header row that names them.
 ///
-/// Units are in the names. Design section 15's exit criterion is that every
-/// column is interpretable six months later from the header alone, and a column
-/// called `duty` is not.
+/// Units are in the names: every column must be interpretable six months later
+/// from the header alone, and a column called `duty` is not.
 pub const HEADER: &str =
     "mhz,observed,duty_pct,duty_sigma_pct,coverage_pct,mean_dbfs,peak_dbfs,windows";
 
@@ -203,7 +200,7 @@ mod tests {
 
     /// **The file and the screen agree**, asserted against one fixture.
     ///
-    /// Design section 15.1's rule is not that the export is careful, it is that
+    /// The rule is not that the export is careful, it is that
     /// it is careful in exactly the same places. Both ask the same `Uncertain`
     /// the same question, so this checks the wiring rather than the arithmetic.
     #[test]

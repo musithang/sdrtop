@@ -163,16 +163,16 @@ impl Default for SweepSettings {
     }
 }
 
-/// How many classic Bluetooth channels [`crate::signal::net::worker::
-/// NetWorker`] gives a live receiver at once, of however many the current
-/// tuning and sample rate let it see at all (`signal::bt::channel::
-/// channels_in_span`). Small on purpose - see `signal::bt::receive`'s own
-/// doc for the measured cost a channel-select filter at 1 MHz spacing
-/// carries per channel, well past design section 12.4's "a few operations
-/// per sample" budget for always-on detection once more than a handful run
-/// at once. Raising this is a real request for more CPU, not a free wider
-/// view, and `NetWorker::new` logs as much once when it is asked for more
-/// than [`crate::signal::net::worker::SAFE_BT_CHANNELS`].
+/// How many classic Bluetooth channels
+/// [`crate::signal::net::worker:: NetWorker`] gives a live receiver at once, of
+/// however many the current tuning and sample rate let it see at all
+/// (`signal::bt::channel:: channels_in_span`). Small on purpose - see
+/// `signal::bt::receive`'s own doc for the measured cost a channel-select
+/// filter at 1 MHz spacing carries per channel, well past a budget of a few
+/// operations per sample for always-on detection once more than a handful run
+/// at once. Raising this is a real request for more CPU, not a free wider view,
+/// and `NetWorker::new` logs as much once when it is asked for more than
+/// [`crate::signal::net::worker::SAFE_BT_CHANNELS`].
 fn default_bt_channels() -> usize {
     8
 }

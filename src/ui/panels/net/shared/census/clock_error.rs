@@ -3,8 +3,8 @@
 
 //! `CLOCK ERROR` - the room's crystals, worst first, one null meter each.
 //!
-//! Bluetooth design measurement 18: "every Bluetooth device in range, sorted by
-//! how bad its clock is", plotted as a distribution (net-ux-polish-plan 4.3).
+//! Every Bluetooth device in range, sorted by how bad its clock is, plotted
+//! as a distribution.
 //! Rendering only: the offsets are the census's, corrected exactly as the CFO
 //! column corrects them (`RadioState::corrected_ppm`), so a meter and the
 //! table cannot disagree about a clock.
@@ -31,7 +31,7 @@
 //! channel 37 but 60.5 ppm of channel 39. A clock inside the smaller figure is
 //! inside on every channel and one outside the larger is outside on every
 //! channel; between them it depends on which channel, and it is amber, as is
-//! anything the reading's own uncertainty cannot place (idiom B's rule, at the
+//! anything the reading's own uncertainty cannot place (`widgets::limit`'s rule, at the
 //! same two sigma).
 
 use ratatui::{
@@ -50,7 +50,7 @@ use crate::ui::widgets::reading::Reading;
 /// offset and drift."
 const CENTRE_TOLERANCE_HZ: f64 = 150e3;
 
-/// The coverage the colour is decided at: two sigma, idiom B's own
+/// The coverage the colour is decided at: two sigma, `widgets::limit`'s own
 /// (`widgets::limit`), because the question is the same one - can this
 /// instrument tell which side of the line the clock is on.
 const COVERAGE_K: f64 = 2.0;

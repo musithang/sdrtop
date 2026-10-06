@@ -64,8 +64,8 @@ pub(super) fn lines(
     // **Not a fixed primary/secondary pair.** That shape was the HackRF's, and
     // it left a SoapySDR device showing a single combined bar while the focus
     // mode could point at stages that had no row on screen. Showing where the
-    // gain went is also the whole argument of this arc: the driver's automatic
-    // split was the thing nobody could see.
+    // gain went is also the whole argument of the per-stage gain: the driver's
+    // automatic split was the thing nobody could see.
     let selected = state.ui.gain_stage;
     let stages = gm.stages();
     for (index, spec) in stages.iter().enumerate() {

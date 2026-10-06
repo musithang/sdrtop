@@ -6,7 +6,7 @@
 //! with the headroom or the shortfall at the end of each row.
 //!
 //! **How far, and against what, at a glance.** The rows were limit rows
-//! (idiom B), each a bracket the width of the panel with `min 2` in the
+//! (`widgets::limit`), each a bracket the width of the panel with `min 2` in the
 //! middle of it and the radio's own ceiling repeated on every line: true,
 //! and nearly empty. One shared axis does what eight brackets could not: the
 //! ceiling is a single rule, a mode that fits ends short of it, and one that

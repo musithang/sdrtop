@@ -286,7 +286,7 @@ impl Binding {
 }
 
 /// One panel's controls, as its section's block in the Keys pane lists
-/// them (net-ux-polish-plan 7.3): read from the registry at the moment the
+/// them: read from the registry at the moment the
 /// menu is drawn (`ui::LayoutEngine::section_controls`), never typed here,
 /// so a panel that gains a binding shows it without a second list to keep
 /// in step (POLICY rule 7).

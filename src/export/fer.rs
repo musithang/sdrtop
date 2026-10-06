@@ -1,9 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright (C) 2026 MusiThang <viktor.laszlo92@protonmail.com>
 
-//! The session's frame error rate against SNR (net-ux-polish-plan 5.7), the
-//! "session's frame-error curve" foundation design 15 names among the first
-//! things anyone would export: one SNR bin a row, all BLE traffic first, then
+//! The session's frame error rate against SNR, among the first things anyone
+//! would export: one SNR bin a row, all BLE traffic first, then
 //! each census device's own curve.
 //!
 //! **Counts always, a rate only where the panel draws one.** A bin with

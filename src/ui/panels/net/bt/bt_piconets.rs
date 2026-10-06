@@ -2,7 +2,7 @@
 // Copyright (C) 2026 MusiThang <viktor.laszlo92@protonmail.com>
 
 //! `NetBtPiconetsPanel` - the classic preset's roster: one row per piconet
-//! heard, and the selected one spelled out below (net-ux-polish-plan 6.1).
+//! heard, and the selected one spelled out below.
 //!
 //! **A roster of piconets, not of devices.** A LAP is the master's lower
 //! address part and every member of its piconet sends it, so the title and

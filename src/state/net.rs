@@ -6,15 +6,14 @@
 //! Deliberately small, and it will stay smaller than it looks like it should.
 //! What belongs here is the state a *header* has to read, because that is the
 //! one thing every panel in the section shares: the rest lives with the panel
-//! that produced it. See `dev_docs/net-foundation-design.md` section 9.2.
+//! that produced it.
 
 /// Whether the receiver is walking the band or sitting on one channel.
 ///
 /// **This changes what every number below it means**, which is why it is the
 /// first field in the header and why it is never absent. A duty cycle measured
 /// while sweeping is a sample of a channel; measured while locked it is that
-/// channel's whole story. Design section 13.1 makes every panel say which one it
-/// is looking at.
+/// channel's whole story, so every panel says which one it is looking at.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
 pub enum NetMode {
     /// Stepping across the band. The default, because nothing has been chosen
@@ -38,8 +37,8 @@ impl NetMode {
     /// The chrome tag every panel in the section carries.
     ///
     /// A panel says *which claim its numbers are*, and the engine spells and
-    /// colours it, which is the rule for every tag. Design section 13.1: the
-    /// mode is part of the reading, so this is not optional for a panel here and
+    /// colours it, which is the rule for every tag. The mode is part of the
+    /// reading, so this is not optional for a panel here and
     /// `every_net_panel_says_how_its_numbers_were_gathered` is what makes that
     /// true rather than customary.
     pub fn tag(self) -> crate::ui::panel::Tag {
@@ -57,7 +56,7 @@ impl NetMode {
     }
 }
 
-/// How every address in the section is shown: foundation design 1.1's switch.
+/// How every address in the section is shown.
 ///
 /// **It changes the presentation, never the measurement.** The census still
 /// keys devices by the full address and the cursor still follows one; only
@@ -77,7 +76,7 @@ pub enum AddressDisplay {
     /// A public address's top three octets are its IEEE OUI, shown in the
     /// IEEE's own hyphenated form so it cannot be mistaken for a whole
     /// address; a vendor name replaces it once a cited registry snapshot
-    /// exists (net-ux-polish-plan 1.6.d). A random address has no OUI at all,
+    /// exists. A random address has no OUI at all,
     /// so it shows its kind (`signal::ble::address::kind`) instead of a
     /// vendor that would be invented.
     Oui,
@@ -85,8 +84,8 @@ pub enum AddressDisplay {
     /// number instead of any part of the address. For screenshots, demos and
     /// a shared terminal.
     ///
-    /// **The number is per session and is not derived from the address**
-    /// (foundation design 1.1): [`AddressBook`] hands them out in the order
+    /// **The number is per session and is not derived from the address**:
+    /// [`AddressBook`] hands them out in the order
     /// addresses are first heard, so nothing in a screenshot can be turned
     /// back into an address, and the same device reads `#17` in every panel
     /// and the export for as long as the app runs.
@@ -222,8 +221,7 @@ pub const MFR_MARK: &str = "\u{00b7}mfr";
 /// for a name.
 ///
 /// **A random address has no IEEE block, but its manufacturer data may name
-/// a company** (net-ux-polish-plan 5.4, Viktor's decision of 2026-09-22):
-/// `company` is that identifier, shown as the SIG's name for it
+/// a company**: `company` is that identifier, shown as the SIG's name for it
 /// (`signal::ble::assigned`, its legal form dropped) or the number itself
 /// where the snapshot does not list it, marked [`MFR_MARK`] - `Apple·mfr`.
 /// It says whose data format the device sends, which for a phone is its
@@ -280,7 +278,7 @@ fn registrant_or_kind(addr: [u8; 6], random: bool) -> String {
 }
 
 /// The session's masked numbers: each address gets the next one the first
-/// time it is heard, and keeps it (foundation design 1.1).
+/// time it is heard, and keeps it.
 ///
 /// **Assigned on arrival, not on display**, by `signal::net::worker` as each
 /// packet reaches the state, so the number says the order devices were heard
@@ -381,12 +379,12 @@ pub struct NetState {
     /// what will set this.
     pub ble_phy: crate::signal::ble::Phy,
     /// The session's frame error rate against SNR over all BLE traffic
-    /// (`signal::ble::fer`, net-ux-polish-plan 5.7): every packet decoded to
+    /// (`signal::ble::fer`): every packet decoded to
     /// its length, good or failed, in its SNR bin.
     pub fer: crate::signal::ble::fer::FerCurve,
     /// Why nothing is being decoded, when the radio can otherwise stream.
     ///
-    /// B6's decoder needs the working rate `signal::ble::receive::front_end`
+    /// The BLE decoder needs the working rate `signal::ble::receive::front_end`
     /// states, and needs the tuning to actually be one of the three
     /// advertising channels - two conditions `net_survey`'s occupancy
     /// measurement does not share, so this is its own refusal rather than
@@ -412,35 +410,29 @@ pub struct NetState {
     /// happening on this channel", which a corrupted decode still is real
     /// evidence of; the census answers "which devices are confirmed here",
     /// where an unconfirmed address would be an invented reading. Different
-    /// questions, so a different gate. B11's own exit condition - "packet
-    /// counts per channel, with the dwell fraction stated" - is this field
-    /// plus [`NetMode::Survey`]'s rotation always dwelling `1 /
-    /// advertising_channels_hz().len()` of a pass on each.
+    /// questions, so a different gate. Packet counts per channel, with the
+    /// dwell fraction stated, are this field plus [`NetMode::Survey`]'s
+    /// rotation always dwelling `1 / advertising_channels_hz().len()` of a pass
+    /// on each.
     pub ble_channel_packets: [u64; 3],
     /// Of [`Self::ble_channel_packets`], the ones whose CRC passed, same
     /// indexing: the pair gives each advertising channel its pass rate
-    /// (net-ux-polish-plan 5.8). A channel a Wi-Fi network sits on shows
+    /// A channel a Wi-Fi network sits on shows
     /// it here first, as a rate that falls while the count keeps rising.
     pub ble_channel_crc_ok: [u64; 3],
     /// Why classic Bluetooth has no live receiver at all right now, on the
     /// `net_bt` preset - the same "refused, not silent" discipline
-    /// [`ble_refused`] already follows.
-    ///
-    /// **Narrowed by B15.** B14 landed `signal::bt::access_code`, the
-    /// specification-precision primitive, with no live receiver behind it,
-    /// so this was `Some` unconditionally. B15 gives it one -
-    /// `signal::bt::receive::Receiver`, one per channel
-    /// `signal::bt::channel::channels_in_span` and `[net].bt_channels`
-    /// together let the worker watch - so this is now `Some` only when that
-    /// receiver genuinely cannot exist (the current tuning's span holds no
-    /// classic BT channel at all), and `None` while it is running, the same
-    /// as [`ble_refused`]. It says nothing about whether any *hit* has been
-    /// found yet; [`Self::bt_piconets`] is what has been.
+    /// [`ble_refused`] already follows. `Some` only when no
+    /// `signal::bt::receive::Receiver` can exist (one per channel
+    /// `signal::bt::channel::channels_in_span` and `[net].bt_channels` together
+    /// let the worker watch): when the current tuning's span holds no classic
+    /// BT channel at all. `None` while it is running, the same as
+    /// [`ble_refused`]. It says nothing about whether any *hit* has been found
+    /// yet; [`Self::bt_piconets`] is what has been.
     pub bt_refused: Option<String>,
     /// Classic Bluetooth access-code hits since the section opened, newest
-    /// first, capped at [`BT_HOP_LIMIT`] - B15's own record, one entry per
-    /// clean access code any watched channel's
-    /// `signal::bt::receive::Receiver` found.
+    /// first, capped at [`BT_HOP_LIMIT`]: one entry per clean access code any
+    /// watched channel's `signal::bt::receive::Receiver` found.
     pub bt_hops: std::collections::VecDeque<BtHop>,
     /// Which classic BT channels the current tuning, span and
     /// `[net].bt_channels` together let the receiver actually watch, low to
@@ -459,16 +451,15 @@ pub struct NetState {
     /// (`signal::net::worker`'s survey budget): what the coexistence key
     /// says rather than showing a count that looks like a quiet band.
     pub bt_load_limited: bool,
-    /// Per-LAP UAP narrowing, B16's own live state, refined by B17's own
-    /// payload tie-break: the distinct UAP values `signal::bt::header::
-    /// PiconetClock` still cannot rule out for that piconet, from every
-    /// header captured on it so far this session - usually exactly two,
-    /// not one, `PiconetClock`'s own doc has the measurement that found
-    /// that floor and why a header alone cannot go lower. A single
-    /// element means `signal::net::worker`'s own `payload::break_uap_tie`
-    /// resolved the tie using a real DH1/DH3/DH5 payload's own CRC-16 -
-    /// sticky from then on for that LAP, since a piconet's real UAP does
-    /// not change mid-session.
+    /// Per-LAP UAP narrowing, refined by the payload tie-break: the distinct
+    /// UAP values `signal::bt::header:: PiconetClock` still cannot rule out for
+    /// that piconet, from every header captured on it so far this session -
+    /// usually exactly two, not one, `PiconetClock`'s own doc has the
+    /// measurement that found that floor and why a header alone cannot go
+    /// lower. A single element means `signal::net::worker`'s own
+    /// `payload::break_uap_tie` resolved the tie using a real DH1/DH3/DH5
+    /// payload's own CRC-16 - sticky from then on for that LAP, since a
+    /// piconet's real UAP does not change mid-session.
     pub bt_uap: std::collections::HashMap<u32, Vec<u8>>,
     /// Every piconet heard this session, one record per LAP
     /// (`signal::bt::piconet`): what the roster draws, counted over the
@@ -514,7 +505,8 @@ pub struct NetState {
     /// of the instrument: the heatmap moves it, the profile shows that moment.
     pub band_scrub: Option<u64>,
     /// The occupancy profile's cursor, a megahertz cell index (0 is
-    /// 2400 MHz). Stop 1.1's one selection model, keyed by the cell so it stays
+    /// 2400 MHz). The section's one selection model, keyed by the cell so it
+    /// stays
     /// on its megahertz however the panel is resized.
     pub band_cursor: crate::state::Selection<usize>,
     /// The tuning-call measurement the Capability panel's `K` runs
@@ -792,7 +784,7 @@ impl NetState {
 
 /// What the receiver missed, and what it never had a chance to see.
 ///
-/// Design section 13.2: this is not a debug panel, it is testimony. Without it
+/// This is not a debug panel, it is testimony. Without it
 /// every count in the section is a lower bound presented as a total, because the
 /// three ways a sample can go missing are all invisible from downstream. The
 /// driver drops them before the block is stamped; the bounded feed refuses whole
@@ -963,7 +955,7 @@ pub struct PacketsView {
 }
 
 /// Which stretch of time the classic hop scatter shows
-/// (net-ux-polish-plan 6.2): a zoom step, and how far before now it ends.
+/// a zoom step, and how far before now it ends.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct HopView {
     /// Index into [`HOP_WINDOWS_MS`].
@@ -1025,13 +1017,13 @@ pub const BT_HOP_LIMIT: usize = 500;
 pub struct BtHop {
     pub channel: u8,
     /// The piconet it belongs to: what `net_bt_hops` colours it by
-    /// (net-ux-polish-plan 6.2), free at detection time.
+    /// free at detection time.
     pub lap: u32,
     pub seen: std::time::Instant,
     /// When its access code ended, µs on the stream's sample clock
     /// (`signal::bt::receive::AccessHit::at_us`), and which stream: a new
     /// stream or rate starts that clock again, so a time is only comparable
-    /// to one of the same `stream` (net-ux-polish-plan 6.6).
+    /// to one of the same `stream`.
     pub at_us: f64,
     pub stream: u32,
     /// What its header said, once one was captured and joined to it: the
@@ -1066,7 +1058,7 @@ pub struct BlePacket {
     /// the ring (`BLE_PACKET_LIMIT`) and by the length field's 6 bits.
     pub payload: Vec<u8>,
     pub crc_ok: bool,
-    /// B7: read from the detector's own coherence at the moment this
+    /// Read from the detector's own coherence at the moment this
     /// packet's sync word was found. `None` only at a coherence of one -
     /// noiseless, which does not happen on a radio - never because nothing
     /// was measured.
@@ -1078,13 +1070,13 @@ pub struct BlePacket {
     /// `RadioState::transmitter_offset`, which removes ours when a reference
     /// allows, and the chrome says which of the two the number on screen is.
     pub freq_offset_hz: Option<crate::signal::dsp::uncertainty::Uncertain>,
-    /// B8: modulation index, delta-f1 average, delta-f2 maximum and their
+    /// Modulation index, delta-f1 average, delta-f2 average and their
     /// ratio, measured from this packet's own on-air symbols. `None` when
     /// the packet was too short, or too unlucky in its particular random
     /// content, to contain a settled run of either kind - see
     /// `signal::ble::measure`'s own doc for what "settled" means here.
     pub modulation: Option<crate::signal::ble::measure::ModulationQuality>,
-    /// B9: this packet's own frequency offset, read early and late, and the
+    /// This packet's own frequency offset, read early and late, and the
     /// drift between them. `None` under the same conditions as
     /// `modulation` - too short a capture to give each half its own
     /// variance.
@@ -1182,7 +1174,7 @@ pub struct CodedFacts {
     pub reading: Option<crate::signal::net::measure::CodedReading>,
 }
 
-/// How the BLE packet list is being read (net-ux-polish-plan 5.3).
+/// How the BLE packet list is being read.
 ///
 /// The cursor holds a packet's [`BlePacket::seq`], not a row: the list is
 /// newest first, so every arrival moves every row, and a cursor on a row
@@ -1291,8 +1283,8 @@ pub struct CensusState {
 impl CensusState {
     /// The next column along, wrapping.
     ///
-    /// One key, cycling, because design section 9.1 asks for the sort key to be
-    /// *shown* rather than remembered - and a control the panel advertises in
+    /// One key, cycling, because the sort key is *shown* rather than
+    /// remembered - and a control the panel advertises in
     /// one direction is one the user can use without being told twice.
     pub fn cycle_sort(&mut self) {
         let keys = crate::signal::net::census::SORT_KEYS.len().max(1);
@@ -1848,7 +1840,7 @@ mod tests {
         assert_eq!(band.id_back(4), None);
     }
 
-    /// Each mode shows what foundation design 1.1 promises, uncut for an
+    /// Each mode shows what it promises, uncut for an
     /// export, and laid exactly into whatever column a table gives it: the
     /// name grows into a wide column and is cut and marked in a narrow one,
     /// while the rest of the address stays whole at the column's end.

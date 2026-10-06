@@ -442,7 +442,7 @@ mod tests {
 
     #[test]
     fn braille_profile_resolves_a_spike_more_rows_can_show() {
-        // B6, as a test. A pilot 20 dB under the audio, in a 40 dB window: on one
+        // A pilot 20 dB under the audio, in a 40 dB window: on one
         // row it lands on the same dot level as the audio and vanishes; on three it
         // is visibly taller than nothing and shorter than the peak.
         let mut data = vec![-40.0f32; 32];

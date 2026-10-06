@@ -109,9 +109,8 @@ pub(super) fn begin_sample_rate_input(ctx: &mut InputCtx<'_>) {
 
 /// `[m]` - survey the band, or lock to where the radio is pointed.
 ///
-/// Design section 13.1 makes this a mode rather than a setting, so switching it
-/// changes what every reading in the section *claims*, not just what the
-/// receiver does.
+/// A mode rather than a setting, so switching it changes what every reading in
+/// the section *claims*, not just what the receiver does.
 ///
 /// **Returns whether it claimed the key, and that return value is the whole
 /// point.** `m` was already the FM demodulator's focus key, and a global arm
@@ -187,7 +186,7 @@ pub(super) fn step_net_channel(ctx: &mut InputCtx<'_>, forward: bool) {
 }
 
 /// `[i]` - cycle how addresses are shown throughout the NET section
-/// (foundation design 1.1: `full`, `oui`, and `masked` once it exists).
+/// (`full`, `oui` and `masked`).
 ///
 /// Section-scoped and declining, like [`toggle_net_mode`]: outside NET there
 /// are no addresses to show, and the key is left for whatever claims it next.
@@ -206,7 +205,7 @@ pub(super) fn cycle_address_display(ctx: &mut InputCtx<'_>) -> bool {
 
 /// `[y]` - establish the frequency reference from what is on centre now.
 ///
-/// Design section 7: every ppm reading in the app contains our own oscillator's
+/// Every ppm reading in the app contains our own oscillator's
 /// error, and this is the one action that takes it out of all of them at once.
 /// It asks; the FFT worker answers on its next block, because that is where the
 /// raw samples already are.

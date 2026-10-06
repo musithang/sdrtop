@@ -12,7 +12,7 @@
 //!
 //! The library is opened at runtime rather than linked, so sdrtop still builds
 //! and runs on a machine that has never heard of SoapySDR. There, [`api`] simply
-//! answers `None` and no Soapy devices exist. See `dev_docs/soapy-design.md`.
+//! answers `None` and no Soapy devices exist.
 
 use std::ffi::{c_char, c_int, c_void, CStr};
 use std::sync::OnceLock;
@@ -163,7 +163,7 @@ pub struct SoapyApi {
     //
     // Declared and resolved before anything calls them, so that a driver missing
     // one is refused at load with the symbol named, rather than part way through
-    // building a stage list. Read from G3.
+    // building a stage list.
     #[allow(dead_code)]
     set_gain_element:
         unsafe extern "C" fn(*mut SoapySDRDevice, c_int, usize, *const c_char, f64) -> c_int,
@@ -437,7 +437,6 @@ impl SoapyApi {
     ///
     /// # Safety
     /// See [`Self::driver_key`].
-    #[allow(dead_code)] // read from G3
     pub unsafe fn set_gain_element(
         &self,
         dev: *mut SoapySDRDevice,
@@ -456,7 +455,6 @@ impl SoapyApi {
     ///
     /// # Safety
     /// See [`Self::driver_key`].
-    #[allow(dead_code)] // read from G3
     pub unsafe fn gain_element(&self, dev: *const SoapySDRDevice, name: &str) -> Option<f64> {
         let c = std::ffi::CString::new(name).ok()?;
         Some(unsafe { (self.get_gain_element)(dev, RX, CHAN, c.as_ptr()) })
@@ -471,7 +469,6 @@ impl SoapyApi {
     ///
     /// # Safety
     /// See [`Self::driver_key`].
-    #[allow(dead_code)] // read from G3
     pub unsafe fn gain_element_range(
         &self,
         dev: *const SoapySDRDevice,

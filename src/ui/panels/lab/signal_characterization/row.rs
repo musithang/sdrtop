@@ -94,7 +94,7 @@ mod tests {
 
     #[test]
     fn annotation_dropped_rather_than_clipped_at_a_narrow_column() {
-        // The B2 row, measured: 120-column terminal → 29 inner. Lead 1 + label 14
+        // The row, measured: 120-column terminal → 29 inner. Lead 1 + label 14
         // + "-35.4 dBFS" 10 + gap 3 leaves 1 column, and "92.807 MHz" needs 10 -
         // so the frequency goes, instead of arriving as a lone "9".
         assert!(!annotation_fits(

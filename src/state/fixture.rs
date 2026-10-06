@@ -358,11 +358,11 @@ impl SdrMetrics {
     /// A named chain that offers **no** boost at all: no automatic gain mode,
     /// and no two-position element to stand in for one.
     ///
-    /// Kept apart from [`Self::named_chain`] since G3, when the plain fixture
-    /// gained a boost. A `SoapyHackRF` reports `Supports AGC: NO` and yet has
-    /// `AMP [0, 14, 14]`, which is the same physical switch the native backend
-    /// drives, so it does have one. The panels still need a device that does
-    /// not, and that is this.
+    /// Kept apart from [`Self::named_chain`], whose plain form has a boost. A
+    /// `SoapyHackRF` reports `Supports AGC: NO` and yet has `AMP [0, 14, 14]`,
+    /// which is the same physical switch the native backend drives, so it does
+    /// have one. The panels still need a device that does not, and that is
+    /// this.
     pub(crate) fn named_chain_no_boost(mut self) -> Self {
         self = self.named_chain();
         let mut caps = (*self.caps).clone();

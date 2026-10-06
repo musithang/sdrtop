@@ -27,7 +27,7 @@ use crate::ui::widgets::limit::Limit;
 pub(super) const LABEL_W: usize = 9;
 
 /// BR's modulation index band, **read from the Core Specification 5.4,
-/// Vol 2, Part A, 3.1.1** on the SIG's own site this session: "The
+/// Vol 2, Part A, 3.1.1** on the SIG's own site: "The
 /// Modulation index shall be between 0.28 and 0.35" (GFSK, BT = 0.5,
 /// 1 Msym/s).
 pub(super) const BR_INDEX: Limit = Limit::Band {

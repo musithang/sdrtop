@@ -26,7 +26,7 @@ pub enum Bond {
 /// enough: a panel that can be the top of one instrument must not bond with
 /// whatever happens to be stacked under it. Spectrum over waterfall was the only
 /// pair, and the engine used to check for their two names; the NET survey's
-/// occupancy over coexistence is the second (net-ux-polish-plan Stop 3.1).
+/// occupancy over coexistence is the second.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub struct Bonding {
     pub role: Bond,
@@ -159,7 +159,7 @@ pub enum Tag {
     /// what it is costing.
     Behind(u64),
     /// `[LE 1M]` / `[LE 2M]` - the PHY the BLE decoder is listening for, so
-    /// every row is read against it (net-ux-polish-plan 5.5).
+    /// every row is read against it.
     Phy(crate::signal::ble::Phy),
     /// `[↑N]` - how far back through the history the view is scrolled. Absent at 0.
     Scroll(usize),
@@ -173,18 +173,18 @@ pub enum Tag {
     ///
     /// **A duty-cycle-sampled census and a complete capture are different
     /// claims**, and presenting one as the other is what rule 4 exists to
-    /// prevent. Design section 13.1 makes the mode part of the reading rather
-    /// than a setting, so every panel in the section that carries a number
-    /// carries this too, and a structural test says so.
+    /// prevent. The mode is part of the reading rather than a setting, so every
+    /// panel in the section that carries a number carries this too, and a
+    /// structural test says so.
     Survey,
     /// `[LOCK]` - parked on one channel: complete inside it, blind outside it.
     Lock,
     /// `[↓PKTS]` - what orders a table, and which way.
     ///
-    /// Design section 9.1: the sort key is shown in the chrome "so the panel
-    /// says how it is ordered rather than the user having to remember". A table
-    /// whose order is only visible in a marker halfway across the header is one
-    /// people read wrong from the other side of the room.
+    /// The sort key is shown in the chrome so the panel says how it is ordered
+    /// rather than the user having to remember. A table whose order is only
+    /// visible in a marker halfway across the header is one people read wrong
+    /// from the other side of the room.
     Sorted(&'static str, bool),
     /// `[FEED LOSS]` - the sample feed dropped blocks inside the span this
     /// panel's numbers cover, so its counts are lower bounds.

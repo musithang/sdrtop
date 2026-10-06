@@ -373,12 +373,12 @@ mod tests {
 
     /// **Every panel in the NET section says how its numbers were gathered.**
     ///
-    /// Design section 13.1 makes the mode part of the reading rather than a
-    /// setting: a duty-cycle-sampled census and a complete capture are different
-    /// claims, and a panel that shows one while the other was running is stating
-    /// the wrong one. Asserted here rather than in each panel's own tests,
-    /// because the rule is about the section and a rule enforced panel by panel
-    /// is a rule the next panel will not know about.
+    /// The mode is part of the reading rather than a setting: a
+    /// duty-cycle-sampled census and a complete capture are different claims,
+    /// and a panel that shows one while the other was running is stating the
+    /// wrong one. Asserted here rather than in each panel's own tests, because
+    /// the rule is about the section and a rule enforced panel by panel is a
+    /// rule the next panel will not know about.
     ///
     /// **The exemption is checkable rather than a list of names.** A panel may
     /// skip the tag only if it declares `Staleness::Never` - that is a panel
@@ -430,7 +430,7 @@ mod tests {
 
     /// Every NET panel whose numbers are counted from the sample feed says how
     /// far back they reach, so the engine can caveat them when the feed lost
-    /// something inside that span (foundation design 13.2). A panel that
+    /// something inside that span. A panel that
     /// forgot would show a lower bound as a total on a lossy link, with
     /// nothing on screen to say so.
     ///
@@ -487,11 +487,11 @@ mod tests {
     /// the engine can say what they are worth (`Tag::Offsets`: relative,
     /// traceable, or a reference that has expired). A ppm on screen without
     /// that tag is an absolute-looking number that may be our own oscillator's
-    /// error in disguise, which is the claim `net-ux-polish-plan` 1.5.b exists
-    /// to stop. Checked by rendering, against a state where every panel has an
-    /// offset to show, rather than by a list of names the next panel would not
-    /// be on. And the other way round: a panel that declares offsets and prints
-    /// none carries a tag about numbers that are not there.
+    /// error in disguise, which is what the tag exists to stop. Checked by
+    /// rendering, against a state where every panel has an offset to show,
+    /// rather than by a list of names the next panel would not be on. And the
+    /// other way round: a panel that declares offsets and prints none carries a
+    /// tag about numbers that are not there.
     #[test]
     fn every_net_panel_showing_a_ppm_says_what_it_is_worth() {
         let rendered = net_panels_with_one_device(crate::state::AddressDisplay::Full);
@@ -516,7 +516,7 @@ mod tests {
     }
 
     /// **Every NET panel that prints an address honours the display switch,
-    /// and says so** (foundation design 1.1: one key, every panel). A panel
+    /// and says so**: one key, every panel. A panel
     /// printing the full address declares `shows_addresses`, so the engine
     /// tags it when the mode is not `full`; and with the mode switched, no
     /// panel anywhere in the section still prints the full address, which is
@@ -998,7 +998,7 @@ mod tests {
 
     #[test]
     fn a_saved_coexistence_preset_falls_back_like_any_unknown_one() {
-        // `net_coexist` was its own preset until Stop 3.3.a2 folded it into
+        // `net_coexist` was once its own preset, before it was folded into
         // the Survey. A config saved on it names a preset that no longer
         // exists, and must land on a drawable layout and say why, the path
         // every unknown preset takes, checked rather than assumed.
@@ -1309,11 +1309,11 @@ mod tests {
         &rest[..rest.find("\n## ").unwrap_or(rest.len())]
     }
 
-    /// **The NET key table cannot fall behind the panels** (net-ux-polish-
-    /// plan 8.b, POLICY rule 7): every NET panel that takes focus has a row
-    /// in `user_docs/keys.md` with its letter, its title and every binding
-    /// its `focus_bindings` declares, word for word; and no row names a
-    /// letter no NET panel takes. Hand-written, checked against the source.
+    /// **The NET key table cannot fall behind the panels** (POLICY rule 7):
+    /// every NET panel that takes focus has a row in `user_docs/keys.md` with
+    /// its letter, its title and every binding its `focus_bindings` declares,
+    /// word for word; and no row names a letter no NET panel takes.
+    /// Hand-written, checked against the source.
     #[test]
     fn the_net_key_table_matches_the_panels() {
         let doc = include_str!("../../../user_docs/keys.md");

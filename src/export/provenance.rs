@@ -3,7 +3,7 @@
 
 //! The header every export begins with.
 //!
-//! Design section 15.1: **an export carries its provenance or it is worthless.**
+//! **An export carries its provenance or it is worthless.**
 //! A column of ppm values, six months later, with no record of what radio
 //! measured them, in which mode, against which frequency reference and with what
 //! uncertainty, is not data. It is a set of numbers someone will misread.
@@ -216,7 +216,7 @@ mod tests {
         assert_eq!(clock(90_000), "25:00:00");
     }
 
-    /// Every field design section 15.1 lists, from a fixture rather than a live
+    /// Every field the header promises, from a fixture rather than a live
     /// radio.
     #[test]
     fn the_block_carries_every_field_the_design_lists() {

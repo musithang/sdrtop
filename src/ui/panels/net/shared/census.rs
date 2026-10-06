@@ -3,18 +3,18 @@
 
 //! `NetCensusPanel` - who is here.
 //!
-//! Design section 9.3 gives this preset one question and this is it: the
-//! population of the band, one row per transmitter, ordered by whichever column
-//! the user picked. The table itself is `ui::widgets::table`; what is here is
-//! the column list, the empty state, and the keys.
+//! One question, and this is it: the population of the band, one row per
+//! transmitter, ordered by whichever column the user picked. The table itself
+//! is `ui::widgets::table`; what is here is the column list, the empty state,
+//! and the keys.
 //!
 //! **An empty table says which of two empties it is.** "We listened and nobody
 //! transmitted" and "nothing is listening" are different claims, and which one
-//! holds now depends on whether a decoder is reading addresses: BLE has filled
-//! this table since B10, and does so only while it has a channel. So the empty
-//! state reads the same condition the feed-health panel dashes its BLE rows on,
-//! and says either that the room was quiet or that nobody was counting.
-//! Printing a bare empty table would let a reader take the flattering one.
+//! holds now depends on whether a decoder is reading addresses: BLE fills this
+//! table, and only while it has a channel. So the empty state reads the same
+//! condition the feed-health panel dashes its BLE rows on, and says either that
+//! the room was quiet or that nobody was counting. Printing a bare empty table
+//! would let a reader take the flattering one.
 //!
 //! **Under the table, the room's clocks and then the selected device**
 //! (`clock_error`, `detail`), in the order they give way: the table keeps its
@@ -212,7 +212,7 @@ fn fmt_interval(d: &Device) -> String {
     }
 }
 
-/// The detail block's advertising timing (net-ux-polish-plan 4.5): the
+/// The detail block's advertising timing: the
 /// interval and where it sits on the 0.625 ms grid, the random delay, and
 /// what it was timed on; or, where there is no estimate, why not.
 ///
@@ -327,7 +327,7 @@ fn fmt_mean_snr(d: &Device) -> String {
     }
 }
 
-/// `0.50 ±0.01`, the index B8 measured, refined across packets. `-` until a
+/// `0.50 ±0.01`, the measured modulation index, refined across packets. `-` until a
 /// packet had settled and alternating bits of both kinds to read.
 fn fmt_modulation(d: &Device) -> String {
     match d.modulation_index {
@@ -350,14 +350,14 @@ fn pdu_types(d: &Device) -> String {
     }
 }
 
-/// B13's own window for "per unit time": five minutes, long enough to see a
+/// The window for "per unit time": five minutes, long enough to see a
 /// handful of rotations from a device turning its address over on the
 /// specification's own cadence (roughly every 15 minutes) without the
 /// figure jumping to zero every time nobody new has shown up in the last
 /// few seconds.
 const TURNOVER_WINDOW: std::time::Duration = std::time::Duration::from_secs(300);
 
-/// B13's exit condition, on screen, split by kind (4.4): how many distinct
+/// Address turnover, on screen, split by kind: how many distinct
 /// addresses have appeared per minute, and of which kind, so the line says
 /// whether it is a rotation rate. `1.2 new/min: 0.8 resolvable private, 0.4
 /// public` reads as devices here changing their addresses and one device
@@ -472,9 +472,7 @@ const DETAIL_LABEL_W: usize = 11;
 /// modes the address as shown already carries it, and repeating it would be
 /// the same fact twice on one screen.
 ///
-/// What the device advertises belongs in this block too and is not here yet:
-/// payloads arrive in Stop 5.9, and a placeholder for them would be a promise
-/// (rule 2).
+/// What the device advertises about itself follows (`advertised_lines`).
 ///
 /// `with_crystal` is false while the clock dial is drawn above it
 /// (`clock_dial`), which shows the same offset and its basis.
@@ -1037,7 +1035,7 @@ mod tests {
         );
     }
 
-    /// B13's own exit condition: two of `populated`'s three devices were
+    /// Two of `populated`'s three devices were
     /// first seen inside the five-minute window (-250 s and -90 s; -600 s
     /// was not), so the rate is `2 / 5 minutes`.
     #[test]
@@ -1449,7 +1447,7 @@ mod tests {
     /// **No cell is cut.** The widest readings a live room produced (two
     /// crystals near -95 ppm, a modulation index whose uncertainty earned four
     /// places) printed as `-94.43 ±0.07 pp` and `0.4828 ±0.00` with the
-    /// columns 4.2.b first gave them: the table widget cuts a cell wider than
+    /// columns first given to them: the table widget cuts a cell wider than
     /// its column, and a cut reading reads as a different reading.
     #[test]
     fn the_widest_live_readings_fit_their_columns_whole() {

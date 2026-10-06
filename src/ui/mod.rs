@@ -91,11 +91,11 @@ mod gain_rendering {
     /// Every panel that draws a gain, rendered against each device shape, with
     /// **distinct** values in each stage.
     ///
-    /// G5 moved gain from two named fields to one vector indexed by position,
-    /// and the failure that change invites is an off-by-one: a panel showing the
-    /// VGA where the LNA belongs, or the same number twice. Equal values would
-    /// hide exactly that, so the fixture uses 24 and 30 and every assertion
-    /// names which one it expects.
+    /// Gain is one vector indexed by position, not two named fields, and the
+    /// failure that invites is an off-by-one: a panel showing the VGA where the
+    /// LNA belongs, or the same number twice. Equal values would hide exactly
+    /// that, so the fixture uses 24 and 30 and every assertion names which one
+    /// it expects.
     ///
     /// `draw` renders through `PanelRegistry::render_panel`, so the frame and
     /// the nameplate are part of what is compared.
@@ -183,9 +183,8 @@ mod gain_rendering {
     }
 
     /// The knob's readout on a single-knob device is the **whole chain**, not
-    /// the front stage. G8 made the SoapySDR knob distribute its figure across
-    /// several stages, so showing position zero would show part of what the
-    /// user set.
+    /// the front stage. The SoapySDR knob distributes its figure across several
+    /// stages, so showing position zero would show part of what the user set.
     #[test]
     fn a_distributed_knob_reads_as_the_whole_chain() {
         let mut m = SdrMetrics::fixture().streaming().named_chain();

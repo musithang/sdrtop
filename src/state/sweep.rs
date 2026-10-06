@@ -268,7 +268,7 @@ mod tests {
 
     #[test]
     fn positions_total_matches_design_table() {
-        // 400–500 MHz at 9 MHz step → 12 positions (matches the design doc).
+        // 400–500 MHz at 9 MHz step → 12 positions.
         let c = SweepConfig {
             start_hz: 400_000_000,
             stop_hz: 500_000_000,

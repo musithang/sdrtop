@@ -20,14 +20,13 @@
 //! the user, who may retune while a pass is running; the pass wins until the
 //! mode is switched to lock, which is what lock is for.
 //!
-//! **B11: one preset gets a different plan, not a different mode.** On the
-//! views the advertising decoder feeds (`signal::net::lock::
-//! ADVERTISING_VIEWS`: the BLE list and the census), survey means rotating
+//! **One preset gets a different plan, not a different mode.** On the views the
+//! advertising decoders feed (`signal::net::lock::ADVERTISING_VIEWS`: the BLE
+//! list, the census and LE Coded), survey means rotating
 //! `signal::ble::channel::advertising_channels_hz`'s three fixed channels
-//! rather than covering the
-//! wideband occupancy grid `signal::net::survey::Plan` computes - design
-//! section 13.1's survey-versus-lock claim still applies unchanged, it is
-//! only the positions that differ.
+//! rather than covering the wideband occupancy grid `signal::net::survey::Plan`
+//! computes - the survey-versus-lock claim still applies unchanged, it is only
+//! the positions that differ.
 
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
@@ -142,15 +141,15 @@ pub fn spawn_net_survey_task(state: Arc<Mutex<SdrMetrics>>, device: Arc<dyn SdrD
                 continue;
             }
 
-            // **B11's rotation is a different plan under the same mode, not a
-            // different mode.** Design section 13.1 makes survey-or-lock part
-            // of what a reading claims, and that claim is unaffected by
-            // *which* positions a survey visits - a BLE preset asking Survey
-            // to rotate the three advertising channels instead of the whole
-            // band is still "hop across the band, dwell, gather statistics";
-            // it just has a different band to cover. Kept out of `Plan`
-            // itself, whose own `covered()` answers a cell-occupancy question
-            // this rotation has no matching answer for.
+            // **The rotation is a different plan under the same mode, not a
+            // different mode.** Survey-or-lock is part of what a reading
+            // claims, and that claim is unaffected by *which* positions a
+            // survey visits - a BLE preset asking Survey to rotate the three
+            // advertising channels instead of the whole band is still "hop
+            // across the band, dwell, gather statistics"; it just has a
+            // different band to cover. Kept out of `Plan` itself, whose own
+            // `covered()` answers a cell-occupancy question this rotation has
+            // no matching answer for.
             if is_ble {
                 if !was_ble {
                     let mut m = state.lock().unwrap_or_else(|e| e.into_inner());

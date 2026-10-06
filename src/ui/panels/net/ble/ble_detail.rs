@@ -2,9 +2,8 @@
 // Copyright (C) 2026 MusiThang <viktor.laszlo92@protonmail.com>
 
 //! `NetBleDetailPanel` - everything about one packet, the one selected in the
-//! list (net-ux-polish-plan 5.4); with none selected, the session's frame
-//! error rate against SNR (5.7), for all traffic or for the one advertiser
-//! the list is filtered to.
+//! list; with none selected, the session's frame error rate against SNR, for
+//! all traffic or for the one advertiser the list is filtered to.
 //!
 //! **It replaced `net_ble_rf`, which showed the latest packet's modulation
 //! beside a list whose cursor could be on a different one.** The detail
@@ -17,21 +16,20 @@
 //! addresses, what ChSel says where the type defines it); what the device
 //! advertises in it (its AD structures, named, the company from the SIG
 //! snapshot with its number beside it); then how it arrived (SNR, and the
-//! transmitter's crystal error in kHz and ppm, with the frame's tag saying
-//! what that offset is worth); then how well it was sent (B8's modulation
-//! quality and B9's drift, each against its limit, idiom B). What it
-//! claims sits beside how it sent it, never instead of it (rule 3).
+//! transmitter's crystal error in kHz and ppm, with the frame's tag saying what
+//! that offset is worth); then how well it was sent (its modulation quality and
+//! drift, each against its limit, `widgets::limit`). What it claims sits beside
+//! how it sent it, never instead of it (rule 3).
 //!
-//! **Modulation quality only from a packet whose CRC passed** (5.4.c,
-//! Viktor's decision of 2026-09-22). The measurement reads the deviation at
-//! the symbols it believes were ones and zeros, and a failed CRC says some of
-//! them were not: the live screen once showed a 1589 kHz alternating deviation for such a
-//! packet. It says "not measured: CRC failed" instead of a number built on
-//! wrong bits (rule 2).
+//! **Modulation quality only from a packet whose CRC passed.** The measurement
+//! reads the deviation at the symbols it believes were ones and zeros, and a
+//! failed CRC says some of them were not: the live screen once showed a
+//! 1589 kHz alternating deviation for such a packet. It says "not measured: CRC
+//! failed" instead of a number built on wrong bits (rule 2).
 //!
 //! **The refusals `net_ble_packets` established, reused here**: not decoding,
 //! nothing decoded yet, and, of this panel's own, a real packet whose content
-//! happened not to contain a settled run of either kind B8 needs
+//! happened not to contain a settled run of either kind the measurement needs
 //! (`signal::ble::measure`), a selected packet that has left the list, and
 //! the CRC gate above. Each is said, never a zeroed or invented row.
 
@@ -373,7 +371,7 @@ fn wrapped(label: &str, value: &str, iw: usize, theme: &crate::Theme) -> Vec<Lin
 }
 
 /// The ADVERTISED section: every AD structure the payload carries, in order,
-/// named and made readable (net-ux-polish-plan 5.2's decode, drawn).
+/// named and made readable.
 ///
 /// **Only from a packet whose CRC passed**, as the list's NAME column: a
 /// failed CRC's octets could spell structures nobody sent. A malformed
@@ -619,10 +617,10 @@ fn header_lines(
         },
         theme,
     ));
-    // Bluetooth design measurement 8: the two ends of B9's drift
-    // measurement, which is how the specification frames it; the drift row
+    // The two ends of the drift measurement, which is how the
+    // specification frames it; the drift row
     // below is their difference. Only where the drift was measured, and only
-    // from a CRC-good packet, for the modulation section's reason (5.4.c).
+    // from a CRC-good packet, for the modulation section's reason.
     if let (Some(d), true) = (p.drift.as_ref(), p.crc_ok) {
         for (label, hz) in [("start", d.initial_hz), ("end", d.final_hz)] {
             if let Some(t) = offset(hz) {
@@ -642,7 +640,7 @@ fn header_lines(
 ///
 /// **Read, not followed** (rule 1). The parameters are the packet's; the
 /// hop sequence is a prediction from them, by the algorithm ChSel names
-/// (#1, or #2 since 5.4.b4, each tested against the specification's own
+/// (#1 or #2, each tested against the specification's own
 /// numbers), labelled so and never presented as observed.
 /// Units are the Link Layer's own (Core 5.4 Vol 6 Part B 2.3.3.1):
 /// `Interval` and the window in 1.25 ms steps, `Timeout` in 10 ms, the SCA
@@ -863,7 +861,7 @@ fn modulation_lines(p: &BlePacket, iw: usize, theme: &crate::Theme) -> Vec<Line<
     out
 }
 
-/// The frame error curve as rows (net-ux-polish-plan 5.7): one SNR bin a
+/// The frame error curve as rows: one SNR bin a
 /// row, from the lowest bin with packets to the highest, each a bar as long as
 /// its failure fraction with the rate and its uncertainty beside it and how
 /// many packets it rests on; a thin bin says it is thin instead of drawing.
@@ -1185,7 +1183,7 @@ mod tests {
         }
     }
 
-    /// B9's exit condition on screen: a packet with drift measured shows
+    /// On screen: a packet with drift measured shows
     /// two more rows than one without, and neither row's word is "pass".
     #[test]
     fn a_packet_with_drift_draws_two_more_rows() {
@@ -1392,7 +1390,7 @@ mod tests {
         assert!(gone.contains("has left the list"), "{gone}");
     }
 
-    /// **5.4.c: no modulation from a failed CRC**, however plausible the
+    /// **No modulation from a failed CRC**, however plausible the
     /// numbers the measurement produced; the reason is said.
     #[test]
     fn a_failed_crc_gets_no_modulation_rows() {

@@ -337,7 +337,7 @@ impl App {
             // On the shared side, not only the snapshot below - `tasks::net`'s
             // survey task reads this off this thread to decide whether a BLE
             // preset means rotating the three advertising channels instead of
-            // the wideband occupancy grid (B11). Setting it only on `m`, the
+            // the wideband occupancy grid. Setting it only on `m`, the
             // clone, was exactly the bug `section` above already had and was
             // fixed for: it looked right on every screen and meant the one
             // reader on another thread saw an empty string for ever.
@@ -1250,16 +1250,16 @@ mod tests {
         );
     }
 
-    /// **The same bug, in the same shape, found the same way `ui.section`'s
-    /// own bug was.** B11 made `tasks::net`'s survey task the first reader of
-    /// `active_preset` off the UI thread - to decide whether a BLE preset
-    /// means rotating the three advertising channels rather than covering the
-    /// wideband occupancy grid - and it read an empty string every time,
-    /// because `active_preset` was written to `m`, the snapshot, one line
-    /// after `guard.clone()`, exactly where `ui.section` used to be written
-    /// before the test above existed. Every screen still looked right, for
-    /// the same reason: every panel renders from the snapshot, and the one
-    /// consumer that does not is off this thread.
+    /// **The same bug, in the same shape, found the same way `ui.section`'s own
+    /// bug was.** `tasks::net`'s survey task reads `active_preset` off the UI
+    /// thread - to decide whether a BLE preset means rotating the three
+    /// advertising channels rather than covering the wideband occupancy grid -
+    /// and it read an empty string every time, because `active_preset` was
+    /// written to `m`, the snapshot, one line after `guard.clone()`, exactly
+    /// where `ui.section` used to be written before the test above existed.
+    /// Every screen still looked right, for the same reason: every panel
+    /// renders from the snapshot, and the one consumer that does not is off
+    /// this thread.
     #[test]
     fn the_active_preset_is_mirrored_into_the_shared_state_and_not_only_the_snapshot() {
         let src = include_str!("mod.rs");

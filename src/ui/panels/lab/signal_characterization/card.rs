@@ -92,7 +92,7 @@ mod tests {
         // Every verdict this panel can print, wrapped at the minimum width the
         // panel declares (30 outer → 28 inner → 27 for the copy). The row budgets
         // must hold the whole sentence: a verdict that loses its tail is exactly
-        // the clipping B2 set out to remove.
+        // the clipping this layout exists to remove.
         let copy_w = super::super::SignalCharacterizationPanel.min_size().0 as usize - 2 - 1;
         let cases = [
             verdict(Modulation::Unknown, 40.0, -40.0, -40.0, 0),

@@ -4,11 +4,10 @@
 //! `FREQUENCY REFERENCE` - what our own oscillator is doing, and what that makes
 //! every ppm reading in the app worth.
 //!
-//! Design section 7.3 puts this card on the RF bench because that is where a
-//! user already goes to ask about their receiver. It is not a NET card: the
-//! error it reports is in every ppm number the app prints, and hiding it inside
-//! one feature would make it a caveat repeated in several places and believed in
-//! none.
+//! This card is on the RF bench because that is where a user already goes to
+//! ask about their receiver. It is not a NET card: the error it reports is in
+//! every ppm number the app prints, and hiding it inside one feature would make
+//! it a caveat repeated in several places and believed in none.
 //!
 //! **The card's job is to say which of three things a ppm reading is**, and only
 //! then what the number was. Unreferenced readings are relative and useful -
@@ -129,7 +128,7 @@ pub(super) fn draw(
         theme,
     ));
 
-    // The measurement itself, drawn through idiom A so it looks like every other
+    // The measurement itself, drawn through `widgets::reading` so it looks like every other
     // reading in the app and dashes when its uncertainty cannot support it.
     let reading = Reading::new(
         Uncertain::from_sigma(r.ppm, r.sigma_ppm),
@@ -149,7 +148,7 @@ pub(super) fn draw(
         theme,
     ));
 
-    // Design section 5.4: the bound is the floor, and it is displayed. Only on
+    // The bound is the floor, and it is displayed. Only on
     // a live reference: an expired one is a thing to redo, not to grade.
     if let Some(efficiency) = r.efficiency.filter(|e| !stale && *e > 0.0) {
         let (mid, right) = bound_row(efficiency);
@@ -306,7 +305,7 @@ mod tests {
     }
 
     /// A reference too coarse to be worth applying dashes, rather than printing
-    /// digits it has not earned. Idiom A's rule, on this panel.
+    /// digits it has not earned. `widgets::reading`'s rule, on this panel.
     #[test]
     fn a_reference_that_cannot_resolve_a_tenth_of_a_ppm_dashes() {
         let mut r = traceable(Duration::from_secs(10));

@@ -1,12 +1,10 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright (C) 2026 MusiThang <viktor.laszlo92@protonmail.com>
 
-//! The time-frequency canvas: what was on the band, and when.
-//!
-//! Design section 9.1 calls this idiom C and the most demanding drawing in the
-//! app. X is time, Y is frequency across the band - the other way round from the
-//! waterfall, deliberately, because a coexistence picture is read as a timeline
-//! with the band down its side.
+//! The time-frequency canvas: what was on the band, and when. The most
+//! demanding drawing in the app. X is time, Y is frequency across the band -
+//! the other way round from the waterfall, deliberately, because a coexistence
+//! picture is read as a timeline with the band down its side.
 //!
 //! **Half blocks, not braille.** A braille cell packs four rows of dots into one
 //! character, but all eight dots share one colour, and this canvas is a heatmap:
