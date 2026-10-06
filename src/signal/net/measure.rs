@@ -262,7 +262,7 @@ const TIMING_STEPS: i32 = 64;
 /// whole bit either way still reads inside the burst. Before a transmitter
 /// that does not ramp its carrier up there is only noise, whose
 /// instantaneous frequency has no bound, and one reading there outweighed
-/// forty bits: two clean packets in five were placed a bit off.
+/// forty bits: nearly half of all clean packets were placed a bit off.
 fn timing(tester: &Tester, first: f64, bit: f64, known: &[bool]) -> f64 {
     let inner = 1..known.len().saturating_sub(1);
     // Every step's readings into one buffer, reused: the same numbers, in
@@ -654,7 +654,7 @@ mod tests {
     /// leaves only noise a bit before it, whose instantaneous frequency has
     /// no bound; the timing search reached a bit outside the packet either
     /// way, and one wild reading there moved the whole packet by a bit:
-    /// about two clean packets in five read a df2 of -120 kHz. Over noise
+    /// nearly half of all clean packets read a df2 of -120 kHz. Over noise
     /// draws and positions, every one reads its deviation.
     #[test]
     fn a_packet_that_starts_from_silence_is_timed_on_its_own_bits() {
