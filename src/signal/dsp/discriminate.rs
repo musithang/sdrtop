@@ -5,14 +5,14 @@
 //! samples, with no opinion about what to do when one of them is
 //! untrustworthy.
 //!
-//! Generalised the way N1 generalised `signal::demod`'s streaming decimator
+//! Generalised the way `signal::demod`'s streaming decimator was generalised
 //! into [`super::fir`]: the arithmetic with a closed-form answer moved here,
-//! and `signal::demod::fm_discriminate` keeps the envelope-gate-and-hold
-//! policy it has always had, because that policy exists to protect a WFM
-//! pilot on a channel assumed to carry a continuous carrier - a decision that
-//! belongs with the demodulator that has a reason to want it, not here. BLE
-//! has neither a pilot nor a continuous carrier to protect, so B2 calls
-//! [`discriminate`] directly with no gate.
+//! and `signal::demod::fm_discriminate` keeps the envelope-gate-and-hold policy
+//! it has always had, because that policy exists to protect a WFM pilot on a
+//! channel assumed to carry a continuous carrier - a decision that belongs with
+//! the demodulator that has a reason to want it, not here. BLE has neither a
+//! pilot nor a continuous carrier to protect, so it calls [`discriminate`]
+//! directly with no gate.
 
 use num_complex::Complex;
 
@@ -32,8 +32,7 @@ pub fn instantaneous_freq_hz(a: Complex<f32>, b: Complex<f32>, rate: f64) -> f32
 /// No production consumer yet: `signal::demod::fm_discriminate` calls
 /// [`instantaneous_freq_hz`] directly rather than this, because it needs the
 /// envelope gate applied between the two calls, not around the whole block.
-/// B2's own tests are the only caller until a step in this arc needs the
-/// gate-free block form.
+/// Tests are the only caller.
 pub fn discriminate(iq: &[Complex<f32>], rate: f64, out: &mut Vec<f32>) {
     out.clear();
     if iq.len() < 2 {

@@ -48,7 +48,6 @@
 /// noise floor reached its new plateau within one or two frames of a gain
 /// change, 0 to 67 ms at the ~15 frames per second the FFT publishes at. Three
 /// is that with a margin, and it is cheap: it costs 200 ms per point.
-#[allow(dead_code)] // read from M2
 pub const SETTLE_FRAMES: u32 = 3;
 
 /// Frames averaged into each point once settled.
@@ -56,7 +55,6 @@ pub const SETTLE_FRAMES: u32 = 3;
 /// Also measured: a settled plateau still moves 0.67 dB peak to peak frame to
 /// frame. Eight frames brings that down to something a slope can be read from,
 /// and costs about half a second per point.
-#[allow(dead_code)] // read from M2
 pub const AVERAGE_FRAMES: u32 = 8;
 
 /// Slope, in dB of noise floor per dB of gain, above which the receiver counts
@@ -65,7 +63,6 @@ pub const AVERAGE_FRAMES: u32 = 8;
 /// The ideal is 1.0 and reality is below it, so this is a threshold rather than
 /// a comparison: 0.7 says "most of the extra gain is showing up as noise, so the
 /// front end is what we are listening to".
-#[allow(dead_code)] // read from M2
 pub const NOISE_LIMITED_SLOPE: f32 = 0.7;
 
 /// What the machine wants the caller to do next.

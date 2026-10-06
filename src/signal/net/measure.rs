@@ -28,8 +28,7 @@
 //!    word), not taken from a lane.
 //!
 //! All of it runs per detected burst, never on the continuous stream, and
-//! is plain data in and out: `dev_docs/measurement-path-design.md` has the
-//! reasoning and Viktor's choices.
+//! is plain data in and out.
 
 use num_complex::Complex;
 

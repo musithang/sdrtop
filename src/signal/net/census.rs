@@ -3,32 +3,30 @@
 
 //! Who is here: the population of the band, keyed by address.
 //!
-//! Design section 10 puts this in `net` rather than in either arc, and the
-//! reason is the one that shapes the whole module: **a device is a device
-//! whichever protocol found it.** A Wi-Fi station and a Bluetooth peripheral are
-//! the same kind of row - an address, when it was last heard, how much it has
-//! said, how strongly - and the panel that ranks them must not care which arc
-//! filled it in.
+//! This lives in `net` rather than in either protocol module, and the reason is
+//! the one that shapes the whole module: **a device is a device whichever
+//! protocol found it.** A Wi-Fi station and a Bluetooth peripheral are the same
+//! kind of row - an address, when it was last heard, how much it has said, how
+//! strongly - and the panel that ranks them must not care which protocol filled
+//! it in.
 //!
-//! **B10 is the first arc to fill this in**, and BLE's own honesty about what
-//! it measures shaped one decision here: this struct was drafted with a
-//! `best_rssi_dbm` field, for whichever arc filled it in first, but BLE has
-//! no calibrated absolute power reference, only the matched filter's own
-//! SNR (design section 7's own reasoning - see `signal::ble::receive`).
-//! Calling that number an RSSI would be exactly the mislabelling POLICY.md's
-//! rule 5 exists to prevent, one scale misnamed as another. The field is
-//! `best_snr_db` instead - honest for what fills it today. A future arc with
-//! a real calibrated RSSI will need to settle how the two coexist in one
-//! column; that is its own question, not answered here ahead of having it.
+//! **BLE's honesty about what it measures shaped one decision here.** A
+//! `best_rssi_dbm` field would be natural, but BLE has no calibrated absolute
+//! power reference, only the matched filter's own SNR (see
+//! `signal::ble::receive`). Calling that number an RSSI would be exactly the
+//! mislabelling POLICY.md's rule 5 exists to prevent, one scale misnamed as
+//! another. The field is `best_snr_db` instead - honest for what fills it
+//! today. A future protocol with a real calibrated RSSI will need to settle how
+//! the two coexist in one column; that is its own question, not answered here
+//! ahead of having it.
 //!
-//! **The same reasoning names two of the fields net-ux-polish-plan 4.2.b
-//! added.** Bluetooth design measurement 17 asks for "PDU types used" and
-//! "measured modulation index"; both are BLE's own quantities, so the fields
-//! say so (`ble_pdu_types`, `modulation_index` from B8's LE 1M measurement)
-//! rather than taking general names a second arc's different type space would
-//! then have to squeeze into. The census stays protocol-neutral in the sense
+//! **The same reasoning names two more fields.** The PDU types a device used
+//! and its measured modulation index are BLE's own quantities, so the fields
+//! say so (`ble_pdu_types`, `modulation_index` from the LE 1M measurement)
+//! rather than taking general names a second protocol's different type space
+//! would then have to squeeze into. The census stays protocol-neutral in the sense
 //! that matters: it keeps codes and numbers, and naming them is the panel's
-//! job. The one thing it asks of `ble` is the address kind (4.4), which is not
+//! job. The one thing it asks of `ble` is the address kind, which is not
 //! a new fact about a device but a reading of two it already holds: the
 //! address and the TxAdd bit it was sent with (`random`).
 //!
@@ -74,8 +72,8 @@ pub struct Device {
     /// on a list.
     pub ble_pdu_types: u16,
     /// This device's modulation index, refined ([`Uncertain::combine`]) across
-    /// every packet B8 could measure one from. `None` until one could: B8
-    /// needs settled runs a short packet does not always contain.
+    /// every packet one could be measured from. `None` until one could: the
+    /// measurement needs settled runs a short packet does not always contain.
     pub modulation_index: Option<Uncertain>,
     /// When its periodic advertising arrived on the one channel a LOCK sat
     /// on: what its advertising interval and random delay are read from
@@ -91,17 +89,15 @@ pub struct Device {
     /// address. See [`observe_crc_failure`] for what that can claim and what
     /// it cannot.
     pub crc_failed: u64,
-    /// When this address was first heard this session. B13's own reason to
-    /// exist: address-rotation observation needs to know when a row's
-    /// address *appeared*, not only that it exists, to say how many new
-    /// ones are showing up per unit time.
+    /// When this address was first heard this session. Address-rotation
+    /// observation needs to know when a row's address *appeared*, not only that
+    /// it exists, to say how many new ones are showing up per unit time.
     pub first_seen: Instant,
     /// When it was last heard.
     pub last_seen: Instant,
     /// This device's own crystal error in ppm, refined
-    /// ([`Uncertain::combine`]) across every packet that reported one -
-    /// design section 2.5's "crystal-error histogram" measurement, per
-    /// device. `None` until at least one packet from this device has
+    /// ([`Uncertain::combine`]) across every packet that reported one: the
+    /// crystal-error measurement, per device. `None` until at least one packet from this device has
     /// reported a frequency offset.
     ///
     /// **As the air delivered it: their error minus ours**, never corrected
@@ -290,8 +286,8 @@ impl Key {
 /// it were a good one or a bad one; only the order *between* two measured
 /// devices is reversed.
 ///
-/// **Sorting by CFO ranks by how bad the clock is, not by its sign** - design
-/// section 2.5's own "sorted by how bad its clock is" - so the key is the
+/// **Sorting by CFO ranks by how bad the clock is, not by its sign**, so the
+/// key is the
 /// *magnitude* of the offset, as the panel shows it, corrected through
 /// `radio` when a reference allows: our own error shifts every device the same
 /// way, so ranking the raw figures would put a clock that is dead on below one
@@ -534,8 +530,8 @@ pub fn observe_crc_failure(devices: &mut [Device], address: [u8; 6], snr_db: Opt
     }
 }
 
-/// How many *new* addresses have appeared in the last `window` - design
-/// section 2.5's measurement 19, address rotation observation.
+/// How many *new* addresses have appeared in the last `window`: address
+/// rotation, observed.
 ///
 /// **A measurement about the protocol, not about a person.** BLE privacy
 /// rotates a device's own advertising address every so often; this counts
@@ -544,8 +540,8 @@ pub fn observe_crc_failure(devices: &mut [Device], address: [u8; 6], snr_db: Opt
 /// need the resolving key a passive receiver does not have, and rule 1
 /// refuses to reason past what was actually measured. "Rotations per
 /// device" is not answerable from this vantage point; "how many distinct
-/// addresses appear per unit time" - the design document's own, more
-/// careful phrasing of the same measurement - is, and is what this computes.
+/// addresses appear per unit time" - the more careful phrasing of the same
+/// measurement - is, and is what this computes.
 ///
 /// A rate, not a running total: `new in the last window / window`, per
 /// minute. A device rotating on the specification's own cadence (roughly
@@ -553,17 +549,15 @@ pub fn observe_crc_failure(devices: &mut [Device], address: [u8; 6], snr_db: Opt
 /// intermittent bump in this number rather than a step in an ever-climbing
 /// total that never says whether the room emptied or just went quiet.
 ///
-/// **Split by address kind (net-ux-polish-plan 4.4), busiest kind first**,
-/// the kind breaking a tie in [`kind_rank`]'s order. Only the private kinds
-/// are regenerated while a device runs (the Generic Access Profile's
-/// private-address timer, Core Vol 3 Part C 10.7, fifteen minutes
-/// recommended; a static address changes only across a power cycle, Vol 6
-/// Part B 1.3.2.1; cited from the specification's structure, not quoted from
-/// a copy read this session). So a total that mixes kinds is not the rotation
-/// rate B13 set out to show: a new public address is a device walking in, a
-/// new resolvable one may be a device already here wearing a new address.
-/// Split, the line can say which. Empty when nothing new appeared, or the
-/// window is zero.
+/// **Split by address kind, busiest kind first**, the kind breaking a tie in
+/// [`kind_rank`]'s order. Only the private kinds are regenerated while a device
+/// runs (the Generic Access Profile's private-address timer, Core Vol 3 Part C
+/// 10.7, fifteen minutes recommended; a static address changes only across a
+/// power cycle, Vol 6 Part B 1.3.2.1; cited from the specification's structure,
+/// not quoted from a copy). So a total that mixes kinds is not a rotation rate:
+/// a new public address is a device walking in, a new resolvable one may be a
+/// device already here wearing a new address. Split, the line can say which.
+/// Empty when nothing new appeared, or the window is zero.
 pub fn turnover_by_kind(
     devices: &[Device],
     window: std::time::Duration,
@@ -817,7 +811,7 @@ mod tests {
     }
 
     /// `first_seen` is set once, at the row's own birth, and does not move
-    /// on later sightings - B13's own turnover measurement needs to know
+    /// on later sightings - the turnover measurement needs to know
     /// when an address *appeared*, which a `first_seen` that kept sliding
     /// forward with every packet could never answer.
     #[test]
@@ -876,7 +870,7 @@ mod tests {
         assert!(combined.sigma() < a.sigma());
     }
 
-    /// B13's own exit condition: a rate, not a running total. Three
+    /// A rate, not a running total. Three
     /// addresses appeared inside the window, one appeared before it, so the
     /// count is three, turned into a per-minute rate by the window's own
     /// length.
@@ -994,7 +988,7 @@ mod tests {
     }
 
     /// The modulation index tightens with packets the way the crystal offset
-    /// does, and a packet B8 could not measure leaves it alone.
+    /// does, and a packet that could not be measured leaves it alone.
     #[test]
     fn the_modulation_index_is_refined_and_an_unmeasured_packet_leaves_it() {
         let now = Instant::now();

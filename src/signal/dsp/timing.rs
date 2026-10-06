@@ -1,14 +1,13 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright (C) 2026 MusiThang <viktor.laszlo92@protonmail.com>
 
-//! Two ways to find a signal's own symbol phase, offered as alternatives
-//! rather than a pipeline of both: [`recover`] (Gardner's adaptive detector)
-//! and [`find_phase`] (exhaustive search over one symbol period). Design
-//! section 1.1 names both and says to use whichever the test vectors say is
-//! enough - and for `signal::ble`'s actual signal, they said something
-//! specific enough to record here rather than only in the arc's own plan.
+//! Two ways to find a signal's own symbol phase, offered as alternatives rather
+//! than a pipeline of both: [`recover`] (Gardner's adaptive detector) and
+//! [`find_phase`] (exhaustive search over one symbol period), whichever the
+//! test vectors say is enough - and for `signal::ble`'s actual signal, they
+//! said something specific enough to record here.
 //!
-//! **[`recover`] is validated on its own terms and used by neither arc yet.**
+//! **[`recover`] is validated on its own terms and used by no receiver yet.**
 //! Gardner's detector is derived for a raised-cosine-shaped baseband PAM/PSK
 //! signal, where the "S-curve" - the error's own value as a function of
 //! phase - has a single zero exactly at the correct sampling instant. Fed a
@@ -26,7 +25,7 @@
 //!
 //! **[`recover`] tracks a static phase, not a drifting clock**, which is the
 //! other reason it stays a validated-but-unused primitive rather than the
-//! arc's choice: BLE's own capture is short bursts, exactly what
+//! receivers' choice: BLE's own capture is short bursts, exactly what
 //! [`find_phase`]'s "search once, hold it" approach fits, while a loop that
 //! tracks a phase changing over time is what a long capture with real sample-
 //! clock skew would need - a real thing a real capture could show, which is
@@ -136,25 +135,23 @@ pub fn recover(x: &[f32], start: f64, sps: f64, gain: f64, symbols: usize) -> Ve
 /// The samples-per-symbol-periodic phase, in `[0, sps)`, at which sampling
 /// `x` every `sps` samples reads the loudest.
 ///
-/// Every candidate phase, `resolution` of them spread evenly across one
-/// symbol period, is scored by the sum of `|x|` at that phase and every
-/// `sps` samples after it for `symbols` symbols; the candidate with the
-/// highest score wins. This is the "peak-picking" design section 1.1 names
-/// as Gardner's alternative: no loop, no gain to tune, and correct exactly
-/// when the true sampling instant really is where the signal is loudest -
-/// true for a symbol whose deviation is at its full value at the correct
-/// instant and passes through a transition, and therefore near zero, at the
-/// wrong one, which is what a GFSK discriminator's output actually looks
+/// Every candidate phase, `resolution` of them spread evenly across one symbol
+/// period, is scored by the sum of `|x|` at that phase and every `sps` samples
+/// after it for `symbols` symbols; the candidate with the highest score wins.
+/// This is "peak-picking", Gardner's alternative: no loop, no gain to tune, and
+/// correct exactly when the true sampling instant really is where the signal is
+/// loudest - true for a symbol whose deviation is at its full value at the
+/// correct instant and passes through a transition, and therefore near zero, at
+/// the wrong one, which is what a GFSK discriminator's output actually looks
 /// like.
 ///
 /// Static, not adaptive: it looks once, at the whole span given, and returns
 /// one phase for all of it. A signal whose timing drifts across `symbols`
 /// symbols needs [`recover`] instead, or a shorter span here repeated.
 ///
-/// Called for real by `signal::ble::sync::slice`, from `signal::ble::receive`
-/// live since B6.
+/// Called for real by `signal::ble::sync::slice`, from `signal::ble::receive`.
 ///
-/// **B6's own real-hardware finding, and a second attempt at it.** Every
+/// **A real-hardware finding, and a second attempt at it.** Every
 /// phase this function returned on a real HackRF capture was an exact
 /// integer number of samples - never one of the fractional candidates
 /// `resolution` is supposed to also try. The cause: two-point linear
@@ -164,15 +161,13 @@ pub fn recover(x: &[f32], start: f64, sps: f64, gain: f64, symbols: usize) -> Ve
 /// so scoring interpolated amplitude systematically favours whichever
 /// candidates need the least blending, an effect proportional to the noise
 /// level and invisible on every clean synthetic signal this module's own
-/// tests use. B6's first attempt (score the nearest raw sample instead of
-/// interpolating) removed the bias by removing interpolation entirely, and
-/// cost `a_noiseless_packet_slices_to_exactly_its_own_bits` its exact match
-/// doing it - the coarser, integer-only resolution loses real precision
-/// this arc's own clean signal needs. Reverted rather than landed
-/// half-verified, with the diagnosis recorded for whoever tried the actual
-/// fix next.
+/// tests use. Scoring the nearest raw sample instead of interpolating removes
+/// the bias by removing interpolation entirely, and costs
+/// `a_noiseless_packet_slices_to_exactly_its_own_bits` its exact match: the
+/// coarser, integer-only resolution loses real precision a clean signal
+/// needs.
 ///
-/// **This is that fix.** [`cubic_interpolate`] replaces two-point linear
+/// **The fix:** [`cubic_interpolate`] replaces two-point linear
 /// interpolation with four-point Catmull-Rom cubic, whose own noise-variance
 /// swing across `frac` is measurably smaller - `1.0` down to `0.640625` at
 /// `frac = 0.5`, computed directly from its own coefficients rather than
@@ -321,7 +316,7 @@ mod tests {
         readings.iter().map(|v| (v - mean).powi(2)).sum::<f64>() / readings.len() as f64
     }
 
-    /// B6's own finding, reproduced directly: linear interpolation's
+    /// The finding, reproduced directly: linear interpolation's
     /// self-noise at `frac = 0.5` measures at about half its own value at
     /// `frac = 0` - the closed-form `g(0.5) = 0.5` against `g(0) = 1.0` -
     /// which is what biases [`find_phase`]'s old scoring toward whichever
@@ -342,7 +337,7 @@ mod tests {
         );
     }
 
-    /// The fix's own exit condition: [`cubic_interpolate`]'s noise-variance
+    /// [`cubic_interpolate`]'s noise-variance
     /// swing across `frac` is measurably smaller than linear's - not merely
     /// asserted from the two interpolators' own coefficients, but measured
     /// on the same noisy signal and compared directly.
@@ -411,8 +406,8 @@ mod tests {
     /// slice.** Starting from a phase that is wrong by a third of a symbol,
     /// the loop pulls itself onto the transitions and recovers the same
     /// symbols correctly - the thing a fixed `k * sps + sps / 2` slice, which
-    /// is what B2's own tests use, cannot do without already knowing the
-    /// answer.
+    /// is what the GFSK round-trip tests use, cannot do without already
+    /// knowing the answer.
     #[test]
     fn a_wrong_starting_phase_is_corrected() {
         const SPS: f64 = 8.0;

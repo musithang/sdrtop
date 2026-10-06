@@ -1,13 +1,12 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright (C) 2026 MusiThang <viktor.laszlo92@protonmail.com>
 
-//! The piconet roster: one record per LAP heard (net-ux-polish-plan 6.1).
-//!
-//! **Keyed by what a LAP really is.** A classic access code carries the
-//! lower address part of the piconet's *master*, so a LAP names a piconet,
-//! not a device: the slaves in it send the master's access code too. This is
-//! a roster of piconets, and it does not pretend to be a device census,
-//! which `bluetooth-bench-plan-2.md` Tier 4 keeps as its own open question.
+//! The piconet roster: one record per LAP heard. **Keyed by what a LAP really
+//! is.** A classic access code carries the lower address part of the piconet's
+//! *master*, so a LAP names a piconet, not a device: the slaves in it send the
+//! master's access code too. This is a roster of piconets, and it does not
+//! pretend to be a device census: what identifies a classic *device* to a
+//! passive listener is an open question.
 //!
 //! **Counted over the session, where `NetState::bt_hops` keeps a window.**
 //! The scatter needs the last few hundred hits with their times; a roster
@@ -84,7 +83,7 @@ use crate::signal::dsp::carrier::Drift;
 use crate::signal::dsp::deviation::Sums;
 use crate::signal::dsp::uncertainty::Uncertain;
 
-/// A piconet's deviation readings (net-ux-polish-plan 6.4), gathered from
+/// A piconet's deviation readings, gathered from
 /// the access code, trailer and header of every header captured on its
 /// LAP, as sums (`signal::dsp::deviation`): bits whose neighbours both
 /// equal them give delta-f1, the modulation index's own reading, and bits
@@ -123,7 +122,7 @@ impl Deviation {
     }
 }
 
-/// What a piconet's headers have said (net-ux-polish-plan 6.3): counted
+/// What a piconet's headers have said: counted
 /// from every header captured on its LAP, and read only once its UAP has
 /// narrowed to one value. Before that a header's HEC cannot say which
 /// dewhitening is right, so nothing about its content is counted, not even

@@ -111,10 +111,10 @@ impl Phy {
 mod tests {
     use super::*;
 
-    /// Both PHYs hold the same modulation-index relationship design
-    /// section 2.1 states for LE 1M - `h = 2 * deviation / symbol_rate`
-    /// equal to 0.5 - checked directly rather than trusted from the two
-    /// numbers having been chosen by eye to look proportional.
+    /// Both PHYs hold the same modulation-index relationship as LE 1M -
+    /// `h = 2 * deviation / symbol_rate` equal to 0.5 - checked directly
+    /// rather than trusted from the two numbers having been chosen by eye to
+    /// look proportional.
     #[test]
     fn both_phys_hold_the_same_modulation_index() {
         for phy in [Phy::OneM, Phy::TwoM] {

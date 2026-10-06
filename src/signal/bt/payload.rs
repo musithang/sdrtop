@@ -1,13 +1,12 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright (C) 2026 MusiThang <viktor.laszlo92@protonmail.com>
 
-//! Classic Bluetooth's payload CRC-16 - B17, the task [`super::header`]'s
-//! own doc named and deferred: `PiconetClock` narrows a LAP's UAP to
-//! exactly two candidates, measured as a genuine floor a header alone
-//! cannot break. `libbtbb`'s own `crc_check` breaks that same tie using the
-//! *payload's* CRC, a register run long enough that the header's own
-//! algebra no longer leaves a twin standing. [`break_uap_tie`] is this
-//! module's own version of that.
+//! Classic Bluetooth's payload CRC-16. `PiconetClock` narrows a LAP's UAP to
+//! exactly two candidates, measured as a genuine floor a header alone cannot
+//! break. `libbtbb`'s own `crc_check` breaks that same tie using the
+//! *payload's* CRC, a register run long enough that the header's own algebra no
+//! longer leaves a twin standing. [`break_uap_tie`] is this module's own
+//! version of that.
 //!
 //! **Scope: the six ACL data types.** DH1/DH3/DH5 carry their payload with
 //! no FEC, so decoding one is whitening plus a CRC-16 - the same shape of
@@ -23,7 +22,7 @@
 //! polynomial as the secondary literature on the baseband gives it, the
 //! table as the port's source has it, and a test standing between them.
 //!
-//! **Not read from the Bluetooth Core Specification itself this session** -
+//! **Not read from the Bluetooth Core Specification itself** -
 //! the same standing every fact in [`super::header`] has. Ported instead
 //! from `libbtbb` (<https://github.com/greatscottgadgets/libbtbb>,
 //! `lib/src/bluetooth_packet.c`: `crcgen`, `decode_payload_header`, `DH`,
@@ -63,7 +62,7 @@ pub struct PayloadHeader {
 /// three bits between FLOW and LENGTH that do not appear in either sum are
 /// `libbtbb`'s own reading of the field, not something this port adds
 /// meaning to). `None` for every packet type this module does not decode -
-/// this session's own scope decision, not a limit of the algorithm itself.
+/// a scope decision, not a limit of the algorithm itself.
 pub fn payload_header_bits(packet_type: header::PacketType) -> Option<usize> {
     use header::PacketType::*;
     match packet_type {
@@ -617,7 +616,7 @@ mod tests {
         assert_eq!(verify_crc(short, 17, PacketType::Dh1, 0x5c), None);
     }
 
-    /// [`break_uap_tie`]'s own exit condition: given a real header and
+    /// [`break_uap_tie`]: given a real header and
     /// payload, and a candidate list containing both the true UAP and a
     /// decoy this same header's own 64-candidate set genuinely produces
     /// under some other CLK1-6 (`PiconetClock`'s own measured floor - see

@@ -14,41 +14,36 @@
 //! thread would have produced them: the same results, in less time on a
 //! machine with more than one core.
 //!
-//! **It counts what arrived and measures what was in the band.** Design
-//! section 13.2 makes what the receiver missed a first-class displayed number
-//! rather than an inference, and a feed whose losses are only visible once
+//! **It counts what arrived and measures what was in the band.** What the
+//! receiver missed is a first-class displayed number rather than an
+//! inference, and a feed whose losses are only visible once
 //! there is something to lose is a feed nobody will trust when the losses
 //! matter - so the counting was built and shown before any measurement sat on
 //! top of it. The band measurement is [`super::scan`] over
 //! [`super::occupancy`].
 //!
-//! **B6 added the first decoder: BLE, on whichever of the three advertising
-//! frequencies the radio is tuned to.** It runs here rather than in its own
-//! task because it needs the same per-block bytes the occupancy scan already
-//! has - a second worker reading the same channel would need its own copy of
-//! the geometry and the retune-detection logic this one already carries.
+//! **The decoders run here**, rather than each in its own task, because they
+//! need the same per-block bytes the occupancy scan already has: a second
+//! worker reading the same channel would need its own copy of the geometry
+//! and the retune detection this one carries.
 //!
-//! **B15 added the second: classic Bluetooth, on the `net_bt` preset.**
-//! Unlike BLE, there is no fixed set of channels to gate on - every one of
-//! the 79 is valid - so this worker builds one `signal::bt::receive::
-//! Receiver` per channel `signal::bt::channel::channels_in_span` and the
-//! configured [`SAFE_BT_CHANNELS`]-guarded cap together let it watch, closest
-//! to the tuned centre first, and rebuilds the fleet whenever the tuning or
-//! the wanted channel list changes.
-//!
-//! **B16 added the third: one `signal::bt::header::PiconetClock` per LAP**,
-//! fed every `HeaderHit` the fleet's own receivers capture, narrowing each
-//! piconet's own UAP as far as a header alone ever can - `PiconetClock`'s
-//! own doc has the measured floor (two candidates, not one) and why. Wi-Fi
-//! arrives the same way when that arc reaches this point.
-//!
-//! **B17 breaks that floor, live.** Each `HeaderHit` now carries a captured
-//! payload region alongside its header; whenever a LAP's own `PiconetClock`
-//! has not settled on one UAP, this worker tries `signal::bt::payload::
-//! break_uap_tie` against it. `resolved_bt_uap` remembers a LAP that
-//! resolves this way for the rest of the session - a piconet's real UAP does
-//! not change, so a later header this arc cannot read the payload of (a
-//! POLL or an FHS, say) must not undo an answer already earned.
+//! - **BLE**, on the advertising channel in view: its packets, the census,
+//!   the connections a CONNECT_IND sets up (followed event by event), and
+//!   the auxiliary packets an `ADV_EXT_IND`'s AuxPtr promises.
+//! - **LE Coded**, on its own view, in LE 1M's place, with its AuxPtrs
+//!   followed the same way.
+//! - **Classic Bluetooth**: one `signal::bt::receive::Receiver` per channel
+//!   `signal::bt::channel::channels_in_span` and the configured
+//!   [`SAFE_BT_CHANNELS`]-guarded cap together let it watch, closest to the
+//!   tuned centre first, rebuilt whenever the tuning or the wanted channel
+//!   list changes. One `signal::bt::header::PiconetClock` per LAP narrows
+//!   each piconet's UAP as far as a header alone can (two candidates, not
+//!   one: `PiconetClock`'s doc has why), and `signal::bt::payload::
+//!   break_uap_tie` breaks the tie from a captured payload.
+//!   `resolved_bt_uap` remembers a LAP resolved this way for the rest of the
+//!   session: a piconet's real UAP does not change, so a later header whose
+//!   payload cannot be read (a POLL or an FHS, say) must not undo an answer
+//!   already earned.
 
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
@@ -626,14 +621,13 @@ impl Load {
 /// there.
 ///
 /// **The census counts confirmed transmitters, not decode attempts.** An
-/// address from a packet whose CRC did not pass is not a device this
-/// receiver has actually confirmed, and counting it would be exactly the
-/// invented reading rule 2 refuses. B10's own exit condition is "every
-/// device in the room" - CRC-clean ones, which is the only kind this can
-/// honestly claim to have found. A failed packet can still count *against*
-/// a device already confirmed, as a CRC failure on an exact address match
-/// (`census::observe_crc_failure` says why that much is safe); it never
-/// makes a row.
+/// address from a packet whose CRC did not pass is not a device this receiver
+/// has actually confirmed, and counting it would be exactly the invented
+/// reading rule 2 refuses. "Every device in the room" means the CRC-clean ones,
+/// the only kind this can honestly claim to have found. A failed packet can
+/// still count *against* a device already confirmed, as a CRC failure on an
+/// exact address match (`census::observe_crc_failure` says why that much is
+/// safe); it never makes a row.
 ///
 /// Pulled out of [`NetWorker::run`]'s own loop as a plain function of a
 /// packet and a clock, rather than tested only by building a real, noisy
@@ -782,7 +776,7 @@ impl NetWorker {
         let mut coded: Option<crate::signal::ble::coded_rx::CodedReceiver> = None;
         let mut bt: Vec<BtReceiver> = Vec::new();
         let mut piconet_clocks: HashMap<u32, PiconetClock> = HashMap::new();
-        // B17's own live tie-break, one LAP at a time: once resolved, a
+        // The live UAP tie-break, one LAP at a time: once resolved, a
         // LAP's real UAP does not change (it comes from the piconet
         // master's own fixed address), so this sticks the same way
         // `signal::net::census::Device::first_seen` never moves on a
@@ -799,7 +793,7 @@ impl NetWorker {
         let mut arrivals_rate = 0.0f64;
         // Which stream the times are on: bumped with every restart of the
         // clock they count on, so a hop, a header and a grid are compared
-        // only within one (net-ux-polish-plan 6.6).
+        // only within one.
         let mut stream_id = 0u32;
         let mut last_fit: HashMap<u32, Instant> = HashMap::new();
         // Piconets with hits their last fit has not seen: refitted once the
@@ -1053,7 +1047,7 @@ impl NetWorker {
                     // extended advertising's primary channel is 1M or
                     // Coded), so a 2M decoder here would listen to nothing
                     // and an empty list would read as a quiet room. Said,
-                    // and not run (net-ux-polish-plan 5.5).
+                    // and not run.
                     put_down_ble(&mut ble, &self.state);
                     let mut m = self.state.lock().unwrap_or_else(|e| e.into_inner());
                     m.net.ble_refused = Some(format!(
@@ -1233,7 +1227,7 @@ impl NetWorker {
                 // computation in this worker stays outside the lock block
                 // for.
                 //
-                // **B17's own tie-break rides alongside it.** A LAP
+                // **The UAP tie-break rides alongside it.** A LAP
                 // already resolved shows its one confirmed UAP and does
                 // no further work at all - `resolved_bt_uap`'s own doc
                 // says why a later, unresolvable header must not undo
@@ -2297,7 +2291,7 @@ mod tests {
         );
     }
 
-    /// B6's exit condition, run through the actual worker rather than
+    /// Through the actual worker rather than
     /// `Receiver` directly: tuned to an advertising channel at a rate the
     /// decoder can reach, a synthetic packet in the block stream ends up in
     /// `net.ble_packets`, CRC-checked.
@@ -2363,10 +2357,9 @@ mod tests {
         assert_eq!(p.channel, CHANNEL);
         assert_eq!(p.adv_addr, Some(addr));
         assert!(p.crc_ok);
-        // Numbered on arrival, so `masked` can show it (net-ux-polish-plan 1.6.b).
+        // Numbered on arrival, so `masked` can show it.
         assert_eq!(m.net.address_book.get(addr), Some(1));
 
-        // B10's own exit condition: a confirmed device reaches the shared
         // What was decoded reaches the state whole: the payload the AD
         // structures will be read from, the address in air order inside it.
         assert_eq!(
@@ -2377,7 +2370,8 @@ mod tests {
         assert!(!p.ch_sel && !p.rx_add_random);
         // The section's frame error curve took it, in its SNR bin.
         assert_eq!(m.net.fer.total(), 1, "{:?}", m.net.fer);
-        // census too, keyed by the same address `net_ble_packets` shows.
+        // A confirmed device reaches the shared census too, keyed by the same
+        // address `net_ble_packets` shows.
         assert_eq!(m.net.census.devices.len(), 1, "{:?}", m.net.census.devices);
         assert_eq!(m.net.census.devices[0].address, addr);
         assert_eq!(m.net.census.devices[0].packets, 1);
@@ -3576,7 +3570,7 @@ mod tests {
             assert_eq!(p.phy, crate::signal::ble::Phy::TwoM);
             assert_eq!(p.adv_addr, Some(addr));
             assert!(p.crc_ok);
-            // Measured on LE 2M's own clock (net-ux-polish-plan 5.5).
+            // Measured on LE 2M's own clock.
             assert!(p.drift.is_some(), "{p:?}");
         }
 
@@ -3810,7 +3804,7 @@ mod tests {
     }
 
     /// **What the packet measured reaches the record**: its PDU type and,
-    /// where B8 could take one, its modulation index; and a later packet
+    /// where one could be taken, its modulation index; and a later packet
     /// from the same address whose CRC failed counts against it.
     #[test]
     fn a_packet_carries_its_type_and_modulation_and_a_failure_counts_against_it() {
@@ -3988,11 +3982,9 @@ mod tests {
         }
     }
 
-    /// B15's own exit condition: a view too narrow for
-    /// `signal::bt::receive::front_end`'s own working rate is refused, with
-    /// a reason - the same "refused, not silent" discipline `ble_refused`
-    /// already follows, now genuinely exercised by classic Bluetooth rather
-    /// than being B14's unconditional placeholder.
+    /// A view too narrow for `signal::bt::receive::front_end`'s own working
+    /// rate is refused, with a reason - the same "refused, not silent"
+    /// discipline `ble_refused` already follows.
     #[test]
     fn a_view_too_narrow_for_the_working_rate_is_refused() {
         let mut m = SdrMetrics::fixture().streaming();
@@ -4033,7 +4025,7 @@ mod tests {
         assert_eq!(m.net.bt_channels_watched.len(), SAFE_BT_CHANNELS);
     }
 
-    /// B15's own exit condition, run through the actual worker rather than
+    /// Through the actual worker rather than
     /// `signal::bt::receive::Receiver` directly: a synthetic classic BT
     /// access code sitting on one channel of a wideband capture reaches
     /// `net.bt_hops`, tagged with the channel it was found on.
@@ -4347,7 +4339,7 @@ mod tests {
         (bytes, channel_hz)
     }
 
-    /// B17's own exit condition, run through the actual worker: a synthetic
+    /// Through the actual worker: a synthetic
     /// classic BT packet carrying a real DH1 header and a real DH1
     /// payload (its own genuine CRC-16) resolves `net.bt_uap` to exactly
     /// one confirmed UAP - not the two-candidate floor a header alone

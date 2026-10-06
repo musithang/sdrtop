@@ -4,8 +4,8 @@
 //! What our own local oscillator is doing, measured against something that
 //! knows better.
 //!
-//! Design section 7, and the decision it records is where this lives rather than
-//! what it computes: **every ppm reading in the app contains our own oscillator's
+//! The decision this module records is where it lives rather than what it
+//! computes: **every ppm reading in the app contains our own oscillator's
 //! error**, so the correction is a property of the radio on the desk and not of
 //! any one feature. A device's carrier offset, its crystal error, the whole
 //! "rank the clocks in the room" measurement - each of them is our error plus
@@ -26,19 +26,19 @@
 //! # Two uncertainties, and only one of them is ours
 //!
 //! The estimator's spread is a Type A uncertainty - evaluated from the
-//! measurement itself, which is what N6's variances are for. The station's own
+//! measurement itself, which is what `dsp::estimate`'s variances are for. The station's own
 //! accuracy is Type B: it comes from a specification rather than from anything
 //! we observed, and the Guide to the Expression of Uncertainty in Measurement
 //! (JCGM 100:2008, 4.3.7) says a quantity known only to lie within `±b` with no
 //! reason to prefer any value inside it contributes a variance of `b²/3`.
 //!
 //! **No station in the table below carries that figure yet**, and the reason is
-//! this repository's own rule rather than an oversight: design section 18 says
-//! no constant reaches the code until someone has read the actual specification.
-//! NIST's station page publishes the frequencies, which is why they are here; it
-//! does not publish the carrier accuracy, which is why [`Standard::tolerance_ppm`]
-//! is `None` for every row. The machinery that would use it is written and
-//! tested, so filling one number in is all that remains.
+//! this repository's own rule rather than an oversight: no constant reaches the
+//! code until someone has read the actual specification. NIST's station page
+//! publishes the frequencies, which is why they are here; it does not publish
+//! the carrier accuracy, which is why [`Standard::tolerance_ppm`] is `None` for
+//! every row. The machinery that would use it is written and tested, so filling
+//! one number in is all that remains.
 
 use rustfft::num_complex::Complex;
 
@@ -141,17 +141,18 @@ pub fn lo_error_ppm(baseband_hz: Uncertain, standard: &Standard) -> Uncertain {
 ///
 /// One in ten thousand captures. A reference is established once and then
 /// believed by every ppm reading in the app until it expires, so the cost of a
-/// false one is high and the cost of refusing is one keypress. N5's
+/// false one is high and the cost of refusing is one keypress.
 /// [`threshold_for_false_alarm`] turns this into a coherence threshold through
 /// the Beta law, which is why this is a rate here rather than a level.
 const FALSE_ALARM: f64 = 1e-4;
 
 /// The residual carrier offset in a block of baseband samples, and its spread.
 ///
-/// **The estimator is the delayed autocorrelation and its variance is Moose's.**
-/// N5 built the first and N6 the second, together with the Cramer-Rao bound that
-/// says whether the pair are being honest. Nothing new is invented here: this is
-/// the two of them pointed at a carrier instead of at a preamble.
+/// **The estimator is the delayed autocorrelation and its variance is
+/// Moose's.** `dsp::correlate` has the first and `dsp::estimate` the second,
+/// together with the Cramer-Rao bound that says whether the pair are being
+/// honest. Nothing new is invented here: this is the two of them pointed at a
+/// carrier instead of at a preamble.
 ///
 /// **`max_offset_hz` is how far the caller is prepared to look, and it is a
 /// parameter because it has to be.** The correlation's phase cannot tell an
@@ -229,8 +230,8 @@ pub struct CarrierOffset {
     pub offset_hz: Uncertain,
     /// `crlb / variance`, in `(0, 1]` (`dsp::uncertainty::efficiency`): one
     /// is as good as the samples and the SNR allow. Well below one says the
-    /// estimator is what limits the reference, not the signal, which is
-    /// design section 5.4's reason to display the bound at all.
+    /// estimator is what limits the reference, not the signal, which is the
+    /// reason to display the bound at all.
     pub efficiency: f64,
 }
 
@@ -325,10 +326,10 @@ mod tests {
         assert!(!STANDARDS.is_empty());
         for s in STANDARDS {
             assert!(!s.source.is_empty(), "{} cites nothing", s.name);
-            // The rule this table exists under: design section 18 says a
-            // constant reaches the code only after a primary source has been
-            // read. The frequencies have been; the accuracies have not, and an
-            // invented one would be indistinguishable from a checked one.
+            // The rule this table exists under: a constant reaches the code
+            // only after a primary source has been read. The frequencies have
+            // been; the accuracies have not, and an invented one would be
+            // indistinguishable from a checked one.
             assert_eq!(
                 s.tolerance_ppm, None,
                 "{} carries an accuracy figure: has it been read from a primary \

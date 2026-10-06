@@ -1,18 +1,16 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright (C) 2026 MusiThang <viktor.laszlo92@protonmail.com>
 
-//! Slot timing, measured against itself (Bluetooth design measurement 12,
-//! net-ux-polish-plan 6.5): how far each access code a piconet sent lands
-//! from its own fitted 625 µs grid.
+//! Slot timing, measured against itself: how far each access code a piconet
+//! sent lands from its own fitted 625 µs grid.
 //!
 //! **Read from the Core Specification 5.4, Vol 2, Part B** on the SIG's own
-//! site this session: the physical channel "is divided into time slots,
-//! each 625 μs in length" and "the packet start shall be aligned with the
-//! slot start" (2.2.3); "the average timing of packet transmission shall
-//! not drift faster than 20 ppm relative to the ideal slot timing of
-//! 625 μs. The instantaneous timing shall not deviate more than 1 μs from
-//! the average timing" (2.2.5). The last sentence is the limit the jitter
-//! is shown against.
+//! site: the physical channel "is divided into time slots, each 625 μs in
+//! length" and "the packet start shall be aligned with the slot start" (2.2.3);
+//! "the average timing of packet transmission shall not drift faster than 20
+//! ppm relative to the ideal slot timing of 625 μs. The instantaneous timing
+//! shall not deviate more than 1 μs from the average timing" (2.2.5). The last
+//! sentence is the limit the jitter is shown against.
 //!
 //! **Against itself, not against us.** Our sample clock and theirs differ
 //! by tens of ppm, which over a minute is thousands of microseconds, so the

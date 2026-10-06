@@ -4,14 +4,12 @@
 //! Classic Bluetooth (BR/EDR)'s own RF channel plan: 79 channels, 1 MHz
 //! apart, `f(k) = 2402 + k` MHz for `k` = 0 to 78. Unlike
 //! [`crate::signal::ble::channel`], numeric order and frequency order agree
-//! here - nothing about BR/EDR's hop sequence, unknown to a passive receiver
-//! (design section 1.4), needs any channel pulled out of line the way BLE's
+//! here - nothing about BR/EDR's hop sequence, unknown to a passive
+//! receiver, needs any channel pulled out of line the way BLE's
 //! three advertising channels are.
 //!
-//! **Not read from the Bluetooth Core Specification itself this session**
-//! (Vol 2, Part B, Section 2, "RF Channels" - design section 6's own
-//! facts-to-verify table does not yet name this fact, and should, alongside
-//! the ones already there). The same discipline `signal::ble::channel`
+//! **Not read from the Bluetooth Core Specification itself** (Vol 2, Part
+//! B, Section 2, "RF Channels"). The same discipline `signal::ble::channel`
 //! already carries for its own table: cross-checked against independent,
 //! widely reproduced secondary sources (the Bluetooth SIG's own public
 //! channel-map explainer, Nordic's and Silicon Labs' BR/EDR primers) that
@@ -21,10 +19,9 @@
 //!
 //! **A second thing this module owns that BLE's channel plan does not
 //! need:** which of the 79 channels a *capture* can actually see at once,
-//! not just which frequency one channel index means. Design section 1.4:
-//! "with 20 MHz of capture we see 20 of 79 channels" - [`channels_in_span`]
-//! makes that count exact, for [`super::receive`] to build one receiver per
-//! channel it actually names, the piece B15 exists to add.
+//! not just which frequency one channel index means. A 20 MHz capture sees
+//! about 20 of the 79; [`channels_in_span`] makes that count exact, for
+//! [`super::receive`] to build one receiver per channel it names.
 
 /// The band classic BT's 79 channels cover exactly.
 pub const LOW_HZ: u64 = 2_402_000_000;
@@ -59,12 +56,10 @@ pub fn centre_hz(channel: u8) -> Option<u64> {
 
 /// The channel a frequency is the centre of, if it is one.
 ///
-/// No consumer from `main` yet: [`super::receive::Receiver`] is built from a
-/// channel *index* `signal::net::worker` already has from
-/// [`channels_in_span`], not from a frequency it would need to look one up
-/// from. Kept as [`centre_hz`]'s own inverse and exercised directly by this
-/// module's own round-trip test, the same standing
-/// `signal::bt::access_code::find_access_code` had after B14.
+/// Only tests call it: [`super::receive::Receiver`] is built from a channel
+/// *index* `signal::net::worker` already has from [`channels_in_span`], not
+/// from a frequency. Kept as [`centre_hz`]'s inverse and exercised by this
+/// module's round-trip test.
 #[allow(dead_code)]
 pub fn channel_of(freq_hz: u64) -> Option<u8> {
     (0..CHANNEL_COUNT).find(|&channel| {
@@ -76,7 +71,7 @@ pub fn channel_of(freq_hz: u64) -> Option<u8> {
 /// `tuned_centre_hz` and spanning `span_hz` - not merely a channel whose
 /// centre happens to land inside it, which would count one the front end's
 /// own rolloff has already started to eat into. Ascending by channel index,
-/// which on this arc is also ascending by frequency.
+/// which for classic Bluetooth is also ascending by frequency.
 ///
 /// An invalid span (non-finite, zero or negative) answers with no channels
 /// rather than guessing at one - the same refusal-not-invention rule 2
@@ -102,15 +97,15 @@ pub fn channels_in_span(tuned_centre_hz: f64, span_hz: f64) -> Vec<u8> {
 mod tests {
     use super::*;
 
-    /// The band's own two edges, at the channels the design document and
-    /// every cross-checked secondary source name.
+    /// The band's own two edges, at the channels every cross-checked
+    /// secondary source names.
     #[test]
     fn channel_zero_and_the_last_channel_sit_at_the_bands_edges() {
         assert_eq!(centre_hz(0), Some(LOW_HZ));
         assert_eq!(centre_hz(78), Some(HIGH_HZ));
     }
 
-    /// B15's own exit condition for this table: every one of the 79 channels
+    /// Every one of the 79 channels
     /// maps to a frequency, and channel 79 and beyond do not exist.
     #[test]
     fn every_one_of_the_seventy_nine_channels_maps_to_a_frequency() {
@@ -173,7 +168,7 @@ mod tests {
         assert_eq!(found, (6..=14).collect::<Vec<u8>>());
     }
 
-    /// Design section 1.4's own figure: a 20 MHz capture centred mid-band
+    /// A 20 MHz capture centred mid-band
     /// sees on the order of 20 of the 79 channels, not all of them.
     #[test]
     fn a_twenty_megahertz_capture_sees_about_twenty_channels() {

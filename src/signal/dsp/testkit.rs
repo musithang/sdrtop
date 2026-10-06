@@ -4,9 +4,9 @@
 //! Deterministic test signals, shared by every step in this layer.
 //!
 //! Compiled only under `cfg(test)`. It is here rather than inside one module's
-//! test block because from N5 onward every step needs noise at a stated
-//! signal-to-noise ratio, and two modules that each roll their own definition of
-//! "0 dB SNR" will disagree about what they measured while both looking right.
+//! test block because many modules need noise at a stated signal-to-noise
+//! ratio, and two modules that each roll their own definition of "0 dB SNR"
+//! will disagree about what they measured while both looking right.
 //!
 //! **Deterministic on purpose.** A test that fails one run in fifty is a test
 //! nobody trusts and everybody re-runs. Every generator here takes a seed, so a

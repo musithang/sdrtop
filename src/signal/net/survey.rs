@@ -4,10 +4,10 @@
 //! Where to point the radio, and for how long, to see the whole band.
 //!
 //! A receiver that reaches this section sees eighteen or twenty megahertz of an
-//! eighty-three megahertz band, so the only way to survey it is to hop. Design
-//! section 13.1 makes the consequence part of the reading rather than a footnote:
-//! **a duty-cycle-sampled census and a complete capture are different claims**,
-//! and every number gathered this way is marked with how it was gathered.
+//! eighty-three megahertz band, so the only way to survey it is to hop, and the
+//! consequence is part of the reading rather than a footnote: **a
+//! duty-cycle-sampled census and a complete capture are different claims**, and
+//! every number gathered this way is marked with how it was gathered.
 //!
 //! Everything here is plain arithmetic over plain data, so the plan can be
 //! asserted with no radio anywhere. The task that executes it only steers the

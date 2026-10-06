@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright (C) 2026 MusiThang <viktor.laszlo92@protonmail.com>
 
-//! FM demodulation as a *measurement*, not audio (see `dev_docs/demod-plan.md`).
+//! FM demodulation as a *measurement*, not audio.
 //!
 //! One worker covers all three modes, branching on the classifier: WFM (polar
 //! discriminator + MPX baseband + 19 kHz pilot), NFM (discriminator + CTCSS tone),

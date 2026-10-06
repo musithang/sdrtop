@@ -7,7 +7,7 @@
 //!   samples ago. It finds anything built out of a repeat, which is what an OFDM
 //!   short training field is, and it does so without knowing the preamble: the
 //!   repeat is the whole signature. Schmidl and Cox's timing metric is read
-//!   straight off it, and so, in N6, is Moose's frequency offset.
+//!   straight off it, and so is Moose's frequency offset (`dsp::estimate`).
 //! * [`MatchedFilter`] compares a signal with a sequence known in advance. It
 //!   finds a Bluetooth access address, and it is the optimal detector for a
 //!   known waveform in white Gaussian noise, which is a statement with a proof
@@ -37,14 +37,14 @@ use rustfft::{Fft, FftPlanner};
 /// How often a running sum is rebuilt from the history it still holds.
 ///
 /// **A running sum carries the rounding error of every sample it has ever seen,
-/// and design section 5.6 asks for a form whose error does not grow with
-/// length.** Measured, an `f64` pair of sums drifts about 3e-13 relative over
-/// four hundred thousand samples and would keep going; the objection is not the
-/// size, which is harmless, but the shape, because a number that grows without a
-/// bound has no bound to state. Rebuilding both sums from the ring every 65536 samples caps it at
-/// whatever that many terms can accumulate, forever. The cost is one window's
-/// worth of arithmetic every 65536 samples: about a tenth of a percent, which at
-/// 20 Msps is every 3.3 ms.
+/// and a measurement needs a form whose error does not grow with length.**
+/// Measured, an `f64` pair of sums drifts about 3e-13 relative over four
+/// hundred thousand samples and would keep going; the objection is not the
+/// size, which is harmless, but the shape, because a number that grows without
+/// a bound has no bound to state. Rebuilding both sums from the ring every
+/// 65536 samples caps it at whatever that many terms can accumulate, forever.
+/// The cost is one window's worth of arithmetic every 65536 samples: about a
+/// tenth of a percent, which at 20 Msps is every 3.3 ms.
 const REFRESH: usize = 1 << 16;
 
 /// One reading from [`DelayedAutocorrelator`].
@@ -52,7 +52,7 @@ const REFRESH: usize = 1 << 16;
 pub struct Coherence {
     /// The correlation itself. Its magnitude says how alike the two windows are;
     /// its argument is the phase the repeat accumulated, which is a frequency
-    /// offset waiting to be read (N6).
+    /// offset waiting to be read (`dsp::estimate`).
     pub p: Complex<f64>,
     /// Energy of the later window, `sum |x|^2`.
     pub energy: f64,
@@ -106,9 +106,8 @@ impl DelayedAutocorrelator {
     /// **No consumer yet.** `signal::reference::capture` builds a fresh
     /// correlator per call rather than reusing one across captures, so nothing
     /// has needed this. It is here for whichever detector runs continuously
-    /// over a live stream and needs to clear its state between windows -
-    /// design section 10's `net::detect` split, or an OFDM burst detector's
-    /// own preamble search.
+    /// over a live stream and needs to clear its state between windows, such
+    /// as an OFDM burst detector's own preamble search.
     #[allow(dead_code)]
     pub fn reset(&mut self) {
         self.hist
@@ -180,13 +179,13 @@ impl DelayedAutocorrelator {
 
 /// One reading from [`MatchedFilter`].
 ///
-/// Reaches `main` since B6: `signal::ble::detect::Detector` builds a
-/// combined preamble-and-access-address reference and reads this back on
-/// every sample of a live capture, since the advertising access address is
-/// known in advance and a known sequence correlated against the live stream
-/// is exactly what a matched filter is for. Design section 10's F4 (symbol
-/// timing from the L-LTF cross-correlation) is a second identified consumer,
-/// not yet built.
+/// `signal::ble::detect::Detector` builds a combined preamble-and-access-
+/// address reference and reads this back on every sample, since the
+/// advertising access address is known in advance and a known sequence
+/// correlated against a stream is exactly what a matched filter is for. The
+/// live receivers build their own references through their front ends
+/// instead. Wi-Fi symbol timing from the L-LTF cross-correlation would be a
+/// second consumer.
 #[derive(Clone, Copy, Debug)]
 pub struct Match {
     /// The correlation with the reference sequence.
@@ -312,9 +311,8 @@ impl MatchedFilter {
     /// **No consumer yet.** `signal::reference::capture` builds a fresh
     /// correlator per call rather than reusing one across captures, so nothing
     /// has needed this. It is here for whichever detector runs continuously
-    /// over a live stream and needs to clear its state between windows -
-    /// design section 10's `net::detect` split, or an OFDM burst detector's
-    /// own preamble search.
+    /// over a live stream and needs to clear its state between windows, such
+    /// as an OFDM burst detector's own preamble search.
     #[allow(dead_code)]
     pub fn reset(&mut self) {
         self.hist
@@ -386,13 +384,12 @@ impl MatchedFilter {
 /// than from a level that happened to work on one recording.
 /// `noise_alone_obeys_the_false_alarm_law` measures it rather than trusting it.
 ///
-/// **Still no production consumer.** `signal::ble::detect`'s live path (B6
-/// onward) reaches for [`threshold_for_false_alarm`] instead, the direction
+/// **No production consumer.** A detector's live path reaches for
+/// [`threshold_for_false_alarm`] instead, the direction
 /// a caller actually thinks in - "I want this false-alarm rate, what
 /// threshold gives it" - not this function's own direction. Only this
 /// module's own tests call it, checking the law it states rather than
-/// living by it. F2 (Wi-Fi burst detection) is a second identified future
-/// consumer of the same kind.
+/// living by it. Wi-Fi burst detection would be a consumer of the same kind.
 #[allow(dead_code)]
 pub fn false_alarm_rate(taps: usize, threshold: f64) -> f64 {
     if taps < 2 {
@@ -413,16 +410,15 @@ pub fn threshold_for_false_alarm(taps: usize, rate: f64) -> f64 {
 /// Correlation of a real signal's *shape* with a known real sequence:
 /// Pearson's coefficient between each window and the sequence, in `[-1, 1]`.
 ///
-/// **Blind to any constant added to the signal, by construction.** The
-/// sequence is centred once (its own mean removed), so a constant added to
-/// the window contributes nothing to the numerator, and the window's own
-/// spread is taken about its own mean in the denominator. A frequency
-/// discriminator turns a transmitter's carrier offset into exactly such a
-/// constant, which is why BLE's detector correlates here rather than
-/// coherently: a coherent correlation across a 40-microsecond sync word
-/// falls apart at an offset of a few tens of kilohertz, and BLE allows
-/// ±360 (`dev_docs/case-studies/case-study-ble-crc.md`, section 13). Blind to the
-/// signal's scale too, so the discriminator's units do not matter.
+/// **Blind to any constant added to the signal, by construction.** The sequence
+/// is centred once (its own mean removed), so a constant added to the window
+/// contributes nothing to the numerator, and the window's own spread is taken
+/// about its own mean in the denominator. A frequency discriminator turns a
+/// transmitter's carrier offset into exactly such a constant, which is why
+/// BLE's detector correlates here rather than coherently: a coherent
+/// correlation across a 40-microsecond sync word falls apart at an offset of a
+/// few tens of kilohertz, and BLE allows ±360. Blind to the signal's scale too,
+/// so the discriminator's units do not matter.
 ///
 /// The correlation runs by overlap-save, two stretches of signal to a
 /// transform (see [`Self::process_block`]), and the window sums alongside it.
@@ -609,8 +605,8 @@ mod tests {
         // improvement in size is the small half of the point. The large half is
         // that this run covers six refresh intervals and the error is reset at
         // each one, so the bound is a property of a single interval and holds for
-        // a run of any length - which is what design section 5.6 asks for, and
-        // the only form of the claim that is a number rather than a trend.
+        // a run of any length, the only form of the claim that is a number
+        // rather than a trend.
         assert!(
             worst_p < 1e-12 && worst_e < 1e-12,
             "running sums drifted: p by {worst_p:e}, energy by {worst_e:e}"
@@ -845,7 +841,7 @@ mod tests {
         }
     }
 
-    /// N5's exit condition: a known preamble, buried in noise at a stated SNR,
+    /// A known preamble, buried in noise at a stated SNR,
     /// found at the right offset, with the false-alarm rate the threshold was
     /// chosen for.
     #[test]

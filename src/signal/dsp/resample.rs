@@ -16,14 +16,15 @@
 //! branches and each output touches only the branch that lands on it: the cost
 //! is the same as one filter at the input rate, whatever `L` is.
 //!
-//! **What the filter has to do decides its specification, and both halves matter:**
-//! the zero-stuffing puts images of the signal at every multiple of the input
-//! rate, and the decimation folds everything above the output Nyquist back into
-//! the band. One low-pass handles both, and the band edge is the lower of the two
-//! Nyquist frequencies, `0.5 / max(L, M)` on the upsampled grid. That is why this
-//! step waited for N3: the caller states the rejection it needs, in dB, and gets
-//! it. A fixed window would have handed out one number and left every caller to
-//! find out whether it was enough.
+//! **What the filter has to do decides its specification, and both halves
+//! matter:** the zero-stuffing puts images of the signal at every multiple of
+//! the input rate, and the decimation folds everything above the output Nyquist
+//! back into the band. One low-pass handles both, and the band edge is the
+//! lower of the two Nyquist frequencies, `0.5 / max(L, M)` on the upsampled
+//! grid. That is why the filter comes from `fir::design_lowpass_to_spec`: the
+//! caller states the rejection it needs, in dB, and gets it. A fixed window
+//! would have handed out one number and left every caller to find out whether
+//! it was enough.
 //!
 //! **Gain.** The design has unit DC gain, but only one branch in `L` contributes
 //! to each output, so the kernels carry a factor of `L`. A resampler that changes
@@ -50,10 +51,9 @@ fn gcd(a: usize, b: usize) -> usize {
 
 /// A streaming polyphase resampler at a fixed rational ratio.
 ///
-/// **No production consumer yet.** Design section 12.3: "the device's rate is a
-/// rational multiple of what a mode needs" is the case this exists for, and no
-/// arc has reached the point of asking a radio for a rate it cannot produce
-/// directly. `fir::design_lowpass_to_spec` is the same story, one layer down.
+/// **No production consumer yet.** It is for a radio whose rate is a rational
+/// multiple of what a mode needs, and nothing yet asks a radio for a rate it
+/// cannot produce directly.
 #[allow(dead_code)]
 pub struct Resampler {
     l: usize,
@@ -227,12 +227,12 @@ mod tests {
     /// cycles per sample.
     ///
     /// Two pieces of arithmetic here are deliberate, and both are the same
-    /// lesson N2 learned: the measurement's own precision runs out before the
-    /// signal's does. The arguments are taken in `f64` because a hundred and
-    /// sixty thousand `f32` arguments carry a rounding bias that reaches a
-    /// milliradian in total, which is a nanocycle per sample of imaginary
-    /// frequency error. The sum is compensated because a long sum of small
-    /// angles is otherwise limited by the size of its own running total.
+    /// lesson the oscillator taught: the measurement's own precision runs out
+    /// before the signal's does. The arguments are taken in `f64` because a
+    /// hundred and sixty thousand `f32` arguments carry a rounding bias that
+    /// reaches a milliradian in total, which is a nanocycle per sample of
+    /// imaginary frequency error. The sum is compensated because a long sum of
+    /// small angles is otherwise limited by the size of its own running total.
     fn measure(x: &[Complex<f32>]) -> (f64, f64) {
         let wide = |s: &Complex<f32>| Complex::new(s.re as f64, s.im as f64);
         let mag = x.iter().map(|s| wide(s).norm()).sum::<f64>() / x.len() as f64;
@@ -313,14 +313,16 @@ mod tests {
 
     /// A tone above the lower of the two Nyquist frequencies has nowhere honest
     /// to go: decimation folds it into the band. The filter is the only thing
-    /// stopping it, and the point of N3 is that the caller says how hard.
+    /// stopping it, and the point of a specified design is that the caller says
+    /// how hard.
     ///
     /// **Swept across the whole stopband, and asserted from both sides.** A
-    /// single tone deep in the stopband passes this with twenty-odd dB to spare,
-    /// because the worst rejection is at the stopband edge and nowhere else, so
-    /// such a test would sail past a filter designed twenty dB too weak. The
-    /// upper bound matters for the same reason it does in N3: a resampler that
-    /// rejects far more than it was asked to is spending taps nobody authorised.
+    /// single tone deep in the stopband passes this with twenty-odd dB to
+    /// spare, because the worst rejection is at the stopband edge and nowhere
+    /// else, so such a test would sail past a filter designed twenty dB too
+    /// weak. The upper bound matters for the same reason it does for the filter
+    /// design: a resampler that rejects far more than it was asked to is
+    /// spending taps nobody authorised.
     #[test]
     fn a_tone_that_would_alias_is_suppressed_by_the_designed_stopband() {
         for stopband in [40.0, 60.0, 80.0] {
@@ -390,7 +392,7 @@ mod tests {
         }
     }
 
-    /// N4's exit condition. Up by 5/4 and back down by 4/5 is a round trip
+    /// Up by 5/4 and back down by 4/5 is a round trip
     /// through both directions of the same machinery, and what comes out has to
     /// be the tone that went in.
     #[test]

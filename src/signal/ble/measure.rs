@@ -255,11 +255,10 @@ mod tests {
             );
         }
 
-        // 250 kHz is BLE's own nominal deviation and must land inside the
-        // band; 150 kHz and 350 kHz are both far enough outside it (design
-        // section 2.1's own 0.45-0.55) that no plausible settling loss
-        // brings them back in - a genuinely wrong transmitter, correctly
-        // read as one.
+        // 250 kHz is BLE's own nominal deviation and must land inside the band;
+        // 150 kHz and 350 kHz are both far enough outside its 0.45 to 0.55 that
+        // no plausible settling loss brings them back in - a genuinely wrong
+        // transmitter, correctly read as one.
         let index = |d: f64| readings.iter().find(|r| r.0 == d).unwrap().1;
         assert!(
             index(250_000.0) > 0.45 && index(250_000.0) < 0.55,

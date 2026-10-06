@@ -2,15 +2,15 @@
 // Copyright (C) 2026 MusiThang <viktor.laszlo92@protonmail.com>
 
 //! Streaming access-code detection: the same check
-//! [`super::access_code::find_access_code`] makes over a finished slice,
-//! made incremental for a live bit stream that never ends and has no
-//! boundary to hand it a slice of - B15's own reason to exist.
+//! [`super::access_code::find_access_code`] makes over a finished slice, made
+//! incremental for a live bit stream that never ends and has no boundary to
+//! hand it a slice of.
 //!
 //! Classic Bluetooth has no known preamble to trigger on the way
-//! `signal::ble::detect::Detector` does: design section 1.4 is explicit that
-//! the access code itself, keyed by a LAP no passive receiver knows in
-//! advance, is the only thing there is to search for. So this runs the check
-//! on every bit rather than after a trigger picks out where to look.
+//! `signal::ble::detect::Detector` does: the access code itself, keyed by a LAP
+//! no passive receiver knows in advance, is the only thing there is to search
+//! for. So this runs the check on every bit rather than after a trigger picks
+//! out where to look.
 //!
 //! **`O(1)` per bit, not a re-scan.** [`Detector::push`] keeps the last 64
 //! bits packed into one `u64` shift register and checks it after every new
@@ -74,7 +74,7 @@ mod tests {
     use super::*;
     use crate::signal::bt::access_code::access_code_bits;
 
-    /// B15's own exit condition for this module: a clean access code fed one
+    /// A clean access code fed one
     /// bit at a time, with real content ahead of it, is found at the instant
     /// its own last bit arrives - a live receiver's only warning that a
     /// window is complete.

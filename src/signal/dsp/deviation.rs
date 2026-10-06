@@ -5,9 +5,8 @@
 //! every on-air bit whose neighbours make it one of the test suites' own
 //! readings ([`suite_readings`]).
 //!
-//! Lifted out of `signal::ble::measure` when classic Bluetooth needed the
-//! same reading (net-ux-polish-plan 6.4): the two protocol modules do not
-//! know each other (foundation design section 10, rule 2), and what they
+//! Lifted out of `signal::ble::measure` when classic Bluetooth needed the same
+//! reading: the two protocol modules do not know each other, and what they
 //! share is GFSK, which is this module's subject, not either protocol's.
 
 use super::uncertainty::Uncertain;

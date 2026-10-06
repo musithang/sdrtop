@@ -6,10 +6,8 @@
 //! receiver that has not joined a piconet can search for without already
 //! knowing what it is listening to.
 //!
-//! **Not read from the Bluetooth Core Specification itself this session**
-//! (Vol 2, Part B, Section 6.2 - design section 6's own facts-to-verify
-//! table already names this as unread, alongside B1's channel table and
-//! B3's preamble rule). The construction here - [`DEFAULT_CODEWORD`] and
+//! **Not read from the Bluetooth Core Specification itself** (Vol 2, Part
+//! B, Section 6.2). The construction here - [`DEFAULT_CODEWORD`] and
 //! [`SW_MATRIX`] - is ported from `libbtbb`
 //! (<https://github.com/greatscottgadgets/libbtbb>,
 //! `lib/src/bluetooth_packet.c`, `btbb_gen_syncword`), Great Scott Gadgets'
@@ -17,10 +15,10 @@
 //! app already drives directly - GPL-2.0-or-later, license-compatible with
 //! this project's GPL-3.0-or-later, and in real use by Ubertooth hardware
 //! for well over a decade. A real, independent, production-tested
-//! implementation rather than a primary text, the same standing B1's three
-//! cross-checked secondary sources had.
+//! implementation rather than a primary text, the same standing the BLE
+//! channel table's three cross-checked secondary sources have.
 //!
-//! **Corroborated the same way B1's channel table was, without a primary
+//! **Corroborated the same way the BLE channel table is, without a primary
 //! source: a structural property, checked by brute force rather than
 //! trusted on the citation alone.** A public description of this code
 //! states two properties any correct transcription of the constants below
@@ -40,10 +38,6 @@
 /// nonzero LAP's own set bits, from this starting point, is the whole of
 /// the code - see [`gen_syncword`].
 ///
-/// No consumer from `main` yet: B14 lands this arc's own detection
-/// primitive alone, with nothing in `tasks` or `ui` feeding it a live
-/// capture - the same position `signal::ble::channel`'s own table was in
-/// after B1, before B3's detector gave it a real caller.
 #[allow(dead_code)]
 const DEFAULT_CODEWORD: u64 = 0xb000_0002_c782_0e7e;
 
@@ -186,18 +180,15 @@ pub(super) fn check_window(word: u64) -> Option<u32> {
 ///
 /// **Exact match only - no bit errors corrected.** `libbtbb`'s own
 /// `promiscuous_packet_search` additionally corrects a small number of bit
-/// errors via a precomputed syndrome table; this arc does not port that
-/// table, so a real capture with any error in its access code is missed
-/// rather than recovered - an honest, coarser first step, not a claim to
-/// have matched the reference implementation's own robustness. Design
-/// section 1.4's own point already holds without it: finding a
-/// *clean* access code yields the LAP for free, with no piconet
-/// membership required first.
+/// errors via a precomputed syndrome table; that table is not ported here, so a
+/// real capture with any error in its access code is missed rather than
+/// recovered - an honest, coarser first step, not a claim to have matched the
+/// reference implementation's own robustness. Finding a *clean* access code
+/// still yields the LAP for free, with no piconet membership required first.
 ///
-/// No consumer from `main` yet; see [`DEFAULT_CODEWORD`]'s own note. B15's
-/// own consumer, [`super::detect::Detector`], cannot reuse this directly -
-/// it has no finished slice to scan, only one more bit at a time - so it
-/// shares [`check_window`] instead.
+/// Only tests call it: the live [`super::detect::Detector`] has no finished
+/// slice to scan, only one more bit at a time, so it shares
+/// [`check_window`] instead.
 #[allow(dead_code)]
 pub fn find_access_code(bits: &[bool]) -> Option<(u32, usize)> {
     if bits.len() < 64 {
@@ -284,7 +275,7 @@ mod tests {
     }
 
     /// A LAP outside the 24-bit range is truncated to it, the same way the
-    /// type this arc reads a `BD_ADDR`'s LAP into elsewhere already treats
+    /// type a `BD_ADDR`'s LAP is read into elsewhere already treats
     /// the field as 24 bits and no more.
     #[test]
     fn bits_above_the_lap_are_ignored() {
@@ -332,11 +323,10 @@ mod tests {
         }
     }
 
-    /// [`find_access_code`]'s own exit condition: a clean access code
+    /// [`find_access_code`]: a clean access code
     /// embedded in a longer bit stream, with real content before and
-    /// after it, is found at the right position and yields the right LAP -
-    /// design section 1.4's "yields the LAP for free", measured rather
-    /// than only claimed.
+    /// after it, is found at the right position and yields the right LAP for
+    /// free, measured rather than only claimed.
     #[test]
     fn a_clean_access_code_is_found_and_yields_its_lap() {
         let lap = 0x00c0_ffee;
@@ -356,11 +346,11 @@ mod tests {
     /// random windows finding one is implausible enough to be worth
     /// asserting against, the same discipline `dsp::correlate`'s own
     /// `noise_alone_crosses_the_threshold_at_about_the_stated_rate` holds
-    /// this arc's other detectors to.
+    /// the other detectors to.
     #[test]
     fn noise_alone_does_not_manufacture_an_access_code() {
         // A fixed, non-random but non-repeating pattern - deterministic,
-        // like every test in this arc, and with no reason to line up with
+        // like every test here, and with no reason to line up with
         // any LAP's own codeword.
         let bits: Vec<bool> = (0..2000u32)
             .map(|i| (i.wrapping_mul(2654435761)) & 1 == 1)

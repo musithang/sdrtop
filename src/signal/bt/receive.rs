@@ -9,14 +9,14 @@
 //! correlates raw IQ against a *known* sync word to find where a packet
 //! starts before it ever slices a bit. Classic Bluetooth has no such
 //! reference to correlate against - the LAP, and so the access code, is
-//! exactly what a passive receiver does not know (design section 1.4) - so
+//! exactly what a passive receiver does not know - so
 //! this receiver never waits for a trigger. It slices continuously, from the
 //! moment it is built, and lets [`super::detect::Detector`] decide on every
 //! new bit whether the last 64 form a real access code.
 //!
-//! **Multiple channels, one capture - capped, not unbounded.** Design
-//! section 1.4: a single ~20 MHz capture already contains on the order of 20
-//! of the 79 classic BT channels at once, each only 1 MHz wide.
+//! **Multiple channels, one capture - capped, not unbounded.** A single
+//! ~20 MHz capture already contains on the order of 20 of the 79 classic BT
+//! channels at once, each only 1 MHz wide.
 //! `signal::net::worker` builds one [`Receiver`] per channel it decides to
 //! watch, each with its own [`crate::signal::dsp::nco::Nco`] mixing that one
 //! channel down to its own baseband - unlike BLE's receiver, which only ever
@@ -25,13 +25,12 @@
 //! **Measured, and found too expensive to run unbounded.** A channel-select
 //! filter tight enough to matter at 1 MHz spacing needs a real tap count -
 //! `front_end`'s own doc has the numbers - and paying that once per watched
-//! channel is not the "a few operations per sample" budget design section
-//! 12.4 sets for always-on detection. `signal::net::worker` therefore caps
+//! channel is far over a budget of a few operations per sample for
+//! always-on detection. `signal::net::worker` therefore caps
 //! how many of the channels in view are actually given a receiver
 //! (`[net].bt_channels` in the config, small by default), choosing the ones
 //! nearest the tuned centre first, and says on screen how many of the total
-//! it is watching - an honest, coarser first step, the same shape B14's own
-//! exact-match-only scope-cut already established for this arc.
+//! it is watching: an honest, coarser step than watching every one.
 //!
 //! **No active symbol-timing recovery.** With no known preamble to anchor a
 //! phase search on (the way `signal::ble::sync::slice` anchors one), this
@@ -45,12 +44,11 @@
 //! once and hold it, taken a step further because this receiver does not
 //! even get a burst boundary to search from.
 //!
-//! **Not yet verified against real hardware.** Every test below is
-//! synthetic, the same honest position B14 documented for
-//! `signal::bt::access_code` itself: there is no live capture of real
-//! classic Bluetooth traffic behind any of these numbers yet, and the
-//! channel-select filter's own real adjacent-channel rejection - as opposed
-//! to what it measures against a synthetic interferer - is unmeasured air.
+//! **What the air has and has not confirmed.** Every test below is
+//! synthetic. Live captures have since found real piconets and resolved
+//! their UAPs, but the channel-select filter's real adjacent-channel
+//! rejection, as opposed to what it measures against a synthetic
+//! interferer, is unmeasured.
 
 use num_complex::Complex;
 
@@ -67,12 +65,11 @@ use super::detect::Detector;
 use super::header;
 
 /// Classic BT's own symbol rate: 1 Mb/s, fixed for the basic rate physical
-/// layer this arc's GFSK chain targets (design section 1.1's "BR payload is
-/// the same GFSK chain as BLE").
+/// layer: the same GFSK chain as BLE's.
 const SYMBOL_RATE_HZ: f64 = 1_000_000.0;
 
 /// One access code found: its LAP, and when its last bit was sliced, in µs
-/// on the stream's own sample clock (net-ux-polish-plan 6.5). To a quarter
+/// on the stream's own sample clock. To a quarter
 /// symbol: the working-rate sample the lane sliced, not the symbol count,
 /// so a slot grid can be fitted to it (`super::slots`). A constant delay
 /// (the decimator's, the discriminator's first sample, the access code's
@@ -109,7 +106,7 @@ pub struct HeaderHit {
     pub sync_end_pair: f64,
     /// When the access code before it ended, dated as
     /// [`AccessHit::at_us`] is: what joins a header to its hit in the
-    /// export (net-ux-polish-plan 6.6).
+    /// export.
     pub at_us: f64,
 }
 
@@ -127,7 +124,7 @@ pub struct HeaderHit {
 const PAYLOAD_CAPTURE_BITS: usize = 183 * 15;
 
 /// How many raw air bits a header itself occupies after the access
-/// code - the 4-bit trailer this arc never reads, plus FEC(1/3)'s own
+/// code - the 4-bit trailer, never read, plus FEC(1/3)'s own
 /// 54 air bits for [`header::HEADER_BITS`] host bits.
 const HEADER_CAPTURE_BITS: usize = header::TRAILER_BITS + header::HEADER_AIR_BITS;
 
@@ -157,8 +154,7 @@ struct PendingHeader {
     /// `None` while still capturing the header itself. A header that
     /// fails FEC never sets this; that capture is abandoned right there
     /// instead ([`Receiver::push`]'s own doc), since no amount of payload
-    /// afterward can be attributed to a header this arc could not even
-    /// read.
+    /// afterward can be attributed to a header that could not even be read.
     header_whitened: Option<[bool; header::HEADER_BITS]>,
     /// [`HeaderHit::sync_end_pair`].
     sync_end_pair: f64,
@@ -205,19 +201,19 @@ const WORKING_RATE_HZ: f64 = SYMBOL_RATE_HZ * PHASES as f64;
 /// weak against a real interferer; that is still unmeasured air, the same
 /// honest gap the module doc's own closing paragraph names.
 ///
-/// **The stopband is 25 dB, not `signal::ble::receive::front_end`'s 40,
-/// and that is a measured trade-off, not an oversight.** A Kaiser filter's
-/// own tap count is set by its transition width and its stopband depth
-/// together (`dsp::fir::kaiser_taps`), and this filter runs once per
-/// *watched channel*, continuously, at [`WORKING_RATE_HZ`] output samples a
-/// second each. At 20 Msps this design (121 taps) costs on the order of
-/// 484 million complex multiply-adds a second *per channel* - measured
-/// directly, not estimated - which for [`super::super::net::worker::
-/// SAFE_BT_CHANNELS`] simultaneous channels is still well past design
-/// section 12.4's "a few operations per sample" budget for always-on
-/// detection; a 40 dB stopband at the same transition would cost close to
-/// three times that. `NetWorker` additionally caps *how many* channels get
-/// a receiver at all rather than relying on the filter alone to make every
+/// **The stopband is 25 dB, not `signal::ble::receive::front_end`'s 40, and
+/// that is a measured trade-off, not an oversight.** A Kaiser filter's own tap
+/// count is set by its transition width and its stopband depth together
+/// (`dsp::fir::kaiser_taps`), and this filter runs once per *watched channel*,
+/// continuously, at [`WORKING_RATE_HZ`] output samples a second each. At 20
+/// Msps this design (121 taps) costs on the order of 484 million complex
+/// multiply-adds a second *per channel* - measured directly, not estimated -
+/// which for
+/// [`super::super::net::worker::SAFE_BT_CHANNELS`]
+/// simultaneous channels is still well past a budget of a few operations per
+/// sample for always-on detection; a 40 dB stopband at the same transition would cost
+/// close to three times that. `NetWorker` additionally caps *how many* channels
+/// get a receiver at all rather than relying on the filter alone to make every
 /// one of them cheap.
 const CHANNEL_SELECT_CUTOFF_HZ: f64 = 500_000.0;
 const CHANNEL_SELECT_TRANSITION_HZ: f64 = 200_000.0;
@@ -537,8 +533,8 @@ mod tests {
     /// margin costs nothing in a test built to have room for it.
     const SETTLE_SYMBOLS: usize = 40;
 
-    /// Build a clean, GFSK-modulated access code (design section 1.1: "BR
-    /// payload is the same GFSK chain" BLE already models), already mixed
+    /// Build a clean, GFSK-modulated access code (BR is the same GFSK chain
+    /// BLE already models), already mixed
     /// to where `ch` sits relative to `tuned_centre_hz` inside a wideband
     /// capture.
     fn place_on_channel(
@@ -559,7 +555,7 @@ mod tests {
         placed
     }
 
-    /// B15's own exit condition, run end to end with no worker or state
+    /// End to end, with no worker or state
     /// involved: a synthetic classic-BT access code sitting on one channel
     /// of a wideband capture is found.
     #[test]
@@ -691,7 +687,7 @@ mod tests {
         }
     }
 
-    /// B16's own exit condition, wired: a synthetic classic-BT packet -
+    /// Wired end to end: a synthetic classic-BT packet -
     /// access code, a 4-bit trailer, and a real FEC(1/3)-encoded, whitened
     /// header, followed by enough further content to complete the
     /// payload capture window too - produces exactly one `HeaderHit`,
@@ -781,7 +777,7 @@ mod tests {
     }
 
     /// [`PAYLOAD_CAPTURE_BITS`]'s own doc claims it covers every packet
-    /// type B17's own `payload` module supports - checked directly rather
+    /// type the `payload` module supports - checked directly rather
     /// than trusted from the arithmetic in the comment alone, the same
     /// discipline every other cited-but-hand-computed constant in this
     /// arc is held to.
@@ -911,7 +907,7 @@ mod tests {
         assert_eq!(winner.map(|(uap, _)| uap), Some(true_uap));
     }
 
-    /// `push`'s own exit condition: a single real access code, found on more
+    /// A single real access code, found on more
     /// than one phase lane in the same call, is reported once - not once
     /// per lane. Directly measured to actually happen on this synthetic
     /// signal, not a hypothetical.

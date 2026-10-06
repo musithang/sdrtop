@@ -77,12 +77,9 @@ fn step_from_turns(turns_per_sample: f64) -> u64 {
 
 /// A phase-accumulator oscillator at a fixed sample rate.
 ///
-/// **No production consumer yet.** Every DSP test in this crate that needs a
-/// synthetic tone or a known frequency offset builds one, but nothing in the
-/// running app has needed to *generate or mix out* a carrier: N16's reference
-/// measurement reads an offset with `dsp::correlate`/`dsp::estimate` and
-/// reports it, it does not correct for it. Mixing a measured offset out before
-/// decode is an arc's job, once one exists.
+/// Mixes a channel down to baseband in the BLE, LE Coded and classic
+/// receivers and in the measurement path (`signal::net::measure`), and
+/// builds the synthetic tones and offsets the DSP tests need.
 #[allow(dead_code)]
 pub struct Nco {
     /// Current phase in accumulator units, `2^64` to the turn.
@@ -441,7 +438,7 @@ mod tests {
         assert_eq!(before, nco.phase_turns());
     }
 
-    /// N2's exit condition. A drifting oscillator is one whose phase error grows
+    /// A drifting oscillator is one whose phase error grows
     /// with the sample index, so the test is not "is it accurate" but "is it as
     /// accurate at the end as at the beginning".
     #[test]

@@ -92,7 +92,7 @@ mod tests {
     }
 
     /// Bit 6 is always the constant, and the low six bits are always the
-    /// channel, for every channel this arc actually uses.
+    /// channel, for every channel BLE actually uses.
     #[test]
     fn the_seed_carries_the_channel_in_its_low_six_bits() {
         for channel in 0..=39u8 {

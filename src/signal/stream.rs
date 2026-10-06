@@ -6,9 +6,8 @@
 //! Every consumer of one of those channels asks the same two questions of every
 //! block - does this one continue the last, and how many never arrived - and
 //! neither question has anything to do with what the consumer is decoding. It
-//! lived in the demod worker while the demod worker was the only consumer. N12
-//! renamed the block type ahead of its second consumer; this is the rest of that
-//! move, and for the same reason.
+//! lived in the demod worker while the demod worker was the only consumer, and
+//! moved here when the NET worker became the second.
 //!
 //! It has to be shared rather than reimplemented because getting it wrong is not
 //! a crash. It is a run read as unbroken straight across a hole, and a

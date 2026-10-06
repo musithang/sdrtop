@@ -5,8 +5,8 @@
 //! [`SdrDevice::set_frequency`] is called to the moment it returns, timed over
 //! several real retunes.
 //!
-//! **That, and only that, is what is measured, and the name says so.** B19 first
-//! built this as "retune latency": set the frequency, then wait for the next
+//! **That, and only that, is what is measured, and the name says so.** A first
+//! version was "retune latency": set the frequency, then wait for the next
 //! block to arrive, and call the wait the time to a block "reflecting the new
 //! frequency". Nothing checked that it did. The next block is as likely to
 //! carry samples captured before the retune and still queued, and the wait was
@@ -14,8 +14,8 @@
 //! block is 131,072 samples, 6.55 ms at 20 Msps and 32.8 ms at 4 Msps. The
 //! figure would have been mostly block phase, labelled as the radio's retune
 //! time, right where it decides whether a connection can be followed. Replaced
-//! 2026-09-19 before anything had shown it (POLICY rule 5: the label names what
-//! was measured).
+//! before anything had shown it (POLICY rule 5: the label names what was
+//! measured).
 //!
 //! **What the call time does and does not tell you.** It is the host-to-radio
 //! part: the driver, the USB control transfer, whatever the firmware does before
@@ -24,8 +24,7 @@
 //! already in flight. So it bounds from one side only: a call that alone takes
 //! longer than a 7.5 ms BLE connection interval rules following out; a call
 //! that is shorter is necessary, not sufficient. When the radio actually changes
-//! frequency in the sample stream is a different measurement, and a research
-//! step of its own (`dev_docs/net-ux-polish-plan.md`, after the plan).
+//! frequency in the sample stream is a different measurement, not made here.
 //!
 //! No streaming is needed and none is assumed: the call is timed whether or not
 //! blocks are flowing.

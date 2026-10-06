@@ -183,12 +183,12 @@ pub fn design_lowpass_kaiser(taps: usize, fc: f64, beta: f64) -> Vec<f32> {
 /// The design rule, as one call: ask for a stopband and a transition width, get
 /// a filter that meets them.
 ///
-/// This is the reason N3 exists as a step. Hamming hands out 53 dB and no
-/// argument changes it; a channel filter and a decimator do not want the same
-/// rejection, and neither should have to take the one number a fixed window
-/// happens to give. Pairing the shape with the length is done here because a
-/// mismatched pair meets neither specification and looks perfectly reasonable
-/// while doing it.
+/// This is why the design is driven by the specification. Hamming hands out 53
+/// dB and no argument changes it; a channel filter and a decimator do not want
+/// the same rejection, and neither should have to take the one number a fixed
+/// window happens to give. Pairing the shape with the length is done here
+/// because a mismatched pair meets neither specification and looks perfectly
+/// reasonable while doing it.
 ///
 /// Measured, at `fc = 0.1` and a transition of 0.02 cycles per sample: a request
 /// for 40 dB comes back as 39.92 dB in 113 taps, 60 dB as 60.08 dB in 183, and
@@ -212,7 +212,7 @@ pub fn design_lowpass_to_spec(fc: f64, transition: f64, stopband_db: f64) -> Vec
 ///
 /// `bt` is the filter's bandwidth-time product - its own -3 dB bandwidth times
 /// the symbol period - which is the number a specification actually states
-/// (0.5 for Bluetooth BR and for BLE; see the arc documents for the clause).
+/// (0.5 for Bluetooth BR and for BLE).
 /// `sps` is samples per symbol and `span_symbols` is how many symbol periods
 /// the kernel spans, centred on zero. `sps * span_symbols` is forced odd, the
 /// same convention [`windowed_sinc`] uses, so the group delay is a whole
@@ -229,9 +229,9 @@ pub fn design_lowpass_to_spec(fc: f64, transition: f64, stopband_db: f64) -> Vec
 /// `the_dash_3db_point_sits_at_bt_over_sps` measures the filter this produces
 /// rather than trusting the formula on faith.
 ///
-/// Reaches `main` since B6: `signal::ble::gfsk::modulate` calls this to build
-/// the pulse-shaping kernel every GFSK transmit and every reference
-/// correlation goes through, live in `signal::ble::detect::Detector`.
+/// `signal::ble::gfsk::modulate` calls this to build the pulse-shaping kernel
+/// every synthetic GFSK transmission and every receiver's reference goes
+/// through.
 pub fn gaussian_taps(bt: f64, sps: usize, span_symbols: usize) -> Vec<f32> {
     use std::f64::consts::PI;
     let n = (sps * span_symbols).max(1) | 1;
@@ -698,7 +698,7 @@ mod tests {
         db(peak)
     }
 
-    /// N3's exit condition: ask for a stopband, get one.
+    /// Ask for a stopband, get one.
     #[test]
     fn the_requested_stopband_is_delivered() {
         for a in [40.0, 60.0, 80.0] {

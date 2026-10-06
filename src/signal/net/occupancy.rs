@@ -7,11 +7,12 @@
 //! The band is divided into one-megahertz cells and each cell is asked one
 //! question over and over: **was anything there in this window?** The fraction
 //! of windows that answer yes is the duty cycle. Nothing here knows what a
-//! subcarrier is, which is the rule for everything in `net` (design section 10).
+//! subcarrier is, which is the rule for everything in `net`: the band's
+//! measurements belong to no protocol.
 //!
 //! # The threshold is derived, and here is the derivation
 //!
-//! Design section 5.5 forbids a magic constant, and "signal is 10 dB above the
+//! A magic constant is not allowed here, and "signal is 10 dB above the
 //! noise" is the magic constant this measurement is usually built on. Three
 //! steps, each with a closed form:
 //!
@@ -28,7 +29,7 @@
 //!    is the `q/a`-th quantile of the noise, so the naive estimate is too high
 //!    by `ln(1-q/a) / ln(1-q)`. At half the plane busy that is three decibels,
 //!    which is not a rounding error. One refinement pass measures `a` against
-//!    the first threshold and re-derives the floor with it (design section 5.2).
+//!    the first threshold and re-derives the floor with it.
 //!
 //! 3. **The threshold comes from the false-alarm rate.** For that same
 //!    distribution, `P(power > T) = exp(-T/m)`, so `T = -m ln(p)` puts the
@@ -326,10 +327,9 @@ fn above(plane: &[f64], threshold: f64) -> f64 {
 /// independent windows that is the binomial standard error, `sqrt(d(1-d)/n)`.
 ///
 /// It is the estimator's own spread and not the whole story - a burst pattern
-/// correlated with the hop rhythm would beat it, and design section 13.1's
-/// warning about survey and lock being different claims is the part no error bar
-/// can carry. Which is why the mode is a tag on the panel as well as a sigma on
-/// the number.
+/// correlated with the hop rhythm would beat it, and that survey and lock are
+/// different claims is the part no error bar can carry. Which is why the mode
+/// is a tag on the panel as well as a sigma on the number.
 pub fn duty_uncertain(duty: f64, windows: u64) -> crate::signal::dsp::uncertainty::Uncertain {
     use crate::signal::dsp::uncertainty::Uncertain;
     if windows == 0 {

@@ -2,9 +2,9 @@
 // Copyright (C) 2026 MusiThang <viktor.laszlo92@protonmail.com>
 
 //! Classic Bluetooth's 18-bit packet header: FEC(1/3) decode, dewhitening,
-//! and the HEC/UAP relationship - design section 1.4's "packet header decode
-//! needs the UAP for the HEC check; it can be inferred over several packets
-//! from the same LAP", B16's own reason to exist.
+//! and the HEC/UAP relationship. Checking a header's HEC needs the piconet's
+//! UAP, which no packet states, but which can be inferred over several
+//! packets from the same LAP.
 //!
 //! **Harder than "infer the UAP" alone, and said so before landing
 //! anything.** The header is whitened - XORed with a pseudo-random
@@ -13,7 +13,7 @@
 //! possible values and returns 64 candidate UAPs, at most one of which is
 //! real; [`PiconetClock`] is the piece that finds out which, by narrowing
 //! across several headers from the same LAP rather than trusting any one
-//! of them - the "over several packets" design section 1.4 already named.
+//! of them.
 //!
 //! **And even that narrows to two, not one - measured, not assumed, after
 //! a first attempt (independent per-header set intersection) measurably
@@ -21,32 +21,26 @@
 //! findings; [`PiconetClock::narrowed`] reports the true floor rather than
 //! picking one of the two survivors and hoping.
 //!
-//! **Not read from the Bluetooth Core Specification itself this session**
-//! (Vol 2, Part B - design section 6's own facts-to-verify table already
-//! names the HEC/UAP relationship as unread, alongside B1's channel table
-//! and B14's access code construction). Ported instead from `libbtbb`
+//! **Not read from the Bluetooth Core Specification itself** (Vol 2, Part
+//! B). Ported instead from `libbtbb`
 //! (<https://github.com/greatscottgadgets/libbtbb>,
 //! `lib/src/bluetooth_packet.c`: `unfec13`, `unwhiten`, `uap_from_hec`, the
 //! `INDICES` and `WHITENING_DATA` tables, and the `PACKET_TYPE_*` constants
 //! from `lib/src/bluetooth_packet.h`), the same organisation and the same
-//! standing B14's own port of `btbb_gen_syncword` already has: GPL-2.0-or-
+//! standing `access_code`'s port of `btbb_gen_syncword` has: GPL-2.0-or-
 //! later, license-compatible with this project's GPL-3.0-or-later, and in
 //! real use by Ubertooth hardware for well over a decade.
 //!
-//! **Bit convention matches this arc's own, because it is the same
-//! convention.** `libbtbb`'s own `air_to_host8/16/32` map array index `i`
+//! **Bit convention matches the rest of `signal::bt`, because it is the
+//! same convention.** `libbtbb`'s own `air_to_host8/16/32` map array index `i`
 //! (the `i`-th bit received) to bit `i` of the resulting integer - exactly
-//! `signal::bt::access_code::pack`'s own convention, already B14's. Every
+//! `signal::bt::access_code::pack`'s own convention. Every
 //! function below takes and returns bits in that same order.
 
 /// The header proper, once FEC(1/3) has recovered it from the 54 bits the
 /// air actually carries and dewhitening has removed the piconet's own
 /// scrambling - 3 bits LT_ADDR, 4 bits TYPE, 3 bits FLOW/ARQN/SEQN packed
 /// as `flags`, 8 bits HEC.
-/// No consumer from `main` yet: this whole module is B16's own
-/// primitive layer, landed here the way B14 landed `signal::bt::
-/// access_code` alone - see this module's own top-level doc for what
-/// wiring a live receiver up to it still needs.
 #[allow(dead_code)]
 pub const HEADER_BITS: usize = 18;
 
@@ -57,11 +51,11 @@ pub const HEADER_AIR_BITS: usize = HEADER_BITS * 3;
 
 /// How many bits sit between the end of the 64-bit access code
 /// (`signal::bt::detect::Detector`'s own trigger point) and the header's
-/// own first air bit - a fixed trailer with no content this arc reads.
+/// own first air bit - a fixed trailer with no content read here.
 /// `libbtbb`'s own `try_clock`/`btbb_decode_header` skip 68 bits past the
 /// start of their own `pkt->symbols`, which begins at the 64-bit sync word
-/// (not the 4-bit preamble a real receiver also sees but this arc's own
-/// `Detector` never stores): `68 - 64 = 4`.
+/// (not the 4-bit preamble a real receiver also sees but `Detector` never
+/// stores): `68 - 64 = 4`.
 #[allow(dead_code)]
 pub const TRAILER_BITS: usize = 4;
 
@@ -155,7 +149,7 @@ pub(crate) fn unwhiten_at(bits: &[bool], clk6: u8, skip: usize) -> Vec<bool> {
 
 /// Reverse the eight bits of a byte - `libbtbb`'s own `reverse`, needed
 /// because [`uap_from_hec`]'s LFSR runs the opposite bit order the rest of
-/// this arc's convention does.
+/// `signal::bt` does.
 #[allow(dead_code)]
 pub(crate) fn reverse_bits(byte: u8) -> u8 {
     let mut out = 0u8;
@@ -406,9 +400,9 @@ pub fn decode_with_uap(whitened: &[bool; HEADER_BITS], uap: u8) -> Option<Header
 /// count already computed, kept ignorant of sample rates the same way
 /// `dsp::nco` is kept ignorant of what a caller mixes.
 ///
-/// **Not read from the Bluetooth Core Specification itself this session** -
-/// the same standing every other constant in this module has; see the
-/// module's own top-level doc.
+/// **Not read from the Bluetooth Core Specification itself** - the same
+/// standing every other constant in this module has; see the module's own
+/// top-level doc.
 #[allow(dead_code)]
 pub const CLOCK_HZ: f64 = 3200.0;
 
@@ -475,7 +469,7 @@ pub const SLOT_US: f64 = 625.0;
 /// floor a header-only receiver can reach, honestly, rather than picking
 /// one of the two and hoping.
 ///
-/// **Wired live since B16**: `signal::bt::receive` captures each header and
+/// **Wired live**: `signal::bt::receive` captures each header and
 /// its stream tick, and `signal::net::worker` folds them in per LAP. Once a
 /// LAP's UAP is one value the worker reads its headers with
 /// [`decode_at`] at the clock [`Self::clocks_for`] gives, and the hypotheses still
@@ -621,7 +615,7 @@ mod tests {
     use super::*;
 
     /// A structural check independent of the ported constants' own
-    /// citation, the same discipline B14's own access code module holds
+    /// citation, the same discipline the access code module holds
     /// itself to - and independent of any second, separately-ported
     /// algorithm this module has no citation for either.
     ///
@@ -681,7 +675,7 @@ mod tests {
             .expect("uap_from_hec is a bijection in hec, so some hec must map to any target uap")
     }
 
-    /// [`unfec13`]'s own exit condition: a clean, tripled header round-trips
+    /// [`unfec13`]: a clean, tripled header round-trips
     /// exactly.
     #[test]
     fn a_clean_tripled_header_round_trips_exactly() {
@@ -757,7 +751,7 @@ mod tests {
         }
     }
 
-    /// [`decode_with_uap`]'s own exit condition: given the confirmed UAP,
+    /// [`decode_with_uap`]: given the confirmed UAP,
     /// the header's real fields come back, whichever CLK1-6 the header
     /// actually used.
     #[test]
@@ -872,8 +866,7 @@ mod tests {
         synthetic_header(data10, hec, this_clk6).0
     }
 
-    /// [`PiconetClock`]'s own exit condition, and the honest version of
-    /// B16's: several headers from the same LAP, real elapsed CLK1-6
+    /// [`PiconetClock`], honestly: several headers from the same LAP, real elapsed CLK1-6
     /// ticks between them, narrow from 64 down to exactly two candidates -
     /// which the same headers, examined without elapsed time, provably
     /// cannot do at all (see this module's own doc for the measurement

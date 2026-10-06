@@ -4,11 +4,11 @@
 //! From a variance to a number a person can read, and the floor physics puts
 //! under all of it.
 //!
-//! Design section 5.3 is the decision this module implements: **every measured
-//! value is displayed with an uncertainty, computed and never assumed.** N6
-//! produced the variances; this turns one into a `sigma` beside a value, decides
-//! how many digits that value is entitled to, and says whether the measurement
-//! can resolve the difference the caller cares about.
+//! The decision this module implements: **every measured value is displayed
+//! with an uncertainty, computed and never assumed.** `dsp::estimate` produces
+//! the variances; this turns one into a `sigma` beside a value, decides how
+//! many digits that value is entitled to, and says whether the measurement can
+//! resolve the difference the caller cares about.
 //!
 //! **The convention, stated because a `+/-` that does not state its convention
 //! is decoration.** What is carried and displayed is the *standard* uncertainty,
@@ -183,9 +183,9 @@ impl Uncertain {
     ///
     /// the same linearisation the Guide to the Expression of Uncertainty in
     /// Measurement uses for any combination of uncorrelated inputs. Exact in
-    /// the limit of small relative uncertainty on `other`; B8 is the reasoned
-    /// first consumer, a ratio of two deviation measurements whose own
-    /// relative uncertainty is a few percent at a workable SNR, well inside
+    /// the limit of small relative uncertainty on `other`; the BLE df2/df1
+    /// ratio is the use it was reasoned for, two deviation measurements whose
+    /// own relative uncertainty is a few percent at a workable SNR, well inside
     /// where the linearisation holds.
     ///
     /// `other` at exactly zero has no meaningful ratio and gets an infinite
@@ -198,7 +198,7 @@ impl Uncertain {
     /// quantities - Jensen's inequality gives it a second-order pull of
     /// about `(sigma_b / b)^2` relative, which this first-order expansion
     /// does not remove. Negligible next to the reported uncertainty itself
-    /// at the relative uncertainties this arc's own measurements run at, and
+    /// at the relative uncertainties the measurements here run at, and
     /// measured rather than assumed:
     /// `the_ratio_matches_a_monte_carlo_simulation_of_the_same_two_measurements`.
     pub fn ratio(&self, other: &Uncertain) -> Self {
@@ -215,12 +215,9 @@ impl Uncertain {
     /// it is not defined and where its absence is the point: a frequency offset
     /// of zero is a perfectly good measurement, and a relative uncertainty is
     /// simply the wrong question to ask about it.
-    // N11 wired in the other three; this one had no honest use in a limit row,
-    // where a margin as a fraction of an exact limit is not a quantity anybody
-    // wants. **The claim below, that occupancy would need it, was written
-    // before occupancy was built and did not hold up**: N14/N15 measure duty
-    // cycle, which has no natural "relative to what" question either. Still no
-    // consumer.
+    // No consumer: a limit row has no honest use for it (a margin as a
+    // fraction of an exact limit is not a quantity anybody wants), and the
+    // band's duty cycle has no natural "relative to what" question either.
     #[allow(dead_code)]
     pub fn relative(&self) -> Option<f64> {
         if self.value == 0.0 {
@@ -305,8 +302,8 @@ impl Uncertain {
 /// Infinite below two samples, where there is no frequency to estimate, and at
 /// or below zero SNR, where there is nothing to estimate it from.
 ///
-/// Design section 5.4: "the Cramer-Rao bound is the floor, and it is
-/// displayed". `signal::reference::carrier_offset_hz` computes it beside its
+/// The Cramer-Rao bound is the floor, and it is displayed:
+/// `signal::reference::carrier_offset_hz` computes it beside its
 /// own estimate, and the RF bench's FREQUENCY REFERENCE card shows how far
 /// above it the reference sits.
 pub fn crlb_frequency(snr: f64, samples: usize) -> f64 {
@@ -335,18 +332,19 @@ pub fn efficiency(variance: f64, bound: f64) -> f64 {
 
 /// The sample mean of `x`, with its own Cramer-Rao-achieving uncertainty.
 ///
-/// **A different bound from [`crlb_frequency`], for a different problem, not
-/// a substitute for it.** That bound is Moose's: a frequency read from the
-/// phase ramp of a repeated complex sequence, and its `M(M^2-1)` denominator
-/// is specific to a phase estimator's geometry. This is the elementary case
+/// **A different bound from [`crlb_frequency`], for a different problem, not a
+/// substitute for it.** That bound is Moose's: a frequency read from the phase
+/// ramp of a repeated complex sequence, and its `M(M^2-1)` denominator is
+/// specific to a phase estimator's geometry. This is the elementary case
 /// instead, a constant buried in additive noise and estimated by averaging
-/// real-valued samples directly, and for i.i.d. Gaussian noise the sample
-/// mean is itself the minimum-variance unbiased estimator, achieving its own
-/// bound exactly: `Var(mean) = sigma^2 / N`, with `sigma^2` the sample
-/// variance around that mean. B7 is the reasoned first consumer: a GFSK
-/// discriminator's output over a run of whitened (so, on average, balanced)
-/// data has this exact shape, a constant carrier-frequency offset sitting in
-/// noise, and no repeated sequence a phase-ramp method could use instead.
+/// real-valued samples directly, and for i.i.d. Gaussian noise the sample mean
+/// is itself the minimum-variance unbiased estimator, achieving its own bound
+/// exactly: `Var(mean) = sigma^2 / N`, with `sigma^2` the sample variance
+/// around that mean. A BLE packet's carrier offset is the use it was reasoned
+/// for: a GFSK discriminator's output over a run of whitened (so, on average,
+/// balanced) data has this exact shape, a constant carrier-frequency offset
+/// sitting in noise, and no repeated sequence a phase-ramp method could use
+/// instead.
 ///
 /// `Uncertain::exact(0.0)` for fewer than two samples, where there is no
 /// variance to estimate from - not zero uncertainty, which `is_resolved`
@@ -409,15 +407,15 @@ mod tests {
         assert_eq!(efficiency(1e-9, f64::INFINITY), 0.0);
     }
 
-    /// **N7's exit condition, and the reason this step is separate.** The
+    /// **The reason this is a separate check.** The
     /// estimator's measured spread must sit above the floor physics puts under
     /// it, and within a stated distance of it. Beating the bound is not a good
     /// result, it is a bug.
     ///
-    /// A shorter preamble than N6 uses and fewer trials, deliberately: this
-    /// needs the ratio, not the third decimal of the variance, and suite time is
-    /// bought back by shortening the signal rather than by asking fewer
-    /// questions of it.
+    /// A shorter preamble than `dsp::estimate`'s tests use and fewer trials,
+    /// deliberately: this needs the ratio, not the third decimal of the
+    /// variance, and suite time is bought back by shortening the signal rather
+    /// than by asking fewer questions of it.
     #[test]
     fn moose_does_not_beat_its_bound() {
         const D: usize = 32;

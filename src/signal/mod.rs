@@ -4,7 +4,7 @@
 pub mod ble;
 pub mod bt;
 pub mod demod;
-// Public from N8: `ui::widgets::reading` needs `dsp::uncertainty`, because the
+// Public because `ui::widgets::reading` needs `dsp::uncertainty`: the
 // rule that a value is printed to no more precision than its uncertainty
 // supports is a numerical decision the UI has to be able to ask about.
 pub mod dsp;

@@ -41,12 +41,13 @@ pub struct Phy {
 
 /// Every mode this section could ever offer, cheapest first.
 ///
-/// Rates and bandwidths from design section 2.2, which carries the derivation.
-/// The 20 Msps entry is the one to look at twice: 802.11a/g/n HT20's active
-/// subcarriers span 16.6 MHz, so 20 Msps captures it with 1.7 MHz of skirt
-/// either side and no room for a clean anti-aliasing roll-off. It works on
-/// strong signals and degrades on weak ones, which is a statable limit rather
-/// than a reason to refuse.
+/// With complex (IQ) samples the sample rate is the bandwidth seen, so each
+/// rate is the lowest that covers the PHY's occupied bandwidth, with room for a
+/// filter's skirt where there is any. The 20 Msps entry is the one to look at
+/// twice: 802.11a/g/n HT20's active subcarriers span 16.6 MHz, so 20 Msps
+/// captures it with 1.7 MHz of skirt either side and no room for a clean
+/// anti-aliasing roll-off. It works on strong signals and degrades on weak
+/// ones, which is a statable limit rather than a reason to refuse.
 pub const PHYS: &[Phy] = &[
     Phy {
         name: "BT BR/EDR",
@@ -156,7 +157,7 @@ mod tests {
         c
     }
 
-    /// Read off the backend, not copied from the design table. If the HackRF's
+    /// Read off the backend, not copied from a table. If the HackRF's
     /// declared range ever changes, this is where it is noticed.
     #[test]
     fn the_hackrf_is_admitted_on_its_own_declaration() {

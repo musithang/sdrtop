@@ -3,13 +3,13 @@
 
 //! Estimators, each with the variance that turns its answer into a measurement.
 //!
-//! **A number without a variance is not a measurement, it is a readout.** Design
-//! section 5.3 makes every displayed value carry an uncertainty, and an
-//! uncertainty has to come from somewhere: the estimator's own variance, at the
-//! SNR that was actually measured and the sample count that was actually used.
-//! So the variance arrives in the same step as the estimator it belongs to,
-//! never as a later refinement, because an estimator that has shipped without
-//! one has already been displayed without one.
+//! **A number without a variance is not a measurement, it is a readout.** Every
+//! displayed value carries an uncertainty, and an uncertainty has to come from
+//! somewhere: the estimator's own variance, at the SNR that was actually
+//! measured and the sample count that was actually used. So the variance
+//! arrives in the same step as the estimator it belongs to, never as a later
+//! refinement, because an estimator that has shipped without one has already
+//! been displayed without one.
 //!
 //! **On where the formulas come from.** The estimators are named and cited: they
 //! are Moose's and Schmidl and Cox's, and being named is what gives them a
@@ -26,7 +26,8 @@
 //! 2. The coherence gives the SNR, because two noisy copies of one signal agree
 //!    exactly as well as their SNR allows and no better.
 //! 3. The SNR gives the variance of every estimate taken from that burst.
-//! 4. The variance becomes the uncertainty printed beside the value (N7).
+//! 4. The variance becomes the uncertainty printed beside the value
+//!    (`dsp::uncertainty`).
 //!
 //! Nothing in that chain needs a number the radio did not supply.
 
@@ -62,11 +63,11 @@ pub fn moose_offset(p: Complex<f64>, lag: usize) -> f64 {
 /// same angle plus a full turn, so a longer lag buys precision and pays for it
 /// with range, one for one.
 // **No consumer yet, and the one candidate reimplemented it instead.**
-// `signal::reference::carrier_offset_hz` (N16) derives its own lag from a
+// `signal::reference::carrier_offset_hz` derives its own lag from a
 // caller-supplied search range rather than composing this function's inverse,
 // because it needed the range-to-lag direction and this is lag-to-range. A
 // timing detector working the other way round - given a lag, what range does
-// it buy - is the Wi-Fi arc's F2/F4 burst and symbol-timing work.
+// it buy - is what a Wi-Fi burst and symbol-timing detector would need.
 #[allow(dead_code)]
 pub fn moose_range(lag: usize) -> f64 {
     0.5 / lag.max(1) as f64
@@ -105,13 +106,12 @@ pub fn moose_variance(snr: f64, pairs: usize, lag: usize) -> f64 {
 // Coherence, its bias, and the SNR it hides
 // ---------------------------------------------------------------------------
 
-/// Squared coherence with the noise floor taken out of it.
-///
-/// **The naive metric is biased upward and the bias is a closed form**, which
-/// design section 5.2 says is the case where the bias gets removed rather than
-/// merely stated. Two noisy copies of one signal correlate with coefficient
-/// `rho = snr / (1 + snr)`, so the metric should read `rho^2`; but the
-/// correlation of the noise with itself adds a floor, and to first order
+/// Squared coherence with the noise floor taken out of it. **The naive metric
+/// is biased upward and the bias is a closed form**, and a bias with a closed
+/// form is removed rather than merely stated. Two noisy copies of one signal
+/// correlate with coefficient `rho = snr / (1 + snr)`, so the metric should
+/// read `rho^2`; but the correlation of the noise with itself adds a floor, and
+/// to first order
 ///
 /// ```text
 /// E[M] = rho^2 + (1 - rho^2) / pairs
@@ -197,8 +197,8 @@ pub fn snr_m2m4(iq: &[Complex<f32>]) -> Option<f64> {
 /// Where a repeat was found: the run of positions whose metric is within a
 /// stated fraction of the peak.
 ///
-/// No consumer yet. Design section 10's F4 (symbol timing from the L-LTF
-/// cross-correlation) is the plan's own answer for where this lands.
+/// No consumer yet: Wi-Fi symbol timing from the L-LTF cross-correlation
+/// would be one.
 #[derive(Clone, Copy, Debug, PartialEq)]
 #[allow(dead_code)]
 pub struct Plateau {
@@ -306,7 +306,7 @@ mod tests {
         v.iter().map(|x| (x - m).powi(2)).sum::<f64>() / (v.len() - 1) as f64
     }
 
-    /// N6's exit condition, and the reason this module exists: the estimate is
+    /// The reason this module exists: the estimate is
     /// centred on the truth, and its spread is the spread the closed form says
     /// it should have, at three signal-to-noise ratios.
     #[test]
