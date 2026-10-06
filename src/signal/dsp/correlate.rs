@@ -421,7 +421,7 @@ pub fn threshold_for_false_alarm(taps: usize, rate: f64) -> f64 {
 /// constant, which is why BLE's detector correlates here rather than
 /// coherently: a coherent correlation across a 40-microsecond sync word
 /// falls apart at an offset of a few tens of kilohertz, and BLE allows
-/// ±360 (`dev_docs/case-study-ble-crc.md`, section 13). Blind to the
+/// ±360 (`dev_docs/case-studies/case-study-ble-crc.md`, section 13). Blind to the
 /// signal's scale too, so the discriminator's units do not matter.
 ///
 /// The correlation runs by overlap-save, two stretches of signal to a

@@ -1,9 +1,9 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright (C) 2026 MusiThang <viktor.laszlo92@protonmail.com>
 
-//! The frame error rate against SNR, accumulated over the session
-//! (Bluetooth design measurement 16, net-ux-polish-plan 5.7): "given enough
-//! traffic from one device this draws the actual waterfall curve of the link".
+//! The frame error rate against SNR, accumulated over the session: given
+//! enough traffic from one device, this draws the actual waterfall curve of
+//! the link.
 //!
 //! **What is counted.** Every packet the receiver decoded to its full length
 //! carries its SNR (read from the sync word, before any payload bit) and its

@@ -59,15 +59,15 @@ pub fn growing(sps: f64) -> crate::signal::dsp::timing::PhaseSearch {
 /// output, sampling each symbol at `phase` and slicing it against
 /// `threshold`.
 ///
-/// A bit is `true` when the recovered sample is above `threshold` - `0.0`
-/// for a caller with nothing else to go on, matching the convention
+/// A bit is `true` when the recovered sample is above `threshold` - `0.0` for a
+/// caller with nothing else to go on, matching the convention
 /// [`super::gfsk::modulate`] uses to map a `true` bit to positive deviation.
-/// `signal::ble::receive::Receiver` passes its own capture's mean instead:
-/// real hardware measured a real device's crystal offset (or this radio's
-/// own LO leakage) sitting exactly at the tuned centre this arc never mixes
-/// off, which shifts every discriminator sample by a constant a fixed zero
-/// would slice against wrongly. See `dsp::uncertainty::mean_with_uncertainty`
-/// for how that same mean becomes B7's reported frequency offset.
+/// `signal::ble::receive::Receiver` passes its own capture's mean instead: real
+/// hardware measured a real device's crystal offset (or this radio's own LO
+/// leakage) sitting exactly at the tuned centre, which shifts every
+/// discriminator sample by a constant a fixed zero would slice against wrongly.
+/// See `dsp::uncertainty::mean_with_uncertainty` for how that same mean becomes
+/// the reported frequency offset.
 ///
 /// **Returns the raw sample at each symbol alongside the bit it became.**
 /// The threshold decision throws away exactly the number
@@ -126,7 +126,7 @@ mod tests {
         eb_n0_db - 10.0 * (sps as f64).log10()
     }
 
-    /// B4's exit condition: bit error rate against a generated packet
+    /// Bit error rate against a generated packet
     /// matches the theoretical GFSK curve within a stated margin, over a
     /// spread of SNRs wide enough to see the curve's own shape.
     ///
@@ -139,7 +139,7 @@ mod tests {
     /// costs on the order of 12-15 dB against the ideal bound, not the couple
     /// of dB a shaping-filter penalty alone would - a real, substantial
     /// implementation loss from the deliberately simple detector, and not a
-    /// number this arc can cite a receiver-specific formula for. What is
+    /// number with a receiver-specific formula to cite. What is
     /// still true, and still worth asserting precisely: the curve's shape
     /// (bit errors fall as Eb/N0 rises), the physical floor (never better
     /// than the ideal bound), and that it actually gets good at high enough

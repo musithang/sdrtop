@@ -1,14 +1,13 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright (C) 2026 MusiThang <viktor.laszlo92@protonmail.com>
 
-//! B20's own primitive layer: parsing a CONNECT_IND/AUX_CONNECT_REQ's own
-//! `LLData`, and Channel Selection Algorithm #1 - "capture a `CONNECT_IND`,
-//! learn the access address, CRC init, hop increment, channel map and
-//! connection interval, then hop along with the connection" (design
-//! section 1.3), scoped down before landing anything.
+//! Parsing a CONNECT_IND/AUX_CONNECT_REQ's `LLData`, and the Channel
+//! Selection Algorithms: what a listener needs to learn the access address,
+//! CRC init, hop increment, channel map and connection interval, and then
+//! hop along with the connection.
 //!
-//! **Read directly from the primary source, the same page B18's own
-//! module doc already cites** (the Bluetooth SIG's own public Core
+//! **Read directly from the primary source, the same page `coded`'s
+//! module doc cites** (the Bluetooth SIG's own public Core
 //! Specification, Core-54, Volume 6 Part B, Link Layer Specification):
 //! section 2.3.3.1 for the `CONNECT_IND`/`AUX_CONNECT_REQ` payload's own
 //! ten `LLData` fields and what each one means, and section 4.5.8.2 for
@@ -17,7 +16,7 @@
 //!
 //! **Field byte widths are the one part of this reasoned rather than
 //! read directly - `LLData`'s own diagram (Figure 2.13) is an image, not
-//! text this session could fetch and quote.** What is directly quoted:
+//! text that could be fetched and quoted.** What is directly quoted:
 //! "The LLData consists of 10 fields" and each field's own meaning and
 //! unit (`WinSize`, `Interval`, `Latency` and `Timeout` are all defined in
 //! terms of a multiplier the text states exactly). The byte width of
@@ -61,8 +60,8 @@ pub struct ConnectIndData {
     /// here on.
     pub access_address: u32,
     /// The connection's own CRC-24 initial value - `libbtbb`-style
-    /// classic Bluetooth aside, this is the first place in this whole
-    /// arc's own BLE side that a CRC does not start from a fixed constant
+    /// classic Bluetooth aside, this is the first place on the BLE side
+    /// that a CRC does not start from a fixed constant
     /// (the advertising channels' whitening and CRC both being channel-
     /// keyed, not connection-keyed).
     pub crc_init: u32,
@@ -221,7 +220,7 @@ impl Csa1 {
     /// `None` when `channel_map` names no used channel at all - not
     /// something a real transmitter is ever supposed to send (the cited
     /// text's own "minimum number of used channels shall be 2"), but a
-    /// channel map this session did not itself confirm reached us intact,
+    /// channel map that is not known to have reached us intact,
     /// and dividing by zero used channels the first time an unmapped
     /// channel needs remapping would otherwise be this function's own
     /// silent way of finding out.
@@ -285,8 +284,7 @@ impl Csa1 {
 }
 
 /// Channel Selection Algorithm #2 (Core 5.4 Vol 6 Part B 4.5.8.3), for the
-/// event channel of an ACL connection: net-ux-polish-plan 5.4.b4, scoped out
-/// of B20 and added at Viktor's request.
+/// event channel of an ACL connection.
 ///
 /// **What was read, and what was reconstructed.** Read from the text on the
 /// SIG's site, 2026-09-23: `channelIdentifier = (Access Address 31-16) XOR
@@ -391,8 +389,7 @@ mod tests {
 
     /// Build a synthetic `CONNECT_IND` payload's own bits directly, LSB-
     /// first per byte and least-significant-octet-first across a
-    /// multi-byte field - this arc's own established transmission-order
-    /// convention throughout.
+    /// multi-byte field - the transmission order used throughout.
     fn synthetic_payload(data: &ConnectIndData) -> Vec<bool> {
         let mut bytes = Vec::with_capacity(34);
         bytes.extend_from_slice(&super::super::pdu::air_octets(data.init_a));

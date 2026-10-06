@@ -2,8 +2,7 @@
 // Copyright (C) 2026 MusiThang <viktor.laszlo92@protonmail.com>
 
 //! A device's advertising interval and its random delay, from when its
-//! packets arrived on one channel (Bluetooth design measurement 9,
-//! net-ux-polish-plan 4.5).
+//! packets arrived on one channel.
 //!
 //! **What the specification says, and where it was checked.** Core Vol 6
 //! Part B 4.4.2.2: advInterval is an integer multiple of 0.625 ms from 20 ms
@@ -11,7 +10,7 @@
 //! after the last, advDelay a pseudo-random 0 to 10 ms drawn by the Link Layer
 //! for every event (`T_advEvent = advInterval + advDelay`), for undirected and
 //! low-duty-cycle directed advertising. Confirmed against public
-//! documentation of that section, not a licensed copy read this session.
+//! documentation of that section, not a licensed copy.
 //!
 //! **One channel, one packet an event.** An event sends on 37, 38 and 39 in
 //! turn; a receiver locked to one of them hears at most one packet of each,

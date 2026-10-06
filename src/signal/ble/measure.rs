@@ -2,8 +2,8 @@
 // Copyright (C) 2026 MusiThang <viktor.laszlo92@protonmail.com>
 
 //! Transmitter modulation quality: modulation index, delta-f1 average,
-//! delta-f2 average and the ratio of the averages, from a packet this arc already
-//! recovered rather than a dedicated test transmission.
+//! delta-f2 average and the ratio of the averages, from a packet the receiver
+//! already recovered rather than a dedicated test transmission.
 //!
 //! Design section 2.1's four numbers are specified as read from a *known*
 //! symbol pattern: `00001111` repeated for delta-f1, `10101010` repeated for
@@ -31,7 +31,7 @@
 //! on-air neighbours, not its data neighbours. The receivers pass the air
 //! bits (`pdu::Packet::air`).
 //!
-//! [`drift`] is B9's own addition, and needs none of the pattern-search
+//! [`drift`] needs none of the pattern-search
 //! machinery above - a frequency drift within a packet is a property of the
 //! per-symbol discriminator readings themselves, not of any particular bit
 //! pattern - but it reads one value per symbol, the reading at each bit's
@@ -44,11 +44,10 @@ use crate::signal::dsp::uncertainty::Uncertain;
 // The symbol rate both measurements scale by is the PHY's own
 // (`Phy::symbol_rate_hz`: 1 Mb/s on LE 1M, 2 Mb/s on LE 2M), a specification
 // fact, never derived from a receiver's own `sps`, which is a demodulator
-// design choice. It was a fixed LE 1M constant until net-ux-polish-plan 5.5
-// made LE 2M a PHY this app decodes as fully as LE 1M.
+// design choice, so LE 2M is measured as fully as LE 1M.
 
 // The run shapes are GFSK's, not BLE's: `signal::dsp::deviation` holds
-// them since classic Bluetooth reads the same (net-ux-polish-plan 6.4).
+// them since classic Bluetooth reads the same.
 
 /// RFPHY/TRM/BV-13-C's floor for Δf1max on LE Coded (S=8): 99.9 % of them
 /// above 185 kHz.
@@ -103,15 +102,14 @@ pub struct ModulationQuality {
     /// is shown: an average under the floor is a transmitter under it, and
     /// one over it could still dip on a run the average hides.
     pub delta_f2_avg_hz: Uncertain,
-    /// `2 * delta_f1_avg_hz / symbol rate` - the modulation index
-    /// design section 2.1 states a band for, derived from delta-f1 because
+    /// `2 * delta_f1_avg_hz / symbol rate` - the modulation index the
+    /// specification states a band for, derived from delta-f1 because
     /// that is the settled, filter-independent deviation a device's own
     /// deviation setting actually controls.
     pub modulation_index: Uncertain,
     /// The average peak deviation over alternating runs, over the same
-    /// figure for settled runs - design section 2.1's fourth number, "the
-    /// specification's own way of asking whether the Gaussian filter is
-    /// right": a ratio well below one means the filter is narrower than it
+    /// figure for settled runs: the specification's way of asking whether
+    /// the Gaussian filter is right. A ratio well below one means the filter is narrower than it
     /// should be, closing the eye during continuous alternation more than
     /// the specification allows.
     pub ratio: Uncertain,
@@ -210,7 +208,7 @@ mod tests {
         (bits, samples)
     }
 
-    /// B8's exit condition, the "measured as wrong" half: a deviation
+    /// The "measured as wrong" half: a deviation
     /// clearly outside the modulation index band measures outside it, and
     /// the measurement moves the *right way* as deviation rises - up for
     /// more, down for less - rather than only "close to the deviation
@@ -397,7 +395,7 @@ mod tests {
             .collect()
     }
 
-    /// B9's exit condition: a synthetic drift of a known rate is recovered
+    /// A synthetic drift of a known rate is recovered
     /// to within its own uncertainty.
     #[test]
     fn a_known_drift_rate_is_recovered_within_its_own_uncertainty() {
@@ -432,8 +430,8 @@ mod tests {
             d.drift_rate_hz_per_us.sigma(),
             drift_rate_hz_per_us
         );
-        // The two ends of the same measurement, design section 2.2's own
-        // framing: final must read higher than initial for a positive
+        // The two ends of the same measurement: final must read higher
+        // than initial for a positive
         // drift, not just the rate derived from their difference.
         assert!(d.final_hz.value() > d.initial_hz.value());
     }
@@ -496,7 +494,7 @@ mod tests {
         (bits, samples)
     }
 
-    /// **LE 2M measured as fully as LE 1M** (net-ux-polish-plan 5.5): the
+    /// **LE 2M measured as fully as LE 1M**: the
     /// nominal 500 kHz deviation, twice LE 1M's at twice the symbol rate,
     /// reads inside the same 0.45 to 0.55 index band, with delta-f1 near
     /// 500 kHz; a transmitter still using LE 1M's 250 kHz reads far below
@@ -520,7 +518,7 @@ mod tests {
         );
     }
 
-    /// B9's drift, on LE 2M's clock: a known rate comes back within its own
+    /// The drift, on LE 2M's clock: a known rate comes back within its own
     /// uncertainty, which it would not if the halves were timed at 1 Mb/s.
     #[test]
     fn le_2m_drift_is_timed_at_its_own_symbol_rate() {

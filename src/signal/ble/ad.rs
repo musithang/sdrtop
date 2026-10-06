@@ -2,7 +2,7 @@
 // Copyright (C) 2026 MusiThang <viktor.laszlo92@protonmail.com>
 
 //! What a device advertises: the AD structures in an advertising or scan
-//! response payload (net-ux-polish-plan 5.2).
+//! response payload.
 //!
 //! **Where each fact was read.** The data types - Flags and its bits, Local
 //! Name, TX Power Level, the Service UUID lists, Service Data, Manufacturer
@@ -12,8 +12,8 @@
 //! (`assigned_numbers/core/ad_types.yaml`), likewise. The framing itself - a
 //! length octet covering the type and the data, and a zero length ending the
 //! significant part - from public documentation of Core Vol 3 Part C 11
-//! (Silicon Labs, Nordic), not from a copy of that section read this session:
-//! the standing `pdu` states for its own layout.
+//! (Silicon Labs, Nordic), not from a copy of that section: the standing
+//! `pdu` states for its own layout.
 //!
 //! **Malformed is shown as malformed, at its offset, and parsing stops
 //! there.** A length that runs past the end, a list whose length is not a
@@ -323,7 +323,7 @@ pub fn name(structures: &[Structure]) -> Option<(&str, bool)> {
 }
 
 /// What an address has said about itself, gathered across its packets whose
-/// CRC passed (net-ux-polish-plan 5.9): the company its manufacturer data
+/// CRC passed: the company its manufacturer data
 /// names, its name, its TX power level.
 ///
 /// **Per address, not per packet.** A device splits what it says between its

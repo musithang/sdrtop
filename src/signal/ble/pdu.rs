@@ -1,16 +1,15 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright (C) 2026 MusiThang <viktor.laszlo92@protonmail.com>
 
-//! The advertising channel PDU: header, address and CRC, from a de-whitened
-//! bit stream. `decode` and `measure`, in design section 10's split - this
-//! reads what is there and checks it against the CRC it carries; nothing
-//! here decides whether to trust a radio or corrects a frequency.
+//! The advertising channel PDU: header, address and CRC, from a de-whitened bit
+//! stream. Decoding, not measuring: this reads what is there and checks it
+//! against the CRC it carries; nothing here decides whether to trust a radio or
+//! corrects a frequency.
 //!
 //! Source: Bluetooth Core Specification, Vol 6, Part B - byte 0's 4-bit PDU
-//! type, RFU, ChSel, TxAdd and RxAdd, byte 1's 6-bit Length, and the seven
-//! legacy advertising PDU types. Cross-checked against public documentation
-//! of the same layout; not read from a licensed copy of the specification
-//! this session, the same standing B1's channel table has.
+//! type, RFU, ChSel, TxAdd and RxAdd, byte 1's Length, and the seven legacy
+//! advertising PDU types, cross-checked against public documentation of the
+//! same layout.
 
 use crate::signal::dsp::code::crc::crc24_ble;
 #[cfg(test)]
@@ -18,9 +17,9 @@ use crate::signal::dsp::code::lfsr::whiten;
 
 /// The seven PDU types a legacy advertising channel packet can carry.
 /// `Other` is not a defect in this list - PDU types 7 and up are extended
-/// advertising (AUX_*, introduced after legacy advertising), out of scope
-/// for this arc until a step says otherwise, and reporting the raw value
-/// rather than refusing the packet is what rule 2 asks for: this is a real
+/// advertising (whose type 7 is read by `ext` where it was heard), and
+/// reporting the raw value rather than refusing the packet is what rule 2
+/// asks for: this is a real
 /// four-bit field that was really read, not a case this decoder cannot see.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum PduType {
@@ -78,7 +77,7 @@ impl PduType {
             Self::AdvScanInd => "ADV_SCAN_IND".to_string(),
             // Bluetooth 5's extended advertising on a primary channel: named,
             // because a named type that is not decoded is a different fact
-            // from an unknown one (net-ux-polish-plan 5.3).
+            // from an unknown one.
             Self::Other(0x07) => "ADV_EXT_IND".to_string(),
             Self::Other(b) => format!("TYPE {b:#04x}"),
         }
@@ -104,18 +103,17 @@ impl PduType {
 /// says the payload starts with one, and whether the CRC that followed it
 /// over the air actually checked out.
 ///
-/// `snr_db`, `freq_offset_hz`, `modulation`, `drift` and `at_pair` are `None` here
-/// always - `decode` sees only bits, never the discriminator samples or the
-/// detector's own coherence B7, B8 and B9's measurements are taken from -
-/// and are filled in by `signal::ble::receive::Receiver::try_decode`, the
-/// caller that has both.
+/// `snr_db`, `freq_offset_hz`, `modulation`, `drift` and `at_pair` are `None`
+/// here always - `decode` sees only bits, never the discriminator samples or
+/// the detector's coherence the measurements are taken from - and are filled in
+/// by `signal::ble::receive::Receiver::try_decode`, the caller that has both.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Packet {
     pub pdu_type: PduType,
     /// Byte 0 bit 5, ChSel: the advertiser (on ADV_IND and ADV_DIRECT_IND)
     /// or initiator (on CONNECT_IND) supports channel selection algorithm #2.
     /// Reserved on every other legacy type, so read, kept and shown only
-    /// where it means something (net-ux-polish-plan 5.1).
+    /// where it means something.
     pub ch_sel: bool,
     pub tx_add_random: bool,
     pub rx_add_random: bool,
@@ -172,7 +170,7 @@ pub const CRC_BITS: usize = 24;
 /// known - the same figure `decode` requires before it returns `Some`.
 ///
 /// `signal::ble::receive::Receiver` uses this to trim its own capture to
-/// exactly the packet before measuring B8's modulation quality from it,
+/// exactly the packet before measuring its modulation quality,
 /// rather than re-deriving [`body_bits`]'s arithmetic a second time and
 /// risking the two silently disagreeing.
 pub fn used_bits(length: u8) -> usize {
@@ -319,9 +317,8 @@ pub fn air_octets(addr: [u8; 6]) -> [u8; 6] {
 /// making decisions on its behalf.
 ///
 /// `cfg(test)` rather than `#[allow(dead_code)]`: unlike `gfsk::modulate`,
-/// which B3 promoted to production because a real detector needs to build a
-/// reference from it, nothing on the receive side ever needs to construct a
-/// packet - only decode one.
+/// which the receiver needs to build its reference, nothing on the receive
+/// side ever constructs a packet, only decodes one.
 #[cfg(test)]
 pub fn encode(channel: u8, header_byte0: u8, payload: &[u8]) -> Vec<bool> {
     let mut pdu_bytes = vec![header_byte0, payload.len() as u8];

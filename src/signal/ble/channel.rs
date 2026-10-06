@@ -15,7 +15,7 @@
 //! Source: Bluetooth Core Specification, Vol 6, Part B, Section 1.4.1 (the
 //! data physical channel index to frequency mapping) and Section 2.3.1 (the
 //! three advertising channels' fixed placement). **Not checked against a copy
-//! of the specification itself in this session** - Rule 1 of `POLICY.md`
+//! of the specification itself** - Rule 1 of `POLICY.md`
 //! applies, and this table has instead been cross-checked against three
 //! independent secondary sources (Electronics Notes' published channel table,
 //! SemFio Networks' and Nordic's own BLE primers) that agree with each other
@@ -32,11 +32,8 @@
 /// and `HIGH_HZ`, which are the wider Wi-Fi framing of the same physical band;
 /// BLE's own channel plan does not reach either edge of that wider range.
 ///
-/// No consumer yet outside this module's own tests; a real one arrives with
-/// B11's survey mode, the same way `net::band`'s edges feed the occupancy
-/// ruler. Still true after B6 wired the rest of this arc into a live
-/// capture: detection and decode both work at a single fixed channel, and
-/// have no reason to know the band's own edges.
+/// Not used outside this module's tests: detection and decode work on one
+/// channel at a time and have no reason to know the band's edges.
 #[allow(dead_code)]
 pub const LOW_HZ: u64 = 2_402_000_000;
 #[allow(dead_code)]
@@ -72,10 +69,8 @@ const TOLERANCE_HZ: u64 = SPACING_HZ / 4;
 
 /// The centre frequency of a BLE RF channel index, 0 to 39.
 ///
-/// Reaches `main` since B11: [`advertising_channels_hz`] calls this for
-/// exactly 37, 38 and 39 to build the rotation `tasks::net::spawn_net_survey_
-/// task` steers through; before that, [`channel_of`] was this arc's only
-/// real caller.
+/// [`advertising_channels_hz`] calls this for exactly 37, 38 and 39 to
+/// build the rotation `tasks::net::spawn_net_survey_task` steers through.
 pub fn centre_hz(channel: u8) -> Option<u64> {
     match channel {
         0..=DATA_LOW_LAST => Some(DATA_LOW_START_HZ + SPACING_HZ * channel as u64),
@@ -91,8 +86,8 @@ pub fn centre_hz(channel: u8) -> Option<u64> {
 
 /// The BLE channel index a frequency is the centre of, if it is one.
 ///
-/// Reaches `main` since B6: `signal::net::worker` calls this every block to
-/// learn which advertising or data channel the radio is tuned to.
+/// `signal::net::worker` calls this every block to learn which advertising
+/// or data channel the radio is tuned to.
 pub fn channel_of(freq_hz: u64) -> Option<u8> {
     (0..=39).find(|&channel| {
         centre_hz(channel).is_some_and(|centre| centre.abs_diff(freq_hz) <= TOLERANCE_HZ)
@@ -100,7 +95,7 @@ pub fn channel_of(freq_hz: u64) -> Option<u8> {
 }
 
 /// The three advertising channels' own centres, 37 then 38 then 39 - the
-/// rotation B11's survey mode steers the tuner through, low edge to middle
+/// rotation the survey steers the tuner through, low edge to middle
 /// to high edge of the band, one at a time.
 ///
 /// `.unwrap()` is safe: 37, 38 and 39 are exactly the three channels
@@ -215,8 +210,8 @@ mod tests {
         assert_eq!(to_decode(2_403_000_000, span, true), Some(37));
     }
 
-    /// The three anchors named in the spec, in the order and at the
-    /// frequencies the design document cites.
+    /// The three anchors named in the Core specification, in its order and
+    /// at its frequencies.
     #[test]
     fn the_advertising_channels_sit_where_the_standard_puts_them() {
         assert_eq!(centre_hz(37), Some(2_402_000_000));
@@ -224,7 +219,7 @@ mod tests {
         assert_eq!(centre_hz(39), Some(2_480_000_000));
     }
 
-    /// [`advertising_channels_hz`]'s own exit condition: the same three
+    /// [`advertising_channels_hz`] gives the same three
     /// frequencies, in the same low-to-high order, that
     /// [`centre_hz`] gives each channel individually - the `.unwrap()`
     /// inside it is safe because these three never answer `None`.
@@ -260,8 +255,8 @@ mod tests {
     }
 
     /// Every one of the 40 channels maps to a frequency, and channel 40 and
-    /// beyond do not exist. This is B1's exit condition, written as an
-    /// assertion rather than left to the eye.
+    /// beyond do not exist, written as an assertion rather than left to the
+    /// eye.
     #[test]
     fn every_one_of_the_forty_channels_maps_to_a_frequency() {
         for channel in 0..=39u8 {

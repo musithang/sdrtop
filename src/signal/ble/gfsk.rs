@@ -40,10 +40,8 @@ const FILTER_SPAN_SYMBOLS: usize = 4;
 /// normalisation matters here - an unnormalised kernel would scale the
 /// deviation along with it.
 ///
-/// Called for real by `signal::ble::detect::Detector::new` (B3), to build
-/// the reference it correlates against - but `Detector` itself has no path
-/// from `main` yet, so the lint still fires here too. Wired in when B6 puts a
-/// real packet on screen.
+/// The LE receiver's matched reference and the LE Coded detector's template
+/// are built with it, so it is production code, not a test helper.
 pub fn modulate(
     bits: &[bool],
     sps: usize,
@@ -101,10 +99,9 @@ mod tests {
     const DEVIATION_HZ: f64 = 250_000.0;
     const BT: f64 = 0.5;
 
-    /// Slice the discriminator output at each symbol's own centre. No timing
-    /// recovery yet - that is B4's job - so this leans on the fact that the
-    /// synthetic transmitter and this reader agree exactly on where a symbol
-    /// starts.
+    /// Slice the discriminator output at each symbol's own centre, with no
+    /// timing recovery: this leans on the fact that the synthetic transmitter
+    /// and this reader agree exactly on where a symbol starts.
     fn recover_bits(iq: &[Complex<f32>], n_bits: usize) -> Vec<bool> {
         let mut inst = Vec::new();
         discriminate(iq, SAMPLE_RATE, &mut inst);
@@ -117,7 +114,7 @@ mod tests {
             .collect()
     }
 
-    /// B2's exit condition: a generated packet demodulates back to the bits
+    /// A generated packet demodulates back to the bits
     /// that went in, at high SNR. Guarded at both ends because a finite
     /// kernel tapers the very first and last symbol towards zero deviation -
     /// zero-padding at the edge of the filter, not a defect in the round trip

@@ -2,21 +2,19 @@
 // Copyright (C) 2026 MusiThang <viktor.laszlo92@protonmail.com>
 
 //! Detection: "is a BLE packet here", from the preamble and the fixed
-//! advertising access address alone. Detection only - no timing recovery
-//! (B4) and no decode (B5 onward).
+//! advertising access address alone. Detection only: timing recovery is
+//! `sync`'s, and decoding `pdu`'s.
 //!
-//! **One matched filter, not two.** Design section 1.1 lists the preamble
-//! correlate and the access address correlate as separate items, and for a
-//! receiver that does not yet know which access address to expect that is
-//! the right split: a cheap preamble-only correlator finds *something*, and
-//! a second stage decides what. On the advertising channels the address is
-//! not unknown - it is the fixed constant [`ADVERTISING_ACCESS_ADDRESS`] - so
-//! there is nothing the two-stage split buys here that concatenating the
-//! preamble and the address into one forty-symbol reference does not also
-//! give, more simply. A connection-following step that must search for an
-//! address it has not yet learned (B14's classic Bluetooth LAP search is the
-//! closer case) is where the two-stage form earns its keep, and that is where
-//! it should be built, not here on spec.
+//! **One matched filter, not two.** A preamble correlator and an access address
+//! correlator can be separate stages, and for a receiver that does not yet know
+//! which access address to expect that is the right split: a cheap
+//! preamble-only correlator finds *something*, and a second stage decides what.
+//! On the advertising channels the address is not unknown - it is the fixed
+//! constant [`ADVERTISING_ACCESS_ADDRESS`] - so there is nothing the two-stage
+//! split buys here that concatenating the preamble and the address into one
+//! forty-symbol reference does not also give, more simply. A search for an
+//! address not yet learned (classic Bluetooth's LAP search is the closer case)
+//! is where the two-stage form earns its keep, and that is where it belongs.
 
 use num_complex::Complex;
 
@@ -34,9 +32,8 @@ use crate::signal::dsp::correlate::MatchedFilter;
 /// transmission-order rule below, which rests on the same page read through a
 /// search summary rather than the page itself.
 ///
-/// Reaches `main` since B6: `signal::ble::receive::Receiver` builds its own
-/// [`Detector`] against exactly this constant, the fixed address every
-/// advertising channel PDU uses.
+/// `signal::ble::receive::Receiver` builds its reference against exactly
+/// this constant, the fixed address every advertising channel PDU uses.
 pub const ADVERTISING_ACCESS_ADDRESS: u32 = 0x8E89_BED6;
 
 /// How many symbols the combined reference below is: 8 for the preamble, 32
@@ -84,7 +81,7 @@ pub fn access_address_bits(access_address: u32) -> [bool; 32] {
 /// specification names the rule by the bit relationship, not by a byte value,
 /// and naming it "0xAA" or "0x55" would silently commit to a bit order this
 /// function does not need to take a position on. `Vec<bool>` rather than a
-/// fixed-size array since B17: the length itself now varies by PHY.
+/// fixed-size array: the length varies by PHY.
 pub fn preamble_bits(access_address: u32, phy: Phy) -> Vec<bool> {
     let mut bit = access_address & 1 != 0;
     (0..phy.preamble_bits_len())
@@ -103,8 +100,8 @@ pub fn preamble_bits(access_address: u32, phy: Phy) -> Vec<bool> {
 /// same 0.5.
 ///
 /// No production consumer, for the same reason [`REFERENCE_SYMBOLS`] has
-/// none: this arc's own tests (`receive.rs`, `measure.rs`, `sync.rs`
-/// included) are the only callers now.
+/// none: tests (`receive.rs`, `measure.rs`, `sync.rs` included) are the
+/// only callers.
 #[allow(dead_code)]
 #[derive(Clone, Copy)]
 pub struct Le1mParams {
@@ -119,7 +116,7 @@ impl Le1mParams {
     /// 1 Mb/s on this PHY, so `sample_rate` follows from `sps` rather than
     /// being a second number that could disagree with it.
     ///
-    /// Only this arc's own tests call it: `signal::ble::receive::Receiver`
+    /// Only tests call it: `signal::ble::receive::Receiver`
     /// needs `sample_rate` set to the *decimated* working rate it actually
     /// runs at, not derived fresh from `sps` by this convenience
     /// constructor, so it builds `Le1mParams` as a plain struct literal
@@ -140,17 +137,14 @@ impl Le1mParams {
 /// A detector for one access address on the LE 1M PHY: the preamble and the
 /// address, correlated as a single known reference.
 ///
-/// **No longer what the live receiver runs on.** `signal::ble::receive::
-/// Receiver` owned one of these from B6 through B9, feeding it every sample
-/// of a live capture. It stopped: a matched filter's coherence is an inner
-/// product, and correlating a signal that has been through `front_end`'s
-/// anti-alias filter against this struct's own *unfiltered* reference -
-/// exactly what building a `Detector` here would still do - collapsed a
-/// clean packet's peak coherence from 0.9998 to 0.22 in the session that
-/// found it, comfortably under threshold. `Receiver` now builds its own
-/// reference (`matched_reference`) through the identical filter instead.
-/// This struct is unchanged and stays exactly what B3 built it as: the
-/// detection algorithm's own tests, below, with no front end in the picture.
+/// **Not what the live receiver runs on.** A matched filter's coherence is
+/// an inner product, and correlating a signal that has been through
+/// `front_end`'s anti-alias filter against this struct's *unfiltered*
+/// reference collapses a clean packet's peak coherence from 0.9998 to 0.22,
+/// under threshold. `Receiver` builds its own reference
+/// (`matched_reference`) through the identical filter instead. This struct
+/// is the detection algorithm on its own, for its tests below, with no
+/// front end in the picture.
 #[allow(dead_code)]
 pub struct Detector {
     filter: MatchedFilter,
@@ -179,7 +173,7 @@ impl Detector {
     /// needs to turn a stated false-alarm rate into a threshold for this
     /// detector specifically.
     ///
-    /// This arc's own tests are the only caller now: `receive.rs`'s live
+    /// Tests are the only caller: `receive.rs`'s live
     /// `Receiver` measures its own reference's length directly instead
     /// (`matched_reference`), rather than trusting this figure or building a
     /// `Detector` to ask it.
@@ -253,8 +247,8 @@ mod tests {
         assert!(!det.is_empty());
     }
 
-    /// B3's exit condition: measured detection rate against a generated
-    /// packet, at three SNRs, and where in the stream it was found.
+    /// Measured detection rate against a generated packet, at three SNRs,
+    /// and where in the stream it was found.
     #[test]
     fn the_packet_is_found_at_three_snrs_at_the_right_position() {
         let params = Le1mParams::at(4);
@@ -308,10 +302,9 @@ mod tests {
         }
     }
 
-    /// The other half of B3's exit condition: noise alone crosses a
-    /// threshold chosen for a stated false-alarm rate about as often as that
-    /// rate says it should, the same law N5's `dsp::correlate` tests already
-    /// hold a generic reference sequence to.
+    /// Noise alone crosses a threshold chosen for a stated false-alarm rate
+    /// about as often as that rate says it should, the same law
+    /// `dsp::correlate`'s tests hold a generic reference sequence to.
     #[test]
     fn noise_alone_crosses_the_threshold_at_about_the_stated_rate() {
         let params = Le1mParams::at(4);

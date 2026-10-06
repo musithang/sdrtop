@@ -1,14 +1,12 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright (C) 2026 MusiThang <viktor.laszlo92@protonmail.com>
 
-//! Bluetooth Low Energy: one of the two protocol modules under the Bluetooth
-//! arc (`bluetooth-bench-design.md`; the checkpoint plan is
-//! `bluetooth-bench-plan.md`).
+//! Bluetooth Low Energy, one of the two Bluetooth protocol modules beside
+//! classic Bluetooth (`signal::bt`).
 //!
-//! Split the way `net-foundation-design.md` section 10 requires of every
-//! protocol module: detect, sync, decode, measure, in that order, each in its
-//! own file, with none of it knowing classic Bluetooth (`signal::bt`, not yet
-//! built) or Wi-Fi exist. [`channel`] comes before any of those stages: it is
+//! Split the way every protocol module is: detect, sync, decode, measure, in
+//! that order, each in its own file, with none of it knowing that classic
+//! Bluetooth or Wi-Fi exist. [`channel`] comes before any of those stages: it is
 //! arithmetic the whole arc needs (which frequency a channel index names), not
 //! a step in the receive chain. [`gfsk`] sits beside it for the same reason:
 //! turning bits into the waveform LE 1M transmits is not itself a receive
@@ -38,28 +36,22 @@ pub mod pdu;
 pub mod receive;
 pub mod sync;
 
-/// Which of BLE's two uncoded PHYs a chain is built for. LE 1M is every
-/// step from B6 through B16's own PHY; B17 adds LE 2M, design section 1.2's
-/// own "the same chain at twice the symbol rate... nothing new except the
-/// numbers" - a receiver parameterised by this rather than a second,
-/// separately-maintained copy of [`receive::Receiver`].
+/// Which PHY a chain is built for. LE 2M is the same chain as LE 1M at twice
+/// the symbol rate, nothing new except the numbers: a receiver parameterised
+/// by this rather than a second, separately maintained copy of
+/// [`receive::Receiver`].
 ///
-/// **Not read from the Bluetooth Core Specification itself this session** -
-/// the same standing every fact in this arc has (design section 6's own
-/// facts-to-verify table, which gains rows for LE 2M's own preamble length
-/// and deviation figure alongside the ones already there). [`Phy::OneM`]'s
-/// own numbers already had that citation from B1 onward; [`Phy::TwoM`]'s
-/// are reasoned by direct analogy - the same modulation index formula
+/// [`Phy::TwoM`]'s figures are reasoned from LE 1M's by direct analogy, not
+/// independently looked up: the same modulation index
 /// (`h = 2 * deviation / symbol_rate`) held at the same `h = 0.5`, and the
-/// same alternating-preamble rule run for twice as long - not independently
-/// looked up.
+/// same alternating-preamble rule run for twice as long.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Default)]
 pub enum Phy {
     #[default]
     OneM,
-    /// Received end to end by `signal::ble::receive::Receiver`, and
-    /// selectable since net-ux-polish-plan 5.5 (`NetState::ble_phy`). Never
-    /// used on the primary advertising channels, which carry only LE 1M and
+    /// Received end to end by `signal::ble::receive::Receiver`, on a followed
+    /// connection that moves to it and where an AuxPtr points. Never used on
+    /// the primary advertising channels, which carry only LE 1M and
     /// LE Coded; the worker refuses it there rather than listening to
     /// nothing.
     TwoM,
@@ -132,8 +124,8 @@ mod tests {
     }
 
     /// LE 2M runs at exactly twice LE 1M's own symbol rate and preamble
-    /// length - design section 1.2's own claim, held to account rather
-    /// than trusted from the doc comment alone.
+    /// length, held to account rather than trusted from the doc comment
+    /// alone.
     #[test]
     fn two_m_is_exactly_double_one_m() {
         assert_eq!(Phy::TwoM.symbol_rate_hz(), Phy::OneM.symbol_rate_hz() * 2.0);

@@ -1,17 +1,16 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright (C) 2026 MusiThang <viktor.laszlo92@protonmail.com>
 
-//! LE Coded PHY's own forward error correction: B18, "the K=4 FEC and the
-//! S=8 pattern mapper" (the master step table's own words). A rate-1/2,
+//! LE Coded PHY's own forward error correction: the K=4 FEC and the S=8
+//! pattern mapper. A rate-1/2,
 //! constraint-length-4 convolutional code, and the "pattern mapper" that
 //! further expands each coded bit for the S=8 coding scheme (S=2 leaves it
 //! alone) - together the reason LE Coded reaches roughly four times LE
 //! 1M's own range at roughly an eighth its data rate.
 //!
-//! **Read directly from the primary source this session - the Bluetooth
-//! SIG's own public Core Specification, not a secondary account of it,**
-//! unlike most of this arc's own citations (design section 6's own facts-
-//! to-verify table drops its LE Coded row because of this). Core-54,
+//! **Read directly from the primary source - the Bluetooth SIG's own public
+//! Core Specification, not a secondary account of it.**
+//! Core-54,
 //! Volume 6 (Low Energy Controller), Part B (Link Layer Specification):
 //! sections 2.2 through 2.2.3 (packet structure - [`PREAMBLE_SYMBOL`],
 //! the FEC block split, the Coding Indicator) and 3.3.1/3.3.2 (the
@@ -585,10 +584,10 @@ mod tests {
         assert_eq!(coded, vec![true, true, true, false]);
     }
 
-    /// [`decode`]'s own exit condition with no errors at all: encoding
+    /// [`decode`] with no errors at all: encoding
     /// then decoding recovers exactly the bits that went in, across many
-    /// random sequences each properly terminated (three zero bits, this
-    /// arc's own convention for every real FEC block), not just the one
+    /// random sequences each properly terminated (three zero bits, as every
+    /// real FEC block is), not just the one
     /// hand-worked example above.
     #[test]
     fn encoding_then_decoding_with_no_errors_recovers_the_input() {
@@ -605,7 +604,7 @@ mod tests {
     /// The actual reason a convolutional code exists: a real bit error in
     /// the coded stream - not just noise the round trip above never sees -
     /// is still corrected, measured directly rather than asserted from a
-    /// textbook distance figure this session never looked up.
+    /// textbook distance figure.
     #[test]
     fn a_single_coded_bit_error_is_always_corrected() {
         let mut rng = Rng::new(22);

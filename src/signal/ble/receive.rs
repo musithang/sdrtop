@@ -18,8 +18,8 @@
 //! that synthetic transmitter and the detector's own reference come from
 //! the same call to [`super::gfsk::modulate`] at the same sample phase - a
 //! real transmitter's clock has no reason to share it. `[super::sync::slice]`
-//! is B4's own answer for a burst whose alignment is not known this
-//! precisely, which turned out to be every real one.
+//! is the answer for a burst whose alignment is not known this precisely,
+//! which turned out to be every real one.
 
 use num_complex::Complex;
 
@@ -40,22 +40,20 @@ use super::gfsk;
 use super::pdu::{self, Packet};
 use super::Phy;
 
-/// Samples per symbol this arc demodulates at. Not a specification
+/// Samples per symbol the receiver demodulates at. Not a specification
 /// requirement - a PHY's own symbol rate ([`Phy::symbol_rate_hz`]) is fixed,
 /// and this is comfortably enough resolution for the matched filter and the
 /// discriminator slice both, without decimating a wide capture further than
-/// it has to. The same for both PHYs B17 supports: `LOOKBACK_SAMPLES`,
+/// it has to. The same for both uncoded PHYs: `LOOKBACK_SAMPLES`,
 /// `HEADER_SEARCH_SYMBOLS` and every other constant counted in symbols below
 /// stays correct unchanged when the PHY changes, because it is this figure -
 /// not the PHY's own absolute rate - that fixes the conversion between the
 /// two units.
 const WORKING_SPS: usize = 4;
 
-/// The actual working rate a receiver on `phy` runs at, once decimated -
-/// B6 through B16's own fixed `WORKING_RATE_HZ` constant, now one number
-/// per PHY rather than one for the whole file, since [`Phy::TwoM`] transmits
-/// at twice [`Phy::OneM`]'s own symbol rate (design section 1.2's own "the
-/// same chain at twice the symbol rate").
+/// The actual working rate a receiver on `phy` runs at, once decimated: one
+/// number per PHY, since [`Phy::TwoM`] transmits at twice [`Phy::OneM`]'s
+/// symbol rate and is received by the same chain at twice the rate.
 fn working_rate_hz(phy: Phy) -> f64 {
     phy.symbol_rate_hz() * WORKING_SPS as f64
 }
@@ -144,7 +142,7 @@ fn energy_end(capture: &[Complex<f32>], from: usize) -> Option<usize> {
 /// phase search and a decode over the whole capture, on every one of the
 /// ~1300 samples a capture runs to: tens of thousands of decodes per trigger.
 /// On a busy real channel that put the receiver at around 280 times real
-/// time (`dev_docs/case-study-ble-crc.md`, section 11).
+/// time.
 const DECODE_EVERY_SAMPLES: usize = 8 * WORKING_SPS;
 
 /// The sync word's detector statistic, Pearson's correlation between the
@@ -183,7 +181,7 @@ const SHAPE_Z: f64 = 6.0;
 /// The detector threshold for `phy`: [`SHAPE_Z`] standard deviations of its
 /// noise statistic. About 0.58 for LE 1M; on a recording of real traffic
 /// every CRC-clean packet an independent receiver found peaked at 0.68 or
-/// more (`dev_docs/case-study-ble-crc.md`, section 13).
+/// more.
 fn shape_threshold(phy: Phy) -> f64 {
     SHAPE_Z / shape_n_eff(phy).sqrt()
 }
@@ -195,9 +193,8 @@ fn shape_threshold(phy: Phy) -> f64 {
 /// the working Nyquist ([`working_rate_hz`] / 2) so there is real stopband
 /// left before that boundary. See `front_end`'s own doc for why LE 1M's
 /// figure, not a narrower one, is the one that was tried first; LE 2M's own
-/// is the identical reasoning at twice the numbers - not separately
-/// measured against real hardware, the same honest gap the whole of B17 has
-/// (this arc's own doc).
+/// is the identical reasoning at twice the numbers, not separately measured
+/// against real hardware.
 fn anti_alias_cutoff_hz(phy: Phy) -> f64 {
     match phy {
         Phy::OneM | Phy::Coded(_) => 1_500_000.0,
@@ -226,61 +223,31 @@ const ANTI_ALIAS_STOPBAND_DB: f64 = 40.0;
 /// working rate, or is not close to a whole multiple of it: a decode running
 /// against a rate it silently disagreed with about would scale every
 /// deviation and timing figure downstream by exactly the mismatch, with
-/// nothing on screen to say so - the same reasoning N15's survey refusal
-/// follows for a span too narrow to plan a sweep across.
+/// nothing on screen to say so.
 ///
-/// **Now carries an anti-alias filter; it did not for B6 through B9, and a
-/// real-hardware session is why it does now.** Every step through B9 shipped
-/// with plain decimation - keep every `d`th sample, filter nothing - because
-/// a first attempt at a Kaiser lowpass here, sized narrow ("well inside the
-/// working Nyquist"), collapsed this arc's own synthetic matched-filter
-/// coherence from about 0.99 to under 0.15, for a cause that attempt did not
-/// run to ground, and the plain-decimation version was what shipped instead.
-/// A real HackRF session locked continuously on channel 37 at 20 Msps, after
-/// B9, found the failure that leaving this out was always a risk for rather
-/// than a known-broken one: a flood of detector triggers, several a second,
-/// every one failing CRC, with no two decoding to consistent-looking fields -
-/// the signature of the detector matching noise and out-of-channel energy
-/// aliased back into the working band, not of a timing or CFO error on real
-/// packets (B6 and B7's own real-hardware notes describe a *different*
-/// symptom: plausible, repeatable fields with a consistent CRC failure,
-/// which is what a small timing or CFO error looks like). The two symptoms
-/// are different enough to be different bugs, so this was pursued as a
-/// second, separate fix, not a retry of B6's.
+/// **An anti-alias filter, because plain decimation let the band fold in.**
+/// Keeping every `d`th sample and filtering nothing worked on synthetic
+/// packets, and on a real HackRF at 20 Msps on channel 37 it produced a
+/// flood of detector triggers, several a second, every one failing its CRC
+/// with no two decoding to consistent fields: the detector matching noise
+/// and out-of-channel energy aliased into the working band.
 ///
-/// **The cause the first attempt did not run to ground, found this session
-/// by measuring rather than guessing again.** A second attempt at a filter
-/// here - the same shape, a cutoff reasoned to be wide enough this time -
-/// reproduced the first attempt's failure exactly, at a size that should not
-/// have: even a bare 19-tap filter with its cutoff at 0.375 cycles/sample,
-/// on an unchanged (undecimated) working-rate signal, collapsed a clean
-/// packet's peak coherence from 0.9998 to 0.22 against this receiver's own
-/// threshold of 0.35. That ruled out "too narrow a cutoff" as the
-/// explanation for either attempt. What a side-by-side measurement found
-/// instead: [`super::detect::Detector`]'s reference comes straight from
-/// `gfsk::modulate`, unfiltered, and correlating a *filtered* signal against
-/// an *unfiltered* reference is what collapses coherence - a matched
-/// filter's coherence is an inner product, far less forgiving of a shape
-/// mismatch between its two sides than an ordinary demodulator is, and it does
-/// not matter how generous the filter's own passband is if only one side of
-/// the correlation goes through it. Filtering the reference through the
-/// identical pipeline restored the same clean packet's coherence to
-/// 0.99999997. [`matched_reference`] is that fix: not a differently-sized
-/// filter, a differently-built reference.
+/// **The reference goes through the same filter.** A filtered signal
+/// correlated against an unfiltered reference collapses the matched
+/// filter's coherence however generous the passband: even a bare 19-tap
+/// filter at 0.375 cycles/sample took a clean packet's peak from 0.9998 to
+/// 0.22, under the threshold of 0.35. A coherence is an inner product, far
+/// less forgiving of a shape mismatch between its two sides than an
+/// ordinary demodulator. Filtering the reference through the identical
+/// pipeline restored it to 0.99999997; [`matched_reference`] builds it so.
 ///
-/// **What is left honestly open.** [`anti_alias_cutoff_hz`] itself is still
-/// reasoned rather than swept - wide enough to pass a PHY's own waveform
-/// comfortably (this fix's own tests confirm that for LE 1M) and narrow
-/// enough to give the aliasing case real stopband before [`working_rate_hz`]'s
-/// Nyquist, but no measurement here says it is the *right* number, only a
-/// defensible one. Verified against this arc's synthetic coherence tests
-/// (unchanged pass/fail, same peak positions) and against a new one this fix
-/// added - `a_strong_out_of_channel_interferer_no_longer_defeats_detection` -
-/// that puts a second, unrelated GFSK signal at a raw offset chosen to fold
-/// straight onto this receiver's own passband under decimation, and checks
-/// detection survives it. **Not yet re-verified against real hardware** -
-/// that is the next real-hardware session's job, the same honest gap B6
-/// through B9 each left behind them, and B17's own LE 2M numbers besides.
+/// [`anti_alias_cutoff_hz`] is reasoned rather than swept: wide enough to
+/// pass the PHY's own waveform (the tests confirm it for LE 1M) and narrow
+/// enough to leave real stopband before the working Nyquist, a defensible
+/// number rather than a measured best.
+/// `a_strong_out_of_channel_interferer_no_longer_defeats_detection` puts a
+/// GFSK signal at an offset that folds onto the passband under decimation
+/// and checks detection survives it.
 pub fn front_end(raw_rate: f64, phy: Phy) -> Result<StreamingDecimator, String> {
     // LE Coded has a chain of its own (`coded_rx`), with a filter chosen for
     // its sensitivity; this one is LE 1M's and LE 2M's.
@@ -519,7 +486,7 @@ pub struct Receiver {
     trigger_len: usize,
     channel: u8,
     raw_rate: f64,
-    /// Which PHY this receiver decodes - B17's own addition. Fixed for the
+    /// Which PHY this receiver decodes. Fixed for the
     /// receiver's own lifetime the same way `channel` and `raw_rate` are:
     /// a change on any of the three invalidates the matched filter's own
     /// reference and the decimator's own filter, so [`Self::matches`] holds
@@ -717,9 +684,9 @@ impl Receiver {
     /// The carrier offset, read from the sync word this capture was triggered
     /// on.
     ///
-    /// **Data-aided, because the data is not balanced.** B7 took the mean of
-    /// the packet's own symbols, on the reasoning that whitened data has as
-    /// many ones as zeros. Over a real stretch of bits it has roughly as many,
+    /// **Data-aided, because the data is not balanced.** The mean of the
+    /// packet's own symbols assumes that whitened data has as many ones as
+    /// zeros. Over a real stretch of bits it has roughly as many,
     /// and a short packet's surplus of either moves the mean by the deviation
     /// times the surplus fraction: a synthetic packet sent 15 kHz off was
     /// reported at 35. The preamble and access address are known exactly.
@@ -832,7 +799,7 @@ impl Receiver {
     ///
     /// The sync word's samples are turned back by `offset_hz` and correlated
     /// coherently with the reference, and the coherence goes through
-    /// `snr_from_metric`, as B7 set out. Before the offset was taken out, the
+    /// `snr_from_metric`. Before the offset was taken out, the
     /// coherence - and so the SNR - was pulled down by the transmitter's own
     /// crystal error, reporting an offset device as a weak one.
     ///
@@ -1035,10 +1002,10 @@ impl Receiver {
     ///
     /// **Why a search, and not a single trusted position.** `decode_at`
     /// does the real work at one candidate boundary; this exists because
-    /// the boundary itself is not a single sample, on this receiver. Design
-    /// intent was "the sample right after the trigger is the header's own
-    /// first sample" - true with no filtering in the path (B6 through B9),
-    /// and false once `front_end` gained its anti-alias filter: a filter
+    /// the boundary itself is not a single sample, on this receiver. "The
+    /// sample right after the trigger is the header's first" holds with no
+    /// filtering in the path, and not once `front_end` has its anti-alias
+    /// filter: a filter
     /// with any real transition band smears the sync word's own energy into
     /// its neighbours over roughly its own settling time, on both sides of
     /// the true boundary, and a matched filter's own peak inside that
@@ -1141,7 +1108,7 @@ impl Receiver {
     /// listed as a failed CRC. If none agrees (a false trigger, or energy that
     /// never stops because the next transmission follows), nothing is
     /// reported: choosing among alignments that nothing vouches for would be
-    /// an invented packet (Viktor's decision, `net-ux-polish-plan.md` 3.4.c).
+    /// an invented packet.
     ///
     /// The one this replaced decoded at the nominal boundary alone, a few
     /// symbols from where the receiver's own measurements put the real one.
@@ -1205,13 +1172,13 @@ impl Receiver {
         if symbols < pdu::HEADER_BITS {
             return None;
         }
-        // A tuning sitting exactly on the channel's own centre - which this
-        // arc's is, since it never mixes off it - is exactly where a real
+        // A tuning sitting exactly on the channel's own centre - as it does
+        // on the advertising views - is exactly where a real
         // front end's LO leakage and IQ DC offset concentrate, and where a
         // real transmitter's own crystal error shows up too: both are a
         // constant added to every discriminator sample, indistinguishable
-        // from each other at this stage and not present in this arc's own
-        // synthetic tests, which is why slicing against a fixed zero passed
+        // from each other at this stage and not present in the synthetic
+        // tests, which is why slicing against a fixed zero passed
         // every one of them and no real capture. The capture's own mean is
         // the honest estimate of that constant - GFSK data is balanced over
         // any real stretch of bits - and this only needs a point estimate:
@@ -1375,10 +1342,10 @@ pub(crate) mod tests {
     }
 
     /// A synthetic packet, preamble through CRC, at `phy`'s own working
-    /// rate - the same construction B3's own detection tests use, extended
-    /// with a real PDU instead of random bits after the sync word. B17's
-    /// own addition: `phy`, so the identical construction proves both PHYs
-    /// rather than a second, separately-written one for LE 2M.
+    /// rate, the same construction the detection tests use, with a real PDU
+    /// instead of random bits after the sync word. `phy` lets the identical
+    /// construction prove both PHYs rather than a second, separately written
+    /// one for LE 2M.
     fn synthetic_packet_iq(
         phy: Phy,
         ch: u8,
@@ -1563,7 +1530,7 @@ pub(crate) mod tests {
         assert!((later - start).abs() < 5.0, "{:?}", got[1].1);
     }
 
-    /// B6's exit condition, built with a synthetic transmitter standing in
+    /// The receiver's end-to-end check, with a synthetic transmitter standing in
     /// for the real one: a full ADV_IND, correctly received end to end -
     /// detection, timing, de-whitening and CRC all agreeing.
     #[test]
@@ -1805,10 +1772,9 @@ pub(crate) mod tests {
     /// ±200 kHz. The first detector correlated coherently across the whole
     /// 40-symbol sync word, and an offset of 15 kHz - one real device in the
     /// test flat - turned the phase far enough across it to put the packet
-    /// under the trigger threshold nine times in ten (`dev_docs/
-    /// case-study-ble-crc.md`, section 13). The offsets here: that device,
-    /// an ordinary crystal, and the far edge. The offset the packet reports
-    /// is the one it was sent with.
+    /// under the trigger threshold nine times in ten. The offsets here: that
+    /// device, an ordinary crystal, and the far edge. The offset the
+    /// packet reports is the one it was sent with.
     ///
     /// This test once used -300 kHz, twice the standard's limit, and passed
     /// on its payload's particular bits: measured over 24 payloads at 20 dB,
@@ -1975,9 +1941,8 @@ pub(crate) mod tests {
         }
     }
 
-    /// B17's own exit condition: the identical chain, on LE 2M, at twice
-    /// the symbol rate and twice the preamble length - design section
-    /// 1.2's own "nothing new except the numbers" - decodes a real ADV_IND
+    /// The identical chain, on LE 2M, at twice the symbol rate and twice the
+    /// preamble length, nothing new except the numbers, decodes a real ADV_IND
     /// whole. Not a second, hand-duplicated test: [`synthetic_packet_iq`],
     /// [`Receiver::new`] and everything downstream take `phy` as data.
     #[test]
@@ -2145,15 +2110,15 @@ pub(crate) mod tests {
         assert_eq!(packets[0].adv_addr, Some(addr));
     }
 
-    /// `front_end`'s anti-alias filter's own exit condition: a second,
+    /// `front_end`'s anti-alias filter, held to its purpose: a second,
     /// unrelated GFSK burst riding in the same wideband capture at a raw
     /// offset this front end's own decimate-by-5 folds straight onto DC (8
     /// MHz, a whole multiple of the 4 MHz working rate) must not defeat
     /// detection of the wanted packet. This is the failure a real HackRF
-    /// session found after B9 - a flood of false triggers on channel 37 with
-    /// no two decoding to consistent fields - that no earlier synthetic test
-    /// exercised, because every one of them put exactly one signal in the
-    /// capture.
+    /// session found with plain decimation: a flood of false triggers on
+    /// channel 37 with no two decoding to consistent fields - that no earlier
+    /// synthetic test exercised, because every one of them put exactly one
+    /// signal in the capture.
     #[test]
     fn a_strong_out_of_channel_interferer_no_longer_defeats_detection() {
         let addr = [0x11, 0x22, 0x33, 0x44, 0x55, 0x66];
