@@ -40,12 +40,11 @@
 //!   each piconet's UAP as far as a header alone can (two candidates, not
 //!   one: `PiconetClock`'s doc has why), and `signal::bt::payload::
 //!   break_uap_tie` breaks the tie from a captured payload.
-//!   `resolved_bt_uap` remembers a LAP resolved this way for the rest of the
-//!   session: a piconet's real UAP does not change, so a later header whose
+//!   [`classic::Classic`] remembers a LAP resolved this way for the rest of
+//!   the session: a piconet's real UAP does not change, so a later header whose
 //!   payload cannot be read (a POLL or an FHS, say) must not undo an answer
 //!   already earned.
 
-use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 use std::time::Instant;
 
@@ -53,12 +52,8 @@ use crossbeam_channel::Receiver as SampleReceiver;
 
 use crate::hardware::{SampleGeometry, StreamBlock};
 use crate::signal::ble::receive::Receiver as BleReceiver;
-use crate::signal::bt::header::PiconetClock;
-use crate::signal::bt::payload;
-use crate::signal::bt::piconet::Inquiry;
-use crate::signal::bt::receive::Receiver as BtReceiver;
 use crate::signal::stream::plan_block;
-use crate::state::{BlePacket, BtHop, SdrMetrics};
+use crate::state::{BlePacket, SdrMetrics};
 
 // The views the classic receiver runs for (the Classic and the Piconet
 // view): a plain string comparison, because that is what the menu is keyed
@@ -77,7 +72,7 @@ use ble::{
     advertised_of, census_from_aux, census_from_ble, extended, measure_coded, push_coded,
     push_le_aux, put_down, put_down_ble,
 };
-use classic::{push_all, survey_budget};
+use classic::{push_all, Classic};
 use feed::{decoded_block, held, Load, Run};
 use follow::{connect_end_pair, event_window, FOLLOW_HELD_S, FOLLOW_ROUNDS};
 use promises::{abandon, keep_promise, packet_start, set_aux_outcome, AuxList, Pending};
@@ -105,6 +100,17 @@ pub const SAFE_BT_CHANNELS: usize = 8;
 /// [`super::occupancy::DUTY_RESOLUTION`], where the two were made to agree. It
 /// publishes at most twenty times a second against a screen that redraws thirty.
 const DWELL_S: f64 = 0.05;
+
+/// Where one block sits in the stream and what it was captured at: what
+/// every receiver is built for and every window is cut against.
+#[derive(Clone, Copy, Debug)]
+struct Tuning {
+    first_pair: u64,
+    centre_hz: f64,
+    rate_hz: f64,
+    /// The usable span: the baseband filter's where the radio has one.
+    span_hz: f64,
+}
 
 pub struct NetWorker {
     pub sample_rx: SampleReceiver<StreamBlock>,
@@ -157,41 +163,8 @@ impl NetWorker {
         let mut ble: Option<BleReceiver> = None;
         // LE Coded's own chain, on the LE Coded view alone.
         let mut coded: Option<crate::signal::ble::coded_rx::CodedReceiver> = None;
-        let mut bt: Vec<BtReceiver> = Vec::new();
-        let mut piconet_clocks: HashMap<u32, PiconetClock> = HashMap::new();
-        // The live UAP tie-break, one LAP at a time: once resolved, a
-        // LAP's real UAP does not change (it comes from the piconet
-        // master's own fixed address), so this sticks the same way
-        // `signal::net::census::Device::first_seen` never moves on a
-        // repeat sighting - a later header from a packet type `payload::
-        // break_uap_tie` cannot read (POLL, FHS, ...) must not flip a
-        // resolved answer back to two candidates.
-        let mut resolved_bt_uap: HashMap<u32, u8> = HashMap::new();
-        // 6.5: each piconet's access-code times, µs on the stream's clock,
-        // for its slot grid (`signal::bt::slots`), kept here rather than in
-        // the state because only the fit is shown; with the rate they were
-        // dated at, and when each was last fitted. A new stream or a new
-        // rate restarts the logs: their times are then on another clock.
-        let mut bt_arrivals: HashMap<u32, std::collections::VecDeque<f64>> = HashMap::new();
-        let mut arrivals_rate = 0.0f64;
-        // Which stream the times are on: bumped with every restart of the
-        // clock they count on, so a hop, a header and a grid are compared
-        // only within one.
-        let mut stream_id = 0u32;
-        let mut last_fit: HashMap<u32, Instant> = HashMap::new();
-        // Piconets with hits their last fit has not seen: refitted once the
-        // interval allows, whether or not another hit comes, so a piconet
-        // that falls silent still has its last hits in its figure.
-        let mut unfitted: std::collections::HashSet<u32> = std::collections::HashSet::new();
+        let mut classic = Classic::new(self.survey_bt_start);
         let mut load = Load::default();
-        // How many classic channels the survey watches: grown and shrunk by
-        // the measured load (`SURVEY_LOAD_HIGH`).
-        let mut survey_bt = self.survey_bt_start;
-        // Whether the classic account was last published load-limited; `None`
-        // until it has been published at all. The fleet alone cannot say:
-        // a survey with no room starts empty and stays empty, and an empty
-        // fleet that never changed would otherwise never say why.
-        let mut bt_said: Option<bool> = None;
         // Where the next block must start for the stream to be unbroken. `None`
         // until a block has been seen, and again after the section closes.
         let mut next_pair: Option<u64> = None;
@@ -255,22 +228,11 @@ impl NetWorker {
             // when it does not, the receivers start again from this block.
             let continuous = next_pair == Some(first_pair);
             // A position *behind* the expected one is a new stream (RX was
-            // restarted, `RxContext::begin_stream`): its clock starts again,
-            // so what each piconet's clock learned from the old one's timing
-            // no longer applies. A resolved UAP does - a piconet's address does
-            // not change - so `resolved_bt_uap` is kept.
+            // restarted, `RxContext::begin_stream`), whose clock starts again.
             if next_pair.is_some_and(|n| first_pair < n) {
-                piconet_clocks.clear();
-                bt_arrivals.clear();
-                unfitted.clear();
-                stream_id = stream_id.wrapping_add(1);
+                classic.new_stream();
             }
-            if rate_hz != arrivals_rate {
-                bt_arrivals.clear();
-                unfitted.clear();
-                arrivals_rate = rate_hz;
-                stream_id = stream_id.wrapping_add(1);
-            }
+            classic.rate(rate_hz);
             if !continuous {
                 put_down_ble(&mut ble, &self.state);
                 put_down(&mut coded, &self.state);
@@ -280,7 +242,7 @@ impl NetWorker {
                     crate::signal::ble::aux_ptr::AuxOutcome::FeedLost,
                     &self.state,
                 );
-                bt.clear();
+                classic.fleet.clear();
                 recent.clear();
             }
             next_pair = Some(first_pair + pairs);
@@ -337,6 +299,12 @@ impl NetWorker {
                         *f.connection.state() == crate::signal::ble::follow::State::Following
                     }),
                 )
+            };
+            let tuning = Tuning {
+                first_pair,
+                centre_hz,
+                rate_hz,
+                span_hz,
             };
 
             // Decoded once, by the first receiver that needs it, and shared by
@@ -538,325 +506,25 @@ impl NetWorker {
             // measurement the survey is for. Classic BT has no fixed channel
             // set to gate on, so the preset's name is the gate.
             if classic_here {
-                let mut wanted = crate::signal::bt::channel::channels_in_span(centre_hz, span_hz);
-                wanted.sort_by_key(|&ch| {
-                    let f = crate::signal::bt::channel::centre_hz(ch).unwrap_or(0) as f64;
-                    (f - centre_hz).abs() as u64
-                });
-                let could = wanted.len().min(self.bt_channels);
-                let cap = if is_net_bt {
-                    self.bt_channels
-                } else {
-                    survey_bt.min(self.bt_channels)
-                };
-                let load_limited = cap < could;
-                wanted.truncate(cap);
-                wanted.sort_unstable();
-
-                let current: Vec<u8> = bt.iter().map(|r| r.channel()).collect();
-                let stale_tuning = bt
-                    .first()
-                    .is_some_and(|r| !r.matches(r.channel(), rate_hz, centre_hz));
-                if current != wanted || stale_tuning || bt_said != Some(load_limited) {
-                    let mut fleet = Vec::with_capacity(wanted.len());
-                    let mut refusal = None;
-                    for &ch in &wanted {
-                        match BtReceiver::new(rate_hz, ch, centre_hz, first_pair) {
-                            Ok(r) => fleet.push(r),
-                            Err(e) => {
-                                refusal.get_or_insert(e);
-                            }
-                        }
-                    }
-                    bt = fleet;
-                    bt_said = Some(load_limited);
-                    let mut m = self.state.lock().unwrap_or_else(|e| e.into_inner());
-                    m.net.bt_load_limited = load_limited;
-                    m.net.bt_refused = if wanted.is_empty() && load_limited {
-                        Some("not running: the survey's load leaves no room".to_string())
-                    } else if wanted.is_empty() {
-                        Some(format!(
-                            "no classic Bluetooth channel fits inside the current {:.1} MHz view",
-                            span_hz / 1e6
-                        ))
-                    } else {
-                        refusal
-                    };
-                    m.net.bt_channels_watched = bt.iter().map(|r| r.channel()).collect();
-                    m.net.bt_capacity = self.bt_channels;
-                }
-
-                let mut hits = Vec::new();
-                let mut header_hits = Vec::new();
-                let (ble_out, answers) =
-                    push_all(ble_on.and(ble.as_mut()), &mut bt, block, first_pair);
+                classic.watch(tuning, is_net_bt, self.bt_channels, &self.state);
+                let (ble_out, answers) = push_all(
+                    ble_on.and(ble.as_mut()),
+                    &mut classic.fleet,
+                    block,
+                    first_pair,
+                );
                 ble_packets = ble_out;
-                for (rx, (laps, headers)) in bt.iter().zip(answers) {
-                    for hit in laps {
-                        hits.push((rx.channel(), hit.lap, hit.at_us));
-                        let log = bt_arrivals.entry(hit.lap).or_default();
-                        if log.len() == crate::signal::bt::slots::KEPT {
-                            log.pop_front();
-                        }
-                        log.push_back(hit.at_us);
-                        unfitted.insert(hit.lap);
-                    }
-                    header_hits
-                        .extend(headers.into_iter().filter(|h| Inquiry::of(h.lap).is_none()));
-                }
-                // Fed to each LAP's own `PiconetClock` outside the lock -
-                // narrowing does real work (64 dewhitenings per header),
-                // the same reasoning every other float or device-free
-                // computation in this worker stays outside the lock block
-                // for.
-                //
-                // **The UAP tie-break rides alongside it.** A LAP
-                // already resolved shows its one confirmed UAP and does
-                // no further work at all - `resolved_bt_uap`'s own doc
-                // says why a later, unresolvable header must not undo
-                // this. Otherwise, a header narrowed to more than one
-                // candidate gets one attempt at `payload::break_uap_tie`
-                // using this same hit's own captured payload; success
-                // resolves the LAP for good, failure (an unsupported
-                // packet type, or simply not enough real payload behind
-                // this particular header) falls back to showing the
-                // still-honest candidate set `PiconetClock` itself
-                // reports, exactly as before this step.
-                let mut narrowed_by_lap = Vec::new();
-                let mut headers_read = Vec::new();
-                // Each header measured again from the raw samples, through
-                // the tester's filter (`measure`), here outside the lock.
                 let window = held(&recent, iq.as_deref().map(|v| (first_pair, v)));
-                for hit in &header_hits {
-                    let clock = piconet_clocks.entry(hit.lap).or_default();
-                    clock.observe(hit.at_us, &hit.whitened);
-                    // The UAPs still standing, each at the clocks the
-                    // piconet's own clock gives it for this header: never the
-                    // first clock that happens to fit, which about one
-                    // header in five reads as another packet type.
-                    let standing = match resolved_bt_uap.get(&hit.lap) {
-                        Some(&uap) => vec![uap],
-                        None => clock.narrowed(),
-                    };
-                    let pairs: Vec<(u8, u8)> = standing
-                        .iter()
-                        .flat_map(|&uap| {
-                            clock
-                                .clocks_for(uap, hit.at_us)
-                                .into_iter()
-                                .map(move |clk6| (uap, clk6))
-                        })
-                        .collect();
-                    // One pair: the header is read there. More: this hit's
-                    // own payload gets one attempt at choosing, UAP and
-                    // clock together; the clock it checks out at pins the
-                    // piconet's clock, so the headers after it have one.
-                    let (shown, read_at) = match pairs.as_slice() {
-                        [pair] => (vec![pair.0], Some(*pair)),
-                        _ => {
-                            match payload::break_uap_tie(&pairs, &hit.whitened, &hit.payload_raw) {
-                                Some((uap, clk6)) => {
-                                    resolved_bt_uap.insert(hit.lap, uap);
-                                    clock.pin(hit.at_us, clk6);
-                                    (vec![uap], Some((uap, clk6)))
-                                }
-                                None => (standing, None),
-                            }
-                        }
-                    };
-                    let read = match (shown.as_slice(), read_at) {
-                        (_, Some((uap, clk6))) => {
-                            match crate::signal::bt::header::decode_at(&hit.whitened, uap, clk6) {
-                                Some(h) => crate::signal::bt::piconet::HeaderRead::Decoded(h),
-                                None => crate::signal::bt::piconet::HeaderRead::Undecoded,
-                            }
-                        }
-                        // One UAP, two clocks and no payload to choose: two
-                        // different headers, so neither is claimed.
-                        ([_], None) => crate::signal::bt::piconet::HeaderRead::Undecoded,
-                        _ => crate::signal::bt::piconet::HeaderRead::Unresolved,
-                    };
-                    // Who sent it: the slot parity of the clock it was read
-                    // at, and only once it was read there. And what its
-                    // payload told: checked where sdrtop can read the type,
-                    // never guessed where it cannot.
-                    let direction = match read {
-                        crate::signal::bt::piconet::HeaderRead::Decoded(h) => {
-                            Some(crate::signal::bt::piconet::Direction::of_clk6(h.clk6))
-                        }
-                        _ => None,
-                    };
-                    let payload = {
-                        use crate::signal::bt::header::PacketType;
-                        use crate::signal::bt::piconet::{HeaderRead, PayloadVerdict};
-                        match (read, read_at) {
-                            (HeaderRead::Decoded(h), Some((uap, clk6))) => match h.packet_type {
-                                PacketType::Null | PacketType::Poll => PayloadVerdict::NoPayload,
-                                t => match payload::check_crc(&hit.payload_raw, clk6, t, uap) {
-                                    Ok(ok) => PayloadVerdict::Crc(ok),
-                                    // Why, in the list's words: never "PSK",
-                                    // which would be a guess about the link.
-                                    Err(why) => PayloadVerdict::NotRead(why.words()),
-                                },
-                            },
-                            _ => PayloadVerdict::NotRead("clock not known"),
-                        }
-                    };
-                    // The header read again from the raw samples, as the
-                    // test suites define its readings (`measure::classic`).
-                    let channel_hz = crate::signal::bt::channel::centre_hz(hit.ch);
-                    let measured = channel_hz
-                        .and_then(|hz| {
-                            let r = super::measure::classic(
-                                &window,
-                                rate_hz,
-                                hz as f64 - centre_hz,
-                                hit.lap,
-                                hit.sync_end_pair,
-                            )?;
-                            let carrier = r
-                                .carrier
-                                .map(|(_, drift)| {
-                                    crate::signal::bt::piconet::Carrier::of(&drift, hz as f64)
-                                })
-                                .unwrap_or_default();
-                            let f0_ppm = r
-                                .carrier
-                                .map(|(_, drift)| drift.initial_hz.scale(1e6 / hz as f64));
-                            Some((r.deviation, carrier, f0_ppm))
-                        })
-                        .unwrap_or_default();
-                    headers_read.push((
-                        hit.lap,
-                        hit.at_us,
-                        clock.hypotheses(),
-                        crate::signal::bt::piconet::PacketReading {
-                            header: read,
-                            direction,
-                            deviation: measured.0,
-                            carrier: measured.1,
-                            f0_ppm: measured.2,
-                            payload,
-                        },
-                    ));
-                    narrowed_by_lap.push((hit.lap, shown));
-                }
-                // The slot fit, outside the lock and at most once a second a
-                // piconet: a rate search over hundreds of hits is real work,
-                // and a jitter figure does not need refreshing faster.
-                let due: Vec<u32> = unfitted
-                    .iter()
-                    .copied()
-                    .filter(|lap| {
-                        last_fit.get(lap).is_none_or(|t| {
-                            now.saturating_duration_since(*t) >= self.slot_fit_every
-                        })
-                    })
-                    .collect();
-                // An inquiry code is every searching device's at once, so it
-                // gets no slot grid of one piconet. Every LAP gets its pace
-                // (`slots::pace`), cheap and burst by burst: the timing half
-                // of telling inquiry and paging from a piconet's traffic.
-                let mut fits = Vec::with_capacity(due.len());
-                for lap in due {
-                    use crate::signal::bt::slots;
-                    let times: Vec<f64> = bt_arrivals
-                        .get(&lap)
-                        .map(|l| l.iter().copied().collect())
-                        .unwrap_or_default();
-                    let inquiry = Inquiry::of(lap).is_some();
-                    let whole = (!inquiry).then(|| slots::fit(&times));
-                    fits.push((lap, whole, slots::pace(&times)));
-                    last_fit.insert(lap, now);
-                    unfitted.remove(&lap);
-                }
-                if !hits.is_empty() || !narrowed_by_lap.is_empty() || !fits.is_empty() {
-                    let mut m = self.state.lock().unwrap_or_else(|e| e.into_inner());
-                    m.net.health.bt_hits += hits.len() as u64;
-                    for (channel, lap, at_us) in hits {
-                        crate::signal::bt::piconet::observe(
-                            &mut m.net.bt_piconets,
-                            lap,
-                            channel,
-                            now,
-                        );
-                        m.net.bt_hops.push_front(BtHop {
-                            channel,
-                            lap,
-                            seen: now,
-                            at_us,
-                            stream: stream_id,
-                            header: None,
-                        });
-                        // Every hit is a packet, read or not: an ID row
-                        // until a header is joined to it.
-                        crate::signal::bt::piconet::observe_packet(
-                            &mut m.net.bt_piconets,
-                            lap,
-                            crate::signal::bt::piconet::BtPacket {
-                                seen: now,
-                                at_us,
-                                stream: stream_id,
-                                channel,
-                                header: None,
-                                direction: None,
-                                deviation: Default::default(),
-                                carrier: Default::default(),
-                                f0_ppm: None,
-                                payload: crate::signal::bt::piconet::PayloadVerdict::NoPayload,
-                            },
-                        );
-                    }
-                    m.net.bt_hops.truncate(crate::state::BT_HOP_LIMIT);
-                    for (lap, narrowed) in narrowed_by_lap {
-                        m.net.bt_uap.insert(lap, narrowed);
-                    }
-                    for (lap, whole, pace) in fits {
-                        if let Some(p) = m.net.bt_piconets.iter_mut().find(|p| p.lap == lap) {
-                            if let Some(fit) = whole {
-                                p.slots = Some(fit);
-                                p.slots_stream = stream_id;
-                            }
-                            p.pace = pace;
-                        }
-                    }
-                    for (lap, at_us, hypotheses, reading) in headers_read {
-                        // Joined to its hit by LAP and time: the header's
-                        // capture starts on the lane that found the access
-                        // code, which may be a quarter-symbol lane off the
-                        // one the hit was dated by.
-                        if let Some(hop) = m.net.bt_hops.iter_mut().find(|h| {
-                            h.lap == lap && h.stream == stream_id && (h.at_us - at_us).abs() < 2.0
-                        }) {
-                            hop.header = Some(reading.header);
-                        }
-                        crate::signal::bt::piconet::observe_header(
-                            &mut m.net.bt_piconets,
-                            lap,
-                            reading.header,
-                            hypotheses,
-                            reading.deviation,
-                            reading.carrier,
-                        );
-                        crate::signal::bt::piconet::read_packet(
-                            &mut m.net.bt_piconets,
-                            lap,
-                            stream_id,
-                            at_us,
-                            reading,
-                        );
-                    }
-                }
+                classic.read(
+                    answers,
+                    &window,
+                    tuning,
+                    now,
+                    self.slot_fit_every,
+                    &self.state,
+                );
             } else {
-                // Not on this preset: no receiver to run, and a refusal or a
-                // watched-channel list from a previous visit must not linger
-                // onto a screen that never claimed to be this one.
-                bt.clear();
-                bt_said = None;
-                let mut m = self.state.lock().unwrap_or_else(|e| e.into_inner());
-                m.net.bt_refused = None;
-                m.net.bt_channels_watched.clear();
-                m.net.bt_load_limited = false;
+                classic.stand_down(&self.state);
             }
 
             // The BLE receiver alone, when no classic fleet ran beside it,
@@ -1294,15 +962,11 @@ impl NetWorker {
                 scan = None;
                 put_down_ble(&mut ble, &self.state);
                 put_down(&mut coded, &self.state);
-                bt.clear();
+                classic.close();
                 load = Load::default();
-                survey_bt = self.survey_bt_start;
-                bt_said = None;
                 next_pair = None;
                 let mut m = self.state.lock().unwrap_or_else(|e| e.into_inner());
-                m.net.bt_refused = None;
-                m.net.bt_channels_watched.clear();
-                m.net.bt_load_limited = false;
+                Classic::unpublish(&mut m);
                 m.net.ble_channel = None;
                 // Nothing is being decoded, so there is no load to report -
                 // and a figure from before the section closed must not be
@@ -1316,7 +980,7 @@ impl NetWorker {
                 // The survey's classic channels follow the load it measured:
                 // one fewer over the high mark, one more under the low one.
                 if is_survey {
-                    survey_bt = survey_budget(survey_bt, reading, self.bt_channels);
+                    classic.loaded(reading, self.bt_channels);
                 }
             }
         }
@@ -3531,8 +3195,8 @@ mod tests {
             .expect("this LAP's header should have arrived");
         assert_eq!(narrowed, &vec![true_uap], "{narrowed:?}");
 
-        // 6.3: resolved by this very payload, the same header is then read
-        // under the UAP: a DH1 from LT_ADDR 2, counted on the roster.
+        // Resolved by this very payload, the same header is then read under the
+        // UAP: a DH1 from LT_ADDR 2, counted on the roster.
         let p = m
             .net
             .bt_piconets
@@ -3544,7 +3208,7 @@ mod tests {
         assert_eq!(h.types[header::PacketType::Dh1.code() as usize], 1);
         assert_eq!(h.lt_addrs, 1 << lt_addr);
 
-        // 6.4: the header's own symbols give the modulation index the
+        // The header's own symbols give the modulation index the
         // modulator was set to: 160 kHz at 1 Msym/s is h = 0.32. Read
         // against the slicer's fast tracker it came out 0.297 (149 kHz); from
         // the header's own settled centre, 0.322 (160.9 +/- 0.8 kHz).
@@ -3556,8 +3220,8 @@ mod tests {
         let index = df1.value() * 2.0 / 1e6;
         assert!((index - 0.32).abs() < 0.01, "h = {index} from {df1:?}");
 
-        // 6.6: the header joins its own hit, so the export can say what the
-        // hit carried.
+        // The header joins its own hit, so the export can say what the hit
+        // carried.
         let hop = m
             .net
             .bt_hops
@@ -3690,7 +3354,7 @@ mod tests {
         assert!(fit.rms_us.value() < 0.3, "{fit:?}");
         assert!(fit.max_us < 0.5, "{fit:?}");
 
-        // 6.6: every one of those hits exports its residual from that grid.
+        // Every one of those hits exports its residual from that grid.
         let rows = crate::export::bt::rows(&m);
         let col = crate::export::bt::HEADER
             .split(',')
