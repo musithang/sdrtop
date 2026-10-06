@@ -7,7 +7,6 @@ use std::sync::Arc;
 #[derive(Clone)]
 pub struct SystemState {
     pub board_name: Arc<str>,
-    #[allow(dead_code)]
     pub serial: Arc<str>,
     pub fw_version: Arc<str>,
     /// The software layer between sdrtop and a radio with no firmware of its
@@ -16,9 +15,7 @@ pub struct SystemState {
     pub stack: Option<crate::hardware::SoftwareStack>,
     // Device identity captured at launch and logged once; kept on the struct for
     // completeness like `serial`, though no panel currently renders them.
-    #[allow(dead_code)]
     pub board_rev: u8,
-    #[allow(dead_code)]
     pub usb_api_version: u16,
     /// Whether sdrtop could watch this radio read-only while another process
     /// holds it (observer mode). Decided once at open from the backend's

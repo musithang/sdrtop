@@ -103,22 +103,6 @@ impl DelayedAutocorrelator {
         }
     }
 
-    /// **No consumer yet.** `signal::reference::capture` builds a fresh
-    /// correlator per call rather than reusing one across captures, so nothing
-    /// has needed this. It is here for whichever detector runs continuously
-    /// over a live stream and needs to clear its state between windows, such
-    /// as an OFDM burst detector's own preamble search.
-    #[allow(dead_code)]
-    pub fn reset(&mut self) {
-        self.hist
-            .iter_mut()
-            .for_each(|s| *s = Complex::new(0.0, 0.0));
-        self.pos = 0;
-        self.count = 0;
-        self.p = Complex::new(0.0, 0.0);
-        self.energy = 0.0;
-    }
-
     /// The sample `k` steps back from the newest one.
     fn at(&self, k: usize) -> Complex<f64> {
         let cap = self.hist.len();
@@ -187,6 +171,7 @@ impl DelayedAutocorrelator {
 /// instead. Wi-Fi symbol timing from the L-LTF cross-correlation would be a
 /// second consumer.
 #[derive(Clone, Copy, Debug)]
+#[cfg(test)]
 pub struct Match {
     /// The correlation with the reference sequence.
     pub value: Complex<f64>,
@@ -195,6 +180,7 @@ pub struct Match {
     reference_energy: f64,
 }
 
+#[cfg(test)]
 impl Match {
     /// `|y|^2 / (E_reference * E_window)`, in `[0, 1]` by Cauchy-Schwarz.
     ///
@@ -214,6 +200,7 @@ impl Match {
 /// Correlation of a signal with a sequence known in advance.
 ///
 /// See [`Match`] for who uses it.
+#[cfg(test)]
 pub struct MatchedFilter {
     /// The reference, conjugated, in its own order: applying it is a dot
     /// product with the window oldest sample first.
@@ -281,6 +268,7 @@ impl BlockPlan {
     }
 }
 
+#[cfg(test)]
 impl MatchedFilter {
     pub fn new(reference: &[Complex<f32>]) -> Self {
         let wide: Vec<Complex<f64>> = reference
@@ -306,21 +294,6 @@ impl MatchedFilter {
 
     pub fn is_empty(&self) -> bool {
         self.taps.is_empty()
-    }
-
-    /// **No consumer yet.** `signal::reference::capture` builds a fresh
-    /// correlator per call rather than reusing one across captures, so nothing
-    /// has needed this. It is here for whichever detector runs continuously
-    /// over a live stream and needs to clear its state between windows, such
-    /// as an OFDM burst detector's own preamble search.
-    #[allow(dead_code)]
-    pub fn reset(&mut self) {
-        self.hist
-            .iter_mut()
-            .for_each(|s| *s = Complex::new(0.0, 0.0));
-        self.pos = self.taps.len().max(1) - 1;
-        self.count = 0;
-        self.energy = 0.0;
     }
 
     /// Feed one sample. Returns a reading once `reference.len()` samples have
@@ -390,7 +363,7 @@ impl MatchedFilter {
 /// threshold gives it" - not this function's own direction. Only this
 /// module's own tests call it, checking the law it states rather than
 /// living by it. Wi-Fi burst detection would be a consumer of the same kind.
-#[allow(dead_code)]
+#[cfg(test)]
 pub fn false_alarm_rate(taps: usize, threshold: f64) -> f64 {
     if taps < 2 {
         return 1.0;

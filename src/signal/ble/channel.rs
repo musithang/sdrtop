@@ -34,9 +34,9 @@
 ///
 /// Not used outside this module's tests: detection and decode work on one
 /// channel at a time and have no reason to know the band's edges.
-#[allow(dead_code)]
+#[cfg(test)]
 pub const LOW_HZ: u64 = 2_402_000_000;
-#[allow(dead_code)]
+#[cfg(test)]
 pub const HIGH_HZ: u64 = 2_480_000_000;
 
 /// Every RF channel is this wide and this far from its neighbour.

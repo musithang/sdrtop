@@ -80,7 +80,6 @@ fn step_from_turns(turns_per_sample: f64) -> u64 {
 /// Mixes a channel down to baseband in the BLE, LE Coded and classic
 /// receivers and in the measurement path (`signal::net::measure`), and
 /// builds the synthetic tones and offsets the DSP tests need.
-#[allow(dead_code)]
 pub struct Nco {
     /// Current phase in accumulator units, `2^64` to the turn.
     phase: u64,
@@ -90,7 +89,6 @@ pub struct Nco {
     sample_rate_hz: f64,
 }
 
-#[allow(dead_code)]
 impl Nco {
     /// An oscillator at `freq_hz`, starting at zero phase.
     ///
@@ -130,6 +128,7 @@ impl Nco {
     /// deliberate: `step / 2^64` for a negative frequency is a value just under
     /// 1, whose `f64` ulp is sixteen times coarser than the small number the
     /// subtraction is about to produce.
+    #[cfg(test)]
     pub fn frequency_hz(&self) -> f64 {
         (self.step as i64 as f64) / TURN * self.sample_rate_hz
     }
@@ -143,6 +142,7 @@ impl Nco {
     /// exact; they are here so that a million samples later the phase is still
     /// where the closed form says it is, which is what
     /// `the_tone_does_not_drift_over_a_million_samples` measures.
+    #[cfg(test)]
     pub fn resolution_hz(&self) -> f64 {
         self.sample_rate_hz / TURN
     }
@@ -150,10 +150,6 @@ impl Nco {
     /// Current phase in turns, `[0, 1)`.
     pub fn phase_turns(&self) -> f64 {
         (self.phase as f64) / TURN
-    }
-
-    pub fn set_phase_turns(&mut self, turns: f64) {
-        self.phase = step_from_turns(turns);
     }
 
     /// Back to zero phase. The frequency is untouched.
@@ -168,10 +164,12 @@ impl Nco {
     }
 
     /// Advance one sample without generating anything.
+    #[cfg(test)]
     pub fn advance(&mut self) {
         self.phase = self.phase.wrapping_add(self.step);
     }
 
+    #[cfg(test)]
     pub fn next_sample(&mut self) -> Complex<f64> {
         let s = self.sample();
         self.advance();
@@ -199,6 +197,7 @@ impl Nco {
     }
 
     /// Fill a block with the oscillator, continuing from the current phase.
+    #[cfg(test)]
     pub fn fill(&mut self, out: &mut [Complex<f32>]) {
         self.walk(out.len(), |k, o| {
             out[k] = Complex::new(o.re as f32, o.im as f32)

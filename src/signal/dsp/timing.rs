@@ -111,7 +111,7 @@ fn cubic_interpolate(x: &[f32], pos: f64) -> f32 {
 ///
 /// No consumer outside this module's own tests - see the module doc for why
 /// `signal::ble::sync` uses [`find_phase`] instead.
-#[allow(dead_code)]
+#[cfg(test)]
 pub fn recover(x: &[f32], start: f64, sps: f64, gain: f64, symbols: usize) -> Vec<f32> {
     let power = if x.is_empty() {
         1.0

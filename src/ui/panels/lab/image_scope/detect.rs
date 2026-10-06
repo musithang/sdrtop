@@ -44,7 +44,10 @@ pub(super) struct ImageReadout {
     /// detection's assertion surface, and as where a future cursor would read
     /// from. (This is what the old `let _ = r.carrier_idx;` in `render` was for;
     /// the reason belongs here, not in a no-op statement three screens away.)
-    #[cfg_attr(not(test), allow(dead_code))]
+    #[cfg_attr(
+        not(test),
+        expect(dead_code, reason = "the detection tests read it, and a cursor would")
+    )]
     pub carrier_idx: usize,
     pub carrier_dbfs: f32,
     pub image_dbfs: f32,

@@ -88,7 +88,6 @@ pub struct Binding {
     /// Read only by the checks at the bottom of this file, and that is the whole
     /// point of it: the pane draws `key` and `what`, while this field is what
     /// ties the row to a real match arm.
-    #[cfg_attr(not(test), allow(dead_code))]
     pub ch: Option<char>,
     pub what: &'static str,
     pub single: OnSingle,

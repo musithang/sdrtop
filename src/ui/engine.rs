@@ -37,7 +37,7 @@ pub struct LayoutEngine {
 }
 
 impl LayoutEngine {
-    #[cfg_attr(not(test), allow(dead_code))]
+    #[cfg(test)]
     pub fn new(config: LayoutConfig, registry: PanelRegistry) -> Self {
         let saved_active_preset = config.active_preset.clone();
         Self::new_with_saved_preset(config, registry, saved_active_preset)
@@ -183,7 +183,7 @@ impl LayoutEngine {
     /// presets against the registry: presets are data and the registry is code,
     /// and a panel renamed on one side leaves the other quietly asking for a name
     /// that resolves to nothing.
-    #[cfg_attr(not(test), allow(dead_code))]
+    #[cfg(test)]
     pub fn registered_panel_names(&self) -> impl Iterator<Item = &'static str> + '_ {
         self.registry.panels_iter().map(|p| p.name())
     }
@@ -223,7 +223,7 @@ impl LayoutEngine {
         self.focused_panel = None;
     }
 
-    #[allow(dead_code)]
+    #[cfg(test)]
     pub fn is_focused(&self, name: &str) -> bool {
         self.focused_panel.as_deref() == Some(name)
     }

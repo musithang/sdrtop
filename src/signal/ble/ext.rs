@@ -15,7 +15,6 @@
 
 // Nothing reads an extended header until the LE Coded worker does; the
 // attribute goes when it does.
-#![allow(dead_code)]
 
 /// The advertising event an extended PDU belongs to (Table 2.13).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

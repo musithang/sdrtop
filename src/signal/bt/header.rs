@@ -41,12 +41,10 @@
 /// air actually carries and dewhitening has removed the piconet's own
 /// scrambling - 3 bits LT_ADDR, 4 bits TYPE, 3 bits FLOW/ARQN/SEQN packed
 /// as `flags`, 8 bits HEC.
-#[allow(dead_code)]
 pub const HEADER_BITS: usize = 18;
 
 /// How many bits FEC(1/3) actually reads off the air for one header - three
 /// repeats of each of the 18 host bits.
-#[allow(dead_code)]
 pub const HEADER_AIR_BITS: usize = HEADER_BITS * 3;
 
 /// How many bits sit between the end of the 64-bit access code
@@ -56,7 +54,6 @@ pub const HEADER_AIR_BITS: usize = HEADER_BITS * 3;
 /// start of their own `pkt->symbols`, which begins at the 64-bit sync word
 /// (not the 4-bit preamble a real receiver also sees but `Detector` never
 /// stores): `68 - 64 = 4`.
-#[allow(dead_code)]
 pub const TRAILER_BITS: usize = 4;
 
 /// Decode 1/3-rate FEC: three like symbols in a row, majority-voted.
@@ -71,7 +68,6 @@ pub const TRAILER_BITS: usize = 4;
 /// majority vote, but three-way agreement failing on a quarter or more of
 /// the header means the capture itself was not clean enough to trust at
 /// all.
-#[allow(dead_code)]
 pub fn unfec13(air: &[bool]) -> Option<[bool; HEADER_BITS]> {
     if air.len() != HEADER_AIR_BITS {
         return None;
@@ -95,14 +91,12 @@ pub fn unfec13(air: &[bool]) -> Option<[bool; HEADER_BITS]> {
 /// One period of the whitening LFSR's own output, and the 64 starting
 /// points - one per possible CLK1-6 value - `libbtbb`'s own `INDICES` and
 /// `WHITENING_DATA` tables, ported verbatim.
-#[allow(dead_code)]
 const WHITENING_INDICES: [u8; 64] = [
     99, 85, 17, 50, 102, 58, 108, 45, 92, 62, 32, 118, 88, 11, 80, 2, 37, 69, 55, 8, 20, 40, 74,
     114, 15, 106, 30, 78, 53, 72, 28, 26, 68, 7, 39, 113, 105, 77, 71, 25, 84, 49, 57, 44, 61, 117,
     10, 1, 123, 124, 22, 125, 111, 23, 42, 126, 6, 112, 76, 24, 48, 43, 116, 0,
 ];
 
-#[allow(dead_code)]
 #[rustfmt::skip]
 const WHITENING_DATA: [bool; 127] = {
     const fn b(n: u8) -> bool { n != 0 }
@@ -123,7 +117,6 @@ const WHITENING_DATA: [bool; 127] = {
 /// 0x3f`). The header is always dewhitened from its own first bit -
 /// `libbtbb`'s own `unwhiten(..., skip=0, ...)` for a header, as opposed to
 /// a payload, which starts further into the same LFSR sequence.
-#[allow(dead_code)]
 pub(crate) fn unwhiten_header(bits: &[bool; HEADER_BITS], clk6: u8) -> [bool; HEADER_BITS] {
     unwhiten_at(bits, clk6, 0).try_into().unwrap()
 }
@@ -135,7 +128,6 @@ pub(crate) fn unwhiten_header(bits: &[bool; HEADER_BITS], clk6: u8) -> [bool; HE
 /// *same* stream as its own header, continuing from bit 18 rather than
 /// restarting - every `libbtbb` call site that dewhitens a payload or a
 /// payload header passes `skip = 18` (`HEADER_BITS`), never a fresh origin.
-#[allow(dead_code)]
 pub(crate) fn unwhiten_at(bits: &[bool], clk6: u8, skip: usize) -> Vec<bool> {
     let mut index =
         (WHITENING_INDICES[(clk6 & 0x3f) as usize] as usize + skip) % WHITENING_DATA.len();
@@ -150,7 +142,6 @@ pub(crate) fn unwhiten_at(bits: &[bool], clk6: u8, skip: usize) -> Vec<bool> {
 /// Reverse the eight bits of a byte - `libbtbb`'s own `reverse`, needed
 /// because [`uap_from_hec`]'s LFSR runs the opposite bit order the rest of
 /// `signal::bt` does.
-#[allow(dead_code)]
 pub(crate) fn reverse_bits(byte: u8) -> u8 {
     let mut out = 0u8;
     for i in 0..8 {
@@ -171,7 +162,6 @@ pub(crate) fn reverse_bits(byte: u8) -> u8 {
 /// let through by chance - it is [`PiconetClock`]'s job to tell a genuine,
 /// recurring UAP apart from the essentially random answer a wrong CLK1-6
 /// guess or a corrupted capture produces.
-#[allow(dead_code)]
 pub(crate) fn uap_from_hec(data: u16, hec: u8) -> u8 {
     let mut hec = hec;
     for i in (0..10).rev() {
@@ -188,7 +178,6 @@ pub(crate) fn uap_from_hec(data: u16, hec: u8) -> u8 {
 /// exactly one entry real, the rest as good as random. [`PiconetClock`]
 /// narrows across several of these, from several headers sharing a LAP,
 /// rather than trusting any single one.
-#[allow(dead_code)]
 pub fn candidate_uaps(whitened: &[bool; HEADER_BITS]) -> [u8; 64] {
     let mut out = [0u8; 64];
     for (clk6, slot) in out.iter_mut().enumerate() {
@@ -203,7 +192,6 @@ pub fn candidate_uaps(whitened: &[bool; HEADER_BITS]) -> [u8; 64] {
 /// Pack up to 16 air-order bits into an integer, bit `i` to bit `i` -
 /// `libbtbb`'s own `air_to_host16`/`air_to_host8`, and
 /// `signal::bt::access_code::pack`'s own convention already.
-#[allow(dead_code)]
 pub(crate) fn pack_bits(bits: &[bool]) -> u16 {
     let mut word = 0u16;
     for (i, &bit) in bits.iter().enumerate().take(16) {
@@ -392,20 +380,6 @@ pub fn decode_with_uap(whitened: &[bool; HEADER_BITS], uap: u8) -> Option<Header
     (0u8..64).find_map(|clk6| decode_at(whitened, uap, clk6))
 }
 
-/// How many times a second CLK1-6 itself advances: 3200 Hz, half the
-/// symbol rate's own microsecond-scale tick in Bluetooth's own timing
-/// hierarchy. Not re-derived here - `signal::net::worker` (or whichever
-/// caller eventually tracks real elapsed time) owns turning a sample count
-/// into a tick count using this rate; this module only ever sees the tick
-/// count already computed, kept ignorant of sample rates the same way
-/// `dsp::nco` is kept ignorant of what a caller mixes.
-///
-/// **Not read from the Bluetooth Core Specification itself** - the same
-/// standing every other constant in this module has; see the module's own
-/// top-level doc.
-#[allow(dead_code)]
-pub const CLOCK_HZ: f64 = 3200.0;
-
 /// One slot, 625 us: how often CLK1-6 steps. It is bits 1 to 6 of CLK, so
 /// it moves at half [`CLOCK_HZ`].
 pub const SLOT_US: f64 = 625.0;
@@ -474,7 +448,6 @@ pub const SLOT_US: f64 = 625.0;
 /// LAP's UAP is one value the worker reads its headers with
 /// [`decode_at`] at the clock [`Self::clocks_for`] gives, and the hypotheses still
 /// standing ([`Self::hypotheses`]) are shown beside what they say.
-#[allow(dead_code)]
 pub struct PiconetClock {
     /// When the last header arrived (us, on the stream's clock) and how many
     /// slots after the first it was - `None` before the first header.
@@ -493,8 +466,8 @@ impl Default for PiconetClock {
     }
 }
 
-#[allow(dead_code)]
 impl PiconetClock {
+    #[cfg(test)]
     pub fn new() -> Self {
         Self::default()
     }

@@ -248,7 +248,6 @@ pub struct TimingState {
     ///
     /// Read by the timing bench from T5. Collected now so the path from the read
     /// thread to the panel is proven before anything draws it.
-    #[cfg_attr(not(test), allow(dead_code))]
     pub read_occupancy: Option<f32>,
 
     // ── Per-callback deadline view (drives the lab_timing strip chart) ──────────

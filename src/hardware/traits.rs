@@ -25,7 +25,6 @@ pub enum AcquisitionKind {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum LevelUnit {
     Dbfs,
-    #[allow(dead_code)]
     Dbm,
 }
 
@@ -421,7 +420,7 @@ impl StageSpec {
 
     /// One setting: the driver exposes the element but it cannot be moved.
     /// Not a fault, and not something to offer the user a control for.
-    #[allow(dead_code)] // only the tests ask it
+    #[cfg(test)]
     pub fn is_fixed(&self) -> bool {
         self.positions() == Some(1)
     }
@@ -858,7 +857,6 @@ pub struct DeviceCapabilities {
     /// Programmable baseband filter (HackRF yes, RTL-SDR no). Part of the device
     /// capability contract and asserted in the device tests; the live panels key off
     /// `bb_filter_hz` (0 ⇒ unknown) directly, so the binary never reads this flag.
-    #[allow(dead_code)]
     pub has_bb_filter: bool,
     /// The Friis cascade NF / MDS panel applies (HackRF's known 3-stage chain).
     pub friis_applicable: bool,
@@ -868,7 +866,6 @@ pub struct DeviceCapabilities {
     /// asking it. Declared now rather than then so that every backend has to
     /// answer the question as part of describing itself, including any added in
     /// between.
-    #[cfg_attr(not(test), allow(dead_code))]
     pub delivery: DeliveryModel,
 }
 
@@ -972,7 +969,6 @@ pub struct RxContext {
     /// What the NET feed did with the blocks handed to it, for the poll task.
     pub net_feed: FeedHealth,
     /// Direct power-spectrum traces from backends that do not publish IQ.
-    #[allow(dead_code)]
     pub power_tx: crossbeam_channel::Sender<PowerTrace>,
     pub geometry: SampleGeometry,
     /// Where the stream is: how many I/Q pairs the radio has delivered since

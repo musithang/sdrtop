@@ -103,12 +103,12 @@ pub const FLOOR_QUANTILE: f64 = 0.10;
 /// where a quantile is set by a handful of samples and the correction runs away.
 ///
 /// It is not tested for directly, because it cannot be: see [`TAIL_LIMIT`].
-#[allow(dead_code)] // a reference the limits are derived from; see `the_constants_are_the_closed_forms`
+#[cfg(test)]
 pub const BUSY_LIMIT: f64 = 1.0 - 2.0 * FLOOR_QUANTILE;
 
 /// `ln(0.9) / ln(0.95)`: the ratio between the tenth and the twentieth quantile
 /// of an exponential, which is what the bottom of a noise-only plane looks like.
-#[allow(dead_code)] // a reference the limits are derived from; see `the_constants_are_the_closed_forms`
+#[cfg(test)]
 pub const TAIL_SHAPE: f64 = 2.054_079_717_745_686;
 
 /// The same ratio at [`BUSY_LIMIT`], where the plane's decile is the noise's
@@ -144,7 +144,7 @@ pub const FALSE_ALARM: f64 = DUTY_RESOLUTION / 10.0;
 
 /// `ln(0.1) / ln(0.9)`: the ratio between the upper and the lower decile of an
 /// exponential, and so of noise power.
-#[allow(dead_code)] // a reference the limits are derived from; see `the_constants_are_the_closed_forms`
+#[cfg(test)]
 pub const NOISE_SPREAD: f64 = 21.854_345_326_782_87;
 
 /// Below this spread the plane is a rail rather than a distribution.

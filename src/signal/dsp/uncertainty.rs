@@ -218,7 +218,7 @@ impl Uncertain {
     // No consumer: a limit row has no honest use for it (a margin as a
     // fraction of an exact limit is not a quantity anybody wants), and the
     // band's duty cycle has no natural "relative to what" question either.
-    #[allow(dead_code)]
+    #[cfg(test)]
     pub fn relative(&self) -> Option<f64> {
         if self.value == 0.0 {
             None

@@ -68,7 +68,7 @@ pub fn moose_offset(p: Complex<f64>, lag: usize) -> f64 {
 // because it needed the range-to-lag direction and this is lag-to-range. A
 // timing detector working the other way round - given a lag, what range does
 // it buy - is what a Wi-Fi burst and symbol-timing detector would need.
-#[allow(dead_code)]
+#[cfg(test)]
 pub fn moose_range(lag: usize) -> f64 {
     0.5 / lag.max(1) as f64
 }
@@ -200,7 +200,7 @@ pub fn snr_m2m4(iq: &[Complex<f32>]) -> Option<f64> {
 /// No consumer yet: Wi-Fi symbol timing from the L-LTF cross-correlation
 /// would be one.
 #[derive(Clone, Copy, Debug, PartialEq)]
-#[allow(dead_code)]
+#[cfg(test)]
 pub struct Plateau {
     /// First index in the run.
     pub start: usize,
@@ -209,21 +209,6 @@ pub struct Plateau {
     /// Index of the largest metric in it.
     pub peak: usize,
     pub peak_metric: f64,
-}
-
-#[allow(dead_code)]
-impl Plateau {
-    pub fn len(&self) -> usize {
-        self.end + 1 - self.start
-    }
-
-    pub fn is_empty(&self) -> bool {
-        false
-    }
-
-    pub fn centre(&self) -> f64 {
-        (self.start + self.end) as f64 / 2.0
-    }
 }
 
 /// Schmidl and Cox's coarse timing, as a plateau rather than as a point.
@@ -243,7 +228,7 @@ impl Plateau {
 /// `None` for an empty input. `fraction` is the 0.9 of the paper unless the
 /// caller has a reason.
 /// No consumer yet; see [`Plateau`].
-#[allow(dead_code)]
+#[cfg(test)]
 pub fn schmidl_cox_plateau(metric: &[f64], fraction: f64) -> Option<Plateau> {
     let (peak, &peak_metric) = metric
         .iter()

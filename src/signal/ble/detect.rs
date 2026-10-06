@@ -16,10 +16,13 @@
 //! address not yet learned (classic Bluetooth's LAP search is the closer case)
 //! is where the two-stage form earns its keep, and that is where it belongs.
 
+#[cfg(test)]
 use num_complex::Complex;
 
+#[cfg(test)]
 use super::gfsk;
 use super::Phy;
+#[cfg(test)]
 use crate::signal::dsp::correlate::MatchedFilter;
 
 /// The fixed access address every advertising channel PDU begins with.
@@ -46,7 +49,7 @@ pub const ADVERTISING_ACCESS_ADDRESS: u32 = 0x8E89_BED6;
 /// symbol count or the [`Detector`] built from it. This module's own tests
 /// below are the only remaining caller, testing the detection algorithm on
 /// its own, deliberately with no front end in the picture.
-#[allow(dead_code)]
+#[cfg(test)]
 pub const REFERENCE_SYMBOLS: usize = 8 + 32;
 
 /// `access_address`'s 32 bits, in the order the specification transmits
@@ -102,8 +105,8 @@ pub fn preamble_bits(access_address: u32, phy: Phy) -> Vec<bool> {
 /// No production consumer, for the same reason [`REFERENCE_SYMBOLS`] has
 /// none: tests (`receive.rs`, `measure.rs`, `sync.rs` included) are the
 /// only callers.
-#[allow(dead_code)]
 #[derive(Clone, Copy)]
+#[cfg(test)]
 pub struct Le1mParams {
     pub sps: usize,
     pub sample_rate: f64,
@@ -111,6 +114,7 @@ pub struct Le1mParams {
     pub bt: f64,
 }
 
+#[cfg(test)]
 impl Le1mParams {
     /// LE 1M at the given samples per symbol. The symbol rate is always
     /// 1 Mb/s on this PHY, so `sample_rate` follows from `sps` rather than
@@ -122,7 +126,6 @@ impl Le1mParams {
     /// constructor, so it builds `Le1mParams` as a plain struct literal
     /// instead. Still a real constructor for a test that wants LE 1M's own
     /// numbers with no decimation in the picture.
-    #[allow(dead_code)]
     pub fn at(sps: usize) -> Self {
         const SYMBOL_RATE: f64 = 1_000_000.0;
         Self {
@@ -145,12 +148,12 @@ impl Le1mParams {
 /// (`matched_reference`) through the identical filter instead. This struct
 /// is the detection algorithm on its own, for its tests below, with no
 /// front end in the picture.
-#[allow(dead_code)]
+#[cfg(test)]
 pub struct Detector {
     filter: MatchedFilter,
 }
 
-#[allow(dead_code)]
+#[cfg(test)]
 impl Detector {
     pub fn new(access_address: u32, params: Le1mParams) -> Self {
         let mut bits = Vec::with_capacity(REFERENCE_SYMBOLS);

@@ -134,7 +134,7 @@ pub fn encode(bits: &[bool]) -> Vec<bool> {
 /// candidate, at whatever Hamming cost the real errors give it - so this
 /// never refuses on account of the errors themselves, only on a stream
 /// that could not have come from this encoder at all.
-#[allow(dead_code)]
+#[cfg(test)]
 pub fn decode(coded: &[bool]) -> Option<Vec<bool>> {
     viterbi(coded.len(), true, |k, g0, g1| hamming(coded, k, g0, g1))
 }
@@ -144,7 +144,7 @@ pub fn decode(coded: &[bool]) -> Option<Vec<bool>> {
 /// cheaply rather than from state zero. What reads a packet's header before
 /// the rest of FEC block 2 has arrived; its last few bits are the least
 /// settled, so a caller decodes some way past what it needs.
-#[allow(dead_code)]
+#[cfg(test)]
 pub fn decode_unterminated(coded: &[bool]) -> Option<Vec<bool>> {
     viterbi(coded.len(), false, |k, g0, g1| hamming(coded, k, g0, g1))
 }
@@ -154,17 +154,9 @@ pub fn decode_unterminated(coded: &[bool]) -> Option<Vec<bool>> {
 /// gains the ones it agrees with, so a faint reading on the wrong side of
 /// zero is outvoted by confident neighbours, where slicing it first would
 /// have counted it as a whole error.
-#[allow(dead_code)]
+#[cfg(test)]
 pub fn decode_soft(readings: &[f32]) -> Option<Vec<bool>> {
     viterbi(readings.len(), true, |k, g0, g1| {
-        correlation(readings, k, g0, g1)
-    })
-}
-
-/// [`decode_soft`] without termination, as [`decode_unterminated`].
-#[allow(dead_code)]
-pub fn decode_soft_unterminated(readings: &[f32]) -> Option<Vec<bool>> {
-    viterbi(readings.len(), false, |k, g0, g1| {
         correlation(readings, k, g0, g1)
     })
 }
@@ -266,7 +258,7 @@ pub fn pattern_map_s8(bit: bool) -> [bool; 4] {
 /// symbols wrong) breaks toward `true`, arbitrarily - documented rather
 /// than silently one way, since nothing in the cited table says which way
 /// a tie should fall.
-#[allow(dead_code)]
+#[cfg(test)]
 pub fn pattern_demap_s8(symbols: [bool; 4]) -> bool {
     const ZERO: [bool; 4] = [false, false, true, true];
     const ONE: [bool; 4] = [true, true, false, false];
@@ -388,7 +380,13 @@ pub struct Block1 {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Decisions {
     /// The reference the bench holds soft decisions to.
-    #[allow(dead_code)]
+    #[cfg_attr(
+        not(test),
+        expect(
+            dead_code,
+            reason = "the hard-decision reference the bench holds soft decisions to"
+        )
+    )]
     Hard,
     Soft,
 }

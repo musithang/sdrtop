@@ -40,7 +40,6 @@ use super::fir::{design_lowpass_kaiser, kaiser_beta, kaiser_taps};
 use num_complex::Complex;
 
 /// No consumer outside this file; see [`Resampler`].
-#[allow(dead_code)]
 fn gcd(a: usize, b: usize) -> usize {
     if b == 0 {
         a
@@ -54,7 +53,6 @@ fn gcd(a: usize, b: usize) -> usize {
 /// **No production consumer yet.** It is for a radio whose rate is a rational
 /// multiple of what a mode needs, and nothing yet asks a radio for a rate it
 /// cannot produce directly.
-#[allow(dead_code)]
 pub struct Resampler {
     l: usize,
     m: usize,
@@ -73,7 +71,6 @@ pub struct Resampler {
     delay_up: f64,
 }
 
-#[allow(dead_code)]
 impl Resampler {
     /// A resampler by `l/m`, with the anti-image and anti-alias filter designed
     /// to `stopband_db` of rejection.
@@ -147,15 +144,6 @@ impl Resampler {
         // rule `StreamingDecimator` follows.
         self.q = self.bt - 1;
         self.p = 0;
-    }
-
-    /// The reduced ratio actually in use.
-    pub fn ratio(&self) -> (usize, usize) {
-        (self.l, self.m)
-    }
-
-    pub fn taps(&self) -> usize {
-        self.bt * self.l
     }
 
     /// The input-sample time the first output after a reset stands for.

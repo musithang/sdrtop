@@ -164,13 +164,10 @@ pub struct SoapyApi {
     // Declared and resolved before anything calls them, so that a driver missing
     // one is refused at load with the symbol named, rather than part way through
     // building a stage list.
-    #[allow(dead_code)]
     set_gain_element:
         unsafe extern "C" fn(*mut SoapySDRDevice, c_int, usize, *const c_char, f64) -> c_int,
-    #[allow(dead_code)]
     get_gain_element:
         unsafe extern "C" fn(*const SoapySDRDevice, c_int, usize, *const c_char) -> f64,
-    #[allow(dead_code)]
     get_gain_element_range:
         unsafe extern "C" fn(*const SoapySDRDevice, c_int, usize, *const c_char) -> SoapySDRRange,
     set_gain_mode: unsafe extern "C" fn(*mut SoapySDRDevice, c_int, usize, bool) -> c_int,
@@ -422,7 +419,6 @@ impl SoapyApi {
     ///
     /// # Safety
     /// See [`Self::driver_key`].
-    #[allow(dead_code)] // kept as the documented counter-example, never called
     pub unsafe fn set_gain(&self, dev: *mut SoapySDRDevice, db: f64) -> Result<(), String> {
         self.check(unsafe { (self.set_gain)(dev, RX, CHAN, db) })
     }

@@ -128,7 +128,6 @@ impl BinAxis {
 }
 
 #[derive(Clone)]
-#[allow(dead_code)]
 pub struct FftFrame {
     pub bins_dbfs: Arc<Vec<f32>>,
     pub peak_hold: Arc<Vec<f32>>,

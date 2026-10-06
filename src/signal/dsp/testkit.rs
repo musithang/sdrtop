@@ -23,7 +23,6 @@ use std::f64::consts::TAU;
 /// state to seed badly: any 64-bit seed is as good as any other.
 pub struct Rng(u64);
 
-#[allow(dead_code)]
 impl Rng {
     pub fn new(seed: u64) -> Self {
         Self(seed)
@@ -79,7 +78,6 @@ impl Rng {
 }
 
 /// Mean power, `E[|x|^2]`, accumulated in `f64`.
-#[allow(dead_code)]
 pub fn power(x: &[Complex<f32>]) -> f64 {
     if x.is_empty() {
         return 0.0;
@@ -97,7 +95,6 @@ pub fn power(x: &[Complex<f32>]) -> f64 {
 /// passed in to the mean power of the noise added, both over the whole array and
 /// over the whole band. Not per symbol, not per bit, not in a measurement
 /// bandwidth narrower than the sample rate. A caller who wants Eb/N0 converts.
-#[allow(dead_code)]
 pub fn at_snr(signal: &[Complex<f32>], snr_db: f64, rng: &mut Rng) -> Vec<Complex<f32>> {
     let noise_power = power(signal) / 10f64.powf(snr_db / 10.0);
     let n = rng.noise(signal.len(), noise_power);

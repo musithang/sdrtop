@@ -38,7 +38,6 @@
 /// nonzero LAP's own set bits, from this starting point, is the whole of
 /// the code - see [`gen_syncword`].
 ///
-#[allow(dead_code)]
 const DEFAULT_CODEWORD: u64 = 0xb000_0002_c782_0e7e;
 
 /// One 64-bit constant per LAP bit, most significant (bit 23) first -
@@ -51,7 +50,6 @@ const DEFAULT_CODEWORD: u64 = 0xb000_0002_c782_0e7e;
 /// search over `2^24` *differences* rather than every pair among `2^24`
 /// LAPs.
 /// No consumer from `main` yet; see [`DEFAULT_CODEWORD`]'s own note.
-#[allow(dead_code)]
 #[rustfmt::skip]
 const SW_MATRIX: [u64; 24] = [
     0xfe00_0002_a0d1_c014, 0x0100_0003_f0b9_201f, 0x0080_0003_3ae4_0edb, 0x0040_0003_5fca_99b9,
@@ -123,7 +121,6 @@ pub fn gen_syncword(lap: u32) -> u64 {
 /// they actually arrive, not the order a hex literal reads left to right.
 ///
 /// No consumer from `main` yet; see [`DEFAULT_CODEWORD`]'s own note.
-#[allow(dead_code)]
 pub fn access_code_bits(lap: u32) -> [bool; 64] {
     let word = gen_syncword(lap);
     let mut out = [false; 64];
@@ -138,7 +135,7 @@ pub fn access_code_bits(lap: u32) -> [bool; 64] {
 /// inverse of `access_code_bits`.
 ///
 /// No consumer from `main` yet; see [`DEFAULT_CODEWORD`]'s own note.
-#[allow(dead_code)]
+#[cfg(test)]
 fn pack(window: &[bool]) -> u64 {
     let mut word = 0u64;
     for (i, &bit) in window.iter().enumerate().take(64) {
@@ -189,7 +186,7 @@ pub(super) fn check_window(word: u64) -> Option<u32> {
 /// Only tests call it: the live [`super::detect::Detector`] has no finished
 /// slice to scan, only one more bit at a time, so it shares
 /// [`check_window`] instead.
-#[allow(dead_code)]
+#[cfg(test)]
 pub fn find_access_code(bits: &[bool]) -> Option<(u32, usize)> {
     if bits.len() < 64 {
         return None;

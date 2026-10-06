@@ -78,7 +78,6 @@ pub(crate) enum Limit {
     /// exactly as real a shape as one that names a minimum, and this widget's
     /// own `carrier_leak` test fixture is what still exercises it, the same
     /// design-sketch row the module doc's own worked example draws.
-    #[allow(dead_code)]
     Max(f64),
     /// A floor: the value belongs at or above it.
     Min(f64),

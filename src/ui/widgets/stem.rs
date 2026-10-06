@@ -27,7 +27,6 @@ use ratatui::{
 
 /// One arrival.
 #[derive(Clone, Copy, Debug, PartialEq)]
-#[allow(dead_code)] // built ahead of its consumer, a Wi-Fi power delay profile
 pub(crate) struct Tap {
     /// Where it arrived, in the x unit the caller is plotting.
     pub at: f64,
@@ -36,10 +35,8 @@ pub(crate) struct Tap {
 }
 
 /// The mark at the top of a stem: the arrival itself.
-#[allow(dead_code)] // built ahead of its consumer, a Wi-Fi power delay profile
 const HEAD: char = '\u{25cf}';
 /// The stalk below it, which says only "this reaches down to the baseline".
-#[allow(dead_code)] // built ahead of its consumer, a Wi-Fi power delay profile
 const STALK: char = '\u{2502}';
 
 /// Draw `taps` into `width` by `height` character cells.
@@ -53,7 +50,6 @@ const STALK: char = '\u{2502}';
 /// `x` and `y` are the axis ranges in data units. Taps outside them are dropped
 /// rather than clamped to an edge, because a tap pinned to the last column is
 /// indistinguishable from one that really arrived there.
-#[allow(dead_code)] // built ahead of its consumer, a Wi-Fi power delay profile
 pub(crate) fn draw(
     taps: &[Tap],
     x: std::ops::Range<f64>,
@@ -100,7 +96,6 @@ pub(crate) fn draw(
 }
 
 /// Which column a value falls in, or `None` outside the axis.
-#[allow(dead_code)] // built ahead of its consumer, a Wi-Fi power delay profile
 pub(crate) fn column(value: f64, x: &std::ops::Range<f64>, width: usize) -> Option<usize> {
     if width == 0 || !value.is_finite() || !x.contains(&value) {
         return None;
@@ -114,7 +109,6 @@ pub(crate) fn column(value: f64, x: &std::ops::Range<f64>, width: usize) -> Opti
 }
 
 /// Which row a level falls on, counted from the top, or `None` off the axis.
-#[allow(dead_code)] // built ahead of its consumer, a Wi-Fi power delay profile
 pub(crate) fn row_of(level: f64, y: &std::ops::Range<f64>, height: usize) -> Option<usize> {
     if height == 0 || !level.is_finite() || !y.contains(&level) {
         return None;

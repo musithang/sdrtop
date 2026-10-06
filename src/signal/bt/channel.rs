@@ -42,7 +42,7 @@ const CHANNEL_COUNT: u8 = 79;
 /// twice as close together, so the same fractional tolerance would let two
 /// neighbours' windows overlap. Only [`channel_of`] uses this; see its own
 /// "no consumer yet" note.
-#[allow(dead_code)]
+#[cfg(test)]
 const TOLERANCE_HZ: u64 = SPACING_HZ / 8;
 
 /// The centre frequency of classic BT RF channel `k`, 0 to 78.
@@ -60,7 +60,7 @@ pub fn centre_hz(channel: u8) -> Option<u64> {
 /// *index* `signal::net::worker` already has from [`channels_in_span`], not
 /// from a frequency. Kept as [`centre_hz`]'s inverse and exercised by this
 /// module's round-trip test.
-#[allow(dead_code)]
+#[cfg(test)]
 pub fn channel_of(freq_hz: u64) -> Option<u8> {
     (0..CHANNEL_COUNT).find(|&channel| {
         centre_hz(channel).is_some_and(|centre| centre.abs_diff(freq_hz) <= TOLERANCE_HZ)

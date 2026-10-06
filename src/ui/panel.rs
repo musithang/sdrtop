@@ -450,7 +450,13 @@ impl PanelChrome {
 
 pub trait Panel: Send + Sync {
     fn name(&self) -> &'static str;
-    #[allow(dead_code)]
+    #[cfg_attr(
+        not(test),
+        expect(
+            dead_code,
+            reason = "the layout tests size every panel by it; the engine does not consult it"
+        )
+    )]
     fn min_size(&self) -> (u16, u16);
 
     fn supports_acquisition(&self, acquisition: crate::hardware::AcquisitionKind) -> bool {

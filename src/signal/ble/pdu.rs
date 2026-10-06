@@ -316,7 +316,7 @@ pub fn air_octets(addr: [u8; 6]) -> [u8; 6] {
 /// build any PDU type or a deliberately corrupt one without this function
 /// making decisions on its behalf.
 ///
-/// `cfg(test)` rather than `#[allow(dead_code)]`: unlike `gfsk::modulate`,
+/// `cfg(test)` rather than ``: unlike `gfsk::modulate`,
 /// which the receiver needs to build its reference, nothing on the receive
 /// side ever constructs a packet, only decodes one.
 #[cfg(test)]

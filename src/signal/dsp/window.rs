@@ -2,10 +2,23 @@
 // Copyright (C) 2026 MusiThang <viktor.laszlo92@protonmail.com>
 
 #[derive(Clone, Copy, Debug, PartialEq)]
-#[allow(dead_code)]
 pub enum WindowFn {
     Hann,
+    #[cfg_attr(
+        not(test),
+        expect(
+            dead_code,
+            reason = "Hamming and Blackman are the windows the tests compare Hann against"
+        )
+    )]
     Hamming,
+    #[cfg_attr(
+        not(test),
+        expect(
+            dead_code,
+            reason = "Hamming and Blackman are the windows the tests compare Hann against"
+        )
+    )]
     Blackman,
 }
 
