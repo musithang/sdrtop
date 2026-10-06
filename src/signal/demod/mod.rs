@@ -230,9 +230,8 @@ pub fn fm_discriminate(iq: &[Complex<f32>], rate: f64, out: &mut Vec<f32>) {
 /// This is what lets the bench demodulate a station the radio is *not* centred
 /// on - the point being that the tuned centre is exactly where both front-ends
 /// put their DC offset and LO leakage, so a channel taken there competes with the
-/// artefact (see the plan's §3.5). Phase is restarted per block: blocks are
-/// independent by design, and a measurement does not care about phase continuity
-/// across a gap.
+/// artefact. Phase is restarted per block: blocks are independent by design, and
+/// a measurement does not care about phase continuity across a gap.
 ///
 /// The phasor advances by repeated complex multiplication rather than a `sin`/`cos`
 /// per sample, renormalised periodically so rounding cannot let it drift off the

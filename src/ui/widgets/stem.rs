@@ -138,7 +138,7 @@ mod tests {
             .collect()
     }
 
-    /// **The one the plan names.** No taps is not a flat line at zero.
+    /// **No taps is not a flat line at zero.**
     #[test]
     fn an_empty_series_is_nothing_rather_than_a_floor() {
         assert!(draw(&[], 0.0..500.0, -60.0..0.0, 40, 10, &theme()).is_none());

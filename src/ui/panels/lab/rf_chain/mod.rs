@@ -470,8 +470,8 @@ mod tests {
         }
     }
 
-    /// Six stages in forty columns: the case the plan named, and the one that
-    /// used to clip `-58 dBm` down to `-58 `.
+    /// Six stages in forty columns: the case that used to clip `-58 dBm` down
+    /// to `-58 `.
     #[test]
     fn six_stages_in_forty_columns_keep_every_reading() {
         let out = draw(RfChainPanel, 40, 30, &with_stages(6, "STAGE"));

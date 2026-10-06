@@ -216,11 +216,11 @@ fn fmt_interval(d: &Device) -> String {
 /// interval and where it sits on the 0.625 ms grid, the random delay, and
 /// what it was timed on; or, where there is no estimate, why not.
 ///
-/// **In SURVEY the reading stays, marked as not updating.** Arrivals are
-/// only ever recorded in LOCK (`signal::net::worker::census_from_ble`), so a
-/// log that exists was measured the right way; leaving the survey does not
-/// make it wrong, only old, and the line says so (rule 4). Without one,
-/// SURVEY refuses as the plan put it: the interval needs LOCK on one channel.
+/// **In SURVEY the reading stays, marked as not updating.** Arrivals are only
+/// ever recorded in LOCK (`signal::net::worker::ble::census_from_ble`), so a
+/// log that exists was measured the right way; leaving the survey does not make
+/// it wrong, only old, and the line says so (rule 4). Without one, SURVEY
+/// refuses: the interval needs LOCK on one channel.
 fn advertising_lines(
     d: &Device,
     state: &SdrMetrics,
