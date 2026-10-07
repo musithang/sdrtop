@@ -63,14 +63,40 @@ It's a hobby project built in my spare time, and honestly, I made it for *you* �
 ## Gallery
 
 <p align="center">
-  <a href="https://github.com/musithang/sdrtop/blob/main/user_docs/pics/hackrf/video.mp4">
-    <img src="https://raw.githubusercontent.com/musithang/sdrtop/main/user_docs/pics/hackrf/command_rail.png" width="100%" alt="sdrtop in motion: click to watch the demo video">
+  <a href="https://raw.githubusercontent.com/musithang/sdrtop/main/user_docs/pics/hackrf/demo.gif">
+    <img src="https://raw.githubusercontent.com/musithang/sdrtop/main/user_docs/pics/hackrf/demo.gif" width="100%" alt="sdrtop running live on a HackRF One">
   </a>
-  <br>
-  <sub>▶ click the screenshot to play the demo video</sub>
 </p>
 
 *It's a terminal app, so brace yourself for the visual spectacle of monospace text in color. The only special effects are honest dBFS numbers.*
+
+<table>
+  <tr>
+    <td width="50%" align="center" valign="top">
+      <a href="https://raw.githubusercontent.com/musithang/sdrtop/main/user_docs/pics/hackrf/piconet_follow.gif">
+        <img src="https://raw.githubusercontent.com/musithang/sdrtop/main/user_docs/pics/hackrf/piconet_follow.gif" width="100%" alt="Following a classic Bluetooth piconet">
+      </a>
+      <br>
+      <b>Piconet follow</b> · classic Bluetooth
+      <br>
+      <sub>One piconet, found by the access code at the start of every packet and read packet by packet. <a href="user_docs/net.md#piconets--classic-1">How it works</a></sub>
+    </td>
+    <td width="50%" align="center" valign="top">
+      <a href="https://raw.githubusercontent.com/musithang/sdrtop/main/user_docs/pics/hackrf/rds_demodulation.gif">
+        <img src="https://raw.githubusercontent.com/musithang/sdrtop/main/user_docs/pics/hackrf/rds_demodulation.gif" width="100%" alt="RDS demodulation on an FM broadcast station">
+      </a>
+      <br>
+      <b>RDS demodulation</b> · FM broadcast
+      <br>
+      <sub>Station name, programme type and RadioText, read off the 57 kHz subcarrier. No audio, on purpose. <a href="user_docs/demodulator.md#rds-in-two-halves">How it works</a></sub>
+    </td>
+  </tr>
+</table>
+
+<p align="center"><sub>Click any clip to see it full size.</sub></p>
+
+> [!NOTE]
+> **Classic Bluetooth and BLE are still a work in progress.** The decoding and the measurements are in; the screens and the math are still being polished, so the piconet clip is a snapshot of where it stands today, not where it ends up.
 
 <details>
   <summary><b>📻 More screenshots</b>: lab benches, RTL-SDR, the Command Rail cards</summary>
