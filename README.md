@@ -62,38 +62,19 @@ It's a hobby project built in my spare time, and honestly, I made it for *you* �
 
 ## Gallery
 
-<p align="center">
-  <a href="https://github.com/musithang/sdrtop/blob/main/user_docs/pics/hackrf/demo.gif">
-    <img src="https://raw.githubusercontent.com/musithang/sdrtop/main/user_docs/pics/hackrf/demo.gif" width="100%" alt="sdrtop running live on a HackRF One">
-  </a>
-</p>
+https://github.com/user-attachments/assets/af278500-24ff-4d98-8129-b421fd513a49
 
 *It's a terminal app, so brace yourself for the visual spectacle of monospace text in color. The only special effects are honest dBFS numbers.*
 
-<table>
-  <tr>
-    <td width="50%" align="center" valign="top">
-      <a href="https://github.com/musithang/sdrtop/blob/main/user_docs/pics/hackrf/piconet_follow.gif">
-        <img src="https://raw.githubusercontent.com/musithang/sdrtop/main/user_docs/pics/hackrf/piconet_follow.gif" width="100%" alt="Following a classic Bluetooth piconet">
-      </a>
-      <br>
-      <b>Piconet follow</b> · classic Bluetooth
-      <br>
-      <sub>One piconet, found by the access code at the start of every packet and read packet by packet. <a href="user_docs/net.md#piconets--classic-1">How it works</a></sub>
-    </td>
-    <td width="50%" align="center" valign="top">
-      <a href="https://github.com/musithang/sdrtop/blob/main/user_docs/pics/hackrf/rds_demodulation.gif">
-        <img src="https://raw.githubusercontent.com/musithang/sdrtop/main/user_docs/pics/hackrf/rds_demodulation.gif" width="100%" alt="RDS demodulation on an FM broadcast station">
-      </a>
-      <br>
-      <b>RDS demodulation</b> · FM broadcast
-      <br>
-      <sub>Station name, programme type and RadioText, read off the 57 kHz subcarrier. No audio, on purpose. <a href="user_docs/demodulator.md#rds-in-two-halves">How it works</a></sub>
-    </td>
-  </tr>
-</table>
+**Piconet follow** · classic Bluetooth<br>
+<sub>One piconet, found by the access code at the start of every packet and read packet by packet. [How it works](user_docs/net.md#piconets--classic-1)</sub>
 
-<p align="center"><sub>Click any clip to see it full size.</sub></p>
+https://github.com/user-attachments/assets/28ac2b8b-bacb-48b1-b51c-5089692e27a2
+
+**RDS demodulation** · FM broadcast<br>
+<sub>Station name, programme type and RadioText, read off the 57 kHz subcarrier. No audio, on purpose. [How it works](user_docs/demodulator.md#rds-in-two-halves)</sub>
+
+https://github.com/user-attachments/assets/6a61ebc2-e0a6-4c19-928e-36823dbea902
 
 > [!NOTE]
 > **Classic Bluetooth and BLE are still a work in progress.** The decoding and the measurements are in; the screens and the math are still being polished, so the piconet clip is a snapshot of where it stands today, not where it ends up.
