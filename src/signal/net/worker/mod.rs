@@ -2170,6 +2170,21 @@ mod tests {
         assert_eq!(m.net.coded_refused, None);
     }
 
+    /// **On the LE Coded view, LE 1M is off for that reason, and says so.**
+    /// Tuned to 2426 MHz, an advertising channel, the BLE decoder is not
+    /// running because LE Coded runs in its place, not because the tuning is
+    /// off one: an export's BLE file repeats this reason word for word, and
+    /// "not tuned to an advertising channel" there would be a false one.
+    #[test]
+    fn on_the_coded_view_the_ble_decoder_says_why_it_is_off() {
+        let m = coded_account_after(crate::signal::net::SECTION, "net_coded");
+        assert_eq!(m.net.ble_channel, None);
+        assert_eq!(
+            m.net.ble_refused.as_deref(),
+            Some("the LE Coded view runs LE Coded in LE 1M's place")
+        );
+    }
+
     /// End to end through the worker: enough stream to cover a load window
     /// publishes a load. `feed`'s unit tests hold the arithmetic; this holds
     /// the wiring, which they cannot see.

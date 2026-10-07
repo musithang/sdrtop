@@ -175,7 +175,19 @@ impl Le {
                 state,
             );
         }
-        match channel.filter(|_| !view.coded) {
+        match channel {
+            _ if view.coded => {
+                // LE Coded runs in LE 1M's place, above: that is why this one
+                // is off, whatever the tuning, and an export says it word for
+                // word.
+                put_down_ble(&mut self.ble, state);
+                if view.open {
+                    let mut m = state.lock().unwrap_or_else(|e| e.into_inner());
+                    m.net.ble_refused =
+                        Some("the LE Coded view runs LE Coded in LE 1M's place".to_string());
+                    m.net.ble_channel = None;
+                }
+            }
             Some(ch)
                 if view.open
                     && view.phy == crate::signal::ble::Phy::TwoM
