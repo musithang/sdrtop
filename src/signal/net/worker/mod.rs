@@ -2129,6 +2129,47 @@ mod tests {
         assert_eq!(m.net.health.decode_load, None);
     }
 
+    /// `section` open on `preset`, tuned to an advertising channel, with an
+    /// LE Coded account left over from before: what one block makes of it.
+    fn coded_account_after(section: &str, preset: &str) -> SdrMetrics {
+        let mut m = SdrMetrics::fixture().streaming();
+        m.ui.section = section.to_string();
+        m.ui.active_preset = preset.to_string();
+        m.radio.frequency = 2_426_000_000;
+        m.radio.config_sample_rate = 4_000_000.0;
+        m.radio.bb_filter_hz = 0;
+        m.net.coded_channel = Some(38);
+        m.net.coded_refused = Some("an earlier visit's reason".to_string());
+        let state = Arc::new(Mutex::new(m));
+        let (tx, rx) = crossbeam_channel::unbounded();
+        tx.send(stamped(&state, 1, false, vec![0u8; 256])).unwrap();
+        drop(tx);
+        NetWorker::new(rx, Arc::clone(&state), eight_bit(), SAFE_BT_CHANNELS).run();
+        let m = state.lock().unwrap().clone();
+        m
+    }
+
+    /// **Off the LE Coded view there is no LE Coded receiver, and the state
+    /// says so.** Its channel is what the header's band field and the menu's
+    /// live line read as "running"; left behind, the BLE view would show a
+    /// CODED channel nothing is decoding. A refusal from an earlier visit goes
+    /// too, as the classic account's does.
+    #[test]
+    fn leaving_the_coded_view_takes_its_channel_and_refusal_with_it() {
+        let m = coded_account_after(crate::signal::net::SECTION, "net_ble");
+        assert_eq!(m.net.coded_channel, None);
+        assert_eq!(m.net.coded_refused, None);
+    }
+
+    /// The same once the section closes: nothing decodes, so nothing is
+    /// shown as decoding on reopening.
+    #[test]
+    fn a_closed_section_leaves_no_coded_channel_behind() {
+        let m = coded_account_after("lab", "net_coded");
+        assert_eq!(m.net.coded_channel, None);
+        assert_eq!(m.net.coded_refused, None);
+    }
+
     /// End to end through the worker: enough stream to cover a load window
     /// publishes a load. `feed`'s unit tests hold the arithmetic; this holds
     /// the wiring, which they cannot see.

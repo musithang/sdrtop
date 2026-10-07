@@ -159,7 +159,13 @@ impl Le {
                 }
             }
         } else {
+            // Not on the LE Coded view, or the section closed: no receiver,
+            // and a channel or a refusal from an earlier visit must not linger
+            // onto a screen that never claimed to be this one.
             put_down(&mut self.coded, state);
+            let mut m = state.lock().unwrap_or_else(|e| e.into_inner());
+            m.net.coded_channel = None;
+            m.net.coded_refused = None;
         }
         if self.coded.is_none() {
             abandon(
