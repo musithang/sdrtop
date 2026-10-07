@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright (C) 2026 MusiThang <viktor.laszlo92@protonmail.com>
 
-//! `RfChainPanel` - the RF Diagnostics column of the Lab RF bench ([6]).
+//! `RfChainPanel` - the RF Diagnostics column of the Lab RF bench (`[6]`).
 //!
 //! Reads the whole receive chain as one story: the per-stage **gain lineup** (level
 //! after each stage), **gain staging** (LNA/VGA vs their optimal targets), the Friis

@@ -20,7 +20,7 @@
 //! **What this does for a burst:**
 //! 1. The raw samples around it are taken from the blocks the worker still
 //!    holds ([`Recent`]), by stream position, without copying a block.
-//! 2. They are mixed to baseband, put through [`tester_filter`] and
+//! 2. They are mixed to baseband, put through [`measurement_filter`] and
 //!    decimated to [`MEASURE_RATE_HZ`].
 //! 3. They are read between samples as the band-limited signal they are
 //!    ([`Oversampled`]).

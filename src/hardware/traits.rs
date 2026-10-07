@@ -936,7 +936,7 @@ pub struct RadioDrops {
 
 /// Shared RX plumbing handed to a backend's streaming start. The per-sample
 /// accumulators write into `metrics`; raw byte blocks go out via `sample_tx` to
-/// the FFT worker. `geometry` tells [`crate::hardware::process::process_block`]
+/// the FFT worker. `geometry` tells [`crate::hardware::process::digest`]
 /// how to decode the bytes and what full scale is worth in them.
 pub struct RxContext {
     pub metrics: Arc<Mutex<SdrMetrics>>,

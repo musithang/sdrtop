@@ -111,7 +111,7 @@ pub const BUSY_LIMIT: f64 = 1.0 - 2.0 * FLOOR_QUANTILE;
 #[cfg(test)]
 pub const TAIL_SHAPE: f64 = 2.054_079_717_745_686;
 
-/// The same ratio at [`BUSY_LIMIT`], where the plane's decile is the noise's
+/// The same ratio at `BUSY_LIMIT`, where the plane's decile is the noise's
 /// median: `ln(0.5) / ln(0.75)`.
 ///
 /// **This is the busy check, and it is the busy check because the direct one is
@@ -167,8 +167,9 @@ pub struct Floor {
     /// The plane's own tenth-to-twentieth quantile ratio, which says how much of
     /// it was noise without needing a threshold to ask.
     pub tail: f64,
-    /// The fraction of the whole plane found above the threshold. This is what
-    /// the floor was corrected for, and what [`BUSY_LIMIT`] is checked against.
+    /// The fraction of the whole plane found above the threshold: what the
+    /// floor was corrected for. Not what decides `trusted`, since a plane too
+    /// busy to measure reads empty ([`TAIL_LIMIT`] has why).
     pub busy: f64,
     /// Whether both preconditions held.
     pub trusted: bool,

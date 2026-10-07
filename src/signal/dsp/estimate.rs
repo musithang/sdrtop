@@ -52,7 +52,7 @@ use std::f64::consts::TAU;
 /// is why nothing cleverer is called for.
 ///
 /// **Its range is `+/- 1/(2 * lag)` and outside that it wraps silently**, giving
-/// a wrong answer that looks exactly like a right one. See [`moose_range`]; the
+/// a wrong answer that looks exactly like a right one. See `moose_range`; the
 /// caller is responsible for arranging that the offset it is looking for fits.
 pub fn moose_offset(p: Complex<f64>, lag: usize) -> f64 {
     p.arg() / (TAU * lag.max(1) as f64)

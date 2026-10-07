@@ -54,7 +54,7 @@ const DATA_LOW_START_HZ: u64 = 2_404_000_000;
 const DATA_LOW_LAST: u8 = 10;
 
 /// Data channel 11's frequency, immediately after the gap channel 38 occupies.
-/// Channels 11 to 36 run from here to [`HIGH_HZ`] minus one spacing.
+/// Channels 11 to 36 run from here to channel 39's 2480 MHz less one spacing.
 const DATA_HIGH_START_HZ: u64 = 2_428_000_000;
 /// The first data channel after the jump.
 const DATA_HIGH_FIRST: u8 = 11;

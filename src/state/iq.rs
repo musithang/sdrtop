@@ -7,7 +7,7 @@ pub const CONSTELLATION_CAP: usize = 1024;
 
 /// Lab IQ correction state - the live DSP behind the `[D]` DC-block / `[C]`
 /// auto-cal chips and `[F]` freeze. Coefficients are applied in the RX hot path
-/// ([`process_block`](crate::hardware::process::process_block)) to the samples
+/// ([`digest`](crate::hardware::process::digest)) to the samples
 /// that feed the FFT, the demod and the constellation, so the spectrum/scope DC
 /// spike and the cloud actually clean up.
 ///
@@ -156,17 +156,17 @@ pub struct IqState {
     pub fft_drops: u64,
     pub fft_drops_session: u64,
     pub phase_imbalance_deg: f32,
-    /// Live I/Q correction state ([D] DC-block / [C] auto-cal / [F] freeze).
+    /// Live I/Q correction state (`[D]` DC-block / `[C]` auto-cal / `[F]` freeze).
     pub cal: IqCalState,
     /// IRR (image-rejection ratio, dB) trend history for the Lab IQ diagnostics
-    /// sparkline. Sampled at the same ~500 ms cadence and [`SNR_HISTORY_LEN`] depth
+    /// sparkline. Sampled at the same ~500 ms cadence and [`super::SNR_HISTORY_LEN`] depth
     /// as the command-rail SIGNAL traces so a full panel-width sweep ≈ 60 s.
     pub irr_history: std::collections::VecDeque<f32>,
     /// Decimated I/Q sample ring buffer for the 2-D constellation display.
     /// Values are normalised to [-1, 1] by the device's own full scale, which is
     /// 128 on both shipped radios and was written here as a literal back when
     /// those were the only two. Written in the RX hot-path at a
-    /// 1 : [`CONST_DECIMATE`] decimation; oldest pairs are evicted once the
+    /// 1 : `CONST_DECIMATE` (`hardware::process`) decimation; oldest pairs are evicted once the
     /// buffer reaches [`CONSTELLATION_CAP`].
     pub constellation: std::collections::VecDeque<(f32, f32)>,
 }

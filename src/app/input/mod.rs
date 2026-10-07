@@ -12,7 +12,7 @@
 //!    focus handler cannot act on a deck that is currently behind it. It is not
 //!    an `InputMode` because input modes represent text being typed.
 //! 3. **Panel focus.** [`handle_normal`] asks the layout engine which panel holds
-//!    focus and hands the key to that panel's own handler - [`core`], [`bench`],
+//!    focus and hands the key to that panel's own handler - [`core`], [`bench`](mod@bench),
 //!    [`signal`], [`sweep`] or [`rail`].
 //! 4. **Global.** Anything a focus handler does not claim falls through to
 //!    [`global`], which is also where an unfocused key lands.

@@ -381,7 +381,7 @@ pub fn decode_with_uap(whitened: &[bool; HEADER_BITS], uap: u8) -> Option<Header
 }
 
 /// One slot, 625 us: how often CLK1-6 steps. It is bits 1 to 6 of CLK, so
-/// it moves at half [`CLOCK_HZ`].
+/// it moves at half CLK's 3.2 kHz.
 pub const SLOT_US: f64 = 625.0;
 
 /// Narrows a piconet's own CLK1-6 *and* UAP together from several headers
@@ -403,7 +403,7 @@ pub const SLOT_US: f64 = 625.0;
 ///
 /// **What actually breaks it: real elapsed time.** CLK1-6 does not reset
 /// between packets - it keeps advancing, **once a slot** ([`SLOT_US`]):
-/// CLK itself ticks at [`CLOCK_HZ`], but CLK1-6 is its bits 1 to 6 and so
+/// CLK itself ticks at 3.2 kHz, but CLK1-6 is its bits 1 to 6 and so
 /// steps at half that. Counting it at the full CLK rate, as this port first
 /// did, eliminated the true hypothesis at the first header one slot on; on
 /// the air every piconet's candidates fell back to 32 again and again, and

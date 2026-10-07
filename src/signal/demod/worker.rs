@@ -11,7 +11,7 @@
 //! four different subsets of the session, and getting the subset wrong is not a
 //! crash but a wrong reading that looks plausible: a station name outliving a
 //! retune, or RadioText thrown away on every dropped block. Each reset is a named
-//! method on [`Session`] with the reason written next to it, rather than a run of
+//! method on `Session` with the reason written next to it, rather than a run of
 //! assignments inlined four times.
 
 use std::sync::{Arc, Mutex};

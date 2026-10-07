@@ -3,12 +3,14 @@
 
 //! The live pipeline: raw device bytes to a decoded advertising channel PDU.
 //!
-//! Four stages, run in order over every sample: [`Detector`] (a matched
-//! filter over raw IQ) finds the sync word; once it does, the samples that
-//! follow are captured; [`discriminate`] turns the capture into instantaneous
-//! frequency; [`super::sync::slice`] finds the symbol phase and slices it to
-//! bits; and [`pdu::decode`], fed those bits de-whitened, either returns a
-//! packet or says there was not enough of one yet.
+//! Four stages, run in order over every sample: [`ShapeMatcher`] finds the
+//! sync word in the discriminator's frequency track, blind to the constant a
+//! carrier offset adds to it; once it does, the samples that follow are
+//! captured; [`discriminate`] turns the capture into instantaneous frequency;
+//! a phase search over the capture as it grows ([`super::sync::growing`])
+//! finds the symbol phase and [`super::sync::slice_at`] slices it to bits; and
+//! [`pdu::decode`], fed those bits de-whitened, either returns a packet or
+//! says there was not enough of one yet.
 //!
 //! **Started as a deterministic peak-derived index, not a search - and real
 //! hardware is why it no longer is one.** `signal::ble::detect`'s own tests
@@ -17,8 +19,8 @@
 //! looked like a known position rather than an estimate. True only because
 //! that synthetic transmitter and the detector's own reference come from
 //! the same call to [`super::gfsk::modulate`] at the same sample phase - a
-//! real transmitter's clock has no reason to share it. `[super::sync::slice]`
-//! is the answer for a burst whose alignment is not known this precisely,
+//! real transmitter's clock has no reason to share it. A phase search is the
+//! answer for a burst whose alignment is not known this precisely,
 //! which turned out to be every real one.
 
 use num_complex::Complex;
@@ -280,7 +282,7 @@ pub fn front_end(raw_rate: f64, phy: Phy) -> Result<StreamingDecimator, String> 
 }
 
 /// The sync-word reference to correlate against, built the way it will
-/// actually be received rather than the way [`super::detect::Detector`]
+/// actually be received rather than the way the tests' `detect::Detector`
 /// builds its own.
 ///
 /// **Why this cannot reuse `Detector`.** A matched filter's coherence is an
@@ -519,7 +521,7 @@ pub struct Receiver {
     /// stream becomes one in the radio's.
     raw_per_working: f64,
     /// Where the next block is assumed to start when the caller does not say
-    /// ([`Self::push`]): straight after the last one.
+    /// (the tests' `push`): straight after the last one.
     next_pair: u64,
     /// Where the capture now under way triggered, in stream pairs: the time
     /// its packet is stamped with (`pdu::Packet::at_pair`).
@@ -840,28 +842,17 @@ impl Receiver {
             && (self.tuned_centre_hz - tuned_centre_hz).abs() < 1.0
     }
 
-    /// Feed one block of raw device bytes. Returns every packet fully
-    /// decoded from it - almost always zero, and rarely more than one: a
-    /// legacy advertising PDU is under a third of a millisecond of air time.
-    /// [`Self::push_at`] for a block assumed to follow the last one without a
-    /// gap: what a test feeding a capture in pieces means, and nothing a live
-    /// stream should rely on, which is why only the tests have it.
+    /// One block of raw device bytes, assumed to follow the last one without
+    /// a gap: what a test feeding a capture in pieces means, and nothing a
+    /// live stream should rely on, which is why only the tests have it.
+    /// [`Self::push_iq_at`] has the rest.
     #[cfg(test)]
     pub fn push(&mut self, bytes: &[u8], geometry: SampleGeometry) -> Vec<Packet> {
         self.push_at(bytes, geometry, self.next_pair)
     }
 
-    /// Feed one block whose first pair sits at `first_pair` in the stream
-    /// (`hardware::StreamBlock::first_pair`), and return the packets it
-    /// completed, each stamped with where its sync word triggered.
-    ///
-    /// **The stamp is the trigger's, not the decode's.** A packet completes
-    /// blocks after it began, and the trigger is where it began: the same
-    /// place in every packet to within the few samples `candidates` searches
-    /// over, microseconds at most, which is what timing one packet against the
-    /// next needs. A trigger in the working stream maps back to the radio's
-    /// pairs through the decimation ratio; the decimator's own delay is the
-    /// same for every packet, so it cancels from any difference of two.
+    /// [`Self::push_iq_at`] on raw device bytes, decoded here: what a test
+    /// that builds its signal as bytes means.
     #[cfg(test)]
     pub fn push_at(
         &mut self,
@@ -874,9 +865,21 @@ impl Receiver {
         self.push_iq_at(&iq, first_pair)
     }
 
-    /// [`Self::push_at`] on a block already decoded: the worker decodes each
+    /// Feed one decoded block whose first pair sits at `first_pair` in the
+    /// stream (`hardware::StreamBlock::first_pair`), and return the packets it
+    /// completed, each stamped with where its sync word triggered: almost
+    /// always none, and rarely more than one, since a legacy advertising PDU
+    /// is under a third of a millisecond of air time. The worker decodes each
     /// block once and hands the same samples to every receiver, where each
     /// used to decode its own copy of the same bytes.
+    ///
+    /// **The stamp is the trigger's, not the decode's.** A packet completes
+    /// blocks after it began, and the trigger is where it began: the same
+    /// place in every packet to within the few samples `candidates` searches
+    /// over, microseconds at most, which is what timing one packet against the
+    /// next needs. A trigger in the working stream maps back to the radio's
+    /// pairs through the decimation ratio; the decimator's own delay is the
+    /// same for every packet, so it cancels from any difference of two.
     pub fn push_iq_at(&mut self, iq: &[Complex<f32>], first_pair: u64) -> Vec<Packet> {
         let mixed;
         let iq = match self.mixer.as_mut() {

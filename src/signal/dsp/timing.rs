@@ -2,12 +2,14 @@
 // Copyright (C) 2026 MusiThang <viktor.laszlo92@protonmail.com>
 
 //! Two ways to find a signal's own symbol phase, offered as alternatives rather
-//! than a pipeline of both: [`recover`] (Gardner's adaptive detector) and
-//! [`find_phase`] (exhaustive search over one symbol period), whichever the
+//! than a pipeline of both: `recover` (Gardner's adaptive detector) and
+//! `find_phase` (exhaustive search over one symbol period), whichever the
 //! test vectors say is enough - and for `signal::ble`'s actual signal, they
-//! said something specific enough to record here.
+//! said something specific enough to record here. Both now live in the
+//! tests: `recover` as a validated primitive, `find_phase` as the definition
+//! the live search, [`PhaseSearch`], is held to bit for bit.
 //!
-//! **[`recover`] is validated on its own terms and used by no receiver yet.**
+//! **`recover` is validated on its own terms and used by no receiver yet.**
 //! Gardner's detector is derived for a raised-cosine-shaped baseband PAM/PSK
 //! signal, where the "S-curve" - the error's own value as a function of
 //! phase - has a single zero exactly at the correct sampling instant. Fed a
@@ -20,13 +22,13 @@
 //! passing cleanly on the PAM-style signal Gardner *is* derived for. That
 //! bias was small - well under a sample at 4 samples per symbol - but large
 //! enough to cost real bit errors even with no noise added at all, which
-//! [`find_phase`] does not. `signal::ble::sync` uses [`find_phase`]
+//! `find_phase` does not. `signal::ble::sync` searches as `find_phase` does
 //! because of this, measured rather than assumed; see its own module doc.
 //!
-//! **[`recover`] tracks a static phase, not a drifting clock**, which is the
+//! **`recover` tracks a static phase, not a drifting clock**, which is the
 //! other reason it stays a validated-but-unused primitive rather than the
 //! receivers' choice: BLE's own capture is short bursts, exactly what
-//! [`find_phase`]'s "search once, hold it" approach fits, while a loop that
+//! `find_phase`'s "search once, hold it" approach fits, while a loop that
 //! tracks a phase changing over time is what a long capture with real sample-
 //! clock skew would need - a real thing a real capture could show, which is
 //! why the primitive is kept rather than deleted.
@@ -50,7 +52,7 @@ pub fn interpolate(x: &[f32], pos: f64) -> f32 {
 }
 
 /// Catmull-Rom cubic interpolation of `x` at a fractional index `pos` -
-/// [`find_phase`]'s own probe, not [`interpolate`]'s: see that function's own
+/// the phase search's own probe, not [`interpolate`]'s: see that function's own
 /// doc for why the two need to differ.
 ///
 /// Four points bracket `pos` rather than two, each edge clamped to the
@@ -201,7 +203,7 @@ pub fn find_phase(x: &[f32], sps: f64, symbols: usize, resolution: usize) -> f64
     best_phase
 }
 
-/// [`find_phase`] over a buffer that only grows, without starting again.
+/// `find_phase` over a buffer that only grows, without starting again.
 ///
 /// **A decoder searching a capture as it arrives searched all of it every
 /// time.** A BLE capture is tried every octet, and each try searched every
@@ -213,7 +215,7 @@ pub fn find_phase(x: &[f32], sps: f64, symbols: usize, resolution: usize) -> f64
 /// new final ones and computes only the last one or two, whose four
 /// samples are not all there yet.
 ///
-/// **The same number, bit for bit**: the terms are added in [`find_phase`]'s
+/// **The same number, bit for bit**: the terms are added in `find_phase`'s
 /// own order, `the_growing_search_is_find_phase` holds it to that over
 /// every prefix of a buffer.
 pub struct PhaseSearch {

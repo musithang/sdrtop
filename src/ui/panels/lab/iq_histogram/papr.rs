@@ -13,7 +13,7 @@ use super::zones::BINS;
 /// Bin mapping (from the rx callback): the 0..full-scale amplitude range is cut
 /// into [`BINS`] equal buckets, so bin `i` normalised runs `[i/32, (i+1)/32)`.
 /// Peak amplitude = top of the highest occupied bin.
-/// RMS amplitude  = sqrt( Σ hist[i]·((i+0.5)/32)² / total ).
+/// RMS amplitude  = `sqrt( Σ hist[i]·((i+0.5)/32)² / total )`.
 /// Returns None when no samples or when all samples are in bin 0 (zero RMS).
 ///
 /// **The device's full scale cancels out.** It used to appear here as a literal

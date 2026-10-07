@@ -31,12 +31,12 @@
 //! on-air neighbours, not its data neighbours. The receivers pass the air
 //! bits (`pdu::Packet::air`).
 //!
-//! [`drift`] needs none of the pattern-search
+//! [`drift_from`] needs none of the pattern-search
 //! machinery above - a frequency drift within a packet is a property of the
 //! per-symbol discriminator readings themselves, not of any particular bit
 //! pattern - but it reads one value per symbol, the reading at each bit's
-//! centre, for a reason [`drift`]'s own doc explains: the raw, oversampled
-//! trace turned out to be the wrong input for it.
+//! centre (`dsp::carrier::by_bit_from`): the raw, oversampled trace turned
+//! out to be the wrong input for it.
 
 use super::Phy;
 use crate::signal::dsp::uncertainty::Uncertain;
@@ -362,13 +362,6 @@ mod tests {
         assert!(modulation_quality(&all_settled, &samples, Phy::OneM).is_none());
     }
 
-    /// A clean IQ signal with an added linear frequency ramp on top of
-    /// whatever it is already modulating: `drift_rate_hz_per_s * t` more
-    /// frequency at time `t`, the same effect a thermally pulling crystal or
-    /// a still-settling PLL has on a real transmitter within one burst.
-    /// Multiplying by a chirp is exact here because frequency is additive
-    /// under complex multiplication: the discriminator recovers the sum of
-    /// the two phase derivatives, not some mixture of them.
     /// The suites' drift of per-symbol `samples`, each held across its bit,
     /// with no preamble held: what the receivers do with a rebuilt
     /// waveform, on the one reading a bit these tests build.
@@ -378,6 +371,13 @@ mod tests {
         drift_from(None, &ten_bit_blocks(&carrier, 1, bits.len() - 1), phy)
     }
 
+    /// A clean IQ signal with an added linear frequency ramp on top of
+    /// whatever it is already modulating: `drift_rate_hz_per_s * t` more
+    /// frequency at time `t`, the same effect a thermally pulling crystal or
+    /// a still-settling PLL has on a real transmitter within one burst.
+    /// Multiplying by a chirp is exact here because frequency is additive
+    /// under complex multiplication: the discriminator recovers the sum of
+    /// the two phase derivatives, not some mixture of them.
     fn with_drift(
         iq: &[num_complex::Complex<f32>],
         sample_rate_hz: f64,

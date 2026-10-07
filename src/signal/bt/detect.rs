@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright (C) 2026 MusiThang <viktor.laszlo92@protonmail.com>
 
-//! Streaming access-code detection: the same check
-//! [`super::access_code::find_access_code`] makes over a finished slice, made
+//! Streaming access-code detection: the same check the tests'
+//! `access_code::find_access_code` makes over a finished slice, made
 //! incremental for a live bit stream that never ends and has no boundary to
 //! hand it a slice of.
 //!
@@ -14,7 +14,7 @@
 //!
 //! **`O(1)` per bit, not a re-scan.** [`Detector::push`] keeps the last 64
 //! bits packed into one `u64` shift register and checks it after every new
-//! bit, rather than re-running [`super::access_code::find_access_code`] over
+//! bit, rather than re-running `access_code::find_access_code` over
 //! a growing buffer - the same per-candidate-position bound that function's
 //! own doc already promises, carried over to a caller that never has a
 //! finished slice to hand it.
@@ -48,7 +48,7 @@ impl Detector {
     ///
     /// **Fewer than 64 bits ever seen answers `None` unconditionally.**
     /// [`super::access_code::gen_syncword`]`(0)` is
-    /// [`super::access_code::DEFAULT_CODEWORD`], a real, checkable value - so
+    /// `access_code`'s `DEFAULT_CODEWORD`, a real, checkable value - so
     /// the all-zero window this detector starts in would otherwise read as a
     /// free, invented match for LAP zero before a single real bit had
     /// arrived to earn it. Rule 2 refuses that: `filled` exists only to hold

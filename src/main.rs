@@ -46,7 +46,7 @@ fn log_path() -> PathBuf {
 
 /// Redirect stderr (fd 2) to a log file for the TUI session and return the saved
 /// original fd. Backend libraries are chatty on stderr - librtlsdr prints
-/// "Allocating zero-copy buffers", "Found … tuner", "[R82XX] PLL not locked!",
+/// "Allocating zero-copy buffers", "Found … tuner", "\[R82XX\] PLL not locked!",
 /// some from its own read thread - which would scribble over the alternate
 /// screen. Sending it to a file keeps the TUI clean while preserving the output
 /// for debugging. Best-effort: returns `None` (and leaves stderr alone) on error.

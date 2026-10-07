@@ -3,7 +3,7 @@
 
 //! Where a GFSK transmitter's deviation can be read from ordinary traffic:
 //! every on-air bit whose neighbours make it one of the test suites' own
-//! readings ([`suite_readings`]).
+//! readings ([`suite_readings_from`]).
 //!
 //! Lifted out of `signal::ble::measure` when classic Bluetooth needed the same
 //! reading: the two protocol modules do not know each other, and what they
@@ -114,7 +114,7 @@ impl BitReadings {
     }
 }
 
-/// [`suite_readings`], from readings already taken.
+/// The test suites' own readings among `bits`, from readings already taken.
 pub fn suite_readings_from(bits: &[bool], readings: &BitReadings) -> Option<(Vec<f32>, Vec<f32>)> {
     let neighbours = |k: usize| (bits[k - 1], bits[k], bits[k + 1]);
     let mut settled = Vec::new();

@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright (C) 2026 MusiThang <viktor.laszlo92@protonmail.com>
 
-//! The verdict card: the panel's last zone, where [`verdict`](super::verdict)'s
+//! The verdict card: the panel's last zone, where [`verdict`](fn@super::verdict)'s
 //! two sentences become rows.
 //!
 //! Prose, not readings - which is the whole reason this is a card and not another

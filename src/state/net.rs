@@ -111,23 +111,7 @@ impl AddressDisplay {
         }
     }
 
-    /// `addr`, sent with TxAdd = `random`, as this mode shows it; `number` is
-    /// its [`AddressBook`] number, which only `Masked` reads.
-    ///
-    /// **`width` is the column the table has for it, not a fixed size.** A
-    /// table gives the address column what the terminal can spare
-    /// (`ui::widgets::table::widen`), up to [`Self::natural_width`]: on a wide
-    /// screen a registrant's whole name fits, on a narrow one it is cut and
-    /// marked `…` (`signal::net::vendor::short_name`), and the rest of the
-    /// address (`..09:be`, `#17`) is always whole and at the column's end, so
-    /// the rows line up. `None` is the natural form with no padding, for the
-    /// export, which is never cut.
-    ///
-    /// A masked address with no number shows `#-`: every address that reaches
-    /// the state is numbered as it arrives, so this is a gap to see, not a
-    /// number to invent.
-    ///
-    /// Without a company: the tests' form; the section calls [`Self::show_with`].
+    /// [`Self::show_with`] with no company: the tests' form.
     #[cfg(test)]
     pub fn show(
         self,
@@ -139,10 +123,24 @@ impl AddressDisplay {
         self.show_with(addr, random, number, None, width)
     }
 
-    /// [`Self::show`], knowing the company the address's manufacturer data
-    /// named (`NetState::company`): for a random address, which has no
-    /// IEEE block, that company takes the kind's place, marked with where it
-    /// came from ([`who_with`]).
+    /// `addr`, sent with TxAdd = `random`, as this mode shows it; `number` is
+    /// its [`AddressBook`] number, which only `Masked` reads, and `company`
+    /// the company its manufacturer data named (`NetState::company`): for a
+    /// random address, which has no IEEE block, that company takes the kind's
+    /// place, marked with where it came from ([`who_with`]).
+    ///
+    /// **`width` is the column the table has for it, not a fixed size.** A
+    /// table gives the address column what the terminal can spare
+    /// (`ui::widgets::table::widen`), up to [`Self::natural_width_with`]: on a wide
+    /// screen a registrant's whole name fits, on a narrow one it is cut and
+    /// marked `…` (`signal::net::vendor::short_name`), and the rest of the
+    /// address (`..09:be`, `#17`) is always whole and at the column's end, so
+    /// the rows line up. `None` is the natural form with no padding, for the
+    /// export, which is never cut.
+    ///
+    /// A masked address with no number shows `#-`: every address that reaches
+    /// the state is numbered as it arrives, so this is a gap to see, not a
+    /// number to invent.
     pub fn show_with(
         self,
         addr: [u8; 6],
@@ -180,15 +178,15 @@ impl AddressDisplay {
         }
     }
 
-    /// The columns `show` needs to print `addr` without cutting anything, and
-    /// never less than a full address's 17, so a table sized for the widest
-    /// row holds every mode.
+    /// [`Self::natural_width_with`] with no company: the tests' form.
     #[cfg(test)]
     pub fn natural_width(self, addr: [u8; 6], random: bool, number: Option<u32>) -> usize {
         self.natural_width_with(addr, random, number, None)
     }
 
-    /// [`Self::natural_width`] for [`Self::show_with`].
+    /// The columns [`Self::show_with`] needs to print `addr` without cutting
+    /// anything, and never less than a full address's 17, so a table sized for
+    /// the widest row holds every mode.
     pub fn natural_width_with(
         self,
         addr: [u8; 6],
@@ -422,12 +420,12 @@ pub struct NetState {
     pub ble_channel_crc_ok: [u64; 3],
     /// Why classic Bluetooth has no live receiver at all right now, on the
     /// `net_bt` preset - the same "refused, not silent" discipline
-    /// [`ble_refused`] already follows. `Some` only when no
+    /// [`Self::ble_refused`] already follows. `Some` only when no
     /// `signal::bt::receive::Receiver` can exist (one per channel
     /// `signal::bt::channel::channels_in_span` and `[net].bt_channels` together
     /// let the worker watch): when the current tuning's span holds no classic
     /// BT channel at all. `None` while it is running, the same as
-    /// [`ble_refused`]. It says nothing about whether any *hit* has been found
+    /// [`Self::ble_refused`]. It says nothing about whether any *hit* has been found
     /// yet; [`Self::bt_piconets`] is what has been.
     pub bt_refused: Option<String>,
     /// Classic Bluetooth access-code hits since the section opened, newest
@@ -439,7 +437,7 @@ pub struct NetState {
     /// high - what `net_bt_hops` reports itself as watching, honestly
     /// narrower than the full 79 (or even the full count a wider capture
     /// could see) whenever the cap is binding. Empty exactly when
-    /// [`bt_refused`] is `Some`.
+    /// [`Self::bt_refused`] is `Some`.
     pub bt_channels_watched: Vec<u8>,
     /// The most classic channels the worker watches at once
     /// (`[net].bt_channels`), published by the worker so a locked step on
@@ -647,7 +645,7 @@ impl NetState {
         self.advertised.get(&addr).and_then(|a| a.company)
     }
 
-    /// `width` as [`AddressDisplay::show`] takes it: the column the table has,
+    /// `width` as [`AddressDisplay::show_with`] takes it: the column the table has,
     /// or `None` for the uncut form an export writes.
     pub fn show_address(&self, addr: [u8; 6], random: bool, width: Option<usize>) -> String {
         self.address_display.show_with(

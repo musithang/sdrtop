@@ -4,7 +4,7 @@
 //! A theme as it is *written down*: hex strings and gradient stops.
 //!
 //! This is the shape of `theme/palettes/*.toml` and of anything a user drops in
-//! `~/.config/sdrtop/themes/`. [`Theme`](super::Theme) is the shape the renderer
+//! `~/.config/sdrtop/themes/`. [`Theme`] is the shape the renderer
 //! wants - parsed `Color`s - and [`ThemeFile::into_theme`] is the one crossing
 //! between them.
 //!

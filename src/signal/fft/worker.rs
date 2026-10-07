@@ -6,9 +6,9 @@
 //! **Split by when it holds the lock**, the same way `tasks/rx/` is, so the
 //! discipline is visible in the file layout rather than in a comment:
 //!
-//! - [`frame`](super::frame) is the per-frame DSP. Runs at **full rate**, holds
+//! - [`frame`] is the per-frame DSP. Runs at **full rate**, holds
 //!   no lock - the averaging is only accurate if it sees every frame.
-//! - [`analysis`](super::analysis) is the expensive maths. Runs at display rate,
+//! - [`analysis`] is the expensive maths. Runs at display rate,
 //!   holds **no lock**, reads no clock.
 //! - [`publish`](super::publish) is the one lock block.
 //!

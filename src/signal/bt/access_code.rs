@@ -146,7 +146,7 @@ fn pack(window: &[bool]) -> u64 {
     word
 }
 
-/// The core check both [`find_access_code`] (a finished slice) and
+/// The core check both the tests' `find_access_code` (a finished slice) and
 /// [`super::detect::Detector`] (a live bit stream with no end to be handed a
 /// slice of) make against one 64-bit window: does it, taken at face value,
 /// come from a real access code?

@@ -11,7 +11,7 @@
 //! measuring has been quietly wrong for a while. An integer accumulator wraps
 //! exactly at one turn, so the only error in the generated frequency is the one
 //! introduced when the increment was computed, once, at the start. It does not
-//! accumulate. That is why [`Nco::frequency_hz`] can state what is being
+//! accumulate. That is why the oscillator can state what is being
 //! generated rather than what was asked for.
 //!
 //! The difference was measured rather than assumed: replacing the accumulator
@@ -29,11 +29,13 @@
 //! * Phase runs in turns, not radians, everywhere inside. One turn is the full
 //!   circle and is exactly `2^64` accumulator units. Radians appear only at the
 //!   last step, where the sample is generated.
-//! * [`Nco::next_sample`] returns the sample *at* the current phase and then
-//!   advances, so the first sample out of a fresh oscillator is exactly `1 + 0j`.
+//! * [`Nco::sample`] is the sample *at* the current phase, taken before the
+//!   phase advances, so the first sample out of a fresh oscillator is exactly
+//!   `1 + 0j`.
 //!
 //! [`Nco::sample`] costs one `sin_cos`, in `f64`: the accurate choice. **The
-//! block methods, [`Nco::mix`] and [`Nco::fill`], do not pay it per sample.**
+//! block methods, [`Nco::mix`] and [`Nco::mix_into`], do not pay it per
+//! sample.**
 //! They became a measured hot path: every classic Bluetooth channel mixes its
 //! whole raw block, and `sin_cos` per raw sample was a fifth of the Classic
 //! view's time on the i3. So a block is walked [`RESYNC`] samples at a time:
@@ -93,7 +95,7 @@ impl Nco {
     /// An oscillator at `freq_hz`, starting at zero phase.
     ///
     /// A sample rate that is not finite and positive cannot be honoured, so the
-    /// oscillator stops: `step` is zero and [`Self::frequency_hz`] reports the
+    /// oscillator stops: `step` is zero and the frequency it reports is the
     /// 0 Hz it is actually generating rather than the frequency it was asked
     /// for. Nothing here invents a rate to carry on with.
     pub fn new(freq_hz: f64, sample_rate_hz: f64) -> Self {

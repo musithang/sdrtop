@@ -2,7 +2,7 @@
 // Copyright (C) 2026 MusiThang <viktor.laszlo92@protonmail.com>
 
 //! RTL-SDR backend: implements [`SdrDevice`] over librtlsdr. The per-sample math
-//! is shared with HackRF via [`crate::hardware::process::process_block`]; what differs is
+//! is shared with HackRF via [`crate::hardware::process`]; what differs is
 //! the unsigned-8-bit sample format, the single discrete tuner-gain model, and
 //! the blocking `rtlsdr_read_async` loop (which we drive on an owned thread and
 //! stop with `rtlsdr_cancel_async`).
@@ -58,7 +58,7 @@ static STDERR_LOCK: Mutex<()> = Mutex::new(());
 /// Run `f` with the process's stderr redirected to /dev/null, then restore it.
 ///
 /// librtlsdr chatters to stderr on open, on tuning, and on gain changes - "Found
-/// Rafael Micro R820T tuner", "Detached kernel driver", "[R82XX] PLL not
+/// Rafael Micro R820T tuner", "Detached kernel driver", "\[R82XX\] PLL not
 /// locked!" - which would scramble the TUI's alternate screen. Every librtlsdr
 /// control call is wrapped in this; the long-lived async read is not (it runs on
 /// its own thread). Best-effort: if the redirect can't be set up, `f` runs

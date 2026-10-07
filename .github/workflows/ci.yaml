@@ -89,6 +89,15 @@ jobs:
       - name: Clippy
         run: cargo clippy --all-targets -- -D warnings
 
+      # A doc comment that links to the item it talks about goes stale without
+      # a sound when that item is renamed, removed or gated behind cfg(test):
+      # nothing but rustdoc reads the link as a reference. Eighty-two had piled
+      # up before this step existed.
+      - name: Doc links resolve
+        run: cargo doc --no-deps --locked
+        env:
+          RUSTDOCFLAGS: -D warnings
+
       # --locked, so CI tests the dependency versions a user actually gets from
       # `cargo install sdrtop --locked` rather than whatever resolved this
       # morning.

@@ -114,7 +114,7 @@ pub(super) const CLOCK_RESOLUTION_PPM: f64 = 1.0;
 /// reference takes out exactly as it does for a BLE offset
 /// (`corrected_ppm`: the radio's LO and its sample clock come from one
 /// crystal). With whether it is judged: only a reference makes it absolute,
-/// and without one it is a reading, which the frame's [RELATIVE] says.
+/// and without one it is a reading, which the frame's `[RELATIVE]` says.
 pub(super) fn clock_of(
     f: &crate::signal::bt::slots::SlotFit,
     state: &SdrMetrics,

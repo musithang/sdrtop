@@ -153,7 +153,7 @@ struct PendingHeader {
     /// Set the moment the header's own air bits complete and pass FEC -
     /// `None` while still capturing the header itself. A header that
     /// fails FEC never sets this; that capture is abandoned right there
-    /// instead ([`Receiver::push`]'s own doc), since no amount of payload
+    /// instead ([`Receiver::push_iq`]'s own doc), since no amount of payload
     /// afterward can be attributed to a header that could not even be read.
     header_whitened: Option<[bool; header::HEADER_BITS]>,
     /// [`HeaderHit::sync_end_pair`].
@@ -369,8 +369,23 @@ impl Receiver {
             && (self.tuned_centre_hz - tuned_centre_hz).abs() < 1.0
     }
 
-    /// Feed one block of raw device bytes. Returns every LAP found in it -
-    /// almost always none.
+    /// [`Self::push_iq`] on raw device bytes, decoded here: what a test that
+    /// builds its signal as bytes means.
+    #[cfg(test)]
+    pub fn push(
+        &mut self,
+        bytes: &[u8],
+        geometry: SampleGeometry,
+    ) -> (Vec<AccessHit>, Vec<HeaderHit>) {
+        let mut iq = Vec::new();
+        decode_iq(bytes, geometry, usize::MAX, &mut iq);
+        self.push_iq(&iq)
+    }
+
+    /// Feed one decoded block, mixed into this channel's own buffer. Returns
+    /// every LAP found in it - almost always none. The worker decodes each
+    /// block once for every watched channel, where each channel used to
+    /// decode its own copy.
     ///
     /// **One hit a packet, by time, not one a lane or one a block.** With no
     /// active timing recovery, more than one of the [`PHASES`] lanes
@@ -397,20 +412,6 @@ impl Receiver {
     /// capture right there - no payload capture is kept for a header this
     /// arc could not even read); once [`PAYLOAD_CAPTURE_BITS`] more
     /// arrive, a [`HeaderHit`] carrying both is emitted.
-    #[cfg(test)]
-    pub fn push(
-        &mut self,
-        bytes: &[u8],
-        geometry: SampleGeometry,
-    ) -> (Vec<AccessHit>, Vec<HeaderHit>) {
-        let mut iq = Vec::new();
-        decode_iq(bytes, geometry, usize::MAX, &mut iq);
-        self.push_iq(&iq)
-    }
-
-    /// [`Self::push`] on a block already decoded, mixed into this channel's
-    /// own buffer: the worker decodes each block once for every watched
-    /// channel, where each channel used to decode its own copy.
     pub fn push_iq(&mut self, iq: &[Complex<f32>]) -> (Vec<AccessHit>, Vec<HeaderHit>) {
         let mut mixed = Vec::new();
         self.mixer.mix_into(iq, &mut mixed);

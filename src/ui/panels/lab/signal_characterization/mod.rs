@@ -18,7 +18,7 @@
 //!   5. [`card`]     Verdict          - a rule-based, plain-language read of the
 //!      same four zones.
 //!
-//! The verdict's *rule* lives apart from its card, in [`verdict`]: a pure function
+//! The verdict's *rule* lives apart from its card, in [`verdict`](fn@verdict): a pure function
 //! of modulation / SNR / ACPR / OBW with no drawing in it at all, in the spirit of
 //! `timing_diagnostics::verdict_copy`. That is what lets the `lab_signal` marker
 //! bar quote the same severity this panel shows without depending on the panel.

@@ -1,19 +1,25 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright (C) 2026 MusiThang <viktor.laszlo92@protonmail.com>
 
-//! The two correlators every burst detector in this project is built from.
+//! The correlators the burst detectors in this project are built from.
 //!
 //! * [`DelayedAutocorrelator`] compares a signal with itself a fixed number of
 //!   samples ago. It finds anything built out of a repeat, which is what an OFDM
 //!   short training field is, and it does so without knowing the preamble: the
 //!   repeat is the whole signature. Schmidl and Cox's timing metric is read
 //!   straight off it, and so is Moose's frequency offset (`dsp::estimate`).
-//! * [`MatchedFilter`] compares a signal with a sequence known in advance. It
-//!   finds a Bluetooth access address, and it is the optimal detector for a
+//! * [`ShapeMatcher`] compares a real track, a discriminator's frequency
+//!   reading, with a shape known in advance, blind to any constant added to it
+//!   and to its scale. The BLE and LE Coded receivers find their sync words
+//!   with it, because a carrier offset is exactly such a constant.
+//! * `MatchedFilter`, which only the tests build, compares a signal with a
+//!   sequence known in advance, coherently. It is the optimal detector for a
 //!   known waveform in white Gaussian noise, which is a statement with a proof
-//!   rather than a preference.
+//!   rather than a preference; no live receiver runs it, because a coherent
+//!   correlation across a sync word falls apart at the carrier offsets BLE
+//!   allows ([`ShapeMatcher`]'s doc has the figures).
 //!
-//! **Both are running-sum structures, and that is the point.** Detection is
+//! **Their window sums are running sums, and that is the point.** Detection is
 //! always on, at up to 20 Msps, so it has to cost a few operations per sample
 //! rather than a window's worth. A running sum buys that by adding one term and
 //! subtracting another instead of re-adding the window, and pays for it by
@@ -22,12 +28,13 @@
 //! `the_running_sums_match_the_direct_ones_over_a_long_run` is the assertion
 //! that the cheap structure has not quietly drifted away from the honest one.
 //!
-//! **Both report a normalised figure, not a level**, in `[0, 1]`. A detector
+//! **They report a normalised figure, not a level**: a coherence in `[0, 1]`,
+//! or [`ShapeMatcher`]'s correlation coefficient in `[-1, 1]`. A detector
 //! whose threshold is an amplitude has to be retuned every time the gain moves,
 //! and on a radio with AGC that is always. A normalised coherence means the same
 //! thing at any gain, and, better, it means something a specification can be
-//! written against: [`false_alarm_rate`] turns a threshold into the probability
-//! that noise alone will trip it.
+//! written against: [`threshold_for_false_alarm`] turns the probability that
+//! noise alone trips a coherence threshold into the threshold itself.
 
 use std::sync::Arc;
 
@@ -372,7 +379,8 @@ pub fn false_alarm_rate(taps: usize, threshold: f64) -> f64 {
 }
 
 /// The coherence threshold whose false-alarm probability is `rate`. The inverse
-/// of [`false_alarm_rate`], and the direction a caller actually thinks in.
+/// of the tests' `false_alarm_rate`, and the direction a caller actually
+/// thinks in.
 pub fn threshold_for_false_alarm(taps: usize, rate: f64) -> f64 {
     if taps < 2 {
         return 1.0;

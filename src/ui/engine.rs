@@ -26,7 +26,7 @@ pub struct LayoutEngine {
     /// The menu renders this and the number keys resolve through it, so both
     /// read one table instead of keeping two lists in step.
     ///
-    /// Built in [`LayoutEngine::new`] and not rebuilt, because the preset table
+    /// Built in [`LayoutEngine::new_with_saved_preset`] and not rebuilt, because the preset table
     /// is fully merged before the engine is constructed (`App::build_ui` folds
     /// the built-ins, the user's preset directory and `config.toml` together
     /// first). `config` is `pub` and so could in principle gain a preset later;
@@ -209,8 +209,8 @@ impl LayoutEngine {
     }
 
     /// Whether a preset with this name is defined. Used by the number-key
-    /// handlers to distinguish "switch" from "not yet available" (the [6]–[9]
-    /// and [0] slots light up automatically as their presets get defined).
+    /// handlers to distinguish "switch" from "not yet available" (the `[6]`–`[9]`
+    /// and `[0]` slots light up automatically as their presets get defined).
     pub fn has_preset(&self, name: &str) -> bool {
         self.config.presets.contains_key(name)
     }

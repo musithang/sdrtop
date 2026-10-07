@@ -210,7 +210,7 @@ pub struct Csa1 {
     hop_increment: u8,
     channel_map: u64,
     /// Every used channel, ascending - section 4.5.8.2's own "remapping
-    /// table... built [from] all the used channels in ascending order,
+    /// table... built \[from\] all the used channels in ascending order,
     /// indexed from zero," computed once rather than rebuilt every
     /// connection event.
     used_channels: Vec<u8>,
@@ -266,7 +266,7 @@ impl Csa1 {
     /// ...If the `unmappedChannel` is a used channel according to the
     /// channel map, Channel Selection Algorithm #1 shall use the
     /// `unmappedChannel` as the data channel index... If the
-    /// `unmappedChannel` is an unused channel..., [it] shall be re-mapped
+    /// `unmappedChannel` is an unused channel..., \[it\] shall be re-mapped
     /// to one of the used channels... using the following algorithm:
     /// `remappingIndex = unmappedChannel mod numUsedChannels`... The
     /// `remappingIndex` is then used to select the data channel index...

@@ -26,7 +26,7 @@
 //! for `pdu::decode`). They take one reading a symbol, positive for a 1, and
 //! never see a sample: finding the packet in a stream, its symbol timing
 //! and its carrier offset are the receiver's work. The test-only
-//! [`transmit`] builds a packet from the Core's text, so the readers are
+//! `transmit` builds a packet from the Core's text, so the readers are
 //! held to the specification rather than to themselves.
 
 use crate::signal::dsp::code::lfsr::whiten;
@@ -55,7 +55,7 @@ pub fn preamble_bits() -> [bool; 80] {
 /// encoded input bits, most recent first - `state[0]` is what section
 /// 3.3.1's own generator polynomials call the `x` term, `state[1]` the
 /// `x^2` term, `state[2]` the `x^3` term. Eight possible values, since
-/// three bits of memory - the number [`decode`]'s own trellis has exactly
+/// three bits of memory - the number the Viterbi decoder's trellis has exactly
 /// that many states for.
 type State = [bool; 3];
 

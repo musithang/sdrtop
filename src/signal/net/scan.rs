@@ -147,18 +147,9 @@ impl Scan {
         self.centre_hz == centre_hz && self.rate_hz == rate_hz && self.span_hz == span_hz
     }
 
-    // The worker hands over the block it has already decoded (`push_iq`);
-    // the bytes' own path is kept for the tests that build their signals as
-    // bytes, and is held to give the same answer.
+    /// [`Self::push_iq`] on interleaved bytes: kept for the tests that build
+    /// their signals as bytes, and held to give the same answer.
     #[cfg(test)]
-    /// Fold one block of interleaved bytes into the dwell.
-    ///
-    /// The floor is derived per block rather than per dwell, and the counts are
-    /// what accumulate. A dwell's worth of raw powers would be megabytes to hold
-    /// and to select over; a block's is ten thousand samples, which is enough
-    /// for a floor good to a few tenths of a decibel, and deriving it afresh
-    /// means a gain change part way through a dwell does not poison the rest of
-    /// it.
     pub fn push(&mut self, bytes: &[u8], geometry: SampleGeometry) {
         let stride = self.n * geometry.bytes_per_pair();
         self.fold(bytes.len() / stride, |scan, w| {
@@ -167,8 +158,16 @@ impl Scan {
         });
     }
 
-    /// [`Self::push`] on a block the worker has already decoded, scaled as
-    /// `demod::decode` scales it: windowing it here gives exactly the
+    /// Fold one block the worker has already decoded into the dwell.
+    ///
+    /// The floor is derived per block rather than per dwell, and the counts are
+    /// what accumulate. A dwell's worth of raw powers would be megabytes to hold
+    /// and to select over; a block's is ten thousand samples, which is enough
+    /// for a floor good to a few tenths of a decibel, and deriving it afresh
+    /// means a gain change part way through a dwell does not poison the rest of
+    /// it.
+    ///
+    /// Scaled as `demod::decode` scales it: windowing it here gives exactly the
     /// samples `decode_into` would (`decoded_samples_read_exactly_as_the_
     /// bytes_do`), without decoding the bytes a second time.
     pub fn push_iq(&mut self, iq: &[Complex<f32>]) {

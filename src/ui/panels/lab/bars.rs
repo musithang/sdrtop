@@ -461,7 +461,7 @@ fn append_focus_hints(
 
 /// Lab IQ marker bar: MKR1 = IMAGE, MKR2 = CARRIER (mirror about the LO), and
 /// `Δ image` = the measured suppression. Auto-tracks the strongest carrier live
-/// unless pinned via `[M]` ([`LabState::iq_marker_pin`]).
+/// unless pinned via `[M]` ([`crate::state::LabState::iq_marker_pin`]).
 fn iq_marker_lines(state: &SdrMetrics, theme: &crate::Theme, iw: usize) -> Vec<Line<'static>> {
     let dim = Style::default().fg(theme.label);
 

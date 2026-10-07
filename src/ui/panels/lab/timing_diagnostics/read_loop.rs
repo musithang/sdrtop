@@ -4,7 +4,7 @@
 //! READ LOOP: what a pull backend can honestly be judged on.
 //!
 //! This zone stands in for CALLBACK TIMING and DEADLINE BUDGET on a
-//! [`DeliveryModel::Pull`] device, and the swap is the whole point. Those two
+//! [`crate::hardware::DeliveryModel::Pull`] device, and the swap is the whole point. Those two
 //! measure the interval between blocks against a deadline, which is meaningful
 //! only when the driver paces the blocks. A pull loop paces itself: it drains
 //! whatever the driver has buffered as fast as it can, then blocks. Measured on

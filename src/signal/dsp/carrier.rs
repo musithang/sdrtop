@@ -17,7 +17,7 @@
 //! the carrier exactly. Whitened traffic does not balance over ten bits: six
 //! ones and four zeros put a BR block's mean some 30 kHz off the carrier,
 //! which the suites' definition would call drift. So each bit's own
-//! modulation is taken out before the blocks are averaged ([`by_bit`]): a
+//! modulation is taken out before the blocks are averaged ([`by_bit_from`]): a
 //! bit's mean reading depends on the bit and its two neighbours and nothing
 //! further (a symbol two bits away moves it by about 1e-8 of the deviation,
 //! `deviation::suite_readings` has the figure), so the burst itself shows
@@ -62,7 +62,8 @@ pub fn by_bit(bits: &[bool], at: impl Fn(f64) -> f32) -> Vec<Option<f64>> {
     by_bit_from(bits, &BitReadings::read(bits.len(), at))
 }
 
-/// [`by_bit`], from readings already taken.
+/// Each bit's carrier, its own modulation taken out, from readings already
+/// taken.
 pub fn by_bit_from(bits: &[bool], readings: &BitReadings) -> Vec<Option<f64>> {
     const ROUNDS: usize = 12;
     let n = bits.len();
@@ -113,7 +114,7 @@ pub fn by_bit_from(bits: &[bool], readings: &BitReadings) -> Vec<Option<f64>> {
     out
 }
 
-/// The suites' drift readings over `carrier` (from [`by_bit`]): the mean of
+/// The suites' drift readings over `carrier` (from [`by_bit_from`]): the mean of
 /// every whole block of ten bits from `from`, up to `to`. A block missing a
 /// bit's carrier is skipped rather than averaged over nine.
 pub fn ten_bit_blocks(carrier: &[Option<f64>], from: usize, to: usize) -> Vec<f64> {
