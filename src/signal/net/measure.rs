@@ -161,30 +161,29 @@ impl<'a> Recent<'a> {
     }
 }
 
-/// A burst's frequency as the tester reads it, at any stream position
-/// inside the window it was built over.
-struct Tester {
-    fine: Oversampled,
-    /// The window through the tester's filter, at [`MEASURE_RATE_HZ`]: what
-    /// [`Self::snr_db`] reads the envelope of.
+/// A stretch of the stream mixed down to one channel and through the
+/// measurement filter, decimated to [`MEASURE_RATE_HZ`]: what [`snr_db`]
+/// reads the powers of, and what [`Tester`] reads the frequency of.
+struct Filtered {
     iq: Vec<Complex<f32>>,
-    /// The stream position of the window's first raw sample.
+    /// The stream position of the stretch's first raw sample.
     start: f64,
     /// The filter's delay, in raw samples.
     delay: f64,
     /// The decimation factor.
     factor: f64,
-    /// [`neighbour_excess_db`] over `from..to`, when asked for.
-    neighbour_db: Option<f64>,
 }
 
-impl Tester {
-    /// The tester over stream positions `from` to `to` of a channel
-    /// `offset_hz` from the tuning, at `rate`; `None` when the rate is not a
-    /// whole multiple of [`MEASURE_RATE_HZ`] or the samples are not held.
+impl Filtered {
+    /// Stream positions `from` to `to` of a channel `offset_hz` from the
+    /// tuning, at `rate`; `None` when the rate is not a whole multiple of
+    /// [`MEASURE_RATE_HZ`] or the samples are not held. With it, what
+    /// `neighbours` asks of the mixed samples before they are filtered
+    /// ([`neighbour_excess_db`]).
     ///
-    /// `neighbours`, when given, is the channel spacing whose neighbours'
-    /// power is read over `from..to` ([`neighbour_excess_db`]).
+    /// `dc`, when given, is the radio's DC offset, taken off the raw samples
+    /// before the channel is mixed down: after it, the offset is a tone at
+    /// the channel's distance from the tuning, which a mean would not see.
     fn new(
         recent: &Recent,
         rate: f64,
@@ -192,7 +191,8 @@ impl Tester {
         from: f64,
         to: f64,
         neighbours: Option<f64>,
-    ) -> Option<Self> {
+        dc: Option<Complex<f32>>,
+    ) -> Option<(Self, Option<f64>)> {
         let factor = (rate / MEASURE_RATE_HZ).round().max(1.0);
         if (rate / factor - MEASURE_RATE_HZ).abs() > MEASURE_RATE_HZ * 0.01 {
             return None;
@@ -207,6 +207,9 @@ impl Tester {
         }
         let len = ((to + reach).ceil() - start) as usize;
         let mut iq = recent.slice(start as u64, len)?;
+        if let Some(dc) = dc {
+            iq.iter_mut().for_each(|z| *z -= dc);
+        }
         // Frequency is measured, not phase, so the oscillator may start at
         // any phase: fresh for every burst.
         Nco::new(-offset_hz, rate).mix(&mut iq);
@@ -218,34 +221,135 @@ impl Tester {
         let delay = filter.delay();
         let mut out = Vec::new();
         filter.process(&iq, &mut out);
+        Some((
+            Self {
+                iq: out,
+                start,
+                delay,
+                factor,
+            },
+            neighbour_db,
+        ))
+    }
+
+    /// Where stream position `pos` falls in [`Self::iq`], fractionally.
+    fn index(&self, pos: f64) -> f64 {
+        (pos - self.start - self.delay) / self.factor
+    }
+
+    /// The filtered samples over stream positions `from` to `to`, or `None`
+    /// when they are not all inside the stretch.
+    fn window(&self, from: f64, to: f64) -> Option<&[Complex<f32>]> {
+        let (a, b) = (self.index(from).round(), self.index(to).round());
+        if a < 0.0 || b <= a || b as usize > self.iq.len() {
+            return None;
+        }
+        self.iq.get(a as usize..b as usize)
+    }
+}
+
+/// A burst's frequency as the tester reads it, at any stream position
+/// inside the window it was built over.
+struct Tester {
+    fine: Oversampled,
+    filtered: Filtered,
+    /// [`neighbour_excess_db`] over `from..to`, when asked for.
+    neighbour_db: Option<f64>,
+}
+
+impl Tester {
+    /// The tester over stream positions `from` to `to`: [`Filtered::new`],
+    /// and the frequency read from it between its samples.
+    fn new(
+        recent: &Recent,
+        rate: f64,
+        offset_hz: f64,
+        from: f64,
+        to: f64,
+        neighbours: Option<f64>,
+    ) -> Option<Self> {
+        let (filtered, neighbour_db) =
+            Filtered::new(recent, rate, offset_hz, from, to, neighbours, None)?;
         Some(Self {
-            fine: Oversampled::new(&out, rate / factor),
-            iq: out,
-            start,
-            delay,
-            factor,
+            fine: Oversampled::new(&filtered.iq, rate / filtered.factor),
+            filtered,
             neighbour_db,
         })
     }
 
     /// The frequency at stream position `pos`, in Hz.
     fn at(&self, pos: f64) -> f32 {
-        self.fine.at((pos - self.start - self.delay) / self.factor)
+        self.fine.at(self.filtered.index(pos))
     }
+}
 
-    /// The SNR over stream positions `from` to `to`, in dB, from the
-    /// envelope through the tester's filter (`estimate::snr_m2m4`). The
-    /// filter has the BLE receiver's front end's edges, so this is read in
-    /// the band LE 1M's SNR is.
-    fn snr_db(&self, from: f64, to: f64) -> Option<f64> {
-        let index = |pos: f64| ((pos - self.start - self.delay) / self.factor).round();
-        let (a, b) = (index(from), index(to));
-        if a < 0.0 || b <= a {
-            return None;
-        }
-        let window = self.iq.get(a as usize..(b as usize).min(self.iq.len()))?;
-        crate::signal::dsp::estimate::snr_m2m4(window).map(|snr| 10.0 * snr.log10())
+/// The gap left before a burst's first symbol, us: the noise is read before
+/// it. A transmitter's carrier is often up before its preamble: on the air,
+/// half of 1129 LE 1M packets already showed it 10 to 20 us early, none
+/// further back than the band's own 2 to 3 % of busy moments, and the
+/// measurement filter spreads a burst's start by a few microseconds more.
+const NOISE_GUARD_US: f64 = 30.0;
+
+/// How much noise is read before a burst, us: 400 samples at the
+/// measurement rate, a noise power good to about 0.2 dB. With the guard it
+/// spans 130 to 30 us before the burst, inside the 150 us between a request
+/// and its response, where the request's own tail has died away by 140.
+const NOISE_SPAN_US: f64 = 100.0;
+
+/// The noise stretch is read in this many parts, to tell noise from the
+/// tail of another transmission.
+const NOISE_PARTS: usize = 4;
+
+/// How far the parts' powers may spread before the stretch is not noise.
+/// Noise alone keeps them within about 30 % of each other; a transmission
+/// 3 dB over the noise in one part doubles it.
+const NOISE_SPREAD: f64 = 2.0;
+
+/// The SNR of the burst over stream positions `from` to `to` on a channel
+/// `offset_hz` from the tuning, in dB, in LE 1M's band (the measurement
+/// filter's): the burst's power over the noise read just before it, the
+/// radio's DC taken out of both. `None` when that stretch is not held, is
+/// not quiet, or the burst is no stronger than it.
+///
+/// **Powers, not the envelope.** The estimator this replaced (M2M4) read a
+/// burst's envelope, and counted everything that moves it as noise: at the
+/// tuned centre the radio's DC offset and its DC-correcting high-pass,
+/// which takes the packet's own slowly varying mean out, and on the air the
+/// channel's own amplitude ripple. A phone 35 dB over the noise read 18 at
+/// the centre and 31 off it; its power reads 35 in both places.
+///
+/// **The radio's DC is measured, not assumed away.** The noise stretch's
+/// mean is the offset the radio adds to everything, so it comes off the
+/// burst too: at the centre it sits under the packet, and it is not noise.
+pub fn snr_db(recent: &Recent, rate: f64, offset_hz: f64, from: f64, to: f64) -> Option<f64> {
+    let us = rate / 1e6;
+    let noise_to = from - NOISE_GUARD_US * us;
+    let noise_from = noise_to - NOISE_SPAN_US * us;
+    // The radio's DC: the raw noise stretch's mean, before any mixing.
+    let raw = recent.slice(noise_from.floor() as u64, (noise_to - noise_from) as usize)?;
+    let dc = raw.iter().fold(Complex::new(0.0f64, 0.0), |a, z| {
+        a + Complex::new(z.re as f64, z.im as f64)
+    }) / raw.len() as f64;
+    let dc = Complex::new(dc.re as f32, dc.im as f32);
+    let (filtered, _) = Filtered::new(recent, rate, offset_hz, noise_from, to, None, Some(dc))?;
+    let noise = filtered.window(noise_from, noise_to)?;
+    let burst = filtered.window(from, to)?;
+    let power =
+        |w: &[Complex<f32>]| w.iter().map(|z| z.norm_sqr() as f64).sum::<f64>() / w.len() as f64;
+    let part = noise.len() / NOISE_PARTS;
+    if part == 0 {
+        return None;
     }
+    let parts: Vec<f64> = noise.chunks_exact(part).map(power).collect();
+    let (low, high) = parts
+        .iter()
+        .fold((f64::INFINITY, 0.0f64), |(l, h), &p| (l.min(p), h.max(p)));
+    if low.is_nan() || low <= 0.0 || high > NOISE_SPREAD * low {
+        return None;
+    }
+    let n = power(noise);
+    let s = power(burst) - n;
+    (s > 0.0).then(|| 10.0 * (s / n).log10())
 }
 
 /// How finely [`timing`] searches, in steps a bit.
@@ -476,16 +580,14 @@ pub fn classic(
 /// starts with; f0 from the preamble's 8 bits, the drift blocks from the
 /// PDU's second bit to its CRC (RF-PHY.TS.4.2.1 TP/TRM-LE/CA/BV-06-C).
 ///
+/// Its SNR is read from where the packet sits alone ([`snr_db`]), so it
+/// stands whether or not the bits could be timed: a packet whose CRC failed
+/// still has the SNR the frame-error curve files it under.
+///
 /// LE 1M only: LE 2M is read by the receiver (`ble::receive`), whose
-/// capture does not hold the samples 2M's rate needs from here. `None` as
-/// [`classic`] refuses.
-pub fn le_1m(
-    recent: &Recent,
-    rate: f64,
-    offset_hz: f64,
-    pdu_pair: f64,
-    air: &[bool],
-) -> Option<(Option<ModulationQuality>, Option<Drift>)> {
+/// capture does not hold the samples 2M's rate needs from here. A figure
+/// that cannot be read is `None`, as [`classic`] refuses.
+pub fn le_1m(recent: &Recent, rate: f64, offset_hz: f64, pdu_pair: f64, air: &[bool]) -> LeReading {
     use crate::signal::ble::detect::{
         access_address_bits, preamble_bits, ADVERTISING_ACCESS_ADDRESS,
     };
@@ -493,13 +595,25 @@ pub fn le_1m(
     let preamble = preamble_bits(ADVERTISING_ACCESS_ADDRESS, Phy::OneM);
     let mut known = preamble.clone();
     known.extend(access_address_bits(ADVERTISING_ACCESS_ADDRESS));
-    let first = pdu_pair - known.len() as f64 * rate / 1e6;
+    let bit = rate / 1e6;
+    let first = pdu_pair - known.len() as f64 * bit;
+    let snr_db = snr_db(
+        recent,
+        rate,
+        offset_hz,
+        first - 0.5 * bit,
+        first + (known.len() + air.len()) as f64 * bit - 0.5 * bit,
+    );
     // No guard: LE's neighbours are 2 MHz away, in the measurement filter's
     // stopband, and one 15 dB down moves the readings 0.3 %
     // (`conformance::a_neighbour_25_db_down_moves_the_readings_under_one_
     // percent`, which also runs LE at 15).
-    let Lined::Up(aligned) = align(recent, rate, offset_hz, &known, first, air.len(), None)? else {
-        return None;
+    let Some(Lined::Up(aligned)) = align(recent, rate, offset_hz, &known, first, air.len(), None)
+    else {
+        return LeReading {
+            snr_db,
+            ..LeReading::default()
+        };
     };
     let all: Vec<bool> = known.iter().chain(air).copied().collect();
     // Every bit read once, for the modulation and the carrier both.
@@ -511,16 +625,28 @@ pub fn le_1m(
     let pdu = known.len();
     let crc = pdu + air.len().saturating_sub(crate::signal::ble::pdu::CRC_BITS);
     let blocks = ten_bit_blocks(&carrier, pdu + 1, crc);
-    Some((
+    LeReading {
+        snr_db,
         modulation,
-        drift_from(Some((f0, preamble.len())), &blocks, Phy::OneM),
-    ))
+        drift: drift_from(Some((f0, preamble.len())), &blocks, Phy::OneM),
+    }
+}
+
+/// What the measurement path reads of an LE 1M packet.
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct LeReading {
+    /// Over the whole packet, in dB, in LE 1M's band ([`snr_db`]).
+    pub snr_db: Option<f64>,
+    /// The test suites' modulation figures.
+    pub modulation: Option<ModulationQuality>,
+    /// f0 and the drift.
+    pub drift: Option<Drift>,
 }
 
 /// What the measurement path reads of an LE Coded packet.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct CodedReading {
-    /// Over the whole packet, in dB, in LE 1M's band ([`Tester::snr_db`]).
+    /// Over the whole packet, in dB, in LE 1M's band ([`snr_db`]).
     pub snr_db: Option<f64>,
     /// RFPHY/TRM/BV-13-C; S=8 only.
     pub modulation: Option<CodedModulation>,
@@ -576,9 +702,13 @@ pub fn le_coded(
         return None;
     };
     let start = aligned.first + (aligned.tau - 0.5) * symbol;
-    let snr_db = aligned
-        .tester
-        .snr_db(start, start + symbols.len() as f64 * symbol);
+    let snr_db = snr_db(
+        recent,
+        rate,
+        offset_hz,
+        start,
+        start + symbols.len() as f64 * symbol,
+    );
     if coding == Coding::S2 {
         return Some(CodedReading {
             snr_db,
@@ -672,7 +802,7 @@ mod tests {
                     iq[start + k] += w * 0.5;
                 }
                 let recent = Recent::new([(0u64, &iq[..])]);
-                let (quality, _) = le_1m(&recent, 20e6, 0.0, start as f64 + 810.0, &air).unwrap();
+                let quality = le_1m(&recent, 20e6, 0.0, start as f64 + 810.0, &air).modulation;
                 let df2 = quality.unwrap().delta_f2_avg_hz.value();
                 assert!(df2 > 185e3, "seed {seed} at {start}: df2 {df2:.0} Hz");
             }
@@ -747,8 +877,9 @@ mod tests {
         let bit = rate / 1e6;
         let pdu_centre = base as f64 + ((lead + pdu_at) as f64 + 0.5) * bit;
         for wrong in [-0.3, 0.0, 0.3] {
-            let (modulation, drift) =
-                le_1m(&recent, rate, offset, pdu_centre + wrong * bit, &air).expect("held");
+            let LeReading {
+                modulation, drift, ..
+            } = le_1m(&recent, rate, offset, pdu_centre + wrong * bit, &air);
             let got = modulation.expect("both kinds of bit");
             for (name, g, w) in [
                 (
@@ -1075,7 +1206,17 @@ mod tests {
             &[1, 2, 3, 4],
         );
         let tx = Gfsk::new(1e6, 250_000.0, 0.5);
-        let (iq, start) = coded_burst(tx, &symbols, rate, 20, 0.01, base, &mut rng);
+        let (iq, start) = on_the_air(
+            tx,
+            &symbols,
+            rate,
+            300,
+            0.0,
+            Complex::new(0.0, 0.0),
+            0.01,
+            base,
+            &mut rng,
+        );
         let recent = Recent::new([(base, &iq[..])]);
         let got = le_coded(&recent, rate, 0.0, start, &symbols, Coding::S2).expect("held");
         assert!(
@@ -1094,29 +1235,300 @@ mod tests {
         use crate::signal::ble::coded::{self, Coding};
         use crate::signal::ble::detect::ADVERTISING_ACCESS_ADDRESS;
         let rate = 8e6;
-        let taps = measurement_filter(rate);
-        let (sum, sq) = taps.iter().fold((0.0f64, 0.0f64), |(a, b), &t| {
-            (a + t as f64, b + (t as f64).powi(2))
-        });
-        // The share of the added noise's power the filter lets through.
-        let passed = sq / (sum * sum);
         for (k, noise) in [0.3, 0.1, 0.03].into_iter().enumerate() {
             let mut rng = Rng::new(80 + k as u64);
             let payload: Vec<u8> = (0..30).map(|_| rng.next_u64() as u8).collect();
             let symbols =
                 coded::transmit(ADVERTISING_ACCESS_ADDRESS, Coding::S8, 38, 0x07, &payload);
             let tx = Gfsk::new(1e6, 250_000.0, 0.5);
-            let (iq, start) = coded_burst(tx, &symbols, rate, 40, noise, 0, &mut rng);
+            let (iq, start) = on_the_air(
+                tx,
+                &symbols,
+                rate,
+                300,
+                0.0,
+                Complex::new(0.0, 0.0),
+                noise,
+                0,
+                &mut rng,
+            );
             let recent = Recent::new([(0, &iq[..])]);
             let got = le_coded(&recent, rate, 0.0, start, &symbols, Coding::S8)
                 .and_then(|r| r.snr_db)
                 .expect("an SNR");
-            let want = -10.0 * (noise * passed).log10();
+            let want = -10.0 * (noise * passed(rate)).log10();
             assert!(
                 (got - want).abs() < 1.0,
                 "noise {noise}: {got:.2} dB, in band {want:.2} dB"
             );
         }
+    }
+
+    /// `bits` sent as a real packet is: silence before and after it, the
+    /// radio's DC-correcting high-pass (a one-pole blocker with its corner at
+    /// `corner_hz`, or none at 0) on the signal, then a DC offset of `dc` and
+    /// `noise` per complex sample added. The `quiet` silence either side, in
+    /// symbols, is held from `base`; returns the samples and the stream
+    /// position the packet's first symbol starts at.
+    #[allow(clippy::too_many_arguments)]
+    fn on_the_air(
+        tx: Gfsk,
+        bits: &[bool],
+        rate: f64,
+        quiet: usize,
+        corner_hz: f64,
+        dc: Complex<f32>,
+        noise: f64,
+        base: u64,
+        rng: &mut Rng,
+    ) -> (Vec<Complex<f32>>, f64) {
+        // A few random bits either side give the Gaussian filter its context;
+        // they are then silenced, as no transmitter sends them.
+        let pad = 4;
+        let mut all: Vec<bool> = (0..quiet + pad).map(|_| rng.next_u64() & 1 == 1).collect();
+        all.extend(bits);
+        all.extend((0..quiet + pad).map(|_| rng.next_u64() & 1 == 1));
+        let burst = Burst::new(tx, &all);
+        let n = burst.len_at(rate);
+        let sps = rate / 1e6;
+        let (a, b) = (
+            ((quiet + pad) as f64 * sps) as usize,
+            ((quiet + pad + bits.len()) as f64 * sps) as usize,
+        );
+        let mut iq: Vec<Complex<f32>> = burst
+            .iq(rate, n)
+            .iter()
+            .enumerate()
+            .map(|(i, z)| {
+                if (a..b).contains(&i) {
+                    Complex::new(z.re as f32, z.im as f32)
+                } else {
+                    Complex::new(0.0, 0.0)
+                }
+            })
+            .collect();
+        if corner_hz > 0.0 {
+            let pole = (-std::f64::consts::TAU * corner_hz / rate).exp() as f32;
+            let (mut last_x, mut last_y) = (Complex::new(0.0f32, 0.0), Complex::new(0.0f32, 0.0));
+            for z in iq.iter_mut() {
+                let y = *z - last_x + last_y * pole;
+                last_x = *z;
+                last_y = y;
+                *z = y;
+            }
+        }
+        let w = if noise > 0.0 {
+            rng.noise(n, noise)
+        } else {
+            vec![Complex::new(0.0, 0.0); n]
+        };
+        for (z, w) in iq.iter_mut().zip(&w) {
+            *z += dc + w;
+        }
+        (iq, base as f64 + a as f64)
+    }
+
+    /// The share of white noise's power the measurement filter lets through:
+    /// what turns a noise power per sample into the noise in its band.
+    fn passed(rate: f64) -> f64 {
+        let taps = measurement_filter(rate);
+        let (sum, sq) = taps.iter().fold((0.0f64, 0.0f64), |(a, b), &t| {
+            (a + t as f64, b + (t as f64).powi(2))
+        });
+        sq / (sum * sum)
+    }
+
+    /// **A packet at the tuned centre reads the SNR it has.** The radio puts
+    /// its DC offset, here 16 dB over the noise, exactly under it, and its
+    /// DC-correcting high-pass takes the packet's own slowly varying mean out.
+    /// An envelope estimator read both as noise: 40 dB came out near 20 on
+    /// the air. Off the centre the same radio does neither.
+    #[test]
+    fn a_coded_packet_reads_its_snr_through_the_radios_dc() {
+        use crate::signal::ble::coded::{self, Coding};
+        use crate::signal::ble::detect::ADVERTISING_ACCESS_ADDRESS;
+        let rate = 8e6;
+        let noise = 0.0003;
+        let want = -10.0 * (noise * passed(rate)).log10();
+        for offset in [0.0, 1e6] {
+            for corner in [0.0, 1e3, 5e3] {
+                let mut rng = Rng::new(91);
+                let payload: Vec<u8> = (0..8).map(|_| rng.next_u64() as u8).collect();
+                let symbols =
+                    coded::transmit(ADVERTISING_ACCESS_ADDRESS, Coding::S8, 38, 0x07, &payload);
+                let dc_amp = (noise * 10f64.powf(1.6)).sqrt() as f32;
+                let tx = Gfsk::new(1e6, 250_000.0, 0.5).with_cfo(offset);
+                let (iq, start) = on_the_air(
+                    tx,
+                    &symbols,
+                    rate,
+                    300,
+                    corner,
+                    Complex::new(dc_amp, -dc_amp * 0.5),
+                    noise,
+                    0,
+                    &mut rng,
+                );
+                let recent = Recent::new([(0, &iq[..])]);
+                let got = le_coded(&recent, rate, offset, start, &symbols, Coding::S8)
+                    .and_then(|r| r.snr_db)
+                    .expect("an SNR");
+                assert!(
+                    (got - want).abs() < 1.0,
+                    "offset {offset}, corner {corner}: {got:.2} dB, in band {want:.2} dB"
+                );
+            }
+        }
+    }
+
+    /// LE 1M is read on the same scale, in the same band, at three noise
+    /// levels and at the centre with the radio's DC under it.
+    #[test]
+    fn an_le_1m_packet_reads_its_snr_in_the_measurement_band() {
+        use crate::signal::ble::detect::{
+            access_address_bits, preamble_bits, ADVERTISING_ACCESS_ADDRESS,
+        };
+        let rate = 8e6;
+        for (k, (noise, offset)) in [(0.3, 1e6), (0.03, 1e6), (0.003, 0.0), (0.0003, 0.0)]
+            .into_iter()
+            .enumerate()
+        {
+            let mut rng = Rng::new(95 + k as u64);
+            let mut bits = preamble_bits(ADVERTISING_ACCESS_ADDRESS, Phy::OneM);
+            bits.extend(access_address_bits(ADVERTISING_ACCESS_ADDRESS));
+            let known = bits.len();
+            let air = crate::signal::ble::pdu::encode(37, 0x02, &(0..31u8).collect::<Vec<_>>());
+            bits.extend(&air);
+            let dc_amp = (noise * 10f64.powf(1.6)).sqrt() as f32;
+            let tx = Gfsk::new(1e6, 250_000.0, 0.5).with_cfo(offset);
+            let (iq, start) = on_the_air(
+                tx,
+                &bits,
+                rate,
+                300,
+                1e3,
+                Complex::new(dc_amp, 0.0),
+                noise,
+                0,
+                &mut rng,
+            );
+            let recent = Recent::new([(0, &iq[..])]);
+            let bit = rate / 1e6;
+            let pdu_centre = start + (known as f64 + 0.5) * bit;
+            let got = le_1m(&recent, rate, offset, pdu_centre, &air)
+                .snr_db
+                .expect("an SNR");
+            let want = -10.0 * (noise * passed(rate)).log10();
+            assert!(
+                (got - want).abs() < 1.0,
+                "noise {noise}, offset {offset}: {got:.2} dB, in band {want:.2} dB"
+            );
+        }
+    }
+
+    /// **A carrier up before the preamble is not noise.** Many transmitters
+    /// bring their carrier up 10 to 20 us before the first symbol; read as
+    /// noise, it refused half the packets on the air or read them low.
+    #[test]
+    fn a_carrier_up_before_the_preamble_is_not_read_as_noise() {
+        use crate::signal::ble::coded::{self, Coding};
+        use crate::signal::ble::detect::ADVERTISING_ACCESS_ADDRESS;
+        let rate = 8e6;
+        let noise = 0.0003;
+        let offset = 1e6;
+        let mut rng = Rng::new(96);
+        let symbols = coded::transmit(ADVERTISING_ACCESS_ADDRESS, Coding::S8, 38, 0x07, &[1, 2]);
+        let tx = Gfsk::new(1e6, 250_000.0, 0.5).with_cfo(offset);
+        let (mut iq, start) = on_the_air(
+            tx,
+            &symbols,
+            rate,
+            300,
+            0.0,
+            Complex::new(0.0, 0.0),
+            noise,
+            0,
+            &mut rng,
+        );
+        let lead = (20.0 * rate / 1e6) as usize;
+        let first = start as usize;
+        for (k, z) in iq[first - lead..first].iter_mut().enumerate() {
+            let turns = offset * k as f64 / rate;
+            *z += Complex::from_polar(1.0f32, (std::f64::consts::TAU * turns) as f32);
+        }
+        let recent = Recent::new([(0, &iq[..])]);
+        let got = le_coded(&recent, rate, offset, start, &symbols, Coding::S8)
+            .and_then(|r| r.snr_db)
+            .expect("an SNR");
+        let want = -10.0 * (noise * passed(rate)).log10();
+        assert!(
+            (got - want).abs() < 1.0,
+            "{got:.2} dB, in band {want:.2} dB"
+        );
+    }
+
+    /// **No quiet stretch before it, no SNR.** A packet whose noise would be
+    /// read over the tail of the one before it would call that packet noise;
+    /// it is refused rather than read low.
+    #[test]
+    fn a_burst_right_after_another_has_no_snr() {
+        use crate::signal::ble::coded::{self, Coding};
+        use crate::signal::ble::detect::ADVERTISING_ACCESS_ADDRESS;
+        let rate = 8e6;
+        let mut rng = Rng::new(93);
+        let symbols = coded::transmit(ADVERTISING_ACCESS_ADDRESS, Coding::S8, 38, 0x07, &[1, 2]);
+        let tx = Gfsk::new(1e6, 250_000.0, 0.5);
+        let (mut iq, start) = on_the_air(
+            tx,
+            &symbols,
+            rate,
+            300,
+            0.0,
+            Complex::new(0.0, 0.0),
+            0.001,
+            0,
+            &mut rng,
+        );
+        // Another transmitter, still sending until 60 us before this one.
+        let ones = vec![true; 200];
+        let other = Burst::new(Gfsk::new(1e6, 250_000.0, 0.5), &ones);
+        let sps = rate / 1e6;
+        let until = (start - 60.0 * sps) as usize;
+        let from = until - (100.0 * sps) as usize;
+        let wave = other.iq(rate, until - from);
+        for (k, z) in wave.iter().enumerate() {
+            iq[from + k] += Complex::new(z.re as f32, z.im as f32);
+        }
+        let recent = Recent::new([(0, &iq[..])]);
+        let got = le_coded(&recent, rate, 0.0, start, &symbols, Coding::S8).expect("held");
+        assert_eq!(got.snr_db, None);
+    }
+
+    /// Held from too late to see the stretch before it: no SNR either.
+    #[test]
+    fn a_burst_whose_quiet_stretch_is_not_held_has_no_snr() {
+        use crate::signal::ble::coded::{self, Coding};
+        use crate::signal::ble::detect::ADVERTISING_ACCESS_ADDRESS;
+        let rate = 8e6;
+        let mut rng = Rng::new(94);
+        let symbols = coded::transmit(ADVERTISING_ACCESS_ADDRESS, Coding::S8, 38, 0x07, &[1, 2]);
+        let tx = Gfsk::new(1e6, 250_000.0, 0.5);
+        let (iq, start) = on_the_air(
+            tx,
+            &symbols,
+            rate,
+            300,
+            0.0,
+            Complex::new(0.0, 0.0),
+            0.001,
+            0,
+            &mut rng,
+        );
+        // Held from 40 us before the packet: the stretch needs 110.
+        let cut = (start - 40.0 * rate / 1e6) as usize;
+        let recent = Recent::new([(cut as u64, &iq[cut..])]);
+        let got = le_coded(&recent, rate, 0.0, start, &symbols, Coding::S8);
+        assert_eq!(got.and_then(|r| r.snr_db), None);
     }
 
     /// A carrier drifting 200 Hz a microsecond through a whole S=8 packet:

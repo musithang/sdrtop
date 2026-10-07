@@ -707,7 +707,10 @@ mod tests {
         ));
         let mut rng = Rng::new(1);
         bits.extend((0..16).map(|_| rng.next_u64() & 1 == 1));
-        let clean = modulate(&bits, SPS, 250_000.0, SAMPLE_RATE, 0.5);
+        // Heard out of silence, as every packet is: its SNR is read against
+        // the noise just before it.
+        let mut clean = vec![Complex::new(0.0f32, 0.0); 200 * SPS];
+        clean.extend(modulate(&bits, SPS, 250_000.0, SAMPLE_RATE, 0.5));
         let noisy = at_snr(&clean, 20.0, &mut Rng::new(2));
 
         let geometry = eight_bit();
@@ -1136,10 +1139,18 @@ mod tests {
             })
             .collect();
         let snr = |ps: &[&&BlePacket]| {
-            let v: Vec<f64> = ps.iter().filter_map(|p| p.snr_db).collect();
-            let lo = v.iter().cloned().fold(f64::INFINITY, f64::min);
-            let hi = v.iter().cloned().fold(f64::NEG_INFINITY, f64::max);
-            format!("{lo:.1} to {hi:.1} dB")
+            let mut v: Vec<f64> = ps.iter().filter_map(|p| p.snr_db).collect();
+            v.sort_by(f64::total_cmp);
+            let (lo, hi) = (v.first().copied(), v.last().copied());
+            let median = (!v.is_empty()).then(|| v[v.len() / 2]);
+            format!(
+                "{} to {} dB, median {}, {} of {} read",
+                lo.map_or("-".into(), |x| format!("{x:.1}")),
+                hi.map_or("-".into(), |x| format!("{x:.1}")),
+                median.map_or("-".into(), |x| format!("{x:.1}")),
+                v.len(),
+                ps.len()
+            )
         };
         let prim: Vec<_> = kept
             .iter()

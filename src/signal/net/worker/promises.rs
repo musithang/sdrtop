@@ -204,10 +204,19 @@ pub(super) fn listen_due(
                 Phy::OneM => {
                     let offset = crate::signal::ble::channel::centre_hz(promise.channel)
                         .map(|hz| hz as f64 - tuning.centre_hz);
-                    let read = offset.zip(p.pdu_pair).and_then(|(o, at)| {
-                        crate::signal::net::measure::le_1m(window, tuning.rate_hz, o, at, &p.air)
-                    });
-                    (p.modulation, p.drift) = read.unwrap_or((None, None));
+                    let read = offset
+                        .zip(p.pdu_pair)
+                        .map(|(o, at)| {
+                            crate::signal::net::measure::le_1m(
+                                window,
+                                tuning.rate_hz,
+                                o,
+                                at,
+                                &p.air,
+                            )
+                        })
+                        .unwrap_or_default();
+                    (p.snr_db, p.modulation, p.drift) = (read.snr_db, read.modulation, read.drift);
                     None
                 }
                 Phy::TwoM => None,

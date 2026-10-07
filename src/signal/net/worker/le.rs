@@ -299,16 +299,20 @@ impl Le {
             return;
         };
         // LE 1M read again as a tester reads it (`measure::le_1m`), outside the
-        // lock; a packet whose window is not held keeps no figure rather than
-        // the receiver's own. LE 2M keeps the receiver's.
+        // lock, its SNR included, on the scale LE Coded's is read on; a packet
+        // whose window is not held keeps no figure rather than the receiver's
+        // own. LE 2M keeps the receiver's.
         if phy == crate::signal::ble::Phy::OneM && !packets.is_empty() {
             let offset =
                 crate::signal::ble::channel::centre_hz(ch).map(|hz| hz as f64 - tuning.centre_hz);
             for p in packets.iter_mut() {
-                let read = offset.zip(p.pdu_pair).and_then(|(o, at)| {
-                    crate::signal::net::measure::le_1m(window, tuning.rate_hz, o, at, &p.air)
-                });
-                (p.modulation, p.drift) = read.unwrap_or((None, None));
+                let read = offset
+                    .zip(p.pdu_pair)
+                    .map(|(o, at)| {
+                        crate::signal::net::measure::le_1m(window, tuning.rate_hz, o, at, &p.air)
+                    })
+                    .unwrap_or_default();
+                (p.snr_db, p.modulation, p.drift) = (read.snr_db, read.modulation, read.drift);
             }
         }
         let funnel = rx.take_funnel();

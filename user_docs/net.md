@@ -438,6 +438,17 @@ The selected packet, spelled out:
 - **Physics**: SNR, carrier offset in kHz and ppm, and the carrier at the
   start and end of the packet: the start is the preamble's mean frequency
   (the test suite's f0), the end the last ten bits before the CRC.
+
+  <a id="how-snr-is-read"></a>**How the SNR is read.** In LE 1M's band, as
+  the packet's power over the noise in a quiet stretch just before it (130
+  to 30 µs before: a transmitter's carrier is often up before its
+  preamble), with the radio's DC offset measured there and taken out of
+  both. It is the same scale for LE 1M and LE Coded. A packet heard straight
+  after another, with no quiet stretch before it, shows no SNR rather than a
+  low one. LE 2M's is still the receiver's own estimate. Before this, the
+  envelope was read, and that counted anything that moves it as noise: a
+  phone 35 dB above the noise read 18 at the tuned centre, where the radio's
+  DC sits under the packet.
 - **Modulation**: the transmitter's modulation index, deviation and drift
   against the specification's limits, each drawn as a bar with the limit
   marked. Read from the packet's own symbols; a packet whose CRC failed is
@@ -888,7 +899,8 @@ type code and are told apart by where they were heard) and the scheme
     2M receiver at that rate).
 
   An auxiliary packet says which `ADV_EXT_IND` pointed at it instead.
-- **SNR**, and **f0**: the carrier at the start, from the preamble.
+- **SNR** (read as on LE 1M, see [how the SNR is read](#how-snr-is-read)),
+  and **f0**: the carrier at the start, from the preamble.
 - On **S=8**, the transmitter against the LE Coded tests: the average
   deviation (225 to 275 kHz), the share of symbols above 185 kHz (the suite
   asks 99.9 %), and the drift through the packet, each a bar with its limit
