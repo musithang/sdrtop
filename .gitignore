@@ -27,3 +27,6 @@ CLAUDE.md
 # Developer-specific docsuments
 dev_docs/
 design_docs/
+
+# npm, when a tool gets installed into the tree by accident
+node_modules/

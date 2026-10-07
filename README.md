@@ -63,7 +63,7 @@ It's a hobby project built in my spare time, and honestly, I made it for *you* â
 ## Gallery
 
 <p align="center">
-  <a href="https://raw.githubusercontent.com/musithang/sdrtop/main/user_docs/pics/hackrf/demo.gif">
+  <a href="https://github.com/musithang/sdrtop/blob/main/user_docs/pics/hackrf/demo.gif">
     <img src="https://raw.githubusercontent.com/musithang/sdrtop/main/user_docs/pics/hackrf/demo.gif" width="100%" alt="sdrtop running live on a HackRF One">
   </a>
 </p>
@@ -73,7 +73,7 @@ It's a hobby project built in my spare time, and honestly, I made it for *you* â
 <table>
   <tr>
     <td width="50%" align="center" valign="top">
-      <a href="https://raw.githubusercontent.com/musithang/sdrtop/main/user_docs/pics/hackrf/piconet_follow.gif">
+      <a href="https://github.com/musithang/sdrtop/blob/main/user_docs/pics/hackrf/piconet_follow.gif">
         <img src="https://raw.githubusercontent.com/musithang/sdrtop/main/user_docs/pics/hackrf/piconet_follow.gif" width="100%" alt="Following a classic Bluetooth piconet">
       </a>
       <br>
@@ -82,7 +82,7 @@ It's a hobby project built in my spare time, and honestly, I made it for *you* â
       <sub>One piconet, found by the access code at the start of every packet and read packet by packet. <a href="user_docs/net.md#piconets--classic-1">How it works</a></sub>
     </td>
     <td width="50%" align="center" valign="top">
-      <a href="https://raw.githubusercontent.com/musithang/sdrtop/main/user_docs/pics/hackrf/rds_demodulation.gif">
+      <a href="https://github.com/musithang/sdrtop/blob/main/user_docs/pics/hackrf/rds_demodulation.gif">
         <img src="https://raw.githubusercontent.com/musithang/sdrtop/main/user_docs/pics/hackrf/rds_demodulation.gif" width="100%" alt="RDS demodulation on an FM broadcast station">
       </a>
       <br>
