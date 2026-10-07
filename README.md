@@ -69,12 +69,12 @@ https://github.com/user-attachments/assets/af278500-24ff-4d98-8129-b421fd513a49
 **Piconet follow** · classic Bluetooth<br>
 <sub>One piconet, found by the access code at the start of every packet and read packet by packet. [How it works](user_docs/net.md#piconets--classic-1)</sub>
 
-https://github.com/user-attachments/assets/28ac2b8b-bacb-48b1-b51c-5089692e27a2
+https://github.com/user-attachments/assets/a9c554c0-bb78-4ac9-9970-b569650d4d08
 
 **RDS demodulation** · FM broadcast<br>
 <sub>Station name, programme type and RadioText, read off the 57 kHz subcarrier. No audio, on purpose. [How it works](user_docs/demodulator.md#rds-in-two-halves)</sub>
 
-https://github.com/user-attachments/assets/6a61ebc2-e0a6-4c19-928e-36823dbea902
+https://github.com/user-attachments/assets/0586cbb9-a0e7-48e0-81b5-664c7c9cfd5a
 
 > [!NOTE]
 > **Classic Bluetooth and BLE are still a work in progress.** The decoding and the measurements are in; the screens and the math are still being polished, so the piconet clip is a snapshot of where it stands today, not where it ends up.
