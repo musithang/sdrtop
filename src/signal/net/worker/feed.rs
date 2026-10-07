@@ -4,7 +4,17 @@
 //! What the stream brought: whether a block follows the last one, the
 //! samples held for the measurement path, and what handling it cost.
 
-use crate::hardware::SampleGeometry;
+use std::collections::VecDeque;
+use std::time::Instant;
+
+use num_complex::Complex;
+
+use crate::hardware::{SampleGeometry, StreamBlock};
+use crate::signal::net::measure::Recent;
+use crate::signal::stream::plan_block;
+use crate::state::NetDecodeHealth;
+
+use super::follow::FOLLOW_HELD_S;
 
 /// `bytes` as samples, decoded into `slot` the first time a receiver asks
 /// and handed out as they are after that.
@@ -22,7 +32,7 @@ pub(super) fn decoded_block<'a>(
 
 /// The blocks the measurement path may cut a burst from: those held from
 /// before, and this one.
-pub(super) fn held<'a>(
+fn held<'a>(
     recent: &'a std::collections::VecDeque<(u64, Vec<num_complex::Complex<f32>>)>,
     current: Option<(u64, &'a [num_complex::Complex<f32>])>,
 ) -> crate::signal::net::measure::Recent<'a> {
@@ -34,18 +44,18 @@ pub(super) fn held<'a>(
     )
 }
 
-/// What the worker carries from one block to the next.
+/// Where the run of blocks stands, by sequence number.
 ///
 /// Three fields, and two of them exist only so that a gap can be told from a
 /// pause. See [`Run::suspend`].
 #[derive(Default)]
-pub(super) struct Run {
-    pub(super) last_seq: u64,
+struct Run {
+    last_seq: u64,
     /// The sequence of the previous block *that reached us*, or `None` when the
     /// run has not started.
-    pub(super) drop_ref: Option<u64>,
+    drop_ref: Option<u64>,
     /// Unbroken blocks since the last gap.
-    pub(super) blocks: u64,
+    blocks: u64,
 }
 
 impl Run {
@@ -56,7 +66,7 @@ impl Run {
     /// been lost. Clearing `drop_ref` is what stops that jump being reported as
     /// the worst loss event of the session. The run length goes with it: there
     /// is no run any more.
-    pub(super) fn suspend(&mut self) {
+    fn suspend(&mut self) {
         self.drop_ref = None;
         self.blocks = 0;
     }
@@ -85,7 +95,7 @@ const LOAD_WINDOW_S: f64 = 0.5;
 /// Pure, with the clock read by the caller, so the arithmetic is testable
 /// without a radio or a real stopwatch.
 #[derive(Default)]
-pub(super) struct Load {
+struct Load {
     busy: std::time::Duration,
     stream_s: f64,
 }
@@ -94,12 +104,7 @@ impl Load {
     /// Add one block: `spent` handling it, `pairs` I/Q pairs of it at
     /// `rate_hz`. Returns a reading once a whole window has been covered, and
     /// starts the next one.
-    pub(super) fn add(
-        &mut self,
-        spent: std::time::Duration,
-        pairs: u64,
-        rate_hz: f64,
-    ) -> Option<f64> {
+    fn add(&mut self, spent: std::time::Duration, pairs: u64, rate_hz: f64) -> Option<f64> {
         // A rate that is not a positive number covers no stream time, and
         // dividing by it would invent a load.
         if rate_hz.is_nan() || rate_hz <= 0.0 {
@@ -113,6 +118,196 @@ impl Load {
         let load = self.busy.as_secs_f64() / self.stream_s;
         *self = Load::default();
         Some(load)
+    }
+}
+
+/// What the worker carries of the stream from one block to the next: where
+/// it stands, what is held of it, and what handling it costs.
+pub(super) struct Feed {
+    run: Run,
+    pair_bytes: u64,
+    /// Where the next block must start for the stream to be unbroken. `None`
+    /// until a block has been seen, and again after the section closes.
+    next_pair: Option<u64>,
+    /// The last few decoded blocks, with their stream positions: what the
+    /// measurement path cuts a burst's raw samples from ([`Recent`]), moved
+    /// here as each block finishes rather than copied, and dropped at any
+    /// break.
+    recent: VecDeque<(u64, Vec<Complex<f32>>)>,
+    /// The tuning and rate of the samples held in `recent`: a retune keeps
+    /// the stream's positions running, so only this says the held samples
+    /// are another tuning's.
+    held_tuning: Option<(f64, f64)>,
+    load: Load,
+}
+
+/// What one block's arrival says about the stream.
+pub(super) struct Arrival {
+    /// The I/Q pairs it holds.
+    pub(super) pairs: u64,
+    /// The run of blocks broke before it.
+    broke: bool,
+    /// Blocks the channel lost before it.
+    dropped: u64,
+    /// Unbroken blocks since the last gap, this one included.
+    run_blocks: u64,
+    /// Its first sample follows the last block's last one.
+    pub(super) continuous: bool,
+    /// Its position is behind the expected one: a new stream (RX was
+    /// restarted, `RxContext::begin_stream`), whose clock starts again.
+    pub(super) new_stream: bool,
+    /// It was captured at another tuning or rate than the samples held.
+    pub(super) retuned: bool,
+}
+
+impl Arrival {
+    /// Counted into the feed's health, inside the caller's lock: integer
+    /// work and a clock read before it, nothing else.
+    pub(super) fn count(&self, h: &mut NetDecodeHealth, now: Instant) {
+        h.blocks_in = h.blocks_in.saturating_add(1);
+        h.pairs_in = h.pairs_in.saturating_add(self.pairs);
+        h.gaps = h.gaps.saturating_add(u64::from(self.broke));
+        h.blocks_lost = h.blocks_lost.saturating_add(self.dropped);
+        h.run_blocks = self.run_blocks;
+        h.last_block = Some(now);
+        if self.broke || self.dropped > 0 {
+            h.last_loss = Some(now);
+        }
+    }
+}
+
+impl Feed {
+    pub(super) fn new(geometry: SampleGeometry) -> Self {
+        Self {
+            run: Run::default(),
+            pair_bytes: geometry.bytes_per_pair() as u64,
+            next_pair: None,
+            recent: VecDeque::new(),
+            held_tuning: None,
+            load: Load::default(),
+        }
+    }
+
+    /// One block arrived: where it stands in the run and the stream, and
+    /// whether the samples held can still be joined to it. They are dropped
+    /// where they cannot.
+    pub(super) fn arrive(&mut self, b: &StreamBlock) -> Arrival {
+        let run = &mut self.run;
+        let started = run.drop_ref.is_some();
+        let plan = plan_block(b.seq, b.gap_before, run.last_seq, run.drop_ref);
+        run.last_seq = b.seq;
+        run.drop_ref = Some(b.seq);
+
+        let pairs = b.bytes.len() as u64 / self.pair_bytes.max(1);
+        // **A run has to have started before it can be interrupted.**
+        // `plan_block` guards its `dropped` count with `drop_ref` and does
+        // not guard `contiguous` with anything, because for the demod the
+        // difference is invisible: a first block declared discontiguous just
+        // resets session state that is already empty. Here the same flag is
+        // about to become a number on a panel, and the section is normally
+        // opened on a radio that has been streaming for a minute - so the
+        // first block through carries a sequence number thousands past
+        // whatever this worker last saw, and would report an interruption
+        // that never happened, once per visit.
+        let broke = started && !plan.contiguous;
+        run.blocks = if broke || !started { 1 } else { run.blocks + 1 };
+
+        // **No receiver is ever carried across a break in the samples.** A
+        // decimator's filter state, a capture half-filled with the start of
+        // a packet, a classic receiver's symbol count - all of them assume
+        // the next sample follows the last one. Across a refused block, a
+        // driver drop or a restarted stream it does not, and carrying on
+        // joins two moments milliseconds apart into one signal that never
+        // existed. The position the block carries says whether it follows;
+        // when it does not, the receivers start again from this block.
+        let continuous = self.next_pair == Some(b.first_pair);
+        let new_stream = self.next_pair.is_some_and(|n| b.first_pair < n);
+        if !continuous {
+            self.recent.clear();
+        }
+        self.next_pair = Some(b.first_pair + pairs);
+        // Samples held from another tuning are not this one's: a window or
+        // a measurement cut from them would be mixed to the wrong channel.
+        let tuning = (b.centre_hz as f64, b.rate_hz);
+        let retuned = self.held_tuning.is_some_and(|t| t != tuning);
+        if retuned {
+            self.recent.clear();
+        }
+        self.held_tuning = Some(tuning);
+        Arrival {
+            pairs,
+            broke,
+            dropped: plan.dropped,
+            run_blocks: run.blocks,
+            continuous,
+            new_stream,
+            retuned,
+        }
+    }
+
+    /// The blocks the measurement path may cut a burst from: those held from
+    /// before, and `current`, this one, where it was decoded.
+    pub(super) fn window<'a>(&'a self, current: Option<(u64, &'a [Complex<f32>])>) -> Recent<'a> {
+        held(&self.recent, current)
+    }
+
+    /// This block, held for the measurement path, as much as
+    /// `measure::HELD_S` asks and no more, or as [`FOLLOW_HELD_S`] where
+    /// something needs `longer` (a followed connection's event, an LE Coded
+    /// packet at S=8, which lasts up to 17 ms and is measured whole once it
+    /// ends, or a promise's window). A block nothing decoded, or one that
+    /// arrived with the section closed, leaves a hole, so what was held
+    /// before it can no longer be joined to what comes after.
+    pub(super) fn hold(
+        &mut self,
+        first_pair: u64,
+        iq: Option<Vec<Complex<f32>>>,
+        open: bool,
+        longer: bool,
+        rate_hz: f64,
+    ) {
+        match iq {
+            Some(block) if open => {
+                self.recent.push_back((first_pair, block));
+                let held_s = if longer {
+                    FOLLOW_HELD_S.max(crate::signal::net::measure::HELD_S)
+                } else {
+                    crate::signal::net::measure::HELD_S
+                };
+                let keep = (held_s * rate_hz) as usize;
+                while self.recent.len() > 1
+                    && self
+                        .recent
+                        .iter()
+                        .skip(1)
+                        .map(|(_, b)| b.len())
+                        .sum::<usize>()
+                        >= keep
+                {
+                    self.recent.pop_front();
+                }
+            }
+            _ => self.recent.clear(),
+        }
+    }
+
+    /// The decode load, once a window of it is covered: `spent` handling a
+    /// block of `pairs` at `rate_hz`.
+    pub(super) fn cost(
+        &mut self,
+        spent: std::time::Duration,
+        pairs: u64,
+        rate_hz: f64,
+    ) -> Option<f64> {
+        self.load.add(spent, pairs, rate_hz)
+    }
+
+    /// The section closed: the run is suspended rather than broken, the load
+    /// starts again, and the next block starts a stream of its own.
+    pub(super) fn close(&mut self) {
+        self.run.suspend();
+        self.load = Load::default();
+        self.next_pair = None;
     }
 }
 

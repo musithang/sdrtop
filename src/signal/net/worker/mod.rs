@@ -44,6 +44,19 @@
 //!   the session: a piconet's real UAP does not change, so a later header whose
 //!   payload cannot be read (a POLL or an FHS, say) must not undo an answer
 //!   already earned.
+//!
+//! **Split by what each part carries from one block to the next.** Each owns
+//! its state and the lock blocks that publish it, and keeps every float and
+//! every receiver's work outside them; [`NetWorker::run`] only sequences
+//! them, in the order the block needs:
+//!
+//! - [`feed`]: where the stream stands (a gap, a pause, a new stream, a
+//!   retune), the samples held for the measurement path, and the decode load.
+//! - [`band`]: the survey's band measurement, a dwell at a time.
+//! - [`le`]: the BLE and LE Coded receivers, the AuxPtr promises their
+//!   advertisements made ([`promises`]) and the connections they followed
+//!   ([`follow`]); [`ble`] is what a decoded LE packet becomes in the state.
+//! - [`classic`]: the classic fleet and what each piconet has taught it.
 
 use std::sync::{Arc, Mutex};
 use std::time::Instant;
@@ -51,7 +64,6 @@ use std::time::Instant;
 use crossbeam_channel::Receiver as SampleReceiver;
 
 use crate::hardware::{SampleGeometry, StreamBlock};
-use crate::signal::stream::plan_block;
 use crate::state::SdrMetrics;
 
 // The views the classic receiver runs for (the Classic and the Piconet
@@ -59,8 +71,8 @@ use crate::state::SdrMetrics;
 // by, and the registry's structural tests hold the strings and the preset
 // files' names to agreeing. A view left out would show an empty list forever.
 use super::lock::CLASSIC_VIEWS;
-use super::scan::Scan;
 
+mod band;
 mod ble;
 mod classic;
 mod feed;
@@ -68,9 +80,9 @@ mod follow;
 mod le;
 mod promises;
 
+use band::Band;
 use classic::{push_all, Classic};
-use feed::{decoded_block, held, Load, Run};
-use follow::FOLLOW_HELD_S;
+use feed::{decoded_block, Feed};
 use le::Le;
 
 /// Above this many simultaneous classic BT channels, `NetWorker::new` logs a
@@ -79,23 +91,6 @@ use le::Le;
 /// guarding against. Matches `config::default_bt_channels`, so a default
 /// config never warns; only a config that deliberately asks for more does.
 pub const SAFE_BT_CHANNELS: usize = 8;
-
-/// How much *observation* a dwell is, before it is published and started again.
-///
-/// **Not a wall-clock interval, which is what this was first written as.** The
-/// feed is lossy and the section can be closed and reopened, so wall time and
-/// time spent looking at the band are different quantities, and a duty cycle is
-/// a fraction of the second one. Counting windows means a dwell interrupted by
-/// dropped blocks is a shorter dwell rather than a diluted one - and it means
-/// the measurement can be tested without a clock, which is how the end-to-end
-/// test below exists at all.
-///
-/// Fifty milliseconds is about eight thousand windows. The duty cycle that
-/// supports is good to a quarter of a percent, which is finer than the whole
-/// percent it is shown to and not by much - see
-/// [`super::occupancy::DUTY_RESOLUTION`], where the two were made to agree. It
-/// publishes at most twenty times a second against a screen that redraws thirty.
-const DWELL_S: f64 = 0.05;
 
 /// Where one block sits in the stream and what it was captured at: what
 /// every receiver is built for and every window is cut against.
@@ -126,6 +121,37 @@ struct View {
     locked: bool,
     /// A connection is being followed.
     following: bool,
+}
+
+impl View {
+    /// The view, and the usable span of the tuning at `rate_hz`, read inside
+    /// the caller's lock.
+    fn read(m: &SdrMetrics, rate_hz: f64) -> (View, f64) {
+        // The usable span is the baseband filter's where the radio has one,
+        // because the bins the front end rolled off carry no measurement and
+        // averaging them in would drag every cell at the edges of the view
+        // down towards a floor that is not the band's. Where there is no
+        // filter, the rate is all we know.
+        let span = if m.radio.bb_filter_hz > 0 {
+            m.radio.bb_filter_hz as f64
+        } else {
+            rate_hz
+        };
+        let view = View {
+            open: m.ui.is_net_section(),
+            classic: CLASSIC_VIEWS.contains(&m.ui.active_preset.as_str()),
+            survey: m.ui.active_preset == super::lock::SURVEY_VIEW,
+            coded: super::lock::CODED_VIEWS.contains(&m.ui.active_preset.as_str()),
+            phy: m.net.ble_phy,
+            locked: m.net.mode == crate::state::NetMode::Lock,
+            following: m
+                .net
+                .ble_connections
+                .iter()
+                .any(|f| *f.connection.state() == crate::signal::ble::follow::State::Following),
+        };
+        (view, span.min(rate_hz))
+    }
 }
 
 pub struct NetWorker {
@@ -173,180 +199,70 @@ impl NetWorker {
     }
 
     pub fn run(self) {
-        let mut run = Run::default();
-        let pair_bytes = self.geometry.bytes_per_pair() as u64;
-        let mut scan: Option<Scan> = None;
+        let mut feed = Feed::new(self.geometry);
+        let mut band = Band::default();
         let mut le = Le::default();
         let mut classic = Classic::new(self.survey_bt_start);
-        let mut load = Load::default();
-        // Where the next block must start for the stream to be unbroken. `None`
-        // until a block has been seen, and again after the section closes.
-        let mut next_pair: Option<u64> = None;
-        // The last few decoded blocks, with their stream positions: what the
-        // measurement path cuts a burst's raw samples from
-        // (`measure::Recent`), moved here as each block finishes rather than
-        // copied, and dropped at any break.
-        let mut recent: std::collections::VecDeque<(u64, Vec<num_complex::Complex<f32>>)> =
-            std::collections::VecDeque::new();
-        // The tuning and rate of the samples held in `recent`: a retune
-        // keeps the stream's positions running, so only this says the held
-        // samples are another tuning's.
-        let mut held_tuning: Option<(f64, f64)> = None;
 
-        while let Ok(StreamBlock {
-            seq,
-            gap_before,
-            bytes,
-            first_pair,
-            centre_hz,
-            rate_hz,
-        }) = self.sample_rx.recv()
-        {
-            let started = run.drop_ref.is_some();
-            let plan = plan_block(seq, gap_before, run.last_seq, run.drop_ref);
+        while let Ok(block) = self.sample_rx.recv() {
             // The clock is read outside the lock, because the lock block below
             // does integer work only and a float or a syscall inside one is a
             // dropped frame on the UI thread.
             let now = Instant::now();
-            run.last_seq = seq;
-            run.drop_ref = Some(seq);
-
-            let pairs = bytes.len() as u64 / pair_bytes.max(1);
-            // **A run has to have started before it can be interrupted.**
-            // `plan_block` guards its `dropped` count with `drop_ref` and does
-            // not guard `contiguous` with anything, because for the demod the
-            // difference is invisible: a first block declared discontiguous just
-            // resets session state that is already empty. Here the same flag is
-            // about to become a number on a panel, and the section is normally
-            // opened on a radio that has been streaming for a minute - so the
-            // first block through carries a sequence number thousands past
-            // whatever this worker last saw, and would report an interruption
-            // that never happened, once per visit.
-            let broke = started && !plan.contiguous;
-            run.blocks = if broke || !started { 1 } else { run.blocks + 1 };
-
-            // **No receiver is ever carried across a break in the samples.** A
-            // decimator's filter state, a capture half-filled with the start of
-            // a packet, a classic receiver's symbol count - all of them assume
-            // the next sample follows the last one. Across a refused block, a
-            // driver drop or a restarted stream it does not, and carrying on
-            // joins two moments milliseconds apart into one signal that never
-            // existed. The position the block carries says whether it follows;
-            // when it does not, the receivers start again from this block.
-            let continuous = next_pair == Some(first_pair);
-            // A position *behind* the expected one is a new stream (RX was
-            // restarted, `RxContext::begin_stream`), whose clock starts again.
-            if next_pair.is_some_and(|n| first_pair < n) {
-                classic.new_stream();
-            }
-            classic.rate(rate_hz);
-            if !continuous {
-                le.interrupted(&self.state);
-                classic.fleet.clear();
-                recent.clear();
-            }
-            next_pair = Some(first_pair + pairs);
-            // The tuning and rate these samples were captured at, from the
-            // block rather than the state: see `StreamBlock::centre_hz`.
-            let centre_hz = centre_hz as f64;
-            // Samples held from another tuning are not this one's: a window
-            // or a measurement cut from them would be mixed to the wrong
-            // channel. Dropped, and the promises waiting on them said.
-            if held_tuning.is_some_and(|t| t != (centre_hz, rate_hz)) {
-                recent.clear();
-                le.retuned(&self.state);
-            }
-            held_tuning = Some((centre_hz, rate_hz));
-
-            let (view, span_hz) = {
-                let mut m = self.state.lock().unwrap_or_else(|e| e.into_inner());
-                let h = &mut m.net.health;
-                h.blocks_in = h.blocks_in.saturating_add(1);
-                h.pairs_in = h.pairs_in.saturating_add(pairs);
-                h.gaps = h.gaps.saturating_add(u64::from(broke));
-                h.blocks_lost = h.blocks_lost.saturating_add(plan.dropped);
-                h.run_blocks = run.blocks;
-                h.last_block = Some(now);
-                if broke || plan.dropped > 0 {
-                    h.last_loss = Some(now);
-                }
-                // The usable span is the baseband filter's where the radio has
-                // one, because the bins the front end rolled off carry no
-                // measurement and averaging them in would drag every cell at the
-                // edges of the view down towards a floor that is not the band's.
-                // Where there is no filter, the rate is all we know.
-                let span = if m.radio.bb_filter_hz > 0 {
-                    m.radio.bb_filter_hz as f64
-                } else {
-                    rate_hz
-                };
-                let view = View {
-                    open: m.ui.is_net_section(),
-                    classic: CLASSIC_VIEWS.contains(&m.ui.active_preset.as_str()),
-                    survey: m.ui.active_preset == super::lock::SURVEY_VIEW,
-                    coded: super::lock::CODED_VIEWS.contains(&m.ui.active_preset.as_str()),
-                    phy: m.net.ble_phy,
-                    locked: m.net.mode == crate::state::NetMode::Lock,
-                    following: m.net.ble_connections.iter().any(|f| {
-                        *f.connection.state() == crate::signal::ble::follow::State::Following
-                    }),
-                };
-                (view, span.min(rate_hz))
-            };
-            let tuning = Tuning {
+            let arrival = feed.arrive(&block);
+            let StreamBlock {
+                bytes,
                 first_pair,
                 centre_hz,
                 rate_hz,
+                ..
+            } = block;
+            if arrival.new_stream {
+                classic.new_stream();
+            }
+            classic.rate(rate_hz);
+            if !arrival.continuous {
+                le.interrupted(&self.state);
+                classic.fleet.clear();
+            }
+            if arrival.retuned {
+                le.retuned(&self.state);
+            }
+
+            let (view, span_hz) = {
+                let mut m = self.state.lock().unwrap_or_else(|e| e.into_inner());
+                arrival.count(&mut m.net.health, now);
+                View::read(&m, rate_hz)
+            };
+            // The tuning and rate these samples were captured at, from the
+            // block rather than the state: see `StreamBlock::centre_hz`.
+            let tuning = Tuning {
+                first_pair,
+                centre_hz: centre_hz as f64,
+                rate_hz,
                 span_hz,
             };
-
-            // Decoded once, by the first receiver that needs it, and shared by
-            // the BLE receiver and every classic channel: each used to turn the
-            // same bytes into the same samples for itself.
-            let mut iq: Option<Vec<num_complex::Complex<f32>>> = None;
             let feeds = le.choose(tuning, view, &self.state);
 
-            // Decoded once, before either decoder runs, so both read it at once.
+            // Decoded once, by the first receiver that needs it, before any
+            // runs, and shared by them all.
             let classic_here = view.open && (view.classic || view.survey);
             let follow_here = view.open && view.following;
-            // The band is measured on the survey, the one view that shows
-            // it; elsewhere its cost would buy nothing on screen, and its
-            // time axis is kept moving with "nobody looked" instead.
-            let scan_here = view.open && view.survey;
-            if feeds.any() || classic_here || follow_here || scan_here {
+            let survey_here = view.open && view.survey;
+            let mut iq: Option<Vec<num_complex::Complex<f32>>> = None;
+            if feeds.any() || classic_here || follow_here || survey_here {
                 decoded_block(&mut iq, &bytes, self.geometry);
             }
-            if scan_here {
-                // Retuning invalidates every cell mapping, so the scan is
-                // rebuilt and whatever it had accumulated goes with it: half a
-                // dwell at one frequency and half at another is a measurement
-                // of neither.
-                if !scan
-                    .as_ref()
-                    .is_some_and(|s| s.matches(centre_hz, rate_hz, span_hz))
-                {
-                    scan = Some(Scan::new(centre_hz, rate_hz, span_hz));
-                }
-                if let (Some(scan), Some(block)) = (scan.as_mut(), iq.as_deref()) {
-                    scan.push_iq(block);
-                    if scan.observed_s() >= DWELL_S {
-                        let band = scan.take();
-                        let mut m = self.state.lock().unwrap_or_else(|e| e.into_inner());
-                        m.net.band.absorb(band, now);
-                    }
-                }
+            if survey_here {
+                band.measure(iq.as_deref(), tuning, now, &self.state);
             } else {
-                scan = None;
-                if view.open {
-                    let mut m = self.state.lock().unwrap_or_else(|e| e.into_inner());
-                    m.net.band.mark_unobserved(now);
-                }
+                band.unobserved(view.open, now, &self.state);
             }
             let block: &[num_complex::Complex<f32>] = iq.as_deref().unwrap_or(&[]);
             // What is held of the stream, this block included: what every
             // window and measurement below is cut from, and where it ends
             // once this block is decoded.
-            let window = held(&recent, iq.as_deref().map(|v| (first_pair, v)));
+            let window = feed.window(iq.as_deref().map(|v| (first_pair, v)));
             let held_end = iq.as_deref().map(|v| (first_pair + v.len() as u64) as f64);
             let mut ble_packets: Option<Vec<crate::signal::ble::pdu::Packet>> = None;
 
@@ -388,45 +304,17 @@ impl NetWorker {
                 le.keep_promises(&window, end, tuning, now, &self.state);
             }
 
-            // Held for the measurement path, as much as `measure::HELD_S`
-            // asks and no more, or a followed connection's event needs; a
-            // block nothing decoded leaves a hole, so what was held before it
-            // can no longer be joined to what comes after.
-            match iq.take() {
-                Some(block) if view.open => {
-                    recent.push_back((first_pair, block));
-                    // An LE Coded packet at S=8 lasts up to 17 ms, and is
-                    // measured whole once it ends.
-                    let held_s = if view.following || view.coded || le.waiting() {
-                        FOLLOW_HELD_S.max(super::measure::HELD_S)
-                    } else {
-                        super::measure::HELD_S
-                    };
-                    let keep = (held_s * rate_hz) as usize;
-                    while recent.len() > 1
-                        && recent.iter().skip(1).map(|(_, b)| b.len()).sum::<usize>() >= keep
-                    {
-                        recent.pop_front();
-                    }
-                }
-                _ => recent.clear(),
-            }
+            let longer = view.following || view.coded || le.waiting();
+            feed.hold(first_pair, iq, view.open, longer, rate_hz);
 
             // Closing the section stops `process_block` forwarding, but blocks
             // already in the channel still arrive - and the run they belong to
             // is over whether or not they are the last of it.
             if !view.open {
-                run.suspend();
-                // The band measurement stops with it. Nothing has been observed
-                // since the section closed, and a panel reopened an hour later
-                // showing the last dwell as if it were current is exactly what
-                // rule 4 exists to prevent; the chrome's staleness marks it, and
-                // dropping the scan means the next dwell starts clean.
-                scan = None;
+                feed.close();
+                band.close();
                 le.close(&self.state);
                 classic.close();
-                load = Load::default();
-                next_pair = None;
                 let mut m = self.state.lock().unwrap_or_else(|e| e.into_inner());
                 Classic::unpublish(&mut m);
                 m.net.ble_channel = None;
@@ -434,7 +322,7 @@ impl NetWorker {
                 // and a figure from before the section closed must not be
                 // shown on reopening as if it were current.
                 m.net.health.decode_load = None;
-            } else if let Some(reading) = load.add(now.elapsed(), pairs, rate_hz) {
+            } else if let Some(reading) = feed.cost(now.elapsed(), arrival.pairs, rate_hz) {
                 // The clock read and the division both happened above, outside
                 // the lock; only the finished figure goes in.
                 let mut m = self.state.lock().unwrap_or_else(|e| e.into_inner());

@@ -37,8 +37,7 @@ pub use net::{
     NetState, PacketsView, PduKind, RetuneRun, BLE_PACKET_LIMIT, BT_HOP_LIMIT, COLUMN_INTERVAL,
     FULL_ADDRESS_WIDTH, HISTORY_COLUMNS,
 };
-// Named by the NET worker's tests; the panel reads it through `SdrMetrics`.
-#[cfg(test)]
+// Named by the NET worker, which counts its arrivals into it.
 pub use net::NetDecodeHealth;
 pub use observer::ObserverState;
 pub use radio::{
