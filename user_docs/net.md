@@ -926,6 +926,17 @@ phone's carrier sat about 1 kHz high (0.5 ppm), its deviation 250.6 kHz.
 S=2 is decoded from packets built to the Core, and has not been heard on
 the air yet: the phone only sends S=8.
 
+**Two rooms away**, the same phone in the kitchen, 26.5 s at 2480 MHz and
+8 Msps: 76 of its `ADV_EXT_IND`s through their CRC, at SNRs from 8.5 down
+to -1.6 dB. Until sdrtop took the radio's own DC offset off the samples,
+it heard none of them. That offset sits at the tuned frequency, exactly
+under every advertising packet in LOCK, and when it is stronger than the
+packet the frequency a receiver reads falls apart, coding gain or not. It
+is now measured from the quiet stretches of the stream and taken off
+before any receiver sees a sample, which also let half again as many LE 1M
+packets through their CRC on the same recordings. The long-range PHY is
+long-range again.
+
 ---
 
 ## Taking the data away (`o`)

@@ -121,6 +121,142 @@ impl Load {
     }
 }
 
+/// How long the estimate of the radio's DC offset averages over, s: the
+/// offset moves with gain and temperature over seconds, so half of one
+/// follows it, while a packet's own mean, a few milliseconds of it, is
+/// diluted away.
+const DC_TIME_S: f64 = 0.5;
+
+/// The radio's DC offset, tracked from the blocks' means and taken off them.
+///
+/// **On the samples, not on the frequency.** A receiver of an FM signal reads
+/// its frequency, and an offset of the carrier is a constant there, which
+/// each receiver already takes out. The radio's DC is not that: it is added
+/// to the samples, at baseband 0 Hz, exactly where a packet at the tuned
+/// centre sits, as every advertising packet does in LOCK. Stronger than the
+/// packet, it keeps the phasor from turning about the origin and the
+/// frequency read from it falls apart, which no correction after the
+/// discriminator can undo. On the air, an LE Coded phone two rooms away was
+/// heard in none of 77 advertisements until it was taken off, and half
+/// again as many LE 1M packets passed their CRC.
+#[derive(Default)]
+struct Dc {
+    estimate: Option<Complex<f64>>,
+    /// Where the stream stood at the end of the last block measured.
+    end: u64,
+}
+
+/// How long a stretch is judged noise or not, s: shorter than any gap
+/// between packets, long enough that its statistics are statistics.
+const QUIET_PART_S: f64 = 50e-6;
+
+/// The rate the stretches are judged at, Hz: every sample up to it, every
+/// few above. Raw noise is white, so the samples kept are as independent as
+/// all of them, at a fifth of the work at 20 Msps.
+const QUIET_JUDGED_HZ: f64 = 4e6;
+
+/// The least `E|x|^4 / (E|x|^2)^2` about a stretch's own mean that counts it
+/// as noise alone. Complex Gaussian noise gives 2 (its power is
+/// exponential); a constant envelope, any GFSK packet, gives 1; noise and a
+/// packet as strong as it, 1.75; a packet three times as strong, 1.44. Noise
+/// judged on 200 samples falls under 1.5 about once in twenty, which only
+/// costs a stretch.
+const NOISE_KURTOSIS: f64 = 1.5;
+
+/// How much more than the quietest noise-like stretch's spread a stretch may
+/// have and still count: noise keeps its stretches within about 30 % of each
+/// other, a packet 3 dB over the noise doubles one.
+const QUIET_SPREAD: f64 = 2.0;
+
+/// How much stream judged noise a block must hold before it says anything
+/// about the DC, s: 40 stretches, a mean good to well under the noise, and
+/// more than a short block that is one packet from end to end can offer.
+const DC_EVIDENCE_S: f64 = 2e-3;
+
+impl Dc {
+    fn take_off(&mut self, block: &mut [Complex<f32>], first_pair: u64, rate_hz: f64) {
+        if block.is_empty() || rate_hz.is_nan() || rate_hz <= 0.0 {
+            return;
+        }
+        // Unmeasured for longer than it averages over, the old estimate says
+        // nothing about now.
+        let away = first_pair.saturating_sub(self.end) as f64 / rate_hz;
+        if away > DC_TIME_S {
+            self.estimate = None;
+        }
+        self.end = first_pair + block.len() as u64;
+        if let Some(mean) = quiet_mean(block, rate_hz) {
+            self.estimate = Some(match self.estimate {
+                Some(old) => {
+                    let weight = (block.len() as f64 / rate_hz / DC_TIME_S).min(1.0);
+                    old + (mean - old) * weight
+                }
+                None => mean,
+            });
+        }
+        // No estimate yet, and this block offered none: nothing is taken off.
+        let Some(estimate) = self.estimate else {
+            return;
+        };
+        let dc = Complex::new(estimate.re as f32, estimate.im as f32);
+        block.iter_mut().for_each(|z| *z -= dc);
+    }
+}
+
+/// The mean of `block` where nothing was on the air: over its stretches that
+/// look like noise alone ([`NOISE_KURTOSIS`]) and are as quiet as the
+/// quietest of those ([`QUIET_SPREAD`]), or `None` when they add up to less
+/// than [`DC_EVIDENCE_S`].
+///
+/// The radio's DC is in every stretch alike; a packet is in some, and its own
+/// mean, small but not zero (and large for a regular pattern at the centre,
+/// whose carrier it is), would be taken off itself if those were counted: on
+/// a clean packet at the tuned centre that spread the deviation the suites
+/// read tenfold. Not a fixed share of the stretches either: in a busy stretch
+/// of stream packets fill more than half of them, and in a short one all.
+///
+/// **Judged by the shape of the spread and by its size, each covering the
+/// other's blind spot.** About its own mean, a stretch of noise has the
+/// statistics of noise whatever the DC and whatever the gain; a packet's
+/// does not, however small its spread, and by size alone a regular pattern
+/// at the centre passed for silence. But a stretch half noise and half a
+/// strong packet has the statistics of noise too (the shape reads `1 / f` for
+/// a packet in a share `f` of it), and its size gives it away. Size is taken
+/// about each stretch's own mean, not as power: power counts the DC, and the
+/// stretches whose noise happened to point away from it would read
+/// quietest.
+fn quiet_mean(block: &[Complex<f32>], rate_hz: f64) -> Option<Complex<f64>> {
+    let part = ((QUIET_PART_S * rate_hz) as usize).max(1);
+    let stride = ((rate_hz / QUIET_JUDGED_HZ).round() as usize).max(1);
+    // Each noise-like stretch's spread and mean.
+    let noisy: Vec<(f64, Complex<f64>)> = block
+        .chunks_exact(part)
+        .filter_map(|c| {
+            let kept = || {
+                c.iter()
+                    .step_by(stride)
+                    .map(|z| Complex::new(z.re as f64, z.im as f64))
+            };
+            let n = kept().count() as f64;
+            let mean = kept().sum::<Complex<f64>>() / n;
+            let (m2, m4) = kept().fold((0.0f64, 0.0f64), |(a, b), z| {
+                let p = (z - mean).norm_sqr();
+                (a + p, b + p * p)
+            });
+            let (m2, m4) = (m2 / n, m4 / n);
+            (m2 > 0.0 && m4 / (m2 * m2) >= NOISE_KURTOSIS).then_some((m2, mean))
+        })
+        .collect();
+    let floor = noisy.iter().map(|s| s.0).fold(f64::INFINITY, f64::min);
+    let quiet: Vec<Complex<f64>> = noisy
+        .iter()
+        .filter(|s| s.0 <= QUIET_SPREAD * floor)
+        .map(|s| s.1)
+        .collect();
+    ((quiet.len() * part) as f64 / rate_hz >= DC_EVIDENCE_S)
+        .then(|| quiet.iter().sum::<Complex<f64>>() / quiet.len() as f64)
+}
+
 /// What the worker carries of the stream from one block to the next: where
 /// it stands, what is held of it, and what handling it costs.
 pub(super) struct Feed {
@@ -139,6 +275,8 @@ pub(super) struct Feed {
     /// are another tuning's.
     held_tuning: Option<(f64, f64)>,
     load: Load,
+    /// The radio's DC offset, as far as the blocks have shown it.
+    dc: Dc,
 }
 
 /// What one block's arrival says about the stream.
@@ -185,6 +323,7 @@ impl Feed {
             recent: VecDeque::new(),
             held_tuning: None,
             load: Load::default(),
+            dc: Dc::default(),
         }
     }
 
@@ -233,6 +372,11 @@ impl Feed {
         if retuned {
             self.recent.clear();
         }
+        // Another tuning, or a stream started again (perhaps at another
+        // gain), is another DC.
+        if retuned || new_stream {
+            self.dc = Dc::default();
+        }
         self.held_tuning = Some(tuning);
         Arrival {
             pairs,
@@ -243,6 +387,17 @@ impl Feed {
             new_stream,
             retuned,
         }
+    }
+
+    /// The radio's DC offset taken off this block's samples, before any
+    /// receiver or the measurement path sees them ([`Dc`] has why).
+    pub(super) fn take_off_dc(
+        &mut self,
+        block: &mut [Complex<f32>],
+        first_pair: u64,
+        rate_hz: f64,
+    ) {
+        self.dc.take_off(block, first_pair, rate_hz);
     }
 
     /// The blocks the measurement path may cut a burst from: those held from
@@ -308,12 +463,114 @@ impl Feed {
         self.run.suspend();
         self.load = Load::default();
         self.next_pair = None;
+        self.dc = Dc::default();
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A block of noise at `level` with the radio's DC `dc` added, as
+    /// samples.
+    fn noisy(len: usize, dc: Complex<f32>, seed: u64) -> Vec<Complex<f32>> {
+        let mut rng = crate::signal::dsp::testkit::Rng::new(seed);
+        rng.noise(len, 0.001).into_iter().map(|z| z + dc).collect()
+    }
+
+    fn mean(block: &[Complex<f32>]) -> Complex<f32> {
+        block.iter().sum::<Complex<f32>>() / block.len() as f32
+    }
+
+    /// The radio's DC comes off the block it is in, from the first block on.
+    #[test]
+    fn the_radios_dc_comes_off_a_block() {
+        let mut feed = Feed::new(SampleGeometry {
+            format: crate::hardware::SampleFormat::Int8,
+            full_scale: 128.0,
+        });
+        let dc = Complex::new(0.08, -0.05);
+        let mut block = noisy(100_000, dc, 1);
+        feed.take_off_dc(&mut block, 0, 20e6);
+        assert!(mean(&block).norm() < 0.001, "{}", mean(&block));
+    }
+
+    /// **A block with no quiet stretch says nothing about the DC, and is
+    /// left as it came.** A short block that is one packet from end to end,
+    /// at the tuned centre, would otherwise offer the packet's own mean (its
+    /// carrier, for a regular preamble) as the radio's, and lose it.
+    #[test]
+    fn a_block_with_no_quiet_stretch_is_left_alone() {
+        let mut feed = Feed::new(SampleGeometry {
+            format: crate::hardware::SampleFormat::Int8,
+            full_scale: 128.0,
+        });
+        // An alternating pattern at the centre: phase swinging about a
+        // fixed point, so a large mean that is signal, not DC.
+        let bits: Vec<bool> = (0..200).map(|i| i % 2 == 0).collect();
+        let wave = crate::signal::ble::gfsk::modulate(&bits, 20, 160_000.0, 20e6, 0.5);
+        let mut block = wave.clone();
+        feed.take_off_dc(&mut block, 0, 20e6);
+        assert_eq!(block, wave);
+    }
+
+    /// A step in the DC (a gain change, say) is followed: three and a half
+    /// of its time constants on, under 5 % of the step is left (3 % would
+    /// be exact).
+    #[test]
+    fn a_step_in_the_dc_is_followed_within_its_time() {
+        let mut feed = Feed::new(SampleGeometry {
+            format: crate::hardware::SampleFormat::Int8,
+            full_scale: 128.0,
+        });
+        let (rate, len) = (20e6, 131_072usize);
+        let (before, after) = (Complex::new(0.08, -0.05), Complex::new(-0.02, 0.06));
+        let mut at = 0u64;
+        for k in 0..10 {
+            let mut block = noisy(len, before, k);
+            feed.take_off_dc(&mut block, at, rate);
+            at += len as u64;
+        }
+        let blocks = (3.5 * DC_TIME_S * rate / len as f64).ceil() as u64;
+        let mut last = Complex::new(0.0, 0.0);
+        for k in 0..blocks {
+            let mut block = noisy(len, after, 100 + k);
+            feed.take_off_dc(&mut block, at, rate);
+            last = mean(&block);
+            at += len as u64;
+        }
+        let step = (after - before).norm();
+        assert!(last.norm() < 0.05 * step, "{} left of {step}", last.norm());
+    }
+
+    /// A retune is a new DC: the estimate starts again from the first block
+    /// at the new tuning rather than following there from the old one.
+    #[test]
+    fn a_retune_starts_the_dc_estimate_again() {
+        let mut feed = Feed::new(SampleGeometry {
+            format: crate::hardware::SampleFormat::Int8,
+            full_scale: 128.0,
+        });
+        let len = 65_536usize;
+        let block = |seq: u64, centre_hz: u64| StreamBlock {
+            seq,
+            gap_before: false,
+            bytes: vec![0; len * 2],
+            first_pair: (seq - 1) * len as u64,
+            centre_hz,
+            rate_hz: 20e6,
+        };
+        for seq in 1..=4u64 {
+            feed.arrive(&block(seq, 2_426_000_000));
+            let mut iq = noisy(len, Complex::new(0.08, -0.05), seq);
+            feed.take_off_dc(&mut iq, (seq - 1) * len as u64, 20e6);
+        }
+        let arrival = feed.arrive(&block(5, 2_480_000_000));
+        assert!(arrival.retuned);
+        let mut iq = noisy(len, Complex::new(-0.03, 0.07), 5);
+        feed.take_off_dc(&mut iq, 4 * len as u64, 20e6);
+        assert!(mean(&iq).norm() < 0.002, "{}", mean(&iq));
+    }
 
     /// Wall time over stream time, reported once a window is covered.
     #[test]

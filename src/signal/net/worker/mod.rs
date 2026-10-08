@@ -253,6 +253,9 @@ impl NetWorker {
             if feeds.any() || classic_here || follow_here || survey_here {
                 decoded_block(&mut iq, &bytes, self.geometry);
             }
+            if let Some(block) = iq.as_mut() {
+                feed.take_off_dc(block, first_pair, rate_hz);
+            }
             if survey_here {
                 band.measure(iq.as_deref(), tuning, now, &self.state);
             } else {
@@ -996,8 +999,18 @@ mod tests {
         m.ui.section = section.to_string();
         m.ui.active_preset = preset.to_string();
         m.net.mode = crate::state::NetMode::Lock;
-        m.radio.frequency = 2_426_000_000;
-        m.radio.config_sample_rate = 20e6;
+        // Tuned and sampled as the recording says beside it, where it says.
+        let meta = std::fs::read_to_string(path.replace(".sigmf-data", ".sigmf-meta"))
+            .ok()
+            .and_then(|s| serde_json::from_str::<serde_json::Value>(&s).ok());
+        let capture = meta
+            .as_ref()
+            .and_then(|m| m["captures"][0]["core:frequency"].as_u64());
+        let rate = meta
+            .as_ref()
+            .and_then(|m| m["global"]["core:sample_rate"].as_f64());
+        m.radio.frequency = capture.unwrap_or(2_426_000_000);
+        m.radio.config_sample_rate = rate.unwrap_or(20e6);
         m.radio.bb_filter_hz = 0;
         let state = Arc::new(Mutex::new(m));
         let (tx, rx) = crossbeam_channel::bounded(4);
@@ -1218,6 +1231,7 @@ mod tests {
             "blocks {blocks} · packets kept {} · CONNECT_IND kept {connects}",
             m.net.ble_packets.len()
         );
+        eprintln!("funnel: {:?}", m.net.health.ble);
         // A second pass, with no follower: every packet with the link's
         // access address on the eight data channels in view, and the
         // CONNECT_IND on 38, from `SDRTOP_REPLAY_FROM` pairs on.
@@ -1438,11 +1452,23 @@ mod tests {
     /// `(channel, header octet 0, payload, first pair)` each, in `blocks`
     /// blocks of 131 072 pairs, as the radio's eight-bit bytes.
     fn coded_scene(packets: &[(u8, u8, Vec<u8>, usize)], blocks: usize) -> Vec<Vec<u8>> {
+        coded_scene_at(packets, blocks, 0.5, num_complex::Complex::new(0.0, 0.0))
+    }
+
+    /// [`coded_scene`] with the packets sent at `amplitude` and the radio's
+    /// DC offset `dc` added to every sample.
+    fn coded_scene_at(
+        packets: &[(u8, u8, Vec<u8>, usize)],
+        blocks: usize,
+        amplitude: f32,
+        dc: num_complex::Complex<f32>,
+    ) -> Vec<Vec<u8>> {
         use crate::signal::ble::coded::{self, Coding};
         use crate::signal::ble::detect::ADVERTISING_ACCESS_ADDRESS;
         let len = 131_072;
         let mut rng = crate::signal::dsp::testkit::Rng::new(6);
         let mut iq = rng.noise(len * blocks, 0.0005);
+        iq.iter_mut().for_each(|z| *z += dc);
         for (ch, byte0, payload, start) in packets {
             let symbols =
                 coded::transmit(ADVERTISING_ACCESS_ADDRESS, Coding::S8, *ch, *byte0, payload);
@@ -1450,7 +1476,8 @@ mod tests {
             let shift = crate::signal::ble::channel::centre_hz(*ch).unwrap() as f64 - 2.426e9;
             let step = std::f64::consts::TAU * shift / 20e6;
             for (k, w) in wave.iter().enumerate() {
-                let rot = num_complex::Complex::from_polar(0.5, (step * (start + k) as f64) as f32);
+                let rot =
+                    num_complex::Complex::from_polar(amplitude, (step * (start + k) as f64) as f32);
                 iq[start + k] += w * rot;
             }
         }
@@ -1574,11 +1601,23 @@ mod tests {
     /// MHz: `(channel, header octet 0, payload, first pair)` each, in
     /// `blocks` blocks, as the radio's eight-bit bytes.
     fn le_scene(packets: &[(u8, u8, Vec<u8>, usize)], blocks: usize) -> Vec<Vec<u8>> {
+        le_scene_at(packets, blocks, 0.5, num_complex::Complex::new(0.0, 0.0))
+    }
+
+    /// [`le_scene`] with the packets sent at `amplitude` and the radio's DC
+    /// offset `dc` added to every sample.
+    fn le_scene_at(
+        packets: &[(u8, u8, Vec<u8>, usize)],
+        blocks: usize,
+        amplitude: f32,
+        dc: num_complex::Complex<f32>,
+    ) -> Vec<Vec<u8>> {
         use crate::signal::ble::detect::{
             access_address_bits, preamble_bits, ADVERTISING_ACCESS_ADDRESS,
         };
         let len = 131_072;
         let mut iq = crate::signal::dsp::testkit::Rng::new(8).noise(len * blocks, 0.0005);
+        iq.iter_mut().for_each(|z| *z += dc);
         for (ch, byte0, payload, start) in packets {
             let mut bits = preamble_bits(ADVERTISING_ACCESS_ADDRESS, crate::signal::ble::Phy::OneM);
             bits.extend_from_slice(&access_address_bits(ADVERTISING_ACCESS_ADDRESS));
@@ -1587,7 +1626,8 @@ mod tests {
             let shift = crate::signal::ble::channel::centre_hz(*ch).unwrap() as f64 - 2.426e9;
             let step = std::f64::consts::TAU * shift / 20e6;
             for (k, w) in wave.iter().enumerate() {
-                let rot = num_complex::Complex::from_polar(0.5, (step * (start + k) as f64) as f32);
+                let rot =
+                    num_complex::Complex::from_polar(amplitude, (step * (start + k) as f64) as f32);
                 iq[start + k] += w * rot;
             }
         }
@@ -1605,6 +1645,66 @@ mod tests {
             .map(|(i, b)| (i as u64 + 1, b))
             .collect();
         run_view("le", "net_ble", &blocks)
+    }
+
+    /// How faint the packets of the two tests below are: about 12 dB over
+    /// the noise in 1 MHz, a packet across a few rooms.
+    const FAINT: f32 = 0.02;
+
+    /// The radio's DC offset in those tests: about 14 dB over the faint
+    /// packet, as a HackRF's was on the air, under a packet at the tuned
+    /// centre.
+    const RADIO_DC: (f32, f32) = (0.08, -0.05);
+
+    /// `blocks` numbered from 1 as the worker's feed numbers them.
+    fn numbered(blocks: Vec<Vec<u8>>) -> Vec<(u64, Vec<u8>)> {
+        blocks
+            .into_iter()
+            .enumerate()
+            .map(|(i, b)| (i as u64 + 1, b))
+            .collect()
+    }
+
+    /// **The radio's DC is taken off before any receiver sees the block.**
+    /// A packet at the tuned centre, as every advertising packet is in
+    /// LOCK, shares baseband 0 Hz with the radio's own DC offset. Added to
+    /// the samples, not to the frequency, a DC stronger than the packet
+    /// keeps the phasor from turning about the origin, and the frequency
+    /// the receivers read falls apart: on the air an LE Coded phone two
+    /// rooms away was heard in 0 of 77 advertisements until it was taken
+    /// off. The same faint packet with no DC is the control.
+    #[test]
+    fn a_faint_coded_packet_at_the_centre_is_heard_through_the_radios_dc() {
+        for dc in [
+            num_complex::Complex::new(0.0, 0.0),
+            num_complex::Complex::new(RADIO_DC.0, RADIO_DC.1),
+        ] {
+            let blocks = coded_scene_at(&[(38, 0x07, adv_ext_ind(9), 20_000)], 4, FAINT, dc);
+            let m = run_view("coded", "net_coded", &numbered(blocks));
+            let heard = m.net.coded_packets.iter().filter(|p| p.crc_ok).count();
+            assert_eq!(heard, 1, "DC {dc}: {:?}", m.net.health.coded);
+        }
+    }
+
+    /// How faint the LE 1M test's packet is: LE 1M has no coding gain, so it
+    /// is sent three times as strong as [`FAINT`], clear of where it stops
+    /// being heard, and the radio's DC is still stronger.
+    const LE_FAINT: f32 = 0.06;
+
+    /// LE 1M the same: on the air, half again as many packets passed their
+    /// CRC once the DC was taken off.
+    #[test]
+    fn a_faint_le_1m_packet_at_the_centre_is_heard_through_the_radios_dc() {
+        let payload: Vec<u8> = (0..20).collect();
+        for dc in [
+            num_complex::Complex::new(0.0, 0.0),
+            num_complex::Complex::new(RADIO_DC.0, RADIO_DC.1),
+        ] {
+            let blocks = le_scene_at(&[(38, 0x02, payload.clone(), 20_000)], 4, LE_FAINT, dc);
+            let m = run_view("le", "net_ble", &numbered(blocks));
+            let heard = m.net.ble_packets.iter().filter(|p| p.crc_ok).count();
+            assert_eq!(heard, 1, "DC {dc}: {:?}", m.net.health.ble);
+        }
     }
 
     /// `adv_ext_ind(channel)` with its AuxPtr's PHY set to `phy` (Table
