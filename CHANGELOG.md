@@ -16,6 +16,76 @@ checkpoint instead of by version.
 
 ## [Unreleased]
 
+## [0.6.5] - 2026-10-09
+
+**One scale for SNR, and the long range given back.**
+
+Two fixes that change what NET hears and what it says it heard. The SNR of
+LE 1M and LE Coded is read the same way, as power over the noise, and no
+longer reads a packet low because of where it sits. And the radio's own DC
+offset, which sat under every advertising packet and cost LE Coded its
+range, is taken off before any receiver sees a sample.
+
+### Fixed
+
+- **LE Coded hears as far as it should, and LE 1M hears more.** A packet
+  at the tuned frequency, as every advertising packet is in LOCK, shares
+  0 Hz with the radio's own DC offset. No NET receiver took that offset
+  off; where it was stronger than the packet, the frequency the receivers
+  read fell apart. On the air, a phone advertising on LE Coded from
+  another room was heard in none of 77 advertisements. The offset is now
+  measured from the stream's quiet stretches and taken off the samples
+  before any receiver or measurement sees them: the same recording gives
+  76 packets through their CRC, at SNRs down to -1.6 dB, and LE 1M passes
+  50 to 90 % more packets through their CRC on the same recordings. It
+  costs about 4 % of a core at 20 Msps. Packets measured away from the
+  centre read as they did.
+- **SNR reads what is there, on one scale for LE 1M and LE Coded.** LE
+  Coded's SNR came from the packet's envelope, which counts everything that
+  moves it as noise: a phone about 35 dB over the noise read 13 to 21 at
+  the tuned centre and 27 to 31 off it. LE 1M's had a ceiling near 19 dB.
+  Both are now the packet's power over the noise in a quiet stretch just
+  before it, in LE 1M's band, with the radio's DC offset taken out: the
+  same phone reads about 35 in both places. A packet heard straight after
+  another, with no quiet stretch before it, shows no SNR rather than a low
+  one. The frame-error curve's upper bins fill accordingly, and the
+  exports' SNR columns carry the new figures. LE 2M keeps its receiver's
+  estimate. How it is read is in the
+  [NET notes](user_docs/net.md#how-snr-is-read).
+- **A packet that starts from silence is measured from its own bits.** Its
+  df1, df2, f0 and drift were sometimes read a whole bit off, because the
+  timing search reached into the noise before the packet: nearly half of
+  clean packets read a df2 of -120 kHz in a synthetic test. The search now
+  scores only bits inside the packet.
+- **Every BLE trigger ends in the decode-health funnel.** A capture under
+  way when the receiver was put down (a retune, a break in the stream, the
+  section closed) vanished from the counts; it now ends as given up, and
+  the funnel adds up.
+- **A followed connection's event is "no receiver" only when nothing
+  listened.** With the two ends on different PHYs and only one of them
+  receivable at the rate, an event the other end was listened for was
+  still put down to "no receiver"; it now counts as heard or missed.
+- **Off the LE Coded view, no LE Coded channel is shown as running.** After
+  leaving the view, the header kept a `● CODED` field and the menu's live
+  line said running, with nothing decoding.
+- **On the LE Coded view, an export says why the BLE decoder is off.** Its
+  BLE file's note gave "not tuned to an advertising channel" while tuned to
+  one; it now says that LE Coded runs in LE 1M's place on that view.
+
+### Changed
+
+- The README shows the demo and two features as video clips, hosted
+  outside the repository so the crate stays small.
+
+### Internal
+
+- The NET worker, `NetState` and the LE receiver are split by what each
+  part does; the worker's main loop went from 1170 lines to 137.
+- Dead code is gone or compiled only for the tests that use it, and no
+  `#[allow(dead_code)]` is left.
+- CI checks that every intra-doc link resolves (`cargo doc` with
+  warnings denied); 82 had gone stale.
+
 ## [0.6.4] - 2026-10-04
 
 **Long-range BLE, and extended advertising followed.**
@@ -976,7 +1046,8 @@ sdrtop stopped being a one-radio program.
   image rejection ratio, wavelength and antenna metrics.
 - Config file with atomic save on quit, and the CLI flags that override it.
 
-[Unreleased]: https://github.com/musithang/sdrtop/compare/v0.6.4...HEAD
+[Unreleased]: https://github.com/musithang/sdrtop/compare/v0.6.5...HEAD
+[0.6.5]: https://github.com/musithang/sdrtop/compare/v0.6.4...v0.6.5
 [0.6.4]: https://github.com/musithang/sdrtop/compare/v0.6.3...v0.6.4
 [0.6.3]: https://github.com/musithang/sdrtop/compare/v0.6.2...v0.6.3
 [0.6.2]: https://github.com/musithang/sdrtop/compare/v0.6.1...v0.6.2

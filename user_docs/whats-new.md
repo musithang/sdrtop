@@ -32,7 +32,42 @@ in time.
 
 ---
 
-## 📡 Checkpoint 26: The long way round *(you are here)*
+## 📶 Checkpoint 27: The range the DC took *(you are here)*
+
+**0.6.5.** Last checkpoint ended on a promise: LE Coded's SNR read low, and
+that was the next hunt. It was, and it went somewhere else entirely.
+
+The SNR first. A phone that measured about 35 dB over the noise read 13 to
+21 on screen when its packets sat at the radio's tuned frequency, and 27 to
+31 a few megahertz away. The estimator read the packet's envelope, and
+counted everything that wobbles it as noise, including what the radio
+itself does at its own centre. Now the SNR is the packet's power over the
+noise just before it, the same way for LE 1M and LE Coded, and the phone
+reads about 35 wherever it sits. LE 1M's quiet ceiling near 19 dB went with
+it. How it is read is in the [NET notes](net.md#how-snr-is-read).
+
+Then the phone went to the kitchen, and sdrtop stopped hearing it. LE Coded
+exists to be heard from the kitchen. A recording showed its packets
+arriving, well above the noise, and the decoder not so much as twitching.
+The culprit was the radio's own DC offset: every radio adds one, at exactly
+the frequency it is tuned to, which in NET is exactly where every
+advertising packet sits. Stronger than a faint packet, it scrambles the
+frequency the receivers read, and nothing downstream can unscramble it.
+sdrtop now measures that offset from the quiet stretches of the stream and
+takes it off before any receiver sees a sample. Same recording: from none
+of 77 advertisements to 76. Ordinary BLE gained too, half again as many
+packets through their CRC on the same recordings. The DC had been ruled
+out in the last checkpoint's notes, which is a lesson about ruling things
+out.
+
+A few smaller untruths went with it: a packet starting from silence could
+be measured a bit off, a decoder's own tally did not always add up, and
+the header could show an LE Coded channel as running after you had left
+the view. The full list is in the [changelog](../CHANGELOG.md).
+
+---
+
+## 📡 Checkpoint 26: The long way round
 
 **0.6.4.** BLE has a long-range mode, LE Coded, which sends every bit as
 eight symbols wrapped in an error-correcting code, so it reaches further
