@@ -90,15 +90,6 @@ pub(crate) const CHIP: char = '\u{25cf}';
 /// Rows the table keeps before the detail block may take any.
 const TABLE_KEEPS: usize = 3;
 
-/// The same shape the census uses: a bench glances, it does not time.
-fn ago(secs: u64) -> String {
-    if secs < 90 {
-        format!("{secs} s")
-    } else {
-        format!("{} min", secs / 60)
-    }
-}
-
 /// The UAP cell: one value (as the address mode shows it,
 /// `NetState::show_uap`), candidates left, or a dash before any header.
 fn uap_cell(uaps: Option<&Vec<u8>>, net: &crate::state::NetState) -> String {
@@ -141,7 +132,7 @@ pub(crate) fn lap_name(lap: u32, net: &crate::state::NetState) -> String {
 }
 
 fn cells(p: &Piconet, state: &SdrMetrics, now: std::time::Instant) -> Vec<String> {
-    let since = |t: std::time::Instant| ago(now.saturating_duration_since(t).as_secs());
+    let since = |t: std::time::Instant| sections::ago(now.saturating_duration_since(t).as_secs());
     vec![
         format!("{CHIP} {}", lap_name(p.lap, &state.net)),
         p.kind().word().to_string(),
@@ -239,8 +230,12 @@ fn detail(
             Span::styled(value, Style::default().fg(theme.value)),
         ])
     };
-    let since =
-        |t: std::time::Instant| format!("{} ago", ago(now.saturating_duration_since(t).as_secs()));
+    let since = |t: std::time::Instant| {
+        format!(
+            "{} ago",
+            sections::ago(now.saturating_duration_since(t).as_secs())
+        )
+    };
     let kind = p.kind();
     let mut out = vec![
         crate::ui::chrome::section(
@@ -340,7 +335,7 @@ fn piconet_lines(
             out.push(field(if i == 0 { label } else { "" }, chunk));
         }
     };
-    let since = |t: std::time::Instant| ago(now.saturating_duration_since(t).as_secs());
+    let since = |t: std::time::Instant| sections::ago(now.saturating_duration_since(t).as_secs());
     let mut out = vec![
         crate::ui::chrome::section("piconet", "", iw, theme),
         field(
@@ -457,7 +452,7 @@ fn piconet_within(
             Style::default().fg(theme.label),
         ))
     };
-    let headers = sections::header_lines(p, state, iw, theme);
+    let headers = sections::header_lines(p, state, now, iw, theme);
     // Whole, leaving a row for the way to Classic 2.
     if out.len() + headers.len() < budget {
         out.extend(headers);
@@ -1145,6 +1140,63 @@ mod tests {
             "{text}"
         );
         assert!(!text.contains("taller panel"), "{text}");
+    }
+
+    /// A piconet whose headers are read, so HEADERS reaches its last rows.
+    fn headers_read() -> SdrMetrics {
+        let mut m = heard();
+        m.net.bt_uap.insert(0x5a3c71, vec![0x4c]);
+        let p = m
+            .net
+            .bt_piconets
+            .iter_mut()
+            .find(|p| p.lap == 0x5a3c71)
+            .unwrap();
+        p.headers.captured = 10;
+        p.headers.decoded = 10;
+        m.net.bt_view.selected = Some(0x5a3c71);
+        m
+    }
+
+    #[test]
+    fn headers_count_the_lmp_messages() {
+        use crate::signal::bt::piconet::{BtPacket, PayloadContent, PayloadVerdict};
+        let mut m = headers_read();
+        let p = m
+            .net
+            .bt_piconets
+            .iter_mut()
+            .find(|p| p.lap == 0x5a3c71)
+            .unwrap();
+        p.lmp.push_front(BtPacket {
+            seen: Instant::now() - Duration::from_secs(12),
+            at_us: 0.0,
+            stream: 1,
+            channel: 73,
+            header: None,
+            direction: None,
+            deviation: Default::default(),
+            carrier: Default::default(),
+            f0_ppm: None,
+            payload: PayloadVerdict::Crc(true),
+            content: Some(PayloadContent::Lmp(
+                crate::signal::bt::lmp::parse(&[16 << 1, 16]).unwrap(),
+            )),
+        });
+        p.lmp_heard = 8;
+        let text = draw(NetBtPiconetsPanel, 191, 30, &m).join("\n");
+        assert!(
+            text.contains("8 messages · last encryption_key_size_req, 12 s ago"),
+            "{text}"
+        );
+    }
+
+    #[test]
+    fn headers_say_when_no_lmp_was_read() {
+        let m = headers_read();
+        let text = draw(NetBtPiconetsPanel, 191, 30, &m).join("\n");
+        let row = text.lines().find(|l| l.contains("LMP")).expect(&text);
+        assert!(row.contains("none read"), "{text}");
     }
 
     /// A short panel keeps what fits whole and names the rest.

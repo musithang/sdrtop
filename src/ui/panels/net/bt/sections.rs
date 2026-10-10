@@ -372,6 +372,7 @@ pub(super) fn residual_shape(
 pub(super) fn header_lines(
     p: &Piconet,
     state: &SdrMetrics,
+    now: std::time::Instant,
     iw: usize,
     theme: &crate::Theme,
 ) -> Vec<Line<'static>> {
@@ -458,8 +459,37 @@ pub(super) fn header_lines(
             addrs.join(", ")
         },
     ));
+    out.push(field("LMP", lmp_text(p, now)));
     out.push(field("CLK1-6", clock_text(h.clock_hypotheses)));
     out
+}
+
+/// The same shape the census uses: a bench glances, it does not time.
+pub(super) fn ago(secs: u64) -> String {
+    if secs < 90 {
+        format!("{secs} s")
+    } else {
+        format!("{} min", secs / 60)
+    }
+}
+
+/// How many link manager messages the piconet has given, and the newest
+/// one's name. Only a DM1 whose CRC passes is read, so a piconet with none
+/// may still have spoken: the line counts what was read, not what was said.
+fn lmp_text(p: &Piconet, now: std::time::Instant) -> String {
+    use crate::signal::bt::piconet::PayloadContent;
+    let last = p.lmp.front().and_then(|k| match &k.content {
+        Some(PayloadContent::Lmp(m)) => Some((m.name(), k.seen)),
+        _ => None,
+    });
+    match last {
+        Some((name, seen)) => format!(
+            "{} messages \u{00b7} last {name}, {} ago",
+            p.lmp_heard,
+            ago(now.saturating_duration_since(seen).as_secs())
+        ),
+        None => "none read".to_string(),
+    }
 }
 
 /// The CLK1-6 hunt, in words: the whitening every header is read through
