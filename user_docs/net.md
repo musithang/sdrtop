@@ -4,22 +4,35 @@
 
 **NET** is sdrtop's look at the 2.4 GHz band: who is on the air, what they
 are saying, and how well their transmitters do it. It listens to Bluetooth
-Low Energy advertising and to classic Bluetooth, and it measures the band
-itself. It never transmits, never joins a connection (it follows the ones
-it hears being set up, from the sidelines), and never plays audio: the guest
-at the party who says nothing all evening and leaves knowing everyone's
-address.
+Low Energy and to classic Bluetooth, and it measures the band itself. It
+never transmits, never joins a connection (it follows the ones it hears
+being set up, from the sidelines), and never plays audio: the guest at the
+party who says nothing all evening and leaves knowing everyone's address.
 
-The section only appears on a radio that reaches the band and can sample fast
-enough for its cheapest mode. On one that cannot, the section is hidden and
-the log says why in one line.
+Decoding is the easy half. Every packet is then treated like any other
+transmitter on the bench: modulation index, drift, crystal error, timing,
+each with its uncertainty and held against the specification's limits. A
+device list with extra steps would have been quicker to write, and much
+less interesting to read.
 
-It lives in four sections of the menu: **NET** for the band itself, **LE**
-for Bluetooth Low Energy, **Classic** for classic Bluetooth and **LE Coded**
-for BLE's long-range PHY. They come and go together, because one radio
-requirement admits all four, and the pages on reading a screen hold in all
-of them. Nine views, one question each; the key is the number to press while
+The section only appears on a radio that reaches the band and can sample
+fast enough for its cheapest mode. On one that cannot, the section is
+hidden and the log says why in one line.
+
+## The views
+
+NET lives in four sections of the menu, which come and go together because
+one radio requirement admits all four. The number is the key to press while
 that section is active:
+
+```
+NET        1 Capability    2 Survey
+LE         1 Census        2 Advertising    3 Connection
+Classic    1 Piconets      2 Packets        3 Bench
+LE Coded   1 Long range
+```
+
+Nine views, one question each:
 
 | Key | View | The question it answers |
 |-----|------|--------------------------|
@@ -35,19 +48,33 @@ that section is active:
 
 The panels with controls announce them with a highlighted letter in the
 title; the full list is in [Keyboard Shortcuts](keys.md#net-panel-focus-modes).
-The menu shows a live line under every NET view, built by the same rules the
-view itself uses, so it never promises more than the screen delivers.
+The menu shows a live line under every NET view, built by the same rules
+the view itself uses, so it never promises more than the screen delivers.
 
-Three pages hold for every view, and are worth a read before any of them:
+## Before any of them
+
+Three pages hold for every view, and are worth a read first:
 
 - **[Reading any NET screen](net-reading.md)**: survey or lock, the header,
-  the three silences, stale and feed loss, and how addresses are shown (`i`).
+  the three silences, stale and feed loss, and how addresses are shown
+  (`i`).
 - **[What a NET number is worth](net-trust.md)**: what an offset in ppm
   rests on, and what has been checked on the air against what has only
   been reasoned.
 - **[Taking the data away](net-export.md)**: `o`, and the files it writes.
 
----
+## A first evening
+
+If you have never opened NET before, this order wastes the least time:
+
+1. **`NET 1`**, to see whether the radio can do this at all. If it says
+   `OUT OF BAND`, the rest of this page is reading for pleasure.
+2. **`NET 2`**, and let the survey run for a minute: the room's Wi-Fi, its
+   Bluetooth, and whatever else shares 2.4 GHz with them.
+3. **`LE 1`**, for who is advertising. Expect phones, watches, and a few
+   things you forgot were wireless.
+4. **`Classic 1`**, with a pair of headphones playing, then `Enter` for its
+   packets and `3` for each end on the bench.
 
 ## If you wrote your own NET preset
 
@@ -61,11 +88,11 @@ shape. A preset of your own that names them needs updating:
 | the `net_coexist` preset | part of `net_survey`; the `net_coexist` panel itself is unchanged |
 
 The built-in views moved too: Census and the BLE view (now Advertising)
-went from `section = "net"` to `"le"`, the three classic views to
+went from `section = "net"` to `"le"`, and the three classic views to
 `"classic"`. A preset of yours still filed under `"net"` keeps working and
 stays in NET; move it with `section` and `slot` if you want it beside its
-kind. All three sections are hidden together on a radio that cannot reach
-the band.
+kind. All of these sections are hidden together on a radio that cannot
+reach the band.
 
 How presets are written is in [Layout presets](presets.md).
 
