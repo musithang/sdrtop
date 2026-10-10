@@ -45,6 +45,12 @@
 //! other way by its slot parity, says so in the warning colour: a check on
 //! the direction reading itself, packet by packet. L2CAP payloads show
 //! their length and no more, and LLID 3 in another type is named, not read.
+//!
+//! **A message's names follow `i`.** A device's name (`name_res`), a
+//! BD_ADDR (`slot_offset`) and the body of an opcode Table 5.1 does not
+//! list are shown as the address mode allows
+//! (`NetState::show_lmp_identity`), as an advertised name and an address
+//! are, so a masked screen is masked in this column too.
 
 use ratatui::{
     layout::Rect,
@@ -59,7 +65,7 @@ use super::sections::{
     counted, index_of, BR_INDEX, F0_LIMIT_KHZ, F0_RESOLUTION_KHZ, INDEX_RESOLUTION,
 };
 use crate::signal::bt::header::PacketType;
-use crate::signal::bt::lmp::Initiator;
+use crate::signal::bt::lmp::{Identifying, Initiator};
 use crate::signal::bt::piconet::{
     ordered, BtPacket, Direction, HeaderRead, PayloadContent, PayloadVerdict, Piconet,
 };
@@ -199,14 +205,18 @@ fn value_cell(reading: &Reading, signed: bool) -> String {
 /// exchange, which DIR does not say: an answer is sent by the other side.
 /// One Table 5.1 forbids in the direction it was sent says so, and the
 /// whole cell wears the warning colour.
-pub(super) fn content_cell(k: &BtPacket, theme: &crate::Theme) -> (String, Option<Color>) {
+pub(super) fn content_cell(
+    k: &BtPacket,
+    net: &crate::state::NetState,
+    theme: &crate::Theme,
+) -> (String, Option<Color>) {
     match &k.content {
         Some(PayloadContent::Lmp(m)) => {
             let tid = match m.initiator {
                 Initiator::Central => "M",
                 Initiator::Peripheral => "S",
             };
-            let text = format!("{tid}: {}", m.words());
+            let text = format!("{tid}: {}", m.words(|i| net.show_lmp_identity(i)));
             match k.direction.and_then(|d| m.against(d)) {
                 Some(against) => (format!("{text}  ({against})"), Some(theme.status_warn)),
                 None => (text, None),
@@ -357,7 +367,7 @@ fn cells(
     };
     ink[PAYLOAD] = Some(payload_ink);
     ink[AGE] = Some(theme.label);
-    let (content, content_ink) = content_cell(k, theme);
+    let (content, content_ink) = content_cell(k, &state.net, theme);
     ink[LMP] = content_ink;
 
     let secs = now.saturating_duration_since(k.seen).as_secs_f64();
@@ -402,6 +412,15 @@ fn tally(p: &Piconet, width: usize, theme: &crate::Theme) -> Line<'static> {
 /// The list the view shows: the piconet's ring of every packet, or its LMP
 /// log (`l`). The keys and the panel both read it from here, so they move
 /// through the same list.
+/// Whether a packet's LMP message carries a BD_ADDR, the one device
+/// address this list prints.
+fn carries_address(k: &BtPacket) -> bool {
+    matches!(
+        &k.content,
+        Some(PayloadContent::Lmp(m)) if matches!(m.identifying, Some(Identifying::Address(_)))
+    )
+}
+
 pub(crate) fn shown<'a>(
     p: &'a Piconet,
     view: &crate::state::PacketsView,
@@ -503,6 +522,10 @@ impl Panel for NetBtPacketsPanel {
         // Held, the list is paused by the user, drawn cooled and never as
         // stale, and says what the pause is costing.
         let behind = start(p, view).unwrap_or(shown(p, view).len()) as u64;
+        // An address is printed here only inside an LMP message, so the
+        // list earns the address tag by holding one, not by being this list.
+        let mut chrome = chrome;
+        chrome.addresses = shown(p, view).iter().any(carries_address);
         chrome
             .tag_if(view.held.is_some(), Tag::Paused)
             .tag_if(view.held.is_some() && behind > 0, Tag::Behind(behind))
@@ -1141,6 +1164,73 @@ mod tests {
         Some(PayloadContent::Lmp(
             crate::signal::bt::lmp::parse(body).unwrap(),
         ))
+    }
+
+    /// A device's name, a BD_ADDR and a body no one can read follow `i`, as
+    /// an advertised name and an address do: in full as sent, in oui the
+    /// name and the address's "who", in masked none of them.
+    #[test]
+    fn lmp_identities_follow_the_address_mode() {
+        use crate::state::AddressDisplay;
+        let mut name = vec![2 << 1 | 1, 0, 22];
+        name.extend(b"WH-1000XM4\0\0\0\0");
+        let bodies: [&[u8]; 3] = [
+            &name,
+            // The piconet's own LAP, little-endian like the rest.
+            &[52 << 1, 0x71, 0x02, 0x18, 0xd3, 0xc3, 0xe7, 0x83, 0xa4],
+            &[67 << 1, 0xde, 0xad],
+        ];
+        let mut m = heard();
+        // Numbered as it reached the state, after another device.
+        m.net.address_book.number([9; 6]);
+        m.net
+            .address_book
+            .number([0xa4, 0x83, 0xe7, 0xc3, 0xd3, 0x18]);
+        record(
+            &mut m,
+            bodies
+                .iter()
+                .enumerate()
+                .map(|(i, b)| {
+                    let mut k = packet(
+                        i as u32,
+                        Some(header(3, 1, 0)),
+                        Some(Direction::Master),
+                        PayloadVerdict::Crc(true),
+                    );
+                    k.content = lmp(b);
+                    k
+                })
+                .collect(),
+        );
+        let at = |m: &SdrMetrics| draw(NetBtPacketsPanel, 191, 12, m).join("\n");
+
+        let text = at(&m);
+        assert!(text.contains("\"WH-1000XM4\""), "{text}");
+        assert!(text.contains("625 µs · a4:83:e7:c3:d3:18"), "{text}");
+        assert!(text.contains("not in Table 5.1  de ad"), "{text}");
+
+        m.net.address_display = AddressDisplay::Oui;
+        let text = at(&m);
+        assert!(text.contains("\"WH-1000XM4\""), "{text}");
+        assert!(text.contains("..d3:18"), "{text}");
+        assert!(!text.contains("c3:d3:18"), "{text}");
+        // An address shown in part is said so on the title, as anywhere.
+        let title = text.lines().next().unwrap_or_default();
+        assert!(title.contains("OUI"), "{title}");
+
+        m.net.address_display = AddressDisplay::Masked;
+        let text = at(&m);
+        assert!(!text.contains("WH-1000XM4"), "{text}");
+        assert!(text.contains("10 of 22 bytes · name, 10 chars"), "{text}");
+        assert!(!text.contains("d3:18"), "{text}");
+        let row = text
+            .lines()
+            .find(|l| l.contains("slot_offset"))
+            .expect(&text);
+        assert!(row.contains("625 µs ·") && row.contains(" #2"), "{row}");
+        assert!(text.contains("not in Table 5.1  2 bytes"), "{text}");
+        assert!(!text.contains("de ad"), "{text}");
     }
 
     /// An LMP packet shows who began the exchange and the message; the

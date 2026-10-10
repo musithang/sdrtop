@@ -632,7 +632,8 @@ mod tests {
             worst_drift_hz: None,
             worst_rate_hz_per_us: None,
         };
-        // And one packet of it, so the packet list draws its table.
+        // And one packet of it, so the packet list draws its table: a
+        // slot_offset, whose BD_ADDR (sent little-endian) is the device.
         crate::signal::bt::piconet::observe_packet(
             &mut m.net.bt_piconets,
             lap,
@@ -646,8 +647,9 @@ mod tests {
                 deviation: Default::default(),
                 carrier: Default::default(),
                 f0_ppm: None,
-                payload: crate::signal::bt::piconet::PayloadVerdict::NoPayload,
-                content: None,
+                payload: crate::signal::bt::piconet::PayloadVerdict::Crc(true),
+                content: crate::signal::bt::lmp::parse(&[52 << 1, 0, 0, 6, 5, 4, 3, 2, 1])
+                    .map(crate::signal::bt::piconet::PayloadContent::Lmp),
             },
         );
 

@@ -286,6 +286,22 @@ impl NetState {
         }
     }
 
+    /// What a link manager message carries that names a device, as the
+    /// address mode allows it: a name as an advertised name is shown, a
+    /// BD_ADDR as any public address is (its session number given as it
+    /// reached the state), and a body no one can read as raw bytes are.
+    pub fn show_lmp_identity(&self, i: &crate::signal::bt::lmp::Identifying) -> String {
+        use crate::signal::bt::lmp::Identifying;
+        match (self.address_display, i) {
+            (AddressDisplay::Masked, Identifying::Name(b)) => {
+                self.show_name(&String::from_utf8_lossy(b))
+            }
+            (AddressDisplay::Masked, Identifying::Unknown(b)) => self.show_bytes(b),
+            (_, Identifying::Address(a)) => self.show_address(*a, false, None),
+            _ => i.full(),
+        }
+    }
+
     /// Raw advertising bytes as the address mode allows them: spaced hex, or
     /// in `masked` only how many there are. Manufacturer and service data
     /// can carry an identifier of their own; the company or the service they

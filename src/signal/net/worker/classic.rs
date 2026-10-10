@@ -560,6 +560,7 @@ impl Classic {
                 reading.deviation,
                 reading.carrier,
             );
+            number_lmp_address(&mut m.net.address_book, reading.content.as_ref());
             crate::signal::bt::piconet::read_packet(
                 &mut m.net.bt_piconets,
                 lap,
@@ -602,9 +603,45 @@ impl Classic {
     }
 }
 
+/// A BD_ADDR an LMP message carries gets its session number the moment it
+/// reaches the state, as an advertiser's address does, so the masked mode
+/// can name it by number on any panel.
+fn number_lmp_address(
+    book: &mut crate::state::AddressBook,
+    content: Option<&crate::signal::bt::piconet::PayloadContent>,
+) {
+    use crate::signal::bt::lmp::Identifying;
+    use crate::signal::bt::piconet::PayloadContent;
+    if let Some(PayloadContent::Lmp(m)) = content {
+        if let Some(Identifying::Address(a)) = m.identifying {
+            book.number(a);
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A BD_ADDR an LMP message carries gets its session number as an
+    /// advertiser's address does, so a masked screen names it by number;
+    /// nothing else is numbered.
+    #[test]
+    fn an_lmp_address_is_numbered_like_an_advertiser() {
+        use crate::signal::bt::piconet::PayloadContent;
+        let mut book = crate::state::AddressBook::default();
+        book.number([9; 6]);
+        let slot_offset = crate::signal::bt::lmp::parse(&[52 << 1, 0, 0, 6, 5, 4, 3, 2, 1])
+            .map(PayloadContent::Lmp);
+        number_lmp_address(&mut book, slot_offset.as_ref());
+        assert_eq!(book.get([1, 2, 3, 4, 5, 6]), Some(2));
+
+        let name =
+            crate::signal::bt::lmp::parse(&[2 << 1, 0, 2, b'h', b'i']).map(PayloadContent::Lmp);
+        number_lmp_address(&mut book, name.as_ref());
+        number_lmp_address(&mut book, None);
+        assert_eq!(book.number([7; 6]), 3, "nothing else was numbered");
+    }
 
     /// The survey's classic budget moves one channel at a time, down over
     /// the high mark, up under the low one to the cap, and holds between.

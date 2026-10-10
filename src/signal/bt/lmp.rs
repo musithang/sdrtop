@@ -76,6 +76,38 @@ pub enum Initiator {
     Peripheral,
 }
 
+/// What a message carries that names a device, kept apart from the words
+/// so the screen can show it as its address mode allows: a name is often a
+/// person's, and an address beside a masked one would undo the mask.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum Identifying {
+    /// `name_res`'s fragment, its trailing zeros dropped: "UTF-8
+    /// characters" by Part C 5.2, which the bytes are not trusted to be.
+    Name(Vec<u8>),
+    /// A BD_ADDR, "of the sending device" (Part C 5.2), in the written
+    /// octet order: sent little-endian, so reversed.
+    Address([u8; 6]),
+    /// The body of an opcode Table 5.1 does not list: what it holds is not
+    /// known, so it may be anything.
+    Unknown(Vec<u8>),
+}
+
+impl Identifying {
+    /// As it was sent: the name quoted, control and invalid bytes escaped;
+    /// the address and the bytes in hex.
+    pub fn full(&self) -> String {
+        match self {
+            Self::Name(b) => format!("\"{}\"", name_text(b)),
+            Self::Address(a) => a
+                .iter()
+                .map(|b| format!("{b:02x}"))
+                .collect::<Vec<_>>()
+                .join(":"),
+            Self::Unknown(b) => hex(b),
+        }
+    }
+}
+
 /// One link manager message, read from a payload body.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct LmpMessage {
@@ -84,8 +116,11 @@ pub struct LmpMessage {
     pub pdu: Option<Pdu>,
     /// The body's length in bytes, opcode included.
     pub length: usize,
-    /// The parameters in words, or in hex.
+    /// The parameters in words, or in hex, without [`Self::identifying`].
     pub params: String,
+    /// The parameter that names a device, kept out of `params`: the last
+    /// one wherever a message carries one.
+    pub identifying: Option<Identifying>,
     /// An escape whose second byte the body does not reach: the opcode is
     /// only half known.
     escape_cut: bool,
@@ -250,6 +285,7 @@ pub fn parse(body: &[u8]) -> Option<LmpMessage> {
                     pdu: None,
                     length: body.len(),
                     params: String::new(),
+                    identifying: None,
                     escape_cut: true,
                 });
             }
@@ -261,13 +297,20 @@ pub fn parse(body: &[u8]) -> Option<LmpMessage> {
     // As far as both the bytes and the table allow.
     let end = pdu.map_or(body.len(), |p| body.len().min(p.length as usize));
     let p = &body[start.min(end)..end];
-    let params = pdu.map_or_else(|| hex(p), |pdu| params_words(&pdu, p));
+    let (params, identifying) = match pdu {
+        Some(pdu) => params_words(&pdu, p),
+        None => (
+            String::new(),
+            (!p.is_empty()).then(|| Identifying::Unknown(p.to_vec())),
+        ),
+    };
     Some(LmpMessage {
         initiator,
         opcode,
         pdu,
         length: body.len(),
         params,
+        identifying,
         escape_cut: false,
     })
 }
@@ -278,6 +321,7 @@ pub fn parse(body: &[u8]) -> Option<LmpMessage> {
 struct Words {
     parts: Vec<String>,
     cut: bool,
+    held: Option<Identifying>,
 }
 
 impl Words {
@@ -285,6 +329,7 @@ impl Words {
         Words {
             parts: Vec::new(),
             cut: false,
+            held: None,
         }
     }
 
@@ -298,11 +343,23 @@ impl Words {
         }
     }
 
-    fn done(mut self) -> String {
+    /// The parameter that names a device, kept apart: the last one, so
+    /// nothing is pushed after it.
+    fn hold(&mut self, part: Option<Identifying>) {
+        if self.cut {
+            return;
+        }
+        match part {
+            Some(p) => self.held = Some(p),
+            None => self.cut = true,
+        }
+    }
+
+    fn done(mut self) -> (String, Option<Identifying>) {
         if self.cut {
             self.parts.push("cut short".into());
         }
-        self.parts.join(" · ")
+        (self.parts.join(" · "), self.held)
     }
 }
 
@@ -353,9 +410,9 @@ fn key_material(name: &str) -> Option<&'static str> {
 /// elements packs its first element into the lowest bits of its first
 /// byte (Vol 1 Part E 2.9, 2.9.2): the AFH channel map and the channel
 /// classification are read that way.
-fn params_words(pdu: &Pdu, p: &[u8]) -> String {
+fn params_words(pdu: &Pdu, p: &[u8]) -> (String, Option<Identifying>) {
     if let Some(what) = key_material(pdu.name) {
-        return what.to_string();
+        return (what.to_string(), None);
     }
     let mut w = Words::new();
     match pdu.name {
@@ -415,16 +472,17 @@ fn params_words(pdu: &Pdu, p: &[u8]) -> String {
                             .iter()
                             .rposition(|&b| b != 0)
                             .map_or(&f[..0], |e| &f[..=e]);
-                        format!(
-                            "{} of {length} bytes · \"{}\"",
-                            shown.len(),
-                            name_text(shown)
-                        )
+                        (shown.to_vec(), length)
                     })
                 }
                 _ => None,
             };
-            w.push(fragment);
+            w.push(
+                fragment
+                    .as_ref()
+                    .map(|(f, length)| format!("{} of {length} bytes", f.len())),
+            );
+            w.hold(fragment.map(|(f, _)| Identifying::Name(f)));
         }
         "features_req_ext" | "features_res_ext" => {
             w.push(p.first().map(|n| format!("page {n}")));
@@ -511,7 +569,18 @@ fn params_words(pdu: &Pdu, p: &[u8]) -> String {
                 .collect::<Vec<_>>()
                 .join(" · ")
         })),
-        _ => return hex(p),
+        "slot_offset" => {
+            w.push(u16le(p, 0).map(|us| match us {
+                0..=1249 => format!("{us} µs"),
+                _ => format!("{us} µs, Part C 5.2: 0 to 1249"),
+            }));
+            w.hold(p.get(2..8).map(|a| {
+                let mut written: [u8; 6] = a.try_into().expect("six bytes");
+                written.reverse();
+                Identifying::Address(written)
+            }));
+        }
+        _ => return (hex(p), None),
     }
     w.done()
 }
@@ -638,12 +707,20 @@ impl LmpMessage {
         }
     }
 
-    /// One line: the name, the parameters, and the length note if any.
-    pub fn words(&self) -> String {
+    /// One line: the name, the parameters, and the length note if any;
+    /// what names a device as `shown` gives it, last among the parameters.
+    pub fn words(&self, shown: impl Fn(&Identifying) -> String) -> String {
         let mut out = self.name();
-        if !self.params.is_empty() {
+        let mut params = self.params.clone();
+        if let Some(i) = &self.identifying {
+            if !params.is_empty() {
+                params.push_str(" · ");
+            }
+            params.push_str(&shown(i));
+        }
+        if !params.is_empty() {
             out.push_str("  ");
-            out.push_str(&self.params);
+            out.push_str(&params);
         }
         if let Some(note) = self.length_note() {
             out.push_str(&format!("  ({note})"));
@@ -753,19 +830,63 @@ mod tests {
     /// in brackets; an empty part leaves no gap.
     #[test]
     fn the_words_are_name_params_and_note() {
-        assert_eq!(parse(&[47 << 1]).unwrap().words(), "timing_accuracy_req");
+        assert_eq!(words(&[47 << 1]), "timing_accuracy_req");
+        assert_eq!(words(&[67 << 1, 1]), "opcode 67: not in Table 5.1  01");
         assert_eq!(
-            parse(&[67 << 1, 1]).unwrap().words(),
-            "opcode 67: not in Table 5.1  01"
-        );
-        assert_eq!(
-            parse(&[3 << 1]).unwrap().words(),
+            words(&[3 << 1]),
             "accepted  cut short  (length 1, Table 5.1: 2)"
         );
     }
 
+    /// In full: what names a device as it was sent.
     fn words(body: &[u8]) -> String {
-        parse(body).unwrap().words()
+        parse(body).unwrap().words(Identifying::full)
+    }
+
+    /// A name, an address and a body no one can read are kept out of the
+    /// words, so the screen shows them as its address mode allows; in full
+    /// they read as they were sent.
+    #[test]
+    fn what_names_a_device_is_kept_apart() {
+        let mut b = vec![2 << 1 | 1, 0, 22];
+        b.extend(b"WH-1000XM4\0\0\0\0");
+        let m = parse(&b).unwrap();
+        assert_eq!(
+            m.identifying,
+            Some(Identifying::Name(b"WH-1000XM4".to_vec()))
+        );
+        assert_eq!(
+            m.words(|_| "HELD".to_string()),
+            "name_res  offset 0 · 10 of 22 bytes · HELD"
+        );
+
+        // 625 us, and the sender's BD_ADDR, both little-endian.
+        let m = parse(&[52 << 1, 0x71, 0x02, 0x18, 0xd3, 0xc3, 0xe7, 0x83, 0xa4]).unwrap();
+        assert_eq!(
+            m.identifying,
+            Some(Identifying::Address([0xa4, 0x83, 0xe7, 0xc3, 0xd3, 0x18]))
+        );
+        assert_eq!(
+            m.words(Identifying::full),
+            "slot_offset  625 µs · a4:83:e7:c3:d3:18"
+        );
+        assert_eq!(
+            words(&[52 << 1, 0xe2, 0x04, 0x18, 0xd3, 0xc3, 0xe7, 0x83, 0xa4]),
+            "slot_offset  1250 µs, Part C 5.2: 0 to 1249 · a4:83:e7:c3:d3:18"
+        );
+        assert_eq!(
+            words(&[52 << 1, 0x71, 0x02, 0x18]),
+            "slot_offset  625 µs · cut short  (length 4, Table 5.1: 9)"
+        );
+
+        // An opcode Table 5.1 does not list: what its body holds is not known.
+        let m = parse(&[67 << 1, 0xde, 0xad]).unwrap();
+        assert_eq!(m.identifying, Some(Identifying::Unknown(vec![0xde, 0xad])));
+        assert_eq!(
+            m.words(|_| "HELD".to_string()),
+            "opcode 67: not in Table 5.1  HELD"
+        );
+        assert_eq!(parse(&[67 << 1]).unwrap().identifying, None);
     }
 
     #[test]
