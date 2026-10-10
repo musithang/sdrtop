@@ -44,7 +44,7 @@ counted everything that wobbles it as noise, including what the radio
 itself does at its own centre. Now the SNR is the packet's power over the
 noise just before it, the same way for LE 1M and LE Coded, and the phone
 reads about 35 wherever it sits. LE 1M's quiet ceiling near 19 dB went with
-it. How it is read is in the [NET notes](net.md#how-snr-is-read).
+it. How it is read is in the [NET notes](net-le.md#how-snr-is-read).
 
 Then the phone went to the kitchen, and sdrtop stopped hearing it. LE Coded
 exists to be heard from the kitchen. A recording showed its packets
@@ -86,7 +86,7 @@ became of every one: heard, missed, out of view, or not listened to and
 why. The same following now works for ordinary BLE's extended advertising
 too, so a phone that advertises the modern way finally shows up named in
 the list and counted in the Census. The details are in the
-[NET notes](net.md#long-range--le-coded-1-focus-v).
+[NET notes](net-le-coded.md).
 
 Following them also turned up three ways the app could say something
 untrue: a retune left old samples behind to be read as new ones, an LE 2M
@@ -112,7 +112,7 @@ followed them perfectly through 268 events without hearing a single one.
 The box had set a bit that said "hop the new way", and sdrtop believed it.
 The specification, a page further on, says the remote gets a vote too, and
 the remote had voted no. With both bits read, every event in view was
-there. The whole hunt is in the [connection notes](net.md#connection--le-3-focus-e).
+there. The whole hunt is in the [connection notes](net-le-connection.md).
 
 Two more things a bench should have had long ago. **`Ctrl+R` records** the
 raw IQ stream as SigMF, with every gap, retune and gain change written down

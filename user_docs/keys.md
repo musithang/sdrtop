@@ -79,7 +79,7 @@ each layout, and the footer shows the numbers for the section you are in.
 | `w` | Pause or resume the waterfall |
 | `h` | Freeze the spectrum (hold the current frame behind the live one) |
 | a letter | Focus the panel whose title highlights it. `e` `l` `c` `i` `d` `t` `v` `x` `m` `n` `g` `b`, and in NET, LE, Classic and LE Coded `k` `j` `z` `u` `e` `v` `b` `c`, all listed [below](#focus-modes) |
-| `y` | On a standard station (WWV at 2.5, 5, 10, 15 or 20 MHz): measure our own oscillator's error and take it out of every offset in the app. See [what an offset is worth](net.md#what-an-offset-is-worth) |
+| `y` | On a standard station (WWV at 2.5, 5, 10, 15 or 20 MHz): measure our own oscillator's error and take it out of every offset in the app. See [what an offset is worth](net-trust.md#what-an-offset-is-worth) |
 | `1` to `9` | The nth layout **of the section you are in** |
 | `p` | Next layout in the same section, wrapping at the end |
 | `Esc` | Leave panel focus, or open the menu when nothing is focused |
@@ -96,10 +96,10 @@ key elsewhere:
 
 | Key | In NET, LE and Classic |
 |-----|--------|
-| `m` | Survey the band, or lock where you are ([survey or lock](net.md#survey-or-lock-m)) |
-| `i` | Show addresses in full, by vendor and kind, or masked ([addresses](net.md#addresses-i)) |
-| `o` | Write the band, the census, the BLE packets, their error curve and the classic hits to files ([taking the data away](net.md#taking-the-data-away-o)) |
-| `←` `→` | Locked: the previous or next place this view listens. On Advertising and Census, advertising channel 37, 38, 39 and round again; elsewhere one block of the band along ([stepping](net.md#stepping-while-locked)) |
+| `m` | Survey the band, or lock where you are ([survey or lock](net-reading.md#survey-or-lock-m)) |
+| `i` | Show addresses in full, by vendor and kind, or masked ([addresses](net-reading.md#addresses-i)) |
+| `o` | Write the band, the census, the BLE packets, their error curve and the classic hits to files ([taking the data away](net-export.md)) |
+| `←` `→` | Locked: the previous or next place this view listens. On Advertising and Census, advertising channel 37, 38, 39 and round again; elsewhere one block of the band along ([stepping](net-reading.md#stepping-while-locked)) |
 
 `p` stays inside the section. It used to walk every preset in the app in
 alphabetical order, which meant leaving the benches for a micro view halfway

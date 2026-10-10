@@ -51,7 +51,7 @@ range, is taken off before any receiver sees a sample.
   one. The frame-error curve's upper bins fill accordingly, and the
   exports' SNR columns carry the new figures. LE 2M keeps its receiver's
   estimate. How it is read is in the
-  [NET notes](user_docs/net.md#how-snr-is-read).
+  [NET notes](user_docs/net-le.md#how-snr-is-read).
 - **A packet that starts from silence is measured from its own bits.** Its
   df1, df2, f0 and drift were sometimes read a whole bit off, because the
   timing search reached into the noise before the packet: nearly half of

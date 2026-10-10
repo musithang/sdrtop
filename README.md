@@ -67,7 +67,7 @@ https://github.com/user-attachments/assets/af278500-24ff-4d98-8129-b421fd513a49
 *It's a terminal app, so brace yourself for the visual spectacle of monospace text in color. The only special effects are honest dBFS numbers.*
 
 **Piconet follow** · classic Bluetooth<br>
-<sub>One piconet, found by the access code at the start of every packet and read packet by packet. [How it works](user_docs/net.md#piconets--classic-1)</sub>
+<sub>One piconet, found by the access code at the start of every packet and read packet by packet. [How it works](user_docs/net-classic.md)</sub>
 
 https://github.com/user-attachments/assets/a9c554c0-bb78-4ac9-9970-b569650d4d08
 
