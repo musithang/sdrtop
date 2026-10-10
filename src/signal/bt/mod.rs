@@ -27,12 +27,22 @@
 //! - [`payload`]: a DH1/DH3/DH5 payload's CRC-16, which breaks that
 //!   two-candidate tie when `signal::net::worker` calls
 //!   [`payload::break_uap_tie`] for a LAP whose UAP has not resolved;
+//! - [`lmp`]: the link manager's messages in a passing payload's body, by
+//!   the Core's names;
 //! - [`piconet`] and [`slots`]: the roster, and slot timing.
 
 pub mod access_code;
 pub mod channel;
 pub mod detect;
 pub mod header;
+#[cfg_attr(
+    not(test),
+    expect(
+        dead_code,
+        reason = "read from the payloads once the piconet keeps its link manager messages"
+    )
+)]
+pub mod lmp;
 pub mod payload;
 pub mod piconet;
 pub mod receive;
