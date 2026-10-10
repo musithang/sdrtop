@@ -397,17 +397,54 @@ fn tally(p: &Piconet, width: usize, theme: &crate::Theme) -> Line<'static> {
     Line::from(Span::styled(text, Style::default().fg(theme.label)))
 }
 
-/// Where the list starts in the piconet's ring: the newest packet while
-/// live, the held one while held, which is also how many arrived since.
-/// `None` when the held packet has left the ring.
+/// The list the view shows: the piconet's ring of every packet, or its LMP
+/// log (`l`). The keys and the panel both read it from here, so they move
+/// through the same list.
+pub(crate) fn shown<'a>(
+    p: &'a Piconet,
+    view: &crate::state::PacketsView,
+) -> &'a std::collections::VecDeque<BtPacket> {
+    if view.lmp_only {
+        &p.lmp
+    } else {
+        &p.packets
+    }
+}
+
+/// Where the list starts in what it shows: the newest packet while live,
+/// the held one while held, which is also how many arrived since. `None`
+/// when the held packet has left what is kept.
 fn start(p: &Piconet, view: &crate::state::PacketsView) -> Option<usize> {
     match view.held {
         None => Some(0),
-        Some((stream, at)) => p
-            .packets
+        Some((stream, at)) => shown(p, view)
             .iter()
             .position(|k| k.stream == stream && k.at_us == at),
     }
+}
+
+/// The LMP log's last line: every message read on the piconet, past what
+/// the log keeps.
+fn lmp_tally(p: &Piconet, theme: &crate::Theme) -> Line<'static> {
+    Line::from(Span::styled(
+        format!(" {} LMP messages · {} kept", p.lmp_heard, p.lmp.len()),
+        Style::default().fg(theme.label),
+    ))
+}
+
+/// What the link has done since its newest LMP message, as counts: payloads
+/// checked and passed. No cause is named: an encrypted link and a damaged
+/// capture both fail their CRC, and the air alone cannot tell them apart.
+/// `None` when nothing has been checked since.
+fn since_last(p: &Piconet) -> Option<String> {
+    let s = p.since_lmp;
+    (s.checked > 0).then(|| {
+        let passed = match s.passed {
+            0 => "none passing".to_string(),
+            n => format!("{n} passing"),
+        };
+        format!("since the last: {} payloads checked, {passed}", s.checked)
+    })
 }
 
 /// The selected piconet, if the roster still has it.
@@ -437,6 +474,7 @@ impl Panel for NetBtPacketsPanel {
             ("↑↓", "scroll, holding the list at its newest"),
             ("H", "hold the list, or let it run"),
             ("End", "back to live"),
+            ("l", "the LMP messages only, or every packet"),
             ("← →", "the previous or next piconet"),
         ]
     }
@@ -455,15 +493,16 @@ impl Panel for NetBtPacketsPanel {
         let view = &state.net.packets_view;
         // Held, the list is paused by the user, drawn cooled and never as
         // stale, and says what the pause is costing.
-        let behind = start(p, view).unwrap_or(p.packets.len()) as u64;
+        let behind = start(p, view).unwrap_or(shown(p, view).len()) as u64;
         chrome
             .tag_if(view.held.is_some(), Tag::Paused)
             .tag_if(view.held.is_some() && behind > 0, Tag::Behind(behind))
             .tag_if(view.first_visible > 0, Tag::Scroll(view.first_visible))
             .suffix(format!(
-                " {} · UAP {}",
+                " {} · UAP {}{}",
                 state.net.show_lap(p.lap),
-                uap_text(p.lap, &state.net)
+                uap_text(p.lap, &state.net),
+                if view.lmp_only { " · LMP only" } else { "" }
             ))
     }
 
@@ -494,15 +533,26 @@ impl Panel for NetBtPacketsPanel {
             f.render_widget(Paragraph::new(lines), inner);
             return;
         };
-        if p.packets.is_empty() {
-            let lines = note("no packets of this piconet kept yet");
+        let view = &state.net.packets_view;
+        let list = shown(p, view);
+        if list.is_empty() {
+            let lines = note(if view.lmp_only {
+                "no LMP read on this piconet yet: only a DM1 whose CRC passes is read, \
+                 and an encrypted link shows its LMP only at a reconnect"
+            } else {
+                "no packets of this piconet kept yet"
+            });
             f.render_widget(Paragraph::new(lines), inner);
             return;
         }
-        let Some(top) = start(p, &state.net.packets_view) else {
-            let lines = note(&format!(
-                "the held packet has left the {} kept; End: back to live",
+        let Some(top) = start(p, view) else {
+            let kept = if view.lmp_only {
+                crate::signal::bt::piconet::LMP_KEPT
+            } else {
                 crate::signal::bt::piconet::PACKETS_KEPT
+            };
+            let lines = note(&format!(
+                "the held packet has left the {kept} kept; End: back to live"
             ));
             f.render_widget(Paragraph::new(lines), inner);
             return;
@@ -519,23 +569,28 @@ impl Panel for NetBtPacketsPanel {
             .position(|q| q.lap == p.lap)
             .map_or(theme.value_hi, |k| theme.series_color(k));
         let height = inner.height as usize;
-        let body = height.saturating_sub(2);
         // As far as the keys scroll it: until the oldest kept is on top, so
         // every press moves the list and none is spent at its end.
-        let rows = p.packets.len() - top;
-        let from = top
-            + state
-                .net
-                .packets_view
-                .first_visible
-                .min(rows.saturating_sub(1));
-        let visible: Vec<(Vec<String>, Vec<Option<Color>>)> = p
-            .packets
+        let rows = list.len() - top;
+        let from = top + view.first_visible.min(rows.saturating_sub(1));
+        // In the log, what the link did since its newest message, above that
+        // message while it is the top row: the newest fact goes first, as
+        // in the list.
+        let since = (view.lmp_only && from == 0)
+            .then(|| since_last(p))
+            .flatten();
+        let body = height.saturating_sub(2 + since.is_some() as usize);
+        let visible: Vec<(Vec<String>, Vec<Option<Color>>)> = list
             .iter()
             .enumerate()
             .skip(from)
             .take(body)
-            .map(|(i, k)| cells(k, p.packets.get(i + 1), p, master, state, now, theme))
+            .map(|(i, k)| {
+                // The packet before in the log is not the one before on the
+                // air, so the log counts no slots between its rows.
+                let before = if view.lmp_only { None } else { list.get(i + 1) };
+                cells(k, before, p, master, state, now, theme)
+            })
             .collect();
         let texts: Vec<Vec<String>> = visible.iter().map(|(c, _)| c.clone()).collect();
         // Every reading whole; the LMP column takes what is left, up to its
@@ -562,6 +617,12 @@ impl Panel for NetBtPacketsPanel {
             },
             theme,
         )];
+        if let Some(since) = since {
+            lines.push(Line::from(Span::styled(
+                format!(" {since}"),
+                Style::default().fg(theme.label),
+            )));
+        }
         for (text, ink) in &visible {
             let mut line = row(&columns, fit, text, false, theme);
             // Cell `i` is span `1 + 2i`: the gutter first, a gap between.
@@ -573,7 +634,11 @@ impl Panel for NetBtPacketsPanel {
             lines.push(line);
         }
         if height >= 3 {
-            lines.push(tally(p, width, theme));
+            lines.push(if view.lmp_only {
+                lmp_tally(p, theme)
+            } else {
+                tally(p, width, theme)
+            });
         }
         f.render_widget(Paragraph::new(lines), inner);
     }
@@ -585,7 +650,7 @@ mod tests {
     use crate::signal::bt::header::{Header, PacketType};
     use crate::signal::bt::piconet::{
         observe, observe_packet, BtPacket, Carrier, Deviation, Direction, HeaderRead,
-        PayloadContent, PayloadVerdict,
+        PayloadContent, PayloadVerdict, SinceLmp,
     };
     use crate::signal::dsp::uncertainty::Uncertain;
     use crate::state::fixture::draw;
@@ -1156,5 +1221,62 @@ mod tests {
         }
         let text = draw(NetBtPacketsPanel, 110, 12, &m).join("\n");
         assert!(text.contains('…'), "{text}");
+    }
+
+    /// `l`'s view lists the LMP log only, old ones included, and closes
+    /// with what the link has done since, claiming no cause for it.
+    #[test]
+    fn the_lmp_view_lists_the_log_and_what_came_after() {
+        let mut m = heard();
+        // One LMP packet, in the ring and in the log, and 412 payloads
+        // checked since it without one passing.
+        let mut k = packet(
+            1,
+            Some(header(3, 1, 0)),
+            Some(Direction::Master),
+            PayloadVerdict::Crc(true),
+        );
+        k.content = lmp(&[16 << 1, 16]);
+        record(&mut m, vec![k.clone()]);
+        let p = m.net.bt_piconets.iter_mut().find(|p| p.lap == LAP).unwrap();
+        p.lmp.push_front(k);
+        p.lmp_heard = 1;
+        p.since_lmp = SinceLmp {
+            checked: 412,
+            passed: 0,
+        };
+        m.net.packets_view.lmp_only = true;
+        let out = draw(NetBtPacketsPanel, 191, 20, &m);
+        let text = out.join("\n");
+        assert!(text.contains("encryption_key_size_req  16 bytes"), "{text}");
+        let closing = out
+            .iter()
+            .find(|l| l.contains("since the last"))
+            .unwrap_or_else(|| panic!("the closing line: {text}"));
+        assert!(
+            closing.contains("since the last: 412 payloads checked, none passing"),
+            "{closing}"
+        );
+        assert!(
+            !closing.contains("encrypt"),
+            "no cause is claimed: {closing}"
+        );
+        assert!(
+            out[0].contains("LMP only"),
+            "the title says which: {}",
+            out[0]
+        );
+    }
+
+    #[test]
+    fn an_empty_lmp_log_says_why() {
+        let mut m = heard();
+        record(
+            &mut m,
+            vec![packet(1, None, None, PayloadVerdict::NoPayload)],
+        );
+        m.net.packets_view.lmp_only = true;
+        let text = draw(NetBtPacketsPanel, 120, 12, &m).join("\n");
+        assert!(text.contains("no LMP read on this piconet yet"), "{text}");
     }
 }

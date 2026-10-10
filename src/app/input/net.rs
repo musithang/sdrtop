@@ -243,10 +243,12 @@ pub(super) fn net_bt_piconets(key: KeyEvent, ctx: &mut InputCtx<'_>) -> KeyActio
 /// The Piconet view's packet list. `↓` scrolls into the past and holds the
 /// list at its newest packet first, so the rows do not slide under the
 /// reader as packets arrive; `↑` scrolls back up; `h` holds the list or lets
-/// it run, as on the BLE list; `End` is live again, at the top. `← →` step
-/// to the previous or next piconet in the roster's order, the view starting
-/// afresh on each; with none heard they do nothing, rather than stepping the
-/// radio from under a focused list.
+/// it run, as on the BLE list; `End` is live again, at the top. `l` swaps
+/// every packet for the piconet's LMP log and back, from live at the top;
+/// the log is a mode, like the hold, so `End`, `h` and a step to another
+/// piconet keep it. `← →` step to the previous or next piconet in the
+/// roster's order, the view starting afresh on each; with none heard they
+/// do nothing, rather than stepping the radio from under a focused list.
 pub(super) fn net_bt_packets(key: KeyEvent, ctx: &mut InputCtx<'_>) -> KeyAction {
     let mut m = metrics(ctx.state);
     let order: Vec<u32> = crate::signal::bt::piconet::ordered(&m.net.bt_piconets)
@@ -258,7 +260,7 @@ pub(super) fn net_bt_packets(key: KeyEvent, ctx: &mut InputCtx<'_>) -> KeyAction
         .bt_view
         .cursor(&order)
         .and_then(|i| m.net.bt_piconets.iter().find(|p| p.lap == order[i]))
-        .map(|p| &p.packets);
+        .map(|p| crate::ui::panels::net::bt::bt_packets::shown(p, &m.net.packets_view));
     let newest = packets.and_then(|k| k.front()).map(|k| (k.stream, k.at_us));
     // Rows below the held packet (or the newest), to scroll no further than.
     let below = packets.map_or(0, |k| {
@@ -280,14 +282,28 @@ pub(super) fn net_bt_packets(key: KeyEvent, ctx: &mut InputCtx<'_>) -> KeyAction
         }
         KeyCode::Char('h') => {
             *view = match view.held {
-                Some(_) => Default::default(),
+                Some(_) => crate::state::PacketsView {
+                    lmp_only: view.lmp_only,
+                    ..Default::default()
+                },
                 None => crate::state::PacketsView {
                     held: newest,
                     ..*view
                 },
             };
         }
-        KeyCode::End => *view = Default::default(),
+        KeyCode::End => {
+            *view = crate::state::PacketsView {
+                lmp_only: view.lmp_only,
+                ..Default::default()
+            }
+        }
+        KeyCode::Char('l') => {
+            *view = crate::state::PacketsView {
+                lmp_only: !view.lmp_only,
+                ..Default::default()
+            }
+        }
         KeyCode::Left | KeyCode::Right => step_piconet(&mut m, &order, key.code == KeyCode::Right),
         _ => {
             drop(m);
@@ -347,7 +363,10 @@ pub(super) fn net_ble_connection(key: KeyEvent, ctx: &mut InputCtx<'_>) -> KeyAc
 fn step_piconet(m: &mut SdrMetrics, order: &[u32], forward: bool) {
     if !order.is_empty() {
         m.net.bt_view.move_by(order, if forward { 1 } else { -1 });
-        m.net.packets_view = Default::default();
+        m.net.packets_view = crate::state::PacketsView {
+            lmp_only: m.net.packets_view.lmp_only,
+            ..Default::default()
+        };
     }
 }
 
@@ -1405,6 +1424,65 @@ mod tests {
         assert_eq!(view(&state).held, Some((1, 29.0 * 625.0)));
         key(&mut engine, &keys, &state, KeyCode::Char('h'));
         assert_eq!(view(&state), Default::default());
+    }
+
+    /// `l` switches to the piconet's LMP log and back, each time from live
+    /// at the top; `End` goes back to live without leaving the log; `↓` in
+    /// the log holds it at its newest message; `← →` keep the log on.
+    #[test]
+    fn l_switches_to_the_lmp_log_and_keeps_it() {
+        let (mut engine, keys, state) = piconet_view(30);
+        {
+            let mut m = metrics(&state);
+            let p = &mut m.net.bt_piconets[0];
+            assert_eq!(p.lap, 0xc3_d318);
+            let older: Vec<_> = p.packets.iter().skip(10).take(5).cloned().collect();
+            p.lmp.extend(older);
+        }
+        let view = |s: &Arc<Mutex<SdrMetrics>>| metrics(s).net.packets_view;
+        key(&mut engine, &keys, &state, KeyCode::Down);
+        key(&mut engine, &keys, &state, KeyCode::Char('l'));
+        assert_eq!(
+            view(&state),
+            crate::state::PacketsView {
+                lmp_only: true,
+                ..Default::default()
+            },
+            "the log, from live at the top"
+        );
+
+        key(&mut engine, &keys, &state, KeyCode::Down);
+        key(&mut engine, &keys, &state, KeyCode::Down);
+        let newest_lmp = 19.0 * 625.0;
+        assert_eq!(
+            view(&state).held,
+            Some((1, newest_lmp)),
+            "held at the log's newest"
+        );
+        for _ in 0..10 {
+            key(&mut engine, &keys, &state, KeyCode::Down);
+        }
+        assert_eq!(
+            view(&state).first_visible,
+            4,
+            "no further than the log's oldest"
+        );
+
+        key(&mut engine, &keys, &state, KeyCode::End);
+        assert_eq!(
+            view(&state),
+            crate::state::PacketsView {
+                lmp_only: true,
+                ..Default::default()
+            },
+            "live, still the log"
+        );
+
+        key(&mut engine, &keys, &state, KeyCode::Right);
+        assert!(view(&state).lmp_only, "the next piconet's log");
+        key(&mut engine, &keys, &state, KeyCode::Left);
+        key(&mut engine, &keys, &state, KeyCode::Char('l'));
+        assert_eq!(view(&state), Default::default(), "every packet again");
     }
 
     /// `← →` step through the piconets in the roster's order, the view

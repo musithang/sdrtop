@@ -51,7 +51,11 @@ pub(in crate::app::input) fn try_set_preset(
             engine.is_panel_visible("net_bt_packets") || engine.is_panel_visible("net_bt_bench");
         if piconet_view && piconet.is_some() {
             m.net.bt_view.selected = piconet;
-            m.net.packets_view = Default::default();
+            // The position starts afresh; the LMP log, a mode, stays.
+            m.net.packets_view = crate::state::PacketsView {
+                lmp_only: m.net.packets_view.lmp_only,
+                ..Default::default()
+            };
         }
     } else {
         m.push_log(format!("Preset '{}' not yet available", name));

@@ -23,6 +23,10 @@ pub struct PacketsView {
     pub held: Option<(u32, f64)>,
     /// Rows scrolled past, from the held packet (or the newest, live).
     pub first_visible: usize,
+    /// The piconet's LMP log in place of every packet: a mode, like the
+    /// hold, kept until switched back, so a scroll or a step to another
+    /// piconet does not drop it.
+    pub lmp_only: bool,
 }
 
 /// Which stretch of time the classic hop scatter shows
