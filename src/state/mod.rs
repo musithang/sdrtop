@@ -37,6 +37,9 @@ pub use net::{
     NetMode, NetState, PacketsView, PduKind, RetuneRun, BLE_PACKET_LIMIT, BT_HOP_LIMIT,
     COLUMN_INTERVAL, FULL_ADDRESS_WIDTH, HISTORY_COLUMNS,
 };
+// The roster's sort keys, which the roster's columns are held to.
+#[cfg(test)]
+pub use net::ROSTER_SORT_KEYS;
 // Named by the NET worker, which counts its arrivals into it.
 pub use net::NetDecodeHealth;
 pub use observer::ObserverState;

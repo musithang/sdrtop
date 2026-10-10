@@ -76,20 +76,26 @@ Two answers, one above the other:
   quiet lanes and letting you conclude the piconet had a nap.
 
 Each piconet wears one colour here and in the roster, and one selection
-(`↑` `↓` in either panel) drives both.
+(`↑` `↓` in either panel) drives both. The lanes run in the roster's order,
+whatever it is sorted by.
 
 ## Piconets *(focus `c`)*
 
-One row per LAP, the most recently heard first:
+One row per LAP, ordered by LAP to begin with, so a piconet that speaks up
+stays where it is instead of leaping to the top just as you reach for it.
+`S` orders by the next column and `R` reverses, as on the Census; the
+column carries the mark (`LAST▴`) and the title says it too (`[↑LAST]`).
+The selection stays on its piconet, wherever the new order puts it, and the
+steps between piconets on Classic 2 and 3 follow the same order.
 
 | Column | What it is |
 |--------|------------|
-| `LAP` | The access code's address part, or `GIAC`, `LIAC`, `DIAC` |
+| `LAP` | The access code's address part, or `GIAC`, `LIAC`, `DIAC`. In **masked** it reads `#n`, the order first heard, and sorts that way: by the hidden value it would give away how the LAPs compare |
 | `KIND` | Piconet, inquiry or paged, as above |
 | `LAST` | How long ago it was last heard |
 | `HITS` | Access codes found, all channels together |
 | `CH` | How many of the 79 channels it was heard on |
-| `UAP` | `32 left`, `2 left`, or the value, see below |
+| `UAP` | `32 left`, `2 left`, or the value, see below. Sorted, a resolved UAP comes first, then the fewest candidates, and a piconet with no header yet last, whichever way |
 | `FIRST` | How long ago it was first heard |
 
 **The UAP is the part Bluetooth does not say.** It is the next 8 bits of

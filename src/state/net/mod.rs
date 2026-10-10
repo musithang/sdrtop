@@ -30,6 +30,8 @@ mod packets;
 pub use address::{who_with, AddressBook, AddressDisplay, FULL_ADDRESS_WIDTH};
 pub use band::{BandOccupancy, CellReading, COLUMN_INTERVAL, HISTORY_COLUMNS};
 pub use census::CensusState;
+#[cfg(test)]
+pub use classic::ROSTER_SORT_KEYS;
 pub use classic::{BtHop, HopView, PacketsView, BT_HOP_LIMIT};
 pub use follow::{ConnectionView, FollowedConnection};
 pub use health::NetDecodeHealth;
@@ -249,6 +251,9 @@ pub struct NetState {
     /// The roster's cursor, on a LAP: the piconet selected. The hop scatter
     /// shares it, so a piconet picked in either is the one both show.
     pub bt_view: super::Selection<u32>,
+    /// How the roster is ordered, `s` and `r` on it. See
+    /// [`NetState::bt_roster`].
+    pub bt_sort: classic::RosterSort,
     /// How much of the past the hop scatter shows, and how far back it ends.
     pub hop_view: HopView,
     /// Where the Piconet view's packet list is scrolled to, and the packet

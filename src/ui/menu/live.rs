@@ -153,10 +153,7 @@ pub fn line(preset: &str, m: &SdrMetrics, now: Instant) -> Option<Live> {
             ))
         }
         "net_bench" => {
-            let laps: Vec<u32> = crate::signal::bt::piconet::ordered(&net.bt_piconets)
-                .iter()
-                .map(|p| p.lap)
-                .collect();
+            let laps: Vec<u32> = net.bt_roster().iter().map(|p| p.lap).collect();
             let Some(p) = net
                 .bt_view
                 .cursor(&laps)
@@ -211,10 +208,7 @@ pub fn line(preset: &str, m: &SdrMetrics, now: Instant) -> Option<Live> {
             ))
         }
         "net_piconet" => {
-            let laps: Vec<u32> = crate::signal::bt::piconet::ordered(&net.bt_piconets)
-                .iter()
-                .map(|p| p.lap)
-                .collect();
+            let laps: Vec<u32> = net.bt_roster().iter().map(|p| p.lap).collect();
             let Some(p) = net
                 .bt_view
                 .cursor(&laps)

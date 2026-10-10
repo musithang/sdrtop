@@ -229,7 +229,7 @@ impl Panel for NetBtHopsPanel {
         // Rows: WHERE heading, bars, underline, axis; WHEN heading, lanes,
         // axis. The lanes are kept first, the bars take the rest, and the
         // "watched now" line only where there is room to spare.
-        let roster = crate::signal::bt::piconet::ordered(&state.net.bt_piconets);
+        let roster = state.net.bt_roster();
         let fixed = 5;
         let lane_room = height.saturating_sub(fixed + 2);
         let (lanes, more) = if roster.len() <= lane_room {

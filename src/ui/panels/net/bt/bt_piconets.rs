@@ -29,9 +29,9 @@ use super::sections::{
     self, channel_runs, CLOCK_RESOLUTION_PPM, F0_RESOLUTION_KHZ, INDEX_RESOLUTION,
     JITTER_RESOLUTION_US, LABEL_W,
 };
-use crate::signal::bt::piconet::{ordered, Inquiry, Kind, Piconet, DCI};
+use crate::signal::bt::piconet::{Inquiry, Kind, Piconet, DCI};
 use crate::state::SdrMetrics;
-use crate::ui::panel::{FeedSpan, Panel, PanelChrome, Staleness};
+use crate::ui::panel::{FeedSpan, Panel, PanelChrome, Staleness, Tag};
 use crate::ui::widgets::reading::Reading;
 use crate::ui::widgets::table::{
     columns_that_fit, grow_to_contents, header, row, viewport_start, Align, Column, Sort,
@@ -79,9 +79,6 @@ const COLUMNS: &[Column] = &[
         align: Align::Right,
     },
 ];
-
-/// The column the roster is ordered by: the most recently heard first.
-const ORDERED_BY: usize = 2;
 
 /// The colour chip a piconet wears here and on the hop panel: solid, so the
 /// colour carries in any font (a braille block drew as faint dots).
@@ -524,6 +521,8 @@ impl Panel for NetBtPiconetsPanel {
         &[
             ("↑↓", "select a piconet"),
             ("Enter", "packet by packet, on Classic 2"),
+            ("S", "sort by the next column"),
+            ("R", "reverse"),
         ]
     }
 
@@ -535,6 +534,10 @@ impl Panel for NetBtPiconetsPanel {
             // and worth what the reference makes it.
             .shows_offsets()
             .tag_if(true, state.net.mode.tag())
+            .tag_if(
+                true,
+                Tag::Sorted(state.net.bt_sort.key(), state.net.bt_sort.descending),
+            )
             // Hits and first sightings accumulate for the session, so a drop
             // at any point in it undercounts them.
             .counts_from_feed(FeedSpan::Session)
@@ -558,7 +561,7 @@ impl Panel for NetBtPiconetsPanel {
             f.render_widget(Paragraph::new(lines), inner);
             return;
         }
-        let roster = ordered(&state.net.bt_piconets);
+        let roster = state.net.bt_roster();
 
         let now = std::time::Instant::now();
         // A column holds its widest cell whole (a long session's hit count).
@@ -581,8 +584,8 @@ impl Panel for NetBtPiconetsPanel {
             &columns,
             fit,
             Sort {
-                column: ORDERED_BY,
-                descending: false,
+                column: state.net.bt_sort.column,
+                descending: state.net.bt_sort.descending,
             },
             theme,
         )];
@@ -743,14 +746,41 @@ mod tests {
         );
     }
 
-    /// The sort mark stands on the column the rows are ordered by, LAST,
-    /// whatever columns are added before it.
+    /// The roster's columns are the sort's keys, in one order, so the mark
+    /// can only stand on the column the rows are ordered by.
     #[test]
-    fn the_sort_mark_is_on_last() {
-        assert_eq!(COLUMNS[ORDERED_BY].title, "LAST");
-        let out = draw(NetBtPiconetsPanel, 70, 8, &heard());
-        let head = out.iter().find(|l| l.contains("LAP")).unwrap();
-        assert!(head.contains("LAST\u{25b4}"), "{head}");
+    fn the_columns_are_the_sort_keys() {
+        let titles: Vec<&str> = COLUMNS.iter().map(|c| c.title).collect();
+        assert_eq!(titles, crate::state::ROSTER_SORT_KEYS);
+    }
+
+    /// By LAP to begin with: the header's mark on LAP, the title saying
+    /// so, and a piconet heard long ago above one heard now. Sorted by
+    /// LAST, the mark and the rows move with it.
+    #[test]
+    fn the_roster_says_what_orders_it() {
+        let mut m = heard();
+        observe(
+            &mut m.net.bt_piconets,
+            0x00_0001,
+            40,
+            Instant::now() - Duration::from_secs(100),
+        );
+        let row = |out: &[String], lap: &str| {
+            out.iter()
+                .position(|l| l.contains(lap))
+                .unwrap_or_else(|| panic!("{lap}: {}", out.join("\n")))
+        };
+        let out = draw(NetBtPiconetsPanel, 70, 10, &m);
+        assert!(out[1].contains("LAP\u{25b4}"), "{}", out[1]);
+        assert!(out[0].contains("\u{2191}LAP"), "{}", out[0]);
+        assert!(row(&out, "0x000001") < row(&out, "0x123456"));
+
+        m.net.bt_sort.column = 2;
+        let out = draw(NetBtPiconetsPanel, 70, 10, &m);
+        assert!(out[1].contains("LAST\u{25b4}"), "{}", out[1]);
+        assert!(out[0].contains("\u{2191}LAST"), "{}", out[0]);
+        assert!(row(&out, "0x000001") > row(&out, "0x123456"));
     }
 
     /// A LAP with both signs of a page is named so, in the table and the
@@ -792,15 +822,15 @@ mod tests {
         assert!(other.contains("piconet"), "{other}");
     }
 
-    /// **One row per piconet, the most recently heard first**, with its
-    /// hits, how many channels, and how far its UAP has narrowed.
+    /// **One row per piconet, by LAP to begin with**, with its hits, how
+    /// many channels, and how far its UAP has narrowed.
     #[test]
-    fn each_piconet_gets_a_row_the_newest_first() {
+    fn each_piconet_gets_a_row_in_lap_order() {
         let out = draw(NetBtPiconetsPanel, 50, 8, &heard());
         let text = out.join("\n");
-        let newest = text.find("0x123456").expect(&text);
-        let older = text.find("0x5a3c71").expect(&text);
-        assert!(newest < older, "{text}");
+        let lower = text.find("0x123456").expect(&text);
+        let higher = text.find("0x5a3c71").expect(&text);
+        assert!(lower < higher, "{text}");
         let row = out.iter().find(|l| l.contains("0x5a3c71")).unwrap();
         assert!(row.contains("2 left"), "{row}");
         assert!(row.contains(" 5 "), "five hits: {row}");

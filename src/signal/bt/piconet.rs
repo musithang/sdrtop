@@ -615,14 +615,6 @@ pub fn read_packet(
     side.add(reading.deviation, reading.carrier);
 }
 
-/// The LAPs in the order the roster is drawn: the most recently heard
-/// first, ties by LAP so the order does not shuffle between frames.
-pub fn ordered(roster: &[Piconet]) -> Vec<&Piconet> {
-    let mut out: Vec<&Piconet> = roster.iter().collect();
-    out.sort_by(|a, b| b.last_seen.cmp(&a.last_seen).then(a.lap.cmp(&b.lap)));
-    out
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -738,10 +730,6 @@ mod tests {
         assert_eq!((h.captured, h.decoded, h.undecoded), (3, 1, 1));
         assert_eq!(h.types[PacketType::Poll.code() as usize], 1);
         assert_eq!(h.lt_addrs, 1 << 3);
-
-        // Most recently heard first.
-        let order: Vec<u32> = ordered(&roster).iter().map(|p| p.lap).collect();
-        assert_eq!(order, vec![0x5a3c71, 0x123456]);
     }
 
     fn packet(at_us: f64, direction: Option<Direction>, settled: f32) -> BtPacket {

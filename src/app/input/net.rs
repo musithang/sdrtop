@@ -210,18 +210,23 @@ pub(super) fn net_census(key: KeyEvent, ctx: &mut InputCtx<'_>) -> KeyAction {
 }
 
 /// The piconet roster: the arrows move the cursor through the piconets in the
-/// order the panel draws them (`signal::bt::piconet::ordered`), the most
-/// recently heard first; the cursor holds a LAP, so a piconet heard again
-/// keeps it as it moves to the top.
+/// order the panel draws them (`NetState::bt_roster`); the cursor holds a
+/// LAP, so a re-sort keeps it on the same piconet. `s` orders by the next
+/// column and `r` reverses, as on the Census, each back to the top.
 pub(super) fn net_bt_piconets(key: KeyEvent, ctx: &mut InputCtx<'_>) -> KeyAction {
     let mut m = metrics(ctx.state);
-    let order: Vec<u32> = crate::signal::bt::piconet::ordered(&m.net.bt_piconets)
-        .iter()
-        .map(|p| p.lap)
-        .collect();
+    let order: Vec<u32> = m.net.bt_roster().iter().map(|p| p.lap).collect();
     match key.code {
         KeyCode::Up => m.net.bt_view.move_by(&order, -1),
         KeyCode::Down => m.net.bt_view.move_by(&order, 1),
+        KeyCode::Char('s') => {
+            m.net.bt_sort.cycle();
+            m.net.bt_view.reset_view();
+        }
+        KeyCode::Char('r') => {
+            m.net.bt_sort.reverse();
+            m.net.bt_view.reset_view();
+        }
         // The selected piconet, packet by packet: the Piconet view opens on
         // it (`global::presets::try_set_preset` carries the selection).
         KeyCode::Enter => {
@@ -251,10 +256,7 @@ pub(super) fn net_bt_piconets(key: KeyEvent, ctx: &mut InputCtx<'_>) -> KeyActio
 /// do nothing, rather than stepping the radio from under a focused list.
 pub(super) fn net_bt_packets(key: KeyEvent, ctx: &mut InputCtx<'_>) -> KeyAction {
     let mut m = metrics(ctx.state);
-    let order: Vec<u32> = crate::signal::bt::piconet::ordered(&m.net.bt_piconets)
-        .iter()
-        .map(|p| p.lap)
-        .collect();
+    let order: Vec<u32> = m.net.bt_roster().iter().map(|p| p.lap).collect();
     let packets: Option<&std::collections::VecDeque<_>> = m
         .net
         .bt_view
@@ -374,10 +376,7 @@ fn step_piconet(m: &mut SdrMetrics, order: &[u32], forward: bool) {
 /// does, so either panel focused moves the view.
 pub(super) fn net_bt_bench(key: KeyEvent, ctx: &mut InputCtx<'_>) -> KeyAction {
     let mut m = metrics(ctx.state);
-    let order: Vec<u32> = crate::signal::bt::piconet::ordered(&m.net.bt_piconets)
-        .iter()
-        .map(|p| p.lap)
-        .collect();
+    let order: Vec<u32> = m.net.bt_roster().iter().map(|p| p.lap).collect();
     match key.code {
         KeyCode::Left | KeyCode::Right => step_piconet(&mut m, &order, key.code == KeyCode::Right),
         _ => {
@@ -394,10 +393,7 @@ pub(super) fn net_bt_bench(key: KeyEvent, ctx: &mut InputCtx<'_>) -> KeyAction {
 /// `End` returns to now.
 pub(super) fn net_bt_hops(key: KeyEvent, ctx: &mut InputCtx<'_>) -> KeyAction {
     let mut m = metrics(ctx.state);
-    let order: Vec<u32> = crate::signal::bt::piconet::ordered(&m.net.bt_piconets)
-        .iter()
-        .map(|p| p.lap)
-        .collect();
+    let order: Vec<u32> = m.net.bt_roster().iter().map(|p| p.lap).collect();
     let oldest_ms = m
         .net
         .bt_hops
@@ -1567,6 +1563,48 @@ mod tests {
             .log
             .iter()
             .any(|l| l.text.contains("select a piconet")));
+    }
+
+    /// `s` walks the roster's columns and `r` reverses, as on the Census;
+    /// the arrows then step through the rows as they are drawn, and the
+    /// selected piconet stays selected.
+    #[test]
+    fn s_and_r_order_the_roster_and_the_arrows_follow() {
+        let (mut engine, keys, state) = focused_on("net_bt", "net_bt_piconets");
+        let now = Instant::now();
+        for (lap, ago) in [(0x30_0000, 1), (0x10_0000, 9), (0x20_0000, 5)] {
+            crate::signal::bt::piconet::observe(
+                &mut metrics(&state).net.bt_piconets,
+                lap,
+                73,
+                now - std::time::Duration::from_secs(ago),
+            );
+        }
+        // By LAP: the first row is the lowest.
+        key(&mut engine, &keys, &state, KeyCode::Down);
+        assert_eq!(metrics(&state).net.bt_view.selected, Some(0x10_0000));
+        metrics(&state).net.bt_view.first_visible = 2;
+
+        key(&mut engine, &keys, &state, KeyCode::Char('s'));
+        assert_eq!(metrics(&state).net.bt_sort.key(), "KIND");
+        assert_eq!(
+            metrics(&state).net.bt_view.first_visible,
+            0,
+            "back to the top"
+        );
+        assert_eq!(metrics(&state).net.bt_view.selected, Some(0x10_0000));
+
+        key(&mut engine, &keys, &state, KeyCode::Char('s'));
+        assert_eq!(metrics(&state).net.bt_sort.key(), "LAST");
+        // Youngest first: 0x30, 0x20, 0x10; the cursor on 0x10, the last.
+        key(&mut engine, &keys, &state, KeyCode::Up);
+        assert_eq!(metrics(&state).net.bt_view.selected, Some(0x20_0000));
+
+        key(&mut engine, &keys, &state, KeyCode::Char('r'));
+        assert!(metrics(&state).net.bt_sort.descending);
+        // Oldest first now: 0x10, 0x20, 0x30.
+        key(&mut engine, &keys, &state, KeyCode::Down);
+        assert_eq!(metrics(&state).net.bt_view.selected, Some(0x30_0000));
     }
 
     /// The Classic view's selection carries into the Piconet view however

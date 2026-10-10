@@ -29,6 +29,109 @@ pub struct PacketsView {
     pub lmp_only: bool,
 }
 
+/// What the piconet roster can be ordered by, in the order its columns are
+/// drawn: the names are the column titles, so the header's mark, the title's
+/// tag and the ordering cannot disagree about which column is which.
+pub const ROSTER_SORT_KEYS: &[&str] = &["LAP", "KIND", "LAST", "HITS", "CH", "UAP", "FIRST"];
+
+/// How the piconet roster is ordered: a column of [`ROSTER_SORT_KEYS`],
+/// and which way.
+///
+/// **By LAP until asked otherwise.** Ordered by when each was last heard,
+/// the rows changed places every time a piconet spoke, and the one a reader
+/// was reaching for moved from under the cursor. A LAP does not change.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct RosterSort {
+    pub column: usize,
+    pub descending: bool,
+}
+
+impl RosterSort {
+    /// The column's title.
+    pub fn key(&self) -> &'static str {
+        ROSTER_SORT_KEYS
+            .get(self.column)
+            .copied()
+            .unwrap_or(ROSTER_SORT_KEYS[0])
+    }
+
+    /// The next column along, wrapping.
+    pub fn cycle(&mut self) {
+        self.column = (self.column + 1) % ROSTER_SORT_KEYS.len();
+    }
+
+    pub fn reverse(&mut self) {
+        self.descending = !self.descending;
+    }
+}
+
+impl super::NetState {
+    /// The classic piconets in the order the roster draws them.
+    ///
+    /// **The one ordering every reader of the roster takes**: the roster
+    /// and its arrows, the hop scatter's lanes, the steps between piconets
+    /// on the Piconet and Bench views and the menu's live line. A second
+    /// ordering anywhere would have the cursor step through a list nobody
+    /// can see.
+    ///
+    /// **Sorted as the column reads.** Masked, the LAP column is `#n`, the
+    /// order first heard, and sorts that way: by the hidden LAP it would
+    /// give away how the LAPs compare. Likewise a masked UAP sorts only by
+    /// whether it is found and how many candidates are left. A UAP with no
+    /// candidates at all, no header heard yet, goes last either way. Ties
+    /// fall to the LAP column, so equal rows keep still too.
+    pub fn bt_roster(&self) -> Vec<&crate::signal::bt::piconet::Piconet> {
+        use crate::signal::bt::piconet::{Kind, Piconet};
+        use std::cmp::Ordering;
+        let masked = self.address_display == super::AddressDisplay::Masked;
+        let place = |p: &Piconet| -> u64 {
+            if masked {
+                self.bt_piconets
+                    .iter()
+                    .position(|q| q.lap == p.lap)
+                    .unwrap_or(usize::MAX) as u64
+            } else {
+                u64::from(p.lap)
+            }
+        };
+        let uap = |p: &Piconet| -> Option<(usize, u8)> {
+            let candidates = self.bt_uap.get(&p.lap).filter(|u| !u.is_empty())?;
+            let value = match candidates.as_slice() {
+                [one] if !masked => *one,
+                _ => 0,
+            };
+            Some((candidates.len(), value))
+        };
+        let kind = |p: &Piconet| match p.kind() {
+            Kind::Piconet => 0,
+            Kind::Paged => 1,
+            Kind::Inquiry(_) => 2,
+        };
+        let sort = self.bt_sort;
+        let mut out: Vec<&Piconet> = self.bt_piconets.iter().collect();
+        out.sort_by(|a, b| {
+            let directed = |o: Ordering| if sort.descending { o.reverse() } else { o };
+            let by = match sort.key() {
+                "KIND" => directed(kind(a).cmp(&kind(b))),
+                // Ages, so the youngest first, as the column reads.
+                "LAST" => directed(b.last_seen.cmp(&a.last_seen)),
+                "FIRST" => directed(b.first_seen.cmp(&a.first_seen)),
+                "HITS" => directed(a.hits.cmp(&b.hits)),
+                "CH" => directed(a.channels_hit().cmp(&b.channels_hit())),
+                "UAP" => match (uap(a), uap(b)) {
+                    (Some(x), Some(y)) => directed(x.cmp(&y)),
+                    (Some(_), None) => Ordering::Less,
+                    (None, Some(_)) => Ordering::Greater,
+                    (None, None) => Ordering::Equal,
+                },
+                _ => directed(place(a).cmp(&place(b))),
+            };
+            by.then_with(|| place(a).cmp(&place(b)))
+        });
+        out
+    }
+}
+
 /// Which stretch of time the classic hop scatter shows
 /// a zoom step, and how far before now it ends.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -104,4 +207,101 @@ pub struct BtHop {
     /// What its header said, once one was captured and joined to it: the
     /// export's header columns. `None` when no header followed.
     pub header: Option<crate::signal::bt::piconet::HeaderRead>,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::signal::bt::piconet::observe;
+    use crate::state::{AddressDisplay, NetState};
+    use std::time::{Duration, Instant};
+
+    /// Three piconets, first heard in the order 0x30…, 0x10…, 0x20…, the
+    /// last one most recently.
+    fn three() -> NetState {
+        let mut net = NetState::default();
+        let t = Instant::now() - Duration::from_secs(30);
+        observe(&mut net.bt_piconets, 0x30_0000, 3, t);
+        observe(
+            &mut net.bt_piconets,
+            0x10_0000,
+            5,
+            t + Duration::from_secs(1),
+        );
+        observe(
+            &mut net.bt_piconets,
+            0x20_0000,
+            7,
+            t + Duration::from_secs(2),
+        );
+        net
+    }
+
+    fn laps(net: &NetState) -> Vec<u32> {
+        net.bt_roster().iter().map(|p| p.lap).collect()
+    }
+
+    fn column(title: &str) -> usize {
+        ROSTER_SORT_KEYS
+            .iter()
+            .position(|k| *k == title)
+            .unwrap_or_else(|| panic!("no column {title}"))
+    }
+
+    /// By LAP until asked otherwise, so a piconet heard again stays where
+    /// it is rather than jumping to the top under the cursor.
+    #[test]
+    fn the_roster_stands_still_by_lap_until_asked_otherwise() {
+        let mut net = three();
+        assert_eq!(laps(&net), [0x10_0000, 0x20_0000, 0x30_0000]);
+        observe(&mut net.bt_piconets, 0x30_0000, 3, Instant::now());
+        assert_eq!(laps(&net), [0x10_0000, 0x20_0000, 0x30_0000]);
+        net.bt_sort.reverse();
+        assert_eq!(laps(&net), [0x30_0000, 0x20_0000, 0x10_0000]);
+    }
+
+    #[test]
+    fn the_sort_walks_the_columns_and_comes_back() {
+        let mut s = RosterSort::default();
+        for want in ["LAP", "KIND", "LAST", "HITS", "CH", "UAP", "FIRST", "LAP"] {
+            assert_eq!(s.key(), want);
+            s.cycle();
+        }
+        s.reverse();
+        assert_eq!(
+            (s.key(), s.descending),
+            ("KIND", true),
+            "reversing keeps the column"
+        );
+    }
+
+    #[test]
+    fn last_puts_the_most_recently_heard_first() {
+        let mut net = three();
+        net.bt_sort.column = column("LAST");
+        assert_eq!(laps(&net), [0x20_0000, 0x10_0000, 0x30_0000]);
+    }
+
+    /// Masked, the LAP column reads `#n`, the order first heard, and sorts
+    /// that way: by the hidden value it would give away how the LAPs
+    /// compare.
+    #[test]
+    fn masked_the_lap_column_sorts_as_it_reads() {
+        let mut net = three();
+        net.address_display = AddressDisplay::Masked;
+        assert_eq!(laps(&net), [0x30_0000, 0x10_0000, 0x20_0000]);
+    }
+
+    /// A resolved UAP first, then the fewest candidates; a piconet with no
+    /// header yet last, whichever way the column runs.
+    #[test]
+    fn uap_sorts_resolved_then_fewest_candidates_then_none() {
+        let mut net = three();
+        net.bt_sort.column = column("UAP");
+        net.bt_uap.insert(0x10_0000, vec![1, 2]);
+        net.bt_uap.insert(0x30_0000, vec![0x67]);
+        assert_eq!(laps(&net), [0x30_0000, 0x10_0000, 0x20_0000]);
+        net.bt_sort.reverse();
+        assert_eq!(laps(&net), [0x10_0000, 0x30_0000, 0x20_0000]);
+    }
 }

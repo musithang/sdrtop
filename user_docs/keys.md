@@ -375,7 +375,7 @@ each panel's numbers mean is on [the NET page](net.md).
 | `v` | BLE Advertising | `LE 2` | `↑↓` select a packet · `Enter` only this address, or all again; on a CONNECT_IND, its connection · `t` only CONNECT, SCAN or ADV, or every kind · `H` hold the list, or let it run |
 | `v` | LE Coded Advertising | `LE Coded 1` | `↑↓` select a packet · `H` hold the list, or let it run |
 | `b` | Classic Bluetooth Hops | `Classic 1` | `↑↓` select a piconet · `+ -` zoom in time · `← →` back and forward in time · `End` back to now |
-| `c` | Piconets | `Classic 1` | `↑↓` select a piconet · `Enter` packet by packet, on Classic 2 |
+| `c` | Piconets | `Classic 1` | `↑↓` select a piconet · `Enter` packet by packet, on Classic 2 · `S` sort by the next column · `R` reverse |
 | `c` | Bench | `Classic 3` | `← →` the previous or next piconet |
 | `v` | Packets | `Classic 2` | `↑↓` scroll, holding the list at its newest · `H` hold the list, or let it run · `End` back to live · `l` the LMP messages only, or every packet · `← →` the previous or next piconet |
 

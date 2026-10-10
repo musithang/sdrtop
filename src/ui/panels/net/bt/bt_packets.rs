@@ -67,7 +67,7 @@ use super::sections::{
 use crate::signal::bt::header::PacketType;
 use crate::signal::bt::lmp::{Identifying, Initiator};
 use crate::signal::bt::piconet::{
-    ordered, BtPacket, Direction, HeaderRead, PayloadContent, PayloadVerdict, Piconet,
+    BtPacket, Direction, HeaderRead, PayloadContent, PayloadVerdict, Piconet,
 };
 use crate::signal::dsp::uncertainty::Uncertain;
 use crate::state::{Provenance, SdrMetrics};
@@ -477,7 +477,7 @@ fn since_last(p: &Piconet) -> Option<String> {
 
 /// The selected piconet, if the roster still has it.
 pub(super) fn selected(state: &SdrMetrics) -> Option<&Piconet> {
-    let roster = ordered(&state.net.bt_piconets);
+    let roster = state.net.bt_roster();
     let laps: Vec<u32> = roster.iter().map(|p| p.lap).collect();
     state.net.bt_view.cursor(&laps).map(|i| roster[i])
 }
