@@ -16,6 +16,59 @@ checkpoint instead of by version.
 
 ## [Unreleased]
 
+## [0.6.6] - 2026-10-10
+
+**What two classic devices say to set up a link, read out.**
+
+Before two Bluetooth devices exchange a note of music, their link managers
+agree what each supports, which Core version it was built to, how to pair
+and whether to encrypt. Those messages are now read off the air and shown
+by name, with their parameters in plain words. The NET guide is rewritten
+as one page per view, and the Classic roster stops jumping around.
+
+### Added
+
+- **The link manager's messages on Classic 2.** A DM1 packet whose CRC
+  passes and whose payload carries a link manager message is read by its
+  name from the Core (`features_res`, `encryption_key_size_req`,
+  `version_res`) with its parameters in words where the Core gives them a
+  meaning, in a new `LMP` column. `M:` or `S:` says who began the exchange,
+  which is not always who sent the packet. A message seen going the way the
+  Core forbids is flagged. Keys and random numbers are named, never shown.
+  Only messages sent before a link encrypts can be read, so they mostly
+  appear while a device connects: switch the headphones off and on to see
+  them. ([Classic 2](user_docs/net-classic-packets.md#the-link-managers-messages))
+- **`l` keeps them.** A busy link pushes these messages out of the packet
+  list in seconds; each piconet keeps its last 256 apart, and `l` on
+  Classic 2 shows only them, with a line saying what the link has done
+  since the last one.
+- **Classic 1 counts them**: a new `LMP` row in HEADERS, `8 messages · last
+  encryption_key_size_req, 12 s ago`, or `none read`.
+- **The other end's maker and Core version**, named from the Bluetooth
+  SIG's own lists (`Core 5.3`, the company by name), or left as a number
+  where the list does not have it. The lists are a dated snapshot, credited
+  in `CREDITS.md`.
+- **Classic 1's roster can be sorted.** `S` orders it by the next column,
+  `R` reverses, as on the Census, and the title says what it is sorted by.
+
+### Changed
+
+- **Classic 1's roster is ordered by LAP until you sort it**, instead of
+  by when each piconet was last heard, so the row you are reaching for no
+  longer moves away as its piconet speaks. The hop lanes and the `← →`
+  steps on Classic 2 and 3 follow the same order.
+- **The NET guide is one page per view.** `user_docs/net.md` is now a short
+  hub, with ten pages beside it (`net-classic.md`, `net-le.md` and so on),
+  each rewritten with tables and small diagrams. A bookmark to a section of
+  the old page lands on the hub.
+
+### Internal
+
+- The SIG's assigned numbers (companies, services, Core versions) are one
+  snapshot shared by the BLE and classic code, refreshed by
+  `packaging/update-sig.sh`.
+- A code comment that points into the development plans fails the build.
+
 ## [0.6.5] - 2026-10-09
 
 **One scale for SNR, and the long range given back.**
@@ -1046,7 +1099,8 @@ sdrtop stopped being a one-radio program.
   image rejection ratio, wavelength and antenna metrics.
 - Config file with atomic save on quit, and the CLI flags that override it.
 
-[Unreleased]: https://github.com/musithang/sdrtop/compare/v0.6.5...HEAD
+[Unreleased]: https://github.com/musithang/sdrtop/compare/v0.6.6...HEAD
+[0.6.6]: https://github.com/musithang/sdrtop/compare/v0.6.5...v0.6.6
 [0.6.5]: https://github.com/musithang/sdrtop/compare/v0.6.4...v0.6.5
 [0.6.4]: https://github.com/musithang/sdrtop/compare/v0.6.3...v0.6.4
 [0.6.3]: https://github.com/musithang/sdrtop/compare/v0.6.2...v0.6.3

@@ -32,7 +32,37 @@ in time.
 
 ---
 
-## 📶 Checkpoint 27: The range the DC took *(you are here)*
+## 🤝 Checkpoint 28: The meeting before the music *(you are here)*
+
+**0.6.6.** Before a pair of headphones plays a single note, it and the
+phone hold a short meeting. What can you do, which version of Bluetooth
+were you built to, what is your name, shall we pair, shall we encrypt.
+Each item on that agenda is a link manager message, and sdrtop now reads
+them off the air and shows them by name on [Classic 2](net-classic-packets.md#the-link-managers-messages),
+with their parameters in words: a line like `version_res  Core 5.2 ·
+Qualcomm (0x001d)` names the Core version and the maker, both from the
+Bluetooth SIG's own lists.
+
+The catch is in the last item. Once the two agree to encrypt, everything
+after is encrypted too, so the meeting is readable only while it happens:
+headphones that connected an hour ago have nothing left to say. Switch
+them off and on while sdrtop listens, and `l` keeps the last 256 messages
+apart so the music does not push them off the screen. The first ones read
+on the air showed something worth knowing: the slave's answer to the
+master's question is marked `M:`, because Bluetooth files a reply under
+whoever asked.
+
+Writing it up turned up one honest mistake before it shipped: a device's
+name and address inside these messages ignored the masked mode. They
+follow `i` now, like everything else. The writing up itself grew too: the
+NET guide was one long page, and is now [a hub](net.md) and a page per
+view, each rewritten with tables and small diagrams. And the Classic
+roster stopped playing musical chairs: it is ordered by LAP until you
+press `S`, so the piconet you are reaching for stays where it is.
+
+---
+
+## 📶 Checkpoint 27: The range the DC took
 
 **0.6.5.** Last checkpoint ended on a promise: LE Coded's SNR read low, and
 that was the next hunt. It was, and it went somewhere else entirely.
