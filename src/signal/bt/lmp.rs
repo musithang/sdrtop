@@ -34,6 +34,7 @@
 //! going the way it forbids are each named in its own words.
 
 use super::piconet::Direction;
+use crate::signal::assigned;
 use crate::signal::errors::error_name;
 
 /// An LMP opcode: seven bits, or an escape (124 to 127) and the byte after.
@@ -369,6 +370,17 @@ fn params_words(pdu: &Pdu, p: &[u8]) -> String {
             w.push(p.get(2).map(|&e| error_name(e)));
         }
         "detach" => w.push(p.first().map(|&e| error_name(e))),
+        "version_req" | "version_res" => {
+            w.push(p.first().map(|&v| match assigned::core_version(v) {
+                Some(name) => format!("Core {name}"),
+                None => format!("version 0x{v:02x}"),
+            }));
+            w.push(u16le(p, 1).map(|id| match assigned::company(id) {
+                Some(name) => format!("{name} (0x{id:04x})"),
+                None => format!("company 0x{id:04x} (not in the SIG list)"),
+            }));
+            w.push(u16le(p, 3).map(|sub| format!("sub 0x{sub:04x}")));
+        }
         "encryption_mode_req" => w.push(p.first().map(|&m| match m {
             0 => "off".into(),
             1 => "on".into(),
@@ -915,6 +927,18 @@ mod tests {
         assert_eq!(
             words(&b),
             "channel_classification  good 0 · bad 0 · unknown 77 · reserved 2"
+        );
+    }
+
+    #[test]
+    fn a_version_names_its_company() {
+        assert_eq!(
+            words(&[38 << 1 | 1, 0x0b, 0x1d, 0x00, 0x00, 0x21]),
+            "version_res  Core 5.2 · Qualcomm (0x001d) · sub 0x2100"
+        );
+        assert_eq!(
+            words(&[37 << 1, 0x30, 0xfe, 0xff, 0, 0]),
+            "version_req  version 0x30 · company 0xfffe (not in the SIG list) · sub 0x0000"
         );
     }
 }

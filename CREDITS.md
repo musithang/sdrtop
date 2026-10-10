@@ -18,6 +18,17 @@ This project was developed with humans and AI working together.
 Found a bug, tested a clone nobody else owns, or sent a patch? Open an issue or
 a pull request and your name belongs here too.
 
+## Data
+
+- **The Bluetooth SIG's assigned numbers**
+  ([bitbucket.org/bluetooth-SIG/public](https://bitbucket.org/bluetooth-SIG/public)):
+  company identifiers, 16-bit service UUIDs and Core versions, read from
+  `company_identifiers.yaml`, `service_uuids.yaml` and `core_version.yaml`
+  into the dated snapshot `src/signal/sig_numbers.tsv` by
+  `packaging/update-sig.sh`. They name a BLE advertiser's company and a
+  classic link manager's company and Core version, rather than leaving two
+  numbers. The names remain the SIG's.
+
 ## Development approach
 - **Core code**: Written and reviewed by humans
 - **AI assistance**: Used Claude Code for implementation, architecture discussion, and problem-solving
