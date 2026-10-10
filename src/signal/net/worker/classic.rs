@@ -391,20 +391,21 @@ impl Classic {
             }
             _ => None,
         };
-        let payload = {
+        // What it carries, read only from a payload whose CRC passed.
+        let (payload, content) = {
             use crate::signal::bt::header::PacketType;
-            use crate::signal::bt::piconet::{HeaderRead, PayloadVerdict};
+            use crate::signal::bt::piconet::{content_of, HeaderRead, PayloadVerdict};
             match (read, read_at) {
                 (HeaderRead::Decoded(h), Some((uap, clk6))) => match h.packet_type {
-                    PacketType::Null | PacketType::Poll => PayloadVerdict::NoPayload,
-                    t => match payload::check_crc(&hit.payload_raw, clk6, t, uap) {
-                        Ok(ok) => PayloadVerdict::Crc(ok),
+                    PacketType::Null | PacketType::Poll => (PayloadVerdict::NoPayload, None),
+                    t => match payload::read_payload(&hit.payload_raw, clk6, t, uap) {
+                        Ok(p) => (PayloadVerdict::Crc(p.crc_ok), content_of(&p, t)),
                         // Why, in the list's words: never "PSK",
                         // which would be a guess about the link.
-                        Err(why) => PayloadVerdict::NotRead(why.words()),
+                        Err(why) => (PayloadVerdict::NotRead(why.words()), None),
                     },
                 },
-                _ => PayloadVerdict::NotRead("clock not known"),
+                _ => (PayloadVerdict::NotRead("clock not known"), None),
             }
         };
         // The header read again from the raw samples, as the test suites define
@@ -440,6 +441,7 @@ impl Classic {
                 carrier: measured.1,
                 f0_ppm: measured.2,
                 payload,
+                content,
             },
             shown,
         }
@@ -517,6 +519,7 @@ impl Classic {
                     carrier: Default::default(),
                     f0_ppm: None,
                     payload: crate::signal::bt::piconet::PayloadVerdict::NoPayload,
+                    content: None,
                 },
             );
         }

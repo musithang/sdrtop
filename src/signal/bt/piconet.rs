@@ -78,7 +78,9 @@ impl Inquiry {
     }
 }
 
-use super::header::Header;
+use super::header::{Header, PacketType};
+use super::lmp::LmpMessage;
+use super::payload;
 use crate::signal::dsp::carrier::Drift;
 use crate::signal::dsp::deviation::Sums;
 use crate::signal::dsp::uncertainty::Uncertain;
@@ -194,6 +196,56 @@ pub enum PayloadVerdict {
     NotRead(&'static str),
 }
 
+/// What a payload whose CRC passed carries, by its LLID (Core 5.4 Vol 2
+/// Part B 6.6.2, Table 6.5): only what the bytes can say without a key.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum PayloadContent {
+    /// A DM1 with LLID 3: the link manager's message. "The ACL-C logical
+    /// link shall use DM1 or DV packets" (Part B 5.2), and DV has no
+    /// reader here.
+    Lmp(LmpMessage),
+    /// LLID 3 in another type, which the Core does not send LMP in: said,
+    /// not decoded.
+    LmpElsewhere(PacketType),
+    /// LLID 1 or 2: L2CAP, not read, its length only. `start`: LLID 2,
+    /// the first fragment of a message; LLID 1 continues one.
+    L2cap { start: bool, bytes: usize },
+    /// LLID 0: "Code 0b00 is reserved for future use."
+    Reserved,
+}
+
+/// What a payload carries, read only once its CRC has passed: a failed one
+/// could be any bytes. `None` too for an LMP body with no byte in it, a
+/// passing CRC over no message.
+pub fn content_of(p: &payload::Payload, t: PacketType) -> Option<PayloadContent> {
+    if !p.crc_ok {
+        return None;
+    }
+    Some(match p.llid {
+        3 if t == PacketType::Dm1 => PayloadContent::Lmp(super::lmp::parse(&p.body)?),
+        3 => PayloadContent::LmpElsewhere(t),
+        1 | 2 => PayloadContent::L2cap {
+            start: p.llid == 2,
+            bytes: p.body.len(),
+        },
+        _ => PayloadContent::Reserved,
+    })
+}
+
+/// How many LMP packets a piconet keeps apart from its ring: a reconnect's
+/// link manager talk comes in its first second, and the ring of
+/// [`PACKETS_KEPT`] turns over in about half a minute of POLL and NULL.
+pub const LMP_KEPT: usize = 256;
+
+/// Payloads checked since a piconet's newest LMP packet, and how many of
+/// them passed: what the link has done since its link manager last spoke
+/// in the clear.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct SinceLmp {
+    pub checked: u64,
+    pub passed: u64,
+}
+
 /// One packet of a piconet, as the Piconet view lists it.
 #[derive(Clone, Debug, PartialEq)]
 pub struct BtPacket {
@@ -215,6 +267,8 @@ pub struct BtPacket {
     /// cannot come back out of.
     pub f0_ppm: Option<Uncertain>,
     pub payload: PayloadVerdict,
+    /// What the payload carries, once its CRC passed.
+    pub content: Option<PayloadContent>,
 }
 
 /// One side's readings, and how many packets it has sent.
@@ -341,6 +395,12 @@ pub struct Piconet {
     pub pace: super::slots::Pace,
     /// Its last [`PACKETS_KEPT`] packets, newest first.
     pub packets: std::collections::VecDeque<BtPacket>,
+    /// Its last [`LMP_KEPT`] packets whose content was read as an LMP
+    /// message, whole and newest first.
+    pub lmp: std::collections::VecDeque<BtPacket>,
+    /// Every LMP packet read on it, past what `lmp` keeps.
+    pub lmp_heard: u64,
+    pub since_lmp: SinceLmp,
 }
 
 /// What a LAP's hits are, as far as they can say.
@@ -427,6 +487,9 @@ pub fn observe(roster: &mut Vec<Piconet>, lap: u32, channel: u8, now: Instant) {
                 slots_stream: 0,
                 pace: Default::default(),
                 packets: std::collections::VecDeque::new(),
+                lmp: std::collections::VecDeque::new(),
+                lmp_heard: 0,
+                since_lmp: SinceLmp::default(),
             });
             roster.last_mut().expect("just pushed")
         }
@@ -494,6 +557,7 @@ pub struct PacketReading {
     pub carrier: Carrier,
     pub f0_ppm: Option<Uncertain>,
     pub payload: PayloadVerdict,
+    pub content: Option<PayloadContent>,
 }
 
 /// A header read after its access code was recorded: fill in the record
@@ -502,6 +566,10 @@ pub struct PacketReading {
 /// hit's record came with empty readings, so only the count moves; the
 /// readings are added where the direction puts them. No record near that
 /// time, or one already read: nothing changes.
+///
+/// A packet read as an LMP message is also kept whole in the piconet's LMP
+/// log, and starts the count of payloads since it afresh; any other checked
+/// payload adds to that count.
 pub fn read_packet(
     roster: &mut [Piconet],
     lap: u32,
@@ -524,7 +592,22 @@ pub fn read_packet(
     packet.deviation = reading.deviation;
     packet.carrier = reading.carrier;
     packet.f0_ppm = reading.f0_ppm;
-    packet.payload = reading.payload;
+    packet.payload = reading.payload.clone();
+    packet.content = reading.content.clone();
+    let lmp = matches!(reading.content, Some(PayloadContent::Lmp(_))).then(|| packet.clone());
+    match (lmp, &reading.payload) {
+        (Some(packet), _) => {
+            p.lmp.push_front(packet);
+            p.lmp.truncate(LMP_KEPT);
+            p.lmp_heard += 1;
+            p.since_lmp = SinceLmp::default();
+        }
+        (None, PayloadVerdict::Crc(ok)) => {
+            p.since_lmp.checked += 1;
+            p.since_lmp.passed += *ok as u64;
+        }
+        (None, _) => {}
+    }
     let sides = &mut p.headers.sides;
     sides.unknown.packets = sides.unknown.packets.saturating_sub(1);
     let side = sides.of(reading.direction);
@@ -673,6 +756,7 @@ mod tests {
             carrier: Carrier::default(),
             f0_ppm: None,
             payload: PayloadVerdict::NoPayload,
+            content: None,
         }
     }
 
@@ -770,6 +854,7 @@ mod tests {
                 carrier: Carrier::default(),
                 f0_ppm: None,
                 payload: PayloadVerdict::NotRead("clock not known"),
+                content: None,
             },
         );
         let p = &roster[0];
@@ -793,8 +878,133 @@ mod tests {
                 carrier: Carrier::default(),
                 f0_ppm: None,
                 payload: PayloadVerdict::NoPayload,
+                content: None,
             },
         );
         assert_eq!(roster[0].headers.sides.master.packets, 0);
+    }
+
+    /// A decoded DM1 header, the type a link manager message rides in.
+    fn dm1_header() -> Header {
+        Header {
+            lt_addr: 1,
+            packet_type: PacketType::Dm1,
+            flags: 0b101,
+            hec: 0,
+            clk6: 12,
+        }
+    }
+
+    fn lmp_reading() -> PacketReading {
+        PacketReading {
+            header: HeaderRead::Decoded(dm1_header()),
+            direction: Some(Direction::Master),
+            deviation: Deviation::default(),
+            carrier: Carrier::default(),
+            f0_ppm: None,
+            payload: PayloadVerdict::Crc(true),
+            content: Some(PayloadContent::Lmp(
+                crate::signal::bt::lmp::parse(&[3 << 1, 15]).unwrap(),
+            )),
+        }
+    }
+
+    /// A read LMP packet goes into the log whole, newest first; the log
+    /// keeps 256, the count goes on.
+    #[test]
+    fn lmp_packets_are_kept_apart() {
+        let t0 = Instant::now();
+        let mut roster = Vec::new();
+        observe(&mut roster, 0x5a3c71, 10, t0);
+        for k in 0..300 {
+            let at = 1_000.0 + k as f64 * 625.0;
+            observe_packet(&mut roster, 0x5a3c71, packet(at, None, 0.0));
+            read_packet(&mut roster, 0x5a3c71, 1, at, lmp_reading());
+        }
+        let p = &roster[0];
+        assert_eq!(p.lmp_heard, 300);
+        assert_eq!(p.lmp.len(), LMP_KEPT);
+        assert_eq!(p.lmp[0].at_us, 1_000.0 + 299.0 * 625.0);
+        assert!(p.lmp[0].content.is_some() && p.lmp[0].header.is_some());
+    }
+
+    /// Since the newest LMP packet: payloads checked and passed, counted
+    /// afresh at each LMP packet.
+    #[test]
+    fn since_the_last_lmp_counts_checked_payloads() {
+        let t0 = Instant::now();
+        let mut roster = Vec::new();
+        observe(&mut roster, 0x5a3c71, 10, t0);
+        fn read(roster: &mut [Piconet], at: f64, r: PacketReading) {
+            observe_packet(roster, 0x5a3c71, packet(at, None, 0.0));
+            read_packet(roster, 0x5a3c71, 1, at, r);
+        }
+        read(&mut roster, 1_000.0, lmp_reading());
+        for k in 1..=3 {
+            let at = 1_000.0 + k as f64 * 625.0;
+            let failed = PacketReading {
+                payload: PayloadVerdict::Crc(false),
+                content: None,
+                ..lmp_reading()
+            };
+            read(&mut roster, at, failed);
+        }
+        let poll = PacketReading {
+            payload: PayloadVerdict::NoPayload,
+            content: None,
+            ..lmp_reading()
+        };
+        read(&mut roster, 5_000.0, poll);
+        assert_eq!(
+            roster[0].since_lmp,
+            SinceLmp {
+                checked: 3,
+                passed: 0
+            }
+        );
+        read(&mut roster, 6_000.0, lmp_reading());
+        assert_eq!(roster[0].since_lmp, SinceLmp::default());
+    }
+
+    /// Content is read only from a passing CRC, and LLID 3 is LMP only in
+    /// a DM1.
+    #[test]
+    fn content_needs_a_pass_and_lmp_a_dm1() {
+        use crate::signal::bt::payload::Payload;
+        let lmp = Payload {
+            crc_ok: true,
+            llid: 3,
+            body: vec![3 << 1, 15],
+        };
+        assert!(matches!(
+            content_of(&lmp, PacketType::Dm1),
+            Some(PayloadContent::Lmp(_))
+        ));
+        assert_eq!(
+            content_of(&lmp, PacketType::Dh1),
+            Some(PayloadContent::LmpElsewhere(PacketType::Dh1))
+        );
+        assert_eq!(
+            content_of(
+                &Payload {
+                    crc_ok: false,
+                    ..lmp.clone()
+                },
+                PacketType::Dm1
+            ),
+            None
+        );
+        let l2 = Payload {
+            crc_ok: true,
+            llid: 2,
+            body: vec![0; 12],
+        };
+        assert_eq!(
+            content_of(&l2, PacketType::Dh1),
+            Some(PayloadContent::L2cap {
+                start: true,
+                bytes: 12
+            })
+        );
     }
 }

@@ -1362,6 +1362,7 @@ mod tests {
                         carrier: Default::default(),
                         f0_ppm: None,
                         payload: PayloadVerdict::NoPayload,
+                        content: None,
                     },
                 );
             }

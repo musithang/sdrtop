@@ -887,6 +887,7 @@ mod tests {
             carrier: Carrier::default(),
             f0_ppm: None,
             payload,
+            content: None,
         }
     }
 

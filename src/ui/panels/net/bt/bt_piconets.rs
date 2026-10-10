@@ -892,6 +892,7 @@ mod tests {
                 carrier: Default::default(),
                 f0_ppm: None,
                 payload: PayloadVerdict::Crc(true),
+                content: None,
             },
         );
         m.net.bt_view.selected = Some(lap);

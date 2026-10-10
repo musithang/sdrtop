@@ -647,6 +647,7 @@ mod tests {
                 carrier: Default::default(),
                 f0_ppm: None,
                 payload: crate::signal::bt::piconet::PayloadVerdict::NoPayload,
+                content: None,
             },
         );
 
