@@ -35,13 +35,6 @@ pub mod access_code;
 pub mod channel;
 pub mod detect;
 pub mod header;
-#[cfg_attr(
-    not(test),
-    expect(
-        dead_code,
-        reason = "read from the payloads once the piconet keeps its link manager messages"
-    )
-)]
 pub mod lmp;
 pub mod payload;
 pub mod piconet;

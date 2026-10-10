@@ -34,6 +34,17 @@
 //! alike, and the air alone cannot tell them apart. A payload left
 //! unchecked says why (`payload::Unchecked`), and never "PSK": whether a
 //! link has gone EDR is not something one packet can show.
+//!
+//! **What a passing payload carries.** The LMP column reads a DM1 whose
+//! LLID is 0b11 as the link manager's message, by its Core name and with
+//! its parameters in words (`signal::bt::lmp`); nothing is read from a
+//! payload whose CRC failed. `M:` or `S:` before the name is the message's
+//! transaction ID, who began the exchange, which is not DIR, who sent this
+//! packet: the answer to a master's request is sent by the slave and still
+//! reads `M:`. A message Table 5.1 allows one way only, seen going the
+//! other way by its slot parity, says so in the warning colour: a check on
+//! the direction reading itself, packet by packet. L2CAP payloads show
+//! their length and no more, and LLID 3 in another type is named, not read.
 
 use ratatui::{
     layout::Rect,
@@ -46,8 +57,9 @@ use ratatui::{
 use super::bt_piconets::{silence, uap_text};
 use super::sections::{index_of, BR_INDEX, F0_LIMIT_KHZ, F0_RESOLUTION_KHZ, INDEX_RESOLUTION};
 use crate::signal::bt::header::PacketType;
+use crate::signal::bt::lmp::Initiator;
 use crate::signal::bt::piconet::{
-    ordered, BtPacket, Direction, HeaderRead, PayloadVerdict, Piconet,
+    ordered, BtPacket, Direction, HeaderRead, PayloadContent, PayloadVerdict, Piconet,
 };
 use crate::signal::dsp::uncertainty::Uncertain;
 use crate::state::{Provenance, SdrMetrics};
@@ -55,7 +67,7 @@ use crate::ui::panel::{FeedSpan, Panel, PanelChrome, Staleness, Tag};
 use crate::ui::widgets::limit::LimitRow;
 use crate::ui::widgets::reading::Reading;
 use crate::ui::widgets::table::{
-    breathe, columns_that_fit, grow_to_contents, header, row, Align, Column, Sort,
+    breathe, columns_that_fit, grow_to_contents, header, row, widen, Align, Column, Sort,
 };
 
 pub struct NetBtPacketsPanel;
@@ -126,6 +138,14 @@ const COLUMNS: &[Column] = &[
         width: 7,
         align: Align::Left,
     },
+    Column {
+        // What a passing payload carries: the link manager's message by
+        // its Core name, or what else it is. Sized by the panel, last, and
+        // cut with an ellipsis where it runs out of room.
+        title: "LMP",
+        width: 12,
+        align: Align::Left,
+    },
 ];
 
 const AGE: usize = 0;
@@ -136,6 +156,7 @@ const CLK: usize = 6;
 const MOD: usize = 9;
 const F0: usize = 10;
 const PAYLOAD: usize = 11;
+const LMP: usize = 12;
 
 /// The most a wide panel spaces its columns out by, beyond the one-column
 /// gap: enough to read calmly, not so much that a row stops reading as one.
@@ -168,6 +189,49 @@ fn value_cell(reading: &Reading, signed: bool) -> String {
         Some(t) => t,
         None => "—".to_string(),
     }
+}
+
+/// What a packet's payload carries, in the LMP column's words, and the
+/// colour the cell wears where it is not the row's ordinary ink. An LMP
+/// message leads with its transaction ID, `M:` or `S:`, who began the
+/// exchange, which DIR does not say: an answer is sent by the other side.
+/// One Table 5.1 forbids in the direction it was sent says so, and the
+/// whole cell wears the warning colour.
+pub(super) fn content_cell(k: &BtPacket, theme: &crate::Theme) -> (String, Option<Color>) {
+    match &k.content {
+        Some(PayloadContent::Lmp(m)) => {
+            let tid = match m.initiator {
+                Initiator::Central => "M",
+                Initiator::Peripheral => "S",
+            };
+            let text = format!("{tid}: {}", m.words());
+            match k.direction.and_then(|d| m.against(d)) {
+                Some(against) => (format!("{text}  ({against})"), Some(theme.status_warn)),
+                None => (text, None),
+            }
+        }
+        Some(PayloadContent::LmpElsewhere(t)) => (format!("LLID 3 in a {}", t.shown()), None),
+        Some(PayloadContent::L2cap { start, bytes }) => (
+            format!(
+                "L2CAP {}, {bytes} bytes",
+                if *start { "start" } else { "continuation" }
+            ),
+            Some(theme.label),
+        ),
+        Some(PayloadContent::Reserved) => ("LLID 0".to_string(), Some(theme.label)),
+        None => (String::new(), None),
+    }
+}
+
+/// `text` cut to `width` characters, the last one an ellipsis where it had
+/// to be cut.
+fn cut(text: &str, width: usize) -> String {
+    if text.chars().count() <= width {
+        return text.to_string();
+    }
+    let mut out: String = text.chars().take(width.saturating_sub(1)).collect();
+    out.push('…');
+    out
 }
 
 /// One packet's cells, and the colour each wears where it is not the row's
@@ -291,6 +355,8 @@ fn cells(
     };
     ink[PAYLOAD] = Some(payload_ink);
     ink[AGE] = Some(theme.label);
+    let (content, content_ink) = content_cell(k, theme);
+    ink[LMP] = content_ink;
 
     let secs = now.saturating_duration_since(k.seen).as_secs_f64();
     (
@@ -307,6 +373,7 @@ fn cells(
             modulation,
             f0_cell,
             payload,
+            content,
         ],
         ink,
     )
@@ -471,8 +538,21 @@ impl Panel for NetBtPacketsPanel {
             .map(|(i, k)| cells(k, p.packets.get(i + 1), p, master, state, now, theme))
             .collect();
         let texts: Vec<Vec<String>> = visible.iter().map(|(c, _)| c.clone()).collect();
-        let columns = breathe(&grow_to_contents(COLUMNS, &texts, &[]), width, BREATHING);
+        // Every reading whole; the LMP column takes what is left, up to its
+        // widest message, and the rest of the room spaces the others out.
+        let widest = texts
+            .iter()
+            .filter_map(|t| t.get(LMP))
+            .map(|t| t.chars().count())
+            .max()
+            .unwrap_or(0);
+        let columns = grow_to_contents(COLUMNS, &texts, &[LMP]);
+        let columns = breathe(&widen(&columns, width, LMP, widest), width, BREATHING);
         let fit = columns_that_fit(&columns, width);
+        let mut visible = visible;
+        for (text, _) in &mut visible {
+            text[LMP] = cut(&text[LMP], columns[LMP].width);
+        }
         let mut lines = vec![header(
             &columns,
             fit,
@@ -505,7 +585,7 @@ mod tests {
     use crate::signal::bt::header::{Header, PacketType};
     use crate::signal::bt::piconet::{
         observe, observe_packet, BtPacket, Carrier, Deviation, Direction, HeaderRead,
-        PayloadVerdict,
+        PayloadContent, PayloadVerdict,
     };
     use crate::signal::dsp::uncertainty::Uncertain;
     use crate::state::fixture::draw;
@@ -981,5 +1061,100 @@ mod tests {
         m.net.packets_view.held = Some((1, 99.0));
         let out = draw(NetBtPacketsPanel, 120, 12, &m).join("\n");
         assert!(out.contains("End: back to live"), "{out}");
+    }
+
+    fn lmp(body: &[u8]) -> Option<PayloadContent> {
+        Some(PayloadContent::Lmp(
+            crate::signal::bt::lmp::parse(body).unwrap(),
+        ))
+    }
+
+    /// An LMP packet shows who began the exchange and the message; the
+    /// packet's own sender stays in DIR.
+    #[test]
+    fn an_lmp_packet_shows_its_message() {
+        let mut m = heard();
+        let mut k = packet(
+            1,
+            Some(header(3, 1, 0)),
+            Some(Direction::Slave),
+            PayloadVerdict::Crc(true),
+        );
+        k.content = lmp(&[3 << 1, 15]);
+        record(&mut m, vec![k]);
+        let out = draw(NetBtPacketsPanel, 191, 20, &m);
+        let row = out
+            .iter()
+            .find(|l| l.contains("accepted"))
+            .expect("the LMP row");
+        assert!(row.contains("◀ S"), "{row}");
+        assert!(row.contains("M: accepted  encryption_mode_req"), "{row}");
+        // Line 0 is the frame's title; the column titles are the first row in it.
+        assert!(out[1].contains("LMP"), "the column's title: {}", out[1]);
+    }
+
+    /// A direction Table 5.1 forbids is named on the row.
+    #[test]
+    fn a_forbidden_direction_is_named() {
+        let mut m = heard();
+        let mut k = packet(
+            1,
+            Some(header(3, 1, 0)),
+            Some(Direction::Slave),
+            PayloadVerdict::Crc(true),
+        );
+        k.content = lmp(&[17 << 1; 17]);
+        record(&mut m, vec![k]);
+        let text = draw(NetBtPacketsPanel, 191, 20, &m).join("\n");
+        assert!(text.contains("Table 5.1: C → P only"), "{text}");
+    }
+
+    /// L2CAP and LLID 3 outside a DM1 say what they are, nothing more.
+    #[test]
+    fn other_content_says_what_it_is() {
+        let mut m = heard();
+        let mut a = packet(
+            1,
+            Some(header(4, 1, 0)),
+            Some(Direction::Master),
+            PayloadVerdict::Crc(true),
+        );
+        a.content = Some(PayloadContent::L2cap {
+            start: true,
+            bytes: 12,
+        });
+        let mut b = packet(
+            2,
+            Some(header(4, 1, 0)),
+            Some(Direction::Master),
+            PayloadVerdict::Crc(true),
+        );
+        b.content = Some(PayloadContent::LmpElsewhere(PacketType::Dh1));
+        record(&mut m, vec![a, b]);
+        let text = draw(NetBtPacketsPanel, 191, 20, &m).join("\n");
+        assert!(text.contains("L2CAP start, 12 bytes"), "{text}");
+        assert!(text.contains("LLID 3 in a DH1"), "{text}");
+    }
+
+    /// Narrow, the message is cut with an ellipsis or left off whole, and
+    /// no row is wider than the panel.
+    #[test]
+    fn a_narrow_list_cuts_the_message() {
+        let mut m = heard();
+        let mut k = packet(
+            1,
+            Some(header(3, 1, 0)),
+            Some(Direction::Master),
+            PayloadVerdict::Crc(true),
+        );
+        k.content = lmp(&[38 << 1 | 1, 0x0b, 0x1d, 0x00, 0x00, 0x21]);
+        record(&mut m, vec![k]);
+        for w in [40u16, 90, 110] {
+            for line in draw(NetBtPacketsPanel, w, 12, &m) {
+                assert!(line.chars().count() <= w as usize, "{w}: {line}");
+            }
+        }
+        let text = draw(NetBtPacketsPanel, 110, 12, &m).join("\n");
+        assert!(text.contains('…'), "{text}");
     }
 }
