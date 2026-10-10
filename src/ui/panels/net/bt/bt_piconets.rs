@@ -1189,6 +1189,19 @@ mod tests {
             text.contains("8 messages · last encryption_key_size_req, 12 s ago"),
             "{text}"
         );
+
+        // One is one message, not "1 messages".
+        m.net
+            .bt_piconets
+            .iter_mut()
+            .find(|p| p.lap == 0x5a3c71)
+            .unwrap()
+            .lmp_heard = 1;
+        let text = draw(NetBtPiconetsPanel, 191, 30, &m).join("\n");
+        assert!(
+            text.contains("1 message · last encryption_key_size_req"),
+            "{text}"
+        );
     }
 
     #[test]

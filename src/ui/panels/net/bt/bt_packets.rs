@@ -55,7 +55,9 @@ use ratatui::{
 };
 
 use super::bt_piconets::{silence, uap_text};
-use super::sections::{index_of, BR_INDEX, F0_LIMIT_KHZ, F0_RESOLUTION_KHZ, INDEX_RESOLUTION};
+use super::sections::{
+    counted, index_of, BR_INDEX, F0_LIMIT_KHZ, F0_RESOLUTION_KHZ, INDEX_RESOLUTION,
+};
 use crate::signal::bt::header::PacketType;
 use crate::signal::bt::lmp::Initiator;
 use crate::signal::bt::piconet::{
@@ -427,7 +429,11 @@ fn start(p: &Piconet, view: &crate::state::PacketsView) -> Option<usize> {
 /// the log keeps.
 fn lmp_tally(p: &Piconet, theme: &crate::Theme) -> Line<'static> {
     Line::from(Span::styled(
-        format!(" {} LMP messages · {} kept", p.lmp_heard, p.lmp.len()),
+        format!(
+            " {} · {} kept",
+            counted(p.lmp_heard, "LMP message"),
+            p.lmp.len()
+        ),
         Style::default().fg(theme.label),
     ))
 }
@@ -443,7 +449,10 @@ fn since_last(p: &Piconet) -> Option<String> {
             0 => "none passing".to_string(),
             n => format!("{n} passing"),
         };
-        format!("since the last: {} payloads checked, {passed}", s.checked)
+        format!(
+            "since the last: {} checked, {passed}",
+            counted(s.checked, "payload")
+        )
     })
 }
 
@@ -1265,6 +1274,29 @@ mod tests {
             out[0].contains("LMP only"),
             "the title says which: {}",
             out[0]
+        );
+        assert!(
+            text.contains("1 LMP message · 1 kept"),
+            "one is one message: {text}"
+        );
+    }
+
+    /// One payload is one payload, not "1 payloads".
+    #[test]
+    fn one_payload_since_the_last_is_singular() {
+        let mut m = heard();
+        record(
+            &mut m,
+            vec![packet(1, None, None, PayloadVerdict::NoPayload)],
+        );
+        let p = m.net.bt_piconets.iter_mut().find(|p| p.lap == LAP).unwrap();
+        p.since_lmp = SinceLmp {
+            checked: 1,
+            passed: 0,
+        };
+        assert_eq!(
+            since_last(p).as_deref(),
+            Some("since the last: 1 payload checked, none passing")
         );
     }
 

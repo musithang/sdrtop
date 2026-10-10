@@ -464,6 +464,15 @@ pub(super) fn header_lines(
     out
 }
 
+/// A count and its noun, singular for one: "1 payload", "2 payloads".
+pub(super) fn counted(n: u64, noun: &str) -> String {
+    if n == 1 {
+        format!("{n} {noun}")
+    } else {
+        format!("{n} {noun}s")
+    }
+}
+
 /// The same shape the census uses: a bench glances, it does not time.
 pub(super) fn ago(secs: u64) -> String {
     if secs < 90 {
@@ -484,8 +493,8 @@ fn lmp_text(p: &Piconet, now: std::time::Instant) -> String {
     });
     match last {
         Some((name, seen)) => format!(
-            "{} messages \u{00b7} last {name}, {} ago",
-            p.lmp_heard,
+            "{} \u{00b7} last {name}, {} ago",
+            counted(p.lmp_heard, "message"),
             ago(now.saturating_duration_since(seen).as_secs())
         ),
         None => "none read".to_string(),
