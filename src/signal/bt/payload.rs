@@ -29,6 +29,10 @@
 //! `payload_crc`), GPL-2.0-or-later, the same standing [`super::header`]'s
 //! own port already has.
 //!
+//! **The bytes are kept.** [`read_payload`] hands back the body and its
+//! LLID beside the CRC verdict, because a link manager message (LLID 0b11)
+//! is read from them; a body whose CRC failed comes back too, marked so.
+//!
 //! **Wired to a live receiver the same day, unlike [`super::header`]'s own
 //! first landing.** `signal::bt::receive::Receiver` captures a fixed,
 //! generous window of raw bits after every header (DH5's own worst-case
@@ -44,8 +48,8 @@ use super::header::{self, HEADER_BITS};
 /// A payload's own header: two or three fields packed into the first byte
 /// (single-slot packets) or two bytes (multi-slot) of the payload region -
 /// `libbtbb`'s own `decode_payload_header`, but only as much of it as
-/// [`verify_crc`] actually needs (LLID and FLOW are carried through for a
-/// future consumer; nothing here reads them yet).
+/// [`read_payload`] needs (FLOW is carried through for a future consumer;
+/// nothing here reads it yet).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct PayloadHeader {
     pub llid: u8,
@@ -250,25 +254,36 @@ impl Unchecked {
     }
 }
 
-/// Check a captured payload region's own CRC-16 against a specific
-/// CLK1-6/UAP guess, dewhitening as it goes - the header/payload's shared
-/// whitening stream, continued from bit [`HEADER_BITS`] rather than
-/// restarted (see [`header::unwhiten_at`]'s own doc).
+/// A payload whose CRC was checked: its LLID and body, as sent.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Payload {
+    pub crc_ok: bool,
+    pub llid: u8,
+    /// The body between the payload header and the CRC, bytes in the
+    /// order sent, each byte's first bit its least significant.
+    pub body: Vec<u8>,
+}
+
+/// Read a captured payload region against a specific CLK1-6/UAP guess,
+/// dewhitening as it goes - the header/payload's shared whitening stream,
+/// continued from bit [`HEADER_BITS`] rather than restarted (see
+/// [`header::unwhiten_at`]'s own doc) - and check its CRC-16.
 ///
 /// `raw` is the still-whitened payload region, starting from its own first
 /// bit (the payload header's own first bit), in whatever length the caller
 /// happened to capture - this function reads only as much of it as the
 /// payload header itself says the packet actually is.
 ///
-/// `Ok(true)`/`Ok(false)` is the actual CRC verdict once one is possible;
-/// where none is, the reason ([`Unchecked`]), never a verdict invented when
-/// the data to compute it is missing (`POLICY.md` rule 2).
-pub fn check_crc(
+/// The bytes come back whether the CRC passed or not, and
+/// [`Payload::crc_ok`] says which; where no verdict is possible, the
+/// reason ([`Unchecked`]), never a verdict invented when the data to
+/// compute it is missing (`POLICY.md` rule 2).
+pub fn read_payload(
     raw: &[bool],
     clk6: u8,
     packet_type: header::PacketType,
     uap: u8,
-) -> Result<bool, Unchecked> {
+) -> Result<Payload, Unchecked> {
     let header_bits_len = payload_header_bits(packet_type).ok_or(Unchecked::NoReader)?;
     let max_len = max_payload_length(packet_type).ok_or(Unchecked::NoReader)?;
     // Data bits out of the raw capture: as they are, or through the FEC.
@@ -289,13 +304,33 @@ pub fn check_crc(
     let payload_header = decode_payload_header(&dewhitened_header).ok_or(Unchecked::BadLength)?;
     let payload_length = payload_header.payload_length.min(max_len);
     let total_bits = payload_length * 8;
-    if total_bits < 16 {
+    // The payload header and the CRC both have to fit, or there is no body
+    // between them to hand back.
+    if total_bits < header_bits_len + 16 {
         return Err(Unchecked::BadLength);
     }
     let dewhitened = header::unwhiten_at(&data(total_bits)?, clk6, HEADER_BITS);
     let received = header::pack_bits(&dewhitened[total_bits - 16..total_bits]);
     let computed = crcgen(&dewhitened[..total_bits - 16], uap);
-    Ok(received == computed)
+    let body = dewhitened[header_bits_len..total_bits - 16]
+        .chunks(8)
+        .map(|b| header::pack_bits(b) as u8)
+        .collect();
+    Ok(Payload {
+        crc_ok: received == computed,
+        llid: payload_header.llid,
+        body,
+    })
+}
+
+/// [`read_payload`]'s CRC verdict alone, or the reason there is none.
+pub fn check_crc(
+    raw: &[bool],
+    clk6: u8,
+    packet_type: header::PacketType,
+    uap: u8,
+) -> Result<bool, Unchecked> {
+    read_payload(raw, clk6, packet_type, uap).map(|p| p.crc_ok)
 }
 
 /// [`check_crc`]'s verdict, or `None` whatever the reason: for a caller
@@ -366,6 +401,18 @@ mod tests {
         uap: u8,
         body: &[u8],
     ) -> ([bool; HEADER_BITS], Vec<bool>) {
+        synthetic_with_llid(packet_type, clk6, uap, 0b10, body)
+    }
+
+    /// [`synthetic_packet`] with the payload header's LLID chosen: 0b10 is
+    /// L2CAP data, 0b11 a link manager message.
+    fn synthetic_with_llid(
+        packet_type: PacketType,
+        clk6: u8,
+        uap: u8,
+        llid: u8,
+        body: &[u8],
+    ) -> ([bool; HEADER_BITS], Vec<bool>) {
         assert!(
             payload_header_bits(packet_type).is_some(),
             "test helper only knows the ACL data types"
@@ -391,7 +438,6 @@ mod tests {
 
         let header_bits_len = payload_header_bits(packet_type).unwrap();
         let mut host = Vec::new();
-        let llid = 0b10u8;
         let flow = false;
         if header_bits_len == 16 {
             host.extend(bits_of_u8(llid, 2));
@@ -575,6 +621,40 @@ mod tests {
             ),
             Some((true_uap, 44)),
             "the UAP, and the clock it was sent at, not the other clock that fits"
+        );
+    }
+
+    /// A passing payload hands back its LLID and body as sent, for DM1
+    /// through the FEC and for DH1 bare.
+    #[test]
+    fn a_passing_payload_keeps_its_bytes() {
+        let body = [0x4e, 0x10, 0x02];
+        for pt in [PacketType::Dm1, PacketType::Dh1] {
+            let (_, raw) = synthetic_with_llid(pt, 29, 0x6d, 0b11, &body);
+            let got = read_payload(&raw, 29, pt, 0x6d).unwrap();
+            assert!(got.crc_ok, "{pt:?}");
+            assert_eq!(got.llid, 0b11, "{pt:?}");
+            assert_eq!(got.body, body.to_vec(), "{pt:?}");
+        }
+    }
+
+    /// A failed CRC still says so, with whatever the bytes were; the
+    /// reasons a payload goes unchecked are the ones `check_crc` gives.
+    #[test]
+    fn a_failing_payload_is_not_ok_and_unchecked_ones_say_why() {
+        let (_, raw) = synthetic_with_llid(PacketType::Dm1, 29, 0x6d, 0b11, &[1, 2]);
+        assert!(
+            !read_payload(&raw, 29, PacketType::Dm1, 0x6e)
+                .unwrap()
+                .crc_ok
+        );
+        assert_eq!(
+            read_payload(&raw[..20], 29, PacketType::Dm1, 0x6d),
+            Err(Unchecked::CutShort)
+        );
+        assert_eq!(
+            read_payload(&raw, 29, PacketType::Hv1, 0x6d),
+            Err(Unchecked::NoReader)
         );
     }
 

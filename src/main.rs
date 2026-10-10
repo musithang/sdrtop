@@ -377,3 +377,107 @@ mod cli_tests {
         assert!(Cli::command().get_about().is_some());
     }
 }
+
+#[cfg(test)]
+mod source_tests {
+    /// The comment of a line, if it has one: what follows its first `//`.
+    fn comment(line: &str) -> Option<&str> {
+        line.find("//").map(|at| &line[at + 2..])
+    }
+
+    /// Why `text` points at a plan or design, if it does: the forms a
+    /// comment used to cite them by.
+    fn plan_reference(text: &str) -> Option<&'static str> {
+        let lower = text.to_lowercase();
+        if lower.contains("dev_docs") {
+            return Some("a dev_docs path");
+        }
+        if lower.contains("-plan.md") || lower.contains("-design.md") {
+            return Some("a plan or design file");
+        }
+        if lower.contains("design section") {
+            return Some("a design section");
+        }
+        if lower.contains("case study")
+            || lower.contains("case-study")
+            || lower.contains("case studies")
+        {
+            return Some("a case study");
+        }
+        if text
+            .match_indices("Stop ")
+            .any(|(at, _)| text[at + 5..].starts_with(|c: char| c.is_ascii_digit()))
+        {
+            return Some("a plan's stop");
+        }
+        // A plan named by its file stem, two words or more before the
+        // suffix (a band plan is not one).
+        let named = lower
+            .split(|c: char| !(c.is_ascii_lowercase() || c == '-'))
+            .any(|word| {
+                (word.ends_with("-plan") || word.ends_with("-design"))
+                    && word.matches('-').count() >= 2
+            });
+        named.then_some("a plan's name")
+    }
+
+    /// **Nothing in a comment points into the plans.** The plans are
+    /// gitignored: a contributor reading the source cannot open what such a
+    /// comment cites, so each comment says its own reason instead. The
+    /// source was cleared of them once; this keeps it so.
+    #[test]
+    fn no_comment_points_at_a_plan() {
+        fn walk(dir: &std::path::Path, out: &mut Vec<std::path::PathBuf>) {
+            for entry in std::fs::read_dir(dir).unwrap() {
+                let path = entry.unwrap().path();
+                if path.is_dir() {
+                    walk(&path, out);
+                } else if path.extension().is_some_and(|e| e == "rs") {
+                    out.push(path);
+                }
+            }
+        }
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
+        let mut files = Vec::new();
+        walk(&root.join("src"), &mut files);
+        assert!(files.len() > 100, "the source tree was not found");
+        let mut found = Vec::new();
+        for file in files {
+            let text = std::fs::read_to_string(&file).unwrap();
+            for (n, line) in text.lines().enumerate() {
+                if let Some(why) = comment(line).and_then(plan_reference) {
+                    let at = file.strip_prefix(root).unwrap_or(&file).display();
+                    found.push(format!("{at}:{}: {why}: {}", n + 1, line.trim()));
+                }
+            }
+        }
+        assert!(
+            found.is_empty(),
+            "comments pointing at plans:\n{}",
+            found.join("\n")
+        );
+    }
+
+    /// The forms it looks for, and the ordinary words it must leave alone.
+    #[test]
+    fn plan_references_are_told_from_ordinary_words() {
+        for cited in [
+            " see dev_docs/foo.md",
+            " as the ble-coded-plan.md says",
+            " design section 6",
+            " (case study)",
+            " Stop 11 found this",
+            " per net-ux-polish-plan",
+        ] {
+            assert!(plan_reference(cited).is_some(), "missed: {cited}");
+        }
+        for ordinary in [
+            " the band-plan label row",
+            " the sweep stops at the edge",
+            " Stop the stream before retuning",
+            " code table G0 and Eb/N0",
+        ] {
+            assert_eq!(plan_reference(ordinary), None, "flagged: {ordinary}");
+        }
+    }
+}
