@@ -126,7 +126,7 @@ fn addresses_line(state: &SdrMetrics) -> String {
             "{}, registrants from the IEEE listing of {}, companies from the SIG registry of {}",
             mode.label(),
             crate::signal::net::vendor::fetched(),
-            crate::signal::ble::assigned::fetched()
+            crate::signal::assigned::fetched()
         ),
     }
 }

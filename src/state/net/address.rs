@@ -171,7 +171,7 @@ pub const MFR_MARK: &str = "\u{00b7}mfr";
 ///
 /// **A random address has no IEEE block, but its manufacturer data may name
 /// a company**: `company` is that identifier, shown as the SIG's name for it
-/// (`signal::ble::assigned`, its legal form dropped) or the number itself
+/// (`signal::assigned`, its legal form dropped) or the number itself
 /// where the snapshot does not list it, marked [`MFR_MARK`] - `Apple·mfr`.
 /// It says whose data format the device sends, which for a phone is its
 /// maker and for a module may not be; the mark keeps that distinct from an
@@ -198,7 +198,7 @@ fn who_parts(addr: [u8; 6], random: bool, company: Option<u16>) -> (String, &'st
             (registrant_or_kind(addr, random), "")
         }
         (_, Some(id)) => {
-            let name = crate::signal::ble::assigned::company(id)
+            let name = crate::signal::assigned::company(id)
                 .map(|n| short_name(n, usize::MAX))
                 .unwrap_or_else(|| format!("0x{id:04X}"));
             (name, MFR_MARK)

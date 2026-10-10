@@ -59,7 +59,7 @@ fn advertised(state: &SdrMetrics, d: &Device) -> [String; 5] {
             .unwrap_or_default(),
         company.map(|id| format!("0x{id:04X}")).unwrap_or_default(),
         company
-            .and_then(crate::signal::ble::assigned::company)
+            .and_then(crate::signal::assigned::company)
             .map(|n| super::csv_field(n).into_owned())
             .unwrap_or_default(),
     ]

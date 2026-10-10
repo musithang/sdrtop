@@ -159,7 +159,7 @@ fn advertised(p: &BlePacket, net: &crate::state::NetState) -> Vec<String> {
                 }
                 Ad::Manufacturer { company: id, data } => {
                     company_id = format!("0x{id:04X}");
-                    company = crate::signal::ble::assigned::company(id)
+                    company = crate::signal::assigned::company(id)
                         .unwrap_or_default()
                         .to_string();
                     mfr_data.push(bytes(&data));

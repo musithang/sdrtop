@@ -352,7 +352,7 @@ fn ch_sel(p: &BlePacket) -> Option<&'static str> {
 fn uuid(written: &[u8]) -> String {
     let text = crate::signal::ble::ad::uuid_text(written);
     match written {
-        [hi, lo] => match crate::signal::ble::assigned::service16(u16::from_be_bytes([*hi, *lo])) {
+        [hi, lo] => match crate::signal::assigned::service16(u16::from_be_bytes([*hi, *lo])) {
             Some(name) => format!("{text} {name}"),
             None => text,
         },
@@ -483,7 +483,7 @@ fn advertised_lines(
                     theme,
                 )),
                 Ad::Manufacturer { company, data } => {
-                    let name = crate::signal::ble::assigned::company(company)
+                    let name = crate::signal::assigned::company(company)
                         .map(|n| format!("{n} (0x{company:04X})"))
                         .unwrap_or_else(|| format!("0x{company:04X}, not in the SIG snapshot"));
                     out.extend(wrapped("company", &name, iw, theme));

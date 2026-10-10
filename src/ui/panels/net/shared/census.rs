@@ -573,7 +573,7 @@ fn advertised_lines(
         parts.push(format!("TX {dbm:+} dBm"));
     }
     if let Some(id) = said.and_then(|a| a.company) {
-        parts.push(match crate::signal::ble::assigned::company(id) {
+        parts.push(match crate::signal::assigned::company(id) {
             Some(n) => format!("{n} 0x{id:04X}"),
             None => format!("company 0x{id:04X}"),
         });

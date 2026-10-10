@@ -354,7 +354,7 @@ pub fn title_spans(
                     "{} \u{00b7} IEEE {} \u{00b7} SIG {}",
                     mode.label().to_uppercase(),
                     crate::signal::net::vendor::fetched(),
-                    crate::signal::ble::assigned::fetched()
+                    crate::signal::assigned::fetched()
                 ),
                 theme.value_hi,
             ),
