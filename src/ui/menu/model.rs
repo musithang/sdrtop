@@ -27,22 +27,35 @@ pub const HIDDEN: &str = "hidden";
 /// is actually in it, so a default install never shows an empty row.
 pub const OTHER: &str = "other";
 
-/// Display order and titles for the sections the built-ins use.
+/// The heading the band and the Bluetooth sections are drawn under.
+pub const BLUETOOTH: &str = "Bluetooth";
+
+/// Wi-Fi's section id. It has no views yet; it is listed whenever the band is,
+/// with [`WIFI_NOTE`] in place of a list.
+pub const WIFI: &str = "wifi";
+
+/// What Wi-Fi's empty section says, rather than showing an empty list.
+pub const WIFI_NOTE: &str = "The Wi-Fi bench is being built: no views yet.";
+
+/// Display order, titles and the heading each is drawn under, for the
+/// sections the built-ins use.
 ///
 /// A section id a user preset invents is not in here: it sorts after these by
 /// id, and [`OTHER`] sorts last of all.
-const KNOWN: &[(&str, &str)] = &[
-    ("command_rail", "Command Rail"),
-    ("lab", "Lab"),
-    ("sweep", "Sweep"),
-    ("micro", "Micro"),
+const KNOWN: &[(&str, &str, Option<&str>)] = &[
+    ("command_rail", "Command Rail", None),
+    ("lab", "Lab", None),
+    ("sweep", "Sweep", None),
+    ("micro", "Micro", None),
     // The NET feature's four (`signal::net::SECTIONS`): `App::build_ui`
     // removes every preset filed under them on a radio that cannot work in the
-    // 2.4 GHz band, so they are absent rather than empty.
-    (crate::signal::net::SECTIONS[0], "NET"),
-    (crate::signal::net::SECTIONS[1], "LE"),
-    (crate::signal::net::SECTIONS[2], "Classic"),
-    (crate::signal::net::SECTIONS[3], "LE Coded"),
+    // 2.4 GHz band, so they are absent rather than empty. The band's id stays
+    // `net` so a preset of the user's filed under it keeps working.
+    (crate::signal::net::SECTIONS[0], "Band", Some(BLUETOOTH)),
+    (crate::signal::net::SECTIONS[1], "LE", Some(BLUETOOTH)),
+    (crate::signal::net::SECTIONS[2], "Classic", Some(BLUETOOTH)),
+    (crate::signal::net::SECTIONS[3], "LE Coded", Some(BLUETOOTH)),
+    (WIFI, "Wi-Fi", None),
 ];
 
 /// One layout, as the menu shows it.
@@ -61,6 +74,12 @@ pub struct Entry {
 pub struct Section {
     pub id: String,
     pub title: String,
+    /// The heading this section is drawn under in the menu, if any: the
+    /// sections sharing one sit together and are drawn indented below it. A
+    /// heading is not a section, so the cursor never stops on it.
+    pub parent: Option<&'static str>,
+    /// What an empty section says in place of a list.
+    pub note: Option<&'static str>,
     /// Slotted entries first in slot order, then the slotless ones by title.
     pub entries: Vec<Entry>,
 }
@@ -103,16 +122,20 @@ impl Menu {
     /// assume the indices still fit. Clamping here rather than indexing there
     /// keeps the "panels never panic during draw" rule intact: a bad index would
     /// take the whole terminal down.
+    ///
+    /// A section with no entries (Wi-Fi, for now) is still a place the cursor
+    /// can stand: it clamps to its first row, and [`Self::at`] finds nothing
+    /// there to open.
     pub fn clamp(&self, section: usize, entry: usize) -> Option<(usize, usize)> {
         let si = section.min(self.sections.len().checked_sub(1)?);
-        let ei = entry.min(self.sections[si].entries.len().checked_sub(1)?);
+        let ei = entry.min(self.sections[si].entries.len().saturating_sub(1));
         Some((si, ei))
     }
 
     /// The entry a clamped cursor points at.
     pub fn at(&self, section: usize, entry: usize) -> Option<&Entry> {
         let (si, ei) = self.clamp(section, entry)?;
-        Some(&self.sections[si].entries[ei])
+        self.sections[si].entries.get(ei)
     }
 }
 
@@ -164,9 +187,31 @@ pub fn build(presets: &HashMap<String, PresetConfig>) -> Menu {
                 (a.slot.is_none(), a.slot, &a.title).cmp(&(b.slot.is_none(), b.slot, &b.title))
             });
             let title = section_title(&id);
-            Section { id, title, entries }
+            let parent = section_parent(&id);
+            Section {
+                id,
+                title,
+                parent,
+                note: None,
+                entries,
+            }
         })
         .collect();
+
+    // Wi-Fi has no views yet and is listed anyway, as the band is: exactly
+    // when one of the NET sections survived the gate, so a radio that cannot
+    // reach 2.4 GHz is not shown a section it could never use.
+    if sections.iter().any(|s| crate::signal::net::is_net(&s.id))
+        && !sections.iter().any(|s| s.id == WIFI)
+    {
+        sections.push(Section {
+            id: WIFI.to_string(),
+            title: section_title(WIFI),
+            parent: section_parent(WIFI),
+            note: Some(WIFI_NOTE),
+            entries: Vec::new(),
+        });
+    }
 
     sections.sort_by(|a, b| (section_rank(&a.id), &a.id).cmp(&(section_rank(&b.id), &b.id)));
     Menu { sections, warnings }
@@ -176,13 +221,22 @@ pub fn build(presets: &HashMap<String, PresetConfig>) -> Menu {
 /// the id itself for one a user preset invented. Also what the NET header
 /// calls the section it is in.
 pub fn section_title(id: &str) -> String {
-    if let Some((_, title)) = KNOWN.iter().find(|(k, _)| *k == id) {
+    if let Some((_, title, _)) = KNOWN.iter().find(|(k, _, _)| *k == id) {
         return (*title).to_string();
     }
     if id == OTHER {
         return "Other".to_string();
     }
     id.to_string()
+}
+
+/// The heading a section is drawn under: the known ones' own, none for a
+/// section a user invented.
+fn section_parent(id: &str) -> Option<&'static str> {
+    KNOWN
+        .iter()
+        .find(|(k, _, _)| *k == id)
+        .and_then(|(_, _, parent)| *parent)
 }
 
 /// Known sections in their declared order, then anything a user invented, then
@@ -193,7 +247,7 @@ fn section_rank(id: &str) -> usize {
     }
     KNOWN
         .iter()
-        .position(|(k, _)| *k == id)
+        .position(|(k, _, _)| *k == id)
         .unwrap_or(KNOWN.len())
 }
 
@@ -210,9 +264,10 @@ mod tests {
         }
     }
 
-    /// The built-ins land in the eight sections, in order.
+    /// The built-ins land in nine sections, in order: the four Bluetooth
+    /// groups, the band first among them, then Wi-Fi.
     #[test]
-    fn the_builtins_build_eight_sections() {
+    fn the_builtins_build_nine_sections() {
         let menu = build(&LayoutConfig::default_config().presets);
         let ids: Vec<&str> = menu.sections.iter().map(|s| s.id.as_str()).collect();
         assert_eq!(
@@ -225,7 +280,8 @@ mod tests {
                 "net",
                 "le",
                 "classic",
-                "coded"
+                "coded",
+                "wifi"
             ]
         );
         assert!(menu.warnings.is_empty(), "{:?}", menu.warnings);
@@ -250,12 +306,84 @@ mod tests {
                 "net",
                 "le",
                 "classic",
-                "coded"
+                "coded",
+                "wifi"
             ]
         );
+        assert_eq!(menu.section("net").unwrap().title, "Band");
         assert_eq!(menu.section("le").unwrap().title, "LE");
         assert_eq!(menu.section("classic").unwrap().title, "Classic");
         assert_eq!(menu.section("coded").unwrap().title, "LE Coded");
+    }
+
+    /// The Bluetooth item holds the band and the three Bluetooth sections,
+    /// each a group numbered from one; nothing else has a parent.
+    #[test]
+    fn bluetooth_holds_the_band_and_its_three_groups() {
+        let menu = build(&LayoutConfig::default_config().presets);
+        let parented: Vec<(&str, Option<&str>)> = menu
+            .sections
+            .iter()
+            .map(|s| (s.id.as_str(), s.parent))
+            .collect();
+        assert_eq!(
+            parented,
+            [
+                ("command_rail", None),
+                ("lab", None),
+                ("sweep", None),
+                ("micro", None),
+                ("net", Some("Bluetooth")),
+                ("le", Some("Bluetooth")),
+                ("classic", Some("Bluetooth")),
+                ("coded", Some("Bluetooth")),
+                ("wifi", None),
+            ]
+        );
+    }
+
+    /// Wi-Fi is listed with nothing in it yet, and says so rather than
+    /// showing an empty list.
+    #[test]
+    fn wifi_is_listed_empty_and_says_why() {
+        let menu = build(&LayoutConfig::default_config().presets);
+        let wifi = menu.section("wifi").expect("Wi-Fi is listed");
+        assert_eq!(wifi.title, "Wi-Fi");
+        assert!(wifi.entries.is_empty());
+        assert!(
+            wifi.note.is_some_and(|n| n.contains("being built")),
+            "{:?}",
+            wifi.note
+        );
+        assert!(
+            menu.sections
+                .iter()
+                .all(|s| s.id == "wifi" || s.note.is_none()),
+            "only the empty section carries a note"
+        );
+    }
+
+    /// Wi-Fi is gated with Bluetooth: on a radio the band refuses, every NET
+    /// preset is dropped before the menu is built, and Wi-Fi goes with them
+    /// rather than standing alone as a promise the radio cannot keep.
+    #[test]
+    fn wifi_is_absent_when_the_band_is() {
+        let mut presets = LayoutConfig::default_config().presets;
+        presets.retain(|_, p| !p.section.as_deref().is_some_and(crate::signal::net::is_net));
+        let menu = build(&presets);
+        assert!(menu.section("wifi").is_none());
+        assert!(menu.section("net").is_none());
+    }
+
+    /// A user preset still filed under the band's old id lands in Band.
+    #[test]
+    fn a_preset_filed_under_net_lands_in_band() {
+        let mut presets = LayoutConfig::default_config().presets;
+        presets.insert("my_band".into(), bare_preset(Some("net"), Some(9)));
+        let menu = build(&presets);
+        let band = menu.section("net").unwrap();
+        assert_eq!(band.title, "Band");
+        assert!(band.entries.iter().any(|e| e.preset == "my_band"));
     }
 
     /// The NET feature's views, a section each for the band and the two
@@ -372,6 +500,7 @@ mod tests {
                 "le",
                 "classic",
                 "coded",
+                "wifi",
                 "nightwatch"
             ]
         );
@@ -447,8 +576,10 @@ mod tests {
     #[test]
     fn a_cursor_past_the_end_is_clamped() {
         let menu = build(&LayoutConfig::default_config().presets);
-        // Eight sections, and Sweep (index 2) has two entries.
-        assert_eq!(menu.clamp(99, 0), Some((7, 0)));
+        // Nine sections, the last (Wi-Fi) empty; Sweep (index 2) has two
+        // entries.
+        assert_eq!(menu.clamp(99, 0), Some((8, 0)));
+        assert_eq!(menu.at(99, 0), None, "Wi-Fi has nothing to open");
         assert_eq!(menu.clamp(2, 99), Some((2, 1)));
         assert_eq!(
             menu.at(2, 99).map(|e| e.preset.as_str()),

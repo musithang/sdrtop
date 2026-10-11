@@ -740,7 +740,7 @@ fn compose_net_band(
 
     const SEP: &str = " \u{b7} ";
     let sep_w = SEP.chars().count();
-    // " NET" (or the section's title) + sep + mode.
+    // The section's title (" Band", " Classic") + sep + mode.
     let mut width = 1 + section.chars().count() + sep_w + mode.label().len();
 
     let mut by_importance: Vec<usize> = (0..fields.len()).collect();
@@ -1474,9 +1474,10 @@ mod tests {
             "{text}"
         );
 
-        // The memory gives way last too.
+        // The memory gives way last too: the narrowest band line that holds
+        // one field beside " Band · SURVEY" keeps the clip, not the channel.
         m.signal.adc_saturation_pct = 0.2;
-        let (text, _) = net_band_text(&m, 30);
+        let (text, _) = net_band_text(&m, 31);
         assert!(text.contains("last clip"), "{text}");
     }
 
@@ -1497,7 +1498,7 @@ mod tests {
     fn the_net_band_names_its_section() {
         let theme = crate::Theme::sdr();
         for (section, title) in [
-            ("net", " NET ·"),
+            ("net", " Band ·"),
             ("le", " LE ·"),
             ("classic", " Classic ·"),
         ] {
@@ -1574,7 +1575,7 @@ mod tests {
         let m = SdrMetrics::fixture();
         let out = crate::state::fixture::draw(HeaderPanel, 100, 5, &m).join("\n");
         assert!(!out.contains("SURVEY") && !out.contains("LOCK"), "{out}");
-        assert!(!out.contains(" NET · "), "{out}");
+        assert!(!out.contains(" Band · "), "{out}");
     }
 
     #[test]
