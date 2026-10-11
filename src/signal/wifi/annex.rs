@@ -94,6 +94,44 @@ pub fn check_map(table: &str, map: &[usize], digest: u64) {
     assert_eq!(got, digest, "{table}: digest {got:#018x}");
 }
 
+/// The digest of complex values, each part rounded to four decimals: one
+/// place finer than the annex prints, and far coarser than any difference
+/// between two correct computations of the same value.
+pub fn digest_values(values: &[num_complex::Complex<f64>]) -> u64 {
+    let q = |x: f64| ((x * 1e4).round() as i64).to_le_bytes();
+    let bytes: Vec<u8> = values
+        .iter()
+        .flat_map(|v| [q(v.re), q(v.im)])
+        .flatten()
+        .collect();
+    fnv1a(&bytes)
+}
+
+/// Hold complex values to the annex: to `table` in full when a copy is at
+/// hand, each part within half a unit of the third decimal it is printed
+/// to (a position the annex marks as a pilot's, printed `X`, is skipped),
+/// and to `digest` always.
+pub fn check_values(table: &str, values: &[num_complex::Complex<f64>], digest: u64) {
+    let got = digest_values(values);
+    if let Some(full) = full() {
+        let want = full[table]["values"]
+            .as_array()
+            .unwrap_or_else(|| panic!("no values for {table}"));
+        assert_eq!(values.len(), want.len(), "{table}: length");
+        for (i, (v, w)) in values.iter().zip(want).enumerate() {
+            let Some(pair) = w.as_array() else { continue };
+            let (re, im) = (pair[0].as_f64().unwrap(), pair[1].as_f64().unwrap());
+            let off = (v.re - re).abs().max((v.im - im).abs());
+            assert!(
+                off <= 0.0005 + 1e-9,
+                "{table}: value {i} is {v}, the annex prints {re} {im}"
+            );
+        }
+        println!("{table} matches the annex; digest {got:#018x}");
+    }
+    assert_eq!(got, digest, "{table}: digest {got:#018x}");
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -111,6 +149,18 @@ mod tests {
     #[test]
     fn bits_digest_as_one_byte_each() {
         assert_eq!(digest_bits(&[true, false]), fnv1a(&[1, 0]));
+    }
+
+    /// Values are digested at four decimals, so a difference far below the
+    /// annex's three cannot change the digest, and a real one does.
+    #[test]
+    fn values_digest_at_four_decimals() {
+        use num_complex::Complex;
+        let a = [Complex::new(0.04600001, -0.0230)];
+        let b = [Complex::new(0.04599999, -0.0230)];
+        let c = [Complex::new(0.0462, -0.0230)];
+        assert_eq!(digest_values(&a), digest_values(&b));
+        assert_ne!(digest_values(&a), digest_values(&c));
     }
 
     /// The message is the annex's 100 octets, the poem's 72 characters among

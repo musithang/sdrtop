@@ -16,9 +16,16 @@
 //! - [`scrambler`]: the DATA field's bits and the scrambler.
 //! - [`bcc`]: the convolutional code and its puncturing.
 //! - [`interleave`]: the block interleaver and its inverse.
+//! - [`map`]: coded bits to constellation points, and back.
+//! - [`ofdm`]: the subcarriers of one symbol, the pilots, and the training
+//!   sequences.
+//! - [`ppdu`]: the whole PPDU in time.
 
 pub mod annex;
 pub mod bcc;
 pub mod interleave;
+pub mod map;
+pub mod ofdm;
+pub mod ppdu;
 pub mod scrambler;
 pub mod signal_field;
