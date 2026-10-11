@@ -333,6 +333,18 @@ fn lines(
         out.push(dash("classic BT", "not decoding"));
     }
 
+    // Wi-Fi, only once its receiver has run this session, as LE Coded: the
+    // views that start it are its own. It counts nothing yet, so it says
+    // where it runs and that no detector exists, never a zero.
+    let w = &state.net.wifi;
+    if w.ran {
+        out.push(match (w.channel, &w.refused) {
+            (Some(ch), _) => row("Wi-Fi", format!("ch {ch}"), Some("no burst detector yet")),
+            (None, Some(why)) => dash("Wi-Fi", why),
+            (None, None) => dash("Wi-Fi", "not running on this view"),
+        });
+    }
+
     // What it cost: the same figure the header band shows, red
     // above the stream's own pace, where the worker is falling behind.
     out.push(match h.decode_load {
@@ -464,6 +476,41 @@ mod tests {
         assert!(out.contains("decode load"), "{out}");
         assert!(out.contains("gave up"), "{out}");
         assert!(!out.contains("\u{2503}"), "{out}");
+    }
+
+    /// Wi-Fi is named only once its receiver has run this session; then
+    /// it says its channel and that there is no detector yet, never a
+    /// count, since nothing is counted.
+    #[test]
+    fn wifi_is_named_once_it_has_run_and_counts_nothing() {
+        let before = draw(NetDecodeHealthPanel, 80, 40, &streaming()).join("\n");
+        assert!(!before.contains("Wi-Fi"), "{before}");
+
+        let mut m = streaming();
+        m.net.wifi.ran = true;
+        m.net.wifi.channel = Some(6);
+        let on = draw(NetDecodeHealthPanel, 80, 40, &m).join("\n");
+        assert!(on.contains("Wi-Fi"), "{on}");
+        assert!(on.contains("ch 6"), "{on}");
+        assert!(on.contains("no burst detector yet"), "{on}");
+    }
+
+    /// Refused, the Wi-Fi row is a dash with the reason; stood down after
+    /// running, a dash saying it is not running here.
+    #[test]
+    fn wifi_refused_or_stood_down_is_a_dash() {
+        let mut m = streaming();
+        m.net.wifi.ran = true;
+        m.net.wifi.refused = Some("not on a Wi-Fi channel centre (2440.000 MHz)".into());
+        let refused = draw(NetDecodeHealthPanel, 100, 40, &m).join("\n");
+        let row = refused.lines().find(|l| l.contains("Wi-Fi")).unwrap();
+        assert!(row.contains("\u{2014}"), "{row}");
+        assert!(row.contains("not on a Wi-Fi channel centre"), "{row}");
+
+        m.net.wifi.refused = None;
+        let down = draw(NetDecodeHealthPanel, 100, 40, &m).join("\n");
+        let row = down.lines().find(|l| l.contains("Wi-Fi")).unwrap();
+        assert!(row.contains("not running on this view"), "{row}");
     }
 
     fn streaming() -> SdrMetrics {

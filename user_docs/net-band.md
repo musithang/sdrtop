@@ -125,6 +125,10 @@ also one bar, good, CRC failed and gave up in their shares, and the decode
 load is a bar against a rule at 100 %, red past it. Once the LE Coded
 receiver has run this session, its funnel and its AuxPtrs are counted here
 too; before that it is not mentioned, because this view never starts it.
+Wi-Fi's receiver is treated the same way: once it has run, a `Wi-Fi` row
+says which channel it is on, or why it is not running, and that it has no
+burst detector yet. It counts nothing, so it shows no number, not even a
+zero.
 
 Every count on the other NET panels is only as complete as this panel says
 the feed was. If this one is unhappy, believe it over the others.

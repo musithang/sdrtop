@@ -57,6 +57,8 @@
 //!   advertisements made ([`promises`]) and the connections they followed
 //!   ([`follow`]); [`ble`] is what a decoded LE packet becomes in the state.
 //! - [`classic`]: the classic fleet and what each piconet has taught it.
+//! - [`wifi`]: whether Wi-Fi's receiver runs, on its views alone, and on
+//!   which channel.
 
 use std::sync::{Arc, Mutex};
 use std::time::Instant;
@@ -79,11 +81,13 @@ mod feed;
 mod follow;
 mod le;
 mod promises;
+mod wifi;
 
 use band::Band;
 use classic::{push_all, Classic};
 use feed::{decoded_block, Feed};
 use le::Le;
+use wifi::Wifi;
 
 /// Above this many simultaneous classic BT channels, `NetWorker::new` logs a
 /// warning naming the cost rather than staying quiet about it -
@@ -208,6 +212,7 @@ impl NetWorker {
         let mut band = Band::default();
         let mut le = Le::default();
         let mut classic = Classic::new(self.survey_bt_start);
+        let mut wifi = Wifi::default();
 
         while let Ok(block) = self.sample_rx.recv() {
             // The clock is read outside the lock, because the lock block below
@@ -248,6 +253,7 @@ impl NetWorker {
                 span_hz,
             };
             let feeds = le.choose(tuning, view, &self.state);
+            wifi.choose(tuning, view, &self.state);
 
             // Decoded once, by the first receiver that needs it, before any
             // runs, and shared by them all.
@@ -323,6 +329,7 @@ impl NetWorker {
                 band.close();
                 le.close(&self.state);
                 classic.close();
+                wifi.close(&self.state);
                 let mut m = self.state.lock().unwrap_or_else(|e| e.into_inner());
                 Classic::unpublish(&mut m);
                 m.net.ble_channel = None;
@@ -1453,6 +1460,113 @@ mod tests {
         let ble = run("le", "net_ble");
         assert_eq!(ble.net.ble_channel, Some(38));
         assert_eq!(ble.net.ble_refused, None);
+    }
+
+    /// Noise as the radio's eight-bit pairs, a block of 131 072.
+    fn noise_block(seed: u64) -> Vec<u8> {
+        use crate::signal::dsp::testkit::Rng;
+        Rng::new(seed)
+            .noise(131_072, 0.02)
+            .iter()
+            .flat_map(|z| {
+                let q = |v: f32| (v * 128.0).clamp(-127.0, 127.0) as i8 as u8;
+                [q(z.re), q(z.im)]
+            })
+            .collect()
+    }
+
+    /// Four blocks of noise through a worker on `preset` under `section`,
+    /// tuned to `hz` at `rate`: the state it leaves.
+    fn run_noise(section: &str, preset: &str, hz: u64, rate: f64) -> SdrMetrics {
+        let mut m = SdrMetrics::fixture().streaming();
+        m.ui.section = section.to_string();
+        m.ui.active_preset = preset.to_string();
+        m.radio.frequency = hz;
+        m.radio.config_sample_rate = rate;
+        m.radio.bb_filter_hz = 0;
+        let state = Arc::new(Mutex::new(m));
+        let (tx, rx) = crossbeam_channel::unbounded();
+        let block = noise_block(13);
+        for seq in 1..=4 {
+            tx.send(stamped(&state, seq, false, block.clone())).unwrap();
+        }
+        drop(tx);
+        NetWorker::new(rx, Arc::clone(&state), eight_bit(), SAFE_BT_CHANNELS).run();
+        let m = state.lock().unwrap().clone();
+        m
+    }
+
+    /// On a Wi-Fi view, at 20 Msps on a channel centre, Wi-Fi's receiver
+    /// runs on that channel and the session remembers it ran.
+    #[test]
+    fn wifi_runs_on_its_view_on_a_channel_centre() {
+        let m = run_noise("wifi_channel", "wifi_survey", 2_437_000_000, 20e6);
+        assert_eq!(m.net.wifi.channel, Some(6));
+        assert_eq!(m.net.wifi.refused, None);
+        assert!(m.net.wifi.ran);
+    }
+
+    /// At another rate, or between two channels, it does not run, and says
+    /// why in words.
+    #[test]
+    fn wifi_refuses_a_wrong_rate_and_an_off_centre_tuning() {
+        let slow = run_noise("wifi_channel", "wifi_survey", 2_437_000_000, 8e6);
+        assert_eq!(slow.net.wifi.channel, None);
+        let why = slow.net.wifi.refused.unwrap();
+        assert!(why.contains("needs 20.000 Msps"), "{why}");
+        assert!(!slow.net.wifi.ran);
+
+        let off = run_noise("wifi_channel", "wifi_survey", 2_440_000_000, 20e6);
+        assert_eq!(off.net.wifi.channel, None);
+        let why = off.net.wifi.refused.unwrap();
+        assert!(why.contains("not on a Wi-Fi channel centre"), "{why}");
+        assert!(why.contains("2440.000 MHz"), "{why}");
+    }
+
+    /// Off the Wi-Fi views nothing Wi-Fi runs, and nothing is refused
+    /// either: not running there is not a refusal.
+    #[test]
+    fn nothing_wifi_runs_off_the_wifi_views() {
+        let m = run_noise("le", "net_ble", 2_437_000_000, 20e6);
+        assert_eq!(m.net.wifi, Default::default());
+    }
+
+    /// Leaving the Wi-Fi view mid-stream stands the receiver down; the
+    /// session still remembers it ran.
+    #[test]
+    fn leaving_the_wifi_view_stands_the_receiver_down() {
+        let mut m = SdrMetrics::fixture().streaming();
+        m.ui.section = "wifi_channel".to_string();
+        m.ui.active_preset = "wifi_survey".to_string();
+        m.radio.frequency = 2_437_000_000;
+        m.radio.config_sample_rate = 20e6;
+        m.radio.bb_filter_hz = 0;
+        let state = Arc::new(Mutex::new(m));
+        let (tx, rx) = crossbeam_channel::unbounded();
+        let block = noise_block(17);
+        tx.send(stamped(&state, 1, false, block.clone())).unwrap();
+        let worker = {
+            let state = Arc::clone(&state);
+            std::thread::spawn(move || {
+                NetWorker::new(rx, state, eight_bit(), SAFE_BT_CHANNELS).run()
+            })
+        };
+        // Until the first block has been through, then the view changes.
+        while state.lock().unwrap().net.health.blocks_in < 1 {
+            std::thread::yield_now();
+        }
+        {
+            let mut m = state.lock().unwrap();
+            m.ui.section = "le".to_string();
+            m.ui.active_preset = "net_ble".to_string();
+        }
+        tx.send(stamped(&state, 2, false, block)).unwrap();
+        drop(tx);
+        worker.join().unwrap();
+        let m = state.lock().unwrap();
+        assert_eq!(m.net.wifi.channel, None);
+        assert_eq!(m.net.wifi.refused, None);
+        assert!(m.net.wifi.ran);
     }
 
     /// An LE Coded S=8 `ADV_EXT_IND` on channel 38 at 20 Msps, the radio at

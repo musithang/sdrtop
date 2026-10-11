@@ -18,6 +18,7 @@
 //!   counting.
 //! - [`band`]: the band occupancy history.
 //! - [`health`]: the decode-health counts.
+//! - [`wifi`]: where Wi-Fi's receiver runs, or why not.
 
 mod address;
 mod band;
@@ -26,6 +27,7 @@ mod classic;
 mod follow;
 mod health;
 mod packets;
+mod wifi;
 
 pub use address::{who_with, AddressBook, AddressDisplay, FULL_ADDRESS_WIDTH};
 pub use band::{BandOccupancy, CellReading, COLUMN_INTERVAL, HISTORY_COLUMNS};
@@ -254,6 +256,8 @@ pub struct NetState {
     /// How the roster is ordered, `s` and `r` on it. See
     /// [`NetState::bt_roster`].
     pub bt_sort: classic::RosterSort,
+    /// Where Wi-Fi's receiver runs, or why it does not.
+    pub wifi: wifi::WifiState,
     /// How much of the past the hop scatter shows, and how far back it ends.
     pub hop_view: HopView,
     /// Where the Piconet view's packet list is scrolled to, and the packet
