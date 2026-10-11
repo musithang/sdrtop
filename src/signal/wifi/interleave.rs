@@ -36,16 +36,17 @@ fn positions(n_cbps: usize, n_bpsc: usize) -> Vec<usize> {
 }
 
 /// One symbol's coded bits, interleaved: the bit at `k` moves to `j`.
-pub fn interleave(bits: &[bool], n_bpsc: usize) -> Vec<bool> {
-    let mut out = vec![false; bits.len()];
+pub fn interleave<T: Copy + Default>(bits: &[T], n_bpsc: usize) -> Vec<T> {
+    let mut out = vec![T::default(); bits.len()];
     for (k, j) in positions(bits.len(), n_bpsc).into_iter().enumerate() {
         out[j] = bits[k];
     }
     out
 }
 
-/// The inverse (Equations 17-18, 17-19): the bit at `j` back to `k`.
-pub fn deinterleave(bits: &[bool], n_bpsc: usize) -> Vec<bool> {
+/// The inverse (Equations 17-18, 17-19): the bit at `j` back to `k`, for
+/// bits or for the readings a receiver has in their place.
+pub fn deinterleave<T: Copy>(bits: &[T], n_bpsc: usize) -> Vec<T> {
     positions(bits.len(), n_bpsc)
         .into_iter()
         .map(|j| bits[j])

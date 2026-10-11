@@ -76,6 +76,37 @@ pub fn demap(points: &[Complex<f64>], n_bpsc: usize) -> Vec<bool> {
         .collect()
 }
 
+/// Points to one reading a bit, positive for a 1: for each bit, the
+/// squared distance to the nearest point where it is 0 less that to the
+/// nearest where it is 1 (the max-log approximation of its likelihood
+/// ratio, up to a scale every reading shares). What the decoder weighs
+/// instead of a hard decision.
+pub fn demap_soft(points: &[Complex<f64>], n_bpsc: usize) -> Vec<f32> {
+    let constellation: Vec<(Vec<bool>, Complex<f64>)> = (0..1usize << n_bpsc)
+        .map(|v| {
+            let bits: Vec<bool> = (0..n_bpsc).map(|i| v >> i & 1 == 1).collect();
+            let p = map(&bits, n_bpsc)[0];
+            (bits, p)
+        })
+        .collect();
+    let mut out = Vec::with_capacity(points.len() * n_bpsc);
+    for y in points {
+        for i in 0..n_bpsc {
+            let (mut zero, mut one) = (f64::INFINITY, f64::INFINITY);
+            for (bits, p) in &constellation {
+                let d = (y - p).norm_sqr();
+                if bits[i] {
+                    one = one.min(d);
+                } else {
+                    zero = zero.min(d);
+                }
+            }
+            out.push((zero - one) as f32);
+        }
+    }
+    out
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -119,6 +150,24 @@ mod tests {
                 assert_eq!((w[0].1 ^ w[1].1).count_ones(), 1, "{n}: {w:?}");
             }
         }
+    }
+
+    /// Soft readings carry each bit's sign and grow with its distance from
+    /// the decision boundary: on a clean point every reading agrees with
+    /// its bit, and a point nudged towards the boundary reads fainter.
+    #[test]
+    fn soft_readings_agree_with_the_bits_and_weaken_near_a_boundary() {
+        for n_bpsc in [1, 2, 4, 6] {
+            let bits: Vec<bool> = (0..n_bpsc * 30).map(|i| (i * 3 + i / 4) % 5 < 2).collect();
+            let r = demap_soft(&map(&bits, n_bpsc), n_bpsc);
+            assert_eq!(r.len(), bits.len());
+            for (i, (&v, &b)) in r.iter().zip(&bits).enumerate() {
+                assert_eq!(v > 0.0, b, "{n_bpsc}: bit {i} read {v}");
+            }
+        }
+        let firm = demap_soft(&[Complex::new(1.0, 0.0)], 1)[0];
+        let faint = demap_soft(&[Complex::new(0.2, 0.0)], 1)[0];
+        assert!(firm > faint && faint > 0.0, "{firm} {faint}");
     }
 
     /// The nearest point's bits are the bits that made it, at every size.

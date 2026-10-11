@@ -118,16 +118,22 @@ impl Code {
                 cost(k, true, true),
             ];
             let mut chosen = 0u64;
-            for to in 0..n {
-                let base = (to << 1) & (n - 1);
-                // Each predecessor's path plus its branch. An unreached one
-                // stays infinite and never wins; of two equal, the lower-
-                // numbered keeps it, by the strict comparison.
-                let via0 = metric[base] + price[sends[to][0]];
-                let via1 = metric[base | 1] + price[sends[to][1]];
-                let take1 = via1 < via0;
-                next[to] = if take1 { via1 } else { via0 };
-                chosen |= (take1 as u64) << to;
+            // In butterflies: states 2j and 2j + 1 are the two predecessors
+            // of both j (a zero in) and j + n/2 (a one in), so each pair is
+            // read once for its two successors.
+            let half = n / 2;
+            for j in 0..half {
+                let (m0, m1) = (metric[2 * j], metric[2 * j + 1]);
+                for to in [j, j + half] {
+                    // Each predecessor's path plus its branch. An unreached
+                    // one stays infinite and never wins; of two equal, the
+                    // lower-numbered keeps it, by the strict comparison.
+                    let via0 = m0 + price[sends[to][0]];
+                    let via1 = m1 + price[sends[to][1]];
+                    let take1 = via1 < via0;
+                    next[to] = if take1 { via1 } else { via0 };
+                    chosen |= (take1 as u64) << to;
+                }
             }
             std::mem::swap(&mut metric, &mut next);
             survivors.push(chosen);

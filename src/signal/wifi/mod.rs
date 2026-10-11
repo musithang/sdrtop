@@ -20,9 +20,11 @@
 //! - [`ofdm`]: the subcarriers of one symbol, the pilots, and the training
 //!   sequences.
 //! - [`ppdu`]: the whole PPDU in time.
+//! - [`chain`]: the bit chain both ways, a PSDU to its points and back.
 
 pub mod annex;
 pub mod bcc;
+pub mod chain;
 pub mod interleave;
 pub mod map;
 pub mod ofdm;
