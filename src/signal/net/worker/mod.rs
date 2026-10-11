@@ -1216,6 +1216,27 @@ mod tests {
             );
         }
         eprintln!("names {names:?}");
+        // What was decoded, and nothing about when: two runs of one
+        // recording through two decoders that should agree print one value.
+        let decoded = kept
+            .iter()
+            .map(|p| {
+                format!(
+                    "{:?}|{:?}|{:?}|{}|{}|{:?};",
+                    p.pdu_type,
+                    p.adv_addr,
+                    p.payload,
+                    p.crc_ok,
+                    p.length,
+                    p.coded.as_ref().map(|c| c.fec_repairs)
+                )
+            })
+            .collect::<String>()
+            + &format!("{f:?}{a:?}");
+        let digest = decoded.bytes().fold(0xcbf2_9ce4_8422_2325u64, |h, b| {
+            (h ^ b as u64).wrapping_mul(0x0000_0100_0000_01b3)
+        });
+        eprintln!("decoded digest {digest:#018x}");
         assert!(primaries > 0, "no ADV_EXT_IND");
         assert!(a.heard > 0 && !auxes.is_empty(), "no AuxPtr followed");
         assert!(!names.is_empty(), "no name read");

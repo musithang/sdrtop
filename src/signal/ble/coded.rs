@@ -29,6 +29,7 @@
 //! `transmit` builds a packet from the Core's text, so the readers are
 //! held to the specification rather than to themselves.
 
+use crate::signal::dsp::code::conv::{correlation, hamming, Code};
 use crate::signal::dsp::code::lfsr::whiten;
 
 /// The 8-symbol unit the Coded PHY's own preamble repeats ten times -
@@ -51,48 +52,23 @@ pub fn preamble_bits() -> [bool; 80] {
     out
 }
 
-/// The convolutional FEC encoder's own memory: the three most recently
-/// encoded input bits, most recent first - `state[0]` is what section
-/// 3.3.1's own generator polynomials call the `x` term, `state[1]` the
-/// `x^2` term, `state[2]` the `x^3` term. Eight possible values, since
-/// three bits of memory - the number the Viterbi decoder's trellis has exactly
-/// that many states for.
-type State = [bool; 3];
-
-const STATE_COUNT: usize = 8;
-
-fn state_to_index(s: State) -> usize {
-    ((s[0] as usize) << 2) | ((s[1] as usize) << 1) | (s[2] as usize)
-}
-
-fn index_to_state(i: usize) -> State {
-    [(i >> 2) & 1 != 0, (i >> 1) & 1 != 0, i & 1 != 0]
-}
-
-/// One encoder step: given the state *before* this input bit, the two
-/// coded output bits and the state *after* it.
+/// The convolutional FEC code: rate 1/2, constraint length 4.
 ///
 /// **Exactly section 3.3.1's own two generator polynomials, not a second,
 /// independently-derived pair.** `G0(x) = 1 + x + x^2 + x^3` reads every
 /// one of the four taps (the input bit itself, `x^0`, plus all three
 /// stored ones); `G1(x) = 1 + x^2 + x^3` skips the `x^1` tap - the only
-/// difference between the two. "The bit coming from generator polynomial
-/// `G0` (`a0`) is transmitted first; the bit coming from generator
-/// polynomial `G1` (`a1`) is transmitted second" is section 3.3.1's own
-/// sentence, and is exactly the order returned here and consumed by
-/// [`encode`].
-fn step(state: State, input: bool) -> (bool, bool, State) {
-    let taps = [input, state[0], state[1], state[2]];
-    let g0 = taps[0] ^ taps[1] ^ taps[2] ^ taps[3];
-    let g1 = taps[0] ^ taps[2] ^ taps[3];
-    let next = [input, state[0], state[1]];
-    (g0, g1, next)
-}
+/// difference between the two. Written in `dsp::code::conv`'s convention
+/// (current input first), that is `0o17` and `0o13`. "The bit coming from
+/// generator polynomial `G0` (`a0`) is transmitted first; the bit coming
+/// from generator polynomial `G1` (`a1`) is transmitted second" is section
+/// 3.3.1's own sentence, and is the order the shared code sends them in.
+const CODE: Code = Code::new(4, 0o17, 0o13);
 
 /// Encode `bits` with the rate-1/2, constraint-length-4 convolutional code,
 /// starting from the all-zero state section 3.3.1 itself specifies
 /// ("initial state... is set to all zeros"). Two coded bits out for every
-/// one in, `a0` then `a1` per [`step`]'s own doc.
+/// one in, `a0` then `a1`.
 ///
 /// **Does not append a termination sequence.** "An input sequence of three
 /// consecutive zeros always brings the... encoder back to its original
@@ -102,15 +78,7 @@ fn step(state: State, input: bool) -> (bool, bool, State) {
 /// TERM2, section 2.2) before calling this, the same way it is the
 /// caller's job to know a block even needs one.
 pub fn encode(bits: &[bool]) -> Vec<bool> {
-    let mut state: State = [false; 3];
-    let mut out = Vec::with_capacity(bits.len() * 2);
-    for &b in bits {
-        let (g0, g1, next) = step(state, b);
-        out.push(g0);
-        out.push(g1);
-        state = next;
-    }
-    out
+    CODE.encode(bits)
 }
 
 /// Decode a rate-1/2, constraint-length-4 convolutionally-encoded stream
@@ -136,7 +104,7 @@ pub fn encode(bits: &[bool]) -> Vec<bool> {
 /// that could not have come from this encoder at all.
 #[cfg(test)]
 pub fn decode(coded: &[bool]) -> Option<Vec<bool>> {
-    viterbi(coded.len(), true, |k, g0, g1| hamming(coded, k, g0, g1))
+    viterbi(coded.len(), true, |k, a, b| hamming(coded, k, a, b))
 }
 
 /// [`decode`] for a stream whose encoder has not yet been terminated: the
@@ -146,7 +114,7 @@ pub fn decode(coded: &[bool]) -> Option<Vec<bool>> {
 /// settled, so a caller decodes some way past what it needs.
 #[cfg(test)]
 pub fn decode_unterminated(coded: &[bool]) -> Option<Vec<bool>> {
-    viterbi(coded.len(), false, |k, g0, g1| hamming(coded, k, g0, g1))
+    viterbi(coded.len(), false, |k, a, b| hamming(coded, k, a, b))
 }
 
 /// Soft-decision [`decode`]: one reading a coded bit, positive for a 1, its
@@ -156,29 +124,13 @@ pub fn decode_unterminated(coded: &[bool]) -> Option<Vec<bool>> {
 /// have counted it as a whole error.
 #[cfg(test)]
 pub fn decode_soft(readings: &[f32]) -> Option<Vec<bool>> {
-    viterbi(readings.len(), true, |k, g0, g1| {
-        correlation(readings, k, g0, g1)
+    viterbi(readings.len(), true, |k, a, b| {
+        correlation(readings, k, a, b)
     })
 }
 
-/// A branch's hard cost at step `k`: the coded bits it disagrees with.
-fn hamming(coded: &[bool], k: usize, g0: bool, g1: bool) -> f32 {
-    f32::from(u8::from(g0 != coded[2 * k]) + u8::from(g1 != coded[2 * k + 1]))
-}
-
-/// A branch's soft cost at step `k`: minus the readings it expects to be
-/// positive, plus the ones it expects negative.
-fn correlation(r: &[f32], k: usize, g0: bool, g1: bool) -> f32 {
-    let one = |expected: bool, v: f32| if expected { -v } else { v };
-    one(g0, r[2 * k]) + one(g1, r[2 * k + 1])
-}
-
-/// The trellis every decoder shares, over `len` coded bits with `cost`
-/// pricing each branch. `terminated` ends the traceback at state zero
-/// (every FEC block of this PHY ends with a termination sequence);
-/// otherwise at the cheapest state, the earliest of equals. Hard costs are
-/// small whole numbers, exact in an `f32`, so the hard decoders choose
-/// exactly as they did with integer metrics.
+/// The shared decoder over `len` coded bits: refused for an odd or empty
+/// stream, which no FEC block of this PHY can be.
 fn viterbi(
     len: usize,
     terminated: bool,
@@ -187,55 +139,7 @@ fn viterbi(
     if len == 0 || !len.is_multiple_of(2) {
         return None;
     }
-    let steps = len / 2;
-
-    let mut metric = [f32::INFINITY; STATE_COUNT];
-    metric[0] = 0.0;
-    let mut back: Vec<[Option<(usize, bool)>; STATE_COUNT]> = Vec::with_capacity(steps);
-
-    for k in 0..steps {
-        let mut next_metric = [f32::INFINITY; STATE_COUNT];
-        let mut step_back: [Option<(usize, bool)>; STATE_COUNT] = [None; STATE_COUNT];
-        for (s, &m) in metric.iter().enumerate() {
-            if m.is_infinite() {
-                continue;
-            }
-            for input in [false, true] {
-                let (g0, g1, next) = step(index_to_state(s), input);
-                let candidate = m + cost(k, g0, g1);
-                let next_idx = state_to_index(next);
-                if candidate < next_metric[next_idx] {
-                    next_metric[next_idx] = candidate;
-                    step_back[next_idx] = Some((s, input));
-                }
-            }
-        }
-        metric = next_metric;
-        back.push(step_back);
-    }
-
-    // The all-zero-input path from state 0 always reaches state 0 again,
-    // at whatever cost the received readings give it, so this is never
-    // actually unreached - checked rather than assumed, since an
-    // `.unwrap()` here would be a claim about the trellis this function
-    // does not otherwise need to prove to itself.
-    let end = if terminated {
-        0
-    } else {
-        (0..STATE_COUNT).min_by(|&a, &b| metric[a].total_cmp(&metric[b]))?
-    };
-    if metric[end].is_infinite() {
-        return None;
-    }
-
-    let mut bits = vec![false; steps];
-    let mut state = end;
-    for k in (0..steps).rev() {
-        let (prev, input) = back[k][state]?;
-        bits[k] = input;
-        state = prev;
-    }
-    Some(bits)
+    CODE.decode(len / 2, terminated, cost)
 }
 
 /// The S=8 coding scheme's own expansion of one coded bit into four
@@ -474,10 +378,10 @@ fn read_block(
         Decisions::Hard => {
             let len = soft.len();
             let hard: Vec<bool> = soft.iter().map(|&v| v > 0.0).collect();
-            viterbi(len, terminated, |k, g0, g1| hamming(&hard, k, g0, g1))?
+            viterbi(len, terminated, |k, a, b| hamming(&hard, k, a, b))?
         }
-        Decisions::Soft => viterbi(soft.len(), terminated, |k, g0, g1| {
-            correlation(&soft, k, g0, g1)
+        Decisions::Soft => viterbi(soft.len(), terminated, |k, a, b| {
+            correlation(&soft, k, a, b)
         })?,
     };
     let again = map(&encode(&bits), coding);

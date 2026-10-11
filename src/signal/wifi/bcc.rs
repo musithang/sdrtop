@@ -4,25 +4,16 @@
 //! The binary convolutional code, and the puncturing that raises its rate.
 
 use super::signal_field::Coding;
+use crate::signal::dsp::code::conv::Code;
 
-/// The generators, g0 = 133 and g1 = 171 octal (17.3.5.6, Figure 17-8),
-/// constraint length 7. Read most significant bit first, each is a tap on
-/// the current input and then on the six bits before it.
-const G0: u8 = 0o133;
-const G1: u8 = 0o171;
+/// The code: constraint length 7, generators g0 = 133 and g1 = 171 octal,
+/// A before B (17.3.5.6, Figure 17-8), in `dsp::code::conv`'s convention,
+/// which is the one this clause writes them in.
+pub const CODE: Code = Code::new(7, 0o133, 0o171);
 
-/// Rate 1/2: for each input bit, output A (from g0) then B (from g1),
-/// starting from the zero state (17.3.5.6).
+/// Rate 1/2 from the zero state (17.3.5.6).
 pub fn encode(bits: &[bool]) -> Vec<bool> {
-    // The window: the current bit in bit 6, the six before it below.
-    let mut window: u8 = 0;
-    let mut out = Vec::with_capacity(bits.len() * 2);
-    for &b in bits {
-        window = (window >> 1) | ((b as u8) << 6);
-        out.push((window & G0).count_ones() % 2 == 1);
-        out.push((window & G1).count_ones() % 2 == 1);
-    }
-    out
+    CODE.encode(bits)
 }
 
 /// Puncture rate-1/2 output to `coding` (Figure 17-9): for 3/4, of every
