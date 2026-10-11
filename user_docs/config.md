@@ -228,7 +228,7 @@ real-time monitoring. Once you spot one, `Enter` tunes to it.
 ## Custom layout presets
 
 A *preset* is a named arrangement of panels: which ones are on screen and where.
-sdrtop ships with twenty-one, and you can write your own, either as a
+sdrtop ships with twenty-five, and you can write your own, either as a
 `[presets.my_view]` block here or as a file of its own.
 
 That has its own page: **[Layout presets](presets.md)**.

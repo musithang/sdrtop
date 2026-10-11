@@ -218,7 +218,7 @@ That last command is the whole diagnostic. If your radio isn't in that list, the
 
 ## Keys
 
-Layouts are grouped into sections and **each section has its own numbers**: `Command Rail` for the general views, `Lab` for the benches, `Sweep` for the band scan, `Micro` for the field views, and on a radio that reaches 2.4 GHz, `NET` for the band, `LE` for Bluetooth Low Energy, `Classic` for classic Bluetooth and `LE Coded` for BLE's long range. So `2` is the RF bench inside Lab and the spectrum inside Command Rail. `Esc` opens the menu, which shows you the sections, the layouts in the one you're on, and the number that opens each. Nine keys per section, rather than one long row to memorise.
+Layouts are grouped into sections and **each section has its own numbers**: `Command Rail` for the general views, `Lab` for the benches, `Sweep` for the band scan, `Micro` for the field views, and on a radio that reaches 2.4 GHz, a `Bluetooth` heading over `Band`, `LE` (Bluetooth Low Energy), `Classic` (classic Bluetooth) and `LE Coded` (BLE's long range), with `Wi-Fi` beside it, empty while its bench is built. So `2` is the RF bench inside Lab and the spectrum inside Command Rail. `Esc` opens the menu, which shows you the sections, the layouts in the one you're on, and the number that opens each. Nine keys per section, rather than one long row to memorise.
 
 The ones that get you everywhere:
 

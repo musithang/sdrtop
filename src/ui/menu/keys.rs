@@ -193,25 +193,25 @@ pub const GLOBAL: &[(&str, &[Binding])] = &[
             f(
                 "M",
                 Some('m'),
-                "NET, LE, Classic and LE Coded: survey the band, or lock where you are",
+                "under Bluetooth: survey the band, or lock where you are",
                 Footer::Section(&crate::signal::net::SECTIONS, "mode"),
             ),
             f(
                 "I",
                 Some('i'),
-                "in NET, LE, Classic and LE Coded: addresses in full, by vendor and kind, or masked",
+                "under Bluetooth: addresses in full, by vendor and kind, or masked",
                 Footer::Section(&crate::signal::net::SECTIONS, "addresses"),
             ),
             f(
                 "\u{2190} \u{2192}",
                 None,
-                "in NET, LE, Classic and LE Coded, locked: the next advertising channel, or the next block of the band",
+                "under Bluetooth, locked: the next advertising channel, or the next block of the band",
                 Footer::Section(&crate::signal::net::SECTIONS, "channel"),
             ),
             f(
                 "O",
                 Some('o'),
-                "in NET, LE, Classic and LE Coded: write the band, the census, the BLE packets, their error curve and the classic hits to files",
+                "under Bluetooth: write the band, the census, the BLE packets, their error curve and the classic hits to files",
                 Footer::Section(&crate::signal::net::SECTIONS, "Export"),
             ),
             f(

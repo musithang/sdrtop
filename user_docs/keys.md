@@ -78,7 +78,7 @@ each layout, and the footer shows the numbers for the section you are in.
 | `a` | Toggle the front end boost: RF amplifier (HackRF) / tuner AGC (RTL-SDR). Absent on a device that reports neither |
 | `w` | Pause or resume the waterfall |
 | `h` | Freeze the spectrum (hold the current frame behind the live one) |
-| a letter | Focus the panel whose title highlights it. `e` `l` `c` `i` `d` `t` `v` `x` `m` `n` `g` `b`, and in NET, LE, Classic and LE Coded `k` `j` `z` `u` `e` `v` `b` `c`, all listed [below](#focus-modes) |
+| a letter | Focus the panel whose title highlights it. `e` `l` `c` `i` `d` `t` `v` `x` `m` `n` `g` `b`, and under Bluetooth `k` `j` `z` `u` `e` `v` `b` `c`, all listed [below](#focus-modes) |
 | `y` | On a standard station (WWV at 2.5, 5, 10, 15 or 20 MHz): measure our own oscillator's error and take it out of every offset in the app. See [what an offset is worth](net-trust.md#what-an-offset-is-worth) |
 | `1` to `9` | The nth layout **of the section you are in** |
 | `p` | Next layout in the same section, wrapping at the end |
@@ -90,11 +90,11 @@ each layout, and the footer shows the numbers for the section you are in.
 `q` **saves**. Quitting is how your frequency, gains, markers and sweep band
 persist to the [config file](config.md); `Ctrl+C` exits without saving anything.
 
-**In NET, LE and Classic** three letters and the side arrows mean something
-of their own, and do nothing outside them, so they never get in the way of the same
+**Under Bluetooth** (Band, LE, Classic and LE Coded) three letters and the
+side arrows mean something of their own, and do nothing outside them, so they never get in the way of the same
 key elsewhere:
 
-| Key | In NET, LE and Classic |
+| Key | Under Bluetooth |
 |-----|--------|
 | `m` | Survey the band, or lock where you are ([survey or lock](net-reading.md#survey-or-lock-m)) |
 | `i` | Show addresses in full, by vendor and kind, or masked ([addresses](net-reading.md#addresses-i)) |
@@ -367,9 +367,9 @@ each panel's numbers mean is on [the NET page](net.md).
 
 | Key | Panel | Where it lives | What it adds |
 |-----|-------|----------------|--------------|
-| `k` | Band Capability | `NET 1` | `K` time the tuning call |
-| `j` | Band Occupancy | `NET 2` | `←→` move the cursor 1 MHz · `B` cursor to the busiest cell · `L` lock the receiver here |
-| `z` | Coexistence | `NET 2` | `↓` back in time: the profile shows that moment · `↑` forward in time · `N` back to now |
+| `k` | Band Capability | `Band 1` | `K` time the tuning call |
+| `j` | Band Occupancy | `Band 2` | `←→` move the cursor 1 MHz · `B` cursor to the busiest cell · `L` lock the receiver here |
+| `z` | Coexistence | `Band 2` | `↓` back in time: the profile shows that moment · `↑` forward in time · `N` back to now |
 | `u` | Band Census | `LE 1` | `↑↓` select · `S` sort by the next column · `R` reverse · `T` trust as frequency reference, or let it go |
 | `e` | Connection | `LE 3` | `↑↓` scroll the events · `End` back to the newest · `← →` the previous or next connection |
 | `v` | BLE Advertising | `LE 2` | `↑↓` select a packet · `Enter` only this address, or all again; on a CONNECT_IND, its connection · `t` only CONNECT, SCAN or ADV, or every kind · `H` hold the list, or let it run |

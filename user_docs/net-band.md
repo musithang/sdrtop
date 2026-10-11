@@ -1,4 +1,4 @@
-# The band · `NET 1` and `NET 2`
+# The band · `Band 1` and `Band 2`
 
 ← [The NET section](net.md)
 
@@ -7,7 +7,7 @@ job at all, and what is actually going on in the 83 MHz between 2400 and
 2483? The first is answered before a single sample arrives; the second
 takes a while, and a little patience.
 
-## Capability · `NET 1`
+## Capability · `Band 1`
 
 What the radio in your hands can do in this band. The verdict at the top
 (`5 OF 8 MODES`, `OUT OF BAND`) is composed only from the facts drawn below
@@ -44,7 +44,7 @@ the call does not include the synthesiser settling or the samples already
 in flight. The panel says which of the two it is, and never "fast enough",
 because optimism is not a measurement.
 
-## Survey · `NET 2`
+## Survey · `Band 2`
 
 What is in the band, measured one megahertz at a time. The band is measured
 only while this view is open: the other views do not show it, and on the

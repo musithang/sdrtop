@@ -21,23 +21,27 @@ hidden and the log says why in one line.
 
 ## The views
 
-NET lives in four sections of the menu, which come and go together because
-one radio requirement admits all four. The number is the key to press while
-that section is active:
+In the menu, NET is the **Bluetooth** item: a heading over four groups, the
+band first, each with its own numbers. The number is the key to press while
+that group is active, so `Classic 2` is Classic's second view. **Wi-Fi**
+sits beside it, empty for now: the Wi-Fi bench is being built. Both come and
+go together, because one radio requirement admits them.
 
 ```
-NET        1 Capability    2 Survey
-LE         1 Census        2 Advertising    3 Connection
-Classic    1 Piconets      2 Packets        3 Bench
-LE Coded   1 Long range
+Bluetooth
+  Band       1 Capability    2 Survey
+  LE         1 Census        2 Advertising    3 Connection
+  Classic    1 Piconets      2 Packets        3 Bench
+  LE Coded   1 Long range
+Wi-Fi        (being built)
 ```
 
 Nine views, one question each:
 
 | Key | View | The question it answers |
 |-----|------|--------------------------|
-| `NET 1` | **[Capability](net-band.md#capability--net-1)** | What can this radio reach and receive here? |
-| `NET 2` | **[Survey](net-band.md#survey--net-2)** | What is in this band, and who is spending the airtime? |
+| `Band 1` | **[Capability](net-band.md#capability--band-1)** | What can this radio reach and receive here? |
+| `Band 2` | **[Survey](net-band.md#survey--band-2)** | What is in this band, and who is spending the airtime? |
 | `LE 1` | **[Census](net-le.md#census--le-1-focus-u)** | Who is here? |
 | `LE 2` | **[Advertising](net-le.md#advertising--le-2)** | What is this device advertising, and is its transmitter any good? |
 | `LE 3` | **[Connection](net-le-connection.md)** | What are two connected devices saying to each other, event by event? |
@@ -67,9 +71,9 @@ Three pages hold for every view, and are worth a read first:
 
 If you have never opened NET before, this order wastes the least time:
 
-1. **`NET 1`**, to see whether the radio can do this at all. If it says
+1. **`Band 1`**, to see whether the radio can do this at all. If it says
    `OUT OF BAND`, the rest of this page is reading for pleasure.
-2. **`NET 2`**, and let the survey run for a minute: the room's Wi-Fi, its
+2. **`Band 2`**, and let the survey run for a minute: the room's Wi-Fi, its
    Bluetooth, and whatever else shares 2.4 GHz with them.
 3. **`LE 1`**, for who is advertising. Expect phones, watches, and a few
    things you forgot were wireless.
@@ -89,10 +93,10 @@ shape. A preset of your own that names them needs updating:
 
 The built-in views moved too: Census and the BLE view (now Advertising)
 went from `section = "net"` to `"le"`, and the three classic views to
-`"classic"`. A preset of yours still filed under `"net"` keeps working and
-stays in NET; move it with `section` and `slot` if you want it beside its
-kind. All of these sections are hidden together on a radio that cannot
-reach the band.
+`"classic"`. A preset of yours still filed under `"net"` keeps working: that
+is the band's id, which the menu now titles **Band**, under Bluetooth. Move
+it with `section` and `slot` if you want it beside its kind. All of these
+sections are hidden together on a radio that cannot reach the band.
 
 How presets are written is in [Layout presets](presets.md).
 

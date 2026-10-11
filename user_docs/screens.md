@@ -39,20 +39,24 @@ marked with a bar at its left edge.
 | **Lab** | The four measurement benches |
 | **Sweep** | The band sweep, full size and compact |
 | **Micro** | The four field views for a small screen |
-| **NET** | The 2.4 GHz band itself: what the radio can reach, and what is on the air |
-| **LE** | Bluetooth Low Energy: who is here, what they advertise, and one connection followed |
-| **Classic** | Classic Bluetooth: the piconets, one piconet's packets, and each end of it on a bench |
-| **LE Coded** | BLE's long-range PHY: who advertises on it, and where each advertisement pointed |
+| **Bluetooth** | A heading, not a section: the four groups below sit under it, indented |
+| &nbsp;&nbsp;**Band** | The 2.4 GHz band itself: what the radio can reach, and what is on the air |
+| &nbsp;&nbsp;**LE** | Bluetooth Low Energy: who is here, what they advertise, and one connection followed |
+| &nbsp;&nbsp;**Classic** | Classic Bluetooth: the piconets, one piconet's packets, and each end of it on a bench |
+| &nbsp;&nbsp;**LE Coded** | BLE's long-range PHY: who advertises on it, and where each advertisement pointed |
+| **Wi-Fi** | Nothing yet: the Wi-Fi bench is being built, and the menu says so |
 
-The last four are one feature, shown only on a radio that reaches the band;
-[the NET page](net.md) is about all of them.
+Bluetooth and Wi-Fi are shown only on a radio that reaches the band; [the NET
+page](net.md) is about everything under Bluetooth. The cursor steps over the
+Bluetooth heading, straight from Micro to Band, and each group keeps its own
+numbers.
 
 Each layout shows its **number** beside its name, and that number is the key that
 opens it while you are in that section. The number is the same one the footer
 shows you on the deck, because both read the same table. There is no second copy
 to go stale.
 
-Every view in NET, LE and Classic has a third line: what that screen would tell you now, built by
+Every view under Bluetooth has a third line: what that screen would tell you now, built by
 the view's own rules. `●` means the receiver feeding it is running; `○` means it
 is not, and the line gives the session's figures as the session's.
 
@@ -319,13 +323,13 @@ plus one measurement panel that has no home preset of its own.
 | `iq_histogram` | IQ amplitude distribution across 32 bins with a Low/Mid/Clip breakdown and PAPR |
 | `signal_strip` | The eight-reading bar described above |
 | `log` | The scrollable message log, with a severity lamp in the gutter |
-| `footer` | Key hints, one set per section: the radio keys (with the gain stages your radio actually reports), the section's own keys (in NET, survey or lock and the address mode with their current state, export and the reference), the section's layouts with the current one marked, and the way out. Focus letters are not repeated here: every panel names its own in its title. While a panel is focused, its keys instead. `Tab` hides it |
+| `footer` | Key hints, one set per section: the radio keys (with the gain stages your radio actually reports), the section's own keys (under Bluetooth, survey or lock and the address mode with their current state, export and the reference), the section's layouts with the current one marked, and the way out. Focus letters are not repeated here: every panel names its own in its title. While a panel is focused, its keys instead. `Tab` hides it |
 
 ---
 
 ## Layouts
 
-The twenty built-in layouts, by section. The key is the number to press while
+The twenty-four built-in layouts, by section. The key is the number to press while
 that section is active, which is what the menu shows beside each name.
 
 The menu labels them with a short title rather than the preset name, so
@@ -368,18 +372,39 @@ screen.
 | `3` | `micro_gain` | Gain |
 | `4` | `micro_health` | Health |
 
-**NET**
+**Bluetooth › Band**
 
 | Key | Preset | What's in it |
 |-----|--------|--------------|
 | `1` | `net` | Band capability: what this radio can reach and receive |
 | `2` | `net_survey` | Occupancy over the coexistence heatmap, bonded · decode health |
-| `3` | `net_census` | The census of transmitters, their clocks and the selected one's detail |
-| `4` | `net_ble` | BLE advertising packets · packet detail |
-| `5` | `net_bt` | Classic Bluetooth hops (where and when) · the piconet roster |
+
+**Bluetooth › LE**
+
+| Key | Preset | What's in it |
+|-----|--------|--------------|
+| `1` | `net_census` | The census of transmitters, their clocks and the selected one's detail |
+| `2` | `net_ble` | BLE advertising packets · packet detail |
+| `3` | `net_connection` | One BLE connection, event by event |
+
+**Bluetooth › Classic**
+
+| Key | Preset | What's in it |
+|-----|--------|--------------|
+| `1` | `net_bt` | Classic Bluetooth hops (where and when) · the piconet roster |
+| `2` | `net_piconet` | One piconet's packets |
+| `3` | `net_bench` | Each end of one piconet, side by side |
+
+**Bluetooth › LE Coded**
+
+| Key | Preset | What's in it |
+|-----|--------|--------------|
+| `1` | `net_coded` | LE Coded advertising packets · packet detail |
+
+**Wi-Fi** has no layouts yet.
 
 `p` steps to the next layout in whichever section you are in, and wraps at the
-end. A twenty-first preset, `observer`, is marked hidden, so it has no section and no
+end. A twenty-fifth preset, `observer`, is marked hidden, so it has no section and no
 key: sdrtop loads it by itself when [another app owns the
 radio](#observer-mode).
 

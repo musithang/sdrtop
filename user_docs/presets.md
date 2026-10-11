@@ -3,8 +3,8 @@
 ← [Back](README.md)
 
 A *preset* is a named arrangement of panels: which ones are on screen, where they
-sit, and how much room each gets. sdrtop ships with twenty-one, grouped into the
-five sections of the [menu](screens.md#the-menu), and you can write your own.
+sit, and how much room each gets. sdrtop ships with twenty-five, grouped into the
+sections of the [menu](screens.md#the-menu), and you can write your own.
 
 There are two places to put one, and they behave identically:
 
@@ -57,7 +57,7 @@ panels  = [ ... ]   # exactly as above
 
 | Field | What it does |
 |-------|--------------|
-| `section` | Which family it belongs to: `command_rail`, `lab`, `sweep`, `micro`, `net`, `le`, `classic`, or a name of your own, which becomes a new section. `hidden` keeps it out of the menu entirely |
+| `section` | Which family it belongs to: `command_rail`, `lab`, `sweep`, `micro`, `net` (titled **Band**), `le`, `classic`, `coded` (the last four drawn under the **Bluetooth** heading), or a name of your own, which becomes a new section. `hidden` keeps it out of the menu entirely |
 | `slot` | The number key, `1` to `9`, **within that section**. Leave it out and the layout is still listed, just without a shortcut |
 | `title` | What the menu calls it. Defaults to the preset name |
 | `blurb` | The half-line under the title. Optional, and worth writing: it is what tells you which of two similar layouts you want |
@@ -65,8 +65,8 @@ panels  = [ ... ]   # exactly as above
 A few things follow from how these are read:
 
 - **Numbers are per section**, so `slot = 5` in `lab` does not collide with
-  `slot = 5` in `micro`. That is the whole point of the sections: nine keys, five
-  times over, instead of one exhausted row.
+  `slot = 5` in `micro`. That is the whole point of the sections: nine keys per
+  section, instead of one exhausted row.
 - **Two presets wanting the same slot is not fatal.** The one whose *preset name*
   sorts first keeps the key, the other stays in the list without one, and the
   reason is written to the log so you can see it happened. Losing a shortcut is a
@@ -97,7 +97,7 @@ nothing to rebuild; open the menu and it is there. The file is just the
 `panels = [...]` part, without the `[presets.name]` header, because the file name
 is the preset name.
 
-The twenty-one built-in presets are written in exactly this format, so the quickest
+The twenty-five built-in presets are written in exactly this format, so the quickest
 way to build on one is to copy it rather than transcribe it from the docs. They
 live in the source tree under `src/config/presets/`.
 
