@@ -21,6 +21,8 @@ pub mod reference;
 pub mod retune;
 mod stats;
 pub mod stream;
+#[cfg(test)]
+pub mod wifi;
 
 pub use demod::DemodWorker;
 pub use fft::FftWorker;
