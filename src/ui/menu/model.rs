@@ -35,7 +35,7 @@ pub const BLUETOOTH: &str = "Bluetooth";
 pub const WIFI: &str = "wifi";
 
 /// What Wi-Fi's empty section says, rather than showing an empty list.
-pub const WIFI_NOTE: &str = "The Wi-Fi bench is being built: no views yet.";
+pub const WIFI_NOTE: &str = "The Wi-Fi bench is being built.";
 
 /// Display order, titles and the heading each is drawn under, for the
 /// sections the built-ins use.

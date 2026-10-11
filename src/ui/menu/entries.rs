@@ -42,6 +42,23 @@ pub fn render(
     if area.width == 0 || area.height == 0 {
         return;
     }
+    // A section with nothing in it yet says what it is waiting for, in place
+    // of an empty list.
+    if section.entries.is_empty() {
+        let note = section.note.unwrap_or("No views in this section.");
+        let lines: Vec<Line> =
+            crate::ui::chrome::wrap(note, (area.width as usize).saturating_sub(2), 3)
+                .into_iter()
+                .map(|chunk| {
+                    Line::from(Span::styled(
+                        format!("  {chunk}"),
+                        Style::default().fg(theme.label),
+                    ))
+                })
+                .collect();
+        f.render_widget(Paragraph::new(lines), area);
+        return;
+    }
     let now = std::time::Instant::now();
     let lives: Vec<Option<Live>> = section
         .entries

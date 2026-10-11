@@ -168,11 +168,20 @@ fn right_pane(
                     }
                 }
                 let keys: String = letters.iter().map(|k| format!(" {k}")).collect();
-                let mut hint = format!("{n} view{}", if n == 1 { "" } else { "s" });
+                let mut hint = match n {
+                    0 => "no views yet".to_string(),
+                    n => format!("{n} view{}", if n == 1 { "" } else { "s" }),
+                };
                 if !keys.is_empty() {
                     hint.push_str(&format!(" \u{00b7} focus keys{keys}"));
                 }
-                let mut line = chrome::section(&s.title, &hint, heading.width as usize, theme);
+                // A group says which heading it sits under, so the folded
+                // form, with the list off screen, still says where it is.
+                let title = match s.parent {
+                    Some(parent) => format!("{parent} \u{203a} {}", s.title),
+                    None => s.title.clone(),
+                };
+                let mut line = chrome::section(&title, &hint, heading.width as usize, theme);
                 // The section's name in the section's colour.
                 if let Some(name) = line.spans.get_mut(1) {
                     name.style = name.style.fg(accent);
@@ -339,6 +348,58 @@ mod tests {
             pane: MenuPane::Views,
             scroll: 0,
         }
+    }
+
+    /// The index of a section in the built-in menu, by id, so the tests do
+    /// not hard-code a position a new section would shift.
+    fn index_of(id: &str) -> usize {
+        model::build(&LayoutConfig::default_config().presets)
+            .sections
+            .iter()
+            .position(|s| s.id == id)
+            .unwrap_or_else(|| panic!("no section {id}"))
+    }
+
+    /// Bluetooth is a heading over its four groups: drawn between Micro and
+    /// Band, never the selected row, its groups indented under it.
+    #[test]
+    fn bluetooth_is_a_heading_over_its_groups() {
+        let out = draw(100, 30, &at(index_of("net"), 0));
+        let joined = out.join("\n");
+        let row = |label: &str| {
+            out.iter()
+                .position(|l| l.contains(label))
+                .unwrap_or_else(|| panic!("{label} missing:\n{joined}"))
+        };
+        let (micro, bluetooth, band) = (row("Micro"), row("Bluetooth"), row("Band"));
+        assert!(micro < bluetooth && bluetooth < band, "{joined}");
+        assert!(
+            !out[bluetooth].contains('\u{258c}'),
+            "a heading is never selected:\n{joined}"
+        );
+        assert!(out[band].contains('\u{258c}'), "Band is:\n{joined}");
+        let col = |line: &str, label: &str| line.find(label).unwrap();
+        assert!(
+            col(&out[band], "Band") > col(&out[micro], "Micro"),
+            "the groups are indented:\n{joined}"
+        );
+    }
+
+    /// Wi-Fi, selected, says it is being built rather than showing an empty
+    /// list.
+    #[test]
+    fn wifi_says_it_is_being_built() {
+        let joined = draw(100, 30, &at(index_of("wifi"), 0)).join("\n");
+        assert!(joined.contains(model::WIFI_NOTE), "{joined}");
+    }
+
+    /// Folded to one column, the heading names the Bluetooth item too: the
+    /// list that would say where Band sits is off screen.
+    #[test]
+    fn folded_a_group_names_its_heading() {
+        let joined = draw(44, 16, &at(index_of("net"), 0)).join("\n");
+        assert!(joined.contains("BLUETOOTH"), "{joined}");
+        assert!(joined.contains("BAND"), "{joined}");
     }
 
     #[test]

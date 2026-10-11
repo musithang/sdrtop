@@ -8,6 +8,11 @@
 //! panes: they group nothing and hold no layouts, so listing them among the
 //! sections would say they were sections.
 //!
+//! A section with a parent is drawn indented under a **heading** row naming
+//! it (`Bluetooth`), before the first of its group. The heading is drawn, not
+//! counted: it is not a section, so the cursor never stops on it, and every
+//! index below is over sections and panes alone.
+//!
 //! Draws only. Which row is selected is decided by the caller.
 
 use ratatui::{
@@ -66,12 +71,18 @@ pub fn render(f: &mut Frame, area: Rect, menu: &Menu, selected: usize, theme: &c
         return;
     }
 
-    let mut lines: Vec<Line> = Vec::with_capacity(row_count(menu) + 1);
+    let mut lines: Vec<Line> = Vec::with_capacity(row_count(menu) + 2);
+    let mut heading: Option<&str> = None;
     for (i, section) in menu.sections.iter().enumerate() {
+        if section.parent.is_some() && section.parent != heading {
+            lines.push(heading_row(section.parent.unwrap_or_default(), theme));
+        }
+        heading = section.parent;
         lines.push(row(
             &section.title,
             Some(accent(i, theme)),
             i == selected,
+            section.parent.is_some(),
             theme,
         ));
     }
@@ -81,20 +92,42 @@ pub fn render(f: &mut Frame, area: Rect, menu: &Menu, selected: usize, theme: &c
         Style::default().fg(theme.border_dim),
     )));
     for (i, (_, label)) in PANES.iter().enumerate() {
-        lines.push(row(label, None, menu.sections.len() + i == selected, theme));
+        lines.push(row(
+            label,
+            None,
+            menu.sections.len() + i == selected,
+            false,
+            theme,
+        ));
     }
 
     lines.truncate(inner.height as usize);
     f.render_widget(Paragraph::new(lines), inner);
 }
 
+/// A heading over a group of sections: no gutter mark and no chip, since it
+/// is never selected and holds no layouts of its own.
+fn heading_row(label: &str, theme: &crate::Theme) -> Line<'static> {
+    Line::from(vec![
+        crate::ui::chrome::selection_gutter(false, theme),
+        Span::raw("  "),
+        Span::styled(
+            label.to_string(),
+            Style::default()
+                .fg(theme.label)
+                .add_modifier(Modifier::BOLD),
+        ),
+    ])
+}
+
 /// A row: the selection bar every selectable list in the app uses
-/// (`chrome::selection_gutter`, 7.4), a section's colour chip or a pane's
-/// blank, and the label.
+/// (`chrome::selection_gutter`), a section's colour chip or a pane's blank,
+/// and the label; indented when it sits under a heading.
 fn row(
     label: &str,
     chip: Option<ratatui::style::Color>,
     chosen: bool,
+    indented: bool,
     theme: &crate::Theme,
 ) -> Line<'static> {
     let style = if chosen {
@@ -106,6 +139,7 @@ fn row(
     };
     Line::from(vec![
         crate::ui::chrome::selection_gutter(chosen, theme),
+        Span::raw(if indented { "  " } else { "" }),
         match chip {
             Some(c) => Span::styled("\u{25cf} ", Style::default().fg(c)),
             None => Span::raw("  "),
