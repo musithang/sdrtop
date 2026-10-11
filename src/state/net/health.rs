@@ -73,6 +73,22 @@ pub struct NetDecodeHealth {
     /// Classic access-code hits since the section opened, every one, where
     /// `bt_hops` keeps only the latest few hundred.
     pub bt_hits: u64,
+    /// Wi-Fi's funnel, counted once its receiver runs.
+    pub wifi: WifiFunnel,
+}
+
+/// What Wi-Fi's receiver made of the preambles it met. Every short training
+/// field it found ends in one of these, so across any break in the stream
+/// they add up to what it found.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct WifiFunnel {
+    /// Short-training-like repeats found whole, pending what they are: a
+    /// frame of this channel, one next door, or another signal with the
+    /// same period.
+    pub detected: u64,
+    /// Ones a break in the stream or a retune cut short, the survey's hops
+    /// among them.
+    pub cut: u64,
 }
 
 /// Every AuxPtr's promise, by how it ended, since the section opened.

@@ -58,7 +58,7 @@ fn lines(state: &SdrMetrics, theme: &crate::Theme) -> Vec<Line<'static>> {
     out.push(Line::from(vec![
         label("Receiver"),
         Span::styled(
-            "not built yet: nothing here is decoded or measured.",
+            "finds short-training-like repeats (feed health); nothing is decoded yet.",
             Style::default().fg(theme.label),
         ),
     ]));
@@ -127,7 +127,8 @@ mod tests {
         assert!(out.contains("channel 6"), "{out}");
         assert!(out.contains("2437.000 MHz"), "{out}");
         assert!(out.contains("20.000 Msps"), "{out}");
-        assert!(out.contains("not built yet"), "{out}");
+        assert!(out.contains("short-training-like repeats"), "{out}");
+        assert!(out.contains("nothing is decoded"), "{out}");
     }
 
     /// At another rate it says so in the rate rule's own words.

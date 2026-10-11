@@ -238,6 +238,9 @@ impl NetWorker {
             if arrival.retuned {
                 le.retuned(&self.state);
             }
+            if !arrival.continuous || arrival.retuned {
+                wifi.interrupted(&self.state);
+            }
 
             let (view, span_hz) = {
                 let mut m = self.state.lock().unwrap_or_else(|e| e.into_inner());
@@ -260,12 +263,16 @@ impl NetWorker {
             let classic_here = view.open && (view.classic || view.survey);
             let follow_here = view.open && view.following;
             let survey_here = view.open && view.survey;
+            let wifi_here = wifi.running();
             let mut iq: Option<Vec<num_complex::Complex<f32>>> = None;
-            if feeds.any() || classic_here || follow_here || survey_here {
+            if feeds.any() || classic_here || follow_here || survey_here || wifi_here {
                 decoded_block(&mut iq, &bytes, self.geometry);
             }
             if let Some(block) = iq.as_mut() {
                 feed.take_off_dc(block, first_pair, rate_hz);
+            }
+            if let Some(block) = iq.as_deref().filter(|_| wifi_here) {
+                wifi.look(first_pair, block, &self.state);
             }
             if survey_here {
                 band.measure(iq.as_deref(), tuning, now, &self.state);
@@ -1130,6 +1137,28 @@ mod tests {
         );
     }
 
+    /// Replays a recording (`SDRTOP_REPLAY=path.sigmf-data`, ci8 at 20 Msps on
+    /// a Wi-Fi channel centre) through the worker on the Wi-Fi view, locked,
+    /// and prints Wi-Fi's funnel and how often it found a preamble. By hand,
+    /// in release.
+    #[test]
+    #[ignore]
+    fn replay_a_wifi_recording() {
+        let Ok(path) = std::env::var("SDRTOP_REPLAY") else {
+            return;
+        };
+        let (m, blocks) = replay(&path, "wifi_channel", "wifi_survey");
+        let secs = blocks as f64 * 131_072.0 / 20e6;
+        let f = m.net.health.wifi;
+        eprintln!(
+            "{secs:.1} s · channel {:?} · preambles {} ({:.1}/s) · cut {}",
+            m.net.wifi.channel,
+            f.detected,
+            f.detected as f64 / secs,
+            f.cut
+        );
+    }
+
     /// Replays a recording (`SDRTOP_REPLAY=path.sigmf-data`, ci8 at 20 Msps
     /// tuned to 2426 MHz) of a phone advertising on LE Coded through the
     /// worker on the LE Coded view, locked on channel 38, and prints what it
@@ -1550,6 +1579,102 @@ mod tests {
     fn nothing_wifi_runs_off_the_wifi_views() {
         let m = run_noise("le", "net_ble", 2_437_000_000, 20e6);
         assert_eq!(m.net.wifi, Default::default());
+    }
+
+    /// The annex's frame at `start` pairs into a block of 4096 eight-bit
+    /// pairs of noise, the frame 20 dB over it, cut off at the block's end.
+    fn frame_block(start: usize, seed: u64) -> Vec<u8> {
+        use crate::signal::wifi::{annex::MESSAGE, ppdu::ppdu, signal_field::Rate};
+        let f = ppdu(&MESSAGE, Rate::R36, 54);
+        let power = f[..320].iter().map(|z| z.norm_sqr()).sum::<f64>() / 320.0;
+        let scale = 0.2 / power.sqrt();
+        let noise = crate::signal::dsp::testkit::Rng::new(seed).noise(4096, 0.0004);
+        (0..4096usize)
+            .flat_map(|n| {
+                let s = n
+                    .checked_sub(start)
+                    .and_then(|i| f.get(i))
+                    .map_or(num_complex::Complex::new(0.0, 0.0), |z| z * scale);
+                let re = s.re as f32 + noise[n].re;
+                let im = s.im as f32 + noise[n].im;
+                let q = |v: f32| (v * 128.0).clamp(-127.0, 127.0) as i8 as u8;
+                [q(re), q(im)]
+            })
+            .collect()
+    }
+
+    /// Blocks through a worker on the Wi-Fi view on channel 6 at 20 Msps,
+    /// each `(seq, bytes)`: a jump in `seq` is a break in the stream.
+    fn run_wifi(section: &str, preset: &str, blocks: &[(u64, Vec<u8>)]) -> SdrMetrics {
+        let mut m = SdrMetrics::fixture().streaming();
+        m.ui.section = section.to_string();
+        m.ui.active_preset = preset.to_string();
+        m.radio.frequency = 2_437_000_000;
+        m.radio.config_sample_rate = 20e6;
+        m.radio.bb_filter_hz = 0;
+        let state = Arc::new(Mutex::new(m));
+        let (tx, rx) = crossbeam_channel::unbounded();
+        for (seq, bytes) in blocks {
+            tx.send(stamped(&state, *seq, false, bytes.clone()))
+                .unwrap();
+        }
+        drop(tx);
+        NetWorker::new(rx, Arc::clone(&state), eight_bit(), SAFE_BT_CHANNELS).run();
+        let m = state.lock().unwrap().clone();
+        m
+    }
+
+    /// A frame on the Wi-Fi view is found once, and nothing is cut.
+    #[test]
+    fn a_frame_on_the_wifi_view_is_found_once() {
+        let m = run_wifi(
+            "wifi_channel",
+            "wifi_survey",
+            &[
+                (1, noise_block(1)),
+                (2, frame_block(1000, 2)),
+                (3, noise_block(3)),
+            ],
+        );
+        assert_eq!(m.net.health.wifi.detected, 1, "{:?}", m.net.health.wifi);
+        assert_eq!(m.net.health.wifi.cut, 0);
+    }
+
+    /// **The funnel adds up across a break**: a frame the break cut in its
+    /// preamble is counted as cut, the whole one after it as found, and
+    /// nothing twice.
+    #[test]
+    fn the_wifi_funnel_adds_up_across_a_break() {
+        let m = run_wifi(
+            "wifi_channel",
+            "wifi_survey",
+            &[
+                (1, noise_block(1)),
+                // Its short training field begins 150 pairs before the end.
+                (2, frame_block(4096 - 150, 2)),
+                // Two blocks missing: the stream broke.
+                (5, noise_block(5)),
+                (6, frame_block(2000, 6)),
+                (7, noise_block(7)),
+            ],
+        );
+        assert_eq!(m.net.health.wifi.cut, 1, "{:?}", m.net.health.wifi);
+        assert_eq!(m.net.health.wifi.detected, 1, "{:?}", m.net.health.wifi);
+    }
+
+    /// Off the Wi-Fi views the same frame is not looked for.
+    #[test]
+    fn off_the_wifi_views_no_frame_is_looked_for() {
+        let m = run_wifi(
+            "le",
+            "net_ble",
+            &[
+                (1, noise_block(1)),
+                (2, frame_block(1000, 2)),
+                (3, noise_block(3)),
+            ],
+        );
+        assert_eq!(m.net.health.wifi, Default::default());
     }
 
     /// Leaving the Wi-Fi view mid-stream stands the receiver down; the

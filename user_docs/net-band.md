@@ -126,9 +126,14 @@ load is a bar against a rule at 100 %, red past it. Once the LE Coded
 receiver has run this session, its funnel and its AuxPtrs are counted here
 too; before that it is not mentioned, because this view never starts it.
 Wi-Fi's receiver is treated the same way: once it has run, a `Wi-Fi` row
-says which channel it is on, or why it is not running, and that it has no
-burst detector yet. It counts nothing, so it shows no number, not even a
-zero.
+says which channel it is on, or why it is not running. Under it, the
+`repeats` it has found and the ones a break or a retune cut short (on the
+survey, every hop is a retune). A repeat is what a frame's short training
+field looks like, and nothing more yet: a frame on the channel next door
+repeats the same way, and so do some other signals, and telling them apart
+is the long training field's job, which is still to come. The row says so:
+`pending`. In a block of flats expect a lot of them; the air is busier than
+any list of networks suggests.
 
 Every count on the other NET panels is only as complete as this panel says
 the feed was. If this one is unhappy, believe it over the others.

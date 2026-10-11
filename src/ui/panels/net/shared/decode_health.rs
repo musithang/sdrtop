@@ -334,15 +334,29 @@ fn lines(
     }
 
     // Wi-Fi, only once its receiver has run this session, as LE Coded: the
-    // views that start it are its own. It counts nothing yet, so it says
-    // where it runs and that no detector exists, never a zero.
+    // views that start it are its own. What it found is a repeat, pending
+    // the long training field's answer to whose it is.
     let w = &state.net.wifi;
     if w.ran {
         out.push(match (w.channel, &w.refused) {
-            (Some(ch), _) => row("Wi-Fi", format!("ch {ch}"), Some("no burst detector yet")),
+            (Some(ch), _) => row("Wi-Fi", format!("ch {ch}"), None),
             (None, Some(why)) => dash("Wi-Fi", why),
             (None, None) => dash("Wi-Fi", "not running on this view"),
         });
+        let f = h.wifi;
+        // A repeat, not yet a preamble: a neighbour's frame and other
+        // signals with the same period pass too, and only the long training
+        // field's sequence will say which are this channel's.
+        out.push(row(
+            "repeats",
+            grouped(f.detected),
+            Some("short-training-like, pending: no L-LTF gate yet"),
+        ));
+        out.push(row(
+            "cut short",
+            grouped(f.cut),
+            Some("by a break or a retune"),
+        ));
     }
 
     // What it cost: the same figure the header band shows, red
@@ -479,20 +493,33 @@ mod tests {
     }
 
     /// Wi-Fi is named only once its receiver has run this session; then
-    /// it says its channel and that there is no detector yet, never a
-    /// count, since nothing is counted.
+    /// it says its channel, the repeats it found, pending what they are,
+    /// and the ones a break or a retune cut short.
     #[test]
-    fn wifi_is_named_once_it_has_run_and_counts_nothing() {
+    fn wifi_is_named_once_it_has_run_with_its_repeats() {
         let before = draw(NetDecodeHealthPanel, 80, 40, &streaming()).join("\n");
         assert!(!before.contains("Wi-Fi"), "{before}");
 
         let mut m = streaming();
         m.net.wifi.ran = true;
         m.net.wifi.channel = Some(6);
+        m.net.health.wifi.detected = 1_204;
+        m.net.health.wifi.cut = 17;
         let on = draw(NetDecodeHealthPanel, 80, 40, &m).join("\n");
-        assert!(on.contains("Wi-Fi"), "{on}");
         assert!(on.contains("ch 6"), "{on}");
-        assert!(on.contains("no burst detector yet"), "{on}");
+        let found = on
+            .lines()
+            .find(|l| l.contains("repeats"))
+            .expect("found row");
+        assert!(
+            found.contains("1 204") && found.contains("pending"),
+            "{found}"
+        );
+        let cut = on
+            .lines()
+            .find(|l| l.contains("cut short"))
+            .expect("cut row");
+        assert!(cut.contains("17"), "{cut}");
     }
 
     /// Refused, the Wi-Fi row is a dash with the reason; stood down after

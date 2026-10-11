@@ -162,12 +162,9 @@ pub fn snr_from_metric(metric: f64, pairs: usize) -> Option<f64> {
 // ---------------------------------------------------------------------------
 
 /// Where a repeat was found: the run of positions whose metric is within a
-/// stated fraction of the peak.
-///
-/// No consumer yet: Wi-Fi symbol timing from the L-LTF cross-correlation
-/// would be one.
+/// stated fraction of the peak. `signal::wifi::detect` reads a short
+/// training field's run through it.
 #[derive(Clone, Copy, Debug, PartialEq)]
-#[cfg(test)]
 pub struct Plateau {
     /// First index in the run.
     pub start: usize,
@@ -194,8 +191,6 @@ pub struct Plateau {
 ///
 /// `None` for an empty input. `fraction` is the 0.9 of the paper unless the
 /// caller has a reason.
-/// No consumer yet; see [`Plateau`].
-#[cfg(test)]
 pub fn schmidl_cox_plateau(metric: &[f64], fraction: f64) -> Option<Plateau> {
     let (peak, &peak_metric) = metric
         .iter()
