@@ -115,6 +115,7 @@ pub fn spawn_net_survey_task(state: Arc<Mutex<SdrMetrics>>, device: Arc<dyn SdrD
                             locked_view = m.ui.active_preset.clone();
                             if m.net.lock_at.is_none() {
                                 m.net.lock_at = crate::signal::net::lock::entering_view(
+                                    &m.ui.section,
                                     &locked_view,
                                     m.radio.frequency,
                                 );

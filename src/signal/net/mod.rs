@@ -24,9 +24,43 @@ pub const SECTIONS: [&str; 4] = [SECTION, "le", "classic", "coded"];
 /// it only needs "a NET view".
 pub const SECTION: &str = "net";
 
-/// Whether a menu section is one of this feature's.
+/// Wi-Fi's menu sections, one per question its views answer: what the
+/// channel is doing, what the room's radio path is like, who is on the
+/// network, and how good one transmitter is. Filed apart from the Bluetooth
+/// ones, so the two benches never share a menu group, and admitted by the
+/// same band gate plus Wi-Fi's own rate (`gate::wifi_verdict`).
+///
+/// Prefixed rather than bare (`channel`), so a user preset filed under a
+/// word of its own does not land in Wi-Fi's tree by accident.
+pub const WIFI_SECTIONS: [&str; 4] = [
+    "wifi_channel",
+    "wifi_room",
+    "wifi_network",
+    "wifi_transmitter",
+];
+
+/// Every section of this feature, Bluetooth's then Wi-Fi's: for the places
+/// that need one static list of them, the footer's key rows above all. Held
+/// to the two lists it repeats by a test.
+pub const ALL_SECTIONS: [&str; 8] = [
+    SECTION,
+    "le",
+    "classic",
+    "coded",
+    "wifi_channel",
+    "wifi_room",
+    "wifi_network",
+    "wifi_transmitter",
+];
+
+/// Whether a menu section is one of Wi-Fi's.
+pub fn is_wifi(section: &str) -> bool {
+    WIFI_SECTIONS.contains(&section)
+}
+
+/// Whether a menu section is one of this feature's, Bluetooth's or Wi-Fi's.
 pub fn is_net(section: &str) -> bool {
-    SECTIONS.contains(&section)
+    SECTIONS.contains(&section) || is_wifi(section)
 }
 
 pub mod band;
@@ -42,3 +76,33 @@ pub mod scan;
 pub mod survey;
 pub mod vendor;
 pub mod worker;
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The Wi-Fi groups are NET sections, so everything gated on one (the
+    /// header, the footer's keys, the startup filter) holds under Wi-Fi; and
+    /// they are Wi-Fi's, never Bluetooth's.
+    #[test]
+    fn is_net_covers_the_wifi_sections() {
+        for s in WIFI_SECTIONS {
+            assert!(is_net(s), "{s}");
+            assert!(is_wifi(s), "{s}");
+        }
+        for s in SECTIONS {
+            assert!(is_net(s), "{s}");
+            assert!(!is_wifi(s), "{s}");
+        }
+        assert!(!is_net("lab"));
+        assert!(!is_wifi("wifi"));
+    }
+
+    /// The combined list is the two lists, Bluetooth's first, and nothing
+    /// else: a section added to either cannot be missed by it.
+    #[test]
+    fn all_sections_is_bluetooth_then_wifi() {
+        let both: Vec<&str> = SECTIONS.iter().chain(&WIFI_SECTIONS).copied().collect();
+        assert_eq!(ALL_SECTIONS.to_vec(), both);
+    }
+}

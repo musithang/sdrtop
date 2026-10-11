@@ -56,6 +56,10 @@ pub struct ThemeFile {
     pub net_ble: Option<String>,
     #[serde(default)]
     pub net_bt: Option<String>,
+    /// Wi-Fi's colour, optional for the same reason: absent, it takes the
+    /// theme's own `border_accent`.
+    #[serde(default)]
+    pub net_wifi: Option<String>,
     /// The series colours. Optional for the same reason: absent, a theme's
     /// own accents stand in, in an order that keeps neighbours apart.
     #[serde(default)]
@@ -112,6 +116,11 @@ impl ThemeFile {
                 Some(hex) => Theme::parse_hex(hex)
                     .ok_or_else(|| format!("net_bt: '{hex}' is not a #rrggbb colour"))?,
                 None => hex!(value_hi),
+            },
+            net_wifi: match &self.net_wifi {
+                Some(hex) => Theme::parse_hex(hex)
+                    .ok_or_else(|| format!("net_wifi: '{hex}' is not a #rrggbb colour"))?,
+                None => hex!(border_accent),
             },
             series: match &self.series {
                 Some(list) if !list.is_empty() => list

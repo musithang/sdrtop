@@ -123,6 +123,7 @@ pub struct ThemeConfig {
     pub observer: Option<String>,
     pub net_ble: Option<String>,
     pub net_bt: Option<String>,
+    pub net_wifi: Option<String>,
 }
 
 impl ThemeConfig {
@@ -374,6 +375,7 @@ impl AppConfig {
         apply!(observer);
         apply!(net_ble);
         apply!(net_bt);
+        apply!(net_wifi);
         t
     }
 
@@ -1346,6 +1348,15 @@ panels = [
         let cfg: AppConfig = toml::from_str(toml).unwrap();
         let t = cfg.build_theme(None);
         assert_eq!(t.border_accent, ratatui::style::Color::Rgb(255, 0, 0));
+    }
+
+    /// Wi-Fi's colour is overridden per field like every other.
+    #[test]
+    fn build_theme_override_applies_to_net_wifi() {
+        let toml = "[theme]\nbase = \"sdr\"\nnet_wifi = \"#123456\"\n";
+        let cfg: AppConfig = toml::from_str(toml).unwrap();
+        let t = cfg.build_theme(None);
+        assert_eq!(t.net_wifi, ratatui::style::Color::Rgb(0x12, 0x34, 0x56));
     }
 
     #[test]

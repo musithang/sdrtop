@@ -16,13 +16,32 @@ use crate::ui;
 
 use crate::app::{App, FocusKeys};
 
+/// What `signal::net::gate` admitted on this radio: the band (and with it
+/// Bluetooth), and Wi-Fi, which needs the band and a 20 MHz channel's rate
+/// on top. A plain `bool` means both or neither, which is what every caller
+/// but the startup path and Wi-Fi's own test wants.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct NetAdmitted {
+    pub band: bool,
+    pub wifi: bool,
+}
+
+impl From<bool> for NetAdmitted {
+    fn from(both: bool) -> Self {
+        Self {
+            band: both,
+            wifi: both,
+        }
+    }
+}
+
 impl App {
     #[cfg(test)]
     pub(crate) fn build_ui(
         active_preset: &str,
         user_presets: &HashMap<String, crate::config::PresetConfig>,
         presets_dir: Option<&std::path::Path>,
-        net_admitted: bool,
+        net_admitted: impl Into<NetAdmitted>,
     ) -> (ui::LayoutEngine, FocusKeys) {
         Self::build_ui_for(
             active_preset,
@@ -38,14 +57,18 @@ impl App {
     /// reach the 2.4 GHz band, or cannot run even the cheapest mode there, the
     /// presets in that section are dropped here and the section is **absent**
     /// from the menu rather than present and empty. Rule 2, and the same
-    /// decision the RF bench makes about its noise-figure card.
+    /// decision the RF bench makes about its noise-figure card. Wi-Fi's
+    /// sections go the same way on a radio that reaches the band but not a
+    /// 20 MHz channel's rate, and take the menu's "being built" item with
+    /// them.
     pub(super) fn build_ui_for(
         active_preset: &str,
         user_presets: &HashMap<String, crate::config::PresetConfig>,
         presets_dir: Option<&std::path::Path>,
-        net_admitted: bool,
+        net_admitted: impl Into<NetAdmitted>,
         acquisition: crate::hardware::AcquisitionKind,
     ) -> anyhow::Result<(ui::LayoutEngine, FocusKeys)> {
+        let net_admitted = net_admitted.into();
         let mut registry = ui::PanelRegistry::new();
         registry.register(ui::HeaderPanel);
         registry.register(ui::SlimHeaderPanel);
@@ -95,10 +118,17 @@ impl App {
         registry.register(ui::NetOccupancyPanel);
 
         let mut layout = LayoutConfig::with_user_presets(user_presets, presets_dir);
-        if !net_admitted {
+        if !net_admitted.band {
             layout
                 .presets
                 .retain(|_, p| !p.section.as_deref().is_some_and(crate::signal::net::is_net));
+        }
+        if !net_admitted.wifi {
+            layout.presets.retain(|_, p| {
+                !p.section
+                    .as_deref()
+                    .is_some_and(crate::signal::net::is_wifi)
+            });
         }
         let mut warnings = Self::filter_incompatible_layouts(&mut layout, &registry, acquisition)?;
         // Harvested against the presets that will actually be offered, user
@@ -154,6 +184,9 @@ impl App {
         let mut engine =
             ui::LayoutEngine::new_with_saved_preset(layout, registry, active_preset.to_string());
         engine.set_startup_warnings(warnings);
+        if !net_admitted.wifi {
+            engine.retire_menu_section(crate::ui::menu::model::WIFI);
+        }
         Ok((engine, focus_keys))
     }
 
@@ -1288,6 +1321,41 @@ mod tests {
             assert!(admitted.menu().section(section).is_some(), "{section}");
             assert!(refused.menu().section(section).is_none(), "{section}");
         }
+    }
+
+    /// A radio that reaches the band but not Wi-Fi's 20 MHz channel keeps
+    /// Bluetooth and gets no Wi-Fi at all: no group, and not the empty
+    /// "being built" item either, which would promise a bench this radio
+    /// can never run.
+    #[test]
+    fn a_radio_short_of_wifi_rate_gets_no_wifi_at_all() {
+        let census = crate::config::LayoutConfig::default_config().presets["net_census"].clone();
+        let mut user = HashMap::new();
+        let mut p = census.clone();
+        p.section = Some("wifi_channel".to_string());
+        p.slot = Some(9);
+        user.insert("my_wifi".to_string(), p);
+
+        let both = NetAdmitted {
+            band: true,
+            wifi: true,
+        };
+        let (able, _) = App::build_ui("command_rail", &user, None, both);
+        assert!(able.has_preset("my_wifi"));
+        assert!(able.menu().section("wifi_channel").is_some());
+
+        let band_only = NetAdmitted {
+            band: true,
+            wifi: false,
+        };
+        let (short, _) = App::build_ui("command_rail", &user, None, band_only);
+        assert!(!short.has_preset("my_wifi"));
+        assert!(short.menu().section("wifi_channel").is_none());
+        assert!(
+            short.menu().section(crate::ui::menu::model::WIFI).is_none(),
+            "no placeholder for a bench this radio cannot run"
+        );
+        assert!(short.menu().section("le").is_some(), "Bluetooth stays");
     }
 
     /// A config saved on a HackRF and opened on an RTL-SDR names a layout that

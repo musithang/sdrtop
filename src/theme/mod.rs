@@ -40,6 +40,10 @@ pub struct Theme {
     // to stand off every palette's gradient, so a mark never reads as a duty.
     pub net_ble: Color,
     pub net_bt: Color,
+    // Wi-Fi's own ink, wherever its views mark what they found and the
+    // header names its channel: apart from both Bluetooth marks, so the two
+    // benches never share a colour.
+    pub net_wifi: Color,
 
     // Series: one colour per thing told apart on one plot, in order (the
     // classic hop scatter's piconets). Never empty; a plot with more things
@@ -317,9 +321,16 @@ mod tests {
         for name in Theme::builtin_names() {
             let text = BUILTIN.iter().find(|(n, _)| *n == name).unwrap().1;
             let file = data::ThemeFile::parse(text).unwrap();
-            assert!(file.net_ble.is_some() && file.net_bt.is_some(), "{name}");
+            assert!(
+                file.net_ble.is_some() && file.net_bt.is_some() && file.net_wifi.is_some(),
+                "{name}"
+            );
             let t = Theme::builtin(name).unwrap();
-            for (field, c) in [("net_ble", t.net_ble), ("net_bt", t.net_bt)] {
+            for (field, c) in [
+                ("net_ble", t.net_ble),
+                ("net_bt", t.net_bt),
+                ("net_wifi", t.net_wifi),
+            ] {
                 let Color::Rgb(r, g, b) = c else {
                     panic!("{name}.{field} is not truecolor")
                 };
@@ -340,8 +351,29 @@ mod tests {
         }
     }
 
+    /// **Wi-Fi never reads as Bluetooth.** Every built-in's Wi-Fi colour
+    /// sits at least 80 from both Bluetooth marks, so a Wi-Fi frame and a
+    /// Bluetooth hit drawn side by side are two colours, not two shades.
+    #[test]
+    fn wifi_stands_off_the_bluetooth_marks() {
+        let dist = |a: Color, b: Color| match (a, b) {
+            (Color::Rgb(r, g, b), Color::Rgb(pr, pg, pb)) => {
+                let d = |a: u8, b: u8| (a as f64 - b as f64).powi(2);
+                (d(r, pr) + d(g, pg) + d(b, pb)).sqrt()
+            }
+            _ => panic!("not truecolor"),
+        };
+        for name in Theme::builtin_names() {
+            let t = Theme::builtin(name).unwrap();
+            for (field, mark) in [("net_ble", t.net_ble), ("net_bt", t.net_bt)] {
+                let apart = dist(t.net_wifi, mark);
+                assert!(apart >= 80.0, "{name}.net_wifi is {apart:.0} from {field}");
+            }
+        }
+    }
+
     /// A user theme written before the marks existed still loads, and draws
-    /// them in its own `border_focused` and `value_hi`.
+    /// them in its own `border_focused`, `value_hi` and `border_accent`.
     #[test]
     fn a_theme_without_mark_colours_still_loads() {
         let mut text = String::from("name = \"older\"\n");
@@ -369,6 +401,7 @@ mod tests {
         let t = data::ThemeFile::parse(&text).unwrap().into_theme().unwrap();
         assert_eq!(t.net_ble, Color::Rgb(0xaa, 0xbb, 0xcc));
         assert_eq!(t.net_bt, Color::Rgb(0xdd, 0xee, 0xff));
+        assert_eq!(t.net_wifi, Color::Rgb(3, 3, 3));
     }
 
     #[test]

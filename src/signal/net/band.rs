@@ -69,6 +69,17 @@ pub fn wifi_channel(freq_hz: u64) -> Option<u8> {
     None
 }
 
+/// The channels a Wi-Fi view steps through and its survey visits: 1 to 13.
+/// Fourteen is a real channel but 802.11b-only and Japan-only, and centred
+/// above the band (see [`HIGH_HZ`]), so nothing takes the radio there; a
+/// tuning that lands on it is still named by [`wifi_channel`].
+pub const WIFI_STEPPED: std::ops::RangeInclusive<u8> = 1..=LAST_SPACED;
+
+/// The centres of [`WIFI_STEPPED`], lowest first.
+pub fn wifi_stepped_centres() -> Vec<u64> {
+    WIFI_STEPPED.filter_map(wifi_centre_hz).collect()
+}
+
 /// The centre frequency of a Wi-Fi channel.
 pub fn wifi_centre_hz(channel: u8) -> Option<u64> {
     match channel {

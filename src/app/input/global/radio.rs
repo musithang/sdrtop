@@ -181,7 +181,7 @@ pub(super) fn step_net_channel(ctx: &mut InputCtx<'_>, forward: bool) {
         cap if classic && cap > 0 => span_mhz.min(cap),
         _ => span_mhz,
     };
-    let how = lock::stepping(&m.ui.active_preset, block_mhz);
+    let how = lock::stepping(&m.ui.section, &m.ui.active_preset, block_mhz);
     m.net.lock_at = Some(lock::step(from, how, forward));
 }
 

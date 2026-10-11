@@ -136,6 +136,31 @@ pub fn verdict(caps: &DeviceCapabilities) -> Result<(), String> {
     Ok(())
 }
 
+/// The mode Wi-Fi's views receive: a 20 MHz channel, read off [`PHYS`] so the
+/// rate is written down once.
+pub fn wifi_phy() -> &'static Phy {
+    PHYS.iter()
+        .find(|p| p.name == "802.11a/g/n HT20")
+        .expect("PHYS lists the 20 MHz Wi-Fi channel")
+}
+
+/// Whether Wi-Fi's sections appear, on top of [`verdict`]: the band must be
+/// reachable, and the rate ceiling must carry a whole 20 MHz channel. A radio
+/// that falls short gets no Wi-Fi sections at all rather than a bench it can
+/// never run, and this is the one line that says why.
+pub fn wifi_verdict(caps: &DeviceCapabilities) -> Result<(), String> {
+    verdict(caps)?;
+    let phy = wifi_phy();
+    if !admits(caps, phy) {
+        return Err(format!(
+            "Wi-Fi hidden: this radio reaches {:.3} Msps, and a 20 MHz Wi-Fi channel needs {:.3}",
+            caps.sample_rate_max_hz / 1e6,
+            phy.rate_hz / 1e6,
+        ));
+    }
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -164,6 +189,36 @@ mod tests {
         let caps = crate::hardware::native::hackrf::caps();
         assert!(verdict(&caps).is_ok());
         assert!(reaches_band(&caps));
+    }
+
+    /// The HackRF's 20 Msps carries a 20 MHz Wi-Fi channel, on its own
+    /// declaration.
+    #[test]
+    fn the_hackrf_is_admitted_to_wifi() {
+        assert!(wifi_verdict(&crate::hardware::native::hackrf::caps()).is_ok());
+    }
+
+    /// A radio that reaches the band but tops out below Wi-Fi's channel is
+    /// refused Wi-Fi alone, and the sentence names both rates; one hertz
+    /// short is short.
+    #[test]
+    fn a_radio_below_wifi_rate_is_refused_wifi_and_says_so() {
+        let slow = caps_with(LOWEST_CENTRE_HZ, HIGHEST_CENTRE_HZ, 10e6);
+        assert!(verdict(&slow).is_ok(), "Bluetooth still fits");
+        let why = wifi_verdict(&slow).unwrap_err();
+        assert!(why.contains("10.000 Msps"), "{why}");
+        assert!(why.contains("20.000"), "{why}");
+        let short = caps_with(LOWEST_CENTRE_HZ, HIGHEST_CENTRE_HZ, 20e6 - 1.0);
+        assert!(wifi_verdict(&short).is_err());
+        let exact = caps_with(LOWEST_CENTRE_HZ, HIGHEST_CENTRE_HZ, 20e6);
+        assert!(wifi_verdict(&exact).is_ok());
+    }
+
+    /// A radio the band refuses is refused Wi-Fi too, for the band's reason.
+    #[test]
+    fn a_radio_off_the_band_is_refused_wifi_for_the_band() {
+        let r820t = caps_with(24_000_000, 1_766_000_000, 3.2e6);
+        assert_eq!(wifi_verdict(&r820t), verdict(&r820t));
     }
 
     /// The RTL-SDR ranges are asserted against the driver in

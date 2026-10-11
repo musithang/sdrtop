@@ -76,6 +76,7 @@ The full set of fields:
 | `observer` | Observer mode's status dot and accent |
 | `net_ble` | Decoded BLE packets, marked on the NET Survey's history. Optional in a theme file: left out, it takes `border_focused` |
 | `net_bt` | Decoded classic Bluetooth hits, marked the same way. Optional: left out, it takes `value_hi` |
+| `net_wifi` | Wi-Fi's own colour: the channel in the header on the Wi-Fi views, and what they mark. Optional: left out, it takes `border_accent` |
 
 Overrides are preserved when you quit with `q`, along with everything else in
 your config.
@@ -105,7 +106,7 @@ That is the whole installation step. There is no list to register the name in an
 nothing to rebuild.
 
 A theme file names itself, gives the fourteen required colours from the table
-above (`net_ble` and `net_bt` may be left out), and
+above (`net_ble`, `net_bt` and `net_wifi` may be left out), and
 lists the gradient the spectrum and waterfall are painted with:
 
 ```toml

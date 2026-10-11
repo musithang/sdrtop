@@ -193,32 +193,45 @@ pub const GLOBAL: &[(&str, &[Binding])] = &[
             f(
                 "M",
                 Some('m'),
-                "under Bluetooth: survey the band, or lock where you are",
-                Footer::Section(&crate::signal::net::SECTIONS, "mode"),
+                "under Bluetooth and Wi-Fi: survey the band, or lock where you are",
+                Footer::Section(&crate::signal::net::ALL_SECTIONS, "mode"),
             ),
             f(
                 "I",
                 Some('i'),
-                "under Bluetooth: addresses in full, by vendor and kind, or masked",
-                Footer::Section(&crate::signal::net::SECTIONS, "addresses"),
+                "under Bluetooth and Wi-Fi: addresses in full, by vendor and kind, or masked",
+                Footer::Section(&crate::signal::net::ALL_SECTIONS, "addresses"),
             ),
             f(
                 "\u{2190} \u{2192}",
                 None,
-                "under Bluetooth, locked: the next advertising channel, or the next block of the band",
-                Footer::Section(&crate::signal::net::SECTIONS, "channel"),
+                "locked: under Bluetooth the next advertising channel or block of the band, under Wi-Fi the next Wi-Fi channel",
+                Footer::Section(&crate::signal::net::ALL_SECTIONS, "channel"),
             ),
             f(
                 "O",
                 Some('o'),
-                "under Bluetooth: write the band, the census, the BLE packets, their error curve and the classic hits to files",
-                Footer::Section(&crate::signal::net::SECTIONS, "Export"),
+                "under Bluetooth and Wi-Fi: write the band, the census, the BLE packets, their error curve and the classic hits to files",
+                Footer::Section(&crate::signal::net::ALL_SECTIONS, "Export"),
             ),
             f(
                 "Y",
                 Some('y'),
                 "on a standard station: set the frequency reference",
-                Footer::Section(&["lab", "net", "le", "classic", "coded"], "Reference"),
+                Footer::Section(
+                    &[
+                        "lab",
+                        "net",
+                        "le",
+                        "classic",
+                        "coded",
+                        "wifi_channel",
+                        "wifi_room",
+                        "wifi_network",
+                        "wifi_transmitter",
+                    ],
+                    "Reference",
+                ),
             ),
             f(
                 "W",
@@ -465,10 +478,33 @@ mod tests {
                 _ => None,
             })
             .expect("the Reference row");
-        for s in crate::signal::net::SECTIONS {
-            assert!(row.contains(&s), "{s} is missing from {row:?}");
+        for s in crate::signal::net::SECTIONS
+            .iter()
+            .chain(&crate::signal::net::WIFI_SECTIONS)
+        {
+            assert!(row.contains(s), "{s} is missing from {row:?}");
         }
         assert!(row.contains(&"lab"));
+    }
+
+    /// The section's own keys (mode, addresses, the side arrows, export)
+    /// hold under Wi-Fi as under Bluetooth: every row naming the Bluetooth
+    /// sections names Wi-Fi's too.
+    #[test]
+    fn the_net_keys_reach_the_wifi_sections() {
+        for label in ["mode", "addresses", "channel", "Export"] {
+            let row = GLOBAL
+                .iter()
+                .flat_map(|(_, rows)| rows.iter())
+                .find_map(|b| match b.footer {
+                    Footer::Section(sections, l) if l == label => Some(sections),
+                    _ => None,
+                })
+                .unwrap_or_else(|| panic!("the {label} row"));
+            for s in crate::signal::net::WIFI_SECTIONS {
+                assert!(row.contains(&s), "{label}: {s} is missing from {row:?}");
+            }
+        }
     }
 
     /// Every character key `input/global/mod.rs` claims is documented here.

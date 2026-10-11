@@ -30,8 +30,12 @@ pub const OTHER: &str = "other";
 /// The heading the band and the Bluetooth sections are drawn under.
 pub const BLUETOOTH: &str = "Bluetooth";
 
-/// Wi-Fi's section id. It has no views yet; it is listed whenever the band is,
-/// with [`WIFI_NOTE`] in place of a list.
+/// The heading Wi-Fi's groups (`signal::net::WIFI_SECTIONS`) are drawn under.
+pub const WIFI_HEADING: &str = "Wi-Fi";
+
+/// The section that stands for Wi-Fi while none of its groups holds a view:
+/// listed whenever the band is, with [`WIFI_NOTE`] in place of a list, and
+/// retired as soon as a group under [`WIFI_HEADING`] has something in it.
 pub const WIFI: &str = "wifi";
 
 /// What Wi-Fi's empty section says, rather than showing an empty list.
@@ -55,6 +59,28 @@ const KNOWN: &[(&str, &str, Option<&str>)] = &[
     (crate::signal::net::SECTIONS[1], "LE", Some(BLUETOOTH)),
     (crate::signal::net::SECTIONS[2], "Classic", Some(BLUETOOTH)),
     (crate::signal::net::SECTIONS[3], "LE Coded", Some(BLUETOOTH)),
+    // Wi-Fi's groups, under a heading of their own and never inside
+    // Bluetooth's: the two benches are separate menus.
+    (
+        crate::signal::net::WIFI_SECTIONS[0],
+        "Channel",
+        Some(WIFI_HEADING),
+    ),
+    (
+        crate::signal::net::WIFI_SECTIONS[1],
+        "Room",
+        Some(WIFI_HEADING),
+    ),
+    (
+        crate::signal::net::WIFI_SECTIONS[2],
+        "Network",
+        Some(WIFI_HEADING),
+    ),
+    (
+        crate::signal::net::WIFI_SECTIONS[3],
+        "Transmitter",
+        Some(WIFI_HEADING),
+    ),
     (WIFI, "Wi-Fi", None),
 ];
 
@@ -198,11 +224,16 @@ pub fn build(presets: &HashMap<String, PresetConfig>) -> Menu {
         })
         .collect();
 
-    // Wi-Fi has no views yet and is listed anyway, as the band is: exactly
-    // when one of the NET sections survived the gate, so a radio that cannot
-    // reach 2.4 GHz is not shown a section it could never use.
-    if sections.iter().any(|s| crate::signal::net::is_net(&s.id))
-        && !sections.iter().any(|s| s.id == WIFI)
+    // While no Wi-Fi group holds a view, Wi-Fi is listed anyway, as the band
+    // is: exactly when one of the Bluetooth sections survived the gate, so a
+    // radio that cannot reach 2.4 GHz is not shown a section it could never
+    // use. The first Wi-Fi view retires it.
+    if sections
+        .iter()
+        .any(|s| crate::signal::net::SECTIONS.contains(&s.id.as_str()))
+        && !sections
+            .iter()
+            .any(|s| s.id == WIFI || s.parent == Some(WIFI_HEADING))
     {
         sections.push(Section {
             id: WIFI.to_string(),
@@ -373,6 +404,55 @@ mod tests {
         let menu = build(&presets);
         assert!(menu.section("wifi").is_none());
         assert!(menu.section("net").is_none());
+    }
+
+    /// A view filed under a Wi-Fi group gets that group's section, titled
+    /// as the group and drawn under the Wi-Fi heading, after LE Coded.
+    #[test]
+    fn a_wifi_preset_files_under_its_heading() {
+        let mut presets = LayoutConfig::default_config().presets;
+        presets.insert(
+            "wifi_view".into(),
+            bare_preset(Some("wifi_channel"), Some(1)),
+        );
+        let menu = build(&presets);
+        let channel = menu.section("wifi_channel").expect("Channel is listed");
+        assert_eq!(channel.title, "Channel");
+        assert_eq!(channel.parent, Some(WIFI_HEADING));
+        assert!(channel.note.is_none());
+        let ids: Vec<&str> = menu.sections.iter().map(|s| s.id.as_str()).collect();
+        let coded = ids.iter().position(|&s| s == "coded").unwrap();
+        let wifi = ids.iter().position(|&s| s == "wifi_channel").unwrap();
+        assert_eq!(wifi, coded + 1, "{ids:?}");
+    }
+
+    /// Once a Wi-Fi group holds a view, the empty Wi-Fi item and its note
+    /// are gone: the heading has something real under it.
+    #[test]
+    fn the_wifi_placeholder_retires_once_a_group_holds_a_view() {
+        let mut presets = LayoutConfig::default_config().presets;
+        presets.insert(
+            "wifi_view".into(),
+            bare_preset(Some("wifi_channel"), Some(1)),
+        );
+        let menu = build(&presets);
+        assert!(menu.section(WIFI).is_none());
+        assert!(menu.sections.iter().all(|s| s.note.is_none()));
+    }
+
+    /// A Wi-Fi group with nothing filed under it is not listed: Room,
+    /// Network and Transmitter appear with their first view.
+    #[test]
+    fn an_empty_wifi_group_is_not_listed() {
+        let mut presets = LayoutConfig::default_config().presets;
+        presets.insert(
+            "wifi_view".into(),
+            bare_preset(Some("wifi_channel"), Some(1)),
+        );
+        let menu = build(&presets);
+        for id in ["wifi_room", "wifi_network", "wifi_transmitter"] {
+            assert!(menu.section(id).is_none(), "{id}");
+        }
     }
 
     /// A user preset still filed under the band's old id lands in Band.

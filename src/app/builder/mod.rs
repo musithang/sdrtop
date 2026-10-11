@@ -299,9 +299,12 @@ impl App {
         // Whether the NET section exists at all, decided once, from the radio's
         // own declaration. The reason travels with the decision so the log and
         // the menu cannot end up disagreeing about why a section is missing.
-        let net = {
+        let (net, wifi) = {
             let m = state.lock().unwrap_or_else(|e| e.into_inner());
-            crate::signal::net::gate::verdict(&m.caps)
+            (
+                crate::signal::net::gate::verdict(&m.caps),
+                crate::signal::net::gate::wifi_verdict(&m.caps),
+            )
         };
 
         let active = preset_override.unwrap_or(&cfg.display.active_preset);
@@ -314,7 +317,10 @@ impl App {
             active,
             &cfg.presets,
             presets_dir.as_deref(),
-            net.is_ok(),
+            registry::NetAdmitted {
+                band: net.is_ok(),
+                wifi: wifi.is_ok(),
+            },
             acquisition,
         )?;
 
@@ -331,6 +337,10 @@ impl App {
                 m.push_log(warning.clone());
             }
             if let Err(why) = &net {
+                m.push_log(why.clone());
+            } else if let Err(why) = &wifi {
+                // Only when the band itself was admitted: otherwise the
+                // band's sentence already says why, and Wi-Fi's would repeat it.
                 m.push_log(why.clone());
             }
 

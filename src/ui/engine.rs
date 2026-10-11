@@ -60,6 +60,14 @@ impl LayoutEngine {
         }
     }
 
+    /// Take a section out of the menu that the presets alone would list:
+    /// Wi-Fi's "being built" item on a radio whose rate can never run the
+    /// bench it promises. The startup path decides; the menu is built before
+    /// it knows.
+    pub fn retire_menu_section(&mut self, id: &str) {
+        self.menu.sections.retain(|s| s.id != id);
+    }
+
     pub fn set_startup_warnings(&mut self, warnings: Vec<String>) {
         self.startup_warnings = warnings;
     }
