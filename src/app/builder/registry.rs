@@ -116,6 +116,7 @@ impl App {
         registry.register(ui::NetCoexistPanel);
         registry.register(ui::NetDecodeHealthPanel);
         registry.register(ui::NetOccupancyPanel);
+        registry.register(ui::NetWifiStandinPanel);
 
         let mut layout = LayoutConfig::with_user_presets(user_presets, presets_dir);
         if !net_admitted.band {
@@ -483,6 +484,10 @@ mod tests {
             (
                 "net_ble_detail",
                 "one received packet's detail, not a count: a block lost elsewhere does not change it",
+            ),
+            (
+                "net_wifi_standin",
+                "it counts nothing yet: where the radio is and at what rate, read off the radio",
             ),
         ];
 

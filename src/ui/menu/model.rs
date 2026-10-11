@@ -296,7 +296,8 @@ mod tests {
     }
 
     /// The built-ins land in nine sections, in order: the four Bluetooth
-    /// groups, the band first among them, then Wi-Fi.
+    /// groups, the band first among them, then Wi-Fi's Channel, its one
+    /// group with a view so far.
     #[test]
     fn the_builtins_build_nine_sections() {
         let menu = build(&LayoutConfig::default_config().presets);
@@ -312,7 +313,7 @@ mod tests {
                 "le",
                 "classic",
                 "coded",
-                "wifi"
+                "wifi_channel"
             ]
         );
         assert!(menu.warnings.is_empty(), "{:?}", menu.warnings);
@@ -338,7 +339,7 @@ mod tests {
                 "le",
                 "classic",
                 "coded",
-                "wifi"
+                "wifi_channel"
             ]
         );
         assert_eq!(menu.section("net").unwrap().title, "Band");
@@ -368,16 +369,23 @@ mod tests {
                 ("le", Some("Bluetooth")),
                 ("classic", Some("Bluetooth")),
                 ("coded", Some("Bluetooth")),
-                ("wifi", None),
+                ("wifi_channel", Some("Wi-Fi")),
             ]
         );
     }
 
-    /// Wi-Fi is listed with nothing in it yet, and says so rather than
-    /// showing an empty list.
+    /// Without a Wi-Fi view (a user who removed the built-in, say), Wi-Fi
+    /// is listed with nothing in it, and says so rather than showing an
+    /// empty list.
     #[test]
-    fn wifi_is_listed_empty_and_says_why() {
-        let menu = build(&LayoutConfig::default_config().presets);
+    fn wifi_without_a_view_is_listed_empty_and_says_why() {
+        let mut presets = LayoutConfig::default_config().presets;
+        presets.retain(|_, p| {
+            !p.section
+                .as_deref()
+                .is_some_and(crate::signal::net::is_wifi)
+        });
+        let menu = build(&presets);
         let wifi = menu.section("wifi").expect("Wi-Fi is listed");
         assert_eq!(wifi.title, "Wi-Fi");
         assert!(wifi.entries.is_empty());
@@ -392,6 +400,11 @@ mod tests {
                 .all(|s| s.id == "wifi" || s.note.is_none()),
             "only the empty section carries a note"
         );
+        // An empty section is still somewhere the cursor can stand, with
+        // nothing there to open.
+        let at = menu.sections.iter().position(|s| s.id == WIFI).unwrap();
+        assert_eq!(menu.clamp(at, 5), Some((at, 0)));
+        assert_eq!(menu.at(at, 0), None, "Wi-Fi has nothing to open");
     }
 
     /// Wi-Fi is gated with Bluetooth: on a radio the band refuses, every NET
@@ -580,7 +593,7 @@ mod tests {
                 "le",
                 "classic",
                 "coded",
-                "wifi",
+                "wifi_channel",
                 "nightwatch"
             ]
         );
@@ -656,10 +669,13 @@ mod tests {
     #[test]
     fn a_cursor_past_the_end_is_clamped() {
         let menu = build(&LayoutConfig::default_config().presets);
-        // Nine sections, the last (Wi-Fi) empty; Sweep (index 2) has two
-        // entries.
+        // Nine sections, the last Wi-Fi's Channel with its one view; Sweep
+        // (index 2) has two entries.
         assert_eq!(menu.clamp(99, 0), Some((8, 0)));
-        assert_eq!(menu.at(99, 0), None, "Wi-Fi has nothing to open");
+        assert_eq!(
+            menu.at(99, 0).map(|e| e.preset.as_str()),
+            Some("wifi_survey")
+        );
         assert_eq!(menu.clamp(2, 99), Some((2, 1)));
         assert_eq!(
             menu.at(2, 99).map(|e| e.preset.as_str()),

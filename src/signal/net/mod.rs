@@ -75,6 +75,7 @@ pub mod occupancy;
 pub mod scan;
 pub mod survey;
 pub mod vendor;
+pub mod wifi;
 pub mod worker;
 
 #[cfg(test)]

@@ -75,6 +75,7 @@ pub use panels::net::shared::census::NetCensusPanel;
 pub use panels::net::shared::coexist::NetCoexistPanel;
 pub use panels::net::shared::decode_health::NetDecodeHealthPanel;
 pub use panels::net::shared::occupancy::NetOccupancyPanel;
+pub use panels::net::wifi::standin::NetWifiStandinPanel;
 
 pub use panels::micro::entry::MicroPanel;
 pub use panels::micro::gain::MicroGainPanel;

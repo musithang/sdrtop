@@ -302,6 +302,16 @@ mod tests {
 
     fn draw_with_metrics(w: u16, h: u16, state: &MenuState, metrics: &SdrMetrics) -> Vec<String> {
         let menu = model::build(&LayoutConfig::default_config().presets);
+        draw_menu(w, h, state, metrics, &menu)
+    }
+
+    fn draw_menu(
+        w: u16,
+        h: u16,
+        state: &MenuState,
+        metrics: &SdrMetrics,
+        menu: &model::Menu,
+    ) -> Vec<String> {
         let theme = crate::Theme::sdr();
         let mut terminal = Terminal::new(TestBackend::new(w, h)).unwrap();
         terminal
@@ -310,7 +320,7 @@ mod tests {
                     f,
                     f.size(),
                     metrics,
-                    &menu,
+                    menu,
                     state,
                     &controls_for(state.section, metrics),
                     &theme,
@@ -385,11 +395,49 @@ mod tests {
         );
     }
 
-    /// Wi-Fi, selected, says it is being built rather than showing an empty
-    /// list.
+    /// Wi-Fi is a heading of its own over its groups, after Bluetooth's,
+    /// never selected, Channel indented under it with its Survey listed.
     #[test]
-    fn wifi_says_it_is_being_built() {
-        let joined = draw(100, 30, &at(index_of("wifi"), 0)).join("\n");
+    fn wifi_is_a_heading_over_its_groups() {
+        let out = draw(100, 30, &at(index_of("wifi_channel"), 0));
+        let joined = out.join("\n");
+        let row = |label: &str| {
+            out.iter()
+                .position(|l| l.contains(label))
+                .unwrap_or_else(|| panic!("{label} missing:\n{joined}"))
+        };
+        let (coded, wifi, channel) = (row("LE Coded"), row("Wi-Fi"), row("Channel"));
+        assert!(coded < wifi && wifi < channel, "{joined}");
+        assert!(
+            !out[wifi].contains('\u{258c}'),
+            "a heading is never selected:\n{joined}"
+        );
+        let col = |line: &str, label: &str| line.find(label).unwrap();
+        assert!(
+            col(&out[channel], "Channel") > col(&out[wifi], "Wi-Fi"),
+            "the groups are indented:\n{joined}"
+        );
+        assert!(joined.contains("Survey"), "{joined}");
+        assert!(!joined.contains(model::WIFI_NOTE), "{joined}");
+    }
+
+    /// With no Wi-Fi view to list, Wi-Fi, selected, says it is being built
+    /// rather than showing an empty list.
+    #[test]
+    fn wifi_without_a_view_says_it_is_being_built() {
+        let mut presets = LayoutConfig::default_config().presets;
+        presets.retain(|_, p| {
+            !p.section
+                .as_deref()
+                .is_some_and(crate::signal::net::is_wifi)
+        });
+        let menu = model::build(&presets);
+        let wifi = menu
+            .sections
+            .iter()
+            .position(|s| s.id == model::WIFI)
+            .expect("the placeholder is listed");
+        let joined = draw_menu(100, 30, &at(wifi, 0), &SdrMetrics::fixture(), &menu).join("\n");
         assert!(joined.contains(model::WIFI_NOTE), "{joined}");
     }
 

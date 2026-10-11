@@ -115,6 +115,10 @@ struct View {
     survey: bool,
     /// An LE Coded view (`lock::CODED_VIEWS`).
     coded: bool,
+    /// A Wi-Fi view: no Bluetooth receiver runs on it. Wi-Fi's and
+    /// Bluetooth's receivers are two separate things, and a view runs the
+    /// one its question needs.
+    wifi: bool,
     /// The LE PHY the user chose (`NetState::ble_phy`).
     phy: crate::signal::ble::Phy,
     /// LOCK rather than SURVEY.
@@ -142,6 +146,7 @@ impl View {
             classic: CLASSIC_VIEWS.contains(&m.ui.active_preset.as_str()),
             survey: m.ui.active_preset == super::lock::SURVEY_VIEW,
             coded: super::lock::CODED_VIEWS.contains(&m.ui.active_preset.as_str()),
+            wifi: super::is_wifi(&m.ui.section),
             phy: m.net.ble_phy,
             locked: m.net.mode == crate::state::NetMode::Lock,
             following: m
@@ -1398,6 +1403,56 @@ mod tests {
         let ble = run("le", "net_ble");
         assert!(ble.net.band.cells.is_empty(), "LE 2 does not");
         assert_eq!(ble.net.ble_channel, Some(38), "and its receiver still runs");
+    }
+
+    /// **A Wi-Fi view runs no Bluetooth receiver.** Tuned to 2426 MHz, where
+    /// a Bluetooth view would decode advertising channel 38, at 20 Msps: no
+    /// BLE, LE Coded or classic receiver, no band measurement, and the BLE
+    /// refusal says why; the same blocks on LE 2 run BLE as before.
+    #[test]
+    fn a_wifi_view_runs_no_bluetooth_receiver() {
+        use crate::signal::dsp::testkit::Rng;
+        let block: Vec<u8> = Rng::new(11)
+            .noise(131_072, 0.02)
+            .iter()
+            .flat_map(|z| {
+                let q = |v: f32| (v * 128.0).clamp(-127.0, 127.0) as i8 as u8;
+                [q(z.re), q(z.im)]
+            })
+            .collect();
+        let run = |section: &str, preset: &str| {
+            let mut m = SdrMetrics::fixture().streaming();
+            m.ui.section = section.to_string();
+            m.ui.active_preset = preset.to_string();
+            m.radio.frequency = 2_426_000_000;
+            m.radio.config_sample_rate = 20e6;
+            m.radio.bb_filter_hz = 0;
+            let state = Arc::new(Mutex::new(m));
+            let (tx, rx) = crossbeam_channel::unbounded();
+            for seq in 1..=4 {
+                tx.send(stamped(&state, seq, false, block.clone())).unwrap();
+            }
+            drop(tx);
+            NetWorker::new(rx, Arc::clone(&state), eight_bit(), SAFE_BT_CHANNELS).run();
+            let m = state.lock().unwrap().clone();
+            m
+        };
+        let wifi = run("wifi_channel", "wifi_survey");
+        assert_eq!(wifi.net.ble_channel, None);
+        assert_eq!(wifi.net.coded_channel, None);
+        assert!(wifi.net.bt_channels_watched.is_empty());
+        assert!(wifi.net.band.cells.is_empty());
+        assert_eq!(
+            wifi.net.ble_refused.as_deref(),
+            Some("a Wi-Fi view runs no Bluetooth receiver")
+        );
+        assert!(
+            wifi.net.health.last_block.is_some(),
+            "the feed still counts"
+        );
+        let ble = run("le", "net_ble");
+        assert_eq!(ble.net.ble_channel, Some(38));
+        assert_eq!(ble.net.ble_refused, None);
     }
 
     /// An LE Coded S=8 `ADV_EXT_IND` on channel 38 at 20 Msps, the radio at

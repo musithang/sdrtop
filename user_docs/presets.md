@@ -3,7 +3,7 @@
 ← [Back](README.md)
 
 A *preset* is a named arrangement of panels: which ones are on screen, where they
-sit, and how much room each gets. sdrtop ships with twenty-five, grouped into the
+sit, and how much room each gets. sdrtop ships with twenty-six, grouped into the
 sections of the [menu](screens.md#the-menu), and you can write your own.
 
 There are two places to put one, and they behave identically:
@@ -22,7 +22,8 @@ name as a built-in (`command_rail`, `spectrum`, `waterfall`,
 `spectrum_waterfall`, `main`, `lab_iq`, `lab_rf`, `lab_timing`, `lab_signal`,
 `lab_sweep`, `micro_main`, `micro_signal`, `micro_gain`, `micro_health`,
 `micro_sweep`, `net`, `net_survey`, `net_census`, `net_ble`, `net_bt`,
-`net_piconet`, `net_bench`, `net_connection`, `net_coded`, `observer`) and your version replaces it, so the number key that
+`net_piconet`, `net_bench`, `net_connection`, `net_coded`, `wifi_survey`,
+`observer`) and your version replaces it, so the number key that
 opens it now opens your layout. Those names are the whole list; a name that isn't
 on it is a new preset, which appears in the menu automatically rather than taking
 over a key.
@@ -97,7 +98,7 @@ nothing to rebuild; open the menu and it is there. The file is just the
 `panels = [...]` part, without the `[presets.name]` header, because the file name
 is the preset name.
 
-The twenty-five built-in presets are written in exactly this format, so the quickest
+The twenty-six built-in presets are written in exactly this format, so the quickest
 way to build on one is to copy it rather than transcribe it from the docs. They
 live in the source tree under `src/config/presets/`.
 
@@ -182,6 +183,10 @@ These are the valid values for `name`. What each one actually draws is in
 `net_bt_hops` · `net_bt_piconets` · `net_bt_packets` · `net_bt_bench`. What each shows is on
 [the NET page](net.md); three of these were renamed or replaced, which that
 page's [last section](net.md#if-you-wrote-your-own-net-preset) lists.
+
+**Wi-Fi:** `net_wifi_standin`, the one panel Wi-Fi has while its receiver is
+being built: which channel the radio is on, whether the rate is the 20 Msps
+the bench needs, and that nothing is decoded yet.
 
 **Observer:** `observer`
 

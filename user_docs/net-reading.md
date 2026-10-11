@@ -55,6 +55,11 @@ to take the latter, which at 8 Msps meant channel 37 was never heard in a
 survey at all: the band's layout and Bluetooth's had simply never been
 introduced.)
 
+Under Wi-Fi, SURVEY rotates the Wi-Fi channels' centres, 1 to 13, since a
+network can only be decoded on its own channel's centre. No Bluetooth
+receiver runs on a Wi-Fi view, whatever the tuning: the two benches each run
+their own.
+
 ## Stepping while locked
 
 `←` and `→` move a locked radio without typing a frequency:
@@ -63,6 +68,7 @@ introduced.)
 |----|-----------|
 | Advertising, Census, LE Coded | The next advertising channel: 37, 38, 39 and round again. Anywhere in between is an expensive way to hear nothing |
 | The classic views | One block along: the span, or the most channels the view watches at once (`[net].bt_channels`) if that is fewer |
+| The Wi-Fi views | The next Wi-Fi channel, 1 to 13 and round again. Channel 14 (Japan, 802.11b only, above the band's top) is never a stop |
 | Everything else | One span along |
 
 Steps wrap round at the band's ends. Surveying, the survey owns the tuning,
@@ -74,6 +80,7 @@ Opening an advertising view off the three channels therefore moves the
 radio to the nearest of them, once, and the log says so. Tune somewhere
 else afterwards (a data channel, to catch secondary advertising, say) and
 it stays where you put it: the instrument does not overrule its user twice.
+A Wi-Fi view does the same with the nearest Wi-Fi channel centre.
 
 ## The header
 
@@ -94,6 +101,7 @@ The line under it says the same in words:
 | `● CODED 38 adv` | The LE Coded receiver, on channel 38 |
 | `■ BT 5–11` | The classic channels being watched |
 | `Wi-Fi ch 6` | No decoder is running, so the tuning is named the way everyone else reads 2.4 GHz |
+| `● WIFI ch6` | On a Wi-Fi view: the Wi-Fi channel, in the Wi-Fi colour, and no Bluetooth channel, since none is decoded there. `● WIFI off-centre` between channels |
 | `decode 81%` | How much of real time the decoders need; see below |
 
 ## The three silences

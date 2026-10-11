@@ -1,0 +1,17 @@
+# Wi-Fi's first view, standing in until its receiver is built. It says where
+# the radio is, whether the sample rate is the one a 20 MHz channel needs
+# (exactly 20 Msps), and that nothing is decoded yet; no Bluetooth receiver
+# runs on it. SURVEY rotates the Wi-Fi channels 1 to 13; LOCK holds one, and
+# the side arrows step them.
+
+section = "wifi_channel"
+slot    = 1
+title   = "Survey"
+blurb   = "the receiver is being built"
+
+panels = [
+    { name = "header",           position = "top", height = 5 },
+    { name = "net_wifi_standin", position = "body" },
+    { name = "log",              position = "bottom", height = 5 },
+    { name = "footer",           position = "bottom" },
+]

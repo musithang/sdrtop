@@ -90,16 +90,16 @@ each layout, and the footer shows the numbers for the section you are in.
 `q` **saves**. Quitting is how your frequency, gains, markers and sweep band
 persist to the [config file](config.md); `Ctrl+C` exits without saving anything.
 
-**Under Bluetooth** (Band, LE, Classic and LE Coded) three letters and the
-side arrows mean something of their own, and do nothing outside them, so they never get in the way of the same
-key elsewhere:
+**Under Bluetooth and Wi-Fi** three letters and the side arrows mean
+something of their own, and do nothing outside them, so they never get in
+the way of the same key elsewhere:
 
-| Key | Under Bluetooth |
+| Key | Under Bluetooth and Wi-Fi |
 |-----|--------|
 | `m` | Survey the band, or lock where you are ([survey or lock](net-reading.md#survey-or-lock-m)) |
 | `i` | Show addresses in full, by vendor and kind, or masked ([addresses](net-reading.md#addresses-i)) |
 | `o` | Write the band, the census, the BLE packets, their error curve and the classic hits to files ([taking the data away](net-export.md)) |
-| `←` `→` | Locked: the previous or next place this view listens. On Advertising and Census, advertising channel 37, 38, 39 and round again; elsewhere one block of the band along ([stepping](net-reading.md#stepping-while-locked)) |
+| `←` `→` | Locked: the previous or next place this view listens. On Advertising and Census, advertising channel 37, 38, 39 and round again; under Wi-Fi, the next Wi-Fi channel, 1 to 13; elsewhere one block of the band along ([stepping](net-reading.md#stepping-while-locked)) |
 
 `p` stays inside the section. It used to walk every preset in the app in
 alphabetical order, which meant leaving the benches for a micro view halfway

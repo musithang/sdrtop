@@ -37,7 +37,7 @@ Welcome. This is the plain-language guide to using sdrtop.
 ## Setting it up
 
 - **[Configuration](config.md)**: the config file, markers, the sweep band
-- **[Layout presets](presets.md)**: the twenty-five built-in layouts, and writing
+- **[Layout presets](presets.md)**: the twenty-six built-in layouts, and writing
   your own
 - **[Themes](themes.md)**: the six palettes, per-field overrides, and writing
   your own

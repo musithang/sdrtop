@@ -24,8 +24,10 @@ hidden and the log says why in one line.
 In the menu, NET is the **Bluetooth** item: a heading over four groups, the
 band first, each with its own numbers. The number is the key to press while
 that group is active, so `Classic 2` is Classic's second view. **Wi-Fi**
-sits beside it, empty for now: the Wi-Fi bench is being built. Both come and
-go together, because one radio requirement admits them.
+sits beside it, a heading of its own whose first group, Channel, holds one
+stand-in view while its receiver is being built. Both need a radio that
+reaches the band; Wi-Fi also needs 20 Msps, a whole Wi-Fi channel, and is
+left out on a radio that cannot sample that fast.
 
 ```
 Bluetooth
@@ -33,7 +35,8 @@ Bluetooth
   LE         1 Census        2 Advertising    3 Connection
   Classic    1 Piconets      2 Packets        3 Bench
   LE Coded   1 Long range
-Wi-Fi        (being built)
+Wi-Fi
+  Channel    1 Survey        (a stand-in, being built)
 ```
 
 Nine views, one question each:

@@ -26,7 +26,10 @@
 //! `signal::ble::channel::advertising_channels_hz`'s three fixed channels
 //! rather than covering the wideband occupancy grid `signal::net::survey::Plan`
 //! computes - the survey-versus-lock claim still applies unchanged, it is only
-//! the positions that differ.
+//! the positions that differ. Wi-Fi's views get theirs the same way: survey
+//! there rotates the Wi-Fi channel centres, 1 to 13
+//! (`signal::net::band::wifi_stepped_centres`), because a network is decoded
+//! only on its own channel's centre.
 
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
@@ -59,12 +62,14 @@ pub fn spawn_net_survey_task(state: Arc<Mutex<SdrMetrics>>, device: Arc<dyn SdrD
         // one to BLE's rotation or back, needs its own announcement even
         // though a survey was already under way either side of the switch.
         let mut was_ble = false;
+        // The same, for Wi-Fi's rotation.
+        let mut was_wifi = false;
         // The view a lock was last seen on, so opening an advertising view
         // moves the radio once, not every poll (`signal::net::lock`).
         let mut locked_view = String::new();
 
         loop {
-            let (active, span_hz, rate_hz, tuned, is_ble) = {
+            let (active, span_hz, rate_hz, tuned, is_ble, is_wifi) = {
                 let m = state.lock().unwrap_or_else(|e| e.into_inner());
                 let span = if m.radio.bb_filter_hz > 0 {
                     (m.radio.bb_filter_hz as f64).min(m.radio.config_sample_rate)
@@ -78,6 +83,7 @@ pub fn spawn_net_survey_task(state: Arc<Mutex<SdrMetrics>>, device: Arc<dyn SdrD
                     m.radio.frequency,
                     crate::signal::net::lock::ADVERTISING_VIEWS
                         .contains(&m.ui.active_preset.as_str()),
+                    crate::signal::net::is_wifi(&m.ui.section),
                 )
             };
 
@@ -151,6 +157,46 @@ pub fn spawn_net_survey_task(state: Arc<Mutex<SdrMetrics>>, device: Arc<dyn SdrD
             // different band to cover. Kept out of `Plan` itself, whose own
             // `covered()` answers a cell-occupancy question this rotation has
             // no matching answer for.
+            if is_wifi {
+                let hops = crate::signal::net::band::wifi_stepped_centres();
+                if !was_wifi {
+                    let mut m = state.lock().unwrap_or_else(|e| e.into_inner());
+                    if !surveying {
+                        m.net.pre_survey_hz = Some(tuned);
+                    }
+                    m.net.survey_refused = None;
+                    m.push_log(format!(
+                        "NET survey: Wi-Fi rotation, {} channels (1 to 13), \
+                         {} ms a pass, 1/{} dwell each",
+                        hops.len(),
+                        ((SETTLE + DWELL) * hops.len() as u32).as_millis(),
+                        hops.len()
+                    ));
+                }
+                surveying = true;
+                was_wifi = true;
+                was_ble = false;
+                for hz in hops {
+                    {
+                        let m = state.lock().unwrap_or_else(|e| e.into_inner());
+                        if m.net.mode != NetMode::Survey
+                            || !crate::signal::net::is_wifi(&m.ui.section)
+                        {
+                            break;
+                        }
+                    }
+                    let _ = device.set_frequency(hz);
+                    {
+                        let mut m = state.lock().unwrap_or_else(|e| e.into_inner());
+                        m.radio.frequency = hz;
+                    }
+                    tokio::time::sleep(SETTLE + DWELL).await;
+                }
+                pass = pass.wrapping_add(1);
+                continue;
+            }
+            was_wifi = false;
+
             if is_ble {
                 if !was_ble {
                     let mut m = state.lock().unwrap_or_else(|e| e.into_inner());

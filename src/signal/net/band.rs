@@ -123,6 +123,18 @@ mod tests {
         assert_eq!(wifi_centre_hz(15), None);
     }
 
+    /// What a Wi-Fi view steps through and its survey visits: the thirteen
+    /// centres in order, each once, and never fourteen.
+    #[test]
+    fn the_stepped_centres_are_one_to_thirteen() {
+        let centres = wifi_stepped_centres();
+        assert_eq!(centres.len(), 13);
+        assert_eq!(centres[0], 2_412_000_000);
+        assert_eq!(centres[12], 2_472_000_000);
+        assert!(centres.windows(2).all(|w| w[1] - w[0] == SPACING_HZ));
+        assert!(!centres.contains(&CHANNEL_14_HZ));
+    }
+
     #[test]
     fn every_channel_round_trips_through_its_centre() {
         for n in 1..=14u8 {

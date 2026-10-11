@@ -493,7 +493,19 @@ fn net_band_strip(state: &SdrMetrics, theme: &crate::Theme, outer_width: u16) ->
         state.radio.config_sample_rate
     };
     let (a, b) = (col(tuned - span / 2.0), col(tuned + span / 2.0));
-    let watched = &state.net.bt_channels_watched;
+    // On a Wi-Fi view the window is Wi-Fi's and no Bluetooth decoder runs in
+    // it: the window in Wi-Fi's ink, and no Bluetooth mark.
+    let wifi = crate::signal::net::is_wifi(&state.ui.section);
+    let window_ink = if wifi {
+        theme.net_wifi
+    } else {
+        theme.border_accent
+    };
+    let watched: &[u8] = if wifi {
+        &[]
+    } else {
+        &state.net.bt_channels_watched
+    };
     let bt_cols = match (watched.iter().min(), watched.iter().max()) {
         (Some(&lo), Some(&hi)) => {
             let edge = |ch: u8| crate::signal::bt::channel::centre_hz(ch).map(|hz| hz as f64);
@@ -508,6 +520,7 @@ fn net_band_strip(state: &SdrMetrics, theme: &crate::Theme, outer_width: u16) ->
         .net
         .ble_channel
         .or(state.net.coded_channel)
+        .filter(|_| !wifi)
         .and_then(crate::signal::ble::channel::centre_hz)
         .map(|hz| col(hz as f64));
 
@@ -530,7 +543,7 @@ fn net_band_strip(state: &SdrMetrics, theme: &crate::Theme, outer_width: u16) ->
         } else if in_view && bt_cols.is_some_and(|(l, h)| (l..=h).contains(&c)) {
             Span::styled("\u{2501}", bold(theme.net_bt))
         } else if in_view {
-            Span::styled("\u{2501}", bold(theme.border_accent))
+            Span::styled("\u{2501}", bold(window_ink))
         } else {
             Span::styled("\u{2508}", Style::default().fg(theme.border_dim))
         });
@@ -648,6 +661,21 @@ fn load_text(load: f64) -> String {
 fn channel_fields(state: &SdrMetrics, theme: &crate::Theme) -> Vec<BandField> {
     let value = Style::default().fg(theme.value);
     let label = Style::default().fg(theme.label);
+    // A Wi-Fi view runs no Bluetooth receiver, so it names its Wi-Fi channel
+    // in Wi-Fi's ink and nothing else, whatever a Bluetooth view left behind.
+    if crate::signal::net::is_wifi(&state.ui.section) {
+        let field = match crate::signal::net::band::wifi_channel(state.radio.frequency) {
+            Some(ch) => vec![
+                Span::styled("\u{25cf}", Style::default().fg(theme.net_wifi)),
+                Span::styled(format!(" WIFI ch{ch}"), value),
+            ],
+            None => vec![
+                Span::styled("\u{25cf}", Style::default().fg(theme.net_wifi)),
+                Span::styled(" WIFI off-centre", label),
+            ],
+        };
+        return vec![BandField::spans(field, 5)];
+    }
     let mut out = Vec::new();
     // The LE Coded receiver is BLE too, in BLE's ink, but named apart: the
     // same channel number is a different receiver on a different PHY.
@@ -1550,6 +1578,61 @@ mod tests {
         let at = text.chars().position(|c| c == '\u{25cf}').unwrap();
         let first = text.chars().position(|c| c == '\u{2501}').unwrap();
         assert!(at > first && at < first + window, "{text}");
+    }
+
+    /// A Wi-Fi view on channel 6.
+    fn wifi_fixture() -> SdrMetrics {
+        let mut m = net_fixture();
+        m.ui.section = "wifi_channel".to_string();
+        m.ui.active_preset = "wifi_survey".to_string();
+        m
+    }
+
+    /// **On a Wi-Fi view the band names the Wi-Fi channel, in Wi-Fi's ink**,
+    /// and no Bluetooth channel: none is decoded there, even if a stale one
+    /// is still in the state.
+    #[test]
+    fn a_wifi_view_names_its_wifi_channel() {
+        let theme = crate::Theme::sdr();
+        let mut m = wifi_fixture();
+        m.net.ble_channel = Some(38);
+        m.net.bt_channels_watched = vec![35, 36];
+        let (text, spans) = net_band_text(&m, 191);
+        assert!(text.contains("\u{25cf} WIFI ch6"), "{text}");
+        assert!(!text.contains("BLE") && !text.contains("BT "), "{text}");
+        let dot = spans.iter().find(|s| s.content == "\u{25cf}").unwrap();
+        assert_eq!(dot.style.fg, Some(theme.net_wifi));
+    }
+
+    /// Between channels it names none, and says so.
+    #[test]
+    fn a_wifi_view_off_a_centre_says_so() {
+        let mut m = wifi_fixture();
+        m.radio.frequency = 2_439_500_000;
+        let (text, _) = net_band_text(&m, 191);
+        assert!(text.contains("WIFI off-centre"), "{text}");
+        assert!(!text.contains("ch6"), "{text}");
+    }
+
+    /// On a Wi-Fi view the strip's window is lit in Wi-Fi's ink, with no
+    /// Bluetooth mark in it.
+    #[test]
+    fn the_wifi_strip_lights_the_window_in_wifi_ink() {
+        let theme = crate::Theme::sdr();
+        let mut m = wifi_fixture();
+        m.radio.bb_filter_hz = 0;
+        m.net.ble_channel = Some(38);
+        m.net.bt_channels_watched = vec![35, 36];
+        let line = net_band_strip(&m, &theme, 191);
+        let lit = |c: ratatui::style::Color| {
+            line.spans
+                .iter()
+                .filter(|s| s.content == "\u{2501}" && s.style.fg == Some(c))
+                .count()
+        };
+        assert!(lit(theme.net_wifi) >= 30, "a 20 MHz window");
+        assert_eq!(lit(theme.border_accent) + lit(theme.net_bt), 0);
+        assert!(!line.spans.iter().any(|s| s.content == "\u{25cf}"));
     }
 
     /// The mode is the first thing the header says and it is never ambiguous:

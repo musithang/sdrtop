@@ -44,10 +44,12 @@ marked with a bar at its left edge.
 | &nbsp;&nbsp;**LE** | Bluetooth Low Energy: who is here, what they advertise, and one connection followed |
 | &nbsp;&nbsp;**Classic** | Classic Bluetooth: the piconets, one piconet's packets, and each end of it on a bench |
 | &nbsp;&nbsp;**LE Coded** | BLE's long-range PHY: who advertises on it, and where each advertisement pointed |
-| **Wi-Fi** | Nothing yet: the Wi-Fi bench is being built, and the menu says so |
+| **Wi-Fi** | A heading too, its own and never inside Bluetooth's |
+| &nbsp;&nbsp;**Channel** | What one Wi-Fi channel is doing. For now a stand-in that says where the radio is and that the receiver is being built |
 
-Bluetooth and Wi-Fi are shown only on a radio that reaches the band; [the NET
-page](net.md) is about everything under Bluetooth. The cursor steps over the
+Bluetooth and Wi-Fi are shown only on a radio that reaches the band, and
+Wi-Fi only on one that can also sample at 20 Msps, a whole Wi-Fi channel;
+[the NET page](net.md) is about everything under Bluetooth. The cursor steps over the
 Bluetooth heading, straight from Micro to Band, and each group keeps its own
 numbers.
 
@@ -401,10 +403,14 @@ screen.
 |-----|--------|--------------|
 | `1` | `net_coded` | LE Coded advertising packets · packet detail |
 
-**Wi-Fi** has no layouts yet.
+**Wi-Fi › Channel**
+
+| Key | Preset | What's in it |
+|-----|--------|--------------|
+| `1` | `wifi_survey` | The stand-in: the channel, whether the rate is right, and that nothing is decoded yet |
 
 `p` steps to the next layout in whichever section you are in, and wraps at the
-end. A twenty-fifth preset, `observer`, is marked hidden, so it has no section and no
+end. A twenty-sixth preset, `observer`, is marked hidden, so it has no section and no
 key: sdrtop loads it by itself when [another app owns the
 radio](#observer-mode).
 
