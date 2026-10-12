@@ -127,13 +127,20 @@ receiver has run this session, its funnel and its AuxPtrs are counted here
 too; before that it is not mentioned, because this view never starts it.
 Wi-Fi's receiver is treated the same way: once it has run, a `Wi-Fi` row
 says which channel it is on, or why it is not running. Under it, the
-`repeats` it has found and the ones a break or a retune cut short (on the
-survey, every hop is a retune). A repeat is what a frame's short training
-field looks like, and nothing more yet: a frame on the channel next door
-repeats the same way, and so do some other signals, and telling them apart
-is the long training field's job, which is still to come. The row says so:
-`pending`. In a block of flats expect a lot of them; the air is busier than
-any list of networks suggests.
+`repeats` it has found, and what the long training field that follows each
+one made of it:
+
+| Row | What it counts |
+|-----|----------------|
+| `repeats` | What a frame's short training field looks like. Not yet a frame: a neighbour's repeats the same way, and so do some other signals |
+| `this channel` | The long training field matched this channel's: a frame of ours |
+| `adjacent` | It matched a channel 5, 10 or 15 MHz away, judged on the part of it our 20 MHz can hear |
+| `not a preamble` | It matched nothing |
+| `cut short` | A break or a retune took it before it could be judged (on the survey, every hop is a retune) |
+
+The four below `repeats` add up to it. In a block of flats expect a lot of
+all of them; the air is busier than any list of networks suggests, and a
+channel with no network on it still hears the ones beside it.
 
 Every count on the other NET panels is only as complete as this panel says
 the feed was. If this one is unhappy, believe it over the others.

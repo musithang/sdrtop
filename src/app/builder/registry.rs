@@ -608,6 +608,13 @@ mod tests {
         m.net.address_display = display;
         m.net.address_book.number([1, 2, 3, 4, 5, 6]);
         m.net.ble_channel = Some(37);
+        // A Wi-Fi frame too, for the Wi-Fi view's latest-frame line.
+        m.net.wifi.last_frame = Some(crate::state::WifiFrame {
+            offset_hz: Uncertain::from_sigma(-12_430.0, 1_900.0),
+            snr_db: 14.0,
+            carrier_hz: 2_437_000_000.0,
+            when: now,
+        });
         m.net.ble_packets.push_front(BlePacket {
             phy: crate::signal::ble::Phy::OneM,
             seq: 0,

@@ -57,6 +57,9 @@ const SEARCH: std::ops::Range<i64> = -10..130;
 #[derive(Clone, Copy, Debug)]
 pub struct Sync {
     /// The stream pair the long training field's first symbol starts on.
+    /// Read by the tests until the channel estimate that starts from it
+    /// lands.
+    #[cfg(test)]
     pub ltf_start: u64,
     /// The transmitter's offset from our tuning, in hertz, with its
     /// uncertainty. Our own oscillator's error is in it.
@@ -64,24 +67,20 @@ pub struct Sync {
     /// The per-sample signal-to-noise ratio the long field's coherence
     /// gives, as a power ratio.
     pub snr: f64,
-    /// How well the long field matched, the squared cosine.
-    pub fit: f64,
 }
 
 /// What the long training field says the repeat was.
 #[derive(Clone, Copy, Debug)]
 pub enum Verdict {
     ThisChannel(Sync),
-    /// A frame on the channel `shift_mhz` away, how well its audible part
-    /// matched.
+    /// A frame on the channel `shift_mhz` away. Which one is read by the
+    /// tests until a view names the loud neighbour.
     Adjacent {
+        #[cfg(test)]
         shift_mhz: i32,
-        fit: f64,
     },
     /// Nothing matched: a repeat, but no frame of ours or a neighbour's.
-    NotPreamble {
-        best: f64,
-    },
+    NotPreamble,
 }
 
 /// The two-symbol reference for a neighbour `shift` channels' worth of
@@ -120,6 +119,15 @@ fn fit(r: &[Complex<f64>], w: &[Complex<f64>]) -> f64 {
     } else {
         0.0
     }
+}
+
+/// The stretch of the stream a verdict on a detection that peaked at
+/// `peak` reads: from 127 samples before it to the end of the long field's
+/// search. `None` too early in the stream to hold.
+pub fn needs(peak: u64) -> Option<(u64, usize)> {
+    let from = peak.checked_sub(127)?;
+    let len = 127 + SEARCH.end as usize + 128;
+    Some((from, len))
 }
 
 /// Judge the repeat whose detection peaked at stream pair `peak`, from
@@ -164,12 +172,12 @@ pub fn examine(samples: &[Complex<f32>], first_pair: u64, peak: u64) -> Option<V
     }
     let (fit_best, shift, t) = best?;
     if fit_best < gate {
-        return Some(Verdict::NotPreamble { best: fit_best });
+        return Some(Verdict::NotPreamble);
     }
     if shift != 0 {
         return Some(Verdict::Adjacent {
+            #[cfg(test)]
             shift_mhz: 5 * shift,
-            fit: fit_best,
         });
     }
 
@@ -189,10 +197,10 @@ pub fn examine(samples: &[Complex<f32>], first_pair: u64, peak: u64) -> Option<V
     let snr = snr_from_metric(metric, 64).unwrap_or(f64::INFINITY);
     let variance = moose_variance(snr, 64, 64) * FS * FS;
     Some(Verdict::ThisChannel(Sync {
+        #[cfg(test)]
         ltf_start: (first_pair as i64 + first + t as i64) as u64,
         offset: Uncertain::from_variance((coarse + fine) * FS, variance),
         snr,
-        fit: fit_best,
     }))
 }
 
@@ -261,11 +269,6 @@ mod tests {
             .collect()
     }
 
-    /// The gate's threshold.
-    fn gate() -> f64 {
-        crate::signal::dsp::correlate::threshold_for_false_alarm(128, GATE_FALSE_ALARM)
-    }
-
     /// The detector's peak on `x`, then the verdict there.
     fn judge(x: &[Complex<f32>]) -> Option<Verdict> {
         let found = StfDetector::new().push(0, x);
@@ -285,9 +288,8 @@ mod tests {
             match judge(&on_air(lead, 10.0, 0.0, &mut rng)) {
                 Some(Verdict::ThisChannel(s)) if s.ltf_start == (lead + 192) as u64 => {
                     // The long field's coherence says about the SNR it was
-                    // made at, and the fit is far over the gate.
+                    // made at.
                     assert!((5.0..20.0).contains(&s.snr), "snr {}", s.snr);
-                    assert!(s.fit > 0.5, "fit {}", s.fit);
                     exact += 1
                 }
                 other => eprintln!("lead {lead}: {other:?}"),
@@ -342,10 +344,7 @@ mod tests {
             for _ in 0..10 {
                 let x = on_air(800, 15.0, mhz as f64 * 1e6, &mut rng);
                 match judge(&x) {
-                    Some(Verdict::Adjacent { shift_mhz, fit }) => {
-                        assert_eq!(shift_mhz, mhz);
-                        assert!(fit >= gate(), "{mhz}: fit {fit}");
-                    }
+                    Some(Verdict::Adjacent { shift_mhz }) => assert_eq!(shift_mhz, mhz),
                     // A neighbour this far out may not pass the short field
                     // at all; it must never pass as ours.
                     None => {}
@@ -363,7 +362,7 @@ mod tests {
         let x = rng.noise(20_000, 1.0);
         for peak in (200..19_000).step_by(997) {
             match examine(&x, 0, peak as u64) {
-                Some(Verdict::NotPreamble { best }) => assert!(best < gate(), "{best}"),
+                Some(Verdict::NotPreamble) => {}
                 other => panic!("{peak}: {other:?}"),
             }
         }
@@ -388,6 +387,23 @@ mod tests {
             each * 1e6,
             each * 200.0 * 100.0
         );
+    }
+
+    /// What a verdict needs is exactly what `examine` reads: given that
+    /// stretch, it judges.
+    #[test]
+    fn needs_is_what_examine_reads() {
+        let mut rng = Rng::new(16);
+        let x = on_air(900, 12.0, 0.0, &mut rng);
+        let peak = StfDetector::new().push(0, &x)[0].peak;
+        let (from, len) = needs(peak).unwrap();
+        let cut = &x[from as usize..from as usize + len];
+        assert!(matches!(
+            examine(cut, from, peak),
+            Some(Verdict::ThisChannel(_))
+        ));
+        assert!(examine(&cut[..len - 1], from, peak).is_none());
+        assert_eq!(needs(100), None);
     }
 
     /// Too near either end of what is held, it waits rather than guessing.

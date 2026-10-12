@@ -36,10 +36,11 @@ pub use census::CensusState;
 pub use classic::ROSTER_SORT_KEYS;
 pub use classic::{BtHop, HopView, PacketsView, BT_HOP_LIMIT};
 pub use follow::{ConnectionView, FollowedConnection};
-pub use health::NetDecodeHealth;
+pub use health::{NetDecodeHealth, WifiFunnel};
 pub use packets::{
     BlePacket, BlePacketView, CodedFacts, ExtInfo, ExtRole, PduKind, BLE_PACKET_LIMIT,
 };
+pub use wifi::WifiFrame;
 
 /// Whether the receiver is walking the band or sitting on one channel.
 ///

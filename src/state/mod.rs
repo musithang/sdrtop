@@ -40,8 +40,9 @@ pub use net::{
 // The roster's sort keys, which the roster's columns are held to.
 #[cfg(test)]
 pub use net::ROSTER_SORT_KEYS;
-// Named by the NET worker, which counts its arrivals into it.
-pub use net::NetDecodeHealth;
+// Named by the NET worker, which counts its arrivals into it, and Wi-Fi's
+// funnel and latest frame with it.
+pub use net::{NetDecodeHealth, WifiFrame, WifiFunnel};
 pub use observer::ObserverState;
 pub use radio::{
     offset_ppm, FrequencyReference, OffsetBasis, Provenance, RadioState, REFERENCE_STALE_S,

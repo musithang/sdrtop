@@ -286,6 +286,9 @@ impl NetWorker {
             let window = feed.window(iq.as_deref().map(|v| (first_pair, v)));
             let held_end = iq.as_deref().map(|v| (first_pair + v.len() as u64) as f64);
             let mut ble_packets: Option<Vec<crate::signal::ble::pdu::Packet>> = None;
+            if let Some(end) = held_end.filter(|_| wifi_here) {
+                wifi.judge(&window, end as u64, centre_hz as f64, now, &self.state);
+            }
 
             // The classic receiver, one per channel the current tuning and
             // the cap together let it watch: `self.bt_channels` on the
@@ -325,7 +328,7 @@ impl NetWorker {
                 le.keep_promises(&window, end, tuning, now, &self.state);
             }
 
-            let longer = view.following || view.coded || le.waiting();
+            let longer = view.following || view.coded || le.waiting() || wifi.waiting();
             feed.hold(first_pair, iq, view.open, longer, rate_hz);
 
             // Closing the section stops `process_block` forwarding, but blocks
@@ -1151,11 +1154,16 @@ mod tests {
         let secs = blocks as f64 * 131_072.0 / 20e6;
         let f = m.net.health.wifi;
         eprintln!(
-            "{secs:.1} s · channel {:?} · preambles {} ({:.1}/s) · cut {}",
+            "{secs:.1} s · channel {:?} · repeats {} ({:.1}/s): this channel {}, adjacent {}, \
+             not a preamble {}, cut {} · last frame {:?}",
             m.net.wifi.channel,
             f.detected,
             f.detected as f64 / secs,
-            f.cut
+            f.this_channel,
+            f.adjacent,
+            f.not_preamble,
+            f.cut,
+            m.net.wifi.last_frame.map(|l| (l.offset_hz, l.snr_db))
         );
     }
 
@@ -1624,9 +1632,11 @@ mod tests {
         m
     }
 
-    /// A frame on the Wi-Fi view is found once, and nothing is cut.
+    /// A frame on the Wi-Fi view is found once, judged this channel's by
+    /// its long training field, and its offset shown: the annex's frame was
+    /// sent on the channel's centre, so the offset is near nothing.
     #[test]
-    fn a_frame_on_the_wifi_view_is_found_once() {
+    fn a_frame_on_the_wifi_view_is_judged_this_channels() {
         let m = run_wifi(
             "wifi_channel",
             "wifi_survey",
@@ -1636,8 +1646,53 @@ mod tests {
                 (3, noise_block(3)),
             ],
         );
-        assert_eq!(m.net.health.wifi.detected, 1, "{:?}", m.net.health.wifi);
-        assert_eq!(m.net.health.wifi.cut, 0);
+        let f = m.net.health.wifi;
+        assert_eq!(
+            (
+                f.detected,
+                f.this_channel,
+                f.adjacent,
+                f.not_preamble,
+                f.cut
+            ),
+            (1, 1, 0, 0, 0),
+            "{f:?}"
+        );
+        let last = m.net.wifi.last_frame.expect("a frame shown");
+        assert!(
+            last.offset_hz.value().abs() < 5_000.0,
+            "{:?}",
+            last.offset_hz
+        );
+        assert!(last.offset_hz.sigma() < 5_000.0, "{:?}", last.offset_hz);
+        assert_eq!(last.carrier_hz, 2_437_000_000.0);
+    }
+
+    /// A frame whose short field was whole but whose long one the break
+    /// took is found and then cut, never judged; the whole frame after it
+    /// is judged; and every repeat found ends in exactly one place.
+    #[test]
+    fn a_frame_the_break_took_its_long_field_from_is_cut() {
+        let m = run_wifi(
+            "wifi_channel",
+            "wifi_survey",
+            &[
+                (1, noise_block(1)),
+                (2, frame_block(4096 - 240, 2)),
+                (5, noise_block(5)),
+                (6, frame_block(2000, 6)),
+                (7, noise_block(7)),
+            ],
+        );
+        let f = m.net.health.wifi;
+        assert_eq!(f.detected, 2, "{f:?}");
+        assert_eq!(f.this_channel, 1, "{f:?}");
+        assert_eq!(f.cut, 1, "{f:?}");
+        assert_eq!(
+            f.detected,
+            f.this_channel + f.adjacent + f.not_preamble + f.cut,
+            "{f:?}"
+        );
     }
 
     /// **The funnel adds up across a break**: a frame the break cut in its
@@ -1658,8 +1713,10 @@ mod tests {
                 (7, noise_block(7)),
             ],
         );
-        assert_eq!(m.net.health.wifi.cut, 1, "{:?}", m.net.health.wifi);
-        assert_eq!(m.net.health.wifi.detected, 1, "{:?}", m.net.health.wifi);
+        let f = m.net.health.wifi;
+        assert_eq!(f.cut, 1, "{f:?}");
+        assert_eq!(f.detected, 1, "{f:?}");
+        assert_eq!(f.this_channel, 1, "{f:?}");
     }
 
     /// Off the Wi-Fi views the same frame is not looked for.

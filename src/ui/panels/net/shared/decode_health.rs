@@ -334,8 +334,8 @@ fn lines(
     }
 
     // Wi-Fi, only once its receiver has run this session, as LE Coded: the
-    // views that start it are its own. What it found is a repeat, pending
-    // the long training field's answer to whose it is.
+    // views that start it are its own. What it found is a repeat, and the
+    // long training field's answer to whose it is.
     let w = &state.net.wifi;
     if w.ran {
         out.push(match (w.channel, &w.refused) {
@@ -350,7 +350,22 @@ fn lines(
         out.push(row(
             "repeats",
             grouped(f.detected),
-            Some("short-training-like, pending: no L-LTF gate yet"),
+            Some("short-training-like, judged below"),
+        ));
+        out.push(row(
+            "this channel",
+            grouped(f.this_channel),
+            Some("long training field matched"),
+        ));
+        out.push(row(
+            "adjacent",
+            grouped(f.adjacent),
+            Some("a channel 5, 10 or 15 MHz away"),
+        ));
+        out.push(row(
+            "not a preamble",
+            grouped(f.not_preamble),
+            Some("matched nothing"),
         ));
         out.push(row(
             "cut short",
@@ -504,6 +519,9 @@ mod tests {
         m.net.wifi.ran = true;
         m.net.wifi.channel = Some(6);
         m.net.health.wifi.detected = 1_204;
+        m.net.health.wifi.this_channel = 1_100;
+        m.net.health.wifi.adjacent = 60;
+        m.net.health.wifi.not_preamble = 27;
         m.net.health.wifi.cut = 17;
         let on = draw(NetDecodeHealthPanel, 80, 40, &m).join("\n");
         assert!(on.contains("ch 6"), "{on}");
@@ -512,7 +530,7 @@ mod tests {
             .find(|l| l.contains("repeats"))
             .expect("found row");
         assert!(
-            found.contains("1 204") && found.contains("pending"),
+            found.contains("1 204") && found.contains("judged below"),
             "{found}"
         );
         let cut = on
@@ -520,6 +538,17 @@ mod tests {
             .find(|l| l.contains("cut short"))
             .expect("cut row");
         assert!(cut.contains("17"), "{cut}");
+        for (label, n) in [
+            ("this channel", "1 100"),
+            ("adjacent", "60"),
+            ("not a preamble", "27"),
+        ] {
+            let row = on
+                .lines()
+                .find(|l| l.contains(label))
+                .unwrap_or_else(|| panic!("{label}"));
+            assert!(row.contains(n), "{row}");
+        }
     }
 
     /// Refused, the Wi-Fi row is a dash with the reason; stood down after

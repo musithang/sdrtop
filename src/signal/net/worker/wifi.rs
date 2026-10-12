@@ -20,14 +20,18 @@ use std::sync::{Arc, Mutex};
 use num_complex::Complex;
 
 use super::{Tuning, View};
-use crate::signal::wifi::detect::StfDetector;
+use crate::signal::net::measure::Recent;
+use crate::signal::wifi::detect::{Detection, StfDetector};
+use crate::signal::wifi::sync::{examine, needs, Verdict};
 use crate::state::SdrMetrics;
 
-/// Where the receiver runs, or why not, and its detector.
+/// Where the receiver runs, or why not, its detector, and the repeats found
+/// that wait for their long training field to be held.
 #[derive(Default)]
 pub(super) struct Wifi {
     published: (Option<u8>, Option<String>),
     detector: StfDetector,
+    waiting: Vec<Detection>,
 }
 
 impl Wifi {
@@ -54,10 +58,18 @@ impl Wifi {
     /// The stream broke or the radio moved: a preamble in progress was cut
     /// short, and is counted as that.
     pub(super) fn interrupted(&mut self, state: &Arc<Mutex<SdrMetrics>>) {
-        if self.detector.cut() {
+        let cut = self.detector.cut() as u64 + self.waiting.len() as u64;
+        self.waiting.clear();
+        if cut > 0 {
             let mut m = state.lock().unwrap_or_else(|e| e.into_inner());
-            m.net.health.wifi.cut += 1;
+            m.net.health.wifi.cut += cut;
         }
+    }
+
+    /// Whether a repeat waits for samples still to come, so the feed holds
+    /// a little more.
+    pub(super) fn waiting(&self) -> bool {
+        !self.waiting.is_empty()
     }
 
     /// Look through a block that starts at stream pair `first_pair`, and
@@ -68,10 +80,65 @@ impl Wifi {
         block: &[Complex<f32>],
         state: &Arc<Mutex<SdrMetrics>>,
     ) {
-        let found = self.detector.push(first_pair, block).len() as u64;
-        if found > 0 {
+        let found = self.detector.push(first_pair, block);
+        if !found.is_empty() {
             let mut m = state.lock().unwrap_or_else(|e| e.into_inner());
-            m.net.health.wifi.detected += found;
+            m.net.health.wifi.detected += found.len() as u64;
+        }
+        self.waiting.extend(found);
+    }
+
+    /// Judge every waiting repeat whose stretch is held by now (`held_end`
+    /// is the pair after the last one held), on `centre_hz`. Those still to
+    /// come wait; one whose stretch can never be held is cut.
+    pub(super) fn judge(
+        &mut self,
+        window: &Recent<'_>,
+        held_end: u64,
+        centre_hz: f64,
+        now: std::time::Instant,
+        state: &Arc<Mutex<SdrMetrics>>,
+    ) {
+        let mut counts = crate::state::WifiFunnel::default();
+        let mut last = None;
+        self.waiting.retain(|d| {
+            let Some((from, len)) = needs(d.peak) else {
+                counts.cut += 1;
+                return false;
+            };
+            if from + len as u64 > held_end {
+                return true;
+            }
+            let verdict = window
+                .slice(from, len)
+                .and_then(|stretch| examine(&stretch, from, d.peak));
+            match verdict {
+                Some(Verdict::ThisChannel(s)) => {
+                    counts.this_channel += 1;
+                    last = Some(crate::state::WifiFrame {
+                        offset_hz: s.offset,
+                        snr_db: 10.0 * s.snr.log10(),
+                        carrier_hz: centre_hz,
+                        when: now,
+                    });
+                }
+                Some(Verdict::Adjacent { .. }) => counts.adjacent += 1,
+                Some(Verdict::NotPreamble) => counts.not_preamble += 1,
+                // Held no longer, or never whole: a hole the feed left.
+                None => counts.cut += 1,
+            }
+            false
+        });
+        if counts != Default::default() {
+            let mut m = state.lock().unwrap_or_else(|e| e.into_inner());
+            let f = &mut m.net.health.wifi;
+            f.this_channel += counts.this_channel;
+            f.adjacent += counts.adjacent;
+            f.not_preamble += counts.not_preamble;
+            f.cut += counts.cut;
+            if last.is_some() {
+                m.net.wifi.last_frame = last;
+            }
         }
     }
 

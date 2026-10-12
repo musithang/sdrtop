@@ -7,9 +7,8 @@
 //! **Two halves, compiled differently.** The receive side runs in the app:
 //!
 //! - [`detect`]: finding a frame's short training field in the stream.
-//! - `sync`: the offset, the timing and the long training field's verdict
-//!   on whose frame it is (compiled for the tests until the worker calls
-//!   it).
+//! - [`sync`]: the offset, the timing and the long training field's
+//!   verdict on whose frame it is.
 //!
 //! The transmit side is compiled for the tests only: written stage by stage
 //! from the standard and held to its own worked example (IEEE 802.11-2024,
@@ -29,7 +28,6 @@
 //! - `chain`: the bit chain both ways, a PSDU to its points and back.
 
 pub mod detect;
-#[cfg(test)]
 pub mod sync;
 
 #[cfg(test)]

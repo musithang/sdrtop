@@ -77,17 +77,25 @@ pub struct NetDecodeHealth {
     pub wifi: WifiFunnel,
 }
 
-/// What Wi-Fi's receiver made of the preambles it met. Every short training
-/// field it found ends in one of these, so across any break in the stream
-/// they add up to what it found.
+/// What Wi-Fi's receiver made of the repeats it met. Every repeat found is
+/// judged by its long training field as this channel's, a neighbour's or no
+/// preamble, or is cut before it could be, so across any break in the
+/// stream those four add up to what was found.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct WifiFunnel {
     /// Short-training-like repeats found whole, pending what they are: a
     /// frame of this channel, one next door, or another signal with the
     /// same period.
     pub detected: u64,
-    /// Ones a break in the stream or a retune cut short, the survey's hops
-    /// among them.
+    /// Frames of this channel: their long training field matched ours.
+    pub this_channel: u64,
+    /// Frames of a channel 5, 10 or 15 MHz away.
+    pub adjacent: u64,
+    /// Repeats whose long training field matched nothing.
+    pub not_preamble: u64,
+    /// Ones a break in the stream or a retune cut short, in their short
+    /// field or before their long one was heard; the survey's hops among
+    /// them.
     pub cut: u64,
 }
 
