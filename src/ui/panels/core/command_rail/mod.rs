@@ -145,24 +145,17 @@ fn stack(
         theme,
     ));
     lines.push(hero::band_sr_line(state, iw, theme));
-    // The S-meter sits directly under the band line, in what used to be a blank
-    // gap. It is dropped entirely when there is nothing to measure, rather than
-    // shown pinned at the floor, which reads as a real (very weak) signal.
-    let pwr = state.signal.channel_power_dbfs;
-    if !stale && pwr.is_finite() {
-        let peak = state
-            .signal
-            .pwr_history
-            .iter()
-            .copied()
-            .filter(|v| v.is_finite())
-            .fold(f32::NEG_INFINITY, f32::max);
-        lines.extend(smeter::s_meter_lines(
-            pwr,
-            peak.is_finite().then_some(peak),
+    // Reserve the S-meter's three rows even when there is no current reading.
+    // Removing them on a weak/bursty signal made every section below jump.
+    let pwr = state.signal.s_meter_dbfs;
+    match (!stale, pwr.filter(|value| value.is_finite())) {
+        (true, Some(power)) => lines.extend(smeter::s_meter_lines(
+            power,
+            state.signal.s_meter_peak_dbfs,
             iw,
             theme,
-        ));
+        )),
+        _ => lines.extend([Line::raw(""), Line::raw(""), Line::raw("")]),
     }
     lines.push(Line::raw(""));
 
@@ -205,4 +198,21 @@ fn log_foot(entry: &crate::state::LogEntry, theme: &crate::Theme) -> Line<'stati
             Style::default().fg(theme.value),
         ),
     ])
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn s_meter_presence_does_not_change_the_stack_height() {
+        let no_signal = SdrMetrics::fixture().streaming();
+        let signal = SdrMetrics::fixture().streaming().with_carrier(0.0, 20.0);
+        let theme = crate::Theme::sdr();
+
+        let without_meter = stack(&no_signal, false, true, false, 34, &theme);
+        let with_meter = stack(&signal, false, true, false, 34, &theme);
+
+        assert_eq!(without_meter.len(), with_meter.len());
+    }
 }

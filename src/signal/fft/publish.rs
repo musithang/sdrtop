@@ -13,17 +13,20 @@
 //! comment, the way `tasks/rx/` makes its two lock blocks visible.
 
 use std::sync::{Arc, Mutex};
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 use crate::state::{FftFrame, SdrMetrics};
 
 use super::analysis::Reading;
+use super::DB_FLOOR;
 
 /// Pace the drawn spectrum to the *visible* waterfall: each waterfall character
 /// row packs this many data rows (half-block ▀), so the spectrum refreshes once
 /// per visible line rather than every FFT frame, keeping the two panels moving in
 /// lockstep. Signal metrics stay at full rate.
 const ROWS_PER_WATERFALL_LINE: u32 = 2;
+const S_METER_TIME_CONSTANT: Duration = Duration::from_millis(300);
+const S_METER_PEAK_HOLD: Duration = Duration::from_secs(1);
 
 /// How much of a marker's channel the measured-bandwidth cut-offs bracket.
 const MARKER_BW_LOW: f32 = 0.005;
@@ -33,6 +36,10 @@ const MARKER_BW_HIGH: f32 = 0.995;
 pub(super) struct Pacing {
     rows_since_spectrum: u32,
     last_update: Option<Instant>,
+    meter_dbfs: Option<f32>,
+    meter_peak_dbfs: Option<f32>,
+    meter_peak_held_until: Option<Instant>,
+    last_meter_update: Option<Instant>,
 }
 
 impl Pacing {
@@ -40,7 +47,61 @@ impl Pacing {
         Self {
             rows_since_spectrum: 0,
             last_update: None,
+            meter_dbfs: None,
+            meter_peak_dbfs: None,
+            meter_peak_held_until: None,
+            last_meter_update: None,
         }
+    }
+
+    /// Apply the S-meter's display-only ballistics outside the state lock.
+    fn s_meter(&mut self, reading_dbfs: f32, now: Instant) -> (Option<f32>, Option<f32>) {
+        let dt = self
+            .last_meter_update
+            .map(|last| now.duration_since(last))
+            .unwrap_or_default();
+        self.last_meter_update = Some(now);
+
+        if dt > Duration::from_secs(1) {
+            self.meter_dbfs = None;
+            self.meter_peak_dbfs = None;
+            self.meter_peak_held_until = None;
+        }
+
+        let Some(previous) = self.meter_dbfs else {
+            if reading_dbfs.is_finite() {
+                self.meter_dbfs = Some(reading_dbfs);
+                self.meter_peak_dbfs = Some(reading_dbfs);
+                self.meter_peak_held_until = Some(now + S_METER_PEAK_HOLD);
+            }
+            return (self.meter_dbfs, self.meter_peak_dbfs);
+        };
+
+        let elapsed = dt.as_secs_f32();
+        let tau = S_METER_TIME_CONSTANT.as_secs_f32();
+        let alpha = 1.0 - (-elapsed / tau).exp();
+        let target_dbfs = if reading_dbfs.is_finite() {
+            reading_dbfs
+        } else {
+            DB_FLOOR
+        };
+        let previous_power = 10.0_f32.powf(previous / 10.0);
+        let target_power = 10.0_f32.powf(target_dbfs / 10.0);
+        let filtered_power = previous_power + alpha * (target_power - previous_power);
+        let filtered_dbfs = (10.0 * filtered_power.log10()).max(DB_FLOOR);
+        self.meter_dbfs = Some(filtered_dbfs);
+
+        if self
+            .meter_peak_dbfs
+            .is_none_or(|peak| filtered_dbfs >= peak)
+        {
+            self.meter_peak_dbfs = Some(filtered_dbfs);
+            self.meter_peak_held_until = Some(now + S_METER_PEAK_HOLD);
+        } else if self.meter_peak_held_until.is_some_and(|until| now >= until) {
+            self.meter_peak_dbfs = Some(filtered_dbfs);
+        }
+
+        (self.meter_dbfs, self.meter_peak_dbfs)
     }
 
     /// Whether to redraw the spectrum: there is none yet, a visible waterfall line
@@ -84,6 +145,8 @@ pub(super) fn publish(
     snap: Snapshot<'_>,
     pacing: &mut Pacing,
 ) -> Option<f32> {
+    let now = Instant::now();
+    let (s_meter_dbfs, s_meter_peak_dbfs) = pacing.s_meter(snap.reading.channel_power_dbfs, now);
     let Ok(mut m) = state.lock() else {
         return None;
     };
@@ -95,6 +158,8 @@ pub(super) fn publish(
 
     m.signal.peak_to_nf_db = r.peak_to_nf_db;
     m.signal.channel_power_dbfs = r.channel_power_dbfs;
+    m.signal.s_meter_dbfs = s_meter_dbfs;
+    m.signal.s_meter_peak_dbfs = s_meter_peak_dbfs;
     m.signal.occupied_bw_hz = r.occupied_bw_hz;
     m.signal.modulation = r.modulation;
     m.signal.acpr_lower_db = r.acpr_lower_db;
@@ -116,7 +181,6 @@ pub(super) fn publish(
         pacing.rows_since_spectrum += 1;
     }
 
-    let now = Instant::now();
     if pacing.due(m.waterfall.last_fft.is_some(), m.caps.trace_stale_ms, now) {
         pacing.mark(now);
         refresh_spectrum(&mut m, &snap);
@@ -286,6 +350,25 @@ mod tests {
         pacing.mark(now);
         assert_eq!(pacing.rows_since_spectrum, 0);
         assert!(!pacing.due(true, 500, now));
+    }
+
+    #[test]
+    fn s_meter_smooths_bursts_and_holds_the_peak_for_one_second() {
+        let start = Instant::now();
+        let mut pacing = Pacing::new();
+        assert_eq!(pacing.s_meter(-40.0, start), (Some(-40.0), Some(-40.0)));
+
+        let (rising, peak) = pacing.s_meter(-20.0, start + Duration::from_millis(100));
+        let rising = rising.unwrap();
+        assert!(rising > -40.0 && rising < -20.0);
+        assert_eq!(peak, Some(rising));
+
+        let (falling, held_peak) = pacing.s_meter(-80.0, start + Duration::from_millis(500));
+        assert!(falling.unwrap() < rising);
+        assert_eq!(held_peak, Some(rising));
+
+        let (released, released_peak) = pacing.s_meter(-80.0, start + Duration::from_millis(1_200));
+        assert_eq!(released_peak, released);
     }
 
     fn marker(freq_hz: u64, channel_bw_hz: u64, measured_bw_hz: Option<u64>) -> SpectrumMarker {

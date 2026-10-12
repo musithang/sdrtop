@@ -186,6 +186,12 @@ pub struct SignalState {
     /// Distinct from [`Self::adc_rms_dbfs`], which is the full-bandwidth figure and
     /// belongs to ADC loading rather than to the signal.
     pub channel_power_dbfs: f32,
+    /// The Command Rail S-meter's 300 ms ballistics, derived from
+    /// [`Self::channel_power_dbfs`]. Display-only: never used as a measurement
+    /// by another panel or calculation.
+    pub s_meter_dbfs: Option<f32>,
+    /// One-second peak hold for the Command Rail S-meter.
+    pub s_meter_peak_dbfs: Option<f32>,
     pub occupied_bw_hz: u64,
     /// Adjacent-channel power ratio, dB relative to the in-channel power, at
     /// ±[`Self::acpr_offset_hz`]. `f32::NEG_INFINITY` when there is nothing to
@@ -254,6 +260,8 @@ impl Default for SignalState {
             saturation_history: VecDeque::new(),
             peak_to_nf_db: 0.0,
             channel_power_dbfs: f32::NEG_INFINITY,
+            s_meter_dbfs: None,
+            s_meter_peak_dbfs: None,
             occupied_bw_hz: 0,
             acpr_lower_db: f32::NEG_INFINITY,
             acpr_upper_db: f32::NEG_INFINITY,
@@ -306,6 +314,8 @@ mod tests {
             saturation_history: VecDeque::new(),
             peak_to_nf_db: 0.0,
             channel_power_dbfs: 0.0,
+            s_meter_dbfs: None,
+            s_meter_peak_dbfs: None,
             occupied_bw_hz: 0,
             acpr_lower_db: f32::NEG_INFINITY,
             acpr_upper_db: f32::NEG_INFINITY,

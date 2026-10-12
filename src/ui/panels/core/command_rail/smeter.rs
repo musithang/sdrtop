@@ -136,7 +136,7 @@ pub(super) fn s_meter_lines(
 
     // Row 2: "S7  ·  -19.3 dBFS  ·  peak S9+20"
     let s_label = frac_to_s_label(frac);
-    let val_str = format!("{power_dbfs:.1} dBFS");
+    let val_str = format!("~{power_dbfs:.1} dBFS");
     let mut row2_spans = vec![
         Span::raw(" "),
         Span::styled(

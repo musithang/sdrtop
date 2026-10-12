@@ -124,39 +124,48 @@ pub(super) fn mode_card_lines(
         ])
     };
 
-    match mode {
+    let mut lines = match mode {
         // HUNT - the three strongest signals on screen, with band tags.
         RailMode::Hunt => {
             let fft = state.waterfall.last_fft.as_ref().filter(|_| !stale);
-            let Some(fr) = fft else {
-                return vec![dim("scanning…".into())];
-            };
-            let peaks = rail_peaks(fr, 3);
-            if peaks.is_empty() {
-                return vec![dim("no peaks".into())];
+            if let Some(fr) = fft {
+                let peaks = rail_peaks(fr, 3);
+                if peaks.is_empty() {
+                    vec![dim("no peaks".into())]
+                } else {
+                    peaks
+                        .into_iter()
+                        .enumerate()
+                        .map(|(i, (hz, db))| {
+                            let mark = if i == 0 { "▸" } else { " " };
+                            let mut spans = vec![
+                                Span::styled(mark.to_string(), Style::default().fg(theme.value_hi)),
+                                Span::styled(
+                                    format!("{:7.2}", hz as f64 / 1e6),
+                                    Style::default().fg(if i == 0 {
+                                        theme.value_hi
+                                    } else {
+                                        theme.value
+                                    }),
+                                ),
+                                Span::styled(
+                                    format!(" {db:4.0}"),
+                                    Style::default().fg(theme.label),
+                                ),
+                            ];
+                            if let Some(b) = band_at(hz) {
+                                spans.push(Span::styled(
+                                    format!("  {b}"),
+                                    Style::default().fg(theme.border_accent),
+                                ));
+                            }
+                            Line::from(spans)
+                        })
+                        .collect()
+                }
+            } else {
+                vec![dim("scanning…".into())]
             }
-            peaks
-                .into_iter()
-                .enumerate()
-                .map(|(i, (hz, db))| {
-                    let mark = if i == 0 { "▸" } else { " " };
-                    let mut spans = vec![
-                        Span::styled(mark.to_string(), Style::default().fg(theme.value_hi)),
-                        Span::styled(
-                            format!("{:7.2}", hz as f64 / 1e6),
-                            Style::default().fg(if i == 0 { theme.value_hi } else { theme.value }),
-                        ),
-                        Span::styled(format!(" {db:4.0}"), Style::default().fg(theme.label)),
-                    ];
-                    if let Some(b) = band_at(hz) {
-                        spans.push(Span::styled(
-                            format!("  {b}"),
-                            Style::default().fg(theme.border_accent),
-                        ));
-                    }
-                    Line::from(spans)
-                })
-                .collect()
         }
 
         // MONITOR - a calm watch headline: signal quality + how many signals are up.
@@ -247,7 +256,13 @@ pub(super) fn mode_card_lines(
                 ]),
             ]
         }
-    }
+    };
+
+    // HUNT can find zero to three peaks; keep its card and the two-row
+    // MONITOR/BENCH cards on one fixed three-row footprint so the rail below
+    // does not move as burst signals appear and disappear.
+    lines.resize_with(3, || Line::raw(""));
+    lines
 }
 
 #[cfg(test)]
@@ -296,6 +311,30 @@ mod tests {
         // Compact kicks in below that - the strip then uses 3-letter codes.
         assert!(mode_tabs_full_w() > 20, "narrow rail must compact");
         assert!(mode_tabs_full_w() <= 28, "wide rail shows full labels");
+    }
+
+    #[test]
+    fn mode_cards_keep_a_fixed_height_as_peaks_come_and_go() {
+        let theme = crate::Theme::sdr();
+        let quiet = SdrMetrics::fixture();
+        let mut busy = SdrMetrics::fixture();
+        let fft = frame(
+            &[
+                -90.0, -90.0, -20.0, -90.0, -90.0, -90.0, -30.0, -90.0, -90.0, -90.0, -40.0, -90.0,
+                -90.0,
+            ],
+            -90.0,
+            1_000_000.0,
+        );
+        assert_eq!(rail_peaks(&fft, 3).len(), 3);
+        busy.waterfall.last_fft = Some(fft);
+
+        for mode in [RailMode::Hunt, RailMode::Monitor, RailMode::Bench] {
+            let quiet_lines = mode_card_lines(mode, &quiet, true, &theme);
+            let busy_lines = mode_card_lines(mode, &busy, false, &theme);
+            assert_eq!(quiet_lines.len(), 3, "{mode:?} quiet card");
+            assert_eq!(busy_lines.len(), 3, "{mode:?} active card");
+        }
     }
 
     #[test]
