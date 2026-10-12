@@ -26,7 +26,6 @@ use clap::Parser;
 use cli::Cli;
 use config::AppConfig;
 use crossterm::{
-    event::{DisableMouseCapture, EnableMouseCapture},
     execute,
     terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
 };
@@ -159,7 +158,7 @@ async fn main() -> Result<()> {
 
     enable_raw_mode()?;
     let mut stdout = io::stdout();
-    execute!(stdout, EnterAlternateScreen, EnableMouseCapture)?;
+    execute!(stdout, EnterAlternateScreen)?;
     let backend = CrosstermBackend::new(stdout);
     let mut terminal = Terminal::new(backend)?;
 
@@ -178,22 +177,14 @@ async fn main() -> Result<()> {
             Ok(None) => {
                 restore_stderr(saved_stderr);
                 disable_raw_mode()?;
-                execute!(
-                    terminal.backend_mut(),
-                    LeaveAlternateScreen,
-                    DisableMouseCapture
-                )?;
+                execute!(terminal.backend_mut(), LeaveAlternateScreen)?;
                 terminal.show_cursor()?;
                 return Ok(());
             }
             Err(e) => {
                 restore_stderr(saved_stderr);
                 disable_raw_mode()?;
-                execute!(
-                    terminal.backend_mut(),
-                    LeaveAlternateScreen,
-                    DisableMouseCapture
-                )?;
+                execute!(terminal.backend_mut(), LeaveAlternateScreen)?;
                 terminal.show_cursor()?;
                 eprintln!("Device selection error: {}", e);
                 std::process::exit(1);
@@ -208,11 +199,7 @@ async fn main() -> Result<()> {
         Err(e) => {
             restore_stderr(saved_stderr);
             disable_raw_mode()?;
-            execute!(
-                terminal.backend_mut(),
-                LeaveAlternateScreen,
-                DisableMouseCapture
-            )?;
+            execute!(terminal.backend_mut(), LeaveAlternateScreen)?;
             terminal.show_cursor()?;
             eprintln!("Error: {}", e);
             std::process::exit(1);
@@ -223,11 +210,7 @@ async fn main() -> Result<()> {
 
     restore_stderr(saved_stderr);
     disable_raw_mode()?;
-    execute!(
-        terminal.backend_mut(),
-        LeaveAlternateScreen,
-        DisableMouseCapture
-    )?;
+    execute!(terminal.backend_mut(), LeaveAlternateScreen)?;
     terminal.show_cursor()?;
 
     application_result(result)

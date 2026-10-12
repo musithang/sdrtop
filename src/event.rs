@@ -24,6 +24,7 @@ pub enum AppEvent {
     Key(KeyEvent),
     Tick,
     DeviceOptionComplete(DeviceOptionCompletion),
+    InputError(std::io::Error),
 }
 
 pub struct EventStream {
@@ -38,22 +39,38 @@ impl EventStream {
         let spawned = thread::Builder::new()
             .name("key-input".to_string())
             .spawn(move || loop {
-                if event::poll(tick_rate).unwrap_or(false) {
-                    match event::read() {
+                let has_event = match event::poll(tick_rate) {
+                    Ok(has_event) => has_event,
+                    Err(error) => {
+                        let _ = event_tx.send(AppEvent::InputError(error));
+                        break;
+                    }
+                };
+
+                if !has_event {
+                    if event_tx.send(AppEvent::Tick).is_err() {
+                        break;
+                    }
+                    continue;
+                }
+
+                match event::read() {
                     Ok(Event::Key(key)) => {
                         if event_tx.send(AppEvent::Key(key)).is_err() {
                             break;
                         }
                     }
-                    Ok(Event::Resize(..))
-                        // Trigger an immediate redraw so preferred_height re-runs with the new width.
-                        if event_tx.send(AppEvent::Tick).is_err() => {
+                    // Trigger an immediate redraw so preferred_height re-runs with the new width.
+                    Ok(Event::Resize(..)) => {
+                        if event_tx.send(AppEvent::Tick).is_err() {
                             break;
                         }
-                    _ => {}
-                }
-                } else if event_tx.send(AppEvent::Tick).is_err() {
-                    break;
+                    }
+                    Ok(_) => {}
+                    Err(error) => {
+                        let _ = event_tx.send(AppEvent::InputError(error));
+                        break;
+                    }
                 }
             });
         spawned.expect("cannot start the key-input thread");

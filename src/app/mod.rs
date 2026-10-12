@@ -164,6 +164,7 @@ impl App {
                     }
                     true
                 }
+                AppEvent::InputError(error) => return Err(error),
             };
 
             if needs_redraw {
@@ -969,6 +970,23 @@ mod tests {
         std::fs::remove_dir(path.with_extension("tmp")).unwrap();
         std::fs::remove_file(path).unwrap();
         std::fs::remove_dir(root).unwrap();
+    }
+
+    #[test]
+    fn terminal_input_errors_are_returned_from_the_event_loop() {
+        let (mut app, tx, _, path) = quit_test_app();
+        tx.send(AppEvent::InputError(io::Error::new(
+            io::ErrorKind::BrokenPipe,
+            "terminal input failed",
+        )))
+        .unwrap();
+        let mut terminal = Terminal::new(ratatui::backend::TestBackend::new(80, 24)).unwrap();
+
+        let error = app.run(&mut terminal).unwrap_err();
+
+        assert_eq!(error.kind(), io::ErrorKind::BrokenPipe);
+        assert_eq!(error.to_string(), "terminal input failed");
+        assert!(!path.exists());
     }
 
     #[test]
