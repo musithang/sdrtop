@@ -73,6 +73,88 @@ pub fn signal_from_bits(bits: &[bool; 24]) -> Vec<Complex<f64>> {
     in_time(&symbol(&map(&interleave(&encode(bits), 1), 1), 0))
 }
 
+/// A signalling symbol in time from 48 coded bits: interleaved, BPSK,
+/// turned by j when `quadrature` (QBPSK, Figure 19-7), pilots at polarity
+/// p_n for the `n`-th symbol after the long training field.
+pub fn sig_symbol(coded: &[bool], quadrature: bool, n: usize) -> Vec<Complex<f64>> {
+    let turn = if quadrature {
+        Complex::new(0.0, 1.0)
+    } else {
+        Complex::new(1.0, 0.0)
+    };
+    let points: Vec<Complex<f64>> = map(&interleave(coded, 1), 1)
+        .into_iter()
+        .map(|p| p * turn)
+        .collect();
+    in_time(&symbol(&points, n))
+}
+
+/// 48 bits of a two-symbol SIG field (HT-SIG, VHT-SIG-A) coded at rate 1/2
+/// and sent as two symbols from the `first`-th after the long field, each
+/// turned or not.
+pub fn two_sig_symbols(
+    bits: &[bool; 48],
+    quadrature: [bool; 2],
+    first: usize,
+) -> [Vec<Complex<f64>>; 2] {
+    let coded = encode(bits);
+    [
+        sig_symbol(&coded[..48], quadrature[0], first),
+        sig_symbol(&coded[48..], quadrature[1], first + 1),
+    ]
+}
+
+/// A symbol of 48 random points from `points`, pilots at polarity p_n: a
+/// DATA symbol's stand-in.
+pub fn random_symbol(
+    rng: &mut crate::signal::dsp::testkit::Rng,
+    points: &[Complex<f64>],
+    n: usize,
+) -> Vec<Complex<f64>> {
+    let chosen: Vec<Complex<f64>> = (0..48)
+        .map(|_| points[(rng.next_u64() % points.len() as u64) as usize])
+        .collect();
+    in_time(&symbol(&chosen, n))
+}
+
+/// HT-greenfield's first HT-LTF in 20 MHz (19.3.9.5, Equation 19-23): the
+/// L-LTF's tones and +1, +1 on -28, -27, -1, -1 on 27, 28, behind a double
+/// guard, twice; and the overlap sample.
+pub fn greenfield_ltf() -> Vec<Complex<f64>> {
+    let mut spectrum = long_spectrum();
+    for (k, v) in [(-28, 1.0), (-27, 1.0), (27, -1.0), (28, -1.0)] {
+        spectrum[super::ofdm::at(k)] = Complex::new(v, 0.0);
+    }
+    windowed(&ifft(&spectrum), 32, 161)
+}
+
+/// A preamble in time: `stf` from 0, `ltf` from 160, then each of
+/// `symbols` 80 samples apart from 320, overlaps added.
+pub fn assemble(
+    stf: &[Complex<f64>],
+    ltf: &[Complex<f64>],
+    symbols: &[Vec<Complex<f64>>],
+) -> Vec<Complex<f64>> {
+    let mut out = vec![Complex::new(0.0, 0.0); 320 + 80 * symbols.len() + 1];
+    let mut place = |at: usize, field: &[Complex<f64>]| {
+        for (o, v) in out[at..at + field.len()].iter_mut().zip(field) {
+            *o += v;
+        }
+    };
+    place(0, stf);
+    place(160, ltf);
+    for (i, s) in symbols.iter().enumerate() {
+        place(320 + 80 * i, s);
+    }
+    out
+}
+
+/// An L-SIG for `rate` and `length` as the `n`-th symbol after the long
+/// field: 0 for the L-SIG itself, 1 for an RL-SIG (27.3.11.6).
+pub fn l_sig_at(rate: Rate, length: u16, n: usize) -> Vec<Complex<f64>> {
+    sig_symbol(&encode(&signal_field::bits(rate, length)), false, n)
+}
+
 /// The DATA symbols, the n-th (from 1) with pilots at polarity p_n.
 fn data_symbols(psdu: &[u8], rate: Rate, initial: u8) -> Vec<Vec<Complex<f64>>> {
     let coded = puncture(&encode(&scrambled(psdu, rate, initial)), rate.coding());

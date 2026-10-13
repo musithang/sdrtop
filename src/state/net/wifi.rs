@@ -14,8 +14,9 @@ pub struct WifiFrame {
     /// The channel centre it was heard on, which the offset is a fraction
     /// of.
     pub carrier_hz: f64,
-    /// What its L-SIG said, or which check refused it.
-    pub lsig: Result<crate::signal::wifi::lsig::LSig, crate::signal::wifi::lsig::Refused>,
+    /// What the symbols after its long training field said: its L-SIG and
+    /// its format.
+    pub heard: crate::signal::wifi::format::Heard,
     pub when: std::time::Instant,
 }
 

@@ -119,7 +119,7 @@ fn fit(r: &[Complex<f64>], w: &[Complex<f64>]) -> f64 {
 /// the stream to hold.
 pub fn needs(peak: u64) -> Option<(u64, usize)> {
     let from = peak.checked_sub(127)?;
-    let len = 127 + SEARCH.end as usize + super::lsig::SIGNAL_AT + 64;
+    let len = 127 + SEARCH.end as usize + super::sig::FIRST_AT + 80 * (super::sig::HELD - 1) + 64;
     Some((from, len))
 }
 
@@ -381,10 +381,10 @@ mod tests {
         );
     }
 
-    /// What a repeat needs held is what `examine` reads and the SIGNAL
-    /// symbol after the latest long field it could find: given that
-    /// stretch, it judges and the L-SIG is read; without the last SIGNAL
-    /// symbol's worth, `examine` still judges.
+    /// What a repeat needs held is what `examine` reads and the symbols
+    /// a format is told from after the latest long field it could find:
+    /// given that stretch, it judges and the L-SIG is read; without those
+    /// symbols' worth, `examine` still judges.
     #[test]
     fn needs_holds_the_verdict_and_the_signal_field() {
         let mut rng = Rng::new(16);
@@ -399,8 +399,9 @@ mod tests {
             crate::signal::wifi::lsig::read(cut, from, &s),
             Some(Ok(_))
         ));
-        assert!(examine(&cut[..len - 80], from, peak).is_some());
-        assert!(examine(&cut[..len - 81], from, peak).is_none());
+        let after = 80 * crate::signal::wifi::sig::HELD;
+        assert!(examine(&cut[..len - after], from, peak).is_some());
+        assert!(examine(&cut[..len - after - 1], from, peak).is_none());
         assert_eq!(needs(100), None);
     }
 

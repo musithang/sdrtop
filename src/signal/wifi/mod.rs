@@ -11,6 +11,9 @@
 //!   verdict on whose frame it is.
 //! - [`channel`]: the channel each subcarrier came through, with the
 //!   uncertainty the noise and the floor's shape leave on it.
+//! - [`sig`]: the symbols after the long training field, each equalised
+//!   and righted by its pilots, read as BPSK at a rotation or scored for
+//!   the axis its power is on.
 //! - [`lsig`]: the SIGNAL field, its rate and length, and the frame's
 //!   airtime.
 //!
@@ -38,11 +41,14 @@
 pub mod bcc;
 pub mod channel;
 pub mod detect;
+pub mod format;
+pub mod htsig;
 pub mod interleave;
 pub mod lsig;
 pub mod map;
 pub mod ofdm;
 pub mod scrambler;
+pub mod sig;
 pub mod signal_field;
 pub mod sync;
 

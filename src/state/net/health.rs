@@ -88,13 +88,19 @@ pub struct WifiFunnel {
     /// same period.
     pub detected: u64,
     /// Frames of this channel: their long training field matched ours.
-    /// Each has its L-SIG read or refused, so these two add up to it.
+    /// Each had its L-SIG read, or a greenfield HT-SIG in its place, or
+    /// neither, so those three add up to it.
     pub this_channel: u64,
     /// Frames of this channel whose L-SIG passed its checks.
     pub lsig_read: u64,
-    /// Frames of this channel whose L-SIG failed its parity, named no
-    /// rate, or had a tail that was not zero.
-    pub lsig_refused: u64,
+    /// Frames of this channel in HT-greenfield format: QBPSK straight after
+    /// the long training field and an HT-SIG that passed its CRC, with no
+    /// L-SIG.
+    pub greenfield: u64,
+    /// Frames of this channel whose first symbol passed as neither: an
+    /// L-SIG that failed its parity, named no rate or had a tail that was
+    /// not zero, or a QBPSK symbol whose HT-SIG failed.
+    pub unreadable: u64,
     /// Frames of a channel 5, 10 or 15 MHz away.
     pub adjacent: u64,
     /// Repeats whose long training field matched nothing.

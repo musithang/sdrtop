@@ -1155,20 +1155,21 @@ mod tests {
         let f = m.net.health.wifi;
         eprintln!(
             "{secs:.1} s · channel {:?} · repeats {} ({:.1}/s): this channel {} (L-SIG read {}, \
-             refused {}), adjacent {}, not a preamble {}, cut {} · last frame {:?}",
+             greenfield {}, unreadable {}), adjacent {}, not a preamble {}, cut {} · last frame {:?}",
             m.net.wifi.channel,
             f.detected,
             f.detected as f64 / secs,
             f.this_channel,
             f.lsig_read,
-            f.lsig_refused,
+            f.greenfield,
+            f.unreadable,
             f.adjacent,
             f.not_preamble,
             f.cut,
             m.net
                 .wifi
                 .last_frame
-                .map(|l| (l.offset_hz, l.snr_db, l.lsig))
+                .map(|l| (l.offset_hz, l.snr_db, l.heard))
         );
     }
 
@@ -1673,13 +1674,19 @@ mod tests {
         assert_eq!(last.carrier_hz, 2_437_000_000.0);
         // Its L-SIG read: the annex's 36 Mb/s and 100 octets, six DATA
         // symbols, 44 us on the air.
-        use crate::signal::wifi::{lsig::LSig, signal_field::Rate};
+        // A clause 17 frame: no later format's signature after it.
+        use crate::signal::wifi::{format::Format, lsig::LSig, signal_field::Rate};
         let want = LSig {
             rate: Rate::R36,
             length: 100,
         };
-        assert_eq!(last.lsig, Ok(want));
-        assert_eq!((f.lsig_read, f.lsig_refused), (1, 0), "{f:?}");
+        assert_eq!(last.heard.lsig, Some(Ok(want)));
+        assert_eq!(last.heard.format, Some(Format::NonHt));
+        assert_eq!(
+            (f.lsig_read, f.greenfield, f.unreadable),
+            (1, 0, 0),
+            "{f:?}"
+        );
     }
 
     /// A frame whose short field was whole but whose long one the break
@@ -1707,7 +1714,11 @@ mod tests {
             f.this_channel + f.adjacent + f.not_preamble + f.cut,
             "{f:?}"
         );
-        assert_eq!(f.this_channel, f.lsig_read + f.lsig_refused, "{f:?}");
+        assert_eq!(
+            f.this_channel,
+            f.lsig_read + f.greenfield + f.unreadable,
+            "{f:?}"
+        );
     }
 
     /// A frame whose long field was whole but whose SIGNAL symbol the break

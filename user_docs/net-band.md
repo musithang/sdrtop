@@ -135,13 +135,14 @@ one made of it:
 | `repeats` | What a frame's short training field looks like. Not yet a frame: a neighbour's repeats the same way, and so do some other signals |
 | `this channel` | The long training field matched this channel's: a frame of ours |
 | `L-SIG read` | Of those, the ones whose SIGNAL field passed its parity, named a rate the standard lists and ended in a zero tail |
-| `L-SIG refused` | The ones whose SIGNAL field failed one of those checks |
+| `greenfield` | The ones in 802.11n's greenfield format, which has no SIGNAL field: an HT-SIG right after the training, its CRC good |
+| `unreadable` | The ones where neither passed its checks |
 | `adjacent` | It matched a channel 5, 10 or 15 MHz away, judged on the part of it our 20 MHz can hear |
 | `not a preamble` | It matched nothing |
 | `cut short` | A break or a retune took it before it could be judged and its SIGNAL field heard (on the survey, every hop is a retune) |
 
 `this channel`, `adjacent`, `not a preamble` and `cut short` add up to
-`repeats`, and the two L-SIG rows add up to `this channel`. In a block of
+`repeats`, and the three rows under `this channel` add up to it. In a block of
 flats expect a lot of all of them; the air is busier than any list of
 networks suggests, and a channel with no network on it still hears the ones
 beside it.
@@ -152,7 +153,18 @@ Wi-Fi format sends one too, for the benefit of older radios, and it tells
 them the truth about the time while fibbing about the rate: an 802.11n or
 ax frame's L-SIG always says 6 Mb/s. So the Wi-Fi panel shows it as
 `L-SIG 6 Mb/s`, the L-SIG's word, and the airtime beside it, which holds
-for all of them.
+for all of them (to the next 4 µs for the newer ones).
+
+What the frame actually is comes from the symbols after it, told apart the
+way the standard tells its own receivers to: a quarter-turned symbol for
+802.11n (`HT-mixed`, with the MCS and length its HT-SIG gives, or
+`HT-greenfield`), a repeated SIGNAL field for 802.11ax and 802.11be (`HE`,
+`EHT or a later PHY`, named for now and read later), a quarter-turn one
+symbol later for VHT (a 5 GHz format that a few 2.4 GHz chips send
+anyway), and `non-HT` (802.11a/g) when none of those signatures is there.
+Every signature is only believed under its own check: a quarter-turned
+symbol whose HT-SIG fails its CRC is `unreadable`, because noise turns
+symbols too.
 
 Every count on the other NET panels is only as complete as this panel says
 the feed was. If this one is unhappy, believe it over the others.

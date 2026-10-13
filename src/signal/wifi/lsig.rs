@@ -10,44 +10,29 @@
 //! duration (10.27.4, 27.3.11.5), so what it says about time holds for
 //! frames this bench cannot decode further.
 //!
-//! **Cut where the channel was measured.** The symbol is taken 144 samples
-//! after the long field's first, with the timing and derotation the channel
-//! estimate used: a timing error inside the guard interval turns both
-//! alike and cancels when one is divided by the other.
-//!
-//! **The pilots take out what the offset's error left**, a phase common to
-//! every tone, before any bit is read; and each tone's reading is weighted
-//! by its own certainty, |H|^2 over its noise, so a tone an echo notched
-//! counts for less.
+//! The symbol is received as every signalling symbol is ([`super::sig`]):
+//! equalised by the long field's estimate, righted by its pilots, each
+//! tone weighted by its own certainty.
 //!
 //! **The tail is a check.** Decoded unterminated, a garbled symbol has to
 //! land six zeros besides even parity and a rate the standard lists: about
 //! one in 200 does. A terminated decode forces the tail and loses the
 //! check, and then a quarter of garbled symbols pass as a rate and a
-//! length nobody sent. It reads more fields right near 0 dB (91 % against
-//! 68 %), but only by accepting those; held to as little noise accepted
-//! (its re-encoded word within 6 of the hard readings), it read no more
-//! than the tail check does (63 % at 0 dB, 96 % at 2 dB against 95 %). So
-//! the standard's own check it is, with no threshold to set (the ignored
-//! test at the foot measures it).
+//! length nobody sent. Held to as little noise accepted by a threshold on
+//! how far its re-encoded word lies from the hard readings (within 7 of 48,
+//! 0.5 % of noise accepted), the terminated decode reads about half a dB
+//! lower (92 % at 0 dB against 86 %); but that threshold is a number found
+//! by trying, where the tail is the standard's own check with a stated
+//! rate. The tail it is (the ignored test at the foot measures it).
 
+#[cfg(test)]
 use num_complex::Complex;
-use rustfft::FftPlanner;
 
 use super::bcc;
-use super::channel::{estimate, Floor};
 use super::interleave::deinterleave;
-use super::map::demap_soft;
-use super::ofdm::{data_subcarriers, polarity, PILOTS};
 use super::signal_field::{Coding, Rate};
+#[cfg(test)]
 use super::sync::Sync;
-
-/// The sample rate everything here is at (a 20 MHz channel, 17.3.2.4).
-const FS: f64 = 20e6;
-
-/// Where the SIGNAL symbol's transform starts, after the long training
-/// field's first sample: its two symbols and the symbol's 0.8 us guard.
-pub const SIGNAL_AT: usize = 128 + 16;
 
 /// What a frame's L-SIG says.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -96,7 +81,7 @@ impl LSig {
 
     /// The field's 24 bits, checked as a receiver checks them; the
     /// reserved bit is ignored on receive (17.3.4.4).
-    fn from_bits(bits: &[bool]) -> Result<Self, Refused> {
+    pub fn from_bits(bits: &[bool]) -> Result<Self, Refused> {
         if bits[..18].iter().filter(|&&b| b).count() % 2 == 1 {
             return Err(Refused::Parity);
         }
@@ -109,74 +94,43 @@ impl LSig {
     }
 }
 
-/// Where tone `k`, -26 to 26 without 0, sits in [`super::channel::TONES`]
-/// order.
-fn tone(k: i32) -> usize {
-    if k < 0 {
-        (k + 26) as usize
-    } else {
-        (k + 25) as usize
-    }
+/// The L-SIG from its symbol's readings in subcarrier order (BPSK,
+/// [`super::sig::Symbol::readings`] at no rotation): deinterleaved,
+/// decoded unterminated and checked.
+#[cfg(test)]
+pub fn from_readings(r: &[f32]) -> Result<LSig, Refused> {
+    LSig::from_bits(&bits(r))
 }
 
-/// The SIGNAL symbol's 48 soft readings, deinterleaved into the order the
-/// encoder sent them, positive for a 1. `None` unless the long field and
-/// the symbol are both held.
+/// The 24 bits the readings decode to, unterminated, before any check.
+pub fn bits(r: &[f32]) -> Vec<bool> {
+    // A symbol's 48 readings always decode to 24 bits; the decoder refuses
+    // only an empty or odd count, which no symbol gives, and a field of
+    // ones fails the tail check.
+    bcc::decode(&deinterleave(r, 1), Coding::Half, false).unwrap_or_else(|| vec![true; 24])
+}
+
+/// The SIGNAL symbol's 48 soft readings, in subcarrier order. `None`
+/// unless the long field and the symbol are both held.
+#[cfg(test)]
 fn readings(samples: &[Complex<f32>], first_pair: u64, sync: &Sync) -> Option<Vec<f32>> {
-    let offset = sync.offset.value();
-    let channel = estimate(samples, first_pair, sync.ltf_start, offset, &Floor::flat())?;
-    let at = (sync.ltf_start.checked_sub(first_pair)? as usize).checked_add(SIGNAL_AT)?;
-    let symbol = samples.get(at..at + 64)?;
-    let turn = -std::f64::consts::TAU * offset / FS;
-    let mut y: Vec<Complex<f64>> = symbol
-        .iter()
-        .enumerate()
-        .map(|(n, z)| {
-            Complex::new(z.re as f64, z.im as f64)
-                * Complex::from_polar(1.0, turn * (SIGNAL_AT + n) as f64)
-        })
-        .collect();
-    FftPlanner::new().plan_fft_forward(64).process(&mut y);
-    let bin = |k: i32| y[k.rem_euclid(64) as usize];
-
-    // The common phase, from the pilots against what they should read
-    // through their channel.
-    let p0 = polarity(0);
-    let common = PILOTS
-        .iter()
-        .map(|&(k, v)| bin(k) * (channel.h[tone(k)] * v * p0).conj())
-        .sum::<Complex<f64>>();
-    let right = if common.norm() > 0.0 {
-        common.conj() / common.norm()
-    } else {
-        Complex::new(1.0, 0.0)
-    };
-
-    let mut soft = Vec::with_capacity(48);
-    for k in data_subcarriers() {
-        let (h, v) = (channel.h[tone(k)], channel.variance[tone(k)]);
-        let gain = h.norm_sqr();
-        if gain == 0.0 || v <= 0.0 {
-            soft.push(0.0);
-            continue;
-        }
-        let point = bin(k) * right / h;
-        soft.push(demap_soft(&[point], 1)[0] * (gain / v) as f32);
-    }
-    Some(deinterleave(&soft, 1))
+    Some(
+        super::sig::header(samples, first_pair, sync)?
+            .symbol(0)?
+            .readings(Complex::new(1.0, 0.0)),
+    )
 }
 
 /// Read the L-SIG of the frame `sync` describes, from `samples` starting
 /// at stream pair `first_pair`. `None` unless the long training field and
 /// the SIGNAL symbol are both held.
+#[cfg(test)]
 pub fn read(
     samples: &[Complex<f32>],
     first_pair: u64,
     sync: &Sync,
 ) -> Option<Result<LSig, Refused>> {
-    let r = readings(samples, first_pair, sync)?;
-    let bits = bcc::decode(&r, Coding::Half, false)?;
-    Some(LSig::from_bits(&bits))
+    Some(from_readings(&readings(samples, first_pair, sync)?))
 }
 
 #[cfg(test)]
@@ -251,11 +205,12 @@ mod tests {
     }
 
     /// A frame at `LEAD`, synchronised as the timing tests show it is: the
-    /// long field's first symbol 192 samples in, no offset left.
+    /// long field's first symbol 192 samples in, no offset left, and the
+    /// offset's uncertainty what the synchronisation states at 10 dB.
     fn placed() -> Sync {
         Sync {
             ltf_start: (LEAD + 192) as u64,
-            offset: Uncertain::from_sigma(0.0, 1.0),
+            offset: Uncertain::from_sigma(0.0, 2_000.0),
             snr: 100.0,
         }
     }
@@ -314,10 +269,11 @@ mod tests {
         }
     }
 
-    /// The SIGNAL symbol turned by 2 rad against the long field (a phase
-    /// the offset's estimate left, made large): the pilots right it.
+    /// A 50 kHz offset the synchronisation did not take out, but said it
+    /// might have (its uncertainty 50 kHz): by the SIGNAL symbol it has
+    /// turned the carrier 1.8 rad, and the pilots right it.
     #[test]
-    fn the_pilots_right_a_turned_symbol() {
+    fn the_pilots_right_what_the_offset_left() {
         let mut rng = Rng::new(82);
         let mut x = on_air(
             &header(&signal_field::bits(Rate::R24, 777)),
@@ -325,12 +281,13 @@ mod tests {
             25.0,
             &mut rng,
         );
-        let turn = Complex::from_polar(1.0f32, 2.0);
-        for z in &mut x[LEAD + 320..] {
-            *z *= turn;
-        }
+        crate::signal::dsp::nco::Nco::new(50e3, 20e6).mix(&mut x);
+        let sync = Sync {
+            offset: Uncertain::from_sigma(0.0, 50e3),
+            ..placed()
+        };
         assert_eq!(
-            read(&x, 0, &placed()),
+            read(&x, 0, &sync),
             Some(Ok(LSig {
                 rate: Rate::R24,
                 length: 777
@@ -446,7 +403,7 @@ mod tests {
                     snr,
                     &mut rng,
                 );
-                let r = readings(&x, 0, &placed()).unwrap();
+                let r = deinterleave(&readings(&x, 0, &placed()).unwrap(), 1);
                 let (open, closed) = both(&r);
                 open_ok += (open == want) as usize;
                 closed_ok += (closed == want) as usize;
@@ -462,7 +419,7 @@ mod tests {
         let (mut open_yes, mut closed_yes) = (0, 0);
         for _ in 0..trials {
             let x = on_air(&frame, &[Complex::new(1.0, 0.0)], 20.0, &mut rng);
-            let r = readings(&x, 0, &placed()).unwrap();
+            let r = deinterleave(&readings(&x, 0, &placed()).unwrap(), 1);
             let (open, closed) = both(&r);
             open_yes += matches!(open, Some(Ok(_))) as usize;
             closed_yes += matches!(closed, Some(Ok(_))) as usize;
@@ -471,87 +428,6 @@ mod tests {
             "noise accepted: unterminated, tail checked {:.2} %; terminated {:.2} %",
             100.0 * open_yes as f64 / trials as f64,
             100.0 * closed_yes as f64 / trials as f64
-        );
-    }
-
-    /// **What a recording's L-SIGs say, by hand**
-    /// (`SDRTOP_REPLAY=path.sigmf-data`, ci8 at 20 Msps on a channel
-    /// centre): every frame of this channel read offline, counted by rate
-    /// and by length, with the refusals by check. `cargo test --release
-    /// a_recordings_l_sigs -- --ignored --nocapture`.
-    #[test]
-    #[ignore]
-    fn a_recordings_l_sigs() {
-        let Ok(path) = std::env::var("SDRTOP_REPLAY") else {
-            return;
-        };
-        let bytes = std::fs::read(&path).unwrap();
-        let pairs = bytes.len() / 2;
-        let pair = |p: &[u8; 2]| Complex::new(p[0] as i8 as f32 / 128.0, p[1] as i8 as f32 / 128.0);
-        // The radio's DC taken off, as the worker's feed does: the long
-        // field has no DC tone, and the HackRF's spike would sit in every
-        // window the gate fits.
-        // Summed in f64: hundreds of millions of f32 additions lose it.
-        let sum = bytes
-            .as_chunks::<2>()
-            .0
-            .iter()
-            .map(|p| {
-                let z = pair(p);
-                Complex::new(z.re as f64, z.im as f64)
-            })
-            .sum::<Complex<f64>>()
-            / pairs as f64;
-        let dc = Complex::new(sum.re as f32, sum.im as f32);
-        // Converted a stretch at a time: the whole recording as floats
-        // would be four times its size.
-        let stretch = |from: usize, len: usize| -> Vec<Complex<f32>> {
-            bytes[2 * from..2 * (from + len).min(pairs)]
-                .as_chunks::<2>()
-                .0
-                .iter()
-                .map(|p| pair(p) - dc)
-                .collect()
-        };
-        let mut by_rate = std::collections::BTreeMap::new();
-        let mut by_length = std::collections::BTreeMap::new();
-        let mut refused = std::collections::BTreeMap::new();
-        let mut airtime = 0u64;
-        let mut detector = StfDetector::new();
-        for at in (0..pairs).step_by(131_072) {
-            for d in detector.push(at as u64, &stretch(at, 131_072)) {
-                let Some((from, len)) = crate::signal::wifi::sync::needs(d.peak) else {
-                    continue;
-                };
-                let x = stretch(from as usize, len);
-                if let Some(Verdict::ThisChannel(s)) = examine(&x, from, d.peak) {
-                    match read(&x, from, &s) {
-                        Some(Ok(l)) => {
-                            *by_rate.entry(l.rate.mbps()).or_insert(0) += 1;
-                            let bucket = match l.length {
-                                0..=31 => "0-31",
-                                32..=127 => "32-127",
-                                128..=511 => "128-511",
-                                512..=1599 => "512-1599",
-                                _ => "1600+",
-                            };
-                            *by_length.entry((l.rate.mbps(), bucket)).or_insert(0) += 1;
-                            airtime += l.airtime_us() as u64;
-                        }
-                        Some(Err(why)) => *refused.entry(why.label()).or_insert(0) += 1,
-                        None => {}
-                    }
-                }
-            }
-        }
-        let secs = pairs as f64 / FS;
-        eprintln!("{secs:.1} s; L-SIG rates (Mb/s: frames) {by_rate:?}");
-        eprintln!("by rate and length {by_length:?}");
-        eprintln!("refused {refused:?}");
-        eprintln!(
-            "airtime {:.1} ms, {:.2} % of the recording",
-            airtime as f64 / 1e3,
-            airtime as f64 / 1e4 / secs
         );
     }
 

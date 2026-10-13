@@ -11,8 +11,9 @@
 //! [`super::classic`] stand down on its views in turn: the two benches are
 //! two receivers, and a view runs the one it needs.
 //!
-//! Where it runs, it looks for preambles ([`StfDetector`]) and counts what
-//! it found and what a break cut short; it decodes nothing yet. Where it
+//! Where it runs, it looks for preambles ([`StfDetector`]), judges each by
+//! its long training field, reads the signalling after it (the L-SIG and
+//! the format), and counts what it found and what a break cut short. Where it
 //! runs and why not are written when the answer changes, not once a block.
 
 use std::sync::{Arc, Mutex};
@@ -22,7 +23,7 @@ use num_complex::Complex;
 use super::{Tuning, View};
 use crate::signal::net::measure::Recent;
 use crate::signal::wifi::detect::{Detection, StfDetector};
-use crate::signal::wifi::lsig::read;
+use crate::signal::wifi::format::{read, Signalling};
 use crate::signal::wifi::sync::{examine, needs, Verdict};
 use crate::state::SdrMetrics;
 
@@ -117,20 +118,22 @@ impl Wifi {
             };
             match examine(&stretch, from, d.peak) {
                 Some(Verdict::ThisChannel(s)) => match read(&stretch, from, &s) {
-                    // The stretch holds the SIGNAL symbol (`needs`); were it
-                    // ever short, the frame was not heard whole.
+                    // The stretch holds the symbols a format is told from
+                    // (`needs`); were it ever short, the frame was not heard
+                    // whole.
                     None => counts.cut += 1,
-                    Some(lsig) => {
+                    Some(heard) => {
                         counts.this_channel += 1;
-                        match lsig {
-                            Ok(_) => counts.lsig_read += 1,
-                            Err(_) => counts.lsig_refused += 1,
+                        match heard.signalling() {
+                            Signalling::LSigRead => counts.lsig_read += 1,
+                            Signalling::Greenfield => counts.greenfield += 1,
+                            Signalling::Unreadable => counts.unreadable += 1,
                         }
                         last = Some(crate::state::WifiFrame {
                             offset_hz: s.offset,
                             snr_db: 10.0 * s.snr.log10(),
                             carrier_hz: centre_hz,
-                            lsig,
+                            heard,
                             when: now,
                         });
                     }
@@ -147,7 +150,8 @@ impl Wifi {
             let f = &mut m.net.health.wifi;
             f.this_channel += counts.this_channel;
             f.lsig_read += counts.lsig_read;
-            f.lsig_refused += counts.lsig_refused;
+            f.greenfield += counts.greenfield;
+            f.unreadable += counts.unreadable;
             f.adjacent += counts.adjacent;
             f.not_preamble += counts.not_preamble;
             f.cut += counts.cut;
