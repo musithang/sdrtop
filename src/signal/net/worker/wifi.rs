@@ -179,8 +179,12 @@ impl Wifi {
             if let Some(clock_ppm) = clock {
                 let ppm = |hz: f64| hz / p.centre_hz * 1e6;
                 clocks.push(WifiClock {
-                    clock_ppm,
+                    clock_ppm: clock_ppm.clock_ppm,
                     carrier_ppm: Uncertain::from_sigma(
+                        ppm(clock_ppm.carrier_hz.value()),
+                        ppm(clock_ppm.carrier_hz.sigma()),
+                    ),
+                    preamble_ppm: Uncertain::from_sigma(
                         ppm(p.sync.offset.value()),
                         ppm(p.sync.offset.sigma()),
                     ),

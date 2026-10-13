@@ -29,8 +29,8 @@ use crate::ui::widgets::reading::Reading;
 
 pub struct NetWifiStandinPanel;
 
-/// Width of the label column.
-const LABEL: usize = 10;
+/// Width of the label column: the longest label and a space.
+const LABEL: usize = 11;
 
 fn lines(state: &SdrMetrics, theme: &crate::Theme) -> Vec<Line<'static>> {
     let label = |s: &str| Span::styled(format!(" {s:<LABEL$}"), Style::default().fg(theme.label));
@@ -71,6 +71,7 @@ fn lines(state: &SdrMetrics, theme: &crate::Theme) -> Vec<Line<'static>> {
             let ago = now.saturating_duration_since(f.when).as_secs();
             vec![
                 label("Last frame"),
+                Span::styled("preamble ", Style::default().fg(theme.label)),
                 Span::styled(
                     format!(
                         "{} · {}",
@@ -156,7 +157,7 @@ fn lines(state: &SdrMetrics, theme: &crate::Theme) -> Vec<Line<'static>> {
                 label("Clock"),
                 Span::styled(
                     format!(
-                        "{} symbol clock \u{b7} carrier {}",
+                        "{} symbol clock \u{b7} carrier {} over the data",
                         Reading::new(c.clock_ppm, "ppm", f64::INFINITY).text(),
                         Reading::new(c.carrier_ppm, "ppm", f64::INFINITY).text()
                     ),
@@ -172,6 +173,27 @@ fn lines(state: &SdrMetrics, theme: &crate::Theme) -> Vec<Line<'static>> {
                 ),
             ],
         }));
+        // The same frame's preamble, a 6.4 us look at a carrier that wanders
+        // from the data's: shown apart, with how far it lay.
+        if let Some(c) = &state.net.wifi.clock {
+            out.push(Line::from(vec![
+                label("Preamble"),
+                Span::styled(
+                    format!(
+                        "carrier {}",
+                        Reading::new(c.preamble_ppm, "ppm", f64::INFINITY).text()
+                    ),
+                    value,
+                ),
+                Span::styled(
+                    format!(
+                        " \u{b7} {:+.1} ppm from the data's",
+                        c.preamble_ppm.value() - c.carrier_ppm.value()
+                    ),
+                    quiet,
+                ),
+            ]));
+        }
         let check = &state.net.wifi.clock_check;
         if let Some(mean) = check.mean() {
             let mut spans = vec![
@@ -371,7 +393,7 @@ mod tests {
     }
 
     fn text(m: &SdrMetrics) -> String {
-        draw(NetWifiStandinPanel, 90, 13, m).join("\n")
+        draw(NetWifiStandinPanel, 100, 14, m).join("\n")
     }
 
     /// A frame of this channel that said `heard`.
@@ -447,6 +469,8 @@ mod tests {
         m.net.wifi.last_frame = Some(frame(non_ht(Rate::R24, 1_500)));
         let r = row(&text(&m), "Last frame");
         assert!(r.contains("kHz") && r.contains("ppm"), "{r}");
+        // Its offset is the preamble's, and says so.
+        assert!(r.contains("preamble"), "{r}");
         assert!(r.contains("-12"), "{r}");
         assert!(r.contains("14 dB"), "{r}");
     }
@@ -649,6 +673,7 @@ mod tests {
         let reading = |clock: f64, carrier: f64| crate::state::WifiClock {
             clock_ppm: Uncertain::from_sigma(clock, 0.6),
             carrier_ppm: Uncertain::from_sigma(carrier, 0.8),
+            preamble_ppm: Uncertain::from_sigma(carrier + 2.1, 0.1),
             symbols: 134,
             when: std::time::Instant::now(),
         };
@@ -659,7 +684,11 @@ mod tests {
         let out = text(&m);
         let r = row(&out, "Clock");
         assert!(r.contains("-11.9") && r.contains("-12.2"), "{r}");
+        assert!(r.contains("carrier") && r.contains("over the data"), "{r}");
         assert!(r.contains("134 symbols"), "{r}");
+        // The preamble's carrier, apart from the data's, and how far.
+        let p = row(&out, "Preamble");
+        assert!(p.contains("-10.1") && p.contains("+2.1"), "{p}");
         let c = row(&out, "Clocks");
         assert!(
             c.contains("clock \u{2212} carrier") || c.contains("clock - carrier"),

@@ -1815,6 +1815,13 @@ mod tests {
         assert_eq!(m.net.health.wifi.lsig_read, 1, "{:?}", m.net.health.wifi);
         let clock = m.net.wifi.clock.expect("a clock read");
         assert_eq!(clock.symbols, 68);
+        // The carrier over the data, the test's own, near nothing too; the
+        // preamble's beside it.
+        assert!(
+            clock.carrier_ppm.value().abs() < 5.0 * clock.carrier_ppm.sigma() + 0.05,
+            "{clock:?}"
+        );
+        assert!(clock.preamble_ppm.sigma() > 0.0, "{clock:?}");
         assert!(
             clock.clock_ppm.value().abs() < 5.0 * clock.clock_ppm.sigma() + 1.0,
             "{clock:?}"

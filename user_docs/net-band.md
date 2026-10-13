@@ -189,13 +189,15 @@ Anything else is a finding, and it is left on screen rather than averaged
 away; the bench does not yet know who sent which frame, so it cannot say
 whose.
 
-One such finding is already in: the carrier offset is read from the
-preamble, the first 16 µs of a frame, and on our own recordings that is
-not always where the transmitter's carrier ends up. A frame whose clock
-and whose pilots both said -20.5 ppm had a preamble anywhere from -19 to
--25 ppm. A transmitter that has just switched on is still settling, it
-seems, and the check catches it doing so: expect the `Clocks` row's
-chi-square to sit well above one for that reason alone.
+One such finding is already in, and it shaped the rows: the carrier read
+from the preamble, a 6.4 µs look, wanders from the carrier over the rest
+of the frame by about 4 kHz either way, on every transmitter we heard.
+Someone's oscillator is jittery over microseconds (quite possibly the
+HackRF's own; the bench cannot tell whose yet). So the `Clock` row's
+carrier is the one read from the pilots across the data, where the
+crystal shows, and the preamble's is shown beside it with how far it lay.
+The `Last frame` offset is labelled as the preamble's for the same
+reason.
 
 Every count on the other NET panels is only as complete as this panel says
 the feed was. If this one is unhappy, believe it over the others.

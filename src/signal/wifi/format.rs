@@ -469,6 +469,37 @@ mod tests {
         }
     }
 
+    /// A preamble whose carrier lay 14 kHz from the rest of its frame (5.8
+    /// ppm, the most the recordings showed): by an extended-range SU's
+    /// last SIG-A symbol the preamble's offset is 2.3 rad wrong, and the
+    /// pilots, weighed against the offset's stated error, still right
+    /// enough of it. At 15 dB through the chain, every one read (and at 6,
+    /// 10 and 20 dB too, tried by hand; widening the pilots' prior by the
+    /// wander changed nothing, so it was not done).
+    #[test]
+    fn a_pulled_preambles_later_symbols_are_righted() {
+        let sig = HeSigA {
+            ppdu: HePpdu::ErSu,
+            bss: bss(5, false),
+        };
+        let mut rng = Rng::new(100);
+        let mut read_right = 0;
+        for _ in 0..20 {
+            let f = build(Kind::Repeated(1004, hesig::he_bits(&sig), true), &mut rng);
+            let mut x = on_air(&f, 15.0, &mut rng);
+            let turn = std::f64::consts::TAU * 14e3 / 20e6;
+            for (n, z) in x[LEAD..].iter_mut().enumerate() {
+                *z *= Complex::from_polar(1.0, (turn * n.min(320) as f64) as f32);
+            }
+            let want = Some(Format::He {
+                kind: HeKind::ErSu,
+                sig_a: Ok(sig),
+            });
+            read_right += (received(&x).map(|h| h.format) == Some(want)) as usize;
+        }
+        assert_eq!(read_right, 20);
+    }
+
     /// A U-SIG whose CRC was spoiled in sending is an RL-SIG with its U-SIG
     /// refused, and named nothing more.
     #[test]
@@ -763,6 +794,7 @@ mod tests {
             .and_then(|m| m["captures"][0]["core:frequency"].as_f64())
             .unwrap_or(2_462e6);
         let mut clocks: Vec<(usize, String, Uncertain, Uncertain, f64)> = Vec::new();
+        let mut pulls_ppm: Vec<(f64, usize)> = Vec::new();
         let mut detector = StfDetector::new();
         for at in (0..pairs).step_by(131_072) {
             for d in detector.push(at as u64, &stretch(at, 131_072)) {
@@ -788,29 +820,33 @@ mod tests {
                         if let Some(c) =
                             crate::signal::wifi::clock::measure(&full, s.ltf_start, &s, &p)
                         {
-                            let carrier = Uncertain::from_sigma(
-                                s.offset.value() / centre * 1e6,
-                                s.offset.sigma() / centre * 1e6,
-                            );
-                            let residual = crate::signal::wifi::clock::residual_carrier_hz(
-                                &full,
-                                s.ltf_start,
-                                &s,
-                                &p,
-                            )
-                            .map_or(f64::NAN, |r| r.value() / centre * 1e6);
+                            let data = c.carrier_hz.value() / centre * 1e6;
                             if p.count >= 100 {
                                 eprintln!(
-                                    "  long: {} symbols, {name}, clock {:.2} +- {:.2}, carrier (training) {:.2} +- {:.2}, carrier (pilots) {:.2}",
+                                    "  long: {} symbols, {name}, clock {:.2} +- {:.2}, carrier (preamble) {:.2}, carrier (data) {data:.2}",
                                     p.count,
-                                    c.value(),
-                                    c.sigma(),
-                                    carrier.value(),
-                                    carrier.sigma(),
-                                    carrier.value() + residual
+                                    c.clock_ppm.value(),
+                                    c.clock_ppm.sigma(),
+                                    s.offset.value() / centre * 1e6,
                                 );
                             }
+                            let carrier =
+                                Uncertain::from_sigma(data, c.carrier_hz.sigma() / centre * 1e6);
+                            let c = c.clock_ppm;
                             clocks.push((p.count, name.clone(), c, carrier, 10.0 * s.snr.log10()));
+                        }
+                    }
+                    if let Some(p) =
+                        crate::signal::wifi::clock::layout(&heard).filter(|p| p.count >= 8)
+                    {
+                        let full = stretch(s.ltf_start as usize, p.end());
+                        if let Some(r) =
+                            crate::signal::wifi::clock::measure(&full, s.ltf_start, &s, &p)
+                        {
+                            if r.carrier_hz.sigma() / centre * 1e6 < 0.5 {
+                                let pull = s.offset.value() - r.carrier_hz.value();
+                                pulls_ppm.push((pull / centre * 1e6, p.count));
+                            }
                         }
                     }
                     *by_format.entry(name).or_insert(0) += 1;
@@ -848,6 +884,19 @@ mod tests {
             airtime as f64 / 1e3,
             airtime as f64 / 1e4 / secs
         );
+        // How far each preamble's carrier lay from its DATA field's.
+        let mut abs: Vec<f64> = pulls_ppm.iter().map(|p| p.0.abs()).collect();
+        abs.sort_by(f64::total_cmp);
+        if !abs.is_empty() {
+            let n = pulls_ppm.len() as f64;
+            let mean = pulls_ppm.iter().map(|p| p.0).sum::<f64>() / n;
+            let rms = (pulls_ppm.iter().map(|p| p.0 * p.0).sum::<f64>() / n).sqrt();
+            let q = |f: f64| abs[((abs.len() - 1) as f64 * f) as usize];
+            eprintln!(
+                "preamble - data carrier over {} frames: mean {mean:+.2} ppm, rms {rms:.2}, |.| median {:.2}, 90 % {:.2}, 99 % {:.2}, max {:.2}",
+                pulls_ppm.len(), q(0.5), q(0.9), q(0.99), q(1.0)
+            );
+        }
         // The clocks against their carriers: by how many symbols they were
         // read over, the worst pulls, and by carrier (a transmitter's
         // likeness until the MAC header names it).
@@ -858,6 +907,7 @@ mod tests {
                 c.add(&crate::state::WifiClock {
                     clock_ppm: *clock,
                     carrier_ppm: *carrier,
+                    preamble_ppm: *carrier,
                     symbols: *n,
                     when: std::time::Instant::now(),
                 });
@@ -907,6 +957,7 @@ mod tests {
                 c.add(&crate::state::WifiClock {
                     clock_ppm: r.2,
                     carrier_ppm: r.3,
+                    preamble_ppm: r.3,
                     symbols: r.0,
                     when: std::time::Instant::now(),
                 });

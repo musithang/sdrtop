@@ -21,14 +21,18 @@ pub struct WifiFrame {
 }
 
 /// The latest frame of this channel whose symbol clock was read, beside
-/// its carrier: two readings of what the standard requires to be one
-/// oscillator.
+/// its carrier over the same DATA field: two readings of what the standard
+/// requires to be one oscillator; and the preamble's carrier, which lies
+/// apart from them.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct WifiClock {
     /// Its sample clock against ours, in ppm, positive when fast.
     pub clock_ppm: crate::signal::dsp::uncertainty::Uncertain,
-    /// Its carrier against our tuning, in ppm of the channel centre.
+    /// Its carrier over the DATA field against our tuning, in ppm of the
+    /// channel centre.
     pub carrier_ppm: crate::signal::dsp::uncertainty::Uncertain,
+    /// Its carrier over the preamble's long training field, likewise.
+    pub preamble_ppm: crate::signal::dsp::uncertainty::Uncertain,
     /// The DATA symbols the clock was read over.
     pub symbols: usize,
     pub when: std::time::Instant,
@@ -112,6 +116,7 @@ mod tests {
         WifiClock {
             clock_ppm: Uncertain::from_sigma(clock, 1.0),
             carrier_ppm: Uncertain::from_sigma(carrier, 1.0),
+            preamble_ppm: Uncertain::from_sigma(carrier + 2.0, 0.1),
             symbols: 100,
             when: std::time::Instant::now(),
         }

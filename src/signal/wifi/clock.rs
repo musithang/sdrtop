@@ -22,6 +22,18 @@
 //! the pairs' constant phases (each pilot's own channel) are absorbed by
 //! the fit, so no channel estimate is needed at all.
 //!
+//! **The carrier is read over the same stretch.** The same four pilots,
+//! each against itself in the first DATA symbol and summed, keep the phase
+//! they share, which turns with whatever carrier offset the preamble's
+//! estimate left; its slope added to that estimate is the carrier over the
+//! DATA field. The preamble's own reading is a 6.4 us look, and on the
+//! recordings it wandered from the DATA field's by 1.6 to 1.8 ppm rms on
+//! every transmitter heard, mean zero, while this one agreed with the
+//! clock to a tenth of a ppm: the clock is held against this one. A
+//! lopsided channel lets a little of the clock's slide into the shared
+//! phase (the pilots' power-weighted mean subcarrier times its rate); that
+//! share is taken out.
+//!
 //! **Only frames whose pilots are known**: non-HT (Clause 17's +1, +1, +1,
 //! -1 at p_n), and HT-mixed with one space-time stream (Psi = 1, 1, 1, -1
 //! rotated a place each symbol, Equation 19-54), its DATA symbols where its
@@ -31,6 +43,7 @@
 use num_complex::Complex;
 
 use super::format::{Format, Heard};
+use super::ofdm::{polarity, PILOTS};
 use super::sig::FIRST_AT;
 use super::sync::Sync;
 use crate::signal::dsp::uncertainty::Uncertain;
@@ -75,7 +88,12 @@ impl Plan {
 /// non-HT frame's or a one-stream BCC HT-mixed one's, of
 /// [`MIN_SYMBOLS`] or more.
 pub fn plan(heard: &Heard) -> Option<Plan> {
-    let plan = match heard.format? {
+    layout(heard).filter(|p| p.count >= MIN_SYMBOLS)
+}
+
+/// Where a frame's DATA symbols are, however few.
+pub fn layout(heard: &Heard) -> Option<Plan> {
+    Some(match heard.format? {
         Format::NonHt => Plan {
             first: FIRST_AT + 80,
             step: 80,
@@ -98,8 +116,7 @@ pub fn plan(heard: &Heard) -> Option<Plan> {
             }
         }
         _ => return None,
-    };
-    (plan.count >= MIN_SYMBOLS).then_some(plan)
+    })
 }
 
 /// The sample rate everything here is at (a 20 MHz channel, 17.3.2.4).
@@ -109,6 +126,16 @@ const FS: f64 = 20e6;
 const PSI: [f64; 4] = [1.0, 1.0, 1.0, -1.0];
 
 impl Pilots {
+    /// For DATA symbol `n` (from 0), the four pilots' full values, -21
+    /// first, polarity included: p_(n+1) for non-HT, whose DATA symbols
+    /// follow the SIGNAL symbol's p_0; p_(n+3) for HT-mixed (19.3.11.11.3).
+    fn signs(self, n: usize) -> [f64; 4] {
+        match self {
+            Pilots::NonHt => PILOTS.map(|(_, v)| v * polarity(n + 1)),
+            Pilots::Ht => [0, 1, 2, 3].map(|j| PSI[(n + j) % 4] * polarity(n + 3)),
+        }
+    }
+
     /// For DATA symbol `n` (from 0), the products of the signs of the
     /// pilots at 21 and -21, and at 7 and -7. The polarity, common to all
     /// four, squares away.
@@ -158,16 +185,25 @@ fn slope(at: &[f64], z: &[Complex<f64>]) -> Option<Uncertain> {
     Some(Uncertain::from_variance(b, rss / (n - 2) as f64 / sxx))
 }
 
-/// The transmitter's sample clock against ours, in ppm, positive when
-/// theirs runs fast, with its uncertainty: from `samples` starting at
-/// stream pair `first_pair`, the frame `sync` describes laid out as
-/// `plan` says. `None` unless its DATA field is held.
+/// What a frame's DATA field says of its transmitter's oscillator.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Clocked {
+    /// Its sample clock against ours, in ppm, positive when fast.
+    pub clock_ppm: Uncertain,
+    /// Its carrier against our tuning over the DATA field, in hertz.
+    pub carrier_hz: Uncertain,
+}
+
+/// The transmitter's sample clock and its carrier over the DATA field,
+/// each with its uncertainty: from `samples` starting at stream pair
+/// `first_pair`, the frame `sync` describes laid out as `plan` says.
+/// `None` unless its DATA field is held.
 pub fn measure(
     samples: &[Complex<f32>],
     first_pair: u64,
     sync: &Sync,
     plan: &Plan,
-) -> Option<Uncertain> {
+) -> Option<Clocked> {
     let base = sync.ltf_start.checked_sub(first_pair)? as usize;
     samples.get(base..base + plan.end())?;
     let turn = -std::f64::consts::TAU * sync.offset.value() / FS;
@@ -187,12 +223,28 @@ pub fn measure(
         Vec::with_capacity(plan.count),
         Vec::with_capacity(plan.count),
     );
+    let mut common = Vec::with_capacity(plan.count);
+    let mut first = [Complex::new(0.0, 0.0); 4];
     for n in 0..plan.count {
         let start = plan.first + plan.step * n;
         let [s21, s7] = plan.pilots.pairs(n);
+        // The four pilots, -21 first, and each times its own sign.
+        let y = [-21, -7, 7, 21].map(|k| bin(start, k));
+        let signs = plan.pilots.signs(n);
+        let signed: [Complex<f64>; 4] = std::array::from_fn(|j| y[j] * signs[j]);
+        if n == 0 {
+            first = signed;
+        }
         at.push(start as f64);
-        outer.push(bin(start, 21) * bin(start, -21).conj() * s21);
-        inner.push(bin(start, 7) * bin(start, -7).conj() * s7);
+        outer.push(y[3] * y[0].conj() * s21);
+        inner.push(y[2] * y[1].conj() * s7);
+        // Each pilot against itself in the first symbol, summed: the phase
+        // all four share, which the carrier's residual turns.
+        common.push(
+            (0..4)
+                .map(|j| signed[j] * first[j].conj())
+                .sum::<Complex<f64>>(),
+        );
     }
     // Each pair's phase rises 2 pi (2k) e / 64 a sample of window start: e
     // from each slope, then the two by inverse variance.
@@ -206,64 +258,36 @@ pub fn measure(
     if !(wa.is_finite() && wb.is_finite()) {
         return None;
     }
-    Some(Uncertain::from_variance(
+    let clock_ppm = Uncertain::from_variance(
         (a.value() * wa + b.value() * wb) / (wa + wb),
         1.0 / (wa + wb),
-    ))
-}
-
-/// **A diagnostic, for the tests**: the carrier offset the LTF's estimate
-/// left, from the pilots' common phase drifting across the DATA field, in
-/// hertz. Each pilot against itself in the first DATA symbol, times both
-/// symbols' known signs and polarities, summed over the four; its phase
-/// rises 2 pi (residual) / FS a sample. A third reading of the carrier,
-/// independent of the training.
-#[cfg(test)]
-pub fn residual_carrier_hz(
-    samples: &[Complex<f32>],
-    first_pair: u64,
-    sync: &Sync,
-    plan: &Plan,
-) -> Option<Uncertain> {
-    use super::ofdm::{polarity, PILOTS};
-    let base = sync.ltf_start.checked_sub(first_pair)? as usize;
-    samples.get(base..base + plan.end())?;
-    let turn = -std::f64::consts::TAU * sync.offset.value() / FS;
-    let bin = |start: usize, k: i32| -> Complex<f64> {
-        (0..64)
-            .map(|i| {
-                let z = samples[base + start + i];
-                let phase = turn * (start + i) as f64
-                    - std::f64::consts::TAU * (k * i as i32) as f64 / 64.0;
-                Complex::new(z.re as f64, z.im as f64) * Complex::from_polar(1.0, phase)
-            })
-            .sum()
+    );
+    // The carrier: what the preamble's offset left, from the common
+    // phase's slope, less the share of the clock's slide a lopsided
+    // channel puts into it (the pilots' power-weighted mean subcarrier
+    // times the slide's rate, 2 pi k e / 64 a sample).
+    let residual = slope(&at, &common)?;
+    let power: [f64; 4] = std::array::from_fn(|j| first[j].norm_sqr());
+    let total: f64 = power.iter().sum();
+    let tilt = if total > 0.0 {
+        [-21.0, -7.0, 7.0, 21.0]
+            .iter()
+            .zip(power)
+            .map(|(k, p)| k * p)
+            .sum::<f64>()
+            / total
+    } else {
+        0.0
     };
-    let signs = |n: usize| -> [f64; 4] {
-        match plan.pilots {
-            Pilots::NonHt => PILOTS.map(|(_, v)| v * polarity(n + 1)),
-            Pilots::Ht => [0, 1, 2, 3].map(|j| PSI[(n + j) % 4] * polarity(n + 3)),
-        }
-    };
-    let first: Vec<Complex<f64>> = PILOTS.iter().map(|&(k, _)| bin(plan.first, k)).collect();
-    let s0 = signs(0);
-    let mut at = Vec::new();
-    let mut z = Vec::new();
-    for n in 0..plan.count {
-        let start = plan.first + plan.step * n;
-        let sn = signs(n);
-        at.push(start as f64);
-        z.push(
-            PILOTS
-                .iter()
-                .enumerate()
-                .map(|(j, &(k, _))| bin(start, k) * first[j].conj() * sn[j] * s0[j])
-                .sum::<Complex<f64>>(),
-        );
-    }
-    let b = slope(&at, &z)?;
-    let scale = FS / std::f64::consts::TAU;
-    Some(Uncertain::from_sigma(b.value() * scale, b.sigma() * scale))
+    let to_hz = FS / std::f64::consts::TAU;
+    let slide_hz = tilt * clock_ppm.value() * 1e-6 * FS / 64.0;
+    Some(Clocked {
+        clock_ppm,
+        carrier_hz: Uncertain::from_sigma(
+            sync.offset.value() + residual.value() * to_hz - slide_hz,
+            residual.sigma() * to_hz,
+        ),
+    })
 }
 
 #[cfg(test)]
@@ -416,12 +440,93 @@ mod tests {
             return None;
         };
         let p = plan(&read(x, 0, &s)?)?;
-        let clock = measure(x, 0, &s, &p)?;
+        let read = measure(x, 0, &s, &p)?;
         let carrier = Uncertain::from_sigma(
-            s.offset.value() / CENTRE_HZ * 1e6,
-            s.offset.sigma() / CENTRE_HZ * 1e6,
+            read.carrier_hz.value() / CENTRE_HZ * 1e6,
+            read.carrier_hz.sigma() / CENTRE_HZ * 1e6,
         );
-        Some((clock, carrier))
+        Some((read.clock_ppm, carrier))
+    }
+
+    /// The preamble's carrier, the DATA field's, both in ppm, and the
+    /// clock, for a frame found and synchronised.
+    fn three_of(x: &[Complex<f32>]) -> Option<(Uncertain, Uncertain, Uncertain)> {
+        let peak = StfDetector::new().push(0, x).first()?.peak;
+        let Some(Verdict::ThisChannel(s)) = examine(x, 0, peak) else {
+            return None;
+        };
+        let p = plan(&read(x, 0, &s)?)?;
+        let r = measure(x, 0, &s, &p)?;
+        let ppm = |u: Uncertain| {
+            Uncertain::from_sigma(u.value() / CENTRE_HZ * 1e6, u.sigma() / CENTRE_HZ * 1e6)
+        };
+        Some((ppm(s.offset), ppm(r.carrier_hz), r.clock_ppm))
+    }
+
+    /// The DATA field's carrier through a channel tilted by an echo, the
+    /// clock and carrier both 20 ppm fast: the carrier read where it
+    /// truly is, the clock's slide kept out of it, and the two agreeing.
+    #[test]
+    fn the_data_carrier_is_the_frames_through_a_tilted_channel() {
+        let mut rng = Rng::new(115);
+        let psdu: Vec<u8> = (0..400).map(|i| (i * 7 + 3) as u8).collect();
+        let frame = ppdu(&psdu, Rate::R6, 0x5d);
+        let mut tilted = frame.clone();
+        for (n, z) in frame.iter().enumerate() {
+            if n + 7 < tilted.len() {
+                tilted[n + 7] += z * Complex::from_polar(0.6, 2.0);
+            }
+        }
+        let mut carriers = Vec::new();
+        for _ in 0..12 {
+            let (_, carrier, clock) =
+                three_of(&on_air(&tilted, 20.0, true, 25.0, &mut rng)).unwrap();
+            let both = clock.sigma().hypot(carrier.sigma());
+            assert!(
+                (clock.value() - carrier.value()).abs() < 4.0 * both,
+                "{clock:?} {carrier:?}"
+            );
+            carriers.push(carrier);
+        }
+        let (bias, spread, ratio) = judge(&carriers, 20.0);
+        eprintln!("data carrier: bias {bias:+.4} ppm, spread {spread:.4}, ratio {ratio:.2}");
+        assert!(
+            bias.abs() < 3.0 * spread / (carriers.len() as f64).sqrt() + 0.005,
+            "bias {bias}"
+        );
+        assert!((0.5..1.6).contains(&ratio), "ratio {ratio}");
+    }
+
+    /// A preamble whose carrier lay 10 kHz (4 ppm) from the rest of its
+    /// frame, inside what the recordings showed: the preamble reads pulled, the
+    /// frame's signalling is still read (the pilots right the symbols the
+    /// preamble's offset no longer fits), and the DATA carrier is the
+    /// frame's own.
+    #[test]
+    fn a_pulled_preamble_is_read_as_pulled() {
+        let mut rng = Rng::new(116);
+        let psdu: Vec<u8> = (0..400).map(|i| (i * 11 + 1) as u8).collect();
+        let frame = ppdu(&psdu, Rate::R6, 0x5d);
+        for _ in 0..10 {
+            let mut x = on_air(&frame, 0.0, true, 25.0, &mut rng);
+            // 10 kHz more for the preamble's 320 samples, the phase then
+            // carried on at the frame's own carrier.
+            let turn = std::f64::consts::TAU * 10e3 / 20e6;
+            for (n, z) in x[LEAD..].iter_mut().enumerate() {
+                let phase = turn * n.min(320) as f64;
+                *z *= Complex::from_polar(1.0, phase as f32);
+            }
+            let (preamble, carrier, _) = three_of(&x).expect("read");
+            let pulled = 10e3 / CENTRE_HZ * 1e6;
+            assert!(
+                (preamble.value() - pulled).abs() < 4.0 * preamble.sigma(),
+                "preamble {preamble:?} against {pulled}"
+            );
+            assert!(
+                carrier.value().abs() < 4.0 * carrier.sigma() + 0.01,
+                "{carrier:?}"
+            );
+        }
     }
 
     /// Bias and spread of `readings` against `truth`, and the spread over
@@ -518,11 +623,11 @@ mod tests {
         }
     }
 
-    /// The diagnostic reads a carrier error the synchronisation was told
-    /// to leave: a frame whose sync is told it is 2 kHz lower than it
-    /// measured.
+    /// The DATA carrier reads what the preamble's offset left: a frame
+    /// whose sync is told it is 2 kHz lower than it measured still has its
+    /// carrier read where it is.
     #[test]
-    fn the_residual_carrier_is_read_from_the_pilots() {
+    fn the_data_carrier_corrects_what_the_preamble_left() {
         let mut rng = Rng::new(114);
         let psdu: Vec<u8> = (0..400).map(|i| (i * 7) as u8).collect();
         let x = on_air(&ppdu(&psdu, Rate::R6, 0x5d), 0.0, true, 25.0, &mut rng);
@@ -535,14 +640,9 @@ mod tests {
             offset: Uncertain::from_sigma(s.offset.value() - 2_000.0, s.offset.sigma()),
             ..s
         };
-        // The frame's carrier is truly 0 here; what the sync measured of it
-        // is left as well as the 2 kHz.
-        let left = 2_000.0 - s.offset.value();
-        let r = residual_carrier_hz(&x, 0, &told, &p).unwrap();
-        assert!(
-            (r.value() - left).abs() < 4.0 * r.sigma() + 5.0,
-            "{r:?} against {left}"
-        );
+        let c = measure(&x, 0, &told, &p).unwrap().carrier_hz;
+        // The frame's carrier is truly 0.
+        assert!(c.value().abs() < 4.0 * c.sigma() + 5.0, "{c:?}");
     }
 
     /// Without its whole DATA field held, nothing is read.
