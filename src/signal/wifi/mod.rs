@@ -42,6 +42,7 @@ pub mod bcc;
 pub mod channel;
 pub mod detect;
 pub mod format;
+pub mod hesig;
 pub mod htsig;
 pub mod interleave;
 pub mod lsig;

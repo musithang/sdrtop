@@ -158,13 +158,23 @@ for all of them (to the next 4 µs for the newer ones).
 What the frame actually is comes from the symbols after it, told apart the
 way the standard tells its own receivers to: a quarter-turned symbol for
 802.11n (`HT-mixed`, with the MCS and length its HT-SIG gives, or
-`HT-greenfield`), a repeated SIGNAL field for 802.11ax and 802.11be (`HE`,
-`EHT or a later PHY`, named for now and read later), a quarter-turn one
+`HT-greenfield`), a repeated SIGNAL field for 802.11ax and 802.11be (`HE
+SU`, `HE MU` and friends, `EHT`, or `PHY version 3, after EHT` for a radio
+from a future this one was not written in), a quarter-turn one
 symbol later for VHT (a 5 GHz format that a few 2.4 GHz chips send
 anyway), and `non-HT` (802.11a/g) when none of those signatures is there.
 Every signature is only believed under its own check: a quarter-turned
 symbol whose HT-SIG fails its CRC is `unreadable`, because noise turns
 symbols too.
+
+An ax or be frame also says which network it belongs to before a single
+MAC byte: a `BSS colour` from 0 to 63, whether it is going `uplink` (to
+the access point) or `downlink`, and how long a `TXOP` it is holding the
+air for. The colour is a label the access point picked, not an address, so
+two networks can wear the same one; read it as "looks like the same
+network", never as a name. And a four-bit CRC guards all of it, so about
+one damaged field in sixteen gets through looking healthy. That is the
+standard's choice, not ours, and the numbers are shown as what they are.
 
 Every count on the other NET panels is only as complete as this panel says
 the feed was. If this one is unhappy, believe it over the others.

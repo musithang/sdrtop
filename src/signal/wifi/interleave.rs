@@ -53,6 +53,28 @@ pub fn deinterleave<T: Copy>(bits: &[T], n_bpsc: usize) -> Vec<T> {
         .collect()
 }
 
+/// Where each of a 52-tone signalling symbol's BPSK coded bits goes
+/// (HE-SIG-A, U-SIG): the first permutation with 13 columns and 4 rows
+/// (Table 27-36, the operation of 21.3.10.8); BPSK has no second.
+fn wide_positions() -> Vec<usize> {
+    (0..52).map(|k| 4 * (k % 13) + k / 13).collect()
+}
+
+/// A 52-tone signalling symbol's coded bits, interleaved.
+#[cfg(test)]
+pub fn interleave_wide<T: Copy + Default>(bits: &[T]) -> Vec<T> {
+    let mut out = vec![T::default(); bits.len()];
+    for (k, j) in wide_positions().into_iter().enumerate() {
+        out[j] = bits[k];
+    }
+    out
+}
+
+/// The inverse, for a 52-tone signalling symbol's readings.
+pub fn deinterleave_wide<T: Copy>(bits: &[T]) -> Vec<T> {
+    wide_positions().into_iter().map(|j| bits[j]).collect()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -89,6 +111,18 @@ mod tests {
     }
 
     /// Deinterleaving undoes interleaving, at every rate's symbol size.
+    /// The 52-tone permutation: adjacent coded bits four tones apart,
+    /// every thirteenth bit on the next tone, and undone by its inverse.
+    #[test]
+    fn the_wide_permutation_is_thirteen_columns_of_four() {
+        let p = wide_positions();
+        assert_eq!(p.len(), 52);
+        assert_eq!(&p[..4], &[0, 4, 8, 12]);
+        assert_eq!((p[12], p[13], p[51]), (48, 1, 51));
+        let bits: Vec<u8> = (0..52).collect();
+        assert_eq!(deinterleave_wide(&interleave_wide(&bits)), bits);
+    }
+
     #[test]
     fn deinterleave_undoes_interleave_at_every_rate() {
         for rate in [Rate::R6, Rate::R12, Rate::R24, Rate::R48] {

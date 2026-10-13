@@ -33,6 +33,20 @@ pub fn data_subcarriers() -> Vec<i32> {
         .collect()
 }
 
+/// The 52 data subcarriers of HE-SIG-A and U-SIG, in the order their
+/// points fill them: -28 to 28, skipping 0 and the pilots (27.3.11.7.4's
+/// M_r20).
+pub fn wide_data_subcarriers() -> Vec<i32> {
+    (-28..=28)
+        .filter(|&k| k != 0 && !PILOTS.iter().any(|&(p, _)| p == k))
+        .collect()
+}
+
+/// The values HE and EHT put on the four edge subcarriers of the L-SIG and
+/// the RL-SIG, for the receiver to measure them by (27.3.11.5, 802.11be
+/// 36.3.12.5).
+pub const EDGES: [(i32, f64); 4] = [(-28, -1.0), (-27, -1.0), (27, -1.0), (28, 1.0)];
+
 /// The pilots' polarity in symbol `n` (SIGNAL is 0, the first DATA symbol 1):
 /// the 127-long sequence of Equation 17-25, which is the data scrambler's
 /// sequence from an all-ones register with 0 sent as +1 and 1 as -1.
@@ -61,6 +75,22 @@ pub fn data_only(points: &[Complex<f64>]) -> Spectrum {
 #[cfg(test)]
 pub fn symbol(points: &[Complex<f64>], n: usize) -> Spectrum {
     let mut out = data_only(points);
+    let p = polarity(n);
+    for (k, v) in PILOTS {
+        out[at(k)] = Complex::new(v * p, 0.0);
+    }
+    out
+}
+
+/// A 52-tone signalling symbol's spectrum (HE-SIG-A, U-SIG): its points on
+/// [`wide_data_subcarriers`] and the four pilots at polarity p_n.
+#[cfg(test)]
+pub fn wide_symbol(points: &[Complex<f64>], n: usize) -> Spectrum {
+    assert_eq!(points.len(), 52, "a wide symbol carries 52 points");
+    let mut out = [Complex::new(0.0, 0.0); 64];
+    for (p, k) in points.iter().zip(wide_data_subcarriers()) {
+        out[at(k)] = *p;
+    }
     let p = polarity(n);
     for (k, v) in PILOTS {
         out[at(k)] = Complex::new(v * p, 0.0);
@@ -164,6 +194,20 @@ mod tests {
             assert!(!data.contains(&k), "{k}");
         }
         assert_eq!(PILOTS.map(|(k, _)| k), [-21, -7, 7, 21]);
+    }
+
+    /// The wide symbol's 52 data subcarriers reach -28 and 28, skip DC
+    /// and the four pilots, and rise; the edge values are 27.3.11.5's.
+    #[test]
+    fn the_wide_layout_is_the_standards() {
+        let data = wide_data_subcarriers();
+        assert_eq!(data.len(), 52);
+        assert_eq!((data[0], data[51]), (-28, 28));
+        assert!(data.windows(2).all(|w| w[0] < w[1]));
+        for k in [0, -21, -7, 7, 21] {
+            assert!(!data.contains(&k), "{k}");
+        }
+        assert_eq!(EDGES.map(|(k, _)| k), [-28, -27, 27, 28]);
     }
 
     /// The pilots' polarity is the scrambler's sequence from an all-ones

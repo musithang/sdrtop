@@ -21,6 +21,7 @@ use ratatui::{
 };
 
 use crate::signal::wifi::format::Format;
+use crate::signal::wifi::hesig::{Bss, HeKind, HePpdu};
 use crate::signal::wifi::htsig::{HtSig, SigFault};
 use crate::state::SdrMetrics;
 use crate::ui::panel::{Panel, PanelChrome, Staleness};
@@ -149,8 +150,9 @@ fn lines(state: &SdrMetrics, theme: &crate::Theme) -> Vec<Line<'static>> {
 }
 
 /// A format named as its signalling said: HT's MCS and length from a good
-/// HT-SIG, and greenfield's airtime from it; a refused SIG by its fault;
-/// HE and EHT named only, their fields read elsewhere.
+/// HT-SIG, and greenfield's airtime from it; HE and U-SIG with what they
+/// say of their network, a later PHY by its number; a refused SIG by its
+/// fault.
 fn format_spans(format: Format, value: Style, quiet: Style, warn: Style) -> Vec<Span<'static>> {
     let ht = |name: &str, sig: Result<HtSig, SigFault>, airtime: bool| match sig {
         Ok(h) => {
@@ -192,10 +194,62 @@ fn format_spans(format: Format, value: Style, quiet: Style, warn: Style) -> Vec<
             Span::styled("VHT (a 5 GHz format) \u{b7} ", value),
             Span::styled(format!("VHT-SIG-A refused: {}", fault.label()), warn),
         ],
-        Format::He { remainder: 1 } => vec![Span::styled("HE, SU or TB", value)],
-        Format::He { .. } => vec![Span::styled("HE, MU or ER SU", value)],
-        Format::EhtOrLater => vec![Span::styled("EHT or a later PHY", value)],
+        Format::He { sig_a: Ok(sig), .. } => {
+            let name = match sig.ppdu {
+                HePpdu::Su => "HE SU",
+                HePpdu::ErSu => "HE ER SU",
+                HePpdu::Mu => "HE MU",
+                HePpdu::Tb => "HE TB",
+            };
+            vec![Span::styled(format!("{name}{}", network(&sig.bss)), value)]
+        }
+        Format::He {
+            kind,
+            sig_a: Err(fault),
+        } => {
+            let name = match kind {
+                HeKind::SuOrTb => "HE, SU or TB",
+                HeKind::Mu => "HE MU",
+                HeKind::ErSu => "HE ER SU",
+            };
+            vec![
+                Span::styled(format!("{name} \u{b7} "), value),
+                Span::styled(format!("HE-SIG-A refused: {}", fault.label()), warn),
+            ]
+        }
+        Format::USig { er, sig: Ok(sig) } => {
+            let name = match sig.version {
+                0 => "EHT".to_string(),
+                v => format!("PHY version {v}, after EHT"),
+            };
+            let er = if er { ", extended range" } else { "" };
+            vec![Span::styled(
+                format!("{name}{er}{}", network(&sig.bss)),
+                value,
+            )]
+        }
+        Format::USig {
+            sig: Err(fault), ..
+        } => vec![
+            Span::styled("an RL-SIG \u{b7} ", value),
+            Span::styled(format!("U-SIG refused: {}", fault.label()), warn),
+        ],
     }
+}
+
+/// What a frame says of its network: its colour, a label two networks can
+/// share, its direction and the TXOP it protects.
+fn network(bss: &Bss) -> String {
+    let txop = match bss.txop_us {
+        None => "no TXOP".to_string(),
+        Some(us) if us < 1_000 => format!("TXOP {us} \u{b5}s"),
+        Some(us) => format!("TXOP {:.2} ms", us as f64 / 1e3),
+    };
+    format!(
+        " \u{b7} BSS colour {} \u{b7} {} \u{b7} {txop}",
+        bss.colour,
+        if bss.uplink { "uplink" } else { "downlink" }
+    )
 }
 
 impl Panel for NetWifiStandinPanel {
@@ -246,6 +300,7 @@ mod tests {
 
     use super::NetWifiStandinPanel;
     use crate::signal::wifi::format::{Format, Heard};
+    use crate::signal::wifi::hesig::{Bss, HeKind, HePpdu, HeSigA, USig};
     use crate::signal::wifi::htsig::{HtSig, SigFault};
     use crate::signal::wifi::lsig::{LSig, Refused};
     use crate::signal::wifi::signal_field::Rate;
@@ -272,6 +327,14 @@ mod tests {
             carrier_hz: 2_437_000_000.0,
             heard,
             when: std::time::Instant::now(),
+        }
+    }
+
+    fn bss(colour: u8, uplink: bool, txop_us: Option<u32>) -> Bss {
+        Bss {
+            colour,
+            uplink,
+            txop_us,
         }
     }
 
@@ -361,8 +424,10 @@ mod tests {
 
     /// Each format named as its signalling said, and nothing more: HT's
     /// MCS and length from its HT-SIG, a refused HT-SIG by its fault, VHT
-    /// as the 5 GHz format, HE and EHT named only. A later format's L-SIG
-    /// airtime is said to be rounded to the 4 us above.
+    /// as the 5 GHz format, HE and U-SIG with their colour, direction and
+    /// TXOP, a later PHY by its number, an RL-SIG whose U-SIG failed as
+    /// just that. A later format's L-SIG airtime is said to be rounded to
+    /// the 4 us above.
     #[test]
     fn each_format_is_named_as_its_signalling_said() {
         let six = Some(Ok(LSig {
@@ -382,9 +447,87 @@ mod tests {
                 Format::Vht(Ok(())),
                 "VHT (a 5 GHz format) \u{b7} VHT-SIG-A CRC good",
             ),
-            (Format::He { remainder: 1 }, "HE, SU or TB"),
-            (Format::He { remainder: 2 }, "HE, MU or ER SU"),
-            (Format::EhtOrLater, "EHT or a later PHY"),
+            (
+                Format::He {
+                    kind: HeKind::SuOrTb,
+                    sig_a: Ok(HeSigA {
+                        ppdu: HePpdu::Su,
+                        bss: bss(23, true, Some(1536)),
+                    }),
+                },
+                "HE SU \u{b7} BSS colour 23 \u{b7} uplink \u{b7} TXOP 1.54 ms",
+            ),
+            (
+                Format::He {
+                    kind: HeKind::SuOrTb,
+                    sig_a: Ok(HeSigA {
+                        ppdu: HePpdu::Tb,
+                        bss: bss(41, true, Some(248)),
+                    }),
+                },
+                "HE TB \u{b7} BSS colour 41 \u{b7} uplink \u{b7} TXOP 248 \u{b5}s",
+            ),
+            (
+                Format::He {
+                    kind: HeKind::Mu,
+                    sig_a: Ok(HeSigA {
+                        ppdu: HePpdu::Mu,
+                        bss: bss(63, false, None),
+                    }),
+                },
+                "HE MU \u{b7} BSS colour 63 \u{b7} downlink \u{b7} no TXOP",
+            ),
+            (
+                Format::He {
+                    kind: HeKind::SuOrTb,
+                    sig_a: Err(SigFault::Crc),
+                },
+                "HE, SU or TB \u{b7} HE-SIG-A refused: CRC",
+            ),
+            (
+                Format::He {
+                    kind: HeKind::ErSu,
+                    sig_a: Err(SigFault::Tail),
+                },
+                "HE ER SU \u{b7} HE-SIG-A refused: tail not zero",
+            ),
+            (
+                Format::USig {
+                    er: false,
+                    sig: Ok(USig {
+                        version: 0,
+                        bss: bss(9, true, Some(1536)),
+                    }),
+                },
+                "EHT \u{b7} BSS colour 9 \u{b7} uplink",
+            ),
+            (
+                Format::USig {
+                    er: true,
+                    sig: Ok(USig {
+                        version: 0,
+                        bss: bss(9, false, None),
+                    }),
+                },
+                "EHT, extended range \u{b7} BSS colour 9 \u{b7} downlink",
+            ),
+            (
+                Format::USig {
+                    er: false,
+                    sig: Ok(USig {
+                        version: 3,
+                        bss: bss(9, true, None),
+                    }),
+                },
+                "PHY version 3, after EHT \u{b7} BSS colour 9",
+            ),
+            (
+                Format::USig {
+                    er: false,
+                    sig: Err(SigFault::Crc),
+                },
+                "an RL-SIG \u{b7} U-SIG refused: CRC",
+            ),
         ];
         for (format, want) in cases {
             let mut m = on_channel_six();

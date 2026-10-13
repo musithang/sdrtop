@@ -155,6 +155,53 @@ pub fn l_sig_at(rate: Rate, length: u16, n: usize) -> Vec<Complex<f64>> {
     sig_symbol(&encode(&signal_field::bits(rate, length)), false, n)
 }
 
+/// An L-SIG as HE and EHT send it, as the `n`-th symbol after the long
+/// field (0 the L-SIG, 1 its repeat): the edge subcarriers carrying
+/// [`super::ofdm::EDGES`] for the receiver to measure them by.
+pub fn wide_l_sig_at(rate: Rate, length: u16, n: usize) -> Vec<Complex<f64>> {
+    let points = map(
+        &interleave(&encode(&signal_field::bits(rate, length)), 1),
+        1,
+    );
+    let mut spectrum = symbol(&points, n);
+    for (k, v) in super::ofdm::EDGES {
+        spectrum[super::ofdm::at(k)] = Complex::new(v, 0.0);
+    }
+    in_time(&spectrum)
+}
+
+/// A 52-bit SIG field (HE-SIG-A, U-SIG) coded at rate 1/2 and sent from the
+/// `first`-th symbol after the long field: two symbols, each interleaved
+/// over its 52 tones, or for an extended-range PPDU four, each followed by
+/// its repeat sent without interleaving, the first repeat QBPSK
+/// (27.3.11.7.4, 802.11be 36.3.12.7.3).
+pub fn wide_sig_symbols(bits: &[bool; 52], er: bool, first: usize) -> Vec<Vec<Complex<f64>>> {
+    use super::interleave::interleave_wide;
+    use super::ofdm::wide_symbol;
+    let coded = encode(bits);
+    let send = |c: &[bool], interleaved: bool, turn: Complex<f64>, n: usize| {
+        let c = if interleaved {
+            interleave_wide(c)
+        } else {
+            c.to_vec()
+        };
+        let points: Vec<Complex<f64>> = map(&c, 1).into_iter().map(|p| p * turn).collect();
+        in_time(&wide_symbol(&points, n))
+    };
+    let (one, j) = (Complex::new(1.0, 0.0), Complex::new(0.0, 1.0));
+    let (a, b) = coded.split_at(52);
+    if er {
+        vec![
+            send(a, true, one, first),
+            send(a, false, j, first + 1),
+            send(b, true, one, first + 2),
+            send(b, false, one, first + 3),
+        ]
+    } else {
+        vec![send(a, true, one, first), send(b, true, one, first + 1)]
+    }
+}
+
 /// The DATA symbols, the n-th (from 1) with pilots at polarity p_n.
 fn data_symbols(psdu: &[u8], rate: Rate, initial: u8) -> Vec<Vec<Complex<f64>>> {
     let coded = puncture(&encode(&scrambled(psdu, rate, initial)), rate.coding());

@@ -25,16 +25,22 @@
 //! comparing two received symbols, both noisy, missed one HE frame in 20 at
 //! 3 dB.
 //!
-//! **HE and EHT are named, not read**: their SIG fields are 52-tone
-//! symbols of their own, read where they are decoded.
+//! **HE and EHT are read to their network's name.** After an RL-SIG come
+//! 52-tone symbols ([`super::sig::Header::wide_symbol`]), their four edge
+//! tones measured from the L-SIG and the RL-SIG: HE-SIG-A or U-SIG, whose
+//! colour, direction and TXOP [`super::hesig`] reads under the CRC. An
+//! extended-range PPDU, HE's or a later PHY's, sends its SIG field's two
+//! symbols each twice, the first repeat QBPSK, which is how it is told;
+//! the repeats are added in before decoding.
 
 use num_complex::Complex;
 
 use super::bcc;
+use super::hesig::{HeKind, HeSigA, USig};
 use super::htsig::{self, HtSig, SigFault};
-use super::interleave::{deinterleave, interleave};
+use super::interleave::{deinterleave, deinterleave_wide, interleave};
 use super::lsig::{self, LSig, Refused};
-use super::sig::{header, Symbol};
+use super::sig::{header, Header, Symbol};
 use super::signal_field::{Coding, Rate};
 use super::sync::Sync;
 
@@ -53,10 +59,18 @@ pub enum Format {
     /// QBPSK on the third symbol: VHT-SIG-A, whose CRC is checked and
     /// whose fields are not read.
     Vht(Result<(), SigFault>),
-    /// An RL-SIG with LENGTH leaving 1 (SU or TB) or 2 (MU or ER SU) over 3.
-    He { remainder: u8 },
-    /// An RL-SIG with LENGTH a multiple of 3: EHT, or a PHY after it.
-    EhtOrLater,
+    /// An RL-SIG with LENGTH leaving 1 or 2 over 3: HE, which kind the
+    /// remainder and the rotations allow, and its SIG-A.
+    He {
+        kind: HeKind,
+        sig_a: Result<HeSigA, SigFault>,
+    },
+    /// An RL-SIG with LENGTH a multiple of 3: a U-SIG, EHT's or a later
+    /// PHY's, in an extended-range preamble or not.
+    USig {
+        er: bool,
+        sig: Result<USig, SigFault>,
+    },
 }
 
 /// What the symbols after a frame's long training field said: its L-SIG
@@ -137,6 +151,54 @@ fn sig_bits(one: &Symbol, two: &Symbol, turns: [Complex<f64>; 2]) -> Vec<bool> {
     bcc::decode(&r, Coding::Half, false).unwrap_or_else(|| vec![true; 48])
 }
 
+/// A 52-bit SIG field from the 52-tone symbols from the third after the
+/// long field: two, each deinterleaved; or in extended range four, each
+/// pair's repeat (not interleaved, the first QBPSK) added reading by
+/// reading to its first. Decoded unterminated so the tail is a check.
+fn wide_bits(h: &Header<'_>, edges: &[Complex<f64>; 4], er: bool) -> Option<Vec<bool>> {
+    let symbol = |n| h.wide_symbol(n, edges);
+    let mut r = deinterleave_wide(&symbol(2)?.readings(BPSK));
+    if er {
+        for (x, y) in r.iter_mut().zip(symbol(3)?.readings(QBPSK)) {
+            *x += y;
+        }
+        let mut second = deinterleave_wide(&symbol(4)?.readings(BPSK));
+        for (x, y) in second.iter_mut().zip(symbol(5)?.readings(BPSK)) {
+            *x += y;
+        }
+        r.extend(second);
+    } else {
+        r.extend(deinterleave_wide(&symbol(3)?.readings(BPSK)));
+    }
+    // 104 readings always decode to 52 bits; a field of ones fails its tail.
+    Some(bcc::decode(&r, Coding::Half, false).unwrap_or_else(|| vec![true; 52]))
+}
+
+/// After an RL-SIG: HE by the LENGTH's remainder 1 or 2, with an
+/// extended-range SU told from MU by a QBPSK second symbol after the
+/// RL-SIG; remainder 0 a U-SIG, extended range told the same way.
+fn after_repeat(h: &Header<'_>, length: u16) -> Option<Format> {
+    let edges = h.edges()?;
+    let er = h.wide_symbol(3, &edges)?.quadrature() > 0.0;
+    Some(match length % 3 {
+        0 => Format::USig {
+            er,
+            sig: USig::from_bits(&wide_bits(h, &edges, er)?),
+        },
+        1 => Format::He {
+            kind: HeKind::SuOrTb,
+            sig_a: HeSigA::from_bits(&wide_bits(h, &edges, false)?, HeKind::SuOrTb),
+        },
+        _ => {
+            let kind = if er { HeKind::ErSu } else { HeKind::Mu };
+            Format::He {
+                kind,
+                sig_a: HeSigA::from_bits(&wide_bits(h, &edges, er)?, kind),
+            }
+        }
+    })
+}
+
 /// Read the symbols after the long field of the frame `sync` describes,
 /// from `samples` starting at stream pair `first_pair`. `None` unless the
 /// symbols the decision needs are held.
@@ -171,11 +233,7 @@ pub fn read(samples: &[Complex<f32>], first_pair: u64, sync: &Sync) -> Option<He
         return Some(heard(Some(Format::HtMixed(HtSig::from_bits(&bits)))));
     }
     if repeats(&decoded, &second.readings(BPSK)) {
-        let format = match said.length % 3 {
-            0 => Format::EhtOrLater,
-            r => Format::He { remainder: r as u8 },
-        };
-        return Some(heard(Some(format)));
+        return Some(heard(Some(after_repeat(&h, said.length)?)));
     }
     if n_sym >= 2 && third.quadrature() > 0.0 {
         let bits = sig_bits(&second, &third, [BPSK, QBPSK]);
@@ -190,10 +248,11 @@ mod tests {
     use crate::signal::dsp::testkit::Rng;
     use crate::signal::dsp::uncertainty::Uncertain;
     use crate::signal::wifi::detect::StfDetector;
+    use crate::signal::wifi::hesig::{self, Bss, HeKind, HePpdu, HeSigA, USig};
     use crate::signal::wifi::htsig;
     use crate::signal::wifi::ppdu::{
         assemble, greenfield_ltf, l_sig_at, long_training, random_symbol, short_training,
-        two_sig_symbols,
+        two_sig_symbols, wide_l_sig_at, wide_sig_symbols,
     };
     use crate::signal::wifi::signal_field::Rate;
     use crate::signal::wifi::sync::{examine, Verdict};
@@ -208,8 +267,10 @@ mod tests {
         Mixed(u16, HtSig),
         Greenfield(HtSig),
         Vht(u16),
-        /// An L-SIG and its repeat, with this LENGTH.
-        Repeated(u16),
+        /// An L-SIG and its repeat with this LENGTH, as HE and EHT send
+        /// them, and a 52-bit SIG field after, in its extended-range form
+        /// when the flag says so.
+        Repeated(u16, [bool; 52], bool),
     }
 
     fn sig() -> HtSig {
@@ -260,9 +321,10 @@ mod tests {
                 // VHT-SIG-A's own fields matter not here, only its CRC.
                 symbols.extend(two_sig_symbols(&htsig::bits(&sig()), [false, true], 1));
             }
-            Kind::Repeated(length) => {
-                symbols.push(l_sig_at(Rate::R6, length, 0));
-                symbols.push(l_sig_at(Rate::R6, length, 1));
+            Kind::Repeated(length, bits, er) => {
+                symbols.push(wide_l_sig_at(Rate::R6, length, 0));
+                symbols.push(wide_l_sig_at(Rate::R6, length, 1));
+                symbols.extend(wide_sig_symbols(&bits, er, 2));
             }
         }
         while symbols.len() < 8 {
@@ -348,33 +410,166 @@ mod tests {
                     format: Some(Format::Vht(Ok(()))),
                 },
             ),
-            (
-                Kind::Repeated(1000),
-                Heard {
-                    lsig: lsig(Rate::R6, 1000),
-                    format: Some(Format::He { remainder: 1 }),
-                },
-            ),
-            (
-                Kind::Repeated(1001),
-                Heard {
-                    lsig: lsig(Rate::R6, 1001),
-                    format: Some(Format::He { remainder: 2 }),
-                },
-            ),
-            (
-                Kind::Repeated(1002),
-                Heard {
-                    lsig: lsig(Rate::R6, 1002),
-                    format: Some(Format::EhtOrLater),
-                },
-            ),
         ];
         for (kind, want) in cases {
             for _ in 0..20 {
                 let x = on_air(&build(kind, &mut rng), 10.0, &mut rng);
                 assert_eq!(received(&x), Some(want), "{kind:?}");
             }
+        }
+    }
+
+    fn bss(colour: u8, uplink: bool) -> Bss {
+        Bss {
+            colour,
+            uplink,
+            txop_us: Some(1536),
+        }
+    }
+
+    /// Every HE PPDU and every U-SIG, at 10 dB through the chain as it
+    /// runs: named by its remainder, its rotations and its Format bit, its
+    /// colour, direction and TXOP read under the CRC; a later PHY by its
+    /// version number; an extended-range preamble by its QBPSK repeat.
+    #[test]
+    fn every_he_and_usig_is_read() {
+        let he = |ppdu, bss| HeSigA { ppdu, bss };
+        let cases = [
+            (1000, he(HePpdu::Su, bss(23, true)), HeKind::SuOrTb),
+            (1003, he(HePpdu::Tb, bss(41, true)), HeKind::SuOrTb),
+            (1001, he(HePpdu::Mu, bss(63, false)), HeKind::Mu),
+            (1004, he(HePpdu::ErSu, bss(5, false)), HeKind::ErSu),
+        ];
+        let mut rng = Rng::new(96);
+        for (length, sig, kind) in cases {
+            let er = kind == HeKind::ErSu;
+            let want = Some(Format::He {
+                kind,
+                sig_a: Ok(sig),
+            });
+            for _ in 0..20 {
+                let k = Kind::Repeated(length, hesig::he_bits(&sig), er);
+                let x = on_air(&build(k, &mut rng), 10.0, &mut rng);
+                let heard = received(&x).expect("found");
+                assert_eq!(heard.lsig, lsig(Rate::R6, length));
+                assert_eq!(heard.format, want, "{sig:?}");
+            }
+        }
+        for (version, er) in [(0, false), (3, false), (0, true)] {
+            let sig = USig {
+                version,
+                bss: bss(9, true),
+            };
+            let want = Some(Format::USig { er, sig: Ok(sig) });
+            for _ in 0..20 {
+                let k = Kind::Repeated(1002, hesig::usig_bits(&sig), er);
+                let x = on_air(&build(k, &mut rng), 10.0, &mut rng);
+                assert_eq!(received(&x).expect("found").format, want, "{sig:?}");
+            }
+        }
+    }
+
+    /// A U-SIG whose CRC was spoiled in sending is an RL-SIG with its U-SIG
+    /// refused, and named nothing more.
+    #[test]
+    fn a_spoiled_usig_is_refused() {
+        let mut rng = Rng::new(97);
+        let mut bits = hesig::usig_bits(&USig {
+            version: 0,
+            bss: bss(9, true),
+        });
+        bits[9] = !bits[9];
+        let x = on_air(
+            &build(Kind::Repeated(1002, bits, false), &mut rng),
+            25.0,
+            &mut rng,
+        );
+        assert_eq!(
+            read(&x, 0, &placed()).map(|h| h.format),
+            Some(Some(Format::USig {
+                er: false,
+                sig: Err(SigFault::Crc)
+            }))
+        );
+    }
+
+    /// The edge tones are measured, not borrowed from +-26: through an
+    /// echo 750 ns late at 0.8, which turns the channel a quarter turn and
+    /// more between 26 and 28, each edge tone's channel against its
+    /// neighbour's at +-26 is the true ratio, at 30 dB.
+    #[test]
+    fn the_edge_tones_are_the_channels_own() {
+        let sig = HeSigA {
+            ppdu: HePpdu::Su,
+            bss: bss(23, true),
+        };
+        let echo = Complex::from_polar(0.8, 1.0);
+        let truth = |k: i32| {
+            Complex::new(1.0, 0.0)
+                + echo * Complex::from_polar(1.0, -std::f64::consts::TAU * (15 * k) as f64 / 64.0)
+        };
+        let mut rng = Rng::new(99);
+        let f = build(Kind::Repeated(1000, hesig::he_bits(&sig), false), &mut rng);
+        let mut echoed = f.clone();
+        for (n, z) in f.iter().enumerate() {
+            if n + 15 < echoed.len() {
+                echoed[n + 15] += z * echo;
+            }
+        }
+        let x = on_air(&echoed, 30.0, &mut rng);
+        let peak = StfDetector::new().push(0, &x)[0].peak;
+        let Some(Verdict::ThisChannel(s)) = examine(&x, 0, peak) else {
+            panic!("not judged this channel's");
+        };
+        let h = crate::signal::wifi::sig::header(&x, 0, &s).unwrap();
+        let edges = h.edges().unwrap();
+        let centre = |k: i32| {
+            let e = crate::signal::wifi::channel::estimate(
+                &x,
+                0,
+                s.ltf_start,
+                s.offset.value(),
+                &crate::signal::wifi::channel::Floor::flat(),
+            )
+            .unwrap();
+            e.h[if k < 0 { 0 } else { 51 }]
+        };
+        for (i, k) in [-28i32, -27, 27, 28].into_iter().enumerate() {
+            let near = k.signum() * 26;
+            let got = edges[i] / centre(near);
+            let want = truth(k) / truth(near);
+            assert!((got - want).norm() < 0.1, "{k}: {got} against {want}");
+            // And it is not the neighbour's: the channel has moved.
+            assert!((want - 1.0).norm() > 0.5, "{k}: {want}");
+        }
+    }
+
+    /// Through a 250 ns echo at half amplitude, which moves the channel
+    /// across the band, an HE SU's SIG-A is read at 12 dB with the edge
+    /// tones measured from the L-SIG.
+    #[test]
+    fn the_edge_tones_are_measured() {
+        let sig = HeSigA {
+            ppdu: HePpdu::Su,
+            bss: bss(23, true),
+        };
+        let mut rng = Rng::new(98);
+        for _ in 0..20 {
+            let f = build(Kind::Repeated(1000, hesig::he_bits(&sig), false), &mut rng);
+            let mut echoed = f.clone();
+            for (n, z) in f.iter().enumerate() {
+                if n + 5 < echoed.len() {
+                    echoed[n + 5] += z * Complex::from_polar(0.5, 2.0);
+                }
+            }
+            let x = on_air(&echoed, 12.0, &mut rng);
+            assert_eq!(
+                received(&x).expect("found").format,
+                Some(Format::He {
+                    kind: HeKind::SuOrTb,
+                    sig_a: Ok(sig)
+                })
+            );
         }
     }
 
@@ -430,13 +625,18 @@ mod tests {
         let (mut read_ok, mut named) = (0, 0);
         for i in 0..400 {
             let length = 1000 + 3 * (i % 300) as u16;
-            let x = on_air(&build(Kind::Repeated(length), &mut rng), 3.0, &mut rng);
+            let sig = HeSigA {
+                ppdu: HePpdu::Su,
+                bss: bss(23, true),
+            };
+            let k = Kind::Repeated(length, hesig::he_bits(&sig), false);
+            let x = on_air(&build(k, &mut rng), 3.0, &mut rng);
             let Some(heard) = received(&x) else {
                 continue;
             };
             if let Some(Ok(_)) = heard.lsig {
                 read_ok += 1;
-                named += (heard.format == Some(Format::He { remainder: 1 })) as usize;
+                named += matches!(heard.format, Some(Format::He { .. })) as usize;
             }
         }
         eprintln!("3 dB: {named} of {read_ok} read L-SIGs named HE");

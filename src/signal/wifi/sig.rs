@@ -34,15 +34,16 @@ use rustfft::FftPlanner;
 
 use super::channel::{estimate, Estimate, Floor};
 use super::map::demap_soft;
-use super::ofdm::{data_subcarriers, polarity, PILOTS};
+use super::ofdm::{data_subcarriers, polarity, wide_data_subcarriers, EDGES, PILOTS};
 use super::sync::Sync;
 
 /// The sample rate everything here is at (a 20 MHz channel, 17.3.2.4).
 const FS: f64 = 20e6;
 
-/// How many symbols after the long training field a frame's format is
-/// told from: the L-SIG and the two after it.
-pub const HELD: usize = 3;
+/// How many symbols after the long training field a frame's format and
+/// signalling are read from: the L-SIG, the RL-SIG and an extended-range
+/// SIG field's four symbols.
+pub const HELD: usize = 6;
 
 /// The first symbol's transform starts here after the long field's first
 /// sample: its two symbols and the symbol's 0.8 us guard. Each symbol after
@@ -100,9 +101,51 @@ pub struct Symbol {
 }
 
 impl Header<'_> {
-    /// The `n`-th symbol after the long field (the L-SIG's place is 0).
-    /// `None` unless it is held.
+    /// The `n`-th symbol after the long field (the L-SIG's place is 0),
+    /// its 48 data tones. `None` unless it is held.
     pub fn symbol(&self, n: usize) -> Option<Symbol> {
+        let y = self.righted(n)?;
+        let tones = data_subcarriers()
+            .into_iter()
+            .map(|k| {
+                let t = tone(k);
+                (y[bin(k)], self.channel.h[t], self.channel.variance[t])
+            })
+            .collect();
+        Some(Symbol { tones })
+    }
+
+    /// The channel on the four edge tones, -28, -27, 27 and 28, which the
+    /// long field does not train: from the L-SIG and the RL-SIG, where HE
+    /// and EHT put known values on them ([`EDGES`]), each righted by its
+    /// pilots, the two averaged as the long field's two symbols are.
+    pub fn edges(&self) -> Option<[Complex<f64>; 4]> {
+        let (a, b) = (self.righted(0)?, self.righted(1)?);
+        Some(EDGES.map(|(k, v)| (a[bin(k)] + b[bin(k)]) / (2.0 * v)))
+    }
+
+    /// The `n`-th symbol's 52 data tones, as HE-SIG-A and U-SIG fill them,
+    /// the edge ones through `edges`. Their noise is taken as the long
+    /// field's at +-26, the nearest it measured, both being the mean of two
+    /// symbols.
+    pub fn wide_symbol(&self, n: usize, edges: &[Complex<f64>; 4]) -> Option<Symbol> {
+        let y = self.righted(n)?;
+        let tones = wide_data_subcarriers()
+            .into_iter()
+            .map(|k| {
+                let (h, t) = match EDGES.iter().position(|&(e, _)| e == k) {
+                    Some(i) => (edges[i], tone(k.clamp(-26, 26))),
+                    None => (self.channel.h[tone(k)], tone(k)),
+                };
+                (y[bin(k)], h, self.channel.variance[t])
+            })
+            .collect();
+        Some(Symbol { tones })
+    }
+
+    /// The `n`-th symbol's 64 bins, derotated by the offset and righted by
+    /// its pilots. `None` unless it is held.
+    fn righted(&self, n: usize) -> Option<Vec<Complex<f64>>> {
         let from = FIRST_AT + 80 * n;
         let at = self.ltf.checked_add(from)?;
         let held = self.samples.get(at..at + 64)?;
@@ -116,7 +159,6 @@ impl Header<'_> {
             })
             .collect();
         FftPlanner::new().plan_fft_forward(64).process(&mut y);
-        let bin = |k: i32| y[k.rem_euclid(64) as usize];
         let h = &self.channel.h;
 
         // The common phase, from the pilots against what they should read
@@ -124,7 +166,7 @@ impl Header<'_> {
         let p = polarity(n);
         let common = PILOTS
             .iter()
-            .map(|&(k, v)| bin(k) * (h[tone(k)] * v * p).conj())
+            .map(|&(k, v)| y[bin(k)] * (h[tone(k)] * v * p).conj())
             .sum::<Complex<f64>>();
         let pilots: f64 = PILOTS
             .iter()
@@ -151,12 +193,13 @@ impl Header<'_> {
             0.0
         };
         let right = Complex::from_polar(1.0, -phase);
-        let tones = data_subcarriers()
-            .into_iter()
-            .map(|k| (bin(k) * right, h[tone(k)], self.channel.variance[tone(k)]))
-            .collect();
-        Some(Symbol { tones })
+        Some(y.into_iter().map(|z| z * right).collect())
     }
+}
+
+/// Where subcarrier `k` sits in the transform's output.
+fn bin(k: i32) -> usize {
+    k.rem_euclid(64) as usize
 }
 
 impl Symbol {
