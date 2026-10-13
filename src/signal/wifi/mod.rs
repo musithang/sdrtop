@@ -9,6 +9,9 @@
 //! - [`detect`]: finding a frame's short training field in the stream.
 //! - [`sync`]: the offset, the timing and the long training field's
 //!   verdict on whose frame it is.
+//! - `channel`: the channel each subcarrier came through, with the
+//!   uncertainty the noise and the floor's shape leave on it (compiled for
+//!   the tests until the SIGNAL field is equalised with it).
 //!
 //! The transmit side is compiled for the tests only: written stage by stage
 //! from the standard and held to its own worked example (IEEE 802.11-2024,
@@ -29,6 +32,9 @@
 
 pub mod detect;
 pub mod sync;
+
+#[cfg(test)]
+pub mod channel;
 
 #[cfg(test)]
 pub mod annex;
