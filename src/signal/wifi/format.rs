@@ -757,6 +757,12 @@ mod tests {
         let mut airtime = 0u64;
         let mut by_format = std::collections::BTreeMap::new();
         let mut by_mcs = std::collections::BTreeMap::new();
+        let centre = std::fs::read_to_string(path.replace(".sigmf-data", ".sigmf-meta"))
+            .ok()
+            .and_then(|m| serde_json::from_str::<serde_json::Value>(&m).ok())
+            .and_then(|m| m["captures"][0]["core:frequency"].as_f64())
+            .unwrap_or(2_462e6);
+        let mut clocks: Vec<(usize, String, Uncertain, Uncertain, f64)> = Vec::new();
         let mut detector = StfDetector::new();
         for at in (0..pairs).step_by(131_072) {
             for d in detector.push(at as u64, &stretch(at, 131_072)) {
@@ -777,6 +783,36 @@ mod tests {
                         }
                         Some(f) => format!("{f:?}"),
                     };
+                    if let Some(p) = crate::signal::wifi::clock::plan(&heard) {
+                        let full = stretch(s.ltf_start as usize, p.end());
+                        if let Some(c) =
+                            crate::signal::wifi::clock::measure(&full, s.ltf_start, &s, &p)
+                        {
+                            let carrier = Uncertain::from_sigma(
+                                s.offset.value() / centre * 1e6,
+                                s.offset.sigma() / centre * 1e6,
+                            );
+                            let residual = crate::signal::wifi::clock::residual_carrier_hz(
+                                &full,
+                                s.ltf_start,
+                                &s,
+                                &p,
+                            )
+                            .map_or(f64::NAN, |r| r.value() / centre * 1e6);
+                            if p.count >= 100 {
+                                eprintln!(
+                                    "  long: {} symbols, {name}, clock {:.2} +- {:.2}, carrier (training) {:.2} +- {:.2}, carrier (pilots) {:.2}",
+                                    p.count,
+                                    c.value(),
+                                    c.sigma(),
+                                    carrier.value(),
+                                    carrier.sigma(),
+                                    carrier.value() + residual
+                                );
+                            }
+                            clocks.push((p.count, name.clone(), c, carrier, 10.0 * s.snr.log10()));
+                        }
+                    }
                     *by_format.entry(name).or_insert(0) += 1;
                     if let Some(Format::HtMixed(Ok(h)) | Format::Greenfield(Ok(h))) = heard.format {
                         *by_mcs.entry(h.mcs).or_insert(0) += 1;
@@ -812,5 +848,75 @@ mod tests {
             airtime as f64 / 1e3,
             airtime as f64 / 1e4 / secs
         );
+        // The clocks against their carriers: by how many symbols they were
+        // read over, the worst pulls, and by carrier (a transmitter's
+        // likeness until the MAC header names it).
+        let summary = |sel: &dyn Fn(usize) -> bool| {
+            let mut c = crate::state::SdrMetrics::fixture().net.wifi.clock_check;
+            let mut big = 0;
+            for (n, _, clock, carrier, _) in clocks.iter().filter(|r| sel(r.0)) {
+                c.add(&crate::state::WifiClock {
+                    clock_ppm: *clock,
+                    carrier_ppm: *carrier,
+                    symbols: *n,
+                    when: std::time::Instant::now(),
+                });
+                let pull = (clock.value() - carrier.value()) / clock.sigma().hypot(carrier.sigma());
+                big += (pull.abs() > 5.0) as usize;
+            }
+            (c.frames, c.mean(), c.chi2_per_dof(), big)
+        };
+        for (label, lo, hi) in [
+            ("8-29", 8, 30),
+            ("30-99", 30, 100),
+            ("100+", 100, usize::MAX),
+        ] {
+            eprintln!(
+                "clocks over {label} symbols: {:?}",
+                summary(&|n| n >= lo && n < hi)
+            );
+        }
+        let mut pulls: Vec<_> = clocks
+            .iter()
+            .map(|(n, f, c, k, snr)| {
+                (
+                    (c.value() - k.value()) / c.sigma().hypot(k.sigma()),
+                    *n,
+                    f.clone(),
+                    *c,
+                    *k,
+                    *snr,
+                )
+            })
+            .collect();
+        pulls.sort_by(|a, b| b.0.abs().total_cmp(&a.0.abs()));
+        for p in pulls.iter().take(8) {
+            eprintln!("  pull {:+.1}: {} symbols, {}, clock {:.1} +- {:.1}, carrier {:.2} +- {:.2}, {:.0} dB", p.0, p.1, p.2, p.3.value(), p.3.sigma(), p.4.value(), p.4.sigma(), p.5);
+        }
+        let mut by_carrier: std::collections::BTreeMap<i64, Vec<usize>> = Default::default();
+        for (i, r) in clocks.iter().enumerate() {
+            by_carrier
+                .entry((r.3.value() / 2.0).round() as i64 * 2)
+                .or_default()
+                .push(i);
+        }
+        for (ppm, idx) in by_carrier.iter().filter(|(_, v)| v.len() >= 20) {
+            let mut c = crate::state::SdrMetrics::fixture().net.wifi.clock_check;
+            for &i in idx {
+                let r = &clocks[i];
+                c.add(&crate::state::WifiClock {
+                    clock_ppm: r.2,
+                    carrier_ppm: r.3,
+                    symbols: r.0,
+                    when: std::time::Instant::now(),
+                });
+            }
+            eprintln!(
+                "  carrier near {ppm:+} ppm: {} frames, clock - carrier {:?}, chi2 {:?}",
+                c.frames,
+                c.mean(),
+                c.chi2_per_dof()
+            );
+        }
     }
 }

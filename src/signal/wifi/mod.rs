@@ -16,6 +16,10 @@
 //!   the axis its power is on.
 //! - [`lsig`]: the SIGNAL field, its rate and length, and the frame's
 //!   airtime.
+//! - [`format`](mod@format), [`htsig`], [`hesig`]: which format a frame is, and what
+//!   its HT-SIG, HE-SIG-A or U-SIG says.
+//! - [`clock`]: the transmitter's symbol clock, from the pilots across its
+//!   DATA field, to hold against its carrier.
 //!
 //! The stages a frame is built from are written stage by stage from the
 //! standard and held to its own worked example (IEEE 802.11-2024, Annex
@@ -40,6 +44,7 @@
 
 pub mod bcc;
 pub mod channel;
+pub mod clock;
 pub mod detect;
 pub mod format;
 pub mod hesig;

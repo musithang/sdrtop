@@ -1171,6 +1171,17 @@ mod tests {
                 .last_frame
                 .map(|l| (l.offset_hz, l.snr_db, l.heard))
         );
+        let c = m.net.wifi.clock_check;
+        eprintln!(
+            "clocks read {} · clock - carrier {:?} ppm · chi2 a frame {:?} · latest {:?}",
+            c.frames,
+            c.mean(),
+            c.chi2_per_dof(),
+            m.net
+                .wifi
+                .clock
+                .map(|k| (k.clock_ppm, k.carrier_ppm, k.symbols))
+        );
     }
 
     /// Replays a recording (`SDRTOP_REPLAY=path.sigmf-data`, ci8 at 20 Msps
@@ -1763,6 +1774,71 @@ mod tests {
         assert_eq!(f.cut, 1, "{f:?}");
         assert_eq!(f.detected, 1, "{f:?}");
         assert_eq!(f.this_channel, 1, "{f:?}");
+    }
+
+    /// A 6 Mb/s frame of 200 octets (ceil(1622 / 24) = 68 DATA symbols,
+    /// 5841 pairs, 292 us) starting `start` pairs into the first of
+    /// `blocks` blocks of 4096, 20 dB over the noise.
+    fn long_frame_blocks(start: usize, blocks: usize, seed: u64) -> Vec<Vec<u8>> {
+        use crate::signal::wifi::{ppdu::ppdu, signal_field::Rate};
+        let psdu: Vec<u8> = (0..200).map(|i| (i * 31 + 7) as u8).collect();
+        let f = ppdu(&psdu, Rate::R6, 0x5d);
+        let power = f[..320].iter().map(|z| z.norm_sqr()).sum::<f64>() / 320.0;
+        let scale = 0.2 / power.sqrt();
+        let noise = crate::signal::dsp::testkit::Rng::new(seed).noise(4096 * blocks, 0.0004);
+        let all: Vec<u8> = (0..4096 * blocks)
+            .flat_map(|n| {
+                let s = n
+                    .checked_sub(start)
+                    .and_then(|i| f.get(i))
+                    .map_or(num_complex::Complex::new(0.0, 0.0), |z| z * scale);
+                let re = s.re as f32 + noise[n].re;
+                let im = s.im as f32 + noise[n].im;
+                let q = |v: f32| (v * 128.0).clamp(-127.0, 127.0) as i8 as u8;
+                [q(re), q(im)]
+            })
+            .collect();
+        all.chunks(8192).map(|c| c.to_vec()).collect()
+    }
+
+    /// A frame long enough to read a clock from, across three blocks: the
+    /// latest clock reading is its, near nothing (both ends' clocks are
+    /// the test's one), and the session's cross-check has one frame in it.
+    #[test]
+    fn a_long_frames_clock_is_read_once_its_end_is_held() {
+        let mut blocks = vec![(1, noise_block(1))];
+        for (i, b) in long_frame_blocks(1000, 3, 2).into_iter().enumerate() {
+            blocks.push((2 + i as u64, b));
+        }
+        blocks.push((5, noise_block(5)));
+        let m = run_wifi("wifi_channel", "wifi_survey", &blocks);
+        assert_eq!(m.net.health.wifi.lsig_read, 1, "{:?}", m.net.health.wifi);
+        let clock = m.net.wifi.clock.expect("a clock read");
+        assert_eq!(clock.symbols, 68);
+        assert!(
+            clock.clock_ppm.value().abs() < 5.0 * clock.clock_ppm.sigma() + 1.0,
+            "{clock:?}"
+        );
+        assert_eq!(m.net.wifi.clock_check.frames, 1);
+        assert!(m.net.wifi.clock_check.mean().is_some());
+    }
+
+    /// A break inside the DATA field drops the clock reading, not the
+    /// frame: it was found, judged and its L-SIG read all the same.
+    #[test]
+    fn a_break_inside_the_data_field_drops_only_the_clock() {
+        let parts = long_frame_blocks(1000, 3, 2);
+        let blocks = vec![
+            (1, noise_block(1)),
+            (2, parts[0].clone()),
+            // The second block of the frame lost.
+            (4, parts[2].clone()),
+            (5, noise_block(5)),
+        ];
+        let m = run_wifi("wifi_channel", "wifi_survey", &blocks);
+        assert_eq!(m.net.health.wifi.lsig_read, 1, "{:?}", m.net.health.wifi);
+        assert!(m.net.wifi.clock.is_none());
+        assert_eq!(m.net.wifi.clock_check.frames, 0);
     }
 
     /// Off the Wi-Fi views the same frame is not looked for.

@@ -139,6 +139,61 @@ fn lines(state: &SdrMetrics, theme: &crate::Theme) -> Vec<Line<'static>> {
             ],
         }));
     }
+    // The two readings of what the standard requires to be one oscillator,
+    // side by side and never averaged into one: the latest frame long
+    // enough to read a clock from, and the session's difference.
+    if state.net.wifi.last_frame.is_some() {
+        let quiet = Style::default().fg(theme.label);
+        out.push(Line::from(match &state.net.wifi.clock {
+            None => vec![
+                label("Clock"),
+                Span::styled(
+                    "no frame long enough yet (30 DATA symbols, one stream)",
+                    quiet,
+                ),
+            ],
+            Some(c) => vec![
+                label("Clock"),
+                Span::styled(
+                    format!(
+                        "{} symbol clock \u{b7} carrier {}",
+                        Reading::new(c.clock_ppm, "ppm", f64::INFINITY).text(),
+                        Reading::new(c.carrier_ppm, "ppm", f64::INFINITY).text()
+                    ),
+                    value,
+                ),
+                Span::styled(
+                    format!(
+                        " \u{b7} {} symbols \u{b7} {} s ago",
+                        c.symbols,
+                        now.saturating_duration_since(c.when).as_secs()
+                    ),
+                    quiet,
+                ),
+            ],
+        }));
+        let check = &state.net.wifi.clock_check;
+        if let Some(mean) = check.mean() {
+            let mut spans = vec![
+                label("Clocks"),
+                Span::styled(
+                    format!(
+                        "clock \u{2212} carrier {}",
+                        Reading::new(mean, "ppm", f64::INFINITY).text()
+                    ),
+                    value,
+                ),
+                Span::styled(format!(" over {} frames", check.frames), quiet),
+            ];
+            if let Some(chi2) = check.chi2_per_dof() {
+                spans.push(Span::styled(
+                    format!(" \u{b7} \u{3c7}\u{b2} {chi2:.1} a frame"),
+                    quiet,
+                ));
+            }
+            out.push(Line::from(spans));
+        }
+    }
     out.push(Line::from(vec![
         label("Receiver"),
         Span::styled(
@@ -316,7 +371,7 @@ mod tests {
     }
 
     fn text(m: &SdrMetrics) -> String {
-        draw(NetWifiStandinPanel, 80, 10, m).join("\n")
+        draw(NetWifiStandinPanel, 90, 13, m).join("\n")
     }
 
     /// A frame of this channel that said `heard`.
@@ -575,6 +630,43 @@ mod tests {
         assert!(f.contains("HT-SIG refused: CRC"), "{f}");
         assert!(!f.contains("HT-greenfield"), "{f}");
         assert!(row(&out, "L-SIG").contains("none read"), "{out}");
+    }
+
+    /// The latest frame's clock beside its carrier, each with its error
+    /// bar and the symbols it was read over; and the session's
+    /// cross-check: clock minus carrier, its error, the frames and the
+    /// chi-square that says whether they agree with one another.
+    #[test]
+    fn the_clock_is_shown_beside_the_carrier() {
+        use crate::signal::dsp::uncertainty::Uncertain;
+        let mut m = on_channel_six();
+        m.net.wifi.last_frame = Some(frame(non_ht(Rate::R6, 400)));
+        let out = text(&m);
+        assert!(
+            row(&out, "Clock").contains("no frame long enough yet"),
+            "{out}"
+        );
+        let reading = |clock: f64, carrier: f64| crate::state::WifiClock {
+            clock_ppm: Uncertain::from_sigma(clock, 0.6),
+            carrier_ppm: Uncertain::from_sigma(carrier, 0.8),
+            symbols: 134,
+            when: std::time::Instant::now(),
+        };
+        m.net.wifi.clock = Some(reading(-11.9, -12.2));
+        for (clock, carrier) in [(-11.9, -12.2), (3.1, 2.4), (-20.0, -19.1)] {
+            m.net.wifi.clock_check.add(&reading(clock, carrier));
+        }
+        let out = text(&m);
+        let r = row(&out, "Clock");
+        assert!(r.contains("-11.9") && r.contains("-12.2"), "{r}");
+        assert!(r.contains("134 symbols"), "{r}");
+        let c = row(&out, "Clocks");
+        assert!(
+            c.contains("clock \u{2212} carrier") || c.contains("clock - carrier"),
+            "{c}"
+        );
+        assert!(c.contains("3 frames"), "{c}");
+        assert!(c.contains("\u{3c7}\u{b2}"), "{c}");
     }
 
     /// While it shows an offset its frame says what that is worth; with no

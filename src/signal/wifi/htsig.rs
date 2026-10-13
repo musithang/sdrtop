@@ -106,13 +106,12 @@ impl HtSig {
         })
     }
 
-    /// A greenfield frame's time on the air, in nanoseconds (Equations
-    /// 19-92 and 19-93): HT-GF-STF and HT-LTF1, 8 us each; HT-SIG, 8 us;
-    /// 4 us for each further HT-LTF; then the DATA symbols, 4 us or 3.6
-    /// with the short guard. The symbols by Equation 19-32 for BCC. LDPC's
-    /// count (19.3.11.7.5) and the unequal modulations are refused, not
+    /// The DATA field as the HT-SIG describes it, or why it is not
+    /// computed: the HT-LTFs before it, its symbols and their length.
+    /// The symbols by Equation 19-32 for BCC; LDPC's count
+    /// (19.3.11.7.5) and the unequal modulations are refused, not
     /// approximated.
-    pub fn greenfield_airtime_ns(&self) -> Result<u32, &'static str> {
+    pub fn data(&self) -> Result<HtData, &'static str> {
         if self.ldpc {
             return Err("LDPC: its symbol count is not computed here");
         }
@@ -151,8 +150,34 @@ impl HtSig {
         } else {
             m_stbc * (8 * self.length as u32 + 16 + 6 * n_es).div_ceil(m_stbc * n_dbps)
         };
-        Ok(24_000 + 4_000 * (n_ltf - 1) + n_sym * symbol_ns)
+        Ok(HtData {
+            n_sts,
+            n_ltf,
+            n_sym,
+            symbol_ns,
+        })
     }
+
+    /// A greenfield frame's time on the air, in nanoseconds (Equations
+    /// 19-92 and 19-93): HT-GF-STF and HT-LTF1, 8 us each; HT-SIG, 8 us;
+    /// 4 us for each further HT-LTF; then the DATA symbols.
+    pub fn greenfield_airtime_ns(&self) -> Result<u32, &'static str> {
+        let d = self.data()?;
+        Ok(24_000 + 4_000 * (d.n_ltf - 1) + d.n_sym * d.symbol_ns)
+    }
+}
+
+/// An HT PPDU's DATA field as its HT-SIG describes it.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct HtData {
+    /// Space-time streams.
+    pub n_sts: u32,
+    /// HT-LTFs before the DATA field.
+    pub n_ltf: u32,
+    /// DATA symbols.
+    pub n_sym: u32,
+    /// Each symbol's length: 4000 ns, or 3600 with the short guard.
+    pub symbol_ns: u32,
 }
 
 /// The 48 bits of `sig` as sent, with its CRC and a zero tail: Smoothing

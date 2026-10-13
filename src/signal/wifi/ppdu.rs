@@ -202,6 +202,97 @@ pub fn wide_sig_symbols(bits: &[bool; 52], er: bool, first: usize) -> Vec<Vec<Co
     }
 }
 
+/// `x` as a receiver hears it when the transmitter's sample clock runs
+/// `ppm` fast against ours: its samples taken at m (1 + ppm 1e-6), between
+/// the transmitted ones by a Blackman-windowed sinc 64 taps wide.
+pub fn clocked(x: &[Complex<f64>], ppm: f64) -> Vec<Complex<f64>> {
+    const HALF: i64 = 32;
+    let ratio = 1.0 + ppm * 1e-6;
+    let n = ((x.len() as f64 - 1.0) / ratio) as usize;
+    (0..n)
+        .map(|m| {
+            let t = m as f64 * ratio;
+            let centre = t.floor() as i64;
+            let mut sum = Complex::new(0.0, 0.0);
+            for i in centre - HALF + 1..=centre + HALF {
+                if i < 0 || i as usize >= x.len() {
+                    continue;
+                }
+                let d = t - i as f64;
+                let sinc = if d.abs() < 1e-12 {
+                    1.0
+                } else {
+                    (std::f64::consts::PI * d).sin() / (std::f64::consts::PI * d)
+                };
+                let w = {
+                    let u = (d + HALF as f64) / (2.0 * HALF as f64);
+                    let a = std::f64::consts::TAU * u;
+                    0.42 - 0.5 * a.cos() + 0.08 * (2.0 * a).cos()
+                };
+                sum += x[i as usize] * sinc * w;
+            }
+            sum
+        })
+        .collect()
+}
+
+/// An HT-mixed PPDU with one space-time stream, as 19.3.9 and 19.3.11
+/// build it: the legacy preamble and an L-SIG at 6 Mb/s whose LENGTH gives
+/// the whole duration (Equation 10-18), HT-SIG, HT-STF, one HT-LTF, then
+/// `sig.data()`'s DATA symbols, random points on the 52 data tones and the
+/// pilots Psi rotated per symbol at polarity p_(n+3) (Equation 19-54), each
+/// behind a 0.8 or 0.4 us guard.
+pub fn ht_mixed(
+    sig: &super::htsig::HtSig,
+    rng: &mut crate::signal::dsp::testkit::Rng,
+) -> Vec<Complex<f64>> {
+    use super::ofdm::{at, polarity, wide_data_subcarriers, PILOTS};
+    let d = sig.data().expect("a DATA field this builds");
+    assert_eq!((d.n_sts, d.n_ltf), (1, 1), "one stream, one HT-LTF");
+    let txtime_ns = 20_000 + 8_000 + 4_000 + 4_000 + d.n_sym * d.symbol_ns;
+    let length = 3 * (txtime_ns - 20_000).div_ceil(4_000) - 3;
+    let guard = if sig.short_gi { 8 } else { 16 };
+    let step = 64 + guard;
+    let mut out = vec![Complex::new(0.0, 0.0); 720 + step * d.n_sym as usize + 1];
+    let mut place = |at: usize, field: &[Complex<f64>]| {
+        for (o, v) in out[at..at + field.len()].iter_mut().zip(field) {
+            *o += v;
+        }
+    };
+    place(0, &short_training());
+    place(160, &long_training());
+    place(320, &l_sig_at(Rate::R6, length as u16, 0));
+    for (i, s) in two_sig_symbols(&super::htsig::bits(sig), [true, true], 1)
+        .iter()
+        .enumerate()
+    {
+        place(400 + 80 * i, s);
+    }
+    place(560, &windowed(&ifft(&short_spectrum()), 16, 81));
+    let mut ltf = long_spectrum();
+    for (k, v) in [(-28, 1.0), (-27, 1.0), (27, -1.0), (28, -1.0)] {
+        ltf[at(k)] = Complex::new(v, 0.0);
+    }
+    place(640, &windowed(&ifft(&ltf), 16, 81));
+    const PSI: [f64; 4] = [1.0, 1.0, 1.0, -1.0];
+    let r = std::f64::consts::FRAC_1_SQRT_2;
+    for n in 0..d.n_sym as usize {
+        let mut spectrum = [Complex::new(0.0, 0.0); 64];
+        for k in wide_data_subcarriers() {
+            let b = rng.next_u64();
+            let re = if b & 1 == 0 { r } else { -r };
+            let im = if b & 2 == 0 { r } else { -r };
+            spectrum[at(k)] = Complex::new(re, im);
+        }
+        let p = polarity(n + 3);
+        for (j, (k, _)) in PILOTS.iter().enumerate() {
+            spectrum[at(*k)] = Complex::new(PSI[(n + j) % 4] * p, 0.0);
+        }
+        place(720 + step * n, &windowed(&ifft(&spectrum), guard, step + 1));
+    }
+    out
+}
+
 /// The DATA symbols, the n-th (from 1) with pilots at polarity p_n.
 fn data_symbols(psdu: &[u8], rate: Rate, initial: u8) -> Vec<Vec<Complex<f64>>> {
     let coded = puncture(&encode(&scrambled(psdu, rate, initial)), rate.coding());

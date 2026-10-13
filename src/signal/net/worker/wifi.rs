@@ -21,19 +21,30 @@ use std::sync::{Arc, Mutex};
 use num_complex::Complex;
 
 use super::{Tuning, View};
+use crate::signal::dsp::uncertainty::Uncertain;
 use crate::signal::net::measure::Recent;
+use crate::signal::wifi::clock::{measure, plan, Plan};
 use crate::signal::wifi::detect::{Detection, StfDetector};
 use crate::signal::wifi::format::{read, Signalling};
-use crate::signal::wifi::sync::{examine, needs, Verdict};
-use crate::state::SdrMetrics;
+use crate::signal::wifi::sync::{examine, needs, Sync, Verdict};
+use crate::state::{SdrMetrics, WifiClock};
 
-/// Where the receiver runs, or why not, its detector, and the repeats found
-/// that wait for their long training field to be held.
+/// Where the receiver runs, or why not, its detector, the repeats found
+/// that wait for their long training field to be held, and the frames that
+/// wait for their DATA field's end to have their clock read.
 #[derive(Default)]
 pub(super) struct Wifi {
     published: (Option<u8>, Option<String>),
     detector: StfDetector,
     waiting: Vec<Detection>,
+    clocks: Vec<Pending>,
+}
+
+/// A frame whose clock is read once its last DATA symbol is held.
+struct Pending {
+    sync: Sync,
+    plan: Plan,
+    centre_hz: f64,
 }
 
 impl Wifi {
@@ -62,6 +73,8 @@ impl Wifi {
     pub(super) fn interrupted(&mut self, state: &Arc<Mutex<SdrMetrics>>) {
         let cut = self.detector.cut() as u64 + self.waiting.len() as u64;
         self.waiting.clear();
+        // A clock still waiting for its frame's end will not see it.
+        self.clocks.clear();
         if cut > 0 {
             let mut m = state.lock().unwrap_or_else(|e| e.into_inner());
             m.net.health.wifi.cut += cut;
@@ -71,7 +84,7 @@ impl Wifi {
     /// Whether a repeat waits for samples still to come, so the feed holds
     /// a little more.
     pub(super) fn waiting(&self) -> bool {
-        !self.waiting.is_empty()
+        !self.waiting.is_empty() || !self.clocks.is_empty()
     }
 
     /// Look through a block that starts at stream pair `first_pair`, and
@@ -129,6 +142,13 @@ impl Wifi {
                             Signalling::Greenfield => counts.greenfield += 1,
                             Signalling::Unreadable => counts.unreadable += 1,
                         }
+                        if let Some(plan) = plan(&heard) {
+                            self.clocks.push(Pending {
+                                sync: s,
+                                plan,
+                                centre_hz,
+                            });
+                        }
                         last = Some(crate::state::WifiFrame {
                             offset_hz: s.offset,
                             snr_db: 10.0 * s.snr.log10(),
@@ -145,8 +165,39 @@ impl Wifi {
             }
             false
         });
-        if counts != Default::default() {
+        // Every frame whose DATA field is held by now has its clock read;
+        // one that a hole took is dropped, its other counts already made.
+        let mut clocks = Vec::new();
+        self.clocks.retain(|p| {
+            let (from, len) = (p.sync.ltf_start, p.plan.end());
+            if from + len as u64 > held_end {
+                return true;
+            }
+            let clock = window
+                .slice(from, len)
+                .and_then(|stretch| measure(&stretch, from, &p.sync, &p.plan));
+            if let Some(clock_ppm) = clock {
+                let ppm = |hz: f64| hz / p.centre_hz * 1e6;
+                clocks.push(WifiClock {
+                    clock_ppm,
+                    carrier_ppm: Uncertain::from_sigma(
+                        ppm(p.sync.offset.value()),
+                        ppm(p.sync.offset.sigma()),
+                    ),
+                    symbols: p.plan.count,
+                    when: now,
+                });
+            }
+            false
+        });
+        if counts != Default::default() || !clocks.is_empty() {
             let mut m = state.lock().unwrap_or_else(|e| e.into_inner());
+            for c in &clocks {
+                m.net.wifi.clock_check.add(c);
+            }
+            if let Some(c) = clocks.last() {
+                m.net.wifi.clock = Some(*c);
+            }
             let f = &mut m.net.health.wifi;
             f.this_channel += counts.this_channel;
             f.lsig_read += counts.lsig_read;

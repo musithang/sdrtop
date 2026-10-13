@@ -176,6 +176,27 @@ network", never as a name. And a four-bit CRC guards all of it, so about
 one damaged field in sixteen gets through looking healthy. That is the
 standard's choice, not ours, and the numbers are shown as what they are.
 
+The standard makes every transmitter run its carrier and its sample clock
+from one oscillator, so a crystal 12 ppm fast should be 12 ppm fast twice.
+The Wi-Fi panel checks: the carrier offset comes from the training, and
+the clock from the pilots drifting across a frame's data, so it needs a
+frame of 30 data symbols or more (a non-HT one, or an 802.11n one with a
+single stream). The `Clock` row shows the latest pair side by side, and
+the `Clocks` row the difference over every frame this session, with a
+chi-square that says whether the frames agree with one another. Near zero
+with a chi-square near one: everybody's clocks are one, ours included.
+Anything else is a finding, and it is left on screen rather than averaged
+away; the bench does not yet know who sent which frame, so it cannot say
+whose.
+
+One such finding is already in: the carrier offset is read from the
+preamble, the first 16 µs of a frame, and on our own recordings that is
+not always where the transmitter's carrier ends up. A frame whose clock
+and whose pilots both said -20.5 ppm had a preamble anywhere from -19 to
+-25 ppm. A transmitter that has just switched on is still settling, it
+seems, and the check catches it doing so: expect the `Clocks` row's
+chi-square to sit well above one for that reason alone.
+
 Every count on the other NET panels is only as complete as this panel says
 the feed was. If this one is unhappy, believe it over the others.
 
