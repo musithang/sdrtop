@@ -36,6 +36,7 @@ fn positions(n_cbps: usize, n_bpsc: usize) -> Vec<usize> {
 }
 
 /// One symbol's coded bits, interleaved: the bit at `k` moves to `j`.
+#[cfg(test)]
 pub fn interleave<T: Copy + Default>(bits: &[T], n_bpsc: usize) -> Vec<T> {
     let mut out = vec![T::default(); bits.len()];
     for (k, j) in positions(bits.len(), n_bpsc).into_iter().enumerate() {

@@ -407,7 +407,7 @@ screen.
 
 | Key | Preset | What's in it |
 |-----|--------|--------------|
-| `1` | `wifi_survey` | The stand-in: the channel, whether the rate is right, the latest frame of this channel's offset with its error bar, and that nothing is decoded yet · feed health |
+| `1` | `wifi_survey` | The stand-in: the channel, whether the rate is right, the latest frame of this channel's offset with its error bar, its SIGNAL field's rate, length and airtime, and that nothing past that field is decoded yet · feed health |
 
 `p` steps to the next layout in whichever section you are in, and wraps at the
 end. A twenty-sixth preset, `observer`, is marked hidden, so it has no section and no

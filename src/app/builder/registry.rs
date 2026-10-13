@@ -613,6 +613,10 @@ mod tests {
             offset_hz: Uncertain::from_sigma(-12_430.0, 1_900.0),
             snr_db: 14.0,
             carrier_hz: 2_437_000_000.0,
+            lsig: Ok(crate::signal::wifi::lsig::LSig {
+                rate: crate::signal::wifi::signal_field::Rate::R24,
+                length: 1_500,
+            }),
             when: now,
         });
         m.net.ble_packets.push_front(BlePacket {

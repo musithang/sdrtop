@@ -357,6 +357,17 @@ fn lines(
             grouped(f.this_channel),
             Some("long training field matched"),
         ));
+        // Each of this channel's frames has its L-SIG read or refused.
+        out.push(row(
+            "  L-SIG read",
+            grouped(f.lsig_read),
+            Some("parity, rate and tail good"),
+        ));
+        out.push(row(
+            "  L-SIG refused",
+            grouped(f.lsig_refused),
+            Some("failed a check"),
+        ));
         out.push(row(
             "adjacent",
             grouped(f.adjacent),
@@ -520,6 +531,8 @@ mod tests {
         m.net.wifi.channel = Some(6);
         m.net.health.wifi.detected = 1_204;
         m.net.health.wifi.this_channel = 1_100;
+        m.net.health.wifi.lsig_read = 1_042;
+        m.net.health.wifi.lsig_refused = 58;
         m.net.health.wifi.adjacent = 60;
         m.net.health.wifi.not_preamble = 27;
         m.net.health.wifi.cut = 17;
@@ -540,6 +553,8 @@ mod tests {
         assert!(cut.contains("17"), "{cut}");
         for (label, n) in [
             ("this channel", "1 100"),
+            ("L-SIG read", "1 042"),
+            ("L-SIG refused", "58"),
             ("adjacent", "60"),
             ("not a preamble", "27"),
         ] {

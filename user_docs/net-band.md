@@ -134,13 +134,25 @@ one made of it:
 |-----|----------------|
 | `repeats` | What a frame's short training field looks like. Not yet a frame: a neighbour's repeats the same way, and so do some other signals |
 | `this channel` | The long training field matched this channel's: a frame of ours |
+| `L-SIG read` | Of those, the ones whose SIGNAL field passed its parity, named a rate the standard lists and ended in a zero tail |
+| `L-SIG refused` | The ones whose SIGNAL field failed one of those checks |
 | `adjacent` | It matched a channel 5, 10 or 15 MHz away, judged on the part of it our 20 MHz can hear |
 | `not a preamble` | It matched nothing |
-| `cut short` | A break or a retune took it before it could be judged (on the survey, every hop is a retune) |
+| `cut short` | A break or a retune took it before it could be judged and its SIGNAL field heard (on the survey, every hop is a retune) |
 
-The four below `repeats` add up to it. In a block of flats expect a lot of
-all of them; the air is busier than any list of networks suggests, and a
-channel with no network on it still hears the ones beside it.
+`this channel`, `adjacent`, `not a preamble` and `cut short` add up to
+`repeats`, and the two L-SIG rows add up to `this channel`. In a block of
+flats expect a lot of all of them; the air is busier than any list of
+networks suggests, and a channel with no network on it still hears the ones
+beside it.
+
+The SIGNAL field (the L-SIG) is the symbol after the training that says a
+frame's rate and length, and so how long it stays on the air. Every newer
+Wi-Fi format sends one too, for the benefit of older radios, and it tells
+them the truth about the time while fibbing about the rate: an 802.11n or
+ax frame's L-SIG always says 6 Mb/s. So the Wi-Fi panel shows it as
+`L-SIG 6 Mb/s`, the L-SIG's word, and the airtime beside it, which holds
+for all of them.
 
 Every count on the other NET panels is only as complete as this panel says
 the feed was. If this one is unhappy, believe it over the others.

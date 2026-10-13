@@ -186,7 +186,8 @@ page's [last section](net.md#if-you-wrote-your-own-net-preset) lists.
 
 **Wi-Fi:** `net_wifi_standin`, the one panel Wi-Fi has while its receiver is
 being built: which channel the radio is on, whether the rate is the 20 Msps
-the bench needs, and that nothing is decoded yet.
+the bench needs, the latest frame's offset and what its SIGNAL field said,
+and that nothing past that field is decoded yet.
 
 **Observer:** `observer`
 

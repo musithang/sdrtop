@@ -30,19 +30,13 @@ use crate::signal::dsp::correlate::threshold_for_false_alarm;
 use crate::signal::dsp::estimate::{moose_offset, moose_variance, snr_from_metric};
 use crate::signal::dsp::uncertainty::Uncertain;
 
+use super::ofdm::LONG;
+
 /// The sample rate everything here is at (a 20 MHz channel, 17.3.2.4).
 const FS: f64 = 20e6;
 
 /// The chance that noise alone passes the gate at one shift and one timing.
 pub const GATE_FALSE_ALARM: f64 = 1e-8;
-
-/// The long training field's tones, -26 to 26 (Equation 17-8), 0 at DC.
-#[rustfmt::skip]
-const LONG: [i8; 53] = [
-    1, 1, -1, -1, 1, 1, -1, 1, -1, 1, 1, 1, 1, 1, 1, -1, -1, 1, 1, -1, 1, -1, 1, 1, 1, 1,
-    0,
-    1, -1, -1, 1, 1, -1, 1, -1, 1, -1, -1, -1, -1, -1, 1, 1, -1, -1, 1, -1, 1, -1, 1, 1, 1, 1,
-];
 
 /// The neighbours judged: 5, 10 and 15 MHz either side, as subcarriers of
 /// 312.5 kHz (16 to a channel), and ourselves.
@@ -57,9 +51,6 @@ const SEARCH: std::ops::Range<i64> = -10..130;
 #[derive(Clone, Copy, Debug)]
 pub struct Sync {
     /// The stream pair the long training field's first symbol starts on.
-    /// Read by the tests until the channel estimate that starts from it
-    /// lands.
-    #[cfg(test)]
     pub ltf_start: u64,
     /// The transmitter's offset from our tuning, in hertz, with its
     /// uncertainty. Our own oscillator's error is in it.
@@ -121,12 +112,14 @@ fn fit(r: &[Complex<f64>], w: &[Complex<f64>]) -> f64 {
     }
 }
 
-/// The stretch of the stream a verdict on a detection that peaked at
-/// `peak` reads: from 127 samples before it to the end of the long field's
-/// search. `None` too early in the stream to hold.
+/// The stretch of the stream a detection that peaked at `peak` is read
+/// from: from 127 samples before it to the end of the SIGNAL symbol after
+/// the latest long field the search could find, so the verdict and the
+/// L-SIG ([`super::lsig`]) are read from one stretch. `None` too early in
+/// the stream to hold.
 pub fn needs(peak: u64) -> Option<(u64, usize)> {
     let from = peak.checked_sub(127)?;
-    let len = 127 + SEARCH.end as usize + 128;
+    let len = 127 + SEARCH.end as usize + super::lsig::SIGNAL_AT + 64;
     Some((from, len))
 }
 
@@ -197,7 +190,6 @@ pub fn examine(samples: &[Complex<f32>], first_pair: u64, peak: u64) -> Option<V
     let snr = snr_from_metric(metric, 64).unwrap_or(f64::INFINITY);
     let variance = moose_variance(snr, 64, 64) * FS * FS;
     Some(Verdict::ThisChannel(Sync {
-        #[cfg(test)]
         ltf_start: (first_pair as i64 + first + t as i64) as u64,
         offset: Uncertain::from_variance((coarse + fine) * FS, variance),
         snr,
@@ -389,20 +381,26 @@ mod tests {
         );
     }
 
-    /// What a verdict needs is exactly what `examine` reads: given that
-    /// stretch, it judges.
+    /// What a repeat needs held is what `examine` reads and the SIGNAL
+    /// symbol after the latest long field it could find: given that
+    /// stretch, it judges and the L-SIG is read; without the last SIGNAL
+    /// symbol's worth, `examine` still judges.
     #[test]
-    fn needs_is_what_examine_reads() {
+    fn needs_holds_the_verdict_and_the_signal_field() {
         let mut rng = Rng::new(16);
         let x = on_air(900, 12.0, 0.0, &mut rng);
         let peak = StfDetector::new().push(0, &x)[0].peak;
         let (from, len) = needs(peak).unwrap();
         let cut = &x[from as usize..from as usize + len];
+        let Some(Verdict::ThisChannel(s)) = examine(cut, from, peak) else {
+            panic!("not judged this channel's");
+        };
         assert!(matches!(
-            examine(cut, from, peak),
-            Some(Verdict::ThisChannel(_))
+            crate::signal::wifi::lsig::read(cut, from, &s),
+            Some(Ok(_))
         ));
-        assert!(examine(&cut[..len - 1], from, peak).is_none());
+        assert!(examine(&cut[..len - 80], from, peak).is_some());
+        assert!(examine(&cut[..len - 81], from, peak).is_none());
         assert_eq!(needs(100), None);
     }
 

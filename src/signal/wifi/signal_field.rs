@@ -42,6 +42,37 @@ impl Rate {
     }
 
     /// Coded bits per subcarrier, N_BPSC (Table 17-4).
+    /// The rate a SIGNAL field's RATE bits name, R1 first; `None` for the
+    /// eight codes Table 17-6 does not list.
+    pub fn from_bits(bits: [bool; 4]) -> Option<Self> {
+        [
+            Rate::R6,
+            Rate::R9,
+            Rate::R12,
+            Rate::R18,
+            Rate::R24,
+            Rate::R36,
+            Rate::R48,
+            Rate::R54,
+        ]
+        .into_iter()
+        .find(|r| r.rate_bits() == bits)
+    }
+
+    /// The data rate in Mb/s (Table 17-4).
+    pub fn mbps(self) -> u32 {
+        match self {
+            Rate::R6 => 6,
+            Rate::R9 => 9,
+            Rate::R12 => 12,
+            Rate::R18 => 18,
+            Rate::R24 => 24,
+            Rate::R36 => 36,
+            Rate::R48 => 48,
+            Rate::R54 => 54,
+        }
+    }
+
     pub fn n_bpsc(self) -> usize {
         match self {
             Rate::R6 | Rate::R9 => 1,
@@ -79,6 +110,7 @@ impl Rate {
 /// The SIGNAL field's 24 bits in transmit order (17.3.4, Figure 17-5): RATE,
 /// a reserved zero, the 12-bit LENGTH in octets LSB first, even parity over
 /// bits 0 to 16, and six tail zeros.
+#[cfg(test)]
 pub fn bits(rate: Rate, length: u16) -> [bool; 24] {
     debug_assert!(length < 4096, "LENGTH is 12 bits");
     let mut out = [false; 24];
@@ -128,6 +160,9 @@ mod tests {
             (Rate::R54, "0011", 6, 288, 216),
         ];
         for (rate, r, bpsc, cbps, dbps) in rows {
+            // Each rate carries its data bits in 4 us symbols.
+            assert_eq!(rate.mbps() as usize * 4, dbps, "{rate:?}");
+            assert_eq!(Rate::from_bits(rate.rate_bits()), Some(rate), "{rate:?}");
             let got: String = rate
                 .rate_bits()
                 .iter()

@@ -3,8 +3,8 @@
 
 //! `NetWifiStandinPanel` - what a Wi-Fi view can say before its receiver
 //! is finished: where the radio is, whether its rate is the one the bench
-//! needs, the latest frame of this channel it synchronised to, and that
-//! nothing is decoded yet.
+//! needs, the latest frame of this channel it synchronised to and what its
+//! L-SIG said, and that nothing past the L-SIG is decoded yet.
 //!
 //! The one measurement on it is that frame's offset, with its error bar
 //! and dated, never a number without them: a view whose receiver is still
@@ -89,10 +89,34 @@ fn lines(state: &SdrMetrics, theme: &crate::Theme) -> Vec<Line<'static>> {
             ),
         ],
     }));
+    // What its L-SIG said, as the L-SIG's: a later format's L-SIG names
+    // 6 Mb/s whatever its own rate, while the airtime holds for every one.
+    if let Some(f) = &state.net.wifi.last_frame {
+        out.push(Line::from(match f.lsig {
+            Ok(l) => vec![
+                label("L-SIG"),
+                Span::styled(
+                    format!("{} Mb/s \u{b7} {} octets", l.rate.mbps(), l.length),
+                    value,
+                ),
+                Span::styled(
+                    format!(" \u{b7} {} \u{b5}s on the air", l.airtime_us()),
+                    Style::default().fg(theme.label),
+                ),
+            ],
+            Err(why) => vec![
+                label("L-SIG"),
+                Span::styled(
+                    format!("refused: {}", why.label()),
+                    Style::default().fg(theme.status_warn),
+                ),
+            ],
+        }));
+    }
     out.push(Line::from(vec![
         label("Receiver"),
         Span::styled(
-            "synchronises to frames; nothing is decoded yet.",
+            "reads each frame's L-SIG; nothing past it is decoded yet.",
             Style::default().fg(theme.label),
         ),
     ]));
@@ -146,6 +170,8 @@ mod tests {
     use crate::state::SdrMetrics;
 
     use super::NetWifiStandinPanel;
+    use crate::signal::wifi::lsig::{LSig, Refused};
+    use crate::signal::wifi::signal_field::Rate;
 
     /// A Wi-Fi view on channel 6 at 20 Msps, streaming.
     fn on_channel_six() -> SdrMetrics {
@@ -168,8 +194,8 @@ mod tests {
         assert!(out.contains("channel 6"), "{out}");
         assert!(out.contains("2437.000 MHz"), "{out}");
         assert!(out.contains("20.000 Msps"), "{out}");
-        assert!(out.contains("synchronises to frames"), "{out}");
-        assert!(out.contains("nothing is decoded"), "{out}");
+        assert!(out.contains("reads each frame's L-SIG"), "{out}");
+        assert!(out.contains("nothing past it is decoded"), "{out}");
     }
 
     /// The latest frame of this channel, its offset in kHz and ppm with
@@ -185,6 +211,10 @@ mod tests {
             offset_hz: crate::signal::dsp::uncertainty::Uncertain::from_sigma(-12_430.0, 1_900.0),
             snr_db: 14.2,
             carrier_hz: 2_437_000_000.0,
+            lsig: Ok(LSig {
+                rate: Rate::R24,
+                length: 1_500,
+            }),
             when: std::time::Instant::now(),
         });
         let out = text(&m);
@@ -192,6 +222,36 @@ mod tests {
         assert!(row.contains("kHz") && row.contains("ppm"), "{row}");
         assert!(row.contains("-12"), "{row}");
         assert!(row.contains("14 dB"), "{row}");
+    }
+
+    /// The latest frame's L-SIG, said as the L-SIG's: its rate and length
+    /// and the airtime they give (1500 octets at 24 Mb/s: 126 symbols, 524
+    /// us); a refused one says which check refused it.
+    #[test]
+    fn the_latest_frames_l_sig_is_shown_as_the_l_sigs() {
+        let mut m = on_channel_six();
+        let frame = |lsig| crate::state::WifiFrame {
+            offset_hz: crate::signal::dsp::uncertainty::Uncertain::from_sigma(0.0, 1_000.0),
+            snr_db: 20.0,
+            carrier_hz: 2_437_000_000.0,
+            lsig,
+            when: std::time::Instant::now(),
+        };
+        m.net.wifi.last_frame = Some(frame(Ok(LSig {
+            rate: Rate::R24,
+            length: 1_500,
+        })));
+        let out = text(&m);
+        let row = out.lines().find(|l| l.contains("L-SIG")).expect("row");
+        assert!(row.contains("24 Mb/s"), "{row}");
+        assert!(row.contains("1500 octets"), "{row}");
+        assert!(row.contains("524 \u{b5}s"), "{row}");
+
+        m.net.wifi.last_frame = Some(frame(Err(Refused::Parity)));
+        let out = text(&m);
+        let row = out.lines().find(|l| l.contains("L-SIG")).expect("row");
+        assert!(row.contains("refused") && row.contains("parity"), "{row}");
+        assert!(!row.contains("Mb/s"), "{row}");
     }
 
     /// While it shows an offset its frame says what that is worth; with no
@@ -205,6 +265,7 @@ mod tests {
             offset_hz: crate::signal::dsp::uncertainty::Uncertain::from_sigma(0.0, 1.0),
             snr_db: 10.0,
             carrier_hz: 2_437_000_000.0,
+            lsig: Err(Refused::Tail),
             when: std::time::Instant::now(),
         });
         assert!(NetWifiStandinPanel.chrome(&m).offsets);

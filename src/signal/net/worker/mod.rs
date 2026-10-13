@@ -1154,16 +1154,21 @@ mod tests {
         let secs = blocks as f64 * 131_072.0 / 20e6;
         let f = m.net.health.wifi;
         eprintln!(
-            "{secs:.1} s · channel {:?} · repeats {} ({:.1}/s): this channel {}, adjacent {}, \
-             not a preamble {}, cut {} · last frame {:?}",
+            "{secs:.1} s · channel {:?} · repeats {} ({:.1}/s): this channel {} (L-SIG read {}, \
+             refused {}), adjacent {}, not a preamble {}, cut {} · last frame {:?}",
             m.net.wifi.channel,
             f.detected,
             f.detected as f64 / secs,
             f.this_channel,
+            f.lsig_read,
+            f.lsig_refused,
             f.adjacent,
             f.not_preamble,
             f.cut,
-            m.net.wifi.last_frame.map(|l| (l.offset_hz, l.snr_db))
+            m.net
+                .wifi
+                .last_frame
+                .map(|l| (l.offset_hz, l.snr_db, l.lsig))
         );
     }
 
@@ -1666,6 +1671,15 @@ mod tests {
         );
         assert!(last.offset_hz.sigma() < 5_000.0, "{:?}", last.offset_hz);
         assert_eq!(last.carrier_hz, 2_437_000_000.0);
+        // Its L-SIG read: the annex's 36 Mb/s and 100 octets, six DATA
+        // symbols, 44 us on the air.
+        use crate::signal::wifi::{lsig::LSig, signal_field::Rate};
+        let want = LSig {
+            rate: Rate::R36,
+            length: 100,
+        };
+        assert_eq!(last.lsig, Ok(want));
+        assert_eq!((f.lsig_read, f.lsig_refused), (1, 0), "{f:?}");
     }
 
     /// A frame whose short field was whole but whose long one the break
@@ -1693,6 +1707,27 @@ mod tests {
             f.this_channel + f.adjacent + f.not_preamble + f.cut,
             "{f:?}"
         );
+        assert_eq!(f.this_channel, f.lsig_read + f.lsig_refused, "{f:?}");
+    }
+
+    /// A frame whose long field was whole but whose SIGNAL symbol the break
+    /// took is cut, not judged: what it would say is not there to read.
+    #[test]
+    fn a_frame_the_break_took_its_signal_from_is_cut() {
+        let m = run_wifi(
+            "wifi_channel",
+            "wifi_survey",
+            &[
+                (1, noise_block(1)),
+                // The long field ends 40 pairs before the block does, the
+                // SIGNAL symbol 40 after.
+                (2, frame_block(4096 - 360, 2)),
+                (5, noise_block(5)),
+                (6, noise_block(6)),
+            ],
+        );
+        let f = m.net.health.wifi;
+        assert_eq!((f.detected, f.this_channel, f.cut), (1, 0, 1), "{f:?}");
     }
 
     /// **The funnel adds up across a break**: a frame the break cut in its

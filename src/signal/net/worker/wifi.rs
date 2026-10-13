@@ -22,6 +22,7 @@ use num_complex::Complex;
 use super::{Tuning, View};
 use crate::signal::net::measure::Recent;
 use crate::signal::wifi::detect::{Detection, StfDetector};
+use crate::signal::wifi::lsig::read;
 use crate::signal::wifi::sync::{examine, needs, Verdict};
 use crate::state::SdrMetrics;
 
@@ -109,19 +110,31 @@ impl Wifi {
             if from + len as u64 > held_end {
                 return true;
             }
-            let verdict = window
-                .slice(from, len)
-                .and_then(|stretch| examine(&stretch, from, d.peak));
-            match verdict {
-                Some(Verdict::ThisChannel(s)) => {
-                    counts.this_channel += 1;
-                    last = Some(crate::state::WifiFrame {
-                        offset_hz: s.offset,
-                        snr_db: 10.0 * s.snr.log10(),
-                        carrier_hz: centre_hz,
-                        when: now,
-                    });
-                }
+            let Some(stretch) = window.slice(from, len) else {
+                // Held no longer: a hole the feed left.
+                counts.cut += 1;
+                return false;
+            };
+            match examine(&stretch, from, d.peak) {
+                Some(Verdict::ThisChannel(s)) => match read(&stretch, from, &s) {
+                    // The stretch holds the SIGNAL symbol (`needs`); were it
+                    // ever short, the frame was not heard whole.
+                    None => counts.cut += 1,
+                    Some(lsig) => {
+                        counts.this_channel += 1;
+                        match lsig {
+                            Ok(_) => counts.lsig_read += 1,
+                            Err(_) => counts.lsig_refused += 1,
+                        }
+                        last = Some(crate::state::WifiFrame {
+                            offset_hz: s.offset,
+                            snr_db: 10.0 * s.snr.log10(),
+                            carrier_hz: centre_hz,
+                            lsig,
+                            when: now,
+                        });
+                    }
+                },
                 Some(Verdict::Adjacent { .. }) => counts.adjacent += 1,
                 Some(Verdict::NotPreamble) => counts.not_preamble += 1,
                 // Held no longer, or never whole: a hole the feed left.
@@ -133,6 +146,8 @@ impl Wifi {
             let mut m = state.lock().unwrap_or_else(|e| e.into_inner());
             let f = &mut m.net.health.wifi;
             f.this_channel += counts.this_channel;
+            f.lsig_read += counts.lsig_read;
+            f.lsig_refused += counts.lsig_refused;
             f.adjacent += counts.adjacent;
             f.not_preamble += counts.not_preamble;
             f.cut += counts.cut;

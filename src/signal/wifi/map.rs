@@ -37,6 +37,7 @@ fn axis(bits: &[bool]) -> f64 {
 }
 
 /// The nearest level's Gray bits on one axis of `n` bits.
+#[cfg(test)]
 fn axis_bits(level: f64, n: usize) -> Vec<bool> {
     let top = (1usize << n) - 1;
     let value = ((level + top as f64) / 2.0).round().clamp(0.0, top as f64) as usize;
@@ -60,6 +61,7 @@ pub fn map(bits: &[bool], n_bpsc: usize) -> Vec<Complex<f64>> {
 }
 
 /// Points to the bits of the nearest constellation point: a hard decision.
+#[cfg(test)]
 pub fn demap(points: &[Complex<f64>], n_bpsc: usize) -> Vec<bool> {
     let k = k_mod(n_bpsc);
     points

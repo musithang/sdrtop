@@ -40,13 +40,7 @@ pub const TONES: [i32; 52] = {
 
 /// The long training field's value on subcarrier `k` (Equation 17-8): +-1.
 fn long(k: i32) -> f64 {
-    #[rustfmt::skip]
-    const LONG: [i8; 53] = [
-        1, 1, -1, -1, 1, 1, -1, 1, -1, 1, 1, 1, 1, 1, 1, -1, -1, 1, 1, -1, 1, -1, 1, 1, 1, 1,
-        0,
-        1, -1, -1, 1, 1, -1, 1, -1, 1, -1, -1, -1, -1, -1, 1, 1, -1, -1, 1, -1, 1, -1, 1, 1, 1, 1,
-    ];
-    LONG[(k + 26) as usize] as f64
+    super::ofdm::LONG[(k + 26) as usize] as f64
 }
 
 /// The sample rate the transform's subcarriers are 312.5 kHz apart at.
@@ -73,6 +67,7 @@ impl Floor {
     /// half again of the tenth percentile's power), each subcarrier's mean
     /// power relative to the mean of the six nearest the centre. `None`
     /// with too few stretches to say anything (fewer than 32).
+    #[cfg(test)]
     pub fn measure(x: &[Complex<f32>]) -> Option<Self> {
         let blocks: Vec<&[Complex<f32>; 64]> = x.as_chunks::<64>().0.iter().collect();
         let power: Vec<f64> = blocks

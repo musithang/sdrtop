@@ -8,12 +8,15 @@
 //! to 31 (`at(k)` is where subcarrier `k` sits), the way the annex prints
 //! them; [`crate::signal::wifi`]'s time-domain stages turn it into samples.
 
+#[cfg(test)]
 use num_complex::Complex;
 
 /// A symbol's 64 subcarriers, -32 first.
+#[cfg(test)]
 pub type Spectrum = [Complex<f64>; 64];
 
 /// Where subcarrier `k`, -32 to 31, sits in a [`Spectrum`].
+#[cfg(test)]
 pub fn at(k: i32) -> usize {
     (k + 32) as usize
 }
@@ -43,6 +46,7 @@ pub fn polarity(n: usize) -> f64 {
 }
 
 /// The 48 points on their subcarriers, nothing else.
+#[cfg(test)]
 pub fn data_only(points: &[Complex<f64>]) -> Spectrum {
     assert_eq!(points.len(), 48, "a symbol carries 48 points");
     let mut out = [Complex::new(0.0, 0.0); 64];
@@ -54,6 +58,7 @@ pub fn data_only(points: &[Complex<f64>]) -> Spectrum {
 
 /// Symbol `n`'s spectrum: its 48 points and the four pilots at that
 /// symbol's polarity (Equation 17-22).
+#[cfg(test)]
 pub fn symbol(points: &[Complex<f64>], n: usize) -> Spectrum {
     let mut out = data_only(points);
     let p = polarity(n);
@@ -66,6 +71,7 @@ pub fn symbol(points: &[Complex<f64>], n: usize) -> Spectrum {
 /// The short training symbol's tones (Equation 17-6): every fourth
 /// subcarrier from -24 to 24, each `+(1+j)` or `-(1+j)`, scaled by
 /// `sqrt(13/6)` so twelve tones carry the power of 52.
+#[cfg(test)]
 const SHORT: [(i32, f64); 12] = [
     (-24, 1.0),
     (-20, -1.0),
@@ -81,15 +87,17 @@ const SHORT: [(i32, f64); 12] = [
     (24, 1.0),
 ];
 
-/// The long training symbol, subcarriers -26 to 26 (Equation 17-8), 0 at DC.
+/// The long training symbol, subcarriers -26 to 26 (Equation 17-8), 0 at DC:
+/// the one table the receiver's references are built from too.
 #[rustfmt::skip]
-const LONG: [i8; 53] = [
+pub const LONG: [i8; 53] = [
     1, 1, -1, -1, 1, 1, -1, 1, -1, 1, 1, 1, 1, 1, 1, -1, -1, 1, 1, -1, 1, -1, 1, 1, 1, 1,
     0,
     1, -1, -1, 1, 1, -1, 1, -1, 1, -1, -1, -1, -1, -1, 1, 1, -1, -1, 1, -1, 1, -1, 1, 1, 1, 1,
 ];
 
 /// The short training symbol's spectrum.
+#[cfg(test)]
 pub fn short_spectrum() -> Spectrum {
     let scale = (13.0f64 / 6.0).sqrt();
     let mut out = [Complex::new(0.0, 0.0); 64];
@@ -100,6 +108,7 @@ pub fn short_spectrum() -> Spectrum {
 }
 
 /// The long training symbol's spectrum.
+#[cfg(test)]
 pub fn long_spectrum() -> Spectrum {
     let mut out = [Complex::new(0.0, 0.0); 64];
     for (i, &v) in LONG.iter().enumerate() {

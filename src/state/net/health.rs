@@ -88,14 +88,20 @@ pub struct WifiFunnel {
     /// same period.
     pub detected: u64,
     /// Frames of this channel: their long training field matched ours.
+    /// Each has its L-SIG read or refused, so these two add up to it.
     pub this_channel: u64,
+    /// Frames of this channel whose L-SIG passed its checks.
+    pub lsig_read: u64,
+    /// Frames of this channel whose L-SIG failed its parity, named no
+    /// rate, or had a tail that was not zero.
+    pub lsig_refused: u64,
     /// Frames of a channel 5, 10 or 15 MHz away.
     pub adjacent: u64,
     /// Repeats whose long training field matched nothing.
     pub not_preamble: u64,
     /// Ones a break in the stream or a retune cut short, in their short
-    /// field or before their long one was heard; the survey's hops among
-    /// them.
+    /// field or before their long one and the SIGNAL symbol after it were
+    /// heard; the survey's hops among them.
     pub cut: u64,
 }
 

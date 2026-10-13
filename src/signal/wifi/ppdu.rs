@@ -64,8 +64,13 @@ fn in_time(spectrum: &Spectrum) -> Vec<Complex<f64>> {
 
 /// The SIGNAL symbol: BPSK at rate 1/2, pilots at polarity p0 (17.3.4).
 pub fn signal_symbol(rate: Rate, length: usize) -> Vec<Complex<f64>> {
-    let bits = interleave(&encode(&signal_field::bits(rate, length as u16)), 1);
-    in_time(&symbol(&map(&bits, 1), 0))
+    signal_from_bits(&signal_field::bits(rate, length as u16))
+}
+
+/// A SIGNAL symbol carrying any 24 bits, valid or not: how a receiver's
+/// checks are shown a field that should fail them.
+pub fn signal_from_bits(bits: &[bool; 24]) -> Vec<Complex<f64>> {
+    in_time(&symbol(&map(&interleave(&encode(bits), 1), 1), 0))
 }
 
 /// The DATA symbols, the n-th (from 1) with pilots at polarity p_n.

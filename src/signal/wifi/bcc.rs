@@ -12,6 +12,7 @@ use crate::signal::dsp::code::conv::{correlation, Code};
 pub const CODE: Code = Code::new(7, 0o133, 0o171);
 
 /// Rate 1/2 from the zero state (17.3.5.6).
+#[cfg(test)]
 pub fn encode(bits: &[bool]) -> Vec<bool> {
     CODE.encode(bits)
 }
@@ -29,6 +30,7 @@ fn sent(coding: Coding) -> &'static [bool] {
 }
 
 /// Puncture rate-1/2 output to `coding`.
+#[cfg(test)]
 pub fn puncture(coded: &[bool], coding: Coding) -> Vec<bool> {
     coded
         .iter()
