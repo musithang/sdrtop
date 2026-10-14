@@ -375,24 +375,36 @@ mod tests {
     /// **What checking the tail costs, measured.** Not a check: by hand,
     /// in release (`cargo test --release what_the_tail_check_costs --
     /// --ignored --nocapture`). At each SNR, the share of fields read right
-    /// decoded unterminated with the tail checked, against terminated with
-    /// only parity and rate to check; and on noise, how often each accepts.
+    /// decoded unterminated with the tail checked, against terminated and
+    /// held to its word within a few disagreements; and on noise, how often
+    /// each accepts, beside the union bound on the terminated decode's.
     #[test]
     #[ignore]
     fn what_the_tail_check_costs() {
-        let both = |r: &[f32]| {
-            let open = bcc::decode(r, Coding::Half, false).map(|b| LSig::from_bits(&b));
-            let closed = bcc::decode(r, Coding::Half, true).map(|mut b| {
-                // Terminated, the tail is zero by construction.
+        // Terminated, then held to its word: the re-encoded field against
+        // the readings' signs, accepted within `d` disagreements.
+        let within = |r: &[f32], d: usize| {
+            bcc::decode(r, Coding::Half, true).and_then(|mut b| {
                 b[18..].fill(false);
-                LSig::from_bits(&b)
-            });
+                let far = bcc::encode(&b)
+                    .iter()
+                    .zip(r)
+                    .filter(|(c, v)| **c != (**v > 0.0))
+                    .count();
+                (far <= d).then(|| LSig::from_bits(&b))
+            })
+        };
+        const DS: [usize; 3] = [5, 6, 7];
+        let all = |r: &[f32]| {
+            let open = bcc::decode(r, Coding::Half, false).map(|b| LSig::from_bits(&b));
+            let closed: Vec<_> = DS.iter().map(|d| within(r, *d)).collect();
             (open, closed)
         };
         let mut rng = Rng::new(86);
         let trials = 4000;
         for snr in [-2.0, -1.0, 0.0, 1.0, 2.0, 4.0] {
-            let (mut open_ok, mut closed_ok) = (0, 0);
+            let mut open_ok = 0;
+            let mut closed_ok = [0; 3];
             for i in 0..trials {
                 let rate = RATES[i % 8];
                 let length = (i * 37 % 4095 + 1) as u16;
@@ -404,30 +416,45 @@ mod tests {
                     &mut rng,
                 );
                 let r = deinterleave(&readings(&x, 0, &placed()).unwrap(), 1);
-                let (open, closed) = both(&r);
+                let (open, closed) = all(&r);
                 open_ok += (open == want) as usize;
-                closed_ok += (closed == want) as usize;
+                for (n, c) in closed.iter().enumerate() {
+                    closed_ok[n] += (*c == want) as usize;
+                }
             }
             eprintln!(
-                "{snr:+.0} dB: unterminated, tail checked {:.2} %; terminated {:.2} %",
+                "{snr:+.0} dB: tail checked {:.2} %; terminated within {DS:?}: {:?} %",
                 100.0 * open_ok as f64 / trials as f64,
-                100.0 * closed_ok as f64 / trials as f64
+                closed_ok.map(|k| (10000.0 * k as f64 / trials as f64).round() / 100.0)
             );
         }
         let mut frame = header(&[false; 24]);
         frame.truncate(321);
-        let (mut open_yes, mut closed_yes) = (0, 0);
-        for _ in 0..trials {
+        let mut open_yes = 0;
+        let mut closed_yes = [0; 3];
+        let noise_trials = 20000;
+        for _ in 0..noise_trials {
             let x = on_air(&frame, &[Complex::new(1.0, 0.0)], 20.0, &mut rng);
             let r = deinterleave(&readings(&x, 0, &placed()).unwrap(), 1);
-            let (open, closed) = both(&r);
+            let (open, closed) = all(&r);
             open_yes += matches!(open, Some(Ok(_))) as usize;
-            closed_yes += matches!(closed, Some(Ok(_))) as usize;
+            for (n, c) in closed.iter().enumerate() {
+                closed_yes[n] += matches!(c, Some(Ok(_))) as usize;
+            }
         }
+        // Union bound: 2^18 words, each within d of 48 coin flips, then
+        // parity and a supported rate (a half each).
+        let bound = DS.map(|d| {
+            let tail: f64 = (0..=d)
+                .map(|k| (0..k).fold(1.0, |c, j| c * (48 - j) as f64 / (j + 1) as f64))
+                .sum::<f64>()
+                / 2f64.powi(48);
+            (10000.0 * (2f64.powi(18) * tail / 4.0)).round() / 100.0
+        });
         eprintln!(
-            "noise accepted: unterminated, tail checked {:.2} %; terminated {:.2} %",
-            100.0 * open_yes as f64 / trials as f64,
-            100.0 * closed_yes as f64 / trials as f64
+            "noise accepted: tail checked {:.2} %; terminated within {DS:?}: {:?} %, bound {bound:?} %",
+            100.0 * open_yes as f64 / noise_trials as f64,
+            closed_yes.map(|k| (10000.0 * k as f64 / noise_trials as f64).round() / 100.0)
         );
     }
 
