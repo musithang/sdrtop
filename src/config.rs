@@ -124,6 +124,14 @@ pub struct ThemeConfig {
     pub net_ble: Option<String>,
     pub net_bt: Option<String>,
     pub net_wifi: Option<String>,
+    pub wifi_non_ht: Option<String>,
+    pub wifi_ht: Option<String>,
+    pub wifi_vht: Option<String>,
+    pub wifi_he: Option<String>,
+    pub wifi_eht: Option<String>,
+    pub wifi_dsss: Option<String>,
+    pub wifi_other_channel: Option<String>,
+    pub wifi_undecoded: Option<String>,
 }
 
 impl ThemeConfig {
@@ -376,6 +384,14 @@ impl AppConfig {
         apply!(net_ble);
         apply!(net_bt);
         apply!(net_wifi);
+        apply!(wifi_non_ht);
+        apply!(wifi_ht);
+        apply!(wifi_vht);
+        apply!(wifi_he);
+        apply!(wifi_eht);
+        apply!(wifi_dsss);
+        apply!(wifi_other_channel);
+        apply!(wifi_undecoded);
         t
     }
 
@@ -1362,6 +1378,18 @@ panels = [
         let cfg: AppConfig = toml::from_str(toml).unwrap();
         let t = cfg.build_theme(None);
         assert_eq!(t.net_wifi, ratatui::style::Color::Rgb(0x12, 0x34, 0x56));
+    }
+
+    /// So are the Wi-Fi formats' colours, each on its own.
+    #[test]
+    fn build_theme_override_applies_to_the_wifi_formats() {
+        let toml =
+            "[theme]\nbase = \"nord\"\nwifi_dsss = \"#010203\"\nwifi_other_channel = \"#040506\"\n";
+        let cfg: AppConfig = toml::from_str(toml).unwrap();
+        let t = cfg.build_theme(None);
+        assert_eq!(t.wifi_dsss, ratatui::style::Color::Rgb(1, 2, 3));
+        assert_eq!(t.wifi_other_channel, ratatui::style::Color::Rgb(4, 5, 6));
+        assert_eq!(t.wifi_ht, crate::Theme::by_name("nord").wifi_ht);
     }
 
     #[test]

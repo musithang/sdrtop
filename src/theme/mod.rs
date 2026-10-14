@@ -45,6 +45,19 @@ pub struct Theme {
     // benches never share a colour.
     pub net_wifi: Color,
 
+    // A Wi-Fi frame's format, one colour each, the same on every Wi-Fi
+    // view: drawn on the background, never over a gradient. A frame of
+    // another channel and one whose signalling did not read are the quiet
+    // two, so the eye counts this channel's identified traffic first.
+    pub wifi_non_ht: Color,
+    pub wifi_ht: Color,
+    pub wifi_vht: Color,
+    pub wifi_he: Color,
+    pub wifi_eht: Color,
+    pub wifi_dsss: Color,
+    pub wifi_other_channel: Color,
+    pub wifi_undecoded: Color,
+
     // Series: one colour per thing told apart on one plot, in order (the
     // classic hop scatter's piconets). Never empty; a plot with more things
     // than colours reuses them in order, and says so.
@@ -65,6 +78,20 @@ fn steel_color(c: Color) -> Color {
 }
 
 impl Theme {
+    /// A Wi-Fi format's colour.
+    pub fn wifi(&self, family: crate::state::Family) -> Color {
+        use crate::state::Family;
+        match family {
+            Family::NonHt => self.wifi_non_ht,
+            Family::Ht => self.wifi_ht,
+            Family::Vht => self.wifi_vht,
+            Family::He => self.wifi_he,
+            Family::Eht => self.wifi_eht,
+            Family::Dsss => self.wifi_dsss,
+            Family::Undecoded => self.wifi_undecoded,
+        }
+    }
+
     /// The `i`th series colour, wrapping round the list.
     pub fn series_color(&self, i: usize) -> Color {
         self.series
@@ -402,6 +429,145 @@ mod tests {
         assert_eq!(t.net_ble, Color::Rgb(0xaa, 0xbb, 0xcc));
         assert_eq!(t.net_bt, Color::Rgb(0xdd, 0xee, 0xff));
         assert_eq!(t.net_wifi, Color::Rgb(3, 3, 3));
+        // The Wi-Fi formats: the series in order, the quiet two in the
+        // theme's own label and value.
+        use crate::state::Family;
+        let series: Vec<Color> = t.series.clone();
+        for (i, f) in Family::ALL[..6].iter().enumerate() {
+            assert_eq!(t.wifi(*f), series[i % series.len()], "{f:?}");
+        }
+        assert_eq!(t.wifi(Family::Undecoded), t.value);
+        assert_eq!(t.wifi_other_channel, t.label);
+    }
+
+    /// CIEDE2000, the perceptual distance between two colours: what the eye
+    /// tells apart, where RGB distance calls two pastels apart that it
+    /// does not.
+    fn ciede2000(a: Color, b: Color) -> f64 {
+        fn lab(c: Color) -> (f64, f64, f64) {
+            let Color::Rgb(r, g, b) = c else {
+                panic!("not truecolor")
+            };
+            let lin = |v: u8| {
+                let v = v as f64 / 255.0;
+                if v <= 0.04045 {
+                    v / 12.92
+                } else {
+                    ((v + 0.055) / 1.055).powf(2.4)
+                }
+            };
+            let (r, g, b) = (lin(r), lin(g), lin(b));
+            let x = (0.4124 * r + 0.3576 * g + 0.1805 * b) / 0.95047;
+            let y = 0.2126 * r + 0.7152 * g + 0.0722 * b;
+            let z = (0.0193 * r + 0.1192 * g + 0.9505 * b) / 1.08883;
+            let f = |t: f64| {
+                if t > 0.008856 {
+                    t.cbrt()
+                } else {
+                    7.787 * t + 16.0 / 116.0
+                }
+            };
+            (
+                116.0 * f(y) - 16.0,
+                500.0 * (f(x) - f(y)),
+                200.0 * (f(y) - f(z)),
+            )
+        }
+        let ((l1, a1, b1), (l2, a2, b2)) = (lab(a), lab(b));
+        let cb = (a1.hypot(b1) + a2.hypot(b2)) / 2.0;
+        let g = 0.5 * (1.0 - (cb.powi(7) / (cb.powi(7) + 25f64.powi(7))).sqrt());
+        let (a1, a2) = ((1.0 + g) * a1, (1.0 + g) * a2);
+        let (c1, c2) = (a1.hypot(b1), a2.hypot(b2));
+        let hue = |b: f64, a: f64| b.atan2(a).to_degrees().rem_euclid(360.0);
+        let (h1, h2) = (hue(b1, a1), hue(b2, a2));
+        let dl = l2 - l1;
+        let dc = c2 - c1;
+        let mut dh = h2 - h1;
+        if c1 * c2 == 0.0 {
+            dh = 0.0;
+        } else if dh > 180.0 {
+            dh -= 360.0;
+        } else if dh < -180.0 {
+            dh += 360.0;
+        }
+        let dhh = 2.0 * (c1 * c2).sqrt() * (dh / 2.0).to_radians().sin();
+        let lb = (l1 + l2) / 2.0;
+        let cbp = (c1 + c2) / 2.0;
+        let hb = if c1 * c2 == 0.0 {
+            h1 + h2
+        } else if (h1 - h2).abs() <= 180.0 {
+            (h1 + h2) / 2.0
+        } else if h1 + h2 < 360.0 {
+            (h1 + h2 + 360.0) / 2.0
+        } else {
+            (h1 + h2 - 360.0) / 2.0
+        };
+        let t = 1.0 - 0.17 * (hb - 30.0).to_radians().cos()
+            + 0.24 * (2.0 * hb).to_radians().cos()
+            + 0.32 * (3.0 * hb + 6.0).to_radians().cos()
+            - 0.20 * (4.0 * hb - 63.0).to_radians().cos();
+        let dth = 30.0 * (-((hb - 275.0) / 25.0).powi(2)).exp();
+        let rc = 2.0 * (cbp.powi(7) / (cbp.powi(7) + 25f64.powi(7))).sqrt();
+        let sl = 1.0 + 0.015 * (lb - 50.0).powi(2) / (20.0 + (lb - 50.0).powi(2)).sqrt();
+        let sc = 1.0 + 0.045 * cbp;
+        let sh = 1.0 + 0.015 * cbp * t;
+        let rt = -(2.0 * dth).to_radians().sin() * rc;
+        ((dl / sl).powi(2) + (dc / sc).powi(2) + (dhh / sh).powi(2) + rt * (dc / sc) * (dhh / sh))
+            .sqrt()
+    }
+
+    /// The helper against two pairs worked elsewhere: black and white 100,
+    /// catppuccin's blue and mauve 18.9.
+    #[test]
+    fn ciede2000_reads_as_published() {
+        assert!((ciede2000(Color::Rgb(0, 0, 0), Color::Rgb(255, 255, 255)) - 100.0).abs() < 0.1);
+        let d = ciede2000(Color::Rgb(0x89, 0xb4, 0xfa), Color::Rgb(0xcb, 0xa6, 0xf7));
+        assert!((d - 18.9).abs() < 0.1, "{d}");
+    }
+
+    /// **The Wi-Fi formats are told apart at a glance in every theme.**
+    /// Every built-in states all eight; the three that fill the air
+    /// (non-HT, HT, DSSS) are at least 20 apart (CIEDE2000), any two of the
+    /// six formats at least 12, and none within 12 of the theme's alarm
+    /// colour, so no frame reads as an alarm. Measured when chosen: the
+    /// closest three 22 (nord), the closest pair 12.3 (gruvbox).
+    #[test]
+    fn the_wifi_formats_are_told_apart_in_every_theme() {
+        use crate::state::Family;
+        for name in Theme::builtin_names() {
+            let text = BUILTIN.iter().find(|(n, _)| *n == name).unwrap().1;
+            let file = data::ThemeFile::parse(text).unwrap();
+            assert!(
+                [
+                    &file.wifi_non_ht,
+                    &file.wifi_ht,
+                    &file.wifi_vht,
+                    &file.wifi_he,
+                    &file.wifi_eht,
+                    &file.wifi_dsss,
+                    &file.wifi_other_channel,
+                    &file.wifi_undecoded
+                ]
+                .iter()
+                .all(|f| f.is_some()),
+                "{name} leaves a Wi-Fi format to the fallback"
+            );
+            let t = Theme::builtin(name).unwrap();
+            let six: Vec<(Family, Color)> =
+                Family::ALL[..6].iter().map(|f| (*f, t.wifi(*f))).collect();
+            for (i, (fa, a)) in six.iter().enumerate() {
+                assert!(
+                    ciede2000(*a, t.status_crit) >= 12.0,
+                    "{name}: {fa:?} reads as the alarm"
+                );
+                for (fb, b) in &six[i + 1..] {
+                    let d = ciede2000(*a, *b);
+                    let air = |f: &Family| matches!(f, Family::NonHt | Family::Ht | Family::Dsss);
+                    let floor = if air(fa) && air(fb) { 20.0 } else { 12.0 };
+                    assert!(d >= floor, "{name}: {fa:?} and {fb:?} are {d:.1} apart");
+                }
+            }
+        }
     }
 
     #[test]

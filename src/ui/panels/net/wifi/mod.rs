@@ -5,3 +5,4 @@
 //! Wi-Fi bench is a menu of its own and shares no panel with Bluetooth's.
 
 pub mod standin;
+pub mod survey;

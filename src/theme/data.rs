@@ -60,6 +60,25 @@ pub struct ThemeFile {
     /// theme's own `border_accent`.
     #[serde(default)]
     pub net_wifi: Option<String>,
+    /// The Wi-Fi formats' colours. Optional for the same reason: absent,
+    /// the six formats take the series in order, a frame of another channel
+    /// the theme's `label` and an undecoded one its `value`.
+    #[serde(default)]
+    pub wifi_non_ht: Option<String>,
+    #[serde(default)]
+    pub wifi_ht: Option<String>,
+    #[serde(default)]
+    pub wifi_vht: Option<String>,
+    #[serde(default)]
+    pub wifi_he: Option<String>,
+    #[serde(default)]
+    pub wifi_eht: Option<String>,
+    #[serde(default)]
+    pub wifi_dsss: Option<String>,
+    #[serde(default)]
+    pub wifi_other_channel: Option<String>,
+    #[serde(default)]
+    pub wifi_undecoded: Option<String>,
     /// The series colours. Optional for the same reason: absent, a theme's
     /// own accents stand in, in an order that keeps neighbours apart.
     #[serde(default)]
@@ -92,6 +111,31 @@ impl ThemeFile {
                 })?
             };
         }
+        let series = match &self.series {
+            Some(list) if !list.is_empty() => list
+                .iter()
+                .enumerate()
+                .map(|(i, hex)| {
+                    Theme::parse_hex(hex)
+                        .ok_or_else(|| format!("series {i}: '{hex}' is not a #rrggbb colour"))
+                })
+                .collect::<Result<Vec<_>, _>>()?,
+            Some(_) => return Err("series: the list is empty".to_string()),
+            None => vec![
+                hex!(border_accent),
+                hex!(value_hi),
+                hex!(status_ok),
+                hex!(observer),
+                hex!(status_crit),
+            ],
+        };
+        // A Wi-Fi format's colour: the theme's own, else the fallback named.
+        let ink = |field: &str, hex: &Option<String>, fallback: ratatui::style::Color| match hex {
+            Some(hex) => Theme::parse_hex(hex)
+                .ok_or_else(|| format!("{field}: '{hex}' is not a #rrggbb colour")),
+            None => Ok(fallback),
+        };
+        let nth = |i: usize| series[i % series.len()];
         let theme = Theme {
             border_dim: hex!(border_dim),
             border_default: hex!(border_default),
@@ -122,24 +166,15 @@ impl ThemeFile {
                     .ok_or_else(|| format!("net_wifi: '{hex}' is not a #rrggbb colour"))?,
                 None => hex!(border_accent),
             },
-            series: match &self.series {
-                Some(list) if !list.is_empty() => list
-                    .iter()
-                    .enumerate()
-                    .map(|(i, hex)| {
-                        Theme::parse_hex(hex)
-                            .ok_or_else(|| format!("series {i}: '{hex}' is not a #rrggbb colour"))
-                    })
-                    .collect::<Result<Vec<_>, _>>()?,
-                Some(_) => return Err("series: the list is empty".to_string()),
-                None => vec![
-                    hex!(border_accent),
-                    hex!(value_hi),
-                    hex!(status_ok),
-                    hex!(observer),
-                    hex!(status_crit),
-                ],
-            },
+            series: series.clone(),
+            wifi_non_ht: ink("wifi_non_ht", &self.wifi_non_ht, nth(0))?,
+            wifi_ht: ink("wifi_ht", &self.wifi_ht, nth(1))?,
+            wifi_vht: ink("wifi_vht", &self.wifi_vht, nth(2))?,
+            wifi_he: ink("wifi_he", &self.wifi_he, nth(3))?,
+            wifi_eht: ink("wifi_eht", &self.wifi_eht, nth(4))?,
+            wifi_dsss: ink("wifi_dsss", &self.wifi_dsss, nth(5))?,
+            wifi_other_channel: ink("wifi_other_channel", &self.wifi_other_channel, hex!(label))?,
+            wifi_undecoded: ink("wifi_undecoded", &self.wifi_undecoded, hex!(value))?,
             palette: self
                 .palette
                 .iter()

@@ -19,6 +19,14 @@ observer       = "#458588"   # observer mode, when another process holds the rad
 net_ble        = "#d3869b"   # decoded BLE packets, marked over the coexistence heatmap
 net_bt         = "#ebdbb2"   # decoded classic Bluetooth hits, the same way
 net_wifi       = "#8a5cff"   # Wi-Fi: its channel in the header, its frames wherever they are marked
+wifi_non_ht    = "#83a598"   # Wi-Fi frames by format, on every Wi-Fi view: 802.11a/g
+wifi_ht        = "#b16286"   # 802.11n
+wifi_vht       = "#8ec07c"   # 802.11ac
+wifi_he        = "#b8bb26"   # 802.11ax
+wifi_eht       = "#d3869b"   # 802.11be
+wifi_dsss      = "#fe8019"   # 802.11b
+wifi_other_channel = "#665c54"   # a frame of another channel heard here: quiet, as the label
+wifi_undecoded = "#d5c4a1"   # signalling that did not read
 series         = ["#83a598", "#fabd2f", "#d3869b", "#b8bb26", "#fe8019", "#458588"]   # one colour per piconet on the classic hop scatter, told apart from each other
 
 # The spectrum and waterfall gradient, cold (weak) to hot (strong).

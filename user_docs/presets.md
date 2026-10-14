@@ -184,9 +184,11 @@ These are the valid values for `name`. What each one actually draws is in
 [the NET page](net.md); three of these were renamed or replaced, which that
 page's [last section](net.md#if-you-wrote-your-own-net-preset) lists.
 
-**Wi-Fi:** `net_wifi_standin`, the one panel Wi-Fi has while its receiver is
-being built: which channel the radio is on, whether the rate is the 20 Msps
-the bench needs, the latest frame's offset, its format and what its
+**Wi-Fi:** `net_wifi_survey`, the thirteen channels side by side: how busy
+each one's busiest megahertz was and the airtime its own frames stated, by
+format, over the survey's visits.
+`net_wifi_standin`, which channel the radio is on, whether the rate is the
+20 Msps the bench needs, the latest frame's offset, its format and what its
 signalling said, the latest 802.11b frame's header, and that nothing past
 that is decoded yet.
 
