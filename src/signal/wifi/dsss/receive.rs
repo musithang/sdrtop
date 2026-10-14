@@ -59,8 +59,11 @@ pub fn threshold() -> f64 {
 /// one time in 2500).
 const SYMBOLS_READ: usize = 128 + 16 + 48 + 8;
 
-/// The timing is refined this far either side of the run's.
-const REFINE: usize = 3;
+/// The timing is refined this far either side of the run's: half a symbol,
+/// so every timing of a symbol is tried. A frame off our centre is found
+/// where its chips happen to correlate with the unturned template, which
+/// can be anywhere in the symbol, not near its own timing.
+const REFINE: usize = SYMBOL / 2;
 
 /// The timings either side of an event's that, holding a run of their own
 /// already, make it the same frame: a frame passes at several timings
@@ -310,6 +313,10 @@ pub struct Read {
     pub start: u64,
     /// The carrier against our tuning, in hertz.
     pub offset_hz: Uncertain,
+    /// How many whole megahertz the frame's centre sits from ours: 0 for a
+    /// frame of this channel, anything else another channel's. 10 is also
+    /// -10.
+    pub shift_mhz: i32,
 }
 
 /// What a SYNC turned out to be.
@@ -318,6 +325,11 @@ pub enum Verdict {
     Frame(Read),
     /// A SYNC with no SFD after it where one should be.
     NoSfd,
+    /// A SYNC whose chips sit `shift_mhz` whole megahertz from our centre,
+    /// with no SFD after it: another channel's frame, header unread.
+    Elsewhere {
+        shift_mhz: i32,
+    },
 }
 
 /// The stretch of the stream a found SYNC is read from: the refinement
@@ -327,15 +339,47 @@ pub fn needs(found: &Found) -> Option<(u64, usize)> {
     Some((from, 2 * REFINE + SYMBOL * (SYMBOLS_READ + 1)))
 }
 
+/// The whole-megahertz shifts 20 Msps can tell apart: -9 to +10, the last
+/// also standing for -10, since at the edge of what is sampled the two are
+/// one.
+const SHIFTS: std::ops::RangeInclusive<i32> = -9..=10;
+
+/// The template turned back by each of [`SHIFTS`], in order: a frame
+/// `k` MHz off turns `k` whole times a symbol, so the same turn undoes it
+/// in every symbol and leaves their differential products alone.
+fn turned() -> &'static [[Complex<f64>; SYMBOL]; 20] {
+    static T: std::sync::OnceLock<[[Complex<f64>; SYMBOL]; 20]> = std::sync::OnceLock::new();
+    T.get_or_init(|| {
+        let t = template();
+        std::array::from_fn(|i| {
+            let k = *SHIFTS.start() + i as i32;
+            std::array::from_fn(|n| {
+                let a = -std::f64::consts::TAU * (k as f64) * n as f64 / SYMBOL as f64;
+                Complex::from_polar(t[n] as f64, a)
+            })
+        })
+    })
+}
+
+/// The 20-point forward transform: bin k is a window's correlation with the
+/// template turned back by k whole megahertz.
+fn shifts_fft() -> &'static std::sync::Arc<dyn rustfft::Fft<f64>> {
+    static F: std::sync::OnceLock<std::sync::Arc<dyn rustfft::Fft<f64>>> =
+        std::sync::OnceLock::new();
+    F.get_or_init(|| rustfft::FftPlanner::new().plan_fft_forward(SYMBOL))
+}
+
 /// The matched filter's output for the symbol whose window starts at `at`
-/// in `samples`, and its normalised power.
-fn despread(samples: &[Complex<f32>], at: usize) -> (Complex<f64>, f64) {
+/// in `samples`, a frame `shift_mhz` whole megahertz from our centre, and
+/// its normalised power.
+fn despread(samples: &[Complex<f32>], at: usize, shift_mhz: i32) -> (Complex<f64>, f64) {
     let t = template();
+    let g = &turned()[(shift_mhz - *SHIFTS.start()) as usize];
     let w = &samples[at..at + SYMBOL];
     let c: Complex<f64> = w
         .iter()
-        .zip(t)
-        .map(|(z, v)| Complex::new(z.re as f64, z.im as f64) * *v as f64)
+        .zip(g)
+        .map(|(z, v)| Complex::new(z.re as f64, z.im as f64) * v)
         .sum();
     let e: f64 = w.iter().map(|z| z.norm_sqr() as f64).sum();
     let et: f64 = t.iter().map(|v| (*v as f64).powi(2)).sum();
@@ -357,21 +401,54 @@ pub fn examine(samples: &[Complex<f32>], first_pair: u64, found: &Found) -> Opti
     if samples.len() < held + len {
         return None;
     }
-    // The timing: the shift of the run's within REFINE whose symbols carry
-    // the most.
+    // Where the frame's centre is: the whole megahertz whose turned
+    // template carries the run's symbols best. Whole megahertz away the
+    // chips still correlate with ours, and the carrier below cannot see a
+    // whole megahertz, so without this another channel's frame reads as
+    // ours.
+    // Chosen with the timing, any start within REFINE of the run's. Turned
+    // by k whole megahertz, a symbol's correlation is bin k of the 20-point
+    // transform of the window times the template, so one transform a
+    // symbol gives every shift at once.
     let run_at = held + REFINE;
-    let at = (run_at - REFINE..=run_at + REFINE)
-        .max_by(|&a, &b| {
-            let score = |s: usize| {
-                (0..RUN)
-                    .map(|k| despread(samples, s + SYMBOL * k).1)
-                    .sum::<f64>()
-            };
-            score(a).total_cmp(&score(b))
-        })
-        .unwrap_or(run_at);
+    let fft = shifts_fft();
+    let t = template();
+    let et: f64 = t.iter().map(|v| (*v as f64).powi(2)).sum();
+    let mut best = (run_at, 0, f64::NEG_INFINITY);
+    let mut carried = [0.0f64; SYMBOL];
+    let mut bins = [Complex::new(0.0, 0.0); SYMBOL];
+    for a in run_at - REFINE..run_at + REFINE {
+        carried.fill(0.0);
+        for k in 0..RUN {
+            let w = &samples[a + SYMBOL * k..a + SYMBOL * (k + 1)];
+            let e: f64 = w.iter().map(|z| z.norm_sqr() as f64).sum();
+            if e <= 0.0 {
+                continue;
+            }
+            for ((b, z), v) in bins.iter_mut().zip(w).zip(t) {
+                *b = Complex::new(z.re as f64, z.im as f64) * *v as f64;
+            }
+            fft.process(&mut bins);
+            for (c, b) in carried.iter_mut().zip(&bins) {
+                *c += b.norm_sqr() / (e * et);
+            }
+        }
+        for shift in SHIFTS {
+            let score = carried[shift.rem_euclid(SYMBOL as i32) as usize];
+            if score > best.2 {
+                best = (a, shift, score);
+            }
+        }
+    }
+    let (at, shift_mhz, _) = best;
+    // What a SYNC with no frame read after it is: ours, or another
+    // channel's whose header could not be read.
+    let nothing_read = match shift_mhz {
+        0 => Verdict::NoSfd,
+        shift_mhz => Verdict::Elsewhere { shift_mhz },
+    };
     let (symbols, rho): (Vec<Complex<f64>>, Vec<f64>) = (0..=SYMBOLS_READ)
-        .map(|k| despread(samples, at + SYMBOL * k))
+        .map(|k| despread(samples, at + SYMBOL * k, shift_mhz))
         .unzip();
     let d: Vec<Complex<f64>> = symbols.windows(2).map(|w| w[1] * w[0].conj()).collect();
     // The products between two symbols that both passed the gate: the
@@ -405,7 +482,7 @@ pub fn examine(samples: &[Complex<f32>], first_pair: u64, found: &Found) -> Opti
         ))
     };
     let Some(first) = carrier(&chips(0..RUN + 2)) else {
-        return Some(Verdict::NoSfd);
+        return Some(nothing_read);
     };
     let turn = Complex::from_polar(1.0, -std::f64::consts::TAU * first.value() * 1e-6);
 
@@ -438,11 +515,11 @@ pub fn examine(samples: &[Complex<f32>], first_pair: u64, found: &Found) -> Opti
         _ => 24,
     };
     let Some((k, preamble)) = sfd.filter(|&(k, _)| k + 1 + header_symbols <= d.len()) else {
-        return Some(Verdict::NoSfd);
+        return Some(nothing_read);
     };
     // The carrier again over the whole SYNC seen, before the SFD.
     let Some(offset_hz) = carrier(&chips(0..k.saturating_sub(16).max(RUN))) else {
-        return Some(Verdict::NoSfd);
+        return Some(nothing_read);
     };
     let turn = Complex::from_polar(1.0, -std::f64::consts::TAU * offset_hz.value() * 1e-6);
 
@@ -487,7 +564,12 @@ pub fn examine(samples: &[Complex<f32>], first_pair: u64, found: &Found) -> Opti
         preamble,
         header: Header::from_bits(&bits),
         start,
-        offset_hz,
+        // The shift and the fine carrier the symbols turned by after it.
+        offset_hz: Uncertain::from_sigma(
+            offset_hz.value() + shift_mhz as f64 * 1e6,
+            offset_hz.sigma(),
+        ),
+        shift_mhz,
     }))
 }
 
@@ -569,6 +651,67 @@ mod tests {
                     }
                 }
             }
+        }
+    }
+
+    /// **A frame off our centre is read at its own centre.** Whole
+    /// megahertz away, the Barker chips still correlate with ours, and the
+    /// carrier from 1 us symbols cannot see a whole megahertz: unchecked, a
+    /// frame of another channel read as this channel's, "near zero". Read at the
+    /// shift that despreads it best, it says how far its centre is, and its
+    /// offset is the shift and the fine carrier together. 10 MHz is also
+    /// -10: at the edge of what is sampled the two are one.
+    #[test]
+    fn a_frame_off_centre_is_read_at_its_shift() {
+        let mut rng = Rng::new(132);
+        for (off, shift) in [
+            (1.0e6 + 20e3, 1),
+            (2.0e6 - 30e3, 2),
+            (3.0e6, 3),
+            (4.95e6, 5),
+            (7.0e6 + 40e3, 7),
+            (10.0e6 - 50e3, 10),
+            (-3.0e6 + 10e3, -3),
+            (-7.0e6, -7),
+        ] {
+            let h = header(Rate::M1, false, 1800);
+            let f = frame(Preamble::Long, &h, 40, 4, &mut rng);
+            match received(&on_air(&f, 18.0, off, &mut rng)) {
+                Some(Verdict::Frame(r)) => {
+                    assert_eq!(r.shift_mhz, shift, "{off}");
+                    assert_eq!(r.header, Ok(h), "{off}");
+                    assert!(
+                        (r.offset_hz.value() - off).abs() < 4.0 * r.offset_hz.sigma() + 200.0,
+                        "{off}: {:?}",
+                        r.offset_hz
+                    );
+                }
+                other => panic!("{off}: {other:?}"),
+            }
+        }
+    }
+
+    /// A SYNC with nothing after it is "no SFD" on our centre; whole
+    /// megahertz off it, it is still another channel's, whose header could
+    /// not be read: where a frame sits is known from its chips before its
+    /// SFD is looked for.
+    #[test]
+    fn a_sync_off_centre_without_its_sfd_is_another_channels() {
+        let mut rng = Rng::new(133);
+        for (off, want) in [
+            (0.0, Verdict::NoSfd),
+            (3.0e6, Verdict::Elsewhere { shift_mhz: 3 }),
+            (-5.0e6 + 30e3, Verdict::Elsewhere { shift_mhz: -5 }),
+        ] {
+            let h = header(Rate::M1, false, 900);
+            let mut f = frame(Preamble::Long, &h, 0, 4, &mut rng);
+            // A hundred SYNC symbols, then silence where the SFD was.
+            f.truncate((4 + 100) * SYMBOL);
+            assert_eq!(
+                received(&on_air(&f, 18.0, off, &mut rng)),
+                Some(want),
+                "{off}"
+            );
         }
     }
 
@@ -878,6 +1021,7 @@ mod tests {
         let mut d = SyncDetector::new();
         let mut kinds = std::collections::BTreeMap::new();
         let (mut found, mut no_sfd, mut refused) = (0, 0, std::collections::BTreeMap::new());
+        let mut elsewhere = std::collections::BTreeMap::new();
         let mut offsets = Vec::new();
         let (mut last_end, mut inside_read) = (0u64, 0);
         for at in (0..pairs).step_by(131_072) {
@@ -887,6 +1031,12 @@ mod tests {
                     continue;
                 };
                 match examine(&stretch(from as usize, len), from, &f) {
+                    Some(Verdict::Frame(r)) if r.shift_mhz != 0 => {
+                        *elsewhere.entry(r.shift_mhz).or_insert(0) += 1;
+                    }
+                    Some(Verdict::Elsewhere { shift_mhz }) => {
+                        *elsewhere.entry(shift_mhz).or_insert(0) += 1;
+                    }
                     Some(Verdict::Frame(r)) => match r.header {
                         Ok(h) => {
                             last_end = r.start + 20 * h.airtime_us(r.preamble) as u64;
@@ -919,7 +1069,7 @@ mod tests {
             }
         }
         let secs = pairs as f64 / 20e6;
-        eprintln!("{secs:.1} s: {found} SYNCs, {no_sfd} with no SFD ({inside_read} inside a frame read before), refused {refused:?}");
+        eprintln!("{secs:.1} s: {found} SYNCs, {no_sfd} with no SFD ({inside_read} inside a frame read before), refused {refused:?}, other channels' by shift in MHz {elsewhere:?}");
         for (k, n) in &kinds {
             eprintln!("  {k:?}: {n} ({:.1}/s)", *n as f64 / secs);
         }

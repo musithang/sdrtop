@@ -416,6 +416,11 @@ fn lines(
             grouped(f.dsss_inside),
             Some("found again after a fade"),
         ));
+        out.push(row(
+            "  another channel",
+            grouped(f.dsss_adjacent),
+            Some("centred whole MHz away"),
+        ));
     }
 
     // What it cost: the same figure the header band shows, red
@@ -576,6 +581,7 @@ mod tests {
         m.net.health.wifi.dsss_no_sfd = 2;
         m.net.health.wifi.dsss_cut = 1;
         m.net.health.wifi.dsss_inside = 7;
+        m.net.health.wifi.dsss_adjacent = 11;
         let on = draw(NetDecodeHealthPanel, 80, 50, &m).join("\n");
         assert!(on.contains("ch 6"), "{on}");
         let found = on
@@ -601,6 +607,7 @@ mod tests {
             ("header refused", "3"),
             ("no SFD", "2"),
             ("inside a frame", "7"),
+            ("another channel", "11"),
             ("adjacent", "60"),
             ("not a preamble", "27"),
         ] {

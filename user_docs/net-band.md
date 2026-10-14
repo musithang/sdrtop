@@ -157,11 +157,15 @@ detector running on a core of its own.
 | `no SFD` | The chips, but no start-of-frame where one should be |
 | `SYNC cut` | A break or a retune took it before its header was held |
 | `inside a frame` | Found again inside a frame already read, after a fade in its data: the same frame, not a new one |
+| `another channel` | Chips centred whole megahertz from ours: a frame of another channel, read at its own centre (header or not) and never counted as this one's |
 
-The five rows under `802.11b SYNCs` add up to it. In a block of
-flats expect a lot of all of them; the air is busier than any list of
-networks suggests, and a channel with no network on it still hears the ones
-beside it.
+The six rows under `802.11b SYNCs` add up to it. Barker chips are
+forgiving enough to be despread from a channel or two away, which is why the
+last row exists: without it, the loudest access point nearby would be
+credited to every channel it can be heard on. Anywhere with more than one
+network in range (a block of flats, a café, a campus) expect a lot of all of
+them; the air is busier than any list of networks suggests, and a channel
+with no network on it still hears the ones around it.
 
 The SIGNAL field (the L-SIG) is the symbol after the training that says a
 frame's rate and length, and so how long it stays on the air. Every newer

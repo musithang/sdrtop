@@ -246,6 +246,14 @@ impl Wifi {
                 .slice(from, len)
                 .and_then(|stretch| dsss_examine(&stretch, from, f));
             match verdict {
+                // Another channel's frame: its chips whole megahertz from
+                // ours. Its airtime still holds its own chips found again.
+                Some(DsssVerdict::Frame(r)) if r.shift_mhz != 0 => {
+                    counts.dsss_adjacent += 1;
+                    if let Ok(h) = r.header {
+                        *until = r.start + 20 * h.airtime_us(r.preamble) as u64;
+                    }
+                }
                 Some(DsssVerdict::Frame(r)) => {
                     match r.header {
                         Ok(h) => {
@@ -263,6 +271,7 @@ impl Wifi {
                     });
                 }
                 Some(DsssVerdict::NoSfd) => counts.dsss_no_sfd += 1,
+                Some(DsssVerdict::Elsewhere { .. }) => counts.dsss_adjacent += 1,
                 // Held no longer, or never whole: a hole the feed left.
                 None => counts.dsss_cut += 1,
             }
@@ -292,6 +301,7 @@ impl Wifi {
             f.dsss_no_sfd += counts.dsss_no_sfd;
             f.dsss_cut += counts.dsss_cut;
             f.dsss_inside += counts.dsss_inside;
+            f.dsss_adjacent += counts.dsss_adjacent;
             if last.is_some() {
                 m.net.wifi.last_frame = last;
             }

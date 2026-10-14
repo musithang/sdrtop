@@ -1172,13 +1172,14 @@ mod tests {
                 .map(|l| (l.offset_hz, l.snr_db, l.heard))
         );
         eprintln!(
-            "802.11b: {} SYNCs, {} read, {} refused, {} no SFD, {} cut, {} inside a frame · latest {:?}",
+            "802.11b: {} SYNCs, {} read, {} refused, {} no SFD, {} cut, {} inside a frame, {} another channel's · latest {:?}",
             f.dsss_found,
             f.dsss_read,
             f.dsss_refused,
             f.dsss_no_sfd,
             f.dsss_cut,
             f.dsss_inside,
+            f.dsss_adjacent,
             m.net
                 .wifi
                 .last_dsss
@@ -1823,17 +1824,18 @@ mod tests {
         header: &crate::signal::wifi::dsss::header::Header,
         seed: u64,
     ) -> Vec<Vec<u8>> {
-        dsss_blocks_faded(start, blocks, header, 60, None, seed)
+        dsss_blocks_faded(start, blocks, header, 60, None, 0.0, seed)
     }
 
     /// The same with `data` data symbols, silenced over `fade` symbols of
-    /// the frame (counted from its first).
+    /// the frame (counted from its first), its centre `offset_hz` from ours.
     fn dsss_blocks_faded(
         start: usize,
         blocks: usize,
         header: &crate::signal::wifi::dsss::header::Header,
         data: usize,
         fade: Option<std::ops::Range<usize>>,
+        offset_hz: f64,
         seed: u64,
     ) -> Vec<Vec<u8>> {
         use crate::signal::wifi::dsss::{header::Preamble, transmit::frame};
@@ -1843,6 +1845,10 @@ mod tests {
             for z in &mut f[(2 + fade.start) * 20..(2 + fade.end) * 20] {
                 *z = num_complex::Complex::new(0.0, 0.0);
             }
+        }
+        let turn = std::f64::consts::TAU * offset_hz / 20e6;
+        for (n, z) in f.iter_mut().enumerate() {
+            *z *= num_complex::Complex::from_polar(1.0, turn * n as f64);
         }
         let power = f.iter().map(|z| z.norm_sqr()).sum::<f64>() / f.len() as f64;
         let scale = 0.2 / power.sqrt();
@@ -1904,6 +1910,30 @@ mod tests {
         );
     }
 
+    /// An 802.11b frame of another channel, its centre 3 MHz from ours, is
+    /// read at its own centre and counted as another channel's: never this
+    /// channel's header, never the frame the view shows.
+    #[test]
+    fn an_802_11b_frame_off_our_centre_is_another_channels() {
+        let h = beacon_like();
+        let mut blocks = vec![(1, noise_block(1))];
+        for (i, b) in dsss_blocks_faded(1000, 2, &h, 60, None, 3.0e6, 2)
+            .into_iter()
+            .enumerate()
+        {
+            blocks.push((2 + i as u64, b));
+        }
+        blocks.push((4, noise_block(4)));
+        let m = run_wifi("wifi_channel", "wifi_survey", &blocks);
+        let f = m.net.health.wifi;
+        assert_eq!(
+            (f.dsss_found, f.dsss_read, f.dsss_refused, f.dsss_adjacent),
+            (1, 0, 0, 1),
+            "{f:?}"
+        );
+        assert!(m.net.wifi.last_dsss.is_none());
+    }
+
     /// A break before its header was held cuts the frame, and every SYNC
     /// found ends in exactly one place.
     #[test]
@@ -1920,7 +1950,12 @@ mod tests {
         assert_eq!((f.dsss_found, f.dsss_cut), (1, 1), "{f:?}");
         assert_eq!(
             f.dsss_found,
-            f.dsss_read + f.dsss_refused + f.dsss_no_sfd + f.dsss_cut + f.dsss_inside
+            f.dsss_read
+                + f.dsss_refused
+                + f.dsss_no_sfd
+                + f.dsss_cut
+                + f.dsss_inside
+                + f.dsss_adjacent
         );
         assert!(m.net.wifi.last_dsss.is_none());
     }
@@ -1937,7 +1972,7 @@ mod tests {
             length_us: 400,
         };
         let mut blocks = vec![(1, noise_block(1))];
-        for (i, b) in dsss_blocks_faded(1000, 3, &h, 400, Some(250..260), 4)
+        for (i, b) in dsss_blocks_faded(1000, 3, &h, 400, Some(250..260), 0.0, 4)
             .into_iter()
             .enumerate()
         {
@@ -1953,7 +1988,12 @@ mod tests {
         );
         assert_eq!(
             f.dsss_found,
-            f.dsss_read + f.dsss_refused + f.dsss_no_sfd + f.dsss_cut + f.dsss_inside
+            f.dsss_read
+                + f.dsss_refused
+                + f.dsss_no_sfd
+                + f.dsss_cut
+                + f.dsss_inside
+                + f.dsss_adjacent
         );
     }
 
