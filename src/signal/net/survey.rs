@@ -32,6 +32,13 @@ pub const SETTLE: Duration = Duration::from_millis(crate::state::SWEEP_SETTLING_
 /// fifty would publish nothing on the positions where it mattered most.
 pub const DWELL: Duration = Duration::from_millis(100);
 
+/// How long the Wi-Fi survey listens to each channel: five beacon intervals
+/// (102.4 ms each), so every access point in range beacons in every visit,
+/// and the visit is long enough for a frame of the longest kind (an 802.11b
+/// one at 1 Mb/s runs to 19 ms) to be a small part of it. A visit is also
+/// what the survey's spread is counted in, so it is one figure for both.
+pub const WIFI_DWELL: Duration = Duration::from_millis(500);
+
 /// One pass across the band.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Plan {

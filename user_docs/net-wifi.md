@@ -8,8 +8,12 @@ motorway by counting the car dealerships beside it. This view measures the
 time instead.
 
 A receiver of 20 Msps hears one Wi-Fi channel at a time, so the survey
-visits channels 1 to 13 in turn and keeps every visit. Each channel gets a
-column of two bars:
+visits channels 1 to 13 in turn, half a second on each (five beacon
+intervals, so every access point in range speaks up at least once a
+visit), and keeps every visit from the moment the view opens. A pass takes
+about seven seconds. Locked on one channel, the survey keeps cutting that
+channel's time into half-second visits, so its column stays live. Each
+channel gets a column of two bars:
 
 - **Busy** (the left bar, in the plain value colour): how much of the time
   the channel's busiest megahertz had anything in it at all. Wi-Fi,

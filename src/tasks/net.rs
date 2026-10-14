@@ -35,7 +35,7 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use crate::hardware::SdrDevice;
-use crate::signal::net::survey::{Plan, DWELL, SETTLE};
+use crate::signal::net::survey::{Plan, DWELL, SETTLE, WIFI_DWELL};
 use crate::state::{NetMode, SdrMetrics};
 
 /// How often to look again when there is nothing to do.
@@ -169,7 +169,7 @@ pub fn spawn_net_survey_task(state: Arc<Mutex<SdrMetrics>>, device: Arc<dyn SdrD
                         "NET survey: Wi-Fi rotation, {} channels (1 to 13), \
                          {} ms a pass, 1/{} dwell each",
                         hops.len(),
-                        ((SETTLE + DWELL) * hops.len() as u32).as_millis(),
+                        ((SETTLE + WIFI_DWELL) * hops.len() as u32).as_millis(),
                         hops.len()
                     ));
                 }
@@ -190,7 +190,7 @@ pub fn spawn_net_survey_task(state: Arc<Mutex<SdrMetrics>>, device: Arc<dyn SdrD
                         let mut m = state.lock().unwrap_or_else(|e| e.into_inner());
                         m.radio.frequency = hz;
                     }
-                    tokio::time::sleep(SETTLE + DWELL).await;
+                    tokio::time::sleep(SETTLE + WIFI_DWELL).await;
                 }
                 pass = pass.wrapping_add(1);
                 continue;

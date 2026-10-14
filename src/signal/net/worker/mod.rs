@@ -119,6 +119,8 @@ struct View {
     survey: bool,
     /// An LE Coded view (`lock::CODED_VIEWS`).
     coded: bool,
+    /// The Wi-Fi survey, the one Wi-Fi view that keeps visits.
+    wifi_survey: bool,
     /// A Wi-Fi view: no Bluetooth receiver runs on it. Wi-Fi's and
     /// Bluetooth's receivers are two separate things, and a view runs the
     /// one its question needs.
@@ -151,6 +153,7 @@ impl View {
             survey: m.ui.active_preset == super::lock::SURVEY_VIEW,
             coded: super::lock::CODED_VIEWS.contains(&m.ui.active_preset.as_str()),
             wifi: super::is_wifi(&m.ui.section),
+            wifi_survey: m.ui.active_preset == super::lock::WIFI_SURVEY_VIEW,
             phy: m.net.ble_phy,
             locked: m.net.mode == crate::state::NetMode::Lock,
             following: m
@@ -241,6 +244,11 @@ impl NetWorker {
             if !arrival.continuous || arrival.retuned {
                 wifi.interrupted(&self.state);
             }
+            // The survey's visit ends where the radio moved or the stream
+            // began again, not at a gap: a dropped block has not moved it.
+            if arrival.retuned || arrival.new_stream {
+                wifi.end_visit(&self.state);
+            }
 
             let (view, span_hz) = {
                 let mut m = self.state.lock().unwrap_or_else(|e| e.into_inner());
@@ -272,7 +280,7 @@ impl NetWorker {
                 feed.take_off_dc(block, first_pair, rate_hz);
             }
             if let Some(block) = iq.as_deref().filter(|_| wifi_here) {
-                wifi.look(first_pair, block, &self.state);
+                wifi.look(first_pair, block, tuning, view.wifi_survey, &self.state);
             }
             if survey_here {
                 band.measure(iq.as_deref(), tuning, now, &self.state);
@@ -359,6 +367,9 @@ impl NetWorker {
                 }
             }
         }
+        // The feed is gone: the survey's visit under way is as long as it
+        // will ever be, and is kept if it is long enough to be one.
+        wifi.end_visit(&self.state);
     }
 }
 
@@ -1137,6 +1148,94 @@ mod tests {
             ok as f64 / secs,
             senders.len(),
             started.elapsed().as_secs_f64()
+        );
+    }
+
+    /// Replays a survey recording (`SDRTOP_SURVEY=dir`: one raw ci8 file a
+    /// visit at 20 Msps, named `r<round>-ch<channel>.iq`, as
+    /// `survey_capture.sh` writes them) through the worker on the Wi-Fi
+    /// survey, visit by visit, each tuned to its channel and after a break,
+    /// and prints every channel's visits as the view reads them, its least
+    /// busy verdict, and what it cost. By hand, in release.
+    #[test]
+    #[ignore]
+    fn replay_a_wifi_survey() {
+        use std::io::Read;
+        let Ok(dir) = std::env::var("SDRTOP_SURVEY") else {
+            return;
+        };
+        let mut names: Vec<String> = std::fs::read_dir(&dir)
+            .unwrap()
+            .filter_map(|e| e.ok()?.file_name().into_string().ok())
+            .filter(|n| n.ends_with(".iq"))
+            .collect();
+        names.sort();
+        let mut m = SdrMetrics::fixture().streaming();
+        m.ui.section = "wifi_channel".to_string();
+        m.ui.active_preset = "wifi_survey".to_string();
+        m.radio.config_sample_rate = 20e6;
+        m.radio.bb_filter_hz = 0;
+        let state = Arc::new(Mutex::new(m));
+        let (tx, rx) = crossbeam_channel::bounded(4);
+        let st = Arc::clone(&state);
+        let start = std::time::Instant::now();
+        let worker = std::thread::spawn(move || {
+            NetWorker::new(rx, st, eight_bit(), SAFE_BT_CHANNELS).run();
+        });
+        let mut seq = 1u64;
+        let mut pairs = 0u64;
+        for name in &names {
+            let ch: u64 = name[name.find("ch").unwrap() + 2..name.len() - 3]
+                .parse()
+                .unwrap();
+            state.lock().unwrap().radio.frequency = 2_407_000_000 + 5_000_000 * ch;
+            let mut f = std::fs::File::open(format!("{dir}/{name}")).unwrap();
+            let mut first = true;
+            loop {
+                let mut buf = vec![0u8; 131_072 * 2];
+                let mut got = 0;
+                while got < buf.len() {
+                    let n = f.read(&mut buf[got..]).unwrap();
+                    if n == 0 {
+                        break;
+                    }
+                    got += n;
+                }
+                if got < buf.len() {
+                    break;
+                }
+                tx.send(stamped(&state, seq, first, buf)).unwrap();
+                first = false;
+                seq += 1;
+                pairs += 131_072;
+            }
+        }
+        drop(tx);
+        worker.join().unwrap();
+        let wall = start.elapsed().as_secs_f64();
+        let m = state.lock().unwrap().clone();
+        let s = &m.net.wifi.survey;
+        for ch in 1..=13u8 {
+            let b = s.busy(ch);
+            let air = s.airtime(ch);
+            let v = &s.visits[usize::from(ch) - 1];
+            eprintln!(
+                "ch {ch:>2}: {} visits, busy {:?} %, airtime {:?} %, read {}, other {}",
+                v.len(),
+                b.map(|b| (
+                    (b.mean * 1e3).round() / 10.0,
+                    b.sigma.map(|x| (x * 1e3).round() / 10.0)
+                )),
+                air.map(|a| (a * 1e3).round() / 10.0),
+                v.iter().map(|x| x.read).sum::<u32>(),
+                v.iter().map(|x| x.other).sum::<u32>(),
+            );
+        }
+        eprintln!("least busy: {:?}", s.least_busy());
+        eprintln!(
+            "{:.1} s of samples in {wall:.1} s: {:.2}x real time",
+            pairs as f64 / 20e6,
+            wall / (pairs as f64 / 20e6)
         );
     }
 
