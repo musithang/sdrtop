@@ -109,6 +109,8 @@ pub(in crate::app::input) fn reset_positions(panel: &str, m: &mut crate::state::
         "sweep_panel" => m.sweep.cursor_frac = None,
         "net_occupancy" => m.net.band_cursor = Default::default(),
         "net_coexist" => m.net.band_scrub = None,
+        // The card goes back to the survey's answer.
+        "net_wifi_survey" => m.net.wifi.survey.selected = None,
         // Kept for the carry into the BLE list before it is cleared: the
         // one selection that outlives its focus, because it is on its way
         // somewhere.

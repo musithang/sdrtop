@@ -42,7 +42,7 @@ pub use net::{
 pub use net::ROSTER_SORT_KEYS;
 // Named by the NET worker, which counts its arrivals into it, and Wi-Fi's
 // funnel and latest frame with it.
-pub use net::{Family, NetDecodeHealth, WifiClock, WifiDsss, WifiFrame, WifiFunnel};
+pub use net::{Family, LeastBusy, NetDecodeHealth, WifiClock, WifiDsss, WifiFrame, WifiFunnel};
 #[cfg(test)]
 pub use net::{Visit, WifiSurvey};
 pub use observer::ObserverState;

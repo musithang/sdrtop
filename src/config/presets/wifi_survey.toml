@@ -1,19 +1,20 @@
-# Wi-Fi's first view, standing in until its receiver is built. It says where
-# the radio is, whether the sample rate is the one a 20 MHz channel needs
-# (exactly 20 Msps), and that nothing is decoded yet; no Bluetooth receiver
-# runs on it. SURVEY rotates the Wi-Fi channels 1 to 13; LOCK holds one, and
-# the side arrows step them. Feed health beside it says what arrived and
-# where Wi-Fi's receiver runs, or why it does not.
+# Which Wi-Fi channel is busy, and which is quiet? Thirteen columns, one a
+# channel: how busy each one's busiest megahertz was, whatever made it, and
+# the airtime its own frames stated, by format, over the survey's visits.
+# Beside them the card: the least busy channel when the visits can tell it
+# apart by more than 2 sigma, and in words when they cannot yet. SURVEY
+# visits channels 1 to 13 in turn; LOCK holds one, the side arrows step
+# them, and the survey's focus (u) selects one to lock on.
 
 section = "wifi_channel"
 slot    = 1
 title   = "Survey"
-blurb   = "the receiver is being built"
+blurb   = "which channel is busy, which is quiet"
 
 panels = [
-    { name = "header",            position = "top", height = 5 },
-    { name = "net_wifi_standin",  position = "body" },
-    { name = "net_decode_health", position = "right", width_pct = 30 },
-    { name = "log",               position = "bottom", height = 5 },
-    { name = "footer",            position = "bottom" },
+    { name = "header",              position = "top", height = 5 },
+    { name = "net_wifi_survey",     position = "body" },
+    { name = "net_wifi_least_busy", position = "right", width_pct = 24 },
+    { name = "log",                 position = "bottom", height = 5 },
+    { name = "footer",              position = "bottom" },
 ]

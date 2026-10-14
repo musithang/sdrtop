@@ -118,6 +118,7 @@ impl App {
         registry.register(ui::NetOccupancyPanel);
         registry.register(ui::NetWifiStandinPanel);
         registry.register(ui::NetWifiSurveyPanel);
+        registry.register(ui::NetWifiLeastBusyPanel);
 
         let mut layout = LayoutConfig::with_user_presets(user_presets, presets_dir);
         if !net_admitted.band {

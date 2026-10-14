@@ -171,7 +171,6 @@ pub struct Busy {
 }
 
 /// Which channel is least busy, or why none can be named yet.
-#[cfg(test)]
 #[derive(Clone, Debug, PartialEq)]
 pub enum LeastBusy {
     /// Not every channel has been visited.
@@ -243,7 +242,6 @@ impl WifiSurvey {
     /// The least busy channel by the plain 2 sigma rule: the quietest, and
     /// every channel whose mean is within twice their combined standard
     /// error of it. No other threshold.
-    #[cfg(test)]
     pub fn least_busy(&self) -> LeastBusy {
         let channels = 1..=SURVEYED as u8;
         let busy: Vec<Option<Busy>> = channels.clone().map(|c| self.busy(c)).collect();

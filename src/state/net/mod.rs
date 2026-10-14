@@ -40,7 +40,7 @@ pub use health::{NetDecodeHealth, WifiFunnel};
 pub use packets::{
     BlePacket, BlePacketView, CodedFacts, ExtInfo, ExtRole, PduKind, BLE_PACKET_LIMIT,
 };
-pub use wifi::{Family, WifiClock, WifiDsss, WifiFrame};
+pub use wifi::{Family, LeastBusy, WifiClock, WifiDsss, WifiFrame};
 #[cfg(test)]
 pub use wifi::{Visit, WifiSurvey};
 

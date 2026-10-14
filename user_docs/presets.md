@@ -3,7 +3,7 @@
 ← [Back](README.md)
 
 A *preset* is a named arrangement of panels: which ones are on screen, where they
-sit, and how much room each gets. sdrtop ships with twenty-six, grouped into the
+sit, and how much room each gets. sdrtop ships with twenty-seven, grouped into the
 sections of the [menu](screens.md#the-menu), and you can write your own.
 
 There are two places to put one, and they behave identically:
@@ -23,7 +23,7 @@ name as a built-in (`command_rail`, `spectrum`, `waterfall`,
 `lab_sweep`, `micro_main`, `micro_signal`, `micro_gain`, `micro_health`,
 `micro_sweep`, `net`, `net_survey`, `net_census`, `net_ble`, `net_bt`,
 `net_piconet`, `net_bench`, `net_connection`, `net_coded`, `wifi_survey`,
-`observer`) and your version replaces it, so the number key that
+`wifi_frames`, `observer`) and your version replaces it, so the number key that
 opens it now opens your layout. Those names are the whole list; a name that isn't
 on it is a new preset, which appears in the menu automatically rather than taking
 over a key.
@@ -98,7 +98,7 @@ nothing to rebuild; open the menu and it is there. The file is just the
 `panels = [...]` part, without the `[presets.name]` header, because the file name
 is the preset name.
 
-The twenty-six built-in presets are written in exactly this format, so the quickest
+The twenty-seven built-in presets are written in exactly this format, so the quickest
 way to build on one is to copy it rather than transcribe it from the docs. They
 live in the source tree under `src/config/presets/`.
 
@@ -186,7 +186,9 @@ page's [last section](net.md#if-you-wrote-your-own-net-preset) lists.
 
 **Wi-Fi:** `net_wifi_survey`, the thirteen channels side by side: how busy
 each one's busiest megahertz was and the airtime its own frames stated, by
-format, over the survey's visits.
+format, over the survey's visits ([Survey](net-wifi.md)).
+`net_wifi_least_busy`, the survey's card: the least busy channel when the
+visits can tell it apart, and in words when they cannot yet.
 `net_wifi_standin`, which channel the radio is on, whether the rate is the
 20 Msps the bench needs, the latest frame's offset, its format and what its
 signalling said, the latest 802.11b frame's header, and that nothing past

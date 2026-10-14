@@ -149,6 +149,65 @@ pub(super) fn net_occupancy(key: KeyEvent, ctx: &mut InputCtx<'_>) -> KeyAction 
     KeyAction::Continue
 }
 
+/// The Wi-Fi survey's focus: `←` `→` select a channel (the first press
+/// lands on the locked one, or on 1, and the ends wrap), `l` locks the
+/// radio on the selected channel, `c` starts the survey again.
+pub(super) fn net_wifi_survey(key: KeyEvent, ctx: &mut InputCtx<'_>) -> KeyAction {
+    let mut m = metrics(ctx.state);
+    let locked = (m.net.mode == crate::state::NetMode::Lock)
+        .then(|| crate::signal::net::band::wifi_channel(m.radio.frequency))
+        .flatten();
+    let step = |from: Option<u8>, by: i8| -> u8 {
+        match from {
+            None => locked.unwrap_or(1),
+            Some(c) => ((i16::from(c) - 1 + i16::from(by)).rem_euclid(13) + 1) as u8,
+        }
+    };
+    match key.code {
+        KeyCode::Left => {
+            let s = &mut m.net.wifi.survey;
+            s.selected = Some(step(s.selected, -1));
+        }
+        KeyCode::Right => {
+            let s = &mut m.net.wifi.survey;
+            s.selected = Some(step(s.selected, 1));
+        }
+        KeyCode::Char('c') => {
+            m.net.wifi.survey = Default::default();
+            m.push_log("Wi-Fi survey started again: every visit dropped".to_string());
+        }
+        KeyCode::Char('l') => {
+            let Some(ch) = m.net.wifi.survey.selected else {
+                m.push_log("Lock: select a channel first (\u{2190}\u{2192})".to_string());
+                return KeyAction::Continue;
+            };
+            if ctx.device.is_none() {
+                m.push_log("Lock: no radio to retune in observer mode".to_string());
+                return KeyAction::Continue;
+            }
+            let Some(tune_hz) = crate::signal::net::band::wifi_centre_hz(ch) else {
+                return KeyAction::Continue;
+            };
+            m.push_log(format!("NET locking on Wi-Fi channel {ch}"));
+            if m.net.mode != crate::state::NetMode::Lock {
+                m.net.mode = crate::state::NetMode::Lock;
+                // The same restart the `m` key makes: survey and lock are
+                // different regimes for how often a megahertz is watched.
+                m.net.band.restart_watch();
+            }
+            m.net.lock_at = Some(crate::state::LockTarget {
+                tune_hz,
+                why: format!("Wi-Fi channel {ch}, chosen on the survey"),
+            });
+        }
+        _ => {
+            drop(m);
+            return global::handle(key, ctx);
+        }
+    }
+    KeyAction::Continue
+}
+
 /// The coexistence history's time cursor, shared with the profile above it:
 /// `↓` goes back a moment, `↑` forward, and forward past the newest, or `N`,
 /// is now again.
@@ -645,6 +704,82 @@ mod tests {
                 now - Duration::from_secs(60),
             )
         }
+    }
+
+    /// Presses on the Wi-Fi survey's focus, in order, on `m`.
+    fn survey_keys(m: SdrMetrics, keys: &[KeyCode]) -> SdrMetrics {
+        let state = Arc::new(Mutex::new(m));
+        let mut engine = LayoutEngine::new(
+            crate::config::LayoutConfig::default_config(),
+            PanelRegistry::new(),
+        );
+        let mut show_footer = true;
+        let focus_keys = HashMap::new();
+        let mut ctx = InputCtx {
+            state: &state,
+            device: None,
+            engine: &mut engine,
+            show_footer: &mut show_footer,
+            focus_keys: &focus_keys,
+        };
+        for code in keys {
+            net_wifi_survey(KeyEvent::new(*code, KeyModifiers::NONE), &mut ctx);
+        }
+        let m = metrics(&state).clone();
+        m
+    }
+
+    /// Whether the log says `text` anywhere.
+    fn said(m: &SdrMetrics, text: &str) -> bool {
+        m.ui.log.iter().any(|l| l.text.contains(text))
+    }
+
+    /// The arrows walk the thirteen channels and round the ends; the first
+    /// press lands on the locked channel, or on 1.
+    #[test]
+    fn the_survey_arrows_select_a_channel() {
+        let m = SdrMetrics::fixture().streaming();
+        let at = |m: SdrMetrics, keys: &[KeyCode]| survey_keys(m, keys).net.wifi.survey.selected;
+        assert_eq!(at(m.clone(), &[KeyCode::Right]), Some(1));
+        assert_eq!(at(m.clone(), &[KeyCode::Left]), Some(1));
+        assert_eq!(at(m.clone(), &[KeyCode::Right, KeyCode::Left]), Some(13));
+        assert_eq!(
+            at(m.clone(), &[KeyCode::Left, KeyCode::Right, KeyCode::Right]),
+            Some(3)
+        );
+        let mut locked = m.clone();
+        locked.net.mode = crate::state::NetMode::Lock;
+        locked.radio.frequency = 2_437_000_000;
+        assert_eq!(at(locked.clone(), &[KeyCode::Right]), Some(6));
+        assert_eq!(at(locked, &[KeyCode::Right, KeyCode::Right]), Some(7));
+    }
+
+    /// `c` starts the survey again: every visit and the selection go, and
+    /// the log says so.
+    #[test]
+    fn c_starts_the_survey_again() {
+        let mut m = SdrMetrics::fixture().streaming();
+        m.net.wifi.survey.visits[3].push(crate::state::Visit::default());
+        m.net.wifi.survey.selected = Some(4);
+        let m = survey_keys(m, &[KeyCode::Char('c')]);
+        assert!(m.net.wifi.survey.visits.iter().all(Vec::is_empty));
+        assert_eq!(m.net.wifi.survey.selected, None);
+        assert!(said(&m, "survey started again"));
+    }
+
+    /// `l` locks only on a selected channel, and only with a radio to
+    /// retune; each refusal is said, and nothing is locked.
+    #[test]
+    fn l_needs_a_selection_and_a_radio() {
+        let m = survey_keys(SdrMetrics::fixture().streaming(), &[KeyCode::Char('l')]);
+        assert!(m.net.lock_at.is_none());
+        assert!(said(&m, "select a channel first"));
+        let m = survey_keys(
+            SdrMetrics::fixture().streaming(),
+            &[KeyCode::Right, KeyCode::Char('l')],
+        );
+        assert!(m.net.lock_at.is_none());
+        assert!(said(&m, "observer mode"));
     }
 
     /// **The regression: the arrows move through the rows the panel draws.**

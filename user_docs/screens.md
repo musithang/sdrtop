@@ -331,7 +331,7 @@ plus one measurement panel that has no home preset of its own.
 
 ## Layouts
 
-The twenty-four built-in layouts, by section. The key is the number to press while
+The twenty-six built-in layouts, by section. The key is the number to press while
 that section is active, which is what the menu shows beside each name.
 
 The menu labels them with a short title rather than the preset name, so
@@ -407,10 +407,11 @@ screen.
 
 | Key | Preset | What's in it |
 |-----|--------|--------------|
-| `1` | `wifi_survey` | The stand-in: the channel, whether the rate is right, the latest frame of this channel's offset with its error bar, its format and SIGNAL field (rate, length, airtime), the latest 802.11b frame's header, and that nothing past its signalling is decoded yet · feed health |
+| `1` | `wifi_survey` | Survey: thirteen columns, each channel's busy share beside its frames' airtime by format · least busy, or why none can be named yet |
+| `2` | `wifi_frames` | The stand-in: the channel, whether the rate is right, the latest frame of this channel's offset with its error bar, its format and SIGNAL field (rate, length, airtime), the latest 802.11b frame's header, and that nothing past its signalling is decoded yet · feed health |
 
 `p` steps to the next layout in whichever section you are in, and wraps at the
-end. A twenty-sixth preset, `observer`, is marked hidden, so it has no section and no
+end. A twenty-seventh preset, `observer`, is marked hidden, so it has no section and no
 key: sdrtop loads it by itself when [another app owns the
 radio](#observer-mode).
 

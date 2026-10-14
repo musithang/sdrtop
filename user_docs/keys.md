@@ -370,6 +370,7 @@ each panel's numbers mean is on [the NET page](net.md).
 | `k` | Band Capability | `Band 1` | `K` time the tuning call |
 | `j` | Band Occupancy | `Band 2` | `←→` move the cursor 1 MHz · `B` cursor to the busiest cell · `L` lock the receiver here |
 | `z` | Coexistence | `Band 2` | `↓` back in time: the profile shows that moment · `↑` forward in time · `N` back to now |
+| `u` | Survey | `Channel 1` (Wi-Fi) | `←→` select a channel · `L` lock the radio on it · `C` start the survey again |
 | `u` | Band Census | `LE 1` | `↑↓` select · `S` sort by the next column · `R` reverse · `T` trust as frequency reference, or let it go |
 | `e` | Connection | `LE 3` | `↑↓` scroll the events · `End` back to the newest · `← →` the previous or next connection |
 | `v` | BLE Advertising | `LE 2` | `↑↓` select a packet · `Enter` only this address, or all again; on a CONNECT_IND, its connection · `t` only CONNECT, SCAN or ADV, or every kind · `H` hold the list, or let it run |

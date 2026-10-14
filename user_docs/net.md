@@ -24,8 +24,8 @@ hidden and the log says why in one line.
 In the menu, NET is the **Bluetooth** item: a heading over four groups, the
 band first, each with its own numbers. The number is the key to press while
 that group is active, so `Classic 2` is Classic's second view. **Wi-Fi**
-sits beside it, a heading of its own whose first group, Channel, holds one
-stand-in view while its receiver is being built. Both need a radio that
+sits beside it, a heading of its own whose first group, Channel, has the
+survey and, while the Frames view is being built, a stand-in for it. Both need a radio that
 reaches the band; Wi-Fi also needs 20 Msps, a whole Wi-Fi channel, and is
 left out on a radio that cannot sample that fast.
 
@@ -36,10 +36,10 @@ Bluetooth
   Classic    1 Piconets      2 Packets        3 Bench
   LE Coded   1 Long range
 Wi-Fi
-  Channel    1 Survey        (a stand-in, being built)
+  Channel    1 Survey        2 Frames (a stand-in, being built)
 ```
 
-Nine views, one question each:
+Eleven views, one question each:
 
 | Key | View | The question it answers |
 |-----|------|--------------------------|
@@ -52,6 +52,8 @@ Nine views, one question each:
 | `Classic 2` | **[Packets](net-classic-packets.md)** | What is this one piconet saying, packet by packet? |
 | `Classic 3` | **[Bench](net-classic-bench.md)** | How good is each end of it, side by side? |
 | `LE Coded 1` | **[Long range](net-le-coded.md)** | Who advertises on LE Coded, and where did each advertisement point? |
+| `Channel 1` | **[Survey](net-wifi.md)** | Which Wi-Fi channel is busy, and which is quiet? |
+| `Channel 2` | Frames | What is on this channel, frame by frame? For now the latest frame and the account of every preamble found |
 
 The panels with controls announce them with a highlighted letter in the
 title; the full list is in [Keyboard Shortcuts](keys.md#net-panel-focus-modes).

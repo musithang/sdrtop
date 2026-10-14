@@ -77,6 +77,9 @@ The full set of fields:
 | `net_ble` | Decoded BLE packets, marked on the NET Survey's history. Optional in a theme file: left out, it takes `border_focused` |
 | `net_bt` | Decoded classic Bluetooth hits, marked the same way. Optional: left out, it takes `value_hi` |
 | `net_wifi` | Wi-Fi's own colour: the channel in the header on the Wi-Fi views, and what they mark. Optional: left out, it takes `border_accent` |
+| `wifi_non_ht` `wifi_ht` `wifi_vht` `wifi_he` `wifi_eht` `wifi_dsss` | A Wi-Fi frame's format (802.11a/g, n, ac, ax, be and b), the same on every Wi-Fi view. Optional: left out, they take the `series` colours in order |
+| `wifi_other_channel` | A frame of another channel heard on this one. Optional: left out, it takes `label` |
+| `wifi_undecoded` | A frame whose signalling did not read. Optional: left out, it takes `value` |
 
 Overrides are preserved when you quit with `q`, along with everything else in
 your config.
@@ -106,7 +109,8 @@ That is the whole installation step. There is no list to register the name in an
 nothing to rebuild.
 
 A theme file names itself, gives the fourteen required colours from the table
-above (`net_ble`, `net_bt` and `net_wifi` may be left out), and
+above (`net_ble`, `net_bt`, `net_wifi` and the `wifi_` colours may be left
+out), and
 lists the gradient the spectrum and waterfall are painted with:
 
 ```toml
