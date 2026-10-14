@@ -216,6 +216,46 @@ fn lines(state: &SdrMetrics, theme: &crate::Theme) -> Vec<Line<'static>> {
             out.push(Line::from(spans));
         }
     }
+    // The latest 802.11b frame, beside the OFDM ones: a different PHY on
+    // the same channel, read as far as its header.
+    {
+        use crate::signal::wifi::dsss::header::Preamble;
+        let quiet = Style::default().fg(theme.label);
+        out.push(Line::from(match &state.net.wifi.last_dsss {
+            None => vec![label("802.11b"), Span::styled("none heard yet", quiet)],
+            Some(d) => {
+                let preamble = match d.preamble {
+                    Preamble::Long => "long preamble",
+                    Preamble::Short => "short preamble",
+                };
+                let mut spans = vec![
+                    label("802.11b"),
+                    Span::styled(format!("{preamble} \u{b7} "), quiet),
+                ];
+                match d.header {
+                    Ok(h) => {
+                        spans.push(Span::styled(
+                            format!("{} Mb/s \u{b7} {} octets", h.rate.mbps(), h.octets()),
+                            value,
+                        ));
+                        spans.push(Span::styled(
+                            format!(
+                                " \u{b7} {} \u{b5}s on the air \u{b7} clocks {}",
+                                h.airtime_us(d.preamble),
+                                if h.locked { "locked" } else { "not locked" }
+                            ),
+                            quiet,
+                        ));
+                    }
+                    Err(fault) => spans.push(Span::styled(
+                        format!("header refused: {}", fault.label()),
+                        Style::default().fg(theme.status_warn),
+                    )),
+                }
+                spans
+            }
+        }));
+    }
     out.push(Line::from(vec![
         label("Receiver"),
         Span::styled(
@@ -393,7 +433,7 @@ mod tests {
     }
 
     fn text(m: &SdrMetrics) -> String {
-        draw(NetWifiStandinPanel, 100, 14, m).join("\n")
+        draw(NetWifiStandinPanel, 100, 16, m).join("\n")
     }
 
     /// A frame of this channel that said `heard`.
@@ -696,6 +736,39 @@ mod tests {
         );
         assert!(c.contains("3 frames"), "{c}");
         assert!(c.contains("\u{3c7}\u{b2}"), "{c}");
+    }
+
+    /// The latest 802.11b frame: its preamble, rate, octets and airtime,
+    /// whether it says its clocks are locked; a refused header by its
+    /// fault; none yet, said.
+    #[test]
+    fn the_latest_802_11b_frame_is_shown() {
+        use crate::signal::dsp::uncertainty::Uncertain;
+        use crate::signal::wifi::dsss::header::{Fault, Header, Preamble, Rate as DsssRate};
+        let mut m = on_channel_six();
+        assert!(row(&text(&m), "802.11b").contains("none heard yet"));
+        let dsss = |header| crate::state::WifiDsss {
+            preamble: Preamble::Long,
+            header,
+            offset_hz: Uncertain::from_sigma(-31_000.0, 400.0),
+            carrier_hz: 2_437_000_000.0,
+            when: std::time::Instant::now(),
+        };
+        m.net.wifi.last_dsss = Some(dsss(Ok(Header {
+            rate: DsssRate::M1,
+            locked: true,
+            extension: false,
+            length_us: 2_400,
+        })));
+        let r = row(&text(&m), "802.11b");
+        assert!(r.contains("long preamble"), "{r}");
+        assert!(r.contains("1 Mb/s"), "{r}");
+        assert!(r.contains("300 octets"), "{r}");
+        assert!(r.contains("2592 \u{b5}s"), "{r}");
+        assert!(r.contains("clocks locked"), "{r}");
+        m.net.wifi.last_dsss = Some(dsss(Err(Fault::Crc)));
+        let r = row(&text(&m), "802.11b");
+        assert!(r.contains("header refused: CRC"), "{r}");
     }
 
     /// While it shows an offset its frame says what that is worth; with no

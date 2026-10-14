@@ -57,16 +57,21 @@ pub fn chips(symbols: &[Complex<f64>], pad: usize, cut: bool) -> Vec<Complex<f64
     fine.into_iter().step_by(FINE).collect()
 }
 
-/// One symbol of +1 as our capture hears it, its own 20 samples: the
-/// matched filter's template. Real, since the chips are and the cut is
-/// symmetric.
+/// One symbol of +1 as our capture hears it, its own 20 samples, less
+/// their mean: the matched filter's template. Real, since the chips are and
+/// the cut is symmetric. The Barker chips sum to one, not zero, so the
+/// symbol has a little DC; taken out, the template is blind to whatever DC
+/// the radio leaves (which, left in, passed the gate thousands of times a
+/// recording), at the cost of that little of the symbol's energy. DC left
+/// in the window's energy only makes the gate harder to pass.
 pub fn template() -> &'static [f32; SYMBOL] {
     static T: std::sync::OnceLock<[f32; SYMBOL]> = std::sync::OnceLock::new();
     T.get_or_init(|| {
         let pad = 8;
         let heard = chips(&[Complex::new(1.0, 0.0)], pad, true);
         let at = pad * SYMBOL;
-        std::array::from_fn(|i| heard[at + i].re as f32)
+        let mean = heard[at..at + SYMBOL].iter().map(|z| z.re).sum::<f64>() / SYMBOL as f64;
+        std::array::from_fn(|i| (heard[at + i].re - mean) as f32)
     })
 }
 
@@ -87,8 +92,8 @@ mod tests {
     }
 
     /// Cut to +-10 MHz the symbol keeps most of its energy, and the
-    /// template is that symbol: real, and correlated with the uncut chips
-    /// above 0.9.
+    /// template is that symbol without its mean: real, summing to nothing,
+    /// and correlated with the uncut chips above 0.9.
     #[test]
     fn the_template_is_the_cut_symbol() {
         let t = template();
@@ -98,18 +103,29 @@ mod tests {
         let eu: f64 = uncut.iter().map(|b| b.norm_sqr()).sum();
         let r = dot / (et * eu).sqrt();
         assert!(r > 0.9, "{r}");
+        assert!(t.iter().sum::<f32>().abs() < 1e-5);
     }
 
     /// **What our +-10 MHz costs a 22 MHz signal, measured.** Against a
     /// receiver that hears the whole chip, whose matched filter's SNR is
-    /// the symbol's energy over the noise density: ours keeps the cut
-    /// symbol's energy (its template's, 20 a symbol uncut), and the cut's
+    /// the symbol's energy over the noise density: ours keeps what of the
+    /// cut symbol its template holds (20 a symbol uncut; the template also
+    /// leaves out the symbol's DC), and the cut's
     /// tails spill into the next symbols, a floor of their own, measured
     /// on random symbols at the right timing with no noise at all.
     #[test]
     fn what_the_cut_costs() {
         let t = template();
-        let kept: f64 = t.iter().map(|v| (*v as f64).powi(2)).sum::<f64>() / SYMBOL as f64;
+        // What the matched filter collects of one symbol of the cut chips,
+        // squared, over the template's energy, against 20 uncut.
+        let one = chips(&[Complex::new(1.0, 0.0)], 8, true);
+        let dot: f64 = one[8 * SYMBOL..9 * SYMBOL]
+            .iter()
+            .zip(t)
+            .map(|(z, v)| z.re * *v as f64)
+            .sum();
+        let et: f64 = t.iter().map(|v| (*v as f64).powi(2)).sum();
+        let kept = dot * dot / et / SYMBOL as f64;
         let loss_db = -10.0 * kept.log10();
         let mut rng = crate::signal::dsp::testkit::Rng::new(140);
         let sent: Vec<Complex<f64>> = (0..400)

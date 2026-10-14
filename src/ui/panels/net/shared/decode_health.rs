@@ -389,6 +389,33 @@ fn lines(
             grouped(f.cut),
             Some("by a break or a retune"),
         ));
+        // 802.11b beside the OFDM funnel: SYNCs found, and what each turned out to be.
+        out.push(row(
+            "802.11b SYNCs",
+            grouped(f.dsss_found),
+            Some("Barker runs, judged below"),
+        ));
+        out.push(row("  header read", grouped(f.dsss_read), Some("CRC good")));
+        out.push(row(
+            "  header refused",
+            grouped(f.dsss_refused),
+            Some("CRC or rate"),
+        ));
+        out.push(row(
+            "  no SFD",
+            grouped(f.dsss_no_sfd),
+            Some("a SYNC, no frame after"),
+        ));
+        out.push(row(
+            "  SYNC cut",
+            grouped(f.dsss_cut),
+            Some("by a break or a retune"),
+        ));
+        out.push(row(
+            "  inside a frame",
+            grouped(f.dsss_inside),
+            Some("found again after a fade"),
+        ));
     }
 
     // What it cost: the same figure the header band shows, red
@@ -543,7 +570,13 @@ mod tests {
         m.net.health.wifi.adjacent = 60;
         m.net.health.wifi.not_preamble = 27;
         m.net.health.wifi.cut = 17;
-        let on = draw(NetDecodeHealthPanel, 80, 40, &m).join("\n");
+        m.net.health.wifi.dsss_found = 96;
+        m.net.health.wifi.dsss_read = 90;
+        m.net.health.wifi.dsss_refused = 3;
+        m.net.health.wifi.dsss_no_sfd = 2;
+        m.net.health.wifi.dsss_cut = 1;
+        m.net.health.wifi.dsss_inside = 7;
+        let on = draw(NetDecodeHealthPanel, 80, 50, &m).join("\n");
         assert!(on.contains("ch 6"), "{on}");
         let found = on
             .lines()
@@ -563,6 +596,11 @@ mod tests {
             ("L-SIG read", "1 042"),
             ("greenfield", "8"),
             ("unreadable", "50"),
+            ("802.11b SYNCs", "96"),
+            ("header read", "90"),
+            ("header refused", "3"),
+            ("no SFD", "2"),
+            ("inside a frame", "7"),
             ("adjacent", "60"),
             ("not a preamble", "27"),
         ] {

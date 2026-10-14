@@ -40,7 +40,7 @@ pub use health::{NetDecodeHealth, WifiFunnel};
 pub use packets::{
     BlePacket, BlePacketView, CodedFacts, ExtInfo, ExtRole, PduKind, BLE_PACKET_LIMIT,
 };
-pub use wifi::{WifiClock, WifiFrame};
+pub use wifi::{WifiClock, WifiDsss, WifiFrame};
 
 /// Whether the receiver is walking the band or sitting on one channel.
 ///

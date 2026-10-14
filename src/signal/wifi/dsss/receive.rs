@@ -5,16 +5,22 @@
 //!
 //! **The matched filter at every sample.** One symbol's 20 samples against
 //! the Barker chips as our capture hears them ([`super::chips`]), every
-//! sample, so each of a symbol's 20 timings is tried. For noise, the
-//! window's power along the template over the window's power is Beta(1,
-//! 19), whatever the template; for a symbol of the chips it is near one.
+//! sample, so each of a symbol's 20 timings is tried. The template has no
+//! mean, so whatever DC the radio leaves cannot pass for chips (in the
+//! window's energy it only makes the gate harder to pass). For noise, the
+//! window's power along the template over its power is Beta(1, 19),
+//! whatever the template; for a symbol of the chips it is near one.
 //!
 //! **A SYNC is a run, with a law.** One symbol passing is a coin with odds
 //! [`per_symbol`]; a SYNC is [`RUN`] symbols in a row passing at one
 //! timing, which disjoint windows of noise do with probability
-//! [`SYNC_FALSE_ALARM`]. A frame at 1 or 2 Mb/s keeps the chips through its
-//! data, so once found the detector waits for two quiet symbols before
-//! looking again.
+//! [`SYNC_FALSE_ALARM`]. A frame passes at several timings near its best,
+//! and at 1 or 2 Mb/s keeps the chips through its data, so a run reaching
+//! [`RUN`] where a timing within four samples already holds one is the same
+//! frame; otherwise it is a new one. A
+//! run at any other timing is another frame. (Waiting instead for a quiet
+//! stretch where nothing passed never ends in noise, where a window passes
+//! one time in four: it swallowed three frames in four on a recording.)
 //!
 //! **Then the frame is read** from the run's first symbol on: the timing
 //! refined to the sample, the carrier from the SYNC's differential
@@ -46,10 +52,6 @@ pub fn threshold() -> f64 {
     1.0 - per_symbol().powf(1.0 / (SYMBOL as f64 - 1.0))
 }
 
-/// Samples with no symbol passing at any timing before the detector looks
-/// again: two symbols.
-const QUIET: u32 = 2 * SYMBOL as u32;
-
 /// The furthest symbol a read needs after the run's first: a long SYNC
 /// found at its very first symbol, its SFD, and the header at 1 Mb/s; and
 /// eight more, since a symbol of noise passes the gate about one time in
@@ -59,6 +61,11 @@ const SYMBOLS_READ: usize = 128 + 16 + 48 + 8;
 
 /// The timing is refined this far either side of the run's.
 const REFINE: usize = 3;
+
+/// The timings either side of an event's that, holding a run of their own
+/// already, make it the same frame: a frame passes at several timings
+/// near its best, which reach a run one after another.
+const NEAR: usize = 4;
 
 /// A SYNC found: the stream pair its run's first symbol starts on.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -80,8 +87,6 @@ pub struct SyncDetector {
     pass: Vec<bool>,
     correlator: Correlator,
     runs: [u32; SYMBOL],
-    inside: bool,
-    quiet: u32,
     gate: f64,
 }
 
@@ -96,8 +101,6 @@ impl Default for SyncDetector {
             pass: Vec::new(),
             correlator: Correlator::new(),
             runs: [0; SYMBOL],
-            inside: false,
-            quiet: 0,
             gate: threshold(),
         }
     }
@@ -164,6 +167,7 @@ impl SyncDetector {
             let mut lanes: [u32; SYMBOL] = std::array::from_fn(|j| {
                 self.runs[((buf_first + j as u64) % SYMBOL as u64) as usize]
             });
+            let carried = lanes;
             let mut events = Vec::new();
             for (chunk, passes) in pass.chunks(SYMBOL).enumerate() {
                 for (j, &p) in passes.iter().enumerate() {
@@ -176,35 +180,37 @@ impl SyncDetector {
             for (j, lane) in lanes.iter().enumerate() {
                 self.runs[((buf_first + j as u64) % SYMBOL as u64) as usize] = *lane;
             }
-            // Each event is a SYNC unless the detector is inside a frame
-            // still: one ends after QUIET samples where nothing passed,
-            // which is looked for only while inside, between events.
-            let mut from = 0;
-            for &e in events.iter().chain(std::iter::once(&m)) {
-                if self.inside {
-                    for &p in &pass[from..e] {
-                        if p {
-                            self.quiet = 0;
-                        } else {
-                            self.quiet += 1;
-                            if self.quiet >= QUIET {
-                                self.inside = false;
-                                break;
-                            }
-                        }
+            // Each event is a new frame unless a timing near it already
+            // holds a run as long: then a frame already found (or about to
+            // be, at that timing) is passing there too. After a gap, even a
+            // SIFS between a frame and its acknowledgement, every run has
+            // broken, so the next frame's first event stands.
+            let run_at = |n: isize| -> u32 {
+                // The run of window n's timing, as of window n.
+                let mut k = 0u32;
+                let mut at = n;
+                while k < RUN as u32 {
+                    if at < 0 {
+                        return k + carried[(at.rem_euclid(SYMBOL as isize)) as usize];
                     }
+                    if !pass[at as usize] {
+                        return k;
+                    }
+                    k += 1;
+                    at -= SYMBOL as isize;
                 }
-                if e == m {
-                    break;
-                }
-                self.quiet = 0;
-                if !self.inside {
-                    self.inside = true;
+                k
+            };
+            for &e in &events {
+                let e = e as isize;
+                let near = (1..=NEAR as isize).any(|d| {
+                    run_at(e - d) >= RUN as u32 || run_at(e + d - SYMBOL as isize) >= RUN as u32
+                });
+                if !near {
                     found.push(Found {
-                        first: buf_first + e as u64 - (SYMBOL * (RUN - 1)) as u64,
+                        first: (buf_first as i64 + e as i64 - (SYMBOL * (RUN - 1)) as i64) as u64,
                     });
                 }
-                from = e + 1;
             }
             let keep = &block[block.len().saturating_sub(SYMBOL - 1)..];
             if keep.len() < SYMBOL - 1 {
@@ -299,7 +305,8 @@ impl Correlator {
 pub struct Read {
     pub preamble: Preamble,
     pub header: Result<Header, Fault>,
-    /// The stream pair the frame's first SYNC symbol started on.
+    /// The stream pair the frame's first SYNC symbol started on: with its
+    /// airtime, where it ends.
     pub start: u64,
     /// The carrier against our tuning, in hertz.
     pub offset_hz: Uncertain,
@@ -619,6 +626,139 @@ mod tests {
         assert!(found.is_empty(), "{found:?}");
     }
 
+    /// Frames one after another, as the air has them: an 802.11b frame,
+    /// noise, an OFDM frame, 10 us of quiet, another 802.11b frame at
+    /// another timing, then one at the first one's: each found, once.
+    #[test]
+    fn frames_in_a_row_are_each_found_once() {
+        use crate::signal::wifi::ppdu::ppdu;
+        use crate::signal::wifi::signal_field::Rate as OfdmRate;
+        let mut rng = Rng::new(138);
+        let h = header(Rate::M2, true, 400);
+        let unit = |f: Vec<Complex<f64>>| {
+            let p = f.iter().map(|z| z.norm_sqr()).sum::<f64>() / f.len() as f64;
+            f.into_iter().map(move |z| z / p.sqrt()).collect::<Vec<_>>()
+        };
+        let mut stream: Vec<Complex<f64>> = vec![Complex::new(0.0, 0.0); 700];
+        stream.extend(unit(frame(Preamble::Long, &h, 30, 0, &mut rng)));
+        stream.extend(vec![Complex::new(0.0, 0.0); 3_000]);
+        let psdu: Vec<u8> = (0..200).collect();
+        stream.extend(unit(ppdu(&psdu, OfdmRate::R24, 0x5d)));
+        stream.extend(vec![Complex::new(0.0, 0.0); 200 + 7]);
+        stream.extend(unit(frame(Preamble::Short, &h, 30, 0, &mut rng)));
+        stream.extend(vec![Complex::new(0.0, 0.0); 200 - 7]);
+        stream.extend(unit(frame(Preamble::Long, &h, 30, 0, &mut rng)));
+        stream.extend(vec![Complex::new(0.0, 0.0); 5_000]);
+        let noise = rng.noise(stream.len(), 0.1);
+        let x: Vec<Complex<f32>> = stream
+            .iter()
+            .zip(noise)
+            .map(|(z, n)| Complex::new(z.re as f32, z.im as f32) + n)
+            .collect();
+        let mut d = SyncDetector::new();
+        let found: Vec<Found> = x
+            .chunks(4096)
+            .enumerate()
+            .flat_map(|(i, b)| d.push((i * 4096) as u64, b))
+            .collect();
+        assert_eq!(found.len(), 3, "{found:?}");
+        let read: Vec<Preamble> = found
+            .iter()
+            .map(|f| match examine(&x, 0, f) {
+                Some(Verdict::Frame(r)) => {
+                    assert_eq!(r.header, Ok(h));
+                    r.preamble
+                }
+                other => panic!("{other:?}"),
+            })
+            .collect();
+        assert_eq!(read, [Preamble::Long, Preamble::Short, Preamble::Long]);
+    }
+
+    /// An acknowledgement a SIFS after its frame, at exactly the frame's
+    /// timing: found as a frame of its own, at 20 and at 8 dB.
+    #[test]
+    fn an_acknowledgement_at_the_same_timing_is_its_own_frame() {
+        let mut rng = Rng::new(141);
+        for snr in [20.0, 8.0] {
+            for _ in 0..10 {
+                let data = header(Rate::M1, false, 800);
+                let ack = header(Rate::M1, false, 112);
+                let mut f = frame(Preamble::Long, &data, 100, 4, &mut rng);
+                // 10 us of silence, then the acknowledgement, on the same
+                // 20-sample grid.
+                f.extend(vec![Complex::new(0.0, 0.0); 200 - 8 * 20]);
+                f.extend(frame(Preamble::Long, &ack, 112, 4, &mut rng));
+                let x = on_air(&f, snr, 10e3, &mut rng);
+                let mut d = SyncDetector::new();
+                let found: Vec<Found> = x
+                    .chunks(4096)
+                    .enumerate()
+                    .flat_map(|(i, b)| d.push((i * 4096) as u64, b))
+                    .collect();
+                let headers: Vec<_> = found
+                    .iter()
+                    .filter_map(|f| match examine(&x, 0, f) {
+                        Some(Verdict::Frame(r)) => r.header.ok(),
+                        _ => None,
+                    })
+                    .collect();
+                assert_eq!(headers, [data, ack], "{snr} dB: {found:?}");
+            }
+        }
+    }
+
+    /// A long frame at 1 Mb/s, 1.5 ms of data after its header, is one
+    /// frame: followed to its end, never found again inside it.
+    #[test]
+    fn a_long_frame_is_found_once() {
+        let mut rng = Rng::new(139);
+        for snr in [20.0, 8.0] {
+            let h = header(Rate::M1, true, 1500);
+            let x = on_air(
+                &frame(Preamble::Long, &h, 1500, 4, &mut rng),
+                snr,
+                30e3,
+                &mut rng,
+            );
+            let mut d = SyncDetector::new();
+            let found: Vec<Found> = x
+                .chunks(4096)
+                .enumerate()
+                .flat_map(|(i, b)| d.push((i * 4096) as u64, b))
+                .collect();
+            assert_eq!(found.len(), 1, "{snr} dB: {found:?}");
+        }
+    }
+
+    /// DC the radio leaves, ten times the noise's power, is no SYNC, and a
+    /// frame under it is read all the same.
+    #[test]
+    fn dc_is_no_sync() {
+        let mut rng = Rng::new(137);
+        let dc = Complex::new(2.2f32, -2.2);
+        let x: Vec<Complex<f32>> = rng.noise(100_000, 1.0).iter().map(|z| z + dc).collect();
+        let mut d = SyncDetector::new();
+        let found: Vec<Found> = x
+            .chunks(4096)
+            .enumerate()
+            .flat_map(|(i, b)| d.push((i * 4096) as u64, b))
+            .collect();
+        assert!(found.is_empty(), "{found:?}");
+        let h = header(Rate::M1, true, 2400);
+        let f = on_air(
+            &frame(Preamble::Long, &h, 40, 4, &mut rng),
+            10.0,
+            0.0,
+            &mut rng,
+        );
+        let with_dc: Vec<Complex<f32>> = f.iter().map(|z| z + dc * 0.3).collect();
+        match received(&with_dc) {
+            Some(Verdict::Frame(r)) => assert_eq!(r.header, Ok(h)),
+            other => panic!("{other:?}"),
+        }
+    }
+
     /// OFDM frames, whatever their rate, are never a SYNC.
     #[test]
     fn ofdm_is_never_a_sync() {
@@ -699,5 +839,98 @@ mod tests {
             secs * 1e3,
             secs * 100.0 * 20e6 / (blocks * 131_072) as f64
         );
+    }
+
+    /// **What a recording's 802.11b frames say, by hand**
+    /// (`SDRTOP_REPLAY=path.sigmf-data`, ci8 at 20 Msps on a channel
+    /// centre): every SYNC found and read, counted by preamble, rate,
+    /// length and locked clocks, with the refusals. `cargo test --release
+    /// a_recordings_802_11b -- --ignored --nocapture`.
+    #[test]
+    #[ignore]
+    fn a_recordings_802_11b() {
+        let Ok(path) = std::env::var("SDRTOP_REPLAY") else {
+            return;
+        };
+        let bytes = std::fs::read(&path).unwrap();
+        let pairs = bytes.len() / 2;
+        let pair = |p: &[u8; 2]| Complex::new(p[0] as i8 as f32 / 128.0, p[1] as i8 as f32 / 128.0);
+        // The radio's DC off, as the worker's feed takes it, summed in f64.
+        let dc = bytes
+            .as_chunks::<2>()
+            .0
+            .iter()
+            .map(|p| {
+                let z = pair(p);
+                Complex::new(z.re as f64, z.im as f64)
+            })
+            .sum::<Complex<f64>>()
+            / pairs as f64;
+        let dc = Complex::new(dc.re as f32, dc.im as f32);
+        let stretch = |from: usize, len: usize| -> Vec<Complex<f32>> {
+            bytes[2 * from..2 * (from + len).min(pairs)]
+                .as_chunks::<2>()
+                .0
+                .iter()
+                .map(|p| pair(p) - dc)
+                .collect()
+        };
+        let mut d = SyncDetector::new();
+        let mut kinds = std::collections::BTreeMap::new();
+        let (mut found, mut no_sfd, mut refused) = (0, 0, std::collections::BTreeMap::new());
+        let mut offsets = Vec::new();
+        let (mut last_end, mut inside_read) = (0u64, 0);
+        for at in (0..pairs).step_by(131_072) {
+            for f in d.push(at as u64, &stretch(at, 131_072)) {
+                found += 1;
+                let Some((from, len)) = needs(&f) else {
+                    continue;
+                };
+                match examine(&stretch(from as usize, len), from, &f) {
+                    Some(Verdict::Frame(r)) => match r.header {
+                        Ok(h) => {
+                            last_end = r.start + 20 * h.airtime_us(r.preamble) as u64;
+                            let bucket = match h.octets() {
+                                0..=63 => "0-63",
+                                64..=255 => "64-255",
+                                256..=511 => "256-511",
+                                _ => "512+",
+                            };
+                            *kinds
+                                .entry((
+                                    format!("{:?}", r.preamble),
+                                    h.rate.mbps(),
+                                    bucket,
+                                    h.locked,
+                                ))
+                                .or_insert(0) += 1;
+                            offsets.push(r.offset_hz.value());
+                        }
+                        Err(e) => *refused.entry(e.label()).or_insert(0) += 1,
+                    },
+                    Some(Verdict::NoSfd) => {
+                        no_sfd += 1;
+                        if f.first < last_end {
+                            inside_read += 1;
+                        }
+                    }
+                    None => {}
+                }
+            }
+        }
+        let secs = pairs as f64 / 20e6;
+        eprintln!("{secs:.1} s: {found} SYNCs, {no_sfd} with no SFD ({inside_read} inside a frame read before), refused {refused:?}");
+        for (k, n) in &kinds {
+            eprintln!("  {k:?}: {n} ({:.1}/s)", *n as f64 / secs);
+        }
+        if !offsets.is_empty() {
+            offsets.sort_by(f64::total_cmp);
+            eprintln!(
+                "  offsets: median {:.1} kHz, from {:.1} to {:.1}",
+                offsets[offsets.len() / 2] / 1e3,
+                offsets[0] / 1e3,
+                offsets[offsets.len() - 1] / 1e3
+            );
+        }
     }
 }

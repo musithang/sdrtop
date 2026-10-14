@@ -100,6 +100,16 @@ impl Rate {
             Rate::M11 => 0x6E,
         }
     }
+
+    /// The rate in Mb/s, as it is said.
+    pub fn mbps(self) -> &'static str {
+        match self {
+            Rate::M1 => "1",
+            Rate::M2 => "2",
+            Rate::M5_5 => "5.5",
+            Rate::M11 => "11",
+        }
+    }
 }
 
 /// The two preambles (15.3.2, 16.2.2.3).
@@ -140,6 +150,16 @@ pub enum Fault {
     Crc,
     /// SIGNAL is none of the four rates.
     Rate,
+}
+
+impl Fault {
+    /// The check that refused it, in a word or two.
+    pub fn label(self) -> &'static str {
+        match self {
+            Fault::Crc => "CRC",
+            Fault::Rate => "no such rate",
+        }
+    }
 }
 
 impl Header {

@@ -20,8 +20,7 @@
 //!   its HT-SIG, HE-SIG-A or U-SIG says.
 //! - [`clock`]: the transmitter's symbol clock, from the pilots across its
 //!   DATA field, to hold against its carrier.
-//! - `dsss`: 802.11b, found by its Barker chips and read to its header
-//!   (compiled for the tests until the worker runs it).
+//! - [`dsss`]: 802.11b, found by its Barker chips and read to its header.
 //!
 //! The stages a frame is built from are written stage by stage from the
 //! standard and held to its own worked example (IEEE 802.11-2024, Annex
@@ -48,7 +47,6 @@ pub mod bcc;
 pub mod channel;
 pub mod clock;
 pub mod detect;
-#[cfg(test)]
 pub mod dsss;
 pub mod format;
 pub mod hesig;

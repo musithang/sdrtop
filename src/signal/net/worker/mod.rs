@@ -1171,6 +1171,19 @@ mod tests {
                 .last_frame
                 .map(|l| (l.offset_hz, l.snr_db, l.heard))
         );
+        eprintln!(
+            "802.11b: {} SYNCs, {} read, {} refused, {} no SFD, {} cut, {} inside a frame · latest {:?}",
+            f.dsss_found,
+            f.dsss_read,
+            f.dsss_refused,
+            f.dsss_no_sfd,
+            f.dsss_cut,
+            f.dsss_inside,
+            m.net
+                .wifi
+                .last_dsss
+                .map(|d| (d.preamble, d.header, d.offset_hz))
+        );
         let c = m.net.wifi.clock_check;
         eprintln!(
             "clocks read {} · clock - carrier {:?} ppm · chi2 a frame {:?} · latest {:?}",
@@ -1799,6 +1812,165 @@ mod tests {
             })
             .collect();
         all.chunks(8192).map(|c| c.to_vec()).collect()
+    }
+
+    /// An 802.11b frame, long preamble, `header` with 60 data symbols after
+    /// it, starting `start` pairs into the first of `blocks` blocks of 4096,
+    /// 20 dB over the noise.
+    fn dsss_blocks(
+        start: usize,
+        blocks: usize,
+        header: &crate::signal::wifi::dsss::header::Header,
+        seed: u64,
+    ) -> Vec<Vec<u8>> {
+        dsss_blocks_faded(start, blocks, header, 60, None, seed)
+    }
+
+    /// The same with `data` data symbols, silenced over `fade` symbols of
+    /// the frame (counted from its first).
+    fn dsss_blocks_faded(
+        start: usize,
+        blocks: usize,
+        header: &crate::signal::wifi::dsss::header::Header,
+        data: usize,
+        fade: Option<std::ops::Range<usize>>,
+        seed: u64,
+    ) -> Vec<Vec<u8>> {
+        use crate::signal::wifi::dsss::{header::Preamble, transmit::frame};
+        let mut rng = crate::signal::dsp::testkit::Rng::new(seed);
+        let mut f = frame(Preamble::Long, header, data, 2, &mut rng);
+        if let Some(fade) = fade {
+            for z in &mut f[(2 + fade.start) * 20..(2 + fade.end) * 20] {
+                *z = num_complex::Complex::new(0.0, 0.0);
+            }
+        }
+        let power = f.iter().map(|z| z.norm_sqr()).sum::<f64>() / f.len() as f64;
+        let scale = 0.2 / power.sqrt();
+        let noise = rng.noise(4096 * blocks, 0.0004);
+        let all: Vec<u8> = (0..4096 * blocks)
+            .flat_map(|n| {
+                let s = n
+                    .checked_sub(start)
+                    .and_then(|i| f.get(i))
+                    .map_or(num_complex::Complex::new(0.0, 0.0), |z| z * scale);
+                let re = s.re as f32 + noise[n].re;
+                let im = s.im as f32 + noise[n].im;
+                let q = |v: f32| (v * 128.0).clamp(-127.0, 127.0) as i8 as u8;
+                [q(re), q(im)]
+            })
+            .collect();
+        all.chunks(8192).map(|c| c.to_vec()).collect()
+    }
+
+    fn beacon_like() -> crate::signal::wifi::dsss::header::Header {
+        crate::signal::wifi::dsss::header::Header {
+            rate: crate::signal::wifi::dsss::header::Rate::M1,
+            locked: true,
+            extension: false,
+            length_us: 2_400,
+        }
+    }
+
+    /// An 802.11b frame on the Wi-Fi view, across two blocks, is found by
+    /// its SYNC and its header read; it is no OFDM frame of this channel.
+    #[test]
+    fn an_802_11b_frame_is_found_and_its_header_read() {
+        let h = beacon_like();
+        let mut blocks = vec![(1, noise_block(1))];
+        for (i, b) in dsss_blocks(1000, 2, &h, 2).into_iter().enumerate() {
+            blocks.push((2 + i as u64, b));
+        }
+        blocks.push((4, noise_block(4)));
+        let m = run_wifi("wifi_channel", "wifi_survey", &blocks);
+        let f = m.net.health.wifi;
+        assert_eq!(
+            (
+                f.dsss_found,
+                f.dsss_read,
+                f.dsss_refused,
+                f.dsss_no_sfd,
+                f.dsss_cut
+            ),
+            (1, 1, 0, 0, 0),
+            "{f:?}"
+        );
+        assert_eq!(f.this_channel, 0, "{f:?}");
+        let last = m.net.wifi.last_dsss.expect("a frame shown");
+        assert_eq!(last.header, Ok(h));
+        assert!(
+            last.offset_hz.value().abs() < 5_000.0,
+            "{:?}",
+            last.offset_hz
+        );
+    }
+
+    /// A break before its header was held cuts the frame, and every SYNC
+    /// found ends in exactly one place.
+    #[test]
+    fn an_802_11b_frame_a_break_took_is_cut() {
+        let parts = dsss_blocks(4096 - 1500, 2, &beacon_like(), 3);
+        let blocks = vec![
+            (1, noise_block(1)),
+            (2, parts[0].clone()),
+            (5, noise_block(5)),
+            (6, noise_block(6)),
+        ];
+        let m = run_wifi("wifi_channel", "wifi_survey", &blocks);
+        let f = m.net.health.wifi;
+        assert_eq!((f.dsss_found, f.dsss_cut), (1, 1), "{f:?}");
+        assert_eq!(
+            f.dsss_found,
+            f.dsss_read + f.dsss_refused + f.dsss_no_sfd + f.dsss_cut + f.dsss_inside
+        );
+        assert!(m.net.wifi.last_dsss.is_none());
+    }
+
+    /// A long 802.11b frame with a fade in its data: the SYNC found again
+    /// after the fade is inside the frame already read, and counted so,
+    /// not as a SYNC with no SFD.
+    #[test]
+    fn a_sync_inside_a_frame_already_read_is_counted_as_that() {
+        let h = crate::signal::wifi::dsss::header::Header {
+            rate: crate::signal::wifi::dsss::header::Rate::M1,
+            locked: true,
+            extension: false,
+            length_us: 400,
+        };
+        let mut blocks = vec![(1, noise_block(1))];
+        for (i, b) in dsss_blocks_faded(1000, 3, &h, 400, Some(250..260), 4)
+            .into_iter()
+            .enumerate()
+        {
+            blocks.push((2 + i as u64, b));
+        }
+        blocks.push((5, noise_block(5)));
+        let m = run_wifi("wifi_channel", "wifi_survey", &blocks);
+        let f = m.net.health.wifi;
+        assert_eq!(
+            (f.dsss_found, f.dsss_read, f.dsss_inside, f.dsss_no_sfd),
+            (2, 1, 1, 0),
+            "{f:?}"
+        );
+        assert_eq!(
+            f.dsss_found,
+            f.dsss_read + f.dsss_refused + f.dsss_no_sfd + f.dsss_cut + f.dsss_inside
+        );
+    }
+
+    /// An OFDM frame is no 802.11b SYNC.
+    #[test]
+    fn an_ofdm_frame_is_no_802_11b_sync() {
+        let m = run_wifi(
+            "wifi_channel",
+            "wifi_survey",
+            &[
+                (1, noise_block(1)),
+                (2, frame_block(1000, 2)),
+                (3, noise_block(3)),
+            ],
+        );
+        assert_eq!(m.net.health.wifi.dsss_found, 0);
+        assert_eq!(m.net.health.wifi.this_channel, 1);
     }
 
     /// A frame long enough to read a clock from, across three blocks: the

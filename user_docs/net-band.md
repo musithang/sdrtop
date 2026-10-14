@@ -142,7 +142,23 @@ one made of it:
 | `cut short` | A break or a retune took it before it could be judged and its SIGNAL field heard (on the survey, every hop is a retune) |
 
 `this channel`, `adjacent`, `not a preamble` and `cut short` add up to
-`repeats`, and the three rows under `this channel` add up to it. In a block of
+`repeats`, and the three rows under `this channel` add up to it.
+
+802.11b is counted beside it, because it is a different radio altogether
+(the original 1999 one, still alive in every access point's beacons): no
+training symbols, just eleven-chip Barker codes, found by their own
+detector running on a core of its own.
+
+| Row | What it counts |
+|-----|----------------|
+| `802.11b SYNCs` | Sixteen Barker symbols in a row at one timing: the start of an 802.11b frame, or something remarkably like one |
+| `header read` | Its SFD found and its header's CRC good: rate, length and airtime known |
+| `header refused` | The header failed its CRC or named a rate there is no such thing as |
+| `no SFD` | The chips, but no start-of-frame where one should be |
+| `SYNC cut` | A break or a retune took it before its header was held |
+| `inside a frame` | Found again inside a frame already read, after a fade in its data: the same frame, not a new one |
+
+The five rows under `802.11b SYNCs` add up to it. In a block of
 flats expect a lot of all of them; the air is busier than any list of
 networks suggests, and a channel with no network on it still hears the ones
 beside it.

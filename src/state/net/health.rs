@@ -105,6 +105,21 @@ pub struct WifiFunnel {
     pub adjacent: u64,
     /// Repeats whose long training field matched nothing.
     pub not_preamble: u64,
+    /// 802.11b SYNCs found: a run of Barker symbols at one timing. Each is
+    /// read, refused, has no SFD, is cut, or lies inside a frame already
+    /// read, so those five add up to it.
+    pub dsss_found: u64,
+    /// Of those, the headers that passed their CRC and named a rate.
+    pub dsss_read: u64,
+    /// The headers that failed their CRC or named no rate.
+    pub dsss_refused: u64,
+    /// SYNCs with no SFD where one should be.
+    pub dsss_no_sfd: u64,
+    /// SYNCs a break or a retune took before their header was held.
+    pub dsss_cut: u64,
+    /// SYNCs inside the airtime of a frame whose header was read: its own
+    /// chips found again after a fade, not a frame of their own.
+    pub dsss_inside: u64,
     /// Ones a break in the stream or a retune cut short, in their short
     /// field or before their long one and the SIGNAL symbol after it were
     /// heard; the survey's hops among them.

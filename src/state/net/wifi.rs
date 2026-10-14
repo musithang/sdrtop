@@ -20,6 +20,20 @@ pub struct WifiFrame {
     pub when: std::time::Instant,
 }
 
+/// The latest 802.11b frame whose SYNC was found and SFD read.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct WifiDsss {
+    pub preamble: crate::signal::wifi::dsss::header::Preamble,
+    /// What its header said, or why it was refused.
+    pub header:
+        Result<crate::signal::wifi::dsss::header::Header, crate::signal::wifi::dsss::header::Fault>,
+    /// Its carrier against our tuning, from its SYNC.
+    pub offset_hz: crate::signal::dsp::uncertainty::Uncertain,
+    /// The channel centre it was heard on.
+    pub carrier_hz: f64,
+    pub when: std::time::Instant,
+}
+
 /// The latest frame of this channel whose symbol clock was read, beside
 /// its carrier over the same DATA field: two readings of what the standard
 /// requires to be one oscillator; and the preamble's carrier, which lies
@@ -105,6 +119,8 @@ pub struct WifiState {
     pub clock: Option<WifiClock>,
     /// Every clock read this session against its carrier.
     pub clock_check: ClockCheck,
+    /// The latest 802.11b frame read.
+    pub last_dsss: Option<WifiDsss>,
 }
 
 #[cfg(test)]

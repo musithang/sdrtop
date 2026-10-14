@@ -25,9 +25,12 @@ use crate::signal::dsp::uncertainty::Uncertain;
 use crate::signal::net::measure::Recent;
 use crate::signal::wifi::clock::{measure, plan, Plan};
 use crate::signal::wifi::detect::{Detection, StfDetector};
+use crate::signal::wifi::dsss::receive::{
+    examine as dsss_examine, needs as dsss_needs, Found, SyncDetector, Verdict as DsssVerdict,
+};
 use crate::signal::wifi::format::{read, Signalling};
 use crate::signal::wifi::sync::{examine, needs, Sync, Verdict};
-use crate::state::{SdrMetrics, WifiClock};
+use crate::state::{SdrMetrics, WifiClock, WifiDsss};
 
 /// Where the receiver runs, or why not, its detector, the repeats found
 /// that wait for their long training field to be held, and the frames that
@@ -38,6 +41,13 @@ pub(super) struct Wifi {
     detector: StfDetector,
     waiting: Vec<Detection>,
     clocks: Vec<Pending>,
+    /// 802.11b's detector, run beside the OFDM one, and the SYNCs found
+    /// that wait for their header to be held.
+    dsss: SyncDetector,
+    dsss_waiting: Vec<Found>,
+    /// The stream pair the last 802.11b frame read ends at: a SYNC before
+    /// it is that frame's chips found again.
+    dsss_until: u64,
 }
 
 /// A frame whose clock is read once its last DATA symbol is held.
@@ -75,16 +85,22 @@ impl Wifi {
         self.waiting.clear();
         // A clock still waiting for its frame's end will not see it.
         self.clocks.clear();
-        if cut > 0 {
+        // An 802.11b SYNC waiting for its header will not see it either, and
+        // the runs in progress belonged to the stream before the break.
+        let dsss_cut = self.dsss_waiting.len() as u64;
+        self.dsss_waiting.clear();
+        self.dsss = SyncDetector::new();
+        if cut > 0 || dsss_cut > 0 {
             let mut m = state.lock().unwrap_or_else(|e| e.into_inner());
             m.net.health.wifi.cut += cut;
+            m.net.health.wifi.dsss_cut += dsss_cut;
         }
     }
 
     /// Whether a repeat waits for samples still to come, so the feed holds
     /// a little more.
     pub(super) fn waiting(&self) -> bool {
-        !self.waiting.is_empty() || !self.clocks.is_empty()
+        !self.waiting.is_empty() || !self.clocks.is_empty() || !self.dsss_waiting.is_empty()
     }
 
     /// Look through a block that starts at stream pair `first_pair`, and
@@ -95,12 +111,29 @@ impl Wifi {
         block: &[Complex<f32>],
         state: &Arc<Mutex<SdrMetrics>>,
     ) {
-        let found = self.detector.push(first_pair, block);
-        if !found.is_empty() {
+        // The OFDM and the 802.11b detectors on one block, side by side
+        // where there is a second core: each owns all it touches, so the
+        // order they run in changes nothing.
+        let (ofdm, dsss) = (&mut self.detector, &mut self.dsss);
+        let (found, syncs) = if parallel() {
+            std::thread::scope(|scope| {
+                let syncs = scope.spawn(|| dsss.push(first_pair, block));
+                let found = ofdm.push(first_pair, block);
+                let syncs = syncs
+                    .join()
+                    .unwrap_or_else(|panic| std::panic::resume_unwind(panic));
+                (found, syncs)
+            })
+        } else {
+            (ofdm.push(first_pair, block), dsss.push(first_pair, block))
+        };
+        if !found.is_empty() || !syncs.is_empty() {
             let mut m = state.lock().unwrap_or_else(|e| e.into_inner());
             m.net.health.wifi.detected += found.len() as u64;
+            m.net.health.wifi.dsss_found += syncs.len() as u64;
         }
         self.waiting.extend(found);
+        self.dsss_waiting.extend(syncs);
     }
 
     /// Judge every waiting repeat whose stretch is held by now (`held_end`
@@ -194,8 +227,52 @@ impl Wifi {
             }
             false
         });
+        // Every 802.11b SYNC whose header is held by now is read.
+        let mut last_dsss = None;
+        let until = &mut self.dsss_until;
+        self.dsss_waiting.retain(|f| {
+            if f.first < *until {
+                counts.dsss_inside += 1;
+                return false;
+            }
+            let Some((from, len)) = dsss_needs(f) else {
+                counts.dsss_cut += 1;
+                return false;
+            };
+            if from + len as u64 > held_end {
+                return true;
+            }
+            let verdict = window
+                .slice(from, len)
+                .and_then(|stretch| dsss_examine(&stretch, from, f));
+            match verdict {
+                Some(DsssVerdict::Frame(r)) => {
+                    match r.header {
+                        Ok(h) => {
+                            counts.dsss_read += 1;
+                            *until = r.start + 20 * h.airtime_us(r.preamble) as u64;
+                        }
+                        Err(_) => counts.dsss_refused += 1,
+                    }
+                    last_dsss = Some(WifiDsss {
+                        preamble: r.preamble,
+                        header: r.header,
+                        offset_hz: r.offset_hz,
+                        carrier_hz: centre_hz,
+                        when: now,
+                    });
+                }
+                Some(DsssVerdict::NoSfd) => counts.dsss_no_sfd += 1,
+                // Held no longer, or never whole: a hole the feed left.
+                None => counts.dsss_cut += 1,
+            }
+            false
+        });
         if counts != Default::default() || !clocks.is_empty() {
             let mut m = state.lock().unwrap_or_else(|e| e.into_inner());
+            if last_dsss.is_some() {
+                m.net.wifi.last_dsss = last_dsss;
+            }
             for c in &clocks {
                 m.net.wifi.clock_check.add(c);
             }
@@ -210,6 +287,11 @@ impl Wifi {
             f.adjacent += counts.adjacent;
             f.not_preamble += counts.not_preamble;
             f.cut += counts.cut;
+            f.dsss_read += counts.dsss_read;
+            f.dsss_refused += counts.dsss_refused;
+            f.dsss_no_sfd += counts.dsss_no_sfd;
+            f.dsss_cut += counts.dsss_cut;
+            f.dsss_inside += counts.dsss_inside;
             if last.is_some() {
                 m.net.wifi.last_frame = last;
             }
@@ -235,6 +317,12 @@ impl Wifi {
         drop(m);
         self.published = answer;
     }
+}
+
+/// Whether there is a second core to run the 802.11b detector on.
+fn parallel() -> bool {
+    static CORES: std::sync::OnceLock<usize> = std::sync::OnceLock::new();
+    *CORES.get_or_init(|| std::thread::available_parallelism().map_or(1, |n| n.get())) > 1
 }
 
 /// On a Wi-Fi view: the channel, or the sentence saying why not.
