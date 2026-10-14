@@ -262,6 +262,7 @@ impl Wifi {
                     }
                 }
                 Some(Verdict::NotPreamble) => counts.not_preamble += 1,
+                Some(Verdict::NotShortField) => counts.not_short_field += 1,
                 // Held no longer, or never whole: a hole the feed left.
                 None => counts.cut += 1,
             }
@@ -377,6 +378,7 @@ impl Wifi {
             f.unreadable += counts.unreadable;
             f.adjacent += counts.adjacent;
             f.not_preamble += counts.not_preamble;
+            f.not_short_field += counts.not_short_field;
             f.cut += counts.cut;
             f.dsss_read += counts.dsss_read;
             f.dsss_refused += counts.dsss_refused;

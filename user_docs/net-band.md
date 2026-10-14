@@ -139,9 +139,11 @@ one made of it:
 | `unreadable` | The ones where neither passed its checks |
 | `adjacent` | It matched a channel 5, 10 or 15 MHz away, judged on the part of it our 20 MHz can hear |
 | `not a preamble` | It matched nothing |
+| `not a short field` | It repeated better 0.4 µs apart than 0.8 µs apart, which a short training field never does (its tones cancel at 0.4 µs) and a Bluetooth burst nearly always does: turned away before the match, the costliest step of the receiver (a steady tone, alike at both, is left to the match). One case is given up knowingly: a frame through an echo two thirds as strong as itself, exactly 0.4 µs (120 m of extra path) late, at low signal |
 | `cut short` | A break or a retune took it before it could be judged and its SIGNAL field heard (on the survey, every hop is a retune) |
 
-`this channel`, `adjacent`, `not a preamble` and `cut short` add up to
+`this channel`, `adjacent`, `not a preamble`, `not a short field` and
+`cut short` add up to
 `repeats`, and the three rows under `this channel` add up to it.
 
 802.11b is counted beside it, because it is a different radio altogether

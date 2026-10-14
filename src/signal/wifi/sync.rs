@@ -72,6 +72,9 @@ pub enum Verdict {
     },
     /// Nothing matched: a repeat, but no frame of ours or a neighbour's.
     NotPreamble,
+    /// A repeat that correlates more 0.4 us apart than 0.8 us apart: no
+    /// short training field does, whatever channel it came through.
+    NotShortField,
 }
 
 /// The two-symbol reference for a neighbour `shift` channels' worth of
@@ -138,6 +141,33 @@ pub fn examine(samples: &[Complex<f32>], first_pair: u64, peak: u64) -> Option<V
         let z = samples[n as usize];
         Complex::new(z.re as f64, z.im as f64)
     };
+
+    // A short field repeats every 16 samples (0.8 us) and cancels 8 apart:
+    // its tones sit every 1.25 MHz, alternately in and out of phase 0.4 us
+    // apart. A carrier or any narrowband signal correlates with itself at
+    // both. So a repeat that correlates more at 8 than at 16 is no short
+    // field, through whatever channel it came (an echo 0.4 us late, the
+    // worst there is, never lifts 8 above 16 unless it is as strong as the
+    // frame), and it is refused before the match that costs the most here.
+    // Both the squared cosine between two 64-sample windows, in the samples
+    // the detector compared.
+    let repeat = |lag: i64| {
+        let (mut c, mut e0, mut e1) = (Complex::new(0.0, 0.0), 0.0, 0.0);
+        for n in p - 127..p - 127 + 64 {
+            let (a, b) = (at(n), at(n + lag));
+            c += a * b.conj();
+            e0 += a.norm_sqr();
+            e1 += b.norm_sqr();
+        }
+        if e0 > 0.0 && e1 > 0.0 {
+            c.norm_sqr() / (e0 * e1)
+        } else {
+            0.0
+        }
+    };
+    if repeat(8) > repeat(16) {
+        return Some(Verdict::NotShortField);
+    }
 
     // Coarse: the short field's 16-sample repeat over the 112 samples
     // ending at the peak.
@@ -346,15 +376,111 @@ mod tests {
         }
     }
 
+    /// A burst like Bluetooth's at `hz` from our centre: 1 Mb/s, the
+    /// frequency 250 kHz either side of it, 50 us long, 20 dB over the noise.
+    fn fsk_burst(hz: f64, rng: &mut Rng) -> Vec<Complex<f32>> {
+        let mut x = vec![Complex::new(0.0f32, 0.0); 3000];
+        let mut phase = 0.0f64;
+        let mut f = hz;
+        for (n, z) in x.iter_mut().enumerate().skip(500).take(1000) {
+            if n % 20 == 0 {
+                f = hz
+                    + if rng.next_u64() & 1 == 1 {
+                        250e3
+                    } else {
+                        -250e3
+                    };
+            }
+            phase += std::f64::consts::TAU * f / FS;
+            *z = Complex::new(phase.cos() as f32, phase.sin() as f32);
+        }
+        let noise = rng.noise(x.len(), 0.01);
+        x.iter().zip(noise).map(|(s, n)| s + n).collect()
+    }
+
+    /// **A narrowband burst is no short field.** Bluetooth's kind of signal
+    /// passes the detector's 3.2 us repeat, and correlates with itself more
+    /// 0.4 us apart than 0.8 us apart; a short field cancels at 0.4 us.
+    /// Refused before the long field's match eight times in ten at least
+    /// (measured, 46 to 50 in 50),
+    /// wherever it sits: a burst whose bits run alike for most of the
+    /// window is a tone there, which the match refuses instead. Never a
+    /// frame of this channel.
+    #[test]
+    fn a_narrowband_burst_is_no_short_field() {
+        let mut rng = Rng::new(16);
+        for hz in [0.3e6, 2.1e6, -4.7e6, 7.9e6] {
+            let mut refused = 0;
+            for _ in 0..50 {
+                let v = judge(&fsk_burst(hz, &mut rng));
+                assert!(!matches!(v, Some(Verdict::ThisChannel(_))), "{hz}: {v:?}");
+                refused += matches!(v, Some(Verdict::NotShortField)) as usize;
+            }
+            assert!(refused >= 40, "{hz}: {refused} of 50");
+        }
+    }
+
+    /// A pure tone correlates alike at both spacings, so the test cannot
+    /// refuse it; the long field's match does. It is never a frame of this
+    /// channel.
+    #[test]
+    fn a_pure_tone_is_never_this_channels() {
+        let mut rng = Rng::new(19);
+        for hz in [0.3e6, 2.1e6, -4.7e6, 7.9e6] {
+            let mut x = vec![Complex::new(0.0f32, 0.0); 3000];
+            for (n, z) in x.iter_mut().enumerate().skip(500).take(1000) {
+                let ph = std::f64::consts::TAU * hz / FS * n as f64;
+                *z = Complex::new(ph.cos() as f32, ph.sin() as f32);
+            }
+            let noise = rng.noise(x.len(), 0.01);
+            let x: Vec<Complex<f32>> = x.iter().zip(noise).map(|(s, n)| s + n).collect();
+            let v = judge(&x);
+            assert!(!matches!(v, Some(Verdict::ThisChannel(_))), "{hz}: {v:?}");
+        }
+    }
+
+    /// **An echo does not make a frame no short field, up to half its
+    /// strength.** The worst a channel can do to the test is an echo 0.4 us
+    /// late, which raises every other tone of the short field and lowers the
+    /// rest. At 0.3 and 0.5 of the frame's amplitude, at 8 and 15 dB, the
+    /// frame is this channel's every time. (Measured beyond: at 0.7, 8 dB,
+    /// 31 frames in 40 are refused, and at 0.9, 15 dB, all; 1.2 us late, 4 in
+    /// 40 at 0.9; other delays none. Such an echo, 120 m of extra path at
+    /// two thirds of the frame's strength, is the case the test gives up.)
+    #[test]
+    fn a_frame_through_an_echo_is_still_a_short_field() {
+        let mut rng = Rng::new(17);
+        for a in [0.3f32, 0.5] {
+            for snr in [8.0, 15.0] {
+                for _ in 0..20 {
+                    let x = on_air(800, snr, 0.0, &mut rng);
+                    let echoed: Vec<Complex<f32>> = (0..x.len())
+                        .map(|n| {
+                            x[n] + if n >= 8 {
+                                x[n - 8] * a
+                            } else {
+                                Complex::new(0.0, 0.0)
+                            }
+                        })
+                        .collect();
+                    match judge(&echoed) {
+                        Some(Verdict::ThisChannel(_)) => {}
+                        other => panic!("echo {a} at {snr} dB: {other:?}"),
+                    }
+                }
+            }
+        }
+    }
+
     /// Where there is only noise, wherever the gate is asked, there is no
-    /// preamble.
+    /// preamble: refused by the period test or by the match.
     #[test]
     fn noise_is_not_a_preamble() {
         let mut rng = Rng::new(13);
         let x = rng.noise(20_000, 1.0);
         for peak in (200..19_000).step_by(997) {
             match examine(&x, 0, peak as u64) {
-                Some(Verdict::NotPreamble) => {}
+                Some(Verdict::NotPreamble | Verdict::NotShortField) => {}
                 other => panic!("{peak}: {other:?}"),
             }
         }

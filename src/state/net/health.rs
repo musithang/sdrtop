@@ -105,6 +105,9 @@ pub struct WifiFunnel {
     pub adjacent: u64,
     /// Repeats whose long training field matched nothing.
     pub not_preamble: u64,
+    /// Repeats that correlate more 0.4 us apart than 0.8 us apart, refused
+    /// before the match: no short training field does.
+    pub not_short_field: u64,
     /// 802.11b SYNCs found: a run of Barker symbols at one timing. Each is
     /// read, refused, has no SFD, is cut, lies inside a frame already read,
     /// or is another channel's, so those six add up to it.

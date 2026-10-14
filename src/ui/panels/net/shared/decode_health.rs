@@ -385,6 +385,11 @@ fn lines(
             Some("matched nothing"),
         ));
         out.push(row(
+            "not a short field",
+            grouped(f.not_short_field),
+            Some("repeats at 0.4 us, not 0.8"),
+        ));
+        out.push(row(
             "cut short",
             grouped(f.cut),
             Some("by a break or a retune"),
@@ -574,6 +579,7 @@ mod tests {
         m.net.health.wifi.unreadable = 50;
         m.net.health.wifi.adjacent = 60;
         m.net.health.wifi.not_preamble = 27;
+        m.net.health.wifi.not_short_field = 1_315;
         m.net.health.wifi.cut = 17;
         m.net.health.wifi.dsss_found = 96;
         m.net.health.wifi.dsss_read = 90;
@@ -610,6 +616,7 @@ mod tests {
             ("another channel", "11"),
             ("adjacent", "60"),
             ("not a preamble", "27"),
+            ("not a short field", "1 315"),
         ] {
             let row = on
                 .lines()

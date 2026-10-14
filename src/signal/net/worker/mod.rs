@@ -1254,7 +1254,8 @@ mod tests {
         let f = m.net.health.wifi;
         eprintln!(
             "{secs:.1} s · channel {:?} · repeats {} ({:.1}/s): this channel {} (L-SIG read {}, \
-             greenfield {}, unreadable {}), adjacent {}, not a preamble {}, cut {} · last frame {:?}",
+             greenfield {}, unreadable {}), adjacent {}, not a preamble {}, not a short field {}, \
+             cut {} · last frame {:?}",
             m.net.wifi.channel,
             f.detected,
             f.detected as f64 / secs,
@@ -1264,6 +1265,7 @@ mod tests {
             f.unreadable,
             f.adjacent,
             f.not_preamble,
+            f.not_short_field,
             f.cut,
             m.net
                 .wifi
@@ -1835,7 +1837,7 @@ mod tests {
         assert_eq!(f.cut, 1, "{f:?}");
         assert_eq!(
             f.detected,
-            f.this_channel + f.adjacent + f.not_preamble + f.cut,
+            f.this_channel + f.adjacent + f.not_preamble + f.not_short_field + f.cut,
             "{f:?}"
         );
         assert_eq!(
