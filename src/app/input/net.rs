@@ -419,6 +419,16 @@ pub(super) fn net_wifi_frames(key: KeyEvent, ctx: &mut InputCtx<'_>) -> KeyActio
         KeyCode::Enter => view.open = !view.open,
         KeyCode::Char('z') => view.zoom = view.zoom.next(),
         KeyCode::Char('d') => view.decode = !view.decode,
+        // The capture's trigger, armed again at once on the new one.
+        KeyCode::Char('t') => {
+            let scope = &mut m.net.wifi.scope;
+            scope.trigger = scope.trigger.next();
+            scope.rearm();
+            let label = scope.trigger.label();
+            m.push_log(format!("Frames: trigger: {label}"));
+        }
+        KeyCode::Char('+') => m.net.wifi.scope.holdoff = m.net.wifi.scope.holdoff.longer(),
+        KeyCode::Char('-') => m.net.wifi.scope.holdoff = m.net.wifi.scope.holdoff.shorter(),
         _ => {
             drop(m);
             return global::handle(key, ctx);
@@ -1656,6 +1666,7 @@ mod tests {
                     snr_db: None,
                     channel: None,
                     clock: None,
+                    epoch: 0,
                 });
             }
         }
@@ -1708,6 +1719,30 @@ mod tests {
         assert_eq!(view(&state).held, Some(30));
         key(&mut engine, &keys, &state, KeyCode::Char('h'));
         assert_eq!(view(&state).held, None);
+    }
+
+    /// `t` steps the capture's trigger and arms it again at once; `+` and
+    /// `-` lengthen and shorten the holdoff, to their ends and no further.
+    #[test]
+    fn t_steps_the_trigger_and_plus_minus_the_holdoff() {
+        use crate::state::{Family, Holdoff, Trigger};
+        let (mut engine, keys, state) = frames_view(3);
+        let scope = |s: &Arc<Mutex<SdrMetrics>>| metrics(s).net.wifi.scope.clone();
+        key(&mut engine, &keys, &state, KeyCode::Char('t'));
+        assert_eq!(scope(&state).trigger, Trigger::Family(Family::NonHt));
+        assert!(said(&metrics(&state), "trigger: non-HT"));
+        for _ in 0..8 {
+            key(&mut engine, &keys, &state, KeyCode::Char('t'));
+        }
+        assert_eq!(scope(&state).trigger, Trigger::Any, "round to any frame");
+        for _ in 0..4 {
+            key(&mut engine, &keys, &state, KeyCode::Char('+'));
+        }
+        assert_eq!(scope(&state).holdoff, Holdoff::Five);
+        for _ in 0..4 {
+            key(&mut engine, &keys, &state, KeyCode::Char('-'));
+        }
+        assert_eq!(scope(&state).holdoff, Holdoff::Half);
     }
 
     /// `Enter` opens the selected frame in place of the list where the card

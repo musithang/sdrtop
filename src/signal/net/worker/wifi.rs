@@ -57,6 +57,15 @@ pub(super) struct Wifi {
     /// The stream's run: one more at every break or retune, so the Frames
     /// list never works out a gap across one.
     run: u64,
+    /// The stream's clock: one more at a new stream, a retune or the
+    /// section closing, not at a feed gap, through which the stream's
+    /// position keeps counting.
+    epoch: u64,
+    /// Where the stream was heard to, on that clock: where a gap's lost
+    /// span begins.
+    heard_to: Option<u64>,
+    /// Spans a gap took, kept with the next lock block.
+    lost: Vec<crate::state::Lost>,
 }
 
 /// How long a visit lets the tuner settle, and how long it then listens:
@@ -95,7 +104,7 @@ impl Wifi {
         // Another channel, or none: what the detector was in the middle of
         // belonged to the old one, and so did the visit.
         if answer.0 != self.published.0 {
-            self.interrupted(state);
+            self.interrupted(None, state);
             self.end_visit(state);
         }
         self.publish(answer, state);
@@ -107,9 +116,23 @@ impl Wifi {
     }
 
     /// The stream broke or the radio moved: a preamble in progress was cut
-    /// short, and is counted as that.
-    pub(super) fn interrupted(&mut self, state: &Arc<Mutex<SdrMetrics>>) {
+    /// short, and is counted as that. `gap_to` is where the stream picks up
+    /// after a feed gap, on the same clock; `None` is a new clock (a new
+    /// stream, a retune, another channel or none).
+    pub(super) fn interrupted(&mut self, gap_to: Option<u64>, state: &Arc<Mutex<SdrMetrics>>) {
         self.run += 1;
+        match (gap_to, self.heard_to) {
+            (Some(to), Some(from)) if to > from => self.lost.push(crate::state::Lost {
+                epoch: self.epoch,
+                from,
+                to,
+            }),
+            (Some(_), _) => {}
+            (None, _) => {
+                self.epoch += 1;
+                self.heard_to = None;
+            }
+        }
         // The visit goes on: a gap in the feed has not moved the radio,
         // and a visit counts what it heard. A retune, a new stream, another
         // channel or another view ends it (`end_visit`).
@@ -215,7 +238,7 @@ impl Wifi {
         let mut counts = crate::state::WifiFunnel::default();
         // Every frame judged, as a row of the Frames list.
         let mut rows: Vec<WifiRow> = Vec::new();
-        let run = self.run;
+        let (run, epoch) = (self.run, self.epoch);
         let row = |start: u64, kind: RowKind| WifiRow {
             seq: 0,
             start,
@@ -229,6 +252,7 @@ impl Wifi {
             snr_db: None,
             channel: None,
             clock: None,
+            epoch,
         };
         self.waiting.retain(|d| {
             let Some((from, len)) = needs(d.peak) else {
@@ -419,8 +443,19 @@ impl Wifi {
             false
         });
         let run = self.run;
-        if counts != Default::default() || !clocks.is_empty() {
+        let before = self.heard_to.replace(held_end);
+        let lost = std::mem::take(&mut self.lost);
+        // Every block, for the capture: whether its window has been heard
+        // is a matter of where the stream is, not of what was found in it.
+        {
             let mut m = state.lock().unwrap_or_else(|e| e.into_inner());
+            // Armed on time, before this block's frames: they were heard
+            // after it, and may set it off. Where the stream was heard to
+            // before them (nothing yet, at its start) finishes nothing early.
+            m.net.wifi.tick_scope(self.epoch, before.unwrap_or(0), now);
+            for l in lost {
+                m.net.wifi.lose(l);
+            }
             let f = &mut m.net.health.wifi;
             f.this_channel += counts.this_channel;
             f.lsig_read += counts.lsig_read;
@@ -446,12 +481,13 @@ impl Wifi {
                 m.net.wifi.clock_check.add(c);
                 m.net.wifi.clock_row(run, *start, *c);
             }
+            m.net.wifi.tick_scope(self.epoch, held_end, now);
         }
     }
 
     /// The section closed: nothing runs, and nothing is refused.
     pub(super) fn close(&mut self, state: &Arc<Mutex<SdrMetrics>>) {
-        self.interrupted(state);
+        self.interrupted(None, state);
         self.end_visit(state);
         self.publish((None, None), state);
     }
@@ -724,7 +760,7 @@ mod tests {
         // 4 ms, a gap, 7 ms: one visit of 10 ms heard, and a 1 ms scrap.
         for i in 0..55u64 {
             if i == 20 {
-                w.interrupted(&st);
+                w.interrupted(None, &st);
             }
             w.look(i * 4000, &rng.noise(4000, 0.01), t, true, &st);
         }
@@ -759,7 +795,7 @@ mod tests {
             w.look(i * 4000, &rng.noise(4000, 0.01), t, true, &st);
         }
         w.look(40 * 4000, &rng.noise(4000, 0.01), t, false, &st);
-        w.interrupted(&st);
+        w.interrupted(None, &st);
         assert!(st
             .lock()
             .unwrap()

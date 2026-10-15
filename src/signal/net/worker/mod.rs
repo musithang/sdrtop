@@ -242,7 +242,10 @@ impl NetWorker {
                 le.retuned(&self.state);
             }
             if !arrival.continuous || arrival.retuned {
-                wifi.interrupted(&self.state);
+                // A gap keeps the stream's clock; a new stream or a retune
+                // starts another.
+                let same_clock = !arrival.new_stream && !arrival.retuned;
+                wifi.interrupted(same_clock.then_some(first_pair), &self.state);
             }
             // The survey's visit ends where the radio moved or the stream
             // began again, not at a gap: a dropped block has not moved it.
@@ -1751,12 +1754,23 @@ mod tests {
     /// Blocks through a worker on the Wi-Fi view on channel 6 at 20 Msps,
     /// each `(seq, bytes)`: a jump in `seq` is a break in the stream.
     fn run_wifi(section: &str, preset: &str, blocks: &[(u64, Vec<u8>)]) -> SdrMetrics {
+        run_wifi_with(section, preset, blocks, |_| {})
+    }
+
+    /// [`run_wifi`], the state first set up by `setup`.
+    fn run_wifi_with(
+        section: &str,
+        preset: &str,
+        blocks: &[(u64, Vec<u8>)],
+        setup: impl FnOnce(&mut SdrMetrics),
+    ) -> SdrMetrics {
         let mut m = SdrMetrics::fixture().streaming();
         m.ui.section = section.to_string();
         m.ui.active_preset = preset.to_string();
         m.radio.frequency = 2_437_000_000;
         m.radio.config_sample_rate = 20e6;
         m.radio.bb_filter_hz = 0;
+        setup(&mut m);
         let state = Arc::new(Mutex::new(m));
         let (tx, rx) = crossbeam_channel::unbounded();
         for (seq, bytes) in blocks {
@@ -1849,6 +1863,63 @@ mod tests {
         let rows = &m.net.wifi.rows;
         assert_eq!(rows.len(), 2, "{rows:?}");
         assert_eq!(rows[1].gap_us, None);
+        // The stream's clock ran through the gap: one epoch, two runs, and
+        // the lost block named where it was.
+        assert_eq!(rows[0].epoch, rows[1].epoch);
+        assert_ne!(rows[0].run, rows[1].run);
+        let lost: Vec<(u64, u64)> = m.net.wifi.lost.iter().map(|l| (l.from, l.to)).collect();
+        assert_eq!(lost, [(2 * 4_096, 3 * 4_096)]);
+        assert_eq!(m.net.wifi.lost[0].epoch, rows[0].epoch);
+    }
+
+    /// A new stream starts another clock: the frames either side of it
+    /// are on different epochs, and nothing is called lost between them.
+    #[test]
+    fn a_new_stream_starts_another_clock() {
+        use crate::signal::wifi::{annex::MESSAGE, ppdu::ppdu, signal_field::Rate};
+        let a = ppdu(&MESSAGE, Rate::R36, 54);
+        let first = ofdm_blocks(&[(1_000, &a)], 1, 8).remove(0);
+        let quiet = ofdm_blocks(&[], 1, 10).remove(0);
+        // The second stream starts again at block 1.
+        let m = run_wifi(
+            "wifi_channel",
+            "wifi_frames",
+            &[
+                (1, first.clone()),
+                (2, quiet.clone()),
+                (1, first),
+                (2, quiet),
+            ],
+        );
+        let rows = &m.net.wifi.rows;
+        assert_eq!(rows.len(), 2, "{rows:?}");
+        assert_ne!(rows[0].epoch, rows[1].epoch);
+        assert!(m.net.wifi.lost.is_empty(), "{:?}", m.net.wifi.lost);
+    }
+
+    /// The worker takes a capture once its window has been heard: a frame
+    /// 1 000 pairs in, a window of 10 cells at 40 us (8 000 pairs).
+    #[test]
+    fn the_worker_takes_a_capture_once_its_window_is_heard() {
+        use crate::signal::wifi::{annex::MESSAGE, ppdu::ppdu, signal_field::Rate};
+        let a = ppdu(&MESSAGE, Rate::R36, 54);
+        let first = ofdm_blocks(&[(1_000, &a)], 1, 8).remove(0);
+        let quiet = ofdm_blocks(&[], 1, 10).remove(0);
+        let blocks = [
+            (1, first),
+            (2, quiet.clone()),
+            (3, quiet.clone()),
+            (4, quiet.clone()),
+            (5, quiet),
+        ];
+        let m = run_wifi_with("wifi_channel", "wifi_frames", &blocks, |m| {
+            m.net.wifi.scope.window_cells = 10;
+            m.net.wifi.frames_view.zoom = crate::state::FrameZoom::Rhythm;
+        });
+        let c = m.net.wifi.scope.capture.as_ref().expect("a capture");
+        assert_eq!(c.rows.len(), 1);
+        assert_eq!(c.to - c.from, 8_000);
+        assert_eq!(c.rows[0].start, 1_000);
     }
 
     /// An 802.11b frame of this channel is kept with its header's airtime

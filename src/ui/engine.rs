@@ -261,11 +261,64 @@ impl LayoutEngine {
     }
 
     pub fn draw(&self, f: &mut Frame, state: &SdrMetrics, theme: &crate::Theme) {
-        let specs = self.config.active_panels();
-        let size = f.size();
         let focused = self.focused_panel.as_deref();
+        let placed = self.place(f.size(), state);
+        for (spec, area) in &placed.stacked {
+            let is_focused = focused == Some(spec.name.as_str());
+            self.registry
+                .render_panel(&spec.name, f, *area, state, theme, is_focused);
+        }
+        // Bond: a centre column of two panels that declare each other as the
+        // halves of one instrument renders as that instrument - the upper
+        // half drops its bottom border and its own axis, the lower half's top
+        // border becomes the shared ruler, and a `├`/`┤` junction overlay
+        // ties the seam into the continuous side borders. See `Bonding`.
+        if let Some((upper, lower, halves)) = placed.bonded {
+            let (up_focus, low_focus) =
+                (focused == Some(upper.name()), focused == Some(lower.name()));
+            upper.render_bonded(f, halves[0], state, theme, up_focus, Bond::Below);
+            lower.render_bonded(f, halves[1], state, theme, low_focus, Bond::Above);
+            // The seam's junctions in the lower half's declared tone, the
+            // colour its side borders are drawn in when nothing outranks it.
+            let seam = if up_focus || low_focus {
+                theme.border_focused
+            } else {
+                lower.chrome(state).tone.color(theme)
+            };
+            chrome::junction_caps(f, halves[1], seam);
+        }
+    }
 
+    /// The rect panel `name` is drawn in on a screen of `size`, by the same
+    /// placement [`Self::draw`] draws from: `None` when the active layout
+    /// does not show it there. For a panel whose state depends on its size,
+    /// written before the frame is drawn (the Frames river's capture is as
+    /// long as its lanes).
+    pub fn area_of(&self, name: &str, size: Rect, state: &SdrMetrics) -> Option<Rect> {
+        let placed = self.place(size, state);
+        if let Some((upper, lower, halves)) = placed.bonded {
+            if upper.name() == name {
+                return Some(halves[0]);
+            }
+            if lower.name() == name {
+                return Some(halves[1]);
+            }
+        }
+        placed
+            .stacked
+            .iter()
+            .find(|(s, _)| s.name == name)
+            .map(|(_, r)| *r)
+    }
+
+    /// Where every panel of the active layout goes on a screen of `size`.
+    fn place(&self, size: Rect, state: &SdrMetrics) -> Placement<'_> {
+        let specs = self.config.active_panels();
         let visible = |name: &str| !self.hidden_panels.contains(name);
+        let mut placed = Placement {
+            stacked: Vec::new(),
+            bonded: None,
+        };
 
         let top_specs: Vec<_> = specs
             .iter()
@@ -315,148 +368,96 @@ impl LayoutEngine {
             ])
             .split(size);
 
-        // Top panels - stacked downward
-        let mut y = outer[0].y;
-        for (spec, &h) in top_specs.iter().zip(top_heights.iter()) {
-            let area = Rect {
-                x: outer[0].x,
-                y,
-                width: outer[0].width,
-                height: h,
-            };
-            self.registry.render_panel(
-                &spec.name,
-                f,
-                area,
-                state,
-                theme,
-                focused == Some(spec.name.as_str()),
-            );
-            y += h;
-        }
-
-        // Bottom panels - stacked downward
-        let mut y = outer[2].y;
-        for (spec, &h) in bottom_specs.iter().zip(bottom_heights.iter()) {
-            let area = Rect {
-                x: outer[2].x,
-                y,
-                width: outer[2].width,
-                height: h,
-            };
-            self.registry.render_panel(
-                &spec.name,
-                f,
-                area,
-                state,
-                theme,
-                focused == Some(spec.name.as_str()),
-            );
-            y += h;
+        // Top panels, then bottom panels, each stacked downward.
+        for (band, specs, heights) in [
+            (outer[0], &top_specs, &top_heights),
+            (outer[2], &bottom_specs, &bottom_heights),
+        ] {
+            let mut y = band.y;
+            for (spec, &h) in specs.iter().zip(heights.iter()) {
+                let area = Rect {
+                    x: band.x,
+                    y,
+                    width: band.width,
+                    height: h,
+                };
+                placed.stacked.push((*spec, area));
+                y += h;
+            }
         }
 
         // Body - split into left / center / right columns
-        if !body_specs.is_empty() {
-            let left_specs: Vec<_> = body_specs
-                .iter()
-                .filter(|s| s.position == Position::Left)
-                .collect();
-            let right_specs: Vec<_> = body_specs
-                .iter()
-                .filter(|s| s.position == Position::Right)
-                .collect();
-            let center_specs: Vec<_> = body_specs
-                .iter()
-                .filter(|s| s.position == Position::Body)
-                .collect();
-
-            // Column width is determined by the FIRST panel in each column:
-            // its own say where it has one (a card that gives way on a
-            // narrow screen), else the preset's share.
-            let body = outer[1].width;
-            let side = |specs: &[&&crate::config::PanelSpec]| {
-                let first = specs.first();
-                let own = first
-                    .and_then(|s| self.registry.get(&s.name))
-                    .and_then(|p| p.column_width(body));
-                match own {
-                    Some(w) => Constraint::Length(w),
-                    None => Constraint::Percentage(first.and_then(|s| s.width_pct).unwrap_or(0)),
-                }
-            };
-            let (left_c, right_c) = (side(&left_specs), side(&right_specs));
-            let given_up = |c: Constraint| c == Constraint::Length(0);
-            let (left_specs, right_specs) = (
-                if given_up(left_c) {
-                    Vec::new()
-                } else {
-                    left_specs
-                },
-                if given_up(right_c) {
-                    Vec::new()
-                } else {
-                    right_specs
-                },
-            );
-
-            let columns = Layout::default()
-                .direction(Direction::Horizontal)
-                .constraints([left_c, Constraint::Min(0), right_c])
-                .split(outer[1]);
-
-            render_column(
-                f,
-                &left_specs,
-                columns[0],
-                state,
-                &self.registry,
-                theme,
-                focused,
-            );
-            // Bond: a centre column of two panels that declare each other as the
-            // halves of one instrument renders as that instrument - the upper
-            // half drops its bottom border and its own axis, the lower half's top
-            // border becomes the shared ruler, and a `├`/`┤` junction overlay
-            // ties the seam into the continuous side borders. See `Bonding`.
-            if let Some((upper, lower)) = self.bonded_pair(&center_specs) {
-                let halves = Layout::default()
-                    .direction(Direction::Vertical)
-                    .constraints([Constraint::Min(0), Constraint::Min(0)])
-                    .split(columns[1]);
-                let (up_focus, low_focus) =
-                    (focused == Some(upper.name()), focused == Some(lower.name()));
-                upper.render_bonded(f, halves[0], state, theme, up_focus, Bond::Below);
-                lower.render_bonded(f, halves[1], state, theme, low_focus, Bond::Above);
-                // The seam's junctions in the lower half's declared tone, the
-                // colour its side borders are drawn in when nothing outranks it.
-                let seam = if up_focus || low_focus {
-                    theme.border_focused
-                } else {
-                    lower.chrome(state).tone.color(theme)
-                };
-                chrome::junction_caps(f, halves[1], seam);
-            } else {
-                render_column(
-                    f,
-                    &center_specs,
-                    columns[1],
-                    state,
-                    &self.registry,
-                    theme,
-                    focused,
-                );
-            }
-            render_column(
-                f,
-                &right_specs,
-                columns[2],
-                state,
-                &self.registry,
-                theme,
-                focused,
-            );
+        if body_specs.is_empty() {
+            return placed;
         }
+        let left_specs: Vec<_> = body_specs
+            .iter()
+            .copied()
+            .filter(|s| s.position == Position::Left)
+            .collect();
+        let right_specs: Vec<_> = body_specs
+            .iter()
+            .copied()
+            .filter(|s| s.position == Position::Right)
+            .collect();
+        let center_specs: Vec<_> = body_specs
+            .iter()
+            .copied()
+            .filter(|s| s.position == Position::Body)
+            .collect();
+
+        // Column width is determined by the FIRST panel in each column:
+        // its own say where it has one (a card that gives way on a
+        // narrow screen), else the preset's share.
+        let body = outer[1].width;
+        let side = |specs: &[&crate::config::PanelSpec]| {
+            let first = specs.first();
+            let own = first
+                .and_then(|s| self.registry.get(&s.name))
+                .and_then(|p| p.column_width(body));
+            match own {
+                Some(w) => Constraint::Length(w),
+                None => Constraint::Percentage(first.and_then(|s| s.width_pct).unwrap_or(0)),
+            }
+        };
+        let (left_c, right_c) = (side(&left_specs), side(&right_specs));
+        let given_up = |c: Constraint| c == Constraint::Length(0);
+
+        let columns = Layout::default()
+            .direction(Direction::Horizontal)
+            .constraints([left_c, Constraint::Min(0), right_c])
+            .split(outer[1]);
+
+        if !given_up(left_c) {
+            placed
+                .stacked
+                .extend(column(&left_specs, columns[0], &self.registry));
+        }
+        if let Some((upper, lower)) = self.bonded_pair(&center_specs) {
+            let halves = Layout::default()
+                .direction(Direction::Vertical)
+                .constraints([Constraint::Min(0), Constraint::Min(0)])
+                .split(columns[1]);
+            placed.bonded = Some((upper, lower, [halves[0], halves[1]]));
+        } else {
+            placed
+                .stacked
+                .extend(column(&center_specs, columns[1], &self.registry));
+        }
+        if !given_up(right_c) {
+            placed
+                .stacked
+                .extend(column(&right_specs, columns[2], &self.registry));
+        }
+        placed
     }
+}
+
+/// Where each panel of the active layout goes: every one by its spec, but
+/// a bonded centre pair, which draws as one instrument.
+struct Placement<'a> {
+    stacked: Vec<(&'a crate::config::PanelSpec, Rect)>,
+    bonded: Option<(&'a dyn Panel, &'a dyn Panel, [Rect; 2])>,
 }
 
 impl LayoutEngine {
@@ -464,7 +465,7 @@ impl LayoutEngine {
     /// lower halves of one instrument, and `None` for any other column.
     fn bonded_pair(
         &self,
-        centre: &[&&crate::config::PanelSpec],
+        centre: &[&crate::config::PanelSpec],
     ) -> Option<(&dyn Panel, &dyn Panel)> {
         let [upper, lower] = centre else {
             return None;
@@ -479,17 +480,16 @@ impl LayoutEngine {
     }
 }
 
-fn render_column(
-    f: &mut Frame,
-    specs: &[&&crate::config::PanelSpec],
+/// A column's panels stacked down `area`: a panel that asks for its own
+/// height in the column (`Panel::column_height`) gets it, the others share
+/// what is left.
+fn column<'a>(
+    specs: &[&'a crate::config::PanelSpec],
     area: Rect,
-    state: &SdrMetrics,
     registry: &PanelRegistry,
-    theme: &crate::Theme,
-    focused_panel: Option<&str>,
-) {
+) -> Vec<(&'a crate::config::PanelSpec, Rect)> {
     if specs.is_empty() {
-        return;
+        return Vec::new();
     }
     let constraints: Vec<Constraint> = specs
         .iter()
@@ -504,10 +504,7 @@ fn render_column(
         .direction(Direction::Vertical)
         .constraints(constraints)
         .split(area);
-    for (spec, area) in specs.iter().zip(areas.iter()) {
-        let focused = focused_panel == Some(spec.name.as_str());
-        registry.render_panel(&spec.name, f, *area, state, theme, focused);
-    }
+    specs.iter().copied().zip(areas.iter().copied()).collect()
 }
 
 #[cfg(test)]

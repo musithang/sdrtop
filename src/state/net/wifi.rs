@@ -355,6 +355,10 @@ pub struct WifiRow {
     /// Its symbol clock and its carrier over the DATA field, when the frame
     /// was long enough to read them (`WifiState::clock_row`).
     pub clock: Option<WifiClock>,
+    /// The stream's clock it was heard on: one per stream and tuning. A
+    /// feed gap keeps it, since the stream's position counts the pairs a
+    /// dropped block held; a new stream or a retune starts another.
+    pub epoch: u64,
 }
 
 impl WifiRow {
@@ -395,6 +399,15 @@ pub enum FrameZoom {
 }
 
 impl FrameZoom {
+    /// Stream pairs a cell, at the 20 Msps every Wi-Fi view runs at.
+    pub fn cell_pairs(self) -> u64 {
+        match self {
+            FrameZoom::Load => 20_000,
+            FrameZoom::Rhythm => 800,
+            FrameZoom::Anatomy => 80,
+        }
+    }
+
     /// Microseconds a cell.
     pub fn cell_us(self) -> f64 {
         match self {
@@ -467,6 +480,305 @@ pub struct WifiState {
     pub rows_heard: u64,
     /// The Frames view's hold, selection, zoom and card.
     pub frames_view: FramesView,
+    /// The spans of the stream a feed gap took, oldest first: at most
+    /// [`LOST_KEPT`].
+    pub lost: std::collections::VecDeque<Lost>,
+    /// The Frames view's triggered capture.
+    pub scope: Scope,
+}
+
+/// How many lost spans are kept: far more than a capture can hold.
+pub const LOST_KEPT: usize = 256;
+
+/// A span of the stream a feed gap took: never heard, though the stream's
+/// clock ran through it.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Lost {
+    pub epoch: u64,
+    /// The pairs from `from` to `to` (not included).
+    pub from: u64,
+    pub to: u64,
+}
+
+/// What starts a capture.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum Trigger {
+    /// Whatever frame comes first.
+    #[default]
+    Any,
+    /// A frame of this channel of this family.
+    Family(Family),
+    /// Another channel's frame.
+    Other,
+}
+
+impl Trigger {
+    /// The order `t` steps through them.
+    const ORDER: [Trigger; 9] = [
+        Trigger::Any,
+        Trigger::Family(Family::NonHt),
+        Trigger::Family(Family::Ht),
+        Trigger::Family(Family::Vht),
+        Trigger::Family(Family::He),
+        Trigger::Family(Family::Eht),
+        Trigger::Family(Family::Dsss),
+        Trigger::Other,
+        Trigger::Family(Family::Undecoded),
+    ];
+
+    /// The next one along, wrapping.
+    pub fn next(self) -> Self {
+        let at = Self::ORDER.iter().position(|t| *t == self).unwrap_or(0);
+        Self::ORDER[(at + 1) % Self::ORDER.len()]
+    }
+
+    /// Whether `row` sets it off.
+    pub fn accepts(self, row: &WifiRow) -> bool {
+        match self {
+            Trigger::Any => true,
+            Trigger::Family(f) => row.family() == Some(f),
+            Trigger::Other => row.family().is_none(),
+        }
+    }
+
+    /// What the titles call it.
+    pub fn label(self) -> &'static str {
+        match self {
+            Trigger::Any => "any frame",
+            Trigger::Family(Family::Dsss) => "802.11b",
+            Trigger::Family(Family::Undecoded) => "unreadable",
+            Trigger::Family(f) => f.label(),
+            Trigger::Other => "another channel",
+        }
+    }
+}
+
+/// How long after a capture the next trigger is not taken.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum Holdoff {
+    Half,
+    #[default]
+    One,
+    Two,
+    Five,
+}
+
+impl Holdoff {
+    pub fn millis(self) -> u64 {
+        match self {
+            Holdoff::Half => 500,
+            Holdoff::One => 1_000,
+            Holdoff::Two => 2_000,
+            Holdoff::Five => 5_000,
+        }
+    }
+
+    /// One step longer (`+`), stopping at the longest.
+    pub fn longer(self) -> Self {
+        match self {
+            Holdoff::Half => Holdoff::One,
+            Holdoff::One => Holdoff::Two,
+            Holdoff::Two | Holdoff::Five => Holdoff::Five,
+        }
+    }
+
+    /// One step shorter (`-`), stopping at the shortest.
+    pub fn shorter(self) -> Self {
+        match self {
+            Holdoff::Five => Holdoff::Two,
+            Holdoff::Two => Holdoff::One,
+            Holdoff::One | Holdoff::Half => Holdoff::Half,
+        }
+    }
+}
+
+/// One capture: a window of one clock's air, and a copy of what was heard
+/// in it, so it outlives the ring.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Capture {
+    /// Captures taken this session, this one included.
+    pub number: u64,
+    pub zoom: FrameZoom,
+    pub trigger: Trigger,
+    pub epoch: u64,
+    /// The window, in stream pairs: `from` up to `to`.
+    pub from: u64,
+    pub to: u64,
+    /// The frame that set it off.
+    pub trigger_seq: u64,
+    /// The frames heard in the window, in the order they were sent.
+    pub rows: Vec<WifiRow>,
+    /// The spans of the window a feed gap took.
+    pub lost: Vec<Lost>,
+}
+
+/// A capture waiting for the rest of its window to be heard.
+#[derive(Clone, Copy, Debug, PartialEq)]
+struct Pending {
+    epoch: u64,
+    from: u64,
+    to: u64,
+    trigger_seq: u64,
+    zoom: FrameZoom,
+    trigger: Trigger,
+}
+
+/// The Frames view as a triggered capture: armed after a holdoff, set off
+/// by the first frame the trigger accepts, shown once its window has been
+/// heard, and held still until the next.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Scope {
+    pub trigger: Trigger,
+    pub holdoff: Holdoff,
+    /// Single: the capture shown stays, and no other is taken.
+    pub stopped: bool,
+    /// The window in cells of the river's scale: its lanes times their
+    /// cells, written by the app from where the river is drawn; zero takes
+    /// no capture, since none would be seen.
+    pub window_cells: u64,
+    /// The capture shown.
+    pub capture: Option<Capture>,
+    /// Captures taken this session.
+    pub taken: u64,
+    /// Armed: frames heard after this seq may set it off.
+    armed_after: Option<u64>,
+    /// When it arms again.
+    rearm_at: Option<std::time::Instant>,
+    pending: Option<Pending>,
+    /// The holdoff's jitter, a xorshift state.
+    seed: u64,
+}
+
+impl Default for Scope {
+    fn default() -> Self {
+        Scope {
+            trigger: Trigger::Any,
+            holdoff: Holdoff::One,
+            stopped: false,
+            window_cells: 0,
+            capture: None,
+            taken: 0,
+            armed_after: None,
+            rearm_at: None,
+            pending: None,
+            seed: 0x2545_f491_4f6c_dd1d,
+        }
+    }
+}
+
+/// How far past a window's end the stream must be heard before its capture
+/// is whole: an 802.11b frame that began inside it is judged once its
+/// header is held, 192 us and more after its start (300 us of pairs).
+const SETTLE_PAIRS: u64 = 6_000;
+
+impl Scope {
+    /// Arm again now: a new trigger, a new holdoff, or `End`.
+    pub fn rearm(&mut self) {
+        self.pending = None;
+        self.armed_after = None;
+        self.rearm_at = None;
+    }
+
+    /// One step: take, finish or arm a capture from what has been heard,
+    /// up to stream pair `heard_to` on clock `epoch`, at `now`.
+    pub fn tick(
+        &mut self,
+        rows: &std::collections::VecDeque<WifiRow>,
+        lost: &std::collections::VecDeque<Lost>,
+        rows_heard: u64,
+        zoom: FrameZoom,
+        heard: (u64, u64),
+        now: std::time::Instant,
+    ) {
+        let (epoch, heard_to) = heard;
+        if self.stopped || self.window_cells == 0 {
+            return;
+        }
+        if let Some(p) = self.pending {
+            // Another clock or another scale: the window can no longer be
+            // heard whole, or is another length. Arm again at once.
+            if p.epoch != epoch || p.zoom != zoom {
+                self.pending = None;
+                self.armed_after = Some(rows_heard);
+            } else if heard_to >= p.to + SETTLE_PAIRS {
+                self.show(p, rows, lost, now);
+                return;
+            } else {
+                return;
+            }
+        }
+        let Some(after) = self.armed_after else {
+            if self.rearm_at.is_some_and(|at| now < at) {
+                return;
+            }
+            // Armed: what is heard from here on can set it off.
+            self.rearm_at = None;
+            self.armed_after = Some(rows_heard);
+            return;
+        };
+        let Some(first) = rows
+            .iter()
+            .filter(|r| r.seq > after && r.epoch == epoch && self.trigger.accepts(r))
+            .min_by_key(|r| r.start)
+        else {
+            return;
+        };
+        let window = self.window_cells * zoom.cell_pairs();
+        let from = first.start.saturating_sub(window / 10);
+        self.pending = Some(Pending {
+            epoch,
+            from,
+            to: from + window,
+            trigger_seq: first.seq,
+            zoom,
+            trigger: self.trigger,
+        });
+        // Perhaps already heard whole.
+        self.tick(rows, lost, rows_heard, zoom, heard, now);
+    }
+
+    /// Show the capture `p` was waiting for, and hold off the next.
+    fn show(
+        &mut self,
+        p: Pending,
+        rows: &std::collections::VecDeque<WifiRow>,
+        lost: &std::collections::VecDeque<Lost>,
+        now: std::time::Instant,
+    ) {
+        let end = |r: &WifiRow| r.start + 20 * u64::from(r.airtime_us.unwrap_or(0));
+        self.taken += 1;
+        self.capture = Some(Capture {
+            number: self.taken,
+            zoom: p.zoom,
+            trigger: p.trigger,
+            epoch: p.epoch,
+            from: p.from,
+            to: p.to,
+            trigger_seq: p.trigger_seq,
+            rows: rows
+                .iter()
+                .filter(|r| {
+                    r.epoch == p.epoch && r.start < p.to && (r.start >= p.from || end(r) > p.from)
+                })
+                .copied()
+                .collect(),
+            lost: lost
+                .iter()
+                .filter(|l| l.epoch == p.epoch && l.from < p.to && l.to > p.from)
+                .copied()
+                .collect(),
+        });
+        self.pending = None;
+        self.armed_after = None;
+        // Up to 10 % either way, in whole milliseconds: a holdoff of exactly
+        // ten beacon intervals (102.4 ms) would land every capture on a
+        // beacon, as a scope's trigger locks onto a periodic signal.
+        self.seed ^= self.seed << 13;
+        self.seed ^= self.seed >> 7;
+        self.seed ^= self.seed << 17;
+        let ms = self.holdoff.millis() * (900 + self.seed % 201) / 1_000;
+        self.rearm_at = Some(now + std::time::Duration::from_millis(ms));
+    }
 }
 
 impl WifiState {
@@ -497,6 +809,27 @@ impl WifiState {
 }
 
 impl WifiState {
+    /// Keep a span a feed gap took.
+    pub fn lose(&mut self, lost: Lost) {
+        self.lost.push_back(lost);
+        while self.lost.len() > LOST_KEPT {
+            self.lost.pop_front();
+        }
+    }
+
+    /// Step the capture, the stream heard up to pair `heard_to` on clock
+    /// `epoch`.
+    pub fn tick_scope(&mut self, epoch: u64, heard_to: u64, now: std::time::Instant) {
+        self.scope.tick(
+            &self.rows,
+            &self.lost,
+            self.rows_heard,
+            self.frames_view.zoom,
+            (epoch, heard_to),
+            now,
+        );
+    }
+
     /// Give the row of the frame that began at stream pair `start` in run
     /// `run` its clock: read once the frame's DATA field was held, after the
     /// row was kept. A row gone from the ring has nothing to carry it.
@@ -543,6 +876,7 @@ mod tests {
             snr_db: None,
             channel: None,
             clock: None,
+            epoch: 0,
         }
     }
 
@@ -758,6 +1092,209 @@ mod tests {
         // A row gone from the ring has nothing to carry it.
         w.clock_row(7, 2_000, reading(3.0, 2.0));
         assert_eq!(w.rows.iter().filter(|r| r.clock.is_some()).count(), 1);
+    }
+
+    /// The capture's tests: channel 11 at 40 us a cell, a window of 100
+    /// cells (4 ms, its first 400 us before the trigger).
+    fn scoped() -> WifiState {
+        let mut w = WifiState::default();
+        w.scope.window_cells = 100;
+        w.frames_view.zoom = FrameZoom::Rhythm;
+        w
+    }
+
+    /// A frame of this channel's, non-HT, `start_us` into clock `epoch`.
+    fn ofdm(epoch: u64, start_us: f64) -> WifiRow {
+        use crate::signal::wifi::format::{Format, Heard};
+        use crate::signal::wifi::lsig::LSig;
+        use crate::signal::wifi::signal_field::Rate;
+        WifiRow {
+            epoch,
+            kind: RowKind::Ofdm(Heard {
+                lsig: Some(Ok(LSig {
+                    rate: Rate::R6,
+                    length: 14,
+                })),
+                format: Some(Format::NonHt),
+            }),
+            ..row(epoch, start_us, Some(44))
+        }
+    }
+
+    fn dsss(start_us: f64) -> WifiRow {
+        use crate::signal::wifi::dsss::header::{Header, Preamble, Rate};
+        WifiRow {
+            kind: RowKind::Dsss {
+                preamble: Preamble::Long,
+                header: Ok(Header {
+                    rate: Rate::M1,
+                    locked: true,
+                    extension: false,
+                    length_us: 300,
+                }),
+            },
+            ..row(0, start_us, Some(492))
+        }
+    }
+
+    fn pairs(us: f64) -> u64 {
+        (us * 20.0) as u64
+    }
+
+    fn starts(c: &Capture) -> Vec<u64> {
+        c.rows.iter().map(|r| r.start / 20).collect()
+    }
+
+    /// **A capture is shown once its window has been heard**, and not
+    /// before: the first frame after arming sets it off, 10 % into the
+    /// window, and the window takes what falls in it.
+    #[test]
+    fn a_capture_is_shown_once_its_window_is_heard() {
+        let t = std::time::Instant::now();
+        let mut w = scoped();
+        w.tick_scope(0, 0, t);
+        for us in [1_000.0, 1_100.0, 4_000.0, 5_000.0] {
+            w.push_row(ofdm(0, us));
+        }
+        w.tick_scope(0, pairs(3_000.0), t);
+        assert!(w.scope.capture.is_none(), "the window not heard yet");
+        // The window ends at 4 600 us; 300 us more for a late 802.11b header.
+        w.tick_scope(0, pairs(4_899.0), t);
+        assert!(w.scope.capture.is_none());
+        w.tick_scope(0, pairs(4_900.0), t);
+        let c = w.scope.capture.as_ref().expect("a capture");
+        assert_eq!((c.number, c.trigger_seq), (1, 1));
+        assert_eq!((c.from, c.to), (pairs(600.0), pairs(4_600.0)));
+        assert_eq!(starts(c), [1_000, 1_100, 4_000]);
+        assert_eq!(w.scope.taken, 1);
+    }
+
+    /// **The holdoff paces the captures**, jittered by up to 10 %: nothing
+    /// is armed 0.899 s after a capture, always by 1.101 s, and only a
+    /// frame heard after arming sets the next one off.
+    #[test]
+    fn the_holdoff_paces_the_captures_within_its_jitter() {
+        for round in 0..20u64 {
+            let t = std::time::Instant::now();
+            let ms = |n: u64| t + std::time::Duration::from_millis(n);
+            let mut w = scoped();
+            w.scope.seed ^= round.wrapping_mul(0x9e37_79b9_7f4a_7c15);
+            w.tick_scope(0, 0, t);
+            w.push_row(ofdm(0, 1_000.0));
+            w.tick_scope(0, pairs(5_000.0), t);
+            assert_eq!(w.scope.taken, 1);
+            w.push_row(ofdm(0, 10_000.0));
+            w.tick_scope(0, pairs(20_000.0), ms(899));
+            assert_eq!(w.scope.taken, 1, "armed too soon");
+            w.tick_scope(0, pairs(20_000.0), ms(1_101));
+            w.push_row(ofdm(0, 30_000.0));
+            w.tick_scope(0, pairs(40_000.0), ms(1_102));
+            let c = w.scope.capture.as_ref().unwrap();
+            assert_eq!((c.number, starts(c)[0]), (2, 30_000), "round {round}");
+        }
+    }
+
+    /// The trigger takes only its own kind.
+    #[test]
+    fn the_trigger_takes_only_its_kind() {
+        let t = std::time::Instant::now();
+        let mut w = scoped();
+        w.scope.trigger = Trigger::Family(Family::Dsss);
+        w.tick_scope(0, 0, t);
+        w.push_row(ofdm(0, 1_000.0));
+        w.push_row(dsss(2_000.0));
+        w.tick_scope(0, pairs(9_000.0), t);
+        let c = w.scope.capture.as_ref().unwrap();
+        assert_eq!((c.trigger_seq, c.from), (2, pairs(1_600.0)));
+        assert_eq!(c.trigger, Trigger::Family(Family::Dsss));
+        assert!(Trigger::Other.accepts(&row(0, 0.0, None)));
+        assert!(!Trigger::Other.accepts(&ofdm(0, 0.0)));
+    }
+
+    /// **Single keeps its capture**, and the capture is a copy: the ring
+    /// moving on under it changes nothing.
+    #[test]
+    fn single_keeps_its_capture_and_the_copy_outlives_the_ring() {
+        let t = std::time::Instant::now();
+        let mut w = scoped();
+        w.tick_scope(0, 0, t);
+        w.push_row(ofdm(0, 1_000.0));
+        w.tick_scope(0, pairs(5_000.0), t);
+        let kept = w.scope.capture.clone();
+        w.scope.stopped = true;
+        for i in 0..3_000 {
+            w.push_row(ofdm(0, 10_000.0 + f64::from(i) * 100.0));
+        }
+        // Long past the holdoff: armed, set off and heard, were it running.
+        let later = t + std::time::Duration::from_secs(10);
+        w.tick_scope(0, pairs(1e7), later);
+        w.push_row(ofdm(0, 1e7));
+        w.tick_scope(0, pairs(2e7), later);
+        assert_eq!(w.scope.capture, kept);
+        assert_eq!(w.rows.len(), WIFI_ROWS_KEPT);
+    }
+
+    /// A new clock (a retune, a new stream) before the window was heard
+    /// drops the capture waiting for it, and the next is taken on the new
+    /// clock; so does another zoom, whose window is another length.
+    #[test]
+    fn a_new_clock_or_another_zoom_drops_a_capture_still_waiting() {
+        let t = std::time::Instant::now();
+        let mut w = scoped();
+        w.tick_scope(0, 0, t);
+        w.push_row(ofdm(0, 1_000.0));
+        w.tick_scope(0, pairs(2_000.0), t);
+        w.tick_scope(1, pairs(100.0), t);
+        w.push_row(ofdm(1, 500.0));
+        w.tick_scope(1, pairs(9_000.0), t);
+        let c = w.scope.capture.as_ref().unwrap();
+        assert_eq!((c.epoch, starts(c)), (1, vec![500]));
+
+        let mut w = scoped();
+        w.tick_scope(0, 0, t);
+        w.push_row(ofdm(0, 1_000.0));
+        w.tick_scope(0, pairs(2_000.0), t);
+        w.frames_view.zoom = FrameZoom::Anatomy;
+        w.tick_scope(0, pairs(9_000.0), t);
+        assert!(w.scope.capture.is_none(), "taken at the old zoom");
+        w.push_row(ofdm(0, 10_000.0));
+        w.tick_scope(0, pairs(20_000.0), t);
+        let c = w.scope.capture.as_ref().unwrap();
+        assert_eq!((c.zoom, c.to - c.from), (FrameZoom::Anatomy, 8_000));
+    }
+
+    /// The spans a feed gap took inside the window go with the capture.
+    #[test]
+    fn a_lost_span_in_the_window_goes_with_it() {
+        let t = std::time::Instant::now();
+        let mut w = scoped();
+        w.tick_scope(0, 0, t);
+        w.push_row(ofdm(0, 1_000.0));
+        let inside = Lost {
+            epoch: 0,
+            from: pairs(2_000.0),
+            to: pairs(2_500.0),
+        };
+        w.lose(inside);
+        w.lose(Lost {
+            epoch: 0,
+            from: pairs(9_000.0),
+            to: pairs(9_100.0),
+        });
+        w.tick_scope(0, pairs(10_000.0), t);
+        assert_eq!(w.scope.capture.as_ref().unwrap().lost, vec![inside]);
+    }
+
+    /// With no river on screen no capture is taken: nobody would see it.
+    #[test]
+    fn no_river_takes_no_capture() {
+        let t = std::time::Instant::now();
+        let mut w = scoped();
+        w.scope.window_cells = 0;
+        w.tick_scope(0, 0, t);
+        w.push_row(ofdm(0, 1_000.0));
+        w.tick_scope(0, pairs(9_000.0), t);
+        assert!(w.scope.capture.is_none());
     }
 
     /// Frames that agree give a mean near their difference and a

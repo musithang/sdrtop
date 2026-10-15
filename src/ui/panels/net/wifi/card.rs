@@ -774,6 +774,7 @@ mod tests {
             snr_db: Some(27.0),
             channel: None,
             clock: None,
+            epoch: 0,
         }
     }
 

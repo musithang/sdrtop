@@ -40,10 +40,12 @@ pub use health::{NetDecodeHealth, WifiFunnel};
 pub use packets::{
     BlePacket, BlePacketView, CodedFacts, ExtInfo, ExtRole, PduKind, BLE_PACKET_LIMIT,
 };
-pub use wifi::FrameZoom;
 #[cfg(test)]
 pub use wifi::WifiSurvey;
 pub use wifi::{Family, FramesView, LeastBusy, RowKind, Visit, WifiClock, WifiRow, WIFI_ROWS_KEPT};
+pub use wifi::{FrameZoom, Lost};
+#[cfg(test)]
+pub use wifi::{Holdoff, Trigger};
 
 /// Whether the receiver is walking the band or sitting on one channel.
 ///

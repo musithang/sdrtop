@@ -630,6 +630,7 @@ mod tests {
             snr_db: Some(14.0),
             channel: None,
             clock: None,
+            epoch: 0,
         });
         m.net.ble_packets.push_front(BlePacket {
             phy: crate::signal::ble::Phy::OneM,

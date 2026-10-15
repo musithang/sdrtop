@@ -368,7 +368,25 @@ impl App {
         self.engine.set_panel_hidden("footer", hide_footer);
         // The width this frame is drawn at, for the panels that give way on
         // a narrow screen and the ones that take over what they showed.
-        m.ui.screen_cols = terminal.size().map_or(0, |s| s.width);
+        let size = terminal.size().unwrap_or_default();
+        m.ui.screen_cols = size.width;
+        // The Frames capture is as long as the river's lanes on this screen,
+        // and the NET worker takes it: written on the shared side, and only
+        // when it changed, so most frames take no second lock.
+        let cells = self
+            .engine
+            .area_of("net_wifi_river", size, &m)
+            .map_or(0, ui::panels::net::wifi::river::capture_cells);
+        if cells != m.net.wifi.scope.window_cells {
+            m.net.wifi.scope.window_cells = cells;
+            self.state
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .net
+                .wifi
+                .scope
+                .window_cells = cells;
+        }
         // Copied out before the closure borrows `self` for the engine.
         let deck_shown = self.deck_shown;
         // Measurement labs wear "instrument mode": the resting frames cool toward

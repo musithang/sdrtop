@@ -42,13 +42,15 @@ pub use net::{
 pub use net::ROSTER_SORT_KEYS;
 // Named by the NET worker, which counts its arrivals into it, and Wi-Fi's
 // funnel and latest frame with it.
-pub use net::FrameZoom;
 #[cfg(test)]
 pub use net::WifiSurvey;
 pub use net::{
     Family, FramesView, LeastBusy, NetDecodeHealth, RowKind, Visit, WifiClock, WifiFunnel, WifiRow,
     WIFI_ROWS_KEPT,
 };
+pub use net::{FrameZoom, Lost};
+#[cfg(test)]
+pub use net::{Holdoff, Trigger};
 pub use observer::ObserverState;
 pub use radio::{
     offset_ppm, FrequencyReference, OffsetBasis, Provenance, RadioState, REFERENCE_STALE_S,

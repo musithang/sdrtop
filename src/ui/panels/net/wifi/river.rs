@@ -43,6 +43,15 @@ const EIGHTHS: [char; 9] = [
     '\u{2588}',
 ];
 
+/// The cells a capture spans when the river is drawn in `outer`: its
+/// lanes times their cells, the same count [`draw`] lays out.
+pub fn capture_cells(outer: Rect) -> u64 {
+    let inner_h = outer.height.saturating_sub(2);
+    let lanes = (inner_h.saturating_sub(1) / 2).clamp(1, 4);
+    let cells = outer.width.saturating_sub(2 + LABEL);
+    u64::from(lanes) * u64::from(cells)
+}
+
 /// Lanes in a column of `rows`: four where there is room, two otherwise.
 fn lanes_for(rows: u16) -> u16 {
     if rows >= 24 {
@@ -395,6 +404,7 @@ mod tests {
             snr_db: Some(snr_db),
             channel: None,
             clock: None,
+            epoch: 0,
         }
     }
 
@@ -579,6 +589,34 @@ mod tests {
             })
             .sum();
         assert_eq!(drawn, 0, "{l:#?}");
+    }
+
+    /// **The capture is as long as the river shows**: the engine says where
+    /// the river is drawn, by the same placement it draws from, and its
+    /// lanes times their cells are the capture's window.
+    #[test]
+    fn the_capture_window_is_the_rivers_lanes_times_their_cells() {
+        let (engine, _) =
+            crate::app::App::build_ui("wifi_frames", &std::collections::HashMap::new(), None, true);
+        let m = on_eleven(FrameZoom::Load);
+        let theme = crate::Theme::sdr();
+        for (w, h, lanes) in [(191u16, 41u16, 4u64), (152, 32, 2), (100, 30, 2)] {
+            let size = ratatui::layout::Rect::new(0, 0, w, h);
+            let at = engine.area_of("net_wifi_river", size, &m).expect("a river");
+            let mut t = ratatui::Terminal::new(ratatui::backend::TestBackend::new(w, h)).unwrap();
+            t.draw(|f| engine.draw(f, &m, &theme)).unwrap();
+            let buf = t.backend().buffer().clone();
+            assert_eq!(
+                buf.get(at.x, at.y).symbol(),
+                "\u{256d}",
+                "{w} x {h}: {at:?}"
+            );
+            assert_eq!(buf.get(at.x + at.width - 1, at.y).symbol(), "\u{256e}");
+            let cells = u64::from(at.width - 2 - super::LABEL);
+            assert_eq!(super::capture_cells(at), lanes * cells, "{w} x {h}");
+        }
+        let narrow = ratatui::layout::Rect::new(0, 0, 100, 30);
+        assert_eq!(engine.area_of("net_wifi_card", narrow, &m), None);
     }
 
     /// **The river's height is the column's to decide**: four lanes when the
