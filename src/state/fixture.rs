@@ -161,7 +161,6 @@ impl SdrMetrics {
             sample_rate,
             timestamp: Instant::now(),
             peak_to_nf_db: snr_db,
-            channel_power_dbfs: noise_floor + snr_db,
             occupied_bw_hz: 150_000,
             enbw_hz: sample_rate / N as f64,
             bin_axis: crate::state::BinAxis::FftBins,
@@ -175,6 +174,9 @@ impl SdrMetrics {
         });
         self.signal.occupied_bw_hz = 150_000;
         let modulation = crate::state::classify(snr_db, 150_000);
+        self.signal.modulation = modulation;
+        self.signal.modulation_settled = modulation;
+        self.signal.readout = self.waterfall.last_fft.clone();
         self.signal.carrier = Some(crate::state::Carrier {
             snr_db,
             occupied_bw_hz: 150_000,

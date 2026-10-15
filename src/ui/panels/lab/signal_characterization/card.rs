@@ -14,8 +14,9 @@ use ratatui::{
     text::{Line, Span},
 };
 
+use crate::signal::ballistics::HELD_AFTER;
 use crate::state::{FftFrame, SdrMetrics};
-use crate::ui::chrome::wrap;
+use crate::ui::chrome::{reserved_row, wrap};
 
 use super::row::dim;
 use super::verdict::{verdict, VerdictLevel};
@@ -27,6 +28,11 @@ use super::verdict::{verdict, VerdictLevel};
 const VERDICT_HEAD_ROWS: usize = 2;
 const VERDICT_DETAIL_ROWS: usize = 4;
 
+/// Push the card. **One height in every state**, from RX stopped to the
+/// longest verdict: each part is padded to its row budget with
+/// [`reserved_row`]s, so a verdict that changes from one sentence to another
+/// on a burst never moves the zones above it. The sentence wraps inside its
+/// budget; the budget does not follow the sentence.
 pub(super) fn lines(
     out: &mut Vec<Line<'static>>,
     state: &SdrMetrics,
@@ -34,34 +40,60 @@ pub(super) fn lines(
     iw: usize,
     theme: &crate::Theme,
 ) {
-    if frame.is_none() {
-        out.push(Line::from(vec![
+    let copy_w = iw.saturating_sub(1);
+    let carrier = state.signal.carrier.as_ref();
+    let (head, detail, held) = if frame.is_none() {
+        let idle = Line::from(vec![
             Span::raw(" "),
             Span::styled("\u{25cb} IDLE \u{2014} RX stopped", dim(theme)),
-        ]));
-        return;
+        ]);
+        (vec![idle], Vec::new(), None)
+    } else {
+        let (level, headline, detail) = verdict(carrier);
+        let (mark, col) = match level {
+            VerdictLevel::Clean => ("\u{2713}", theme.status_ok),
+            VerdictLevel::Caution => ("\u{26a0}", theme.status_warn),
+            VerdictLevel::Judging => ("\u{25cc}", theme.stale),
+            VerdictLevel::NoSignal => ("\u{25cb}", theme.stale),
+        };
+        let head = wrap(&format!("{mark} {headline}"), copy_w, VERDICT_HEAD_ROWS)
+            .into_iter()
+            .map(|row| {
+                Line::from(vec![
+                    Span::raw(" "),
+                    Span::styled(row, Style::default().fg(col).add_modifier(Modifier::BOLD)),
+                ])
+            })
+            .collect();
+        let detail = wrap(&detail, copy_w, VERDICT_DETAIL_ROWS)
+            .into_iter()
+            .map(|row| {
+                Line::from(vec![
+                    Span::raw(" "),
+                    Span::styled(row, Style::default().fg(theme.label)),
+                ])
+            })
+            .collect();
+        // Through a gap the verdict is the carrier's as last heard, and says
+        // how long ago that was.
+        let held = carrier
+            .map(|c| c.heard.elapsed())
+            .filter(|a| *a > HELD_AFTER);
+        (head, detail, held)
     };
-
-    let (level, headline, detail) = verdict(state.signal.carrier.as_ref());
-    let (mark, col) = match level {
-        VerdictLevel::Clean => ("\u{2713}", theme.status_ok),
-        VerdictLevel::Caution => ("\u{26a0}", theme.status_warn),
-        VerdictLevel::Judging => ("\u{25cc}", theme.stale),
-        VerdictLevel::NoSignal => ("\u{25cb}", theme.stale),
-    };
-    let copy_w = iw.saturating_sub(1);
-    for row in wrap(&format!("{mark} {headline}"), copy_w, VERDICT_HEAD_ROWS) {
-        out.push(Line::from(vec![
+    // Padded together, so a one-row headline is followed by its sentence and
+    // the held rows sit under both.
+    let copy: Vec<Line<'static>> = head.into_iter().chain(detail).collect();
+    let n = copy.len();
+    out.extend(copy);
+    out.extend((n..VERDICT_HEAD_ROWS + VERDICT_DETAIL_ROWS).map(|_| reserved_row()));
+    out.push(match held {
+        Some(age) => Line::from(vec![
             Span::raw(" "),
-            Span::styled(row, Style::default().fg(col).add_modifier(Modifier::BOLD)),
-        ]));
-    }
-    for row in wrap(&detail, copy_w, VERDICT_DETAIL_ROWS) {
-        out.push(Line::from(vec![
-            Span::raw(" "),
-            Span::styled(row, Style::default().fg(theme.label)),
-        ]));
-    }
+            Span::styled(format!("held {:.1} s", age.as_secs_f32()), dim(theme)),
+        ]),
+        None => reserved_row(),
+    });
     out.push(Line::raw(""));
     out.push(Line::from(vec![
         Span::raw(" "),

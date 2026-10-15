@@ -6,6 +6,7 @@
 
 use ratatui::text::{Line, Span};
 
+use crate::signal::ballistics::Shown;
 use crate::state::{Carrier, FftFrame};
 use crate::ui::chrome::section;
 use crate::ui::widgets::micro_common::fmt_bw;
@@ -18,6 +19,7 @@ pub(super) fn lines(
     out: &mut Vec<Line<'static>>,
     frame: Option<&FftFrame>,
     carrier: Option<&Carrier>,
+    s_meter: Option<Shown>,
     iw: usize,
     theme: &crate::Theme,
 ) {
@@ -35,15 +37,13 @@ pub(super) fn lines(
         return;
     };
 
+    // The rail S-meter's readout: the same quantity on the same ballistic,
+    // marked `~` as there, so the two can never disagree.
     out.push(metric(
         "Channel power",
-        if fr.channel_power_dbfs.is_finite() {
-            vec![Span::styled(
-                format!("{:.1} dBFS", fr.channel_power_dbfs),
-                val(theme),
-            )]
-        } else {
-            vec![dash(theme)]
+        match s_meter.filter(|s| s.readout.is_finite()) {
+            Some(s) => vec![Span::styled(format!("~{:.1} dBFS", s.readout), val(theme))],
+            None => vec![dash(theme)],
         },
         theme,
     ));
@@ -157,7 +157,6 @@ mod tests {
             sample_rate: sr,
             timestamp: Instant::now(),
             peak_to_nf_db: 40.0,
-            channel_power_dbfs: -22.0,
             occupied_bw_hz: 180_000,
             enbw_hz: 1_000.0,
             bin_axis: crate::state::BinAxis::FftBins,

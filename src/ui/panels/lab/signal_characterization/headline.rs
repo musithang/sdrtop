@@ -46,9 +46,12 @@ pub(super) fn lines(
         Span::styled("  peak / noise", dim(theme)),
     ];
     // MOD badge - the classifier's estimate of what's at centre.
-    if state.signal.modulation.is_known() {
+    // The class that has held for a second, as the demod beside it uses: the
+    // latest frame's guess flips with every burst.
+    let modulation = state.signal.modulation_settled;
+    if modulation.is_known() {
         hspans.push(Span::styled(
-            format!("   {}", state.signal.modulation.label()),
+            format!("   {}", modulation.label()),
             Style::default()
                 .fg(theme.value_hi)
                 .add_modifier(Modifier::BOLD),

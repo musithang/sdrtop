@@ -167,11 +167,14 @@ impl SpectrumAccumulator {
             sample_rate,
             timestamp: Instant::now(),
             peak_to_nf_db: prominence,
-            channel_power_dbfs: f32::NEG_INFINITY,
             occupied_bw_hz: 0,
             enbw_hz: trace.rbw_hz.unwrap_or(0) as f64,
             bin_axis: crate::state::BinAxis::MeasuredPoints,
         });
+        // The Lab prints its channel figures from the readout frame. A trace
+        // is one whole sweep, already averaged, and arrives slower than the
+        // readout's four a second, so every trace is taken.
+        metrics.signal.readout = metrics.waterfall.last_fft.clone();
         Ok(())
     }
 }
@@ -403,7 +406,11 @@ mod tests {
         assert_eq!(metrics.signal.peak_to_nf_db, 45.0);
         assert_eq!(metrics.radio.frequency, 100_000_000);
         assert_eq!(metrics.signal.channel_power_dbfs, f32::NEG_INFINITY);
-        assert_eq!(frame.channel_power_dbfs, f32::NEG_INFINITY);
+        assert_eq!(
+            metrics.signal.readout.as_ref().map(|r| r.timestamp),
+            Some(frame.timestamp),
+            "the Lab's channel figures read the trace"
+        );
         assert!(metrics
             .ui
             .log

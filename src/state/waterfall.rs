@@ -137,7 +137,6 @@ pub struct FftFrame {
     pub sample_rate: f64,
     pub timestamp: Instant,
     pub peak_to_nf_db: f32,
-    pub channel_power_dbfs: f32,
     pub occupied_bw_hz: u64,
     pub enbw_hz: f64,
     pub bin_axis: BinAxis,

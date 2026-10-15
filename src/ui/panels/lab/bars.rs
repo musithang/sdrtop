@@ -235,15 +235,22 @@ fn signal_fields(sig: &crate::state::SignalState, stale: bool) -> Vec<(&'static 
             ("OBW", dash()),
         ];
     }
+    // Paced as the panel below prints them, so the two never disagree: the
+    // class that has held, the quarter-second frame's peak over noise, and
+    // channel power as the S-meter reads it.
     vec![
-        ("MOD", sig.modulation.label().to_string()),
-        ("SNR", format!("{:.0} dB", sig.peak_to_nf_db)),
+        ("MOD", sig.modulation_settled.label().to_string()),
+        (
+            "SNR",
+            sig.readout
+                .as_ref()
+                .map_or_else(dash, |fr| format!("{:.0} dB", fr.peak_to_nf_db)),
+        ),
         (
             "CH PWR",
-            if sig.channel_power_dbfs.is_finite() {
-                format!("{:.1} dBFS", sig.channel_power_dbfs)
-            } else {
-                dash()
+            match sig.s_meter.filter(|s| s.readout.is_finite()) {
+                Some(s) => format!("~{:.1} dBFS", s.readout),
+                None => dash(),
             },
         ),
         // The carrier's, not the frame in hand's: in a gap between bursts
@@ -1071,6 +1078,16 @@ mod tests {
             acpr_lower_db: -34.9,
             acpr_upper_db: -35.1,
             modulation: crate::state::Modulation::Wfm,
+            modulation_settled: crate::state::Modulation::Wfm,
+            s_meter: Some(crate::signal::ballistics::Shown {
+                level: -28.6,
+                peak: -28.6,
+                readout: -28.6,
+            }),
+            readout: SdrMetrics::fixture()
+                .with_carrier(0.0, 47.0)
+                .waterfall
+                .last_fft,
             carrier: Some(
                 crate::ui::panels::lab::signal_characterization::steady_carrier(
                     crate::state::Modulation::Wfm,
@@ -1082,6 +1099,21 @@ mod tests {
             ),
             ..Default::default()
         }
+    }
+
+    /// The banner's channel figures are the quarter-second frame's and the
+    /// S-meter's readout, its class the settled one: never the frame in hand.
+    #[test]
+    fn signal_banner_reads_the_paced_figures() {
+        let mut sig = measured();
+        sig.peak_to_nf_db = 4.0;
+        sig.channel_power_dbfs = -70.0;
+        sig.modulation = crate::state::Modulation::Unknown;
+        let f = signal_fields(&sig, false);
+        let get = |k: &str| f.iter().find(|(n, _)| *n == k).unwrap().1.clone();
+        assert_eq!(get("MOD"), "WFM");
+        assert_eq!(get("SNR"), "47 dB");
+        assert_eq!(get("CH PWR"), "~-28.6 dBFS");
     }
 
     /// The banner's bandwidth is the carrier's: in a gap the frame in hand
@@ -1127,7 +1159,7 @@ mod tests {
         let get = |k: &str| f.iter().find(|(n, _)| *n == k).unwrap().1.clone();
         assert_eq!(get("MOD"), "WFM");
         assert_eq!(get("SNR"), "47 dB");
-        assert_eq!(get("CH PWR"), "-28.6 dBFS");
+        assert_eq!(get("CH PWR"), "~-28.6 dBFS");
         assert_eq!(get("OBW"), "120.0 kHz");
     }
 

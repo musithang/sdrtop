@@ -371,9 +371,10 @@ at:
 
 Where the demod panel opposite opens the channel up and reads what is inside it,
 this one answers the question you ask first: what *is* that, and how clean is it?
-The channel figures come from the same FFT frame the spectrum beside it draws, so
-the two always agree. Press `x` to focus it, then `C` to write the current readings
-to the log.
+The channel figures come from the same FFT frames the spectrum beside it draws,
+taken four times a second: often enough to follow the signal, slowly enough that a
+number can actually be read before it changes. Press `x` to focus it, then `C` to
+write the current readings to the log.
 
 **The carrier figures wait for a carrier.** Occupied bandwidth, the adjacent
 channels and the verdict describe a carrier, and in the gap between two bursts
@@ -381,8 +382,10 @@ there is none: measured there, the adjacent channels are noise against noise at
 about 0 dB, and the occupied bandwidth is noise spread over the whole span. So
 these come only from frames with a carrier in them and are held through a gap of
 up to a second; after a second of nothing they are dashes and the verdict says
-`NO SIGNAL`. The verdict also holds a second before it changes its mind, and a
-carrier heard for less than that reads `◌ CARRIER HEARD` while it is judged. A
+`NO SIGNAL`. While they are being held the verdict card says for how long
+(`held 0.8 s`). The verdict also holds a second before it changes its mind, and a
+carrier heard for less than that reads `◌ CARRIER HEARD` while it is judged. The
+card keeps one height whatever it says, so nothing above it moves. A
 walkie-talkie keying up does not get a new diagnosis every time it takes a breath.
 
 **Radio headline.** Peak-to-noise in dB with a status lamp, and the classifier's
@@ -392,7 +395,9 @@ to 10, red below that.
 **Signal metrics.**
 
 - **Channel power**, the total power in the occupied channel. Unlike a single bin,
-  this does not change when you change the sample rate.
+  this does not change when you change the sample rate. It is the same reading as
+  the S-meter on the Command Rail, through the same meter movement and marked `~`
+  the same way, so the two never disagree.
 - **Peak**, the strongest real bin near centre and its frequency. "Real" because
   the front end's own LO leakage sits exactly at centre and is usually the tallest
   thing there; naming it would report the tuned frequency as a station every time

@@ -49,9 +49,6 @@ pub(super) struct Stack<'a> {
     rows: Vec<(Line<'a>, Prio)>,
 }
 
-/// What a [reserved](Stack::reserve) row is drawn with.
-const RESERVED: &str = "\u{2800}";
-
 /// A blank spacer row - the ones `chrome::fit_spacers` owns.
 fn is_gap(l: &Line<'_>) -> bool {
     l.spans.iter().all(|s| s.content.trim().is_empty())
@@ -81,11 +78,10 @@ impl<'a> Stack<'a> {
     }
     /// Hold a row that has nothing to show this frame, worth what the row it
     /// stands for is worth, so the stack keeps one shape with or without the
-    /// reading. Drawn as U+2800, the empty braille cell the MPX trace is drawn
-    /// with: it shows nothing but is not whitespace, so neither the shedding
-    /// pass nor `chrome::fit_spacers` mistakes it for a spacer and grows it.
+    /// reading ([`crate::ui::chrome::reserved_row`]: not a spacer to the shedding pass
+    /// either).
     pub(super) fn reserve(&mut self, prio: Prio) {
-        self.rows.push((Line::raw(RESERVED), prio));
+        self.rows.push((crate::ui::chrome::reserved_row(), prio));
     }
 
     /// Shed rows until the stack fits `avail`, cheapest class first, and return what

@@ -130,6 +130,12 @@ impl Ballistic {
     }
 }
 
+/// A value not renewed for longer than this is being held rather than read:
+/// more than two quarter-second readouts have gone by without one, which is a
+/// gap in the signal, not a slow frame. Where a held value is shown, it says
+/// so from here on.
+pub const HELD_AFTER: Duration = Duration::from_millis(600);
+
 /// How long a new value must hold before it replaces the one shown.
 pub const SETTLE: Duration = Duration::from_secs(1);
 

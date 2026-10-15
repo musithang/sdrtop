@@ -24,9 +24,10 @@
 //! bar quote the same severity this panel shows without depending on the panel.
 //! [`row`] holds the label column and the annotation rule every zone writes into.
 //!
-//! The channel figures come from the latest coherent FFT frame
-//! (`state.waterfall.last_fft`), so they agree with the bonded spectrum beside
-//! it. The carrier figures (occupied bandwidth, the adjacent channels, the
+//! The channel figures come from the FFT frame as it stood at the last
+//! quarter-second tick (`state.signal.readout`), so a number changes slowly
+//! enough to be read; channel power is the rail S-meter's own readout, one
+//! account for one quantity. The carrier figures (occupied bandwidth, the adjacent channels, the
 //! verdict) come from `state.signal.carrier`: taken only from frames with a
 //! carrier, held through a gap of up to a second, because in a gap between
 //! bursts the same measurements read noise.
@@ -90,13 +91,18 @@ impl Panel for SignalCharacterizationPanel {
         // one must never be printed as a current measurement. Resolved once here so
         // the zones cannot disagree about it, and so `stale` itself is only passed
         // to the two zones that have their own idle copy to print.
-        let frame = state.waterfall.last_fft.as_ref().filter(|_| !stale);
+        //
+        // The frame is the one taken at the last quarter-second tick, not the
+        // one in hand, so a number changes slowly enough to be read; staleness
+        // is still the frame in hand's.
+        let frame = state.signal.readout.as_ref().filter(|_| !stale);
 
         let mut lines: Vec<Line> = Vec::new();
         headline::lines(&mut lines, state, frame, iw, theme);
         lines.push(Line::raw(""));
         let carrier = state.signal.carrier.as_ref().filter(|_| !stale);
-        metrics::lines(&mut lines, frame, carrier, iw, theme);
+        let s_meter = state.signal.s_meter.filter(|_| !stale);
+        metrics::lines(&mut lines, frame, carrier, s_meter, iw, theme);
         lines.push(Line::raw(""));
         acpr::lines(&mut lines, state, frame, carrier, iw, theme);
         lines.push(Line::raw(""));
@@ -161,6 +167,95 @@ mod tests {
         assert!(row(&lines, "Occupied BW").contains("---"), "{text}");
         assert!(row(&lines, "L \u{2212}").contains("---"), "{text}");
         assert!(text.contains("NO SIGNAL"), "{text}");
+    }
+
+    fn rows_of(m: &SdrMetrics) -> (Option<usize>, Option<usize>) {
+        let lines = crate::state::fixture::draw(SignalCharacterizationPanel, 48, 40, m);
+        (
+            lines.iter().position(|l| l.contains("SPECTRAL SHAPE")),
+            lines.iter().position(|l| l.contains("[C] snapshot")),
+        )
+    }
+
+    /// **The card is one height.** Whatever it says, from RX stopped to a
+    /// splatter verdict whose sentence wraps to four rows, the zones above it
+    /// and its own last row stay where they are.
+    #[test]
+    fn the_card_keeps_one_height() {
+        use verdict::steady;
+        let base = SdrMetrics::fixture().streaming().with_carrier(0.0, 40.0);
+        let with = |c: Option<crate::state::Carrier>| {
+            let mut m = base.clone();
+            m.signal.carrier = c;
+            m
+        };
+        let mut judging = steady(Modulation::Wfm, 40.0, -40.0, -40.0, 180_000);
+        judging.verdict = None;
+        let mut held = steady(Modulation::Wfm, 43.0, -38.0, -41.0, 180_000);
+        held.heard = std::time::Instant::now() - std::time::Duration::from_millis(800);
+        let states = [
+            with(None),
+            with(Some(judging)),
+            with(Some(steady(Modulation::Wfm, 15.0, -40.0, -40.0, 180_000))),
+            with(Some(steady(Modulation::Wfm, 47.0, -10.0, -40.0, 1_250_000))),
+            with(Some(steady(Modulation::Wfm, 43.0, -38.0, -41.0, 180_000))),
+            with(Some(held)),
+            base.clone().with_stale_fft(),
+        ];
+        let want = rows_of(&states[0]);
+        assert!(want.0.is_some() && want.1.is_some());
+        for (i, m) in states.iter().enumerate() {
+            assert_eq!(rows_of(m), want, "state {i}");
+        }
+    }
+
+    /// A verdict held through a gap says how long it has been held.
+    #[test]
+    fn a_held_verdict_says_how_long() {
+        let text = |m: &SdrMetrics| {
+            crate::state::fixture::draw(SignalCharacterizationPanel, 48, 40, m).join("\n")
+        };
+        let m = in_a_gap();
+        assert!(!text(&m).contains("held"), "{}", text(&m));
+        let mut held = in_a_gap();
+        if let Some(c) = held.signal.carrier.as_mut() {
+            c.heard = std::time::Instant::now() - std::time::Duration::from_millis(800);
+        }
+        assert!(text(&held).contains("held 0.8 s"), "{}", text(&held));
+    }
+
+    /// **The channel figures are the quarter-second frame's.** The frame in
+    /// hand has moved on since the last tick; the panel prints the tick's,
+    /// and channel power is the S-meter's own readout.
+    #[test]
+    fn the_channel_figures_are_the_quarter_second_frame() {
+        let mut m = SdrMetrics::fixture().streaming().with_carrier(0.0, 40.0);
+        if let Some(fr) = m.waterfall.last_fft.as_mut() {
+            fr.peak_to_nf_db = 52.0;
+            fr.noise_floor = -95.0;
+        }
+        if let Some(s) = m.signal.s_meter.as_mut() {
+            s.readout = -61.2;
+        }
+        let lines = crate::state::fixture::draw(SignalCharacterizationPanel, 48, 40, &m);
+        let text = lines.join("\n");
+        assert!(text.contains("40.0 dB  peak / noise"), "{text}");
+        assert!(row(&lines, "Noise floor").contains("-100.0 dBFS"), "{text}");
+        assert!(
+            row(&lines, "Channel power").contains("~-61.2 dBFS"),
+            "{text}"
+        );
+    }
+
+    /// The badge is the class that has held, as the demod beside it uses.
+    #[test]
+    fn the_badge_is_the_settled_class() {
+        let mut m = SdrMetrics::fixture().streaming().with_carrier(0.0, 40.0);
+        m.signal.modulation = Modulation::Nfm;
+        m.signal.modulation_settled = Modulation::Wfm;
+        let lines = crate::state::fixture::draw(SignalCharacterizationPanel, 48, 40, &m);
+        let head = row(&lines, "peak / noise");
+        assert!(head.contains("WFM") && !head.contains("NFM"), "{head}");
     }
 
     #[test]

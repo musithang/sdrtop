@@ -43,8 +43,9 @@ pub const DEMOD_STALE_AFTER: Duration = Duration::from_millis(1_500);
 /// two of the worker's 250 ms updates have gone by without one, which is a
 /// fade under the presence gate, not a slow frame. Held readings stay on screen
 /// until [`DEMOD_STALE_AFTER`], so a station heard in bursts does not empty the
-/// panel at every gap, and the panel says they are held.
-pub const DEMOD_HELD_AFTER: Duration = Duration::from_millis(600);
+/// panel at every gap, and the panel says they are held. The display's one
+/// rule for a held value (`signal::ballistics::HELD_AFTER`).
+pub const DEMOD_HELD_AFTER: Duration = crate::signal::ballistics::HELD_AFTER;
 
 /// RDS text older than this stops reading as a live decode.
 ///

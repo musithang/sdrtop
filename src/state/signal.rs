@@ -310,6 +310,11 @@ pub struct SignalState {
     /// and it is `Unknown`. What picks the demodulator and the demod panel's
     /// sections, so neither is torn down and rebuilt by a gap.
     pub modulation_settled: Modulation,
+    /// The spectrum frame as it stood at the last quarter-second tick: what
+    /// the Lab prints its channel figures from (peak over noise, peak, noise
+    /// floor, peak hold), so a number changes at most four times a second and
+    /// can be read. Display only.
+    pub readout: Option<crate::state::FftFrame>,
     /// The carrier figures (see [`Carrier`]); `None` when no carrier has been
     /// heard for a second.
     pub carrier: Option<Carrier>,
@@ -356,6 +361,7 @@ impl Default for SignalState {
             last_clip_at: None,
             modulation: Modulation::Unknown,
             modulation_settled: Modulation::Unknown,
+            readout: None,
             carrier: None,
             adc_peak_dbfs: 0.0,
             adc_rms_dbfs: 0.0,
@@ -438,6 +444,7 @@ mod tests {
             last_clip_at: None,
             modulation: Modulation::Unknown,
             modulation_settled: Modulation::Unknown,
+            readout: None,
             carrier: None,
             adc_peak_dbfs: 0.0,
             adc_rms_dbfs: 0.0,

@@ -223,7 +223,6 @@ mod tests {
             sample_rate: 3.0,
             timestamp: std::time::Instant::now(),
             peak_to_nf_db: 0.0,
-            channel_power_dbfs: f32::NEG_INFINITY,
             occupied_bw_hz: 0,
             enbw_hz: 1.0,
             bin_axis: BinAxis::MeasuredPoints,

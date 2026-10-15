@@ -451,7 +451,6 @@ mod tests {
             sample_rate: span_hz,
             timestamp: std::time::Instant::now(),
             peak_to_nf_db: 30.0,
-            channel_power_dbfs: f32::NEG_INFINITY,
             occupied_bw_hz: 0,
             enbw_hz: 100.0,
             bin_axis: crate::state::BinAxis::MeasuredPoints,

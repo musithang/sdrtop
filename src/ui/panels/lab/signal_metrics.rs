@@ -48,36 +48,34 @@ impl Panel for SignalMetricsPanel {
         let lbl = Style::default().fg(theme.label);
         let val = Style::default().fg(theme.value);
 
-        let noise_str = state
-            .waterfall
-            .last_fft
-            .as_ref()
+        // The figures as the Lab Signal bench prints them: the frame taken at
+        // the last quarter-second tick, and channel power as the S-meter reads
+        // it, so a number changes slowly enough to be read and the two
+        // benches never disagree.
+        let frame = state.signal.readout.as_ref().filter(|_| !stale);
+        let noise_str = frame
             .map(|fr| format!("{:.1} dBFS", fr.noise_floor))
             .unwrap_or_else(|| "---".into());
+        let snr = frame.map(|fr| fr.peak_to_nf_db);
 
         let rows: &[Line] = &[
             Line::from(vec![
                 Span::styled(format!("{:<15}", "Peak/NF"), lbl),
                 Span::styled(
-                    if stale {
-                        "---".into()
-                    } else {
-                        format!("{:.1} dB", state.signal.peak_to_nf_db)
-                    },
-                    Style::default().fg(if stale {
-                        theme.label
-                    } else {
-                        snr_color(state.signal.peak_to_nf_db, theme)
-                    }),
+                    snr.map_or_else(|| "---".into(), |s| format!("{s:.1} dB")),
+                    Style::default().fg(snr.map_or(theme.label, |s| snr_color(s, theme))),
                 ),
             ]),
             Line::from(vec![
                 Span::styled(format!("{:<15}", "Channel power"), lbl),
                 Span::styled(
-                    if state.signal.channel_power_dbfs.is_finite() {
-                        format!("{:.1} dBFS", state.signal.channel_power_dbfs)
-                    } else {
-                        "---".into()
+                    match state
+                        .signal
+                        .s_meter
+                        .filter(|s| !stale && s.readout.is_finite())
+                    {
+                        Some(s) => format!("~{:.1} dBFS", s.readout),
+                        None => "---".into(),
                     },
                     val,
                 ),
@@ -113,5 +111,28 @@ impl Panel for SignalMetricsPanel {
         for (i, line) in rows.iter().take(n).enumerate() {
             f.render_widget(Paragraph::new(line.clone()), row_areas[i]);
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The channel figures are the quarter-second frame's and the S-meter's
+    /// readout, as on the Lab Signal bench: one account for one quantity.
+    #[test]
+    fn the_figures_are_the_paced_ones() {
+        let mut m = SdrMetrics::fixture().streaming().with_carrier(0.0, 40.0);
+        m.signal.peak_to_nf_db = 4.0;
+        if let Some(fr) = m.waterfall.last_fft.as_mut() {
+            fr.noise_floor = -95.0;
+        }
+        if let Some(s) = m.signal.s_meter.as_mut() {
+            s.readout = -61.2;
+        }
+        let text = crate::state::fixture::draw(SignalMetricsPanel, 40, 10, &m).join("\n");
+        assert!(text.contains("40.0 dB"), "{text}");
+        assert!(text.contains("~-61.2 dBFS"), "{text}");
+        assert!(text.contains("-100.0 dBFS"), "{text}");
     }
 }

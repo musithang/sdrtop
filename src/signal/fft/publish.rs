@@ -20,7 +20,7 @@ use crate::state::{FftFrame, SdrMetrics};
 use super::analysis::Reading;
 use super::readout::CarrierPacing;
 use super::DB_FLOOR;
-use crate::signal::ballistics::{Ballistic, Settled};
+use crate::signal::ballistics::{Ballistic, Settled, READOUT};
 
 /// Pace the drawn spectrum to the *visible* waterfall: each waterfall character
 /// row packs this many data rows (half-block ▀), so the spectrum refreshes once
@@ -42,6 +42,8 @@ pub(super) struct Pacing {
     modulation: Settled<crate::state::Modulation>,
     /// The carrier figures, taken only from frames with a carrier.
     carrier: CarrierPacing,
+    /// When the channel figures' frame was last taken.
+    readout_at: Option<Instant>,
 }
 
 impl Pacing {
@@ -52,6 +54,7 @@ impl Pacing {
             s_meter: Ballistic::new(DB_FLOOR),
             modulation: Settled::new(),
             carrier: CarrierPacing::new(),
+            readout_at: None,
         }
     }
 
@@ -70,6 +73,18 @@ impl Pacing {
     fn mark(&mut self, now: Instant) {
         self.rows_since_spectrum = 0;
         self.last_update = Some(now);
+    }
+
+    /// Whether to take the channel figures' frame now: four times a second,
+    /// so a number changes slowly enough to be read.
+    fn take_readout(&mut self, now: Instant) -> bool {
+        let due = self
+            .readout_at
+            .is_none_or(|t| now.saturating_duration_since(t) >= READOUT);
+        if due {
+            self.readout_at = Some(now);
+        }
+        due
     }
 }
 
@@ -142,6 +157,9 @@ pub(super) fn publish(
     if pacing.due(m.waterfall.last_fft.is_some(), m.caps.trace_stale_ms, now) {
         pacing.mark(now);
         refresh_spectrum(&mut m, &snap);
+    }
+    if pacing.take_readout(now) {
+        m.signal.readout = m.waterfall.last_fft.clone();
     }
     Some(alpha)
 }
@@ -267,7 +285,6 @@ fn refresh_spectrum(m: &mut SdrMetrics, snap: &Snapshot<'_>) {
         sample_rate: snap.sample_rate,
         timestamp: Instant::now(),
         peak_to_nf_db: r.peak_to_nf_db,
-        channel_power_dbfs: r.channel_power_dbfs,
         occupied_bw_hz: r.occupied_bw_hz,
         enbw_hz: snap.enbw_hz,
         bin_axis: crate::state::BinAxis::FftBins,
@@ -279,6 +296,20 @@ mod tests {
     use super::*;
     use crate::state::SpectrumMarker;
     use std::time::Duration;
+
+    /// The channel figures' frame is taken four times a second, the first
+    /// at once, however fast the frames come.
+    #[test]
+    fn the_readout_is_taken_four_times_a_second() {
+        let t0 = Instant::now();
+        let mut p = Pacing::new();
+        let taken: Vec<u64> = (0..2_000u64)
+            .step_by(10)
+            .filter(|ms| p.take_readout(t0 + Duration::from_millis(*ms)))
+            .collect();
+        assert_eq!(taken.first(), Some(&0));
+        assert_eq!(taken.len(), 8, "{taken:?}");
+    }
 
     #[test]
     fn pacing_reserves_one_fifth_of_each_trace_age_budget() {

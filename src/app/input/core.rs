@@ -391,7 +391,6 @@ mod tests {
             sample_rate: 63_000_000.0,
             timestamp: Instant::now(),
             peak_to_nf_db: 70.0,
-            channel_power_dbfs: -20.0,
             occupied_bw_hz: 0,
             enbw_hz: 0.0,
             bin_axis: BinAxis::MeasuredPoints,

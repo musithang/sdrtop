@@ -245,6 +245,14 @@ pub fn pad_to_fill(lines: &mut Vec<Line<'_>>, avail: usize) {
     }
 }
 
+/// A row held for something that has nothing to show this frame, so a stack
+/// keeps one shape with or without it. Drawn as U+2800, the empty braille cell
+/// the braille traces are drawn with: it shows nothing but is not whitespace,
+/// so [`fit_spacers`] does not take it for a spacer and grow it.
+pub fn reserved_row() -> Line<'static> {
+    Line::raw("\u{2800}")
+}
+
 /// Fit an airy `lines` stack to exactly `avail` rows: drop spacers when it
 /// overflows, grow them when it underflows. The one call a panel makes to both
 /// breathe and fill across every terminal height.
