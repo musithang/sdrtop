@@ -28,10 +28,10 @@ use ratatui::{
     Frame,
 };
 
-use super::frames::{at, ink, shown, top};
+use super::frames::{capture, ink, selection};
 use super::{plate, put, silence};
 use crate::state::{Family, FrameZoom, RowKind, SdrMetrics, WifiRow};
-use crate::ui::panel::{FeedSpan, Panel, PanelChrome, Staleness, Tag};
+use crate::ui::panel::{FeedSpan, Panel, PanelChrome, Staleness};
 
 pub struct NetWifiRiverPanel;
 
@@ -75,7 +75,7 @@ struct Placed {
 }
 
 impl Placed {
-    fn of(row: &WifiRow, newest: &WifiRow, theme: &crate::Theme) -> Self {
+    fn of(row: &WifiRow, zero: u64, theme: &crate::Theme) -> Self {
         use crate::signal::wifi::dsss::header::Preamble;
         let preamble = match row.kind {
             RowKind::Dsss {
@@ -90,7 +90,7 @@ impl Placed {
             RowKind::Ofdm(_) | RowKind::OtherOfdm { .. } => 20.0,
         };
         Placed {
-            start: (row.start as f64 - newest.start as f64) / 20.0,
+            start: (row.start as f64 - zero as f64) / 20.0,
             air: row.airtime_us.map(f64::from),
             colour: ink(row, theme),
             unreadable: row.family() == Some(Family::Undecoded),
@@ -201,38 +201,49 @@ fn time(us: f64, signed: bool) -> String {
     }
 }
 
-/// The frames to draw, oldest first, the window's start, and the selected
-/// frame where it can be lit.
-fn window(
-    state: &SdrMetrics,
-    d: f64,
-    span: f64,
-    lanes: u16,
-    theme: &crate::Theme,
-) -> (Vec<Placed>, f64, Option<Placed>) {
+/// What the river draws of the capture, in microseconds from the frame
+/// that set it off.
+struct Window {
+    placed: Vec<Placed>,
+    /// The first lane's start.
+    t0: f64,
+    /// The capture's end: nothing is drawn past it.
+    end: f64,
+    lit: Option<Placed>,
+    lost: Vec<(f64, f64)>,
+}
+
+/// The capture's frames, its window, the selected frame where it can be lit
+/// and the spans a feed gap took; before the first capture, an empty
+/// window with its trigger 10 % in.
+fn window(state: &SdrMetrics, span: f64, lanes: u16, theme: &crate::Theme) -> Window {
     let whole = span * f64::from(lanes);
-    let shown = shown(state);
-    let view = &state.net.wifi.frames_view;
-    let Some(t) = top(&shown, view).filter(|&t| t < shown.len()) else {
-        // Nothing to end on: the window ends now, and is empty.
-        return (Vec::new(), -whole, None);
+    let Some((c, at)) = selection(state) else {
+        return Window {
+            placed: Vec::new(),
+            t0: -0.1 * whole,
+            end: f64::INFINITY,
+            lit: None,
+            lost: Vec::new(),
+        };
     };
-    let newest = shown[t];
-    let placed: Vec<Placed> = shown[t..]
-        .iter()
-        .rev()
-        .filter(|r| r.run == newest.run)
-        .map(|r| Placed::of(r, newest, theme))
-        .collect();
-    let lit = at(&shown, view)
-        .map(|i| shown[i])
-        .filter(|r| r.run == newest.run)
-        .map(|r| Placed::of(r, newest, theme));
-    let mut t0 = Placed::of(newest, newest, theme).end(d) - whole;
-    if let Some(s) = lit.filter(|s| s.start < t0) {
-        t0 = s.start - 0.3 * span;
+    let zero = c.trigger_row().map_or(c.from, |t| t.start);
+    let us = |pair: u64| (pair as f64 - zero as f64) / 20.0;
+    let placed: Vec<Placed> = c.rows.iter().map(|r| Placed::of(r, zero, theme)).collect();
+    let lit = Placed::of(&c.rows[at], zero, theme);
+    // A capture longer than this river (the screen shrank since) slides
+    // to keep the selection in view.
+    let mut t0 = us(c.from);
+    if lit.start >= t0 + whole {
+        t0 = lit.start - 0.3 * span;
     }
-    (placed, t0, lit)
+    Window {
+        placed,
+        t0,
+        end: us(c.to),
+        lit: Some(lit),
+        lost: c.lost.iter().map(|l| (us(l.from), us(l.to))).collect(),
+    }
 }
 
 fn draw(buf: &mut Buffer, area: Rect, state: &SdrMetrics, theme: &crate::Theme) {
@@ -241,7 +252,8 @@ fn draw(buf: &mut Buffer, area: Rect, state: &SdrMetrics, theme: &crate::Theme) 
     if lw < 10 {
         return;
     }
-    let zoom = state.net.wifi.frames_view.zoom;
+    // A capture is drawn at the scale it was taken at, until the next.
+    let zoom = capture(state).map_or(state.net.wifi.frames_view.zoom, |c| c.zoom);
     let d = zoom.cell_us();
     let span = d * f64::from(lw);
     let silent = silence(state);
@@ -250,7 +262,13 @@ fn draw(buf: &mut Buffer, area: Rect, state: &SdrMetrics, theme: &crate::Theme) 
     } else {
         theme.label
     });
-    let (placed, t0, lit) = window(state, d, span, lanes, theme);
+    let Window {
+        placed,
+        t0,
+        end,
+        lit,
+        lost,
+    } = window(state, span, lanes, theme);
     let lit_bg = theme.border_dim;
     for i in 0..lanes {
         let (top_y, bottom_y) = (area.y + 2 * i, area.y + 2 * i + 1);
@@ -278,7 +296,19 @@ fn draw(buf: &mut Buffer, area: Rect, state: &SdrMetrics, theme: &crate::Theme) 
             .collect();
         for x in 0..lw {
             let a = a0 + f64::from(x) * d;
+            if a >= end {
+                break;
+            }
             let cx = area.x + LABEL + x;
+            // Never heard: hatched, so it does not pass for quiet air.
+            if lost.iter().any(|&(from, to)| a < to && a + d > from) {
+                let hatch = Style::default().fg(theme.stale);
+                buf.get_mut(cx, top_y).set_char('\u{2571}').set_style(hatch);
+                buf.get_mut(cx, bottom_y)
+                    .set_char('\u{2571}')
+                    .set_style(hatch);
+                continue;
+            }
             if lit.is_some_and(|s| a < s.end(d) && a + d > s.start) {
                 buf.get_mut(cx, top_y).set_bg(lit_bg);
                 buf.get_mut(cx, bottom_y).set_bg(lit_bg);
@@ -323,22 +353,34 @@ impl Panel for NetWifiRiverPanel {
     }
 
     fn chrome(&self, state: &SdrMetrics) -> PanelChrome {
-        let view = &state.net.wifi.frames_view;
-        // Where the card has no room, its reading rides in the title.
-        let reading = if super::card::on_screen(state) {
-            String::new()
-        } else {
-            super::card::reading_words(state)
-                .map(|w| format!(" \u{b7} {w}"))
-                .unwrap_or_default()
+        let scope = &state.net.wifi.scope;
+        let wide = super::card::on_screen(state);
+        let mut suffix = match capture(state) {
+            Some(c) => format!(" \u{b7} capture {} \u{b7} {}", c.number, c.zoom.label()),
+            None => format!(
+                " \u{b7} {} \u{b7} armed",
+                state.net.wifi.frames_view.zoom.label()
+            ),
         };
-        // Held with the list, and paused by the user as the list is.
+        if wide {
+            suffix.push_str(&format!(
+                " \u{b7} trigger: {} \u{b7} holdoff {:.1} s \u{b7} z t",
+                scope.trigger.label(),
+                scope.holdoff.millis() as f64 / 1e3
+            ));
+        } else if let Some(w) = super::card::reading_words(state) {
+            // Where the card has no room, its reading rides here, and the
+            // trigger and holdoff give way: the list's keys name them.
+            suffix.push_str(&format!(" \u{b7} {w}"));
+        }
+        if scope.stopped {
+            suffix.push_str(" \u{b7} STOP");
+        }
         PanelChrome::new("River")
             .stale_when(Staleness::NotStreaming)
             .tag_if(true, state.net.mode.tag())
             .counts_from_feed(FeedSpan::Session)
-            .tag_if(view.held.is_some(), Tag::Paused)
-            .suffix(format!(" \u{b7} {} \u{b7} z{reading}", view.zoom.label()))
+            .suffix(suffix)
     }
 
     fn render(
@@ -364,7 +406,7 @@ mod tests {
     use crate::signal::wifi::lsig::{LSig, Refused};
     use crate::signal::wifi::signal_field::Rate;
     use crate::state::fixture::draw;
-    use crate::state::{FrameZoom, RowKind, SdrMetrics, WifiRow};
+    use crate::state::{Capture, FrameZoom, Lost, RowKind, SdrMetrics, Trigger, WifiRow};
 
     /// The Frames view on channel 11 at 20 Msps, streaming.
     fn on_eleven(zoom: FrameZoom) -> SdrMetrics {
@@ -420,27 +462,66 @@ mod tests {
         (cells(1 + 2 * i), cells(2 + 2 * i))
     }
 
+    /// The river drawn into a buffer, for its colours.
+    fn buffer(m: &SdrMetrics) -> ratatui::buffer::Buffer {
+        let theme = crate::Theme::sdr();
+        let mut registry = crate::ui::PanelRegistry::new();
+        registry.register(NetWifiRiverPanel);
+        let mut t = ratatui::Terminal::new(ratatui::backend::TestBackend::new(100, 11)).unwrap();
+        t.draw(|f| registry.render_panel("net_wifi_river", f, f.size(), m, &theme, false))
+            .unwrap();
+        t.backend().buffer().clone()
+    }
+
     fn count(cells: &[char], c: char) -> usize {
         cells.iter().filter(|&&x| x == c).count()
+    }
+
+    /// The ring as one capture set off by its `trig`th frame, its window
+    /// from `from_us` across the river's four lanes of 89 cells at its zoom.
+    fn captured(m: &mut SdrMetrics, trig: usize, from_us: f64) {
+        let rows: Vec<WifiRow> = m.net.wifi.rows.iter().copied().collect();
+        let zoom = m.net.wifi.frames_view.zoom;
+        let from = (from_us * 20.0) as u64;
+        m.net.wifi.scope.capture = Some(Capture {
+            number: 7,
+            zoom,
+            trigger: Trigger::Any,
+            epoch: 0,
+            from,
+            to: from + 4 * 89 * zoom.cell_pairs(),
+            trigger_seq: rows[trig].seq,
+            rows,
+            lost: Vec::new(),
+        });
     }
 
     /// **At 40 us a cell a frame is as wide as its airtime and as tall as
     /// its SNR**, in sixteenths of 0 to 24 dB over the lane's two rows: a
     /// 200 us frame at 24 dB is five cells full in both rows, the 40 us
     /// frame after it at 12 dB one cell full in the lower row only. The
-    /// newest frame ends the last lane.
+    /// capture's window starts the first lane.
     #[test]
     fn a_frame_is_as_wide_as_its_airtime_and_as_tall_as_its_snr() {
         let mut m = on_eleven(FrameZoom::Rhythm);
         m.net.wifi.push_row(frame(0.0, Some(200), 24.0));
         m.net.wifi.push_row(frame(216.0, Some(40), 12.0));
+        captured(&mut m, 0, 0.0);
         let l = lines(&m);
-        let (top, bottom) = lane(&l, 3);
+        let (top, bottom) = lane(&l, 0);
         assert_eq!(count(&top, '\u{2588}'), 5, "{l:#?}");
         assert_eq!(count(&bottom, '\u{2588}'), 6, "{l:#?}");
-        assert_eq!(bottom[88], '\u{2588}', "the newest ends the lane: {l:#?}");
-        assert_eq!(top[88], ' ', "{l:#?}");
-        assert!(l.join("\n").contains("40 \u{b5}s a cell"), "{l:#?}");
+        assert_eq!(bottom[0], '\u{2588}', "the window starts the lane: {l:#?}");
+        assert_eq!((top[5], bottom[5]), (' ', '\u{2588}'), "{l:#?}");
+        let title = &l[0];
+        for want in [
+            "capture 7",
+            "40 \u{b5}s a cell",
+            "trigger: any frame",
+            "holdoff 1.0 s",
+        ] {
+            assert!(title.contains(want), "{want} in {title}");
+        }
     }
 
     /// A frame that stated no length is drawn as its start; one whose
@@ -456,8 +537,9 @@ mod tests {
             }),
             ..frame(400.0, Some(80), 20.0)
         });
+        captured(&mut m, 0, 0.0);
         let l = lines(&m);
-        let (top, bottom) = lane(&l, 3);
+        let (top, bottom) = lane(&l, 0);
         assert_eq!(count(&top, '\u{258c}'), 1, "{l:#?}");
         assert_eq!(count(&bottom, '\u{258c}'), 1, "{l:#?}");
         assert_eq!(count(&bottom, '\u{2592}'), 2, "{l:#?}");
@@ -469,29 +551,24 @@ mod tests {
     fn at_a_millisecond_a_cell_the_share_on_air_is_the_shade() {
         let mut m = on_eleven(FrameZoom::Load);
         m.net.wifi.push_row(frame(0.0, Some(500), 20.0));
+        captured(&mut m, 0, 0.0);
         let l = lines(&m);
-        let (top, bottom) = lane(&l, 3);
-        assert_eq!(top[88], '\u{2592}', "{l:#?}");
-        assert_eq!(bottom[88], '\u{2592}', "{l:#?}");
-        assert!(l.join("\n").contains("1 ms a cell"), "{l:#?}");
+        let (top, bottom) = lane(&l, 0);
+        assert_eq!((top[0], bottom[0]), ('\u{2592}', '\u{2592}'), "{l:#?}");
+        assert!(l[0].contains("1 ms a cell"), "{l:#?}");
     }
 
-    /// **The selected frame is always on the river**: selected a second
-    /// before the newest, the window slides back to put it 30 % into the
-    /// first lane, and the lane's label counts back from the newest.
+    /// **Time zero is the trigger**: the lanes' labels count from the frame
+    /// that set the capture off, before it negative and after it positive.
     #[test]
-    fn the_window_slides_to_the_selected_frame() {
+    fn the_lanes_count_from_the_trigger() {
         let mut m = on_eleven(FrameZoom::Rhythm);
-        m.net.wifi.push_row(frame(0.0, Some(100), 27.0));
-        m.net.wifi.push_row(frame(1_000_000.0, Some(40), 27.0));
-        m.net.wifi.frames_view.held = Some(2);
-        m.net.wifi.frames_view.cursor = 1;
+        m.net.wifi.push_row(frame(10_000.0, Some(40), 27.0));
+        // 10 % of four lanes of 89 cells at 40 us before it.
+        captured(&mut m, 0, 10_000.0 - 1_424.0);
         let l = lines(&m);
-        let (_, bottom) = lane(&l, 0);
-        assert_eq!(bottom[27], '\u{2588}', "{l:#?}");
-        assert_eq!(bottom[28], '\u{2588}', "{l:#?}");
-        assert_eq!(count(&bottom, '\u{2588}'), 2, "{l:#?}");
-        assert!(l[2].contains("-1.00 s"), "{l:#?}");
+        assert!(l[2].contains("-1.4 ms"), "{l:#?}");
+        assert!(l[4].contains("+2.1 ms"), "{l:#?}");
     }
 
     /// The selected frame is lit: its cells on the border's dim colour.
@@ -500,19 +577,14 @@ mod tests {
         let mut m = on_eleven(FrameZoom::Rhythm);
         m.net.wifi.push_row(frame(0.0, Some(80), 27.0));
         m.net.wifi.push_row(frame(200.0, Some(80), 27.0));
+        captured(&mut m, 0, 0.0);
+        m.net.wifi.frames_view.selected = Some(2);
+        let buf = buffer(&m);
         let theme = crate::Theme::sdr();
-        let mut registry = crate::ui::PanelRegistry::new();
-        registry.register(NetWifiRiverPanel);
-        let mut t = ratatui::Terminal::new(ratatui::backend::TestBackend::new(100, 11)).unwrap();
-        t.draw(|f| registry.render_panel("net_wifi_river", f, f.size(), &m, &theme, false))
-            .unwrap();
-        let buf = t.backend().buffer().clone();
-        // The newest (selected) ends the last lane: cells 87 and 88; the
-        // one before is 82 and 83.
-        let bg = |cell: u16| buf.get(10 + cell, 8).bg;
-        assert_eq!(bg(88), theme.border_dim);
-        assert_eq!(bg(87), theme.border_dim);
-        assert_ne!(bg(83), theme.border_dim);
+        let bg = |cell: u16| buf.get(10 + cell, 2).bg;
+        assert_eq!(bg(5), theme.border_dim);
+        assert_eq!(bg(6), theme.border_dim);
+        assert_ne!(bg(0), theme.border_dim);
     }
 
     /// At 4 us a cell the preamble is told from the rest of the frame: its
@@ -521,53 +593,47 @@ mod tests {
     fn at_four_microseconds_a_cell_the_preamble_is_tinted() {
         let mut m = on_eleven(FrameZoom::Anatomy);
         m.net.wifi.push_row(frame(0.0, Some(40), 27.0));
+        captured(&mut m, 0, 0.0);
+        let buf = buffer(&m);
         let theme = crate::Theme::sdr();
-        let mut registry = crate::ui::PanelRegistry::new();
-        registry.register(NetWifiRiverPanel);
-        let mut t = ratatui::Terminal::new(ratatui::backend::TestBackend::new(100, 11)).unwrap();
-        t.draw(|f| registry.render_panel("net_wifi_river", f, f.size(), &m, &theme, false))
-            .unwrap();
-        let buf = t.backend().buffer().clone();
-        // Ten cells end the last lane, 79 to 88: five of preamble, five after.
-        let fg = |cell: u16| buf.get(10 + cell, 8).fg;
+        let fg = |cell: u16| buf.get(10 + cell, 2).fg;
         let tinted = crate::ui::widgets::charts::lerp_color(theme.wifi_non_ht, theme.value, 0.55);
-        assert_eq!(fg(79), tinted);
-        assert_eq!(fg(83), tinted);
-        assert_eq!(fg(84), theme.wifi_non_ht);
-        assert_eq!(fg(88), theme.wifi_non_ht);
+        assert_eq!(fg(0), tinted);
+        assert_eq!(fg(4), tinted);
+        assert_eq!(fg(5), theme.wifi_non_ht);
+        assert_eq!(fg(9), theme.wifi_non_ht);
     }
 
-    /// **Held, the river holds at the same moment** as the list: nothing
-    /// newer than the held frame is drawn.
+    /// **A span a feed gap took is hatched**, never drawn as quiet air.
     #[test]
-    fn a_held_river_draws_nothing_newer_than_the_held_frame() {
+    fn a_lost_span_is_hatched() {
         let mut m = on_eleven(FrameZoom::Rhythm);
-        // On the cells' grid, so each frame fills exactly one.
-        for i in 0..3 {
-            m.net
-                .wifi
-                .push_row(frame(320.0 * f64::from(i), Some(40), 27.0));
+        m.net.wifi.push_row(frame(0.0, Some(40), 27.0));
+        captured(&mut m, 0, 0.0);
+        if let Some(c) = m.net.wifi.scope.capture.as_mut() {
+            c.lost = vec![Lost {
+                epoch: 0,
+                from: 2_000 * 20,
+                to: 3_000 * 20,
+            }];
         }
-        m.net.wifi.frames_view.held = Some(2);
         let l = lines(&m);
-        let full: usize = (0..4).map(|i| count(&lane(&l, i).1, '\u{2588}')).sum();
-        assert_eq!(full, 2, "{l:#?}");
-        assert!(l[0].contains("PAUSED"), "{l:#?}");
+        let (top, bottom) = lane(&l, 0);
+        assert_eq!(count(&top, '\u{2571}'), 25, "{l:#?}");
+        assert_eq!(count(&bottom, '\u{2571}'), 25, "{l:#?}");
+        assert_eq!(bottom[50], '\u{2571}', "{l:#?}");
     }
 
-    /// Across a break the stream's clock starts again: a frame of another
-    /// run is not placed on this run's clock.
+    /// Single says STOP; before the first capture the lanes are empty and
+    /// the title says what it is armed for.
     #[test]
-    fn a_frame_of_another_run_is_not_placed() {
+    fn stopped_and_armed_are_said() {
         let mut m = on_eleven(FrameZoom::Rhythm);
-        m.net.wifi.push_row(frame(100.0, Some(40), 27.0));
-        m.net.wifi.push_row(WifiRow {
-            run: 1,
-            ..frame(50.0, Some(40), 27.0)
-        });
-        let l = lines(&m);
-        let full: usize = (0..4).map(|i| count(&lane(&l, i).1, '\u{2588}')).sum();
-        assert_eq!(full, 1, "{l:#?}");
+        m.net.wifi.push_row(frame(0.0, Some(40), 27.0));
+        assert!(lines(&m)[0].contains("armed"), "{:#?}", lines(&m));
+        captured(&mut m, 0, 0.0);
+        m.net.wifi.scope.stopped = true;
+        assert!(lines(&m)[0].contains("STOP"), "{:#?}", lines(&m));
     }
 
     /// Not measured: the lanes dimmed under the shared plate, its head and

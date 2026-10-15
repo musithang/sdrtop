@@ -126,9 +126,9 @@ pub(in crate::app::input) fn reset_positions(panel: &str, m: &mut crate::state::
         // The piconet is what the view is of, not a place in it, and the
         // hold is a mode as the BLE list's is: only the scroll goes.
         "net_bt_packets" => m.net.packets_view.first_visible = 0,
-        // The cursor is a place in the list; the hold, the river's zoom and
-        // the card's face are modes.
-        "net_wifi_frames" => m.net.wifi.frames_view.cursor = 0,
+        // The selection is a place in the capture; Single, the river's zoom,
+        // the card's face and the frame opened in the list's place are modes.
+        "net_wifi_frames" => m.net.wifi.frames_view.selected = None,
         // The zoom is a mode; where in time the window ends is a position.
         "net_bt_hops" => {
             m.net.bt_view = Default::default();

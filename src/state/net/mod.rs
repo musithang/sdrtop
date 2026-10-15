@@ -42,10 +42,10 @@ pub use packets::{
 };
 #[cfg(test)]
 pub use wifi::WifiSurvey;
-pub use wifi::{Family, FramesView, LeastBusy, RowKind, Visit, WifiClock, WifiRow, WIFI_ROWS_KEPT};
-pub use wifi::{FrameZoom, Lost};
+pub use wifi::{Capture, FrameZoom, Lost};
+pub use wifi::{Family, LeastBusy, RowKind, Visit, WifiClock, WifiRow};
 #[cfg(test)]
-pub use wifi::{Holdoff, Trigger};
+pub use wifi::{FramesView, Holdoff, Trigger};
 
 /// Whether the receiver is walking the band or sitting on one channel.
 ///

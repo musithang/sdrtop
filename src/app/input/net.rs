@@ -374,51 +374,55 @@ pub(super) fn net_bt_packets(key: KeyEvent, ctx: &mut InputCtx<'_>) -> KeyAction
     KeyAction::Continue
 }
 
-/// The Frames list. `↓` holds the list at its newest frame and moves the
-/// selection down, so the rows do not slide under the reader; `↑` moves it
-/// back up, staying held at the top; `h` holds the list or lets it run, as
-/// on the other lists; `End` is live again. `z` steps the river's zoom and
-/// `d` turns the card between the selected frame and the decode account:
-/// modes, which the hold keys leave alone. Where the card has no room,
-/// `Enter` opens the selected frame in place of the list and closes it;
-/// `End` closes it too, back to the live list.
+/// The Frames list, a capture at a time. `↑↓` select a frame of the
+/// capture and stop it there (Single), so the frames do not change under
+/// the reader; `h` stops the captures or runs them (running arms again at
+/// once, back on the trigger frame); `End` runs too, and closes a frame
+/// opened in the list's place. `z` steps the river's zoom, `d` turns the
+/// card, `t` steps the trigger, `+` `-` the holdoff: modes the others leave
+/// alone. Where the card has no room, `Enter` opens the selected frame in
+/// place of the list and closes it.
 pub(super) fn net_wifi_frames(key: KeyEvent, ctx: &mut InputCtx<'_>) -> KeyAction {
     let mut m = metrics(ctx.state);
-    let newest = crate::ui::panels::net::wifi::frames::shown(&m)
-        .first()
-        .map(|r| r.seq);
-    let below = crate::ui::panels::net::wifi::frames::below(&m);
     let card = crate::ui::panels::net::wifi::card::on_screen(&m);
-    let view = &mut m.net.wifi.frames_view;
+    let step = crate::ui::panels::net::wifi::frames::selection(&m).map(|(c, at)| {
+        let to = match key.code {
+            KeyCode::Up => at.saturating_sub(1),
+            _ => (at + 1).min(c.rows.len().saturating_sub(1)),
+        };
+        c.rows[to].seq
+    });
     match key.code {
-        KeyCode::Up => view.cursor = view.cursor.saturating_sub(1),
-        KeyCode::Down => {
-            if view.held.is_none() {
-                view.held = newest;
-                view.cursor = 0;
-            }
-            if view.held.is_some() {
-                view.cursor = (view.cursor + 1).min(below);
+        KeyCode::Up | KeyCode::Down => {
+            if let Some(seq) = step {
+                m.net.wifi.frames_view.selected = Some(seq);
+                m.net.wifi.scope.stopped = true;
             }
         }
         KeyCode::Char('h') => {
-            view.held = match view.held {
-                Some(_) => None,
-                None => newest,
-            };
-            view.cursor = 0;
+            let wifi = &mut m.net.wifi;
+            wifi.scope.stopped = !wifi.scope.stopped;
+            if !wifi.scope.stopped {
+                wifi.scope.rearm();
+                wifi.frames_view.selected = None;
+            }
         }
         KeyCode::End => {
-            view.held = None;
-            view.cursor = 0;
-            view.open = false;
+            let wifi = &mut m.net.wifi;
+            wifi.scope.stopped = false;
+            wifi.scope.rearm();
+            wifi.frames_view.selected = None;
+            wifi.frames_view.open = false;
         }
         KeyCode::Enter if card => {
             m.push_log("Frames: the selected frame is on the card".to_string());
         }
-        KeyCode::Enter => view.open = !view.open,
-        KeyCode::Char('z') => view.zoom = view.zoom.next(),
-        KeyCode::Char('d') => view.decode = !view.decode,
+        KeyCode::Enter => m.net.wifi.frames_view.open = !m.net.wifi.frames_view.open,
+        KeyCode::Char('z') => {
+            let view = &mut m.net.wifi.frames_view;
+            view.zoom = view.zoom.next();
+        }
+        KeyCode::Char('d') => m.net.wifi.frames_view.decode = !m.net.wifi.frames_view.decode,
         // The capture's trigger, armed again at once on the new one.
         KeyCode::Char('t') => {
             let scope = &mut m.net.wifi.scope;
@@ -1537,24 +1541,25 @@ mod tests {
                 "net_wifi_frames",
                 |m| {
                     m.net.wifi.frames_view = crate::state::FramesView {
-                        held: Some(40),
-                        cursor: 7,
+                        selected: Some(7),
                         zoom: crate::state::FrameZoom::Anatomy,
                         decode: true,
                         open: true,
-                    }
+                    };
+                    m.net.wifi.scope.stopped = true;
                 },
-                // The cursor goes; the hold, the zoom, the card's face and the
-                // frame opened in place of the list are modes.
+                // The selection goes, back to the trigger frame; Single, the
+                // zoom, the card's face and the frame opened in place of the
+                // list are modes.
                 |m| {
                     m.net.wifi.frames_view
                         == crate::state::FramesView {
-                            held: Some(40),
-                            cursor: 0,
+                            selected: None,
                             zoom: crate::state::FrameZoom::Anatomy,
                             decode: true,
                             open: true,
                         }
+                        && m.net.wifi.scope.stopped
                 },
             ),
         ];
@@ -1673,34 +1678,49 @@ mod tests {
         (engine, keys, state)
     }
 
-    /// The Frames list's keys: `↓` holds the list at its newest frame and
-    /// moves the selection down, `↑` back up, `h` holds or lets it run,
-    /// `End` returns to live; `z` steps the river's zoom and `d` turns the
-    /// card, both modes the hold keys leave alone.
+    /// The Frames list's keys: `↑↓` stop the capture (Single) and move the
+    /// selection through it, from its trigger frame, to its ends and no
+    /// further; `End` runs again on the trigger frame; `h` stops or runs;
+    /// `z` and `d` are modes the others leave alone.
     #[test]
-    fn the_frames_list_selects_holds_zooms_and_turns_the_card() {
+    fn the_frames_list_selects_stops_zooms_and_turns_the_card() {
         use crate::state::{FrameZoom, FramesView};
         let (mut engine, keys, state) = frames_view(30);
+        {
+            let mut m = metrics(&state);
+            let rows: Vec<crate::state::WifiRow> = m.net.wifi.rows.iter().copied().collect();
+            m.net.wifi.scope.capture = Some(crate::state::Capture {
+                number: 1,
+                zoom: FrameZoom::Load,
+                trigger: crate::state::Trigger::Any,
+                epoch: 0,
+                from: 0,
+                to: 40 * 20_000,
+                trigger_seq: rows[3].seq,
+                rows,
+                lost: Vec::new(),
+            });
+        }
         let view = |s: &Arc<Mutex<SdrMetrics>>| metrics(s).net.wifi.frames_view;
-
-        key(&mut engine, &keys, &state, KeyCode::Up);
-        assert_eq!(view(&state), FramesView::default(), "live: nothing above");
+        let stopped = |s: &Arc<Mutex<SdrMetrics>>| metrics(s).net.wifi.scope.stopped;
 
         key(&mut engine, &keys, &state, KeyCode::Down);
         key(&mut engine, &keys, &state, KeyCode::Down);
-        assert_eq!(view(&state).held, Some(30), "held at the newest");
-        assert_eq!(view(&state).cursor, 2);
+        assert!(stopped(&state), "a selection stops the capture");
+        assert_eq!(view(&state).selected, Some(6), "two on from the trigger");
         key(&mut engine, &keys, &state, KeyCode::Up);
-        assert_eq!(view(&state).cursor, 1);
+        assert_eq!(view(&state).selected, Some(5));
         for _ in 0..40 {
             key(&mut engine, &keys, &state, KeyCode::Down);
         }
-        assert_eq!(view(&state).cursor, 29, "no further than the oldest");
+        assert_eq!(view(&state).selected, Some(30), "no further than the last");
+        for _ in 0..40 {
+            key(&mut engine, &keys, &state, KeyCode::Up);
+        }
+        assert_eq!(view(&state).selected, Some(1), "no further than the first");
 
         key(&mut engine, &keys, &state, KeyCode::Char('z'));
         key(&mut engine, &keys, &state, KeyCode::Char('d'));
-        assert_eq!(view(&state).zoom, FrameZoom::Rhythm);
-        assert!(view(&state).decode);
         key(&mut engine, &keys, &state, KeyCode::End);
         assert_eq!(
             view(&state),
@@ -1709,16 +1729,14 @@ mod tests {
                 decode: true,
                 ..Default::default()
             },
-            "live, at the top, the modes kept"
+            "running, on the trigger frame, the modes kept"
         );
-        key(&mut engine, &keys, &state, KeyCode::Char('z'));
-        key(&mut engine, &keys, &state, KeyCode::Char('z'));
-        assert_eq!(view(&state).zoom, FrameZoom::Load, "round to the load");
+        assert!(!stopped(&state));
 
         key(&mut engine, &keys, &state, KeyCode::Char('h'));
-        assert_eq!(view(&state).held, Some(30));
+        assert!(stopped(&state));
         key(&mut engine, &keys, &state, KeyCode::Char('h'));
-        assert_eq!(view(&state).held, None);
+        assert!(!stopped(&state));
     }
 
     /// `t` steps the capture's trigger and arms it again at once; `+` and

@@ -1,13 +1,13 @@
-# What is on this channel, frame by frame: the river, the channel's time as
-# lanes of frames at 1 ms, 40 us or 4 us a cell; under it every frame heard
-# on the channel's centre, newest first, with what was read of it (its
-# format and signalling, the gap before it, its airtime, offset and SNR)
-# and another channel's frames by how far away they are. Beside them the
-# card: this channel's frames a second over whole seconds, by format, and
-# the selected frame field by field, its clock and its channel; `d` turns
-# it to the account of every preamble found. The list's focus (e) holds the
-# list and the river, selects a frame and steps the river's zoom. No
-# Bluetooth receiver runs on it.
+# What is on this channel, frame by frame, a capture at a time, as an
+# oscilloscope takes them: a window of air set off by a trigger (any frame,
+# or one kind) and held still until the next, after a holdoff. The river
+# draws the capture as lanes of frames at 1 ms, 40 us or 4 us a cell; under
+# it the capture's frames in time order, what was read of each, their time
+# from the trigger. Beside them the card: this channel's frames a second
+# over everything heard, by format, and the selected frame field by field;
+# `d` turns it to the account of every preamble found. The list's focus
+# (e) selects a frame (stopping the captures), steps the scale, the trigger
+# and the holdoff. No Bluetooth receiver runs on it.
 
 section = "wifi_channel"
 slot    = 2

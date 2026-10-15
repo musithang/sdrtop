@@ -44,13 +44,10 @@ pub use net::ROSTER_SORT_KEYS;
 // funnel and latest frame with it.
 #[cfg(test)]
 pub use net::WifiSurvey;
-pub use net::{
-    Family, FramesView, LeastBusy, NetDecodeHealth, RowKind, Visit, WifiClock, WifiFunnel, WifiRow,
-    WIFI_ROWS_KEPT,
-};
-pub use net::{FrameZoom, Lost};
+pub use net::{Capture, FrameZoom, Lost};
+pub use net::{Family, LeastBusy, NetDecodeHealth, RowKind, Visit, WifiClock, WifiFunnel, WifiRow};
 #[cfg(test)]
-pub use net::{Holdoff, Trigger};
+pub use net::{FramesView, Holdoff, Trigger};
 pub use observer::ObserverState;
 pub use radio::{
     offset_ppm, FrequencyReference, OffsetBasis, Provenance, RadioState, REFERENCE_STALE_S,

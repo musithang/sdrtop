@@ -13,11 +13,12 @@
 //! that stated no length and across a break; its offset with its 1 sigma
 //! and its SNR. Another channel's frame is named by how far away it is.
 //!
-//! **Newest first, held at a frame** as the Classic list is: live, the
-//! newest frame is the selected one; held, the list draws from one frame
-//! down while newer ones arrive above, and the cursor moves through it.
-//! The ring keeps what it keeps, and the title says how far back that
-//! reaches, so a held list never passes for the whole story.
+//! **A capture, in time order.** The view does not stream: it shows the
+//! frames of one capture (`state::Scope`), oldest first as the river reads,
+//! their time counted from the frame that set the capture off, the spans a
+//! feed gap took as lines where they fell. Live, a new capture replaces it
+//! after the holdoff; selecting a frame stops it (Single) until `H` or
+//! `End`.
 
 use ratatui::{
     layout::Rect,
@@ -29,8 +30,8 @@ use ratatui::{
 
 use crate::signal::wifi::format::{Format, Heard};
 use crate::signal::wifi::hesig::{HeKind, HePpdu};
-use crate::state::{FramesView, RowKind, SdrMetrics, WifiRow, WIFI_ROWS_KEPT};
-use crate::ui::panel::{FeedSpan, Panel, PanelChrome, Staleness, Tag};
+use crate::state::{Capture, RowKind, SdrMetrics, WifiRow};
+use crate::ui::panel::{FeedSpan, Panel, PanelChrome, Staleness};
 
 pub struct NetWifiFramesPanel;
 
@@ -53,48 +54,34 @@ pub fn shown(state: &SdrMetrics) -> Vec<&WifiRow> {
         .collect()
 }
 
-/// Where the list starts in what it shows: the newest while live, the held
-/// frame while held, which is also how many arrived since. `None` when the
-/// held frame has left the ring.
-pub(super) fn top(shown: &[&WifiRow], view: &FramesView) -> Option<usize> {
-    match view.held {
-        None => Some(0),
-        Some(seq) => shown.iter().position(|r| r.seq == seq),
-    }
+/// The capture shown, when it was taken on this channel's centre: one
+/// taken before the survey moved on is that channel's.
+pub(super) fn capture(state: &SdrMetrics) -> Option<&Capture> {
+    let centre = state.radio.frequency as f64;
+    state.net.wifi.scope.capture.as_ref().filter(|c| {
+        c.trigger_row()
+            .is_some_and(|t| (t.carrier_hz - centre).abs() < 1.0)
+    })
 }
 
-/// Where the selected frame is in what is shown: the newest while live.
-pub(super) fn at(shown: &[&WifiRow], view: &FramesView) -> Option<usize> {
-    let top = top(shown, view)?;
-    let cursor = if view.held.is_some() { view.cursor } else { 0 };
-    (top < shown.len()).then(|| (top + cursor).min(shown.len() - 1))
+/// The capture shown and where its selected frame is in it.
+pub fn selection(state: &SdrMetrics) -> Option<(&Capture, usize)> {
+    let c = capture(state)?;
+    Some((c, c.index_of(state.net.wifi.frames_view.selected)))
 }
 
-/// Rows below the held frame (or the newest), as far as the cursor goes.
-pub fn below(state: &SdrMetrics) -> usize {
-    let shown = shown(state);
-    top(&shown, &state.net.wifi.frames_view).map_or(0, |t| shown.len().saturating_sub(t + 1))
-}
-
-/// From `newest` to `row`, in microseconds: on the stream's own clock
-/// within one run, by when each was judged across a break.
-pub(super) fn since(row: &WifiRow, newest: &WifiRow) -> f64 {
-    if row.run == newest.run {
-        (row.start as f64 - newest.start as f64) / 20.0
-    } else {
-        -newest
-            .when
-            .saturating_duration_since(row.when)
-            .as_secs_f64()
-            * 1e6
-    }
+/// From the frame that set `c` off to `row`, in microseconds: one clock
+/// across the capture, a feed gap included.
+pub(super) fn since_trigger(row: &WifiRow, c: &Capture) -> f64 {
+    let zero = c.trigger_row().map_or(c.from, |t| t.start);
+    (row.start as f64 - zero as f64) / 20.0
 }
 
 pub(super) fn when(us: f64) -> String {
     if us.abs() < 1e6 {
-        format!("{:>9.3} ms", us / 1e3)
+        format!("{:>+10.3} ms", us / 1e3)
     } else {
-        format!("{:>9.3} s ", us / 1e6)
+        format!("{:>+10.3} s ", us / 1e6)
     }
 }
 
@@ -220,7 +207,7 @@ pub(super) fn ink(row: &WifiRow, theme: &crate::Theme) -> Color {
 
 fn header(width: usize) -> String {
     let mut s = format!(
-        " {:<13}{:>8}  {:<17}{:<10}",
+        " {:<14}{:>8}  {:<17}{:<10}",
         "when", "gap \u{b5}s", "format", "rate"
     );
     if width >= MID {
@@ -233,13 +220,14 @@ fn header(width: usize) -> String {
 
 fn row_line(
     row: &WifiRow,
-    newest: &WifiRow,
+    rel_us: f64,
     selected: bool,
+    trigger: bool,
     width: usize,
     state: &SdrMetrics,
-    now: std::time::Instant,
     theme: &crate::Theme,
 ) -> Line<'static> {
+    let now = std::time::Instant::now();
     let base = if selected {
         Style::default()
             .fg(theme.value_hi)
@@ -256,7 +244,7 @@ fn row_line(
             if selected { "\u{258c}" } else { " " },
             Style::default().fg(theme.border_accent),
         ),
-        Span::styled(format!("{:<13}", when(since(row, newest))), quiet),
+        Span::styled(format!("{:<14}", when(rel_us)), quiet),
         Span::styled(format!("{:>8}  ", gap(row.gap_us)), base),
         Span::styled(
             if other {
@@ -291,6 +279,12 @@ fn row_line(
         }
         None => spans.push(Span::styled(format!("{:>5}    ", "\u{b7}"), quiet)),
     }
+    if trigger {
+        spans.push(Span::styled(
+            "  \u{25c2} trigger",
+            Style::default().fg(theme.border_accent),
+        ));
+    }
     if width >= FULL && !extra.is_empty() {
         spans.push(Span::styled(format!("  {extra}"), quiet));
     }
@@ -301,11 +295,15 @@ fn row_line(
 /// frame it would have shown.
 fn keys(width: usize, card: bool) -> &'static str {
     match (card, width >= FULL) {
-        (false, _) => " \u{2191}\u{2193} scroll   H hold   End live   z zoom   Enter the frame",
-        (true, true) => {
-            " \u{2191}\u{2193} scroll, holding at the newest   H hold   End live   z zoom   d the decode account"
+        (false, _) => {
+            " \u{2191}\u{2193} select   H stop/run   End run   z zoom   t trigger   + - holdoff   Enter the frame"
         }
-        (true, false) => " \u{2191}\u{2193} scroll   H hold   End live   z zoom   d the decode account",
+        (true, true) => {
+            " \u{2191}\u{2193} select, stopping   H stop/run   End run   z zoom   t trigger   + - holdoff   d the decode account"
+        }
+        (true, false) => {
+            " \u{2191}\u{2193} select   H stop/run   End run   z zoom   t trigger   + - holdoff   d decode"
+        }
     }
 }
 
@@ -331,48 +329,85 @@ fn lines(
     let note = |s: String| Line::from(Span::styled(s, Style::default().fg(theme.stale)));
     let mut out = vec![Line::from(Span::styled(header(width), quiet))];
     let shown = shown(state);
-    let view = &state.net.wifi.frames_view;
+    let selected = selection(state);
     let silent = super::silence(state);
     if let Some(s) = &silent {
-        out.push(note(if shown.is_empty() {
+        out.push(note(if selected.is_none() {
             format!(" nothing can be heard: {}", s.why)
         } else {
             format!(
-                " nothing can be heard now: {}; the frames below are from before",
+                " nothing can be heard now: {}; the capture below is from before",
                 s.why
             )
         }));
     }
-    if shown.is_empty() {
+    let Some((c, at)) = selected else {
         if silent.is_none() {
-            let ch = crate::signal::net::band::wifi_channel(state.radio.frequency)
-                .map_or("this channel".to_string(), |c| format!("channel {c}"));
-            out.push(note(format!(" nothing heard on {ch} yet")));
+            let scope = &state.net.wifi.scope;
+            out.push(note(if shown.is_empty() {
+                let ch = crate::signal::net::band::wifi_channel(state.radio.frequency)
+                    .map_or("this channel".to_string(), |c| format!("channel {c}"));
+                format!(" nothing heard on {ch} yet")
+            } else if scope.stopped {
+                " stopped: H or End takes captures again".to_string()
+            } else {
+                format!(" armed: waiting for {}", scope.trigger.label())
+            }));
         }
         return out;
-    }
-    let Some(top) = top(&shown, view) else {
-        out.push(note(format!(
-            " the held frame has left the {WIFI_ROWS_KEPT} kept; End: back to live"
-        )));
-        return out;
     };
-    let selected = at(&shown, view).unwrap_or(top);
+    // The frames and the lost spans, in time order: `Ok` a frame's index,
+    // `Err` the spans lost one after another with nothing heard between.
+    let mut items: Vec<Result<usize, Vec<&crate::state::Lost>>> = Vec::new();
+    let mut lost = c.lost.iter().peekable();
+    for (i, r) in c.rows.iter().enumerate() {
+        let run: Vec<_> = std::iter::from_fn(|| lost.next_if(|l| l.from <= r.start)).collect();
+        if !run.is_empty() {
+            items.push(Err(run));
+        }
+        items.push(Ok(i));
+    }
+    let rest: Vec<_> = lost.collect();
+    if !rest.is_empty() {
+        items.push(Err(rest));
+    }
+    let sel_item = items.iter().position(|it| *it == Ok(at)).unwrap_or(0);
     let body = height.saturating_sub(out.len() + 1).max(1);
-    // The window scrolls to keep the cursor in it.
-    let from = top + (selected - top).saturating_sub(body - 1);
-    let now = std::time::Instant::now();
-    let newest = shown[top];
-    for (i, row) in shown.iter().enumerate().skip(from).take(body) {
-        out.push(row_line(
-            row,
-            newest,
-            i == selected,
-            width,
-            state,
-            now,
-            theme,
-        ));
+    // The window keeps the selection in it, half way down where it can.
+    let from = sel_item
+        .saturating_sub(body / 2)
+        .min(items.len().saturating_sub(body));
+    for it in items.iter().skip(from).take(body) {
+        out.push(match it {
+            Ok(i) => {
+                let r = &c.rows[*i];
+                row_line(
+                    r,
+                    since_trigger(r, c),
+                    *i == at,
+                    r.seq == c.trigger_seq,
+                    width,
+                    state,
+                    theme,
+                )
+            }
+            Err(spans) => {
+                let ms = |pairs: u64| pairs as f64 / 20e3;
+                let sum: u64 = spans.iter().map(|l| l.to - l.from).sum();
+                let what = match (spans.first(), spans.last()) {
+                    (Some(first), Some(last)) if spans.len() > 1 => format!(
+                        "{:.1} ms not received in {} gaps over {:.1} ms",
+                        ms(sum),
+                        spans.len(),
+                        ms(last.to - first.from)
+                    ),
+                    _ => format!("{:.1} ms not received", ms(sum)),
+                };
+                note(format!(
+                    " \u{2571}\u{2571} {what}: the feed lost blocks here \u{2571}\u{2571}"
+                ))
+            }
+        });
     }
     while out.len() + 1 < height {
         out.push(Line::raw(""));
@@ -401,13 +436,21 @@ impl Panel for NetWifiFramesPanel {
 
     fn focus_bindings(&self) -> &'static [(&'static str, &'static str)] {
         &[
-            ("\u{2191}\u{2193}", "scroll, holding the list at its newest"),
-            ("H", "hold the list, or let it run"),
-            ("End", "back to live"),
+            (
+                "\u{2191}\u{2193}",
+                "select a frame of the capture, stopping it",
+            ),
+            ("H", "stop the captures, or run them"),
+            ("End", "run, on the trigger frame"),
             (
                 "z",
                 "the river's zoom: 1 ms, 40 \u{b5}s or 4 \u{b5}s a cell",
             ),
+            (
+                "t",
+                "the trigger: any frame, a format, another channel's, unreadable",
+            ),
+            ("+ -", "the holdoff: 0.5, 1, 2 or 5 s"),
             ("d", "the card: the selected frame, or the decode account"),
             (
                 "Enter",
@@ -417,31 +460,31 @@ impl Panel for NetWifiFramesPanel {
     }
 
     fn chrome(&self, state: &SdrMetrics) -> PanelChrome {
-        let shown = shown(state);
         let view = &state.net.wifi.frames_view;
+        let scope = &state.net.wifi.scope;
         let mut chrome = PanelChrome::new("Fram_es")
             .stale_when(Staleness::NotStreaming)
             .tag_if(true, state.net.mode.tag())
             .counts_from_feed(FeedSpan::Session);
-        if let (Some(newest), Some(oldest)) = (shown.first(), shown.last()) {
-            let span = newest.when.saturating_duration_since(oldest.when);
-            chrome.suffix = Some(format!(
-                " \u{b7} {} kept \u{b7} {:.1} s",
-                shown.len(),
-                span.as_secs_f64()
-            ));
+        let Some(c) = capture(state) else {
+            return chrome;
+        };
+        let mut suffix = format!(
+            " \u{b7} capture {} \u{b7} {} frame{} \u{b7} in time order",
+            c.number,
+            c.rows.len(),
+            if c.rows.len() == 1 { "" } else { "s" }
+        );
+        if scope.stopped {
+            suffix.push_str(" \u{b7} STOP");
         }
+        chrome.suffix = Some(suffix);
         // Opened on the decode account, no offset is on it.
         let account = opened(state) && view.decode;
-        if !account && shown.iter().any(|r| r.offset_hz.is_some()) {
+        if !account && c.rows.iter().any(|r| r.offset_hz.is_some()) {
             chrome = chrome.shows_offsets();
         }
-        // Held, the list is paused by the user and says what the pause is
-        // costing.
-        let behind = top(&shown, view).unwrap_or(shown.len()) as u64;
         chrome
-            .tag_if(view.held.is_some(), Tag::Paused)
-            .tag_if(view.held.is_some() && behind > 0, Tag::Behind(behind))
     }
 
     fn render(
@@ -471,7 +514,7 @@ mod tests {
     use crate::signal::wifi::lsig::{LSig, Refused};
     use crate::signal::wifi::signal_field::Rate;
     use crate::state::fixture::draw;
-    use crate::state::{RowKind, SdrMetrics, WifiRow};
+    use crate::state::{Capture, FrameZoom, Lost, RowKind, SdrMetrics, Trigger, WifiRow};
 
     /// The Frames view on channel 11 at 20 Msps, streaming.
     fn on_eleven() -> SdrMetrics {
@@ -574,6 +617,26 @@ mod tests {
         draw(NetWifiFramesPanel, w, h, m).join("\n")
     }
 
+    /// Every frame kept as one capture at 40 us a cell over 400 cells (16
+    /// ms), set off by the `trig`th (from 0), its window 10 % before it.
+    pub(crate) fn capture_all(m: &mut SdrMetrics, trig: usize) {
+        let rows: Vec<WifiRow> = m.net.wifi.rows.iter().copied().collect();
+        let t = rows[trig];
+        let window = 400 * 800;
+        let from = t.start.saturating_sub(window / 10);
+        m.net.wifi.scope.capture = Some(Capture {
+            number: 7,
+            zoom: FrameZoom::Rhythm,
+            trigger: Trigger::Any,
+            epoch: 0,
+            from,
+            to: from + window,
+            trigger_seq: t.seq,
+            rows,
+            lost: Vec::new(),
+        });
+    }
+
     /// The line that says `what`.
     fn line<'a>(out: &'a str, what: &str) -> &'a str {
         out.lines()
@@ -581,7 +644,7 @@ mod tests {
             .unwrap_or_else(|| panic!("no line with {what} in\n{out}"))
     }
 
-    /// The rows under the column titles, newest first.
+    /// The frame rows under the column titles, in the list's order.
     fn rows(out: &str) -> Vec<&str> {
         out.lines()
             .skip_while(|l| !l.contains("gap \u{b5}s"))
@@ -620,6 +683,7 @@ mod tests {
             Some(196),
         ));
         w.push_row(row(5_000.0, unreadable(), None));
+        capture_all(&mut m, 0);
         let out = text(&m, 191, 16);
         assert!(out.contains("Frames"), "the nameplate: {out}");
 
@@ -649,33 +713,48 @@ mod tests {
         assert!(line(&out, "unreadable").contains("\u{b7}"), "{out}");
     }
 
-    /// **Newest first, the newest selected while live**: its time is the
-    /// list's zero and the others count back from it.
+    /// **A capture reads in time order, from its trigger**: the frame that
+    /// set it off is the list's zero and is selected, the ones before it
+    /// count down to it and the ones after count on; the title names the
+    /// capture.
     #[test]
-    fn the_newest_frame_is_on_top_and_selected() {
+    fn a_capture_reads_in_time_order_from_its_trigger() {
         let mut m = on_eleven();
-        m.net
-            .wifi
-            .push_row(row(0.0, non_ht(Rate::R24, 20), Some(28)));
-        m.net
-            .wifi
-            .push_row(row(64.0, non_ht(Rate::R6, 14), Some(44)));
+        let w = &mut m.net.wifi;
+        w.push_row(row(0.0, non_ht(Rate::R24, 20), Some(28)));
+        w.push_row(row(64.0, non_ht(Rate::R6, 14), Some(44)));
+        w.push_row(row(200.0, non_ht(Rate::R12, 30), Some(40)));
+        capture_all(&mut m, 1);
         let out = text(&m, 191, 16);
         let r = rows(&out);
-        assert_eq!(r.len(), 2, "{out}");
+        assert_eq!(r.len(), 3, "{out}");
         assert!(
-            r[0].contains("0.000 ms") && r[0].contains("6 Mb/s"),
+            r[0].contains("-0.064 ms") && r[0].contains("24 Mb/s"),
             "{out}"
         );
         assert!(
-            r[1].contains("-0.064 ms") && r[1].contains("24 Mb/s"),
+            r[1].contains("+0.000 ms") && r[1].contains("6 Mb/s"),
             "{out}"
         );
         assert!(
-            r[0].contains('\u{258c}'),
-            "the selected row is marked: {out}"
+            r[2].contains("+0.136 ms") && r[2].contains("12 Mb/s"),
+            "{out}"
         );
-        assert!(!r[1].contains('\u{258c}'), "{out}");
+        assert!(
+            r[1].contains('\u{258c}') && r[1].contains("trigger"),
+            "{out}"
+        );
+        assert!(
+            !r[0].contains('\u{258c}') && !r[2].contains('\u{258c}'),
+            "{out}"
+        );
+        assert!(
+            out.contains("capture 7 \u{b7} 3 frames \u{b7} in time order"),
+            "{out}"
+        );
+        assert!(!out.contains("STOP"), "{out}");
+        m.net.wifi.scope.stopped = true;
+        assert!(text(&m, 191, 16).contains("STOP"));
     }
 
     /// The gap is unknown after a frame that stated no length, and written
@@ -688,10 +767,11 @@ mod tests {
         w.push_row(row(2_528.0, non_ht(Rate::R6, 14), Some(44)));
         w.push_row(row(3_000.0, RowKind::OtherOfdm { shift_mhz: 5 }, None));
         w.push_row(row(3_100.0, non_ht(Rate::R12, 30), Some(40)));
+        capture_all(&mut m, 0);
         let out = text(&m, 191, 16);
         let r = rows(&out);
-        assert!(r[2].contains("2.5 ms"), "{out}");
-        let gap = r[0].split("ms").nth(1).unwrap().trim_start();
+        assert!(r[1].contains("2.5 ms"), "{out}");
+        let gap = r[3].split("ms").nth(1).unwrap().trim_start();
         assert!(gap.starts_with('\u{b7}'), "after a start alone: {out}");
     }
 
@@ -701,6 +781,7 @@ mod tests {
     fn the_columns_give_way_as_the_list_narrows() {
         let mut m = on_eleven();
         m.net.wifi.push_row(row(0.0, ht(7, 1_500), Some(200)));
+        capture_all(&mut m, 0);
         let out = text(&m, 98, 10);
         let r = line(&out, "MCS 7");
         assert!(!r.contains('\u{b1}') && r.contains("48.0 kHz"), "{r}");
@@ -711,35 +792,9 @@ mod tests {
         assert!(r.contains("200 \u{b5}s") && r.contains("27.0 dB"), "{r}");
     }
 
-    /// **Held, the list stays at its frame** and says how many arrived
-    /// since; the held frame gone from the ring is said, not guessed at.
+    /// The selection is a frame of the capture, and the rows follow it.
     #[test]
-    fn a_held_list_stays_at_its_frame() {
-        let mut m = on_eleven();
-        for i in 0..3 {
-            m.net
-                .wifi
-                .push_row(row(100.0 * i as f64, non_ht(Rate::R6, 10 + i), Some(40)));
-        }
-        m.net.wifi.frames_view.held = Some(2);
-        let out = text(&m, 191, 16);
-        let r = rows(&out);
-        assert_eq!(r.len(), 2, "{out}");
-        assert!(r[0].contains("11 B") && r[0].contains("0.000 ms"), "{out}");
-        assert!(out.contains("HELD") || out.contains("PAUSED"), "{out}");
-        assert!(out.contains('1'), "{out}");
-
-        m.net.wifi.frames_view.held = Some(99);
-        let out = text(&m, 191, 16);
-        assert!(
-            out.contains("the held frame has left the 2048 kept; End: back to live"),
-            "{out}"
-        );
-    }
-
-    /// The cursor selects a frame further down, and the rows follow it.
-    #[test]
-    fn the_window_follows_the_cursor() {
+    fn the_rows_follow_the_selection() {
         let mut m = on_eleven();
         for i in 0..30u16 {
             m.net.wifi.push_row(row(
@@ -748,15 +803,99 @@ mod tests {
                 Some(40),
             ));
         }
-        m.net.wifi.frames_view.held = Some(30);
-        m.net.wifi.frames_view.cursor = 20;
+        capture_all(&mut m, 0);
+        m.net.wifi.frames_view.selected = Some(21);
         let out = text(&m, 191, 16);
         let marked: Vec<&str> = rows(&out)
             .into_iter()
             .filter(|l| l.contains('\u{258c}'))
             .collect();
         assert_eq!(marked.len(), 1, "{out}");
-        assert!(marked[0].contains("109 B"), "the 21st newest: {out}");
+        assert!(marked[0].contains("120 B"), "the 21st: {out}");
+    }
+
+    /// **A span a feed gap took is a line where it fell**, and the gap
+    /// after it is unknown.
+    #[test]
+    fn a_lost_span_is_a_line_where_it_fell() {
+        let mut m = on_eleven();
+        m.net
+            .wifi
+            .push_row(row(0.0, non_ht(Rate::R24, 20), Some(28)));
+        m.net.wifi.push_row(WifiRow {
+            run: 1,
+            ..row(5_000.0, non_ht(Rate::R6, 14), Some(44))
+        });
+        capture_all(&mut m, 0);
+        if let Some(c) = m.net.wifi.scope.capture.as_mut() {
+            c.lost = vec![Lost {
+                epoch: 0,
+                from: 1_000 * 20,
+                to: 3_200 * 20,
+            }];
+        }
+        let out = text(&m, 191, 16);
+        let lines: Vec<&str> = out.lines().collect();
+        let at = lines
+            .iter()
+            .position(|l| l.contains("2.2 ms not received"))
+            .unwrap_or_else(|| panic!("{out}"));
+        assert!(lines[at - 1].contains("24 Mb/s"), "{out}");
+        assert!(lines[at + 1].contains("6 Mb/s"), "{out}");
+        let gap = lines[at + 1].split("ms").nth(1).unwrap().trim_start();
+        assert!(gap.starts_with('\u{b7}'), "{out}");
+    }
+
+    /// A time past +100 ms and a gap past 100 ms keep a space between
+    /// them: two numbers run together read as one.
+    #[test]
+    fn long_times_and_long_gaps_stay_apart() {
+        let mut m = on_eleven();
+        m.net
+            .wifi
+            .push_row(row(0.0, non_ht(Rate::R24, 20), Some(28)));
+        m.net
+            .wifi
+            .push_row(row(307_188.0, non_ht(Rate::R6, 14), Some(44)));
+        capture_all(&mut m, 0);
+        let out = text(&m, 191, 16);
+        assert!(
+            line(&out, "6 Mb/s").contains("+307.188 ms 307.2 ms"),
+            "{out}"
+        );
+    }
+
+    /// Spans lost one after another, nothing heard between them, are one
+    /// line: how much was lost, in how many gaps, over how long.
+    #[test]
+    fn lost_spans_in_a_row_are_one_line() {
+        let mut m = on_eleven();
+        m.net
+            .wifi
+            .push_row(row(0.0, non_ht(Rate::R24, 20), Some(28)));
+        m.net.wifi.push_row(WifiRow {
+            run: 3,
+            ..row(40_000.0, non_ht(Rate::R6, 14), Some(44))
+        });
+        capture_all(&mut m, 0);
+        let lost = |from_us: u64, to_us: u64| Lost {
+            epoch: 0,
+            from: from_us * 20,
+            to: to_us * 20,
+        };
+        if let Some(c) = m.net.wifi.scope.capture.as_mut() {
+            c.lost = vec![
+                lost(1_000, 7_600),
+                lost(14_100, 20_700),
+                lost(27_300, 33_900),
+            ];
+        }
+        let out = text(&m, 191, 16);
+        assert_eq!(out.matches("not received").count(), 1, "{out}");
+        assert!(
+            out.contains("19.8 ms not received in 3 gaps over 32.9 ms"),
+            "{out}"
+        );
     }
 
     /// **Where the card has no room, `Enter` opens the selected frame in
@@ -769,6 +908,7 @@ mod tests {
             .wifi
             .push_row(row(0.0, non_ht(Rate::R24, 20), Some(28)));
         m.net.wifi.push_row(row(100.0, ht(7, 1_500), Some(200)));
+        capture_all(&mut m, 1);
         m.net.wifi.frames_view.open = true;
         m.ui.screen_cols = 100;
         let out = text(&m, 100, 15);
@@ -788,20 +928,29 @@ mod tests {
         assert!(out.contains("Enter the frame"), "{out}");
     }
 
-    /// Frames heard on another channel's centre (the survey's visits) are
-    /// not this channel's list.
+    /// Before the first capture the list says what it is waiting for, and
+    /// stopped with none, how to take one; a capture from another channel's
+    /// centre (the survey moved on) is not this channel's.
     #[test]
-    fn only_frames_heard_on_this_centre_are_listed() {
+    fn until_a_capture_the_list_says_what_it_waits_for() {
+        let mut m = on_eleven();
+        m.net
+            .wifi
+            .push_row(row(0.0, non_ht(Rate::R6, 14), Some(44)));
+        let out = text(&m, 191, 16);
+        assert!(out.contains("armed: waiting for any frame"), "{out}");
+        m.net.wifi.scope.trigger = Trigger::Family(crate::state::Family::Dsss);
+        assert!(text(&m, 191, 16).contains("waiting for 802.11b"));
+        m.net.wifi.scope.stopped = true;
+        assert!(text(&m, 191, 16).contains("stopped: H or End takes captures again"));
+
         let mut m = on_eleven();
         m.net.wifi.push_row(WifiRow {
             carrier_hz: 2_437e6,
             ..row(0.0, non_ht(Rate::R54, 99), Some(30))
         });
-        m.net
-            .wifi
-            .push_row(row(100.0, non_ht(Rate::R6, 14), Some(44)));
+        capture_all(&mut m, 0);
         let out = text(&m, 191, 16);
-        assert_eq!(rows(&out).len(), 1, "{out}");
         assert!(!out.contains("54 Mb/s"), "{out}");
     }
 
@@ -814,7 +963,7 @@ mod tests {
     }
 
     /// **Not measured**: why nothing can be heard, from the shared Wi-Fi
-    /// silence; frames kept from before are still listed, and said to be.
+    /// silence; a capture from before is still listed, and said to be.
     #[test]
     fn when_nothing_can_be_heard_it_says_why() {
         let mut m = on_eleven();
@@ -827,6 +976,7 @@ mod tests {
         m.net
             .wifi
             .push_row(row(0.0, non_ht(Rate::R6, 14), Some(44)));
+        capture_all(&mut m, 0);
         let out = text(&m, 191, 16);
         assert!(out.contains("from before"), "{out}");
         assert_eq!(rows(&out).len(), 1, "{out}");

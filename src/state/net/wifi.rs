@@ -436,19 +436,14 @@ impl FrameZoom {
     }
 }
 
-/// The Frames view: live or held, the frame selected, the river's zoom and
-/// what the card shows.
-///
-/// **Held at a frame, not a copy of the ring**, as the Classic list is: the
-/// list is newest first, so holding it means drawing from one frame down
-/// while newer ones arrive above.
+/// The Frames view: the frame selected in the capture, the river's zoom,
+/// what the card shows, and the frame opened where the card has no room.
+/// Single, the capture held still, is the scope's (`Scope::stopped`).
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub struct FramesView {
-    /// The newest frame shown while held, by its seq; `None` while live.
-    pub held: Option<u64>,
-    /// The selected frame, in rows down from the newest shown. Live, it is
-    /// always the newest: a cursor on a list that moves would slide.
-    pub cursor: usize,
+    /// The selected frame of the capture, by its seq; `None` is the frame
+    /// that set it off, which is where every new capture starts.
+    pub selected: Option<u64>,
     pub zoom: FrameZoom,
     /// The card shows the decode account in place of the selected frame.
     pub decode: bool,
@@ -610,6 +605,23 @@ pub struct Capture {
     pub rows: Vec<WifiRow>,
     /// The spans of the window a feed gap took.
     pub lost: Vec<Lost>,
+}
+
+impl Capture {
+    /// Where the frame `selected` (by seq) is among its rows: the frame
+    /// that set it off when none is, or when that one is not in it.
+    pub fn index_of(&self, selected: Option<u64>) -> usize {
+        let find = |seq: u64| self.rows.iter().position(|r| r.seq == seq);
+        selected
+            .and_then(find)
+            .or_else(|| find(self.trigger_seq))
+            .unwrap_or(0)
+    }
+
+    /// The frame that set it off.
+    pub fn trigger_row(&self) -> Option<&WifiRow> {
+        self.rows.iter().find(|r| r.seq == self.trigger_seq)
+    }
 }
 
 /// A capture waiting for the rest of its window to be heard.

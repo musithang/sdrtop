@@ -189,12 +189,13 @@ each one's busiest megahertz was and the airtime its own frames stated, by
 format, over the survey's visits ([Survey](net-wifi.md)).
 `net_wifi_least_busy`, the survey's card: the least busy channel when the
 visits can tell it apart, and in words when they cannot yet.
-`net_wifi_river`, the channel's time as lanes of frames, each in its
-format's colour, as wide as its airtime and as tall as its SNR, at 1 ms,
-40 µs or 4 µs a cell.
-`net_wifi_frames`, every frame heard on the channel's centre, newest first:
-its format and what its signalling said, the gap before it, its airtime,
-offset and SNR, and another channel's frames by how far away they are.
+`net_wifi_river`, a capture of the channel's air as lanes of frames, each
+in its format's colour, as wide as its airtime and as tall as its SNR, at
+1 ms, 40 µs or 4 µs a cell.
+`net_wifi_frames`, the capture's frames in time order from its trigger:
+their format and what their signalling said, the gap before each, its
+airtime, offset and SNR, and another channel's frames by how far away
+they are.
 `net_wifi_card`, the Frames view's card: this channel's frames a second
 over whole seconds, by format, and the selected frame field by field with
 its clock and its channel, or the account of every preamble found.

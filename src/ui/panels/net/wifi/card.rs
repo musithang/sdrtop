@@ -7,7 +7,9 @@
 //!
 //! **The reading is measured over whole seconds.** The frames of this
 //! channel in each complete one-second block back from the newest frame
-//! shown, on the stream's own clock and within one run of it: a part
+//! heard, on the stream's own clock and within one run of it, over
+//! everything heard and never the capture alone (a capture is what is
+//! looked at, not what is measured): a part
 //! second is not a second, and a break restarts the clock. Its 1 sigma is
 //! the standard error over those blocks, given from the third on as the
 //! survey gives its own; under a whole second no rate is given at all.
@@ -28,7 +30,7 @@ use ratatui::{
     Frame,
 };
 
-use super::frames::{at, ink, shown, since, top, when};
+use super::frames::{ink, selection, shown, since_trigger, when};
 use crate::signal::wifi::format::Format;
 use crate::signal::wifi::hesig::{Bss, HePpdu};
 use crate::state::{Family, RowKind, SdrMetrics, WifiRow};
@@ -522,7 +524,6 @@ fn lines(
         return state_lines("NOT MEASURED", &s.why, width, theme);
     }
     let shown = shown(state);
-    let view = &state.net.wifi.frames_view;
     let ch = crate::signal::net::band::wifi_channel(state.radio.frequency)
         .map_or("this channel".to_string(), |c| format!("channel {c}"));
     if shown.is_empty() {
@@ -533,15 +534,9 @@ fn lines(
             theme,
         );
     }
-    let Some(t) = top(&shown, view).filter(|&t| t < shown.len()) else {
-        return state_lines(
-            "HELD",
-            "the held frame has left the ring; End: back to live",
-            width,
-            theme,
-        );
-    };
-    let rows = &shown[t..];
+    // Over everything heard, whatever the capture shows: a capture is
+    // what is looked at, not what is measured.
+    let rows = &shown[..];
     let mut out = Vec::new();
     if rows.iter().any(|r| r.family().is_some()) {
         reading(rows, width, theme, &mut out);
@@ -573,7 +568,6 @@ pub(super) fn lower(
     back: &str,
 ) -> Vec<Line<'static>> {
     let mut out = Vec::new();
-    let shown = shown(state);
     let view = &state.net.wifi.frames_view;
     if view.decode {
         out.push(rule(
@@ -586,16 +580,14 @@ pub(super) fn lower(
         ));
         return out;
     }
-    let (Some(t), Some(row)) = (
-        top(&shown, view).filter(|&t| t < shown.len()),
-        at(&shown, view).map(|i| shown[i]),
-    ) else {
+    let Some((c, at)) = selection(state) else {
         return out;
     };
+    let row = &c.rows[at];
     out.push(rule(
         &format!(
-            "SELECTED  {} \u{b7} d: the decode account{back}",
-            when(since(row, shown[t])).trim()
+            "SELECTED  {} from the trigger \u{b7} d: the decode account{back}",
+            when(since_trigger(row, c)).trim()
         ),
         width,
         theme,
@@ -644,9 +636,7 @@ pub fn on_screen(state: &SdrMetrics) -> bool {
 /// The reading in words, for the river's title where the card has no room:
 /// `None` until there is a rate to give.
 pub(super) fn reading_words(state: &SdrMetrics) -> Option<String> {
-    let shown = shown(state);
-    let t = top(&shown, &state.net.wifi.frames_view).filter(|&t| t < shown.len())?;
-    let r = rate(&shown[t..])?;
+    let r = rate(&shown(state))?;
     let mean = if r.mean >= 10.0 {
         format!("{:.0}", r.mean)
     } else {
@@ -676,14 +666,12 @@ impl Panel for NetWifiCardPanel {
             .stale_when(Staleness::NotStreaming)
             .tag_if(true, state.net.mode.tag())
             .counts_from_feed(FeedSpan::Session);
-        let shown = shown(state);
         let view = &state.net.wifi.frames_view;
         // Only while the selected frame's fields are on it: not in place of
         // a silence, nor under the decode account.
         let offset = super::silence(state).is_none()
             && !view.decode
-            && top(&shown, view).is_some_and(|t| t < shown.len())
-            && at(&shown, view).is_some_and(|i| shown[i].offset_hz.is_some());
+            && selection(state).is_some_and(|(c, at)| c.rows[at].offset_hz.is_some());
         if offset {
             chrome.shows_offsets()
         } else {
@@ -776,6 +764,23 @@ mod tests {
             clock: None,
             epoch: 0,
         }
+    }
+
+    /// The ring as one capture, set off by its newest frame.
+    fn captured(m: &mut SdrMetrics) {
+        let rows: Vec<WifiRow> = m.net.wifi.rows.iter().copied().collect();
+        let t = rows[rows.len() - 1];
+        m.net.wifi.scope.capture = Some(crate::state::Capture {
+            number: 3,
+            zoom: crate::state::FrameZoom::Rhythm,
+            trigger: crate::state::Trigger::Any,
+            epoch: 0,
+            from: t.start.saturating_sub(32_000),
+            to: t.start + 288_000,
+            trigger_seq: t.seq,
+            rows,
+            lost: Vec::new(),
+        });
     }
 
     fn text(m: &SdrMetrics, w: u16, h: u16) -> String {
@@ -942,9 +947,10 @@ mod tests {
             clock: Some(clock),
             ..at(0.0, ht())
         });
+        captured(&mut m);
         let out = text(&m, 70, 27);
         for want in [
-            "SELECTED",
+            "SELECTED  +0.000 ms from the trigger",
             "48.00 \u{b1} 0.20 kHz",
             "SNR 27.0 dB",
             "symbol clock",
@@ -1015,6 +1021,7 @@ mod tests {
         for (kind, wants) in cases {
             let mut m = on_eleven();
             m.net.wifi.push_row(at(0.0, kind));
+            captured(&mut m);
             let out = text(&m, 70, 27);
             for want in wants {
                 assert!(out.contains(want), "{want} in\n{out}");
@@ -1031,6 +1038,7 @@ mod tests {
             channel: Some([0; 52]),
             ..at(0.0, ht())
         });
+        captured(&mut m);
         let out = text(&m, 70, 18);
         assert!(!out.contains("payload"), "{out}");
         assert!(out.contains("+0.0 dB"), "{out}");
@@ -1046,6 +1054,7 @@ mod tests {
     fn d_turns_the_card_to_the_decode_account() {
         let mut m = on_eleven();
         m.net.wifi.push_row(at(0.0, ht()));
+        captured(&mut m);
         m.net.health.wifi.this_channel = 1;
         m.net.wifi.frames_view.decode = true;
         let out = text(&m, 70, 27);
