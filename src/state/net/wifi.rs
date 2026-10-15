@@ -294,6 +294,69 @@ impl WifiSurvey {
 
 /// Where Wi-Fi's receiver runs, or why it does not, published by the
 /// worker's Wi-Fi part (`signal::net::worker`'s `wifi`).
+/// How many frames the Frames list keeps: about seven seconds of a busy
+/// channel (300 frames a second), a minute and a half of a quiet one.
+pub const WIFI_ROWS_KEPT: usize = 2_048;
+
+/// What a frame in the Frames list is, as far as it was read.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum RowKind {
+    /// A frame of this channel, OFDM: what its signalling said.
+    Ofdm(crate::signal::wifi::format::Heard),
+    /// A frame of this channel, 802.11b: its preamble, and its header or
+    /// why it was refused.
+    Dsss {
+        preamble: crate::signal::wifi::dsss::header::Preamble,
+        header: Result<
+            crate::signal::wifi::dsss::header::Header,
+            crate::signal::wifi::dsss::header::Fault,
+        >,
+    },
+    /// Another channel's OFDM frame, `shift_mhz` from ours: its start, and
+    /// nothing more, since nothing it said was read.
+    OtherOfdm { shift_mhz: i32 },
+    /// Another channel's 802.11b frame, its header read at its own centre.
+    OtherDsss {
+        shift_mhz: i32,
+        preamble: crate::signal::wifi::dsss::header::Preamble,
+        header: Result<
+            crate::signal::wifi::dsss::header::Header,
+            crate::signal::wifi::dsss::header::Fault,
+        >,
+    },
+}
+
+/// One frame in the Frames list.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct WifiRow {
+    /// Its place in the session's arrivals, from 1: what a selection holds
+    /// on to, since the ring's positions shift with every frame.
+    pub seq: u64,
+    /// The stream pair its first sample arrived at.
+    pub start: u64,
+    /// The run of the stream it was heard in: within one run, starts are
+    /// one clock; across a break or a retune they are not.
+    pub run: u64,
+    pub when: std::time::Instant,
+    /// The channel centre it was heard on.
+    pub carrier_hz: f64,
+    pub kind: RowKind,
+    /// The airtime it stated, in microseconds: `None` where nothing it
+    /// said was read.
+    pub airtime_us: Option<u32>,
+    /// From the end of the frame before it to its start, in microseconds:
+    /// `None` across a break, and after a frame that stated no length.
+    pub gap_us: Option<f64>,
+    /// Its carrier against our tuning.
+    pub offset_hz: Option<crate::signal::dsp::uncertainty::Uncertain>,
+    /// Its SNR a sample, in dB.
+    pub snr_db: Option<f64>,
+    /// Its channel's magnitude on each of the 52 tones, as hundredths of a
+    /// decibel against the tones' mean power; a frame of this channel's
+    /// OFDM only.
+    pub channel: Option<[i16; 52]>,
+}
+
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct WifiState {
     /// The Wi-Fi channel the receiver runs on now, when it runs.
@@ -317,12 +380,121 @@ pub struct WifiState {
     pub last_dsss: Option<WifiDsss>,
     /// The survey's visits, channel by channel.
     pub survey: WifiSurvey,
+    /// The frames heard, oldest first, in the order they were sent: at most
+    /// [`WIFI_ROWS_KEPT`].
+    pub rows: std::collections::VecDeque<WifiRow>,
+    /// Frames heard this session, the last row's seq.
+    pub rows_heard: u64,
+}
+
+impl WifiState {
+    /// Keep `row`, in its place by start within its run (a frame can be
+    /// judged after one that followed it), with the gap before it and the
+    /// gap after it worked out again.
+    pub fn push_row(&mut self, mut row: WifiRow) {
+        self.rows_heard += 1;
+        row.seq = self.rows_heard;
+        let at = self
+            .rows
+            .iter()
+            .rposition(|r| (r.run, r.start) <= (row.run, row.start))
+            .map_or(0, |i| i + 1);
+        self.rows.insert(at, row);
+        for i in [at, at + 1] {
+            if i < self.rows.len() {
+                let gap = i
+                    .checked_sub(1)
+                    .and_then(|p| gap_us(&self.rows[p], &self.rows[i]));
+                self.rows[i].gap_us = gap;
+            }
+        }
+        while self.rows.len() > WIFI_ROWS_KEPT {
+            self.rows.pop_front();
+        }
+    }
+}
+
+/// From the end of `before` to the start of `row`, in microseconds, when
+/// both are of one run and `before` stated its length. A Wi-Fi view runs at
+/// exactly 20 Msps (`signal::net::wifi::rate_refusal`): 20 pairs a
+/// microsecond.
+fn gap_us(before: &WifiRow, row: &WifiRow) -> Option<f64> {
+    let air = before.airtime_us?;
+    (before.run == row.run)
+        .then(|| (row.start as f64 - before.start as f64) / 20.0 - f64::from(air))
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::signal::dsp::uncertainty::Uncertain;
+
+    /// A row of this channel's OFDM, `start_us` into run `run`, stating
+    /// `air_us` of airtime.
+    fn row(run: u64, start_us: f64, air_us: Option<u32>) -> WifiRow {
+        WifiRow {
+            seq: 0,
+            start: (start_us * 20.0) as u64,
+            run,
+            when: std::time::Instant::now(),
+            carrier_hz: 2_462e6,
+            kind: RowKind::OtherOfdm { shift_mhz: 5 },
+            airtime_us: air_us,
+            gap_us: None,
+            offset_hz: None,
+            snr_db: None,
+            channel: None,
+        }
+    }
+
+    /// **Rows are kept in the order they were sent, with the gap before
+    /// each.** A data frame and its acknowledgement a SIFS apart read 16 us
+    /// apart; a frame judged late (an 802.11b header waits longer than an
+    /// OFDM one) goes in its place, and the gaps either side of it follow.
+    #[test]
+    fn rows_are_kept_in_order_with_their_gaps() {
+        let mut w = WifiState::default();
+        w.push_row(row(0, 0.0, Some(48)));
+        w.push_row(row(0, 64.0, Some(44)));
+        assert_eq!(w.rows[1].gap_us, Some(16.0));
+        w.push_row(row(0, 2_000.0, Some(28)));
+        w.push_row(row(0, 500.0, Some(100)));
+        let starts: Vec<u64> = w.rows.iter().map(|r| r.start / 20).collect();
+        assert_eq!(starts, [0, 64, 500, 2_000]);
+        assert_eq!(w.rows[2].gap_us, Some(500.0 - 108.0));
+        assert_eq!(w.rows[3].gap_us, Some(2_000.0 - 600.0));
+        let seqs: Vec<u64> = w.rows.iter().map(|r| r.seq).collect();
+        assert_eq!(seqs, [1, 2, 4, 3], "each keeps the seq it arrived with");
+    }
+
+    /// Across a break or a retune the stream's clock starts again: the gap
+    /// is unknown, never a number. So is the gap after a frame whose length
+    /// nothing stated.
+    #[test]
+    fn a_gap_is_known_only_within_a_run_after_a_stated_length() {
+        let mut w = WifiState::default();
+        w.push_row(row(0, 0.0, Some(48)));
+        w.push_row(row(1, 30.0, Some(48)));
+        assert_eq!(w.rows[1].gap_us, None, "across a break");
+        w.push_row(row(1, 200.0, None));
+        w.push_row(row(1, 400.0, Some(48)));
+        assert_eq!(
+            w.rows[3].gap_us, None,
+            "after a frame with no stated length"
+        );
+    }
+
+    /// The ring keeps its newest `WIFI_ROWS_KEPT`, oldest first.
+    #[test]
+    fn the_ring_keeps_its_newest() {
+        let mut w = WifiState::default();
+        for i in 0..(WIFI_ROWS_KEPT + 52) {
+            w.push_row(row(0, i as f64 * 100.0, Some(48)));
+        }
+        assert_eq!(w.rows.len(), WIFI_ROWS_KEPT);
+        assert_eq!(w.rows.front().unwrap().seq, 53);
+        assert_eq!(w.rows_heard, (WIFI_ROWS_KEPT + 52) as u64);
+    }
 
     /// The busiest megahertz of each channel at each of its six visits, as
     /// the survey recorded on 2026-10-14 heard them (channel 1 first).

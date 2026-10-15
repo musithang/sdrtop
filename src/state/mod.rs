@@ -45,7 +45,8 @@ pub use net::ROSTER_SORT_KEYS;
 #[cfg(test)]
 pub use net::WifiSurvey;
 pub use net::{
-    Family, LeastBusy, NetDecodeHealth, Visit, WifiClock, WifiDsss, WifiFrame, WifiFunnel,
+    Family, LeastBusy, NetDecodeHealth, RowKind, Visit, WifiClock, WifiDsss, WifiFrame, WifiFunnel,
+    WifiRow,
 };
 pub use observer::ObserverState;
 pub use radio::{

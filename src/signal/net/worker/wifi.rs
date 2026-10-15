@@ -25,6 +25,7 @@ use crate::signal::dsp::uncertainty::Uncertain;
 use crate::signal::net::measure::Recent;
 use crate::signal::net::scan::Scan;
 use crate::signal::net::survey::{SETTLE, WIFI_DWELL};
+use crate::signal::wifi::channel::{estimate, Estimate, Floor};
 use crate::signal::wifi::clock::{measure, plan, Plan};
 use crate::signal::wifi::detect::{Detection, StfDetector};
 use crate::signal::wifi::dsss::receive::{
@@ -32,7 +33,7 @@ use crate::signal::wifi::dsss::receive::{
 };
 use crate::signal::wifi::format::{read, Signalling};
 use crate::signal::wifi::sync::{examine, needs, Sync, Verdict};
-use crate::state::{Family, SdrMetrics, Visit, WifiClock, WifiDsss};
+use crate::state::{Family, RowKind, SdrMetrics, Visit, WifiClock, WifiDsss, WifiRow};
 
 /// Where the receiver runs, or why not, its detector, the repeats found
 /// that wait for their long training field to be held, and the frames that
@@ -53,6 +54,9 @@ pub(super) struct Wifi {
     /// On the survey, the visit under way, and how long one lasts.
     visit: Option<Visiting>,
     rhythm: Rhythm,
+    /// The stream's run: one more at every break or retune, so the Frames
+    /// list never works out a gap across one.
+    run: u64,
 }
 
 /// How long a visit lets the tuner settle, and how long it then listens:
@@ -105,6 +109,7 @@ impl Wifi {
     /// The stream broke or the radio moved: a preamble in progress was cut
     /// short, and is counted as that.
     pub(super) fn interrupted(&mut self, state: &Arc<Mutex<SdrMetrics>>) {
+        self.run += 1;
         // The visit goes on: a gap in the feed has not moved the radio,
         // and a visit counts what it heard. A retune, a new stream, another
         // channel or another view ends it (`end_visit`).
@@ -209,6 +214,22 @@ impl Wifi {
     ) {
         let mut counts = crate::state::WifiFunnel::default();
         let mut last = None;
+        // Every frame judged, as a row of the Frames list.
+        let mut rows: Vec<WifiRow> = Vec::new();
+        let run = self.run;
+        let row = |start: u64, kind: RowKind| WifiRow {
+            seq: 0,
+            start,
+            run,
+            when: now,
+            carrier_hz: centre_hz,
+            kind,
+            airtime_us: None,
+            gap_us: None,
+            offset_hz: None,
+            snr_db: None,
+            channel: None,
+        };
         self.waiting.retain(|d| {
             let Some((from, len)) = needs(d.peak) else {
                 counts.cut += 1;
@@ -230,10 +251,29 @@ impl Wifi {
                     None => counts.cut += 1,
                     Some(heard) => {
                         counts.this_channel += 1;
+                        let (f, us) = family(&heard);
                         if let Some(v) = self.visit.as_mut() {
-                            let (f, us) = family(&heard);
                             v.frame(f, us);
                         }
+                        rows.push(WifiRow {
+                            airtime_us: us.map(|us| us.round() as u32),
+                            offset_hz: Some(s.offset),
+                            snr_db: Some(10.0 * s.snr.log10()),
+                            // The magnitudes do not depend on the floor's
+                            // shape, which only widens each tone's
+                            // uncertainty.
+                            channel: estimate(
+                                &stretch,
+                                from,
+                                s.ltf_start,
+                                s.offset.value(),
+                                &Floor::flat(),
+                            )
+                            .and_then(|e| centi_db(&e)),
+                            // The long training field follows the short
+                            // field (8 us) and its own guard (1.6 us).
+                            ..row(s.ltf_start.saturating_sub(192), RowKind::Ofdm(heard))
+                        });
                         match heard.signalling() {
                             Signalling::LSigRead => counts.lsig_read += 1,
                             Signalling::Greenfield => counts.greenfield += 1,
@@ -255,8 +295,9 @@ impl Wifi {
                         });
                     }
                 },
-                Some(Verdict::Adjacent { .. }) => {
+                Some(Verdict::Adjacent { shift_mhz }) => {
                     counts.adjacent += 1;
+                    rows.push(row(d.start, RowKind::OtherOfdm { shift_mhz }));
                     if let Some(v) = self.visit.as_mut() {
                         v.other += 1;
                     }
@@ -299,6 +340,12 @@ impl Wifi {
         });
         // Every 802.11b SYNC whose header is held by now is read.
         let mut last_dsss = None;
+        let dsss_row = |r: &crate::signal::wifi::dsss::receive::Read, kind: RowKind| WifiRow {
+            airtime_us: r.header.ok().map(|h| h.airtime_us(r.preamble)),
+            offset_hz: Some(r.offset_hz),
+            snr_db: r.snr_db,
+            ..row(r.start, kind)
+        };
         let until = &mut self.dsss_until;
         let visit = &mut self.visit;
         self.dsss_waiting.retain(|f| {
@@ -321,6 +368,14 @@ impl Wifi {
                 // ours. Its airtime still holds its own chips found again.
                 Some(DsssVerdict::Frame(r)) if r.shift_mhz != 0 => {
                     counts.dsss_adjacent += 1;
+                    rows.push(dsss_row(
+                        &r,
+                        RowKind::OtherDsss {
+                            shift_mhz: r.shift_mhz,
+                            preamble: r.preamble,
+                            header: r.header,
+                        },
+                    ));
                     if let Some(v) = visit.as_mut() {
                         v.other += 1;
                     }
@@ -340,6 +395,13 @@ impl Wifi {
                         let us = r.header.ok().map(|h| f64::from(h.airtime_us(r.preamble)));
                         v.frame(Family::Dsss, us);
                     }
+                    rows.push(dsss_row(
+                        &r,
+                        RowKind::Dsss {
+                            preamble: r.preamble,
+                            header: r.header,
+                        },
+                    ));
                     last_dsss = Some(WifiDsss {
                         preamble: r.preamble,
                         header: r.header,
@@ -388,6 +450,10 @@ impl Wifi {
             f.dsss_adjacent += counts.dsss_adjacent;
             if last.is_some() {
                 m.net.wifi.last_frame = last;
+            }
+            rows.sort_by_key(|r| r.start);
+            for r in rows {
+                m.net.wifi.push_row(r);
             }
         }
     }
@@ -439,6 +505,23 @@ fn decide(centre_hz: u64, rate_hz: f64) -> (Option<u8>, Option<String>) {
 
 /// The family a frame of this channel is, and the airtime its signalling
 /// stated, in microseconds, when it stated one.
+/// A channel estimate's magnitude on each tone, as hundredths of a decibel
+/// against the tones' mean power: what the Frames card draws, in 104 bytes
+/// a frame rather than 832.
+fn centi_db(e: &Estimate) -> Option<[i16; 52]> {
+    let power: Vec<f64> = e.h.iter().map(|h| h.norm_sqr()).collect();
+    let mean = power.iter().sum::<f64>() / power.len().max(1) as f64;
+    if power.len() != 52 || mean <= 0.0 {
+        return None;
+    }
+    let mut out = [0i16; 52];
+    for (o, p) in out.iter_mut().zip(&power) {
+        let cdb = 1_000.0 * (p.max(mean * 1e-6) / mean).log10();
+        *o = cdb.round().clamp(f64::from(i16::MIN), f64::from(i16::MAX)) as i16;
+    }
+    Some(out)
+}
+
 fn family(heard: &crate::signal::wifi::format::Heard) -> (Family, Option<f64>) {
     use crate::signal::wifi::format::Format;
     // The L-SIG's airtime is the frame's in every format but greenfield,
@@ -579,6 +662,25 @@ mod tests {
     /// Each frame is the family its signalling named, with the airtime its
     /// L-SIG stated; a frame whose L-SIG was refused is undecoded and states
     /// nothing.
+    /// The channel kept for the card: each tone's power against the mean,
+    /// in hundredths of a decibel.
+    #[test]
+    fn a_channel_is_kept_in_hundredths_of_a_decibel() {
+        let mut h = vec![num_complex::Complex::new(1.0, 0.0); 52];
+        h[0] = num_complex::Complex::new(2.0, 0.0);
+        h[51] = num_complex::Complex::new(0.0, 0.0);
+        let e = Estimate {
+            h,
+            variance: vec![0.0; 52],
+        };
+        let c = centi_db(&e).unwrap();
+        // Mean power (4 + 50 + 0) / 52.
+        let mean = 54.0f64 / 52.0;
+        assert_eq!(c[0], (1_000.0 * (4.0 / mean).log10()).round() as i16);
+        assert_eq!(c[1], (1_000.0 * (1.0 / mean).log10()).round() as i16);
+        assert_eq!(c[51], -6_000, "a tone with nothing on it is held at -60 dB");
+    }
+
     #[test]
     fn a_frame_is_the_family_its_signalling_named() {
         let air = LSig {

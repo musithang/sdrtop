@@ -38,7 +38,9 @@ use crate::ui::panel::{Panel, PanelChrome, Staleness};
 pub struct NetDecodeHealthPanel;
 
 /// Label and value column widths, so the counts line up under each other.
-const LABEL: usize = 15;
+/// The label column holds the longest label any row has (`not a short
+/// field`, `  another channel`): a longer one pushes its count out of line.
+const LABEL: usize = 17;
 const VALUE: usize = 10;
 
 /// One row: a label, a right-aligned count, and a note that earns its place or
@@ -559,6 +561,53 @@ mod tests {
         assert!(out.contains("decode load"), "{out}");
         assert!(out.contains("gave up"), "{out}");
         assert!(!out.contains("\u{2503}"), "{out}");
+    }
+
+    /// **Every count sits in one column.** The Wi-Fi rows' longer labels
+    /// (`not a short field`, `  another channel`) pushed their numbers two
+    /// places right of the others'.
+    #[test]
+    fn every_wifi_count_ends_in_one_column() {
+        let mut m = streaming();
+        m.net.wifi.ran = true;
+        m.net.wifi.channel = Some(6);
+        let f = &mut m.net.health.wifi;
+        (f.detected, f.this_channel, f.lsig_read, f.unreadable) = (1_204, 1_100, 1_042, 50);
+        (f.adjacent, f.not_preamble, f.not_short_field, f.cut) = (60, 27, 1_315, 17);
+        (f.dsss_found, f.dsss_read, f.dsss_refused, f.dsss_no_sfd) = (96, 90, 3, 2);
+        (f.dsss_cut, f.dsss_inside, f.dsss_adjacent) = (1, 7, 11);
+        let out = draw(NetDecodeHealthPanel, 90, 60, &m);
+        let from = out
+            .iter()
+            .position(|l| l.contains("Wi-Fi"))
+            .expect("the Wi-Fi rows");
+        let ends: Vec<(usize, String)> = out[from + 1..]
+            .iter()
+            .filter_map(|l| {
+                // The count: from its first digit after the label, through single spaces
+                // between digit groups (`1 204`); the note starts three
+                // spaces after it.
+                let body: Vec<char> = l.trim_start_matches('│').chars().collect();
+                // Past the label, which may hold digits of its own (802.11b).
+                let mut i = super::LABEL
+                    + body[super::LABEL..]
+                        .iter()
+                        .position(|c| c.is_ascii_digit())?;
+                while i + 1 < body.len()
+                    && (body[i + 1].is_ascii_digit()
+                        || (body[i + 1] == ' '
+                            && body.get(i + 2).is_some_and(|c| c.is_ascii_digit())))
+                {
+                    i += 1;
+                }
+                Some((i, body.iter().collect()))
+            })
+            .take(14)
+            .collect();
+        let first = ends[0].0;
+        for (end, line) in &ends {
+            assert_eq!(*end, first, "{line}");
+        }
     }
 
     /// Wi-Fi is named only once its receiver has run this session; then

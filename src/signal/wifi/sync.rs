@@ -64,10 +64,9 @@ pub struct Sync {
 #[derive(Clone, Copy, Debug)]
 pub enum Verdict {
     ThisChannel(Sync),
-    /// A frame on the channel `shift_mhz` away. Which one is read by the
-    /// tests until a view names the loud neighbour.
+    /// A frame on the channel `shift_mhz` away (5, 10 or 15 MHz either
+    /// side), which the Frames list names.
     Adjacent {
-        #[cfg(test)]
         shift_mhz: i32,
     },
     /// Nothing matched: a repeat, but no frame of ours or a neighbour's.
@@ -199,7 +198,6 @@ pub fn examine(samples: &[Complex<f32>], first_pair: u64, peak: u64) -> Option<V
     }
     if shift != 0 {
         return Some(Verdict::Adjacent {
-            #[cfg(test)]
             shift_mhz: 5 * shift,
         });
     }

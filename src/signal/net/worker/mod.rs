@@ -1764,6 +1764,127 @@ mod tests {
         m
     }
 
+    /// OFDM frames at the given pairs into `blocks` blocks of 4096 eight-bit
+    /// pairs, each 20 dB over the noise: equal blocks, so the stream's pairs
+    /// are one clock from block to block.
+    fn ofdm_blocks(
+        frames: &[(usize, &[num_complex::Complex<f64>])],
+        blocks: usize,
+        seed: u64,
+    ) -> Vec<Vec<u8>> {
+        let mut air = vec![num_complex::Complex::new(0.0f64, 0.0); 4096 * blocks];
+        for (start, f) in frames {
+            let power = f[..320].iter().map(|z| z.norm_sqr()).sum::<f64>() / 320.0;
+            let scale = 0.2 / power.sqrt();
+            for (o, z) in air[*start..].iter_mut().zip(f.iter()) {
+                *o += z * scale;
+            }
+        }
+        let noise = crate::signal::dsp::testkit::Rng::new(seed).noise(4096 * blocks, 0.0004);
+        let all: Vec<u8> = air
+            .iter()
+            .zip(&noise)
+            .flat_map(|(s, n)| {
+                let q = |v: f32| (v * 128.0).clamp(-127.0, 127.0) as i8 as u8;
+                [q(s.re as f32 + n.re), q(s.im as f32 + n.im)]
+            })
+            .collect();
+        all.chunks(8192).map(|c| c.to_vec()).collect()
+    }
+
+    /// **Every frame is kept as a row, with the gap before it.** A data
+    /// frame and a 14-octet frame a SIFS after it: two rows of this
+    /// channel's OFDM, the first where it was sent and stating the airtime
+    /// it took, the second 16 us after the first one's end, each with its
+    /// SNR and its channel's magnitudes.
+    #[test]
+    fn every_frame_is_kept_as_a_row_with_the_gap_before_it() {
+        use crate::signal::wifi::{annex::MESSAGE, ppdu::ppdu, signal_field::Rate};
+        let a = ppdu(&MESSAGE, Rate::R36, 54);
+        let b = ppdu(&[0x5a; 14], Rate::R6, 0x5d);
+        let at_b = 1_000 + a.len() + 16 * 20;
+        let blocks: Vec<(u64, Vec<u8>)> = ofdm_blocks(&[(1_000, &a), (at_b, &b)], 3, 7)
+            .into_iter()
+            .enumerate()
+            .map(|(i, b)| (1 + i as u64, b))
+            .collect();
+        let m = run_wifi("wifi_channel", "wifi_frames", &blocks);
+        let rows = &m.net.wifi.rows;
+        assert_eq!(rows.len(), 2, "{rows:?}");
+        assert_eq!(rows[0].start, 1_000);
+        assert_eq!(rows[0].airtime_us, Some((a.len() / 20) as u32));
+        assert!(matches!(rows[0].kind, crate::state::RowKind::Ofdm(_)));
+        assert!(
+            rows[0].snr_db.is_some_and(|s| s > 15.0),
+            "{:?}",
+            rows[0].snr_db
+        );
+        // Sent through no channel at all: every tone within 1.5 dB of the
+        // mean at 20 dB.
+        let ch = rows[0].channel.expect("its channel");
+        assert!(ch.iter().all(|c| c.abs() < 150), "{ch:?}");
+        let gap = rows[1].gap_us.expect("a gap within one run");
+        assert!((gap - 16.0).abs() < 0.1, "{gap}");
+    }
+
+    /// Across a break the gap is unknown, never a number.
+    #[test]
+    fn a_break_leaves_the_gap_unknown() {
+        use crate::signal::wifi::{annex::MESSAGE, ppdu::ppdu, signal_field::Rate};
+        let a = ppdu(&MESSAGE, Rate::R36, 54);
+        let first = ofdm_blocks(&[(1_000, &a)], 1, 8).remove(0);
+        let second = ofdm_blocks(&[(500, &a)], 1, 9).remove(0);
+        let quiet = ofdm_blocks(&[], 1, 10).remove(0);
+        // Block 3 never arrives: a break.
+        let m = run_wifi(
+            "wifi_channel",
+            "wifi_frames",
+            &[(1, first), (2, quiet.clone()), (4, second), (5, quiet)],
+        );
+        let rows = &m.net.wifi.rows;
+        assert_eq!(rows.len(), 2, "{rows:?}");
+        assert_eq!(rows[1].gap_us, None);
+    }
+
+    /// An 802.11b frame of this channel is kept with its header's airtime
+    /// and its SNR read from its SYNC (20 dB put in); one of another
+    /// channel with its shift.
+    #[test]
+    fn an_802_11b_frame_is_kept_as_a_row() {
+        use crate::state::RowKind;
+        let h = beacon_like();
+        let mut blocks = vec![(1, noise_block(1))];
+        for (i, b) in dsss_blocks(1000, 2, &h, 2).into_iter().enumerate() {
+            blocks.push((2 + i as u64, b));
+        }
+        blocks.push((4, noise_block(4)));
+        let m = run_wifi("wifi_channel", "wifi_frames", &blocks);
+        let r = m.net.wifi.rows.back().expect("a row");
+        assert!(matches!(r.kind, RowKind::Dsss { .. }), "{r:?}");
+        let air = h.airtime_us(crate::signal::wifi::dsss::header::Preamble::Long);
+        assert_eq!(r.airtime_us, Some(air));
+        assert!(
+            r.snr_db.is_some_and(|s| (s - 20.0).abs() < 1.5),
+            "{:?}",
+            r.snr_db
+        );
+
+        let mut blocks = vec![(1, noise_block(1))];
+        for (i, b) in dsss_blocks_faded(1000, 2, &h, 60, None, 3.0e6, 2)
+            .into_iter()
+            .enumerate()
+        {
+            blocks.push((2 + i as u64, b));
+        }
+        blocks.push((4, noise_block(4)));
+        let m = run_wifi("wifi_channel", "wifi_frames", &blocks);
+        let r = m.net.wifi.rows.back().expect("a row");
+        assert!(
+            matches!(r.kind, RowKind::OtherDsss { shift_mhz: 3, .. }),
+            "{r:?}"
+        );
+    }
+
     /// A frame on the Wi-Fi view is found once, judged this channel's by
     /// its long training field, and its offset shown: the annex's frame was
     /// sent on the channel's centre, so the offset is near nothing.

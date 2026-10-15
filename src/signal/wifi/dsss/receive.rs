@@ -317,7 +317,29 @@ pub struct Read {
     /// frame of this channel, anything else another channel's. 10 is also
     /// -10.
     pub shift_mhz: i32,
+    /// Its SNR a sample, in dB, read from its SYNC's coherence
+    /// ([`snr_from_coherence`]); `None` where the coherence is past what
+    /// the template can carry, or within noise of nothing.
+    pub snr_db: Option<f64>,
 }
+
+/// The SNR a sample, in dB, from `rho`: the mean share of a SYNC symbol's
+/// energy the Barker template carries, with the frame's carrier taken off
+/// first. With signal S and noise N a sample over a symbol of L samples, the
+/// template carries S times its own coherence with the chips as sent
+/// (`TEMPLATE_CARRIES`) plus the noise's share along any one direction,
+/// N / L, of the S + N there is; inverted.
+pub fn snr_from_coherence(rho: f64) -> Option<f64> {
+    let floor = 1.0 / SYMBOL as f64;
+    (rho > floor && rho < TEMPLATE_CARRIES)
+        .then(|| 10.0 * ((rho - floor) / (TEMPLATE_CARRIES - rho)).log10())
+}
+
+/// The coherence of the template with a noiseless 802.11b symbol as the
+/// capture holds it: below one, since the chips reach us through our
+/// filter and at 20 Msps rather than 11 Mchip/s. Measured on the standard's
+/// own waveform (`the_template_carries_what_it_says`).
+const TEMPLATE_CARRIES: f64 = 0.974;
 
 /// What a SYNC turned out to be.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -521,6 +543,7 @@ pub fn examine(samples: &[Complex<f32>], first_pair: u64, found: &Found) -> Opti
     let Some(offset_hz) = carrier(&chips(0..k.saturating_sub(16).max(RUN))) else {
         return Some(nothing_read);
     };
+
     let turn = Complex::from_polar(1.0, -std::f64::consts::TAU * offset_hz.value() * 1e-6);
 
     // d[k] is the change into symbol k + 1: the SFD's last bit. The frame
@@ -530,6 +553,36 @@ pub fn examine(samples: &[Complex<f32>], first_pair: u64, found: &Found) -> Opti
         Preamble::Short => 56,
     };
     let start_symbol = (k + 1 + 1) as i64 - (sync + 16) as i64;
+    // Its SNR from the coherence of its whole SYNC symbols, from its first
+    // to the last before the SFD: a symbol the run began on that was partly
+    // noise before the frame would pass the gate and read it low. The
+    // carrier is taken off them first: its turn across a symbol lowers the
+    // coherence by more than a simple model of it says once noise is mixed
+    // in (at 150 kHz and 25 dB the model read 6 dB high), and with it gone
+    // the template's own coherence holds as measured.
+    let sync_symbols = start_symbol.max(0) as usize..(k + 1).saturating_sub(15).min(rho.len());
+    let snr_db = (!sync_symbols.is_empty())
+        .then(|| {
+            let (a, b) = (
+                at + SYMBOL * sync_symbols.start,
+                at + SYMBOL * sync_symbols.end,
+            );
+            let step = -std::f64::consts::TAU * offset_hz.value() / 20e6;
+            let still: Vec<Complex<f32>> = samples[a..b]
+                .iter()
+                .enumerate()
+                .map(|(n, z)| {
+                    let r = Complex::from_polar(1.0, step * (a + n) as f64);
+                    let z = Complex::new(z.re as f64, z.im as f64) * r;
+                    Complex::new(z.re as f32, z.im as f32)
+                })
+                .collect();
+            let sum: f64 = (0..sync_symbols.len())
+                .map(|s| despread(&still, SYMBOL * s, shift_mhz).1)
+                .sum();
+            sum / sync_symbols.len() as f64
+        })
+        .and_then(snr_from_coherence);
     let start = (first_pair as i64 + at as i64 + SYMBOL as i64 * start_symbol) as u64;
 
     let mut bits = Vec::with_capacity(48);
@@ -570,6 +623,7 @@ pub fn examine(samples: &[Complex<f32>], first_pair: u64, found: &Found) -> Opti
             offset_hz.sigma(),
         ),
         shift_mhz,
+        snr_db,
     }))
 }
 
@@ -651,6 +705,61 @@ mod tests {
                     }
                 }
             }
+        }
+    }
+
+    /// The template's coherence with a noiseless SYNC symbol, as the
+    /// capture holds it, is the constant the SNR is read against.
+    #[test]
+    fn the_template_carries_what_it_says() {
+        let mut rng = Rng::new(132);
+        let f = frame(
+            Preamble::Long,
+            &header(Rate::M1, true, 400),
+            40,
+            4,
+            &mut rng,
+        );
+        let x: Vec<Complex<f32>> = f
+            .iter()
+            .map(|z| Complex::new(z.re as f32, z.im as f32))
+            .collect();
+        let start = 4 * SYMBOL;
+        let rho: Vec<f64> = (0..128)
+            .map(|k| despread(&x, start + SYMBOL * k, 0).1)
+            .collect();
+        let mean = rho.iter().sum::<f64>() / rho.len() as f64;
+        eprintln!("template carries {mean:.6}");
+        assert!((mean - TEMPLATE_CARRIES).abs() < 5e-4, "{mean:.6}");
+    }
+
+    /// **A frame's SNR is read from its SYNC.** The share of each SYNC
+    /// symbol's energy the Barker template carries is S / (S + N) plus the
+    /// noise's own share along the template; inverted, it is the SNR a
+    /// sample. Long frames at 1 Mb/s, 5 to 25 dB a sample, six a level at
+    /// carriers 0 to 150 kHz off (the turn across a symbol taken out):
+    /// read within 1 dB of what was put in.
+    #[test]
+    fn the_snr_is_read_from_the_sync() {
+        let mut rng = Rng::new(131);
+        for snr in [5.0, 10.0, 15.0, 20.0, 25.0] {
+            let mut read = Vec::new();
+            for off in [0.0, 30e3, -60e3, 90e3, -120e3, 150e3] {
+                let f = frame(
+                    Preamble::Long,
+                    &header(Rate::M1, true, 400),
+                    40,
+                    4,
+                    &mut rng,
+                );
+                let x = on_air(&f, snr, off, &mut rng);
+                match received(&x) {
+                    Some(Verdict::Frame(r)) => read.push(r.snr_db.expect("an SNR")),
+                    other => panic!("{snr} dB: {other:?}"),
+                }
+            }
+            let mean = read.iter().sum::<f64>() / read.len() as f64;
+            assert!((mean - snr).abs() < 1.0, "{snr} dB put in, read {read:?}");
         }
     }
 
