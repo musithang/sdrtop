@@ -53,8 +53,7 @@ pub const ADC_COMFORT_DBFS: std::ops::RangeInclusive<f32> = -12.0..=-4.0;
 /// question. So the offset follows what the carrier turns out to be.
 ///
 /// These are the channel steps of the services the classifier can name, not
-/// regulatory ACPR masks (sdrtop asserts no mask; see the panel's own
-/// `ACPR_BAR_FLOOR_DB`). An unclassified carrier keeps the broadcast spacing,
+/// regulatory ACPR masks (sdrtop asserts no mask; see [`ACPR_FLOOR_DB`]). An unclassified carrier keeps the broadcast spacing,
 /// since that is the state the page rests in.
 ///
 /// The value actually used is recorded in [`SignalState::acpr_offset_hz`] rather
@@ -152,6 +151,11 @@ pub const VERDICT_CLEAN_SNR_DB: f32 = 20.0;
 /// splatter worth a note. sdrtop's own instrument reading, not an asserted
 /// regulatory mask.
 pub const VERDICT_ACPR_CONCERN_DB: f32 = -20.0;
+
+/// The bottom of the adjacent-channel scale: an ACPR this far down or further
+/// reads as a clean, empty bar, and the bar's needle comes to rest here. The
+/// gauge's own display range, not a regulatory mask.
+pub const ACPR_FLOOR_DB: f32 = -80.0;
 
 /// What the Lab's verdict says of the carrier at centre: its kind. The words
 /// are the Signal Characterization panel's; the kind lives here so it can be
@@ -323,6 +327,17 @@ pub struct SignalState {
     /// The carrier figures (see [`Carrier`]); `None` when no carrier has been
     /// heard for a second.
     pub carrier: Option<Carrier>,
+    /// The adjacent-channel bars' needles, lower and upper: the carrier's
+    /// ratios on the averaging meter while it is heard and held, then falling
+    /// back to [`ACPR_FLOOR_DB`] rather than vanishing; `None` at rest. A
+    /// falling needle is not a reading: its digits are refused (the carrier
+    /// is gone) and it is drawn as stale.
+    pub acpr_needle: [Option<f32>; 2],
+    /// The adjacent-channel offset the needles were measured at: the last
+    /// carrier frame's, kept through gaps (where the classifier has no class
+    /// and [`Self::acpr_offset_hz`] falls back to the broadcast spacing) so
+    /// the rows name what was measured. `None` until a carrier has been heard.
+    pub acpr_measured_offset_hz: Option<f64>,
     /// ADC loading for the Lab RF bench, refreshed each ~200 ms window: the loudest
     /// sample (`adc_peak_dbfs`), the full-bandwidth RMS level (`adc_rms_dbfs`, total
     /// I/Q power vs full scale - distinct from the in-channel `channel_power_dbfs`),
@@ -368,6 +383,8 @@ impl Default for SignalState {
             modulation_settled: Modulation::Unknown,
             readout: None,
             carrier: None,
+            acpr_needle: [None, None],
+            acpr_measured_offset_hz: None,
             adc_peak_dbfs: 0.0,
             adc_rms_dbfs: 0.0,
             adc_clip_events: 0,
@@ -451,6 +468,8 @@ mod tests {
             modulation_settled: Modulation::Unknown,
             readout: None,
             carrier: None,
+            acpr_needle: [None, None],
+            acpr_measured_offset_hz: None,
             adc_peak_dbfs: 0.0,
             adc_rms_dbfs: 0.0,
             adc_clip_events: 0,

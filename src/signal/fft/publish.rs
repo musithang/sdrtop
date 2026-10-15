@@ -135,6 +135,8 @@ pub(super) fn publish(
     m.signal.modulation = r.modulation;
     m.signal.modulation_settled = modulation_settled;
     m.signal.carrier = carrier;
+    m.signal.acpr_needle = pacing.carrier.needle();
+    m.signal.acpr_measured_offset_hz = pacing.carrier.offset_hz();
     m.signal.acpr_lower_db = r.acpr_lower_db;
     m.signal.acpr_upper_db = r.acpr_upper_db;
     m.signal.adj_carrier_dbfs = r.adj_carrier_dbfs;

@@ -34,9 +34,11 @@ pub const PEAK_HOLD: Duration = Duration::from_secs(1);
 /// How often the digits take the level: four times a second.
 pub const READOUT: Duration = Duration::from_millis(250);
 /// The time constant of an [averaging](Ballistic::averaging) meter, both
-/// ways: a second, so a ratio scattered a few dB from frame to frame stands
-/// still to within a decibel or two and a lasting change shows in a few.
-pub const AVERAGE: Duration = Duration::from_secs(1);
+/// ways. Half a second: a ratio scattered a few dB from frame to frame stands
+/// still to within about two, with no bias; averaged in power, a rise of
+/// 20 dB shows in under a second and the fall takes about three, so the
+/// meter is springy without reading the scatter's peaks.
+pub const AVERAGE: Duration = Duration::from_millis(500);
 /// A pause longer than this starts the meter afresh, rather than swinging
 /// from a level that belongs to before it.
 pub const RESTART: Duration = Duration::from_secs(1);
@@ -91,6 +93,17 @@ impl Ballistic {
             readout_at: None,
             last: None,
         }
+    }
+
+    /// Put the needle at rest, the floor, without forgetting when it last
+    /// moved: the next reading springs up from the floor over the real time
+    /// since, rather than appearing at once at full height.
+    pub fn rest(&mut self) {
+        let floor = 10f64.powf(f64::from(self.floor) / 10.0);
+        self.power = Some(floor);
+        self.peak = self.floor;
+        self.peak_until = None;
+        self.readout = self.floor;
     }
 
     /// The reading `reading` taken at `now`; what to show, or `None` before
@@ -164,10 +177,11 @@ pub const HELD_AFTER: Duration = Duration::from_millis(600);
 /// How long a new value must hold before it replaces the one shown.
 pub const SETTLE: Duration = Duration::from_secs(1);
 
-/// How long a modulation class (AM, NFM, WFM) holds: longer than a verdict,
-/// because the classes are told apart by an occupied bandwidth that scatters
-/// from one burst to the next, and a badge or a demodulator that changes with
-/// it is no use to anyone.
+/// How long a modulation class (AM, NFM, WFM) is kept: longer than a
+/// verdict, because the classes are told apart by an occupied bandwidth that
+/// scatters from one burst to the next, and a badge or a demodulator that
+/// changes with it is no use to anyone. A class still appears after
+/// [`SETTLE`], so a one-second burst gets one.
 pub const CLASS_HOLD: Duration = Duration::from_secs(2);
 
 /// A class that changes on screen only once a new one has held for
@@ -199,8 +213,9 @@ impl<T: Copy + PartialEq> Settled<T> {
         Self::with_hold(SETTLE)
     }
 
-    /// The same, holding for `hold` in place of [`SETTLE`]: both before a new
-    /// value replaces the shown one and before nothing heard gives it up.
+    /// The same, keeping for `hold` in place of [`SETTLE`]: a value still
+    /// appears after [`SETTLE`], but a new one must hold `hold` to replace
+    /// it, and it is given up only after `hold` with nothing heard.
     pub fn with_hold(hold: Duration) -> Self {
         Settled {
             shown: None,
@@ -230,7 +245,12 @@ impl<T: Copy + PartialEq> Settled<T> {
         }
         match self.candidate {
             Some((c, since)) if c == value => {
-                if now.saturating_duration_since(since) >= self.hold {
+                let wait = if self.shown.is_none() {
+                    SETTLE
+                } else {
+                    self.hold
+                };
+                if now.saturating_duration_since(since) >= wait {
                     self.shown = Some(value);
                     self.candidate = None;
                 }
@@ -292,23 +312,28 @@ mod tests {
         assert_eq!(first, Some(1_000));
     }
 
-    /// **A class holds longer.** AM, NFM and WFM are told apart by a
-    /// bandwidth that scatters from burst to burst, so a class must hold
-    /// [`CLASS_HOLD`] to replace another, and is given up only after as long
-    /// with nothing heard.
+    /// **A class is kept longer, not waited for longer.** AM, NFM and WFM
+    /// are told apart by a bandwidth that scatters from burst to burst: a
+    /// class appears after [`SETTLE`] like any value, so a one-second burst
+    /// gets one, but must hold [`CLASS_HOLD`] to replace another, and is kept
+    /// as long after the last frame with one.
     #[test]
-    fn a_class_holds_longer() {
+    fn a_class_is_kept_longer() {
         let t0 = Instant::now();
         let ms = |n: u64| t0 + Duration::from_millis(n);
         let mut s = Settled::with_hold(CLASS_HOLD);
         s.update(Some('w'), ms(0));
-        assert_eq!(s.update(Some('w'), ms(1_500)), None);
-        assert_eq!(s.update(Some('w'), ms(2_000)), Some('w'));
-        s.update(Some('n'), ms(2_100));
-        assert_eq!(s.update(Some('n'), ms(3_600)), Some('w'));
-        assert_eq!(s.update(Some('n'), ms(4_100)), Some('n'));
-        assert_eq!(s.update(None, ms(6_100)), Some('n'));
-        assert_eq!(s.update(None, ms(6_101)), None);
+        assert_eq!(s.update(Some('w'), ms(999)), None);
+        assert_eq!(
+            s.update(Some('w'), ms(1_000)),
+            Some('w'),
+            "appears at a second"
+        );
+        s.update(Some('n'), ms(1_100));
+        assert_eq!(s.update(Some('n'), ms(2_600)), Some('w'));
+        assert_eq!(s.update(Some('n'), ms(3_100)), Some('n'), "replaces at two");
+        assert_eq!(s.update(None, ms(5_100)), Some('n'));
+        assert_eq!(s.update(None, ms(5_101)), None, "kept two");
     }
 
     /// A second with nothing heard and it is given up; heard again, it

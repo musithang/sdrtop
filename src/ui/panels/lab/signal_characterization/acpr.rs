@@ -9,19 +9,19 @@ use ratatui::{
     text::{Line, Span},
 };
 
-use crate::state::{Carrier, FftFrame, SdrMetrics};
+use crate::state::{Carrier, FftFrame, SdrMetrics, ACPR_FLOOR_DB};
 use crate::ui::chrome::section;
 
-use super::row::{annotated, dash, fmt_freq, metric, val};
+use super::row::{annotated, dash, dim, fmt_freq, metric, val};
 
 /// Width of the `L −200k` / `R +25k` label field. The bar starts after it, so an
 /// overflow here would push one row's bar out of alignment with the other's.
 const LABEL_W: usize = 8;
 
-/// The ACPR bar's own display floor - not a regulatory spectral-mask limit (we
-/// don't assert one), just how far down this gauge reads before showing a fully
-/// clean, empty bar. A ratio at 0 dB (touching the carrier) reads full/red.
-pub(super) const ACPR_BAR_FLOOR_DB: f32 = -80.0;
+/// Width of the digits column, `-80.0 dB` at the widest the bar can show: the
+/// digits and the dash that stands in for them end in one column, so the bar
+/// does not change length when the digits come and go.
+const VALUE_W: usize = 8;
 
 pub(super) fn lines(
     out: &mut Vec<Line<'static>>,
@@ -32,7 +32,12 @@ pub(super) fn lines(
     theme: &crate::Theme,
 ) {
     out.push(section("ADJACENT CHANNEL", "ACPR", iw, theme));
-    let off = state.signal.acpr_offset_hz;
+    // The offset the needles were measured at, kept through gaps: the frame
+    // in hand's follows its own class, which a gap does not have.
+    let off = state
+        .signal
+        .acpr_measured_offset_hz
+        .unwrap_or(state.signal.acpr_offset_hz);
     let lo_label = acpr_label('L', off, '\u{2212}');
     let hi_label = acpr_label('R', off, '+');
     // The carrier's ratios, not the frame in hand's: in a gap between bursts
@@ -40,31 +45,38 @@ pub(super) fn lines(
     // the bars would go red at every gap. Both sides or neither, because the
     // pair is read together.
     let pair = carrier.and_then(|c| c.acpr_lower.zip(c.acpr_upper).map(|p| (c, p)));
-    let Some((c, (lo, hi))) = pair else {
-        out.push(metric(&lo_label, vec![dash(theme)], theme));
-        out.push(metric(&hi_label, vec![dash(theme)], theme));
-        // Same row count either way, so the stack below does not jump when the
-        // measurement comes and goes.
-        out.push(metric("Adj carrier", vec![dash(theme)], theme));
-        return;
-    };
-
-    for (label, shown) in [(&lo_label, lo), (&hi_label, hi)] {
-        // The bar is the ballistic level, so splatter shows at once and the
-        // bar falls slowly; the digits are its readout, four times a second.
-        let value_str = format!("{:.1} dB", shown.readout);
-        // lead(1) + label(8) + gap(1) + bar + gap(1) + value
-        let bar_w = iw
-            .saturating_sub(1 + LABEL_W + 1 + 1 + value_str.chars().count())
-            .max(6);
+    // The bars are the needles: the carrier's ratios on the averaging meter
+    // while it is heard and held, then falling back to rest in the stale
+    // colour with their digits refused, so a bar is released rather than
+    // vanishing. The row has one shape whatever it shows: label, bar (an
+    // empty track at rest), digits or a dash in one right-aligned column.
+    let needles = state
+        .signal
+        .acpr_needle
+        .map(|n| n.filter(|_| frame.is_some()));
+    let bar_w = iw.saturating_sub(1 + LABEL_W + 1 + 1 + VALUE_W).max(6);
+    for (i, label) in [&lo_label, &hi_label].into_iter().enumerate() {
+        let digits = pair.map(|(_, (lo, hi))| if i == 0 { lo } else { hi }.readout);
         let mut spans = vec![Span::styled(
             format!(" {label:<LABEL_W$}"),
             Style::default().fg(theme.label),
         )];
-        spans.extend(acpr_bar(shown.level, bar_w, theme));
-        spans.push(Span::styled(format!(" {value_str}"), val(theme)));
+        spans.extend(acpr_bar(
+            needles[i].unwrap_or(ACPR_FLOOR_DB),
+            bar_w,
+            digits.is_some(),
+            theme,
+        ));
+        spans.push(match digits {
+            Some(db) => Span::styled(format!(" {:>VALUE_W$}", format!("{db:.1} dB")), val(theme)),
+            None => Span::styled(format!(" {:>VALUE_W$}", "---"), dim(theme)),
+        });
         out.push(Line::from(spans));
     }
+    let Some((c, (lo, hi))) = pair else {
+        out.push(metric("Adj carrier", vec![dash(theme)], theme));
+        return;
+    };
     // The louder of the two bands is the one worth naming, and the FFT
     // worker picks it the same way: lower wins a tie.
     let adj_freq = frame.map(|fr| {
@@ -105,16 +117,23 @@ fn acpr_label(side: char, offset_hz: f64, sign: char) -> String {
 /// carrier = worse (green→red, same grading the timing deadline bars use). No
 /// reference tick - unlike the timing budget bar, there is no verified
 /// regulatory ACPR threshold to mark, so the bar shows the measurement only.
-fn acpr_bar(db: f32, bar_w: usize, theme: &crate::Theme) -> Vec<Span<'static>> {
-    let clamped = db.clamp(ACPR_BAR_FLOOR_DB, 0.0);
-    let badness = ((clamped - ACPR_BAR_FLOOR_DB) * 10.0).round() as u32;
-    let max_badness = ((0.0 - ACPR_BAR_FLOOR_DB) * 10.0).round() as u32;
+/// A needle that is not `live` (falling back after the carrier has gone) is
+/// drawn in the stale colour: a needle returning to rest, not a reading.
+fn acpr_bar(db: f32, bar_w: usize, live: bool, theme: &crate::Theme) -> Vec<Span<'static>> {
+    let clamped = db.clamp(ACPR_FLOOR_DB, 0.0);
+    let badness = ((clamped - ACPR_FLOOR_DB) * 10.0).round() as u32;
+    let max_badness = ((0.0 - ACPR_FLOOR_DB) * 10.0).round() as u32;
+    let (lo, hi) = if live {
+        (theme.status_ok, theme.status_crit)
+    } else {
+        (theme.stale, theme.stale)
+    };
     crate::ui::widgets::charts::gain_bar_colored(
         badness,
         max_badness,
         bar_w,
-        theme.status_ok,
-        theme.status_crit,
+        lo,
+        hi,
         theme.border_dim,
     )
 }
@@ -127,7 +146,7 @@ mod tests {
     #[test]
     fn acpr_bar_width_matches_bar_w() {
         let t = crate::theme::Theme::sdr();
-        let spans = acpr_bar(-38.0, 24, &t);
+        let spans = acpr_bar(-38.0, 24, true, &t);
         let w: usize = spans.iter().map(|s| s.content.chars().count()).sum();
         assert_eq!(w, 24);
     }
@@ -135,14 +154,24 @@ mod tests {
     #[test]
     fn acpr_bar_touching_carrier_is_full_red() {
         let t = crate::theme::Theme::sdr();
-        let spans = acpr_bar(0.0, 10, &t);
+        let spans = acpr_bar(0.0, 10, true, &t);
         assert_eq!(spans.last().unwrap().style.fg, Some(t.status_crit));
+    }
+
+    #[test]
+    fn a_released_needle_is_drawn_as_stale() {
+        let t = crate::theme::Theme::sdr();
+        let spans = acpr_bar(-30.0, 10, false, &t);
+        assert!(spans
+            .iter()
+            .filter(|s| !s.content.trim().is_empty())
+            .all(|s| s.style.fg == Some(t.stale)));
     }
 
     #[test]
     fn acpr_bar_below_floor_is_empty() {
         let t = crate::theme::Theme::sdr();
-        let spans = acpr_bar(-95.0, 10, &t);
+        let spans = acpr_bar(-95.0, 10, true, &t);
         let s: String = spans.iter().map(|s| s.content.as_ref()).collect();
         assert!(
             s.chars().all(|c| c == ' '),

@@ -47,6 +47,39 @@ pub(super) fn needs_continuity(modulation: Modulation) -> bool {
     matches!(modulation, Modulation::Nfm | Modulation::Wfm)
 }
 
+/// The MPX spectrum as the panel draws it: each bin averaged in power over
+/// `signal::ballistics::AVERAGE`, so the trace moves smoothly from one update
+/// to the next instead of jumping with every one. Display only: the pilot is
+/// measured from the raw spectrum, never from this.
+#[derive(Default)]
+struct MpxDisplay {
+    power: Vec<f32>,
+    at: Option<Instant>,
+}
+
+impl MpxDisplay {
+    /// Average `raw` (magnitudes) in at `now`, and return the magnitudes to
+    /// draw. The first spectrum, and the first after a pause longer than
+    /// `ballistics::RESTART` or a change of size, is drawn as measured: an
+    /// average across a gap or a retune would describe neither side of it.
+    fn show(&mut self, raw: &[f32], now: Instant) -> Vec<f32> {
+        use crate::signal::ballistics::{AVERAGE, RESTART};
+        let dt = self.at.map(|t| now.saturating_duration_since(t));
+        self.at = Some(now);
+        let afresh = self.power.len() != raw.len() || dt.is_none_or(|d| d > RESTART);
+        if afresh {
+            self.power = raw.iter().map(|m| m * m).collect();
+        } else {
+            let dt = dt.unwrap_or_default().as_secs_f32();
+            let a = 1.0 - (-dt / AVERAGE.as_secs_f32()).exp();
+            for (p, m) in self.power.iter_mut().zip(raw) {
+                *p += a * (m * m - *p);
+            }
+        }
+        self.power.iter().map(|p| p.sqrt()).collect()
+    }
+}
+
 /// Everything the worker carries from one block to the next.
 ///
 /// Scratch buffers are reused so a steady state allocates nothing; the rest is
@@ -59,6 +92,7 @@ struct Session {
     env: Vec<f32>,
     mpx_scratch: Vec<Complex<f32>>,
     mpx_mags: Vec<f32>,
+    mpx_display: MpxDisplay,
 
     /// Channel filter, redesigned only when the decimation factor changes, which
     /// happens on a sample-rate change or a WFM/NFM reclassification.
@@ -100,6 +134,7 @@ impl Session {
             env: Vec::new(),
             mpx_scratch: Vec::new(),
             mpx_mags: Vec::new(),
+            mpx_display: MpxDisplay::default(),
             taps: Vec::new(),
             taps_for_d: 0,
             sdec: None,
@@ -476,19 +511,20 @@ impl DemodWorker {
             &mut s.mpx_scratch,
             &mut s.mpx_mags,
         );
-        out.mpx = (!s.mpx_mags.is_empty()).then(|| {
-            Arc::new(crate::state::MpxFrame {
-                bin_hz: rate / MPX_FFT_SIZE as f64,
-                mags_hz: s.mpx_mags.clone(),
-            })
-        });
-        out.pilot = out.mpx.as_ref().map(|f| {
-            pilot_measure(
-                &f.mags_hz,
-                f.bin_hz,
-                crate::state::deviation_limit_hz(Modulation::Wfm),
-            )
-        });
+        if s.mpx_mags.is_empty() {
+            return;
+        }
+        let bin_hz = rate / MPX_FFT_SIZE as f64;
+        // The pilot from the spectrum as measured; the picture smoothed.
+        out.pilot = Some(pilot_measure(
+            &s.mpx_mags,
+            bin_hz,
+            crate::state::deviation_limit_hz(Modulation::Wfm),
+        ));
+        out.mpx = Some(Arc::new(crate::state::MpxFrame {
+            bin_hz,
+            mags_hz: s.mpx_display.show(&s.mpx_mags, Instant::now()),
+        }));
     }
 
     /// Narrow-band FM: accumulate the contiguous run the tone detector needs.
@@ -526,6 +562,45 @@ impl DemodWorker {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// **The MPX picture is smooth.** A spectrum whose pilot line reads
+    /// 20 dB apart from one update to the next is drawn within a few dB of
+    /// its power mean; the first update, and the first after a pause or a
+    /// change of size, is drawn as measured.
+    #[test]
+    fn the_mpx_picture_is_smoothed() {
+        let t0 = Instant::now();
+        let at = |ms: u64| t0 + std::time::Duration::from_millis(ms);
+        let mut d = MpxDisplay::default();
+        let frame = |pilot: f32| {
+            let mut v = vec![1.0f32; 64];
+            v[19] = pilot;
+            v
+        };
+        assert_eq!(
+            d.show(&frame(100.0), at(0))[19],
+            100.0,
+            "the first as measured"
+        );
+        let mut shown = Vec::new();
+        for (i, ms) in (250..5_000u64).step_by(250).enumerate() {
+            let pilot = if i % 2 == 0 { 10.0 } else { 100.0 };
+            shown.push(d.show(&frame(pilot), at(ms))[19]);
+        }
+        let db = |m: f32| 20.0 * m.log10();
+        let late = &shown[8..];
+        let lo = late.iter().copied().fold(f32::INFINITY, f32::min);
+        let hi = late.iter().copied().fold(f32::NEG_INFINITY, f32::max);
+        assert!(db(hi) - db(lo) < 4.0, "swings {:.1} dB", db(hi) - db(lo));
+        // The power mean of 10 and 100 is 71.1, 37.0 dB.
+        assert!((db(hi) + db(lo)) / 2.0 > 34.0, "{} {}", db(lo), db(hi));
+        assert_eq!(
+            d.show(&frame(10.0), at(7_000))[19],
+            10.0,
+            "after a pause, afresh"
+        );
+        assert_eq!(d.show(&[3.0; 32], at(7_250))[0], 3.0, "a new size, afresh");
+    }
 
     /// **A fade does not wipe what was measured.** A block under the
     /// presence gate stops the measuring, but the last reading stays to age

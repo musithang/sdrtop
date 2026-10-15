@@ -128,6 +128,7 @@ mod tests {
         let mut c = verdict::steady(Modulation::Wfm, 38.0, -41.0, -43.0, 180_000);
         c.heard = std::time::Instant::now() - std::time::Duration::from_millis(300);
         m.signal.carrier = Some(c);
+        m.signal.acpr_needle = [Some(-41.0), Some(-43.0)];
         m.signal.acpr_lower_db = -0.4;
         m.signal.acpr_upper_db = 0.3;
         m.signal.occupied_bw_hz = 1_900_000;
@@ -154,6 +155,45 @@ mod tests {
         assert!(row(&lines, "L \u{2212}").contains("-41.0 dB"), "{text}");
         assert!(row(&lines, "R +").contains("-43.0 dB"), "{text}");
         assert!(text.contains("CLEAN WFM SIGNAL"), "{text}");
+    }
+
+    /// **The adjacent-channel rows keep one shape**: measured, released (the
+    /// needle falling back with its digits refused) and at rest, the bar
+    /// starts and the digits end in the same columns.
+    #[test]
+    fn the_acpr_rows_keep_one_shape() {
+        let measured = in_a_gap();
+        let mut released = in_a_gap();
+        released.signal.carrier = None;
+        released.signal.acpr_needle = [Some(-40.0), Some(-45.0)];
+        let mut rest = released.clone();
+        rest.signal.acpr_needle = [None, None];
+        let l_row = |m: &SdrMetrics| {
+            let lines = crate::state::fixture::draw(SignalCharacterizationPanel, 48, 40, m);
+            row(&lines, "L \u{2212}").to_string()
+        };
+        let (a, b, c) = (l_row(&measured), l_row(&released), l_row(&rest));
+        assert!(a.contains("-41.0 dB") && a.contains('\u{2588}'), "{a}");
+        assert!(b.contains("---") && b.contains('\u{2588}'), "released: {b}");
+        assert!(c.contains("---") && !c.contains('\u{2588}'), "at rest: {c}");
+        let end = |r: &str| r.trim_end_matches(['\u{2502}', ' ']).chars().count();
+        assert_eq!(end(&a), end(&b), "{a}\n{b}");
+        assert_eq!(end(&b), end(&c), "{b}\n{c}");
+    }
+
+    /// The rows name the offset their needles were measured at, not the one
+    /// the frame in hand would use: in a gap the classifier has no class.
+    #[test]
+    fn the_acpr_rows_name_the_measured_offset() {
+        let mut m = in_a_gap();
+        m.signal.acpr_offset_hz = 200_000.0;
+        m.signal.acpr_measured_offset_hz = Some(9_000.0);
+        let lines = crate::state::fixture::draw(SignalCharacterizationPanel, 48, 40, &m);
+        let text = lines.join("\n");
+        assert!(
+            text.contains("L \u{2212}9k") && !text.contains("200k"),
+            "{text}"
+        );
     }
 
     /// A second with no carrier and its figures are refused, whatever the
