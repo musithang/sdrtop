@@ -374,6 +374,51 @@ pub(super) fn net_bt_packets(key: KeyEvent, ctx: &mut InputCtx<'_>) -> KeyAction
     KeyAction::Continue
 }
 
+/// The Frames list. `↓` holds the list at its newest frame and moves the
+/// selection down, so the rows do not slide under the reader; `↑` moves it
+/// back up, staying held at the top; `h` holds the list or lets it run, as
+/// on the other lists; `End` is live again. `z` steps the river's zoom and
+/// `d` turns the card between the selected frame and the decode account:
+/// modes, which the hold keys leave alone.
+pub(super) fn net_wifi_frames(key: KeyEvent, ctx: &mut InputCtx<'_>) -> KeyAction {
+    let mut m = metrics(ctx.state);
+    let newest = crate::ui::panels::net::wifi::frames::shown(&m)
+        .first()
+        .map(|r| r.seq);
+    let below = crate::ui::panels::net::wifi::frames::below(&m);
+    let view = &mut m.net.wifi.frames_view;
+    match key.code {
+        KeyCode::Up => view.cursor = view.cursor.saturating_sub(1),
+        KeyCode::Down => {
+            if view.held.is_none() {
+                view.held = newest;
+                view.cursor = 0;
+            }
+            if view.held.is_some() {
+                view.cursor = (view.cursor + 1).min(below);
+            }
+        }
+        KeyCode::Char('h') => {
+            view.held = match view.held {
+                Some(_) => None,
+                None => newest,
+            };
+            view.cursor = 0;
+        }
+        KeyCode::End => {
+            view.held = None;
+            view.cursor = 0;
+        }
+        KeyCode::Char('z') => view.zoom = view.zoom.next(),
+        KeyCode::Char('d') => view.decode = !view.decode,
+        _ => {
+            drop(m);
+            return global::handle(key, ctx);
+        }
+    }
+    KeyAction::Continue
+}
+
 /// The Connection view: `↑↓` scroll through the events kept, as far as the
 /// oldest one's last row; `End` goes back to the newest; `← →` step to the
 /// previous or next connection followed.
@@ -1396,7 +1441,7 @@ mod tests {
             fn(&mut SdrMetrics),
             fn(&SdrMetrics) -> bool,
         );
-        let cases: [Case; 7] = [
+        let cases: [Case; 8] = [
             (
                 "net_survey",
                 "net_occupancy",
@@ -1467,6 +1512,29 @@ mod tests {
                     m.net.packets_view.first_visible == 0
                         && m.net.packets_view.held == Some((1, 5_000.0))
                         && m.net.bt_view.selected == Some(0x5a3c71)
+                },
+            ),
+            (
+                "wifi_frames",
+                "net_wifi_frames",
+                |m| {
+                    m.net.wifi.frames_view = crate::state::FramesView {
+                        held: Some(40),
+                        cursor: 7,
+                        zoom: crate::state::FrameZoom::Anatomy,
+                        decode: true,
+                    }
+                },
+                // The cursor goes; the hold, the zoom and the card's face are
+                // modes.
+                |m| {
+                    m.net.wifi.frames_view
+                        == crate::state::FramesView {
+                            held: Some(40),
+                            cursor: 0,
+                            zoom: crate::state::FrameZoom::Anatomy,
+                            decode: true,
+                        }
                 },
             ),
         ];
@@ -1555,6 +1623,80 @@ mod tests {
         assert_eq!(view(&state).held, Some((1, 29.0 * 625.0)));
         key(&mut engine, &keys, &state, KeyCode::Char('h'));
         assert_eq!(view(&state), Default::default());
+    }
+
+    /// The Frames view on channel 11 with `n` frames heard, a millisecond
+    /// apart, and the list focused.
+    fn frames_view(n: u64) -> (LayoutEngine, crate::app::FocusKeys, Arc<Mutex<SdrMetrics>>) {
+        let (engine, keys, state) = focused_on("wifi_frames", "net_wifi_frames");
+        {
+            let mut m = metrics(&state);
+            m.radio.frequency = 2_462_000_000;
+            for k in 0..n {
+                m.net.wifi.push_row(crate::state::WifiRow {
+                    seq: 0,
+                    start: k * 20_000,
+                    run: 0,
+                    when: Instant::now(),
+                    carrier_hz: 2_462e6,
+                    kind: crate::state::RowKind::OtherOfdm { shift_mhz: 5 },
+                    airtime_us: None,
+                    gap_us: None,
+                    offset_hz: None,
+                    snr_db: None,
+                    channel: None,
+                });
+            }
+        }
+        (engine, keys, state)
+    }
+
+    /// The Frames list's keys: `↓` holds the list at its newest frame and
+    /// moves the selection down, `↑` back up, `h` holds or lets it run,
+    /// `End` returns to live; `z` steps the river's zoom and `d` turns the
+    /// card, both modes the hold keys leave alone.
+    #[test]
+    fn the_frames_list_selects_holds_zooms_and_turns_the_card() {
+        use crate::state::{FrameZoom, FramesView};
+        let (mut engine, keys, state) = frames_view(30);
+        let view = |s: &Arc<Mutex<SdrMetrics>>| metrics(s).net.wifi.frames_view;
+
+        key(&mut engine, &keys, &state, KeyCode::Up);
+        assert_eq!(view(&state), FramesView::default(), "live: nothing above");
+
+        key(&mut engine, &keys, &state, KeyCode::Down);
+        key(&mut engine, &keys, &state, KeyCode::Down);
+        assert_eq!(view(&state).held, Some(30), "held at the newest");
+        assert_eq!(view(&state).cursor, 2);
+        key(&mut engine, &keys, &state, KeyCode::Up);
+        assert_eq!(view(&state).cursor, 1);
+        for _ in 0..40 {
+            key(&mut engine, &keys, &state, KeyCode::Down);
+        }
+        assert_eq!(view(&state).cursor, 29, "no further than the oldest");
+
+        key(&mut engine, &keys, &state, KeyCode::Char('z'));
+        key(&mut engine, &keys, &state, KeyCode::Char('d'));
+        assert_eq!(view(&state).zoom, FrameZoom::Rhythm);
+        assert!(view(&state).decode);
+        key(&mut engine, &keys, &state, KeyCode::End);
+        assert_eq!(
+            view(&state),
+            FramesView {
+                zoom: FrameZoom::Rhythm,
+                decode: true,
+                ..Default::default()
+            },
+            "live, at the top, the modes kept"
+        );
+        key(&mut engine, &keys, &state, KeyCode::Char('z'));
+        key(&mut engine, &keys, &state, KeyCode::Char('z'));
+        assert_eq!(view(&state).zoom, FrameZoom::Load, "round to the load");
+
+        key(&mut engine, &keys, &state, KeyCode::Char('h'));
+        assert_eq!(view(&state).held, Some(30));
+        key(&mut engine, &keys, &state, KeyCode::Char('h'));
+        assert_eq!(view(&state).held, None);
     }
 
     /// `l` switches to the piconet's LMP log and back, each time from live

@@ -1,17 +1,18 @@
-# What one Wi-Fi channel's frames are, standing in until the Frames view
-# is built: where the radio is, whether the sample rate is the one a 20 MHz
-# channel needs (exactly 20 Msps), the latest frame's offset, format and
-# signalling, the latest 802.11b header; and beside it the funnel, every
-# preamble found and what became of it. No Bluetooth receiver runs on it.
+# What is on this channel, frame by frame: every frame heard on the channel's
+# centre, newest first, with what was read of it (its format and
+# signalling, the gap before it, its airtime, offset and SNR) and another
+# channel's frames by how far away they are. The list's focus (e) holds it
+# and selects a frame. Beside it the funnel, every preamble found and what
+# became of it. No Bluetooth receiver runs on it.
 
 section = "wifi_channel"
 slot    = 2
 title   = "Frames"
-blurb   = "the latest frame; the list is being built"
+blurb   = "what is on this channel, frame by frame"
 
 panels = [
     { name = "header",            position = "top", height = 5 },
-    { name = "net_wifi_standin",  position = "body" },
+    { name = "net_wifi_frames",   position = "body" },
     { name = "net_decode_health", position = "right", width_pct = 30 },
     { name = "log",               position = "bottom", height = 5 },
     { name = "footer",            position = "bottom" },

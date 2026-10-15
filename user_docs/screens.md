@@ -45,7 +45,7 @@ marked with a bar at its left edge.
 | &nbsp;&nbsp;**Classic** | Classic Bluetooth: the piconets, one piconet's packets, and each end of it on a bench |
 | &nbsp;&nbsp;**LE Coded** | BLE's long-range PHY: who advertises on it, and where each advertisement pointed |
 | **Wi-Fi** | A heading too, its own and never inside Bluetooth's |
-| &nbsp;&nbsp;**Channel** | What one Wi-Fi channel is doing. For now a stand-in that says where the radio is and that the receiver is being built |
+| &nbsp;&nbsp;**Channel** | What one Wi-Fi channel is doing: which channel is busy, and what is on one, frame by frame |
 
 Bluetooth and Wi-Fi are shown only on a radio that reaches the band, and
 Wi-Fi only on one that can also sample at 20 Msps, a whole Wi-Fi channel;
@@ -415,7 +415,7 @@ screen.
 | Key | Preset | What's in it |
 |-----|--------|--------------|
 | `1` | `wifi_survey` | Survey: thirteen columns, each channel's busy share beside its frames' airtime by format · least busy, or why none can be named yet |
-| `2` | `wifi_frames` | The stand-in: the channel, whether the rate is right, the latest frame of this channel's offset with its error bar, its format and SIGNAL field (rate, length, airtime), the latest 802.11b frame's header, and that nothing past its signalling is decoded yet · feed health |
+| `2` | `wifi_frames` | Frames: every frame heard on the channel, newest first, with its format, signalling, gap, airtime, offset and SNR · feed health |
 
 `p` steps to the next layout in whichever section you are in, and wraps at the
 end. A twenty-seventh preset, `observer`, is marked hidden, so it has no section and no

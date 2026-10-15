@@ -251,7 +251,7 @@ impl Wifi {
                     None => counts.cut += 1,
                     Some(heard) => {
                         counts.this_channel += 1;
-                        let (f, us) = family(&heard);
+                        let (f, us) = Family::of(&heard);
                         if let Some(v) = self.visit.as_mut() {
                             v.frame(f, us);
                         }
@@ -503,8 +503,6 @@ fn decide(centre_hz: u64, rate_hz: f64) -> (Option<u8>, Option<String>) {
     }
 }
 
-/// The family a frame of this channel is, and the airtime its signalling
-/// stated, in microseconds, when it stated one.
 /// A channel estimate's magnitude on each tone, as hundredths of a decibel
 /// against the tones' mean power: what the Frames card draws, in 104 bytes
 /// a frame rather than 832.
@@ -520,32 +518,6 @@ fn centi_db(e: &Estimate) -> Option<[i16; 52]> {
         *o = cdb.round().clamp(f64::from(i16::MIN), f64::from(i16::MAX)) as i16;
     }
     Some(out)
-}
-
-fn family(heard: &crate::signal::wifi::format::Heard) -> (Family, Option<f64>) {
-    use crate::signal::wifi::format::Format;
-    // The L-SIG's airtime is the frame's in every format but greenfield,
-    // which has none and states its own in its HT-SIG.
-    let lsig = heard
-        .lsig
-        .and_then(|l| l.ok())
-        .map(|l| f64::from(l.airtime_us()));
-    match heard.format {
-        None => (Family::Undecoded, None),
-        Some(Format::NonHt) => (Family::NonHt, lsig),
-        Some(Format::HtMixed(_)) => (Family::Ht, lsig),
-        Some(Format::Greenfield(Ok(sig))) => (
-            Family::Ht,
-            sig.greenfield_airtime_ns()
-                .ok()
-                .map(|ns| f64::from(ns) / 1e3),
-        ),
-        Some(Format::Greenfield(Err(_))) => (Family::Undecoded, None),
-        Some(Format::Vht(_)) => (Family::Vht, lsig),
-        Some(Format::He { .. }) => (Family::He, lsig),
-        Some(Format::USig { sig: Ok(u), .. }) if u.version == 0 => (Family::Eht, lsig),
-        Some(Format::USig { .. }) => (Family::Undecoded, lsig),
-    }
 }
 
 /// Keep a finished visit, if it listened for at least half a dwell: a
@@ -645,23 +617,7 @@ impl Visiting {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::signal::wifi::format::{Format, Heard};
-    use crate::signal::wifi::lsig::LSig;
-    use crate::signal::wifi::signal_field::Rate;
 
-    fn heard(format: Option<Format>, length: u16) -> Heard {
-        Heard {
-            lsig: Some(Ok(LSig {
-                rate: Rate::R6,
-                length,
-            })),
-            format,
-        }
-    }
-
-    /// Each frame is the family its signalling named, with the airtime its
-    /// L-SIG stated; a frame whose L-SIG was refused is undecoded and states
-    /// nothing.
     /// The channel kept for the card: each tone's power against the mean,
     /// in hundredths of a decibel.
     #[test]
@@ -679,30 +635,6 @@ mod tests {
         assert_eq!(c[0], (1_000.0 * (4.0 / mean).log10()).round() as i16);
         assert_eq!(c[1], (1_000.0 * (1.0 / mean).log10()).round() as i16);
         assert_eq!(c[51], -6_000, "a tone with nothing on it is held at -60 dB");
-    }
-
-    #[test]
-    fn a_frame_is_the_family_its_signalling_named() {
-        let air = LSig {
-            rate: Rate::R6,
-            length: 100,
-        }
-        .airtime_us() as f64;
-        assert_eq!(
-            family(&heard(Some(Format::NonHt), 100)),
-            (Family::NonHt, Some(air))
-        );
-        assert_eq!(
-            family(&heard(Some(Format::Vht(Ok(()))), 100)),
-            (Family::Vht, Some(air))
-        );
-        assert_eq!(
-            family(&Heard {
-                lsig: Some(Err(crate::signal::wifi::lsig::Refused::Parity)),
-                format: None
-            }),
-            (Family::Undecoded, None)
-        );
     }
 
     fn tuning() -> Tuning {

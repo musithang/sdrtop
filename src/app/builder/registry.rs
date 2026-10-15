@@ -117,6 +117,7 @@ impl App {
         registry.register(ui::NetDecodeHealthPanel);
         registry.register(ui::NetOccupancyPanel);
         registry.register(ui::NetWifiStandinPanel);
+        registry.register(ui::NetWifiFramesPanel);
         registry.register(ui::NetWifiSurveyPanel);
         registry.register(ui::NetWifiLeastBusyPanel);
 

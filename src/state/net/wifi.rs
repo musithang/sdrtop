@@ -138,6 +138,34 @@ impl Family {
             Family::Undecoded => "not decoded",
         }
     }
+
+    /// The family a frame of this channel is, and the airtime its
+    /// signalling stated, in microseconds, when it stated one.
+    pub fn of(heard: &crate::signal::wifi::format::Heard) -> (Family, Option<f64>) {
+        use crate::signal::wifi::format::Format;
+        // The L-SIG's airtime is the frame's in every format but greenfield,
+        // which has none and states its own in its HT-SIG.
+        let lsig = heard
+            .lsig
+            .and_then(|l| l.ok())
+            .map(|l| f64::from(l.airtime_us()));
+        match heard.format {
+            None => (Family::Undecoded, None),
+            Some(Format::NonHt) => (Family::NonHt, lsig),
+            Some(Format::HtMixed(_)) => (Family::Ht, lsig),
+            Some(Format::Greenfield(Ok(sig))) => (
+                Family::Ht,
+                sig.greenfield_airtime_ns()
+                    .ok()
+                    .map(|ns| f64::from(ns) / 1e3),
+            ),
+            Some(Format::Greenfield(Err(_))) => (Family::Undecoded, None),
+            Some(Format::Vht(_)) => (Family::Vht, lsig),
+            Some(Format::He { .. }) => (Family::He, lsig),
+            Some(Format::USig { sig: Ok(u), .. }) if u.version == 0 => (Family::Eht, lsig),
+            Some(Format::USig { .. }) => (Family::Undecoded, lsig),
+        }
+    }
 }
 
 /// One visit the survey paid a channel: how long it listened, how busy its
@@ -357,6 +385,61 @@ pub struct WifiRow {
     pub channel: Option<[i16; 52]>,
 }
 
+impl WifiRow {
+    /// Its family, for a frame of this channel; another channel's frame is
+    /// none of them.
+    pub fn family(&self) -> Option<Family> {
+        match self.kind {
+            RowKind::Ofdm(heard) => Some(Family::of(&heard).0),
+            RowKind::Dsss { .. } => Some(Family::Dsss),
+            RowKind::OtherOfdm { .. } | RowKind::OtherDsss { .. } => None,
+        }
+    }
+}
+
+/// How much time one cell of the Frames river holds. Set by a key, never by
+/// the traffic: a scale that followed the bursts would change every frame's
+/// width from one second to the next.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum FrameZoom {
+    /// 1 ms a cell: the channel's load, which reads at any traffic.
+    #[default]
+    Load,
+    /// 40 us a cell: the exchanges, a frame and its acknowledgement.
+    Rhythm,
+    /// 4 us a cell: one frame's anatomy, its preamble and the SIFS after.
+    Anatomy,
+}
+
+impl FrameZoom {
+    /// The next step in, wrapping from the finest back to the load.
+    pub fn next(self) -> Self {
+        match self {
+            FrameZoom::Load => FrameZoom::Rhythm,
+            FrameZoom::Rhythm => FrameZoom::Anatomy,
+            FrameZoom::Anatomy => FrameZoom::Load,
+        }
+    }
+}
+
+/// The Frames view: live or held, the frame selected, the river's zoom and
+/// what the card shows.
+///
+/// **Held at a frame, not a copy of the ring**, as the Classic list is: the
+/// list is newest first, so holding it means drawing from one frame down
+/// while newer ones arrive above.
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct FramesView {
+    /// The newest frame shown while held, by its seq; `None` while live.
+    pub held: Option<u64>,
+    /// The selected frame, in rows down from the newest shown. Live, it is
+    /// always the newest: a cursor on a list that moves would slide.
+    pub cursor: usize,
+    pub zoom: FrameZoom,
+    /// The card shows the decode account in place of the selected frame.
+    pub decode: bool,
+}
+
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct WifiState {
     /// The Wi-Fi channel the receiver runs on now, when it runs.
@@ -385,6 +468,8 @@ pub struct WifiState {
     pub rows: std::collections::VecDeque<WifiRow>,
     /// Frames heard this session, the last row's seq.
     pub rows_heard: u64,
+    /// The Frames view's hold, selection, zoom and card.
+    pub frames_view: FramesView,
 }
 
 impl WifiState {
@@ -445,6 +530,40 @@ mod tests {
             snr_db: None,
             channel: None,
         }
+    }
+
+    /// Each frame is the family its signalling named, with the airtime its
+    /// L-SIG stated; a frame whose L-SIG was refused is undecoded and states
+    /// nothing.
+    #[test]
+    fn a_frame_is_the_family_its_signalling_named() {
+        use crate::signal::wifi::format::{Format, Heard};
+        use crate::signal::wifi::lsig::LSig;
+        use crate::signal::wifi::signal_field::Rate;
+        let lsig = LSig {
+            rate: Rate::R6,
+            length: 100,
+        };
+        let heard = |format| Heard {
+            lsig: Some(Ok(lsig)),
+            format,
+        };
+        let air = lsig.airtime_us() as f64;
+        assert_eq!(
+            Family::of(&heard(Some(Format::NonHt))),
+            (Family::NonHt, Some(air))
+        );
+        assert_eq!(
+            Family::of(&heard(Some(Format::Vht(Ok(()))))),
+            (Family::Vht, Some(air))
+        );
+        assert_eq!(
+            Family::of(&Heard {
+                lsig: Some(Err(crate::signal::wifi::lsig::Refused::Parity)),
+                format: None
+            }),
+            (Family::Undecoded, None)
+        );
     }
 
     /// **Rows are kept in the order they were sent, with the gap before

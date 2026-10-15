@@ -189,6 +189,9 @@ each one's busiest megahertz was and the airtime its own frames stated, by
 format, over the survey's visits ([Survey](net-wifi.md)).
 `net_wifi_least_busy`, the survey's card: the least busy channel when the
 visits can tell it apart, and in words when they cannot yet.
+`net_wifi_frames`, every frame heard on the channel's centre, newest first:
+its format and what its signalling said, the gap before it, its airtime,
+offset and SNR, and another channel's frames by how far away they are.
 `net_wifi_standin`, which channel the radio is on, whether the rate is the
 20 Msps the bench needs, the latest frame's offset, its format and what its
 signalling said, the latest 802.11b frame's header, and that nothing past

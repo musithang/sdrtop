@@ -71,6 +71,6 @@ Locked, the locked channel's column stays live and every other is held at
 its last pass in the stale colour, and the card is the locked channel's.
 `Esc` leaves the focus and the card goes back to the survey's answer.
 
-The radio's latest frame, its format and signalling, and the account of
-every preamble found are on `Channel 2` for now, until the Frames view is
-built.
+The channel's frames one by one, each with its format and signalling, and
+the account of every preamble found are on `Channel 2`, whose Frames view
+is still being built.
