@@ -19,8 +19,8 @@ use ratatui::{
 use crate::state::{RdsData, SdrMetrics, PTY_NAMES, RDS_AGED_AFTER, RDS_DROPPED_AFTER};
 use crate::ui::chrome;
 
-use super::fmt::val;
-use super::stack::Stack;
+use super::fmt::{missing, val};
+use super::stack::{Prio, Stack};
 
 /// Rows of RadioText the panel will show. Two rows hold the 64-character maximum
 /// on any column wide enough to be readable; a third would push the sections below
@@ -34,10 +34,11 @@ pub(super) fn lines(
     theme: &crate::Theme,
 ) {
     stack.heading(chrome::section("RDS", "57 kHz", iw, theme));
-    let Some(d) = state.demod.live_rds() else {
-        stack.gap();
-        return;
-    };
+    // A decoder with nothing yet reads as an empty snapshot, so the section
+    // has one shape from the first frame: each field fills its own row as the
+    // station reveals it, and a burst never adds or removes one.
+    let empty = RdsData::default();
+    let d = state.demod.live_rds().map_or(&empty, |d| d.as_ref());
 
     let age = state.demod.rds_age();
     // Past the drop timeout the accumulated text is not about anything currently
@@ -52,37 +53,33 @@ pub(super) fn lines(
             Style::default().fg(color).add_modifier(Modifier::BOLD),
         ),
     ]));
-    if let Some(pi) = d.pi.filter(|_| !dropped) {
-        stack.detail(Line::from(vec![
-            chrome::field("PI", 8, theme),
-            Span::styled(format!("{pi:04X}"), val(theme)),
-        ]));
-    }
-    if let Some(name) = d
-        .pty
-        .filter(|_| !dropped)
-        .map(|p| PTY_NAMES[(p & 0x1F) as usize])
-    {
-        stack.detail(Line::from(vec![
-            chrome::field("PTY", 8, theme),
-            Span::styled(name, val(theme)),
-        ]));
-    }
-    // Traffic flags only earn a row when one of them is set -
-    // "TP off, TA off" is the normal case and says nothing.
+    stack.detail(Line::from(vec![
+        chrome::field("PI", 8, theme),
+        d.pi.filter(|_| !dropped).map_or_else(
+            || missing(theme),
+            |pi| Span::styled(format!("{pi:04X}"), val(theme)),
+        ),
+    ]));
+    // Traffic flags ride on the programme type's row and only when one of
+    // them is set - "TP off, TA off" is the normal case and says nothing.
+    let mut pty = vec![
+        chrome::field("PTY", 8, theme),
+        d.pty.filter(|_| !dropped).map_or_else(
+            || missing(theme),
+            |p| Span::styled(PTY_NAMES[(p & 0x1F) as usize], val(theme)),
+        ),
+    ];
     if (d.tp || d.ta) && !dropped {
-        let mut flags = Vec::new();
-        if d.tp {
-            flags.push("TP");
-        }
-        if d.ta {
-            flags.push("TA");
-        }
-        stack.detail(Line::from(vec![
-            chrome::field("Traffic", 8, theme),
-            Span::styled(flags.join(" "), Style::default().fg(theme.status_warn)),
-        ]));
+        let flags: Vec<&str> = [(d.tp, "TP"), (d.ta, "TA")]
+            .into_iter()
+            .filter_map(|(on, f)| on.then_some(f))
+            .collect();
+        pty.push(Span::styled(
+            format!("  {}", flags.join(" ")),
+            Style::default().fg(theme.status_warn),
+        ));
     }
+    stack.detail(Line::from(pty));
     // A running count of the decoder's own work, not anything
     // the station said - last of the RDS rows to be worth a row.
     //
@@ -92,27 +89,34 @@ pub(super) fn lines(
     // a session total climbing while the run keeps restarting is
     // a host that cannot keep up, not a station that will not
     // decode.
+    let mut groups = vec![chrome::field("Groups", 8, theme)];
     if d.groups_session > 0 && !dropped {
-        let mut row = vec![
-            chrome::field("Groups", 8, theme),
-            Span::styled(d.groups_session.to_string(), val(theme)),
-        ];
+        groups.push(Span::styled(d.groups_session.to_string(), val(theme)));
         if d.groups_ok != d.groups_session {
-            row.push(Span::styled(
+            groups.push(Span::styled(
                 format!("  +{}", d.groups_ok),
                 Style::default().fg(theme.stale),
             ));
         }
-        stack.minor(Line::from(row));
+    } else {
+        groups.push(missing(theme));
     }
-    // RadioText is a free-text field up to 64 characters, so it
-    // is the one thing here that has to wrap to the column.
-    if let Some(rt) = d.rt.as_deref().filter(|_| !dropped) {
-        for row in chrome::wrap(rt, iw.saturating_sub(1), RT_MAX_ROWS) {
-            stack.detail(Line::from(vec![
+    stack.minor(Line::from(groups));
+    // RadioText is a free-text field up to 64 characters, so it is the one
+    // thing here that has to wrap to the column. Its rows are held whether or
+    // not a station sends any, so text arriving does not push the panel.
+    let rt =
+        d.rt.as_deref()
+            .filter(|_| !dropped)
+            .map(|rt| chrome::wrap(rt, iw.saturating_sub(1), RT_MAX_ROWS))
+            .unwrap_or_default();
+    for i in 0..RT_MAX_ROWS {
+        match rt.get(i) {
+            Some(row) => stack.detail(Line::from(vec![
                 Span::raw(" "),
-                Span::styled(row, val(theme)),
-            ]));
+                Span::styled(row.clone(), val(theme)),
+            ])),
+            None => stack.reserve(Prio::Detail),
         }
     }
 }

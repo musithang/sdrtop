@@ -39,6 +39,13 @@ pub const DC_PROXIMITY_HZ: i64 = 30_000;
 /// panel stops presenting the number as live.
 pub const DEMOD_STALE_AFTER: Duration = Duration::from_millis(1_500);
 
+/// A measurement older than this is being held rather than renewed: more than
+/// two of the worker's 250 ms updates have gone by without one, which is a
+/// fade under the presence gate, not a slow frame. Held readings stay on screen
+/// until [`DEMOD_STALE_AFTER`], so a station heard in bursts does not empty the
+/// panel at every gap, and the panel says they are held.
+pub const DEMOD_HELD_AFTER: Duration = Duration::from_millis(600);
+
 /// RDS text older than this stops reading as a live decode.
 ///
 /// Everything else the demod produces is remeasured several times a second, so a
@@ -278,6 +285,15 @@ impl DemodState {
             Some(t) => t.elapsed() > DEMOD_STALE_AFTER,
             None => true,
         }
+    }
+
+    /// How long the readings have been held without renewal, when they are
+    /// past [`DEMOD_HELD_AFTER`] and not yet stale. `None` while they are being
+    /// renewed, and once they have aged out.
+    pub fn held_for(&self) -> Option<Duration> {
+        self.last_update
+            .map(|t| t.elapsed())
+            .filter(|a| *a > DEMOD_HELD_AFTER && *a <= DEMOD_STALE_AFTER)
     }
 
     /// The measurement to render, or `None` when it is missing or stale. The one

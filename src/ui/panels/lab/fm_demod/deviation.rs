@@ -13,7 +13,7 @@ use crate::state::{deviation_limit_hz, FmMeasure, Modulation};
 use crate::ui::chrome;
 use crate::ui::widgets::micro_common::bar_spans;
 
-use super::fmt::{fmt_hz, fmt_offset, lbl, val};
+use super::fmt::{fmt_hz, fmt_offset, lbl, missing, val};
 use super::stack::Stack;
 
 pub(super) fn lines(
@@ -69,7 +69,26 @@ pub(super) fn lines(
                 Span::styled(fmt_offset(carrier_offset_hz), val(theme)),
             ]));
         }
-        None => stack.gap(),
+        // The same four rows with nothing in them, so the sections below do
+        // not move when a short block brings no reading.
+        None => {
+            stack.push(Line::from(vec![
+                chrome::field("Peak", 8, theme),
+                missing(theme),
+            ]));
+            let bar_w = iw.saturating_sub(9).min(14);
+            if bar_w >= 4 {
+                let mut row = vec![Span::raw(" ")];
+                row.extend(bar_spans(0.0, bar_w, theme.stale, theme));
+                stack.ornament(Line::from(row));
+            }
+            for label in ["RMS", "Carrier"] {
+                stack.detail(Line::from(vec![
+                    chrome::field(label, 8, theme),
+                    missing(theme),
+                ]));
+            }
+        }
     }
 }
 

@@ -16,8 +16,8 @@ use crate::signal::demod::{MPX_SPAN_HZ, PILOT_HZ};
 use crate::state::{MpxFrame, SdrMetrics};
 use crate::ui::chrome;
 
-use super::fmt::lbl;
-use super::stack::Stack;
+use super::fmt::{lbl, no_reading};
+use super::stack::{Prio, Stack};
 
 /// Rows the MPX trace grows to when the panel has height going spare, and the slack
 /// it refuses to spend getting there.
@@ -42,30 +42,40 @@ pub(super) fn lines(
     theme: &crate::Theme,
 ) {
     stack.heading(chrome::section("MPX BASEBAND", "0-60 kHz", iw, theme));
-    match state.demod.live_mpx() {
-        Some(frame) => {
-            let w = iw.saturating_sub(2);
-            let profile = mpx_profile(frame, w * 2);
-            if w >= 8 && !profile.is_empty() {
-                // The trace is one block at whatever height it was given, so the
-                // rows go on together: the caller sizes it, the shedding pass
-                // must not take a slice out of the middle of a picture.
-                for row in crate::ui::widgets::charts::braille_profile(&profile, w, trace_rows) {
-                    stack.push(Line::from(vec![
-                        Span::raw(" "),
-                        Span::styled(row, Style::default().fg(theme.border_accent)),
-                    ]));
-                }
-                // The tick row is the first thing to go: a trace without its
-                // 19k/38k/57k marks is still a shape, marks without a trace are
-                // nothing at all.
-                stack.ornament(Line::from(vec![
+    let w = iw.saturating_sub(2);
+    let profile = state
+        .demod
+        .live_mpx()
+        .map(|frame| mpx_profile(frame, w * 2))
+        .filter(|p| w >= 8 && !p.is_empty());
+    match profile {
+        Some(profile) => {
+            // The trace is one block at whatever height it was given, so the
+            // rows go on together: the caller sizes it, the shedding pass
+            // must not take a slice out of the middle of a picture.
+            for row in crate::ui::widgets::charts::braille_profile(&profile, w, trace_rows) {
+                stack.push(Line::from(vec![
                     Span::raw(" "),
-                    Span::styled(mpx_ticks(w), lbl(theme)),
+                    Span::styled(row, Style::default().fg(theme.border_accent)),
                 ]));
             }
+            // The tick row is the first thing to go: a trace without its
+            // 19k/38k/57k marks is still a shape, marks without a trace are
+            // nothing at all.
+            stack.ornament(Line::from(vec![
+                Span::raw(" "),
+                Span::styled(mpx_ticks(w), lbl(theme)),
+            ]));
         }
-        None => stack.gap(),
+        // No frame from this block: the trace's rows are kept, saying so on
+        // the first, and the tick row's place is kept with nothing in it.
+        None => {
+            stack.push(no_reading(theme));
+            for _ in 1..trace_rows {
+                stack.reserve(Prio::Core);
+            }
+            stack.reserve(Prio::Ornament);
+        }
     }
 }
 

@@ -697,11 +697,11 @@ mod tests {
         };
         w.choose(t, view(), &st);
         // 4 ms, a gap, 7 ms: one visit of 10 ms heard, and a 1 ms scrap.
-        for i in 0..55 {
+        for i in 0..55u64 {
             if i == 20 {
                 w.interrupted(&st);
             }
-            w.look(0, &rng.noise(4000, 0.01), t, true, &st);
+            w.look(i * 4000, &rng.noise(4000, 0.01), t, true, &st);
         }
         let m = st.lock().unwrap();
         let six = &m.net.wifi.survey.visits[5];
@@ -730,10 +730,10 @@ mod tests {
         };
         w.choose(t, view(), &st);
         // 8 ms on the survey, long enough to be kept, then a block off it.
-        for _ in 0..40 {
-            w.look(0, &rng.noise(4000, 0.01), t, true, &st);
+        for i in 0..40u64 {
+            w.look(i * 4000, &rng.noise(4000, 0.01), t, true, &st);
         }
-        w.look(0, &rng.noise(4000, 0.01), t, false, &st);
+        w.look(40 * 4000, &rng.noise(4000, 0.01), t, false, &st);
         w.interrupted(&st);
         assert!(st
             .lock()

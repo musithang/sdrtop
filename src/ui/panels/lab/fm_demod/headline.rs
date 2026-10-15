@@ -5,7 +5,9 @@
 //! whether anything is being demodulated and, if so, what and where.
 //!
 //! Three states, and they have to read differently: RX stopped, locked, and idle.
-//! Only the locked one carries advisories - sentences about something the reader
+//! A lock whose readings are held after a fade, waiting to age out, says so on
+//! its own lamp rather than being a fourth state. Only the locked one carries
+//! advisories - sentences about something the reader
 //! can act on, which is why they wrap rather than clip.
 
 use ratatui::{
@@ -25,15 +27,18 @@ use super::stack::Stack;
 /// same thing.
 const ADVISORY_MAX_ROWS: usize = 2;
 
-/// Push the headline rows. `locked` means some demodulator produced a reading
-/// this frame; `modulation` is the *effective* mode, the one the sections below
-/// are chosen by.
+/// Push the headline rows. `locked` means some demodulator has a reading that
+/// has not aged out; `modulation` is the *effective* mode, the one the sections
+/// below are chosen by. `advise` leaves the advisories out, for the probe that
+/// sizes the MPX trace: an advisory coming and going must not resize it.
+#[allow(clippy::too_many_arguments)]
 pub(super) fn lines(
     stack: &mut Stack<'static>,
     state: &SdrMetrics,
     modulation: Modulation,
     locked: bool,
     stale: bool,
+    advise: bool,
     iw: usize,
     theme: &crate::Theme,
 ) {
@@ -52,15 +57,29 @@ pub(super) fn lines(
         } else {
             ""
         };
-        stack.push(Line::from(vec![
-            Span::raw(" "),
-            Span::styled(
+        // Under the presence gate the last readings are held until they age
+        // out, and the lamp says so: they are no longer a lock, and how long
+        // they have been held is part of what they are.
+        let lamp = match state.demod.held_for() {
+            None => Span::styled(
                 format!("\u{25cf} DEMOD LOCK \u{2014} {}{}", modulation.label(), src),
                 Style::default()
                     .fg(theme.status_ok)
                     .add_modifier(Modifier::BOLD),
             ),
-        ]));
+            Some(age) => Span::styled(
+                format!(
+                    "\u{25cc} DEMOD HELD \u{2014} {}{} {:.1} s",
+                    modulation.label(),
+                    src,
+                    age.as_secs_f32()
+                ),
+                Style::default()
+                    .fg(theme.stale)
+                    .add_modifier(Modifier::BOLD),
+            ),
+        };
+        stack.push(Line::from(vec![Span::raw(" "), lamp]));
         let d = state.demod.decimation.max(1);
         // The absolute frequency actually being demodulated - with an offset
         // in play this is not the tuned frequency, and must never be implied.
@@ -92,7 +111,9 @@ pub(super) fn lines(
                 lbl(theme),
             ),
         ]));
-        advisories(stack, state, d, iw, theme);
+        if advise {
+            advisories(stack, state, d, iw, theme);
+        }
     } else {
         // The *effective* mode, not the classifier's raw guess: the sections
         // below are chosen by it, and passing the raw one meant forcing AM with

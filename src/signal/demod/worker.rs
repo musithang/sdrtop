@@ -231,7 +231,7 @@ impl DemodWorker {
                 // to pick a demodulator on its own.
                 (
                     m.radio.config_sample_rate,
-                    m.demod.effective_modulation(m.signal.modulation),
+                    m.demod.effective_modulation(m.signal.modulation_settled),
                     m.signal.peak_to_nf_db,
                     m.radio.hw_streaming,
                     m.demod.offset_hz,
@@ -285,7 +285,12 @@ impl DemodWorker {
                 continue;
             };
             if !streaming || snr_db < crate::state::CLASSIFY_MIN_SNR_DB {
-                self.clear();
+                // A fade under the gate stops the measuring but keeps the last
+                // reading: it ages out by the one staleness rule, so a station
+                // heard in bursts does not empty the panel at every gap.
+                if !streaming {
+                    self.clear();
+                }
                 s.audio.clear();
                 // Same reasoning as the contiguity break below: a fade under the
                 // gate stops the stream, it does not move the radio. The channel
@@ -521,6 +526,47 @@ impl DemodWorker {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// **A fade does not wipe what was measured.** A block under the
+    /// presence gate stops the measuring, but the last reading stays to age
+    /// out by the one staleness rule (`DEMOD_STALE_AFTER`): on a bursty
+    /// station every gap used to empty the panel at once, and the next burst
+    /// rebuilt it.
+    #[test]
+    fn a_fade_does_not_wipe_the_last_reading() {
+        use crate::hardware::{SampleFormat, StreamBlock};
+        let mut m = SdrMetrics::fixture().streaming();
+        m.radio.frequency = 100_000_000;
+        m.radio.config_sample_rate = 2_400_000.0;
+        m.signal.modulation_settled = Modulation::Wfm;
+        m.signal.peak_to_nf_db = 0.0;
+        m.demod.enabled = true;
+        let reading = crate::state::FmMeasure {
+            peak_dev_hz: 60_000.0,
+            rms_dev_hz: 20_000.0,
+            carrier_offset_hz: 0.0,
+        };
+        m.demod.fm = Some(reading);
+        m.demod.last_update = Some(Instant::now());
+        let state = Arc::new(Mutex::new(m));
+        let (tx, rx) = crossbeam_channel::unbounded();
+        tx.send(StreamBlock {
+            seq: 1,
+            gap_before: false,
+            bytes: vec![0u8; 2 * 16_384],
+            first_pair: 0,
+            centre_hz: 100_000_000,
+            rate_hz: 2_400_000.0,
+        })
+        .unwrap();
+        drop(tx);
+        let geometry = SampleGeometry {
+            format: SampleFormat::Int8,
+            full_scale: 128.0,
+        };
+        DemodWorker::new(rx, Arc::clone(&state), geometry).run();
+        assert_eq!(state.lock().unwrap().demod.fm, Some(reading));
+    }
 
     #[test]
     fn only_the_fm_modes_pay_for_every_block() {

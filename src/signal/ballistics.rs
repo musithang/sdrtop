@@ -130,9 +130,72 @@ impl Ballistic {
     }
 }
 
+/// How long a new value must hold before it replaces the one shown.
+pub const SETTLE: Duration = Duration::from_secs(1);
+
+/// A value that changes on screen only once a new one has held for
+/// [`SETTLE`]: a classification that flips on every burst and gap, held
+/// still until the flip is real.
+#[derive(Clone, Debug)]
+pub struct Settled<T> {
+    shown: T,
+    candidate: Option<(T, Instant)>,
+}
+
+impl<T: Copy + PartialEq> Settled<T> {
+    /// Showing `first` until something else holds.
+    pub fn new(first: T) -> Self {
+        Settled {
+            shown: first,
+            candidate: None,
+        }
+    }
+
+    /// `value` seen at `now`; what to show.
+    pub fn update(&mut self, value: T, now: Instant) -> T {
+        if value == self.shown {
+            self.candidate = None;
+            return self.shown;
+        }
+        match self.candidate {
+            Some((c, since)) if c == value => {
+                if now.saturating_duration_since(since) >= SETTLE {
+                    self.shown = value;
+                    self.candidate = None;
+                }
+            }
+            _ => self.candidate = Some((value, now)),
+        }
+        self.shown
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// **A value changes only once it has held for a second.** A flip that
+    /// lasts 900 ms is never shown; one that lasts a second is, from then
+    /// on; a flip back and forth starts the wait again each time.
+    #[test]
+    fn a_value_changes_only_once_it_has_held() {
+        let t0 = Instant::now();
+        let ms = |n: u64| t0 + Duration::from_millis(n);
+        let mut s = Settled::new('a');
+        assert_eq!(s.update('a', ms(0)), 'a');
+        assert_eq!(s.update('b', ms(100)), 'a');
+        assert_eq!(s.update('b', ms(999)), 'a');
+        assert_eq!(s.update('a', ms(1000)), 'a', "back before it held");
+        assert_eq!(s.update('b', ms(1100)), 'a');
+        assert_eq!(
+            s.update('c', ms(1500)),
+            'a',
+            "another candidate starts afresh"
+        );
+        assert_eq!(s.update('c', ms(2499)), 'a');
+        assert_eq!(s.update('c', ms(2500)), 'c');
+        assert_eq!(s.update('c', ms(9000)), 'c');
+    }
 
     /// Readings every 5 ms: `floor` for `quiet` ms, then `level` for
     /// `burst` ms, then `floor` again for `after` ms. Every update's shown.

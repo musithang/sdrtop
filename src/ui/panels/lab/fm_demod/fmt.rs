@@ -8,7 +8,10 @@
 //! for the label, one of these styles for the number beside it - so the styles
 //! live here rather than being re-derived at the top of each section module.
 
-use ratatui::style::Style;
+use ratatui::{
+    style::Style,
+    text::{Line, Span},
+};
 
 /// Label colour: hints, units, and anything that is not itself a reading.
 pub(super) fn lbl(theme: &crate::Theme) -> Style {
@@ -18,6 +21,22 @@ pub(super) fn lbl(theme: &crate::Theme) -> Style {
 /// Value colour: the numbers, where the number is not being graded.
 pub(super) fn val(theme: &crate::Theme) -> Style {
     Style::default().fg(theme.value)
+}
+
+/// The value of a field whose reading is not there: a dash in the stale
+/// colour. The row stays, so a section keeps its shape on a burst, and says
+/// it has nothing rather than leaving a hole.
+pub(super) fn missing(theme: &crate::Theme) -> Span<'static> {
+    Span::styled("\u{2014}", Style::default().fg(theme.stale))
+}
+
+/// A section's lead row when its reading is not there, in the same words the
+/// rail's S-meter uses.
+pub(super) fn no_reading(theme: &crate::Theme) -> Line<'static> {
+    Line::from(vec![
+        Span::raw(" "),
+        Span::styled("\u{25cc} no reading", Style::default().fg(theme.stale)),
+    ])
 }
 
 /// Frequency in the most readable unit for a deviation / offset figure. Keeps

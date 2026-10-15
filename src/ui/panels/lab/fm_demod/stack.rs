@@ -49,6 +49,9 @@ pub(super) struct Stack<'a> {
     rows: Vec<(Line<'a>, Prio)>,
 }
 
+/// What a [reserved](Stack::reserve) row is drawn with.
+const RESERVED: &str = "\u{2800}";
+
 /// A blank spacer row - the ones `chrome::fit_spacers` owns.
 fn is_gap(l: &Line<'_>) -> bool {
     l.spans.iter().all(|s| s.content.trim().is_empty())
@@ -75,6 +78,14 @@ impl<'a> Stack<'a> {
     }
     pub(super) fn gap(&mut self) {
         self.rows.push((Line::raw(""), Prio::Core));
+    }
+    /// Hold a row that has nothing to show this frame, worth what the row it
+    /// stands for is worth, so the stack keeps one shape with or without the
+    /// reading. Drawn as U+2800, the empty braille cell the MPX trace is drawn
+    /// with: it shows nothing but is not whitespace, so neither the shedding
+    /// pass nor `chrome::fit_spacers` mistakes it for a spacer and grows it.
+    pub(super) fn reserve(&mut self, prio: Prio) {
+        self.rows.push((Line::raw(RESERVED), prio));
     }
 
     /// Shed rows until the stack fits `avail`, cheapest class first, and return what
@@ -234,6 +245,17 @@ mod tests {
             vec!["lock", "PILOT", "stereo"],
             "orphaned nameplate survived: {kept:?}"
         );
+    }
+
+    #[test]
+    fn a_reserved_row_is_not_a_spacer() {
+        let mut s = Stack::new();
+        s.push(Line::raw("a"));
+        s.reserve(Prio::Detail);
+        s.gap();
+        let rows = s.fit(usize::MAX);
+        assert!(!is_gap(&rows[1]), "a reserved row would be grown as a gap");
+        assert!(is_gap(&rows[2]));
     }
 
     #[test]

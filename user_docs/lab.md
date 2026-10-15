@@ -461,6 +461,16 @@ actually has, rather than a fixed grid where most rows read as permanently empty
 There is no audio section, and there is no audio. A section a mode does not have is
 simply absent rather than sitting there empty.
 
+**It holds still on a bursty signal.** A mode has to hold for a second before the
+sections change, so one odd frame from the classifier does not swap the broadcast
+sections for the NFM ones. When the signal drops under the detection threshold,
+the last readings stay where they are and the headline turns from `DEMOD LOCK`
+to `◌ DEMOD HELD`, counting how long they have been held. A second and a
+half without a new one and they go, and the headline says why. A figure that is
+missing shows as a dim dash on its own row instead of taking the row with it, so
+nothing below it moves. A panel that does a little dance every time a walkie-talkie
+unkeys is exciting, just not in the way an instrument should be.
+
 - **MPX baseband**: the demodulated composite from 0 to 60 kHz as a braille
   profile, with ticks at 19 k (pilot), 38 k (stereo difference) and 57 k (RDS).
   This is the audio-side spectrum, not the RF one. You are looking *inside* the FM
@@ -493,7 +503,7 @@ subcarrier, and shows:
 - the **Programme Service** name, the 8-character station name,
 - **PI**, the station's unique hex identity code,
 - **PTY**, the programme type (`Pop Music`, `News`, `Culture` and so on),
-- **Traffic** flags, when TP or TA is set,
+- **Traffic** flags beside the programme type, when TP or TA is set,
 - **Groups**, which is two numbers: the total accepted on this channel, and after
   it the length of the current unbroken run. `Groups 1400  +1` means fourteen
   hundred groups have been decoded here, but the run in progress is one group long,

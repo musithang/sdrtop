@@ -164,7 +164,7 @@ pub(super) fn fm_demod(key: KeyEvent, ctx: &mut InputCtx<'_>) -> KeyAction {
             // logged "no measurement to snapshot" with the number on screen above it.
             // The mode name is the *effective* one for the same reason the sections
             // are chosen by it - a forced mode logged the classifier's guess.
-            let modulation = m.demod.effective_modulation(m.signal.modulation);
+            let modulation = m.demod.effective_modulation(m.signal.modulation_settled);
             let ch = format!(" \u{00b7} {:.0} kHz ch", m.demod.channel_rate_hz / 1000.0);
             let body = match (m.demod.live(), m.demod.live_am()) {
                 (Some(fm), _) => {

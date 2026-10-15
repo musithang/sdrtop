@@ -232,6 +232,12 @@ pub struct SignalState {
     /// frame by the FFT worker via [`classify`]. Drives the lab_signal headline /
     /// banner and, later, the demod panel's mode-adaptive view.
     pub modulation: Modulation,
+    /// The same, changed only once a new class has held for a second
+    /// (`signal::ballistics::Settled`): on a bursty signal the classifier
+    /// flips between a class and `Unknown` with every burst and gap. What
+    /// picks the demodulator and the demod panel's sections, so neither is
+    /// torn down and rebuilt by a gap.
+    pub modulation_settled: Modulation,
     /// ADC loading for the Lab RF bench, refreshed each ~200 ms window: the loudest
     /// sample (`adc_peak_dbfs`), the full-bandwidth RMS level (`adc_rms_dbfs`, total
     /// I/Q power vs full scale - distinct from the in-channel `channel_power_dbfs`),
@@ -274,6 +280,7 @@ impl Default for SignalState {
             sat_history: hist(),
             last_clip_at: None,
             modulation: Modulation::Unknown,
+            modulation_settled: Modulation::Unknown,
             adc_peak_dbfs: 0.0,
             adc_rms_dbfs: 0.0,
             adc_clip_events: 0,
@@ -327,6 +334,7 @@ mod tests {
             sat_history: VecDeque::new(),
             last_clip_at: None,
             modulation: Modulation::Unknown,
+            modulation_settled: Modulation::Unknown,
             adc_peak_dbfs: 0.0,
             adc_rms_dbfs: 0.0,
             adc_clip_events: 0,

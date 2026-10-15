@@ -14,7 +14,7 @@ use crate::state::AmMeasure;
 use crate::ui::chrome;
 use crate::ui::widgets::micro_common::bar_spans;
 
-use super::fmt::val;
+use super::fmt::{missing, val};
 use super::stack::Stack;
 
 /// `DEPTH`: modulation index, with the positive and negative peaks split out
@@ -57,7 +57,25 @@ pub(super) fn depth_lines(
                 ),
             ]));
         }
-        None => stack.gap(),
+        // The same rows with nothing in them, so the carrier below stays put.
+        None => {
+            stack.push(Line::from(vec![
+                chrome::field("Depth", 8, theme),
+                missing(theme),
+            ]));
+            let bar_w = iw.saturating_sub(9).min(14);
+            if bar_w >= 4 {
+                let mut row = vec![Span::raw(" ")];
+                row.extend(bar_spans(0.0, bar_w, theme.stale, theme));
+                stack.ornament(Line::from(row));
+            }
+            for label in ["Pos", "Neg"] {
+                stack.detail(Line::from(vec![
+                    chrome::field(label, 8, theme),
+                    missing(theme),
+                ]));
+            }
+        }
     }
 }
 
@@ -74,7 +92,10 @@ pub(super) fn carrier_lines(
             chrome::field("Level", 8, theme),
             Span::styled(format!("{:.1} dBFS", a.carrier_dbfs), val(theme)),
         ])),
-        None => stack.gap(),
+        None => stack.push(Line::from(vec![
+            chrome::field("Level", 8, theme),
+            missing(theme),
+        ])),
     }
 }
 
