@@ -16,6 +16,49 @@ checkpoint instead of by version.
 
 ## [Unreleased]
 
+## [0.6.7] - 2026-10-15
+
+**A steadier screen, and a first look at Wi-Fi.**
+
+Watching sdrtop run on somebody else's terminal in a video made it plain:
+on anything that comes and goes, a walkie-talkie, a digital burst, Wi-Fi,
+the panels flickered and jumped about. The meters now move the way real
+meters do and the panels keep their shape. And Wi-Fi has its first view,
+a survey of which channel is busy and which is quiet.
+
+### Added
+
+- **Wi-Fi's channel survey** (`Channel 1` under Wi-Fi in the menu). It
+  visits channels 1 to 13 in turn, half a second each, and shows how much
+  of the time each is busy and how much of that is Wi-Fi frames, by format
+  (802.11b, a/g, n, ac, ax, be). A card names the least busy channel once
+  the measurements can tell it apart from the rest, and says so plainly
+  when they cannot yet. It needs a radio that samples 20 Msps, such as a
+  HackRF. ([Survey](user_docs/net-wifi.md))
+- `Channel 2` stands in for the coming Frames view: the latest frame read
+  on the channel, and an account of every preamble found.
+
+### Changed
+
+- **The S-meter moves like a meter.** Up at once, down slowly, the true
+  peak held for a second, and the digits change four times a second so
+  they can be read.
+- **Lab Signal holds still on bursty signals.** Numbers change four times
+  a second. Every panel keeps the same rows with or without a reading, so
+  nothing jumps up and down the screen. Between bursts the last reading
+  stays and says how long it has been held, the adjacent-channel bars sink
+  back gently instead of vanishing, and the modulation badge no longer
+  flips with every burst. The MPX trace is smoothed.
+
+### Fixed
+
+- **The gap between bursts is no longer measured as the signal.** The
+  adjacent-channel ratio, occupied bandwidth and verdict were read from
+  noise in every gap, which turned the bars red and the verdict to
+  `NO SIGNAL` and back several times a second.
+- Channel power, which the S-meter and Lab Signal both show, is now one
+  reading in both places.
+
 ## [0.6.6] - 2026-10-10
 
 **What two classic devices say to set up a link, read out.**
@@ -1099,7 +1142,8 @@ sdrtop stopped being a one-radio program.
   image rejection ratio, wavelength and antenna metrics.
 - Config file with atomic save on quit, and the CLI flags that override it.
 
-[Unreleased]: https://github.com/musithang/sdrtop/compare/v0.6.6...HEAD
+[Unreleased]: https://github.com/musithang/sdrtop/compare/v0.6.7...HEAD
+[0.6.7]: https://github.com/musithang/sdrtop/compare/v0.6.6...v0.6.7
 [0.6.6]: https://github.com/musithang/sdrtop/compare/v0.6.5...v0.6.6
 [0.6.5]: https://github.com/musithang/sdrtop/compare/v0.6.4...v0.6.5
 [0.6.4]: https://github.com/musithang/sdrtop/compare/v0.6.3...v0.6.4

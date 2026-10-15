@@ -32,7 +32,37 @@ in time.
 
 ---
 
-## 🤝 Checkpoint 28: The meeting before the music *(you are here)*
+## 📺 Checkpoint 29: Seen on somebody else's screen *(you are here)*
+
+**0.6.7.** There is a particular kind of honesty that only a video of your
+own program running on a stranger's machine can deliver. sdrtop looked
+lovely on a steady FM station. On anything that comes and goes, a
+walkie-talkie, a digital burst, Wi-Fi, it flickered like a fluorescent tube
+and its panels jumped up and down the screen in time with the bursts. It
+had always done that. It had just never done it in front of an audience.
+
+So the meters now behave like meters. The [S-meter](screens.md) goes up at
+once and comes down slowly, and holds the true peak for a second. Numbers
+change four times a second, which is slow enough to actually read them.
+Every panel on [Lab Signal](lab.md#signal-characterization--lab-signal-lab-4)
+keeps the same rows whether or not it has a reading, so nothing moves.
+Between bursts the last reading stays and says how long it has been held,
+the adjacent-channel bars sink back gently instead of blinking out, and
+the MPX trace is smoothed. Along the way it turned out the gaps between
+bursts were being measured as if they were the signal: noise against
+noise, which made the adjacent channels look dreadful several times a
+second. They are now left out.
+
+And Wi-Fi has its first view. The [channel survey](net-wifi.md) visits
+channels 1 to 13, half a second each, and shows how busy each one really
+is, in time rather than in network names, with the frames split by
+format. It will tell you which channel is quietest once the measurements
+can say so, and until then it says it cannot tell them apart yet, which
+is the honest answer for the first minute or two.
+
+---
+
+## 🤝 Checkpoint 28: The meeting before the music
 
 **0.6.6.** Before a pair of headphones plays a single note, it and the
 phone hold a short meeting. What can you do, which version of Bluetooth
