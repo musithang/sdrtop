@@ -1453,6 +1453,66 @@ mod tests {
         assert!(keys.len() >= 7, "only {} NET panels take focus", keys.len());
     }
 
+    /// **A panel that says it reads no spectrum draws the same without one**:
+    /// rendered with an FFT frame and its measurements and with none, the
+    /// two are identical. What the FFT feed is switched off by cannot lie.
+    #[test]
+    fn a_panel_that_reads_no_spectrum_draws_the_same_without_one() {
+        use crate::state::SdrMetrics;
+        let (engine, _) = App::build_ui("net", &HashMap::new(), None, true);
+        let theme = crate::Theme::sdr();
+        let bare = SdrMetrics::fixture().streaming();
+        let fed = SdrMetrics::fixture()
+            .streaming()
+            .with_carrier(25_000.0, 40.0);
+        let draw = |name: &str, m: &SdrMetrics| {
+            let mut t =
+                ratatui::Terminal::new(ratatui::backend::TestBackend::new(120, 30)).unwrap();
+            t.draw(|f| {
+                engine
+                    .registry()
+                    .render_panel(name, f, f.size(), m, &theme, false)
+            })
+            .unwrap();
+            t.backend().buffer().clone()
+        };
+        let mut checked = 0;
+        for panel in engine.registered_panels() {
+            if panel.reads_spectrum() {
+                continue;
+            }
+            checked += 1;
+            assert_eq!(
+                draw(panel.name(), &bare),
+                draw(panel.name(), &fed),
+                "{} says it reads no spectrum",
+                panel.name()
+            );
+        }
+        assert!(checked >= 20, "only {checked} panels said so");
+    }
+
+    /// **The spectrum is wanted only where a panel on screen reads it**: on
+    /// every NET view nothing does, and the FFT worker can stop; on the Lab
+    /// and the main views something always does.
+    #[test]
+    fn the_spectrum_is_wanted_only_where_a_panel_reads_it() {
+        for (preset, wanted) in [
+            ("wifi_frames", false),
+            ("wifi_survey", false),
+            ("net_ble", false),
+            ("net_bt", false),
+            ("net_piconet", false),
+            ("net_survey", false),
+            ("main", true),
+            ("lab_signal", true),
+            ("spectrum", true),
+        ] {
+            let (engine, _) = App::build_ui(preset, &HashMap::new(), None, true);
+            assert_eq!(engine.shows_spectrum_reader(), wanted, "{preset}");
+        }
+    }
+
     /// Every panel a preset can name is listed in `user_docs/presets.md`'s
     /// panel names, so a new panel is not a name nobody can find.
     #[test]

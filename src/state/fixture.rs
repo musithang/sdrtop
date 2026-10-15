@@ -87,6 +87,7 @@ impl SdrMetrics {
                 markers: vec![],
                 pending_marker: None,
                 style: SpectrumStyle::default(),
+                wanted: true,
             },
             waterfall: WaterfallState::new(
                 512,

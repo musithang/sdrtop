@@ -378,6 +378,9 @@ pub(super) fn initial_metrics(cfg: &AppConfig, boot: Boot) -> anyhow::Result<Sdr
             markers,
             pending_marker: None,
             style: cfg.display.spectrum_style,
+            // Until the first frame is drawn and says otherwise: a spectrum
+            // fed for nobody costs a core, one starved for a panel is wrong.
+            wanted: true,
         },
         // Clamped, not trusted: `save_config` writes the live buffer depth back,
         // so a config written before the floor existed carries a value too small

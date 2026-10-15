@@ -1026,6 +1026,10 @@ impl Panel for HeaderPanel {
     fn name(&self) -> &'static str {
         "header"
     }
+
+    fn reads_spectrum(&self) -> bool {
+        false
+    }
     fn supports_acquisition(&self, _acquisition: crate::hardware::AcquisitionKind) -> bool {
         true
     }

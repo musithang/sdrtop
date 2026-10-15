@@ -193,6 +193,7 @@ pub fn process_block(
 #[derive(Clone, Copy)]
 pub struct Arrival {
     cal: crate::state::IqCalState,
+    fft_enabled: bool,
     demod_enabled: bool,
     net_enabled: bool,
     centre_hz: u64,
@@ -235,13 +236,18 @@ pub fn arrive(
     // tuning, from the same lock, so the file's gain and frequency are the
     // settings of one moment.
     let recording = ctx.record.armed();
-    let (cal, demod_enabled, net_enabled, centre_hz, rate_hz, gain) = {
+    // The FFT's gate is whether a panel on screen reads the spectrum, or a
+    // frequency reference was asked for, which the FFT worker measures from
+    // the blocks it gets: at 20 Msps the transform is a core, and on a NET
+    // view nothing reads it.
+    let (cal, fft_enabled, demod_enabled, net_enabled, centre_hz, rate_hz, gain) = {
         let mut m = ctx.metrics.lock().unwrap_or_else(|e| e.into_inner());
         // What the radio delivered, counted where it arrives: a block the
         // intake later has no room for still crossed the USB link.
         m.radio.bytes_since_last_poll += buf.len() as u64;
         (
             m.iq.cal,
+            m.spectrum.wanted || m.radio.reference_request,
             m.demod.enabled,
             m.ui.is_net_section(),
             m.radio.frequency,
@@ -279,6 +285,7 @@ pub fn arrive(
 
     Arrival {
         cal,
+        fft_enabled,
         demod_enabled,
         net_enabled,
         centre_hz,
@@ -348,6 +355,7 @@ pub fn digest(
 ) {
     let Arrival {
         cal,
+        fft_enabled,
         demod_enabled,
         net_enabled,
         centre_hz,
@@ -381,8 +389,10 @@ pub fn digest(
     // Single brief lock to flush accumulated results - O(1), no loops inside.
     {
         let Ok(mut m) = ctx.metrics.lock() else {
-            let taken = ctx.sample_tx.try_send(buf.to_vec()).is_ok();
-            ctx.fft_feed.record(ctx.sample_tx.len(), taken);
+            if fft_enabled {
+                let taken = ctx.sample_tx.try_send(buf.to_vec()).is_ok();
+                ctx.fft_feed.record(ctx.sample_tx.len(), taken);
+            }
             return;
         };
 
@@ -484,8 +494,12 @@ pub fn digest(
     // `try_send` has returned there is nothing downstream that can tell the block
     // ever existed. The depth is read straight after, which can only understate
     // it if the worker drained the queue in between.
-    let taken = ctx.sample_tx.try_send(forward).is_ok();
-    ctx.fft_feed.record(ctx.sample_tx.len(), taken);
+    // Not offered, not lost: with nobody reading the spectrum the block is
+    // not the FFT feed's to count.
+    if fft_enabled {
+        let taken = ctx.sample_tx.try_send(forward).is_ok();
+        ctx.fft_feed.record(ctx.sample_tx.len(), taken);
+    }
 }
 
 /// The running totals one block folds into, and the per-pair body that fills
@@ -734,6 +748,27 @@ pub(crate) mod tests {
             intake: Default::default(),
         };
         (Arc::new(ctx), sample_rx, demod_rx, net_rx)
+    }
+
+    /// **The FFT worker gets no block when nothing on screen reads it**,
+    /// and one again for a frequency reference asked for, which it measures
+    /// from the blocks it gets; a block not offered is not a loss.
+    #[test]
+    fn the_fft_feed_is_gated_on_a_reader() {
+        let (ctx, sample_rx, _demod_rx, _net_rx) = rx_ctx();
+        let block: Vec<u8> = (0..64u8).collect();
+        ctx.metrics.lock().unwrap().spectrum.wanted = false;
+        super::process_block(&block, eight_bit(), 0, &ctx, Instant::now());
+        assert!(sample_rx.try_recv().is_err(), "nobody reads it");
+        ctx.metrics.lock().unwrap().radio.reference_request = true;
+        super::process_block(&block, eight_bit(), 0, &ctx, Instant::now());
+        assert!(sample_rx.try_recv().is_ok(), "a reference was asked for");
+        let mut m = ctx.metrics.lock().unwrap();
+        m.radio.reference_request = false;
+        m.spectrum.wanted = true;
+        drop(m);
+        super::process_block(&block, eight_bit(), 0, &ctx, Instant::now());
+        assert!(sample_rx.try_recv().is_ok());
     }
 
     /// **The recorder gets the raw bytes**, even while the other feeds carry

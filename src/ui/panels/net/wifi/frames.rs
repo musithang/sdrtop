@@ -424,6 +424,10 @@ impl Panel for NetWifiFramesPanel {
         "net_wifi_frames"
     }
 
+    fn reads_spectrum(&self) -> bool {
+        false
+    }
+
     fn min_size(&self) -> (u16, u16) {
         (40, 5)
     }

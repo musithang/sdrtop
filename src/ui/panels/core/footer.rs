@@ -479,6 +479,10 @@ impl Panel for FooterPanel {
     fn name(&self) -> &'static str {
         "footer"
     }
+
+    fn reads_spectrum(&self) -> bool {
+        false
+    }
     fn supports_acquisition(&self, _acquisition: crate::hardware::AcquisitionKind) -> bool {
         true
     }

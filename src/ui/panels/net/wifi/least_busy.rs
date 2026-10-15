@@ -342,6 +342,10 @@ impl Panel for NetWifiLeastBusyPanel {
         "net_wifi_least_busy"
     }
 
+    fn reads_spectrum(&self) -> bool {
+        false
+    }
+
     fn min_size(&self) -> (u16, u16) {
         (20, 8)
     }

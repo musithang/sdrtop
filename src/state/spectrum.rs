@@ -61,4 +61,8 @@ pub struct SpectrumState {
     pub pending_marker: Option<u64>,
     /// Trace render style; cycled with `D`. See [`SpectrumStyle`].
     pub style: SpectrumStyle,
+    /// Whether a panel on screen reads the spectrum or what is measured from
+    /// it, written by the app each frame: when none does, the FFT worker is
+    /// fed nothing (`hardware::process`), and at 20 Msps that is a core.
+    pub wanted: bool,
 }

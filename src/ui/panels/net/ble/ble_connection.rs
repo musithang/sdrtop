@@ -473,6 +473,10 @@ impl Panel for NetBleConnectionPanel {
         "net_ble_connection"
     }
 
+    fn reads_spectrum(&self) -> bool {
+        false
+    }
+
     fn min_size(&self) -> (u16, u16) {
         (30, 6)
     }

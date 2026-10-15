@@ -653,6 +653,10 @@ impl Panel for NetWifiCardPanel {
         "net_wifi_card"
     }
 
+    fn reads_spectrum(&self) -> bool {
+        false
+    }
+
     fn min_size(&self) -> (u16, u16) {
         (40, 10)
     }

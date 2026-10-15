@@ -230,6 +230,10 @@ impl Panel for NetWifiSurveyPanel {
         "net_wifi_survey"
     }
 
+    fn reads_spectrum(&self) -> bool {
+        false
+    }
+
     fn min_size(&self) -> (u16, u16) {
         (60, 12)
     }

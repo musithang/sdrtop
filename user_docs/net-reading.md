@@ -130,6 +130,12 @@ Over 100 % they cannot keep up and blocks are dropped, which the `gaps`
 count and the feed-loss tags then show. The [Survey's decode
 health](net-band.md#decode-health) has the whole account.
 
+No NET view computes a spectrum: nothing on these screens reads one, and
+at the 20 Msps a Wi-Fi view runs it would take a whole core the decoders
+need (on a small machine, the difference between a feed that keeps up and
+one that breaks several times a second). It starts again the moment a
+view that shows one is on screen.
+
 ## Addresses (`i`)
 
 `i` switches how addresses are shown, on every panel and in every export at

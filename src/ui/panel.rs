@@ -521,6 +521,16 @@ pub trait Panel: Send + Sync {
         &[]
     }
 
+    /// Whether it reads the spectrum or anything measured from it (the FFT
+    /// frame, `signal.*`'s carrier, power, S-meter, modulation and adjacent
+    /// channels). True unless a panel says otherwise, so one nobody thought
+    /// about keeps its spectrum: when no panel on screen reads it, the FFT
+    /// worker is fed nothing. A panel that says false is held to it by a
+    /// test that draws it with a spectrum and without.
+    fn reads_spectrum(&self) -> bool {
+        true
+    }
+
     /// The rows this panel takes in a stacked column of `column` rows, when
     /// it needs a height of its own rather than an even share: a plot whose
     /// lanes are whole rows, more of them when there is room. `None`, the

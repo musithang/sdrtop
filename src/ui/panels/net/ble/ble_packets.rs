@@ -428,6 +428,10 @@ impl Panel for NetBlePacketsPanel {
         }
     }
 
+    fn reads_spectrum(&self) -> bool {
+        false
+    }
+
     fn min_size(&self) -> (u16, u16) {
         (48, 6)
     }

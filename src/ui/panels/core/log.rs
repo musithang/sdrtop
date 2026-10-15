@@ -85,6 +85,10 @@ impl Panel for LogPanel {
     fn name(&self) -> &'static str {
         "log"
     }
+
+    fn reads_spectrum(&self) -> bool {
+        false
+    }
     fn supports_acquisition(&self, _acquisition: crate::hardware::AcquisitionKind) -> bool {
         true
     }

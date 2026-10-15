@@ -569,6 +569,10 @@ impl Panel for NetOccupancyPanel {
         "net_occupancy"
     }
 
+    fn reads_spectrum(&self) -> bool {
+        false
+    }
+
     fn min_size(&self) -> (u16, u16) {
         (40, 8)
     }

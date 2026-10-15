@@ -248,6 +248,23 @@ impl LayoutEngine {
     /// hidden and nothing asks about it - but `App::draw` gates the demodulator on
     /// `is_panel_visible("fm_demod")`, so the first panel hidden other than the
     /// footer would have kept its worker running behind a panel that is not drawn.
+    /// Whether a panel the active layout shows reads the spectrum: the FFT
+    /// worker's gate.
+    pub fn shows_spectrum_reader(&self) -> bool {
+        self.config
+            .active_panels()
+            .iter()
+            .filter(|s| !self.hidden_panels.contains(&s.name))
+            .filter_map(|s| self.registry.get(&s.name))
+            .any(|p| p.reads_spectrum())
+    }
+
+    /// The registry, for tests that draw a panel through it.
+    #[cfg(test)]
+    pub fn registry(&self) -> &PanelRegistry {
+        &self.registry
+    }
+
     pub fn is_panel_visible(&self, name: &str) -> bool {
         !self.hidden_panels.contains(name)
             && self.config.active_panels().iter().any(|s| s.name == name)

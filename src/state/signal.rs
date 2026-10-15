@@ -294,6 +294,10 @@ pub struct SignalState {
     /// Recent SNR (peak/noise-floor) samples, pushed by the rx poll task roughly
     /// every 500 ms while streaming. Powers the micro_signal trend arrow.
     pub snr_history: VecDeque<f32>,
+    /// The FFT frame the trends last took their figures from, by its time:
+    /// a frame is pushed once, so a paused FFT leaves a gap, not its last
+    /// level repeated.
+    pub trended_fft: Option<std::time::Instant>,
     /// Recent channel-power (dBFS) samples - pushed alongside `snr_history` at the
     /// same ~500 ms cadence. Powers the command rail's PWR sparkline + trend.
     pub pwr_history: VecDeque<f32>,
@@ -375,6 +379,7 @@ impl Default for SignalState {
             usb_errors_last_poll: 0,
             usb_error_history: VecDeque::new(),
             snr_history: hist(),
+            trended_fft: None,
             pwr_history: hist(),
             nf_history: hist(),
             sat_history: hist(),
@@ -460,6 +465,7 @@ mod tests {
             usb_errors_last_poll: 0,
             usb_error_history: VecDeque::new(),
             snr_history: VecDeque::new(),
+            trended_fft: None,
             pwr_history: VecDeque::new(),
             nf_history: VecDeque::new(),
             sat_history: VecDeque::new(),

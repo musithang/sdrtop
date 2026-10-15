@@ -489,6 +489,10 @@ impl Panel for NetDecodeHealthPanel {
         "net_decode_health"
     }
 
+    fn reads_spectrum(&self) -> bool {
+        false
+    }
+
     fn min_size(&self) -> (u16, u16) {
         (44, 12)
     }

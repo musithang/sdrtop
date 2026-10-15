@@ -227,14 +227,27 @@ fn push_trends(m: &mut SdrMetrics) {
     let snr = m.signal.peak_to_nf_db;
     let pwr = m.signal.channel_power_dbfs;
     let sat = m.signal.adc_saturation_pct;
-    let nf = m.waterfall.last_fft.as_ref().map(|f| f.noise_floor);
+    // The FFT's figures only from a frame not pushed before: while the FFT
+    // is not fed (nothing on screen reads it) its last frame stays in the
+    // state, and pushing it every poll would draw a level nobody measured.
+    let stamp = m.waterfall.last_fft.as_ref().map(|f| f.timestamp);
+    let fresh = stamp.is_some() && stamp != m.signal.trended_fft;
+    m.signal.trended_fft = stamp;
+    let nf = m
+        .waterfall
+        .last_fft
+        .as_ref()
+        .filter(|_| fresh)
+        .map(|f| f.noise_floor);
     // IRR from the freshly-written imbalance, via the shared helper the Lab IQ
     // panel also uses (so trend and read-out agree).
     let irr =
         crate::signal::image_rejection_db(m.iq.iq_imbalance_db, m.iq.phase_imbalance_deg) as f32;
-    push(&mut m.signal.snr_history, snr);
-    if pwr.is_finite() {
-        push(&mut m.signal.pwr_history, pwr);
+    if fresh {
+        push(&mut m.signal.snr_history, snr);
+        if pwr.is_finite() {
+            push(&mut m.signal.pwr_history, pwr);
+        }
     }
     if let Some(nf) = nf {
         push(&mut m.signal.nf_history, nf);
@@ -246,6 +259,26 @@ fn push_trends(m: &mut SdrMetrics) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// **A trend takes an FFT frame once**: while the FFT is not running
+    /// (nothing on screen reads it) the SNR, power and noise floor trends
+    /// get nothing, rather than its last frame again and again; the
+    /// saturation, measured here, goes on.
+    #[test]
+    fn a_trend_takes_each_fft_frame_once() {
+        let mut m = SdrMetrics::fixture().streaming().with_carrier(0.0, 30.0);
+        push_trends(&mut m);
+        push_trends(&mut m);
+        assert_eq!(m.signal.snr_history.len(), 1);
+        assert_eq!(m.signal.pwr_history.len(), 1);
+        assert_eq!(m.signal.nf_history.len(), 1);
+        assert_eq!(m.signal.sat_history.len(), 2);
+        if let Some(f) = m.waterfall.last_fft.as_mut() {
+            f.timestamp += std::time::Duration::from_millis(33);
+        }
+        push_trends(&mut m);
+        assert_eq!(m.signal.snr_history.len(), 2);
+    }
 
     #[test]
     fn throughput_reports_no_spread_until_it_has_two_samples() {

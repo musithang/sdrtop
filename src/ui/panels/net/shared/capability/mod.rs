@@ -151,6 +151,10 @@ impl Panel for NetCapabilityPanel {
         "net_capability"
     }
 
+    fn reads_spectrum(&self) -> bool {
+        false
+    }
+
     fn min_size(&self) -> (u16, u16) {
         (48, 16)
     }

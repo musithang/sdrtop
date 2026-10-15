@@ -487,6 +487,10 @@ impl Panel for NetBtPacketsPanel {
         "net_bt_packets"
     }
 
+    fn reads_spectrum(&self) -> bool {
+        false
+    }
+
     fn min_size(&self) -> (u16, u16) {
         (30, 6)
     }

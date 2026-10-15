@@ -968,6 +968,10 @@ impl Panel for NetBleDetailPanel {
         "net_ble_detail"
     }
 
+    fn reads_spectrum(&self) -> bool {
+        false
+    }
+
     fn min_size(&self) -> (u16, u16) {
         (28, 4)
     }

@@ -316,6 +316,7 @@ impl App {
         // active is how the rest of the layout already works. The gate itself stays,
         // so the extra per-block copy still costs nothing on every screen without it.
         let demod_preset = self.engine.is_panel_visible("fm_demod");
+        let spectrum_wanted = self.engine.shows_spectrum_reader();
         // Written into the **shared state**, not into the snapshot below.
         //
         // Everything after the clone is the UI thread talking to itself: the
@@ -330,6 +331,9 @@ impl App {
             let mut guard = self.state.lock().unwrap_or_else(|e| e.into_inner());
             guard.sweep.active = sweep_active;
             guard.demod.enabled = demod_preset && guard.demod.user_on;
+            // The FFT worker is fed only while a panel on screen reads what it
+            // makes: on a NET view nothing does, and at 20 Msps it is a core.
+            guard.spectrum.wanted = spectrum_wanted;
             guard.ui.section = self
                 .engine
                 .scope()
