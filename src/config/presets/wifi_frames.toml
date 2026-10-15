@@ -2,10 +2,12 @@
 # lanes of frames at 1 ms, 40 us or 4 us a cell; under it every frame heard
 # on the channel's centre, newest first, with what was read of it (its
 # format and signalling, the gap before it, its airtime, offset and SNR)
-# and another channel's frames by how far away they are. The list's focus
-# (e) holds both, selects a frame (lit on the river) and steps the river's
-# zoom. Beside them the funnel, every preamble found and what became of
-# it. No Bluetooth receiver runs on it.
+# and another channel's frames by how far away they are. Beside them the
+# card: this channel's frames a second over whole seconds, by format, and
+# the selected frame field by field, its clock and its channel; `d` turns
+# it to the account of every preamble found. The list's focus (e) holds the
+# list and the river, selects a frame and steps the river's zoom. No
+# Bluetooth receiver runs on it.
 
 section = "wifi_channel"
 slot    = 2
@@ -13,10 +15,10 @@ title   = "Frames"
 blurb   = "what is on this channel, frame by frame"
 
 panels = [
-    { name = "header",            position = "top", height = 5 },
-    { name = "net_wifi_river",    position = "body" },
-    { name = "net_wifi_frames",   position = "body" },
-    { name = "net_decode_health", position = "right", width_pct = 30 },
-    { name = "log",               position = "bottom", height = 5 },
-    { name = "footer",            position = "bottom" },
+    { name = "header",          position = "top", height = 5 },
+    { name = "net_wifi_river",  position = "body" },
+    { name = "net_wifi_frames", position = "body" },
+    { name = "net_wifi_card",   position = "right", width_pct = 36 },
+    { name = "log",             position = "bottom", height = 5 },
+    { name = "footer",          position = "bottom" },
 ]

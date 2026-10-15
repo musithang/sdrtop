@@ -116,8 +116,8 @@ impl App {
         registry.register(ui::NetCoexistPanel);
         registry.register(ui::NetDecodeHealthPanel);
         registry.register(ui::NetOccupancyPanel);
-        registry.register(ui::NetWifiStandinPanel);
         registry.register(ui::NetWifiFramesPanel);
+        registry.register(ui::NetWifiCardPanel);
         registry.register(ui::NetWifiRiverPanel);
         registry.register(ui::NetWifiSurveyPanel);
         registry.register(ui::NetWifiLeastBusyPanel);
@@ -489,10 +489,6 @@ mod tests {
                 "net_ble_detail",
                 "one received packet's detail, not a count: a block lost elsewhere does not change it",
             ),
-            (
-                "net_wifi_standin",
-                "it counts nothing yet: where the radio is and at what rate, read off the radio",
-            ),
         ];
 
         let (engine, _) = App::build_ui("net", &HashMap::new(), None, true);
@@ -540,11 +536,13 @@ mod tests {
         let mut checked = 0;
         for (name, text, chrome) in &rendered {
             // A ppm, or an f0 in kHz (the packet list's column, the Classic
-            // view's summary line): an offset either way, corrected by the
-            // reference where there is one.
+            // view's summary line), or a Wi-Fi frame's offset in kHz with
+            // its 1 sigma: an offset either way, corrected by the reference
+            // where there is one.
             let prints_ppm = text.contains(" ppm")
                 || text.contains("f0 kHz")
-                || (text.contains("f0 ") && text.contains(" kHz"));
+                || (text.contains("f0 ") && text.contains(" kHz"))
+                || (text.contains('\u{b1}') && text.contains(" kHz"));
             let declares = chrome.offsets;
             if prints_ppm || declares {
                 checked += 1;
@@ -612,19 +610,26 @@ mod tests {
         m.net.address_display = display;
         m.net.address_book.number([1, 2, 3, 4, 5, 6]);
         m.net.ble_channel = Some(37);
-        // A Wi-Fi frame too, for the Wi-Fi view's latest-frame line.
-        m.net.wifi.last_frame = Some(crate::state::WifiFrame {
-            offset_hz: Uncertain::from_sigma(-12_430.0, 1_900.0),
-            snr_db: 14.0,
-            carrier_hz: 2_437_000_000.0,
-            heard: crate::signal::wifi::format::Heard {
+        // A Wi-Fi frame too, heard where the radio is, for the Frames view.
+        m.net.wifi.push_row(crate::state::WifiRow {
+            seq: 0,
+            start: 0,
+            run: 0,
+            when: now,
+            carrier_hz: m.radio.frequency as f64,
+            kind: crate::state::RowKind::Ofdm(crate::signal::wifi::format::Heard {
                 lsig: Some(Ok(crate::signal::wifi::lsig::LSig {
                     rate: crate::signal::wifi::signal_field::Rate::R24,
                     length: 1_500,
                 })),
                 format: Some(crate::signal::wifi::format::Format::NonHt),
-            },
-            when: now,
+            }),
+            airtime_us: Some(524),
+            gap_us: None,
+            offset_hz: Some(Uncertain::from_sigma(-12_430.0, 1_900.0)),
+            snr_db: Some(14.0),
+            channel: None,
+            clock: None,
         });
         m.net.ble_packets.push_front(BlePacket {
             phy: crate::signal::ble::Phy::OneM,

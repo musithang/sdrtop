@@ -386,6 +386,7 @@ mod tests {
             offset_hz: Some(Uncertain::from_sigma(-48_000.0, 200.0)),
             snr_db: Some(snr_db),
             channel: None,
+            clock: None,
         }
     }
 

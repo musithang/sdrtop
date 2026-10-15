@@ -195,10 +195,9 @@ format's colour, as wide as its airtime and as tall as its SNR, at 1 ms,
 `net_wifi_frames`, every frame heard on the channel's centre, newest first:
 its format and what its signalling said, the gap before it, its airtime,
 offset and SNR, and another channel's frames by how far away they are.
-`net_wifi_standin`, which channel the radio is on, whether the rate is the
-20 Msps the bench needs, the latest frame's offset, its format and what its
-signalling said, the latest 802.11b frame's header, and that nothing past
-that is decoded yet.
+`net_wifi_card`, the Frames view's card: this channel's frames a second
+over whole seconds, by format, and the selected frame field by field with
+its clock and its channel, or the account of every preamble found.
 
 **Observer:** `observer`
 

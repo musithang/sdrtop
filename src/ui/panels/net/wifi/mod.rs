@@ -4,10 +4,10 @@
 //! Wi-Fi's panels. Beside `net::ble` and `net::bt`, never inside either: the
 //! Wi-Fi bench is a menu of its own and shares no panel with Bluetooth's.
 
+pub mod card;
 pub mod frames;
 pub mod least_busy;
 pub mod river;
-pub mod standin;
 pub mod survey;
 
 use ratatui::{

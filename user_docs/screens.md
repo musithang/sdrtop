@@ -415,7 +415,7 @@ screen.
 | Key | Preset | What's in it |
 |-----|--------|--------------|
 | `1` | `wifi_survey` | Survey: thirteen columns, each channel's busy share beside its frames' airtime by format · least busy, or why none can be named yet |
-| `2` | `wifi_frames` | Frames: every frame heard on the channel, newest first, with its format, signalling, gap, airtime, offset and SNR · feed health |
+| `2` | `wifi_frames` | Frames: the river of the channel's time · every frame heard on it, newest first, with its format, signalling, gap, airtime, offset and SNR · frames a second by format, and the selected frame field by field |
 
 `p` steps to the next layout in whichever section you are in, and wraps at the
 end. A twenty-seventh preset, `observer`, is marked hidden, so it has no section and no

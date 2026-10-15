@@ -33,7 +33,7 @@ use crate::signal::wifi::dsss::receive::{
 };
 use crate::signal::wifi::format::{read, Signalling};
 use crate::signal::wifi::sync::{examine, needs, Sync, Verdict};
-use crate::state::{Family, RowKind, SdrMetrics, Visit, WifiClock, WifiDsss, WifiRow};
+use crate::state::{Family, RowKind, SdrMetrics, Visit, WifiClock, WifiRow};
 
 /// Where the receiver runs, or why not, its detector, the repeats found
 /// that wait for their long training field to be held, and the frames that
@@ -213,7 +213,6 @@ impl Wifi {
         state: &Arc<Mutex<SdrMetrics>>,
     ) {
         let mut counts = crate::state::WifiFunnel::default();
-        let mut last = None;
         // Every frame judged, as a row of the Frames list.
         let mut rows: Vec<WifiRow> = Vec::new();
         let run = self.run;
@@ -229,6 +228,7 @@ impl Wifi {
             offset_hz: None,
             snr_db: None,
             channel: None,
+            clock: None,
         };
         self.waiting.retain(|d| {
             let Some((from, len)) = needs(d.peak) else {
@@ -286,13 +286,6 @@ impl Wifi {
                                 centre_hz,
                             });
                         }
-                        last = Some(crate::state::WifiFrame {
-                            offset_hz: s.offset,
-                            snr_db: 10.0 * s.snr.log10(),
-                            carrier_hz: centre_hz,
-                            heard,
-                            when: now,
-                        });
                     }
                 },
                 Some(Verdict::Adjacent { shift_mhz }) => {
@@ -322,24 +315,28 @@ impl Wifi {
                 .and_then(|stretch| measure(&stretch, from, &p.sync, &p.plan));
             if let Some(clock_ppm) = clock {
                 let ppm = |hz: f64| hz / p.centre_hz * 1e6;
-                clocks.push(WifiClock {
-                    clock_ppm: clock_ppm.clock_ppm,
-                    carrier_ppm: Uncertain::from_sigma(
-                        ppm(clock_ppm.carrier_hz.value()),
-                        ppm(clock_ppm.carrier_hz.sigma()),
-                    ),
-                    preamble_ppm: Uncertain::from_sigma(
-                        ppm(p.sync.offset.value()),
-                        ppm(p.sync.offset.sigma()),
-                    ),
-                    symbols: p.plan.count,
-                    when: now,
-                });
+                // The frame's row, kept when it was judged, by where it began.
+                let start = p.sync.ltf_start.saturating_sub(192);
+                clocks.push((
+                    start,
+                    WifiClock {
+                        clock_ppm: clock_ppm.clock_ppm,
+                        carrier_ppm: Uncertain::from_sigma(
+                            ppm(clock_ppm.carrier_hz.value()),
+                            ppm(clock_ppm.carrier_hz.sigma()),
+                        ),
+                        preamble_ppm: Uncertain::from_sigma(
+                            ppm(p.sync.offset.value()),
+                            ppm(p.sync.offset.sigma()),
+                        ),
+                        symbols: p.plan.count,
+                        when: now,
+                    },
+                ));
             }
             false
         });
         // Every 802.11b SYNC whose header is held by now is read.
-        let mut last_dsss = None;
         let dsss_row = |r: &crate::signal::wifi::dsss::receive::Read, kind: RowKind| WifiRow {
             airtime_us: r.header.ok().map(|h| h.airtime_us(r.preamble)),
             offset_hz: Some(r.offset_hz),
@@ -402,13 +399,6 @@ impl Wifi {
                             header: r.header,
                         },
                     ));
-                    last_dsss = Some(WifiDsss {
-                        preamble: r.preamble,
-                        header: r.header,
-                        offset_hz: r.offset_hz,
-                        carrier_hz: centre_hz,
-                        when: now,
-                    });
                 }
                 Some(DsssVerdict::NoSfd) => counts.dsss_no_sfd += 1,
                 Some(DsssVerdict::Elsewhere { .. }) => {
@@ -422,17 +412,9 @@ impl Wifi {
             }
             false
         });
+        let run = self.run;
         if counts != Default::default() || !clocks.is_empty() {
             let mut m = state.lock().unwrap_or_else(|e| e.into_inner());
-            if last_dsss.is_some() {
-                m.net.wifi.last_dsss = last_dsss;
-            }
-            for c in &clocks {
-                m.net.wifi.clock_check.add(c);
-            }
-            if let Some(c) = clocks.last() {
-                m.net.wifi.clock = Some(*c);
-            }
             let f = &mut m.net.health.wifi;
             f.this_channel += counts.this_channel;
             f.lsig_read += counts.lsig_read;
@@ -448,12 +430,15 @@ impl Wifi {
             f.dsss_cut += counts.dsss_cut;
             f.dsss_inside += counts.dsss_inside;
             f.dsss_adjacent += counts.dsss_adjacent;
-            if last.is_some() {
-                m.net.wifi.last_frame = last;
-            }
             rows.sort_by_key(|r| r.start);
             for r in rows {
                 m.net.wifi.push_row(r);
+            }
+            // After the rows: a short frame's clock can be read in the same
+            // block it was judged in.
+            for (start, c) in &clocks {
+                m.net.wifi.clock_check.add(c);
+                m.net.wifi.clock_row(run, *start, *c);
             }
         }
     }

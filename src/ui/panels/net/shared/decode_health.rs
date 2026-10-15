@@ -335,100 +335,7 @@ fn lines(
         out.push(dash("classic BT", "not decoding"));
     }
 
-    // Wi-Fi, only once its receiver has run this session, as LE Coded: the
-    // views that start it are its own. What it found is a repeat, and the
-    // long training field's answer to whose it is.
-    let w = &state.net.wifi;
-    if w.ran {
-        out.push(match (w.channel, &w.refused) {
-            (Some(ch), _) => row("Wi-Fi", format!("ch {ch}"), None),
-            (None, Some(why)) => dash("Wi-Fi", why),
-            (None, None) => dash("Wi-Fi", "not running on this view"),
-        });
-        let f = h.wifi;
-        // A repeat, not yet a preamble: a neighbour's frame and other
-        // signals with the same period pass too, and only the long training
-        // field's sequence will say which are this channel's.
-        out.push(row(
-            "repeats",
-            grouped(f.detected),
-            Some("short-training-like, judged below"),
-        ));
-        out.push(row(
-            "this channel",
-            grouped(f.this_channel),
-            Some("long training field matched"),
-        ));
-        // Each of this channel's frames had its L-SIG read, or a greenfield
-        // HT-SIG in its place, or neither.
-        out.push(row(
-            "  L-SIG read",
-            grouped(f.lsig_read),
-            Some("parity, rate and tail good"),
-        ));
-        out.push(row(
-            "  greenfield",
-            grouped(f.greenfield),
-            Some("HT-SIG read, no L-SIG"),
-        ));
-        out.push(row(
-            "  unreadable",
-            grouped(f.unreadable),
-            Some("no L-SIG or HT-SIG passed"),
-        ));
-        out.push(row(
-            "adjacent",
-            grouped(f.adjacent),
-            Some("a channel 5, 10 or 15 MHz away"),
-        ));
-        out.push(row(
-            "not a preamble",
-            grouped(f.not_preamble),
-            Some("matched nothing"),
-        ));
-        out.push(row(
-            "not a short field",
-            grouped(f.not_short_field),
-            Some("repeats at 0.4 us, not 0.8"),
-        ));
-        out.push(row(
-            "cut short",
-            grouped(f.cut),
-            Some("by a break or a retune"),
-        ));
-        // 802.11b beside the OFDM funnel: SYNCs found, and what each turned out to be.
-        out.push(row(
-            "802.11b SYNCs",
-            grouped(f.dsss_found),
-            Some("Barker runs, judged below"),
-        ));
-        out.push(row("  header read", grouped(f.dsss_read), Some("CRC good")));
-        out.push(row(
-            "  header refused",
-            grouped(f.dsss_refused),
-            Some("CRC or rate"),
-        ));
-        out.push(row(
-            "  no SFD",
-            grouped(f.dsss_no_sfd),
-            Some("a SYNC, no frame after"),
-        ));
-        out.push(row(
-            "  SYNC cut",
-            grouped(f.dsss_cut),
-            Some("by a break or a retune"),
-        ));
-        out.push(row(
-            "  inside a frame",
-            grouped(f.dsss_inside),
-            Some("found again after a fade"),
-        ));
-        out.push(row(
-            "  another channel",
-            grouped(f.dsss_adjacent),
-            Some("centred whole MHz away"),
-        ));
-    }
+    out.extend(wifi_lines(state, theme, width));
 
     // What it cost: the same figure the header band shows, red
     // above the stream's own pace, where the worker is falling behind.
@@ -456,6 +363,125 @@ fn lines(
     // and nothing looks yet. See the module header.
     out.push(dash("bursts", "no detector yet"));
     (out, drawings)
+}
+
+/// Wi-Fi's rows: whether its receiver runs, every repeat found and what
+/// became of it, and the 802.11b SYNCs beside them. Empty until it has run
+/// this session, as LE Coded's are: the views that start it are its own.
+/// The Frames card shows the same rows as its decode account.
+pub(crate) fn wifi_lines(
+    state: &SdrMetrics,
+    theme: &crate::Theme,
+    width: usize,
+) -> Vec<Line<'static>> {
+    let h = &state.net.health;
+    let row = |label, value, note| count(label, value, theme.value, note, theme, width);
+    let dash = |label, note| {
+        count(
+            label,
+            "\u{2014}".to_string(),
+            theme.stale,
+            Some(note),
+            theme,
+            width,
+        )
+    };
+    let w = &state.net.wifi;
+    let mut out = Vec::new();
+    if !w.ran {
+        return out;
+    }
+    // What it found is a repeat, and the long training field's answer to
+    // whose it is.
+    out.push(match (w.channel, &w.refused) {
+        (Some(ch), _) => row("Wi-Fi", format!("ch {ch}"), None),
+        (None, Some(why)) => dash("Wi-Fi", why),
+        (None, None) => dash("Wi-Fi", "not running on this view"),
+    });
+    let f = h.wifi;
+    // A repeat, not yet a preamble: a neighbour's frame and other
+    // signals with the same period pass too, and only the long training
+    // field's sequence will say which are this channel's.
+    out.push(row(
+        "repeats",
+        grouped(f.detected),
+        Some("short-training-like, judged below"),
+    ));
+    out.push(row(
+        "this channel",
+        grouped(f.this_channel),
+        Some("long training field matched"),
+    ));
+    // Each of this channel's frames had its L-SIG read, or a greenfield
+    // HT-SIG in its place, or neither.
+    out.push(row(
+        "  L-SIG read",
+        grouped(f.lsig_read),
+        Some("parity, rate and tail good"),
+    ));
+    out.push(row(
+        "  greenfield",
+        grouped(f.greenfield),
+        Some("HT-SIG read, no L-SIG"),
+    ));
+    out.push(row(
+        "  unreadable",
+        grouped(f.unreadable),
+        Some("no L-SIG or HT-SIG passed"),
+    ));
+    out.push(row(
+        "adjacent",
+        grouped(f.adjacent),
+        Some("a channel 5, 10 or 15 MHz away"),
+    ));
+    out.push(row(
+        "not a preamble",
+        grouped(f.not_preamble),
+        Some("matched nothing"),
+    ));
+    out.push(row(
+        "not a short field",
+        grouped(f.not_short_field),
+        Some("repeats at 0.4 us, not 0.8"),
+    ));
+    out.push(row(
+        "cut short",
+        grouped(f.cut),
+        Some("by a break or a retune"),
+    ));
+    // 802.11b beside the OFDM funnel: SYNCs found, and what each turned out to be.
+    out.push(row(
+        "802.11b SYNCs",
+        grouped(f.dsss_found),
+        Some("Barker runs, judged below"),
+    ));
+    out.push(row("  header read", grouped(f.dsss_read), Some("CRC good")));
+    out.push(row(
+        "  header refused",
+        grouped(f.dsss_refused),
+        Some("CRC or rate"),
+    ));
+    out.push(row(
+        "  no SFD",
+        grouped(f.dsss_no_sfd),
+        Some("a SYNC, no frame after"),
+    ));
+    out.push(row(
+        "  SYNC cut",
+        grouped(f.dsss_cut),
+        Some("by a break or a retune"),
+    ));
+    out.push(row(
+        "  inside a frame",
+        grouped(f.dsss_inside),
+        Some("found again after a fade"),
+    ));
+    out.push(row(
+        "  another channel",
+        grouped(f.dsss_adjacent),
+        Some("centred whole MHz away"),
+    ));
+    out
 }
 
 impl Panel for NetDecodeHealthPanel {

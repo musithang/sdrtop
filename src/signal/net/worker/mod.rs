@@ -377,7 +377,7 @@ impl NetWorker {
 mod tests {
     use super::*;
     use crate::hardware::SampleFormat;
-    use crate::state::BlePacket;
+    use crate::state::{BlePacket, RowKind};
 
     /// The survey starts with no classic channel, and says it is the load:
     /// its first reading has not come yet, and a receiver it has not measured
@@ -1255,7 +1255,7 @@ mod tests {
         eprintln!(
             "{secs:.1} s · channel {:?} · repeats {} ({:.1}/s): this channel {} (L-SIG read {}, \
              greenfield {}, unreadable {}), adjacent {}, not a preamble {}, not a short field {}, \
-             cut {} · last frame {:?}",
+             cut {} · latest {:?}",
             m.net.wifi.channel,
             f.detected,
             f.detected as f64 / secs,
@@ -1269,8 +1269,9 @@ mod tests {
             f.cut,
             m.net
                 .wifi
-                .last_frame
-                .map(|l| (l.offset_hz, l.snr_db, l.heard))
+                .rows
+                .back()
+                .map(|r| (r.offset_hz, r.snr_db, r.kind))
         );
         eprintln!(
             "802.11b: {} SYNCs, {} read, {} refused, {} no SFD, {} cut, {} inside a frame, {} another channel's · latest {:?}",
@@ -1283,8 +1284,11 @@ mod tests {
             f.dsss_adjacent,
             m.net
                 .wifi
-                .last_dsss
-                .map(|d| (d.preamble, d.header, d.offset_hz))
+                .rows
+                .iter()
+                .rev()
+                .find(|r| matches!(r.kind, RowKind::Dsss { .. }))
+                .map(|r| (r.kind, r.offset_hz))
         );
         let c = m.net.wifi.clock_check;
         eprintln!(
@@ -1292,10 +1296,11 @@ mod tests {
             c.frames,
             c.mean(),
             c.chi2_per_dof(),
-            m.net
-                .wifi
-                .clock
-                .map(|k| (k.clock_ppm, k.carrier_ppm, k.symbols))
+            m.net.wifi.rows.iter().rev().find_map(|r| r.clock).map(|k| (
+                k.clock_ppm,
+                k.carrier_ppm,
+                k.symbols
+            ))
         );
     }
 
@@ -1911,14 +1916,14 @@ mod tests {
             (1, 1, 0, 0, 0),
             "{f:?}"
         );
-        let last = m.net.wifi.last_frame.expect("a frame shown");
-        assert!(
-            last.offset_hz.value().abs() < 5_000.0,
-            "{:?}",
-            last.offset_hz
-        );
-        assert!(last.offset_hz.sigma() < 5_000.0, "{:?}", last.offset_hz);
+        let last = m.net.wifi.rows.back().expect("a frame kept");
+        let offset = last.offset_hz.expect("its offset");
+        assert!(offset.value().abs() < 5_000.0, "{offset:?}");
+        assert!(offset.sigma() < 5_000.0, "{offset:?}");
         assert_eq!(last.carrier_hz, 2_437_000_000.0);
+        let RowKind::Ofdm(heard) = last.kind else {
+            panic!("{:?}", last.kind)
+        };
         // Its L-SIG read: the annex's 36 Mb/s and 100 octets, six DATA
         // symbols, 44 us on the air.
         // A clause 17 frame: no later format's signature after it.
@@ -1927,8 +1932,8 @@ mod tests {
             rate: Rate::R36,
             length: 100,
         };
-        assert_eq!(last.heard.lsig, Some(Ok(want)));
-        assert_eq!(last.heard.format, Some(Format::NonHt));
+        assert_eq!(heard.lsig, Some(Ok(want)));
+        assert_eq!(heard.format, Some(Format::NonHt));
         assert_eq!(
             (f.lsig_read, f.greenfield, f.unreadable),
             (1, 0, 0),
@@ -2123,13 +2128,13 @@ mod tests {
             "{f:?}"
         );
         assert_eq!(f.this_channel, 0, "{f:?}");
-        let last = m.net.wifi.last_dsss.expect("a frame shown");
-        assert_eq!(last.header, Ok(h));
-        assert!(
-            last.offset_hz.value().abs() < 5_000.0,
-            "{:?}",
-            last.offset_hz
-        );
+        let last = m.net.wifi.rows.back().expect("a frame kept");
+        let RowKind::Dsss { header, .. } = last.kind else {
+            panic!("{:?}", last.kind)
+        };
+        assert_eq!(header, Ok(h));
+        let offset = last.offset_hz.expect("its offset");
+        assert!(offset.value().abs() < 5_000.0, "{offset:?}");
     }
 
     /// An 802.11b frame of another channel, its centre 3 MHz from ours, is
@@ -2153,7 +2158,12 @@ mod tests {
             (1, 0, 0, 1),
             "{f:?}"
         );
-        assert!(m.net.wifi.last_dsss.is_none());
+        assert!(!m
+            .net
+            .wifi
+            .rows
+            .iter()
+            .any(|r| matches!(r.kind, RowKind::Dsss { .. })));
     }
 
     /// A break before its header was held cuts the frame, and every SYNC
@@ -2179,7 +2189,12 @@ mod tests {
                 + f.dsss_inside
                 + f.dsss_adjacent
         );
-        assert!(m.net.wifi.last_dsss.is_none());
+        assert!(!m
+            .net
+            .wifi
+            .rows
+            .iter()
+            .any(|r| matches!(r.kind, RowKind::Dsss { .. })));
     }
 
     /// A long 802.11b frame with a fade in its data: the SYNC found again
@@ -2235,9 +2250,9 @@ mod tests {
         assert_eq!(m.net.health.wifi.this_channel, 1);
     }
 
-    /// A frame long enough to read a clock from, across three blocks: the
-    /// latest clock reading is its, near nothing (both ends' clocks are
-    /// the test's one), and the session's cross-check has one frame in it.
+    /// A frame long enough to read a clock from, across three blocks: its
+    /// row carries the clock, near nothing (both ends' clocks are the
+    /// test's one), and the session's cross-check has one frame in it.
     #[test]
     fn a_long_frames_clock_is_read_once_its_end_is_held() {
         let mut blocks = vec![(1, noise_block(1))];
@@ -2247,7 +2262,8 @@ mod tests {
         blocks.push((5, noise_block(5)));
         let m = run_wifi("wifi_channel", "wifi_survey", &blocks);
         assert_eq!(m.net.health.wifi.lsig_read, 1, "{:?}", m.net.health.wifi);
-        let clock = m.net.wifi.clock.expect("a clock read");
+        assert_eq!(m.net.wifi.rows.len(), 1);
+        let clock = m.net.wifi.rows[0].clock.expect("a clock read");
         assert_eq!(clock.symbols, 68);
         // The carrier over the data, the test's own, near nothing too; the
         // preamble's beside it.
@@ -2278,7 +2294,8 @@ mod tests {
         ];
         let m = run_wifi("wifi_channel", "wifi_survey", &blocks);
         assert_eq!(m.net.health.wifi.lsig_read, 1, "{:?}", m.net.health.wifi);
-        assert!(m.net.wifi.clock.is_none());
+        assert_eq!(m.net.wifi.rows.len(), 1);
+        assert!(m.net.wifi.rows[0].clock.is_none());
         assert_eq!(m.net.wifi.clock_check.frames, 0);
     }
 

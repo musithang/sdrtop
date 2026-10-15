@@ -78,7 +78,7 @@ pub fn below(state: &SdrMetrics) -> usize {
 
 /// From `newest` to `row`, in microseconds: on the stream's own clock
 /// within one run, by when each was judged across a break.
-fn since(row: &WifiRow, newest: &WifiRow) -> f64 {
+pub(super) fn since(row: &WifiRow, newest: &WifiRow) -> f64 {
     if row.run == newest.run {
         (row.start as f64 - newest.start as f64) / 20.0
     } else {
@@ -90,7 +90,7 @@ fn since(row: &WifiRow, newest: &WifiRow) -> f64 {
     }
 }
 
-fn when(us: f64) -> String {
+pub(super) fn when(us: f64) -> String {
     if us.abs() < 1e6 {
         format!("{:>9.3} ms", us / 1e3)
     } else {
@@ -299,9 +299,9 @@ fn row_line(
 
 fn keys(width: usize) -> &'static str {
     if width >= FULL {
-        " \u{2191}\u{2193} scroll, holding at the newest   H hold   End live   z zoom"
+        " \u{2191}\u{2193} scroll, holding at the newest   H hold   End live   z zoom   d the decode account"
     } else {
-        " \u{2191}\u{2193} scroll   H hold   End live   z zoom"
+        " \u{2191}\u{2193} scroll   H hold   End live   z zoom   d the decode account"
     }
 }
 
@@ -389,6 +389,7 @@ impl Panel for NetWifiFramesPanel {
                 "z",
                 "the river's zoom: 1 ms, 40 \u{b5}s or 4 \u{b5}s a cell",
             ),
+            ("d", "the card: the selected frame, or the decode account"),
         ]
     }
 
@@ -473,6 +474,7 @@ mod tests {
             offset_hz: Some(Uncertain::from_sigma(-48_000.0, 200.0)),
             snr_db: Some(27.0),
             channel: None,
+            clock: None,
         }
     }
 

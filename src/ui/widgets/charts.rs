@@ -351,15 +351,6 @@ pub fn bipolar_braille_strip(
 /// around it. Three rows give twelve levels at 3.3 dB each and the same pilot stands
 /// halfway up the strip.
 pub fn braille_profile(data: &[f32], cols: usize, rows: usize) -> Vec<String> {
-    if cols == 0 || rows == 0 {
-        return Vec::new();
-    }
-    // Dot bits within a 2×4 braille cell, indexed bottom (0) → top (3) per side,
-    // since a filled column grows upward from the floor.
-    const LEFT: [u8; 4] = [0x40, 0x04, 0x02, 0x01]; // dots 7,3,2,1
-    const RIGHT: [u8; 4] = [0x80, 0x20, 0x10, 0x08]; // dots 8,6,5,4
-
-    let total_levels = (rows * 4) as i32;
     let (lo, hi) = data
         .iter()
         .copied()
@@ -369,6 +360,25 @@ pub fn braille_profile(data: &[f32], cols: usize, rows: usize) -> Vec<String> {
         });
     // Nothing to plot, or a perfectly flat trace with no shape to show.
     if !lo.is_finite() || !hi.is_finite() || (hi - lo) <= 1e-6 {
+        return vec![" ".repeat(cols); rows];
+    }
+    braille_profile_in(data, cols, rows, lo, hi)
+}
+
+/// [`braille_profile`] on a window of its own, `lo` to `hi`: a trace whose
+/// spread is small against what it is measured on keeps that look, where
+/// a window of its own range would stretch a ripple to the full height.
+pub fn braille_profile_in(data: &[f32], cols: usize, rows: usize, lo: f32, hi: f32) -> Vec<String> {
+    if cols == 0 || rows == 0 {
+        return Vec::new();
+    }
+    // Dot bits within a 2×4 braille cell, indexed bottom (0) → top (3) per side,
+    // since a filled column grows upward from the floor.
+    const LEFT: [u8; 4] = [0x40, 0x04, 0x02, 0x01]; // dots 7,3,2,1
+    const RIGHT: [u8; 4] = [0x80, 0x20, 0x10, 0x08]; // dots 8,6,5,4
+
+    let total_levels = (rows * 4) as i32;
+    if hi - lo <= 1e-6 {
         return vec![" ".repeat(cols); rows];
     }
     let range = hi - lo;
@@ -402,6 +412,16 @@ pub fn braille_profile(data: &[f32], cols: usize, rows: usize) -> Vec<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// On a scale of its own the profile keeps that scale: a flat trace
+    /// in the middle of a window stands half way up, rather than vanishing
+    /// as it does when the window is its own range.
+    #[test]
+    fn a_profile_on_a_given_scale_keeps_it() {
+        let rows = braille_profile_in(&[0.0; 8], 4, 2, -3.0, 3.0);
+        assert_eq!(rows[1], "\u{28ff}".repeat(4), "the lower row full");
+        assert_eq!(rows[0], "\u{2800}".repeat(4), "the upper row empty");
+    }
 
     #[test]
     fn braille_profile_geometry() {

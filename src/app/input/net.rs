@@ -1645,6 +1645,7 @@ mod tests {
                     offset_hz: None,
                     snr_db: None,
                     channel: None,
+                    clock: None,
                 });
             }
         }

@@ -3,41 +3,9 @@
 
 //! Wi-Fi's receiver, as the worker last left it: where it runs, or why not.
 
-/// The latest frame of this channel the receiver synchronised to.
-#[derive(Clone, Copy, Debug, PartialEq)]
-pub struct WifiFrame {
-    /// Its offset from our tuning, with its uncertainty; our own
-    /// oscillator's error is in it until a reference takes it out.
-    pub offset_hz: crate::signal::dsp::uncertainty::Uncertain,
-    /// The per-sample SNR its long training field gave, in dB.
-    pub snr_db: f64,
-    /// The channel centre it was heard on, which the offset is a fraction
-    /// of.
-    pub carrier_hz: f64,
-    /// What the symbols after its long training field said: its L-SIG and
-    /// its format.
-    pub heard: crate::signal::wifi::format::Heard,
-    pub when: std::time::Instant,
-}
-
-/// The latest 802.11b frame whose SYNC was found and SFD read.
-#[derive(Clone, Copy, Debug, PartialEq)]
-pub struct WifiDsss {
-    pub preamble: crate::signal::wifi::dsss::header::Preamble,
-    /// What its header said, or why it was refused.
-    pub header:
-        Result<crate::signal::wifi::dsss::header::Header, crate::signal::wifi::dsss::header::Fault>,
-    /// Its carrier against our tuning, from its SYNC.
-    pub offset_hz: crate::signal::dsp::uncertainty::Uncertain,
-    /// The channel centre it was heard on.
-    pub carrier_hz: f64,
-    pub when: std::time::Instant,
-}
-
-/// The latest frame of this channel whose symbol clock was read, beside
-/// its carrier over the same DATA field: two readings of what the standard
-/// requires to be one oscillator; and the preamble's carrier, which lies
-/// apart from them.
+/// A frame's symbol clock, beside its carrier over the same DATA field: two
+/// readings of what the standard requires to be one oscillator; and the
+/// preamble's carrier, which lies apart from them.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct WifiClock {
     /// Its sample clock against ours, in ppm, positive when fast.
@@ -383,6 +351,9 @@ pub struct WifiRow {
     /// decibel against the tones' mean power; a frame of this channel's
     /// OFDM only.
     pub channel: Option<[i16; 52]>,
+    /// Its symbol clock and its carrier over the DATA field, when the frame
+    /// was long enough to read them (`WifiState::clock_row`).
+    pub clock: Option<WifiClock>,
 }
 
 impl WifiRow {
@@ -470,15 +441,8 @@ pub struct WifiState {
     /// only then, as it does LE Coded: a line for a receiver this session
     /// never started would offer one the view on screen does not start.
     pub ran: bool,
-    /// The latest frame of this channel, kept across a stand-down so the
-    /// panel can still say what it last saw, dated.
-    pub last_frame: Option<WifiFrame>,
-    /// The latest frame whose clock was read, and its carrier.
-    pub clock: Option<WifiClock>,
     /// Every clock read this session against its carrier.
     pub clock_check: ClockCheck,
-    /// The latest 802.11b frame read.
-    pub last_dsss: Option<WifiDsss>,
     /// The survey's visits, channel by channel.
     pub survey: WifiSurvey,
     /// The frames heard, oldest first, in the order they were sent: at most
@@ -517,6 +481,22 @@ impl WifiState {
     }
 }
 
+impl WifiState {
+    /// Give the row of the frame that began at stream pair `start` in run
+    /// `run` its clock: read once the frame's DATA field was held, after the
+    /// row was kept. A row gone from the ring has nothing to carry it.
+    pub fn clock_row(&mut self, run: u64, start: u64, clock: WifiClock) {
+        if let Some(r) = self
+            .rows
+            .iter_mut()
+            .rev()
+            .find(|r| r.run == run && r.start == start)
+        {
+            r.clock = Some(clock);
+        }
+    }
+}
+
 /// From the end of `before` to the start of `row`, in microseconds, when
 /// both are of one run and `before` stated its length. A Wi-Fi view runs at
 /// exactly 20 Msps (`signal::net::wifi::rate_refusal`): 20 pairs a
@@ -547,6 +527,7 @@ mod tests {
             offset_hz: None,
             snr_db: None,
             channel: None,
+            clock: None,
         }
     }
 
@@ -745,6 +726,23 @@ mod tests {
             symbols: 100,
             when: std::time::Instant::now(),
         }
+    }
+
+    /// A clock is read after its frame's row was kept, and finds the row
+    /// again by its run and start; a row of another run with the same
+    /// start is another frame and is left alone.
+    #[test]
+    fn a_clock_finds_its_frames_row() {
+        let mut w = WifiState::default();
+        w.push_row(row(0, 100.0, Some(300)));
+        w.push_row(row(1, 100.0, Some(300)));
+        w.push_row(row(1, 900.0, Some(40)));
+        w.clock_row(1, 2_000, reading(3.0, 2.0));
+        assert_eq!(w.rows[1].clock.map(|c| c.symbols), Some(100));
+        assert!(w.rows[0].clock.is_none() && w.rows[2].clock.is_none());
+        // A row gone from the ring has nothing to carry it.
+        w.clock_row(7, 2_000, reading(3.0, 2.0));
+        assert_eq!(w.rows.iter().filter(|r| r.clock.is_some()).count(), 1);
     }
 
     /// Frames that agree give a mean near their difference and a

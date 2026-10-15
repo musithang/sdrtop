@@ -46,8 +46,8 @@ pub use net::FrameZoom;
 #[cfg(test)]
 pub use net::WifiSurvey;
 pub use net::{
-    Family, FramesView, LeastBusy, NetDecodeHealth, RowKind, Visit, WifiClock, WifiDsss, WifiFrame,
-    WifiFunnel, WifiRow, WIFI_ROWS_KEPT,
+    Family, FramesView, LeastBusy, NetDecodeHealth, RowKind, Visit, WifiClock, WifiFunnel, WifiRow,
+    WIFI_ROWS_KEPT,
 };
 pub use observer::ObserverState;
 pub use radio::{

@@ -43,10 +43,7 @@ pub use packets::{
 pub use wifi::FrameZoom;
 #[cfg(test)]
 pub use wifi::WifiSurvey;
-pub use wifi::{
-    Family, FramesView, LeastBusy, RowKind, Visit, WifiClock, WifiDsss, WifiFrame, WifiRow,
-    WIFI_ROWS_KEPT,
-};
+pub use wifi::{Family, FramesView, LeastBusy, RowKind, Visit, WifiClock, WifiRow, WIFI_ROWS_KEPT};
 
 /// Whether the receiver is walking the band or sitting on one channel.
 ///
