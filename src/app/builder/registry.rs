@@ -118,6 +118,7 @@ impl App {
         registry.register(ui::NetOccupancyPanel);
         registry.register(ui::NetWifiStandinPanel);
         registry.register(ui::NetWifiFramesPanel);
+        registry.register(ui::NetWifiRiverPanel);
         registry.register(ui::NetWifiSurveyPanel);
         registry.register(ui::NetWifiLeastBusyPanel);
 

@@ -6,6 +6,7 @@
 
 pub mod frames;
 pub mod least_busy;
+pub mod river;
 pub mod standin;
 pub mod survey;
 
@@ -106,6 +107,9 @@ fn plate(buf: &mut Buffer, area: Rect, s: &Silence, theme: &crate::Theme) {
         Style::default().fg(theme.value),
         inside,
     );
+    // Five rows hold the head, the reason and the keys with no gap above
+    // the keys; six and more leave one.
+    let keys_y = if h >= 6 { y0 + 4 } else { y0 + 3 };
     let mut x = x0 + 3;
     for (part, key) in &s.keys {
         let style = if *key {
@@ -115,7 +119,7 @@ fn plate(buf: &mut Buffer, area: Rect, s: &Silence, theme: &crate::Theme) {
         } else {
             Style::default().fg(theme.label)
         };
-        x = put(buf, x, y0 + 4, part, style, inside);
+        x = put(buf, x, keys_y, part, style, inside);
     }
 }
 

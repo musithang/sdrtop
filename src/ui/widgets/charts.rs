@@ -75,7 +75,7 @@ pub fn eighth_block_bar(val: u32, max_val: u32, n: usize) -> (String, String) {
 
 /// Linear blend of two colours along `t∈[0,1]`. Falls back to `a` for non-Rgb
 /// inputs (the SDR theme is truecolor, so the Rgb arm is what actually runs).
-fn lerp_color(a: Color, b: Color, t: f64) -> Color {
+pub(crate) fn lerp_color(a: Color, b: Color, t: f64) -> Color {
     let t = t.clamp(0.0, 1.0);
     match (a, b) {
         (Color::Rgb(r1, g1, b1), Color::Rgb(r2, g2, b2)) => Color::Rgb(

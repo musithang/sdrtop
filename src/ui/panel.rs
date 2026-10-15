@@ -521,6 +521,14 @@ pub trait Panel: Send + Sync {
         &[]
     }
 
+    /// The rows this panel takes in a stacked column of `column` rows, when
+    /// it needs a height of its own rather than an even share: a plot whose
+    /// lanes are whole rows, more of them when there is room. `None`, the
+    /// default, shares what the others leave.
+    fn column_height(&self, _column: u16) -> Option<u16> {
+        None
+    }
+
     /// Preferred rendered height in rows, given the available terminal width and current state.
     /// Used by the layout engine for top/bottom panels. Default: 3 (1 content + 2 borders).
     fn preferred_height(&self, _available_width: u16, _state: &SdrMetrics) -> u16 {

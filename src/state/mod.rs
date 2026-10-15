@@ -42,7 +42,6 @@ pub use net::{
 pub use net::ROSTER_SORT_KEYS;
 // Named by the NET worker, which counts its arrivals into it, and Wi-Fi's
 // funnel and latest frame with it.
-#[cfg(test)]
 pub use net::FrameZoom;
 #[cfg(test)]
 pub use net::WifiSurvey;

@@ -412,6 +412,24 @@ pub enum FrameZoom {
 }
 
 impl FrameZoom {
+    /// Microseconds a cell.
+    pub fn cell_us(self) -> f64 {
+        match self {
+            FrameZoom::Load => 1_000.0,
+            FrameZoom::Rhythm => 40.0,
+            FrameZoom::Anatomy => 4.0,
+        }
+    }
+
+    /// What the river's title says of it.
+    pub fn label(self) -> &'static str {
+        match self {
+            FrameZoom::Load => "1 ms a cell",
+            FrameZoom::Rhythm => "40 \u{b5}s a cell",
+            FrameZoom::Anatomy => "4 \u{b5}s a cell",
+        }
+    }
+
     /// The next step in, wrapping from the finest back to the load.
     pub fn next(self) -> Self {
         match self {

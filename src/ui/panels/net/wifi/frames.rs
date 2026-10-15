@@ -56,7 +56,7 @@ pub fn shown(state: &SdrMetrics) -> Vec<&WifiRow> {
 /// Where the list starts in what it shows: the newest while live, the held
 /// frame while held, which is also how many arrived since. `None` when the
 /// held frame has left the ring.
-fn top(shown: &[&WifiRow], view: &FramesView) -> Option<usize> {
+pub(super) fn top(shown: &[&WifiRow], view: &FramesView) -> Option<usize> {
     match view.held {
         None => Some(0),
         Some(seq) => shown.iter().position(|r| r.seq == seq),
@@ -64,7 +64,7 @@ fn top(shown: &[&WifiRow], view: &FramesView) -> Option<usize> {
 }
 
 /// Where the selected frame is in what is shown: the newest while live.
-fn at(shown: &[&WifiRow], view: &FramesView) -> Option<usize> {
+pub(super) fn at(shown: &[&WifiRow], view: &FramesView) -> Option<usize> {
     let top = top(shown, view)?;
     let cursor = if view.held.is_some() { view.cursor } else { 0 };
     (top < shown.len()).then(|| (top + cursor).min(shown.len() - 1))
@@ -213,7 +213,7 @@ fn eighth(snr_db: f64) -> char {
 }
 
 /// A row's colour: its family's, or the other channels' quiet one.
-fn ink(row: &WifiRow, theme: &crate::Theme) -> Color {
+pub(super) fn ink(row: &WifiRow, theme: &crate::Theme) -> Color {
     row.family()
         .map_or(theme.wifi_other_channel, |f| theme.wifi(f))
 }
@@ -299,9 +299,9 @@ fn row_line(
 
 fn keys(width: usize) -> &'static str {
     if width >= FULL {
-        " \u{2191}\u{2193} scroll, holding at the newest   H hold   End live"
+        " \u{2191}\u{2193} scroll, holding at the newest   H hold   End live   z zoom"
     } else {
-        " \u{2191}\u{2193} scroll   H hold   End live"
+        " \u{2191}\u{2193} scroll   H hold   End live   z zoom"
     }
 }
 
@@ -385,6 +385,10 @@ impl Panel for NetWifiFramesPanel {
             ("\u{2191}\u{2193}", "scroll, holding the list at its newest"),
             ("H", "hold the list, or let it run"),
             ("End", "back to live"),
+            (
+                "z",
+                "the river's zoom: 1 ms, 40 \u{b5}s or 4 \u{b5}s a cell",
+            ),
         ]
     }
 

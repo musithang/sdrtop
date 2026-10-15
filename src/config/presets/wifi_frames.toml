@@ -1,9 +1,11 @@
-# What is on this channel, frame by frame: every frame heard on the channel's
-# centre, newest first, with what was read of it (its format and
-# signalling, the gap before it, its airtime, offset and SNR) and another
-# channel's frames by how far away they are. The list's focus (e) holds it
-# and selects a frame. Beside it the funnel, every preamble found and what
-# became of it. No Bluetooth receiver runs on it.
+# What is on this channel, frame by frame: the river, the channel's time as
+# lanes of frames at 1 ms, 40 us or 4 us a cell; under it every frame heard
+# on the channel's centre, newest first, with what was read of it (its
+# format and signalling, the gap before it, its airtime, offset and SNR)
+# and another channel's frames by how far away they are. The list's focus
+# (e) holds both, selects a frame (lit on the river) and steps the river's
+# zoom. Beside them the funnel, every preamble found and what became of
+# it. No Bluetooth receiver runs on it.
 
 section = "wifi_channel"
 slot    = 2
@@ -12,6 +14,7 @@ blurb   = "what is on this channel, frame by frame"
 
 panels = [
     { name = "header",            position = "top", height = 5 },
+    { name = "net_wifi_river",    position = "body" },
     { name = "net_wifi_frames",   position = "body" },
     { name = "net_decode_health", position = "right", width_pct = 30 },
     { name = "log",               position = "bottom", height = 5 },

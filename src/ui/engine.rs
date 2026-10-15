@@ -470,7 +470,15 @@ fn render_column(
     if specs.is_empty() {
         return;
     }
-    let constraints: Vec<Constraint> = specs.iter().map(|_| Constraint::Min(0)).collect();
+    let constraints: Vec<Constraint> = specs
+        .iter()
+        .map(|s| {
+            registry
+                .get(&s.name)
+                .and_then(|p| p.column_height(area.height))
+                .map_or(Constraint::Min(0), Constraint::Length)
+        })
+        .collect();
     let areas = Layout::default()
         .direction(Direction::Vertical)
         .constraints(constraints)

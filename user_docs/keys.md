@@ -370,7 +370,7 @@ each panel's numbers mean is on [the NET page](net.md).
 | `k` | Band Capability | `Band 1` | `K` time the tuning call |
 | `j` | Band Occupancy | `Band 2` | `←→` move the cursor 1 MHz · `B` cursor to the busiest cell · `L` lock the receiver here |
 | `z` | Coexistence | `Band 2` | `↓` back in time: the profile shows that moment · `↑` forward in time · `N` back to now |
-| `e` | Frames | `Channel 2` (Wi-Fi) | `↑↓` scroll, holding the list at its newest · `H` hold the list, or let it run · `End` back to live |
+| `e` | Frames | `Channel 2` (Wi-Fi) | `↑↓` scroll, holding the list at its newest · `H` hold the list, or let it run · `End` back to live · `z` the river's zoom: 1 ms, 40 µs or 4 µs a cell |
 | `u` | Survey | `Channel 1` (Wi-Fi) | `←→` select a channel · `L` lock the radio on it · `C` start the survey again |
 | `u` | Band Census | `LE 1` | `↑↓` select · `S` sort by the next column · `R` reverse · `T` trust as frequency reference, or let it go |
 | `e` | Connection | `LE 3` | `↑↓` scroll the events · `End` back to the newest · `← →` the previous or next connection |
