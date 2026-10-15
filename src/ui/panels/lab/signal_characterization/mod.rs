@@ -24,8 +24,12 @@
 //! bar quote the same severity this panel shows without depending on the panel.
 //! [`row`] holds the label column and the annotation rule every zone writes into.
 //!
-//! Every scalar comes from the latest coherent FFT frame (`state.waterfall.last_fft`),
-//! so the numbers agree with the bonded spectrum beside it.
+//! The channel figures come from the latest coherent FFT frame
+//! (`state.waterfall.last_fft`), so they agree with the bonded spectrum beside
+//! it. The carrier figures (occupied bandwidth, the adjacent channels, the
+//! verdict) come from `state.signal.carrier`: taken only from frames with a
+//! carrier, held through a gap of up to a second, because in a gap between
+//! bursts the same measurements read noise.
 
 mod acpr;
 mod card;
@@ -35,6 +39,8 @@ mod row;
 mod shape;
 mod verdict;
 
+#[cfg(test)]
+pub(crate) use verdict::steady as steady_carrier;
 pub(crate) use verdict::{verdict, VerdictLevel};
 
 use ratatui::{layout::Rect, text::Line, widgets::Paragraph, Frame};
@@ -89,9 +95,10 @@ impl Panel for SignalCharacterizationPanel {
         let mut lines: Vec<Line> = Vec::new();
         headline::lines(&mut lines, state, frame, iw, theme);
         lines.push(Line::raw(""));
-        metrics::lines(&mut lines, frame, iw, theme);
+        let carrier = state.signal.carrier.as_ref().filter(|_| !stale);
+        metrics::lines(&mut lines, frame, carrier, iw, theme);
         lines.push(Line::raw(""));
-        acpr::lines(&mut lines, state, frame, stale, iw, theme);
+        acpr::lines(&mut lines, state, frame, carrier, iw, theme);
         lines.push(Line::raw(""));
         shape::lines(&mut lines, state, stale, iw, theme);
         lines.push(Line::raw(""));
@@ -105,6 +112,56 @@ impl Panel for SignalCharacterizationPanel {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    use crate::state::Modulation;
+
+    /// A carrier heard 300 ms ago, and the frame in hand a gap between its
+    /// bursts: noise against noise, about 0 dB a side, the whole span occupied.
+    fn in_a_gap() -> SdrMetrics {
+        let mut m = SdrMetrics::fixture().streaming().with_carrier(0.0, 40.0);
+        let mut c = verdict::steady(Modulation::Wfm, 38.0, -41.0, -43.0, 180_000);
+        c.heard = std::time::Instant::now() - std::time::Duration::from_millis(300);
+        m.signal.carrier = Some(c);
+        m.signal.acpr_lower_db = -0.4;
+        m.signal.acpr_upper_db = 0.3;
+        m.signal.occupied_bw_hz = 1_900_000;
+        if let Some(fr) = m.waterfall.last_fft.as_mut() {
+            fr.occupied_bw_hz = 1_900_000;
+        }
+        m
+    }
+
+    fn row<'a>(lines: &'a [String], label: &str) -> &'a str {
+        lines
+            .iter()
+            .find(|l| l.contains(label))
+            .map_or("", |l| l.as_str())
+    }
+
+    /// **A gap is not read as the carrier.** The adjacent ratios, the
+    /// occupied bandwidth and the verdict are the carrier's, not the gap's.
+    #[test]
+    fn the_panel_prints_the_carrier_not_the_gap() {
+        let lines = crate::state::fixture::draw(SignalCharacterizationPanel, 48, 40, &in_a_gap());
+        let text = lines.join("\n");
+        assert!(row(&lines, "Occupied BW").contains("180.0 kHz"), "{text}");
+        assert!(row(&lines, "L \u{2212}").contains("-41.0 dB"), "{text}");
+        assert!(row(&lines, "R +").contains("-43.0 dB"), "{text}");
+        assert!(text.contains("CLEAN WFM SIGNAL"), "{text}");
+    }
+
+    /// A second with no carrier and its figures are refused, whatever the
+    /// frame in hand reads.
+    #[test]
+    fn without_a_carrier_its_figures_are_refused() {
+        let mut m = in_a_gap();
+        m.signal.carrier = None;
+        let lines = crate::state::fixture::draw(SignalCharacterizationPanel, 48, 40, &m);
+        let text = lines.join("\n");
+        assert!(row(&lines, "Occupied BW").contains("---"), "{text}");
+        assert!(row(&lines, "L \u{2212}").contains("---"), "{text}");
+        assert!(text.contains("NO SIGNAL"), "{text}");
+    }
 
     #[test]
     fn panel_name_is_stable() {

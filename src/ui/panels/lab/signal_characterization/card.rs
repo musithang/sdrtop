@@ -34,7 +34,7 @@ pub(super) fn lines(
     iw: usize,
     theme: &crate::Theme,
 ) {
-    let Some(fr) = frame else {
+    if frame.is_none() {
         out.push(Line::from(vec![
             Span::raw(" "),
             Span::styled("\u{25cb} IDLE \u{2014} RX stopped", dim(theme)),
@@ -42,17 +42,11 @@ pub(super) fn lines(
         return;
     };
 
-    let sig = &state.signal;
-    let (level, headline, detail) = verdict(
-        sig.modulation,
-        fr.peak_to_nf_db,
-        sig.acpr_lower_db,
-        sig.acpr_upper_db,
-        fr.occupied_bw_hz,
-    );
+    let (level, headline, detail) = verdict(state.signal.carrier.as_ref());
     let (mark, col) = match level {
         VerdictLevel::Clean => ("\u{2713}", theme.status_ok),
         VerdictLevel::Caution => ("\u{26a0}", theme.status_warn),
+        VerdictLevel::Judging => ("\u{25cc}", theme.stale),
         VerdictLevel::NoSignal => ("\u{25cb}", theme.stale),
     };
     let copy_w = iw.saturating_sub(1);
@@ -94,18 +88,32 @@ mod tests {
         // must hold the whole sentence: a verdict that loses its tail is exactly
         // the clipping this layout exists to remove.
         let copy_w = super::super::SignalCharacterizationPanel.min_size().0 as usize - 2 - 1;
+        use super::super::verdict::steady;
+        let mut judging = steady(Modulation::Wfm, 40.0, -40.0, -40.0, 180_000);
+        judging.verdict = None;
+        // A splatter verdict held while its adjacent pair is not measured.
+        let mut splatter_unmeasured = steady(Modulation::Wfm, 47.0, -10.0, -40.0, 1_250_000);
+        splatter_unmeasured.acpr_lower = None;
         let cases = [
-            verdict(Modulation::Unknown, 40.0, -40.0, -40.0, 0),
-            verdict(Modulation::Wfm, 15.0, -40.0, -40.0, 180_000),
-            verdict(Modulation::Wfm, 47.0, -10.0, -40.0, 1_250_000),
-            verdict(Modulation::Wfm, 43.0, -38.0, -41.0, 180_000),
-            verdict(
+            verdict(None),
+            verdict(Some(&judging)),
+            verdict(Some(&steady(Modulation::Wfm, 15.0, -40.0, -40.0, 180_000))),
+            verdict(Some(&steady(
+                Modulation::Wfm,
+                47.0,
+                -10.0,
+                -40.0,
+                1_250_000,
+            ))),
+            verdict(Some(&splatter_unmeasured)),
+            verdict(Some(&steady(Modulation::Wfm, 43.0, -38.0, -41.0, 180_000))),
+            verdict(Some(&steady(
                 Modulation::Nfm,
                 30.0,
                 f32::NEG_INFINITY,
                 f32::NEG_INFINITY,
                 15_000,
-            ),
+            ))),
         ];
         for (_, headline, detail) in cases {
             let head = wrap(&format!("\u{26a0} {headline}"), copy_w, VERDICT_HEAD_ROWS);

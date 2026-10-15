@@ -246,12 +246,13 @@ fn signal_fields(sig: &crate::state::SignalState, stale: bool) -> Vec<(&'static 
                 dash()
             },
         ),
+        // The carrier's, not the frame in hand's: in a gap between bursts
+        // the frame's 99 % bandwidth is noise spread over the whole span.
         (
             "OBW",
-            if sig.occupied_bw_hz > 0 {
-                crate::ui::widgets::micro_common::fmt_bw(sig.occupied_bw_hz)
-            } else {
-                dash()
+            match sig.carrier.filter(|c| c.occupied_bw_hz > 0) {
+                Some(c) => crate::ui::widgets::micro_common::fmt_bw(c.occupied_bw_hz),
+                None => dash(),
             },
         ),
     ]
@@ -839,8 +840,8 @@ fn signal_marker_lines(state: &SdrMetrics, theme: &crate::Theme, iw: usize) -> V
     // two, because it is a judgement rather than a reading.
     let stale = crate::ui::widgets::micro_common::fft_stale(state);
 
-    let obw_str = if !stale && sig.occupied_bw_hz > 0 {
-        crate::ui::widgets::micro_common::fmt_bw(sig.occupied_bw_hz)
+    let obw_str = if let Some(c) = sig.carrier.filter(|c| !stale && c.occupied_bw_hz > 0) {
+        crate::ui::widgets::micro_common::fmt_bw(c.occupied_bw_hz)
     } else {
         "\u{2014}".to_string()
     };
@@ -860,19 +861,17 @@ fn signal_marker_lines(state: &SdrMetrics, theme: &crate::Theme, iw: usize) -> V
             Style::default().fg(theme.stale),
         )]
     } else {
-        let (level, ..) = crate::ui::panels::lab::signal_characterization::verdict(
-            sig.modulation,
-            sig.peak_to_nf_db,
-            sig.acpr_lower_db,
-            sig.acpr_upper_db,
-            sig.occupied_bw_hz,
-        );
+        let (level, ..) =
+            crate::ui::panels::lab::signal_characterization::verdict(sig.carrier.as_ref());
         let (mark, col) = match level {
             crate::ui::panels::lab::signal_characterization::VerdictLevel::Clean => {
                 ("\u{2713}", theme.status_ok)
             }
             crate::ui::panels::lab::signal_characterization::VerdictLevel::Caution => {
                 ("\u{26a0}", theme.status_warn)
+            }
+            crate::ui::panels::lab::signal_characterization::VerdictLevel::Judging => {
+                ("\u{25cc}", theme.stale)
             }
             crate::ui::panels::lab::signal_characterization::VerdictLevel::NoSignal => {
                 ("\u{25cb}", theme.stale)
@@ -1072,8 +1071,54 @@ mod tests {
             acpr_lower_db: -34.9,
             acpr_upper_db: -35.1,
             modulation: crate::state::Modulation::Wfm,
+            carrier: Some(
+                crate::ui::panels::lab::signal_characterization::steady_carrier(
+                    crate::state::Modulation::Wfm,
+                    47.0,
+                    -34.9,
+                    -35.1,
+                    120_000,
+                ),
+            ),
             ..Default::default()
         }
+    }
+
+    /// The banner's bandwidth is the carrier's: in a gap the frame in hand
+    /// occupies the whole span.
+    #[test]
+    fn signal_banner_reads_the_carriers_bandwidth() {
+        let mut sig = measured();
+        sig.occupied_bw_hz = 1_900_000;
+        let f = signal_fields(&sig, false);
+        let obw = f.iter().find(|(n, _)| *n == "OBW").unwrap().1.clone();
+        assert_eq!(obw, "120.0 kHz");
+        sig.carrier = None;
+        let f = signal_fields(&sig, false);
+        let obw = f.iter().find(|(n, _)| *n == "OBW").unwrap().1.clone();
+        assert_eq!(obw, "\u{2014}", "no carrier, no bandwidth");
+    }
+
+    /// The marker bar's QUALITY is the held verdict the card shows, not one
+    /// judged from the frame in hand.
+    #[test]
+    fn signal_marker_quality_is_the_held_verdict() {
+        let mut m = SdrMetrics::fixture().streaming().with_carrier(0.0, 40.0);
+        m.signal = crate::state::SignalState {
+            acpr_lower_db: -0.4,
+            acpr_upper_db: 0.3,
+            peak_to_nf_db: 4.0,
+            occupied_bw_hz: 1_900_000,
+            ..measured()
+        };
+        let text: String = signal_marker_lines(&m, &crate::Theme::sdr(), 190)
+            .iter()
+            .flat_map(|l| l.spans.iter().map(|s| s.content.to_string()))
+            .collect();
+        assert!(
+            text.contains("Clean") && text.contains("120.0 kHz"),
+            "{text}"
+        );
     }
 
     #[test]

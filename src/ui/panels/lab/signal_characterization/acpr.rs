@@ -9,7 +9,7 @@ use ratatui::{
     text::{Line, Span},
 };
 
-use crate::state::{FftFrame, SdrMetrics};
+use crate::state::{Carrier, FftFrame, SdrMetrics};
 use crate::ui::chrome::section;
 
 use super::row::{annotated, dash, fmt_freq, metric, val};
@@ -27,32 +27,32 @@ pub(super) fn lines(
     out: &mut Vec<Line<'static>>,
     state: &SdrMetrics,
     frame: Option<&FftFrame>,
-    stale: bool,
+    carrier: Option<&Carrier>,
     iw: usize,
     theme: &crate::Theme,
 ) {
     out.push(section("ADJACENT CHANNEL", "ACPR", iw, theme));
-    let sig = &state.signal;
-    let off = sig.acpr_offset_hz;
+    let off = state.signal.acpr_offset_hz;
     let lo_label = acpr_label('L', off, '\u{2212}');
     let hi_label = acpr_label('R', off, '+');
-    // The pair is written together by the FFT worker - both finite, or neither.
-    // Testing both says so at the point of use rather than trusting it.
-    let measured = !stale && sig.acpr_lower_db.is_finite() && sig.acpr_upper_db.is_finite();
-    if !measured {
+    // The carrier's ratios, not the frame in hand's: in a gap between bursts
+    // the adjacent bands are noise measured against noise, about 0 dB, and
+    // the bars would go red at every gap. Both sides or neither, because the
+    // pair is read together.
+    let pair = carrier.and_then(|c| c.acpr_lower.zip(c.acpr_upper).map(|p| (c, p)));
+    let Some((c, (lo, hi))) = pair else {
         out.push(metric(&lo_label, vec![dash(theme)], theme));
         out.push(metric(&hi_label, vec![dash(theme)], theme));
         // Same row count either way, so the stack below does not jump when the
         // measurement comes and goes.
         out.push(metric("Adj carrier", vec![dash(theme)], theme));
         return;
-    }
+    };
 
-    for (label, db) in [
-        (&lo_label, sig.acpr_lower_db),
-        (&hi_label, sig.acpr_upper_db),
-    ] {
-        let value_str = format!("{db:.1} dB");
+    for (label, shown) in [(&lo_label, lo), (&hi_label, hi)] {
+        // The bar is the ballistic level, so splatter shows at once and the
+        // bar falls slowly; the digits are its readout, four times a second.
+        let value_str = format!("{:.1} dB", shown.readout);
         // lead(1) + label(8) + gap(1) + bar + gap(1) + value
         let bar_w = iw
             .saturating_sub(1 + LABEL_W + 1 + 1 + value_str.chars().count())
@@ -61,14 +61,14 @@ pub(super) fn lines(
             format!(" {label:<LABEL_W$}"),
             Style::default().fg(theme.label),
         )];
-        spans.extend(acpr_bar(db, bar_w, theme));
+        spans.extend(acpr_bar(shown.level, bar_w, theme));
         spans.push(Span::styled(format!(" {value_str}"), val(theme)));
         out.push(Line::from(spans));
     }
     // The louder of the two bands is the one worth naming, and the FFT
     // worker picks it the same way: lower wins a tie.
     let adj_freq = frame.map(|fr| {
-        if sig.acpr_lower_db >= sig.acpr_upper_db {
+        if lo.readout >= hi.readout {
             fr.center_freq_hz.saturating_sub(off as u64)
         } else {
             fr.center_freq_hz + off as u64
@@ -76,19 +76,12 @@ pub(super) fn lines(
     });
     // A silent adjacent band has no level to name - the sentinel must not
     // reach the screen as a number.
+    let adj = c.adj_carrier_dbfs;
     out.push(metric(
         "Adj carrier",
-        match (sig.adj_carrier_dbfs.is_finite(), adj_freq) {
-            (true, Some(hz)) => annotated(
-                format!("{:.1} dBFS", sig.adj_carrier_dbfs),
-                fmt_freq(hz),
-                iw,
-                theme,
-            ),
-            (true, None) => vec![Span::styled(
-                format!("{:.1} dBFS", sig.adj_carrier_dbfs),
-                val(theme),
-            )],
+        match (adj.is_finite(), adj_freq) {
+            (true, Some(hz)) => annotated(format!("{adj:.1} dBFS"), fmt_freq(hz), iw, theme),
+            (true, None) => vec![Span::styled(format!("{adj:.1} dBFS"), val(theme))],
             (false, _) => vec![dash(theme)],
         },
         theme,

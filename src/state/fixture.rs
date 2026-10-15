@@ -174,6 +174,16 @@ impl SdrMetrics {
             readout: noise_floor + snr_db,
         });
         self.signal.occupied_bw_hz = 150_000;
+        let modulation = crate::state::classify(snr_db, 150_000);
+        self.signal.carrier = Some(crate::state::Carrier {
+            snr_db,
+            occupied_bw_hz: 150_000,
+            adj_carrier_dbfs: noise_floor,
+            acpr_lower: None,
+            acpr_upper: None,
+            verdict: crate::state::judge(modulation, snr_db, f32::NAN, f32::NAN),
+            heard: Instant::now(),
+        });
         self.waterfall
             .buffer
             .rows

@@ -6,7 +6,7 @@
 
 use ratatui::text::{Line, Span};
 
-use crate::state::FftFrame;
+use crate::state::{Carrier, FftFrame};
 use crate::ui::chrome::section;
 use crate::ui::widgets::micro_common::fmt_bw;
 
@@ -17,6 +17,7 @@ use super::row::{annotated, dash, fmt_freq, metric, val};
 pub(super) fn lines(
     out: &mut Vec<Line<'static>>,
     frame: Option<&FftFrame>,
+    carrier: Option<&Carrier>,
     iw: usize,
     theme: &crate::Theme,
 ) {
@@ -68,13 +69,10 @@ pub(super) fn lines(
 
     out.push(metric(
         "Occupied BW",
-        if fr.occupied_bw_hz > 0 {
-            annotated(
-                fmt_bw(fr.occupied_bw_hz),
-                "99% power".to_string(),
-                iw,
-                theme,
-            )
+        // The carrier's, not this frame's: in a gap between bursts the
+        // frame's 99 % bandwidth is noise spread over the whole span.
+        if let Some(c) = carrier.filter(|c| c.occupied_bw_hz > 0) {
+            annotated(fmt_bw(c.occupied_bw_hz), "99% power".to_string(), iw, theme)
         } else {
             vec![dash(theme)]
         },

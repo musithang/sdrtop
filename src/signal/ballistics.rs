@@ -133,34 +133,60 @@ impl Ballistic {
 /// How long a new value must hold before it replaces the one shown.
 pub const SETTLE: Duration = Duration::from_secs(1);
 
-/// A value that changes on screen only once a new one has held for
+/// A class that changes on screen only once a new one has held for
 /// [`SETTLE`]: a classification that flips on every burst and gap, held
 /// still until the flip is real.
+///
+/// It reads only what is there. A frame with nothing in it (`None`: a gap
+/// between bursts) neither changes the value nor restarts the hold of the
+/// one waiting to replace it, so a station heard in bursts settles however
+/// short they are; a whole [`SETTLE`] with nothing heard and the value is
+/// given up.
 #[derive(Clone, Debug)]
 pub struct Settled<T> {
-    shown: T,
+    shown: Option<T>,
     candidate: Option<(T, Instant)>,
+    heard: Option<Instant>,
+}
+
+impl<T: Copy + PartialEq> Default for Settled<T> {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl<T: Copy + PartialEq> Settled<T> {
-    /// Showing `first` until something else holds.
-    pub fn new(first: T) -> Self {
+    /// Showing nothing until something has held.
+    pub fn new() -> Self {
         Settled {
-            shown: first,
+            shown: None,
             candidate: None,
+            heard: None,
         }
     }
 
-    /// `value` seen at `now`; what to show.
-    pub fn update(&mut self, value: T, now: Instant) -> T {
-        if value == self.shown {
+    /// `value` seen at `now`, `None` for a frame with nothing in it; what
+    /// to show.
+    pub fn update(&mut self, value: Option<T>, now: Instant) -> Option<T> {
+        let Some(value) = value else {
+            if self
+                .heard
+                .is_none_or(|h| now.saturating_duration_since(h) > SETTLE)
+            {
+                self.shown = None;
+                self.candidate = None;
+            }
+            return self.shown;
+        };
+        self.heard = Some(now);
+        if self.shown == Some(value) {
             self.candidate = None;
             return self.shown;
         }
         match self.candidate {
             Some((c, since)) if c == value => {
                 if now.saturating_duration_since(since) >= SETTLE {
-                    self.shown = value;
+                    self.shown = Some(value);
                     self.candidate = None;
                 }
             }
@@ -181,20 +207,59 @@ mod tests {
     fn a_value_changes_only_once_it_has_held() {
         let t0 = Instant::now();
         let ms = |n: u64| t0 + Duration::from_millis(n);
-        let mut s = Settled::new('a');
-        assert_eq!(s.update('a', ms(0)), 'a');
-        assert_eq!(s.update('b', ms(100)), 'a');
-        assert_eq!(s.update('b', ms(999)), 'a');
-        assert_eq!(s.update('a', ms(1000)), 'a', "back before it held");
-        assert_eq!(s.update('b', ms(1100)), 'a');
+        let mut s = Settled::new();
+        assert_eq!(s.update(Some('a'), ms(0)), None, "nothing until it holds");
+        assert_eq!(s.update(Some('a'), ms(1000)), Some('a'));
+        assert_eq!(s.update(Some('b'), ms(1100)), Some('a'));
+        assert_eq!(s.update(Some('b'), ms(1999)), Some('a'));
         assert_eq!(
-            s.update('c', ms(1500)),
-            'a',
+            s.update(Some('a'), ms(2000)),
+            Some('a'),
+            "back before it held"
+        );
+        assert_eq!(s.update(Some('b'), ms(2100)), Some('a'));
+        assert_eq!(
+            s.update(Some('c'), ms(2500)),
+            Some('a'),
             "another candidate starts afresh"
         );
-        assert_eq!(s.update('c', ms(2499)), 'a');
-        assert_eq!(s.update('c', ms(2500)), 'c');
-        assert_eq!(s.update('c', ms(9000)), 'c');
+        assert_eq!(s.update(Some('c'), ms(3499)), Some('a'));
+        assert_eq!(s.update(Some('c'), ms(3500)), Some('c'));
+    }
+
+    /// **A gap is not a reading.** Heard in bursts of 300 ms every second,
+    /// a class settles a second after it is first heard, and the gaps in
+    /// between neither change it nor restart its hold.
+    #[test]
+    fn a_gap_neither_changes_nor_restarts_the_hold() {
+        let t0 = Instant::now();
+        let mut s = Settled::new();
+        let mut first = None;
+        for ms in (0..5_000u64).step_by(10) {
+            let heard = (ms % 1_000 < 300).then_some('w');
+            if let Some(w) = s.update(heard, t0 + Duration::from_millis(ms)) {
+                assert_eq!(w, 'w');
+                first.get_or_insert(ms);
+            } else {
+                assert!(first.is_none(), "given up at {ms} ms in a short gap");
+            }
+        }
+        assert_eq!(first, Some(1_000));
+    }
+
+    /// A second with nothing heard and it is given up; heard again, it
+    /// must hold afresh.
+    #[test]
+    fn a_second_of_nothing_gives_it_up() {
+        let t0 = Instant::now();
+        let ms = |n: u64| t0 + Duration::from_millis(n);
+        let mut s = Settled::new();
+        s.update(Some('w'), ms(0));
+        assert_eq!(s.update(Some('w'), ms(1000)), Some('w'));
+        assert_eq!(s.update(None, ms(2000)), Some('w'));
+        assert_eq!(s.update(None, ms(2001)), None);
+        assert_eq!(s.update(Some('w'), ms(2100)), None);
+        assert_eq!(s.update(Some('w'), ms(3100)), Some('w'));
     }
 
     /// Readings every 5 ms: `floor` for `quiet` ms, then `level` for

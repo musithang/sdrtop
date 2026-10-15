@@ -54,8 +54,8 @@ pub use radio::{
 pub use record::{RecordProgress, RecordState};
 pub use selection::Selection;
 pub use signal::{
-    acpr_offset_hz, classify, Modulation, RadioDropAccount, SignalState, ADC_COMFORT_DBFS,
-    CLASSIFY_MIN_SNR_DB, SAT_CLIP_PCT, SAT_CRIT_PCT, SAT_WARN_PCT,
+    acpr_offset_hz, classify, judge, Carrier, Modulation, RadioDropAccount, SignalState, Verdict,
+    ADC_COMFORT_DBFS, CLASSIFY_MIN_SNR_DB, SAT_CLIP_PCT, SAT_CRIT_PCT, SAT_WARN_PCT,
 };
 pub use spectrum::{SpectrumMarker, SpectrumState, SpectrumStyle};
 pub use sweep::{SweepConfig, SweepFrame, SweepState, SWEEP_SETTLING_MS};

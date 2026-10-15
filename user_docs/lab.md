@@ -371,9 +371,19 @@ at:
 
 Where the demod panel opposite opens the channel up and reads what is inside it,
 this one answers the question you ask first: what *is* that, and how clean is it?
-Everything here comes from the same FFT frame the spectrum beside it draws, so the
-two always agree. Press `x` to focus it, then `C` to write the current readings to
-the log.
+The channel figures come from the same FFT frame the spectrum beside it draws, so
+the two always agree. Press `x` to focus it, then `C` to write the current readings
+to the log.
+
+**The carrier figures wait for a carrier.** Occupied bandwidth, the adjacent
+channels and the verdict describe a carrier, and in the gap between two bursts
+there is none: measured there, the adjacent channels are noise against noise at
+about 0 dB, and the occupied bandwidth is noise spread over the whole span. So
+these come only from frames with a carrier in them and are held through a gap of
+up to a second; after a second of nothing they are dashes and the verdict says
+`NO SIGNAL`. The verdict also holds a second before it changes its mind, and a
+carrier heard for less than that reads `◌ CARRIER HEARD` while it is judged. A
+walkie-talkie keying up does not get a new diagnosis every time it takes a breath.
 
 **Radio headline.** Peak-to-noise in dB with a status lamp, and the classifier's
 guess at the modulation (`WFM`, `NFM`, `AM`). Green at 20 dB or better, amber down
@@ -403,7 +413,8 @@ to 10, red below that.
 
 **Adjacent channel (ACPR).** How far down the neighbouring channels sit relative
 to this one, one bar per side, more fill meaning closer to the carrier and so
-worse. The spacing follows the modulation (±200 kHz for broadcast FM, ±25 kHz for
+worse. The bar jumps up at once and falls back slowly, like the S-meter, so
+splatter is never missed and the digits beside it change four times a second. The spacing follows the modulation (±200 kHz for broadcast FM, ±25 kHz for
 NFM, ±9 kHz for AM) and the row labels name whichever offset was actually used, so
 they cannot drift apart. The bar's floor is sdrtop's own display range, not a
 regulatory mask: no limit is being asserted, the bar just shows the measurement.

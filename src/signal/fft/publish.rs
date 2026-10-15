@@ -18,6 +18,7 @@ use std::time::Instant;
 use crate::state::{FftFrame, SdrMetrics};
 
 use super::analysis::Reading;
+use super::readout::CarrierPacing;
 use super::DB_FLOOR;
 use crate::signal::ballistics::{Ballistic, Settled};
 
@@ -39,6 +40,8 @@ pub(super) struct Pacing {
     s_meter: Ballistic,
     /// The modulation, held until a new class has held for a second.
     modulation: Settled<crate::state::Modulation>,
+    /// The carrier figures, taken only from frames with a carrier.
+    carrier: CarrierPacing,
 }
 
 impl Pacing {
@@ -47,7 +50,8 @@ impl Pacing {
             rows_since_spectrum: 0,
             last_update: None,
             s_meter: Ballistic::new(DB_FLOOR),
-            modulation: Settled::new(crate::state::Modulation::Unknown),
+            modulation: Settled::new(),
+            carrier: CarrierPacing::new(),
         }
     }
 
@@ -95,7 +99,11 @@ pub(super) fn publish(
     let now = Instant::now();
     // The S-meter's ballistics, outside the lock: a float's worth of work.
     let s_meter = pacing.s_meter.update(snap.reading.channel_power_dbfs, now);
-    let modulation_settled = pacing.modulation.update(snap.reading.modulation, now);
+    let modulation_settled = pacing
+        .modulation
+        .update(Some(snap.reading.modulation).filter(|m| m.is_known()), now)
+        .unwrap_or(crate::state::Modulation::Unknown);
+    let carrier = pacing.carrier.update(snap.reading, now);
     let Ok(mut m) = state.lock() else {
         return None;
     };
@@ -111,6 +119,7 @@ pub(super) fn publish(
     m.signal.occupied_bw_hz = r.occupied_bw_hz;
     m.signal.modulation = r.modulation;
     m.signal.modulation_settled = modulation_settled;
+    m.signal.carrier = carrier;
     m.signal.acpr_lower_db = r.acpr_lower_db;
     m.signal.acpr_upper_db = r.acpr_upper_db;
     m.signal.adj_carrier_dbfs = r.adj_carrier_dbfs;

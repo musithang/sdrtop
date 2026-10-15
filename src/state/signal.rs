@@ -144,6 +144,77 @@ pub fn classify(snr_db: f32, occupied_bw_hz: u64) -> Modulation {
     }
 }
 
+/// Peak-to-noise (dB) at or above which a carrier is judged clean rather than
+/// weak: the same "clean" threshold `snr_color` grades with everywhere.
+pub const VERDICT_CLEAN_SNR_DB: f32 = 20.0;
+
+/// An adjacent-channel ratio worse (less negative) than this is judged
+/// splatter worth a note. sdrtop's own instrument reading, not an asserted
+/// regulatory mask.
+pub const VERDICT_ACPR_CONCERN_DB: f32 = -20.0;
+
+/// What the Lab's verdict says of the carrier at centre: its kind, with the
+/// class it was judged as. The words are the Signal Characterization panel's;
+/// the kind lives here so it can be held from frame to frame where the frames
+/// arrive, and every reader of it shows the same one.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum Verdict {
+    /// Above the presence gate, under [`VERDICT_CLEAN_SNR_DB`].
+    Weak(Modulation),
+    /// Strong, with an adjacent-channel ratio past [`VERDICT_ACPR_CONCERN_DB`].
+    Splatter(Modulation),
+    /// Strong and well separated.
+    Clean(Modulation),
+}
+
+/// Judge one frame's carrier, or `None` when there is none to judge: no class,
+/// or under the classifier's own presence gate. The adjacent-channel ratio
+/// counts only when both sides were measured.
+pub fn judge(
+    modulation: Modulation,
+    snr_db: f32,
+    acpr_lower_db: f32,
+    acpr_upper_db: f32,
+) -> Option<Verdict> {
+    if !modulation.is_known() || snr_db < CLASSIFY_MIN_SNR_DB {
+        return None;
+    }
+    if snr_db < VERDICT_CLEAN_SNR_DB {
+        return Some(Verdict::Weak(modulation));
+    }
+    let worst = (acpr_lower_db.is_finite() && acpr_upper_db.is_finite())
+        .then(|| acpr_lower_db.max(acpr_upper_db));
+    if worst.is_some_and(|w| w > VERDICT_ACPR_CONCERN_DB) {
+        return Some(Verdict::Splatter(modulation));
+    }
+    Some(Verdict::Clean(modulation))
+}
+
+/// The carrier figures as the Lab shows them. Taken only from frames with a
+/// carrier in them, because in a gap between bursts the same measurements read
+/// noise: the adjacent-channel ratio of noise is about 0 dB, its occupied
+/// bandwidth the whole span. Held through a gap of up to a second
+/// (`signal::ballistics::SETTLE`), then refused. Display only: every
+/// measurement keeps the raw per-frame figures on [`SignalState`].
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Carrier {
+    /// Peak over the noise floor, dB, as at the last quarter-second tick.
+    pub snr_db: f32,
+    /// The 99 % occupied bandwidth, as at the same tick.
+    pub occupied_bw_hz: u64,
+    /// The louder adjacent band's level, dBFS, as at the same tick.
+    pub adj_carrier_dbfs: f32,
+    /// The adjacent-channel ratios on the instrument ballistic, so splatter
+    /// shows at once and its bar falls slowly; `None` for a side not measured.
+    pub acpr_lower: Option<crate::signal::ballistics::Shown>,
+    pub acpr_upper: Option<crate::signal::ballistics::Shown>,
+    /// The verdict, changed only once a new kind has held for a second;
+    /// `None` until one has.
+    pub verdict: Option<Verdict>,
+    /// When a carrier was last heard: in a gap, how long it has been held.
+    pub heard: std::time::Instant,
+}
+
 /// What the radio itself says about samples it dropped before any reached
 /// the host. See `hardware::SdrDevice::radio_drops`.
 #[derive(Clone, Debug, Default, PartialEq)]
@@ -234,10 +305,14 @@ pub struct SignalState {
     pub modulation: Modulation,
     /// The same, changed only once a new class has held for a second
     /// (`signal::ballistics::Settled`): on a bursty signal the classifier
-    /// flips between a class and `Unknown` with every burst and gap. What
-    /// picks the demodulator and the demod panel's sections, so neither is
-    /// torn down and rebuilt by a gap.
+    /// flips between a class and `Unknown` with every burst and gap, and a
+    /// gap neither changes this nor restarts its hold; a second with no class
+    /// and it is `Unknown`. What picks the demodulator and the demod panel's
+    /// sections, so neither is torn down and rebuilt by a gap.
     pub modulation_settled: Modulation,
+    /// The carrier figures (see [`Carrier`]); `None` when no carrier has been
+    /// heard for a second.
+    pub carrier: Option<Carrier>,
     /// ADC loading for the Lab RF bench, refreshed each ~200 ms window: the loudest
     /// sample (`adc_peak_dbfs`), the full-bandwidth RMS level (`adc_rms_dbfs`, total
     /// I/Q power vs full scale - distinct from the in-channel `channel_power_dbfs`),
@@ -281,6 +356,7 @@ impl Default for SignalState {
             last_clip_at: None,
             modulation: Modulation::Unknown,
             modulation_settled: Modulation::Unknown,
+            carrier: None,
             adc_peak_dbfs: 0.0,
             adc_rms_dbfs: 0.0,
             adc_clip_events: 0,
@@ -307,6 +383,33 @@ impl SignalState {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn nothing_is_judged_without_a_carrier() {
+        assert_eq!(judge(Modulation::Unknown, 40.0, -40.0, -40.0), None);
+        assert_eq!(judge(Modulation::Wfm, 5.0, -40.0, -40.0), None);
+    }
+
+    #[test]
+    fn a_carrier_under_the_clean_threshold_is_weak() {
+        let w = Modulation::Wfm;
+        assert_eq!(judge(w, 15.0, -40.0, -40.0), Some(Verdict::Weak(w)));
+    }
+
+    #[test]
+    fn a_strong_carrier_with_a_poor_adjacent_ratio_splatters() {
+        let w = Modulation::Wfm;
+        assert_eq!(judge(w, 40.0, -10.0, -40.0), Some(Verdict::Splatter(w)));
+        assert_eq!(judge(w, 43.7, -38.0, -41.0), Some(Verdict::Clean(w)));
+    }
+
+    #[test]
+    fn half_an_adjacent_pair_is_no_ratio() {
+        let n = Modulation::Nfm;
+        for (lo, hi) in [(f32::NEG_INFINITY, -10.0), (-10.0, f32::NEG_INFINITY)] {
+            assert_eq!(judge(n, 30.0, lo, hi), Some(Verdict::Clean(n)));
+        }
+    }
 
     fn with_history(samples: &[f32]) -> SignalState {
         let mut s = SignalState {
@@ -335,6 +438,7 @@ mod tests {
             last_clip_at: None,
             modulation: Modulation::Unknown,
             modulation_settled: Modulation::Unknown,
+            carrier: None,
             adc_peak_dbfs: 0.0,
             adc_rms_dbfs: 0.0,
             adc_clip_events: 0,

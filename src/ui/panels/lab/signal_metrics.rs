@@ -85,8 +85,9 @@ impl Panel for SignalMetricsPanel {
             Line::from(vec![
                 Span::styled(format!("{:<15}", "Occupied BW"), lbl),
                 Span::styled(
-                    if state.signal.occupied_bw_hz > 0 {
-                        crate::ui::widgets::micro_common::fmt_bw(state.signal.occupied_bw_hz)
+                    // The carrier's: a gap between bursts occupies the span.
+                    if let Some(c) = state.signal.carrier.filter(|c| c.occupied_bw_hz > 0) {
+                        crate::ui::widgets::micro_common::fmt_bw(c.occupied_bw_hz)
                     } else {
                         "---".into()
                     },

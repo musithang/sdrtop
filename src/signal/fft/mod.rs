@@ -8,6 +8,8 @@
 //!
 //! - [`frame`]: per-frame DSP - decode, transform, average. Full rate, no lock.
 //! - [`analysis`]: the measurements. Display rate, no lock, no clock.
+//! - [`readout`]: what the Lab shows of them, paced for the eye (the carrier
+//!   figures, held through a gap). Display only, no lock.
 //! - [`publish`]: the one lock block.
 //! - [`worker`]: the loop that sequences them.
 //!
@@ -19,6 +21,7 @@ mod analysis;
 mod carrier;
 pub mod frame;
 mod publish;
+mod readout;
 mod worker;
 
 pub use carrier::{centre_radius_bins, strongest_real_bin};
