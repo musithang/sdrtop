@@ -92,7 +92,14 @@ to its right. From top to bottom:
   tuned digit lit.
 - **S-meter**: a classic analog signal-strength bar (S1 to S9+60) with a green to
   amber to red gradient and a faint peak-hold pip, sitting under the band and
-  sample-rate line.
+  sample-rate line. It moves like a real meter's needle rather than like a
+  strobe: up within 10 ms, so a short burst still shows, and down over 300 ms,
+  so a gap does not drop it to the floor and back. The pip is the true peak,
+  the highest reading of the last second. The figure beside it (marked `~`,
+  for damped) is the bar's own level, refreshed four times a second so you can
+  read it. With nothing to read, the meter keeps its place and says
+  `no reading`. All of it is display only: every measurement elsewhere uses
+  the raw reading.
 - **HUNT · MONITOR · BENCH tabs**: the mode strip. The lead card below it follows
   what you're doing. Tuning surfaces the strongest carriers (Hunt), idling shows a
   calm watch headline (Monitor), changing gain shows front-end health (Bench). It

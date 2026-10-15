@@ -168,8 +168,11 @@ impl SdrMetrics {
         });
         self.signal.peak_to_nf_db = snr_db;
         self.signal.channel_power_dbfs = noise_floor + snr_db;
-        self.signal.s_meter_dbfs = Some(noise_floor + snr_db);
-        self.signal.s_meter_peak_dbfs = Some(noise_floor + snr_db);
+        self.signal.s_meter = Some(crate::signal::ballistics::Shown {
+            level: noise_floor + snr_db,
+            peak: noise_floor + snr_db,
+            readout: noise_floor + snr_db,
+        });
         self.signal.occupied_bw_hz = 150_000;
         self.waterfall
             .buffer

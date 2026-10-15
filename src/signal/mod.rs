@@ -2,6 +2,7 @@
 // Copyright (C) 2026 MusiThang <viktor.laszlo92@protonmail.com>
 
 pub mod assigned;
+pub mod ballistics;
 pub mod ble;
 pub mod bt;
 pub mod demod;

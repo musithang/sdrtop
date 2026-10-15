@@ -145,17 +145,12 @@ fn stack(
         theme,
     ));
     lines.push(hero::band_sr_line(state, iw, theme));
-    // Reserve the S-meter's three rows even when there is no current reading.
-    // Removing them on a weak/bursty signal made every section below jump.
-    let pwr = state.signal.s_meter_dbfs;
-    match (!stale, pwr.filter(|value| value.is_finite())) {
-        (true, Some(power)) => lines.extend(smeter::s_meter_lines(
-            power,
-            state.signal.s_meter_peak_dbfs,
-            iw,
-            theme,
-        )),
-        _ => lines.extend([Line::raw(""), Line::raw(""), Line::raw("")]),
+    // The S-meter's three rows are kept when there is no reading: removing
+    // them on a weak or bursty signal made every section below jump. Kept,
+    // they say so, rather than standing blank.
+    match state.signal.s_meter.filter(|_| !stale) {
+        Some(shown) => lines.extend(smeter::s_meter_lines(shown, iw, theme)),
+        None => lines.extend(smeter::no_reading_lines(iw, theme)),
     }
     lines.push(Line::raw(""));
 
@@ -214,5 +209,24 @@ mod tests {
         let with_meter = stack(&signal, false, true, false, 34, &theme);
 
         assert_eq!(without_meter.len(), with_meter.len());
+    }
+
+    /// Without a reading the meter keeps its rows and says so on them, in
+    /// a word, rather than three blank rows that say nothing.
+    #[test]
+    fn no_reading_is_said_where_the_meter_stands() {
+        let no_signal = SdrMetrics::fixture().streaming();
+        let theme = crate::Theme::sdr();
+        let text: String = stack(&no_signal, false, true, false, 34, &theme)
+            .iter()
+            .map(|l| {
+                l.spans
+                    .iter()
+                    .map(|s| s.content.as_ref())
+                    .collect::<String>()
+            })
+            .collect::<Vec<_>>()
+            .join("\n");
+        assert!(text.contains("no reading"), "{text}");
     }
 }

@@ -87,16 +87,19 @@ const SCALE: &[(&str, f64)] = &[
     ("+60", 14.0 / 14.0),
 ];
 
+/// The meter's three rows: the scale, the bar at the level with the true
+/// peak's pip, and the S-unit and digits from the readout (refreshed four
+/// times a second, so they can be read while the bar moves).
 pub(super) fn s_meter_lines(
-    power_dbfs: f32,
-    peak_dbfs: Option<f32>,
+    shown: crate::signal::ballistics::Shown,
     iw: usize,
     theme: &crate::Theme,
 ) -> [Line<'static>; 3] {
     let bar_w = iw.saturating_sub(1).max(1);
-    let frac = power_to_s_frac(power_dbfs);
+    let frac = power_to_s_frac(shown.level);
     let fill_eighths = (frac * bar_w as f64 * 8.0) as usize;
-    let peak_col = peak_dbfs.map(|p| (power_to_s_frac(p) * bar_w as f64) as usize);
+    let peak_col = Some((power_to_s_frac(shown.peak) * bar_w as f64) as usize);
+    let (power_dbfs, peak_dbfs) = (shown.readout, Some(shown.peak));
 
     // Row 0: scale tick labels.
     let skip_alt = iw < 20;
@@ -134,8 +137,8 @@ pub(super) fn s_meter_lines(
     }
     let row1 = Line::from(bar_spans);
 
-    // Row 2: "S7  ·  -19.3 dBFS  ·  peak S9+20"
-    let s_label = frac_to_s_label(frac);
+    // Row 2: "S7  ·  ~-19.3 dBFS  ·  peak S9+20", read from the readout.
+    let s_label = frac_to_s_label(power_to_s_frac(power_dbfs));
     let val_str = format!("~{power_dbfs:.1} dBFS");
     let mut row2_spans = vec![
         Span::raw(" "),
@@ -164,9 +167,62 @@ pub(super) fn s_meter_lines(
     [row0, row1, row2]
 }
 
+/// The meter's rows with no reading: the scale and an empty bar where it
+/// stands, and the words.
+pub(super) fn no_reading_lines(iw: usize, theme: &crate::Theme) -> [Line<'static>; 3] {
+    let quiet = crate::signal::ballistics::Shown {
+        level: f32::NEG_INFINITY,
+        peak: f32::NEG_INFINITY,
+        readout: f32::NEG_INFINITY,
+    };
+    let [scale, _, _] = s_meter_lines(quiet, iw, theme);
+    let bar_w = iw.saturating_sub(1).max(1);
+    let empty = Line::from(vec![
+        Span::raw(" "),
+        Span::styled(
+            "\u{2581}".repeat(bar_w),
+            Style::default().fg(theme.border_dim),
+        ),
+    ]);
+    let words = Line::from(vec![
+        Span::raw(" "),
+        Span::styled("no reading", Style::default().fg(theme.stale)),
+    ]);
+    [scale, empty, words]
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn row_text(l: &Line<'_>) -> String {
+        l.spans.iter().map(|s| s.content.as_ref()).collect()
+    }
+
+    /// The bar is the level, the pip the peak, and the digits and the
+    /// S-unit the readout: what the eye reads changes four times a second
+    /// while the bar moves with every reading.
+    #[test]
+    fn the_digits_and_the_s_unit_read_the_readout() {
+        let theme = crate::Theme::sdr();
+        let shown = crate::signal::ballistics::Shown {
+            level: -20.0,
+            peak: -10.0,
+            readout: -30.0,
+        };
+        let rows = s_meter_lines(shown, 34, &theme);
+        let digits = row_text(&rows[2]);
+        assert!(digits.contains("~-30.0 dBFS"), "{digits}");
+        assert!(
+            digits.starts_with(&format!(" {}", frac_to_s_label(power_to_s_frac(-30.0)))),
+            "{digits}"
+        );
+        let at = |db: f32| (power_to_s_frac(db) * 33.0) as usize;
+        let bar = row_text(&rows[1]);
+        let cells: Vec<char> = bar.chars().skip(1).collect();
+        assert_eq!(cells[at(-10.0)], '╵', "{bar}");
+        assert_ne!(cells[at(-20.0) - 1], ' ', "{bar}");
+    }
 
     #[test]
     fn power_to_s_frac_s1_is_zero() {
