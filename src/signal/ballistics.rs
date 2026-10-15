@@ -33,6 +33,10 @@ pub const RELEASE: Duration = Duration::from_millis(300);
 pub const PEAK_HOLD: Duration = Duration::from_secs(1);
 /// How often the digits take the level: four times a second.
 pub const READOUT: Duration = Duration::from_millis(250);
+/// The time constant of an [averaging](Ballistic::averaging) meter, both
+/// ways: a second, so a ratio scattered a few dB from frame to frame stands
+/// still to within a decibel or two and a lasting change shows in a few.
+pub const AVERAGE: Duration = Duration::from_secs(1);
 /// A pause longer than this starts the meter afresh, rather than swinging
 /// from a level that belongs to before it.
 pub const RESTART: Duration = Duration::from_secs(1);
@@ -50,6 +54,8 @@ pub struct Shown {
 #[derive(Clone, Debug)]
 pub struct Ballistic {
     floor: f32,
+    attack: Duration,
+    release: Duration,
     power: Option<f64>,
     peak: f32,
     peak_until: Option<Instant>,
@@ -61,8 +67,23 @@ pub struct Ballistic {
 impl Ballistic {
     /// A meter whose silence, a reading that is not finite, is `floor`.
     pub fn new(floor: f32) -> Self {
+        Self::with_times(floor, ATTACK, RELEASE)
+    }
+
+    /// A power average over [`AVERAGE`], rising as slowly as it falls. For a
+    /// ratio rather than a level, measured on bands whose noise scatters it a
+    /// few dB from frame to frame: a fast attack catches every upward scatter,
+    /// so the bar saws up and down and reads the scatter's peaks instead of
+    /// the ratio.
+    pub fn averaging(floor: f32) -> Self {
+        Self::with_times(floor, AVERAGE, AVERAGE)
+    }
+
+    fn with_times(floor: f32, attack: Duration, release: Duration) -> Self {
         Ballistic {
             floor,
+            attack,
+            release,
             power: None,
             peak: floor,
             peak_until: None,
@@ -104,7 +125,11 @@ impl Ballistic {
         } else {
             self.floor
         });
-        let tau = if target > level { ATTACK } else { RELEASE };
+        let tau = if target > level {
+            self.attack
+        } else {
+            self.release
+        };
         let alpha = 1.0 - (-dt.as_secs_f64() / tau.as_secs_f64()).exp();
         let level = level + alpha * (target - level);
         self.power = Some(level);
@@ -139,6 +164,12 @@ pub const HELD_AFTER: Duration = Duration::from_millis(600);
 /// How long a new value must hold before it replaces the one shown.
 pub const SETTLE: Duration = Duration::from_secs(1);
 
+/// How long a modulation class (AM, NFM, WFM) holds: longer than a verdict,
+/// because the classes are told apart by an occupied bandwidth that scatters
+/// from one burst to the next, and a badge or a demodulator that changes with
+/// it is no use to anyone.
+pub const CLASS_HOLD: Duration = Duration::from_secs(2);
+
 /// A class that changes on screen only once a new one has held for
 /// [`SETTLE`]: a classification that flips on every burst and gap, held
 /// still until the flip is real.
@@ -153,6 +184,7 @@ pub struct Settled<T> {
     shown: Option<T>,
     candidate: Option<(T, Instant)>,
     heard: Option<Instant>,
+    hold: Duration,
 }
 
 impl<T: Copy + PartialEq> Default for Settled<T> {
@@ -162,12 +194,19 @@ impl<T: Copy + PartialEq> Default for Settled<T> {
 }
 
 impl<T: Copy + PartialEq> Settled<T> {
-    /// Showing nothing until something has held.
+    /// Showing nothing until something has held for [`SETTLE`].
     pub fn new() -> Self {
+        Self::with_hold(SETTLE)
+    }
+
+    /// The same, holding for `hold` in place of [`SETTLE`]: both before a new
+    /// value replaces the shown one and before nothing heard gives it up.
+    pub fn with_hold(hold: Duration) -> Self {
         Settled {
             shown: None,
             candidate: None,
             heard: None,
+            hold,
         }
     }
 
@@ -177,7 +216,7 @@ impl<T: Copy + PartialEq> Settled<T> {
         let Some(value) = value else {
             if self
                 .heard
-                .is_none_or(|h| now.saturating_duration_since(h) > SETTLE)
+                .is_none_or(|h| now.saturating_duration_since(h) > self.hold)
             {
                 self.shown = None;
                 self.candidate = None;
@@ -191,7 +230,7 @@ impl<T: Copy + PartialEq> Settled<T> {
         }
         match self.candidate {
             Some((c, since)) if c == value => {
-                if now.saturating_duration_since(since) >= SETTLE {
+                if now.saturating_duration_since(since) >= self.hold {
                     self.shown = Some(value);
                     self.candidate = None;
                 }
@@ -251,6 +290,25 @@ mod tests {
             }
         }
         assert_eq!(first, Some(1_000));
+    }
+
+    /// **A class holds longer.** AM, NFM and WFM are told apart by a
+    /// bandwidth that scatters from burst to burst, so a class must hold
+    /// [`CLASS_HOLD`] to replace another, and is given up only after as long
+    /// with nothing heard.
+    #[test]
+    fn a_class_holds_longer() {
+        let t0 = Instant::now();
+        let ms = |n: u64| t0 + Duration::from_millis(n);
+        let mut s = Settled::with_hold(CLASS_HOLD);
+        s.update(Some('w'), ms(0));
+        assert_eq!(s.update(Some('w'), ms(1_500)), None);
+        assert_eq!(s.update(Some('w'), ms(2_000)), Some('w'));
+        s.update(Some('n'), ms(2_100));
+        assert_eq!(s.update(Some('n'), ms(3_600)), Some('w'));
+        assert_eq!(s.update(Some('n'), ms(4_100)), Some('n'));
+        assert_eq!(s.update(None, ms(6_100)), Some('n'));
+        assert_eq!(s.update(None, ms(6_101)), None);
     }
 
     /// A second with nothing heard and it is given up; heard again, it

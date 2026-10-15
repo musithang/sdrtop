@@ -390,7 +390,9 @@ walkie-talkie keying up does not get a new diagnosis every time it takes a breat
 
 **Radio headline.** Peak-to-noise in dB with a status lamp, and the classifier's
 guess at the modulation (`WFM`, `NFM`, `AM`). Green at 20 dB or better, amber down
-to 10, red below that.
+to 10, red below that. The guess is told apart by occupied bandwidth, which
+scatters from one burst to the next, so a new one has to hold for two seconds
+before the badge changes, and the badge stays two seconds after the carrier goes.
 
 **Signal metrics.**
 
@@ -418,8 +420,11 @@ to 10, red below that.
 
 **Adjacent channel (ACPR).** How far down the neighbouring channels sit relative
 to this one, one bar per side, more fill meaning closer to the carrier and so
-worse. The bar jumps up at once and falls back slowly, like the S-meter, so
-splatter is never missed and the digits beside it change four times a second. The spacing follows the modulation (±200 kHz for broadcast FM, ±25 kHz for
+worse. The ratio is averaged over about a second, up and down alike: measured on
+the noise in the neighbouring bands it scatters a few dB from frame to frame even
+on a rock-steady carrier, and a bar that chased every scatter would mostly be
+showing you the noise. The digits beside it change four times a second. The
+spacing follows the modulation (±200 kHz for broadcast FM, ±25 kHz for
 NFM, ±9 kHz for AM) and the row labels name whichever offset was actually used, so
 they cannot drift apart. The bar's floor is sdrtop's own display range, not a
 regulatory mask: no limit is being asserted, the bar just shows the measurement.
@@ -477,7 +482,7 @@ actually has, rather than a fixed grid where most rows read as permanently empty
 There is no audio section, and there is no audio. A section a mode does not have is
 simply absent rather than sitting there empty.
 
-**It holds still on a bursty signal.** A mode has to hold for a second before the
+**It holds still on a bursty signal.** A mode has to hold for two seconds before the
 sections change, so one odd frame from the classifier does not swap the broadcast
 sections for the NFM ones. When the signal drops under the detection threshold,
 the last readings stay where they are and the headline turns from `DEMOD LOCK`

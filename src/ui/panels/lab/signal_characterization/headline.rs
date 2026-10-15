@@ -46,7 +46,7 @@ pub(super) fn lines(
         Span::styled("  peak / noise", dim(theme)),
     ];
     // MOD badge - the classifier's estimate of what's at centre.
-    // The class that has held for a second, as the demod beside it uses: the
+    // The class that has held for two seconds, as the demod beside it uses: the
     // latest frame's guess flips with every burst.
     let modulation = state.signal.modulation_settled;
     if modulation.is_known() {

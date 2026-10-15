@@ -15,7 +15,7 @@
 use std::time::Instant;
 
 use crate::signal::ballistics::{Ballistic, Settled, Shown, READOUT, SETTLE};
-use crate::state::{judge, Carrier, Verdict};
+use crate::state::{judge, Carrier, Modulation, Verdict};
 
 use super::analysis::Reading;
 use super::DB_FLOOR;
@@ -34,7 +34,10 @@ pub(super) struct CarrierPacing {
 impl CarrierPacing {
     pub(super) fn new() -> Self {
         Self {
-            acpr: [Ballistic::new(DB_FLOOR), Ballistic::new(DB_FLOOR)],
+            acpr: [
+                Ballistic::averaging(DB_FLOOR),
+                Ballistic::averaging(DB_FLOOR),
+            ],
             shown: [None, None],
             verdict: Settled::new(),
             figures: None,
@@ -43,8 +46,14 @@ impl CarrierPacing {
         }
     }
 
-    /// One frame's reading at `now`; the carrier figures to show.
-    pub(super) fn update(&mut self, r: &Reading, now: Instant) -> Option<Carrier> {
+    /// One frame's reading at `now`, with the class held for the badge; the
+    /// carrier figures to show.
+    pub(super) fn update(
+        &mut self,
+        r: &Reading,
+        modulation: Modulation,
+        now: Instant,
+    ) -> Option<Carrier> {
         let judged = judge(
             r.modulation,
             r.peak_to_nf_db,
@@ -80,6 +89,7 @@ impl CarrierPacing {
             acpr_lower: self.shown[0],
             acpr_upper: self.shown[1],
             verdict,
+            modulation,
             heard,
         })
     }
@@ -88,7 +98,6 @@ impl CarrierPacing {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::state::Modulation;
     use std::time::Duration;
 
     /// A broadcast carrier: 40 dB over the noise, 180 kHz wide, its
@@ -135,7 +144,10 @@ mod tests {
                 } else {
                     gap()
                 };
-                (t, p.update(&r, t0 + Duration::from_millis(t)))
+                (
+                    t,
+                    p.update(&r, Modulation::Wfm, t0 + Duration::from_millis(t)),
+                )
             })
             .collect()
     }
@@ -155,7 +167,7 @@ mod tests {
             }
         }
         let late = frames.last().unwrap().1.unwrap();
-        assert_eq!(late.verdict, Some(Verdict::Clean(Modulation::Wfm)));
+        assert_eq!(late.verdict, Some(Verdict::Clean));
     }
 
     /// A second without a carrier and the figures are refused.
@@ -178,23 +190,100 @@ mod tests {
         let mut p = CarrierPacing::new();
         let mut last = None;
         for t in (0..1_500).step_by(33) {
-            last = p.update(&carrier(30.0), at(t)).unwrap().verdict;
+            last = p
+                .update(&carrier(30.0), Modulation::Wfm, at(t))
+                .unwrap()
+                .verdict;
         }
-        let clean = Some(Verdict::Clean(Modulation::Wfm));
+        let clean = Some(Verdict::Clean);
         assert_eq!(last, clean);
         for (i, t) in (1_500..3_000).step_by(33).enumerate() {
             let snr = if i % 2 == 0 { 15.0 } else { 30.0 };
-            assert_eq!(p.update(&carrier(snr), at(t)).unwrap().verdict, clean);
+            assert_eq!(
+                p.update(&carrier(snr), Modulation::Wfm, at(t))
+                    .unwrap()
+                    .verdict,
+                clean
+            );
         }
-        let weak = Some(Verdict::Weak(Modulation::Wfm));
+        let weak = Some(Verdict::Weak);
         let called: Vec<_> = (3_000..4_200)
             .step_by(33)
-            .map(|t| (t, p.update(&carrier(15.0), at(t)).unwrap().verdict))
+            .map(|t| {
+                (
+                    t,
+                    p.update(&carrier(15.0), Modulation::Wfm, at(t))
+                        .unwrap()
+                        .verdict,
+                )
+            })
             .collect();
         assert!(
             called.iter().all(|(t, v)| (*v == weak) == (*t >= 4_000)),
             "{called:?}"
         );
+    }
+
+    /// **The adjacent-channel bars are averaged, not peak-caught.** A ratio
+    /// measured on noisy adjacent bands scatters a few dB from frame to frame
+    /// on a perfectly steady carrier; the bar must not jump up with every
+    /// scatter and fall back.
+    #[test]
+    fn the_acpr_bars_are_averaged() {
+        let t0 = Instant::now();
+        let mut p = CarrierPacing::new();
+        // A steady carrier whose lower ratio scatters evenly over -45..-35 dB
+        // from frame to frame.
+        let mut seed = 7u32;
+        let mut scatter = || {
+            seed = seed.wrapping_mul(1_664_525).wrapping_add(1_013_904_223);
+            (seed >> 8) as f32 / (1u32 << 24) as f32 * 10.0 - 45.0
+        };
+        let (mut levels, mut powers) = (Vec::new(), Vec::new());
+        for t in (0..6_000u64).step_by(33) {
+            let mut r = carrier(40.0);
+            r.acpr_lower_db = scatter();
+            let c = p
+                .update(&r, Modulation::Wfm, t0 + Duration::from_millis(t))
+                .unwrap();
+            if t >= 1_500 {
+                levels.push(c.acpr_lower.unwrap().level);
+                powers.push(10f64.powf(f64::from(r.acpr_lower_db) / 10.0));
+            }
+        }
+        let lo = levels.iter().copied().fold(f32::INFINITY, f32::min);
+        let hi = levels.iter().copied().fold(f32::NEG_INFINITY, f32::max);
+        assert!(hi - lo < 2.0, "the bar swings {lo:.1} to {hi:.1} dB");
+        // And it reads the ratio's power mean, not its frame-to-frame peaks.
+        let mean = (10.0 * (powers.iter().sum::<f64>() / powers.len() as f64).log10()) as f32;
+        let shown = levels.iter().sum::<f32>() / levels.len() as f32;
+        assert!(
+            (shown - mean).abs() < 0.5,
+            "shows {shown:.1} dB for a mean of {mean:.1}"
+        );
+    }
+
+    /// **A class that flips does not tear the verdict down.** Bursts whose
+    /// bandwidth scatters classify as WFM in one frame and AM in the next;
+    /// the verdict is a kind (clean, weak, splatter) and settles on it, its
+    /// class being the one held for the badge.
+    #[test]
+    fn a_flipping_class_does_not_unsettle_the_verdict() {
+        let t0 = Instant::now();
+        let mut p = CarrierPacing::new();
+        let mut last = None;
+        for (i, t) in (0..1_500u64).step_by(33).enumerate() {
+            let mut r = carrier(30.0);
+            r.modulation = if i % 2 == 0 {
+                Modulation::Wfm
+            } else {
+                Modulation::Am
+            };
+            last = p.update(&r, Modulation::Wfm, t0 + Duration::from_millis(t));
+        }
+        let c = last.unwrap();
+        assert_eq!(c.verdict, Some(Verdict::Clean));
+        assert_eq!(c.modulation, Modulation::Wfm);
     }
 
     /// The digits change at most four times a second, however fast the
@@ -209,7 +298,7 @@ mod tests {
             let mut r = carrier(40.0);
             r.occupied_bw_hz = 180_000 + i as u64;
             let bw = p
-                .update(&r, t0 + Duration::from_millis(t))
+                .update(&r, Modulation::Wfm, t0 + Duration::from_millis(t))
                 .unwrap()
                 .occupied_bw_hz;
             if last != Some(bw) {

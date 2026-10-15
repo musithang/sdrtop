@@ -153,23 +153,26 @@ pub const VERDICT_CLEAN_SNR_DB: f32 = 20.0;
 /// regulatory mask.
 pub const VERDICT_ACPR_CONCERN_DB: f32 = -20.0;
 
-/// What the Lab's verdict says of the carrier at centre: its kind, with the
-/// class it was judged as. The words are the Signal Characterization panel's;
-/// the kind lives here so it can be held from frame to frame where the frames
-/// arrive, and every reader of it shows the same one.
+/// What the Lab's verdict says of the carrier at centre: its kind. The words
+/// are the Signal Characterization panel's; the kind lives here so it can be
+/// held from frame to frame where the frames arrive, and every reader of it
+/// shows the same one. The class is not part of it: it is held on its own,
+/// longer (`SignalState::modulation_settled`), so a class that scatters from
+/// burst to burst does not tear a settled verdict down.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum Verdict {
     /// Above the presence gate, under [`VERDICT_CLEAN_SNR_DB`].
-    Weak(Modulation),
+    Weak,
     /// Strong, with an adjacent-channel ratio past [`VERDICT_ACPR_CONCERN_DB`].
-    Splatter(Modulation),
+    Splatter,
     /// Strong and well separated.
-    Clean(Modulation),
+    Clean,
 }
 
 /// Judge one frame's carrier, or `None` when there is none to judge: no class,
-/// or under the classifier's own presence gate. The adjacent-channel ratio
-/// counts only when both sides were measured.
+/// or under the classifier's own presence gate. The class only gates; the kind
+/// is the same whatever it is. The adjacent-channel ratio counts only when
+/// both sides were measured.
 pub fn judge(
     modulation: Modulation,
     snr_db: f32,
@@ -180,14 +183,14 @@ pub fn judge(
         return None;
     }
     if snr_db < VERDICT_CLEAN_SNR_DB {
-        return Some(Verdict::Weak(modulation));
+        return Some(Verdict::Weak);
     }
     let worst = (acpr_lower_db.is_finite() && acpr_upper_db.is_finite())
         .then(|| acpr_lower_db.max(acpr_upper_db));
     if worst.is_some_and(|w| w > VERDICT_ACPR_CONCERN_DB) {
-        return Some(Verdict::Splatter(modulation));
+        return Some(Verdict::Splatter);
     }
-    Some(Verdict::Clean(modulation))
+    Some(Verdict::Clean)
 }
 
 /// The carrier figures as the Lab shows them. Taken only from frames with a
@@ -211,6 +214,8 @@ pub struct Carrier {
     /// The verdict, changed only once a new kind has held for a second;
     /// `None` until one has.
     pub verdict: Option<Verdict>,
+    /// The class the verdict's words name: the held one, as on the badge.
+    pub modulation: Modulation,
     /// When a carrier was last heard: in a gap, how long it has been held.
     pub heard: std::time::Instant,
 }
@@ -303,11 +308,11 @@ pub struct SignalState {
     /// frame by the FFT worker via [`classify`]. Drives the lab_signal headline /
     /// banner and, later, the demod panel's mode-adaptive view.
     pub modulation: Modulation,
-    /// The same, changed only once a new class has held for a second
-    /// (`signal::ballistics::Settled`): on a bursty signal the classifier
-    /// flips between a class and `Unknown` with every burst and gap, and a
-    /// gap neither changes this nor restarts its hold; a second with no class
-    /// and it is `Unknown`. What picks the demodulator and the demod panel's
+    /// The same, changed only once a new class has held for two seconds
+    /// (`signal::ballistics::CLASS_HOLD`): on a bursty signal the classifier
+    /// flips between a class and `Unknown` with every burst and gap, and
+    /// between classes as the bandwidth scatters; a gap neither changes this
+    /// nor restarts its hold, and two seconds with no class make it `Unknown`. What picks the demodulator and the demod panel's
     /// sections, so neither is torn down and rebuilt by a gap.
     pub modulation_settled: Modulation,
     /// The spectrum frame as it stood at the last quarter-second tick: what
@@ -399,21 +404,21 @@ mod tests {
     #[test]
     fn a_carrier_under_the_clean_threshold_is_weak() {
         let w = Modulation::Wfm;
-        assert_eq!(judge(w, 15.0, -40.0, -40.0), Some(Verdict::Weak(w)));
+        assert_eq!(judge(w, 15.0, -40.0, -40.0), Some(Verdict::Weak));
     }
 
     #[test]
     fn a_strong_carrier_with_a_poor_adjacent_ratio_splatters() {
         let w = Modulation::Wfm;
-        assert_eq!(judge(w, 40.0, -10.0, -40.0), Some(Verdict::Splatter(w)));
-        assert_eq!(judge(w, 43.7, -38.0, -41.0), Some(Verdict::Clean(w)));
+        assert_eq!(judge(w, 40.0, -10.0, -40.0), Some(Verdict::Splatter));
+        assert_eq!(judge(w, 43.7, -38.0, -41.0), Some(Verdict::Clean));
     }
 
     #[test]
     fn half_an_adjacent_pair_is_no_ratio() {
         let n = Modulation::Nfm;
         for (lo, hi) in [(f32::NEG_INFINITY, -10.0), (-10.0, f32::NEG_INFINITY)] {
-            assert_eq!(judge(n, 30.0, lo, hi), Some(Verdict::Clean(n)));
+            assert_eq!(judge(n, 30.0, lo, hi), Some(Verdict::Clean));
         }
     }
 

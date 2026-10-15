@@ -247,7 +247,7 @@ mod tests {
     }
 
     /// A live FM lock on a streaming radio: the classifier's raw class is
-    /// `raw`, the class it has held for a second is `settled`.
+    /// `raw`, the class it has held for two seconds is `settled`.
     pub(super) fn locked(raw: Modulation, settled: Modulation) -> SdrMetrics {
         let mut m = SdrMetrics::fixture().streaming();
         m.signal.modulation = raw;

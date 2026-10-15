@@ -184,6 +184,7 @@ impl SdrMetrics {
             acpr_lower: None,
             acpr_upper: None,
             verdict: crate::state::judge(modulation, snr_db, f32::NAN, f32::NAN),
+            modulation,
             heard: Instant::now(),
         });
         self.waterfall

@@ -72,17 +72,27 @@ pub(crate) fn verdict(carrier: Option<&Carrier>) -> (VerdictLevel, String, Strin
         .acpr_lower
         .zip(c.acpr_upper)
         .map(|(l, u)| (l.readout, u.readout));
+    // The class held for the badge; none named while none has held.
+    let m = c.modulation;
+    let (class, class_sp) = if m.is_known() {
+        (m.label(), format!("{} ", m.label()))
+    } else {
+        ("", String::new())
+    };
     match kind {
-        Verdict::Weak(m) => {
-            let mod_label = m.label();
-            (
-                VerdictLevel::Caution,
-                format!("WEAK {mod_label} SIGNAL"),
-                format!("{mod_label} carrier detected, but only {snr_db:.0} dB above the noise floor \u{2014} marginal."),
-            )
-        }
-        Verdict::Splatter(m) => {
-            let mod_label = m.label();
+        Verdict::Weak => (
+            VerdictLevel::Caution,
+            format!("WEAK {class_sp}SIGNAL"),
+            format!(
+                "{} detected, but only {snr_db:.0} dB above the noise floor \u{2014} marginal.",
+                if class.is_empty() {
+                    "Carrier".to_string()
+                } else {
+                    format!("{class} carrier")
+                }
+            ),
+        ),
+        Verdict::Splatter => {
             let detail = match acpr {
                 Some((l, u)) => format!(
                     "Strong carrier ({snr_db:.0} dB), {obw_str} occupied, but only {:.0} dB adjacent-channel suppression.",
@@ -94,20 +104,19 @@ pub(crate) fn verdict(carrier: Option<&Carrier>) -> (VerdictLevel, String, Strin
             };
             (
                 VerdictLevel::Caution,
-                format!("{mod_label} CARRIER \u{2014} ADJACENT SPLATTER"),
+                format!("{class_sp}CARRIER \u{2014} ADJACENT SPLATTER"),
                 detail,
             )
         }
-        Verdict::Clean(m) => {
-            let mod_label = m.label();
+        Verdict::Clean => {
             let acpr_note = match acpr {
                 Some((l, u)) => format!(", ACPR {l:.0}/{u:.0} dB"),
                 None => String::new(),
             };
             (
                 VerdictLevel::Clean,
-                format!("CLEAN {mod_label} SIGNAL"),
-                format!("Strong, well-separated {mod_label} carrier \u{2014} {snr_db:.0} dB above noise, {obw_str} occupied{acpr_note}."),
+                format!("CLEAN {class_sp}SIGNAL"),
+                format!("Strong, well-separated {class_sp}carrier \u{2014} {snr_db:.0} dB above noise, {obw_str} occupied{acpr_note}."),
             )
         }
     }
@@ -136,6 +145,7 @@ pub(crate) fn steady(
         acpr_lower: shown(acpr_lower_db),
         acpr_upper: shown(acpr_upper_db),
         verdict: crate::state::judge(modulation, snr_db, acpr_lower_db, acpr_upper_db),
+        modulation,
         heard: std::time::Instant::now(),
     }
 }
@@ -171,6 +181,20 @@ mod tests {
         let (level, headline, _) = verdict(Some(&c));
         assert_eq!(level, VerdictLevel::Judging);
         assert_eq!(headline, "CARRIER HEARD");
+    }
+
+    /// A verdict settled before the class has: the words name no class
+    /// rather than print the badge's dash.
+    #[test]
+    fn a_verdict_without_a_class_names_none() {
+        let mut c = steady(Modulation::Wfm, 43.0, -38.0, -41.0, 180_000);
+        c.modulation = Modulation::Unknown;
+        let (_, headline, detail) = verdict(Some(&c));
+        assert_eq!(headline, "CLEAN SIGNAL");
+        assert!(
+            detail.starts_with("Strong, well-separated carrier"),
+            "{detail}"
+        );
     }
 
     #[test]

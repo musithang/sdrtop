@@ -20,7 +20,7 @@ use crate::state::{FftFrame, SdrMetrics};
 use super::analysis::Reading;
 use super::readout::CarrierPacing;
 use super::DB_FLOOR;
-use crate::signal::ballistics::{Ballistic, Settled, READOUT};
+use crate::signal::ballistics::{Ballistic, Settled, CLASS_HOLD, READOUT};
 
 /// Pace the drawn spectrum to the *visible* waterfall: each waterfall character
 /// row packs this many data rows (half-block ▀), so the spectrum refreshes once
@@ -38,7 +38,7 @@ pub(super) struct Pacing {
     last_update: Option<Instant>,
     /// The S-meter's ballistics, carried from frame to frame.
     s_meter: Ballistic,
-    /// The modulation, held until a new class has held for a second.
+    /// The modulation, held until a new class has held for two seconds.
     modulation: Settled<crate::state::Modulation>,
     /// The carrier figures, taken only from frames with a carrier.
     carrier: CarrierPacing,
@@ -52,7 +52,7 @@ impl Pacing {
             rows_since_spectrum: 0,
             last_update: None,
             s_meter: Ballistic::new(DB_FLOOR),
-            modulation: Settled::new(),
+            modulation: Settled::with_hold(CLASS_HOLD),
             carrier: CarrierPacing::new(),
             readout_at: None,
         }
@@ -118,7 +118,7 @@ pub(super) fn publish(
         .modulation
         .update(Some(snap.reading.modulation).filter(|m| m.is_known()), now)
         .unwrap_or(crate::state::Modulation::Unknown);
-    let carrier = pacing.carrier.update(snap.reading, now);
+    let carrier = pacing.carrier.update(snap.reading, modulation_settled, now);
     let Ok(mut m) = state.lock() else {
         return None;
     };
