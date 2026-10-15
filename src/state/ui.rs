@@ -244,6 +244,11 @@ pub struct UiState {
     /// See [`MenuState`].
     pub menu: Option<MenuState>,
     pub device_option_update: DeviceOptionUpdate,
+    /// The screen's width in columns as of this frame, set by the app before
+    /// it draws, so a panel that gives way on a narrow screen and the panels
+    /// that take over what it showed decide alike. Zero, unknown, reads as
+    /// wide.
+    pub screen_cols: u16,
 }
 
 /// Which pane the menu's right column is showing.
@@ -361,6 +366,7 @@ impl UiState {
 impl Default for UiState {
     fn default() -> Self {
         Self {
+            screen_cols: 0,
             input_mode: InputMode::Normal,
             input_buf: String::new(),
             focused_panel: None,

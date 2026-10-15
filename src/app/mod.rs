@@ -366,6 +366,9 @@ impl App {
                 crate::state::InputMode::Normal | crate::state::InputMode::DeviceOptionInput { .. }
             );
         self.engine.set_panel_hidden("footer", hide_footer);
+        // The width this frame is drawn at, for the panels that give way on
+        // a narrow screen and the ones that take over what they showed.
+        m.ui.screen_cols = terminal.size().map_or(0, |s| s.width);
         // Copied out before the closure borrows `self` for the engine.
         let deck_shown = self.deck_shown;
         // Measurement labs wear "instrument mode": the resting frames cool toward

@@ -315,13 +315,21 @@ impl Panel for NetWifiRiverPanel {
 
     fn chrome(&self, state: &SdrMetrics) -> PanelChrome {
         let view = &state.net.wifi.frames_view;
+        // Where the card has no room, its reading rides in the title.
+        let reading = if super::card::on_screen(state) {
+            String::new()
+        } else {
+            super::card::reading_words(state)
+                .map(|w| format!(" \u{b7} {w}"))
+                .unwrap_or_default()
+        };
         // Held with the list, and paused by the user as the list is.
         PanelChrome::new("River")
             .stale_when(Staleness::NotStreaming)
             .tag_if(true, state.net.mode.tag())
             .counts_from_feed(FeedSpan::Session)
             .tag_if(view.held.is_some(), Tag::Paused)
-            .suffix(format!(" \u{b7} {} \u{b7} z", view.zoom.label()))
+            .suffix(format!(" \u{b7} {} \u{b7} z{reading}", view.zoom.label()))
     }
 
     fn render(

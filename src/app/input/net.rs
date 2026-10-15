@@ -379,13 +379,16 @@ pub(super) fn net_bt_packets(key: KeyEvent, ctx: &mut InputCtx<'_>) -> KeyAction
 /// back up, staying held at the top; `h` holds the list or lets it run, as
 /// on the other lists; `End` is live again. `z` steps the river's zoom and
 /// `d` turns the card between the selected frame and the decode account:
-/// modes, which the hold keys leave alone.
+/// modes, which the hold keys leave alone. Where the card has no room,
+/// `Enter` opens the selected frame in place of the list and closes it;
+/// `End` closes it too, back to the live list.
 pub(super) fn net_wifi_frames(key: KeyEvent, ctx: &mut InputCtx<'_>) -> KeyAction {
     let mut m = metrics(ctx.state);
     let newest = crate::ui::panels::net::wifi::frames::shown(&m)
         .first()
         .map(|r| r.seq);
     let below = crate::ui::panels::net::wifi::frames::below(&m);
+    let card = crate::ui::panels::net::wifi::card::on_screen(&m);
     let view = &mut m.net.wifi.frames_view;
     match key.code {
         KeyCode::Up => view.cursor = view.cursor.saturating_sub(1),
@@ -408,7 +411,12 @@ pub(super) fn net_wifi_frames(key: KeyEvent, ctx: &mut InputCtx<'_>) -> KeyActio
         KeyCode::End => {
             view.held = None;
             view.cursor = 0;
+            view.open = false;
         }
+        KeyCode::Enter if card => {
+            m.push_log("Frames: the selected frame is on the card".to_string());
+        }
+        KeyCode::Enter => view.open = !view.open,
         KeyCode::Char('z') => view.zoom = view.zoom.next(),
         KeyCode::Char('d') => view.decode = !view.decode,
         _ => {
@@ -1523,10 +1531,11 @@ mod tests {
                         cursor: 7,
                         zoom: crate::state::FrameZoom::Anatomy,
                         decode: true,
+                        open: true,
                     }
                 },
-                // The cursor goes; the hold, the zoom and the card's face are
-                // modes.
+                // The cursor goes; the hold, the zoom, the card's face and the
+                // frame opened in place of the list are modes.
                 |m| {
                     m.net.wifi.frames_view
                         == crate::state::FramesView {
@@ -1534,6 +1543,7 @@ mod tests {
                             cursor: 0,
                             zoom: crate::state::FrameZoom::Anatomy,
                             decode: true,
+                            open: true,
                         }
                 },
             ),
@@ -1698,6 +1708,27 @@ mod tests {
         assert_eq!(view(&state).held, Some(30));
         key(&mut engine, &keys, &state, KeyCode::Char('h'));
         assert_eq!(view(&state).held, None);
+    }
+
+    /// `Enter` opens the selected frame in place of the list where the card
+    /// has no room, and closes it again; `End` goes back to the live list.
+    /// Where the card is on screen it says so and changes nothing.
+    #[test]
+    fn enter_opens_the_frame_where_the_card_has_no_room() {
+        let (mut engine, keys, state) = frames_view(5);
+        let open = |s: &Arc<Mutex<SdrMetrics>>| metrics(s).net.wifi.frames_view.open;
+        metrics(&state).ui.screen_cols = 191;
+        key(&mut engine, &keys, &state, KeyCode::Enter);
+        assert!(!open(&state));
+        assert!(said(&metrics(&state), "on the card"));
+        metrics(&state).ui.screen_cols = 100;
+        key(&mut engine, &keys, &state, KeyCode::Enter);
+        assert!(open(&state));
+        key(&mut engine, &keys, &state, KeyCode::Enter);
+        assert!(!open(&state));
+        key(&mut engine, &keys, &state, KeyCode::Enter);
+        key(&mut engine, &keys, &state, KeyCode::End);
+        assert!(!open(&state));
     }
 
     /// `l` switches to the piconet's LMP log and back, each time from live

@@ -53,7 +53,7 @@ Eleven views, one question each:
 | `Classic 3` | **[Bench](net-classic-bench.md)** | How good is each end of it, side by side? |
 | `LE Coded 1` | **[Long range](net-le-coded.md)** | Who advertises on LE Coded, and where did each advertisement point? |
 | `Channel 1` | **[Survey](net-wifi.md)** | Which Wi-Fi channel is busy, and which is quiet? |
-| `Channel 2` | Frames | What is on this channel, frame by frame? |
+| `Channel 2` | **[Frames](net-wifi-frames.md)** | What is on this channel, frame by frame? |
 
 The panels with controls announce them with a highlighted letter in the
 title; the full list is in [Keyboard Shortcuts](keys.md#net-panel-focus-modes).

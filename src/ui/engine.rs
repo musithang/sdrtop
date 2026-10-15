@@ -370,17 +370,38 @@ impl LayoutEngine {
                 .filter(|s| s.position == Position::Body)
                 .collect();
 
-            // Column width is determined by the FIRST panel in each column.
-            let left_pct = left_specs.first().and_then(|s| s.width_pct).unwrap_or(0);
-            let right_pct = right_specs.first().and_then(|s| s.width_pct).unwrap_or(0);
+            // Column width is determined by the FIRST panel in each column:
+            // its own say where it has one (a card that gives way on a
+            // narrow screen), else the preset's share.
+            let body = outer[1].width;
+            let side = |specs: &[&&crate::config::PanelSpec]| {
+                let first = specs.first();
+                let own = first
+                    .and_then(|s| self.registry.get(&s.name))
+                    .and_then(|p| p.column_width(body));
+                match own {
+                    Some(w) => Constraint::Length(w),
+                    None => Constraint::Percentage(first.and_then(|s| s.width_pct).unwrap_or(0)),
+                }
+            };
+            let (left_c, right_c) = (side(&left_specs), side(&right_specs));
+            let given_up = |c: Constraint| c == Constraint::Length(0);
+            let (left_specs, right_specs) = (
+                if given_up(left_c) {
+                    Vec::new()
+                } else {
+                    left_specs
+                },
+                if given_up(right_c) {
+                    Vec::new()
+                } else {
+                    right_specs
+                },
+            );
 
             let columns = Layout::default()
                 .direction(Direction::Horizontal)
-                .constraints([
-                    Constraint::Percentage(left_pct),
-                    Constraint::Min(0),
-                    Constraint::Percentage(right_pct),
-                ])
+                .constraints([left_c, Constraint::Min(0), right_c])
                 .split(outer[1]);
 
             render_column(

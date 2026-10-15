@@ -276,7 +276,7 @@ fn row_line(
         .map_or("\u{b7}".to_string(), |us| format!("{us} \u{b5}s"));
     let off_w = if width >= FULL { 17 } else { 10 };
     let off = row.offset_hz.map_or(String::new(), |o| {
-        let t = state.radio.transmitter_offset(o, row.carrier_hz, now).khz;
+        let t = state.radio.transmitter_offset(o, row.centre_hz(), now).khz;
         if width >= FULL {
             format!("{:+.1} \u{b1}{:.1} kHz", t.value(), t.sigma())
         } else {
@@ -297,12 +297,22 @@ fn row_line(
     Line::from(spans)
 }
 
-fn keys(width: usize) -> &'static str {
-    if width >= FULL {
-        " \u{2191}\u{2193} scroll, holding at the newest   H hold   End live   z zoom   d the decode account"
-    } else {
-        " \u{2191}\u{2193} scroll   H hold   End live   z zoom   d the decode account"
+/// The keys under the list; where the card has no room, `Enter` opens the
+/// frame it would have shown.
+fn keys(width: usize, card: bool) -> &'static str {
+    match (card, width >= FULL) {
+        (false, _) => " \u{2191}\u{2193} scroll   H hold   End live   z zoom   Enter the frame",
+        (true, true) => {
+            " \u{2191}\u{2193} scroll, holding at the newest   H hold   End live   z zoom   d the decode account"
+        }
+        (true, false) => " \u{2191}\u{2193} scroll   H hold   End live   z zoom   d the decode account",
     }
+}
+
+/// Whether the list shows the selected frame in its place: opened, and the
+/// card not on screen to show it.
+fn opened(state: &SdrMetrics) -> bool {
+    state.net.wifi.frames_view.open && !super::card::on_screen(state)
 }
 
 fn lines(
@@ -311,6 +321,12 @@ fn lines(
     height: usize,
     theme: &crate::Theme,
 ) -> Vec<Line<'static>> {
+    if opened(state) {
+        let frame = super::card::lower(state, width, height, theme, " \u{b7} Enter: the list");
+        if !frame.is_empty() {
+            return frame;
+        }
+    }
     let quiet = Style::default().fg(theme.label);
     let note = |s: String| Line::from(Span::styled(s, Style::default().fg(theme.stale)));
     let mut out = vec![Line::from(Span::styled(header(width), quiet))];
@@ -361,7 +377,10 @@ fn lines(
     while out.len() + 1 < height {
         out.push(Line::raw(""));
     }
-    out.push(Line::from(Span::styled(keys(width), quiet)));
+    out.push(Line::from(Span::styled(
+        keys(width, super::card::on_screen(state)),
+        quiet,
+    )));
     out
 }
 
@@ -390,6 +409,10 @@ impl Panel for NetWifiFramesPanel {
                 "the river's zoom: 1 ms, 40 \u{b5}s or 4 \u{b5}s a cell",
             ),
             ("d", "the card: the selected frame, or the decode account"),
+            (
+                "Enter",
+                "the selected frame in place of the list, where the card has no room",
+            ),
         ]
     }
 
@@ -408,7 +431,9 @@ impl Panel for NetWifiFramesPanel {
                 span.as_secs_f64()
             ));
         }
-        if shown.iter().any(|r| r.offset_hz.is_some()) {
+        // Opened on the decode account, no offset is on it.
+        let account = opened(state) && view.decode;
+        if !account && shown.iter().any(|r| r.offset_hz.is_some()) {
             chrome = chrome.shows_offsets();
         }
         // Held, the list is paused by the user and says what the pause is
@@ -731,6 +756,35 @@ mod tests {
             .collect();
         assert_eq!(marked.len(), 1, "{out}");
         assert!(marked[0].contains("109 B"), "the 21st newest: {out}");
+    }
+
+    /// **Where the card has no room, `Enter` opens the selected frame in
+    /// place of the list**, with the card's own fields; `d` there is the
+    /// decode account. Where the card is on screen the list stays a list.
+    #[test]
+    fn narrow_the_selected_frame_opens_in_place_of_the_list() {
+        let mut m = on_eleven();
+        m.net
+            .wifi
+            .push_row(row(0.0, non_ht(Rate::R24, 20), Some(28)));
+        m.net.wifi.push_row(row(100.0, ht(7, 1_500), Some(200)));
+        m.net.wifi.frames_view.open = true;
+        m.ui.screen_cols = 100;
+        let out = text(&m, 100, 15);
+        assert!(out.contains("MCS 7 \u{b7} 1500 B \u{b7} STBC 0"), "{out}");
+        assert!(out.contains("Enter: the list"), "{out}");
+        assert!(!out.contains("gap \u{b5}s"), "{out}");
+        m.net.wifi.frames_view.decode = true;
+        let out = text(&m, 100, 15);
+        assert!(out.contains("this channel"), "{out}");
+        m.net.wifi.frames_view.decode = false;
+        m.ui.screen_cols = 191;
+        let out = text(&m, 100, 15);
+        assert!(out.contains("gap \u{b5}s"), "the card has it: {out}");
+        m.ui.screen_cols = 100;
+        m.net.wifi.frames_view.open = false;
+        let out = text(&m, 100, 15);
+        assert!(out.contains("Enter the frame"), "{out}");
     }
 
     /// Frames heard on another channel's centre (the survey's visits) are

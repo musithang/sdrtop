@@ -337,9 +337,15 @@ impl Wifi {
             false
         });
         // Every 802.11b SYNC whose header is held by now is read.
+        // Another channel's frame is read at its own centre, whole megahertz
+        // from ours: its offset is kept against that centre, where it was
+        // sent, so it reads as its crystal's and not as the shift.
         let dsss_row = |r: &crate::signal::wifi::dsss::receive::Read, kind: RowKind| WifiRow {
             airtime_us: r.header.ok().map(|h| h.airtime_us(r.preamble)),
-            offset_hz: Some(r.offset_hz),
+            offset_hz: Some(Uncertain::from_sigma(
+                r.offset_hz.value() - f64::from(r.shift_mhz) * 1e6,
+                r.offset_hz.sigma(),
+            )),
             snr_db: r.snr_db,
             ..row(r.start, kind)
         };

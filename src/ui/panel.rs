@@ -529,6 +529,15 @@ pub trait Panel: Send + Sync {
         None
     }
 
+    /// The columns this panel's side column takes in a body `body` columns
+    /// wide, when the panel decides rather than the preset's share; `Some(0)`
+    /// gives the column up, and the body takes its room. Read off the first
+    /// panel of a left or right column. `None`, the default, keeps the
+    /// preset's share.
+    fn column_width(&self, _body: u16) -> Option<u16> {
+        None
+    }
+
     /// Preferred rendered height in rows, given the available terminal width and current state.
     /// Used by the layout engine for top/bottom panels. Default: 3 (1 content + 2 borders).
     fn preferred_height(&self, _available_width: u16, _state: &SdrMetrics) -> u16 {

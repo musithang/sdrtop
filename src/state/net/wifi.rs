@@ -343,7 +343,8 @@ pub struct WifiRow {
     /// From the end of the frame before it to its start, in microseconds:
     /// `None` across a break, and after a frame that stated no length.
     pub gap_us: Option<f64>,
-    /// Its carrier against our tuning.
+    /// Its carrier against the centre of the channel it was sent on
+    /// ([`WifiRow::centre_hz`]): ours, or another channel's for its frame.
     pub offset_hz: Option<crate::signal::dsp::uncertainty::Uncertain>,
     /// Its SNR a sample, in dB.
     pub snr_db: Option<f64>,
@@ -357,6 +358,17 @@ pub struct WifiRow {
 }
 
 impl WifiRow {
+    /// The centre of the channel it was sent on: ours, or for another
+    /// channel's frame, that channel's, which its offset is against.
+    pub fn centre_hz(&self) -> f64 {
+        match self.kind {
+            RowKind::OtherOfdm { shift_mhz } | RowKind::OtherDsss { shift_mhz, .. } => {
+                self.carrier_hz + f64::from(shift_mhz) * 1e6
+            }
+            RowKind::Ofdm(_) | RowKind::Dsss { .. } => self.carrier_hz,
+        }
+    }
+
     /// Its family, for a frame of this channel; another channel's frame is
     /// none of them.
     pub fn family(&self) -> Option<Family> {
@@ -427,6 +439,9 @@ pub struct FramesView {
     pub zoom: FrameZoom,
     /// The card shows the decode account in place of the selected frame.
     pub decode: bool,
+    /// Where the card has no room, the selected frame (or the decode
+    /// account) in place of the list.
+    pub open: bool,
 }
 
 #[derive(Clone, Debug, Default, PartialEq)]

@@ -72,4 +72,5 @@ its last pass in the stale colour, and the card is the locked channel's.
 `Esc` leaves the focus and the card goes back to the survey's answer.
 
 The channel's frames one by one, each with its format and signalling, and
-the account of every preamble found are on `Channel 2`, the Frames view.
+the account of every preamble found are on `Channel 2`,
+[the Frames view](net-wifi-frames.md).

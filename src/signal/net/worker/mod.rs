@@ -1888,6 +1888,11 @@ mod tests {
             matches!(r.kind, RowKind::OtherDsss { shift_mhz: 3, .. }),
             "{r:?}"
         );
+        // Its offset against the centre it was sent on, 3 MHz from ours,
+        // where the test sent it: near nothing, not near 3 MHz.
+        let offset = r.offset_hz.expect("its offset");
+        assert!(offset.value().abs() < 5_000.0, "{offset:?}");
+        assert_eq!(r.centre_hz(), 2_440e6);
     }
 
     /// A frame on the Wi-Fi view is found once, judged this channel's by

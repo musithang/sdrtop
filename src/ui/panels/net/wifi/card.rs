@@ -196,7 +196,7 @@ fn fields(row: &WifiRow, state: &SdrMetrics) -> Vec<Field> {
         .unwrap_or_default();
     out.push(match row.offset_hz {
         Some(o) => {
-            let t = state.radio.transmitter_offset(o, row.carrier_hz, now).khz;
+            let t = state.radio.transmitter_offset(o, row.centre_hz(), now).khz;
             field(
                 "preamble",
                 format!("{:+.2} \u{b1} {:.2} kHz \u{b7} {snr}", t.value(), t.sigma()),
@@ -350,7 +350,15 @@ fn reading(rows: &[&WifiRow], width: usize, theme: &crate::Theme, out: &mut Vec<
     let label = Style::default().fg(theme.label);
     let Some(r) = rate(rows) else {
         let own = rows.iter().filter(|r| r.family().is_some()).count();
-        let why = format!("fewer than a second of frames yet \u{b7} {own} of this channel's");
+        // Frames kept from before a break, and still no whole second since:
+        // the feed losing blocks is why, not too little heard.
+        let broken = rows.iter().any(|r| r.run != rows[0].run);
+        let why = if broken {
+            "no unbroken second of the stream yet: the feed lost blocks within the last second"
+                .to_string()
+        } else {
+            format!("fewer than a second of frames yet \u{b7} {own} of this channel's")
+        };
         for l in crate::ui::chrome::wrap(&why, width.saturating_sub(2), 2) {
             out.push(Line::from(Span::styled(format!(" {l}"), label)));
         }
@@ -550,9 +558,26 @@ fn lines(
         ));
     }
     out.push(Line::raw(""));
+    out.extend(lower(state, width, height, theme, ""));
+    out
+}
+
+/// The card's lower part: the selected frame field by field, or with `d`
+/// the decode account; with `back`, the key that leaves it, where the list
+/// shows it in its own place.
+pub(super) fn lower(
+    state: &SdrMetrics,
+    width: usize,
+    height: usize,
+    theme: &crate::Theme,
+    back: &str,
+) -> Vec<Line<'static>> {
+    let mut out = Vec::new();
+    let shown = shown(state);
+    let view = &state.net.wifi.frames_view;
     if view.decode {
         out.push(rule(
-            "DECODE ACCOUNT \u{b7} d: the selected frame",
+            &format!("DECODE ACCOUNT \u{b7} d: the selected frame{back}"),
             width,
             theme,
         ));
@@ -561,12 +586,15 @@ fn lines(
         ));
         return out;
     }
-    let Some(row) = at(&shown, view).map(|i| shown[i]) else {
+    let (Some(t), Some(row)) = (
+        top(&shown, view).filter(|&t| t < shown.len()),
+        at(&shown, view).map(|i| shown[i]),
+    ) else {
         return out;
     };
     out.push(rule(
         &format!(
-            "SELECTED  {} \u{b7} d: the decode account",
+            "SELECTED  {} \u{b7} d: the decode account{back}",
             when(since(row, shown[t])).trim()
         ),
         width,
@@ -601,6 +629,35 @@ fn lines(
     out
 }
 
+/// Whether the card has room on a screen `cols` wide: at 191 and 152 it
+/// does, at 100 the list and the river need every column.
+pub fn fits(cols: u16) -> bool {
+    cols >= 140
+}
+
+/// Whether the card is on screen now, by the width the app last drew at;
+/// unknown reads as wide.
+pub fn on_screen(state: &SdrMetrics) -> bool {
+    state.ui.screen_cols == 0 || fits(state.ui.screen_cols)
+}
+
+/// The reading in words, for the river's title where the card has no room:
+/// `None` until there is a rate to give.
+pub(super) fn reading_words(state: &SdrMetrics) -> Option<String> {
+    let shown = shown(state);
+    let t = top(&shown, &state.net.wifi.frames_view).filter(|&t| t < shown.len())?;
+    let r = rate(&shown[t..])?;
+    let mean = if r.mean >= 10.0 {
+        format!("{:.0}", r.mean)
+    } else {
+        format!("{:.1}", r.mean)
+    };
+    Some(match r.sigma {
+        Some(s) => format!("{mean} \u{b1} {s:.1} frames a second"),
+        None => format!("{mean} frames a second"),
+    })
+}
+
 impl Panel for NetWifiCardPanel {
     fn name(&self) -> &'static str {
         "net_wifi_card"
@@ -608,6 +665,10 @@ impl Panel for NetWifiCardPanel {
 
     fn min_size(&self) -> (u16, u16) {
         (40, 10)
+    }
+
+    fn column_width(&self, body: u16) -> Option<u16> {
+        (!fits(body)).then_some(0)
     }
 
     fn chrome(&self, state: &SdrMetrics) -> PanelChrome {
@@ -785,6 +846,65 @@ mod tests {
             "{out}"
         );
         assert!(out.contains("0.7 a second from other channels"), "{out}");
+    }
+
+    /// **What gives way**: the card keeps its place at 191 and 152 columns
+    /// and gives it up at 100, where its reading moves into the river's
+    /// title: the two are never both on screen and never neither.
+    #[test]
+    fn the_card_gives_way_on_a_narrow_screen_and_its_reading_moves() {
+        let (engine, _) =
+            crate::app::App::build_ui("wifi_frames", &std::collections::HashMap::new(), None, true);
+        let theme = crate::Theme::sdr();
+        let mut m = on_eleven();
+        for r in three_seconds().into_iter().rev() {
+            m.net.wifi.push_row(r);
+        }
+        for (w, h, card) in [(191u16, 41u16, true), (152, 32, true), (100, 30, false)] {
+            m.ui.screen_cols = w;
+            let mut t = ratatui::Terminal::new(ratatui::backend::TestBackend::new(w, h)).unwrap();
+            t.draw(|f| engine.draw(f, &m, &theme)).unwrap();
+            let buf = t.backend().buffer().clone();
+            let text: Vec<String> = (0..h)
+                .map(|y| (0..w).map(|x| buf.get(x, y).symbol()).collect())
+                .collect();
+            let all = text.join("\n");
+            let river = text.iter().find(|l| l.contains("River")).unwrap();
+            assert_eq!(all.contains("Frames a second"), card, "{w} x {h}:\n{all}");
+            assert_eq!(
+                river.contains("12 \u{b1} 1.2 frames a second"),
+                !card,
+                "{w} x {h}: {river}"
+            );
+            // Given way, the body takes the room: the river runs the width.
+            if !card {
+                assert!(river.trim_end().ends_with('\u{256e}'), "{river}");
+                assert_eq!(river.chars().count(), usize::from(w));
+            }
+        }
+    }
+
+    /// Seconds of frames, but broken by the feed's losses into runs each
+    /// shorter than one: the card says the breaks are why, not that it has
+    /// heard too little.
+    #[test]
+    fn a_feed_that_keeps_breaking_is_named_as_the_reason() {
+        let mut m = on_eleven();
+        for run in 0..4u64 {
+            for i in 0..5 {
+                m.net.wifi.push_row(WifiRow {
+                    run,
+                    ..at(4.0 - run as f64 - 0.1 * f64::from(i), ht())
+                });
+            }
+        }
+        let out = text(&m, 70, 27);
+        assert!(
+            out.contains("no unbroken second of the stream yet"),
+            "{out}"
+        );
+        assert!(out.contains("blocks"), "{out}");
+        assert!(!out.contains("fewer than a second"), "{out}");
     }
 
     /// Under a whole second of frames, no rate is given.
