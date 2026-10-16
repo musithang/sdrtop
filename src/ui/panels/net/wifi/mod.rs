@@ -23,6 +23,16 @@ struct Silence {
     head: &'static str,
     why: String,
     keys: Vec<(&'static str, bool)>,
+    /// What a list says before the reason, and a card in its place.
+    line: &'static str,
+    card: &'static str,
+}
+
+impl Silence {
+    /// The keys as plain words, for a card.
+    fn keys_text(&self) -> String {
+        self.keys.iter().map(|(k, _)| *k).collect()
+    }
 }
 
 fn silence(state: &SdrMetrics) -> Option<Silence> {
@@ -31,6 +41,8 @@ fn silence(state: &SdrMetrics) -> Option<Silence> {
             head: "NOT RECEIVING",
             why: "The radio is open and idle: no samples, so no channel can be visited.".into(),
             keys: vec![("Space", true), (" starts receiving.", false)],
+            line: "nothing can be heard",
+            card: "NOT MEASURED",
         });
     }
     let why = state.net.wifi.refused.clone()?;
@@ -39,12 +51,38 @@ fn silence(state: &SdrMetrics) -> Option<Silence> {
             head: "WRONG SAMPLE RATE",
             why,
             keys: vec![("s", true), (", then ", false), ("20", true), (".", false)],
+            line: "nothing can be heard",
+            card: "NOT MEASURED",
         });
     }
     Some(Silence {
         head: "NOT ON A CHANNEL CENTRE",
         why,
         keys: vec![("← →", true), (" step to a channel centre.", false)],
+        line: "nothing can be heard",
+        card: "NOT MEASURED",
+    })
+}
+
+/// What the Frames view cannot show, and why: the shared silences, and the
+/// survey walking the band, since a view of one channel's frames needs the
+/// radio to stay on one.
+fn frames_silence(state: &SdrMetrics) -> Option<Silence> {
+    silence(state).or_else(|| {
+        (state.net.mode != NetMode::Lock).then(|| Silence {
+            head: "NOT LOCKED ON A CHANNEL",
+            why: "The Frames view reads one channel, and the survey walks the band.".into(),
+            keys: vec![
+                ("m", true),
+                (" locks here, ", false),
+                ("\u{2190} \u{2192}", true),
+                (" step the channel; or lock one on the ", false),
+                ("Survey", true),
+                (".", false),
+            ],
+            line: "not locked on a channel",
+            card: "NOT LOCKED",
+        })
     })
 }
 

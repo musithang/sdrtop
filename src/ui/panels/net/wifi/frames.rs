@@ -330,14 +330,14 @@ fn lines(
     let mut out = vec![Line::from(Span::styled(header(width), quiet))];
     let shown = shown(state);
     let selected = selection(state);
-    let silent = super::silence(state);
+    let silent = super::frames_silence(state);
     if let Some(s) = &silent {
         out.push(note(if selected.is_none() {
-            format!(" nothing can be heard: {}", s.why)
+            format!(" {}: {}", s.line, s.why)
         } else {
             format!(
-                " nothing can be heard now: {}; the capture below is from before",
-                s.why
+                " {} now: {}; the capture below is from before",
+                s.line, s.why
             )
         }));
     }
@@ -529,6 +529,7 @@ mod tests {
         m.radio.config_sample_rate = 20e6;
         m.net.wifi.ran = true;
         m.net.wifi.channel = Some(11);
+        m.net.mode = crate::state::NetMode::Lock;
         m
     }
 
@@ -956,6 +957,15 @@ mod tests {
         capture_all(&mut m, 0);
         let out = text(&m, 191, 16);
         assert!(!out.contains("54 Mb/s"), "{out}");
+    }
+
+    /// Not locked on a channel, the list says so and how to lock one.
+    #[test]
+    fn unlocked_the_list_says_how_to_lock_a_channel() {
+        let mut m = on_eleven();
+        m.net.mode = crate::state::NetMode::Survey;
+        let out = text(&m, 191, 16);
+        assert!(out.contains("not locked on a channel"), "{out}");
     }
 
     /// **Listening**: nothing of this channel yet is said in words, never

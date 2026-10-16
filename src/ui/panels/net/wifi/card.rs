@@ -520,8 +520,9 @@ fn lines(
     height: usize,
     theme: &crate::Theme,
 ) -> Vec<Line<'static>> {
-    if let Some(s) = super::silence(state) {
-        return state_lines("NOT MEASURED", &s.why, width, theme);
+    if let Some(s) = super::frames_silence(state) {
+        let what = format!("{} {}", s.why, s.keys_text());
+        return state_lines(s.card, &what, width, theme);
     }
     let shown = shown(state);
     let ch = crate::signal::net::band::wifi_channel(state.radio.frequency)
@@ -673,7 +674,7 @@ impl Panel for NetWifiCardPanel {
         let view = &state.net.wifi.frames_view;
         // Only while the selected frame's fields are on it: not in place of
         // a silence, nor under the decode account.
-        let offset = super::silence(state).is_none()
+        let offset = super::frames_silence(state).is_none()
             && !view.decode
             && selection(state).is_some_and(|(c, at)| c.rows[at].offset_hz.is_some());
         if offset {
@@ -720,6 +721,7 @@ mod tests {
         m.radio.config_sample_rate = 20e6;
         m.net.wifi.ran = true;
         m.net.wifi.channel = Some(11);
+        m.net.mode = crate::state::NetMode::Lock;
         m
     }
 
@@ -1071,6 +1073,16 @@ mod tests {
             !out.contains("blocks lost") && !out.contains("SELECTED"),
             "{out}"
         );
+    }
+
+    /// Not locked on a channel, the card says NOT LOCKED and how to.
+    #[test]
+    fn unlocked_the_card_says_how_to_lock_a_channel() {
+        let mut m = on_eleven();
+        m.net.mode = crate::state::NetMode::Survey;
+        let out = text(&m, 70, 27);
+        assert!(out.contains("NOT LOCKED"), "{out}");
+        assert!(out.contains("Survey"), "{out}");
     }
 
     /// The silences: not measured, listening, and only other channels.

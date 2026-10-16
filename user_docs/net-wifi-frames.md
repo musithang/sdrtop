@@ -60,9 +60,10 @@ the traffic would change every frame's width from one second to the next.
 
 (The lengths are for a 191-column terminal; a capture is always as long as
 the river you have.) The labels on the left count from the trigger. The
-frame selected in the list is drawn in the focus colour, with a `▸` at its
-lane and a `━` under its columns on the axis: lane and column cross on it,
-so it stands out even where a theme's focus colour is close to a format's.
+frame selected in the list stands up off the river like a raised key:
+drawn in the focus colour on a lighter ground, with a darker edge either
+side of it and a `▸` at its lane, so it stands out even where
+a theme's focus colour is close to a format's.
 The title says which capture this is,
 its scale, the trigger, the holdoff, and `STOP` when you have stopped it.
 
@@ -136,6 +137,10 @@ face stay as you left them.
 
 ## When there is nothing to show
 
+- **Not locked on a channel**: the survey is walking the band, and a view
+  of one channel's frames needs the radio to stay put. Press `m` to lock
+  where it is and `← →` to step to the channel you want, or lock one on the
+  Survey (`L`).
 - **Listening**: nothing heard on this channel yet. The lanes stay empty;
   give it a few seconds before calling the channel quiet.
 - **Only other channels**: every frame heard came from a channel 5, 10 or

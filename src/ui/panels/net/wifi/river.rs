@@ -29,7 +29,7 @@ use ratatui::{
 };
 
 use super::frames::{capture, ink, selection};
-use super::{plate, put, silence};
+use super::{frames_silence, plate, put};
 use crate::state::{Family, FrameZoom, RowKind, SdrMetrics, WifiRow};
 use crate::ui::panel::{FeedSpan, Panel, PanelChrome, Staleness};
 
@@ -256,7 +256,7 @@ fn draw(buf: &mut Buffer, area: Rect, state: &SdrMetrics, theme: &crate::Theme) 
     let zoom = capture(state).map_or(state.net.wifi.frames_view.zoom, |c| c.zoom);
     let d = zoom.cell_us();
     let span = d * f64::from(lw);
-    let silent = silence(state);
+    let silent = frames_silence(state);
     let ink_label = Style::default().fg(if silent.is_some() {
         theme.stale
     } else {
@@ -272,13 +272,14 @@ fn draw(buf: &mut Buffer, area: Rect, state: &SdrMetrics, theme: &crate::Theme) 
     // The selection: no colour alone can be told from every format's in
     // every theme (a theme paints its formats from its own palette), and a
     // tall frame fills its cells so a background never shows. So it is drawn
-    // in the focus colour on the dim border colour, and crossed by shape: a
-    // pointer at its lane's label and a bar on the axis under its columns.
-    let lit_bg = theme.border_dim;
+    // in the focus colour, raised like a key: its cells on a ground lifted
+    // toward the focus colour, the cell either side of it on the dim border
+    // colour as the key's edge, and a pointer at its lane's label. Only
+    // backgrounds and the label: no other frame's glyph is touched.
+    let lift = crate::ui::widgets::charts::lerp_color(theme.border_dim, theme.border_focused, 0.3);
     let mark = Style::default()
         .fg(theme.border_focused)
         .add_modifier(Modifier::BOLD);
-    let mut marked_columns: Vec<u16> = Vec::new();
     for i in 0..lanes {
         let (top_y, bottom_y) = (area.y + 2 * i, area.y + 2 * i + 1);
         let a0 = t0 + f64::from(i) * span;
@@ -303,6 +304,7 @@ fn draw(buf: &mut Buffer, area: Rect, state: &SdrMetrics, theme: &crate::Theme) 
             .filter(|f| f.start < a0 + span && f.end(d) > a0)
             .copied()
             .collect();
+        let mut lane_cols: Vec<u16> = Vec::new();
         for x in 0..lw {
             let a = a0 + f64::from(x) * d;
             if a >= end {
@@ -320,9 +322,9 @@ fn draw(buf: &mut Buffer, area: Rect, state: &SdrMetrics, theme: &crate::Theme) 
             }
             let selected = lit.is_some_and(|s| a < s.end(d) && a + d > s.start);
             if selected {
-                buf.get_mut(cx, top_y).set_bg(lit_bg);
-                buf.get_mut(cx, bottom_y).set_bg(lit_bg);
-                marked_columns.push(cx);
+                buf.get_mut(cx, top_y).set_bg(lift);
+                buf.get_mut(cx, bottom_y).set_bg(lift);
+                lane_cols.push(cx);
                 for y in [top_y, bottom_y] {
                     buf.get_mut(area.x + LABEL - 1, y)
                         .set_char('\u{25b8}')
@@ -345,15 +347,25 @@ fn draw(buf: &mut Buffer, area: Rect, state: &SdrMetrics, theme: &crate::Theme) 
                 };
                 buf.get_mut(cx, top_y).set_char(t).set_fg(colour);
                 buf.get_mut(cx, bottom_y).set_char(b).set_fg(colour);
+                if selected {
+                    buf.get_mut(cx, top_y).set_style(mark.fg(colour));
+                    buf.get_mut(cx, bottom_y).set_style(mark.fg(colour));
+                }
+            }
+        }
+        // The key's edge, a cell either side, where the lane has one.
+        let cells = area.x + LABEL..area.x + LABEL + lw;
+        if let (Some(&first), Some(&last)) = (lane_cols.first(), lane_cols.last()) {
+            for edge in [first.checked_sub(1), Some(last + 1)].into_iter().flatten() {
+                if cells.contains(&edge) && !lane_cols.contains(&edge) {
+                    buf.get_mut(edge, top_y).set_bg(theme.border_dim);
+                    buf.get_mut(edge, bottom_y).set_bg(theme.border_dim);
+                }
             }
         }
     }
     let axis = area.y + 2 * lanes;
     if axis < area.bottom() {
-        // Under the scale's labels, which are drawn over it.
-        for &cx in &marked_columns {
-            buf.get_mut(cx, axis).set_char('\u{2501}').set_style(mark);
-        }
         for x in (0..lw.saturating_sub(8)).step_by(30) {
             let at = put(buf, area.x + LABEL + x, axis, "\u{250a}", ink_label, area);
             put(
@@ -454,6 +466,7 @@ mod tests {
         m.radio.config_sample_rate = 20e6;
         m.net.wifi.ran = true;
         m.net.wifi.channel = Some(11);
+        m.net.mode = crate::state::NetMode::Lock;
         m.net.wifi.frames_view.zoom = zoom;
         m
     }
@@ -609,11 +622,12 @@ mod tests {
     }
 
     /// **The selected frame is marked so it cannot be missed**, whatever its
-    /// colour and however tall: its glyphs in the focus colour on the dim
-    /// border colour, a pointer at its lane's label, and a bar on the axis
-    /// under its cells, so lane and column cross on it in any theme.
+    /// colour and however tall, and stands up off the river: its glyphs in
+    /// the focus colour on a lifted ground, the cells either side of it on
+    /// the dim border colour like the edge of a raised key, and a pointer at
+    /// its lane's label. Nothing on the axis.
     #[test]
-    fn the_selected_frame_is_marked_in_any_colour() {
+    fn the_selected_frame_is_marked_and_lifted() {
         let mut m = on_eleven(FrameZoom::Rhythm);
         m.net.wifi.push_row(frame(0.0, Some(80), 27.0));
         m.net.wifi.push_row(frame(4_000.0, Some(80), 27.0));
@@ -621,14 +635,19 @@ mod tests {
         m.net.wifi.frames_view.selected = Some(2);
         let buf = buffer(&m);
         let theme = crate::Theme::sdr();
+        let lift =
+            crate::ui::widgets::charts::lerp_color(theme.border_dim, theme.border_focused, 0.3);
         // The second frame, 4 ms in: lane 1 (lanes of 89 cells of 40 us),
         // cells 11 and 12, rows 3 and 4.
         let at = |x: u16, y: u16| buf.get(x, y);
         for y in [3, 4] {
             for cell in [11, 12] {
                 assert_eq!(at(10 + cell, y).fg, theme.border_focused, "{cell},{y}");
-                assert_eq!(at(10 + cell, y).bg, theme.border_dim, "{cell},{y}");
+                assert_eq!(at(10 + cell, y).bg, lift, "{cell},{y}");
             }
+            assert_eq!(at(10 + 10, y).bg, theme.border_dim, "its left edge");
+            assert_eq!(at(10 + 13, y).bg, theme.border_dim, "its right edge");
+            assert_ne!(at(10 + 14, y).bg, theme.border_dim);
             assert_eq!(at(9, y).symbol(), "\u{25b8}", "the pointer at lane 1");
         }
         assert_ne!(
@@ -637,10 +656,27 @@ mod tests {
             "the other frame keeps its colour"
         );
         assert_ne!(at(9, 2).symbol(), "\u{25b8}", "no pointer at lane 0");
-        // The axis row under the lanes.
-        assert_eq!(at(10 + 11, 9).symbol(), "\u{2501}");
-        assert_eq!(at(10 + 12, 9).symbol(), "\u{2501}");
-        assert_ne!(at(10 + 20, 9).symbol(), "\u{2501}");
+        let axis: String = (0..100).map(|x| at(x, 9).symbol()).collect();
+        assert!(
+            !axis.contains('\u{2501}'),
+            "nothing under it on the axis: {axis}"
+        );
+    }
+
+    /// **Not locked on a channel**: the survey walks the band, and a view of
+    /// one channel's frames has none to show; the river says so in the
+    /// shared plate, with the keys that lock it here and where else to.
+    #[test]
+    fn unlocked_the_river_says_how_to_lock_a_channel() {
+        let mut m = on_eleven(FrameZoom::Rhythm);
+        m.net.mode = crate::state::NetMode::Survey;
+        let out = lines(&m).join("\n");
+        assert!(out.contains("NOT LOCKED ON A CHANNEL"), "{out}");
+        assert!(
+            out.contains("m") && out.contains("\u{2190} \u{2192}"),
+            "{out}"
+        );
+        assert!(out.contains("Survey"), "{out}");
     }
 
     /// At 4 us a cell the preamble is told from the rest of the frame: its
