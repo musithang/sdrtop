@@ -203,6 +203,8 @@ its clock and its channel, or the account of every preamble found.
 second: how busy its busiest megahertz was beside the airtime its frames
 stated, by format, 0 to 100 %, with the reading over the last 20 s in its
 title.
+`net_wifi_ledger`, what spent that time: a row a format and rate, its
+share of the time heard, frames a second and airtime a frame.
 
 **Observer:** `observer`
 

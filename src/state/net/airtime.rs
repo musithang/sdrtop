@@ -1,8 +1,9 @@
 //! Channel › Airtime's numbers, as pure functions of the state, so its
 //! panels only draw: the hero's columns and the card's reading from the
-//! survey's visits on the locked channel.
+//! survey's visits on the locked channel, and the ledger from the frames
+//! kept for the Frames view.
 
-use super::wifi::WifiSurvey;
+use super::wifi::{Family, RowKind, WifiRow, WifiState, WifiSurvey};
 use std::time::{Duration, Instant};
 
 /// How long a hero column covers: a second, two of the survey's
@@ -137,6 +138,229 @@ impl WifiSurvey {
     }
 }
 
+/// What a ledger row is spent by: a format of this channel, or another
+/// channel's frames, which are counted and never given a format here.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Spender {
+    Format(Family),
+    OtherChannel,
+}
+
+impl Spender {
+    /// The standards' own order: 802.11b, a/g, n, ac, ax, be, then another
+    /// channel's and the frames not decoded. Fixed, so a row a reader is
+    /// reaching for never moves.
+    fn order(self) -> u8 {
+        match self {
+            Spender::Format(Family::Dsss) => 0,
+            Spender::Format(Family::NonHt) => 1,
+            Spender::Format(Family::Ht) => 2,
+            Spender::Format(Family::Vht) => 3,
+            Spender::Format(Family::He) => 4,
+            Spender::Format(Family::Eht) => 5,
+            Spender::OtherChannel => 6,
+            Spender::Format(Family::Undecoded) => 7,
+        }
+    }
+
+    pub fn label(self) -> &'static str {
+        match self {
+            Spender::Format(f) => f.label(),
+            Spender::OtherChannel => "another channel",
+        }
+    }
+}
+
+/// A rate a frame's signalling named: 802.11b's header, a non-HT L-SIG, an
+/// HT-SIG's MCS. VHT, HE and EHT name theirs in fields not read.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum LedgerRate {
+    Dsss(crate::signal::wifi::dsss::header::Rate),
+    NonHt(crate::signal::wifi::signal_field::Rate),
+    Mcs(u8),
+}
+
+impl LedgerRate {
+    fn of(row: &WifiRow) -> Option<LedgerRate> {
+        use crate::signal::wifi::format::Format;
+        match row.kind {
+            RowKind::Dsss { header: Ok(h), .. } => Some(LedgerRate::Dsss(h.rate)),
+            RowKind::Ofdm(heard) => match (heard.format, heard.lsig) {
+                (Some(Format::NonHt), Some(Ok(l))) => Some(LedgerRate::NonHt(l.rate)),
+                (Some(Format::HtMixed(Ok(h)) | Format::Greenfield(Ok(h))), _) => {
+                    Some(LedgerRate::Mcs(h.mcs))
+                }
+                _ => None,
+            },
+            _ => None,
+        }
+    }
+
+    /// Its place among its format's rates, slowest first.
+    fn key(self) -> u32 {
+        use crate::signal::wifi::dsss::header::Rate as D;
+        match self {
+            LedgerRate::Dsss(D::M1) => 10,
+            LedgerRate::Dsss(D::M2) => 20,
+            LedgerRate::Dsss(D::M5_5) => 55,
+            LedgerRate::Dsss(D::M11) => 110,
+            LedgerRate::NonHt(r) => r.mbps(),
+            LedgerRate::Mcs(m) => u32::from(m),
+        }
+    }
+
+    pub fn label(self) -> String {
+        match self {
+            LedgerRate::Dsss(r) => format!("{} Mb/s", r.mbps()),
+            LedgerRate::NonHt(r) => format!("{} Mb/s", r.mbps()),
+            LedgerRate::Mcs(m) => format!("MCS {m}"),
+        }
+    }
+}
+
+/// One row of the ledger: what spent the time, at which rate (none where
+/// none was read), how many frames, how many of them stated their airtime
+/// and how much they stated; `rates` is more than one in a folded row.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct LedgerRow {
+    pub spender: Spender,
+    pub rate: Option<LedgerRate>,
+    pub frames: usize,
+    pub stated: usize,
+    pub air_us: f64,
+    pub rates: usize,
+}
+
+impl LedgerRow {
+    pub fn label(&self) -> String {
+        match (self.rates, self.rate) {
+            (2.., _) => format!("{} \u{b7} {} rates", self.spender.label(), self.rates),
+            (_, Some(r)) => format!("{} {}", self.spender.label(), r.label()),
+            (_, None) => self.spender.label().to_string(),
+        }
+    }
+
+    /// The airtime a frame stated, over the frames that stated one; `None`
+    /// where none did.
+    pub fn mean_us(&self) -> Option<f64> {
+        (self.stated > 0).then(|| self.air_us / self.stated as f64)
+    }
+}
+
+/// The ledger: its rows in the standards' order, the span of the stream
+/// its frames were heard over and how much of it was heard (the span less
+/// what feed gaps took).
+#[derive(Clone, Debug, PartialEq)]
+pub struct Ledger {
+    pub rows: Vec<LedgerRow>,
+    pub span_s: f64,
+    pub heard_s: f64,
+}
+
+impl Ledger {
+    /// A row's share of the time heard, from the airtime its frames stated.
+    pub fn share(&self, row: &LedgerRow) -> f64 {
+        row.air_us / 1e6 / self.heard_s
+    }
+
+    /// A row's frames a second of the time heard.
+    pub fn per_s(&self, row: &LedgerRow) -> f64 {
+        row.frames as f64 / self.heard_s
+    }
+
+    /// The rows a format each, its rates together: what gives way when a
+    /// row a rate does not fit.
+    pub fn folded(&self) -> Vec<LedgerRow> {
+        let mut out: Vec<LedgerRow> = Vec::new();
+        for r in &self.rows {
+            match out.last_mut().filter(|o| o.spender == r.spender) {
+                Some(o) => {
+                    o.frames += r.frames;
+                    o.stated += r.stated;
+                    o.air_us += r.air_us;
+                    o.rates += r.rates;
+                }
+                None => out.push(*r),
+            }
+        }
+        out
+    }
+}
+
+/// The pairs a second the Wi-Fi receiver runs at.
+const PAIRS_PER_S: f64 = 20e6;
+
+impl WifiState {
+    /// The ledger of the frames heard on `centre_hz` on the newest clock
+    /// they were heard on: from the first of them to the stream's edge (or,
+    /// on another clock, the last one's end), less the spans a feed gap
+    /// took. `None` until a frame was heard there.
+    pub fn ledger(&self, centre_hz: f64) -> Option<Ledger> {
+        let here = |r: &&WifiRow| (r.carrier_hz - centre_hz).abs() < 1.0;
+        let epoch = self.rows.iter().filter(here).map(|r| r.epoch).max()?;
+        let rows: Vec<&WifiRow> = self
+            .rows
+            .iter()
+            .filter(here)
+            .filter(|r| r.epoch == epoch)
+            .collect();
+        let from = rows.iter().map(|r| r.start).min()?;
+        let last_end = rows
+            .iter()
+            .map(|r| r.start + (f64::from(r.airtime_us.unwrap_or(0)) * PAIRS_PER_S / 1e6) as u64)
+            .max()?;
+        let to = match self.heard_to {
+            Some((e, heard)) if e == epoch => heard.max(last_end),
+            _ => last_end,
+        };
+        let lost: u64 = self
+            .lost
+            .iter()
+            .filter(|l| l.epoch == epoch)
+            .map(|l| l.to.min(to).saturating_sub(l.from.max(from)))
+            .sum();
+        let span = to.saturating_sub(from);
+        let heard_s = span.saturating_sub(lost) as f64 / PAIRS_PER_S;
+        if heard_s <= 0.0 {
+            return None;
+        }
+        let mut out: Vec<LedgerRow> = Vec::new();
+        for r in rows {
+            let spender = r.family().map_or(Spender::OtherChannel, Spender::Format);
+            let rate = LedgerRate::of(r).filter(|_| spender != Spender::OtherChannel);
+            let at = match out
+                .iter()
+                .position(|o| o.spender == spender && o.rate == rate)
+            {
+                Some(i) => i,
+                None => {
+                    out.push(LedgerRow {
+                        spender,
+                        rate,
+                        frames: 0,
+                        stated: 0,
+                        air_us: 0.0,
+                        rates: 1,
+                    });
+                    out.len() - 1
+                }
+            };
+            let o = &mut out[at];
+            o.frames += 1;
+            if let Some(us) = r.airtime_us {
+                o.stated += 1;
+                o.air_us += f64::from(us);
+            }
+        }
+        out.sort_by_key(|o| (o.spender.order(), o.rate.map_or(0, LedgerRate::key)));
+        Some(Ledger {
+            rows: out,
+            span_s: span as f64 / PAIRS_PER_S,
+            heard_s,
+        })
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use crate::state::{Visit, WifiSurvey};
@@ -261,5 +485,203 @@ mod tests {
         let cut = survey(vec![visit(now, 0.5, 0.2, 0.5, 0.2, 0.1)]);
         assert_eq!(cut.share(6, now, 4), None);
         assert_eq!(survey(vec![]).share(6, now, 4), None);
+    }
+
+    // The ledger.
+
+    use crate::signal::wifi::dsss::header::{Header, Preamble, Rate as DsssRate};
+    use crate::signal::wifi::format::{Format, Heard};
+    use crate::signal::wifi::htsig::HtSig;
+    use crate::signal::wifi::lsig::LSig;
+    use crate::signal::wifi::signal_field::Rate;
+    use crate::state::{Lost, RowKind, WifiRow};
+
+    const ELEVEN: f64 = 2_462e6;
+
+    /// A frame `at_s` into epoch `epoch` on `centre`, stating `air_us`.
+    fn row(kind: RowKind, at_s: f64, air_us: Option<u32>, epoch: u64, centre: f64) -> WifiRow {
+        WifiRow {
+            seq: 0,
+            start: (at_s * 20e6) as u64,
+            run: epoch,
+            when: Instant::now(),
+            carrier_hz: centre,
+            kind,
+            airtime_us: air_us,
+            gap_us: None,
+            offset_hz: None,
+            snr_db: None,
+            channel: None,
+            clock: None,
+            epoch,
+        }
+    }
+
+    fn b(rate: DsssRate) -> RowKind {
+        RowKind::Dsss {
+            preamble: Preamble::Long,
+            header: Ok(Header {
+                rate,
+                locked: true,
+                extension: false,
+                length_us: 2000,
+            }),
+        }
+    }
+
+    fn non_ht(rate: Rate) -> RowKind {
+        RowKind::Ofdm(Heard {
+            lsig: Some(Ok(LSig { rate, length: 100 })),
+            format: Some(Format::NonHt),
+        })
+    }
+
+    fn ht(mcs: u8) -> RowKind {
+        RowKind::Ofdm(Heard {
+            lsig: Some(Ok(LSig {
+                rate: Rate::R6,
+                length: 100,
+            })),
+            format: Some(Format::HtMixed(Ok(HtSig {
+                mcs,
+                cbw40: false,
+                length: 1500,
+                stbc: 0,
+                ldpc: false,
+                short_gi: false,
+                ness: 0,
+            }))),
+        })
+    }
+
+    fn unread() -> RowKind {
+        RowKind::Ofdm(Heard {
+            lsig: None,
+            format: None,
+        })
+    }
+
+    /// One second of channel 11: two 802.11b beacons, two non-HT rates
+    /// written out of order, an HT frame, another channel's and an
+    /// unreadable one; heard to the second's end.
+    fn second() -> crate::state::net::wifi::WifiState {
+        let mut w = crate::state::net::wifi::WifiState::default();
+        for r in [
+            row(b(DsssRate::M1), 0.0, Some(2000), 0, ELEVEN),
+            row(non_ht(Rate::R24), 0.1, Some(50), 0, ELEVEN),
+            row(ht(7), 0.2, Some(100), 0, ELEVEN),
+            row(non_ht(Rate::R6), 0.3, Some(100), 0, ELEVEN),
+            row(RowKind::OtherOfdm { shift_mhz: -5 }, 0.4, None, 0, ELEVEN),
+            row(unread(), 0.5, None, 0, ELEVEN),
+            row(b(DsssRate::M1), 0.6, Some(2000), 0, ELEVEN),
+        ] {
+            w.push_row(r);
+        }
+        w.heard_to = Some((0, 20_000_000));
+        w
+    }
+
+    /// **One row a format and rate, in the standards' order**, never by
+    /// share: 802.11b, non-HT, HT, then another channel's and the
+    /// unreadable; each its share of the time heard, frames a second and
+    /// airtime a frame, none for a row that stated none.
+    #[test]
+    fn the_ledger_is_a_row_a_format_and_rate_in_the_standards_order() {
+        let l = second().ledger(ELEVEN).expect("frames heard");
+        let labels: Vec<String> = l.rows.iter().map(|r| r.label()).collect();
+        assert_eq!(
+            labels,
+            [
+                "802.11b 1 Mb/s",
+                "non-HT 6 Mb/s",
+                "non-HT 24 Mb/s",
+                "HT MCS 7",
+                "another channel",
+                "not decoded"
+            ]
+        );
+        assert!((l.span_s - 1.0).abs() < 1e-9, "{l:?}");
+        assert!((l.heard_s - 1.0).abs() < 1e-9, "{l:?}");
+        let b = &l.rows[0];
+        assert!((l.share(b) - 0.004).abs() < 1e-9, "{l:?}");
+        assert!((l.per_s(b) - 2.0).abs() < 1e-9, "{l:?}");
+        assert_eq!(b.mean_us(), Some(2000.0));
+        assert_eq!(l.rows[5].mean_us(), None);
+        assert_eq!(l.share(&l.rows[5]), 0.0);
+        assert!((l.per_s(&l.rows[5]) - 1.0).abs() < 1e-9, "{l:?}");
+    }
+
+    /// **The time heard is the span less what a feed gap took**: a lost
+    /// quarter second of this clock comes off, another clock's does not;
+    /// an older clock's frames and another centre's are not this ledger's.
+    #[test]
+    fn the_time_heard_is_the_span_less_its_lost_spans() {
+        let mut w = second();
+        w.lose(Lost {
+            epoch: 0,
+            from: 10_000_000,
+            to: 15_000_000,
+        });
+        w.lose(Lost {
+            epoch: 7,
+            from: 0,
+            to: 20_000_000,
+        });
+        let l = w.ledger(ELEVEN).unwrap();
+        assert!((l.span_s - 1.0).abs() < 1e-9, "{l:?}");
+        assert!((l.heard_s - 0.75).abs() < 1e-9, "{l:?}");
+        assert!((l.per_s(&l.rows[0]) - 2.0 / 0.75).abs() < 1e-9, "{l:?}");
+
+        // A newer clock: only its frames, from its first.
+        w.push_row(row(b(DsssRate::M2), 3.0, Some(1000), 1, ELEVEN));
+        w.push_row(row(b(DsssRate::M2), 3.0, Some(1000), 1, 2_437e6));
+        w.heard_to = Some((1, 80_000_000));
+        let l = w.ledger(ELEVEN).unwrap();
+        assert_eq!(l.rows.len(), 1, "{l:?}");
+        assert_eq!(l.rows[0].label(), "802.11b 2 Mb/s");
+        assert!((l.span_s - 1.0).abs() < 1e-9, "{l:?}");
+    }
+
+    /// Heard to no further than its last frame's end where the stream's
+    /// edge is another clock's: the span is never guessed past what was
+    /// heard.
+    #[test]
+    fn without_the_streams_edge_the_span_ends_with_the_last_frame() {
+        let mut w = second();
+        w.heard_to = None;
+        let l = w.ledger(ELEVEN).unwrap();
+        assert!((l.span_s - (0.6 + 0.002)).abs() < 1e-9, "{l:?}");
+    }
+
+    /// **Folded, a format's rates are one row**: shares and frames a
+    /// second summed, airtime a frame the mean over the frames that stated
+    /// one; a format of one rate keeps its name.
+    #[test]
+    fn folded_a_formats_rates_are_one_row() {
+        let l = second().ledger(ELEVEN).unwrap();
+        let f = l.folded();
+        let labels: Vec<String> = f.iter().map(|r| r.label()).collect();
+        assert_eq!(
+            labels,
+            [
+                "802.11b 1 Mb/s",
+                "non-HT \u{b7} 2 rates",
+                "HT MCS 7",
+                "another channel",
+                "not decoded"
+            ]
+        );
+        assert_eq!(f[1].mean_us(), Some(75.0));
+        assert!((l.share(&f[1]) - 150e-6).abs() < 1e-12, "{f:?}");
+        assert!((l.per_s(&f[1]) - 2.0).abs() < 1e-9, "{f:?}");
+    }
+
+    /// Nothing heard on this centre is no ledger, not an empty one.
+    #[test]
+    fn nothing_heard_is_no_ledger() {
+        assert!(second().ledger(2_412e6).is_none());
+        assert!(crate::state::net::wifi::WifiState::default()
+            .ledger(ELEVEN)
+            .is_none());
     }
 }

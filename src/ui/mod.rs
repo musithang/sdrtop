@@ -79,6 +79,7 @@ pub use panels::net::wifi::airtime::NetWifiAirtimePanel;
 pub use panels::net::wifi::card::NetWifiCardPanel;
 pub use panels::net::wifi::frames::NetWifiFramesPanel;
 pub use panels::net::wifi::least_busy::NetWifiLeastBusyPanel;
+pub use panels::net::wifi::ledger::NetWifiLedgerPanel;
 pub use panels::net::wifi::river::NetWifiRiverPanel;
 pub use panels::net::wifi::survey::NetWifiSurveyPanel;
 

@@ -390,4 +390,29 @@ mod tests {
         assert_eq!(NetWifiAirtimePanel.column_height(27), Some(11));
         assert_eq!(NetWifiAirtimePanel.column_height(18), Some(7));
     }
+
+    /// On the view, the hero takes its rows at the top of the body and the
+    /// ledger the rest under it, at the three sizes.
+    #[test]
+    fn on_the_view_the_ledger_takes_the_rows_under_the_hero() {
+        let (engine, _) = crate::app::App::build_ui(
+            "wifi_airtime",
+            &std::collections::HashMap::new(),
+            None,
+            true,
+        );
+        let m = on_eleven();
+        for (w, h, hero) in [(191u16, 41u16, 11u16), (152, 32, 7), (100, 30, 7)] {
+            let size = Rect::new(0, 0, w, h);
+            let a = engine
+                .area_of("net_wifi_airtime", size, &m)
+                .expect("the hero");
+            let l = engine
+                .area_of("net_wifi_ledger", size, &m)
+                .expect("the ledger");
+            assert_eq!(a.height, hero, "{w} x {h}");
+            assert_eq!(l.y, a.y + a.height, "{w} x {h}");
+            assert!(l.height >= 7, "{w} x {h}: {l:?}");
+        }
+    }
 }

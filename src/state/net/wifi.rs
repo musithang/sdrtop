@@ -485,6 +485,9 @@ pub struct WifiState {
     pub lost: std::collections::VecDeque<Lost>,
     /// The Frames view's triggered capture.
     pub scope: Scope,
+    /// How far the stream has been heard, on which clock: the edge of the
+    /// time the frames were heard over, quiet air after the last included.
+    pub heard_to: Option<(u64, u64)>,
 }
 
 /// How many lost spans are kept: far more than a capture can hold.
@@ -837,6 +840,7 @@ impl WifiState {
     /// Step the capture, the stream heard up to pair `heard_to` on clock
     /// `epoch`.
     pub fn tick_scope(&mut self, epoch: u64, heard_to: u64, now: std::time::Instant) {
+        self.heard_to = Some((epoch, heard_to));
         self.scope.tick(
             &self.rows,
             &self.lost,
