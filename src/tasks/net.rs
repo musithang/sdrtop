@@ -41,6 +41,22 @@ use crate::state::{NetMode, SdrMetrics};
 /// How often to look again when there is nothing to do.
 const IDLE_POLL: Duration = Duration::from_millis(100);
 
+/// Which rotation a survey pass runs: the band's plan of positions, BLE's
+/// three advertising channels, or Wi-Fi's thirteen channel centres.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Rotation {
+    Band,
+    Advertising,
+    Wifi,
+}
+
+/// Whether a pass on `now` is announced in the log, after one on `last`
+/// (`None`: no survey ran): at a survey's start and at every change of
+/// rotation, so the log never names a rotation the radio has left.
+fn announces(last: Option<Rotation>, now: Rotation) -> bool {
+    last != Some(now)
+}
+
 /// `NET locked to 2442.500 MHz`, and why there when the cursor chose it.
 fn locked_line(tune_hz: u64, why: Option<&str>) -> String {
     match why {
@@ -57,13 +73,12 @@ pub fn spawn_net_survey_task(state: Arc<Mutex<SdrMetrics>>, device: Arc<dyn SdrD
         let mut pass = 0u64;
         // Said once, not once a poll.
         let mut refused = false;
-        // Tracked separately from `surveying`, which only says whether *some*
-        // survey is running: switching presets mid-survey, from the wideband
-        // one to BLE's rotation or back, needs its own announcement even
-        // though a survey was already under way either side of the switch.
-        let mut was_ble = false;
-        // The same, for Wi-Fi's rotation.
-        let mut was_wifi = false;
+        // The rotation the last pass ran, tracked apart from `surveying`,
+        // which only says whether *some* survey is running: switching presets
+        // mid-survey, from the band's plan to a rotation or back, needs its
+        // own announcement though a survey ran either side of the switch.
+        // `None` while no survey runs, so the next one is announced too.
+        let mut last: Option<Rotation> = None;
         // The view a lock was last seen on, so opening an advertising view
         // moves the radio once, not every poll (`signal::net::lock`).
         let mut locked_view = String::new();
@@ -94,6 +109,7 @@ pub fn spawn_net_survey_task(state: Arc<Mutex<SdrMetrics>>, device: Arc<dyn SdrD
                 // reach the same answer without another iteration of this loop.
                 if surveying {
                     surveying = false;
+                    last = None;
                     let exit = {
                         let mut m = state.lock().unwrap_or_else(|e| e.into_inner());
                         m.net.end(tuned)
@@ -159,7 +175,7 @@ pub fn spawn_net_survey_task(state: Arc<Mutex<SdrMetrics>>, device: Arc<dyn SdrD
             // no matching answer for.
             if is_wifi {
                 let hops = crate::signal::net::band::wifi_stepped_centres();
-                if !was_wifi {
+                if announces(last, Rotation::Wifi) {
                     let mut m = state.lock().unwrap_or_else(|e| e.into_inner());
                     if !surveying {
                         m.net.pre_survey_hz = Some(tuned);
@@ -174,8 +190,7 @@ pub fn spawn_net_survey_task(state: Arc<Mutex<SdrMetrics>>, device: Arc<dyn SdrD
                     ));
                 }
                 surveying = true;
-                was_wifi = true;
-                was_ble = false;
+                last = Some(Rotation::Wifi);
                 for hz in hops {
                     {
                         let m = state.lock().unwrap_or_else(|e| e.into_inner());
@@ -195,10 +210,9 @@ pub fn spawn_net_survey_task(state: Arc<Mutex<SdrMetrics>>, device: Arc<dyn SdrD
                 pass = pass.wrapping_add(1);
                 continue;
             }
-            was_wifi = false;
 
             if is_ble {
-                if !was_ble {
+                if announces(last, Rotation::Advertising) {
                     let mut m = state.lock().unwrap_or_else(|e| e.into_inner());
                     if !surveying {
                         m.net.pre_survey_hz = Some(tuned);
@@ -214,7 +228,7 @@ pub fn spawn_net_survey_task(state: Arc<Mutex<SdrMetrics>>, device: Arc<dyn SdrD
                     ));
                 }
                 surveying = true;
-                was_ble = true;
+                last = Some(Rotation::Advertising);
                 for hz in crate::signal::ble::channel::advertising_channels_hz() {
                     {
                         let m = state.lock().unwrap_or_else(|e| e.into_inner());
@@ -236,7 +250,6 @@ pub fn spawn_net_survey_task(state: Arc<Mutex<SdrMetrics>>, device: Arc<dyn SdrD
                 pass = pass.wrapping_add(1);
                 continue;
             }
-            was_ble = false;
 
             let plan = Plan::for_span(span_hz, pass);
             let bins = crate::signal::net::scan::bins_for(rate_hz);
@@ -249,10 +262,11 @@ pub fn spawn_net_survey_task(state: Arc<Mutex<SdrMetrics>>, device: Arc<dyn SdrD
                 tokio::time::sleep(IDLE_POLL).await;
                 continue;
             }
-            if !surveying {
-                surveying = true;
+            if announces(last, Rotation::Band) {
                 let mut m = state.lock().unwrap_or_else(|e| e.into_inner());
-                m.net.pre_survey_hz = Some(tuned);
+                if !surveying {
+                    m.net.pre_survey_hz = Some(tuned);
+                }
                 // The coverage is logged rather than assumed. A plan is only a
                 // plan if its positions between them see the whole band, and a
                 // radio whose usable span left a gap would otherwise report that
@@ -266,6 +280,8 @@ pub fn spawn_net_survey_task(state: Arc<Mutex<SdrMetrics>>, device: Arc<dyn SdrD
                     crate::signal::net::occupancy::CELLS
                 ));
             }
+            surveying = true;
+            last = Some(Rotation::Band);
 
             for hz in &plan.hops {
                 {
@@ -341,6 +357,22 @@ fn refusal(plan: &Plan, rate_hz: f64, bins: usize, span_hz: f64) -> Option<Strin
 mod tests {
     use super::*;
     use crate::signal::net::scan::bins_for;
+
+    /// **Every change of rotation is announced**, not only a survey's start:
+    /// from the band's plan to the advertising channels and back, and from
+    /// either to Wi-Fi's; a pass on the same rotation is not. Opening the
+    /// Classic view from an LE one used to run the band's plan under a log
+    /// still naming the advertising rotation.
+    #[test]
+    fn every_change_of_rotation_is_announced() {
+        use Rotation::{Advertising, Band, Wifi};
+        assert!(announces(None, Band));
+        assert!(!announces(Some(Band), Band));
+        assert!(announces(Some(Advertising), Band));
+        assert!(announces(Some(Band), Advertising));
+        assert!(announces(Some(Wifi), Advertising));
+        assert!(!announces(Some(Wifi), Wifi));
+    }
 
     /// The case the user hit: a radio set to two megasamples.
     ///

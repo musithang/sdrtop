@@ -31,8 +31,9 @@ use crate::signal::ble::channel::{advertising_channels_hz, centre_hz, channel_of
 use crate::state::LockTarget;
 
 /// The views a locked radio belongs on an advertising channel for: the ones
-/// the advertising decoder feeds.
-pub const ADVERTISING_VIEWS: &[&str] = &["net_ble", "net_census", "net_coded"];
+/// the advertising decoder feeds. The Connection view among them, since a
+/// CONNECT_IND heard on an advertising channel is how it finds a connection.
+pub const ADVERTISING_VIEWS: &[&str] = &["net_ble", "net_census", "net_coded", "net_connection"];
 
 /// The views the LE Coded receiver runs for, and nothing of LE 1M's or
 /// classic's: LE Coded's own chain (`ble::coded_rx`), on the advertising
@@ -266,6 +267,18 @@ mod tests {
     }
 
     /// Off the three, a step goes to the next one in the direction asked.
+    /// **The Connection view is an advertising view.** It is fed by the
+    /// advertising decoder (a CONNECT_IND is how a connection is found), so
+    /// it steps the three advertising channels and, opened locked off them,
+    /// moves to the nearest, as the other LE views do.
+    #[test]
+    fn the_connection_view_steps_and_opens_as_an_advertising_view() {
+        assert_eq!(stepping("le", "net_connection", 8), Stepping::Advertising);
+        let t = entering_view("le", "net_connection", 2_440_000_000).expect("moved");
+        assert_eq!(t.tune_hz, 2_426_000_000);
+        assert!(entering_view("le", "net_connection", 2_426_000_000).is_none());
+    }
+
     #[test]
     fn off_the_advertising_channels_a_step_finds_the_next_one() {
         let fwd = |hz| step(hz, Stepping::Advertising, true).tune_hz;

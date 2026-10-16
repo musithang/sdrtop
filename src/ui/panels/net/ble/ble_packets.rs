@@ -454,7 +454,7 @@ impl Panel for NetBlePacketsPanel {
             ("↑↓", "select a packet"),
             (
                 "Enter",
-                "only this address, or all again; on a CONNECT_IND, its connection",
+                "only this address, or all again; on a CONNECT_IND, its connection, the radio locked there",
             ),
             ("t", "only CONNECT, SCAN or ADV, or every kind"),
             ("H", "hold the list, or let it run"),

@@ -88,7 +88,7 @@ that finds out what it does.
 
 | Key | What it does |
 |-----|--------------|
-| `Enter` | Narrows the list to the selected packet's address, and back. **[FILTERED]** says the list is not everything. Selecting a device in the Census and coming here narrows it for you. On a `CONNECT_IND`, opens that connection on [LE 3](net-le-connection.md) |
+| `Enter` | Narrows the list to the selected packet's address, and back. **[FILTERED]** says the list is not everything. Selecting a device in the Census and coming here narrows it for you. On a `CONNECT_IND`, opens that connection on [LE 3](net-le-connection.md), locking the radio where it is |
 | `t` | Narrows to one kind, then the next, then every kind again: **CONNECT** (a connection being set up), **SCAN** (`SCAN_REQ` and `SCAN_RSP`) or **ADV** (the advertising that is nearly everything else). It works with `Enter`, so one device's CONNECTs are two keys away |
 | `H` | Holds the list still; the title counts what has arrived since |
 
@@ -149,7 +149,8 @@ hearing the hops. Which algorithm applies takes both ChSel bits, this
 packet's and the one of the advertising packet it answered; with that one
 not heard, the detail says it does not know rather than pick. A connection
 being followed says so here, and `Enter` on a `CONNECT_IND` in the list
-opens it on LE 3.
+opens it on LE 3, locking the radio where it is if it was surveying:
+following needs it still.
 
 **Physics.** The start of the packet is the preamble's mean frequency (the
 test suite's f0), the end the last ten bits before the CRC.

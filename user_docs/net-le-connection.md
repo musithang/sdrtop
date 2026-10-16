@@ -13,7 +13,12 @@ at the appointments that happen to be in its part of the band.
 
 ## Without retuning
 
-The radio stays where it is and listens to the band it already has. At
+Following needs the radio still, so it is done in LOCK: the radio stays
+where it is and listens to the band it already has. (`Enter` on a
+`CONNECT_IND` locks it there for you. Surveying, this view rotates the
+three advertising channels as the other LE views do, which is how a
+`CONNECT_IND` is caught on whichever one the devices used; opened locked
+off all three, it moves to the nearest.) At
 20 Msps on 2426 MHz that is advertising channel 38 and data channels 7 to
 14, which the top line counts (`8 in view (7-14)`). The `CONNECT_IND` says
 when the connection's events will be and which channel each will hop to

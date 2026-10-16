@@ -574,6 +574,16 @@ pub(super) fn net_ble_packets(key: KeyEvent, ctx: &mut InputCtx<'_>) -> KeyActio
                     selected: Some(aa),
                     first_visible: 0,
                 };
+                // Surveying, the radio would leave the channel the
+                // CONNECT_IND was heard on: lock where it is, the switch `m`
+                // makes. The task logs where it ends, once it has.
+                if m.ui.is_net_section() && m.net.mode == crate::state::NetMode::Survey {
+                    m.net.mode = crate::state::NetMode::Lock;
+                    m.net.band.restart_watch();
+                    m.push_log(
+                        "BLE list: following needs the radio still, so NET locks where it is",
+                    );
+                }
                 drop(m);
                 return global::presets::try_set_preset(ctx.engine, ctx.state, "net_connection");
             }
@@ -1244,6 +1254,38 @@ mod tests {
         let m = metrics(&state);
         assert_eq!(m.net.connection_view.selected, Some(0x1111_1111));
         assert_eq!(m.net.ble_view.filter, None, "not a filter");
+    }
+
+    /// **Surveying, `Enter` on a followed CONNECT_IND locks the radio where
+    /// it is**: the CONNECT_IND was heard here, the connection's events in
+    /// view are here, and following needs the radio still. The log says
+    /// why; one that is not followed locks nothing.
+    #[test]
+    fn enter_on_a_connect_ind_while_surveying_locks_where_it_is() {
+        let (mut engine, keys, state) = focused_on("net_ble", "net_ble_packets");
+        {
+            let mut m = metrics(&state);
+            m.ui.section = "le".to_string();
+            m.net.mode = crate::state::NetMode::Survey;
+        }
+        with_connections(&state, 0x3333_3333);
+        key(&mut engine, &keys, &state, KeyCode::Enter);
+        assert_eq!(metrics(&state).net.mode, crate::state::NetMode::Survey);
+
+        metrics(&state).net.ble_packets.clear();
+        with_connections(&state, 0x1111_1111);
+        key(&mut engine, &keys, &state, KeyCode::Enter);
+        assert_eq!(engine.active_preset(), "net_connection");
+        let m = metrics(&state);
+        assert_eq!(m.net.mode, crate::state::NetMode::Lock);
+        assert!(m.net.lock_at.is_none(), "where it is, not somewhere asked");
+        assert!(
+            m.ui.log
+                .iter()
+                .any(|l| l.text.contains("following needs the radio still")),
+            "{:?}",
+            m.ui.log.iter().map(|l| &l.text).collect::<Vec<_>>()
+        );
     }
 
     /// A CONNECT_IND whose connection is not followed (its CRC failed, or
