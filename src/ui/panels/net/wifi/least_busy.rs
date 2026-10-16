@@ -224,22 +224,28 @@ fn draw(buf: &mut Buffer, area: Rect, state: &SdrMetrics, theme: &crate::Theme) 
                 y += 1;
             }
         }
+        // Counts only of a channel visited: before its first visit there is
+        // nothing to count, and "not visited yet" has said so.
         let visits = &survey.visits[usize::from(ch - 1)];
-        let read: u32 = visits.iter().map(|v| v.read).sum();
-        let other: u32 = visits.iter().map(|v| v.other).sum();
-        let secs: f64 = visits.iter().map(|v| v.seconds).sum();
-        lines(
-            buf,
-            &mut y,
-            &format!("{read} frames read on its centre, {other} heard here from other channels"),
-            value,
-        );
-        lines(
-            buf,
-            &mut y,
-            &format!("{} visits, {secs:.1} s", visits.len()),
-            label,
-        );
+        if !visits.is_empty() {
+            let read: u32 = visits.iter().map(|v| v.read).sum();
+            let other: u32 = visits.iter().map(|v| v.other).sum();
+            let secs: f64 = visits.iter().map(|v| v.seconds).sum();
+            lines(
+                buf,
+                &mut y,
+                &format!(
+                    "{read} frames read on its centre, {other} heard here from other channels"
+                ),
+                value,
+            );
+            lines(
+                buf,
+                &mut y,
+                &format!("{} visits, {secs:.1} s", visits.len()),
+                label,
+            );
+        }
         y += 1;
         if lock.is_some() {
             lines(buf, &mut y, "The survey is paused: this channel is live, the others are held at their last pass.", label);
@@ -413,6 +419,21 @@ mod tests {
     const STEADY: [f64; 13] = [
         0.3, 0.3, 0.3, 0.3, 0.3, 0.01, 0.3, 0.3, 0.3, 0.3, 0.3, 0.3, 0.3,
     ];
+
+    /// A selected channel the survey has not reached yet says so and no
+    /// more: no count of frames or visits as zeros, and no `-0.0 s` (an
+    /// empty sum of seconds is negative zero).
+    #[test]
+    fn a_channel_not_visited_yet_counts_nothing() {
+        let mut s = survey(STEADY, 2);
+        s.visits[3].clear();
+        s.selected = Some(4);
+        let text = drawn(NetWifiLeastBusyPanel, 46, 25, &state(s)).join("\n");
+        assert!(text.contains("not visited yet"), "{text}");
+        assert!(!text.contains("visits,"), "{text}");
+        assert!(!text.contains("frames read"), "{text}");
+        assert!(!text.contains("-0.0"), "{text}");
+    }
 
     /// One channel apart: named in big digits, with what sets it apart.
     #[test]

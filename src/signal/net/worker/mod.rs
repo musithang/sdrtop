@@ -1251,6 +1251,77 @@ mod tests {
     }
 
     /// Replays a recording (`SDRTOP_REPLAY=path.sigmf-data`, ci8 at 20 Msps on
+    /// a Wi-Fi channel centre) through the worker on the Airtime view, locked,
+    /// and prints what the view reads: the visits' busy share and the
+    /// frames' share of the time by family, weighted by their seconds, the
+    /// ledger and the rhythm. By hand, in release.
+    #[test]
+    #[ignore]
+    fn replay_the_airtime_view() {
+        let Ok(path) = std::env::var("SDRTOP_REPLAY") else {
+            return;
+        };
+        let (m, blocks) = replay(&path, "wifi_channel", "wifi_airtime");
+        let secs = blocks as f64 * 131_072.0 / 20e6;
+        let w = &m.net.wifi;
+        let ch = w.channel.expect("on a channel");
+        let visits = &w.survey.visits[usize::from(ch) - 1];
+        let heard: f64 = visits.iter().map(|v| v.seconds).sum();
+        let span: f64 = visits.iter().map(|v| v.span_s).sum();
+        let busy = visits.iter().map(|v| v.busy * v.seconds).sum::<f64>() / heard;
+        let mut by = [0.0f64; 7];
+        for v in visits {
+            for (b, a) in by.iter_mut().zip(v.airtime) {
+                *b += a * v.seconds / heard;
+            }
+        }
+        eprintln!(
+            "{secs:.1} s · channel {ch} · {} visits, {heard:.2} s heard of {span:.2} s",
+            visits.len()
+        );
+        eprintln!(
+            "busy {:.2} % · frames {:.2} %",
+            100.0 * busy,
+            100.0 * by.iter().sum::<f64>()
+        );
+        for (f, b) in crate::state::Family::ALL.iter().zip(by) {
+            if b > 0.0 {
+                eprintln!("  {:<12} {:.3} %", f.label(), 100.0 * b);
+            }
+        }
+        let centre = m.radio.frequency as f64;
+        if let Some(l) = w.ledger(centre) {
+            eprintln!("ledger over {:.2} s, {:.2} s heard:", l.span_s, l.heard_s);
+            for r in &l.rows {
+                eprintln!(
+                    "  {:<20} {:>7.3} % {:>7.1}/s {:>8}",
+                    r.label(),
+                    100.0 * l.share(r),
+                    l.per_s(r),
+                    r.mean_us().map_or("-".into(), |m| format!("{m:.0} us"))
+                );
+            }
+        }
+        if let Some(r) = w.rhythm(centre) {
+            let top: Vec<(usize, u32)> = {
+                let mut v: Vec<(usize, u32)> = r.bins.iter().copied().enumerate().collect();
+                v.sort_by_key(|b| std::cmp::Reverse(b.1));
+                v.into_iter().take(6).collect()
+            };
+            eprintln!(
+                "rhythm: under {} past {} corrected {} unplaced {} · top bins (from us, count) {:?}",
+                r.under,
+                r.past,
+                r.corrected,
+                r.unplaced,
+                top.iter()
+                    .map(|(k, n)| (10f64.powf(*k as f64 / 10.0).round() as u64, *n))
+                    .collect::<Vec<_>>()
+            );
+        }
+    }
+
+    /// Replays a recording (`SDRTOP_REPLAY=path.sigmf-data`, ci8 at 20 Msps on
     /// a Wi-Fi channel centre) through the worker on the Wi-Fi view, locked,
     /// and prints Wi-Fi's funnel and how often it found a preamble. By hand,
     /// in release.

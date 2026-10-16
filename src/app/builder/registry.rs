@@ -1517,6 +1517,43 @@ mod tests {
         }
     }
 
+    /// **A short terminal places every panel inside itself.** The top and
+    /// bottom panels keep their own heights only while the screen has the
+    /// rows: on a terminal shorter than the header, the log and the footer
+    /// together, a footer drawn below the last row was a crash, on every
+    /// view. Each preset, at short and ordinary heights, is drawn whole.
+    #[test]
+    fn a_short_terminal_places_every_panel_inside_itself() {
+        let (mut engine, _) = App::build_ui("main", &HashMap::new(), None, true);
+        let theme = crate::Theme::sdr();
+        let m = crate::state::SdrMetrics::fixture().streaming();
+        for preset in engine.preset_names() {
+            engine.set_preset(&preset);
+            for (w, h) in [
+                (100u16, 3u16),
+                (100, 8),
+                (100, 11),
+                (40, 12),
+                (191, 14),
+                (191, 41),
+            ] {
+                let size = ratatui::layout::Rect::new(0, 0, w, h);
+                let names: Vec<&str> = engine.registered_panel_names().collect();
+                for name in names {
+                    if let Some(r) = engine.area_of(name, size, &m) {
+                        assert!(
+                            r.right() <= w && r.bottom() <= h,
+                            "{preset} at {w} x {h}: {name} at {r:?}"
+                        );
+                    }
+                }
+                let mut t =
+                    ratatui::Terminal::new(ratatui::backend::TestBackend::new(w, h)).unwrap();
+                t.draw(|f| engine.draw(f, &m, &theme)).unwrap();
+            }
+        }
+    }
+
     /// Every panel a preset can name is listed in `user_docs/presets.md`'s
     /// panel names, so a new panel is not a name nobody can find.
     #[test]

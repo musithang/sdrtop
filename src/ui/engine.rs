@@ -385,7 +385,11 @@ impl LayoutEngine {
             ])
             .split(size);
 
-        // Top panels, then bottom panels, each stacked downward.
+        // Top panels, then bottom panels, each stacked downward. On a screen
+        // shorter than their heights together a band is squeezed, and a
+        // panel keeps only the rows left of it inside the band and the
+        // screen: one drawn past the last row would write outside the
+        // frame's buffer. A panel with no row left is not drawn.
         for (band, specs, heights) in [
             (outer[0], &top_specs, &top_heights),
             (outer[2], &bottom_specs, &bottom_heights),
@@ -397,9 +401,13 @@ impl LayoutEngine {
                     y,
                     width: band.width,
                     height: h,
-                };
-                placed.stacked.push((*spec, area));
-                y += h;
+                }
+                .intersection(band)
+                .intersection(size);
+                if area.height > 0 && area.width > 0 {
+                    placed.stacked.push((*spec, area));
+                }
+                y = y.saturating_add(h);
             }
         }
 
