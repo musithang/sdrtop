@@ -872,7 +872,11 @@ fn fer_lines(
     theme: &crate::Theme,
 ) -> Vec<Line<'static>> {
     use crate::signal::ble::fer::{edges, MIN_PACKETS};
-    let hint = format!("{scope} \u{00b7} {} packets", curve.total());
+    let total = curve.total();
+    let hint = format!(
+        "{scope} \u{00b7} {total} packet{}",
+        if total == 1 { "" } else { "s" }
+    );
     let mut out = vec![crate::ui::chrome::section(
         "frame errors by SNR",
         &hint,
@@ -947,7 +951,10 @@ fn fer_lines(
                 ));
             }
             None => spans.push(Span::styled(
-                format!("{n} packets, fewer than {MIN_PACKETS}"),
+                format!(
+                    "{n} packet{}, fewer than {MIN_PACKETS}",
+                    if n == 1 { "" } else { "s" }
+                ),
                 Style::default().fg(theme.stale),
             )),
         }
@@ -1722,6 +1729,24 @@ mod tests {
     }
 
     /// **Nothing selected: the session's frame error curve**, all traffic,
+    /// A bin of one packet says "1 packet", not "1 packets".
+    #[test]
+    fn a_bin_of_one_packet_is_one_packet() {
+        let mut m = SdrMetrics::fixture().streaming();
+        m.net.fer.record(1.0, true);
+        for _ in 0..30 {
+            m.net.fer.record(20.0, true);
+        }
+        let out = draw(NetBleDetailPanel, 80, 24, &m).join("\n");
+        assert!(out.contains("1 packet, fewer than 10"), "{out}");
+        assert!(!out.contains(" 1 packets"), "{out}");
+        let mut one = SdrMetrics::fixture().streaming();
+        one.net.fer.record(12.0, true);
+        let out = draw(NetBleDetailPanel, 80, 24, &one).join("\n");
+        assert!(out.contains("all traffic \u{b7} 1 packet"), "{out}");
+        assert!(!out.contains(" 1 packets"), "{out}");
+    }
+
     /// each bin's rate with its uncertainty and count, a thin bin said to be
     /// thin; filtered to one address, that device's own curve under its name.
     #[test]
