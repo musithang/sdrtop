@@ -17,7 +17,8 @@
 //! one a gap in the feed cut into, or a second after the first one heard
 //! that no visit ended in, is hatched in the stale colour and left out of
 //! the reading (a gap is not quiet air, rule 2). The reading, over the last
-//! [`READING_COLUMNS`] seconds with its 1 sigma, rides in the title.
+//! [`READING_COLUMNS`] seconds with its 1 sigma, is the card's; where the
+//! card has no room it rides in the title.
 
 use ratatui::{
     buffer::Buffer,
@@ -39,7 +40,7 @@ const PLOT_X: u16 = 7;
 const COLUMN_CELLS: u16 = 3;
 
 /// A bar's cell `r` rows from the floor, of a bar `share` of `rows` tall.
-fn eighth(share: f64, rows: u16, r: u16) -> char {
+pub(super) fn eighth(share: f64, rows: u16, r: u16) -> char {
     const EIGHTHS: [char; 9] = [' ', '▁', '▂', '▃', '▄', '▅', '▆', '▇', '█'];
     let e = (share.clamp(0.0, 1.0) * f64::from(rows) * 8.0).round() as u16;
     let lo = r * 8;
@@ -195,7 +196,10 @@ impl Panel for NetWifiAirtimePanel {
             None => String::new(),
         };
         suffix.push_str(" \u{b7} a column a second \u{b7} 0 to 100 %");
-        let reading = locked(state).and_then(|ch| {
+        // Where the card is on screen it carries the reading; here only
+        // where it has no room.
+        let room = !super::card::on_screen(state);
+        let reading = locked(state).filter(|_| room).and_then(|ch| {
             state
                 .net
                 .wifi
@@ -330,11 +334,14 @@ mod tests {
         assert!(mid[..78].iter().all(|c| *c == ' '), "{l:#?}");
     }
 
-    /// The title names the channel and the scale, and the reading over the
-    /// last 20 s with its 1 sigma once three seconds were heard whole.
+    /// The title names the channel and the scale; where the card has no
+    /// room, the reading over the last 20 s with its 1 sigma once three
+    /// seconds were heard whole rides in it, and where the card is on
+    /// screen the card alone carries it.
     #[test]
-    fn the_title_carries_the_reading() {
+    fn the_title_carries_the_reading_where_the_card_has_no_room() {
         let mut m = on_eleven();
+        m.ui.screen_cols = 100;
         m.net.wifi.survey.visits[10] = vec![
             visit(2.5, 1.0, 0.2, 0.1),
             visit(1.5, 1.0, 0.2, 0.2),
@@ -344,6 +351,10 @@ mod tests {
         assert!(l[0].contains("channel 11"), "{}", l[0]);
         assert!(l[0].contains("a column a second"), "{}", l[0]);
         assert!(l[0].contains("20.0 ± 5.8 % frames over 20 s"), "{}", l[0]);
+        m.ui.screen_cols = 191;
+        let l = lines(&m);
+        assert!(l[0].contains("a column a second"), "{}", l[0]);
+        assert!(!l[0].contains("frames over"), "{}", l[0]);
     }
 
     /// Nothing heard on the channel yet: the columns empty, and said so.
@@ -392,7 +403,8 @@ mod tests {
     }
 
     /// On the view, the hero takes its rows at the top of the body and the
-    /// ledger the rest under it, at the three sizes.
+    /// ledger the rest under it, the card beside both at 191 and 152 and
+    /// gone at 100.
     #[test]
     fn on_the_view_the_ledger_takes_the_rows_under_the_hero() {
         let (engine, _) = crate::app::App::build_ui(
@@ -402,7 +414,11 @@ mod tests {
             true,
         );
         let m = on_eleven();
-        for (w, h, hero) in [(191u16, 41u16, 11u16), (152, 32, 7), (100, 30, 7)] {
+        for (w, h, hero, card) in [
+            (191u16, 41u16, 11u16, Some(70u16)),
+            (152, 32, 7, Some(54)),
+            (100, 30, 7, None),
+        ] {
             let size = Rect::new(0, 0, w, h);
             let a = engine
                 .area_of("net_wifi_airtime", size, &m)
@@ -413,6 +429,12 @@ mod tests {
             assert_eq!(a.height, hero, "{w} x {h}");
             assert_eq!(l.y, a.y + a.height, "{w} x {h}");
             assert!(l.height >= 7, "{w} x {h}: {l:?}");
+            let c = engine.area_of("net_wifi_share", size, &m);
+            assert_eq!(c.map(|c| c.width), card, "{w} x {h}");
+            if let Some(c) = c {
+                assert_eq!(c.x, a.x + a.width, "{w} x {h}");
+                assert_eq!(c.height, a.height + l.height, "{w} x {h}");
+            }
         }
     }
 }

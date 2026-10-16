@@ -81,6 +81,7 @@ pub use panels::net::wifi::frames::NetWifiFramesPanel;
 pub use panels::net::wifi::least_busy::NetWifiLeastBusyPanel;
 pub use panels::net::wifi::ledger::NetWifiLedgerPanel;
 pub use panels::net::wifi::river::NetWifiRiverPanel;
+pub use panels::net::wifi::share::NetWifiSharePanel;
 pub use panels::net::wifi::survey::NetWifiSurveyPanel;
 
 pub use panels::micro::entry::MicroPanel;

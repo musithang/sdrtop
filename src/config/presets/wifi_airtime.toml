@@ -2,11 +2,15 @@
 # the right: how busy the channel's busiest megahertz was, whatever made
 # it, beside the airtime its own frames stated, by format, 0 to 100 %. A
 # second a gap in the feed cut into is hatched and left out of the reading,
-# which rides in the title with its 1 sigma. Under it the ledger: a row a
-# format and rate in the standards' order, its share of the time heard,
-# frames a second and airtime a frame, over the frames the Frames view
-# keeps. It reads the channel the radio is locked on: LOCK holds one, the
-# side arrows step them. No Bluetooth receiver runs on it.
+# which is the card's. Under it the ledger: a row a format and rate in the
+# standards' order, its share of the time heard, frames a second and
+# airtime a frame, over the frames the Frames view keeps. Beside them the
+# card: the share of the time the frames took over the last 20 s with its
+# 1 sigma, the energy's beside it, how much was heard, and at its foot the
+# rhythm, the gaps between frames against SIFS and DIFS. On a narrow screen
+# the card gives way and its reading rides in the hero's title. It reads
+# the channel the radio is locked on: LOCK holds one, the side arrows step
+# them. No Bluetooth receiver runs on it.
 
 section = "wifi_channel"
 slot    = 3
@@ -17,6 +21,7 @@ panels = [
     { name = "header",           position = "top", height = 5 },
     { name = "net_wifi_airtime", position = "body" },
     { name = "net_wifi_ledger",  position = "body" },
+    { name = "net_wifi_share",   position = "right", width_pct = 36 },
     { name = "log",              position = "bottom", height = 5 },
     { name = "footer",           position = "bottom" },
 ]

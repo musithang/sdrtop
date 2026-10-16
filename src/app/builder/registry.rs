@@ -121,6 +121,7 @@ impl App {
         registry.register(ui::NetWifiRiverPanel);
         registry.register(ui::NetWifiAirtimePanel);
         registry.register(ui::NetWifiLedgerPanel);
+        registry.register(ui::NetWifiSharePanel);
         registry.register(ui::NetWifiSurveyPanel);
         registry.register(ui::NetWifiLeastBusyPanel);
 

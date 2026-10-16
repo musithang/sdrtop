@@ -201,10 +201,13 @@ over whole seconds, by format, and the selected frame field by field with
 its clock and its channel, or the account of every preamble found.
 `net_wifi_airtime`, what is spending the channel's time, a column a
 second: how busy its busiest megahertz was beside the airtime its frames
-stated, by format, 0 to 100 %, with the reading over the last 20 s in its
-title.
+stated, by format, 0 to 100 %, with the reading in its title where the
+card has no room.
 `net_wifi_ledger`, what spent that time: a row a format and rate, its
 share of the time heard, frames a second and airtime a frame.
+`net_wifi_share`, the Airtime view's card: the share of the time the
+frames took over the last 20 s with its 1 sigma, the energy's beside it,
+and the rhythm, the gaps between frames against SIFS and DIFS.
 
 **Observer:** `observer`
 

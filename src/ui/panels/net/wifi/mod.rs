@@ -10,6 +10,7 @@ pub mod frames;
 pub mod least_busy;
 pub mod ledger;
 pub mod river;
+pub mod share;
 pub mod survey;
 
 use ratatui::{

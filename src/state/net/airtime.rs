@@ -290,20 +290,116 @@ impl Ledger {
 /// The pairs a second the Wi-Fi receiver runs at.
 const PAIRS_PER_S: f64 = 20e6;
 
+/// The rhythm's bins: ten a decade from 1 us to 100 ms.
+pub const RHYTHM_BINS: usize = 50;
+
+/// The bins a decade.
+const PER_DECADE: f64 = 10.0;
+
+/// aSignalExtension (Table 18-5): the 6 us of no transmission a frame's
+/// stated airtime leaves out after it, where 10.3.8 puts one.
+const SIGNAL_EXTENSION_US: f64 = 6.0;
+
+/// The bin a gap of `us` falls in, from 1 us; `None` under 1 us or from
+/// 100 ms on.
+pub fn rhythm_bin(us: f64) -> Option<usize> {
+    if us < 1.0 {
+        return None;
+    }
+    let k = (us.log10() * PER_DECADE).floor() as usize;
+    (k < RHYTHM_BINS).then_some(k)
+}
+
+/// Whether a frame of `family` is followed by a signal extension: 10.3.8
+/// (19.3.2) puts one after a NON_HT ERP-OFDM PPDU (every non-HT OFDM frame
+/// in this band), HT_MF and HT_GF, and every HE PPDU; none after 802.11b.
+/// EHT's own rule is in 802.11be, not read here, so an EHT gap is placed as
+/// heard rather than by a rule borrowed from another PHY; VHT is not sent
+/// in this band by the standard. A frame not decoded has no answer at all.
+fn extended(family: Family) -> Option<bool> {
+    match family {
+        Family::NonHt | Family::Ht | Family::He => Some(true),
+        Family::Dsss | Family::Vht | Family::Eht => Some(false),
+        Family::Undecoded => None,
+    }
+}
+
+/// The gaps between frames, each from the end of one to the start of the
+/// next on one unbroken run, with the signal extension taken off where the
+/// standard adds one: in [`RHYTHM_BINS`] bins, the gaps under 1 us (a frame
+/// begun before the last ended) and from 100 ms on counted beside them,
+/// how many were corrected, and how many followed a frame not decoded and
+/// could not be placed.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Rhythm {
+    pub bins: [u32; RHYTHM_BINS],
+    pub under: u32,
+    pub past: u32,
+    pub corrected: u32,
+    pub unplaced: u32,
+}
+
 impl WifiState {
+    /// The newest clock the frames on `centre_hz` were heard on, and where
+    /// its frames there are in the ring.
+    fn newest_here(&self, centre_hz: f64) -> Option<(u64, Vec<usize>)> {
+        let here = |r: &WifiRow| (r.carrier_hz - centre_hz).abs() < 1.0;
+        let epoch = self
+            .rows
+            .iter()
+            .filter(|r| here(r))
+            .map(|r| r.epoch)
+            .max()?;
+        let at = (0..self.rows.len())
+            .filter(|&i| here(&self.rows[i]) && self.rows[i].epoch == epoch)
+            .collect();
+        Some((epoch, at))
+    }
+
+    /// The rhythm of the frames the ledger of `centre_hz` reads; `None`
+    /// until a frame was heard there.
+    pub fn rhythm(&self, centre_hz: f64) -> Option<Rhythm> {
+        let (_, at) = self.newest_here(centre_hz)?;
+        let mut r = Rhythm {
+            bins: [0; RHYTHM_BINS],
+            under: 0,
+            past: 0,
+            corrected: 0,
+            unplaced: 0,
+        };
+        for i in at {
+            let (Some(gap), Some(before)) = (self.rows[i].gap_us, i.checked_sub(1)) else {
+                continue;
+            };
+            // Another channel's frame is 802.11b where it stated a length.
+            let family = self.rows[before].family().unwrap_or(Family::Dsss);
+            let gap = match extended(family) {
+                None => {
+                    r.unplaced += 1;
+                    continue;
+                }
+                Some(true) => {
+                    r.corrected += 1;
+                    gap - SIGNAL_EXTENSION_US
+                }
+                Some(false) => gap,
+            };
+            match rhythm_bin(gap) {
+                Some(k) => r.bins[k] += 1,
+                None if gap < 1.0 => r.under += 1,
+                None => r.past += 1,
+            }
+        }
+        Some(r)
+    }
+
     /// The ledger of the frames heard on `centre_hz` on the newest clock
     /// they were heard on: from the first of them to the stream's edge (or,
     /// on another clock, the last one's end), less the spans a feed gap
     /// took. `None` until a frame was heard there.
     pub fn ledger(&self, centre_hz: f64) -> Option<Ledger> {
-        let here = |r: &&WifiRow| (r.carrier_hz - centre_hz).abs() < 1.0;
-        let epoch = self.rows.iter().filter(here).map(|r| r.epoch).max()?;
-        let rows: Vec<&WifiRow> = self
-            .rows
-            .iter()
-            .filter(here)
-            .filter(|r| r.epoch == epoch)
-            .collect();
+        let (epoch, at) = self.newest_here(centre_hz)?;
+        let rows: Vec<&WifiRow> = at.iter().map(|&i| &self.rows[i]).collect();
         let from = rows.iter().map(|r| r.start).min()?;
         let last_end = rows
             .iter()
@@ -683,5 +779,122 @@ mod tests {
         assert!(crate::state::net::wifi::WifiState::default()
             .ledger(ELEVEN)
             .is_none());
+    }
+
+    // The rhythm.
+
+    use super::{rhythm_bin, Rhythm, RHYTHM_BINS};
+    use crate::signal::wifi::hesig::{Bss, HeKind, USig};
+    use crate::signal::wifi::htsig::SigFault;
+
+    fn he() -> RowKind {
+        RowKind::Ofdm(Heard {
+            lsig: Some(Ok(LSig {
+                rate: Rate::R6,
+                length: 100,
+            })),
+            format: Some(Format::He {
+                kind: HeKind::SuOrTb,
+                sig_a: Err(SigFault::Crc),
+            }),
+        })
+    }
+
+    /// A U-SIG of `version`: 0 is EHT, a later one is not decoded, though
+    /// its L-SIG still stated the airtime.
+    fn usig(version: u8) -> RowKind {
+        RowKind::Ofdm(Heard {
+            lsig: Some(Ok(LSig {
+                rate: Rate::R6,
+                length: 100,
+            })),
+            format: Some(Format::USig {
+                er: false,
+                sig: Ok(USig {
+                    version,
+                    bss: Bss {
+                        colour: 1,
+                        uplink: false,
+                        txop_us: None,
+                    },
+                }),
+            }),
+        })
+    }
+
+    /// The rhythm of `pairs`: each a frame of `air_us` and the frame `gap`
+    /// microseconds after its end.
+    fn rhythm_of(pairs: &[(RowKind, f64)]) -> Rhythm {
+        let mut w = crate::state::net::wifi::WifiState::default();
+        let mut at = 0.0;
+        for (kind, gap) in pairs {
+            w.push_row(row(*kind, at / 1e6, Some(100), 0, ELEVEN));
+            at += 100.0 + gap;
+            w.push_row(row(non_ht(Rate::R24), at / 1e6, Some(100), 0, ELEVEN));
+            // The next pair well apart: past the plot.
+            at += 100.0 + 200_000.0;
+        }
+        w.heard_to = Some((0, (at * 20.0) as u64));
+        w.rhythm(ELEVEN).expect("frames heard")
+    }
+
+    /// **The signal extension comes off where the standard puts one**: an
+    /// ERP-OFDM frame and its acknowledgement 17 us apart are a SIFS (the
+    /// 10 us bin, 10 to 12.6 us) once its 6 us of no transmission are taken
+    /// off; two 802.11b frames 11 us apart land there as they are, since
+    /// 802.11b has none.
+    #[test]
+    fn an_acknowledgement_after_erp_ofdm_and_after_802_11b_is_a_sifs() {
+        let ofdm = rhythm_of(&[(non_ht(Rate::R6), 17.0)]);
+        assert_eq!(ofdm.bins[10], 1, "{ofdm:?}");
+        assert_eq!(ofdm.corrected, 1);
+        let b = rhythm_of(&[(b(DsssRate::M1), 11.0)]);
+        assert_eq!(b.bins[10], 1, "{b:?}");
+        assert_eq!(b.corrected, 0);
+    }
+
+    /// After HT and HE frames too (10.3.8 names HT_MF, HT_GF and every HE
+    /// PPDU).
+    #[test]
+    fn after_ht_and_he_the_extension_comes_off() {
+        let r = rhythm_of(&[(ht(7), 17.0), (he(), 17.0)]);
+        assert_eq!(r.bins[10], 2, "{r:?}");
+        // The two, and the long gap after the first acknowledgement.
+        assert_eq!(r.corrected, 3);
+    }
+
+    /// EHT's own rule is in 802.11be, not read here: its gap is placed as
+    /// heard, not corrected by a rule borrowed from another PHY.
+    #[test]
+    fn after_eht_the_gap_is_placed_as_heard() {
+        let r = rhythm_of(&[(usig(0), 17.0)]);
+        assert_eq!(r.bins[12], 1, "{r:?}");
+        assert_eq!(r.corrected, 0);
+    }
+
+    /// After a frame not decoded nobody knows whether an extension
+    /// followed it, so its gap is counted apart, not placed.
+    #[test]
+    fn after_a_frame_not_decoded_the_gap_is_not_placed() {
+        let r = rhythm_of(&[(usig(3), 17.0)]);
+        assert_eq!(r.bins.iter().sum::<u32>(), 0, "{r:?}");
+        assert_eq!(r.unplaced, 1);
+    }
+
+    /// Fifty bins, ten a decade from 1 us to 100 ms: a frame starting
+    /// inside the one before is under 1 us, a gap past 100 ms past the
+    /// plot, both counted beside it.
+    #[test]
+    fn overlaps_and_long_gaps_are_counted_beside_the_plot() {
+        let r = rhythm_of(&[(b(DsssRate::M1), -50.0), (b(DsssRate::M1), 500.0)]);
+        assert_eq!(r.under, 1, "{r:?}");
+        // 500 us: the 27th bin, 398 to 501 us.
+        assert_eq!(r.bins[26], 1, "{r:?}");
+        // Each pair 200 ms from the next.
+        assert_eq!(r.past, 1, "{r:?}");
+        assert_eq!(RHYTHM_BINS, 50);
+        assert_eq!(rhythm_bin(1.0), Some(0));
+        assert_eq!(rhythm_bin(99_999.0), Some(49));
+        assert_eq!(rhythm_bin(100_000.0), None);
     }
 }

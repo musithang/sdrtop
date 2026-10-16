@@ -32,7 +32,7 @@ mod packets;
 mod wifi;
 
 pub use address::{who_with, AddressBook, AddressDisplay, FULL_ADDRESS_WIDTH};
-pub use airtime::{AirColumn, Spender, READING_COLUMNS};
+pub use airtime::{AirColumn, Rhythm, Spender, READING_COLUMNS, RHYTHM_BINS};
 pub use band::{BandOccupancy, CellReading, COLUMN_INTERVAL, HISTORY_COLUMNS};
 pub use census::CensusState;
 #[cfg(test)]
