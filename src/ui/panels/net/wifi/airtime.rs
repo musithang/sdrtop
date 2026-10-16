@@ -195,9 +195,9 @@ impl Panel for NetWifiAirtimePanel {
             Some(ch) => format!(" \u{b7} channel {ch}"),
             None => String::new(),
         };
-        suffix.push_str(" \u{b7} a column a second \u{b7} 0 to 100 %");
         // Where the card is on screen it carries the reading; here only
-        // where it has no room.
+        // where it has no room, and there the scale gives way to it (the
+        // axis says the scale) so the mode's tag still fits.
         let room = !super::card::on_screen(state);
         let reading = locked(state).filter(|_| room).and_then(|ch| {
             state
@@ -206,15 +206,18 @@ impl Panel for NetWifiAirtimePanel {
                 .survey
                 .share(ch, std::time::Instant::now(), READING_COLUMNS)
         });
-        if let Some(r) = reading {
-            let spread = r
-                .frames
-                .sigma
-                .map_or(String::new(), |s| format!(" \u{b1} {}", pct(s)));
-            suffix.push_str(&format!(
-                " \u{b7} {}{spread} % frames over {READING_COLUMNS} s",
-                pct(r.frames.mean)
-            ));
+        match reading {
+            Some(r) => {
+                let spread = r
+                    .frames
+                    .sigma
+                    .map_or(String::new(), |s| format!(" \u{b1} {}", pct(s)));
+                suffix.push_str(&format!(
+                    " \u{b7} {}{spread} % frames over {READING_COLUMNS} s",
+                    pct(r.frames.mean)
+                ));
+            }
+            None => suffix.push_str(" \u{b7} a column a second \u{b7} 0 to 100 %"),
         }
         PanelChrome::new("Airtime")
             .stale_when(Staleness::NotStreaming)
@@ -336,8 +339,8 @@ mod tests {
 
     /// The title names the channel and the scale; where the card has no
     /// room, the reading over the last 20 s with its 1 sigma once three
-    /// seconds were heard whole rides in it, and where the card is on
-    /// screen the card alone carries it.
+    /// seconds were heard whole rides in it in the scale's place, and where
+    /// the card is on screen the card alone carries it.
     #[test]
     fn the_title_carries_the_reading_where_the_card_has_no_room() {
         let mut m = on_eleven();
@@ -349,8 +352,12 @@ mod tests {
         ];
         let l = lines(&m);
         assert!(l[0].contains("channel 11"), "{}", l[0]);
-        assert!(l[0].contains("a column a second"), "{}", l[0]);
         assert!(l[0].contains("20.0 ± 5.8 % frames over 20 s"), "{}", l[0]);
+        // The scale gives way to it, and the mode's tag still fits: the
+        // axis says the scale.
+        assert!(!l[0].contains("a column a second"), "{}", l[0]);
+        assert!(!l[0].contains("0 to 100 %"), "{}", l[0]);
+        assert!(l[0].contains("[LOCK]"), "{}", l[0]);
         m.ui.screen_cols = 191;
         let l = lines(&m);
         assert!(l[0].contains("a column a second"), "{}", l[0]);

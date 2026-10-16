@@ -25,7 +25,7 @@ In the menu, NET is the **Bluetooth** item: a heading over four groups, the
 band first, each with its own numbers. The number is the key to press while
 that group is active, so `Classic 2` is Classic's second view. **Wi-Fi**
 sits beside it, a heading of its own whose first group, Channel, has the
-survey and the Frames view. Both need a radio that
+survey, the Frames view and Airtime. Both need a radio that
 reaches the band; Wi-Fi also needs 20 Msps, a whole Wi-Fi channel, and is
 left out on a radio that cannot sample that fast.
 
@@ -36,10 +36,10 @@ Bluetooth
   Classic    1 Piconets      2 Packets        3 Bench
   LE Coded   1 Long range
 Wi-Fi
-  Channel    1 Survey        2 Frames
+  Channel    1 Survey        2 Frames         3 Airtime
 ```
 
-Eleven views, one question each:
+Twelve views, one question each:
 
 | Key | View | The question it answers |
 |-----|------|--------------------------|
@@ -54,6 +54,7 @@ Eleven views, one question each:
 | `LE Coded 1` | **[Long range](net-le-coded.md)** | Who advertises on LE Coded, and where did each advertisement point? |
 | `Channel 1` | **[Survey](net-wifi.md)** | Which Wi-Fi channel is busy, and which is quiet? |
 | `Channel 2` | **[Frames](net-wifi-frames.md)** | What is on this channel, frame by frame? |
+| `Channel 3` | **[Airtime](net-wifi-airtime.md)** | What is spending this channel's time? |
 
 The panels with controls announce them with a highlighted letter in the
 title; the full list is in [Keyboard Shortcuts](keys.md#net-panel-focus-modes).

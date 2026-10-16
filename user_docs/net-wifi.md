@@ -73,4 +73,5 @@ its last pass in the stale colour, and the card is the locked channel's.
 
 The channel's frames one by one, each with its format and signalling, and
 the account of every preamble found are on `Channel 2`,
-[the Frames view](net-wifi-frames.md).
+[the Frames view](net-wifi-frames.md). What one channel's time goes on, second by
+second and format by format, is `Channel 3`, [Airtime](net-wifi-airtime.md).
