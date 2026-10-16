@@ -60,7 +60,10 @@ the traffic would change every frame's width from one second to the next.
 
 (The lengths are for a 191-column terminal; a capture is always as long as
 the river you have.) The labels on the left count from the trigger. The
-frame selected in the list is lit. The title says which capture this is,
+frame selected in the list is drawn in the focus colour, with a `▸` at its
+lane and a `━` under its columns on the axis: lane and column cross on it,
+so it stands out even where a theme's focus colour is close to a format's.
+The title says which capture this is,
 its scale, the trigger, the holdoff, and `STOP` when you have stopped it.
 
 ## The list

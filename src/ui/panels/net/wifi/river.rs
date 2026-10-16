@@ -24,7 +24,7 @@
 use ratatui::{
     buffer::Buffer,
     layout::Rect,
-    style::{Color, Style},
+    style::{Color, Modifier, Style},
     Frame,
 };
 
@@ -269,7 +269,16 @@ fn draw(buf: &mut Buffer, area: Rect, state: &SdrMetrics, theme: &crate::Theme) 
         lit,
         lost,
     } = window(state, span, lanes, theme);
+    // The selection: no colour alone can be told from every format's in
+    // every theme (a theme paints its formats from its own palette), and a
+    // tall frame fills its cells so a background never shows. So it is drawn
+    // in the focus colour on the dim border colour, and crossed by shape: a
+    // pointer at its lane's label and a bar on the axis under its columns.
     let lit_bg = theme.border_dim;
+    let mark = Style::default()
+        .fg(theme.border_focused)
+        .add_modifier(Modifier::BOLD);
+    let mut marked_columns: Vec<u16> = Vec::new();
     for i in 0..lanes {
         let (top_y, bottom_y) = (area.y + 2 * i, area.y + 2 * i + 1);
         let a0 = t0 + f64::from(i) * span;
@@ -309,11 +318,31 @@ fn draw(buf: &mut Buffer, area: Rect, state: &SdrMetrics, theme: &crate::Theme) 
                     .set_style(hatch);
                 continue;
             }
-            if lit.is_some_and(|s| a < s.end(d) && a + d > s.start) {
+            let selected = lit.is_some_and(|s| a < s.end(d) && a + d > s.start);
+            if selected {
                 buf.get_mut(cx, top_y).set_bg(lit_bg);
                 buf.get_mut(cx, bottom_y).set_bg(lit_bg);
+                marked_columns.push(cx);
+                for y in [top_y, bottom_y] {
+                    buf.get_mut(area.x + LABEL - 1, y)
+                        .set_char('\u{25b8}')
+                        .set_style(mark);
+                }
             }
             if let Some((t, b, colour)) = cell(&near, a, d, zoom, theme) {
+                // Its anatomy kept: at 4 us a cell the preamble paler, here
+                // from the focus colour.
+                let colour = match lit.filter(|_| selected) {
+                    Some(s) if zoom == FrameZoom::Anatomy && a + d / 2.0 < s.start + s.preamble => {
+                        crate::ui::widgets::charts::lerp_color(
+                            theme.border_focused,
+                            theme.value,
+                            0.55,
+                        )
+                    }
+                    Some(_) => theme.border_focused,
+                    None => colour,
+                };
                 buf.get_mut(cx, top_y).set_char(t).set_fg(colour);
                 buf.get_mut(cx, bottom_y).set_char(b).set_fg(colour);
             }
@@ -321,6 +350,10 @@ fn draw(buf: &mut Buffer, area: Rect, state: &SdrMetrics, theme: &crate::Theme) 
     }
     let axis = area.y + 2 * lanes;
     if axis < area.bottom() {
+        // Under the scale's labels, which are drawn over it.
+        for &cx in &marked_columns {
+            buf.get_mut(cx, axis).set_char('\u{2501}').set_style(mark);
+        }
         for x in (0..lw.saturating_sub(8)).step_by(30) {
             let at = put(buf, area.x + LABEL + x, axis, "\u{250a}", ink_label, area);
             put(
@@ -575,20 +608,39 @@ mod tests {
         assert!(l[4].contains("+2.1 ms"), "{l:#?}");
     }
 
-    /// The selected frame is lit: its cells on the border's dim colour.
+    /// **The selected frame is marked so it cannot be missed**, whatever its
+    /// colour and however tall: its glyphs in the focus colour on the dim
+    /// border colour, a pointer at its lane's label, and a bar on the axis
+    /// under its cells, so lane and column cross on it in any theme.
     #[test]
-    fn the_selected_frame_is_lit() {
+    fn the_selected_frame_is_marked_in_any_colour() {
         let mut m = on_eleven(FrameZoom::Rhythm);
         m.net.wifi.push_row(frame(0.0, Some(80), 27.0));
-        m.net.wifi.push_row(frame(200.0, Some(80), 27.0));
+        m.net.wifi.push_row(frame(4_000.0, Some(80), 27.0));
         captured(&mut m, 0, 0.0);
         m.net.wifi.frames_view.selected = Some(2);
         let buf = buffer(&m);
         let theme = crate::Theme::sdr();
-        let bg = |cell: u16| buf.get(10 + cell, 2).bg;
-        assert_eq!(bg(5), theme.border_dim);
-        assert_eq!(bg(6), theme.border_dim);
-        assert_ne!(bg(0), theme.border_dim);
+        // The second frame, 4 ms in: lane 1 (lanes of 89 cells of 40 us),
+        // cells 11 and 12, rows 3 and 4.
+        let at = |x: u16, y: u16| buf.get(x, y);
+        for y in [3, 4] {
+            for cell in [11, 12] {
+                assert_eq!(at(10 + cell, y).fg, theme.border_focused, "{cell},{y}");
+                assert_eq!(at(10 + cell, y).bg, theme.border_dim, "{cell},{y}");
+            }
+            assert_eq!(at(9, y).symbol(), "\u{25b8}", "the pointer at lane 1");
+        }
+        assert_ne!(
+            at(10, 2).fg,
+            theme.border_focused,
+            "the other frame keeps its colour"
+        );
+        assert_ne!(at(9, 2).symbol(), "\u{25b8}", "no pointer at lane 0");
+        // The axis row under the lanes.
+        assert_eq!(at(10 + 11, 9).symbol(), "\u{2501}");
+        assert_eq!(at(10 + 12, 9).symbol(), "\u{2501}");
+        assert_ne!(at(10 + 20, 9).symbol(), "\u{2501}");
     }
 
     /// At 4 us a cell the preamble is told from the rest of the frame: its
@@ -597,15 +649,21 @@ mod tests {
     fn at_four_microseconds_a_cell_the_preamble_is_tinted() {
         let mut m = on_eleven(FrameZoom::Anatomy);
         m.net.wifi.push_row(frame(0.0, Some(40), 27.0));
+        m.net.wifi.push_row(frame(200.0, Some(40), 27.0));
         captured(&mut m, 0, 0.0);
+        m.net.wifi.frames_view.selected = Some(2);
         let buf = buffer(&m);
         let theme = crate::Theme::sdr();
         let fg = |cell: u16| buf.get(10 + cell, 2).fg;
-        let tinted = crate::ui::widgets::charts::lerp_color(theme.wifi_non_ht, theme.value, 0.55);
+        let lerp = crate::ui::widgets::charts::lerp_color;
+        let tinted = lerp(theme.wifi_non_ht, theme.value, 0.55);
         assert_eq!(fg(0), tinted);
         assert_eq!(fg(4), tinted);
         assert_eq!(fg(5), theme.wifi_non_ht);
         assert_eq!(fg(9), theme.wifi_non_ht);
+        // The selected frame keeps its anatomy, in the focus colour.
+        assert_eq!(fg(50), lerp(theme.border_focused, theme.value, 0.55));
+        assert_eq!(fg(55), theme.border_focused);
     }
 
     /// **A span a feed gap took is hatched**, never drawn as quiet air.
