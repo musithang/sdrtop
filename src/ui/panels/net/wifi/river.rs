@@ -269,14 +269,9 @@ fn draw(buf: &mut Buffer, area: Rect, state: &SdrMetrics, theme: &crate::Theme) 
         lit,
         lost,
     } = window(state, span, lanes, theme);
-    // The selection: no colour alone can be told from every format's in
-    // every theme (a theme paints its formats from its own palette), and a
-    // tall frame fills its cells so a background never shows. So it is drawn
-    // in the focus colour, raised like a key: its cells on a ground lifted
-    // toward the focus colour, the cell either side of it on the dim border
-    // colour as the key's edge, and a pointer at its lane's label. Only
-    // backgrounds and the label: no other frame's glyph is touched.
-    let lift = crate::ui::widgets::charts::lerp_color(theme.border_dim, theme.border_focused, 0.3);
+    // The selection, highlighted: its glyphs in the focus colour on the dim
+    // border colour (a tall frame fills its cells, so the colour carries it
+    // there), and a pointer at its lane's label.
     let mark = Style::default()
         .fg(theme.border_focused)
         .add_modifier(Modifier::BOLD);
@@ -304,7 +299,6 @@ fn draw(buf: &mut Buffer, area: Rect, state: &SdrMetrics, theme: &crate::Theme) 
             .filter(|f| f.start < a0 + span && f.end(d) > a0)
             .copied()
             .collect();
-        let mut lane_cols: Vec<u16> = Vec::new();
         for x in 0..lw {
             let a = a0 + f64::from(x) * d;
             if a >= end {
@@ -322,9 +316,8 @@ fn draw(buf: &mut Buffer, area: Rect, state: &SdrMetrics, theme: &crate::Theme) 
             }
             let selected = lit.is_some_and(|s| a < s.end(d) && a + d > s.start);
             if selected {
-                buf.get_mut(cx, top_y).set_bg(lift);
-                buf.get_mut(cx, bottom_y).set_bg(lift);
-                lane_cols.push(cx);
+                buf.get_mut(cx, top_y).set_bg(theme.border_dim);
+                buf.get_mut(cx, bottom_y).set_bg(theme.border_dim);
                 for y in [top_y, bottom_y] {
                     buf.get_mut(area.x + LABEL - 1, y)
                         .set_char('\u{25b8}')
@@ -350,16 +343,6 @@ fn draw(buf: &mut Buffer, area: Rect, state: &SdrMetrics, theme: &crate::Theme) 
                 if selected {
                     buf.get_mut(cx, top_y).set_style(mark.fg(colour));
                     buf.get_mut(cx, bottom_y).set_style(mark.fg(colour));
-                }
-            }
-        }
-        // The key's edge, a cell either side, where the lane has one.
-        let cells = area.x + LABEL..area.x + LABEL + lw;
-        if let (Some(&first), Some(&last)) = (lane_cols.first(), lane_cols.last()) {
-            for edge in [first.checked_sub(1), Some(last + 1)].into_iter().flatten() {
-                if cells.contains(&edge) && !lane_cols.contains(&edge) {
-                    buf.get_mut(edge, top_y).set_bg(theme.border_dim);
-                    buf.get_mut(edge, bottom_y).set_bg(theme.border_dim);
                 }
             }
         }
@@ -621,13 +604,11 @@ mod tests {
         assert!(l[4].contains("+2.1 ms"), "{l:#?}");
     }
 
-    /// **The selected frame is marked so it cannot be missed**, whatever its
-    /// colour and however tall, and stands up off the river: its glyphs in
-    /// the focus colour on a lifted ground, the cells either side of it on
-    /// the dim border colour like the edge of a raised key, and a pointer at
-    /// its lane's label. Nothing on the axis.
+    /// **The selected frame is highlighted**: its glyphs in the focus
+    /// colour on the dim border colour, and a pointer at its lane's label;
+    /// nothing around it and nothing on the axis.
     #[test]
-    fn the_selected_frame_is_marked_and_lifted() {
+    fn the_selected_frame_is_highlighted() {
         let mut m = on_eleven(FrameZoom::Rhythm);
         m.net.wifi.push_row(frame(0.0, Some(80), 27.0));
         m.net.wifi.push_row(frame(4_000.0, Some(80), 27.0));
@@ -635,19 +616,16 @@ mod tests {
         m.net.wifi.frames_view.selected = Some(2);
         let buf = buffer(&m);
         let theme = crate::Theme::sdr();
-        let lift =
-            crate::ui::widgets::charts::lerp_color(theme.border_dim, theme.border_focused, 0.3);
         // The second frame, 4 ms in: lane 1 (lanes of 89 cells of 40 us),
         // cells 11 and 12, rows 3 and 4.
         let at = |x: u16, y: u16| buf.get(x, y);
         for y in [3, 4] {
             for cell in [11, 12] {
                 assert_eq!(at(10 + cell, y).fg, theme.border_focused, "{cell},{y}");
-                assert_eq!(at(10 + cell, y).bg, lift, "{cell},{y}");
+                assert_eq!(at(10 + cell, y).bg, theme.border_dim, "{cell},{y}");
             }
-            assert_eq!(at(10 + 10, y).bg, theme.border_dim, "its left edge");
-            assert_eq!(at(10 + 13, y).bg, theme.border_dim, "its right edge");
-            assert_ne!(at(10 + 14, y).bg, theme.border_dim);
+            assert_ne!(at(10 + 10, y).bg, theme.border_dim, "nothing beside it");
+            assert_ne!(at(10 + 13, y).bg, theme.border_dim, "nothing beside it");
             assert_eq!(at(9, y).symbol(), "\u{25b8}", "the pointer at lane 1");
         }
         assert_ne!(
