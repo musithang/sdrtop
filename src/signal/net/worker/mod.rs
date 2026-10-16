@@ -332,6 +332,25 @@ impl NetWorker {
             } else {
                 classic.stand_down(&self.state);
             }
+            // Every receiver for this block is chosen and has said its
+            // channel: what the worker is working on, told as one account
+            // (copies only, inside the lock).
+            {
+                let mut m = self.state.lock().unwrap_or_else(|e| e.into_inner());
+                let watched = &m.net.bt_channels_watched;
+                let bt = watched
+                    .iter()
+                    .min()
+                    .copied()
+                    .zip(watched.iter().max().copied());
+                m.net.receiver = Some(crate::state::ReceiverNow {
+                    centre_hz: tuning.centre_hz as u64,
+                    span_hz: tuning.span_hz as u64,
+                    ble: m.net.ble_channel,
+                    coded: m.net.coded_channel,
+                    bt,
+                });
+            }
 
             // The BLE receiver alone, when no classic fleet ran beside it,
             // then what it found, as it always was.
@@ -1786,6 +1805,27 @@ mod tests {
         assert!(on("wifi_survey"));
         assert!(on("wifi_airtime"));
         assert!(!on("wifi_frames"));
+    }
+
+    /// **The worker tells what it is working on as one account**: the
+    /// centre and span of the last block it took, with the channels its
+    /// receivers ran on there, written together.
+    #[test]
+    fn the_receiver_is_told_as_one_account() {
+        let m = run_noise("classic", "net_bt", 2_441_000_000, 20e6);
+        let r = m.net.receiver.expect("a block was taken");
+        assert_eq!(r.centre_hz, 2_441_000_000);
+        assert_eq!(r.span_hz, 20_000_000);
+        assert_eq!(r.ble, m.net.ble_channel);
+        let watched = &m.net.bt_channels_watched;
+        assert!(!watched.is_empty());
+        assert_eq!(
+            r.bt,
+            Some((
+                *watched.iter().min().unwrap(),
+                *watched.iter().max().unwrap()
+            ))
+        );
     }
 
     /// On a Wi-Fi view, at 20 Msps on a channel centre, Wi-Fi's receiver

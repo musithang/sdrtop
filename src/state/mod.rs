@@ -34,8 +34,8 @@ pub use micro::MicroView;
 pub use net::{
     who_with, AddressBook, AddressDisplay, BandOccupancy, BlePacket, BlePacketView, BtHop,
     CellReading, CodedFacts, ConnectionView, ExtInfo, ExtRole, FollowedConnection, LockTarget,
-    NetMode, NetState, PacketsView, PduKind, RetuneRun, BLE_PACKET_LIMIT, BT_HOP_LIMIT,
-    COLUMN_INTERVAL, FULL_ADDRESS_WIDTH, HISTORY_COLUMNS,
+    NetMode, NetState, PacketsView, PduKind, ReceiverNow, RetuneRun, BLE_PACKET_LIMIT,
+    BT_HOP_LIMIT, COLUMN_INTERVAL, FULL_ADDRESS_WIDTH, HISTORY_COLUMNS,
 };
 // The roster's sort keys, which the roster's columns are held to.
 #[cfg(test)]

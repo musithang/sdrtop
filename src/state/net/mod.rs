@@ -117,6 +117,20 @@ pub struct LockTarget {
     pub why: String,
 }
 
+/// What the receiver is working on, as one account: the centre and span of
+/// the last block its decoders took, and the channel each ran on there
+/// (`bt` the lowest and highest classic channel watched). Written by the
+/// worker in one lock block once a block's receivers are chosen, so the NET
+/// band line never pairs one tuning's channels with another's frequency.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct ReceiverNow {
+    pub centre_hz: u64,
+    pub span_hz: u64,
+    pub ble: Option<u8>,
+    pub coded: Option<u8>,
+    pub bt: Option<(u8, u8)>,
+}
+
 #[derive(Clone, Debug, Default)]
 pub struct NetState {
     pub mode: NetMode,
@@ -303,6 +317,8 @@ pub struct NetState {
     /// (`BandOccupancy::columns_taken`), `None` for now. Shared by both halves
     /// of the instrument: the heatmap moves it, the profile shows that moment.
     pub band_scrub: Option<u64>,
+    /// What the receiver is working on, `None` before its first block.
+    pub receiver: Option<ReceiverNow>,
     /// The occupancy profile's cursor, a megahertz cell index (0 is
     /// 2400 MHz). The section's one selection model, keyed by the cell so it
     /// stays
