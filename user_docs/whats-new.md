@@ -32,7 +32,33 @@ in time.
 
 ---
 
-## 📺 Checkpoint 29: Seen on somebody else's screen *(you are here)*
+## 🔬 Checkpoint 30: Frame by frame *(you are here)*
+
+**0.6.8.** The survey tells you a channel is busy. The obvious next
+question is busy with what, and the honest way to answer it is to look:
+the new [Frames view](net-wifi-frames.md) sits on one channel and shows
+the frames themselves, what kind each one is, how fast it was sent, how
+long it took, and the sixteen microseconds an access point and a laptop
+leave between a frame and its acknowledgement.
+
+The first version did exactly that, live, and was unreadable. A busy
+channel sends a few hundred frames a second, and a list that replaces
+itself twenty-five times a second is a very honest blur. So it now
+behaves like an oscilloscope: it takes a capture, a short window of air,
+holds it still, and takes the next a second later. A trigger decides what
+starts one, so you can ask for an 802.11b beacon and get one in the middle
+of the picture instead of hoping. The river draws each capture at three
+zooms, from the channel's load down to a single frame's preamble.
+
+On the way it turned out every NET view had been computing a spectrum
+that nothing on screen showed, at 20 Msps, on a two-core laptop. That was
+a whole core spent on a picture nobody saw, while the receivers next to
+it dropped blocks. It is off now, and the survey's feed went from breaking
+hundreds of times in twenty seconds to a handful.
+
+---
+
+## 📺 Checkpoint 29: Seen on somebody else's screen
 
 **0.6.7.** There is a particular kind of honesty that only a video of your
 own program running on a stranger's machine can deliver. sdrtop looked

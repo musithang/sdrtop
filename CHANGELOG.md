@@ -16,6 +16,54 @@ checkpoint instead of by version.
 
 ## [Unreleased]
 
+## [0.6.8] - 2026-10-16
+
+**What is on a Wi-Fi channel, frame by frame.**
+
+The survey says how busy a channel is. The new Frames view sits on one
+channel and shows what is actually on it: each frame, what kind it is,
+how long it took and the gaps between them. A busy channel is far too
+fast to read as it streams past, so the view takes captures the way an
+oscilloscope does and holds each one still. And every NET view stops
+computing a spectrum nobody looks at, which on a small machine gives the
+receivers back a whole core.
+
+### Added
+
+- **Wi-Fi's Frames view** (`Channel 2` under Wi-Fi in the menu). Each
+  capture is a short window of air, held on screen until the next one a
+  second later. The river draws it as lanes of frames, coloured by format,
+  as wide as their airtime and as tall as their SNR, at three scales (`z`):
+  1 ms a cell for the load, 40 µs for the exchanges, 4 µs for one frame.
+  The list under it reads the capture in time order: format, rate, length,
+  the gap before each frame, its airtime, offset and SNR. The card gives
+  the channel's frames a second by format and the selected frame field by
+  field, its symbol clock and its channel across the 52 tones, or (`d`)
+  the account of every preamble found. ([Frames](user_docs/net-wifi-frames.md))
+- **A trigger** (`t`): any frame, or one kind (a format, 802.11b, another
+  channel's, an unreadable one), placed a tenth of the way into the
+  capture. `↑↓` select a frame and hold the capture there; `H` and `End`
+  let it run again; `+` `-` set the holdoff.
+- An 802.11b frame's SNR, read from how well its SYNC matches the Barker
+  code.
+- On a narrow screen the card gives way, its reading moves into the
+  river's title, and `Enter` opens the selected frame in the list's place.
+
+### Changed
+
+- **No NET view computes a spectrum any more.** Nothing there shows one,
+  and at the 20 Msps the Wi-Fi views run it took a whole core. On the
+  test laptop the Wi-Fi survey's feed went from breaking hundreds of times
+  in twenty seconds to a handful.
+- The Frames view replaces the stand-in that held `Channel 2`.
+
+### Fixed
+
+- Another channel's 802.11b frame showed its offset with the whole
+  channel shift in it (`-5026 kHz`); it is now against its own centre.
+- The trends no longer repeat the last spectrum reading while no spectrum
+  is being computed: they leave a gap.
+
 ## [0.6.7] - 2026-10-15
 
 **A steadier screen, and a first look at Wi-Fi.**
@@ -1142,7 +1190,8 @@ sdrtop stopped being a one-radio program.
   image rejection ratio, wavelength and antenna metrics.
 - Config file with atomic save on quit, and the CLI flags that override it.
 
-[Unreleased]: https://github.com/musithang/sdrtop/compare/v0.6.7...HEAD
+[Unreleased]: https://github.com/musithang/sdrtop/compare/v0.6.8...HEAD
+[0.6.8]: https://github.com/musithang/sdrtop/compare/v0.6.7...v0.6.8
 [0.6.7]: https://github.com/musithang/sdrtop/compare/v0.6.6...v0.6.7
 [0.6.6]: https://github.com/musithang/sdrtop/compare/v0.6.5...v0.6.6
 [0.6.5]: https://github.com/musithang/sdrtop/compare/v0.6.4...v0.6.5
