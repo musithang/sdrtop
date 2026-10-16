@@ -44,10 +44,10 @@ pub const CODED_VIEWS: &[&str] = &["net_coded"];
 /// would buy nothing on screen.
 pub const SURVEY_VIEW: &str = "net_survey";
 
-/// The Wi-Fi survey: the one Wi-Fi view that keeps a channel's visits, for
-/// the same reason; on the others the band scan they need would buy nothing
-/// on screen.
-pub const WIFI_SURVEY_VIEW: &str = "wifi_survey";
+/// The Wi-Fi views that keep a channel's visits, the survey and Airtime,
+/// for the same reason; on the others the band scan they need would buy
+/// nothing on screen.
+pub const WIFI_VISIT_VIEWS: &[&str] = &["wifi_survey", "wifi_airtime"];
 
 /// The views the classic receiver runs for: the Classic, Piconet and Bench
 /// views read the same receiver, so they watch the same channels,

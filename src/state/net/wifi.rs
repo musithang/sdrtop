@@ -102,7 +102,7 @@ impl Family {
             Family::Vht => "VHT",
             Family::He => "HE",
             Family::Eht => "EHT",
-            Family::Dsss => "DSSS",
+            Family::Dsss => "802.11b",
             Family::Undecoded => "not decoded",
         }
     }
@@ -140,9 +140,14 @@ impl Family {
 /// busiest megahertz was, the share of the visit the frames read on its
 /// centre stated as airtime (by family, in [`Family::ALL`]'s order), and how
 /// many frames were read there and heard there from other channels.
+/// `span_s` is the stretch of the stream it covered, first sample heard to
+/// last, a gap in the feed included, so `seconds / span_s` is how much of
+/// it was heard; `ended` is when its last block arrived.
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub struct Visit {
     pub seconds: f64,
+    pub span_s: f64,
+    pub ended: Option<std::time::Instant>,
     pub busy: f64,
     pub airtime: [f64; 7],
     pub read: u32,
@@ -195,7 +200,7 @@ pub struct WifiSurvey {
 }
 
 impl WifiSurvey {
-    fn of(&self, ch: u8) -> &[Visit] {
+    pub(super) fn of(&self, ch: u8) -> &[Visit] {
         usize::from(ch)
             .checked_sub(1)
             .and_then(|i| self.visits.get(i))

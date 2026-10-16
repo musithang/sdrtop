@@ -166,20 +166,22 @@ impl Wifi {
         !self.waiting.is_empty() || !self.clocks.is_empty() || !self.dsss_waiting.is_empty()
     }
 
-    /// Look through a block that starts at stream pair `first_pair`, and
-    /// count what was found.
+    /// Look through a block that starts at stream pair `first_pair`,
+    /// arrived at `now`, and count what was found; `visits` when the view
+    /// keeps the survey's visits.
     pub(super) fn look(
         &mut self,
         first_pair: u64,
         block: &[Complex<f32>],
         tuning: Tuning,
-        survey: bool,
+        visits: bool,
+        now: std::time::Instant,
         state: &Arc<Mutex<SdrMetrics>>,
     ) {
         // The survey's visit: begun past the retune's settling, ended by the
         // next retune or, locked, after a dwell, so a locked channel keeps
         // gaining visits.
-        match (survey, self.published.0) {
+        match (visits, self.published.0) {
             (true, Some(ch)) => {
                 let fresh = self.visit.as_ref().is_none_or(|v| v.channel != ch);
                 if fresh {
@@ -190,7 +192,7 @@ impl Wifi {
                     self.visit = Some(Visiting::new(ch, tuning, settle));
                 }
                 if let Some(v) = self.visit.as_mut() {
-                    v.hear(block);
+                    v.hear(first_pair, block, now);
                     if v.samples as f64 >= self.rhythm.dwell.as_secs_f64() * tuning.rate_hz {
                         let done = std::mem::replace(v, Visiting::new(ch, tuning, 0));
                         keep(done, self.rhythm, state);
@@ -572,6 +574,11 @@ struct Visiting {
     /// settling after a retune.
     settle: u64,
     samples: u64,
+    /// The first stream pair heard and the one after the last, and when
+    /// that last block arrived: the span the visit covered, gaps included.
+    first: Option<u64>,
+    end: u64,
+    heard_at: Option<std::time::Instant>,
     scan: Scan,
     airtime_us: [f64; 7],
     read: u32,
@@ -585,6 +592,9 @@ impl Visiting {
             rate_hz: tuning.rate_hz,
             settle,
             samples: 0,
+            first: None,
+            end: 0,
+            heard_at: None,
             scan: Scan::new(tuning.centre_hz, tuning.rate_hz, tuning.span_hz),
             airtime_us: [0.0; 7],
             read: 0,
@@ -592,14 +602,18 @@ impl Visiting {
         }
     }
 
-    /// A block of `block` heard on this visit.
-    fn hear(&mut self, block: &[Complex<f32>]) {
+    /// A block starting at stream pair `first_pair`, arrived at `now`,
+    /// heard on this visit.
+    fn hear(&mut self, first_pair: u64, block: &[Complex<f32>], now: std::time::Instant) {
         let skip = (self.settle as usize).min(block.len());
         self.settle -= skip as u64;
         let heard = &block[skip..];
         if !heard.is_empty() {
             self.scan.push_iq(heard);
             self.samples += heard.len() as u64;
+            self.first.get_or_insert(first_pair + skip as u64);
+            self.end = first_pair + block.len() as u64;
+            self.heard_at = Some(now);
         }
     }
 
@@ -618,6 +632,10 @@ impl Visiting {
             return None;
         }
         let seconds = self.samples as f64 / rate_hz;
+        let span_s = self
+            .first
+            .map_or(seconds, |f| self.end.saturating_sub(f) as f64 / rate_hz)
+            .max(seconds);
         // The busiest megahertz of the channel's 20, by the band's own
         // measure; a cell the view never covered has no say.
         let band = self.scan.take();
@@ -633,6 +651,8 @@ impl Visiting {
         let airtime = self.airtime_us.map(|us| (us / 1e6 / seconds).min(1.0));
         Some(Visit {
             seconds,
+            span_s,
+            ended: self.heard_at,
             busy,
             airtime,
             read: self.read,
@@ -686,7 +706,7 @@ mod tests {
             classic: false,
             survey: false,
             coded: false,
-            wifi_survey: true,
+            wifi_visits: true,
             wifi: true,
             phy: crate::signal::ble::Phy::default(),
             locked: false,
@@ -720,7 +740,14 @@ mod tests {
             for _ in 0..blocks {
                 let t = on(hz, at);
                 w.choose(t, view(), &st);
-                w.look(at, &rng.noise(4000, 0.01), t, true, &st);
+                w.look(
+                    at,
+                    &rng.noise(4000, 0.01),
+                    t,
+                    true,
+                    std::time::Instant::now(),
+                    &st,
+                );
                 at += 4000;
             }
         }
@@ -762,12 +789,57 @@ mod tests {
             if i == 20 {
                 w.interrupted(None, &st);
             }
-            w.look(i * 4000, &rng.noise(4000, 0.01), t, true, &st);
+            w.look(
+                i * 4000,
+                &rng.noise(4000, 0.01),
+                t,
+                true,
+                std::time::Instant::now(),
+                &st,
+            );
         }
         let m = st.lock().unwrap();
         let six = &m.net.wifi.survey.visits[5];
         assert_eq!(six.len(), 1, "{six:?}");
         assert!((six[0].seconds - 0.010).abs() < 1e-9, "{six:?}");
+    }
+
+    /// **A visit knows the span it covered.** 4 ms heard, 2 ms lost to a
+    /// gap in the feed, 6 ms heard: 10 ms of seconds over a 12 ms span, so
+    /// a reader can tell a visit heard whole from one a gap cut into, and
+    /// the visit says when it ended.
+    #[test]
+    fn a_visit_knows_the_span_it_covered() {
+        let st = state();
+        let mut w = Wifi {
+            rhythm: Rhythm {
+                settle: std::time::Duration::ZERO,
+                dwell: std::time::Duration::from_millis(10),
+            },
+            ..Default::default()
+        };
+        let mut rng = crate::signal::dsp::testkit::Rng::new(12);
+        let t = Tuning {
+            first_pair: 0,
+            centre_hz: 2_437e6,
+            rate_hz: 20e6,
+            span_hz: 20e6,
+        };
+        w.choose(t, view(), &st);
+        let before = std::time::Instant::now();
+        for i in (0..20u64).chain(30..60) {
+            if i == 30 {
+                w.interrupted(Some(i * 4000), &st);
+            }
+            let now = std::time::Instant::now();
+            w.look(i * 4000, &rng.noise(4000, 0.01), t, true, now, &st);
+        }
+        let m = st.lock().unwrap();
+        let six = &m.net.wifi.survey.visits[5];
+        assert_eq!(six.len(), 1, "{six:?}");
+        assert!((six[0].seconds - 0.010).abs() < 1e-9, "{six:?}");
+        assert!((six[0].span_s - 0.012).abs() < 1e-9, "{six:?}");
+        assert!(six[0].ended.is_some_and(|t| t >= before), "{six:?}");
     }
 
     /// Leaving the survey drops the visit under way: what a visit would
@@ -792,9 +864,23 @@ mod tests {
         w.choose(t, view(), &st);
         // 8 ms on the survey, long enough to be kept, then a block off it.
         for i in 0..40u64 {
-            w.look(i * 4000, &rng.noise(4000, 0.01), t, true, &st);
+            w.look(
+                i * 4000,
+                &rng.noise(4000, 0.01),
+                t,
+                true,
+                std::time::Instant::now(),
+                &st,
+            );
         }
-        w.look(40 * 4000, &rng.noise(4000, 0.01), t, false, &st);
+        w.look(
+            40 * 4000,
+            &rng.noise(4000, 0.01),
+            t,
+            false,
+            std::time::Instant::now(),
+            &st,
+        );
         w.interrupted(None, &st);
         assert!(st
             .lock()
@@ -814,8 +900,8 @@ mod tests {
     fn a_visit_keeps_what_it_heard() {
         let mut rng = crate::signal::dsp::testkit::Rng::new(5);
         let mut v = Visiting::new(6, tuning(), 4096);
-        for _ in 0..40 {
-            v.hear(&rng.noise(4096, 0.01));
+        for i in 0..40u64 {
+            v.hear(i * 4096, &rng.noise(4096, 0.01), std::time::Instant::now());
         }
         v.frame(Family::Dsss, Some(1000.0));
         v.frame(Family::Undecoded, None);
@@ -823,6 +909,8 @@ mod tests {
         let kept = v.finish(20e6, 4096).expect("long enough");
         let heard_s = 39.0 * 4096.0 / 20e6;
         assert!((kept.seconds - heard_s).abs() < 1e-9, "{kept:?}");
+        // Heard whole: the settling is not part of the span either.
+        assert!((kept.span_s - heard_s).abs() < 1e-9, "{kept:?}");
         assert!((kept.airtime[5] - 1e-3 / heard_s).abs() < 1e-9, "{kept:?}");
         assert_eq!((kept.read, kept.other), (2, 2));
         assert!(kept.busy < 0.05, "noise alone is not busy: {kept:?}");

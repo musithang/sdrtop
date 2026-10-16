@@ -23,7 +23,7 @@ name as a built-in (`command_rail`, `spectrum`, `waterfall`,
 `lab_sweep`, `micro_main`, `micro_signal`, `micro_gain`, `micro_health`,
 `micro_sweep`, `net`, `net_survey`, `net_census`, `net_ble`, `net_bt`,
 `net_piconet`, `net_bench`, `net_connection`, `net_coded`, `wifi_survey`,
-`wifi_frames`, `observer`) and your version replaces it, so the number key that
+`wifi_frames`, `wifi_airtime`, `observer`) and your version replaces it, so the number key that
 opens it now opens your layout. Those names are the whole list; a name that isn't
 on it is a new preset, which appears in the menu automatically rather than taking
 over a key.
@@ -199,6 +199,10 @@ they are.
 `net_wifi_card`, the Frames view's card: this channel's frames a second
 over whole seconds, by format, and the selected frame field by field with
 its clock and its channel, or the account of every preamble found.
+`net_wifi_airtime`, what is spending the channel's time, a column a
+second: how busy its busiest megahertz was beside the airtime its frames
+stated, by format, 0 to 100 %, with the reading over the last 20 s in its
+title.
 
 **Observer:** `observer`
 

@@ -119,8 +119,9 @@ struct View {
     survey: bool,
     /// An LE Coded view (`lock::CODED_VIEWS`).
     coded: bool,
-    /// The Wi-Fi survey, the one Wi-Fi view that keeps visits.
-    wifi_survey: bool,
+    /// A Wi-Fi view that keeps the survey's visits
+    /// (`lock::WIFI_VISIT_VIEWS`).
+    wifi_visits: bool,
     /// A Wi-Fi view: no Bluetooth receiver runs on it. Wi-Fi's and
     /// Bluetooth's receivers are two separate things, and a view runs the
     /// one its question needs.
@@ -153,7 +154,7 @@ impl View {
             survey: m.ui.active_preset == super::lock::SURVEY_VIEW,
             coded: super::lock::CODED_VIEWS.contains(&m.ui.active_preset.as_str()),
             wifi: super::is_wifi(&m.ui.section),
-            wifi_survey: m.ui.active_preset == super::lock::WIFI_SURVEY_VIEW,
+            wifi_visits: super::lock::WIFI_VISIT_VIEWS.contains(&m.ui.active_preset.as_str()),
             phy: m.net.ble_phy,
             locked: m.net.mode == crate::state::NetMode::Lock,
             following: m
@@ -283,7 +284,14 @@ impl NetWorker {
                 feed.take_off_dc(block, first_pair, rate_hz);
             }
             if let Some(block) = iq.as_deref().filter(|_| wifi_here) {
-                wifi.look(first_pair, block, tuning, view.wifi_survey, &self.state);
+                wifi.look(
+                    first_pair,
+                    block,
+                    tuning,
+                    view.wifi_visits,
+                    now,
+                    &self.state,
+                );
             }
             if survey_here {
                 band.measure(iq.as_deref(), tuning, now, &self.state);
@@ -1692,6 +1700,21 @@ mod tests {
         NetWorker::new(rx, Arc::clone(&state), eight_bit(), SAFE_BT_CHANNELS).run();
         let m = state.lock().unwrap().clone();
         m
+    }
+
+    /// The survey's visits are kept on the views that read them, the
+    /// survey and Airtime, and on no other Wi-Fi view.
+    #[test]
+    fn the_wifi_visits_are_kept_on_the_views_that_read_them() {
+        let on = |preset: &str| {
+            let mut m = SdrMetrics::fixture().streaming();
+            m.ui.section = "wifi_channel".into();
+            m.ui.active_preset = preset.into();
+            View::read(&m, 20e6).0.wifi_visits
+        };
+        assert!(on("wifi_survey"));
+        assert!(on("wifi_airtime"));
+        assert!(!on("wifi_frames"));
     }
 
     /// On a Wi-Fi view, at 20 Msps on a channel centre, Wi-Fi's receiver

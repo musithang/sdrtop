@@ -19,8 +19,10 @@
 //! - [`band`]: the band occupancy history.
 //! - [`health`]: the decode-health counts.
 //! - [`wifi`]: where Wi-Fi's receiver runs, or why not.
+//! - [`airtime`]: the Airtime view's numbers, read from the survey's visits.
 
 mod address;
+mod airtime;
 mod band;
 mod census;
 mod classic;
@@ -30,6 +32,7 @@ mod packets;
 mod wifi;
 
 pub use address::{who_with, AddressBook, AddressDisplay, FULL_ADDRESS_WIDTH};
+pub use airtime::{AirColumn, READING_COLUMNS};
 pub use band::{BandOccupancy, CellReading, COLUMN_INTERVAL, HISTORY_COLUMNS};
 pub use census::CensusState;
 #[cfg(test)]

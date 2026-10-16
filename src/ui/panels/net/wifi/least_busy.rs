@@ -485,7 +485,7 @@ mod tests {
         let text = drawn(NetWifiLeastBusyPanel, 46, 25, &state(s)).join("\n");
         assert!(text.contains("CHANNEL") && text.contains("± "), "{text}");
         assert!(
-            text.contains("DSSS") && text.contains("18.0 % of its time"),
+            text.contains("802.11b") && text.contains("18.0 % of its time"),
             "{text}"
         );
         assert!(

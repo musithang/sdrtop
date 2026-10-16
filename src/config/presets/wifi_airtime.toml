@@ -1,0 +1,19 @@
+# What is spending this channel's time? A column a second, the newest on
+# the right: how busy the channel's busiest megahertz was, whatever made
+# it, beside the airtime its own frames stated, by format, 0 to 100 %. A
+# second a gap in the feed cut into is hatched and left out of the reading,
+# which rides in the title with its 1 sigma. It reads the survey's visits
+# to the channel the radio is locked on: LOCK holds one, the side arrows
+# step them. No Bluetooth receiver runs on it.
+
+section = "wifi_channel"
+slot    = 3
+title   = "Airtime"
+blurb   = "what is spending this channel's time"
+
+panels = [
+    { name = "header",           position = "top", height = 5 },
+    { name = "net_wifi_airtime", position = "body" },
+    { name = "log",              position = "bottom", height = 5 },
+    { name = "footer",           position = "bottom" },
+]

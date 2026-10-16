@@ -4,6 +4,7 @@
 //! Wi-Fi's panels. Beside `net::ble` and `net::bt`, never inside either: the
 //! Wi-Fi bench is a menu of its own and shares no panel with Bluetooth's.
 
+pub mod airtime;
 pub mod card;
 pub mod frames;
 pub mod least_busy;
@@ -64,14 +65,19 @@ fn silence(state: &SdrMetrics) -> Option<Silence> {
     })
 }
 
-/// What the Frames view cannot show, and why: the shared silences, and the
-/// survey walking the band, since a view of one channel's frames needs the
-/// radio to stay on one.
+/// What the Frames view cannot show, and why.
 fn frames_silence(state: &SdrMetrics) -> Option<Silence> {
+    channel_silence(state, "Frames")
+}
+
+/// What a view of one channel (`view`: Frames, Airtime) cannot show, and
+/// why: the shared silences, and the survey walking the band, since a view
+/// of one channel needs the radio to stay on one.
+fn channel_silence(state: &SdrMetrics, view: &str) -> Option<Silence> {
     silence(state).or_else(|| {
         (state.net.mode != NetMode::Lock).then(|| Silence {
             head: "NOT LOCKED ON A CHANNEL",
-            why: "The Frames view reads one channel, and the survey walks the band.".into(),
+            why: format!("The {view} view reads one channel, and the survey walks the band."),
             keys: vec![
                 ("m", true),
                 (" locks here, ", false),

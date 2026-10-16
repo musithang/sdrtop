@@ -44,6 +44,7 @@ pub use net::ROSTER_SORT_KEYS;
 // funnel and latest frame with it.
 #[cfg(test)]
 pub use net::WifiSurvey;
+pub use net::{AirColumn, READING_COLUMNS};
 pub use net::{Capture, FrameZoom, Lost};
 pub use net::{Family, LeastBusy, NetDecodeHealth, RowKind, Visit, WifiClock, WifiFunnel, WifiRow};
 #[cfg(test)]

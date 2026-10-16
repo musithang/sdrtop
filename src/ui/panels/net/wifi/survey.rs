@@ -395,7 +395,7 @@ mod tests {
         assert!(text.contains("25.8") && text.contains("19.5"), "{text}");
         assert!(text.contains("busy, any transmitter"), "{text}");
         assert!(
-            text.contains("DSSS frames") && text.contains("non-HT frames"),
+            text.contains("802.11b frames") && text.contains("non-HT frames"),
             "{text}"
         );
         assert!(
