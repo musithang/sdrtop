@@ -14,6 +14,11 @@
 </p>
 
 <p align="center">
+  <sub>Supported by</sub><br>
+  <a href="https://www.sdrplay.com/"><b>SDRplay</b></a>
+</p>
+
+<p align="center">
   <a href="https://www.rust-lang.org"><img src="https://img.shields.io/badge/rust-1.88%2B-orange?logo=rust&logoColor=white" alt="Rust 1.88+"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-GPL--3.0--or--later-blue" alt="GPL-3.0-or-later"></a>
   <img src="https://img.shields.io/badge/platform-linux-lightgrey?logo=linux&logoColor=white" alt="Linux">
@@ -81,7 +86,7 @@ https://github.com/user-attachments/assets/a9c554c0-bb78-4ac9-9970-b569650d4d08
 https://github.com/user-attachments/assets/0586cbb9-a0e7-48e0-81b5-664c7c9cfd5a
 
 > [!NOTE]
-> **Classic Bluetooth and BLE are still a work in progress.** The decoding and the measurements are in; the screens and the math are still being polished, so the piconet clip is a snapshot of where it stands today, not where it ends up.
+> The clips are snapshots of the day I recorded them. The screens have kept moving since, and will keep moving.
 
 <details>
   <summary><b>📻 More screenshots</b>: lab benches, RTL-SDR, the Command Rail cards</summary>
@@ -119,7 +124,7 @@ Everything your radio knows about itself, in real time, without leaving the term
 - **A band sweep** wider than one window, stitched into a single curve with band-plan labels, `Enter` on a peak to tune straight to it.
 - **Micro field views**, because sdrtop shouldn't need a full terminal to be useful. When the panels stop being readable, each concern strips down to the one number that matters, big enough to read across the room.
 - **Observer mode**: if another app already holds the radio, sdrtop tells you which one, shows device identity and USB stats, and waits. No error dialog, no fight over the USB handle, and it takes the radio back the moment it's free.
-- **NET: the 2.4 GHz band, measured.** BLE advertising, LE Coded (BLE's long-range PHY) and classic Bluetooth piconets, decoded and then treated like any other transmitter on the bench: modulation index, drift, crystal error in ppm, advertising interval, frame error rate against SNR, slot jitter, each with its uncertainty and against the specification's limits. A BLE connection heard being set up is followed event by event, and an LE Coded advertisement to the auxiliary packet it points at, from the sidelines: it never transmits and never joins anything. Not a device list with extra steps; the list was the easy part. [The details](user_docs/net.md).
+- **NET: the 2.4 GHz band, measured.** Bluetooth (BLE, LE Coded and classic piconets) and Wi-Fi, decoded and then treated like any other transmitter on the bench: modulation, drift, crystal error in ppm, frame errors against SNR, each with its uncertainty and against the specification's limits. For Wi-Fi there is a survey of which channel is busy and a Frames view that takes one channel apart frame by frame. A BLE connection is followed from the sidelines; sdrtop never transmits and never joins anything. [The details](user_docs/net.md).
 - **Recording**: `Ctrl+R` from any layout writes the raw IQ stream as SigMF, with every sample the radio or the app lost marked where it happened, so a recording says how far it can be trusted. [The details](user_docs/recording.md).
 - **Six themes and a layout system**: presets grouped into sections, `Esc` for the menu, or define your own out of any panel sdrtop draws.
 
@@ -139,7 +144,7 @@ Measured the awkward way rather than the easy way. Bandwidth about the carrier, 
 | [The Lab presets](user_docs/lab.md): the bench-engineer views | [Configuration](user_docs/config.md): config.toml &amp; [layouts](user_docs/presets.md) | [Advanced features](user_docs/advanced.md): workflows & limits |
 | [Tips & tricks](user_docs/tips-and-tricks.md): gain, markers, workflows | [Troubleshooting](user_docs/troubleshooting.md): when things go sideways | [Supported hardware](user_docs/hardware.md): what works today |
 | [Themes](user_docs/themes.md): the six palettes | [What's new](user_docs/whats-new.md): the checkpoint log | [The demodulator](user_docs/demodulator.md): how it was built |
-| [The NET section](user_docs/net.md): BLE, LE Coded & classic Bluetooth, measured | [Layout presets](user_docs/presets.md): the built-ins and your own | [Recording](user_docs/recording.md): the IQ stream as SigMF |
+| [The NET section](user_docs/net.md): Bluetooth and Wi-Fi, measured | [Layout presets](user_docs/presets.md): the built-ins and your own | [Recording](user_docs/recording.md): the IQ stream as SigMF |
 | [Changelog](CHANGELOG.md): version by version | | |
 
 ---
@@ -165,7 +170,7 @@ Add `--hackrf` or `--rtlsdr` to install the runtime for your radio. `--soapy` ad
 
 ```sh
 sh install.sh --prefix ~/.local     # install under a directory, no root anywhere
-sh install.sh --version v0.5.1      # a specific release instead of the latest
+sh install.sh --version v0.6.8      # a specific release instead of the latest
 sh install.sh --from-source         # skip the prebuilt binary, always compile
 sh install.sh --git                 # compile the main branch, live dangerously
 sh install.sh --no-verify           # skip the checksum check (say why first)
@@ -222,7 +227,7 @@ That last command is the whole diagnostic. If your radio isn't in that list, the
 
 ## Keys
 
-Layouts are grouped into sections and **each section has its own numbers**: `Command Rail` for the general views, `Lab` for the benches, `Sweep` for the band scan, `Micro` for the field views, and on a radio that reaches 2.4 GHz, a `Bluetooth` heading over `Band`, `LE` (Bluetooth Low Energy), `Classic` (classic Bluetooth) and `LE Coded` (BLE's long range), with `Wi-Fi` beside it (its `Channel` survey of which channel is busy, on a radio that samples 20 Msps). So `2` is the RF bench inside Lab and the spectrum inside Command Rail. `Esc` opens the menu, which shows you the sections, the layouts in the one you're on, and the number that opens each. Nine keys per section, rather than one long row to memorise.
+Layouts are grouped into sections and **each section has its own numbers**: `Command Rail` for the general views, `Lab` for the benches, `Sweep` for the band scan, `Micro` for the field views, and on a radio that reaches 2.4 GHz, `Bluetooth` (`Band`, `LE`, `Classic`, `LE Coded`) and `Wi-Fi` (its `Channel` views, on a radio that samples 20 Msps). So `2` is the RF bench inside Lab and the spectrum inside Command Rail. `Esc` opens the menu, which shows you the sections, the layouts in the one you're on, and the number that opens each. Nine keys per section, rather than one long row to memorise.
 
 The ones that get you everywhere:
 
@@ -260,34 +265,18 @@ Frequency, gains, sample rate, markers, the sweep band, your theme and your layo
 
 ### ✅ Done
 
-- HackRF One and RTL-SDR: full native support
-- Spectrum, waterfall, markers, band-plan overlay
-- Four lab benches: IQ, RF, Timing, Signal
-- FM demodulator with RDS, MPX baseband, CTCSS
-- IQ correction, band sweep, observer mode
-- Six themes, layout presets, micro field views
-- PortaPack H4M in HackRF mode
-- Per-stage gain control on any radio, placed front to back rather than by the driver
-- A measured noise-step sweep on the RF bench, not just the modelled figure
-- tinySA / tinySA Ultra: calibrated dBm spectrum and native sweeps (thanks, [@AlCalzone](https://github.com/AlCalzone))
-- **NET**: BLE and classic Bluetooth, decoded and measured against the Core Specification, exported with provenance
-- BLE connections followed event by event, from the sidelines
-- **LE Coded**: BLE's long-range PHY, S=8 and S=2, with its AuxPtr followed to the auxiliary packet
-- IQ recording to SigMF, every lost sample marked where it happened
+Native support for the HackRF One, the RTL-SDR, the PortaPack H4M and the tinySA family (that last one thanks to [@AlCalzone](https://github.com/AlCalzone)). Spectrum, waterfall and the four lab benches. The FM demodulator with RDS. IQ correction, band sweeps, observer mode and SigMF recording. Bluetooth decoded and measured against the Core Specification, and the first Wi-Fi views. Release by release, it's all in the [changelog](CHANGELOG.md).
 
 ### 🔧 In progress
 
-- **SoapySDR feature parity**: closing the gap so every panel and every measurement works through a SoapySDR device the same way it does on a HackRF or RTL-SDR. The gain chain, the timing bench and the RF bench are done; the remaining gaps are the ones that need a datasheet nobody publishes
-- **Math audit**: derived measurements audited reading by reading until the numbers are not just present but trustworthy
-- **UI polish**: micro view redesign, rough edges, the small things that make a good tool feel right
+- **Wi-Fi**: the channel survey and the Frames view are in. Next up is who and what is actually spending a channel's airtime
+- **SoapySDR feature parity**: every panel and every measurement working through a SoapySDR device the way it does on a HackRF. Most of it is there; what's left needs datasheets nobody publishes
 
 ### 🔜 Next
 
-- In-app config editing
-- Native backends for hardware that lands on the desk
-- **Digital signal demodulation done properly**, the way Bluetooth now is: WiFi, ADS-B, AIS, LoRa, DMR. Each gets its own UI and its own detailed info panel. Still no audio, still just data
-
-The whole story, in order: [What's new](user_docs/whats-new.md).
+- A native backend for the SDRplay RSP1B, now that one is sitting on my desk
+- **Digital signals done properly**, the way Bluetooth is now: LoRa, DMR, GSM, ADS-B, AIS. Each gets its own screens. Still no audio, still just data
+- Editing the config from inside the app
 
 ---
 
@@ -307,17 +296,6 @@ Native support is added only after physical testing on real devices. No guessing
 **SoapySDR is the deliberate exception**, because "I don't own one" was a bad answer to give every week, and buying one of everything is not a plan, it's a fantasy with a shipping address. Nothing about your radio is hardcoded: sdrtop asks the driver for the frequency range, the gain range, whether there's an AGC, the sample format and how many of its bits mean anything. What it can't ask, it refuses rather than invents. Verified against a HackRF through `SoapyHackRF`: the loader, enumeration, opening, capabilities and streaming. Unverified: literally every other radio. [The honest version](user_docs/hardware.md#soapysdr-the-honest-version) has the full reckoning, including the gotchas I already hit.
 
 It took me a while to stop wincing at that. Before this, every row above was green and "tested on real hardware" applied to everything I shipped, which is another way of saying it separated nothing. The grey badges are what make the green ones mean something, and a rule nobody has ever had a reason to test is not a rule, it's a habit. This one now has one marked edge on it, on purpose.
-
-### The hardware wishlist
-
-Every native backend needs the device to physically exist on my desk, and development here runs on a HackRF One and a PortaPack H4M. If sdrtop is useful to you and you'd like your radio supported properly, contributions go straight into buying it. Every radio that arrives gets a real backend: tested on hardware, documented, shipped.
-
-| Device | Why it matters | Price |
-|---|---|---|
-| RTL-SDR Blog V4 | The backend is in; a unit here would let me test the clone variants | ~€25 |
-| Airspy Mini | Clean 24–1700 MHz, popular with hams and scanner hobbyists | ~€80 |
-| Airspy HF+ Discovery | Best budget HF receiver, dedicated listener community | ~€150 |
-| LimeSDR Mini 2.0 | Full-duplex, wide range, and the obvious device to confirm the SoapySDR path on | ~€160 |
 
 ---
 

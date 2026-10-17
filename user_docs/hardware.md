@@ -320,9 +320,10 @@ behaviour and `/sys` that don't have direct equivalents elsewhere.
 | LimeSDR / bladeRF / SDRplay / PlutoSDR | Try SoapySDR | These should already work through the SoapySDR backend. Nobody has told me yet |
 
 **Native** device support means physically owning and testing the hardware, and
-development here runs on a HackRF One and a PortaPack H4M. That is the whole
-bottleneck: the list moves at exactly the speed of a hobby budget. The SoapySDR
-backend exists precisely because that speed was not good enough.
+development here runs on a HackRF One, a PortaPack H4M and an RSP1B that
+SDRplay sent. That is the whole bottleneck: the list moves at exactly the speed
+of a hobby budget. The SoapySDR backend exists precisely because that speed was
+not good enough.
 
-If you'd like to move it along, the wishlist and the Ko-fi link live in the
-[project README](../README.md#supported-hardware).
+If you'd like to move it along, the project has a
+[GitHub Sponsors page](https://github.com/sponsors/musithang).

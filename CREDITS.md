@@ -18,6 +18,11 @@ This project was developed with humans and AI working together.
 Found a bug, tested a clone nobody else owns, or sent a patch? Open an issue or
 a pull request and your name belongs here too.
 
+## Hardware
+
+- **[SDRplay](https://www.sdrplay.com/)**: an RSP1B, sent to the project in
+  October 2026.
+
 ## Data
 
 - **The Bluetooth SIG's assigned numbers**
