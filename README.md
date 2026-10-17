@@ -10,19 +10,19 @@
 </p>
 
 <p align="center">
+  <a href="https://www.rust-lang.org"><img src="https://img.shields.io/badge/rust-1.88%2B-orange?logo=rust&logoColor=white" alt="Rust 1.88+"></a>
+  <a href="LICENSE"><img src="https://img.shields.io/badge/license-GPL--3.0--or--later-blue" alt="GPL-3.0-or-later"></a>
+  <img src="https://img.shields.io/badge/platform-linux-lightgrey?logo=linux&logoColor=white" alt="Linux">
+  <img src="https://img.shields.io/badge/stage-early%20development-red" alt="Early development">
+</p>
+
+<p align="center">
   <a title="This tool is Tool of The Week on Terminal Trove, The $HOME of all things in the terminal" href="https://terminaltrove.com/"><img src="https://cdn.terminaltrove.com/media/badges/tool_of_the_week/png/terminal_trove_tool_of_the_week_green_on_dark_grey_bg.png" alt="Terminal Trove Tool of The Week" width="150" /></a>
 </p>
 
 <p align="center">
   <sub>Supported by</sub><br>
   <a href="https://www.sdrplay.com/"><b>SDRplay</b></a>
-</p>
-
-<p align="center">
-  <a href="https://www.rust-lang.org"><img src="https://img.shields.io/badge/rust-1.88%2B-orange?logo=rust&logoColor=white" alt="Rust 1.88+"></a>
-  <a href="LICENSE"><img src="https://img.shields.io/badge/license-GPL--3.0--or--later-blue" alt="GPL-3.0-or-later"></a>
-  <img src="https://img.shields.io/badge/platform-linux-lightgrey?logo=linux&logoColor=white" alt="Linux">
-  <img src="https://img.shields.io/badge/stage-early%20development-red" alt="Early development">
 </p>
 
 <p align="center">
@@ -60,20 +60,20 @@
 
 It's a hobby project built in my spare time, and honestly, I made it for *you* ❤️. Use it however you like, beat on it, and don't be shy: open issues, dig through the code, and if you've got a good idea, send it my way as a pull request or just a message. This is an open table, not my private garage.
 
+https://github.com/user-attachments/assets/af278500-24ff-4d98-8129-b421fd513a49
+
+<sub>It's a terminal app, so brace yourself for the visual spectacle of monospace text in color. The only special effects are honest dBFS numbers.</sub>
+
 > [!IMPORTANT]
-> **Project status: early development.** New features keep coming, and each one goes the same way: built, measured against the specification, then polished until its screen reads at a glance. Between features the work is sharper radio math and bug fixing.
+> **Early development.** New features keep coming, and each one goes the same way: built, measured against the specification, then polished until its screen reads at a glance. Between features the work is sharper radio math and bug fixing.
 >
-> HackRF One, RTL-SDR and a tinySA Ultra ZS405 are **verified on hardware**. Anything with a **SoapySDR** driver also works, and that backend is **beta**: it was written from the API rather than from owning the radios, so treat it as "should work, nobody has confirmed it yet". [The docs say exactly which parts are confirmed](user_docs/hardware.md#soapysdr-the-honest-version). If you own one of those, an issue either way is worth a lot to me.
+> The HackRF One, the RTL-SDR, the PortaPack H4M and a tinySA Ultra are **verified on hardware**. Anything with a SoapySDR driver should work too, as a **beta** written from the API rather than from owning the radios: [which parts are confirmed](user_docs/hardware.md#soapysdr-the-honest-version).
 >
 > Known issues: plenty 😄 If something looks broken, it's either a bug or an undocumented feature. Flip a coin, then open an issue.
 
 ---
 
 ## Gallery
-
-https://github.com/user-attachments/assets/af278500-24ff-4d98-8129-b421fd513a49
-
-*It's a terminal app, so brace yourself for the visual spectacle of monospace text in color. The only special effects are honest dBFS numbers.*
 
 **Piconet follow** · classic Bluetooth<br>
 <sub>One piconet, found by the access code at the start of every packet and read packet by packet. [How it works](user_docs/net-classic.md)</sub>
@@ -84,9 +84,6 @@ https://github.com/user-attachments/assets/a9c554c0-bb78-4ac9-9970-b569650d4d08
 <sub>Station name, programme type and RadioText, read off the 57 kHz subcarrier. No audio, on purpose. [How it works](user_docs/demodulator.md#rds-in-two-halves)</sub>
 
 https://github.com/user-attachments/assets/0586cbb9-a0e7-48e0-81b5-664c7c9cfd5a
-
-> [!NOTE]
-> The clips are snapshots of the day I recorded them. The screens have kept moving since, and will keep moving.
 
 <details>
   <summary><b>📻 More screenshots</b>: lab benches, RTL-SDR, the Command Rail cards</summary>
@@ -109,24 +106,24 @@ https://github.com/user-attachments/assets/0586cbb9-a0e7-48e0-81b5-664c7c9cfd5a
 
 Got a clean capture on your hardware? Drop it in [`user_docs/pics/`](https://github.com/musithang/sdrtop/tree/main/user_docs/pics) and send a PR. Shots from radios I don't own are the most useful ones there are.
 
+<sub>The clips are snapshots of the day I recorded them; the screens keep moving.</sub>
+
 ---
 
 ## What it does
 
 Everything your radio knows about itself, in real time, without leaving the terminal. It's more than I planned. Every one of these started as "that'd be a nice little readout".
 
-- **The Command Rail**, the default cockpit: a big segmented frequency hero, an analog S-meter, HUNT · MONITOR · BENCH mode cards that follow what you're doing, recall slots, and SNR · PWR · NF · SAT each riding its own braille oscilloscope trace. All dials, no autopilot. It's a radio, not a self-driving car.
-- **Spectrum and waterfall**: FFT with peak hold, noise floor tracking, zoom, band-plan overlay and persistent markers; a scrolling spectrogram in truecolor, 256 or 16 colors with history scroll-back and frame averaging.
-- **Focus modes**: press the highlighted letter in a panel's title and the panel is yours, with cursor read-outs, holds and markers. No mouse input is handled anywhere, and nothing in sdrtop needs any.
-- **Four lab benches** for the questions a plot can't answer: is the quadrature clean, is the front end staged right, is my computer keeping up, and what *is* that signal. Noise figure, MDS, IRR, occupied bandwidth, ACPR, ADC loading, jitter. [The details](user_docs/lab.md).
-- **A demodulator that doesn't play audio**, deliberately. It opens the channel and reports what a spectrum plot structurally cannot: FM deviation about the carrier, the MPX baseband with its 19 kHz pilot, stereo injection, CTCSS, AM depth, and **RDS** station name, PTY and RadioText. It reads radios, it doesn't play them. [How it works](user_docs/demodulator.md).
-- **IQ correction, not just measurement**: one key subtracts the live DC estimate from the stream, another captures a quadrature correction and applies it. Watch the spike and the mirror images actually go away.
-- **A band sweep** wider than one window, stitched into a single curve with band-plan labels, `Enter` on a peak to tune straight to it.
-- **Micro field views**, because sdrtop shouldn't need a full terminal to be useful. When the panels stop being readable, each concern strips down to the one number that matters, big enough to read across the room.
-- **Observer mode**: if another app already holds the radio, sdrtop tells you which one, shows device identity and USB stats, and waits. No error dialog, no fight over the USB handle, and it takes the radio back the moment it's free.
-- **NET: the 2.4 GHz band, measured.** Bluetooth (BLE, LE Coded and classic piconets) and Wi-Fi, decoded and then treated like any other transmitter on the bench: modulation, drift, crystal error in ppm, frame errors against SNR, each with its uncertainty and against the specification's limits. For Wi-Fi there is a survey of which channel is busy and a Frames view that takes one channel apart frame by frame. A BLE connection is followed from the sidelines; sdrtop never transmits and never joins anything. [The details](user_docs/net.md).
-- **Recording**: `Ctrl+R` from any layout writes the raw IQ stream as SigMF, with every sample the radio or the app lost marked where it happened, so a recording says how far it can be trusted. [The details](user_docs/recording.md).
-- **Six themes and a layout system**: presets grouped into sections, `Esc` for the menu, or define your own out of any panel sdrtop draws.
+- **The Command Rail**, the default cockpit: a big frequency hero, an analog S-meter, mode cards that follow what you're doing, and SNR, power, noise figure and saturation each on its own live trace. All dials, no autopilot. It's a radio, not a self-driving car.
+- **Spectrum and waterfall** with peak hold, noise floor tracking, zoom, a band-plan overlay and markers.
+- **Four lab benches** for the questions a plot can't answer: is the quadrature clean, is the front end staged right, is my computer keeping up, and what *is* that signal. [The details](user_docs/lab.md).
+- **A demodulator that doesn't play audio**, deliberately: FM deviation, the MPX baseband and its pilot, stereo, CTCSS, AM depth and RDS. It reads radios, it doesn't play them. [How it works](user_docs/demodulator.md).
+- **IQ correction**, not just measurement: take the DC spike and the mirror image out of the stream and watch them actually go away.
+- **A band sweep** wider than one window, stitched into one curve; `Enter` on a peak tunes straight to it.
+- **NET: the 2.4 GHz band, measured.** Bluetooth (BLE, LE Coded and classic) and Wi-Fi, decoded and then treated like any other transmitter on the bench, each number with its uncertainty and against the specification's limits. Connections are followed from the sidelines: sdrtop never transmits and never joins anything. (First thing it taught me: the biggest airtime hog on my channel isn't Wi-Fi 6, it's a 1 Mb/s 802.11b beacon that should have retired around the time flip phones did.) [The details](user_docs/net.md).
+- **Recording**: `Ctrl+R` writes the raw IQ stream as SigMF, every lost sample marked where it happened. [The details](user_docs/recording.md).
+- **Small screens and shared radios**: micro views that strip each concern down to one big number, and an observer mode that waits politely when another app holds the radio.
+- **Focus modes, themes and layouts**: press a panel's highlighted letter and it's yours; six themes; presets you can rearrange or write yourself. Nothing needs a mouse.
 
 Measured the awkward way rather than the easy way. Bandwidth about the carrier, not across whatever span you happened to capture, so a mistuned radio confesses instead of faking a good number. The noise floor as a density, so the same receiver reads as the same receiver whatever the sample rate. And every lab panel marks itself **[STALE]** the moment RX stops, so a frozen number is never mistaken for a live one.
 
@@ -276,7 +273,7 @@ Native support for the HackRF One, the RTL-SDR, the PortaPack H4M and the tinySA
 
 - A native backend for the SDRplay RSP1B, now that one is sitting on my desk
 - **Digital signals done properly**, the way Bluetooth is now: LoRa, DMR, GSM, ADS-B, AIS. Each gets its own screens. Still no audio, still just data
-- Editing the config from inside the app
+- Editing the config from inside the app. Until then: `$EDITOR` and a little courage
 
 ---
 
