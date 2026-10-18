@@ -47,7 +47,7 @@
 </p>
 
 <p align="center">
-  <a href="#-install">Install</a> ·
+  <a href="#install">Install</a> ·
   <a href="#keys">Keys</a> ·
   <a href="#config">Config</a> ·
   <a href="#roadmap">Roadmap</a> ·
@@ -67,8 +67,6 @@ https://github.com/user-attachments/assets/af278500-24ff-4d98-8129-b421fd513a49
 > [!IMPORTANT]
 > **Early development.** New features keep coming, and each one goes the same way: built, measured against the specification, then polished until its screen reads at a glance. Between features the work is sharper radio math and bug fixing.
 >
-> The HackRF One, the RTL-SDR, the PortaPack H4M and a tinySA Ultra are **verified on hardware**. Anything with a SoapySDR driver should work too, as a **beta** written from the API rather than from owning the radios: [which parts are confirmed](user_docs/hardware.md#soapysdr-the-honest-version).
->
 > Known issues: plenty 😄 If something looks broken, it's either a bug or an undocumented feature. Flip a coin, then open an issue.
 
 ---
@@ -84,6 +82,8 @@ https://github.com/user-attachments/assets/a9c554c0-bb78-4ac9-9970-b569650d4d08
 <sub>Station name, programme type and RadioText, read off the 57 kHz subcarrier. No audio, on purpose. [How it works](user_docs/demodulator.md#rds-in-two-halves)</sub>
 
 https://github.com/user-attachments/assets/0586cbb9-a0e7-48e0-81b5-664c7c9cfd5a
+
+<sub>The clips are snapshots of the day I recorded them; the screens keep moving.</sub>
 
 <details>
   <summary><b>📻 More screenshots</b>: lab benches, RTL-SDR, the Command Rail cards</summary>
@@ -105,8 +105,6 @@ https://github.com/user-attachments/assets/0586cbb9-a0e7-48e0-81b5-664c7c9cfd5a
 </details>
 
 Got a clean capture on your hardware? Drop it in [`user_docs/pics/`](https://github.com/musithang/sdrtop/tree/main/user_docs/pics) and send a PR. Shots from radios I don't own are the most useful ones there are.
-
-<sub>The clips are snapshots of the day I recorded them; the screens keep moving.</sub>
 
 ---
 
@@ -131,14 +129,14 @@ Measured the awkward way rather than the easy way. Bandwidth about the carrier, 
 
 ---
 
-### 📖 Documentation
+## Documentation
 
 **[→ Full user guide](user_docs/README.md)**. This page is the short version; everything below is covered properly over there.
 
 | | | |
 |---|---|---|
 | [Getting started](user_docs/getting-started.md): install & run | [Keyboard shortcuts](user_docs/keys.md): every key | [What's on screen](user_docs/screens.md): panels explained |
-| [The Lab presets](user_docs/lab.md): the bench-engineer views | [Configuration](user_docs/config.md): config.toml &amp; [layouts](user_docs/presets.md) | [Advanced features](user_docs/advanced.md): workflows & limits |
+| [The Lab presets](user_docs/lab.md): the bench-engineer views | [Configuration](user_docs/config.md): config.toml, every field | [Advanced features](user_docs/advanced.md): workflows & limits |
 | [Tips & tricks](user_docs/tips-and-tricks.md): gain, markers, workflows | [Troubleshooting](user_docs/troubleshooting.md): when things go sideways | [Supported hardware](user_docs/hardware.md): what works today |
 | [Themes](user_docs/themes.md): the six palettes | [What's new](user_docs/whats-new.md): the checkpoint log | [The demodulator](user_docs/demodulator.md): how it was built |
 | [The NET section](user_docs/net.md): Bluetooth and Wi-Fi, measured | [Layout presets](user_docs/presets.md): the built-ins and your own | [Recording](user_docs/recording.md): the IQ stream as SigMF |
@@ -146,7 +144,7 @@ Measured the awkward way rather than the easy way. Bandwidth about the carrier, 
 
 ---
 
-## 📦 Install
+## Install
 
 **Requirements:** Linux · a HackRF One, an RTL-SDR, a tinySA, or anything SoapySDR speaks to
 
@@ -171,10 +169,10 @@ sh install.sh --version v0.6.8      # a specific release instead of the latest
 sh install.sh --from-source         # skip the prebuilt binary, always compile
 sh install.sh --git                 # compile the main branch, live dangerously
 sh install.sh --no-verify           # skip the checksum check (say why first)
-sh install.sh --hackrf              # Install the HackRF runtime
-sh install.sh --rtlsdr              # Install the RTL-SDR runtime
+sh install.sh --hackrf              # add the HackRF runtime
+sh install.sh --rtlsdr              # add the RTL-SDR runtime
 sh install.sh --soapy               # add SoapySDR and its driver modules
-sh install.sh --deps-only --hackrf   # Install only the selected runtime
+sh install.sh --deps-only --hackrf  # only the selected runtime, no sdrtop
 sh install.sh --uninstall           # remove what a previous run installed
 sh install.sh --help                # this list, from the script itself
 ```
@@ -194,14 +192,12 @@ sdrtop is on [crates.io](https://crates.io/crates/sdrtop). Cargo compiles it for
 ```sh
 sudo apt install build-essential    # Debian / Ubuntu / Mint
 sudo pacman -S base-devel           # Arch / Manjaro
-sudo dnf install gcc               # Fedora
+sudo dnf install gcc                # Fedora
 
 cargo install sdrtop --locked
 ```
 
-Building needs Rust 1.88+ and a C compiler/linker. Install Rust with [rustup](https://rustup.rs). No SDR libraries, development headers or pkg-config are required. At runtime, HackRF needs libhackrf 2023.01.1+ and RTL-SDR needs librtlsdr. A missing or incompatible library disables only its backend.
-
-tinySA builds and runs without libhackrf or librtlsdr. Install native SDR runtimes only for the backends you use.
+Building needs Rust 1.88+ and a C compiler/linker. Install Rust with [rustup](https://rustup.rs). No SDR libraries, development headers or pkg-config are required. At runtime, HackRF needs libhackrf 2023.01.1+ and RTL-SDR needs librtlsdr. A missing or incompatible library disables only its own backend, so install the runtimes for the radios you have (a tinySA needs neither).
 
 Then go make coffee: a few minutes on a laptop, considerably more on a Raspberry Pi. It's not frozen, it's just Rust.
 
@@ -282,10 +278,11 @@ Native support for the HackRF One, the RTL-SDR, the PortaPack H4M and the tinySA
 | Device | Status | Notes |
 |---|---|---|
 | HackRF One | ✅ Full support | All diagnostics, gain stages, ADC metrics |
+| PortaPack H4M (Mayhem) | ✅ Full support | HackRF mode: all HackRF diagnostics apply |
 | RTL-SDR (R820T, E4000, R828D) | ✅ Full support | Single tuner gain + AGC; no VGA, no BB filter, no Friis NF |
 | tinySA / Ultra / Ultra+ | ✅ Spectrum support | ZS405 verified; calibrated dBm spectrum, waterfall and native band sweeps |
 | **Anything with a SoapySDR driver** | 🧪 **Beta** | Airspy, SDRplay, Pluto, Lime, bladeRF, USRP, SoapyRemote. Unconfirmed on anything but a HackRF |
-| PortaPack H4M (Mayhem) | ✅ Full support | HackRF mode: all HackRF diagnostics apply |
+| SDRplay RSP1B | 🔲 Planned | On my desk; the native backend is next |
 | HackRF Pro | 🔲 Planned | Needs hardware |
 
 Native support is added only after physical testing on real devices. No guessing from datasheets. Translation: that list moves at exactly the speed of my hobby budget.
@@ -326,4 +323,4 @@ Yep, it's a radio tower. I'm a simple man, I see free time, I make ASCII art.
 
 ---
 
-**[Credits](CREDITS.md)**
+**[Credits](CREDITS.md)** · **[Contributing](CONTRIBUTING.md)** · **[License](LICENSE)**: GPL-3.0-or-later
