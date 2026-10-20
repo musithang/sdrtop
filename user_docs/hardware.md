@@ -64,9 +64,10 @@ sdrtop --device tinysa=/dev/ttyACM2
 sdrtop --device 'tinysa=/dev/ttyACM2?input=high'
 ```
 
-Automatic discovery recognizes the official USB CDC identity on
-`/dev/ttyACM*`. The explicit form selects a path when several devices are
-present or discovery cannot inspect sysfs. A Basic tinySA uses the persisted
+Automatic discovery recognizes the official USB CDC identity: on Linux among
+`/dev/ttyACM*`, on a Mac among `/dev/cu.usbmodem*` (there the path looks like
+`tinysa=/dev/cu.usbmodem4001`). The explicit form selects a path when several
+devices are present or discovery can't see the USB identity. A Basic tinySA uses the persisted
 `[tinysa].basic_input` value. The default is LOW from 100 kHz to 350 MHz. HIGH
 covers 240 MHz to 959 MHz. The supported firmware defines 959 MHz as the HIGH
 limit. `?input=low` or `?input=high` overrides the config at startup. A bare
@@ -315,8 +316,8 @@ the rest before I did: an M4 MacBook Air with an RTL-SDR Blog V4, through
 Homebrew. [Observer mode](advanced.md#observer-mode-when-another-app-owns-the-radio)
 works there too, reading what macOS's own device registry says about the radio
 and the app holding it; nobody has watched it do that on a real Mac yet, so if
-you're the first, tell me what it said. A tinySA isn't found by itself on a Mac
-yet. sdrtop looks for the
+you're the first, tell me what it said. The same goes for a
+[tinySA](#tinysa), which is found on its `/dev/cu.usbmodem*` port. sdrtop looks for the
 libraries where Homebrew and MacPorts put them (`/opt/homebrew/lib`,
 `/usr/local/lib`, `/opt/local/lib`), so this is the whole setup:
 
