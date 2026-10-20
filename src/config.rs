@@ -395,14 +395,22 @@ impl AppConfig {
         t
     }
 
+    /// Write the config to `path` through a temporary file beside it, so a
+    /// failed write never leaves half a file. A failure names the file it
+    /// could not create, write or replace: "Permission denied" alone sends
+    /// the reader looking in the wrong place.
     pub fn save(&self, path: &Path) -> anyhow::Result<()> {
+        use anyhow::Context;
         if let Some(parent) = path.parent() {
-            std::fs::create_dir_all(parent)?;
+            std::fs::create_dir_all(parent)
+                .with_context(|| format!("could not create {}", parent.display()))?;
         }
         let content = toml::to_string_pretty(self)?;
         let tmp = path.with_extension("tmp");
-        std::fs::write(&tmp, content)?;
-        std::fs::rename(&tmp, path)?;
+        std::fs::write(&tmp, content)
+            .with_context(|| format!("could not write {}", tmp.display()))?;
+        std::fs::rename(&tmp, path)
+            .with_context(|| format!("could not replace {}", path.display()))?;
         Ok(())
     }
 }
@@ -877,6 +885,40 @@ panels = [
             29,
             "twenty-eight built-ins plus the one good file"
         );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// **A save that fails names the file it could not write**: the
+    /// directory it could not create, or the temporary file it could not
+    /// write, never a bare "Permission denied (os error 13)" with no path.
+    #[test]
+    fn a_failed_save_names_the_file() {
+        let dir = std::env::temp_dir().join(format!("sdrtop-save-fails-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+
+        // The config's directory is a file: it cannot be created.
+        let blocker = dir.join("not-a-dir");
+        std::fs::write(&blocker, "").unwrap();
+        let err = format!(
+            "{:#}",
+            AppConfig::default()
+                .save(&blocker.join("config.toml"))
+                .unwrap_err()
+        );
+        assert!(err.contains(&blocker.display().to_string()), "{err}");
+
+        // The temporary file's name is taken by a directory: it cannot be
+        // written.
+        std::fs::create_dir_all(dir.join("config.tmp")).unwrap();
+        let err = format!(
+            "{:#}",
+            AppConfig::default()
+                .save(&dir.join("config.toml"))
+                .unwrap_err()
+        );
+        assert!(err.contains("config.tmp"), "{err}");
+
         let _ = std::fs::remove_dir_all(&dir);
     }
 

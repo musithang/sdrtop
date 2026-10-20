@@ -4,7 +4,8 @@
 use libc::{c_char, c_int, c_uchar, c_void};
 use std::sync::OnceLock;
 
-use crate::hardware::runtime_lib::{self, Host};
+use crate::hardware::runtime_lib;
+use crate::host::Host;
 
 use super::super::loader::{load, symbol};
 

@@ -26,6 +26,9 @@ mod api;
 
 // Where the API looks for libSoapySDR on this host: the app's own module,
 // reached by the path the API names it by.
+#[path = "../src/host.rs"]
+#[allow(dead_code)]
+mod host;
 #[path = "../src/hardware/runtime_lib.rs"]
 #[allow(dead_code)]
 mod runtime_lib;

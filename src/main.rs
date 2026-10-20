@@ -14,6 +14,7 @@ pub use theme::Theme;
 mod event;
 mod export;
 mod hardware;
+mod host;
 mod palette;
 mod signal;
 mod state;
@@ -48,30 +49,41 @@ fn log_path() -> PathBuf {
 /// "Allocating zero-copy buffers", "Found … tuner", "\[R82XX\] PLL not locked!",
 /// some from its own read thread - which would scribble over the alternate
 /// screen. Sending it to a file keeps the TUI clean while preserving the output
-/// for debugging. Best-effort: returns `None` (and leaves stderr alone) on error.
-fn redirect_stderr_to_log() -> Option<i32> {
+/// for debugging. Best-effort: on error stderr is left alone and the reason is
+/// returned, for the app's own log to say.
+fn redirect_stderr_to_log() -> Result<i32, String> {
     use std::os::unix::io::AsRawFd;
-    let path = log_path();
-    if let Some(parent) = path.parent() {
-        let _ = std::fs::create_dir_all(parent);
-    }
-    let file = std::fs::OpenOptions::new()
-        .create(true)
-        .append(true)
-        .open(&path)
-        .ok()?;
+    let file = open_log(&log_path())?;
     unsafe {
         let saved = libc::dup(libc::STDERR_FILENO);
         if saved < 0 {
-            return None;
+            return Err("the log could not be attached to stderr".to_string());
         }
         if libc::dup2(file.as_raw_fd(), libc::STDERR_FILENO) < 0 {
             libc::close(saved);
-            return None;
+            return Err("the log could not be attached to stderr".to_string());
         }
         // `file` drops here, closing its own fd; fd 2 keeps the open description.
-        Some(saved)
+        Ok(saved)
     }
+}
+
+/// The session log at `path`, opened to append, its directory made if
+/// missing; why not, naming the file, when it cannot be.
+fn open_log(path: &std::path::Path) -> Result<std::fs::File, String> {
+    if let Some(parent) = path.parent() {
+        let _ = std::fs::create_dir_all(parent);
+    }
+    std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(path)
+        .map_err(|e| {
+            format!(
+                "The log {} could not be opened ({e}): library messages may show on screen.",
+                path.display()
+            )
+        })
 }
 
 /// Restore the real stderr saved by [`redirect_stderr_to_log`].
@@ -164,7 +176,10 @@ async fn main() -> Result<()> {
 
     // From here on the alternate screen is live - keep backend-library chatter
     // off it by routing stderr to the log file until we tear the TUI down.
-    let saved_stderr = redirect_stderr_to_log();
+    let (saved_stderr, log_problem) = match redirect_stderr_to_log() {
+        Ok(fd) => (Some(fd), None),
+        Err(why) => (None, Some(why)),
+    };
 
     let selected = if devices.len() > 1 {
         let items: Vec<(usize, String)> = devices
@@ -206,6 +221,9 @@ async fn main() -> Result<()> {
         }
     };
 
+    if let Some(why) = log_problem {
+        app.note(why);
+    }
     let result = app.run(&mut terminal);
 
     restore_stderr(saved_stderr);
@@ -213,6 +231,9 @@ async fn main() -> Result<()> {
     execute!(terminal.backend_mut(), LeaveAlternateScreen)?;
     terminal.show_cursor()?;
 
+    if let Some(warning) = app.unsaved() {
+        eprintln!("sdrtop: {warning}");
+    }
     application_result(result)
 }
 
@@ -221,6 +242,20 @@ mod cli_tests {
     use super::{application_result, Cli};
     use clap::CommandFactory;
     use std::io;
+
+    /// **A log that cannot be opened says which file and why**, so the
+    /// reason backend messages land on the screen is not a mystery.
+    #[test]
+    fn a_log_that_cannot_be_opened_says_which_file_and_why() {
+        let blocker =
+            std::env::temp_dir().join(format!("sdrtop-log-blocked-{}", std::process::id()));
+        std::fs::write(&blocker, "").unwrap();
+        let path = blocker.join("sdrtop.log");
+        let why = super::open_log(&path).unwrap_err();
+        assert!(why.contains(&path.display().to_string()), "{why}");
+        assert!(why.contains("could not be opened"), "{why}");
+        let _ = std::fs::remove_file(&blocker);
+    }
 
     #[test]
     fn application_errors_keep_the_full_chain_for_process_failure() {

@@ -666,20 +666,41 @@ pub fn api() -> Option<&'static SoapyApi> {
 /// symlink from the `-dev` package and can point at anything, including a build
 /// nobody meant to run against.
 const LINUX: &[&str] = &["libSoapySDR.so.0.8", "libSoapySDR.so.0", "libSoapySDR.so"];
-/// The same on macOS, the versioned `.dylib` first for the same reason.
-const MACOS: &[&str] = &["libSoapySDR.0.8.dylib", "libSoapySDR.dylib"];
+/// The same on macOS, the versioned `.dylib` first for the same reason. A
+/// 0.9 comes after every 0.8, so a Mac with only a 0.9 is told by the ABI
+/// check why it is refused, rather than finding nothing.
+const MACOS: &[&str] = &[
+    "libSoapySDR.0.8.dylib",
+    "libSoapySDR.0.9.dylib",
+    "libSoapySDR.dylib",
+];
 
 /// The names libSoapySDR is tried by on `host`, in order.
-fn names(host: crate::hardware::runtime_lib::Host) -> Vec<String> {
+fn names(host: crate::host::Host) -> Vec<String> {
     crate::hardware::runtime_lib::candidates(host, LINUX, MACOS)
 }
 
+/// How libSoapySDR is opened on `host`. On macOS its symbols are made
+/// global: driver modules built for flat-namespace lookup (MacPorts' among
+/// them) resolve SoapySDR's own symbols from what is already loaded, and fail
+/// with "symbol not found in flat namespace" otherwise. Linux keeps the
+/// loader's default, which libloading's `Library::new` has always used.
+fn open_flags(host: crate::host::Host) -> std::os::raw::c_int {
+    use libloading::os::unix::{RTLD_GLOBAL, RTLD_LAZY, RTLD_LOCAL};
+    match host {
+        crate::host::Host::Linux => RTLD_LAZY | RTLD_LOCAL,
+        crate::host::Host::MacOs => RTLD_LAZY | RTLD_GLOBAL,
+    }
+}
+
 fn load() -> Option<SoapyApi> {
-    for name in &names(crate::hardware::runtime_lib::Host::current()) {
+    let host = crate::host::Host::current();
+    for name in &names(host) {
         // Safety: opening a shared library runs its initialisers, which is why
         // this is unsafe. libSoapySDR is a well-behaved library and the names
         // above are fixed, not taken from user input.
-        let Ok(lib) = (unsafe { libloading::Library::new(name) }) else {
+        let opened = unsafe { libloading::os::unix::Library::open(Some(name), open_flags(host)) };
+        let Ok(lib) = opened.map(libloading::Library::from) else {
             continue;
         };
         return match resolve(lib) {
@@ -799,18 +820,36 @@ unsafe fn cstr_to_string(ptr: *const c_char) -> String {
 mod tests {
     use super::*;
 
+    /// **On macOS libSoapySDR's symbols are opened global**: a driver
+    /// module built for flat-namespace lookup resolves SoapySDR's own
+    /// symbols from what is already loaded. Linux keeps the loader's default.
+    #[test]
+    fn on_macos_soapysdr_is_opened_global() {
+        use crate::host::Host;
+        use libloading::os::unix::{RTLD_GLOBAL, RTLD_LAZY, RTLD_LOCAL};
+        assert_eq!(open_flags(Host::Linux), RTLD_LAZY | RTLD_LOCAL);
+        assert_eq!(open_flags(Host::MacOs), RTLD_LAZY | RTLD_GLOBAL);
+    }
+
     /// On Linux the names are unchanged, the versioned soname first; on
     /// macOS the `.dylib`s Homebrew installs, the versioned one first,
     /// Homebrew's Apple Silicon prefix among the places tried.
     #[test]
     fn the_library_is_looked_for_by_the_hosts_names() {
-        use crate::hardware::runtime_lib::Host;
+        use crate::host::Host;
         assert_eq!(
             names(Host::Linux),
             ["libSoapySDR.so.0.8", "libSoapySDR.so.0", "libSoapySDR.so"].map(String::from)
         );
         let mac = names(Host::MacOs);
         assert_eq!(mac[0], "libSoapySDR.0.8.dylib");
+        // A 0.9 is tried only after every 0.8: it is opened to be refused by
+        // the ABI check with a line that says why, not to win over a 0.8.
+        let at = |n: &str| mac.iter().position(|m| m == n).unwrap();
+        assert!(
+            at("/opt/local/lib/libSoapySDR.0.8.dylib") < at("libSoapySDR.0.9.dylib"),
+            "{mac:?}"
+        );
         assert!(
             mac.contains(&"/opt/homebrew/lib/libSoapySDR.0.8.dylib".to_string()),
             "{mac:?}"

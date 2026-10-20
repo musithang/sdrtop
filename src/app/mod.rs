@@ -69,6 +69,10 @@ pub struct App {
     /// The IQ recording `Ctrl+R` started, while its writer may still be at
     /// work. See `export::iq`.
     pub(super) recorder: Option<crate::export::iq::Recorder>,
+    /// What could not be saved when the session ended, and why: said once
+    /// the terminal is restored, as a warning, since the session itself
+    /// ended as asked.
+    pub(super) unsaved: Option<String>,
 }
 
 impl App {
@@ -298,10 +302,26 @@ impl App {
         )
     }
 
-    fn finish_session(&self) -> io::Result<()> {
+    fn finish_session(&mut self) -> io::Result<()> {
         self.restore_noise_sweep();
         self.restore_sweep_tuning();
-        self.save_config().map_err(io::Error::other)
+        if let Err(e) = self.save_config() {
+            self.unsaved = Some(format!("not all settings were saved: {e:#}"));
+        }
+        Ok(())
+    }
+
+    /// What could not be saved when the session ended, if anything.
+    pub fn unsaved(&self) -> Option<&str> {
+        self.unsaved.as_deref()
+    }
+
+    /// A line in the app's own log, from outside the event loop.
+    pub fn note(&self, line: impl Into<String>) {
+        self.state
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .push_log(line.into());
     }
 
     fn draw<B: Backend>(&mut self, terminal: &mut Terminal<B>) -> io::Result<()> {
@@ -924,6 +944,37 @@ mod tests {
         std::fs::remove_file(path).unwrap();
     }
 
+    /// **Quitting with settings that cannot be written is a warning, not a
+    /// failed exit**: the session ends as asked, and what was not saved, and
+    /// where, is kept for the line printed once the terminal is back.
+    #[test]
+    fn quitting_with_settings_that_cannot_be_written_warns_and_ends_the_session() {
+        let state = Arc::new(Mutex::new(SdrMetrics::fixture()));
+        let device = Arc::new(QuitDevice::new(state.lock().unwrap().caps.as_ref().clone()));
+        let blocker =
+            std::env::temp_dir().join(format!("sdrtop-quit-unsaved-{}", std::process::id()));
+        std::fs::write(&blocker, "").unwrap();
+        let path = blocker.join("config.toml");
+        let mut app = App::assemble(
+            AppConfig::default(),
+            Some(path),
+            state,
+            Some(device),
+            None,
+            None,
+        )
+        .unwrap();
+
+        assert!(app.finish_session().is_ok());
+        let warning = app.unsaved().expect("the failed save is kept").to_string();
+        assert!(warning.contains("not all settings were saved"), "{warning}");
+        assert!(
+            warning.contains(&blocker.display().to_string()),
+            "{warning}"
+        );
+        let _ = std::fs::remove_file(&blocker);
+    }
+
     #[test]
     fn backend_hook_and_file_save_failures_are_both_reported() {
         let state = Arc::new(Mutex::new(SdrMetrics::fixture()));
@@ -958,7 +1009,7 @@ mod tests {
     }
 
     #[test]
-    fn ordinary_quit_reports_save_failure_and_preserves_existing_config() {
+    fn ordinary_quit_warns_of_a_save_failure_and_preserves_existing_config() {
         static NEXT_PATH: AtomicUsize = AtomicUsize::new(0);
         let root = std::env::temp_dir().join(format!(
             "sdrtop-quit-save-failure-{}-{}",
@@ -988,9 +1039,12 @@ mod tests {
             .unwrap();
         let mut terminal = Terminal::new(ratatui::backend::TestBackend::new(80, 24)).unwrap();
 
-        let error = app.run(&mut terminal).unwrap_err();
+        // The quit itself succeeds; the save failure is a warning that names
+        // the file, and the config already there is left as it was.
+        app.run(&mut terminal).unwrap();
 
-        assert_eq!(error.kind(), io::ErrorKind::Other);
+        let warning = app.unsaved().expect("the failed save is kept");
+        assert!(warning.contains("config.tmp"), "{warning}");
         assert_eq!(std::fs::read(&path).unwrap(), original);
         std::fs::remove_dir(path.with_extension("tmp")).unwrap();
         std::fs::remove_file(path).unwrap();

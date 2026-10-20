@@ -363,11 +363,21 @@ aren't preserved. Keep them in a config you don't quit-and-save over
 
 ### Settings aren't saved at all
 
+When a save fails, sdrtop says so as it quits, naming the file:
+`sdrtop: not all settings were saved: could not write ~/.config/sdrtop/config.tmp:
+Permission denied`. The session still ends normally; only the settings are lost.
+
 1. **Quit with `q`, not `Ctrl+C`.** Only a clean quit saves.
 2. **Check the directory is writable:**
    ```sh
    ls -ld ~/.config/sdrtop/
    ```
+   Owned by root? An earlier `sudo sdrtop` made it. Give it back:
+   ```sh
+   sudo chown -R "$USER" ~/.config/sdrtop
+   ```
+   The same goes for `sdrtop.log`: when it can't be opened, the in-app log says
+   so, and library messages may show on screen until it can.
 3. **Check you have disk space.** A full home partition makes the save fail.
    ```sh
    df -h ~/

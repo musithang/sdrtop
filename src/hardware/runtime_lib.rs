@@ -15,23 +15,7 @@
 //! The host is a parameter, so the macOS lists are held by tests that run on
 //! Linux, with no Mac and no library anywhere.
 
-/// The host's family, as far as finding a library goes.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum Host {
-    Linux,
-    MacOs,
-}
-
-impl Host {
-    /// The host this build runs on.
-    pub fn current() -> Host {
-        if cfg!(target_os = "macos") {
-            Host::MacOs
-        } else {
-            Host::Linux
-        }
-    }
-}
+use crate::host::Host;
 
 /// Where macOS package managers put libraries the loader would not find by
 /// name: Homebrew on Apple Silicon, Homebrew on Intel, MacPorts.

@@ -368,6 +368,7 @@ impl App {
             config_path,
             events: EventStream::new(Duration::from_millis(33)),
             show_footer: true,
+            unsaved: None,
             deck_shown: false,
             engine,
             theme,
