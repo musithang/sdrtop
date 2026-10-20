@@ -68,7 +68,17 @@ unsafe extern "C" {
 }
 
 /// A CoreFoundation object this code created and releases.
+///
+/// Made only through [`Cf::created`], which turns a null result into
+/// `None`: CoreFoundation stops the whole process on `CFRelease(NULL)`, and
+/// a property the device does not have comes back null.
 struct Cf(CfTypeRef);
+
+impl Cf {
+    fn created(object: CfTypeRef) -> Option<Cf> {
+        (!object.is_null()).then(|| Cf(object))
+    }
+}
 
 impl Drop for Cf {
     fn drop(&mut self) {
@@ -92,7 +102,7 @@ fn cf_string(text: &str) -> Option<Cf> {
     // SAFETY: `c` is a valid NUL-terminated string for the length of the call.
     let s =
         unsafe { CFStringCreateWithCString(std::ptr::null(), c.as_ptr(), CF_STRING_ENCODING_UTF8) };
-    (!s.is_null()).then_some(Cf(s))
+    Cf::created(s)
 }
 
 /// One registry property of `entry`, or `None` when it has no such key.
@@ -100,7 +110,7 @@ fn property(entry: &Io, key: &str) -> Option<Cf> {
     let key = cf_string(key)?;
     // SAFETY: `entry` is a live registry entry and `key` a live CFString.
     let value = unsafe { IORegistryEntryCreateCFProperty(entry.0, key.0, std::ptr::null(), 0) };
-    (!value.is_null()).then_some(Cf(value))
+    Cf::created(value)
 }
 
 fn number(entry: &Io, key: &str) -> Option<i64> {
@@ -185,5 +195,28 @@ pub fn find(wanted: &Wanted) -> Result<Option<UsbDeviceInfo>, String> {
         if let Some(info) = from_iokit(&props(&entry), wanted) {
             return Ok(Some(info));
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[link(name = "IOKit", kind = "framework")]
+    unsafe extern "C" {
+        fn IORegistryGetRootEntry(main_port: MachPort) -> IoObject;
+    }
+
+    /// **A key the entry does not have is `None`, and nothing else.** IOKit
+    /// answers it with null, and releasing that null stops the process; a
+    /// USB device with no serial number is the everyday case.
+    #[test]
+    fn a_property_the_entry_does_not_have_is_none() {
+        // SAFETY: the root entry always exists; it is released by `Io`.
+        let root = Io(unsafe { IORegistryGetRootEntry(MAIN_PORT_DEFAULT) });
+        assert_ne!(root.0, 0, "the registry has a root");
+        assert!(property(&root, "sdrtop: no such key").is_none());
+        assert_eq!(number(&root, "sdrtop: no such key"), None);
+        assert_eq!(string(&root, "sdrtop: no such key"), None);
     }
 }
