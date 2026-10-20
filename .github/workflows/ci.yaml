@@ -73,8 +73,8 @@ jobs:
           persist-credentials: false
 
       - name: Install native runtimes
-        # Keep coverage with both native runtime libraries installed
-        run: sudo apt-get update && sudo apt-get install -y libhackrf0 librtlsdr2
+        # Keep coverage with both native runtime libraries and libSoapySDR installed
+        run: sudo apt-get update && sudo apt-get install -y libhackrf0 librtlsdr2 libsoapysdr0.8
 
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
@@ -107,6 +107,9 @@ jobs:
       - name: Resolve installed native libraries
         run: cargo test --locked hardware::native::tests::installed_native_libraries_resolve -- --ignored --exact
 
+      - name: Resolve installed libSoapySDR
+        run: cargo test --locked hardware::soapy::api::tests::installed_soapysdr_resolves -- --ignored --exact
+
       # sdrtop is published to crates.io, and a publish cannot be undone: a
       # version that fails to package can only be fixed by burning the version
       # number. So the packaging is checked on every push, not at tag time.
@@ -120,6 +123,41 @@ jobs:
       # toolchain, C libraries and warm registry cache.
       - name: The crate still packages
         run: cargo package --locked
+
+  # macOS has no Mac on the desk, so this runner is the one sdrtop is tested on
+  # there: the same lints and tests as Linux on every push, then the parts that
+  # only a Mac can answer. Homebrew's radio libraries are installed, as the
+  # guide tells a Mac user to, and must open by the names sdrtop tries: a
+  # wrong name or a Homebrew prefix moving is caught here, not in an issue.
+  # The radios themselves are tested by the people who own one.
+  macos:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Install the radio libraries from Homebrew
+        run: brew install librtlsdr hackrf soapysdr
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Clippy
+        run: cargo clippy --all-targets -- -D warnings
+
+      - name: Test
+        run: cargo test --all --locked
+
+      - name: Homebrew's libhackrf and librtlsdr resolve
+        run: cargo test --locked hardware::native::tests::installed_native_libraries_resolve -- --ignored --exact
+
+      - name: Homebrew's libSoapySDR resolves
+        run: cargo test --locked hardware::soapy::api::tests::installed_soapysdr_resolves -- --ignored --exact
 
   no-native-libraries:
     runs-on: ubuntu-latest

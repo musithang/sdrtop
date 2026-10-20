@@ -35,7 +35,7 @@
 
 <p align="center">
   <b>Via SoapySDR</b> <img src="https://img.shields.io/badge/BETA-orange" alt="Beta"><br>
-  <a href="user_docs/hardware.md#soapysdr-the-honest-version"><img src="https://img.shields.io/badge/SoapySDR-0.8-informational" alt="SoapySDR 0.8"></a>
+  <a href="user_docs/hardware.md#soapysdr-the-honest-version"><img src="https://img.shields.io/badge/SoapySDR-0.8%20%7C%200.9-informational" alt="SoapySDR 0.8 | 0.9"></a>
   <a href="user_docs/hardware.md#soapysdr-the-honest-version"><img src="https://img.shields.io/badge/Airspy-lightgrey" alt="Airspy"></a>
   <a href="user_docs/hardware.md#soapysdr-the-honest-version"><img src="https://img.shields.io/badge/SDRplay%20RSP-lightgrey" alt="SDRplay RSP"></a>
   <a href="user_docs/hardware.md#soapysdr-the-honest-version"><img src="https://img.shields.io/badge/PlutoSDR-lightgrey" alt="PlutoSDR"></a>

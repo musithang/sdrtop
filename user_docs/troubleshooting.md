@@ -94,9 +94,10 @@ it is short.
    rather not think about it.
 2. **Check sdrtop loaded the library at all.** In
    `~/.config/sdrtop/sdrtop.log`, a line starting `SoapySDR:` means it tried and
-   declined, and it says why. The likely one is an ABI mismatch: sdrtop is
-   written against SoapySDR **0.8**, and it refuses anything else rather than
-   calling into a library whose functions have a different shape. That refusal is
+   declined, and it says why. The likely one is an ABI mismatch: sdrtop reads
+   SoapySDR **0.8** and **0.9** (whose C functions are 0.8's, checked against
+   both releases' headers), and it refuses anything else rather than calling
+   into a library whose functions have a different shape. That refusal is
    not caution, it is the difference between "no devices" and a crash.
 3. **Your sound card is not a bug.** If `SoapySDRUtil --find` lists
    `driver = audio`, that is `soapysdr-module-audio` doing its job. sdrtop skips

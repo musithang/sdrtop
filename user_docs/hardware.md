@@ -135,7 +135,7 @@ dropped.
 
 | Thing | State |
 |---|---|
-| Loading libSoapySDR, ABI check, enumeration | Verified on a real install |
+| Loading libSoapySDR, ABI check, enumeration | Verified on a real install (0.8.1); 0.9 read from its headers and loaded in CI on macOS |
 | Opening a device, reading its capabilities | Verified, on a HackRF through `SoapyHackRF` |
 | Streaming, at full sample rate, no drops | Verified, same HackRF, 8 Msps and 10 Msps |
 | The two radios above, unaffected | Verified. The native paths did not change |

@@ -17,13 +17,20 @@
 use std::ffi::{c_char, c_int, c_void, CStr};
 use std::sync::OnceLock;
 
-/// The ABI this code was written against, from `SOAPY_SDR_ABI_VERSION` in
-/// `SoapySDR/Version.h`.
+/// The ABIs whose C declarations this file binds, from `SOAPY_SDR_ABI_VERSION`
+/// in `SoapySDR/Version.h`.
 ///
 /// **Not the library version.** A libSoapySDR 0.8.1 reports its ABI as `0.8`;
 /// `0.8.1` is what `SoapySDR_getLibVersion` returns. Upstream's own guidance in
 /// that header is a plain string comparison against this constant.
-const WANT_ABI: &str = "0.8";
+///
+/// `0.9` is here because every declaration this file binds (each
+/// `SoapySDRDevice_*` function below, `SoapySDRKwargs`, `SoapySDRRange`, the
+/// two `_clear`s and `SoapySDR_getABIVersion`) reads the same in 0.9.0's
+/// `Device.h` and `Types.h` as in 0.8.1's: 0.9 raised the ABI for its C++
+/// classes and added C functions, and changed none of these. Read from the
+/// headers, like the rest of this backend, not from running a 0.9.
+const ACCEPTED_ABI: &[&str] = &["0.9", "0.8"];
 
 /// The RX direction, `SOAPY_SDR_RX` from `SoapySDR/Constants.h`. TX is 0.
 pub const RX: c_int = 1;
@@ -661,17 +668,22 @@ pub fn api() -> Option<&'static SoapyApi> {
 
 /// Names to try on Linux, most specific first.
 ///
-/// The versioned soname first because it is the one that promises the ABI these
-/// signatures were written against. The bare `.so` last: it is the development
-/// symlink from the `-dev` package and can point at anything, including a build
-/// nobody meant to run against.
-const LINUX: &[&str] = &["libSoapySDR.so.0.8", "libSoapySDR.so.0", "libSoapySDR.so"];
-/// The same on macOS, the versioned `.dylib` first for the same reason. A
-/// 0.9 comes after every 0.8, so a Mac with only a 0.9 is told by the ABI
-/// check why it is refused, rather than finding nothing.
+/// The versioned sonames first because they promise an ABI these signatures
+/// bind ([`ACCEPTED_ABI`]), the newer one first. The bare `.so` last: it is the
+/// development symlink from the `-dev` package and can point at anything,
+/// including a build nobody meant to run against.
+const LINUX: &[&str] = &[
+    "libSoapySDR.so.0.9",
+    "libSoapySDR.so.0.8",
+    "libSoapySDR.so.0",
+    "libSoapySDR.so",
+];
+/// The same on macOS, the versioned `.dylib`s first for the same reason:
+/// Homebrew ships 0.9, so a Mac with Homebrew's and MacPorts' 0.8 both gets
+/// Homebrew's, the one the guide installs.
 const MACOS: &[&str] = &[
-    "libSoapySDR.0.8.dylib",
     "libSoapySDR.0.9.dylib",
+    "libSoapySDR.0.8.dylib",
     "libSoapySDR.dylib",
 ];
 
@@ -714,7 +726,7 @@ fn load() -> Option<SoapyApi> {
                     // returns the stream pointer in 0.8. Refuse, and say what was
                     // found so the log answers the question on its own.
                     eprintln!(
-                        "SoapySDR: {name} reports ABI {found:?}, sdrtop needs {WANT_ABI:?}. \
+                        "SoapySDR: {name} reports ABI {found:?}, sdrtop reads {ACCEPTED_ABI:?}. \
                          Soapy devices will not be offered."
                     );
                     None
@@ -796,7 +808,7 @@ fn resolve(lib: libloading::Library) -> Result<SoapyApi, &'static str> {
 /// Pure, so the refusal path is testable on a machine with no library at all,
 /// which is every CI runner.
 fn abi_ok(found: &str) -> bool {
-    found == WANT_ABI
+    ACCEPTED_ABI.contains(&found)
 }
 
 /// A C string as an owned `String`, lossily.
@@ -820,6 +832,16 @@ unsafe fn cstr_to_string(ptr: *const c_char) -> String {
 mod tests {
     use super::*;
 
+    /// The installed libSoapySDR opens by the names sdrtop tries, resolves
+    /// every symbol and reports an ABI it reads. By hand where SoapySDR is
+    /// installed, and in CI on the macOS runner with Homebrew's.
+    #[test]
+    #[ignore = "requires an installed libSoapySDR"]
+    fn installed_soapysdr_resolves() {
+        let api = api().expect("the installed libSoapySDR must open and resolve");
+        assert!(abi_ok(&api.abi_version()), "{}", api.abi_version());
+    }
+
     /// **On macOS libSoapySDR's symbols are opened global**: a driver
     /// module built for flat-namespace lookup resolves SoapySDR's own
     /// symbols from what is already loaded. Linux keeps the loader's default.
@@ -839,15 +861,22 @@ mod tests {
         use crate::host::Host;
         assert_eq!(
             names(Host::Linux),
-            ["libSoapySDR.so.0.8", "libSoapySDR.so.0", "libSoapySDR.so"].map(String::from)
+            [
+                "libSoapySDR.so.0.9",
+                "libSoapySDR.so.0.8",
+                "libSoapySDR.so.0",
+                "libSoapySDR.so"
+            ]
+            .map(String::from)
         );
         let mac = names(Host::MacOs);
-        assert_eq!(mac[0], "libSoapySDR.0.8.dylib");
-        // A 0.9 is tried only after every 0.8: it is opened to be refused by
-        // the ABI check with a line that says why, not to win over a 0.8.
+        assert_eq!(mac[0], "libSoapySDR.0.9.dylib");
+        // The newer ABI first, wherever it is: Homebrew ships 0.9, so a Mac
+        // with Homebrew's and MacPorts' 0.8 both gets Homebrew's, the one
+        // the guide installs.
         let at = |n: &str| mac.iter().position(|m| m == n).unwrap();
         assert!(
-            at("/opt/local/lib/libSoapySDR.0.8.dylib") < at("libSoapySDR.0.9.dylib"),
+            at("/opt/homebrew/lib/libSoapySDR.0.9.dylib") < at("libSoapySDR.0.8.dylib"),
             "{mac:?}"
         );
         assert!(
@@ -857,21 +886,26 @@ mod tests {
         assert!(!mac.iter().any(|n| n.contains(".so")), "{mac:?}");
     }
 
-    /// Exact equality, and the reasons for each refusal.
+    /// Exact equality against the ABIs whose C declarations this file binds,
+    /// and the reasons for each refusal.
     ///
-    /// The `0.8.1` case is the one this plan originally got wrong: that is the
-    /// *library* version, and the same library's ABI is `0.8`. Accepting it
-    /// would mean accepting a string this function should never see, which is a
-    /// small thing until the day some other project's `0.8.1` really is a
-    /// different ABI.
+    /// The `0.8.1` case is an easy one to get wrong: that is the *library*
+    /// version, and the same library's ABI is `0.8`. Accepting it would mean
+    /// accepting a string this function should never see, which is a small
+    /// thing until the day some other project's `0.8.1` really is a different
+    /// ABI.
     #[test]
-    fn only_the_abi_we_were_written_against_is_accepted() {
+    fn only_the_abis_we_bind_are_accepted() {
         assert!(abi_ok("0.8"));
+        assert!(
+            abi_ok("0.9"),
+            "its C declarations are 0.8's, read from 0.9.0's headers"
+        );
         assert!(
             !abi_ok("0.7"),
             "0.7 changed setupStream and would corrupt the stack"
         );
-        assert!(!abi_ok("0.9"));
+        assert!(!abi_ok("0.10"), "not read yet");
         assert!(
             !abi_ok("0.8-dev"),
             "a development branch is not the release ABI"
