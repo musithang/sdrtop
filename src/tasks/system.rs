@@ -48,7 +48,9 @@ pub fn cpu_percent(used_s: f64, elapsed_s: f64, ncpus: f64) -> f32 {
 /// Linux's `/proc/self/stat` and `/proc/self/status`, with the kernel's
 /// `ticks_per_sec`: user and system ticks as CPU seconds, `VmRSS` as
 /// megabytes. The fields after the process name are counted from its last
-/// `)`, so a name with spaces or brackets in it does not move them.
+/// `)`, so a name with spaces or brackets in it does not move them. Linux's
+/// alone, and compiled for the tests on every host.
+#[cfg(any(target_os = "linux", test))]
 pub fn parse_proc(stat: &str, status: &str, ticks_per_sec: f64) -> Option<SelfStats> {
     let after_comm = stat.rsplit_once(')')?.1;
     let fields: Vec<&str> = after_comm.split_whitespace().collect();
