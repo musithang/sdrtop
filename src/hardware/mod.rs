@@ -10,7 +10,7 @@
 //! The rest is shared and backend-neutral: [`traits`] is the vocabulary,
 //! [`process`] the per-sample decode all three feed, [`intake`] the queue that
 //! keeps it off the driver's thread, [`record_tap`] the
-//! recorder's feed out of it, [`gain`] the placement policy, [`sysfs`] the
+//! recorder's feed out of it, [`gain`] the placement policy, [`usb`] the
 //! read-only USB scan behind observer mode, [`runtime_lib`] where a radio's
 //! runtime library is looked for on the host.
 //!
@@ -28,9 +28,9 @@ pub mod process;
 pub mod record_tap;
 pub mod runtime_lib;
 pub mod soapy;
-pub mod sysfs;
 pub mod tinysa;
 mod traits;
+pub mod usb;
 
 pub use discovery::{list_all_devices, open_device, DeviceKind, DeviceListing};
 pub use record_tap::RecordTap;

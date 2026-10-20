@@ -50,7 +50,7 @@ pub(super) struct Tuning {
     pub notes: Vec<String>,
 }
 
-/// Who the device says it is. `new_observer` fills this from sysfs, with
+/// Who the device says it is. `new_observer` fills this from the USB scan, with
 /// placeholders for what only an opened device can report.
 pub(super) struct Identity {
     pub board_name: String,
@@ -114,7 +114,7 @@ impl Boot {
         }
     }
 
-    /// A radio another process is holding: everything comes from sysfs or from a
+    /// A radio another process is holding: everything comes from the USB scan or from a
     /// static capability profile for the matching backend.
     ///
     /// The config's tuning is taken **verbatim**, not clamped like [`Self::normal`]'s.
@@ -125,7 +125,7 @@ impl Boot {
     /// 0 dB. A config value the operator recognises beats a fabricated legal one.
     pub(super) fn observer(
         cfg: &AppConfig,
-        sysinfo: &hardware::sysfs::HackRfSysInfo,
+        sysinfo: &hardware::usb::UsbDeviceInfo,
         profile: hardware::discovery::ObserverProfile,
     ) -> Self {
         Self {
@@ -153,9 +153,9 @@ impl Boot {
             },
             identity: Identity {
                 board_name: sysinfo.product.clone(),
-                serial: sysinfo.serial.clone(),
+                serial: sysinfo.serial.clone().unwrap_or_else(|| "—".into()),
                 fw_version: "Observer Mode".to_string(),
-                // Observer mode reads sysfs for a device sdrtop knows by name,
+                // Observer mode looks for a device sdrtop knows by its USB ids,
                 // and only the two native backends have such a profile.
                 stack: None,
                 board_rev: 0xFE,
@@ -166,11 +166,8 @@ impl Boot {
             observer: ObserverState {
                 active: true,
                 device: Some(format!("{} · {}", sysinfo.product, sysinfo.manufacturer)),
-                serial: Some(sysinfo.serial.clone()),
-                usb: Some(format!(
-                    "High Speed ({} Mbit/s) · {} · Bus {}, Dev {}",
-                    sysinfo.speed_mbits, sysinfo.max_power, sysinfo.bus, sysinfo.dev
-                )),
+                serial: sysinfo.serial.clone(),
+                usb: Some(hardware::usb::usb_line(sysinfo)).filter(|l| !l.is_empty()),
                 connected: sysinfo.connected_secs.map(crate::tasks::fmt_duration),
                 ..Default::default()
             },
@@ -549,15 +546,15 @@ mod tests {
             .expect("this backend can be observed")
     }
 
-    fn sysinfo() -> hardware::sysfs::HackRfSysInfo {
-        hardware::sysfs::HackRfSysInfo {
+    fn sysinfo() -> hardware::usb::UsbDeviceInfo {
+        hardware::usb::UsbDeviceInfo {
             product: "RTL2838UHIDIR".into(),
             manufacturer: "Realtek".into(),
-            serial: "00000001".into(),
-            speed_mbits: 480,
-            max_power: "500mA".into(),
-            bus: 1,
-            dev: 5,
+            serial: Some("00000001".into()),
+            speed_mbits: Some(480.0),
+            max_power: Some("500mA".into()),
+            bus: Some(1),
+            dev: Some(5),
             connected_secs: None,
         }
     }

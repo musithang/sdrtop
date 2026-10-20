@@ -4,7 +4,7 @@
 //! The app's own CPU share and resident memory, once a second.
 //!
 //! Split as the hardware layer is: what a reading means is plain data and
-//! plain arithmetic ([`parse_proc`], [`SelfStats::new`], [`cpu_percent`]),
+//! plain arithmetic (`parse_proc` for Linux, [`SelfStats::new`], [`cpu_percent`]),
 //! tested on every host; how it is read is a thin call that differs by
 //! system. Linux reads `/proc/self`; macOS has no `/proc`, so it takes the
 //! CPU time from `getrusage` (seconds, unambiguous) and the resident size

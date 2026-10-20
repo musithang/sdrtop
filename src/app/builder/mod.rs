@@ -8,7 +8,7 @@
 //! - [`App::new_normal`] - the device opened, so it gets programmed, streamed
 //!   from, and swept.
 //! - [`App::new_observer`] - another process holds it, so everything is read
-//!   from sysfs and every control is inert.
+//!   from the USB scan and every control is inert.
 //!
 //! What they share is factored by kind rather than by order: [`boot`] owns the
 //! `SdrMetrics` a session starts with (and the startup clamp, which is pure and
@@ -242,7 +242,7 @@ impl App {
     pub(super) fn new_observer(
         cfg: AppConfig,
         config_path: Option<PathBuf>,
-        sysinfo: hardware::sysfs::HackRfSysInfo,
+        sysinfo: hardware::usb::UsbDeviceInfo,
         profile: hardware::discovery::ObserverProfile,
     ) -> anyhow::Result<Self> {
         let state = Arc::new(Mutex::new(initial_metrics(
@@ -268,7 +268,7 @@ impl App {
             None,
             Some("observer"),
         )?;
-        tasks::spawn_observer_task(Arc::clone(&state), sysinfo.bus, sysinfo.dev, profile);
+        tasks::spawn_observer_task(Arc::clone(&state), profile);
         tasks::spawn_sys_resource_task(Arc::clone(&state));
         Ok(app)
     }

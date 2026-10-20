@@ -8,33 +8,29 @@ use super::fmt_duration;
 use crate::hardware::{self, discovery::ObserverProfile};
 use crate::state::SdrMetrics;
 
-/// Polls sysfs/proc every 1 s to track which process owns the SDR device
-/// (observer mode only).  Writes device identity and owner info to `state`.
+/// Polls the USB scan every 1 s to track the SDR device and which process
+/// owns it (observer mode only). Writes device identity and owner info to
+/// `state`.
 ///
 /// `profile` carries the scan, so this task never asks which backend it is
 /// watching. A backend with no profile cannot get here: observer mode is
 /// refused for it before the task is spawned.
-pub fn spawn_observer_task(
-    state: Arc<Mutex<SdrMetrics>>,
-    bus: u32,
-    dev: u32,
-    profile: ObserverProfile,
-) {
+pub fn spawn_observer_task(state: Arc<Mutex<SdrMetrics>>, profile: ObserverProfile) {
     tokio::spawn(async move {
         let ticks_per_sec = unsafe { libc::sysconf(libc::_SC_CLK_TCK) } as f64;
         let mut last_owner_cpu: Option<(u64, Instant)> = None;
 
         loop {
-            if let Some(info) = (profile.scan)() {
-                let owner = hardware::sysfs::find_owner(info.bus, info.dev);
+            // A scan that finds nothing, or that the system refused, leaves
+            // the last account as it was, as an unplugged radio always has.
+            if let Ok(Some(info)) = (profile.scan)() {
+                let owner = hardware::usb::find_owner(&info);
+                let usb = hardware::usb::usb_line(&info);
                 let mut m = state.lock().unwrap_or_else(|e| e.into_inner());
 
                 m.observer.device = Some(format!("{} · {}", info.product, info.manufacturer));
-                m.observer.serial = Some(info.serial);
-                m.observer.usb = Some(format!(
-                    "High Speed ({} Mbit/s) · {} · Bus {}, Dev {}",
-                    info.speed_mbits, info.max_power, info.bus, info.dev
-                ));
+                m.observer.serial = info.serial;
+                m.observer.usb = Some(usb).filter(|l| !l.is_empty());
                 m.observer.connected = info.connected_secs.map(fmt_duration);
 
                 if let Some(o) = owner {
@@ -65,9 +61,6 @@ pub fn spawn_observer_task(
                     m.observer.owner_uptime = None;
                 }
             }
-            // bus/dev retained to avoid unused-variable warnings; may be used for
-            // direct sysfs node lookup in a future improvement.
-            let _ = (bus, dev);
             tokio::time::sleep(Duration::from_secs(1)).await;
         }
     });

@@ -16,7 +16,7 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 use super::native::{hackrf, rtlsdr};
-use super::{soapy, sysfs, tinysa, DeviceCapabilities, SdrDevice};
+use super::{soapy, tinysa, usb, DeviceCapabilities, SdrDevice};
 
 /// Which backend a [`DeviceListing`] / open request targets.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -29,13 +29,14 @@ pub enum DeviceKind {
 
 /// What observer mode needs in order to describe a device it cannot open.
 ///
-/// **One answer rather than two questions.** A backend either has both a sysfs
+/// **One answer rather than two questions.** A backend either has both a USB
 /// scan and a capability profile or it has neither, and two methods that must
 /// agree are two facts that eventually will not.
 #[derive(Clone, Copy)]
 pub struct ObserverProfile {
-    /// Finds this backend's device in sysfs, by USB vendor and product id.
-    pub scan: fn() -> Option<sysfs::HackRfSysInfo>,
+    /// Finds this backend's device by USB vendor and product id, the way
+    /// this system lists USB devices.
+    pub scan: fn() -> Result<Option<usb::UsbDeviceInfo>, String>,
     /// Placeholder capabilities, so the panels keep this radio's labels rather
     /// than another radio's.
     ///
@@ -57,7 +58,7 @@ impl DeviceKind {
 
     /// How observer mode describes this backend, when it can.
     ///
-    /// Observer mode reads sysfs for a USB device sdrtop knows by vendor and
+    /// Observer mode looks for a USB device sdrtop knows by vendor and
     /// product id. There is no generic equivalent for "whatever SoapySDR was
     /// talking to", so a Soapy device that will not open simply will not open,
     /// and says why.
@@ -68,11 +69,11 @@ impl DeviceKind {
     pub fn observer_profile(&self) -> Option<ObserverProfile> {
         match self {
             DeviceKind::HackRf => Some(ObserverProfile {
-                scan: sysfs::find_hackrf,
+                scan: usb::find_hackrf,
                 caps: hackrf::caps,
             }),
             DeviceKind::RtlSdr => Some(ObserverProfile {
-                scan: sysfs::find_rtlsdr,
+                scan: usb::find_rtlsdr,
                 caps: rtlsdr::observer_caps,
             }),
             DeviceKind::Soapy | DeviceKind::TinySa => None,
@@ -534,7 +535,7 @@ mod tests {
         assert_eq!(offer_soapy(all, &[], filter.as_deref()).len(), 2);
     }
 
-    /// Observer mode reads sysfs for a USB device sdrtop knows by vendor and
+    /// Observer mode looks for a USB device sdrtop knows by vendor and
     /// product id, and only the two native backends are such devices.
     ///
     /// This used to be a comment in three files and a `debug_assert!` in one of
@@ -545,7 +546,7 @@ mod tests {
         assert!(DeviceKind::RtlSdr.observer_profile().is_some());
         assert!(
             DeviceKind::Soapy.observer_profile().is_none(),
-            "there is no sysfs profile for whatever SoapySDR was talking to"
+            "there is no USB profile for whatever SoapySDR was talking to"
         );
         assert!(DeviceKind::TinySa.observer_profile().is_none());
     }

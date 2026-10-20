@@ -88,14 +88,21 @@ impl App {
             }
             Err(open_err) => {
                 // Device is present but couldn't be opened (e.g. busy) - fall back
-                // to read-only observer mode via the matching backend's sysfs
+                // to read-only observer mode via the matching backend's USB
                 // scan. A backend that cannot be observed has no profile, and
-                // then the open error is the answer.
+                // then the open error is the answer; a scan the system refused
+                // is said beside it rather than dropped.
                 let Some(profile) = listing.kind.observer_profile() else {
                     return Err(open_err);
                 };
-                let Some(sysinfo) = (profile.scan)() else {
-                    return Err(open_err);
+                let sysinfo = match (profile.scan)() {
+                    Ok(Some(info)) => info,
+                    Ok(None) => return Err(open_err),
+                    Err(scan) => {
+                        return Err(open_err.context(format!(
+                            "observer mode could not look for the radio either: {scan}"
+                        )))
+                    }
                 };
                 Self::new_observer(cfg, config_path, sysinfo, profile)
             }
