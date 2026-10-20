@@ -556,6 +556,7 @@ mod tests {
             bus: Some(1),
             dev: Some(5),
             connected_secs: None,
+            holder: None,
         }
     }
 

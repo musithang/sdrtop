@@ -30,17 +30,31 @@ pub struct UsbDeviceInfo {
     pub bus: Option<u32>,
     pub dev: Option<u32>,
     pub connected_secs: Option<u64>,
+    /// The process the system itself names as holding the device: macOS
+    /// writes it into the registry (`UsbExclusiveOwner`). Linux names none,
+    /// and is asked by device node instead.
+    pub holder: Option<Holder>,
 }
 
-/// The process holding a device, as observer mode describes it.
+/// A process the system names as a device's holder.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Holder {
+    pub pid: u32,
+    pub name: String,
+}
+
+/// The process holding a device, as observer mode describes it. Past its
+/// pid and name, each reading is there only when the system let it be read:
+/// another user's process keeps its details to itself.
 #[derive(Clone, Debug, PartialEq)]
 pub struct OwnerInfo {
     pub pid: u32,
     pub name: String,
-    pub cmdline: String,
-    pub cpu_ticks: u64,
-    pub rss_mb: u64,
-    pub running_secs: u64,
+    pub cmdline: Option<String>,
+    /// CPU time used so far, user and system, in seconds.
+    pub cpu_s: Option<f64>,
+    pub rss_mb: Option<u64>,
+    pub running_secs: Option<u64>,
 }
 
 /// A radio looked for: its vendor id, the product ids it ships under, and the
@@ -102,15 +116,52 @@ pub fn find_rtlsdr() -> Result<Option<UsbDeviceInfo>, String> {
 
 /// The process holding `device`, when this system can tell. Linux finds it
 /// by the device node it has open, which needs the bus and device number;
-/// macOS does not say yet.
+/// macOS names it in the registry, and the scan carried that name here.
 pub fn find_owner(device: &UsbDeviceInfo) -> Option<OwnerInfo> {
     #[cfg(target_os = "linux")]
     return linux::find_owner(device.bus?, device.dev?);
-    #[cfg(not(target_os = "linux"))]
+    #[cfg(target_os = "macos")]
+    return device.holder.as_ref().map(macos::owner);
+    #[cfg(not(any(target_os = "linux", target_os = "macos")))]
     {
         let _ = device;
         None
     }
+}
+
+/// A `UsbExclusiveOwner` value, `pid 663, MIDIServer`, as the process it
+/// names. Anything else names no one.
+#[cfg(any(target_os = "macos", test))]
+pub fn parse_holder(value: &str) -> Option<Holder> {
+    let (pid, name) = value.strip_prefix("pid ")?.split_once(", ")?;
+    let name = name.trim();
+    Some(Holder {
+        pid: pid.parse().ok()?,
+        name: (!name.is_empty()).then(|| name.to_string())?,
+    })
+}
+
+/// A process's command line from the `KERN_PROCARGS2` sysctl: the argument
+/// count, the executable's path, padding, then that many NUL-ended
+/// arguments, joined by spaces. Malformed is `None`, not a guess.
+#[cfg(any(target_os = "macos", test))]
+pub fn parse_procargs2(buffer: &[u8]) -> Option<String> {
+    let (argc, rest) = buffer.split_first_chunk::<4>()?;
+    let argc = usize::try_from(i32::from_ne_bytes(*argc)).ok()?;
+    if argc == 0 {
+        return None;
+    }
+    // The executable's path, then NUL padding up to the first argument.
+    let path_end = rest.iter().position(|&b| b == 0)?;
+    let start = rest[path_end..].iter().position(|&b| b != 0)? + path_end;
+    let mut args = Vec::with_capacity(argc);
+    let mut tail = &rest[start..];
+    for _ in 0..argc {
+        let end = tail.iter().position(|&b| b == 0)?;
+        args.push(String::from_utf8_lossy(&tail[..end]));
+        tail = &tail[end + 1..];
+    }
+    Some(args.join(" "))
 }
 
 /// A USB speed's name, from its rate in Mbit/s.
@@ -162,6 +213,9 @@ pub struct IoUsbProps {
     pub address: Option<u32>,
     /// `Device Speed`, IOKit's code for the link speed.
     pub speed: Option<u32>,
+    /// `UsbExclusiveOwner` from the device, or else from the first of its
+    /// interfaces that has one.
+    pub exclusive_owner: Option<String>,
 }
 
 /// The device as IOKit describes it, if it is `wanted`.
@@ -201,6 +255,7 @@ pub fn from_iokit(props: &IoUsbProps, wanted: &Wanted) -> Option<UsbDeviceInfo> 
         bus: props.location_id.map(|l| l >> 24),
         dev: props.address,
         connected_secs: None,
+        holder: props.exclusive_owner.as_deref().and_then(parse_holder),
     })
 }
 
@@ -218,6 +273,7 @@ mod tests {
             bus: Some(1),
             dev: Some(5),
             connected_secs: None,
+            holder: None,
         }
     }
 
@@ -290,6 +346,7 @@ mod tests {
             location_id: Some(0x0110_0000),
             address: Some(3),
             speed: Some(2),
+            exclusive_owner: None,
         }
     }
 
@@ -309,9 +366,93 @@ mod tests {
                 bus: Some(1),
                 dev: Some(3),
                 connected_secs: None,
+                holder: None,
             })
         );
         assert_eq!(from_iokit(&hackrf_props(), &RTLSDR), None);
+    }
+
+    /// The holder IOKit names comes along with the device, and a value
+    /// that names no process is no holder.
+    #[test]
+    fn the_holder_iokit_names_comes_with_the_device() {
+        let held = IoUsbProps {
+            exclusive_owner: Some("pid 4312, hackrf_transfer".into()),
+            ..hackrf_props()
+        };
+        assert_eq!(
+            from_iokit(&held, &HACKRF).unwrap().holder,
+            Some(Holder {
+                pid: 4312,
+                name: "hackrf_transfer".into()
+            })
+        );
+        let odd = IoUsbProps {
+            exclusive_owner: Some("MIDIServer".into()),
+            ..hackrf_props()
+        };
+        assert_eq!(from_iokit(&odd, &HACKRF).unwrap().holder, None);
+    }
+
+    /// `pid N, name`, a name with a comma or spaces in it included; no pid,
+    /// a pid that is not a number, or no name is no one.
+    #[test]
+    fn a_holder_is_read_from_its_registry_value() {
+        let holder = |pid, name: &str| {
+            Some(Holder {
+                pid,
+                name: name.into(),
+            })
+        };
+        assert_eq!(
+            parse_holder("pid 663, MIDIServer"),
+            holder(663, "MIDIServer")
+        );
+        assert_eq!(
+            parse_holder("pid 9001, SDR++ Helper, beta"),
+            holder(9001, "SDR++ Helper, beta")
+        );
+        assert_eq!(parse_holder("MIDIServer"), None);
+        assert_eq!(parse_holder("pid x, gqrx"), None);
+        assert_eq!(parse_holder("pid 12, "), None);
+        assert_eq!(parse_holder(""), None);
+    }
+
+    fn procargs(argc: i32, path: &str, pad: usize, args: &[&str]) -> Vec<u8> {
+        let mut b = argc.to_ne_bytes().to_vec();
+        b.extend_from_slice(path.as_bytes());
+        b.extend(std::iter::repeat_n(0, 1 + pad));
+        for a in args {
+            b.extend_from_slice(a.as_bytes());
+            b.push(0);
+        }
+        // The environment follows the arguments, and is not theirs.
+        b.extend_from_slice(b"HOME=/Users/someone\0");
+        b
+    }
+
+    /// The arguments, and only the arguments: the executable path before
+    /// them and the environment after them are left out.
+    #[test]
+    fn a_command_line_is_read_from_procargs2() {
+        let b = procargs(
+            3,
+            "/opt/homebrew/bin/hackrf_transfer",
+            5,
+            &["hackrf_transfer", "-r", "/dev/null"],
+        );
+        assert_eq!(
+            parse_procargs2(&b).as_deref(),
+            Some("hackrf_transfer -r /dev/null")
+        );
+        let short = procargs(4, "/bin/x", 0, &["x", "-a"]);
+        assert_eq!(
+            parse_procargs2(&short[..short.len() - 20]),
+            None,
+            "fewer arguments than argc"
+        );
+        assert_eq!(parse_procargs2(&[1, 0]), None);
+        assert_eq!(parse_procargs2(&procargs(0, "/bin/x", 0, &[])), None);
     }
 
     /// Every speed code IOKit defines, and one it does not.
@@ -349,6 +490,7 @@ mod tests {
             ..IoUsbProps::default()
         };
         let info = from_iokit(&bare, &RTLSDR).unwrap();
+        assert_eq!(info.holder, None);
         assert_eq!(
             (info.product.as_str(), info.manufacturer.as_str()),
             ("RTL-SDR", "Realtek")

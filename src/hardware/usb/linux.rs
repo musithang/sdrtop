@@ -43,6 +43,8 @@ pub fn scan(devices: &Path, wanted: &Wanted) -> Option<UsbDeviceInfo> {
             connected_secs: read(&base.join("power/connected_duration"))
                 .and_then(|s| s.parse::<u64>().ok())
                 .map(|us| us / 1_000_000),
+            // Linux names no holder; `find_owner` asks by device node.
+            holder: None,
         })
     })
 }
@@ -62,92 +64,78 @@ pub fn find(wanted: &Wanted) -> Result<Option<UsbDeviceInfo>, String> {
 #[cfg(target_os = "linux")]
 pub fn find_owner(bus: u32, dev: u32) -> Option<super::OwnerInfo> {
     let device_node = format!("/dev/bus/usb/{:03}/{:03}", bus, dev);
-
-    let uptime_secs = read(Path::new("/proc/uptime"))
-        .and_then(|s| {
-            s.split_whitespace()
-                .next()
-                .and_then(|v| v.parse::<f64>().ok())
-        })
-        .unwrap_or(0.0) as u64;
-
-    let ticks_raw = unsafe { libc::sysconf(libc::_SC_CLK_TCK) };
-    let ticks_per_sec: u64 = if ticks_raw > 0 { ticks_raw as u64 } else { 100 };
-
-    for entry in fs::read_dir("/proc").ok()?.flatten() {
-        let pid_str = entry.file_name();
-        let Ok(pid) = pid_str.to_string_lossy().parse::<u32>() else {
-            continue;
-        };
-
-        let proc_base = entry.path();
-
-        // Check if this process has the device node open.
-        // read_dir on fd/ will fail if we don't own the process - skip silently.
-        let owns_device = fs::read_dir(proc_base.join("fd"))
-            .map(|entries| {
-                entries.flatten().any(|fd| {
-                    fs::read_link(fd.path())
-                        .map(|t| t.to_string_lossy() == device_node)
-                        .unwrap_or(false)
-                })
-            })
-            .unwrap_or(false);
-
-        if !owns_device {
-            continue;
+    fs::read_dir("/proc").ok()?.flatten().find_map(|entry| {
+        let pid = entry.file_name().to_string_lossy().parse::<u32>().ok()?;
+        // read_dir on fd/ fails for another user's process: passed over.
+        let owns_device = fs::read_dir(entry.path().join("fd"))
+            .ok()?
+            .flatten()
+            .any(|fd| {
+                fs::read_link(fd.path())
+                    .map(|t| t.to_string_lossy() == device_node)
+                    .unwrap_or(false)
+            });
+        if owns_device {
+            process(pid)
+        } else {
+            None
         }
+    })
+}
 
-        let name = read(&proc_base.join("comm")).unwrap_or_else(|| "unknown".into());
+/// What `/proc` says about process `pid`, each reading only when it could
+/// be read. A process with no name has gone, and is `None`.
+#[cfg(target_os = "linux")]
+fn process(pid: u32) -> Option<super::OwnerInfo> {
+    let base = Path::new("/proc").join(pid.to_string());
+    let name = read(&base.join("comm"))?;
+    let cmdline = fs::read(base.join("cmdline")).ok().and_then(|bytes| {
+        let line = String::from_utf8_lossy(&bytes).replace('\0', " ");
+        let line = line.trim();
+        (!line.is_empty()).then(|| line.to_string())
+    });
 
-        let cmdline = fs::read(proc_base.join("cmdline"))
-            .ok()
-            .map(|bytes| {
-                bytes
-                    .iter()
-                    .map(|&b| if b == 0 { ' ' } else { b as char })
-                    .collect::<String>()
-                    .trim()
-                    .to_string()
-            })
-            .unwrap_or_default();
+    // SAFETY: sysconf reads a constant and has no preconditions.
+    let ticks = unsafe { libc::sysconf(libc::_SC_CLK_TCK) };
+    let ticks = (ticks > 0).then_some(ticks as f64);
+    // After the last ')': state(0) ppid(1) ... utime(11) stime(12) ...
+    // starttime(19), the times in clock ticks.
+    let stat = read(&base.join("stat")).and_then(|s| {
+        let fields: Vec<u64> = s
+            .rsplit_once(')')?
+            .1
+            .split_whitespace()
+            .map(|f| f.parse().unwrap_or(0))
+            .collect();
+        Some((*fields.get(11)? + *fields.get(12)?, *fields.get(19)?))
+    });
+    let uptime = read(Path::new("/proc/uptime"))
+        .and_then(|s| s.split_whitespace().next()?.parse::<f64>().ok());
+    let cpu_s = stat.zip(ticks).map(|((cpu, _), t)| cpu as f64 / t);
+    let running_secs = stat
+        .zip(ticks)
+        .zip(uptime)
+        .map(|(((_, start), t), up)| (up - start as f64 / t).max(0.0) as u64);
 
-        // Parse /proc/PID/stat: after last ')' → state ppid ... utime(11) stime(12) ... starttime(19)
-        let (cpu_ticks, starttime_ticks) = read(&proc_base.join("stat"))
-            .and_then(|s| {
-                let after = s.rsplit_once(')')?.1;
-                let f: Vec<&str> = after.split_whitespace().collect();
-                let utime: u64 = f.get(11)?.parse().ok()?;
-                let stime: u64 = f.get(12)?.parse().ok()?;
-                let starttime: u64 = f.get(19)?.parse().ok()?;
-                Some((utime + stime, starttime))
-            })
-            .unwrap_or((0, 0));
+    let rss_mb = read(&base.join("status")).and_then(|s| {
+        let kb = s
+            .lines()
+            .find(|l| l.starts_with("VmRSS:"))?
+            .split_whitespace()
+            .nth(1)?
+            .parse::<u64>()
+            .ok()?;
+        Some(kb / 1024)
+    });
 
-        let running_secs = uptime_secs.saturating_sub(starttime_ticks / ticks_per_sec.max(1));
-
-        let rss_mb = read(&proc_base.join("status"))
-            .and_then(|s| {
-                s.lines()
-                    .find(|l| l.starts_with("VmRSS:"))?
-                    .split_whitespace()
-                    .nth(1)?
-                    .parse::<u64>()
-                    .ok()
-            })
-            .map(|kb| kb / 1024)
-            .unwrap_or(0);
-
-        return Some(super::OwnerInfo {
-            pid,
-            name,
-            cmdline,
-            cpu_ticks,
-            rss_mb,
-            running_secs,
-        });
-    }
-    None
+    Some(super::OwnerInfo {
+        pid,
+        name,
+        cmdline,
+        cpu_s,
+        rss_mb,
+        running_secs,
+    })
 }
 
 #[cfg(test)]
@@ -218,6 +206,7 @@ mod tests {
                 bus: Some(1),
                 dev: Some(7),
                 connected_secs: Some(93),
+                holder: None,
             }
         );
         assert_eq!(scan(&tree.0, &RTLSDR), None);
@@ -250,8 +239,24 @@ mod tests {
                 bus: None,
                 dev: None,
                 connected_secs: None,
+                holder: None,
             }
         );
+    }
+
+    /// This test's own process, read the way a holder is: its name, its
+    /// command line, and readings that are there and plausible.
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn a_process_reads_as_proc_describes_it() {
+        let me = process(std::process::id()).expect("our own process reads");
+        assert_eq!(me.pid, std::process::id());
+        assert!(!me.name.is_empty());
+        assert!(me.cmdline.as_deref().is_some_and(|c| c.contains("sdrtop")));
+        assert!(me.cpu_s.is_some_and(|s| s >= 0.0));
+        assert!(me.rss_mb.is_some());
+        assert!(me.running_secs.is_some_and(|s| s < 3600));
+        assert_eq!(process(u32::MAX), None, "no such process");
     }
 
     /// A tree that is not there finds nothing rather than failing.

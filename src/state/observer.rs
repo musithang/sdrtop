@@ -10,7 +10,8 @@ pub struct ObserverState {
     pub connected: Option<String>,
     pub owner: Option<String>,
     pub cmdline: Option<String>,
-    pub owner_cpu_pct: f32,
-    pub owner_ram_mb: u64,
+    /// The holder's CPU share, every core together, as our own is shown.
+    pub owner_cpu_pct: Option<f32>,
+    pub owner_ram_mb: Option<u64>,
     pub owner_uptime: Option<String>,
 }

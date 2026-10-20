@@ -308,10 +308,15 @@ have it and people who have never heard of it. On Debian and Ubuntu that is
 
 ### macOS, unofficially
 
-Linux is home, and that's not an oversight: observer mode and the USB
-statistics are built on Linux's `/sys`, which a Mac doesn't have, so on a Mac
-those two say nothing. The rest runs, and a user proved it before I did: an M4
-MacBook Air with an RTL-SDR Blog V4, through Homebrew. sdrtop looks for the
+Linux is home, and that's not an oversight: it's the only system I have run
+sdrtop on with a radio plugged in. The Mac build is built and tested on every
+change, on GitHub's Apple Silicon machines, which have no radio. A user proved
+the rest before I did: an M4 MacBook Air with an RTL-SDR Blog V4, through
+Homebrew. [Observer mode](advanced.md#observer-mode-when-another-app-owns-the-radio)
+works there too, reading what macOS's own device registry says about the radio
+and the app holding it; nobody has watched it do that on a real Mac yet, so if
+you're the first, tell me what it said. A tinySA isn't found by itself on a Mac
+yet. sdrtop looks for the
 libraries where Homebrew and MacPorts put them (`/opt/homebrew/lib`,
 `/usr/local/lib`, `/opt/local/lib`), so this is the whole setup:
 

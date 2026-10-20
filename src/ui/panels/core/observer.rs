@@ -93,11 +93,16 @@ impl Panel for ObserverPanel {
                 )));
             }
             let uptime = state.observer.owner_uptime.as_deref().unwrap_or(dash);
+            let cpu = state
+                .observer
+                .owner_cpu_pct
+                .map_or_else(|| dash.to_string(), |c| format!("{c:.1}%"));
+            let ram = state
+                .observer
+                .owner_ram_mb
+                .map_or_else(|| dash.to_string(), |r| format!("{r} MB"));
             lines.push(Line::from(Span::styled(
-                format!(
-                    "  CPU: {:.1}%  ·  RAM: {} MB  ·  Running: {}",
-                    state.observer.owner_cpu_pct, state.observer.owner_ram_mb, uptime,
-                ),
+                format!("  CPU: {cpu}  ·  RAM: {ram}  ·  Running: {uptime}"),
                 Style::default().fg(theme.value),
             )));
         } else {
@@ -114,5 +119,33 @@ impl Panel for ObserverPanel {
         )));
 
         f.render_widget(Paragraph::new(lines), inner);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::state::fixture::draw;
+
+    fn held(cpu: Option<f32>, ram: Option<u64>) -> SdrMetrics {
+        let mut m = SdrMetrics::fixture();
+        m.observer.active = true;
+        m.observer.owner = Some("hackrf_transfer (PID 4312)".into());
+        m.observer.owner_cpu_pct = cpu;
+        m.observer.owner_ram_mb = ram;
+        m
+    }
+
+    /// **A holder whose readings the system kept to itself shows dashes**,
+    /// not 0.0 % and 0 MB: another user's process, or the first second
+    /// before a CPU share can be worked out.
+    #[test]
+    fn a_reading_the_system_kept_is_a_dash_not_a_zero() {
+        let screen = draw(ObserverPanel, 80, 16, &held(None, None)).join("\n");
+        assert!(screen.contains("CPU: —  ·  RAM: —"), "{screen}");
+        assert!(!screen.contains("0.0%"), "{screen}");
+
+        let screen = draw(ObserverPanel, 80, 16, &held(Some(2.5), Some(41))).join("\n");
+        assert!(screen.contains("CPU: 2.5%  ·  RAM: 41 MB"), "{screen}");
     }
 }

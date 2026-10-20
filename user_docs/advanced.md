@@ -121,10 +121,15 @@ tell it.
 
 In observer mode sdrtop still shows:
 
-- device identity: serial number, board name and revision
-- which process is holding the radio
-- USB statistics: errors, data transferred
+- the device: its name, maker and serial number
+- the USB link: speed, the power it asked for, bus and device number, and on
+  Linux how long it has been plugged in
+- which process is holding the radio, with its command line, CPU share,
+  memory and how long it has been running
 - its own CPU and memory use
+
+Whatever the system won't say shows as a dash. Another user's process keeps
+its details to itself, and macOS doesn't say when a device was plugged in.
 
 It cannot tune, change gain, or stream samples, so there is no spectrum,
 waterfall or measurement. The display marks itself accordingly, and quitting does
@@ -133,9 +138,9 @@ settings.
 
 ### Getting the radio back
 
-When the other app releases the device, usually by quitting, sdrtop picks it up
-automatically. You don't need to restart it; leave it running and it'll switch to
-normal mode when the device frees up.
+Quit the other app, then quit sdrtop with `q` and start it again: it opens the
+radio normally. Observer mode doesn't take the radio over by itself when it
+frees up, so a sdrtop left running stays an observer.
 
 ### Finding out what has it
 
@@ -147,6 +152,13 @@ lsusb
 
 # which process has a USB device open
 sudo lsof /dev/bus/usb/*/* 2>/dev/null
+```
+
+On a Mac, the system keeps the answer in its device registry, which is where
+sdrtop reads it too:
+
+```sh
+ioreg -p IOUSB -l -w0 | grep -E '"USB Product Name"|UsbExclusiveOwner'
 ```
 
 And if you know what it is:

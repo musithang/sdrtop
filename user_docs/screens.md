@@ -307,12 +307,9 @@ progress.
 
 If another app (GNU Radio, SDR++, `hackrf_transfer`) already holds your radio,
 sdrtop can't control it, but it doesn't fall over either. It switches to observer
-mode and shows what the operating system will tell it: device identity, which
-process is holding the radio, USB statistics, and its own CPU and RAM.
-
-There's no spectrum, no waterfall and no tuning in this mode, and the config is
-not saved on quit, since there's nothing new to save. When the other app lets go,
-sdrtop picks the radio back up automatically. See
+mode and shows what the operating system will tell it about the radio and the app
+holding it. There's no spectrum, no waterfall and no tuning in this mode. What it
+shows, and how to get the radio back, is in
 [Advanced Features](advanced.md#observer-mode-when-another-app-owns-the-radio).
 
 ---
