@@ -24,6 +24,15 @@
 #[allow(dead_code)]
 mod api;
 
+// Where the API looks for libSoapySDR on this host: the app's own module,
+// reached by the path the API names it by.
+#[path = "../src/hardware/runtime_lib.rs"]
+#[allow(dead_code)]
+mod runtime_lib;
+mod hardware {
+    pub(crate) use super::runtime_lib;
+}
+
 fn main() {
     let args = std::env::args().nth(1).unwrap_or_default();
     let args = if args.is_empty() {

@@ -11,7 +11,8 @@
 //! [`process`] the per-sample decode all three feed, [`intake`] the queue that
 //! keeps it off the driver's thread, [`record_tap`] the
 //! recorder's feed out of it, [`gain`] the placement policy, [`sysfs`] the
-//! read-only USB scan behind observer mode.
+//! read-only USB scan behind observer mode, [`runtime_lib`] where a radio's
+//! runtime library is looked for on the host.
 //!
 //! **What this file re-exports is what the rest of the app may know about the
 //! hardware**, so nothing backend-specific belongs in the list below. A fact
@@ -25,6 +26,7 @@ pub mod intake;
 pub mod native;
 pub mod process;
 pub mod record_tap;
+pub mod runtime_lib;
 pub mod soapy;
 pub mod sysfs;
 pub mod tinysa;

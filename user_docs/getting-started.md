@@ -89,7 +89,8 @@ Everything below is the same job done by hand.
 
 ## What you need
 
-- **Host:** A Linux machine.
+- **Host:** A Linux machine. A Mac works too, unofficially: see
+  [macOS, unofficially](hardware.md#macos-unofficially).
 - **Radio:** A HackRF One, RTL-SDR or a supported SoapySDR device.
 - **Source builds:** Rust 1.88+ and a C compiler/linker. Install Rust with
   [rustup](https://rustup.rs). Runtime-loading releases need no SDR development

@@ -659,16 +659,23 @@ pub fn api() -> Option<&'static SoapyApi> {
     API.get_or_init(load).as_ref()
 }
 
-/// Names to try, most specific first.
+/// Names to try on Linux, most specific first.
 ///
 /// The versioned soname first because it is the one that promises the ABI these
 /// signatures were written against. The bare `.so` last: it is the development
 /// symlink from the `-dev` package and can point at anything, including a build
 /// nobody meant to run against.
-const CANDIDATES: &[&str] = &["libSoapySDR.so.0.8", "libSoapySDR.so.0", "libSoapySDR.so"];
+const LINUX: &[&str] = &["libSoapySDR.so.0.8", "libSoapySDR.so.0", "libSoapySDR.so"];
+/// The same on macOS, the versioned `.dylib` first for the same reason.
+const MACOS: &[&str] = &["libSoapySDR.0.8.dylib", "libSoapySDR.dylib"];
+
+/// The names libSoapySDR is tried by on `host`, in order.
+fn names(host: crate::hardware::runtime_lib::Host) -> Vec<String> {
+    crate::hardware::runtime_lib::candidates(host, LINUX, MACOS)
+}
 
 fn load() -> Option<SoapyApi> {
-    for name in CANDIDATES {
+    for name in &names(crate::hardware::runtime_lib::Host::current()) {
         // Safety: opening a shared library runs its initialisers, which is why
         // this is unsafe. libSoapySDR is a well-behaved library and the names
         // above are fixed, not taken from user input.
@@ -791,6 +798,25 @@ unsafe fn cstr_to_string(ptr: *const c_char) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// On Linux the names are unchanged, the versioned soname first; on
+    /// macOS the `.dylib`s Homebrew installs, the versioned one first,
+    /// Homebrew's Apple Silicon prefix among the places tried.
+    #[test]
+    fn the_library_is_looked_for_by_the_hosts_names() {
+        use crate::hardware::runtime_lib::Host;
+        assert_eq!(
+            names(Host::Linux),
+            ["libSoapySDR.so.0.8", "libSoapySDR.so.0", "libSoapySDR.so"].map(String::from)
+        );
+        let mac = names(Host::MacOs);
+        assert_eq!(mac[0], "libSoapySDR.0.8.dylib");
+        assert!(
+            mac.contains(&"/opt/homebrew/lib/libSoapySDR.0.8.dylib".to_string()),
+            "{mac:?}"
+        );
+        assert!(!mac.iter().any(|n| n.contains(".so")), "{mac:?}");
+    }
 
     /// Exact equality, and the reasons for each refusal.
     ///

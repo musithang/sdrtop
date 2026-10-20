@@ -4,6 +4,8 @@
 use libc::{c_char, c_int, c_uchar, c_void};
 use std::sync::OnceLock;
 
+use crate::hardware::runtime_lib::{self, Host};
+
 use super::super::loader::{load, symbol};
 
 /// `void (*)(unsigned char *buf, uint32_t len, void *ctx)` - the async read sink.
@@ -39,18 +41,39 @@ pub struct RtlSdrApi {
 }
 
 // Ubuntu uses .so.2 for the same C API that Debian packages as .so.0
-const CANDIDATES: &[&str] = &["librtlsdr.so.0", "librtlsdr.so.2", "librtlsdr.so"];
+const LINUX: &[&str] = &["librtlsdr.so.0", "librtlsdr.so.2", "librtlsdr.so"];
+// Homebrew and MacPorts install librtlsdr.0.dylib and its development link.
+const MACOS: &[&str] = &["librtlsdr.0.dylib", "librtlsdr.dylib"];
+
+/// The names librtlsdr is tried by on `host`, in order.
+fn names(host: Host) -> Vec<String> {
+    runtime_lib::candidates(host, LINUX, MACOS)
+}
+
+/// What to install on `host` when none of them opened.
+fn hint(host: Host) -> &'static str {
+    match host {
+        Host::Linux => {
+            "Install librtlsdr0 on Debian, librtlsdr2 on Ubuntu or rtl-sdr on Arch/Fedora."
+        }
+        Host::MacOs => "Install it with Homebrew: brew install rtl-sdr.",
+    }
+}
 
 pub fn api() -> anyhow::Result<&'static RtlSdrApi> {
     static API: OnceLock<Result<RtlSdrApi, String>> = OnceLock::new();
-    API.get_or_init(|| load("librtlsdr", CANDIDATES, resolve))
-        .as_ref()
-        .map_err(|err| {
-            anyhow::anyhow!(
-                "{err}\nRTL-SDR needs the librtlsdr runtime. \
-                 Install librtlsdr0 on Debian, librtlsdr2 on Ubuntu or rtl-sdr on Arch/Fedora."
-            )
-        })
+    API.get_or_init(|| {
+        let names = names(Host::current());
+        let names: Vec<&str> = names.iter().map(String::as_str).collect();
+        load("librtlsdr", &names, resolve)
+    })
+    .as_ref()
+    .map_err(|err| {
+        anyhow::anyhow!(
+            "{err}\nRTL-SDR needs the librtlsdr runtime. {}",
+            hint(Host::current())
+        )
+    })
 }
 
 pub(super) fn resolve(lib: libloading::Library) -> Result<RtlSdrApi, String> {
@@ -77,4 +100,34 @@ pub(super) fn resolve(lib: libloading::Library) -> Result<RtlSdrApi, String> {
         rtlsdr_cancel_async: sym!(rtlsdr_cancel_async),
         _lib: lib,
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// On Linux the names are the ones Debian, Ubuntu and the rest ship,
+    /// unchanged; on macOS the `.dylib`s Homebrew and MacPorts install,
+    /// Homebrew's Apple Silicon prefix among the places tried.
+    #[test]
+    fn the_library_is_looked_for_by_the_hosts_names() {
+        assert_eq!(
+            names(Host::Linux),
+            ["librtlsdr.so.0", "librtlsdr.so.2", "librtlsdr.so"].map(String::from)
+        );
+        let mac = names(Host::MacOs);
+        assert_eq!(mac[0], "librtlsdr.0.dylib");
+        assert!(
+            mac.contains(&"/opt/homebrew/lib/librtlsdr.0.dylib".to_string()),
+            "{mac:?}"
+        );
+        assert!(!mac.iter().any(|n| n.contains(".so")), "{mac:?}");
+    }
+
+    /// The install hint names the host's package manager.
+    #[test]
+    fn the_install_hint_names_the_hosts_package_manager() {
+        assert!(hint(Host::MacOs).contains("brew install rtl-sdr"));
+        assert!(hint(Host::Linux).contains("librtlsdr0 on Debian"));
+    }
 }

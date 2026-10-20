@@ -4,6 +4,8 @@
 use libc::{c_char, c_int, c_void};
 use std::sync::OnceLock;
 
+use crate::hardware::runtime_lib::{self, Host};
+
 use super::super::loader::{load, optional_symbol, symbol};
 
 #[repr(C)]
@@ -88,18 +90,37 @@ pub struct HackrfApi {
     pub hackrf_get_transfer_queue_depth: Option<unsafe extern "C" fn(*mut c_void) -> u32>,
 }
 
-const CANDIDATES: &[&str] = &["libhackrf.so.0", "libhackrf.so"];
+const LINUX: &[&str] = &["libhackrf.so.0", "libhackrf.so"];
+// Homebrew and MacPorts install libhackrf.0.dylib and its development link.
+const MACOS: &[&str] = &["libhackrf.0.dylib", "libhackrf.dylib"];
+
+/// The names libhackrf is tried by on `host`, in order.
+fn names(host: Host) -> Vec<String> {
+    runtime_lib::candidates(host, LINUX, MACOS)
+}
+
+/// What to install on `host` when none of them opened.
+fn hint(host: Host) -> &'static str {
+    match host {
+        Host::Linux => "Install libhackrf0 on Debian/Ubuntu or hackrf on Arch/Fedora.",
+        Host::MacOs => "Install it with Homebrew: brew install hackrf.",
+    }
+}
 
 pub fn api() -> anyhow::Result<&'static HackrfApi> {
     static API: OnceLock<Result<HackrfApi, String>> = OnceLock::new();
-    API.get_or_init(|| load("libhackrf", CANDIDATES, resolve))
-        .as_ref()
-        .map_err(|err| {
-            anyhow::anyhow!(
-                "{err}\nHackRF needs libhackrf 2023.01.1 or newer. \
-                 Install libhackrf0 on Debian/Ubuntu or hackrf on Arch/Fedora."
-            )
-        })
+    API.get_or_init(|| {
+        let names = names(Host::current());
+        let names: Vec<&str> = names.iter().map(String::as_str).collect();
+        load("libhackrf", &names, resolve)
+    })
+    .as_ref()
+    .map_err(|err| {
+        anyhow::anyhow!(
+            "{err}\nHackRF needs libhackrf 2023.01.1 or newer. {}",
+            hint(Host::current())
+        )
+    })
 }
 
 pub(super) fn resolve(lib: libloading::Library) -> Result<HackrfApi, String> {
@@ -140,4 +161,34 @@ pub(super) fn resolve(lib: libloading::Library) -> Result<HackrfApi, String> {
         },
         _lib: lib,
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// On Linux the names are unchanged; on macOS the `.dylib`s Homebrew
+    /// and MacPorts install, Homebrew's Apple Silicon prefix among the
+    /// places tried.
+    #[test]
+    fn the_library_is_looked_for_by_the_hosts_names() {
+        assert_eq!(
+            names(Host::Linux),
+            ["libhackrf.so.0", "libhackrf.so"].map(String::from)
+        );
+        let mac = names(Host::MacOs);
+        assert_eq!(mac[0], "libhackrf.0.dylib");
+        assert!(
+            mac.contains(&"/opt/homebrew/lib/libhackrf.0.dylib".to_string()),
+            "{mac:?}"
+        );
+        assert!(!mac.iter().any(|n| n.contains(".so")), "{mac:?}");
+    }
+
+    /// The install hint names the host's package manager.
+    #[test]
+    fn the_install_hint_names_the_hosts_package_manager() {
+        assert!(hint(Host::MacOs).contains("brew install hackrf"));
+        assert!(hint(Host::Linux).contains("libhackrf0 on Debian/Ubuntu"));
+    }
 }

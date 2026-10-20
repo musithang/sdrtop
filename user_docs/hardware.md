@@ -279,6 +279,7 @@ which is the honest answer rather than a guess dressed as two.
 | x86-64 Linux | Fully supported |
 | Raspberry Pi (Pi 2 and newer, 64-bit Raspberry Pi OS Bookworm) | Supported, with lower sample rates on older Pis |
 | ARM / Android (Termux) | Builds and runs; needs a root-capable USB stack to reach the device |
+| macOS (Homebrew) | Unofficial, tested by the people who run it: [macOS, unofficially](#macos-unofficially) |
 
 sdrtop loads libhackrf and librtlsdr at runtime. Neither library is required
 to build sdrtop. A missing or incompatible library disables only
@@ -305,8 +306,25 @@ have it and people who have never heard of it. On Debian and Ubuntu that is
 `libsoapysdr0.8` plus a driver module such as `soapysdr-module-airspy`, or
 `soapysdr-module-all` if you are feeling generous with disk space.
 
-Linux only, and that's not an oversight: the whole thing is built on libusb
-behaviour and `/sys` that don't have direct equivalents elsewhere.
+### macOS, unofficially
+
+Linux is home, and that's not an oversight: observer mode and the USB
+statistics are built on Linux's `/sys`, which a Mac doesn't have, so on a Mac
+those two say nothing. The rest runs, and a user proved it before I did: an M4
+MacBook Air with an RTL-SDR Blog V4, through Homebrew. sdrtop looks for the
+libraries where Homebrew and MacPorts put them (`/opt/homebrew/lib`,
+`/usr/local/lib`, `/opt/local/lib`), so this is the whole setup:
+
+```sh
+brew install rtl-sdr        # an RTL-SDR
+brew install hackrf         # a HackRF
+brew install soapysdr       # SoapySDR, plus the driver module for your radio
+cargo install sdrtop --locked
+```
+
+The one-line installer is Linux's; on a Mac, use cargo. I don't own a Mac, so
+this stays unofficial: tested by the people who run it. If something behaves
+differently there, an issue is how I find out.
 
 ---
 
