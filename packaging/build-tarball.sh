@@ -7,14 +7,64 @@
 #
 #   packaging/build-tarball.sh
 #
-# Built in a Debian 12 container rather than on the host, so the binary carries
-# the oldest glibc floor worth supporting instead of whatever the build machine
-# happens to have. See packaging/Containerfile.
+# On Linux, built in a Debian 12 container rather than on the host, so the
+# binary carries the oldest glibc floor worth supporting instead of whatever
+# the build machine happens to have. See packaging/Containerfile.
+#
+# On macOS, built on the machine itself, for its own architecture: Apple's
+# toolchain sets the oldest macOS the binary runs on, so there is no floor to
+# keep with a container. release.yaml runs it on an Apple Silicon and an
+# Intel runner, and each binary is run where it was built.
+#
+# What goes into the tarball and how it is packed is packaging/pack-tarball.sh,
+# shared by both.
 #
 # packaging/install.sh builds from source for other architectures or libcs
 set -eu
 
 REPO="$(cd "$(dirname "$0")/.." && pwd)"
+
+VERSION=$("$REPO/packaging/version.sh")
+
+# The commit is resolved here, on the host, and handed to build.rs through the
+# environment. The container has no git, and bind-mounting .git into it would
+# trip git's safe.directory check when the uid does not match. See build.rs.
+COMMIT=$(git -C "$REPO" rev-parse --short HEAD 2>/dev/null || echo "")
+if [ -n "$COMMIT" ] && ! git -C "$REPO" diff --quiet HEAD 2>/dev/null; then
+    COMMIT="$COMMIT-dirty"
+    echo "warning: building a release tarball from a dirty tree" >&2
+fi
+
+# The commit's own date, which is the one timestamp about this build that is a
+# property of the source rather than of when someone happened to run this. Every
+# mtime in the archive is forced to it below, so two builds of one commit produce
+# one checksum. 0 when there is no git: still deterministic, and a build with no
+# commit was never going to be reproducible anyway.
+SOURCE_DATE_EPOCH=$(git -C "$REPO" log -1 --format=%ct 2>/dev/null || echo 0)
+
+if [ "$(uname -s)" = Darwin ]; then
+    case "$(uname -m)" in
+        arm64) TRIPLE=aarch64-apple-darwin ;;
+        x86_64) TRIPLE=x86_64-apple-darwin ;;
+        *) echo "no macOS release for $(uname -m)" >&2; exit 2 ;;
+    esac
+    NAME="sdrtop-${VERSION}-${TRIPLE}"
+    # A target directory of its own, for the same reason the container has
+    # one: a host build never inherits it.
+    CARGO_TARGET_DIR="$REPO/target/release-$TRIPLE" SDRTOP_COMMIT="$COMMIT" \
+        cargo build --release --locked --target "$TRIPLE" \
+        --manifest-path "$REPO/Cargo.toml"
+    BIN="$REPO/target/release-$TRIPLE/$TRIPLE/release/sdrtop"
+    # Signed ad hoc, on both architectures. Apple Silicon runs nothing without
+    # a signature and its linker adds one, but the Intel linker does not, and
+    # one rule for both is easier to check than two. An ad-hoc signature is a
+    # hash of the file with no certificate and no timestamp, so it costs no
+    # reproducibility; it is not a developer signature, and says nothing about
+    # who built the file. The attestation on the release says that.
+    codesign --sign - --force "$BIN"
+    export VERSION SOURCE_DATE_EPOCH
+    exec sh "$REPO/packaging/pack-tarball.sh" "$NAME" "$BIN"
+fi
 
 # Podman first, then docker. This used to live in a _container.sh that two build
 # scripts shared; there is one left, so it lives here. Set CONTAINER to override
@@ -54,30 +104,12 @@ echo "building the $IMAGE image" >&2
 "$CONTAINER" build --platform linux/amd64 \
     -t "$IMAGE" -f "$REPO/packaging/Containerfile" "$REPO"
 
-VERSION=$("$REPO/packaging/version.sh")
-
 # The full Rust target triple, not `x86_64-linux`. The short form does not say
 # which libc, and that is precisely the axis this project is known to have
 # trouble on. It also means a musl or aarch64 build can be added later as a new
 # name rather than by breaking this one and every install.sh already in the
-# wild. See dev_docs/release-process-plan.md.
+# wild.
 NAME="sdrtop-${VERSION}-x86_64-unknown-linux-gnu"
-
-# The commit is resolved here, on the host, and handed to build.rs through the
-# environment. The container has no git, and bind-mounting .git into it would
-# trip git's safe.directory check when the uid does not match. See build.rs.
-COMMIT=$(git -C "$REPO" rev-parse --short HEAD 2>/dev/null || echo "")
-if [ -n "$COMMIT" ] && ! git -C "$REPO" diff --quiet HEAD 2>/dev/null; then
-    COMMIT="$COMMIT-dirty"
-    echo "warning: building a release tarball from a dirty tree" >&2
-fi
-
-# The commit's own date, which is the one timestamp about this build that is a
-# property of the source rather than of when someone happened to run this. Every
-# mtime in the archive is forced to it below, so two builds of one commit produce
-# one checksum. 0 when there is no git: still deterministic, and a build with no
-# commit was never going to be reproducible anyway.
-SOURCE_DATE_EPOCH=$(git -C "$REPO" log -1 --format=%ct 2>/dev/null || echo 0)
 
 exec "$CONTAINER" run --rm --platform linux/amd64 $CONTAINER_USER \
     -v "$REPO:/src" -w /src -e NAME="$NAME" -e SDRTOP_COMMIT="$COMMIT" \
@@ -87,70 +119,7 @@ exec "$CONTAINER" run --rm --platform linux/amd64 $CONTAINER_USER \
     # working copy in a state a later host build inherits.
     export CARGO_TARGET_DIR=/src/target/container
     cargo build --release --target x86_64-unknown-linux-gnu
-
-    OUT=/src/target/tarball/$NAME
-    rm -rf "$OUT"; mkdir -p "$OUT"
-    cp target/container/x86_64-unknown-linux-gnu/release/sdrtop "$OUT/"
-
-    # Reading the ELF headers proves what the binary asks of a machine; this
-    # proves it runs. Tested here, in the staging directory, so the file that
-    # gets exercised is the exact one that goes into the archive rather than the
-    # one it was copied from.
-    #
-    # Test startup at the supported glibc floor without native SDR libraries
-    reported=$("$OUT/sdrtop" --version)
-    echo "$reported"
-    "$OUT/sdrtop" --help >/dev/null
-
-    # And it has to be *this* version. Nothing else in the pipeline compares the
-    # binary against the name on the archive, so a stale CARGO_TARGET_DIR could
-    # ship an older build under the current version and no check would notice.
-    # release.yaml separately asserts the tag against Cargo.toml, and $VERSION
-    # came from version.sh reading that same file, so the two together chain the
-    # tag all the way to the binary.
-    case "$reported" in
-        "sdrtop $VERSION" | "sdrtop $VERSION "*) ;;
-        *)
-            echo "the binary reports \"$reported\", not sdrtop $VERSION" >&2
-            exit 1
-            ;;
-    esac
-    cp README.md LICENSE "$OUT/"
-    cp target/man/sdrtop.1 "$OUT/"
-    # install.sh travels with the tarball as well as being the one-liner on the
-    # release page, so an unpacked tarball can install itself offline.
-    cp packaging/install.sh "$OUT/"
-    # Only the markdown, not user_docs/pics: that carries screenshots and a
-    # 16 MB screen recording, which turned a 1.5 MB tarball into an 18 MB one.
-    mkdir -p "$OUT/user_docs"
-    cp user_docs/*.md "$OUT/user_docs/"
-
-    # Cleared, not just created. release.yaml collects the release assets with
-    # `cp target/dist/*.tar.gz`, so anything left here from an earlier build
-    # ships alongside this one: rename the asset, as R5 just did, and a local
-    # run leaves both the old and the new name sitting in the glob. A fresh CI
-    # runner never sees it, which is exactly what makes it worth closing here.
-    # target/ is build output, so this deletes nothing that cannot be rebuilt.
-    rm -rf /src/target/dist
-    mkdir -p /src/target/dist
-    # Deterministic, so the same commit gives the same checksum and anyone can
-    # rebuild this and compare. `tar -czf` is not: it records each file mtime
-    # (which `cp` set to now) and walks the directory in filesystem order, and
-    # gzip stamps its own header with the current time. Each flag kills one of
-    # those sources of variance:
-    #
-    #   --sort=name     archive order stops depending on the filesystem
-    #   --mtime         every entry gets the commit date, not the copy time
-    #   --owner/--group whoever ran the build stops being recorded
-    #   --format=gnu    explicit, since pax would add extended time headers
-    #   gzip -n         no timestamp, and no original filename, in the header
-    #
-    # Two steps rather than a pipeline: this is dash, which has no pipefail, so
-    # a failing tar in a pipe would be invisible. `set -e` catches both of these.
-    tar --sort=name --format=gnu \
-        --mtime="@$SOURCE_DATE_EPOCH" \
-        --owner=0 --group=0 --numeric-owner \
-        -C /src/target/tarball -cf "/src/target/dist/$NAME.tar" "$NAME"
-    gzip -9n "/src/target/dist/$NAME.tar"
-    echo "/src/target/dist/$NAME.tar.gz"
+    # Tested at the supported glibc floor, without native SDR libraries.
+    sh packaging/pack-tarball.sh "$NAME" \
+        target/container/x86_64-unknown-linux-gnu/release/sdrtop
 '

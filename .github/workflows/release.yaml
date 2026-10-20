@@ -1,15 +1,16 @@
 name: Release
 
 # Deliberately separate from ci.yaml. That runs on every push and must stay
-# fast; this runs once per tag and builds the release tarball in a Debian 12
-# container, for the glibc floor.
+# fast; this runs once per tag and builds the release tarballs: Linux's in a
+# Debian 12 container, for the glibc floor, and macOS's on an Apple Silicon and
+# an Intel runner, each binary run on the kind of machine it was built for.
 #
-# One artefact and one installer. There is no package matrix and no emulated
-# test matrix, because packaging/install.sh is what adapts to the target: it
-# resolves the library dependencies through whatever package manager the machine
-# has, and it builds from source whenever the prebuilt binary cannot run there.
-# That covers every architecture and every distribution without this pipeline
-# needing to know about any of them.
+# One tarball per system and one installer. There is no package matrix and no
+# emulated test matrix, because packaging/install.sh is what adapts to the
+# target: it resolves the library dependencies through whatever package manager
+# the machine has, and it builds from source whenever the prebuilt binary cannot
+# run there. That covers every architecture and every distribution without this
+# pipeline needing to know about any of them.
 on:
   push:
     tags: ["v*"]
@@ -30,12 +31,6 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: read
-      # Sigstore signs through a short-lived OIDC token minted for this run
-      # rather than through a key this repository has to hold, rotate and not
-      # lose. That is the whole reason attestations beat a minisign keypair
-      # here, and it is why the job needs to mint one and to write the result.
-      id-token: write
-      attestations: write
     steps:
       - uses: actions/checkout@v4
 
@@ -120,18 +115,143 @@ jobs:
           cmp -s "$out"/*/install.sh packaging/install.sh || {
             echo "::error::the tarball's install.sh is missing or out of date"; exit 1; }
 
+      - uses: actions/upload-artifact@v4
+        with:
+          name: tarball-linux
+          path: target/dist/*.tar.gz
+          if-no-files-found: error
+
+  # The same recipe as Linux's, packaging/build-tarball.sh, which builds on the
+  # runner itself on macOS. Not signed with a developer certificate for now,
+  # but never unsigned: Apple Silicon runs nothing without a signature, so
+  # build-tarball.sh signs both binaries ad hoc, and that signature is checked
+  # below rather than trusted. A tarball fetched with curl carries no
+  # quarantine flag, so the binary in it runs as it is.
+  #
+  # macos-15-intel is GitHub's last Intel image, supported until August 2027.
+  # After that the x86_64 build moves to the Apple Silicon runner as a cross
+  # build, and the line that runs it there needs Rosetta.
+  build-macos:
+    strategy:
+      matrix:
+        include:
+          - runner: macos-latest
+            triple: aarch64-apple-darwin
+            arch: arm64
+            minos: "11.0"
+          - runner: macos-15-intel
+            triple: x86_64-apple-darwin
+            arch: x86_64
+            minos: "10.12"
+    runs-on: ${{ matrix.runner }}
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.triple }}
+
+      # GNU tar for the reproducible archive; macOS's own tar is bsdtar, which
+      # pack-tarball.sh refuses rather than pack something that differs on
+      # every run.
+      - name: Build the tarball
+        run: |
+          command -v gtar >/dev/null || brew install gnu-tar
+          TAR=gtar packaging/build-tarball.sh
+
+      - name: Check what came out
+        run: |
+          out="$RUNNER_TEMP/unpacked"
+          mkdir -p "$out"
+          tar -xzf target/dist/*.tar.gz -C "$out"
+          bin=$(find "$out" -name sdrtop -type f | head -1)
+          [ -n "$bin" ] || { echo "::error::no sdrtop binary in the tarball"; exit 1; }
+          file "$bin"
+          test "$(lipo -archs "$bin")" = "${{ matrix.arch }}" || {
+            echo "::error::the tarball does not contain a ${{ matrix.arch }} binary"; exit 1; }
+
+          # The counterpart of Linux's DT_NEEDED check: every library the
+          # binary is linked against must be part of macOS itself. The radio
+          # libraries are opened at run time, from Homebrew or MacPorts, and a
+          # link to one would make the binary refuse to start on a Mac without
+          # it. Listed by rule rather than by name, because which frameworks
+          # the system libraries pull in is Apple's business and changes with
+          # the SDK; where they come from is the property that matters.
+          libs=$(otool -L "$bin" | tail -n +2 | awk '{print $1}')
+          echo "links: $libs"
+          bad=$(printf '%s\n' "$libs" | grep -v -e '^/usr/lib/' -e '^/System/Library/' || true)
+          test -z "$bad" || {
+            echo "::error::linked against something that is not part of macOS: $bad"; exit 1; }
+          if printf '%s\n' "$libs" | grep -qi -e hackrf -e rtlsdr -e soapy; then
+            echo "::error::a radio library is linked; it must stay a runtime load"; exit 1
+          fi
+
+          # The oldest macOS it runs on, asserted: a newer SDK default would
+          # otherwise drop older Macs without a word.
+          # A target below 10.14 records it in LC_VERSION_MIN_MACOSX as
+          # `version`; from 10.14 on, LC_BUILD_VERSION records it as `minos`.
+          minos=$(otool -l "$bin" | awk '
+              /LC_BUILD_VERSION/ { b = 1 } /LC_VERSION_MIN_MACOSX/ { v = 1 }
+              b && $1 == "minos" { print $2; exit }
+              v && $1 == "version" { print $2; exit }')
+          echo "minimum macOS: $minos"
+          test "$minos" = "${{ matrix.minos }}" || {
+            echo "::error::minimum macOS is $minos, expected ${{ matrix.minos }}"; exit 1; }
+
+          # Signed, and signed validly: an ad-hoc signature that does not match
+          # the file is refused by the kernel at launch on Apple Silicon.
+          codesign --verify --strict --verbose=2 "$bin"
+          codesign -dv "$bin" 2>&1 | tee "$RUNNER_TEMP/codesign.txt"
+          grep -q 'Signature=adhoc' "$RUNNER_TEMP/codesign.txt" || {
+            echo "::error::the binary carries no ad-hoc signature"; exit 1; }
+
+          cmp -s "$out"/*/install.sh packaging/install.sh || {
+            echo "::error::the tarball's install.sh is missing or out of date"; exit 1; }
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: tarball-${{ matrix.triple }}
+          path: target/dist/*.tar.gz
+          if-no-files-found: error
+
+  # One checksum file and one attestation for every system's tarball, made in
+  # one place once all of them have passed their checks.
+  collect:
+    needs: [build, build-macos]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      # Sigstore signs through a short-lived OIDC token minted for this run
+      # rather than through a key this repository has to hold, rotate and not
+      # lose. That is the whole reason attestations beat a minisign keypair
+      # here, and it is why the job needs to mint one and to write the result.
+      id-token: write
+      attestations: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: tarball-*
+          path: release
+          merge-multiple: true
+
       # Named globs rather than `*`, so the checksum file can never list itself
       # and an empty build directory fails here instead of producing an empty
-      # SHA256SUMS that verifies nothing.
+      # SHA256SUMS that verifies nothing. Three tarballs, counted: a system that
+      # quietly built nothing must not ship a release without it.
       #
       # These names are the checksums, and install.sh checks a download against
       # them. Renaming an asset after upload breaks that for everyone.
       - name: Collect the artefacts and their checksums
         run: |
-          mkdir -p release
-          cp target/dist/*.tar.gz release/
           cp packaging/install.sh release/
           cd release
+          ls -l
+          test "$(ls -- *.tar.gz | wc -l)" -eq 3 || {
+            echo "::error::expected three tarballs (Linux, macOS arm64, macOS x86_64)"; exit 1; }
           sha256sum -- *.tar.gz install.sh > SHA256SUMS
           cat SHA256SUMS
 
@@ -143,12 +263,12 @@ jobs:
       # This binds each artefact's digest to this repository, this workflow file
       # and this commit, signed through Sigstore. A user checks it with:
       #
-      #   gh attestation verify sdrtop-<version>-x86_64-unknown-linux-gnu.tar.gz \
+      #   gh attestation verify sdrtop-<version>-<target>.tar.gz \
       #      --repo musithang/sdrtop
       #
-      # SHA256SUMS itself is not attested: it is derived from the two files that
-      # are, so attesting it would add a third thing to keep in agreement and
-      # prove nothing the other two do not already.
+      # SHA256SUMS itself is not attested: it is derived from the files that
+      # are, so attesting it would add one more thing to keep in agreement and
+      # prove nothing the others do not already.
       #
       # Deliberately not gated on a tag. A workflow_dispatch run produces a real
       # attestation, which is the only way to exercise this before a release
@@ -172,7 +292,7 @@ jobs:
   # the other way round would mean a perfect release page pointing at a version
   # that failed to publish.
   publish:
-    needs: build
+    needs: collect
     # Only a tag publishes. A manual run builds, checks, attests and stops.
     if: startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-latest
@@ -231,7 +351,7 @@ jobs:
           cargo publish --locked
 
   release:
-    needs: [build, publish]
+    needs: [collect, publish]
     # Only a tag drafts a release. A manual run builds, checks and stops there.
     if: startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-latest
