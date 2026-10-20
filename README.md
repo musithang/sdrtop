@@ -21,8 +21,8 @@
 </p>
 
 <p align="center">
-  <sub>Supported by</sub><br>
-  <a href="https://www.sdrplay.com/"><b>SDRplay</b></a>
+  <sub>This project is supported by</sub><br>
+  <a href="https://airspy.com/"><b>Airspy</b></a> &nbsp;·&nbsp; <a href="https://www.sdrplay.com/"><b>SDRplay</b></a>
 </p>
 
 <p align="center">
@@ -267,7 +267,7 @@ Native support for the HackRF One, the RTL-SDR, the PortaPack H4M and the tinySA
 
 ### 🔜 Next
 
-- A native backend for the SDRplay RSP1B, now that one is sitting on my desk
+- Native backends for the radios now sitting on my desk: the SDRplay RSP1B, the Airspy R2 and the Airspy HF+ Discovery
 - **Digital signals done properly**, the way Bluetooth is now: LoRa, DMR, GSM, ADS-B, AIS. Each gets its own screens. Still no audio, still just data
 - Editing the config from inside the app. Until then: `$EDITOR` and a little courage
 
@@ -282,8 +282,12 @@ Native support for the HackRF One, the RTL-SDR, the PortaPack H4M and the tinySA
 | RTL-SDR (R820T, E4000, R828D) | ✅ Full support | Single tuner gain + AGC; no VGA, no BB filter, no Friis NF |
 | tinySA / Ultra / Ultra+ | ✅ Spectrum support | ZS405 verified; calibrated dBm spectrum, waterfall and native band sweeps |
 | **Anything with a SoapySDR driver** | 🧪 **Beta** | Airspy, SDRplay, Pluto, Lime, bladeRF, USRP, SoapyRemote. Unconfirmed on anything but a HackRF |
-| SDRplay RSP1B | 🔲 Planned | On my desk; the native backend is next |
+| SDRplay RSP1B | 🔲 Planned | On my desk; native backend in the queue |
+| Airspy R2 | 🔲 Planned | On my desk; native backend in the queue |
+| Airspy HF+ Discovery | 🔲 Planned | On my desk; native backend in the queue |
 | HackRF Pro | 🔲 Planned | Needs hardware |
+
+**Hardware from the people who make it:** the RSP1B came from [SDRplay](https://www.sdrplay.com/), the R2 and the HF+ Discovery from [Airspy](https://airspy.com/). Thank you both.
 
 Native support is added only after physical testing on real devices. No guessing from datasheets. Translation: that list moves at exactly the speed of my hobby budget.
 

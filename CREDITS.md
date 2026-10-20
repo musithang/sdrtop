@@ -20,6 +20,8 @@ a pull request and your name belongs here too.
 
 ## Hardware
 
+- **[Airspy](https://airspy.com/)**: an Airspy R2 and an Airspy HF+ Discovery,
+  engineering samples, sent to the project in October 2026.
 - **[SDRplay](https://www.sdrplay.com/)**: an RSP1B, sent to the project in
   October 2026.
 

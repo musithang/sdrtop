@@ -314,14 +314,17 @@ behaviour and `/sys` that don't have direct equivalents elsewhere.
 
 | Device | Status | Notes |
 |--------|--------|-------|
+| SDRplay RSP1B | Planned | On the desk, sent by SDRplay |
+| Airspy R2 | Planned | On the desk, sent by Airspy |
+| Airspy HF+ Discovery | Planned | On the desk, sent by Airspy |
 | Airspy Mini | Planned | Needs hardware to test |
-| Airspy HF+ Discovery | Planned | Needs hardware to test |
 | HackRF Pro | Planned | Needs hardware to test |
 | LimeSDR / bladeRF / SDRplay / PlutoSDR | Try SoapySDR | These should already work through the SoapySDR backend. Nobody has told me yet |
 
 **Native** device support means physically owning and testing the hardware, and
-development here runs on a HackRF One, a PortaPack H4M and an RSP1B that
-SDRplay sent. That is the whole bottleneck: the list moves at exactly the speed
+development here runs on a HackRF One and a PortaPack H4M, with an RSP1B from
+SDRplay and an Airspy R2 and HF+ Discovery from Airspy now on the desk, waiting
+for their native backends. That is the whole bottleneck: the list moves at exactly the speed
 of a hobby budget. The SoapySDR backend exists precisely because that speed was
 not good enough.
 
