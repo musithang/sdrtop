@@ -199,15 +199,18 @@ permanent while you watch a progress spinner.
 
 | Job | Deed | Reversible |
 |---|---|---|
-| `build` | tarball in the Debian 12 container, tag matched against `Cargo.toml`, changelog section confirmed to exist, glibc floor asserted, exact shared-library set asserted, provenance attestation signed | yes |
+| `build` | Linux tarball in the Debian 12 container, tag matched against `Cargo.toml`, changelog section confirmed to exist, glibc floor asserted, exact shared-library set asserted | yes |
+| `build-macos` | macOS tarballs on an Apple Silicon and an Intel runner: architecture, system-only links, minimum macOS and ad-hoc signature asserted, then installed offline from the unpacked tarball and run | yes |
+| `collect` | all three tarballs counted, `SHA256SUMS` written, provenance attestation signed | yes |
 | `publish` | `cargo publish` to crates.io via Trusted Publishing | **no. never. under no circumstances whatsoever** |
 | `release` | drafts the GitHub release with your changelog as its body | yes |
 
-The irreversible act sits in the **middle**: guarded by everything `build`
-checks, followed only by a step that is safe to retry until the heat death of
-the universe.
+The irreversible act sits in the **middle**: guarded by everything `build`,
+`build-macos` and `collect` check, followed only by a step that is safe to retry
+until the heat death of the universe.
 
-If `build` fails, breathe out. Nothing has happened. Proceed to the Bestiary.
+If any of those three fails, breathe out. Nothing has happened. Proceed to the
+Bestiary.
 
 ## VIII. Interrogate the draft before the public may 🔍
 
@@ -230,10 +233,17 @@ sh packaging/install.sh --prefix ~/.cache/rel-test --git
 sh packaging/install.sh --prefix ~/.cache/rel-test --uninstall
 ```
 
+The two macOS tarballs can't be tried here, there being no Mac on the desk.
+`build-macos` already installed each one from its unpacked tarball on a real
+Mac and ran it, which is what the offline line above does for Linux. Their
+entries in `SHA256SUMS` and their attestations are checked like Linux's.
+
 And demand that the attestation prove itself:
 
 ```sh
-gh attestation verify sdrtop-X.Y.Z-x86_64-unknown-linux-gnu.tar.gz --repo musithang/sdrtop
+for t in x86_64-unknown-linux-gnu aarch64-apple-darwin x86_64-apple-darwin; do
+    gh attestation verify sdrtop-X.Y.Z-$t.tar.gz --repo musithang/sdrtop
+done
 ```
 
 > *The checksum check in `install.sh` once lived inside an `if` whose every
@@ -320,9 +330,10 @@ and it will happily eat yours.
 
 ## 🔵 The Ubuntu One: "it works on my machine, but not on my other machine"
 
-The prebuilt tarball needs x86_64 Linux with glibc 2.36+. The installer runs
-the binary to check compatibility. Other architectures, musl and older glibc
-systems use the source-build fallback.
+The prebuilt Linux tarball needs x86_64 Linux with glibc 2.36+. The macOS
+tarballs need macOS 11+ on Apple Silicon and 10.12+ on Intel. The installer
+runs the binary to check compatibility. Other architectures, musl and older
+glibc systems use the source-build fallback.
 
 Native SDR libraries are optional runtime loads. Linux candidates are
 `libhackrf.so.0` / `libhackrf.so` and

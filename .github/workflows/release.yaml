@@ -210,6 +210,20 @@ jobs:
           cmp -s "$out"/*/install.sh packaging/install.sh || {
             echo "::error::the tarball's install.sh is missing or out of date"; exit 1; }
 
+      # What a Mac user does with this tarball, on a Mac: install.sh from the
+      # unpacked tarball, offline, into a prefix of its own, then the installed
+      # binary run and the installation removed again. It goes through the
+      # macOS branches the Linux runner never takes (BSD install, no udev).
+      - name: Install from the unpacked tarball
+        run: |
+          out="$RUNNER_TEMP/unpacked"
+          prefix="$RUNNER_TEMP/prefix"
+          sh "$out"/*/install.sh --prefix "$prefix"
+          "$prefix/bin/sdrtop" --version
+          test -f "$prefix/share/man/man1/sdrtop.1"
+          sh "$out"/*/install.sh --prefix "$prefix" --uninstall
+          test ! -e "$prefix/bin/sdrtop"
+
       - uses: actions/upload-artifact@v4
         with:
           name: tarball-${{ matrix.triple }}

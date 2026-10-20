@@ -3,7 +3,7 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 # Copyright (C) 2026 MusiThang <viktor.laszlo92@protonmail.com>
 
-# Install sdrtop on any Linux distribution.
+# Install sdrtop on any Linux distribution, or on macOS.
 #
 #   curl -fsSL https://raw.githubusercontent.com/musithang/sdrtop/main/packaging/install.sh | sh
 #   sh install.sh --prefix ~/.local        # no root anywhere
@@ -14,7 +14,8 @@
 # There are two ways to get sdrtop and this script picks between them, so nobody
 # else has to:
 #
-#   1. the prebuilt tarball, x86_64 glibc only, published on the release page,
+#   1. the prebuilt tarball published on the release page: x86_64 Linux with
+#      glibc, and macOS on Apple Silicon or Intel,
 #   2. `cargo install sdrtop --locked`, which works everywhere because it
 #      compiles on the machine it is installing to.
 #
@@ -60,6 +61,7 @@ sdrtop installer
   --hackrf        also install the optional libhackrf runtime
   --rtlsdr        also install the optional librtlsdr runtime
   --soapy         also install libSoapySDR and its driver modules (optional)
+                  (on macOS these three come from Homebrew)
   --deps-only     install only runtimes selected by --hackrf, --rtlsdr, --soapy
   --uninstall     remove what a previous run installed
   --help          this
@@ -96,7 +98,11 @@ if [ "$RAW_DEPS_ONLY" -eq 1 ] && [ "$WANT_HACKRF" -eq 0 ] \
     die "--deps-only requires --hackrf, --rtlsdr or --soapy"
 fi
 
-[ "$(uname -s)" = Linux ] || die "sdrtop is Linux only; this is $(uname -s)"
+OS=$(uname -s)
+case "$OS" in
+    Linux|Darwin) ;;
+    *) die "sdrtop installs on Linux and macOS; this is $OS" ;;
+esac
 
 # `--git` installs whatever main happens to be, which has no version number to
 # ask for. Silently ignoring one would install something other than what was
@@ -122,9 +128,26 @@ if [ -z "$PREFIX" ]; then
         say "no root and no sudo, installing into $PREFIX"
     fi
 fi
-# Writing inside your own home never needs sudo, whatever the prefix defaulted to.
+# Writing inside your own home never needs sudo, whatever the prefix defaulted
+# to, and neither does a prefix whose bin and share are already yours (or can
+# be made by you): on an Intel Mac, Homebrew owns those under /usr/local, and a
+# file sudo put there would be root's.
 case "$PREFIX" in "$HOME"/*) SUDO="" ;; esac
+# Whether `$1` can be written, or created in its nearest existing parent.
+writable() {
+    d=$1
+    while [ ! -e "$d" ]; do d=$(dirname "$d"); done
+    [ -w "$d" ]
+}
+if writable "$PREFIX/bin" && writable "$PREFIX/share"; then SUDO=""; fi
 as_root() { if [ -n "$SUDO" ]; then $SUDO "$@"; else "$@"; fi; }
+
+# `install -D` (create the parent directories) is GNU's; macOS's install has
+# no such flag, so the directory is made first, on both.
+put() {
+    as_root mkdir -p "$(dirname "$3")"
+    as_root install -m "$1" "$2" "$3"
+}
 
 BIN_DIR="$PREFIX/bin"
 MAN_DIR="$PREFIX/share/man/man1"
@@ -144,10 +167,18 @@ fi
 # in every list is the -dev/-devel package: distributions rename the runtime
 # library when its soname changes but keep the development package name stable,
 # and installing it pulls the runtime library in as a dependency.
+# On macOS that is Homebrew or nothing: the libraries sdrtop opens are looked
+# for where Homebrew and MacPorts put them, and Homebrew is the one that can be
+# driven without a prompt. A Linux machine with Homebrew on it keeps its own
+# package manager, which is the one that supplies udev rules.
 PM=""
-for c in apt-get dnf yum pacman zypper apk xbps-install emerge nix-env; do
-    if command -v "$c" >/dev/null 2>&1; then PM="$c"; break; fi
-done
+if [ "$OS" = Darwin ]; then
+    if command -v brew >/dev/null 2>&1; then PM=brew; fi
+else
+    for c in apt-get dnf yum pacman zypper apk xbps-install emerge nix-env; do
+        if command -v "$c" >/dev/null 2>&1; then PM="$c"; break; fi
+    done
+fi
 
 # The names below were read off each distribution's own package index, not
 # remembered. The one that surprises: Debian calls the rtl-sdr runtime
@@ -234,6 +265,18 @@ case "$PM" in
         SOAPY_MODULES=""
         LEGACY_DEV_PKGS="hackrf rtl-sdr pkg-config"
         DEV_PKGS="gcc" ;;
+    brew)
+        # Read off formulae.brew.sh. Homebrew's own tree carries the HackRF and
+        # RTL-SDR modules only; the others live in third-party taps, which this
+        # script does not add on anyone's behalf.
+        LIB_HACKRF="hackrf"
+        LIB_RTLSDR="librtlsdr"
+        SOAPY_LIB="soapysdr"
+        SOAPY_MODULES="soapyhackrf soapyrtlsdr"
+        LEGACY_DEV_PKGS="hackrf librtlsdr pkgconf"
+        # A compiler comes with Apple's Command Line Tools, which only their
+        # own dialog installs; see the compile step.
+        DEV_PKGS="" ;;
     "")
         LIB_HACKRF=""; LIB_RTLSDR=""; DEV_PKGS="" ;;
 esac
@@ -249,6 +292,8 @@ pm_install() {
         xbps-install) as_root xbps-install -Sy "$1" ;;
         emerge)  as_root emerge --noreplace "$1" ;;
         nix-env) nix-env -iA "nixpkgs.$1" ;;
+        # Never as root: Homebrew refuses to run that way.
+        brew)    brew install "$1" ;;
         *) return 1 ;;
     esac
 }
@@ -263,22 +308,38 @@ install_first() {
     return 1
 }
 
-have_native_lib() {
+# Whether the library `$1` (libhackrf, librtlsdr, libSoapySDR) is installed
+# where sdrtop will look for it: the loader's cache on Linux; on macOS the
+# directories sdrtop itself searches, Homebrew's on Apple Silicon and Intel and
+# MacPorts'.
+have_lib() {
+    if [ "$OS" = Darwin ]; then
+        for d in /opt/homebrew/lib /usr/local/lib /opt/local/lib; do
+            for f in "$d/$1".dylib "$d/$1".*.dylib; do
+                [ -e "$f" ] && return 0
+            done
+        done
+        return 1
+    fi
     ldconfig -p 2>/dev/null | grep -Fq "$1.so"
 }
+
+have_native_lib() { have_lib "$1"; }
 
 # SoapySDR is not a dependency. sdrtop opens it at runtime if it is there and
 # behaves exactly as it always did if it is not, so this asks rather than
 # requires.
-have_soapy() {
-    ldconfig -p 2>/dev/null | grep -q 'libSoapySDR\.so'
-}
+have_soapy() { have_lib libSoapySDR; }
 
 install_soapy() {
     if have_soapy; then
         say "libSoapySDR is already present"
     elif [ -z "$PM" ] || [ -z "$SOAPY_LIB" ]; then
-        warn "no SoapySDR package list for this system; install libSoapySDR yourself"
+        if [ "$OS" = Darwin ]; then
+            warn "no Homebrew; install libSoapySDR yourself (brew.sh, or MacPorts)"
+        else
+            warn "no SoapySDR package list for this system; install libSoapySDR yourself"
+        fi
         return 0
     else
         step "Installing libSoapySDR with $PM"
@@ -303,11 +364,15 @@ install_runtime_deps() {
         return 0
     fi
     if [ -z "$PM" ]; then
-        warn "no known package manager; install the selected SDR libraries yourself"
+        if [ "$OS" = Darwin ]; then
+            warn "no Homebrew; install the selected SDR libraries yourself (brew.sh, or MacPorts)"
+        else
+            warn "no known package manager; install the selected SDR libraries yourself"
+        fi
         return 0
     fi
     step "Installing selected native SDR libraries with $PM"
-    say "(this may ask for your password)"
+    [ "$PM" = brew ] || say "(this may ask for your password)"
     # Not fatal. A stale or unreachable mirror must not end the installation
     # before the libraries have even been tried, and they may be cached already.
     if [ "$PM" = apt-get ]; then
@@ -379,21 +444,30 @@ if [ -z "$BINARY" ] && [ "$FROM_SOURCE" -eq 0 ]; then
     say "sdrtop $TAG"
 
     ARCH=$(uname -m)
-    if [ "$ARCH" != x86_64 ]; then
+    # The asset name is the full Rust target triple from 0.4.2 onwards.
+    # v0.4.1, the only release older than that with a tarball attached,
+    # carries the short form `sdrtop-0.4.1-x86_64-linux.tar.gz`, and
+    # `--version v0.4.1` has to keep working. So both are tried, newest
+    # spelling first. Drop the legacy candidate once no supported release
+    # uses it, which is the moment 0.4.1 stops being worth installing.
+    # macOS tarballs exist from the release that added them; an older tag
+    # simply has none, and is compiled.
+    CANDIDATES=""
+    case "$OS/$ARCH" in
+        Linux/x86_64)
+            CANDIDATES="sdrtop-$VERSION-x86_64-unknown-linux-gnu sdrtop-$VERSION-x86_64-linux" ;;
+        Darwin/arm64)
+            CANDIDATES="sdrtop-$VERSION-aarch64-apple-darwin" ;;
+        Darwin/x86_64)
+            CANDIDATES="sdrtop-$VERSION-x86_64-apple-darwin" ;;
+    esac
+    if [ -z "$CANDIDATES" ]; then
         say "no prebuilt binary for $ARCH; compiling instead"
     else
         step "Downloading the prebuilt binary"
         BASE="https://github.com/$REPO/releases/download/$TAG"
-        # The asset name is the full Rust target triple from 0.4.2 onwards.
-        # v0.4.1, the only release older than that with a tarball attached,
-        # carries the short form `sdrtop-0.4.1-x86_64-linux.tar.gz`, and
-        # `--version v0.4.1` has to keep working. So both are tried, newest
-        # spelling first. Drop the legacy candidate once no supported release
-        # uses it, which is the moment 0.4.1 stops being worth installing.
         NAME=""
-        for candidate in \
-            "sdrtop-$VERSION-x86_64-unknown-linux-gnu" \
-            "sdrtop-$VERSION-x86_64-linux"
+        for candidate in $CANDIDATES
         do
             if fetch "$BASE/$candidate.tar.gz" "$WORK/$candidate.tar.gz"; then
                 NAME="$candidate"
@@ -412,13 +486,19 @@ if [ -z "$BINARY" ] && [ "$FROM_SOURCE" -eq 0 ]; then
             if [ "$NO_VERIFY" -eq 1 ]; then
                 warn "--no-verify: installing $NAME.tar.gz without checking its checksum"
             else
-                command -v sha256sum >/dev/null 2>&1 \
-                    || die "sha256sum is needed to verify the download (or pass --no-verify)"
+                # macOS has no sha256sum; its shasum reads the same file.
+                if command -v sha256sum >/dev/null 2>&1; then
+                    sha256_check() { sha256sum -c "$1"; }
+                elif command -v shasum >/dev/null 2>&1; then
+                    sha256_check() { shasum -a 256 -c "$1"; }
+                else
+                    die "sha256sum or shasum is needed to verify the download (or pass --no-verify)"
+                fi
                 fetch "$BASE/SHA256SUMS" "$WORK/SHA256SUMS" \
                     || die "could not download SHA256SUMS for $TAG (or pass --no-verify)"
                 grep " $NAME.tar.gz\$" "$WORK/SHA256SUMS" > "$WORK/expected.sha256" \
                     || die "SHA256SUMS for $TAG does not list $NAME.tar.gz"
-                ( cd "$WORK" && sha256sum -c expected.sha256 >/dev/null ) \
+                ( cd "$WORK" && sha256_check expected.sha256 >/dev/null ) \
                     || die "checksum mismatch on $NAME.tar.gz; refusing to install it"
                 say "  checksum verified"
             fi
@@ -440,8 +520,12 @@ if [ -z "$BINARY" ] && [ "$FROM_SOURCE" -eq 0 ]; then
                 SRC_DIR="$WORK/$NAME"
             else
                 say "the prebuilt binary does not run on this system:"
-                ldd "$WORK/$NAME/sdrtop" 2>&1 | grep -E 'not found|Error|error' \
-                    | sed 's/^/    /' || say "    (it failed to start)"
+                if [ "$OS" = Linux ]; then
+                    ldd "$WORK/$NAME/sdrtop" 2>&1 | grep -E 'not found|Error|error' \
+                        | sed 's/^/    /' || say "    (it failed to start)"
+                else
+                    say "    (it failed to start)"
+                fi
                 say "compiling for this system"
             fi
         fi
@@ -452,7 +536,14 @@ fi
 if [ -z "$BINARY" ]; then
     step "Compiling with cargo"
 
-    if command -v cc >/dev/null 2>&1; then
+    # On macOS `cc` exists before the Command Line Tools do, as a stub that
+    # offers to install them, so it is xcode-select that says whether they are
+    # there. Their installer is a dialog, which a script cannot click through.
+    if [ "$OS" = Darwin ]; then
+        xcode-select -p >/dev/null 2>&1 \
+            || die "compiling needs Apple's Command Line Tools: run 'xcode-select --install', then this installer again"
+        say "Apple's Command Line Tools are installed"
+    elif command -v cc >/dev/null 2>&1; then
         say "a C compiler/linker is already installed"
     elif [ -n "$PM" ]; then
         say "installing C build tools (this may ask for your password)"
@@ -575,19 +666,19 @@ fi
 
 # ── Install ─────────────────────────────────────────────────────────────────
 step "Installing into $PREFIX"
-as_root install -Dm755 "$BINARY" "$BIN_DIR/sdrtop"
+put 755 "$BINARY" "$BIN_DIR/sdrtop"
 say "  $BIN_DIR/sdrtop"
 if [ -n "$SRC_DIR" ]; then
     if [ -f "$SRC_DIR/sdrtop.1" ]; then
-        as_root install -Dm644 "$SRC_DIR/sdrtop.1" "$MAN_DIR/sdrtop.1"
+        put 644 "$SRC_DIR/sdrtop.1" "$MAN_DIR/sdrtop.1"
         say "  $MAN_DIR/sdrtop.1"
     fi
     for f in "$SRC_DIR/README.md" "$SRC_DIR/LICENSE"; do
-        [ -f "$f" ] && as_root install -Dm644 "$f" "$DOC_DIR/$(basename "$f")"
+        if [ -f "$f" ]; then put 644 "$f" "$DOC_DIR/$(basename "$f")"; fi
     done
     if [ -d "$SRC_DIR/user_docs" ]; then
         for f in "$SRC_DIR"/user_docs/*.md; do
-            [ -f "$f" ] && as_root install -Dm644 "$f" "$DOC_DIR/user_docs/$(basename "$f")"
+            if [ -f "$f" ]; then put 644 "$f" "$DOC_DIR/user_docs/$(basename "$f")"; fi
         done
     fi
 fi
@@ -612,11 +703,16 @@ else
     say "  With it, sdrtop also reaches Airspy, SDRplay, PlutoSDR, LimeSDR,"
     say "  bladeRF, USRP and anything else with a SoapySDR driver."
     say "  Re-run this installer with --soapy to add it."
+    if [ "$OS" = Darwin ]; then
+        say "  On a Mac that brings the HackRF and RTL-SDR modules; the others"
+        say "  come from their makers or the pothosware Homebrew tap."
+    fi
 fi
 
 # ── The radio has to be openable ────────────────────────────────────────────
-# Distribution packages supply native SDR udev rules
-if [ "$WANT_HACKRF" -eq 1 ] || [ "$WANT_RTLSDR" -eq 1 ]; then
+# Distribution packages supply native SDR udev rules. macOS has no udev and
+# needs no rules: any user may open a USB radio there.
+if [ "$OS" = Linux ] && { [ "$WANT_HACKRF" -eq 1 ] || [ "$WANT_RTLSDR" -eq 1 ]; }; then
     step "Device access"
     if grep -rqs -e 'idVendor.*1d50' -e 'idVendor.*0bda' \
          /usr/lib/udev/rules.d /lib/udev/rules.d /etc/udev/rules.d; then

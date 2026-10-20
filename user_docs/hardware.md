@@ -328,8 +328,11 @@ brew install soapysdr       # SoapySDR, plus the driver module for your radio
 cargo install sdrtop --locked
 ```
 
-The one-line installer is Linux's; on a Mac, use cargo. I don't own a Mac, so
-this stays unofficial: tested by the people who run it. If something behaves
+The [one-line installer](getting-started.md) works on a Mac too: it takes the
+macOS tarball for your Mac when the release carries one and compiles with cargo
+when it doesn't (that needs Apple's Command Line Tools, `xcode-select
+--install`), and its `--hackrf`, `--rtlsdr` and `--soapy` go through Homebrew.
+I don't own a Mac, so this stays unofficial: tested by the people who run it. If something behaves
 differently there, an issue is how I find out.
 
 ---

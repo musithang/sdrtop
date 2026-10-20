@@ -159,6 +159,16 @@ jobs:
       - name: Homebrew's libSoapySDR resolves
         run: cargo test --locked hardware::soapy::api::tests::installed_soapysdr_resolves -- --ignored --exact
 
+      # install.sh under macOS's own sh (bash 3.2 in POSIX mode, not Linux's
+      # dash), and its Homebrew branch against the libraries installed above:
+      # it must find them where sdrtop looks and install nothing.
+      - name: The installer on macOS
+        run: |
+          sh -n packaging/install.sh
+          sh packaging/install.sh --help >/dev/null
+          sh packaging/install.sh --deps-only --hackrf --rtlsdr | tee "$RUNNER_TEMP/deps.txt"
+          grep -q 'already present' "$RUNNER_TEMP/deps.txt"
+
   no-native-libraries:
     runs-on: ubuntu-latest
     permissions:
