@@ -143,6 +143,7 @@ mod tests {
         engine: ui::LayoutEngine,
         show_footer: bool,
         focus_keys: crate::app::FocusKeys,
+        device: Option<Arc<dyn crate::hardware::SdrDevice>>,
     }
 
     impl Harness {
@@ -155,7 +156,21 @@ mod tests {
                 engine,
                 show_footer: true,
                 focus_keys: HashMap::new(),
+                device: None,
             }
+        }
+
+        /// The keys on a fixture Airspy R2 at 92.8 MHz, inside its LNA's
+        /// measured band, with its stages at `gains`.
+        fn on_r2(r2: &crate::hardware::native::airspy::bench::BenchR2, gains: [f64; 3]) -> Self {
+            let mut h = Self::new();
+            h.device = Some(Arc::clone(&r2.device));
+            let mut m = metrics(&h.state);
+            m.caps = Arc::new(r2.device.capabilities().clone());
+            m.radio.frequency = 92_800_000;
+            m.radio.gains = gains.to_vec();
+            drop(m);
+            h
         }
 
         fn press(&mut self, c: char) -> KeyAction {
@@ -165,7 +180,7 @@ mod tests {
         fn key(&mut self, code: KeyCode) -> KeyAction {
             let mut ctx = InputCtx {
                 state: &self.state,
-                device: None,
+                device: self.device.as_ref(),
                 engine: &mut self.engine,
                 show_footer: &mut self.show_footer,
                 focus_keys: &self.focus_keys,
@@ -541,5 +556,104 @@ mod tests {
                 .any(|e| e.text.contains("no front end boost")),
             "and the user is told why nothing happened"
         );
+    }
+
+    // ── The gain keys on a radio whose stages are measured tables ───────────
+
+    use crate::hardware::native::airspy::bench::BenchR2;
+
+    fn gains(h: &Harness) -> Vec<f64> {
+        metrics(&h.state).radio.gains.clone()
+    }
+
+    /// **Every gain key reaches its own register.** `↑` the LNA, `]` the
+    /// mixer, and the VGA once `.` has picked it: each lands on the next
+    /// measured position, in the radio and in the state alike. `]` used to
+    /// call a setter the R2 does not have and report the mixer moved.
+    #[test]
+    fn on_the_r2_every_gain_key_reaches_its_own_register() {
+        let r2 = BenchR2::new();
+        let mut h = Harness::on_r2(&r2, [23.40, 8.25, 0.0]);
+        h.key(KeyCode::Up);
+        h.press(']');
+        assert_eq!(r2.registers(), [9, 7, -1]);
+        assert_eq!(gains(&h), [26.96, 9.41, 0.0]);
+        for _ in 0..3 {
+            h.press('.');
+        }
+        h.key(KeyCode::Up);
+        assert_eq!(r2.registers(), [9, 7, 1]);
+        assert_eq!(gains(&h), [26.96, 9.41, 3.40]);
+    }
+
+    /// **A measured table is walked position by position**, however close two
+    /// of its values are: the mixer's 15.90, 16.16, 16.17 and 16.24 dB are
+    /// four settings, not one 16 dB that the key cannot leave.
+    #[test]
+    fn a_measured_table_is_walked_position_by_position() {
+        let r2 = BenchR2::new();
+        let mut h = Harness::on_r2(&r2, [11.28, 15.90, 0.0]);
+        let mut mixer = Vec::new();
+        for _ in 0..3 {
+            h.press(']');
+            mixer.push((r2.registers()[1], gains(&h)[1]));
+        }
+        assert_eq!(mixer, [(13, 16.16), (14, 16.17), (15, 16.24)]);
+        h.key(KeyCode::Up);
+        assert_eq!((r2.registers()[0], gains(&h)[0]), (4, 11.75));
+        h.key(KeyCode::Down);
+        h.key(KeyCode::Down);
+        assert_eq!((r2.registers()[0], gains(&h)[0]), (2, 9.09));
+    }
+
+    /// The stage picked with `.` walks its table the same way.
+    #[test]
+    fn a_picked_stage_walks_its_table_too() {
+        let r2 = BenchR2::new();
+        let mut h = Harness::on_r2(&r2, [27.76, 8.25, 0.0]);
+        h.press('.');
+        h.key(KeyCode::Up);
+        assert_eq!((r2.registers()[0], gains(&h)[0]), (11, 28.19));
+        h.key(KeyCode::Down);
+        assert_eq!((r2.registers()[0], gains(&h)[0]), (10, 27.76));
+    }
+
+    /// **The log says where the stage is**: its measured dB and its position
+    /// inside the band the dB holds in, the position alone outside it.
+    #[test]
+    fn the_log_names_a_measured_stage_by_its_reading() {
+        let r2 = BenchR2::new();
+        let mut h = Harness::on_r2(&r2, [23.40, 15.90, 0.0]);
+        h.press(']');
+        assert!(
+            h.log().contains("MIX gain \u{2192} 16.16 dB (13/15)"),
+            "{}",
+            h.log()
+        );
+        metrics(&h.state).radio.frequency = 943_400_000;
+        h.key(KeyCode::Up);
+        assert!(
+            h.log().contains("LNA gain \u{2192} step 9/14"),
+            "{}",
+            h.log()
+        );
+    }
+
+    /// **`[R]` puts every stage where a first run would**, in the radio and
+    /// in the state, by the same rule; the VGA is not left where it was.
+    #[test]
+    fn reset_sets_every_r2_stage_by_the_first_run_rule() {
+        let r2 = BenchR2::new();
+        let mut h = Harness::on_r2(&r2, [36.02, 12.03, 26.79]);
+        h.press('r');
+        let first_run = crate::hardware::gain::defaults(&r2.device.capabilities().gain.stages());
+        assert_eq!(gains(&h), first_run);
+        let stages = r2.device.capabilities().gain.stages();
+        let positions: Vec<i32> = stages
+            .iter()
+            .zip(&first_run)
+            .map(|(s, &db)| s.position_of(db).unwrap() as i32)
+            .collect();
+        assert_eq!(r2.registers().to_vec(), positions);
     }
 }

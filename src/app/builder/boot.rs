@@ -284,15 +284,9 @@ pub fn resolve_gains(radio: &RadioConfig, gm: &GainModel) -> (Vec<f64>, Vec<Stri
                 values = v;
             }
         },
-        // No string at all: the historical defaults, so a first run is unchanged.
-        _ => {
-            if let Some(first) = stages.first() {
-                values[0] = first.snap(DEFAULT_LNA_GAIN as f64);
-            }
-            if let Some(second) = stages.get(1) {
-                values[1] = second.snap(DEFAULT_VGA_GAIN as f64);
-            }
-        }
+        // No string at all: the historical defaults, so a first run is
+        // unchanged, and the same ones `[R]` puts back.
+        _ => values = hardware::gain::defaults(&stages),
     }
 
     for (index, override_db) in [(0usize, radio.lna_gain), (1, radio.vga_gain)] {

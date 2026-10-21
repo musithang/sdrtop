@@ -7,7 +7,7 @@
 //! waterfall's fall-through safe: `handle_no_device` hides the radio and every
 //! one of these returns immediately.
 
-use crate::state::{InputMode, DEFAULT_LNA_GAIN, DEFAULT_VGA_GAIN};
+use crate::state::InputMode;
 
 use super::super::{metrics, InputCtx};
 
@@ -33,7 +33,10 @@ pub(super) fn reset_defaults(ctx: &mut InputCtx<'_>) {
     let caps = device.capabilities();
     let def_freq = caps.default_frequency_hz;
     let def_sr = caps.default_sample_rate_hz;
-    let (lna_def, vga_def) = caps.gain.clamp_gains(DEFAULT_LNA_GAIN, DEFAULT_VGA_GAIN);
+    // Every stage the device has, by position, where a first run would put
+    // it: a radio with three stages is not reset in two of them.
+    let stages = caps.gain.stages();
+    let gains = crate::hardware::gain::defaults(&stages);
 
     // The rate is the device's own default, so a driver has no reason to round
     // it; taking what it reports anyway costs nothing and keeps one account of
@@ -46,18 +49,21 @@ pub(super) fn reset_defaults(ctx: &mut InputCtx<'_>) {
             crate::hardware::native::hackrf::compute_bb_filter_bw(def_sr),
         ),
     };
-    let results = [
-        device.set_lna_gain(lna_def),
-        device.set_vga_gain(vga_def),
+    let mut results: Vec<anyhow::Result<()>> = stages
+        .iter()
+        .zip(&gains)
+        .enumerate()
+        .map(|(index, (spec, &db))| device.set_stage_gain(index, &spec.name, db))
+        .collect();
+    results.extend([
         device.set_frequency(def_freq),
         sr_result,
         device.set_amp_enable(false),
-    ];
+    ]);
 
     let mut m = metrics(ctx.state);
     if results.iter().all(|r| r.is_ok()) {
-        m.radio.set_primary_gain(lna_def);
-        m.radio.set_secondary_gain(vga_def);
+        m.radio.gains = gains;
         m.radio.amp_enabled = false;
         m.lab.rf_autotrack = false;
         m.radio.frequency = def_freq;

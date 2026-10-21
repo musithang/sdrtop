@@ -14,7 +14,9 @@
 //! `]` twenty more; they are one function each now, with the direction as an
 //! argument.
 
-use crate::hardware::{Boost, GainModel, StageSpec};
+#[cfg(test)]
+use crate::hardware::GainModel;
+use crate::hardware::{Boost, StageReading, StageSpec};
 use crate::state::RailMode;
 
 use super::super::{metrics, InputCtx};
@@ -33,23 +35,22 @@ const CONTINUOUS_STEP_DB: u32 = 1;
 /// moves by [`CONTINUOUS_STEP_DB`] because it has none of its own to follow.
 /// That covers a HackRF's 8 dB LNA and 2 dB VGA, an RTL-SDR's irregular tuner
 /// table and whatever a driver reported, without naming any of them.
-fn next_on_stage(stage: &StageSpec, current: u32, up: bool) -> u32 {
+///
+/// **A table entry comes back exactly**, never rounded to a whole dB: the
+/// Airspy R2's mixer has 15.90, 16.16, 16.17 and 16.24 dB a position apart,
+/// and rounded they are one 16 the key can never step past.
+fn next_on_stage(stage: &StageSpec, current: f64, up: bool) -> f64 {
     if !stage.table.is_empty() {
-        let idx = stage
-            .table
-            .iter()
-            .enumerate()
-            .min_by_key(|(_, &g)| (g - current as f64).abs().round() as i64)
-            .map(|(i, _)| i)
-            .unwrap_or(0);
+        let idx = stage.position_of(current).unwrap_or(0) as usize;
         let next = if up {
             (idx + 1).min(stage.table.len() - 1)
         } else {
             idx.saturating_sub(1)
         };
-        return stage.table[next].max(0.0).round() as u32;
+        return stage.table[next];
     }
 
+    let current = current.max(0.0).round() as u32;
     let lo = stage.min_db.max(0.0).round() as u32;
     let hi = stage.max_db.max(stage.min_db).max(0.0).round() as u32;
     let step = if stage.step_db > 0.0 {
@@ -57,10 +58,30 @@ fn next_on_stage(stage: &StageSpec, current: u32, up: bool) -> u32 {
     } else {
         CONTINUOUS_STEP_DB
     };
-    if up {
+    let next = if up {
         (current + step).clamp(lo, hi)
     } else {
         current.saturating_sub(step).clamp(lo, hi)
+    };
+    f64::from(next)
+}
+
+/// How a stage's setting reads in the log, with the radio at `hz`.
+///
+/// Its dB where the dB holds, with its position when the stage is a table,
+/// so two measured values that print alike are still two settings; its
+/// position alone where the dB was not measured.
+fn said(stage: &StageSpec, db: f64, hz: u64) -> String {
+    match stage.reading(db, hz) {
+        StageReading::Position { at, of } => format!("step {at}/{of}"),
+        StageReading::Db(db) if !stage.table.is_empty() => {
+            let at = stage.position_of(db).unwrap_or(0);
+            let of = stage.positions().unwrap_or(1).saturating_sub(1);
+            let text = format!("{db:.2}");
+            let text = text.trim_end_matches('0').trim_end_matches('.');
+            format!("{text} dB ({at}/{of})")
+        }
+        StageReading::Db(db) => format!("{db:.0} dB"),
     }
 }
 
@@ -68,7 +89,10 @@ fn next_on_stage(stage: &StageSpec, current: u32, up: bool) -> u32 {
 ///
 /// A device whose front stage does not exist cannot be stepped and is left
 /// alone: an RTL-SDR that reported no gain table is exactly that case.
-pub(super) fn next_primary_gain(gain: &GainModel, current: u32, up: bool) -> u32 {
+/// [`step_primary`] takes the front stage itself, for its log line; this is
+/// the same rule as the tests pin it.
+#[cfg(test)]
+fn next_primary_gain(gain: &GainModel, current: f64, up: bool) -> f64 {
     match gain.stages().first() {
         Some(front) => next_on_stage(front, current, up),
         None => current,
@@ -109,21 +133,31 @@ pub(super) fn step_selected_stage(ctx: &mut InputCtx<'_>, up: bool) {
         return;
     };
 
-    let current = metrics(ctx.state).radio.stage_gain(index);
-    let step = if spec.step_db > 0.0 {
-        spec.step_db
-    } else {
-        1.0
+    let (current, hz) = {
+        let m = metrics(ctx.state);
+        (m.radio.stage_gain(index), m.radio.frequency)
     };
-    let target = if up { current + step } else { current - step };
-    // Snap towards the direction of travel, so a value that started off the grid
-    // still moves rather than snapping back onto where it already was.
-    let next = if up {
-        spec.snap(target.max(current + step * 0.5))
+    // A table is walked entry by entry, as the stage keys walk it; a step of
+    // 1 dB snapped onto a table skips entries closer together than that.
+    let next = if !spec.table.is_empty() {
+        next_on_stage(spec, current, up)
     } else {
-        spec.snap_down(target)
+        let step = if spec.step_db > 0.0 {
+            spec.step_db
+        } else {
+            1.0
+        };
+        let target = if up { current + step } else { current - step };
+        // Snap towards the direction of travel, so a value that started off
+        // the grid still moves rather than snapping back onto where it already
+        // was.
+        let next = if up {
+            spec.snap(target.max(current + step * 0.5))
+        } else {
+            spec.snap_down(target)
+        };
+        next.clamp(spec.min_db, spec.max_db)
     };
-    let next = next.clamp(spec.min_db, spec.max_db);
 
     let result = device.set_stage_gain(index, &spec.name, next);
     let mut m = metrics(ctx.state);
@@ -132,7 +166,7 @@ pub(super) fn step_selected_stage(ctx: &mut InputCtx<'_>, up: bool) {
             m.radio.set_stage_gain(index, next);
             m.lab.rf_autotrack = false;
             m.ui.note_mode_action(RailMode::Bench);
-            m.push_log(format!("{} \u{2192} {next:.0} dB", spec.name));
+            m.push_log(format!("{} \u{2192} {}", spec.name, said(spec, next, hz)));
         }
         Err(e) => m.push_log(format!("Gain error: {e}")),
     }
@@ -179,14 +213,22 @@ pub(super) fn step_primary(ctx: &mut InputCtx<'_>, up: bool) {
         return;
     }
     let gain = &device.capabilities().gain;
-    let current = metrics(ctx.state).radio.primary_gain();
-    let new_gain = next_primary_gain(gain, current, up);
+    let Some(front) = gain.stages().into_iter().next() else {
+        return;
+    };
+    let (current, hz) = {
+        let m = metrics(ctx.state);
+        (m.radio.stage_gain(0), m.radio.frequency)
+    };
+    let new_gain = next_on_stage(&front, current, up);
 
-    let result = device.set_lna_gain(new_gain);
+    // By position, with the exact value: the one setter every backend has for
+    // every stage.
+    let result = device.set_stage_gain(0, &front.name, new_gain);
     let mut m = metrics(ctx.state);
     match result {
         Ok(()) => {
-            m.radio.set_primary_gain(new_gain);
+            m.radio.set_stage_gain(0, new_gain);
             // On a single-tuner device, setting a manual gain turns the tuner AGC
             // off in hardware - keep the UI's AGC flag in sync.
             if gain.is_single() {
@@ -195,9 +237,9 @@ pub(super) fn step_primary(ctx: &mut InputCtx<'_>, up: bool) {
             m.lab.rf_autotrack = false;
             m.ui.note_mode_action(RailMode::Bench);
             m.push_log(format!(
-                "{} gain \u{2192} {} dB",
+                "{} gain \u{2192} {}",
                 gain.primary_label(),
-                new_gain
+                said(&front, new_gain, hz)
             ));
         }
         Err(e) => m.push_log(format!("Gain error: {}", e)),
@@ -262,7 +304,7 @@ fn step_distributed(ctx: &mut InputCtx<'_>, up: bool) {
 }
 
 /// `[` / `]` - step the second stage. No-op on a device that does not give one
-/// a key of its own, which today is everything but a HackRF.
+/// a key of its own, which today is everything but a HackRF and an Airspy R2.
 ///
 /// The step comes from the stage, not from a datasheet written down here: the
 /// 2 dB grid is the model's to state, the same way the front stage's 8 dB is.
@@ -275,19 +317,28 @@ pub(super) fn step_vga(ctx: &mut InputCtx<'_>, up: bool) {
     let stages = gm.stages();
     let Some(second) = stages.get(1) else { return };
     let label = second.name.clone();
-    let new_gain = {
+    let (new_gain, hz) = {
         let m = metrics(ctx.state);
-        next_on_stage(second, m.radio.secondary_gain(), up)
+        (
+            next_on_stage(second, m.radio.stage_gain(1), up),
+            m.radio.frequency,
+        )
     };
 
-    let result = device.set_vga_gain(new_gain);
+    // By position, not through `set_vga_gain`: on an R2 the second stage is
+    // the mixer, and a VGA setter it does not have answered `Ok` and moved
+    // nothing.
+    let result = device.set_stage_gain(1, &label, new_gain);
     let mut m = metrics(ctx.state);
     match result {
         Ok(()) => {
-            m.radio.set_secondary_gain(new_gain);
+            m.radio.set_stage_gain(1, new_gain);
             m.lab.rf_autotrack = false;
             m.ui.note_mode_action(RailMode::Bench);
-            m.push_log(format!("{label} gain \u{2192} {} dB", new_gain));
+            m.push_log(format!(
+                "{label} gain \u{2192} {}",
+                said(second, new_gain, hz)
+            ));
         }
         Err(e) => m.push_log(format!("{label} gain error: {}", e)),
     }
@@ -363,10 +414,10 @@ mod tests {
     #[test]
     fn the_lna_walks_its_step_and_clamps_at_both_ends() {
         let g = hackrf::gain_model();
-        assert_eq!(next_primary_gain(&g, 16, true), 24);
-        assert_eq!(next_primary_gain(&g, 16, false), 8);
-        assert_eq!(next_primary_gain(&g, 40, true), 40);
-        assert_eq!(next_primary_gain(&g, 0, false), 0);
+        assert_eq!(next_primary_gain(&g, 16.0, true), 24.0);
+        assert_eq!(next_primary_gain(&g, 16.0, false), 8.0);
+        assert_eq!(next_primary_gain(&g, 40.0, true), 40.0);
+        assert_eq!(next_primary_gain(&g, 0.0, false), 0.0);
     }
 
     /// A tuner's gains are a table, not an arithmetic series, so stepping moves to
@@ -375,12 +426,16 @@ mod tests {
     #[test]
     fn a_tuner_steps_to_the_neighbouring_table_entry() {
         let g = rtl(&[0, 9, 14, 27, 37, 49]);
-        assert_eq!(next_primary_gain(&g, 14, true), 27);
-        assert_eq!(next_primary_gain(&g, 14, false), 9);
-        assert_eq!(next_primary_gain(&g, 49, true), 49, "clamps at the top");
-        assert_eq!(next_primary_gain(&g, 0, false), 0, "clamps at the bottom");
+        assert_eq!(next_primary_gain(&g, 14.0, true), 27.0);
+        assert_eq!(next_primary_gain(&g, 14.0, false), 9.0);
+        assert_eq!(next_primary_gain(&g, 49.0, true), 49.0, "clamps at the top");
+        assert_eq!(
+            next_primary_gain(&g, 0.0, false),
+            0.0,
+            "clamps at the bottom"
+        );
         // 15 is nearest 14, so up lands on the entry after 14.
-        assert_eq!(next_primary_gain(&g, 15, true), 27);
+        assert_eq!(next_primary_gain(&g, 15.0, true), 27.0);
     }
 
     /// A tuner that reported no gain table cannot be stepped, and must not panic
@@ -388,8 +443,8 @@ mod tests {
     #[test]
     fn an_empty_gain_table_leaves_the_gain_alone() {
         let g = rtl(&[]);
-        assert_eq!(next_primary_gain(&g, 27, true), 27);
-        assert_eq!(next_primary_gain(&g, 27, false), 27);
+        assert_eq!(next_primary_gain(&g, 27.0, true), 27.0);
+        assert_eq!(next_primary_gain(&g, 27.0, false), 27.0);
     }
 
     /// Which trait call `[A]` makes follows the boost's mechanism, and getting
@@ -432,11 +487,11 @@ mod tests {
                 stage.step_db
             );
         }
-        let mut v = 0;
+        let mut v = 0.0;
         for _ in 0..100 {
             v = next_primary_gain(&g, v, true);
         }
-        assert_eq!(v, 40, "stepping up should reach the maximum exactly");
+        assert_eq!(v, 40.0, "stepping up should reach the maximum exactly");
     }
 
     /// The ring includes "the whole chain", so pressing on always gets back to

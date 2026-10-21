@@ -91,14 +91,6 @@ impl RadioState {
         self.gains[index] = db;
     }
 
-    pub fn set_primary_gain(&mut self, db: u32) {
-        self.set_stage_gain(0, db as f64);
-    }
-
-    pub fn set_secondary_gain(&mut self, db: u32) {
-        self.set_stage_gain(1, db as f64);
-    }
-
     fn whole(v: Option<f64>) -> u32 {
         v.filter(|x| x.is_finite())
             .map(|x| x.max(0.0).round() as u32)

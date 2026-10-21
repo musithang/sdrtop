@@ -206,7 +206,7 @@ mod tests {
     #[test]
     fn a_single_stage_total_is_just_its_own_gain() {
         let mut m = SdrMetrics::fixture().single_stage();
-        m.radio.set_primary_gain(27);
+        m.radio.set_stage_gain(0, 27.0);
         m.radio.amp_enabled = true;
         assert_eq!(total_gain_db(&m), 27);
     }
@@ -214,8 +214,8 @@ mod tests {
     #[test]
     fn a_two_stage_total_sums_both_stages_and_the_amp() {
         let mut m = SdrMetrics::fixture();
-        m.radio.set_primary_gain(24);
-        m.radio.set_secondary_gain(30);
+        m.radio.set_stage_gain(0, 24.0);
+        m.radio.set_stage_gain(1, 30.0);
         assert_eq!(total_gain_db(&m), 54);
         m.radio.amp_enabled = true;
         assert_eq!(total_gain_db(&m), 54 + AMP_GAIN_DB);

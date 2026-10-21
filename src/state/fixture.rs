@@ -334,8 +334,8 @@ impl SdrMetrics {
         let mut caps = (*self.caps).clone();
         caps.gain = crate::hardware::native::rtlsdr::gain_model(&[0, 9, 14, 27, 37, 49]);
         caps.friis_applicable = false;
-        self.radio.set_primary_gain(27);
-        self.radio.set_secondary_gain(0);
+        self.radio.set_stage_gain(0, 27.0);
+        self.radio.set_stage_gain(1, 0.0);
         self.caps = Arc::new(caps);
         self
     }
@@ -451,8 +451,8 @@ impl SdrMetrics {
             full_scale: 8192.0,
             converter_bits: None,
         };
-        self.radio.set_primary_gain(40);
-        self.radio.set_secondary_gain(0);
+        self.radio.set_stage_gain(0, 40.0);
+        self.radio.set_stage_gain(1, 0.0);
         self.radio.amp_enabled = false;
         self.system.stack = Some(crate::hardware::SoftwareStack {
             label: "soapysdr  ",

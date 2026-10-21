@@ -649,6 +649,49 @@ fn c_string(ptr: *const c_char) -> Option<String> {
     })
 }
 
+/// An R2 on the fixture libairspy, for tests elsewhere that need to see
+/// what a key or a reset actually wrote into the radio.
+#[cfg(test)]
+pub(crate) mod bench {
+    use super::super::test_support::TestLibrary;
+    use super::*;
+
+    pub(crate) struct BenchR2 {
+        fixture: TestLibrary,
+        pub device: Arc<dyn SdrDevice>,
+    }
+
+    impl BenchR2 {
+        pub(crate) fn new() -> Self {
+            let fixture = TestLibrary::new(false);
+            // Lives as long as the test process, as the real library does once
+            // loaded.
+            let api: &'static ffi::AirspyApi =
+                Box::leak(Box::new(ffi::resolve(fixture.library()).unwrap()));
+            let listing = DeviceListing {
+                kind: DeviceKind::Airspy,
+                index: 0,
+                label: "Airspy R2 · 637862dc2e1182d7".into(),
+                serial: Some("637862dc2e1182d7".into()),
+                args: None,
+                path: None,
+                tiny_sa_input: None,
+            };
+            let device = AirspyDevice::open_with_api(api, &listing).expect("the R2 opens");
+            Self {
+                fixture,
+                device: Arc::new(device),
+            }
+        }
+
+        /// The register positions last written to the LNA, mixer and VGA;
+        /// -1 for one never written.
+        pub(crate) fn registers(&self) -> [i32; 3] {
+            [4, 5, 6].map(|field| self.fixture.airspy_state(field))
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::super::test_support::TestLibrary;

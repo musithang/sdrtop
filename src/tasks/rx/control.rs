@@ -154,6 +154,17 @@ pub(super) fn track_gain(
         if m.lab.noise_sweep.is_some() {
             return;
         }
+        // Retuned out of a stage's measured band: its dB no longer hold, so
+        // neither does a target in dB. Off, once, and said.
+        if m.lab.rf_autotrack {
+            if let Some(why) = m.chain_db_refusal() {
+                drop(m);
+                let mut m = state.lock().unwrap_or_else(|e| e.into_inner());
+                m.lab.rf_autotrack = false;
+                m.push_log(format!("Auto-gain track OFF: {why}"));
+                return;
+            }
+        }
         (
             m.lab.rf_autotrack,
             m.caps.gain.stages(),
@@ -293,6 +304,37 @@ pub(super) fn advance_noise_sweep(state: &Arc<Mutex<SdrMetrics>>, device: &Arc<d
 mod tests {
     use super::*;
     use std::cell::Cell;
+
+    /// **Auto-track stops where a stage's dB stops holding**: tuned out of the
+    /// R2's LNA band with the peak off its window, it switches itself off and
+    /// says why, and writes no register; inside the band it moves the chain.
+    #[test]
+    fn auto_track_stops_outside_a_stages_measured_band() {
+        let r2 = crate::hardware::native::airspy::bench::BenchR2::new();
+        let mut m = SdrMetrics::fixture().band_measured_chain();
+        m.lab.rf_autotrack = true;
+        let state = Arc::new(Mutex::new(m));
+        track_gain(&state, &r2.device, -30.0);
+        let m = state.lock().unwrap();
+        assert!(!m.lab.rf_autotrack);
+        let last = m.ui.log.back().map(|e| e.text.clone()).unwrap_or_default();
+        assert!(last.contains("LNA's gain in dB was measured"), "{last}");
+        assert_eq!(r2.registers(), [-1, -1, -1]);
+        drop(m);
+
+        let mut m = SdrMetrics::fixture().band_measured_chain();
+        m.radio.frequency = 92_800_000;
+        m.radio.gains = vec![9.09, 8.25, 6.80];
+        m.lab.rf_autotrack = true;
+        let state = Arc::new(Mutex::new(m));
+        track_gain(&state, &r2.device, -30.0);
+        assert!(state.lock().unwrap().lab.rf_autotrack);
+        assert!(
+            r2.registers().iter().all(|&r| r >= 0),
+            "{:?}",
+            r2.registers()
+        );
+    }
 
     #[test]
     fn the_comfort_window_is_closed_at_both_ends() {

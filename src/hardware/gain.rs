@@ -214,6 +214,23 @@ pub fn format_named(stages: &[StageSpec], values: &[f64]) -> String {
         .join(",")
 }
 
+/// The gains a first run starts with, one per stage, and what `[R]` puts
+/// back: the historical front and second-stage defaults snapped onto each
+/// stage's own values, every stage after them at its minimum.
+///
+/// One rule for both, so a reset never leaves a radio somewhere its first
+/// run would not have put it.
+pub fn defaults(stages: &[StageSpec]) -> Vec<f64> {
+    let mut values: Vec<f64> = stages.iter().map(|s| s.min_db).collect();
+    if let Some(first) = stages.first() {
+        values[0] = first.snap(f64::from(crate::state::DEFAULT_LNA_GAIN));
+    }
+    if let Some(second) = stages.get(1) {
+        values[1] = second.snap(f64::from(crate::state::DEFAULT_VGA_GAIN));
+    }
+    values
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

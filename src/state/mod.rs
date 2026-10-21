@@ -129,6 +129,32 @@ impl SdrMetrics {
             .all(|s| s.db_holds_at(self.radio.frequency))
     }
 
+    /// Why a gain decision made in dB cannot be made at the tuned frequency,
+    /// or `None` when it can: the first stage whose dB was not measured here,
+    /// and the band it was.
+    ///
+    /// Auto-gain sets a target in dB and spreads it by each stage's dB; with
+    /// a stage outside its measured band those dB are not what the stage
+    /// gives, so the target would land somewhere nobody chose.
+    pub fn chain_db_refusal(&self) -> Option<String> {
+        let hz = self.radio.frequency;
+        let stage = self
+            .caps
+            .gain
+            .stages()
+            .into_iter()
+            .find(|s| !s.db_holds_at(hz))?;
+        Some(match &stage.measured_in {
+            Some(band) => format!(
+                "{}'s gain in dB was measured from {:.0} to {:.0} MHz only",
+                stage.name,
+                *band.start() as f64 / 1e6,
+                *band.end() as f64 / 1e6,
+            ),
+            None => format!("{}'s gain is not in dB here", stage.name),
+        })
+    }
+
     /// The gain figure a readout should show for the front-end knob.
     ///
     /// **The whole chain on a single-knob device, the front stage otherwise.**
@@ -178,6 +204,21 @@ mod stage_reading_tests {
         m.radio.frequency = 92_800_000;
         assert_eq!(m.stage_reading(0), Some(StageReading::Db(36.02)));
         assert!(m.chain_db_holds());
+    }
+
+    /// A decision in dB is refused, by the stage and its band, where that
+    /// stage's dB was not measured; allowed inside the band and on any radio
+    /// with no bands.
+    #[test]
+    fn a_decision_in_db_names_the_stage_it_cannot_trust() {
+        let mut m = SdrMetrics::fixture().band_measured_chain();
+        assert_eq!(
+            m.chain_db_refusal().as_deref(),
+            Some("LNA's gain in dB was measured from 88 to 170 MHz only")
+        );
+        m.radio.frequency = 92_800_000;
+        assert_eq!(m.chain_db_refusal(), None);
+        assert_eq!(SdrMetrics::fixture().chain_db_refusal(), None);
     }
 
     /// Every other device reads as it always did.

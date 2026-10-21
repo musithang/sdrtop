@@ -173,6 +173,17 @@ pub(super) fn rf_chain(key: KeyEvent, ctx: &mut InputCtx<'_>) -> KeyAction {
                 );
                 return KeyAction::Continue;
             }
+            // A target in dB means nothing where a stage's dB was not measured.
+            // The latch goes off too: tracking on figures that do not hold is
+            // the same decision made forty times a second.
+            if let Some(why) = metrics(state).chain_db_refusal() {
+                let mut m = metrics(state);
+                m.lab.rf_autotrack = false;
+                m.push_log(format!(
+                    "Auto-gain: {why}, and its target is set in dB \u{2014} set the stages by hand"
+                ));
+                return KeyAction::Continue;
+            }
             let targets = staging_target(peak, &stages, &current);
             // Judged on the **total**, not on the arrangement. Auto-gain is
             // about where the converter sits; how that total is spread is the
