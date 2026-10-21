@@ -155,9 +155,10 @@ impl Boot {
                 board_name: sysinfo.product.clone(),
                 serial: sysinfo.serial.clone().unwrap_or_else(|| "—".into()),
                 fw_version: "Observer Mode".to_string(),
-                // Observer mode looks for a device sdrtop knows by its USB ids,
-                // and only the two native backends have such a profile.
-                stack: None,
+                // The backend's own, so an observed RTL-SDR is not introduced
+                // as a HackRF; the header shows its value as a dash, since the
+                // holder's library is not something sdrtop can see.
+                stack: (profile.stack)(),
                 board_rev: 0xFE,
                 usb_api_version: 0,
                 // A radio observed is, by definition, one observer mode can watch.
@@ -820,6 +821,30 @@ mod tests {
         assert!(obs.spectrum.markers.is_empty());
         assert!(obs.ui.recall.iter().all(|s| s.is_none()));
         assert!(obs.observer.active);
+    }
+
+    /// **An RTL-SDR another process holds is introduced as an RTL-SDR.** The
+    /// header's firmware field fell back to the HackRF's label for any
+    /// observed radio with no software stack, so a Blog V4 held by `rtl_test`
+    /// read `hackrf fw`. The value stays a dash: which library the holder
+    /// drives it through is not something sdrtop can see.
+    #[test]
+    fn an_observed_radio_is_introduced_as_its_own_backend() {
+        let cfg = AppConfig::default();
+        let header = |kind| {
+            let m = initial_metrics(&cfg, Boot::observer(&cfg, &sysinfo(), profile(kind))).unwrap();
+            crate::state::fixture::draw(crate::ui::panels::core::header::HeaderPanel, 120, 8, &m)
+                .join("\n")
+        };
+        let rtl = header(hardware::DeviceKind::RtlSdr);
+        assert!(rtl.contains("rtl-sdr"), "{rtl}");
+        assert!(!rtl.contains("hackrf fw"), "not a HackRF:\n{rtl}");
+        assert!(
+            !rtl.contains("librtlsdr"),
+            "the holder's library is not seen:\n{rtl}"
+        );
+        let hackrf = header(hardware::DeviceKind::HackRf);
+        assert!(hackrf.contains("hackrf fw"), "{hackrf}");
     }
 
     // ── The config's gain, and its migration ────────────────────────────────

@@ -138,7 +138,7 @@ jobs:
           persist-credentials: false
 
       - name: Install the radio libraries from Homebrew
-        run: brew install librtlsdr hackrf soapysdr
+        run: brew install librtlsdr hackrf soapysdr soapyrtlsdr soapyhackrf
 
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
@@ -158,6 +158,11 @@ jobs:
 
       - name: Homebrew's libSoapySDR resolves
         run: cargo test --locked hardware::soapy::api::tests::installed_soapysdr_resolves -- --ignored --exact
+
+      # Homebrew's modules are built for flat-namespace lookup: they must still
+      # load once sdrtop has opened librtlsdr and libhackrf itself (#25).
+      - name: Homebrew's SoapySDR modules load beside the native libraries
+        run: cargo test --locked hardware::discovery::tests::installed_soapy_modules_load_after_the_native_libraries -- --ignored --exact
 
       # install.sh under macOS's own sh (bash 3.2 in POSIX mode, not Linux's
       # dash), and its Homebrew branch against the libraries installed above:

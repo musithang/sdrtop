@@ -315,8 +315,9 @@ change, on GitHub's Apple Silicon machines, which have no radio. A user proved
 the rest before I did: an M4 MacBook Air with an RTL-SDR Blog V4, through
 Homebrew. [Observer mode](advanced.md#observer-mode-when-another-app-owns-the-radio)
 works there too, reading what macOS's own device registry says about the radio
-and the app holding it; nobody has watched it do that on a real Mac yet, so if
-you're the first, tell me what it said. The same goes for a
+and the app holding it. The same user watched it switch over while `rtl_test`
+held the V4; whether it named `rtl_test` and its PID is the part I'm still
+waiting to hear, so if you try it, tell me what it said. The same goes for a
 [tinySA](#tinysa), which is found on its `/dev/cu.usbmodem*` port. sdrtop looks for the
 libraries where Homebrew and MacPorts put them (`/opt/homebrew/lib`,
 `/usr/local/lib`, `/opt/local/lib`), so this is the whole setup:
@@ -324,7 +325,8 @@ libraries where Homebrew and MacPorts put them (`/opt/homebrew/lib`,
 ```sh
 brew install rtl-sdr        # an RTL-SDR
 brew install hackrf         # a HackRF
-brew install soapysdr       # SoapySDR, plus the driver module for your radio
+brew install soapysdr       # SoapySDR
+brew install soapyrtlsdr    # and the driver module for your radio (soapyhackrf for a HackRF)
 cargo install sdrtop --locked
 ```
 

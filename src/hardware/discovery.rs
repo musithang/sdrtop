@@ -44,6 +44,9 @@ pub struct ObserverProfile {
     /// empty gain table, which is why `Boot::observer` does not clamp against
     /// it. See the comment there.
     pub caps: fn() -> DeviceCapabilities,
+    /// What the header names where a HackRF names its firmware, for a backend
+    /// whose radio has none; `None` for one that has firmware of its own.
+    pub stack: fn() -> Option<super::SoftwareStack>,
 }
 
 impl DeviceKind {
@@ -71,10 +74,12 @@ impl DeviceKind {
             DeviceKind::HackRf => Some(ObserverProfile {
                 scan: usb::find_hackrf,
                 caps: hackrf::caps,
+                stack: || None,
             }),
             DeviceKind::RtlSdr => Some(ObserverProfile {
                 scan: usb::find_rtlsdr,
                 caps: rtlsdr::observer_caps,
+                stack: || Some(rtlsdr::stack()),
             }),
             DeviceKind::Soapy | DeviceKind::TinySa => None,
         }
@@ -289,6 +294,34 @@ pub fn open_device(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// **The installed SoapySDR driver modules load after sdrtop has opened
+    /// librtlsdr and libhackrf**, the order [`list_all_devices`] opens them
+    /// in. On macOS Homebrew's modules are built for flat-namespace lookup,
+    /// and failed here with "symbol not found in flat namespace" for the
+    /// library sdrtop had opened local, so `--device soapy` found nothing.
+    /// By hand where SoapySDR and its rtlsdr and hackrf modules are
+    /// installed, and in CI on the macOS runner with Homebrew's.
+    #[test]
+    #[ignore = "requires libSoapySDR with its rtlsdr and hackrf modules, librtlsdr and libhackrf"]
+    fn installed_soapy_modules_load_after_the_native_libraries() {
+        rtlsdr::ffi::api().expect("the installed librtlsdr must resolve");
+        hackrf::ffi::api().expect("the installed libhackrf must resolve");
+        let modules = soapy::api::api()
+            .expect("the installed libSoapySDR must open and resolve")
+            .load_every_module();
+
+        let named = |part: &str| modules.iter().any(|(path, _)| path.contains(part));
+        assert!(
+            named("rtlsdr") && named("HackRF"),
+            "the rtlsdr and hackrf modules must be installed: {modules:?}"
+        );
+        let failed: Vec<_> = modules
+            .iter()
+            .filter(|(_, said)| !said.is_empty())
+            .collect();
+        assert!(failed.is_empty(), "{failed:#?}");
+    }
 
     #[test]
     fn native_availability_check_accepts_non_native_backends() {

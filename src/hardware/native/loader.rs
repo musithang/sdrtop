@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
+use crate::hardware::runtime_lib;
 use libloading::Library;
 
 pub(super) fn load<T>(
@@ -10,7 +11,7 @@ pub(super) fn load<T>(
     let mut errors = Vec::new();
     for name in candidates {
         // The names come from the backend's fixed library list
-        let result = unsafe { Library::new(name) }
+        let result = unsafe { runtime_lib::open(name) }
             .map_err(|err| err.to_string())
             .and_then(resolve);
         match result {

@@ -641,6 +641,39 @@ impl SoapyApi {
         out
     }
 
+    /// Every module SoapySDR finds, each loaded the way SoapySDR loads one,
+    /// with what its `loadModule` said: empty on success, else the error its
+    /// log would print. Only a test loads modules by hand; the app leaves
+    /// that to SoapySDR's first enumeration.
+    #[cfg(test)]
+    pub(crate) fn load_every_module(&self) -> Vec<(String, String)> {
+        // Declared here rather than in the table: nothing in the app calls
+        // them. From `SoapySDR/Modules.h`, the same in 0.8.1 and 0.9.0: the
+        // list is freed with `SoapySDRStrings_clear`, the error string with
+        // `SoapySDR_free`.
+        type ListModules = unsafe extern "C" fn(*mut usize) -> *mut *mut c_char;
+        type LoadModule = unsafe extern "C" fn(*const c_char) -> *mut c_char;
+        let list: ListModules = unsafe { *self._lib.get(b"SoapySDR_listModules\0").unwrap() };
+        let load: LoadModule = unsafe { *self._lib.get(b"SoapySDR_loadModule\0").unwrap() };
+
+        let mut len = 0usize;
+        let mut paths = unsafe { list(&mut len) };
+        if paths.is_null() {
+            return Vec::new();
+        }
+        let modules: Vec<std::ffi::CString> = (0..len)
+            .map(|i| unsafe { CStr::from_ptr(*paths.add(i)) }.to_owned())
+            .collect();
+        unsafe { (self.strings_clear)(&mut paths, len) };
+        modules
+            .iter()
+            .map(|path| {
+                let said = unsafe { self.owned_string(load(path.as_ptr())) };
+                (path.to_string_lossy().into_owned(), said)
+            })
+            .collect()
+    }
+
     /// A `char*` the library allocated for us: copy it, then hand it back.
     ///
     /// # Safety
@@ -692,27 +725,15 @@ fn names(host: crate::host::Host) -> Vec<String> {
     crate::hardware::runtime_lib::candidates(host, LINUX, MACOS)
 }
 
-/// How libSoapySDR is opened on `host`. On macOS its symbols are made
-/// global: driver modules built for flat-namespace lookup (MacPorts' among
-/// them) resolve SoapySDR's own symbols from what is already loaded, and fail
-/// with "symbol not found in flat namespace" otherwise. Linux keeps the
-/// loader's default, which libloading's `Library::new` has always used.
-fn open_flags(host: crate::host::Host) -> std::os::raw::c_int {
-    use libloading::os::unix::{RTLD_GLOBAL, RTLD_LAZY, RTLD_LOCAL};
-    match host {
-        crate::host::Host::Linux => RTLD_LAZY | RTLD_LOCAL,
-        crate::host::Host::MacOs => RTLD_LAZY | RTLD_GLOBAL,
-    }
-}
-
 fn load() -> Option<SoapyApi> {
     let host = crate::host::Host::current();
     for name in &names(host) {
         // Safety: opening a shared library runs its initialisers, which is why
         // this is unsafe. libSoapySDR is a well-behaved library and the names
         // above are fixed, not taken from user input.
-        let opened = unsafe { libloading::os::unix::Library::open(Some(name), open_flags(host)) };
-        let Ok(lib) = opened.map(libloading::Library::from) else {
+        // Global on macOS, so its driver modules find it:
+        // `runtime_lib::open_flags` says why.
+        let Ok(lib) = (unsafe { crate::hardware::runtime_lib::open(name) }) else {
             continue;
         };
         return match resolve(lib) {
@@ -840,17 +861,6 @@ mod tests {
     fn installed_soapysdr_resolves() {
         let api = api().expect("the installed libSoapySDR must open and resolve");
         assert!(abi_ok(&api.abi_version()), "{}", api.abi_version());
-    }
-
-    /// **On macOS libSoapySDR's symbols are opened global**: a driver
-    /// module built for flat-namespace lookup resolves SoapySDR's own
-    /// symbols from what is already loaded. Linux keeps the loader's default.
-    #[test]
-    fn on_macos_soapysdr_is_opened_global() {
-        use crate::host::Host;
-        use libloading::os::unix::{RTLD_GLOBAL, RTLD_LAZY, RTLD_LOCAL};
-        assert_eq!(open_flags(Host::Linux), RTLD_LAZY | RTLD_LOCAL);
-        assert_eq!(open_flags(Host::MacOs), RTLD_LAZY | RTLD_GLOBAL);
     }
 
     /// On Linux the names are unchanged, the versioned soname first; on

@@ -91,7 +91,8 @@ it is short.
    If your radio is not in that list, sdrtop has no chance and the problem is not
    in sdrtop. You are missing the driver module: `soapysdr-module-airspy`,
    `soapysdr-module-sdrplay`, and so on, or `soapysdr-module-all` if you would
-   rather not think about it.
+   rather not think about it. On a Mac they are Homebrew formulae of their
+   own: `brew install soapyrtlsdr`, `brew install soapyhackrf`.
 2. **Check sdrtop loaded the library at all.** In
    `~/.config/sdrtop/sdrtop.log`, a line starting `SoapySDR:` means it tried and
    declined, and it says why. The likely one is an ABI mismatch: sdrtop reads
@@ -99,15 +100,21 @@ it is short.
    both releases' headers), and it refuses anything else rather than calling
    into a library whose functions have a different shape. That refusal is
    not caution, it is the difference between "no devices" and a crash.
-3. **Your sound card is not a bug.** If `SoapySDRUtil --find` lists
+3. **On a Mac, `symbol not found in flat namespace`.** If the log or the
+   screen after quitting shows that for `_rtlsdr_...` or `_hackrf_...` while
+   `SoapySDRUtil --find` sees the radio fine, your build is older than the fix:
+   it opened librtlsdr and libhackrf in a way Homebrew's SoapyRTLSDR and
+   SoapyHackRF modules could not see, so those modules never loaded. Update,
+   and check [which build you are running](#which-build-am-i-actually-running).
+4. **Your sound card is not a bug.** If `SoapySDRUtil --find` lists
    `driver = audio`, that is `soapysdr-module-audio` doing its job. sdrtop skips
    it by default. If you actually want it, `--device soapy=driver=audio`.
-4. **Your HackRF or RTL-SDR appears once, not twice.** Deliberate: the native
+5. **Your HackRF or RTL-SDR appears once, not twice.** Deliberate: the native
    backend wins. `--device soapy` forces the other path.
-5. **Is the radio on another machine?** That is SoapyRemote, and it has its own
+6. **Is the radio on another machine?** That is SoapyRemote, and it has its own
    short checklist in
    [Supported hardware](hardware.md#a-radio-on-another-machine-soapyremote).
-6. **Still nothing?** Please [open an issue](../../../issues) with the full
+7. **Still nothing?** Please [open an issue](../../../issues) with the full
    `SoapySDRUtil --find` output and anything in the log starting `SoapySDR:`.
    That backend was written from the API rather than from owning the hardware, so
    your report is not a nuisance, it is the test.
