@@ -279,7 +279,7 @@ pub fn open_device(
     tinysa_settings: &crate::config::TinySaSettings,
 ) -> anyhow::Result<Arc<dyn SdrDevice>> {
     match listing.kind {
-        DeviceKind::Airspy => anyhow::bail!(airspy::not_yet(listing)),
+        DeviceKind::Airspy => Ok(Arc::new(airspy::AirspyDevice::open(listing)?)),
         DeviceKind::HackRf => Ok(Arc::new(hackrf::HackRfDevice::open(listing.index)?)),
         DeviceKind::RtlSdr => Ok(Arc::new(rtlsdr::RtlDevice::open(listing.index)?)),
         DeviceKind::Soapy => {
@@ -419,6 +419,26 @@ mod tests {
         let out = offer_soapy(vec![soapy_hackrf(), soapy_airspy()], &native, None);
         assert_eq!(out.len(), 1, "the duplicate HackRF is gone");
         assert!(out[0].label.contains("airspy"));
+    }
+
+    /// The R2 reached natively and through SoapyAirspy is one radio: the two
+    /// spell its serial the same way (`SoapySDRUtil --find` on this machine),
+    /// so the native listing claims it.
+    #[test]
+    fn the_r2_reached_two_ways_is_listed_once() {
+        let native = vec![listing(
+            DeviceKind::Airspy,
+            "Airspy R2 \u{00b7} 637862dc2e1182d7",
+            Some("637862dc2e1182d7"),
+            None,
+        )];
+        let soapy = listing(
+            DeviceKind::Soapy,
+            "SoapySDR \u{00b7} airspy \u{00b7} AirSpy One [637862dc2e1182d7]",
+            Some("637862dc2e1182d7"),
+            Some("driver=airspy, serial=637862dc2e1182d7"),
+        );
+        assert!(offer_soapy(vec![soapy], &native, None).is_empty());
     }
 
     /// The case that would be maddening and is easy to write by accident: two

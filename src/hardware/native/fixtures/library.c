@@ -129,7 +129,8 @@ int rtlsdr_cancel_async(void *device) { calls[4]++; return 0; }
 #endif
 
 // libairspy 1.0.10. Modes 20 and up are this library's: 20 lists Airspy Mini
-// rates, 21 refuses to open (AIRSPY_ERROR_BUSY), 22 finds no device.
+// rates, 21 refuses to open (AIRSPY_ERROR_BUSY), 22 finds no device, 23 fails
+// every setting (AIRSPY_ERROR_LIBUSB).
 int airspy_list_devices(uint64_t *serials, int count) {
     if (mode == 22) return 0;
     if (serials && count >= 1) serials[0] = 0x637862DC2E1182D7ULL;
@@ -141,6 +142,47 @@ int airspy_open_sn(void **device, uint64_t serial) {
     return 0;
 }
 int airspy_close(void *device) { calls[3]++; free(device); return 0; }
+// What the backend asked libairspy for last, by field (see fixture_airspy_state):
+// 0 sample type, 1 bias tee, 2 LNA AGC, 3 mixer AGC, 4 LNA, 5 mixer, 6 VGA,
+// 7 frequency in kHz, 8 sample rate argument. -1 until set.
+static int airspy_state[9] = {-1, -1, -1, -1, -1, -1, -1, -1, -1};
+int fixture_airspy_state(int field) { return airspy_state[field]; }
+typedef struct { uint32_t part_id[2]; uint32_t serial_no[4]; } airspy_read_partid_serialno_t;
+typedef struct { uint32_t major_version; uint32_t minor_version; uint32_t revision; } airspy_lib_version_t;
+size_t fixture_airspy_layout(int field) {
+    switch (field) {
+        case 0: return sizeof(airspy_read_partid_serialno_t);
+        case 1: return offsetof(airspy_read_partid_serialno_t, serial_no);
+        case 2: return sizeof(airspy_lib_version_t);
+        default: abort();
+    }
+}
+void airspy_lib_version(airspy_lib_version_t *v) {
+    v->major_version = 1; v->minor_version = 0; v->revision = 10;
+}
+int airspy_board_partid_serialno_read(void *device, airspy_read_partid_serialno_t *p) {
+    p->part_id[0] = 0x6906002B; p->part_id[1] = 0x00000030;
+    p->serial_no[0] = 0; p->serial_no[1] = 0;
+    p->serial_no[2] = 0x637862DC; p->serial_no[3] = 0x2E1182D7;
+    return 0;
+}
+const char *airspy_error_name(int code) { return code == -6 ? "AIRSPY_ERROR_BUSY" : "AIRSPY_ERROR_OTHER"; }
+#define AIRSPY_SET(name, field, type) \
+    int name(void *device, type value) { \
+        if (mode == 23) return -1000; \
+        airspy_state[field] = (int)value; return 0; }
+AIRSPY_SET(airspy_set_sample_type, 0, int)
+AIRSPY_SET(airspy_set_rf_bias, 1, uint8_t)
+AIRSPY_SET(airspy_set_lna_agc, 2, uint8_t)
+AIRSPY_SET(airspy_set_mixer_agc, 3, uint8_t)
+AIRSPY_SET(airspy_set_lna_gain, 4, uint8_t)
+AIRSPY_SET(airspy_set_mixer_gain, 5, uint8_t)
+AIRSPY_SET(airspy_set_vga_gain, 6, uint8_t)
+int airspy_set_freq(void *device, uint32_t freq_hz) {
+    if (mode == 23) return -1000;
+    airspy_state[7] = (int)(freq_hz / 1000); return 0;
+}
+AIRSPY_SET(airspy_set_samplerate, 8, uint32_t)
 int airspy_board_id_read(void *device, uint8_t *value) { *value = 0; return 0; }
 const char *airspy_board_id_name(int id) { return id == 0 ? "AIRSPY" : "AIRSPY BOARD ID INVALID"; }
 int airspy_version_string_read(void *device, char *version, uint8_t length) {

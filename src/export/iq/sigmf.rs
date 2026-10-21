@@ -270,11 +270,11 @@ mod tests {
         let m = crate::state::SdrMetrics::fixture().band_measured_chain();
         assert_eq!(
             gain_text(&m.caps, &m.radio.gains, false, 943_400_000),
-            "LNA=step 14/14,MIX=12,VGA=27"
+            "LNA=step 14/14,MIX=12.03,VGA=26.79"
         );
         assert_eq!(
             gain_text(&m.caps, &m.radio.gains, false, 92_800_000),
-            "LNA=36,MIX=12,VGA=27"
+            "LNA=36.02,MIX=12.03,VGA=26.79"
         );
     }
 

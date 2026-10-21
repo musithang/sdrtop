@@ -14,17 +14,44 @@ use crate::host::Host;
 
 use super::super::loader::{load, symbol};
 
+/// `airspy_lib_version_t`.
+#[repr(C)]
+#[derive(Clone, Copy, Default)]
+pub struct LibVersion {
+    pub major: u32,
+    pub minor: u32,
+    pub revision: u32,
+}
+
+/// `AIRSPY_SAMPLE_INT16_IQ`: interleaved I/Q, int16, the converter's 12 bits
+/// shifted up by four and filtered.
+pub const SAMPLE_INT16_IQ: c_int = 2;
+
 pub struct AirspyApi {
     // Keeps the library mapped for as long as the API is reachable
     _lib: libloading::Library,
     /// With a null buffer, the number of Airspy devices on the bus; otherwise
     /// fills up to `count` serials and returns how many. Negative on error.
+    pub airspy_lib_version: unsafe extern "C" fn(*mut LibVersion),
     pub airspy_list_devices: unsafe extern "C" fn(*mut u64, c_int) -> c_int,
     pub airspy_open_sn: unsafe extern "C" fn(*mut *mut c_void, u64) -> c_int,
     pub airspy_close: unsafe extern "C" fn(*mut c_void) -> c_int,
     pub airspy_board_id_read: unsafe extern "C" fn(*mut c_void, *mut u8) -> c_int,
     pub airspy_board_id_name: unsafe extern "C" fn(c_int) -> *const c_char,
     pub airspy_version_string_read: unsafe extern "C" fn(*mut c_void, *mut c_char, u8) -> c_int,
+    pub airspy_error_name: unsafe extern "C" fn(c_int) -> *const c_char,
+    pub airspy_set_sample_type: unsafe extern "C" fn(*mut c_void, c_int) -> c_int,
+    /// An index into the firmware's rate list, or a rate in Hz from 1 MHz up.
+    pub airspy_set_samplerate: unsafe extern "C" fn(*mut c_void, u32) -> c_int,
+    pub airspy_set_freq: unsafe extern "C" fn(*mut c_void, u32) -> c_int,
+    /// Register positions, not decibels: LNA 0..14, mixer and VGA 0..15.
+    pub airspy_set_lna_gain: unsafe extern "C" fn(*mut c_void, u8) -> c_int,
+    pub airspy_set_mixer_gain: unsafe extern "C" fn(*mut c_void, u8) -> c_int,
+    pub airspy_set_vga_gain: unsafe extern "C" fn(*mut c_void, u8) -> c_int,
+    pub airspy_set_lna_agc: unsafe extern "C" fn(*mut c_void, u8) -> c_int,
+    pub airspy_set_mixer_agc: unsafe extern "C" fn(*mut c_void, u8) -> c_int,
+    /// 4.5 V on the antenna port. Only ever switched off here.
+    pub airspy_set_rf_bias: unsafe extern "C" fn(*mut c_void, u8) -> c_int,
     /// With `len` zero, writes the number of rates the firmware offers into
     /// the buffer's first element; otherwise copies that many rates in Hz,
     /// complex rates for the IQ sample types (the default at open).
@@ -72,12 +99,23 @@ pub(super) fn resolve(lib: libloading::Library) -> Result<AirspyApi, String> {
         };
     }
     Ok(AirspyApi {
+        airspy_lib_version: sym!(airspy_lib_version),
         airspy_list_devices: sym!(airspy_list_devices),
         airspy_open_sn: sym!(airspy_open_sn),
         airspy_close: sym!(airspy_close),
         airspy_board_id_read: sym!(airspy_board_id_read),
         airspy_board_id_name: sym!(airspy_board_id_name),
         airspy_version_string_read: sym!(airspy_version_string_read),
+        airspy_error_name: sym!(airspy_error_name),
+        airspy_set_sample_type: sym!(airspy_set_sample_type),
+        airspy_set_samplerate: sym!(airspy_set_samplerate),
+        airspy_set_freq: sym!(airspy_set_freq),
+        airspy_set_lna_gain: sym!(airspy_set_lna_gain),
+        airspy_set_mixer_gain: sym!(airspy_set_mixer_gain),
+        airspy_set_vga_gain: sym!(airspy_set_vga_gain),
+        airspy_set_lna_agc: sym!(airspy_set_lna_agc),
+        airspy_set_mixer_agc: sym!(airspy_set_mixer_agc),
+        airspy_set_rf_bias: sym!(airspy_set_rf_bias),
         airspy_get_samplerates: sym!(airspy_get_samplerates),
         _lib: lib,
     })

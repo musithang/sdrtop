@@ -201,11 +201,14 @@ pub fn format_named(stages: &[StageSpec], values: &[f64]) -> String {
         .iter()
         .enumerate()
         .map(|(i, s)| {
-            format!(
-                "{}={:.0}",
-                s.name,
-                values.get(i).copied().unwrap_or(s.min_db)
-            )
+            let v = values.get(i).copied().unwrap_or(s.min_db);
+            // Whole dB as whole dB; a measured table's fractional value to
+            // the hundredth, or a save brings back its neighbour.
+            if v.fract() == 0.0 {
+                format!("{}={v:.0}", s.name)
+            } else {
+                format!("{}={v:.2}", s.name)
+            }
         })
         .collect::<Vec<_>>()
         .join(",")
@@ -214,6 +217,20 @@ pub fn format_named(stages: &[StageSpec], values: &[f64]) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// **A saved gain comes back as the setting it was.** Whole-dB stages
+    /// keep their whole-dB form; a measured table's fractional values are
+    /// written to the hundredth, because the Airspy R2's LNA has 27.76 and
+    /// 28.19 dB a position apart and `28` would bring back the wrong one.
+    #[test]
+    fn a_fractional_table_value_survives_a_save() {
+        assert_eq!(format_named(&hackrf(), &[16.0, 20.0]), "LNA=16,VGA=20");
+        let lna = StageSpec::tabled("LNA", vec![26.96, 27.76, 28.19]);
+        let text = format_named(std::slice::from_ref(&lna), &[27.76]);
+        assert_eq!(text, "LNA=27.76");
+        let (pairs, _) = parse_named(&text);
+        assert_eq!(lna.position_of(pairs[0].1), Some(1));
+    }
 
     /// The two stages a HackRF presents through SoapyHackRF once `AMP`, a
     /// two-position element, has become the boost. Real probe values.

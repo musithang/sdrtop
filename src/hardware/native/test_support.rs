@@ -73,6 +73,24 @@ impl TestLibrary {
         }
     }
 
+    /// What the backend last asked the fixture's libairspy for, by field
+    /// (see `fixture_airspy_state` in the fixture).
+    pub fn airspy_state(&self, field: i32) -> i32 {
+        unsafe {
+            self.lib
+                .get::<unsafe extern "C" fn(i32) -> i32>(b"fixture_airspy_state\0")
+                .unwrap()(field)
+        }
+    }
+
+    pub fn airspy_layout(&self, field: i32) -> usize {
+        unsafe {
+            self.lib
+                .get::<unsafe extern "C" fn(i32) -> usize>(b"fixture_airspy_layout\0")
+                .unwrap()(field)
+        }
+    }
+
     pub fn list_layout(&self, field: i32) -> usize {
         unsafe {
             self.lib

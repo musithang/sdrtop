@@ -392,42 +392,13 @@ impl SdrMetrics {
     }
 
     /// A chain whose stages were **measured**, and one of them only in a
-    /// band: the Airspy R2's three tables as the bench measured them, its LNA
+    /// band: the Airspy R2's own gain model as the bench measured it, its LNA
     /// valid from 88 to 170 MHz, tuned to 943.4 MHz where the LNA reads as a
     /// position. LNA and VGA have keys of their own, the mixer is reached with
     /// the stage keys.
     pub(crate) fn band_measured_chain(mut self) -> Self {
-        use crate::hardware::{GainModel, StageSpec};
         let mut caps = (*self.caps).clone();
-        caps.gain = GainModel::new(
-            vec![
-                StageSpec::tabled(
-                    "LNA",
-                    vec![
-                        0.0, 4.38, 9.09, 11.28, 11.75, 13.52, 16.74, 19.96, 23.40, 26.96, 27.76,
-                        28.19, 28.64, 32.34, 36.02,
-                    ],
-                )
-                .measured_between(88_000_000, 170_000_000),
-                StageSpec::tabled(
-                    "MIX",
-                    vec![
-                        0.0, 1.14, 2.59, 4.34, 5.65, 6.94, 8.25, 9.41, 10.53, 12.03, 13.37, 14.67,
-                        15.90, 16.16, 16.17, 16.24,
-                    ],
-                ),
-                StageSpec::tabled(
-                    "VGA",
-                    vec![
-                        0.0, 3.40, 6.80, 10.16, 13.64, 16.91, 20.40, 23.52, 26.79, 30.17, 33.51,
-                        36.86, 40.20, 43.65, 46.89, 49.96,
-                    ],
-                ),
-            ],
-            "LNA",
-            "LNA",
-        )
-        .with_second_stage();
+        caps.gain = crate::hardware::native::airspy::gain_model();
         caps.friis_applicable = false;
         self.caps = Arc::new(caps);
         self.radio.gains = vec![36.02, 12.03, 26.79];

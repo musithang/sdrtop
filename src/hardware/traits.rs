@@ -426,8 +426,6 @@ impl StageSpec {
     }
 
     /// The same stage, its values decibels only between `lo_hz` and `hi_hz`.
-    /// Built by tests until a device measured in a band builds one.
-    #[cfg(test)]
     pub fn measured_between(mut self, lo_hz: u64, hi_hz: u64) -> Self {
         self.measured_in = Some(lo_hz..=hi_hz);
         self
@@ -1004,10 +1002,12 @@ pub struct DeviceInfo {
     pub tuner_name: Option<String>,
     /// What to show where a HackRF shows its firmware version.
     ///
-    /// `None` on a device with firmware of its own. The header used to work this
-    /// out by asking whether the gain model was single-knob, which was a fine
-    /// proxy while there were two backends and started calling a SoapySDR device
-    /// an RTL-SDR the moment there were three. A backend says what it is.
+    /// `None` on a HackRF, whose own firmware the header names; a radio whose
+    /// firmware is not a HackRF's names it here under its own label. The
+    /// header used to work this out by asking whether the gain model was
+    /// single-knob, which was a fine proxy while there were two backends and
+    /// started calling a SoapySDR device an RTL-SDR the moment there were
+    /// three. A backend says what it is.
     pub stack: Option<SoftwareStack>,
 }
 

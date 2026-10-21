@@ -59,8 +59,8 @@ impl Panel for RfChainPanel {
     }
     fn focus_bindings(&self) -> &'static [(&'static str, &'static str)] {
         &[
-            ("\u{2191}\u{2193}", "LNA"),
-            ("[ ]", "VGA"),
+            ("\u{2191}\u{2193}", "front gain"),
+            ("[ ]", "second gain"),
             ("A", "auto-gain"),
             ("K", "noise sweep"),
             ("\u{23B5}", "freeze"),
@@ -199,6 +199,23 @@ impl Panel for RfChainPanel {
                 adc_rms,
                 amp,
                 tracking: state.lab.rf_autotrack,
+                front: state
+                    .caps
+                    .gain
+                    .stages()
+                    .first()
+                    .map_or_else(|| "gain".to_string(), |s| s.name.clone()),
+                second: state
+                    .caps
+                    .gain
+                    .has_second_stage()
+                    .then(|| state.caps.gain.stages().get(1).map(|s| s.name.clone()))
+                    .flatten(),
+                boost: state
+                    .caps
+                    .gain
+                    .has_boost()
+                    .then(|| state.caps.gain.boost_label().to_string()),
             },
             theme,
         );
@@ -254,6 +271,24 @@ mod tests {
         let ant = near.lines().find(|l| l.contains("ANT")).unwrap_or_default();
         assert!(ant.contains("dBm"), "{ant}\n{near}");
         assert!(!near.contains("14/14"), "{near}");
+    }
+
+    /// **The bench names the radio's own controls.** On the R2 the arrows
+    /// move the LNA and `[ ]` the mixer, and there is no amp to bypass; on a
+    /// HackRF they are its LNA, its VGA and its AMP.
+    #[test]
+    fn the_bench_names_the_radios_own_gain_keys() {
+        let r2 = SdrMetrics::fixture()
+            .streaming()
+            .with_carrier(0.0, 40.0)
+            .band_measured_chain();
+        let out = draw(RfChainPanel, 60, 44, &r2).join("\n");
+        assert!(out.contains("[ ] MIX"), "{out}");
+        assert!(!out.contains("[ ] VGA") && !out.contains("AMP"), "{out}");
+
+        let hackrf = SdrMetrics::fixture().streaming().with_carrier(0.0, 40.0);
+        let out = draw(RfChainPanel, 60, 44, &hackrf).join("\n");
+        assert!(out.contains("[ ] VGA") && out.contains("AMP"), "{out}");
     }
 
     #[test]
