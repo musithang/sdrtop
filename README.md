@@ -12,7 +12,7 @@
 <p align="center">
   <a href="https://www.rust-lang.org"><img src="https://img.shields.io/badge/rust-1.88%2B-orange?logo=rust&logoColor=white" alt="Rust 1.88+"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-GPL--3.0--or--later-blue" alt="GPL-3.0-or-later"></a>
-  <img src="https://img.shields.io/badge/platform-linux-lightgrey?logo=linux&logoColor=white" alt="Linux">
+  <a href="user_docs/hardware.md#macos-unofficially"><img src="https://img.shields.io/badge/platform-linux%20%7C%20macOS-lightgrey" alt="Linux | macOS"></a>
   <img src="https://img.shields.io/badge/stage-early%20development-red" alt="Early development">
 </p>
 
@@ -146,7 +146,7 @@ Measured the awkward way rather than the easy way. Bandwidth about the carrier, 
 
 ## Install
 
-**Requirements:** Linux · a HackRF One, an RTL-SDR, a tinySA, or anything SoapySDR speaks to
+**Requirements:** Linux, or a Mac ([unofficially](user_docs/hardware.md#macos-unofficially): built and tested in CI, radios tested by users) · a HackRF One, an RTL-SDR, a tinySA, or anything SoapySDR speaks to
 
 ### The one-liner
 

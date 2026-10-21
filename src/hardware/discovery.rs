@@ -301,7 +301,10 @@ mod tests {
     /// and failed here with "symbol not found in flat namespace" for the
     /// library sdrtop had opened local, so `--device soapy` found nothing.
     /// By hand where SoapySDR and its rtlsdr and hackrf modules are
-    /// installed, and in CI on the macOS runner with Homebrew's.
+    /// installed, and in CI on the macOS runner with Homebrew's. Run it on
+    /// its own (CI names it with `--exact`): a module another test loaded
+    /// earlier in the process answers "already loaded", which says it loaded
+    /// then, in that test's order, not in this one.
     #[test]
     #[ignore = "requires libSoapySDR with its rtlsdr and hackrf modules, librtlsdr and libhackrf"]
     fn installed_soapy_modules_load_after_the_native_libraries() {
@@ -316,9 +319,11 @@ mod tests {
             named("rtlsdr") && named("HackRF"),
             "the rtlsdr and hackrf modules must be installed: {modules:?}"
         );
+        // SoapySDR keeps a module only when it loaded, so "already loaded"
+        // is a success from earlier, not an error.
         let failed: Vec<_> = modules
             .iter()
-            .filter(|(_, said)| !said.is_empty())
+            .filter(|(_, said)| !said.is_empty() && !said.ends_with(" already loaded"))
             .collect();
         assert!(failed.is_empty(), "{failed:#?}");
     }

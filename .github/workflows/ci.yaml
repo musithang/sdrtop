@@ -74,7 +74,7 @@ jobs:
 
       - name: Install native runtimes
         # Keep coverage with both native runtime libraries and libSoapySDR installed
-        run: sudo apt-get update && sudo apt-get install -y libhackrf0 librtlsdr2 libsoapysdr0.8
+        run: sudo apt-get update && sudo apt-get install -y libhackrf0 librtlsdr2 libsoapysdr0.8 soapysdr0.8-module-rtlsdr soapysdr0.8-module-hackrf
 
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
@@ -109,6 +109,9 @@ jobs:
 
       - name: Resolve installed libSoapySDR
         run: cargo test --locked hardware::soapy::api::tests::installed_soapysdr_resolves -- --ignored --exact
+
+      - name: SoapySDR's modules load beside the native libraries
+        run: cargo test --locked hardware::discovery::tests::installed_soapy_modules_load_after_the_native_libraries -- --ignored --exact
 
       # sdrtop is published to crates.io, and a publish cannot be undone: a
       # version that fails to package can only be fixed by burning the version

@@ -155,10 +155,13 @@ impl Boot {
                 board_name: sysinfo.product.clone(),
                 serial: sysinfo.serial.clone().unwrap_or_else(|| "—".into()),
                 fw_version: "Observer Mode".to_string(),
-                // The backend's own, so an observed RTL-SDR is not introduced
-                // as a HackRF; the header shows its value as a dash, since the
-                // holder's library is not something sdrtop can see.
-                stack: (profile.stack)(),
+                // The backend's label, so an observed RTL-SDR is not
+                // introduced as a HackRF. Its value is a dash: the library the
+                // holder drives it through is not something sdrtop can see.
+                stack: (profile.stack)().map(|stack| hardware::SoftwareStack {
+                    value: Arc::from("—"),
+                    ..stack
+                }),
                 board_rev: 0xFE,
                 usb_api_version: 0,
                 // A radio observed is, by definition, one observer mode can watch.
@@ -826,16 +829,26 @@ mod tests {
     /// **An RTL-SDR another process holds is introduced as an RTL-SDR.** The
     /// header's firmware field fell back to the HackRF's label for any
     /// observed radio with no software stack, so a Blog V4 held by `rtl_test`
-    /// read `hackrf fw`. The value stays a dash: which library the holder
-    /// drives it through is not something sdrtop can see.
+    /// read `hackrf fw`. The value is a dash, in the state and not only on
+    /// screen: which library the holder drives it through is not something
+    /// sdrtop can see, so nothing that reads the state may say `librtlsdr`.
     #[test]
     fn an_observed_radio_is_introduced_as_its_own_backend() {
         let cfg = AppConfig::default();
+        let observed =
+            |kind| initial_metrics(&cfg, Boot::observer(&cfg, &sysinfo(), profile(kind))).unwrap();
         let header = |kind| {
-            let m = initial_metrics(&cfg, Boot::observer(&cfg, &sysinfo(), profile(kind))).unwrap();
-            crate::state::fixture::draw(crate::ui::panels::core::header::HeaderPanel, 120, 8, &m)
-                .join("\n")
+            crate::state::fixture::draw(
+                crate::ui::panels::core::header::HeaderPanel,
+                120,
+                8,
+                &observed(kind),
+            )
+            .join("\n")
         };
+        let stack = observed(hardware::DeviceKind::RtlSdr).system.stack.unwrap();
+        assert_eq!(stack.label, "rtl-sdr   ");
+        assert_eq!(&*stack.value, "—");
         let rtl = header(hardware::DeviceKind::RtlSdr);
         assert!(rtl.contains("rtl-sdr"), "{rtl}");
         assert!(!rtl.contains("hackrf fw"), "not a HackRF:\n{rtl}");
