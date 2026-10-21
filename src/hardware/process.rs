@@ -715,12 +715,37 @@ pub(crate) mod tests {
         rx_ctx_holding(8, 8)
     }
 
+    /// The same, for a backend whose samples have this geometry.
+    pub(crate) fn rx_ctx_of(
+        geometry: SampleGeometry,
+    ) -> (
+        Arc<RxContext>,
+        crossbeam_channel::Receiver<Vec<u8>>,
+        crossbeam_channel::Receiver<StreamBlock>,
+        crossbeam_channel::Receiver<StreamBlock>,
+    ) {
+        rx_ctx_shaped(8, 8, geometry)
+    }
+
     /// The same, with the FFT queue's depth chosen: a shallow one can be filled
     /// in a test, which is how the lossy hand-off is exercised without needing a
     /// slow FFT worker to be behind.
     fn rx_ctx_holding(
         fft_cap: usize,
         net_cap: usize,
+    ) -> (
+        Arc<RxContext>,
+        crossbeam_channel::Receiver<Vec<u8>>,
+        crossbeam_channel::Receiver<StreamBlock>,
+        crossbeam_channel::Receiver<StreamBlock>,
+    ) {
+        rx_ctx_shaped(fft_cap, net_cap, eight_bit())
+    }
+
+    fn rx_ctx_shaped(
+        fft_cap: usize,
+        net_cap: usize,
+        geometry: SampleGeometry,
     ) -> (
         Arc<RxContext>,
         crossbeam_channel::Receiver<Vec<u8>>,
@@ -742,7 +767,7 @@ pub(crate) mod tests {
             net_tx,
             net_feed: crate::hardware::FeedHealth::default(),
             power_tx,
-            geometry: eight_bit(),
+            geometry,
             stream_pairs: std::sync::atomic::AtomicU64::new(0),
             record: Default::default(),
             intake: Default::default(),

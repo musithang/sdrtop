@@ -27,6 +27,24 @@ pub struct LibVersion {
 /// shifted up by four and filtered.
 pub const SAMPLE_INT16_IQ: c_int = 2;
 
+/// `airspy_transfer_t`: one block, handed to the callback on libairspy's
+/// consumer thread.
+#[repr(C)]
+pub struct Transfer {
+    pub device: *mut c_void,
+    pub ctx: *mut c_void,
+    pub samples: *mut c_void,
+    /// I/Q pairs in `samples` for the IQ sample types.
+    pub sample_count: c_int,
+    /// Samples lost in libairspy's own queue just before this block: whole
+    /// USB buffers it had no room for, each counted at this block's size.
+    pub dropped_samples: u64,
+    pub sample_type: c_int,
+}
+
+/// `airspy_sample_block_cb_fn`. A non-zero return asks libairspy to stop.
+pub type SampleBlockFn = extern "C" fn(*mut Transfer) -> c_int;
+
 pub struct AirspyApi {
     // Keeps the library mapped for as long as the API is reachable
     _lib: libloading::Library,
@@ -55,6 +73,12 @@ pub struct AirspyApi {
     /// With `len` zero, writes the number of rates the firmware offers into
     /// the buffer's first element; otherwise copies that many rates in Hz,
     /// complex rates for the IQ sample types (the default at open).
+    /// Starts libairspy's USB and consumer threads; the callback runs on the
+    /// consumer thread with `ctx` in each transfer.
+    pub airspy_start_rx: unsafe extern "C" fn(*mut c_void, SampleBlockFn, *mut c_void) -> c_int,
+    /// Joins both threads before returning when the stream was running.
+    pub airspy_stop_rx: unsafe extern "C" fn(*mut c_void) -> c_int,
+    pub airspy_is_streaming: unsafe extern "C" fn(*mut c_void) -> c_int,
     pub airspy_get_samplerates: unsafe extern "C" fn(*mut c_void, *mut u32, u32) -> c_int,
 }
 
@@ -116,6 +140,9 @@ pub(super) fn resolve(lib: libloading::Library) -> Result<AirspyApi, String> {
         airspy_set_lna_agc: sym!(airspy_set_lna_agc),
         airspy_set_mixer_agc: sym!(airspy_set_mixer_agc),
         airspy_set_rf_bias: sym!(airspy_set_rf_bias),
+        airspy_start_rx: sym!(airspy_start_rx),
+        airspy_stop_rx: sym!(airspy_stop_rx),
+        airspy_is_streaming: sym!(airspy_is_streaming),
         airspy_get_samplerates: sym!(airspy_get_samplerates),
         _lib: lib,
     })

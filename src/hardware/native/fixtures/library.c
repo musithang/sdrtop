@@ -1,5 +1,10 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
+// For pthreads and nanosleep under -std=c11.
+#define _POSIX_C_SOURCE 200809L
+
+#include <pthread.h>
+#include <time.h>
 #include <stdint.h>
 #include <stddef.h>
 #include <stdlib.h>
@@ -130,7 +135,8 @@ int rtlsdr_cancel_async(void *device) { calls[4]++; return 0; }
 
 // libairspy 1.0.10. Modes 20 and up are this library's: 20 lists Airspy Mini
 // rates, 21 refuses to open (AIRSPY_ERROR_BUSY), 22 finds no device, 23 fails
-// every setting (AIRSPY_ERROR_LIBUSB).
+// every setting (AIRSPY_ERROR_LIBUSB), 24 streams three blocks and then stops
+// by itself, as libairspy does when a USB transfer comes back short.
 int airspy_list_devices(uint64_t *serials, int count) {
     if (mode == 22) return 0;
     if (serials && count >= 1) serials[0] = 0x637862DC2E1182D7ULL;
@@ -144,16 +150,32 @@ int airspy_open_sn(void **device, uint64_t serial) {
 int airspy_close(void *device) { calls[3]++; free(device); return 0; }
 // What the backend asked libairspy for last, by field (see fixture_airspy_state):
 // 0 sample type, 1 bias tee, 2 LNA AGC, 3 mixer AGC, 4 LNA, 5 mixer, 6 VGA,
-// 7 frequency in kHz, 8 sample rate argument. -1 until set.
-static int airspy_state[9] = {-1, -1, -1, -1, -1, -1, -1, -1, -1};
+// 7 frequency in kHz, 8 sample rate argument; 9 streams started, 10 stops
+// asked, 11 the sample rate argument in force when the last stream started.
+// -1 until set.
+static int airspy_state[12] = {-1, -1, -1, -1, -1, -1, -1, -1, -1, 0, 0, -1};
 int fixture_airspy_state(int field) { return airspy_state[field]; }
 typedef struct { uint32_t part_id[2]; uint32_t serial_no[4]; } airspy_read_partid_serialno_t;
 typedef struct { uint32_t major_version; uint32_t minor_version; uint32_t revision; } airspy_lib_version_t;
+// airspy_transfer_t in airspy.h, field for field.
+typedef struct {
+    void *device;
+    void *ctx;
+    void *samples;
+    int sample_count;
+    uint64_t dropped_samples;
+    int sample_type;
+} airspy_transfer_t;
 size_t fixture_airspy_layout(int field) {
     switch (field) {
         case 0: return sizeof(airspy_read_partid_serialno_t);
         case 1: return offsetof(airspy_read_partid_serialno_t, serial_no);
         case 2: return sizeof(airspy_lib_version_t);
+        case 3: return sizeof(airspy_transfer_t);
+        case 4: return offsetof(airspy_transfer_t, samples);
+        case 5: return offsetof(airspy_transfer_t, sample_count);
+        case 6: return offsetof(airspy_transfer_t, dropped_samples);
+        case 7: return offsetof(airspy_transfer_t, sample_type);
         default: abort();
     }
 }
@@ -191,6 +213,56 @@ int airspy_version_string_read(void *device, char *version, uint8_t length) {
     version[length - 1] = 0;
     return 0;
 }
+typedef int (*airspy_cb)(airspy_transfer_t *);
+static struct {
+    pthread_t thread;
+    int running;
+    airspy_cb cb;
+    void *ctx;
+    void *device;
+} airspy_stream;
+static _Atomic int airspy_streaming, airspy_stop;
+// libairspy's consumer thread: three blocks of four pairs, block k's pair i
+// carrying I = 100k + i and Q = -(100k + i). Before the second, one buffer
+// of the queue was lost: four pairs, counted at that block's size.
+static void *airspy_consumer(void *arg) {
+    int16_t samples[8];
+    for (int k = 0; k < 3; k++) {
+        for (int i = 0; i < 4; i++) {
+            samples[2 * i] = (int16_t)(100 * k + i);
+            samples[2 * i + 1] = (int16_t)-(100 * k + i);
+        }
+        airspy_transfer_t t = {airspy_stream.device, airspy_stream.ctx, samples, 4,
+                               k == 1 ? 4 : 0, 2};
+        airspy_stream.cb(&t);
+    }
+    if (mode == 24) { airspy_streaming = 0; return NULL; }
+    while (!airspy_stop) {
+        struct timespec pause = {0, 1000000};
+        nanosleep(&pause, NULL);
+    }
+    return NULL;
+}
+int airspy_start_rx(void *device, airspy_cb cb, void *ctx) {
+    if (mode == 23 || airspy_streaming) return -1000;
+    airspy_state[9]++;
+    airspy_state[11] = airspy_state[8];
+    airspy_stream.cb = cb;
+    airspy_stream.ctx = ctx;
+    airspy_stream.device = device;
+    airspy_stop = 0;
+    airspy_streaming = 1;
+    airspy_stream.running = pthread_create(&airspy_stream.thread, NULL, airspy_consumer, NULL) == 0;
+    return airspy_stream.running ? 0 : -1000;
+}
+int airspy_stop_rx(void *device) {
+    airspy_state[10]++;
+    airspy_stop = 1;
+    if (airspy_stream.running) { pthread_join(airspy_stream.thread, NULL); airspy_stream.running = 0; }
+    airspy_streaming = 0;
+    return 0;
+}
+int airspy_is_streaming(void *device) { return airspy_streaming; }
 #ifndef OMIT_LAST_SYMBOL
 int airspy_get_samplerates(void *device, uint32_t *buffer, uint32_t len) {
     static const uint32_t r2[] = {10000000, 2500000};

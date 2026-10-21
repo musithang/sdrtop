@@ -3,10 +3,16 @@
 
 //! The Airspy R2, driven through libairspy.
 //!
-//! Found, identified, opened and described here; it is reached only when
-//! `--device airspy` asks for it by name, and until it can stream, starting
-//! RX says so and points at the SoapySDR path, which keeps offering the radio
-//! as before.
+//! Found, identified, opened, described and streamed here; it is reached
+//! only when `--device airspy` asks for it by name, and the SoapySDR path
+//! keeps offering the radio as before.
+//!
+//! **libairspy owns the threads.** Its USB thread queues whole buffers and
+//! its consumer thread converts them to I/Q and calls [`rx_callback`], which
+//! hands the block to [`crate::hardware::intake`] and returns. What the
+//! library's own queue had no room for arrives as `dropped_samples` on the
+//! next block, and goes in as the driver's drop before it: counted, and a gap
+//! at a known place in the stream.
 //!
 //! **Its gains are measured, not read off a datasheet.** libairspy takes
 //! register positions, 0..14 or 0..15, and says nothing about decibels; the
@@ -25,7 +31,7 @@ use std::ffi::CStr;
 
 use libc::{c_char, c_int, c_void};
 
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 
 use crate::hardware::traits::RateSet;
 use crate::hardware::{
@@ -260,6 +266,65 @@ pub fn caps() -> DeviceCapabilities {
     }
 }
 
+// ── RX callback (libairspy's consumer thread) ──────────────────────────────
+
+extern "C" fn rx_callback(transfer: *mut ffi::Transfer) -> c_int {
+    // No Rust panic may cross into C.
+    let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        // SAFETY: libairspy hands a transfer that is valid for this call,
+        // whose `ctx` is the `RxContext` the device keeps alive (see
+        // `Stream`).
+        unsafe { rx_block(transfer) }
+    }));
+    // Never asks libairspy to stop: 1.0.10 answers a non-zero return by
+    // ending its consumer thread while still reporting the stream as running,
+    // which would read as a live stream that delivers nothing.
+    0
+}
+
+/// # Safety
+/// `transfer` is null or a transfer libairspy passed to the callback, with
+/// `ctx` null or a live `RxContext`.
+unsafe fn rx_block(transfer: *mut ffi::Transfer) {
+    // Stamped first, so the timing bench measures the interval between
+    // deliveries and not entry plus our own work.
+    let now = std::time::Instant::now();
+    // SAFETY: the caller's contract.
+    let Some(t) = (unsafe { transfer.as_ref() }) else {
+        return;
+    };
+    // Only the type set at open is understood; anything else is not samples
+    // of ours, and is not read as if it were.
+    if t.ctx.is_null() || t.samples.is_null() || t.sample_type != ffi::SAMPLE_INT16_IQ {
+        return;
+    }
+    let Ok(pairs) = usize::try_from(t.sample_count) else {
+        return;
+    };
+    // SAFETY: the caller's contract.
+    let ctx = unsafe { &*(t.ctx as *const RxContext) };
+    let len = pairs * ctx.geometry.bytes_per_pair();
+    // SAFETY: an INT16_IQ transfer holds `sample_count` pairs of two int16.
+    let buf = unsafe { std::slice::from_raw_parts(t.samples as *const u8, len) };
+    crate::hardware::intake::deliver(ctx, buf, t.dropped_samples, now);
+}
+
+/// What the device keeps while libairspy's threads may call back into it.
+#[derive(Default)]
+struct Stream {
+    /// The context handed to the running stream, kept alive until
+    /// libairspy has joined the threads that use it.
+    ctx: Option<Arc<RxContext>>,
+    /// Contexts of streams libairspy ended by itself (a USB transfer that came
+    /// back short, or the radio leaving the bus). 1.0.10 then joins nothing
+    /// on stop, and its consumer thread can be left waiting with the pointer,
+    /// so they are never let go; nor is the handle closed (see `Drop`).
+    stranded: Vec<Arc<RxContext>>,
+    /// The rate last set, Hz: libairspy has no getter, and a change while
+    /// streaming costs a restart, which the same rate does not need.
+    rate: Option<u32>,
+}
+
 /// An open Airspy R2.
 pub struct AirspyDevice {
     api: &'static ffi::AirspyApi,
@@ -267,11 +332,15 @@ pub struct AirspyDevice {
     caps: DeviceCapabilities,
     info: DeviceInfo,
     notes: Vec<String>,
+    /// Held across every start, stop and restart, so the RX task's
+    /// [`SdrDevice::is_streaming`] never sees the gap inside a rate change as
+    /// a stream that stopped.
+    stream: Mutex<Stream>,
 }
 
 // Safety: the handle is only used through libairspy, which serialises its
-// own control transfers, from the control path; the streaming thread it will
-// start is its own.
+// own control transfers; starting, stopping and the rate are serialised by
+// `stream`, and the threads libairspy starts are its own.
 unsafe impl Send for AirspyDevice {}
 unsafe impl Sync for AirspyDevice {}
 
@@ -314,6 +383,7 @@ impl AirspyDevice {
                 stack: None,
             },
             notes: Vec::new(),
+            stream: Mutex::new(Stream::default()),
         };
         // SAFETY: the handle is open and owned by `device`.
         let found = unsafe { read_found(api, ptr, serial) };
@@ -378,11 +448,42 @@ impl AirspyDevice {
         }
     }
 
-    /// Why RX cannot start yet, and the road that works.
-    fn start_rx_refusal(&self) -> String {
-        "The Airspy R2's own backend opens and describes the radio but cannot stream \
-         yet. For samples, open it with --device soapy=driver=airspy"
-            .to_string()
+    fn stream(&self) -> std::sync::MutexGuard<'_, Stream> {
+        self.stream.lock().unwrap_or_else(|e| e.into_inner())
+    }
+
+    /// Whether libairspy says its stream runs.
+    fn library_streaming(&self) -> bool {
+        // SAFETY: the handle is open.
+        unsafe { (self.api.airspy_is_streaming)(self.ptr) != 0 }
+    }
+
+    /// Starts libairspy's threads on `ctx`, which `stream` keeps.
+    fn start_locked(&self, stream: &mut Stream, ctx: Arc<RxContext>) -> anyhow::Result<()> {
+        let user = Arc::as_ptr(&ctx) as *mut c_void;
+        stream.ctx = Some(ctx);
+        // SAFETY: the handle is open; `user` stays valid while `stream` holds it.
+        let code = unsafe { (self.api.airspy_start_rx)(self.ptr, rx_callback, user) };
+        if code != 0 {
+            stream.ctx = None;
+        }
+        self.check(code, "start streaming")
+    }
+
+    /// Stops libairspy's stream and lets the context go once nothing can
+    /// call back with it.
+    fn stop_locked(&self, stream: &mut Stream) -> anyhow::Result<()> {
+        // 1.0.10 joins its threads only for a stream it still calls running;
+        // one that ended by itself leaves its consumer thread behind.
+        let joined = self.library_streaming();
+        // SAFETY: the handle is open.
+        let code = unsafe { (self.api.airspy_stop_rx)(self.ptr) };
+        if let Some(ctx) = stream.ctx.take() {
+            if !joined {
+                stream.stranded.push(ctx);
+            }
+        }
+        self.check(code, "stop streaming")
     }
 
     /// libairspy's name for an error code.
@@ -402,16 +503,36 @@ impl SdrDevice for AirspyDevice {
     }
 
     fn start_rx(&self, ctx: Arc<RxContext>) -> anyhow::Result<()> {
-        let _ = ctx;
-        anyhow::bail!(self.start_rx_refusal())
+        let mut stream = self.stream();
+        if stream.ctx.is_some() && self.library_streaming() {
+            return Ok(());
+        }
+        // A stream that ended by itself is stopped before a new one starts,
+        // so its context is accounted for.
+        if stream.ctx.is_some() {
+            self.stop_locked(&mut stream)?;
+        }
+        let started = self.start_locked(&mut stream, ctx);
+        // A radio that fell off the bus comes back as a new USB device, which
+        // this handle no longer reaches.
+        if started.is_err() && !stream.stranded.is_empty() {
+            return started.map_err(|e| {
+                e.context(
+                    "the last stream ended by itself; if the R2 left the USB bus, \
+                     open it again from the menu or restart sdrtop",
+                )
+            });
+        }
+        started
     }
 
     fn stop_rx(&self) -> anyhow::Result<()> {
-        Ok(())
+        self.stop_locked(&mut self.stream())
     }
 
     fn is_streaming(&self) -> bool {
-        false
+        let _stream = self.stream();
+        self.library_streaming()
     }
 
     fn set_frequency(&self, hz: u64) -> anyhow::Result<()> {
@@ -430,15 +551,34 @@ impl SdrDevice for AirspyDevice {
 
     /// One of the two rates the firmware offers, set as asked: libairspy has
     /// no getter to read it back with.
+    ///
+    /// **A change while streaming restarts the stream.** libairspy does not
+    /// refuse it, but sets the rate by clearing the bulk endpoint the running
+    /// transfers are on; stopped first, nothing is in flight. The restarted
+    /// stream counts its positions from zero, as any new stream does, so no
+    /// block of it is joined to one at the old rate.
     fn set_sample_rate(&self, hz: f64) -> anyhow::Result<RateSet> {
         let Some(&rate) = R2_RATES.iter().find(|&&r| (f64::from(r) - hz).abs() < 0.5) else {
             anyhow::bail!("the Airspy R2 runs at 2.5 or 10 Msps");
         };
-        // SAFETY: the handle is open.
-        self.check(
-            unsafe { (self.api.airspy_set_samplerate)(self.ptr, rate) },
-            "set the rate",
-        )?;
+        let mut stream = self.stream();
+        let running = stream.ctx.clone().filter(|_| self.library_streaming());
+        if running.is_none() || stream.rate != Some(rate) {
+            if running.is_some() {
+                self.stop_locked(&mut stream)?;
+            }
+            // SAFETY: the handle is open.
+            self.check(
+                unsafe { (self.api.airspy_set_samplerate)(self.ptr, rate) },
+                "set the rate",
+            )?;
+            stream.rate = Some(rate);
+            if let Some(ctx) = running {
+                ctx.begin_stream();
+                self.start_locked(&mut stream, ctx)
+                    .map_err(|e| e.context("the stream stopped for the rate change"))?;
+            }
+        }
         Ok(RateSet::new(f64::from(rate), None, 0))
     }
 
@@ -471,7 +611,21 @@ impl SdrDevice for AirspyDevice {
 
 impl Drop for AirspyDevice {
     fn drop(&mut self) {
-        // SAFETY: the handle was opened in `open` and is closed once, here.
+        let mut stream = self.stream();
+        if stream.ctx.is_some() {
+            let _ = self.stop_locked(&mut stream);
+        }
+        // A stream libairspy ended by itself leaves transfers it never reaped,
+        // and 1.0.10's close frees them after tearing down the USB context
+        // they belong to: on an R2 that fell off the bus, that crashed. Such
+        // a handle is held, with its context, until the process exits and the
+        // system releases both.
+        if !stream.stranded.is_empty() {
+            return;
+        }
+        drop(stream);
+        // SAFETY: the handle was opened in `open` and is closed once, here,
+        // after its stream.
         unsafe { (self.api.airspy_close)(self.ptr) };
     }
 }
@@ -739,12 +893,178 @@ mod tests {
         assert!(why.contains("AIRSPY_ERROR"), "{why}");
     }
 
-    /// Until it streams, starting RX says so and names the road that works.
+    /// The libairspy transfer, as the C compiler lays it out.
     #[test]
-    fn starting_rx_says_it_is_not_finished_and_points_at_soapy() {
-        let (_fixture, device) = opened();
-        let why = device.start_rx_refusal();
-        assert!(why.contains("--device soapy=driver=airspy"), "{why}");
+    fn the_transfer_matches_the_c_layout() {
+        use std::mem::{offset_of, size_of};
+        let fixture = TestLibrary::new(false);
+        assert_eq!(fixture.airspy_layout(3), size_of::<ffi::Transfer>());
+        assert_eq!(fixture.airspy_layout(4), offset_of!(ffi::Transfer, samples));
+        assert_eq!(
+            fixture.airspy_layout(5),
+            offset_of!(ffi::Transfer, sample_count)
+        );
+        assert_eq!(
+            fixture.airspy_layout(6),
+            offset_of!(ffi::Transfer, dropped_samples)
+        );
+        assert_eq!(
+            fixture.airspy_layout(7),
+            offset_of!(ffi::Transfer, sample_type)
+        );
+    }
+
+    const WAIT: std::time::Duration = std::time::Duration::from_secs(5);
+
+    fn streaming_ctx() -> (
+        Arc<RxContext>,
+        crossbeam_channel::Receiver<crate::hardware::StreamBlock>,
+    ) {
+        let (ctx, _fft, _demod, net) =
+            crate::hardware::process::tests::rx_ctx_of(caps().sample_geometry);
+        (ctx, net)
+    }
+
+    /// **Blocks arrive from libairspy's thread with its losses placed**: the
+    /// samples as the library converted them, and the buffer its queue had
+    /// no room for counted as a drop and left as a gap before the block it
+    /// preceded. Stopping joins the threads and lets the context go.
+    #[test]
+    fn blocks_arrive_with_the_librarys_losses_placed() {
+        let (fixture, device) = opened();
+        let (ctx, net) = streaming_ctx();
+        device.start_rx(Arc::clone(&ctx)).unwrap();
+        assert!(device.is_streaming());
+        let blocks: Vec<_> = (0..3).map(|_| net.recv_timeout(WAIT).unwrap()).collect();
+        assert_eq!(
+            blocks.iter().map(|b| b.first_pair).collect::<Vec<_>>(),
+            [0, 8, 12],
+            "four pairs lost before the second block"
+        );
+        assert_eq!(
+            blocks.iter().map(|b| b.gap_before).collect::<Vec<_>>(),
+            [false, true, false]
+        );
+        let first: Vec<i16> = blocks[0]
+            .bytes
+            .as_chunks::<2>()
+            .0
+            .iter()
+            .map(|&b| i16::from_le_bytes(b))
+            .collect();
+        assert_eq!(first, [0, 0, 1, -1, 2, -2, 3, -3]);
+        assert_eq!(ctx.metrics.lock().unwrap().acc.drops, 4);
+        device.stop_rx().unwrap();
+        assert!(!device.is_streaming());
+        assert_eq!(fixture.airspy_state(10), 1);
+        assert_eq!(Arc::strong_count(&ctx), 1, "nothing can call back now");
+    }
+
+    /// **A rate change while streaming restarts the stream at the new rate**,
+    /// counting from zero; the same rate again restarts nothing, and before
+    /// a stream there is nothing to restart.
+    #[test]
+    fn a_rate_change_while_streaming_restarts_the_stream() {
+        let (fixture, device) = opened();
+        let (ctx, net) = streaming_ctx();
+        device.set_sample_rate(10e6).unwrap();
+        assert_eq!(fixture.airspy_state(9), 0, "not streaming, nothing started");
+        device.start_rx(Arc::clone(&ctx)).unwrap();
+        for _ in 0..3 {
+            net.recv_timeout(WAIT).unwrap();
+        }
+        device.set_sample_rate(10e6).unwrap();
+        assert_eq!((fixture.airspy_state(9), fixture.airspy_state(10)), (1, 0));
+        device.set_sample_rate(2.5e6).unwrap();
+        assert_eq!((fixture.airspy_state(9), fixture.airspy_state(10)), (2, 1));
+        assert_eq!(
+            fixture.airspy_state(11),
+            2_500_000,
+            "started at the new rate"
+        );
+        assert!(device.is_streaming());
+        assert_eq!(net.recv_timeout(WAIT).unwrap().first_pair, 0);
+        device.stop_rx().unwrap();
+    }
+
+    /// **A stream libairspy ended by itself keeps its context**: the
+    /// library's consumer thread may still hold it. The RX task sees the
+    /// stream stopped, and a new start begins cleanly.
+    #[test]
+    fn a_stream_that_ended_by_itself_keeps_its_context() {
+        let (fixture, device) = opened();
+        let (ctx, net) = streaming_ctx();
+        fixture.mode(24);
+        device.start_rx(Arc::clone(&ctx)).unwrap();
+        for _ in 0..3 {
+            net.recv_timeout(WAIT).unwrap();
+        }
+        let deadline = std::time::Instant::now() + WAIT;
+        while device.is_streaming() {
+            assert!(
+                std::time::Instant::now() < deadline,
+                "the stream never ended"
+            );
+            std::thread::yield_now();
+        }
+        device.stop_rx().unwrap();
+        assert_eq!(Arc::strong_count(&ctx), 2, "kept, not let go");
+        fixture.mode(0);
+        device.start_rx(Arc::clone(&ctx)).unwrap();
+        assert!(device.is_streaming());
+        assert_eq!(fixture.airspy_state(9), 2);
+        device.stop_rx().unwrap();
+    }
+
+    /// **A radio whose stream libairspy ended by itself is never closed.**
+    /// 1.0.10's close tears the USB context down before freeing transfers
+    /// the dead stream never reaped, and crashed doing it when the R2 fell
+    /// off the bus. A radio stopped cleanly is closed as usual.
+    #[test]
+    fn a_radio_whose_stream_died_is_not_closed() {
+        let (fixture, device) = opened();
+        let (ctx, net) = streaming_ctx();
+        device.start_rx(Arc::clone(&ctx)).unwrap();
+        net.recv_timeout(WAIT).unwrap();
+        device.stop_rx().unwrap();
+        drop(device);
+        assert_eq!(fixture.calls(3), 1, "stopped cleanly, closed");
+
+        let (fixture, device) = opened();
+        let (ctx, net) = streaming_ctx();
+        fixture.mode(24);
+        device.start_rx(Arc::clone(&ctx)).unwrap();
+        for _ in 0..3 {
+            net.recv_timeout(WAIT).unwrap();
+        }
+        let deadline = std::time::Instant::now() + WAIT;
+        while device.is_streaming() {
+            assert!(
+                std::time::Instant::now() < deadline,
+                "the stream never ended"
+            );
+            std::thread::yield_now();
+        }
+        device.stop_rx().unwrap();
+        fixture.mode(23);
+        let why = format!("{:#}", device.start_rx(Arc::clone(&ctx)).unwrap_err());
+        assert!(
+            why.contains("ended by itself") && why.contains("restart"),
+            "{why}"
+        );
+        drop(device);
+        assert_eq!(fixture.calls(3), 0, "held, not closed");
+    }
+
+    /// A stream that would not start leaves nothing behind and says why.
+    #[test]
+    fn a_refused_start_says_so_and_keeps_nothing() {
+        let (fixture, device) = opened();
+        let (ctx, _net) = streaming_ctx();
+        fixture.mode(23);
+        let why = device.start_rx(Arc::clone(&ctx)).unwrap_err().to_string();
+        assert!(why.contains("could not start streaming"), "{why}");
+        assert_eq!(Arc::strong_count(&ctx), 1);
         assert!(!device.is_streaming());
     }
 }
