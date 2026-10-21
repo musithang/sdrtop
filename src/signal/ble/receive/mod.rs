@@ -539,6 +539,7 @@ pub(crate) mod tests {
         SampleGeometry {
             format: SampleFormat::Int8,
             full_scale: 128.0,
+            converter_bits: None,
         }
     }
 

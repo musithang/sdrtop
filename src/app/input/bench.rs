@@ -228,13 +228,14 @@ pub(super) fn rf_chain(key: KeyEvent, ctx: &mut InputCtx<'_>) -> KeyAction {
         // settings and watch what each step does to the noise floor. Pressing it
         // again during a run stops it and puts the stage back.
         KeyCode::Char('k') => {
-            let (running, stages, current, streaming) = {
+            let (running, stages, current, streaming, tuned) = {
                 let m = metrics(state);
                 (
                     m.lab.noise_sweep.is_some(),
                     m.caps.gain.stages(),
                     m.radio.gains.clone(),
                     m.radio.hw_streaming,
+                    m.radio.frequency,
                 )
             };
             if running {
@@ -257,6 +258,10 @@ pub(super) fn rf_chain(key: KeyEvent, ctx: &mut InputCtx<'_>) -> KeyAction {
                     .push_log("Noise sweep: this device reports no gain stages".to_string());
                 return KeyAction::Continue;
             };
+            if let Some(why) = crate::signal::noise_slope::refusal(spec, tuned) {
+                metrics(state).push_log(format!("Noise sweep: {why}"));
+                return KeyAction::Continue;
+            }
             let plan = crate::signal::noise_slope::plan_for(spec);
             if plan.is_empty() {
                 metrics(state).push_log(format!(

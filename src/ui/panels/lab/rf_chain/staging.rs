@@ -12,7 +12,7 @@ use ratatui::{
     text::{Line, Span},
 };
 
-use crate::hardware::StageSpec;
+use crate::hardware::{StageReading, StageSpec};
 use crate::ui::chrome::section;
 use crate::ui::rf_calc::{Stage, StageLevel};
 
@@ -54,7 +54,7 @@ pub(super) fn lineup(
         .unwrap_or(0);
     let widest_right = levels
         .iter()
-        .map(|n| format!("{:.0} dBm", n.signal_dbm).chars().count())
+        .map(|n| level_text(n.signal_dbm).chars().count())
         .chain(std::iter::once(
             format!("{adc_peak:.0} dBFS").chars().count(),
         ))
@@ -73,7 +73,7 @@ pub(super) fn lineup(
                     String::new()
                 },
                 mid_col: dim,
-                right: format!("{:.0} dBm", node.signal_dbm),
+                right: level_text(node.signal_dbm),
                 right_col: theme.value,
             },
             iw,
@@ -126,8 +126,17 @@ fn clip(label: &str, w: usize) -> String {
 /// the signal arrives, so it contributes nothing and says so with a dash.
 fn mid_text(index: usize, stages: &[Stage]) -> String {
     match index.checked_sub(1).and_then(|k| stages.get(k)) {
-        Some(stage) => format!("{:+} dB", stage.gain_db as i64),
-        None => "\u{2014}".to_string(),
+        Some(stage) if stage.gain_db.is_finite() => format!("{:+} dB", stage.gain_db as i64),
+        _ => "\u{2014}".to_string(),
+    }
+}
+
+/// A level, or a dash where it could not be worked out.
+fn level_text(dbm: f64) -> String {
+    if dbm.is_finite() {
+        format!("{dbm:.0} dBm")
+    } else {
+        "\u{2014}".to_string()
     }
 }
 
@@ -143,6 +152,7 @@ pub(super) fn staging(
     stages: &[StageSpec],
     current: &[f64],
     targets: &[f64],
+    hz: u64,
     iw: usize,
     theme: &crate::Theme,
 ) {
@@ -172,16 +182,27 @@ pub(super) fn staging(
         } else {
             (theme.border_accent, theme.status_warn)
         };
+        // A gain against its range where it was measured; its position among
+        // its settings, with no target, where it was not.
+        let (bar_value, bar_max, tick, val_str) = match spec.reading(value, hz) {
+            StageReading::Position { at, of } => (at, of.max(1), None, format!("{at}/{of} step")),
+            StageReading::Db(_) => (
+                value.max(0.0).round() as u32,
+                spec.max_db.max(1.0).round() as u32,
+                Some(((target - spec.min_db) / span).clamp(0.0, 1.0)),
+                format!("{:.0} / {:.0} dB", value, spec.max_db),
+            ),
+        };
         out.push(bar_row(
             Bar {
                 label: &clip(&spec.name, label_w),
                 label_w,
-                value: value.max(0.0).round() as u32,
-                max: spec.max_db.max(1.0).round() as u32,
+                value: bar_value,
+                max: bar_max,
                 lo,
                 hi,
-                tick: Some(((target - spec.min_db) / span).clamp(0.0, 1.0)),
-                val_str: format!("{:.0} / {:.0} dB", value, spec.max_db),
+                tick,
+                val_str,
                 val_col: theme.value,
             },
             bw,

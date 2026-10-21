@@ -264,6 +264,12 @@ pub struct SampleGeometry {
     pub format: SampleFormat,
     /// The sample count that means 0 dBFS.
     pub full_scale: f32,
+    /// The converter's own depth, when a library has scaled its samples into
+    /// a wider container than the full scale says. libairspy shifts the R2's
+    /// 12-bit samples left by four and filters them into int16, so its full
+    /// scale is 16384 counts while the converter behind it has 12 bits. `None`
+    /// for every device whose full scale is its converter's (all the others).
+    pub converter_bits: Option<u8>,
 }
 
 impl SampleGeometry {
@@ -294,9 +300,15 @@ impl SampleGeometry {
     /// reports `CS16 [full-scale=65536]`, which derives to 17 bits, and there is
     /// no such thing as a 17-bit sample in a 16-bit container. Found by probing
     /// a real driver, not by imagining one.
+    ///
+    /// **Unless the converter's depth is stated**: a library that scales its
+    /// samples up (libairspy puts 12 bits into 16384 counts) has made the
+    /// full scale say more than the converter has.
     pub fn bits(&self) -> u8 {
         let derived = (self.full_scale.max(1.0).log2().round() as i32 + 1).clamp(1, 32) as u8;
-        derived.min(self.container_bits())
+        self.converter_bits
+            .unwrap_or(derived)
+            .min(self.container_bits())
     }
 
     /// Counts between the decoder's zero and the converter's own zero.
@@ -356,6 +368,37 @@ pub struct StageSpec {
     /// reads out of the device, not a span with a spacing. Rounding one to a
     /// nearest step would offer settings the tuner will refuse.
     pub table: Vec<f64>,
+    /// Where these values are decibels: the frequencies, in Hz, the stage was
+    /// measured over. `None` means everywhere the device tunes, which is what
+    /// a datasheet or a driver's own answer is taken to say.
+    ///
+    /// **Outside it a setting is a position, not a gain.** The Airspy R2's LNA
+    /// was measured on the bench across the VHF band only, and its steps give
+    /// up to 5 dB less at 900 MHz; carrying the VHF figures there would show
+    /// decibels nobody measured. So a stage tuned outside its band reads as
+    /// "step 14 of 14", and anything that would add it into a dB total does
+    /// not.
+    pub measured_in: Option<std::ops::RangeInclusive<u64>>,
+}
+
+/// How a stage's setting reads at the frequency the radio is tuned to.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum StageReading {
+    /// A gain in dB, as measured or as the device states it.
+    Db(f64),
+    /// Where the setting sits among the stage's positions, `at` counted from
+    /// 0 and `of` the last one, because its dB was not measured here.
+    Position { at: u32, of: u32 },
+}
+
+impl StageReading {
+    /// Five columns: `36 dB`, or `14/14` where the dB was not measured.
+    pub fn compact(self) -> String {
+        match self {
+            StageReading::Db(db) => format!("{:2.0} dB", db.max(0.0)),
+            StageReading::Position { at, of } => format!("{at:2}/{of}"),
+        }
+    }
 }
 
 impl StageSpec {
@@ -378,6 +421,53 @@ impl StageSpec {
             max_db,
             step_db,
             table: Vec::new(),
+            measured_in: None,
+        }
+    }
+
+    /// The same stage, its values decibels only between `lo_hz` and `hi_hz`.
+    /// Built by tests until a device measured in a band builds one.
+    #[cfg(test)]
+    pub fn measured_between(mut self, lo_hz: u64, hi_hz: u64) -> Self {
+        self.measured_in = Some(lo_hz..=hi_hz);
+        self
+    }
+
+    /// Whether this stage's values are decibels at `hz`.
+    pub fn db_holds_at(&self, hz: u64) -> bool {
+        self.measured_in
+            .as_ref()
+            .is_none_or(|band| band.contains(&hz))
+    }
+
+    /// The position a value sits at: its index in the table, or its step
+    /// count from the minimum. `None` for a continuous stage.
+    pub fn position_of(&self, db: f64) -> Option<u32> {
+        if !self.table.is_empty() {
+            let nearest = self
+                .table
+                .iter()
+                .enumerate()
+                .min_by(|a, b| (a.1 - db).abs().total_cmp(&(b.1 - db).abs()))?;
+            return u32::try_from(nearest.0).ok();
+        }
+        (self.step_db > 0.0).then(|| ((db - self.min_db) / self.step_db).round().max(0.0) as u32)
+    }
+
+    /// How a setting of `db` reads with the radio tuned to `hz`.
+    pub fn reading(&self, db: f64, hz: u64) -> StageReading {
+        if self.db_holds_at(hz) {
+            return StageReading::Db(db);
+        }
+        match (self.position_of(db), self.positions()) {
+            (Some(at), Some(n)) => StageReading::Position {
+                at,
+                of: n.saturating_sub(1),
+            },
+            // A continuous stage has no positions to name; its value is what
+            // there is, and a continuous stage measured in a band is not a
+            // shape anything builds.
+            _ => StageReading::Db(db),
         }
     }
 
@@ -391,6 +481,7 @@ impl StageSpec {
             max_db,
             step_db: 0.0,
             table: values,
+            measured_in: None,
         }
     }
 
@@ -1618,6 +1709,7 @@ mod tests {
         let g = |format| SampleGeometry {
             format,
             full_scale: 128.0,
+            converter_bits: None,
         };
         assert_eq!(g(SampleFormat::Uint8).centre_bias(), 0.5);
         assert_eq!(g(SampleFormat::Int8).centre_bias(), 0.0);
@@ -1629,11 +1721,13 @@ mod tests {
         let wide = |fs| SampleGeometry {
             format: SampleFormat::Int16,
             full_scale: fs,
+            converter_bits: None,
         };
         assert_eq!(
             SampleGeometry {
                 format: SampleFormat::Int8,
                 full_scale: 128.0,
+                converter_bits: None,
             }
             .bits(),
             8,
@@ -1648,6 +1742,85 @@ mod tests {
         assert_eq!(wide(32768.0).bits(), 16);
     }
 
+    /// The Airspy R2's LNA as measured at 92.8 MHz, valid over the VHF band
+    /// the bench checked it in.
+    fn vhf_lna() -> StageSpec {
+        StageSpec::tabled(
+            "LNA",
+            vec![
+                0.0, 4.38, 9.09, 11.28, 11.75, 13.52, 16.74, 19.96, 23.40, 26.96, 27.76, 28.19,
+                28.64, 32.34, 36.02,
+            ],
+        )
+        .measured_between(88_000_000, 170_000_000)
+    }
+
+    /// **Inside its band a setting is a gain; outside, a position.** The
+    /// edges belong to the band. A stage with no band is a gain everywhere.
+    #[test]
+    fn a_stage_reads_in_db_only_where_it_was_measured() {
+        let lna = vhf_lna();
+        assert_eq!(lna.reading(36.02, 92_800_000), StageReading::Db(36.02));
+        assert_eq!(lna.reading(36.02, 88_000_000), StageReading::Db(36.02));
+        assert_eq!(lna.reading(36.02, 170_000_000), StageReading::Db(36.02));
+        assert_eq!(
+            lna.reading(36.02, 943_400_000),
+            StageReading::Position { at: 14, of: 14 }
+        );
+        assert_eq!(
+            lna.reading(11.28, 465_000_000),
+            StageReading::Position { at: 3, of: 14 }
+        );
+        assert!(!lna.db_holds_at(170_000_001));
+        let vga = StageSpec::ranged("VGA", 0.0, 62.0, 2.0);
+        assert_eq!(vga.reading(30.0, 2_400_000_000), StageReading::Db(30.0));
+    }
+
+    /// A position is counted the same way for a table and for a grid; a
+    /// continuous stage has none.
+    #[test]
+    fn a_position_is_counted_in_tables_and_grids() {
+        assert_eq!(vhf_lna().position_of(0.0), Some(0));
+        assert_eq!(vhf_lna().position_of(23.40), Some(8));
+        assert_eq!(
+            StageSpec::ranged("VGA", 0.0, 62.0, 2.0).position_of(30.0),
+            Some(15)
+        );
+        assert_eq!(
+            StageSpec::ranged("IF", 0.0, 50.0, 0.0).position_of(10.0),
+            None
+        );
+    }
+
+    /// Five columns either way, so the header and the rail keep their
+    /// layout whichever a stage reads as.
+    #[test]
+    fn a_reading_fits_five_columns() {
+        assert_eq!(StageReading::Db(36.02).compact(), "36 dB");
+        assert_eq!(StageReading::Db(4.38).compact(), " 4 dB");
+        assert_eq!(StageReading::Position { at: 14, of: 14 }.compact(), "14/14");
+        assert_eq!(StageReading::Position { at: 3, of: 14 }.compact(), " 3/14");
+    }
+
+    /// **A converter scaled into a wider container says its own depth.**
+    /// libairspy's R2 stream has a full scale of 16384 counts, which derives
+    /// to 15 bits, from a 12-bit converter; the ADC bench must call it 12. A
+    /// stated depth is still capped by the container.
+    #[test]
+    fn a_scaled_converter_says_its_own_depth() {
+        let r2 = SampleGeometry {
+            format: SampleFormat::Int16,
+            full_scale: 16384.0,
+            converter_bits: Some(12),
+        };
+        assert_eq!(r2.bits(), 12);
+        let impossible = SampleGeometry {
+            converter_bits: Some(20),
+            ..r2
+        };
+        assert_eq!(impossible.bits(), 16, "no 20 bits in an int16");
+    }
+
     /// Two real drivers, probed on this machine, that would each have been got
     /// wrong by a rule that only looked at one of format or full scale.
     #[test]
@@ -1658,6 +1831,7 @@ mod tests {
             SampleGeometry {
                 format: SampleFormat::Int16,
                 full_scale: 65536.0,
+                converter_bits: None,
             }
             .bits(),
             16
@@ -1667,6 +1841,7 @@ mod tests {
             SampleGeometry {
                 format: SampleFormat::Int8,
                 full_scale: 128.0,
+                converter_bits: None,
             }
             .bits(),
             8
@@ -1677,6 +1852,7 @@ mod tests {
             SampleGeometry {
                 format: SampleFormat::Int8,
                 full_scale: 1_000_000.0,
+                converter_bits: None,
             }
             .bits(),
             8
@@ -1692,6 +1868,7 @@ mod tests {
             let b = SampleGeometry {
                 format: SampleFormat::Int8,
                 full_scale: fs,
+                converter_bits: None,
             }
             .bits();
             assert!((1..=32).contains(&b), "full_scale {fs} gave {b} bits");

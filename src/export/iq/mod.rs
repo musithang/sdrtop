@@ -159,7 +159,7 @@ struct Writer {
 impl Writer {
     fn run(mut self) {
         let mut refreshed = Instant::now();
-        let mut gain_cache: Option<(Vec<f64>, bool, String)> = None;
+        let mut gain_cache: Option<(Vec<f64>, bool, u64, String)> = None;
         // Whether the channel closed under the writer: only a disarm does
         // that, so the tap is someone else's to manage from then on.
         let mut closed = false;
@@ -178,13 +178,17 @@ impl Writer {
                     boost,
                 }) => {
                     self.tap.release(bytes.len());
-                    let fresh =
-                        !matches!(&gain_cache, Some((g, b, _)) if *g == gains && *b == boost);
+                    // Keyed by the frequency too: the same settings read as
+                    // dB on one side of a stage's measured band and as steps
+                    // on the other.
+                    let hz = at.centre_hz;
+                    let fresh = !matches!(&gain_cache,
+                        Some((g, b, f, _)) if *g == gains && *b == boost && *f == hz);
                     if fresh {
-                        let text = sigmf::gain_text(&self.caps, &gains, boost);
-                        gain_cache = Some((gains, boost, text));
+                        let text = sigmf::gain_text(&self.caps, &gains, boost, hz);
+                        gain_cache = Some((gains, boost, hz, text));
                     }
-                    let gain = gain_cache.as_ref().map(|c| c.2.as_str()).unwrap_or("");
+                    let gain = gain_cache.as_ref().map(|c| c.3.as_str()).unwrap_or("");
                     let (take, stop) = self.rec.block(&at, gain);
                     let n = (take * self.header.bytes_per_pair) as usize;
                     if let Err(e) = self.data.write_all(&bytes[..n.min(bytes.len())]) {

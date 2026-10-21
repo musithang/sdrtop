@@ -638,6 +638,7 @@ mod tests {
         let geometry = SampleGeometry {
             format: SampleFormat::Int8,
             full_scale: 128.0,
+            converter_bits: None,
         };
         DemodWorker::new(rx, Arc::clone(&state), geometry).run();
         assert_eq!(state.lock().unwrap().demod.fm, Some(reading));

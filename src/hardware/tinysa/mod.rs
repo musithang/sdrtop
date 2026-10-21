@@ -1170,6 +1170,7 @@ fn capabilities(model: Model, basic_input: BasicInput) -> DeviceCapabilities {
         sample_geometry: SampleGeometry {
             format: SampleFormat::Int8,
             full_scale: 1.0,
+            converter_bits: None,
         },
         gain: GainModel::new(Vec::new(), "RF", "RF").with_gauge_fallback(0),
         samples_per_transfer: 0,

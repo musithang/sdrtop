@@ -111,6 +111,24 @@ pub struct SdrMetrics {
 }
 
 impl SdrMetrics {
+    /// How stage `index` reads at the frequency the radio is tuned to:
+    /// decibels where they were measured, its position elsewhere. `None`
+    /// past the end of the chain.
+    pub fn stage_reading(&self, index: usize) -> Option<crate::hardware::StageReading> {
+        let spec = self.caps.gain.stages().into_iter().nth(index)?;
+        Some(spec.reading(self.radio.stage_gain(index), self.radio.frequency))
+    }
+
+    /// Whether every stage's setting is a dB at the tuned frequency, so that
+    /// adding them up gives a gain.
+    pub fn chain_db_holds(&self) -> bool {
+        self.caps
+            .gain
+            .stages()
+            .iter()
+            .all(|s| s.db_holds_at(self.radio.frequency))
+    }
+
     /// The gain figure a readout should show for the front-end knob.
     ///
     /// **The whole chain on a single-knob device, the front stage otherwise.**
@@ -133,5 +151,41 @@ impl SdrMetrics {
 
     pub fn push_log(&mut self, msg: impl Into<String>) {
         self.ui.push_log(msg);
+    }
+}
+
+#[cfg(test)]
+mod stage_reading_tests {
+    use super::SdrMetrics;
+    use crate::hardware::StageReading;
+
+    /// The R2's LNA reads in dB inside the band it was measured in and as a
+    /// position outside it; the mixer and VGA, measured everywhere, read in
+    /// dB at any frequency; and the chain adds up to a gain only where every
+    /// stage does.
+    #[test]
+    fn a_stage_reads_by_where_the_radio_is_tuned() {
+        let mut m = SdrMetrics::fixture().band_measured_chain();
+        assert_eq!(
+            m.stage_reading(0),
+            Some(StageReading::Position { at: 14, of: 14 })
+        );
+        assert_eq!(m.stage_reading(1), Some(StageReading::Db(12.03)));
+        assert_eq!(m.stage_reading(2), Some(StageReading::Db(26.79)));
+        assert_eq!(m.stage_reading(3), None);
+        assert!(!m.chain_db_holds());
+
+        m.radio.frequency = 92_800_000;
+        assert_eq!(m.stage_reading(0), Some(StageReading::Db(36.02)));
+        assert!(m.chain_db_holds());
+    }
+
+    /// Every other device reads as it always did.
+    #[test]
+    fn a_chain_with_no_bands_is_a_gain_everywhere() {
+        let mut m = SdrMetrics::fixture();
+        m.radio.frequency = 5_800_000_000;
+        assert!(m.chain_db_holds());
+        assert!(matches!(m.stage_reading(0), Some(StageReading::Db(_))));
     }
 }

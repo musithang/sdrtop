@@ -1189,6 +1189,7 @@ mod tests {
         SampleGeometry {
             format,
             full_scale: 128.0,
+            converter_bits: None,
         }
     }
 
@@ -1213,6 +1214,7 @@ mod tests {
         let wide = SampleGeometry {
             format: SampleFormat::Int16,
             full_scale: 32768.0,
+            converter_bits: None,
         };
         // 16 bytes: four 16-bit pairs, or eight 8-bit ones.
         let bytes = vec![0u8; 16];
@@ -1231,6 +1233,7 @@ mod tests {
         let wide = SampleGeometry {
             format: SampleFormat::Int8,
             full_scale: 512.0,
+            converter_bits: None,
         };
         let mut out = Vec::new();
         // 0x40 is +64 counts. Against 128 that is half scale; against 512 it is

@@ -391,11 +391,13 @@ mod tests {
     const EIGHT_BIT: SampleGeometry = SampleGeometry {
         format: SampleFormat::Int8,
         full_scale: 128.0,
+        converter_bits: None,
     };
     /// An RTL-SDR: unsigned, centred on a value that is not a code.
     const RTL: SampleGeometry = SampleGeometry {
         format: SampleFormat::Uint8,
         full_scale: 128.0,
+        converter_bits: None,
     };
 
     /// Moments for `n` samples with the given per-component variance and no DC,
@@ -693,6 +695,7 @@ mod tests {
                 SampleGeometry {
                     format: SampleFormat::Int16,
                     full_scale: 32768.0,
+                    converter_bits: None,
                 },
             )
             .adc_peak_dbfs

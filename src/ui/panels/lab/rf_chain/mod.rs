@@ -115,14 +115,23 @@ impl Panel for RfChainPanel {
         let stages: Vec<Stage> = if modelled {
             cascade(amp, lna, vga)
         } else {
-            // The driver's own stages, with the gains it is actually set to.
+            // The driver's own stages, with the gains it is actually set to,
+            // and no gain at all (NaN) for a stage whose dB was not measured
+            // at this frequency: the lineup stops there rather than adding a
+            // position in as if it were decibels.
             state
                 .caps
                 .gain
                 .stages()
                 .iter()
                 .enumerate()
-                .map(|(i, s)| Stage::unmodelled(&s.name, state.radio.stage_gain(i)))
+                .map(|(i, s)| {
+                    let gain = match state.stage_reading(i) {
+                        Some(crate::hardware::StageReading::Db(db)) => db,
+                        _ => f64::NAN,
+                    };
+                    Stage::unmodelled(&s.name, gain)
+                })
                 .collect()
         };
         let nf = system_nf_db(&stages);
@@ -133,7 +142,13 @@ impl Panel for RfChainPanel {
         };
         let (verdict_word, sev) = staging_verdict(adc_peak);
         let stage_specs = state.caps.gain.stages();
-        let targets = staging_target(adc_peak, &stage_specs, &state.radio.gains);
+        // A target is a dB figure shared out over the chain, which needs every
+        // stage to be a gain here; where one is not, no target is offered.
+        let targets = if state.chain_db_holds() {
+            staging_target(adc_peak, &stage_specs, &state.radio.gains)
+        } else {
+            state.radio.gains.clone()
+        };
         let sev_col = severity_color(sev, theme);
 
         let mut lines: Vec<Line> = Vec::new();
@@ -144,6 +159,7 @@ impl Panel for RfChainPanel {
             &stage_specs,
             &state.radio.gains,
             &targets,
+            state.radio.frequency,
             iw,
             theme,
         );
@@ -209,6 +225,36 @@ mod tests {
 
     use crate::state::fixture::draw;
     use crate::state::SdrMetrics;
+
+    /// **The level lineup stops where a gain stops being known.** With the
+    /// R2 tuned outside the band its LNA was measured in, the levels after
+    /// the LNA still follow back from the measured ADC level, the antenna end
+    /// and the LNA's own output do not, and the staging block gives the LNA's
+    /// position; nothing on the bench reads `NaN`. Inside the band every row
+    /// is a level.
+    #[test]
+    fn the_lineup_stops_where_a_stage_was_not_measured() {
+        let mut m = SdrMetrics::fixture()
+            .streaming()
+            .with_carrier(0.0, 40.0)
+            .band_measured_chain();
+        let far = draw(RfChainPanel, 60, 40, &m).join("\n");
+        assert!(!far.contains("NaN"), "{far}");
+        assert!(far.contains("14/14"), "{far}");
+        let ant = far.lines().find(|l| l.contains("ANT")).unwrap_or_default();
+        assert!(
+            ant.contains('\u{2014}') && !ant.contains("dBm"),
+            "{ant}\n{far}"
+        );
+        let vga = far.lines().find(|l| l.contains("VGA") && l.contains("dBm"));
+        assert!(vga.is_some(), "the VGA's output is still a level:\n{far}");
+
+        m.radio.frequency = 92_800_000;
+        let near = draw(RfChainPanel, 60, 40, &m).join("\n");
+        let ant = near.lines().find(|l| l.contains("ANT")).unwrap_or_default();
+        assert!(ant.contains("dBm"), "{ant}\n{near}");
+        assert!(!near.contains("14/14"), "{near}");
+    }
 
     #[test]
     fn an_idle_bench_spends_no_row_saying_the_sweep_is_idle() {

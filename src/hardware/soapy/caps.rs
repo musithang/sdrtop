@@ -362,7 +362,11 @@ fn geometry_for(native: &str, full_scale: f64) -> Result<SampleGeometry, Unsuppo
             SampleFormat::Int16 => 32768.0,
         }
     };
-    Ok(SampleGeometry { format, full_scale })
+    Ok(SampleGeometry {
+        format,
+        full_scale,
+        converter_bits: None,
+    })
 }
 
 #[cfg(test)]

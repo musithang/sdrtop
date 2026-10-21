@@ -941,7 +941,11 @@ pub(crate) mod tests {
             ("int16 at 32768", SampleFormat::Int16, 32768.0, &wide),
         ];
         for (name, format, full_scale, buf) in cases {
-            let g = SampleGeometry { format, full_scale };
+            let g = SampleGeometry {
+                format,
+                full_scale,
+                converter_bits: None,
+            };
             for cal in [crate::state::IqCalState::default(), correcting, frozen] {
                 for len in [buf.len(), buf.len() / 3 * 2] {
                     let len = len - len % g.bytes_per_pair();
@@ -1316,6 +1320,7 @@ pub(crate) mod tests {
         SampleGeometry {
             format: SampleFormat::Int8,
             full_scale: 128.0,
+            converter_bits: None,
         }
     }
 
@@ -1351,6 +1356,7 @@ pub(crate) mod tests {
         let g = SampleGeometry {
             format: SampleFormat::Int8,
             full_scale: 32768.0,
+            converter_bits: None,
         };
         assert_eq!(super::signed_bin(&g, -32768), 0);
         assert_eq!(super::signed_bin(&g, 0), 16);
@@ -1422,6 +1428,7 @@ pub(crate) mod tests {
             let g = SampleGeometry {
                 format,
                 full_scale: fs as f32,
+                converter_bits: None,
             };
             let flagged = |v: i64| match format {
                 SampleFormat::Int16 => super::decode_i16(fs, (v as i16).to_le_bytes()).1,
@@ -1464,6 +1471,7 @@ pub(crate) mod tests {
         let g = SampleGeometry {
             format: SampleFormat::Int16,
             full_scale: 32768.0,
+            converter_bits: None,
         };
         assert_eq!(g.bytes_per_pair(), 4);
         assert_eq!(
@@ -1480,6 +1488,7 @@ pub(crate) mod tests {
         let g = SampleGeometry {
             format: SampleFormat::Int16,
             full_scale: 32768.0,
+            converter_bits: None,
         };
         assert_eq!(super::signed_bin(&g, -32768), 0);
         assert_eq!(super::signed_bin(&g, 0), 16);
@@ -1494,6 +1503,7 @@ pub(crate) mod tests {
         let wide = SampleGeometry {
             format: SampleFormat::Int16,
             full_scale: 32768.0,
+            converter_bits: None,
         };
         let mut out = Vec::new();
         super::encode_into(&mut out, 1234.0, -5678.0, &wide);
@@ -1515,6 +1525,7 @@ pub(crate) mod tests {
         let wide = SampleGeometry {
             format: SampleFormat::Int16,
             full_scale: 32768.0,
+            converter_bits: None,
         };
         let mut out = Vec::new();
         super::encode_into(&mut out, 90_000.0, -90_000.0, &wide);
@@ -1533,6 +1544,7 @@ pub(crate) mod tests {
         let g = SampleGeometry {
             format: SampleFormat::Int8,
             full_scale: 0.0,
+            converter_bits: None,
         };
         let _ = super::signed_bin(&g, 0);
     }

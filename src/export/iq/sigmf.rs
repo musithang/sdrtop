@@ -14,7 +14,7 @@
 use serde_json::{json, Map, Value};
 
 use super::recording::{Recording, Stop};
-use crate::hardware::{AcquisitionKind, DeviceCapabilities, SampleFormat};
+use crate::hardware::{AcquisitionKind, DeviceCapabilities, SampleFormat, StageReading};
 use crate::state::SdrMetrics;
 
 /// The SigMF version the files follow.
@@ -48,9 +48,26 @@ pub fn datatype(format: SampleFormat) -> &'static str {
 }
 
 /// The gain chain by stage name, as the config saves it, and the boost when
-/// the radio has one.
-pub fn gain_text(caps: &DeviceCapabilities, gains: &[f64], boost: bool) -> String {
-    let named = crate::hardware::gain::format_named(&caps.gain.stages(), gains);
+/// the radio has one. A stage whose dB was not measured at `hz` is written as
+/// its step (`LNA=step 14/14`), as the screen shows it.
+pub fn gain_text(caps: &DeviceCapabilities, gains: &[f64], boost: bool, hz: u64) -> String {
+    let named = caps
+        .gain
+        .stages()
+        .iter()
+        .enumerate()
+        .map(|(i, spec)| {
+            let db = gains.get(i).copied().unwrap_or(spec.min_db);
+            match spec.reading(db, hz) {
+                StageReading::Position { at, of } => format!("{}=step {at}/{of}", spec.name),
+                StageReading::Db(_) => crate::hardware::gain::format_named(
+                    std::slice::from_ref(spec),
+                    std::slice::from_ref(&db),
+                ),
+            }
+        })
+        .collect::<Vec<_>>()
+        .join(",");
     match caps.gain.boost() {
         Some(_) => format!(
             "{named}, {} {}",
@@ -97,7 +114,12 @@ impl Header {
                 .stack
                 .as_ref()
                 .map(|s| format!("{} {}", s.label.trim(), s.value)),
-            gain: gain_text(&state.caps, &state.radio.gains, state.radio.amp_enabled),
+            gain: gain_text(
+                &state.caps,
+                &state.radio.gains,
+                state.radio.amp_enabled,
+                state.radio.frequency,
+            ),
             reference: crate::export::provenance::reference_line(state, std::time::Instant::now()),
             iq_correction,
         })
@@ -238,6 +260,23 @@ mod tests {
     }
 
     const T0: f64 = 1_790_500_000.25;
+
+    /// **The recording keeps the rule the screen keeps**: a stage whose dB
+    /// was measured where the radio was tuned is written as its dB, one whose
+    /// dB was not as its step, so a file read years later does not claim a
+    /// gain nobody measured.
+    #[test]
+    fn a_stage_measured_elsewhere_is_recorded_as_its_step() {
+        let m = crate::state::SdrMetrics::fixture().band_measured_chain();
+        assert_eq!(
+            gain_text(&m.caps, &m.radio.gains, false, 943_400_000),
+            "LNA=step 14/14,MIX=12,VGA=27"
+        );
+        assert_eq!(
+            gain_text(&m.caps, &m.radio.gains, false, 92_800_000),
+            "LNA=36,MIX=12,VGA=27"
+        );
+    }
 
     /// Fixed points, including the fraction's carry.
     #[test]

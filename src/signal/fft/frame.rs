@@ -171,7 +171,11 @@ mod tests {
         decode_into(
             &bytes,
             &[1.0],
-            SampleGeometry { format, full_scale },
+            SampleGeometry {
+                format,
+                full_scale,
+                converter_bits: None,
+            },
             &mut out,
         );
         out[0]
@@ -214,6 +218,7 @@ mod tests {
                 SampleGeometry {
                     format,
                     full_scale: 128.0,
+                    converter_bits: None,
                 },
                 &mut out,
             );
@@ -251,6 +256,7 @@ mod tests {
             SampleGeometry {
                 format: SampleFormat::Int16,
                 full_scale: 32768.0,
+                converter_bits: None,
             },
             &mut out,
         );
@@ -272,6 +278,7 @@ mod tests {
             SampleGeometry {
                 format: SampleFormat::Int16,
                 full_scale: 2048.0,
+                converter_bits: None,
             },
             &mut out,
         );

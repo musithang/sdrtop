@@ -206,26 +206,27 @@ pub fn level_lineup(adc_signal_dbfs: f64, snr_db: f64, stages: &[Stage]) -> Vec<
 /// driver's own, the ADC level is measured, and the antenna end follows from the
 /// two; none of it needs to know how much noise any stage adds. What is missing
 /// is the noise line, and it is missing rather than guessed.
+///
+/// **Walked back from the ADC**, the one level that is measured: each stage's
+/// output is the next stage's output less the next stage's gain. A stage whose
+/// gain is not known (NaN) leaves every level before it unknown too, and NaN
+/// carries that, so the levels nearer the ADC survive and the rest read as a
+/// dash rather than as a guess.
 pub fn signal_lineup(adc_signal_dbfs: f64, stages: &[Stage]) -> Vec<StageLevel> {
-    let total_gain: f64 = stages.iter().map(|s| s.gain_db).sum();
-    let ant_signal = adc_signal_dbfs + ADC_DBFS_REF_DBM - total_gain;
-
-    let mut out = Vec::with_capacity(stages.len() + 1);
-    out.push(StageLevel {
-        label: "ANT".to_string(),
-        signal_dbm: ant_signal,
-        noise_dbm: None,
-    });
-    let mut cum_gain = 0.0;
-    for stage in stages {
-        cum_gain += stage.gain_db;
-        out.push(StageLevel {
-            label: stage.label.clone(),
-            signal_dbm: ant_signal + cum_gain,
-            noise_dbm: None,
-        });
+    let mut levels = vec![0.0; stages.len() + 1];
+    levels[stages.len()] = adc_signal_dbfs + ADC_DBFS_REF_DBM;
+    for k in (0..stages.len()).rev() {
+        levels[k] = levels[k + 1] - stages[k].gain_db;
     }
-    out
+    std::iter::once("ANT".to_string())
+        .chain(stages.iter().map(|s| s.label.clone()))
+        .zip(levels)
+        .map(|(label, signal_dbm)| StageLevel {
+            label,
+            signal_dbm,
+            noise_dbm: None,
+        })
+        .collect()
 }
 
 /// How hard the ADC is driven, from the loudest sample, the RMS level, and the clip

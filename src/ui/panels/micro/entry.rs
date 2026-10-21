@@ -17,6 +17,7 @@ use ratatui::{
     Frame,
 };
 
+use crate::hardware::StageReading;
 use crate::state::SdrMetrics;
 use crate::ui::panel::{Panel, PanelChrome};
 use crate::ui::widgets::charts::draw_hbar;
@@ -162,23 +163,44 @@ fn render_gain(f: &mut Frame, area: Rect, state: &SdrMetrics, theme: &crate::The
     }
     let gm = &state.caps.gain;
     let stages = gm.stages();
-    // (name, value dB, full scale dB) for each bar drawn.
-    let bars: Vec<(String, u32, f64)> = match (gm.has_second_stage(), stages.first(), stages.get(1))
-    {
-        (true, Some(first), Some(second)) => vec![
-            (first.name.clone(), state.radio.primary_gain(), first.max_db),
-            (
-                second.name.clone(),
-                state.radio.secondary_gain(),
-                second.max_db,
-            ),
-        ],
-        _ => vec![(
-            "Gain".to_string(),
-            state.shown_gain(),
-            gm.primary_max_db() as f64,
-        )],
+    // (name, how full the bar is, the value in full and in short) for each
+    // bar drawn. A stage reads as its step where its dB was not measured, and
+    // a single knob's total is a dash where the chain does not add up to dB.
+    let cell = |name: &str, reading: Option<StageReading>, full_db: f64| {
+        let (fill, text, short) = match reading {
+            Some(StageReading::Db(db)) => {
+                let db = db.max(0.0).round() as u32;
+                (
+                    db as f64 / full_db.max(1.0),
+                    format!("{db} dB"),
+                    format!("{db}dB"),
+                )
+            }
+            Some(StageReading::Position { at, of }) => {
+                let text = StageReading::Position { at, of }
+                    .compact()
+                    .trim()
+                    .to_string();
+                (at as f64 / of.max(1) as f64, text.clone(), text)
+            }
+            None => (0.0, "\u{2014}".to_string(), "\u{2014}".to_string()),
+        };
+        (name.to_string(), fill, text, short)
     };
+    let bars: Vec<(String, f64, String, String)> =
+        match (gm.has_second_stage(), stages.first(), stages.get(1)) {
+            (true, Some(first), Some(second)) => vec![
+                cell(&first.name, state.stage_reading(0), first.max_db),
+                cell(&second.name, state.stage_reading(1), second.max_db),
+            ],
+            _ => vec![cell(
+                "Gain",
+                state
+                    .chain_db_holds()
+                    .then_some(StageReading::Db(state.shown_gain() as f64)),
+                gm.primary_max_db() as f64,
+            )],
+        };
     match mode {
         Mode::Compact => {
             let n = bars.len() as u32;
@@ -186,13 +208,13 @@ fn render_gain(f: &mut Frame, area: Rect, state: &SdrMetrics, theme: &crate::The
                 .direction(Direction::Horizontal)
                 .constraints(vec![Constraint::Ratio(1, n); bars.len()])
                 .split(area);
-            for (i, (name, db, full)) in bars.iter().enumerate() {
+            for (i, (name, fill, text, _)) in bars.iter().enumerate() {
                 draw_hbar(
                     f,
                     halves[i],
-                    *db as f64 / full.max(1.0),
+                    *fill,
                     &format!(" {name} "),
-                    &format!("{db} dB"),
+                    text,
                     theme.value,
                     theme,
                 );
@@ -200,7 +222,7 @@ fn render_gain(f: &mut Frame, area: Rect, state: &SdrMetrics, theme: &crate::The
         }
         Mode::Narrow => {
             let mut spans = vec![Span::raw(" ")];
-            for (i, (name, db, _)) in bars.iter().enumerate() {
+            for (i, (name, _, _, short)) in bars.iter().enumerate() {
                 if i > 0 {
                     spans.push(Span::raw("  "));
                 }
@@ -209,7 +231,7 @@ fn render_gain(f: &mut Frame, area: Rect, state: &SdrMetrics, theme: &crate::The
                     Style::default().fg(theme.label),
                 ));
                 spans.push(Span::styled(
-                    format!("{db}dB"),
+                    short.clone(),
                     Style::default().fg(theme.value),
                 ));
             }
@@ -218,7 +240,10 @@ fn render_gain(f: &mut Frame, area: Rect, state: &SdrMetrics, theme: &crate::The
         Mode::Minimum => {
             let values: Vec<String> = bars
                 .iter()
-                .map(|(name, db, _)| format!("{}:{}", name.chars().next().unwrap_or('G'), db))
+                .map(|(name, _, _, short)| {
+                    let value = short.trim_end_matches("dB");
+                    format!("{}:{value}", name.chars().next().unwrap_or('G'))
+                })
                 .collect();
             let mut spans = vec![
                 Span::raw(" "),
@@ -454,6 +479,23 @@ mod tests {
         assert!(matches!(Mode::from_width(59), Mode::Narrow));
         assert!(matches!(Mode::from_width(40), Mode::Narrow));
         assert!(matches!(Mode::from_width(39), Mode::Minimum));
+    }
+
+    /// The micro view keeps the same rule as the header in each of its
+    /// widths: the R2's LNA tuned outside its measured band reads as its
+    /// step, inside it as its dB.
+    #[test]
+    fn the_micro_gain_gives_a_position_where_a_stage_was_not_measured() {
+        use crate::state::fixture::draw;
+        let mut m = SdrMetrics::fixture().band_measured_chain();
+        for w in [80, 50, 30] {
+            let far = draw(MicroPanel, w, 6, &m).join("\n");
+            assert!(far.contains("14/14"), "width {w}:\n{far}");
+            assert!(!far.contains("36"), "width {w}:\n{far}");
+        }
+        m.radio.frequency = 92_800_000;
+        let near = draw(MicroPanel, 80, 6, &m).join("\n");
+        assert!(near.contains("36 dB"), "{near}");
     }
 
     /// **The gain row is the device's**: a HackRF shows its LNA and VGA and

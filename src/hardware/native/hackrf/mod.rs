@@ -415,6 +415,7 @@ pub fn caps() -> DeviceCapabilities {
         sample_geometry: SampleGeometry {
             format: SampleFormat::Int8,
             full_scale: 128.0,
+            converter_bits: None,
         },
         gain: gain_model(),
         samples_per_transfer: crate::state::HACKRF_SAMPLES_PER_TRANSFER,

@@ -9,6 +9,7 @@ use ratatui::{
     text::{Line, Span},
 };
 
+use crate::hardware::StageReading;
 use crate::state::SdrMetrics;
 use crate::ui::panels::core::header::gain_bar;
 use crate::ui::widgets::charts::gain_bar_colored;
@@ -75,10 +76,21 @@ pub(super) fn lines(
         } else {
             (theme.border_accent, theme.status_warn)
         };
+        // A gain in dB where it was measured, its position where it was not.
+        let (value, max, text) = match state.stage_reading(index) {
+            Some(StageReading::Position { at, of }) => {
+                (at, of.max(1), StageReading::Position { at, of }.compact())
+            }
+            _ => {
+                let db = state.radio.stage_gain(index).max(0.0).round() as u32;
+                (db, spec.max_db.max(1.0).round() as u32, format!("{db:2}"))
+            }
+        };
         out.push(gain_row(
             stage_label_cell(&spec.name, selected == Some(index), theme),
-            state.radio.stage_gain(index).max(0.0).round() as u32,
-            spec.max_db.max(1.0).round() as u32,
+            value,
+            max,
+            text,
             from,
             to,
             bar_w,
@@ -89,11 +101,17 @@ pub(super) fn lines(
         out.push(Line::raw(""));
     }
 
-    let total = state.radio.total_gain().max(0.0).round() as u32;
+    // A total of gains is one only where every stage is a gain here: a
+    // position added to decibels is not a number of anything.
+    let total = if state.chain_db_holds() {
+        format!("{} dB", state.radio.total_gain().max(0.0).round() as u32)
+    } else {
+        "\u{2014}".to_string()
+    };
     let mut total_spans = vec![
         Span::raw(" "),
         label_cell("TOTAL", theme),
-        Span::styled(format!("{total} dB"), Style::default().fg(val_col)),
+        Span::styled(total, Style::default().fg(val_col)),
     ];
     if active {
         let headroom = (-state.signal.adc_peak_dbfs).max(0.0);
@@ -121,6 +139,7 @@ fn gain_row(
     label: Span<'static>,
     gain: u32,
     max: u32,
+    text: String,
     lo: Color,
     hi: Color,
     bar_w: usize,
@@ -140,15 +159,34 @@ fn gain_row(
     let mut spans = vec![Span::raw(" "), label];
     spans.extend(bar);
     spans.push(Span::raw(" "));
-    spans.push(Span::styled(
-        format!("{gain:2}"),
-        Style::default().fg(val_col),
-    ));
+    spans.push(Span::styled(text, Style::default().fg(val_col)));
     Line::from(spans)
 }
 
 #[cfg(test)]
 mod tests {
+
+    /// **The rail adds the chain up only where every stage is a gain.** Tuned
+    /// outside the band the R2's LNA was measured in, its row gives its
+    /// position and the total is a dash, not 75 dB; inside it, both are dB.
+    #[test]
+    fn the_rail_totals_the_chain_only_where_every_stage_was_measured() {
+        let mut m = crate::state::SdrMetrics::fixture()
+            .streaming()
+            .band_measured_chain();
+        let far = crate::state::fixture::draw(crate::ui::CommandRailPanel, 34, 40, &m).join("\n");
+        assert!(far.contains("14/14"), "{far}");
+        assert!(!far.contains("75 dB"), "{far}");
+        assert!(
+            far.contains("TOTAL \u{2014}") || far.contains("TOTAL  \u{2014}"),
+            "{far}"
+        );
+
+        m.radio.frequency = 92_800_000;
+        let near = crate::state::fixture::draw(crate::ui::CommandRailPanel, 34, 40, &m).join("\n");
+        assert!(near.contains("75 dB"), "{near}");
+        assert!(!near.contains("14/14"), "{near}");
+    }
 
     /// The rail drops the boost row entirely on a device that has none, rather
     /// than printing a stage the reader could go hunting for a key to turn on.

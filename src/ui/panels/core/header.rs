@@ -9,6 +9,7 @@ use ratatui::{
     Frame,
 };
 
+use crate::hardware::StageReading;
 use crate::state::SdrMetrics;
 use crate::ui::chrome::frame;
 use crate::ui::panel::{Panel, PanelChrome};
@@ -951,6 +952,39 @@ fn bottom_band_line(state: &SdrMetrics, theme: &crate::Theme, inner_width: u16) 
         }
     };
 
+    // A stage's bar and value in fourteen columns: the bar over its range and
+    // `NN dB`, or over its positions and `at/of` where its dB was not measured
+    // at this frequency, or an empty bar and a dash where the chain's total is
+    // not a gain.
+    let stage_cell =
+        |reading: Option<StageReading>, max_db: u32, lo: Color, hi: Color| -> Vec<Span<'static>> {
+            let (value, max) = match reading {
+                Some(StageReading::Db(db)) => (db.max(0.0).round() as u32, max_db),
+                Some(StageReading::Position { at, of }) => (at, of.max(1)),
+                None => (0, 1),
+            };
+            let mut spans = gain_bar_spans(value, max, lo, hi);
+            spans.push(Span::raw(" "));
+            match reading {
+                Some(StageReading::Db(db)) => spans.extend([
+                    Span::styled(
+                        format!("{:2.0}", db.max(0.0)),
+                        Style::default().fg(val_color),
+                    ),
+                    Span::styled(" dB", Style::default().fg(theme.label)),
+                ]),
+                Some(position) => spans.push(Span::styled(
+                    position.compact(),
+                    Style::default().fg(val_color),
+                )),
+                None => spans.push(Span::styled(
+                    " \u{2014}   ",
+                    Style::default().fg(theme.label),
+                )),
+            }
+            spans
+        };
+
     // Left block: segmented VFO readout + unit + sample-rate. Its width varies
     // with the number of MHz digits and the active-digit underline, so it is
     // measured (below) rather than assumed, and the trailing gap fills the rest.
@@ -984,46 +1018,44 @@ fn bottom_band_line(state: &SdrMetrics, theme: &crate::Theme, inner_width: u16) 
     let gap = (inner_width as usize).saturating_sub(left_w + right);
 
     // Primary stage: HackRF LNA / RTL-SDR tuner - green → yellow gradient.
-    let p_str = format!("{:2}", state.shown_gain());
+    // Where the device has a second stage the primary is the front stage, and
+    // it reads as a position where its dB was not measured; a single knob is
+    // the whole chain, a dB total only where every stage is one.
+    let primary = if gm.has_second_stage() {
+        state.stage_reading(0)
+    } else {
+        state
+            .chain_db_holds()
+            .then_some(StageReading::Db(state.shown_gain() as f64))
+    };
     let p_label = format!("{:<4}", gm.primary_label_short());
 
     let mut spans = left_spans;
     spans.push(leader(gap, theme.border_dim));
     spans.push(Span::styled(p_label, Style::default().fg(theme.label)));
-    spans.extend(gain_bar_spans(
-        state.shown_gain(),
+    spans.extend(stage_cell(
+        primary,
         gm.primary_max_db(),
         theme.status_ok,
         theme.value_hi,
     ));
-    spans.extend([
-        Span::raw(" "),
-        Span::styled(p_str, Style::default().fg(val_color)),
-        Span::styled(" dB", Style::default().fg(theme.label)),
-        Span::raw("    "),
-    ]);
+    spans.push(Span::raw("    "));
 
     if let (true, Some(second)) = (gm.has_second_stage(), gm.stages().get(1)) {
         // The second stage, by the name and the range the device gave it,
         // in the same four columns whatever it is called.
-        let vga_str = format!("{:2}", state.radio.secondary_gain());
         let name: String = second.name.chars().take(3).collect();
         spans.push(Span::styled(
             format!("{name:<3} "),
             Style::default().fg(theme.label),
         ));
-        spans.extend(gain_bar_spans(
-            state.radio.secondary_gain(),
+        spans.extend(stage_cell(
+            state.stage_reading(1),
             second.max_db.max(1.0).round() as u32,
             theme.border_accent,
             theme.status_warn,
         ));
-        spans.extend([
-            Span::raw(" "),
-            Span::styled(vga_str, Style::default().fg(val_color)),
-            Span::styled(" dB", Style::default().fg(theme.label)),
-            Span::raw("  "),
-        ]);
+        spans.push(Span::raw("  "));
     } else {
         // Single-tuner device: blank the 20-col second-stage region to keep width.
         spans.push(Span::raw(" ".repeat(20)));
@@ -1340,6 +1372,26 @@ mod tests {
                 }
             }
         }
+    }
+
+    /// **A stage's dB is shown only where it was measured.** The R2's LNA
+    /// table holds from 88 to 170 MHz: tuned to 943.4 MHz the header gives
+    /// its position, `14/14`, and no dB; tuned to 92.8 MHz, its 36 dB. The
+    /// mixer, the second key, was measured everywhere and reads in dB at both.
+    #[test]
+    fn the_header_gives_a_position_where_a_stage_was_not_measured() {
+        let mut m = crate::state::SdrMetrics::fixture()
+            .streaming()
+            .band_measured_chain();
+        let far = crate::state::fixture::draw(HeaderPanel, 140, 8, &m).join("\n");
+        assert!(far.contains("14/14"), "{far}");
+        assert!(!far.contains("36 dB"), "{far}");
+        assert!(far.contains("12 dB"), "the mixer still reads in dB:\n{far}");
+
+        m.radio.frequency = 92_800_000;
+        let near = crate::state::fixture::draw(HeaderPanel, 140, 8, &m).join("\n");
+        assert!(near.contains("36 dB"), "{near}");
+        assert!(!near.contains("14/14"), "{near}");
     }
 
     #[test]

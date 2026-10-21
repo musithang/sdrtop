@@ -412,6 +412,7 @@ fn rtl_caps(tuner: c_int, gains_tenths: &[i32]) -> DeviceCapabilities {
             // Centered by 128 rather than the true 127.5 bias, deliberately.
             // See `process::decode`.
             full_scale: 128.0,
+            converter_bits: None,
         },
         gain: gain_model(&steps),
         samples_per_transfer: (RTL_BUF_LEN / 2) as u64,

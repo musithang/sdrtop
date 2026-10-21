@@ -371,6 +371,23 @@ pub const MAX_POINTS: usize = 8;
 /// A switch is refused deliberately. Two points do define a line, but a boost
 /// that is either in or out is not a gain axis: the number that came back would
 /// be the difference between two front ends, printed as a slope.
+/// Why the noise step cannot be measured on `spec` tuned to `hz`, or nothing
+/// when it can. It reads the noise against the stage's gain in dB, so a stage
+/// whose dB was not measured at this frequency would give a slope against
+/// numbers nobody measured.
+pub fn refusal(spec: &crate::hardware::StageSpec, hz: u64) -> Option<String> {
+    if spec.db_holds_at(hz) {
+        return None;
+    }
+    let band = spec.measured_in.as_ref()?;
+    Some(format!(
+        "{}'s gain in dB was measured from {:.0} to {:.0} MHz only, and the noise step reads against it",
+        spec.name,
+        *band.start() as f64 / 1e6,
+        *band.end() as f64 / 1e6,
+    ))
+}
+
 pub fn plan_for(spec: &crate::hardware::StageSpec) -> Vec<f64> {
     let Some(n) = spec.positions() else {
         return Vec::new();
@@ -406,6 +423,7 @@ mod tests {
             max_db,
             step_db,
             table: Vec::new(),
+            measured_in: None,
         }
     }
 
@@ -518,6 +536,21 @@ mod tests {
     fn a_switch_gives_no_plan() {
         // An RF amp is on or off. Two points make a line, but not this line.
         assert!(plan_for(&ranged(0.0, 14.0, 14.0)).is_empty());
+    }
+
+    /// The noise step is refused where the front stage's dB was not
+    /// measured, with the band it was measured in; anywhere else, and on a
+    /// stage measured everywhere, it is not.
+    #[test]
+    fn the_noise_step_needs_the_stage_in_db() {
+        let lna = ranged(0.0, 40.0, 8.0).measured_between(88_000_000, 170_000_000);
+        let why = refusal(&lna, 943_400_000).expect("refused outside the band");
+        assert!(
+            why.contains("LNA") && why.contains("88") && why.contains("170"),
+            "{why}"
+        );
+        assert_eq!(refusal(&lna, 92_800_000), None);
+        assert_eq!(refusal(&ranged(0.0, 40.0, 8.0), 943_400_000), None);
     }
 
     #[test]

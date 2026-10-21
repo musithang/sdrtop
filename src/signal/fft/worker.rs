@@ -244,6 +244,7 @@ mod tests {
             SampleGeometry {
                 format: crate::hardware::SampleFormat::Int8,
                 full_scale: 128.0,
+                converter_bits: None,
             },
             tone_bin_offset,
             frames,
@@ -373,7 +374,15 @@ mod tests {
         assert_eq!(ref_bin, N / 2 + offset as usize, "the reference moved");
 
         for (format, full_scale) in [(SampleFormat::Uint8, 128.0), (SampleFormat::Int16, 32768.0)] {
-            let m = run_geometry(SampleGeometry { format, full_scale }, offset, 4);
+            let m = run_geometry(
+                SampleGeometry {
+                    format,
+                    full_scale,
+                    converter_bits: None,
+                },
+                offset,
+                4,
+            );
             let (bin, level) = peak_of(&m);
             assert_eq!(bin, ref_bin, "{format:?}: the tone moved bin");
             assert!(

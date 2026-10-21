@@ -488,6 +488,7 @@ mod tests {
         let mut feed = Feed::new(SampleGeometry {
             format: crate::hardware::SampleFormat::Int8,
             full_scale: 128.0,
+            converter_bits: None,
         });
         let dc = Complex::new(0.08, -0.05);
         let mut block = noisy(100_000, dc, 1);
@@ -504,6 +505,7 @@ mod tests {
         let mut feed = Feed::new(SampleGeometry {
             format: crate::hardware::SampleFormat::Int8,
             full_scale: 128.0,
+            converter_bits: None,
         });
         // An alternating pattern at the centre: phase swinging about a
         // fixed point, so a large mean that is signal, not DC.
@@ -522,6 +524,7 @@ mod tests {
         let mut feed = Feed::new(SampleGeometry {
             format: crate::hardware::SampleFormat::Int8,
             full_scale: 128.0,
+            converter_bits: None,
         });
         let (rate, len) = (20e6, 131_072usize);
         let (before, after) = (Complex::new(0.08, -0.05), Complex::new(-0.02, 0.06));
@@ -550,6 +553,7 @@ mod tests {
         let mut feed = Feed::new(SampleGeometry {
             format: crate::hardware::SampleFormat::Int8,
             full_scale: 128.0,
+            converter_bits: None,
         });
         let len = 65_536usize;
         let block = |seq: u64, centre_hz: u64| StreamBlock {
