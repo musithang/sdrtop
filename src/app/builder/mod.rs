@@ -344,21 +344,7 @@ impl App {
                 m.push_log(why.clone());
             }
 
-            // The menu is the first screen. The cursor starts on the layout the
-            // config restored, so `Enter` resumes and no other key is needed for
-            // it: resume is where the cursor is, not a command of its own. On a
-            // first run, or after the config names a layout the menu hides, there
-            // is nothing to restore and the cursor starts at the top.
-            let (section, entry) = engine
-                .menu()
-                .locate(engine.active_preset())
-                .unwrap_or((0, 0));
-            m.ui.menu = Some(crate::state::MenuState {
-                section,
-                entry,
-                pane: crate::state::MenuPane::Views,
-                scroll: 0,
-            });
+            m.ui.menu = startup_menu(engine.menu(), engine.active_preset(), m.observer.active);
         }
 
         Ok(Self {
@@ -393,4 +379,65 @@ fn spawn_worker(name: &str, run: impl FnOnce() + Send + 'static) {
         .name(name.to_string())
         .spawn(run)
         .unwrap_or_else(|e| panic!("cannot start the {name} thread: {e}"));
+}
+
+/// The menu in front of the first screen, if any.
+///
+/// The menu is the first screen. The cursor starts on the layout the config
+/// restored, so `Enter` resumes and no other key is needed for it: resume is
+/// where the cursor is, not a command of its own. On a first run, or after
+/// the config names a layout the menu hides, there is nothing to restore and
+/// the cursor starts at the top.
+///
+/// **Not in observer mode.** Its layout is given, not chosen, so the menu does
+/// not list it, and resuming from the top would replace the one screen that
+/// names the radio's holder with a layout waiting for a stream that never
+/// comes. `Esc` still opens the menu, and closes it again onto this screen.
+fn startup_menu(
+    menu: &crate::ui::menu::model::Menu,
+    active: &str,
+    observing: bool,
+) -> Option<crate::state::MenuState> {
+    if observing {
+        return None;
+    }
+    let (section, entry) = menu.locate(active).unwrap_or((0, 0));
+    Some(crate::state::MenuState {
+        section,
+        entry,
+        pane: crate::state::MenuPane::Views,
+        scroll: 0,
+    })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn engine(active: &str) -> crate::ui::LayoutEngine {
+        let mut cfg = crate::config::LayoutConfig::default_config();
+        cfg.active_preset = active.to_string();
+        crate::ui::LayoutEngine::new(cfg, crate::ui::PanelRegistry::new())
+    }
+
+    /// **Observer mode starts on its own screen, not behind the menu.** The
+    /// menu does not list the observer layout, so its cursor sat on the first
+    /// entry, and the `Enter` that resumes everywhere else replaced the one
+    /// screen that names the radio's holder with a layout waiting for a
+    /// stream, with nothing in the menu leading back.
+    #[test]
+    fn observer_mode_starts_on_its_own_screen() {
+        let observer = engine("observer");
+        assert_eq!(observer.active_preset(), "observer");
+        assert!(observer.menu().locate("observer").is_none());
+        assert!(startup_menu(observer.menu(), "observer", true).is_none());
+
+        // Everywhere else the menu still comes first, on the restored layout.
+        let spectrum = engine("spectrum");
+        let menu = startup_menu(spectrum.menu(), "spectrum", false).expect("the menu comes first");
+        assert_eq!(
+            Some((menu.section, menu.entry)),
+            spectrum.menu().locate("spectrum")
+        );
+    }
 }

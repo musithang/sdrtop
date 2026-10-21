@@ -136,6 +136,10 @@ waterfall or measurement. The display marks itself accordingly, and quitting doe
 **not** save the config, since nothing about the session describes your real
 settings.
 
+It opens straight onto the observer screen, not the menu. `Esc` still opens the
+menu, and `Esc` again brings you back. The other views are there too, but they
+need a stream, so opening one leaves the observer screen until you restart.
+
 ### Getting the radio back
 
 Quit the other app, then quit sdrtop with `q` and start it again: it opens the

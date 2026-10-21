@@ -86,6 +86,21 @@ fn open_log(path: &std::path::Path) -> Result<std::fs::File, String> {
         })
 }
 
+/// What is said when no radio was found: the backends' hints, and where the
+/// libraries' own messages went while sdrtop looked, when they went to the
+/// log rather than the terminal.
+fn no_device_message(hint: &str, log: Option<&std::path::Path>) -> String {
+    let mut message =
+        format!("No device found. Connect a HackRF, RTL-SDR, or tinySA and try again.{hint}");
+    if let Some(log) = log {
+        message.push_str(&format!(
+            "\nWhat the radio libraries said while looking is in {}.",
+            log.display()
+        ));
+    }
+    message
+}
+
 /// Restore the real stderr saved by [`redirect_stderr_to_log`].
 fn restore_stderr(saved: Option<i32>) {
     if let Some(s) = saved {
@@ -159,11 +174,24 @@ async fn main() -> Result<()> {
             std::process::exit(1);
         }
     }
+    // Looking for radios asks every library, and some talk on stderr while
+    // they do: SoapyRTLSDR opens each dongle to read its tuner, and librtlsdr
+    // says why it could not when another app holds one. That goes to the log
+    // with the rest of their messages, not onto the terminal, where it would
+    // sit behind the TUI and reappear at exit.
+    let looking = redirect_stderr_to_log();
     let devices = hardware::list_all_devices(want, soapy_filter.as_deref());
+    let logged = looking.ok().map(|saved| {
+        restore_stderr(Some(saved));
+        log_path()
+    });
     if devices.is_empty() {
         eprintln!(
-            "No device found. Connect a HackRF, RTL-SDR, or tinySA and try again.{}",
-            hardware::discovery::no_device_hint(want)
+            "{}",
+            no_device_message(
+                &hardware::discovery::no_device_hint(want),
+                logged.as_deref()
+            )
         );
         std::process::exit(1);
     }
@@ -242,6 +270,24 @@ mod cli_tests {
     use super::{application_result, Cli};
     use clap::CommandFactory;
     use std::io;
+
+    /// **With no radio found, the message says where the libraries'
+    /// messages went**: they were sent to the log while sdrtop looked, and a
+    /// module that would not load is often the reason nothing was found.
+    /// Where they could not be sent there, they were on the terminal already.
+    #[test]
+    fn no_radio_found_points_at_what_the_libraries_said() {
+        let log = std::path::Path::new("/home/me/.config/sdrtop/sdrtop.log");
+        let said = super::no_device_message("\nSoapySDR is installed.", Some(log));
+        assert!(said.starts_with("No device found."), "{said}");
+        assert!(said.contains("SoapySDR is installed."), "{said}");
+        assert!(
+            said.ends_with(&format!("is in {}.", log.display())),
+            "{said}"
+        );
+        let unlogged = super::no_device_message("", None);
+        assert!(!unlogged.contains("sdrtop.log"), "{unlogged}");
+    }
 
     /// **A log that cannot be opened says which file and why**, so the
     /// reason backend messages land on the screen is not a mystery.

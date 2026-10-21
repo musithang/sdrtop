@@ -29,7 +29,9 @@ overlay.
 
 ### "No SDR device found"
 
-sdrtop prints this and exits before the TUI starts.
+sdrtop prints this and exits before the TUI starts. Whatever the radio libraries
+said while it looked is in [the log](#start-here-the-log-file), and the last line
+of the message names the file.
 
 1. **Check the cable and the port.** A surprising share of "dead" radios are dead
    cables. Try a different, short one, straight into the machine rather than
@@ -167,6 +169,12 @@ any SDR software gets a chance.
 
 Symptom: the dongle shows up in `lsusb`, and `rtl_test` says "usb_claim_interface
 error -6" or "Failed to open rtlsdr device".
+
+Not this one: in observer mode the log can carry librtlsdr's "Kernel driver is
+active, or device is claimed by second instance of librtlsdr" with this same
+advice, on a Mac too. That is SoapySDR asking for a dongle another app is
+holding while sdrtop looks for radios, and the other app is the answer, not the
+kernel.
 
 Fix: tell the kernel not to load that driver.
 
