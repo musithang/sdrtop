@@ -127,3 +127,37 @@ CONTROL(rtlsdr_read_async, (void *device, void (*callback)(unsigned char *, uint
 #ifndef OMIT_LAST_SYMBOL
 int rtlsdr_cancel_async(void *device) { calls[4]++; return 0; }
 #endif
+
+// libairspy 1.0.10. Modes 20 and up are this library's: 20 lists Airspy Mini
+// rates, 21 refuses to open (AIRSPY_ERROR_BUSY), 22 finds no device.
+int airspy_list_devices(uint64_t *serials, int count) {
+    if (mode == 22) return 0;
+    if (serials && count >= 1) serials[0] = 0x637862DC2E1182D7ULL;
+    return 1;
+}
+int airspy_open_sn(void **device, uint64_t serial) {
+    if (mode == 21) return -6;
+    *device = malloc(1);
+    return 0;
+}
+int airspy_close(void *device) { calls[3]++; free(device); return 0; }
+int airspy_board_id_read(void *device, uint8_t *value) { *value = 0; return 0; }
+const char *airspy_board_id_name(int id) { return id == 0 ? "AIRSPY" : "AIRSPY BOARD ID INVALID"; }
+int airspy_version_string_read(void *device, char *version, uint8_t length) {
+    const char *v = "AirSpy NOS v1.0.0-rc10-0-g946184a 2016-09-19";
+    strncpy(version, v, length);
+    version[length - 1] = 0;
+    return 0;
+}
+#ifndef OMIT_LAST_SYMBOL
+int airspy_get_samplerates(void *device, uint32_t *buffer, uint32_t len) {
+    static const uint32_t r2[] = {10000000, 2500000};
+    static const uint32_t mini[] = {6000000, 3000000};
+    const uint32_t *rates = mode == 20 ? mini : r2;
+    if (len == 0) { buffer[0] = 2; return 0; }
+    if (len > 2) return -2;
+    memcpy(buffer, rates, len * sizeof(uint32_t));
+    return 0;
+}
+#endif
+

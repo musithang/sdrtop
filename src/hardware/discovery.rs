@@ -15,12 +15,15 @@
 use std::path::PathBuf;
 use std::sync::Arc;
 
-use super::native::{hackrf, rtlsdr};
+use super::native::{airspy, hackrf, rtlsdr};
 use super::{soapy, tinysa, usb, DeviceCapabilities, SdrDevice};
 
 /// Which backend a [`DeviceListing`] / open request targets.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum DeviceKind {
+    /// The Airspy R2, natively. Reached only by `--device airspy` until it
+    /// streams; discovery keeps offering it through SoapySDR meanwhile.
+    Airspy,
     HackRf,
     RtlSdr,
     Soapy,
@@ -53,6 +56,7 @@ impl DeviceKind {
     /// Reports a missing or incompatible native runtime library
     pub fn check_available(self) -> anyhow::Result<()> {
         match self {
+            Self::Airspy => airspy::ffi::api().map(|_| ()),
             Self::HackRf => hackrf::ffi::api().map(|_| ()),
             Self::RtlSdr => rtlsdr::ffi::api().map(|_| ()),
             _ => Ok(()),
@@ -81,7 +85,7 @@ impl DeviceKind {
                 caps: rtlsdr::observer_caps,
                 stack: || Some(rtlsdr::stack()),
             }),
-            DeviceKind::Soapy | DeviceKind::TinySa => None,
+            DeviceKind::Airspy | DeviceKind::Soapy | DeviceKind::TinySa => None,
         }
     }
 }
@@ -143,6 +147,8 @@ pub fn parse_device_arg(spec: &str) -> anyhow::Result<(DeviceKind, Option<String
         None => (spec, None),
     };
     let kind = match name.to_ascii_lowercase().as_str() {
+        // Not in the --device help until it streams: asked for by name only.
+        "airspy" => DeviceKind::Airspy,
         "hackrf" => DeviceKind::HackRf,
         "rtlsdr" | "rtl-sdr" | "rtl" => DeviceKind::RtlSdr,
         "soapy" | "soapysdr" => DeviceKind::Soapy,
@@ -163,8 +169,10 @@ pub fn parse_device_arg(spec: &str) -> anyhow::Result<(DeviceKind, Option<String
 /// Reports relevant backend diagnostics after empty discovery
 pub fn no_device_hint(want: Option<DeviceKind>) -> String {
     let mut hint = String::new();
-    for kind in [DeviceKind::HackRf, DeviceKind::RtlSdr] {
-        if want.is_none() || want == Some(kind) {
+    for kind in [DeviceKind::HackRf, DeviceKind::RtlSdr, DeviceKind::Airspy] {
+        // The Airspy is looked for only when asked for by name.
+        let asked = want == Some(kind) || (want.is_none() && kind != DeviceKind::Airspy);
+        if asked {
             if let Err(err) = kind.check_available() {
                 hint.push('\n');
                 hint.push_str(&err.to_string());
@@ -191,6 +199,10 @@ pub fn list_all_devices(
     let mut out = Vec::new();
     out.extend(hackrf::list());
     out.extend(rtlsdr::list());
+    // Only by name, until the native path can stream.
+    if want == Some(DeviceKind::Airspy) {
+        out.extend(airspy::list());
+    }
     let tinysa = if want == Some(DeviceKind::TinySa) {
         tinysa::list(soapy_filter.filter(|value| !value.is_empty()))
     } else {
@@ -267,6 +279,7 @@ pub fn open_device(
     tinysa_settings: &crate::config::TinySaSettings,
 ) -> anyhow::Result<Arc<dyn SdrDevice>> {
     match listing.kind {
+        DeviceKind::Airspy => anyhow::bail!(airspy::not_yet(listing)),
         DeviceKind::HackRf => Ok(Arc::new(hackrf::HackRfDevice::open(listing.index)?)),
         DeviceKind::RtlSdr => Ok(Arc::new(rtlsdr::RtlDevice::open(listing.index)?)),
         DeviceKind::Soapy => {
@@ -540,7 +553,14 @@ mod tests {
             )
         );
         assert!(parse_device_arg("tinysa=/dev/ttyACM2?input=other").is_err());
-        assert!(parse_device_arg("airspy").is_err(), "not a backend name");
+        assert_eq!(
+            parse_device_arg("airspy").unwrap(),
+            (DeviceKind::Airspy, None)
+        );
+        assert!(
+            parse_device_arg("airspyhf").is_err(),
+            "the HF+ is SoapySDR's"
+        );
         assert!(parse_device_arg("").is_err(), "nor is nothing");
     }
 

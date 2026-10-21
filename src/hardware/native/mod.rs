@@ -1,7 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright (C) 2026 MusiThang <viktor.laszlo92@protonmail.com>
 
-//! The backends sdrtop drives itself: HackRF One and RTL-SDR.
+//! The backends sdrtop drives itself: HackRF One and RTL-SDR, with the Airspy
+//! R2 on its way in ([`airspy`]).
 //!
 //! Each is a thin FFI wrapper ([`hackrf::ffi`], [`rtlsdr::ffi`]) plus a device
 //! struct, loaded at runtime and described from its own datasheet. What they
@@ -13,6 +14,7 @@
 //! Deciding between them, when the same radio is reachable two ways, is
 //! [`super::discovery`]'s job.
 
+pub mod airspy;
 pub mod hackrf;
 mod loader;
 pub mod rtlsdr;
@@ -23,8 +25,9 @@ mod test_support;
 #[cfg(test)]
 mod tests {
     #[test]
-    #[ignore = "requires installed libhackrf and librtlsdr runtimes"]
+    #[ignore = "requires installed libhackrf, librtlsdr and libairspy runtimes"]
     fn installed_native_libraries_resolve() {
+        super::airspy::ffi::api().expect("the installed libairspy must resolve");
         super::hackrf::ffi::api().expect("the installed libhackrf must resolve");
         super::rtlsdr::ffi::api().expect("the installed librtlsdr must resolve");
     }
