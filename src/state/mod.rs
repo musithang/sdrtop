@@ -82,6 +82,32 @@ pub const DEFAULT_VGA_GAIN: u32 = 20;
 pub const DEFAULT_FREQUENCY: u64 = 2_400_000_000;
 pub const DEFAULT_SAMPLE_RATE: f64 = 10_000_000.0;
 
+/// Where the gain knob sits on its vendor curve; see
+/// [`SdrMetrics::curve_reading`].
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct CurveReading {
+    pub name: &'static str,
+    pub short: &'static str,
+    /// The step the chain is on, or the nearest one when `on` is false.
+    pub step: usize,
+    pub last: usize,
+    /// Whether the chain is exactly on `step`, rather than moved off the
+    /// curve by hand.
+    pub on: bool,
+    /// The whole chain in dB, where every stage's dB holds at the tuned
+    /// frequency.
+    pub total_db: Option<f64>,
+}
+
+impl CurveReading {
+    /// `12/21`, or `≈12/21` for a chain off the curve: the nearest step,
+    /// marked as not where the chain is.
+    pub fn step_text(&self) -> String {
+        let near = if self.on { "" } else { "\u{2248}" };
+        format!("{near}{}/{}", self.step, self.last)
+    }
+}
+
 #[derive(Clone)]
 pub struct SdrMetrics {
     pub radio: RadioState,
@@ -127,6 +153,26 @@ impl SdrMetrics {
             .stages()
             .iter()
             .all(|s| s.db_holds_at(self.radio.frequency))
+    }
+
+    /// Where the gain knob is on its vendor curve, when it walks one.
+    ///
+    /// The step the chain is exactly on, or, for a chain moved off the curve
+    /// by hand, the step it would rejoin at, said as such; and the chain's
+    /// total where every stage is a dB here.
+    pub fn curve_reading(&self) -> Option<CurveReading> {
+        let gm = &self.caps.gain;
+        let curve = gm.curves().get(self.radio.gain_curve?)?;
+        let stages = gm.stages();
+        let exact = curve.step_of(&stages, &self.radio.gains);
+        Some(CurveReading {
+            name: curve.name,
+            short: curve.short,
+            step: exact.unwrap_or_else(|| curve.nearest_step(&stages, &self.radio.gains)),
+            last: curve.last_step(),
+            on: exact.is_some(),
+            total_db: self.chain_db_holds().then(|| self.radio.total_gain()),
+        })
     }
 
     /// Why a gain decision made in dB cannot be made at the tuned frequency,
@@ -219,6 +265,28 @@ mod stage_reading_tests {
         m.radio.frequency = 92_800_000;
         assert_eq!(m.chain_db_refusal(), None);
         assert_eq!(SdrMetrics::fixture().chain_db_refusal(), None);
+    }
+
+    /// **Where the knob is on its curve**: the step and its total in dB in
+    /// the LNA's band, the step and no total outside it; a chain moved off
+    /// the curve by hand reads as the step it would rejoin at, marked; no
+    /// curve, no reading.
+    #[test]
+    fn the_curve_reading_says_where_the_knob_is() {
+        let mut m = SdrMetrics::fixture().band_measured_chain().on_curve(0, 10);
+        m.radio.frequency = 92_800_000;
+        let r = m.curve_reading().unwrap();
+        assert_eq!((r.short, r.step, r.last, r.on), ("LIN", 10, 21, true));
+        assert_eq!(r.step_text(), "10/21");
+        assert!((r.total_db.unwrap() - 51.39).abs() < 1e-9);
+        m.radio.frequency = 943_400_000;
+        assert_eq!(m.curve_reading().unwrap().total_db, None);
+        m.radio.gains = vec![36.02, 16.24, 49.96];
+        let off = m.curve_reading().unwrap();
+        assert_eq!((off.step, off.on), (21, false));
+        assert_eq!(off.step_text(), "\u{2248}21/21");
+        m.radio.gain_curve = None;
+        assert_eq!(m.curve_reading(), None);
     }
 
     /// Every other device reads as it always did.

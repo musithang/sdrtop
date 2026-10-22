@@ -67,6 +67,24 @@ pub(super) fn lines(
     // mode could point at stages that had no row on screen. Showing where the
     // gain went is also the whole argument of the per-stage gain: the driver's
     // automatic split was the thing nobody could see.
+    // The vendor curve the knob walks, above the stages it sets: its bar is
+    // the step along the curve, and the stages below keep their own rows.
+    if let Some(curve) = state.curve_reading() {
+        out.push(gain_row(
+            label_cell(curve.short, theme),
+            curve.step as u32,
+            curve.last.max(1) as u32,
+            curve.step_text(),
+            theme.status_ok,
+            theme.value_hi,
+            bar_w,
+            active,
+            val_col,
+            theme,
+        ));
+        out.push(Line::raw(""));
+    }
+
     let selected = state.ui.gain_stage;
     let stages = gm.stages();
     for (index, spec) in stages.iter().enumerate() {
@@ -186,6 +204,24 @@ mod tests {
         let near = crate::state::fixture::draw(crate::ui::CommandRailPanel, 34, 40, &m).join("\n");
         assert!(near.contains("75 dB"), "{near}");
         assert!(!near.contains("14/14"), "{near}");
+    }
+
+    /// **On a curve the rail leads with it**: a row for the curve and its
+    /// step above the stages, which keep their own rows.
+    #[test]
+    fn the_rail_leads_with_the_curve_the_knob_walks() {
+        let mut m = crate::state::SdrMetrics::fixture()
+            .streaming()
+            .band_measured_chain()
+            .on_curve(0, 10);
+        m.radio.frequency = 92_800_000;
+        let out = crate::state::fixture::draw(crate::ui::CommandRailPanel, 34, 40, &m);
+        let curve = out
+            .iter()
+            .position(|l| l.contains("LIN") && l.contains("10/21"));
+        let lna = out.iter().position(|l| l.contains("LNA"));
+        assert!(curve.is_some() && curve < lna, "{}", out.join("\n"));
+        assert!(out.join("\n").contains("51 dB"), "{}", out.join("\n"));
     }
 
     /// The rail drops the boost row entirely on a device that has none, rather

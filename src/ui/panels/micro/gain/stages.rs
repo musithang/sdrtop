@@ -2,7 +2,9 @@
 // Copyright (C) 2026 MusiThang <viktor.laszlo92@protonmail.com>
 
 //! The gain chain: the primary stage, the second stage where there is one, and
-//! the front-end boost with the running total.
+//! the front-end boost with the running total. A radio with more stages than
+//! two rows hold (the Airspy R2's three) gets its knob on the first row, the
+//! vendor curve or the front stage, and every stage by name on the second.
 //!
 //! Always drawn, streaming or not - gain is configured, not measured, so a
 //! stopped radio still has a real answer here. That is the point of this view:
@@ -16,7 +18,7 @@ use ratatui::{
     Frame,
 };
 
-use crate::hardware::GainModel;
+use crate::hardware::{GainModel, StageReading};
 use crate::state::SdrMetrics;
 use crate::ui::widgets::charts::draw_hbar;
 
@@ -53,6 +55,11 @@ pub(super) fn draw(
     let gm = &state.caps.gain;
     let theme = fd.theme;
     let w = label_w(gm);
+
+    if gm.stages().len() > 2 {
+        draw_many(f, primary, second, boost, state, fd);
+        return;
+    }
 
     draw_hbar(
         f,
@@ -114,6 +121,91 @@ pub(super) fn draw(
             ),
         ])),
         boost,
+    );
+}
+
+/// A stage's reading as a row shows it: `17 dB`, or `6/14` where its dB was
+/// not measured at the tuned frequency.
+fn reading_text(reading: Option<StageReading>) -> String {
+    match reading {
+        Some(StageReading::Db(db)) => format!("{:.0} dB", db.max(0.0)),
+        Some(position) => position.compact().trim().to_string(),
+        None => "\u{2014}".to_string(),
+    }
+}
+
+/// The rows for a chain of more than two stages: the knob, every stage, and
+/// the total of all of them where all of them are dB.
+fn draw_many(
+    f: &mut Frame,
+    knob: Rect,
+    stages_row: Rect,
+    total_row: Rect,
+    state: &SdrMetrics,
+    fd: &Field,
+) {
+    let gm = &state.caps.gain;
+    let theme = fd.theme;
+    let w = label_w(gm).max(3);
+    let stages = gm.stages();
+
+    // The knob: the vendor curve's step where it walks one, else the front
+    // stage, by its reading.
+    let (label, fill, value) = match state.curve_reading() {
+        Some(c) => (
+            c.short.to_string(),
+            c.step as f64 / c.last.max(1) as f64,
+            c.step_text(),
+        ),
+        None => {
+            let front = stages.first().map_or("", |s| s.name.as_str());
+            let fill = match state.stage_reading(0) {
+                Some(StageReading::Position { at, of }) => at as f64 / of.max(1) as f64,
+                _ => state.radio.stage_gain(0) / stages.first().map_or(1.0, |s| s.max_db.max(1.0)),
+            };
+            (
+                front.to_string(),
+                fill,
+                reading_text(state.stage_reading(0)),
+            )
+        }
+    };
+    draw_hbar(
+        f,
+        knob,
+        fill,
+        &format!(" {label:<w$}  "),
+        &value,
+        theme.value,
+        theme,
+    );
+
+    let mut line = vec![Span::raw(" ")];
+    for (i, spec) in stages.iter().enumerate() {
+        if i > 0 {
+            line.push(fd.label(" \u{00b7} "));
+        }
+        line.push(fd.label(format!("{} ", spec.name)));
+        line.push(Span::styled(
+            reading_text(state.stage_reading(i)),
+            Style::default().fg(theme.value),
+        ));
+    }
+    f.render_widget(Paragraph::new(Line::from(line)), stages_row);
+
+    // The whole chain, every stage of it, and only where each is a dB here.
+    let total = if state.chain_db_holds() {
+        format!("{:.0} dB", state.radio.total_gain().max(0.0))
+    } else {
+        "\u{2014}".to_string()
+    };
+    f.render_widget(
+        Paragraph::new(Line::from(vec![
+            Span::raw(" "),
+            fd.label("Total: "),
+            Span::styled(total, Style::default().fg(theme.value_hi)),
+        ])),
+        total_row,
     );
 }
 

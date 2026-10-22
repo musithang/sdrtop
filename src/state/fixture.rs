@@ -407,6 +407,15 @@ impl SdrMetrics {
         self
     }
 
+    /// The knob on one of the gain model's vendor curves, the chain exactly on
+    /// `step` of it.
+    pub(crate) fn on_curve(mut self, curve: usize, step: usize) -> Self {
+        let gm = self.caps.gain.clone();
+        self.radio.gain_curve = Some(curve);
+        self.radio.gains = gm.curves()[curve].values(step, &gm.stages());
+        self
+    }
+
     /// The gain model behind both chain fixtures.
     ///
     /// The numbers are a real probe answer, not an invented shape:

@@ -1012,6 +1012,43 @@ fn bottom_band_line(state: &SdrMetrics, theme: &crate::Theme, inner_width: u16) 
         return Line::from(left_spans);
     }
 
+    // A knob on a vendor curve: the curve and its step, every stage at its
+    // register position, and the chain in dB where it holds. Its width is
+    // measured rather than the fixed 42 below, because two-digit positions
+    // make it a few columns wider, and the gap gives them up.
+    if let Some(curve) = state.curve_reading() {
+        let label = Style::default().fg(theme.label);
+        let value = Style::default().fg(val_color);
+        let mut right = vec![
+            Span::styled(format!("{} ", curve.short), label),
+            Span::styled(curve.step_text(), value),
+            Span::styled(" \u{25b8} ", label),
+        ];
+        for (i, spec) in gm.stages().iter().enumerate() {
+            if i > 0 {
+                right.push(Span::styled(" \u{00b7} ", label));
+            }
+            let at = spec.position_of(state.radio.stage_gain(i)).unwrap_or(0);
+            right.push(Span::styled(format!("{} ", spec.name), label));
+            right.push(Span::styled(at.to_string(), value));
+        }
+        right.push(Span::raw("   "));
+        match curve.total_db {
+            Some(db) => right.extend([
+                Span::styled(format!("{:.0}", db.max(0.0)), value),
+                Span::styled(" dB", label),
+            ]),
+            None => right.push(Span::styled("\u{2014}", label)),
+        }
+        right.push(Span::raw("  "));
+        let right_w: usize = right.iter().map(|s| s.width()).sum();
+        let gap = (inner_width as usize).saturating_sub(left_w + right_w);
+        let mut spans = left_spans;
+        spans.push(leader(gap, theme.border_dim));
+        spans.extend(right);
+        return Line::from(spans);
+    }
+
     // right: primary "LNA/TUN "(4) + bar(8) + " "(1) + val(2) + " dB"(3) + "    "(4)  = 22
     //      + second stage "VGA "(4) + bar(8) + " "(1) + val(2) + " dB"(3) + "  "(2)   = 20  (blank on RTL)
     let right = 22 + 20;
@@ -1392,6 +1429,34 @@ mod tests {
         let near = crate::state::fixture::draw(HeaderPanel, 140, 8, &m).join("\n");
         assert!(near.contains("36 dB"), "{near}");
         assert!(!near.contains("14/14"), "{near}");
+    }
+
+    /// **On a curve the header names the curve and every stage**: the step,
+    /// each stage's register position, and the chain in dB where it holds;
+    /// a dash for the total outside the LNA's band, and a chain off the curve
+    /// marked as near its step, not on it.
+    #[test]
+    fn the_header_names_the_curve_and_every_stage_on_it() {
+        let mut m = crate::state::SdrMetrics::fixture()
+            .streaming()
+            .band_measured_chain()
+            .on_curve(0, 10);
+        m.radio.frequency = 92_800_000;
+        let near = crate::state::fixture::draw(HeaderPanel, 160, 8, &m).join("\n");
+        assert!(
+            near.contains("LIN 10/21 \u{25b8} LNA 6 \u{00b7} MIX 1 \u{00b7} VGA 10   51 dB"),
+            "{near}"
+        );
+        m.radio.frequency = 943_400_000;
+        let far = crate::state::fixture::draw(HeaderPanel, 160, 8, &m).join("\n");
+        assert!(far.contains("VGA 10   \u{2014}"), "{far}");
+        assert!(!far.contains("51 dB"), "{far}");
+        m.radio.gains = vec![36.02, 16.24, 49.96];
+        let off = crate::state::fixture::draw(HeaderPanel, 160, 8, &m).join("\n");
+        assert!(
+            off.contains("LIN \u{2248}21/21 \u{25b8} LNA 14 \u{00b7} MIX 15 \u{00b7} VGA 15"),
+            "{off}"
+        );
     }
 
     #[test]

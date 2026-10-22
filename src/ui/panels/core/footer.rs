@@ -31,9 +31,13 @@ type Group = Vec<String>;
 /// the stages the device reported and its boost by its own name, and a key
 /// the device cannot use is not offered. A power-trace device (a tinySA)
 /// takes a span where the others take a rate, and has no gain keys here.
-fn radio_group(gm: &GainModel, span: bool, picked: Option<usize>) -> Group {
+fn radio_group(gm: &GainModel, span: bool, picked: Option<usize>, curve: Option<usize>) -> Group {
     use crate::ui::menu::keys::{Footer, GLOBAL};
     let stages = gm.stages();
+    // The vendor curve the arrows walk, when no stage is picked by hand.
+    let walking = curve
+        .filter(|_| picked.is_none())
+        .and_then(|c| gm.curves().get(c));
     let mut out = Vec::new();
     for (_, rows) in GLOBAL {
         for row in rows.iter() {
@@ -55,6 +59,9 @@ fn radio_group(gm: &GainModel, span: bool, picked: Option<usize>) -> Group {
                             gm.has_second_stage(),
                             stages.first(),
                         ) {
+                            _ if walking.is_some() => {
+                                format!("[\u{2191}\u{2193}] {}", walking.map_or("", |c| c.name))
+                            }
                             // One stage picked with `,` / `.`: the arrows move it.
                             (Some(one), _, _) => format!("[\u{2191}\u{2193}] {}", one.name),
                             (None, true, Some(first)) => {
@@ -63,6 +70,16 @@ fn radio_group(gm: &GainModel, span: bool, picked: Option<usize>) -> Group {
                             _ => "[\u{2191}\u{2193}] Gain".to_string(),
                         },
                     ),
+                    // On a radio with curves the ring is the knob: a curve,
+                    // one stage by hand, or neither.
+                    Some('.') if !gm.curves().is_empty() => out.push(format!(
+                        "[, .] knob={}",
+                        match (walking, picked.and_then(|i| stages.get(i))) {
+                            (Some(c), _) => c.name,
+                            (None, Some(one)) => one.name.as_str(),
+                            (None, None) => "manual",
+                        }
+                    )),
                     Some('.') if stages.len() > 1 => out.push(format!(
                         "[, .] stage={}",
                         picked
@@ -236,6 +253,7 @@ fn normal_groups(m: &SdrMetrics, available_width: u16) -> Vec<Group> {
         &m.caps.gain,
         m.caps.sample_rate_is_span,
         m.ui.gain_stage,
+        m.radio.gain_curve,
     )];
     let section = section_group(m);
     if !section.is_empty() {
@@ -1011,7 +1029,7 @@ mod tests {
                 crate::hardware::StageSpec::ranged("AMP", 0.0, 14.0, 14.0),
             ));
         assert_eq!(
-            radio_group(&amp, false, None),
+            radio_group(&amp, false, None, None),
             vec!["[Space] RX", "[F] Freq", "[S] Rate", "[↑↓] Gain", "[A] AMP"]
         );
         // Three stages the driver called LNA, TIA and PGA, one knob, and an
@@ -1026,14 +1044,16 @@ mod tests {
             "RF",
         )
         .with_boost(crate::hardware::Boost::GainMode);
-        let items = radio_group(&lime, false, None).join(" ");
+        let items = radio_group(&lime, false, None, None).join(" ");
         assert!(
             items.contains("[↑↓] Gain") && items.contains("[A] AGC"),
             "{items}"
         );
         assert!(!items.contains("VGA") && !items.contains("LNA"), "{items}");
         let none = GainModel::new(vec![], "RF", "RF").with_gauge_fallback(45);
-        assert!(!radio_group(&none, false, None).join(" ").contains("[A]"));
+        assert!(!radio_group(&none, false, None, None)
+            .join(" ")
+            .contains("[A]"));
     }
 
     /// **The arrows move what `,` / `.` picked**: with a stage picked the
@@ -1041,21 +1061,44 @@ mod tests {
     /// with one stage is offered nothing to pick.
     #[test]
     fn a_picked_stage_is_what_the_footer_says_the_arrows_move() {
-        let hackrf = radio_group(&hackrf::gain_model(), false, Some(1)).join(" ");
+        let hackrf = radio_group(&hackrf::gain_model(), false, Some(1), None).join(" ");
         assert!(hackrf.contains("[↑↓] VGA"), "{hackrf}");
         assert!(hackrf.contains("[, .] stage=VGA"), "{hackrf}");
         let rtl = radio_group(
             &crate::hardware::native::rtlsdr::gain_model(&[0, 10]),
             false,
             None,
+            None,
         );
         assert!(!rtl.join(" ").contains("[, .]"), "{rtl:?}");
+    }
+
+    /// **On a radio with curves the footer names what the knob walks**: the
+    /// curve on the arrows and the picking keys, a stage picked by hand when
+    /// one is, and the front stage with the ring at "manual" when neither.
+    #[test]
+    fn the_footer_names_the_curve_the_arrows_walk() {
+        let r2 = crate::hardware::native::airspy::gain_model();
+        let lin = radio_group(&r2, false, None, Some(0)).join(" ");
+        assert!(lin.contains("[↑↓] Linearity"), "{lin}");
+        assert!(lin.contains("[, .] knob=Linearity"), "{lin}");
+        assert!(lin.contains("[[ ]] MIX"), "{lin}");
+        let vga = radio_group(&r2, false, Some(2), None).join(" ");
+        assert!(
+            vga.contains("[↑↓] VGA") && vga.contains("[, .] knob=VGA"),
+            "{vga}"
+        );
+        let manual = radio_group(&r2, false, None, None).join(" ");
+        assert!(
+            manual.contains("[↑↓] LNA") && manual.contains("[, .] knob=manual"),
+            "{manual}"
+        );
     }
 
     /// A power-trace device (a tinySA) takes a span, and has no gain keys here.
     #[test]
     fn power_trace_footer_keeps_only_supported_radio_controls() {
-        let items = radio_group(&hackrf::gain_model(), true, None).join(" ");
+        let items = radio_group(&hackrf::gain_model(), true, None, None).join(" ");
         assert_eq!(items, "[Space] RX [F] Freq [S] Span");
     }
 

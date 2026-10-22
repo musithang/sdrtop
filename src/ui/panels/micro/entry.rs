@@ -187,7 +187,28 @@ fn render_gain(f: &mut Frame, area: Rect, state: &SdrMetrics, theme: &crate::The
         };
         (name.to_string(), fill, text, short)
     };
-    let bars: Vec<(String, f64, String, String)> =
+    // On a vendor curve: the step along it, and the chain it sets as one
+    // figure, since one stage beside the curve would be an arbitrary pick.
+    let curve_bars = state.curve_reading().map(|c| {
+        let step = c.step_text();
+        vec![
+            (
+                c.short.to_string(),
+                c.step as f64 / c.last.max(1) as f64,
+                step.clone(),
+                step,
+            ),
+            cell(
+                "Total",
+                c.total_db.map(StageReading::Db),
+                crate::hardware::gain::total_range(&stages).1,
+            ),
+        ]
+    });
+    let on_curve = curve_bars.is_some();
+    let bars: Vec<(String, f64, String, String)> = if let Some(bars) = curve_bars {
+        bars
+    } else {
         match (gm.has_second_stage(), stages.first(), stages.get(1)) {
             (true, Some(first), Some(second)) => vec![
                 cell(&first.name, state.stage_reading(0), first.max_db),
@@ -200,7 +221,8 @@ fn render_gain(f: &mut Frame, area: Rect, state: &SdrMetrics, theme: &crate::The
                     .then_some(StageReading::Db(state.shown_gain() as f64)),
                 gm.primary_max_db() as f64,
             )],
-        };
+        }
+    };
     match mode {
         Mode::Compact => {
             let n = bars.len() as u32;
@@ -240,9 +262,16 @@ fn render_gain(f: &mut Frame, area: Rect, state: &SdrMetrics, theme: &crate::The
         Mode::Minimum => {
             let values: Vec<String> = bars
                 .iter()
-                .map(|(name, _, _, short)| {
+                .enumerate()
+                .map(|(i, (name, _, _, short))| {
                     let value = short.trim_end_matches("dB");
-                    format!("{}:{value}", name.chars().next().unwrap_or('G'))
+                    // A curve keeps its three letters: `L` alone would read
+                    // as the LNA.
+                    if i == 0 && on_curve {
+                        format!("{name}:{value}")
+                    } else {
+                        format!("{}:{value}", name.chars().next().unwrap_or('G'))
+                    }
                 })
                 .collect();
             let mut spans = vec![
@@ -496,6 +525,20 @@ mod tests {
         m.radio.frequency = 92_800_000;
         let near = draw(MicroPanel, 80, 6, &m).join("\n");
         assert!(near.contains("36 dB"), "{near}");
+    }
+
+    /// **On a curve the first gain bar is the curve's step**, at every width.
+    #[test]
+    fn the_micro_gain_bar_is_the_curve_when_the_knob_walks_one() {
+        use crate::state::fixture::draw;
+        let m = SdrMetrics::fixture().band_measured_chain().on_curve(0, 10);
+        for w in [80, 50, 30] {
+            let out = draw(MicroPanel, w, 6, &m).join("\n");
+            assert!(
+                out.contains("LIN") && out.contains("10/21"),
+                "width {w}:\n{out}"
+            );
+        }
     }
 
     /// **The gain row is the device's**: a HackRF shows its LNA and VGA and

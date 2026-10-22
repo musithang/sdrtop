@@ -701,7 +701,6 @@ impl GainCurve {
     }
 
     /// The step the chain is exactly on, if it is on one.
-    #[cfg(test)]
     pub fn step_of(&self, stages: &[StageSpec], gains: &[f64]) -> Option<usize> {
         let at = Self::positions_of(stages, gains)?;
         self.steps.iter().position(|step| *step == at)

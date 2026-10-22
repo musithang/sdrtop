@@ -202,4 +202,36 @@ mod tests {
             );
         }
     }
+
+    /// **The gain rows are the R2's own**: on its curve, the curve and its
+    /// step, then every stage by name in dB where it holds and as a position
+    /// where it does not, and the whole chain as the total; by hand, the
+    /// LNA, then every stage. Never a mixer called VGA, and never a total
+    /// that leaves a stage out or adds positions to decibels.
+    #[test]
+    fn the_r2s_gain_rows_name_its_stages_and_total_all_three() {
+        let mut m = SdrMetrics::fixture().band_measured_chain().on_curve(0, 10);
+        m.radio.frequency = 92_800_000;
+        let near = draw(MicroGainPanel, W, H, &m).join("\n");
+        assert!(near.contains("LIN") && near.contains("10/21"), "{near}");
+        assert!(
+            near.contains("LNA 17 dB \u{00b7} MIX 1 dB \u{00b7} VGA 34 dB"),
+            "{near}"
+        );
+        assert!(near.contains("Total: 51 dB"), "{near}");
+        m.radio.frequency = 943_400_000;
+        let far = draw(MicroGainPanel, W, H, &m).join("\n");
+        assert!(
+            far.contains("LNA 6/14 \u{00b7} MIX 1 dB \u{00b7} VGA 34 dB"),
+            "{far}"
+        );
+        assert!(far.contains("Total: \u{2014}"), "{far}");
+        m.radio.gain_curve = None;
+        let hand = draw(MicroGainPanel, W, H, &m).join("\n");
+        assert!(hand.contains("6/14") && !hand.contains("LIN"), "{hand}");
+        assert!(
+            !hand.contains("VGA  "),
+            "no row labelled VGA for the mixer:\n{hand}"
+        );
+    }
 }
