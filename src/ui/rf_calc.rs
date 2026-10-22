@@ -365,9 +365,62 @@ pub fn staging_target(peak_dbfs: f64, stages: &[StageSpec], current: &[f64]) -> 
     crate::hardware::gain::distribute(stages, wanted).0
 }
 
+/// [`staging_target`] for a knob that may be on a vendor curve: there, the
+/// target is the highest step of the curve at or under the total the
+/// converter wants, so auto-gain moves along the curve as the arrows do and
+/// keeps the headroom the target leaves rather than rounding into it.
+pub fn staging_target_on(
+    peak_dbfs: f64,
+    gm: &crate::hardware::GainModel,
+    curve: Option<usize>,
+    current: &[f64],
+) -> Vec<f64> {
+    let stages = gm.stages();
+    match curve.and_then(|c| gm.curves().get(c)) {
+        Some(c) => {
+            let now: f64 = current.iter().take(stages.len()).sum();
+            let wanted = now + (OPT_PEAK_DBFS - peak_dbfs);
+            c.values(c.step_for_total(&stages, wanted), &stages)
+        }
+        None => staging_target(peak_dbfs, &stages, current),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// **On a vendor curve the target is a step of it**: the highest step
+    /// whose chain stays at or under the total the converter wants, so the
+    /// headroom the target keeps is not spent by rounding up; off any curve,
+    /// the stages' own distribution as before.
+    #[test]
+    fn on_a_curve_the_staging_target_is_a_step_of_it() {
+        let gm = crate::hardware::native::airspy::gain_model();
+        let stages = gm.stages();
+        let lin = &gm.curves()[0];
+        let at_10 = lin.values(10, &stages); // 51.39 dB
+                                             // 22 dB short of the optimum wants 73.39 dB: Linearity 15 is 72.07,
+                                             // 16 would be 74.03.
+        let peak = OPT_PEAK_DBFS - 22.0;
+        let target = staging_target_on(peak, &gm, Some(0), &at_10);
+        assert_eq!(target, lin.values(15, &stages));
+        assert_eq!(
+            staging_target_on(peak, &gm, None, &at_10),
+            staging_target(peak, &stages, &at_10)
+        );
+        // 28 dB too hot wants 23.39 dB: Linearity 2 is 21.54.
+        assert_eq!(
+            staging_target_on(20.0, &gm, Some(0), &at_10),
+            lin.values(2, &stages)
+        );
+        // Hotter than any step can answer: the bottom of the curve, never
+        // below it.
+        assert_eq!(
+            staging_target_on(60.0, &gm, Some(0), &at_10),
+            lin.values(0, &stages)
+        );
+    }
 
     #[test]
     fn nf_amp_on_max_gain_is_near_amp_nf() {

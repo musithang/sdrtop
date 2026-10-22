@@ -31,7 +31,7 @@ use ratatui::{
 use crate::state::SdrMetrics;
 use crate::ui::panel::{Panel, PanelChrome, Staleness, Tag};
 use crate::ui::rf_calc::{
-    cascade, level_lineup, signal_lineup, staging_target, staging_verdict, system_nf_db, Stage,
+    cascade, level_lineup, signal_lineup, staging_target_on, staging_verdict, system_nf_db, Stage,
 };
 
 use super::rf_bench::severity_color;
@@ -145,7 +145,14 @@ impl Panel for RfChainPanel {
         // A target is a dB figure shared out over the chain, which needs every
         // stage to be a gain here; where one is not, no target is offered.
         let targets = if state.chain_db_holds() {
-            staging_target(adc_peak, &stage_specs, &state.radio.gains)
+            // On a vendor curve, a step of it: the target the auto-gain key
+            // would set, not a split the knob could never reach.
+            staging_target_on(
+                adc_peak,
+                &state.caps.gain,
+                state.radio.gain_curve,
+                &state.radio.gains,
+            )
         } else {
             state.radio.gains.clone()
         };

@@ -145,7 +145,7 @@ pub(super) fn track_gain(
     device: &Arc<dyn SdrDevice>,
     adc_peak_dbfs: f32,
 ) {
-    let (latched, stages, current) = {
+    let (latched, gm, curve, current) = {
         let m = state.lock().unwrap_or_else(|e| e.into_inner());
         // A noise sweep moves one stage on purpose and reads what that does to
         // the floor. Auto-track exists to undo exactly that. Whichever ran
@@ -167,10 +167,12 @@ pub(super) fn track_gain(
         }
         (
             m.lab.rf_autotrack,
-            m.caps.gain.stages(),
+            m.caps.gain.clone(),
+            m.radio.gain_curve,
             m.radio.gains.clone(),
         )
     };
+    let stages = gm.stages();
     // No longer gated on a modelled chain: since R3 the target is one policy
     // over whatever stages the device reports, so any radio that names some can
     // be tracked. A radio that names none has nothing to move.
@@ -178,7 +180,8 @@ pub(super) fn track_gain(
         return;
     }
 
-    let targets = crate::ui::rf_calc::staging_target(adc_peak_dbfs as f64, &stages, &current);
+    // Along the knob's curve when it walks one, as the arrows would.
+    let targets = crate::ui::rf_calc::staging_target_on(adc_peak_dbfs as f64, &gm, curve, &current);
     // The total, not the arrangement: see the note in `input/bench.rs`.
     let now_total: f64 = current.iter().take(stages.len()).sum();
     let want_total: f64 = targets.iter().sum();
@@ -203,8 +206,13 @@ pub(super) fn track_gain(
                 .enumerate()
                 .map(|(i, spec)| format!("{} {:.0}", spec.name, targets[i]))
                 .collect();
+            let step = m
+                .curve_reading()
+                .filter(|c| c.on)
+                .map(|c| format!("{} {} \u{00b7} ", c.name, c.step_text()))
+                .unwrap_or_default();
             m.push_log(format!(
-                "Auto-gain track \u{2192} {} dB",
+                "Auto-gain track \u{2192} {step}{} dB",
                 split.join(" \u{00b7} ")
             ));
         }
@@ -304,6 +312,34 @@ pub(super) fn advance_noise_sweep(state: &Arc<Mutex<SdrMetrics>>, device: &Arc<d
 mod tests {
     use super::*;
     use std::cell::Cell;
+
+    /// **Auto-track on a curve stays on it**: the chain it sets is a step of
+    /// the curve, in the radio's registers and in the state.
+    #[test]
+    fn auto_track_on_a_curve_lands_on_a_step_of_it() {
+        let r2 = crate::hardware::native::airspy::bench::BenchR2::new();
+        let mut m = SdrMetrics::fixture().band_measured_chain().on_curve(0, 10);
+        m.radio.frequency = 92_800_000;
+        m.lab.rf_autotrack = true;
+        let state = Arc::new(Mutex::new(m));
+        track_gain(&state, &r2.device, -30.0);
+        let m = state.lock().unwrap();
+        let gm = &m.caps.gain;
+        let step = gm.curves()[0].step_of(&gm.stages(), &m.radio.gains);
+        assert!(step.is_some_and(|s| s > 10), "{:?}", m.radio.gains);
+        let last = m.ui.log.back().map(|e| e.text.clone()).unwrap_or_default();
+        assert!(
+            last.contains(&format!("Linearity {}/21", step.unwrap())),
+            "{last}"
+        );
+        let positions: Vec<i32> = gm
+            .stages()
+            .iter()
+            .zip(&m.radio.gains)
+            .map(|(s, &db)| s.position_of(db).unwrap() as i32)
+            .collect();
+        assert_eq!(r2.registers().to_vec(), positions);
+    }
 
     /// **Auto-track stops where a stage's dB stops holding**: tuned out of the
     /// R2's LNA band with the peak off its window, it switches itself off and

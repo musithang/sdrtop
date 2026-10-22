@@ -706,6 +706,16 @@ impl GainCurve {
         self.steps.iter().position(|step| *step == at)
     }
 
+    /// The highest step whose chain adds up to no more than `total_db`, or the
+    /// first step when every one is over it. Meaningful only where each
+    /// stage's values are dB.
+    pub fn step_for_total(&self, stages: &[StageSpec], total_db: f64) -> usize {
+        (0..self.steps.len())
+            .rev()
+            .find(|&step| self.values(step, stages).iter().sum::<f64>() <= total_db + 1e-9)
+            .unwrap_or(0)
+    }
+
     /// The step closest to the chain, by how many positions each stage is
     /// away from it in all; the lower step on a tie. Where a hand-set chain
     /// rejoins the curve.

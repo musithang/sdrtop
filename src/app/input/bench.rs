@@ -144,7 +144,7 @@ pub(super) fn iq_diagnostics(key: KeyEvent, ctx: &mut InputCtx<'_>) -> KeyAction
 /// (incl. the [↑↓]/[ ] gain nudges) falls through to the global handler.
 pub(super) fn rf_chain(key: KeyEvent, ctx: &mut InputCtx<'_>) -> KeyAction {
     let (state, device) = (ctx.state, ctx.device);
-    use crate::ui::rf_calc::staging_target;
+    use crate::ui::rf_calc::staging_target_on;
     match key.code {
         // [A] - auto-gain: one-shot to optimal, or latch the continuous track once
         // already there. HackRF-only; never runs unless streaming.
@@ -184,7 +184,12 @@ pub(super) fn rf_chain(key: KeyEvent, ctx: &mut InputCtx<'_>) -> KeyAction {
                 ));
                 return KeyAction::Continue;
             }
-            let targets = staging_target(peak, &stages, &current);
+            // Along the knob's curve when it walks one, as the arrows would.
+            let (gm, curve) = {
+                let m = metrics(state);
+                (m.caps.gain.clone(), m.radio.gain_curve)
+            };
+            let targets = staging_target_on(peak, &gm, curve, &current);
             // Judged on the **total**, not on the arrangement. Auto-gain is
             // about where the converter sits; how that total is spread is the
             // knob's business. Comparing per stage would make a hand-set chain
@@ -214,8 +219,15 @@ pub(super) fn rf_chain(key: KeyEvent, ctx: &mut InputCtx<'_>) -> KeyAction {
                                 .enumerate()
                                 .map(|(i, spec)| format!("{} {:.0}", spec.name, targets[i]))
                                 .collect();
+                            // The step too, when the chain landed on the
+                            // knob's curve, as the arrows' log names it.
+                            let step = m
+                                .curve_reading()
+                                .filter(|c| c.on)
+                                .map(|c| format!("{} {} \u{00b7} ", c.name, c.step_text()))
+                                .unwrap_or_default();
                             m.push_log(format!(
-                                "Auto-gain \u{2192} {} dB (signal \u{2192} \u{2212}8 dBFS)",
+                                "Auto-gain \u{2192} {step}{} dB (signal \u{2192} \u{2212}8 dBFS)",
                                 split.join(" \u{00b7} ")
                             ));
                         }
