@@ -361,6 +361,7 @@ impl App {
             focus_keys,
             theme_config: cfg.theme.clone(),
             tinysa_config: cfg.tinysa.clone(),
+            airspy_config: cfg.airspy.clone(),
             net_config: cfg.net.clone(),
             record_config: cfg.record.clone(),
             recorder: None,

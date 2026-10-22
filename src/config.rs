@@ -309,6 +309,25 @@ impl Default for TinySaSettings {
     }
 }
 
+/// Settings the Airspy R2's own backend applies when it opens.
+///
+/// The bias tee is deliberately not here: it starts off every session,
+/// because 4.5 V on an antenna port rewired since the last one is how an LNA
+/// dies.
+#[derive(Deserialize, Serialize, Clone, Debug, Default, PartialEq, Eq)]
+pub struct AirspySettings {
+    /// libairspy's 12-bit packing: a quarter less USB traffic, unpacked on
+    /// the host.
+    #[serde(default)]
+    pub packing: bool,
+}
+
+impl AirspySettings {
+    fn is_default(&self) -> bool {
+        *self == Self::default()
+    }
+}
+
 #[derive(Deserialize, Serialize, Clone, Debug, Default)]
 pub struct AppConfig {
     #[serde(default)]
@@ -325,6 +344,10 @@ pub struct AppConfig {
     pub record: RecordSettings,
     #[serde(default)]
     pub tinysa: TinySaSettings,
+    /// Written only once it differs from the default, so a file from a radio
+    /// that is not an Airspy carries no block about one.
+    #[serde(default, skip_serializing_if = "AirspySettings::is_default")]
+    pub airspy: AirspySettings,
     /// User-defined layout presets, merged into the built-in set at startup.
     /// A preset here with the same name as a built-in overrides it. Preserved
     /// verbatim across save so hand-written presets survive a quit.
@@ -980,6 +1003,20 @@ panels = [
         "#;
         let cfg: LayoutConfig = toml::from_str(raw).unwrap();
         assert_eq!(cfg.active_panels().len(), 2);
+    }
+
+    /// **`[airspy]` appears only once it says something**: a default file has
+    /// no Airspy block, and packing set comes back as written.
+    #[test]
+    fn the_airspy_block_is_written_only_when_it_says_something() {
+        let plain = toml::to_string(&AppConfig::default()).unwrap();
+        assert!(!plain.contains("[airspy]"), "{plain}");
+        let mut cfg = AppConfig::default();
+        cfg.airspy.packing = true;
+        let text = toml::to_string(&cfg).unwrap();
+        assert!(text.contains("[airspy]\npacking = true"), "{text}");
+        let back: AppConfig = toml::from_str(&text).unwrap();
+        assert!(back.airspy.packing);
     }
 
     #[test]

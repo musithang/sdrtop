@@ -151,9 +151,9 @@ int airspy_close(void *device) { calls[3]++; free(device); return 0; }
 // What the backend asked libairspy for last, by field (see fixture_airspy_state):
 // 0 sample type, 1 bias tee, 2 LNA AGC, 3 mixer AGC, 4 LNA, 5 mixer, 6 VGA,
 // 7 frequency in kHz, 8 sample rate argument; 9 streams started, 10 stops
-// asked, 11 the sample rate argument in force when the last stream started.
-// -1 until set.
-static int airspy_state[12] = {-1, -1, -1, -1, -1, -1, -1, -1, -1, 0, 0, -1};
+// asked, 11 the sample rate argument in force when the last stream started,
+// 12 packing, 13 packing in force when the last stream started. -1 until set.
+static int airspy_state[14] = {-1, -1, -1, -1, -1, -1, -1, -1, -1, 0, 0, -1, -1, -1};
 int fixture_airspy_state(int field) { return airspy_state[field]; }
 typedef struct { uint32_t part_id[2]; uint32_t serial_no[4]; } airspy_read_partid_serialno_t;
 typedef struct { uint32_t major_version; uint32_t minor_version; uint32_t revision; } airspy_lib_version_t;
@@ -247,6 +247,7 @@ int airspy_start_rx(void *device, airspy_cb cb, void *ctx) {
     if (mode == 23 || airspy_streaming) return -1000;
     airspy_state[9]++;
     airspy_state[11] = airspy_state[8];
+    airspy_state[13] = airspy_state[12];
     airspy_stream.cb = cb;
     airspy_stream.ctx = ctx;
     airspy_stream.device = device;
@@ -263,6 +264,12 @@ int airspy_stop_rx(void *device) {
     return 0;
 }
 int airspy_is_streaming(void *device) { return airspy_streaming; }
+// libairspy refuses packing while streaming, with AIRSPY_ERROR_BUSY.
+int airspy_set_packing(void *device, uint8_t value) {
+    if (mode == 23) return -1000;
+    if (airspy_streaming) return -6;
+    airspy_state[12] = value; return 0;
+}
 #ifndef OMIT_LAST_SYMBOL
 int airspy_get_samplerates(void *device, uint32_t *buffer, uint32_t len) {
     static const uint32_t r2[] = {10000000, 2500000};

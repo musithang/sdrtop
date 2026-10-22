@@ -79,6 +79,8 @@ pub struct AirspyApi {
     /// Joins both threads before returning when the stream was running.
     pub airspy_stop_rx: unsafe extern "C" fn(*mut c_void) -> c_int,
     pub airspy_is_streaming: unsafe extern "C" fn(*mut c_void) -> c_int,
+    /// 12-bit packing on the USB link; refused while streaming.
+    pub airspy_set_packing: unsafe extern "C" fn(*mut c_void, u8) -> c_int,
     pub airspy_get_samplerates: unsafe extern "C" fn(*mut c_void, *mut u32, u32) -> c_int,
 }
 
@@ -143,6 +145,7 @@ pub(super) fn resolve(lib: libloading::Library) -> Result<AirspyApi, String> {
         airspy_start_rx: sym!(airspy_start_rx),
         airspy_stop_rx: sym!(airspy_stop_rx),
         airspy_is_streaming: sym!(airspy_is_streaming),
+        airspy_set_packing: sym!(airspy_set_packing),
         airspy_get_samplerates: sym!(airspy_get_samplerates),
         _lib: lib,
     })

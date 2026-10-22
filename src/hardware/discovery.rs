@@ -276,10 +276,11 @@ fn offer_soapy(
 /// Opens the device a listing points at, as a trait object.
 pub fn open_device(
     listing: &DeviceListing,
-    tinysa_settings: &crate::config::TinySaSettings,
+    cfg: &crate::config::AppConfig,
 ) -> anyhow::Result<Arc<dyn SdrDevice>> {
+    let tinysa_settings = &cfg.tinysa;
     match listing.kind {
-        DeviceKind::Airspy => Ok(Arc::new(airspy::AirspyDevice::open(listing)?)),
+        DeviceKind::Airspy => Ok(Arc::new(airspy::AirspyDevice::open(listing, &cfg.airspy)?)),
         DeviceKind::HackRf => Ok(Arc::new(hackrf::HackRfDevice::open(listing.index)?)),
         DeviceKind::RtlSdr => Ok(Arc::new(rtlsdr::RtlDevice::open(listing.index)?)),
         DeviceKind::Soapy => {

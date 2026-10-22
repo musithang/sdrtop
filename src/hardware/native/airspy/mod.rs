@@ -36,8 +36,8 @@ use std::sync::{Arc, Mutex};
 use crate::hardware::traits::RateSet;
 use crate::hardware::{
     AcquisitionKind, DeliveryModel, DeviceCapabilities, DeviceInfo, DeviceKind, DeviceListing,
-    GainCurve, GainModel, LevelUnit, RxContext, SampleFormat, SampleGeometry, SdrDevice, StageSpec,
-    IQ_TRACE_STALE_MS,
+    DeviceOption, GainCurve, GainModel, LevelUnit, RxContext, SampleFormat, SampleGeometry,
+    SdrDevice, StageSpec, IQ_TRACE_STALE_MS,
 };
 
 /// Which Airspy a firmware is, by the rates it offers.
@@ -388,6 +388,9 @@ struct Stream {
     /// The rate last set, Hz: libairspy has no getter, and a change while
     /// streaming costs a restart, which the same rate does not need.
     rate: Option<u32>,
+    /// What the two options are set to; libairspy has no getter for either.
+    bias_tee: bool,
+    packing: bool,
 }
 
 /// An open Airspy R2.
@@ -410,14 +413,19 @@ unsafe impl Send for AirspyDevice {}
 unsafe impl Sync for AirspyDevice {}
 
 impl AirspyDevice {
-    /// Opens the radio a listing names, by its serial.
-    pub fn open(listing: &DeviceListing) -> anyhow::Result<Self> {
-        Self::open_with_api(ffi::api()?, listing)
+    /// Opens the radio a listing names, by its serial, with the `[airspy]`
+    /// settings.
+    pub fn open(
+        listing: &DeviceListing,
+        settings: &crate::config::AirspySettings,
+    ) -> anyhow::Result<Self> {
+        Self::open_with_api(ffi::api()?, listing, settings)
     }
 
     fn open_with_api(
         api: &'static ffi::AirspyApi,
         listing: &DeviceListing,
+        settings: &crate::config::AirspySettings,
     ) -> anyhow::Result<Self> {
         let serial = listing
             .serial
@@ -491,6 +499,11 @@ impl AirspyDevice {
             unsafe { (api.airspy_set_mixer_agc)(ptr, 0) },
             "switch the mixer AGC off",
         )?;
+        device.check(
+            unsafe { (api.airspy_set_packing)(ptr, u8::from(settings.packing)) },
+            "set packing",
+        )?;
+        device.stream().packing = settings.packing;
         let mut v = ffi::LibVersion::default();
         // SAFETY: fills the struct it is given.
         unsafe { (api.airspy_lib_version)(&mut v) };
@@ -533,6 +546,29 @@ impl AirspyDevice {
             stream.ctx = None;
         }
         self.check(code, "start streaming")
+    }
+
+    /// Makes `change` with the stream stopped, when one is running, and starts
+    /// it again after: for the settings libairspy refuses, or should not be
+    /// given, on a running stream. The restarted stream counts its positions
+    /// from zero, as any new stream does, so no block of it is joined to one
+    /// from before the change.
+    fn restart_around(
+        &self,
+        stream: &mut Stream,
+        change: impl FnOnce(&mut Stream) -> anyhow::Result<()>,
+    ) -> anyhow::Result<()> {
+        let running = stream.ctx.clone().filter(|_| self.library_streaming());
+        if running.is_some() {
+            self.stop_locked(stream)?;
+        }
+        change(stream)?;
+        if let Some(ctx) = running {
+            ctx.begin_stream();
+            self.start_locked(stream, ctx)
+                .map_err(|e| e.context("the stream stopped for the change"))?;
+        }
+        Ok(())
     }
 
     /// Stops libairspy's stream and lets the context go once nothing can
@@ -627,22 +663,17 @@ impl SdrDevice for AirspyDevice {
             anyhow::bail!("the Airspy R2 runs at 2.5 or 10 Msps");
         };
         let mut stream = self.stream();
-        let running = stream.ctx.clone().filter(|_| self.library_streaming());
-        if running.is_none() || stream.rate != Some(rate) {
-            if running.is_some() {
-                self.stop_locked(&mut stream)?;
-            }
-            // SAFETY: the handle is open.
-            self.check(
-                unsafe { (self.api.airspy_set_samplerate)(self.ptr, rate) },
-                "set the rate",
-            )?;
-            stream.rate = Some(rate);
-            if let Some(ctx) = running {
-                ctx.begin_stream();
-                self.start_locked(&mut stream, ctx)
-                    .map_err(|e| e.context("the stream stopped for the rate change"))?;
-            }
+        let running = stream.ctx.is_some() && self.library_streaming();
+        if !running || stream.rate != Some(rate) {
+            self.restart_around(&mut stream, |stream| {
+                // SAFETY: the handle is open.
+                self.check(
+                    unsafe { (self.api.airspy_set_samplerate)(self.ptr, rate) },
+                    "set the rate",
+                )?;
+                stream.rate = Some(rate);
+                Ok(())
+            })?;
         }
         Ok(RateSet::new(f64::from(rate), None, 0))
     }
@@ -671,6 +702,76 @@ impl SdrDevice for AirspyDevice {
 
     fn open_notes(&self) -> &[String] {
         &self.notes
+    }
+
+    fn options(&self) -> Vec<DeviceOption> {
+        let stream = self.stream();
+        let on_off = |on: bool| if on { "On" } else { "Off" }.to_string();
+        vec![
+            DeviceOption {
+                id: "bias_tee".into(),
+                label: "Bias tee (4.5 V)".into(),
+                choices: vec!["Off".into(), "On".into()],
+                selected_choice: on_off(stream.bias_tee),
+                integer_range: None,
+            },
+            DeviceOption {
+                id: "packing".into(),
+                label: "12-bit packing".into(),
+                choices: vec!["Off".into(), "On".into()],
+                selected_choice: on_off(stream.packing),
+                integer_range: None,
+            },
+        ]
+    }
+
+    fn set_option(&self, id: &str, choice: &str) -> anyhow::Result<()> {
+        let on = match choice {
+            "On" => true,
+            "Off" => false,
+            _ => anyhow::bail!("{choice} is not a choice for {id}"),
+        };
+        let mut stream = self.stream();
+        match id {
+            "bias_tee" => {
+                // SAFETY: the handle is open.
+                self.check(
+                    unsafe { (self.api.airspy_set_rf_bias)(self.ptr, u8::from(on)) },
+                    "switch the bias tee",
+                )?;
+                stream.bias_tee = on;
+                Ok(())
+            }
+            // libairspy refuses packing on a running stream, so it restarts.
+            "packing" => self.restart_around(&mut stream, |stream| {
+                // SAFETY: the handle is open.
+                self.check(
+                    unsafe { (self.api.airspy_set_packing)(self.ptr, u8::from(on)) },
+                    "set packing",
+                )?;
+                stream.packing = on;
+                Ok(())
+            }),
+            _ => anyhow::bail!("the Airspy R2 has no option {id}"),
+        }
+    }
+
+    /// Packing only: the bias tee starts off every session, whatever the last
+    /// one ended with.
+    fn update_config(&self, config: &mut crate::config::AppConfig) -> anyhow::Result<()> {
+        config.airspy.packing = self.stream().packing;
+        Ok(())
+    }
+
+    /// Smaller while packed: libairspy 1.0.10 fills a 147456-byte packed
+    /// buffer (6144 x 24) instead of 262144, which unpacks to 98304 real
+    /// samples, 49152 I/Q pairs.
+    fn samples_per_transfer(&self) -> u64 {
+        if self.stream().packing {
+            49_152
+        } else {
+            self.caps.samples_per_transfer
+        }
     }
 }
 
@@ -742,7 +843,8 @@ pub(crate) mod bench {
                 path: None,
                 tiny_sa_input: None,
             };
-            let device = AirspyDevice::open_with_api(api, &listing).expect("the R2 opens");
+            let device = AirspyDevice::open_with_api(api, &listing, &Default::default())
+                .expect("the R2 opens");
             Self {
                 fixture,
                 device: Arc::new(device),
@@ -865,7 +967,8 @@ mod tests {
         let fixture = TestLibrary::new(false);
         let api: &'static ffi::AirspyApi =
             Box::leak(Box::new(ffi::resolve(fixture.library()).unwrap()));
-        let device = AirspyDevice::open_with_api(api, &listing()).expect("the R2 opens");
+        let device = AirspyDevice::open_with_api(api, &listing(), &Default::default())
+            .expect("the R2 opens");
         (fixture, device)
     }
 
@@ -973,7 +1076,7 @@ mod tests {
         let api: &'static ffi::AirspyApi =
             Box::leak(Box::new(ffi::resolve(fixture.library()).unwrap()));
         fixture.mode(20);
-        let why = AirspyDevice::open_with_api(api, &listing())
+        let why = AirspyDevice::open_with_api(api, &listing(), &Default::default())
             .err()
             .unwrap()
             .to_string();
@@ -982,7 +1085,7 @@ mod tests {
             "{why}"
         );
         fixture.mode(21);
-        let why = AirspyDevice::open_with_api(api, &listing())
+        let why = AirspyDevice::open_with_api(api, &listing(), &Default::default())
             .err()
             .unwrap()
             .to_string();
@@ -1187,6 +1290,80 @@ mod tests {
         );
         drop(device);
         assert_eq!(fixture.calls(3), 0, "held, not closed");
+    }
+
+    fn option(device: &AirspyDevice, id: &str) -> String {
+        device
+            .options()
+            .into_iter()
+            .find(|o| o.id == id)
+            .map(|o| o.selected_choice)
+            .unwrap_or_default()
+    }
+
+    /// **Two options, both off at first**: the bias tee and packing.
+    /// Switching the bias tee reaches the radio both ways; a choice it does
+    /// not offer is refused.
+    #[test]
+    fn the_bias_tee_is_an_option_that_reaches_the_radio() {
+        let (fixture, device) = opened();
+        let ids: Vec<String> = device.options().into_iter().map(|o| o.id).collect();
+        assert_eq!(ids, ["bias_tee", "packing"]);
+        assert_eq!(
+            (option(&device, "bias_tee"), option(&device, "packing")),
+            ("Off".into(), "Off".into())
+        );
+        device.set_option("bias_tee", "On").unwrap();
+        assert_eq!(
+            (fixture.airspy_state(1), option(&device, "bias_tee")),
+            (1, "On".into())
+        );
+        device.set_option("bias_tee", "Off").unwrap();
+        assert_eq!(fixture.airspy_state(1), 0);
+        assert!(device.set_option("bias_tee", "Maybe").is_err());
+        // The Options pane shows 18 columns of a label, and a cut one read
+        // "Bias tee, 4.5 V on" live.
+        for o in device.options() {
+            assert!(o.label.chars().count() <= 18, "{}", o.label);
+        }
+        assert!(device.set_option("turbo", "On").is_err());
+    }
+
+    /// **Packing while streaming restarts the stream with it**, since
+    /// libairspy refuses it on a running one; the block the timing bench
+    /// expects shrinks to the packed transfer's 49152 pairs.
+    #[test]
+    fn packing_while_streaming_restarts_the_stream() {
+        let (fixture, device) = opened();
+        let (ctx, net) = streaming_ctx();
+        device.start_rx(Arc::clone(&ctx)).unwrap();
+        for _ in 0..3 {
+            net.recv_timeout(WAIT).unwrap();
+        }
+        assert_eq!(device.samples_per_transfer(), 65_536);
+        device.set_option("packing", "On").unwrap();
+        assert_eq!((fixture.airspy_state(9), fixture.airspy_state(10)), (2, 1));
+        assert_eq!(fixture.airspy_state(13), 1, "the new stream is packed");
+        assert!(device.is_streaming());
+        assert_eq!(device.samples_per_transfer(), 49_152);
+        device.stop_rx().unwrap();
+    }
+
+    /// **Packing is kept, the bias tee never**: opened with packing on, the
+    /// radio is packed at open; the config takes packing back, and has
+    /// nowhere to keep the bias tee.
+    #[test]
+    fn packing_is_kept_and_the_bias_tee_is_not() {
+        let fixture = TestLibrary::new(false);
+        let api: &'static ffi::AirspyApi =
+            Box::leak(Box::new(ffi::resolve(fixture.library()).unwrap()));
+        let packed = crate::config::AirspySettings { packing: true };
+        let device = AirspyDevice::open_with_api(api, &listing(), &packed).unwrap();
+        assert_eq!(fixture.airspy_state(12), 1);
+        device.set_option("bias_tee", "On").unwrap();
+        let mut cfg = crate::config::AppConfig::default();
+        device.update_config(&mut cfg).unwrap();
+        assert_eq!(cfg.airspy, packed);
     }
 
     /// A stream that would not start leaves nothing behind and says why.
