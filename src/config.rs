@@ -54,6 +54,11 @@ pub struct RadioConfig {
     pub lna_gain: Option<u32>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub vga_gain: Option<u32>,
+    /// What the gain knob walks, on a radio that has vendor curves: a curve
+    /// by its name (`"Linearity"`), or `"manual"` for the stages by hand.
+    /// Absent: the radio's own default. Written only for a radio with curves.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub gain_mode: Option<String>,
     #[serde(default)]
     pub amp_enabled: bool,
     /// Command Rail recall slots (the rail's `M` save / `1·2·3` jump). Three
@@ -70,6 +75,7 @@ impl Default for RadioConfig {
             gain: None,
             lna_gain: None,
             vga_gain: None,
+            gain_mode: None,
             amp_enabled: false,
             recall_hz: [0; 3],
         }

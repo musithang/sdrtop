@@ -567,7 +567,7 @@ mod tests {
     }
 
     /// **Every gain key reaches its own register.** `↑` the LNA, `]` the
-    /// mixer, and the VGA once `.` has picked it: each lands on the next
+    /// mixer, and the VGA once `,` has picked it: each lands on the next
     /// measured position, in the radio and in the state alike. `]` used to
     /// call a setter the R2 does not have and report the mixer moved.
     #[test]
@@ -578,9 +578,8 @@ mod tests {
         h.press(']');
         assert_eq!(r2.registers(), [9, 7, -1]);
         assert_eq!(gains(&h), [26.96, 9.41, 0.0]);
-        for _ in 0..3 {
-            h.press('.');
-        }
+        // Backwards from the stages by hand, the ring's last stop: the VGA.
+        h.press(',');
         h.key(KeyCode::Up);
         assert_eq!(r2.registers(), [9, 7, 1]);
         assert_eq!(gains(&h), [26.96, 9.41, 3.40]);
@@ -606,12 +605,15 @@ mod tests {
         assert_eq!((r2.registers()[0], gains(&h)[0]), (2, 9.09));
     }
 
-    /// The stage picked with `.` walks its table the same way.
+    /// The stage picked on the ring walks its table the same way.
     #[test]
     fn a_picked_stage_walks_its_table_too() {
         let r2 = BenchR2::new();
         let mut h = Harness::on_r2(&r2, [27.76, 8.25, 0.0]);
-        h.press('.');
+        // Linearity, Sensitivity, then the LNA alone.
+        for _ in 0..3 {
+            h.press('.');
+        }
         h.key(KeyCode::Up);
         assert_eq!((r2.registers()[0], gains(&h)[0]), (11, 28.19));
         h.key(KeyCode::Down);
@@ -639,21 +641,92 @@ mod tests {
         );
     }
 
-    /// **`[R]` puts every stage where a first run would**, in the radio and
-    /// in the state, by the same rule; the VGA is not left where it was.
+    /// **`[R]` puts the knob where a first run starts it**: on Linearity at
+    /// step 10, every stage set by position in the radio and in the state,
+    /// from a chain that was off the curve and on no curve at all.
     #[test]
-    fn reset_sets_every_r2_stage_by_the_first_run_rule() {
+    fn reset_puts_the_r2_back_on_its_start_curve() {
         let r2 = BenchR2::new();
         let mut h = Harness::on_r2(&r2, [36.02, 12.03, 26.79]);
         h.press('r');
-        let first_run = crate::hardware::gain::defaults(&r2.device.capabilities().gain.stages());
-        assert_eq!(gains(&h), first_run);
-        let stages = r2.device.capabilities().gain.stages();
-        let positions: Vec<i32> = stages
-            .iter()
-            .zip(&first_run)
-            .map(|(s, &db)| s.position_of(db).unwrap() as i32)
-            .collect();
-        assert_eq!(r2.registers().to_vec(), positions);
+        assert_eq!(gains(&h), [16.74, 1.14, 33.51]);
+        assert_eq!(metrics(&h.state).radio.gain_curve, Some(0));
+        assert_eq!(r2.registers(), [6, 1, 10]);
+    }
+
+    fn on_curve(h: &Harness, curve: usize, step: usize) {
+        let mut m = metrics(&h.state);
+        let gm = m.caps.gain.clone();
+        m.radio.gain_curve = Some(curve);
+        m.radio.gains = gm.curves()[curve].values(step, &gm.stages());
+    }
+
+    /// **On a curve, `↑↓` walks it**: one step, all three stages set by
+    /// position to that step's entries, and the log names the curve, the step
+    /// and what each stage now is.
+    #[test]
+    fn on_a_curve_the_arrows_walk_it_and_set_every_stage() {
+        let r2 = BenchR2::new();
+        let mut h = Harness::on_r2(&r2, [0.0, 0.0, 0.0]);
+        on_curve(&h, 0, 10);
+        h.key(KeyCode::Up);
+        // Linearity 11: LNA 8, mixer 0, VGA 10.
+        assert_eq!(r2.registers(), [8, 0, 10]);
+        assert_eq!(gains(&h), [23.40, 0.0, 33.51]);
+        assert!(h.log().contains("Linearity 11/21"), "{}", h.log());
+        for _ in 0..30 {
+            h.key(KeyCode::Down);
+        }
+        assert_eq!(r2.registers(), [0, 0, 4], "the bottom of the curve");
+        on_curve(&h, 1, 12);
+        h.key(KeyCode::Up);
+        // Sensitivity 13: LNA 14, mixer 9, VGA 5.
+        assert_eq!(r2.registers(), [14, 9, 5]);
+    }
+
+    /// **A chain set off the curve by hand rejoins it at its nearest step**:
+    /// the first press moves from there, not from wherever the curve was.
+    #[test]
+    fn a_hand_set_chain_rejoins_the_curve_at_its_nearest_step() {
+        let r2 = BenchR2::new();
+        // LNA 14, mixer 15, VGA 15: nearest Linearity 21 (14, 12, 13).
+        let mut h = Harness::on_r2(&r2, [36.02, 16.24, 49.96]);
+        metrics(&h.state).radio.gain_curve = Some(0);
+        h.key(KeyCode::Down);
+        // Linearity 20: LNA 14, mixer 12, VGA 12.
+        assert_eq!(r2.registers(), [14, 12, 12]);
+    }
+
+    /// **The ring holds the curves, then each stage alone**: `.` from the
+    /// stages by hand goes to Linearity, Sensitivity, the LNA, mixer and VGA
+    /// alone, and round again; picking a stage takes the knob off the curve.
+    #[test]
+    fn the_ring_runs_through_the_curves_then_each_stage() {
+        let r2 = BenchR2::new();
+        let mut h = Harness::on_r2(&r2, [0.0, 0.0, 0.0]);
+        let mut seen = Vec::new();
+        for _ in 0..6 {
+            h.press('.');
+            let m = metrics(&h.state);
+            seen.push((m.radio.gain_curve, m.ui.gain_stage));
+        }
+        assert_eq!(
+            seen,
+            [
+                (Some(0), None),
+                (Some(1), None),
+                (None, Some(0)),
+                (None, Some(1)),
+                (None, Some(2)),
+                (Some(0), None),
+            ]
+        );
+        h.press(',');
+        let picked = {
+            let m = metrics(&h.state);
+            (m.radio.gain_curve, m.ui.gain_stage)
+        };
+        assert_eq!(picked, (None, Some(2)), "and backwards");
+        assert!(h.log().contains("Gain: Linearity curve"), "{}", h.log());
     }
 }

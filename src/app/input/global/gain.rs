@@ -177,6 +177,13 @@ pub(super) fn step_selected_stage(ctx: &mut InputCtx<'_>, up: bool) {
 /// picked across layouts and focus until the ring comes back round, and the
 /// footer says which stage `↑` / `↓` are moving.
 pub(super) fn select_stage(ctx: &mut InputCtx<'_>, forward: bool) {
+    let has_curves = ctx
+        .device
+        .is_some_and(|d| !d.capabilities().gain.curves().is_empty());
+    if has_curves {
+        select_on_curve_ring(ctx, forward);
+        return;
+    }
     let count = ctx.device.map(|d| d.capabilities().gain.stages().len());
     let Some(count) = count.filter(|n| *n > 1) else {
         return;
@@ -193,6 +200,93 @@ pub(super) fn select_stage(ctx: &mut InputCtx<'_>, forward: bool) {
     m.push_log(msg);
 }
 
+/// `,` / `.` on a device with vendor curves: the ring is the curves, then
+/// each stage alone, and round. A curve is the chain's own knob there, so the
+/// ring has no separate "whole chain" stop; picking a stage takes the knob off
+/// the curve, which is what the stages by hand means.
+fn select_on_curve_ring(ctx: &mut InputCtx<'_>, forward: bool) {
+    let mut m = metrics(ctx.state);
+    let gm = m.caps.gain.clone();
+    let curves = gm.curves().len();
+    let stages = gm.stages();
+    let ring = curves + stages.len();
+    let at = match (m.ui.gain_stage, m.radio.gain_curve) {
+        (Some(stage), _) => Some(curves + stage),
+        (None, Some(curve)) => Some(curve),
+        (None, None) => None,
+    };
+    let next = match (at, forward) {
+        (None, true) => 0,
+        (None, false) => ring - 1,
+        (Some(i), true) => (i + 1) % ring,
+        (Some(i), false) => (i + ring - 1) % ring,
+    };
+    let msg = if next < curves {
+        m.radio.gain_curve = Some(next);
+        m.ui.gain_stage = None;
+        format!("Gain: {} curve", gm.curves()[next].name)
+    } else {
+        m.radio.gain_curve = None;
+        m.ui.gain_stage = Some(next - curves);
+        format!("Gain: {} alone", stages[next - curves].name)
+    };
+    m.push_log(msg);
+}
+
+/// `↑` / `↓` on a vendor curve: one step along it from where the chain is,
+/// every stage set by position to that step's entries.
+///
+/// From the nearest step, so a chain moved off the curve by hand rejoins it
+/// where it is rather than jumping back to where the curve last was.
+fn step_curve(ctx: &mut InputCtx<'_>, curve: usize, up: bool) {
+    let Some(device) = ctx.device else { return };
+    let gm = &device.capabilities().gain;
+    let Some(c) = gm.curves().get(curve) else {
+        return;
+    };
+    let stages = gm.stages();
+    let (from, hz) = {
+        let m = metrics(ctx.state);
+        (c.nearest_step(&stages, &m.radio.gains), m.radio.frequency)
+    };
+    let step = if up {
+        (from + 1).min(c.last_step())
+    } else {
+        from.saturating_sub(1)
+    };
+    let values = c.values(step, &stages);
+
+    // Device calls with no lock held, as everywhere else in this file.
+    let mut failed = None;
+    for (index, (value, spec)) in values.iter().zip(&stages).enumerate() {
+        if let Err(e) = device.set_stage_gain(index, &spec.name, *value) {
+            failed = Some(format!("{}: {e}", spec.name));
+            break;
+        }
+    }
+
+    let mut m = metrics(ctx.state);
+    match failed {
+        Some(why) => m.push_log(format!("Gain error: {why}")),
+        None => {
+            let split: Vec<String> = stages
+                .iter()
+                .zip(&values)
+                .map(|(s, &v)| format!("{} {}", s.name, said(s, v, hz)))
+                .collect();
+            m.radio.gains = values;
+            m.lab.rf_autotrack = false;
+            m.ui.note_mode_action(RailMode::Bench);
+            m.push_log(format!(
+                "{} {step}/{} \u{2192} {}",
+                c.name,
+                c.last_step(),
+                split.join(" \u{00b7} ")
+            ));
+        }
+    }
+}
+
 /// `↑` / `↓` - step the primary front-end stage.
 ///
 /// On a device that presents its stages separately, this moves the front one
@@ -203,6 +297,12 @@ pub(super) fn select_stage(ctx: &mut InputCtx<'_>, forward: bool) {
 /// [`step_distributed`].
 pub(super) fn step_primary(ctx: &mut InputCtx<'_>, up: bool) {
     let Some(device) = ctx.device else { return };
+    // On a vendor curve the knob is the curve.
+    let curve = metrics(ctx.state).radio.gain_curve;
+    if let Some(curve) = curve.filter(|&c| c < device.capabilities().gain.curves().len()) {
+        step_curve(ctx, curve, up);
+        return;
+    }
     // A knob that moves a chain has to be distributed across it. Asked as
     // "more than one stage and no key of its own for the second", which is what
     // that has always meant: a HackRF drives its two stages from two keys, and

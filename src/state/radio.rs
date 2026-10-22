@@ -20,6 +20,14 @@ pub struct RadioState {
     /// `f64` because a stage can have a fractional step or a negative minimum;
     /// see [`crate::hardware::StageSpec`].
     pub gains: Vec<f64>,
+    /// The vendor curve `↑↓` walks, by its index in `caps.gain.curves()`;
+    /// `None` when the knob moves stages by hand.
+    ///
+    /// **What the knob does, not where the chain is.** Whether the gains sit
+    /// exactly on a step of it is asked of the curve
+    /// ([`crate::hardware::GainCurve`]), so no writer of `gains` has to
+    /// remember to clear this.
+    pub gain_curve: Option<usize>,
     pub amp_enabled: bool,
     pub rx_enabled: bool,
     pub hw_streaming: bool,

@@ -43,6 +43,7 @@ impl SdrMetrics {
                 actual_sample_rate: 0,
                 bb_filter_hz: 5_000_000,
                 gains: vec![24.0, 30.0],
+                gain_curve: None,
                 amp_enabled: false,
                 rx_enabled: false,
                 hw_streaming: false,

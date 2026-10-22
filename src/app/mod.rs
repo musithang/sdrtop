@@ -592,12 +592,32 @@ impl App {
         let Some(path) = &self.config_path else {
             return Ok(());
         };
-        let (freq, rate, gains, amp, wf_rows, wf_palette, spec_style, markers, sweep_cfg, recall) = {
+        let (
+            freq,
+            rate,
+            gains,
+            gain_mode,
+            amp,
+            wf_rows,
+            wf_palette,
+            spec_style,
+            markers,
+            sweep_cfg,
+            recall,
+        ) = {
             let m = self.state.lock().unwrap_or_else(|e| e.into_inner());
             (
                 m.radio.frequency,
                 m.radio.config_sample_rate,
                 crate::hardware::gain::format_named(&m.caps.gain.stages(), &m.radio.gains),
+                // By name, like the stages; only on a radio that has curves.
+                (!m.caps.gain.curves().is_empty()).then(|| {
+                    m.radio
+                        .gain_curve
+                        .and_then(|c| m.caps.gain.curves().get(c))
+                        .map_or("manual", |c| c.name)
+                        .to_string()
+                }),
                 m.radio.amp_enabled,
                 m.waterfall.buffer.max_rows,
                 m.waterfall.palette,
@@ -617,6 +637,7 @@ impl App {
                 gain: Some(gains),
                 lna_gain: None,
                 vga_gain: None,
+                gain_mode,
                 amp_enabled: amp,
                 recall_hz: recall,
             },

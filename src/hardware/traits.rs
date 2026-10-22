@@ -452,6 +452,16 @@ impl StageSpec {
         (self.step_db > 0.0).then(|| ((db - self.min_db) / self.step_db).round().max(0.0) as u32)
     }
 
+    /// The value at a position: its table entry, or its step counted from the
+    /// minimum, inside the range. The inverse of [`Self::position_of`].
+    pub fn value_at(&self, position: u32) -> f64 {
+        if !self.table.is_empty() {
+            let last = self.table.len() - 1;
+            return self.table[(position as usize).min(last)];
+        }
+        (self.min_db + f64::from(position) * self.step_db).clamp(self.min_db, self.max_db)
+    }
+
     /// How a setting of `db` reads with the radio tuned to `hz`.
     pub fn reading(&self, db: f64, hz: u64) -> StageReading {
         if self.db_holds_at(hz) {
@@ -655,6 +665,76 @@ impl Boost {
 /// three. Each backend now builds one of these for itself, and the eleven
 /// questions below are field reads. A driver that has to describe itself
 /// differently changes the constructor in its own module and nothing else.
+/// A vendor's own way of spreading one knob across the stages: each step a
+/// position on every stage, front to back.
+///
+/// **Positions, not decibels**, because that is what a vendor's table holds,
+/// and a position means the same register setting at every frequency even
+/// where its decibels were not measured.
+#[derive(Clone, Debug, PartialEq)]
+pub struct GainCurve {
+    pub name: &'static str,
+    /// Three letters, for the readouts that have no room for the name.
+    pub short: &'static str,
+    steps: Vec<Vec<u32>>,
+}
+
+impl GainCurve {
+    pub fn new(name: &'static str, short: &'static str, steps: Vec<Vec<u32>>) -> Self {
+        Self { name, short, steps }
+    }
+
+    /// The highest step; steps count from 0.
+    pub fn last_step(&self) -> usize {
+        self.steps.len().saturating_sub(1)
+    }
+
+    /// One value per stage at `step`, each stage's own value at the position
+    /// the curve gives it.
+    pub fn values(&self, step: usize, stages: &[StageSpec]) -> Vec<f64> {
+        let positions = &self.steps[step.min(self.last_step())];
+        stages
+            .iter()
+            .zip(positions)
+            .map(|(stage, &at)| stage.value_at(at))
+            .collect()
+    }
+
+    /// The step the chain is exactly on, if it is on one.
+    #[cfg(test)]
+    pub fn step_of(&self, stages: &[StageSpec], gains: &[f64]) -> Option<usize> {
+        let at = Self::positions_of(stages, gains)?;
+        self.steps.iter().position(|step| *step == at)
+    }
+
+    /// The step closest to the chain, by how many positions each stage is
+    /// away from it in all; the lower step on a tie. Where a hand-set chain
+    /// rejoins the curve.
+    pub fn nearest_step(&self, stages: &[StageSpec], gains: &[f64]) -> usize {
+        let Some(at) = Self::positions_of(stages, gains) else {
+            return 0;
+        };
+        self.steps
+            .iter()
+            .enumerate()
+            .min_by_key(|(_, step)| {
+                step.iter()
+                    .zip(&at)
+                    .map(|(&a, &b)| a.abs_diff(b))
+                    .sum::<u32>()
+            })
+            .map_or(0, |(i, _)| i)
+    }
+
+    fn positions_of(stages: &[StageSpec], gains: &[f64]) -> Option<Vec<u32>> {
+        stages
+            .iter()
+            .enumerate()
+            .map(|(i, s)| s.position_of(gains.get(i).copied().unwrap_or(s.min_db)))
+            .collect()
+    }
+}
+
 #[derive(Clone, Debug)]
 pub struct GainModel {
     /// The adjustable stages, front to back, in the order the device presents
@@ -684,6 +764,11 @@ pub struct GainModel {
     /// RTL-SDR whose tuner named no gains at all, or a driver that reported a
     /// chain with no room in it. 49 dB is the historical RTL answer.
     gauge_fallback_db: u32,
+    /// The vendor's curves, when the device has them; see [`GainCurve`].
+    curves: Vec<GainCurve>,
+    /// The curve and step a first run and `[R]` start from, when the device
+    /// starts on a curve rather than on its stages' defaults.
+    start: Option<(usize, usize)>,
 }
 
 impl GainModel {
@@ -718,6 +803,45 @@ impl GainModel {
             },
             no_cascade_reason: "chain not modelled",
             gauge_fallback_db: 0,
+            curves: Vec::new(),
+            start: None,
+        }
+    }
+
+    /// The vendor's curves, the knob starting on the one named `start` at
+    /// `step`.
+    pub fn with_curves(mut self, curves: Vec<GainCurve>, start: &str, step: usize) -> Self {
+        let index = curves.iter().position(|c| c.name == start);
+        debug_assert!(index.is_some(), "no curve named {start}");
+        self.curves = curves;
+        self.start = index.map(|i| (i, step));
+        self
+    }
+
+    pub fn curves(&self) -> &[GainCurve] {
+        &self.curves
+    }
+
+    /// The curve called `name`, by its index.
+    pub fn curve_named(&self, name: &str) -> Option<usize> {
+        self.curves
+            .iter()
+            .position(|c| c.name.eq_ignore_ascii_case(name))
+    }
+
+    /// The curve the knob starts on, if the device starts on one.
+    pub fn default_curve(&self) -> Option<usize> {
+        self.start.map(|(curve, _)| curve)
+    }
+
+    /// Where a first run and `[R]` put the stages with the knob on `curve`:
+    /// the start step of that curve, or each stage's own default when the knob
+    /// is on no curve.
+    pub fn start_gains(&self, curve: Option<usize>) -> Vec<f64> {
+        let stages = self.stages();
+        match curve.and_then(|c| self.curves.get(c)) {
+            Some(c) => c.values(self.start.map_or(0, |(_, step)| step), &stages),
+            None => super::gain::defaults(&stages),
         }
     }
 

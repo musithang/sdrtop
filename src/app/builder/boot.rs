@@ -41,6 +41,9 @@ pub(super) struct Tuning {
     pub bb_filter_hz: u32,
     /// One value per stage, in `caps.gain.stages()` order, already snapped.
     pub gains: Vec<f64>,
+    /// The vendor curve the knob walks, if the radio has curves and the
+    /// config did not ask for the stages by hand.
+    pub gain_curve: Option<usize>,
     /// What the configured gain string could not be honoured about.
     ///
     /// Carried out of here rather than logged here, because this function is
@@ -147,6 +150,8 @@ impl Boot {
                 // here would replace every gain the operator set with 0 dB and
                 // present it as a legal value. The test below pins the reasoning.
                 gains: observer_gains(&cfg.radio),
+                // An observed radio's knob is not ours to turn.
+                gain_curve: None,
                 // Nothing to report: with no real stage list there is nothing
                 // to fail to match a name against.
                 notes: Vec::new(),
@@ -206,13 +211,44 @@ pub(super) fn resolve_tuning(radio: &RadioConfig, caps: &DeviceCapabilities) -> 
         } else {
             caps.default_sample_rate_hz
         };
-    let (gains, notes) = resolve_gains(radio, &caps.gain);
+    let (gain_curve, mode_note) = resolve_gain_mode(radio, &caps.gain);
+    let (gains, mut notes) = resolve_gains(radio, &caps.gain, gain_curve);
+    notes.extend(mode_note);
     Tuning {
         frequency_hz,
         sample_rate,
         bb_filter_hz: hardware::native::hackrf::compute_bb_filter_bw(sample_rate),
         gains,
+        gain_curve,
         notes,
+    }
+}
+
+/// Which vendor curve the knob starts on: the one the config names, none
+/// for `"manual"`, the radio's own default when the config says nothing. A
+/// name the radio has no curve for is said, and the default stands.
+pub fn resolve_gain_mode(radio: &RadioConfig, gm: &GainModel) -> (Option<usize>, Option<String>) {
+    if gm.curves().is_empty() {
+        return (None, None);
+    }
+    match radio.gain_mode.as_deref().map(str::trim) {
+        None | Some("") => (gm.default_curve(), None),
+        Some(mode) if mode.eq_ignore_ascii_case("manual") => (None, None),
+        Some(mode) => match gm.curve_named(mode) {
+            Some(curve) => (Some(curve), None),
+            None => {
+                let start = gm.default_curve();
+                let fallback = start
+                    .and_then(|c| gm.curves().get(c))
+                    .map_or("the stages by hand", |c| c.name);
+                (
+                    start,
+                    Some(format!(
+                        "gain_mode \"{mode}\" is not one of this radio's; starting on {fallback}"
+                    )),
+                )
+            }
+        },
     }
 }
 
@@ -266,7 +302,11 @@ fn observer_gains(radio: &RadioConfig) -> Vec<f64> {
 /// Never fails. A gain string nobody can parse leaves the defaults in place and
 /// says so, because a config that refuses to load is worse than one setting that
 /// did not take.
-pub fn resolve_gains(radio: &RadioConfig, gm: &GainModel) -> (Vec<f64>, Vec<String>) {
+pub fn resolve_gains(
+    radio: &RadioConfig,
+    gm: &GainModel,
+    curve: Option<usize>,
+) -> (Vec<f64>, Vec<String>) {
     let stages = gm.stages();
     let mut notes = Vec::new();
     let mut values: Vec<f64> = stages.iter().map(|s| s.min_db).collect();
@@ -284,9 +324,9 @@ pub fn resolve_gains(radio: &RadioConfig, gm: &GainModel) -> (Vec<f64>, Vec<Stri
                 values = v;
             }
         },
-        // No string at all: the historical defaults, so a first run is
-        // unchanged, and the same ones `[R]` puts back.
-        _ => values = hardware::gain::defaults(&stages),
+        // No string at all: where the knob starts, on its curve or at the
+        // historical defaults, the same values `[R]` puts back.
+        _ => values = gm.start_gains(curve),
     }
 
     for (index, override_db) in [(0usize, radio.lna_gain), (1, radio.vga_gain)] {
@@ -323,6 +363,7 @@ pub(super) fn initial_metrics(cfg: &AppConfig, boot: Boot) -> anyhow::Result<Sdr
             // Already one value per stage, snapped onto the device's own grids
             // by `resolve_gains`.
             gains: tuning.gains.clone(),
+            gain_curve: tuning.gain_curve,
             amp_enabled: cfg.radio.amp_enabled,
             rx_enabled: false,
             hw_streaming: false,
@@ -864,7 +905,7 @@ mod tests {
         let caps = hardware::native::hackrf::caps();
         let cfg = hackrf_config();
         assert!(cfg.radio.gain.is_none(), "the old form has no string");
-        let (gains, notes) = resolve_gains(&cfg.radio, &caps.gain);
+        let (gains, notes) = resolve_gains(&cfg.radio, &caps.gain, None);
         assert_eq!(gains, vec![24.0, 30.0]);
         assert!(notes.is_empty(), "{notes:?}");
     }
@@ -875,7 +916,7 @@ mod tests {
     fn a_config_with_no_gain_at_all_uses_the_historical_defaults() {
         let caps = hardware::native::hackrf::caps();
         let cfg = AppConfig::default();
-        let (gains, _) = resolve_gains(&cfg.radio, &caps.gain);
+        let (gains, _) = resolve_gains(&cfg.radio, &caps.gain, None);
         assert_eq!(gains, vec![16.0, 20.0]);
     }
 
@@ -886,7 +927,7 @@ mod tests {
         let caps = hardware::native::hackrf::caps();
         let mut cfg = AppConfig::default();
         cfg.radio.gain = Some("VGA=41,LNA=27".into());
-        let (gains, notes) = resolve_gains(&cfg.radio, &caps.gain);
+        let (gains, notes) = resolve_gains(&cfg.radio, &caps.gain, None);
         assert_eq!(
             gains,
             vec![24.0, 42.0],
@@ -902,7 +943,7 @@ mod tests {
         let caps = hardware::native::hackrf::caps();
         let mut cfg = AppConfig::default();
         cfg.radio.gain = Some("45".into());
-        let (gains, _) = resolve_gains(&cfg.radio, &caps.gain);
+        let (gains, _) = resolve_gains(&cfg.radio, &caps.gain, None);
         assert_eq!(
             gains,
             vec![40.0, 4.0],
@@ -918,7 +959,7 @@ mod tests {
         let mut cfg = AppConfig::default();
         cfg.radio.gain = Some("LNA=8,VGA=40".into());
         cfg.radio.lna_gain = Some(32);
-        let (gains, _) = resolve_gains(&cfg.radio, &caps.gain);
+        let (gains, _) = resolve_gains(&cfg.radio, &caps.gain, None);
         assert_eq!(gains, vec![32.0, 40.0], "the VGA kept what the string set");
     }
 
@@ -930,7 +971,7 @@ mod tests {
         let caps = hardware::native::hackrf::caps();
         let mut cfg = AppConfig::default();
         cfg.radio.gain = Some("IFGR=20,LNA=16".into());
-        let (gains, notes) = resolve_gains(&cfg.radio, &caps.gain);
+        let (gains, notes) = resolve_gains(&cfg.radio, &caps.gain, None);
         assert_eq!(gains[0], 16.0);
         assert_eq!(notes.len(), 1);
         assert!(notes[0].contains("IFGR"), "{:?}", notes[0]);
@@ -943,7 +984,7 @@ mod tests {
         let caps = hardware::native::hackrf::caps();
         let mut cfg = AppConfig::default();
         cfg.radio.gain = Some("banana".into());
-        let (gains, notes) = resolve_gains(&cfg.radio, &caps.gain);
+        let (gains, notes) = resolve_gains(&cfg.radio, &caps.gain, None);
         assert_eq!(gains.len(), 2, "still one value per stage");
         assert!(!notes.is_empty(), "and it said why");
     }
@@ -957,5 +998,49 @@ mod tests {
         assert_eq!(observer_gains(&cfg.radio), vec![37.0, 41.0], "not snapped");
         cfg.radio.gain = Some("55".into());
         assert_eq!(observer_gains(&cfg.radio), vec![55.0]);
+    }
+
+    /// **An R2 starts on its curve**: with nothing in the config, on
+    /// Linearity at its start step; a curve named in the config by its name,
+    /// any case; `"manual"` on the stages' own defaults; a name the radio
+    /// has no curve for is said, and the default stands. A radio with no
+    /// curves has no mode.
+    #[test]
+    fn the_gain_mode_is_resolved_by_name() {
+        let mut caps = (*crate::state::SdrMetrics::fixture().caps).clone();
+        caps.gain = crate::hardware::native::airspy::gain_model();
+        let mut cfg = AppConfig::default();
+        let t = resolve_tuning(&cfg.radio, &caps);
+        assert_eq!(
+            (t.gain_curve, t.gains.clone()),
+            (Some(0), vec![16.74, 1.14, 33.51])
+        );
+        cfg.radio.gain_mode = Some("sensitivity".into());
+        assert_eq!(resolve_tuning(&cfg.radio, &caps).gain_curve, Some(1));
+        cfg.radio.gain_mode = Some("manual".into());
+        let t = resolve_tuning(&cfg.radio, &caps);
+        assert_eq!(t.gain_curve, None);
+        assert_eq!(
+            t.gains,
+            crate::hardware::gain::defaults(&caps.gain.stages())
+        );
+        cfg.radio.gain_mode = Some("Turbo".into());
+        let t = resolve_tuning(&cfg.radio, &caps);
+        assert_eq!(t.gain_curve, Some(0));
+        assert!(
+            t.notes
+                .iter()
+                .any(|n| n.contains("\"Turbo\"") && n.contains("Linearity")),
+            "{:?}",
+            t.notes
+        );
+        // A saved gain string wins over the start step, on the saved curve.
+        cfg.radio.gain_mode = Some("Linearity".into());
+        cfg.radio.gain = Some("LNA=23.40,MIX=0,VGA=33.51".into());
+        let t = resolve_tuning(&cfg.radio, &caps);
+        assert_eq!((t.gain_curve, t.gains), (Some(0), vec![23.40, 0.0, 33.51]));
+        let hackrf = crate::hardware::native::hackrf::caps();
+        cfg.radio.gain_mode = Some("Linearity".into());
+        assert_eq!(resolve_tuning(&cfg.radio, &hackrf).gain_curve, None);
     }
 }

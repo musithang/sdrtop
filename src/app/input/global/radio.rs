@@ -34,9 +34,11 @@ pub(super) fn reset_defaults(ctx: &mut InputCtx<'_>) {
     let def_freq = caps.default_frequency_hz;
     let def_sr = caps.default_sample_rate_hz;
     // Every stage the device has, by position, where a first run would put
-    // it: a radio with three stages is not reset in two of them.
+    // it: a radio with three stages is not reset in two of them, and one
+    // whose knob starts on a vendor curve goes back onto it.
     let stages = caps.gain.stages();
-    let gains = crate::hardware::gain::defaults(&stages);
+    let curve = caps.gain.default_curve();
+    let gains = caps.gain.start_gains(curve);
 
     // The rate is the device's own default, so a driver has no reason to round
     // it; taking what it reports anyway costs nothing and keeps one account of
@@ -64,6 +66,7 @@ pub(super) fn reset_defaults(ctx: &mut InputCtx<'_>) {
     let mut m = metrics(ctx.state);
     if results.iter().all(|r| r.is_ok()) {
         m.radio.gains = gains;
+        m.radio.gain_curve = curve;
         m.radio.amp_enabled = false;
         m.lab.rf_autotrack = false;
         m.radio.frequency = def_freq;

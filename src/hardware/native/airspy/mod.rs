@@ -36,7 +36,7 @@ use std::sync::{Arc, Mutex};
 use crate::hardware::traits::RateSet;
 use crate::hardware::{
     AcquisitionKind, DeliveryModel, DeviceCapabilities, DeviceInfo, DeviceKind, DeviceListing,
-    GainModel, LevelUnit, RxContext, SampleFormat, SampleGeometry, SdrDevice, StageSpec,
+    GainCurve, GainModel, LevelUnit, RxContext, SampleFormat, SampleGeometry, SdrDevice, StageSpec,
     IQ_TRACE_STALE_MS,
 };
 
@@ -190,6 +190,47 @@ fn label(found: &Found) -> String {
 /// The rates the R2's firmware offers, complex samples per second.
 const R2_RATES: [u32; 2] = [2_500_000, 10_000_000];
 
+// libairspy's two presets, as `airspy.c` (1.0.10, lines 117-122) holds them:
+// register positions, indexed from the top of the curve down.
+const LINEARITY_VGA: [u32; 22] = [
+    13, 12, 11, 11, 11, 11, 11, 10, 10, 10, 10, 10, 10, 10, 10, 10, 9, 8, 7, 6, 5, 4,
+];
+const LINEARITY_MIXER: [u32; 22] = [
+    12, 12, 11, 9, 8, 7, 6, 6, 5, 0, 0, 1, 0, 0, 2, 2, 1, 1, 1, 1, 0, 0,
+];
+const LINEARITY_LNA: [u32; 22] = [
+    14, 14, 14, 13, 12, 10, 9, 9, 8, 9, 8, 6, 5, 3, 1, 0, 0, 0, 0, 0, 0, 0,
+];
+const SENSITIVITY_VGA: [u32; 22] = [
+    13, 12, 11, 10, 9, 8, 7, 6, 5, 5, 5, 5, 5, 4, 4, 4, 4, 4, 4, 4, 4, 4,
+];
+const SENSITIVITY_MIXER: [u32; 22] = [
+    12, 12, 12, 12, 11, 10, 10, 9, 9, 8, 7, 4, 4, 4, 3, 2, 2, 1, 0, 0, 0, 0,
+];
+const SENSITIVITY_LNA: [u32; 22] = [
+    14, 14, 14, 14, 14, 14, 14, 14, 14, 13, 12, 12, 9, 9, 8, 7, 6, 5, 3, 2, 1, 0,
+];
+
+/// A preset as a curve over the three stages. `airspy_set_*_gain(v)` reads
+/// entry `21 - v` of each table, with both AGCs off, and does nothing else:
+/// so step `v` here is that call's setting, made through the three stage
+/// setters, and the state knows every position it put the radio at.
+fn preset(
+    name: &'static str,
+    short: &'static str,
+    lna: &[u32; 22],
+    mixer: &[u32; 22],
+    vga: &[u32; 22],
+) -> GainCurve {
+    let steps = (0..22)
+        .map(|v| {
+            let i = 21 - v;
+            vec![lna[i], mixer[i], vga[i]]
+        })
+        .collect();
+    GainCurve::new(name, short, steps)
+}
+
 /// The R2's three stages as this bench measured them: what each register
 /// position gave, in dB above position 0, from back-to-back differences
 /// against steady carriers with the other stages held (FM 92.8 MHz, 465 MHz,
@@ -230,6 +271,30 @@ pub fn gain_model() -> GainModel {
     )
     .with_second_stage()
     .with_no_cascade_reason("each stage's own noise figure is not published")
+    // The knob walks a vendor curve unless a stage is picked by hand. It
+    // starts on Linearity, which keeps the LNA low until the middle of the
+    // curve and so is the harder to overdrive near strong stations, at step
+    // 10, the middle: a choice, not a measurement.
+    .with_curves(
+        vec![
+            preset(
+                "Linearity",
+                "LIN",
+                &LINEARITY_LNA,
+                &LINEARITY_MIXER,
+                &LINEARITY_VGA,
+            ),
+            preset(
+                "Sensitivity",
+                "SEN",
+                &SENSITIVITY_LNA,
+                &SENSITIVITY_MIXER,
+                &SENSITIVITY_VGA,
+            ),
+        ],
+        "Linearity",
+        10,
+    )
 }
 
 /// What an R2 can do, from its own firmware's rates and the bench.
@@ -848,6 +913,31 @@ mod tests {
         assert!(stages[1].db_holds_at(1_800_000_000) && stages[2].db_holds_at(24_000_000));
         assert!(g.has_second_stage());
         assert_eq!(g.unmodelled_stages(), "LNA\u{25b8}MIX\u{25b8}VGA");
+    }
+
+    /// **The presets are libairspy's own tables**, step `v` reading entry
+    /// `21 - v`: the top of Linearity is LNA 14, mixer 12, VGA 13, its bottom
+    /// LNA 0, mixer 0, VGA 4, and Sensitivity 12 is LNA 13, mixer 8, VGA 5.
+    /// The knob starts on Linearity 10.
+    #[test]
+    fn the_presets_are_libairspys_tables() {
+        let g = gain_model();
+        let stages = g.stages();
+        let curves = g.curves();
+        assert_eq!(
+            curves
+                .iter()
+                .map(|c| (c.name, c.short, c.last_step()))
+                .collect::<Vec<_>>(),
+            [("Linearity", "LIN", 21), ("Sensitivity", "SEN", 21)]
+        );
+        let lin = &curves[0];
+        assert_eq!(lin.values(21, &stages), [36.02, 15.90, 43.65]);
+        assert_eq!(lin.values(0, &stages), [0.0, 0.0, 13.64]);
+        assert_eq!(curves[1].values(12, &stages), [32.34, 10.53, 16.91]);
+        assert_eq!(g.default_curve(), Some(0));
+        assert_eq!(g.start_gains(Some(0)), [16.74, 1.14, 33.51]);
+        assert_eq!(lin.step_of(&stages, &[16.74, 1.14, 33.51]), Some(10));
     }
 
     /// **Opening states what the firmware would otherwise choose**: the IQ
