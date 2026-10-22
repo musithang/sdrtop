@@ -151,8 +151,10 @@ pub(super) fn staging(
     out: &mut Vec<Line<'static>>,
     stages: &[StageSpec],
     current: &[f64],
-    targets: &[f64],
-    hz: u64,
+    // `None` where no target can be offered: a stage whose dB is not
+    // measured here, or one the tuner AGC is setting.
+    targets: Option<&[f64]>,
+    readings: &[Option<StageReading>],
     iw: usize,
     theme: &crate::Theme,
 ) {
@@ -173,7 +175,7 @@ pub(super) fn staging(
 
     for (index, spec) in stages.iter().enumerate() {
         let value = current.get(index).copied().unwrap_or(spec.min_db);
-        let target = targets.get(index).copied().unwrap_or(value);
+        let target = targets.and_then(|t| t.get(index).copied());
         let span = (spec.max_db - spec.min_db).max(1.0);
         // The front stage keeps the warmer ramp, as in the command rail: it is
         // the one whose setting decides the noise figure.
@@ -184,12 +186,19 @@ pub(super) fn staging(
         };
         // A gain against its range where it was measured; its position among
         // its settings, with no target, where it was not.
-        let (bar_value, bar_max, tick, val_str) = match spec.reading(value, hz) {
+        let reading = readings
+            .get(index)
+            .copied()
+            .flatten()
+            .unwrap_or(StageReading::Db(value));
+        let (bar_value, bar_max, tick, val_str) = match reading {
             StageReading::Position { at, of } => (at, of.max(1), None, format!("{at}/{of} step")),
+            // The tuner's own setting, which sdrtop does not know.
+            StageReading::Auto => (0, 1, None, "AGC".to_string()),
             StageReading::Db(_) => (
                 value.max(0.0).round() as u32,
                 spec.max_db.max(1.0).round() as u32,
-                Some(((target - spec.min_db) / span).clamp(0.0, 1.0)),
+                target.map(|t| ((t - spec.min_db) / span).clamp(0.0, 1.0)),
                 format!("{:.0} / {:.0} dB", value, spec.max_db),
             ),
         };
@@ -211,6 +220,16 @@ pub(super) fn staging(
         out.push(Line::raw(""));
     }
 
+    // No target, no verdict on it: "at optimum" against a target that was
+    // never offered would be a claim about nothing.
+    let Some(targets) = targets else {
+        out.push(Line::from(vec![
+            Span::raw(" "),
+            Span::styled("opt ", Style::default().fg(theme.label)),
+            Span::styled("\u{2014} no target here", Style::default().fg(theme.label)),
+        ]));
+        return;
+    };
     let at_opt = stages.iter().enumerate().all(|(i, spec)| {
         let value = current.get(i).copied().unwrap_or(spec.min_db);
         let target = targets.get(i).copied().unwrap_or(value);

@@ -144,7 +144,7 @@ impl Panel for RfChainPanel {
         let stage_specs = state.caps.gain.stages();
         // A target is a dB figure shared out over the chain, which needs every
         // stage to be a gain here; where one is not, no target is offered.
-        let targets = if state.chain_db_holds() {
+        let targets = state.chain_db_holds().then(|| {
             // On a vendor curve, a step of it: the target the auto-gain key
             // would set, not a split the knob could never reach.
             staging_target_on(
@@ -153,9 +153,10 @@ impl Panel for RfChainPanel {
                 state.radio.gain_curve,
                 &state.radio.gains,
             )
-        } else {
-            state.radio.gains.clone()
-        };
+        });
+        let readings: Vec<_> = (0..stage_specs.len())
+            .map(|i| state.stage_reading(i))
+            .collect();
         let sev_col = severity_color(sev, theme);
 
         let mut lines: Vec<Line> = Vec::new();
@@ -165,8 +166,8 @@ impl Panel for RfChainPanel {
             &mut lines,
             &stage_specs,
             &state.radio.gains,
-            &targets,
-            state.radio.frequency,
+            targets.as_deref(),
+            &readings,
             iw,
             theme,
         );
@@ -249,6 +250,20 @@ mod tests {
 
     use crate::state::fixture::draw;
     use crate::state::SdrMetrics;
+
+    /// **No target, no "at optimum"**: under the AGC (or a stage outside its
+    /// measured band) the staging block offers no target, and says so rather
+    /// than calling the chain optimal against one.
+    #[test]
+    fn with_no_target_the_staging_claims_no_optimum() {
+        let mut m = SdrMetrics::fixture().streaming().band_measured_chain();
+        m.radio.frequency = 92_800_000;
+        m.radio.amp_enabled = true;
+        let out = draw(RfChainPanel, 70, 60, &m).join("\n");
+        assert!(out.contains("no target here"), "{out}");
+        assert!(!out.contains("at optimum"), "{out}");
+        assert!(out.contains("AGC"), "{out}");
+    }
 
     /// **The level lineup stops where a gain stops being known.** With the
     /// R2 tuned outside the band its LNA was measured in, the levels after

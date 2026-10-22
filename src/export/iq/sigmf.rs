@@ -49,7 +49,8 @@ pub fn datatype(format: SampleFormat) -> &'static str {
 
 /// The gain chain by stage name, as the config saves it, and the boost when
 /// the radio has one. A stage whose dB was not measured at `hz` is written as
-/// its step (`LNA=step 14/14`), as the screen shows it.
+/// its step (`LNA=step 14/14`), and one the tuner AGC is setting as `AGC`,
+/// as the screen shows them.
 pub fn gain_text(caps: &DeviceCapabilities, gains: &[f64], boost: bool, hz: u64) -> String {
     let named = caps
         .gain
@@ -58,8 +59,14 @@ pub fn gain_text(caps: &DeviceCapabilities, gains: &[f64], boost: bool, hz: u64)
         .enumerate()
         .map(|(i, spec)| {
             let db = gains.get(i).copied().unwrap_or(spec.min_db);
-            match spec.reading(db, hz) {
+            let reading = if boost && caps.gain.auto_governs(i) {
+                StageReading::Auto
+            } else {
+                spec.reading(db, hz)
+            };
+            match reading {
                 StageReading::Position { at, of } => format!("{}=step {at}/{of}", spec.name),
+                StageReading::Auto => format!("{}=AGC", spec.name),
                 StageReading::Db(_) => crate::hardware::gain::format_named(
                     std::slice::from_ref(spec),
                     std::slice::from_ref(&db),
@@ -270,11 +277,22 @@ mod tests {
         let m = crate::state::SdrMetrics::fixture().band_measured_chain();
         assert_eq!(
             gain_text(&m.caps, &m.radio.gains, false, 943_400_000),
-            "LNA=step 14/14,MIX=12.03,VGA=26.79"
+            "LNA=step 14/14,MIX=12.03,VGA=26.79, AGC off"
         );
         assert_eq!(
             gain_text(&m.caps, &m.radio.gains, false, 92_800_000),
-            "LNA=36.02,MIX=12.03,VGA=26.79"
+            "LNA=36.02,MIX=12.03,VGA=26.79, AGC off"
+        );
+    }
+
+    /// **What the tuner AGC set is recorded as AGC**, not as the figure the
+    /// keys last left: the file would otherwise claim a gain nobody set.
+    #[test]
+    fn a_stage_under_the_agc_is_recorded_as_agc() {
+        let m = crate::state::SdrMetrics::fixture().band_measured_chain();
+        assert_eq!(
+            gain_text(&m.caps, &m.radio.gains, true, 92_800_000),
+            "LNA=AGC,MIX=AGC,VGA=26.79, AGC on"
         );
     }
 

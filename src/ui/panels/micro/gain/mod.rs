@@ -234,4 +234,25 @@ mod tests {
             "no row labelled VGA for the mixer:\n{hand}"
         );
     }
+
+    /// **Under the AGC the micro gain rows read AGC**: the R2's LNA and mixer
+    /// and its total, and an RTL-SDR's tuner, where its last manual figure
+    /// used to stay.
+    #[test]
+    fn the_micro_gain_rows_read_agc_for_what_the_tuner_sets() {
+        let mut m = SdrMetrics::fixture().band_measured_chain().on_curve(0, 10);
+        m.radio.frequency = 92_800_000;
+        m.radio.amp_enabled = true;
+        let r2 = draw(MicroGainPanel, W, H, &m).join("\n");
+        assert!(
+            r2.contains("LNA AGC \u{00b7} MIX AGC \u{00b7} VGA 34 dB"),
+            "{r2}"
+        );
+        assert!(r2.contains("Total: \u{2014}"), "{r2}");
+        let mut rtl = driven().single_stage();
+        rtl.radio.amp_enabled = true;
+        let out = draw(MicroGainPanel, W, H, &rtl).join("\n");
+        assert!(out.contains("AGC") && !out.contains("27 dB"), "{out}");
+        assert!(out.contains("Total: \u{2014}"), "{out}");
+    }
 }

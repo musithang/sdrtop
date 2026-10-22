@@ -389,6 +389,8 @@ pub enum StageReading {
     /// Where the setting sits among the stage's positions, `at` counted from
     /// 0 and `of` the last one, because its dB was not measured here.
     Position { at: u32, of: u32 },
+    /// Set by the device's own automatic gain, so sdrtop does not know it.
+    Auto,
 }
 
 impl StageReading {
@@ -397,6 +399,7 @@ impl StageReading {
         match self {
             StageReading::Db(db) => format!("{:2.0} dB", db.max(0.0)),
             StageReading::Position { at, of } => format!("{at:2}/{of}"),
+            StageReading::Auto => "  AGC".to_string(),
         }
     }
 }
@@ -778,6 +781,9 @@ pub struct GainModel {
     /// The curve and step a first run and `[R]` start from, when the device
     /// starts on a curve rather than on its stages' defaults.
     start: Option<(usize, usize)>,
+    /// The stages an automatic gain mode sets, by position; empty for all of
+    /// them. See [`Self::auto_governs`].
+    auto_stages: Vec<usize>,
 }
 
 impl GainModel {
@@ -814,7 +820,23 @@ impl GainModel {
             gauge_fallback_db: 0,
             curves: Vec::new(),
             start: None,
+            auto_stages: Vec::new(),
         }
+    }
+
+    /// The automatic gain mode sets these stages only; the rest stay where
+    /// the keys put them.
+    pub fn with_auto_stages(mut self, stages: &[usize]) -> Self {
+        self.auto_stages = stages.to_vec();
+        self
+    }
+
+    /// Whether stage `index` is the device's own to set while its automatic
+    /// gain mode is on: every stage, unless the device named the ones it
+    /// sets. A boost that is a switch rather than a gain mode sets none.
+    pub fn auto_governs(&self, index: usize) -> bool {
+        matches!(self.boost, Some(Boost::GainMode))
+            && (self.auto_stages.is_empty() || self.auto_stages.contains(&index))
     }
 
     /// The vendor's curves, the knob starting on the one named `start` at

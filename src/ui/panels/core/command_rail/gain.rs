@@ -99,6 +99,8 @@ pub(super) fn lines(
             Some(StageReading::Position { at, of }) => {
                 (at, of.max(1), StageReading::Position { at, of }.compact())
             }
+            // The tuner AGC's to set: no figure of ours to show.
+            Some(StageReading::Auto) => (0, 1, "AGC".to_string()),
             _ => {
                 let db = state.radio.stage_gain(index).max(0.0).round() as u32;
                 (db, spec.max_db.max(1.0).round() as u32, format!("{db:2}"))
@@ -222,6 +224,35 @@ mod tests {
         let lna = out.iter().position(|l| l.contains("LNA"));
         assert!(curve.is_some() && curve < lna, "{}", out.join("\n"));
         assert!(out.join("\n").contains("51 dB"), "{}", out.join("\n"));
+    }
+
+    /// **Under the AGC the rail's LNA and mixer read AGC** and the total is a
+    /// dash; the VGA keeps its dB.
+    #[test]
+    fn the_rail_reads_agc_for_what_the_tuner_sets() {
+        let mut m = crate::state::SdrMetrics::fixture()
+            .streaming()
+            .band_measured_chain()
+            .on_curve(0, 10);
+        m.radio.frequency = 92_800_000;
+        m.radio.amp_enabled = true;
+        let out = crate::state::fixture::draw(crate::ui::CommandRailPanel, 34, 40, &m).join("\n");
+        let row = |name: &str| {
+            out.lines()
+                .find(|l| l.contains(&format!(" {name} ")))
+                .unwrap_or_default()
+                .to_string()
+        };
+        assert!(
+            row("LNA").contains("AGC") && row("MIX").contains("AGC"),
+            "{out}"
+        );
+        assert!(row("VGA").contains("34"), "{out}");
+        assert!(!out.contains("LIN"), "no curve step under the AGC:\n{out}");
+        assert!(
+            out.contains("TOTAL \u{2014}") || out.contains("TOTAL  \u{2014}"),
+            "{out}"
+        );
     }
 
     /// The rail drops the boost row entirely on a device that has none, rather

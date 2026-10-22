@@ -313,6 +313,24 @@ mod tests {
     use super::*;
     use std::cell::Cell;
 
+    /// **Auto-track stops under the AGC**: the tuner is setting the stages it
+    /// would move.
+    #[test]
+    fn auto_track_stops_under_the_agc() {
+        let r2 = crate::hardware::native::airspy::bench::BenchR2::new();
+        let mut m = SdrMetrics::fixture().band_measured_chain().on_curve(0, 10);
+        m.radio.frequency = 92_800_000;
+        m.radio.amp_enabled = true;
+        m.lab.rf_autotrack = true;
+        let state = Arc::new(Mutex::new(m));
+        track_gain(&state, &r2.device, -30.0);
+        let m = state.lock().unwrap();
+        assert!(!m.lab.rf_autotrack);
+        let last = m.ui.log.back().map(|e| e.text.clone()).unwrap_or_default();
+        assert!(last.contains("the tuner AGC sets LNA and MIX"), "{last}");
+        assert_eq!(r2.registers(), [-1, -1, -1]);
+    }
+
     /// **Auto-track on a curve stays on it**: the chain it sets is a step of
     /// the curve, in the radio's registers and in the state.
     #[test]

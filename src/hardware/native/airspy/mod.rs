@@ -271,6 +271,10 @@ pub fn gain_model() -> GainModel {
     )
     .with_second_stage()
     .with_no_cascade_reason("each stage's own noise figure is not published")
+    // `[A]` is the R820T's own AGC on the LNA and the mixer, both together;
+    // the VGA has none and stays where the keys put it.
+    .with_boost(crate::hardware::Boost::GainMode)
+    .with_auto_stages(&[0, 1])
     // The knob walks a vendor curve unless a stage is picked by hand. It
     // starts on Linearity, which keeps the LNA low until the middle of the
     // curve and so is the harder to overdrive near strong stations, at step
@@ -702,6 +706,19 @@ impl SdrDevice for AirspyDevice {
 
     fn open_notes(&self) -> &[String] {
         &self.notes
+    }
+
+    /// The LNA and mixer AGC, together.
+    fn set_tuner_agc(&self, on: bool) -> anyhow::Result<()> {
+        // SAFETY: the handle is open.
+        self.check(
+            unsafe { (self.api.airspy_set_lna_agc)(self.ptr, u8::from(on)) },
+            "switch the LNA AGC",
+        )?;
+        self.check(
+            unsafe { (self.api.airspy_set_mixer_agc)(self.ptr, u8::from(on)) },
+            "switch the mixer AGC",
+        )
     }
 
     fn options(&self) -> Vec<DeviceOption> {
@@ -1364,6 +1381,22 @@ mod tests {
         let mut cfg = crate::config::AppConfig::default();
         device.update_config(&mut cfg).unwrap();
         assert_eq!(cfg.airspy, packed);
+    }
+
+    /// **`[A]` is both AGCs**, on and off together; the VGA has none.
+    #[test]
+    fn the_agc_switches_the_lna_and_mixer_agc_together() {
+        let (fixture, device) = opened();
+        device.set_tuner_agc(true).unwrap();
+        assert_eq!((fixture.airspy_state(2), fixture.airspy_state(3)), (1, 1));
+        device.set_tuner_agc(false).unwrap();
+        assert_eq!((fixture.airspy_state(2), fixture.airspy_state(3)), (0, 0));
+        let g = gain_model();
+        assert!(matches!(g.boost(), Some(crate::hardware::Boost::GainMode)));
+        assert_eq!(
+            (0..3).map(|i| g.auto_governs(i)).collect::<Vec<_>>(),
+            [true, true, false]
+        );
     }
 
     /// A stream that would not start leaves nothing behind and says why.

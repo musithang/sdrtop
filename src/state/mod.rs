@@ -142,7 +142,15 @@ impl SdrMetrics {
     /// past the end of the chain.
     pub fn stage_reading(&self, index: usize) -> Option<crate::hardware::StageReading> {
         let spec = self.caps.gain.stages().into_iter().nth(index)?;
+        if self.agc_sets(index) {
+            return Some(crate::hardware::StageReading::Auto);
+        }
         Some(spec.reading(self.radio.stage_gain(index), self.radio.frequency))
+    }
+
+    /// Whether stage `index` is being set by the device's own AGC now.
+    pub fn agc_sets(&self, index: usize) -> bool {
+        self.radio.amp_enabled && self.caps.gain.auto_governs(index)
     }
 
     /// Whether every stage's setting is a dB at the tuned frequency, so that
@@ -152,7 +160,8 @@ impl SdrMetrics {
             .gain
             .stages()
             .iter()
-            .all(|s| s.db_holds_at(self.radio.frequency))
+            .enumerate()
+            .all(|(i, s)| s.db_holds_at(self.radio.frequency) && !self.agc_sets(i))
     }
 
     /// Where the gain knob is on its vendor curve, when it walks one.
@@ -162,6 +171,10 @@ impl SdrMetrics {
     /// total where every stage is a dB here.
     pub fn curve_reading(&self) -> Option<CurveReading> {
         let gm = &self.caps.gain;
+        // Under the AGC the chain is not on any step the knob set.
+        if (0..gm.stages().len()).any(|i| self.agc_sets(i)) {
+            return None;
+        }
         let curve = gm.curves().get(self.radio.gain_curve?)?;
         let stages = gm.stages();
         let exact = curve.step_of(&stages, &self.radio.gains);
@@ -184,6 +197,16 @@ impl SdrMetrics {
     /// gives, so the target would land somewhere nobody chose.
     pub fn chain_db_refusal(&self) -> Option<String> {
         let hz = self.radio.frequency;
+        let stages = self.caps.gain.stages();
+        let auto: Vec<&str> = stages
+            .iter()
+            .enumerate()
+            .filter(|(i, _)| self.agc_sets(*i))
+            .map(|(_, s)| s.name.as_str())
+            .collect();
+        if !auto.is_empty() {
+            return Some(format!("the tuner AGC sets {}", auto.join(" and ")));
+        }
         let stage = self
             .caps
             .gain
@@ -287,6 +310,36 @@ mod stage_reading_tests {
         assert_eq!(off.step_text(), "\u{2248}21/21");
         m.radio.gain_curve = None;
         assert_eq!(m.curve_reading(), None);
+    }
+
+    /// **What the tuner AGC sets reads as AGC**: on an R2 with its AGC on,
+    /// the LNA and the mixer read `Auto` and the VGA keeps its dB; the chain
+    /// has no total and no curve step, and a decision in dB says why. An
+    /// RTL-SDR's tuner the same, where its last manual gain used to stay on
+    /// screen.
+    #[test]
+    fn stages_under_the_agc_read_as_auto() {
+        let mut m = SdrMetrics::fixture().band_measured_chain().on_curve(0, 10);
+        m.radio.frequency = 92_800_000;
+        m.radio.amp_enabled = true;
+        assert_eq!(m.stage_reading(0), Some(StageReading::Auto));
+        assert_eq!(m.stage_reading(1), Some(StageReading::Auto));
+        assert_eq!(m.stage_reading(2), Some(StageReading::Db(33.51)));
+        assert!(!m.chain_db_holds());
+        assert_eq!(m.curve_reading(), None);
+        assert_eq!(
+            m.chain_db_refusal().as_deref(),
+            Some("the tuner AGC sets LNA and MIX")
+        );
+        m.radio.amp_enabled = false;
+        assert_eq!(m.stage_reading(0), Some(StageReading::Db(16.74)));
+        let mut rtl = SdrMetrics::fixture().rtlsdr();
+        rtl.radio.amp_enabled = true;
+        assert_eq!(rtl.stage_reading(0), Some(StageReading::Auto));
+        // A HackRF's amp is a switch, not an AGC: its stages keep their dB.
+        let mut hackrf = SdrMetrics::fixture();
+        hackrf.radio.amp_enabled = true;
+        assert!(matches!(hackrf.stage_reading(0), Some(StageReading::Db(_))));
     }
 
     /// Every other device reads as it always did.

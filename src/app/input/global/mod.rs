@@ -654,6 +654,27 @@ mod tests {
         assert_eq!(r2.registers(), [6, 1, 10]);
     }
 
+    /// **`[A]` switches the R2's AGC, and a hand on a stage it governs
+    /// switches it off first**: as libairspy's own presets do, and as an
+    /// RTL-SDR's manual gain always has. Said in the log, both ways.
+    #[test]
+    fn the_agc_is_a_key_and_a_hand_on_its_stages_switches_it_off() {
+        let r2 = BenchR2::new();
+        let mut h = Harness::on_r2(&r2, [0.0, 0.0, 0.0]);
+        on_curve(&h, 0, 10);
+        h.press('a');
+        assert!(metrics(&h.state).radio.amp_enabled);
+        h.key(KeyCode::Up);
+        assert!(!metrics(&h.state).radio.amp_enabled);
+        assert_eq!(r2.registers(), [8, 0, 10], "Linearity 11, set by hand");
+        assert!(h.log().contains("AGC off"), "{}", h.log());
+        // The VGA has no AGC: moving it alone leaves the AGC on.
+        h.press('a');
+        h.press(',');
+        h.key(KeyCode::Up);
+        assert!(metrics(&h.state).radio.amp_enabled);
+    }
+
     fn on_curve(h: &Harness, curve: usize, step: usize) {
         let mut m = metrics(&h.state);
         let gm = m.caps.gain.clone();

@@ -61,12 +61,22 @@ pub(super) fn draw(
         return;
     }
 
+    // Under the tuner AGC the front stage is the tuner's to set, and the
+    // last figure the key left would be stale.
+    let (fill, text) = if state.agc_sets(0) {
+        (0.0, "AGC".to_string())
+    } else {
+        (
+            r.primary_gain() as f64 / gm.primary_max_db().max(1) as f64,
+            format!("{} dB", r.primary_gain()),
+        )
+    };
     draw_hbar(
         f,
         primary,
-        r.primary_gain() as f64 / gm.primary_max_db().max(1) as f64,
+        fill,
         &format!(" {:<w$}  ", gm.primary_label()),
-        &format!("{} dB", r.primary_gain()),
+        &text,
         theme.value,
         theme,
     );
@@ -116,7 +126,12 @@ pub(super) fn draw(
             Span::raw("    "),
             fd.label("Total: "),
             Span::styled(
-                format!("{} dB", total_gain_db(state)),
+                // Nothing to add up where the tuner AGC set a stage.
+                if (0..gm.stages().len()).any(|i| state.agc_sets(i)) {
+                    "\u{2014}".to_string()
+                } else {
+                    format!("{} dB", total_gain_db(state))
+                },
                 Style::default().fg(theme.value_hi),
             ),
         ])),

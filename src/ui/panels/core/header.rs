@@ -961,7 +961,7 @@ fn bottom_band_line(state: &SdrMetrics, theme: &crate::Theme, inner_width: u16) 
             let (value, max) = match reading {
                 Some(StageReading::Db(db)) => (db.max(0.0).round() as u32, max_db),
                 Some(StageReading::Position { at, of }) => (at, of.max(1)),
-                None => (0, 1),
+                Some(StageReading::Auto) | None => (0, 1),
             };
             let mut spans = gain_bar_spans(value, max, lo, hi);
             spans.push(Span::raw(" "));
@@ -1016,24 +1016,36 @@ fn bottom_band_line(state: &SdrMetrics, theme: &crate::Theme, inner_width: u16) 
     // register position, and the chain in dB where it holds. Its width is
     // measured rather than the fixed 42 below, because two-digit positions
     // make it a few columns wider, and the gap gives them up.
-    if let Some(curve) = state.curve_reading() {
+    // Under the AGC on such a radio the same line says so: `AGC` where the
+    // curve would be, `auto` for each stage the tuner sets.
+    let agc = (0..gm.stages().len()).any(|i| state.agc_sets(i));
+    let chain_form = match state.curve_reading() {
+        Some(c) => Some((format!("{} ", c.short), c.step_text(), c.total_db)),
+        None if agc && !gm.curves().is_empty() => Some(("AGC".to_string(), String::new(), None)),
+        None => None,
+    };
+    if let Some((head, step, total_db)) = chain_form {
         let label = Style::default().fg(theme.label);
         let value = Style::default().fg(val_color);
         let mut right = vec![
-            Span::styled(format!("{} ", curve.short), label),
-            Span::styled(curve.step_text(), value),
+            Span::styled(head, label),
+            Span::styled(step, value),
             Span::styled(" \u{25b8} ", label),
         ];
         for (i, spec) in gm.stages().iter().enumerate() {
             if i > 0 {
                 right.push(Span::styled(" \u{00b7} ", label));
             }
-            let at = spec.position_of(state.radio.stage_gain(i)).unwrap_or(0);
             right.push(Span::styled(format!("{} ", spec.name), label));
-            right.push(Span::styled(at.to_string(), value));
+            if state.agc_sets(i) {
+                right.push(Span::styled("auto", value));
+            } else {
+                let at = spec.position_of(state.radio.stage_gain(i)).unwrap_or(0);
+                right.push(Span::styled(at.to_string(), value));
+            }
         }
         right.push(Span::raw("   "));
-        match curve.total_db {
+        match total_db {
             Some(db) => right.extend([
                 Span::styled(format!("{:.0}", db.max(0.0)), value),
                 Span::styled(" dB", label),
@@ -1060,6 +1072,9 @@ fn bottom_band_line(state: &SdrMetrics, theme: &crate::Theme, inner_width: u16) 
     // the whole chain, a dB total only where every stage is one.
     let primary = if gm.has_second_stage() {
         state.stage_reading(0)
+    } else if state.agc_sets(0) {
+        // The tuner is setting it: not the last figure the key left behind.
+        Some(StageReading::Auto)
     } else {
         state
             .chain_db_holds()
@@ -1457,6 +1472,30 @@ mod tests {
             off.contains("LIN \u{2248}21/21 \u{25b8} LNA 14 \u{00b7} MIX 15 \u{00b7} VGA 15"),
             "{off}"
         );
+    }
+
+    /// **Under the AGC the header says the tuner is setting it**: on the R2
+    /// `AGC` where the curve would be and `auto` for the LNA and mixer, the
+    /// VGA's own position, no total; on an RTL-SDR `AGC` where its last
+    /// manual tuner gain used to stay.
+    #[test]
+    fn the_header_says_what_the_agc_is_setting() {
+        let mut m = crate::state::SdrMetrics::fixture()
+            .streaming()
+            .band_measured_chain()
+            .on_curve(0, 10);
+        m.radio.frequency = 92_800_000;
+        m.radio.amp_enabled = true;
+        let r2 = crate::state::fixture::draw(HeaderPanel, 160, 8, &m).join("\n");
+        assert!(
+            r2.contains("AGC \u{25b8} LNA auto \u{00b7} MIX auto \u{00b7} VGA 10   \u{2014}"),
+            "{r2}"
+        );
+        let mut rtl = crate::state::SdrMetrics::fixture().streaming().rtlsdr();
+        rtl.radio.set_stage_gain(0, 29.0);
+        rtl.radio.amp_enabled = true;
+        let out = crate::state::fixture::draw(HeaderPanel, 160, 8, &rtl).join("\n");
+        assert!(out.contains("AGC") && !out.contains("29 dB"), "{out}");
     }
 
     #[test]

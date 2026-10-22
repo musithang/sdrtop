@@ -66,6 +66,41 @@ fn next_on_stage(stage: &StageSpec, current: f64, up: bool) -> f64 {
     f64::from(next)
 }
 
+/// Before a key sets stages the tuner AGC is setting, the AGC goes off: as
+/// libairspy's presets switch it off before they set anything, and as an
+/// RTL-SDR's manual gain always has. Said in the log. `false` when the AGC
+/// would not switch off, and the key should not go on.
+fn release_agc(ctx: &mut InputCtx<'_>, touched: &[usize]) -> bool {
+    let Some(device) = ctx.device else {
+        return false;
+    };
+    let governed: Vec<String> = {
+        let m = metrics(ctx.state);
+        let stages = m.caps.gain.stages();
+        touched
+            .iter()
+            .filter(|&&i| m.agc_sets(i))
+            .filter_map(|&i| stages.get(i).map(|s| s.name.clone()))
+            .collect()
+    };
+    if governed.is_empty() {
+        return true;
+    }
+    let result = device.set_tuner_agc(false);
+    let mut m = metrics(ctx.state);
+    match result {
+        Ok(()) => {
+            m.radio.amp_enabled = false;
+            m.push_log(format!("AGC off: {} set by hand", governed.join(" and ")));
+            true
+        }
+        Err(e) => {
+            m.push_log(format!("AGC error: {e}"));
+            false
+        }
+    }
+}
+
 /// How a stage's setting reads in the log, with the radio at `hz`.
 ///
 /// Its dB where the dB holds, with its position when the stage is a table,
@@ -74,6 +109,7 @@ fn next_on_stage(stage: &StageSpec, current: f64, up: bool) -> f64 {
 fn said(stage: &StageSpec, db: f64, hz: u64) -> String {
     match stage.reading(db, hz) {
         StageReading::Position { at, of } => format!("step {at}/{of}"),
+        StageReading::Auto => "AGC".to_string(),
         StageReading::Db(db) if !stage.table.is_empty() => {
             let at = stage.position_of(db).unwrap_or(0);
             let of = stage.positions().unwrap_or(1).saturating_sub(1);
@@ -132,6 +168,9 @@ pub(super) fn step_selected_stage(ctx: &mut InputCtx<'_>, up: bool) {
     let Some(spec) = stages.get(index) else {
         return;
     };
+    if !release_agc(ctx, &[index]) {
+        return;
+    }
 
     let (current, hz) = {
         let m = metrics(ctx.state);
@@ -245,6 +284,10 @@ fn step_curve(ctx: &mut InputCtx<'_>, curve: usize, up: bool) {
         return;
     };
     let stages = gm.stages();
+    let every: Vec<usize> = (0..stages.len()).collect();
+    if !release_agc(ctx, &every) {
+        return;
+    }
     let (from, hz) = {
         let m = metrics(ctx.state);
         (c.nearest_step(&stages, &m.radio.gains), m.radio.frequency)
@@ -316,6 +359,9 @@ pub(super) fn step_primary(ctx: &mut InputCtx<'_>, up: bool) {
     let Some(front) = gain.stages().into_iter().next() else {
         return;
     };
+    if !release_agc(ctx, &[0]) {
+        return;
+    }
     let (current, hz) = {
         let m = metrics(ctx.state);
         (m.radio.stage_gain(0), m.radio.frequency)
@@ -368,6 +414,10 @@ fn step_distributed(ctx: &mut InputCtx<'_>, up: bool) {
     if stages.is_empty() {
         return;
     }
+    let every: Vec<usize> = (0..stages.len()).collect();
+    if !release_agc(ctx, &every) {
+        return;
+    }
     let from = metrics(ctx.state).radio.total_gain();
     let want = crate::hardware::gain::next_total(&stages, from, up);
     let (values, achieved) = crate::hardware::gain::distribute(&stages, want);
@@ -416,6 +466,9 @@ pub(super) fn step_vga(ctx: &mut InputCtx<'_>, up: bool) {
     }
     let stages = gm.stages();
     let Some(second) = stages.get(1) else { return };
+    if !release_agc(ctx, &[1]) {
+        return;
+    }
     let label = second.name.clone();
     let (new_gain, hz) = {
         let m = metrics(ctx.state);
