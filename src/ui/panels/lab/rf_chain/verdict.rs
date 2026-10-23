@@ -21,6 +21,8 @@ use ratatui::{
 /// The verdict in three lines. `front` is the front stage's name and `trim`
 /// the stage to take a few dB off at the end of the chain (the second stage
 /// where the radio has one), so the advice names controls the radio has.
+/// `clipper` is the part that clips before the converter, on a radio whose
+/// ceiling is not the converter's.
 fn copy(
     word: &str,
     adc_peak: f64,
@@ -28,15 +30,26 @@ fn copy(
     snr: f64,
     front: &str,
     trim: &str,
+    clipper: Option<&str>,
 ) -> [String; 3] {
+    let (saturating, rail) = match clipper {
+        Some(part) => (
+            format!("the {part} clipping, before the ADC"),
+            format!("the {part}'s limit"),
+        ),
+        None => (
+            "ADC saturating, waveform distorted".to_string(),
+            "the rail".to_string(),
+        ),
+    };
     match word {
         "CLIPPING" => [
-            format!("Signal at {adc_peak:.0} dBFS \u{2014} ADC saturating, waveform distorted."),
+            format!("Signal at {adc_peak:.0} dBFS \u{2014} {saturating}."),
             format!("Reduce {front} or {trim} to restore headroom."),
-            "SNR is lost wherever the ADC clips.".to_string(),
+            "SNR is lost wherever the signal clips.".to_string(),
         ],
         "HOT" => [
-            format!("Signal at {adc_peak:.0} dBFS \u{2014} {headroom:.0} dB from the rail."),
+            format!("Signal at {adc_peak:.0} dBFS \u{2014} {headroom:.0} dB from {rail}."),
             "SNR intact but peaks may saturate.".to_string(),
             format!("Trim {trim} by 2\u{2013}4 dB to add margin."),
         ],
@@ -65,6 +78,10 @@ pub(super) struct Verdict<'a> {
     pub sev: u8,
     pub sev_col: Color,
     pub adc_peak: f64,
+    /// The radio's ceiling, dBFS, and what clips there when it is not the
+    /// converter: the headroom and the words are about that rail.
+    pub ceiling: f64,
+    pub clipper: Option<&'a str>,
     pub snr: f64,
     pub adc_rms: f32,
     pub amp: bool,
@@ -79,7 +96,7 @@ pub(super) struct Verdict<'a> {
 pub(super) fn draw(out: &mut Vec<Line<'static>>, v: &Verdict<'_>, theme: &crate::Theme) {
     let dim = theme.border_dim;
     let lbl = Style::default().fg(theme.label);
-    let headroom = -v.adc_peak;
+    let headroom = v.ceiling - v.adc_peak;
 
     let title_mark = if v.sev == 0 {
         "\u{2713}"
@@ -96,7 +113,9 @@ pub(super) fn draw(out: &mut Vec<Line<'static>>, v: &Verdict<'_>, theme: &crate:
         ),
     ]));
     let trim = v.second.as_deref().unwrap_or(&v.front);
-    for line in copy(v.word, v.adc_peak, headroom, v.snr, &v.front, trim) {
+    for line in copy(
+        v.word, v.adc_peak, headroom, v.snr, &v.front, trim, v.clipper,
+    ) {
         out.push(Line::from(vec![Span::raw(" "), Span::styled(line, lbl)]));
     }
 
@@ -172,13 +191,13 @@ mod tests {
             words.len() >= 4,
             "expected several distinct verdicts, got {words:?}"
         );
-        let well_staged = copy("WELL-STAGED", -8.0, 8.0, 40.0, "LNA", "VGA");
+        let well_staged = copy("WELL-STAGED", -8.0, 8.0, 40.0, "LNA", "VGA", None);
         for w in &words {
             if *w == "WELL-STAGED" {
                 continue;
             }
             assert_ne!(
-                copy(w, -8.0, 8.0, 40.0, "LNA", "VGA"),
+                copy(w, -8.0, 8.0, 40.0, "LNA", "VGA", None),
                 well_staged,
                 "{w} has no copy of its own and falls through to WELL-STAGED"
             );
@@ -190,7 +209,7 @@ mod tests {
         // Every branch leads with the number it is a verdict about; a body that
         // does not name the level reads as generic advice.
         for w in ["CLIPPING", "HOT", "UNDER-UTILISED", "WEAK", "WELL-STAGED"] {
-            let c = copy(w, -3.0, 3.0, 22.0, "LNA", "VGA");
+            let c = copy(w, -3.0, 3.0, 22.0, "LNA", "VGA", None);
             assert!(c[0].contains("-3 dBFS"), "{w}: {:?}", c[0]);
         }
     }
@@ -198,8 +217,8 @@ mod tests {
     #[test]
     fn an_unknown_verdict_reads_as_well_staged_rather_than_panicking() {
         assert_eq!(
-            copy("SOMETHING NEW", -8.0, 8.0, 40.0, "LNA", "VGA"),
-            copy("WELL-STAGED", -8.0, 8.0, 40.0, "LNA", "VGA")
+            copy("SOMETHING NEW", -8.0, 8.0, 40.0, "LNA", "VGA", None),
+            copy("WELL-STAGED", -8.0, 8.0, 40.0, "LNA", "VGA", None)
         );
     }
 }

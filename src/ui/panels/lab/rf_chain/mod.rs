@@ -140,7 +140,9 @@ impl Panel for RfChainPanel {
         } else {
             signal_lineup(adc_peak, &stages)
         };
-        let (verdict_word, sev) = staging_verdict(adc_peak);
+        // Judged against this radio's ceiling, where its clip happens.
+        let ceiling = state.ceiling_dbfs();
+        let (verdict_word, sev) = staging_verdict(adc_peak - ceiling);
         let stage_specs = state.caps.gain.stages();
         // A target is a dB figure shared out over the chain, which needs every
         // stage to be a gain here; where one is not, no target is offered.
@@ -148,7 +150,7 @@ impl Panel for RfChainPanel {
             // On a vendor curve, a step of it: the target the auto-gain key
             // would set, not a split the knob could never reach.
             staging_target_on(
-                adc_peak,
+                adc_peak - ceiling,
                 &state.caps.gain,
                 state.radio.gain_curve,
                 &state.radio.gains,
@@ -203,6 +205,8 @@ impl Panel for RfChainPanel {
                 sev,
                 sev_col,
                 adc_peak,
+                ceiling,
+                clipper: state.caps.gain.ceiling_part(),
                 snr,
                 adc_rms,
                 amp,
@@ -250,6 +254,17 @@ mod tests {
 
     use crate::state::fixture::draw;
     use crate::state::SdrMetrics;
+
+    /// **At the R2's ceiling the verdict names the tuner**, not the ADC.
+    #[test]
+    fn at_the_r2s_ceiling_the_verdict_names_the_tuner() {
+        let mut m = SdrMetrics::fixture().streaming().band_measured_chain();
+        m.radio.frequency = 92_800_000;
+        m.signal.adc_peak_dbfs = -3.0;
+        let out = draw(RfChainPanel, 70, 60, &m).join("\n");
+        assert!(out.contains("GAIN CLIPPING"), "{out}");
+        assert!(out.contains("the tuner clipping, before the ADC"), "{out}");
+    }
 
     /// **No target, no "at optimum"**: under the AGC (or a stage outside its
     /// measured band) the staging block offers no target, and says so rather

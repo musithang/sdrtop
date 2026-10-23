@@ -292,6 +292,10 @@ pub fn gain_model() -> GainModel {
     // the VGA has none and stays where the keys put it.
     .with_boost(crate::hardware::Boost::GainMode)
     .with_auto_stages(&[0, 1])
+    // Measured on the bench with raw ADC samples: on a strong carrier the
+    // R820T's IF output squares off at about -3 dBFS of the converter, its
+    // rails never reached, so the clip counter sees nothing there.
+    .with_ceiling(-3.0, "tuner")
     // The knob walks a vendor curve unless a stage is picked by hand. It
     // starts on Linearity, which keeps the LNA low until the middle of the
     // curve and so is the harder to overdrive near strong stations, at step

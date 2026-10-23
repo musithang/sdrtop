@@ -27,7 +27,8 @@ const VALW: usize = 11;
 /// Top of the headroom gauge, in dB below full scale.
 const HDRM_MAX: f64 = 24.0;
 
-/// `HEADROOM` - how far the peak sits below 0 dBFS, with a tick at the optimal
+/// `HEADROOM` - how far the peak sits below the radio's ceiling (`peak` is
+/// given against it: 0 dBFS on most radios), with a tick at the optimal
 /// landing (`−OPT_PEAK_DBFS`, i.e. 8 dB of headroom).
 pub(super) fn headroom(
     out: &mut Vec<Line<'static>>,
@@ -36,7 +37,8 @@ pub(super) fn headroom(
     iw: usize,
     theme: &crate::Theme,
 ) {
-    let headroom = -peak;
+    // `+ 0.0` turns a peak exactly at the ceiling into +0 dB, not -0 dB.
+    let headroom = -peak + 0.0;
     out.push(section("Headroom", "\u{2502} = optimal", iw, theme));
     out.push(bar_row(
         Bar {
@@ -53,6 +55,23 @@ pub(super) fn headroom(
         bar_width(iw, LABEL_W, VALW),
         theme,
     ));
+}
+
+/// Where the radio clips before its converter, and that the clip count above
+/// cannot see it: a clip there touches no converter rail.
+pub(super) fn ceiling(
+    out: &mut Vec<Line<'static>>,
+    ceiling_dbfs: f64,
+    part: &str,
+    theme: &crate::Theme,
+) {
+    // Short enough for the bench at a laptop's width, where a longer line
+    // was cut live; wider still, it is cut at the panel's edge.
+    let text = format!(" {part} clips at {ceiling_dbfs:.0} dBFS, before the ADC: uncounted");
+    out.push(Line::from(Span::styled(
+        text,
+        Style::default().fg(theme.label),
+    )));
 }
 
 /// `LOADING` - peak, rms, effective bits and clip events, with the staging

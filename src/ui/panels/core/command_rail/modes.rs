@@ -212,9 +212,9 @@ pub(super) fn mode_card_lines(
         // BENCH - gain-chain health: clip headroom + a one-word verdict.
         RailMode::Bench => {
             let streaming = state.radio.hw_streaming;
-            let power = state.signal.adc_peak_dbfs;
+            // Against this radio's ceiling: where a clip happens.
             let headroom = if streaming {
-                (-power).max(0.0)
+                (-state.peak_to_ceiling_db()).max(0.0)
             } else {
                 f32::NAN
             };

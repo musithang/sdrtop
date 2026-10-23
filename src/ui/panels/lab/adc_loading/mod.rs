@@ -95,7 +95,9 @@ impl Panel for AdcLoadingPanel {
             .unwrap_or((state.radio.primary_gain(), state.radio.secondary_gain()));
         let bits = state.caps.sample_geometry.bits();
         let load = adc_loading(peak, rms, clip, n, bits);
-        let (verdict, sev) = staging_verdict(peak);
+        // Judged against this radio's ceiling, where its clip happens.
+        let ceiling = state.ceiling_dbfs();
+        let (verdict, sev) = staging_verdict(peak - ceiling);
         let sev_col = severity_color(sev, theme);
 
         let mut lines: Vec<Line> = Vec::new();
@@ -111,7 +113,7 @@ impl Panel for AdcLoadingPanel {
             &histogram::Levels {
                 peak_frac: 10f64.powf(peak / 20.0),
                 sigma_frac: histogram::per_axis_sigma_frac(rms),
-                clipping: load.clip_events > 0 || peak >= -1.0,
+                clipping: load.clip_events > 0 || peak - ceiling >= -1.0,
             },
             chart_w,
             chart_h,
@@ -119,9 +121,12 @@ impl Panel for AdcLoadingPanel {
         );
         lines.push(Line::raw(""));
 
-        readouts::headroom(&mut lines, peak, sev_col, iw, theme);
+        readouts::headroom(&mut lines, peak - ceiling, sev_col, iw, theme);
         lines.push(Line::raw(""));
         readouts::loading(&mut lines, &load, verdict, sev_col, iw, theme);
+        if let Some(part) = state.caps.gain.ceiling_part() {
+            readouts::ceiling(&mut lines, ceiling, part, theme);
+        }
         lines.push(Line::raw(""));
         // The quantisation ceiling on that card follows the device, but its
         // IIP3, IMD3 and SFDR figures are a specific front end's datasheet
@@ -202,5 +207,29 @@ mod tests {
         )
         .join("\n");
         assert!(unknown.contains("/ 14 eff"), "{unknown}");
+    }
+
+    /// **At the R2's ceiling the ADC bench says so**: a peak at -3 dBFS is
+    /// clipping in the tuner, before the converter, which the clip counter
+    /// cannot see; the counter's `none` is not left to speak alone.
+    #[test]
+    fn at_the_tuners_ceiling_the_bench_says_the_tuner_clips() {
+        let mut m = SdrMetrics::fixture().streaming().band_measured_chain();
+        m.signal.adc_peak_dbfs = -3.0;
+        let out = crate::state::fixture::draw(AdcLoadingPanel, 60, 40, &m).join("\n");
+        assert!(out.contains("CLIPPING"), "{out}");
+        assert!(
+            out.contains("tuner clips at -3 dBFS, before the ADC: uncounted"),
+            "{out}"
+        );
+        assert!(out.contains("HDRM") && out.contains("+0 dB"), "{out}");
+        let hackrf = crate::state::fixture::draw(
+            AdcLoadingPanel,
+            60,
+            40,
+            &SdrMetrics::fixture().streaming(),
+        )
+        .join("\n");
+        assert!(!hackrf.contains("tuner clips"), "{hackrf}");
     }
 }

@@ -584,19 +584,26 @@ fn rf_marker_lines(state: &SdrMetrics, theme: &crate::Theme, iw: usize) -> Vec<L
     let peak = state.signal.adc_peak_dbfs;
     let snr = state.signal.peak_to_nf_db;
     let noise = peak - snr; // ADC noise floor, dBFS
-    let headroom = -peak;
-    let (_, sev) = staging_verdict(peak as f64);
+                            // Against this radio's ceiling, which is the rail a clip happens at.
+                            // `+ 0.0` turns a peak exactly at the ceiling into +0 dB, not -0 dB.
+    let headroom = -state.peak_to_ceiling_db() + 0.0;
+    let (_, sev) = staging_verdict(state.peak_to_ceiling_db() as f64);
     let peak_col = match sev {
         2 => theme.status_crit,
         1 => theme.status_warn,
         _ => theme.status_ok,
     };
 
-    // CLIP reference line is the constant 0 dBFS rail; always shown first.
+    // CLIP reference line is the rail a clip happens at: the converter's
+    // 0 dBFS, or the part that clips first, named; always shown first.
+    let rail = match state.caps.gain.ceiling_part() {
+        Some(part) => format!("{:.0} dBFS ({part})", state.ceiling_dbfs()),
+        None => "0 dBFS".to_string(),
+    };
     let mut spans: Vec<Span> = vec![
         Span::raw(" "),
         Span::styled("CLIP ", dim),
-        Span::styled("0 dBFS", val),
+        Span::styled(rail, val),
     ];
     let mut used = span_w(&spans);
 
@@ -1150,6 +1157,29 @@ mod tests {
         assert!(
             text.contains("Clean") && text.contains("120.0 kHz"),
             "{text}"
+        );
+    }
+
+    /// **The RF marker bar draws this radio's rail**: on an R2 the tuner's
+    /// -3 dBFS, the headroom counted from it; on a HackRF the converter's
+    /// 0 dBFS, as before.
+    #[test]
+    fn the_rf_marker_draws_the_radios_own_rail() {
+        let text = |m: &SdrMetrics| -> String {
+            rf_marker_lines(m, &crate::Theme::sdr(), 190)
+                .iter()
+                .flat_map(|l| l.spans.iter().map(|s| s.content.to_string()))
+                .collect()
+        };
+        let mut r2 = SdrMetrics::fixture().streaming().band_measured_chain();
+        r2.signal.adc_peak_dbfs = -9.0;
+        let out = text(&r2);
+        assert!(out.contains("CLIP -3 dBFS (tuner)"), "{out}");
+        assert!(out.contains("\u{0394} headroom +6 dB"), "{out}");
+        let out = text(&SdrMetrics::fixture().streaming());
+        assert!(
+            out.contains("CLIP 0 dBFS") && out.contains("headroom +8 dB"),
+            "{out}"
         );
     }
 

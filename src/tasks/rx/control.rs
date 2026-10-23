@@ -173,6 +173,9 @@ pub(super) fn track_gain(
         )
     };
     let stages = gm.stages();
+    // Against the radio's ceiling: the comfortable window and the target
+    // keep their margin from where this radio clips.
+    let adc_peak_dbfs = adc_peak_dbfs - gm.ceiling_dbfs() as f32;
     // No longer gated on a modelled chain: since R3 the target is one policy
     // over whatever stages the device reports, so any radio that names some can
     // be tracked. A radio that names none has nothing to move.
@@ -312,6 +315,22 @@ pub(super) fn advance_noise_sweep(state: &Arc<Mutex<SdrMetrics>>, device: &Arc<d
 mod tests {
     use super::*;
     use std::cell::Cell;
+
+    /// **Auto-track's comfortable window is under the radio's ceiling**: a
+    /// peak at -6 dBFS is 3 dB from an R2's tuner limit, too hot, and the
+    /// chain comes down; on a HackRF it is inside the window and left alone.
+    #[test]
+    fn auto_track_keeps_clear_of_the_radios_ceiling() {
+        let r2 = crate::hardware::native::airspy::bench::BenchR2::new();
+        let mut m = SdrMetrics::fixture().band_measured_chain().on_curve(0, 15);
+        m.radio.frequency = 92_800_000;
+        m.lab.rf_autotrack = true;
+        let before: f64 = m.radio.gains.iter().sum();
+        let state = Arc::new(Mutex::new(m));
+        track_gain(&state, &r2.device, -6.0);
+        let after: f64 = state.lock().unwrap().radio.gains.iter().sum();
+        assert!(after < before, "{before} -> {after}");
+    }
 
     /// **Auto-track stops under the AGC**: the tuner is setting the stages it
     /// would move.

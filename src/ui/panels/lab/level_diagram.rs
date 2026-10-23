@@ -228,7 +228,7 @@ impl Panel for LevelDiagramPanel {
         ]));
 
         // Legend + key figures.
-        let headroom = -adc_peak;
+        let headroom = state.ceiling_dbfs() - adc_peak;
         let mut legend = vec![
             Span::raw(" "),
             Span::styled("\u{2588} signal", Style::default().fg(sig_col)),

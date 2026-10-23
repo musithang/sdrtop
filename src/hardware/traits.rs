@@ -784,6 +784,9 @@ pub struct GainModel {
     /// The stages an automatic gain mode sets, by position; empty for all of
     /// them. See [`Self::auto_governs`].
     auto_stages: Vec<usize>,
+    /// Where the chain clips before the converter does, in dBFS of the
+    /// converter, and what clips there. See [`Self::ceiling_dbfs`].
+    ceiling: Option<(f64, &'static str)>,
 }
 
 impl GainModel {
@@ -821,7 +824,29 @@ impl GainModel {
             curves: Vec::new(),
             start: None,
             auto_stages: Vec::new(),
+            ceiling: None,
         }
+    }
+
+    /// The chain clips at `dbfs` of the converter, in `what` (`"tuner"`),
+    /// before the converter's own rails: measured, not assumed.
+    pub fn with_ceiling(mut self, dbfs: f64, what: &'static str) -> Self {
+        self.ceiling = Some((dbfs, what));
+        self
+    }
+
+    /// The highest level the samples can honestly reach: the converter's
+    /// 0 dBFS, or lower where the chain clips first. Every judgement of a
+    /// peak (headroom, the staging verdict, auto-gain's target) is made
+    /// against this, because a clip there touches no converter rail and the
+    /// clip counter cannot see it.
+    pub fn ceiling_dbfs(&self) -> f64 {
+        self.ceiling.map_or(0.0, |(dbfs, _)| dbfs)
+    }
+
+    /// What clips at the ceiling, when it is not the converter.
+    pub fn ceiling_part(&self) -> Option<&'static str> {
+        self.ceiling.map(|(_, what)| what)
     }
 
     /// The automatic gain mode sets these stages only; the rest stay where

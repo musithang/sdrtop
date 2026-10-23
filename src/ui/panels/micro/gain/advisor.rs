@@ -26,7 +26,7 @@ pub(super) fn draw(f: &mut Frame, area: Rect, state: &SdrMetrics, fd: &Field) {
     let (text, color) = if fd.stale {
         ("--- (RX not streaming)", theme.stale)
     } else {
-        let (text, severity) = gain_advice(&state.iq.iq_amplitude_hist);
+        let (text, severity) = gain_advice(&state.iq.iq_amplitude_hist, state.ceiling_dbfs());
         let color = match severity {
             2 => theme.status_crit,
             1 => theme.status_warn,

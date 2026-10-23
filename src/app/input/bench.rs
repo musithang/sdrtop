@@ -152,7 +152,9 @@ pub(super) fn rf_chain(key: KeyEvent, ctx: &mut InputCtx<'_>) -> KeyAction {
             let (peak, stages, current, streaming) = {
                 let m = metrics(state);
                 (
-                    m.signal.adc_peak_dbfs as f64,
+                    // Against the radio's ceiling: the target keeps its
+                    // margin from where this radio clips.
+                    m.peak_to_ceiling_db() as f64,
                     m.caps.gain.stages(),
                     m.radio.gains.clone(),
                     m.radio.hw_streaming,
@@ -226,9 +228,14 @@ pub(super) fn rf_chain(key: KeyEvent, ctx: &mut InputCtx<'_>) -> KeyAction {
                                 .filter(|c| c.on)
                                 .map(|c| format!("{} {} \u{00b7} ", c.name, c.step_text()))
                                 .unwrap_or_default();
+                            // The target as the radio's own: 8 dB under its
+                            // ceiling, -11 dBFS on an R2 whose tuner clips at
+                            // -3.
+                            let target = m.ceiling_dbfs() + crate::ui::rf_calc::OPT_PEAK_DBFS;
                             m.push_log(format!(
-                                "Auto-gain \u{2192} {step}{} dB (signal \u{2192} \u{2212}8 dBFS)",
-                                split.join(" \u{00b7} ")
+                                "Auto-gain \u{2192} {step}{} dB (signal \u{2192} \u{2212}{:.0} dBFS)",
+                                split.join(" \u{00b7} "),
+                                -target
                             ));
                         }
                         Some(why) => m.push_log(format!("Auto-gain: {why}")),

@@ -114,13 +114,19 @@ pub fn estimate_mds_dbm(bb_filter_hz: u32, nf_db: f64) -> Option<f64> {
 
 /// Gain-staging advice from the IQ amplitude histogram.
 /// Returns `(text, severity)` where severity: 0 = OK, 1 = warn, 2 = crit.
-pub fn gain_advice(hist: &[u64; 32]) -> (&'static str, u8) {
+///
+/// The zones are quarters of the range the samples can honestly reach: the
+/// whole histogram on a radio whose ceiling is the converter, the part under
+/// the ceiling on one that clips before it (an R2's tuner at -3 dBFS, about
+/// 23 of the 32 bins), so its clipping is seen where it happens.
+pub fn gain_advice(hist: &[u64; 32], ceiling_dbfs: f64) -> (&'static str, u8) {
     let total: u64 = hist.iter().sum();
     if total == 0 {
         return ("no signal — start RX", 0);
     }
-    let low: u64 = hist[..8].iter().sum();
-    let high: u64 = hist[24..].iter().sum();
+    let usable = ((32.0 * 10f64.powf(ceiling_dbfs.min(0.0) / 20.0)).round() as usize).clamp(4, 32);
+    let low: u64 = hist[..usable / 4].iter().sum();
+    let high: u64 = hist[usable * 3 / 4..].iter().sum();
     let low_pct = low * 100 / total;
     let high_pct = high * 100 / total;
     if high_pct > 10 {
@@ -422,6 +428,19 @@ mod tests {
         );
     }
 
+    /// **The advice's clipping zone is under the radio's ceiling**: samples
+    /// gathered just below an R2's -3 dBFS are its tuner clipping, which a
+    /// zone at 0 dBFS never sees; at 0 dBFS the zones are as before.
+    #[test]
+    fn the_advice_clips_at_the_radios_ceiling() {
+        let mut hist = [0u64; 32];
+        for b in &mut hist[18..23] {
+            *b = 100;
+        }
+        assert_eq!(gain_advice(&hist, 0.0).1, 0, "a HackRF: comfortably staged");
+        assert_eq!(gain_advice(&hist, -3.0).1, 2, "an R2: at its tuner's limit");
+    }
+
     #[test]
     fn nf_amp_on_max_gain_is_near_amp_nf() {
         let nf = estimate_nf_db(true, 40);
@@ -453,7 +472,7 @@ mod tests {
         let mut hist = [0u64; 32];
         hist[24] = 20;
         hist[0] = 80; // >10% in high bins
-        let (_, sev) = gain_advice(&hist);
+        let (_, sev) = gain_advice(&hist, 0.0);
         assert_eq!(sev, 2);
     }
 
@@ -462,7 +481,7 @@ mod tests {
         let mut hist = [0u64; 32];
         hist[0] = 95;
         hist[8] = 5; // >90% in low bins
-        let (_, sev) = gain_advice(&hist);
+        let (_, sev) = gain_advice(&hist, 0.0);
         assert_eq!(sev, 1);
     }
 
@@ -471,7 +490,7 @@ mod tests {
         let mut hist = [0u64; 32];
         hist[8] = 50;
         hist[16] = 50; // mid-range utilisation
-        let (_, sev) = gain_advice(&hist);
+        let (_, sev) = gain_advice(&hist, 0.0);
         assert_eq!(sev, 0);
     }
 

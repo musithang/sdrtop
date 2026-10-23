@@ -148,6 +148,18 @@ impl SdrMetrics {
         Some(spec.reading(self.radio.stage_gain(index), self.radio.frequency))
     }
 
+    /// The highest level the samples can honestly reach on this radio, dBFS.
+    /// See [`crate::hardware::GainModel::ceiling_dbfs`].
+    pub fn ceiling_dbfs(&self) -> f64 {
+        self.caps.gain.ceiling_dbfs()
+    }
+
+    /// The ADC peak against that ceiling: 0 at it, negative below. What the
+    /// staging verdicts, the headroom and auto-gain judge.
+    pub fn peak_to_ceiling_db(&self) -> f32 {
+        self.signal.adc_peak_dbfs - self.ceiling_dbfs() as f32
+    }
+
     /// Whether stage `index` is being set by the device's own AGC now.
     pub fn agc_sets(&self, index: usize) -> bool {
         self.radio.amp_enabled && self.caps.gain.auto_governs(index)
@@ -340,6 +352,23 @@ mod stage_reading_tests {
         let mut hackrf = SdrMetrics::fixture();
         hackrf.radio.amp_enabled = true;
         assert!(matches!(hackrf.stage_reading(0), Some(StageReading::Db(_))));
+    }
+
+    /// **The peak is judged against the radio's own ceiling**: on an R2 its
+    /// tuner clips at -3 dBFS, so a peak there is at the limit; a HackRF's
+    /// ceiling is the converter's 0 dBFS.
+    #[test]
+    fn the_peak_is_judged_against_the_radios_ceiling() {
+        let mut r2 = SdrMetrics::fixture().band_measured_chain();
+        r2.signal.adc_peak_dbfs = -3.0;
+        assert_eq!(r2.ceiling_dbfs(), -3.0);
+        assert_eq!(r2.peak_to_ceiling_db(), 0.0);
+        let mut hackrf = SdrMetrics::fixture();
+        hackrf.signal.adc_peak_dbfs = -3.0;
+        assert_eq!(
+            (hackrf.ceiling_dbfs(), hackrf.peak_to_ceiling_db()),
+            (0.0, -3.0)
+        );
     }
 
     /// Every other device reads as it always did.
