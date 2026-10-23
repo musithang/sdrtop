@@ -3,12 +3,12 @@
 
 //! What the panel measures, computed once.
 //!
-//! Four blocks draw from the same six numbers, and two of them (the verdict and
+//! The blocks draw from the same numbers, and two of them (the verdict and
 //! the image bar) need figures the DC block derived. Computing them here rather
 //! than in each section is what lets [`super::verdict::decide`] be a pure
 //! function of a `Reading` instead of a function of the whole metrics snapshot:
 //! the decision then has nothing to do with drawing, and can be tested by
-//! writing down six numbers.
+//! writing down a handful of numbers.
 
 use crate::signal::image_rejection_db;
 use crate::state::SdrMetrics;
@@ -25,6 +25,10 @@ pub(super) struct Reading {
     pub dc_mag: f64,
     /// How tall the LO spike is, or `None` when there is no offset at all.
     pub spike_dbfs: Option<f64>,
+    /// How far the DC stands over (positive) or under the signal's magnitude
+    /// rms (DC excluded), dB.
+    /// `None` with no offset at all.
+    pub dc_over_signal_db: Option<f64>,
     pub amp_db: f32,
     pub phase_deg: f32,
     pub irr_db: f64,
@@ -35,11 +39,14 @@ impl Reading {
         let dc_i = state.iq.dc_offset_i;
         let dc_q = state.iq.dc_offset_q;
         let dc_mag = (dc_i as f64).hypot(dc_q as f64);
+        let spike_dbfs = dc_spike_dbfs(dc_mag);
+        let rms_dbfs = state.signal.adc_rms_dbfs as f64;
         Self {
             dc_i,
             dc_q,
             dc_mag,
-            spike_dbfs: dc_spike_dbfs(dc_mag),
+            spike_dbfs,
+            dc_over_signal_db: spike_dbfs.map(|s| s - rms_dbfs),
             amp_db: state.iq.iq_imbalance_db,
             phase_deg: state.iq.phase_imbalance_deg,
             irr_db: image_rejection_db(state.iq.iq_imbalance_db, state.iq.phase_imbalance_deg),

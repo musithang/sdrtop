@@ -3,10 +3,10 @@
 
 //! The row vocabulary the three measurement sections share.
 //!
-//! Four shapes: a bipolar null-meter for a deviation from zero, a gradient bar
-//! for a quality that runs one way, a plain right-aligned readout, and a filled
-//! chip. All four take their widths from one place, which is what keeps every
-//! meter, bar and value starting and ending at the same column.
+//! Three shapes: a bipolar null-meter for a deviation from zero, a gradient bar
+//! for a quality that runs one way, and a filled chip. They take their widths
+//! from one place, which is what keeps every meter, bar and value starting and
+//! ending at the same column.
 //!
 //! These were four closures inside `render`, captured over `iw`, `theme`,
 //! `field_w` and `track_w`. As a struct the widths are computed once and named,
@@ -19,8 +19,8 @@ use ratatui::{
 
 use crate::ui::widgets::charts::{gain_bar_colored, null_meter};
 
-/// Fixed label field: `" LBL "` - space + three columns + space.
-const LEAD: usize = 5;
+/// Fixed label field: `" label "` - space + five columns + space.
+pub(super) const LEAD: usize = 7;
 /// Right-hand value budget, so the numbers align down the panel.
 const VALUE_W: usize = 10;
 
@@ -57,19 +57,6 @@ impl<'a> Rows<'a> {
         self.dim
     }
 
-    /// `" text ………… value"` - value right-aligned to the panel edge.
-    pub(super) fn readout(&self, text: &str, val: String, color: Color) -> Line<'static> {
-        let pad = self
-            .iw
-            .saturating_sub(1 + text.chars().count() + val.chars().count());
-        Line::from(vec![
-            Span::raw(" "),
-            Span::styled(text.to_string(), self.lbl),
-            Span::raw(" ".repeat(pad.max(1))),
-            Span::styled(val, Style::default().fg(color).add_modifier(Modifier::BOLD)),
-        ])
-    }
-
     /// Filled cockpit chip, the same pill style as the command-rail mode tabs.
     /// `active` lights it from the live correction state.
     pub(super) fn chip(&self, label: &str, active: bool) -> Span<'static> {
@@ -85,7 +72,7 @@ impl<'a> Rows<'a> {
         Span::styled(format!(" {label} "), st)
     }
 
-    /// `" LBL "` + bipolar null-meter + value. For a reading whose ideal is zero
+    /// `" label "` + bipolar null-meter + value. For a reading whose ideal is zero
     /// and which can err either way.
     pub(super) fn meter(
         &self,
@@ -105,7 +92,7 @@ impl<'a> Rows<'a> {
         Line::from(spans)
     }
 
-    /// `" LBL "` + gradient quality bar + value. `frac` 0..1 maps the fill; for a
+    /// `" label "` + gradient quality bar + value. `frac` 0..1 maps the fill; for a
     /// reading that only runs one way, so `lo`/`hi` say which end is good.
     pub(super) fn bar(
         &self,
@@ -130,7 +117,7 @@ impl<'a> Rows<'a> {
     fn lead(&self, label: &str) -> Vec<Span<'static>> {
         vec![
             Span::raw(" "),
-            Span::styled(format!("{label:<3}"), self.lbl),
+            Span::styled(format!("{label:<5}"), self.lbl),
             Span::raw(" "),
         ]
     }
@@ -180,24 +167,5 @@ mod tests {
         let r = Rows::new(4, &t);
         assert!(r.field_w >= 8, "field collapsed to {}", r.field_w);
         assert!(r.track_w >= 6, "track collapsed to {}", r.track_w);
-    }
-
-    /// The readout right-aligns its value; with a long label there is still at
-    /// least one space between the two rather than them running together.
-    #[test]
-    fn a_readout_never_glues_its_label_to_its_value() {
-        let t = Theme::sdr();
-        let r = Rows::new(20, &t);
-        let line = r.readout("a very long label indeed", "-57.3 dBFS".into(), t.label);
-        let text: String = line.spans.iter().map(|s| s.content.as_ref()).collect();
-        assert!(
-            text.ends_with("-57.3 dBFS"),
-            "value not at the end: {text:?}"
-        );
-        let before = text.trim_end_matches("-57.3 dBFS");
-        assert!(
-            before.ends_with(' '),
-            "label and value ran together: {text:?}"
-        );
     }
 }

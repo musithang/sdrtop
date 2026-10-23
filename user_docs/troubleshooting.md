@@ -339,9 +339,11 @@ reports the same receiver as the same receiver.
 
 ### DC offset or DC spike is high
 
-Every radio has some DC offset from component tolerances, and a DC spike below
-−40 dBFS is normal. If it's in the way of a measurement, press `D` in Lab IQ
-focus and it's subtracted from the stream. Some sample rates also show less of it
+Every radio has some DC offset from component tolerances. What makes it a problem
+is how loud it is against your signal, which IQ Diagnostics shows: well under the
+signal it is a small spike at the centre, within 10 dB of it it is the loudest
+thing you are receiving. Either way, press `D` in Lab IQ focus and it's subtracted
+from the stream. Some sample rates also show less of it
 than others, so `s` and a bit of experimenting is worth a try.
 
 ### IRR is low

@@ -8,7 +8,7 @@
 //! severity plus the words. [`lines`] is what turns that into spans. The same
 //! separation `signal_characterization` got in R4e, and for the same reason: the
 //! interesting part of this block is *which* verdict, and that is now testable by
-//! writing down six numbers.
+//! writing down a handful of numbers.
 //!
 //! The thresholds are [`super::severity`]'s, not literals of its own. Before the
 //! split the verdict compared against `3.0`, `5.0`, `0.02`, `1.0` and `2.0`
@@ -25,7 +25,9 @@ use crate::state::IqCalState;
 
 use super::reading::Reading;
 use super::rows::Rows;
-use super::severity::{AMP_CRIT_DB, AMP_WARN_DB, OFFSET_CRIT, PHASE_CRIT_DEG, PHASE_WARN_DEG};
+use super::severity::{
+    AMP_CRIT_DB, AMP_WARN_DB, DC_REL_CRIT_DB, OFFSET_CRIT, PHASE_CRIT_DEG, PHASE_WARN_DEG,
+};
 
 /// How loudly to say it. Maps to a theme colour in [`lines`], nowhere else.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -69,7 +71,7 @@ pub(super) fn decide(r: &Reading, cal: &IqCalState) -> Verdict {
             level: Level::Crit,
             body: vec![
                 (
-                    format!("I/Q off balance \u{2192} image only \u{2212}{irr} dB."),
+                    format!("I/Q off balance: the image only {irr} dB down."),
                     Tone::Plain,
                 ),
                 (
@@ -84,20 +86,22 @@ pub(super) fn decide(r: &Reading, cal: &IqCalState) -> Verdict {
         };
     }
 
-    if r.dc_mag > OFFSET_CRIT as f64 {
-        let spike = r
-            .spike_dbfs
-            .map(|s| format!("{s:.1}"))
-            .unwrap_or_else(|| "\u{2014}".into());
+    // High against full scale, or against the signal: the same offset is a
+    // small spike under a strong signal and the loudest thing in a weak one.
+    let near_signal = r.dc_over_signal_db.is_some_and(|d| d > DC_REL_CRIT_DB);
+    if r.dc_mag > OFFSET_CRIT as f64 || near_signal {
+        let how = match (r.dc_over_signal_db, r.spike_dbfs) {
+            (Some(d), _) if d >= 0.0 => format!("The DC is {d:.0} dB over the signal."),
+            (Some(d), _) => format!("The DC is only {:.0} dB under the signal.", -d),
+            (None, Some(s)) => format!("The DC is {s:.0} dBFS at the LO."),
+            (None, None) => "The DC is off zero.".to_string(),
+        };
         return Verdict {
             mark: "\u{26a0}",
             title: "DC OFFSET HIGH",
             level: Level::Warn,
             body: vec![
-                (
-                    format!("I/Q centroid off-zero \u{2192} DC spike {spike} dBFS at LO."),
-                    Tone::Plain,
-                ),
+                (how, Tone::Plain),
                 (
                     if cal.dc_block_on {
                         "DC-block on but residual offset remains.".into()
@@ -116,25 +120,33 @@ pub(super) fn decide(r: &Reading, cal: &IqCalState) -> Verdict {
             title: "MINOR IMBALANCE",
             level: Level::Warn,
             body: vec![(
-                "Within tolerance \u{2014} watch the image level.".into(),
+                format!("Within tolerance: the image {irr} dB down."),
                 Tone::Plain,
             )],
         };
     }
 
     let corrected = cal.cal_applied || cal.dc_block_on;
+    let tone = if corrected { Tone::Good } else { Tone::Plain };
+    let dc = match r.dc_over_signal_db {
+        Some(d) => format!("The DC {:.0} dB under the signal.", -d),
+        None => "No DC offset.".to_string(),
+    };
     Verdict {
         mark: "\u{2713}",
         title: "IQ QUALITY OK",
         level: Level::Ok,
-        body: vec![(
-            if corrected {
-                format!("Corrections active \u{00b7} image \u{2212}{irr} dB \u{00b7} DC centred.")
-            } else {
-                format!("Quadrature balanced \u{00b7} image \u{2212}{irr} dB \u{00b7} DC centred.")
-            },
-            if corrected { Tone::Good } else { Tone::Plain },
-        )],
+        body: vec![
+            (
+                if corrected {
+                    format!("Corrections active, the image {irr} dB down.")
+                } else {
+                    format!("Quadrature balanced, the image {irr} dB down.")
+                },
+                tone,
+            ),
+            (dc, tone),
+        ],
     }
 }
 
@@ -285,6 +297,29 @@ mod tests {
         );
         assert_eq!(corrected.body[0].1, Tone::Good);
         assert!(corrected.body[0].0.starts_with("Corrections active"));
+    }
+
+    /// **High against the signal is high**: an offset under the absolute
+    /// limit that stands within 10 dB of a weak signal is the loudest thing in
+    /// the capture, and a recording of Wi-Fi at 2462 MHz had it 3 dB over the
+    /// signal while this said "DC centred".
+    #[test]
+    fn a_dc_near_the_signal_is_high_even_under_the_absolute_limit() {
+        let mut m = SdrMetrics::fixture();
+        m.iq.dc_offset_i = -0.0063;
+        m.iq.dc_offset_q = 0.0149;
+        m.signal.adc_rms_dbfs = -38.4;
+        let v = decide(&Reading::of(&m), &IqCalState::default());
+        assert_eq!(v.title, "DC OFFSET HIGH");
+        assert!(v.body[0].0.contains("3 dB over the signal"), "{:?}", v.body);
+        m.signal.adc_rms_dbfs = -10.0;
+        let v = decide(&Reading::of(&m), &IqCalState::default());
+        assert_eq!(v.title, "IQ QUALITY OK", "{:?}", v.body);
+        assert!(
+            v.body[1].0.contains("26 dB under the signal"),
+            "{:?}",
+            v.body
+        );
     }
 
     /// The verdict's boundaries are the colour scale's boundaries. If they ever

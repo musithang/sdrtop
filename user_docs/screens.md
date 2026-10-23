@@ -221,9 +221,10 @@ the panel says so itself.
 
 Three views of the same quadrature question, from three directions.
 
-- **IQ Diagnostics** *(left, focus `i`)*: DC offset, amplitude and phase
-  imbalance, and IRR, each drawn as an analog **null-meter** where the centre tick
-  is perfect and the needle shows how far off you are. Its focus mode is also
+- **IQ Diagnostics** *(left, focus `i`)*: the DC offset against the signal, gain
+  and phase imbalance as analog **null-meters** where the centre tick is perfect
+  and the needle shows how far off you are, and the image rejection those two
+  predict. Its focus mode is also
   where sdrtop *corrects* the stream rather than just measuring it.
 - **IQ Constellation** *(centre)*: recent I/Q pairs as a dot-cloud coloured by
   density, phosphor-scope style, in a square zoomed to the cloud with dBFS rings,

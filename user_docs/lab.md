@@ -286,27 +286,34 @@ do something about the answer.
 
 ### IQ Diagnostics *(focus `i`)*
 
-Each *deviation-from-ideal* is drawn as an analog **null-meter**: a centre tick is
-"perfect", and a coloured needle deflects left or right by how far off you are,
-with the span between centre and needle filled. A glance reads the state; the
-number beside it reads the exact value.
+Three blocks and a verdict, top to bottom.
 
-- **DC I / DC Q**: how far each channel is offset from zero, with a combined **DC
-  magnitude** quality bar. A high DC offset puts a fixed tone right in the middle
-  of your spectrum.
-- **DC spike**: how tall that centre-frequency spike is, in dBFS. Green below
-  −40 dBFS.
-- **Amp imbalance**: whether I and Q carry the same power. A mismatch creates
-  mirror images of signals on the opposite side of centre.
-- **Phase imbalance**: whether I and Q are exactly 90° apart. Also causes
-  mirroring.
-- **IRR**: **Image Rejection Ratio** in dB, as a red-to-green quality bar. This is
-  the key quadrature-quality figure. It tells you how far *below* every real
-  signal its mirror image appears. 30 dB or more is good, the images are faint;
-  below 20 dB and they become a problem.
+**DC at the LO.** A DC offset is a tone at 0 Hz, right in the middle of your
+spectrum, and what decides whether it matters is how loud it is *against the
+signal*. The same offset is a small spike under a strong station and the loudest
+thing in the capture under a weak one: a HackRF on FM at a modest gain can carry
+its DC 12 dB over everything it receives. So the block gives the DC's level in
+dBFS, how far over or under the signal's rms that is, a scale showing it
+(green well under, amber closing in, red within 10 dB or over), and the I and Q
+split as a percentage of full scale.
 
-A contextual hint at the bottom summarises whether anything needs attention,
-colour-matched to severity.
+**Quadrature.** Two analog **null-meters**, where the centre tick is perfect and
+the needle deflects by how far off you are:
+
+- **gain**: whether I and Q carry the same power.
+- **phase**: whether I and Q are exactly 90° apart.
+
+Either one puts a mirror image of every signal on the opposite side of the LO, and
+right under them is how far down that image should be, the **IRR** those two
+predict, as a red-to-green bar with its 60-second trend. 30 dB or more is good;
+below 20 dB the images become a problem. It is a prediction from the imbalance
+figures; the [Image-Rejection Scope](#image-rejection-scope) is where an image is
+measured.
+
+**The verdict** says the one thing that matters most, in plain words, and the chips
+under it show which corrections are on, with how long ago the auto-cal was taken.
+The DC counts as high when it is over 2 % of full scale *or* within 10 dB of the
+signal.
 
 ### IQ Constellation
 
@@ -792,9 +799,9 @@ A typical setup flow, switching presets as you go:
 2. In **Lab IQ (`Lab 1`)**, watch the **constellation**: adjust LNA and VGA until the
    cloud is a bright, well-filled ring with no red ring in sight (full scale, or
    the radio's clip, only appears when the signal gets near it). Glance at **IQ Diagnostics**:
-   a centred needle on each null-meter, IRR above 30 dB and DC spike below
-   −40 dBFS mean clean quadrature. If the DC spike is in your way, press `D`; if
-   the images are, park on a strong carrier and press `C`.
+   a centred needle on each null-meter, an image predicted 30 dB or more down,
+   and the DC well under the signal mean clean quadrature. If the DC is in your
+   way, press `D`; if the images are, park on a strong carrier and press `C`.
 3. In **Lab RF (`Lab 2`)**, focus **RF Diagnostics** (`d`) and press `A` to auto-stage
    the gain, then read **NF** and **MDS** to confirm the receiver is sensitive
    enough for what you're chasing. Watch the **ADC Loading** ladder put the peak

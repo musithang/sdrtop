@@ -1,7 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright (C) 2026 MusiThang <viktor.laszlo92@protonmail.com>
 
-//! IMAGE REJECTION section: the IRR bar and its 60-second trend.
+//! The image the quadrature predicts: the IRR bar and its 60-second trend,
+//! closing the quadrature section as the consequence of its two meters.
 //!
 //! IRR is the one reading here where higher is better, so the bar's gradient runs
 //! crit → ok rather than the other way, and the trend sparkline is auto-scaled:
@@ -14,7 +15,6 @@ use ratatui::{
 };
 
 use crate::state::SdrMetrics;
-use crate::ui::chrome::section;
 use crate::ui::widgets::micro_common::spark_minmax;
 
 use super::reading::Reading;
@@ -38,22 +38,24 @@ pub(super) fn lines(state: &SdrMetrics, r: &Reading, rows: &Rows) -> Vec<Line<'s
     let theme = rows.theme;
     let color = irr_color(r.irr_db, theme);
 
+    // The image these two predict, said as the scope says a measured one:
+    // how far down it is, positive.
     let mut out = vec![
-        section(
-            "Image rejection",
-            "IRR \u{00b7} higher better",
-            rows.iw,
-            theme,
-        ),
-        Line::raw(""),
         rows.bar(
-            "IRR",
+            "image",
             r.irr_db / IRR_FULL_SCALE_DB,
             theme.status_crit,
             theme.status_ok,
             color,
             r.irr_text(1),
         ),
+        Line::from(Span::styled(
+            format!(
+                "{}down, as gain and phase predict it",
+                " ".repeat(super::rows::LEAD)
+            ),
+            Style::default().fg(rows.dim()),
+        )),
         Line::raw(""),
     ];
 
@@ -77,6 +79,13 @@ pub(super) fn lines(state: &SdrMetrics, r: &Reading, rows: &Rows) -> Vec<Line<'s
             Span::styled(ann, Style::default().fg(rows.dim())),
         ]));
     }
+    out.push(Line::from(Span::styled(
+        format!(
+            "{}measured on the scope \u{2192}",
+            " ".repeat(super::rows::LEAD)
+        ),
+        Style::default().fg(rows.dim()),
+    )));
     out
 }
 
@@ -94,6 +103,9 @@ mod tests {
         let rows = Rows::new(60, &t);
         let out = lines(&m, &Reading::of(&m), &rows);
         assert_eq!(out.len(), 4, "a trend row appeared with no history");
+        assert!(!out
+            .iter()
+            .any(|l| l.spans.iter().any(|s| s.content.contains("trend"))));
     }
 
     /// And with history it appears, annotated with the window's spread.
@@ -105,7 +117,7 @@ mod tests {
         let rows = Rows::new(60, &t);
         let out = lines(&m, &Reading::of(&m), &rows);
         assert_eq!(out.len(), 5);
-        let text: String = out[4].spans.iter().map(|s| s.content.as_ref()).collect();
+        let text: String = out[3].spans.iter().map(|s| s.content.as_ref()).collect();
         assert!(text.contains("trend"), "{text:?}");
         assert!(text.contains("dB/60s"), "{text:?}");
         // Peak-to-peak of 0..4 is 4, so the ± annotation is half of it.

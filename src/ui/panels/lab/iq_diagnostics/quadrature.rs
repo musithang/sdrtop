@@ -4,7 +4,9 @@
 //! QUADRATURE section: how far the two channels are from balance.
 //!
 //! Both readings are deviations from zero that can err either way, so both are
-//! null-meters. What they cost in image rejection is [`super::image`]'s job.
+//! null-meters. What they cost in image rejection follows them in the same
+//! section, from [`super::image`], because it is their consequence and not a
+//! separate measurement.
 
 use ratatui::text::Line;
 
@@ -23,9 +25,9 @@ const PHASE_FULL_SCALE_DEG: f64 = 6.0;
 pub(super) fn lines(r: &Reading, rows: &Rows) -> Vec<Line<'static>> {
     let theme = rows.theme;
     vec![
-        section("Quadrature", "gain \u{00b7} phase balance", rows.iw, theme),
+        section("Quadrature", "gain \u{00b7} phase", rows.iw, theme),
         rows.meter(
-            "AMP",
+            "gain",
             r.amp_db as f64,
             AMP_FULL_SCALE_DB,
             imbalance_color(r.amp_db.abs(), theme),
@@ -33,7 +35,7 @@ pub(super) fn lines(r: &Reading, rows: &Rows) -> Vec<Line<'static>> {
         ),
         Line::raw(""),
         rows.meter(
-            "PHA",
+            "phase",
             r.phase_deg as f64,
             PHASE_FULL_SCALE_DEG,
             phase_color(r.phase_deg.abs(), theme),

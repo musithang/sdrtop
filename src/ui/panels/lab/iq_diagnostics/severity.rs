@@ -10,10 +10,16 @@
 
 use ratatui::style::Color;
 
-/// DC offset per channel, in raw units. `±0.010` is the target printed on the
-/// section nameplate; twice that is where it starts distorting the spectrum.
-pub(super) const OFFSET_WARN: f32 = 0.005;
+/// The DC offset's magnitude, as a fraction of full scale, past which it is
+/// high whatever the signal: two percent of the converter's range spent on a
+/// tone at 0 Hz.
 pub(super) const OFFSET_CRIT: f32 = 0.02;
+
+/// The DC against the signal's rms, dB (negative is under it). Within 10 dB
+/// of the signal the DC is a large share of everything the converter carries;
+/// 30 dB under, it is a small spike at the LO.
+pub(super) const DC_REL_WARN_DB: f64 = -30.0;
+pub(super) const DC_REL_CRIT_DB: f64 = -10.0;
 
 /// Amplitude imbalance, dB.
 pub(super) const AMP_WARN_DB: f32 = 1.0;
@@ -22,16 +28,6 @@ pub(super) const AMP_CRIT_DB: f32 = 3.0;
 /// Phase imbalance, degrees.
 pub(super) const PHASE_WARN_DEG: f32 = 2.0;
 pub(super) const PHASE_CRIT_DEG: f32 = 5.0;
-
-pub(super) fn offset_color(abs_val: f32, theme: &crate::Theme) -> Color {
-    if abs_val > OFFSET_CRIT {
-        theme.status_crit
-    } else if abs_val > OFFSET_WARN {
-        theme.status_warn
-    } else {
-        theme.status_ok
-    }
-}
 
 pub(super) fn imbalance_color(abs_db: f32, theme: &crate::Theme) -> Color {
     if abs_db > AMP_CRIT_DB {
@@ -65,6 +61,17 @@ pub(super) fn irr_color(irr_db: f64, theme: &crate::Theme) -> Color {
     }
 }
 
+/// The DC against the signal: lower is better, like the spike.
+pub(super) fn dc_rel_color(over_db: f64, theme: &crate::Theme) -> Color {
+    if over_db > DC_REL_CRIT_DB {
+        theme.status_crit
+    } else if over_db > DC_REL_WARN_DB {
+        theme.status_warn
+    } else {
+        theme.status_ok
+    }
+}
+
 /// Likewise: a *lower* (more negative) spike is better.
 pub(super) fn spike_color(spike_dbfs: f64, theme: &crate::Theme) -> Color {
     if spike_dbfs < -40.0 {
@@ -84,9 +91,9 @@ mod tests {
     #[test]
     fn the_deviation_scales_escalate_away_from_zero() {
         let t = Theme::sdr();
-        assert_eq!(offset_color(0.0, &t), t.status_ok);
-        assert_eq!(offset_color(OFFSET_WARN + 0.001, &t), t.status_warn);
-        assert_eq!(offset_color(OFFSET_CRIT + 0.001, &t), t.status_crit);
+        assert_eq!(dc_rel_color(-40.0, &t), t.status_ok);
+        assert_eq!(dc_rel_color(-20.0, &t), t.status_warn);
+        assert_eq!(dc_rel_color(3.0, &t), t.status_crit);
 
         assert_eq!(imbalance_color(0.0, &t), t.status_ok);
         assert_eq!(imbalance_color(AMP_WARN_DB + 0.1, &t), t.status_warn);

@@ -218,9 +218,9 @@ through:
    confirm the receiver is sensitive enough for what you're after.
 3. **Quadrature, Lab IQ (`Lab 1`).** The constellation should be a bright ring,
    with no red ring in view; a cloud flattened against one means clipping.
-   **IRR** above 30 dB and **DC spike** below −40 dBFS mean clean quadrature. If
-   the DC spike is in your way, press `D`. If mirror images are, park on a strong
-   carrier and press `C`.
+   An image predicted 30 dB or more down and the **DC** well under the signal
+   mean clean quadrature. If the DC is in your way, press `D`. If mirror images
+   are, park on a strong carrier and press `C`.
 4. **Stability, Lab Timing (`Lab 3`).** The timing verdict should read Good or
    Excellent, and the ring-buffer fill should be flat rather than trending up.
 5. **The bench you'll actually watch.** Set averaging, and capture a reference
