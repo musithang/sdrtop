@@ -78,8 +78,11 @@ axes at once, which is the fastest way to answer "how far apart, and how much
 weaker?" without arithmetic.
 
 Each bench adds its own field. Lab Signal carries occupied bandwidth and a quality
-verdict, Lab RF reads the ADC window (clip ceiling, peak, headroom, noise, SNR),
-and Lab IQ shows the measured carrier-to-image suppression.
+verdict, Lab RF reads the ADC window (clip ceiling, peak, headroom, the noise floor
+the FFT measured with the bandwidth it was measured in, SNR), and Lab IQ shows the
+measured carrier-to-image suppression. The clip ceiling is 0 dBFS on most radios;
+one whose tuner clips before its converter shows that lower figure and names the
+part, and headroom counts from there.
 
 > **If you build your own preset**, note that the reference line and the ghost
 > trace are drawn only in **instrument mode**, which sdrtop turns on for presets
@@ -164,7 +167,8 @@ How hard the 8-bit ADC is actually being driven:
 Focus RF Diagnostics with `d`, then:
 
 - **`A`, auto-gain.** When the chain is off-optimal, one press jumps LNA and VGA
-  to the staging target (signal around −8 dBFS, no clip), filling LNA first to
+  to the staging target (signal about 8 dB under the clip ceiling, so around
+  −8 dBFS on most radios, no clip), filling LNA first to
   protect the noise figure. Once you're already at the optimum, pressing `A` again
   **latches a continuous auto-track** that re-nudges the gain when the level
   drifts. Press once more to unlatch. Touching the gain manually drops the latch

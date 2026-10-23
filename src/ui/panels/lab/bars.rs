@@ -574,7 +574,7 @@ fn iq_marker_lines(state: &SdrMetrics, theme: &crate::Theme, iw: usize) -> Vec<L
 }
 
 /// Lab RF marker bar: the ADC window read as a single line -
-/// `CLIP 0 dBFS · PEAK −8 dBFS · Δ headroom +8 dB · NOISE −48 dBFS · SNR 40 dB` -
+/// `CLIP 0 dBFS · PEAK −8 dBFS · Δ headroom +8 dB · FLOOR −100 dBFS/1.8 kHz · SNR 40 dB` -
 /// plus the focused panel's key hints. PEAK / headroom carry the staging severity
 /// colour so a clipping or starved chain reads at a glance.
 fn rf_marker_lines(state: &SdrMetrics, theme: &crate::Theme, iw: usize) -> Vec<Line<'static>> {
@@ -583,9 +583,24 @@ fn rf_marker_lines(state: &SdrMetrics, theme: &crate::Theme, iw: usize) -> Vec<L
 
     let peak = state.signal.adc_peak_dbfs;
     let snr = state.signal.peak_to_nf_db;
-    let noise = peak - snr; // ADC noise floor, dBFS
-                            // Against this radio's ceiling, which is the rail a clip happens at.
-                            // `+ 0.0` turns a peak exactly at the ceiling into +0 dB, not -0 dB.
+    // The floor the FFT measured, per its resolution bandwidth: the only one
+    // there is. A sample peak minus a spectral ratio is not a floor of
+    // anything, and read as one it fell while the real floor stood still.
+    let floor = match state
+        .waterfall
+        .last_fft
+        .as_ref()
+        .filter(|f| f.enbw_hz > 0.0)
+    {
+        Some(f) => format!(
+            "{:.0} dBFS/{}",
+            f.noise_floor,
+            crate::ui::widgets::micro_common::fmt_rbw(f.enbw_hz)
+        ),
+        None => "\u{2014}".to_string(),
+    };
+    // Against this radio's ceiling, which is the rail a clip happens at.
+    // `+ 0.0` turns a peak exactly at the ceiling into +0 dB, not -0 dB.
     let headroom = -state.peak_to_ceiling_db() + 0.0;
     let (_, sev) = staging_verdict(state.peak_to_ceiling_db() as f64);
     let peak_col = match sev {
@@ -641,8 +656,8 @@ fn rf_marker_lines(state: &SdrMetrics, theme: &crate::Theme, iw: usize) -> Vec<L
     try_add(
         vec![
             Span::raw("   "),
-            Span::styled("NOISE ", dim),
-            Span::styled(format!("{noise:.0} dBFS"), val),
+            Span::styled("FLOOR ", dim),
+            Span::styled(floor, val),
         ],
         &mut used,
         &mut spans,
@@ -1181,6 +1196,32 @@ mod tests {
             out.contains("CLIP 0 dBFS") && out.contains("headroom +8 dB"),
             "{out}"
         );
+    }
+
+    /// **The floor is the one the FFT measured, per its own bandwidth**:
+    /// not a sample peak minus a spectral ratio under a measured name, which
+    /// on an R2 fell 3 dB while the real floor stood still. No frame, no
+    /// floor.
+    #[test]
+    fn the_rf_marker_floor_is_the_measured_one() {
+        let text = |m: &SdrMetrics| -> String {
+            rf_marker_lines(m, &crate::Theme::sdr(), 190)
+                .iter()
+                .flat_map(|l| l.spans.iter().map(|s| s.content.to_string()))
+                .collect()
+        };
+        let m = SdrMetrics::fixture().streaming().with_carrier(0.0, 40.0);
+        let enbw = m.waterfall.last_fft.as_ref().unwrap().enbw_hz;
+        let out = text(&m);
+        let want = format!(
+            "FLOOR -100 dBFS/{}",
+            crate::ui::widgets::micro_common::fmt_rbw(enbw)
+        );
+        assert!(out.contains(&want), "{want} in {out}");
+        assert!(!out.contains("NOISE"), "{out}");
+        let mut none = SdrMetrics::fixture().streaming();
+        none.waterfall.last_fft = None;
+        assert!(text(&none).contains("FLOOR \u{2014}"), "{}", text(&none));
     }
 
     #[test]
