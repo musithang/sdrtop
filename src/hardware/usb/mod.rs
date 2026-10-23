@@ -82,6 +82,16 @@ pub const HACKRF: Wanted = Wanted {
     manufacturer: "Great Scott Gadgets",
 };
 
+/// An Airspy (1d50:60a1). The Airspy Mini answers on the same id, so a scan
+/// cannot tell the two apart; observer mode names what the device itself
+/// says, `AIRSPY`, and no model.
+pub const AIRSPY: Wanted = Wanted {
+    vid: 0x1d50,
+    pids: &[0x60a1],
+    product: "AIRSPY",
+    manufacturer: "www.airspy.com",
+};
+
 /// An RTL-SDR dongle (Realtek, 0bda:2832 or 0bda:2838).
 pub const RTLSDR: Wanted = Wanted {
     vid: 0x0bda,
@@ -107,6 +117,11 @@ pub fn find(wanted: &Wanted) -> Result<Option<UsbDeviceInfo>, String> {
 /// A HackRF One, held by another app or not.
 pub fn find_hackrf() -> Result<Option<UsbDeviceInfo>, String> {
     find(&HACKRF)
+}
+
+/// An Airspy, held by another app or not.
+pub fn find_airspy() -> Result<Option<UsbDeviceInfo>, String> {
+    find(&AIRSPY)
 }
 
 /// An RTL-SDR dongle, held by another app or not.
@@ -285,6 +300,8 @@ mod tests {
         assert!(RTLSDR.is(0x0bda, 0x2832));
         assert!(!RTLSDR.is(0x0bda, 0x0129), "a card reader, not a dongle");
         assert!(!HACKRF.is(0x1d51, 0x6089));
+        assert!(AIRSPY.is(0x1d50, 0x60a1));
+        assert!(!AIRSPY.is(0x1d50, 0x6089), "a HackRF on the same vendor id");
     }
 
     /// Each speed by its name, a low-speed device's 1.5 included.
@@ -334,6 +351,7 @@ mod tests {
     fn the_scan_answers_on_this_host() {
         assert!(find(&HACKRF).is_ok(), "{:?}", find(&HACKRF));
         assert!(find(&RTLSDR).is_ok(), "{:?}", find(&RTLSDR));
+        assert!(find(&AIRSPY).is_ok(), "{:?}", find(&AIRSPY));
     }
 
     fn hackrf_props() -> IoUsbProps {

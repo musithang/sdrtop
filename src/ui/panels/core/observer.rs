@@ -3,7 +3,7 @@
 
 use ratatui::{
     layout::Rect,
-    style::{Modifier, Style},
+    style::Style,
     text::{Line, Span},
     widgets::Paragraph,
     Frame,
@@ -43,13 +43,8 @@ impl Panel for ObserverPanel {
         let usb = state.observer.usb.as_deref().unwrap_or(dash);
         let connected = state.observer.connected.as_deref().unwrap_or(dash);
 
+        // The frame names the panel; the body starts with the radio.
         let mut lines: Vec<Line> = vec![
-            Line::from(vec![Span::styled(
-                " Observer Mode",
-                Style::default()
-                    .fg(theme.observer)
-                    .add_modifier(Modifier::BOLD),
-            )]),
             Line::from(""),
             Line::from(Span::styled(
                 format!("  {}", device),
@@ -139,6 +134,14 @@ mod tests {
     /// **A holder whose readings the system kept to itself shows dashes**,
     /// not 0.0 % and 0 MB: another user's process, or the first second
     /// before a CPU share can be worked out.
+    /// **The panel's name is said once**, by its frame: a heading inside
+    /// repeating it read as two titles on a Mac and here (issue #25).
+    #[test]
+    fn the_panel_names_itself_once() {
+        let screen = draw(ObserverPanel, 80, 16, &held(None, None)).join("\n");
+        assert_eq!(screen.matches("Observer Mode").count(), 1, "{screen}");
+    }
+
     #[test]
     fn a_reading_the_system_kept_is_a_dash_not_a_zero() {
         let screen = draw(ObserverPanel, 80, 16, &held(None, None)).join("\n");

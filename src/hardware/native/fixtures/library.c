@@ -134,7 +134,8 @@ int rtlsdr_cancel_async(void *device) { calls[4]++; return 0; }
 #endif
 
 // libairspy 1.0.10. Modes 20 and up are this library's: 20 lists Airspy Mini
-// rates, 21 refuses to open (AIRSPY_ERROR_BUSY), 22 finds no device, 23 fails
+// rates, 21 lists the radio but will not open it, as 1.0.10 answers for one
+// another program has claimed (AIRSPY_ERROR_NOT_FOUND), 22 finds no device, 23 fails
 // every setting (AIRSPY_ERROR_LIBUSB), 24 streams three blocks and then stops
 // by itself, as libairspy does when a USB transfer comes back short.
 int airspy_list_devices(uint64_t *serials, int count) {
@@ -143,7 +144,7 @@ int airspy_list_devices(uint64_t *serials, int count) {
     return 1;
 }
 int airspy_open_sn(void **device, uint64_t serial) {
-    if (mode == 21) return -6;
+    if (mode == 21) return -5;
     *device = malloc(1);
     return 0;
 }
@@ -188,7 +189,9 @@ int airspy_board_partid_serialno_read(void *device, airspy_read_partid_serialno_
     p->serial_no[2] = 0x637862DC; p->serial_no[3] = 0x2E1182D7;
     return 0;
 }
-const char *airspy_error_name(int code) { return code == -6 ? "AIRSPY_ERROR_BUSY" : "AIRSPY_ERROR_OTHER"; }
+const char *airspy_error_name(int code) {
+    return code == -5 ? "AIRSPY_ERROR_NOT_FOUND" : code == -6 ? "AIRSPY_ERROR_BUSY" : "AIRSPY_ERROR_OTHER";
+}
 #define AIRSPY_SET(name, field, type) \
     int name(void *device, type value) { \
         if (mode == 23) return -1000; \

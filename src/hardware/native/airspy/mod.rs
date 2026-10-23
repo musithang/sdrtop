@@ -71,6 +71,10 @@ pub struct Found {
     pub firmware: Option<String>,
     pub rates: Vec<u32>,
     pub model: Model,
+    /// Listed on the bus but would not open: another program has claimed it
+    /// (libairspy 1.0.10 then answers `AIRSPY_ERROR_NOT_FOUND`), or this user
+    /// may not open it. Nothing else is known about it.
+    pub held: bool,
 }
 
 impl Model {
@@ -84,8 +88,9 @@ impl Model {
 }
 
 /// Every Airspy on the bus, each opened just long enough to identify it. A
-/// radio that will not open (another app holding it) is left out rather than
-/// described from nothing.
+/// radio that is listed but will not open (another app holding it) is kept,
+/// held and described by its serial alone, so that opening it fails and
+/// observer mode can say whose it is.
 pub fn find(api: &ffi::AirspyApi) -> Vec<Found> {
     // SAFETY: a null buffer asks only for the count.
     let count = unsafe { (api.airspy_list_devices)(std::ptr::null_mut(), 0) };
@@ -101,22 +106,30 @@ pub fn find(api: &ffi::AirspyApi) -> Vec<Found> {
     serials.truncate(usize::try_from(got).unwrap_or(0));
     serials
         .into_iter()
-        .filter_map(|serial| identify(api, serial))
+        .map(|serial| identify(api, serial))
         .collect()
 }
 
-/// One radio, opened by its serial, read and closed.
-fn identify(api: &ffi::AirspyApi, serial: u64) -> Option<Found> {
+/// One radio, opened by its serial, read and closed; or, when it would not
+/// open, held.
+fn identify(api: &ffi::AirspyApi, serial: u64) -> Found {
     let mut device: *mut c_void = std::ptr::null_mut();
     // SAFETY: libairspy writes the handle it opened, or fails.
     if unsafe { (api.airspy_open_sn)(&mut device, serial) } != 0 || device.is_null() {
-        return None;
+        return Found {
+            serial: format!("{serial:x}"),
+            board: None,
+            firmware: None,
+            rates: Vec::new(),
+            model: Model::Unknown,
+            held: true,
+        };
     }
     // SAFETY: `device` was opened just above and is closed once read.
     let found = unsafe { read_found(api, device, serial) };
     // SAFETY: as above.
     unsafe { (api.airspy_close)(device) };
-    Some(found)
+    found
 }
 
 /// What an open radio says about itself.
@@ -154,6 +167,7 @@ unsafe fn read_found(api: &ffi::AirspyApi, device: *mut c_void, serial: u64) -> 
             firmware,
             model: model_from_rates(&rates),
             rates,
+            held: false,
         }
     }
 }
@@ -180,6 +194,9 @@ pub fn list() -> Vec<DeviceListing> {
 
 fn label(found: &Found) -> String {
     let base = format!("{} · {}", found.model.name(), found.serial);
+    if found.held {
+        return format!("{base} · in use by another program, or not ours to open");
+    }
     match found.model {
         Model::R2 => base,
         Model::Mini => format!("{base} · not driven natively, use soapy=driver=airspy"),
@@ -443,7 +460,17 @@ impl AirspyDevice {
             // SAFETY: returns a static string for any code.
             let name = c_string(unsafe { (api.airspy_error_name)(code) })
                 .unwrap_or_else(|| code.to_string());
-            anyhow::bail!("{}: libairspy could not open it ({name})", listing.label);
+            // libairspy 1.0.10 answers NOT_FOUND for a radio it listed a
+            // moment ago when another program has claimed it.
+            let why = if code == ffi::ERROR_NOT_FOUND {
+                ": it is on the bus, so another program is most likely using it"
+            } else {
+                ""
+            };
+            anyhow::bail!(
+                "{}: libairspy could not open it ({name}){why}",
+                listing.label
+            );
         }
         // From here the handle is the device's, and its Drop closes it.
         let mut device = Self {
@@ -813,6 +840,15 @@ impl Drop for AirspyDevice {
     }
 }
 
+/// The firmware slot of the header for an R2 observed, not opened: under the
+/// R2's own label, with the version it cannot read as a dash.
+pub fn observer_stack() -> crate::hardware::SoftwareStack {
+    crate::hardware::SoftwareStack {
+        label: "airspy fw ",
+        value: Arc::from("\u{2014}"),
+    }
+}
+
 /// The version in the firmware's own string: `v1.0.0-rc10-0-g946184a` from
 /// `AirSpy NOS v1.0.0-rc10-0-g946184a 2016-09-19`, or the whole string when
 /// there is no such word in it.
@@ -922,6 +958,7 @@ mod tests {
                 firmware: Some("AirSpy NOS v1.0.0-rc10-0-g946184a 2016-09-19".into()),
                 rates: vec![10_000_000, 2_500_000],
                 model: Model::R2,
+                held: false,
             }]
         );
         assert_eq!(fixture.calls(3), 1, "opened to identify it, then closed");
@@ -930,13 +967,25 @@ mod tests {
     /// A Mini is named as one; a radio another app holds is left out; no
     /// radio is no radio.
     #[test]
-    fn a_mini_is_named_and_a_held_radio_left_out() {
+    fn a_mini_is_named_and_a_held_radio_kept() {
         let fixture = TestLibrary::new(false);
         let api = ffi::resolve(fixture.library()).unwrap();
         fixture.mode(20);
         assert_eq!(find(&api)[0].model, Model::Mini);
+        // Listed but not opened: on the bus, another program's. Kept, so that
+        // opening it fails and observer mode can say whose it is.
         fixture.mode(21);
-        assert_eq!(find(&api), vec![]);
+        assert_eq!(
+            find(&api),
+            vec![Found {
+                serial: "637862dc2e1182d7".into(),
+                board: None,
+                firmware: None,
+                rates: vec![],
+                model: Model::Unknown,
+                held: true,
+            }]
+        );
         fixture.mode(22);
         assert_eq!(find(&api), vec![]);
     }
@@ -951,6 +1000,7 @@ mod tests {
             firmware: None,
             rates: vec![10_000_000, 2_500_000],
             model: Model::R2,
+            held: false,
         };
         assert_eq!(label(&r2), "Airspy R2 · 637862dc2e1182d7");
         let mini = Found {
@@ -1106,7 +1156,36 @@ mod tests {
             .err()
             .unwrap()
             .to_string();
-        assert!(why.contains("AIRSPY_ERROR_BUSY"), "{why}");
+        assert!(why.contains("AIRSPY_ERROR_NOT_FOUND"), "{why}");
+        assert!(why.contains("another program"), "{why}");
+    }
+
+    /// A radio that is listed but would not open says so in the selector,
+    /// without a model it was never asked for.
+    #[test]
+    fn a_held_radio_is_labelled_as_held() {
+        let held = Found {
+            serial: "637862dc2e1182d7".into(),
+            board: None,
+            firmware: None,
+            rates: vec![],
+            model: Model::Unknown,
+            held: true,
+        };
+        assert_eq!(
+            label(&held),
+            "Airspy · 637862dc2e1182d7 · in use by another program, or not ours to open"
+        );
+    }
+
+    /// Observer mode names the firmware slot as the R2's, with the version
+    /// it cannot read as a dash, rather than leaving the header to call it a
+    /// HackRF's.
+    #[test]
+    fn the_observed_r2_names_its_own_firmware_slot() {
+        let stack = observer_stack();
+        assert_eq!(stack.label, "airspy fw ");
+        assert_eq!(&*stack.value, "\u{2014}");
     }
 
     /// A gain in dB lands on the register position the bench measured it

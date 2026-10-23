@@ -27,6 +27,10 @@ pub struct LibVersion {
 /// shifted up by four and filtered.
 pub const SAMPLE_INT16_IQ: c_int = 2;
 
+/// `AIRSPY_ERROR_NOT_FOUND`: also what 1.0.10's open answers for a radio
+/// another program has claimed.
+pub const ERROR_NOT_FOUND: c_int = -5;
+
 /// `airspy_transfer_t`: one block, handed to the callback on libairspy's
 /// consumer thread.
 #[repr(C)]

@@ -39,10 +39,12 @@ pub fn scan(devices: &Path, wanted: &Wanted) -> Option<UsbDeviceInfo> {
             max_power: read(&base.join("bMaxPower")),
             bus: number("busnum"),
             dev: number("devnum"),
-            // In microseconds, and not written by every kernel.
+            // In milliseconds (the kernel's sysfs-bus-usb ABI; checked against
+            // a plug-in time in the kernel log), and not written by every
+            // kernel.
             connected_secs: read(&base.join("power/connected_duration"))
                 .and_then(|s| s.parse::<u64>().ok())
-                .map(|us| us / 1_000_000),
+                .map(|ms| ms / 1_000),
             // Linux names no holder; `find_owner` asks by device node.
             holder: None,
         })
@@ -191,7 +193,7 @@ mod tests {
                 ("bMaxPower", "500mA"),
                 ("busnum", "1"),
                 ("devnum", "7"),
-                ("power/connected_duration", "93000000"),
+                ("power/connected_duration", "93000"),
             ],
         );
         let info = scan(&tree.0, &HACKRF).expect("the HackRF is found");

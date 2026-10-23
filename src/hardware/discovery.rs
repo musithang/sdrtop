@@ -85,7 +85,15 @@ impl DeviceKind {
                 caps: rtlsdr::observer_caps,
                 stack: || Some(rtlsdr::stack()),
             }),
-            DeviceKind::Airspy | DeviceKind::Soapy | DeviceKind::TinySa => None,
+            // The R2's capabilities as placeholders: a Mini on the same USB id
+            // would show the R2's band and stage names, but the scan names it
+            // only by what it says, `AIRSPY`.
+            DeviceKind::Airspy => Some(ObserverProfile {
+                scan: usb::find_airspy,
+                caps: airspy::caps,
+                stack: || Some(airspy::observer_stack()),
+            }),
+            DeviceKind::Soapy | DeviceKind::TinySa => None,
         }
     }
 }
@@ -623,6 +631,7 @@ mod tests {
     fn only_the_native_backends_can_be_observed() {
         assert!(DeviceKind::HackRf.observer_profile().is_some());
         assert!(DeviceKind::RtlSdr.observer_profile().is_some());
+        assert!(DeviceKind::Airspy.observer_profile().is_some());
         assert!(
             DeviceKind::Soapy.observer_profile().is_none(),
             "there is no USB profile for whatever SoapySDR was talking to"
@@ -648,6 +657,15 @@ mod tests {
         );
         assert_eq!(rtl.gain.primary_label(), "Tuner");
         assert!(!rtl.gain.has_second_stage(), "an RTL-SDR is one tuner");
+        let airspy = DeviceKind::Airspy.observer_profile().unwrap();
+        let names: Vec<String> = (airspy.caps)()
+            .gain
+            .stages()
+            .into_iter()
+            .map(|s| s.name)
+            .collect();
+        assert_eq!(names, ["LNA", "MIX", "VGA"]);
+        assert_eq!((airspy.stack)().map(|s| s.label), Some("airspy fw "));
     }
 
     /// The case that would otherwise make every unprogrammed device look like
