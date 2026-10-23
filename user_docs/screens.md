@@ -206,9 +206,10 @@ only positions that gap inside the ADC window. It cannot widen it.
 - **RF Diagnostics** *(left, focus `d`)*: the chain as numbers. Gain lineup,
   staging bars with optimal-target ticks, per-stage and Friis-total noise figure,
   sensitivity (MDS), and a plain-language verdict. `A` auto-stages the gain.
-- **Gain-Staging Level Diagram** *(centre)*: the same lineup as a picture, two
-  traces climbing the stage axis. The vertical gap between them is the SNR being
-  carried up the chain.
+- **Gain-Staging Level Diagram** *(centre)*: the same lineup as a picture, the
+  signal as a staircase up the chain, a step for each stage's gain, and the
+  converter's window at the right: clip, signal, floor and the distances
+  between them.
 - **ADC Loading** *(right)*: a signed sample-histogram bell, the loading read-out
   (peak, rms, crest, effective bits, clip events), and a modeled linearity card.
 

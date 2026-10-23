@@ -44,6 +44,12 @@ pub struct RfFreeze {
     pub amp_enabled: bool,
     pub lna_gain: u32,
     pub vga_gain: u32,
+    /// The floor the FFT measured and the bandwidth it was measured in
+    /// (dBFS, Hz), when there was one.
+    pub floor: Option<(f32, f64)>,
+    /// Every gain stage's reading, so a chain of any shape is held whole and
+    /// not only the two gains a HackRF has.
+    pub readings: Vec<Option<crate::hardware::StageReading>>,
 }
 
 /// Measurement-state for the lab instrument-chrome.

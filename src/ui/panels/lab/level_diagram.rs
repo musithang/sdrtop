@@ -3,21 +3,29 @@
 
 //! `LevelDiagramPanel` - the Gain-Staging Level Diagram, centre of the Lab RF bench.
 //!
-//! Plots the modeled signal level and noise floor climbing stage-by-stage
-//! (ANT▸LNA▸MIX▸VGA▸ADC). The vertical gap between the two traces is the SNR: it is
-//! set at the antenna and only repositioned - not improved - by gain. Reading it left
-//! to right tells the whole front-end story the left panel quantifies.
+//! The chain is the x-axis (`ANT ─┤LNA├─┤MIX├─┤VGA├─▶ ADC`) and the signal is
+//! a **staircase** on it: the level holds between two stages and steps at
+//! each one, so every step is that stage's gain and every tread is a node's
+//! level. It used to be a ramp interpolated between nodes, which drew levels
+//! at places in the chain where nothing has a level, and was a wall of blocks
+//! besides.
 //!
-//! **A chain with no published noise figures gets the measured half.** The
-//! noise trace needs each stage's own noise figure, which nobody publishes
-//! for most radios (an Airspy R2's included), so there the panel draws what
-//! is measured: the signal walked back from the converter through each
-//! stage's measured gain, the floor the FFT measured at the converter, and
-//! where the radio clips; and it says why there is no noise trace.
+//! At the right edge is the converter's window, the one place where every
+//! line is measured: where the radio clips, where the signal sits, where the
+//! FFT's floor is, and the distances between them.
+//!
+//! **Measured and modelled are drawn apart.** The signal is the converter's
+//! measured peak walked back through each stage's gain, a solid line. The
+//! floor is the FFT's, solid, and only where it was measured: at the
+//! converter. On a chain whose stages' noise figures sdrtop knows (the
+//! HackRF), the noise is walked back from that floor through them, dashed,
+//! because it is a model. On every other radio nobody publishes those
+//! figures (an Airspy R2's included), so there is no noise walk, and the
+//! panel says why instead of drawing one.
 
 use ratatui::{
     layout::Rect,
-    style::{Color, Style},
+    style::{Color, Modifier, Style},
     text::{Line, Span},
     widgets::Paragraph,
     Frame,
@@ -26,31 +34,12 @@ use ratatui::{
 use crate::hardware::StageReading;
 use crate::state::SdrMetrics;
 use crate::ui::panel::{Panel, PanelChrome, Staleness, Tag};
-use crate::ui::rf_calc::{cascade, level_lineup, signal_lineup, Stage, StageLevel};
+use crate::ui::rf_calc::{cascade, level_lineup, signal_lineup, Stage};
 
 pub struct LevelDiagramPanel;
 
-/// dBm window of the y-axis (modeled / relative). Wide enough to hold the antenna
-/// thermal floor at the bottom and the ADC clip line near the top.
-const TOP_DBM: f64 = 10.0;
-const BOT_DBM: f64 = -110.0;
-
-/// Interpolate a node series at fractional node position `p` (piecewise linear).
-fn lerp_at(vals: &[f64], p: f64) -> f64 {
-    if vals.is_empty() {
-        return 0.0;
-    }
-    let lo = (p.floor() as usize).min(vals.len() - 1);
-    let hi = (lo + 1).min(vals.len() - 1);
-    let frac = p - lo as f64;
-    vals[lo] + (vals[hi] - vals[lo]) * frac
-}
-
-/// Map a dBm level to a chart row (0 = top, `h-1` = bottom). Out-of-range clamps.
-fn dbm_row(dbm: f64, h: usize) -> usize {
-    let t = ((TOP_DBM - dbm) / (TOP_DBM - BOT_DBM)).clamp(0.0, 1.0);
-    (t * (h.saturating_sub(1)) as f64).round() as usize
-}
+/// The y gutter: `-120┤`.
+const GUTTER: usize = 5;
 
 impl Panel for LevelDiagramPanel {
     fn name(&self) -> &'static str {
@@ -74,28 +63,60 @@ impl Panel for LevelDiagramPanel {
         theme: &crate::Theme,
         _focused: bool,
     ) {
-        let stale = !state.radio.hw_streaming;
         if inner.width == 0 || inner.height == 0 {
             return;
         }
-
-        let dim = theme.border_dim;
-        if !stale && !state.caps.friis_applicable {
-            render_measured(f, inner, state, theme);
-            return;
-        }
-        if stale {
-            let msg = "\u{2014}\u{2014}\u{2014}".to_string();
+        if !state.radio.hw_streaming {
             f.render_widget(
-                Paragraph::new(Span::styled(msg, Style::default().fg(dim))),
+                Paragraph::new(Span::styled(
+                    "\u{2014}\u{2014}\u{2014}",
+                    Style::default().fg(theme.border_dim),
+                )),
                 inner,
             );
             return;
         }
+        let lines = diagram(&chain_of(state), state, inner.width, inner.height, theme);
+        f.render_widget(Paragraph::new(lines), inner);
+    }
+}
 
-        // --- model: 5 nodes ANT, LNA, MIX, VGA, ADC (ADC = VGA output) ----------
-        // Frozen snapshot when held, else the live gain/level.
-        let fz = state.lab.rf_freeze.as_ref();
+/// What the diagram draws, gathered once from the live or the held state.
+struct Chain {
+    /// Each stage's name, and what is written under it (its gain, its step,
+    /// or `AGC`).
+    stages: Vec<(String, String)>,
+    /// The signal at each node, dBFS: the antenna, then each stage's output,
+    /// the last being what the converter sees. NaN where it is not known.
+    signal: Vec<f64>,
+    /// The noise at the same nodes, from the stages' noise figures; `None`
+    /// where those figures are not known, or no floor anchors them.
+    noise: Option<Vec<f64>>,
+    /// The converter's measured peak, dBFS.
+    adc_peak: f64,
+    /// The FFT's floor at the converter and the bandwidth it was measured in
+    /// (dBFS, Hz).
+    floor: Option<(f64, f64)>,
+}
+
+/// The chain as the diagram draws it: the held snapshot when the bench is
+/// frozen, else the live state.
+fn chain_of(state: &SdrMetrics) -> Chain {
+    let fz = state.lab.rf_freeze.as_ref();
+    let adc_peak = fz
+        .map(|f| f.peak_dbfs)
+        .unwrap_or(state.signal.adc_peak_dbfs) as f64;
+    let floor = match fz {
+        Some(f) => f.floor.map(|(db, enbw)| (db as f64, enbw)),
+        None => state
+            .waterfall
+            .last_fft
+            .as_ref()
+            .filter(|fr| fr.enbw_hz > 0.0)
+            .map(|fr| (fr.noise_floor as f64, fr.enbw_hz)),
+    };
+
+    if state.caps.friis_applicable {
         let (amp, lna, vga) = fz
             .map(|f| (f.amp_enabled, f.lna_gain, f.vga_gain))
             .unwrap_or((
@@ -104,431 +125,514 @@ impl Panel for LevelDiagramPanel {
                 state.radio.secondary_gain(),
             ));
         let stages = cascade(amp, lna, vga);
-        let adc_peak = fz
-            .map(|f| f.peak_dbfs)
-            .unwrap_or(state.signal.adc_peak_dbfs) as f64;
-        let snr = fz.map(|f| f.snr_db).unwrap_or(state.signal.peak_to_nf_db) as f64;
-        let mut nodes: Vec<StageLevel> = level_lineup(adc_peak, snr, &stages);
-        if let Some(last) = nodes.last().cloned() {
-            nodes.push(StageLevel {
-                label: "ADC".to_string(),
-                ..last
-            });
-        }
-        let n = nodes.len();
-        if n < 2 {
-            return;
-        }
-        let sig: Vec<f64> = nodes.iter().map(|s| s.signal_dbm).collect();
-        // This panel is gated on `friis_applicable`, so every node has a noise
-        // figure; the fallback keeps the type total rather than unwrapping.
-        let noise: Vec<f64> = nodes
-            .iter()
-            .map(|s| s.noise_dbm.unwrap_or(s.signal_dbm))
-            .collect();
-
-        let sig_col = theme.value_hi;
-        let noise_col = theme.border_accent;
-        let gap_col = dim;
-
-        // --- layout ------------------------------------------------------------
-        let iw = inner.width as usize;
-        let ih = inner.height as usize;
-        let gutter = 4usize; // "−110"
-        let chart_w = iw.saturating_sub(gutter + 1);
-        // Reserve: caption(1) + x-labels(1) + legend(1).
-        let chart_h = ih.saturating_sub(3).clamp(4, 28);
-        if chart_w < 8 || chart_h < 4 {
-            f.render_widget(
-                Paragraph::new(Span::styled(" level diagram", Style::default().fg(dim))),
-                inner,
-            );
-            return;
-        }
-
-        let mut lines: Vec<Line> = Vec::new();
-
-        // Caption.
-        lines.push(Line::from(Span::styled(
-            " level climbs stage-by-stage \u{00b7} the gap between signal and noise is the SNR",
-            Style::default().fg(dim),
-        )));
-
-        // dBm gridline rows.
-        let ticks = [10.0, -20.0, -50.0, -80.0, -110.0];
-        let mut row_label = vec![String::new(); chart_h];
-        for d in ticks {
-            let r = dbm_row(d, chart_h);
-            if row_label[r].is_empty() {
-                row_label[r] = format!("{:>w$}", d as i32, w = gutter);
-            }
-        }
-        // Reference lines: ADC clip at 0 dBm, and the converter's quantisation
-        // floor below it. That floor was drawn at a flat -50 dBm, which is the
-        // 8-bit answer and about 36 dB too high for a 14-bit radio.
-        let clip_row = dbm_row(0.0, chart_h);
-        let floor_row = dbm_row(
-            -crate::ui::rf_calc::quantisation_snr_db(state.caps.sample_geometry.bits()),
-            chart_h,
+        // The noise is anchored on the floor the FFT measured, so its last
+        // node is that floor. With no floor there is nothing to anchor it on.
+        let lineup = level_lineup(
+            adc_peak,
+            floor.map(|(db, _)| adc_peak - db).unwrap_or(f64::NAN),
+            &stages,
         );
-
-        // Per-column interpolated signal/noise rows.
-        let node_at = |col: usize| (col as f64 / (chart_w - 1) as f64) * (n - 1) as f64;
-        let sig_row: Vec<usize> = (0..chart_w)
-            .map(|c| dbm_row(lerp_at(&sig, node_at(c)), chart_h))
-            .collect();
-        let noise_row: Vec<usize> = (0..chart_w)
-            .map(|c| dbm_row(lerp_at(&noise, node_at(c)), chart_h))
-            .collect();
-
-        for (row, g) in row_label.iter().enumerate() {
-            // y gutter
-            let mut spans: Vec<Span> = Vec::new();
-            if g.is_empty() {
-                spans.push(Span::styled(
-                    format!("{:>gutter$}\u{2502}", "", gutter = gutter),
-                    Style::default().fg(dim),
-                ));
-            } else {
-                spans.push(Span::styled(
-                    format!("{g}\u{2524}"),
-                    Style::default().fg(dim),
-                ));
-            }
-            // plot row
-            let mut cells: Vec<(char, Color)> = Vec::with_capacity(chart_w);
-            for c in 0..chart_w {
-                let (ch, col) = match classify(row, sig_row[c], noise_row[c]) {
-                    Cell::Signal => ('\u{2588}', sig_col),           // █ signal
-                    Cell::Noise => ('\u{25ac}', noise_col),          // ▬ noise
-                    Cell::UsableDr => ('\u{2591}', gap_col),         // ░ usable DR
-                    Cell::Buried => ('\u{2592}', theme.status_warn), // ▒ signal buried
-                    Cell::Empty if row == clip_row => ('\u{00b7}', theme.status_crit),
-                    Cell::Empty if row == floor_row => ('\u{00b7}', theme.status_warn),
-                    Cell::Empty => (' ', dim),
-                };
-                cells.push((ch, col));
-            }
-            spans.extend(coalesce(cells));
-            lines.push(Line::from(spans));
-        }
-
-        // x-axis stage labels, centred under each node column.
-        let mut axis: Vec<char> = vec![' '; chart_w];
-        for (i, node) in nodes.iter().enumerate() {
-            let col = ((i as f64 / (n - 1) as f64) * (chart_w - 1) as f64).round() as usize;
-            let lbl = node.label.as_str();
-            let start = col
-                .saturating_sub(lbl.len() / 2)
-                .min(chart_w.saturating_sub(lbl.len()));
-            for (k, ch) in lbl.chars().enumerate() {
-                if start + k < chart_w {
-                    axis[start + k] = ch;
-                }
-            }
-        }
-        lines.push(Line::from(vec![
-            Span::raw(" ".repeat(gutter + 1)),
-            Span::styled(
-                axis.into_iter().collect::<String>(),
-                Style::default().fg(theme.label),
-            ),
-        ]));
-
-        // Legend + key figures.
-        let headroom = state.ceiling_dbfs() - adc_peak;
-        let mut legend = vec![
-            Span::raw(" "),
-            Span::styled("\u{2588} signal", Style::default().fg(sig_col)),
-            Span::styled("  \u{25ac} noise", Style::default().fg(noise_col)),
-        ];
-        if snr < 0.0 {
-            // Signal sits below the noise at the ADC - flag the buried band.
-            legend.push(Span::styled(
-                "  \u{2592} buried",
-                Style::default().fg(theme.status_warn),
-            ));
-        } else {
-            legend.push(Span::styled(
-                "  \u{2591} usable DR",
-                Style::default().fg(gap_col),
-            ));
-        }
-        legend.push(Span::styled(
-            format!("  \u{00b7} SNR {snr:.0} dB \u{00b7} headroom {headroom:.0} dB"),
-            Style::default().fg(dim),
-        ));
-        lines.push(Line::from(legend));
-
-        // Self-adjusting density: drop only as many airy spacers as needed to fit,
-        // spread evenly, so a short pane keeps balanced breathing room. (chrome)
-        crate::ui::chrome::collapse_spacers(&mut lines, ih);
-        f.render_widget(Paragraph::new(lines), inner);
+        return Chain {
+            stages: stages
+                .iter()
+                .map(|s| (s.label.clone(), format!("{:+.0}", s.gain_db + 0.0)))
+                .collect(),
+            signal: lineup.iter().map(|l| l.signal_dbm).collect(),
+            noise: floor.map(|_| {
+                lineup
+                    .iter()
+                    .map(|l| l.noise_dbm.unwrap_or(f64::NAN))
+                    .collect()
+            }),
+            adc_peak,
+            floor,
+        };
     }
-}
 
-/// The diagram for a chain whose stages' noise figures nobody publishes: the
-/// signal at each node, from the converter's measured peak walked back
-/// through each stage's measured gain (the GAIN LINEUP's walk, drawn), the
-/// floor the FFT measured at the converter, and the radio's ceiling. A stage
-/// whose gain is not a dB here (outside its measured band, or set by the
-/// AGC) leaves every level before it unknown, and the trace starts after it.
-fn render_measured(f: &mut Frame, inner: Rect, state: &SdrMetrics, theme: &crate::Theme) {
-    let dim = theme.border_dim;
     let specs = state.caps.gain.stages();
-    let readings: Vec<Option<StageReading>> =
-        (0..specs.len()).map(|i| state.stage_reading(i)).collect();
+    let readings: Vec<Option<StageReading>> = match fz {
+        Some(f) => f.readings.clone(),
+        None => (0..specs.len()).map(|i| state.stage_reading(i)).collect(),
+    };
+    let reading = |i: usize| readings.get(i).copied().flatten();
+    // A stage whose gain is not a dB here (outside its measured band, or set
+    // by the AGC) leaves every level before it unknown.
     let stages: Vec<Stage> = specs
         .iter()
-        .zip(&readings)
-        .map(|(s, r)| {
-            let gain = match r {
-                Some(StageReading::Db(db)) => *db,
+        .enumerate()
+        .map(|(i, s)| {
+            let gain = match reading(i) {
+                Some(StageReading::Db(db)) => db,
                 _ => f64::NAN,
             };
             Stage::unmodelled(&s.name, gain)
         })
         .collect();
-    let adc_peak = state
-        .lab
-        .rf_freeze
-        .as_ref()
-        .map(|f| f.peak_dbfs)
-        .unwrap_or(state.signal.adc_peak_dbfs) as f64;
-    // ANT, each stage's output (the last is what the converter sees), ADC.
-    let mut sig: Vec<f64> = signal_lineup(adc_peak, &stages)
-        .iter()
-        .map(|l| l.signal_dbm)
-        .collect();
-    sig.push(adc_peak);
-    let mut labels = vec!["ANT".to_string()];
-    labels.extend(specs.iter().zip(&readings).map(|(s, r)| match r {
-        Some(StageReading::Db(db)) => format!("{} {db:+.0}", s.name),
-        Some(StageReading::Position { at, of }) => format!("{} {at}/{of}", s.name),
-        Some(StageReading::Auto) => format!("{} AGC", s.name),
-        None => s.name.clone(),
-    }));
-    labels.push("ADC".to_string());
-    let n = sig.len();
-    let ceiling = state.ceiling_dbfs();
-    let floor = state
-        .waterfall
-        .last_fft
-        .as_ref()
-        .filter(|fr| fr.enbw_hz > 0.0)
-        .map(|fr| (fr.noise_floor as f64, fr.enbw_hz));
+    Chain {
+        stages: specs
+            .iter()
+            .enumerate()
+            .map(|(i, s)| {
+                let under = match reading(i) {
+                    Some(StageReading::Db(db)) => format!("{:+.0}", db + 0.0),
+                    Some(StageReading::Position { at, of }) => format!("{at}/{of}"),
+                    Some(StageReading::Auto) => "AGC".to_string(),
+                    None => String::new(),
+                };
+                (s.name.clone(), under)
+            })
+            .collect(),
+        signal: signal_lineup(adc_peak, &stages)
+            .iter()
+            .map(|l| l.signal_dbm)
+            .collect(),
+        noise: None,
+        adc_peak,
+        floor,
+    }
+}
 
-    // The window: 0 dBFS at the top, 20 dB rows down to below the lowest
-    // thing drawn.
-    let lowest = sig
+/// How a step trace is drawn: the run along a tread, the riser, and the four
+/// corners where a riser leaves one tread and meets the next.
+struct Pen {
+    run: char,
+    riser: char,
+    up_from: char,
+    up_to: char,
+    down_from: char,
+    down_to: char,
+}
+
+/// The signal: measured, heavy.
+const HEAVY: Pen = Pen {
+    run: '\u{2501}',
+    riser: '\u{2503}',
+    up_from: '\u{251b}',
+    up_to: '\u{250f}',
+    down_from: '\u{2513}',
+    down_to: '\u{2517}',
+};
+
+/// The noise: modelled, dashed.
+const DASHED: Pen = Pen {
+    run: '\u{2504}',
+    riser: '\u{2506}',
+    up_from: '\u{2518}',
+    up_to: '\u{250c}',
+    down_from: '\u{2510}',
+    down_to: '\u{2514}',
+};
+
+/// The 20 dB grid's dot; a trace or a label may take its cell.
+const GRID_DOT: char = '\u{00b7}';
+
+/// A plot drawn cell by cell, then cut into styled lines.
+struct Grid {
+    cells: Vec<Vec<(char, Color, bool)>>,
+}
+
+impl Grid {
+    fn new(w: usize, h: usize, ink: Color) -> Self {
+        Grid {
+            cells: vec![vec![(' ', ink, false); w]; h],
+        }
+    }
+    fn set(&mut self, r: usize, x: usize, ch: char, col: Color) {
+        if let Some(c) = self.cells.get_mut(r).and_then(|row| row.get_mut(x)) {
+            *c = (ch, col, false);
+        }
+    }
+    /// Nothing but the background or the grid's dot is there.
+    fn free(&self, r: usize, x: usize) -> bool {
+        self.cells
+            .get(r)
+            .and_then(|row| row.get(x))
+            .is_some_and(|c| c.0 == ' ' || c.0 == GRID_DOT)
+    }
+    fn text(&mut self, r: usize, x: usize, s: &str, col: Color) {
+        for (k, ch) in s.chars().enumerate() {
+            self.set(r, x + k, ch, col);
+        }
+    }
+    /// Writes `s` only where every cell it needs is free, so a label never
+    /// overprints a trace.
+    fn text_if_free(&mut self, r: usize, x: usize, s: &str, col: Color) -> bool {
+        let fits = (0..s.chars().count()).all(|k| self.free(r, x + k));
+        if fits {
+            self.text(r, x, s, col);
+        }
+        fits
+    }
+    fn bold(&mut self, r: usize, x: usize, n: usize) {
+        for k in 0..n {
+            if let Some(c) = self.cells.get_mut(r).and_then(|row| row.get_mut(x + k)) {
+                c.2 = true;
+            }
+        }
+    }
+    fn line(&self, r: usize) -> Line<'static> {
+        let mut spans = Vec::new();
+        let mut run = String::new();
+        let mut cur: Option<(Color, bool)> = None;
+        let style = |(c, b): (Color, bool)| {
+            let s = Style::default().fg(c);
+            if b {
+                s.add_modifier(Modifier::BOLD)
+            } else {
+                s
+            }
+        };
+        for &(ch, col, b) in &self.cells[r] {
+            if cur != Some((col, b)) {
+                if let Some(c) = cur {
+                    spans.push(Span::styled(std::mem::take(&mut run), style(c)));
+                }
+                cur = Some((col, b));
+            }
+            run.push(ch);
+        }
+        if let Some(c) = cur {
+            spans.push(Span::styled(run, style(c)));
+        }
+        Line::from(spans)
+    }
+}
+
+/// Where the treads and risers fall across a plot `w` columns wide, for
+/// `stages` stages: one tread a node, a riser at each stage.
+struct Steps {
+    treads: Vec<(usize, usize)>,
+    risers: Vec<usize>,
+}
+
+impl Steps {
+    fn new(w: usize, stages: usize) -> Self {
+        let risers: Vec<usize> = (1..=stages).map(|k| k * w / (stages + 1)).collect();
+        let mut treads = Vec::with_capacity(stages + 1);
+        let mut from = 0;
+        for &r in &risers {
+            treads.push((from, r.saturating_sub(1)));
+            from = r + 1;
+        }
+        treads.push((from, w.saturating_sub(1)));
+        Steps { treads, risers }
+    }
+}
+
+/// A staircase through `rows` (one a node, `None` where the level is not
+/// known), its treads drawn for the first `runs` nodes. `over` lets it draw
+/// over what is already there; without it, it only fills free cells.
+#[allow(clippy::too_many_arguments)]
+fn staircase(
+    g: &mut Grid,
+    x0: usize,
+    steps: &Steps,
+    rows: &[Option<usize>],
+    runs: usize,
+    pen: &Pen,
+    col: Color,
+    over: bool,
+) {
+    let put = |g: &mut Grid, r: usize, x: usize, ch: char| {
+        if over || g.free(r, x0 + x) {
+            g.set(r, x0 + x, ch, col);
+        }
+    };
+    for (j, &(a, b)) in steps.treads.iter().enumerate().take(runs) {
+        if let Some(r) = rows[j] {
+            for x in a..=b {
+                put(g, r, x, pen.run);
+            }
+        }
+    }
+    for (k, &x) in steps.risers.iter().enumerate() {
+        match (rows[k], rows[k + 1]) {
+            (Some(from), Some(to)) if from == to => put(g, from, x, pen.run),
+            (Some(from), Some(to)) if to < from => {
+                put(g, from, x, pen.up_from);
+                put(g, to, x, pen.up_to);
+                for r in to + 1..from {
+                    put(g, r, x, pen.riser);
+                }
+            }
+            (Some(from), Some(to)) => {
+                put(g, from, x, pen.down_from);
+                put(g, to, x, pen.down_to);
+                for r in from + 1..to {
+                    put(g, r, x, pen.riser);
+                }
+            }
+            // Nothing known before this stage: the trace starts here.
+            (None, Some(to)) => put(g, to, x, pen.run),
+            _ => {}
+        }
+    }
+}
+
+/// The whole panel body, `w × h`.
+fn diagram(
+    c: &Chain,
+    state: &SdrMetrics,
+    w: u16,
+    h: u16,
+    theme: &crate::Theme,
+) -> Vec<Line<'static>> {
+    let dim = theme.border_dim;
+    let (iw, ih) = (w as usize, h as usize);
+    // The converter's window: its words where they fit, its numbers where not.
+    let wide = iw >= 66;
+    let zone = if wide { 18 } else { 11 };
+    let cw = iw.saturating_sub(GUTTER + zone);
+    let foot = if c.noise.is_some() || state.caps.friis_applicable {
+        3
+    } else {
+        4
+    };
+    let ch = ih.saturating_sub(1 + foot);
+    let s = c.stages.len();
+    if cw < 20 || ch < 6 || c.signal.len() != s + 1 {
+        return vec![Line::from(Span::styled(
+            " level diagram",
+            Style::default().fg(dim),
+        ))];
+    }
+
+    // 0 dBFS at the top, 20 dB lines down to below the lowest thing drawn.
+    let lowest = c
+        .signal
         .iter()
+        .chain(c.noise.iter().flatten())
         .copied()
+        .chain(c.floor.map(|(db, _)| db))
         .filter(|v| v.is_finite())
-        .chain(floor.map(|(db, _)| db))
         .fold(f64::INFINITY, f64::min);
     let bottom = if lowest.is_finite() {
-        (((lowest - 10.0) / 20.0).floor() * 20.0).min(-40.0)
+        (((lowest - 8.0) / 20.0).floor() * 20.0).min(-40.0)
     } else {
         -120.0
     };
-    let iw = inner.width as usize;
-    let ih = inner.height as usize;
-    let gutter = 4usize;
-    let chart_w = iw.saturating_sub(gutter + 1);
-    // Caption, axis, legend, the figure, the note.
-    let chart_h = ih.saturating_sub(5).clamp(4, 28);
-    if chart_w < 8 || n < 2 {
-        f.render_widget(
-            Paragraph::new(Span::styled(" level diagram", Style::default().fg(dim))),
-            inner,
-        );
-        return;
-    }
-    let row_of = |db: f64| -> usize {
-        let t = ((0.0 - db) / (0.0 - bottom)).clamp(0.0, 1.0);
-        (t * (chart_h - 1) as f64).round() as usize
+    let row_of = |db: f64| -> Option<usize> {
+        db.is_finite()
+            .then(|| ((-db / -bottom).clamp(0.0, 1.0) * (ch - 1) as f64).round() as usize)
     };
-    let node_at = |col: usize| (col as f64 / (chart_w - 1) as f64) * (n - 1) as f64;
+    let steps = Steps::new(cw, s);
+    let last = steps.treads[s];
+    let zx = GUTTER + cw;
 
-    let mut lines: Vec<Line> = vec![Line::from(Span::styled(
-        " signal measured at the converter, walked back stage by stage",
-        Style::default().fg(dim),
-    ))];
-    let mut row_label = vec![String::new(); chart_h];
+    let mut g = Grid::new(iw, ch, theme.value);
     let mut tick = 0.0;
     while tick >= bottom {
-        let r = row_of(tick);
-        if row_label[r].is_empty() {
-            row_label[r] = format!("{:>w$}", tick as i32, w = gutter);
+        if let Some(r) = row_of(tick) {
+            g.text(r, 0, &format!("{:>4}\u{2524}", tick as i32), dim);
+            for x in (GUTTER..zx).step_by(3) {
+                g.set(r, x, GRID_DOT, dim);
+            }
         }
         tick -= 20.0;
     }
-    let ceiling_row = row_of(ceiling);
-    let floor_row = floor.map(|(db, _)| row_of(db));
-    // The floor is measured at the converter: drawn over the last segment.
-    let floor_from = (((n - 2) as f64 / (n - 1) as f64) * (chart_w - 1) as f64).round() as usize;
-    let sig_row: Vec<Option<usize>> = (0..chart_w)
-        .map(|c| {
-            let p = node_at(c);
-            let lo = (p.floor() as usize).min(n - 1);
-            let hi = (lo + 1).min(n - 1);
-            (sig[lo].is_finite() && sig[hi].is_finite()).then(|| row_of(lerp_at(&sig, p)))
-        })
-        .collect();
-    for (row, g) in row_label.iter().enumerate() {
-        let mut spans = vec![Span::styled(
-            if g.is_empty() {
-                format!("{:>gutter$}\u{2502}", "")
-            } else {
-                format!("{g}\u{2524}")
-            },
-            Style::default().fg(dim),
-        )];
-        let cells: Vec<(char, Color)> = (0..chart_w)
-            .map(|c| {
-                if sig_row[c] == Some(row) {
-                    ('\u{2588}', theme.value_hi)
-                } else if floor_row == Some(row) && c >= floor_from {
-                    ('\u{25ac}', theme.border_accent)
-                } else if row == ceiling_row && c % 2 == 0 {
-                    ('\u{00b7}', theme.status_crit)
-                } else {
-                    (' ', dim)
-                }
-            })
-            .collect();
-        spans.extend(coalesce(cells));
-        lines.push(Line::from(spans));
+    for r in 0..ch {
+        if g.free(r, GUTTER - 1) {
+            g.set(r, GUTTER - 1, '\u{2502}', dim);
+        }
     }
 
-    // Node labels under their columns, left to right, a label that would
-    // run into the one before it left out rather than overprinted.
-    let mut axis: Vec<char> = vec![' '; chart_w];
-    let mut free_from = 0usize;
-    for (i, label) in labels.iter().enumerate() {
-        let col = ((i as f64 / (n - 1) as f64) * (chart_w - 1) as f64).round() as usize;
-        let len = label.chars().count();
-        let start = col.saturating_sub(len / 2).min(chart_w.saturating_sub(len));
-        if start < free_from {
-            continue;
+    let ceiling = state.ceiling_dbfs();
+    let ceil_row = row_of(ceiling);
+    let floor_row = c.floor.and_then(|(db, _)| row_of(db));
+    let sig_row = row_of(c.adc_peak);
+    // The ceiling and the floor belong to the converter: the last tread.
+    if let Some(r) = ceil_row {
+        for x in last.0..=last.1 {
+            g.set(r, GUTTER + x, '\u{2508}', theme.status_crit);
         }
-        for (k, ch) in label.chars().enumerate() {
-            if start + k < chart_w {
-                axis[start + k] = ch;
+    }
+    if let Some(r) = floor_row {
+        for x in last.0..=last.1 {
+            g.set(r, GUTTER + x, '\u{2500}', theme.border_accent);
+        }
+    }
+    if let Some(noise) = &c.noise {
+        let mut rows: Vec<Option<usize>> = noise.iter().map(|&v| row_of(v)).collect();
+        rows[s] = floor_row;
+        staircase(
+            &mut g,
+            GUTTER,
+            &steps,
+            &rows,
+            s,
+            &DASHED,
+            theme.border_accent,
+            false,
+        );
+    }
+    let rows: Vec<Option<usize>> = c.signal.iter().map(|&v| row_of(v)).collect();
+    staircase(
+        &mut g,
+        GUTTER,
+        &steps,
+        &rows,
+        s + 1,
+        &HEAVY,
+        theme.value_hi,
+        true,
+    );
+    // Each node's level over its tread; the converter's is in the window.
+    for (j, &(a, b)) in steps.treads.iter().enumerate().take(s) {
+        if let Some(r) = rows[j] {
+            let t = format!("{:.0}", c.signal[j]);
+            let x = GUTTER + ((a + b) / 2).saturating_sub(t.len() / 2);
+            if r == 0 || !g.text_if_free(r - 1, x, &t, theme.label) {
+                g.text_if_free(r + 1, x, &t, theme.label);
             }
         }
-        free_from = start + len + 1;
     }
-    lines.push(Line::from(vec![
-        Span::raw(" ".repeat(gutter + 1)),
-        Span::styled(
-            axis.into_iter().collect::<String>(),
-            Style::default().fg(theme.label),
-        ),
-    ]));
 
-    let clips = match state.caps.gain.ceiling_part() {
-        Some(part) => format!("{part} clips {ceiling:.0} dBFS"),
-        None => "clips 0 dBFS".to_string(),
+    // The window: a ruler from the ceiling through the signal to the floor,
+    // each distance written between its two ends.
+    // Two ends on neighbouring rows leave no room between them, and the
+    // distance goes under the lower one instead, where `under` allows.
+    let span = |g: &mut Grid,
+                a: Option<usize>,
+                b: Option<usize>,
+                under: bool,
+                text: String,
+                col: Color| {
+        if let (Some(a), Some(b)) = (a, b) {
+            let (top, bot) = (a.min(b), a.max(b));
+            for r in top + 1..bot {
+                g.set(r, zx, '\u{2502}', theme.label);
+            }
+            if bot > top + 1 {
+                g.text((top + bot) / 2, zx + 2, &text, col);
+            } else if under && bot != top && bot + 1 < ch {
+                g.text(bot + 1, zx + 2, &text, col);
+            }
+        }
     };
-    let floor_text = match floor {
-        Some((db, enbw)) => format!(
-            "floor {db:.0} dBFS/{}",
+    let headroom = ceiling - c.adc_peak;
+    span(
+        &mut g,
+        ceil_row,
+        sig_row,
+        false,
+        if wide {
+            format!("{headroom:.0} dB headroom")
+        } else {
+            format!("{headroom:.0} dB")
+        },
+        theme.value,
+    );
+    if let Some((floor, _)) = c.floor {
+        let gap = c.adc_peak - floor;
+        let (text, col) = match (wide, gap >= 0.0) {
+            (true, true) => (format!("{gap:.0} dB over floor"), theme.value),
+            (true, false) => (format!("{:.0} dB under floor", -gap), theme.status_warn),
+            (false, true) => (format!("{gap:.0} dB"), theme.value),
+            (false, false) => (format!("{gap:.0} dB"), theme.status_warn),
+        };
+        span(&mut g, sig_row, floor_row, true, text, col);
+    }
+    if let Some(r) = ceil_row {
+        let who = state.caps.gain.ceiling_part().unwrap_or("ADC");
+        let text = if wide {
+            format!("{who} clips {ceiling:.0}")
+        } else {
+            format!("clip {ceiling:.0}")
+        };
+        g.set(r, zx, '\u{252c}', theme.status_crit);
+        g.text(r, zx + 2, &text, theme.status_crit);
+    }
+    if let (Some(r), Some((floor, _))) = (floor_row, c.floor) {
+        g.set(r, zx, '\u{2534}', theme.border_accent);
+        let text = if wide {
+            format!("floor {floor:.0}")
+        } else {
+            format!("{floor:.0}")
+        };
+        g.text(r, zx + 2, &text, theme.border_accent);
+    }
+    if let Some(r) = sig_row {
+        let text = format!("{:.0} dBFS", c.adc_peak);
+        g.set(r, zx, '\u{25cf}', theme.value_hi);
+        g.text(r, zx + 2, &text, theme.value_hi);
+        g.bold(r, zx + 2, text.len());
+    }
+
+    // The chain under it: each stage boxed at its riser, its gain beneath.
+    let mut axis = Grid::new(iw, 2, theme.value);
+    axis.text(0, 0, "    \u{2514}", dim);
+    for x in GUTTER..zx {
+        axis.set(0, x, '\u{2500}', dim);
+    }
+    axis.text(0, zx, "\u{25b6} ADC", theme.label);
+    axis.text(1, GUTTER + 1, "ANT", theme.label);
+    // Left to right; a box that would run into the one before it is left
+    // out rather than overprinted.
+    let (mut free_box, mut free_under) = (GUTTER, GUTTER + 5);
+    for ((name, under), &r) in c.stages.iter().zip(&steps.risers) {
+        let x = GUTTER + r;
+        let n = name.chars().count();
+        let bx = x.saturating_sub(n.div_ceil(2));
+        if bx >= free_box && bx + n + 2 <= zx {
+            axis.text(0, bx, &format!("\u{2524}{name}\u{251c}"), dim);
+            axis.text(0, bx + 1, name, theme.value);
+            free_box = bx + n + 2;
+        }
+        let u = under.chars().count();
+        let ux = x.saturating_sub(u / 2);
+        if ux >= free_under && ux + u <= zx {
+            axis.text(1, ux, under, theme.value_hi);
+            free_under = ux + u + 1;
+        }
+    }
+    let total = c.signal[s] - c.signal[0];
+    if total.is_finite() {
+        axis.text(1, zx, &format!("\u{03a3} {total:+.0} dB"), theme.label);
+    }
+
+    let caption = if c.noise.is_some() {
+        " signal measured at the converter; noise from each stage's figure"
+    } else {
+        " signal measured at the converter, walked back stage by stage"
+    };
+    let mut lines = vec![Line::from(Span::styled(caption, Style::default().fg(dim)))];
+    lines.extend((0..ch).map(|r| g.line(r)));
+    lines.push(axis.line(0));
+    lines.push(axis.line(1));
+
+    let floor_key = match c.floor {
+        Some((_, enbw)) => format!(
+            "\u{2500} floor /{}",
             crate::ui::widgets::micro_common::fmt_rbw(enbw)
         ),
         None => "no floor measured yet".to_string(),
     };
-    lines.push(Line::from(vec![
+    let mut legend = vec![
         Span::raw(" "),
+        Span::styled("\u{2501} signal, dBFS", Style::default().fg(theme.value_hi)),
         Span::styled(
-            "\u{2588} signal, dBFS at the converter",
-            Style::default().fg(theme.value_hi),
-        ),
-        Span::styled(
-            format!("  \u{25ac} {floor_text}"),
+            format!("   {floor_key}"),
             Style::default().fg(theme.border_accent),
         ),
-    ]));
-    // The ceiling on a line of its own with its distance to the floor: one
-    // legend line could not hold both at a laptop's width.
-    let mut ceiling_spans = vec![
-        Span::raw(" "),
-        Span::styled(
-            format!("\u{00b7} {clips}"),
-            Style::default().fg(theme.status_crit),
-        ),
     ];
-    if let Some((db, enbw)) = floor {
-        ceiling_spans.push(Span::styled(
-            format!(
-                ", {:.0} dB above the floor per {}",
-                ceiling - db,
-                crate::ui::widgets::micro_common::fmt_rbw(enbw)
-            ),
-            Style::default().fg(dim),
+    if c.noise.is_some() {
+        legend.push(Span::styled(
+            "   \u{2504} noise, modelled",
+            Style::default().fg(theme.border_accent),
         ));
     }
-    lines.push(Line::from(ceiling_spans));
-    lines.push(Line::from(Span::styled(
-        format!(" no noise trace: {}", state.caps.gain.no_cascade_reason()),
-        Style::default().fg(dim),
-    )));
-    crate::ui::chrome::collapse_spacers(&mut lines, ih);
-    f.render_widget(Paragraph::new(lines), inner);
-}
-
-/// What a chart row holds for a column, from the signal-trace row `sr` and the
-/// noise-trace row `nr` (rows grow downward, so a *smaller* row is a *higher* level).
-/// The `Buried` case keeps the diagram honest when the noise climbs above the signal
-/// (negative SNR): the band between them is flagged instead of left blank.
-#[derive(PartialEq, Debug)]
-enum Cell {
-    Signal,
-    Noise,
-    UsableDr,
-    Buried,
-    Empty,
-}
-
-fn classify(row: usize, sr: usize, nr: usize) -> Cell {
-    if row == sr {
-        Cell::Signal
+    legend.push(Span::styled(
+        "   \u{2508} clip",
+        Style::default().fg(theme.status_crit),
+    ));
+    lines.push(Line::from(legend));
+    if !state.caps.friis_applicable {
+        lines.push(Line::from(Span::styled(
+            format!(" no noise trace: {}", state.caps.gain.no_cascade_reason()),
+            Style::default().fg(dim),
+        )));
     }
-    // signal wins ties (SNR ≈ 0)
-    else if row == nr {
-        Cell::Noise
-    } else if row > sr.min(nr) && row < sr.max(nr) {
-        if sr < nr {
-            Cell::UsableDr
-        } else {
-            Cell::Buried
-        }
-    } else {
-        Cell::Empty
-    }
-}
-
-/// Coalesce a per-cell `(char, colour)` row into runs of same-coloured spans.
-fn coalesce(cells: Vec<(char, Color)>) -> Vec<Span<'static>> {
-    let mut spans: Vec<Span<'static>> = Vec::new();
-    let mut run = String::new();
-    let mut run_col: Option<Color> = None;
-    for (ch, col) in cells {
-        if run_col != Some(col) {
-            if let Some(c) = run_col {
-                spans.push(Span::styled(
-                    std::mem::take(&mut run),
-                    Style::default().fg(c),
-                ));
-            }
-            run_col = Some(col);
-        }
-        run.push(ch);
-    }
-    if let Some(c) = run_col {
-        spans.push(Span::styled(run, Style::default().fg(c)));
-    }
-    spans
+    lines
 }
 
 #[cfg(test)]
@@ -536,57 +640,12 @@ mod tests {
     use super::*;
 
     #[test]
-    fn dbm_row_maps_top_and_bottom() {
-        assert_eq!(dbm_row(TOP_DBM, 10), 0, "top of range → row 0");
-        assert_eq!(dbm_row(BOT_DBM, 10), 9, "bottom → last row");
-        // Clamps beyond the window.
-        assert_eq!(dbm_row(100.0, 10), 0);
-        assert_eq!(dbm_row(-500.0, 10), 9);
-    }
-
-    #[test]
-    fn lerp_at_interpolates_between_nodes() {
-        let v = [0.0, 10.0, 20.0];
-        assert!((lerp_at(&v, 0.0) - 0.0).abs() < 1e-9);
-        assert!((lerp_at(&v, 0.5) - 5.0).abs() < 1e-9);
-        assert!((lerp_at(&v, 2.0) - 20.0).abs() < 1e-9);
-        assert!(
-            (lerp_at(&v, 9.0) - 20.0).abs() < 1e-9,
-            "past the end clamps to last"
-        );
-    }
-
-    #[test]
     fn panel_name() {
         assert_eq!(LevelDiagramPanel.name(), "level_diagram");
     }
 
-    #[test]
-    fn classify_normal_signal_above_noise() {
-        // signal at row 2 (higher level), noise at row 6 (lower level)
-        assert_eq!(classify(2, 2, 6), Cell::Signal);
-        assert_eq!(classify(6, 2, 6), Cell::Noise);
-        assert_eq!(
-            classify(4, 2, 6),
-            Cell::UsableDr,
-            "between them = usable DR"
-        );
-        assert_eq!(classify(0, 2, 6), Cell::Empty);
-        assert_eq!(classify(9, 2, 6), Cell::Empty);
-    }
-
-    #[test]
-    fn classify_inverted_noise_above_signal() {
-        // Noise louder than signal: noise at row 2, signal at row 6.
-        assert_eq!(classify(2, 6, 2), Cell::Noise);
-        assert_eq!(classify(6, 6, 2), Cell::Signal);
-        assert_eq!(classify(4, 6, 2), Cell::Buried, "buried band, not blank");
-    }
-
-    #[test]
-    fn classify_coincident_is_signal() {
-        // SNR ≈ 0: the two traces land on the same row → signal drawn, no blank gap.
-        assert_eq!(classify(3, 3, 3), Cell::Signal);
+    fn draw(m: &SdrMetrics, w: u16, h: u16) -> String {
+        crate::state::fixture::draw(LevelDiagramPanel, w, h, m).join("\n")
     }
 
     fn r2(hz: u64) -> SdrMetrics {
@@ -600,47 +659,61 @@ mod tests {
         m
     }
 
+    fn hackrf() -> SdrMetrics {
+        let mut m = SdrMetrics::fixture().streaming().with_carrier(0.0, 40.0);
+        m.signal.adc_peak_dbfs = -14.0;
+        if let Some(fr) = m.waterfall.last_fft.as_mut() {
+            fr.noise_floor = -72.0;
+        }
+        m
+    }
+
     /// **On a chain with no published noise figures the diagram is the
     /// measured half**: the signal walked back from the converter through
-    /// each stage's measured gain, the floor the FFT measured at the
-    /// converter, and where this radio clips; it says why there is no noise
-    /// trace instead of leaving the panel empty.
+    /// each stage's measured gain, the chain boxed under it with each
+    /// stage's gain, and the converter's window with where this radio
+    /// clips, the signal, the floor and the distances between them; it says
+    /// why there is no noise trace.
     #[test]
     fn an_r2_gets_the_measured_diagram() {
-        // At the Lab RF bench's own width on a laptop, where a longer legend
-        // was cut.
-        let out =
-            crate::state::fixture::draw(LevelDiagramPanel, 73, 26, &r2(92_800_000)).join("\n");
+        // At the Lab RF bench's own width on a laptop.
+        let out = draw(&r2(92_800_000), 73, 26);
         for want in [
+            "\u{2524}LNA\u{251c}",
+            "\u{2524}MIX\u{251c}",
+            "\u{2524}VGA\u{251c}",
+            "+17",
+            "+1",
+            "+34",
+            "\u{25b6} ADC",
             "ANT",
-            "LNA +17",
-            "MIX +1",
-            "VGA +34",
-            "ADC",
-            "\u{2588}",
-            "floor -100 dBFS/",
-            "tuner clips -3 dBFS",
-            "97 dB above the floor per",
-            "\u{25ac} floor -100 dBFS/39.1 kHz",
+            "\u{03a3} +51 dB",
+            "\u{2501}",
+            "\u{25cf} -27 dBFS",
+            "tuner clips -3",
+            "24 dB headroom",
+            "73 dB over floor",
+            "floor -100",
+            "\u{2500} floor /39.1 kHz",
             "no noise trace: each stage's own noise figure is not published",
         ] {
             assert!(out.contains(want), "{want:?} in\n{out}");
         }
+        assert!(!out.contains('\u{2504}'), "no modelled noise:\n{out}");
     }
 
     /// Outside the LNA's band its gain reads as its step and the levels
-    /// before it are unknown, so the trace starts after it; under the AGC
-    /// the stages it sets read AGC.
+    /// before it are unknown, so the trace starts after it and there is no
+    /// total; under the AGC the stages it sets read AGC.
     #[test]
     fn the_measured_diagram_stops_where_a_gain_is_not_known() {
-        let far =
-            crate::state::fixture::draw(LevelDiagramPanel, 90, 22, &r2(943_400_000)).join("\n");
-        assert!(far.contains("LNA 6/14"), "{far}");
-        assert!(!far.contains("NaN"), "{far}");
+        let far = draw(&r2(943_400_000), 90, 22);
+        assert!(far.contains("6/14"), "{far}");
+        assert!(!far.contains("NaN") && !far.contains('\u{03a3}'), "{far}");
         let mut agc = r2(92_800_000);
         agc.radio.amp_enabled = true;
-        let out = crate::state::fixture::draw(LevelDiagramPanel, 90, 22, &agc).join("\n");
-        assert!(out.contains("LNA AGC") && out.contains("MIX AGC"), "{out}");
+        let out = draw(&agc, 90, 22);
+        assert_eq!(out.matches("AGC").count(), 2, "{out}");
     }
 
     /// A radio with no ceiling of its own clips at the converter, and says
@@ -651,8 +724,132 @@ mod tests {
             .streaming()
             .named_chain()
             .with_carrier(0.0, 20.0);
-        let out = crate::state::fixture::draw(LevelDiagramPanel, 90, 22, &m).join("\n");
-        assert!(out.contains("clips 0 dBFS"), "{out}");
+        let out = draw(&m, 90, 22);
+        assert!(out.contains("ADC clips 0"), "{out}");
         assert!(!out.contains("tuner"), "{out}");
+    }
+
+    /// **On the HackRF the noise is walked back from the floor the FFT
+    /// measured**, dashed because it is modelled from the stages' noise
+    /// figures. It used to be anchored on the sample peak less a spectral
+    /// ratio, which put the converter's noise 18 dB off the floor here.
+    #[test]
+    fn a_hackrf_gets_the_modelled_noise_on_the_measured_floor() {
+        let out = draw(&hackrf(), 73, 26);
+        for want in [
+            "noise from each stage's figure",
+            "\u{2504} noise, modelled",
+            "\u{2504}",
+            "\u{2524}LNA\u{251c}",
+            "\u{2524}MIX\u{251c}",
+            "\u{2524}VGA\u{251c}",
+            "+24",
+            "-7",
+            "+30",
+            "\u{03a3} +47 dB",
+            "ADC clips 0",
+            "\u{25cf} -14 dBFS",
+            "14 dB headroom",
+            "58 dB over floor",
+            "floor -72",
+        ] {
+            assert!(out.contains(want), "{want:?} in\n{out}");
+        }
+        assert!(!out.contains("no noise trace"), "{out}");
+        assert!(!out.contains("-54"), "the old anchor:\n{out}");
+    }
+
+    /// No floor measured yet: nothing to anchor the noise on, so no noise
+    /// trace and no distance to a floor, and the legend says why.
+    #[test]
+    fn with_no_floor_there_is_no_noise_walk() {
+        let mut m = hackrf();
+        m.waterfall.last_fft = None;
+        let out = draw(&m, 73, 26);
+        assert!(out.contains("no floor measured yet"), "{out}");
+        assert!(
+            !out.contains('\u{2504}') && !out.contains("over floor"),
+            "{out}"
+        );
+    }
+
+    /// A signal under the floor is said to be under it, not drawn as a
+    /// negative distance over it.
+    #[test]
+    fn a_signal_under_the_floor_says_so() {
+        let mut m = hackrf();
+        m.signal.adc_peak_dbfs = -80.0;
+        let out = draw(&m, 73, 26);
+        assert!(out.contains("8 dB under floor"), "{out}");
+    }
+
+    /// **Frozen, the whole chain is held**: the stages' readings and the
+    /// floor as well as the peak, so a gain moved after the freeze does not
+    /// redraw half of a held picture.
+    #[test]
+    fn a_frozen_bench_holds_every_stage_and_the_floor() {
+        let mut m = r2(92_800_000);
+        m.lab.rf_freeze = Some(crate::state::RfFreeze {
+            signed_hist: [0; 32],
+            peak_dbfs: -27.0,
+            rms_dbfs: -40.0,
+            clip_events: 0,
+            snr_db: 40.0,
+            amp_enabled: false,
+            lna_gain: 0,
+            vga_gain: 0,
+            floor: Some((-100.0, 39_062.5)),
+            readings: (0..3).map(|i| m.stage_reading(i)).collect(),
+        });
+        m = m.on_curve(0, 0);
+        m.signal.adc_peak_dbfs = -60.0;
+        if let Some(fr) = m.waterfall.last_fft.as_mut() {
+            fr.noise_floor = -90.0;
+        }
+        let out = draw(&m, 73, 26);
+        for want in ["+17", "+34", "\u{25cf} -27 dBFS", "floor -100"] {
+            assert!(out.contains(want), "{want:?} in\n{out}");
+        }
+    }
+
+    /// At the panel's smallest size the window keeps its numbers and drops
+    /// its words, so no reading is cut.
+    #[test]
+    fn the_smallest_panel_keeps_the_numbers() {
+        let out = draw(&r2(92_800_000), 40, 14);
+        for want in [
+            "clip -3",
+            "\u{25cf} -27 dBFS",
+            "\u{2534} -100",
+            "\u{25b6} ADC",
+        ] {
+            assert!(out.contains(want), "{want:?} in\n{out}");
+        }
+    }
+
+    /// Not streaming, it draws nothing but the dash.
+    #[test]
+    fn stopped_it_draws_the_dash() {
+        let out = draw(&SdrMetrics::fixture(), 73, 26);
+        assert!(out.contains("\u{2014}\u{2014}\u{2014}"), "{out}");
+        assert!(!out.contains("ADC"), "{out}");
+    }
+
+    #[test]
+    fn a_staircase_steps_at_each_stage() {
+        let steps = Steps::new(20, 3);
+        assert_eq!(steps.risers, vec![5, 10, 15]);
+        assert_eq!(steps.treads, vec![(0, 4), (6, 9), (11, 14), (16, 19)]);
+        let mut g = Grid::new(20, 5, Color::Reset);
+        let rows = [Some(4), Some(2), Some(3), Some(0)];
+        staircase(&mut g, 0, &steps, &rows, 4, &HEAVY, Color::Reset, true);
+        let text: Vec<String> = (0..5)
+            .map(|r| g.cells[r].iter().map(|c| c.0).collect())
+            .collect();
+        assert_eq!(text[0], "               ┏━━━━");
+        assert_eq!(text[1], "               ┃    ");
+        assert_eq!(text[2], "     ┏━━━━┓    ┃    ");
+        assert_eq!(text[3], "     ┃    ┗━━━━┛    ");
+        assert_eq!(text[4], "━━━━━┛              ");
     }
 }

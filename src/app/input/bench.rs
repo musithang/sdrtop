@@ -336,6 +336,15 @@ pub(super) fn rf_chain(key: KeyEvent, ctx: &mut InputCtx<'_>) -> KeyAction {
                     amp_enabled: m.radio.amp_enabled,
                     lna_gain: m.radio.primary_gain(),
                     vga_gain: m.radio.secondary_gain(),
+                    floor: m
+                        .waterfall
+                        .last_fft
+                        .as_ref()
+                        .filter(|fr| fr.enbw_hz > 0.0)
+                        .map(|fr| (fr.noise_floor, fr.enbw_hz)),
+                    readings: (0..m.caps.gain.stages().len())
+                        .map(|i| m.stage_reading(i))
+                        .collect(),
                 });
                 m.push_log("Lab RF: frozen \u{2014} histogram & diagram held".to_string());
             }

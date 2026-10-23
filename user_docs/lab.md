@@ -139,25 +139,39 @@ used to go blank instead: three lines on a twenty row panel.
 
 ### Gain-Staging Level Diagram
 
-The lineup drawn as a picture: two traces climbing the stage axis, **signal**
-(filled) and **noise floor** (line). The vertical gap between them is the SNR.
-Reading it left to right shows that gap being *carried up* the chain and parked
-inside the ADC window, never widened. Dashed reference lines mark the ADC clip
-ceiling and the 8-bit floor, and the band between the traces is shaded as
-**usable dynamic range**. If the noise ever climbs above the signal, that band is
-flagged **buried** rather than left blank, because an empty gap and a negative one
-are very different situations.
+The lineup drawn as a picture. The chain itself is the x-axis, `ANT ─┤LNA├─┤MIX├─┤VGA├─▶ ADC`,
+with each stage's gain written under it, and the signal is a **staircase** on
+it: the level holds between two stages and steps up (or down, for the HackRF's
+mixer) at each one. Every step is a stage's gain, every tread is the level at
+that point, written just above it. The y-axis is dBFS, the converter's own
+scale, with the signal walked back from the peak the converter measured. Nothing
+here is calibrated to the antenna, so the antenna's figure is a level relative
+to full scale, not a power in dBm.
 
-That is the HackRF, whose stages come with noise figures. **On a radio whose
-stages don't** (an Airspy R2, anything through SoapySDR) the noise trace would
-have to be made up, so it isn't drawn, and the panel says so on its last line.
-What is drawn is everything that is measured: the signal walked back from the
-converter through each stage's measured gain, the floor the FFT measured at the
-converter (with the bandwidth it was measured in), and the level where this
-radio clips, with the distance between the two. A stage whose gain isn't a
-decibel figure right now, outside the band it was measured in or while the AGC
-is driving it, reads as its step or `AGC` under the axis, and the trace starts
-after it rather than guessing what came before.
+At the right edge sits the **converter's window**, the one place where every
+line is measured:
+
+- where this radio clips (red): 0 dBFS at the ADC on a HackRF, about −3 dBFS at
+  the tuner's output on an [Airspy R2](hardware.md#airspy-r2), which flattens
+  the signal before the converter's own rails;
+- the signal (`●`), and the **headroom** between it and the clip;
+- the **floor** the FFT measured, with the bandwidth it was measured in in the
+  legend, and how far the signal sits **over the floor**. A signal under it
+  says it is under it, in amber, rather than showing a negative distance.
+
+Solid lines are measured, a dashed one is modelled. On the HackRF, whose stages
+come with noise figures, the noise is walked back from the measured floor
+through them (`┄`): watch the gap between it and the signal shrink at the first
+stage and then stay put, because gain moves the SNR up the chain but never
+improves it. **On a radio whose stages don't come with noise figures** (an
+Airspy R2, anything through SoapySDR) that walk would have to be made up, so it
+isn't drawn, and the panel says so on its last line.
+
+A stage whose gain isn't a decibel figure right now, outside the band it was
+measured in or while the AGC is driving it, reads as its step or `AGC` under the
+axis, and the staircase starts after it rather than guessing what came before.
+[Freeze the bench](#auto-gain-and-freeze) and the whole picture is held, every
+stage and the floor included.
 
 ### ADC Loading
 
