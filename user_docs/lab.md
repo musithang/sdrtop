@@ -699,21 +699,27 @@ exist on a pull backend.
 
 ### Timing Diagnostics *(focus `t`)*
 
-- **Callback timing** (push) or **read timing** (pull): the measured period against
-  the period expected at your sample rate, the throughput that implies, and the
-  jitter around it.
-- **Deadline budget** (push): per-callback deviation percentiles (p95, p99, peak)
-  drawn against a deadline that scales with the sample rate, because a callback
-  that is 200 µs late is fine at 2 Msps and fatal at 20. A late-callback count
-  sits beside it.
-- **Read occupancy** (pull): the share of the read loop spent working rather than
+- **Arrival** (push): a block every so many milliseconds against the period
+  your sample rate implies, the jitter around it and its 60-second trend.
+- **Late by** (push): how late the worst callbacks came (p95, p99, peak), each a
+  bar on one logarithmic scale from 1 % of the budget to ten times it, with the
+  time and the multiple written beside it, and a count of the ones past it. The
+  **budget** is the radio's slack, and the nameplate says which: a slice of one
+  block where the driver holds its USB transfer until the callback returns (the
+  HackRF, an RTL-SDR), and the depth of the driver's queue less one block where it
+  queues blocks before calling back (an [Airspy R2](hardware.md#airspy-r2):
+  libairspy keeps eight, so a callback may come seven blocks late, about 46 ms at
+  10 Msps, before anything is lost).
+- **Read loop** (pull): the share of the read loop spent working rather than
   waiting. Low is healthy and means there is slack. Climbing toward 100 % means
   the reader has stopped having spare time, and the driver's buffer is about to
   start filling, which is the same warning a late callback gives on the other
   transport.
-- **Sample rate**: host clock drift in ppm and the drift of the measured rate
-  against the configured one. This is clock integrity rather than throughput: a
-  steady few ppm is a crystal being a crystal, a wandering figure is not.
+- **Sample clock**: the rate the radio actually delivers and how many ppm that is
+  off the one you set, measured over a long baseline: the one clock figure on the
+  bench, also the `CLOCK` in the bars above and below. A steady few ppm is a
+  crystal being a crystal, a wandering figure is not. Then the throughput it
+  produces, with its trend.
 - **The verdict** names its own reason rather than just a grade, so
   `Sample clock is off the configured rate / 182 ppm out, nothing lost` is
   distinguishable at a glance from `Overrun, samples lost`. A clock that is a

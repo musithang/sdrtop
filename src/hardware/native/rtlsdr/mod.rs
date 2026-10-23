@@ -421,6 +421,7 @@ fn rtl_caps(tuner: c_int, gains_tenths: &[i32]) -> DeviceCapabilities {
         // We own the thread, but `rtlsdr_read_async` drives `rtl_rx_callback`
         // from inside it. The pacing is still the driver's, not ours.
         delivery: DeliveryModel::Push,
+        driver_queue_blocks: None,
     }
 }
 

@@ -3,9 +3,9 @@
 
 //! `timing_diagnostics` - the numbers column of the `lab_timing` preset.
 //!
-//! Three zones and a verdict: how well the stream is keeping up, how close the
-//! worst of it came to the threshold, and whether the sample clock is delivering
-//! what was asked for.
+//! Three zones and a verdict: how regularly blocks arrive, how late the worst
+//! of them came against the radio's slack, and whether the sample clock is
+//! delivering what was asked for.
 //!
 //! **The first zone depends on how samples arrive.** A push backend gets
 //! [`callback`] and [`deadline`], which measure block arrival against a deadline
@@ -122,16 +122,16 @@ mod tests {
         let out = draw(TimingDiagnosticsPanel, W, H, &live().pulling(0.65)).join("\n");
         assert!(out.contains("READ LOOP"), "no read-loop zone:\n{out}");
         assert!(
-            !out.contains("DEADLINE BUDGET"),
+            !out.contains("LATE BY"),
             "a pull loop was given a deadline:\n{out}"
         );
         assert!(
-            !out.contains("CALLBACK TIMING"),
+            !out.contains("ARRIVAL"),
             "a pull loop has no callbacks:\n{out}"
         );
         // And the push device still gets both, unchanged.
         let push = draw(TimingDiagnosticsPanel, W, H, &live()).join("\n");
-        assert!(push.contains("CALLBACK TIMING") && push.contains("DEADLINE BUDGET"));
+        assert!(push.contains("ARRIVAL") && push.contains("LATE BY"));
         assert!(!push.contains("READ LOOP"));
     }
 
@@ -176,10 +176,44 @@ mod tests {
     #[test]
     fn the_three_zones_appear_in_order() {
         let out = draw(TimingDiagnosticsPanel, W, H, &live()).join("\n");
-        let cb = out.find("CALLBACK TIMING").expect("no callback zone");
-        let dl = out.find("DEADLINE BUDGET").expect("no deadline zone");
-        let sr = out.find("SAMPLE RATE").expect("no sample-rate zone");
+        let cb = out.find("ARRIVAL").expect("no callback zone");
+        let dl = out.find("LATE BY").expect("no deadline zone");
+        let sr = out.find("SAMPLE CLOCK").expect("no sample-rate zone");
         assert!(cb < dl && dl < sr, "zones out of order:\n{out}");
+    }
+
+    /// **Behind a driver's queue the budget is the queue's slack**, said on
+    /// the nameplate: the R2's five minutes at 10 Msps, callbacks up to
+    /// 2.3 ms late, read 109 of 160 late against a slice of one block.
+    #[test]
+    fn a_queued_driver_is_judged_against_its_queue() {
+        let mut m = live();
+        let mut caps = (*m.caps).clone();
+        caps.driver_queue_blocks = Some(8);
+        m.caps = std::sync::Arc::new(caps);
+        m.timing.cb_period_expected = 6_554;
+        m.timing.deadline_budget_us = 7 * 6_554;
+        m.timing.dev_p95_us = 1_689;
+        m.timing.dev_p99_us = 2_013;
+        m.timing.dev_peak_us = 2_330;
+        m.timing.late_callbacks = 0;
+        let out = draw(TimingDiagnosticsPanel, 53, 26, &m).join("\n");
+        for want in [
+            "45.9 ms, 8-block queue",
+            "2.3 ms 5 %",
+            "none past the budget",
+        ] {
+            assert!(out.contains(want), "{want:?} in\n{out}");
+        }
+    }
+
+    /// One clock figure: the delivered rate's offset, not a second ppm from
+    /// the block period beside it.
+    #[test]
+    fn the_clock_is_stated_once() {
+        let out = draw(TimingDiagnosticsPanel, W, H, &live()).join("\n");
+        assert_eq!(out.matches("ppm").count(), 1, "{out}");
+        assert!(!out.contains("Host drift"), "{out}");
     }
 
     /// Callbacks comfortably inside the budget say so; ones well over it are
@@ -187,12 +221,12 @@ mod tests {
     #[test]
     fn the_late_count_distinguishes_inside_from_over_budget() {
         let inside = draw(TimingDiagnosticsPanel, W, H, &live()).join("\n");
-        assert!(inside.contains("none over budget"), "{inside}");
+        assert!(inside.contains("none past the budget"), "{inside}");
 
         let over = SdrMetrics::fixture().streaming().with_timing(2.5);
         let out = draw(TimingDiagnosticsPanel, W, H, &over).join("\n");
         assert!(
-            out.contains("over budget") && !out.contains("none over budget"),
+            out.contains("past the budget") && !out.contains("none past the budget"),
             "an over-budget stream still read clean:\n{out}"
         );
     }

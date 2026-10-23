@@ -155,7 +155,7 @@ fn rf_banner_fields(state: &SdrMetrics) -> Vec<(&'static str, String)> {
 
 /// Lab timing banner middle fields.
 ///
-/// `CALLBACK … · JITTER … · DRIFT … · DEADLINE …` on a push backend, where
+/// `CALLBACK … · JITTER … · CLOCK … · DEADLINE …` on a push backend, where
 /// DEADLINE reads `✓ met` while no callback misses the budget, else the worst
 /// slip as a percentage of the budget (the mockup's `⚠ 130%` / `⚠ 1050%`).
 ///
@@ -200,7 +200,9 @@ fn timing_banner_fields(
     vec![
         (period_label, callback),
         ("JITTER", format!("\u{00b1}{} \u{00b5}s", t.cb_jitter_us)),
-        ("DRIFT", format!("{:+} ppm", t.cb_period_delta_ppm)),
+        // The sample clock's offset over the long baseline: the one clock
+        // figure the bench shows, here as in the diagnostics column.
+        ("CLOCK", format!("{:+} ppm", t.sr_delta_ppm)),
         last,
     ]
 }
@@ -696,7 +698,7 @@ fn titlecase(s: &str) -> String {
 }
 
 /// Lab timing marker bar: the host-timing window as a single line -
-/// `JITTER ±42 µs · DRIFT +12 ppm · LATE 0 · BUF 0% · QUALITY ✓ Excellent` -
+/// `JITTER ±42 µs · CLOCK +18 ppm · LATE 0 · BUF 0% · QUALITY ✓ Excellent` -
 /// plus the focused panel's key hints. LATE / BUF / QUALITY carry their severity
 /// colour so a pressured pipeline reads at a glance.
 fn timing_marker_lines(state: &SdrMetrics, theme: &crate::Theme, iw: usize) -> Vec<Line<'static>> {
@@ -722,8 +724,8 @@ fn timing_marker_lines(state: &SdrMetrics, theme: &crate::Theme, iw: usize) -> V
     try_add(
         vec![
             Span::raw("   "),
-            Span::styled("DRIFT ", dim),
-            crate::ui::widgets::timing_fmt::ppm_span(t.cb_period_delta_ppm, theme),
+            Span::styled("CLOCK ", dim),
+            crate::ui::widgets::timing_fmt::ppm_span(t.sr_delta_ppm, theme),
         ],
         &mut used,
         &mut spans,

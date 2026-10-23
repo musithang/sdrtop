@@ -1177,6 +1177,7 @@ fn capabilities(model: Model, basic_input: BasicInput) -> DeviceCapabilities {
         has_bb_filter: true,
         friis_applicable: false,
         delivery: DeliveryModel::Pull,
+        driver_queue_blocks: None,
     }
 }
 

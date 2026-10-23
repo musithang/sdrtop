@@ -141,6 +141,7 @@ impl TimingQuality {
         drops_per_sec: u64,
         delivery: DeliveryModel,
         read_occupancy: Option<f32>,
+        driver_queue_blocks: Option<u32>,
     ) -> TimingVerdict {
         // No timing data yet (not streaming / first poll) reads as the best case
         // rather than alarming the user with a red verdict on an idle radio.
@@ -154,8 +155,11 @@ impl TimingQuality {
         let (pace_grade, pace_cause) = match delivery {
             DeliveryModel::Push => {
                 // f64, unchanged from before this became two currencies: the
-                // push grade must not shift by a rounding step.
-                let ratio = jitter_p99_us as f64 / cb_period_expected as f64;
+                // push grade must not shift by a rounding step. Against the
+                // driver's slack where it queues blocks: a callback that runs
+                // a block late behind libairspy's queue has lost nothing.
+                let span = cb_period_expected * queue_slack_blocks(driver_queue_blocks);
+                let ratio = jitter_p99_us as f64 / span as f64;
                 let grade = if ratio > 0.50 {
                     TimingQuality::Poor
                 } else if ratio > 0.25 {
@@ -219,14 +223,18 @@ impl TimingQuality {
     }
 }
 
+/// Blocks of slack a driver's queue gives a late callback: its depth less the
+/// one being delivered, and one block where there is no queue.
+fn queue_slack_blocks(driver_queue_blocks: Option<u32>) -> u64 {
+    driver_queue_blocks.map_or(1, |q| u64::from(q.saturating_sub(1).max(1)))
+}
+
 #[derive(Clone, Default)]
 pub struct TimingState {
     /// Measured mean time between RX callbacks (µs).
     pub cb_period_us: u64,
     /// Expected callback period at the configured sample rate (µs).
     pub cb_period_expected: u64,
-    /// Signed offset of the measured period from expected, in ppm.
-    pub cb_period_delta_ppm: i64,
     /// Std-dev of the callback period over the last poll window (µs).
     pub cb_jitter_us: u64,
     /// Largest callback jitter seen in the most recent poll window.
@@ -259,8 +267,10 @@ pub struct TimingState {
     /// The full snapshot of the hot-path gap ring (not just the deadline window),
     /// so the strip chart can fill a wide panel; it plots this directly.
     pub cb_deviations_us: Vec<i32>,
-    /// Late-callback deadline budget for this sample rate (µs), proportional to
-    /// the expected period (see [`DEADLINE_BUDGET_FRAC`]).
+    /// Late-callback deadline budget for this sample rate (µs): proportional to
+    /// the expected period (see [`DEADLINE_BUDGET_FRAC`]), or the slack of a
+    /// driver's queue where it keeps one
+    /// ([`crate::hardware::DeviceCapabilities::driver_queue_blocks`]).
     pub deadline_budget_us: u64,
     /// Callbacks in the shown window whose |deviation| exceeded the budget.
     pub late_callbacks: u32,
@@ -292,15 +302,10 @@ impl TimingState {
         throughput_std_mbps: f64,
         delivery: DeliveryModel,
         read_occupancy: Option<f32>,
+        driver_queue_blocks: Option<u32>,
     ) -> Self {
         let cb_period_expected = if config_sample_rate > 0.0 {
             (samples_per_transfer as f64 / config_sample_rate * 1e6).round() as u64
-        } else {
-            0
-        };
-        let cb_period_delta_ppm = if cb_period_expected > 0 && cb_period_us > 0 {
-            ((cb_period_us as f64 - cb_period_expected as f64) / cb_period_expected as f64 * 1e6)
-                .round() as i64
         } else {
             0
         };
@@ -321,17 +326,23 @@ impl TimingState {
             drops_per_sec,
             delivery,
             read_occupancy,
+            driver_queue_blocks,
         );
 
         // ── Per-callback deadline view ──────────────────────────────────────────
         // Budget scales with the expected period (floored), so "late" means the
-        // same proportional slip at any sample rate.
-        let deadline_budget_us = if cb_period_expected > 0 {
-            ((DEADLINE_BUDGET_FRAC * cb_period_expected as f64).round() as u64)
-                .max(DEADLINE_BUDGET_FLOOR_US)
-        } else {
-            DEADLINE_BUDGET_FLOOR_US
-        };
+        // same proportional slip at any sample rate. A driver that queues
+        // blocks before the callback gives the queue's slack instead: that is
+        // how late a block may come before one is lost.
+        let deadline_budget_us =
+            if let (Some(_), true) = (driver_queue_blocks, cb_period_expected > 0) {
+                cb_period_expected * queue_slack_blocks(driver_queue_blocks)
+            } else if cb_period_expected > 0 {
+                ((DEADLINE_BUDGET_FRAC * cb_period_expected as f64).round() as u64)
+                    .max(DEADLINE_BUDGET_FLOOR_US)
+            } else {
+                DEADLINE_BUDGET_FLOOR_US
+            };
         // The strip chart plots the whole snapshot ring so a wide panel fills with
         // real samples (newest at the right edge) rather than blanking out - the
         // chart shows as many of these as its width allows.
@@ -357,7 +368,6 @@ impl TimingState {
         Self {
             cb_period_us,
             cb_period_expected,
-            cb_period_delta_ppm,
             cb_jitter_us,
             jitter_max_us,
             // Session peak is carried forward by the caller (rx task), not derived
@@ -428,6 +438,7 @@ mod tests {
             0.1,
             DeliveryModel::Push,
             None,
+            None,
         );
         assert_eq!(t.cb_period_expected, 3_413);
     }
@@ -448,10 +459,10 @@ mod tests {
             0.2,
             DeliveryModel::Push,
             None,
+            None,
         );
         assert_eq!(t.cb_period_expected, 13_107);
-        // Measured slightly under expected → negative ppm.
-        assert!(t.cb_period_delta_ppm < 0, "got {}", t.cb_period_delta_ppm);
+        assert_eq!(t.cb_period_us, 13_100);
     }
 
     #[test]
@@ -469,6 +480,7 @@ mod tests {
             19.5,
             0.2,
             DeliveryModel::Push,
+            None,
             None,
         );
         assert_eq!(t.sr_delta_ppm, -200);
@@ -489,6 +501,7 @@ mod tests {
             0.0,
             DeliveryModel::Push,
             None,
+            None,
         );
         assert_eq!(t.cb_period_expected, 0);
         assert_eq!(t.timing_quality, TimingQuality::Excellent);
@@ -498,7 +511,7 @@ mod tests {
     fn quality_decision_tree() {
         let exp = 13_107u64;
         let grade = |j, ppm, drops| {
-            TimingQuality::classify(j, exp, ppm, drops, DeliveryModel::Push, None).quality
+            TimingQuality::classify(j, exp, ppm, drops, DeliveryModel::Push, None, None).quality
         };
         // Clean stream.
         assert_eq!(grade(500, 10, 0), TimingQuality::Excellent);
@@ -520,7 +533,7 @@ mod tests {
     fn the_reason_for_the_grade_comes_back_with_it() {
         let exp = 13_107u64;
         let why = |j, ppm, drops| {
-            TimingQuality::classify(j, exp, ppm, drops, DeliveryModel::Push, None).cause
+            TimingQuality::classify(j, exp, ppm, drops, DeliveryModel::Push, None, None).cause
         };
 
         assert_eq!(why(500, 10, 0), TimingCause::Settled);
@@ -536,7 +549,7 @@ mod tests {
 
         // No stream yet is settled, not a fault.
         assert_eq!(
-            TimingQuality::classify(9_000, 0, 9_000, 9, DeliveryModel::Push, None).cause,
+            TimingQuality::classify(9_000, 0, 9_000, 9, DeliveryModel::Push, None, None).cause,
             TimingCause::Settled
         );
     }
@@ -551,13 +564,13 @@ mod tests {
     #[test]
     fn a_pull_backend_is_not_graded_on_its_own_read_rhythm() {
         let measured =
-            TimingQuality::classify(7_763, 1_638, -18, 0, DeliveryModel::Pull, Some(0.65));
+            TimingQuality::classify(7_763, 1_638, -18, 0, DeliveryModel::Pull, Some(0.65), None);
         assert_eq!(measured.quality, TimingQuality::Excellent, "{measured:?}");
         assert_eq!(measured.cause, TimingCause::Settled);
 
         // The identical stream on a push backend is still a disaster, because
         // there the interval really is the link's.
-        let pushed = TimingQuality::classify(7_763, 1_638, -18, 0, DeliveryModel::Push, None);
+        let pushed = TimingQuality::classify(7_763, 1_638, -18, 0, DeliveryModel::Push, None, None);
         assert_eq!(pushed.quality, TimingQuality::Poor);
         assert_eq!(pushed.cause, TimingCause::Jitter);
     }
@@ -574,7 +587,7 @@ mod tests {
             (1.00, TimingQuality::Poor),
         ];
         for (occ, want) in bands {
-            let v = TimingQuality::classify(0, 1_638, 0, 0, DeliveryModel::Pull, Some(occ));
+            let v = TimingQuality::classify(0, 1_638, 0, 0, DeliveryModel::Pull, Some(occ), None);
             assert_eq!(v.quality, want, "occupancy {occ}: {v:?}");
             if want != TimingQuality::Excellent {
                 assert_eq!(v.cause, TimingCause::Backlog, "occupancy {occ}");
@@ -585,14 +598,15 @@ mod tests {
     /// The two causes that are not about pace still apply to a pull backend.
     #[test]
     fn drops_and_the_clock_still_count_on_a_pull_backend() {
-        let dropping = TimingQuality::classify(0, 1_638, 0, 3, DeliveryModel::Pull, Some(0.1));
+        let dropping =
+            TimingQuality::classify(0, 1_638, 0, 3, DeliveryModel::Pull, Some(0.1), None);
         assert_eq!(
             dropping.cause,
             TimingCause::Drops,
             "drops outrank everything"
         );
 
-        let off = TimingQuality::classify(0, 1_638, 900, 0, DeliveryModel::Pull, Some(0.1));
+        let off = TimingQuality::classify(0, 1_638, 900, 0, DeliveryModel::Pull, Some(0.1), None);
         assert_eq!(off.quality, TimingQuality::Poor);
         assert_eq!(off.cause, TimingCause::Clock);
     }
@@ -602,7 +616,7 @@ mod tests {
     /// it is not supposed to be judged by.
     #[test]
     fn a_pull_backend_without_a_reading_is_not_graded_on_pace() {
-        let v = TimingQuality::classify(99_999, 1_638, 0, 0, DeliveryModel::Pull, None);
+        let v = TimingQuality::classify(99_999, 1_638, 0, 0, DeliveryModel::Pull, None, None);
         assert_eq!(v.quality, TimingQuality::Excellent, "{v:?}");
         assert_eq!(v.cause, TimingCause::Settled);
     }
@@ -629,6 +643,7 @@ mod tests {
             0.2,
             DeliveryModel::Push,
             None,
+            None,
         );
         let t_rough = TimingState::compute(
             13_107,
@@ -642,6 +657,7 @@ mod tests {
             19.5,
             0.2,
             DeliveryModel::Push,
+            None,
             None,
         );
         assert_eq!(t_calm.jitter_max_us, 200);
@@ -675,6 +691,7 @@ mod tests {
             0.2,
             DeliveryModel::Push,
             None,
+            None,
         );
         assert_eq!(t.deadline_budget_us, 603, "budget = round(0.046 * 13107)");
         // Signed deviations preserved, newest last, early spike negative.
@@ -707,6 +724,7 @@ mod tests {
             0.2,
             DeliveryModel::Push,
             None,
+            None,
         );
         // Whole ring is available to plot.
         assert_eq!(t.cb_deviations_us.len(), 40 + STRIP_WINDOW);
@@ -735,7 +753,48 @@ mod tests {
             0.0,
             DeliveryModel::Push,
             None,
+            None,
         );
         assert_eq!(t.deadline_budget_us, DEADLINE_BUDGET_FLOOR_US);
+    }
+
+    /// **Behind a driver's queue, a late callback is not a loss.** The R2 at
+    /// 10 Msps, five minutes on the bench: callbacks up to 2.3 ms late
+    /// against a block of 6.55 ms, nothing lost. Against a slice of one block
+    /// that was 109 of 160 late and a marginal pace; against the seven blocks
+    /// libairspy's queue can absorb it is none late and an excellent pace,
+    /// and what is left to grade is the clock.
+    #[test]
+    fn a_driver_queue_is_the_budget() {
+        // A 6.554 ms block (65536 pairs at 10 Msps), callbacks scattered to
+        // 2.3 ms either way.
+        let gaps: Vec<u64> = (0..160)
+            .map(|k| if k % 3 == 0 { 8_884 } else { 4_224 })
+            .collect();
+        let compute = |queue| {
+            TimingState::compute(
+                6_568,
+                10_000_000.0,
+                65_536,
+                &[2_013],
+                &gaps,
+                821,
+                10_003_210,
+                0,
+                38.1,
+                1.37,
+                DeliveryModel::Push,
+                None,
+                queue,
+            )
+        };
+        let sliced = compute(None);
+        assert_eq!(sliced.deadline_budget_us, 301);
+        assert_eq!(sliced.late_callbacks, 160);
+        let queued = compute(Some(8));
+        assert_eq!(queued.deadline_budget_us, 7 * 6_554);
+        assert_eq!(queued.late_callbacks, 0);
+        assert_eq!(queued.timing_quality, TimingQuality::Marginal);
+        assert_eq!(queued.timing_cause, TimingCause::Clock, "the pace is fine");
     }
 }

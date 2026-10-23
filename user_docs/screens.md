@@ -256,11 +256,12 @@ Three views of the same quadrature question, from three directions.
 Whether your computer is keeping up with the radio in real time.
 
 - **Timing Diagnostics** *(left, focus `t`)*: measured versus expected block
-  period, host clock drift in ppm, jitter, and a verdict that names its own
-  reason. On a radio that pushes blocks at you (HackRF, RTL-SDR, Airspy R2) it grades
-  deviation percentiles against a deadline budget that scales with the sample
-  rate; on one you pull from (SoapySDR) there is no deadline to miss, so it
-  measures how much of the read loop went on waiting instead.
+  period, jitter, the sample clock's offset in ppm, and a verdict that names its
+  own reason. On a radio that pushes blocks at you (HackRF, RTL-SDR, Airspy R2) it
+  measures how late the worst blocks come against the radio's slack (a slice of
+  one block, or a driver's queue where it keeps one); on one you pull from
+  (SoapySDR) there is no deadline to miss, so it measures how much of the read
+  loop went on waiting instead.
 - **Interval Strip Chart** *(centre)*: every point is one real block, plotted by
   how far its arrival drifted from the expected interval. Late deliveries climb,
   early ones dip. A host hiccup is something you watch happen rather than infer.

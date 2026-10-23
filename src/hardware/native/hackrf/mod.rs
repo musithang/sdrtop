@@ -424,6 +424,7 @@ pub fn caps() -> DeviceCapabilities {
         // libhackrf owns the thread and calls `rx_callback`. The interval
         // between callbacks is the link's own cadence.
         delivery: DeliveryModel::Push,
+        driver_queue_blocks: None,
     }
 }
 

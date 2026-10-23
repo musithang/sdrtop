@@ -245,6 +245,7 @@ mod tests {
             8,
             crate::hardware::DeliveryModel::Push,
             None,
+            None,
         );
         dropping.timing.timing_quality = v.quality;
         dropping.timing.timing_cause = v.cause;

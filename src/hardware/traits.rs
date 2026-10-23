@@ -1129,13 +1129,17 @@ pub struct DeviceCapabilities {
     pub has_bb_filter: bool,
     /// The Friis cascade NF / MDS panel applies (HackRF's known 3-stage chain).
     pub friis_applicable: bool,
-    /// Whether the driver pushes samples at us or we pull them.
-    ///
-    /// Read by the capability tests only until T5, where the timing bench starts
-    /// asking it. Declared now rather than then so that every backend has to
-    /// answer the question as part of describing itself, including any added in
-    /// between.
+    /// Whether the driver pushes samples at us or we pull them. The timing
+    /// bench grades a push stream on its callbacks' arrival and a pull stream
+    /// on its read loop.
     pub delivery: DeliveryModel,
+    /// Blocks a push driver holds between its USB transfers and our callback,
+    /// when it holds any: libairspy keeps eight. With such a queue a callback
+    /// may run that many blocks less one late before anything is lost, so
+    /// that, and not a slice of one block, is the timing bench's budget.
+    /// `None` where the callback runs on the transfer itself (libhackrf,
+    /// librtlsdr) or the backend pulls.
+    pub driver_queue_blocks: Option<u32>,
 }
 
 impl DeviceCapabilities {

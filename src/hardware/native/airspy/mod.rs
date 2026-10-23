@@ -219,6 +219,12 @@ fn label(found: &Found) -> String {
 /// The rates the R2's firmware offers, complex samples per second.
 const R2_RATES: [u32; 2] = [2_500_000, 10_000_000];
 
+/// Buffers libairspy queues between its USB transfers and the consumer thread
+/// that calls us back (`libairspy/src/airspy.c`, v1.0.10: the queue its
+/// `dropped_samples` counts the overflows of). A callback can fall that many
+/// blocks less one behind before a buffer is lost.
+const LIBAIRSPY_QUEUE_BLOCKS: u32 = 8;
+
 // libairspy's two presets, as `airspy.c` (1.0.10, lines 117-122) holds them:
 // register positions, indexed from the top of the curve down.
 const LINEARITY_VGA: [u32; 22] = [
@@ -365,6 +371,7 @@ pub fn caps() -> DeviceCapabilities {
         has_bb_filter: false,
         friis_applicable: false,
         delivery: DeliveryModel::Push,
+        driver_queue_blocks: Some(LIBAIRSPY_QUEUE_BLOCKS),
     }
 }
 
@@ -1122,6 +1129,9 @@ mod tests {
         assert_eq!((c.sample_rate_min_hz, c.sample_rate_max_hz), (2.5e6, 10e6));
         assert_eq!(c.sample_geometry.full_scale, 16384.0);
         assert_eq!(c.sample_geometry.bits(), 12);
+        // libairspy queues before its callback, and the timing bench's
+        // budget is that queue's slack.
+        assert_eq!(c.driver_queue_blocks, Some(8));
         assert_eq!(c.samples_per_transfer, 65_536);
         assert_eq!(c.delivery, DeliveryModel::Push);
         assert!(!c.friis_applicable && !c.has_bb_filter);

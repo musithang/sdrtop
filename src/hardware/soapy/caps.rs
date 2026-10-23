@@ -302,6 +302,7 @@ pub fn capabilities(a: &DriverAnswers) -> Result<Built, Unsupported> {
         // `readStream` is a pull: it returns as soon as the driver has data,
         // so our loop sets the rhythm rather than measuring one.
         delivery: DeliveryModel::Pull,
+        driver_queue_blocks: None,
     };
     Ok(Built {
         caps,

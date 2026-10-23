@@ -212,6 +212,7 @@ pub(super) fn write_back(
         tp_std,
         device.capabilities().delivery,
         c.read_occupancy,
+        device.capabilities().driver_queue_blocks,
     );
     m.timing.jitter_session_max_us = prev_peak.max(m.timing.jitter_max_us);
     m.timing.wire_bytes_per_pair = wire_bytes_per_pair;

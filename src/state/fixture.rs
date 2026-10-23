@@ -272,6 +272,7 @@ impl SdrMetrics {
             0,
             DeliveryModel::Pull,
             Some(occupancy),
+            None,
         );
         self.timing.timing_quality = v.quality;
         self.timing.timing_cause = v.cause;
@@ -296,11 +297,10 @@ impl SdrMetrics {
         // quality and a cause that never came from the same decision, which is
         // the exact confusion this pair exists to prevent.
         let verdict =
-            TimingQuality::classify(pick(0.99), expected, 18, 0, DeliveryModel::Push, None);
+            TimingQuality::classify(pick(0.99), expected, 18, 0, DeliveryModel::Push, None, None);
         self.timing = TimingState {
             cb_period_us: expected,
             cb_period_expected: expected,
-            cb_period_delta_ppm: 12,
             cb_jitter_us: (peak as u64) / 3,
             jitter_max_us: peak as u64,
             jitter_session_max_us: peak as u64,
