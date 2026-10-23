@@ -29,6 +29,7 @@
   <b>Tested on real hardware</b><br>
   <a href="https://greatscottgadgets.com/hackrf/one/"><img src="https://img.shields.io/badge/HackRF%20One-brightgreen" alt="HackRF One"></a>
   <a href="https://www.rtl-sdr.com/"><img src="https://img.shields.io/badge/RTL--SDR-green" alt="RTL-SDR"></a>
+  <a href="user_docs/hardware.md#airspy-r2"><img src="https://img.shields.io/badge/Airspy%20R2-1a7f8e" alt="Airspy R2"></a>
   <a href="https://github.com/portapack-mayhem/mayhem-firmware"><img src="https://img.shields.io/badge/PortaPack%20H4M-blueviolet" alt="PortaPack H4M"></a>
   <a href="user_docs/hardware.md#tinysa"><img src="https://img.shields.io/badge/tinySA%20Ultra-blue" alt="tinySA Ultra"></a>
 </p>
@@ -36,7 +37,7 @@
 <p align="center">
   <b>Via SoapySDR</b> <img src="https://img.shields.io/badge/BETA-orange" alt="Beta"><br>
   <a href="user_docs/hardware.md#soapysdr-the-honest-version"><img src="https://img.shields.io/badge/SoapySDR-0.8%20%7C%200.9-informational" alt="SoapySDR 0.8 | 0.9"></a>
-  <a href="user_docs/hardware.md#soapysdr-the-honest-version"><img src="https://img.shields.io/badge/Airspy-lightgrey" alt="Airspy"></a>
+  <a href="user_docs/hardware.md#soapysdr-the-honest-version"><img src="https://img.shields.io/badge/Airspy%20Mini%20%C2%B7%20HF%2B-lightgrey" alt="Airspy Mini · HF+"></a>
   <a href="user_docs/hardware.md#soapysdr-the-honest-version"><img src="https://img.shields.io/badge/SDRplay%20RSP-lightgrey" alt="SDRplay RSP"></a>
   <a href="user_docs/hardware.md#soapysdr-the-honest-version"><img src="https://img.shields.io/badge/PlutoSDR-lightgrey" alt="PlutoSDR"></a>
   <a href="user_docs/hardware.md#soapysdr-the-honest-version"><img src="https://img.shields.io/badge/LimeSDR-lightgrey" alt="LimeSDR"></a>
@@ -146,7 +147,7 @@ Measured the awkward way rather than the easy way. Bandwidth about the carrier, 
 
 ## Install
 
-**Requirements:** Linux, or a Mac ([unofficially](user_docs/hardware.md#macos-unofficially): built and tested in CI, radios tested by users) · a HackRF One, an RTL-SDR, a tinySA, or anything SoapySDR speaks to
+**Requirements:** Linux, or a Mac ([unofficially](user_docs/hardware.md#macos-unofficially): built and tested in CI, radios tested by users) · a HackRF One, an RTL-SDR, an Airspy R2, a tinySA, or anything SoapySDR speaks to
 
 ### The one-liner
 
@@ -156,7 +157,7 @@ curl -fsSL https://raw.githubusercontent.com/musithang/sdrtop/main/packaging/ins
 
 The installer tries the prebuilt binary on your machine. It compiles from source if the binary cannot run there. Native SDR libraries are optional runtime dependencies.
 
-Add `--hackrf` or `--rtlsdr` to install the runtime for your radio. `--soapy` adds SoapySDR and its driver modules. A plain install adds none of these libraries.
+Add `--hackrf`, `--rtlsdr` or `--airspy` to install the runtime for your radio. `--soapy` adds SoapySDR and its driver modules. A plain install adds none of these libraries.
 
 <details>
 <summary>Every flag it takes, and installing without root</summary>
@@ -171,6 +172,7 @@ sh install.sh --git                 # compile the main branch, live dangerously
 sh install.sh --no-verify           # skip the checksum check (say why first)
 sh install.sh --hackrf              # add the HackRF runtime
 sh install.sh --rtlsdr              # add the RTL-SDR runtime
+sh install.sh --airspy              # add the Airspy R2 runtime
 sh install.sh --soapy               # add SoapySDR and its driver modules
 sh install.sh --deps-only --hackrf  # only the selected runtime, no sdrtop
 sh install.sh --uninstall           # remove what a previous run installed
@@ -197,7 +199,7 @@ sudo dnf install gcc                # Fedora
 cargo install sdrtop --locked
 ```
 
-Building needs Rust 1.88+ and a C compiler/linker. Install Rust with [rustup](https://rustup.rs). No SDR libraries, development headers or pkg-config are required. At runtime, HackRF needs libhackrf 2023.01.1+ and RTL-SDR needs librtlsdr. A missing or incompatible library disables only its own backend, so install the runtimes for the radios you have (a tinySA needs neither).
+Building needs Rust 1.88+ and a C compiler/linker. Install Rust with [rustup](https://rustup.rs). No SDR libraries, development headers or pkg-config are required. At runtime, HackRF needs libhackrf 2023.01.1+, RTL-SDR needs librtlsdr and the Airspy R2 needs libairspy. A missing or incompatible library disables only its own backend, so install the runtimes for the radios you have (a tinySA needs none of them).
 
 Then go make coffee: a few minutes on a laptop, considerably more on a Raspberry Pi. It's not frozen, it's just Rust.
 
@@ -258,7 +260,7 @@ Frequency, gains, sample rate, markers, the sweep band, your theme and your layo
 
 ### ✅ Done
 
-Native support for the HackRF One, the RTL-SDR, the PortaPack H4M and the tinySA family (that last one thanks to [@AlCalzone](https://github.com/AlCalzone)). Spectrum, waterfall and the four lab benches. The FM demodulator with RDS. IQ correction, band sweeps, observer mode and SigMF recording. Bluetooth decoded and measured against the Core Specification, and the first Wi-Fi views. Release by release, it's all in the [changelog](CHANGELOG.md).
+Native support for the HackRF One, the RTL-SDR, the Airspy R2, the PortaPack H4M and the tinySA family (that last one thanks to [@AlCalzone](https://github.com/AlCalzone)). Spectrum, waterfall and the four lab benches. The FM demodulator with RDS. IQ correction, band sweeps, observer mode and SigMF recording. Bluetooth decoded and measured against the Core Specification, and the first Wi-Fi views. Release by release, it's all in the [changelog](CHANGELOG.md).
 
 ### 🔧 In progress
 
@@ -267,7 +269,7 @@ Native support for the HackRF One, the RTL-SDR, the PortaPack H4M and the tinySA
 
 ### 🔜 Next
 
-- Native backends for the radios now sitting on my desk: the SDRplay RSP1B, the Airspy R2 and the Airspy HF+ Discovery
+- Native backends for the radios still waiting on my desk: the SDRplay RSP1B and the Airspy HF+ Discovery
 - **Digital signals done properly**, the way Bluetooth is now: LoRa, DMR, GSM, ADS-B, AIS. Each gets its own screens. Still no audio, still just data
 - Editing the config from inside the app. Until then: `$EDITOR` and a little courage
 
@@ -280,10 +282,10 @@ Native support for the HackRF One, the RTL-SDR, the PortaPack H4M and the tinySA
 | HackRF One | ✅ Full support | All diagnostics, gain stages, ADC metrics |
 | PortaPack H4M (Mayhem) | ✅ Full support | HackRF mode: all HackRF diagnostics apply |
 | RTL-SDR (R820T, E4000, R828D) | ✅ Full support | Single tuner gain + AGC; no VGA, no BB filter, no Friis NF |
+| Airspy R2 | ✅ Full support | Natively: measured LNA, mixer and VGA tables, Airspy's Linearity and Sensitivity curves on the knob, tuner AGC; no BB filter, no Friis NF. [Details](user_docs/hardware.md#airspy-r2) |
 | tinySA / Ultra / Ultra+ | ✅ Spectrum support | ZS405 verified; calibrated dBm spectrum, waterfall and native band sweeps |
-| **Anything with a SoapySDR driver** | 🧪 **Beta** | Airspy, SDRplay, Pluto, Lime, bladeRF, USRP, SoapyRemote. Unconfirmed on anything but a HackRF |
+| **Anything with a SoapySDR driver** | 🧪 **Beta** | Airspy Mini and HF+, SDRplay, Pluto, Lime, bladeRF, USRP, SoapyRemote. Unconfirmed on anything but a HackRF and an Airspy R2 |
 | SDRplay RSP1B | 🔲 Planned | On my desk; native backend in the queue |
-| Airspy R2 | 🔲 Planned | On my desk; native backend in the queue |
 | Airspy HF+ Discovery | 🔲 Planned | On my desk; native backend in the queue |
 | HackRF Pro | 🔲 Planned | Needs hardware |
 

@@ -266,6 +266,24 @@ mod tests {
         assert!(out.contains("the tuner clipping, before the ADC"), "{out}");
     }
 
+    /// **A stage's gain reads as the same figure on every panel**: rounded,
+    /// as the level diagram and the header round it. 16.74 dB truncated to
+    /// +16 here sat beside +17 in the diagram.
+    #[test]
+    fn the_lineup_rounds_a_stage_gain_as_the_diagram_does() {
+        let mut m = SdrMetrics::fixture()
+            .streaming()
+            .band_measured_chain()
+            .on_curve(0, 10);
+        m.radio.frequency = 92_800_000;
+        let out = draw(RfChainPanel, 60, 40, &m).join("\n");
+        let rows = lineup_rows(&out).join("\n");
+        assert!(
+            rows.contains("LNA +17 dB") && rows.contains("VGA +34 dB"),
+            "{rows}"
+        );
+    }
+
     /// **No target, no "at optimum"**: under the AGC (or a stage outside its
     /// measured band) the staging block offers no target, and says so rather
     /// than calling the chain optimal against one.

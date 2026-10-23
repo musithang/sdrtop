@@ -251,7 +251,7 @@ Whether your computer is keeping up with the radio in real time.
 
 - **Timing Diagnostics** *(left, focus `t`)*: measured versus expected block
   period, host clock drift in ppm, jitter, and a verdict that names its own
-  reason. On a radio that pushes blocks at you (HackRF, RTL-SDR) it grades
+  reason. On a radio that pushes blocks at you (HackRF, RTL-SDR, Airspy R2) it grades
   deviation percentiles against a deadline budget that scales with the sample
   rate; on one you pull from (SoapySDR) there is no deadline to miss, so it
   measures how much of the read loop went on waiting instead.

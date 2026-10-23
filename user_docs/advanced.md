@@ -25,7 +25,7 @@ duplicate, go straight to the source:
 sdrtop --frequency 92800000      # start tuned here (Hz)
 sdrtop --gain "LNA=24,VGA=30"    # name the stages your radio reports
 sdrtop --gain 54                 # or a total, placed front stage first
-sdrtop --device rtlsdr           # pin a backend: hackrf | rtlsdr | soapy
+sdrtop --device rtlsdr           # pin a backend: hackrf | rtlsdr | airspy | soapy
 sdrtop --theme nord              # see themes.md
 sdrtop --config ~/my-config.toml # use a different config file
 ```

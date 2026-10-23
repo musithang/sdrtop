@@ -126,14 +126,15 @@ fn clip(label: &str, w: usize) -> String {
 /// the signal arrives, so it contributes nothing and says so with a dash.
 fn mid_text(index: usize, stages: &[Stage]) -> String {
     match index.checked_sub(1).and_then(|k| stages.get(k)) {
-        Some(stage) if stage.gain_db.is_finite() => format!("{:+} dB", stage.gain_db as i64),
+        // Rounded, as every other panel rounds a stage's gain.
+        Some(stage) if stage.gain_db.is_finite() => format!("{:+.0} dB", stage.gain_db),
         _ => "\u{2014}".to_string(),
     }
 }
 
-/// A level, or a dash where it could not be worked out.
-/// A node's level as the converter's dBFS walked back through the gains: not
-/// dBm, because nothing on any radio here is calibrated to the antenna.
+/// A node's level, the converter's dBFS walked back through the gains (not
+/// dBm: nothing on any radio here is calibrated to the antenna), or a dash
+/// where it could not be worked out.
 fn level_text(dbm: f64) -> String {
     if dbm.is_finite() {
         format!("{dbm:.0} dBFS")
