@@ -190,6 +190,19 @@ impl Tree {
         node
     }
 
+    /// The rows `path` passes through, first column first: what the crumb
+    /// names. Stops at the first index out of range.
+    pub fn trail(&self, tile: Tile, path: &Path) -> Vec<&Node> {
+        let mut rows = self.root(tile);
+        let mut out = Vec::new();
+        for &i in &path.rows {
+            let Some(n) = rows.get(i) else { break };
+            out.push(n);
+            rows = n.children();
+        }
+        out
+    }
+
     /// The rows of each column `path` passes through, the last being the
     /// column the cursor is in.
     pub fn columns(&self, tile: Tile, path: &Path) -> Vec<&[Node]> {
@@ -994,5 +1007,22 @@ mod tests {
     #[test]
     fn the_build_is_deterministic() {
         assert_eq!(builtins(), builtins());
+    }
+
+    /// The trail names each row the path passes through, and stops at a
+    /// bad index rather than inventing one.
+    #[test]
+    fn the_trail_names_the_path() {
+        let tree = builtins();
+        let path = path_to(&tree, Tile::Lab, &["Wi-Fi", "2.4 GHz", "Channel", "Frames"]);
+        let names: Vec<&str> = tree
+            .trail(Tile::Lab, &path)
+            .iter()
+            .map(|n| n.title.as_str())
+            .collect();
+        assert_eq!(names, ["Wi-Fi", "2.4 GHz", "Channel", "Frames"]);
+        let mut bad = path.clone();
+        bad.rows[1] = 99;
+        assert_eq!(tree.trail(Tile::Lab, &bad).len(), 1);
     }
 }

@@ -17,6 +17,9 @@
 //! - [`keys`]: the right column, the key reference.
 //! - [`options`]: the right column, device settings.
 //! - [`tree`]: the sections hung on the tiles' trees. Pure, as `model` is.
+//! - [`tiles`]: the top row of square tiles.
+//! - [`crumb`]: the whole path, over the cascade.
+//! - [`ink`]: a tree row's colour role on the theme.
 //!
 //! [`render`] is the orchestrator. It resolves the frame, carves the rows and
 //! columns, and calls each part once. **The parts do not call each other.**
@@ -27,8 +30,16 @@ pub mod live;
 pub mod model;
 pub mod options;
 pub mod sections;
-// Built and tested ahead of the screen that draws it. `expect` fails the
-// build as soon as the menu reads it, so this line cannot outlive its reason.
+
+// Built and tested ahead of the screen that draws them. `expect` fails the
+// build as soon as the menu reads one, so these lines cannot outlive their
+// reason.
+#[cfg_attr(not(test), expect(dead_code))]
+pub mod crumb;
+#[cfg_attr(not(test), expect(dead_code))]
+pub mod ink;
+#[cfg_attr(not(test), expect(dead_code))]
+pub mod tiles;
 #[cfg_attr(not(test), expect(dead_code))]
 pub mod tree;
 
