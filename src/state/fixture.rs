@@ -306,6 +306,8 @@ impl SdrMetrics {
             sr_delta_ppm: 18,
             throughput_mean_mbps: 38.1,
             throughput_std_mbps: 0.4,
+            // A HackRF's int8 pairs are what its link carries.
+            wire_bytes_per_pair: Some(2.0),
             timing_quality: verdict.quality,
             timing_cause: verdict.cause,
             // The fixture is a push device (an idle HackRF), which has no read

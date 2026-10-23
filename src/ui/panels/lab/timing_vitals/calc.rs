@@ -11,8 +11,8 @@
 /// assumed. A 16-bit radio moves twice the bytes at the same sample rate, and
 /// telling it otherwise puts it comfortably inside a budget it is sitting on
 /// the edge of.
-pub(super) fn link_ceiling_mbps(sample_rate_max_hz: f64, bytes_per_pair: usize) -> f64 {
-    (sample_rate_max_hz * bytes_per_pair as f64) / (1024.0 * 1024.0)
+pub(super) fn link_ceiling_mbps(sample_rate_max_hz: f64, bytes_per_pair: f64) -> f64 {
+    (sample_rate_max_hz * bytes_per_pair) / (1024.0 * 1024.0)
 }
 
 /// `HH:MM:SS` uptime from a whole-second count.
@@ -32,9 +32,9 @@ mod tests {
     #[test]
     fn link_ceiling_is_the_devices_own_byte_rate() {
         // 20 Msps HackRF → 40 MB(byte)/s → ~38.1 binary MB/s.
-        let c = link_ceiling_mbps(20_000_000.0, 2);
+        let c = link_ceiling_mbps(20_000_000.0, 2.0);
         assert!((c - 38.147).abs() < 0.01, "got {c}");
-        assert_eq!(link_ceiling_mbps(0.0, 2), 0.0);
+        assert_eq!(link_ceiling_mbps(0.0, 2.0), 0.0);
     }
 
     /// A wider sample is more bytes at the same rate. The same 20 Msps on a
@@ -42,8 +42,8 @@ mod tests {
     /// or the panel will call a saturated link healthy.
     #[test]
     fn a_wider_sample_doubles_the_link_ceiling() {
-        let narrow = link_ceiling_mbps(20_000_000.0, 2);
-        let wide = link_ceiling_mbps(20_000_000.0, 4);
+        let narrow = link_ceiling_mbps(20_000_000.0, 2.0);
+        let wide = link_ceiling_mbps(20_000_000.0, 4.0);
         assert!((wide - narrow * 2.0).abs() < 1e-9, "{wide} vs {narrow}");
     }
 

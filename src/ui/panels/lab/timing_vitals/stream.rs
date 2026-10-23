@@ -36,7 +36,9 @@ pub(super) fn lines(state: &SdrMetrics, r: &Rows) -> Vec<Line<'static>> {
             .saturating_sub(drops.driver_drops_session);
         out.push(Line::from(vec![
             Span::raw(" "),
-            Span::styled("Lost in      ", r.lbl()),
+            // No column padding: two seven-digit counts fill the bench's 44
+            // columns, and a padded label cut the second one short.
+            Span::styled("Lost: ", r.lbl()),
             Span::styled(
                 format!(
                     "driver {} \u{00b7} sdrtop {ours}",

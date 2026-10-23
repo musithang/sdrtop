@@ -664,7 +664,9 @@ on a timer: they all have a shape here, and the shape repeats.
 The supporting cast, all on a 60-second rolling window:
 
 - **Sample drops**: per second plus the session total. Non-zero means something
-  upstream is not keeping up.
+  upstream is not keeping up, and a line under it says who: the **driver**
+  (samples its library or the radio's link lost before handing them over) or
+  **sdrtop** (its own intake had no room for a block).
 - **ADC saturation**: how often samples hit the ADC ceiling, with the session
   peak.
 - **CPU load and RAM**: sdrtop's own use. CPU is a system-wide percentage, so
@@ -672,6 +674,10 @@ The supporting cast, all on a 60-second rolling window:
   well under it.
 - **USB link**: bus throughput, link utilisation against the device's real
   ceiling, and USB errors (zero-length transfers, usually a cable or hub problem).
+  Bus throughput is what crossed the link, which is not always what arrived: an
+  Airspy R2 packing its samples to 12 bits carries 3 bytes for every 4 its library
+  hands over. Through SoapySDR the wire is the driver's secret, so the line says
+  **Delivered** instead and counts what reached sdrtop.
   The errors are coloured by recent rate rather than session total, so one old
   glitch doesn't pin the panel red forever.
 - **Ring buffer**: peak fill and overrun margin. This is the leading indicator.

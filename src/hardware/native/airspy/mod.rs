@@ -811,6 +811,12 @@ impl SdrDevice for AirspyDevice {
         Ok(())
     }
 
+    /// Two real samples cross the link for each pair libairspy delivers: 16
+    /// bits each unpacked, 12 packed.
+    fn wire_bytes_per_pair(&self) -> Option<f64> {
+        Some(if self.stream().packing { 3.0 } else { 4.0 })
+    }
+
     /// Smaller while packed: libairspy 1.0.10 fills a 147456-byte packed
     /// buffer (6144 x 24) instead of 262144, which unpacks to 98304 real
     /// samples, 49152 I/Q pairs.
@@ -1452,6 +1458,16 @@ mod tests {
         assert!(device.is_streaming());
         assert_eq!(device.samples_per_transfer(), 49_152);
         device.stop_rx().unwrap();
+    }
+
+    /// What the USB link carries per pair delivered: 4 bytes unpacked (two
+    /// 16-bit real samples), 3 packed (two 12-bit ones).
+    #[test]
+    fn the_wire_carries_three_bytes_a_pair_when_packed() {
+        let (_fixture, device) = opened();
+        assert_eq!(device.wire_bytes_per_pair(), Some(4.0));
+        device.set_option("packing", "On").unwrap();
+        assert_eq!(device.wire_bytes_per_pair(), Some(3.0));
     }
 
     /// **Packing is kept, the bias tee never**: opened with packing on, the

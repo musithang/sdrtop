@@ -239,6 +239,10 @@ pub struct TimingState {
     pub sr_delta_ppm: i64,
     pub throughput_mean_mbps: f64,
     pub throughput_std_mbps: f64,
+    /// Bytes on the radio's link per pair delivered, when the backend knows
+    /// (see `hardware::SdrDevice::wire_bytes_per_pair`); the bus line turns
+    /// the delivered throughput into what crossed the link with it.
+    pub wire_bytes_per_pair: Option<f64>,
     pub timing_quality: TimingQuality,
     /// Which condition produced `timing_quality`. Written by the same
     /// `classify` call, so the grade and its wording cannot disagree.
@@ -362,6 +366,8 @@ impl TimingState {
             sr_delta_ppm,
             throughput_mean_mbps,
             throughput_std_mbps,
+            // The rx task sets it from the device after this rebuild.
+            wire_bytes_per_pair: None,
             timing_quality: verdict.quality,
             timing_cause: verdict.cause,
             read_occupancy,

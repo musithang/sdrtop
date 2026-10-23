@@ -191,6 +191,7 @@ pub(super) fn write_back(
     // Carry the session jitter peak across the wholesale rebuild - it is reset on
     // RX start and by the timing panel's [R] focus binding.
     let prev_peak = m.timing.jitter_session_max_us;
+    let wire_bytes_per_pair = device.wire_bytes_per_pair();
     m.timing = crate::state::TimingState::compute(
         m.iq.cb_period_us,
         m.radio.config_sample_rate,
@@ -208,6 +209,7 @@ pub(super) fn write_back(
         c.read_occupancy,
     );
     m.timing.jitter_session_max_us = prev_peak.max(m.timing.jitter_max_us);
+    m.timing.wire_bytes_per_pair = wire_bytes_per_pair;
 
     m.radio.rx_enabled
 }

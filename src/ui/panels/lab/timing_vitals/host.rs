@@ -68,26 +68,29 @@ pub(super) fn usb_lines(state: &SdrMetrics, r: &Rows) -> Vec<Line<'static>> {
         Span::styled(" (session)", r.lbl()),
     ]));
 
-    let mbps = state.timing.throughput_mean_mbps;
-    let ceiling = link_ceiling_mbps(
-        state.caps.sample_rate_max_hz,
-        state.caps.sample_geometry.bytes_per_pair(),
-    );
+    // What crossed the link, where the backend knows its wire format: the
+    // delivered pairs at the wire's bytes per pair (an R2 packing 12-bit
+    // samples carries 3 for every 4 delivered). Where it does not, the
+    // delivered figure under its own name.
+    let delivered = state.timing.throughput_mean_mbps;
+    let per_pair = state.caps.sample_geometry.bytes_per_pair() as f64;
+    let wire = state.timing.wire_bytes_per_pair.filter(|&w| w > 0.0);
+    let (name, mbps, bytes) = match wire {
+        Some(w) => ("Bus throughput ", delivered * w / per_pair, w),
+        None => ("Delivered ", delivered, per_pair),
+    };
+    let ceiling = link_ceiling_mbps(state.caps.sample_rate_max_hz, bytes);
     let util = if ceiling > 0.0 {
         (mbps / ceiling).clamp(0.0, 1.0)
     } else {
         0.0
     };
     out.push(Line::from(if r.stale {
-        vec![
-            Span::raw(" "),
-            Span::styled("Bus throughput ", r.lbl()),
-            r.dash(),
-        ]
+        vec![Span::raw(" "), Span::styled(name, r.lbl()), r.dash()]
     } else {
         vec![
             Span::raw(" "),
-            Span::styled("Bus throughput ", r.lbl()),
+            Span::styled(name, r.lbl()),
             Span::styled(format!("{mbps:.1} MB/s"), Style::default().fg(theme.value)),
             Span::styled(format!(" of {ceiling:.1} max"), r.lbl()),
         ]

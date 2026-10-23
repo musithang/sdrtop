@@ -186,6 +186,45 @@ mod tests {
         m.signal.driver_drops_session = 4_063_232;
         let out = draw(TimingVitalsPanel, W, H, &m).join("\n");
         assert!(out.contains("driver 4063232 \u{00b7} sdrtop 0"), "{out}");
+        // At the live bench's 44 columns, seven-digit counts both ways: the
+        // line was cut there once, showing 122880 for 1228800.
+        m.signal.total_drops_session = 4_866_048;
+        m.signal.driver_drops_session = 3_637_248;
+        let out = draw(TimingVitalsPanel, 46, H, &m).join("\n");
+        assert!(
+            out.contains("driver 3637248 \u{00b7} sdrtop 1228800"),
+            "{out}"
+        );
+    }
+
+    /// **The bus line counts what crosses the link**: an R2 packing 12-bit
+    /// samples carries 3 bytes on the wire for every 4-byte pair sdrtop gets,
+    /// so 38.1 MB/s delivered is 28.6 on the bus, of a 28.6 most; a backend
+    /// that cannot say what its wire carries shows what it delivered, under
+    /// that name; a HackRF reads as it always did.
+    #[test]
+    fn the_bus_line_counts_the_wire_not_the_delivery() {
+        let mut r2 = live().band_measured_chain();
+        r2.caps = std::sync::Arc::new(crate::hardware::native::airspy::caps());
+        r2.timing.throughput_mean_mbps = 38.147;
+        r2.timing.wire_bytes_per_pair = Some(3.0);
+        let out = draw(TimingVitalsPanel, W, H, &r2).join("\n");
+        assert!(
+            out.contains("Bus throughput 28.6 MB/s of 28.6 max"),
+            "{out}"
+        );
+        r2.timing.wire_bytes_per_pair = None;
+        let out = draw(TimingVitalsPanel, W, H, &r2).join("\n");
+        assert!(out.contains("Delivered 38.1 MB/s"), "{out}");
+        assert!(!out.contains("Bus throughput"), "{out}");
+        let mut hackrf = live();
+        hackrf.timing.throughput_mean_mbps = 38.147;
+        hackrf.timing.wire_bytes_per_pair = Some(2.0);
+        let out = draw(TimingVitalsPanel, W, H, &hackrf).join("\n");
+        assert!(
+            out.contains("Bus throughput 38.1 MB/s of 38.1 max"),
+            "{out}"
+        );
     }
 
     #[test]

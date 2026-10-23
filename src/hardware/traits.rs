@@ -1536,6 +1536,18 @@ pub trait SdrDevice: Send + Sync {
     fn samples_per_transfer(&self) -> u64 {
         self.capabilities().samples_per_transfer
     }
+
+    /// Bytes the radio's link carries for each I/Q pair delivered, when the
+    /// backend knows its wire format; `None` when it does not.
+    ///
+    /// What the timing bench calls bus throughput. The default is the pairs
+    /// as delivered, which is the wire for a radio that hands over its own
+    /// samples (a HackRF's int8, an RTL-SDR's uint8). A backend whose library
+    /// converts on the host says what crossed the link, and one that cannot
+    /// know says so, rather than calling a delivery figure a bus figure.
+    fn wire_bytes_per_pair(&self) -> Option<f64> {
+        Some(self.capabilities().sample_geometry.bytes_per_pair() as f64)
+    }
 }
 
 #[cfg(test)]

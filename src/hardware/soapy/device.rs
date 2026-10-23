@@ -182,6 +182,13 @@ impl SdrDevice for SoapyDevice {
         Some(self.streaming.clock().read())
     }
 
+    /// SoapySDR hands over the format sdrtop asked for, converted by the
+    /// driver from whatever its radio sends; what crossed the link is not
+    /// published.
+    fn wire_bytes_per_pair(&self) -> Option<f64> {
+        None
+    }
+
     /// The block the running stream settled on, or the one this backend intends
     /// to read when none is running. See [`super::stream::Streaming::block_pairs`].
     fn samples_per_transfer(&self) -> u64 {
