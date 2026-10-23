@@ -379,6 +379,7 @@ pub(super) fn initial_metrics(cfg: &AppConfig, boot: Boot) -> anyhow::Result<Sdr
         signal: SignalState {
             drops_per_sec: 0,
             total_drops_session: 0,
+            driver_drops_session: 0,
             drop_history: VecDeque::with_capacity(THROUGHPUT_HISTORY_LEN),
             saturation_history: VecDeque::with_capacity(THROUGHPUT_HISTORY_LEN),
             usb_error_history: VecDeque::with_capacity(THROUGHPUT_HISTORY_LEN),

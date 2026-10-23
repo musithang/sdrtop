@@ -28,6 +28,24 @@ pub(super) fn lines(state: &SdrMetrics, r: &Rows) -> Vec<Line<'static>> {
         ),
         drops.drop_history.iter().map(|&v| v as f64).collect(),
     ));
+    // Whose loss: the driver reported it before the block reached sdrtop, or
+    // sdrtop's own intake had no room for the block.
+    if drops.total_drops_session > 0 {
+        let ours = drops
+            .total_drops_session
+            .saturating_sub(drops.driver_drops_session);
+        out.push(Line::from(vec![
+            Span::raw(" "),
+            Span::styled("Lost in      ", r.lbl()),
+            Span::styled(
+                format!(
+                    "driver {} \u{00b7} sdrtop {ours}",
+                    drops.driver_drops_session
+                ),
+                r.dim(),
+            ),
+        ]));
+    }
     // What the radio dropped before anything reached the host: no hole in
     // the stream shows these, so the count above cannot.
     match &drops.radio_drops {

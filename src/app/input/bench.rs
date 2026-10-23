@@ -354,6 +354,7 @@ pub(super) fn timing_vitals(key: KeyEvent, ctx: &mut InputCtx<'_>) -> KeyAction 
         KeyCode::Char('r') => {
             let mut m = metrics(state);
             m.signal.total_drops_session = 0;
+            m.signal.driver_drops_session = 0;
             // Both session totals, because the panel shows them one above the
             // other and a reset that cleared only one would read as the other
             // still counting.

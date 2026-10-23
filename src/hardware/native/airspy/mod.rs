@@ -1286,6 +1286,11 @@ mod tests {
             .collect();
         assert_eq!(first, [0, 0, 1, -1, 2, -2, 3, -3]);
         assert_eq!(ctx.metrics.lock().unwrap().acc.drops, 4);
+        assert_eq!(
+            ctx.metrics.lock().unwrap().signal.driver_drops_session,
+            4,
+            "libairspy's own"
+        );
         device.stop_rx().unwrap();
         assert!(!device.is_streaming());
         assert_eq!(fixture.airspy_state(10), 1);

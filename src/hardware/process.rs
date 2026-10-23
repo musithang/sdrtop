@@ -364,6 +364,9 @@ pub fn digest(
         dropped_pairs,
         now,
     } = *arrival;
+    // The driver's own loss, kept apart from the intake's: the timing bench
+    // says whose it was.
+    let driver_dropped = dropped_pairs;
     let dropped_pairs = dropped_pairs + lost_before;
     let pairs = buf.len() / geometry.bytes_per_pair();
     let correcting = cal.correcting();
@@ -399,6 +402,7 @@ pub fn digest(
         if dropped_pairs > 0 {
             m.acc.drops += dropped_pairs;
             m.signal.total_drops_session += dropped_pairs;
+            m.signal.driver_drops_session += driver_dropped;
         }
 
         m.acc.saturated += saturated;

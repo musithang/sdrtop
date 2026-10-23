@@ -173,6 +173,21 @@ mod tests {
         assert!(out.contains("the longest 10.9 ms"), "{out}");
     }
 
+    /// **Whose loss it was is said**, once there is a loss: the driver's own
+    /// (libairspy's queue, a HackRF's short transfer, a SoapySDR overflow)
+    /// apart from sdrtop's intake refusing a block. A clean session has no
+    /// such line.
+    #[test]
+    fn a_loss_says_whether_the_driver_or_sdrtop_lost_it() {
+        let quiet = draw(TimingVitalsPanel, W, H, &live()).join("\n");
+        assert!(!quiet.contains("driver"), "{quiet}");
+        let mut m = live();
+        m.signal.total_drops_session = 4_063_232;
+        m.signal.driver_drops_session = 4_063_232;
+        let out = draw(TimingVitalsPanel, W, H, &m).join("\n");
+        assert!(out.contains("driver 4063232 \u{00b7} sdrtop 0"), "{out}");
+    }
+
     #[test]
     fn the_verdict_follows_the_timing_quality() {
         let good = draw(TimingVitalsPanel, W, H, &live()).join("\n");

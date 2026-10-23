@@ -248,6 +248,10 @@ pub enum RadioDropAccount {
 pub struct SignalState {
     pub drops_per_sec: u64,
     pub total_drops_session: u64,
+    /// The part of `total_drops_session` the driver reported itself, before
+    /// the block reached sdrtop (libairspy's queue, a HackRF's short transfer,
+    /// a SoapySDR overflow); the rest is sdrtop's intake refusing a block.
+    pub driver_drops_session: u64,
     /// The radio's own count of what it dropped: drops that leave no hole in
     /// the stream positions, so `drops_per_sec` can never see them.
     pub radio_drops: RadioDropAccount,
@@ -362,6 +366,7 @@ impl Default for SignalState {
         Self {
             drops_per_sec: 0,
             total_drops_session: 0,
+            driver_drops_session: 0,
             radio_drops: RadioDropAccount::NotKept,
             drop_history: VecDeque::new(),
             adc_saturation_pct: 0.0,
@@ -448,6 +453,7 @@ mod tests {
         let mut s = SignalState {
             drops_per_sec: 0,
             total_drops_session: 0,
+            driver_drops_session: 0,
             radio_drops: RadioDropAccount::NotKept,
             drop_history: VecDeque::new(),
             adc_saturation_pct: 0.0,

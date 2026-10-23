@@ -169,6 +169,11 @@ mod tests {
         let a = arrive(&block, eight_bit(), 0, &ctx, Instant::now());
         digest(&block, eight_bit(), &a, 96, &ctx);
         assert_eq!(ctx.metrics.lock().unwrap().acc.drops, 96);
+        assert_eq!(
+            ctx.metrics.lock().unwrap().signal.driver_drops_session,
+            0,
+            "the queue's loss, not the driver's"
+        );
         assert!(net.try_recv().unwrap().gap_before);
     }
 
