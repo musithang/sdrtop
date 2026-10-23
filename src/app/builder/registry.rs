@@ -16,21 +16,27 @@ use crate::ui;
 
 use crate::app::{App, FocusKeys};
 
-/// What `signal::net::gate` admitted on this radio: the band (and with it
+/// What `signal::net::gate` decided on this radio: the band (and with it
 /// Bluetooth), and Wi-Fi, which needs the band and a 20 MHz channel's rate
-/// on top. A plain `bool` means both or neither, which is what every caller
-/// but the startup path and Wi-Fi's own test wants.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+/// on top, each with the gate's sentence when it refused. A plain `bool`
+/// means both or neither, which is what every caller but the startup path
+/// and Wi-Fi's own test wants.
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct NetAdmitted {
-    pub band: bool,
-    pub wifi: bool,
+    pub band: Result<(), String>,
+    pub wifi: Result<(), String>,
 }
 
 impl From<bool> for NetAdmitted {
     fn from(both: bool) -> Self {
+        let verdict = if both {
+            Ok(())
+        } else {
+            Err("this radio cannot reach the band".to_string())
+        };
         Self {
-            band: both,
-            wifi: both,
+            band: verdict.clone(),
+            wifi: verdict,
         }
     }
 }
@@ -55,12 +61,12 @@ impl App {
 
     /// `net_admitted` comes from `signal::net::gate`: on a radio that cannot
     /// reach the 2.4 GHz band, or cannot run even the cheapest mode there, the
-    /// presets in that section are dropped here and the section is **absent**
-    /// from the menu rather than present and empty. Rule 2, and the same
-    /// decision the RF bench makes about its noise-figure card. Wi-Fi's
-    /// sections go the same way on a radio that reaches the band but not a
+    /// presets in those sections are taken out here, so no key, cycle or
+    /// saved config can open a screen this radio cannot fill (rule 2).
+    /// Wi-Fi's go the same way on a radio that reaches the band but not a
     /// 20 MHz channel's rate, and take the menu's "being built" item with
-    /// them.
+    /// them. What was taken out is handed to the engine with the gate's
+    /// sentence, so the menu can list those views as refused and say why.
     pub(super) fn build_ui_for(
         active_preset: &str,
         user_presets: &HashMap<String, crate::config::PresetConfig>,
@@ -126,17 +132,28 @@ impl App {
         registry.register(ui::NetWifiLeastBusyPanel);
 
         let mut layout = LayoutConfig::with_user_presets(user_presets, presets_dir);
-        if !net_admitted.band {
-            layout
+        let mut refusals = Vec::new();
+        for (verdict, refuses) in [
+            (
+                &net_admitted.band,
+                crate::signal::net::is_net as fn(&str) -> bool,
+            ),
+            (&net_admitted.wifi, crate::signal::net::is_wifi),
+        ] {
+            let Err(why) = verdict else { continue };
+            let taken: HashMap<String, crate::config::PresetConfig> = layout
                 .presets
-                .retain(|_, p| !p.section.as_deref().is_some_and(crate::signal::net::is_net));
-        }
-        if !net_admitted.wifi {
-            layout.presets.retain(|_, p| {
-                !p.section
-                    .as_deref()
-                    .is_some_and(crate::signal::net::is_wifi)
-            });
+                .extract_if(|_, p| p.section.as_deref().is_some_and(refuses))
+                .collect();
+            refusals.extend(
+                crate::ui::menu::model::build(&taken)
+                    .sections
+                    .into_iter()
+                    .map(|section| crate::ui::menu::tree::Refusal {
+                        section,
+                        why: why.clone(),
+                    }),
+            );
         }
         let mut warnings = Self::filter_incompatible_layouts(&mut layout, &registry, acquisition)?;
         // Harvested against the presets that will actually be offered, user
@@ -192,7 +209,8 @@ impl App {
         let mut engine =
             ui::LayoutEngine::new_with_saved_preset(layout, registry, active_preset.to_string());
         engine.set_startup_warnings(warnings);
-        if !net_admitted.wifi {
+        engine.set_refusals(refusals);
+        if net_admitted.wifi.is_err() {
             engine.retire_menu_section(crate::ui::menu::model::WIFI);
         }
         Ok((engine, focus_keys))
@@ -1307,10 +1325,10 @@ mod tests {
     }
 
     /// The gate at the level it actually acts. A radio that cannot work in the
-    /// band gets **no** NET section: not one greyed out, not one showing zeros,
-    /// and not an empty heading with nothing under it.
+    /// band gets no NET view the engine can set: not one showing zeros, and
+    /// not one a number key, the `p` cycle or a saved config can reach.
     #[test]
-    fn a_refused_radio_gets_no_net_section_at_all() {
+    fn a_refused_radio_can_open_no_net_view() {
         let (admitted, _) = App::build_ui("command_rail", &HashMap::new(), None, true);
         assert!(admitted.has_preset("net"));
         assert!(admitted.menu().section("net").is_some());
@@ -1324,6 +1342,72 @@ mod tests {
         // Every other section is untouched: the gate removes one thing.
         for other in ["command_rail", "lab", "sweep", "micro"] {
             assert!(refused.menu().section(other).is_some(), "{other} went too");
+        }
+    }
+
+    /// What the gate refused is listed in the menu's tree, by its real
+    /// titles, with the gate's sentence, the user's own presets included,
+    /// and none of it opens.
+    #[test]
+    fn a_refused_radio_is_shown_the_views_it_cannot_open() {
+        let census = crate::config::LayoutConfig::default_config().presets["net_census"].clone();
+        let mut user = HashMap::new();
+        let mut mine = census.clone();
+        mine.section = Some("le".to_string());
+        mine.slot = Some(9);
+        user.insert("my_le".to_string(), mine);
+        let refused = NetAdmitted {
+            band: Err("this radio tunes 24.000 to 1800.000 MHz".into()),
+            wifi: Err("this radio tunes 24.000 to 1800.000 MHz".into()),
+        };
+        let (engine, _) = App::build_ui("command_rail", &user, None, refused);
+        let tree = engine.menu_tree();
+        for name in ["net", "net_census", "net_bt", "wifi_frames", "my_le"] {
+            assert!(!engine.has_preset(name), "{name} must not be settable");
+            let (tile, path) = tree.locate(name).unwrap_or_else(|| panic!("{name} listed"));
+            let node = tree.node(tile, &path).unwrap();
+            assert!(!node.opens(), "{name}");
+            assert!(
+                node.refused
+                    .as_deref()
+                    .is_some_and(|w| w.contains("1800.000")),
+                "{name}: {:?}",
+                node.refused
+            );
+        }
+        let (tile, census) = tree.locate("net_census").unwrap();
+        assert_eq!(tree.node(tile, &census).unwrap().title, "Census");
+    }
+
+    /// Short of Wi-Fi's rate alone, Bluetooth opens and Wi-Fi is refused
+    /// with Wi-Fi's own sentence.
+    #[test]
+    fn a_radio_short_of_wifi_rate_is_refused_wifi_alone() {
+        let short = NetAdmitted {
+            band: Ok(()),
+            wifi: Err("this radio reaches 10.000 Msps".into()),
+        };
+        let (engine, _) = App::build_ui("command_rail", &HashMap::new(), None, short);
+        let tree = engine.menu_tree();
+        let (tile, census) = tree.locate("net_census").unwrap();
+        assert!(tree.node(tile, &census).unwrap().opens());
+        let (tile, frames) = tree.locate("wifi_frames").unwrap();
+        let node = tree.node(tile, &frames).unwrap();
+        assert_eq!(
+            node.refused.as_deref(),
+            Some("this radio reaches 10.000 Msps")
+        );
+        assert!(!engine.has_preset("wifi_frames"));
+    }
+
+    /// An able radio is refused nothing.
+    #[test]
+    fn an_able_radio_is_refused_nothing() {
+        let (engine, _) = App::build_ui("command_rail", &HashMap::new(), None, true);
+        let tree = engine.menu_tree();
+        for name in ["net_census", "wifi_frames"] {
+            let (tile, path) = tree.locate(name).unwrap();
+            assert!(tree.node(tile, &path).unwrap().opens(), "{name}");
         }
     }
 
@@ -1369,16 +1453,16 @@ mod tests {
         user.insert("my_wifi".to_string(), p);
 
         let both = NetAdmitted {
-            band: true,
-            wifi: true,
+            band: Ok(()),
+            wifi: Ok(()),
         };
         let (able, _) = App::build_ui("command_rail", &user, None, both);
         assert!(able.has_preset("my_wifi"));
         assert!(able.menu().section("wifi_channel").is_some());
 
         let band_only = NetAdmitted {
-            band: true,
-            wifi: false,
+            band: Ok(()),
+            wifi: Err("this radio reaches 10.000 Msps".into()),
         };
         let (short, _) = App::build_ui("command_rail", &user, None, band_only);
         assert!(!short.has_preset("my_wifi"));

@@ -318,8 +318,8 @@ impl App {
             &cfg.presets,
             presets_dir.as_deref(),
             registry::NetAdmitted {
-                band: net.is_ok(),
-                wifi: wifi.is_ok(),
+                band: net.clone(),
+                wifi: wifi.clone(),
             },
             acquisition,
         )?;
@@ -337,11 +337,11 @@ impl App {
                 m.push_log(warning.clone());
             }
             if let Err(why) = &net {
-                m.push_log(why.clone());
+                m.push_log(format!("Bluetooth and Wi-Fi refused: {why}"));
             } else if let Err(why) = &wifi {
                 // Only when the band itself was admitted: otherwise the
                 // band's sentence already says why, and Wi-Fi's would repeat it.
-                m.push_log(why.clone());
+                m.push_log(format!("Wi-Fi refused: {why}"));
             }
 
             m.ui.menu = startup_menu(engine.menu(), engine.active_preset(), m.observer.active);

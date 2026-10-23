@@ -4,10 +4,13 @@
 //! Which radios can work in this band at all, and which modes their sample rate
 //! admits.
 //!
-//! **A radio that cannot get there does not get a greyed-out section, it gets no
-//! section.** That is rule 2 and it is the same decision the RF bench's
-//! noise-figure card already makes: absent is correct, and a screen of zeros
-//! would be a claim we cannot support. One line in the log says why, once.
+//! **A radio that cannot get there gets no view, and is told why where it
+//! looks.** Its presets never reach the layout engine, so nothing can open a
+//! screen of zeros, which would be a claim we cannot support (rule 2). The
+//! menu still lists those views, quiet and unopenable, with the sentence
+//! written here beside them: a refusal said where the user is looking for the
+//! thing, rather than a section that silently is not there. The log says the
+//! same sentence once.
 //!
 //! Everything here branches on [`DeviceCapabilities`] and never on a device
 //! name, so a SoapySDR radio nobody here has held is admitted or refused on
@@ -110,7 +113,8 @@ pub fn admits(caps: &DeviceCapabilities, phy: &Phy) -> bool {
     caps.sample_rate_max_hz >= phy.rate_hz
 }
 
-/// Whether the NET section appears, and if not, the one line that says why.
+/// Whether the band's views can run, and if not, the one sentence that says
+/// why: in the log, and on the menu beside the refused views.
 ///
 /// The sentence is written here rather than at the call site because the reason
 /// and the decision must not be able to disagree: a section that vanished for
@@ -118,7 +122,7 @@ pub fn admits(caps: &DeviceCapabilities, phy: &Phy) -> bool {
 pub fn verdict(caps: &DeviceCapabilities) -> Result<(), String> {
     if !reaches_band(caps) {
         return Err(format!(
-            "NET section hidden: this radio tunes {:.3} to {:.3} MHz, and the 2.4 GHz band needs {:.3} to {:.3}",
+            "this radio tunes {:.3} to {:.3} MHz, and the 2.4 GHz band needs {:.3} to {:.3}",
             caps.freq_min_hz as f64 / 1e6,
             caps.freq_max_hz as f64 / 1e6,
             LOWEST_CENTRE_HZ as f64 / 1e6,
@@ -128,7 +132,7 @@ pub fn verdict(caps: &DeviceCapabilities) -> Result<(), String> {
     let minimum = minimum_rate_hz();
     if caps.sample_rate_max_hz < minimum {
         return Err(format!(
-            "NET section hidden: this radio reaches {:.3} Msps, and the cheapest mode here needs {:.3}",
+            "this radio reaches {:.3} Msps, and the cheapest mode here needs {:.3}",
             caps.sample_rate_max_hz / 1e6,
             minimum / 1e6,
         ));
@@ -144,16 +148,16 @@ pub fn wifi_phy() -> &'static Phy {
         .expect("PHYS lists the 20 MHz Wi-Fi channel")
 }
 
-/// Whether Wi-Fi's sections appear, on top of [`verdict`]: the band must be
+/// Whether Wi-Fi's views can run, on top of [`verdict`]: the band must be
 /// reachable, and the rate ceiling must carry a whole 20 MHz channel. A radio
-/// that falls short gets no Wi-Fi sections at all rather than a bench it can
-/// never run, and this is the one line that says why.
+/// that falls short is refused every Wi-Fi view rather than given a bench it
+/// can never run, and this is the one sentence that says why.
 pub fn wifi_verdict(caps: &DeviceCapabilities) -> Result<(), String> {
     verdict(caps)?;
     let phy = wifi_phy();
     if !admits(caps, phy) {
         return Err(format!(
-            "Wi-Fi hidden: this radio reaches {:.3} Msps, and a 20 MHz Wi-Fi channel needs {:.3}",
+            "this radio reaches {:.3} Msps, and a 20 MHz Wi-Fi channel needs {:.3}",
             caps.sample_rate_max_hz / 1e6,
             phy.rate_hz / 1e6,
         ));

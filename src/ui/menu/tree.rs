@@ -17,6 +17,13 @@
 //! where Bluetooth lives; [`Tree::descend`] passes through it so it costs no
 //! key press.
 //!
+//! **A refused row is listed, not hidden.** Views the radio cannot run (the
+//! NET gate's refusals) never reach the layout engine, but they are hung here
+//! as [`Refusal`]s and drawn quiet with the gate's sentence, so the user finds
+//! the reason where they look for the thing. A branch with nothing it can
+//! open and at least one refusal under it carries that refusal too, which is
+//! what greys Bluetooth itself on a radio that stops at 1.8 GHz.
+//!
 //! **Later rows are part of the table.** A group a design has named but no
 //! preset fills yet is listed as later, quiet and unopenable, and becomes a
 //! real row the moment a preset is filed under it. A group the table does not
@@ -87,6 +94,8 @@ pub struct Node {
     pub about: Option<&'static str>,
     /// Named by a design, filled by nothing yet: drawn quiet, opens nothing.
     pub later: bool,
+    /// Why this radio cannot open it, in the gate's words.
+    pub refused: Option<String>,
     pub kind: Kind,
 }
 
@@ -113,6 +122,11 @@ impl Node {
         }
     }
 
+    /// Whether `Enter` on this row opens a layout.
+    pub fn opens(&self) -> bool {
+        self.view().is_some() && self.refused.is_none()
+    }
+
     /// Whether the cursor may stand here.
     pub fn is_stop(&self) -> bool {
         !matches!(self.kind, Kind::Heading)
@@ -133,6 +147,13 @@ impl Node {
             Kind::Heading => 0,
         }
     }
+}
+
+/// A menu section whose views this radio cannot run, and why.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Refusal {
+    pub section: Section,
+    pub why: String,
 }
 
 /// Both trees, built once from the menu's sections.
@@ -338,6 +359,7 @@ fn heading(title: &str) -> Node {
         band: None,
         about: None,
         later: false,
+        refused: None,
         kind: Kind::Heading,
     }
 }
@@ -350,6 +372,7 @@ fn branch(title: &str, tone: Tone, children: Vec<Node>) -> Node {
         band: None,
         about: None,
         later: false,
+        refused: None,
         kind: Kind::Branch {
             section: None,
             children,
@@ -519,11 +542,12 @@ fn radio_table() -> Vec<Node> {
     ]
 }
 
-/// Hang the menu's sections on the table.
-pub fn build(menu: &Menu) -> Tree {
+/// Hang the menu's sections on the table, and the refused ones beside them.
+pub fn build(menu: &Menu, refused: &[Refusal]) -> Tree {
     let mut lab = lab_table();
     let mut placed: Vec<&str> = Vec::new();
-    fill(&mut lab, &menu.sections, &mut placed);
+    fill(&mut lab, &menu.sections, refused, &mut placed);
+    carry_refusals(&mut lab);
 
     // A section the table does not name: a user's own, or the presets that
     // named none. Each its own row under Other, in the menu's order, with
@@ -535,7 +559,7 @@ pub fn build(menu: &Menu) -> Tree {
         .map(|s| {
             let mut row = group(&s.title, Tone::Quiet, &s.id);
             if let Kind::Branch { children, .. } = &mut row.kind {
-                *children = views(s);
+                *children = views(s, None);
             }
             row
         })
@@ -558,7 +582,7 @@ pub fn build(menu: &Menu) -> Tree {
     }
 }
 
-fn views(section: &Section) -> Vec<Node> {
+fn views(section: &Section, refused: Option<&str>) -> Vec<Node> {
     section
         .entries
         .iter()
@@ -569,29 +593,62 @@ fn views(section: &Section) -> Vec<Node> {
             band: None,
             about: None,
             later: false,
+            refused: refused.map(str::to_string),
             kind: Kind::View(e.clone()),
         })
         .collect()
 }
 
-fn fill<'a>(rows: &mut [Node], sections: &'a [Section], placed: &mut Vec<&'a str>) {
+fn fill<'a>(
+    rows: &mut [Node],
+    sections: &'a [Section],
+    refusals: &[Refusal],
+    placed: &mut Vec<&'a str>,
+) {
     for row in rows {
         let later = row.later;
+        let mut refused = None;
         if let Kind::Branch { section, children } = &mut row.kind {
             match section {
                 Some(id) => {
                     if let Some(s) = sections.iter().find(|s| s.id == *id) {
                         placed.push(&s.id);
-                        *children = views(s);
+                        *children = views(s, None);
+                    } else if let Some(r) = refusals.iter().find(|r| r.section.id == *id) {
+                        *children = views(&r.section, Some(&r.why));
+                        refused = Some(r.why.clone());
                     }
                 }
-                None => fill(children, sections, placed),
+                None => fill(children, sections, refusals, placed),
             }
+        }
+        if refused.is_some() {
+            row.refused = refused;
         }
         // A preset filed under a later group makes it a real one.
         if later && !row.children().is_empty() {
             row.later = false;
             row.hint = None;
+        }
+    }
+}
+
+/// Grey a branch with nothing it can open and a refusal under it, in that
+/// refusal's words. A later row beside a refused one does not keep its parent
+/// open: it opens nothing either.
+fn carry_refusals(rows: &mut [Node]) {
+    for row in rows {
+        let Kind::Branch { children, .. } = &mut row.kind else {
+            continue;
+        };
+        carry_refusals(children);
+        if row.refused.is_some() || children.is_empty() {
+            continue;
+        }
+        let stops = || children.iter().filter(|n| n.is_stop());
+        let openable = stops().any(|n| n.refused.is_none() && !n.later);
+        if !openable {
+            row.refused = stops().find_map(|n| n.refused.clone());
         }
     }
 }
@@ -627,7 +684,7 @@ mod tests {
     use crate::config::{LayoutConfig, PresetConfig};
 
     fn tree_of(presets: &std::collections::HashMap<String, PresetConfig>) -> Tree {
-        build(&super::super::model::build(presets))
+        build(&super::super::model::build(presets), &[])
     }
 
     fn builtins() -> Tree {
@@ -715,7 +772,7 @@ mod tests {
     fn every_listed_preset_has_one_place() {
         let presets = LayoutConfig::default_config().presets;
         let menu = super::super::model::build(&presets);
-        let tree = build(&menu);
+        let tree = build(&menu, &[]);
         let mut seen = 0;
         for section in &menu.sections {
             for entry in &section.entries {
@@ -870,6 +927,60 @@ mod tests {
         let first = titles(&tree_of(&presets).lab).join(" ");
         assert!(!first.contains("SMALL WINDOW"), "{first}");
         assert!(!first.contains("Compact"), "{first}");
+    }
+
+    /// The NET presets refused as the gate refuses them on a radio that
+    /// stops below the band: every Bluetooth and Wi-Fi view listed by its
+    /// real title, refused with the reason, and the reason carried up to
+    /// Bluetooth and Wi-Fi themselves.
+    fn refused_tree() -> Tree {
+        let mut presets = LayoutConfig::default_config().presets;
+        let net: std::collections::HashMap<String, PresetConfig> = presets
+            .extract_if(|_, p| p.section.as_deref().is_some_and(crate::signal::net::is_net))
+            .collect();
+        let menu = super::super::model::build(&presets);
+        let refusals: Vec<Refusal> = super::super::model::build(&net)
+            .sections
+            .into_iter()
+            .map(|section| Refusal {
+                section,
+                why: "this radio tunes 24.000 to 1800.000 MHz".into(),
+            })
+            .collect();
+        build(&menu, &refusals)
+    }
+
+    #[test]
+    fn refused_views_are_listed_with_the_reason() {
+        let tree = refused_tree();
+        assert_eq!(titles(&builtins().lab), titles(&tree.lab), "nothing hidden");
+        let (_, census) = tree.locate("net_census").expect("listed");
+        let node = tree.node(Tile::Lab, &census).unwrap();
+        assert!(!node.opens());
+        assert_eq!(node.title, "Census");
+        assert!(node.refused.as_deref().unwrap().contains("1800.000"));
+        for area in ["Bluetooth", "Wi-Fi"] {
+            let path = path_to(&tree, Tile::Lab, &[area]);
+            let row = tree.node(Tile::Lab, &path).unwrap();
+            assert!(row.refused.is_some(), "{area} carries the refusal");
+            // Still browsable: what exists is shown, it just does not open.
+            assert!(tree.descend(Tile::Lab, &path).is_some(), "{area}");
+        }
+        let later = path_to(&tree, Tile::Lab, &["Wi-Fi", "2.4 GHz", "Room"]);
+        let room = tree.node(Tile::Lab, &later).unwrap();
+        assert!(room.later && room.refused.is_none(), "later stays later");
+        let spectrum = path_to(&tree, Tile::Lab, &["Spectrum"]);
+        assert!(tree.node(Tile::Lab, &spectrum).unwrap().refused.is_none());
+    }
+
+    /// An admitted view opens; a group never does.
+    #[test]
+    fn only_an_admitted_view_opens() {
+        let tree = builtins();
+        let (_, census) = tree.locate("net_census").unwrap();
+        assert!(tree.node(Tile::Lab, &census).unwrap().opens());
+        let le = path_to(&tree, Tile::Lab, &["Bluetooth", "2.4 GHz", "Low Energy"]);
+        assert!(!tree.node(Tile::Lab, &le).unwrap().opens());
     }
 
     /// The band rows reach exactly what the NET gate admits.

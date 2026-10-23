@@ -33,6 +33,8 @@ pub struct LayoutEngine {
     /// nothing does that outside the tests, and a preset added that way would be
     /// absent from the menu rather than break it.
     menu: menu::model::Menu,
+    /// The views this radio is refused, for the menu to list as refused.
+    refusals: Vec<menu::tree::Refusal>,
     startup_warnings: Vec<String>,
 }
 
@@ -56,6 +58,7 @@ impl LayoutEngine {
             focused_panel: None,
             hidden_panels: HashSet::new(),
             menu,
+            refusals: Vec::new(),
             startup_warnings: Vec::new(),
         }
     }
@@ -66,6 +69,18 @@ impl LayoutEngine {
     /// it knows.
     pub fn retire_menu_section(&mut self, id: &str) {
         self.menu.sections.retain(|s| s.id != id);
+    }
+
+    pub fn set_refusals(&mut self, refusals: Vec<menu::tree::Refusal>) {
+        self.refusals = refusals;
+    }
+
+    /// The menu's two trees: the sections, and beside them what the radio
+    /// was refused. Not drawn yet; `expect` fails the build once the menu
+    /// reads it.
+    #[cfg_attr(not(test), expect(dead_code))]
+    pub fn menu_tree(&self) -> menu::tree::Tree {
+        menu::tree::build(&self.menu, &self.refusals)
     }
 
     pub fn set_startup_warnings(&mut self, warnings: Vec<String>) {
