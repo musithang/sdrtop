@@ -35,6 +35,7 @@ REPO=musithang/sdrtop
 CRATE=sdrtop
 WANT_HACKRF=0
 WANT_RTLSDR=0
+WANT_AIRSPY=0
 WANT_SOAPY=0
 RAW_DEPS_ONLY=0
 FROM_SOURCE=0
@@ -60,9 +61,11 @@ sdrtop installer
   --no-verify     install a download without checking its checksum (say why first)
   --hackrf        also install the optional libhackrf runtime
   --rtlsdr        also install the optional librtlsdr runtime
+  --airspy        also install the optional libairspy runtime (Airspy R2)
   --soapy         also install libSoapySDR and its driver modules (optional)
-                  (on macOS these three come from Homebrew)
-  --deps-only     install only runtimes selected by --hackrf, --rtlsdr, --soapy
+                  (on macOS these four come from Homebrew)
+  --deps-only     install only runtimes selected by --hackrf, --rtlsdr,
+                  --airspy, --soapy
   --uninstall     remove what a previous run installed
   --help          this
 
@@ -84,6 +87,7 @@ while [ $# -gt 0 ]; do
         --no-verify)   NO_VERIFY=1; shift ;;
         --hackrf)      WANT_HACKRF=1; shift ;;
         --rtlsdr)      WANT_RTLSDR=1; shift ;;
+        --airspy)      WANT_AIRSPY=1; shift ;;
         --soapy)       WANT_SOAPY=1; shift ;;
         --deps-only)   RAW_DEPS_ONLY=1; shift ;;
         --uninstall)   UNINSTALL=1; shift ;;
@@ -93,9 +97,10 @@ while [ $# -gt 0 ]; do
 done
 
 if [ "$RAW_DEPS_ONLY" -eq 1 ] && [ "$WANT_HACKRF" -eq 0 ] \
-   && [ "$WANT_RTLSDR" -eq 0 ] && [ "$WANT_SOAPY" -eq 0 ]; then
+   && [ "$WANT_RTLSDR" -eq 0 ] && [ "$WANT_AIRSPY" -eq 0 ] \
+   && [ "$WANT_SOAPY" -eq 0 ]; then
     usage >&2
-    die "--deps-only requires --hackrf, --rtlsdr or --soapy"
+    die "--deps-only requires --hackrf, --rtlsdr, --airspy or --soapy"
 fi
 
 OS=$(uname -s)
@@ -189,6 +194,13 @@ fi
 # needs to be detected.
 HACKRF_UDEV=""
 RTLSDR_UDEV=""
+# libairspy, read off repology (2026-10-23). Debian and Ubuntu build it from
+# `airspyone-host` and ship the library as `libairspy0`; Arch, Homebrew, Nix and
+# Gentoo call the package `airspy`; Alpine splits off `airspyone-host-libs` and
+# Void `libairspy`. Fedora (`airspyone_host`) and openSUSE (`airspy`) are known
+# only by their source names here, so both carry candidates and the same
+# best-effort caveat as SoapySDR's below.
+LIB_AIRSPY=""
 # SoapySDR is optional: sdrtop opens it at runtime and works without it, so
 # these are only used by --soapy. Two lists, because the library alone finds no
 # devices: SOAPY_LIB is what sdrtop loads, SOAPY_MODULES is what actually talks
@@ -208,6 +220,7 @@ case "$PM" in
     apt-get)
         LIB_HACKRF="libhackrf0 libhackrf-dev"
         LIB_RTLSDR="librtlsdr0 librtlsdr2 librtlsdr-dev"
+        LIB_AIRSPY="libairspy0 libairspy-dev"
         SOAPY_LIB="libsoapysdr0.8 libsoapysdr0.7 libsoapysdr-dev"
         SOAPY_MODULES="soapysdr-module-all"
         LEGACY_DEV_PKGS="libhackrf-dev librtlsdr-dev pkg-config"
@@ -215,6 +228,7 @@ case "$PM" in
     dnf|yum)
         LIB_HACKRF="hackrf hackrf-devel"
         LIB_RTLSDR="rtl-sdr rtl-sdr-devel"
+        LIB_AIRSPY="airspyone_host airspyone_host-devel"
         SOAPY_LIB="SoapySDR"
         SOAPY_MODULES="SoapySDR-hackrf SoapySDR-rtlsdr SoapySDR-airspy SoapySDR-plutosdr"
         LEGACY_DEV_PKGS="hackrf-devel rtl-sdr-devel pkgconf-pkg-config"
@@ -222,6 +236,7 @@ case "$PM" in
     pacman)
         LIB_HACKRF="hackrf"
         LIB_RTLSDR="rtl-sdr"
+        LIB_AIRSPY="airspy"
         SOAPY_LIB="soapysdr"
         SOAPY_MODULES="soapyhackrf soapyrtlsdr soapyairspy soapyplutosdr"
         LEGACY_DEV_PKGS="hackrf rtl-sdr pkgconf"
@@ -229,6 +244,7 @@ case "$PM" in
     zypper)
         LIB_HACKRF="libhackrf0 hackrf libhackrf-devel"
         LIB_RTLSDR="librtlsdr0 rtl-sdr rtl-sdr-devel"
+        LIB_AIRSPY="libairspy0 airspy"
         SOAPY_LIB="libSoapySDR0_8 SoapySDR SoapySDR-devel"
         SOAPY_MODULES="SoapySDR-module-hackrf SoapySDR-module-rtlsdr"
         LEGACY_DEV_PKGS="libhackrf-devel rtl-sdr-devel pkg-config"
@@ -238,6 +254,7 @@ case "$PM" in
         # the udev rules are three packages.
         LIB_HACKRF="hackrf-libs hackrf-dev"
         LIB_RTLSDR="librtlsdr librtlsdr-dev"
+        LIB_AIRSPY="airspyone-host-libs airspyone-host"
         SOAPY_LIB="soapysdr soapysdr-dev"
         SOAPY_MODULES="soapysdr-hackrf soapysdr-rtlsdr"
         HACKRF_UDEV="hackrf-udev"
@@ -247,6 +264,7 @@ case "$PM" in
     xbps-install)
         LIB_HACKRF="hackrf hackrf-devel"
         LIB_RTLSDR="rtl-sdr rtl-sdr-devel"
+        LIB_AIRSPY="libairspy airspy"
         SOAPY_LIB="SoapySDR SoapySDR-devel"
         SOAPY_MODULES="SoapyHackRF SoapyRTLSDR"
         LEGACY_DEV_PKGS="hackrf-devel rtl-sdr-devel pkg-config"
@@ -254,6 +272,7 @@ case "$PM" in
     emerge)
         LIB_HACKRF="net-wireless/hackrf"
         LIB_RTLSDR="net-wireless/rtl-sdr"
+        LIB_AIRSPY="net-wireless/airspy"
         SOAPY_LIB="net-wireless/soapysdr"
         SOAPY_MODULES="net-wireless/soapyhackrf net-wireless/soapyrtlsdr"
         LEGACY_DEV_PKGS="net-wireless/hackrf net-wireless/rtl-sdr"
@@ -261,6 +280,7 @@ case "$PM" in
     nix-env)
         LIB_HACKRF="hackrf"
         LIB_RTLSDR="rtl-sdr"
+        LIB_AIRSPY="airspy"
         SOAPY_LIB="soapysdr-with-plugins soapysdr"
         SOAPY_MODULES=""
         LEGACY_DEV_PKGS="hackrf rtl-sdr pkg-config"
@@ -271,6 +291,7 @@ case "$PM" in
         # script does not add on anyone's behalf.
         LIB_HACKRF="hackrf"
         LIB_RTLSDR="librtlsdr"
+        LIB_AIRSPY="airspy"
         SOAPY_LIB="soapysdr"
         SOAPY_MODULES="soapyhackrf soapyrtlsdr"
         LEGACY_DEV_PKGS="hackrf librtlsdr pkgconf"
@@ -278,7 +299,7 @@ case "$PM" in
         # own dialog installs; see the compile step.
         DEV_PKGS="" ;;
     "")
-        LIB_HACKRF=""; LIB_RTLSDR=""; DEV_PKGS="" ;;
+        LIB_HACKRF=""; LIB_RTLSDR=""; LIB_AIRSPY=""; DEV_PKGS="" ;;
 esac
 
 pm_install() {
@@ -308,7 +329,7 @@ install_first() {
     return 1
 }
 
-# Whether the library `$1` (libhackrf, librtlsdr, libSoapySDR) is installed
+# Whether the library `$1` (libhackrf, librtlsdr, libairspy, libSoapySDR) is installed
 # where sdrtop will look for it: the loader's cache on Linux; on macOS the
 # directories sdrtop itself searches, Homebrew's on Apple Silicon and Intel and
 # MacPorts'.
@@ -355,11 +376,13 @@ install_soapy() {
 }
 
 install_runtime_deps() {
-    if [ "$WANT_HACKRF" -eq 0 ] && [ "$WANT_RTLSDR" -eq 0 ]; then
+    if [ "$WANT_HACKRF" -eq 0 ] && [ "$WANT_RTLSDR" -eq 0 ] \
+       && [ "$WANT_AIRSPY" -eq 0 ]; then
         return 0
     fi
     if { [ "$WANT_HACKRF" -eq 0 ] || have_native_lib libhackrf; } \
-       && { [ "$WANT_RTLSDR" -eq 0 ] || have_native_lib librtlsdr; }; then
+       && { [ "$WANT_RTLSDR" -eq 0 ] || have_native_lib librtlsdr; } \
+       && { [ "$WANT_AIRSPY" -eq 0 ] || have_native_lib libairspy; }; then
         say "the selected native SDR libraries are already present"
         return 0
     fi
@@ -386,6 +409,9 @@ install_runtime_deps() {
     if [ "$WANT_RTLSDR" -eq 1 ]; then
         install_first "$LIB_RTLSDR" || warn "could not install librtlsdr automatically"
         udev_pkgs="$udev_pkgs $RTLSDR_UDEV"
+    fi
+    if [ "$WANT_AIRSPY" -eq 1 ]; then
+        install_first "$LIB_AIRSPY" || warn "could not install libairspy automatically"
     fi
     for p in $udev_pkgs; do
         if pm_install "$p" >/dev/null 2>&1; then say "  $p"; fi
@@ -700,8 +726,9 @@ if have_soapy; then
     say "  radios. Reports either way are genuinely welcome."
 else
     say "libSoapySDR is not installed, and sdrtop does not need it."
-    say "  With it, sdrtop also reaches Airspy, SDRplay, PlutoSDR, LimeSDR,"
-    say "  bladeRF, USRP and anything else with a SoapySDR driver."
+    say "  With it, sdrtop also reaches the Airspy Mini and HF+, SDRplay,"
+    say "  PlutoSDR, LimeSDR, bladeRF, USRP and anything else with a SoapySDR"
+    say "  driver."
     say "  Re-run this installer with --soapy to add it."
     if [ "$OS" = Darwin ]; then
         say "  On a Mac that brings the HackRF and RTL-SDR modules; the others"
@@ -712,15 +739,16 @@ fi
 # ── The radio has to be openable ────────────────────────────────────────────
 # Distribution packages supply native SDR udev rules. macOS has no udev and
 # needs no rules: any user may open a USB radio there.
-if [ "$OS" = Linux ] && { [ "$WANT_HACKRF" -eq 1 ] || [ "$WANT_RTLSDR" -eq 1 ]; }; then
+if [ "$OS" = Linux ] && { [ "$WANT_HACKRF" -eq 1 ] || [ "$WANT_RTLSDR" -eq 1 ] \
+   || [ "$WANT_AIRSPY" -eq 1 ]; }; then
     step "Device access"
     if grep -rqs -e 'idVendor.*1d50' -e 'idVendor.*0bda' \
          /usr/lib/udev/rules.d /lib/udev/rules.d /etc/udev/rules.d; then
         say "udev rules for SDR hardware are installed"
     else
         warn "no udev rules for SDR hardware were found on this system"
-        say "  HackRF/RTL-SDR access may need udev rules. They come"
-        say "  with the libhackrf and rtl-sdr packages on most distributions; see"
+        say "  HackRF/RTL-SDR/Airspy access may need udev rules. They come"
+        say "  with the libhackrf, rtl-sdr and airspy packages on most distributions; see"
         say "  user_docs/troubleshooting.md if installing those did not supply any."
     fi
 
@@ -751,6 +779,7 @@ case ":$PATH:" in
 esac
 
 say ""
-say "For a HackRF or RTL-SDR, re-run this installer with --hackrf or --rtlsdr."
+say "For a HackRF, RTL-SDR or Airspy R2, re-run this installer with --hackrf,"
+say "--rtlsdr or --airspy."
 say "Run 'sdrtop'. It opens on its menu: Enter takes a layout, Space starts"
 say "receiving, Esc brings the menu back, q quits and saves."

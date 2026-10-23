@@ -3,9 +3,10 @@
 
 //! The Airspy R2, driven through libairspy.
 //!
-//! Found, identified, opened, described and streamed here; it is reached
-//! only when `--device airspy` asks for it by name, and the SoapySDR path
-//! keeps offering the radio as before.
+//! Found, identified, opened, described and streamed here. Discovery offers
+//! an R2 natively, and a radio another program holds (for observer mode);
+//! a Mini, or rates nobody here has seen, stay with SoapyAirspy unless
+//! `--device airspy` names this backend (see [`offered`]).
 //!
 //! **libairspy owns the threads.** Its USB thread queues whole buffers and
 //! its consumer thread converts them to I/Q and calls [`rx_callback`], which
@@ -172,13 +173,24 @@ unsafe fn read_found(api: &ffi::AirspyApi, device: *mut c_void, serial: u64) -> 
     }
 }
 
-/// The device selector's entries for what [`find`] returned.
-pub fn list() -> Vec<DeviceListing> {
+/// Whether discovery offers `found` natively. An R2, or a radio another
+/// program holds (opening it fails and observer mode says whose it is),
+/// always; a Mini or unknown rates only when `--device airspy` named this
+/// backend: offered unasked, the radio would replace the SoapyAirspy listing
+/// that drives it, on a model nobody here has held.
+pub fn offered(found: &Found, asked_by_name: bool) -> bool {
+    asked_by_name || found.model == Model::R2 || found.held
+}
+
+/// The device selector's entries for what [`find`] returned and [`offered`]
+/// lets through.
+pub fn list(asked_by_name: bool) -> Vec<DeviceListing> {
     let Ok(api) = ffi::api() else {
         return Vec::new();
     };
     find(api)
         .into_iter()
+        .filter(|found| offered(found, asked_by_name))
         .enumerate()
         .map(|(index, found)| DeviceListing {
             kind: DeviceKind::Airspy,
@@ -998,6 +1010,46 @@ mod tests {
         );
         fixture.mode(22);
         assert_eq!(find(&api), vec![]);
+    }
+
+    /// **Offered without being asked for: an R2, or a radio another program
+    /// holds** (it opens onto observer mode). A Mini or a radio of unknown
+    /// rates is left to SoapyAirspy unless `--device airspy` names the
+    /// backend: offered natively, it would take the place of the Soapy
+    /// listing that works for it.
+    #[test]
+    fn only_an_r2_or_a_held_radio_is_offered_unasked() {
+        let r2 = Found {
+            serial: "637862dc2e1182d7".into(),
+            board: Some("AIRSPY".into()),
+            firmware: None,
+            rates: vec![10_000_000, 2_500_000],
+            model: Model::R2,
+            held: false,
+        };
+        let held = Found {
+            board: None,
+            rates: vec![],
+            model: Model::Unknown,
+            held: true,
+            ..r2.clone()
+        };
+        let mini = Found {
+            model: Model::Mini,
+            rates: vec![6_000_000, 3_000_000],
+            ..r2.clone()
+        };
+        let unknown = Found {
+            model: Model::Unknown,
+            rates: vec![8_000_000],
+            ..r2.clone()
+        };
+        assert!(offered(&r2, false) && offered(&held, false));
+        assert!(!offered(&mini, false) && !offered(&unknown, false));
+        assert!(
+            offered(&mini, true) && offered(&unknown, true),
+            "named, every one"
+        );
     }
 
     /// The selector says which Airspy it is and by which serial; a Mini says

@@ -21,8 +21,8 @@ use super::{soapy, tinysa, usb, DeviceCapabilities, SdrDevice};
 /// Which backend a [`DeviceListing`] / open request targets.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum DeviceKind {
-    /// The Airspy R2, natively. Reached only by `--device airspy` until it
-    /// streams; discovery keeps offering it through SoapySDR meanwhile.
+    /// The Airspy R2, natively; a Mini stays with SoapySDR unless this
+    /// backend is asked for by name.
     Airspy,
     HackRf,
     RtlSdr,
@@ -162,8 +162,8 @@ pub fn parse_device_arg(spec: &str) -> anyhow::Result<(DeviceKind, Option<String
         "soapy" | "soapysdr" => DeviceKind::Soapy,
         "tinysa" | "tiny-sa" => DeviceKind::TinySa,
         other => anyhow::bail!(
-            "Unknown --device '{other}' (use 'hackrf', 'rtlsdr', 'tinysa', or \
-             'soapy'; tinysa and soapy accept '=selector')"
+            "Unknown --device '{other}' (use 'hackrf', 'rtlsdr', 'airspy', 'tinysa', \
+             or 'soapy'; tinysa and soapy accept '=selector')"
         ),
     };
     if kind == DeviceKind::TinySa {
@@ -178,9 +178,7 @@ pub fn parse_device_arg(spec: &str) -> anyhow::Result<(DeviceKind, Option<String
 pub fn no_device_hint(want: Option<DeviceKind>) -> String {
     let mut hint = String::new();
     for kind in [DeviceKind::HackRf, DeviceKind::RtlSdr, DeviceKind::Airspy] {
-        // The Airspy is looked for only when asked for by name.
-        let asked = want == Some(kind) || (want.is_none() && kind != DeviceKind::Airspy);
-        if asked {
+        if want.is_none() || want == Some(kind) {
             if let Err(err) = kind.check_available() {
                 hint.push('\n');
                 hint.push_str(&err.to_string());
@@ -207,10 +205,9 @@ pub fn list_all_devices(
     let mut out = Vec::new();
     out.extend(hackrf::list());
     out.extend(rtlsdr::list());
-    // Only by name, until the native path can stream.
-    if want == Some(DeviceKind::Airspy) {
-        out.extend(airspy::list());
-    }
+    // An R2 natively, which then wins over SoapyAirspy's listing of it
+    // below; a Mini only when asked for by name (see `airspy::offered`).
+    out.extend(airspy::list(want == Some(DeviceKind::Airspy)));
     let tinysa = if want == Some(DeviceKind::TinySa) {
         tinysa::list(soapy_filter.filter(|value| !value.is_empty()))
     } else {
@@ -591,6 +588,11 @@ mod tests {
             "the HF+ is SoapySDR's"
         );
         assert!(parse_device_arg("").is_err(), "nor is nothing");
+        let why = parse_device_arg("airspyhf").unwrap_err().to_string();
+        assert!(
+            why.contains("'airspy'"),
+            "the backends it lists include it: {why}"
+        );
     }
 
     /// Spellings that have to keep working, and the case fold.
