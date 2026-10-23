@@ -16,6 +16,7 @@
 //! - [`entries`]: the right column, a section's layouts.
 //! - [`keys`]: the right column, the key reference.
 //! - [`options`]: the right column, device settings.
+//! - [`tree`]: the sections hung on the tiles' trees. Pure, as `model` is.
 //!
 //! [`render`] is the orchestrator. It resolves the frame, carves the rows and
 //! columns, and calls each part once. **The parts do not call each other.**
@@ -26,6 +27,10 @@ pub mod live;
 pub mod model;
 pub mod options;
 pub mod sections;
+// Built and tested ahead of the screen that draws it. `expect` fails the
+// build as soon as the menu reads it, so this line cannot outlive its reason.
+#[cfg_attr(not(test), expect(dead_code))]
+pub mod tree;
 
 use ratatui::{
     layout::{Constraint, Direction, Layout, Rect},
