@@ -4,10 +4,12 @@
 //! `ImageScopePanel` - the LO-centred image-rejection scope for the Lab IQ preset.
 //!
 //! Reads the existing fftshifted FFT frame (DC/LO at the centre bin) and tells the
-//! quadrature story directly: the strongest **carrier**, its **mirror image**
-//! reflected about the LO, and the residual **DC spike** at the centre. The gap
-//! between carrier and image is the measured image suppression - the empirical
-//! counterpart to the computed IRR shown one panel left.
+//! quadrature story directly: the strongest **carrier** and its **mirror**
+//! reflected about the LO. The gap between them, drawn on the mirror's column,
+//! is the measured image suppression - the empirical counterpart to the IRR
+//! the imbalance predicts one panel left - where it is one: a mirror on the
+//! floor is a lower bound, and a signal running across the LO has no image
+//! to measure at all ([`detect::Reading`]).
 //!
 //! Split the same way as its bench partner `iq_constellation`: what is measured,
 //! then what is drawn.
@@ -16,15 +18,15 @@
 //!   the [`carrier_image`] end so the marker bar and the `[M]` pin get the same
 //!   answer the scope draws.
 //! - [`chart`]: the block-cell bar chart and the frequency window it spans.
-//! - [`readout`]: the four lines under it, and the caption.
-//! - [`tint`]: the three colours carrier / image / DC wear everywhere.
+//! - [`readout`]: the lines under it, and the caption.
+//! - [`tint`]: the colours carrier and image wear everywhere.
 
 mod chart;
 mod detect;
 mod readout;
 mod tint;
 
-pub(crate) use detect::carrier_image;
+pub(crate) use detect::{carrier_image, Reading};
 
 use ratatui::{
     layout::Rect,
@@ -49,8 +51,8 @@ pub(crate) struct CarrierImage {
     pub image_hz: u64,
     pub carrier_dbfs: f32,
     pub image_dbfs: f32,
-    /// carrier − image, in dB (positive = image is below the carrier).
-    pub suppression_db: f32,
+    /// What the gap between them can honestly be called.
+    pub reading: Reading,
 }
 
 impl Panel for ImageScopePanel {
@@ -93,15 +95,28 @@ impl Panel for ImageScopePanel {
 
         // The read-outs are always shown, so they are built first and the chart
         // gets whatever height is left over.
-        let readouts = readout::lines(&r, win.carrier_hz, &tint, iw, theme);
+        let readouts = readout::lines(&r, win.carrier_hz, win.image_hz, &tint, iw, theme);
         let chart_w = iw.saturating_sub(chart::GUTTER + 1);
         let reserved = 1 /*marker*/ + 1 /*axis*/ + 1 /*gap*/ + readouts.len() + 1 /*caption*/;
-        // Fill all the vertical room left after the chrome - a taller chart gives
-        // finer dBFS resolution and matches the mockup's full-height scope.
         let chart_h = ih.saturating_sub(reserved);
+        let gap = readout::gap_label(r.reading).map(|label| chart::Gap {
+            carrier_dbfs: r.carrier_dbfs,
+            image_dbfs: r.image_dbfs,
+            label,
+        });
 
         let mut lines: Vec<Line> = Vec::new();
-        chart::draw(&mut lines, bins, rate, &win, chart_w, chart_h, &tint);
+        chart::draw(
+            &mut lines,
+            bins,
+            rate,
+            frame.noise_floor,
+            &win,
+            gap.as_ref(),
+            chart_w,
+            chart_h,
+            &tint,
+        );
         lines.extend(readouts);
         lines.push(readout::caption(theme));
 
@@ -128,5 +143,64 @@ mod tests {
     #[test]
     fn panel_name_is_stable() {
         assert_eq!(ImageScopePanel.name(), "image_scope");
+    }
+
+    /// A carrier 1 MHz off the LO at 40 dB over a -100 floor, its frame
+    /// edited by `edit`.
+    fn scope(edit: impl FnOnce(&mut Vec<f32>)) -> String {
+        let mut m = SdrMetrics::fixture()
+            .streaming()
+            .with_carrier(1_000_000.0, 40.0);
+        let fr = m.waterfall.last_fft.as_mut().unwrap();
+        let mut bins = (*fr.bins_dbfs).clone();
+        edit(&mut bins);
+        fr.bins_dbfs = std::sync::Arc::new(bins);
+        crate::state::fixture::draw(ImageScopePanel, 61, 26, &m).join("\n")
+    }
+
+    /// **The gap is drawn where it is measured**: the carrier's level carried
+    /// to its mirror's column, the rejection beside it, and the verdict in
+    /// plain words, positive.
+    #[test]
+    fn an_image_over_the_floor_is_measured_and_drawn() {
+        // 1 MHz at 10 Msps over 256 bins is 25.6 bins: carrier 154, mirror 102.
+        let out = scope(|b| b[102] = -90.0);
+        for want in [
+            "\u{25bc} carrier",
+            "\u{25bd} mirror",
+            "IMAGE 30 dB DOWN",
+            "30 dB",
+            "\u{254c}",
+            "LO ",
+            "the IRR its imbalance predicts",
+        ] {
+            assert!(out.contains(want), "{want:?} in\n{out}");
+        }
+        assert!(!out.contains("DC spike") && !out.contains("supp"), "{out}");
+    }
+
+    /// A mirror on the floor is a lower bound, said as one.
+    #[test]
+    fn a_mirror_on_the_floor_is_a_lower_bound() {
+        let out = scope(|_| {});
+        assert!(out.contains("IMAGE \u{2265} 40 dB DOWN"), "{out}");
+        assert!(out.contains("under the floor"), "{out}");
+    }
+
+    /// **A signal across the LO gets no figure**: the case a station tuned
+    /// to the centre showed as a few dB of image rejection.
+    #[test]
+    fn a_signal_across_the_lo_gets_no_figure() {
+        let out = scope(|b| {
+            for v in b.iter_mut().take(156).skip(100) {
+                *v = -70.0;
+            }
+        });
+        assert!(out.contains("NO IMAGE TO MEASURE"), "{out}");
+        assert!(out.contains("runs across the LO"), "{out}");
+        assert!(
+            !out.contains("dB DOWN") && !out.contains('\u{25bd}'),
+            "{out}"
+        );
     }
 }

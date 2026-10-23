@@ -76,11 +76,15 @@ pub(super) fn iq_diagnostics(key: KeyEvent, ctx: &mut InputCtx<'_>) -> KeyAction
                 m.push_log("IQ markers: auto-tracking carrier/image".to_string());
             } else if let Some(ci) = auto {
                 m.lab.iq_marker_pin = Some((ci.carrier_hz, ci.image_hz));
+                let image = match ci.reading.rejection() {
+                    Some((db, true)) => format!("image \u{2265} {db:.1} dB down"),
+                    Some((db, false)) => format!("image {db:.1} dB down"),
+                    None => "no image to measure".to_string(),
+                };
                 m.push_log(format!(
-                    "IQ markers pinned — carrier {:.3} MHz · image {:.3} MHz · supp {:.1} dB",
+                    "IQ markers pinned — carrier {:.3} MHz · mirror {:.3} MHz · {image}",
                     ci.carrier_hz as f64 / 1e6,
                     ci.image_hz as f64 / 1e6,
-                    ci.suppression_db,
                 ));
             } else {
                 m.push_log("IQ markers: no carrier detected yet".to_string());

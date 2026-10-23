@@ -17,10 +17,15 @@ use ratatui::{
 
 use super::tint::Tint;
 
-/// Fixed dBFS window for the bar chart - a stable axis (0 at top, −120 at the
-/// floor) reads better than an auto-ranging one when comparing two peaks.
-const FLOOR_DBFS: f32 = -120.0;
-const TOP_DBFS: f32 = 0.0;
+/// The dBFS window: the floor 10 dB under its bottom, the strongest bin 5 dB
+/// under its top, both on 10 dB lines, never above full scale. A fixed
+/// 0 to -120 dBFS left the top half of the chart empty on every real capture.
+fn y_range(bins: &[f32], floor: f32) -> (f32, f32) {
+    let max = bins.iter().copied().fold(f32::NEG_INFINITY, f32::max);
+    let top = (((max + 5.0) / 10.0).ceil() * 10.0).min(0.0);
+    let bottom = ((floor - 10.0) / 10.0).floor() * 10.0;
+    (bottom.min(top - 20.0), top)
+}
 
 /// Partial-cell block ramp: index 0 = empty, 8 = full cell.
 const BLOCKS: [char; 9] = [
@@ -71,13 +76,26 @@ impl Window {
     }
 }
 
+/// What the chart marks beyond the bars: where the carrier's level is
+/// carried across to its mirror, and what the gap is called. `None` draws the
+/// spectrum and the LO alone, for a carrier that has no image to show.
+pub(super) struct Gap {
+    pub carrier_dbfs: f32,
+    pub image_dbfs: f32,
+    /// `30 dB`, `≥17 dB` or `5 dB?`.
+    pub label: String,
+}
+
 /// Render the marker row, the bar rows and the frequency-axis row into `out`.
 /// Draws nothing when the area is too small to be read.
+#[allow(clippy::too_many_arguments)]
 pub(super) fn draw(
     out: &mut Vec<Line<'static>>,
     bins: &[f32],
     rate: f64,
+    floor: f32,
     win: &Window,
+    gap: Option<&Gap>,
     chart_w: usize,
     chart_h: usize,
     tint: &Tint,
@@ -87,120 +105,98 @@ pub(super) fn draw(
     }
     let n = bins.len();
     let bin_hz = rate / n as f64;
-
+    let (bottom, top) = y_range(bins, floor);
     // Aggregate bins into columns (peak per column), single O(n) pass.
-    let mut col_level = vec![FLOOR_DBFS; chart_w];
+    let mut col_level = vec![bottom; chart_w];
     for (i, &v) in bins.iter().enumerate() {
         let bf = win.center_hz + (i as f64 - n as f64 / 2.0) * bin_hz;
-        if bf < win.left_hz || bf >= win.right_hz {
-            continue;
-        }
-        let c = (((bf - win.left_hz) / win.width_hz()) * chart_w as f64) as usize;
-        let c = c.min(chart_w - 1);
-        if v > col_level[c] {
-            col_level[c] = v;
+        if let Some(c) = win.col_of(bf, chart_w) {
+            col_level[c] = col_level[c].max(v);
         }
     }
+    let carrier_col = gap.and(win.col_of(win.carrier_hz, chart_w));
+    let image_col = gap.and(win.col_of(win.image_hz, chart_w));
+    let lo_col = win.col_of(win.center_hz, chart_w);
+    let rows = chart_h as f32;
+    // Rows down from the top, fractional, for a level.
+    let depth = |db: f32| ((top - db) / (top - bottom)).clamp(0.0, 1.0) * rows;
 
-    let carrier_col = win.col_of(win.carrier_hz, chart_w);
-    let image_col = win.col_of(win.image_hz, chart_w);
-    let dc_col = win.col_of(win.center_hz, chart_w);
-    let col_color = |c: usize| -> Color {
-        if Some(c) == carrier_col {
+    // The marker row: the LO always, the carrier and its mirror when there is
+    // an image to show.
+    let mut cells = vec![(' ', tint.rule); chart_w];
+    if let Some(c) = lo_col {
+        cells[c] = ('\u{250a}', tint.rule);
+    }
+    if let Some(c) = carrier_col {
+        cells[c] = ('\u{25bc}', tint.carrier);
+    }
+    if let Some(c) = image_col {
+        cells[c] = ('\u{25bd}', tint.image);
+    }
+    let mut marks = with_gutter(String::new(), &cells, tint);
+    // Above the chart the gutter carries no rule.
+    marks.spans[0] = Span::raw(" ".repeat(GUTTER + 1));
+    out.push(marks);
+
+    // The bars.
+    let mut grid = vec![vec![(' ', tint.base); chart_w]; chart_h];
+    for (c, &level) in col_level.iter().enumerate() {
+        let h = rows - depth(level);
+        let col = if Some(c) == carrier_col {
             tint.carrier
         } else if Some(c) == image_col {
             tint.image
-        } else if Some(c) == dc_col {
-            tint.dc
         } else {
             tint.base
-        }
-    };
-
-    // Marker row: ▼ over carrier/image, ▮ over DC.
-    let mut mk: Vec<Span> = vec![Span::raw(" ".repeat(GUTTER + 1))];
-    let mut run = String::new();
-    let mut run_col = tint.base;
-    let flush = |run: &mut String, col: Color, out: &mut Vec<Span>| {
-        if !run.is_empty() {
-            out.push(Span::styled(std::mem::take(run), Style::default().fg(col)));
-        }
-    };
-    for c in 0..chart_w {
-        let (ch, col) = if Some(c) == carrier_col {
-            ('\u{25bc}', tint.carrier)
-        } else if Some(c) == image_col {
-            ('\u{25bc}', tint.image)
-        } else if Some(c) == dc_col {
-            ('\u{25ae}', tint.dc)
-        } else {
-            (' ', tint.base)
         };
-        if col != run_col {
-            flush(&mut run, run_col, &mut mk);
-            run_col = col;
-        }
-        run.push(ch);
-    }
-    flush(&mut run, run_col, &mut mk);
-    out.push(Line::from(mk));
-
-    // dBFS gridline label rows.
-    let tick_row = |db: f32| -> usize {
-        (((TOP_DBFS - db) / (TOP_DBFS - FLOOR_DBFS)) * (chart_h - 1) as f32).round() as usize
-    };
-    let mut row_label = vec![String::new(); chart_h];
-    for db in [0.0, -30.0, -60.0, -90.0, -120.0] {
-        let row = tick_row(db).min(chart_h - 1);
-        if row_label[row].is_empty() {
-            row_label[row] = format!("{:>width$}", db as i32, width = GUTTER);
+        for (r, row) in grid.iter_mut().enumerate() {
+            let cell = h - (chart_h - 1 - r) as f32;
+            if cell > 0.05 {
+                row[c] = (BLOCKS[(cell * 8.0).round().clamp(1.0, 8.0) as usize], col);
+            }
         }
     }
-
-    // Bar rows, top → bottom.
-    for (row, g) in row_label.iter().enumerate() {
-        let mut spans: Vec<Span> = Vec::new();
-        if g.is_empty() {
-            spans.push(Span::styled(
-                format!("{:>gutter$}\u{2502}", "", gutter = GUTTER),
-                Style::default().fg(tint.rule),
-            ));
+    // The carrier's level carried across to its mirror, and the gap between
+    // the two drawn on the mirror's column with its size beside it: the image
+    // rejection where it is, not two numbers to subtract.
+    if let (Some(g), Some(m)) = (gap, image_col) {
+        let from = (depth(g.carrier_dbfs) as usize).min(chart_h - 1);
+        let to = (depth(g.image_dbfs) as usize).min(chart_h - 1);
+        let reach = m.saturating_sub(1)..=(m + 1).min(chart_w - 1);
+        grid[from][reach].fill(('\u{254c}', tint.carrier));
+        for row in grid.iter_mut().take(to).skip(from + 1) {
+            row[m] = ('\u{2506}', tint.label);
+        }
+        let len = g.label.chars().count();
+        let at = if m + 2 + len <= chart_w {
+            m + 2
         } else {
-            spans.push(Span::styled(
-                format!("{g}\u{2524}"),
-                Style::default().fg(tint.rule),
-            ));
-        }
-        let from_bottom = (chart_h - 1 - row) as f32;
-        let mut run = String::new();
-        let mut run_col = tint.base;
-        let mut started = false;
-        for (c, &level) in col_level.iter().enumerate() {
-            let frac = ((level - FLOOR_DBFS) / (TOP_DBFS - FLOOR_DBFS)).clamp(0.0, 1.0);
-            let cell = frac * chart_h as f32 - from_bottom;
-            let ch = if cell >= 1.0 {
-                '\u{2588}'
-            } else if cell <= 0.05 {
-                ' '
-            } else {
-                BLOCKS[(cell * 8.0).round().clamp(1.0, 8.0) as usize]
-            };
-            let col = if ch == ' ' { tint.base } else { col_color(c) };
-            if !started {
-                run_col = col;
-                started = true;
+            m.saturating_sub(len + 1)
+        };
+        let mid = (from + to.max(from)) / 2;
+        for (k, ch) in g.label.chars().enumerate() {
+            if let Some(cell) = grid[mid].get_mut(at + k) {
+                *cell = (ch, tint.label);
             }
-            if col != run_col {
-                spans.push(Span::styled(
-                    std::mem::take(&mut run),
-                    Style::default().fg(run_col),
-                ));
-                run_col = col;
-            }
-            run.push(ch);
         }
-        spans.push(Span::styled(run, Style::default().fg(run_col)));
-        out.push(Line::from(spans));
+    }
+    // dBFS every 10 dB where the rows allow, else every 20.
+    let step = if rows / ((top - bottom) / 10.0) >= 2.0 {
+        10.0
+    } else {
+        20.0
+    };
+    let mut ticks = vec![String::new(); chart_h];
+    let mut db = top;
+    while db >= bottom {
+        let r = (depth(db).round() as usize).min(chart_h - 1);
+        if ticks[r].is_empty() {
+            ticks[r] = format!("{:>width$}", db as i32, width = GUTTER);
+        }
+        db -= step;
+    }
+    for (row, tick) in grid.iter().zip(ticks) {
+        out.push(with_gutter(tick, row, tint));
     }
 
     // Frequency axis row.
@@ -212,7 +208,7 @@ pub(super) fn draw(
             }
         }
     };
-    let lo_lbl = format!("{} LO", fmt_mhz2(win.center_hz));
+    let lo_lbl = format!("LO {}", fmt_mhz2(win.center_hz));
     write(&mut axis, 0, &fmt_mhz2(win.left_hz));
     let cen = chart_w.saturating_sub(lo_lbl.chars().count()) / 2;
     write(&mut axis, cen, &lo_lbl);
@@ -229,8 +225,36 @@ pub(super) fn draw(
             Style::default().fg(tint.rule),
         ),
     ]));
-
     out.push(Line::raw(""));
+}
+
+/// One chart row: its tick in the gutter (or the bare rule) and its cells as
+/// styled runs.
+fn with_gutter(tick: String, cells: &[(char, Color)], tint: &Tint) -> Line<'static> {
+    let gutter = if tick.is_empty() {
+        format!("{:>GUTTER$}\u{2502}", "")
+    } else {
+        format!("{tick}\u{2524}")
+    };
+    let mut spans = vec![Span::styled(gutter, Style::default().fg(tint.rule))];
+    let mut run = String::new();
+    let mut cur: Option<Color> = None;
+    for &(ch, col) in cells {
+        if cur != Some(col) {
+            if let Some(c) = cur {
+                spans.push(Span::styled(
+                    std::mem::take(&mut run),
+                    Style::default().fg(c),
+                ));
+            }
+            cur = Some(col);
+        }
+        run.push(ch);
+    }
+    if let Some(c) = cur {
+        spans.push(Span::styled(run, Style::default().fg(c)));
+    }
+    Line::from(spans)
 }
 
 fn fmt_mhz2(hz: f64) -> String {
@@ -240,6 +264,17 @@ fn fmt_mhz2(hz: f64) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The chart spans the floor to the strongest bin, on 10 dB lines.
+    #[test]
+    fn the_y_range_follows_the_capture() {
+        let mut b = vec![-84.0; 64];
+        b[32] = -39.0;
+        assert_eq!(y_range(&b, -84.2), (-100.0, -30.0));
+        // Never above full scale.
+        b[32] = 0.0;
+        assert_eq!(y_range(&b, -84.2).1, 0.0);
+    }
 
     #[test]
     fn window_holds_both_carrier_and_its_mirror() {

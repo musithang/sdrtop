@@ -468,7 +468,7 @@ fn append_focus_hints(
 }
 
 /// Lab IQ marker bar: MKR1 = IMAGE, MKR2 = CARRIER (mirror about the LO), and
-/// `Δ image` = the measured suppression. Auto-tracks the strongest carrier live
+/// `image down` = the measured suppression. Auto-tracks the strongest carrier live
 /// unless pinned via `[M]` ([`crate::state::LabState::iq_marker_pin`]).
 fn iq_marker_lines(state: &SdrMetrics, theme: &crate::Theme, iw: usize) -> Vec<Line<'static>> {
     let dim = Style::default().fg(theme.label);
@@ -534,25 +534,29 @@ fn iq_marker_lines(state: &SdrMetrics, theme: &crate::Theme, iw: usize) -> Vec<L
     c2.extend(slot(2, "CARRIER", theme.value_hi, carrier_data));
     try_add(c2, &mut used, &mut spans);
 
-    // Δ image: image level relative to the carrier (signed; normally negative),
-    // colour-graded by the true suppression so an inverted pick is not flattered.
+    // How far the image sits under the carrier, as the scope says it: a
+    // positive figure, a lower bound where the mirror is the floor. Only where the scope calls the gap an image: a mirror that is a
+    // signal's own other half, or one too close to tell from a signal of its
+    // own, gets a dash rather than a figure.
     if let Some(c) = &ci {
-        let rel = c.image_dbfs - c.carrier_dbfs;
-        let scol = if c.suppression_db >= 40.0 {
-            theme.status_ok
-        } else if c.suppression_db >= 20.0 {
-            theme.status_warn
-        } else {
-            theme.status_crit
-        };
-        let rel_str = if rel <= 0.0 {
-            format!("\u{2212}{:.1} dB", -rel)
-        } else {
-            format!("+{rel:.1} dB")
+        let (rel_str, scol) = match c.reading.rejection() {
+            Some((db, bound)) => (
+                format!("{}{db:.1} dB", if bound { "\u{2265} " } else { "" }),
+                if bound {
+                    theme.value_hi
+                } else if db >= 40.0 {
+                    theme.status_ok
+                } else if db >= 20.0 {
+                    theme.status_warn
+                } else {
+                    theme.status_crit
+                },
+            ),
+            None => ("\u{2014}".to_string(), theme.border_dim),
         };
         let cand = vec![
             Span::raw("   "),
-            Span::styled("\u{0394} image ", dim),
+            Span::styled("image down ", dim),
             Span::styled(
                 rel_str,
                 Style::default().fg(scol).add_modifier(Modifier::BOLD),

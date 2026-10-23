@@ -79,10 +79,11 @@ weaker?" without arithmetic.
 
 Each bench adds its own field. Lab Signal carries occupied bandwidth and a quality
 verdict, Lab RF reads the ADC window (clip ceiling, peak, headroom, the noise floor
-the FFT measured with the bandwidth it was measured in, SNR), and Lab IQ shows the
-measured carrier-to-image suppression. The clip ceiling is 0 dBFS on most radios;
-one whose tuner clips before its converter shows that lower figure and names the
-part, and headroom counts from there.
+the FFT measured with the bandwidth it was measured in, SNR), and Lab IQ shows how
+far the image sits under the carrier, where the image scope can say (a dash where
+it cannot). The clip ceiling is 0 dBFS on most radios; one whose tuner clips
+before its converter shows that lower figure and names the part, and headroom
+counts from there.
 
 > **If you build your own preset**, note that the reference line and the ghost
 > trace are drawn only in **instrument mode**, which sdrtop turns on for presets
@@ -348,22 +349,34 @@ The empirical check on everything above. The other two panels *calculate* image
 rejection from the measured imbalance figures. This one goes and looks at a real
 image.
 
-It finds the strongest carrier in the frame, finds the bin that mirrors it about
-the centre (the LO), and reports:
+It finds the strongest carrier in the frame (`▼`) and the bin that mirrors it
+about the centre, the LO (`▽`), and draws the gap between them where it is: the
+carrier's level is carried across to the mirror's column as a dashed tick, and the
+drop from there down to the mirror is the image rejection, written beside it. The
+chart's scale follows the capture, from just under the noise floor to just over
+the strongest bin. Under it, the carrier and the mirror with their frequencies and
+levels, and one verdict:
 
-- **CARRIER**: its frequency and level.
-- **IMAGE**: the level of the mirror at the reflected frequency.
-- **DC spike**: the residual at centre, which is the I/Q offset rather than any
-  signal.
-- **image supp.**: the gap between carrier and image in dB, which is the measured
-  counterpart of the computed IRR next door.
+- **IMAGE 32 dB DOWN**: the mirror stands clear of the floor, so the image is
+  measured. The measured counterpart of the computed IRR next door.
+- **IMAGE ≥ 17 dB DOWN**: the mirror is the noise floor, so the real image is
+  somewhere under it and the figure is a lower bound. A weak carrier can only ever
+  give you this; a stronger one, or more gain, turns it into a measurement.
+- **MIRROR 5 dB DOWN**: within 6 dB of the carrier, which no working front end
+  lets an image do. It is far more likely a signal of its own sitting there, so
+  there is no image figure.
+- **NO IMAGE TO MEASURE**: the carrier is part of a signal that runs across the LO,
+  say a station you tuned to, so the "mirror" is the signal's own other half. Tune
+  so the signal sits off to one side, a megahertz or two, and its image appears on
+  the other.
 
-When the two disagree, trust this one for "what will actually appear in my
-spectrum" and the computed IRR for "how imbalanced is the hardware". They're
-answering slightly different questions.
+When this and the computed IRR disagree, trust this one for "what will actually
+appear in my spectrum" and the computed IRR for "how imbalanced is the hardware".
+They're answering slightly different questions. The DC offset is IQ Diagnostics'
+to report; here it is simply the LO's column.
 
-Two things stop it lying to you. It ignores a small guard band around centre, so
-the DC spike can never be mistaken for a carrier. And on the automatic path it
+Two more things stop it lying to you. It ignores a small guard band around centre,
+so the DC spike can never be mistaken for a carrier. And on the automatic path it
 requires the strongest bin to stand at least 10 dB clear of the noise floor;
 below that there is no carrier, only noise, and reporting the loudest noise bin as
 a carrier would produce an alarming suppression figure about nothing. Place a

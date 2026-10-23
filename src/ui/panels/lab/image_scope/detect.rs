@@ -16,6 +16,50 @@ use crate::state::{FftFrame, SdrMetrics};
 /// A placed marker / pin bypasses this gate.
 const CARRIER_MIN_SNR_DB: f32 = 10.0;
 
+/// Over the floor, where a bin is taken as part of a signal rather than noise
+/// when walking from the carrier to the LO. Lower than the carrier gate: the
+/// skirt of a signal is weaker than its peak.
+const SIGNAL_OVER_FLOOR_DB: f32 = 6.0;
+
+/// Bins either side looked at together on that walk, so one deep bin in a
+/// busy signal's spectrum is not taken for a gap.
+const WALK_HALF_WIDTH: usize = 2;
+
+/// A mirror within this of the carrier is more likely a signal of its own
+/// than an image: no working front end lets an image through that strong.
+const MIRROR_BUSY_DB: f32 = 6.0;
+
+/// A mirror this close to the floor is the floor: the image is somewhere
+/// under it.
+const AT_FLOOR_DB: f32 = 3.0;
+
+/// What the gap between the carrier and its mirror can honestly be called.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub(crate) enum Reading {
+    /// The image, measured above the floor: this far under the carrier, dB.
+    Measured(f32),
+    /// The mirror is the floor: the image is at least this far down, dB.
+    AtLeast(f32),
+    /// The mirror is within [`MIRROR_BUSY_DB`] of the carrier: too close to
+    /// tell from a signal of its own. How far down it is, dB.
+    MirrorBusy(f32),
+    /// The carrier is part of a signal that runs across the LO, so its
+    /// mirror is the signal's own other half and there is no image to see.
+    OnTheLo,
+}
+
+impl Reading {
+    /// The figure that can be printed as image rejection, and whether it is
+    /// a lower bound; `None` where there is no image measurement at all.
+    pub(crate) fn rejection(self) -> Option<(f32, bool)> {
+        match self {
+            Reading::Measured(db) => Some((db, false)),
+            Reading::AtLeast(db) => Some((db, true)),
+            Reading::MirrorBusy(_) | Reading::OnTheLo => None,
+        }
+    }
+}
+
 use super::CarrierImage;
 
 /// Resolve the carrier and its LO-mirror image into absolute frequencies + levels,
@@ -32,7 +76,7 @@ pub(crate) fn carrier_image(state: &SdrMetrics) -> Option<CarrierImage> {
         image_hz: (center - r.carrier_offset_hz).round() as u64,
         carrier_dbfs: r.carrier_dbfs,
         image_dbfs: r.image_dbfs,
-        suppression_db: r.suppression_db,
+        reading: r.reading,
     })
 }
 
@@ -51,18 +95,23 @@ pub(super) struct ImageReadout {
     pub carrier_idx: usize,
     pub carrier_dbfs: f32,
     pub image_dbfs: f32,
-    pub dc_dbfs: f32,
-    /// carrier − image, in dB (positive = image is below the carrier).
-    pub suppression_db: f32,
+    pub reading: Reading,
     /// Carrier offset from the LO, signed (Hz).
     pub carrier_offset_hz: f64,
 }
 
-/// Locate the carrier, its mirror about the centre (LO) bin, and the DC-spike
-/// level. The carrier is `carrier_hint` when supplied and valid (a placed marker
-/// or pin); otherwise the strongest bin outside a small DC guard, when it clears
-/// the noise floor by [`CARRIER_MIN_SNR_DB`]. `None` when the
-/// frame is too small / silent. Pure + deterministic for unit testing.
+/// Locate the carrier and its mirror about the centre (LO) bin, and say what
+/// the gap between them is ([`Reading`]). The carrier is `carrier_hint` when
+/// supplied and valid (a placed marker or pin); otherwise the strongest bin
+/// outside a small DC guard, when it clears the noise floor by
+/// [`CARRIER_MIN_SNR_DB`]. `None` when the frame is too small / silent. Pure +
+/// deterministic for unit testing.
+///
+/// **Not every mirror is an image.** A station sitting on the LO has its
+/// strongest bin just off the DC guard and its mirror on its own other side,
+/// and the scope used to print the station's symmetry, a few dB, as the
+/// front end's image rejection. A carrier whose signal runs unbroken to the
+/// LO is [`Reading::OnTheLo`] and gets no figure.
 pub(super) fn detect_image(
     bins: &[f32],
     sample_rate: f64,
@@ -109,13 +158,43 @@ pub(super) fn detect_image(
 
     let image_idx = (2 * center).saturating_sub(carrier_idx).min(n - 1);
     let bin_hz = sample_rate / n as f64;
+    let (carrier, image) = (bins[carrier_idx], bins[image_idx]);
+    let down = carrier - image;
+    let reading = if runs_to_the_lo(bins, carrier_idx, center, guard, noise_floor) {
+        Reading::OnTheLo
+    } else if image <= noise_floor + AT_FLOOR_DB {
+        // The image reads no higher than the bin, which is mostly noise.
+        Reading::AtLeast(down)
+    } else if down < MIRROR_BUSY_DB {
+        Reading::MirrorBusy(down)
+    } else {
+        Reading::Measured(down)
+    };
     Some(ImageReadout {
         carrier_idx,
-        carrier_dbfs: bins[carrier_idx],
-        image_dbfs: bins[image_idx],
-        dc_dbfs: bins[center],
-        suppression_db: bins[carrier_idx] - bins[image_idx],
+        carrier_dbfs: carrier,
+        image_dbfs: image,
+        reading,
         carrier_offset_hz: (carrier_idx as f64 - center as f64) * bin_hz,
+    })
+}
+
+/// Whether the signal the carrier belongs to runs, with no stretch of noise,
+/// from the carrier all the way to the DC guard: every window of bins on the
+/// way holds one over the floor by [`SIGNAL_OVER_FLOOR_DB`].
+fn runs_to_the_lo(bins: &[f32], carrier: usize, center: usize, guard: usize, floor: f32) -> bool {
+    let n = bins.len();
+    let path = if carrier > center {
+        center + guard + 1..carrier
+    } else {
+        carrier + 1..center - guard
+    };
+    path.into_iter().all(|i| {
+        let lo = i.saturating_sub(WALK_HALF_WIDTH);
+        let hi = (i + WALK_HALF_WIDTH).min(n - 1);
+        bins[lo..=hi]
+            .iter()
+            .any(|&v| v >= floor + SIGNAL_OVER_FLOOR_DB)
     })
 }
 
@@ -176,8 +255,7 @@ mod tests {
         assert_eq!(r.carrier_idx, 40);
         assert!((r.carrier_dbfs - (-8.0)).abs() < 1e-6);
         assert!((r.image_dbfs - (-64.0)).abs() < 1e-6);
-        assert!((r.dc_dbfs - (-20.0)).abs() < 1e-6);
-        assert!((r.suppression_db - 56.0).abs() < 1e-6);
+        assert_eq!(r.reading, Reading::Measured(56.0));
         assert!(
             (r.carrier_offset_hz - 8.0).abs() < 1e-6,
             "off {}",
@@ -217,6 +295,58 @@ mod tests {
         // An out-of-range hint is likewise ignored.
         let r2 = detect_image(&b, 64.0, -110.0, Some(999)).unwrap();
         assert_eq!(r2.carrier_idx, 50);
+    }
+
+    /// **A signal on the LO has no image to measure**: its strongest bin
+    /// just off the DC guard and the mirror on its own other side read a few
+    /// dB apart, which used to be printed as the front end's image rejection.
+    #[test]
+    fn a_signal_running_across_the_lo_is_not_an_image() {
+        let mut b = frame(64);
+        // An FM station centred on the LO, a little lopsided.
+        for (i, v) in b.iter_mut().enumerate().take(41).skip(24) {
+            *v = -60.0 - (i as f32 - 32.0).abs();
+        }
+        b[37] = -50.0;
+        let r = detect_image(&b, 64.0, -110.0, None).unwrap();
+        assert_eq!(r.carrier_idx, 37);
+        assert_eq!(r.reading, Reading::OnTheLo);
+        assert!(r.reading.rejection().is_none());
+    }
+
+    /// One deep bin inside a busy signal is not a gap that splits it from
+    /// the LO; a real stretch of noise is.
+    #[test]
+    fn a_single_deep_bin_is_not_a_gap_but_noise_is() {
+        let mut b = frame(64);
+        for v in b.iter_mut().take(44).skip(20) {
+            *v = -70.0;
+        }
+        b[44] = -50.0;
+        b[38] = -110.0;
+        let r = detect_image(&b, 64.0, -110.0, None).unwrap();
+        assert_eq!(r.reading, Reading::OnTheLo);
+        for v in b.iter_mut().take(43).skip(36) {
+            *v = -110.0;
+        }
+        let r = detect_image(&b, 64.0, -110.0, None).unwrap();
+        assert_ne!(r.reading, Reading::OnTheLo);
+    }
+
+    /// A mirror on the floor is a lower bound, not a measurement: the image
+    /// is somewhere under it. A mirror within 6 dB is no image figure at all.
+    #[test]
+    fn a_mirror_on_the_floor_is_a_bound_and_one_close_is_not_an_image() {
+        let mut b = frame(64);
+        b[50] = -60.0;
+        b[14] = -108.0;
+        let r = detect_image(&b, 64.0, -110.0, None).unwrap();
+        assert_eq!(r.reading, Reading::AtLeast(48.0));
+        assert_eq!(r.reading.rejection(), Some((48.0, true)));
+        b[14] = -63.0;
+        let r = detect_image(&b, 64.0, -110.0, None).unwrap();
+        assert_eq!(r.reading, Reading::MirrorBusy(3.0));
+        assert!(r.reading.rejection().is_none());
     }
 
     #[test]

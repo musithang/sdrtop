@@ -1,112 +1,140 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright (C) 2026 MusiThang <viktor.laszlo92@protonmail.com>
 
-//! The four read-out lines under the chart, plus the caption.
+//! The read-out under the chart: the carrier and its mirror, what the gap
+//! between them is called, and where the predicted IRR is.
 //!
-//! Each line is `mark · label · value · decoration`, and the decoration is the
-//! part that goes when the column is narrow: the 32% Lab IQ slot is often under
-//! 33 cells of inner width, and clipping a level mid-word is worse than losing a
-//! parenthetical that only names what the label already said.
+//! Each carrier and mirror line is `mark · label · value · decoration`, and
+//! the decoration is the part that goes when the column is narrow: the 32%
+//! Lab IQ slot is often under 33 cells of inner width, and clipping a level
+//! mid-word is worse than losing what only repeats the label.
+//!
+//! There is no DC line. The DC bin's level here and IQ Diagnostics' DC spike
+//! are two different figures, and showing both under one name gave the bench
+//! two answers to one question; on the chart, the DC is the LO's column.
 
 use ratatui::{
     style::{Modifier, Style},
     text::{Line, Span},
 };
 
-use super::detect::ImageReadout;
+use super::detect::{ImageReadout, Reading};
 use super::tint::{supp_color, Tint};
 
 /// Number of leading spans a line always keeps: mark, label, value. Only what
 /// follows those is droppable.
 const ESSENTIAL_SPANS: usize = 3;
 
-/// The four lines, fitted to `iw`. `carrier_hz` is the carrier's *absolute*
-/// frequency - the readout carries only its offset from the LO, and printing that
-/// as though it were a tuned frequency is exactly the kind of near-miss this
-/// panel must not make.
+/// The lines, fitted to `iw`. `carrier_hz` is the carrier's *absolute*
+/// frequency - the readout carries only its offset from the LO, and printing
+/// that as though it were a tuned frequency is exactly the kind of near-miss
+/// this panel must not make.
 pub(super) fn lines(
     r: &ImageReadout,
     carrier_hz: f64,
+    image_hz: f64,
     tint: &Tint,
     iw: usize,
     theme: &crate::Theme,
 ) -> Vec<Line<'static>> {
-    let dimc = theme.border_dim;
     let lbl = Style::default().fg(theme.label);
-
-    // Image level relative to the carrier: normally negative (image below); a
-    // positive value flags that the "carrier" is weaker than its mirror.
-    let rel = r.image_dbfs - r.carrier_dbfs;
-    let rel_str = if rel <= 0.0 {
-        format!("\u{2212}{:.1} dB", -rel)
-    } else {
-        format!("+{rel:.1} dB")
-    };
-    let supp_c = supp_color(r.suppression_db, theme);
-
-    vec![
-        fit(
-            vec![
-                Span::styled(" \u{25bc} ", Style::default().fg(tint.carrier)),
-                Span::styled("CARRIER ", lbl),
-                Span::styled(
-                    format!("{:.3} MHz", carrier_hz / 1e6),
-                    Style::default()
-                        .fg(tint.carrier)
-                        .add_modifier(Modifier::BOLD),
-                ),
-                Span::styled(
-                    format!(" \u{00b7} {:.1} dBFS", r.carrier_dbfs),
-                    Style::default().fg(dimc),
-                ),
-            ],
-            iw,
-        ),
-        fit(
-            vec![
-                Span::styled(" \u{25bc} ", Style::default().fg(tint.image)),
-                Span::styled("IMAGE ", lbl),
-                Span::styled(
-                    format!("\u{00b7} {:.1} dBFS", r.image_dbfs),
-                    Style::default().fg(tint.image),
-                ),
-                Span::styled(" (mirror)", lbl),
-            ],
-            iw,
-        ),
-        fit(
-            vec![
-                Span::styled(" \u{25ae} ", Style::default().fg(tint.dc)),
-                Span::styled("DC spike ", lbl),
-                Span::styled(
-                    format!("\u{00b7} {:.1} dBFS", r.dc_dbfs),
-                    Style::default().fg(tint.dc),
-                ),
-                Span::styled(" (I/Q offset)", Style::default().fg(dimc)),
-            ],
-            iw,
-        ),
-        Line::from(vec![
-            Span::raw(" "),
-            Span::styled("image supp. ", lbl),
-            Span::styled(
-                rel_str,
-                Style::default().fg(supp_c).add_modifier(Modifier::BOLD),
+    let dim = Style::default().fg(theme.border_dim);
+    if r.reading == Reading::OnTheLo {
+        return vec![
+            Line::from(Span::styled(
+                format!(" the strongest signal, {:.3} MHz,", carrier_hz / 1e6),
+                lbl,
+            )),
+            Line::from(Span::styled(" runs across the LO: its mirror is its", lbl)),
+            Line::from(Span::styled(" own other half, not an image", lbl)),
+            Line::raw(""),
+            fit(
+                vec![
+                    Span::raw(" "),
+                    Span::styled(
+                        "NO IMAGE TO MEASURE",
+                        Style::default()
+                            .fg(theme.status_warn)
+                            .add_modifier(Modifier::BOLD),
+                    ),
+                    Span::raw(""),
+                    Span::styled("  tune it off the LO", dim),
+                ],
+                iw,
             ),
-        ]),
+        ];
+    }
+    let level = |mark: &str, col, name: &str, hz: f64, dbfs: f32| {
+        fit(
+            vec![
+                Span::styled(format!(" {mark} "), Style::default().fg(col)),
+                Span::styled(format!("{name:<8}"), lbl),
+                Span::styled(
+                    format!("{:>12}", format!("{:.3} MHz", hz / 1e6)),
+                    Style::default().fg(col).add_modifier(Modifier::BOLD),
+                ),
+                Span::styled(
+                    format!("  {dbfs:.0} dBFS"),
+                    Style::default().fg(theme.value),
+                ),
+            ],
+            iw,
+        )
+    };
+    let (head, col, why) = match r.reading {
+        Reading::Measured(db) => (format!("IMAGE {db:.0} dB DOWN"), supp_color(db, theme), ""),
+        // A bound is not graded: it says how good the front end is at least.
+        Reading::AtLeast(db) => (
+            format!("IMAGE \u{2265} {db:.0} dB DOWN"),
+            theme.value_hi,
+            "  under the floor",
+        ),
+        Reading::MirrorBusy(db) => (
+            format!("MIRROR {db:.0} dB DOWN"),
+            theme.status_warn,
+            "  a signal of its own?",
+        ),
+        Reading::OnTheLo => unreachable!("answered above"),
+    };
+    vec![
+        level(
+            "\u{25bc}",
+            tint.carrier,
+            "carrier",
+            carrier_hz,
+            r.carrier_dbfs,
+        ),
+        level("\u{25bd}", tint.image, "mirror", image_hz, r.image_dbfs),
+        Line::raw(""),
+        fit(
+            vec![
+                Span::raw(" "),
+                Span::styled(head, Style::default().fg(col).add_modifier(Modifier::BOLD)),
+                Span::raw(""),
+                Span::styled(why.to_string(), dim),
+            ],
+            iw,
+        ),
     ]
 }
 
-/// The panel's closing line, echoed by the constellation panel's own caption so
-/// the two Lab IQ panels read as one bench.
+/// The figure the chart writes beside the gap, or `None` where there is no
+/// gap to draw.
+pub(super) fn gap_label(reading: Reading) -> Option<String> {
+    match reading {
+        Reading::Measured(db) => Some(format!("{db:.0} dB")),
+        Reading::AtLeast(db) => Some(format!("\u{2265}{db:.0} dB")),
+        Reading::MirrorBusy(db) => Some(format!("{db:.0} dB?")),
+        Reading::OnTheLo => None,
+    }
+}
+
+/// The panel's closing line: where the figure this one checks lives.
 pub(super) fn caption(theme: &crate::Theme) -> Line<'static> {
-    Line::from(vec![
-        Span::raw(" "),
-        Span::styled(
-            "image mirrors the carrier about the LO",
-            Style::default().fg(theme.border_dim),
-        ),
-    ])
+    Line::from(Span::styled(
+        " the IRR its imbalance predicts \u{2190} left",
+        Style::default().fg(theme.border_dim),
+    ))
 }
 
 /// Drop trailing decoration spans until the line fits `iw`, never cutting into

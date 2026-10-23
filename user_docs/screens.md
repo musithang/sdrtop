@@ -233,8 +233,9 @@ Three views of the same quadrature question, from three directions.
   The imbalance and DC numbers are one panel to the left. Yes, it looks like a
   1970s scope. That's the idea.
 - **Image Scope** *(right)*: the empirical check on the computed IRR. It finds the
-  strongest carrier, finds its mirror image reflected about the LO, and shows the
-  gap between them. The diagnostics panel calculates image rejection from the
+  strongest carrier, finds its mirror image reflected about the LO, and draws the
+  gap between them on the mirror's column. A signal sitting on the LO has no image
+  to measure, and it says so. The diagnostics panel calculates image rejection from the
   imbalance figures; this one goes and measures a real image.
 
 ### Signal bench · `Lab 4`

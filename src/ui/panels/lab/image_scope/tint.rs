@@ -3,7 +3,7 @@
 
 //! The scope's colour vocabulary.
 //!
-//! Carrier, image and DC each get one colour, and every part of the panel uses
+//! Carrier and image each get one colour, and every part of the panel uses
 //! the same one: the `▼` in the read-out is the same yellow as the `▼` over the
 //! bar, which is the same yellow as the bar itself. That correspondence is what
 //! lets a reader tie a number to a column without a legend, so the three colours
@@ -11,14 +11,15 @@
 
 use ratatui::style::Color;
 
-/// The three colours a column can take, plus the base for everything else and
-/// the rule colour the chart's gutter, ticks and axis are drawn in.
+/// The two colours a column can take, plus the base for everything else, the
+/// rule colour the chart's gutter, ticks and axis are drawn in, and the label
+/// colour of the gap's figure.
 pub(super) struct Tint {
     pub base: Color,
     pub carrier: Color,
     pub image: Color,
-    pub dc: Color,
     pub rule: Color,
+    pub label: Color,
 }
 
 impl Tint {
@@ -29,8 +30,8 @@ impl Tint {
             base: dim(theme.border_accent, 0.5),
             carrier: theme.value_hi,
             image: theme.status_warn,
-            dc: theme.status_crit,
             rule: theme.border_dim,
+            label: theme.label,
         }
     }
 }
