@@ -34,7 +34,7 @@ pub(super) fn lines(
     out.push(section("SPECTRAL SHAPE", "60 s", iw, theme));
     if stale {
         out.push(metric("C/N trend", vec![dash(theme)], theme));
-        out.push(metric("Crest / PAPR", vec![dash(theme)], theme));
+        out.push(metric("Crest / axis", vec![dash(theme)], theme));
         return;
     }
     let sig = &state.signal;
@@ -69,11 +69,12 @@ pub(super) fn lines(
         ]));
     }
 
-    // Crest / PAPR: reuses the exact ADC-loading model from the Lab RF
-    // bench (`rf_calc::adc_loading`) rather than re-deriving peak-minus-rms:
-    // full-bandwidth ADC crest factor, the same honest proxy the RF lab
-    // already shows for "constant-envelope vs peaky".
-    let n: u64 = state.iq.adc_signed_hist.iter().sum();
+    // The crest: reuses the exact ADC-loading model from the Lab RF bench
+    // (`rf_calc::adc_loading`) rather than re-deriving peak-minus-rms, so the
+    // two benches show one figure. Per axis, as the converter sees it: 3 dB
+    // for a constant envelope, more for anything peaky. Not a PAPR, which is
+    // the complex envelope's and reads 0 dB for the same carrier.
+    let n: u64 = state.iq.adc_band_hist.iter().sum();
     let load = crate::ui::rf_calc::adc_loading(
         sig.adc_peak_dbfs as f64,
         sig.adc_rms_dbfs as f64,
@@ -82,7 +83,7 @@ pub(super) fn lines(
         state.caps.sample_geometry.bits(),
     );
     out.push(metric(
-        "Crest / PAPR",
+        "Crest / axis",
         vec![Span::styled(format!("{:.1} dB", load.crest_db), val(theme))],
         theme,
     ));

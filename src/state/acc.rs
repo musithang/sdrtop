@@ -27,11 +27,11 @@ pub(crate) struct Accumulators {
     /// from the expected period is derived downstream, not stored here.
     pub cb_gaps_us: VecDeque<u64>,
     pub iq_hist: [u64; 32],
-    /// Signed per-sample histogram (I and Q each binned) for the ADC-loading
-    /// bell: the device's own -FS..+FS span cut into 32, so bin 16 is mid-scale
-    /// and 0/31 the rails. That is `(v + 128) / 8` on an 8-bit radio and a wider
-    /// bucket on anything else; `hardware::process::signed_bin` decides.
-    pub adc_signed_hist: [u64; 32],
+    /// Every I and Q sample by its 6 dB band below full scale, one band a
+    /// bit of the converter, for the ADC Loading bench: band 0 is the top
+    /// bit, the converter's last band holds everything under its LSB.
+    /// `hardware::process` decides the band.
+    pub adc_band_hist: [u64; crate::hardware::ADC_BANDS],
     /// Loudest sample magnitude this window (max |i|,|q|), for the ADC peak level.
     pub peak_amp: u32,
 }

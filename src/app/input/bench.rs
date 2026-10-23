@@ -328,7 +328,7 @@ pub(super) fn rf_chain(key: KeyEvent, ctx: &mut InputCtx<'_>) -> KeyAction {
                 m.push_log("Lab RF: live".to_string());
             } else {
                 m.lab.rf_freeze = Some(crate::state::RfFreeze {
-                    signed_hist: m.iq.adc_signed_hist,
+                    band_hist: m.iq.adc_band_hist,
                     peak_dbfs: m.signal.adc_peak_dbfs,
                     rms_dbfs: m.signal.adc_rms_dbfs,
                     clip_events: m.signal.adc_clip_events,

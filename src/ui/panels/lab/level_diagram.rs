@@ -790,7 +790,7 @@ mod tests {
     fn a_frozen_bench_holds_every_stage_and_the_floor() {
         let mut m = r2(92_800_000);
         m.lab.rf_freeze = Some(crate::state::RfFreeze {
-            signed_hist: [0; 32],
+            band_hist: [0; crate::hardware::ADC_BANDS],
             peak_dbfs: -27.0,
             rms_dbfs: -40.0,
             clip_events: 0,

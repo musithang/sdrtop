@@ -1,61 +1,24 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright (C) 2026 MusiThang <viktor.laszlo92@protonmail.com>
 
-//! The three read-out blocks under the bell: clip headroom, loading, and the
-//! modeled linearity card.
+//! The read-out under the ladder: the verdict and the loading, where the
+//! radio clips before its converter, and the modeled linearity card.
 //!
-//! One module because they are one stack of fixed-height sections, all reading
-//! the same `adc_loading` / `linearity` model, and all written in the shared
-//! `rf_bench` row vocabulary.
+//! One module because they are one stack of fixed-height blocks, all reading
+//! the same `adc_loading` / `linearity` model.
 
 use ratatui::{
-    style::{Color, Style},
+    style::{Color, Modifier, Style},
     text::{Line, Span},
 };
 
 use crate::ui::chrome::section;
-use crate::ui::rf_calc::{linearity, AdcLoading, OPT_PEAK_DBFS};
+use crate::ui::rf_calc::{linearity, AdcLoading};
 
-use super::super::rf_bench::{bar_row, bar_width, row, Bar, Row};
+use super::super::rf_bench::{row, Row};
 
-/// Label column for this panel's rows: clears `HDRM`, `peak`, `bits`, `clip`.
+/// Label column for the linearity card's rows: clears `P1dB`, `IIP3`, `SFDR`.
 const LABEL_W: usize = 4;
-
-/// Width reserved for the headroom bar's right-hand value.
-const VALW: usize = 11;
-
-/// Top of the headroom gauge, in dB below full scale.
-const HDRM_MAX: f64 = 24.0;
-
-/// `HEADROOM` - how far the peak sits below the radio's ceiling (`peak` is
-/// given against it: 0 dBFS on most radios), with a tick at the optimal
-/// landing (`−OPT_PEAK_DBFS`, i.e. 8 dB of headroom).
-pub(super) fn headroom(
-    out: &mut Vec<Line<'static>>,
-    peak: f64,
-    sev_col: Color,
-    iw: usize,
-    theme: &crate::Theme,
-) {
-    // `+ 0.0` turns a peak exactly at the ceiling into +0 dB, not -0 dB.
-    let headroom = -peak + 0.0;
-    out.push(section("Headroom", "\u{2502} = optimal", iw, theme));
-    out.push(bar_row(
-        Bar {
-            label: "HDRM",
-            label_w: LABEL_W,
-            value: headroom.clamp(0.0, HDRM_MAX) as u32,
-            max: HDRM_MAX as u32,
-            lo: theme.status_warn,
-            hi: theme.status_ok,
-            tick: Some(-OPT_PEAK_DBFS / HDRM_MAX),
-            val_str: format!("{headroom:+.0} dB"),
-            val_col: sev_col,
-        },
-        bar_width(iw, LABEL_W, VALW),
-        theme,
-    ));
-}
 
 /// Where the radio clips before its converter, and that the clip count above
 /// cannot see it: a clip there touches no converter rail.
@@ -74,70 +37,84 @@ pub(super) fn ceiling(
     )));
 }
 
-/// `LOADING` - peak, rms, effective bits and clip events, with the staging
-/// verdict on the last row.
+/// The staging verdict and how far the peak sits from where this radio
+/// clips, then the loading in one column of labels and one of values: peak,
+/// rms, the bits the peak reaches, and the clips counted at the rails.
 pub(super) fn loading(
     out: &mut Vec<Line<'static>>,
     load: &AdcLoading,
+    ceiling: f64,
+    part: Option<&str>,
     verdict: &str,
     sev_col: Color,
-    iw: usize,
     theme: &crate::Theme,
 ) {
     let dim = theme.border_dim;
-    let r = |label: &'static str, mid: String, mid_col: Color, right: String, right_col: Color| {
-        row(
-            Row {
-                label,
-                label_w: LABEL_W,
-                mid,
-                mid_col,
-                right,
-                right_col,
-            },
-            iw,
-            theme,
-        )
+    // Between the two figures as shown, rounded as `{:.0}` rounds them, so
+    // -3 and a peak printed as -10 are 7 dB apart on screen as well, never 8.
+    // `+ 0.0` turns a peak exactly at the ceiling into 0 dB, not -0 dB.
+    let headroom = ceiling.round_ties_even() - load.peak_dbfs.round_ties_even() + 0.0;
+    let whose = match part {
+        Some(part) => format!("the {part}'s clip"),
+        None => "full scale".to_string(),
     };
-
-    out.push(section("Loading", "peak / rms", iw, theme));
-    out.push(r(
+    out.push(Line::from(vec![
+        Span::raw(" "),
+        Span::styled(
+            verdict.to_string(),
+            Style::default().fg(sev_col).add_modifier(Modifier::BOLD),
+        ),
+        Span::styled(
+            if headroom >= 0.0 {
+                format!("  {headroom:.0} dB under {whose}")
+            } else {
+                format!("  {:.0} dB past {whose}", -headroom)
+            },
+            Style::default().fg(theme.value),
+        ),
+    ]));
+    let row = |label: &str, value: String, col: Color, rest: String| {
+        Line::from(vec![
+            Span::styled(format!(" {label:<6}"), Style::default().fg(theme.label)),
+            Span::styled(format!("{value:<11}"), Style::default().fg(col)),
+            Span::styled(rest, Style::default().fg(dim)),
+        ])
+    };
+    out.push(row(
         "peak",
         format!("{:.0} dBFS", load.peak_dbfs),
         sev_col,
-        format!("{}/{} cts", load.peak_counts, load.full_scale_counts),
-        theme.value,
+        format!("{} of {} counts", load.peak_counts, load.full_scale_counts),
     ));
-    out.push(r(
+    out.push(row(
         "rms",
         format!("{:.0} dBFS", load.rms_dbfs),
         theme.value,
-        format!("crest {:.1} dB", load.crest_db),
-        theme.value,
+        format!("per axis, crest {:.1} dB", load.crest_db),
     ));
-    out.push(r(
+    out.push(row(
         "bits",
-        format!("{:.1} / {} eff", load.enob, load.bits),
+        format!("{:.1} of {}", load.bits_reached, load.bits),
         theme.value_hi,
-        "ENOB".to_string(),
-        dim,
+        "reached by the peak".to_string(),
     ));
-    let (clip_txt, clip_col) = if load.clip_events == 0 {
+    let (clips, clip_col) = if load.clip_events == 0 {
         ("none".to_string(), theme.status_ok)
     } else {
-        (format!("{} hits", load.clip_events), theme.status_crit)
+        (load.clip_events.to_string(), theme.status_crit)
     };
-    let n_txt = if load.n >= 1000 {
+    let n = if load.n >= 1_000_000 {
+        format!("{:.1}M", load.n as f64 / 1e6)
+    } else if load.n >= 1000 {
         format!("{}k", load.n / 1000)
     } else {
-        format!("{}", load.n)
+        load.n.to_string()
     };
-    out.push(r(
-        "clip",
-        format!("{clip_txt} / {n_txt}"),
+    out.push(row(
+        "clips",
+        clips,
         clip_col,
-        verdict.to_string(),
-        sev_col,
+        format!("at the rails, of {n} samples"),
     ));
 }
 

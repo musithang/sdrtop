@@ -237,19 +237,28 @@ pub fn signal_lineup(adc_signal_dbfs: f64, stages: &[Stage]) -> Vec<StageLevel> 
 }
 
 /// How hard the ADC is driven, from the loudest sample, the RMS level, and the clip
-/// count. `peak_counts` is the peak amplitude in the converter's own counts; `enob`
-/// is the range the peak actually exercises (6.02 dB per bit), not an SNR-derived
-/// ENOB.
+/// count. `peak_counts` is the peak amplitude in the converter's own counts.
+///
+/// **Per axis, both ends.** The converter digitises I and Q separately, and
+/// the peak is the loudest single I or Q sample, so the rms beside it is the
+/// one of a single axis too: the magnitude rms less 3 dB. The crest used to
+/// put the per-axis peak over the magnitude rms, a ratio of two different
+/// things, which read -0.4 dB on an Airspy R2 driven into its tuner's ceiling;
+/// a crest factor below zero is not a thing a signal can have.
 #[derive(Clone, Copy, Debug)]
 pub struct AdcLoading {
     pub peak_dbfs: f64,
+    /// The rms of one axis, dBFS.
     pub rms_dbfs: f64,
+    /// Peak over rms, both per axis: 3 dB for a constant envelope.
     pub crest_db: f64,
     pub peak_counts: u32,
     /// The count that reads as full scale, so the panel can print `x / y cts`
     /// without deriving the ceiling a second time.
     pub full_scale_counts: u32,
-    pub enob: f64,
+    /// How many of the converter's bits the peak reaches, 6.02 dB a bit. Not
+    /// an ENOB, which would come from the converter's SNR.
+    pub bits_reached: f64,
     /// The converter's depth, carried through so the readout and the number
     /// agree by construction rather than by both being handed 8.
     pub bits: u8,
@@ -261,6 +270,9 @@ pub struct AdcLoading {
 /// [`crate::hardware::SampleGeometry::bits`]. Every figure here scales with it,
 /// which is the whole reason it is a parameter: this used to be hardcoded to 8,
 /// and 8 is true of exactly the two radios sdrtop could open.
+///
+/// `rms_dbfs` is the magnitude rms as measured, `sqrt(i² + q²)`; the result
+/// carries it per axis.
 pub fn adc_loading(
     peak_dbfs: f64,
     rms_dbfs: f64,
@@ -273,13 +285,15 @@ pub fn adc_loading(
     let peak_counts = (full * 10f64.powf(peak_dbfs / 20.0))
         .round()
         .clamp(0.0, full) as u32;
+    // Balanced I and Q share the power equally: each axis carries half.
+    let rms_axis = rms_dbfs - 10.0 * std::f64::consts::LOG10_2;
     AdcLoading {
         peak_dbfs,
-        rms_dbfs,
-        crest_db: peak_dbfs - rms_dbfs,
+        rms_dbfs: rms_axis,
+        crest_db: peak_dbfs - rms_axis,
         peak_counts,
         full_scale_counts: full as u32,
-        enob: (bits as f64 + peak_dbfs / 6.02).clamp(0.0, bits as f64),
+        bits_reached: (bits as f64 + peak_dbfs / 6.02).clamp(0.0, bits as f64),
         bits,
         clip_events,
         n,
@@ -597,12 +611,13 @@ mod tests {
     const EIGHT: u8 = 8;
 
     #[test]
-    fn adc_loading_peak_counts_and_crest_and_enob() {
+    fn adc_loading_peak_counts_and_crest_and_bits() {
         let l = adc_loading(-8.0, -18.0, 0, 8192, EIGHT);
         assert_eq!(l.peak_counts, 51, "127·10^(−8/20) ≈ 51 counts");
-        assert!((l.crest_db - 10.0).abs() < 1e-9);
+        assert!((l.rms_dbfs - (-18.0 - 3.0103)).abs() < 1e-3, "per axis");
+        assert!((l.crest_db - 13.0103).abs() < 1e-3);
         assert!(
-            (l.enob - (8.0 - 8.0 / 6.02)).abs() < 1e-9,
+            (l.bits_reached - (8.0 - 8.0 / 6.02)).abs() < 1e-9,
             "≈ 6.67 effective bits"
         );
     }
@@ -612,7 +627,7 @@ mod tests {
         let l = adc_loading(0.0, -6.0, 3, 8192, EIGHT);
         assert_eq!(l.peak_counts, 127);
         assert_eq!(l.full_scale_counts, 127);
-        assert!((l.enob - 8.0).abs() < 1e-9);
+        assert!((l.bits_reached - 8.0).abs() < 1e-9);
         assert_eq!(l.clip_events, 3);
     }
 
@@ -624,8 +639,22 @@ mod tests {
         let l = adc_loading(0.0, -6.0, 0, 8192, 14);
         assert_eq!(l.peak_counts, 8191);
         assert_eq!(l.full_scale_counts, 8191);
-        assert!((l.enob - 14.0).abs() < 1e-9);
+        assert!((l.bits_reached - 14.0).abs() < 1e-9);
         assert_eq!(l.bits, 14);
+    }
+
+    /// **A constant envelope's crest is 3 dB per axis, never below zero**:
+    /// an FM carrier's I swings to its magnitude and its rms is that over
+    /// root two. Measured on an R2 driven past its tuner's ceiling, the old
+    /// ratio of the axis peak to the magnitude rms read -0.4 dB.
+    #[test]
+    fn a_constant_envelope_has_a_three_db_crest() {
+        // Magnitude rms equal to the axis peak: a carrier of constant size.
+        let l = adc_loading(-10.0, -10.0, 0, 8192, 12);
+        assert!((l.crest_db - 3.0103).abs() < 1e-3, "{}", l.crest_db);
+        // The R2 at Linearity 20, axis peak -1.4, magnitude rms -1.0.
+        let hot = adc_loading(-1.4, -1.0, 0, 8192, 12);
+        assert!(hot.crest_db > 0.0, "{}", hot.crest_db);
     }
 
     /// A driver reporting a silly depth must not shift by 255 or divide by zero.
@@ -634,7 +663,7 @@ mod tests {
         for bits in [0u8, 1, 200] {
             let l = adc_loading(-6.0, -12.0, 0, 8192, bits);
             assert!(l.full_scale_counts >= 1);
-            assert!(l.enob >= 0.0);
+            assert!(l.bits_reached >= 0.0);
         }
     }
 

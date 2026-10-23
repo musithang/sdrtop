@@ -128,14 +128,12 @@ pub struct IqState {
     pub cb_jitter_us: u64,
     pub jitter_history: std::collections::VecDeque<u64>,
     pub iq_amplitude_hist: [u64; 32],
-    /// Signed ADC sample histogram (I and Q binned together) for the Lab RF
-    /// ADC-loading bell: the device's own -FS..+FS span cut into 32, so bin 16 is
-    /// mid-scale and 0/31 are the rails. `(v + 128) / 8` on an 8-bit radio, which
-    /// is what this used to say as though it were the rule; the bin width comes
-    /// from the declared full scale, so a 12-bit converter's bell fills the same
-    /// 32 buckets instead of huddling in the middle four.
-    /// Snapshotted from the accumulator each ~200 ms window, like `iq_amplitude_hist`.
-    pub adc_signed_hist: [u64; 32],
+    /// The ADC's samples (I and Q each) by 6 dB band below full scale, one
+    /// band a bit of the converter: band 0 is the top bit, and only the
+    /// converter's own depth is used, so a 12-bit radio in 16-bit words has
+    /// twelve. Snapshotted from the accumulator each ~200 ms window, like
+    /// `iq_amplitude_hist`.
+    pub adc_band_hist: [u64; crate::hardware::ADC_BANDS],
     /// How full the FFT feed's queue got, as a percentage of its depth.
     ///
     /// **The deepest it reached during the window, not its depth at poll time.**

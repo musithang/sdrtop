@@ -33,6 +33,7 @@ mod traits;
 pub mod usb;
 
 pub use discovery::{list_all_devices, open_device, DeviceKind, DeviceListing};
+pub use process::ADC_BANDS;
 pub use record_tap::RecordTap;
 #[cfg(test)]
 pub(crate) use traits::RateSet;

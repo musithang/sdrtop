@@ -52,25 +52,28 @@ fn const_stride(pairs: usize) -> usize {
     CONST_DECIMATE.max(pairs.div_ceil(CONST_MAX_PER_BLOCK))
 }
 
-/// Bin a centered signed sample into the 32-bucket signed ADC histogram:
-/// bin 0 = −FS rail, 16 = mid-scale, 31 = +FS rail.
+/// The most 6 dB bands the ADC's band histogram keeps: one a bit of a
+/// 16-bit converter, the widest any radio here delivers.
+pub const ADC_BANDS: usize = 16;
+
+/// The 6 dB band of the ADC's band histogram a centered sample falls in, one
+/// a bit: band 0 holds `|v|` from half of full scale up (the converter's top
+/// bit), band `k` from `fs / 2^(k+1)` to `fs / 2^k`, and the last band the
+/// converter has holds everything below it, zero included.
 ///
-/// Integer arithmetic against the device's own full scale, so an 8-bit radio
-/// lands on exactly the `(v + 128) / 8` this used to hardcode.
+/// The reference the fast path is checked against: the plain definition, a
+/// comparison per band.
 #[cfg(test)]
-fn signed_bin(g: &SampleGeometry, v: i64) -> usize {
-    let fs = g.full_scale as i64;
-    ((v + fs) / bin_width(fs)).clamp(0, 31) as usize
+fn band_bin(g: &SampleGeometry, v: i64) -> usize {
+    let fs = (g.full_scale as i64).max(1) as u64;
+    let last = band_count(g) - 1;
+    let a = v.unsigned_abs();
+    (0..last).find(|&k| a << (k + 1) >= fs).unwrap_or(last)
 }
 
-/// Counts per histogram bucket: the full −FS..+FS span divided into 32.
-///
-/// `.max(1)` is not defensive dressing. A driver reporting a full scale under
-/// 16 counts would otherwise divide by zero inside the RX callback, which is the
-/// worst place in the program to find out.
-#[inline]
-fn bin_width(full_scale: i64) -> i64 {
-    (full_scale * 2 / 32).max(1)
+/// The bands the converter has: its own depth, at most [`ADC_BANDS`].
+fn band_count(g: &SampleGeometry) -> usize {
+    (g.bits() as usize).clamp(1, ADC_BANDS)
 }
 
 /// Counts per bucket of the *amplitude* histogram, which spans 0..+FS rather
@@ -92,8 +95,11 @@ fn amp_bin_width(full_scale: i64) -> u64 {
 #[derive(Clone, Copy, Default)]
 struct Bins {
     fs: i64,
-    signed_width: i64,
-    signed_shift: Option<u32>,
+    /// `log2(fs)` where the full scale is a power of two, which makes a
+    /// sample's band its leading zeros; the comparison otherwise.
+    fs_log2: Option<u32>,
+    /// The last band the converter has.
+    last_band: usize,
     amp_width: u64,
     amp_shift: Option<u32>,
 }
@@ -106,7 +112,8 @@ struct Bins {
 struct Sample {
     v: i64,
     rail: bool,
-    signed_bucket: u8,
+    /// Its 6 dB band, one a bit: [`Bins::band`].
+    band: u8,
     /// `|v|`, and its amplitude bucket. The pair's Chebyshev amplitude is the
     /// larger of its two, and so is its bucket, because the bucketing never
     /// puts a larger amplitude in a lower bucket.
@@ -122,7 +129,7 @@ impl Bins {
         Sample {
             v,
             rail,
-            signed_bucket: self.signed(v) as u8,
+            band: self.band(abs) as u8,
             abs: abs as u32,
             amp_bucket: self.amp(abs) as u8,
         }
@@ -135,27 +142,40 @@ impl Bins {
 
     fn new(g: &SampleGeometry) -> Self {
         let fs = g.full_scale as i64;
-        let signed_width = bin_width(fs);
         let amp_width = amp_bin_width(fs);
         let shift = |w: u64| w.is_power_of_two().then(|| w.trailing_zeros());
         Self {
             fs,
-            signed_width,
-            signed_shift: shift(signed_width as u64),
+            fs_log2: (fs > 1).then(|| shift(fs as u64)).flatten(),
+            last_band: band_count(g) - 1,
             amp_width,
             amp_shift: shift(amp_width),
         }
     }
 
-    /// The signed ADC histogram's bucket for a centered sample.
+    /// The 6 dB band of a sample's `|v|`, one a bit: band 0 from half of
+    /// full scale up, band `k` from `fs / 2^(k+1)` to `fs / 2^k`, the
+    /// converter's last band everything below. A leading-zero count where
+    /// the full scale is a power of two, which it is on every converter
+    /// here; a comparison a band otherwise. The tests check it against the
+    /// plain comparisons on every input.
     #[inline]
-    fn signed(&self, v: i64) -> usize {
-        let n = v + self.fs;
-        let bucket = match self.signed_shift {
-            Some(k) => n >> k,
-            None => n / self.signed_width,
+    fn band(&self, abs: u64) -> usize {
+        if abs == 0 {
+            return self.last_band;
+        }
+        let k = match self.fs_log2 {
+            // |v| at or above fs / 2^(k+1) is band k: the bit below the
+            // full scale's that |v|'s highest bit sits on.
+            Some(l) => (l as i64 - 1 - abs.ilog2() as i64).max(0) as usize,
+            None => {
+                let fs = self.fs.max(1) as u64;
+                (0..self.last_band)
+                    .find(|&k| abs << (k + 1) >= fs)
+                    .unwrap_or(self.last_band)
+            }
         };
-        bucket.clamp(0, 31) as usize
+        k.min(self.last_band)
     }
 
     /// The amplitude histogram's bucket for a Chebyshev amplitude.
@@ -380,7 +400,7 @@ pub fn digest(
         q_sq,
         iq_cross,
         hist: local_hist,
-        signed: local_signed,
+        bands: local_bands,
         peak: local_peak,
         consts: local_const,
         out: out_buf,
@@ -416,7 +436,7 @@ pub fn digest(
         for (acc, &local) in m.acc.iq_hist.iter_mut().zip(local_hist.iter()) {
             *acc += local;
         }
-        for (acc, &local) in m.acc.adc_signed_hist.iter_mut().zip(local_signed.iter()) {
+        for (acc, &local) in m.acc.adc_band_hist.iter_mut().zip(local_bands.iter()) {
             *acc += local;
         }
         m.acc.peak_amp = m.acc.peak_amp.max(local_peak);
@@ -535,8 +555,9 @@ struct Accumulators {
     q_sq: i64,
     iq_cross: i64,
     hist: [u64; 32],
-    /// Signed I/Q distribution, the ADC bell.
-    signed: [u64; 32],
+    /// Every I and Q sample by its 6 dB band, one a bit: how much of the
+    /// converter the signal uses.
+    bands: [u64; ADC_BANDS],
     /// Loudest |i|,|q| this block.
     peak: u32,
     consts: Vec<(f32, f32)>,
@@ -567,8 +588,8 @@ impl Accumulators {
         self.hist[si.amp_bucket.max(sq.amp_bucket) as usize] += 1;
         // Both on the RAW samples: the physical ADC's-eye view.
         self.peak = self.peak.max(si.abs.max(sq.abs));
-        self.signed[si.signed_bucket as usize] += 1;
-        self.signed[sq.signed_bucket as usize] += 1;
+        self.bands[si.band as usize] += 1;
+        self.bands[sq.band as usize] += 1;
 
         // Display path: corrected samples feed the FFT (re-encoded bytes) and the
         // constellation. When no correction is active these equal the raw samples.
@@ -625,7 +646,7 @@ fn encode_into(out: &mut Vec<u8>, i: f32, q: f32, g: &SampleGeometry) {
 /// near 32767, so a test written against `i16::MAX` cannot fire on one - and
 /// every SoapySDR radio that reports `CS16` with a full scale below 32768 is
 /// exactly that. The saturation reading stayed at 0.00 % for the whole session
-/// while the signed histogram was slammed into its top bucket and the peak read
+/// while the ADC's histogram was slammed into its top bucket and the peak read
 /// 0 dBFS: three accounts of one sample, and only this one said the front end
 /// was fine.
 ///
@@ -890,8 +911,8 @@ pub(crate) mod tests {
             let amp = i.unsigned_abs().max(q.unsigned_abs());
             a.hist[((amp / amp_width) as usize).min(31)] += 1;
             a.peak = a.peak.max(amp as u32);
-            a.signed[super::signed_bin(&geometry, i)] += 1;
-            a.signed[super::signed_bin(&geometry, q)] += 1;
+            a.bands[super::band_bin(&geometry, i)] += 1;
+            a.bands[super::band_bin(&geometry, q)] += 1;
             let (ci, cq) = if a.correcting {
                 cal.apply(i as f32, q as f32)
             } else {
@@ -928,7 +949,7 @@ pub(crate) mod tests {
             "{what}: sums"
         );
         assert_eq!(fast.hist, reference.hist, "{what}: amplitude histogram");
-        assert_eq!(fast.signed, reference.signed, "{what}: signed histogram");
+        assert_eq!(fast.bands, reference.bands, "{what}: band histogram");
         assert_eq!(fast.peak, reference.peak, "{what}: peak");
         assert_eq!(fast.consts, reference.consts, "{what}: constellation");
         assert_eq!(fast.out, reference.out, "{what}: corrected stream");
@@ -1353,43 +1374,71 @@ pub(crate) mod tests {
         }
     }
 
+    /// One band a bit, from the top: on an 8-bit converter `|v|` 64 to 128 is
+    /// the top bit's band, 1 count is the LSB's band 6, and zero is band 7,
+    /// the last the converter has.
     #[test]
-    fn signed_bin_maps_rails_and_centre() {
+    fn band_bin_puts_one_bit_in_each_band() {
         let g = eight_bit();
-        assert_eq!(super::signed_bin(&g, -128), 0, "−FS rail → bin 0");
-        assert_eq!(super::signed_bin(&g, 0), 16, "mid-scale → centre bin");
-        assert_eq!(super::signed_bin(&g, 127), 31, "+FS rail → top bin");
-        // Clamps out-of-range without panicking on the array index.
-        assert_eq!(super::signed_bin(&g, 200), 31);
-        assert_eq!(super::signed_bin(&g, -200), 0);
+        for (v, band) in [
+            (-128, 0),
+            (127, 0),
+            (64, 0),
+            (63, 1),
+            (-32, 1),
+            (31, 2),
+            (2, 5),
+            (1, 6),
+            (-1, 6),
+            (0, 7),
+        ] {
+            assert_eq!(super::band_bin(&g, v), band, "{v}");
+        }
+        // Past the rails is still the top band, never an index past the end.
+        assert_eq!(super::band_bin(&g, 200), 0);
+        assert_eq!(super::band_bin(&g, -200), 0);
     }
 
-    /// The bin widths this file used to hardcode, now derived, must come out
+    /// **The R2's twelve bits, not the sixteen of its container**: libairspy
+    /// scales them to a full scale of 16384, so its LSB is 8 counts, and
+    /// everything under 8 is the twelfth band, not a thirteenth to sixteenth
+    /// the converter does not have.
+    #[test]
+    fn a_twelve_bit_converter_in_sixteen_bits_has_twelve_bands() {
+        let g = crate::hardware::native::airspy::caps().sample_geometry;
+        assert_eq!(super::band_count(&g), 12);
+        assert_eq!(super::band_bin(&g, 16383), 0);
+        assert_eq!(super::band_bin(&g, 8192), 0);
+        assert_eq!(super::band_bin(&g, 8191), 1);
+        assert_eq!(super::band_bin(&g, 8), 10);
+        assert_eq!(super::band_bin(&g, 7), 11);
+        assert_eq!(super::band_bin(&g, 0), 11);
+    }
+
+    /// The bin width this file used to hardcode, now derived, must come out
     /// identical for 8 bits. If someone later "tidies" full_scale to the RTL's
     /// true 127.5 bias, this is what fails and says why.
     #[test]
     fn eight_bit_geometry_reproduces_the_old_constants() {
-        assert_eq!(
-            super::bin_width(128),
-            8,
-            "the signed histogram was (v+128)/8"
-        );
         assert_eq!(super::amp_bin_width(128), 4, "the amplitude one was amp/4");
     }
 
-    /// The same arithmetic on a wider converter still puts the rails in the end
-    /// bins and mid-scale in the middle. Exercised before any device reports it,
+    /// The same arithmetic on a wider converter still puts the rails in the
+    /// top band and zero in the last. Exercised before any device reports it,
     /// because the alternative is finding out from a stranger's screenshot.
     #[test]
     fn a_wider_converter_bins_the_same_way() {
         let g = SampleGeometry {
-            format: SampleFormat::Int8,
+            format: SampleFormat::Int16,
             full_scale: 32768.0,
             converter_bits: None,
         };
-        assert_eq!(super::signed_bin(&g, -32768), 0);
-        assert_eq!(super::signed_bin(&g, 0), 16);
-        assert_eq!(super::signed_bin(&g, 32767), 31);
+        assert_eq!(super::band_count(&g), 16);
+        assert_eq!(super::band_bin(&g, -32768), 0);
+        assert_eq!(super::band_bin(&g, 32767), 0);
+        // One count is the LSB's band, as on 8 bits; only zero is under it.
+        assert_eq!(super::band_bin(&g, 1), 14);
+        assert_eq!(super::band_bin(&g, 0), 15);
     }
 
     // --- Int16 (SoapySDR CS16) decode ----------------------------------------
@@ -1441,7 +1490,7 @@ pub(crate) mod tests {
 
     /// The three readings of one fact must agree at every declared scale.
     ///
-    /// The clip flag, the signed histogram and the peak level are three accounts
+    /// The clip flag, the band histogram and the peak level are three accounts
     /// of the same sample, and they were taken against two different notions of
     /// full scale: the histogram and the peak followed the geometry, the clip
     /// flag followed the container. A sample can sit in the histogram's top
@@ -1463,8 +1512,8 @@ pub(crate) mod tests {
                 SampleFormat::Int16 => super::decode_i16(fs, (v as i16).to_le_bytes()).1,
                 _ => super::decode(format, fs, v as i8 as u8).1,
             };
-            // The positive rail: top histogram bucket, 0 dBFS, and clipping.
-            assert_eq!(super::signed_bin(&g, fs - 1), 31, "{format:?}/{fs}");
+            // The positive rail: top band, 0 dBFS, and clipping.
+            assert_eq!(super::band_bin(&g, fs - 1), 0, "{format:?}/{fs}");
             assert!(
                 (20.0 * ((fs - 1) as f32 / fs as f32).log10()).abs() < 0.1,
                 "{format:?}/{fs}: the peak reading does not call this full scale"
@@ -1474,10 +1523,14 @@ pub(crate) mod tests {
                 "{format:?}/{fs}: +rail must read as clipping"
             );
             // The negative rail, the same three ways.
-            assert_eq!(super::signed_bin(&g, -fs), 0, "{format:?}/{fs}");
+            assert_eq!(super::band_bin(&g, -fs), 0, "{format:?}/{fs}");
             assert!(flagged(-fs), "{format:?}/{fs}: -rail must read as clipping");
             // Mid-scale is none of those things.
-            assert_eq!(super::signed_bin(&g, 0), 16, "{format:?}/{fs}");
+            assert_eq!(
+                super::band_bin(&g, 0),
+                super::band_count(&g) - 1,
+                "{format:?}/{fs}"
+            );
             assert!(!flagged(0), "{format:?}/{fs}: mid-scale is not clipping");
         }
     }
@@ -1508,20 +1561,6 @@ pub(crate) mod tests {
             256,
             "1 KiB is 256 pairs, not 512"
         );
-    }
-
-    /// The signed histogram against a 16-bit full scale puts the rails in the
-    /// end bins, exactly as it does at 8.
-    #[test]
-    fn int16_bins_across_its_own_full_scale() {
-        let g = SampleGeometry {
-            format: SampleFormat::Int16,
-            full_scale: 32768.0,
-            converter_bits: None,
-        };
-        assert_eq!(super::signed_bin(&g, -32768), 0);
-        assert_eq!(super::signed_bin(&g, 0), 16);
-        assert_eq!(super::signed_bin(&g, 32767), 31);
     }
 
     /// Re-encoding a corrected sample round-trips through the wire format. The
@@ -1567,7 +1606,6 @@ pub(crate) mod tests {
     #[test]
     fn a_nonsense_full_scale_does_not_divide_by_zero() {
         for fs in [0i64, 1, 15] {
-            assert!(super::bin_width(fs) >= 1);
             assert!(super::amp_bin_width(fs) >= 1);
         }
         let g = SampleGeometry {
@@ -1575,7 +1613,11 @@ pub(crate) mod tests {
             full_scale: 0.0,
             converter_bits: None,
         };
-        let _ = super::signed_bin(&g, 0);
+        let _ = super::band_bin(&g, 0);
+        let bins = super::Bins::new(&g);
+        for v in [0u64, 1, 2, 128] {
+            assert_eq!(bins.band(v), 0, "a full scale of zero has one band");
+        }
     }
 
     /// ...and it must not call the whole block a clip either.

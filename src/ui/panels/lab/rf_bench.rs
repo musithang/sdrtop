@@ -37,8 +37,8 @@ pub(super) fn severity_color(sev: u8, theme: &crate::Theme) -> Color {
 /// ` LBL  mid ·········· right` - a label, a middle column, and a right-aligned
 /// value pushed to the panel edge.
 ///
-/// `label_w` differs between the two panels (4 for the ADC column's `HDRM` /
-/// `peak` / `bits`, 3 for the chain's `LNA` / `MDS` / `sys`), so it is a
+/// `label_w` differs between the two panels (4 for the ADC column's `P1dB` /
+/// `IIP3` / `SFDR`, 3 for the chain's `LNA` / `MDS` / `sys`), so it is a
 /// parameter rather than a constant: the columns are meant to line up *within* a
 /// panel, not across the gap between them.
 pub(super) struct Row<'a> {

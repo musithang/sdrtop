@@ -68,7 +68,7 @@ impl SdrMetrics {
                 cb_jitter_us: 0,
                 jitter_history: VecDeque::new(),
                 iq_amplitude_hist: [0u64; 32],
-                adc_signed_hist: [0u64; 32],
+                adc_band_hist: [0u64; crate::hardware::ADC_BANDS],
                 buf_fill_pct: 0.0,
                 fft_drops: 0,
                 fft_drops_session: 0,

@@ -117,8 +117,8 @@ pub(super) fn drain(
 
     m.iq.iq_amplitude_hist = m.acc.iq_hist;
     m.acc.iq_hist = [0u64; 32];
-    m.iq.adc_signed_hist = m.acc.adc_signed_hist;
-    m.acc.adc_signed_hist = [0u64; 32];
+    m.iq.adc_band_hist = m.acc.adc_band_hist;
+    m.acc.adc_band_hist = [0u64; crate::hardware::ADC_BANDS];
     m.acc.peak_amp = 0;
     m.signal.adc_clip_events = acc_saturated;
 

@@ -175,17 +175,29 @@ stage and the floor included.
 
 ### ADC Loading
 
-How hard the 8-bit ADC is actually being driven:
+How much of the converter the signal actually uses:
 
-- **Signed sample histogram**: a centred bell from −FS to +FS. A healthy signal
-  fills the middle without piling up on the rails; the rails turn amber, then red,
-  as clipping appears. A lopsided bell reveals a DC offset.
-- **Headroom** bar: clip headroom in dB, with the optimal tick.
-- **Loading**: `peak` and `rms` in dBFS and ADC counts, **crest** factor,
-  **effective bits** (ENOB), and the **clip-event** count for the window.
+- **The bit ladder**: one column for every 6 dB below full scale, which is one
+  bit of the converter, the least significant at the left and full scale at the
+  right. Each is as tall as its share of the samples, with the percentage on top.
+  A HackRF on broadcast FM at a modest gain can turn out to be using three of its
+  eight bits, which is the kind of thing a ladder says at a glance and a bell
+  never did.
+- **The axis** is dBFS, the same scale as every other level on the bench. The
+  green stretch is where the staging verdict wants the peak, `▲` is the peak and
+  `△` the rms. On a radio that clips before its converter (an
+  [Airspy R2](hardware.md#airspy-r2), at about −3 dBFS in its tuner) a red line
+  runs through the ladder where it clips, so a band past it is plainly past it.
+- **The verdict** and how far the peak sits from where the radio clips, then the
+  **loading**: `peak` in dBFS and in the converter's counts, `rms` and the
+  **crest** factor, both per axis because the converter digitises I and Q
+  separately (a constant envelope reads 3 dB), how many **bits** the peak reaches,
+  and the **clips** counted at the converter's rails. A clip in a tuner touches no
+  rail, so on the R2 a line under it says the counter cannot see it.
 - **Linearity** *(modeled)*: P1dB headroom, IIP3 / IMD3, and SFDR against the
   honest 8-bit ceiling (`6.02·8 + 1.76 ≈ 50 dB`). These need a two-tone source to
-  measure for real; here they're gain-adjusted datasheet estimates for guidance.
+  measure for real; here they're gain-adjusted datasheet estimates for guidance,
+  shown only on the HackRF they describe.
 
 ### Auto-gain and freeze
 
@@ -754,8 +766,8 @@ A typical setup flow, switching presets as you go:
    the images are, park on a strong carrier and press `C`.
 3. In **Lab RF (`Lab 2`)**, focus **RF Diagnostics** (`d`) and press `A` to auto-stage
    the gain, then read **NF** and **MDS** to confirm the receiver is sensitive
-   enough for what you're chasing. Watch the **ADC Loading** bell fill the range
-   without touching the rails.
+   enough for what you're chasing. Watch the **ADC Loading** ladder put the peak
+   on the green stretch, short of where the radio clips.
 4. In **Lab Timing (`Lab 3`)**, confirm the timing verdict is Good or Excellent, and
    that the ring-buffer fill isn't trending upward, before committing to a long
    run.

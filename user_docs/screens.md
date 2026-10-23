@@ -210,8 +210,9 @@ only positions that gap inside the ADC window. It cannot widen it.
   signal as a staircase up the chain, a step for each stage's gain, and the
   converter's window at the right: clip, signal, floor and the distances
   between them.
-- **ADC Loading** *(right)*: a signed sample-histogram bell, the loading read-out
-  (peak, rms, crest, effective bits, clip events), and a modeled linearity card.
+- **ADC Loading** *(right)*: the bit ladder, how much of the converter the
+  samples use, one column a bit; the staging verdict, the loading read-out (peak,
+  rms, crest, bits reached, clips), and a modeled linearity card.
 
 The dBm figures are modeled and relative, not a calibrated wattmeter reading, and
 the panel says so itself.

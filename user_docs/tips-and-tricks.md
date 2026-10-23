@@ -17,8 +17,9 @@ digitising mostly noise; too much and the ADC clips, which is worse than it
 sounds. A clipped ADC doesn't politely round up, it makes things up, and a
 confident lie is the worst kind of data.
 
-The fastest way to see it is the **ADC Loading** bell in Lab RF (`Lab 2`): a shape
-that fills the middle without piling up on the rails. If you want exact numbers,
+The fastest way to see it is the **ADC Loading** ladder in Lab RF (`Lab 2`): the
+samples climbing towards full scale, the peak on the green stretch, nothing past
+the red line. If you want exact numbers,
 add the `iq_histogram` panel to a [layout of your own](presets.md)
 and aim for:
 
@@ -213,7 +214,7 @@ through:
 
 1. **Tune** to your target with `f`, and **start RX** with `Space`.
 2. **Gain, Lab RF (`Lab 2`).** Focus with `d`, press `A`, and check the ADC Loading
-   bell fills the middle without touching the rails. Read **NF** and **MDS** to
+   ladder puts the peak on the green stretch. Read **NF** and **MDS** to
    confirm the receiver is sensitive enough for what you're after.
 3. **Quadrature, Lab IQ (`Lab 1`).** The constellation should be a bright ring
    comfortably inside the unit circle; smeared out to the edge means clipping.

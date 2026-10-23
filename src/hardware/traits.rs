@@ -1891,7 +1891,7 @@ mod tests {
     /// The depth follows the full scale, which is the number a SoapySDR driver
     /// actually reports. The 2048 case is the one that matters: a 12-bit ADC
     /// handing over 16-bit containers is 12 bits, and saying 16 would put a
-    /// wrong ENOB on the RF bench for every such radio.
+    /// wrong bit count on the RF bench for every such radio.
     /// Only an unsigned format has a zero that is not a code. Half a count, and
     /// half a count is 0.0039 of full scale on an 8-bit radio: enough to sit at
     /// 78 % of the DC offset the IQ bench warns at, which is why it is added

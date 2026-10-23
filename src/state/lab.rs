@@ -36,7 +36,8 @@ pub const REF_MAX: f32 = 0.0;
 /// the display is held. Captures everything the two panels derive from.
 #[derive(Clone)]
 pub struct RfFreeze {
-    pub signed_hist: [u64; 32],
+    /// The ADC's samples by 6 dB band, as [`crate::state::IqState::adc_band_hist`].
+    pub band_hist: [u64; crate::hardware::ADC_BANDS],
     pub peak_dbfs: f32,
     pub rms_dbfs: f32,
     pub clip_events: u64,
