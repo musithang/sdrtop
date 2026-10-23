@@ -216,8 +216,8 @@ through:
 2. **Gain, Lab RF (`Lab 2`).** Focus with `d`, press `A`, and check the ADC Loading
    ladder puts the peak on the green stretch. Read **NF** and **MDS** to
    confirm the receiver is sensitive enough for what you're after.
-3. **Quadrature, Lab IQ (`Lab 1`).** The constellation should be a bright ring
-   comfortably inside the unit circle; smeared out to the edge means clipping.
+3. **Quadrature, Lab IQ (`Lab 1`).** The constellation should be a bright ring,
+   with no red ring in view; a cloud flattened against one means clipping.
    **IRR** above 30 dB and **DC spike** below −40 dBFS mean clean quadrature. If
    the DC spike is in your way, press `D`. If mirror images are, park on a strong
    carrier and press `C`.

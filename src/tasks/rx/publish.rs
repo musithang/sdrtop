@@ -76,6 +76,8 @@ pub(super) struct Computed {
     /// The radio's own drop count over this window: `Ok(None)` from a radio
     /// that keeps none, `None` when there was no stream to ask about.
     pub radio_drops: Option<Result<Option<super::metrics::DropWindow>, String>>,
+    /// Where the constellation is zoomed to after this window, dBFS.
+    pub constellation_outer_db: Option<f64>,
 }
 
 /// Write the results, sample the trend histories, rebuild the timing snapshot,
@@ -127,6 +129,9 @@ pub(super) fn write_back(
         m.iq.dc_offset_q = iq.dc_q;
         m.signal.adc_peak_dbfs = iq.adc_peak_dbfs;
         m.signal.adc_rms_dbfs = iq.adc_rms_dbfs;
+        if let Some(outer) = c.constellation_outer_db {
+            m.iq.constellation_outer_db = Some(outer as f32);
+        }
         if let Some(v) = iq.iq_imbalance_db {
             m.iq.iq_imbalance_db = v;
         }

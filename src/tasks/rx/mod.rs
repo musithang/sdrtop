@@ -72,6 +72,8 @@ pub fn spawn_rx_task(
         let mut baseline_rate = f64::NAN;
         // The radio's drop count and stream position at the last reading.
         let mut drops_seen: Option<(u32, u64)> = None;
+        // Where the constellation is zoomed to: it holds before zooming in.
+        let mut scale = metrics::ConstellationScale::default();
 
         loop {
             // Single is_streaming() call per iteration - the result is used for
@@ -93,13 +95,17 @@ pub fn spawn_rx_task(
             }
             rate.push(drained.last_block_at, drained.bytes);
 
+            let iq = metrics::iq_metrics(
+                drained.moments,
+                drained.cal,
+                device.capabilities().sample_geometry,
+            );
+            let had_samples = drained.moments.samples > 0;
             let computed = Computed {
-                iq: metrics::iq_metrics(
-                    drained.moments,
-                    drained.cal,
-                    device.capabilities().sample_geometry,
-                ),
-                had_samples: drained.moments.samples > 0,
+                constellation_outer_db: had_samples
+                    .then(|| scale.update(iq.adc_rms_dbfs as f64, drained.cal.frozen)),
+                iq,
+                had_samples,
                 callback: metrics::callback_timing(
                     drained.jitter_sum_us,
                     drained.jitter_sq_sum,

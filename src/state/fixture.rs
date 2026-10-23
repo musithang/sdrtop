@@ -77,6 +77,7 @@ impl SdrMetrics {
                 cal: IqCalState::default(),
                 irr_history: VecDeque::new(),
                 constellation: VecDeque::new(),
+                constellation_outer_db: None,
             },
             observer: ObserverState::default(),
             spectrum: SpectrumState {

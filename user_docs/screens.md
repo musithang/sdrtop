@@ -226,10 +226,12 @@ Three views of the same quadrature question, from three directions.
   is perfect and the needle shows how far off you are. Its focus mode is also
   where sdrtop *corrects* the stream rather than just measuring it.
 - **IQ Constellation** *(centre)*: recent I/Q pairs as a dot-cloud coloured by
-  density, phosphor-scope style, with a fitted imbalance ellipse over the top. A
-  circle is healthy, an ellipse is amplitude imbalance, a tilt is phase imbalance,
-  and an offset cloud is DC offset. No numbers here on purpose; they're one panel
-  to the left. Yes, it looks like a 1970s scope. That's the idea.
+  density, phosphor-scope style, in a square zoomed to the cloud with dBFS rings,
+  and a fitted imbalance ellipse over the top. A circle is healthy, an ellipse is
+  amplitude imbalance, a tilt is phase imbalance, and an offset cloud is DC offset.
+  Beside it, the envelope: how far out the points sit and how much that varies.
+  The imbalance and DC numbers are one panel to the left. Yes, it looks like a
+  1970s scope. That's the idea.
 - **Image Scope** *(right)*: the empirical check on the computed IRR. It finds the
   strongest carrier, finds its mirror image reflected about the LO, and shows the
   gap between them. The diagnostics panel calculates image rejection from the

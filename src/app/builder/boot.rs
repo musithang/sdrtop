@@ -404,6 +404,7 @@ pub(super) fn initial_metrics(cfg: &AppConfig, boot: Boot) -> anyhow::Result<Sdr
             cal: crate::state::IqCalState::default(),
             irr_history: VecDeque::with_capacity(crate::state::SNR_HISTORY_LEN),
             constellation: VecDeque::new(),
+            constellation_outer_db: None,
         },
         observer,
         spectrum: SpectrumState {

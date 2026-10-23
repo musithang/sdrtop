@@ -316,13 +316,31 @@ shape is often faster to read.
 - An **ellipse** means amplitude imbalance (I and Q at different levels).
 - A **tilt** means phase imbalance (I and Q not 90° apart).
 - The cloud's **offset** from centre is the DC offset, marked with a crosshair.
+- A cloud pushed **flat against the edge** is clipping.
+
+The picture is **square**, so a circle is drawn as a circle and an ellipse means
+the hardware, not the terminal's cells. It is **zoomed to the cloud**: the outer
+ring sits about 5 dB above the signal's rms, on a 3 dB step, and the rings inside
+it are 6 dB apart, each labelled in dBFS. Full scale is drawn in red when it is in
+view, and so is the clip of a radio that clips before its converter (an
+[Airspy R2](hardware.md#airspy-r2) at about −3 dBFS, dashed). The zoom follows a
+growing signal at once but waits a second before zooming in on a fading one, so
+the picture does not flicker between two scales, and it holds still while the
+cloud is frozen with `F`. A weak signal on an 8-bit radio, zoomed this far, shows
+the converter's grid of counts: that is the quantisation, not a fault.
 
 The cloud is coloured by **point density**, a phosphor-scope look where sparse
-edges are cool blue and the dense core glows orange, so you can see where the
-signal's energy actually concentrates. A measured **imbalance ellipse** is fitted
-over it: its axis ratio is the amplitude imbalance and its tilt is the phase
-imbalance, the same two faults the diagnostics quantify, drawn straight onto the
-cloud. No live numbers sit here on purpose; they're one panel to the left.
+edges are cool blue and the dense core glows orange. A measured **imbalance
+ellipse** is fitted over it: its axis ratio is the amplitude imbalance and its tilt
+the phase imbalance, the same two faults the diagnostics quantify, drawn straight
+onto the cloud. The numbers for those, and for the DC offset, are one panel to the
+left and nowhere else.
+
+Beside the square is the one thing only this panel measures, the **envelope**:
+how far from the centre the points sit. A radial profile from the centre out to the
+outer ring, the envelope's rms in dBFS, and its **spread**: 0 % is a perfect ring
+(a constant envelope, like FM), about 52 % is Gaussian noise, and a clipped signal
+piles up at the outer edge.
 
 ### Image-Rejection Scope
 
@@ -759,8 +777,8 @@ A typical setup flow, switching presets as you go:
 
 1. Tune to your target and start RX (`Space`).
 2. In **Lab IQ (`Lab 1`)**, watch the **constellation**: adjust LNA and VGA until the
-   cloud is a bright, well-filled ring sitting comfortably *inside* the unit
-   circle (smearing out to the edge means clipping). Glance at **IQ Diagnostics**:
+   cloud is a bright, well-filled ring with no red ring in sight (full scale, or
+   the radio's clip, only appears when the signal gets near it). Glance at **IQ Diagnostics**:
    a centred needle on each null-meter, IRR above 30 dB and DC spike below
    −40 dBFS mean clean quadrature. If the DC spike is in your way, press `D`; if
    the images are, park on a strong carrier and press `C`.

@@ -380,10 +380,75 @@ pub(super) fn drop_window(
     }
 }
 
+/// Where the constellation is zoomed to, held from poll to poll.
+///
+/// **Out at once, in only after a second.** A cloud that grows past the outer
+/// ring would be drawn off the edge, so the scale follows it out on the next
+/// poll; a cloud that shrinks is only zoomed in on once it has wanted the
+/// smaller ring for [`ZOOM_IN_POLLS`] polls in a row, so an rms hovering on a
+/// step boundary does not flicker the whole picture between two scales. A
+/// frozen constellation keeps its scale: a held cloud re-zoomed under the
+/// live rms would be a different picture of the same points.
+#[derive(Debug, Default)]
+pub(super) struct ConstellationScale {
+    outer_db: Option<f64>,
+    wants_in: u32,
+}
+
+/// Polls of 200 ms a smaller ring must be wanted before the picture zooms in.
+const ZOOM_IN_POLLS: u32 = 5;
+
+impl ConstellationScale {
+    /// The outer ring after a window whose magnitude rms was `rms_dbfs`.
+    pub(super) fn update(&mut self, rms_dbfs: f64, frozen: bool) -> f64 {
+        let want = crate::state::IqState::outer_ring_for(rms_dbfs);
+        let now = match self.outer_db {
+            Some(held) if frozen => held,
+            Some(held) if want < held => {
+                self.wants_in += 1;
+                if self.wants_in >= ZOOM_IN_POLLS {
+                    self.wants_in = 0;
+                    want
+                } else {
+                    held
+                }
+            }
+            _ => {
+                self.wants_in = 0;
+                want
+            }
+        };
+        self.outer_db = Some(now);
+        now
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::hardware::SampleFormat;
+
+    /// The scale follows a growing cloud at once and a shrinking one only
+    /// after a second of wanting it; a frozen cloud keeps its scale.
+    #[test]
+    fn the_constellation_zooms_out_at_once_and_in_after_a_second() {
+        let mut s = ConstellationScale::default();
+        assert_eq!(s.update(-14.0, false), -9.0, "5 dB over, on a 3 dB step");
+        assert_eq!(s.update(-1.0, false), 0.0, "out at once, never past FS");
+        for _ in 0..ZOOM_IN_POLLS - 1 {
+            assert_eq!(s.update(-14.0, false), 0.0, "held while it waits");
+        }
+        assert_eq!(s.update(-14.0, false), -9.0, "in after a second");
+        // Hovering across a step boundary goes out once, then holds there.
+        let hovering: Vec<f64> = [-13.9, -14.1, -13.9, -14.1, -13.9, -14.1]
+            .into_iter()
+            .map(|rms| s.update(rms, false))
+            .collect();
+        assert_eq!(hovering, vec![-6.0; 6]);
+        let held = s.outer_db.unwrap();
+        assert_eq!(s.update(-40.0, true), held, "frozen keeps its scale");
+        assert_eq!(s.update(5.0, true), held);
+    }
 
     /// A HackRF: signed, so its zero is a code and there is nothing to add back.
     /// Used by every test whose subject is not the centring itself, so their

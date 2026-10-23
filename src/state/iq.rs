@@ -167,4 +167,29 @@ pub struct IqState {
     /// 1 : `CONST_DECIMATE` (`hardware::process`) decimation; oldest pairs are evicted once the
     /// buffer reaches [`CONSTELLATION_CAP`].
     pub constellation: std::collections::VecDeque<(f32, f32)>,
+    /// The constellation's outer ring, dBFS: where the picture is zoomed to.
+    /// Set by the RX poll from the full-rate rms with a hold before zooming
+    /// in ([`IqState::outer_ring_for`]), so the scale does not flicker
+    /// between two steps; `None` until a window has been measured.
+    pub constellation_outer_db: Option<f32>,
+}
+
+/// Over the rms, where the constellation's outer ring sits: the bulk of a
+/// cloud then reaches about half the radius or more.
+const OUTER_OVER_RMS_DB: f64 = 5.0;
+
+/// The outer ring moves in steps this size.
+pub const OUTER_STEP_DB: f64 = 3.0;
+
+impl IqState {
+    /// The outer ring a cloud of magnitude rms `rms_dbfs` wants: 5 dB over it,
+    /// rounded up to a 3 dB step, never past full scale.
+    pub fn outer_ring_for(rms_dbfs: f64) -> f64 {
+        let db = if rms_dbfs.is_finite() {
+            rms_dbfs
+        } else {
+            -120.0
+        };
+        (((db + OUTER_OVER_RMS_DB) / OUTER_STEP_DB).ceil() * OUTER_STEP_DB).min(0.0)
+    }
 }

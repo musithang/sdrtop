@@ -6,8 +6,6 @@
 
 use ratatui::style::Color;
 
-use super::BOUND;
-
 /// Density-grid resolution (cells per axis) for the persistence colouring.
 const DENSITY_GRID: usize = 28;
 
@@ -26,11 +24,13 @@ pub(super) const HEAT: [Color; HEAT_LEVELS] = [
 
 /// Split the cloud into [`HEAT_LEVELS`] layers by local point density, so each can
 /// be drawn in its own heat colour. Bins points on a [`DENSITY_GRID`]² grid over
-/// the canvas extent; a point's bucket is `sqrt(cell_count / max_count)` (the sqrt
-/// spreads the low end so sparse structure stays visible).
-pub(super) fn density_layers(coords: &[(f64, f64)]) -> Vec<Vec<(f64, f64)>> {
+/// the canvas extent, `±bound`, the same extent the canvas draws: a density
+/// measured over another extent would colour the wrong points hot. A point's
+/// bucket is `sqrt(cell_count / max_count)` (the sqrt spreads the low end so
+/// sparse structure stays visible).
+pub(super) fn density_layers(coords: &[(f64, f64)], bound: f64) -> Vec<Vec<(f64, f64)>> {
     let cell = |v: f64| -> usize {
-        (((v + BOUND) / (2.0 * BOUND) * DENSITY_GRID as f64) as isize)
+        (((v + bound) / (2.0 * bound) * DENSITY_GRID as f64) as isize)
             .clamp(0, DENSITY_GRID as isize - 1) as usize
     };
     let mut counts = vec![0u32; DENSITY_GRID * DENSITY_GRID];
@@ -57,7 +57,7 @@ mod tests {
     #[test]
     fn density_layers_partition_all_points() {
         let coords = ring(200, 1.0, 1.0);
-        let layers = density_layers(&coords);
+        let layers = density_layers(&coords, 1.3);
         assert_eq!(layers.len(), HEAT_LEVELS);
         let total: usize = layers.iter().map(|l| l.len()).sum();
         assert_eq!(
@@ -72,7 +72,7 @@ mod tests {
         // Most points piled on one spot + a few scattered → the hottest layer is used.
         let mut coords = vec![(0.1, 0.1); 500];
         coords.extend(ring(20, 1.0, 1.0));
-        let layers = density_layers(&coords);
+        let layers = density_layers(&coords, 1.3);
         assert!(
             !layers[HEAT_LEVELS - 1].is_empty(),
             "dense core should reach the hot layer"
