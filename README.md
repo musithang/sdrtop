@@ -12,7 +12,8 @@
 <p align="center">
   <a href="https://www.rust-lang.org"><img src="https://img.shields.io/badge/rust-1.88%2B-orange?logo=rust&logoColor=white" alt="Rust 1.88+"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-GPL--3.0--or--later-blue" alt="GPL-3.0-or-later"></a>
-  <a href="user_docs/hardware.md#macos-unofficially"><img src="https://img.shields.io/badge/platform-linux%20%7C%20macOS-lightgrey" alt="Linux | macOS"></a>
+  <a href="user_docs/hardware.md#host-platforms"><img src="https://img.shields.io/badge/Linux-FCC624?logo=linux&logoColor=black" alt="Linux"></a>
+  <a href="user_docs/hardware.md#macos-unofficially"><img src="https://img.shields.io/badge/macOS-unofficial-000000?logo=apple&logoColor=white" alt="macOS, unofficial"></a>
   <img src="https://img.shields.io/badge/stage-early%20development-red" alt="Early development">
 </p>
 
@@ -28,10 +29,10 @@
 <p align="center">
   <b>Tested on real hardware</b><br>
   <a href="https://greatscottgadgets.com/hackrf/one/"><img src="https://img.shields.io/badge/HackRF%20One-brightgreen" alt="HackRF One"></a>
-  <a href="https://www.rtl-sdr.com/"><img src="https://img.shields.io/badge/RTL--SDR-green" alt="RTL-SDR"></a>
-  <a href="user_docs/hardware.md#airspy-r2"><img src="https://img.shields.io/badge/Airspy%20R2-1a7f8e" alt="Airspy R2"></a>
-  <a href="https://github.com/portapack-mayhem/mayhem-firmware"><img src="https://img.shields.io/badge/PortaPack%20H4M-blueviolet" alt="PortaPack H4M"></a>
-  <a href="user_docs/hardware.md#tinysa"><img src="https://img.shields.io/badge/tinySA%20Ultra-blue" alt="tinySA Ultra"></a>
+  <a href="https://www.rtl-sdr.com/"><img src="https://img.shields.io/badge/RTL--SDR-brightgreen" alt="RTL-SDR"></a>
+  <a href="user_docs/hardware.md#airspy-r2"><img src="https://img.shields.io/badge/Airspy%20R2-brightgreen" alt="Airspy R2"></a>
+  <a href="https://github.com/portapack-mayhem/mayhem-firmware"><img src="https://img.shields.io/badge/PortaPack%20H4M-brightgreen" alt="PortaPack H4M"></a>
+  <a href="user_docs/hardware.md#tinysa"><img src="https://img.shields.io/badge/tinySA%20Ultra-brightgreen" alt="tinySA Ultra"></a>
 </p>
 
 <p align="center">

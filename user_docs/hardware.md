@@ -432,9 +432,9 @@ the rest before I did: an M4 MacBook Air with an RTL-SDR Blog V4, through
 Homebrew. [Observer mode](advanced.md#observer-mode-when-another-app-owns-the-radio)
 works there too, reading what macOS's own device registry says about the radio
 and the app holding it. The same user watched it switch over while `rtl_test`
-held the V4; whether it named `rtl_test` and its PID is the part I'm still
-waiting to hear, so if you try it, tell me what it said. The same goes for a
-[tinySA](#tinysa), which is found on its `/dev/cu.usbmodem*` port. sdrtop looks for the
+held the V4, and it named `rtl_test` as the holder. Nobody has tried a HackRF
+or a [tinySA](#tinysa) there yet (the tinySA is looked for on its
+`/dev/cu.usbmodem*` port), so if you do, tell me what it said. sdrtop looks for the
 libraries where Homebrew and MacPorts put them (`/opt/homebrew/lib`,
 `/usr/local/lib`, `/opt/local/lib`), so this is the whole setup:
 

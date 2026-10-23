@@ -32,7 +32,41 @@ in time.
 
 ---
 
-## 🔬 Checkpoint 30: Frame by frame *(you are here)*
+## 🍎 Checkpoint 31: A Mac, an R2, and where the time went *(you are here)*
+
+**0.6.9.** Three things at once, which is two more than a sensible person
+would ship together.
+
+**A Mac.** Someone opened an issue saying their RTL-SDR did not work on
+macOS, which was fair, because nobody had ever tried. I don't own a Mac,
+so GitHub's Apple Silicon machines became one: every change is now built
+and tested there, and the release carries tarballs for Apple Silicon and
+Intel that the one-line installer knows how to fetch. The libraries are
+found where Homebrew puts them, SoapySDR's modules load, and observer
+mode asks macOS's own device registry who is holding the radio. The person
+who reported it did the part I could not: a real Mac, a real V4,
+streaming, and the observer screen naming `rtl_test` as the culprit.
+[macOS, unofficially](hardware.md#macos-unofficially) has the setup.
+
+**An Airspy R2**, driven natively. Its three gain stages are measured on
+the bench rather than taken from a datasheet, so a dB figure appears only
+in the band it was measured in. The gain knob walks libairspy's own
+Linearity and Sensitivity curves, which is how the radio was meant to be
+driven. And the bench found something the clip counter could never have
+told you: the R2's tuner flattens the signal at about −3 dBFS, before the
+converter's own rails, so a counter that says zero clips was being
+perfectly honest about the wrong thing. The headroom is judged against
+the tuner now. [Airspy R2](hardware.md#airspy-r2).
+
+**Airtime**, the third Wi-Fi view: one channel, second by second, and
+what its time went on. The usual answer is humbling for modern Wi-Fi. A
+few hundred quick frames a second barely register, while one 802.11b
+beacon from 1999's idea of speed owns a respectable slice of the air.
+[Airtime](net-wifi-airtime.md).
+
+---
+
+## 🔬 Checkpoint 30: Frame by frame
 
 **0.6.8.** The survey tells you a channel is busy. The obvious next
 question is busy with what, and the honest way to answer it is to look:

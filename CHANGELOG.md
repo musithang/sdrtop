@@ -16,6 +16,94 @@ checkpoint instead of by version.
 
 ## [Unreleased]
 
+## [0.6.9] - 2026-10-23
+
+**A Mac, an Airspy R2, and where a channel's time goes.**
+
+sdrtop runs on macOS now, properly: built and tested on every change on
+GitHub's Apple Silicon machines, released as a tarball for Apple Silicon
+and Intel, installed by the same one-liner, and proved on a real Mac with
+a real RTL-SDR by the person who asked for it (#25). The Airspy R2 is the
+third radio sdrtop drives itself, with its gain measured on the bench
+rather than read off a box. And Wi-Fi gets an Airtime view, a channel's
+time second by second and what it went on.
+
+### Added
+
+- **macOS.** The radio libraries are found where Homebrew and MacPorts
+  put them, SoapySDR and its driver modules load (0.8 or 0.9), observer
+  mode names the app holding the radio from macOS's own device registry,
+  a tinySA is found on its `/dev/cu.usbmodem*` port, and the app's own
+  CPU and memory read there too. Release tarballs for Apple Silicon and
+  Intel, checked to link only system libraries and signed ad hoc;
+  `install.sh` takes the right one and installs the libraries through
+  Homebrew. Built and tested on every change; radios tested by the people
+  who run it. ([macOS, unofficially](user_docs/hardware.md#macos-unofficially))
+- **Native Airspy R2.** libairspy is loaded at run time like the other
+  native libraries; the R2 is offered natively by default, ahead of
+  SoapyAirspy's listing of the same radio. Its three gain stages are
+  tables measured on the bench, shown in dB only in the band they were
+  measured in. The gain knob walks libairspy's own Linearity and
+  Sensitivity curves (`LIN 11/21` in the header), `[A]` switches the
+  tuner AGC and every gain reading then says AGC. The Options pane has
+  the bias tee (off at every start, never saved) and 12-bit packing.
+  Observer mode works for an R2 another program holds. An Airspy Mini
+  stays with SoapySDR unless `--device airspy` asks for it.
+  ([Airspy R2](user_docs/hardware.md#airspy-r2))
+- **Wi-Fi's Airtime view** (`Channel 3` under Wi-Fi). A column a second
+  of one channel's time, the energy's bar beside the frames' stacked by
+  format; a ledger of each format and rate's share of the time; a card
+  with the share over 20 s, its spread, and the rhythm of the gaps
+  between frames. ([Airtime](user_docs/net-wifi-airtime.md))
+- The timing bench says whose loss it was: what the driver reported (a
+  libairspy queue, a HackRF short transfer, a SoapySDR overflow) apart
+  from what sdrtop's intake had no room for. Its bus line counts the
+  bytes that crossed the link, so a packed R2 carries 3 for every 4
+  delivered; a SoapySDR device whose wire is unknown says Delivered.
+- The R2's real ceiling is its tuner, which clips at about −3 dBFS
+  before the converter's own rails, where the clip counter cannot see it.
+  Headroom, the staging verdicts, auto-gain and the ADC bench are judged
+  against it.
+- The Gain-Staging Level Diagram draws its measured half on a radio with
+  no noise figures (the signal walked back through each stage's gain,
+  the floor, the ceiling) instead of an empty panel.
+
+### Changed
+
+- **Two new config fields**, both optional: `[radio] gain_mode` (the
+  gain curve, by name) and `[airspy] packing`. An older config loads as
+  before.
+- Every gain key, the reset and auto-gain set a stage by its exact
+  value. A measured table is walked entry by entry instead of sticking
+  on a rounded step.
+- Auto-gain and auto-track walk the gain curve when one is selected,
+  and refuse outside the band a stage was measured in or while the AGC
+  is on, rather than maxing the LNA.
+- The gain lineup's levels are dBFS at the converter, not uncalibrated
+  dBm.
+- A config or log that cannot be written names the file, and quitting
+  with settings that could not be saved warns and exits normally.
+- What the radio libraries print while sdrtop looks for radios goes to
+  the log, not the terminal.
+
+### Fixed
+
+- The RF bench's marker bar showed a sample peak minus a spectral ratio
+  as NOISE, which read 52 dB off the real floor. It now shows the noise
+  floor the FFT measured, with the bandwidth it was measured in.
+- An RTL-SDR on tuner AGC showed its last manual gain; it says AGC.
+- Observer mode opens on its own screen instead of behind the menu, its
+  panel names itself once, and the Connected time was a thousand times
+  too long on Linux.
+- An observed RTL-SDR on a Mac was introduced as a HackRF.
+- A terminal shorter than a view's top and bottom panels no longer
+  crashes.
+- The NET band line never names a channel beside another tuning's
+  frequency; the Connection view surveys the three advertising channels
+  like the other LE views.
+- The gain lineup rounds a stage's gain as the rest of the screen does
+  (16.74 dB was +16 beside a +17).
+
 ## [0.6.8] - 2026-10-16
 
 **What is on a Wi-Fi channel, frame by frame.**
@@ -1190,7 +1278,8 @@ sdrtop stopped being a one-radio program.
   image rejection ratio, wavelength and antenna metrics.
 - Config file with atomic save on quit, and the CLI flags that override it.
 
-[Unreleased]: https://github.com/musithang/sdrtop/compare/v0.6.8...HEAD
+[Unreleased]: https://github.com/musithang/sdrtop/compare/v0.6.9...HEAD
+[0.6.9]: https://github.com/musithang/sdrtop/compare/v0.6.8...v0.6.9
 [0.6.8]: https://github.com/musithang/sdrtop/compare/v0.6.7...v0.6.8
 [0.6.7]: https://github.com/musithang/sdrtop/compare/v0.6.6...v0.6.7
 [0.6.6]: https://github.com/musithang/sdrtop/compare/v0.6.5...v0.6.6
