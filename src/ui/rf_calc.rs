@@ -152,9 +152,10 @@ pub fn adc_utilisation_ratio(hist: &[u64; 32]) -> f64 {
     }
 }
 
-/// `0 dBFS = 0 dBm` reference that anchors the modeled dBm lineup to the measured ADC
-/// level. The HackRF is not power-calibrated, so every dBm here is **modeled /
-/// relative** - useful for staging, not a wattmeter reading.
+/// `0 dBFS = 0 dBm` reference that anchors the lineup to the measured ADC level.
+/// No radio here is power-calibrated, so the levels are shown as dBFS at the
+/// converter walked back through the gains (the fields keep their historical
+/// `_dbm` names) - useful for staging, not a wattmeter reading.
 pub const ADC_DBFS_REF_DBM: f64 = 0.0;
 
 /// Signal and (modeled) noise level at one node of the chain, in dBm.

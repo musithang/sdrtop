@@ -297,16 +297,18 @@ mod tests {
         assert!(far.contains("14/14"), "{far}");
         let ant = far.lines().find(|l| l.contains("ANT")).unwrap_or_default();
         assert!(
-            ant.contains('\u{2014}') && !ant.contains("dBm"),
+            ant.contains('\u{2014}') && !ant.contains("dBFS"),
             "{ant}\n{far}"
         );
-        let vga = far.lines().find(|l| l.contains("VGA") && l.contains("dBm"));
+        let vga = far
+            .lines()
+            .find(|l| l.contains("VGA") && l.contains("dBFS"));
         assert!(vga.is_some(), "the VGA's output is still a level:\n{far}");
 
         m.radio.frequency = 92_800_000;
         let near = draw(RfChainPanel, 60, 40, &m).join("\n");
         let ant = near.lines().find(|l| l.contains("ANT")).unwrap_or_default();
-        assert!(ant.contains("dBm"), "{ant}\n{near}");
+        assert!(ant.contains("dBFS"), "{ant}\n{near}");
         assert!(!near.contains("14/14"), "{near}");
     }
 
@@ -483,6 +485,18 @@ mod tests {
     const W: u16 = 56;
     const H: u16 = 22;
 
+    /// The GAIN LINEUP's level rows: those between its heading and the
+    /// next block's that carry a level.
+    fn lineup_rows(out: &str) -> Vec<String> {
+        out.lines()
+            .skip_while(|l| !l.contains("GAIN LINEUP"))
+            .skip(1)
+            .take_while(|l| !l.contains("GAIN STAGING"))
+            .filter(|l| l.contains("dBFS"))
+            .map(str::to_string)
+            .collect()
+    }
+
     fn chain() -> SdrMetrics {
         SdrMetrics::fixture()
             .streaming()
@@ -499,7 +513,14 @@ mod tests {
         assert!(out.contains("GAIN LINEUP"), "no level lineup:\n{out}");
         assert!(out.contains("GAIN STAGING"), "no staging advice:\n{out}");
         assert!(out.contains("ANT"), "no antenna node:\n{out}");
-        assert!(out.contains("dBm"), "no levels:\n{out}");
+        let ant = out.lines().find(|l| l.contains("ANT")).unwrap_or_default();
+        assert!(ant.contains("dBFS"), "no levels:\n{out}");
+        // Not dBm: nothing here is calibrated to the antenna, so a level is
+        // the converter's dBFS walked back through the gains.
+        assert!(
+            !lineup_rows(&out).iter().any(|l| l.contains("dBm")),
+            "{out}"
+        );
         // And the verdict, which needs only the ADC peak.
         assert!(
             out.contains("STAGED") || out.contains("GAIN"),
@@ -601,13 +622,9 @@ mod tests {
         }
         let joined = out.join("\n");
         assert_eq!(
-            joined.matches("dBm").count(),
-            7,
-            "the antenna and six stages each keep their level:\n{joined}"
-        );
-        assert!(
-            joined.contains("dBFS"),
-            "and the ADC keeps its own:\n{joined}"
+            lineup_rows(&joined).len(),
+            8,
+            "the antenna and six stages each keep their level, and the ADC its own:\n{joined}"
         );
     }
 
@@ -622,9 +639,9 @@ mod tests {
         }
         let joined = out.join("\n");
         assert_eq!(
-            joined.matches("dBm").count(),
-            4,
-            "antenna plus three stages:\n{joined}"
+            lineup_rows(&joined).len(),
+            5,
+            "antenna plus three stages, and the ADC:\n{joined}"
         );
         assert!(
             joined.contains("PREAMPLI"),
@@ -644,11 +661,12 @@ mod tests {
         let end_column = |line: &str| -> Option<usize> {
             let cols: Vec<char> = line.chars().collect();
             let text: String = cols.iter().collect();
-            text.find("dBm")
-                .map(|byte| text[..byte].chars().count() + 3)
+            text.find("dBFS")
+                .map(|byte| text[..byte].chars().count() + 4)
         };
+        // The lineup's rows only: the verdict below says "dBFS" too.
         let edges = |m: &SdrMetrics| -> Vec<usize> {
-            draw(RfChainPanel, W, 30, m)
+            lineup_rows(&draw(RfChainPanel, W, 30, m).join("\n"))
                 .iter()
                 .filter_map(|l| end_column(l))
                 .collect()

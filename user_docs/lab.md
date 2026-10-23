@@ -98,13 +98,13 @@ teach: **level climbs stage by stage; the gap between signal and noise is the SN
 set at the antenna; gain only positions that gap in the ADC window.** It never
 improves it. Each panel restates one face of that.
 
-> **A note on the levels.** The HackRF is not power-calibrated, so the dBm figures
-> here are *modeled and relative*: the lineup is back-computed from the *measured*
-> ADC level through the *known* stage gains, anchored to a documented
-> `0 dBFS = 0 dBm` reference. They're exactly right for staging decisions, and
-> they're not a wattmeter reading. Likewise the linearity figures below are
-> datasheet-anchored estimates, not lab measurements. Both are labelled as such in
-> the panel.
+> **A note on the levels.** No radio here is power-calibrated, so the lineup's
+> levels are **dBFS at the converter**, walked back from the *measured* ADC level
+> through the *known* stage gains. That is why the antenna reads something like
+> `-75 dBFS` rather than a dBm figure it has no right to: exactly right for
+> staging decisions, and not a wattmeter reading. Likewise the linearity figures
+> below are datasheet-anchored estimates, not lab measurements. Both are labelled
+> as such in the panel.
 
 ### RF Diagnostics *(focus `d`)*
 
@@ -147,6 +147,17 @@ ceiling and the 8-bit floor, and the band between the traces is shaded as
 **usable dynamic range**. If the noise ever climbs above the signal, that band is
 flagged **buried** rather than left blank, because an empty gap and a negative one
 are very different situations.
+
+That is the HackRF, whose stages come with noise figures. **On a radio whose
+stages don't** (an Airspy R2, anything through SoapySDR) the noise trace would
+have to be made up, so it isn't drawn, and the panel says so on its last line.
+What is drawn is everything that is measured: the signal walked back from the
+converter through each stage's measured gain, the floor the FFT measured at the
+converter (with the bandwidth it was measured in), and the level where this
+radio clips, with the distance between the two. A stage whose gain isn't a
+decibel figure right now, outside the band it was measured in or while the AGC
+is driving it, reads as its step or `AGC` under the axis, and the trace starts
+after it rather than guessing what came before.
 
 ### ADC Loading
 

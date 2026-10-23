@@ -19,8 +19,8 @@ use crate::ui::rf_calc::{Stage, StageLevel};
 use super::super::rf_bench::{bar_row, bar_width, row, Bar, Row};
 use super::{LABEL_W, VALW};
 
-/// `GAIN LINEUP` - the modeled level at each node of the chain, ending at the
-/// ADC read in dBFS.
+/// `GAIN LINEUP` - the level at each node of the chain, the converter's dBFS
+/// walked back through each stage's gain, ending at the ADC as read.
 pub(super) fn lineup(
     out: &mut Vec<Line<'static>>,
     levels: &[StageLevel],
@@ -132,9 +132,11 @@ fn mid_text(index: usize, stages: &[Stage]) -> String {
 }
 
 /// A level, or a dash where it could not be worked out.
+/// A node's level as the converter's dBFS walked back through the gains: not
+/// dBm, because nothing on any radio here is calibrated to the antenna.
 fn level_text(dbm: f64) -> String {
     if dbm.is_finite() {
-        format!("{dbm:.0} dBm")
+        format!("{dbm:.0} dBFS")
     } else {
         "\u{2014}".to_string()
     }
