@@ -283,7 +283,6 @@ fn below_tree(
         )
     });
     let card = card::Card {
-        tile,
         trail: &trail,
         radio: (&m.system.board_name, m.caps.freq_min_hz, m.caps.freq_max_hz),
         live,

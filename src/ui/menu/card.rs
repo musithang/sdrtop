@@ -20,12 +20,11 @@ use ratatui::{
 
 use super::live::Live;
 use super::ruler::{self, Mark};
-use super::tree::{Kind, Node, Tile};
+use super::tree::{Kind, Node};
 use super::{ink, map};
 
 /// Everything the card shows.
 pub struct Card<'a> {
-    pub tile: Tile,
     /// The rows from the first column down to the one under the cursor,
     /// that one last ([`super::tree::Tree::trail`]).
     pub trail: &'a [&'a Node],
@@ -129,10 +128,7 @@ fn mark<'a>(card: &'a Card<'a>) -> Option<Mark<'a>> {
         Kind::Branch { section, .. } => section.is_some(),
         Kind::Heading => false,
     };
-    match card.tile {
-        Tile::Lab if !node.later && tuned_anywhere => Some(Mark::Anywhere),
-        _ => None,
-    }
+    (!node.later && tuned_anywhere).then_some(Mark::Anywhere)
 }
 
 /// The words, and how many rows they took.
@@ -252,6 +248,7 @@ fn words<'a>(node: &Node, card: &Card<'_>, w: usize, theme: &crate::Theme) -> (V
 mod tests {
     use super::*;
     use crate::config::LayoutConfig;
+    use crate::ui::menu::tree::Tile;
     use crate::ui::menu::{model, tree};
     use ratatui::{backend::TestBackend, Terminal};
 
@@ -277,7 +274,6 @@ mod tests {
         }
         let trail = t.trail(tile, &path);
         let card = Card {
-            tile,
             trail: &trail,
             radio,
             live: None,
@@ -388,7 +384,7 @@ mod tests {
         assert!(!all.contains("WHERE IT LISTENS"), "{all}");
     }
 
-    /// A Radio row has no band yet and no ruler; it says it is not built.
+    /// A later Radio row has no band and no ruler; it says it is not built.
     #[test]
     fn a_later_row_has_no_ruler() {
         let t = builtins();

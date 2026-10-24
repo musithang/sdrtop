@@ -26,6 +26,7 @@ mod core;
 mod global;
 mod menu;
 mod net;
+mod pager;
 mod rail;
 mod signal;
 mod sweep;

@@ -236,9 +236,10 @@ impl Tree {
         out
     }
 
-    /// Where a preset sits, if the Lab tree lists it. Every preset the menu
-    /// lists is in the Lab tree, since the Radio tree has no views yet.
+    /// Where a preset sits, in whichever tree lists it.
     pub fn locate(&self, preset: &str) -> Option<(Tile, Path)> {
+        // Lab first: a preset filed under a known Lab group is never in the
+        // Radio tree, and the Radio tree holds only its own groups.
         for tile in [Tile::Lab, Tile::Radio] {
             let mut rows = Vec::new();
             if find(self.root(tile), preset, &mut rows) {
@@ -533,8 +534,8 @@ fn lab_table() -> Vec<Node> {
     ]
 }
 
-/// No Radio view exists yet: the tile says what it will hold, every row
-/// later, and opens nothing.
+/// The Radio tile: pagers first, the only group with a view yet; the rest
+/// says what the tile will hold, later rows that open nothing.
 fn radio_table() -> Vec<Node> {
     use Tone::Radio;
     let soon = |title: &str, hint: &'static str, about: &'static str| {
@@ -544,6 +545,16 @@ fn radio_table() -> Vec<Node> {
             .about(about)
     };
     vec![
+        heading("PAGERS"),
+        branch(
+            "Pagers",
+            Radio,
+            vec![group("POCSAG", Radio, crate::signal::pocsag::SECTION)
+                .hint("512-2400 bd")
+                .about("POCSAG, the paging code most pagers spoke: an address, a function, and a numeric or a text message. Read by sdrtop's own decoder.")],
+        )
+        .hint("POCSAG")
+        .about("One-way messages to pocket pagers: hospitals, fire services, and DAPNET, the radio amateurs' own network."),
         heading("LISTEN"),
         soon(
             "FM broadcast",
@@ -578,9 +589,13 @@ fn radio_table() -> Vec<Node> {
 /// Hang the menu's sections on the table, and the refused ones beside them.
 pub fn build(menu: &Menu, refused: &[Refusal]) -> Tree {
     let mut lab = lab_table();
+    let mut radio = radio_table();
     let mut placed: Vec<&str> = Vec::new();
     fill(&mut lab, &menu.sections, refused, &mut placed);
+    fill(&mut radio, &menu.sections, refused, &mut placed);
     carry_refusals(&mut lab);
+    carry_refusals(&mut radio);
+    prune(&mut radio);
 
     // A section the table does not name: a user's own, or the presets that
     // named none. Each its own row under Other, in the menu's order, with
@@ -609,10 +624,7 @@ pub fn build(menu: &Menu, refused: &[Refusal]) -> Tree {
     }
 
     prune(&mut lab);
-    Tree {
-        radio: radio_table(),
-        lab,
-    }
+    Tree { radio, lab }
 }
 
 fn views(section: &Section, refused: Option<&str>) -> Vec<Node> {
@@ -810,28 +822,58 @@ mod tests {
         for section in &menu.sections {
             for entry in &section.entries {
                 let (tile, path) = tree.locate(&entry.preset).expect(&entry.preset);
-                assert_eq!(tile, Tile::Lab);
                 let node = tree.node(tile, &path).unwrap();
                 assert_eq!(node.view(), Some(entry));
                 assert_eq!(tree.section_at(tile, &path), Some(section.id.as_str()));
                 seen += 1;
             }
         }
-        let lab_views: usize = tree.lab.iter().map(Node::view_count).sum();
-        assert_eq!(lab_views, seen);
+        let views: usize = tree
+            .lab
+            .iter()
+            .chain(&tree.radio)
+            .map(Node::view_count)
+            .sum();
+        assert_eq!(views, seen);
         assert!(tree.locate("observer").is_none(), "hidden stays hidden");
     }
 
-    /// The Radio tile holds nothing that opens yet, and says what it will.
+    /// The Radio tile opens on pagers, its one live group; the rest are
+    /// later rows that say what the tile will hold and open nothing.
     #[test]
-    fn the_radio_tree_is_all_later() {
+    fn the_radio_tree_opens_on_pagers() {
         let tree = builtins();
-        let rows: Vec<&Node> = tree.radio.iter().filter(|n| n.is_stop()).collect();
-        assert!(!rows.is_empty());
-        assert!(rows.iter().all(|n| n.later && n.about.is_some()));
-        assert_eq!(tree.radio.iter().map(Node::view_count).sum::<usize>(), 0);
-        let first = tree.clamp(Tile::Radio, &Path::default()).unwrap();
-        assert_eq!(tree.descend(Tile::Radio, &first), None);
+        let first: Vec<&Node> = tree.radio.iter().filter(|n| n.is_stop()).collect();
+        assert_eq!(first[0].title, "Pagers");
+        assert!(!first[0].later);
+        assert!(first[1..].iter().all(|n| n.later && n.about.is_some()));
+        let (tile, path) = tree
+            .locate("radio_pocsag")
+            .expect("the pager view is listed");
+        assert_eq!(tile, Tile::Radio);
+        let titles: Vec<&str> = tree
+            .trail(tile, &path)
+            .iter()
+            .map(|n| n.title.as_str())
+            .collect();
+        assert_eq!(titles, ["Pagers", "POCSAG", "Pager"]);
+        assert_eq!(
+            tree.section_at(tile, &path),
+            Some(crate::signal::pocsag::SECTION)
+        );
+        let ham = tree
+            .clamp(
+                Tile::Radio,
+                &Path {
+                    rows: vec![tree
+                        .radio
+                        .iter()
+                        .position(|n| n.title == "Ham bands")
+                        .unwrap()],
+                },
+            )
+            .unwrap();
+        assert_eq!(tree.descend(Tile::Radio, &ham), None);
     }
 
     /// `→` from Bluetooth lands in its groups, through the band, and `←`

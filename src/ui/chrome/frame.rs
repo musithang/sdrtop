@@ -307,6 +307,7 @@ pub fn title_spans(
             Tag::Paused => ("PAUSED".to_string(), theme.status_warn),
             Tag::Stride(n) => (format!("\u{00D7}{n}"), theme.label),
             Tag::Filtered => ("FILTERED".to_string(), theme.value_hi),
+            Tag::Masked => ("MASKED".to_string(), theme.status_warn),
             Tag::Kind(kind) => (kind.to_string(), theme.value_hi),
             Tag::Listening(what) => (what.to_string(), theme.value_hi),
             Tag::Behind(n) => (format!("+{n} NEW"), theme.label),

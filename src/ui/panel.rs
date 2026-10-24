@@ -148,6 +148,10 @@ pub enum Tag {
     /// `[FILTERED]` - a list narrowed to one thing the user picked; the rows
     /// say which, and the tag says the list is not everything.
     Filtered,
+    /// `[MASKED]` - text on this panel is shown as its kind and length, not
+    /// as what it says: a presentation the user chose, said on every panel
+    /// it changes.
+    Masked,
     /// `[CONNECT]` - a list narrowed to one kind of row, named. A tag of its
     /// own rather than [`Tag::Filtered`], because the two narrow together and
     /// one tag for both would hide which is on.

@@ -130,6 +130,7 @@ impl App {
         registry.register(ui::NetWifiSharePanel);
         registry.register(ui::NetWifiSurveyPanel);
         registry.register(ui::NetWifiLeastBusyPanel);
+        registry.register(ui::PagerFacePanel);
 
         let mut layout = LayoutConfig::with_user_presets(user_presets, presets_dir);
         let mut refusals = Vec::new();

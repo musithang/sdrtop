@@ -6,6 +6,10 @@
 //! The pages are written by `signal::pocsag::worker` and read by the Radio
 //! views. Each is held behind an `Arc`: the whole state is cloned for every
 //! frame, and a page carries every codeword it was read from.
+//!
+//! **What the view shows is the user's** ([`PagerView`]), written only by
+//! the keys: which page, which screen of it, masked or not, whose pager, day
+//! or night. The worker never touches it.
 
 use std::collections::VecDeque;
 use std::sync::Arc;
@@ -58,6 +62,25 @@ pub struct PagerFeed {
     pub load: Option<f64>,
 }
 
+/// What the pager view shows, set by its keys.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct PagerView {
+    /// The page on the display, by its number: a new page arriving does not
+    /// move it. `None` follows the newest, as a pager shows what just came.
+    pub selected: Option<u64>,
+    /// Which screen of a long page READ is on.
+    pub screen: usize,
+    /// Text shown as its kind and length only, everywhere at once.
+    pub masked: bool,
+    /// The address this pager answers to. `None` is monitor mode: every
+    /// address.
+    pub mine: Option<u32>,
+    /// The night backlight.
+    pub night: bool,
+    /// Pages read, by number: opened with READ.
+    pub read: std::collections::BTreeSet<u64>,
+}
+
 #[derive(Clone, Debug, Default)]
 pub struct PagerState {
     /// Received pages, oldest first, at most [`INBOX_MAX`].
@@ -69,9 +92,92 @@ pub struct PagerState {
     /// The channel's actual sample rate, once a block has built it.
     pub channel_rate: Option<f64>,
     pub feed: PagerFeed,
+    pub view: PagerView,
 }
 
 impl PagerState {
+    /// The pages this pager shows, oldest first: every one, or only its own
+    /// address's.
+    pub fn shown(&self) -> Vec<&Arc<PageEntry>> {
+        self.inbox
+            .iter()
+            .filter(|e| self.view.mine.is_none_or(|ric| e.page.ric == ric))
+            .collect()
+    }
+
+    /// The page on the display: the selected one while it is still shown,
+    /// else the newest shown.
+    pub fn current(&self) -> Option<&Arc<PageEntry>> {
+        let shown = self.shown();
+        self.view
+            .selected
+            .and_then(|n| shown.iter().find(|e| e.n == n).copied())
+            .or_else(|| shown.last().copied())
+    }
+
+    /// Shown pages not yet read.
+    pub fn unread(&self) -> usize {
+        self.shown()
+            .iter()
+            .filter(|e| !self.view.read.contains(&e.n))
+            .count()
+    }
+
+    /// The page before or after the current one, and its first screen. At
+    /// either end it stays: a list that wraps under the reader loses them.
+    pub fn step(&mut self, forward: bool) {
+        let shown: Vec<u64> = self.shown().iter().map(|e| e.n).collect();
+        let Some(at) = self
+            .current()
+            .and_then(|c| shown.iter().position(|&n| n == c.n))
+        else {
+            return;
+        };
+        let next = if forward {
+            (at + 1).min(shown.len() - 1)
+        } else {
+            at.saturating_sub(1)
+        };
+        // Back on the newest is following again.
+        self.view.selected = (next + 1 < shown.len()).then(|| shown[next]);
+        self.view.screen = 0;
+    }
+
+    /// READ: the page marked read, and on to its next screen. How many
+    /// screens a page has depends on the display's size, which only the face
+    /// knows; it takes this count modulo its own ([`Self::screen_of`]).
+    pub fn read_on(&mut self) {
+        let Some(n) = self.current().map(|e| e.n) else {
+            return;
+        };
+        self.view.read.insert(n);
+        self.view.screen = self.view.screen.wrapping_add(1);
+    }
+
+    /// The screen READ is on, for a page of `screens`.
+    pub fn screen_of(&self, screens: usize) -> usize {
+        self.view.screen % screens.max(1)
+    }
+
+    /// Make the current page's address this pager's, or go back to every
+    /// address.
+    pub fn toggle_mine(&mut self) {
+        self.view.mine = match self.view.mine {
+            Some(_) => None,
+            None => self.current().map(|e| e.page.ric),
+        };
+        self.view.selected = None;
+        self.view.screen = 0;
+    }
+
+    /// Empty the inbox. The session's count stays: those pages were received.
+    pub fn clear(&mut self) {
+        self.inbox.clear();
+        self.view.selected = None;
+        self.view.screen = 0;
+        self.view.read.clear();
+    }
+
     /// Add a received page, numbering it and letting the oldest go past
     /// [`INBOX_MAX`].
     pub fn push(&mut self, page: Page, link: Link, centre_hz: u64, at: Instant, unix_s: f64) {
@@ -85,7 +191,9 @@ impl PagerState {
             link,
         }));
         while self.inbox.len() > INBOX_MAX {
-            self.inbox.pop_front();
+            if let Some(gone) = self.inbox.pop_front() {
+                self.view.read.remove(&gone.n);
+            }
         }
     }
 }
@@ -120,6 +228,77 @@ mod tests {
             one_is_higher: false,
             batches: 1,
         }
+    }
+
+    fn with(rics: &[u32]) -> PagerState {
+        let mut s = PagerState::default();
+        let now = Instant::now();
+        for &ric in rics {
+            let mut p = page();
+            p.ric = ric;
+            s.push(p, link(), 439_987_500, now, 0.0);
+        }
+        s
+    }
+
+    /// The display follows the newest until a page is chosen, and a chosen
+    /// page stays chosen when a new one arrives.
+    #[test]
+    fn the_display_follows_until_a_page_is_chosen() {
+        let mut s = with(&[8, 16, 24]);
+        assert_eq!(s.current().map(|e| e.n), Some(3));
+        s.step(false);
+        assert_eq!(s.current().map(|e| e.n), Some(2));
+        s.push(page(), link(), 0, Instant::now(), 0.0);
+        assert_eq!(
+            s.current().map(|e| e.n),
+            Some(2),
+            "a new page does not move it"
+        );
+        s.step(true);
+        s.step(true);
+        assert_eq!(
+            (s.current().map(|e| e.n), s.view.selected),
+            (Some(4), None),
+            "following again"
+        );
+        s.step(true);
+        assert_eq!(s.current().map(|e| e.n), Some(4), "stays at the end");
+    }
+
+    /// My pager: only its address's pages, counted unread until read.
+    #[test]
+    fn my_pager_shows_its_own_pages() {
+        let mut s = with(&[8, 16, 8]);
+        s.toggle_mine();
+        assert_eq!(s.view.mine, Some(8));
+        assert_eq!(s.shown().len(), 2);
+        assert_eq!(s.unread(), 2);
+        s.read_on();
+        assert_eq!(s.unread(), 1);
+        s.toggle_mine();
+        assert_eq!((s.view.mine, s.shown().len()), (None, 3));
+    }
+
+    /// READ steps through a long page's screens and round again.
+    #[test]
+    fn read_steps_through_the_screens() {
+        let mut s = with(&[8]);
+        s.read_on();
+        s.read_on();
+        assert_eq!(s.screen_of(3), 2);
+        s.read_on();
+        assert_eq!(s.screen_of(3), 0);
+    }
+
+    /// Clearing empties the inbox and keeps the session's count.
+    #[test]
+    fn clearing_keeps_the_count() {
+        let mut s = with(&[8, 16]);
+        s.clear();
+        assert!(s.inbox.is_empty());
+        assert_eq!(s.received, 2);
+        assert!(s.current().is_none());
     }
 
     /// Numbered from one, never reused, the oldest let go past the cap and

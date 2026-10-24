@@ -608,6 +608,7 @@ impl App {
             markers,
             sweep_cfg,
             recall,
+            night,
         ) = {
             let m = self.state.lock().unwrap_or_else(|e| e.into_inner());
             (
@@ -629,6 +630,7 @@ impl App {
                 m.spectrum.markers.clone(),
                 m.sweep.config.clone(),
                 crate::state::recall_to_hz(&m.ui.recall),
+                m.pager.view.night,
             )
         };
         let cfg = AppConfig {
@@ -668,6 +670,7 @@ impl App {
             airspy: self.airspy_config.clone(),
             net: self.net_config.clone(),
             record: self.record_config.clone(),
+            pager: crate::config::PagerSettings { night },
             presets: self.user_presets.clone(),
         };
         let mut candidate = cfg.clone();

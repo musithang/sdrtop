@@ -1,0 +1,12 @@
+# The pager: a POCSAG pager's face, the page it was sent and how it came.
+section = "pocsag"
+slot    = 1
+title   = "Pager"
+blurb   = "a pager's face: what it was sent, and how"
+about   = "A POCSAG pager, as one looks: the page on its display, the buttons to page through and read, its address and the bits it took repairing. Received by sdrtop's own decoder at 512, 1200 or 2400 baud; m masks the text, u makes one address your pager."
+
+panels = [
+    { name = "header_slim", position = "top", height = 4 },
+    { name = "pager_face",  position = "body" },
+    { name = "footer",      position = "bottom" },
+]

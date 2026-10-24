@@ -45,6 +45,8 @@ pub use panels::core::spectrum::SpectrumPanel;
 pub use panels::core::system_resources::SystemResourcesPanel;
 pub use panels::core::waterfall::WaterfallPanel;
 
+pub use panels::radio::pager::PagerFacePanel;
+
 pub use panels::lab::adc_loading::AdcLoadingPanel;
 pub use panels::lab::bars::{LabBannerPanel, LabMarkerPanel};
 pub use panels::lab::fm_demod::FmDemodPanel;

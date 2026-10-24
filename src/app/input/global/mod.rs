@@ -34,6 +34,11 @@ use crossterm::event::{KeyCode, KeyEvent};
 use super::{InputCtx, KeyAction};
 
 pub(super) fn handle(key: KeyEvent, ctx: &mut InputCtx<'_>) -> KeyAction {
+    // The pager view's buttons, before the table: they claim their keys only
+    // on that view, and decline everywhere else.
+    if super::pager::handle(key, ctx) {
+        return KeyAction::Continue;
+    }
     match key.code {
         KeyCode::Esc => view::leave_focus_or_open_menu(ctx),
         KeyCode::Char('q') => return KeyAction::Quit,

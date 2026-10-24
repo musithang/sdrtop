@@ -3,7 +3,7 @@
 ← [Back](README.md)
 
 A *preset* is a named arrangement of panels: which ones are on screen, where they
-sit, and how much room each gets. sdrtop ships with twenty-seven, grouped into the
+sit, and how much room each gets. sdrtop ships with twenty-eight, grouped into the
 sections of the [menu](screens.md#the-menu), and you can write your own.
 
 There are two places to put one, and they behave identically:
@@ -23,7 +23,7 @@ name as a built-in (`command_rail`, `spectrum`, `waterfall`,
 `lab_sweep`, `micro_main`, `micro_signal`, `micro_gain`, `micro_health`,
 `micro_sweep`, `net`, `net_survey`, `net_census`, `net_ble`, `net_bt`,
 `net_piconet`, `net_bench`, `net_connection`, `net_coded`, `wifi_survey`,
-`wifi_frames`, `wifi_airtime`, `observer`) and your version replaces it, so the number key that
+`wifi_frames`, `wifi_airtime`, `radio_pocsag`, `observer`) and your version replaces it, so the number key that
 opens it now opens your layout. Those names are the whole list; a name that isn't
 on it is a new preset, which appears in the menu automatically rather than taking
 over a key.
@@ -98,7 +98,7 @@ nothing to rebuild; open the menu and it is there. The file is just the
 `panels = [...]` part, without the `[presets.name]` header, because the file name
 is the preset name.
 
-The twenty-seven built-in presets are written in exactly this format, so the quickest
+The twenty-eight built-in presets are written in exactly this format, so the quickest
 way to build on one is to copy it rather than transcribe it from the docs. They
 live in the source tree under `src/config/presets/`.
 
@@ -208,6 +208,10 @@ share of the time heard, frames a second and airtime a frame.
 `net_wifi_share`, the Airtime view's card: the share of the time the
 frames took over the last 20 s with its 1 sigma, the energy's beside it,
 and the rhythm, the gaps between frames against SIFS and DIFS.
+
+**Radio:** `pager_face`, a POCSAG pager as one looks: the page on its
+dot-matrix display, its address and what it took repairing, the buttons
+with their keys, and the link along the bottom.
 
 **Observer:** `observer`
 

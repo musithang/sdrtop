@@ -458,7 +458,13 @@ pub(super) fn initial_metrics(cfg: &AppConfig, boot: Boot) -> anyhow::Result<Sdr
         lab: crate::state::LabState::default(),
         demod: crate::state::DemodState::default(),
         net: crate::state::NetState::default(),
-        pager: crate::state::PagerState::default(),
+        pager: crate::state::PagerState {
+            view: crate::state::PagerView {
+                night: cfg.pager.night,
+                ..Default::default()
+            },
+            ..Default::default()
+        },
         record: crate::state::RecordState::default(),
         caps,
         device_options: Arc::new(Vec::new()),

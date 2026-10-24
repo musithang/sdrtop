@@ -24,6 +24,11 @@
 
 use super::bch::{self, Checked, IDLE};
 
+/// What [`Page::text`] writes where a character was lost: the Unicode
+/// replacement character, which no message can contain, so a hole is never
+/// mistaken for a `?` someone sent.
+pub const LOST: char = '\u{FFFD}';
+
 /// The two function bits, named as pagers name them: A is 00, D is 11.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Function {
@@ -172,19 +177,19 @@ impl Page {
             .count()
     }
 
-    /// The content as one line of text for a display, with `?` where a
+    /// The content as one line of text for a display, with [`LOST`] where a
     /// character was lost and `·` where a 7-bit code does not print.
     pub fn text(&self) -> String {
         match &self.content {
             Content::Tone => String::new(),
             Content::Numeric(chars) => chars
                 .iter()
-                .map(|c| c.map_or('?', Numeric::glyph))
+                .map(|c| c.map_or(LOST, Numeric::glyph))
                 .collect(),
             Content::Alpha(codes) => codes
                 .iter()
                 .map(|c| match c {
-                    None => '?',
+                    None => LOST,
                     Some(b @ 0x20..=0x7E) => *b as char,
                     Some(_) => '·',
                 })
@@ -529,7 +534,7 @@ pub(super) mod tests {
         assert_eq!(p.refused(), 1);
         let text = p.text();
         assert!(text.starts_with("AB"), "{text}");
-        assert!(text.contains('?'), "{text}");
+        assert!(text.contains(LOST), "{text}");
         assert!(text.ends_with("PQRST"), "{text}");
         assert_eq!(text.chars().count(), 20, "{text}");
     }

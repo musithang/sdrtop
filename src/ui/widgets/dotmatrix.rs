@@ -22,8 +22,10 @@
 
 use ratatui::{buffer::Buffer, layout::Rect, style::Color};
 
-/// A character that was lost on the way: drawn as a checker.
-pub const LOST: char = '\u{FFFD}';
+/// A character that was lost on the way: drawn as a checker. The page's
+/// own mark for one (`signal::pocsag::page::LOST`), so a page's text goes
+/// to the display as it is.
+pub const LOST: char = crate::signal::pocsag::page::LOST;
 
 /// Dots across one character, and the gap after it.
 const DOTS: u16 = 5;

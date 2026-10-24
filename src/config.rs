@@ -218,6 +218,20 @@ impl Default for NetSettings {
     }
 }
 
+/// `[pager]`: what the pager view keeps between runs. Only the backlight:
+/// which page was on the display, or whose pager it was, is a session's.
+#[derive(Deserialize, Serialize, Clone, Debug, Default, PartialEq, Eq)]
+pub struct PagerSettings {
+    #[serde(default)]
+    pub night: bool,
+}
+
+impl PagerSettings {
+    pub fn is_default(&self) -> bool {
+        *self == Self::default()
+    }
+}
+
 /// `[record]`: how long an IQ recording may run, whichever limit comes first.
 ///
 /// No in-app control changes these, so `App` holds the loaded block and
@@ -351,6 +365,9 @@ pub struct AppConfig {
     pub net: NetSettings,
     #[serde(default)]
     pub record: RecordSettings,
+    /// Written only once it differs from the default, as `[airspy]` is.
+    #[serde(default, skip_serializing_if = "PagerSettings::is_default")]
+    pub pager: PagerSettings,
     #[serde(default)]
     pub tinysa: TinySaSettings,
     /// Written only once it differs from the default, so a file from a radio
@@ -574,6 +591,10 @@ const BUILTIN_PRESETS: &[(&str, &str)] = &[
         include_str!("config/presets/wifi_survey.toml"),
     ),
     (
+        "radio_pocsag",
+        include_str!("config/presets/radio_pocsag.toml"),
+    ),
+    (
         "wifi_frames",
         include_str!("config/presets/wifi_frames.toml"),
     ),
@@ -794,7 +815,7 @@ panels = [
         // This is what makes `parse_builtin`'s `expect` safe: the text is compiled
         // in, so it cannot differ between here and the shipped binary.
         let cfg = LayoutConfig::default_config();
-        assert_eq!(cfg.presets.len(), 28, "twenty-eight built-ins");
+        assert_eq!(cfg.presets.len(), 29, "twenty-nine built-ins");
         assert_eq!(cfg.active_preset, DEFAULT_PRESET);
         for (name, preset) in &cfg.presets {
             assert!(!preset.panels.is_empty(), "{name} lists no panels");
@@ -864,7 +885,7 @@ panels = [
             "a new name should be added"
         );
         assert_eq!(cfg.presets["nightwatch"].panels.len(), 3);
-        assert_eq!(cfg.presets.len(), 29, "added, not replaced");
+        assert_eq!(cfg.presets.len(), 30, "added, not replaced");
         // And every built-in is still there.
         assert!(cfg.presets.contains_key("lab_signal"));
         let _ = std::fs::remove_dir_all(&dir);
@@ -875,7 +896,7 @@ panels = [
         let dir = presets_dir_with("replace", &[("lab_iq", A_LAYOUT)]);
         let cfg = LayoutConfig::with_user_presets(&HashMap::new(), Some(&dir));
         assert_eq!(cfg.presets["lab_iq"].panels.len(), 3, "the file should win");
-        assert_eq!(cfg.presets.len(), 28, "replaced, not added");
+        assert_eq!(cfg.presets.len(), 29, "replaced, not added");
         let _ = std::fs::remove_dir_all(&dir);
     }
 
@@ -934,8 +955,8 @@ panels = [
         assert!(!cfg.presets.contains_key("README"), "only .toml is read");
         assert_eq!(
             cfg.presets.len(),
-            29,
-            "twenty-eight built-ins plus the one good file"
+            30,
+            "twenty-nine built-ins plus the one good file"
         );
         let _ = std::fs::remove_dir_all(&dir);
     }
@@ -980,14 +1001,14 @@ panels = [
             LayoutConfig::with_user_presets(&HashMap::new(), None)
                 .presets
                 .len(),
-            28
+            29
         );
         let missing = std::env::temp_dir().join("sdrtop-presets-that-do-not-exist");
         assert_eq!(
             LayoutConfig::with_user_presets(&HashMap::new(), Some(&missing))
                 .presets
                 .len(),
-            28
+            29
         );
     }
 

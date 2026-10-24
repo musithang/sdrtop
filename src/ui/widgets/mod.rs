@@ -12,9 +12,6 @@ pub mod band_plan;
 pub mod bigdigits;
 pub mod canvas;
 pub mod charts;
-// Drawn by nothing until the pager face draws it. `expect` fails the build
-// as soon as it is, so this line cannot outlive its reason.
-#[cfg_attr(not(test), expect(dead_code))]
 pub mod dotmatrix;
 pub mod limit;
 pub mod micro_common;

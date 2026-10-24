@@ -82,6 +82,8 @@ const KNOWN: &[(&str, &str, Option<&str>)] = &[
         Some(WIFI_HEADING),
     ),
     (WIFI, "Wi-Fi", None),
+    // The Radio tile's first group: a pager.
+    (crate::signal::pocsag::SECTION, "POCSAG", None),
 ];
 
 /// One layout, as the menu shows it.
@@ -274,11 +276,11 @@ mod tests {
         }
     }
 
-    /// The built-ins land in nine sections, in order: the four Bluetooth
+    /// The built-ins land in ten sections, in order: the four Bluetooth
     /// groups, the band first among them, then Wi-Fi's Channel, its one
-    /// group with a view so far.
+    /// group with a view so far, then the Radio tile's POCSAG.
     #[test]
-    fn the_builtins_build_nine_sections() {
+    fn the_builtins_build_ten_sections() {
         let menu = build(&LayoutConfig::default_config().presets);
         let ids: Vec<&str> = menu.sections.iter().map(|s| s.id.as_str()).collect();
         assert_eq!(
@@ -292,7 +294,8 @@ mod tests {
                 "le",
                 "classic",
                 "coded",
-                "wifi_channel"
+                "wifi_channel",
+                "pocsag"
             ]
         );
         assert!(menu.warnings.is_empty(), "{:?}", menu.warnings);
@@ -318,7 +321,8 @@ mod tests {
                 "le",
                 "classic",
                 "coded",
-                "wifi_channel"
+                "wifi_channel",
+                "pocsag"
             ]
         );
         assert_eq!(menu.section("net").unwrap().title, "Band");
@@ -349,6 +353,7 @@ mod tests {
                 ("classic", Some("Bluetooth")),
                 ("coded", Some("Bluetooth")),
                 ("wifi_channel", Some("Wi-Fi")),
+                ("pocsag", None),
             ]
         );
     }
@@ -568,6 +573,7 @@ mod tests {
                 "classic",
                 "coded",
                 "wifi_channel",
+                "pocsag",
                 "nightwatch"
             ]
         );
