@@ -16,6 +16,54 @@ checkpoint instead of by version.
 
 ## [Unreleased]
 
+## [0.7.0] - 2026-10-24
+
+**A menu with doors, and a pager behind the first one.**
+
+The menu had run out of room: a column of sections and a column of views,
+and the number keys long since spoken for. It is tiles now, Radio, Lab,
+Options, Keys and Quit, each with a tree behind it. And the Radio tile is
+no longer a promise: its first view is a pager, drawn as one, with
+sdrtop's own POCSAG decoder behind the display, and beside it, as
+everywhere in sdrtop, how each page actually got there.
+
+### Added
+
+- **The pager** (Radio › Pagers › POCSAG › Pager). POCSAG at 512, 1200
+  and 2400 baud, decoded by sdrtop itself from ITU-R M.584, no paging
+  library. A pager face with a dot-matrix display, a NEW lamp and buttons
+  with their keys; an inbox of every page; and a card with the physics of
+  the page shown: the rate and its clock error, the shift against the
+  standard, the level and decision SNR, preamble and sync, the bits
+  repaired, the polarity, what decided numeric or text. Text is shown,
+  and `m` masks it everywhere at once. `u` makes it your pager, only one
+  address. `b` switches day and night, `l` steps the display's colour.
+  Tested off the air with a PortaPack sending and an Airspy R2 receiving:
+  numeric, text, tone only, functions A to D, both polarities.
+  ([The pager](user_docs/radio-pocsag.md))
+- **The menu, rebuilt.** Tiles across the top, Resume first when there is
+  a view to go back to, and a tree under Radio and Lab that opens column
+  by column, with a card that says what the view shows, where it listens
+  against the radio's reach and what will open. A view the radio cannot
+  do is listed in grey with the reason, instead of disappearing.
+- **The Lab benches, redrawn.** The Gain-Staging Level Diagram is a
+  staircase on the chain with the converter's window beside it; ADC
+  Loading a ladder of bits. The IQ Constellation is square, so a circle
+  is a circle, with an envelope profile beside it. IQ Diagnostics reads
+  the DC against the signal rather than against full scale. Timing
+  Diagnostics judges a late block against how much slack the radio's
+  driver actually has.
+
+### Changed
+
+- **One new config block**, `[pager]` (the display's day or night and its
+  colour), and nine optional theme keys for the pager's case and display
+  (`pager_*`, `lcd_*`). An older config and an older theme load as before.
+- The Image-Rejection Scope gives no figure for a signal running across
+  the LO, whose mirror is its own other half (a station at the centre
+  read as 3.6 dB of image rejection), and says when its figure is only a
+  lower bound.
+
 ## [0.6.9] - 2026-10-23
 
 **A Mac, an Airspy R2, and where a channel's time goes.**
@@ -1278,7 +1326,8 @@ sdrtop stopped being a one-radio program.
   image rejection ratio, wavelength and antenna metrics.
 - Config file with atomic save on quit, and the CLI flags that override it.
 
-[Unreleased]: https://github.com/musithang/sdrtop/compare/v0.6.9...HEAD
+[Unreleased]: https://github.com/musithang/sdrtop/compare/v0.7.0...HEAD
+[0.7.0]: https://github.com/musithang/sdrtop/compare/v0.6.9...v0.7.0
 [0.6.9]: https://github.com/musithang/sdrtop/compare/v0.6.8...v0.6.9
 [0.6.8]: https://github.com/musithang/sdrtop/compare/v0.6.7...v0.6.8
 [0.6.7]: https://github.com/musithang/sdrtop/compare/v0.6.6...v0.6.7

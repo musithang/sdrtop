@@ -32,7 +32,51 @@ in time.
 
 ---
 
-## 🍎 Checkpoint 31: A Mac, an R2, and where the time went *(you are here)*
+## 📟 Checkpoint 32: A pager, and a menu with doors *(you are here)*
+
+**0.7.0.** The minor number moves, because the menu is not the menu any more.
+
+**The menu.** It had been two columns, sections and views, and the number
+keys had run out a while ago. Now it is tiles: Radio, Lab, Options, Keys
+and Quit, with Resume in front when there is somewhere to go back to.
+Behind Radio and Lab is a tree, opened a column at a time, and a card that
+tells you what a view shows and where it listens against what your radio
+can actually reach. A view your radio cannot do is still there, in grey,
+with the reason written next to it, because a menu where things silently
+vanish is a menu you stop trusting.
+
+**The pager.** The Radio tile had been a row of good intentions. Its first
+real view is a pager: a drawn one, case and buttons and a dot-matrix
+display with every unlit dot showing, the way the real ones looked. The
+decoder is sdrtop's own, POCSAG straight from the ITU Recommendation, no
+library, and beside the face sits the part a real pager never had: the
+card that says how the page got there. Rate and clock error, shift,
+level, the bits it repaired, and what decided whether it was digits or
+text.
+
+That last one earned its place on day one. The first page I ever sent it
+was "sdrtop is awesome", which came out as `372U 9][68382-37058[]`. Every
+bit was right; the sender had simply put text under the function that
+"usually" means numbers. So now the content gets a vote, and the card
+says when it overruled the function. Then a PortaPack sent everything it
+could think of (numeric, text, tone only, A to D, inverted) and an Airspy
+R2 read every one. Then it read a few pages nobody sent, a second after
+the real one, out of the noise after the transmitter stopped. It knows
+when a transmission is over now.
+
+`m` masks the text, `u` makes it your pager, `b` turns the backlight to
+night, and `l` paints the display green, amber, blue, grey or red, which
+is the most important feature of the release and nobody can tell me
+otherwise. [The pager](radio-pocsag.md).
+
+**The Lab, redrawn.** The gain staging is a staircase on the chain now,
+the ADC a ladder of bits, the constellation finally square (a circle is
+a circle), and the IQ and timing benches judge what they see against the
+signal and the radio's own slack instead of against full scale.
+
+---
+
+## 🍎 Checkpoint 31: A Mac, an R2, and where the time went
 
 **0.6.9.** Three things at once, which is two more than a sensible person
 would ship together.
