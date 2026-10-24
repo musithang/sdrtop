@@ -15,6 +15,11 @@ pub mod fft;
 pub mod iq;
 pub mod net;
 pub mod noise_slope;
+// Received and tested ahead of the worker and the face that will use it.
+// `expect` fails the build as soon as something outside the tests reads it,
+// so this line cannot outlive its reason.
+#[cfg_attr(not(test), expect(dead_code))]
+pub mod pocsag;
 pub mod power;
 pub mod rds;
 pub mod rds_demod;
