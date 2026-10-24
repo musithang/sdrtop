@@ -80,6 +80,9 @@ The full set of fields:
 | `wifi_non_ht` `wifi_ht` `wifi_vht` `wifi_he` `wifi_eht` `wifi_dsss` | A Wi-Fi frame's format (802.11a/g, n, ac, ax, be and b), the same on every Wi-Fi view. Optional: left out, they take the `series` colours in order |
 | `wifi_other_channel` | A frame of another channel heard on this one. Optional: left out, it takes `label` |
 | `wifi_undecoded` | A frame whose signalling did not read. Optional: left out, it takes `value` |
+| `pager_case` `pager_edge` `pager_bezel` | The pager on the POCSAG view: its plastic case, the case's moulded edge, and the bezel round its display. Optional: left out, the case and bezel take `stale` and the edge `border_dim` |
+| `lcd_day_glass` `lcd_day_ink` `lcd_day_ghost` | The pager's display by day: the glass, the lit dots, and an unlit dot, which a real display shows faintly as part of every character's cell. Keep the ghost a shade off the glass, or the cells read as letters. Optional: left out, the glass takes `value`, the ink `stale` and the ghost the glass (no cells shown) |
+| `lcd_night_glass` `lcd_night_ink` `lcd_night_ghost` | The same display in its night backlight. Optional: left out, the glass takes `stale` and the ink `value_hi` |
 
 Overrides are preserved when you quit with `q`, along with everything else in
 your config.
@@ -109,8 +112,8 @@ That is the whole installation step. There is no list to register the name in an
 nothing to rebuild.
 
 A theme file names itself, gives the fourteen required colours from the table
-above (`net_ble`, `net_bt`, `net_wifi` and the `wifi_` colours may be left
-out), and
+above (`net_ble`, `net_bt`, `net_wifi` and the `wifi_`, `pager_` and `lcd_`
+colours may be left out), and
 lists the gradient the spectrum and waterfall are painted with:
 
 ```toml

@@ -138,6 +138,15 @@ pub struct ThemeConfig {
     pub wifi_dsss: Option<String>,
     pub wifi_other_channel: Option<String>,
     pub wifi_undecoded: Option<String>,
+    pub pager_case: Option<String>,
+    pub pager_edge: Option<String>,
+    pub pager_bezel: Option<String>,
+    pub lcd_day_glass: Option<String>,
+    pub lcd_day_ink: Option<String>,
+    pub lcd_day_ghost: Option<String>,
+    pub lcd_night_glass: Option<String>,
+    pub lcd_night_ink: Option<String>,
+    pub lcd_night_ghost: Option<String>,
 }
 
 impl ThemeConfig {
@@ -421,6 +430,15 @@ impl AppConfig {
         apply!(wifi_dsss);
         apply!(wifi_other_channel);
         apply!(wifi_undecoded);
+        apply!(pager_case);
+        apply!(pager_edge);
+        apply!(pager_bezel);
+        apply!(lcd_day_glass);
+        apply!(lcd_day_ink);
+        apply!(lcd_day_ghost);
+        apply!(lcd_night_glass);
+        apply!(lcd_night_ink);
+        apply!(lcd_night_ghost);
         t
     }
 
@@ -1467,6 +1485,18 @@ panels = [
         let cfg: AppConfig = toml::from_str(toml).unwrap();
         let t = cfg.build_theme(None);
         assert_eq!(t.border_accent, ratatui::style::Color::Rgb(255, 0, 0));
+    }
+
+    /// The pager display's colours are overridden per field like every other.
+    #[test]
+    fn build_theme_override_applies_to_the_pager_display() {
+        let toml = "[theme]\nbase = \"sdr\"\nlcd_night_ink = \"#123456\"\n";
+        let cfg: AppConfig = toml::from_str(toml).unwrap();
+        let t = cfg.build_theme(None);
+        assert_eq!(
+            t.lcd(true).ink,
+            ratatui::style::Color::Rgb(0x12, 0x34, 0x56)
+        );
     }
 
     /// Wi-Fi's colour is overridden per field like every other.

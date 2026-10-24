@@ -79,6 +79,29 @@ pub struct ThemeFile {
     pub wifi_other_channel: Option<String>,
     #[serde(default)]
     pub wifi_undecoded: Option<String>,
+    /// The pager's colours. Optional for the same reason: absent, they are
+    /// the theme's own (the case and bezel its `stale`, the edge its
+    /// `border_dim`; the day display its `value` glass and `stale` ink, the
+    /// night its `stale` glass and `value_hi` ink; no ghost dots, each ghost
+    /// its glass).
+    #[serde(default)]
+    pub pager_case: Option<String>,
+    #[serde(default)]
+    pub pager_edge: Option<String>,
+    #[serde(default)]
+    pub pager_bezel: Option<String>,
+    #[serde(default)]
+    pub lcd_day_glass: Option<String>,
+    #[serde(default)]
+    pub lcd_day_ink: Option<String>,
+    #[serde(default)]
+    pub lcd_day_ghost: Option<String>,
+    #[serde(default)]
+    pub lcd_night_glass: Option<String>,
+    #[serde(default)]
+    pub lcd_night_ink: Option<String>,
+    #[serde(default)]
+    pub lcd_night_ghost: Option<String>,
     /// The series colours. Optional for the same reason: absent, a theme's
     /// own accents stand in, in an order that keeps neighbours apart.
     #[serde(default)]
@@ -175,6 +198,16 @@ impl ThemeFile {
             wifi_dsss: ink("wifi_dsss", &self.wifi_dsss, nth(5))?,
             wifi_other_channel: ink("wifi_other_channel", &self.wifi_other_channel, hex!(label))?,
             wifi_undecoded: ink("wifi_undecoded", &self.wifi_undecoded, hex!(value))?,
+            pager_case: ink("pager_case", &self.pager_case, hex!(stale))?,
+            pager_edge: ink("pager_edge", &self.pager_edge, hex!(border_dim))?,
+            pager_bezel: ink("pager_bezel", &self.pager_bezel, hex!(stale))?,
+            lcd_day_glass: ink("lcd_day_glass", &self.lcd_day_glass, hex!(value))?,
+            lcd_day_ink: ink("lcd_day_ink", &self.lcd_day_ink, hex!(stale))?,
+            lcd_day_ghost: ink("lcd_day_ghost", &self.lcd_day_ghost, hex!(value))?,
+            lcd_night_glass: ink("lcd_night_glass", &self.lcd_night_glass, hex!(stale))?,
+            lcd_night_ink: ink("lcd_night_ink", &self.lcd_night_ink, hex!(value_hi))?,
+            lcd_night_ghost: ink("lcd_night_ghost", &self.lcd_night_ghost, hex!(stale))?,
+
             palette: self
                 .palette
                 .iter()

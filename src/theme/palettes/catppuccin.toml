@@ -29,6 +29,16 @@ wifi_other_channel = "#585b70"   # a frame of another channel heard here: quiet,
 wifi_undecoded = "#cdd6f4"   # signalling that did not read
 series         = ["#74c7ec", "#f9e2af", "#f5c2e7", "#a6e3a1", "#b4befe", "#f38ba8"]   # one colour per piconet on the classic hop scatter, told apart from each other
 
+pager_case     = "#313244"   # the pager's case
+pager_edge     = "#45475a"   # its moulded edge
+pager_bezel    = "#11111b"   # the bezel round its display
+lcd_day_glass  = "#a3b896"   # the display by day: green STN glass
+lcd_day_ink    = "#1e1e2e"   # its ink
+lcd_day_ghost  = "#9baf8f"   # an unlit dot, a shade off the glass
+lcd_night_glass = "#231d14"   # the display by night: an amber backlight
+lcd_night_ink  = "#f9e2af"   # its ink
+lcd_night_ghost = "#2a2318"   # an unlit dot
+
 # The spectrum and waterfall gradient, cold (weak) to hot (strong).
 # `at` is the position in 0.0..1.0; the stops must climb.
 palette = [

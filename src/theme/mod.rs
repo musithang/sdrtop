@@ -58,6 +58,21 @@ pub struct Theme {
     pub wifi_other_channel: Color,
     pub wifi_undecoded: Color,
 
+    // The pager: its case, the case's moulded edge, the bezel round the
+    // display, and the display itself in two backlights, day (a green STN
+    // glass with dark ink) and night (an amber backlight). `ghost` is an
+    // unlit dot, a shade off the glass, as a real character display shows
+    // its cells.
+    pub pager_case: Color,
+    pub pager_edge: Color,
+    pub pager_bezel: Color,
+    pub lcd_day_glass: Color,
+    pub lcd_day_ink: Color,
+    pub lcd_day_ghost: Color,
+    pub lcd_night_glass: Color,
+    pub lcd_night_ink: Color,
+    pub lcd_night_ghost: Color,
+
     // Series: one colour per thing told apart on one plot, in order (the
     // classic hop scatter's piconets). Never empty; a plot with more things
     // than colours reuses them in order, and says so.
@@ -89,6 +104,24 @@ impl Theme {
             Family::Eht => self.wifi_eht,
             Family::Dsss => self.wifi_dsss,
             Family::Undecoded => self.wifi_undecoded,
+        }
+    }
+
+    /// The pager display's three inks, in the day or the night backlight.
+    pub fn lcd(&self, night: bool) -> crate::ui::widgets::dotmatrix::Look {
+        use crate::ui::widgets::dotmatrix::Look;
+        if night {
+            Look {
+                glass: self.lcd_night_glass,
+                ink: self.lcd_night_ink,
+                ghost: self.lcd_night_ghost,
+            }
+        } else {
+            Look {
+                glass: self.lcd_day_glass,
+                ink: self.lcd_day_ink,
+                ghost: self.lcd_day_ghost,
+            }
         }
     }
 
@@ -302,6 +335,39 @@ mod tests {
         }
     }
 
+    /// **The pager's display reads in both backlights, in every theme.** Each
+    /// built-in states its own pager colours (not the fallback); the ink
+    /// stands well off the glass, and an unlit dot sits just off it: there
+    /// to be seen as a cell, never mistaken for a lit dot.
+    #[test]
+    fn every_pager_display_reads() {
+        for name in Theme::builtin_names() {
+            let text = BUILTIN.iter().find(|(n, _)| *n == name).unwrap().1;
+            let file = data::ThemeFile::parse(text).unwrap();
+            assert!(
+                file.lcd_day_glass.is_some()
+                    && file.lcd_night_ink.is_some()
+                    && file.pager_case.is_some(),
+                "{name} relies on the pager fallback"
+            );
+            let t = Theme::builtin(name).unwrap();
+            for night in [false, true] {
+                let l = t.lcd(night);
+                let ink = ciede2000(l.ink, l.glass);
+                let ghost = ciede2000(l.ghost, l.glass);
+                assert!(
+                    ink >= 40.0,
+                    "{name} night={night}: ink only {ink:.1} off the glass"
+                );
+                assert!(
+                    (0.8..=6.0).contains(&ghost),
+                    "{name} night={night}: a ghost dot {ghost:.1} off the glass"
+                );
+                assert!(ghost < ink / 5.0, "{name} night={night}");
+            }
+        }
+    }
+
     /// **Series colours are told apart at a glance.** Every built-in states
     /// its own six (not the fallback), and no two of them sit closer than 60
     /// (Euclidean, 0-255 RGB): two piconets in near colours would read as one
@@ -438,6 +504,11 @@ mod tests {
         }
         assert_eq!(t.wifi(Family::Undecoded), t.value);
         assert_eq!(t.wifi_other_channel, t.label);
+        // The pager: the theme's own colours, and no ghost dots.
+        assert_eq!(t.pager_case, t.stale);
+        assert_eq!(t.lcd(false).ink, t.stale);
+        assert_eq!(t.lcd(false).ghost, t.lcd(false).glass);
+        assert_eq!(t.lcd(true).ink, t.value_hi);
     }
 
     /// CIEDE2000, the perceptual distance between two colours: what the eye
