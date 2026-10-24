@@ -13,6 +13,7 @@ section = "wifi_channel"
 slot    = 2
 title   = "Frames"
 blurb   = "what is on this channel, frame by frame"
+about   = "Every frame on the channel as it passes, coloured by Wi-Fi generation, with how strong and how clean each one was."
 
 panels = [
     { name = "header",          position = "top", height = 5 },

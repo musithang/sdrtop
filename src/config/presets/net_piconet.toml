@@ -12,6 +12,7 @@ section = "classic"
 slot    = 2
 title   = "Packets"
 blurb   = "one piconet, packet by packet"
+about   = "One classic piconet, packet by packet."
 
 panels = [
     { name = "header",         position = "top", height = 5 },

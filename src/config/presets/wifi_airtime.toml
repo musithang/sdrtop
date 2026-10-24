@@ -16,6 +16,7 @@ section = "wifi_channel"
 slot    = 3
 title   = "Airtime"
 blurb   = "what is spending this channel's time"
+about   = "Where the channel's time goes: which kinds of frames spend it, and how much is left."
 
 panels = [
     { name = "header",           position = "top", height = 5 },

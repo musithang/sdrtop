@@ -7,6 +7,7 @@ section = "lab"
 slot    = 3
 title   = "Timing"
 blurb   = "jitter, drops, scheduling"
+about   = "Whether the samples arrive on time and whole: late blocks, drops, and the clock measured against the rate asked for."
 
 panels = [
     { name = "header",              position = "top", height = 5 },

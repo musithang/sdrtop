@@ -5,6 +5,7 @@ section = "lab"
 slot    = 2
 title   = "RF"
 blurb   = "chain, noise figure, level line up"
+about   = "The gain chain stage by stage, the noise figure where the radio publishes its front end, and how close the converter is to clipping."
 
 panels = [
     { name = "header",         position = "top", height = 5 },

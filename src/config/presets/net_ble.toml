@@ -15,6 +15,7 @@ section = "le"
 slot    = 2
 title   = "Advertising"
 blurb   = "what is this device advertising"
+about   = "What one device's advertising packets say, packet by packet, with how cleanly each was received."
 
 panels = [
     { name = "header",          position = "top", height = 5 },

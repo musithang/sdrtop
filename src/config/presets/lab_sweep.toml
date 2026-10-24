@@ -6,6 +6,7 @@ section = "sweep"
 slot    = 1
 title   = "Band sweep"
 blurb   = "scan a range, hold the peaks"
+about   = "Steps across a range wider than the radio sees at once, and holds the strongest reading at each frequency."
 
 panels = [
     { name = "header",          position = "top", height = 3 },

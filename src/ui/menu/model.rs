@@ -93,6 +93,8 @@ pub struct Entry {
     pub slot: Option<u8>,
     pub title: String,
     pub blurb: Option<String>,
+    /// What the card says it shows (`PresetConfig::about`).
+    pub about: Option<String>,
 }
 
 /// A named group of layouts.
@@ -201,6 +203,7 @@ pub fn build(presets: &HashMap<String, PresetConfig>) -> Menu {
             slot,
             title: preset.title.clone().unwrap_or_else(|| name.clone()),
             blurb: preset.blurb.clone(),
+            about: preset.about.clone(),
         });
     }
 

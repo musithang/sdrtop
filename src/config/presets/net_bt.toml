@@ -19,6 +19,7 @@ section = "classic"
 slot    = 1
 title   = "Piconets"
 blurb   = "who is here, the old way"
+about   = "Every classic piconet heard, one row each, with how well its hops were caught."
 
 panels = [
     { name = "header",        position = "top", height = 5 },

@@ -17,6 +17,7 @@ section = "net"
 slot    = 2
 title   = "Survey"
 blurb   = "what is in this band"
+about   = "Energy across the whole band, channel by channel: what is busy, what is quiet, and who is there."
 
 panels = [
     { name = "header",            position = "top", height = 5 },

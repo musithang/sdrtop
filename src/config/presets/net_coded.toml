@@ -15,6 +15,7 @@ section = "coded"
 slot    = 1
 title   = "Long range"
 blurb   = "who advertises on LE Coded"
+about   = "Devices advertising on LE Coded, the slow long-reach mode, and how cleanly they were heard."
 
 panels = [
     { name = "header",            position = "top", height = 5 },

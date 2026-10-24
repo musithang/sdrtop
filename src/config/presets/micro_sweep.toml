@@ -4,6 +4,7 @@ section = "sweep"
 slot    = 2
 title   = "Sweep, micro"
 blurb   = "the scan in a small window"
+about   = "The same sweep, small enough for a corner of the screen."
 
 panels = [
     { name = "micro_sweep_panel",  position = "body" },

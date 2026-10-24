@@ -12,6 +12,7 @@ section = "le"
 slot    = 1
 title   = "Census"
 blurb   = "who is here"
+about   = "Every Low Energy device announcing itself near you, one row each: how strong, how often, how steady its transmitter is. Nothing is joined or paired; sdrtop only listens."
 
 panels = [
     { name = "header",     position = "top", height = 5 },

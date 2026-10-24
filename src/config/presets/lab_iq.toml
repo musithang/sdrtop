@@ -7,6 +7,7 @@ section = "lab"
 slot    = 1
 title   = "IQ"
 blurb   = "constellation, image rejection, DC"
+about   = "Whether the receiver's two halves agree. A mismatch shows as a mirror image of every signal; this measures how far down it is and where the DC spike sits."
 
 panels = [
     { name = "header",            position = "top", height = 5 },

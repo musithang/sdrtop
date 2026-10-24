@@ -504,6 +504,11 @@ pub struct PresetConfig {
     /// The second line under the title in the menu. Absent means no second line.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub blurb: Option<String>,
+
+    /// What the menu's card says this layout shows, in a sentence or two.
+    /// Absent means the card gives only the title and the blurb.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub about: Option<String>,
 }
 
 /// The sixteen built-in layouts, embedded at compile time.
@@ -741,7 +746,7 @@ panels = [
     #[test]
     fn no_builtin_preset_names_a_key_that_is_never_read() {
         const PANEL_KEYS: &[&str] = &["name", "position", "height", "width_pct"];
-        const PRESET_KEYS: &[&str] = &["panels", "section", "slot", "title", "blurb"];
+        const PRESET_KEYS: &[&str] = &["panels", "section", "slot", "title", "blurb", "about"];
 
         for (name, text) in BUILTIN_PRESETS {
             let value: toml::Value =

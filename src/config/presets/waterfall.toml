@@ -4,6 +4,7 @@ section = "command_rail"
 slot    = 3
 title   = "Waterfall"
 blurb   = "full width waterfall"
+about   = "The waterfall across the whole screen: what came and went over the last minutes."
 
 panels = [
     { name = "header",     position = "top", height = 5 },

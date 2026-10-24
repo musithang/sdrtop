@@ -345,7 +345,54 @@ impl LayoutEngine {
 
     /// Where every panel of the active layout goes on a screen of `size`.
     fn place(&self, size: Rect, state: &SdrMetrics) -> Placement<'_> {
-        let specs = self.config.active_panels();
+        self.place_specs(self.config.active_panels(), size, state)
+    }
+
+    /// Where each panel of layout `preset` would go on a screen of `size`,
+    /// named as its frame names it: the menu's map of a view, drawn from the
+    /// placement the deck itself would use rather than from a picture of it.
+    /// Empty for a preset the table does not hold.
+    #[cfg_attr(not(test), expect(dead_code))]
+    pub fn placement_of(
+        &self,
+        preset: &str,
+        size: Rect,
+        state: &SdrMetrics,
+    ) -> Vec<(String, Rect)> {
+        let Some(config) = self.config.presets.get(preset) else {
+            return Vec::new();
+        };
+        let name = |panel: &str| {
+            let title = self
+                .registry
+                .get(panel)
+                .map(|p| p.chrome(state).title.replace('_', ""))
+                .unwrap_or_default();
+            if title.is_empty() {
+                panel.replace('_', " ")
+            } else {
+                title
+            }
+        };
+        let placed = self.place_specs(&config.panels, size, state);
+        let mut out: Vec<(String, Rect)> = placed
+            .stacked
+            .iter()
+            .map(|(spec, r)| (name(&spec.name), *r))
+            .collect();
+        if let Some((upper, lower, halves)) = placed.bonded {
+            out.push((name(upper.name()), halves[0]));
+            out.push((name(lower.name()), halves[1]));
+        }
+        out
+    }
+
+    fn place_specs<'a>(
+        &'a self,
+        specs: &'a [crate::config::PanelSpec],
+        size: Rect,
+        state: &SdrMetrics,
+    ) -> Placement<'a> {
         let visible = |name: &str| !self.hidden_panels.contains(name);
         let mut placed = Placement {
             stacked: Vec::new(),
@@ -915,6 +962,27 @@ mod tests {
         assert!(e.scope().is_none());
         assert_eq!(e.preset_in_scope(1), None);
         assert_eq!(e.next_in_scope(), None);
+    }
+
+    /// The menu's map of a view is the deck's own placement of that view,
+    /// whichever view is active, named as the frames name the panels.
+    #[test]
+    fn a_views_placement_is_the_decks_own() {
+        let (mut engine, _) =
+            crate::app::App::build_ui("command_rail", &HashMap::new(), None, true);
+        let m = SdrMetrics::fixture();
+        let size = Rect::new(0, 0, 191, 41);
+        let placed = engine.placement_of("lab_iq", size, &m);
+        assert!(placed.len() >= 5, "{placed:?}");
+        assert!(placed.iter().all(|(_, r)| r.intersection(size) == *r));
+        assert!(
+            placed.iter().any(|(n, _)| n.contains("Constellation")),
+            "{placed:?}"
+        );
+        engine.set_preset("lab_iq");
+        let constellation = engine.area_of("iq_constellation", size, &m).unwrap();
+        assert!(placed.iter().any(|(_, r)| *r == constellation));
+        assert!(engine.placement_of("no_such_view", size, &m).is_empty());
     }
 
     /// The built-ins file themselves cleanly, so a default install logs nothing

@@ -5,6 +5,7 @@ section = "command_rail"
 slot    = 4
 title   = "Spectrum + Waterfall"
 blurb   = "bonded pair, one shared ruler"
+about   = "The spectrum over the waterfall on one shared frequency ruler, so a peak and its history line up."
 
 panels = [
     { name = "header",     position = "top", height = 5 },

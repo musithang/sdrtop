@@ -10,6 +10,7 @@ section = "le"
 slot    = 3
 title   = "Connection"
 blurb   = "one connection, event by event"
+about   = "One Low Energy connection, followed from event to event as it hops."
 
 panels = [
     { name = "header",             position = "top", height = 5 },

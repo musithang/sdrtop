@@ -20,6 +20,9 @@
 //! - [`tiles`]: the top row of square tiles.
 //! - [`crumb`]: the whole path, over the cascade.
 //! - [`ink`]: a tree row's colour role on the theme.
+//! - [`cascade`]: the columns down the path.
+//! - [`card`]: what the row under the cursor is; it draws [`ruler`] and
+//!   [`map`].
 //!
 //! [`render`] is the orchestrator. It resolves the frame, carves the rows and
 //! columns, and calls each part once. **The parts do not call each other.**
@@ -35,9 +38,17 @@ pub mod sections;
 // build as soon as the menu reads one, so these lines cannot outlive their
 // reason.
 #[cfg_attr(not(test), expect(dead_code))]
+pub mod card;
+#[cfg_attr(not(test), expect(dead_code))]
+pub mod cascade;
+#[cfg_attr(not(test), expect(dead_code))]
 pub mod crumb;
 #[cfg_attr(not(test), expect(dead_code))]
 pub mod ink;
+#[cfg_attr(not(test), expect(dead_code))]
+pub mod map;
+#[cfg_attr(not(test), expect(dead_code))]
+pub mod ruler;
 #[cfg_attr(not(test), expect(dead_code))]
 pub mod tiles;
 #[cfg_attr(not(test), expect(dead_code))]

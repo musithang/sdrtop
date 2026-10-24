@@ -4,6 +4,7 @@ section = "micro"
 slot    = 2
 title   = "Signal"
 blurb   = "level and quality only"
+about   = "Signal level and quality in large type, and nothing else."
 
 panels = [
     { name = "micro_signal_panel",  position = "body" },

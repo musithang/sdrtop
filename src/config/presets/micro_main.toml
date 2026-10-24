@@ -5,6 +5,7 @@ section = "micro"
 slot    = 1
 title   = "Main"
 blurb   = "the essentials, large type"
+about   = "The essential readings in large type."
 
 panels = [
     { name = "micro_panel",  position = "body" },

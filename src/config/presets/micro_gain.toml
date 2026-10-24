@@ -4,6 +4,7 @@ section = "micro"
 slot    = 3
 title   = "Gain"
 blurb   = "the gain chain, large type"
+about   = "The gain chain in large type."
 
 panels = [
     { name = "micro_gain_panel",  position = "body" },
