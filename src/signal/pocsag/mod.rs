@@ -11,10 +11,20 @@
 //! - [`bch`]: one codeword, checked and repaired, or refused.
 //! - [`page`]: batches to pages: the address from the codeword and its frame,
 //!   the message across codewords and batches, what was lost kept as lost.
+//! - [`channel`]: the paging channel out of the radio's stream, continuous
+//!   across blocks.
+//! - [`clock`]: the bit clock, followed as the transmitter's drifts.
+//! - [`demod`]: the channel's samples to pages, at 512, 1200 and 2400 baud,
+//!   with what each transmission measured.
 //!
 //! **A page is not testimony on its own** (POLICY.md, rule 3). Every page
 //! keeps the codewords it was read from and what each needed repairing, so
 //! the screen can say what the link took, not only what it carried.
 
 pub mod bch;
+pub mod channel;
+pub mod clock;
+#[cfg(test)]
+mod conformance;
+pub mod demod;
 pub mod page;
