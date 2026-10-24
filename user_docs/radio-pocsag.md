@@ -143,6 +143,14 @@ bits are repaired (and counted), three are refused rather than "repaired"
 into a different codeword. A refused codeword's characters are lost, and
 two in a row end the page, as §2.5.1 asks.
 
+**A transmission ends when its signal does.** Some transmitters send the
+next sync word and then simply stop. Read on regardless, the noise after it
+is sixteen more "codewords", and enough of them pass the check to print a
+page or two from addresses nobody sent, a second after the real one. So
+every word must stand on the two levels the transmission's own bits stood
+on; noise has no levels to stand on, and the first word that does not ends
+the transmission there. Nothing read after it reaches a page or the card.
+
 **Numeric or text?** The Recommendation gives numeric pages function A and
 text pages function D, and calls this "regarded as standard", which is
 standards language for "usually". A pager knows its format from how it was

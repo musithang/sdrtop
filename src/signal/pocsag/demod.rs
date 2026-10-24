@@ -18,6 +18,15 @@
 //! its codewords and would print addresses nobody sent. A pager joining
 //! mid-transmission (§2.3) still locks, on the next exact sync word.
 //!
+//! **A transmission ends when its signal does.** Transmitters stop mid-batch,
+//! and some send the next sync word before they do: a PortaPack Mayhem does,
+//! and the sixteen "codewords" read from the noise after it passed the check
+//! often enough to print two or three pages from addresses nobody sent, a
+//! second after the real one. Every word is now held to its bits standing on
+//! the two levels the transmission's own bits stand on ([`word_spread`]); the
+//! first one that does not ends the transmission there, and neither it nor
+//! anything after it reaches a page or the link's measurements.
+//!
 //! **The polarity is found, not assumed.** The sync word is matched as sent
 //! and inverted; [`Link::one_is_higher`] says which frequency carried a 1.
 //! Nothing here names one of them "normal".
@@ -44,6 +53,11 @@ const PREAMBLE_MIN: u32 = 32;
 /// Wrong bits a sync word may have when a preamble came first, or inside a
 /// transmission already locked.
 const SYNC_ERRORS: u32 = 2;
+
+/// The most a word's bits may stand off their levels ([`word_spread`]) and
+/// still be signal. Measured: a clean or 3 dB transmission's words sit at
+/// 0.01 to 0.15, noise read after the carrier stops at 0.69 to 0.96.
+const SIGNAL_SPREAD_MAX: f64 = 0.45;
 
 /// What one transmission measured, from its first sync word to the page.
 #[derive(Clone, Debug, PartialEq)]
@@ -157,12 +171,21 @@ struct Rx {
     runs: std::collections::VecDeque<u32>,
     lock: Option<Lock>,
     assembler: Assembler,
+    /// Every word's spread, for the tests to see the gate's two sides.
+    #[cfg(test)]
+    spreads: Vec<f64>,
 }
 
 struct Lock {
     inverted: bool,
     word: u32,
     bits: u32,
+    /// The current word's bits as decided, with their levels.
+    pending: Vec<(bool, f64)>,
+    /// The sums as the last word that was signal left them. The bits are
+    /// counted as they come, so the threshold follows them as before; a
+    /// word that turns out to be noise is taken back out by restoring this.
+    before: Stats,
     words: Vec<u32>,
     /// Reading the sync word between batches rather than a codeword.
     expecting_sync: bool,
@@ -173,13 +196,13 @@ struct Lock {
 enum Next {
     Nothing,
     Batch([u32; 16]),
-    /// The sync word that should follow a batch did not: the transmission
-    /// is over, or lost.
+    /// The sync word that should follow a batch did not, or a word was no
+    /// longer signal: the transmission is over, or lost.
     Lost,
 }
 
 /// The transmission's running sums.
-#[derive(Default)]
+#[derive(Clone, Default)]
 struct Stats {
     preamble: u32,
     sync_errors: u32,
@@ -210,6 +233,8 @@ impl Rx {
             runs: std::collections::VecDeque::with_capacity(33),
             lock: None,
             assembler: Assembler::default(),
+            #[cfg(test)]
+            spreads: Vec::new(),
         }
     }
 
@@ -294,6 +319,7 @@ impl Rx {
         if let (Some(h), Some(l)) = (mean(s.hi), mean(s.lo)) {
             self.threshold = (h + l) / 2.0;
         }
+        lock.pending.push((high, value));
         let bit = high != lock.inverted;
         lock.word = (lock.word << 1) | u32::from(bit);
         lock.bits += 1;
@@ -302,6 +328,17 @@ impl Rx {
         }
         lock.bits = 0;
         let word = lock.word;
+        // Is this word still signal? Its bits against the two levels the
+        // transmission stood on before it, else this word's own.
+        let spread = word_spread(&lock.pending, &lock.before);
+        lock.pending.clear();
+        #[cfg(test)]
+        self.spreads.push(spread);
+        if spread > SIGNAL_SPREAD_MAX {
+            lock.stats = lock.before.clone();
+            return Next::Lost;
+        }
+        lock.before = lock.stats.clone();
         if lock.expecting_sync {
             if (word ^ SYNC).count_ones() <= SYNC_ERRORS {
                 lock.expecting_sync = false;
@@ -336,17 +373,20 @@ impl Rx {
                 0
             };
             if errors <= allowed {
+                let stats = Stats {
+                    preamble,
+                    sync_errors: errors,
+                    ..Stats::default()
+                };
                 self.lock = Some(Lock {
                     inverted,
                     word: 0,
                     bits: 0,
+                    pending: Vec::with_capacity(32),
+                    before: stats.clone(),
                     words: Vec::with_capacity(16),
                     expecting_sync: false,
-                    stats: Stats {
-                        preamble,
-                        sync_errors: errors,
-                        ..Stats::default()
-                    },
+                    stats,
                 });
                 return;
             }
@@ -429,7 +469,7 @@ impl Rx {
 }
 
 /// A least-squares straight line through points added one at a time.
-#[derive(Default)]
+#[derive(Clone, Default)]
 struct Line {
     n: f64,
     sx: f64,
@@ -452,6 +492,29 @@ impl Line {
         let d = self.n * self.sxx - self.sx * self.sx;
         (self.n >= 2.0 && d > 0.0).then(|| (self.n * self.sxy - self.sx * self.sy) / d)
     }
+}
+
+/// How far a word's bits stand from their levels: the rms of each bit's
+/// value less its level, over half the distance between the levels. Near 0
+/// for a clean signal; noise read as bits has no levels to stand on.
+/// The levels are the transmission's, or this word's own until it has some.
+fn word_spread(bits: &[(bool, f64)], stats: &Stats) -> f64 {
+    let own = |want: bool| {
+        let v: Vec<f64> = bits.iter().filter(|b| b.0 == want).map(|b| b.1).collect();
+        (!v.is_empty()).then(|| v.iter().sum::<f64>() / v.len() as f64)
+    };
+    let (Some(hi), Some(lo)) = (mean(stats.hi).or(own(true)), mean(stats.lo).or(own(false))) else {
+        return f64::INFINITY;
+    };
+    let half = (hi - lo) / 2.0;
+    if half <= 0.0 {
+        return f64::INFINITY;
+    }
+    let sq: f64 = bits
+        .iter()
+        .map(|&(high, v)| (v - if high { hi } else { lo }).powi(2))
+        .sum();
+    (sq / bits.len().max(1) as f64).sqrt() / half
 }
 
 fn mean((sum, _, n): (f64, f64, u64)) -> Option<f64> {
@@ -668,6 +731,60 @@ pub(super) mod tests {
             b.link.decision_snr_db.unwrap(),
         );
         assert!(sb < sa - 3.0, "clean {sa:.1} dB, noisy {sb:.1} dB");
+    }
+
+    /// A transmission whose carrier stops right after the next sync word,
+    /// as a PortaPack's did: the real page, and no page read from the noise
+    /// after it, at a strong signal and at 3 dB; the link measured from the
+    /// signal alone.
+    #[test]
+    fn nothing_is_read_after_the_carrier_stops() {
+        let batches = transmit(&[(200_001, Function::D, alpha("SDRTOP 0.7.0 RELEASED"))]);
+        let mut bits = air_bits(&batches, 576);
+        bits.extend((0..32).rev().map(|b| (SYNC >> b) & 1 == 1));
+        for baud in RATES {
+            let mut iq = fsk(&bits, Air::at(baud), RATE, 2_000, 0);
+            let mut rng = Rng::new(9);
+            iq.extend(rng.noise((RATE * 2.0) as usize, 0.25 * 0.5 * 0.5));
+            for snr in [30.0, 3.0] {
+                let mut rng = Rng::new(3);
+                let got = decode(&at_snr(&iq, snr, &mut rng), RATE);
+                assert_eq!(
+                    got.len(),
+                    1,
+                    "{baud} baud at {snr} dB: {:#?}",
+                    got.iter().map(|r| r.page.ric).collect::<Vec<_>>()
+                );
+                assert_eq!(got[0].page.text(), "SDRTOP 0.7.0 RELEASED");
+                assert!(
+                    (got[0].link.shift_hz - 4_500.0).abs() < 150.0,
+                    "{baud} at {snr}: {}",
+                    got[0].link.shift_hz
+                );
+            }
+        }
+    }
+
+    /// The carrier stopping in the middle of a page ends it there: the page
+    /// is published with what was read, and nothing after it.
+    #[test]
+    fn a_carrier_stopping_mid_page_ends_the_page() {
+        let batches = transmit(&[(
+            200_001,
+            Function::D,
+            alpha("A PAGE THAT IS CUT OFF IN ITS MIDDLE BY THE TRANSMITTER"),
+        )]);
+        let bits = air_bits(&batches, 576);
+        let mut iq = fsk(&bits[..576 + 32 + 32 * 8], Air::at(1200), RATE, 2_000, 0);
+        let mut rng = Rng::new(4);
+        iq.extend(rng.noise((RATE * 2.0) as usize, 0.25 * 0.5 * 0.5));
+        let got = decode(&iq, RATE);
+        assert_eq!(got.len(), 1, "{got:#?}");
+        assert!(
+            got[0].page.text().starts_with("A PAGE"),
+            "{}",
+            got[0].page.text()
+        );
     }
 
     /// Locked while a transmission is read, at its rate, and not after.
