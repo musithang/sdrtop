@@ -178,6 +178,14 @@ pub(super) fn drain(
     if net_drops > 0 {
         m.net.health.last_loss = Some(now);
     }
+    // The pager feed's, taken unconditionally for the NET feed's reason.
+    let (pager_depth, pager_drops) = rx_ctx.pager_feed.take();
+    m.pager.feed.peak_depth = pager_depth;
+    m.pager.feed.refused = pager_drops;
+    m.pager.feed.refused_session += pager_drops;
+    if pager_drops > 0 {
+        m.pager.feed.last_loss = Some(now);
+    }
     let buf_sample = (m.iq.buf_fill_pct * 10.0) as u64;
     if m.iq.buf_fill_history.len() >= THROUGHPUT_HISTORY_LEN {
         m.iq.buf_fill_history.pop_front();
@@ -207,6 +215,7 @@ mod tests {
         let (sample_tx, sample_rx) = crossbeam_channel::bounded(4);
         let (demod_tx, demod_rx) = crossbeam_channel::bounded(2);
         let (net_tx, net_rx) = crossbeam_channel::bounded(4);
+        let (pager_tx, _) = crossbeam_channel::bounded(1);
         let (power_tx, _) = crossbeam_channel::bounded(1);
         let ctx = RxContext {
             metrics: Arc::clone(&state),
@@ -215,6 +224,8 @@ mod tests {
             demod_tx,
             net_tx,
             net_feed: FeedHealth::default(),
+            pager_tx,
+            pager_feed: FeedHealth::default(),
             power_tx,
             geometry: SampleGeometry {
                 format: SampleFormat::Int8,
@@ -249,6 +260,24 @@ mod tests {
         let m = state.lock().unwrap();
         assert_eq!(m.iq.buf_fill_pct, 0.0);
         assert_eq!((m.iq.fft_drops, m.iq.fft_drops_session), (0, 1));
+    }
+
+    /// A block the pager feed refused is counted for the window and the
+    /// session, and dated.
+    #[test]
+    fn a_refused_pager_block_is_counted_and_dated() {
+        let (state, ctx, _fft_rx, _demod_rx, _net_rx) = ctx_and_state();
+        ctx.pager_feed.record(4, false);
+        let when = Instant::now();
+        drain(&state, &ctx, when, true);
+        {
+            let m = state.lock().unwrap();
+            assert_eq!((m.pager.feed.refused, m.pager.feed.refused_session), (1, 1));
+            assert_eq!(m.pager.feed.last_loss, Some(when));
+        }
+        drain(&state, &ctx, when, true);
+        let m = state.lock().unwrap();
+        assert_eq!((m.pager.feed.refused, m.pager.feed.refused_session), (0, 1));
     }
 
     /// A block the NET feed refused is a loss, and the loss is dated at the

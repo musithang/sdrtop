@@ -356,6 +356,11 @@ impl UiState {
         crate::signal::net::is_net(&self.section)
     }
 
+    /// Whether the deck is on a pager view, which turns the pager feed on.
+    pub fn is_pager_section(&self) -> bool {
+        self.section == crate::signal::pocsag::SECTION
+    }
+
     pub fn is_lab_mode(&self) -> bool {
         self.active_preset.starts_with("lab_")
     }

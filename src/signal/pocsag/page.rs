@@ -216,6 +216,17 @@ impl Assembler {
     /// The sixteen codewords after one sync codeword. Returns the pages this
     /// batch completed.
     pub fn push_batch(&mut self, batch: &[u32; 16]) -> Vec<Page> {
+        self.push_words(batch)
+    }
+
+    /// The first codewords of a batch the signal broke off inside: read in
+    /// their frames as far as they go, so a page whose address came before
+    /// the break is still a page, ended by [`Self::finish`].
+    pub fn push_partial(&mut self, words: &[u32]) -> Vec<Page> {
+        self.push_words(&words[..words.len().min(16)])
+    }
+
+    fn push_words(&mut self, batch: &[u32]) -> Vec<Page> {
         let mut done = Vec::new();
         for (i, &raw) in batch.iter().enumerate() {
             let frame = (i / 2) as u32;
@@ -588,6 +599,17 @@ pub(super) mod tests {
         assert!(reads_as_text(&as_codes("WX 14C, 1018 HPA")));
         assert!(!reads_as_text(&as_codes("U*H!L")));
         assert!(!reads_as_text(&as_codes("12345")), "no letter");
+    }
+
+    /// A batch broken off after the address is still the start of a page.
+    #[test]
+    fn a_partial_batch_keeps_its_page() {
+        let batches = transmit(&[(9, Function::D, alpha_bits("BROKEN OFF"))]);
+        let mut a = Assembler::default();
+        assert!(a.push_partial(&batches[0][..5]).is_empty());
+        let p = a.finish().expect("the page");
+        assert_eq!((p.ric, p.end), (9, End::Cut));
+        assert!(p.text().starts_with("BROK"), "{}", p.text());
     }
 
     /// A page cut off by the end of the signal is still a page, ended so.

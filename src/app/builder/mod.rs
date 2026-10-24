@@ -165,6 +165,9 @@ impl App {
         // thread, and anything deeper starts hiding the losses rather than
         // absorbing them.
         let (net_tx, net_rx) = crossbeam_channel::bounded::<crate::hardware::StreamBlock>(4);
+        // The pager queue is the NET queue's depth for the NET queue's
+        // reason: every block is wanted, and a deeper queue would hide losses.
+        let (pager_tx, pager_rx) = crossbeam_channel::bounded::<crate::hardware::StreamBlock>(4);
         // Read out before `cfg` is moved into `Self::assemble` below - a
         // plain `usize`, not worth threading the whole config through the
         // worker for.
@@ -177,6 +180,8 @@ impl App {
             demod_tx,
             net_tx,
             net_feed: hardware::FeedHealth::default(),
+            pager_tx,
+            pager_feed: hardware::FeedHealth::default(),
             power_tx,
             geometry,
             stream_pairs: std::sync::atomic::AtomicU64::new(0),
@@ -215,6 +220,14 @@ impl App {
                 let net_state = Arc::clone(&state);
                 spawn_worker("net-worker", move || {
                     NetWorker::new(net_rx, net_state, geometry, bt_channels).run()
+                });
+
+                // Spawned always, as the NET worker is: with no pager view on
+                // screen nothing is forwarded, and the thread waits on `recv`.
+                let pager_state = Arc::clone(&state);
+                spawn_worker("pager-worker", move || {
+                    crate::signal::pocsag::worker::PagerWorker::new(pager_rx, pager_state, geometry)
+                        .run()
                 });
 
                 tasks::spawn_rx_task(Arc::clone(&state), Arc::clone(&device), Arc::clone(&rx_ctx));

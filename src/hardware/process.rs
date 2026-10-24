@@ -216,6 +216,7 @@ pub struct Arrival {
     fft_enabled: bool,
     demod_enabled: bool,
     net_enabled: bool,
+    pager_enabled: bool,
     centre_hz: u64,
     rate_hz: f64,
     /// The block's place in the stream, after the pairs the driver lost.
@@ -260,7 +261,7 @@ pub fn arrive(
     // frequency reference was asked for, which the FFT worker measures from
     // the blocks it gets: at 20 Msps the transform is a core, and on a NET
     // view nothing reads it.
-    let (cal, fft_enabled, demod_enabled, net_enabled, centre_hz, rate_hz, gain) = {
+    let (cal, fft_enabled, demod_enabled, net_enabled, pager_enabled, centre_hz, rate_hz, gain) = {
         let mut m = ctx.metrics.lock().unwrap_or_else(|e| e.into_inner());
         // What the radio delivered, counted where it arrives: a block the
         // intake later has no room for still crossed the USB link.
@@ -270,6 +271,7 @@ pub fn arrive(
             m.spectrum.wanted || m.radio.reference_request,
             m.demod.enabled,
             m.ui.is_net_section(),
+            m.ui.is_pager_section(),
             m.radio.frequency,
             m.radio.config_sample_rate,
             recording.then(|| (m.radio.gains.clone(), m.radio.amp_enabled)),
@@ -308,6 +310,7 @@ pub fn arrive(
         fft_enabled,
         demod_enabled,
         net_enabled,
+        pager_enabled,
         centre_hz,
         rate_hz,
         first_pair,
@@ -378,6 +381,7 @@ pub fn digest(
         fft_enabled,
         demod_enabled,
         net_enabled,
+        pager_enabled,
         centre_hz,
         rate_hz,
         first_pair,
@@ -511,6 +515,22 @@ pub fn digest(
             })
             .is_ok();
         ctx.net_feed.record(ctx.net_tx.len(), taken);
+    }
+    // The fourth feed, counted for the third's reason: a page's codewords run
+    // across blocks, and one lost block in the middle destroys them.
+    if pager_enabled {
+        let taken = ctx
+            .pager_tx
+            .try_send(super::StreamBlock {
+                seq: block_seq,
+                gap_before: dropped_pairs > 0,
+                bytes: forward.clone(),
+                first_pair,
+                centre_hz,
+                rate_hz,
+            })
+            .is_ok();
+        ctx.pager_feed.record(ctx.pager_tx.len(), taken);
     }
     // The one point where a lost block is observable. This channel is lossy by
     // design - dropping under load beats blocking the USB callback - but lossy
@@ -780,6 +800,7 @@ pub(crate) mod tests {
         let (sample_tx, sample_rx) = crossbeam_channel::bounded(fft_cap);
         let (demod_tx, demod_rx) = crossbeam_channel::bounded(8);
         let (net_tx, net_rx) = crossbeam_channel::bounded(net_cap);
+        let (pager_tx, _) = crossbeam_channel::bounded(1);
         let (power_tx, _) = crossbeam_channel::bounded(1);
         let mut m = SdrMetrics::fixture();
         m.demod.enabled = true;
@@ -791,6 +812,8 @@ pub(crate) mod tests {
             demod_tx,
             net_tx,
             net_feed: crate::hardware::FeedHealth::default(),
+            pager_tx,
+            pager_feed: crate::hardware::FeedHealth::default(),
             power_tx,
             geometry,
             stream_pairs: std::sync::atomic::AtomicU64::new(0),
@@ -1173,6 +1196,46 @@ pub(crate) mod tests {
         };
         assert_eq!(dropped, 1, "a block no decoder will ever see");
         assert_eq!(depth, 1, "and the queue was full when it happened");
+    }
+
+    /// The pager feed runs only while a pager view is on screen, and counts
+    /// the block it could not take, as the NET feed does.
+    #[test]
+    fn the_pager_feed_runs_on_its_view_and_counts_what_it_refuses() {
+        let (ctx, _sample_rx, _demod_rx, _net_rx) = rx_ctx_holding(8, 1);
+        let (pager_tx, pager_rx) = crossbeam_channel::bounded(1);
+        let ctx = Arc::new(RxContext {
+            metrics: Arc::clone(&ctx.metrics),
+            sample_tx: ctx.sample_tx.clone(),
+            fft_feed: crate::hardware::FeedHealth::default(),
+            demod_tx: ctx.demod_tx.clone(),
+            net_tx: ctx.net_tx.clone(),
+            net_feed: crate::hardware::FeedHealth::default(),
+            pager_tx,
+            pager_feed: crate::hardware::FeedHealth::default(),
+            power_tx: ctx.power_tx.clone(),
+            geometry: ctx.geometry,
+            stream_pairs: std::sync::atomic::AtomicU64::new(0),
+            record: Default::default(),
+            intake: Default::default(),
+        });
+        let block = vec![0x10u8; 64];
+
+        // On a NET view the pager feed forwards nothing and counts nothing.
+        super::process_block(&block, eight_bit(), 0, &ctx, Instant::now());
+        assert_eq!(ctx.pager_feed.take(), (0, 0));
+        assert!(pager_rx.is_empty());
+
+        ctx.metrics.lock().unwrap().ui.section = crate::signal::pocsag::SECTION.to_string();
+        super::process_block(&block, eight_bit(), 0, &ctx, Instant::now());
+        assert_eq!(ctx.pager_feed.take(), (1, 0), "the queue took it");
+        super::process_block(&block, eight_bit(), 0, &ctx, Instant::now());
+        assert_eq!(
+            ctx.pager_feed.take(),
+            (1, 1),
+            "a block no pager will ever see"
+        );
+        assert_eq!(pager_rx.len(), 1);
     }
 
     /// The stride follows the block, so the budget reaches the end of it.

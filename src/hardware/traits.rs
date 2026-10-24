@@ -1243,6 +1243,13 @@ pub struct RxContext {
     pub net_tx: crossbeam_channel::Sender<StreamBlock>,
     /// What the NET feed did with the blocks handed to it, for the poll task.
     pub net_feed: FeedHealth,
+    /// Fourth, independently lossy feed, to the pager worker. Forwarded only
+    /// while a pager view is on screen. Counted as the NET feed is, for the
+    /// same reason: a block lost inside a page destroys its codewords, so a
+    /// loss is a displayed number, taken where the block was refused.
+    pub pager_tx: crossbeam_channel::Sender<StreamBlock>,
+    /// What the pager feed did with the blocks handed to it, for the poll task.
+    pub pager_feed: FeedHealth,
     /// Direct power-spectrum traces from backends that do not publish IQ.
     pub power_tx: crossbeam_channel::Sender<PowerTrace>,
     pub geometry: SampleGeometry,

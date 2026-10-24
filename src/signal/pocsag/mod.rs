@@ -16,10 +16,16 @@
 //! - [`clock`]: the bit clock, followed as the transmitter's drifts.
 //! - [`demod`]: the channel's samples to pages, at 512, 1200 and 2400 baud,
 //!   with what each transmission measured.
+//! - [`worker`]: the thread that runs them on the radio's stream, while a
+//!   pager view is on screen, and publishes what they heard.
 //!
 //! **A page is not testimony on its own** (POLICY.md, rule 3). Every page
 //! keeps the codewords it was read from and what each needed repairing, so
 //! the screen can say what the link took, not only what it carried.
+
+/// The menu section the pager views are filed under: the one whose being on
+/// screen turns the pager feed on.
+pub const SECTION: &str = "pocsag";
 
 pub mod bch;
 pub mod channel;
@@ -28,3 +34,4 @@ pub mod clock;
 mod conformance;
 pub mod demod;
 pub mod page;
+pub mod worker;

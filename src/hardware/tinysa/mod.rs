@@ -1898,6 +1898,7 @@ mod tests {
         let (sample_tx, _) = crossbeam_channel::bounded(1);
         let (demod_tx, _) = crossbeam_channel::bounded(1);
         let (net_tx, _) = crossbeam_channel::bounded(1);
+        let (pager_tx, _) = crossbeam_channel::bounded(1);
         let (power_tx, _) = crossbeam_channel::bounded(1);
         let context = Arc::new(RxContext {
             metrics: state,
@@ -1906,6 +1907,8 @@ mod tests {
             demod_tx,
             net_tx,
             net_feed: crate::hardware::FeedHealth::default(),
+            pager_tx,
+            pager_feed: crate::hardware::FeedHealth::default(),
             power_tx,
             geometry: capabilities(Model::Basic, BasicInput::Low).sample_geometry,
             stream_pairs: std::sync::atomic::AtomicU64::new(0),
@@ -3039,6 +3042,7 @@ mod tests {
             let (sample_tx, _) = crossbeam_channel::bounded(1);
             let (demod_tx, _) = crossbeam_channel::bounded(1);
             let (net_tx, _) = crossbeam_channel::bounded(1);
+            let (pager_tx, _) = crossbeam_channel::bounded(1);
             let (power_tx, power_rx) = crossbeam_channel::bounded(4);
             let context = Arc::new(RxContext {
                 metrics: Arc::clone(&state),
@@ -3047,6 +3051,8 @@ mod tests {
                 demod_tx,
                 net_tx,
                 net_feed: crate::hardware::FeedHealth::default(),
+                pager_tx,
+                pager_feed: crate::hardware::FeedHealth::default(),
                 power_tx,
                 geometry: device.capabilities().sample_geometry,
                 stream_pairs: std::sync::atomic::AtomicU64::new(0),

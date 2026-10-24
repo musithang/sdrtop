@@ -375,6 +375,7 @@ mod power_control_tests {
         let (sample_tx, _) = crossbeam_channel::bounded(1);
         let (demod_tx, _) = crossbeam_channel::bounded(1);
         let (net_tx, _) = crossbeam_channel::bounded(1);
+        let (pager_tx, _) = crossbeam_channel::bounded(1);
         let (power_tx, _) = crossbeam_channel::bounded(1);
         Arc::new(RxContext {
             metrics: Arc::clone(state),
@@ -383,6 +384,8 @@ mod power_control_tests {
             demod_tx,
             net_tx,
             net_feed: FeedHealth::default(),
+            pager_tx,
+            pager_feed: FeedHealth::default(),
             power_tx,
             geometry: SampleGeometry::default(),
             stream_pairs: std::sync::atomic::AtomicU64::new(0),

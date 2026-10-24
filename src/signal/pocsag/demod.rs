@@ -355,8 +355,19 @@ impl Rx {
 
     /// The transmission ended: its open page ends with it.
     fn drop_lock(&mut self, out: &mut Vec<Received>) {
-        if self.lock.is_none() {
+        let Some(lock) = &mut self.lock else {
             return;
+        };
+        // The codewords of a batch the signal broke off inside: pages they
+        // complete, and the one still open, are ended here, not lost.
+        let partial = std::mem::take(&mut lock.words);
+        if !lock.expecting_sync && !partial.is_empty() {
+            let pages = self.assembler.push_partial(&partial);
+            let link = self.link();
+            out.extend(pages.into_iter().map(|page| Received {
+                page,
+                link: link.clone(),
+            }));
         }
         if let Some(page) = self.assembler.finish() {
             let link = self.link();
@@ -672,6 +683,25 @@ pub(super) mod tests {
         assert_eq!(seen, Some(2400));
         d.reset();
         assert_eq!(d.locked(), None);
+    }
+
+    /// A break inside the first batch, after the address, still publishes
+    /// the page, as cut.
+    #[test]
+    fn a_break_in_the_first_batch_keeps_the_page() {
+        let iq = page_air(Air::at(1200), "A MESSAGE BROKEN OFF EARLY");
+        let mut d = Decoder::new(RATE);
+        // Preamble and sync, then about half the first batch.
+        let upto = 2_000 + ((576.0 + 32.0 + 272.0) * RATE / 1200.0) as usize;
+        let mut got: Vec<Received> = iq[..upto].chunks(4_096).flat_map(|b| d.push(b)).collect();
+        got.extend(d.reset());
+        assert_eq!(got.len(), 1, "{got:#?}");
+        assert_eq!(got[0].page.end, crate::signal::pocsag::page::End::Cut);
+        assert!(
+            got[0].page.text().starts_with("A MESS"),
+            "{}",
+            got[0].page.text()
+        );
     }
 
     /// A break in the stream mid-page ends the page there, as cut.

@@ -10,6 +10,7 @@ mod lab;
 mod micro;
 mod net;
 mod observer;
+mod pager;
 mod radio;
 mod record;
 mod selection;
@@ -50,6 +51,7 @@ pub use net::{Family, LeastBusy, NetDecodeHealth, RowKind, Visit, WifiClock, Wif
 #[cfg(test)]
 pub use net::{FramesView, Holdoff, Trigger};
 pub use observer::ObserverState;
+pub use pager::PagerState;
 pub use radio::{
     offset_ppm, FrequencyReference, OffsetBasis, Provenance, RadioState, REFERENCE_STALE_S,
 };
@@ -126,6 +128,8 @@ pub struct SdrMetrics {
     pub demod: DemodState,
     /// What the 2.4 GHz receiver is doing. See [`NetState`].
     pub net: NetState,
+    /// What the pager receiver has heard. See [`PagerState`].
+    pub pager: PagerState,
     /// What the IQ recorder is doing. See [`RecordState`].
     pub record: RecordState,
     /// Active device's capability descriptor - drives capability-aware UI

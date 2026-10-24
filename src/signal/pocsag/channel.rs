@@ -21,6 +21,12 @@
 //!
 //! The decimations are integers, so the channel rate is whatever they give:
 //! [`Channel::rate`] reports it, never [`CHANNEL_HZ`].
+//!
+//! **The radio's DC offset is taken off.** A channel at the tuned centre sits
+//! on the tuner's DC, a constant added to every sample, which bends the
+//! discriminator's reading toward it. A slow mean ([`DC_SECONDS`]) is
+//! subtracted: the two FSK tones at ±4.5 kHz average to nothing over it, the
+//! offset does not.
 
 use num_complex::Complex;
 
@@ -36,12 +42,17 @@ pub const CHANNEL_HZ: f64 = 38_400.0;
 /// baud bit rate's main lobe, with room for a transmitter some kHz off.
 const PASS_HZ: f64 = 9_000.0;
 
+/// How long the DC mean remembers: long against a bit at 512 baud, short
+/// against a page.
+const DC_SECONDS: f64 = 0.1;
+
 pub struct Channel {
     nco: Nco,
     stages: Vec<StreamingDecimator>,
     rate: f64,
     mixed: Vec<Complex<f32>>,
     between: Vec<Complex<f32>>,
+    dc: Option<Complex<f64>>,
 }
 
 impl Channel {
@@ -79,6 +90,7 @@ impl Channel {
             rate,
             mixed: Vec::new(),
             between: Vec::new(),
+            dc: None,
         }
     }
 
@@ -101,11 +113,34 @@ impl Channel {
             }
         }
         self.mixed = input;
+        self.take_off_dc(out);
+    }
+
+    /// Subtract the slow mean. Seeded from the first block's own mean, so
+    /// the stream does not start a tenth of a second off while it settles.
+    fn take_off_dc(&mut self, out: &mut [Complex<f32>]) {
+        if out.is_empty() {
+            return;
+        }
+        let alpha = 1.0 / (DC_SECONDS * self.rate);
+        let mut dc = self.dc.unwrap_or_else(|| {
+            out.iter()
+                .map(|z| Complex::new(f64::from(z.re), f64::from(z.im)))
+                .sum::<Complex<f64>>()
+                / out.len() as f64
+        });
+        for z in out.iter_mut() {
+            let v = Complex::new(f64::from(z.re), f64::from(z.im));
+            dc += (v - dc) * alpha;
+            *z = Complex::new((v.re - dc.re) as f32, (v.im - dc.im) as f32);
+        }
+        self.dc = Some(dc);
     }
 
     /// A break in the stream: start again with no history.
     pub fn reset(&mut self) {
         self.nco.reset();
+        self.dc = None;
         for s in &mut self.stages {
             s.reset();
         }
@@ -164,6 +199,29 @@ mod tests {
         assert!(power(&out[200..]) < 1e-3, "{}", power(&out[200..]));
     }
 
+    /// A constant offset at the tuned centre is taken off, and a tone beside
+    /// it comes through at its level.
+    #[test]
+    fn the_dc_offset_is_taken_off() {
+        let input = 2.4e6;
+        let dc = Complex::new(0.08f32, -0.05);
+        let x: Vec<Complex<f32>> = tone(4_500.0, input, 480_000)
+            .iter()
+            .map(|z| z * 0.5 + dc)
+            .collect();
+        let mut c = Channel::new(input, 0.0);
+        let mut out = Vec::new();
+        let mut all = Vec::new();
+        for b in x.chunks(65_536) {
+            c.push(b, &mut out);
+            all.extend_from_slice(&out);
+        }
+        let late = &all[all.len() / 2..];
+        let mean = late.iter().sum::<Complex<f32>>() / late.len() as f32;
+        assert!(mean.norm() < 0.005, "{mean}");
+        assert!((power(late) - 0.25).abs() < 0.02, "{}", power(late));
+    }
+
     /// After a reset the channel starts again as new: the same input gives
     /// the same output as a fresh channel's.
     #[test]
@@ -181,12 +239,15 @@ mod tests {
     }
 
     /// Across block boundaries the channel is one tone: no phase step where
-    /// one block ends and the next begins.
+    /// one block ends and the next begins. Read once the DC mean has
+    /// settled, a few of its time constants in: before that the mean of a
+    /// short first block is not zero over a few cycles of a tone, and the
+    /// tone wobbles while it settles.
     #[test]
     fn blocks_join_without_a_step() {
         let input = 2.0e6;
         let mut c = Channel::new(input, 100e3);
-        let signal = tone(100e3 + 1_200.0, input, 400_000);
+        let signal = tone(100e3 + 1_200.0, input, 2_000_000);
         let mut out = Vec::new();
         let mut all = Vec::new();
         for block in signal.chunks(7_777) {
@@ -194,7 +255,8 @@ mod tests {
             all.extend_from_slice(&out);
         }
         let rate = c.rate();
-        let worst = all[300..]
+        let settled = (3.0 * DC_SECONDS * rate) as usize;
+        let worst = all[settled..]
             .windows(2)
             .map(|w| {
                 let f = crate::signal::dsp::discriminate::instantaneous_freq_hz(w[0], w[1], rate);
