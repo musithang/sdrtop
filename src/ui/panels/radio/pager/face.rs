@@ -30,6 +30,7 @@ use ratatui::{
     Frame,
 };
 
+use super::{fill, kind, mhz, put};
 use crate::state::SdrMetrics;
 use crate::ui::panel::{Panel, PanelChrome, Staleness, Tag};
 use crate::ui::widgets::charts::lerp_color;
@@ -44,8 +45,9 @@ const CHARS_MAX: usize = 16;
 const CHARS_MIN: usize = 8;
 
 /// The case's rows besides the display's text lines: edges, brand, bezel,
-/// the display's own status and info rows, buttons, keys and the strip.
-const CASE_FIXED_H: u16 = 17;
+/// the display's own status and info rows, buttons, keys and the strip's
+/// two lines.
+const CASE_FIXED_H: u16 = 18;
 
 /// A level, as bars on the display: four from -70 to -30 dBFS, 10 dB a bar.
 fn bars(level_dbfs: f64) -> usize {
@@ -82,27 +84,6 @@ impl Panel for PagerFacePanel {
         _focused: bool,
     ) {
         face(f.buffer_mut(), inner, state, theme);
-    }
-}
-
-/// Write `text` at (`x`, `y`), clipped to `area`.
-fn put(buf: &mut Buffer, area: Rect, x: u16, y: u16, text: &str, style: Style) {
-    if y < area.top() || y >= area.bottom() {
-        return;
-    }
-    for (x, ch) in (x..).zip(text.chars()) {
-        if x >= area.left() && x < area.right() {
-            buf.get_mut(x, y).set_char(ch).set_style(style);
-        }
-    }
-}
-
-fn fill(buf: &mut Buffer, area: Rect, r: Rect, bg: Color) {
-    let r = r.intersection(area);
-    for y in r.top()..r.bottom() {
-        for x in r.left()..r.right() {
-            buf.get_mut(x, y).set_symbol(" ").set_bg(bg);
-        }
     }
 }
 
@@ -317,7 +298,7 @@ fn face(buf: &mut Buffer, area: Rect, m: &SdrMetrics, theme: &crate::Theme) {
             }
             s
         }
-        None => "DAPNET: 439.9875 MHz, F to tune".to_string(),
+        None => format!("LISTENING ON {} MHz", mhz(m.radio.frequency)),
     };
     put(buf, area, lcd.x + 1, lcd.bottom() - 1, &info, glass);
 
@@ -378,8 +359,32 @@ fn face(buf: &mut Buffer, area: Rect, m: &SdrMetrics, theme: &crate::Theme) {
         }
     }
 
-    // The strip: the link, the level, the cost.
-    let sy = case.bottom() - 2;
+    // The strip: the link, the level, the cost; under it the page's link in
+    // short, the physics a pager never shows, so it is on screen however
+    // narrow the screen and whether the card is beside it or not.
+    if let Some(e) = current {
+        let mut line = super::link_line(&e.link);
+        if e.page.repairs() > 0 {
+            line.push_str(&format!("  {} repaired", e.page.repairs()));
+        }
+        put(
+            buf,
+            area,
+            case.x + 3,
+            case.bottom() - 2,
+            "LINK",
+            shell.fg(theme.border_dim),
+        );
+        put(
+            buf,
+            area,
+            case.x + 9,
+            case.bottom() - 2,
+            &line,
+            shell.fg(theme.value),
+        );
+    }
+    let sy = case.bottom() - 3;
     let mut x = case.x + 3;
     let mut part = |buf: &mut Buffer, text: &str, ink: Color| {
         put(buf, area, x, sy, text, shell.fg(ink));
@@ -435,16 +440,6 @@ fn display_look(look: Look, bezel: Color, live: bool) -> Look {
     }
 }
 
-/// A content's kind, as the display's status row says it.
-fn kind(c: &crate::signal::pocsag::page::Content) -> &'static str {
-    use crate::signal::pocsag::page::Content;
-    match c {
-        Content::Tone => "TONE",
-        Content::Numeric(_) => "NUMERIC",
-        Content::Alpha(_) => "ALPHA",
-    }
-}
-
 fn display(m: &SdrMetrics, chars: usize, rows: usize) -> Display {
     let p = &m.pager;
     let one = |lines: Vec<String>| Display {
@@ -481,53 +476,9 @@ fn display(m: &SdrMetrics, chars: usize, rows: usize) -> Display {
 
 #[cfg(test)]
 mod tests {
+    use super::super::sample::with_pages;
     use super::*;
-    use crate::signal::pocsag::demod::Link;
-    use crate::signal::pocsag::page::{Content, Decided, End, Function, Page};
     use crate::state::fixture::draw;
-    use std::time::Instant;
-
-    fn link(level: f64) -> Link {
-        Link {
-            baud: 1200,
-            measured_baud: 1200.0,
-            clock_ppm: 0.0,
-            shift_hz: 4500.0,
-            offset_hz: 0.0,
-            decision_snr_db: Some(30.0),
-            level_dbfs: level,
-            preamble_bits: 576,
-            sync_errors: 0,
-            one_is_higher: false,
-            batches: 1,
-        }
-    }
-
-    fn alpha(ric: u32, text: &str) -> Page {
-        Page {
-            ric,
-            function: Function::D,
-            content: Content::Alpha(text.bytes().map(Some).collect()),
-            decided: Decided::ByFunction,
-            end: End::Idle,
-            codewords: Vec::new(),
-        }
-    }
-
-    fn with_pages(pages: &[(u32, &str)]) -> SdrMetrics {
-        let mut m = SdrMetrics::fixture().streaming();
-        m.ui.section = crate::signal::pocsag::SECTION.to_string();
-        for (ric, text) in pages {
-            m.pager.push(
-                alpha(*ric, text),
-                link(-38.0),
-                439_987_500,
-                Instant::now(),
-                0.0,
-            );
-        }
-        m
-    }
 
     /// The display's dots, read back as text is hard; what can be read is
     /// every line of plain text on the face.
@@ -552,19 +503,24 @@ mod tests {
             "LEVEL",
             "-38 dBFS",
             "ALPHA",
+            "LINK",
+            "1200 baud +0 ppm",
+            "\u{b1}4.50 kHz",
+            "SNR 30 dB",
         ] {
             assert!(all.contains(want), "'{want}' missing:\n{all}");
         }
     }
 
-    /// Nothing heard: the display says so, and where a page could be heard.
+    /// Nothing heard: the display says so, and the frequency it listens on.
     #[test]
     fn nothing_heard_says_so() {
         let mut m = SdrMetrics::fixture().streaming();
         m.ui.section = crate::signal::pocsag::SECTION.to_string();
+        m.radio.frequency = 439_987_500;
         let all = face_text(&m, 120, 34);
         assert!(all.contains("SEARCHING"), "{all}");
-        assert!(all.contains("DAPNET: 439.9875 MHz"), "{all}");
+        assert!(all.contains("LISTENING ON 439.9875 MHz"), "{all}");
     }
 
     /// A stopped radio: the frame says stale and the display says why.

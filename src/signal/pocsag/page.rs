@@ -18,9 +18,15 @@
 //!
 //! **The content's kind is a decision, and the page says how it was made.**
 //! §2.1 gives numeric messages function bits 00 and §2.2 gives alphanumeric
-//! ones 11. Those are taken at their word. The other two functions name no
-//! format, so there the content itself decides: 7-bit text when it reads as
-//! text, digits when it does not, and the page records which way it went.
+//! ones 11, and §2 calls these formats "regarded as standard", not required:
+//! a pager knows its format from how it was set up, not from these two bits.
+//! Senders do put text under function A: Viktor's first page off a HackRF,
+//! "sdrtop is awesome" sent to function A, read as `372U 9][68382-...` until
+//! its bits were read seven at a time. So function A's content is read as
+//! text when it reads as text, and function D's as digits when it is not
+//! text and is digits, and the page says the content overruled the function
+//! ([`Decided::OverFunction`]). Functions B and C name no format, and there
+//! the content decides alone.
 
 use super::bch::{self, Checked, IDLE};
 
@@ -114,8 +120,12 @@ pub enum Content {
 /// How the content's kind was decided.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Decided {
-    /// Function A or D, which §2 assigns to numeric and alphanumeric.
+    /// Function A or D, which §2 assigns to numeric and alphanumeric, and the
+    /// content agrees.
     ByFunction,
+    /// Function A or D, and the content reads as the other format: shown as
+    /// what it reads as, and said to be against the function.
+    OverFunction,
     /// Function B or C, which name no format: the content decided, because
     /// exactly one reading of it fits.
     ByContent,
@@ -318,8 +328,27 @@ fn content_of(function: Function, bits: &[Option<bool>], followed: bool) -> (Con
         return (Content::Tone, Decided::NoMessage);
     }
     match function {
-        Function::A => (Content::Numeric(numeric(bits)), Decided::ByFunction),
-        Function::D => (Content::Alpha(alpha(bits)), Decided::ByFunction),
+        Function::A => {
+            let codes = alpha(bits);
+            if reads_as_text(&codes) {
+                (Content::Alpha(codes), Decided::OverFunction)
+            } else {
+                (Content::Numeric(numeric(bits)), Decided::ByFunction)
+            }
+        }
+        Function::D => {
+            let codes = alpha(bits);
+            let digits = numeric(bits);
+            let printable = codes
+                .iter()
+                .flatten()
+                .all(|&b| (0x20..=0x7E).contains(&b) || b == b'\n' || b == b'\r');
+            if !printable && reads_as_digits(&digits) {
+                (Content::Numeric(digits), Decided::OverFunction)
+            } else {
+                (Content::Alpha(codes), Decided::ByFunction)
+            }
+        }
         Function::B | Function::C => {
             let codes = alpha(bits);
             let digits = numeric(bits);
@@ -594,6 +623,25 @@ pub(super) mod tests {
     fn functions_are_lettered_from_00() {
         let letters: String = (0..4).map(|b| Function::from_bits(b).letter()).collect();
         assert_eq!(letters, "ABCD");
+    }
+
+    /// Text sent under function A is read as text, and the page says the
+    /// content overruled the function: the first page off the air was
+    /// exactly this. Digits under function A stay digits.
+    #[test]
+    fn text_under_function_a_is_read_as_text() {
+        let p = receive(&transmit(&[(
+            0,
+            Function::A,
+            alpha_bits("sdrtop is awesome"),
+        )]));
+        assert_eq!(p[0].text(), "sdrtop is awesome");
+        assert_eq!(p[0].decided, Decided::OverFunction);
+        let d = receive(&transmit(&[(0, Function::A, numeric_bits("2045-17"))]));
+        assert_eq!(
+            (d[0].text().as_str(), d[0].decided),
+            ("2045-17", Decided::ByFunction)
+        );
     }
 
     /// The symbol share: words pass, digits read 7 bits at a time do not.

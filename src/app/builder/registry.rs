@@ -131,6 +131,8 @@ impl App {
         registry.register(ui::NetWifiSurveyPanel);
         registry.register(ui::NetWifiLeastBusyPanel);
         registry.register(ui::PagerFacePanel);
+        registry.register(ui::PagerInboxPanel);
+        registry.register(ui::PagerCardPanel);
 
         let mut layout = LayoutConfig::with_user_presets(user_presets, presets_dir);
         let mut refusals = Vec::new();

@@ -86,7 +86,8 @@ pub fn wrap(text: &str, chars: usize) -> Vec<String> {
 }
 
 /// Draw `lines` into `area`, one line every [`LINE_CELLS`] rows, as many
-/// characters as fit across. The whole area is glass first.
+/// characters as fit across. Every cell of every row is drawn, written or
+/// not: a character display shows its empty cells as unlit dots too.
 pub fn render(buf: &mut Buffer, area: Rect, lines: &[&str], look: Look) {
     for y in area.top()..area.bottom() {
         for x in area.left()..area.right() {
@@ -94,12 +95,12 @@ pub fn render(buf: &mut Buffer, area: Rect, lines: &[&str], look: Look) {
         }
     }
     let across = chars_across(area.width);
-    for (li, text) in lines.iter().enumerate() {
+    let rows = usize::from(area.height / LINE_CELLS);
+    for li in 0..rows {
         let top = area.y + li as u16 * LINE_CELLS;
-        if top + LINE_CELLS > area.bottom() {
-            break;
-        }
-        for (ci, ch) in text.chars().take(across).enumerate() {
+        let mut text = lines.get(li).map_or("".chars(), |l| l.chars());
+        for ci in 0..across {
+            let ch = text.next().unwrap_or(' ');
             let left = area.x + ci as u16 * CHAR_CELLS;
             let rows = glyph(ch);
             for cy in 0..LINE_CELLS {
@@ -413,6 +414,24 @@ mod tests {
         assert_ne!(glyph('0'), glyph('O'));
         assert_ne!(glyph('1'), glyph('l'));
         assert_ne!(glyph('['), glyph(']'));
+    }
+
+    /// Empty cells and empty rows show their unlit dots, as a display does.
+    #[test]
+    fn empty_cells_show_their_dots() {
+        let area = Rect::new(0, 0, width_of(3), LINE_CELLS * 2);
+        let mut buf = Buffer::empty(area);
+        render(&mut buf, area, &["A"], LOOK);
+        assert_eq!(
+            buf.get(2 * CHAR_CELLS, 0).fg,
+            LOOK.ghost,
+            "the third cell of the first row"
+        );
+        assert_eq!(
+            buf.get(0, LINE_CELLS).fg,
+            LOOK.ghost,
+            "the empty second row"
+        );
     }
 
     /// Nothing is drawn past the area, and what does not fit is left off,

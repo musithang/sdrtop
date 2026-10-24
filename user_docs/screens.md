@@ -426,7 +426,7 @@ screen.
 
 | Key | Preset | What's in it |
 |-----|--------|--------------|
-| `1` | `radio_pocsag` | A POCSAG pager, as one looks: the page on its dot-matrix display, its address and what it took repairing, the buttons with their keys, the link along the bottom |
+| `1` | `radio_pocsag` | A POCSAG pager, as one looks: the page on its dot-matrix display, its address and what it took repairing, the buttons with their keys, the link along the bottom · every page received · the shown page as received, its physics and its decoding |
 
 `p` steps to the next layout in whichever section you are in, and wraps at the
 end. A twenty-ninth preset, `observer`, is marked hidden, so it has no section and no

@@ -211,7 +211,12 @@ and the rhythm, the gaps between frames against SIFS and DIFS.
 
 **Radio:** `pager_face`, a POCSAG pager as one looks: the page on its
 dot-matrix display, its address and what it took repairing, the buttons
-with their keys, and the link along the bottom.
+with their keys, and the link along the bottom. `pager_inbox`, every page
+received this session, newest first, with its text. `pager_card`, the page
+on the display as it was received: rate and clock error, shift, offset,
+level and decision SNR, preamble and sync, codewords and repairs, polarity,
+address, what decided its kind, how it ended, and one codeword's bits with
+the repaired ones lit.
 
 **Observer:** `observer`
 

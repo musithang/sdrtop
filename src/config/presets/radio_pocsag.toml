@@ -1,4 +1,6 @@
-# The pager: a POCSAG pager's face, the page it was sent and how it came.
+# The pager: a POCSAG pager's face, beside it every page received and the
+# shown page's physics. On a narrow screen the right column gives way and the
+# face's own strip carries the link.
 section = "pocsag"
 slot    = 1
 title   = "Pager"
@@ -8,5 +10,7 @@ about   = "A POCSAG pager, as one looks: the page on its display, the buttons to
 panels = [
     { name = "header_slim", position = "top", height = 4 },
     { name = "pager_face",  position = "body" },
+    { name = "pager_inbox", position = "right" },
+    { name = "pager_card",  position = "right" },
     { name = "footer",      position = "bottom" },
 ]
