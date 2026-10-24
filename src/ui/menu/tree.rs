@@ -82,6 +82,14 @@ const BAND_24: Band = Band {
     hi_hz: HIGHEST_CENTRE_HZ,
 };
 
+/// Wi-Fi's 5 GHz channels, from channel 36's lower edge to channel 177's
+/// upper one. Only the menu's mark: nothing here tunes there yet, and the
+/// gate will say what reaching it means when something does.
+const BAND_5: Band = Band {
+    lo_hz: 5_170_000_000,
+    hi_hz: 5_895_000_000,
+};
+
 /// One row of a column.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Node {
@@ -512,11 +520,11 @@ fn lab_table() -> Vec<Node> {
                 .about("Thirteen overlapping 20 MHz channels; 1, 6 and 11 are the three that do not overlap."),
                 branch("5 GHz", Wifi, Vec::new())
                     .later()
-                    .about("Not built yet."),
+                    .band(BAND_5)
+                    .about("Channels 36 to 177, 20 to 160 MHz wide. Not built yet."),
             ],
         )
-        .hint("2.4 GHz")
-        .band(BAND_24)
+        .hint("2.4 · 5 GHz")
         .about("Routers, phones, laptops: who is using the air, and how."),
         heading("SMALL WINDOW"),
         group("Compact", Quiet, "micro")
@@ -1006,6 +1014,19 @@ mod tests {
         assert!(tree.node(Tile::Lab, &census).unwrap().opens());
         let le = path_to(&tree, Tile::Lab, &["Bluetooth", "2.4 GHz", "Low Energy"]);
         assert!(!tree.node(Tile::Lab, &le).unwrap().opens());
+    }
+
+    /// Each band row marks its own band: Wi-Fi spans two and claims
+    /// neither, so 5 GHz is never drawn at 2.4.
+    #[test]
+    fn every_band_row_carries_its_own_band() {
+        let tree = builtins();
+        let wifi = path_to(&tree, Tile::Lab, &["Wi-Fi"]);
+        assert_eq!(tree.node(Tile::Lab, &wifi).unwrap().band, None);
+        let five = path_to(&tree, Tile::Lab, &["Wi-Fi", "5 GHz"]);
+        assert_eq!(tree.node(Tile::Lab, &five).unwrap().band, Some(BAND_5));
+        let two = path_to(&tree, Tile::Lab, &["Wi-Fi", "2.4 GHz"]);
+        assert_eq!(tree.node(Tile::Lab, &two).unwrap().band, Some(BAND_24));
     }
 
     /// The band rows reach exactly what the NET gate admits.

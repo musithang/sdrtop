@@ -63,6 +63,23 @@ pub(super) fn handle(key: KeyEvent, ctx: &mut InputCtx<'_>) -> KeyAction {
         return KeyAction::Continue;
     }
 
+    // A tile's letter selects it from anywhere in the menu, so no pane is
+    // a place you can only leave by closing the menu.
+    if let KeyCode::Char(c) = key.code {
+        if let Some(tile) = by_letter(c) {
+            set(
+                ctx,
+                MenuState {
+                    tile,
+                    focus: MenuFocus::Tiles,
+                    scroll: 0,
+                    ..state
+                },
+            );
+            return KeyAction::Continue;
+        }
+    }
+
     match state.focus {
         MenuFocus::Tiles => tiles_key(key.code, ctx, state),
         MenuFocus::Below => match state.tile {
@@ -101,11 +118,6 @@ fn tiles_key(code: KeyCode, ctx: &mut InputCtx<'_>, state: MenuState) -> KeyActi
         // your place in.
         KeyCode::Left => set(ctx, pick(shown[at.saturating_sub(1)])),
         KeyCode::Right => set(ctx, pick(shown[(at + 1).min(shown.len() - 1)])),
-        KeyCode::Char(c) => {
-            if let Some(tile) = by_letter(c) {
-                set(ctx, pick(tile));
-            }
-        }
         KeyCode::Enter if state.tile == MenuTile::Resume => {
             let active = ctx.engine.active_preset().to_string();
             return open(ctx, &active);
@@ -223,10 +235,9 @@ fn tree_key(code: KeyCode, ctx: &mut InputCtx<'_>, state: MenuState) -> KeyActio
     KeyAction::Continue
 }
 
-/// The Options pane: up and down the settings (round at the ends, as it
-/// always went), left and right through a setting's values, Enter for a
-/// number; `Tab` back to the tiles. With nothing to set, up and left go
-/// back to the tiles, as they do out of a tree.
+/// The Options pane: up and down the settings, left and right through a
+/// setting's values, Enter for a number. Up from the first setting goes
+/// back to the tiles; with nothing to set, left does too.
 fn options_key(
     code: KeyCode,
     ctx: &mut InputCtx<'_>,
@@ -243,21 +254,30 @@ fn options_key(
                 ..state
             },
         ),
-        KeyCode::Up if !has_options => set(
+        // Up from the first setting goes back to the tiles, as it does out
+        // of the key reference; the list stops at its ends rather than
+        // wrapping under the cursor.
+        KeyCode::Up if state.scroll == 0 || !has_options => set(
             ctx,
             MenuState {
                 focus: MenuFocus::Tiles,
                 ..state
             },
         ),
-        KeyCode::Up | KeyCode::Down => {
+        KeyCode::Up => set(
+            ctx,
+            MenuState {
+                scroll: state.scroll - 1,
+                ..state
+            },
+        ),
+        KeyCode::Down => {
             let count = metrics(ctx.state).device_options.len();
             if count > 0 {
-                let step = if code == KeyCode::Down { 1 } else { -1 };
                 set(
                     ctx,
                     MenuState {
-                        scroll: wrap(state.scroll.min(count - 1), step, count),
+                        scroll: (state.scroll + 1).min(count - 1),
                         ..state
                     },
                 );
@@ -995,6 +1015,17 @@ mod tests {
         );
     }
 
+    /// A tile's letter leaves any pane for that tile: Options is never a
+    /// place only Esc gets you out of.
+    #[test]
+    fn a_tiles_letter_leaves_any_pane() {
+        let mut h = Harness::new();
+        h.show_options(vec![option("bandwidth", "Bandwidth", "Narrow")]);
+        h.key(KeyCode::Char('l'));
+        assert_eq!(h.menu().tile, MenuTile::Lab);
+        assert_eq!(h.menu().focus, MenuFocus::Tiles);
+    }
+
     /// Down goes into the tree, Tab goes back and forth.
     #[test]
     fn down_and_tab_move_between_the_tiles_and_what_is_below() {
@@ -1120,9 +1151,13 @@ mod tests {
         h.key(KeyCode::Down);
         assert_eq!(h.menu().scroll, 1);
         h.key(KeyCode::Down);
-        assert_eq!(h.menu().scroll, 0);
+        assert_eq!(h.menu().scroll, 1, "stops at the last");
         h.key(KeyCode::Up);
-        assert_eq!(h.menu().scroll, 1);
+        assert_eq!(h.menu().scroll, 0);
+        assert_eq!(h.menu().focus, MenuFocus::Below);
+        h.key(KeyCode::Up);
+        assert_eq!(h.menu().focus, MenuFocus::Tiles, "up from the first leaves");
+        assert_eq!(h.menu().tile, MenuTile::Options);
     }
 
     #[test]

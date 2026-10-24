@@ -121,8 +121,16 @@ fn mark<'a>(card: &'a Card<'a>) -> Option<Mark<'a>> {
         };
         return Some(Mark::Band(band, name));
     }
+    // No band anywhere above: a view, or a group of views, works wherever
+    // the radio is tuned. An area over several bands (Wi-Fi) says nothing
+    // here; its bands say where they are.
+    let tuned_anywhere = match &node.kind {
+        Kind::View(_) => true,
+        Kind::Branch { section, .. } => section.is_some(),
+        Kind::Heading => false,
+    };
     match card.tile {
-        Tile::Lab if !node.later => Some(Mark::Anywhere),
+        Tile::Lab if !node.later && tuned_anywhere => Some(Mark::Anywhere),
         _ => None,
     }
 }
@@ -363,6 +371,21 @@ mod tests {
         let t = builtins();
         let all = draw(&t, Tile::Lab, &["Receiver", "IQ"], HACKRF, &[]).join("\n");
         assert!(all.contains("wherever you tune"), "{all}");
+    }
+
+    /// Wi-Fi's 5 GHz row marks 5 GHz, and Wi-Fi itself, over two bands,
+    /// draws no ruler at all rather than one of them.
+    #[test]
+    fn five_gigahertz_is_drawn_at_five() {
+        let t = builtins();
+        let all = draw(&t, Tile::Lab, &["Wi-Fi", "5 GHz"], HACKRF, &[]).join("\n");
+        assert!(all.contains("5 GHz ▼") || all.contains("▼ 5 GHz"), "{all}");
+        assert!(
+            !all.contains("2.4 GHz ▼") && !all.contains("▼ 2.4 GHz"),
+            "{all}"
+        );
+        let all = draw(&t, Tile::Lab, &["Wi-Fi"], HACKRF, &[]).join("\n");
+        assert!(!all.contains("WHERE IT LISTENS"), "{all}");
     }
 
     /// A Radio row has no band yet and no ruler; it says it is not built.
