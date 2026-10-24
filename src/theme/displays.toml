@@ -1,0 +1,29 @@
+# Pager display colours: what a pager's display looked like, so the same in
+# every theme. The theme's own display (its lcd_* keys) comes first in the
+# cycle; these follow, in this order. Each by day and by night; the ghost
+# is an unlit dot, a shade off the glass.
+
+[[display]]
+name  = "green"
+day   = { glass = "#9aab88", ink = "#18241a", ghost = "#93a482" }
+night = { glass = "#0a1e0f", ink = "#6dff8a", ghost = "#0f2615" }
+
+[[display]]
+name  = "amber"
+day   = { glass = "#d9a441", ink = "#2a1a00", ghost = "#d09c3b" }
+night = { glass = "#1c1300", ink = "#ffb400", ghost = "#241903" }
+
+[[display]]
+name  = "blue"
+day   = { glass = "#2f5fc4", ink = "#eef4ff", ghost = "#3767cc" }
+night = { glass = "#0a1638", ink = "#9fc2ff", ghost = "#101e45" }
+
+[[display]]
+name  = "grey"
+day   = { glass = "#b8bcb2", ink = "#1a1c1a", ghost = "#b0b4aa" }
+night = { glass = "#1c1f1c", ink = "#d8dcd2", ghost = "#232623" }
+
+[[display]]
+name  = "red"
+day   = { glass = "#d06b5e", ink = "#2a0905", ghost = "#c86357" }
+night = { glass = "#1a0503", ink = "#ff4a32", ghost = "#230806" }

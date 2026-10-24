@@ -203,7 +203,11 @@ fn face(buf: &mut Buffer, area: Rect, m: &SdrMetrics, theme: &crate::Theme) {
         Rect::new(lcd.x - 1, lcd.y - 1, lw + 2, lh + 2),
         theme.pager_bezel,
     );
-    let look = display_look(theme.lcd(p.view.night), theme.pager_bezel, live);
+    let look = display_look(
+        theme.display(p.view.display.as_deref(), p.view.night),
+        theme.pager_bezel,
+        live,
+    );
     fill(buf, area, lcd, look.glass);
     let glass = Style::default().bg(look.glass).fg(look.ink);
 
@@ -346,6 +350,11 @@ fn face(buf: &mut Buffer, area: Rect, m: &SdrMetrics, theme: &crate::Theme) {
         put(buf, area, kx, by + 3, key, shell.fg(theme.border_dim));
         bx += bw + gap;
     }
+    // The rest of the keys, engraved under the buttons as a pager's side
+    // carries its functions.
+    let more = "U my pager   B day/night   L colour   C clear";
+    let mx = case.x + case.width.saturating_sub(more.chars().count() as u16) / 2;
+    put(buf, area, mx, by + 5, more, shell.fg(theme.border_dim));
     if bx + 9 < case.right() {
         for i in 0..3 {
             put(
@@ -507,6 +516,7 @@ mod tests {
             "1200 baud +0 ppm",
             "\u{b1}4.50 kHz",
             "SNR 30 dB",
+            "U my pager   B day/night   L colour   C clear",
         ] {
             assert!(all.contains(want), "'{want}' missing:\n{all}");
         }
@@ -572,6 +582,26 @@ mod tests {
                 "{w}x{h}"
             );
         }
+    }
+
+    /// The display is drawn in the colour chosen, by day and by night.
+    #[test]
+    fn the_display_takes_the_colour_chosen() {
+        let theme = crate::Theme::sdr();
+        let mut m = with_pages(&[(8, "COLOUR")]);
+        m.pager.view.display = Some("blue".to_string());
+        m.pager.view.night = true;
+        let glass = theme.display(Some("blue"), true).glass;
+        let mut terminal =
+            ratatui::Terminal::new(ratatui::backend::TestBackend::new(120, 34)).unwrap();
+        terminal
+            .draw(|f| PagerFacePanel.render(f, f.size(), &m, &theme, false))
+            .unwrap();
+        let buf = terminal.backend().buffer().clone();
+        let found = (0..34u16)
+            .flat_map(|y| (0..120u16).map(move |x| (x, y)))
+            .any(|(x, y)| buf.get(x, y).bg == glass);
+        assert!(found, "no cell in the blue display's night glass");
     }
 
     #[test]

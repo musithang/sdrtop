@@ -42,6 +42,15 @@ pub(super) fn handle(key: KeyEvent, ctx: &mut InputCtx<'_>) -> bool {
             m.push_log(line);
         }
         KeyCode::Char('b') => p.view.night = !p.view.night,
+        KeyCode::Char('l') => {
+            p.next_display();
+            let name = p
+                .view
+                .display
+                .clone()
+                .unwrap_or_else(|| "the theme's own".to_string());
+            m.push_log(format!("Pager display: {name}"));
+        }
         KeyCode::Char('c') => {
             let n = p.inbox.len();
             p.clear();
@@ -130,6 +139,11 @@ mod tests {
         assert_eq!(state.lock().unwrap().pager.view.mine, Some(16));
         press(&state, KeyCode::Char('b'));
         assert!(state.lock().unwrap().pager.view.night);
+        press(&state, KeyCode::Char('l'));
+        assert_eq!(
+            state.lock().unwrap().pager.view.display.as_deref(),
+            Some("green")
+        );
         press(&state, KeyCode::Char('c'));
         assert!(state.lock().unwrap().pager.inbox.is_empty());
     }

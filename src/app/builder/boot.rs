@@ -461,6 +461,7 @@ pub(super) fn initial_metrics(cfg: &AppConfig, boot: Boot) -> anyhow::Result<Sdr
         pager: crate::state::PagerState {
             view: crate::state::PagerView {
                 night: cfg.pager.night,
+                display: cfg.pager.display.clone(),
                 ..Default::default()
             },
             ..Default::default()

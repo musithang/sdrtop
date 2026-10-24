@@ -101,6 +101,22 @@ the way of the same key elsewhere:
 | `o` | Write the band, the census, the BLE packets, their error curve and the classic hits to files ([taking the data away](net-export.md)) |
 | `←` `→` | Locked: the previous or next place this view listens. On Advertising and Census, advertising channel 37, 38, 39 and round again; under Wi-Fi, the next Wi-Fi channel, 1 to 13; elsewhere one block of the band along ([stepping](net-reading.md#stepping-while-locked)) |
 
+**On the pager** (Radio › Pagers › POCSAG) its buttons work the moment the
+view is on screen, no focus needed, as a pager's do in the hand. On every
+other view these keys go on doing what they do there:
+
+| Key | On the pager |
+|-----|--------|
+| `←` `→` | The previous or next page; back on the newest, the display follows new pages again |
+| `Enter` | Read on: the next screen of a long page, and the page counts as read |
+| `m` | Text shown as its kind and length only, on the display, the list and the card at once |
+| `u` | The shown page's address is your pager: only its pages, the NEW lamp for its unread. Again for every address |
+| `b` | The display by day or by night |
+| `l` | The display's colour: the theme's own, then green, amber, blue, grey and red, and round again |
+| `c` | Empty the inbox. The session's count of pages received stays |
+
+The display's light and colour are kept in the config's `[pager]` block.
+
 `p` stays inside the section. It used to walk every preset in the app in
 alphabetical order, which meant leaving the benches for a micro view halfway
 through and no way to predict what came next. Cycling within Lab is a thing you

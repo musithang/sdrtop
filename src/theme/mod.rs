@@ -107,7 +107,21 @@ impl Theme {
         }
     }
 
-    /// The pager display's three inks, in the day or the night backlight.
+    /// The pager display named `display` (one of [`display_names`]), by day
+    /// or by night. `None`, or a name not in the list, is the theme's own.
+    pub fn display(
+        &self,
+        display: Option<&str>,
+        night: bool,
+    ) -> crate::ui::widgets::dotmatrix::Look {
+        match display.and_then(|name| displays().iter().find(|d| d.name == name)) {
+            Some(d) if night => d.night,
+            Some(d) => d.day,
+            None => self.lcd(night),
+        }
+    }
+
+    /// The theme's own pager display, in the day or the night backlight.
     pub fn lcd(&self, night: bool) -> crate::ui::widgets::dotmatrix::Look {
         use crate::ui::widgets::dotmatrix::Look;
         if night {
@@ -158,6 +172,59 @@ impl Theme {
             ..self.clone()
         }
     }
+}
+
+/// One of the pager display colours of `displays.toml`.
+#[derive(Clone, Debug)]
+pub struct Display {
+    pub name: String,
+    pub day: crate::ui::widgets::dotmatrix::Look,
+    pub night: crate::ui::widgets::dotmatrix::Look,
+}
+
+/// The pager display colours, read once from `displays.toml`, which is
+/// compiled in. Its own test holds every one of them readable, so the
+/// `expect`s here cannot fire in a shipped binary.
+pub fn displays() -> &'static [Display] {
+    use std::sync::OnceLock;
+    static DISPLAYS: OnceLock<Vec<Display>> = OnceLock::new();
+    DISPLAYS.get_or_init(|| {
+        let file: toml::Value =
+            toml::from_str(include_str!("displays.toml")).expect("displays.toml parses");
+        let look = |t: &toml::Value| {
+            let ink = |k: &str| {
+                t.get(k)
+                    .and_then(toml::Value::as_str)
+                    .and_then(Theme::parse_hex)
+                    .expect("displays.toml colours are #rrggbb")
+            };
+            crate::ui::widgets::dotmatrix::Look {
+                glass: ink("glass"),
+                ink: ink("ink"),
+                ghost: ink("ghost"),
+            }
+        };
+        file.get("display")
+            .and_then(toml::Value::as_array)
+            .expect("displays.toml lists displays")
+            .iter()
+            .map(|d| Display {
+                name: d
+                    .get("name")
+                    .and_then(toml::Value::as_str)
+                    .expect("a display is named")
+                    .to_string(),
+                day: look(&d["day"]),
+                night: look(&d["night"]),
+            })
+            .collect()
+    })
+}
+
+/// The names a pager display can be set to, in the order `l` steps through
+/// them after the theme's own.
+pub fn display_names() -> Vec<&'static str> {
+    displays().iter().map(|d| d.name.as_str()).collect()
 }
 
 /// The six built-in themes, embedded at compile time.
@@ -366,6 +433,30 @@ mod tests {
                 assert!(ghost < ink / 5.0, "{name} night={night}");
             }
         }
+    }
+
+    /// Every pager display colour reads, by day and by night, as the
+    /// themes' own displays must: the ink well off the glass, the unlit dot
+    /// just off it.
+    #[test]
+    fn every_display_colour_reads() {
+        let names = display_names();
+        assert_eq!(names, ["green", "amber", "blue", "grey", "red"]);
+        let t = Theme::sdr();
+        for name in names {
+            for night in [false, true] {
+                let l = t.display(Some(name), night);
+                let ink = ciede2000(l.ink, l.glass);
+                let ghost = ciede2000(l.ghost, l.glass);
+                assert!(ink >= 40.0, "{name} night={night}: ink {ink:.1}");
+                assert!(
+                    (0.8..=6.0).contains(&ghost),
+                    "{name} night={night}: ghost {ghost:.1}"
+                );
+            }
+        }
+        assert_eq!(t.display(None, false), t.lcd(false));
+        assert_eq!(t.display(Some("no such"), true), t.lcd(true));
     }
 
     /// **Series colours are told apart at a glance.** Every built-in states

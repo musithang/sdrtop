@@ -104,7 +104,8 @@ fn radio_group(gm: &GainModel, span: bool, picked: Option<usize>, curve: Option<
 }
 
 /// The section's own group: the keys the key table files under this menu
-/// section, with the NET modes' current state beside their keys. Focus keys
+/// section, with the NET modes' and the pager view's current state beside
+/// their keys. Focus keys
 /// are not here: every panel that takes focus names its letter in its own
 /// title.
 fn section_group(m: &SdrMetrics) -> Group {
@@ -118,9 +119,33 @@ fn section_group(m: &SdrMetrics) -> Group {
             if !sections.contains(&m.ui.section.as_str()) {
                 continue;
             }
-            out.push(match row.ch {
-                Some('m') => format!("[{}] {label}={}", row.key, m.net.mode.label()),
-                Some('i') => format!("[{}] {label}={}", row.key, m.net.address_display.label()),
+            let net = crate::signal::net::is_net(&m.ui.section);
+            let view = &m.pager.view;
+            out.push(match (row.ch, net) {
+                (Some('m'), true) => format!("[{}] {label}={}", row.key, m.net.mode.label()),
+                (Some('i'), true) => {
+                    format!("[{}] {label}={}", row.key, m.net.address_display.label())
+                }
+                // The pager's own, with how its view stands.
+                (Some('m'), false) => format!(
+                    "[{}] {label}={}",
+                    row.key,
+                    if view.masked { "on" } else { "off" }
+                ),
+                (Some('u'), false) => match view.mine {
+                    Some(ric) => format!("[{}] {label}={ric:07}", row.key),
+                    None => format!("[{}] {label}=all", row.key),
+                },
+                (Some('b'), false) => format!(
+                    "[{}] {label}={}",
+                    row.key,
+                    if view.night { "night" } else { "day" }
+                ),
+                (Some('l'), false) => format!(
+                    "[{}] {label}={}",
+                    row.key,
+                    view.display.as_deref().unwrap_or("theme")
+                ),
                 _ => format!("[{}] {label}", row.key),
             });
         }

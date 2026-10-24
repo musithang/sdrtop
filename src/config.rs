@@ -218,12 +218,16 @@ impl Default for NetSettings {
     }
 }
 
-/// `[pager]`: what the pager view keeps between runs. Only the backlight:
-/// which page was on the display, or whose pager it was, is a session's.
+/// `[pager]`: what the pager view keeps between runs. Only how its display
+/// looks: which page was on it, or whose pager it was, is a session's.
 #[derive(Deserialize, Serialize, Clone, Debug, Default, PartialEq, Eq)]
 pub struct PagerSettings {
     #[serde(default)]
     pub night: bool,
+    /// The display's colour by name (`theme::display_names`); absent is the
+    /// theme's own.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub display: Option<String>,
 }
 
 impl PagerSettings {

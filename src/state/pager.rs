@@ -77,6 +77,9 @@ pub struct PagerView {
     pub mine: Option<u32>,
     /// The night backlight.
     pub night: bool,
+    /// The display's colour by name (`theme::display_names`); `None` is the
+    /// theme's own.
+    pub display: Option<String>,
     /// Pages read, by number: opened with READ.
     pub read: std::collections::BTreeSet<u64>,
 }
@@ -168,6 +171,21 @@ impl PagerState {
         };
         self.view.selected = None;
         self.view.screen = 0;
+    }
+
+    /// The next display colour: the theme's own, then each of
+    /// `theme::display_names` in turn, and round again.
+    pub fn next_display(&mut self) {
+        let names = crate::theme::display_names();
+        let at = self
+            .view
+            .display
+            .as_deref()
+            .and_then(|d| names.iter().position(|n| *n == d));
+        self.view.display = match at {
+            None => names.first().map(|n| n.to_string()),
+            Some(i) => names.get(i + 1).map(|n| n.to_string()),
+        };
     }
 
     /// Empty the inbox. The session's count stays: those pages were received.
@@ -289,6 +307,20 @@ mod tests {
         assert_eq!(s.screen_of(3), 2);
         s.read_on();
         assert_eq!(s.screen_of(3), 0);
+    }
+
+    /// The display colours go round, the theme's own first and last.
+    #[test]
+    fn the_display_colours_go_round() {
+        let mut s = PagerState::default();
+        let mut seen = vec![s.view.display.clone()];
+        for _ in 0..crate::theme::display_names().len() + 1 {
+            s.next_display();
+            seen.push(s.view.display.clone());
+        }
+        assert_eq!(seen.first(), Some(&None));
+        assert_eq!(seen.last(), Some(&None), "back to the theme's own");
+        assert_eq!(seen[1].as_deref(), Some("green"));
     }
 
     /// Clearing empties the inbox and keeps the session's count.

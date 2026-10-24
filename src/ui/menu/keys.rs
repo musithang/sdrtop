@@ -249,6 +249,53 @@ pub const GLOBAL: &[(&str, &[Binding])] = &[
         ],
     ),
     (
+        "The pager",
+        &[
+            f(
+                "\u{2190} \u{2192}",
+                None,
+                "on the pager: the previous or next page",
+                Footer::Section(&[crate::signal::pocsag::SECTION], "page"),
+            ),
+            f(
+                "Enter",
+                None,
+                "on the pager: read on, a screen of a long page at a time",
+                Footer::Section(&[crate::signal::pocsag::SECTION], "read"),
+            ),
+            f(
+                "M",
+                Some('m'),
+                "on the pager: text as its kind and length only, everywhere at once",
+                Footer::Section(&[crate::signal::pocsag::SECTION], "mask"),
+            ),
+            f(
+                "U",
+                Some('u'),
+                "on the pager: the shown page's address is your pager, or every address again",
+                Footer::Section(&[crate::signal::pocsag::SECTION], "my pager"),
+            ),
+            f(
+                "B",
+                Some('b'),
+                "on the pager: the display by day or by night",
+                Footer::Section(&[crate::signal::pocsag::SECTION], "light"),
+            ),
+            f(
+                "L",
+                Some('l'),
+                "on the pager: the display's colour, the theme's own first",
+                Footer::Section(&[crate::signal::pocsag::SECTION], "colour"),
+            ),
+            f(
+                "C",
+                Some('c'),
+                "on the pager: empty the inbox",
+                Footer::Section(&[crate::signal::pocsag::SECTION], "clear"),
+            ),
+        ],
+    ),
+    (
         "Layouts and session",
         &[
             b("1-9", None, "the nth layout of this section"),
@@ -553,7 +600,13 @@ mod tests {
     /// reference still promises after the arm was deleted.
     #[test]
     fn the_reference_documents_no_dead_keys() {
-        let src = include_str!("../../app/input/global/mod.rs");
+        // The global table, and the pager view's buttons, which claim their
+        // keys before it on that view.
+        let src = [
+            include_str!("../../app/input/global/mod.rs"),
+            include_str!("../../app/input/pager.rs"),
+        ]
+        .concat();
         for (group, bindings) in GLOBAL {
             for binding in *bindings {
                 let Some(c) = binding.ch else { continue };
@@ -568,15 +621,27 @@ mod tests {
 
     /// A key is documented once. Two rows for one key means two answers to one
     /// question, and the reader has no way to tell which is current.
+    ///
+    /// **Unless the two are filed under sections that never share a screen**:
+    /// a section-scoped key is a different key in each, `m` NET's mode in a
+    /// NET section and the pager's mask on the pager, and each footer shows
+    /// only its own.
     #[test]
     fn no_key_is_documented_twice() {
-        let mut seen = Vec::new();
+        let mut seen: Vec<(char, &Footer)> = Vec::new();
         for (_, bindings) in GLOBAL {
             for binding in *bindings {
-                if let Some(c) = binding.ch {
-                    assert!(!seen.contains(&c), "[{c}] is documented twice");
-                    seen.push(c);
+                let Some(c) = binding.ch else { continue };
+                for (other, footer) in seen.iter().filter(|(o, _)| *o == c) {
+                    let apart = match (*footer, &binding.footer) {
+                        (Footer::Section(a, _), Footer::Section(b, _)) => {
+                            !a.iter().any(|s| b.contains(s))
+                        }
+                        _ => false,
+                    };
+                    assert!(apart, "[{other}] is documented twice");
                 }
+                seen.push((c, &binding.footer));
             }
         }
     }
