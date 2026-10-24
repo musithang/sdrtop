@@ -23,21 +23,11 @@ pub(super) fn leave_focus_or_open_menu(ctx: &mut InputCtx<'_>) {
     open_menu(ctx);
 }
 
-/// Open the menu with the cursor on the active preset.
-///
-/// The cursor starting there is what makes `Enter` resume: the most ordinary
-/// thing a person does with this screen needs no key of its own. A preset the
-/// menu hides, or one no longer in the config, starts the cursor at the top
-/// rather than refusing to open.
+/// Open the menu over the deck, on Resume: a session always has a view to
+/// go back to, and `Enter` goes back to it.
 pub(super) fn open_menu(ctx: &mut InputCtx<'_>) {
-    let active = ctx.engine.active_preset().to_string();
-    let (section, entry) = ctx.engine.menu().locate(&active).unwrap_or((0, 0));
-    metrics(ctx.state).ui.menu = Some(crate::state::MenuState {
-        section,
-        entry,
-        pane: crate::state::MenuPane::Views,
-        scroll: 0,
-    });
+    let state = crate::ui::menu::opening(ctx.engine, true);
+    metrics(ctx.state).ui.menu = Some(state);
 }
 
 /// `[Esc]` - leave focus mode, and clear **everything** focus mode put on screen.

@@ -22,56 +22,48 @@ use ratatui::{
 };
 
 use super::ink;
+use crate::state::MenuTile;
 
-/// One tile. The order of [`Face::ALL`] is the order on screen.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum Face {
-    Resume,
-    Radio,
-    Lab,
-    Options,
-    Keys,
-    Quit,
-}
-
-impl Face {
-    pub const ALL: [Face; 6] = [
-        Face::Resume,
-        Face::Radio,
-        Face::Lab,
-        Face::Options,
-        Face::Keys,
-        Face::Quit,
+/// How each tile looks and what it says. Here rather than beside the type,
+/// because the state only needs to know which tile is selected.
+impl MenuTile {
+    pub const ALL: [MenuTile; 6] = [
+        MenuTile::Resume,
+        MenuTile::Radio,
+        MenuTile::Lab,
+        MenuTile::Options,
+        MenuTile::Keys,
+        MenuTile::Quit,
     ];
 
     /// The tiles on screen: Resume only when there is something to resume.
-    pub fn shown(resume: bool) -> Vec<Face> {
+    pub fn shown(resume: bool) -> Vec<MenuTile> {
         Self::ALL
             .into_iter()
-            .filter(|f| resume || *f != Face::Resume)
+            .filter(|f| resume || *f != MenuTile::Resume)
             .collect()
     }
 
     pub fn name(self) -> &'static str {
         match self {
-            Face::Resume => "Resume",
-            Face::Radio => "Radio",
-            Face::Lab => "Lab",
-            Face::Options => "Options",
-            Face::Keys => "Keys",
-            Face::Quit => "Quit",
+            MenuTile::Resume => "Resume",
+            MenuTile::Radio => "Radio",
+            MenuTile::Lab => "Lab",
+            MenuTile::Options => "Options",
+            MenuTile::Keys => "Keys",
+            MenuTile::Quit => "Quit",
         }
     }
 
     /// The key that selects it, as drawn in its corner.
     pub fn key(self) -> &'static str {
         match self {
-            Face::Resume => "Enter",
-            Face::Radio => "R",
-            Face::Lab => "L",
-            Face::Options => "O",
-            Face::Keys => "K",
-            Face::Quit => "Q",
+            MenuTile::Resume => "Enter",
+            MenuTile::Radio => "R",
+            MenuTile::Lab => "L",
+            MenuTile::Options => "O",
+            MenuTile::Keys => "K",
+            MenuTile::Quit => "Q",
         }
     }
 
@@ -79,46 +71,46 @@ impl Face {
     /// the caller passes.
     fn line(self) -> &'static str {
         match self {
-            Face::Resume => "",
-            Face::Radio => "listen to the air",
-            Face::Lab => "measure and decode",
-            Face::Options => "radio settings",
-            Face::Keys => "every key",
-            Face::Quit => "close sdrtop",
+            MenuTile::Resume => "",
+            MenuTile::Radio => "listen to the air",
+            MenuTile::Lab => "measure and decode",
+            MenuTile::Options => "radio settings",
+            MenuTile::Keys => "every key",
+            MenuTile::Quit => "close sdrtop",
         }
     }
 
     fn color(self, theme: &crate::Theme) -> ratatui::style::Color {
         match self {
-            Face::Resume => theme.status_ok,
-            Face::Radio => theme.border_accent,
-            Face::Lab => theme.value_hi,
-            Face::Options | Face::Keys => theme.label,
-            Face::Quit => theme.status_crit,
+            MenuTile::Resume => theme.status_ok,
+            MenuTile::Radio => theme.border_accent,
+            MenuTile::Lab => theme.value_hi,
+            MenuTile::Options | MenuTile::Keys => theme.label,
+            MenuTile::Quit => theme.status_crit,
         }
     }
 
     /// The large tile's picture, four rows at most.
     fn icon(self) -> &'static [&'static str] {
         match self {
-            Face::Resume => &["▐█▄    ", "▐███▄  ", "▐███▀  ", "▐█▀    "],
-            Face::Radio => &["((( ╻ )))", "    ┃    ", "    ┃    ", "  ▁▁┻▁▁  "],
-            Face::Lab => &["╭─────────╮", "│    ▆    │", "│▁▁▂▅█▅▂▁▁│", "╰─────────╯"],
-            Face::Options => &["──●───────", "──────●───", "────●─────"],
-            Face::Keys => &["┌───┐ ┌───┐", "│Esc│ │ ↵ │", "└───┘ └───┘"],
-            Face::Quit => &[" ╭─  │  ─╮ ", " │   ╵   │ ", " ╰───────╯ "],
+            MenuTile::Resume => &["▐█▄    ", "▐███▄  ", "▐███▀  ", "▐█▀    "],
+            MenuTile::Radio => &["((( ╻ )))", "    ┃    ", "    ┃    ", "  ▁▁┻▁▁  "],
+            MenuTile::Lab => &["╭─────────╮", "│    ▆    │", "│▁▁▂▅█▅▂▁▁│", "╰─────────╯"],
+            MenuTile::Options => &["──●───────", "──────●───", "────●─────"],
+            MenuTile::Keys => &["┌───┐ ┌───┐", "│Esc│ │ ↵ │", "└───┘ └───┘"],
+            MenuTile::Quit => &[" ╭─  │  ─╮ ", " │   ╵   │ ", " ╰───────╯ "],
         }
     }
 
     /// The small tile's picture, one row.
     fn glyph(self) -> &'static str {
         match self {
-            Face::Resume => "▶",
-            Face::Radio => "((╻))",
-            Face::Lab => "▁▅█▅▁",
-            Face::Options => "─●──",
-            Face::Keys => "[↵]",
-            Face::Quit => "×",
+            MenuTile::Resume => "▶",
+            MenuTile::Radio => "((╻))",
+            MenuTile::Lab => "▁▅█▅▁",
+            MenuTile::Options => "─●──",
+            MenuTile::Keys => "[↵]",
+            MenuTile::Quit => "×",
         }
     }
 }
@@ -183,8 +175,8 @@ pub fn render(
     f: &mut Frame,
     area: Rect,
     size: Size,
-    faces: &[Face],
-    selected: Face,
+    faces: &[MenuTile],
+    selected: MenuTile,
     focused: bool,
     resume: &str,
     theme: &crate::Theme,
@@ -201,7 +193,7 @@ pub fn render(
     for &face in faces {
         let rect = Rect::new(x, area.y, w, h).intersection(area);
         if rect.width == w && rect.height == h {
-            let line = if face == Face::Resume {
+            let line = if face == MenuTile::Resume {
                 resume
             } else {
                 face.line()
@@ -226,7 +218,7 @@ fn tile(
     buf: &mut Buffer,
     rect: Rect,
     size: Size,
-    face: Face,
+    face: MenuTile,
     selected: bool,
     focused: bool,
     line: &str,
@@ -313,8 +305,8 @@ fn tile(
 fn names(
     buf: &mut Buffer,
     area: Rect,
-    faces: &[Face],
-    selected: Face,
+    faces: &[MenuTile],
+    selected: MenuTile,
     focused: bool,
     theme: &crate::Theme,
 ) {
@@ -360,7 +352,7 @@ mod tests {
         h: u16,
         size: Size,
         resume: bool,
-        selected: Face,
+        selected: MenuTile,
         focused: bool,
     ) -> Vec<String> {
         let theme = crate::Theme::sdr();
@@ -371,7 +363,7 @@ mod tests {
                     f,
                     f.size(),
                     size,
-                    &Face::shown(resume),
+                    &MenuTile::shown(resume),
                     selected,
                     focused,
                     "Wi-Fi · Frames",
@@ -389,12 +381,12 @@ mod tests {
     /// there is not.
     #[test]
     fn resume_leads_only_when_there_is_something_to_resume() {
-        assert_eq!(Face::shown(true)[0], Face::Resume);
-        assert_eq!(Face::shown(false)[0], Face::Radio);
-        assert_eq!(Face::shown(false).len(), 5);
-        let rows = draw(191, 10, Size::Large, false, Face::Radio, true).join("\n");
+        assert_eq!(MenuTile::shown(true)[0], MenuTile::Resume);
+        assert_eq!(MenuTile::shown(false)[0], MenuTile::Radio);
+        assert_eq!(MenuTile::shown(false).len(), 5);
+        let rows = draw(191, 10, Size::Large, false, MenuTile::Radio, true).join("\n");
         assert!(!rows.contains("Resume"), "{rows}");
-        let rows = draw(191, 10, Size::Large, true, Face::Resume, true).join("\n");
+        let rows = draw(191, 10, Size::Large, true, MenuTile::Resume, true).join("\n");
         assert!(
             rows.contains("Resume") && rows.contains("Wi-Fi · Frames"),
             "{rows}"
@@ -404,13 +396,13 @@ mod tests {
     /// A large tile is 20 x 10 and a small one 10 x 5: square at a 1:2 cell.
     #[test]
     fn the_tiles_are_square_on_screen() {
-        let rows = draw(191, 10, Size::Large, true, Face::Lab, true);
+        let rows = draw(191, 10, Size::Large, true, MenuTile::Lab, true);
         let top = &rows[0];
         let left = top.find('╭').unwrap();
         let right = top[left..].find('╮').unwrap();
         assert_eq!(top[left..left + right].chars().count() + 1, 20);
         assert!(rows[9].contains('╰'), "{}", rows[9]);
-        let rows = draw(80, 5, Size::Small, true, Face::Lab, true);
+        let rows = draw(80, 5, Size::Small, true, MenuTile::Lab, true);
         let left = rows[0].find('╭').unwrap();
         let right = rows[0][left..].find('╮').unwrap();
         assert_eq!(rows[0][left..left + right].chars().count() + 1, 10);
@@ -421,7 +413,7 @@ mod tests {
     #[test]
     fn the_selected_tile_has_the_heavy_frame() {
         for focused in [true, false] {
-            let rows = draw(191, 10, Size::Large, true, Face::Lab, focused);
+            let rows = draw(191, 10, Size::Large, true, MenuTile::Lab, focused);
             assert_eq!(rows[0].matches('┏').count(), 1);
             let col = |row: &str, pat: &str| row[..row.find(pat).unwrap()].chars().count();
             let heavy = col(&rows[0], "┏");
@@ -435,8 +427,8 @@ mod tests {
     #[test]
     fn every_tile_shows_its_key() {
         for size in [Size::Large, Size::Small] {
-            let rows = draw(191, size.height(), size, true, Face::Lab, true).join("\n");
-            for face in Face::ALL {
+            let rows = draw(191, size.height(), size, true, MenuTile::Lab, true).join("\n");
+            for face in MenuTile::ALL {
                 assert!(rows.contains(face.key()), "{size:?} {face:?}");
                 assert!(rows.contains(face.name()), "{size:?} {face:?}");
             }
@@ -458,8 +450,8 @@ mod tests {
     /// selected.
     #[test]
     fn the_narrow_form_names_every_tile() {
-        let rows = draw(60, 1, Size::Names, true, Face::Keys, true);
-        for face in Face::ALL {
+        let rows = draw(60, 1, Size::Names, true, MenuTile::Keys, true);
+        for face in MenuTile::ALL {
             assert!(rows[0].contains(face.name()), "{}", rows[0]);
         }
         assert!(rows[0].contains("▌Keys"), "{}", rows[0]);

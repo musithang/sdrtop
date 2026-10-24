@@ -35,6 +35,9 @@ pub struct LayoutEngine {
     menu: menu::model::Menu,
     /// The views this radio is refused, for the menu to list as refused.
     refusals: Vec<menu::tree::Refusal>,
+    /// The menu's trees: `menu` hung on the tiles, with `refusals` beside it.
+    /// Rebuilt whenever either changes, which is only at startup.
+    tree: menu::tree::Tree,
     startup_warnings: Vec<String>,
 }
 
@@ -51,6 +54,7 @@ impl LayoutEngine {
         saved_active_preset: String,
     ) -> Self {
         let menu = menu::model::build(&config.presets);
+        let tree = menu::tree::build(&menu, &[]);
         Self {
             config,
             saved_active_preset,
@@ -59,6 +63,7 @@ impl LayoutEngine {
             hidden_panels: HashSet::new(),
             menu,
             refusals: Vec::new(),
+            tree,
             startup_warnings: Vec::new(),
         }
     }
@@ -69,18 +74,18 @@ impl LayoutEngine {
     /// it knows.
     pub fn retire_menu_section(&mut self, id: &str) {
         self.menu.sections.retain(|s| s.id != id);
+        self.tree = menu::tree::build(&self.menu, &self.refusals);
     }
 
     pub fn set_refusals(&mut self, refusals: Vec<menu::tree::Refusal>) {
         self.refusals = refusals;
+        self.tree = menu::tree::build(&self.menu, &self.refusals);
     }
 
     /// The menu's two trees: the sections, and beside them what the radio
-    /// was refused. Not drawn yet; `expect` fails the build once the menu
-    /// reads it.
-    #[cfg_attr(not(test), expect(dead_code))]
-    pub fn menu_tree(&self) -> menu::tree::Tree {
-        menu::tree::build(&self.menu, &self.refusals)
+    /// was refused.
+    pub fn menu_tree(&self) -> &menu::tree::Tree {
+        &self.tree
     }
 
     pub fn set_startup_warnings(&mut self, warnings: Vec<String>) {
@@ -352,7 +357,6 @@ impl LayoutEngine {
     /// named as its frame names it: the menu's map of a view, drawn from the
     /// placement the deck itself would use rather than from a picture of it.
     /// Empty for a preset the table does not hold.
-    #[cfg_attr(not(test), expect(dead_code))]
     pub fn placement_of(
         &self,
         preset: &str,

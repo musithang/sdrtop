@@ -170,6 +170,18 @@ pub struct Path {
     pub rows: Vec<usize>,
 }
 
+impl From<crate::state::MenuPath> for Path {
+    fn from(p: crate::state::MenuPath) -> Self {
+        Path { rows: p.rows() }
+    }
+}
+
+impl From<&Path> for crate::state::MenuPath {
+    fn from(p: &Path) -> Self {
+        crate::state::MenuPath::from_rows(&p.rows)
+    }
+}
+
 impl Tree {
     pub fn root(&self, tile: Tile) -> &[Node] {
         match tile {
@@ -231,9 +243,9 @@ impl Tree {
     /// A path certainly in range and on a cursor stop, or `None` for a tree
     /// with nothing in it.
     ///
-    /// The cursor is cloned into the frame snapshot and drawn without the
-    /// engine, as [`Menu::clamp`] explains, so it is pulled into range here
-    /// rather than trusted there. An index on a heading moves to the next
+    /// The cursor is cloned into the frame snapshot every frame, so it is
+    /// pulled into range here rather than trusted: an index past the end
+    /// would panic mid-draw and take the terminal with it. An index on a heading moves to the next
     /// stop in its column, or the one before it when the heading is last.
     pub fn clamp(&self, tile: Tile, path: &Path) -> Option<Path> {
         let mut rows = self.root(tile);

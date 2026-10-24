@@ -36,6 +36,8 @@ pub struct Card<'a> {
     /// (`LayoutEngine::placement_of`); empty for anything but a view.
     pub placed: &'a [(String, Rect)],
     pub screen: Rect,
+    /// On Resume: where the radio was left, said above the view's card.
+    pub left_off: Option<&'a str>,
 }
 
 /// Width below which the map goes under the words instead of beside them.
@@ -74,7 +76,8 @@ pub fn render(f: &mut Frame, area: Rect, card: &Card<'_>, theme: &crate::Theme) 
     }
     let (mx, my, mw) = if beside {
         let x = area.x + text_w + 4;
-        (x, area.y + 3, (area.right() - x).min(48))
+        let top = if card.left_off.is_some() { 6 } else { 3 };
+        (x, area.y + top, (area.right() - x).min(48))
     } else {
         (area.x, y + 1, text_w.min(48))
     };
@@ -128,6 +131,20 @@ fn mark<'a>(card: &'a Card<'a>) -> Option<Mark<'a>> {
 fn words<'a>(node: &Node, card: &Card<'_>, w: usize, theme: &crate::Theme) -> (Vec<Line<'a>>, u16) {
     let dead = node.later || node.refused.is_some();
     let mut lines = Vec::new();
+
+    if let Some(left_off) = card.left_off {
+        lines.push(Line::from(Span::styled(
+            "WHERE YOU LEFT OFF",
+            Style::default()
+                .fg(theme.status_ok)
+                .add_modifier(Modifier::BOLD),
+        )));
+        lines.push(Line::from(Span::styled(
+            left_off.to_string(),
+            Style::default().fg(theme.value),
+        )));
+        lines.push(Line::raw(""));
+    }
 
     // The name, and how to open it, on one row.
     let title = Style::default()
@@ -258,6 +275,7 @@ mod tests {
             live: None,
             placed,
             screen: Rect::new(0, 0, 191, 41),
+            left_off: None,
         };
         let theme = crate::Theme::sdr();
         let mut terminal = Terminal::new(TestBackend::new(100, 28)).unwrap();

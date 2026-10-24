@@ -141,30 +141,6 @@ impl Menu {
                 .map(|ei| (si, ei))
         })
     }
-
-    /// A cursor position that is certainly in range, or `None` when there is
-    /// nothing to point at.
-    ///
-    /// The cursor lives in `UiState`, which is cloned into every frame's
-    /// snapshot and rendered without the engine present, so the renderer cannot
-    /// assume the indices still fit. Clamping here rather than indexing there
-    /// keeps the "panels never panic during draw" rule intact: a bad index would
-    /// take the whole terminal down.
-    ///
-    /// A section with no entries (Wi-Fi, for now) is still a place the cursor
-    /// can stand: it clamps to its first row, and [`Self::at`] finds nothing
-    /// there to open.
-    pub fn clamp(&self, section: usize, entry: usize) -> Option<(usize, usize)> {
-        let si = section.min(self.sections.len().checked_sub(1)?);
-        let ei = entry.min(self.sections[si].entries.len().saturating_sub(1));
-        Some((si, ei))
-    }
-
-    /// The entry a clamped cursor points at.
-    pub fn at(&self, section: usize, entry: usize) -> Option<&Entry> {
-        let (si, ei) = self.clamp(section, entry)?;
-        self.sections[si].entries.get(ei)
-    }
 }
 
 /// Build the menu from the merged preset table.
@@ -403,11 +379,6 @@ mod tests {
                 .all(|s| s.id == "wifi" || s.note.is_none()),
             "only the empty section carries a note"
         );
-        // An empty section is still somewhere the cursor can stand, with
-        // nothing there to open.
-        let at = menu.sections.iter().position(|s| s.id == WIFI).unwrap();
-        assert_eq!(menu.clamp(at, 5), Some((at, 0)));
-        assert_eq!(menu.at(at, 0), None, "Wi-Fi has nothing to open");
     }
 
     /// Wi-Fi is gated with Bluetooth: on a radio the band refuses, every NET
@@ -661,30 +632,5 @@ mod tests {
         assert!(menu.sections.is_empty());
         assert!(menu.warnings.is_empty());
         assert!(menu.locate("anything").is_none());
-        assert!(menu.clamp(0, 0).is_none());
-        assert!(menu.at(0, 0).is_none());
-    }
-
-    /// An out of range cursor is pulled back into range rather than indexed.
-    /// The cursor is cloned into the frame snapshot and rendered without the
-    /// engine, so this is what keeps a bad index from panicking mid-draw and
-    /// taking the terminal with it.
-    #[test]
-    fn a_cursor_past_the_end_is_clamped() {
-        let menu = build(&LayoutConfig::default_config().presets);
-        // Nine sections, the last Wi-Fi's Channel with its one view; Sweep
-        // (index 2) has two entries.
-        assert_eq!(menu.clamp(99, 0), Some((8, 0)));
-        assert_eq!(
-            menu.at(99, 0).map(|e| e.preset.as_str()),
-            Some("wifi_survey")
-        );
-        assert_eq!(menu.clamp(2, 99), Some((2, 1)));
-        assert_eq!(
-            menu.at(2, 99).map(|e| e.preset.as_str()),
-            Some("micro_sweep")
-        );
-        // An in-range cursor is left exactly where it is.
-        assert_eq!(menu.clamp(1, 2), Some((1, 2)));
     }
 }

@@ -251,35 +251,80 @@ pub struct UiState {
     pub screen_cols: u16,
 }
 
-/// Which pane the menu's right column is showing.
+/// The menu's tiles, in the order they stand on screen.
+///
+/// Resume is listed only when there is something to resume
+/// ([`MenuState::resume`]). How each is drawn is `ui::menu::tiles`'.
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
-pub enum MenuPane {
-    /// The selected section's layouts. The only pane the number keys work in.
+pub enum MenuTile {
+    Resume,
+    Radio,
     #[default]
-    Views,
-    /// The key reference. Replaces the `?` overlay, which had drifted out of
-    /// step with the dispatch because nothing checked it.
-    Keys,
+    Lab,
     /// Settings exposed by the active device.
     Options,
+    /// The key reference. Replaced the `?` overlay, which had drifted out of
+    /// step with the dispatch because nothing checked it.
+    Keys,
+    Quit,
+}
+
+/// Where the keys go: the row of tiles, or what the selected tile opens
+/// below it (a tree, the options, the key reference).
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
+pub enum MenuFocus {
+    #[default]
+    Tiles,
+    Below,
+}
+
+/// A place in one of the menu's trees: a row index in each column. Fixed
+/// size, so [`MenuState`] stays `Copy` and is cloned into the frame snapshot
+/// without an allocation; the deepest path the trees have is four.
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
+pub struct MenuPath {
+    rows: [u8; MenuPath::DEPTH],
+    len: u8,
+}
+
+impl MenuPath {
+    pub const DEPTH: usize = 8;
+
+    /// Deeper than [`Self::DEPTH`] is cut there, and an index past 255 is
+    /// held at 255: either way the renderer clamps it onto a real row.
+    pub fn from_rows(rows: &[usize]) -> Self {
+        let mut out = Self::default();
+        for (slot, &i) in out.rows.iter_mut().zip(rows) {
+            *slot = i.min(u8::MAX as usize) as u8;
+        }
+        out.len = rows.len().min(Self::DEPTH) as u8;
+        out
+    }
+
+    pub fn rows(&self) -> Vec<usize> {
+        self.rows[..self.len as usize]
+            .iter()
+            .map(|&i| i as usize)
+            .collect()
+    }
 }
 
 /// Where the cursor is while the menu is open.
 ///
-/// The cursor sits on a **view**, never on a section heading. That is what lets
-/// `Enter` mean exactly one thing, and it is why resume needs no key of its own:
-/// the menu opens with the cursor already on the active preset, so `Enter` puts
-/// you back where you were using the same key that opens anything else.
-///
-/// Indices into `menu::model::Menu`, which the engine owns and rebuilds never.
-/// A stale index cannot outlive the table it points into, but the renderer still
-/// clamps rather than trusting them, because this is cloned into every frame's
+/// Each tree keeps its own path, so moving between the Radio and Lab tiles
+/// comes back to where you were in each. The paths index the engine's
+/// `menu::tree::Tree`, which it builds once; the renderer still clamps them
+/// rather than trusting them, because this is cloned into every frame's
 /// snapshot and a panic during draw takes the terminal with it.
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
 pub struct MenuState {
-    pub section: usize,
-    pub entry: usize,
-    pub pane: MenuPane,
+    pub tile: MenuTile,
+    pub focus: MenuFocus,
+    pub radio: MenuPath,
+    pub lab: MenuPath,
+    /// Whether there is a view to resume: in a session always, at startup
+    /// only when a saved config named one.
+    pub resume: bool,
     /// Scroll position in Keys or selected row in Options.
     pub scroll: usize,
 }

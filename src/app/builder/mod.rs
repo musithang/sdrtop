@@ -295,6 +295,10 @@ impl App {
             .as_deref()
             .and_then(crate::config::LayoutConfig::presets_dir);
         let theme = cfg.build_theme(themes_dir.as_deref());
+        // Whether a config was saved before this run: what makes a view
+        // worth offering to resume. Read before anything writes one, which
+        // only quitting does.
+        let saved = config_path.as_deref().is_some_and(std::path::Path::exists);
 
         // Whether the NET section exists at all, decided once, from the radio's
         // own declaration. The reason travels with the decision so the log and
@@ -344,7 +348,7 @@ impl App {
                 m.push_log(format!("Wi-Fi refused: {why}"));
             }
 
-            m.ui.menu = startup_menu(engine.menu(), engine.active_preset(), m.observer.active);
+            m.ui.menu = startup_menu(&engine, m.observer.active, saved);
         }
 
         Ok(Self {
@@ -384,31 +388,24 @@ fn spawn_worker(name: &str, run: impl FnOnce() + Send + 'static) {
 
 /// The menu in front of the first screen, if any.
 ///
-/// The menu is the first screen. The cursor starts on the layout the config
-/// restored, so `Enter` resumes and no other key is needed for it: resume is
-/// where the cursor is, not a command of its own. On a first run, or after
-/// the config names a layout the menu hides, there is nothing to restore and
-/// the cursor starts at the top.
+/// The menu is the first screen. When a saved config named a view the menu
+/// lists, it opens on the Resume tile, with the Lab tree already standing on
+/// that view: `Enter` resumes, `↓` goes in there. On a first run (no config
+/// file yet) there is nothing to resume, no Resume tile, and it opens on Lab.
 ///
 /// **Not in observer mode.** Its layout is given, not chosen, so the menu does
 /// not list it, and resuming from the top would replace the one screen that
 /// names the radio's holder with a layout waiting for a stream that never
 /// comes. `Esc` still opens the menu, and closes it again onto this screen.
 fn startup_menu(
-    menu: &crate::ui::menu::model::Menu,
-    active: &str,
+    engine: &crate::ui::LayoutEngine,
     observing: bool,
+    saved: bool,
 ) -> Option<crate::state::MenuState> {
     if observing {
         return None;
     }
-    let (section, entry) = menu.locate(active).unwrap_or((0, 0));
-    Some(crate::state::MenuState {
-        section,
-        entry,
-        pane: crate::state::MenuPane::Views,
-        scroll: 0,
-    })
+    Some(crate::ui::menu::opening(engine, saved))
 }
 
 #[cfg(test)]
@@ -431,14 +428,22 @@ mod tests {
         let observer = engine("observer");
         assert_eq!(observer.active_preset(), "observer");
         assert!(observer.menu().locate("observer").is_none());
-        assert!(startup_menu(observer.menu(), "observer", true).is_none());
+        assert!(startup_menu(&observer, true, true).is_none());
 
         // Everywhere else the menu still comes first, on the restored layout.
         let spectrum = engine("spectrum");
-        let menu = startup_menu(spectrum.menu(), "spectrum", false).expect("the menu comes first");
-        assert_eq!(
-            Some((menu.section, menu.entry)),
-            spectrum.menu().locate("spectrum")
-        );
+        let menu = startup_menu(&spectrum, false, true).expect("the menu comes first");
+        assert_eq!(menu.tile, crate::state::MenuTile::Resume);
+        let (_, path) = spectrum.menu_tree().locate("spectrum").unwrap();
+        assert_eq!(menu.lab, (&path).into());
+    }
+
+    /// A first run has nothing to resume: no Resume tile, and Lab selected.
+    #[test]
+    fn a_first_run_opens_on_lab_without_resume() {
+        let spectrum = engine("spectrum");
+        let menu = startup_menu(&spectrum, false, false).expect("the menu comes first");
+        assert!(!menu.resume);
+        assert_eq!(menu.tile, crate::state::MenuTile::Lab);
     }
 }

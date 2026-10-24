@@ -455,12 +455,13 @@ impl App {
                     full
                 };
                 f.render_widget(ratatui::widgets::Clear, area);
-                let controls = self.engine.section_controls(menu_state.section, &m);
+                let section = ui::menu::keys_section(&self.engine, &menu_state);
+                let controls = self.engine.section_controls(section, &m);
                 ui::menu::render(
                     f,
                     area,
                     &m,
-                    self.engine.menu(),
+                    &self.engine,
                     &menu_state,
                     &controls,
                     &frame_theme,
@@ -1102,14 +1103,15 @@ mod tests {
 
     #[test]
     fn numeric_menu_entry_preserves_the_deck_footer_setting() {
-        use crate::state::{InputMode, MenuPane, MenuState};
+        use crate::state::{InputMode, MenuFocus, MenuState, MenuTile};
         let (mut app, _, _, _) = quit_test_app();
         app.engine.set_preset("command_rail");
         {
             let mut m = app.state.lock().unwrap();
             m.ui.device_option_update = DeviceOptionUpdate::Idle;
             m.ui.menu = Some(MenuState {
-                pane: MenuPane::Options,
+                tile: MenuTile::Options,
+                focus: MenuFocus::Below,
                 ..Default::default()
             });
         }

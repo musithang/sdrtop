@@ -14,8 +14,8 @@
 use crossterm::event::{KeyCode, KeyEvent};
 
 use crate::event::{DeviceOptionCompletion, DeviceOptionRequest};
-use crate::state::{DeviceOptionUpdate, InputMode, MenuPane, MenuState, SdrMetrics};
-use crate::ui::menu::{keys, sections};
+use crate::state::{DeviceOptionUpdate, InputMode, MenuFocus, MenuState, MenuTile, SdrMetrics};
+use crate::ui::menu::{self, keys, tree};
 
 use super::{global, metrics, InputCtx, KeyAction};
 
@@ -35,51 +35,235 @@ pub(super) fn handle(key: KeyEvent, ctx: &mut InputCtx<'_>) -> KeyAction {
     };
 
     match key.code {
-        KeyCode::Esc if option_pending => {}
-        KeyCode::Tab | KeyCode::BackTab if option_pending => {}
-        KeyCode::Esc => close(ctx),
+        KeyCode::Esc | KeyCode::Tab | KeyCode::BackTab if option_pending => {
+            return KeyAction::Continue
+        }
+        KeyCode::Esc => {
+            close(ctx);
+            return KeyAction::Continue;
+        }
         KeyCode::Char('q') => return KeyAction::Quit,
-
-        KeyCode::Right if state.pane == MenuPane::Options && has_options => {
-            return request_option_change(ctx, state, 1);
+        KeyCode::Tab | KeyCode::BackTab => {
+            let focus = match state.focus {
+                MenuFocus::Tiles => MenuFocus::Below,
+                MenuFocus::Below => MenuFocus::Tiles,
+            };
+            set(ctx, enter(ctx, MenuState { focus, ..state }));
+            return KeyAction::Continue;
         }
-        KeyCode::Left if state.pane == MenuPane::Options && has_options => {
-            return request_option_change(ctx, state, -1);
-        }
-        KeyCode::Tab | KeyCode::Right => move_row(ctx, state, 1),
-        KeyCode::BackTab | KeyCode::Left => move_row(ctx, state, -1),
-        KeyCode::Down => move_down(ctx, state, 1),
-        KeyCode::Up => move_down(ctx, state, -1),
+        _ => {}
+    }
 
-        // A digit opens that slot in this section, which is the same thing the
-        // digit does on the deck. The menu is a picture of the number keys, so
-        // the two must not be able to disagree.
-        //
-        // The Keys pane has no slots, so a digit there does nothing rather than
-        // acting on whichever section the cursor last sat in.
-        KeyCode::Char(c @ '1'..='9') if state.pane == MenuPane::Views => {
-            let slot = c as u8 - b'0';
-            let target = section_of(ctx, state).and_then(|s| {
-                s.entries
-                    .iter()
-                    .find(|e| e.slot == Some(slot))
-                    .map(|e| e.preset.clone())
-            });
-            if let Some(name) = target {
-                return open(ctx, &name);
+    // A digit opens that slot in the group the Lab path stands in: the same
+    // thing the digit does on the deck, so the two cannot disagree.
+    if let KeyCode::Char(c @ '1'..='9') = key.code {
+        if menu::tree_of(state.tile) == Some(tree::Tile::Lab) {
+            return open_slot(ctx, state, c as u8 - b'0');
+        }
+        return KeyAction::Continue;
+    }
+
+    match state.focus {
+        MenuFocus::Tiles => tiles_key(key.code, ctx, state),
+        MenuFocus::Below => match state.tile {
+            MenuTile::Options => options_key(key.code, ctx, state, has_options),
+            MenuTile::Keys => keys_key(key.code, ctx, state),
+            MenuTile::Quit => match key.code {
+                KeyCode::Enter => KeyAction::Quit,
+                KeyCode::Up | KeyCode::Left => {
+                    set(
+                        ctx,
+                        MenuState {
+                            focus: MenuFocus::Tiles,
+                            ..state
+                        },
+                    );
+                    KeyAction::Continue
+                }
+                _ => KeyAction::Continue,
+            },
+            MenuTile::Resume | MenuTile::Radio | MenuTile::Lab => tree_key(key.code, ctx, state),
+        },
+    }
+}
+
+/// On the row of tiles: choose one, jump to one by its letter, go in.
+fn tiles_key(code: KeyCode, ctx: &mut InputCtx<'_>, state: MenuState) -> KeyAction {
+    let shown = MenuTile::shown(state.resume);
+    let at = shown.iter().position(|t| *t == state.tile).unwrap_or(0);
+    let pick = |tile| MenuState {
+        tile,
+        scroll: 0,
+        ..state
+    };
+    match code {
+        // Stops at the ends: a row you cannot see wrap is a row you lose
+        // your place in.
+        KeyCode::Left => set(ctx, pick(shown[at.saturating_sub(1)])),
+        KeyCode::Right => set(ctx, pick(shown[(at + 1).min(shown.len() - 1)])),
+        KeyCode::Char(c) => {
+            if let Some(tile) = by_letter(c) {
+                set(ctx, pick(tile));
             }
         }
-        KeyCode::Enter if state.pane == MenuPane::Views => {
-            let target = ctx
-                .engine
-                .menu()
-                .at(state.section, state.entry)
-                .map(|e| e.preset.clone());
-            if let Some(name) = target {
-                return open(ctx, &name);
+        KeyCode::Enter if state.tile == MenuTile::Resume => {
+            let active = ctx.engine.active_preset().to_string();
+            return open(ctx, &active);
+        }
+        KeyCode::Enter if state.tile == MenuTile::Quit => return KeyAction::Quit,
+        KeyCode::Enter | KeyCode::Down if state.tile != MenuTile::Quit => {
+            set(
+                ctx,
+                enter(
+                    ctx,
+                    MenuState {
+                        focus: MenuFocus::Below,
+                        ..state
+                    },
+                ),
+            );
+        }
+        _ => {}
+    }
+    KeyAction::Continue
+}
+
+/// The tile a letter selects: the one drawn in its corner. `q` is not here:
+/// it quits from anywhere, as on the deck; `Q` selects the Quit tile.
+fn by_letter(c: char) -> Option<MenuTile> {
+    match c {
+        'r' | 'R' => Some(MenuTile::Radio),
+        'l' | 'L' => Some(MenuTile::Lab),
+        'o' | 'O' => Some(MenuTile::Options),
+        'k' | 'K' => Some(MenuTile::Keys),
+        'Q' => Some(MenuTile::Quit),
+        _ => None,
+    }
+}
+
+/// Going below Resume is going into the Lab tree, at the view Resume would
+/// open; any tree is entered on a real row.
+fn enter(ctx: &InputCtx<'_>, state: MenuState) -> MenuState {
+    if state.focus != MenuFocus::Below {
+        return state;
+    }
+    let state = if state.tile == MenuTile::Resume {
+        MenuState {
+            tile: MenuTile::Lab,
+            ..state
+        }
+    } else {
+        state
+    };
+    match menu::tree_of(state.tile) {
+        Some(tile) => with_path(state, tile, menu::path_in(ctx.engine, &state, tile)),
+        None => state,
+    }
+}
+
+fn with_path(state: MenuState, tile: tree::Tile, path: Option<tree::Path>) -> MenuState {
+    let Some(path) = path else { return state };
+    match tile {
+        tree::Tile::Lab => MenuState {
+            lab: (&path).into(),
+            ..state
+        },
+        tree::Tile::Radio => MenuState {
+            radio: (&path).into(),
+            ..state
+        },
+    }
+}
+
+/// In a tree: up and down the column, right into what the row holds or the
+/// view it is, left back out, and out of the first column to the tiles.
+fn tree_key(code: KeyCode, ctx: &mut InputCtx<'_>, state: MenuState) -> KeyAction {
+    let Some(tile) = menu::tree_of(state.tile) else {
+        return KeyAction::Continue;
+    };
+    let tree = ctx.engine.menu_tree();
+    let Some(path) = menu::path_in(ctx.engine, &state, tile) else {
+        return KeyAction::Continue;
+    };
+    let up_to_tiles = MenuState {
+        focus: MenuFocus::Tiles,
+        ..state
+    };
+    let next = match code {
+        KeyCode::Up => {
+            let moved = tree.step(tile, &path, false);
+            if moved == path && path.rows.len() == 1 {
+                set(ctx, up_to_tiles);
+                return KeyAction::Continue;
+            }
+            Some(moved)
+        }
+        KeyCode::Down => Some(tree.step(tile, &path, true)),
+        KeyCode::Right | KeyCode::Enter => {
+            let node = tree.node(tile, &path);
+            if let Some(view) = node.filter(|n| n.opens()).and_then(|n| n.view()) {
+                let preset = view.preset.clone();
+                return open(ctx, &preset);
+            }
+            // A refused or later row opens nothing; its card says why.
+            tree.descend(tile, &path)
+        }
+        KeyCode::Left => match tree.ascend(tile, &path) {
+            Some(up) => Some(up),
+            None => {
+                set(ctx, up_to_tiles);
+                return KeyAction::Continue;
+            }
+        },
+        _ => None,
+    };
+    if let Some(next) = next {
+        set(ctx, with_path(state, tile, Some(next)));
+    }
+    KeyAction::Continue
+}
+
+/// The Options pane: up and down the settings (round at the ends, as it
+/// always went), left and right through a setting's values, Enter for a
+/// number; `Tab` back to the tiles. With nothing to set, up and left go
+/// back to the tiles, as they do out of a tree.
+fn options_key(
+    code: KeyCode,
+    ctx: &mut InputCtx<'_>,
+    state: MenuState,
+    has_options: bool,
+) -> KeyAction {
+    match code {
+        KeyCode::Right if has_options => return request_option_change(ctx, state, 1),
+        KeyCode::Left if has_options => return request_option_change(ctx, state, -1),
+        KeyCode::Left => set(
+            ctx,
+            MenuState {
+                focus: MenuFocus::Tiles,
+                ..state
+            },
+        ),
+        KeyCode::Up if !has_options => set(
+            ctx,
+            MenuState {
+                focus: MenuFocus::Tiles,
+                ..state
+            },
+        ),
+        KeyCode::Up | KeyCode::Down => {
+            let count = metrics(ctx.state).device_options.len();
+            if count > 0 {
+                let step = if code == KeyCode::Down { 1 } else { -1 };
+                set(
+                    ctx,
+                    MenuState {
+                        scroll: wrap(state.scroll.min(count - 1), step, count),
+                        ..state
+                    },
+                );
             }
         }
-        KeyCode::Enter if state.pane == MenuPane::Options => {
+        KeyCode::Enter => {
             let mut m = metrics(ctx.state);
             if m.ui.device_option_update.is_pending() {
                 return KeyAction::Continue;
@@ -105,6 +289,73 @@ pub(super) fn handle(key: KeyEvent, ctx: &mut InputCtx<'_>) -> KeyAction {
     KeyAction::Continue
 }
 
+/// The key reference is taller than a short terminal, so it scrolls. It does
+/// not wrap: a list you are reading top to bottom should stop at the bottom
+/// rather than silently start again. Up from the top goes to the tiles.
+fn keys_key(code: KeyCode, ctx: &mut InputCtx<'_>, state: MenuState) -> KeyAction {
+    match code {
+        KeyCode::Up | KeyCode::Left if state.scroll == 0 => set(
+            ctx,
+            MenuState {
+                focus: MenuFocus::Tiles,
+                ..state
+            },
+        ),
+        KeyCode::Up => set(
+            ctx,
+            MenuState {
+                scroll: state.scroll - 1,
+                ..state
+            },
+        ),
+        KeyCode::Down => {
+            let last = {
+                let m = metrics(ctx.state);
+                let section = menu::keys_section(ctx.engine, &state);
+                let controls = ctx.engine.section_controls(section, &m);
+                keys::row_count_for(&m.caps, &controls).saturating_sub(1)
+            };
+            set(
+                ctx,
+                MenuState {
+                    scroll: (state.scroll + 1).min(last),
+                    ..state
+                },
+            );
+        }
+        _ => {}
+    }
+    KeyAction::Continue
+}
+
+/// Open the view with `slot` in the group the Lab path stands in. A refused
+/// view is not in the engine's table, so it opens nothing here either.
+fn open_slot(ctx: &mut InputCtx<'_>, state: MenuState, slot: u8) -> KeyAction {
+    let tree = ctx.engine.menu_tree();
+    let Some(path) = menu::path_in(ctx.engine, &state, tree::Tile::Lab) else {
+        return KeyAction::Continue;
+    };
+    let Some(id) = tree.section_at(tree::Tile::Lab, &path) else {
+        return KeyAction::Continue;
+    };
+    let target = ctx
+        .engine
+        .menu()
+        .sections
+        .iter()
+        .find(|s| s.id == id)
+        .and_then(|s| s.entries.iter().find(|e| e.slot == Some(slot)))
+        .map(|e| e.preset.clone());
+    match target {
+        Some(name) => open(ctx, &name),
+        None => KeyAction::Continue,
+    }
+}
+
+fn set(ctx: &mut InputCtx<'_>, state: MenuState) {
+    metrics(ctx.state).ui.menu = Some(state);
+}
+
 /// Load a layout and close the menu.
 fn open(ctx: &mut InputCtx<'_>, preset: &str) -> KeyAction {
     let action = global::presets::try_set_preset(ctx.engine, ctx.state, preset);
@@ -114,100 +365,6 @@ fn open(ctx: &mut InputCtx<'_>, preset: &str) -> KeyAction {
 
 fn close(ctx: &mut InputCtx<'_>) {
     metrics(ctx.state).ui.menu = None;
-}
-
-fn section_of<'a>(
-    ctx: &'a InputCtx<'_>,
-    state: MenuState,
-) -> Option<&'a crate::ui::menu::model::Section> {
-    let (si, _) = ctx.engine.menu().clamp(state.section, state.entry)?;
-    ctx.engine.menu().sections.get(si)
-}
-
-/// Step down the left column: the sections, then the panes under the rule.
-///
-/// One index over both kinds of row, so `Tab` walks the column exactly as it is
-/// drawn and cannot skip the rule or land on it.
-fn move_row(ctx: &mut InputCtx<'_>, state: MenuState, step: isize) {
-    let menu = ctx.engine.menu();
-    let rows = sections::row_count(menu);
-    if rows == 0 {
-        return;
-    }
-    let Some((si, _)) = menu.clamp(state.section, state.entry) else {
-        return;
-    };
-    let next = wrap(sections::selected_row(menu, si, state.pane), step, rows);
-
-    let updated = match sections::row_target(menu, next) {
-        Ok(section) => {
-            // The new section may be shorter than the one we came from.
-            let len = menu.sections[section].entries.len();
-            MenuState {
-                section,
-                entry: state.entry.min(len.saturating_sub(1)),
-                pane: MenuPane::Views,
-                scroll: 0,
-            }
-        }
-        // Leaving for a pane keeps `section` and `entry`, so coming back lands
-        // where you were rather than at the top.
-        Err(pane) => MenuState {
-            pane,
-            scroll: 0,
-            ..state
-        },
-    };
-    metrics(ctx.state).ui.menu = Some(updated);
-}
-
-/// Up and down: through a section's layouts, or through the key reference.
-fn move_down(ctx: &mut InputCtx<'_>, state: MenuState, step: isize) {
-    match state.pane {
-        MenuPane::Views => {
-            let Some((si, ei)) = ctx.engine.menu().clamp(state.section, state.entry) else {
-                return;
-            };
-            let count = ctx.engine.menu().sections[si].entries.len();
-            if count == 0 {
-                return;
-            }
-            metrics(ctx.state).ui.menu = Some(MenuState {
-                section: si,
-                entry: wrap(ei, step, count),
-                ..state
-            });
-        }
-        // The reference is taller than a short terminal, so it scrolls. It does
-        // not wrap: a list you are reading top to bottom should stop at the
-        // bottom rather than silently start again.
-        MenuPane::Keys => {
-            let last = {
-                let m = metrics(ctx.state);
-                let controls = ctx.engine.section_controls(state.section, &m);
-                keys::row_count_for(&m.caps, &controls).saturating_sub(1)
-            };
-            let next = if step >= 0 {
-                (state.scroll + 1).min(last)
-            } else {
-                state.scroll.saturating_sub(1)
-            };
-            metrics(ctx.state).ui.menu = Some(MenuState {
-                scroll: next,
-                ..state
-            });
-        }
-        MenuPane::Options => {
-            let count = metrics(ctx.state).device_options.len();
-            if count == 0 {
-                return;
-            }
-            metrics(ctx.state).ui.menu = Some(MenuState {
-                scroll: wrap(state.scroll.min(count - 1), step, count),
-                ..state
-            });
-        }
-    }
 }
 
 fn request_option_change(ctx: &mut InputCtx<'_>, menu: MenuState, step: isize) -> KeyAction {
@@ -283,7 +440,7 @@ pub(super) fn complete_device_option(
             crate::hardware::debug_assert_device_options(&options);
             let selected_id =
                 m.ui.menu
-                    .filter(|menu| menu.pane == MenuPane::Options)
+                    .filter(|menu| menu.tile == MenuTile::Options)
                     .and_then(|menu| m.device_options.get(menu.scroll))
                     .map(|option| option.id.clone());
             m.device_options = std::sync::Arc::new(options);
@@ -294,7 +451,7 @@ pub(super) fn complete_device_option(
             if let Some(menu) =
                 m.ui.menu
                     .as_mut()
-                    .filter(|menu| menu.pane == MenuPane::Options)
+                    .filter(|menu| menu.tile == MenuTile::Options)
             {
                 menu.scroll = preserved_index.unwrap_or_else(|| menu.scroll.min(last_option));
             }
@@ -390,7 +547,8 @@ mod tests {
             let mut m = self.state.lock().unwrap();
             m.device_options = Arc::new(options);
             m.ui.menu = Some(MenuState {
-                pane: MenuPane::Options,
+                tile: MenuTile::Options,
+                focus: MenuFocus::Below,
                 ..MenuState::default()
             });
         }
@@ -443,7 +601,7 @@ mod tests {
         assert!(m.ui.input_buf.is_empty());
         assert_eq!(m.ui.device_option_update, DeviceOptionUpdate::Idle);
         assert_eq!(m.device_options[0].selected_choice, "0");
-        assert_eq!(m.ui.menu.unwrap().pane, MenuPane::Options);
+        assert_eq!(m.ui.menu.unwrap().tile, MenuTile::Options);
     }
 
     #[test]
@@ -780,47 +938,165 @@ mod tests {
         }
     }
 
-    /// Tab walks the column exactly as it is drawn: every section, then Keys,
-    /// then Options, then round to the top. The panes are the two rows under the
-    /// rule, so this is what proves Options is reachable at all.
-    #[test]
-    fn tab_walks_the_sections_then_both_panes_then_wraps() {
-        let mut h = Harness::new();
-        let sections = h.engine.menu().sections.len();
-        for _ in 0..sections - 1 {
-            h.key(KeyCode::Tab);
+    /// The path to the rows titled `want` in the Lab tree.
+    fn lab_path(h: &Harness, want: &[&str]) -> crate::state::MenuPath {
+        let tree = h.engine.menu_tree();
+        let mut rows = tree.root(tree::Tile::Lab);
+        let mut path = Vec::new();
+        for name in want {
+            let i = rows
+                .iter()
+                .position(|n| n.is_stop() && n.title == *name)
+                .unwrap();
+            path.push(i);
+            rows = rows[i].children();
         }
-        assert_eq!(h.menu().pane, MenuPane::Views, "still on the last section");
-
-        h.key(KeyCode::Tab);
-        assert_eq!(h.menu().pane, MenuPane::Keys);
-        h.key(KeyCode::Tab);
-        assert_eq!(h.menu().pane, MenuPane::Options);
-        h.key(KeyCode::Tab);
-        assert_eq!(h.menu().pane, MenuPane::Views, "wraps back to the sections");
-        assert_eq!(h.menu().section, 0);
+        crate::state::MenuPath::from_rows(&path)
     }
 
-    /// Options holds nothing yet, so the keys that act on a list are quiet
-    /// rather than acting on whichever section the cursor came from. A digit
-    /// there must not load a layout behind the reader's back.
+    fn titles(h: &Harness, path: crate::state::MenuPath) -> Vec<String> {
+        h.engine
+            .menu_tree()
+            .trail(tree::Tile::Lab, &path.into())
+            .iter()
+            .map(|n| n.title.clone())
+            .collect()
+    }
+
+    /// Left and right choose a tile and stop at the ends; a tile's letter
+    /// selects it from anywhere on the row.
+    #[test]
+    fn the_tiles_are_chosen_by_arrows_and_letters() {
+        let mut h = Harness::new();
+        h.state.lock().unwrap().ui.menu = Some(MenuState {
+            resume: true,
+            ..MenuState::default()
+        });
+        h.key(KeyCode::Left);
+        h.key(KeyCode::Left);
+        h.key(KeyCode::Left);
+        assert_eq!(h.menu().tile, MenuTile::Resume, "stops at the first");
+        for (c, tile) in [
+            ('k', MenuTile::Keys),
+            ('O', MenuTile::Options),
+            ('r', MenuTile::Radio),
+            ('L', MenuTile::Lab),
+            ('Q', MenuTile::Quit),
+        ] {
+            h.key(KeyCode::Char(c));
+            assert_eq!(h.menu().tile, tile, "{c}");
+        }
+        h.key(KeyCode::Right);
+        assert_eq!(h.menu().tile, MenuTile::Quit, "stops at the last");
+        assert_eq!(
+            h.key(KeyCode::Enter),
+            KeyAction::Quit,
+            "Enter on Quit quits"
+        );
+    }
+
+    /// Down goes into the tree, Tab goes back and forth.
+    #[test]
+    fn down_and_tab_move_between_the_tiles_and_what_is_below() {
+        let mut h = Harness::new();
+        assert_eq!(h.menu().focus, MenuFocus::Tiles);
+        h.key(KeyCode::Down);
+        assert_eq!(h.menu().focus, MenuFocus::Below);
+        h.key(KeyCode::Tab);
+        assert_eq!(h.menu().focus, MenuFocus::Tiles);
+        h.key(KeyCode::Tab);
+        assert_eq!(h.menu().focus, MenuFocus::Below);
+    }
+
+    /// Right goes into what a row holds, through Bluetooth's single band;
+    /// left comes back the same way, and out of the first column to the tiles.
+    #[test]
+    fn the_tree_is_walked_in_and_out() {
+        let mut h = Harness::new();
+        let bluetooth = lab_path(&h, &["Bluetooth"]);
+        h.state.lock().unwrap().ui.menu = Some(MenuState {
+            focus: MenuFocus::Below,
+            lab: bluetooth,
+            ..MenuState::default()
+        });
+        h.key(KeyCode::Right);
+        assert_eq!(
+            titles(&h, h.menu().lab),
+            ["Bluetooth", "2.4 GHz", "Overview"]
+        );
+        h.key(KeyCode::Down);
+        assert_eq!(
+            titles(&h, h.menu().lab),
+            ["Bluetooth", "2.4 GHz", "Low Energy"]
+        );
+        h.key(KeyCode::Right);
+        assert_eq!(
+            titles(&h, h.menu().lab),
+            ["Bluetooth", "2.4 GHz", "Low Energy", "Census"]
+        );
+        h.key(KeyCode::Left);
+        h.key(KeyCode::Left);
+        assert_eq!(titles(&h, h.menu().lab), ["Bluetooth"]);
+        h.key(KeyCode::Left);
+        assert_eq!(h.menu().focus, MenuFocus::Tiles);
+        assert_eq!(titles(&h, h.menu().lab), ["Bluetooth"], "the place is kept");
+    }
+
+    /// Enter on a view opens it and closes the menu; a digit opens that slot
+    /// in the group the path stands in, on the tiles or in the tree.
+    #[test]
+    fn enter_and_digits_open_views() {
+        let mut h = Harness::new();
+        let iq = lab_path(&h, &["Receiver", "IQ"]);
+        h.state.lock().unwrap().ui.menu = Some(MenuState {
+            focus: MenuFocus::Below,
+            lab: iq,
+            ..MenuState::default()
+        });
+        h.key(KeyCode::Enter);
+        assert_eq!(h.engine.active_preset(), "lab_iq");
+        assert!(h.state.lock().unwrap().ui.menu.is_none(), "the menu closed");
+
+        h.state.lock().unwrap().ui.menu = Some(MenuState {
+            lab: iq,
+            ..MenuState::default()
+        });
+        h.key(KeyCode::Char('3'));
+        assert_eq!(h.engine.active_preset(), "lab_timing");
+    }
+
+    /// Resume's Enter goes back to the deck's view; its Down goes into the
+    /// Lab tree standing on that view.
+    #[test]
+    fn resume_goes_back_or_goes_in() {
+        let mut h = Harness::new();
+        h.engine.set_preset("lab_rf");
+        let opening = crate::ui::menu::opening(&h.engine, true);
+        assert_eq!(opening.tile, MenuTile::Resume);
+        h.state.lock().unwrap().ui.menu = Some(opening);
+        h.key(KeyCode::Down);
+        assert_eq!(h.menu().tile, MenuTile::Lab);
+        assert_eq!(titles(&h, h.menu().lab), ["Receiver", "RF"]);
+
+        h.engine.set_preset("command_rail");
+        h.state.lock().unwrap().ui.menu = Some(MenuState {
+            tile: MenuTile::Resume,
+            resume: true,
+            ..opening
+        });
+        h.key(KeyCode::Enter);
+        assert_eq!(h.engine.active_preset(), "command_rail");
+        assert!(h.state.lock().unwrap().ui.menu.is_none());
+    }
+
+    /// Options with nothing to set: no key there loads a layout, and up goes
+    /// back to the tiles.
     #[test]
     fn options_has_nothing_to_steer() {
         let mut h = Harness::new();
-        h.state.lock().unwrap().ui.menu = Some(MenuState {
-            section: 1,
-            entry: 2,
-            pane: MenuPane::Options,
-            scroll: 0,
-        });
+        h.show_options(Vec::new());
         let before = h.menu();
-
-        for code in [
-            KeyCode::Down,
-            KeyCode::Up,
-            KeyCode::Char('1'),
-            KeyCode::Enter,
-        ] {
+        for code in [KeyCode::Down, KeyCode::Char('1'), KeyCode::Enter] {
             h.key(code);
             assert_eq!(h.menu(), before, "{code:?} moved something");
         }
@@ -829,6 +1105,8 @@ mod tests {
             "command_rail",
             "no key in Options may load a layout"
         );
+        h.key(KeyCode::Up);
+        assert_eq!(h.menu().focus, MenuFocus::Tiles);
     }
 
     #[test]
@@ -859,24 +1137,17 @@ mod tests {
         assert!(matches!(action, KeyAction::ApplyDeviceOption(_)));
     }
 
+    /// With nothing to set, left leaves Options for the tiles, as it leaves a
+    /// tree, and right does nothing.
     #[test]
-    fn horizontal_keys_keep_the_old_navigation_for_empty_devices() {
+    fn horizontal_keys_leave_an_empty_options_pane() {
         let mut h = Harness::new();
-        h.state.lock().unwrap().ui.menu = Some(MenuState {
-            pane: MenuPane::Options,
-            ..MenuState::default()
-        });
-
-        h.key(KeyCode::Left);
-        assert_eq!(h.menu().pane, MenuPane::Keys);
-
-        h.state.lock().unwrap().ui.menu = Some(MenuState {
-            pane: MenuPane::Options,
-            ..MenuState::default()
-        });
+        h.show_options(Vec::new());
         h.key(KeyCode::Right);
-        assert_eq!(h.menu().pane, MenuPane::Views);
-        assert_eq!(h.menu().section, 0);
+        assert_eq!(h.menu().focus, MenuFocus::Below);
+        h.key(KeyCode::Left);
+        assert_eq!(h.menu().focus, MenuFocus::Tiles);
+        assert_eq!(h.menu().tile, MenuTile::Options);
     }
 
     #[test]
@@ -1008,9 +1279,9 @@ mod tests {
         h.key(KeyCode::Esc);
         assert!(h.state.lock().unwrap().ui.menu.is_some());
         h.key(KeyCode::Tab);
-        assert_eq!(h.menu().pane, MenuPane::Options);
+        assert_eq!(h.menu().focus, MenuFocus::Below, "Tab waits for the device");
         h.key(KeyCode::BackTab);
-        assert_eq!(h.menu().pane, MenuPane::Options);
+        assert_eq!(h.menu().focus, MenuFocus::Below);
         assert_eq!(h.key(KeyCode::Char('q')), KeyAction::Quit);
     }
 
@@ -1062,30 +1333,25 @@ mod tests {
         ));
     }
 
-    /// A pane is a detour, not a reset: the place you had in the list survives
-    /// the visit, so stepping back onto the sections does not start you at the
-    /// top of one.
+    /// A pane is a detour, not a reset: the place in the Lab tree survives a
+    /// visit to Options and Keys, and to the Radio tree.
     #[test]
-    fn a_pane_visit_does_not_disturb_the_place_in_the_list() {
+    fn a_pane_visit_does_not_disturb_the_place_in_the_tree() {
         let mut h = Harness::new();
-        // The last section, because that is the one the panes are entered from.
-        // Walking there first would move the cursor on its own and prove nothing
-        // about the panes.
-        let last = h.engine.menu().sections.len() - 1;
-        let place = MenuState {
-            section: last,
-            entry: 1,
-            pane: MenuPane::Views,
-            scroll: 0,
-        };
-        h.state.lock().unwrap().ui.menu = Some(place);
-
-        h.key(KeyCode::Tab);
-        assert_eq!(h.menu().pane, MenuPane::Keys);
-        assert_eq!((h.menu().section, h.menu().entry), (last, 1));
-        h.key(KeyCode::Tab);
-        assert_eq!(h.menu().pane, MenuPane::Options);
-        assert_eq!((h.menu().section, h.menu().entry), (last, 1));
+        let frames = lab_path(&h, &["Wi-Fi", "2.4 GHz", "Channel", "Frames"]);
+        h.state.lock().unwrap().ui.menu = Some(MenuState {
+            lab: frames,
+            ..MenuState::default()
+        });
+        for c in ['o', 'k', 'r', 'l'] {
+            h.key(KeyCode::Char(c));
+            assert_eq!(h.menu().lab, frames, "{c}");
+        }
+        h.key(KeyCode::Down);
+        assert_eq!(
+            titles(&h, h.menu().lab),
+            ["Wi-Fi", "2.4 GHz", "Channel", "Frames"]
+        );
     }
 
     #[test]

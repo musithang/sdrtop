@@ -8,83 +8,135 @@
 //! `Rect` the caller supplies: the whole screen at startup, a centred box over
 //! the deck during a session. One function, two callers.
 //!
+//! **Tiles above, what they open below.** A row of square tiles (Resume, Radio,
+//! Lab, Options, Keys, Quit); under Radio and Lab a cascade of columns down a
+//! tree sorted by where it listens, with a card saying what the row under the
+//! cursor is; under Options, Keys and Quit their pane.
+//!
 //! Split by what each part draws, the way `panels/core/spectrum/` is:
 //!
-//! - [`model`]: presets to sections. The only part with logic, and the only part
-//!   that never touches ratatui.
-//! - [`sections`]: the left column.
-//! - [`entries`]: the right column, a section's layouts.
-//! - [`keys`]: the right column, the key reference.
-//! - [`options`]: the right column, device settings.
-//! - [`tree`]: the sections hung on the tiles' trees. Pure, as `model` is.
-//! - [`tiles`]: the top row of square tiles.
+//! - [`model`]: presets to sections. Pure, and still what a number key counts in.
+//! - [`tree`]: the sections hung on the tiles' trees, the refusals beside them.
+//!   Pure, as `model` is.
+//! - [`tiles`]: the top row.
 //! - [`crumb`]: the whole path, over the cascade.
-//! - [`ink`]: a tree row's colour role on the theme.
 //! - [`cascade`]: the columns down the path.
 //! - [`card`]: what the row under the cursor is; it draws [`ruler`] and
 //!   [`map`].
+//! - [`keys`]: the key reference, under Keys.
+//! - [`options`]: device settings, under Options.
+//! - [`ink`]: a tree row's colour role on the theme.
+//! - [`live`]: the live line a view's card carries.
 //!
-//! [`render`] is the orchestrator. It resolves the frame, carves the rows and
-//! columns, and calls each part once. **The parts do not call each other.**
+//! [`render`] is the orchestrator. It resolves the frame, carves the rows, and
+//! calls each part once. **The parts do not call each other.**
 
-pub mod entries;
+pub mod card;
+pub mod cascade;
+pub mod crumb;
+pub mod ink;
 pub mod keys;
 pub mod live;
+pub mod map;
 pub mod model;
 pub mod options;
-pub mod sections;
-
-// Built and tested ahead of the screen that draws them. `expect` fails the
-// build as soon as the menu reads one, so these lines cannot outlive their
-// reason.
-#[cfg_attr(not(test), expect(dead_code))]
-pub mod card;
-#[cfg_attr(not(test), expect(dead_code))]
-pub mod cascade;
-#[cfg_attr(not(test), expect(dead_code))]
-pub mod crumb;
-#[cfg_attr(not(test), expect(dead_code))]
-pub mod ink;
-#[cfg_attr(not(test), expect(dead_code))]
-pub mod map;
-#[cfg_attr(not(test), expect(dead_code))]
 pub mod ruler;
-#[cfg_attr(not(test), expect(dead_code))]
 pub mod tiles;
-#[cfg_attr(not(test), expect(dead_code))]
 pub mod tree;
 
 use ratatui::{
-    layout::{Constraint, Direction, Layout, Rect},
+    layout::Rect,
     style::{Modifier, Style},
     text::{Line, Span},
     widgets::Paragraph,
     Frame,
 };
 
-use crate::state::{InputMode, MenuPane, MenuState, SdrMetrics};
+use crate::state::{InputMode, MenuFocus, MenuState, MenuTile, SdrMetrics};
 use crate::ui::chrome;
+use crate::ui::LayoutEngine;
 
-use model::Menu;
+/// Rows the tile row leaves the menu below it at least, before it shrinks.
+const BELOW_TILES: u16 = 18;
 
-/// Below this many columns the two columns stop fitting side by side, so the
-/// left one folds away and the current section's title becomes the heading of
-/// the single remaining column. The number keys are unaffected: they never
-/// depended on the section list being visible.
-const TWO_COLUMN_MIN: u16 = 50;
+/// A body shorter than this has no tile row at all: what the selected tile
+/// opens keeps every row, so the options editor stays on screen in a
+/// terminal a few rows tall.
+const TILES_MIN_BODY: u16 = 8;
 
-/// Width of the section column: "Command Rail" plus the cursor gutter and the
-/// rule.
-const LEFT_WIDTH: u16 = 16;
+/// The tree a tile opens, if it opens one.
+pub fn tree_of(tile: MenuTile) -> Option<tree::Tile> {
+    match tile {
+        MenuTile::Radio => Some(tree::Tile::Radio),
+        MenuTile::Lab | MenuTile::Resume => Some(tree::Tile::Lab),
+        _ => None,
+    }
+}
 
-/// `controls` are the focus keys of the section the cursor is on
-/// (`ui::LayoutEngine::section_controls`), for the Keys pane and the views'
-/// heading.
+/// The path the menu stands on in `tile`'s tree, clamped onto a real row.
+pub fn path_in(engine: &LayoutEngine, state: &MenuState, tile: tree::Tile) -> Option<tree::Path> {
+    let raw = match tile {
+        tree::Tile::Radio => state.radio,
+        tree::Tile::Lab => state.lab,
+    };
+    engine.menu_tree().clamp(tile, &raw.into())
+}
+
+/// The menu as it opens: on Resume when there is a view to resume and the
+/// deck is on one the menu lists, on Lab otherwise, the focus on the tiles,
+/// and the Lab tree already standing on the deck's view, so `Enter`
+/// resumes and `↓` goes in exactly there.
+pub fn opening(engine: &LayoutEngine, resume: bool) -> MenuState {
+    let located = engine.menu_tree().locate(engine.active_preset());
+    let resume = resume && located.is_some();
+    MenuState {
+        tile: if resume {
+            MenuTile::Resume
+        } else {
+            MenuTile::Lab
+        },
+        focus: MenuFocus::Tiles,
+        lab: located
+            .as_ref()
+            .map(|(_, path)| path.into())
+            .unwrap_or_default(),
+        resume,
+        ..MenuState::default()
+    }
+}
+
+/// The menu section the Keys pane is about: the group the Lab path stands
+/// in, else the deck's own, else the first.
+pub fn keys_section(engine: &LayoutEngine, state: &MenuState) -> usize {
+    let tree = engine.menu_tree();
+    let sections = &engine.menu().sections;
+    path_in(engine, state, tree::Tile::Lab)
+        .and_then(|p| tree.section_at(tree::Tile::Lab, &p))
+        .and_then(|id| sections.iter().position(|s| s.id == id))
+        .or_else(|| engine.menu().locate(engine.active_preset()).map(|(s, _)| s))
+        .unwrap_or(0)
+}
+
+/// What the Resume tile says under its name: where the deck is.
+fn resume_line(engine: &LayoutEngine) -> String {
+    let tree = engine.menu_tree();
+    let Some((tile, path)) = tree.locate(engine.active_preset()) else {
+        return String::new();
+    };
+    let trail = tree.trail(tile, &path);
+    match (trail.first(), trail.last()) {
+        (Some(area), Some(view)) => format!("{} · {}", area.title, view.title),
+        _ => String::new(),
+    }
+}
+
+/// `controls` are the focus keys of the section [`keys_section`] names
+/// (`ui::LayoutEngine::section_controls`), for the Keys pane.
 pub fn render(
     f: &mut Frame,
     area: Rect,
     m: &SdrMetrics,
-    menu: &Menu,
+    engine: &LayoutEngine,
     state: &MenuState,
     controls: &[keys::Control],
     theme: &crate::Theme,
@@ -104,145 +156,212 @@ pub fn render(
         return;
     }
 
-    // Header, body, footer. The body wins when the terminal is too short for all
-    // three: a menu with no list is not a menu.
-    let rows = Layout::default()
-        .direction(Direction::Vertical)
-        .constraints([
-            Constraint::Length(1),
-            Constraint::Min(1),
-            Constraint::Length(1),
-        ])
-        .split(inner);
-
-    header(f, rows[0], m, theme);
-    footer(f, rows[2], state, m, theme);
-
-    // The cursor is cloned into the frame snapshot and arrives here without the
-    // engine, so it is clamped rather than trusted. An out of range index would
-    // panic during draw and take the terminal with it.
-    let Some((si, ei)) = menu.clamp(state.section, state.entry) else {
-        f.render_widget(
-            Paragraph::new(Span::styled(
-                "  no layouts are defined",
-                Style::default().fg(theme.status_warn),
-            )),
-            rows[1],
-        );
-        return;
+    // Header, body, footer. The body wins when the terminal is too short for
+    // all three: a menu with nothing to choose is not a menu.
+    let header_h = u16::from(inner.height >= 3);
+    let footer_h = u16::from(inner.height >= 3);
+    header(
+        f,
+        Rect {
+            height: header_h,
+            ..inner
+        },
+        m,
+        theme,
+    );
+    footer(
+        f,
+        Rect {
+            y: inner.bottom().saturating_sub(footer_h),
+            height: footer_h,
+            ..inner
+        },
+        state,
+        m,
+        theme,
+    );
+    let mut body = Rect {
+        y: inner.y + header_h,
+        height: inner.height.saturating_sub(header_h + footer_h),
+        ..inner
     };
 
-    if rows[1].width >= TWO_COLUMN_MIN {
-        let cols = Layout::default()
-            .direction(Direction::Horizontal)
-            .constraints([Constraint::Length(LEFT_WIDTH), Constraint::Min(1)])
-            .split(rows[1]);
-        let row = sections::selected_row(menu, si, state.pane);
-        sections::render(f, cols[0], menu, row, theme);
-        right_pane(f, cols[1], m, menu, si, ei, state, controls, false, theme);
-    } else {
-        right_pane(f, rows[1], m, menu, si, ei, state, controls, true, theme);
+    let faces = MenuTile::shown(state.resume);
+    let on_tiles = state.focus == MenuFocus::Tiles;
+    if body.height >= TILES_MIN_BODY {
+        let size = tiles::Size::for_area(body.width, body.height, faces.len(), BELOW_TILES);
+        let row = Rect {
+            y: body.y + 1,
+            height: size.height(),
+            ..body
+        };
+        tiles::render(
+            f,
+            row,
+            size,
+            &faces,
+            state.tile,
+            on_tiles,
+            &resume_line(engine),
+            theme,
+        );
+        let used = 1 + size.height() + 1;
+        body = Rect {
+            y: body.y + used,
+            height: body.height.saturating_sub(used),
+            ..body
+        };
+    }
+    let body = Rect {
+        x: body.x + 1,
+        width: body.width.saturating_sub(2),
+        ..body
+    };
+    if body.height == 0 || body.width == 0 {
+        return;
+    }
+
+    match tree_of(state.tile) {
+        Some(tile) => below_tree(f, body, m, engine, state, tile, theme),
+        None => below_pane(f, body, m, engine, state, controls, theme),
     }
 }
 
-/// The one place that decides which pane the right column is showing. A new pane
-/// is a variant here and a module beside `entries`, not a rewrite.
-///
-/// `folded` says whether the section list is off screen. It is passed in rather
-/// than re-derived from `area.width`, because by the time this runs `area` is
-/// only the *remaining* column: measuring that against the two-column threshold
-/// put the folded form's heading on screen while the section list was still
-/// beside it, at every terminal between roughly 66 and 82 columns.
-#[allow(clippy::too_many_arguments)]
-fn right_pane(
+/// Under Radio, Lab and Resume: the crumb, the columns and the card.
+fn below_tree(
     f: &mut Frame,
     area: Rect,
     m: &SdrMetrics,
-    menu: &Menu,
-    section: usize,
-    cursor: usize,
+    engine: &LayoutEngine,
     state: &MenuState,
-    controls: &[keys::Control],
-    folded: bool,
+    tile: tree::Tile,
     theme: &crate::Theme,
 ) {
-    // In the folded single-column form the pane names itself, because the list
-    // that would otherwise name it is not on screen. The views always carry
-    // their section's heading, in its colour (7.1).
-    let (heading, body) = if folded || state.pane == MenuPane::Views {
-        let split = Layout::default()
-            .direction(Direction::Vertical)
-            .constraints([Constraint::Length(1), Constraint::Min(1)])
-            .split(area);
-        (Some(split[0]), split[1])
+    let tree = engine.menu_tree();
+    let path = path_in(engine, state, tile).unwrap_or_default();
+    let trail = tree.trail(tile, &path);
+    let (name, color) = match tile {
+        tree::Tile::Lab => ("Lab", theme.value_hi),
+        tree::Tile::Radio => ("Radio", theme.border_accent),
+    };
+    let views: usize = tree.root(tile).iter().map(tree::Node::view_count).sum();
+    let hint = match views {
+        0 => "later".to_string(),
+        1 => "1 view".to_string(),
+        n => format!("{n} views"),
+    };
+    crumb::render(
+        f,
+        Rect { height: 1, ..area },
+        (name, color),
+        &trail,
+        &hint,
+        theme,
+    );
+    let columns = Rect {
+        y: area.y + 2,
+        height: area.height.saturating_sub(2),
+        ..area
+    };
+    if columns.height == 0 {
+        return;
+    }
+    let cursor = state.focus == MenuFocus::Below;
+    let card_area = cascade::render(f, columns, tree, tile, &path, cursor, theme);
+
+    let screen = f.size();
+    let view = trail.last().filter(|n| n.opens()).and_then(|n| n.view());
+    let placed = view
+        .map(|e| engine.placement_of(&e.preset, screen, m))
+        .unwrap_or_default();
+    let live = view.and_then(|e| live::line(&e.preset, m, std::time::Instant::now()));
+    let left_off = (state.tile == MenuTile::Resume).then(|| {
+        format!(
+            "{:.3} MHz · {:.3} Msps",
+            m.radio.frequency as f64 / 1e6,
+            m.radio.config_sample_rate / 1e6
+        )
+    });
+    let card = card::Card {
+        tile,
+        trail: &trail,
+        radio: (&m.system.board_name, m.caps.freq_min_hz, m.caps.freq_max_hz),
+        live,
+        placed: &placed,
+        screen,
+        left_off: left_off.as_deref(),
+    };
+    card::render(f, card_area, &card, theme);
+}
+
+/// Under Options, Keys and Quit: a heading naming the pane, then the pane.
+fn below_pane(
+    f: &mut Frame,
+    area: Rect,
+    m: &SdrMetrics,
+    engine: &LayoutEngine,
+    state: &MenuState,
+    controls: &[keys::Control],
+    theme: &crate::Theme,
+) {
+    let (title, hint) = match state.tile {
+        MenuTile::Options => ("Options", "settings of this radio"),
+        MenuTile::Keys => ("Keys", "every key, the deck's own first"),
+        _ => ("Quit", ""),
+    };
+    // Below a few rows the heading gives way: the pane's own rows matter
+    // more than its name, which the tile row or the footer already says.
+    let (heading, pane) = if area.height >= 5 {
+        (
+            Some(Rect { height: 1, ..area }),
+            Rect {
+                y: area.y + 2,
+                height: area.height - 2,
+                ..area
+            },
+        )
     } else {
         (None, area)
     };
-    let accent = sections::accent(section, theme);
     if let Some(heading) = heading {
-        let line = match state.pane {
-            MenuPane::Views => {
-                let s = &menu.sections[section];
-                let n = s.entries.len();
-                // The section's focus keys beside its count: a letter
-                // belongs to its section, which is why keys never collide.
-                // Once each: two of its panels may share a letter when no
-                // view shows both (`app::FocusKeys`), and it is one key.
-                let mut letters: Vec<char> = Vec::new();
-                for c in controls.iter() {
-                    if !letters.contains(&c.key) {
-                        letters.push(c.key);
-                    }
-                }
-                let keys: String = letters.iter().map(|k| format!(" {k}")).collect();
-                let mut hint = match n {
-                    0 => "no views yet".to_string(),
-                    n => format!("{n} view{}", if n == 1 { "" } else { "s" }),
-                };
-                if !keys.is_empty() {
-                    hint.push_str(&format!(" \u{00b7} focus keys{keys}"));
-                }
-                // A group says which heading it sits under, so the folded
-                // form, with the list off screen, still says where it is.
-                let title = match s.parent {
-                    Some(parent) => format!("{parent} \u{203a} {}", s.title),
-                    None => s.title.clone(),
-                };
-                let mut line = chrome::section(&title, &hint, heading.width as usize, theme);
-                // The section's name in the section's colour.
-                if let Some(name) = line.spans.get_mut(1) {
-                    name.style = name.style.fg(accent);
-                }
-                line
-            }
-            MenuPane::Keys => chrome::section("Keys", "", heading.width as usize, theme),
-            MenuPane::Options => chrome::section("Options", "", heading.width as usize, theme),
-        };
-        f.render_widget(Paragraph::new(line), heading);
+        f.render_widget(
+            Paragraph::new(chrome::section(title, hint, heading.width as usize, theme)),
+            heading,
+        );
     }
-
-    match state.pane {
-        MenuPane::Views => {
-            entries::render(f, body, m, &menu.sections[section], cursor, accent, theme)
+    match state.tile {
+        MenuTile::Options => options::render(f, pane, m, state.scroll, theme),
+        MenuTile::Keys => {
+            let section = &engine.menu().sections;
+            let name = section
+                .get(keys_section(engine, state))
+                .map_or("", |s| s.title.as_str());
+            keys::render(f, pane, &m.caps, name, controls, state.scroll, theme)
         }
-        MenuPane::Keys => keys::render(
-            f,
-            body,
-            &m.caps,
-            &menu.sections[section].title,
-            controls,
-            state.scroll,
-            theme,
-        ),
-        MenuPane::Options => options::render(f, body, m, state.scroll, theme),
+        _ => {
+            let lines = vec![
+                Line::from(Span::styled(
+                    "Enter closes sdrtop.",
+                    Style::default().fg(theme.value),
+                )),
+                Line::from(Span::styled(
+                    "The tuning, the gains and the view you are on are saved on the way out.",
+                    Style::default().fg(theme.label),
+                )),
+            ];
+            f.render_widget(Paragraph::new(lines), pane);
+        }
     }
 }
 
 /// Who you are and where the radio is pointing, so the menu is not a screen that
 /// hides the one number you were watching.
 fn header(f: &mut Frame, area: Rect, m: &SdrMetrics, theme: &crate::Theme) {
-    // Whether the radio is streaming, beside where it is pointed: the live
-    // lines under the views are only ever as live as this (7.2).
+    if area.height == 0 {
+        return;
+    }
+    // Whether the radio is streaming, beside where it is pointed: a card's
+    // live line is only ever as live as this.
     let (dot, ink, word) = if m.radio.hw_streaming {
         ("\u{25cf}", theme.status_ok, "RX")
     } else {
@@ -267,8 +386,11 @@ fn header(f: &mut Frame, area: Rect, m: &SdrMetrics, theme: &crate::Theme) {
     f.render_widget(Paragraph::new(line), area);
 }
 
-/// Show the keys for the active menu pane or editor
+/// The keys that work where the focus is.
 fn footer(f: &mut Frame, area: Rect, state: &MenuState, m: &SdrMetrics, theme: &crate::Theme) {
+    if area.height == 0 {
+        return;
+    }
     let key = Style::default().fg(theme.border_accent);
     let what = Style::default().fg(theme.label);
     let mut spans = Vec::new();
@@ -276,31 +398,60 @@ fn footer(f: &mut Frame, area: Rect, state: &MenuState, m: &SdrMetrics, theme: &
         .device_options
         .get(state.scroll)
         .is_some_and(|option| option.integer_range.is_some());
+    let below = state.focus == MenuFocus::Below;
     let bindings: &[(&str, &str)] =
         if matches!(m.ui.input_mode, InputMode::DeviceOptionInput { .. }) {
             &[("Enter", "apply"), ("Esc", "cancel")]
-        } else if state.pane == MenuPane::Options && numeric {
+        } else if !below {
+            match state.tile {
+                MenuTile::Resume => &[
+                    ("Enter", "resume"),
+                    ("\u{2190}\u{2192}", "choose"),
+                    ("\u{2193}", "go in"),
+                    ("R L O K Q", "jump"),
+                    ("Esc", "close"),
+                ],
+                MenuTile::Quit => &[
+                    ("Enter", "quit"),
+                    ("\u{2190}\u{2192}", "choose"),
+                    ("Esc", "close"),
+                ],
+                _ => &[
+                    ("\u{2190}\u{2192}", "choose"),
+                    ("\u{2193} Enter", "go in"),
+                    ("R L O K Q", "jump"),
+                    ("Esc", "close"),
+                ],
+            }
+        } else if state.tile == MenuTile::Options && numeric {
             &[
                 ("Enter", "number"),
                 ("\u{2190}\u{2192}", "all choices"),
                 ("Esc", "close"),
-                ("Tab", "section"),
+                ("Tab", "tiles"),
                 ("\u{2191}\u{2193}", "option"),
             ]
-        } else if state.pane == MenuPane::Options && !m.device_options.is_empty() {
+        } else if state.tile == MenuTile::Options && !m.device_options.is_empty() {
             &[
-                ("Tab", "section"),
+                ("Tab", "tiles"),
                 ("\u{2191}\u{2193}", "option"),
                 ("\u{2190}\u{2192}", "value"),
                 ("Enter", "next"),
                 ("Esc", "close"),
             ]
+        } else if matches!(state.tile, MenuTile::Options | MenuTile::Keys) {
+            &[
+                ("\u{2191}\u{2193}", "scroll"),
+                ("Tab", "tiles"),
+                ("Esc", "close"),
+            ]
         } else {
             &[
-                ("Tab", "section"),
                 ("\u{2191}\u{2193}", "move"),
-                ("1-9", "open"),
-                ("Enter", "open"),
+                ("\u{2192} Enter", "open"),
+                ("\u{2190}", "back"),
+                ("1-9", "open by number"),
+                ("Tab", "tiles"),
                 ("Esc", "close"),
             ]
         };
@@ -314,9 +465,19 @@ fn footer(f: &mut Frame, area: Rect, state: &MenuState, m: &SdrMetrics, theme: &
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::config::LayoutConfig;
+    use crate::state::MenuPath;
     use ratatui::{backend::TestBackend, Terminal};
     use std::sync::Arc;
+
+    fn engine() -> LayoutEngine {
+        crate::app::App::build_ui(
+            "command_rail",
+            &std::collections::HashMap::new(),
+            None,
+            true,
+        )
+        .0
+    }
 
     /// Render the menu at a fixed size and hand back the buffer as lines.
     ///
@@ -327,32 +488,22 @@ mod tests {
         draw_with_metrics(w, h, state, &SdrMetrics::fixture())
     }
 
-    fn draw_with_metrics(w: u16, h: u16, state: &MenuState, metrics: &SdrMetrics) -> Vec<String> {
-        let menu = model::build(&LayoutConfig::default_config().presets);
-        draw_menu(w, h, state, metrics, &menu)
+    fn draw_with_metrics(w: u16, h: u16, state: &MenuState, m: &SdrMetrics) -> Vec<String> {
+        draw_on(&engine(), w, h, state, m)
     }
 
-    fn draw_menu(
+    fn draw_on(
+        engine: &LayoutEngine,
         w: u16,
         h: u16,
         state: &MenuState,
-        metrics: &SdrMetrics,
-        menu: &model::Menu,
+        m: &SdrMetrics,
     ) -> Vec<String> {
         let theme = crate::Theme::sdr();
         let mut terminal = Terminal::new(TestBackend::new(w, h)).unwrap();
+        let controls = engine.section_controls(keys_section(engine, state), m);
         terminal
-            .draw(|f| {
-                render(
-                    f,
-                    f.size(),
-                    metrics,
-                    menu,
-                    state,
-                    &controls_for(state.section, metrics),
-                    &theme,
-                )
-            })
+            .draw(|f| render(f, f.size(), m, engine, state, &controls, &theme))
             .unwrap();
         let buf = terminal.backend().buffer().clone();
         (0..h)
@@ -366,140 +517,109 @@ mod tests {
             .collect()
     }
 
-    /// The section's controls as the app computes them: from a deck built
-    /// the way the app builds it, panels and all.
-    fn controls_for(section: usize, m: &SdrMetrics) -> Vec<keys::Control> {
-        let (engine, _) = crate::app::App::build_ui(
-            "command_rail",
-            &std::collections::HashMap::new(),
-            None,
-            true,
-        );
-        engine.section_controls(section, m)
+    /// The Lab path to the rows titled `want`, as the state holds it.
+    fn lab(want: &[&str]) -> MenuPath {
+        let e = engine();
+        let tree = e.menu_tree();
+        let mut rows = tree.root(tree::Tile::Lab);
+        let mut path = Vec::new();
+        for name in want {
+            let i = rows
+                .iter()
+                .position(|n| n.is_stop() && n.title == *name)
+                .unwrap_or_else(|| panic!("{name}"));
+            path.push(i);
+            rows = rows[i].children();
+        }
+        MenuPath::from_rows(&path)
     }
 
-    fn at(section: usize, entry: usize) -> MenuState {
+    fn in_lab(want: &[&str]) -> MenuState {
         MenuState {
-            section,
-            entry,
-            pane: MenuPane::Views,
-            scroll: 0,
+            tile: MenuTile::Lab,
+            focus: MenuFocus::Below,
+            lab: lab(want),
+            resume: true,
+            ..MenuState::default()
         }
     }
 
-    /// The index of a section in the built-in menu, by id, so the tests do
-    /// not hard-code a position a new section would shift.
-    fn index_of(id: &str) -> usize {
-        model::build(&LayoutConfig::default_config().presets)
-            .sections
-            .iter()
-            .position(|s| s.id == id)
-            .unwrap_or_else(|| panic!("no section {id}"))
+    fn pane(tile: MenuTile, scroll: usize) -> MenuState {
+        MenuState {
+            tile,
+            focus: MenuFocus::Below,
+            scroll,
+            ..MenuState::default()
+        }
     }
 
-    /// Bluetooth is a heading over its four groups: drawn between Micro and
-    /// Band, never the selected row, its groups indented under it.
+    /// The tiles, the crumb, every column down the path and the card.
     #[test]
-    fn bluetooth_is_a_heading_over_its_groups() {
-        let out = draw(100, 30, &at(index_of("net"), 0));
-        let joined = out.join("\n");
-        let row = |label: &str| {
-            out.iter()
-                .position(|l| l.contains(label))
-                .unwrap_or_else(|| panic!("{label} missing:\n{joined}"))
-        };
-        let (micro, bluetooth, band) = (row("Micro"), row("Bluetooth"), row("Band"));
-        assert!(micro < bluetooth && bluetooth < band, "{joined}");
-        assert!(
-            !out[bluetooth].contains('\u{258c}'),
-            "a heading is never selected:\n{joined}"
-        );
-        assert!(out[band].contains('\u{258c}'), "Band is:\n{joined}");
-        let col = |line: &str, label: &str| line.find(label).unwrap();
-        assert!(
-            col(&out[band], "Band") > col(&out[micro], "Micro"),
-            "the groups are indented:\n{joined}"
-        );
-    }
-
-    /// Wi-Fi is a heading of its own over its groups, after Bluetooth's,
-    /// never selected, Channel indented under it with its Survey listed.
-    #[test]
-    fn wifi_is_a_heading_over_its_groups() {
-        let out = draw(100, 30, &at(index_of("wifi_channel"), 0));
-        let joined = out.join("\n");
-        let row = |label: &str| {
-            out.iter()
-                .position(|l| l.contains(label))
-                .unwrap_or_else(|| panic!("{label} missing:\n{joined}"))
-        };
-        let (coded, wifi, channel) = (row("LE Coded"), row("Wi-Fi"), row("Channel"));
-        assert!(coded < wifi && wifi < channel, "{joined}");
-        assert!(
-            !out[wifi].contains('\u{258c}'),
-            "a heading is never selected:\n{joined}"
-        );
-        let col = |line: &str, label: &str| line.find(label).unwrap();
-        assert!(
-            col(&out[channel], "Channel") > col(&out[wifi], "Wi-Fi"),
-            "the groups are indented:\n{joined}"
-        );
-        assert!(joined.contains("Survey"), "{joined}");
-        assert!(!joined.contains(model::WIFI_NOTE), "{joined}");
-    }
-
-    /// With no Wi-Fi view to list, Wi-Fi, selected, says it is being built
-    /// rather than showing an empty list.
-    #[test]
-    fn wifi_without_a_view_says_it_is_being_built() {
-        let mut presets = LayoutConfig::default_config().presets;
-        presets.retain(|_, p| {
-            !p.section
-                .as_deref()
-                .is_some_and(crate::signal::net::is_wifi)
-        });
-        let menu = model::build(&presets);
-        let wifi = menu
-            .sections
-            .iter()
-            .position(|s| s.id == model::WIFI)
-            .expect("the placeholder is listed");
-        let joined = draw_menu(100, 30, &at(wifi, 0), &SdrMetrics::fixture(), &menu).join("\n");
-        assert!(joined.contains(model::WIFI_NOTE), "{joined}");
-    }
-
-    /// Folded to one column, the heading names the Bluetooth item too: the
-    /// list that would say where Band sits is off screen.
-    #[test]
-    fn folded_a_group_names_its_heading() {
-        let joined = draw(44, 16, &at(index_of("net"), 0)).join("\n");
-        assert!(joined.contains("BLUETOOTH"), "{joined}");
-        assert!(joined.contains("BAND"), "{joined}");
-    }
-
-    #[test]
-    fn both_columns_are_drawn() {
-        let all = draw(80, 24, &at(1, 0)).join("\n");
-        for wanted in ["Command Rail", "Lab", "Sweep", "Micro", "IQ", "Timing"] {
+    fn the_whole_menu_is_drawn() {
+        let all = draw(191, 41, &in_lab(&["Wi-Fi", "2.4 GHz", "Channel", "Frames"])).join("\n");
+        for wanted in [
+            "Resume",
+            "Radio",
+            "Lab",
+            "Options",
+            "Keys",
+            "Quit",
+            "── LAB › Wi-Fi › 2.4 GHz › Channel › Frames",
+            "AREA",
+            "BAND",
+            "GROUP",
+            "VIEW",
+            "Enter or 2 opens it",
+            "WHERE IT LISTENS",
+            "WHAT OPENS",
+        ] {
             assert!(all.contains(wanted), "'{wanted}' missing from:\n{all}");
         }
     }
 
+    /// No Resume tile without something to resume.
+    #[test]
+    fn a_first_run_has_no_resume_tile() {
+        let first = MenuState {
+            resume: false,
+            ..in_lab(&["Spectrum"])
+        };
+        let all = draw(191, 41, &first).join("\n");
+        assert!(!all.contains("Resume"), "{all}");
+        assert!(draw(191, 41, &in_lab(&["Spectrum"]))
+            .join("\n")
+            .contains("Resume"));
+    }
+
+    /// Resume says where the deck is, and its card where you left off.
+    #[test]
+    fn resume_says_where_you_left_off() {
+        let mut e = engine();
+        e.set_preset("wifi_frames");
+        let state = MenuState {
+            tile: MenuTile::Resume,
+            focus: MenuFocus::Tiles,
+            lab: lab(&["Wi-Fi", "2.4 GHz", "Channel", "Frames"]),
+            resume: true,
+            ..MenuState::default()
+        };
+        let all = draw_on(&e, 191, 41, &state, &SdrMetrics::fixture()).join("\n");
+        assert!(all.contains("Wi-Fi · Frames"), "{all}");
+        assert!(all.contains("WHERE YOU LEFT OFF"), "{all}");
+        assert!(all.contains("100.000 MHz ·"), "{all}");
+    }
+
     /// The number beside a view is its slot, which is the key that selects it.
     /// If these ever disagree the menu is teaching a key that does not work.
-    ///
-    /// Matched as the rendered pair `"2  RF"` rather than "some line mentioning
-    /// RF": the header says `HackRF One`, which contains `RF` and satisfied a
-    /// looser version of this test for the wrong reason.
     #[test]
     fn the_numbers_shown_are_the_keys_that_work() {
-        let all = draw(80, 24, &at(1, 0));
+        let all = draw(191, 41, &in_lab(&["Receiver", "IQ"]));
         let joined = all.join("\n");
         for (slot, title) in [(1, "IQ"), (2, "RF"), (3, "Timing"), (4, "Signal")] {
-            let pair = format!("{slot}  {title}");
+            let pair = format!("{slot} {title}");
             assert!(
                 all.iter().any(|l| l.contains(&pair)),
-                "expected '{pair}' on a row, in:\n{joined}"
+                "'{pair}' in:\n{joined}"
             );
         }
     }
@@ -508,127 +628,132 @@ mod tests {
     /// not hide the one number you were watching.
     #[test]
     fn the_header_shows_the_device_and_the_frequency() {
-        let all = draw(80, 24, &at(0, 0)).join("\n");
-        assert!(all.contains("100.000 MHz"), "{all}");
-    }
-
-    /// A narrow terminal folds to one column instead of spilling, and names the
-    /// section it is showing, since the list that would name it is gone.
-    #[test]
-    fn a_narrow_terminal_folds_to_one_column() {
-        let all = draw(44, 16, &at(1, 0));
-        let joined = all.join("\n");
-        assert!(all.iter().all(|l| l.chars().count() <= 44), "{joined}");
-        assert!(joined.contains("IQ"), "the views must survive:\n{joined}");
+        let all = draw(80, 24, &in_lab(&["Spectrum"])).join("\n");
         assert!(
-            joined.contains("LAB"),
-            "the folded form must name its section:\n{joined}"
+            all.contains("HackRF One") && all.contains("100.000 MHz"),
+            "{all}"
         );
     }
 
-    /// The fold is decided by the whole width, not the remaining column.
-    ///
-    /// Found by running the real binary at 70 columns: the menu still had
-    /// both columns while the right one, being only the remainder, measured
-    /// below the threshold and drew the folded form's heading beside the list.
-    /// The views now carry their section's heading in both forms (7.1), so
-    /// what is checked is the fold itself, across that gap: the list on
-    /// screen at every width from 56, gone below the threshold, and the
-    /// heading naming the section either way.
+    /// A view's card carries its live line: `●` when the view's receiver runs
+    /// now, `○` with the session's figures otherwise.
     #[test]
-    fn the_fold_follows_the_whole_width_and_the_heading_names_the_section() {
-        for w in [56, 60, 70, 80, 120] {
-            let all = draw(w, 20, &at(0, 0)).join("\n");
-            assert!(
-                all.contains("Command Rail"),
-                "the section list must be on screen at {w}:\n{all}"
-            );
-            assert!(all.contains("COMMAND RAIL"), "no heading at {w}:\n{all}");
-        }
-        let folded = draw(44, 16, &at(0, 0)).join("\n");
-        assert!(!folded.contains("Command Rail"), "{folded}");
-        assert!(folded.contains("COMMAND RAIL"), "{folded}");
-    }
-
-    /// **Every NET view carries a live line** (7.2), `●` for the view
-    /// running now and `○` with the session's figures otherwise; a section
-    /// with nothing live keeps its two rows a view.
-    #[test]
-    fn net_views_carry_a_live_line() {
-        let menu = model::build(&LayoutConfig::default_config().presets);
-        let section = |id: &str| menu.sections.iter().position(|s| s.id == id).unwrap();
+    fn a_views_card_carries_its_live_line() {
         let mut m = SdrMetrics::fixture().streaming();
         m.ui.active_preset = "net_ble".to_string();
         m.net.ble_channel = Some(37);
         m.net.ble_channel_packets = [300, 100, 12];
         m.net.ble_channel_crc_ok = [290, 95, 11];
-        let le = draw_with_metrics(100, 30, &at(section("le"), 1), &m).join("\n");
+        let state = in_lab(&["Bluetooth", "2.4 GHz", "Low Energy", "Advertising"]);
+        let le = draw_with_metrics(191, 41, &state, &m).join("\n");
         assert!(
             le.contains("\u{25cf} 412 packets this session, 96 % CRC ok"),
             "{le}"
         );
-        assert!(le.contains("LE"), "{le}");
-        assert!(le.contains("3 views"), "{le}");
-        // The selected view wears the bar, not a triangle.
-        assert!(le.contains("\u{258c} 2  Advertising"), "{le}");
-        assert!(!le.contains("\u{25b8}"), "{le}");
-        let classic = draw_with_metrics(100, 30, &at(section("classic"), 0), &m).join("\n");
+        let state = in_lab(&["Bluetooth", "2.4 GHz", "Classic", "Piconets"]);
+        let classic = draw_with_metrics(191, 41, &state, &m).join("\n");
         assert!(
             classic.contains("\u{25cb} no piconet heard this session; not listening now"),
             "{classic}"
         );
-        assert!(classic.contains("3 views"), "{classic}");
-        // A letter two views' panels share is one key, named once: the
-        // Piconets panel's and the Bench's `c`.
-        let heading = classic.lines().find(|l| l.contains("3 views")).unwrap();
-        let cs = heading
-            .split(|c: char| !c.is_alphanumeric())
-            .filter(|w| *w == "c")
-            .count();
-        assert_eq!(cs, 1, "{heading}");
-        let lab = draw(100, 30, &at(1, 0)).join("\n");
-        // Only the header's own stopped mark; no view line.
-        assert_eq!(lab.matches('\u{25cb}').count(), 1, "{lab}");
-        assert!(!lab.contains("not listening"), "{lab}");
     }
 
-    /// The menu fits every width either side of the fold.
+    /// On a radio the gate refuses, Bluetooth and Wi-Fi are on the menu, grey,
+    /// and the card says why in the gate's words.
     #[test]
-    fn the_menu_fits_every_width() {
-        let menu = model::build(&LayoutConfig::default_config().presets);
-        let net = menu.sections.iter().position(|s| s.id == "net").unwrap();
-        for w in 30..130u16 {
-            for h in [12u16, 20, 30] {
-                for line in draw(w, h, &at(net, 4)) {
-                    assert!(line.chars().count() <= w as usize, "{w}x{h}: {line:?}");
+    fn a_refused_view_is_shown_with_its_reason() {
+        let refused = crate::app::App::build_ui(
+            "command_rail",
+            &std::collections::HashMap::new(),
+            None,
+            false,
+        )
+        .0;
+        let state = MenuState {
+            tile: MenuTile::Lab,
+            focus: MenuFocus::Below,
+            lab: {
+                let tree = refused.menu_tree();
+                let (_, path) = tree.locate("wifi_frames").expect("listed");
+                (&path).into()
+            },
+            resume: true,
+            ..MenuState::default()
+        };
+        let all = draw_on(&refused, 191, 41, &state, &SdrMetrics::fixture()).join("\n");
+        assert!(all.contains("✗ Not on this radio"), "{all}");
+        assert!(all.contains("This radio cannot reach the band."), "{all}");
+        assert!(all.contains("refused"), "{all}");
+        assert!(!all.contains("opens it"), "{all}");
+        assert!(
+            !all.contains("WHAT OPENS"),
+            "a refused view has no placement:\n{all}"
+        );
+    }
+
+    /// The menu fits every width and height, and never panics drawing them.
+    #[test]
+    fn the_menu_fits_every_size() {
+        let states = [
+            in_lab(&["Wi-Fi", "2.4 GHz", "Channel", "Frames"]),
+            in_lab(&["Bluetooth", "2.4 GHz", "Low Energy"]),
+            pane(MenuTile::Keys, 0),
+            pane(MenuTile::Options, 0),
+            pane(MenuTile::Quit, 0),
+            MenuState {
+                tile: MenuTile::Radio,
+                ..MenuState::default()
+            },
+        ];
+        for w in (20..200u16).step_by(7) {
+            for h in [3u16, 6, 12, 24, 32, 41] {
+                for state in &states {
+                    for line in draw(w, h, state) {
+                        assert!(line.chars().count() <= w as usize, "{w}x{h}: {line:?}");
+                    }
                 }
             }
         }
     }
 
-    /// **Keys, scoped** (7.3): opened from NET, the Keys pane lists every
-    /// NET panel's focus key and bindings first, generated from the panels,
-    /// then the global keys; the views' heading names the same letters.
+    /// Paths past the end of the tree, and a tree that does not exist, are
+    /// drawn as the nearest real row rather than a panic.
     #[test]
-    fn keys_from_a_section_list_its_panels_controls_first() {
-        let menu = model::build(&LayoutConfig::default_config().presets);
-        let keys_of = |id: &str| {
-            let section = menu.sections.iter().position(|s| s.id == id).unwrap();
-            let state = MenuState {
-                section,
-                entry: 0,
-                pane: MenuPane::Keys,
-                scroll: 0,
-            };
-            draw(110, 40, &state).join("\n")
+    fn an_out_of_range_path_does_not_panic() {
+        let state = MenuState {
+            lab: MenuPath::from_rows(&[200, 200, 200, 200, 200, 200, 200, 200, 200]),
+            radio: MenuPath::from_rows(&[99]),
+            focus: MenuFocus::Below,
+            ..MenuState::default()
         };
-        let le = keys_of("le");
+        let all = draw(191, 41, &state).join("\n");
+        assert!(all.contains("Compact"), "{all}");
+        let radio = MenuState {
+            tile: MenuTile::Radio,
+            ..state
+        };
+        draw(191, 41, &radio);
+    }
+
+    /// **Keys, scoped**: opened with the Lab path in a group, the Keys pane
+    /// lists that group's panels' focus keys and bindings first, generated
+    /// from the panels, then the global keys.
+    #[test]
+    fn keys_list_the_groups_panels_first() {
+        let keys_of = |want: &[&str]| {
+            let state = MenuState {
+                lab: lab(want),
+                ..pane(MenuTile::Keys, 0)
+            };
+            draw(110, 48, &state).join("\n")
+        };
+        let le = keys_of(&["Bluetooth", "2.4 GHz", "Low Energy"]);
         assert!(le.contains("LE: FOCUS KEYS"), "{le}");
         assert!(
             le.contains("BLE Advertising") && le.contains("select a packet"),
             "{le}"
         );
-        let all = keys_of("classic");
+        let all = keys_of(&["Bluetooth", "2.4 GHz", "Classic", "Packets"]);
         assert!(all.contains("CLASSIC: FOCUS KEYS"), "{all}");
         for (key, title, what) in [
             ('c', "Piconets", "select a piconet"),
@@ -644,17 +769,6 @@ mod tests {
         let block = all.find("CLASSIC: FOCUS KEYS").unwrap();
         let radio = all.find("THE RADIO").unwrap();
         assert!(block < radio, "the section's block comes first");
-
-        let classic = menu
-            .sections
-            .iter()
-            .position(|s| s.id == "classic")
-            .unwrap();
-        let views = draw(110, 30, &at(classic, 0)).join("\n");
-        let heading = views.lines().find(|l| l.contains("3 views")).unwrap();
-        for key in ['v', 'c', 'b'] {
-            assert!(heading.contains(&format!(" {key}")), "{key}: {heading}");
-        }
     }
 
     /// **Every focusable panel a section shows is in its block**: checked
@@ -662,14 +776,9 @@ mod tests {
     /// a new panel cannot be left out of the Keys pane.
     #[test]
     fn every_focusable_panel_is_in_its_sections_block() {
-        let (engine, _) = crate::app::App::build_ui(
-            "command_rail",
-            &std::collections::HashMap::new(),
-            None,
-            true,
-        );
+        let engine = engine();
         let m = SdrMetrics::fixture();
-        let presets = &LayoutConfig::default_config().presets;
+        let presets = &crate::config::LayoutConfig::default_config().presets;
         for (si, section) in engine.menu().sections.iter().enumerate() {
             let controls = engine.section_controls(si, &m);
             for entry in &section.entries {
@@ -693,89 +802,53 @@ mod tests {
         }
     }
 
-    /// The Keys pane is a row in the left column and the content of the right
-    /// one, and it replaces an overlay that had drifted out of step with the
-    /// dispatch. `keys.rs` owns the check that it cannot drift again.
+    /// The Keys pane lists the global keys under its tile.
     #[test]
     fn the_keys_pane_lists_the_global_keys() {
-        let state = MenuState {
-            section: 0,
-            entry: 0,
-            pane: MenuPane::Keys,
-            scroll: 0,
-        };
-        let all = draw(90, 30, &state).join("\n");
-        assert!(
-            all.contains("Keys"),
-            "the left column needs the row:\n{all}"
-        );
+        let all = draw(90, 40, &pane(MenuTile::Keys, 0)).join("\n");
+        assert!(all.contains("KEYS"), "{all}");
         assert!(all.contains("start or stop RX"), "{all}");
         assert!(all.contains("type a frequency"), "{all}");
-        // The section list is still there: the pane replaces the right column,
-        // not the whole menu.
-        assert!(all.contains("Command Rail"), "{all}");
     }
 
     /// The reference is taller than a short terminal, so it scrolls, and the
     /// scroll actually moves the content rather than being stored and ignored.
     #[test]
     fn the_keys_pane_scrolls() {
-        let top = draw(
-            90,
-            18,
-            &MenuState {
-                section: 0,
-                entry: 0,
-                pane: MenuPane::Keys,
-                scroll: 0,
-            },
-        )
-        .join("\n");
-        let down = draw(
-            90,
-            18,
-            &MenuState {
-                section: 0,
-                entry: 0,
-                pane: MenuPane::Keys,
-                scroll: 30,
-            },
-        )
-        .join("\n");
-        // The section's own block leads, and scrolls away first.
-        assert!(top.contains("COMMAND RAIL: FOCUS KEYS"), "{top}");
+        let at = |scroll| MenuState {
+            lab: lab(&["Spectrum"]),
+            ..pane(MenuTile::Keys, scroll)
+        };
+        let top = draw(90, 30, &at(0)).join("\n");
+        let down = draw(90, 30, &at(30)).join("\n");
+        assert!(top.contains("FOCUS KEYS"), "{top}");
         assert!(!down.contains("FOCUS KEYS"), "scrolled away:\n{down}");
         assert_ne!(top, down);
     }
 
-    /// The Options pane is empty by design, so what is being pinned is that the
-    /// emptiness is stated on screen. A pane that opens to blank space reads as
-    /// a bug; one that says why it is blank reads as a decision.
+    /// The Options pane says so when the radio has nothing to set.
     #[test]
     fn the_options_pane_admits_it_is_empty() {
-        let state = MenuState {
-            section: 0,
-            entry: 0,
-            pane: MenuPane::Options,
-            scroll: 0,
-        };
-        let all = draw(90, 30, &state).join("\n");
-        assert!(
-            all.contains("Options"),
-            "the left column needs the row:\n{all}"
-        );
+        let all = draw(90, 30, &pane(MenuTile::Options, 0)).join("\n");
+        assert!(all.contains("OPTIONS"), "{all}");
         assert!(all.contains("Settings will live here"), "{all}");
-        // And the pane replaces the right column only, the same as Keys.
-        assert!(all.contains("Command Rail"), "{all}");
+    }
+
+    /// Quit says what Enter does there, and what is kept.
+    #[test]
+    fn the_quit_pane_says_what_enter_does() {
+        let state = MenuState {
+            focus: MenuFocus::Tiles,
+            ..pane(MenuTile::Quit, 0)
+        };
+        let all = draw(120, 41, &state).join("\n");
+        assert!(all.contains("Enter closes sdrtop."), "{all}");
+        assert!(all.contains("Enter quit"), "{all}");
     }
 
     #[test]
-    fn a_short_folded_options_pane_keeps_the_selected_option_visible() {
-        let state = MenuState {
-            pane: MenuPane::Options,
-            scroll: 5,
-            ..MenuState::default()
-        };
+    fn a_short_options_pane_keeps_the_selected_option_visible() {
+        let state = pane(MenuTile::Options, 5);
         let mut metrics = SdrMetrics::fixture();
         for index in 0..6 {
             Arc::make_mut(&mut metrics.device_options).push(crate::hardware::DeviceOption {
@@ -786,17 +859,13 @@ mod tests {
                 integer_range: None,
             });
         }
-
         let all = draw_with_metrics(40, 10, &state, &metrics).join("\n");
         assert!(all.contains("Option 5"), "{all}");
     }
 
     #[test]
     fn numeric_options_show_entry_hints_and_keep_the_accepted_value_in_the_editor() {
-        let state = MenuState {
-            pane: MenuPane::Options,
-            ..MenuState::default()
-        };
+        let state = pane(MenuTile::Options, 0);
         let mut m = SdrMetrics::fixture();
         m.device_options = Arc::new(vec![crate::hardware::DeviceOption {
             id: "gain".into(),
@@ -848,18 +917,9 @@ mod tests {
     #[test]
     fn it_survives_a_tiny_terminal() {
         for (w, h) in [(40, 10), (20, 5), (8, 3), (4, 2)] {
-            let lines = draw(w, h, &at(3, 3));
+            let lines = draw(w, h, &in_lab(&["Receiver", "IQ"]));
             assert_eq!(lines.len(), h as usize);
             assert!(lines.iter().all(|l| l.chars().count() <= w as usize));
         }
-    }
-
-    /// An out of range cursor is clamped, not indexed. `MenuState` is cloned into
-    /// the frame snapshot and arrives here without the engine that built the
-    /// table, so this is the path that must not panic.
-    #[test]
-    fn an_out_of_range_cursor_does_not_panic() {
-        let all = draw(80, 24, &at(99, 99)).join("\n");
-        assert!(all.contains("Micro"), "clamps to the last section:\n{all}");
     }
 }
