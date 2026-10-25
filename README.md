@@ -1,4 +1,4 @@
-<p align="center">
+f<p align="center">
   <img src="user_docs/pics/sdrtop_logo.png" alt="sdrtop logo" width="75">
 </p>
 
@@ -200,9 +200,7 @@ yay -S sdrtop-git    # the main branch, compiled, live dangerously
 
 `paru` or a plain `makepkg -si` does the same job. Each package also installs the man page and these docs.
 
-The radio runtimes are optional dependencies: `hackrf`, `rtl-sdr` and `soapysdr`. The Airspy R2's `airspy` is not on that list, so install it yourself if you have one. SoapySDR alone finds no radios: its driver modules are `soapyrtlsdr`, `soapyhackrf` and `soapyairspy` in the official repos, and `soapysdrplay3-git` in the AUR for an RSP.
-
-These packages are Ateles's, not mine. A new release shows up when they update the PKGBUILD (0.7.0 was there the same day). A broken or outdated package belongs on its AUR page. A broken sdrtop belongs here.
+The radio runtimes are optional dependencies: `hackrf`, `rtl-sdr` and `soapysdr`. The Airspy R2's `airspy` is not on that list, so install it yourself if you have one. SoapySDR alone finds no radios: its driver modules are `soapyrtlsdr`, `soapyhackrf` and `soapyairspy` in the official repos, and `soapysdrplay3-git` in the AUR for an RSP
 
 ### Or cargo, the boring one that always works
 
