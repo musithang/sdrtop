@@ -1,4 +1,4 @@
-f<p align="center">
+<p align="center">
   <img src="user_docs/pics/sdrtop_logo.png" alt="sdrtop logo" width="75">
 </p>
 
