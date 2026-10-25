@@ -198,9 +198,11 @@ yay -S sdrtop        # the release tag, compiled on your machine
 yay -S sdrtop-git    # the main branch, compiled, live dangerously
 ```
 
-`paru` or a plain `makepkg -si` does the same job. Each package also installs the man page and these docs.
+`paru` or a plain `makepkg -si` does the same job. Each package also installs the man page and the docs.
 
-The radio runtimes are optional dependencies: `hackrf`, `rtl-sdr` and `soapysdr`. The Airspy R2's `airspy` is not on that list, so install it yourself if you have one. SoapySDR alone finds no radios: its driver modules are `soapyrtlsdr`, `soapyhackrf` and `soapyairspy` in the official repos, and `soapysdrplay3-git` in the AUR for an RSP
+The radio runtimes are optional dependencies: `hackrf`, `rtl-sdr` and `soapysdr`. The Airspy R2's `airspy` is not on that list yet, so for an R2 it's `sudo pacman -S airspy`. SoapySDR alone finds no radios: its driver modules are `soapyrtlsdr`, `soapyhackrf`, `soapyairspy` and `soapyplutosdr` in the official repos, and `soapysdrplay3-git` in the AUR for an RSP.
+
+Use the AUR or the one-liner, not both. The one-liner installs to `/usr/local/bin`, which comes before the package's `/usr/bin` on the PATH, so that copy runs even after the package has moved on.
 
 ### Or cargo, the boring one that always works
 

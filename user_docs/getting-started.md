@@ -110,8 +110,8 @@ The optional dependencies are `hackrf`, `rtl-sdr` and `soapysdr`. The Airspy
 R2 needs `airspy`, which the packages don't list yet:
 
 ```sh
-sudo pacman -S airspy                                # Airspy R2, native
-sudo pacman -S soapyrtlsdr soapyhackrf soapyairspy   # SoapySDR driver modules
+sudo pacman -S airspy        # Airspy R2, native
+sudo pacman -S soapyrtlsdr soapyhackrf soapyairspy soapyplutosdr   # SoapySDR driver modules
 ```
 
 An RSP needs `soapysdrplay3-git` from the AUR, plus SDRplay's own API.
@@ -119,6 +119,10 @@ An RSP needs `soapysdrplay3-git` from the AUR, plus SDRplay's own API.
 The packages are Ateles's, so their bugs go on their AUR pages. A release
 reaches them when the PKGBUILD is updated, not when I tag it. If you need a
 release before that, the installer above or cargo below have it already.
+
+Use one or the other, not both. The installer puts sdrtop in `/usr/local/bin`,
+which comes before the package's `/usr/bin` on the PATH, so that copy runs
+even after the package has moved on. `sh install.sh --uninstall` removes it.
 
 Everything below is the same job done by hand.
 
