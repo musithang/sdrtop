@@ -87,6 +87,39 @@ one. If you are reaching for it because the check failed,
 [troubleshooting](troubleshooting.md#checksum-mismatch-or-could-not-download-sha256sums)
 is the better door.
 
+## On Arch, from the AUR
+
+sdrtop is on the [AUR](https://aur.archlinux.org/packages?K=sdrtop), packaged
+by [Ateles](https://aur.archlinux.org/account/Ateles). Thank you, I owe you a
+beer.
+
+```sh
+yay -S sdrtop-bin    # the release tarball, nothing to compile
+yay -S sdrtop        # the release tag, compiled on your machine
+yay -S sdrtop-git    # the main branch, compiled, live dangerously
+```
+
+They conflict with each other, so it's one of the three. `paru` or a plain
+`makepkg -si` works the same. `sdrtop-bin` is the tarball from the
+[releases page](../../../releases), with its checksum pinned in the PKGBUILD.
+The other two compile with cargo, so expect the usual few minutes. All three
+install the binary to `/usr/bin`, the man page, and these docs under
+`/usr/share/doc`.
+
+The optional dependencies are `hackrf`, `rtl-sdr` and `soapysdr`. The Airspy
+R2 needs `airspy`, which the packages don't list yet:
+
+```sh
+sudo pacman -S airspy                                # Airspy R2, native
+sudo pacman -S soapyrtlsdr soapyhackrf soapyairspy   # SoapySDR driver modules
+```
+
+An RSP needs `soapysdrplay3-git` from the AUR, plus SDRplay's own API.
+
+The packages are Ateles's, so their bugs go on their AUR pages. A release
+reaches them when the PKGBUILD is updated, not when I tag it. If you need a
+release before that, the installer above or cargo below have it already.
+
 Everything below is the same job done by hand.
 
 ## What you need

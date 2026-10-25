@@ -16,6 +16,13 @@ checkpoint instead of by version.
 
 ## [Unreleased]
 
+### Added
+
+- **Arch, from the AUR.** `sdrtop`, `sdrtop-bin` and `sdrtop-git`, packaged
+  by Ateles, are in the install docs, with the Airspy and SoapySDR packages
+  their optional dependencies leave out.
+  ([Getting started](user_docs/getting-started.md#on-arch-from-the-aur))
+
 ## [0.7.0] - 2026-10-24
 
 **A menu with doors, and a pager behind the first one.**

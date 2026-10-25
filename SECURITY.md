@@ -35,7 +35,8 @@ response times. What I can promise:
 
 The latest release, and `main`. There are no backports: a fix lands in a new
 release, and upgrading is how you get it. Re-running the installer or
-`cargo install sdrtop --locked --force` does that.
+`cargo install sdrtop --locked --force` does that. On Arch, your AUR helper
+does, once the package has been updated.
 
 ---
 

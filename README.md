@@ -188,6 +188,22 @@ Piped straight into a shell they go after `sh -s --`. `--no-verify` turns off th
 
 Piping a script into `sh` means running code you haven't read. You should read it: [`packaging/install.sh`](packaging/install.sh). I'd want to.
 
+### On Arch, from the AUR
+
+sdrtop is on the [AUR](https://aur.archlinux.org/packages?K=sdrtop), packaged by [Ateles](https://aur.archlinux.org/account/Ateles). Thank you, I owe you a beer. There are three packages. Pick one:
+
+```sh
+yay -S sdrtop-bin    # the release tarball, nothing to compile
+yay -S sdrtop        # the release tag, compiled on your machine
+yay -S sdrtop-git    # the main branch, compiled, live dangerously
+```
+
+`paru` or a plain `makepkg -si` does the same job. Each package also installs the man page and these docs.
+
+The radio runtimes are optional dependencies: `hackrf`, `rtl-sdr` and `soapysdr`. The Airspy R2's `airspy` is not on that list, so install it yourself if you have one. SoapySDR alone finds no radios: its driver modules are `soapyrtlsdr`, `soapyhackrf` and `soapyairspy` in the official repos, and `soapysdrplay3-git` in the AUR for an RSP.
+
+These packages are Ateles's, not mine. A new release shows up when they update the PKGBUILD (0.7.0 was there the same day). A broken or outdated package belongs on its AUR page. A broken sdrtop belongs here.
+
 ### Or cargo, the boring one that always works
 
 sdrtop is on [crates.io](https://crates.io/crates/sdrtop). Cargo compiles it for your machine.
