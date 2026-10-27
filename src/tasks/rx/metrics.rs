@@ -30,9 +30,10 @@ pub(super) const DBFS_FLOOR: f32 = -120.0;
 pub(super) struct Moments {
     pub i_sum: i64,
     pub q_sum: i64,
-    pub i_sq_sum: u64,
-    pub q_sq_sum: u64,
-    pub cross_sum: i64,
+    /// 128-bit for the reason on `state::acc::Accumulators::i_sq_sum`.
+    pub i_sq_sum: u128,
+    pub q_sq_sum: u128,
+    pub cross_sum: i128,
     pub samples: u64,
     /// Largest single-component magnitude seen in the window, in counts.
     pub peak_amp: u32,
@@ -471,8 +472,8 @@ mod tests {
         Moments {
             i_sum: 0,
             q_sum: 0,
-            i_sq_sum: var * n,
-            q_sq_sum: var * n,
+            i_sq_sum: u128::from(var * n),
+            q_sq_sum: u128::from(var * n),
             cross_sum: 0,
             samples: n,
             peak_amp: 0,
@@ -495,13 +496,13 @@ mod tests {
     /// ever read better than.
     #[test]
     fn a_centred_unsigned_stream_has_no_dc_offset() {
-        let n = 1_000;
+        let n: u64 = 1_000;
         let mo = Moments {
             i_sum: -(n as i64) / 2,
             q_sum: -(n as i64) / 2,
-            i_sq_sum: n / 2,
-            q_sq_sum: n / 2,
-            cross_sum: n as i64 / 2,
+            i_sq_sum: u128::from(n / 2),
+            q_sq_sum: u128::from(n / 2),
+            cross_sum: i128::from(n / 2),
             samples: n,
             peak_amp: 1,
         };
@@ -517,13 +518,13 @@ mod tests {
     /// the correction everywhere would invent one radio's fix on another.
     #[test]
     fn a_signed_radio_keeps_the_offset_the_unsigned_one_does_not_have() {
-        let n = 1_000;
+        let n: u64 = 1_000;
         let mo = Moments {
             i_sum: -(n as i64) / 2,
             q_sum: -(n as i64) / 2,
-            i_sq_sum: n / 2,
-            q_sq_sum: n / 2,
-            cross_sum: n as i64 / 2,
+            i_sq_sum: u128::from(n / 2),
+            q_sq_sum: u128::from(n / 2),
+            cross_sum: i128::from(n / 2),
             samples: n,
             peak_amp: 1,
         };

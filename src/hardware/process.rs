@@ -358,6 +358,16 @@ fn accumulate(buf: &[u8], geometry: SampleGeometry, cal: crate::state::IqCalStat
                 );
             }
         }
+        SampleFormat::Int32 => {
+            let bins = acc.bins;
+            let word = geometry.counts_per_word();
+            for c in buf.as_chunks::<8>().0 {
+                acc.fold(
+                    &bins.sample(decode_i32(fs_counts, word, [c[0], c[1], c[2], c[3]])),
+                    &bins.sample(decode_i32(fs_counts, word, [c[4], c[5], c[6], c[7]])),
+                );
+            }
+        }
     }
     acc
 }
@@ -432,9 +442,9 @@ pub fn digest(
         m.acc.saturated += saturated;
         m.acc.i_sum += i_sum;
         m.acc.q_sum += q_sum;
-        m.acc.i_sq_sum += i_sq as u64;
-        m.acc.q_sq_sum += q_sq as u64;
-        m.acc.iq_cross_sum += iq_cross;
+        m.acc.i_sq_sum += i_sq as u128;
+        m.acc.q_sq_sum += q_sq as u128;
+        m.acc.iq_cross_sum += i128::from(iq_cross);
         m.acc.sample_count += pairs as u64;
 
         for (acc, &local) in m.acc.iq_hist.iter_mut().zip(local_hist.iter()) {
@@ -656,6 +666,10 @@ fn encode_into(out: &mut Vec<u8>, i: f32, q: f32, g: &SampleGeometry) {
             out.extend_from_slice(&(ci as i16).to_le_bytes());
             out.extend_from_slice(&(cq as i16).to_le_bytes());
         }
+        SampleFormat::Int32 => {
+            out.extend_from_slice(&ci.to_le_bytes());
+            out.extend_from_slice(&cq.to_le_bytes());
+        }
     }
 }
 
@@ -708,9 +722,9 @@ fn decode(format: SampleFormat, full_scale: i64, b: u8) -> (i64, bool) {
     let v = match format {
         SampleFormat::Int8 => b as i8 as i64,
         SampleFormat::Uint8 => b as i64 - 128,
-        // Unreachable: `process_block` sends 16-bit blocks down the other arm,
-        // where a pair is four bytes and one byte on its own means nothing.
-        SampleFormat::Int16 => return (0, false),
+        // Unreachable: `process_block` sends 16- and 32-bit blocks down their
+        // own arms, where one byte on its own means nothing.
+        SampleFormat::Int16 | SampleFormat::Int32 => return (0, false),
     };
     (v, on_rail(full_scale, v))
 }
@@ -727,6 +741,24 @@ fn decode(format: SampleFormat, full_scale: i64, b: u8) -> (i64, bool) {
 fn decode_i16(full_scale: i64, bytes: [u8; 2]) -> (i64, bool) {
     let v = i16::from_le_bytes(bytes) as i64;
     (v, on_rail(full_scale, v))
+}
+
+/// Decode one little-endian signed 32-bit component, and say whether it sits
+/// on the converter's rail.
+///
+/// The positive rail is the converter's top word, `word` counts below the full
+/// scale ([`SampleGeometry::counts_per_word`]), not one count below it: a
+/// 16-bit word carried with eight fraction bits tops out at 32767 x 256, and a
+/// test at `full_scale - 1` would never see it. Anything past the rail counts
+/// too, since the library's processing can carry a sample a little beyond the
+/// word it came from.
+#[inline]
+fn decode_i32(full_scale: i64, word: i64, bytes: [u8; 4]) -> (i64, bool) {
+    let v = i32::from_le_bytes(bytes) as i64;
+    (
+        v,
+        full_scale >= 1 && (v >= full_scale - word || v <= -full_scale),
+    )
 }
 
 #[cfg(test)]
@@ -910,7 +942,15 @@ pub(crate) mod tests {
             cal,
             ..super::Accumulators::default()
         };
+        let word = geometry.counts_per_word();
         let pair_at = |k: usize| match format {
+            SampleFormat::Int32 => {
+                let c = &buf[k * 8..k * 8 + 8];
+                (
+                    super::decode_i32(fs, word, [c[0], c[1], c[2], c[3]]),
+                    super::decode_i32(fs, word, [c[4], c[5], c[6], c[7]]),
+                )
+            }
             SampleFormat::Int16 => {
                 let c = &buf[k * 4..k * 4 + 4];
                 (
@@ -996,6 +1036,14 @@ pub(crate) mod tests {
                 v.to_le_bytes()
             })
             .collect();
+        // A 16-bit converter's words with eight fraction bits, past the rail
+        // both ways now and then, as the library's correction can carry them.
+        let deep: Vec<u8> = (0..40_001)
+            .flat_map(|_| {
+                let v = ((rng.unit() * 2.0 - 1.0) * 9_000_000.0) as i32;
+                v.to_le_bytes()
+            })
+            .collect();
         let correcting = crate::state::IqCalState {
             dc_block_on: true,
             dc_i_raw: 3.5,
@@ -1012,12 +1060,13 @@ pub(crate) mod tests {
             ("int16 at 2048", SampleFormat::Int16, 2048.0, &wide),
             ("int16 at 1000", SampleFormat::Int16, 1000.0, &wide),
             ("int16 at 32768", SampleFormat::Int16, 32768.0, &wide),
+            ("int32 at 2^23", SampleFormat::Int32, 8_388_608.0, &deep),
         ];
         for (name, format, full_scale, buf) in cases {
             let g = SampleGeometry {
                 format,
                 full_scale,
-                converter_bits: None,
+                converter_bits: (format == SampleFormat::Int32).then_some(16),
             };
             for cal in [crate::state::IqCalState::default(), correcting, frozen] {
                 for len in [buf.len(), buf.len() / 3 * 2] {
@@ -1549,6 +1598,76 @@ pub(crate) mod tests {
                 "{v} is not a rail"
             );
         }
+    }
+
+    // --- Int32 (a converter's words carried with fractions) decode ----------
+    /// Little endian, two's complement, four bytes, against literal bytes.
+    #[test]
+    fn int32_is_little_endian() {
+        let fs = 8_388_608;
+        assert_eq!(super::decode_i32(fs, 256, [0x00, 0x01, 0x00, 0x00]).0, 256);
+        assert_eq!(super::decode_i32(fs, 256, [0x01, 0x00, 0x00, 0x00]).0, 1);
+        assert_eq!(super::decode_i32(fs, 256, [0x00, 0x00, 0x80, 0x00]).0, fs);
+        assert_eq!(super::decode_i32(fs, 256, [0xFF, 0xFF, 0xFF, 0xFF]).0, -1);
+        assert_eq!(
+            super::decode_i32(fs, 256, [0x00, 0x00, 0x80, 0xFF]).0,
+            -fs,
+            "two's complement over all four bytes"
+        );
+    }
+
+    /// The rail of a 16-bit word with eight fraction bits under it is the
+    /// word's top, 32767 x 256, and the bottom, -32768 x 256; past either is a
+    /// clip too, because the library's correction can carry a sample beyond
+    /// the word it came from. One count of fraction inside is not a clip.
+    #[test]
+    fn a_word_carried_with_fractions_clips_at_the_words_rail() {
+        let fs: i64 = 8_388_608;
+        let at = |v: i64| super::decode_i32(fs, 256, (v as i32).to_le_bytes()).1;
+        for v in [32_767 * 256, 32_767 * 256 + 100, fs, -fs, -fs - 5000] {
+            assert!(at(v), "{v} is on or past the rail");
+        }
+        for v in [32_767 * 256 - 1, -fs + 1, 0, 12_345] {
+            assert!(!at(v), "{v} is not a rail");
+        }
+    }
+
+    /// A poll window of a 32-bit format near full scale holds more than 64
+    /// bits of squares: 4096-pair blocks of samples the library's correction
+    /// carried 40 % past the top of a 16-bit converter's word (eight fraction
+    /// bits under it), for 287 ms at 912 kS/s. The window's sums must hold
+    /// them, exactly.
+    #[test]
+    fn a_window_of_full_scale_32_bit_samples_does_not_overflow_its_sums() {
+        let (ctx, _s, _d, _n) = rx_ctx();
+        let g = SampleGeometry {
+            format: SampleFormat::Int32,
+            full_scale: 8_388_608.0,
+            converter_bits: Some(16),
+        };
+        let v: i32 = 11_744_051; // 1.4 x 2^23
+        let block: Vec<u8> = (0..4096)
+            .flat_map(|_| [v.to_le_bytes(), (-v).to_le_bytes()].concat())
+            .collect();
+        let blocks = 64; // 262144 pairs, 287 ms at 912 kS/s
+        for _ in 0..blocks {
+            super::process_block(&block, g, 0, &ctx, Instant::now());
+        }
+        let m = ctx.metrics.lock().unwrap();
+        let pairs = 4096u128 * blocks;
+        let sq = (v as i128 * v as i128) as u128;
+        assert!(
+            sq * pairs > u128::from(u64::MAX),
+            "the case is the one that overflows u64"
+        );
+        assert_eq!(m.acc.i_sq_sum, sq * pairs);
+        assert_eq!(m.acc.q_sq_sum, sq * pairs);
+        assert_eq!(m.acc.iq_cross_sum, -(sq as i128) * pairs as i128);
+        assert_eq!(
+            m.acc.saturated,
+            2 * 4096 * blocks as u64,
+            "every sample on a rail"
+        );
     }
 
     /// The three readings of one fact must agree at every declared scale.

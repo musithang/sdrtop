@@ -361,6 +361,9 @@ fn geometry_for(native: &str, full_scale: f64) -> Result<SampleGeometry, Unsuppo
         match format {
             SampleFormat::Int8 | SampleFormat::Uint8 => 128.0,
             SampleFormat::Int16 => 32768.0,
+            // Never parsed from a SoapySDR format above; the container's own
+            // scale, for completeness.
+            SampleFormat::Int32 => 2_147_483_648.0,
         }
     };
     Ok(SampleGeometry {

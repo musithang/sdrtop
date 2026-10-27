@@ -44,6 +44,7 @@ pub fn datatype(format: SampleFormat) -> &'static str {
         SampleFormat::Int8 => "ci8",
         SampleFormat::Uint8 => "cu8",
         SampleFormat::Int16 => "ci16_le",
+        SampleFormat::Int32 => "ci32_le",
     }
 }
 
@@ -310,6 +311,7 @@ mod tests {
         assert_eq!(datatype(SampleFormat::Int8), "ci8");
         assert_eq!(datatype(SampleFormat::Uint8), "cu8");
         assert_eq!(datatype(SampleFormat::Int16), "ci16_le");
+        assert_eq!(datatype(SampleFormat::Int32), "ci32_le");
     }
 
     /// The document parses, has the three objects SigMF requires, and each

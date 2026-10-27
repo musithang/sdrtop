@@ -290,6 +290,10 @@ mod tests {
                         bytes.extend_from_slice(&((i * fs) as i16).to_le_bytes());
                         bytes.extend_from_slice(&((q * fs) as i16).to_le_bytes());
                     }
+                    SampleFormat::Int32 => {
+                        bytes.extend_from_slice(&((i * fs) as i32).to_le_bytes());
+                        bytes.extend_from_slice(&((q * fs) as i32).to_le_bytes());
+                    }
                 }
                 phase += step;
             }
@@ -373,7 +377,11 @@ mod tests {
         let (ref_bin, ref_level) = peak_of(&reference);
         assert_eq!(ref_bin, N / 2 + offset as usize, "the reference moved");
 
-        for (format, full_scale) in [(SampleFormat::Uint8, 128.0), (SampleFormat::Int16, 32768.0)] {
+        for (format, full_scale) in [
+            (SampleFormat::Uint8, 128.0),
+            (SampleFormat::Int16, 32768.0),
+            (SampleFormat::Int32, 8_388_608.0),
+        ] {
             let m = run_geometry(
                 SampleGeometry {
                     format,

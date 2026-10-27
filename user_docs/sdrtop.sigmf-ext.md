@@ -17,7 +17,7 @@ RTL-SDR, `ci16_le` through SoapySDR) and a `.sigmf-meta` file beside it.
 | name | required | type | description |
 |---|---|---|---|
 | `sdrtop:full_scale` | true | double | The sample value that means full scale. Divide by it to get samples in the range -1 to 1, the way sdrtop reads them. For `cu8` the zero is 127.5 and the value is measured from there. |
-| `sdrtop:bits` | true | uint | How many bits of the container the converter fills. A `ci16_le` recording from SoapySDR is often a 12-bit converter in a 16-bit container. |
+| `sdrtop:bits` | true | uint | How many bits of the container the converter fills. A `ci16_le` recording from SoapySDR is often a 12-bit converter in a 16-bit container. A `ci32_le` recording carries a converter's words with fraction bits below them, left by the radio library's own processing: `sdrtop:full_scale` is then the converter's full scale times a power of two, and this field is the converter's depth. |
 | `sdrtop:stack` | false | string | The software between sdrtop and a radio with no firmware of its own, with its version, for example the SoapySDR runtime. Absent on a radio that has firmware. |
 | `sdrtop:gain` | true | string | The gain chain when the recording started, by stage name as the radio's driver names them (`LNA=16,VGA=20`), and the front end boost when the radio has one. A stage whose gain in dB was not measured at the frequency being recorded is written as its step instead (`LNA=step 14/14`). Changes during the recording are annotations labelled `gain`. |
 | `sdrtop:reference` | true | string | The frequency reference sdrtop held when the recording started, or that it held none. **The samples are never corrected by it**: it is here so a reader who wants absolute frequencies has what they need. |

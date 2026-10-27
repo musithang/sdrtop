@@ -12,13 +12,19 @@ pub(crate) struct Accumulators {
     pub saturated: u64,
     pub i_sum: i64,
     pub q_sum: i64,
-    pub i_sq_sum: u64,
-    pub q_sq_sum: u64,
+    /// The squares and the cross product are 128-bit because a poll window
+    /// of a 32-bit format can hold more than 64 bits of them: a full-scale
+    /// square is 2^46 counts on a 16-bit converter carried with eight
+    /// fraction bits, 200 ms at 912 kS/s is 2^17.5 pairs, and that is already
+    /// 2^63.5 before a library's correction carries a sample past its word or
+    /// a poll comes late.
+    pub i_sq_sum: u128,
+    pub q_sq_sum: u128,
     pub sample_count: u64,
     pub jitter_sum_us: u64,
     pub jitter_sq_sum: u64,
     pub jitter_count: u64,
-    pub iq_cross_sum: i64,
+    pub iq_cross_sum: i128,
     pub last_callback: Option<Instant>,
     /// Rolling window of recent inter-callback gaps (µs), newest at the back.
     /// Unlike the sum/variance accumulators above, this is NOT zeroed each poll -

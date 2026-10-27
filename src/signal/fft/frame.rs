@@ -86,6 +86,24 @@ pub fn decode_into(
                 };
             }
         }
+        // Eight bytes to a pair. A 32-bit container carries a converter's
+        // words with fractions below them; f32 holds them exactly up to 2^24
+        // counts, and the full scale is a power of two.
+        SampleFormat::Int32 => {
+            let fs = geometry.full_scale;
+            for (i, (oct, &w)) in frame
+                .as_chunks::<8>()
+                .0
+                .iter()
+                .zip(window.iter())
+                .enumerate()
+            {
+                out[i] = Complex {
+                    re: i32::from_le_bytes([oct[0], oct[1], oct[2], oct[3]]) as f32 / fs * w,
+                    im: i32::from_le_bytes([oct[4], oct[5], oct[6], oct[7]]) as f32 / fs * w,
+                };
+            }
+        }
     }
 }
 
@@ -283,6 +301,31 @@ mod tests {
             &mut out,
         );
         assert!((out[0].re - 1.0).abs() < 1e-6, "got {}", out[0].re);
+    }
+
+    /// Eight bytes to a pair, little endian, by the declared full scale; a
+    /// word's fractions survive into the float exactly.
+    #[test]
+    fn int32_decodes_eight_bytes_per_pair() {
+        let mut out = [Complex { re: 0.0, im: 0.0 }; 2];
+        let bytes = [
+            0x00, 0x00, 0x40, 0x00, 0x00, 0x00, 0xC0, 0xFF, // 2^22, -2^22
+            0x81, 0xFF, 0x7F, 0x00, 0x00, 0x00, 0x00, 0x00, // 32767 x 256 + 129, 0
+        ];
+        decode_into(
+            &bytes,
+            &[1.0, 1.0],
+            SampleGeometry {
+                format: SampleFormat::Int32,
+                full_scale: 8_388_608.0,
+                converter_bits: Some(16),
+            },
+            &mut out,
+        );
+        assert_eq!(out[0].re, 0.5);
+        assert_eq!(out[0].im, -0.5);
+        assert_eq!(out[1].re, (32_767.0 * 256.0 + 129.0) / 8_388_608.0);
+        assert_eq!(out[1].im, 0.0);
     }
 
     #[test]

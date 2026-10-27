@@ -237,6 +237,28 @@ pub enum SampleFormat {
     /// [`SampleGeometry::bits`], from the full scale the driver reports.
     ///
     Int16,
+    /// Interleaved signed 32-bit little endian, four bytes per component, for
+    /// a library that hands floats a radio's integer words became after its
+    /// own processing: libairspyhf corrects and fine-tunes the HF+'s 16-bit
+    /// USB words in floating point, and rounding them back to 16 bits lifted
+    /// the measured noise floor by up to half a dB wherever the radio's own
+    /// noise was under one word. The words are carried with fraction bits
+    /// below them, so the full scale is the converter's times a power of two
+    /// and [`SampleGeometry::converter_bits`] says how deep the converter is.
+    ///
+    /// A block's per-sample sums are `i64`: a sample's square is under
+    /// 2^48 for anything within twice the full scale of a 24-bit container,
+    /// so a block may hold 2^15 such pairs; the backend hands blocks well
+    /// under that.
+    #[cfg_attr(
+        not(test),
+        expect(
+            dead_code,
+            reason = "the HF+ backend constructs it once it opens the radio; \
+                      this expectation then fails the build, so it cannot outlive the reason"
+        )
+    )]
+    Int32,
 }
 
 impl Default for SampleFormat {
@@ -284,6 +306,7 @@ impl SampleGeometry {
         match self.format {
             SampleFormat::Int8 | SampleFormat::Uint8 => 2,
             SampleFormat::Int16 => 4,
+            SampleFormat::Int32 => 8,
         }
     }
 
@@ -327,7 +350,27 @@ impl SampleGeometry {
     pub fn centre_bias(&self) -> f64 {
         match self.format {
             SampleFormat::Uint8 => 0.5,
-            SampleFormat::Int8 | SampleFormat::Int16 => 0.0,
+            SampleFormat::Int8 | SampleFormat::Int16 | SampleFormat::Int32 => 0.0,
+        }
+    }
+
+    /// Counts in one step of the converter's own words: where a library's
+    /// processing left fractions of a word in a wider container, the
+    /// converter's top word is that many counts below the full scale, and
+    /// that, not one count below it, is where its samples rail.
+    ///
+    /// Only [`SampleFormat::Int32`] carries such fractions. Every other format
+    /// holds whole words, one count each, and its rail stays a count below
+    /// the full scale whatever the converter's depth: libairspy's 12-bit R2 in
+    /// int16 is filtered, not scaled by a whole number of counts, so its words
+    /// have no such step to find.
+    pub fn counts_per_word(&self) -> i64 {
+        match self.format {
+            SampleFormat::Int32 => {
+                let fs = self.full_scale.max(1.0) as i64;
+                (fs >> (u32::from(self.bits()).saturating_sub(1))).max(1)
+            }
+            SampleFormat::Int8 | SampleFormat::Uint8 | SampleFormat::Int16 => 1,
         }
     }
 
@@ -337,6 +380,7 @@ impl SampleGeometry {
         match self.format {
             SampleFormat::Int8 | SampleFormat::Uint8 => 8,
             SampleFormat::Int16 => 16,
+            SampleFormat::Int32 => 32,
         }
     }
 }
@@ -1917,6 +1961,43 @@ mod tests {
         assert_eq!(g(SampleFormat::Uint8).centre_bias(), 0.5);
         assert_eq!(g(SampleFormat::Int8).centre_bias(), 0.0);
         assert_eq!(g(SampleFormat::Int16).centre_bias(), 0.0);
+        assert_eq!(g(SampleFormat::Int32).centre_bias(), 0.0);
+    }
+
+    /// A 16-bit converter's words with eight fraction bits under them: eight
+    /// bytes a pair, the converter's 16 bits (not the 24 the full scale would
+    /// derive), 256 counts to one of its words. Every other format's word is
+    /// one count, whatever its converter, so nothing shipped moves.
+    #[test]
+    fn a_wide_container_carries_its_converters_words_with_fractions() {
+        let wide = SampleGeometry {
+            format: SampleFormat::Int32,
+            full_scale: 8_388_608.0,
+            converter_bits: Some(16),
+        };
+        assert_eq!(wide.bytes_per_pair(), 8);
+        assert_eq!(wide.bits(), 16);
+        assert_eq!(wide.counts_per_word(), 256);
+        let undeclared = SampleGeometry {
+            converter_bits: None,
+            ..wide
+        };
+        assert_eq!(undeclared.bits(), 24, "the full scale's own depth");
+        assert_eq!(undeclared.counts_per_word(), 1);
+        let r2 = SampleGeometry {
+            format: SampleFormat::Int16,
+            full_scale: 16384.0,
+            converter_bits: Some(12),
+        };
+        assert_eq!(r2.counts_per_word(), 1, "whole words, filtered, not scaled");
+        for format in [SampleFormat::Int8, SampleFormat::Uint8] {
+            let g = SampleGeometry {
+                format,
+                full_scale: 128.0,
+                converter_bits: None,
+            };
+            assert_eq!(g.counts_per_word(), 1);
+        }
     }
 
     #[test]

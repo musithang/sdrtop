@@ -155,6 +155,17 @@ pub fn decode(buf: &[u8], geometry: SampleGeometry, max_pairs: usize, out: &mut 
                 });
             }
         }
+        // Exact in f32 up to 2^24 counts, and the full scale is a power of
+        // two, so nothing the container carries is rounded here.
+        SampleFormat::Int32 => {
+            let fs = geometry.full_scale;
+            for oct in bytes.as_chunks::<8>().0 {
+                out.push(Complex {
+                    re: i32::from_le_bytes([oct[0], oct[1], oct[2], oct[3]]) as f32 / fs,
+                    im: i32::from_le_bytes([oct[4], oct[5], oct[6], oct[7]]) as f32 / fs,
+                });
+            }
+        }
     }
 }
 
@@ -1223,6 +1234,17 @@ mod tests {
         assert_eq!(out.len(), 4);
         decode(&bytes, geom(SampleFormat::Int8), 100, &mut out);
         assert_eq!(out.len(), 8);
+        let deep = SampleGeometry {
+            format: SampleFormat::Int32,
+            full_scale: 8_388_608.0,
+            converter_bits: Some(16),
+        };
+        decode(&bytes, deep, 100, &mut out);
+        assert_eq!(out.len(), 2, "two 32-bit pairs");
+        let mut one = (-(1i32 << 21)).to_le_bytes().to_vec();
+        one.extend_from_slice(&(1i32 << 22).to_le_bytes());
+        decode(&one, deep, 100, &mut out);
+        assert_eq!((out[0].re, out[0].im), (-0.25, 0.5));
     }
 
     /// The normalisation follows the device's full scale rather than a constant.
