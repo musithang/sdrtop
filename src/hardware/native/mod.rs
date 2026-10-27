@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright (C) 2026 MusiThang <viktor.laszlo92@protonmail.com>
 
-//! The backends sdrtop drives itself: HackRF One and RTL-SDR, with the Airspy
-//! R2 on its way in ([`airspy`]).
+//! The backends sdrtop drives itself: HackRF One, RTL-SDR and the Airspy R2,
+//! with the Airspy HF+ Discovery on its way in ([`airspyhf`]).
 //!
 //! Each is a thin FFI wrapper ([`hackrf::ffi`], [`rtlsdr::ffi`]) plus a device
 //! struct, loaded at runtime and described from its own datasheet. What they
@@ -15,6 +15,7 @@
 //! [`super::discovery`]'s job.
 
 pub mod airspy;
+pub mod airspyhf;
 pub mod hackrf;
 mod loader;
 pub mod rtlsdr;
@@ -25,9 +26,10 @@ mod test_support;
 #[cfg(test)]
 mod tests {
     #[test]
-    #[ignore = "requires installed libhackrf, librtlsdr and libairspy runtimes"]
+    #[ignore = "requires installed libhackrf, librtlsdr, libairspy and libairspyhf runtimes"]
     fn installed_native_libraries_resolve() {
         super::airspy::ffi::api().expect("the installed libairspy must resolve");
+        super::airspyhf::ffi::api().expect("the installed libairspyhf must resolve");
         super::hackrf::ffi::api().expect("the installed libhackrf must resolve");
         super::rtlsdr::ffi::api().expect("the installed librtlsdr must resolve");
     }

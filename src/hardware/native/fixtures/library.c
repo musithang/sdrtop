@@ -285,3 +285,58 @@ int airspy_get_samplerates(void *device, uint32_t *buffer, uint32_t len) {
 }
 #endif
 
+
+// libairspyhf 1.6.8. Modes 30 and up are this library's: 30 reports a Ranger's
+// part id, 31 lists the radio but will not open it, as for one another program
+// has claimed (AIRSPYHF_ERROR), 32 finds no device.
+int airspyhf_list_devices(uint64_t *serials, int count) {
+    if (mode == 32) return 0;
+    if (serials && count >= 1) serials[0] = 0xDD528080FF444630ULL;
+    return 1;
+}
+int airspyhf_open_sn(void **device, uint64_t serial) {
+    if (mode == 31) return -1;
+    *device = malloc(1);
+    return 0;
+}
+int airspyhf_close(void *device) { calls[3]++; free(device); return 0; }
+// What the backend asked libairspyhf for last, by field (see
+// fixture_airspyhf_state): 0 the length passed to version_string_read. -1
+// until asked.
+static int airspyhf_state[1] = {-1};
+int fixture_airspyhf_state(int field) { return airspyhf_state[field]; }
+typedef struct { uint32_t part_id; uint32_t serial_no[4]; } airspyhf_read_partid_serialno_t;
+size_t fixture_airspyhf_layout(int field) {
+    switch (field) {
+        case 0: return sizeof(airspyhf_read_partid_serialno_t);
+        case 1: return offsetof(airspyhf_read_partid_serialno_t, serial_no);
+        default: abort();
+    }
+}
+// The words the bench's Discovery reports (part id 2), or a Ranger's (3).
+int airspyhf_board_partid_serialno_read(void *device, airspyhf_read_partid_serialno_t *p) {
+    p->part_id = mode == 30 ? 3 : 2;
+    p->serial_no[0] = 0xDD528080; p->serial_no[1] = 0xFF444630;
+    p->serial_no[2] = 0x33303520; p->serial_no[3] = 0x34303031;
+    return 0;
+}
+// As 1.6.8 does: length - 1 bytes from a 64-byte buffer, then a NUL. The
+// length is recorded, and the copy kept inside the buffer here so that a test
+// can say a longer request was made rather than read past it.
+int airspyhf_version_string_read(void *device, char *version, uint8_t length) {
+    char local[64] = "R5.0.1-CD";
+    airspyhf_state[0] = length;
+    if (length == 0) return -1;
+    memcpy(version, local, length - 1 < 63 ? length - 1 : 63);
+    version[length - 1] = 0;
+    return 0;
+}
+#ifndef OMIT_LAST_SYMBOL
+int airspyhf_get_samplerates(void *device, uint32_t *buffer, uint32_t len) {
+    static const uint32_t rates[] = {912000, 768000, 650000, 456000, 384000, 228000, 192000};
+    if (len == 0) { buffer[0] = 7; return 0; }
+    if (len > 7) return -1;
+    memcpy(buffer, rates, len * sizeof(uint32_t));
+    return 0;
+}
+#endif

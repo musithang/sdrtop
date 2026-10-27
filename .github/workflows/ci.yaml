@@ -74,7 +74,7 @@ jobs:
 
       - name: Install native runtimes
         # Keep coverage with the native runtime libraries and libSoapySDR installed
-        run: sudo apt-get update && sudo apt-get install -y libhackrf0 librtlsdr2 libairspy0 libsoapysdr0.8 soapysdr0.8-module-rtlsdr soapysdr0.8-module-hackrf
+        run: sudo apt-get update && sudo apt-get install -y libhackrf0 librtlsdr2 libairspy0 libairspyhf1 libsoapysdr0.8 soapysdr0.8-module-rtlsdr soapysdr0.8-module-hackrf
 
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
@@ -141,7 +141,7 @@ jobs:
           persist-credentials: false
 
       - name: Install the radio libraries from Homebrew
-        run: brew install librtlsdr hackrf airspy soapysdr soapyrtlsdr soapyhackrf
+        run: brew install librtlsdr hackrf airspy airspyhf soapysdr soapyrtlsdr soapyhackrf
 
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
@@ -156,7 +156,7 @@ jobs:
       - name: Test
         run: cargo test --all --locked
 
-      - name: Homebrew's libhackrf, librtlsdr and libairspy resolve
+      - name: Homebrew's libhackrf, librtlsdr, libairspy and libairspyhf resolve
         run: cargo test --locked hardware::native::tests::installed_native_libraries_resolve -- --ignored --exact
 
       - name: Homebrew's libSoapySDR resolves
