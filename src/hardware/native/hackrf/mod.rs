@@ -408,6 +408,7 @@ pub fn caps() -> DeviceCapabilities {
         sample_rate_is_span: false,
         freq_min_hz: 1_000_000,
         freq_max_hz: 6_000_000_000,
+        freq_gaps: Vec::new(),
         sample_rate_min_hz: 2_000_000.0,
         sample_rate_max_hz: 20_000_000.0,
         default_frequency_hz: DEFAULT_FREQUENCY,

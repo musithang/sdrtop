@@ -46,12 +46,8 @@ pub(super) fn command_rail(key: KeyEvent, ctx: &mut InputCtx<'_>) -> KeyAction {
                 let caps = device.capabilities();
                 let new_freq = {
                     let m = metrics(state);
-                    let step = m.spectrum.step_hz;
-                    if matches!(key.code, KeyCode::Left) {
-                        m.radio.frequency.saturating_sub(step).max(caps.freq_min_hz)
-                    } else {
-                        (m.radio.frequency + step).min(caps.freq_max_hz)
-                    }
+                    let up = matches!(key.code, KeyCode::Right);
+                    caps.step_within_band(m.radio.frequency, m.spectrum.step_hz, up)
                 };
                 let result = device.set_frequency(new_freq);
                 let mut m = metrics(state);

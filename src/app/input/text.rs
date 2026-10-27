@@ -102,8 +102,9 @@ pub(super) fn frequency(
         KeyCode::Enter => {
             if let Some(device) = device {
                 let caps = device.capabilities();
-                // Clamp into the tuning range rather than rejecting (matches the
-                // arrow-key tuning, which already clamps).
+                // Clamped into the hull rather than rejected, as the arrows
+                // clamp; but a frequency in a gap between bands is refused,
+                // because neither edge of the gap is what was asked for.
                 let freq_hz: Option<u64> = {
                     let m = metrics(state);
                     m.ui.input_buf
@@ -113,6 +114,7 @@ pub(super) fn frequency(
                         .map(|mhz| {
                             ((mhz * 1_000_000.0) as u64).clamp(caps.freq_min_hz, caps.freq_max_hz)
                         })
+                        .filter(|&hz| caps.tunes(hz))
                 };
                 let result = freq_hz.map(|hz| device.set_frequency(hz));
                 let mut m = metrics(state);
@@ -131,10 +133,8 @@ pub(super) fn frequency(
                     _ => {
                         let bad = m.ui.input_buf.clone();
                         m.push_log(format!(
-                            "Invalid frequency: '{}' ({:.0}–{:.0} MHz)",
-                            bad,
-                            caps.freq_min_hz as f64 / 1e6,
-                            caps.freq_max_hz as f64 / 1e6
+                            "Invalid frequency: '{bad}' (this radio tunes {})",
+                            caps.bands_text()
                         ));
                     }
                 }
@@ -407,5 +407,115 @@ pub(super) fn reference_accuracy(key: KeyEvent, state: &Arc<Mutex<SdrMetrics>>, 
             }
         }
         _ => {}
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::collections::HashMap;
+
+    use crate::config::LayoutConfig;
+    use crate::ui::{LayoutEngine, PanelRegistry};
+
+    /// A radio with the HF+'s two bands that remembers where it was tuned.
+    struct TwoBands {
+        caps: hardware::DeviceCapabilities,
+        tuned: Mutex<Vec<u64>>,
+    }
+
+    impl hardware::SdrDevice for TwoBands {
+        fn capabilities(&self) -> &hardware::DeviceCapabilities {
+            &self.caps
+        }
+        fn info(&self) -> hardware::DeviceInfo {
+            hardware::DeviceInfo::default()
+        }
+        fn start_rx(&self, _: Arc<hardware::RxContext>) -> anyhow::Result<()> {
+            Ok(())
+        }
+        fn stop_rx(&self) -> anyhow::Result<()> {
+            Ok(())
+        }
+        fn is_streaming(&self) -> bool {
+            true
+        }
+        fn set_frequency(&self, hz: u64) -> anyhow::Result<()> {
+            self.tuned.lock().unwrap().push(hz);
+            Ok(())
+        }
+        fn set_sample_rate(&self, hz: f64) -> anyhow::Result<hardware::RateSet> {
+            Ok(hardware::RateSet::new(hz, Some(hz), 0))
+        }
+        fn set_lna_gain(&self, _db: u32) -> anyhow::Result<()> {
+            Ok(())
+        }
+    }
+
+    fn two_bands() -> (Arc<Mutex<SdrMetrics>>, Arc<TwoBands>) {
+        let caps = hardware::DeviceCapabilities {
+            freq_min_hz: 9_000,
+            freq_max_hz: 260_000_000,
+            freq_gaps: vec![std::ops::RangeInclusive::new(31_000_001, 59_999_999)],
+            ..hardware::native::hackrf::caps()
+        };
+        let mut m = SdrMetrics::fixture();
+        m.caps = Arc::new(caps.clone());
+        m.radio.frequency = 31_000_000;
+        let radio = Arc::new(TwoBands {
+            caps,
+            tuned: Mutex::new(Vec::new()),
+        });
+        (Arc::new(Mutex::new(m)), radio)
+    }
+
+    fn type_frequency(state: &Arc<Mutex<SdrMetrics>>, radio: &Arc<TwoBands>, text: &str) {
+        let device: Arc<dyn hardware::SdrDevice> = radio.clone();
+        metrics(state).ui.input_buf = text.to_string();
+        frequency(KeyEvent::from(KeyCode::Enter), state, Some(&device));
+    }
+
+    /// A frequency typed into the gap between bands is refused, the radio
+    /// untouched and the bands named; one in a band is tuned.
+    #[test]
+    fn a_typed_frequency_in_the_gap_is_refused_with_the_bands() {
+        let (state, radio) = two_bands();
+        type_frequency(&state, &radio, "45");
+        assert!(radio.tuned.lock().unwrap().is_empty(), "nothing was tuned");
+        let log = metrics(&state).ui.log.back().unwrap().text.clone();
+        assert!(
+            log.contains("this radio tunes 9 kHz to 31 MHz, 60 to 260 MHz"),
+            "{log}"
+        );
+        assert_eq!(metrics(&state).radio.frequency, 31_000_000);
+        type_frequency(&state, &radio, "7.074");
+        assert_eq!(*radio.tuned.lock().unwrap(), vec![7_074_000]);
+        assert_eq!(metrics(&state).radio.frequency, 7_074_000);
+    }
+
+    /// The spectrum's arrows stop at the band's edge, not inside the gap and
+    /// not across it.
+    #[test]
+    fn the_arrows_stop_at_the_bands_edge() {
+        let (state, radio) = two_bands();
+        let device: Arc<dyn hardware::SdrDevice> = radio.clone();
+        let mut engine = LayoutEngine::new(LayoutConfig::default_config(), PanelRegistry::new());
+        let mut show_footer = true;
+        let focus_keys = HashMap::new();
+        let mut ctx = super::super::InputCtx {
+            state: &state,
+            device: Some(&device),
+            engine: &mut engine,
+            show_footer: &mut show_footer,
+            focus_keys: &focus_keys,
+        };
+        super::super::core::spectrum(KeyEvent::from(KeyCode::Right), &mut ctx);
+        assert_eq!(metrics(&state).radio.frequency, 31_000_000);
+        assert!(radio
+            .tuned
+            .lock()
+            .unwrap()
+            .iter()
+            .all(|&hz| hz == 31_000_000));
     }
 }

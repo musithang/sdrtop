@@ -51,28 +51,60 @@ pub fn hz(f: u64) -> String {
     }
 }
 
+/// The board's name, its reach `min_hz..=max_hz`, and the gaps inside it.
+pub type Reach<'a> = (&'a str, u64, u64, &'a [std::ops::RangeInclusive<u64>]);
+
+/// The reach in words, band by band: `24 MHz to 1.8 GHz`, or `9 kHz to 31
+/// MHz, 60 MHz to 260 MHz` for a radio with a gap.
+fn reach_text(min_hz: u64, max_hz: u64, gaps: &[std::ops::RangeInclusive<u64>]) -> String {
+    let mut parts = Vec::new();
+    let mut from = min_hz;
+    for gap in gaps {
+        if *gap.start() > from {
+            parts.push(format!("{} to {}", hz(from), hz(gap.start() - 1)));
+        }
+        from = gap.end().saturating_add(1);
+    }
+    if from <= max_hz {
+        parts.push(format!("{} to {}", hz(from), hz(max_hz)));
+    }
+    parts.join(", ")
+}
+
 fn trim(v: f64) -> String {
     let s = format!("{v:.4}");
     s.trim_end_matches('0').trim_end_matches('.').to_string()
 }
 
-/// `radio` is the board's name and its reach, `min_hz..=max_hz`.
+/// The frequency at the middle of column `i`: [`column()`] turned round.
+fn hz_at(i: u16, width: u16) -> f64 {
+    let span = HIGH_HZ.log10() - LOW_HZ.log10();
+    let t = f64::from(i) / f64::from(width.saturating_sub(1).max(1));
+    10f64.powf(LOW_HZ.log10() + t * span)
+}
+
+/// `radio` is the board's name, its reach `min_hz..=max_hz`, and the gaps
+/// inside that reach it does not tune.
 pub fn render(
     buf: &mut Buffer,
     area: Rect,
-    radio: (&str, u64, u64),
+    radio: Reach<'_>,
     mark: Mark<'_>,
     theme: &crate::Theme,
 ) {
     if area.height < HEIGHT || area.width < 24 {
         return;
     }
-    let (name, min_hz, max_hz) = radio;
+    let (name, min_hz, max_hz, gaps) = radio;
+    let in_gap = |hz: f64| {
+        gaps.iter()
+            .any(|g| (*g.start() as f64..=*g.end() as f64).contains(&hz))
+    };
     let w = area.width;
     let (x, y) = (area.x, area.y);
     let (lo, hi) = (column(min_hz as f64, w), column(max_hz as f64, w));
     for i in 0..w {
-        let (glyph, ink) = if (lo..=hi).contains(&i) {
+        let (glyph, ink) = if (lo..=hi).contains(&i) && !in_gap(hz_at(i, w)) {
             ("━", theme.border_default)
         } else {
             ("┈", theme.stale)
@@ -102,7 +134,10 @@ pub fn render(
     }
     match mark {
         Mark::Band(band, label) => {
-            let ok = band.within(min_hz, max_hz);
+            let ok = band.within(min_hz, max_hz)
+                && !gaps
+                    .iter()
+                    .any(|g| *g.start() <= band.hi_hz && band.lo_hz <= *g.end());
             let ink = if ok {
                 theme.value_hi
             } else {
@@ -142,7 +177,7 @@ pub fn render(
     buf.set_string(
         x,
         y + 4,
-        format!("{name} reaches {} to {}", hz(min_hz), hz(max_hz)),
+        format!("{name} reaches {}", reach_text(min_hz, max_hz, gaps)),
         Style::default().fg(theme.label),
     );
 }
@@ -151,7 +186,7 @@ pub fn render(
 mod tests {
     use super::*;
 
-    fn draw(radio: (&str, u64, u64), mark: Mark<'_>) -> Vec<String> {
+    fn draw(radio: Reach<'_>, mark: Mark<'_>) -> Vec<String> {
         let area = Rect::new(0, 0, 64, HEIGHT);
         let mut buf = Buffer::empty(area);
         render(&mut buf, area, radio, mark, &crate::Theme::sdr());
@@ -172,13 +207,66 @@ mod tests {
     /// The reach is drawn solid, the rest dotted, and said in words.
     #[test]
     fn the_reach_is_the_radios_own() {
-        let rows = draw(("Airspy R2", 24_000_000, 1_800_000_000), Mark::Anywhere);
+        let rows = draw(
+            ("Airspy R2", 24_000_000, 1_800_000_000, &[]),
+            Mark::Anywhere,
+        );
         assert!(rows[1].starts_with('┈'), "{}", rows[1]);
         assert!(rows[1].ends_with('┈'), "{}", rows[1]);
         assert!(rows[1].contains('━'));
         assert_eq!(rows[4].trim_end(), "Airspy R2 reaches 24 MHz to 1.8 GHz");
-        let rows = draw(("HackRF One", 1_000_000, 6_000_000_000), Mark::Anywhere);
+        let rows = draw(
+            ("HackRF One", 1_000_000, 6_000_000_000, &[]),
+            Mark::Anywhere,
+        );
         assert!(rows[1].starts_with('━'), "{}", rows[1]);
+    }
+
+    /// A radio with a gap is drawn dotted over it and says its reach band by
+    /// band; a view whose band falls in the gap is not covered, one inside a
+    /// band is.
+    #[test]
+    fn a_gap_in_the_reach_is_dotted_and_said() {
+        let gaps = [std::ops::RangeInclusive::new(31_000_001, 59_999_999)];
+        let hf = ("Airspy HF+ Discovery", 9_000, 260_000_000, &gaps[..]);
+        let rows = draw(hf, Mark::Anywhere);
+        let bar: Vec<char> = rows[1].chars().collect();
+        assert_eq!(bar[column(45e6, 64) as usize], '┈', "{}", rows[1]);
+        assert_eq!(bar[column(20e6, 64) as usize], '━', "{}", rows[1]);
+        assert_eq!(bar[column(100e6, 64) as usize], '━', "{}", rows[1]);
+        assert_eq!(
+            rows[4].trim_end(),
+            "Airspy HF+ Discovery reaches 9 kHz to 31 MHz, 60 MHz to 260 MHz"
+        );
+        let theme = crate::Theme::sdr();
+        for (band, ok) in [
+            (
+                Band {
+                    lo_hz: 50_000_000,
+                    hi_hz: 54_000_000,
+                },
+                false,
+            ),
+            (
+                Band {
+                    lo_hz: 88_000_000,
+                    hi_hz: 108_000_000,
+                },
+                true,
+            ),
+        ] {
+            let area = Rect::new(0, 0, 64, HEIGHT);
+            let mut buf = Buffer::empty(area);
+            render(&mut buf, area, hf, Mark::Band(band, "b"), &theme);
+            let x = column(band.lo_hz as f64, 64);
+            let ink = buf.get(x, 1).fg;
+            let want = if ok {
+                theme.value_hi
+            } else {
+                theme.status_crit
+            };
+            assert_eq!(ink, want, "{band:?}");
+        }
     }
 
     /// A band is marked where it lies, named, in the colour that says
@@ -192,7 +280,7 @@ mod tests {
             render(
                 &mut buf,
                 area,
-                ("radio", 24_000_000, top),
+                ("radio", 24_000_000, top, &[]),
                 Mark::Band(BAND, "2.4 GHz"),
                 &theme,
             );

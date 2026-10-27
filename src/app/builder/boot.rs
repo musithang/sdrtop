@@ -200,7 +200,7 @@ impl Boot {
 /// caller overwrites it with what the device actually reported once
 /// `set_sample_rate` has answered.
 pub(super) fn resolve_tuning(radio: &RadioConfig, caps: &DeviceCapabilities) -> Tuning {
-    let frequency_hz = if (caps.freq_min_hz..=caps.freq_max_hz).contains(&radio.frequency_hz) {
+    let frequency_hz = if caps.tunes(radio.frequency_hz) {
         radio.frequency_hz
     } else {
         caps.default_frequency_hz
@@ -498,9 +498,27 @@ mod tests {
         assert_eq!(t.frequency_hz, caps.default_frequency_hz);
         assert!((t.sample_rate - caps.default_sample_rate_hz).abs() < f64::EPSILON);
         assert!(
-            (caps.freq_min_hz..=caps.freq_max_hz).contains(&t.frequency_hz),
+            caps.tunes(t.frequency_hz),
             "fallback frequency must itself be legal"
         );
+    }
+
+    /// A frequency saved inside a radio's gap between bands is not tuned at
+    /// start; the radio's own default is, as for one outside its range.
+    #[test]
+    fn a_config_in_the_gap_falls_back_to_the_default() {
+        let caps = hardware::DeviceCapabilities {
+            freq_min_hz: 9_000,
+            freq_max_hz: 260_000_000,
+            freq_gaps: vec![std::ops::RangeInclusive::new(31_000_001, 59_999_999)],
+            default_frequency_hz: 7_100_000,
+            ..hardware::native::hackrf::caps()
+        };
+        let mut radio = hackrf_config().radio;
+        radio.frequency_hz = 45_000_000;
+        assert_eq!(resolve_tuning(&radio, &caps).frequency_hz, 7_100_000);
+        radio.frequency_hz = 31_000_000;
+        assert_eq!(resolve_tuning(&radio, &caps).frequency_hz, 31_000_000);
     }
 
     #[test]

@@ -1163,6 +1163,7 @@ fn capabilities(model: Model, basic_input: BasicInput) -> DeviceCapabilities {
         trace_stale_ms: 5_000,
         freq_min_hz: minimum_hz,
         freq_max_hz: maximum_hz,
+        freq_gaps: Vec::new(),
         sample_rate_min_hz: allowed_points()[0] as f64,
         sample_rate_max_hz: (maximum_hz - minimum_hz) as f64,
         default_frequency_hz: default_frequency(model, basic_input),

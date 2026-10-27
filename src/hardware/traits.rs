@@ -1150,8 +1150,17 @@ pub struct DeviceCapabilities {
     pub level_max_db: f32,
     /// A trace becomes stale after this positive millisecond budget
     pub trace_stale_ms: u128,
+    /// The lowest and highest frequency the radio tunes: the hull of its
+    /// bands, which is what a display spans.
     pub freq_min_hz: u64,
     pub freq_max_hz: u64,
+    /// Stretches inside the hull the radio does not tune, lowest first, none
+    /// overlapping. Empty for a radio with one band, which is every radio
+    /// but the Airspy HF+: its HF and VHF front ends leave 31 to 60 MHz to
+    /// neither, and a frequency there is refused rather than tuned to
+    /// whatever the radio then delivers. Ask [`Self::tunes`], never the hull,
+    /// whether a frequency can be tuned.
+    pub freq_gaps: Vec<std::ops::RangeInclusive<u64>>,
     pub sample_rate_min_hz: f64,
     pub sample_rate_max_hz: f64,
     /// Startup freq/rate guaranteed legal for THIS device. Used as the fallback
@@ -1186,7 +1195,106 @@ pub struct DeviceCapabilities {
     pub driver_queue_blocks: Option<u32>,
 }
 
+/// A frequency's unit for [`DeviceCapabilities::bands_text`]: Hz, kHz, MHz,
+/// GHz as 0..3, the largest the number reaches.
+fn unit_of(hz: u64) -> u32 {
+    match hz {
+        1_000_000_000.. => 3,
+        1_000_000.. => 2,
+        1_000.. => 1,
+        _ => 0,
+    }
+}
+
+/// `hz` in `unit`, with no more decimals than it needs (at most three).
+fn number_in(hz: u64, unit: u32) -> String {
+    let v = hz as f64 / 1000f64.powi(unit as i32);
+    let text = format!("{v:.3}");
+    text.trim_end_matches('0').trim_end_matches('.').to_string()
+}
+
+/// `hz` in its own unit, named: `9 kHz`, `31 MHz`, `1.766 GHz`.
+fn hz_text(hz: u64) -> String {
+    let unit = unit_of(hz);
+    let name = ["Hz", "kHz", "MHz", "GHz"][unit as usize];
+    format!("{} {name}", number_in(hz, unit))
+}
+
 impl DeviceCapabilities {
+    /// Whether the radio tunes to `hz`: inside the hull and in no gap.
+    pub fn tunes(&self, hz: u64) -> bool {
+        (self.freq_min_hz..=self.freq_max_hz).contains(&hz) && !self.in_gap(hz)
+    }
+
+    /// Whether `hz` falls in a gap between bands: inside the hull, where a
+    /// spectrum near a band's edge can still show it, but not a frequency the
+    /// radio receives as itself.
+    pub fn in_gap(&self, hz: u64) -> bool {
+        self.freq_gaps.iter().any(|gap| gap.contains(&hz))
+    }
+
+    /// The bands the radio tunes, lowest first: the hull with the gaps cut
+    /// out of it.
+    pub fn bands(&self) -> Vec<std::ops::RangeInclusive<u64>> {
+        let mut bands = Vec::with_capacity(self.freq_gaps.len() + 1);
+        let mut from = self.freq_min_hz;
+        for gap in &self.freq_gaps {
+            if *gap.start() > from {
+                bands.push(from..=gap.start() - 1);
+            }
+            from = gap.end().saturating_add(1);
+        }
+        if from <= self.freq_max_hz {
+            bands.push(from..=self.freq_max_hz);
+        }
+        bands
+    }
+
+    /// One step of `step` up or down from `hz`, kept inside the band `hz` is
+    /// in: the arrows stop at a band's edge, as they stop at the hull's, and
+    /// a gap is crossed by typing a frequency on the other side of it. From a
+    /// frequency the radio does not tune, the band nearest it in the step's
+    /// direction, or its last band.
+    pub fn step_within_band(&self, hz: u64, step: u64, up: bool) -> u64 {
+        let bands = self.bands();
+        let band = bands
+            .iter()
+            .find(|band| band.contains(&hz))
+            .or_else(|| {
+                if up {
+                    bands.iter().find(|band| *band.start() > hz)
+                } else {
+                    bands.iter().rev().find(|band| *band.end() < hz)
+                }
+            })
+            .or(bands.last());
+        let Some(band) = band else {
+            return hz;
+        };
+        let next = if up {
+            hz.saturating_add(step)
+        } else {
+            hz.saturating_sub(step)
+        };
+        next.clamp(*band.start(), *band.end())
+    }
+
+    /// The bands in words, for a refusal: `9 kHz to 31 MHz, 60 to 260 MHz`.
+    pub fn bands_text(&self) -> String {
+        self.bands()
+            .iter()
+            .map(|band| {
+                let (lo, hi) = (*band.start(), *band.end());
+                if unit_of(lo) == unit_of(hi) {
+                    format!("{} to {}", number_in(lo, unit_of(hi)), hz_text(hi))
+                } else {
+                    format!("{} to {}", hz_text(lo), hz_text(hi))
+                }
+            })
+            .collect::<Vec<_>>()
+            .join(", ")
+    }
+
     /// Reject invalid display bounds or a zero trace-age budget before initializing views
     pub fn validate_display(&self) -> anyhow::Result<()> {
         anyhow::ensure!(
@@ -2180,5 +2288,84 @@ mod tests {
         // An empty table can't snap → the value passes through unchanged.
         let empty = rtlsdr::gain_model(&[]);
         assert_eq!(empty.clamp_gains(33, 7), (33, 7));
+    }
+
+    /// The HF+'s two bands, on a capability set that is otherwise a HackRF's:
+    /// 9 kHz to 260 MHz with 31 to 60 MHz cut out.
+    fn two_bands() -> DeviceCapabilities {
+        DeviceCapabilities {
+            freq_min_hz: 9_000,
+            freq_max_hz: 260_000_000,
+            freq_gaps: vec![std::ops::RangeInclusive::new(31_000_001, 59_999_999)],
+            ..crate::hardware::native::hackrf::caps()
+        }
+    }
+
+    /// A frequency in the gap is not tuned, its edges are, and so is the
+    /// hull's; outside the hull nothing is. A radio with no gap tunes its
+    /// whole hull, as every radio did before gaps.
+    #[test]
+    fn a_gap_is_not_tuned_and_its_edges_are() {
+        let c = two_bands();
+        for hz in [9_000, 31_000_000, 60_000_000, 260_000_000, 7_074_000] {
+            assert!(c.tunes(hz), "{hz}");
+        }
+        for hz in [8_999, 31_000_001, 45_000_000, 59_999_999, 260_000_001] {
+            assert!(!c.tunes(hz), "{hz}");
+        }
+        assert!(c.in_gap(45_000_000) && !c.in_gap(31_000_000) && !c.in_gap(8_000));
+        let one = crate::hardware::native::hackrf::caps();
+        assert!(one.freq_gaps.is_empty());
+        assert!(one.tunes(one.freq_min_hz) && one.tunes(one.freq_max_hz));
+        assert!(!one.tunes(one.freq_max_hz + 1));
+    }
+
+    /// The bands are the hull with the gaps cut out; one band without them.
+    #[test]
+    fn the_bands_are_the_hull_less_its_gaps() {
+        assert_eq!(
+            two_bands().bands(),
+            vec![9_000..=31_000_000, 60_000_000..=260_000_000]
+        );
+        let one = crate::hardware::native::hackrf::caps();
+        assert_eq!(one.bands(), vec![one.freq_min_hz..=one.freq_max_hz]);
+    }
+
+    /// The arrows stop at a band's edge as at the hull's; they do not step
+    /// into the gap nor jump over it.
+    #[test]
+    fn a_step_stops_at_its_bands_edge() {
+        let c = two_bands();
+        assert_eq!(c.step_within_band(30_950_000, 100_000, true), 31_000_000);
+        assert_eq!(c.step_within_band(31_000_000, 100_000, true), 31_000_000);
+        assert_eq!(c.step_within_band(60_050_000, 100_000, false), 60_000_000);
+        assert_eq!(c.step_within_band(60_000_000, 100_000, true), 60_100_000);
+        assert_eq!(c.step_within_band(9_000, 100_000, false), 9_000);
+        // From inside the gap (a config written elsewhere), the band in the
+        // step's direction.
+        assert_eq!(c.step_within_band(45_000_000, 100_000, true), 60_000_000);
+        assert_eq!(c.step_within_band(45_000_000, 100_000, false), 31_000_000);
+        let one = crate::hardware::native::hackrf::caps();
+        assert_eq!(
+            one.step_within_band(one.freq_max_hz - 10, 100_000, true),
+            one.freq_max_hz,
+            "the hull's edge, as before"
+        );
+    }
+
+    /// The bands in words, each edge in the unit it reaches.
+    #[test]
+    fn the_bands_are_said_in_words() {
+        assert_eq!(two_bands().bands_text(), "9 kHz to 31 MHz, 60 to 260 MHz");
+        assert_eq!(
+            crate::hardware::native::hackrf::caps().bands_text(),
+            "1 MHz to 6 GHz"
+        );
+        let rtl = DeviceCapabilities {
+            freq_min_hz: 24_000_000,
+            freq_max_hz: 1_766_000_000,
+            ..crate::hardware::native::hackrf::caps()
+        };
+        assert_eq!(rtl.bands_text(), "24 MHz to 1.766 GHz");
     }
 }

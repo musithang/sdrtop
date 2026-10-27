@@ -105,7 +105,9 @@ pub fn minimum_rate_hz() -> f64 {
 /// Does the radio's declared tuning range cover the whole band this section
 /// works in?
 pub fn reaches_band(caps: &DeviceCapabilities) -> bool {
-    caps.freq_min_hz <= LOWEST_CENTRE_HZ && caps.freq_max_hz >= HIGHEST_CENTRE_HZ
+    caps.bands()
+        .iter()
+        .any(|band| band.contains(&LOWEST_CENTRE_HZ) && band.contains(&HIGHEST_CENTRE_HZ))
 }
 
 /// Can the radio's sample-rate ceiling receive this mode?
@@ -120,6 +122,14 @@ pub fn admits(caps: &DeviceCapabilities, phy: &Phy) -> bool {
 /// and the decision must not be able to disagree: a section that vanished for
 /// one reason while the log gave another would be worse than silence.
 pub fn verdict(caps: &DeviceCapabilities) -> Result<(), String> {
+    if !reaches_band(caps) && !caps.freq_gaps.is_empty() {
+        return Err(format!(
+            "this radio tunes {}, and the 2.4 GHz band needs {:.3} to {:.3} MHz",
+            caps.bands_text(),
+            LOWEST_CENTRE_HZ as f64 / 1e6,
+            HIGHEST_CENTRE_HZ as f64 / 1e6,
+        ));
+    }
     if !reaches_band(caps) {
         return Err(format!(
             "this radio tunes {:.3} to {:.3} MHz, and the 2.4 GHz band needs {:.3} to {:.3}",
@@ -295,5 +305,29 @@ mod tests {
             PHYS.iter().map(|p| p.rate_hz).fold(f64::INFINITY, f64::min)
         );
         assert_eq!(minimum_rate_hz(), 2e6);
+    }
+
+    /// A radio whose hull reaches the 2.4 GHz band but whose gap covers it
+    /// does not reach it, and the refusal names its bands; one without a gap
+    /// is refused in the words it always was.
+    #[test]
+    fn a_gap_over_the_band_is_not_reaching_it() {
+        let mut c = crate::hardware::native::hackrf::caps();
+        assert!(reaches_band(&c));
+        c.freq_gaps = vec![std::ops::RangeInclusive::new(2_300_000_000, 2_600_000_000)];
+        assert!(!reaches_band(&c));
+        let why = verdict(&c).unwrap_err();
+        assert!(
+            why.starts_with(
+                "this radio tunes 1 MHz to 2.3 GHz, 2.6 to 6 GHz, and the 2.4 GHz band needs"
+            ),
+            "{why}"
+        );
+        let mut r2 = crate::hardware::native::hackrf::caps();
+        r2.freq_min_hz = 24_000_000;
+        r2.freq_max_hz = 1_800_000_000;
+        assert!(verdict(&r2)
+            .unwrap_err()
+            .starts_with("this radio tunes 24.000 to 1800.000 MHz"));
     }
 }

@@ -456,6 +456,7 @@ fn band_strip_line(state: &SdrMetrics, theme: &crate::Theme, outer_width: u16) -
         state.radio.frequency,
         fmin,
         fmax,
+        &state.caps.freq_gaps,
         lo,
         hi,
         theme,
@@ -815,10 +816,12 @@ fn compose_net_band(
 
 /// Pure core of [`band_strip_line`] - takes the tuned frequency and tunable range
 /// directly so it can be unit-tested without a full `SdrMetrics`.
+#[allow(clippy::too_many_arguments)]
 fn compose_band_strip(
     freq: u64,
     fmin: u64,
     fmax: u64,
+    gaps: &[std::ops::RangeInclusive<u64>],
     lo_lbl: String,
     hi_lbl: String,
     theme: &crate::Theme,
@@ -847,7 +850,13 @@ fn compose_band_strip(
         Span::styled(lo_lbl, Style::default().fg(theme.label)),
         Span::raw(" "),
     ];
-    spans.extend(rail_spans(track_w, marker_col, band_at(freq), theme));
+    let rail = rail_spans(track_w, marker_col, band_at(freq), theme);
+    let column = |hz: u64| (range_frac(hz, fmin, fmax) * (track_w - 1) as f64).round() as usize;
+    let gap_cols: Vec<std::ops::Range<usize>> = gaps
+        .iter()
+        .map(|gap| column(*gap.start())..column(*gap.end()) + 1)
+        .collect();
+    spans.extend(cut_gaps(rail, &gap_cols));
     spans.extend([
         Span::raw(" "),
         Span::styled(hi_lbl, Style::default().fg(theme.label)),
@@ -856,6 +865,34 @@ fn compose_band_strip(
         Span::styled("┤", Style::default().fg(dim)),
     ]);
     Line::from(spans)
+}
+
+/// The rail with a radio's gaps between bands cut out of it: the rule's
+/// columns over a frequency the radio does not tune are left blank, so the
+/// dial shows two bands with nothing between them rather than one range. The
+/// needle and the band callout are never cut, only the rule.
+fn cut_gaps(rail: Vec<Span<'static>>, gaps: &[std::ops::Range<usize>]) -> Vec<Span<'static>> {
+    if gaps.is_empty() {
+        return rail;
+    }
+    let mut out: Vec<Span<'static>> = Vec::with_capacity(rail.len() + 2 * gaps.len());
+    let mut col = 0usize;
+    for span in rail {
+        for ch in span.content.chars() {
+            let cut = matches!(ch, '━' | '┈') && gaps.iter().any(|g| g.contains(&col));
+            let (text, style) = if cut {
+                (' ', Style::default())
+            } else {
+                (ch, span.style)
+            };
+            match out.last_mut() {
+                Some(last) if last.style == style => last.content.to_mut().push(text),
+                _ => out.push(Span::styled(text.to_string(), style)),
+            }
+            col += 1;
+        }
+    }
+    out
 }
 
 /// The lit-rail dial itself, exactly `track_w` columns: a bright heavy `━` rule up
@@ -1498,6 +1535,48 @@ mod tests {
         assert!(out.contains("AGC") && !out.contains("29 dB"), "{out}");
     }
 
+    /// A radio with a gap between its bands shows the gap on the dial as a
+    /// blank stretch of the rule, where the gap's frequencies would fall; the
+    /// needle, the labels and the strip's width are as on any radio.
+    #[test]
+    fn the_dial_leaves_a_gap_between_bands_blank() {
+        let t = Theme::sdr();
+        let gaps = [std::ops::RangeInclusive::new(31_000_001, 59_999_999)];
+        let line = compose_band_strip(
+            7_074_000,
+            9_000,
+            260_000_000,
+            &gaps,
+            "9k".into(),
+            "260M".into(),
+            &t,
+            120,
+        );
+        let text: String = line.spans.iter().map(|s| s.content.as_ref()).collect();
+        assert_eq!(text.chars().count(), 120);
+        assert!(text.contains('◆'), "{text}");
+        // The track starts after "├─ 9k " (6 columns) and ends before " 260M ─┤".
+        let track: Vec<char> = text.chars().skip(6).take(120 - 6 - 8).collect();
+        let col = |hz: u64| {
+            (range_frac(hz, 9_000, 260_000_000) * (track.len() - 1) as f64).round() as usize
+        };
+        assert_eq!(track[col(45_000_000)], ' ', "inside the gap: {text}");
+        assert_ne!(track[col(20_000_000)], ' ', "inside the HF band: {text}");
+        assert_ne!(track[col(150_000_000)], ' ', "inside the VHF band: {text}");
+        let without = compose_band_strip(
+            7_074_000,
+            9_000,
+            260_000_000,
+            &[],
+            "9k".into(),
+            "260M".into(),
+            &t,
+            120,
+        );
+        let plain: String = without.spans.iter().map(|s| s.content.as_ref()).collect();
+        assert!(!plain.contains("  "), "no gap, no blank: {plain}");
+    }
+
     #[test]
     fn band_strip_total_width_matches_outer() {
         // The composed strip must be exactly `outer_width` columns so the ├/┤ caps
@@ -1512,6 +1591,7 @@ mod tests {
                         145_500_000,
                         1_000_000,
                         6_000_000_000,
+                        &[],
                         "1M".into(),
                         "6G".into(),
                         &t,
@@ -1524,6 +1604,7 @@ mod tests {
                         200_000_000,
                         1_000_000,
                         6_000_000_000,
+                        &[],
                         "1M".into(),
                         "6G".into(),
                         &t,

@@ -31,16 +31,16 @@ pub fn spawn_sweep_task(state: Arc<Mutex<SdrMetrics>>, device: Arc<dyn SdrDevice
         let mut saved_rx_enabled = false;
 
         loop {
-            let (active, config, sample_rate, fmin, fmax) = {
+            let (active, config, sample_rate, caps) = {
                 let m = state.lock().unwrap_or_else(|e| e.into_inner());
                 (
                     m.sweep.active,
                     m.sweep.config.clone(),
                     m.radio.config_sample_rate,
-                    m.caps.freq_min_hz,
-                    m.caps.freq_max_hz,
+                    Arc::clone(&m.caps),
                 )
             };
+            let (fmin, fmax) = (caps.freq_min_hz, caps.freq_max_hz);
 
             if active && !was_active {
                 was_active = true;
@@ -96,6 +96,12 @@ pub fn spawn_sweep_task(state: Arc<Mutex<SdrMetrics>>, device: Arc<dyn SdrDevice
                     break;
                 }
                 let hz = config.position_hz(i, sample_rate).clamp(fmin, fmax);
+                // A position in a gap between bands is not tuned: the radio
+                // would deliver something there, and it would not be a
+                // reading of that frequency. The curve keeps the hole.
+                if !caps.tunes(hz) {
+                    continue;
+                }
                 let _ = device.set_frequency(hz);
                 {
                     let mut m = state.lock().unwrap_or_else(|e| e.into_inner());
@@ -140,6 +146,11 @@ pub fn spawn_sweep_task(state: Arc<Mutex<SdrMetrics>>, device: Arc<dyn SdrDevice
                     let n = pos_peak.len();
                     for j in 0..n {
                         let f = (hz as f64 - pos_sr / 2.0 + (j as f64 / n as f64) * pos_sr) as u64;
+                        // Bins a position near a band's edge sees across it,
+                        // in the gap, are left out for the same reason.
+                        if caps.in_gap(f) {
+                            continue;
+                        }
                         freq_hz.push(f);
                         peak.push(pos_peak[j]);
                         mean.push((pos_mean_sum[j] / frames as f64) as f32);

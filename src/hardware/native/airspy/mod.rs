@@ -352,6 +352,7 @@ pub fn caps() -> DeviceCapabilities {
         // Airspy's own figures for the R2.
         freq_min_hz: 24_000_000,
         freq_max_hz: 1_800_000_000,
+        freq_gaps: Vec::new(),
         sample_rate_min_hz: R2_RATES[0] as f64,
         sample_rate_max_hz: R2_RATES[1] as f64,
         default_frequency_hz: 100_000_000,

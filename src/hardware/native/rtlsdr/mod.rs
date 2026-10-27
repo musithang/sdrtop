@@ -399,6 +399,7 @@ fn rtl_caps(tuner: c_int, gains_tenths: &[i32]) -> DeviceCapabilities {
         sample_rate_is_span: false,
         freq_min_hz,
         freq_max_hz,
+        freq_gaps: Vec::new(),
         // RTL-SDR's usable upper band is 900_001..=3_200_000 Hz (the lower
         // 225_001..=300_000 band is excluded as it can't be a single range).
         // 900_001 is the true floor; the sample-rate input clamps into this

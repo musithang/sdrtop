@@ -52,13 +52,10 @@ pub(super) fn spectrum(key: KeyEvent, ctx: &mut InputCtx<'_>) -> KeyAction {
     match key.code {
         KeyCode::Left => {
             if let Some(device) = device {
-                let fmin = device.capabilities().freq_min_hz;
+                let caps = device.capabilities();
                 let new_freq = {
                     let m = metrics(state);
-                    m.radio
-                        .frequency
-                        .saturating_sub(m.spectrum.step_hz)
-                        .max(fmin)
+                    caps.step_within_band(m.radio.frequency, m.spectrum.step_hz, false)
                 };
                 let result = device.set_frequency(new_freq);
                 let mut m = metrics(state);
@@ -73,10 +70,10 @@ pub(super) fn spectrum(key: KeyEvent, ctx: &mut InputCtx<'_>) -> KeyAction {
         }
         KeyCode::Right => {
             if let Some(device) = device {
-                let fmax = device.capabilities().freq_max_hz;
+                let caps = device.capabilities();
                 let new_freq = {
                     let m = metrics(state);
-                    (m.radio.frequency + m.spectrum.step_hz).min(fmax)
+                    caps.step_within_band(m.radio.frequency, m.spectrum.step_hz, true)
                 };
                 let result = device.set_frequency(new_freq);
                 let mut m = metrics(state);

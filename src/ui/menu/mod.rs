@@ -284,7 +284,12 @@ fn below_tree(
     });
     let card = card::Card {
         trail: &trail,
-        radio: (&m.system.board_name, m.caps.freq_min_hz, m.caps.freq_max_hz),
+        radio: (
+            &m.system.board_name,
+            m.caps.freq_min_hz,
+            m.caps.freq_max_hz,
+            &m.caps.freq_gaps,
+        ),
         live,
         placed: &placed,
         screen,

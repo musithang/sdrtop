@@ -28,8 +28,8 @@ pub struct Card<'a> {
     /// The rows from the first column down to the one under the cursor,
     /// that one last ([`super::tree::Tree::trail`]).
     pub trail: &'a [&'a Node],
-    /// The board's name and its reach, `min_hz..=max_hz`.
-    pub radio: (&'a str, u64, u64),
+    /// The board's name, its reach `min_hz..=max_hz`, and its gaps.
+    pub radio: ruler::Reach<'a>,
     pub live: Option<Live>,
     /// The view's panels where the deck would put them on `screen`
     /// (`LayoutEngine::placement_of`); empty for anything but a view.
@@ -252,14 +252,14 @@ mod tests {
     use crate::ui::menu::{model, tree};
     use ratatui::{backend::TestBackend, Terminal};
 
-    const HACKRF: (&str, u64, u64) = ("HackRF One", 1_000_000, 6_000_000_000);
-    const AIRSPY: (&str, u64, u64) = ("Airspy R2", 24_000_000, 1_800_000_000);
+    const HACKRF: ruler::Reach<'static> = ("HackRF One", 1_000_000, 6_000_000_000, &[]);
+    const AIRSPY: ruler::Reach<'static> = ("Airspy R2", 24_000_000, 1_800_000_000, &[]);
 
     fn draw(
         t: &tree::Tree,
         tile: Tile,
         want: &[&str],
-        radio: (&str, u64, u64),
+        radio: ruler::Reach<'_>,
         placed: &[(String, Rect)],
     ) -> Vec<String> {
         let mut rows = t.root(tile);
