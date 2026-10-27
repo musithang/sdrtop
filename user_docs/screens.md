@@ -11,9 +11,9 @@ to act on it, is in [The Lab presets](lab.md).
 ## How the screen is put together
 
 sdrtop is built out of **panels**, and a **preset** is a named arrangement of
-them, which this page also calls a **layout**. Layouts are grouped into four
-**sections**, and the menu is how you move between them. Within a section the
-number keys pick a layout and `p` steps to the next one. You can define your own
+them, which this page also calls a **layout** or a **view**. Views are grouped,
+and [the menu](#the-menu) is how you move between them. Within a group the
+number keys pick a view and `p` steps to the next one. You can define your own
 out of any panel on this page, in the [config file](presets.md). Nothing here is
 hard-wired to a particular screen.
 
@@ -26,53 +26,48 @@ stops, so a number that has stopped updating never passes for a live one.
 
 The first thing sdrtop shows you, and `Esc` from anywhere brings it back.
 
-It is one screen in two columns. The left column lists the five **sections**,
-each with its own colour dot, and below a dotted rule two panes that are not
-sections: **Keys** and **Options**. The right column shows whatever is selected
-on the left, under a heading in the section's colour that counts its views and
-names its focus letters. A selected row, here as on every list in sdrtop, is
-marked with a bar at its left edge.
+Along the top, a row of **tiles**: **Resume**, **Radio**, **Lab**,
+**Options**, **Keys** and **Quit**. `←` `→` choose one, or press its letter
+(`R` `L` `O` `K` `Q`) from anywhere in the menu. Resume is only there when
+there is something to resume: the view your last session ended on. On a
+first run the menu opens on Lab.
 
-| Section | Holds |
-|---------|-------|
-| **Command Rail** | The five general views: the cockpit, spectrum, waterfall, both bonded, and the classic layout |
-| **Lab** | The four measurement benches |
-| **Sweep** | The band sweep, full size and compact |
-| **Micro** | The four field views for a small screen |
-| **Bluetooth** | A heading, not a section: the four groups below sit under it, indented |
-| &nbsp;&nbsp;**Band** | The 2.4 GHz band itself: what the radio can reach, and what is on the air |
-| &nbsp;&nbsp;**LE** | Bluetooth Low Energy: who is here, what they advertise, and one connection followed |
-| &nbsp;&nbsp;**Classic** | Classic Bluetooth: the piconets, one piconet's packets, and each end of it on a bench |
-| &nbsp;&nbsp;**LE Coded** | BLE's long-range PHY: who advertises on it, and where each advertisement pointed |
-| **Wi-Fi** | A heading too, its own and never inside Bluetooth's |
-| &nbsp;&nbsp;**Channel** | What one Wi-Fi channel is doing: which channel is busy, and what is on one, frame by frame |
+Under Radio and Lab is a **tree**, opened one column at a time, left to
+right: `↓` or `Enter` from a tile goes in, `↑` `↓` move in a column, `→` or
+`Enter` opens the next column (or the view), `←` goes back, and `←` from the
+first column returns to the tiles. `Tab` jumps between the tiles and the
+tree. The row the cursor is on is marked with a bar at its left edge, as on
+every list in sdrtop, and the rows it came through keep a mark too, so the
+whole path is on screen. The line above the columns says the path in words.
 
-Bluetooth and Wi-Fi are shown only on a radio that reaches the band, and
-Wi-Fi only on one that can also sample at 20 Msps, a whole Wi-Fi channel;
-[the NET page](net.md) is about everything under Bluetooth. The cursor steps over the
-Bluetooth heading, straight from Micro to Band, and each group keeps its own
-numbers.
+| Tile | Under it |
+|------|----------|
+| **Radio** | Listening to the air. **Pagers › POCSAG** is [the pager](radio-pocsag.md); the rest (FM broadcast, aviation, marine, the ham bands, walkie-talkies) are listed as *later*, to say what the tile will hold |
+| **Lab** | Measuring and decoding. **Spectrum** (the general views), **Sweep**, **Receiver** (the four benches), **Bluetooth › 2.4 GHz** (Overview, Low Energy, Classic, Long range), **Wi-Fi › 2.4 GHz** (Channel; Room, Network and Transmitter later, and 5 GHz) and **Compact** (large type, for a small window) |
+| **Options** | The radio's own settings, where it has any: a tinySA's, the Airspy R2's bias tee and packing |
+| **Keys** | Every key, the group you are in first: each panel's focus letter and what it adds, then the general keys |
+| **Quit** | What quitting saves, and `Enter` quits. Plain `q` quits from anywhere, as on the deck |
 
-Each layout shows its **number** beside its name, and that number is the key that
-opens it while you are in that section. The number is the same one the footer
-shows you on the deck, because both read the same table. There is no second copy
-to go stale.
+To the right of the columns is the **card**: what the row under the cursor
+is, in plain words. For a view, its name and the key that opens it, what
+you will see on it, the line it would show you right now (`●` its receiver
+running, `○` not), **where it listens** on a ruler from 1 MHz to 7 GHz with
+your radio's own reach drawn solid, and **what opens**, a small map of its
+panels drawn from the view's own layout rather than from a picture someone
+kept up to date by hand.
 
-Every view under Bluetooth has a third line: what that screen would tell you now, built by
-the view's own rules. `●` means the receiver feeding it is running; `○` means it
-is not, and the line gives the session's figures as the session's.
+**A view your radio cannot do is still listed.** It is greyed, and the card
+says why in a sentence, for example that this radio tunes 24 to 1800 MHz and
+Bluetooth lives at 2.4 GHz. `Enter` does nothing on it. A menu where things
+quietly vanish is a menu you stop trusting; one that says "not on this
+radio, and here is why" saves you the ten minutes of looking for it.
 
-**Keys** is the key reference, scrollable with `↑` / `↓`. It opens with the focus
-keys of the section you came from, each panel's letter and what it adds, read
-from the panels themselves, then the general keys. It replaces the old `?`
-overlay, and unlike that overlay it is checked against the app's own key
-dispatch, so it cannot promise a key that does not exist.
-
-**Options** is empty on purpose so far, and says so when you open it.
-
-The menu opens with the cursor on the layout you are already using, so `Enter`
-puts you back without looking anything up. At startup that is your last session's
-layout, which makes the first `Enter` of the day a resume.
+Views come in **groups** (Spectrum, Receiver, Low Energy, Classic, ...), and
+each group numbers its own views from `1`. The number beside a view is the
+key that opens it while the cursor is in that group, and the same number
+works on the deck once you are there: the footer shows it, and `p` steps to
+the next view in the group. This guide writes them as group then number, so
+`Receiver 2` is the Receiver group's second view, Gain & noise.
 
 Nothing behind the menu is disturbed while it is open. The radio keeps streaming,
 and the header keeps the tuned frequency on screen, so opening the menu never
@@ -82,9 +77,9 @@ hides the one number you were watching.
 
 ## The main views
 
-### Command Rail
+### Tuning desk · `Spectrum 1`
 
-The view sdrtop opens on (`Command Rail 1`). A left **instrument rail** that
+The default view, and the cockpit. A left **instrument rail** that
 gathers everything a poweruser glances at, with the spectrum and waterfall bonded
 to its right. From top to bottom:
 
@@ -177,8 +172,8 @@ A single bar with eight live readings, sized to sit at the bottom of a layout:
 
 ## The lab benches
 
-The four layouts in the **Lab** section, plus the band sweep next door in
-**Sweep**, are the measurement side of sdrtop. Each one puts three or four panels
+The four views in **Lab › Receiver**, plus the band sweep next door in
+**Lab › Sweep**, are the measurement side of sdrtop. Each one puts three or four panels
 together to answer a single question. This section says what each panel *is*;
 [The Lab presets](lab.md) explains the readings.
 
@@ -197,7 +192,7 @@ between two of them, in both frequency and level. On the signal bench it also
 carries the occupied bandwidth and a quality verdict; on the RF bench it reads the
 ADC window instead (clip ceiling, peak, headroom, noise, SNR).
 
-### RF front-end bench · `Lab 2`
+### Gain & noise · `Receiver 2`
 
 Three panels that tell the whole receive chain as one story: level climbs stage by
 stage, the gap between signal and noise is the SNR set at the antenna, and gain
@@ -217,7 +212,7 @@ only positions that gap inside the ADC window. It cannot widen it.
 The dBm figures are modeled and relative, not a calibrated wattmeter reading, and
 the panel says so itself.
 
-### IQ bench · `Lab 1`
+### IQ balance · `Receiver 1`
 
 Three views of the same quadrature question, from three directions.
 
@@ -239,7 +234,7 @@ Three views of the same quadrature question, from three directions.
   to measure, and it says so. The diagnostics panel calculates image rejection from the
   imbalance figures; this one goes and measures a real image.
 
-### Signal bench · `Lab 4`
+### Signal quality · `Receiver 4`
 
 - **Signal Characterization** *(left, focus `x`)*: what is that, and how clean is
   it? Modulation class, SNR, channel power, occupied bandwidth, adjacent-channel
@@ -251,7 +246,7 @@ Three views of the same quadrature question, from three directions.
   RadioText. There is no audio anywhere in sdrtop, deliberately. This is an
   instrument, not a receiver.
 
-### Timing bench · `Lab 3`
+### USB & timing · `Receiver 3`
 
 Whether your computer is keeping up with the radio in real time.
 
@@ -269,7 +264,7 @@ Whether your computer is keeping up with the radio in real time.
   60-second trends, USB errors, configured versus measured sample rate, buffer
   fill, and uptime. Every one with a sparkline.
 
-### Sweep · `Sweep 1`
+### Band sweep · `Sweep 1`
 
 - **Sweep** *(body, focus `g`)*: your radio sees only as much spectrum at once as
   the sample rate covers. This scans a wider band by retuning across it, measuring
@@ -282,27 +277,27 @@ Whether your computer is keeping up with the radio in real time.
 
 ---
 
-## Micro field views
+## Compact views
 
-The **Micro** section of the menu. The idea is that sdrtop shouldn't need a full
+**Lab › Compact** in the menu. The idea is that sdrtop shouldn't need a full
 terminal to be useful: squeezed into a slim tmux split, an SSH session on a phone,
 or the small screen of a cyberdeck, the full panels stop being readable. Each
-micro view strips one concern down to a single glance, and each adapts to the
+compact view strips one concern down to a single glance, and each adapts to the
 width it's given, staying readable from an 80×24 SSH session down to a 40-column
 framebuffer.
 
-Four views, on `1` to `4` inside the section:
+Four views, on `1` to `4` inside the group:
 
 | Key | View | Built for |
 |-----|------|-----------|
-| `Micro 1` | **Overview** | The four field questions at once: where am I, what's the signal, is it healthy, what's the gain |
-| `Micro 2` | **Signal** | Aiming an antenna. A large SNR bar with a trend arrow, plus channel power, noise floor, occupied BW and RBW |
-| `Micro 3` | **Gain** | Setting gain fast on arrival. Wide LNA/VGA bars, prominent ADC utilisation, a gain-advisor verdict, with NF and MDS for context |
-| `Micro 4` | **Health** | Long unattended captures. Drop, saturation and buffer sparklines, CPU and RAM, USB throughput, sample-rate accuracy, a summary verdict and a session timer |
+| `Compact 1` | **Essentials** | The four field questions at once: where am I, what's the signal, is it healthy, what's the gain |
+| `Compact 2` | **Level at a glance** | Aiming an antenna. A large SNR bar with a trend arrow, plus channel power, noise floor, occupied BW and RBW |
+| `Compact 3` | **Gain chain** | Setting gain fast on arrival. Wide LNA/VGA bars, prominent ADC utilisation, a gain-advisor verdict, with NF and MDS for context |
+| `Compact 4` | **Link health** | Long unattended captures. Drop, saturation and buffer sparklines, CPU and RAM, USB throughput, sample-rate accuracy, a summary verdict and a session timer |
 
 There used to be a fifth, the compact sweep, reached by cycling one step past
-Health. It now lives in the **Sweep** section as `Sweep 2`, next to the full-size
-sweep it is a small version of. Grouping by what a view is for beats grouping by
+the last. It now lives under **Sweep** as `Sweep 2`, Small sweep, next to the
+full-size sweep it is a small version of. Grouping by what a view is for beats grouping by
 how small it is.
 
 The looks here are still cooking. The idea is solid, the pixels are a work in
@@ -331,117 +326,117 @@ plus one measurement panel that has no home preset of its own.
 | Panel | What it draws |
 |-------|---------------|
 | `header` | The full "Radio" block: frequency, band, sample rate, LNA/VGA/AMP and stream status |
-| `header_slim` | The thin version used by the Command Rail, where the frequency lives in the rail instead |
+| `header_slim` | The thin version used by the Tuning desk, where the frequency lives in the rail instead |
 | `system_resources` | sdrtop's own CPU and memory use |
 | `iq_histogram` | IQ amplitude distribution across 32 bins with a Low/Mid/Clip breakdown and PAPR |
 | `signal_strip` | The eight-reading bar described above |
 | `log` | The scrollable message log, with a severity lamp in the gutter |
-| `footer` | Key hints, one set per section: the radio keys (with the gain stages your radio actually reports), the section's own keys (under Bluetooth, survey or lock and the address mode with their current state, export and the reference), the section's layouts with the current one marked, and the way out. Focus letters are not repeated here: every panel names its own in its title. While a panel is focused, its keys instead. `Tab` hides it |
+| `footer` | Key hints, one set per group: the radio keys (with the gain stages your radio actually reports), the group's own keys (under Bluetooth, survey or lock and the address mode with their current state, export and the reference), the group's views with the current one marked, and the way out. Focus letters are not repeated here: every panel names its own in its title. While a panel is focused, its keys instead. `Tab` hides it |
 
 ---
 
 ## Layouts
 
-The twenty-eight built-in layouts, by section. The key is the number to press while
-that section is active, which is what the menu shows beside each name.
+The twenty-eight built-in layouts, by group. The key is the number to press while
+you are in that group, which is what the menu shows beside each name.
 
-The menu labels them with a short title rather than the preset name, so
-`command_rail` reads as **Rail** and `main` as **Classic**. The preset name is the
+The menu calls each by its title rather than its preset name, so `command_rail`
+reads as **Tuning desk** and `main` as **Classic screen**. The preset name is the
 one you use in a [config file](presets.md); the title is only what it is called on
-screen.
+screen. No two views share a title, and none is called what its group is.
 
-**Command Rail**
+**Lab › Spectrum**
 
-| Key | Preset | What's in it |
-|-----|--------|--------------|
-| `1` | `command_rail` | Command Rail + bonded spectrum/waterfall (the default) |
-| `2` | `spectrum` | Spectrum, with header and log |
-| `3` | `waterfall` | Waterfall, with header and log |
-| `4` | `spectrum_waterfall` | Both, bonded |
-| `5` | `main` | Spectrum, waterfall, signal strip and log under a full header |
+| Key | Title | Preset | What's in it |
+|-----|-------|--------|--------------|
+| `1` | Tuning desk | `command_rail` | The instrument rail + bonded spectrum/waterfall (the default) |
+| `2` | Full spectrum | `spectrum` | Spectrum, with header and log |
+| `3` | Full waterfall | `waterfall` | Waterfall, with header and log |
+| `4` | Spectrum + waterfall | `spectrum_waterfall` | Both, bonded |
+| `5` | Classic screen | `main` | Spectrum, waterfall, signal strip and log under a full header |
 
-**Lab**
+**Lab › Sweep**
 
-| Key | Preset | What's in it |
-|-----|--------|--------------|
-| `1` | `lab_iq` | IQ diagnostics · constellation · image scope |
-| `2` | `lab_rf` | RF diagnostics · level diagram · ADC loading |
-| `3` | `lab_timing` | Timing diagnostics · interval strip chart · hardware vitals |
-| `4` | `lab_signal` | Signal characterization · spectrum/waterfall · FM demod |
+| Key | Title | Preset | What's in it |
+|-----|-------|--------|--------------|
+| `1` | Band sweep | `lab_sweep` | Sweep scanner · signal metrics · sweep strip |
+| `2` | Small sweep | `micro_sweep` | The same scan as a compact field view |
 
-**Sweep**
+**Lab › Receiver**
 
-| Key | Preset | What's in it |
-|-----|--------|--------------|
-| `1` | `lab_sweep` | Sweep scanner · signal metrics · sweep strip |
-| `2` | `micro_sweep` | The same scan as a compact field view |
+| Key | Title | Preset | What's in it |
+|-----|-------|--------|--------------|
+| `1` | IQ balance | `lab_iq` | IQ diagnostics · constellation · image scope |
+| `2` | Gain & noise | `lab_rf` | RF diagnostics · level diagram · ADC loading |
+| `3` | USB & timing | `lab_timing` | Timing diagnostics · interval strip chart · hardware vitals |
+| `4` | Signal quality | `lab_signal` | Signal characterization · spectrum/waterfall · FM demod |
 
-**Micro**
+**Lab › Bluetooth › 2.4 GHz › Overview**
 
-| Key | Preset | What's in it |
-|-----|--------|--------------|
-| `1` | `micro_main` | Overview |
-| `2` | `micro_signal` | Signal |
-| `3` | `micro_gain` | Gain |
-| `4` | `micro_health` | Health |
+| Key | Title | Preset | What's in it |
+|-----|-------|--------|--------------|
+| `1` | Radio check | `net` | Band capability: what this radio can reach and receive |
+| `2` | Bluetooth survey | `net_survey` | Occupancy over the coexistence heatmap, bonded · decode health |
 
-**Bluetooth › Band**
+**Lab › Bluetooth › 2.4 GHz › Low Energy**
 
-| Key | Preset | What's in it |
-|-----|--------|--------------|
-| `1` | `net` | Band capability: what this radio can reach and receive |
-| `2` | `net_survey` | Occupancy over the coexistence heatmap, bonded · decode health |
+| Key | Title | Preset | What's in it |
+|-----|-------|--------|--------------|
+| `1` | LE devices | `net_census` | The census of transmitters, their clocks and the selected one's detail |
+| `2` | Advertising | `net_ble` | BLE advertising packets · packet detail |
+| `3` | One LE link | `net_connection` | One BLE connection, event by event |
 
-**Bluetooth › LE**
+**Lab › Bluetooth › 2.4 GHz › Classic**
 
-| Key | Preset | What's in it |
-|-----|--------|--------------|
-| `1` | `net_census` | The census of transmitters, their clocks and the selected one's detail |
-| `2` | `net_ble` | BLE advertising packets · packet detail |
-| `3` | `net_connection` | One BLE connection, event by event |
+| Key | Title | Preset | What's in it |
+|-----|-------|--------|--------------|
+| `1` | Piconets nearby | `net_bt` | Classic Bluetooth hops (where and when) · the piconet roster |
+| `2` | Packets | `net_piconet` | One piconet's packets |
+| `3` | Both ends | `net_bench` | Each end of one piconet, side by side |
 
-**Bluetooth › Classic**
+**Lab › Bluetooth › 2.4 GHz › Long range**
 
-| Key | Preset | What's in it |
-|-----|--------|--------------|
-| `1` | `net_bt` | Classic Bluetooth hops (where and when) · the piconet roster |
-| `2` | `net_piconet` | One piconet's packets |
-| `3` | `net_bench` | Each end of one piconet, side by side |
+| Key | Title | Preset | What's in it |
+|-----|-------|--------|--------------|
+| `1` | Long-range devices | `net_coded` | LE Coded advertising packets · packet detail |
 
-**Bluetooth › LE Coded**
+**Lab › Wi-Fi › 2.4 GHz › Channel**
 
-| Key | Preset | What's in it |
-|-----|--------|--------------|
-| `1` | `net_coded` | LE Coded advertising packets · packet detail |
+| Key | Title | Preset | What's in it |
+|-----|-------|--------|--------------|
+| `1` | Channel survey | `wifi_survey` | Thirteen columns, thirteen columns, each channel's busy share beside its frames' airtime by format · least busy, or why none can be named yet |
+| `2` | Frames | `wifi_frames` | A capture at a time: the river of its air · its frames in time order, with their format, signalling, gap, airtime, offset and SNR · frames a second by format, and the selected frame field by field |
+| `3` | Airtime | `wifi_airtime` | A column a second, the busy share beside the frames' airtime by format · the ledger, a row a format and rate · the share of the time with its 1 sigma, and the rhythm of the gaps between frames |
 
-**Wi-Fi › Channel**
+**Lab › Compact**
 
-| Key | Preset | What's in it |
-|-----|--------|--------------|
-| `1` | `wifi_survey` | Survey: thirteen columns, each channel's busy share beside its frames' airtime by format · least busy, or why none can be named yet |
-| `2` | `wifi_frames` | Frames, a capture at a time: the river of its air · its frames in time order, with their format, signalling, gap, airtime, offset and SNR · frames a second by format, and the selected frame field by field |
-| `3` | `wifi_airtime` | Airtime: a column a second, the busy share beside the frames' airtime by format · the ledger, a row a format and rate · the share of the time with its 1 sigma, and the rhythm of the gaps between frames |
+| Key | Title | Preset | What's in it |
+|-----|-------|--------|--------------|
+| `1` | Essentials | `micro_main` | Where am I, what's the signal, is it healthy, what's the gain |
+| `2` | Level at a glance | `micro_signal` | A large SNR bar, for aiming an antenna |
+| `3` | Gain chain | `micro_gain` | The gain stages and the ADC, for setting gain fast |
+| `4` | Link health | `micro_health` | Drops, saturation, buffer and CPU, for long unattended runs |
 
 **Radio › Pagers › POCSAG** ([the pager](radio-pocsag.md))
 
-| Key | Preset | What's in it |
-|-----|--------|--------------|
-| `1` | `radio_pocsag` | A POCSAG pager, as one looks: the page on its dot-matrix display, its address and what it took repairing, the buttons with their keys, the link along the bottom · every page received · the shown page as received, its physics and its decoding |
+| Key | Title | Preset | What's in it |
+|-----|-------|--------|--------------|
+| `1` | Pager | `radio_pocsag` | A POCSAG pager, as one looks: the page on its dot-matrix display, its address and what it took repairing, the buttons with their keys, the link along the bottom · every page received · the shown page as received, its physics and its decoding |
 
-`p` steps to the next layout in whichever section you are in, and wraps at the
-end. A twenty-ninth preset, `observer`, is marked hidden, so it has no section and no
+`p` steps to the next layout in whichever group you are in, and wraps at the
+end. A twenty-ninth preset, `observer`, is marked hidden, so it has no group and no
 key: sdrtop loads it by itself when [another app owns the
 radio](#observer-mode).
 
-`main` had no key at all until the sections arrived. The general views had four
+`main` had no key at all until the groups arrived. The general views had four
 digits between them and there were five of them, so one had to lose, and it lost
-quietly: the docs said "`p` reaches it" and left it there. Sections give each
+quietly: the docs said "`p` reaches it" and left it there. Groups give each
 family its own nine digits, which is more than any of them needs.
 
 A preset's *name* matters in one place: anything starting with `lab_` renders in
 **instrument mode**. If you're writing your own layout, that and the other two
 arrangements with behaviour attached are covered in
-[Configuration](presets.md), along with how to give it a section and a number of
+[Configuration](presets.md), along with how to give it a group and a number of
 its own.
 
 ---

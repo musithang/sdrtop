@@ -1,4 +1,4 @@
-# Piconets · `Classic 1`
+# Piconets nearby · `Classic 1`
 
 ← [The NET section](net.md)
 
@@ -161,7 +161,7 @@ Before the UAP is one value, nothing is read or guessed: the section says
 how many headers were captured and why they wait.
 
 `Enter` opens [the Packets view](net-classic-packets.md) on the selected
-piconet, and `3` [the Bench](net-classic-bench.md). An inquiry code or a
+piconet, and `3` [Both ends](net-classic-bench.md). An inquiry code or a
 page is not a piconet either of them could open, so its whole account stays
 here. A panel too short for everything keeps what fits whole and names the
 rest (`+ HEADERS on a taller panel`), rather than cutting a section in half.

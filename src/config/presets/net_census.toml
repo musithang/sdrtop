@@ -10,7 +10,7 @@
 
 section = "le"
 slot    = 1
-title   = "Census"
+title   = "LE devices"
 blurb   = "who is here"
 about   = "Every Low Energy device announcing itself near you, one row each: how strong, how often, how steady its transmitter is. Nothing is joined or paired; sdrtop only listens."
 

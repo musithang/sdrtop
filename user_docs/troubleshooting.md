@@ -226,14 +226,14 @@ quirks. If yours behaves oddly in a way `rtl_test` doesn't explain,
 2. **Check gain.** A completely flat trace means gain is far too low (all noise
    floor) or far too high (everything slammed at the top). `↑` / `↓` to adjust.
    On a HackRF, LNA 24 / VGA 30 is a reasonable place to start over from.
-3. **Check the health panels.** Lab Timing (`Lab 3`) shows drops, saturation and CPU.
+3. **Check the health panels.** USB & timing (`Receiver 3`) shows drops, saturation and CPU.
    Non-zero drops mean USB or CPU can't keep up; high saturation means turn the
    gain down.
 
 ### A key does nothing
 
-1. **Focus keys only work when their panel is on screen.** `x` needs Lab Signal,
-   `d` needs Lab RF, and so on. If the panel isn't in the current preset, the key
+1. **Focus keys only work when their panel is on screen.** `x` needs Signal quality,
+   `d` needs Gain & noise, and so on. If the panel isn't in the current preset, the key
    is inert.
 2. **`[` and `]` are the HackRF's VGA keys and nothing else.** An RTL-SDR has no
    VGA stage; use `a` for the tuner AGC instead. A device reached through
@@ -245,7 +245,7 @@ quirks. If yours behaves oddly in a way `rtl_test` doesn't explain,
    rather than showing you an `OFF` you cannot change.
 4. **You might be in a text-entry mode.** After `f`, `s` or `m`, keystrokes are
    letters rather than commands until you press `Enter` or `Esc`.
-5. **Known bug: `v` and `t` are unreliable in Lab Timing.** Two panels each claim
+5. **Known bug: `v` and `t` are unreliable in USB & timing.** Two panels each claim
    these focus keys, and which one wins is decided randomly at startup. On some
    launches pressing `v` or `t` in the timing bench does nothing at all, even though the
    footer offers them. Restarting sdrtop reshuffles it. This is a bug and will be
@@ -259,7 +259,7 @@ quirks. If yours behaves oddly in a way `rtl_test` doesn't explain,
 
 1. **Lower the sample rate.** `s`, then a smaller number. If you're at 20, try 5.
    This is the single most effective fix and usually the correct one.
-2. **Check which end is at fault.** Lab Timing (`Lab 3`) answers this directly. If
+2. **Check which end is at fault.** USB & timing (`Receiver 3`) answers this directly. If
    the **Interval Strip Chart** shows late arrivals clustered around something,
    your host is stalling. If they are punctual but the ring buffer still fills,
    the bus is the limit. On a SoapySDR device there is no lateness to see, so
@@ -283,8 +283,8 @@ sdrtop redraws at about 30 fps. On a slow host at 20 Msps that's real work, most
 FFT.
 
 - Drop the sample rate. It cuts the FFT size and the CPU load together.
-- Use a smaller preset. The micro views draw far less than a full lab bench.
-  `Esc`, then the **Micro** section.
+- Use a smaller preset. The compact views draw far less than a full lab bench.
+  `Esc`, then **Lab › Compact**.
 - Close the other things. Browsers are the usual culprit.
 
 ---
@@ -310,7 +310,7 @@ being lost, so if it's gone, the problem is gone.
   classifier has been fooled by a wide span. Press `T` in demod focus to force
   WFM.
 - **Check the channel.** If the panel warns "on DC spike", the demodulated channel
-  is sitting on the radio's own LO leakage. Press `D` in Lab IQ for the DC block,
+  is sitting on the radio's own LO leakage. Press `D` in IQ balance for the DC block,
   or walk the channel off centre with `←` / `→`.
 - **Give it a moment.** `◌ DECODING` means bits are arriving and the name is a
   second or two away. `○ NO RDS` is the real "this station carries none".
@@ -342,7 +342,7 @@ reports the same receiver as the same receiver.
 Every radio has some DC offset from component tolerances. What makes it a problem
 is how loud it is against your signal, which IQ Diagnostics shows: well under the
 signal it is a small spike at the centre, within 10 dB of it it is the loudest
-thing you are receiving. Either way, press `D` in Lab IQ focus and it's subtracted
+thing you are receiving. Either way, press `D` in IQ balance focus and it's subtracted
 from the stream. Some sample rates also show less of it
 than others, so `s` and a bit of experimenting is worth a try.
 
@@ -351,7 +351,7 @@ than others, so `s` and a bit of experimenting is worth a try.
 Below 20 dB means quadrature imbalance is significant and mirror images will be
 visible. Two things to try:
 
-- **Press `C` in Lab IQ focus** with a strong clean carrier on screen. That
+- **Press `C` in IQ balance focus** with a strong clean carrier on screen. That
   captures a quadrature correction and applies it, which is exactly what this is
   for. Watch the image drop on the Image-Rejection Scope.
 - **Try another sample rate.** Some are better than others on the same hardware.

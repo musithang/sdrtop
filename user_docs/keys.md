@@ -18,26 +18,31 @@ a marker name, where what you press is what you get.
 
 `Esc` opens the menu. It is also the first thing you see when sdrtop starts.
 
-The menu is one screen in two columns. On the left are the **sections**, which
-are the four families of layout, plus two panes underneath a dotted rule: the
-**Keys** reference and **Options**. On the right is whatever the left column has
-selected.
+A row of tiles along the top (Resume, Radio, Lab, Options, Keys, Quit) and,
+under Radio and Lab, a tree opened a column at a time. What each part shows is
+in [What You See on Screen](screens.md#the-menu).
 
-| Key | In the menu |
-|-----|-------------|
-| `Tab` / `Shift+Tab` | Next or previous row in the left column: the sections, then Keys, then Options |
-| `←` / `→` | The same thing |
-| `↑` / `↓` | Move through the layouts on the right, or scroll the Keys reference |
-| `1` to `9` | Open the layout with that number, in this section |
-| `Enter` | Open the highlighted layout |
-| `Esc` | Close the menu and go back to what you were looking at |
-| `q` | Quit and save |
+| Where | Key | Does |
+|-------|-----|------|
+| tiles | `←` `→` | Choose a tile; what is under it follows at once |
+| tiles | `↓` `Enter` | Into the tree. On Resume, `Enter` goes back to the view you left |
+| anywhere | `R` `L` `O` `K` `Q` | That tile: Radio, Lab, Options, Keys, Quit (`Enter` on Quit quits) |
+| tree | `↑` `↓` | Move in the column, skipping its headings |
+| tree | `→` `Enter` | Open: the next column, or the view |
+| tree | `←` | Back a column; from the first, up to the tiles |
+| tree | `1` to `9` | Open the view with that number in the group the cursor is in |
+| anywhere | `Tab` | Between the tiles and what is under them |
+| anywhere | `Esc` | Close the menu and go back to what you were looking at |
+| anywhere | `q` | Quit and save |
 
-The menu opens with the cursor already on the layout you are using, so `Enter`
-puts you straight back. That is also how the first screen of a session works:
-sdrtop remembers the layout you quit from, and the menu opens on it.
+A view your radio cannot open is listed greyed, with the reason on the card,
+and `Enter` and its number do nothing there.
 
-In **Options**, `Up` / `Down` selects a device setting.
+After the first run the menu opens with **Resume** in front, standing on the
+view you quit from, so the first `Enter` of a session puts you straight back.
+
+In **Options**, `Up` / `Down` selects a device setting, and `Up` from the
+first one goes back to the tiles.
 `Left` / `Right` cycles all advertised choices, including `auto` when available.
 `Enter` cycles discrete settings or opens number entry when the footer shows `Enter number`.
 Type an integer within the displayed range.
@@ -48,22 +53,22 @@ An unavailable value shows the closest advertised integer without applying it.
 `Esc` cancels entry without changing the device.
 The accepted value stays visible until the device finishes applying the change.
 
-**Numbers belong to a section.** `2` is the RF bench inside Lab and the spectrum
-inside Command Rail, and each section starts again at `1`. This is what keeps the
-keyboard small: four families of layout, nine keys, instead of one long row of
-numbers you have to memorise.
+**Numbers belong to a group.** `2` is Gain & noise inside Receiver and Full
+spectrum inside Spectrum, and each group starts again at `1`. This is what keeps
+the keyboard small: nine keys a group, instead of one long row of numbers you
+have to memorise.
 
 Because a bare number is ambiguous on its own, this guide writes them as
-**section then number**:
+**group then number**:
 
 | Written | Means |
 |---------|-------|
-| `Lab 2` | The RF bench, `2` while the Lab section is active |
-| `Sweep 1` | The band sweep |
-| `Micro 3` | The gain field view |
+| `Receiver 2` | Gain & noise, the RF bench: `2` while you are in Receiver |
+| `Sweep 1` | Band sweep |
+| `Compact 3` | Gain chain, the gain field view |
 
 On screen you never have to do that translation: the menu shows the number beside
-each layout, and the footer shows the numbers for the section you are in.
+each view, and the footer shows the numbers for the group you are in.
 
 ---
 
@@ -80,8 +85,8 @@ each layout, and the footer shows the numbers for the section you are in.
 | `h` | Freeze the spectrum (hold the current frame behind the live one) |
 | a letter | Focus the panel whose title highlights it. `e` `l` `c` `i` `d` `t` `v` `x` `m` `n` `g` `b`, and under Bluetooth `k` `j` `z` `u` `e` `v` `b` `c`, all listed [below](#focus-modes) |
 | `y` | On a standard station (WWV at 2.5, 5, 10, 15 or 20 MHz): measure our own oscillator's error and take it out of every offset in the app. See [what an offset is worth](net-trust.md#what-an-offset-is-worth) |
-| `1` to `9` | The nth layout **of the section you are in** |
-| `p` | Next layout in the same section, wrapping at the end |
+| `1` to `9` | The nth view **of the group you are in** |
+| `p` | Next view in the same group, wrapping at the end |
 | `Esc` | Leave panel focus, or open the menu when nothing is focused |
 | `Tab` | Show or hide the footer bar |
 | `q` | Quit and save settings |
@@ -117,10 +122,10 @@ other view these keys go on doing what they do there:
 
 The display's light and colour are kept in the config's `[pager]` block.
 
-`p` stays inside the section. It used to walk every preset in the app in
-alphabetical order, which meant leaving the benches for a micro view halfway
-through and no way to predict what came next. Cycling within Lab is a thing you
-might actually want to do.
+`p` stays inside the group. It used to walk every preset in the app in
+alphabetical order, which meant leaving the benches for a compact view halfway
+through and no way to predict what came next. Cycling through the Receiver
+benches is a thing you might actually want to do.
 
 `Esc` steps out one level at a time: out of a focused panel first, and only then
 into the menu. So a focused panel is never one keystroke away from a full screen
@@ -262,7 +267,7 @@ saved to the config.
 ## Command Rail focus mode
 
 Press `c` to drive the Command Rail, the instrument rail in the default
-`Command Rail 1` layout.
+`Spectrum 1` layout.
 
 | Key | What it does |
 |-----|-------------|
@@ -285,12 +290,12 @@ inside rail focus. `Esc` gives the digits back.
 | Key | Panel | Where it lives | What it adds |
 |-----|-------|----------------|--------------|
 | `b` | Measurement banner | every lab preset | `↑↓` reference level · `[ ]` trace averaging · `C` capture or clear the reference trace · `R` clear the reference level |
-| `i` | **I**Q Diagnostics | `Lab 1` | `D` DC-block · `C` auto-cal · `F` freeze the constellation · `M` pin the carrier/image markers |
-| `d` | RF **D**iagnostics | `Lab 2` | `A` auto-gain · `K` measure the noise step · `⎵` or `F` freeze the histogram and level diagram |
-| `t` | **T**iming Diagnostics | `Lab 3` | `R` reset the session jitter peak · `C` clear the jitter and throughput history |
-| `v` | Hardware **V**itals | `Lab 3` | `R` reset the session drop counter · `C` clear the trend sparklines |
-| `x` | Signal Characterization | `Lab 4` | `C` log a snapshot of the modulation, SNR, occupied bandwidth and ACPR |
-| `m` | FM **M**PX · Demod | `Lab 4` | `Space` demod on/off · `←/→` move the channel ±25 kHz · `P` snap to the strongest carrier · `0` re-centre · `T` force WFM / NFM / AM or auto · `C` log a snapshot |
+| `i` | **I**Q Diagnostics | `Receiver 1` | `D` DC-block · `C` auto-cal · `F` freeze the constellation · `M` pin the carrier/image markers |
+| `d` | RF **D**iagnostics | `Receiver 2` | `A` auto-gain · `K` measure the noise step · `⎵` or `F` freeze the histogram and level diagram |
+| `t` | **T**iming Diagnostics | `Receiver 3` | `R` reset the session jitter peak · `C` clear the jitter and throughput history |
+| `v` | Hardware **V**itals | `Receiver 3` | `R` reset the session drop counter · `C` clear the trend sparklines |
+| `x` | Signal Characterization | `Receiver 4` | `C` log a snapshot of the modulation, SNR, occupied bandwidth and ACPR |
+| `m` | FM **M**PX · Demod | `Receiver 4` | `Space` demod on/off · `←/→` move the channel ±25 kHz · `P` snap to the strongest carrier · `0` re-centre · `T` force WFM / NFM / AM or auto · `C` log a snapshot |
 | `n` | Signal Metrics | `Sweep 1` | `C` log a snapshot |
 | `g` | Sweep | `Sweep 1` | `←/→` cursor · `S` / `E` set start / end frequency · `M` peak or mean curve · `+/-` dwell time · `C` log a snapshot · `Enter` tune to the cursor frequency |
 
@@ -373,8 +378,8 @@ just as importantly, what it does not.
 
 ## NET panel focus modes
 
-A focus letter belongs to its section: `v` is Hardware Vitals on the Lab
-timing bench and a packet list in LE and Classic (BLE's, and one classic
+A focus letter belongs to its group: `v` is Hardware Vitals on USB & timing
+and a packet list in Low Energy and Classic (BLE's, and one classic
 piconet's),
 and no layout shows two of them. The
 alphabet has twenty-six letters and sdrtop has rather more panels than that,
@@ -383,15 +388,15 @@ each panel's numbers mean is on [the NET page](net.md).
 
 | Key | Panel | Where it lives | What it adds |
 |-----|-------|----------------|--------------|
-| `k` | Band Capability | `Band 1` | `K` time the tuning call |
-| `j` | Band Occupancy | `Band 2` | `←→` move the cursor 1 MHz · `B` cursor to the busiest cell · `L` lock the receiver here |
-| `z` | Coexistence | `Band 2` | `↓` back in time: the profile shows that moment · `↑` forward in time · `N` back to now |
+| `k` | Band Capability | `Overview 1` | `K` time the tuning call |
+| `j` | Band Occupancy | `Overview 2` | `←→` move the cursor 1 MHz · `B` cursor to the busiest cell · `L` lock the receiver here |
+| `z` | Coexistence | `Overview 2` | `↓` back in time: the profile shows that moment · `↑` forward in time · `N` back to now |
 | `e` | Frames | `Channel 2` (Wi-Fi) | `↑↓` select a frame of the capture, stopping it · `H` stop the captures, or run them · `End` run, on the trigger frame · `z` the river's zoom: 1 ms, 40 µs or 4 µs a cell · `t` the trigger: any frame, a format, another channel's, unreadable · `+ -` the holdoff: 0.5, 1, 2 or 5 s · `d` the card: the selected frame, or the decode account · `Enter` the selected frame in place of the list, where the card has no room |
 | `u` | Survey | `Channel 1` (Wi-Fi) | `←→` select a channel · `L` lock the radio on it · `C` start the survey again |
-| `u` | Band Census | `LE 1` | `↑↓` select · `S` sort by the next column · `R` reverse · `T` trust as frequency reference, or let it go |
-| `e` | Connection | `LE 3` | `↑↓` scroll the events · `End` back to the newest · `← →` the previous or next connection |
-| `v` | BLE Advertising | `LE 2` | `↑↓` select a packet · `Enter` only this address, or all again; on a CONNECT_IND, its connection, the radio locked there · `t` only CONNECT, SCAN or ADV, or every kind · `H` hold the list, or let it run |
-| `v` | LE Coded Advertising | `LE Coded 1` | `↑↓` select a packet · `H` hold the list, or let it run |
+| `u` | Band Census | `Low Energy 1` | `↑↓` select · `S` sort by the next column · `R` reverse · `T` trust as frequency reference, or let it go |
+| `e` | Connection | `Low Energy 3` | `↑↓` scroll the events · `End` back to the newest · `← →` the previous or next connection |
+| `v` | BLE Advertising | `Low Energy 2` | `↑↓` select a packet · `Enter` only this address, or all again; on a CONNECT_IND, its connection, the radio locked there · `t` only CONNECT, SCAN or ADV, or every kind · `H` hold the list, or let it run |
+| `v` | LE Coded Advertising | `Long range 1` | `↑↓` select a packet · `H` hold the list, or let it run |
 | `b` | Classic Bluetooth Hops | `Classic 1` | `↑↓` select a piconet · `+ -` zoom in time · `← →` back and forward in time · `End` back to now |
 | `c` | Piconets | `Classic 1` | `↑↓` select a piconet · `Enter` packet by packet, on Classic 2 · `S` sort by the next column · `R` reverse |
 | `c` | Bench | `Classic 3` | `← →` the previous or next piconet |
@@ -400,7 +405,7 @@ each panel's numbers mean is on [the NET page](net.md).
 `T` in the Census asks how far the trusted device's crystal can be off, in
 ppm, as text you type; `Enter` confirms and `Esc` cancels. This table is
 checked against the panels themselves by a test, so it cannot quietly fall
-behind them; the menu's **Keys** pane lists the same thing for the section
+behind them; the menu's **Keys** pane lists the same thing for the group
 you are in.
 
 ---

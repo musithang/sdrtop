@@ -7,16 +7,16 @@ spectrum, they surface the measurements sdrtop can derive about your receiver's
 *signal quality* and *hardware health*. They're built for setting up a clean
 capture and for watching for trouble during a long run.
 
-Four benches in the **Lab** section, plus the band sweep in **Sweep**. The key
-is the number to press while that section is active:
+Four benches under **Lab › Receiver**, plus the band sweep under **Lab ›
+Sweep**. The key is the number to press while you are in that group:
 
-| Key | Preset | The question it answers |
+| Key | View | The question it answers |
 |-----|--------|--------------------------|
-| `Lab 1` | **Lab IQ** | Is the quadrature clean, and can I make it cleaner? |
-| `Lab 2` | **Lab RF** | Is the front end staged properly for what I'm chasing? |
-| `Lab 3` | **Lab Timing** | Is my computer keeping up with the radio? |
-| `Lab 4` | **Lab Signal** | What is that signal, and what's inside it? |
-| `Sweep 1` | **Lab Sweep** | What's out there across a band too wide to see at once? |
+| `Receiver 1` | **IQ balance** | Is the quadrature clean, and can I make it cleaner? |
+| `Receiver 2` | **Gain & noise** | Is the front end staged properly for what I'm chasing? |
+| `Receiver 3` | **USB & timing** | Is my computer keeping up with the radio? |
+| `Receiver 4` | **Signal quality** | What is that signal, and what's inside it? |
+| `Sweep 1` | **Band sweep** | What's out there across a band too wide to see at once? |
 
 [What you see on screen](screens.md) says which panel is which and where it sits.
 This page is about what the readings *mean* and what to do about them.
@@ -77,9 +77,9 @@ placed markers with frequency and level, and the **Δ** between two of them in b
 axes at once, which is the fastest way to answer "how far apart, and how much
 weaker?" without arithmetic.
 
-Each bench adds its own field. Lab Signal carries occupied bandwidth and a quality
-verdict, Lab RF reads the ADC window (clip ceiling, peak, headroom, the noise floor
-the FFT measured with the bandwidth it was measured in, SNR), and Lab IQ shows how
+Each bench adds its own field. Signal quality carries occupied bandwidth and a quality
+verdict, Gain & noise reads the ADC window (clip ceiling, peak, headroom, the noise floor
+the FFT measured with the bandwidth it was measured in, SNR), and IQ balance shows how
 far the image sits under the carrier, where the image scope can say (a dash where
 it cannot). The clip ceiling is 0 dBFS on most radios; one whose tuner clips
 before its converter shows that lower figure and names the part, and headroom
@@ -92,7 +92,7 @@ counts from there.
 
 ---
 
-## RF Front-End Bench · *Lab RF (`Lab 2`)*
+## RF Front-End Bench · *Gain & noise (`Receiver 2`)*
 
 Three panels that read the whole receive chain as one story. The thesis they
 teach: **level climbs stage by stage; the gap between signal and noise is the SNR
@@ -274,7 +274,7 @@ the gain you chose rather than the step it happened to be parked on.
 
 ---
 
-## IQ Bench · *Lab IQ (`Lab 1`)*
+## IQ Bench · *IQ balance (`Receiver 1`)*
 
 Everything here is about **quadrature**: whether the I and Q channels your radio
 produces are really equal in amplitude and really 90° apart. When they're not,
@@ -423,7 +423,7 @@ saved. A fresh launch is an uncorrected radio, which is the honest default.
 
 ## IQ Amplitude Distribution · *optional panel (`iq_histogram`)*
 
-> Not in any built-in preset any more; the image scope took its slot in Lab IQ.
+> Not in any built-in preset any more; the image scope took its slot in IQ balance.
 > Add `iq_histogram` to a [custom layout](presets.md) if you
 > want the exact Low/Mid/Clip percentages.
 
@@ -446,7 +446,7 @@ at:
 
 ---
 
-## Signal Characterization · *Lab Signal (`Lab 4`)*
+## Signal Characterization · *Signal quality (`Receiver 4`)*
 
 Where the demod panel opposite opens the channel up and reads what is inside it,
 this one answers the question you ask first: what *is* that, and how clean is it?
@@ -542,7 +542,7 @@ the demod panel opposite, force the mode with `T` rather than trusting the badge
 
 ---
 
-## FM MPX · Demod · *Lab Signal (`Lab 4`)*
+## FM MPX · Demod · *Signal quality (`Receiver 4`)*
 
 This panel actually demodulates the channel and reads out what is inside it. It is
 a **measurement instrument, not a receiver**. There is no audio anywhere in
@@ -673,12 +673,12 @@ While focused (`m`):
 
 If the panel warns **"on DC spike"**, the channel is sitting on the front end's own
 DC offset and LO leakage, which swamps the phase detector and inflates every
-deviation figure. Either enable the DC block (`D` in Lab IQ) or walk the channel
+deviation figure. Either enable the DC block (`D` in IQ balance) or walk the channel
 off centre with `←` / `→`.
 
 ---
 
-## Timing Bench · *Lab Timing (`Lab 3`)*
+## Timing Bench · *USB & timing (`Receiver 3`)*
 
 The question no other bench can answer: is your computer keeping up with the radio
 in real time? Samples arrive in steady USB bursts, and your machine has to keep
@@ -769,10 +769,10 @@ The supporting cast, all on a 60-second rolling window:
 
 ---
 
-## Sweep · *Lab Sweep (`Sweep 1`)*
+## Sweep · *Band sweep (`Sweep 1`)*
 
 Your radio sees only as much spectrum at once as the sample rate covers, ±10 MHz
-at 20 Msps on a HackRF and rather less on an RTL-SDR. **Lab Sweep** maps a wider
+at 20 Msps on a HackRF and rather less on an RTL-SDR. **Band sweep** maps a wider
 band by retuning across it: at each step it measures briefly, records the peak and
 mean level, then moves on, stitching the results into one curve with frequency on
 the x-axis. Known bands are labelled from the band plan, and the cursor reads out
@@ -802,17 +802,17 @@ the signal bench, sized to fit next to a scan.
 A typical setup flow, switching presets as you go:
 
 1. Tune to your target and start RX (`Space`).
-2. In **Lab IQ (`Lab 1`)**, watch the **constellation**: adjust LNA and VGA until the
+2. In **IQ balance (`Receiver 1`)**, watch the **constellation**: adjust LNA and VGA until the
    cloud is a bright, well-filled ring with no red ring in sight (full scale, or
    the radio's clip, only appears when the signal gets near it). Glance at **IQ Diagnostics**:
    a centred needle on each null-meter, an image predicted 30 dB or more down,
    and the DC well under the signal mean clean quadrature. If the DC is in your
    way, press `D`; if the images are, park on a strong carrier and press `C`.
-3. In **Lab RF (`Lab 2`)**, focus **RF Diagnostics** (`d`) and press `A` to auto-stage
+3. In **Gain & noise (`Receiver 2`)**, focus **RF Diagnostics** (`d`) and press `A` to auto-stage
    the gain, then read **NF** and **MDS** to confirm the receiver is sensitive
    enough for what you're chasing. Watch the **ADC Loading** ladder put the peak
    on the green stretch, short of where the radio clips.
-4. In **Lab Timing (`Lab 3`)**, confirm the timing verdict is Good or Excellent, and
+4. In **USB & timing (`Receiver 3`)**, confirm the timing verdict is Good or Excellent, and
    that the ring-buffer fill isn't trending upward, before committing to a long
    run.
 5. On the bench you're actually working at, set the banner up: averaging up if the

@@ -239,16 +239,16 @@ That last command is the whole diagnostic. If your radio isn't in that list, the
 
 ## Keys
 
-Layouts are grouped into sections and **each section has its own numbers**: `Command Rail` for the general views, `Lab` for the benches, `Sweep` for the band scan, `Micro` for the field views, and on a radio that reaches 2.4 GHz, `Bluetooth` (`Band`, `LE`, `Classic`, `LE Coded`) and `Wi-Fi` (its `Channel` views, on a radio that samples 20 Msps). So `2` is the RF bench inside Lab and the spectrum inside Command Rail. `Esc` opens the menu, which shows you the sections, the layouts in the one you're on, and the number that opens each. Nine keys per section, rather than one long row to memorise.
+`Esc` opens the menu: a row of tiles (Radio, Lab, Options, Keys, Quit) with a tree under Radio and Lab. Under Lab, the views are grouped and **each group has its own numbers**: `Spectrum` for the general views, `Sweep` for the band scan, `Receiver` for the benches, `Compact` for the field views, and `Bluetooth` (`Overview`, `Low Energy`, `Classic`, `Long range`) and `Wi-Fi` (`Channel`) for the 2.4 GHz band. Under Radio, the pager. So `2` is Gain & noise inside Receiver and Full spectrum inside Spectrum. Nine keys per group, rather than one long row to memorise. A view your radio cannot do is greyed, with the reason, instead of hidden.
 
 The ones that get you everywhere:
 
 | Key | Action |
 |---|---|
 | `Esc` | Open the menu, or leave a focused panel |
-| `Enter` | Take the highlighted layout |
+| `Enter` | Open what the menu's cursor is on |
 | `Space` | Start / stop RX |
-| `1`–`9` | The nth layout **of the section you're in** |
+| `1`–`9` | The nth view **of the group you're in** |
 | `↑` / `↓` | Primary gain |
 | `f` / `s` | Type a frequency / a sample rate |
 | `c` / `e` / `l` | Focus the Command Rail / spectrum / waterfall |

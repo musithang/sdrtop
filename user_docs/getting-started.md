@@ -255,28 +255,30 @@ listing every HackRF and RTL-SDR by type and serial. Use `↑` / `↓` (or `j` /
 to pick one, then `Enter`. Skip it entirely with `--device hackrf` or
 `--device rtlsdr`.
 
-Then the **menu** opens, which is sdrtop's front door. On the left are the four
-families of layout, on the right the layouts in whichever one is selected.
+Then the **menu** opens, which is sdrtop's front door: a row of tiles (Radio,
+Lab, Options, Keys, Quit) with a tree under each, opened a column at a time.
 
-1. **`Enter`** takes the highlighted layout, which on a first run is the Command
-   Rail cockpit. From then on the menu opens on whatever you were using last, so
-   `Enter` is a resume.
+1. **`Enter`** goes into the Lab tree, where the cursor already stands on
+   **Spectrum › Tuning desk**, the cockpit; `Enter` again opens it. From then on the menu opens with a
+   **Resume** tile in front, so the first `Enter` of the day puts you back where
+   you were.
 2. **`Space`** to start receiving. The spectrum and waterfall come to life.
 3. **`↑` / `↓`** to adjust gain if the signal looks too weak or too strong. That's
    the LNA on a HackRF, the tuner gain on an RTL-SDR, and the whole gain chain on
    anything reached through SoapySDR. A flat trace usually means gain is far off
    in one direction or the other.
-4. **`Esc`** brings the menu back at any time. Tab across to **Keys** for the full
-   key reference without leaving the app.
+4. **`Esc`** brings the menu back at any time. `K` jumps to the **Keys** tile,
+   the full key reference without leaving the app.
 5. **`q`** to quit. Your settings are saved automatically.
 
-Once that works, the interesting part is the sections. `Esc`, then `Tab` to
-**Lab**, and `1` to `4` are the [measurement benches](lab.md). **Micro** shrinks
-everything down for a small screen, and **Sweep** scans a whole band.
+Once that works, the interesting part is the rest of the tree. Under Lab,
+**Receiver** holds the four [measurement benches](lab.md), **Compact** shrinks
+everything down for a small screen, and **Sweep** scans a whole band. The menu
+itself is described in [What You See on Screen](screens.md#the-menu).
 
-Numbers start again at `1` in every section, which is why there are four families
-rather than one long row of keys. This guide writes them as section then number,
-so `Lab 2` means "press `2` while Lab is the section you are in".
+Numbers start again at `1` in every group, which is why the menu is a tree
+rather than one long row of keys. This guide writes them as group then number,
+so `Receiver 2` means "press `2` while you are in the Receiver group".
 
 ---
 

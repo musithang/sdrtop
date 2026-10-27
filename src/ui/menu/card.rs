@@ -365,7 +365,7 @@ mod tests {
     #[test]
     fn a_view_without_a_band_listens_anywhere() {
         let t = builtins();
-        let all = draw(&t, Tile::Lab, &["Receiver", "IQ"], HACKRF, &[]).join("\n");
+        let all = draw(&t, Tile::Lab, &["Receiver", "IQ balance"], HACKRF, &[]).join("\n");
         assert!(all.contains("wherever you tune"), "{all}");
     }
 
@@ -406,7 +406,7 @@ mod tests {
         let rows = draw(
             &t,
             Tile::Lab,
-            &["Bluetooth", "2.4 GHz", "Low Energy", "Census"],
+            &["Bluetooth", "2.4 GHz", "Low Energy", "LE devices"],
             HACKRF,
             &placed,
         );

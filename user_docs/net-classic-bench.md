@@ -1,4 +1,4 @@
-# Bench · `Classic 3` *(focus `c`)*
+# Both ends · `Classic 3` *(focus `c`)*
 
 ← [The NET section](net.md)
 

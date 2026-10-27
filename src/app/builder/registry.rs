@@ -1379,7 +1379,7 @@ mod tests {
             );
         }
         let (tile, census) = tree.locate("net_census").unwrap();
-        assert_eq!(tree.node(tile, &census).unwrap().title, "Census");
+        assert_eq!(tree.node(tile, &census).unwrap().title, "LE devices");
     }
 
     /// Short of Wi-Fi's rate alone, Bluetooth opens and Wi-Fi is refused

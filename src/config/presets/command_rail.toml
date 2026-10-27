@@ -5,7 +5,7 @@
 
 section = "command_rail"
 slot    = 1
-title   = "Rail"
+title   = "Tuning desk"
 blurb   = "tuning deck, recall slots, log"
 about   = "Everything for tuning by hand: frequency and gains on the left, recall slots, the spectrum over the waterfall, and the log."
 

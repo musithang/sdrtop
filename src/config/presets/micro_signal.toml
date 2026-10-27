@@ -2,7 +2,7 @@
 
 section = "micro"
 slot    = 2
-title   = "Signal"
+title   = "Level at a glance"
 blurb   = "level and quality only"
 about   = "Signal level and quality in large type, and nothing else."
 

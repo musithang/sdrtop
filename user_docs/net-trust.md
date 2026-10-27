@@ -16,7 +16,7 @@ saying some ppm off, and at 2.4 GHz every ppm is 2.4 kHz. So the panels that sho
 | Tag | Corrected by | Good for |
 |-----|--------------|----------|
 | **[RELATIVE]** | Nothing: measured against our own oscillator | Comparing devices with each other, not saying how far off one is |
-| **[REFERENCED]** | A device you told sdrtop to trust: `T` in [the Census](net-le.md#census--le-1-focus-u), with how far its crystal can be off, in ppm | As good as your word, and every panel and export names it as "user-stated" |
+| **[REFERENCED]** | A device you told sdrtop to trust: `T` in [the Census](net-le.md#le-devices--low-energy-1-focus-u), with how far its crystal can be off, in ppm | As good as your word, and every panel and export names it as "user-stated" |
 | **[TRACEABLE]** | A standard station: tune to one (WWV at 2.5, 5, 10, 15 or 20 MHz) and press `y`; sdrtop measures its carrier and takes our error out of every reading at once | Saying how far off a device actually is |
 
 A reference expires after fifteen minutes, because oscillators drift, and
@@ -47,7 +47,7 @@ on LE 1M and LE 2M alike.
 | Classic DM1 payload and its CRC | checked | A reconnect's link-manager messages settled both UAPs, to exactly the devices' own |
 | Classic LMP messages, by name | checked | `features_req_ext` and `features_res` read off the same pair |
 | Classic DH payloads, DM3 and DM5 | **not yet** | None arrived unencrypted and in basic rate |
-| BLE connection following | checked | A TV box and its remote, Algorithm #1, see [LE 3](net-le-connection.md#on-the-air) |
+| BLE connection following | checked | A TV box and its remote, Algorithm #1, see [Low Energy 3](net-le-connection.md#on-the-air) |
 | LE Coded S=8 | checked | A phone advertising from nRF Connect, see [LE Coded](net-le-coded.md#on-the-air) |
 | LE Coded S=2 | **not yet** | Decoded from packets built to the Core; the phone only sends S=8 |
 
@@ -74,7 +74,7 @@ the CRCs stopped passing.
   name. The export's `packet_type` column says the same.
 - **"predicted, not followed"** beside a `CONNECT_IND` in the packet detail
   means the channels there were worked out from its parameters. The
-  connection itself is followed on [LE 3](net-le-connection.md), through
+  connection itself is followed on [Low Energy 3](net-le-connection.md), through
   the events whose channels the radio's window holds, and only those.
 
 ---

@@ -17,7 +17,7 @@ digitising mostly noise; too much and the ADC clips, which is worse than it
 sounds. A clipped ADC doesn't politely round up, it makes things up, and a
 confident lie is the worst kind of data.
 
-The fastest way to see it is the **ADC Loading** ladder in Lab RF (`Lab 2`): the
+The fastest way to see it is the **ADC Loading** ladder in Gain & noise (`Receiver 2`): the
 samples climbing towards full scale, the peak on the green stretch, nothing past
 the red line. If you want exact numbers,
 add the `iq_histogram` panel to a [layout of your own](presets.md)
@@ -29,7 +29,7 @@ and aim for:
 
 ### Let it do it for you
 
-Lab RF (`Lab 2`), focus with `d`, press `A`. That stages LNA and VGA to the target in
+Gain & noise (`Receiver 2`), focus with `d`, press `A`. That stages LNA and VGA to the target in
 one press, filling LNA first to protect the noise figure. Press `A` again once
 you're at the optimum and it latches a continuous track that follows level drift.
 Any manual gain key drops the latch, so it never fights you.
@@ -98,13 +98,13 @@ is a candidate.
 Press `f`, type a frequency in MHz, `Enter`, look for a second or two, repeat. It
 sounds primitive and it's often the fastest thing when you have a shortlist.
 
-For a band rather than a list, use **Lab Sweep** (`Sweep 1`) instead. It scans wider
+For a band rather than a list, use **Band sweep** (`Sweep 1`) instead. It scans wider
 than one window by retuning across the band, and `Enter` on the cursor tunes
 straight to whatever you found.
 
 ### Recall slots: three frequencies, one keypress
 
-The Command Rail (`Command Rail 1`) keeps three recall slots, and they're the fastest way to
+The Command Rail (`Spectrum 1`) keeps three recall slots, and they're the fastest way to
 compare signals.
 
 1. Press `c` to focus the rail.
@@ -213,15 +213,15 @@ The lab presets are built for exactly this, one concern each. A typical run
 through:
 
 1. **Tune** to your target with `f`, and **start RX** with `Space`.
-2. **Gain, Lab RF (`Lab 2`).** Focus with `d`, press `A`, and check the ADC Loading
+2. **Gain, Gain & noise (`Receiver 2`).** Focus with `d`, press `A`, and check the ADC Loading
    ladder puts the peak on the green stretch. Read **NF** and **MDS** to
    confirm the receiver is sensitive enough for what you're after.
-3. **Quadrature, Lab IQ (`Lab 1`).** The constellation should be a bright ring,
+3. **Quadrature, IQ balance (`Receiver 1`).** The constellation should be a bright ring,
    with no red ring in view; a cloud flattened against one means clipping.
    An image predicted 30 dB or more down and the **DC** well under the signal
    mean clean quadrature. If the DC is in your way, press `D`. If mirror images
    are, park on a strong carrier and press `C`.
-4. **Stability, Lab Timing (`Lab 3`).** The timing verdict should read Good or
+4. **Stability, USB & timing (`Receiver 3`).** The timing verdict should read Good or
    Excellent, and the ring-buffer fill should be flat rather than trending up.
 5. **The bench you'll actually watch.** Set averaging, and capture a reference
    trace before you change anything.
@@ -232,7 +232,7 @@ If all four check out, the run is worth starting.
 
 ## During a long capture
 
-Keep **Hardware Vitals** in view (Lab Timing, `Lab 3`, focus `v`):
+Keep **Hardware Vitals** in view (USB & timing, `Receiver 3`, focus `v`):
 
 - **Buffer fill trending toward the ceiling** is the warning that matters, and it
   arrives *before* the drop counter does. Act on this one.
@@ -259,9 +259,9 @@ ssh pi@raspberrypi.local sdrtop --theme nord --frequency 433920000
 tmux split-window -v -p 30 'sdrtop --lna 24'
 ```
 
-On anything cramped, the [micro field views](screens.md#micro-field-views) strip
+On anything cramped, the [compact views](screens.md#compact-views) strip
 each concern down to one glance and stay readable down to about 40 columns. `Esc`
-for the menu, then the **Micro** section.
+for the menu, then **Lab › Compact**.
 
 One habit worth having: if you're scripting sdrtop or trying out a layout, pass
 `--config /tmp/something.toml`. `q` saves, so a script that runs sdrtop without it

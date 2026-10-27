@@ -3,7 +3,7 @@
 Welcome. This is the plain-language guide to using sdrtop.
 
 > **Status:** spectrum, waterfall, the four lab benches, the sweep scanner, the
-> micro field views, IQ recording and the NET section (BLE, LE Coded and
+> compact field views, the pager, IQ recording and the NET section (BLE, LE Coded and
 > classic Bluetooth, measured), with the HackRF One, the RTL-SDR and the tinySA
 > verified on hardware. Anything with a **SoapySDR** driver works too, written
 > from the API rather than from owning the radio, which is a different kind of

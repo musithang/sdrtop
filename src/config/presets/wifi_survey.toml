@@ -8,7 +8,7 @@
 
 section = "wifi_channel"
 slot    = 1
-title   = "Survey"
+title   = "Channel survey"
 blurb   = "which channel is busy, which is quiet"
 about   = "Which Wi-Fi channel is busy and which is quiet, measured channel by channel."
 

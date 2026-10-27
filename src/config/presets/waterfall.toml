@@ -2,7 +2,7 @@
 
 section = "command_rail"
 slot    = 3
-title   = "Waterfall"
+title   = "Full waterfall"
 blurb   = "full width waterfall"
 about   = "The waterfall across the whole screen: what came and went over the last minutes."
 

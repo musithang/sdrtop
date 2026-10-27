@@ -72,7 +72,7 @@ recording writes each one down as a `radio dropped N` annotation over the
 stretch of samples it lies in, with the total in `sdrtop:radio_drops`. A stretch
 rather than a sample, because a drop inside the radio leaves no mark in the
 stream: the samples either side of it arrive joined, and the count is read five
-times a second. The same count is on the Timing bench (`Lab 3`), recording or
+times a second. The same count is on the Timing bench (`Receiver 3`), recording or
 not.
 
 While it runs, the header shows `● REC 12.4 s · 496 MB`. That's the length of

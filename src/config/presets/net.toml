@@ -5,7 +5,7 @@
 
 section = "net"
 slot    = 1
-title   = "Capability"
+title   = "Radio check"
 blurb   = "what this radio can reach and receive"
 about   = "What this radio can reach in the 2.4 GHz band, and which Bluetooth and Wi-Fi modes its sample rate can receive."
 

@@ -1695,9 +1695,9 @@ mod tests {
         );
 
         // The memory gives way last too: the narrowest band line that holds
-        // one field beside " Band · SURVEY" keeps the clip, not the channel.
+        // one field beside " Overview · SURVEY" keeps the clip, not the channel.
         m.signal.adc_saturation_pct = 0.2;
-        let (text, _) = net_band_text(&m, 31);
+        let (text, _) = net_band_text(&m, 35);
         assert!(text.contains("last clip"), "{text}");
     }
 
@@ -1718,8 +1718,8 @@ mod tests {
     fn the_net_band_names_its_section() {
         let theme = crate::Theme::sdr();
         for (section, title) in [
-            ("net", " Band ·"),
-            ("le", " LE ·"),
+            ("net", " Overview ·"),
+            ("le", " Low Energy ·"),
             ("classic", " Classic ·"),
         ] {
             let mut m = net_fixture();

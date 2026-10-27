@@ -42,23 +42,33 @@ pub const WIFI: &str = "wifi";
 pub const WIFI_NOTE: &str = "The Wi-Fi bench is being built.";
 
 /// Display order, titles and the heading each is drawn under, for the
-/// sections the built-ins use.
+/// sections the built-ins use. The title is the group's name everywhere: the
+/// menu's tree draws it, and the header names the view's section by it.
 ///
 /// A section id a user preset invents is not in here: it sorts after these by
 /// id, and [`OTHER`] sorts last of all.
 const KNOWN: &[(&str, &str, Option<&str>)] = &[
-    ("command_rail", "Command Rail", None),
-    ("lab", "Lab", None),
+    // The ids are older than the names and stay, so a user's presets filed
+    // under them keep working.
+    ("command_rail", "Spectrum", None),
+    ("lab", "Receiver", None),
     ("sweep", "Sweep", None),
-    ("micro", "Micro", None),
-    // The NET feature's four (`signal::net::SECTIONS`): `App::build_ui`
-    // removes every preset filed under them on a radio that cannot work in the
-    // 2.4 GHz band, so they are absent rather than empty. The band's id stays
-    // `net` so a preset of the user's filed under it keeps working.
-    (crate::signal::net::SECTIONS[0], "Band", Some(BLUETOOTH)),
-    (crate::signal::net::SECTIONS[1], "LE", Some(BLUETOOTH)),
+    ("micro", "Compact", None),
+    // The NET feature's four (`signal::net::SECTIONS`): on a radio that cannot
+    // work in the 2.4 GHz band their presets never reach the layout engine,
+    // and the menu lists them refused, with the gate's reason.
+    (crate::signal::net::SECTIONS[0], "Overview", Some(BLUETOOTH)),
+    (
+        crate::signal::net::SECTIONS[1],
+        "Low Energy",
+        Some(BLUETOOTH),
+    ),
     (crate::signal::net::SECTIONS[2], "Classic", Some(BLUETOOTH)),
-    (crate::signal::net::SECTIONS[3], "LE Coded", Some(BLUETOOTH)),
+    (
+        crate::signal::net::SECTIONS[3],
+        "Long range",
+        Some(BLUETOOTH),
+    ),
     // Wi-Fi's groups, under a heading of their own and never inside
     // Bluetooth's: the two benches are separate menus.
     (
@@ -325,10 +335,10 @@ mod tests {
                 "pocsag"
             ]
         );
-        assert_eq!(menu.section("net").unwrap().title, "Band");
-        assert_eq!(menu.section("le").unwrap().title, "LE");
+        assert_eq!(menu.section("net").unwrap().title, "Overview");
+        assert_eq!(menu.section("le").unwrap().title, "Low Energy");
         assert_eq!(menu.section("classic").unwrap().title, "Classic");
-        assert_eq!(menu.section("coded").unwrap().title, "LE Coded");
+        assert_eq!(menu.section("coded").unwrap().title, "Long range");
     }
 
     /// The Bluetooth item holds the band and the three Bluetooth sections,
@@ -447,14 +457,14 @@ mod tests {
         }
     }
 
-    /// A user preset still filed under the band's old id lands in Band.
+    /// A user preset filed under the band's id lands in its Overview.
     #[test]
-    fn a_preset_filed_under_net_lands_in_band() {
+    fn a_preset_filed_under_net_lands_in_the_overview() {
         let mut presets = LayoutConfig::default_config().presets;
         presets.insert("my_band".into(), bare_preset(Some("net"), Some(9)));
         let menu = build(&presets);
         let band = menu.section("net").unwrap();
-        assert_eq!(band.title, "Band");
+        assert_eq!(band.title, "Overview");
         assert!(band.entries.iter().any(|e| e.preset == "my_band"));
     }
 
@@ -474,14 +484,17 @@ mod tests {
         let want = |v: &[(u8, &str)]| -> Vec<(Option<u8>, String)> {
             v.iter().map(|(s, t)| (Some(*s), t.to_string())).collect()
         };
-        assert_eq!(titles("net"), want(&[(1, "Capability"), (2, "Survey")]));
+        assert_eq!(
+            titles("net"),
+            want(&[(1, "Radio check"), (2, "Bluetooth survey")])
+        );
         assert_eq!(
             titles("le"),
-            want(&[(1, "Census"), (2, "Advertising"), (3, "Connection")])
+            want(&[(1, "LE devices"), (2, "Advertising"), (3, "One LE link")])
         );
         assert_eq!(
             titles("classic"),
-            want(&[(1, "Piconets"), (2, "Packets"), (3, "Bench")])
+            want(&[(1, "Piconets nearby"), (2, "Packets"), (3, "Both ends")])
         );
     }
 
@@ -506,7 +519,7 @@ mod tests {
             .find(|e| e.preset == "main")
             .expect("main must be in the menu");
         assert_eq!(classic.slot, Some(5));
-        assert_eq!(classic.title, "Classic");
+        assert_eq!(classic.title, "Classic screen");
     }
 
     /// Sweep keeps `lab_sweep` under its own section without renaming it. The

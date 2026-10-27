@@ -110,7 +110,7 @@ When the card is short, the rhythm is the first thing to give way.
 
 - **Not locked on a channel**: the survey is walking the band. The same
   plate as on Frames: `m` locks where you are, `← →` step the channel, or
-  lock one on the Survey.
+  lock one on the Channel survey.
 - **Listening**: nothing heard on this channel yet, or no second heard
   whole yet because the feed keeps dropping blocks. The card says which.
 - **Not measured**: the radio is idle, at the wrong rate, or tuned off a

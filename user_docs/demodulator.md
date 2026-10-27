@@ -5,7 +5,7 @@
 The `fm_demod` panel opens a channel up and reports what is inside it. This page
 is about how it arrives at those numbers.
 
-[The Lab presets](lab.md#fm-mpx--demod--lab-signal-lab-4) covers the other half:
+[The Lab presets](lab.md#fm-mpx--demod--signal-quality-receiver-4) covers the other half:
 what each reading means and what to do about it. If you want to *use* the demod,
 start there. This page is for anyone who wants to know what is actually happening
 between the antenna and the number.
@@ -79,7 +79,7 @@ has to be a real answer available, rather than a shrug and a link to somebody
 else's issue tracker.
 
 If that was the depth you were after, you are done, and the panel itself is
-[documented here](lab.md#fm-mpx--demod--lab-signal-lab-4).
+[documented here](lab.md#fm-mpx--demod--signal-quality-receiver-4).
 
 ---
 
@@ -423,7 +423,7 @@ Still no audio. It reads radios, it does not play them.
 
 ## Where to go next
 
-- **[The Lab presets](lab.md#fm-mpx--demod--lab-signal-lab-4)**: what every
+- **[The Lab presets](lab.md#fm-mpx--demod--signal-quality-receiver-4)**: what every
   reading on the demod panel means, and how to act on it
 - **[Tips and Tricks](tips-and-tricks.md)**: getting a signal clean enough for
   RDS to decode in the first place

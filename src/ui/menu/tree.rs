@@ -415,14 +415,15 @@ fn branch(title: &str, tone: Tone, children: Vec<Node>) -> Node {
 }
 
 /// A row whose children are the views of menu section `id`, filled by
-/// [`build`].
-fn group(title: &str, tone: Tone, id: &str) -> Node {
+/// [`build`]. Its title is the section's own (`model::section_title`), the
+/// one the header names the section by.
+fn group(tone: Tone, id: &str) -> Node {
     Node {
         kind: Kind::Branch {
             section: Some(id.to_string()),
             children: Vec::new(),
         },
-        ..branch(title, tone, Vec::new())
+        ..branch(&super::model::section_title(id), tone, Vec::new())
     }
 }
 
@@ -455,14 +456,14 @@ fn lab_table() -> Vec<Node> {
     let wifi = crate::signal::net::WIFI_SECTIONS;
     vec![
         heading("SEE THE BAND"),
-        group("Spectrum", Spectrum, "command_rail")
+        group(Spectrum, "command_rail")
             .hint("any freq.")
             .about("The band around your tuning, live: the spectrum, the waterfall, or both on one ruler."),
-        group("Sweep", Sweep, "sweep")
+        group(Sweep, "sweep")
             .hint("wide")
             .about("Steps the radio across a range wider than it can see at once, and holds the peaks."),
         heading("CHECK THE RADIO"),
-        group("Receiver", Receiver, "lab")
+        group(Receiver, "lab")
             .hint("health")
             .about("Whether the radio itself is telling the truth: its balance, its gain and noise, the USB link, and the signal it hands over."),
         heading("DECODE DEVICES"),
@@ -473,16 +474,16 @@ fn lab_table() -> Vec<Node> {
                 "2.4 GHz",
                 Ble,
                 vec![
-                    group("Overview", Quiet, net[0])
+                    group(Quiet, net[0])
                         .hint("the band")
                         .about("The band as a whole, before any one device: what this radio can reach here, and what is busy."),
-                    group("Low Energy", Ble, net[1])
+                    group(Ble, net[1])
                         .hint("watches, tags")
                         .about("Bluetooth Low Energy: fitness bands, smart watches, item trackers, phones announcing themselves."),
-                    group("Classic", Classic, net[2])
+                    group(Classic, net[2])
                         .hint("headsets, cars")
                         .about("Classic Bluetooth: headsets, car kits, speakers, hopping 1600 times a second across 79 channels."),
-                    group("Long range", Coded, net[3])
+                    group(Coded, net[3])
                         .hint("LE Coded")
                         .about("LE Coded: the slow, long-reach Low Energy mode."),
                 ],
@@ -502,16 +503,16 @@ fn lab_table() -> Vec<Node> {
                     "2.4 GHz",
                     Wifi,
                     vec![
-                        group("Channel", Wifi, wifi[0])
+                        group(Wifi, wifi[0])
                             .hint("busy or quiet")
                             .about("One channel at a time: which is busy, what is on it, where its time goes."),
-                        group("Room", Wifi, wifi[1])
+                        group(Wifi, wifi[1])
                             .later()
                             .about("Echoes and movement in the room, read from the frames themselves. Not built yet."),
-                        group("Network", Wifi, wifi[2])
+                        group(Wifi, wifi[2])
                             .later()
                             .about("One network and its devices. Not built yet."),
-                        group("Transmitter", Wifi, wifi[3])
+                        group(Wifi, wifi[3])
                             .later()
                             .about("One transmitter on the bench. Not built yet."),
                     ],
@@ -528,7 +529,7 @@ fn lab_table() -> Vec<Node> {
         .hint("2.4 · 5 GHz")
         .about("Routers, phones, laptops: who is using the air, and how."),
         heading("SMALL WINDOW"),
-        group("Compact", Quiet, "micro")
+        group(Quiet, "micro")
             .hint("large type")
             .about("The same readings in large type, for a small terminal or a screen across the room."),
     ]
@@ -549,7 +550,7 @@ fn radio_table() -> Vec<Node> {
         branch(
             "Pagers",
             Radio,
-            vec![group("POCSAG", Radio, crate::signal::pocsag::SECTION)
+            vec![group(Radio, crate::signal::pocsag::SECTION)
                 .hint("512-2400 bd")
                 .about("POCSAG, the paging code most pagers spoke: an address, a function, and a numeric or a text message. Read by sdrtop's own decoder.")],
         )
@@ -605,7 +606,7 @@ pub fn build(menu: &Menu, refused: &[Refusal]) -> Tree {
         .iter()
         .filter(|s| !placed.contains(&s.id.as_str()) && s.id != WIFI)
         .map(|s| {
-            let mut row = group(&s.title, Tone::Quiet, &s.id);
+            let mut row = group(Tone::Quiet, &s.id);
             if let Kind::Branch { children, .. } = &mut row.kind {
                 *children = views(s, None);
             }
@@ -901,7 +902,7 @@ mod tests {
     #[test]
     fn descend_and_ascend_stop_at_the_ends() {
         let tree = builtins();
-        let view = path_to(&tree, Tile::Lab, &["Receiver", "IQ"]);
+        let view = path_to(&tree, Tile::Lab, &["Receiver", "IQ balance"]);
         assert_eq!(tree.descend(Tile::Lab, &view), None);
         let room = path_to(&tree, Tile::Lab, &["Wi-Fi", "2.4 GHz", "Room"]);
         assert_eq!(tree.descend(Tile::Lab, &room), None);
@@ -939,7 +940,7 @@ mod tests {
         // as the tree does: the last area's last view.
         let clamped = tree.clamp(Tile::Lab, &past).unwrap();
         assert_eq!(clamped.rows.len(), 2);
-        assert_eq!(tree.node(Tile::Lab, &clamped).unwrap().title, "Health");
+        assert_eq!(tree.node(Tile::Lab, &clamped).unwrap().title, "Link health");
         let empty = Tree {
             radio: Vec::new(),
             lab: Vec::new(),
@@ -1008,6 +1009,34 @@ mod tests {
     /// stops below the band: every Bluetooth and Wi-Fi view listed by its
     /// real title, refused with the reason, and the reason carried up to
     /// Bluetooth and Wi-Fi themselves.
+    /// No two views are called the same, on either tile, and none is called
+    /// what its group is: a name in the menu, the header or the guide means
+    /// one place.
+    #[test]
+    fn every_view_has_a_name_of_its_own() {
+        fn walk<'a>(rows: &'a [Node], group: Option<&'a str>, views: &mut Vec<&'a str>) {
+            for n in rows {
+                match &n.kind {
+                    Kind::View(e) => {
+                        assert_ne!(Some(e.title.as_str()), group, "a view named as its group");
+                        views.push(&e.title);
+                    }
+                    Kind::Branch { .. } => walk(n.children(), Some(&n.title), views),
+                    Kind::Heading => {}
+                }
+            }
+        }
+        let tree = builtins();
+        let mut views = Vec::new();
+        for tile in [Tile::Lab, Tile::Radio] {
+            walk(tree.root(tile), None, &mut views);
+        }
+        let mut seen = std::collections::HashSet::new();
+        let twice: Vec<&str> = views.iter().copied().filter(|t| !seen.insert(*t)).collect();
+        assert!(twice.is_empty(), "named twice: {twice:?}");
+        assert!(views.len() >= 28, "every built-in view walked: {views:?}");
+    }
+
     fn refused_tree() -> Tree {
         let mut presets = LayoutConfig::default_config().presets;
         let net: std::collections::HashMap<String, PresetConfig> = presets
@@ -1032,7 +1061,7 @@ mod tests {
         let (_, census) = tree.locate("net_census").expect("listed");
         let node = tree.node(Tile::Lab, &census).unwrap();
         assert!(!node.opens());
-        assert_eq!(node.title, "Census");
+        assert_eq!(node.title, "LE devices");
         assert!(node.refused.as_deref().unwrap().contains("1800.000"));
         for area in ["Bluetooth", "Wi-Fi"] {
             let path = path_to(&tree, Tile::Lab, &[area]);

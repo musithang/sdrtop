@@ -2,7 +2,7 @@
 
 section = "micro"
 slot    = 4
-title   = "Health"
+title   = "Link health"
 blurb   = "drops, saturation, throughput"
 about   = "Drops, saturation and throughput in large type: whether the link is healthy."
 

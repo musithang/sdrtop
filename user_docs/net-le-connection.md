@@ -1,4 +1,4 @@
-# Connection · `LE 3` *(focus `e`)*
+# One LE link · `Low Energy 3` *(focus `e`)*
 
 ← [The NET section](net.md)
 

@@ -299,7 +299,7 @@ mod tests {
         let (rows, _) = draw(&t, &path, true, 191, 24);
         let all = rows.join("\n");
         assert!(
-            all.contains("Census") && all.contains("Connection"),
+            all.contains("LE devices") && all.contains("One LE link"),
             "{all}"
         );
         assert_eq!(all.matches('▌').count(), 3, "{all}");
@@ -321,7 +321,7 @@ mod tests {
     fn the_preview_has_no_cursor() {
         let theme = crate::Theme::sdr();
         let t = builtins();
-        let path = path_to(&t, &["Receiver", "IQ"]);
+        let path = path_to(&t, &["Receiver", "IQ balance"]);
         let mut terminal = Terminal::new(TestBackend::new(191, 24)).unwrap();
         for cursor in [true, false] {
             terminal

@@ -5,7 +5,7 @@
 
 section = "lab"
 slot    = 3
-title   = "Timing"
+title   = "USB & timing"
 blurb   = "jitter, drops, scheduling"
 about   = "Whether the samples arrive on time and whole: late blocks, drops, and the clock measured against the rate asked for."
 

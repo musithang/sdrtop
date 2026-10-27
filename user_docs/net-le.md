@@ -1,13 +1,13 @@
-# Bluetooth Low Energy · `LE 1` and `LE 2`
+# Bluetooth Low Energy · `Low Energy 1` and `Low Energy 2`
 
 ← [The NET section](net.md)
 
 BLE devices spend their lives shouting short adverts on three channels
 (37, 38 and 39, at 2402, 2426 and 2480 MHz) in the hope that somebody
-cares. sdrtop cares, professionally. **LE 1** counts who is shouting, **LE
-2** reads each shout and measures the voice it came in.
+cares. sdrtop cares, professionally. **Low Energy 1** counts who is shouting,
+**Low Energy 2** reads each shout and measures the voice it came in.
 
-## Census · `LE 1` *(focus `u`)*
+## LE devices · `Low Energy 1` *(focus `u`)*
 
 One row per transmitter the BLE decoder has **confirmed**: an address is
 only counted from a packet whose CRC passed, because a corrupted address
@@ -57,7 +57,7 @@ channel in view ([extended advertising](#extended-advertising)), its types
 say `extended`, and its interval stays unknown: an auxiliary packet comes
 when its primary says, not on an interval of its own.
 
-## Advertising · `LE 2`
+## Advertising · `Low Energy 2`
 
 Real BLE advertising packets, CRC-checked, as they arrive. The radio has to
 be on an advertising channel; the header says which channel the decoder has,
@@ -88,7 +88,7 @@ that finds out what it does.
 
 | Key | What it does |
 |-----|--------------|
-| `Enter` | Narrows the list to the selected packet's address, and back. **[FILTERED]** says the list is not everything. Selecting a device in the Census and coming here narrows it for you. On a `CONNECT_IND`, opens that connection on [LE 3](net-le-connection.md), locking the radio where it is |
+| `Enter` | Narrows the list to the selected packet's address, and back. **[FILTERED]** says the list is not everything. Selecting a device in the Census and coming here narrows it for you. On a `CONNECT_IND`, opens that connection on [Low Energy 3](net-le-connection.md), locking the radio where it is |
 | `t` | Narrows to one kind, then the next, then every kind again: **CONNECT** (a connection being set up), **SCAN** (`SCAN_REQ` and `SCAN_RSP`) or **ADV** (the advertising that is nearly everything else). It works with `Enter`, so one device's CONNECTs are two keys away |
 | `H` | Holds the list still; the title counts what has arrived since |
 
@@ -105,7 +105,7 @@ and never a connection, whose packets carry an address of their own. LE 2M
 lives almost entirely in connections and never on the three advertising
 channels, so that key was either refused or listened very carefully to
 nothing. LE 2M is back where it lives: a connection followed on
-[LE 3](net-le-connection.md) that moves to LE 2M is received on it from the
+[Low Energy 3](net-le-connection.md) that moves to LE 2M is received on it from the
 moment the two devices agreed, at a sample rate that is a multiple of
 8 Msps (8 or 16). At 20 Msps there is no LE 2M receiver, and its events say
 **no receiver** rather than pretend to have listened.
@@ -149,7 +149,7 @@ hearing the hops. Which algorithm applies takes both ChSel bits, this
 packet's and the one of the advertising packet it answered; with that one
 not heard, the detail says it does not know rather than pick. A connection
 being followed says so here, and `Enter` on a `CONNECT_IND` in the list
-opens it on LE 3, locking the radio where it is if it was surveying:
+opens it on Low Energy 3, locking the radio where it is if it was surveying:
 following needs it still.
 
 **Physics.** The start of the packet is the preamble's mean frequency (the

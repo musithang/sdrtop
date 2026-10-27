@@ -2,7 +2,7 @@
 
 section = "micro"
 slot    = 3
-title   = "Gain"
+title   = "Gain chain"
 blurb   = "the gain chain, large type"
 about   = "The gain chain in large type."
 

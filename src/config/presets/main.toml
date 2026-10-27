@@ -2,7 +2,7 @@
 
 section = "command_rail"
 slot    = 5
-title   = "Classic"
+title   = "Classic screen"
 blurb   = "spectrum over waterfall with gauges"
 about   = "The spectrum over the waterfall, with the signal, gain and health gauges beside them."
 

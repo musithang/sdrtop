@@ -148,7 +148,7 @@ had always done that. It had just never done it in front of an audience.
 So the meters now behave like meters. The [S-meter](screens.md) goes up at
 once and comes down slowly, and holds the true peak for a second. Numbers
 change four times a second, which is slow enough to actually read them.
-Every panel on [Lab Signal](lab.md#signal-characterization--lab-signal-lab-4)
+Every panel on [Lab Signal](lab.md#signal-characterization--signal-quality-receiver-4)
 keeps the same rows whether or not it has a reading, so nothing moves.
 Between bursts the last reading stays and says how long it has been held,
 the adjacent-channel bars sink back gently instead of blinking out, and

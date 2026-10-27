@@ -1063,7 +1063,7 @@ mod tests {
         h.key(KeyCode::Right);
         assert_eq!(
             titles(&h, h.menu().lab),
-            ["Bluetooth", "2.4 GHz", "Low Energy", "Census"]
+            ["Bluetooth", "2.4 GHz", "Low Energy", "LE devices"]
         );
         h.key(KeyCode::Left);
         h.key(KeyCode::Left);
@@ -1078,7 +1078,7 @@ mod tests {
     #[test]
     fn enter_and_digits_open_views() {
         let mut h = Harness::new();
-        let iq = lab_path(&h, &["Receiver", "IQ"]);
+        let iq = lab_path(&h, &["Receiver", "IQ balance"]);
         h.state.lock().unwrap().ui.menu = Some(MenuState {
             focus: MenuFocus::Below,
             lab: iq,
@@ -1107,7 +1107,7 @@ mod tests {
         h.state.lock().unwrap().ui.menu = Some(opening);
         h.key(KeyCode::Down);
         assert_eq!(h.menu().tile, MenuTile::Lab);
-        assert_eq!(titles(&h, h.menu().lab), ["Receiver", "RF"]);
+        assert_eq!(titles(&h, h.menu().lab), ["Receiver", "Gain & noise"]);
 
         h.engine.set_preset("command_rail");
         h.state.lock().unwrap().ui.menu = Some(MenuState {

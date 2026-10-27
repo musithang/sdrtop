@@ -6,7 +6,7 @@
 
 section = "lab"
 slot    = 4
-title   = "Signal"
+title   = "Signal quality"
 blurb   = "SNR, occupied bandwidth, demod"
 about   = "One signal measured: its SNR, how wide it is, and what the demodulator makes of it."
 

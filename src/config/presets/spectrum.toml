@@ -2,7 +2,7 @@
 
 section = "command_rail"
 slot    = 2
-title   = "Spectrum"
+title   = "Full spectrum"
 blurb   = "full width spectrum plot"
 about   = "The spectrum across the whole screen, with peak hold and the measured noise floor."
 

@@ -612,9 +612,14 @@ mod tests {
     /// If these ever disagree the menu is teaching a key that does not work.
     #[test]
     fn the_numbers_shown_are_the_keys_that_work() {
-        let all = draw(191, 41, &in_lab(&["Receiver", "IQ"]));
+        let all = draw(191, 41, &in_lab(&["Receiver", "IQ balance"]));
         let joined = all.join("\n");
-        for (slot, title) in [(1, "IQ"), (2, "RF"), (3, "Timing"), (4, "Signal")] {
+        for (slot, title) in [
+            (1, "IQ balance"),
+            (2, "Gain & noise"),
+            (3, "USB & timing"),
+            (4, "Signal quality"),
+        ] {
             let pair = format!("{slot} {title}");
             assert!(
                 all.iter().any(|l| l.contains(&pair)),
@@ -649,7 +654,7 @@ mod tests {
             le.contains("\u{25cf} 412 packets this session, 96 % CRC ok"),
             "{le}"
         );
-        let state = in_lab(&["Bluetooth", "2.4 GHz", "Classic", "Piconets"]);
+        let state = in_lab(&["Bluetooth", "2.4 GHz", "Classic", "Piconets nearby"]);
         let classic = draw_with_metrics(191, 41, &state, &m).join("\n");
         assert!(
             classic.contains("\u{25cb} no piconet heard this session; not listening now"),
@@ -747,7 +752,7 @@ mod tests {
             draw(110, 48, &state).join("\n")
         };
         let le = keys_of(&["Bluetooth", "2.4 GHz", "Low Energy"]);
-        assert!(le.contains("LE: FOCUS KEYS"), "{le}");
+        assert!(le.contains("LOW ENERGY: FOCUS KEYS"), "{le}");
         assert!(
             le.contains("BLE Advertising") && le.contains("select a packet"),
             "{le}"
@@ -916,7 +921,7 @@ mod tests {
     #[test]
     fn it_survives_a_tiny_terminal() {
         for (w, h) in [(40, 10), (20, 5), (8, 3), (4, 2)] {
-            let lines = draw(w, h, &in_lab(&["Receiver", "IQ"]));
+            let lines = draw(w, h, &in_lab(&["Receiver", "IQ balance"]));
             assert_eq!(lines.len(), h as usize);
             assert!(lines.iter().all(|l| l.chars().count() <= w as usize));
         }

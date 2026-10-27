@@ -3,8 +3,8 @@
 ← [Back](README.md)
 
 A *preset* is a named arrangement of panels: which ones are on screen, where they
-sit, and how much room each gets. sdrtop ships with twenty-eight, grouped into the
-sections of the [menu](screens.md#the-menu), and you can write your own.
+sit, and how much room each gets. sdrtop ships with twenty-eight, grouped in the
+[menu](screens.md#the-menu), and you can write your own.
 
 There are two places to put one, and they behave identically:
 
@@ -43,9 +43,10 @@ panels = [
 
 ## Where it appears in the menu
 
-Four optional fields put a preset somewhere in the [menu](screens.md#the-menu)
-and give it a number key. Leave them all out and the layout still works; it just
-lands in a section called **Other** with no shortcut.
+Five optional fields put a preset somewhere in the [menu](screens.md#the-menu),
+give it a number key and tell the menu's card what to say about it. Leave them
+all out and the layout still works; it just lands under **Lab › Other** with no
+shortcut.
 
 ```toml
 [presets.my_view]
@@ -53,27 +54,29 @@ section = "lab"
 slot    = 5
 title   = "Nightwatch"
 blurb   = "Waterfall and log, for leaving running"
+about   = "The waterfall over the whole screen and the log beside it, for a night of watching one band."
 panels  = [ ... ]   # exactly as above
 ```
 
 | Field | What it does |
 |-------|--------------|
-| `section` | Which family it belongs to: `command_rail`, `lab`, `sweep`, `micro`, `net` (titled **Band**), `le`, `classic`, `coded` (the last four drawn under the **Bluetooth** heading), or a name of your own, which becomes a new section. `hidden` keeps it out of the menu entirely |
-| `slot` | The number key, `1` to `9`, **within that section**. Leave it out and the layout is still listed, just without a shortcut |
+| `section` | Which group it belongs to, by id: `command_rail` (**Spectrum**), `sweep` (**Sweep**), `lab` (**Receiver**), `micro` (**Compact**), `net` (**Overview**), `le` (**Low Energy**), `classic` (**Classic**), `coded` (**Long range**), `wifi_channel` (**Channel**), `pocsag` (**POCSAG**, under Radio), or a name of your own, which becomes a group under **Lab › Other**. The ids are older than the names and stay as they are, so a preset written for an earlier sdrtop still lands in the right place. `hidden` keeps it out of the menu entirely |
+| `slot` | The number key, `1` to `9`, **within that group**. Leave it out and the layout is still listed, just without a shortcut |
 | `title` | What the menu calls it. Defaults to the preset name |
 | `blurb` | The half-line under the title. Optional, and worth writing: it is what tells you which of two similar layouts you want |
+| `about` | A sentence or two for the menu's card: what you will see on this layout. Optional; without it the card leaves that paragraph out |
 
 A few things follow from how these are read:
 
-- **Numbers are per section**, so `slot = 5` in `lab` does not collide with
-  `slot = 5` in `micro`. That is the whole point of the sections: nine keys per
-  section, instead of one exhausted row.
+- **Numbers are per group**, so `slot = 5` in `lab` does not collide with
+  `slot = 5` in `micro`. That is the whole point of the groups: nine keys per
+  group, instead of one exhausted row.
 - **Two presets wanting the same slot is not fatal.** The one whose *preset name*
   sorts first keeps the key, the other stays in the list without one, and the
   reason is written to the log so you can see it happened. Losing a shortcut is a
   better answer than losing the layout.
-- **A section name sdrtop does not know becomes a section of its own**, listed
-  after the built-in ones and titled with the name you gave it.
+- **A section name sdrtop does not know becomes a group of its own**, under
+  **Lab › Other**, titled with the name you gave it.
 - **`hidden` is how the built-in `observer` preset stays out of the way.** It is
   loaded by sdrtop itself, so there is nothing to pick.
 
@@ -174,7 +177,7 @@ These are the valid values for `name`. What each one actually draws is in
 
 **Sweep:** `sweep_panel` · `sweep_strip`
 
-**Micro field views:** `micro_panel` · `micro_signal_panel` · `micro_gain_panel` ·
+**Compact views:** `micro_panel` · `micro_signal_panel` · `micro_gain_panel` ·
 `micro_health_panel` · `micro_sweep_panel`
 
 **NET:** `net_capability` · `net_occupancy` · `net_coexist` ·
@@ -186,7 +189,7 @@ page's [last section](net.md#if-you-wrote-your-own-net-preset) lists.
 
 **Wi-Fi:** `net_wifi_survey`, the thirteen channels side by side: how busy
 each one's busiest megahertz was and the airtime its own frames stated, by
-format, over the survey's visits ([Survey](net-wifi.md)).
+format, over the survey's visits ([Channel survey](net-wifi.md)).
 `net_wifi_least_busy`, the survey's card: the least busy channel when the
 visits can tell it apart, and in words when they cannot yet.
 `net_wifi_river`, a capture of the channel's air as lanes of frames, each

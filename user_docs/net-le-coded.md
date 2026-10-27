@@ -1,4 +1,4 @@
-# Long range · `LE Coded 1` *(focus `v`)*
+# Long-range devices · `Long range 1` *(focus `v`)*
 
 ← [The NET section](net.md)
 

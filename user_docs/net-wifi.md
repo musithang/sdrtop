@@ -1,4 +1,4 @@
-# Survey · `Channel 1` *(focus `u`)*
+# Channel survey · `Channel 1` *(focus `u`)*
 
 ← [The NET section](net.md)
 
@@ -19,7 +19,7 @@ channel gets a column of two bars:
   the channel's busiest megahertz had anything in it at all. Wi-Fi,
   Bluetooth, a microwave oven, somebody's baby monitor: whatever a Wi-Fi
   station would hear and politely wait for. It is the same measure the
-  [Bluetooth band survey](net-band.md#survey--band-2) makes, with its floor
+  [Bluetooth band survey](net-band.md#bluetooth-survey--overview-2) makes, with its floor
   and threshold derived rather than guessed.
 - **Frames** (the right bar, stacked by format): the share of the time the
   frames read on the channel's own centre said they would take, by format,

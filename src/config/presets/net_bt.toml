@@ -17,7 +17,7 @@
 
 section = "classic"
 slot    = 1
-title   = "Piconets"
+title   = "Piconets nearby"
 blurb   = "who is here, the old way"
 about   = "Every classic piconet heard, one row each, with how well its hops were caught."
 

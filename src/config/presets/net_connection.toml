@@ -8,7 +8,7 @@
 
 section = "le"
 slot    = 3
-title   = "Connection"
+title   = "One LE link"
 blurb   = "one connection, event by event"
 about   = "One Low Energy connection, followed from event to event as it hops."
 

@@ -7,7 +7,7 @@ NET writes six files, one for each record the section keeps:
 
 | File | One row per |
 |------|-------------|
-| `net-band-*.csv` | Megahertz of the band: duty, its uncertainty, coverage, power. From the Survey (`Band 2`) only: elsewhere the band is not being measured, and the file says so instead |
+| `net-band-*.csv` | Megahertz of the band: duty, its uncertainty, coverage, power. From the Bluetooth survey (`Overview 2`) only: elsewhere the band is not being measured, and the file says so instead |
 | `net-census-*.csv` | Counted device, in the order the Census shows them |
 | `net-ble-*.csv` | Packet, in the list's order, as it was shown (held or filtered) |
 | `net-fer-*.csv` | SNR bin of the frame error curve, for all traffic and for each device |

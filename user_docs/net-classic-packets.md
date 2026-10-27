@@ -7,13 +7,13 @@ view](net-classic.md) is the room, this is one conversation in it:
 overheard, timed and measured, and still not understood, which is the
 polite way round.
 
-It shows the piconet selected on the Piconets view. `Enter` on the roster
+It shows the piconet selected on Piconets nearby. `Enter` on the roster
 brings it here, and so does `2` with a piconet selected. With the list
 focused, `← →` step to the previous or next piconet in the roster's order.
 With none heard, or none selected, the list says which of the two it is
 rather than showing an empty table and letting you wonder.
 
-The classic receiver runs here exactly as on the Piconets view: same
+The classic receiver runs here exactly as on Piconets nearby: same
 channels, same `← →` steps for a locked radio when nothing is focused. The
 three classic views are three readings of one stream of hits, not three
 receivers with three opinions.

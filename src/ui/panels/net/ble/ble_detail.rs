@@ -666,7 +666,7 @@ fn connection_lines(
     let mut out = vec![crate::ui::chrome::section(
         "connection",
         if followed.is_some() {
-            "followed on LE 3"
+            "followed on Low Energy 3"
         } else {
             "read, not followed"
         },
@@ -1677,7 +1677,7 @@ mod tests {
             std::time::Instant::now(),
         );
         let out = draw(NetBleDetailPanel, 90, 40, &sel(&m)).join("\n");
-        assert!(out.contains("followed on LE 3"), "{out}");
+        assert!(out.contains("followed on Low Energy 3"), "{out}");
         assert!(!out.contains("read, not followed"), "{out}");
     }
 
