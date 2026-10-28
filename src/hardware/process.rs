@@ -849,6 +849,7 @@ pub(crate) mod tests {
             power_tx,
             geometry,
             stream_pairs: std::sync::atomic::AtomicU64::new(0),
+            streams_begun: std::sync::atomic::AtomicU64::new(0),
             record: Default::default(),
             intake: Default::default(),
         };
@@ -1265,6 +1266,7 @@ pub(crate) mod tests {
             power_tx: ctx.power_tx.clone(),
             geometry: ctx.geometry,
             stream_pairs: std::sync::atomic::AtomicU64::new(0),
+            streams_begun: std::sync::atomic::AtomicU64::new(0),
             record: Default::default(),
             intake: Default::default(),
         });

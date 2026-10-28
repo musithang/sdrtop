@@ -185,6 +185,7 @@ impl App {
             power_tx,
             geometry,
             stream_pairs: std::sync::atomic::AtomicU64::new(0),
+            streams_begun: std::sync::atomic::AtomicU64::new(0),
             record: Default::default(),
             intake: Default::default(),
         });

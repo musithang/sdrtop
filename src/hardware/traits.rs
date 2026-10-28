@@ -1434,6 +1434,11 @@ pub struct RxContext {
     /// not. Reset by [`RxContext::begin_stream`], so a restarted stream starts
     /// again from zero rather than appearing to continue across the pause.
     pub stream_pairs: AtomicU64,
+    /// How many streams have begun on this context ([`RxContext::begin_stream`]).
+    /// What the RX task watches to restart anything it measures over a run of
+    /// one stream: a radio that changes rate by stopping and starting its
+    /// stream leaves a silence no rate measured across it may count.
+    pub streams_begun: AtomicU64,
     /// Fourth feed, to the IQ recorder: raw blocks while a recording runs,
     /// nothing otherwise. Shared, because the recorder that arms it outlives
     /// no stream and the stream outlives no recorder.
@@ -1452,6 +1457,8 @@ impl RxContext {
     pub fn begin_stream(&self) {
         self.stream_pairs
             .store(0, std::sync::atomic::Ordering::Relaxed);
+        self.streams_begun
+            .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
     }
 }
 
@@ -2419,5 +2426,23 @@ mod tests {
         assert_eq!(plain.start_gains(None), [0.0, 6.0], "the historical rule");
         let own = GainModel::new(stages, "ATT", "ATT").with_start_gains(vec![0.0, 0.0]);
         assert_eq!(own.start_gains(None), [0.0, 0.0]);
+    }
+
+    /// Each stream begun is counted, and its positions start from zero.
+    #[test]
+    fn beginning_a_stream_counts_it_and_restarts_its_positions() {
+        let (ctx, _f, _d, _n) = crate::hardware::process::tests::rx_ctx();
+        ctx.stream_pairs
+            .store(4096, std::sync::atomic::Ordering::Relaxed);
+        let before = ctx.streams_begun.load(std::sync::atomic::Ordering::Relaxed);
+        ctx.begin_stream();
+        assert_eq!(
+            ctx.stream_pairs.load(std::sync::atomic::Ordering::Relaxed),
+            0
+        );
+        assert_eq!(
+            ctx.streams_begun.load(std::sync::atomic::Ordering::Relaxed),
+            before + 1
+        );
     }
 }

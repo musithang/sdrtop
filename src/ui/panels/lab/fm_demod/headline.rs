@@ -155,10 +155,20 @@ fn advisories(
             ]));
         }
     };
-    // Sitting on the tuned centre means sharing the channel with the
-    // front-end's DC offset / LO leakage. Point at the existing fix.
-    if state.demod.on_dc_spike(state.iq.cal.correcting()) {
-        advise("\u{2192} on DC spike \u{2014} [D] in Lab IQ, or offset".to_string());
+    // Sitting on the LO means sharing the channel with the front end's DC
+    // offset / LO leakage. Point at the fix that works there: the DC block
+    // where the LO is the centre, an offset where it is not (the DC block
+    // removes the 0 Hz tone, not a leak beside it).
+    let lo = state.radio.lo_offset_hz;
+    if state.demod.on_dc_spike(state.iq.cal.correcting(), lo) {
+        advise(if lo == 0 {
+            "\u{2192} on DC spike \u{2014} [D] in Lab IQ, or offset".to_string()
+        } else {
+            format!(
+                "\u{2192} on the LO's leak at {:+.1} kHz \u{2014} offset the channel",
+                lo as f64 / 1e3
+            )
+        });
     }
     // Blocks lost on the way here. RDS and CTCSS both need unbroken runs, so
     // without this line a busy host and a station with no RDS look identical:

@@ -387,11 +387,19 @@ impl DemodState {
         self.mode_override
     }
 
-    /// Whether the channel is close enough to the tuned centre to be competing
-    /// with the front-end's DC artefact. `dc_corrected` suppresses it: the
-    /// existing DC block already cleans that up.
-    pub fn on_dc_spike(&self, dc_corrected: bool) -> bool {
-        !dc_corrected && self.offset_hz.abs() < DC_PROXIMITY_HZ
+    /// Whether the channel is close enough to the LO, `lo_offset_hz` from
+    /// the tuned centre, to be competing with the front end's DC offset and
+    /// LO leakage. `dc_corrected` suppresses it where the LO is the centre:
+    /// the DC block cleans that up. Where the LO is off the centre (an Airspy
+    /// HF+ at a zero-IF rate leaks 5 kHz up), the DC block removes the 0 Hz
+    /// tone and not the leak, so it suppresses nothing.
+    pub fn on_dc_spike(&self, dc_corrected: bool, lo_offset_hz: i64) -> bool {
+        let near = (self.offset_hz - lo_offset_hz).abs() < DC_PROXIMITY_HZ;
+        if lo_offset_hz == 0 {
+            !dc_corrected && near
+        } else {
+            near
+        }
     }
 }
 
@@ -405,12 +413,13 @@ pub const SNAP_DC_GUARD_HZ: f64 = 10_000.0;
 
 /// Offset from the tuned centre, in Hz, of the strongest *carrier* in an
 /// fftshifted spectrum - what "snap the demod onto the loudest carrier" resolves
-/// to. Bins within [`SNAP_DC_GUARD_HZ`] of centre are excluded as artefact.
+/// to. Bins within [`SNAP_DC_GUARD_HZ`] of centre, and of the LO where it is
+/// `lo_offset_hz` off the centre, are excluded as artefact.
 ///
 /// `None` for an empty spectrum, a nonsensical rate, or a span so narrow that the
 /// guard swallows it - the caller then leaves the offset alone rather than
 /// jumping to an invented frequency.
-pub fn strongest_offset_hz(bins_dbfs: &[f32], sample_rate: f64) -> Option<i64> {
+pub fn strongest_offset_hz(bins_dbfs: &[f32], sample_rate: f64, lo_offset_hz: i64) -> Option<i64> {
     if bins_dbfs.is_empty() || !sample_rate.is_finite() || sample_rate <= 0.0 {
         return None;
     }
@@ -418,10 +427,11 @@ pub fn strongest_offset_hz(bins_dbfs: &[f32], sample_rate: f64) -> Option<i64> {
     let bin_hz = sample_rate / n as f64;
     let centre = n as f64 / 2.0;
     let guard_bins = (SNAP_DC_GUARD_HZ / bin_hz).ceil();
+    let lo = centre + lo_offset_hz as f64 / bin_hz;
 
     let mut best: Option<(usize, f32)> = None;
     for (i, &v) in bins_dbfs.iter().enumerate() {
-        if (i as f64 - centre).abs() <= guard_bins {
+        if (i as f64 - centre).abs() <= guard_bins || (i as f64 - lo).abs() <= guard_bins {
             continue;
         }
         if best.is_none_or(|(_, bv)| v > bv) {
@@ -673,11 +683,11 @@ mod tests {
         // 8 bins over 800 kHz → 100 kHz per bin, centre (DC) at index 4.
         let mut bins = vec![-90.0f32; 8];
         bins[6] = -10.0;
-        assert_eq!(strongest_offset_hz(&bins, 800_000.0), Some(200_000));
+        assert_eq!(strongest_offset_hz(&bins, 800_000.0, 0), Some(200_000));
         // A peak below centre reads negative.
         bins[6] = -90.0;
         bins[2] = -10.0;
-        assert_eq!(strongest_offset_hz(&bins, 800_000.0), Some(-200_000));
+        assert_eq!(strongest_offset_hz(&bins, 800_000.0, 0), Some(-200_000));
     }
 
     #[test]
@@ -688,16 +698,16 @@ mod tests {
         let mut bins = vec![-90.0f32; 8];
         bins[4] = 0.0; // DC spike, by far the strongest bin
         bins[6] = -40.0; // the actual carrier
-        assert_eq!(strongest_offset_hz(&bins, 800_000.0), Some(200_000));
+        assert_eq!(strongest_offset_hz(&bins, 800_000.0, 0), Some(200_000));
     }
 
     #[test]
     fn strongest_offset_declines_to_guess() {
-        assert_eq!(strongest_offset_hz(&[], 2_000_000.0), None);
-        assert_eq!(strongest_offset_hz(&[-10.0, -20.0], 0.0), None);
+        assert_eq!(strongest_offset_hz(&[], 2_000_000.0, 0), None);
+        assert_eq!(strongest_offset_hz(&[-10.0, -20.0], 0.0, 0), None);
         // A span narrower than the guard leaves no candidate bins at all.
         assert_eq!(
-            strongest_offset_hz(&[-10.0, -20.0, -30.0, -40.0], 8_000.0),
+            strongest_offset_hz(&[-10.0, -20.0, -30.0, -40.0], 8_000.0, 0),
             None
         );
     }
@@ -738,14 +748,47 @@ mod tests {
             offset_hz: 0,
             ..Default::default()
         };
-        assert!(centred.on_dc_spike(false));
+        assert!(centred.on_dc_spike(false, 0));
         // The existing DC block already handles it - no need to nag.
-        assert!(!centred.on_dc_spike(true));
+        assert!(!centred.on_dc_spike(true, 0));
         // Tuned well off centre, the artefact is out of the channel.
         let offset = DemodState {
             offset_hz: 200_000,
             ..Default::default()
         };
-        assert!(!offset.on_dc_spike(false));
+        assert!(!offset.on_dc_spike(false, 0));
+    }
+
+    /// **Near the LO, wherever it is.** With the LO 171 kHz up (an HF+ tuned
+    /// below its lowest LO) a channel on the centre is clear of it and one at
+    /// +171 kHz is on it; and the DC block, which removes the 0 Hz tone, does
+    /// not clear a leak that is not at 0 Hz.
+    #[test]
+    fn the_dc_warning_follows_the_lo() {
+        let at = |offset_hz| DemodState {
+            offset_hz,
+            ..Default::default()
+        };
+        assert!(!at(0).on_dc_spike(false, 171_000));
+        assert!(at(171_000).on_dc_spike(false, 171_000));
+        assert!(
+            at(171_000).on_dc_spike(true, 171_000),
+            "the DC block is no help there"
+        );
+    }
+
+    /// The snap skips the LO's bins too where the LO is off the centre.
+    #[test]
+    fn the_snap_skips_an_lo_off_the_centre() {
+        let mut bins = vec![-100.0f32; 1024];
+        // 800 kS/s over 1024 bins: 781.25 Hz a bin. A leak at +171 kHz (bin
+        // 512 + 219) louder than a station at -200 kHz (bin 256).
+        bins[512 + 219] = -20.0;
+        bins[256] = -30.0;
+        assert_eq!(strongest_offset_hz(&bins, 800_000.0, 0), Some(171_094));
+        assert_eq!(
+            strongest_offset_hz(&bins, 800_000.0, 171_000),
+            Some(-200_000)
+        );
     }
 }

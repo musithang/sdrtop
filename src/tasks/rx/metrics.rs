@@ -286,6 +286,18 @@ impl RateTracker {
     }
 }
 
+/// Whether the rate baseline must start again: the configured rate changed,
+/// or a new stream has begun since it last started (each `(rate, streams
+/// begun)`). A radio that changes rate by stopping and starting its stream
+/// leaves a silence between the two, and a baseline running across it reads
+/// the silence as a slow clock: 768 kS/s read -9435 ppm ten seconds after
+/// such a change on an Airspy HF+, falling as one over the time since. The
+/// window a restart is noticed in is not folded in at all, since its last
+/// block can be the old stream's (see the RX loop).
+pub(super) fn baseline_restarts(now: (f64, u64), baseline: (f64, u64)) -> bool {
+    now.0 != baseline.0 || now.1 != baseline.1
+}
+
 /// Sliding long-baseline estimate of the delivered sample rate.
 ///
 /// Task local, deliberately: it is neither drawn nor shared, so it has no
@@ -1002,5 +1014,19 @@ mod tests {
         b.push(0, 4_000_000);
         assert_eq!(b.rate(2), None);
         assert_eq!(b.elapsed_us, 0);
+    }
+
+    /// The baseline starts again for a new rate and for a new stream at the
+    /// same rate, and not otherwise; the seed (NaN) restarts at the first
+    /// poll.
+    #[test]
+    fn the_rate_baseline_restarts_with_a_new_rate_or_stream() {
+        assert!(!baseline_restarts((768e3, 3), (768e3, 3)));
+        assert!(baseline_restarts((192e3, 3), (768e3, 3)), "a new rate");
+        assert!(baseline_restarts((768e3, 4), (768e3, 3)), "a new stream");
+        assert!(
+            baseline_restarts((768e3, 0), (f64::NAN, 0)),
+            "the first poll"
+        );
     }
 }

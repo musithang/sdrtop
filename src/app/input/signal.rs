@@ -121,7 +121,8 @@ pub(super) fn fm_demod(key: KeyEvent, ctx: &mut InputCtx<'_>) -> KeyAction {
                 .as_ref()
                 .map(|f| Arc::clone(&f.bins_dbfs));
             let sr = m.radio.config_sample_rate;
-            match bins.and_then(|b| crate::state::strongest_offset_hz(&b, sr)) {
+            let lo = m.radio.lo_offset_hz;
+            match bins.and_then(|b| crate::state::strongest_offset_hz(&b, sr, lo)) {
                 Some(off) => {
                     let limit = m.demod.offset_limit_hz(sr);
                     let snapped = off.clamp(-limit, limit);

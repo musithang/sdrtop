@@ -233,6 +233,7 @@ mod tests {
                 converter_bits: None,
             },
             stream_pairs: std::sync::atomic::AtomicU64::new(0),
+            streams_begun: std::sync::atomic::AtomicU64::new(0),
             record: Default::default(),
             intake: Default::default(),
         };

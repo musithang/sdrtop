@@ -70,6 +70,8 @@ pub fn spawn_rx_task(
         // nothing, and it means there is no separate first-time branch to get
         // wrong.
         let mut baseline_rate = f64::NAN;
+        // The streams begun at the last baseline restart.
+        let mut baseline_streams = 0u64;
         // The radio's drop count and stream position at the last reading.
         let mut drops_seen: Option<(u32, u64)> = None;
         // Where the constellation is zoomed to: it holds before zooming in.
@@ -88,13 +90,28 @@ pub fn spawn_rx_task(
             // `[S]` retunes the rate mid-stream. Averaging across that would
             // report the blend of two rates as an offset from one of them, for
             // the whole length of the baseline.
-            let rate_restarted = drained.config_sample_rate != baseline_rate;
+            // A stream begun again (a rate change made by stopping and
+            // starting it) restarts the baseline too: the silence between the
+            // two streams is not the radio's rate.
+            let streams = rx_ctx
+                .streams_begun
+                .load(std::sync::atomic::Ordering::Relaxed);
+            let rate_restarted = metrics::baseline_restarts(
+                (drained.config_sample_rate, streams),
+                (baseline_rate, baseline_streams),
+            );
             if rate_restarted {
                 baseline_rate = drained.config_sample_rate;
+                baseline_streams = streams;
                 rate.reset();
                 throughput.reset();
+            } else {
+                // Not the window the baseline restarted in: its last block can
+                // be the old stream's, and taken as the new baseline's start it
+                // counted the silence before the new stream as time with no
+                // samples in it (93 ms, -9435 ppm ten seconds on).
+                rate.push(drained.last_block_at, drained.bytes);
             }
-            rate.push(drained.last_block_at, drained.bytes);
 
             let iq = metrics::iq_metrics(
                 drained.moments,
@@ -391,6 +408,7 @@ mod power_control_tests {
             power_tx,
             geometry: SampleGeometry::default(),
             stream_pairs: std::sync::atomic::AtomicU64::new(0),
+            streams_begun: std::sync::atomic::AtomicU64::new(0),
             record: Default::default(),
             intake: Default::default(),
         })
