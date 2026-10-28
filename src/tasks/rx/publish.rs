@@ -71,6 +71,9 @@ pub(super) struct Computed {
     /// Delivered sample rate over the long baseline, or `None` while that
     /// baseline is still too short to mean anything.
     pub measured_rate: Option<u32>,
+    /// The baseline started again this window (the rate changed): the last
+    /// figure measured belongs to the old rate and is no longer one.
+    pub rate_restarted: bool,
     /// Read-loop occupancy for a pull backend, over this poll window.
     pub read_occupancy: Option<f32>,
     /// The radio's own drop count over this window: `Ok(None)` from a radio
@@ -114,14 +117,10 @@ pub(super) fn write_back(
 
     // The delivered sample rate, measured over tens of seconds rather than over
     // this one window. `None` means the baseline is not long enough yet, and the
-    // last good figure is kept rather than replaced by a worse one.
-    if let Some(rate) = c.measured_rate {
-        m.radio.actual_sample_rate = rate;
-        if m.radio.sample_rate_history.len() >= crate::state::THROUGHPUT_HISTORY_LEN {
-            m.radio.sample_rate_history.pop_front();
-        }
-        m.radio.sample_rate_history.push_back(rate as u64);
-    }
+    // last good figure is kept rather than replaced by a worse one: but only
+    // the last figure at this rate. Carried across a rate change, 768 kS/s
+    // measured against 192 configured read as +3 000 000 ppm for ten seconds.
+    carry_measured_rate(&mut m, c.measured_rate, c.rate_restarted);
 
     if c.had_samples {
         let iq = &c.iq;
@@ -221,6 +220,22 @@ pub(super) fn write_back(
     m.radio.rx_enabled
 }
 
+/// The measured rate into the state: a new figure when the baseline has one,
+/// the last figure kept while it has none, and none at all once the baseline
+/// has started again for a new rate.
+fn carry_measured_rate(m: &mut SdrMetrics, measured: Option<u32>, restarted: bool) {
+    if restarted {
+        m.radio.actual_sample_rate = 0;
+    }
+    if let Some(rate) = measured {
+        m.radio.actual_sample_rate = rate;
+        if m.radio.sample_rate_history.len() >= crate::state::THROUGHPUT_HISTORY_LEN {
+            m.radio.sample_rate_history.pop_front();
+        }
+        m.radio.sample_rate_history.push_back(rate as u64);
+    }
+}
+
 /// Push one sample onto each of the five signal trend rings.
 ///
 /// Split out because the borrow dance is the whole content: every value has to be
@@ -276,6 +291,23 @@ mod tests {
     /// (nothing on screen reads it) the SNR, power and noise floor trends
     /// get nothing, rather than its last frame again and again; the
     /// saturation, measured here, goes on.
+    /// **The last measured rate is kept only at its own rate.** While the
+    /// baseline is short the last figure stands; when the rate changes it
+    /// goes, so the clock is not 768 kS/s measured against 192 configured.
+    #[test]
+    fn the_measured_rate_does_not_outlive_its_rate() {
+        let mut m = SdrMetrics::fixture().streaming();
+        carry_measured_rate(&mut m, Some(768_004), false);
+        assert_eq!(m.radio.actual_sample_rate, 768_004);
+        carry_measured_rate(&mut m, None, false);
+        assert_eq!(
+            m.radio.actual_sample_rate, 768_004,
+            "kept while the baseline is short"
+        );
+        carry_measured_rate(&mut m, None, true);
+        assert_eq!(m.radio.actual_sample_rate, 0, "gone with its rate");
+    }
+
     /// A balance that is not the front end's keeps no IRR trend: with the
     /// LO turned off the centre the other trends go on and the IRR's does not.
     #[test]

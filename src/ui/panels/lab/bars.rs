@@ -202,7 +202,14 @@ fn timing_banner_fields(
         ("JITTER", format!("\u{00b1}{} \u{00b5}s", t.cb_jitter_us)),
         // The sample clock's offset over the long baseline: the one clock
         // figure the bench shows, here as in the diagnostics column.
-        ("CLOCK", format!("{:+} ppm", t.sr_delta_ppm)),
+        (
+            "CLOCK",
+            if t.sr_known {
+                format!("{:+} ppm", t.sr_delta_ppm)
+            } else {
+                "\u{2014}".to_string()
+            },
+        ),
         last,
     ]
 }
@@ -725,7 +732,11 @@ fn timing_marker_lines(state: &SdrMetrics, theme: &crate::Theme, iw: usize) -> V
         vec![
             Span::raw("   "),
             Span::styled("CLOCK ", dim),
-            crate::ui::widgets::timing_fmt::ppm_span(t.sr_delta_ppm, theme),
+            if t.sr_known {
+                crate::ui::widgets::timing_fmt::ppm_span(t.sr_delta_ppm, theme)
+            } else {
+                Span::styled("\u{2014}", dim)
+            },
         ],
         &mut used,
         &mut spans,
@@ -1332,6 +1343,30 @@ mod tests {
         let f = timing_banner_fields(&t, push);
         let deadline = f.iter().find(|(k, _)| *k == "DEADLINE").unwrap();
         assert_eq!(deadline.1, "\u{26a0} 1044%");
+    }
+
+    /// **No measured rate, no clock figure.** Until the long baseline has run
+    /// the banner's CLOCK is a dash, never `+0 ppm`, which reads as a clock
+    /// found perfect; with a rate measured it is the offset.
+    #[test]
+    fn the_clock_is_a_dash_until_a_rate_is_measured() {
+        let push = crate::hardware::DeliveryModel::Push;
+        let mut t = crate::state::TimingState {
+            cb_period_us: 5_333,
+            sr_delta_ppm: 0,
+            ..Default::default()
+        };
+        let clock = |t: &crate::state::TimingState| {
+            timing_banner_fields(t, push)
+                .into_iter()
+                .find(|(k, _)| *k == "CLOCK")
+                .unwrap()
+                .1
+        };
+        assert_eq!(clock(&t), "\u{2014}");
+        t.sr_known = true;
+        t.sr_delta_ppm = 5;
+        assert_eq!(clock(&t), "+5 ppm");
     }
 
     /// The same alarming numbers on a pull backend must not produce a deadline

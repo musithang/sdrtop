@@ -106,6 +106,8 @@ pub(super) fn apply_rx_request(
             tp.reset();
             rate.reset();
             let mut m = state.lock().unwrap_or_else(|e| e.into_inner());
+            // A new session measures its own rate; the last one's is not it.
+            m.radio.actual_sample_rate = 0;
             m.radio.rx_start_time = Some(Instant::now());
             m.timing.jitter_session_max_us = 0;
             m.push_log("RX streaming started");

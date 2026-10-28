@@ -245,6 +245,11 @@ pub struct TimingState {
     pub jitter_session_max_us: u64,
     /// Sample-rate offset (actual vs configured), in ppm.
     pub sr_delta_ppm: i64,
+    /// Whether there is a measured rate to give that offset against. Until
+    /// the long baseline has run (after RX starts, or the rate changes) there
+    /// is not, and the offset is not a reading: shown as a dash, never as
+    /// `+0 ppm`.
+    pub sr_known: bool,
     pub throughput_mean_mbps: f64,
     pub throughput_std_mbps: f64,
     /// Bytes on the radio's link per pair delivered, when the backend knows
@@ -374,6 +379,7 @@ impl TimingState {
             // from this window - start at 0 here.
             jitter_session_max_us: 0,
             sr_delta_ppm,
+            sr_known: config_sample_rate > 0.0 && actual_sample_rate > 0,
             throughput_mean_mbps,
             throughput_std_mbps,
             // The rx task sets it from the device after this rebuild.

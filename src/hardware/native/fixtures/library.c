@@ -3,6 +3,7 @@
 // For pthreads and nanosleep under -std=c11.
 #define _POSIX_C_SOURCE 200809L
 
+#include <math.h>
 #include <pthread.h>
 #include <time.h>
 #include <stdint.h>
@@ -303,8 +304,10 @@ int airspyhf_close(void *device) { calls[3]++; free(device); return 0; }
 // What the backend asked libairspyhf for last, by field (see
 // fixture_airspyhf_state): 0 the length passed to version_string_read, 1 the
 // frequency in kHz, 2 the rate argument, 3 library DSP, 4 attenuator index,
-// 5 LNA, 6 AGC, 7 AGC threshold. -1 until asked.
-static int airspyhf_state[8] = {-1, -1, -1, -1, -1, -1, -1, -1};
+// 5 LNA, 6 AGC, 7 AGC threshold, 8 streams started, 9 stops asked, 10 the
+// rate in force when the last stream started, 11 tunings asked, 12 library
+// DSP when the last stream started. -1 until asked, the counts from 0.
+static int airspyhf_state[13] = {-1, -1, -1, -1, -1, -1, -1, -1, 0, 0, -1, 0, -1};
 int fixture_airspyhf_state(int field) { return airspyhf_state[field]; }
 typedef struct { uint32_t part_id; uint32_t serial_no[4]; } airspyhf_read_partid_serialno_t;
 size_t fixture_airspyhf_layout(int field) {
@@ -348,6 +351,7 @@ int airspyhf_get_calibration(void *device, int32_t *ppb) {
         airspyhf_state[field] = (int)value; return 0; }
 int airspyhf_set_freq(void *device, uint32_t freq_hz) {
     if (mode == 34) return -1;
+    airspyhf_state[11]++;
     airspyhf_state[1] = (int)(freq_hz / 1000); return 0;
 }
 AIRSPYHF_SET(airspyhf_set_samplerate, 2, uint32_t)
@@ -363,6 +367,76 @@ int airspyhf_is_low_if(void *device) {
 }
 // 1.6.8's block.
 int airspyhf_get_output_size(void *device) { return 2048; }
+// airspyhf_transfer_t in airspyhf.h, field for field.
+typedef struct { float re; float im; } airspyhf_complex_float_t;
+typedef struct {
+    void *device;
+    void *ctx;
+    airspyhf_complex_float_t *samples;
+    int sample_count;
+    uint64_t dropped_samples;
+} airspyhf_transfer_t;
+size_t fixture_airspyhf_transfer_layout(int field) {
+    switch (field) {
+        case 0: return sizeof(airspyhf_transfer_t);
+        case 1: return offsetof(airspyhf_transfer_t, samples);
+        case 2: return offsetof(airspyhf_transfer_t, sample_count);
+        case 3: return offsetof(airspyhf_transfer_t, dropped_samples);
+        default: abort();
+    }
+}
+typedef int (*airspyhf_cb)(airspyhf_transfer_t *);
+static struct { pthread_t thread; int running; airspyhf_cb cb; void *ctx; void *device; } airspyhf_stream;
+static _Atomic int airspyhf_streaming, airspyhf_stop_flag;
+// The firmware's filter gain at the bench Discovery's rates, dB: what the
+// library divides the words by (192 kS/s 16 dB, 768 kS/s none).
+static int airspyhf_gain_db(void) { return airspyhf_state[2] == 192000 ? 16 : 0; }
+// libairspyhf's consumer thread: four blocks of four pairs, block k's pair i
+// carrying the words I = 100k + i + 1 and Q = -(100k + i + 1), times the
+// filter gain over 32768 as the library computes it in float. With the DSP
+// off those are the words exactly; with it on, a quarter of a word is added,
+// as the library's correction leaves fractions. Before the third block one
+// buffer was lost: four pairs, at that block's size.
+static void *airspyhf_consumer(void *arg) {
+    airspyhf_complex_float_t samples[4];
+    for (int k = 0; k < 4; k++) {
+        float gain = (1.0f / 32768) * powf(10.0f, (float)airspyhf_gain_db() * -0.05f);
+        float frac = airspyhf_state[3] == 1 ? 0.25f : 0.0f;
+        for (int i = 0; i < 4; i++) {
+            samples[i].re = ((float)(100 * k + i + 1) + frac) * gain;
+            samples[i].im = -((float)(100 * k + i + 1) + frac) * gain;
+        }
+        airspyhf_transfer_t t = {airspyhf_stream.device, airspyhf_stream.ctx, samples, 4, k == 2 ? 4 : 0};
+        airspyhf_stream.cb(&t);
+    }
+    if (mode == 35) { airspyhf_streaming = 0; return NULL; }
+    while (!airspyhf_stop_flag) {
+        struct timespec pause = {0, 1000000};
+        nanosleep(&pause, NULL);
+    }
+    return NULL;
+}
+int airspyhf_start(void *device, airspyhf_cb cb, void *ctx) {
+    if (mode == 34 || airspyhf_streaming) return -1;
+    airspyhf_state[8]++;
+    airspyhf_state[10] = airspyhf_state[2];
+    airspyhf_state[12] = airspyhf_state[3];
+    airspyhf_stream.cb = cb;
+    airspyhf_stream.ctx = ctx;
+    airspyhf_stream.device = device;
+    airspyhf_stop_flag = 0;
+    airspyhf_streaming = 1;
+    airspyhf_stream.running = pthread_create(&airspyhf_stream.thread, NULL, airspyhf_consumer, NULL) == 0;
+    return airspyhf_stream.running ? 0 : -1;
+}
+int airspyhf_stop(void *device) {
+    airspyhf_state[9]++;
+    airspyhf_stop_flag = 1;
+    if (airspyhf_stream.running) { pthread_join(airspyhf_stream.thread, NULL); airspyhf_stream.running = 0; }
+    airspyhf_streaming = 0;
+    return 0;
+}
+int airspyhf_is_streaming(void *device) { return airspyhf_streaming; }
 #ifndef OMIT_LAST_SYMBOL
 int airspyhf_get_samplerates(void *device, uint32_t *buffer, uint32_t len) {
     static const uint32_t rates[] = {912000, 768000, 650000, 456000, 384000, 228000, 192000};

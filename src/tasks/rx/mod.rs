@@ -88,7 +88,8 @@ pub fn spawn_rx_task(
             // `[S]` retunes the rate mid-stream. Averaging across that would
             // report the blend of two rates as an offset from one of them, for
             // the whole length of the baseline.
-            if drained.config_sample_rate != baseline_rate {
+            let rate_restarted = drained.config_sample_rate != baseline_rate;
+            if rate_restarted {
                 baseline_rate = drained.config_sample_rate;
                 rate.reset();
                 throughput.reset();
@@ -112,6 +113,7 @@ pub fn spawn_rx_task(
                     drained.jitter_count,
                 ),
                 measured_rate: rate.rate(device.capabilities().sample_geometry.bytes_per_pair()),
+                rate_restarted,
                 read_occupancy: window_occupancy(device.read_loop_us(), &mut last_loop_us),
                 // Asked only of a running stream: the count is the stream's.
                 radio_drops: if hw_streaming && hw_rx_active {

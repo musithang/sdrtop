@@ -3,8 +3,15 @@
 
 //! The Airspy HF+ Discovery, driven through libairspyhf.
 //!
-//! Found, identified, opened and described here, for now only when `--device
-//! airspyhf` names this backend; it does not stream yet.
+//! Found, identified, opened, described and streamed here, for now only when
+//! `--device airspyhf` names this backend.
+//!
+//! **libairspyhf owns the threads.** Its USB thread queues whole buffers and
+//! its consumer thread converts them to floats and calls [`rx_callback`],
+//! which turns them back into the radio's words (with fraction bits, so the
+//! library's correction is not rounded away) and hands the block to
+//! [`crate::hardware::intake`]. The library hides the scale it divided the
+//! words by; each stream reads it from its first block ([`filter_gain_db`]).
 //!
 //! **Its gains are what they say.** The attenuator's 6 dB steps and the LNA's
 //! 6 dB were measured on the bench against steady carriers, at HF and VHF,
@@ -310,6 +317,185 @@ pub fn caps(rates: &[u32], samples_per_transfer: u64) -> DeviceCapabilities {
     }
 }
 
+// ── The stream (libairspyhf's consumer thread) ─────────────────────────────
+
+/// The firmware's filter gain, whole dB, from a block taken with the
+/// library's DSP off, or `None` when the block cannot tell.
+///
+/// libairspyhf hands each 16-bit word as `word * (1/32768 * 10^(-g/20))`,
+/// computed in float, and never says what `g` is; it differs from rate to
+/// rate and may from firmware to firmware. With the DSP off nothing else
+/// touches the samples, so the right `g` is one that turns every sample back
+/// into a whole word. A larger `g` by 20 dB turns them into whole words too
+/// (ten times each), so the smallest that fits is taken, and only where some
+/// word is not a multiple of ten: a block of zeros, or of tens, tells nothing.
+/// Only ever given blocks taken with the DSP off: samples carrying decimal
+/// fractions of a word would fit a `g` 20 or 40 dB too high, and the DSP's
+/// are not whole words at any gain.
+pub fn filter_gain_db(samples: &[f32]) -> Option<u8> {
+    (0u8..=60).find(|&g| {
+        let per_word = f64::from(word_gain(g));
+        let mut telling = false;
+        for &x in samples {
+            let word = f64::from(x) / per_word;
+            if (word - word.round()).abs() > 1e-3 {
+                return false;
+            }
+            telling |= (word.round() as i64) % 10 != 0;
+        }
+        telling
+    })
+}
+
+/// What libairspyhf multiplies a word by at filter gain `g`, in float as it
+/// computes it (`airspyhf.c`, `convert_samples`).
+fn word_gain(g: u8) -> f32 {
+    (1.0f32 / 32768.0) * 10f32.powf(f32::from(g) * -0.05)
+}
+
+/// Counts per float at filter gain `g`: the USB word's scale with eight
+/// fraction bits below it, the container's full scale at the word's.
+fn scale_for(g: u8) -> f64 {
+    256.0 / f64::from(word_gain(g))
+}
+
+/// What a stream carries from one block to the next. Only libairspyhf's
+/// consumer thread converts, so `conversion` is never contended; `tuning` is
+/// the device's own, locked once a stream to put the frequency back after the
+/// measurement.
+struct StreamCtx {
+    rx: Arc<RxContext>,
+    api: &'static ffi::AirspyHfApi,
+    ptr: *mut c_void,
+    rate: u32,
+    tuning: Arc<Mutex<Tuning>>,
+    conversion: Mutex<Conversion>,
+}
+
+// Safety: the handle is used from the consumer thread only for the two calls
+// that end the measurement, under the device's tuning mutex, which every
+// other tuning call takes too.
+unsafe impl Send for StreamCtx {}
+unsafe impl Sync for StreamCtx {}
+
+#[derive(Default)]
+struct Conversion {
+    /// Counts per float once the filter gain is known; `None` while the
+    /// stream is still measuring it, with the library's DSP off.
+    scale: Option<f64>,
+    gain_db: Option<u8>,
+    /// Blocks that could not tell the gain.
+    undecided: u32,
+    /// Whether the log has been told what was measured.
+    said: bool,
+    words: Vec<u8>,
+}
+
+extern "C" fn rx_callback(transfer: *mut ffi::Transfer) -> c_int {
+    // No Rust panic may cross into C.
+    let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        // SAFETY: libairspyhf hands a transfer valid for this call, whose
+        // `ctx` is the `StreamCtx` the device keeps alive (see `Stream`).
+        unsafe { rx_block(transfer) }
+    }));
+    // Never asks libairspyhf to stop: 1.6.8 answers a non-zero return by
+    // ending its consumer thread while still calling the stream running.
+    0
+}
+
+/// # Safety
+/// `transfer` is null or a transfer libairspyhf passed to the callback, with
+/// `ctx` null or a live `StreamCtx`.
+unsafe fn rx_block(transfer: *mut ffi::Transfer) {
+    // Stamped first, so the timing bench measures the interval between
+    // deliveries and not entry plus our own work.
+    let now = std::time::Instant::now();
+    // SAFETY: the caller's contract.
+    let Some(t) = (unsafe { transfer.as_ref() }) else {
+        return;
+    };
+    if t.ctx.is_null() || t.samples.is_null() {
+        return;
+    }
+    let Ok(pairs) = usize::try_from(t.sample_count) else {
+        return;
+    };
+    // SAFETY: the caller's contract.
+    let ctx = unsafe { &*(t.ctx as *const StreamCtx) };
+    // SAFETY: a transfer holds `sample_count` complex floats.
+    let floats = unsafe { std::slice::from_raw_parts(t.samples as *const f32, pairs * 2) };
+    let mut conv = ctx.conversion.lock().unwrap_or_else(|e| e.into_inner());
+    let Some(scale) = conv.scale else {
+        measure(ctx, &mut conv, floats);
+        return;
+    };
+    conv.words.clear();
+    conv.words.reserve(floats.len() * 4);
+    for &x in floats {
+        let word = (f64::from(x) * scale)
+            .round()
+            .clamp(f64::from(i32::MIN), f64::from(i32::MAX)) as i32;
+        conv.words.extend_from_slice(&word.to_le_bytes());
+    }
+    crate::hardware::intake::deliver(&ctx.rx, &conv.words, t.dropped_samples, now);
+    if !conv.said {
+        conv.said = say_measured(ctx, &conv);
+    }
+}
+
+/// A block taken while the filter gain is not known yet, with the library's
+/// DSP off: read the gain from it if it can tell, and once it does, put the
+/// DSP back on and the frequency back as it is meant to be. The block itself
+/// is not delivered: uncorrected and unturned, it is not the stream the
+/// rest is, so the stream's positions start after it.
+fn measure(ctx: &StreamCtx, conv: &mut Conversion, floats: &[f32]) {
+    let Some(g) = filter_gain_db(floats) else {
+        conv.undecided += 1;
+        return;
+    };
+    conv.gain_db = Some(g);
+    conv.scale = Some(scale_for(g));
+    let tuning = ctx.tuning.lock().unwrap_or_else(|e| e.into_inner());
+    // SAFETY: the handle is open while a stream runs; the tuning mutex keeps
+    // this from crossing a tuning made from another thread. With the DSP back
+    // on, a frequency set while it was off gets the IF shift it lacked; the
+    // same frequency again moves nothing.
+    unsafe {
+        (ctx.api.airspyhf_set_lib_dsp)(ctx.ptr, 1);
+        if tuning.freq_hz > 0 {
+            (ctx.api.airspyhf_set_freq)(ctx.ptr, tuning.freq_hz as u32);
+        }
+    }
+}
+
+/// Tell the log what the stream measured, without ever waiting for the lock:
+/// `false` when it is busy, and the next block tries again.
+fn say_measured(ctx: &StreamCtx, conv: &Conversion) -> bool {
+    let Ok(mut m) = ctx.rx.metrics.try_lock() else {
+        return false;
+    };
+    m.push_log(format!(
+        "{}: the USB word's scale at {} kS/s read from the samples: filter gain {} dB",
+        Board::Discovery.name(),
+        ctx.rate / 1000,
+        conv.gain_db.unwrap_or(0),
+    ));
+    true
+}
+
+/// What the device keeps while libairspyhf's threads may call back into it.
+#[derive(Default)]
+struct Stream {
+    /// The context handed to the running stream, kept alive until
+    /// libairspyhf has joined the threads that use it.
+    ctx: Option<Arc<StreamCtx>>,
+    /// Contexts of streams libairspyhf ended by itself (a USB transfer that
+    /// came back short, the radio leaving the bus). 1.6.8 then joins nothing
+    /// on stop and leaves its transfers live, so they are never let go; nor is
+    /// the handle closed (see `Drop`).
+    stranded: Vec<Arc<StreamCtx>>,
+}
+
 /// Where the radio is tuned, as the device last set it: libairspyhf has no
 /// getters.
 struct Tuning {
@@ -328,7 +514,11 @@ pub struct AirspyHfDevice {
     rates: Vec<u32>,
     /// The flash's reference correction, read at open.
     ppb: i32,
-    tuning: Mutex<Tuning>,
+    tuning: Arc<Mutex<Tuning>>,
+    /// Held across every start, stop and restart, so the RX task's
+    /// [`SdrDevice::is_streaming`] never sees the gap inside a rate change as
+    /// a stream that stopped.
+    stream: Mutex<Stream>,
 }
 
 // Safety: the handle is only used through libairspyhf, which serialises its
@@ -399,11 +589,12 @@ impl AirspyHfDevice {
             notes: Vec::new(),
             rates: found.rates,
             ppb: ppb.unwrap_or(0),
-            tuning: Mutex::new(Tuning {
+            tuning: Arc::new(Mutex::new(Tuning {
                 freq_hz: 0,
                 rate: 0,
                 low_if: false,
-            }),
+            })),
+            stream: Mutex::new(Stream::default()),
         };
         // What the firmware and the library would otherwise keep from the last
         // program, stated: the library's correction on, the AGC off at its low
@@ -454,6 +645,65 @@ impl AirspyHfDevice {
     fn tuning(&self) -> std::sync::MutexGuard<'_, Tuning> {
         self.tuning.lock().unwrap_or_else(|e| e.into_inner())
     }
+
+    fn stream(&self) -> std::sync::MutexGuard<'_, Stream> {
+        self.stream.lock().unwrap_or_else(|e| e.into_inner())
+    }
+
+    /// Whether libairspyhf says its stream runs.
+    fn library_streaming(&self) -> bool {
+        // SAFETY: the handle is open.
+        unsafe { (self.api.airspyhf_is_streaming)(self.ptr) != 0 }
+    }
+
+    /// Starts libairspyhf's threads on a new context for `rx`, with the
+    /// library's DSP off until the first block has told the filter gain at
+    /// this rate (see [`filter_gain_db`]).
+    fn start_locked(&self, stream: &mut Stream, rx: Arc<RxContext>) -> anyhow::Result<()> {
+        let ctx = Arc::new(StreamCtx {
+            rx,
+            api: self.api,
+            ptr: self.ptr,
+            rate: self.tuning().rate,
+            tuning: Arc::clone(&self.tuning),
+            conversion: Mutex::new(Conversion::default()),
+        });
+        // SAFETY: the handle is open.
+        self.check(
+            unsafe { (self.api.airspyhf_set_lib_dsp)(self.ptr, 0) },
+            "switch the library's DSP off to measure",
+        )?;
+        let user = Arc::as_ptr(&ctx) as *mut c_void;
+        stream.ctx = Some(ctx);
+        // SAFETY: the handle is open; `user` stays valid while `stream` holds it.
+        let code = unsafe { (self.api.airspyhf_start)(self.ptr, rx_callback, user) };
+        if code != 0 {
+            stream.ctx = None;
+            // SAFETY: as above.
+            unsafe { (self.api.airspyhf_set_lib_dsp)(self.ptr, 1) };
+        }
+        self.check(code, "start streaming")
+    }
+
+    /// Stops libairspyhf's stream and lets the context go once nothing can
+    /// call back with it.
+    fn stop_locked(&self, stream: &mut Stream) -> anyhow::Result<()> {
+        // 1.6.8 joins its threads only for a stream it still calls running;
+        // one that ended by itself leaves its consumer thread behind.
+        let joined = self.library_streaming();
+        // SAFETY: the handle is open.
+        let code = unsafe { (self.api.airspyhf_stop)(self.ptr) };
+        if let Some(ctx) = stream.ctx.take() {
+            if !joined {
+                stream.stranded.push(ctx);
+            }
+        }
+        // The DSP back on whatever the stream left it at, so a tuning made
+        // while stopped gets its IF shift.
+        // SAFETY: as above.
+        unsafe { (self.api.airspyhf_set_lib_dsp)(self.ptr, 1) };
+        self.check(code, "stop streaming")
+    }
 }
 
 impl SdrDevice for AirspyHfDevice {
@@ -465,19 +715,37 @@ impl SdrDevice for AirspyHfDevice {
         self.info.clone()
     }
 
-    fn start_rx(&self, _ctx: Arc<RxContext>) -> anyhow::Result<()> {
-        anyhow::bail!(
-            "the {}'s own backend opens and describes the radio but cannot stream yet",
-            Board::Discovery.name()
-        )
+    fn start_rx(&self, ctx: Arc<RxContext>) -> anyhow::Result<()> {
+        let mut stream = self.stream();
+        if stream.ctx.is_some() && self.library_streaming() {
+            return Ok(());
+        }
+        // A stream that ended by itself is stopped before a new one starts,
+        // so its context is accounted for.
+        if stream.ctx.is_some() {
+            self.stop_locked(&mut stream)?;
+        }
+        let started = self.start_locked(&mut stream, ctx);
+        // A radio that fell off the bus comes back as a new USB device, which
+        // this handle no longer reaches.
+        if started.is_err() && !stream.stranded.is_empty() {
+            return started.map_err(|e| {
+                e.context(
+                    "the last stream ended by itself; if the radio left the USB bus, \
+                     open it again from the menu or restart sdrtop",
+                )
+            });
+        }
+        started
     }
 
     fn stop_rx(&self) -> anyhow::Result<()> {
-        Ok(())
+        self.stop_locked(&mut self.stream())
     }
 
     fn is_streaming(&self) -> bool {
-        false
+        let _stream = self.stream();
+        self.library_streaming()
     }
 
     fn set_frequency(&self, hz: u64) -> anyhow::Result<()> {
@@ -489,17 +757,28 @@ impl SdrDevice for AirspyHfDevice {
                 hz as f64 / 1e6
             );
         }
+        // Under the tuning mutex, which the stream also takes when it puts
+        // the frequency back after measuring.
+        let mut tuning = self.tuning();
         // SAFETY: the handle is open; the bands keep `hz` inside u32.
         self.check(
             unsafe { (self.api.airspyhf_set_freq)(self.ptr, hz as u32) },
             "tune",
         )?;
-        self.tuning().freq_hz = hz;
+        tuning.freq_hz = hz;
         Ok(())
     }
 
     /// One of the rates the firmware lists, set as asked; whether it is a
     /// low-IF one is read back, because where the LO sits depends on it.
+    ///
+    /// **Never on a running stream.** A rate set while streaming, followed by
+    /// a tuning below the lowest low-IF LO, left this radio sending nothing
+    /// from its next start until it was unplugged (measured, and reported to
+    /// Airspy, who traced it to the silicon). A running stream is stopped,
+    /// the rate set, and the stream started again, measuring the new rate's
+    /// filter gain afresh; its positions count from zero, as any new stream's
+    /// do, so no block of it is joined to one at the old rate.
     fn set_sample_rate(&self, hz: f64) -> anyhow::Result<RateSet> {
         let Some(&rate) = self
             .rates
@@ -513,16 +792,27 @@ impl SdrDevice for AirspyHfDevice {
                 listed.join(", ")
             );
         };
-        // SAFETY: the handle is open.
-        self.check(
-            unsafe { (self.api.airspyhf_set_samplerate)(self.ptr, rate) },
-            "set the rate",
-        )?;
-        // SAFETY: the handle is open.
-        let low_if = unsafe { (self.api.airspyhf_is_low_if)(self.ptr) } != 0;
-        let mut tuning = self.tuning();
-        tuning.rate = rate;
-        tuning.low_if = low_if;
+        let mut stream = self.stream();
+        let running = stream.ctx.clone().filter(|_| self.library_streaming());
+        if running.is_some() {
+            self.stop_locked(&mut stream)?;
+        }
+        {
+            let mut tuning = self.tuning();
+            // SAFETY: the handle is open.
+            self.check(
+                unsafe { (self.api.airspyhf_set_samplerate)(self.ptr, rate) },
+                "set the rate",
+            )?;
+            // SAFETY: the handle is open.
+            tuning.low_if = unsafe { (self.api.airspyhf_is_low_if)(self.ptr) } != 0;
+            tuning.rate = rate;
+        }
+        if let Some(ctx) = running {
+            ctx.rx.begin_stream();
+            self.start_locked(&mut stream, Arc::clone(&ctx.rx))
+                .map_err(|e| e.context("the stream stopped for the rate change"))?;
+        }
         Ok(RateSet::new(f64::from(rate), None, 0))
     }
 
@@ -562,6 +852,12 @@ impl SdrDevice for AirspyHfDevice {
         )
     }
 
+    /// The radio's 16-bit I and Q words cross the link, four bytes a pair,
+    /// whatever container sdrtop carries them in afterwards.
+    fn wire_bytes_per_pair(&self) -> Option<f64> {
+        Some(4.0)
+    }
+
     fn lo_offset_hz(&self) -> i64 {
         let t = self.tuning();
         if t.rate == 0 || t.freq_hz == 0 {
@@ -573,7 +869,20 @@ impl SdrDevice for AirspyHfDevice {
 
 impl Drop for AirspyHfDevice {
     fn drop(&mut self) {
-        // SAFETY: the handle was opened in `open` and is closed once, here.
+        let mut stream = self.stream();
+        if stream.ctx.is_some() {
+            let _ = self.stop_locked(&mut stream);
+        }
+        // A stream libairspyhf ended by itself leaves transfers 1.6.8 never
+        // reaped, and its close frees them after tearing down the USB context
+        // they belong to. Such a handle is held, with its context, until the
+        // process exits and the system releases both.
+        if !stream.stranded.is_empty() {
+            return;
+        }
+        drop(stream);
+        // SAFETY: the handle was opened in `open` and is closed once, here,
+        // after its stream.
         unsafe { (self.api.airspyhf_close)(self.ptr) };
     }
 }
@@ -902,13 +1211,194 @@ mod tests {
         assert_eq!(fixture.airspyhf_state(6), 1);
     }
 
-    /// It does not stream yet, and says so.
+    const WAIT: std::time::Duration = std::time::Duration::from_secs(5);
+
+    fn streaming_ctx() -> (
+        Arc<RxContext>,
+        crossbeam_channel::Receiver<crate::hardware::StreamBlock>,
+    ) {
+        let (ctx, _fft, _demod, net) = crate::hardware::process::tests::rx_ctx_of(
+            caps(&[912_000, 768_000, 192_000], 2048).sample_geometry,
+        );
+        (ctx, net)
+    }
+
+    fn words(block: &crate::hardware::StreamBlock) -> Vec<i32> {
+        block
+            .bytes
+            .as_chunks::<4>()
+            .0
+            .iter()
+            .map(|&b| i32::from_le_bytes(b))
+            .collect()
+    }
+
+    /// **The hidden gain is read back from the samples**: each word times the
+    /// library's float gain at `g` gives `g` again, at every gain the
+    /// Discovery's rates use; a block of zeros, of tens, or with the DSP's
+    /// fractions in it tells nothing.
     #[test]
-    fn starting_rx_says_it_cannot_stream_yet() {
-        let (_fixture, device) = opened();
-        let (ctx, _s, _d, _n) = crate::hardware::process::tests::rx_ctx();
-        let why = device.start_rx(ctx).unwrap_err().to_string();
-        assert!(why.contains("cannot stream yet"), "{why}");
+    fn the_filter_gain_is_read_from_the_words() {
+        for g in [0u8, 3, 7, 9, 13, 16] {
+            let block: Vec<f32> = (-700i32..700).map(|w| w as f32 * word_gain(g)).collect();
+            assert_eq!(filter_gain_db(&block), Some(g), "g = {g}");
+        }
+        assert_eq!(filter_gain_db(&[0.0; 64]), None, "zeros tell nothing");
+        let tens: Vec<f32> = (1..50).map(|w| (w * 10) as f32 * word_gain(0)).collect();
+        assert_eq!(filter_gain_db(&tens), None, "nor do tens: 0 or 20 dB?");
+        // A third of a word: no power of ten makes it whole, as no DSP
+        // output is whole words at any gain.
+        let turned: Vec<f32> = (1..50)
+            .map(|w| (w as f32 + 1.0 / 3.0) * word_gain(0))
+            .collect();
+        assert_eq!(
+            filter_gain_db(&turned),
+            None,
+            "the DSP's fractions are no words"
+        );
+    }
+
+    /// The transfer struct has the layout libairspyhf hands over.
+    #[test]
+    fn the_transfer_matches_the_c_layout() {
+        let fixture = TestLibrary::new(false);
+        assert_eq!(
+            fixture.airspyhf_transfer_layout(0),
+            std::mem::size_of::<ffi::Transfer>()
+        );
+        assert_eq!(
+            fixture.airspyhf_transfer_layout(1),
+            std::mem::offset_of!(ffi::Transfer, samples)
+        );
+        assert_eq!(
+            fixture.airspyhf_transfer_layout(2),
+            std::mem::offset_of!(ffi::Transfer, sample_count)
+        );
+        assert_eq!(
+            fixture.airspyhf_transfer_layout(3),
+            std::mem::offset_of!(ffi::Transfer, dropped_samples)
+        );
+    }
+
+    /// **A stream starts by measuring, then delivers the words.** It starts
+    /// with the library's DSP off; the first block tells the filter gain (16
+    /// dB at 192 kS/s), is not delivered, and the DSP goes back on with the
+    /// frequency set again; the rest arrive as the radio's words with eight
+    /// fraction bits (the fixture's quarter word is 64 counts), the buffer
+    /// the library lost counted and placed. The log says what was measured.
+    /// Stopping joins the threads and lets the context go.
+    #[test]
+    fn a_stream_measures_its_scale_then_delivers_words() {
+        let (fixture, device) = opened();
+        device.set_sample_rate(192_000.0).unwrap();
+        device.set_frequency(7_100_000).unwrap();
+        let tuned = fixture.airspyhf_state(11);
+        let (ctx, net) = streaming_ctx();
+        device.start_rx(Arc::clone(&ctx)).unwrap();
+        assert_eq!(fixture.airspyhf_state(12), 0, "started with the DSP off");
+        let blocks: Vec<_> = (0..3).map(|_| net.recv_timeout(WAIT).unwrap()).collect();
+        assert_eq!(fixture.airspyhf_state(3), 1, "the DSP back on");
+        assert_eq!(
+            fixture.airspyhf_state(11),
+            tuned + 1,
+            "the frequency set again"
+        );
+        assert_eq!(
+            blocks.iter().map(|b| b.first_pair).collect::<Vec<_>>(),
+            [0, 8, 12],
+            "the measuring block not delivered; four pairs lost before the third"
+        );
+        assert_eq!(
+            words(&blocks[0]),
+            [
+                101 * 256 + 64,
+                -(101 * 256 + 64),
+                102 * 256 + 64,
+                -(102 * 256 + 64),
+                103 * 256 + 64,
+                -(103 * 256 + 64),
+                104 * 256 + 64,
+                -(104 * 256 + 64)
+            ]
+        );
+        assert_eq!(ctx.metrics.lock().unwrap().signal.driver_drops_session, 4);
+        let log: Vec<String> = ctx
+            .metrics
+            .lock()
+            .unwrap()
+            .ui
+            .log
+            .iter()
+            .map(|e| e.text.to_string())
+            .collect();
+        assert!(
+            log.iter()
+                .any(|l| l.contains("at 192 kS/s read from the samples: filter gain 16 dB")),
+            "{log:?}"
+        );
+        device.stop_rx().unwrap();
         assert!(!device.is_streaming());
+        assert_eq!(Arc::strong_count(&ctx), 1, "nothing can call back now");
+    }
+
+    /// **A rate change never lands on a running stream**: the stream is
+    /// stopped, the rate set, and a new one started, measuring again.
+    #[test]
+    fn a_rate_change_while_streaming_restarts_the_stream() {
+        let (fixture, device) = opened();
+        device.set_sample_rate(768_000.0).unwrap();
+        let (ctx, net) = streaming_ctx();
+        device.start_rx(Arc::clone(&ctx)).unwrap();
+        // The fixture's stream delivers three blocks and idles: take them all,
+        // so what arrives next is the new stream's.
+        for _ in 0..3 {
+            net.recv_timeout(WAIT).unwrap();
+        }
+        device.set_sample_rate(192_000.0).unwrap();
+        assert!(device.is_streaming());
+        assert_eq!(fixture.airspyhf_state(8), 2, "started again");
+        assert_eq!(fixture.airspyhf_state(9), 1, "stopped first");
+        assert_eq!(fixture.airspyhf_state(10), 192_000, "at the new rate");
+        assert_eq!(fixture.airspyhf_state(12), 0, "measuring afresh");
+        let first = net.recv_timeout(WAIT).unwrap();
+        assert_eq!(first.first_pair, 0, "a new stream's positions");
+        device.stop_rx().unwrap();
+    }
+
+    /// The link carries the radio's int16 words, four bytes a pair, not the
+    /// eight sdrtop's container takes: the timing bench's bus line counts the
+    /// wire.
+    #[test]
+    fn the_wire_carries_four_bytes_a_pair() {
+        let (_fixture, device) = opened();
+        assert_eq!(device.wire_bytes_per_pair(), Some(4.0));
+        assert_eq!(device.capabilities().sample_geometry.bytes_per_pair(), 8);
+    }
+
+    /// A stream that ended by itself keeps its context, and the handle is
+    /// not closed under it; a new start works.
+    #[test]
+    fn a_stream_that_ended_by_itself_keeps_its_context() {
+        let (fixture, device) = opened();
+        let (ctx, net) = streaming_ctx();
+        fixture.mode(35);
+        device.start_rx(Arc::clone(&ctx)).unwrap();
+        for _ in 0..3 {
+            net.recv_timeout(WAIT).unwrap();
+        }
+        let deadline = std::time::Instant::now() + WAIT;
+        while device.is_streaming() {
+            assert!(
+                std::time::Instant::now() < deadline,
+                "the stream never ended"
+            );
+            std::thread::yield_now();
+        }
+        device.stop_rx().unwrap();
+        assert_eq!(Arc::strong_count(&ctx), 2, "kept, not let go");
+        fixture.mode(0);
+        device.start_rx(Arc::clone(&ctx)).unwrap();
+        assert!(device.is_streaming());
+        device.stop_rx().unwrap();
     }
 }

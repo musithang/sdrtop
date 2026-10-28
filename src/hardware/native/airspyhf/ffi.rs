@@ -33,6 +33,25 @@ pub struct PartSerial {
 /// longer request would read past it.
 pub const VERSION_STRING_SIZE: u8 = 64;
 
+/// `airspyhf_transfer_t`: one block, handed to the callback on libairspyhf's
+/// consumer thread.
+#[repr(C)]
+pub struct Transfer {
+    pub device: *mut c_void,
+    pub ctx: *mut c_void,
+    /// `sample_count` complex floats, `{re, im}`: the radio's 16-bit words
+    /// times the firmware's filter gain over 32768, corrected and turned by
+    /// the library while its DSP is on.
+    pub samples: *mut c_void,
+    pub sample_count: c_int,
+    /// Samples lost in libairspyhf's own queue just before this block: whole
+    /// buffers it had no room for, each counted at this block's size.
+    pub dropped_samples: u64,
+}
+
+/// `airspyhf_sample_block_cb_fn`. A non-zero return asks libairspyhf to stop.
+pub type SampleBlockFn = extern "C" fn(*mut Transfer) -> c_int;
+
 /// `airspyhf_lib_version_t`.
 #[repr(C)]
 #[derive(Clone, Copy, Default)]
@@ -79,6 +98,12 @@ pub struct AirspyHfApi {
     /// The firmware's AGC, which sets the attenuator while on.
     pub airspyhf_set_hf_agc: unsafe extern "C" fn(*mut c_void, u8) -> c_int,
     pub airspyhf_set_hf_agc_threshold: unsafe extern "C" fn(*mut c_void, u8) -> c_int,
+    /// Starts libairspyhf's USB and consumer threads; the callback runs on the
+    /// consumer thread with `ctx` in each transfer.
+    pub airspyhf_start: unsafe extern "C" fn(*mut c_void, SampleBlockFn, *mut c_void) -> c_int,
+    /// Joins both threads, in 1.6.8 only for a stream it still calls running.
+    pub airspyhf_stop: unsafe extern "C" fn(*mut c_void) -> c_int,
+    pub airspyhf_is_streaming: unsafe extern "C" fn(*mut c_void) -> c_int,
     /// With `len` zero, writes the number of rates the firmware offers into
     /// the buffer's first element; otherwise copies that many rates in Hz.
     pub airspyhf_get_samplerates: unsafe extern "C" fn(*mut c_void, *mut u32, u32) -> c_int,
@@ -144,6 +169,9 @@ pub(super) fn resolve(lib: libloading::Library) -> Result<AirspyHfApi, String> {
         airspyhf_set_hf_lna: sym!(airspyhf_set_hf_lna),
         airspyhf_set_hf_agc: sym!(airspyhf_set_hf_agc),
         airspyhf_set_hf_agc_threshold: sym!(airspyhf_set_hf_agc_threshold),
+        airspyhf_start: sym!(airspyhf_start),
+        airspyhf_stop: sym!(airspyhf_stop),
+        airspyhf_is_streaming: sym!(airspyhf_is_streaming),
         airspyhf_get_samplerates: sym!(airspyhf_get_samplerates),
         _lib: lib,
     })

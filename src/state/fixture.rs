@@ -307,6 +307,7 @@ impl SdrMetrics {
             jitter_max_us: peak as u64,
             jitter_session_max_us: peak as u64,
             sr_delta_ppm: 18,
+            sr_known: true,
             throughput_mean_mbps: 38.1,
             throughput_std_mbps: 0.4,
             // A HackRF's int8 pairs are what its link carries.

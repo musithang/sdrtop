@@ -109,6 +109,14 @@ impl TestLibrary {
         }
     }
 
+    pub fn airspyhf_transfer_layout(&self, field: i32) -> usize {
+        unsafe {
+            self.lib
+                .get::<unsafe extern "C" fn(i32) -> usize>(b"fixture_airspyhf_transfer_layout\0")
+                .unwrap()(field)
+        }
+    }
+
     pub fn list_layout(&self, field: i32) -> usize {
         unsafe {
             self.lib
