@@ -662,6 +662,61 @@ impl StageSpec {
     }
 }
 
+/// Where a radio's chain stops the samples before the converter's own rails,
+/// measured on the radio, never assumed: what sets it, what happens there,
+/// and how high it is at each frequency.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Ceiling {
+    /// The part that sets it, as the screen names it (`"tuner"`).
+    pub part: &'static str,
+    /// What happens to a signal that reaches it.
+    pub kind: CeilingKind,
+    /// dBFS of the converter from each frequency up to the next entry's,
+    /// lowest first; the first entry starts at 0 Hz.
+    steps: Vec<(u64, f64)>,
+}
+
+impl Ceiling {
+    /// How high it is at `hz`.
+    pub fn dbfs_at(&self, hz: u64) -> f64 {
+        self.steps
+            .iter()
+            .rev()
+            .find(|(from, _)| hz >= *from)
+            .map_or(self.steps[0].1, |&(_, dbfs)| dbfs)
+    }
+}
+
+/// What a [`Ceiling`] does to a signal that reaches it.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum CeilingKind {
+    /// The part clips: what passes it is lost, and no converter rail counts
+    /// it.
+    Clips,
+    /// The part turns its own gain down to keep the level there: nothing is
+    /// lost, but past it the level is no longer the antenna's, and the radio
+    /// does not report by how much.
+    Holds,
+}
+
+impl CeilingKind {
+    /// "clips" or "holds", for "the tuner clips at -3".
+    pub fn verb(self) -> &'static str {
+        match self {
+            Self::Clips => "clips",
+            Self::Holds => "holds",
+        }
+    }
+
+    /// "clip" or "hold", for "the tuner's clip".
+    pub fn noun(self) -> &'static str {
+        match self {
+            Self::Clips => "clip",
+            Self::Holds => "hold",
+        }
+    }
+}
+
 /// How a device's front-end boost is reached, when it has one.
 ///
 /// Two different mechanisms, and the distinction is the driver's, not ours. A
@@ -824,9 +879,9 @@ pub struct GainModel {
     /// The stages an automatic gain mode sets, by position; empty for all of
     /// them. See [`Self::auto_governs`].
     auto_stages: Vec<usize>,
-    /// Where the chain clips before the converter does, in dBFS of the
-    /// converter, and what clips there. See [`Self::ceiling_dbfs`].
-    ceiling: Option<(f64, &'static str)>,
+    /// Where the chain stops the samples before the converter does. See
+    /// [`Self::ceiling_dbfs_at`].
+    ceiling: Option<Ceiling>,
     /// The gains a first run and `[R]` give the stages when the knob is on no
     /// curve, where the device has its own; `None` for the historical rule
     /// (`hardware::gain::defaults`).
@@ -884,24 +939,46 @@ impl GainModel {
     }
 
     /// The chain clips at `dbfs` of the converter, in `what` (`"tuner"`),
-    /// before the converter's own rails: measured, not assumed.
+    /// before the converter's own rails, at every frequency: measured, not
+    /// assumed.
     pub fn with_ceiling(mut self, dbfs: f64, what: &'static str) -> Self {
-        self.ceiling = Some((dbfs, what));
+        self.ceiling = Some(Ceiling {
+            part: what,
+            kind: CeilingKind::Clips,
+            steps: vec![(0, dbfs)],
+        });
         self
     }
 
-    /// The highest level the samples can honestly reach: the converter's
-    /// 0 dBFS, or lower where the chain clips first. Every judgement of a
-    /// peak (headroom, the staging verdict, auto-gain's target) is made
-    /// against this, because a clip there touches no converter rail and the
-    /// clip counter cannot see it.
-    pub fn ceiling_dbfs(&self) -> f64 {
-        self.ceiling.map_or(0.0, |(dbfs, _)| dbfs)
+    /// `what` (`"digital AGC"`) holds the level at a ceiling by turning its
+    /// own gain down, at `dbfs` of the converter from each frequency of
+    /// `steps` up to the next one's, lowest first: measured, not assumed.
+    pub fn with_held_ceiling(mut self, what: &'static str, steps: Vec<(u64, f64)>) -> Self {
+        debug_assert!(
+            steps.first().is_some_and(|&(from, _)| from == 0)
+                && steps.windows(2).all(|w| w[0].0 < w[1].0),
+            "steps from 0 Hz, lowest first"
+        );
+        self.ceiling = Some(Ceiling {
+            part: what,
+            kind: CeilingKind::Holds,
+            steps,
+        });
+        self
     }
 
-    /// What clips at the ceiling, when it is not the converter.
-    pub fn ceiling_part(&self) -> Option<&'static str> {
-        self.ceiling.map(|(_, what)| what)
+    /// The highest level the samples can honestly reach at `hz`: the
+    /// converter's 0 dBFS, or lower where the chain stops them first. Every
+    /// judgement of a peak (headroom, the staging verdict, auto-gain's
+    /// target) is made against this, because neither a clip nor a hold there
+    /// touches a converter rail, and the clip counter cannot see it.
+    pub fn ceiling_dbfs_at(&self, hz: u64) -> f64 {
+        self.ceiling.as_ref().map_or(0.0, |c| c.dbfs_at(hz))
+    }
+
+    /// The ceiling, when it is not the converter's.
+    pub fn ceiling(&self) -> Option<&Ceiling> {
+        self.ceiling.as_ref()
     }
 
     /// The automatic gain mode sets these stages only; the rest stay where

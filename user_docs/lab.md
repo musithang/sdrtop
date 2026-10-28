@@ -83,7 +83,11 @@ the FFT measured with the bandwidth it was measured in, SNR), and IQ balance sho
 far the image sits under the carrier, where the image scope can say (a dash where
 it cannot). The clip ceiling is 0 dBFS on most radios; one whose tuner clips
 before its converter shows that lower figure and names the part, and headroom
-counts from there.
+counts from there. A radio whose own AGC holds the level below full scale (the
+Airspy HF+'s digital AGC does) shows `HOLD` instead of `CLIP`, and a peak that
+reaches it reads `HELD`: nothing was lost, the radio quietly turned its own gain
+down, and from there on the level is no longer the antenna's. Polite, but not
+a measurement.
 
 > **If you build your own preset**, note that the reference line and the ghost
 > trace are drawn only in **instrument mode**, which sdrtop turns on for presets
@@ -129,7 +133,7 @@ improves it. Each panel restates one face of that.
 - **Noise step**: what the `K` measurement found, when you've run one. Described
   [below](#the-noise-step-k).
 - **Verdict**: a plain-language read of the staging (`WELL-STAGED`, `HOT`,
-  `CLIPPING`, `UNDER-UTILISED` and so on) with the action chips beside it.
+  `CLIPPING`, `HELD`, `UNDER-UTILISED` and so on) with the action chips beside it.
 
 **Two of those blocks need numbers no driver reports**, and only those two. Noise
 figure and MDS are computed from each stage's own noise figure, which sdrtop

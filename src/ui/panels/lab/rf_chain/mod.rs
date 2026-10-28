@@ -31,7 +31,8 @@ use ratatui::{
 use crate::state::SdrMetrics;
 use crate::ui::panel::{Panel, PanelChrome, Staleness, Tag};
 use crate::ui::rf_calc::{
-    cascade, level_lineup, signal_lineup, staging_target_on, staging_verdict, system_nf_db, Stage,
+    cascade, level_lineup, signal_lineup, staging_target_on, staging_verdict_for, system_nf_db,
+    Stage,
 };
 
 use super::rf_bench::severity_color;
@@ -140,9 +141,11 @@ impl Panel for RfChainPanel {
         } else {
             signal_lineup(adc_peak, &stages)
         };
-        // Judged against this radio's ceiling, where its clip happens.
+        // Judged against this radio's ceiling where it is tuned, where its
+        // samples stop.
         let ceiling = state.ceiling_dbfs();
-        let (verdict_word, sev) = staging_verdict(adc_peak - ceiling);
+        let (verdict_word, sev) =
+            staging_verdict_for(adc_peak - ceiling, state.ceiling().map(|c| c.kind));
         let stage_specs = state.caps.gain.stages();
         // A target is a dB figure shared out over the chain, which needs every
         // stage to be a gain here; where one is not, no target is offered.
@@ -206,7 +209,7 @@ impl Panel for RfChainPanel {
                 sev_col,
                 adc_peak,
                 ceiling,
-                clipper: state.caps.gain.ceiling_part(),
+                clipper: state.ceiling(),
                 snr,
                 adc_rms,
                 amp,
@@ -264,6 +267,33 @@ mod tests {
         let out = draw(RfChainPanel, 70, 60, &m).join("\n");
         assert!(out.contains("GAIN CLIPPING"), "{out}");
         assert!(out.contains("the tuner clipping, before the ADC"), "{out}");
+    }
+
+    /// **At the HF+'s ceiling the verdict says held, not clipping**: its
+    /// digital AGC holds the level there, and past it the level is not the
+    /// antenna's; on VHF the hold is lower, and the same peak is past it.
+    #[test]
+    fn at_the_hf_plus_ceiling_the_verdict_says_held() {
+        let mut m = SdrMetrics::fixture().streaming().airspyhf();
+        m.signal.adc_peak_dbfs = -11.6;
+        let out = draw(RfChainPanel, 70, 60, &m).join("\n");
+        assert!(out.contains("GAIN HELD"), "{out}");
+        assert!(out.contains("the digital AGC holding it there."), "{out}");
+        assert!(
+            out.contains("past it the level is not the antenna's."),
+            "{out}"
+        );
+        assert!(!out.contains("CLIPPING"), "{out}");
+        m.signal.adc_peak_dbfs = -16.0;
+        let hf = draw(RfChainPanel, 70, 60, &m).join("\n");
+        assert!(
+            hf.contains("GAIN HOT") || hf.contains("GAIN WELL-STAGED"),
+            "{hf}"
+        );
+        m.radio.frequency = 100_000_000;
+        m.signal.adc_peak_dbfs = -13.0;
+        let vhf = draw(RfChainPanel, 70, 60, &m).join("\n");
+        assert!(vhf.contains("GAIN HELD"), "{vhf}");
     }
 
     /// **A stage's gain reads as the same figure on every panel**: rounded,

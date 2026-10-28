@@ -100,7 +100,7 @@ impl Panel for IqConstellationPanel {
             if let Some(env) = envelope::Envelope::of(&coords, r, bins) {
                 let scale = side::Scale {
                     outer_db,
-                    clip: face.clip_db.zip(state.caps.gain.ceiling_part()),
+                    clip: face.clip_db.zip(state.ceiling()),
                     points: coords.len(),
                 };
                 f.render_widget(
@@ -256,6 +256,11 @@ mod tests {
         far.iq.constellation_outer_db = Some(-1.0);
         let out = draw(&far, 77, 26);
         assert!(out.contains("tuner clips -3"), "{out}");
+        // A ceiling that holds says so.
+        let mut hf = with_ring(0.6).airspyhf();
+        hf.iq.constellation_outer_db = Some(-1.0);
+        let out = draw(&hf, 77, 26);
+        assert!(out.contains("digital AGC holds -12"), "{out}");
     }
 
     /// The smallest panel draws the square alone and does not panic.

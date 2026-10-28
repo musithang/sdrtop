@@ -348,6 +348,20 @@ pub fn linearity(lna_gain: u32, vga_gain: u32, bits: u8) -> Linearity {
 /// Where the ADC peak should land for clean staging.
 pub const OPT_PEAK_DBFS: f64 = -8.0;
 
+/// [`staging_verdict`] for a peak measured against a radio's ceiling, in the
+/// words that ceiling's kind earns: at a part that holds the level (turns its
+/// own gain down) nothing clips, but the level is no longer the antenna's, so
+/// the word is `HELD`, at the same severity.
+pub fn staging_verdict_for(
+    peak_to_ceiling_db: f64,
+    kind: Option<crate::hardware::CeilingKind>,
+) -> (&'static str, u8) {
+    match staging_verdict(peak_to_ceiling_db) {
+        ("CLIPPING", sev) if kind == Some(crate::hardware::CeilingKind::Holds) => ("HELD", sev),
+        verdict => verdict,
+    }
+}
+
 /// Staging verdict from the ADC peak level. `(word, severity)` with severity
 /// 0 = OK, 1 = warn, 2 = crit - same scale as [`gain_advice`].
 pub fn staging_verdict(peak_dbfs: f64) -> (&'static str, u8) {
@@ -699,6 +713,21 @@ mod tests {
         assert_eq!(staging_verdict(-8.0).1, 0, "−8 dBFS is well-staged");
         assert_eq!(staging_verdict(0.0), ("CLIPPING", 2));
         assert_eq!(staging_verdict(-40.0).0, "WEAK");
+    }
+
+    /// At a ceiling that holds, nothing clips: the word says held, at the
+    /// same severity; every other word, and a clipping ceiling, unchanged.
+    #[test]
+    fn a_held_ceiling_is_held_not_clipping() {
+        use crate::hardware::CeilingKind::{Clips, Holds};
+        assert_eq!(staging_verdict_for(0.0, Some(Holds)), ("HELD", 2));
+        assert_eq!(staging_verdict_for(0.0, Some(Clips)), ("CLIPPING", 2));
+        assert_eq!(staging_verdict_for(0.0, None), ("CLIPPING", 2));
+        assert_eq!(
+            staging_verdict_for(-8.0, Some(Holds)),
+            staging_verdict(-8.0)
+        );
+        assert_eq!(staging_verdict_for(-3.0, Some(Holds)), ("HOT", 1));
     }
 
     /// A HackRF's two stages, as `GainModel::stages()` reports them.

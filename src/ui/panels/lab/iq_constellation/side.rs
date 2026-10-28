@@ -22,8 +22,9 @@ use super::envelope::{Envelope, NOISE_SPREAD};
 /// What the column reads besides the envelope.
 pub(super) struct Scale<'a> {
     pub outer_db: f64,
-    /// Where and in what the radio clips before its converter, when it does.
-    pub clip: Option<(f64, &'a str)>,
+    /// Where the radio stops the samples before its converter, when it
+    /// does, and the part that clips or holds them there.
+    pub clip: Option<(f64, &'a crate::hardware::Ceiling)>,
     pub points: usize,
 }
 
@@ -118,9 +119,9 @@ pub(super) fn lines(
             " \u{2500} full scale",
             Style::default().fg(theme.status_crit),
         ))
-    } else if let Some((at, part)) = scale.clip.filter(|&(at, _)| at < scale.outer_db) {
+    } else if let Some((at, c)) = scale.clip.filter(|&(at, _)| at < scale.outer_db) {
         Line::from(Span::styled(
-            format!(" \u{2504} {part} clips {at:.0}"),
+            format!(" \u{2504} {} {} {at:.0}", c.part, c.kind.verb()),
             Style::default().fg(theme.status_crit),
         ))
     } else {

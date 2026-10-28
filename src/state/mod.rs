@@ -152,10 +152,16 @@ impl SdrMetrics {
         Some(spec.reading(self.radio.stage_gain(index), self.radio.frequency))
     }
 
-    /// The highest level the samples can honestly reach on this radio, dBFS.
-    /// See [`crate::hardware::GainModel::ceiling_dbfs`].
+    /// The highest level the samples can honestly reach on this radio where
+    /// it is tuned, dBFS. See [`crate::hardware::GainModel::ceiling_dbfs_at`].
     pub fn ceiling_dbfs(&self) -> f64 {
-        self.caps.gain.ceiling_dbfs()
+        self.caps.gain.ceiling_dbfs_at(self.radio.frequency)
+    }
+
+    /// The part that stops the samples before the converter, when there is
+    /// one, and what it does there.
+    pub fn ceiling(&self) -> Option<&crate::hardware::Ceiling> {
+        self.caps.gain.ceiling()
     }
 
     /// The ADC peak against that ceiling: 0 at it, negative below. What the
@@ -382,6 +388,23 @@ mod stage_reading_tests {
     /// **The peak is judged against the radio's own ceiling**: on an R2 its
     /// tuner clips at -3 dBFS, so a peak there is at the limit; a HackRF's
     /// ceiling is the converter's 0 dBFS.
+    /// **The HF+'s ceiling follows the band**: its digital AGC holds a peak
+    /// at -11.6 dBFS on HF and -13.3 on VHF, and says it holds.
+    #[test]
+    fn the_hf_plus_ceiling_follows_the_band() {
+        let mut m = SdrMetrics::fixture().airspyhf();
+        m.signal.adc_peak_dbfs = -11.6;
+        assert_eq!(m.ceiling_dbfs(), -11.6);
+        assert!(m.peak_to_ceiling_db().abs() < 1e-5);
+        m.radio.frequency = 100_000_000;
+        assert_eq!(m.ceiling_dbfs(), -13.3);
+        assert!((m.peak_to_ceiling_db() - 1.7).abs() < 1e-5);
+        assert_eq!(
+            m.ceiling().map(|c| c.kind),
+            Some(crate::hardware::CeilingKind::Holds)
+        );
+    }
+
     #[test]
     fn the_peak_is_judged_against_the_radios_ceiling() {
         let mut r2 = SdrMetrics::fixture().band_measured_chain();

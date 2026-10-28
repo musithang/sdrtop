@@ -20,17 +20,26 @@ use super::super::rf_bench::{row, Row};
 /// Label column for the linearity card's rows: clears `P1dB`, `IIP3`, `SFDR`.
 const LABEL_W: usize = 4;
 
-/// Where the radio clips before its converter, and that the clip count above
-/// cannot see it: a clip there touches no converter rail.
+/// Where the radio stops its samples before its converter, and that the
+/// clip count above cannot see it: neither a clip nor a hold there touches a
+/// converter rail.
 pub(super) fn ceiling(
     out: &mut Vec<Line<'static>>,
     ceiling_dbfs: f64,
-    part: &str,
+    c: &crate::hardware::Ceiling,
     theme: &crate::Theme,
 ) {
     // Short enough for the bench at a laptop's width, where a longer line
     // was cut live; wider still, it is cut at the panel's edge.
-    let text = format!(" {part} clips at {ceiling_dbfs:.0} dBFS, before the ADC: uncounted");
+    let part = c.part;
+    let text = match c.kind {
+        crate::hardware::CeilingKind::Clips => {
+            format!(" {part} clips at {ceiling_dbfs:.0} dBFS, before the ADC: uncounted")
+        }
+        crate::hardware::CeilingKind::Holds => {
+            format!(" {part} holds peaks at {ceiling_dbfs:.0} dBFS: gain cut unreported")
+        }
+    };
     out.push(Line::from(Span::styled(
         text,
         Style::default().fg(theme.label),
@@ -44,7 +53,7 @@ pub(super) fn loading(
     out: &mut Vec<Line<'static>>,
     load: &AdcLoading,
     ceiling: f64,
-    part: Option<&str>,
+    part: Option<&crate::hardware::Ceiling>,
     verdict: &str,
     sev_col: Color,
     theme: &crate::Theme,
@@ -55,7 +64,7 @@ pub(super) fn loading(
     // `+ 0.0` turns a peak exactly at the ceiling into 0 dB, not -0 dB.
     let headroom = ceiling.round_ties_even() - load.peak_dbfs.round_ties_even() + 0.0;
     let whose = match part {
-        Some(part) => format!("the {part}'s clip"),
+        Some(c) => format!("the {}'s {}", c.part, c.kind.noun()),
         None => "full scale".to_string(),
     };
     out.push(Line::from(vec![

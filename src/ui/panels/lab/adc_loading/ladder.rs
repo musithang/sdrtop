@@ -38,8 +38,10 @@ pub(super) struct Levels {
     pub peak_dbfs: f64,
     /// Per axis, as the samples in the bands are.
     pub rms_dbfs: f64,
-    /// Where this radio clips, dBFS.
+    /// Where this radio stops its samples, dBFS.
     pub ceiling_dbfs: f64,
+    /// Whether a part clips or holds them there; `None` at the converter.
+    pub ceiling_kind: Option<crate::hardware::CeilingKind>,
     /// The staging verdict's colour, for the peak's mark.
     pub sev_col: Color,
 }
@@ -139,8 +141,8 @@ pub(super) fn draw(
             }
         }
     }
-    // A radio that clips before its converter: the line runs through the
-    // ladder, so a band past it is seen to be past it.
+    // A radio that stops its samples before its converter: the line runs
+    // through the ladder, so a band past it is seen to be past it.
     if lv.ceiling_dbfs < 0.0 {
         let cx = across.x_of(lv.ceiling_dbfs, bits);
         for row in grid.iter_mut() {
@@ -206,8 +208,9 @@ pub(super) fn draw(
         ),
     ];
     if lv.ceiling_dbfs < 0.0 {
+        let verb = lv.ceiling_kind.map_or("clips", |k| k.verb());
         key.push(Span::styled(
-            "   \u{250a} where it clips",
+            format!("   \u{250a} where it {verb}"),
             Style::default().fg(theme.status_crit),
         ));
     }

@@ -413,6 +413,22 @@ impl SdrMetrics {
         self
     }
 
+    /// An Airspy HF+ Discovery at its own start, on 40 m: the attenuator at
+    /// none and the LNA off, its words carried as `Int32`, and the digital
+    /// AGC's hold as its ceiling.
+    pub(crate) fn airspyhf(mut self) -> Self {
+        let rates = [
+            912_000, 768_000, 650_000, 456_000, 384_000, 228_000, 192_000,
+        ];
+        self.caps = Arc::new(crate::hardware::native::airspyhf::caps(&rates, 2048));
+        self.system.board_name = Arc::from("Airspy HF+ Discovery");
+        self.radio.gains = vec![0.0, 0.0];
+        self.radio.gain_curve = None;
+        self.radio.frequency = 7_100_000;
+        self.radio.config_sample_rate = 768_000.0;
+        self
+    }
+
     /// The knob on one of the gain model's vendor curves, the chain exactly on
     /// `step` of it.
     pub(crate) fn on_curve(mut self, curve: usize, step: usize) -> Self {

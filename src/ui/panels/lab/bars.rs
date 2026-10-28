@@ -622,15 +622,21 @@ fn rf_marker_lines(state: &SdrMetrics, theme: &crate::Theme, iw: usize) -> Vec<L
         _ => theme.status_ok,
     };
 
-    // CLIP reference line is the rail a clip happens at: the converter's
-    // 0 dBFS, or the part that clips first, named; always shown first.
-    let rail = match state.caps.gain.ceiling_part() {
-        Some(part) => format!("{:.0} dBFS ({part})", state.ceiling_dbfs()),
-        None => "0 dBFS".to_string(),
+    // The reference line is where the samples stop: the converter's 0 dBFS,
+    // or the part that clips or holds them first, named; always shown first.
+    let (label, rail) = match state.ceiling() {
+        Some(c) => (
+            match c.kind {
+                crate::hardware::CeilingKind::Clips => "CLIP ",
+                crate::hardware::CeilingKind::Holds => "HOLD ",
+            },
+            format!("{:.0} dBFS ({})", state.ceiling_dbfs(), c.part),
+        ),
+        None => ("CLIP ", "0 dBFS".to_string()),
     };
     let mut spans: Vec<Span> = vec![
         Span::raw(" "),
-        Span::styled("CLIP ", dim),
+        Span::styled(label, dim),
         Span::styled(rail, val),
     ];
     let mut used = span_w(&spans);
@@ -1213,6 +1219,12 @@ mod tests {
             out.contains("CLIP 0 dBFS") && out.contains("headroom +8 dB"),
             "{out}"
         );
+        // The HF+'s rail is its digital AGC's hold, and the bar says hold.
+        let mut hf = SdrMetrics::fixture().streaming().airspyhf();
+        hf.signal.adc_peak_dbfs = -20.0;
+        let out = text(&hf);
+        assert!(out.contains("HOLD -12 dBFS (digital AGC)"), "{out}");
+        assert!(!out.contains("CLIP"), "{out}");
     }
 
     /// **The floor is the one the FFT measured, per its own bandwidth**:

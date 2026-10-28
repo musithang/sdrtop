@@ -283,7 +283,17 @@ pub fn gain_model() -> GainModel {
     .with_boost(crate::hardware::Boost::GainMode)
     .with_auto_stages(&[0])
     .with_start_gains(vec![0.0, 0.0])
+    // The radio's digital AGC, always on, turns its own gain down so that a
+    // carrier's sample peak stops at -11.6 dBFS of the USB word on HF and
+    // -13.3 dBFS on VHF, at every rate (measured on a cable from VGA 0 up,
+    // all seven rates, both bands, each within 0.2 dB). It cuts gain cleanly
+    // and does not report how much, so past it the level is not the
+    // antenna's and nothing on the word ever clips.
+    .with_held_ceiling("digital AGC", vec![(0, -11.6), (VHF_FROM_HZ, -13.3)])
 }
+
+/// Where the VHF front end starts.
+const VHF_FROM_HZ: u64 = 60_000_000;
 
 /// What a Discovery can do: Airspy's published bands, the rates its firmware
 /// lists, and the block its library hands over.
@@ -305,7 +315,7 @@ pub fn caps(rates: &[u32], samples_per_transfer: u64) -> DeviceCapabilities {
         // The HF front end to 31 MHz, the VHF one from 60: nothing in between.
         freq_min_hz: 9_000,
         freq_max_hz: 260_000_000,
-        freq_gaps: vec![std::ops::RangeInclusive::new(31_000_001, 59_999_999)],
+        freq_gaps: vec![std::ops::RangeInclusive::new(31_000_001, VHF_FROM_HZ - 1)],
         sample_rate_min_hz: f64::from(min),
         sample_rate_max_hz: f64::from(max),
         // The 40 m band: a choice, somewhere there is always something.
@@ -1251,7 +1261,8 @@ mod tests {
     }
 
     /// The two measured stages, front to back, starting with no attenuation
-    /// and the LNA off; the AGC sets the attenuator alone.
+    /// and the LNA off; the AGC sets the attenuator alone; the digital AGC
+    /// holds the level at its measured ceiling, lower on VHF.
     #[test]
     fn the_gain_model_is_the_measured_one() {
         let g = gain_model();
@@ -1265,6 +1276,15 @@ mod tests {
         assert_eq!(g.start_gains(None), [0.0, 0.0]);
         assert!(g.auto_governs(0) && !g.auto_governs(1));
         assert!(g.has_second_stage());
+        let c = g.ceiling().expect("the digital AGC's hold");
+        assert_eq!(
+            (c.part, c.kind),
+            ("digital AGC", crate::hardware::CeilingKind::Holds)
+        );
+        assert_eq!(g.ceiling_dbfs_at(9_000), -11.6);
+        assert_eq!(g.ceiling_dbfs_at(31_000_000), -11.6);
+        assert_eq!(g.ceiling_dbfs_at(60_000_000), -13.3);
+        assert_eq!(g.ceiling_dbfs_at(260_000_000), -13.3);
     }
 
     /// What a Discovery is: two bands with the gap, the firmware's rates, the

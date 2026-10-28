@@ -21,8 +21,8 @@ use ratatui::{
 /// The verdict in three lines. `front` is the front stage's name and `trim`
 /// the stage to take a few dB off at the end of the chain (the second stage
 /// where the radio has one), so the advice names controls the radio has.
-/// `clipper` is the part that clips before the converter, on a radio whose
-/// ceiling is not the converter's.
+/// `clipper` is the part that stops the samples before the converter, on a
+/// radio whose ceiling is not the converter's.
 fn copy(
     word: &str,
     adc_peak: f64,
@@ -30,19 +30,25 @@ fn copy(
     snr: f64,
     front: &str,
     trim: &str,
-    clipper: Option<&str>,
+    clipper: Option<&crate::hardware::Ceiling>,
 ) -> [String; 3] {
     let (saturating, rail) = match clipper {
-        Some(part) => (
-            format!("the {part} clipping, before the ADC"),
-            format!("the {part}'s limit"),
+        Some(c) => (
+            format!("the {} clipping, before the ADC", c.part),
+            format!("the {}'s {}", c.part, c.kind.noun()),
         ),
         None => (
             "ADC saturating, waveform distorted".to_string(),
             "the rail".to_string(),
         ),
     };
+    let holder = clipper.map_or("the radio", |c| c.part);
     match word {
+        "HELD" => [
+            format!("Signal at {adc_peak:.0} dBFS \u{2014} the {holder} holding it there."),
+            format!("Reduce {front} or {trim} to bring it under the hold:"),
+            "past it the level is not the antenna's.".to_string(),
+        ],
         "CLIPPING" => [
             format!("Signal at {adc_peak:.0} dBFS \u{2014} {saturating}."),
             format!("Reduce {front} or {trim} to restore headroom."),
@@ -78,10 +84,10 @@ pub(super) struct Verdict<'a> {
     pub sev: u8,
     pub sev_col: Color,
     pub adc_peak: f64,
-    /// The radio's ceiling, dBFS, and what clips there when it is not the
-    /// converter: the headroom and the words are about that rail.
+    /// The radio's ceiling, dBFS, and the part that clips or holds there when
+    /// it is not the converter: the headroom and the words are about it.
     pub ceiling: f64,
-    pub clipper: Option<&'a str>,
+    pub clipper: Option<&'a crate::hardware::Ceiling>,
     pub snr: f64,
     pub adc_rms: f32,
     pub amp: bool,
@@ -173,7 +179,7 @@ pub(super) fn draw(out: &mut Vec<Line<'static>>, v: &Verdict<'_>, theme: &crate:
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::ui::rf_calc::staging_verdict;
+    use crate::ui::rf_calc::staging_verdict_for;
 
     #[test]
     fn every_verdict_staging_verdict_can_return_has_its_own_copy() {
@@ -182,9 +188,11 @@ mod tests {
         // here fails this test instead of silently falling through to WELL-STAGED.
         let mut words: Vec<&str> = Vec::new();
         for db in -120..=0 {
-            let (w, _) = staging_verdict(db as f64);
-            if !words.contains(&w) {
-                words.push(w);
+            for kind in [None, Some(crate::hardware::CeilingKind::Holds)] {
+                let (w, _) = staging_verdict_for(db as f64, kind);
+                if !words.contains(&w) {
+                    words.push(w);
+                }
             }
         }
         assert!(
@@ -208,7 +216,14 @@ mod tests {
     fn the_copy_quotes_the_measured_peak() {
         // Every branch leads with the number it is a verdict about; a body that
         // does not name the level reads as generic advice.
-        for w in ["CLIPPING", "HOT", "UNDER-UTILISED", "WEAK", "WELL-STAGED"] {
+        for w in [
+            "CLIPPING",
+            "HELD",
+            "HOT",
+            "UNDER-UTILISED",
+            "WEAK",
+            "WELL-STAGED",
+        ] {
             let c = copy(w, -3.0, 3.0, 22.0, "LNA", "VGA", None);
             assert!(c[0].contains("-3 dBFS"), "{w}: {:?}", c[0]);
         }

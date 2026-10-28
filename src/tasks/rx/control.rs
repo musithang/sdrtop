@@ -147,7 +147,7 @@ pub(super) fn track_gain(
     device: &Arc<dyn SdrDevice>,
     adc_peak_dbfs: f32,
 ) {
-    let (latched, gm, curve, current) = {
+    let (latched, gm, curve, current, ceiling) = {
         let m = state.lock().unwrap_or_else(|e| e.into_inner());
         // A noise sweep moves one stage on purpose and reads what that does to
         // the floor. Auto-track exists to undo exactly that. Whichever ran
@@ -172,12 +172,14 @@ pub(super) fn track_gain(
             m.caps.gain.clone(),
             m.radio.gain_curve,
             m.radio.gains.clone(),
+            m.ceiling_dbfs(),
         )
     };
     let stages = gm.stages();
-    // Against the radio's ceiling: the comfortable window and the target
-    // keep their margin from where this radio clips.
-    let adc_peak_dbfs = adc_peak_dbfs - gm.ceiling_dbfs() as f32;
+    // Against the radio's ceiling where it is tuned: the comfortable window
+    // and the target keep their margin from where this radio stops the
+    // samples.
+    let adc_peak_dbfs = adc_peak_dbfs - ceiling as f32;
     // No longer gated on a modelled chain: since R3 the target is one policy
     // over whatever stages the device reports, so any radio that names some can
     // be tracked. A radio that names none has nothing to move.

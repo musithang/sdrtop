@@ -38,10 +38,10 @@ pub use record_tap::RecordTap;
 #[cfg(test)]
 pub(crate) use traits::RateSet;
 pub use traits::{
-    AcquisitionKind, Boost, DeliveryModel, DeviceCapabilities, DeviceInfo, DeviceOption,
-    DirectSweepConfig, FeedHealth, GainCurve, GainModel, LevelUnit, PowerTrace, PowerTraceTarget,
-    RadioDrops, RxContext, SampleFormat, SampleGeometry, SdrDevice, SoftwareStack, StageReading,
-    StageSpec, StreamBlock, IQ_TRACE_STALE_MS,
+    AcquisitionKind, Boost, Ceiling, CeilingKind, DeliveryModel, DeviceCapabilities, DeviceInfo,
+    DeviceOption, DirectSweepConfig, FeedHealth, GainCurve, GainModel, LevelUnit, PowerTrace,
+    PowerTraceTarget, RadioDrops, RxContext, SampleFormat, SampleGeometry, SdrDevice,
+    SoftwareStack, StageReading, StageSpec, StreamBlock, IQ_TRACE_STALE_MS,
 };
 
 pub(crate) fn debug_assert_device_options(options: &[DeviceOption]) {

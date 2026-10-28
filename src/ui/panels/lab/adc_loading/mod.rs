@@ -30,7 +30,7 @@ use ratatui::{
 
 use crate::state::SdrMetrics;
 use crate::ui::panel::{Panel, PanelChrome, Staleness, Tag};
-use crate::ui::rf_calc::{adc_loading, staging_verdict};
+use crate::ui::rf_calc::{adc_loading, staging_verdict_for};
 
 use super::rf_bench::severity_color;
 
@@ -95,10 +95,11 @@ impl Panel for AdcLoadingPanel {
             .unwrap_or((state.radio.primary_gain(), state.radio.secondary_gain()));
         let bits = state.caps.sample_geometry.bits();
         let load = adc_loading(peak, rms, clip, n, bits);
-        // Judged against this radio's ceiling, where its clip happens.
+        // Judged against this radio's ceiling where it is tuned, where its
+        // samples stop.
         let ceiling = state.ceiling_dbfs();
-        let part = state.caps.gain.ceiling_part();
-        let (verdict, sev) = staging_verdict(peak - ceiling);
+        let part = state.ceiling();
+        let (verdict, sev) = staging_verdict_for(peak - ceiling, part.map(|c| c.kind));
         let sev_col = severity_color(sev, theme);
 
         // The ladder takes the height the read-out under it leaves.
@@ -121,6 +122,7 @@ impl Panel for AdcLoadingPanel {
                 peak_dbfs: peak,
                 rms_dbfs: load.rms_dbfs,
                 ceiling_dbfs: ceiling,
+                ceiling_kind: part.map(|c| c.kind),
                 sev_col,
             },
             iw,
@@ -264,6 +266,37 @@ mod tests {
             assert!(out.contains(want), "{want:?} in\n{out}");
         }
         assert!(!out.contains("ENOB") && !out.contains("HDRM"), "{out}");
+    }
+
+    /// **The HF+'s ceiling is a hold, not a clip**: its digital AGC turns
+    /// its own gain down there, so the bench measures headroom to it, calls
+    /// a peak there held, and says the gain it cuts is not reported.
+    #[test]
+    fn the_hf_plus_bench_measures_to_the_digital_agcs_hold() {
+        let draw = |peak: f32| {
+            let mut m = SdrMetrics::fixture().streaming().airspyhf();
+            m.signal.adc_peak_dbfs = peak;
+            m.signal.adc_rms_dbfs = peak - 16.0;
+            m.iq.adc_band_hist[..12].copy_from_slice(&R2_LIN14);
+            crate::state::fixture::draw(AdcLoadingPanel, 61, 26, &m).join("\n")
+        };
+        let weak = draw(-36.0);
+        for want in [
+            "UNDER-UTILISED  24 dB under the digital AGC's hold",
+            "\u{250a} where it holds",
+            "digital AGC holds peaks at -12 dBFS: gain cut unreported",
+        ] {
+            assert!(weak.contains(want), "{want:?} in\n{weak}");
+        }
+        assert!(
+            !weak.contains("where it clips") && !weak.contains("clips at"),
+            "{weak}"
+        );
+        let held = draw(-11.0);
+        assert!(
+            held.contains("HELD  1 dB past the digital AGC's hold"),
+            "{held}"
+        );
     }
 
     /// **At the R2's ceiling the ADC bench says so**: a peak past -3 dBFS is

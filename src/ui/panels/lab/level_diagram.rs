@@ -524,20 +524,33 @@ fn diagram(
     );
     if let Some((floor, _)) = c.floor {
         let gap = c.adc_peak - floor;
-        let (text, col) = match (wide, gap >= 0.0) {
-            (true, true) => (format!("{gap:.0} dB over floor"), theme.value),
-            (true, false) => (format!("{:.0} dB under floor", -gap), theme.status_warn),
-            (false, true) => (format!("{gap:.0} dB"), theme.value),
-            (false, false) => (format!("{gap:.0} dB"), theme.status_warn),
+        // Worded where the zone holds the words: a three-figure gap, which a
+        // radio with this much range reaches, no longer fits beside them.
+        let (worded, col) = if gap >= 0.0 {
+            (format!("{gap:.0} dB over floor"), theme.value)
+        } else {
+            (format!("{:.0} dB under floor", -gap), theme.status_warn)
+        };
+        let text = if wide && worded.len() <= zone - 2 {
+            worded
+        } else {
+            format!("{gap:.0} dB")
         };
         span(&mut g, sig_row, floor_row, true, text, col);
     }
     if let Some(r) = ceil_row {
-        let who = state.caps.gain.ceiling_part().unwrap_or("ADC");
-        let text = if wide {
-            format!("{who} clips {ceiling:.0}")
+        let (who, kind) = state
+            .ceiling()
+            .map_or(("ADC", crate::hardware::CeilingKind::Clips), |c| {
+                (c.part, c.kind)
+            });
+        // The part's name where the zone holds it, the bare word where not:
+        // the key under the plot names the part either way.
+        let named = format!("{who} {} {ceiling:.0}", kind.verb());
+        let text = if wide && named.chars().count() <= zone - 2 {
+            named
         } else {
-            format!("clip {ceiling:.0}")
+            format!("{} {ceiling:.0}", kind.noun())
         };
         g.set(r, zx, '\u{252c}', theme.status_crit);
         g.text(r, zx + 2, &text, theme.status_crit);
@@ -622,7 +635,12 @@ fn diagram(
         ));
     }
     legend.push(Span::styled(
-        "   \u{2508} clip",
+        match state.ceiling() {
+            Some(c) if c.kind == crate::hardware::CeilingKind::Holds => {
+                format!("   \u{2508} hold, {}", c.part)
+            }
+            _ => "   \u{2508} clip".to_string(),
+        },
         Style::default().fg(theme.status_crit),
     ));
     lines.push(Line::from(legend));
@@ -714,6 +732,30 @@ mod tests {
         agc.radio.amp_enabled = true;
         let out = draw(&agc, 90, 22);
         assert_eq!(out.matches("AGC").count(), 2, "{out}");
+    }
+
+    /// The HF+'s ceiling is its digital AGC's hold, and the diagram says it
+    /// holds there, wide or narrow.
+    #[test]
+    fn the_hf_plus_window_shows_the_digital_agcs_hold() {
+        let mut m = SdrMetrics::fixture()
+            .streaming()
+            .with_carrier(0.0, 30.0)
+            .airspyhf();
+        m.signal.adc_peak_dbfs = -30.0;
+        let wide = draw(&m, 73, 26);
+        assert!(wide.contains("\u{252c} hold -12"), "{wide}");
+        assert!(wide.contains("\u{2508} hold, digital AGC"), "{wide}");
+        // A gap of three figures is given as its number, not cut mid-word.
+        if let Some(fr) = m.waterfall.last_fft.as_mut() {
+            fr.noise_floor = -133.0;
+        }
+        let deep = draw(&m, 73, 26);
+        assert!(
+            deep.contains("103 dB") && !deep.contains("over floo"),
+            "{deep}"
+        );
+        assert!(!wide.contains("clip"), "{wide}");
     }
 
     /// A radio with no ceiling of its own clips at the converter, and says
