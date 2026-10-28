@@ -35,6 +35,10 @@ const TREND_ANN_W: usize = 13;
 const TREND_LEAD_W: usize = 7;
 
 pub(super) fn lines(state: &SdrMetrics, r: &Reading, rows: &Rows) -> Vec<Line<'static>> {
+    // No balance, no image it predicts: the quadrature section said why.
+    if r.balance_refusal.is_some() {
+        return Vec::new();
+    }
     let theme = rows.theme;
     let color = irr_color(r.irr_db, theme);
 

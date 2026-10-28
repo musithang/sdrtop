@@ -19,7 +19,7 @@ use ratatui::{
 
 use crate::ui::chrome::section;
 
-use super::reading::Reading;
+use super::reading::{LoLine, Reading};
 use super::rows::{Rows, LEAD};
 use super::severity::{dc_rel_color, spike_color, DC_REL_CRIT_DB, DC_REL_WARN_DB};
 
@@ -138,21 +138,19 @@ pub(super) fn lines(r: &Reading, rows: &Rows) -> Vec<Line<'static>> {
     if r.lo_offset_hz != 0 {
         let at = format!("{:+.1} kHz", r.lo_offset_hz as f64 / 1e3);
         let mut lo = lead("LO");
-        match r.lo_line_dbfs {
-            Some(db) => {
+        let note = |text: String| Span::styled(text, Style::default().fg(dim));
+        match r.lo_line {
+            LoLine::Level(db) => {
                 lo.push(Span::styled(
                     format!("{db:.0} dBFS/bin"),
                     Style::default().fg(spike_color(db, theme)),
                 ));
-                lo.push(Span::styled(
-                    format!("   at {at}"),
-                    Style::default().fg(dim),
-                ));
+                lo.push(note(format!("   at {at}")));
             }
-            None => lo.push(Span::styled(
-                format!("at {at}, not in this span"),
-                Style::default().fg(dim),
-            )),
+            LoLine::OutOfSpan => lo.push(note(format!("at {at}, not in this span"))),
+            LoLine::NoSpectrum | LoLine::AtTheCentre => {
+                lo.push(note(format!("at {at}, no spectrum yet")))
+            }
         }
         out.push(Line::from(lo));
     }

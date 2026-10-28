@@ -204,6 +204,27 @@ impl SdrMetrics {
         })
     }
 
+    /// Why the I/Q balance the moments measure is not the front end's, or
+    /// `None` when it is.
+    ///
+    /// The gain and phase imbalance are read from the stream's second moments
+    /// on the assumption that the front end's image mirrors about 0 Hz. A radio
+    /// whose library turns the samples off the LO (`RadioState::lo_offset_hz`
+    /// not zero) has its image mirror about the LO instead, and the turning
+    /// spreads I into Q over every window, so the moments read balanced
+    /// whatever the hardware does; such a library has corrected the balance
+    /// itself besides. The readings, the image they predict, the trend and the
+    /// auto-cal that would correct from them all stand down with this reason.
+    pub fn iq_balance_refusal(&self) -> Option<String> {
+        let offset = self.radio.lo_offset_hz;
+        (offset != 0).then(|| {
+            format!(
+                "the samples are turned {:+.1} kHz off the LO, so their I/Q balance is not the front end's",
+                offset as f64 / 1e3
+            )
+        })
+    }
+
     /// Why a gain decision made in dB cannot be made at the tuned frequency,
     /// or `None` when it can: the first stage whose dB was not measured here,
     /// and the band it was.

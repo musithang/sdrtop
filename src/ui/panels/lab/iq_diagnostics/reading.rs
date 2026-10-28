@@ -36,9 +36,11 @@ pub(super) struct Reading {
     /// Zero on a radio that mixes straight to 0 Hz, where the DC above is
     /// the LO's leak; anything else puts the leak somewhere the DC is not.
     pub lo_offset_hz: i64,
-    /// The spectrum's level at the LO, dBFS per bin, where the LO is off the
-    /// centre and inside the frame; `None` otherwise.
-    pub lo_line_dbfs: Option<f64>,
+    /// The spectrum's level at the LO, where the LO is off the centre.
+    pub lo_line: LoLine,
+    /// Why the gain, phase and IRR above are not the front end's
+    /// (`SdrMetrics::iq_balance_refusal`), or `None` when they are.
+    pub balance_refusal: Option<String>,
 }
 
 impl Reading {
@@ -58,7 +60,8 @@ impl Reading {
             phase_deg: state.iq.phase_imbalance_deg,
             irr_db: image_rejection_db(state.iq.iq_imbalance_db, state.iq.phase_imbalance_deg),
             lo_offset_hz: state.radio.lo_offset_hz,
-            lo_line_dbfs: lo_line_dbfs(state),
+            lo_line: lo_line(state),
+            balance_refusal: state.iq_balance_refusal(),
         }
     }
 
@@ -93,34 +96,41 @@ impl Reading {
     }
 }
 
-/// The spectrum's level at an LO off the centre: the highest of the five bins
-/// round it in the last FFT frame, dBFS per bin. `None` with the LO at the
-/// centre (the DC reading is the LO there), with no frame, or with the LO
-/// outside the frame.
-fn lo_line_dbfs(state: &SdrMetrics) -> Option<f64> {
+/// What the spectrum says at an LO off the centre.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub(super) enum LoLine {
+    /// The LO is at the centre: the DC reading is its leak.
+    AtTheCentre,
+    /// No spectrum frame to read it from yet.
+    NoSpectrum,
+    /// Off the edge of the frame.
+    OutOfSpan,
+    /// The highest of the five bins round it, dBFS per bin.
+    Level(f64),
+}
+
+fn lo_line(state: &SdrMetrics) -> LoLine {
     let offset = state.radio.lo_offset_hz;
     if offset == 0 {
-        return None;
+        return LoLine::AtTheCentre;
     }
-    let frame = state.waterfall.last_fft.as_ref()?;
+    let Some(frame) = state.waterfall.last_fft.as_ref() else {
+        return LoLine::NoSpectrum;
+    };
     let n = frame.bins_dbfs.len();
     if n == 0 || frame.sample_rate <= 0.0 {
-        return None;
+        return LoLine::NoSpectrum;
     }
     let at = (n as f64 / 2.0 + offset as f64 * n as f64 / frame.sample_rate).round();
     if at < 0.0 || at >= n as f64 {
-        return None;
+        return LoLine::OutOfSpan;
     }
     let at = at as usize;
-    let lo = at.saturating_sub(2);
-    let hi = (at + 2).min(n - 1);
-    frame.bins_dbfs[lo..=hi]
+    let peak = frame.bins_dbfs[at.saturating_sub(2)..=(at + 2).min(n - 1)]
         .iter()
         .copied()
-        .fold(None, |best: Option<f32>, v| {
-            Some(best.map_or(v, |b| b.max(v)))
-        })
-        .map(f64::from)
+        .fold(f32::NEG_INFINITY, f32::max);
+    LoLine::Level(f64::from(peak))
 }
 
 /// DC spike level in dBFS: how tall the centre-frequency spike is in the spectrum.

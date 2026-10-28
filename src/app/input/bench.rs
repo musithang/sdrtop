@@ -115,6 +115,8 @@ pub(super) fn iq_diagnostics(key: KeyEvent, ctx: &mut InputCtx<'_>) -> KeyAction
                 m.iq.cal.c_qi = 0.0;
                 m.iq.cal.c_qq = 1.0;
                 m.push_log("IQ auto-cal cleared — quadrature uncorrected".to_string());
+            } else if let Some(why) = m.iq_balance_refusal() {
+                m.push_log(format!("IQ auto-cal refused: {why}"));
             } else {
                 m.iq.cal.cal_pending = true;
                 m.push_log("IQ auto-cal — capturing correction…".to_string());
@@ -416,4 +418,55 @@ pub(super) fn timing_diagnostics(key: KeyEvent, ctx: &mut InputCtx<'_>) -> KeyAc
         _ => return global::handle(key, ctx),
     }
     KeyAction::Continue
+}
+
+#[cfg(test)]
+mod tests {
+    use std::collections::HashMap;
+    use std::sync::{Arc, Mutex};
+
+    use crossterm::event::{KeyCode, KeyEvent};
+
+    use crate::config::LayoutConfig;
+    use crate::state::SdrMetrics;
+    use crate::ui::{LayoutEngine, PanelRegistry};
+
+    use super::super::{metrics, InputCtx};
+
+    fn press_on_iq_bench(state: &Arc<Mutex<SdrMetrics>>, c: char) {
+        let mut engine = LayoutEngine::new(LayoutConfig::default_config(), PanelRegistry::new());
+        let mut show_footer = true;
+        let focus_keys = HashMap::new();
+        let mut ctx = InputCtx {
+            state,
+            device: None,
+            engine: &mut engine,
+            show_footer: &mut show_footer,
+            focus_keys: &focus_keys,
+        };
+        super::iq_diagnostics(KeyEvent::from(KeyCode::Char(c)), &mut ctx);
+    }
+
+    /// **Auto-cal is refused where the balance is not the front end's**: it
+    /// would build a correction from moments the library's turning has
+    /// already evened out, and apply it on top of the library's own. Where
+    /// the LO is at the centre it captures as it always has.
+    #[test]
+    fn auto_cal_is_refused_where_the_balance_is_not_the_front_ends() {
+        let state = Arc::new(Mutex::new(SdrMetrics::fixture().streaming()));
+        metrics(&state).radio.lo_offset_hz = 5_000;
+        press_on_iq_bench(&state, 'c');
+        {
+            let m = metrics(&state);
+            assert!(!m.iq.cal.cal_pending, "nothing captured");
+            let log = &m.ui.log.back().unwrap().text;
+            assert!(
+                log.starts_with("IQ auto-cal refused: the samples are turned +5.0 kHz off the LO"),
+                "{log}"
+            );
+        }
+        metrics(&state).radio.lo_offset_hz = 0;
+        press_on_iq_bench(&state, 'c');
+        assert!(metrics(&state).iq.cal.cal_pending, "captures at the centre");
+    }
 }

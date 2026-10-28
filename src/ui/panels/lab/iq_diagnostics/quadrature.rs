@@ -24,6 +24,16 @@ const PHASE_FULL_SCALE_DEG: f64 = 6.0;
 
 pub(super) fn lines(r: &Reading, rows: &Rows) -> Vec<Line<'static>> {
     let theme = rows.theme;
+    if let Some(why) = &r.balance_refusal {
+        let mut out = vec![section("Quadrature", "not measured here", rows.iw, theme)];
+        let width = rows.iw.saturating_sub(2).max(12);
+        out.extend(
+            crate::ui::chrome::wrap(&format!("Not measured: {why}."), width, 3)
+                .into_iter()
+                .map(|l| Line::styled(format!(" {l}"), rows.label_style())),
+        );
+        return out;
+    }
     vec![
         section("Quadrature", "gain \u{00b7} phase", rows.iw, theme),
         rows.meter(

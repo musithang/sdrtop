@@ -161,6 +161,33 @@ mod tests {
         assert!(!centred.contains("dBFS/bin"), "{centred}");
     }
 
+    /// **Where the samples are turned off the LO, the balance is not the
+    /// front end's, and nothing judges it.** A gain imbalance that would be a
+    /// critical verdict on a radio mixing to 0 Hz gives no verdict, no meters
+    /// and no predicted image here: the section says why, and the verdict
+    /// judges the DC alone.
+    #[test]
+    fn a_balance_turned_off_the_lo_is_not_judged() {
+        let mut m = bench();
+        m.iq.iq_imbalance_db = 4.0;
+        m.radio.lo_offset_hz = 5_000;
+        let out = draw(IqDiagnosticsPanel, 60, 34, &m).join("\n");
+        assert!(out.contains("not measured here"), "{out}");
+        assert!(
+            out.contains("Not measured: the samples are turned"),
+            "{out}"
+        );
+        assert!(out.contains("+5.0 kHz off"), "{out}");
+        assert!(!out.contains("QUADRATURE IMBALANCE"), "{out}");
+        assert!(!out.contains("+4.00 dB"), "no gain meter: {out}");
+        assert!(!out.contains("as gain and phase predict it"), "{out}");
+        assert!(out.contains("DC OK"), "{out}");
+        assert!(out.contains("LO    at +5.0 kHz, no spectrum yet"), "{out}");
+        m.radio.lo_offset_hz = 0;
+        let centred = draw(IqDiagnosticsPanel, 60, 34, &m).join("\n");
+        assert!(centred.contains("QUADRATURE IMBALANCE"), "{centred}");
+    }
+
     /// The blocks are present in the order the panel promises: the DC, the
     /// quadrature and the image it predicts, the verdict, the chips.
     #[test]

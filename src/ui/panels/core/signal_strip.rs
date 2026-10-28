@@ -202,7 +202,7 @@ fn build_cells(state: &SdrMetrics, theme: &crate::Theme, stale: bool, hw_stale: 
                 .collect(),
         )
     };
-    let iq = if hw_stale {
+    let iq = if hw_stale || state.iq_balance_refusal().is_some() {
         Cell::dash("IQ", theme, true)
     } else {
         let v = state.iq.iq_imbalance_db;
@@ -356,6 +356,25 @@ impl Panel for SignalStripPanel {
 mod tests {
     use super::*;
     use crate::theme::Theme;
+
+    /// The strip's IQ cell is a dash where the balance is not the front
+    /// end's, and the imbalance where it is.
+    #[test]
+    fn the_iq_cell_stands_down_where_the_balance_is_not_the_front_ends() {
+        let t = Theme::sdr();
+        let mut m = SdrMetrics::fixture().streaming();
+        m.iq.iq_imbalance_db = 1.5;
+        let iq = |m: &SdrMetrics| {
+            build_cells(m, &t, false, false)
+                .into_iter()
+                .find(|c| c.label == "IQ")
+                .unwrap()
+                .value
+        };
+        assert_eq!(iq(&m), "+1.5 dB");
+        m.radio.lo_offset_hz = -3_000;
+        assert_eq!(iq(&m), "---");
+    }
 
     #[test]
     fn snr_color_thresholds() {

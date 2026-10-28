@@ -262,7 +262,10 @@ fn push_trends(m: &mut SdrMetrics) {
         push(&mut m.signal.nf_history, nf);
     }
     push(&mut m.signal.sat_history, sat);
-    push(&mut m.iq.irr_history, irr);
+    // A balance that is not the front end's has no trend to keep.
+    if m.iq_balance_refusal().is_none() {
+        push(&mut m.iq.irr_history, irr);
+    }
 }
 
 #[cfg(test)]
@@ -273,6 +276,19 @@ mod tests {
     /// (nothing on screen reads it) the SNR, power and noise floor trends
     /// get nothing, rather than its last frame again and again; the
     /// saturation, measured here, goes on.
+    /// A balance that is not the front end's keeps no IRR trend: with the
+    /// LO turned off the centre the other trends go on and the IRR's does not.
+    #[test]
+    fn no_irr_trend_where_the_balance_is_not_the_front_ends() {
+        let mut m = SdrMetrics::fixture().streaming().with_carrier(0.0, 30.0);
+        push_trends(&mut m);
+        assert_eq!(m.iq.irr_history.len(), 1);
+        m.radio.lo_offset_hz = 5_000;
+        push_trends(&mut m);
+        assert_eq!(m.iq.irr_history.len(), 1, "no IRR pushed");
+        assert_eq!(m.signal.sat_history.len(), 2, "the rest goes on");
+    }
+
     #[test]
     fn a_trend_takes_each_fft_frame_once() {
         let mut m = SdrMetrics::fixture().streaming().with_carrier(0.0, 30.0);

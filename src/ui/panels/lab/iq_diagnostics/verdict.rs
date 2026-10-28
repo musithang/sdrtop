@@ -60,8 +60,11 @@ pub(super) struct Verdict {
 /// correction is not keeping up, and the advice has to say "re-run" rather than
 /// "run".
 pub(super) fn decide(r: &Reading, cal: &IqCalState) -> Verdict {
-    let amp = r.amp_db.abs();
-    let phase = r.phase_deg.abs();
+    // With the balance not the front end's, neither imbalance verdict can be
+    // given: they would be judging the library's turning, not the radio.
+    let balance = r.balance_refusal.is_none();
+    let amp = if balance { r.amp_db.abs() } else { 0.0 };
+    let phase = if balance { r.phase_deg.abs() } else { 0.0 };
     let irr = r.irr_text(0);
 
     if amp > AMP_CRIT_DB || phase > PHASE_CRIT_DEG {
@@ -134,11 +137,14 @@ pub(super) fn decide(r: &Reading, cal: &IqCalState) -> Verdict {
     };
     Verdict {
         mark: "\u{2713}",
-        title: "IQ QUALITY OK",
+        // Only the DC was judged where the balance is not the front end's.
+        title: if balance { "IQ QUALITY OK" } else { "DC OK" },
         level: Level::Ok,
         body: vec![
             (
-                if corrected {
+                if !balance {
+                    "The I/Q balance is not judged here.".to_string()
+                } else if corrected {
                     format!("Corrections active, the image {irr} dB down.")
                 } else {
                     format!("Quadrature balanced, the image {irr} dB down.")
