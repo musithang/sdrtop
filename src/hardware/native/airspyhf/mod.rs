@@ -39,8 +39,8 @@ use libc::{c_char, c_int, c_void};
 use crate::hardware::traits::RateSet;
 use crate::hardware::{
     AcquisitionKind, DeliveryModel, DeviceCapabilities, DeviceInfo, DeviceKind, DeviceListing,
-    GainModel, LevelUnit, RxContext, SampleFormat, SampleGeometry, SdrDevice, StageSpec,
-    IQ_TRACE_STALE_MS,
+    DeviceOption, GainModel, LevelUnit, RxContext, SampleFormat, SampleGeometry, SdrDevice,
+    StageSpec, IQ_TRACE_STALE_MS,
 };
 
 /// Which HF+ a firmware is, by the part id it reports.
@@ -251,6 +251,17 @@ pub fn lo_offset_hz(freq_hz: u64, low_if: bool, dsp: bool, ppb: i32) -> i64 {
     (lo_hz - freq_hz as f64).round() as i64
 }
 
+/// Where the samples are centred after tuning to `freq_hz`: there, with the
+/// library's correction on (it turns the samples onto it); on the LO, the
+/// firmware's kHz grid point on the true scale, with it off.
+pub fn tuned_centre_hz(freq_hz: u64, low_if: bool, dsp: bool, ppb: i32) -> u64 {
+    if dsp {
+        freq_hz
+    } else {
+        freq_hz.saturating_add_signed(lo_offset_hz(freq_hz, low_if, false, ppb))
+    }
+}
+
 /// The HF+ Discovery's two stages front to back: the attenuator, nine 6 dB
 /// steps of negative gain, and the LNA, off or 6 dB. Both measured on the
 /// bench at HF and VHF to within 0.2 dB of those figures. The firmware's AGC
@@ -459,11 +470,14 @@ fn measure(ctx: &StreamCtx, conv: &mut Conversion, floats: &[f32]) {
     // SAFETY: the handle is open while a stream runs; the tuning mutex keeps
     // this from crossing a tuning made from another thread. With the DSP back
     // on, a frequency set while it was off gets the IF shift it lacked; the
-    // same frequency again moves nothing.
-    unsafe {
-        (ctx.api.airspyhf_set_lib_dsp)(ctx.ptr, 1);
-        if tuning.freq_hz > 0 {
-            (ctx.api.airspyhf_set_freq)(ctx.ptr, tuning.freq_hz as u32);
+    // same frequency again moves nothing. With the correction chosen off, the
+    // DSP stays off and the tuning is already what it should be.
+    if tuning.dsp {
+        unsafe {
+            (ctx.api.airspyhf_set_lib_dsp)(ctx.ptr, 1);
+            if tuning.freq_hz > 0 {
+                (ctx.api.airspyhf_set_freq)(ctx.ptr, tuning.freq_hz as u32);
+            }
         }
     }
 }
@@ -502,6 +516,9 @@ struct Tuning {
     freq_hz: u64,
     rate: u32,
     low_if: bool,
+    /// The library's correction, IF shift and fine tuning, as chosen: on
+    /// unless switched off for the raw words.
+    dsp: bool,
 }
 
 /// An open Airspy HF+ Discovery.
@@ -527,14 +544,19 @@ unsafe impl Send for AirspyHfDevice {}
 unsafe impl Sync for AirspyHfDevice {}
 
 impl AirspyHfDevice {
-    /// Opens the radio a listing names, by its serial.
-    pub fn open(listing: &DeviceListing) -> anyhow::Result<Self> {
-        Self::open_with_api(ffi::api()?, listing)
+    /// Opens the radio a listing names, by its serial, with the `[airspyhf]`
+    /// settings.
+    pub fn open(
+        listing: &DeviceListing,
+        settings: &crate::config::AirspyHfSettings,
+    ) -> anyhow::Result<Self> {
+        Self::open_with_api(ffi::api()?, listing, settings)
     }
 
     fn open_with_api(
         api: &'static ffi::AirspyHfApi,
         listing: &DeviceListing,
+        settings: &crate::config::AirspyHfSettings,
     ) -> anyhow::Result<Self> {
         let serial = listing
             .serial
@@ -593,17 +615,20 @@ impl AirspyHfDevice {
                 freq_hz: 0,
                 rate: 0,
                 low_if: false,
+                dsp: true,
             })),
             stream: Mutex::new(Stream::default()),
         };
         // What the firmware and the library would otherwise keep from the last
-        // program, stated: the library's correction on, the AGC off at its low
-        // threshold, no attenuation, the LNA off.
+        // program, stated: the library's correction as saved (on unless the
+        // raw words were chosen), the AGC off at its low threshold, no
+        // attenuation, the LNA off.
+        device.tuning().dsp = settings.dsp;
         // SAFETY: the handle is open and owned by `device`, whose Drop closes it.
         unsafe {
             device.check(
-                (api.airspyhf_set_lib_dsp)(ptr, 1),
-                "switch the library's DSP on",
+                (api.airspyhf_set_lib_dsp)(ptr, u8::from(settings.dsp)),
+                "set the library's DSP",
             )?;
             device.check((api.airspyhf_set_hf_agc)(ptr, 0), "switch the AGC off")?;
             device.check(
@@ -625,7 +650,14 @@ impl AirspyHfDevice {
                 }
                 None => format!("{name}: the radio's flash correction could not be read"),
             },
-            format!("{name}: library DSP on, AGC off, no attenuation, LNA off, set at open"),
+            format!(
+                "{name}: library DSP {}, AGC off, no attenuation, LNA off, set at open",
+                if settings.dsp {
+                    "on"
+                } else {
+                    "off (saved): the raw words, centred on the kHz grid"
+                }
+            ),
         ];
         Ok(device)
     }
@@ -679,8 +711,9 @@ impl AirspyHfDevice {
         let code = unsafe { (self.api.airspyhf_start)(self.ptr, rx_callback, user) };
         if code != 0 {
             stream.ctx = None;
+            let dsp = u8::from(self.tuning().dsp);
             // SAFETY: as above.
-            unsafe { (self.api.airspyhf_set_lib_dsp)(self.ptr, 1) };
+            unsafe { (self.api.airspyhf_set_lib_dsp)(self.ptr, dsp) };
         }
         self.check(code, "start streaming")
     }
@@ -698,10 +731,11 @@ impl AirspyHfDevice {
                 stream.stranded.push(ctx);
             }
         }
-        // The DSP back on whatever the stream left it at, so a tuning made
-        // while stopped gets its IF shift.
+        // The DSP back as chosen whatever the stream left it at, so a tuning
+        // made while stopped gets the IF shift it should.
+        let dsp = u8::from(self.tuning().dsp);
         // SAFETY: as above.
-        unsafe { (self.api.airspyhf_set_lib_dsp)(self.ptr, 1) };
+        unsafe { (self.api.airspyhf_set_lib_dsp)(self.ptr, dsp) };
         self.check(code, "stop streaming")
     }
 }
@@ -748,7 +782,14 @@ impl SdrDevice for AirspyHfDevice {
         self.library_streaming()
     }
 
-    fn set_frequency(&self, hz: u64) -> anyhow::Result<()> {
+    /// With the library's correction on, tuned to the hertz: the firmware
+    /// takes whole kHz and the library turns the rest. With it off, to the
+    /// firmware's kHz grid, and the frequency returned is that grid point on
+    /// the true scale (the flash's correction folded back), which is where the
+    /// samples are then centred. Below 180 kHz the lowest LO depends on the
+    /// rate's architecture, so with the correction off the centre would move
+    /// with the rate; it is refused there instead.
+    fn set_frequency(&self, hz: u64) -> anyhow::Result<u64> {
         if !self.caps.tunes(hz) {
             anyhow::bail!(
                 "the {} tunes {}, not {:.3} MHz",
@@ -760,13 +801,21 @@ impl SdrDevice for AirspyHfDevice {
         // Under the tuning mutex, which the stream also takes when it puts
         // the frequency back after measuring.
         let mut tuning = self.tuning();
+        if !tuning.dsp && hz < MIN_ZERO_IF_LO_HZ {
+            anyhow::bail!(
+                "with the library's correction off the {} tunes from {} kHz, \
+                 where its lowest LO is the same at every rate",
+                Board::Discovery.name(),
+                MIN_ZERO_IF_LO_HZ / 1000
+            );
+        }
         // SAFETY: the handle is open; the bands keep `hz` inside u32.
         self.check(
             unsafe { (self.api.airspyhf_set_freq)(self.ptr, hz as u32) },
             "tune",
         )?;
         tuning.freq_hz = hz;
-        Ok(())
+        Ok(tuned_centre_hz(hz, tuning.low_if, tuning.dsp, self.ppb))
     }
 
     /// One of the rates the firmware lists, set as asked; whether it is a
@@ -843,6 +892,69 @@ impl SdrDevice for AirspyHfDevice {
         &self.notes
     }
 
+    fn options(&self) -> Vec<DeviceOption> {
+        let on = self.tuning().dsp;
+        vec![DeviceOption {
+            id: "dsp".into(),
+            label: "Library DSP".into(),
+            choices: vec!["On".into(), "Off".into()],
+            selected_choice: if on { "On" } else { "Off" }.into(),
+            integer_range: None,
+        }]
+    }
+
+    /// The library's DSP on or off. Takes effect from the next block; the
+    /// frequency then has to be set again (the IF shift comes and goes with
+    /// it, and off, the centre is the kHz grid), which the app does on
+    /// [`SdrDevice::option_moves_tuning`]. Below 180 kHz switching it off is
+    /// refused, as tuning there with it off is.
+    fn set_option(&self, id: &str, choice: &str) -> anyhow::Result<()> {
+        if id != "dsp" {
+            anyhow::bail!("the {} has no option {id}", Board::Discovery.name());
+        }
+        let on = match choice {
+            "On" => true,
+            "Off" => false,
+            _ => anyhow::bail!("{choice} is not a choice for {id}"),
+        };
+        let stream = self.stream();
+        let mut tuning = self.tuning();
+        if !on && tuning.freq_hz > 0 && tuning.freq_hz < MIN_ZERO_IF_LO_HZ {
+            anyhow::bail!(
+                "with the library's correction off the {} tunes from {} kHz; tune there first",
+                Board::Discovery.name(),
+                MIN_ZERO_IF_LO_HZ / 1000
+            );
+        }
+        tuning.dsp = on;
+        // A stream still measuring its scale keeps the DSP off until it is
+        // done, and then sets it as chosen.
+        let measuring = stream.ctx.as_ref().is_some_and(|ctx| {
+            ctx.conversion
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .scale
+                .is_none()
+        });
+        if !measuring {
+            // SAFETY: the handle is open.
+            self.check(
+                unsafe { (self.api.airspyhf_set_lib_dsp)(self.ptr, u8::from(on)) },
+                "set the library's DSP",
+            )?;
+        }
+        Ok(())
+    }
+
+    fn option_moves_tuning(&self, id: &str) -> bool {
+        id == "dsp"
+    }
+
+    fn update_config(&self, config: &mut crate::config::AppConfig) -> anyhow::Result<()> {
+        config.airspyhf.dsp = self.tuning().dsp;
+        Ok(())
+    }
+
     /// The firmware's AGC, which sets the attenuator while it is on.
     fn set_tuner_agc(&self, on: bool) -> anyhow::Result<()> {
         // SAFETY: the handle is open.
@@ -858,9 +970,10 @@ impl SdrDevice for AirspyHfDevice {
         Some(4.0)
     }
 
+    /// With the correction off the samples are centred on the LO itself.
     fn lo_offset_hz(&self) -> i64 {
         let t = self.tuning();
-        if t.rate == 0 || t.freq_hz == 0 {
+        if t.rate == 0 || t.freq_hz == 0 || !t.dsp {
             return 0;
         }
         lo_offset_hz(t.freq_hz, t.low_if, true, self.ppb)
@@ -1029,7 +1142,8 @@ mod tests {
         let fixture = TestLibrary::new(false);
         let api: &'static ffi::AirspyHfApi =
             Box::leak(Box::new(ffi::resolve(fixture.library()).unwrap()));
-        let device = AirspyHfDevice::open_with_api(api, &listing()).expect("the Discovery opens");
+        let device = AirspyHfDevice::open_with_api(api, &listing(), &Default::default())
+            .expect("the Discovery opens");
         (fixture, device)
     }
 
@@ -1057,6 +1171,83 @@ mod tests {
         // +250 ppb: tuned 100.000025 MHz in the radio's reference, LO at
         // 100.005 MHz there, 100.004975 MHz on the true scale.
         assert_eq!(lo_offset_hz(100_000_000, false, true, 250), 4_975);
+    }
+
+    /// With the library's correction on the samples are centred where asked;
+    /// off, on the LO: the firmware's kHz grid point, folded back onto the
+    /// true scale by the flash's correction.
+    #[test]
+    fn the_centre_is_the_asked_frequency_or_the_grid() {
+        assert_eq!(tuned_centre_hz(7_074_300, false, true, 0), 7_074_300);
+        assert_eq!(tuned_centre_hz(7_074_300, false, false, 0), 7_074_000);
+        assert_eq!(tuned_centre_hz(7_074_600, true, false, 0), 7_075_000);
+        // +250 ppb: 100.000025 MHz in the radio's reference rounds to
+        // 100.000 MHz there, 99.999975 MHz on the true scale.
+        assert_eq!(tuned_centre_hz(100_000_000, false, false, 250), 99_999_975);
+    }
+
+    /// **With the DSP off** the radio opens without it, tunes onto the grid
+    /// and says so, puts its LO on the centre, refuses below 180 kHz, and
+    /// keeps it off through a stream's measuring: the frequency is not set
+    /// again and the words carry no fraction. Switching it on reaches the
+    /// library, asks the app to tune again, and is what the config keeps.
+    #[test]
+    fn the_dsp_off_tunes_on_the_grid_and_stays_off() {
+        let fixture = TestLibrary::new(false);
+        let api: &'static ffi::AirspyHfApi =
+            Box::leak(Box::new(ffi::resolve(fixture.library()).unwrap()));
+        let device = AirspyHfDevice::open_with_api(
+            api,
+            &listing(),
+            &crate::config::AirspyHfSettings { dsp: false },
+        )
+        .expect("the Discovery opens");
+        assert_eq!(fixture.airspyhf_state(3), 0, "opened with the DSP off");
+        assert_eq!(device.options()[0].selected_choice, "Off");
+        device.set_sample_rate(192_000.0).unwrap();
+        assert_eq!(device.set_frequency(7_074_300).unwrap(), 7_074_000);
+        assert_eq!(device.lo_offset_hz(), 0, "the LO is the centre");
+        let why = device.set_frequency(150_000).unwrap_err().to_string();
+        assert!(why.contains("from 180 kHz"), "{why}");
+
+        let tuned = fixture.airspyhf_state(11);
+        let (ctx, net) = streaming_ctx();
+        device.start_rx(Arc::clone(&ctx)).unwrap();
+        let block = net.recv_timeout(WAIT).unwrap();
+        assert_eq!(fixture.airspyhf_state(3), 0, "the DSP still off");
+        assert_eq!(
+            fixture.airspyhf_state(11),
+            tuned,
+            "the frequency left alone"
+        );
+        assert_eq!(words(&block)[..2], [101 * 256, -(101 * 256)]);
+        device.stop_rx().unwrap();
+        assert_eq!(fixture.airspyhf_state(3), 0, "and off after stopping");
+
+        assert!(device.option_moves_tuning("dsp"));
+        device.set_option("dsp", "On").unwrap();
+        assert_eq!(fixture.airspyhf_state(3), 1);
+        assert_eq!(device.set_frequency(7_074_300).unwrap(), 7_074_300);
+        let mut config = crate::config::AppConfig::default();
+        device.update_config(&mut config).unwrap();
+        assert!(config.airspyhf.dsp);
+        device.set_option("dsp", "Off").unwrap();
+        device.update_config(&mut config).unwrap();
+        assert!(!config.airspyhf.dsp);
+    }
+
+    /// Below 180 kHz, where the lowest LO moves with the rate, switching the
+    /// DSP off is refused and it stays on.
+    #[test]
+    fn the_dsp_stays_on_below_the_zero_if_floor() {
+        let (fixture, device) = opened();
+        assert_eq!(device.set_frequency(150_000).unwrap(), 150_000);
+        let why = device.set_option("dsp", "Off").unwrap_err().to_string();
+        assert!(why.contains("tune there first"), "{why}");
+        assert_eq!(fixture.airspyhf_state(3), 1);
+        assert_eq!(device.options()[0].selected_choice, "On");
+        assert!(device.set_option("dsp", "Maybe").is_err());
+        assert!(device.set_option("agc", "On").is_err());
     }
 
     /// The two measured stages, front to back, starting with no attenuation
@@ -1142,7 +1333,7 @@ mod tests {
         let api: &'static ffi::AirspyHfApi =
             Box::leak(Box::new(ffi::resolve(fixture.library()).unwrap()));
         fixture.mode(30);
-        let why = AirspyHfDevice::open_with_api(api, &listing())
+        let why = AirspyHfDevice::open_with_api(api, &listing(), &Default::default())
             .err()
             .unwrap()
             .to_string();
@@ -1153,7 +1344,7 @@ mod tests {
         );
         assert_eq!(fixture.calls(3), 1, "closed again");
         fixture.mode(31);
-        let why = AirspyHfDevice::open_with_api(api, &listing())
+        let why = AirspyHfDevice::open_with_api(api, &listing(), &Default::default())
             .err()
             .unwrap()
             .to_string();

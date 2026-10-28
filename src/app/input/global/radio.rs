@@ -57,8 +57,10 @@ pub(super) fn reset_defaults(ctx: &mut InputCtx<'_>) {
         .enumerate()
         .map(|(index, (spec, &db))| device.set_stage_gain(index, &spec.name, db))
         .collect();
+    // Where the radio tuned, which a receiver on a tuning grid may round.
+    let mut tuned_freq = def_freq;
     results.extend([
-        device.set_frequency(def_freq),
+        device.set_frequency(def_freq).map(|hz| tuned_freq = hz),
         sr_result,
         device.set_amp_enable(false),
     ]);
@@ -69,7 +71,7 @@ pub(super) fn reset_defaults(ctx: &mut InputCtx<'_>) {
         m.radio.gain_curve = curve;
         m.radio.amp_enabled = false;
         m.lab.rf_autotrack = false;
-        m.radio.frequency = def_freq;
+        m.radio.frequency = tuned_freq;
         m.radio.config_sample_rate = settled_sr;
         m.radio.bb_filter_hz = bb_bw;
         m.push_log("Settings reset to defaults");

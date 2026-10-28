@@ -304,7 +304,10 @@ pub fn open_device(
     let tinysa_settings = &cfg.tinysa;
     match listing.kind {
         DeviceKind::Airspy => Ok(Arc::new(airspy::AirspyDevice::open(listing, &cfg.airspy)?)),
-        DeviceKind::AirspyHf => Ok(Arc::new(airspyhf::AirspyHfDevice::open(listing)?)),
+        DeviceKind::AirspyHf => Ok(Arc::new(airspyhf::AirspyHfDevice::open(
+            listing,
+            &cfg.airspyhf,
+        )?)),
         DeviceKind::HackRf => Ok(Arc::new(hackrf::HackRfDevice::open(listing.index)?)),
         DeviceKind::RtlSdr => Ok(Arc::new(rtlsdr::RtlDevice::open(listing.index)?)),
         DeviceKind::Soapy => {

@@ -119,7 +119,7 @@ pub(super) fn frequency(
                 let result = freq_hz.map(|hz| device.set_frequency(hz));
                 let mut m = metrics(state);
                 match (freq_hz, result) {
-                    (Some(hz), Some(Ok(()))) => {
+                    (Some(_), Some(Ok(hz))) => {
                         m.radio.frequency = hz;
                         m.ui.note_mode_action(RailMode::Hunt);
                         m.ui.input_mode = InputMode::Normal;
@@ -440,9 +440,9 @@ mod tests {
         fn is_streaming(&self) -> bool {
             true
         }
-        fn set_frequency(&self, hz: u64) -> anyhow::Result<()> {
+        fn set_frequency(&self, hz: u64) -> anyhow::Result<u64> {
             self.tuned.lock().unwrap().push(hz);
-            Ok(())
+            Ok(hz)
         }
         fn set_sample_rate(&self, hz: f64) -> anyhow::Result<hardware::RateSet> {
             Ok(hardware::RateSet::new(hz, Some(hz), 0))

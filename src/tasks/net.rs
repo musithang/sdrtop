@@ -153,9 +153,9 @@ pub fn spawn_net_survey_task(state: Arc<Mutex<SdrMetrics>>, device: Arc<dyn SdrD
                     let result = device.set_frequency(target.tune_hz);
                     let mut m = state.lock().unwrap_or_else(|e| e.into_inner());
                     match result {
-                        Ok(()) => {
-                            m.radio.frequency = target.tune_hz;
-                            m.push_log(locked_line(target.tune_hz, Some(&target.why)));
+                        Ok(tuned) => {
+                            m.radio.frequency = tuned;
+                            m.push_log(locked_line(tuned, Some(&target.why)));
                         }
                         Err(e) => m.push_log(format!("NET lock refused by the radio: {e}")),
                     }
@@ -460,9 +460,9 @@ mod tests {
         fn is_streaming(&self) -> bool {
             false
         }
-        fn set_frequency(&self, hz: u64) -> anyhow::Result<()> {
+        fn set_frequency(&self, hz: u64) -> anyhow::Result<u64> {
             self.tuned.lock().unwrap().push(hz);
-            Ok(())
+            Ok(hz)
         }
         fn set_sample_rate(&self, hz: f64) -> anyhow::Result<crate::hardware::RateSet> {
             Ok(crate::hardware::RateSet::new(hz, Some(hz), 0))

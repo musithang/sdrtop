@@ -62,6 +62,8 @@ pub struct App {
     /// The `[airspy]` block, carried forward the same way; the R2's backend
     /// writes its own part back through `update_config`.
     pub(super) airspy_config: crate::config::AirspySettings,
+    /// The `[airspyhf]` block, likewise.
+    pub(super) airspyhf_config: crate::config::AirspyHfSettings,
     /// The `[net]` block exactly as it was loaded - `[net].bt_channels`
     /// has no in-app control that would change it while running, so the
     /// only way `save_config` can carry it forward is to hold the loaded
@@ -193,6 +195,7 @@ impl App {
             input::complete_device_option(
                 &self.state,
                 DeviceOptionCompletion {
+                    retune: None,
                     result: Err("device is unavailable".to_string()),
                 },
             );
@@ -200,13 +203,47 @@ impl App {
         };
         let tx = self.events.sender();
         let worker_request = request.clone();
+        let state = Arc::clone(&self.state);
         Self::spawn_device_option_task(tx, move || {
-            Self::execute_device_option(
+            let result = Self::execute_device_option(
                 &worker_request,
                 |id, choice| device.set_option(id, choice),
                 || device.options(),
-            )
+            );
+            let retune = result
+                .is_ok()
+                .then(|| Self::retune_after_option(device.as_ref(), &worker_request.id, &state))
+                .flatten();
+            DeviceOptionCompletion {
+                result: result.map_err(|error| format!("{error:#}")),
+                retune,
+            }
         });
+    }
+
+    /// Set the frequency again after an option that can move the tuning, and
+    /// keep the radio's word for where it landed. The frequency is read when
+    /// the option has been applied, not when it was asked for, so a retune made
+    /// while the option was being set is the one the radio gets.
+    fn retune_after_option(
+        device: &dyn SdrDevice,
+        id: &str,
+        state: &Arc<Mutex<SdrMetrics>>,
+    ) -> Option<Result<u64, String>> {
+        if !device.option_moves_tuning(id) {
+            return None;
+        }
+        let hz = state
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .radio
+            .frequency;
+        // Device call with no lock held, as everywhere else.
+        Some(
+            device
+                .set_frequency(hz)
+                .map_err(|error| format!("{error:#}")),
+        )
     }
 
     fn device_option_pending(&self) -> bool {
@@ -528,13 +565,10 @@ impl App {
 
     fn spawn_device_option_task(
         tx: std::sync::mpsc::Sender<AppEvent>,
-        apply: impl FnOnce() -> anyhow::Result<Vec<hardware::DeviceOption>> + Send + 'static,
+        apply: impl FnOnce() -> DeviceOptionCompletion + Send + 'static,
     ) {
         std::thread::spawn(move || {
-            let completion = DeviceOptionCompletion {
-                result: apply().map_err(|error| format!("{error:#}")),
-            };
-            let _ = tx.send(AppEvent::DeviceOptionComplete(completion));
+            let _ = tx.send(AppEvent::DeviceOptionComplete(apply()));
         });
     }
 
@@ -670,6 +704,7 @@ impl App {
             },
             tinysa: self.tinysa_config.clone(),
             airspy: self.airspy_config.clone(),
+            airspyhf: self.airspyhf_config.clone(),
             net: self.net_config.clone(),
             record: self.record_config.clone(),
             pager: crate::config::PagerSettings { night, display },
@@ -791,10 +826,10 @@ mod tests {
             false
         }
 
-        fn set_frequency(&self, hz: u64) -> anyhow::Result<()> {
+        fn set_frequency(&self, hz: u64) -> anyhow::Result<u64> {
             self.tuned_hz.store(hz, Ordering::Relaxed);
             self.tune_calls.fetch_add(1, Ordering::Relaxed);
-            Ok(())
+            Ok(hz)
         }
 
         fn set_sample_rate(&self, hz: f64) -> anyhow::Result<RateSet> {
@@ -874,6 +909,7 @@ mod tests {
         tx.send(AppEvent::Key(KeyEvent::from(KeyCode::Char('q'))))
             .unwrap();
         tx.send(AppEvent::DeviceOptionComplete(DeviceOptionCompletion {
+            retune: None,
             result: Ok(vec![hardware::DeviceOption {
                 id: "bandwidth".into(),
                 label: "Bandwidth".into(),
@@ -1155,6 +1191,7 @@ mod tests {
         tx.send(AppEvent::Key(KeyEvent::from(KeyCode::Char('q'))))
             .unwrap();
         tx.send(AppEvent::DeviceOptionComplete(DeviceOptionCompletion {
+            retune: None,
             result: Err("device rejected choice".into()),
         }))
         .unwrap();
@@ -1260,8 +1297,9 @@ mod tests {
         let worker_state = Arc::clone(&state);
         let worker_request = request.clone();
 
-        App::spawn_device_option_task(event_tx, move || {
-            App::execute_device_option(
+        App::spawn_device_option_task(event_tx, move || DeviceOptionCompletion {
+            retune: None,
+            result: App::execute_device_option(
                 &worker_request,
                 |_, _| {
                     assert!(
@@ -1295,6 +1333,7 @@ mod tests {
                     ]
                 },
             )
+            .map_err(|error| format!("{error:#}")),
         });
 
         started_rx
@@ -1317,6 +1356,93 @@ mod tests {
         assert_eq!(m.device_options.len(), 2);
         assert_eq!(m.device_options[0].selected_choice, "Wide");
         assert_eq!(m.device_options[1].selected_choice, "0 dB");
+    }
+
+    /// A radio on a kHz tuning grid whose `grid` option moves the tuning.
+    struct GridDevice(DeviceCapabilities);
+
+    impl SdrDevice for GridDevice {
+        fn capabilities(&self) -> &DeviceCapabilities {
+            &self.0
+        }
+        fn info(&self) -> DeviceInfo {
+            DeviceInfo::default()
+        }
+        fn start_rx(&self, _ctx: Arc<RxContext>) -> anyhow::Result<()> {
+            Ok(())
+        }
+        fn stop_rx(&self) -> anyhow::Result<()> {
+            Ok(())
+        }
+        fn is_streaming(&self) -> bool {
+            false
+        }
+        fn set_frequency(&self, hz: u64) -> anyhow::Result<u64> {
+            if hz < 1_000 {
+                anyhow::bail!("below the grid");
+            }
+            Ok((hz + 500) / 1000 * 1000)
+        }
+        fn set_sample_rate(&self, hz: f64) -> anyhow::Result<RateSet> {
+            Ok(RateSet::new(hz, Some(hz), 0))
+        }
+        fn set_lna_gain(&self, _db: u32) -> anyhow::Result<()> {
+            Ok(())
+        }
+        fn option_moves_tuning(&self, id: &str) -> bool {
+            id == "grid"
+        }
+    }
+
+    /// **An option that moves the tuning is followed by the frequency**, and
+    /// the state keeps where the radio says it landed, with a log line when
+    /// that is not where it was; a refusal is logged and leaves the state. An
+    /// option that does not move it is not followed.
+    #[test]
+    fn an_option_that_moves_the_tuning_retunes_and_keeps_the_answer() {
+        let device = GridDevice(SdrMetrics::fixture().caps.as_ref().clone());
+        let state = Arc::new(Mutex::new(SdrMetrics::fixture()));
+        state.lock().unwrap().radio.frequency = 7_074_300;
+        assert_eq!(App::retune_after_option(&device, "other", &state), None);
+        let retune = App::retune_after_option(&device, "grid", &state);
+        assert_eq!(retune, Some(Ok(7_074_000)));
+
+        let request = DeviceOptionRequest {
+            id: "grid".into(),
+            label: "Grid".into(),
+            choice: "On".into(),
+        };
+        let complete = |retune| {
+            state.lock().unwrap().ui.device_option_update = DeviceOptionUpdate::Pending {
+                request: request.clone(),
+                quit_requested: false,
+            };
+            input::complete_device_option(
+                &state,
+                DeviceOptionCompletion {
+                    result: Ok(Vec::new()),
+                    retune,
+                },
+            );
+        };
+        complete(retune);
+        {
+            let m = state.lock().unwrap();
+            assert_eq!(m.radio.frequency, 7_074_000);
+            assert!(m
+                .ui
+                .log
+                .back()
+                .is_some_and(|e| e.text.contains("Grid: tuned to 7.074000 MHz, -300 Hz")));
+        }
+        complete(Some(Err("below the grid".into())));
+        let m = state.lock().unwrap();
+        assert_eq!(m.radio.frequency, 7_074_000);
+        assert!(m
+            .ui
+            .log
+            .back()
+            .is_some_and(|e| e.text.contains("Grid: retune refused: below the grid")));
     }
 
     #[test]

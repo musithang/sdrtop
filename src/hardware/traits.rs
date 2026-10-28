@@ -1611,7 +1611,13 @@ pub trait SdrDevice: Send + Sync {
     fn stop_rx(&self) -> anyhow::Result<()>;
     fn is_streaming(&self) -> bool;
 
-    fn set_frequency(&self, hz: u64) -> anyhow::Result<()>;
+    /// Tune to `hz` and say where the radio is tuned: the frequency at the
+    /// centre of the samples from now on. That is `hz` on a radio that tunes
+    /// to the hertz, and the nearest step of a radio that cannot: an Airspy
+    /// HF+ with its library's correction off tunes in whole kHz. Every caller
+    /// keeps what comes back, never what it asked for, so no frequency on
+    /// screen is one the samples are not centred on.
+    fn set_frequency(&self, hz: u64) -> anyhow::Result<u64>;
     /// Set the sample rate and report what the radio settled on.
     ///
     /// An implementation asks the driver back where the driver can be asked,
@@ -1644,6 +1650,14 @@ pub trait SdrDevice: Send + Sync {
 
     fn set_option(&self, _id: &str, _choice: &str) -> anyhow::Result<()> {
         anyhow::bail!("this backend has no device options")
+    }
+
+    /// Whether setting option `id` can move where the radio is tuned, so the
+    /// app sets the frequency again after it and keeps what comes back. No
+    /// option does on any radio but one: the Airspy HF+'s library DSP, off,
+    /// puts the centre on the firmware's kHz grid.
+    fn option_moves_tuning(&self, _id: &str) -> bool {
+        false
     }
 
     /// Update backend-owned settings before the app saves its config snapshot.

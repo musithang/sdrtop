@@ -52,8 +52,8 @@ pub(super) fn command_rail(key: KeyEvent, ctx: &mut InputCtx<'_>) -> KeyAction {
                 let result = device.set_frequency(new_freq);
                 let mut m = metrics(state);
                 match result {
-                    Ok(()) => {
-                        m.radio.frequency = new_freq;
+                    Ok(tuned) => {
+                        m.radio.frequency = tuned;
                         m.ui.note_mode_action(RailMode::Hunt);
                     }
                     Err(e) => m.push_log(format!("Tune error: {}", e)),
@@ -85,10 +85,14 @@ pub(super) fn command_rail(key: KeyEvent, ctx: &mut InputCtx<'_>) -> KeyAction {
                     let result = device.set_frequency(hz);
                     let mut m = metrics(state);
                     match result {
-                        Ok(()) => {
-                            m.radio.frequency = hz;
+                        Ok(tuned) => {
+                            m.radio.frequency = tuned;
                             m.ui.note_mode_action(RailMode::Hunt);
-                            m.push_log(format!("Recall {} → {:.3} MHz", slot + 1, hz as f64 / 1e6));
+                            m.push_log(format!(
+                                "Recall {} → {:.3} MHz",
+                                slot + 1,
+                                tuned as f64 / 1e6
+                            ));
                         }
                         Err(e) => m.push_log(format!("Recall error: {}", e)),
                     }

@@ -486,6 +486,27 @@ pub(super) fn complete_device_option(
             } else {
                 m.push_log(format!("{} updated", request.label));
             }
+            // An option that moved the tuning was followed by the frequency
+            // again, and the state keeps where the radio says it now is.
+            match completion.retune {
+                Some(Ok(tuned)) => {
+                    // To the hertz, with how far it moved: a few hundred
+                    // hertz vanish in a kHz-rounded figure.
+                    let moved = tuned as i64 - m.radio.frequency as i64;
+                    if moved != 0 {
+                        m.push_log(format!(
+                            "{}: tuned to {:.6} MHz, {moved:+} Hz",
+                            request.label,
+                            tuned as f64 / 1e6,
+                        ));
+                    }
+                    m.radio.frequency = tuned;
+                }
+                Some(Err(message)) => {
+                    m.push_log(format!("{}: retune refused: {message}", request.label));
+                }
+                None => {}
+            }
         }
         Err(message) => {
             m.ui.device_option_update = DeviceOptionUpdate::Failed { id: request.id };
@@ -659,6 +680,7 @@ mod tests {
         assert!(!complete_device_option(
             &h.state,
             DeviceOptionCompletion {
+                retune: None,
                 result: Ok(vec![option("mode", "Mode", "Wide"), integer_option("-10")]),
             }
         ));
@@ -806,6 +828,7 @@ mod tests {
         complete_device_option(
             &h.state,
             DeviceOptionCompletion {
+                retune: None,
                 result: Ok(vec![option]),
             },
         );
@@ -942,7 +965,10 @@ mod tests {
             };
             assert!(complete_device_option(
                 &h.state,
-                DeviceOptionCompletion { result }
+                DeviceOptionCompletion {
+                    result,
+                    retune: None,
+                }
             ));
             let m = metrics(&h.state);
             if failed {
@@ -1196,6 +1222,7 @@ mod tests {
         complete_device_option(
             &h.state,
             DeviceOptionCompletion {
+                retune: None,
                 result: Ok(vec![
                     option("bandwidth", "Bandwidth", "Wide"),
                     described_option("attenuation", "Attenuation", &["0 dB", "10 dB"], "0 dB"),
@@ -1229,6 +1256,7 @@ mod tests {
         complete_device_option(
             &h.state,
             DeviceOptionCompletion {
+                retune: None,
                 result: Err("device rejected choice".to_string()),
             },
         );
@@ -1255,6 +1283,7 @@ mod tests {
         complete_device_option(
             &h.state,
             DeviceOptionCompletion {
+                retune: None,
                 result: Ok(vec![described_option(
                     "bandwidth",
                     "Bandwidth",
@@ -1284,6 +1313,7 @@ mod tests {
         complete_device_option(
             &h.state,
             DeviceOptionCompletion {
+                retune: None,
                 result: Ok(vec![option("mode", "Mode", "Narrow")]),
             },
         );
@@ -1335,6 +1365,7 @@ mod tests {
         complete_device_option(
             &h.state,
             DeviceOptionCompletion {
+                retune: None,
                 result: Ok(vec![
                     option("mode", "Mode", "Narrow"),
                     option("bandwidth", "Bandwidth", "Wide"),

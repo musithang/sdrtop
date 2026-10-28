@@ -355,6 +355,32 @@ impl AirspySettings {
     }
 }
 
+/// Settings the Airspy HF+ Discovery's own backend applies when it opens.
+#[derive(Deserialize, Serialize, Clone, Debug, PartialEq, Eq)]
+pub struct AirspyHfSettings {
+    /// libairspyhf's own processing: the IQ balance correction at the zero-IF
+    /// rates, the 5 kHz IF shift and the fine tuning. Off, the samples are the
+    /// radio's words as they came, centred on the firmware's kHz grid.
+    #[serde(default = "AirspyHfSettings::default_dsp")]
+    pub dsp: bool,
+}
+
+impl Default for AirspyHfSettings {
+    fn default() -> Self {
+        Self { dsp: true }
+    }
+}
+
+impl AirspyHfSettings {
+    fn default_dsp() -> bool {
+        true
+    }
+
+    fn is_default(&self) -> bool {
+        *self == Self::default()
+    }
+}
+
 #[derive(Deserialize, Serialize, Clone, Debug, Default)]
 pub struct AppConfig {
     #[serde(default)]
@@ -378,6 +404,9 @@ pub struct AppConfig {
     /// that is not an Airspy carries no block about one.
     #[serde(default, skip_serializing_if = "AirspySettings::is_default")]
     pub airspy: AirspySettings,
+    /// The same for the Airspy HF+.
+    #[serde(default, skip_serializing_if = "AirspyHfSettings::is_default")]
+    pub airspyhf: AirspyHfSettings,
     /// User-defined layout presets, merged into the built-in set at startup.
     /// A preset here with the same name as a built-in overrides it. Preserved
     /// verbatim across save so hand-written presets survive a quit.
@@ -1146,6 +1175,25 @@ panels = [
         assert!(serialized.contains("[tinysa]"));
         assert!(serialized.contains("basic_input = \"high\""));
         assert!(restored.tinysa.high_attenuation);
+    }
+
+    /// The HF+'s library DSP is on unless the file says off, and only an
+    /// off is written: a config that never met the radio carries no section.
+    #[test]
+    fn airspyhf_settings_default_on_and_round_trip_off() {
+        let defaults: AppConfig = toml::from_str("").unwrap();
+        assert!(defaults.airspyhf.dsp);
+        assert!(!toml::to_string_pretty(&defaults)
+            .unwrap()
+            .contains("[airspyhf]"));
+        let empty: AppConfig = toml::from_str("[airspyhf]\n").unwrap();
+        assert!(empty.airspyhf.dsp);
+
+        let config: AppConfig = toml::from_str("[airspyhf]\ndsp = false\n").unwrap();
+        let serialized = toml::to_string_pretty(&config).unwrap();
+        assert!(serialized.contains("[airspyhf]"), "{serialized}");
+        let restored: AppConfig = toml::from_str(&serialized).unwrap();
+        assert!(!restored.airspyhf.dsp);
     }
 
     #[test]

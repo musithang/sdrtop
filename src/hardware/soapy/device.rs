@@ -197,9 +197,10 @@ impl SdrDevice for SoapyDevice {
             .unwrap_or(self.caps.samples_per_transfer)
     }
 
-    fn set_frequency(&self, hz: u64) -> anyhow::Result<()> {
+    fn set_frequency(&self, hz: u64) -> anyhow::Result<u64> {
         unsafe { self.api.set_frequency(self.dev, hz as f64) }
-            .map_err(|e| anyhow::anyhow!("{}: {e}", self.args))
+            .map_err(|e| anyhow::anyhow!("{}: {e}", self.args))?;
+        Ok(hz)
     }
 
     /// Sets the rate, asks what it became, then matches the baseband filter to

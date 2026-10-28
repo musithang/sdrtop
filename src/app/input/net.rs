@@ -67,7 +67,7 @@ pub(super) fn net_capability(key: KeyEvent, ctx: &mut InputCtx<'_>) -> KeyAction
             .map(|e| format!(", refused: {e}"))
             .unwrap_or_default();
         let home_note = match back {
-            Ok(()) => format!("; back on {:.3} MHz", home as f64 / 1e6),
+            Ok(tuned) => format!("; back on {:.3} MHz", tuned as f64 / 1e6),
             Err(e) => format!("; could not go back to {:.3} MHz: {e}", home as f64 / 1e6),
         };
         m.push_log(format!(
@@ -2189,10 +2189,10 @@ mod tests {
         fn is_streaming(&self) -> bool {
             true
         }
-        fn set_frequency(&self, hz: u64) -> anyhow::Result<()> {
+        fn set_frequency(&self, hz: u64) -> anyhow::Result<u64> {
             std::thread::sleep(Duration::from_millis(1));
             self.calls.lock().unwrap().push(hz);
-            Ok(())
+            Ok(hz)
         }
         fn set_sample_rate(&self, hz: f64) -> anyhow::Result<crate::hardware::RateSet> {
             Ok(crate::hardware::RateSet::new(hz, Some(hz), 0))

@@ -193,7 +193,7 @@ impl DirectSweepControl for dyn SdrDevice {
     }
 
     fn set_frequency(&self, hz: u64) -> anyhow::Result<()> {
-        SdrDevice::set_frequency(self, hz)
+        SdrDevice::set_frequency(self, hz).map(|_| ())
     }
 }
 

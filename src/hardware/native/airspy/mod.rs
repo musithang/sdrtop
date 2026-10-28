@@ -691,7 +691,7 @@ impl SdrDevice for AirspyDevice {
         self.library_streaming()
     }
 
-    fn set_frequency(&self, hz: u64) -> anyhow::Result<()> {
+    fn set_frequency(&self, hz: u64) -> anyhow::Result<u64> {
         if !(self.caps.freq_min_hz..=self.caps.freq_max_hz).contains(&hz) {
             anyhow::bail!(
                 "the Airspy R2 tunes 24 MHz to 1.8 GHz, not {} MHz",
@@ -702,7 +702,8 @@ impl SdrDevice for AirspyDevice {
         self.check(
             unsafe { (self.api.airspy_set_freq)(self.ptr, hz as u32) },
             "tune",
-        )
+        )?;
+        Ok(hz)
     }
 
     /// One of the two rates the firmware offers, set as asked: libairspy has

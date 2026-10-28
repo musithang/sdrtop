@@ -168,14 +168,14 @@ impl SdrDevice for RtlDevice {
         self.streaming.load(Ordering::SeqCst)
     }
 
-    fn set_frequency(&self, hz: u64) -> anyhow::Result<()> {
+    fn set_frequency(&self, hz: u64) -> anyhow::Result<u64> {
         let res = with_stderr_silenced(|| unsafe {
             (self.api.rtlsdr_set_center_freq)(self.ptr, hz as u32)
         });
         if res != 0 {
             anyhow::bail!("Failed to set RTL-SDR frequency");
         }
-        Ok(())
+        Ok(hz)
     }
 
     /// RTL-SDR has no programmable baseband filter, so this only sets the rate

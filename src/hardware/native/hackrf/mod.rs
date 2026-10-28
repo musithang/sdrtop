@@ -181,13 +181,13 @@ impl SdrDevice for HackRfDevice {
         }))
     }
 
-    fn set_frequency(&self, hz: u64) -> anyhow::Result<()> {
+    fn set_frequency(&self, hz: u64) -> anyhow::Result<u64> {
         unsafe {
             if (self.api.hackrf_set_freq)(self.ptr, hz) != 0 {
                 anyhow::bail!("Failed to set frequency");
             }
         }
-        Ok(())
+        Ok(hz)
     }
 
     /// Sets the sample rate and programs the nearest valid BB filter BW,

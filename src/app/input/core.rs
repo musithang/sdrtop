@@ -60,8 +60,8 @@ pub(super) fn spectrum(key: KeyEvent, ctx: &mut InputCtx<'_>) -> KeyAction {
                 let result = device.set_frequency(new_freq);
                 let mut m = metrics(state);
                 match result {
-                    Ok(()) => {
-                        m.radio.frequency = new_freq;
+                    Ok(tuned) => {
+                        m.radio.frequency = tuned;
                         m.ui.note_mode_action(RailMode::Hunt);
                     }
                     Err(e) => m.push_log(format!("Tune error: {}", e)),
@@ -78,8 +78,8 @@ pub(super) fn spectrum(key: KeyEvent, ctx: &mut InputCtx<'_>) -> KeyAction {
                 let result = device.set_frequency(new_freq);
                 let mut m = metrics(state);
                 match result {
-                    Ok(()) => {
-                        m.radio.frequency = new_freq;
+                    Ok(tuned) => {
+                        m.radio.frequency = tuned;
                         m.ui.note_mode_action(RailMode::Hunt);
                     }
                     Err(e) => m.push_log(format!("Tune error: {}", e)),

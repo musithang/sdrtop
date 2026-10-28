@@ -91,9 +91,9 @@ pub fn measure_calls(
         let result = device.set_frequency(hz);
         let elapsed = start.elapsed();
         match result {
-            Ok(()) => {
+            Ok(at) => {
                 calls_ms.push(elapsed.as_secs_f32() * 1000.0);
-                tuned(hz);
+                tuned(at);
             }
             Err(e) => {
                 failed += 1;
@@ -145,12 +145,12 @@ mod tests {
         fn is_streaming(&self) -> bool {
             false
         }
-        fn set_frequency(&self, hz: u64) -> anyhow::Result<()> {
+        fn set_frequency(&self, hz: u64) -> anyhow::Result<u64> {
             if self.refuse.contains(&hz) {
                 anyhow::bail!("injected refusal at {hz}");
             }
             std::thread::sleep(self.delay);
-            Ok(())
+            Ok(hz)
         }
         fn set_sample_rate(&self, hz: f64) -> anyhow::Result<crate::hardware::RateSet> {
             Ok(crate::hardware::RateSet::new(hz, Some(hz), 0))

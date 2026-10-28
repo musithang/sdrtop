@@ -82,7 +82,12 @@ impl App {
         // named setters are what the default `set_stage_gain` maps onto, so both
         // native radios are programmed exactly as they always were.
         let stages = caps.gain.stages();
-        let mut startup_results = vec![device.set_frequency(tuning.frequency_hz), sr_result];
+        // The radio says where it tuned, which is not always where it was asked
+        // (a receiver on a tuning grid), and the state starts from its word.
+        let freq_result = device.set_frequency(tuning.frequency_hz).map(|tuned| {
+            tuning.frequency_hz = tuned;
+        });
+        let mut startup_results = vec![freq_result, sr_result];
         for (index, spec) in stages.iter().enumerate() {
             let db = tuning.gains.get(index).copied().unwrap_or(spec.min_db);
             startup_results.push(device.set_stage_gain(index, &spec.name, db));
@@ -380,6 +385,7 @@ impl App {
             theme_config: cfg.theme.clone(),
             tinysa_config: cfg.tinysa.clone(),
             airspy_config: cfg.airspy.clone(),
+            airspyhf_config: cfg.airspyhf.clone(),
             net_config: cfg.net.clone(),
             record_config: cfg.record.clone(),
             recorder: None,

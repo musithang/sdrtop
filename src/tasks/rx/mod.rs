@@ -377,8 +377,8 @@ mod power_control_tests {
             self.streaming.load(Ordering::Relaxed)
         }
 
-        fn set_frequency(&self, _hz: u64) -> anyhow::Result<()> {
-            Ok(())
+        fn set_frequency(&self, hz: u64) -> anyhow::Result<u64> {
+            Ok(hz)
         }
 
         fn set_sample_rate(&self, hz: f64) -> anyhow::Result<RateSet> {

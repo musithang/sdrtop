@@ -261,8 +261,9 @@ impl SdrDevice for TinySaDevice {
         self.request(Command::IsStreaming).unwrap_or(false)
     }
 
-    fn set_frequency(&self, hz: u64) -> anyhow::Result<()> {
-        self.request(|reply| Command::SetFrequency(hz, reply))
+    fn set_frequency(&self, hz: u64) -> anyhow::Result<u64> {
+        self.request(|reply| Command::SetFrequency(hz, reply))?;
+        Ok(hz)
     }
 
     fn set_sample_rate(&self, hz: f64) -> anyhow::Result<RateSet> {

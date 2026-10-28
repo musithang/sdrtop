@@ -18,6 +18,9 @@ pub struct DeviceOptionRequest {
 #[derive(Debug)]
 pub struct DeviceOptionCompletion {
     pub result: Result<Vec<DeviceOption>, String>,
+    /// For an option that moves the tuning, what setting the frequency again
+    /// after it gave: where the radio is now tuned, or why it refused.
+    pub retune: Option<Result<u64, String>>,
 }
 
 pub enum AppEvent {
