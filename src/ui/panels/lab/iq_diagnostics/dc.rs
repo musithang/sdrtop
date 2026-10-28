@@ -36,7 +36,18 @@ pub(super) fn lines(r: &Reading, rows: &Rows) -> Vec<Line<'static>> {
             Span::styled(format!("{label:<5} "), rows.label_style()),
         ]
     };
-    let mut out = vec![section("DC at the LO", "a tone at 0 Hz", rows.iw, theme)];
+    // On a radio whose LO is not at 0 Hz the DC is no longer its leak: the
+    // section says where it measures, and the LO gets a line of its own.
+    let mut out = if r.lo_offset_hz == 0 {
+        vec![section("DC at the LO", "a tone at 0 Hz", rows.iw, theme)]
+    } else {
+        vec![section(
+            "DC at 0 Hz",
+            "the LO is off the centre",
+            rows.iw,
+            theme,
+        )]
+    };
 
     let mut level = lead("level");
     match (r.spike_dbfs, r.dc_over_signal_db) {
@@ -124,5 +135,26 @@ pub(super) fn lines(r: &Reading, rows: &Rows) -> Vec<Line<'static>> {
         Style::default().fg(theme.value),
     ));
     out.push(Line::from(iq));
+    if r.lo_offset_hz != 0 {
+        let at = format!("{:+.1} kHz", r.lo_offset_hz as f64 / 1e3);
+        let mut lo = lead("LO");
+        match r.lo_line_dbfs {
+            Some(db) => {
+                lo.push(Span::styled(
+                    format!("{db:.0} dBFS/bin"),
+                    Style::default().fg(spike_color(db, theme)),
+                ));
+                lo.push(Span::styled(
+                    format!("   at {at}"),
+                    Style::default().fg(dim),
+                ));
+            }
+            None => lo.push(Span::styled(
+                format!("at {at}, not in this span"),
+                Style::default().fg(dim),
+            )),
+        }
+        out.push(Line::from(lo));
+    }
     out
 }

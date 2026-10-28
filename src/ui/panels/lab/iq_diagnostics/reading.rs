@@ -32,6 +32,13 @@ pub(super) struct Reading {
     pub amp_db: f32,
     pub phase_deg: f32,
     pub irr_db: f64,
+    /// Where the LO sits, Hz from the centre (`RadioState::lo_offset_hz`).
+    /// Zero on a radio that mixes straight to 0 Hz, where the DC above is
+    /// the LO's leak; anything else puts the leak somewhere the DC is not.
+    pub lo_offset_hz: i64,
+    /// The spectrum's level at the LO, dBFS per bin, where the LO is off the
+    /// centre and inside the frame; `None` otherwise.
+    pub lo_line_dbfs: Option<f64>,
 }
 
 impl Reading {
@@ -50,6 +57,18 @@ impl Reading {
             amp_db: state.iq.iq_imbalance_db,
             phase_deg: state.iq.phase_imbalance_deg,
             irr_db: image_rejection_db(state.iq.iq_imbalance_db, state.iq.phase_imbalance_deg),
+            lo_offset_hz: state.radio.lo_offset_hz,
+            lo_line_dbfs: lo_line_dbfs(state),
+        }
+    }
+
+    /// Where the DC reading sits, in words: the LO on a radio whose LO is at
+    /// 0 Hz, plain 0 Hz on one whose LO is not.
+    pub(super) fn dc_place(&self) -> &'static str {
+        if self.lo_offset_hz == 0 {
+            "the LO"
+        } else {
+            "0 Hz"
         }
     }
 
@@ -72,6 +91,36 @@ impl Reading {
             )
         }
     }
+}
+
+/// The spectrum's level at an LO off the centre: the highest of the five bins
+/// round it in the last FFT frame, dBFS per bin. `None` with the LO at the
+/// centre (the DC reading is the LO there), with no frame, or with the LO
+/// outside the frame.
+fn lo_line_dbfs(state: &SdrMetrics) -> Option<f64> {
+    let offset = state.radio.lo_offset_hz;
+    if offset == 0 {
+        return None;
+    }
+    let frame = state.waterfall.last_fft.as_ref()?;
+    let n = frame.bins_dbfs.len();
+    if n == 0 || frame.sample_rate <= 0.0 {
+        return None;
+    }
+    let at = (n as f64 / 2.0 + offset as f64 * n as f64 / frame.sample_rate).round();
+    if at < 0.0 || at >= n as f64 {
+        return None;
+    }
+    let at = at as usize;
+    let lo = at.saturating_sub(2);
+    let hi = (at + 2).min(n - 1);
+    frame.bins_dbfs[lo..=hi]
+        .iter()
+        .copied()
+        .fold(None, |best: Option<f32>, v| {
+            Some(best.map_or(v, |b| b.max(v)))
+        })
+        .map(f64::from)
 }
 
 /// DC spike level in dBFS: how tall the centre-frequency spike is in the spectrum.

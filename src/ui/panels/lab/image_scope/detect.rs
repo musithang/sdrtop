@@ -69,11 +69,18 @@ use super::CarrierImage;
 pub(crate) fn carrier_image(state: &SdrMetrics) -> Option<CarrierImage> {
     let frame = state.waterfall.last_fft.as_ref()?;
     let hint = carrier_hint_bin(state, frame);
-    let r = detect_image(&frame.bins_dbfs, frame.sample_rate, frame.noise_floor, hint)?;
+    let lo = lo_bin(state, frame);
+    let r = detect_image(
+        &frame.bins_dbfs,
+        frame.sample_rate,
+        frame.noise_floor,
+        hint,
+        lo,
+    )?;
     let center = frame.center_freq_hz as f64;
     Some(CarrierImage {
         carrier_hz: (center + r.carrier_offset_hz).round() as u64,
-        image_hz: (center - r.carrier_offset_hz).round() as u64,
+        image_hz: (center + r.image_offset_hz).round() as u64,
         carrier_dbfs: r.carrier_dbfs,
         image_dbfs: r.image_dbfs,
         reading: r.reading,
@@ -96,11 +103,26 @@ pub(super) struct ImageReadout {
     pub carrier_dbfs: f32,
     pub image_dbfs: f32,
     pub reading: Reading,
-    /// Carrier offset from the LO, signed (Hz).
+    /// Carrier offset from the frame's centre, signed (Hz).
     pub carrier_offset_hz: f64,
+    /// Its mirror's offset from the frame's centre, signed (Hz): the carrier
+    /// reflected about the LO, which is the centre on most radios.
+    pub image_offset_hz: f64,
 }
 
-/// Locate the carrier and its mirror about the centre (LO) bin, and say what
+/// The bin the LO sits in, in an fftshifted frame: the centre, moved by the
+/// offset the device reports (`SdrDevice::lo_offset_hz`). The centre when that
+/// falls outside the frame, since nothing then mirrors about a bin it has.
+pub(super) fn lo_bin(state: &SdrMetrics, frame: &FftFrame) -> usize {
+    let n = frame.bins_dbfs.len();
+    let lo_hz = (frame.center_freq_hz as i64).saturating_add(state.radio.lo_offset_hz);
+    u64::try_from(lo_hz)
+        .ok()
+        .and_then(|hz| freq_to_bin(hz, frame.center_freq_hz, frame.sample_rate, n))
+        .unwrap_or(n / 2)
+}
+
+/// Locate the carrier and its mirror about the LO's bin `lo`, and say what
 /// the gap between them is ([`Reading`]). The carrier is `carrier_hint` when
 /// supplied and valid (a placed marker or pin); otherwise the strongest bin
 /// outside a small DC guard, when it clears the noise floor by
@@ -117,12 +139,13 @@ pub(super) fn detect_image(
     sample_rate: f64,
     noise_floor: f32,
     carrier_hint: Option<usize>,
+    lo: usize,
 ) -> Option<ImageReadout> {
     let n = bins.len();
-    if n < 8 {
+    if n < 8 || lo >= n {
         return None;
     }
-    let center = n / 2;
+    let center = lo;
     let guard = (n / 64).max(2);
     let in_band = |i: usize| i < n && (i as isize - center as isize).unsigned_abs() > guard;
 
@@ -156,6 +179,8 @@ pub(super) fn detect_image(
         }
     };
 
+    // A mirror past the frame's edge (an LO well off the centre) is measured
+    // at the edge's bin, which then reads as the floor or a bound.
     let image_idx = (2 * center).saturating_sub(carrier_idx).min(n - 1);
     let bin_hz = sample_rate / n as f64;
     let (carrier, image) = (bins[carrier_idx], bins[image_idx]);
@@ -175,7 +200,8 @@ pub(super) fn detect_image(
         carrier_dbfs: carrier,
         image_dbfs: image,
         reading,
-        carrier_offset_hz: (carrier_idx as f64 - center as f64) * bin_hz,
+        carrier_offset_hz: (carrier_idx as f64 - (n / 2) as f64) * bin_hz,
+        image_offset_hz: (image_idx as f64 - (n / 2) as f64) * bin_hz,
     })
 }
 
@@ -245,13 +271,42 @@ mod tests {
         vec![-110.0; n]
     }
 
+    /// The LO's bin in the 64-bin frames below: the centre, as on most radios.
+    const LO: usize = 32;
+
+    /// **An LO off the centre is the axis.** The HF+ at a zero-IF rate holds
+    /// its LO 5 kHz above the centre: a carrier 8 bins above that LO has its
+    /// mirror 8 bins below it, not 8 below the centre, and a carrier mirrored
+    /// about the centre would be measured against an empty bin.
+    #[test]
+    fn the_mirror_is_taken_about_the_lo() {
+        let mut b = frame(64);
+        let lo = 36;
+        b[44] = -8.0; // carrier, +8 bins from the LO
+        b[28] = -64.0; // its mirror about the LO
+        b[20] = -110.0; // where a mirror about the centre would be: the floor
+        let r = detect_image(&b, 64.0, -110.0, None, lo).unwrap();
+        assert_eq!(r.carrier_idx, 44);
+        assert_eq!(r.reading, Reading::Measured(56.0));
+        assert!((r.carrier_offset_hz - 12.0).abs() < 1e-6, "from the centre");
+        assert!(
+            (r.image_offset_hz - (-4.0)).abs() < 1e-6,
+            "{}",
+            r.image_offset_hz
+        );
+        // And the guard sits round the LO: a line on the LO is not a carrier.
+        let mut on_lo = frame(64);
+        on_lo[36] = -10.0;
+        assert!(detect_image(&on_lo, 64.0, -110.0, None, lo).is_none());
+    }
+
     #[test]
     fn detect_image_finds_carrier_and_mirror() {
         let mut b = frame(64);
         b[40] = -8.0; // carrier, +8 bins from centre (32)
         b[24] = -64.0; // its mirror, −8 bins
         b[32] = -20.0; // DC spike
-        let r = detect_image(&b, 64.0, -110.0, None).unwrap();
+        let r = detect_image(&b, 64.0, -110.0, None, LO).unwrap();
         assert_eq!(r.carrier_idx, 40);
         assert!((r.carrier_dbfs - (-8.0)).abs() < 1e-6);
         assert!((r.image_dbfs - (-64.0)).abs() < 1e-6);
@@ -269,7 +324,7 @@ mod tests {
         let mut b = frame(64);
         b[32] = 0.0; // huge DC, at centre
         b[44] = -12.0; // the real carrier
-        let r = detect_image(&b, 64.0, -110.0, None).unwrap();
+        let r = detect_image(&b, 64.0, -110.0, None, LO).unwrap();
         assert_eq!(r.carrier_idx, 44, "carrier should skip the guarded DC bin");
     }
 
@@ -279,7 +334,7 @@ mod tests {
         let mut b = frame(64);
         b[50] = -4.0; // strongest peak (would auto-win)
         b[40] = -18.0; // the bin the operator marked
-        let r = detect_image(&b, 64.0, -110.0, Some(40)).unwrap();
+        let r = detect_image(&b, 64.0, -110.0, Some(40), LO).unwrap();
         assert_eq!(r.carrier_idx, 40, "hint should drive the carrier");
         assert_eq!((2 * 32usize) - 40, 24);
         assert!((r.carrier_dbfs - (-18.0)).abs() < 1e-6);
@@ -290,10 +345,10 @@ mod tests {
         let mut b = frame(64);
         b[50] = -4.0;
         // A hint inside the DC guard is rejected → auto-pick the strongest bin.
-        let r = detect_image(&b, 64.0, -110.0, Some(33)).unwrap();
+        let r = detect_image(&b, 64.0, -110.0, Some(33), LO).unwrap();
         assert_eq!(r.carrier_idx, 50);
         // An out-of-range hint is likewise ignored.
-        let r2 = detect_image(&b, 64.0, -110.0, Some(999)).unwrap();
+        let r2 = detect_image(&b, 64.0, -110.0, Some(999), LO).unwrap();
         assert_eq!(r2.carrier_idx, 50);
     }
 
@@ -308,7 +363,7 @@ mod tests {
             *v = -60.0 - (i as f32 - 32.0).abs();
         }
         b[37] = -50.0;
-        let r = detect_image(&b, 64.0, -110.0, None).unwrap();
+        let r = detect_image(&b, 64.0, -110.0, None, LO).unwrap();
         assert_eq!(r.carrier_idx, 37);
         assert_eq!(r.reading, Reading::OnTheLo);
         assert!(r.reading.rejection().is_none());
@@ -324,12 +379,12 @@ mod tests {
         }
         b[44] = -50.0;
         b[38] = -110.0;
-        let r = detect_image(&b, 64.0, -110.0, None).unwrap();
+        let r = detect_image(&b, 64.0, -110.0, None, LO).unwrap();
         assert_eq!(r.reading, Reading::OnTheLo);
         for v in b.iter_mut().take(43).skip(36) {
             *v = -110.0;
         }
-        let r = detect_image(&b, 64.0, -110.0, None).unwrap();
+        let r = detect_image(&b, 64.0, -110.0, None, LO).unwrap();
         assert_ne!(r.reading, Reading::OnTheLo);
     }
 
@@ -340,11 +395,11 @@ mod tests {
         let mut b = frame(64);
         b[50] = -60.0;
         b[14] = -108.0;
-        let r = detect_image(&b, 64.0, -110.0, None).unwrap();
+        let r = detect_image(&b, 64.0, -110.0, None, LO).unwrap();
         assert_eq!(r.reading, Reading::AtLeast(48.0));
         assert_eq!(r.reading.rejection(), Some((48.0, true)));
         b[14] = -63.0;
-        let r = detect_image(&b, 64.0, -110.0, None).unwrap();
+        let r = detect_image(&b, 64.0, -110.0, None, LO).unwrap();
         assert_eq!(r.reading, Reading::MirrorBusy(3.0));
         assert!(r.reading.rejection().is_none());
     }
@@ -359,7 +414,7 @@ mod tests {
 
     #[test]
     fn detect_image_too_small_is_none() {
-        assert!(detect_image(&frame(4), 64.0, -110.0, None).is_none());
+        assert!(detect_image(&frame(4), 64.0, -110.0, None, LO).is_none());
     }
 
     #[test]
@@ -369,18 +424,18 @@ mod tests {
         let mut b = frame(64); // floor -110
         b[40] = -104.0; // a 6 dB noise bump, under the 10 dB gate
         assert!(
-            detect_image(&b, 64.0, -110.0, None).is_none(),
+            detect_image(&b, 64.0, -110.0, None, LO).is_none(),
             "a sub-gate noise peak must not be reported as a carrier"
         );
         // The same weak bin is still measured when the operator marks it explicitly.
-        let r = detect_image(&b, 64.0, -110.0, Some(40)).unwrap();
+        let r = detect_image(&b, 64.0, -110.0, Some(40), LO).unwrap();
         assert_eq!(
             r.carrier_idx, 40,
             "an explicit hint bypasses the noise gate"
         );
         // A real carrier well above the floor passes the auto gate.
         b[44] = -70.0;
-        let r2 = detect_image(&b, 64.0, -110.0, None).unwrap();
+        let r2 = detect_image(&b, 64.0, -110.0, None, LO).unwrap();
         assert_eq!(r2.carrier_idx, 44);
     }
 }

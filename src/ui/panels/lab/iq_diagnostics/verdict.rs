@@ -93,7 +93,7 @@ pub(super) fn decide(r: &Reading, cal: &IqCalState) -> Verdict {
         let how = match (r.dc_over_signal_db, r.spike_dbfs) {
             (Some(d), _) if d >= 0.0 => format!("The DC is {d:.0} dB over the signal."),
             (Some(d), _) => format!("The DC is only {:.0} dB under the signal.", -d),
-            (None, Some(s)) => format!("The DC is {s:.0} dBFS at the LO."),
+            (None, Some(s)) => format!("The DC is {s:.0} dBFS at {}.", r.dc_place()),
             (None, None) => "The DC is off zero.".to_string(),
         };
         return Verdict {

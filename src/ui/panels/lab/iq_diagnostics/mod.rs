@@ -137,6 +137,30 @@ mod tests {
         assert!(out.contains("STALE"), "the frame should be tagged:\n{out}");
     }
 
+    /// **On a radio whose LO is off the centre the DC is not called the
+    /// LO's.** The section says it measures 0 Hz, and the LO's own line is
+    /// read off the spectrum where the LO is: here 20 dB over the -100 floor,
+    /// 5 kHz up. With the LO at the centre the section reads as it always has.
+    #[test]
+    fn an_lo_off_the_centre_is_read_where_it_is() {
+        let mut m = bench().with_carrier(1_000_000.0, 40.0);
+        m.radio.lo_offset_hz = 5_000;
+        let fr = m.waterfall.last_fft.as_mut().unwrap();
+        let n = fr.bins_dbfs.len();
+        let at = (n as f64 / 2.0 + 5_000.0 * n as f64 / fr.sample_rate).round() as usize;
+        let mut bins = (*fr.bins_dbfs).clone();
+        bins[at] = -80.0;
+        fr.bins_dbfs = std::sync::Arc::new(bins);
+        let out = draw(IqDiagnosticsPanel, 60, 34, &m).join("\n");
+        assert!(out.contains("DC AT 0 HZ"), "{out}");
+        assert!(!out.contains("DC AT THE LO"), "{out}");
+        assert!(out.contains("-80 dBFS/bin"), "{out}");
+        assert!(out.contains("at +5.0 kHz"), "{out}");
+        let centred = draw(IqDiagnosticsPanel, 60, 34, &bench()).join("\n");
+        assert!(centred.contains("DC AT THE LO"), "{centred}");
+        assert!(!centred.contains("dBFS/bin"), "{centred}");
+    }
+
     /// The blocks are present in the order the panel promises: the DC, the
     /// quadrature and the image it predicts, the verdict, the chips.
     #[test]

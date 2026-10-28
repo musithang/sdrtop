@@ -375,6 +375,7 @@ pub(super) fn initial_metrics(cfg: &AppConfig, boot: Boot) -> anyhow::Result<Sdr
             sample_rate_history: VecDeque::with_capacity(THROUGHPUT_HISTORY_LEN),
             reference: None,
             reference_request: false,
+            lo_offset_hz: 0,
         },
         signal: SignalState {
             drops_per_sec: 0,

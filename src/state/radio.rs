@@ -51,6 +51,10 @@ pub struct RadioState {
     /// bool, and a fourth sample feed for a once-a-session measurement would be
     /// a lot of plumbing for one keypress.
     pub reference_request: bool,
+    /// Where the LO sits in the delivered spectrum, Hz from its centre, as the
+    /// device last said (`hardware::SdrDevice::lo_offset_hz`). Zero on every
+    /// radio that mixes straight to 0 Hz.
+    pub lo_offset_hz: i64,
 }
 
 impl RadioState {

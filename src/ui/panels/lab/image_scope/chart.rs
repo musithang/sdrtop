@@ -41,7 +41,10 @@ pub(super) const GUTTER: usize = 4;
 pub(super) struct Window {
     pub left_hz: f64,
     pub right_hz: f64,
+    /// The frame's centre: where its bins are counted from.
     pub center_hz: f64,
+    /// The LO: what the mirror reflects about, and what the axis names.
+    pub lo_hz: f64,
     pub carrier_hz: f64,
     pub image_hz: f64,
 }
@@ -50,15 +53,26 @@ impl Window {
     /// The window wide enough to hold both the carrier and its mirror, with a
     /// floor on the span so a carrier sitting on the LO still gets a readable
     /// slice rather than collapsing to nothing.
-    pub(super) fn new(center_hz: f64, carrier_offset_hz: f64, rate: f64) -> Self {
-        let off = carrier_offset_hz.abs().max(rate * 0.04);
+    /// Centred on the LO, `lo_offset_hz` from the frame's centre; the carrier
+    /// is `carrier_offset_hz` from the centre and its mirror as far the other
+    /// side of the LO.
+    pub(super) fn new(
+        center_hz: f64,
+        lo_offset_hz: f64,
+        carrier_offset_hz: f64,
+        rate: f64,
+    ) -> Self {
+        let lo_hz = center_hz + lo_offset_hz;
+        let carrier_hz = center_hz + carrier_offset_hz;
+        let off = (carrier_hz - lo_hz).abs().max(rate * 0.04);
         let span = (off * 1.5).min(rate / 2.0).max(1.0);
         Self {
-            left_hz: center_hz - span,
-            right_hz: center_hz + span,
+            left_hz: lo_hz - span,
+            right_hz: lo_hz + span,
             center_hz,
-            carrier_hz: center_hz + carrier_offset_hz,
-            image_hz: center_hz - carrier_offset_hz,
+            lo_hz,
+            carrier_hz,
+            image_hz: 2.0 * lo_hz - carrier_hz,
         }
     }
 
@@ -116,7 +130,7 @@ pub(super) fn draw(
     }
     let carrier_col = gap.and(win.col_of(win.carrier_hz, chart_w));
     let image_col = gap.and(win.col_of(win.image_hz, chart_w));
-    let lo_col = win.col_of(win.center_hz, chart_w);
+    let lo_col = win.col_of(win.lo_hz, chart_w);
     let rows = chart_h as f32;
     // Rows down from the top, fractional, for a level.
     let depth = |db: f32| ((top - db) / (top - bottom)).clamp(0.0, 1.0) * rows;
@@ -208,7 +222,7 @@ pub(super) fn draw(
             }
         }
     };
-    let lo_lbl = format!("LO {}", fmt_mhz2(win.center_hz));
+    let lo_lbl = format!("LO {}", fmt_mhz2(win.lo_hz));
     write(&mut axis, 0, &fmt_mhz2(win.left_hz));
     let cen = chart_w.saturating_sub(lo_lbl.chars().count()) / 2;
     write(&mut axis, cen, &lo_lbl);
@@ -280,7 +294,7 @@ mod tests {
     fn window_holds_both_carrier_and_its_mirror() {
         // A carrier 200 kHz above a 100 MHz LO: the window must contain both it and
         // the mirror 200 kHz below, or the plot's whole point is off screen.
-        let w = Window::new(100e6, 200e3, 2e6);
+        let w = Window::new(100e6, 0.0, 200e3, 2e6);
         assert!(w.left_hz <= w.image_hz, "mirror is off the left edge");
         assert!(w.right_hz > w.carrier_hz, "carrier is off the right edge");
         assert_eq!(w.carrier_hz, 100.2e6);
@@ -291,7 +305,7 @@ mod tests {
     fn window_stays_readable_for_a_carrier_on_the_lo() {
         // Zero offset would collapse the span to nothing; the rate-derived floor
         // keeps a slice to look at.
-        let w = Window::new(100e6, 0.0, 2e6);
+        let w = Window::new(100e6, 0.0, 0.0, 2e6);
         assert!(w.right_hz - w.left_hz > 0.0);
         assert_eq!(w.carrier_hz, w.image_hz, "on the LO the two coincide");
     }
@@ -301,14 +315,14 @@ mod tests {
         // Half the sample rate either side is all there is; a huge offset must clamp
         // rather than plot frequencies that were never captured.
         let rate = 2e6;
-        let w = Window::new(100e6, 5e6, rate);
+        let w = Window::new(100e6, 0.0, 5e6, rate);
         assert!(w.right_hz - w.center_hz <= rate / 2.0 + 1.0);
         assert!(w.center_hz - w.left_hz <= rate / 2.0 + 1.0);
     }
 
     #[test]
     fn columns_span_the_window_left_to_right() {
-        let w = Window::new(100e6, 200e3, 2e6);
+        let w = Window::new(100e6, 0.0, 200e3, 2e6);
         assert_eq!(
             w.col_of(w.left_hz, 40),
             Some(0),
@@ -323,5 +337,22 @@ mod tests {
         assert_eq!(last, 39, "just inside the right edge is the last column");
         // The LO sits at the middle of an LO-centred window.
         assert_eq!(w.col_of(w.center_hz, 40), Some(20));
+    }
+
+    /// The window is centred on the LO, and the mirror sits as far the other
+    /// side of it as the carrier: with the LO 5 kHz up, a carrier 20 kHz up is
+    /// 15 kHz above the LO and mirrors 15 kHz below it, 10 kHz under the
+    /// centre.
+    #[test]
+    fn the_window_turns_about_the_lo() {
+        let w = Window::new(100e6, 5e3, 20e3, 768e3);
+        assert_eq!(w.lo_hz, 100.005e6);
+        assert_eq!(w.carrier_hz, 100.020e6);
+        assert_eq!(w.image_hz, 99.990e6);
+        assert_eq!(
+            (w.right_hz - w.lo_hz, w.lo_hz - w.left_hz),
+            (w.lo_hz - w.left_hz, w.right_hz - w.lo_hz),
+            "symmetric about the LO"
+        );
     }
 }

@@ -84,14 +84,20 @@ impl Panel for ImageScopePanel {
         let hint = detect::carrier_hint_bin(state, frame);
         let bins = &frame.bins_dbfs;
         let rate = frame.sample_rate;
-        let Some(r) = detect::detect_image(bins, rate, frame.noise_floor, hint) else {
+        let lo = detect::lo_bin(state, frame);
+        let Some(r) = detect::detect_image(bins, rate, frame.noise_floor, hint, lo) else {
             return placeholder(f, inner, "No signal yet\u{2026}", theme);
         };
 
         let iw = inner.width as usize;
         let ih = inner.height as usize;
         let tint = tint::Tint::new(theme);
-        let win = chart::Window::new(frame.center_freq_hz as f64, r.carrier_offset_hz, rate);
+        let win = chart::Window::new(
+            frame.center_freq_hz as f64,
+            state.radio.lo_offset_hz as f64,
+            r.carrier_offset_hz,
+            rate,
+        );
 
         // The read-outs are always shown, so they are built first and the chart
         // gets whatever height is left over.
@@ -177,6 +183,30 @@ mod tests {
             assert!(out.contains(want), "{want:?} in\n{out}");
         }
         assert!(!out.contains("DC spike") && !out.contains("supp"), "{out}");
+    }
+
+    /// **The mirror is looked for about the LO the radio reports.** With the
+    /// LO half a megahertz above the centre, the 1 MHz carrier's mirror is at
+    /// the centre (bin 128), not at -1 MHz: an image there is measured, and
+    /// the same frame read as if the LO were at the centre finds only the
+    /// floor where it looks.
+    #[test]
+    fn the_mirror_follows_an_lo_off_the_centre() {
+        let draw = |lo_offset_hz: i64| {
+            let mut m = SdrMetrics::fixture()
+                .streaming()
+                .with_carrier(1_000_000.0, 40.0);
+            m.radio.lo_offset_hz = lo_offset_hz;
+            let fr = m.waterfall.last_fft.as_mut().unwrap();
+            let mut bins = (*fr.bins_dbfs).clone();
+            bins[128] = -90.0;
+            fr.bins_dbfs = std::sync::Arc::new(bins);
+            crate::state::fixture::draw(ImageScopePanel, 61, 26, &m).join("\n")
+        };
+        let off = draw(500_000);
+        assert!(off.contains("IMAGE 30 dB DOWN"), "{off}");
+        let centred = draw(0);
+        assert!(centred.contains("IMAGE \u{2265} 40 dB DOWN"), "{centred}");
     }
 
     /// A mirror on the floor is a lower bound, said as one.

@@ -1711,6 +1711,19 @@ pub trait SdrDevice: Send + Sync {
     fn wire_bytes_per_pair(&self) -> Option<f64> {
         Some(self.capabilities().sample_geometry.bytes_per_pair() as f64)
     }
+
+    /// Where the radio's local oscillator sits in the delivered spectrum, Hz
+    /// from its centre, at the tuning and rate it has now.
+    ///
+    /// Zero for a radio that mixes the tuned frequency straight to 0 Hz, which
+    /// is every radio but one: libairspyhf puts the HF+'s LO 5 kHz off the
+    /// asked frequency at its zero-IF rates and rotates the samples back, and
+    /// below its lowest LO it holds the LO there and rotates further. What is
+    /// measured "at the LO" (its leak, the axis an image mirrors about) is
+    /// measured here, not at the centre.
+    fn lo_offset_hz(&self) -> i64 {
+        0
+    }
 }
 
 #[cfg(test)]
