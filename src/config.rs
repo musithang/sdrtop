@@ -2,7 +2,7 @@
 // Copyright (C) 2026 MusiThang <viktor.laszlo92@protonmail.com>
 
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 use std::path::{Path, PathBuf};
 
 use crate::palette::WaterfallPalette;
@@ -59,12 +59,26 @@ pub struct RadioConfig {
     /// Absent: the radio's own default. Written only for a radio with curves.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub gain_mode: Option<String>,
-    #[serde(default)]
-    pub amp_enabled: bool,
+    /// The front-end boost (an amp, a tuner or firmware AGC) each radio was
+    /// left with, by the radio's own name (`"HackRF One" = true`), so one
+    /// radio's boost is never another's start. A radio not listed starts with
+    /// it off. Written only for a radio that has a boost. The single
+    /// `amp_enabled` this replaced is no longer read: which radio it was saved
+    /// on is not known, so nothing can honestly start from it.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub boost: BTreeMap<String, bool>,
     /// Command Rail recall slots (the rail's `M` save / `1·2·3` jump). Three
     /// fixed slots; `0` means empty. Tuning memory belongs with the radio.
     #[serde(default = "default_recall")]
     pub recall_hz: [u64; 3],
+}
+
+impl RadioConfig {
+    /// The boost the radio called `board` was left with; off for one never
+    /// seen.
+    pub fn boost_for(&self, board: &str) -> bool {
+        self.boost.get(board).copied().unwrap_or(false)
+    }
 }
 
 impl Default for RadioConfig {
@@ -76,7 +90,7 @@ impl Default for RadioConfig {
             lna_gain: None,
             vga_gain: None,
             gain_mode: None,
-            amp_enabled: false,
+            boost: BTreeMap::new(),
             recall_hz: [0; 3],
         }
     }
@@ -1194,6 +1208,35 @@ panels = [
         assert!(serialized.contains("[airspyhf]"), "{serialized}");
         let restored: AppConfig = toml::from_str(&serialized).unwrap();
         assert!(!restored.airspyhf.dsp);
+    }
+
+    /// The boost is kept per radio by name and written only when there is one;
+    /// the single `amp_enabled` it replaced is read past and not written.
+    #[test]
+    fn the_boost_is_per_radio_and_the_old_flag_is_let_go() {
+        let defaults: AppConfig = toml::from_str("").unwrap();
+        assert!(!toml::to_string_pretty(&defaults).unwrap().contains("boost"));
+
+        let source = r#"
+            [radio]
+            amp_enabled = true
+
+            [radio.boost]
+            "HackRF One" = true
+            "Airspy HF+ Discovery" = false
+        "#;
+        let config: AppConfig = toml::from_str(source).unwrap();
+        assert!(config.radio.boost_for("HackRF One"));
+        assert!(!config.radio.boost_for("Airspy HF+ Discovery"));
+        assert!(
+            !config.radio.boost_for("Airspy R2"),
+            "the old flag starts nobody"
+        );
+        let serialized = toml::to_string_pretty(&config).unwrap();
+        assert!(!serialized.contains("amp_enabled"), "{serialized}");
+        assert!(serialized.contains("[radio.boost]"), "{serialized}");
+        let restored: AppConfig = toml::from_str(&serialized).unwrap();
+        assert_eq!(restored.radio.boost, config.radio.boost);
     }
 
     #[test]

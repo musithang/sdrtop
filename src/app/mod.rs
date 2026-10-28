@@ -64,6 +64,9 @@ pub struct App {
     pub(super) airspy_config: crate::config::AirspySettings,
     /// The `[airspyhf]` block, likewise.
     pub(super) airspyhf_config: crate::config::AirspyHfSettings,
+    /// `[radio.boost]` as loaded: every other radio's entry is carried
+    /// forward, and the open radio's is written from the live state.
+    pub(super) boost_config: std::collections::BTreeMap<String, bool>,
     /// The `[net]` block exactly as it was loaded - `[net].bt_channels`
     /// has no in-app control that would change it while running, so the
     /// only way `save_config` can carry it forward is to hold the loaded
@@ -658,7 +661,12 @@ impl App {
                         .map_or("manual", |c| c.name)
                         .to_string()
                 }),
-                m.radio.amp_enabled,
+                // The open radio's own entry, and only for a radio that has a
+                // boost.
+                m.caps
+                    .gain
+                    .has_boost()
+                    .then(|| (m.system.board_name.to_string(), m.radio.amp_enabled)),
                 m.waterfall.buffer.max_rows,
                 m.waterfall.palette,
                 m.spectrum.style,
@@ -680,7 +688,11 @@ impl App {
                 lna_gain: None,
                 vga_gain: None,
                 gain_mode,
-                amp_enabled: amp,
+                boost: {
+                    let mut boost = self.boost_config.clone();
+                    boost.extend(amp);
+                    boost
+                },
                 recall_hz: recall,
             },
             display: DisplayConfig {
@@ -974,6 +986,48 @@ mod tests {
         assert_eq!(saved.radio.frequency_hz, 144_390_000);
         assert_eq!(saved.tinysa.points, 900);
         std::fs::remove_file(path).unwrap();
+    }
+
+    /// The open radio's boost is saved under its name and every other radio's
+    /// line is carried forward; a radio with no boost adds no line.
+    #[test]
+    fn the_open_radios_boost_is_saved_under_its_name() {
+        let save = |board: &str, boost: Option<hardware::Boost>| {
+            let state = Arc::new(Mutex::new(SdrMetrics::fixture()));
+            let caps = {
+                let mut m = state.lock().unwrap();
+                m.system.board_name = Arc::from(board);
+                m.radio.amp_enabled = true;
+                let mut caps = m.caps.as_ref().clone();
+                caps.gain = match boost {
+                    Some(b) => caps.gain.clone().with_boost(b),
+                    None => hardware::GainModel::new(caps.gain.stages().to_vec(), "Gain", "G"),
+                };
+                m.caps = Arc::new(caps.clone());
+                caps
+            };
+            let device: Arc<dyn SdrDevice> = Arc::new(QuitDevice::new(caps));
+            let path = std::env::temp_dir().join(format!(
+                "sdrtop-boost-{}-{}.toml",
+                std::process::id(),
+                board.len()
+            ));
+            let _ = std::fs::remove_file(&path);
+            let mut config = AppConfig::default();
+            config.radio.boost.insert("Airspy R2".into(), false);
+            let app =
+                App::assemble(config, Some(path.clone()), state, Some(device), None, None).unwrap();
+            app.save_config().unwrap();
+            let saved = AppConfig::load_or_default(&path);
+            std::fs::remove_file(path).unwrap();
+            saved.radio.boost
+        };
+        let amp = || Some(hardware::Boost::GainMode);
+        let saved = save("HackRF One", amp());
+        assert_eq!(saved.get("HackRF One"), Some(&true));
+        assert_eq!(saved.get("Airspy R2"), Some(&false), "carried forward");
+        let saved = save("tinySA", None);
+        assert_eq!(saved.len(), 1, "no boost, no line: {saved:?}");
     }
 
     #[test]

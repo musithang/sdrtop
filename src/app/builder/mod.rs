@@ -92,8 +92,9 @@ impl App {
             let db = tuning.gains.get(index).copied().unwrap_or(spec.min_db);
             startup_results.push(device.set_stage_gain(index, &spec.name, db));
         }
-        startup_results.push(device.set_amp_enable(cfg.radio.amp_enabled));
-        startup_results.push(device.set_tuner_agc(cfg.radio.amp_enabled));
+        let boost = cfg.radio.boost_for(&info.board_name);
+        startup_results.push(device.set_amp_enable(boost));
+        startup_results.push(device.set_tuner_agc(boost));
 
         let device_options = device.options();
         hardware::debug_assert_device_options(&device_options);
@@ -386,6 +387,7 @@ impl App {
             tinysa_config: cfg.tinysa.clone(),
             airspy_config: cfg.airspy.clone(),
             airspyhf_config: cfg.airspyhf.clone(),
+            boost_config: cfg.radio.boost.clone(),
             net_config: cfg.net.clone(),
             record_config: cfg.record.clone(),
             recorder: None,

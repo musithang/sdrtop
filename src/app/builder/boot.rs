@@ -367,7 +367,7 @@ pub(super) fn initial_metrics(cfg: &AppConfig, boot: Boot) -> anyhow::Result<Sdr
             // by `resolve_gains`.
             gains: tuning.gains.clone(),
             gain_curve: tuning.gain_curve,
-            amp_enabled: cfg.radio.amp_enabled,
+            amp_enabled: cfg.radio.boost_for(&identity.board_name),
             rx_enabled: false,
             hw_streaming: false,
             rx_start_time: None,
@@ -720,6 +720,33 @@ mod tests {
         assert_eq!(metrics.spectrum.y_max, -10.0);
         assert_eq!(metrics.waterfall.db_min, -110.0);
         assert_eq!(metrics.waterfall.db_max, -10.0);
+    }
+
+    /// **One radio's boost is never another's start**: each starts from its
+    /// own line in `[radio.boost]`, and one with no line starts with it off.
+    #[test]
+    fn each_radio_starts_from_its_own_boost() {
+        let mut cfg = AppConfig::default();
+        cfg.radio.boost.insert("HackRF One".into(), true);
+        cfg.radio.boost.insert("Airspy HF+ Discovery".into(), false);
+        let start = |board: &str| {
+            let caps = hardware::native::hackrf::caps();
+            let tuning = resolve_tuning(&cfg.radio, &caps);
+            let info = hardware::DeviceInfo {
+                board_name: board.into(),
+                ..Default::default()
+            };
+            initial_metrics(
+                &cfg,
+                Boot::normal(&cfg, Arc::new(caps), tuning, &info, true),
+            )
+            .unwrap()
+            .radio
+            .amp_enabled
+        };
+        assert!(start("HackRF One"));
+        assert!(!start("Airspy HF+ Discovery"));
+        assert!(!start("Airspy R2"), "never seen: off");
     }
 
     #[test]

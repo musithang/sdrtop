@@ -43,8 +43,10 @@ rather than treated as an error.
 frequency_hz = 92800000    # tuned center frequency, in Hz
 sample_rate  = 2000000.0   # samples/sec. HackRF 2–20 M · RTL-SDR 0.9–3.2 M
 gain         = "LNA=24,VGA=30"  # per stage, or a bare total like gain = 54
-amp_enabled  = false       # front end boost: HackRF RF amp / RTL-SDR tuner AGC
 recall_hz    = [0, 0, 0]   # Command Rail recall slots. 0 means empty
+
+[radio.boost]               # front end boost, each radio by its own name
+"HackRF One" = false        # HackRF RF amp · RTL-SDR tuner AGC · Airspy AGC
 
 [display]
 active_preset      = "command_rail"  # which layout to open on
@@ -89,6 +91,14 @@ Markers and your own presets get their own blocks, described below.
 **`[radio]`** is the tuning state, and it's what `q` writes back. `recall_hz` holds
 the Command Rail's three recall slots, which you set with `M` in rail focus, so
 tuning memory lives with the radio rather than with the display.
+
+**`[radio.boost]`** remembers the front end boost (`a`) per radio, under the
+name the header shows, so a HackRF you left with its amp on does not hand
+that amp to the next radio you plug in as an AGC it never asked for. A radio
+with no line starts with its boost off, and only radios that have one get a
+line. Older configs had a single `amp_enabled` for everybody; sdrtop no
+longer reads it, because nobody remembers which radio it was saved on, least
+of all the file.
 
 ### The gain line
 
