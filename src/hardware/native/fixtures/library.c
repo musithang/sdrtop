@@ -301,9 +301,10 @@ int airspyhf_open_sn(void **device, uint64_t serial) {
 }
 int airspyhf_close(void *device) { calls[3]++; free(device); return 0; }
 // What the backend asked libairspyhf for last, by field (see
-// fixture_airspyhf_state): 0 the length passed to version_string_read. -1
-// until asked.
-static int airspyhf_state[1] = {-1};
+// fixture_airspyhf_state): 0 the length passed to version_string_read, 1 the
+// frequency in kHz, 2 the rate argument, 3 library DSP, 4 attenuator index,
+// 5 LNA, 6 AGC, 7 AGC threshold. -1 until asked.
+static int airspyhf_state[8] = {-1, -1, -1, -1, -1, -1, -1, -1};
 int fixture_airspyhf_state(int field) { return airspyhf_state[field]; }
 typedef struct { uint32_t part_id; uint32_t serial_no[4]; } airspyhf_read_partid_serialno_t;
 size_t fixture_airspyhf_layout(int field) {
@@ -331,6 +332,37 @@ int airspyhf_version_string_read(void *device, char *version, uint8_t length) {
     version[length - 1] = 0;
     return 0;
 }
+typedef struct { uint32_t major_version; uint32_t minor_version; uint32_t revision; } airspyhf_lib_version_t;
+void airspyhf_lib_version(airspyhf_lib_version_t *v) {
+    v->major_version = 1; v->minor_version = 6; v->revision = 8;
+}
+// Mode 33: a radio whose flash holds a correction of +250 ppb.
+int airspyhf_get_calibration(void *device, int32_t *ppb) {
+    *ppb = mode == 33 ? 250 : 0;
+    return 0;
+}
+// Mode 34 fails every setting, as a radio that left the bus would.
+#define AIRSPYHF_SET(name, field, type) \
+    int name(void *device, type value) { \
+        if (mode == 34) return -1; \
+        airspyhf_state[field] = (int)value; return 0; }
+int airspyhf_set_freq(void *device, uint32_t freq_hz) {
+    if (mode == 34) return -1;
+    airspyhf_state[1] = (int)(freq_hz / 1000); return 0;
+}
+AIRSPYHF_SET(airspyhf_set_samplerate, 2, uint32_t)
+AIRSPYHF_SET(airspyhf_set_lib_dsp, 3, uint8_t)
+AIRSPYHF_SET(airspyhf_set_hf_att, 4, uint8_t)
+AIRSPYHF_SET(airspyhf_set_hf_lna, 5, uint8_t)
+AIRSPYHF_SET(airspyhf_set_hf_agc, 6, uint8_t)
+AIRSPYHF_SET(airspyhf_set_hf_agc_threshold, 7, uint8_t)
+// The firmware's architectures as the bench's Discovery lists them: 912 and
+// 768 kS/s zero-IF, the rest low-IF.
+int airspyhf_is_low_if(void *device) {
+    return airspyhf_state[2] >= 0 && airspyhf_state[2] <= 650000;
+}
+// 1.6.8's block.
+int airspyhf_get_output_size(void *device) { return 2048; }
 #ifndef OMIT_LAST_SYMBOL
 int airspyhf_get_samplerates(void *device, uint32_t *buffer, uint32_t len) {
     static const uint32_t rates[] = {912000, 768000, 650000, 456000, 384000, 228000, 192000};

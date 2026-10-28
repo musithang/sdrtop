@@ -993,34 +993,49 @@ fn bottom_band_line(state: &SdrMetrics, theme: &crate::Theme, inner_width: u16) 
     // `NN dB`, or over its positions and `at/of` where its dB was not measured
     // at this frequency, or an empty bar and a dash where the chain's total is
     // not a gain.
-    let stage_cell =
-        |reading: Option<StageReading>, max_db: u32, lo: Color, hi: Color| -> Vec<Span<'static>> {
-            let (value, max) = match reading {
-                Some(StageReading::Db(db)) => (db.max(0.0).round() as u32, max_db),
-                Some(StageReading::Position { at, of }) => (at, of.max(1)),
-                Some(StageReading::Auto) | None => (0, 1),
-            };
-            let mut spans = gain_bar_spans(value, max, lo, hi);
-            spans.push(Span::raw(" "));
-            match reading {
-                Some(StageReading::Db(db)) => spans.extend([
-                    Span::styled(
-                        format!("{:2.0}", db.max(0.0)),
-                        Style::default().fg(val_color),
-                    ),
-                    Span::styled(" dB", Style::default().fg(theme.label)),
-                ]),
-                Some(position) => spans.push(Span::styled(
-                    position.compact(),
-                    Style::default().fg(val_color),
-                )),
-                None => spans.push(Span::styled(
-                    " \u{2014}   ",
-                    Style::default().fg(theme.label),
-                )),
-            }
-            spans
+    // The bar spans the stage's own range, `min_db` to `max_db`: from zero
+    // on an amplifier, from its deepest setting on an attenuator, whose gains
+    // are negative and read as such (`-12dB`, in the same five columns).
+    let stage_cell = |reading: Option<StageReading>,
+                      min_db: f64,
+                      max_db: u32,
+                      lo: Color,
+                      hi: Color|
+     -> Vec<Span<'static>> {
+        let floor = min_db.min(0.0);
+        let (value, max) = match reading {
+            Some(StageReading::Db(db)) => (
+                (db - floor).max(0.0).round() as u32,
+                (f64::from(max_db) - floor).round() as u32,
+            ),
+            Some(StageReading::Position { at, of }) => (at, of.max(1)),
+            Some(StageReading::Auto) | None => (0, 1),
         };
+        let mut spans = gain_bar_spans(value, max, lo, hi);
+        spans.push(Span::raw(" "));
+        match reading {
+            Some(StageReading::Db(db)) if db.round() < 0.0 => spans.extend([
+                Span::styled(format!("{db:3.0}"), Style::default().fg(val_color)),
+                Span::styled("dB", Style::default().fg(theme.label)),
+            ]),
+            Some(StageReading::Db(db)) => spans.extend([
+                Span::styled(
+                    format!("{:2.0}", db.max(0.0)),
+                    Style::default().fg(val_color),
+                ),
+                Span::styled(" dB", Style::default().fg(theme.label)),
+            ]),
+            Some(position) => spans.push(Span::styled(
+                position.compact(),
+                Style::default().fg(val_color),
+            )),
+            None => spans.push(Span::styled(
+                " \u{2014}   ",
+                Style::default().fg(theme.label),
+            )),
+        }
+        spans
+    };
 
     // Left block: segmented VFO readout + unit + sample-rate. Its width varies
     // with the number of MHz digits and the active-digit underline, so it is
@@ -1122,8 +1137,16 @@ fn bottom_band_line(state: &SdrMetrics, theme: &crate::Theme, inner_width: u16) 
     let mut spans = left_spans;
     spans.push(leader(gap, theme.border_dim));
     spans.push(Span::styled(p_label, Style::default().fg(theme.label)));
+    // The front stage's own floor where it has a key of its own; a single
+    // knob's gauge is the whole chain, from nothing.
+    let primary_min = if gm.has_second_stage() {
+        gm.stages().first().map_or(0.0, |s| s.min_db)
+    } else {
+        0.0
+    };
     spans.extend(stage_cell(
         primary,
+        primary_min,
         gm.primary_max_db(),
         theme.status_ok,
         theme.value_hi,
@@ -1140,6 +1163,7 @@ fn bottom_band_line(state: &SdrMetrics, theme: &crate::Theme, inner_width: u16) 
         ));
         spans.extend(stage_cell(
             state.stage_reading(1),
+            second.min_db,
             second.max_db.max(1.0).round() as u32,
             theme.border_accent,
             theme.status_warn,
@@ -1461,6 +1485,25 @@ mod tests {
                 }
             }
         }
+    }
+
+    /// **An attenuator reads as the negative gain it is.** The HF+'s ATT at
+    /// -12 dB is drawn as `-12dB` with its bar over -48..0, never floored to
+    /// `0 dB`, which is what the header once showed for 48 dB of attenuation.
+    #[test]
+    fn an_attenuator_reads_negative_in_the_header() {
+        let mut m = crate::state::SdrMetrics::fixture().streaming();
+        m.caps = std::sync::Arc::new(crate::hardware::native::airspyhf::caps(&[768_000], 2048));
+        m.radio.frequency = 7_100_000;
+        m.radio.gains = vec![-12.0, 6.0];
+        let out = crate::state::fixture::draw(HeaderPanel, 140, 8, &m).join("\n");
+        assert!(out.contains("ATT"), "{out}");
+        assert!(out.contains("-12dB"), "{out}");
+        assert!(out.contains(" 6 dB"), "the LNA: {out}");
+        m.radio.gains = vec![-48.0, 0.0];
+        let deepest = crate::state::fixture::draw(HeaderPanel, 140, 8, &m).join("\n");
+        assert!(deepest.contains("-48dB"), "{deepest}");
+        assert!(!deepest.contains("ATT        0 dB"), "{deepest}");
     }
 
     /// **A stage's dB is shown only where it was measured.** The R2's LNA

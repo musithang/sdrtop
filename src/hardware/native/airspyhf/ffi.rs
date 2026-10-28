@@ -33,6 +33,15 @@ pub struct PartSerial {
 /// longer request would read past it.
 pub const VERSION_STRING_SIZE: u8 = 64;
 
+/// `airspyhf_lib_version_t`.
+#[repr(C)]
+#[derive(Clone, Copy, Default)]
+pub struct LibVersion {
+    pub major: u32,
+    pub minor: u32,
+    pub revision: u32,
+}
+
 pub struct AirspyHfApi {
     // Keeps the library mapped for as long as the API is reachable
     _lib: libloading::Library,
@@ -47,6 +56,29 @@ pub struct AirspyHfApi {
         unsafe extern "C" fn(*mut c_void, *mut PartSerial) -> c_int,
     /// See [`VERSION_STRING_SIZE`] for the longest `length` that is safe.
     pub airspyhf_version_string_read: unsafe extern "C" fn(*mut c_void, *mut c_char, u8) -> c_int,
+    pub airspyhf_lib_version: unsafe extern "C" fn(*mut LibVersion),
+    /// The correction the radio's flash holds for its reference, parts per
+    /// billion; the library applies it to every tuning.
+    pub airspyhf_get_calibration: unsafe extern "C" fn(*mut c_void, *mut i32) -> c_int,
+    /// Hz. The firmware tunes in whole kHz; with the library's DSP on, the
+    /// rest is a rotation of the samples.
+    pub airspyhf_set_freq: unsafe extern "C" fn(*mut c_void, u32) -> c_int,
+    /// A rate in Hz from the firmware's list, or an index into it.
+    pub airspyhf_set_samplerate: unsafe extern "C" fn(*mut c_void, u32) -> c_int,
+    /// Whether the current rate is a low-IF one (1) or zero-IF (0).
+    pub airspyhf_is_low_if: unsafe extern "C" fn(*mut c_void) -> c_int,
+    /// Pairs per callback: 2048 in 1.6.8, 4096 in later versions.
+    pub airspyhf_get_output_size: unsafe extern "C" fn(*mut c_void) -> c_int,
+    /// The library's IQ correction, IF shift and fine tuning, on (1) or off.
+    pub airspyhf_set_lib_dsp: unsafe extern "C" fn(*mut c_void, u8) -> c_int,
+    /// The attenuator by its index, 0..8, 6 dB a step.
+    pub airspyhf_set_hf_att: unsafe extern "C" fn(*mut c_void, u8) -> c_int,
+    /// The LNA, 0 or 1: 6 dB on the level when on (measured; the header's
+    /// "compensated in digital" is not what the firmware does).
+    pub airspyhf_set_hf_lna: unsafe extern "C" fn(*mut c_void, u8) -> c_int,
+    /// The firmware's AGC, which sets the attenuator while on.
+    pub airspyhf_set_hf_agc: unsafe extern "C" fn(*mut c_void, u8) -> c_int,
+    pub airspyhf_set_hf_agc_threshold: unsafe extern "C" fn(*mut c_void, u8) -> c_int,
     /// With `len` zero, writes the number of rates the firmware offers into
     /// the buffer's first element; otherwise copies that many rates in Hz.
     pub airspyhf_get_samplerates: unsafe extern "C" fn(*mut c_void, *mut u32, u32) -> c_int,
@@ -101,6 +133,17 @@ pub(super) fn resolve(lib: libloading::Library) -> Result<AirspyHfApi, String> {
         airspyhf_close: sym!(airspyhf_close),
         airspyhf_board_partid_serialno_read: sym!(airspyhf_board_partid_serialno_read),
         airspyhf_version_string_read: sym!(airspyhf_version_string_read),
+        airspyhf_lib_version: sym!(airspyhf_lib_version),
+        airspyhf_get_calibration: sym!(airspyhf_get_calibration),
+        airspyhf_set_freq: sym!(airspyhf_set_freq),
+        airspyhf_set_samplerate: sym!(airspyhf_set_samplerate),
+        airspyhf_is_low_if: sym!(airspyhf_is_low_if),
+        airspyhf_get_output_size: sym!(airspyhf_get_output_size),
+        airspyhf_set_lib_dsp: sym!(airspyhf_set_lib_dsp),
+        airspyhf_set_hf_att: sym!(airspyhf_set_hf_att),
+        airspyhf_set_hf_lna: sym!(airspyhf_set_hf_lna),
+        airspyhf_set_hf_agc: sym!(airspyhf_set_hf_agc),
+        airspyhf_set_hf_agc_threshold: sym!(airspyhf_set_hf_agc_threshold),
         airspyhf_get_samplerates: sym!(airspyhf_get_samplerates),
         _lib: lib,
     })

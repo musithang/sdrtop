@@ -309,7 +309,10 @@ pub fn resolve_gains(
 ) -> (Vec<f64>, Vec<String>) {
     let stages = gm.stages();
     let mut notes = Vec::new();
-    let mut values: Vec<f64> = stages.iter().map(|s| s.min_db).collect();
+    // A stage the saved string does not name starts where the device starts
+    // it, not at its minimum: on an attenuator the minimum is the deepest
+    // setting, and a string saved on another radio names none of its stages.
+    let mut values: Vec<f64> = gm.start_gains(curve);
 
     match radio.gain.as_deref().map(str::trim) {
         Some(text) if !text.is_empty() => match text.parse::<f64>() {
@@ -947,6 +950,19 @@ mod tests {
         let cfg = AppConfig::default();
         let (gains, _) = resolve_gains(&cfg.radio, &caps.gain, None);
         assert_eq!(gains, vec![16.0, 20.0]);
+    }
+
+    /// **A stage the string does not name starts where the device starts
+    /// it.** A string saved on a HackRF names an LNA and a VGA: on the HF+
+    /// Discovery the LNA is found (6 dB, its nearest) and the attenuator,
+    /// unnamed, starts at none rather than at its minimum, -48 dB.
+    #[test]
+    fn an_unnamed_stage_starts_at_the_devices_start() {
+        let gm = hardware::native::airspyhf::gain_model();
+        let mut cfg = AppConfig::default();
+        cfg.radio.gain = Some("LNA=28,VGA=12".into());
+        let (gains, _) = resolve_gains(&cfg.radio, &gm, None);
+        assert_eq!(gains, vec![0.0, 6.0]);
     }
 
     /// The named form names the device's own stages, and each value lands on

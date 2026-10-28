@@ -250,14 +250,6 @@ pub enum SampleFormat {
     /// 2^48 for anything within twice the full scale of a 24-bit container,
     /// so a block may hold 2^15 such pairs; the backend hands blocks well
     /// under that.
-    #[cfg_attr(
-        not(test),
-        expect(
-            dead_code,
-            reason = "the HF+ backend constructs it once it opens the radio; \
-                      this expectation then fails the build, so it cannot outlive the reason"
-        )
-    )]
     Int32,
 }
 
@@ -438,9 +430,13 @@ pub enum StageReading {
 }
 
 impl StageReading {
-    /// Five columns: `36 dB`, or `14/14` where the dB was not measured.
+    /// Five columns: `36 dB`, `-12dB` for an attenuator, or `14/14` where
+    /// the dB was not measured.
     pub fn compact(self) -> String {
         match self {
+            // An attenuator's setting is a negative gain, and said as one:
+            // flooring it at zero showed "0 dB" for 12 dB of attenuation.
+            StageReading::Db(db) if db.round() < 0.0 => format!("{:3.0}dB", db),
             StageReading::Db(db) => format!("{:2.0} dB", db.max(0.0)),
             StageReading::Position { at, of } => format!("{at:2}/{of}"),
             StageReading::Auto => "  AGC".to_string(),
@@ -831,6 +827,10 @@ pub struct GainModel {
     /// Where the chain clips before the converter does, in dBFS of the
     /// converter, and what clips there. See [`Self::ceiling_dbfs`].
     ceiling: Option<(f64, &'static str)>,
+    /// The gains a first run and `[R]` give the stages when the knob is on no
+    /// curve, where the device has its own; `None` for the historical rule
+    /// (`hardware::gain::defaults`).
+    start_values: Option<Vec<f64>>,
 }
 
 impl GainModel {
@@ -869,7 +869,18 @@ impl GainModel {
             start: None,
             auto_stages: Vec::new(),
             ceiling: None,
+            start_values: None,
         }
+    }
+
+    /// The stages start at `values`, one per stage, at a first run and on
+    /// `[R]`, rather than at the historical front and second-stage defaults:
+    /// for a device whose sensible start is not "some gain on the first two
+    /// stages", an attenuator at none and a preamp off among them.
+    pub fn with_start_gains(mut self, values: Vec<f64>) -> Self {
+        debug_assert_eq!(values.len(), self.stages.len(), "one start value per stage");
+        self.start_values = Some(values);
+        self
     }
 
     /// The chain clips at `dbfs` of the converter, in `what` (`"tuner"`),
@@ -941,7 +952,14 @@ impl GainModel {
         let stages = self.stages();
         match curve.and_then(|c| self.curves.get(c)) {
             Some(c) => c.values(self.start.map_or(0, |(_, step)| step), &stages),
-            None => super::gain::defaults(&stages),
+            None => match &self.start_values {
+                Some(values) => stages
+                    .iter()
+                    .zip(values)
+                    .map(|(stage, &v)| stage.snap(v))
+                    .collect(),
+                None => super::gain::defaults(&stages),
+            },
         }
     }
 
@@ -2205,6 +2223,12 @@ mod tests {
         assert_eq!(StageReading::Db(4.38).compact(), " 4 dB");
         assert_eq!(StageReading::Position { at: 14, of: 14 }.compact(), "14/14");
         assert_eq!(StageReading::Position { at: 3, of: 14 }.compact(), " 3/14");
+        // An attenuator reads as the negative gain it is, in the same five
+        // columns.
+        assert_eq!(StageReading::Db(-12.0).compact(), "-12dB");
+        assert_eq!(StageReading::Db(-48.0).compact(), "-48dB");
+        assert_eq!(StageReading::Db(-6.0).compact(), " -6dB");
+        assert_eq!(StageReading::Db(0.0).compact(), " 0 dB");
     }
 
     /// **A converter scaled into a wider container says its own depth.**
@@ -2380,5 +2404,20 @@ mod tests {
             ..crate::hardware::native::hackrf::caps()
         };
         assert_eq!(rtl.bands_text(), "24 MHz to 1.766 GHz");
+    }
+
+    /// A device's own start gains are where a first run and `[R]` put the
+    /// stages, snapped onto their values, rather than the historical front
+    /// and second-stage defaults (which would switch a 0/6 dB preamp on).
+    #[test]
+    fn a_device_can_start_its_stages_where_it_says() {
+        let stages = vec![
+            StageSpec::tabled("ATT", (0..=8).map(|i| f64::from(i) * 6.0 - 48.0).collect()),
+            StageSpec::tabled("LNA", vec![0.0, 6.0]),
+        ];
+        let plain = GainModel::new(stages.clone(), "ATT", "ATT");
+        assert_eq!(plain.start_gains(None), [0.0, 6.0], "the historical rule");
+        let own = GainModel::new(stages, "ATT", "ATT").with_start_gains(vec![0.0, 0.0]);
+        assert_eq!(own.start_gains(None), [0.0, 0.0]);
     }
 }

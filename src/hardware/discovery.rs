@@ -25,7 +25,7 @@ pub enum DeviceKind {
     /// backend is asked for by name.
     Airspy,
     /// The Airspy HF+ Discovery, natively, asked for by name only while its
-    /// backend cannot open it.
+    /// backend cannot stream.
     AirspyHf,
     HackRf,
     RtlSdr,
@@ -222,7 +222,7 @@ pub fn list_all_devices(
     // An R2 natively, which then wins over SoapyAirspy's listing of it
     // below; a Mini only when asked for by name (see `airspy::offered`).
     out.extend(airspy::list(want == Some(DeviceKind::Airspy)));
-    // The HF+ only when asked for by name, until its backend opens it.
+    // The HF+ only when asked for by name, until its backend streams.
     if want == Some(DeviceKind::AirspyHf) {
         out.extend(airspyhf::list());
     }
@@ -304,7 +304,7 @@ pub fn open_device(
     let tinysa_settings = &cfg.tinysa;
     match listing.kind {
         DeviceKind::Airspy => Ok(Arc::new(airspy::AirspyDevice::open(listing, &cfg.airspy)?)),
-        DeviceKind::AirspyHf => Err(airspyhf::not_yet(listing)),
+        DeviceKind::AirspyHf => Ok(Arc::new(airspyhf::AirspyHfDevice::open(listing)?)),
         DeviceKind::HackRf => Ok(Arc::new(hackrf::HackRfDevice::open(listing.index)?)),
         DeviceKind::RtlSdr => Ok(Arc::new(rtlsdr::RtlDevice::open(listing.index)?)),
         DeviceKind::Soapy => {
@@ -471,6 +471,26 @@ mod tests {
             "SoapySDR \u{00b7} airspy \u{00b7} AirSpy One [637862dc2e1182d7]",
             Some("637862dc2e1182d7"),
             Some("driver=airspy, serial=637862dc2e1182d7"),
+        );
+        assert!(offer_soapy(vec![soapy], &native, None).is_empty());
+    }
+
+    /// The HF+ Discovery reached natively and through SoapyAirspyHF is one
+    /// radio: `SoapySDRUtil --find` on this machine spells its serial as the
+    /// native listing does, so the native listing claims it.
+    #[test]
+    fn the_hf_plus_reached_two_ways_is_listed_once() {
+        let native = vec![listing(
+            DeviceKind::AirspyHf,
+            "Airspy HF+ Discovery \u{00b7} dd528080ff444630",
+            Some("dd528080ff444630"),
+            None,
+        )];
+        let soapy = listing(
+            DeviceKind::Soapy,
+            "SoapySDR \u{00b7} airspyhf \u{00b7} AirSpy HF+ [dd528080ff444630]",
+            Some("dd528080ff444630"),
+            Some("driver=airspyhf, serial=dd528080ff444630"),
         );
         assert!(offer_soapy(vec![soapy], &native, None).is_empty());
     }
