@@ -99,8 +99,8 @@ pub(super) fn begin_sample_rate_input(ctx: &mut InputCtx<'_>) {
     let (lo, hi, name) = {
         let c = device.capabilities();
         (
-            c.sample_rate_min_hz / 1e6,
-            c.sample_rate_max_hz / 1e6,
+            crate::ui::widgets::timing_fmt::fmt_msps(c.sample_rate_min_hz),
+            crate::ui::widgets::timing_fmt::fmt_msps(c.sample_rate_max_hz),
             if c.sample_rate_is_span {
                 "span"
             } else {
@@ -112,7 +112,9 @@ pub(super) fn begin_sample_rate_input(ctx: &mut InputCtx<'_>) {
     m.ui.input_mode = InputMode::SampleRateInput;
     m.ui.input_buf.clear();
     m.push_log(format!(
-        "Enter {name} in MHz ({lo:.1}\u{2013}{hi:.1}), then press Enter",
+        "Enter {name} in MHz ({}\u{2013}{}), then press Enter",
+        lo.trim_start(),
+        hi.trim_start(),
     ));
 }
 

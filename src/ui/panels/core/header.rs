@@ -960,7 +960,7 @@ fn bottom_band_line(state: &SdrMetrics, theme: &crate::Theme, inner_width: u16) 
     let active = state.radio.hw_streaming && !state.observer.active;
     let gm = &state.caps.gain;
 
-    let sr_str = format!("{:4.1}", state.radio.config_sample_rate / 1_000_000.0);
+    let sr_str = crate::ui::widgets::timing_fmt::fmt_msps(state.radio.config_sample_rate);
     let (bandwidth_label, bandwidth_unit) = if state.caps.sample_rate_is_span {
         ("SPAN ", " MHz")
     } else {
@@ -1494,11 +1494,13 @@ mod tests {
     fn an_attenuator_reads_negative_in_the_header() {
         let mut m = crate::state::SdrMetrics::fixture().streaming();
         m.caps = std::sync::Arc::new(crate::hardware::native::airspyhf::caps(&[768_000], 2048));
+        m.radio.config_sample_rate = 768_000.0;
         m.radio.frequency = 7_100_000;
         m.radio.gains = vec![-12.0, 6.0];
         let out = crate::state::fixture::draw(HeaderPanel, 140, 8, &m).join("\n");
         assert!(out.contains("ATT"), "{out}");
         assert!(out.contains("-12dB"), "{out}");
+        assert!(out.contains("SR 0.768 Msps"), "the rate, not 0.8: {out}");
         assert!(out.contains(" 6 dB"), "the LNA: {out}");
         m.radio.gains = vec![-48.0, 0.0];
         let deepest = crate::state::fixture::draw(HeaderPanel, 140, 8, &m).join("\n");

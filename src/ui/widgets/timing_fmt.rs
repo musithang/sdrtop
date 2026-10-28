@@ -14,6 +14,18 @@ use ratatui::{style::Style, text::Span};
 
 use crate::state::TimingQuality;
 
+/// A sample rate in Msps, without the unit: one decimal from 1 Msps up, as it
+/// always was (`20.0`, ` 2.4`), and three below it, where one decimal reads
+/// 768 and 912 kS/s alike as `0.8`.
+pub(crate) fn fmt_msps(hz: f64) -> String {
+    let msps = hz / 1e6;
+    if msps < 1.0 {
+        format!("{msps:.3}")
+    } else {
+        format!("{msps:4.1}")
+    }
+}
+
 /// Microseconds rendered as `ms` once they pass 1000 µs, else plain `µs`.
 /// How long ago something was measured, at the resolution a reading's age is
 /// read at: `3 s ago`, then `4 min ago` from ninety seconds on.
@@ -92,5 +104,15 @@ mod tests {
         assert_eq!(ppm_span(10, &t).style.fg, Some(t.status_ok));
         assert_eq!(ppm_span(-120, &t).style.fg, Some(t.status_warn));
         assert_eq!(ppm_span(600, &t).style.fg, Some(t.status_crit));
+    }
+
+    /// Below 1 Msps three decimals, so 768 and 912 kS/s are two rates; from
+    /// 1 Msps up the one decimal and the width it always had.
+    #[test]
+    fn a_rate_under_one_msps_keeps_its_kilosamples() {
+        assert_eq!(fmt_msps(768_000.0), "0.768");
+        assert_eq!(fmt_msps(912_000.0), "0.912");
+        assert_eq!(fmt_msps(2_400_000.0), " 2.4");
+        assert_eq!(fmt_msps(20_000_000.0), "20.0");
     }
 }

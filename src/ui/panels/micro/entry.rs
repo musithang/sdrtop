@@ -130,7 +130,10 @@ fn status_line(state: &SdrMetrics, theme: &crate::Theme, mode: Mode) -> Line<'st
             Span::raw("   "),
             Span::styled(format!("{:.3} MHz", freq_mhz), freq_style),
             Span::raw("   "),
-            dim(format!("{:.1} Msps", sr_msps)),
+            dim(format!(
+                "{} Msps",
+                crate::ui::widgets::timing_fmt::fmt_msps(sr_msps * 1e6).trim_start()
+            )),
             Span::raw("   "),
             dim(boost(" ")),
         ]),
