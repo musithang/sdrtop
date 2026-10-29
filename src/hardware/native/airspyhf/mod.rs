@@ -279,7 +279,11 @@ pub fn gain_model() -> GainModel {
         "ATT",
     )
     .with_second_stage()
-    .with_no_cascade_reason("each stage's own noise figure is not published")
+    // Both are digital gain after the converter, behind the radio's own RF,
+    // IF and digital AGCs, which are always on (Airspy's account, and what
+    // every measurement here shows): they place the level in the samples.
+    .with_digital_stages("AGC")
+    .with_no_cascade_reason("ATT and LNA are digital, after the converter")
     .with_boost(crate::hardware::Boost::GainMode)
     .with_auto_stages(&[0])
     .with_start_gains(vec![0.0, 0.0])
@@ -1305,6 +1309,11 @@ mod tests {
         assert_eq!(g.start_gains(None), [0.0, 0.0]);
         assert!(g.auto_governs(0) && !g.auto_governs(1));
         assert!(g.has_second_stage());
+        assert!(g.stages_are_digital());
+        assert_eq!(
+            g.chain_caption(),
+            "ANT\u{25b8}AGC\u{25b8}ADC\u{25b8}ATT\u{25b8}LNA\u{25b8}word"
+        );
         let c = g.ceiling().expect("the digital AGC's hold");
         assert_eq!(
             (c.part, c.kind),

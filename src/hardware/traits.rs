@@ -886,6 +886,10 @@ pub struct GainModel {
     /// Not built from `stages`, because it names parts that have no gain to
     /// set: a HackRF reads `LNA▸MIX▸VGA`, and the mixer is not a stage.
     chain_diagram: String,
+    /// The stages are digital gain after the converter, not front-end gain,
+    /// and this names what sits before the converter (`"AGC"`); `None` for a
+    /// chain whose stages are ahead of it. See [`Self::stages_are_digital`].
+    digital: Option<&'static str>,
     no_cascade_reason: &'static str,
     /// Full scale for the primary gain gauge when the stages describe no span.
     ///
@@ -940,6 +944,7 @@ impl GainModel {
             } else {
                 chain_diagram
             },
+            digital: None,
             no_cascade_reason: "chain not modelled",
             gauge_fallback_db: 0,
             curves: Vec::new(),
@@ -1082,6 +1087,36 @@ impl GainModel {
         self
     }
 
+    /// The stages are digital gain applied after the converter, with
+    /// `before` (`"AGC"`) ahead of it: they place the level in the samples,
+    /// they do not set what the converter sees. The Airspy HF+'s ATT and LNA
+    /// are such, by Airspy's account and by every measurement here.
+    pub fn with_digital_stages(mut self, before: &'static str) -> Self {
+        self.digital = Some(before);
+        self
+    }
+
+    /// Whether the stages are digital gain after the converter.
+    pub fn stages_are_digital(&self) -> bool {
+        self.digital.is_some()
+    }
+
+    /// The receive chain as a caption, for the panels that draw a chain they
+    /// cannot model: `ANT▸LNA▸MIX▸VGA▸ADC` where the stages are ahead of the
+    /// converter, `ANT▸AGC▸ADC▸ATT▸LNA▸word` where they are digital gain after
+    /// it and the samples are the word they produce. The stage names are the
+    /// device's own: an RTL-SDR really is one tuner, and a SoapySDR device is
+    /// **whatever `listGains` named**, the driver's answer rather than ours.
+    pub fn chain_caption(&self) -> String {
+        match self.digital {
+            Some(before) => format!(
+                "ANT\u{25B8}{before}\u{25B8}ADC\u{25B8}{}\u{25B8}word",
+                self.chain_diagram
+            ),
+            None => format!("ANT\u{25B8}{}\u{25B8}ADC", self.chain_diagram),
+        }
+    }
+
     /// Why the modelled Friis cascade is not on offer for this device.
     pub fn with_no_cascade_reason(mut self, reason: &'static str) -> Self {
         self.no_cascade_reason = reason;
@@ -1158,16 +1193,6 @@ impl GainModel {
     /// How the boost is reached, for the backend that has to drive it.
     pub fn boost(&self) -> Option<&Boost> {
         self.boost.as_ref()
-    }
-
-    /// The stages between antenna and converter, for the panels that draw a
-    /// chain they cannot model.
-    ///
-    /// Only read where `friis_applicable` is false. An RTL-SDR really is one
-    /// tuner, and a SoapySDR device is **whatever `listGains` named**, which is
-    /// the driver's own answer rather than one of ours.
-    pub fn unmodelled_stages(&self) -> String {
-        self.chain_diagram.clone()
     }
 
     /// Why the modelled cascade is not on offer, in a few words.

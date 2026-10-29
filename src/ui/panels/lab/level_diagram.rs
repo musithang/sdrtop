@@ -577,8 +577,15 @@ fn diagram(
     for x in GUTTER..zx {
         axis.set(0, x, '\u{2500}', dim);
     }
-    axis.text(0, zx, "\u{25b6} ADC", theme.label);
-    axis.text(1, GUTTER + 1, "ANT", theme.label);
+    // Digital stages after the converter: the walk starts at the converter
+    // and ends at the word the samples are, and the antenna is not on it.
+    let (start, end) = if state.caps.gain.stages_are_digital() {
+        ("ADC", "\u{25b6} word")
+    } else {
+        ("ANT", "\u{25b6} ADC")
+    };
+    axis.text(0, zx, end, theme.label);
+    axis.text(1, GUTTER + 1, start, theme.label);
     // Left to right; a box that would run into the one before it is left
     // out rather than overprinted.
     let (mut free_box, mut free_under) = (GUTTER, GUTTER + 5);
@@ -605,6 +612,8 @@ fn diagram(
 
     let caption = if c.noise.is_some() {
         " signal measured at the converter; noise from each stage's figure"
+    } else if state.caps.gain.stages_are_digital() {
+        " measured in the samples, walked back through the digital gain"
     } else {
         " signal measured at the converter, walked back stage by stage"
     };
@@ -756,6 +765,30 @@ mod tests {
             "{deep}"
         );
         assert!(!wide.contains("clip"), "{wide}");
+    }
+
+    /// **On the HF+ the stages are digital, after the converter**: the walk
+    /// starts at the converter and ends at the word, the antenna is not on
+    /// the axis, and the caption says the signal was measured in the samples.
+    #[test]
+    fn the_hf_plus_walk_starts_at_the_converter() {
+        let mut m = SdrMetrics::fixture()
+            .streaming()
+            .with_carrier(0.0, 30.0)
+            .airspyhf();
+        m.signal.adc_peak_dbfs = -30.0;
+        let out = draw(&m, 73, 26);
+        for want in [
+            "measured in the samples, walked back through the digital gain",
+            "\u{25b6} word",
+            "ADC",
+        ] {
+            assert!(out.contains(want), "{want:?} in\n{out}");
+        }
+        assert!(
+            !out.contains("ANT") && !out.contains("\u{25b6} ADC"),
+            "{out}"
+        );
     }
 
     /// A radio with no ceiling of its own clips at the converter, and says

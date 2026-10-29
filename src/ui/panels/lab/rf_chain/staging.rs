@@ -21,11 +21,18 @@ use super::{LABEL_W, VALW};
 
 /// `GAIN LINEUP` - the level at each node of the chain, the converter's dBFS
 /// walked back through each stage's gain, ending at the ADC as read.
+///
+/// Where the stages are `digital` gain after the converter, the walk starts
+/// at the converter, not the antenna: the first node is the level the stages
+/// are handed (the samples less their gain), the antenna has no level, and the
+/// last node is the word the samples are, not the ADC.
+#[allow(clippy::too_many_arguments)]
 pub(super) fn lineup(
     out: &mut Vec<Line<'static>>,
     levels: &[StageLevel],
     stages: &[Stage],
     adc_peak: f64,
+    digital: bool,
     sev_col: Color,
     iw: usize,
     theme: &crate::Theme,
@@ -40,7 +47,8 @@ pub(super) fn lineup(
     // past the pane and the terminal clips the reading off the right-hand end.
     // Which is the wrong thing to lose: the level is the measurement, the label
     // is only its name.
-    let label_w = lineup_label_w(levels);
+    // `word` closes a digital chain, and is wider than the `ADC` it replaces.
+    let label_w = lineup_label_w(levels).max(if digital { 4 } else { 0 });
 
     // If both columns will not fit, the **middle one goes**. The per-stage gain
     // is context and is spelled out again in the staging block below; the level
@@ -62,10 +70,32 @@ pub(super) fn lineup(
         .unwrap_or(0);
     let show_mid = 1 + label_w + 1 + widest_mid + 1 + widest_right <= iw;
 
-    for (i, node) in levels.iter().enumerate() {
+    // Ahead of digital stages the antenna's level is not known: the radio's
+    // own AGCs, always on, sit between it and the converter.
+    if digital {
         out.push(row(
             Row {
-                label: &clip(&node.label, label_w),
+                label: "ANT",
+                label_w,
+                mid: String::new(),
+                mid_col: dim,
+                right: "\u{2014}".to_string(),
+                right_col: theme.value,
+            },
+            iw,
+            theme,
+        ));
+        out.push(Line::raw(""));
+    }
+    for (i, node) in levels.iter().enumerate() {
+        let label = if digital && i == 0 {
+            "ADC"
+        } else {
+            node.label.as_str()
+        };
+        out.push(row(
+            Row {
+                label: &clip(label, label_w),
                 label_w,
                 mid: if show_mid {
                     mid_text(i, stages)
@@ -81,12 +111,13 @@ pub(super) fn lineup(
         ));
         out.push(Line::raw(""));
     }
-    // ADC node = the last stage's output, read in dBFS.
+    // ADC node = the last stage's output, read in dBFS; after digital stages,
+    // the word the samples are.
     out.push(row(
         Row {
-            label: "ADC",
+            label: if digital { "word" } else { "ADC" },
             label_w,
-            mid: if show_mid {
+            mid: if show_mid && !digital {
                 "0 dB".to_string()
             } else {
                 String::new()

@@ -165,7 +165,16 @@ impl Panel for RfChainPanel {
         let sev_col = severity_color(sev, theme);
 
         let mut lines: Vec<Line> = Vec::new();
-        staging::lineup(&mut lines, &levels, &stages, adc_peak, sev_col, iw, theme);
+        staging::lineup(
+            &mut lines,
+            &levels,
+            &stages,
+            adc_peak,
+            state.caps.gain.stages_are_digital(),
+            sev_col,
+            iw,
+            theme,
+        );
         lines.push(Line::raw(""));
         staging::staging(
             &mut lines,
@@ -306,6 +315,54 @@ mod tests {
         m.signal.adc_peak_dbfs = -13.0;
         let vhf = draw(RfChainPanel, 70, 60, &m).join("\n");
         assert!(vhf.contains("GAIN HELD"), "{vhf}");
+    }
+
+    /// **The HF+'s lineup starts at its converter**: ATT and LNA are digital
+    /// gain after it, so the antenna has no level, the first level is what
+    /// the stages are handed, and the last row is the word, not the ADC.
+    #[test]
+    fn the_hf_plus_lineup_starts_at_the_converter() {
+        let mut m = SdrMetrics::fixture().streaming().airspyhf();
+        m.radio.gains = vec![-6.0, 6.0];
+        m.signal.adc_peak_dbfs = -20.0;
+        let out = draw(RfChainPanel, 60, 40, &m).join("\n");
+        // Every labelled row of the lineup, the antenna's dash included.
+        let rows: Vec<String> = out
+            .lines()
+            .skip_while(|l| !l.contains("GAIN LINEUP"))
+            .skip(1)
+            .take_while(|l| !l.contains("GAIN STAGING"))
+            .filter(|l| {
+                !l.trim_matches(|c: char| c == '\u{2502}' || c.is_whitespace())
+                    .is_empty()
+            })
+            .map(str::to_string)
+            .collect();
+        let labels: Vec<&str> = rows
+            .iter()
+            .map(|r| {
+                r.trim_start_matches('\u{2502}')
+                    .split_whitespace()
+                    .next()
+                    .unwrap_or("")
+            })
+            .collect();
+        assert_eq!(labels, ["ANT", "ADC", "ATT", "LNA", "word"], "{rows:?}");
+        let joined = rows.join("\n");
+        assert!(joined.contains("-20 dBFS"), "{joined}");
+        assert!(
+            rows[0].contains('\u{2014}') && !rows[0].contains("dBFS"),
+            "{rows:?}"
+        );
+        assert!(
+            rows[1].contains("-20 dBFS"),
+            "the stages' input: -20 less -6 plus 6: {rows:?}"
+        );
+        assert!(
+            rows[2].contains("-6 dB") && rows[2].contains("-26 dBFS"),
+            "{rows:?}"
+        );
+        assert!(rows[4].contains("-20 dBFS"), "the word, whole: {rows:?}");
     }
 
     /// **One headroom on every panel**: the verdict, the ADC bench and the

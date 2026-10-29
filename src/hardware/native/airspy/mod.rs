@@ -1156,7 +1156,10 @@ mod tests {
         assert!(stages[0].db_holds_at(92_800_000) && !stages[0].db_holds_at(943_400_000));
         assert!(stages[1].db_holds_at(1_800_000_000) && stages[2].db_holds_at(24_000_000));
         assert!(g.has_second_stage());
-        assert_eq!(g.unmodelled_stages(), "LNA\u{25b8}MIX\u{25b8}VGA");
+        assert_eq!(
+            g.chain_caption(),
+            "ANT\u{25b8}LNA\u{25b8}MIX\u{25b8}VGA\u{25b8}ADC"
+        );
     }
 
     /// **The presets are libairspy's own tables**, step `v` reading entry

@@ -113,8 +113,9 @@ fn hairline(iw: usize, color: ratatui::style::Color) -> Line<'static> {
 fn rf_chain_str(gm: &GainModel, friis_applicable: bool, amp_enabled: bool) -> String {
     if !friis_applicable {
         // The stages the device itself names, not a guess: an RTL-SDR is one
-        // tuner, and a SoapySDR device reports its own gain elements.
-        return format!("ANT\u{25B8}{}\u{25B8}ADC", gm.unmodelled_stages());
+        // tuner, and a SoapySDR device reports its own gain elements; after
+        // the converter where they are digital.
+        return gm.chain_caption();
     }
     let mut s = String::from("ANT\u{25B8}");
     if amp_enabled {
@@ -1195,6 +1196,27 @@ mod tests {
         assert!(
             text.contains("Clean") && text.contains("120.0 kHz"),
             "{text}"
+        );
+    }
+
+    /// **The banner's chain is the radio's own**: on the HF+ the stages are
+    /// digital gain after the converter, behind the radio's AGCs, ending in
+    /// the word; on an R2 the stages are ahead of the ADC.
+    #[test]
+    fn the_banner_chain_puts_digital_stages_after_the_converter() {
+        let hf = SdrMetrics::fixture().streaming().airspyhf();
+        let fields = rf_banner_fields(&hf);
+        assert_eq!(
+            fields[0],
+            (
+                "CHAIN",
+                "ANT\u{25b8}AGC\u{25b8}ADC\u{25b8}ATT\u{25b8}LNA\u{25b8}word".to_string()
+            )
+        );
+        let r2 = SdrMetrics::fixture().streaming().band_measured_chain();
+        assert_eq!(
+            rf_banner_fields(&r2)[0].1,
+            "ANT\u{25b8}LNA\u{25b8}MIX\u{25b8}VGA\u{25b8}ADC"
         );
     }
 
