@@ -57,6 +57,18 @@ pub(crate) fn verdict(carrier: Option<&Carrier>) -> (VerdictLevel, String, Strin
             "Nothing clearly above the noise floor at centre.".to_string(),
         );
     };
+    // Wider than any one broadcast, the window has walked through station
+    // after station: there is no carrier here to call clean or weak.
+    if c.occupied_bw_hz > crate::state::WFM_MAX_BW_HZ {
+        let bw = fmt_bw(c.occupied_bw_hz);
+        return (
+            VerdictLevel::Caution,
+            "MANY SIGNALS".to_string(),
+            format!(
+                "{bw} wide at centre, more than any one broadcast: several signals, none judged."
+            ),
+        );
+    }
     let Some(kind) = c.verdict else {
         return (
             VerdictLevel::Judging,
@@ -157,6 +169,26 @@ mod tests {
 
     fn on(m: Modulation, snr: f32, lo: f32, hi: f32, obw: u64) -> (VerdictLevel, String, String) {
         verdict(Some(&steady(m, snr, lo, hi, obw)))
+    }
+
+    /// **A band of stations is many signals**, never one clean carrier: the
+    /// 40 m slice that once read `CLEAN WFM SIGNAL` at 657 kHz says so.
+    #[test]
+    fn a_band_of_stations_is_many_signals() {
+        let c = steady(
+            crate::state::Modulation::Unknown,
+            53.0,
+            f32::NEG_INFINITY,
+            f32::NEG_INFINITY,
+            657_400,
+        );
+        let (level, headline, detail) = verdict(Some(&c));
+        assert_eq!(level, VerdictLevel::Caution);
+        assert_eq!(headline, "MANY SIGNALS");
+        assert!(
+            detail.starts_with("657.4 kHz wide") && !detail.contains("carrier"),
+            "{detail}"
+        );
     }
 
     #[test]

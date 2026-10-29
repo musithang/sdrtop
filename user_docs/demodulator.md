@@ -233,8 +233,11 @@ the 57 kHz RDS subcarrier both sit inside it.
 
 The pilot is measured by taking the strongest bin in a small neighbourhood of
 19 kHz rather than one exact bin, because the pilot rarely lands on a bin centre
-and window leakage spreads it across its neighbours. Broadcast practice injects
-it at 8 to 10 % of the deviation limit. Anything at or above 4 % is reported as
+and window leakage spreads it across its neighbours. It also has to stand at least
+10 dB above the guard band around it (16 to 18 and 20 to 22 kHz, which broadcast
+keeps empty apart from the pilot). Noise through the discriminator fills that band
+evenly, and noise loud enough to read as 15 % injection is still noise, not stereo.
+Broadcast practice injects it at 8 to 10 % of the deviation limit. Anything at or above 4 % is reported as
 locked, so a weakly injected but genuine pilot still reads as stereo. Between
 1.5 % and 4 % it is reported as **marginal**, which is its own state rather than
 a rounding decision, because "there might be a pilot here" is a true thing that

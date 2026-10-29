@@ -121,6 +121,16 @@ pub const CLASSIFY_MIN_SNR_DB: f32 = 10.0;
 /// the two populations; this is the middle of it.
 pub const WFM_MIN_BW_HZ: u64 = 50_000;
 
+/// Occupied bandwidth above which the energy at centre is not one signal at all.
+///
+/// Carson's rule for broadcast FM with its widest subcarrier, the 92 kHz SCA:
+/// 2 x (75 + 92) = 334 kHz. No single broadcast reaches past it, and its 99 %
+/// occupied bandwidth sits far inside it (~85 kHz measured). Wider than this,
+/// the carrier window has walked through station after station: on the 40 m
+/// band a 768 kHz slice of SSB, CW and broadcast read as one 657 kHz "clean
+/// WFM signal". That is many signals, and no modulation is named for them.
+pub const WFM_MAX_BW_HZ: u64 = 334_000;
+
 /// Occupied bandwidth at or above which the carrier reads as narrow-band FM rather
 /// than AM. The honest weak point of the heuristic: narrow FM data bursts and AM
 /// voice genuinely overlap here (a 447 MHz data burst measures 6–8 kHz, AM
@@ -137,6 +147,7 @@ pub fn classify(snr_db: f32, occupied_bw_hz: u64) -> Modulation {
         return Modulation::Unknown;
     }
     match occupied_bw_hz {
+        bw if bw > WFM_MAX_BW_HZ => Modulation::Unknown,
         bw if bw >= WFM_MIN_BW_HZ => Modulation::Wfm,
         bw if bw >= NFM_MIN_BW_HZ => Modulation::Nfm,
         _ => Modulation::Am,
@@ -537,6 +548,16 @@ mod tests {
                 acpr_offset_hz(m)
             );
         }
+    }
+
+    /// **Wider than any one broadcast is not one signal**: a band of stations
+    /// walked into one window (657 kHz on 40 m) names no modulation; the widest
+    /// FM broadcast Carson's rule allows still reads as WFM.
+    #[test]
+    fn classify_names_no_modulation_for_a_band_of_stations() {
+        assert_eq!(classify(53.0, 657_000), Modulation::Unknown);
+        assert_eq!(classify(53.0, WFM_MAX_BW_HZ + 1), Modulation::Unknown);
+        assert_eq!(classify(53.0, WFM_MAX_BW_HZ), Modulation::Wfm);
     }
 
     #[test]

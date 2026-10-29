@@ -357,12 +357,23 @@ pub struct PilotMeasure {
 const PILOT_LOCK_PCT: f32 = 4.0;
 /// Below this the line is indistinguishable from baseband content near 19 kHz.
 const PILOT_MARGINAL_PCT: f32 = 1.5;
+/// How far a pilot must stand above the MPX around it, dB, to be a pilot at
+/// all. Broadcast MPX keeps 15 to 23 kHz clear but for the pilot (mono audio
+/// ends at 15, the stereo difference starts at 23), so a real one stands 30
+/// dB and more above that guard band. Wideband noise through the
+/// discriminator fills it evenly, and its strongest bin near 19 kHz sits a
+/// few dB over the rest: on the 40 m band, demodulated as WFM, such noise
+/// read as a pilot at 15 % injection, "stereo".
+const PILOT_CONTRAST_DB: f32 = 10.0;
+/// The guard band either side of the pilot that it is measured against, Hz.
+const PILOT_GUARD_HZ: [(f64, f64); 2] = [(16_000.0, 18_000.0), (20_000.0, 22_000.0)];
 
 /// Measure the pilot from an MPX spectrum.
 ///
 /// Takes the strongest bin within a small neighbourhood of 19 kHz rather than one
 /// exact bin: the pilot rarely lands on a bin centre, and window leakage spreads
-/// it over its neighbours.
+/// it over its neighbours. A line that does not stand [`PILOT_CONTRAST_DB`]
+/// above the guard band around it is no pilot, whatever its level.
 pub fn pilot_measure(mags_hz: &[f32], bin_hz: f64, limit_hz: f32) -> PilotMeasure {
     let absent = PilotMeasure {
         state: PilotState::Absent,
@@ -382,7 +393,23 @@ pub fn pilot_measure(mags_hz: &[f32], bin_hz: f64, limit_hz: f32) -> PilotMeasur
 
     let dev = mags_hz[lo..=hi].iter().copied().fold(0.0f32, f32::max);
     let pct = dev / limit_hz * 100.0;
-    let state = if pct >= PILOT_LOCK_PCT {
+    let mut guard: Vec<f32> = PILOT_GUARD_HZ
+        .iter()
+        .flat_map(|&(from, to)| {
+            let a = (from / bin_hz).ceil() as usize;
+            let b = ((to / bin_hz).floor() as usize).min(mags_hz.len().saturating_sub(1));
+            mags_hz.get(a..=b).unwrap_or(&[]).iter().copied()
+        })
+        .collect();
+    let stands_out = if guard.is_empty() {
+        false
+    } else {
+        let floor = quantile(&mut guard, 0.5);
+        dev > floor * 10f32.powf(PILOT_CONTRAST_DB / 20.0)
+    };
+    let state = if !stands_out {
+        PilotState::Absent
+    } else if pct >= PILOT_LOCK_PCT {
         PilotState::Locked
     } else if pct >= PILOT_MARGINAL_PCT {
         PilotState::Marginal
@@ -1043,6 +1070,68 @@ mod tests {
         let (mut scratch, mut mags) = (Vec::new(), Vec::new());
         mpx_spectrum(&[0.0; 100], &window, fft.as_ref(), &mut scratch, &mut mags);
         assert!(mags.is_empty());
+    }
+
+    /// **Noise is no pilot**: an MPX that wideband noise fills evenly, at a
+    /// level that would read 13 % injection near 19 kHz, has no line standing
+    /// out of the guard band, so no pilot and no stereo; a pilot over the same
+    /// noise floor, standing well out of it, still locks.
+    #[test]
+    fn noise_in_the_mpx_is_no_pilot() {
+        let bin_hz = 160.0;
+        let n = 400;
+        // Noise-like: an even floor with a few dB of bin-to-bin spread.
+        let noise: Vec<f32> = (0..n)
+            .map(|i| 10_000.0 * (1.0 + 0.4 * ((i * 7919 % 13) as f32 / 13.0 - 0.5)))
+            .collect();
+        let p = pilot_measure(&noise, bin_hz, 75_000.0);
+        assert!(
+            p.injection_pct > PILOT_LOCK_PCT,
+            "the level alone would lock: {}",
+            p.injection_pct
+        );
+        assert_eq!(p.state, PilotState::Absent);
+        let mut with_pilot: Vec<f32> = noise.iter().map(|v| v / 50.0).collect();
+        with_pilot[(PILOT_HZ / bin_hz).round() as usize] = 7_500.0;
+        assert_eq!(
+            pilot_measure(&with_pilot, bin_hz, 75_000.0).state,
+            PilotState::Locked
+        );
+    }
+
+    /// The case as it came: complex noise, as a crowded HF band looks to a
+    /// WFM channel, through the discriminator. No pilot.
+    #[test]
+    fn discriminated_noise_is_no_pilot() {
+        let rate = 320_000.0;
+        let mut seed = 0x2545_f491_4f6c_dd1du64;
+        let mut next = || {
+            seed ^= seed << 13;
+            seed ^= seed >> 7;
+            seed ^= seed << 17;
+            (seed >> 11) as f32 / (1u64 << 53) as f32 - 0.5
+        };
+        let iq: Vec<Complex<f32>> = (0..MPX_FFT_SIZE * 2)
+            .map(|_| Complex {
+                re: next(),
+                im: next(),
+            })
+            .collect();
+        let mut inst = Vec::new();
+        fm_discriminate(&iq, rate, &mut inst);
+        let (mags, bin_hz) = mpx_of(&inst, rate);
+        let p = pilot_measure(&mags, bin_hz, 75_000.0);
+        assert!(
+            p.injection_pct > PILOT_LOCK_PCT,
+            "the level alone would lock: {}",
+            p.injection_pct
+        );
+        assert_eq!(
+            p.state,
+            PilotState::Absent,
+            "injection = {}",
+            p.injection_pct
+        );
     }
 
     #[test]

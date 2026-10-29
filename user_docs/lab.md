@@ -476,7 +476,11 @@ walkie-talkie keying up does not get a new diagnosis every time it takes a breat
 **Radio headline.** Peak-to-noise in dB with a status lamp, and the classifier's
 guess at the modulation (`WFM`, `NFM`, `AM`). Green at 20 dB or better, amber down
 to 10, red below that. The guess is told apart by occupied bandwidth, which
-scatters from one burst to the next. A guess shows once it has held for a second,
+scatters from one burst to the next. Wider than any one broadcast can be (334 kHz,
+Carson's rule with the widest subcarrier), there is no guess at all and the verdict
+says `MANY SIGNALS`: on a crowded HF band the measurement walks from one station to
+the next, and a whole band is not a very wide FM transmitter, however much it would
+like to be. A guess shows once it has held for a second,
 a different one has to hold for two to replace it, and the badge stays two seconds
 after the carrier goes.
 
