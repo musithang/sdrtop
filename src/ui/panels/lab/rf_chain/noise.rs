@@ -39,9 +39,12 @@ const STEP_LABEL_W: usize = 5;
 /// filled, rather than leaving a hole. The reason comes from the gain model, so
 /// an RTL-SDR reads "single tuner, no cascade" and a SoapySDR device reads
 /// "chain not modelled": two different facts that used to share one sentence.
+/// On `digital` stages the missing figure is the radio's own, set ahead of
+/// them, and they scale signal and noise alike: the copy says that instead.
 pub(super) fn not_modelled(
     out: &mut Vec<Line<'static>>,
     reason: &str,
+    digital: bool,
     iw: usize,
     theme: &crate::Theme,
 ) {
@@ -52,27 +55,25 @@ pub(super) fn not_modelled(
         Span::styled(reason.to_string(), Style::default().fg(theme.stale)),
     ]));
     out.push(Line::raw(""));
-    out.push(Line::from(vec![
-        Span::raw(" "),
-        Span::styled(
-            "NF and MDS need each stage's own noise figure,".to_string(),
-            Style::default().fg(theme.label),
-        ),
-    ]));
-    out.push(Line::from(vec![
-        Span::raw(" "),
-        Span::styled(
-            "which no driver reports. The levels above are".to_string(),
-            Style::default().fg(theme.label),
-        ),
-    ]));
-    out.push(Line::from(vec![
-        Span::raw(" "),
-        Span::styled(
-            "measured and do not need it.".to_string(),
-            Style::default().fg(theme.label),
-        ),
-    ]));
+    let copy: [&str; 3] = if digital {
+        [
+            "The noise is the radio's, set ahead of these",
+            "digital stages, which scale signal and noise",
+            "alike. No driver reports the radio's own NF.",
+        ]
+    } else {
+        [
+            "NF and MDS need each stage's own noise figure,",
+            "which no driver reports. The levels above are",
+            "measured and do not need it.",
+        ]
+    };
+    for text in copy {
+        out.push(Line::from(vec![
+            Span::raw(" "),
+            Span::styled(text.to_string(), Style::default().fg(theme.label)),
+        ]));
+    }
 }
 
 pub(super) fn noise_figure(

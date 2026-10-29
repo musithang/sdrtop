@@ -23,6 +23,10 @@ use ratatui::{
 /// where the radio has one), so the advice names controls the radio has.
 /// `clipper` is the part that stops the samples before the converter, on a
 /// radio whose ceiling is not the converter's.
+/// `digital` is a radio whose stages are digital gain after the converter:
+/// there they only place the level in the samples, so the advice says that
+/// and promises nothing for the SNR, which the radio's own AGCs set.
+#[allow(clippy::too_many_arguments)]
 fn copy(
     word: &str,
     adc_peak: f64,
@@ -31,6 +35,7 @@ fn copy(
     front: Control<'_>,
     trim: Control<'_>,
     clipper: Option<&crate::hardware::Ceiling>,
+    digital: bool,
 ) -> [String; 3] {
     // "Reduce ATT" could mean either way on an attenuator, so the advice says
     // which: more of it to bring the level down, less to bring it up.
@@ -40,6 +45,11 @@ fn copy(
     } else {
         format!("{} or {}", front.lower(true), trim.lower(false))
     };
+    if digital {
+        if let Some(lines) = placement_copy(word, adc_peak, headroom, front, trim, &lower) {
+            return lines;
+        }
+    }
     let (front, trim_name) = (front, trim.name);
     let (saturating, rail) = match clipper {
         Some(c) => (
@@ -92,6 +102,56 @@ fn copy(
             format!("{snr:.0} dB above the noise floor. SNR set at"),
             "the front end is fully preserved.".to_string(),
         ],
+    }
+}
+
+/// The verdict for digital stages, where the gain only places the level in
+/// the samples; `None` for a word whose copy says nothing about the SNR
+/// already (`HELD`, `CLIPPING`).
+fn placement_copy(
+    word: &str,
+    adc_peak: f64,
+    headroom: f64,
+    front: Control<'_>,
+    trim: Control<'_>,
+    lower: &str,
+) -> Option<[String; 3]> {
+    let raise = if front.attenuates == trim.attenuates {
+        let verb = if front.attenuates { "less" } else { "more" };
+        format!("{verb} {} or {}", front.name, trim.name)
+    } else {
+        let one =
+            |c: Control<'_>| format!("{} {}", if c.attenuates { "less" } else { "more" }, c.name);
+        format!("{} or {}", one(front), one(trim))
+    };
+    let head = format!("Signal at {adc_peak:.0} dBFS \u{2014} {headroom:.0} dB headroom,");
+    Some(match word {
+        "UNDER-UTILISED" | "WEAK" => [
+            head,
+            format!("low in the word: {raise} lifts it;"),
+            "the radio's AGCs set the SNR, not these.".to_string(),
+        ],
+        "HOT" => [
+            format!("Signal at {adc_peak:.0} dBFS \u{2014} {headroom:.0} dB from the hold."),
+            "Near it the radio cuts its own gain:".to_string(),
+            format!("{lower} keeps it clear."),
+        ],
+        "WELL-STAGED" => [
+            head,
+            "well placed. ATT and LNA place it in the".to_string(),
+            "word only; the radio's AGCs set the SNR.".to_string(),
+        ],
+        _ => return None,
+    })
+}
+
+/// The verdict word as shown: on digital stages a placement, not a staging
+/// of the front end.
+fn shown_word(word: &str, digital: bool) -> &str {
+    match (word, digital) {
+        ("WELL-STAGED", true) => "WELL PLACED",
+        ("UNDER-UTILISED" | "WEAK", true) => "LOW IN THE WORD",
+        _ => word,
     }
 }
 
@@ -148,6 +208,8 @@ pub(super) struct Verdict<'a> {
     /// Whether the front stage and the second are attenuators.
     pub front_attenuates: bool,
     pub second_attenuates: bool,
+    /// Whether the stages are digital gain after the converter.
+    pub digital: bool,
 }
 
 pub(super) fn draw(out: &mut Vec<Line<'static>>, v: &Verdict<'_>, theme: &crate::Theme) {
@@ -167,7 +229,11 @@ pub(super) fn draw(out: &mut Vec<Line<'static>>, v: &Verdict<'_>, theme: &crate:
     out.push(Line::from(vec![
         Span::raw(" "),
         Span::styled(
-            format!("{title_mark} GAIN {}", v.word),
+            format!(
+                "{title_mark} {} {}",
+                if v.digital { "LEVEL" } else { "GAIN" },
+                shown_word(v.word, v.digital)
+            ),
             Style::default().fg(v.sev_col).add_modifier(Modifier::BOLD),
         ),
     ]));
@@ -182,7 +248,9 @@ pub(super) fn draw(out: &mut Vec<Line<'static>>, v: &Verdict<'_>, theme: &crate:
         },
         None => front,
     };
-    for line in copy(v.word, v.adc_peak, headroom, v.snr, front, trim, v.clipper) {
+    for line in copy(
+        v.word, v.adc_peak, headroom, v.snr, front, trim, v.clipper, v.digital,
+    ) {
         out.push(Line::from(vec![Span::raw(" "), Span::styled(line, lbl)]));
     }
 
@@ -210,15 +278,29 @@ pub(super) fn draw(out: &mut Vec<Line<'static>>, v: &Verdict<'_>, theme: &crate:
         chips.push(chip(&format!("[ ] {second}"), false));
     }
     out.push(Line::from(chips));
-    let limited = if v.adc_rms > -50.0 {
+    // Behind digital stages the noise is the radio's, set before the gain
+    // the keys move; which kind limits it is not seen from here.
+    let limited = if v.digital {
+        "SNR set in the radio"
+    } else if v.adc_rms > -50.0 {
         "analog-noise limited"
     } else {
         "quantisation limited"
     };
-    // The boost by its own name, and nothing where the radio has none.
+    // The boost by its own name, and nothing where the radio has none. On
+    // digital stages the radio's AGCs are always on, and the switch only
+    // says who sets the front stage.
     let boost_txt = v.boost.as_deref().map(|name| {
-        let state = if v.amp { "on" } else { "bypass" };
-        format!("{name} {state} \u{00b7} ")
+        if v.digital {
+            if v.amp {
+                format!("{name} sets {} \u{00b7} ", v.front)
+            } else {
+                format!("{} by hand \u{00b7} ", v.front)
+            }
+        } else {
+            let state = if v.amp { "on" } else { "bypass" };
+            format!("{name} {state} \u{00b7} ")
+        }
     });
     let ag_txt = if v.tracking {
         "auto-gain \u{2713} tracking"
@@ -268,6 +350,7 @@ mod tests {
             Control::gain("LNA"),
             Control::gain("VGA"),
             None,
+            false,
         );
         for w in &words {
             if *w == "WELL-STAGED" {
@@ -281,7 +364,8 @@ mod tests {
                     40.0,
                     Control::gain("LNA"),
                     Control::gain("VGA"),
-                    None
+                    None,
+                    false
                 ),
                 well_staged,
                 "{w} has no copy of its own and falls through to WELL-STAGED"
@@ -309,6 +393,7 @@ mod tests {
                 Control::gain("LNA"),
                 Control::gain("VGA"),
                 None,
+                false,
             );
             assert!(c[0].contains("-3 dBFS"), "{w}: {:?}", c[0]);
         }
@@ -324,7 +409,8 @@ mod tests {
                 40.0,
                 Control::gain("LNA"),
                 Control::gain("VGA"),
-                None
+                None,
+                false
             ),
             copy(
                 "WELL-STAGED",
@@ -333,7 +419,8 @@ mod tests {
                 40.0,
                 Control::gain("LNA"),
                 Control::gain("VGA"),
-                None
+                None,
+                false
             )
         );
     }

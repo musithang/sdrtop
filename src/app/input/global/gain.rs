@@ -544,13 +544,29 @@ pub(super) fn toggle_boost(ctx: &mut InputCtx<'_>) {
             m.radio.amp_enabled = new_state;
             m.lab.rf_autotrack = false;
             m.ui.note_mode_action(RailMode::Bench);
-            m.push_log(format!(
-                "{} {}",
-                label,
-                if new_state { "ON" } else { "OFF" }
-            ));
+            m.push_log(boost_line(&gm, new_state));
         }
         Err(e) => m.push_log(format!("{} error: {}", label, e)),
+    }
+}
+
+/// What the boost key logs. On digital stages the radio's AGCs are always on
+/// and the switch only says who sets the stage they govern, so the line says
+/// that rather than "ON" for a control that adds nothing.
+fn boost_line(gm: &crate::hardware::GainModel, on: bool) -> String {
+    let label = gm.boost_label();
+    let governed = gm
+        .stages()
+        .iter()
+        .enumerate()
+        .find(|&(i, _)| gm.auto_governs(i))
+        .map(|(_, s)| s.name.clone());
+    match (gm.stages_are_digital(), governed) {
+        (true, Some(stage)) if on => {
+            format!("{label} ON: the radio sets {stage}; its AGCs are always on")
+        }
+        (true, Some(stage)) => format!("{label} OFF: {stage} by hand"),
+        _ => format!("{label} {}", if on { "ON" } else { "OFF" }),
     }
 }
 
@@ -559,6 +575,20 @@ mod tests {
     use super::*;
 
     use crate::hardware::native::{hackrf, rtlsdr};
+
+    /// On the HF+ the boost key says who sets ATT, the radio's AGCs being
+    /// always on; elsewhere it says ON and OFF as it always has.
+    #[test]
+    fn the_boost_line_says_what_the_switch_does() {
+        let hf = crate::hardware::native::airspyhf::gain_model();
+        assert_eq!(
+            boost_line(&hf, true),
+            "AGC ON: the radio sets ATT; its AGCs are always on"
+        );
+        assert_eq!(boost_line(&hf, false), "AGC OFF: ATT by hand");
+        assert_eq!(boost_line(&hackrf::gain_model(), true), "AMP ON");
+        assert_eq!(boost_line(&rtl(&[0, 9]), false), "AGC OFF");
+    }
 
     fn rtl(steps: &[u32]) -> GainModel {
         rtlsdr::gain_model(steps)

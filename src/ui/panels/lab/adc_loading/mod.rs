@@ -49,9 +49,15 @@ impl Panel for AdcLoadingPanel {
     }
 
     fn chrome(&self, state: &SdrMetrics) -> PanelChrome {
-        PanelChrome::new("ADC Loading")
-            .stale_when(Staleness::NotStreaming)
-            .tag_if(state.lab.rf_freeze.is_some(), Tag::Frozen)
+        // Behind digital gain the samples are the word it produces, not what
+        // the converter saw: the panel is named for what it reads.
+        PanelChrome::new(if state.caps.gain.stages_are_digital() {
+            "Word Loading"
+        } else {
+            "ADC Loading"
+        })
+        .stale_when(Staleness::NotStreaming)
+        .tag_if(state.lab.rf_freeze.is_some(), Tag::Frozen)
     }
 
     fn render(
@@ -295,6 +301,11 @@ mod tests {
         );
         let at = draw(-13.6);
         assert!(at.contains("HELD  at the digital AGC's hold"), "{at}");
+        // Behind digital gain the panel reads the word, and says so.
+        assert!(
+            weak.contains("Word Loading") && !weak.contains("ADC Loading"),
+            "{weak}"
+        );
         let held = draw(-11.0);
         assert!(
             held.contains("HELD  3 dB past the digital AGC's hold"),

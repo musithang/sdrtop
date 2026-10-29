@@ -181,6 +181,7 @@ fn level_text(dbm: f64) -> String {
 /// answer. It used to be exactly two bars, labelled LNA and VGA and measured
 /// against 40 and 62: correct on a HackRF and wrong on anything else, including
 /// a HackRF reached through SoapySDR, whose stage list is the driver's.
+#[allow(clippy::too_many_arguments)]
 pub(super) fn staging(
     out: &mut Vec<Line<'static>>,
     stages: &[StageSpec],
@@ -189,6 +190,9 @@ pub(super) fn staging(
     // measured here, or one the tuner AGC is setting.
     targets: Option<&[f64]>,
     readings: &[Option<StageReading>],
+    // Digital stages after the converter: the target places the level in
+    // the samples, it is not a staging of the front end.
+    digital: bool,
     iw: usize,
     theme: &crate::Theme,
 ) {
@@ -201,7 +205,11 @@ pub(super) fn staging(
     let bw = bar_width(iw, label_w, VALW);
     out.push(section(
         "Gain staging",
-        "\u{2502} = optimal target",
+        if digital {
+            "\u{2502} = target in the word"
+        } else {
+            "\u{2502} = optimal target"
+        },
         iw,
         theme,
     ));

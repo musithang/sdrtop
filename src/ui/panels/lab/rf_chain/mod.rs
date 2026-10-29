@@ -182,6 +182,7 @@ impl Panel for RfChainPanel {
             &state.radio.gains,
             targets.as_deref(),
             &readings,
+            state.caps.gain.stages_are_digital(),
             iw,
             theme,
         );
@@ -191,7 +192,13 @@ impl Panel for RfChainPanel {
             lines.push(Line::raw(""));
             noise::sensitivity(&mut lines, state, nf, iw, theme);
         } else {
-            noise::not_modelled(&mut lines, state.caps.gain.no_cascade_reason(), iw, theme);
+            noise::not_modelled(
+                &mut lines,
+                state.caps.gain.no_cascade_reason(),
+                state.caps.gain.stages_are_digital(),
+                iw,
+                theme,
+            );
         }
         lines.push(Line::raw(""));
         // Running or finished, never both: the progress block is the same
@@ -252,6 +259,7 @@ impl Panel for RfChainPanel {
                     .stages()
                     .get(1)
                     .is_some_and(|s| s.max_db <= 0.0),
+                digital: state.caps.gain.stages_are_digital(),
             },
             theme,
         );
@@ -298,7 +306,7 @@ mod tests {
         let mut m = SdrMetrics::fixture().streaming().airspyhf();
         m.signal.adc_peak_dbfs = -11.6;
         let out = draw(RfChainPanel, 70, 60, &m).join("\n");
-        assert!(out.contains("GAIN HELD"), "{out}");
+        assert!(out.contains("LEVEL HELD"), "{out}");
         assert!(out.contains("the digital AGC holding it there."), "{out}");
         assert!(
             out.contains("past it the level is not the antenna's."),
@@ -308,13 +316,13 @@ mod tests {
         m.signal.adc_peak_dbfs = -16.0;
         let hf = draw(RfChainPanel, 70, 60, &m).join("\n");
         assert!(
-            hf.contains("GAIN HOT") || hf.contains("GAIN WELL-STAGED"),
+            hf.contains("LEVEL HOT") || hf.contains("LEVEL WELL PLACED"),
             "{hf}"
         );
         m.radio.frequency = 100_000_000;
         m.signal.adc_peak_dbfs = -13.0;
         let vhf = draw(RfChainPanel, 70, 60, &m).join("\n");
-        assert!(vhf.contains("GAIN HELD"), "{vhf}");
+        assert!(vhf.contains("LEVEL HELD"), "{vhf}");
     }
 
     /// **The HF+'s lineup starts at its converter**: ATT and LNA are digital
@@ -375,7 +383,7 @@ mod tests {
         m.signal.adc_peak_dbfs = -16.4;
         let rf = draw(RfChainPanel, 70, 60, &m).join("\n");
         assert!(
-            rf.contains("Signal at -16 dBFS \u{2014} 2 dB from the digital AGC's hold."),
+            rf.contains("Signal at -16 dBFS \u{2014} 2 dB from the hold."),
             "{rf}"
         );
         let adc = draw(
@@ -394,11 +402,27 @@ mod tests {
     /// ATT, never "increase" or "reduce" it; a gain chain keeps its words.
     #[test]
     fn an_attenuator_is_asked_for_more_or_less() {
+        // An attenuator ahead of the converter, then a gain stage: the HF+'s
+        // names, without its digital flag, which has copy of its own.
         let mut m = SdrMetrics::fixture().streaming().airspyhf();
+        let mut caps = (*m.caps).clone();
+        caps.gain = crate::hardware::GainModel::new(
+            vec![
+                crate::hardware::StageSpec::tabled(
+                    "ATT",
+                    (0..=8).map(|i| f64::from(i) * 6.0 - 48.0).collect(),
+                ),
+                crate::hardware::StageSpec::tabled("LNA", vec![0.0, 6.0]),
+            ],
+            "ATT",
+            "ATT",
+        )
+        .with_second_stage();
+        m.caps = std::sync::Arc::new(caps);
         for (peak, want) in [
-            (-11.0, "More ATT or reduce LNA to bring it under the hold:"),
-            (-36.0, "ADC window under-used. Less ATT"),
-            (-50.0, "Less ATT; at 0 dB, check the antenna"),
+            (-0.5, "More ATT or reduce LNA to restore headroom."),
+            (-24.0, "ADC window under-used. Less ATT"),
+            (-40.0, "Less ATT; at 0 dB, check the antenna"),
         ] {
             m.signal.adc_peak_dbfs = peak;
             let out = draw(RfChainPanel, 70, 60, &m).join("\n");
@@ -415,6 +439,74 @@ mod tests {
             out.contains("Increase LNA; if maxed, check the antenna"),
             "{out}"
         );
+    }
+
+    /// **On digital stages the advice is placement only**: the HF+'s ATT and
+    /// LNA place the level in the word and promise nothing for the SNR, which
+    /// the radio's AGCs set; the words say `LEVEL`, not `GAIN`, and the AGC
+    /// switch says who sets ATT.
+    #[test]
+    fn on_digital_stages_the_advice_is_placement_only() {
+        let mut m = SdrMetrics::fixture().streaming().airspyhf();
+        for (peak, want) in [
+            (
+                -22.0,
+                [
+                    "LEVEL WELL PLACED",
+                    "well placed. ATT and LNA place it in the",
+                    "word only; the radio's AGCs set the SNR.",
+                ],
+            ),
+            (
+                -36.0,
+                [
+                    "LEVEL LOW IN THE WORD",
+                    "low in the word: less ATT or more LNA lifts it;",
+                    "the radio's AGCs set the SNR, not these.",
+                ],
+            ),
+            (
+                -50.0,
+                [
+                    "LEVEL LOW IN THE WORD",
+                    "less ATT or more LNA lifts it;",
+                    "not these.",
+                ],
+            ),
+            (
+                -15.0,
+                [
+                    "LEVEL HOT",
+                    "Near it the radio cuts its own gain:",
+                    "More ATT or reduce LNA keeps it clear.",
+                ],
+            ),
+        ] {
+            m.signal.adc_peak_dbfs = peak;
+            let out = draw(RfChainPanel, 70, 60, &m).join("\n");
+            for w in want {
+                assert!(out.contains(w), "{w:?} at {peak} in\n{out}");
+            }
+            for never in [
+                "check the antenna",
+                "each stage's own noise figure",
+                "analog-noise",
+                "quantisation limited",
+                "GAIN WELL",
+                "GAIN WEAK",
+                "GAIN HOT",
+                "GAIN UNDER",
+            ] {
+                assert!(!out.contains(never), "{never:?} at {peak} in\n{out}");
+            }
+            assert!(
+                out.contains("SNR set in the radio") && out.contains("ATT by hand"),
+                "{out}"
+            );
+        }
+        m.radio.amp_enabled = true;
+        let out = draw(RfChainPanel, 70, 60, &m).join("\n");
+        assert!(out.contains("AGC sets ATT"), "{out}");
     }
 
     /// **A stage's gain reads as the same figure on every panel**: rounded,

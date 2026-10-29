@@ -144,6 +144,17 @@ replaced by one line saying which fact is missing and why, and the rest of the
 bench, which is measured rather than modelled, stays exactly as it is. The bench
 used to go blank instead: three lines on a twenty row panel.
 
+**Some radios' gain knobs are not in the front end at all.** On the Airspy HF+
+the `ATT` and `LNA` keys set digital gain after the converter, behind the radio's
+own RF, IF and digital AGCs, which are always on (Airspy's account, and every
+measurement sdrtop made agrees). There the chain reads `ANT▸AGC▸ADC▸ATT▸LNA▸word`,
+the lineup starts at the converter and ends at the word the samples are, the ADC
+bench is called Word Loading because that is what it reads, and the verdict speaks
+of where the level sits (`WELL PLACED`, `LOW IN THE WORD`, `HOT`, `HELD`), never of
+signal-to-noise, which the radio settles before these knobs touch anything. The
+noise step is refused there: digital gain moves the floor exactly as far as the
+signal, and a measurement that can only ever say "6 dB" is not one.
+
 ### Gain-Staging Level Diagram
 
 The lineup drawn as a picture. The chain itself is the x-axis, `ANT ─┤LNA├─┤MIX├─┤VGA├─▶ ADC`,

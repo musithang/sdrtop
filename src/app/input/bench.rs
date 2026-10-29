@@ -277,7 +277,7 @@ pub(super) fn rf_chain(key: KeyEvent, ctx: &mut InputCtx<'_>) -> KeyAction {
         // settings and watch what each step does to the noise floor. Pressing it
         // again during a run stops it and puts the stage back.
         KeyCode::Char('k') => {
-            let (running, stages, current, streaming, tuned) = {
+            let (running, stages, current, streaming, tuned, digital) = {
                 let m = metrics(state);
                 (
                     m.lab.noise_sweep.is_some(),
@@ -285,6 +285,7 @@ pub(super) fn rf_chain(key: KeyEvent, ctx: &mut InputCtx<'_>) -> KeyAction {
                     m.radio.gains.clone(),
                     m.radio.hw_streaming,
                     m.radio.frequency,
+                    m.caps.gain.stages_are_digital(),
                 )
             };
             if running {
@@ -307,6 +308,16 @@ pub(super) fn rf_chain(key: KeyEvent, ctx: &mut InputCtx<'_>) -> KeyAction {
                     .push_log("Noise sweep: this device reports no gain stages".to_string());
                 return KeyAction::Continue;
             };
+            // Digital gain after the converter scales the floor exactly as it
+            // scales the signal, so stepping it says nothing of a front end.
+            if digital {
+                metrics(state).push_log(format!(
+                    "Noise sweep: {} is digital gain after the converter, which moves the \
+                     floor exactly as much as the signal; there is no front end to measure here",
+                    spec.name
+                ));
+                return KeyAction::Continue;
+            }
             if let Some(why) = crate::signal::noise_slope::refusal(spec, tuned) {
                 metrics(state).push_log(format!("Noise sweep: {why}"));
                 return KeyAction::Continue;
@@ -481,5 +492,31 @@ mod tests {
         metrics(&state).radio.lo_offset_hz = 0;
         press_on_iq_bench(&state, 'c');
         assert!(metrics(&state).iq.cal.cal_pending, "captures at the centre");
+    }
+
+    /// **The noise step is refused on digital stages**: stepping digital gain
+    /// after the converter moves the floor exactly as much as the signal, so
+    /// it measures no front end; no sweep is started.
+    #[test]
+    fn the_noise_step_is_refused_on_digital_stages() {
+        let state = Arc::new(Mutex::new(SdrMetrics::fixture().streaming().airspyhf()));
+        let mut engine = LayoutEngine::new(LayoutConfig::default_config(), PanelRegistry::new());
+        let mut show_footer = true;
+        let focus_keys = HashMap::new();
+        let mut ctx = InputCtx {
+            state: &state,
+            device: None,
+            engine: &mut engine,
+            show_footer: &mut show_footer,
+            focus_keys: &focus_keys,
+        };
+        super::rf_chain(KeyEvent::from(KeyCode::Char('k')), &mut ctx);
+        let m = metrics(&state);
+        assert!(m.lab.noise_sweep.is_none(), "no sweep started");
+        let log = &m.ui.log.back().unwrap().text;
+        assert!(
+            log.starts_with("Noise sweep: ATT is digital gain after the converter"),
+            "{log}"
+        );
     }
 }
