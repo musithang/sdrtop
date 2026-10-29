@@ -188,7 +188,10 @@ pub(super) fn track_gain(
     }
 
     // Along the knob's curve when it walks one, as the arrows would.
-    let targets = crate::ui::rf_calc::staging_target_on(adc_peak_dbfs as f64, &gm, curve, &current);
+    // From a peak at the ceiling the level is unknown: the least gain, and
+    // the next poll, back under it, tracks from a figure that means something.
+    let (targets, _) =
+        crate::ui::rf_calc::auto_gain_target(adc_peak_dbfs as f64, &gm, curve, &current);
     // The total, not the arrangement: see the note in `input/bench.rs`.
     let now_total: f64 = current.iter().take(stages.len()).sum();
     let want_total: f64 = targets.iter().sum();

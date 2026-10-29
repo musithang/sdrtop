@@ -214,7 +214,7 @@ pub(super) fn mode_card_lines(
             let streaming = state.radio.hw_streaming;
             // Against this radio's ceiling: where a clip happens.
             let headroom = if streaming {
-                (-state.peak_to_ceiling_db()).max(0.0)
+                state.shown_headroom_db().max(0.0) as f32
             } else {
                 f32::NAN
             };

@@ -28,10 +28,19 @@ fn copy(
     adc_peak: f64,
     headroom: f64,
     snr: f64,
-    front: &str,
-    trim: &str,
+    front: Control<'_>,
+    trim: Control<'_>,
     clipper: Option<&crate::hardware::Ceiling>,
 ) -> [String; 3] {
+    // "Reduce ATT" could mean either way on an attenuator, so the advice says
+    // which: more of it to bring the level down, less to bring it up.
+    let lower = if front.attenuates == trim.attenuates {
+        let verb = if front.attenuates { "More" } else { "Reduce" };
+        format!("{verb} {} or {}", front.name, trim.name)
+    } else {
+        format!("{} or {}", front.lower(true), trim.lower(false))
+    };
+    let (front, trim_name) = (front, trim.name);
     let (saturating, rail) = match clipper {
         Some(c) => (
             format!("the {} clipping, before the ADC", c.part),
@@ -46,27 +55,35 @@ fn copy(
     match word {
         "HELD" => [
             format!("Signal at {adc_peak:.0} dBFS \u{2014} the {holder} holding it there."),
-            format!("Reduce {front} or {trim} to bring it under the hold:"),
+            format!("{lower} to bring it under the hold:"),
             "past it the level is not the antenna's.".to_string(),
         ],
         "CLIPPING" => [
             format!("Signal at {adc_peak:.0} dBFS \u{2014} {saturating}."),
-            format!("Reduce {front} or {trim} to restore headroom."),
+            format!("{lower} to restore headroom."),
             "SNR is lost wherever the signal clips.".to_string(),
         ],
         "HOT" => [
             format!("Signal at {adc_peak:.0} dBFS \u{2014} {headroom:.0} dB from {rail}."),
             "SNR intact but peaks may saturate.".to_string(),
-            format!("Trim {trim} by 2\u{2013}4 dB to add margin."),
+            format!("Trim {trim_name} by 2\u{2013}4 dB to add margin."),
         ],
         "UNDER-UTILISED" => [
             format!("Signal at {adc_peak:.0} dBFS \u{2014} {headroom:.0} dB headroom,"),
-            format!("ADC window under-used. Increase {front} gain"),
+            if front.attenuates {
+                format!("ADC window under-used. Less {}", front.name)
+            } else {
+                format!("ADC window under-used. Increase {} gain", front.name)
+            },
             "to lift the signal into the optimal zone.".to_string(),
         ],
         "WEAK" => [
             format!("Signal at {adc_peak:.0} dBFS \u{2014} ADC severely under-driven."),
-            format!("Increase {front}; if maxed, check the antenna"),
+            if front.attenuates {
+                format!("Less {}; at 0 dB, check the antenna", front.name)
+            } else {
+                format!("Increase {}; if maxed, check the antenna", front.name)
+            },
             "or reduce the system noise figure.".to_string(),
         ],
         _ => [
@@ -75,6 +92,37 @@ fn copy(
             format!("{snr:.0} dB above the noise floor. SNR set at"),
             "the front end is fully preserved.".to_string(),
         ],
+    }
+}
+
+/// A gain control the advice names: its name, and whether it is an
+/// attenuator (every setting at or under 0 dB), where "more" is less level.
+#[derive(Clone, Copy)]
+pub(super) struct Control<'a> {
+    pub name: &'a str,
+    pub attenuates: bool,
+}
+
+impl<'a> Control<'a> {
+    /// A control that adds gain.
+    #[cfg(test)]
+    fn gain(name: &'a str) -> Self {
+        Self {
+            name,
+            attenuates: false,
+        }
+    }
+
+    /// The words that take the level down with it: "more ATT", "reduce LNA",
+    /// capitalised to start a sentence.
+    fn lower(self, first: bool) -> String {
+        let verb = match (self.attenuates, first) {
+            (true, true) => "More",
+            (true, false) => "more",
+            (false, true) => "Reduce",
+            (false, false) => "reduce",
+        };
+        format!("{verb} {}", self.name)
     }
 }
 
@@ -97,12 +145,17 @@ pub(super) struct Verdict<'a> {
     pub front: String,
     pub second: Option<String>,
     pub boost: Option<String>,
+    /// Whether the front stage and the second are attenuators.
+    pub front_attenuates: bool,
+    pub second_attenuates: bool,
 }
 
 pub(super) fn draw(out: &mut Vec<Line<'static>>, v: &Verdict<'_>, theme: &crate::Theme) {
     let dim = theme.border_dim;
     let lbl = Style::default().fg(theme.label);
-    let headroom = v.ceiling - v.adc_peak;
+    // As every other panel shows it, so the figure equals the difference of
+    // the two levels printed beside it.
+    let headroom = crate::ui::rf_calc::shown_headroom_db(v.ceiling, v.adc_peak);
 
     let title_mark = if v.sev == 0 {
         "\u{2713}"
@@ -118,10 +171,18 @@ pub(super) fn draw(out: &mut Vec<Line<'static>>, v: &Verdict<'_>, theme: &crate:
             Style::default().fg(v.sev_col).add_modifier(Modifier::BOLD),
         ),
     ]));
-    let trim = v.second.as_deref().unwrap_or(&v.front);
-    for line in copy(
-        v.word, v.adc_peak, headroom, v.snr, &v.front, trim, v.clipper,
-    ) {
+    let front = Control {
+        name: &v.front,
+        attenuates: v.front_attenuates,
+    };
+    let trim = match v.second.as_deref() {
+        Some(name) => Control {
+            name,
+            attenuates: v.second_attenuates,
+        },
+        None => front,
+    };
+    for line in copy(v.word, v.adc_peak, headroom, v.snr, front, trim, v.clipper) {
         out.push(Line::from(vec![Span::raw(" "), Span::styled(line, lbl)]));
     }
 
@@ -199,13 +260,29 @@ mod tests {
             words.len() >= 4,
             "expected several distinct verdicts, got {words:?}"
         );
-        let well_staged = copy("WELL-STAGED", -8.0, 8.0, 40.0, "LNA", "VGA", None);
+        let well_staged = copy(
+            "WELL-STAGED",
+            -8.0,
+            8.0,
+            40.0,
+            Control::gain("LNA"),
+            Control::gain("VGA"),
+            None,
+        );
         for w in &words {
             if *w == "WELL-STAGED" {
                 continue;
             }
             assert_ne!(
-                copy(w, -8.0, 8.0, 40.0, "LNA", "VGA", None),
+                copy(
+                    w,
+                    -8.0,
+                    8.0,
+                    40.0,
+                    Control::gain("LNA"),
+                    Control::gain("VGA"),
+                    None
+                ),
                 well_staged,
                 "{w} has no copy of its own and falls through to WELL-STAGED"
             );
@@ -224,7 +301,15 @@ mod tests {
             "WEAK",
             "WELL-STAGED",
         ] {
-            let c = copy(w, -3.0, 3.0, 22.0, "LNA", "VGA", None);
+            let c = copy(
+                w,
+                -3.0,
+                3.0,
+                22.0,
+                Control::gain("LNA"),
+                Control::gain("VGA"),
+                None,
+            );
             assert!(c[0].contains("-3 dBFS"), "{w}: {:?}", c[0]);
         }
     }
@@ -232,8 +317,24 @@ mod tests {
     #[test]
     fn an_unknown_verdict_reads_as_well_staged_rather_than_panicking() {
         assert_eq!(
-            copy("SOMETHING NEW", -8.0, 8.0, 40.0, "LNA", "VGA", None),
-            copy("WELL-STAGED", -8.0, 8.0, 40.0, "LNA", "VGA", None)
+            copy(
+                "SOMETHING NEW",
+                -8.0,
+                8.0,
+                40.0,
+                Control::gain("LNA"),
+                Control::gain("VGA"),
+                None
+            ),
+            copy(
+                "WELL-STAGED",
+                -8.0,
+                8.0,
+                40.0,
+                Control::gain("LNA"),
+                Control::gain("VGA"),
+                None
+            )
         );
     }
 }

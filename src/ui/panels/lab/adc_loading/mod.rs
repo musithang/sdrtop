@@ -132,7 +132,7 @@ impl Panel for AdcLoadingPanel {
         lines.push(Line::raw(""));
         readouts::loading(&mut lines, &load, ceiling, part, verdict, sev_col, theme);
         if let Some(part) = part {
-            readouts::ceiling(&mut lines, ceiling, part, theme);
+            readouts::ceiling(&mut lines, &state.ceiling_text(), part, theme);
         }
         // The quantisation ceiling on that card follows the device, but its
         // IIP3, IMD3 and SFDR figures are a specific front end's datasheet
@@ -269,8 +269,9 @@ mod tests {
     }
 
     /// **The HF+'s ceiling is a hold, not a clip**: its digital AGC turns
-    /// its own gain down there, so the bench measures headroom to it, calls
-    /// a peak there held, and says the gain it cuts is not reported.
+    /// its own gain down from the lower edge of its measured span, so the
+    /// bench measures headroom to that edge, calls a peak past it held, and
+    /// writes the span and that the gain it cuts is not seen.
     #[test]
     fn the_hf_plus_bench_measures_to_the_digital_agcs_hold() {
         let draw = |peak: f32| {
@@ -282,9 +283,9 @@ mod tests {
         };
         let weak = draw(-36.0);
         for want in [
-            "UNDER-UTILISED  24 dB under the digital AGC's hold",
+            "UNDER-UTILISED  22 dB under the digital AGC's hold",
             "\u{250a} where it holds",
-            "digital AGC holds peaks at -12 dBFS: gain cut unreported",
+            "digital AGC holds peaks -14 to -12 dBFS: gain cut unseen",
         ] {
             assert!(weak.contains(want), "{want:?} in\n{weak}");
         }
@@ -292,9 +293,11 @@ mod tests {
             !weak.contains("where it clips") && !weak.contains("clips at"),
             "{weak}"
         );
+        let at = draw(-13.6);
+        assert!(at.contains("HELD  at the digital AGC's hold"), "{at}");
         let held = draw(-11.0);
         assert!(
-            held.contains("HELD  1 dB past the digital AGC's hold"),
+            held.contains("HELD  3 dB past the digital AGC's hold"),
             "{held}"
         );
     }

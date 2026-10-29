@@ -63,6 +63,25 @@ impl SweepConfig {
     pub fn position_hz(&self, i: usize, sample_rate: f64) -> u64 {
         self.start_hz + self.effective_step_hz(sample_rate) * i as u64
     }
+
+    /// The positions the radio tunes, each with its index, in order.
+    ///
+    /// A position outside the radio's reach, or in a gap between its bands,
+    /// is left out rather than moved to the nearest edge: a reading taken at
+    /// the edge and drawn at the position would be a reading of a frequency
+    /// that was never tuned. A range saved on another radio (400-500 MHz on
+    /// one that stops at 260) used to be swept as one edge, 145 times. The
+    /// curve keeps the hole; a range with no position left is refused.
+    pub fn tuned_positions(
+        &self,
+        sample_rate: f64,
+        caps: &crate::hardware::DeviceCapabilities,
+    ) -> Vec<(usize, u64)> {
+        (0..self.positions_total(sample_rate))
+            .map(|i| (i, self.position_hz(i, sample_rate)))
+            .filter(|&(_, hz)| caps.tunes(hz))
+            .collect()
+    }
 }
 
 /// One completed sweep cycle: a stitched curve of bin center frequencies and the
@@ -438,5 +457,38 @@ mod tests {
         let second = sw.end(first.tune_hz);
         assert_eq!(second.tune_hz, 145_500_000);
         assert!(!second.jumped);
+    }
+
+    /// **A position the radio does not tune is left out**, never moved to
+    /// the nearest edge: a range saved on another radio has none left on an
+    /// HF+ and is refused; one across its 31-60 MHz gap keeps a hole; on a
+    /// radio that tunes it all, every position stays.
+    #[test]
+    fn only_the_positions_the_radio_tunes_are_swept() {
+        let hf = crate::hardware::native::airspyhf::observer_caps();
+        let far = SweepConfig::default();
+        assert!(
+            far.tuned_positions(768e3, &hf).is_empty(),
+            "400-500 MHz on a radio to 260"
+        );
+        let across = SweepConfig {
+            start_hz: 25_000_000,
+            stop_hz: 70_000_000,
+            ..SweepConfig::default()
+        };
+        let tuned = across.tuned_positions(768e3, &hf);
+        assert!(!tuned.is_empty());
+        assert!(tuned.iter().all(|&(_, hz)| hf.tunes(hz)));
+        assert!(
+            tuned.len() < across.positions_total(768e3),
+            "the gap left out"
+        );
+        assert!(tuned.iter().any(|&(_, hz)| hz < 31_000_000));
+        assert!(tuned.iter().any(|&(_, hz)| hz >= 60_000_000));
+        let hackrf = crate::hardware::native::hackrf::caps();
+        assert_eq!(
+            far.tuned_positions(10e6, &hackrf).len(),
+            far.positions_total(10e6)
+        );
     }
 }

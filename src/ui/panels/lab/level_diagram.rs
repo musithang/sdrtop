@@ -509,7 +509,7 @@ fn diagram(
             }
         }
     };
-    let headroom = ceiling - c.adc_peak;
+    let headroom = crate::ui::rf_calc::shown_headroom_db(ceiling, c.adc_peak);
     span(
         &mut g,
         ceil_row,
@@ -744,7 +744,7 @@ mod tests {
             .airspyhf();
         m.signal.adc_peak_dbfs = -30.0;
         let wide = draw(&m, 73, 26);
-        assert!(wide.contains("\u{252c} hold -12"), "{wide}");
+        assert!(wide.contains("\u{252c} hold -14"), "{wide}");
         assert!(wide.contains("\u{2508} hold, digital AGC"), "{wide}");
         // A gap of three figures is given as its number, not cut mid-word.
         if let Some(fr) = m.waterfall.last_fft.as_mut() {

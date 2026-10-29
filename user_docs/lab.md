@@ -84,8 +84,10 @@ far the image sits under the carrier, where the image scope can say (a dash wher
 it cannot). The clip ceiling is 0 dBFS on most radios; one whose tuner clips
 before its converter shows that lower figure and names the part, and headroom
 counts from there. A radio whose own AGC holds the level below full scale (the
-Airspy HF+'s digital AGC does) shows `HOLD` instead of `CLIP`, and a peak that
-reaches it reads `HELD`: nothing was lost, the radio quietly turned its own gain
+Airspy HF+'s digital AGC does) shows `HOLD` instead of `CLIP`, as a span
+(`-14 to -12`) where the radio holds at different levels depending on what came
+before, with headroom counted to the lower one, and a peak that reaches it reads
+`HELD`: nothing was lost, the radio quietly turned its own gain
 down, and from there on the level is no longer the antenna's. Polite, but not
 a measurement.
 

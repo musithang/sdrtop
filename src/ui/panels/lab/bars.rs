@@ -614,7 +614,7 @@ fn rf_marker_lines(state: &SdrMetrics, theme: &crate::Theme, iw: usize) -> Vec<L
     };
     // Against this radio's ceiling, which is the rail a clip happens at.
     // `+ 0.0` turns a peak exactly at the ceiling into +0 dB, not -0 dB.
-    let headroom = -state.peak_to_ceiling_db() + 0.0;
+    let headroom = state.shown_headroom_db();
     let (_, sev) = staging_verdict(state.peak_to_ceiling_db() as f64);
     let peak_col = match sev {
         2 => theme.status_crit,
@@ -630,7 +630,7 @@ fn rf_marker_lines(state: &SdrMetrics, theme: &crate::Theme, iw: usize) -> Vec<L
                 crate::hardware::CeilingKind::Clips => "CLIP ",
                 crate::hardware::CeilingKind::Holds => "HOLD ",
             },
-            format!("{:.0} dBFS ({})", state.ceiling_dbfs(), c.part),
+            format!("{} dBFS ({})", state.ceiling_text(), c.part),
         ),
         None => ("CLIP ", "0 dBFS".to_string()),
     };
@@ -1223,7 +1223,7 @@ mod tests {
         let mut hf = SdrMetrics::fixture().streaming().airspyhf();
         hf.signal.adc_peak_dbfs = -20.0;
         let out = text(&hf);
-        assert!(out.contains("HOLD -12 dBFS (digital AGC)"), "{out}");
+        assert!(out.contains("HOLD -14 to -12 dBFS (digital AGC)"), "{out}");
         assert!(!out.contains("CLIP"), "{out}");
     }
 

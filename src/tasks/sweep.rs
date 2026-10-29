@@ -40,8 +40,6 @@ pub fn spawn_sweep_task(state: Arc<Mutex<SdrMetrics>>, device: Arc<dyn SdrDevice
                     Arc::clone(&m.caps),
                 )
             };
-            let (fmin, fmax) = (caps.freq_min_hz, caps.freq_max_hz);
-
             if active && !was_active {
                 was_active = true;
                 let mut m = state.lock().unwrap_or_else(|e| e.into_inner());
@@ -51,11 +49,7 @@ pub fn spawn_sweep_task(state: Arc<Mutex<SdrMetrics>>, device: Arc<dyn SdrDevice
                 m.sweep.cycle_count = 0;
                 m.sweep.positions_done = 0;
                 m.sweep.positions_total = config.positions_total(sample_rate);
-                m.push_log(format!(
-                    "Sweep started: {:.1}–{:.1} MHz",
-                    config.start_hz as f64 / 1e6,
-                    config.stop_hz as f64 / 1e6
-                ));
+                m.push_log(start_line(&config, sample_rate, &caps));
             }
 
             if !active {
@@ -81,7 +75,8 @@ pub fn spawn_sweep_task(state: Arc<Mutex<SdrMetrics>>, device: Arc<dyn SdrDevice
             }
 
             let positions = config.positions_total(sample_rate);
-            if positions == 0 {
+            let tuned = config.tuned_positions(sample_rate, &caps);
+            if tuned.is_empty() {
                 tokio::time::sleep(Duration::from_millis(200)).await;
                 continue;
             }
@@ -91,16 +86,12 @@ pub fn spawn_sweep_task(state: Arc<Mutex<SdrMetrics>>, device: Arc<dyn SdrDevice
             let mut peak: Vec<f32> = Vec::new();
             let mut mean: Vec<f32> = Vec::new();
 
-            for i in 0..positions {
+            // Only positions the radio tunes: one outside its reach or in a
+            // gap between its bands would deliver something, and it would not
+            // be a reading of that frequency. The curve keeps the hole.
+            for &(i, hz) in &tuned {
                 if !state.lock().unwrap_or_else(|e| e.into_inner()).sweep.active {
                     break;
-                }
-                let hz = config.position_hz(i, sample_rate).clamp(fmin, fmax);
-                // A position in a gap between bands is not tuned: the radio
-                // would deliver something there, and it would not be a
-                // reading of that frequency. The curve keeps the hole.
-                if !caps.tunes(hz) {
-                    continue;
                 }
                 let _ = device.set_frequency(hz);
                 {
@@ -194,6 +185,24 @@ impl DirectSweepControl for dyn SdrDevice {
 
     fn set_frequency(&self, hz: u64) -> anyhow::Result<()> {
         SdrDevice::set_frequency(self, hz).map(|_| ())
+    }
+}
+
+/// What a sweep says as it starts. A range the radio cannot reach at all is
+/// said once, not swept as its nearest edge.
+fn start_line(
+    config: &crate::state::SweepConfig,
+    sample_rate: f64,
+    caps: &crate::hardware::DeviceCapabilities,
+) -> String {
+    let (start, stop) = (config.start_hz as f64 / 1e6, config.stop_hz as f64 / 1e6);
+    if config.tuned_positions(sample_rate, caps).is_empty() {
+        format!(
+            "Sweep refused: {start:.1}\u{2013}{stop:.1} MHz is outside what this radio tunes ({}); set START and STOP",
+            caps.bands_text()
+        )
+    } else {
+        format!("Sweep started: {start:.1}\u{2013}{stop:.1} MHz")
     }
 }
 
@@ -464,6 +473,27 @@ mod direct_tests {
             metrics.sweep.config.dwell_ms = 200;
         }
         state
+    }
+
+    /// A range the radio cannot reach is refused by name, with what it tunes.
+    #[test]
+    fn a_range_out_of_reach_is_refused_as_it_starts() {
+        let hf = crate::hardware::native::airspyhf::observer_caps();
+        let far = crate::state::SweepConfig::default();
+        assert_eq!(
+            start_line(&far, 768e3, &hf),
+            "Sweep refused: 400.0\u{2013}500.0 MHz is outside what this radio tunes \
+             (9 kHz to 31 MHz, 60 to 260 MHz); set START and STOP"
+        );
+        let near = crate::state::SweepConfig {
+            start_hz: 25_000_000,
+            stop_hz: 70_000_000,
+            ..far
+        };
+        assert_eq!(
+            start_line(&near, 768e3, &hf),
+            "Sweep started: 25.0\u{2013}70.0 MHz"
+        );
     }
 
     #[test]

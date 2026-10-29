@@ -283,13 +283,19 @@ pub fn gain_model() -> GainModel {
     .with_boost(crate::hardware::Boost::GainMode)
     .with_auto_stages(&[0])
     .with_start_gains(vec![0.0, 0.0])
-    // The radio's digital AGC, always on, turns its own gain down so that a
-    // carrier's sample peak stops at -11.6 dBFS of the USB word on HF and
-    // -13.3 dBFS on VHF, at every rate (measured on a cable from VGA 0 up,
-    // all seven rates, both bands, each within 0.2 dB). It cuts gain cleanly
-    // and does not report how much, so past it the level is not the
-    // antenna's and nothing on the word ever clips.
-    .with_held_ceiling("digital AGC", vec![(0, -11.6), (VHF_FROM_HZ, -13.3)])
+    // The radio's digital AGC, always on, turns its own gain down to hold a
+    // carrier's sample peak, at the same level on the USB word at every rate
+    // (measured on a cable, all seven rates, both bands, each within 0.2 dB).
+    // Where it holds depends on what came before: a carrier that arrives well
+    // past it is held at -13.5 dBFS on HF and -14.8 on VHF, and the next gain
+    // command sent while it is there lifts the hold to -11.6 and -13.3. It
+    // cuts gain cleanly and does not report how much, so from the lower level
+    // up the level may no longer be the antenna's, and nothing on the word
+    // ever clips.
+    .with_held_ceiling(
+        "digital AGC",
+        vec![(0, -13.5, -11.6), (VHF_FROM_HZ, -14.8, -13.3)],
+    )
 }
 
 /// Where the VHF front end starts.
@@ -1285,7 +1291,7 @@ mod tests {
 
     /// The two measured stages, front to back, starting with no attenuation
     /// and the LNA off; the AGC sets the attenuator alone; the digital AGC
-    /// holds the level at its measured ceiling, lower on VHF.
+    /// holds the level within its measured span, lower on VHF.
     #[test]
     fn the_gain_model_is_the_measured_one() {
         let g = gain_model();
@@ -1304,10 +1310,12 @@ mod tests {
             (c.part, c.kind),
             ("digital AGC", crate::hardware::CeilingKind::Holds)
         );
-        assert_eq!(g.ceiling_dbfs_at(9_000), -11.6);
-        assert_eq!(g.ceiling_dbfs_at(31_000_000), -11.6);
-        assert_eq!(g.ceiling_dbfs_at(60_000_000), -13.3);
-        assert_eq!(g.ceiling_dbfs_at(260_000_000), -13.3);
+        assert_eq!(g.ceiling_dbfs_at(9_000), -13.5);
+        assert_eq!(g.ceiling_dbfs_at(31_000_000), -13.5);
+        assert_eq!(g.ceiling_dbfs_at(60_000_000), -14.8);
+        assert_eq!(g.ceiling_dbfs_at(260_000_000), -14.8);
+        assert_eq!(c.text_at(14_200_000), "-14 to -12");
+        assert_eq!(c.text_at(100_000_000), "-15 to -13");
     }
 
     /// What a Discovery is: two bands with the gap, the firmware's rates, the

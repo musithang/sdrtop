@@ -231,6 +231,18 @@ impl Panel for RfChainPanel {
                     .gain
                     .has_boost()
                     .then(|| state.caps.gain.boost_label().to_string()),
+                front_attenuates: state
+                    .caps
+                    .gain
+                    .stages()
+                    .first()
+                    .is_some_and(|s| s.max_db <= 0.0),
+                second_attenuates: state
+                    .caps
+                    .gain
+                    .stages()
+                    .get(1)
+                    .is_some_and(|s| s.max_db <= 0.0),
             },
             theme,
         );
@@ -294,6 +306,58 @@ mod tests {
         m.signal.adc_peak_dbfs = -13.0;
         let vhf = draw(RfChainPanel, 70, 60, &m).join("\n");
         assert!(vhf.contains("GAIN HELD"), "{vhf}");
+    }
+
+    /// **One headroom on every panel**: the verdict, the ADC bench and the
+    /// strip each subtract the two levels as they print them. A peak of
+    /// -16.4 under a hold from -13.5 reads 2 dB everywhere (-14 and -16
+    /// printed), where the verdict once said 3 beside the bench's 2.
+    #[test]
+    fn the_headroom_is_one_figure_on_every_panel() {
+        let mut m = SdrMetrics::fixture().streaming().airspyhf();
+        m.signal.adc_peak_dbfs = -16.4;
+        let rf = draw(RfChainPanel, 70, 60, &m).join("\n");
+        assert!(
+            rf.contains("Signal at -16 dBFS \u{2014} 2 dB from the digital AGC's hold."),
+            "{rf}"
+        );
+        let adc = draw(
+            crate::ui::panels::lab::adc_loading::AdcLoadingPanel,
+            61,
+            26,
+            &m,
+        )
+        .join("\n");
+        assert!(adc.contains("2 dB under the digital AGC's hold"), "{adc}");
+        assert_eq!(m.shown_headroom_db(), 2.0);
+    }
+
+    /// **An attenuator is moved in words that say which way**: on the HF+,
+    /// whose front stage is an attenuator, the advice asks for more or less
+    /// ATT, never "increase" or "reduce" it; a gain chain keeps its words.
+    #[test]
+    fn an_attenuator_is_asked_for_more_or_less() {
+        let mut m = SdrMetrics::fixture().streaming().airspyhf();
+        for (peak, want) in [
+            (-11.0, "More ATT or reduce LNA to bring it under the hold:"),
+            (-36.0, "ADC window under-used. Less ATT"),
+            (-50.0, "Less ATT; at 0 dB, check the antenna"),
+        ] {
+            m.signal.adc_peak_dbfs = peak;
+            let out = draw(RfChainPanel, 70, 60, &m).join("\n");
+            assert!(out.contains(want), "{want:?} at {peak} in\n{out}");
+            assert!(
+                !out.contains("Increase ATT") && !out.contains("Reduce ATT"),
+                "{out}"
+            );
+        }
+        let mut hackrf = SdrMetrics::fixture().streaming();
+        hackrf.signal.adc_peak_dbfs = -50.0;
+        let out = draw(RfChainPanel, 70, 60, &hackrf).join("\n");
+        assert!(
+            out.contains("Increase LNA; if maxed, check the antenna"),
+            "{out}"
+        );
     }
 
     /// **A stage's gain reads as the same figure on every panel**: rounded,

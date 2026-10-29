@@ -25,7 +25,7 @@ const LABEL_W: usize = 4;
 /// converter rail.
 pub(super) fn ceiling(
     out: &mut Vec<Line<'static>>,
-    ceiling_dbfs: f64,
+    level: &str,
     c: &crate::hardware::Ceiling,
     theme: &crate::Theme,
 ) {
@@ -34,10 +34,10 @@ pub(super) fn ceiling(
     let part = c.part;
     let text = match c.kind {
         crate::hardware::CeilingKind::Clips => {
-            format!(" {part} clips at {ceiling_dbfs:.0} dBFS, before the ADC: uncounted")
+            format!(" {part} clips at {level} dBFS, before the ADC: uncounted")
         }
         crate::hardware::CeilingKind::Holds => {
-            format!(" {part} holds peaks at {ceiling_dbfs:.0} dBFS: gain cut unreported")
+            format!(" {part} holds peaks {level} dBFS: gain cut unseen")
         }
     };
     out.push(Line::from(Span::styled(
@@ -62,7 +62,7 @@ pub(super) fn loading(
     // Between the two figures as shown, rounded as `{:.0}` rounds them, so
     // -3 and a peak printed as -10 are 7 dB apart on screen as well, never 8.
     // `+ 0.0` turns a peak exactly at the ceiling into 0 dB, not -0 dB.
-    let headroom = ceiling.round_ties_even() - load.peak_dbfs.round_ties_even() + 0.0;
+    let headroom = crate::ui::rf_calc::shown_headroom_db(ceiling, load.peak_dbfs);
     let whose = match part {
         Some(c) => format!("the {}'s {}", c.part, c.kind.noun()),
         None => "full scale".to_string(),
@@ -74,7 +74,9 @@ pub(super) fn loading(
             Style::default().fg(sev_col).add_modifier(Modifier::BOLD),
         ),
         Span::styled(
-            if headroom >= 0.0 {
+            if headroom == 0.0 {
+                format!("  at {whose}")
+            } else if headroom > 0.0 {
                 format!("  {headroom:.0} dB under {whose}")
             } else {
                 format!("  {:.0} dB past {whose}", -headroom)

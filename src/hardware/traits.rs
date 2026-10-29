@@ -671,19 +671,41 @@ pub struct Ceiling {
     pub part: &'static str,
     /// What happens to a signal that reaches it.
     pub kind: CeilingKind,
-    /// dBFS of the converter from each frequency up to the next entry's,
-    /// lowest first; the first entry starts at 0 Hz.
-    steps: Vec<(u64, f64)>,
+    /// From each frequency up to the next entry's, lowest first (the first
+    /// from 0 Hz): the lowest and the highest level it was measured at, dBFS
+    /// of the converter; the same for a ceiling that does not move.
+    steps: Vec<(u64, f64, f64)>,
 }
 
 impl Ceiling {
-    /// How high it is at `hz`.
-    pub fn dbfs_at(&self, hz: u64) -> f64 {
-        self.steps
+    /// The measured span at `hz`, lowest first.
+    fn span_at(&self, hz: u64) -> (f64, f64) {
+        let &(_, low, high) = self
+            .steps
             .iter()
             .rev()
-            .find(|(from, _)| hz >= *from)
-            .map_or(self.steps[0].1, |&(_, dbfs)| dbfs)
+            .find(|(from, _, _)| hz >= *from)
+            .unwrap_or(&self.steps[0]);
+        (low, high)
+    }
+
+    /// Where it starts at `hz`: the lowest level it was measured at, which
+    /// is where every judgement of a peak starts, because past it the level
+    /// may already not be the antenna's.
+    pub fn dbfs_at(&self, hz: u64) -> f64 {
+        self.span_at(hz).0
+    }
+
+    /// How it reads on screen at `hz`, rounded as every level beside it is:
+    /// `-3`, or `-14 to -12` for one measured over a span.
+    pub fn text_at(&self, hz: u64) -> String {
+        let (low, high) = self.span_at(hz);
+        let (low, high) = (low.round_ties_even() + 0.0, high.round_ties_even() + 0.0);
+        if low == high {
+            format!("{low:.0}")
+        } else {
+            format!("{low:.0} to {high:.0}")
+        }
     }
 }
 
@@ -945,19 +967,21 @@ impl GainModel {
         self.ceiling = Some(Ceiling {
             part: what,
             kind: CeilingKind::Clips,
-            steps: vec![(0, dbfs)],
+            steps: vec![(0, dbfs, dbfs)],
         });
         self
     }
 
     /// `what` (`"digital AGC"`) holds the level at a ceiling by turning its
-    /// own gain down, at `dbfs` of the converter from each frequency of
-    /// `steps` up to the next one's, lowest first: measured, not assumed.
-    pub fn with_held_ceiling(mut self, what: &'static str, steps: Vec<(u64, f64)>) -> Self {
+    /// own gain down, somewhere between the two levels of `steps` (dBFS of
+    /// the converter, lowest first) from each frequency up to the next one's:
+    /// measured, not assumed.
+    pub fn with_held_ceiling(mut self, what: &'static str, steps: Vec<(u64, f64, f64)>) -> Self {
         debug_assert!(
-            steps.first().is_some_and(|&(from, _)| from == 0)
-                && steps.windows(2).all(|w| w[0].0 < w[1].0),
-            "steps from 0 Hz, lowest first"
+            steps.first().is_some_and(|&(from, _, _)| from == 0)
+                && steps.windows(2).all(|w| w[0].0 < w[1].0)
+                && steps.iter().all(|&(_, low, high)| low <= high),
+            "steps from 0 Hz, lowest first, each span lowest first"
         );
         self.ceiling = Some(Ceiling {
             part: what,

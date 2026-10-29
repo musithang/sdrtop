@@ -134,7 +134,7 @@ pub(super) fn lines(
         Span::styled(total, Style::default().fg(val_col)),
     ];
     if active {
-        let headroom = (-state.peak_to_ceiling_db()).max(0.0);
+        let headroom = state.shown_headroom_db().max(0.0) as f32;
         total_spans.push(Span::styled(
             "  \u{00b7}  ".to_string(),
             Style::default().fg(theme.border_dim),

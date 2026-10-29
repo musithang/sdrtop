@@ -348,6 +348,14 @@ pub fn linearity(lna_gain: u32, vga_gain: u32, bits: u8) -> Linearity {
 /// Where the ADC peak should land for clean staging.
 pub const OPT_PEAK_DBFS: f64 = -8.0;
 
+/// The headroom between `ceiling` and `peak` as the screen shows it: each
+/// rounded as it is printed, then subtracted, so -12 and a peak printed as
+/// -16 are 4 dB apart in every panel, never 5 in one and 4 in the next.
+/// `+ 0.0` turns a peak exactly at the ceiling into 0 dB, not -0 dB.
+pub fn shown_headroom_db(ceiling: f64, peak: f64) -> f64 {
+    ceiling.round_ties_even() - peak.round_ties_even() + 0.0
+}
+
 /// [`staging_verdict`] for a peak measured against a radio's ceiling, in the
 /// words that ceiling's kind earns: at a part that holds the level (turns its
 /// own gain down) nothing clips, but the level is no longer the antenna's, so
@@ -421,9 +429,59 @@ pub fn staging_target_on(
     }
 }
 
+/// Where auto-gain takes the chain, from a peak measured against the radio's
+/// ceiling, and whether the level it started from was known.
+///
+/// A peak at the ceiling (where the staging verdict says `CLIPPING` or
+/// `HELD`) is not the antenna's level, only a floor under it: the part that
+/// clipped or held it does not say by how much. A target worked out from it
+/// lands short by however much was lost; on the HF+ a carrier well past the
+/// digital AGC's hold read 2 dB past it, and the target left it held. From
+/// there the chain goes to the least gain it has (the bottom of the knob's
+/// curve on a curve), and the next reading, back under the ceiling, gives a
+/// target that means something.
+pub fn auto_gain_target(
+    peak_to_ceiling_db: f64,
+    gm: &crate::hardware::GainModel,
+    curve: Option<usize>,
+    current: &[f64],
+) -> (Vec<f64>, bool) {
+    if staging_verdict(peak_to_ceiling_db).0 != "CLIPPING" {
+        return (
+            staging_target_on(peak_to_ceiling_db, gm, curve, current),
+            true,
+        );
+    }
+    let stages = gm.stages();
+    let least = match curve.and_then(|c| gm.curves().get(c)) {
+        Some(c) => c.values(0, &stages),
+        None => stages.iter().map(|s| s.min_db).collect(),
+    };
+    (least, false)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// **From a peak at the ceiling the level is unknown**: auto-gain takes
+    /// the chain to its least gain rather than to a target worked out from a
+    /// figure that is not the antenna's; under the ceiling, the target as
+    /// before. On a curve, its bottom step.
+    #[test]
+    fn from_a_peak_at_the_ceiling_auto_gain_takes_the_least_gain() {
+        let hf = crate::hardware::native::airspyhf::gain_model();
+        let (gains, known) = auto_gain_target(1.0, &hf, None, &[0.0, 6.0]);
+        assert_eq!((gains, known), (vec![-48.0, 0.0], false));
+        let (gains, known) = auto_gain_target(-20.0, &hf, None, &[-24.0, 0.0]);
+        assert!(known);
+        assert_eq!(gains, staging_target_on(-20.0, &hf, None, &[-24.0, 0.0]));
+        let r2 = crate::hardware::native::airspy::gain_model();
+        let stages = r2.stages();
+        let (gains, known) =
+            auto_gain_target(0.0, &r2, Some(0), &r2.curves()[0].values(10, &stages));
+        assert_eq!((gains, known), (r2.curves()[0].values(0, &stages), false));
+    }
 
     /// **On a vendor curve the target is a step of it**: the highest step
     /// whose chain stays at or under the total the converter wants, so the
@@ -713,6 +771,15 @@ mod tests {
         assert_eq!(staging_verdict(-8.0).1, 0, "−8 dBFS is well-staged");
         assert_eq!(staging_verdict(0.0), ("CLIPPING", 2));
         assert_eq!(staging_verdict(-40.0).0, "WEAK");
+    }
+
+    /// The headroom shown is the difference of the two figures as printed.
+    #[test]
+    fn the_shown_headroom_is_the_printed_difference() {
+        assert_eq!(shown_headroom_db(-11.6, -16.3), 4.0);
+        assert_eq!(shown_headroom_db(-3.0, -3.0), 0.0);
+        assert!(shown_headroom_db(-3.0, -3.0).is_sign_positive(), "no -0");
+        assert_eq!(shown_headroom_db(-13.5, -11.0), -3.0);
     }
 
     /// At a ceiling that holds, nothing clips: the word says held, at the

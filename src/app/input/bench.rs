@@ -150,7 +150,6 @@ pub(super) fn iq_diagnostics(key: KeyEvent, ctx: &mut InputCtx<'_>) -> KeyAction
 /// (incl. the [↑↓]/[ ] gain nudges) falls through to the global handler.
 pub(super) fn rf_chain(key: KeyEvent, ctx: &mut InputCtx<'_>) -> KeyAction {
     let (state, device) = (ctx.state, ctx.device);
-    use crate::ui::rf_calc::staging_target_on;
     match key.code {
         // [A] - auto-gain: one-shot to optimal, or latch the continuous track once
         // already there. HackRF-only; never runs unless streaming.
@@ -197,7 +196,9 @@ pub(super) fn rf_chain(key: KeyEvent, ctx: &mut InputCtx<'_>) -> KeyAction {
                 let m = metrics(state);
                 (m.caps.gain.clone(), m.radio.gain_curve)
             };
-            let targets = staging_target_on(peak, &gm, curve, &current);
+            // From a peak at the ceiling the level is unknown, and the chain
+            // goes to its least gain instead; the log says so.
+            let (targets, known) = crate::ui::rf_calc::auto_gain_target(peak, &gm, curve, &current);
             // Judged on the **total**, not on the arrangement. Auto-gain is
             // about where the converter sits; how that total is spread is the
             // knob's business. Comparing per stage would make a hand-set chain
@@ -238,11 +239,23 @@ pub(super) fn rf_chain(key: KeyEvent, ctx: &mut InputCtx<'_>) -> KeyAction {
                             // ceiling, -11 dBFS on an R2 whose tuner clips at
                             // -3.
                             let target = m.ceiling_dbfs() + crate::ui::rf_calc::OPT_PEAK_DBFS;
-                            m.push_log(format!(
-                                "Auto-gain \u{2192} {step}{} dB (signal \u{2192} \u{2212}{:.0} dBFS)",
-                                split.join(" \u{00b7} "),
-                                -target
-                            ));
+                            if known {
+                                m.push_log(format!(
+                                    "Auto-gain \u{2192} {step}{} dB (signal \u{2192} \u{2212}{:.0} dBFS)",
+                                    split.join(" \u{00b7} "),
+                                    -target
+                                ));
+                            } else {
+                                let at = m.ceiling().map_or_else(
+                                    || "full scale".to_string(),
+                                    |c| format!("the {}'s {}", c.part, c.kind.noun()),
+                                );
+                                m.push_log(format!(
+                                    "Auto-gain \u{2192} {step}{} dB, the least: the peak was at {at}, \
+                                     so its level is unknown; [A] again lands it",
+                                    split.join(" \u{00b7} ")
+                                ));
+                            }
                         }
                         Some(why) => m.push_log(format!("Auto-gain: {why}")),
                     }

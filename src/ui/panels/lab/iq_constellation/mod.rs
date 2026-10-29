@@ -260,7 +260,7 @@ mod tests {
         let mut hf = with_ring(0.6).airspyhf();
         hf.iq.constellation_outer_db = Some(-1.0);
         let out = draw(&hf, 77, 26);
-        assert!(out.contains("digital AGC holds -12"), "{out}");
+        assert!(out.contains("digital AGC holds -14"), "{out}");
     }
 
     /// The smallest panel draws the square alone and does not panic.

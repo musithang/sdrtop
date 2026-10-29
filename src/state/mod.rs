@@ -158,6 +158,20 @@ impl SdrMetrics {
         self.caps.gain.ceiling_dbfs_at(self.radio.frequency)
     }
 
+    /// The ceiling where the radio is tuned as the screen writes it: `-3`, or
+    /// `-14 to -12` for one measured over a span; `0` at the converter.
+    pub fn ceiling_text(&self) -> String {
+        self.ceiling()
+            .map_or_else(|| "0".to_string(), |c| c.text_at(self.radio.frequency))
+    }
+
+    /// The headroom as the screen shows it: the ceiling and the peak each
+    /// rounded as they are printed, then subtracted, so the figure always
+    /// equals the difference of the two figures beside it.
+    pub fn shown_headroom_db(&self) -> f64 {
+        crate::ui::rf_calc::shown_headroom_db(self.ceiling_dbfs(), self.signal.adc_peak_dbfs as f64)
+    }
+
     /// The part that stops the samples before the converter, when there is
     /// one, and what it does there.
     pub fn ceiling(&self) -> Option<&crate::hardware::Ceiling> {
@@ -389,16 +403,19 @@ mod stage_reading_tests {
     /// tuner clips at -3 dBFS, so a peak there is at the limit; a HackRF's
     /// ceiling is the converter's 0 dBFS.
     /// **The HF+'s ceiling follows the band**: its digital AGC holds a peak
-    /// at -11.6 dBFS on HF and -13.3 on VHF, and says it holds.
+    /// from -13.5 dBFS on HF and from -14.8 on VHF, judged from the lower
+    /// level, written as the span, and says it holds.
     #[test]
     fn the_hf_plus_ceiling_follows_the_band() {
         let mut m = SdrMetrics::fixture().airspyhf();
-        m.signal.adc_peak_dbfs = -11.6;
-        assert_eq!(m.ceiling_dbfs(), -11.6);
+        m.signal.adc_peak_dbfs = -13.5;
+        assert_eq!(m.ceiling_dbfs(), -13.5);
         assert!(m.peak_to_ceiling_db().abs() < 1e-5);
+        assert_eq!(m.ceiling_text(), "-14 to -12");
         m.radio.frequency = 100_000_000;
-        assert_eq!(m.ceiling_dbfs(), -13.3);
-        assert!((m.peak_to_ceiling_db() - 1.7).abs() < 1e-5);
+        assert_eq!(m.ceiling_dbfs(), -14.8);
+        assert!((m.peak_to_ceiling_db() - 1.3).abs() < 1e-5);
+        assert_eq!(m.ceiling_text(), "-15 to -13");
         assert_eq!(
             m.ceiling().map(|c| c.kind),
             Some(crate::hardware::CeilingKind::Holds)
