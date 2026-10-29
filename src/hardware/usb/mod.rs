@@ -65,12 +65,22 @@ pub struct Wanted {
     pub pids: &'static [u16],
     pub product: &'static str,
     pub manufacturer: &'static str,
+    /// The product string the device must give to be this radio, for an id
+    /// other boards ship under too; `None` where the id alone is the radio.
+    pub named: Option<&'static str>,
 }
 
 impl Wanted {
-    /// Whether `vid`:`pid` is this radio.
+    /// Whether `vid`:`pid` is this radio's id.
     pub fn is(&self, vid: u16, pid: u16) -> bool {
         vid == self.vid && self.pids.contains(&pid)
+    }
+
+    /// Whether a device with this id and this product string is this radio:
+    /// the id, and the name where the id alone does not settle it. A device
+    /// that gives no name cannot be told from the other boards on its id.
+    pub fn matches(&self, vid: u16, pid: u16, product: Option<&str>) -> bool {
+        self.is(vid, pid) && self.named.is_none_or(|name| product == Some(name))
     }
 }
 
@@ -80,6 +90,7 @@ pub const HACKRF: Wanted = Wanted {
     pids: &[0x6089],
     product: "HackRF One",
     manufacturer: "Great Scott Gadgets",
+    named: None,
 };
 
 /// An Airspy (1d50:60a1). The Airspy Mini answers on the same id, so a scan
@@ -90,6 +101,19 @@ pub const AIRSPY: Wanted = Wanted {
     pids: &[0x60a1],
     product: "AIRSPY",
     manufacturer: "www.airspy.com",
+    named: None,
+};
+
+/// An Airspy HF+ (03eb:800c). 03eb is Atmel's vendor id, on many boards
+/// that are not radios, so the product string the HF+ gives is part of the
+/// match. The Discovery and the other HF+ boards give the same one, so
+/// observer mode names what the device says, `AIRSPY HF+`, and no model.
+pub const AIRSPYHF: Wanted = Wanted {
+    vid: 0x03eb,
+    pids: &[0x800c],
+    product: "AIRSPY HF+",
+    manufacturer: "www.airspy.com",
+    named: Some("AIRSPY HF+"),
 };
 
 /// An RTL-SDR dongle (Realtek, 0bda:2832 or 0bda:2838).
@@ -98,6 +122,7 @@ pub const RTLSDR: Wanted = Wanted {
     pids: &[0x2832, 0x2838],
     product: "RTL-SDR",
     manufacturer: "Realtek",
+    named: None,
 };
 
 /// Looks for `wanted` on this system. `Ok(None)` is the radio not being
@@ -122,6 +147,11 @@ pub fn find_hackrf() -> Result<Option<UsbDeviceInfo>, String> {
 /// An Airspy, held by another app or not.
 pub fn find_airspy() -> Result<Option<UsbDeviceInfo>, String> {
     find(&AIRSPY)
+}
+
+/// An Airspy HF+, held by another app or not.
+pub fn find_airspyhf() -> Result<Option<UsbDeviceInfo>, String> {
+    find(&AIRSPYHF)
 }
 
 /// An RTL-SDR dongle, held by another app or not.
@@ -241,7 +271,7 @@ pub struct IoUsbProps {
 /// rounded to the nearest one it does.
 #[cfg(any(target_os = "macos", test))]
 pub fn from_iokit(props: &IoUsbProps, wanted: &Wanted) -> Option<UsbDeviceInfo> {
-    if !wanted.is(props.vid?, props.pid?) {
+    if !wanted.matches(props.vid?, props.pid?, props.product.as_deref()) {
         return None;
     }
     // IOKit's USB speed codes, kUSBDeviceSpeedLow (0) through
@@ -304,6 +334,19 @@ mod tests {
         assert!(!AIRSPY.is(0x1d50, 0x6089), "a HackRF on the same vendor id");
     }
 
+    /// **An HF+ is its id and its name**: 03eb is Atmel's vendor id, so a
+    /// board on 03eb:800c that does not call itself `AIRSPY HF+`, or gives no
+    /// name at all, is not taken for one. The other radios match by id alone.
+    #[test]
+    fn an_hf_plus_is_its_id_and_its_name() {
+        assert!(AIRSPYHF.matches(0x03eb, 0x800c, Some("AIRSPY HF+")));
+        assert!(!AIRSPYHF.matches(0x03eb, 0x800c, Some("SAM D21 board")));
+        assert!(!AIRSPYHF.matches(0x03eb, 0x800c, None));
+        assert!(!AIRSPYHF.matches(0x03eb, 0x2404, Some("AIRSPY HF+")));
+        assert!(HACKRF.matches(0x1d50, 0x6089, None));
+        assert!(AIRSPY.matches(0x1d50, 0x60a1, Some("AIRSPY")));
+    }
+
     /// Each speed by its name, a low-speed device's 1.5 included.
     #[test]
     fn a_speed_is_named_from_its_rate() {
@@ -352,6 +395,7 @@ mod tests {
         assert!(find(&HACKRF).is_ok(), "{:?}", find(&HACKRF));
         assert!(find(&RTLSDR).is_ok(), "{:?}", find(&RTLSDR));
         assert!(find(&AIRSPY).is_ok(), "{:?}", find(&AIRSPY));
+        assert!(find(&AIRSPYHF).is_ok(), "{:?}", find(&AIRSPYHF));
     }
 
     fn hackrf_props() -> IoUsbProps {
@@ -388,6 +432,24 @@ mod tests {
             })
         );
         assert_eq!(from_iokit(&hackrf_props(), &RTLSDR), None);
+        // An HF+ by its name as well as its id, as on Linux.
+        let hf = IoUsbProps {
+            vid: Some(0x03eb),
+            pid: Some(0x800c),
+            product: Some("AIRSPY HF+".into()),
+            vendor: Some("www.airspy.com".into()),
+            serial: Some("AIRSPYHF SN:DD528080FF444630".into()),
+            ..hackrf_props()
+        };
+        assert_eq!(
+            from_iokit(&hf, &AIRSPYHF).map(|i| i.product),
+            Some("AIRSPY HF+".into())
+        );
+        let other = IoUsbProps {
+            product: Some("SAM D21 board".into()),
+            ..hf
+        };
+        assert_eq!(from_iokit(&other, &AIRSPYHF), None);
     }
 
     /// The holder IOKit names comes along with the device, and a value

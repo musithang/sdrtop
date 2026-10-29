@@ -26,7 +26,7 @@ pub fn scan(devices: &Path, wanted: &Wanted) -> Option<UsbDeviceInfo> {
         // Interface entries (`1-2:1.0`) have no idVendor and are passed over.
         let vid = hex(&base.join("idVendor"))?;
         let pid = hex(&base.join("idProduct"))?;
-        if !wanted.is(vid, pid) {
+        if !wanted.matches(vid, pid, read(&base.join("product")).as_deref()) {
             return None;
         }
         let number = |file: &str| read(&base.join(file)).and_then(|s| s.parse().ok());
@@ -142,7 +142,7 @@ fn process(pid: u32) -> Option<super::OwnerInfo> {
 
 #[cfg(test)]
 mod tests {
-    use super::super::{HACKRF, RTLSDR};
+    use super::super::{AIRSPYHF, HACKRF, RTLSDR};
     use super::*;
     use std::path::PathBuf;
 
@@ -212,6 +212,40 @@ mod tests {
             }
         );
         assert_eq!(scan(&tree.0, &RTLSDR), None);
+    }
+
+    /// An HF+ is found by its id and its name, as the kernel writes them; an
+    /// Atmel board on the same id that is not one is passed over, even when
+    /// it comes first.
+    #[test]
+    fn an_hf_plus_is_found_by_its_name_too() {
+        let tree = Tree::new("airspyhf");
+        tree.device(
+            "1-1",
+            &[
+                ("idVendor", "03eb"),
+                ("idProduct", "800c"),
+                ("product", "SAM D21 board"),
+            ],
+        );
+        tree.device(
+            "2-2",
+            &[
+                ("idVendor", "03eb"),
+                ("idProduct", "800c"),
+                ("product", "AIRSPY HF+"),
+                ("manufacturer", "www.airspy.com"),
+                ("serial", "AIRSPYHF SN:DD528080FF444630"),
+                ("speed", "480"),
+                ("bMaxPower", "500mA"),
+                ("busnum", "2"),
+                ("devnum", "4"),
+            ],
+        );
+        let info = scan(&tree.0, &AIRSPYHF).expect("the HF+ is found");
+        assert_eq!(info.product, "AIRSPY HF+");
+        assert_eq!(info.serial.as_deref(), Some("AIRSPYHF SN:DD528080FF444630"));
+        assert_eq!((info.bus, info.dev), (Some(2), Some(4)));
     }
 
     /// **What the kernel did not write is missing**, never a plausible

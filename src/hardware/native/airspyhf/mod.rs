@@ -295,6 +295,29 @@ pub fn gain_model() -> GainModel {
 /// Where the VHF front end starts.
 const VHF_FROM_HZ: u64 = 60_000_000;
 
+/// The rates a Discovery's firmware lists (R5.0.1-CD, read from the radio),
+/// for describing one that is observed and so cannot be asked.
+const DISCOVERY_RATES: [u32; 7] = [
+    912_000, 768_000, 650_000, 456_000, 384_000, 228_000, 192_000,
+];
+
+/// A Discovery's capabilities as placeholders, for observer mode: the bands,
+/// stages and ceiling are the board's, the rates its firmware lists. The
+/// block is the library's, which only an open radio reports, so it is left
+/// unknown.
+pub fn observer_caps() -> DeviceCapabilities {
+    caps(&DISCOVERY_RATES, 0)
+}
+
+/// The firmware slot of the header for an HF+ observed, not opened: under
+/// the HF+'s own label, with the version it cannot read as a dash.
+pub fn observer_stack() -> crate::hardware::SoftwareStack {
+    crate::hardware::SoftwareStack {
+        label: "airspyhf fw ",
+        value: Arc::from("\u{2014}"),
+    }
+}
+
 /// What a Discovery can do: Airspy's published bands, the rates its firmware
 /// lists, and the block its library hands over.
 pub fn caps(rates: &[u32], samples_per_transfer: u64) -> DeviceCapabilities {

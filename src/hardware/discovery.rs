@@ -97,7 +97,15 @@ impl DeviceKind {
                 caps: airspy::caps,
                 stack: || Some(airspy::observer_stack()),
             }),
-            DeviceKind::AirspyHf | DeviceKind::Soapy | DeviceKind::TinySa => None,
+            // A Discovery's capabilities as placeholders: another HF+ board on
+            // the same USB id would show the Discovery's bands, but the scan
+            // names it only by what it says, `AIRSPY HF+`.
+            DeviceKind::AirspyHf => Some(ObserverProfile {
+                scan: usb::find_airspyhf,
+                caps: airspyhf::observer_caps,
+                stack: || Some(airspyhf::observer_stack()),
+            }),
+            DeviceKind::Soapy | DeviceKind::TinySa => None,
         }
     }
 }
@@ -680,7 +688,7 @@ mod tests {
     }
 
     /// Observer mode looks for a USB device sdrtop knows by vendor and
-    /// product id, and only the two native backends are such devices.
+    /// product id, and only the native backends are such devices.
     ///
     /// This used to be a comment in three files and a `debug_assert!` in one of
     /// them. A refusal that only fires in a debug build is not a tested fact.
@@ -689,15 +697,12 @@ mod tests {
         assert!(DeviceKind::HackRf.observer_profile().is_some());
         assert!(DeviceKind::RtlSdr.observer_profile().is_some());
         assert!(DeviceKind::Airspy.observer_profile().is_some());
+        assert!(DeviceKind::AirspyHf.observer_profile().is_some());
         assert!(
             DeviceKind::Soapy.observer_profile().is_none(),
             "there is no USB profile for whatever SoapySDR was talking to"
         );
         assert!(DeviceKind::TinySa.observer_profile().is_none());
-        assert!(
-            DeviceKind::AirspyHf.observer_profile().is_none(),
-            "not until its backend can describe the radio"
-        );
     }
 
     /// The failure the deleted assertion existed to prevent: a user staring at
@@ -727,6 +732,20 @@ mod tests {
             .collect();
         assert_eq!(names, ["LNA", "MIX", "VGA"]);
         assert_eq!((airspy.stack)().map(|s| s.label), Some("airspy fw "));
+        let hf = DeviceKind::AirspyHf.observer_profile().unwrap();
+        let caps = (hf.caps)();
+        let names: Vec<String> = caps.gain.stages().into_iter().map(|s| s.name).collect();
+        assert_eq!(names, ["ATT", "LNA"]);
+        assert_eq!(
+            caps.bands(),
+            vec![9_000..=31_000_000, 60_000_000..=260_000_000]
+        );
+        assert_eq!(
+            (caps.sample_rate_min_hz, caps.sample_rate_max_hz),
+            (192e3, 912e3)
+        );
+        let stack = (hf.stack)().unwrap();
+        assert_eq!((stack.label, &*stack.value), ("airspyhf fw ", "\u{2014}"));
     }
 
     /// The case that would otherwise make every unprogrammed device look like
