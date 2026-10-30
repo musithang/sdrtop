@@ -169,14 +169,17 @@ fn render_gain(f: &mut Frame, area: Rect, state: &SdrMetrics, theme: &crate::The
     // (name, how full the bar is, the value in full and in short) for each
     // bar drawn. A stage reads as its step where its dB was not measured, and
     // a single knob's total is a dash where the chain does not add up to dB.
-    let cell = |name: &str, reading: Option<StageReading>, full_db: f64| {
+    // `low_db` to `full_db` is the stage's own range: an attenuator's runs
+    // up to 0 dB from below, and its gains read negative.
+    let cell = |name: &str, reading: Option<StageReading>, low_db: f64, full_db: f64| {
         let (fill, text, short) = match reading {
             Some(StageReading::Db(db)) => {
-                let db = db.max(0.0).round() as u32;
+                let floor = low_db.min(0.0);
+                let shown = db.round();
                 (
-                    db as f64 / full_db.max(1.0),
-                    format!("{db} dB"),
-                    format!("{db}dB"),
+                    (db - floor).max(0.0) / (full_db - floor).max(1.0),
+                    format!("{shown:.0} dB"),
+                    format!("{shown:.0}dB"),
                 )
             }
             Some(StageReading::Position { at, of }) => {
@@ -205,6 +208,7 @@ fn render_gain(f: &mut Frame, area: Rect, state: &SdrMetrics, theme: &crate::The
             cell(
                 "Total",
                 c.total_db.map(StageReading::Db),
+                crate::hardware::gain::total_range(&stages).0,
                 crate::hardware::gain::total_range(&stages).1,
             ),
         ]
@@ -215,8 +219,18 @@ fn render_gain(f: &mut Frame, area: Rect, state: &SdrMetrics, theme: &crate::The
     } else {
         match (gm.has_second_stage(), stages.first(), stages.get(1)) {
             (true, Some(first), Some(second)) => vec![
-                cell(&first.name, state.stage_reading(0), first.max_db),
-                cell(&second.name, state.stage_reading(1), second.max_db),
+                cell(
+                    &first.name,
+                    state.stage_reading(0),
+                    first.min_db,
+                    first.max_db,
+                ),
+                cell(
+                    &second.name,
+                    state.stage_reading(1),
+                    second.min_db,
+                    second.max_db,
+                ),
             ],
             _ => vec![cell(
                 "Gain",
@@ -227,6 +241,7 @@ fn render_gain(f: &mut Frame, area: Rect, state: &SdrMetrics, theme: &crate::The
                         .chain_db_holds()
                         .then_some(StageReading::Db(state.shown_gain() as f64))
                 },
+                0.0,
                 gm.primary_max_db() as f64,
             )],
         }

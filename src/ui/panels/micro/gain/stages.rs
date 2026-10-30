@@ -176,7 +176,11 @@ fn draw_many(
             let front = stages.first().map_or("", |s| s.name.as_str());
             let fill = match state.stage_reading(0) {
                 Some(StageReading::Position { at, of }) => at as f64 / of.max(1) as f64,
-                _ => state.radio.stage_gain(0) / stages.first().map_or(1.0, |s| s.max_db.max(1.0)),
+                // Over the stage's own range, as the header's bar.
+                _ => stages.first().map_or(0.0, |s| {
+                    let floor = s.min_db.min(0.0);
+                    (state.radio.stage_gain(0) - floor) / (s.max_db - floor).max(1.0)
+                }),
             };
             (
                 front.to_string(),
@@ -210,7 +214,7 @@ fn draw_many(
 
     // The whole chain, every stage of it, and only where each is a dB here.
     let total = if state.chain_db_holds() {
-        format!("{:.0} dB", state.radio.total_gain().max(0.0))
+        format!("{:.0} dB", state.radio.total_gain())
     } else {
         "\u{2014}".to_string()
     };

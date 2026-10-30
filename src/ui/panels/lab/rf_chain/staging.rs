@@ -237,9 +237,11 @@ pub(super) fn staging(
             StageReading::Position { at, of } => (at, of.max(1), None, format!("{at}/{of} step")),
             // The tuner's own setting, which sdrtop does not know.
             StageReading::Auto => (0, 1, None, "AGC".to_string()),
+            // Over the stage's own range, from its deepest setting on an
+            // attenuator (the HF+'s ATT runs -48 to 0 dB).
             StageReading::Db(_) => (
-                value.max(0.0).round() as u32,
-                spec.max_db.max(1.0).round() as u32,
+                (value - spec.min_db.min(0.0)).max(0.0).round() as u32,
+                ((spec.max_db - spec.min_db.min(0.0)).round() as u32).max(1),
                 target.map(|t| ((t - spec.min_db) / span).clamp(0.0, 1.0)),
                 format!("{:.0} / {:.0} dB", value, spec.max_db),
             ),

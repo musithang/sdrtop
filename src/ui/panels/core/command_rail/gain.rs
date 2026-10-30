@@ -101,9 +101,20 @@ pub(super) fn lines(
             }
             // The tuner AGC's to set: no figure of ours to show.
             Some(StageReading::Auto) => (0, 1, "AGC".to_string()),
+            // The bar spans the stage's own range, as the header's does:
+            // from zero on an amplifier, from its deepest setting on an
+            // attenuator, whose gains are negative and read as such.
             _ => {
-                let db = state.radio.stage_gain(index).max(0.0).round() as u32;
-                (db, spec.max_db.max(1.0).round() as u32, format!("{db:2}"))
+                let db = state.radio.stage_gain(index);
+                let floor = spec.min_db.min(0.0);
+                let value = (db - floor).max(0.0).round() as u32;
+                let max = ((spec.max_db - floor).round() as u32).max(1);
+                let text = if db.round() < 0.0 {
+                    format!("{db:3.0}")
+                } else {
+                    format!("{:2.0}", db.max(0.0))
+                };
+                (value, max, text)
             }
         };
         out.push(gain_row(
@@ -124,7 +135,8 @@ pub(super) fn lines(
     // A total of gains is one only where every stage is a gain here: a
     // position added to decibels is not a number of anything.
     let total = if state.chain_db_holds() {
-        format!("{} dB", state.radio.total_gain().max(0.0).round() as u32)
+        // Negative where an attenuator outweighs the rest, and said so.
+        format!("{:.0} dB", state.radio.total_gain())
     } else {
         "\u{2014}".to_string()
     };
@@ -309,5 +321,35 @@ mod tests {
         assert_eq!(gain_bar_width(0), 4);
         assert_eq!(gain_bar_width(22), 12); // wide rail → ceiling
         assert_eq!(gain_bar_width(18), 8); // mid → 18-10
+    }
+
+    /// **An attenuator's bar spans its own range, as the header's does.** The
+    /// HF+'s ATT runs -48 to 0 dB; read as a gain from zero, every setting
+    /// clamped to 0, the bar stayed empty and the value read 0 whatever it
+    /// was set to (Viktor, live: "it sets it, it just does not show").
+    #[test]
+    fn an_attenuator_moves_its_bar_and_reads_negative() {
+        let rail = |att: f64| {
+            let mut m = crate::state::SdrMetrics::fixture().streaming().airspyhf();
+            m.radio.gains = vec![att, 0.0];
+            crate::state::fixture::draw(crate::ui::CommandRailPanel, 34, 40, &m)
+        };
+        let deep = rail(-48.0);
+        let none = rail(0.0);
+        let row = |lines: &[String]| {
+            lines
+                .iter()
+                .find(|l| l.contains("ATT"))
+                .cloned()
+                .unwrap_or_default()
+        };
+        assert!(row(&rail(-18.0)).contains("-18"), "{}", row(&rail(-18.0)));
+        let total = rail(-18.0)
+            .iter()
+            .find(|l| l.contains("TOTAL"))
+            .cloned()
+            .unwrap_or_default();
+        assert!(total.contains("-18 dB"), "{total}");
+        assert_ne!(row(&deep), row(&none), "the bar did not move");
     }
 }

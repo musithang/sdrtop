@@ -18,6 +18,12 @@ This project was developed with humans and AI working together.
 Found a bug, tested a clone nobody else owns, or sent a patch? Open an issue or
 a pull request and your name belongs here too.
 
+## Packaging
+
+- **Ateles ([@4goettma](https://github.com/4goettma))**: the Arch Linux
+  packages on the AUR, `sdrtop`, `sdrtop-git` and `sdrtop-bin`, kept current:
+  the optional radio libraries and a build that matches the release profile.
+
 ## Hardware
 
 - **[Airspy](https://airspy.com/)**: an Airspy R2 and an Airspy HF+ Discovery,
