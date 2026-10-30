@@ -183,13 +183,24 @@ fn text_of(buf: &[c_char]) -> Option<String> {
     (!text.is_empty()).then(|| text.to_string())
 }
 
-/// The device selector's entries for what [`find`] returned.
-pub fn list() -> Vec<DeviceListing> {
+/// Whether a radio [`find`] returned is offered without being asked for by
+/// name: a Discovery, the one board driven natively, and a held radio, which
+/// cannot say what it is and is only offered so that observer mode can show
+/// it. The other HF+ boards stay with SoapyAirspyHF unless asked for, where
+/// they work and here they would be refused.
+pub fn offered(found: &Found, asked_by_name: bool) -> bool {
+    asked_by_name || found.board == Board::Discovery || found.held
+}
+
+/// The device selector's entries for what [`find`] returned and [`offered`]
+/// lets through.
+pub fn list(asked_by_name: bool) -> Vec<DeviceListing> {
     let Ok(api) = ffi::api() else {
         return Vec::new();
     };
     find(api)
         .into_iter()
+        .filter(|found| offered(found, asked_by_name))
         .enumerate()
         .map(|(index, found)| DeviceListing {
             kind: DeviceKind::AirspyHf,
@@ -1122,6 +1133,33 @@ mod tests {
         );
         fixture.mode(32);
         assert_eq!(find(&api), vec![]);
+    }
+
+    /// **Unasked, only a Discovery is offered natively**, and a held radio,
+    /// which cannot say what it is, so observer mode can show it; another HF+
+    /// board stays with SoapyAirspyHF, where it works, unless asked for.
+    #[test]
+    fn unasked_only_a_discovery_or_a_held_radio_is_offered() {
+        let discovery = Found {
+            serial: "dd528080ff444630".into(),
+            board: Board::Discovery,
+            firmware: None,
+            rates: vec![768_000],
+            held: false,
+        };
+        let ranger = Found {
+            board: Board::Ranger,
+            ..discovery.clone()
+        };
+        let held = Found {
+            board: Board::Unknown,
+            held: true,
+            ..discovery.clone()
+        };
+        assert!(offered(&discovery, false));
+        assert!(offered(&held, false));
+        assert!(!offered(&ranger, false));
+        assert!(offered(&ranger, true), "asked for by name");
     }
 
     /// The selector says which HF+ it is and by which serial; another board

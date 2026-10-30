@@ -10,13 +10,13 @@ die() { printf '%s\n' "$*" >&2; exit 1; }
 [ -z "${RUSTFLAGS+x}" ] || die "RUSTFLAGS must be unset"
 [ -z "${CARGO_ENCODED_RUSTFLAGS+x}" ] || die "CARGO_ENCODED_RUSTFLAGS must be unset"
 
-if ldconfig -p | grep -Eq 'lib(hackrf|rtlsdr|airspy|SoapySDR)\.so'; then
+if ldconfig -p | grep -Eq 'lib(hackrf|rtlsdr|airspy|airspyhf|SoapySDR)\.so'; then
     die "The smoke environment must have no SDR runtime libraries"
 fi
 if find /usr/lib /usr/local/lib /lib /usr/include /usr/local/include \
     \( -name 'libhackrf.so*' -o -name 'librtlsdr.so*' -o -name 'libairspy.so*' \
-       -o -name 'libSoapySDR.so*' -o -name hackrf.h -o -name rtl-sdr.h \
-       -o -name airspy.h \) -print | grep -q .; then
+       -o -name 'libairspyhf.so*' -o -name 'libSoapySDR.so*' -o -name hackrf.h \
+       -o -name rtl-sdr.h -o -name airspy.h -o -name airspyhf.h \) -print | grep -q .; then
     die "The smoke environment must have no SDR libraries or headers"
 fi
 
@@ -24,7 +24,7 @@ cargo build --locked
 cargo test --locked
 bin="${CARGO_TARGET_DIR:-target}/debug/sdrtop"
 needed=$(readelf -d "$bin")
-if printf '%s\n' "$needed" | grep -Eq 'NEEDED.*lib(hackrf|rtlsdr|airspy)'; then
+if printf '%s\n' "$needed" | grep -Eq 'NEEDED.*lib(hackrf|rtlsdr|airspy|airspyhf)'; then
     die "The binary requires a native SDR library"
 fi
 work=$(mktemp -d)
@@ -61,11 +61,15 @@ expect_text "librtlsdr2"
 expect_failure --device airspy
 expect_text "libairspy backend unavailable"
 expect_text "libairspy0"
+expect_failure --device airspyhf
+expect_text "libairspyhf backend unavailable"
+expect_text "libairspyhf1"
 expect_failure
 expect_text "No device found"
 expect_text "libhackrf backend unavailable"
 expect_text "librtlsdr backend unavailable"
 expect_text "libairspy backend unavailable"
+expect_text "libairspyhf backend unavailable"
 for backend in tinysa soapy; do
     expect_failure --device "$backend"
     expect_text "No device found"

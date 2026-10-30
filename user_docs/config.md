@@ -27,8 +27,8 @@ The config is **device-agnostic**: the same file works for a HackRF or an
 RTL-SDR. Any value outside the active device's range is clamped into it at
 startup rather than rejected, so a config saved on a HackRF at 2.4 GHz and
 10 Msps still boots an RTL-SDR at a legal frequency and rate instead of failing.
-With more than one radio connected, pick one with
-`--device hackrf|rtlsdr|soapy`.
+With more than one radio connected, pick one with `--device`; `sdrtop --help`
+lists the backends it takes.
 
 ---
 

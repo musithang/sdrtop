@@ -37,7 +37,7 @@ pub(crate) const VERSION: &str = match option_env!("SDRTOP_VERSION") {
 #[command(
     name = "sdrtop",
     version = VERSION,
-    about = "SDR terminal monitor: HackRF One, RTL-SDR, Airspy R2, and SoapySDR devices"
+    about = "SDR terminal monitor: HackRF One, RTL-SDR, Airspy R2, Airspy HF+ Discovery, and SoapySDR devices"
 )]
 pub struct Cli {
     /// Path to config file (default: ~/.config/sdrtop/config.toml)
@@ -47,7 +47,7 @@ pub struct Cli {
     /// Pick the backend, optionally with a tinySA path/input or SoapySDR device args
     #[arg(
         long,
-        value_name = "hackrf|rtlsdr|airspy|tinysa[=PATH[?input=low|high]]|soapy[=args]"
+        value_name = "hackrf|rtlsdr|airspy|airspyhf|tinysa[=PATH[?input=low|high]]|soapy[=args]"
     )]
     pub device: Option<String>,
 

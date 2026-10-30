@@ -167,17 +167,15 @@ pub fn parse_device_arg(spec: &str) -> anyhow::Result<(DeviceKind, Option<String
         None => (spec, None),
     };
     let kind = match name.to_ascii_lowercase().as_str() {
-        // Not in the --device help until it streams: asked for by name only.
         "airspy" => DeviceKind::Airspy,
-        // Not in the --device help until it opens: asked for by name only.
         "airspyhf" => DeviceKind::AirspyHf,
         "hackrf" => DeviceKind::HackRf,
         "rtlsdr" | "rtl-sdr" | "rtl" => DeviceKind::RtlSdr,
         "soapy" | "soapysdr" => DeviceKind::Soapy,
         "tinysa" | "tiny-sa" => DeviceKind::TinySa,
         other => anyhow::bail!(
-            "Unknown --device '{other}' (use 'hackrf', 'rtlsdr', 'airspy', 'tinysa', \
-             or 'soapy'; tinysa and soapy accept '=selector')"
+            "Unknown --device '{other}' (use 'hackrf', 'rtlsdr', 'airspy', 'airspyhf', \
+             'tinysa', or 'soapy'; tinysa and soapy accept '=selector')"
         ),
     };
     if kind == DeviceKind::TinySa {
@@ -188,23 +186,24 @@ pub fn parse_device_arg(spec: &str) -> anyhow::Result<(DeviceKind, Option<String
     Ok((kind, filter))
 }
 
+/// The native backends, whose missing runtime library is a reason a search
+/// came back empty.
+const NATIVE: [DeviceKind; 4] = [
+    DeviceKind::HackRf,
+    DeviceKind::RtlSdr,
+    DeviceKind::Airspy,
+    DeviceKind::AirspyHf,
+];
+
 /// Reports relevant backend diagnostics after empty discovery
 pub fn no_device_hint(want: Option<DeviceKind>) -> String {
     let mut hint = String::new();
-    for kind in [DeviceKind::HackRf, DeviceKind::RtlSdr, DeviceKind::Airspy] {
+    for kind in NATIVE {
         if want.is_none() || want == Some(kind) {
             if let Err(err) = kind.check_available() {
                 hint.push('\n');
                 hint.push_str(&err.to_string());
             }
-        }
-    }
-    // libairspyhf only when its backend was asked for: unasked it offers
-    // nothing yet, so its absence is no reason the search came back empty.
-    if want == Some(DeviceKind::AirspyHf) {
-        if let Err(err) = DeviceKind::AirspyHf.check_available() {
-            hint.push('\n');
-            hint.push_str(&err.to_string());
         }
     }
     if (want.is_none() || want == Some(DeviceKind::Soapy)) && soapy::api::api().is_some() {
@@ -230,10 +229,10 @@ pub fn list_all_devices(
     // An R2 natively, which then wins over SoapyAirspy's listing of it
     // below; a Mini only when asked for by name (see `airspy::offered`).
     out.extend(airspy::list(want == Some(DeviceKind::Airspy)));
-    // The HF+ only when asked for by name, until its backend streams.
-    if want == Some(DeviceKind::AirspyHf) {
-        out.extend(airspyhf::list());
-    }
+    // A Discovery natively, which then wins over SoapyAirspyHF's listing of
+    // it below; the other HF+ boards only when asked for by name (see
+    // `airspyhf::offered`).
+    out.extend(airspyhf::list(want == Some(DeviceKind::AirspyHf)));
     let tinysa = if want == Some(DeviceKind::TinySa) {
         tinysa::list(soapy_filter.filter(|value| !value.is_empty()))
     } else {
@@ -388,12 +387,12 @@ mod tests {
         assert!(no_device_hint(Some(DeviceKind::TinySa)).is_empty());
     }
 
-    /// Unasked, the HF+ backend offers nothing yet, so a missing
-    /// libairspyhf is no reason a search came back empty and the hint does
-    /// not name it, installed or not.
+    /// Unasked, every native backend's missing library is a reason a search
+    /// came back empty, the HF+'s now included (it offers a Discovery
+    /// unasked); a search for one backend names no other's.
     #[test]
-    fn an_unasked_search_does_not_name_libairspyhf() {
-        assert!(!no_device_hint(None).contains("libairspyhf"));
+    fn an_unasked_search_asks_every_native_backend() {
+        assert!(NATIVE.contains(&DeviceKind::AirspyHf));
         assert!(!no_device_hint(Some(DeviceKind::HackRf)).contains("libairspyhf"));
     }
 
