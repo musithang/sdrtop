@@ -406,6 +406,7 @@ fn rtl_caps(tuner: c_int, gains_tenths: &[i32]) -> DeviceCapabilities {
         // range, so entering "0.9" (900_000) snaps up to a valid 900_001.
         sample_rate_min_hz: 900_001.0,
         sample_rate_max_hz: 3_200_000.0,
+        sample_rates: Vec::new(),
         default_frequency_hz: 100_000_000,
         default_sample_rate_hz: 2_400_000.0,
         sample_geometry: SampleGeometry {

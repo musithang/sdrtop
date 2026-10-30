@@ -167,6 +167,26 @@ pub(super) fn sample_rate(
         KeyCode::Char(c) if c.is_ascii_digit() || c == '.' => {
             metrics(state).ui.input_buf.push(c);
         }
+        // On a radio that takes only a list of rates, the arrows step through
+        // it, from the figure in the field or else the rate it runs at; the
+        // field then holds the rate, so Enter, Backspace and typing work on it
+        // as on a typed one. A radio with no list ignores them, as before.
+        KeyCode::Left | KeyCode::Right | KeyCode::Up | KeyCode::Down => {
+            let up = matches!(key.code, KeyCode::Right | KeyCode::Up);
+            let mut m = metrics(state);
+            let from =
+                m.ui.input_buf
+                    .parse::<f64>()
+                    .ok()
+                    .filter(|&mhz| mhz > 0.0)
+                    .map(|mhz| mhz * 1e6)
+                    .unwrap_or(m.radio.config_sample_rate);
+            if let Some(hz) = m.caps.rate_step(from, up) {
+                m.ui.input_buf = crate::ui::widgets::timing_fmt::fmt_msps(hz)
+                    .trim()
+                    .to_string();
+            }
+        }
         KeyCode::Enter => {
             if let Some(device) = device {
                 let caps = device.capabilities();
@@ -180,7 +200,9 @@ pub(super) fn sample_rate(
                         .parse::<f64>()
                         .ok()
                         .filter(|&mhz| mhz > 0.0)
-                        .map(|mhz| (mhz * 1_000_000.0).clamp(lo_hz, hi_hz))
+                        // Whole hertz: 0.768 MHz in floating point is a hair
+                        // under 768 000, and every radio's rates are whole.
+                        .map(|mhz| (mhz * 1_000_000.0).round().clamp(lo_hz, hi_hz))
                 };
                 // Release lock before calling device - set_sample_rate is a
                 // blocking USB control transfer; holding the mutex here deadlocks the
@@ -517,5 +539,84 @@ mod tests {
             .unwrap()
             .iter()
             .all(|&hz| hz == 31_000_000));
+    }
+
+    fn rate_key(state: &Arc<Mutex<SdrMetrics>>, code: KeyCode) {
+        sample_rate(KeyEvent::from(code), state, None);
+    }
+
+    /// On a radio with a list of rates the arrows step through it from the
+    /// rate it runs at, and the field holds the rate stepped to; on one with
+    /// no list they leave the field alone.
+    #[test]
+    fn the_arrows_step_a_listed_rate_into_the_field() {
+        let mut m = SdrMetrics::fixture().airspyhf();
+        m.ui.input_mode = InputMode::SampleRateInput;
+        let state = Arc::new(Mutex::new(m));
+        rate_key(&state, KeyCode::Right);
+        assert_eq!(metrics(&state).ui.input_buf, "0.912");
+        rate_key(&state, KeyCode::Right);
+        assert_eq!(metrics(&state).ui.input_buf, "0.912", "stops at the top");
+        rate_key(&state, KeyCode::Left);
+        rate_key(&state, KeyCode::Down);
+        assert_eq!(metrics(&state).ui.input_buf, "0.650");
+        rate_key(&state, KeyCode::Up);
+        assert_eq!(metrics(&state).ui.input_buf, "0.768");
+
+        let mut hackrf = SdrMetrics::fixture();
+        hackrf.ui.input_mode = InputMode::SampleRateInput;
+        let state = Arc::new(Mutex::new(hackrf));
+        rate_key(&state, KeyCode::Right);
+        assert_eq!(metrics(&state).ui.input_buf, "");
+    }
+
+    /// A rate stepped to (or typed) reaches the radio in whole hertz, so the
+    /// radio's own 768 000 is asked for, not a hair under it.
+    #[test]
+    fn a_stepped_rate_reaches_the_radio_in_whole_hertz() {
+        struct Asked(hardware::DeviceCapabilities, Mutex<Vec<f64>>);
+        impl hardware::SdrDevice for Asked {
+            fn capabilities(&self) -> &hardware::DeviceCapabilities {
+                &self.0
+            }
+            fn info(&self) -> hardware::DeviceInfo {
+                hardware::DeviceInfo::default()
+            }
+            fn start_rx(&self, _: Arc<hardware::RxContext>) -> anyhow::Result<()> {
+                Ok(())
+            }
+            fn stop_rx(&self) -> anyhow::Result<()> {
+                Ok(())
+            }
+            fn is_streaming(&self) -> bool {
+                false
+            }
+            fn set_frequency(&self, hz: u64) -> anyhow::Result<u64> {
+                Ok(hz)
+            }
+            fn set_sample_rate(&self, hz: f64) -> anyhow::Result<hardware::RateSet> {
+                self.1.lock().unwrap().push(hz);
+                Ok(hardware::RateSet::new(hz, Some(hz), 0))
+            }
+            fn set_lna_gain(&self, _db: u32) -> anyhow::Result<()> {
+                Ok(())
+            }
+        }
+        let radio = Arc::new(Asked(
+            crate::hardware::native::airspyhf::caps(&[912_000, 768_000, 192_000], 2048),
+            Mutex::new(Vec::new()),
+        ));
+        let device: Arc<dyn hardware::SdrDevice> = radio.clone();
+        let mut m = SdrMetrics::fixture().airspyhf();
+        m.radio.config_sample_rate = 912_000.0;
+        m.ui.input_mode = InputMode::SampleRateInput;
+        let state = Arc::new(Mutex::new(m));
+        rate_key(&state, KeyCode::Left);
+        sample_rate(KeyEvent::from(KeyCode::Enter), &state, Some(&device));
+        assert_eq!(*radio.1.lock().unwrap(), vec![768_000.0]);
+        let m = metrics(&state);
+        assert_eq!(m.radio.config_sample_rate, 768_000.0);
+        let log = &m.ui.log.back().unwrap().text;
+        assert!(log.contains("set to 0.768 MHz"), "{log}");
     }
 }

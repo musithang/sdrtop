@@ -268,6 +268,7 @@ pub fn capabilities(a: &DriverAnswers) -> Result<Built, Unsupported> {
         freq_gaps: Vec::new(),
         sample_rate_min_hz: rate_min,
         sample_rate_max_hz: rate_max,
+        sample_rates: Vec::new(),
         default_frequency_hz: WANT_FREQ_HZ.clamp(freq_min, freq_max) as u64,
         default_sample_rate_hz: WANT_RATE_HZ.clamp(rate_min, rate_max),
         sample_geometry: geometry,

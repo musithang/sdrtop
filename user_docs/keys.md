@@ -78,7 +78,7 @@ each view, and the footer shows the numbers for the group you are in.
 |-----|-------------|
 | `Space` | Start or stop receiving |
 | `f` | Type a new center frequency (in MHz) |
-| `s` | Type a new sample rate (HackRF 2–20 MHz · RTL-SDR 0.9–3.2 MHz) |
+| `s` | Type a new sample rate (HackRF 2–20 MHz · RTL-SDR 0.9–3.2 MHz); on a radio with a fixed list of rates (the Airspys) `←` `→` step through it |
 | `r` | Reset all settings to defaults |
 | `a` | Toggle the front end boost: RF amplifier (HackRF) / tuner AGC (RTL-SDR). Absent on a device that reports neither |
 | `w` | Pause or resume the waterfall |
@@ -415,7 +415,8 @@ you are in.
 Three keys put sdrtop into a text-entry mode: `f` (frequency in MHz), `s` (sample
 rate in MHz) and `m` in spectrum focus (marker name). While you're typing, keys
 are letters rather than commands, and **this is the one place capitals mean what
-they say**. `Enter` confirms, `Esc` cancels.
+they say**. `Enter` confirms, `Esc` cancels. On a radio that offers only a list
+of rates, `s` shows the list, and `←` `→` (or `↑` `↓`) step through it.
 
 A marker name left empty gets an automatic label like `[1]`. Input formats and
 examples are in [Advanced Features](advanced.md).

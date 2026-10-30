@@ -1167,6 +1167,7 @@ fn capabilities(model: Model, basic_input: BasicInput) -> DeviceCapabilities {
         freq_gaps: Vec::new(),
         sample_rate_min_hz: allowed_points()[0] as f64,
         sample_rate_max_hz: (maximum_hz - minimum_hz) as f64,
+        sample_rates: Vec::new(),
         default_frequency_hz: default_frequency(model, basic_input),
         default_sample_rate_hz: DEFAULT_SPAN_HZ as f64,
         sample_geometry: SampleGeometry {

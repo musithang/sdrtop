@@ -229,4 +229,24 @@ mod tests {
             .join("\n");
         assert!(text.contains("no reading"), "{text}");
     }
+
+    /// The rail writes a rate under 1 Msps to the kHz, as the header does:
+    /// 456 kS/s is not 0.5M. From 1 Msps up it reads as it always did.
+    #[test]
+    fn the_rail_writes_a_rate_under_one_msps_to_the_khz() {
+        let theme = crate::Theme::sdr();
+        let text = |m: &SdrMetrics| {
+            let line = hero::band_sr_line(m, 60, &theme);
+            line.spans
+                .iter()
+                .map(|s| s.content.as_ref())
+                .collect::<String>()
+        };
+        let mut hf = SdrMetrics::fixture().airspyhf();
+        hf.radio.config_sample_rate = 456_000.0;
+        assert!(text(&hf).contains("SR 0.456M"), "{}", text(&hf));
+        let hackrf = SdrMetrics::fixture();
+        let want = format!("SR {:.1}M", hackrf.radio.config_sample_rate / 1e6);
+        assert!(text(&hackrf).contains(&want), "{}", text(&hackrf));
+    }
 }

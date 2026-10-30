@@ -365,6 +365,11 @@ pub fn caps(rates: &[u32], samples_per_transfer: u64) -> DeviceCapabilities {
         freq_gaps: vec![std::ops::RangeInclusive::new(31_000_001, VHF_FROM_HZ - 1)],
         sample_rate_min_hz: f64::from(min),
         sample_rate_max_hz: f64::from(max),
+        sample_rates: {
+            let mut listed: Vec<f64> = rates.iter().map(|&r| f64::from(r)).collect();
+            listed.sort_by(f64::total_cmp);
+            listed
+        },
         // The 40 m band: a choice, somewhere there is always something.
         default_frequency_hz: 7_100_000,
         default_sample_rate_hz: f64::from(default_rate),

@@ -140,7 +140,7 @@ times higher than this radio goes.
 ## Rates, and what 0 dBFS means
 
 sdrtop starts on 768 kS/s at 7.100 MHz, because somewhere on 40 m there is always
-something.
+something. `s` lists the seven rates, and `←` `→` step through them.
 
 **0 dBFS is the 16-bit USB word**, where the samples really clip. The firmware
 filters each rate with its own gain, so a carrier's dBFS changes with the rate by

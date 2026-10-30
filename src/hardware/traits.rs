@@ -1307,6 +1307,11 @@ pub struct DeviceCapabilities {
     pub freq_gaps: Vec<std::ops::RangeInclusive<u64>>,
     pub sample_rate_min_hz: f64,
     pub sample_rate_max_hz: f64,
+    /// The rates the radio offers, lowest first, when it takes only those
+    /// (an Airspy's firmware lists its own); empty when any rate between the
+    /// minimum and the maximum will do. `[S]` steps through a list instead of
+    /// leaving the user to guess which figures the radio accepts.
+    pub sample_rates: Vec<f64>,
     /// Startup freq/rate guaranteed legal for THIS device. Used as the fallback
     /// when a loaded config value is out of range (e.g. a HackRF config opened
     /// on an RTL-SDR), so the radio never boots to an illegal setting.
@@ -1365,6 +1370,29 @@ fn hz_text(hz: u64) -> String {
 }
 
 impl DeviceCapabilities {
+    /// The listed rate one step up or down from `from`, or `None` for a radio
+    /// that takes any rate in its range. From a rate between two listed
+    /// ones, the next listed one that way; at either end of the list, that
+    /// end, so holding a key stops there rather than wrapping round.
+    pub fn rate_step(&self, from: f64, up: bool) -> Option<f64> {
+        let first = *self.sample_rates.first()?;
+        let last = *self.sample_rates.last()?;
+        Some(if up {
+            self.sample_rates
+                .iter()
+                .copied()
+                .find(|&r| r > from + 0.5)
+                .unwrap_or(last)
+        } else {
+            self.sample_rates
+                .iter()
+                .rev()
+                .copied()
+                .find(|&r| r < from - 0.5)
+                .unwrap_or(first)
+        })
+    }
+
     /// Whether the radio tunes to `hz`: inside the hull and in no gap.
     pub fn tunes(&self, hz: u64) -> bool {
         (self.freq_min_hz..=self.freq_max_hz).contains(&hz) && !self.in_gap(hz)
@@ -2583,6 +2611,38 @@ mod tests {
         assert_eq!(
             ctx.streams_begun.load(std::sync::atomic::Ordering::Relaxed),
             before + 1
+        );
+    }
+
+    /// A radio with a list of rates steps through it: from a listed rate to
+    /// the next, from between two to the nearer one that way, and stops at
+    /// either end; a radio with no list has no steps.
+    #[test]
+    fn rates_step_through_a_list_and_stop_at_its_ends() {
+        let hf = crate::hardware::native::airspyhf::caps(
+            &[
+                912_000, 768_000, 650_000, 456_000, 384_000, 228_000, 192_000,
+            ],
+            2048,
+        );
+        assert_eq!(
+            hf.sample_rates,
+            vec![192e3, 228e3, 384e3, 456e3, 650e3, 768e3, 912e3]
+        );
+        assert_eq!(hf.rate_step(768e3, true), Some(912e3));
+        assert_eq!(hf.rate_step(768e3, false), Some(650e3));
+        assert_eq!(hf.rate_step(912e3, true), Some(912e3));
+        assert_eq!(hf.rate_step(192e3, false), Some(192e3));
+        assert_eq!(hf.rate_step(700e3, true), Some(768e3));
+        assert_eq!(hf.rate_step(700e3, false), Some(650e3));
+        // A hair under a listed rate is that rate, not the one below it.
+        assert_eq!(hf.rate_step(767_999.9, false), Some(650e3));
+        let r2 = crate::hardware::native::airspy::caps();
+        assert_eq!(r2.sample_rates, vec![2.5e6, 10e6]);
+        assert_eq!(r2.rate_step(2.5e6, true), Some(10e6));
+        assert_eq!(
+            crate::hardware::native::hackrf::caps().rate_step(8e6, true),
+            None
         );
     }
 }

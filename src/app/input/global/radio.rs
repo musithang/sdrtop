@@ -95,10 +95,11 @@ pub(super) fn begin_frequency_input(ctx: &mut InputCtx<'_>) {
     m.push_log("Enter frequency in MHz, then press Enter");
 }
 
-/// `[S]` - type a sample rate, with the device's own legal range in the prompt.
+/// `[S]` - type a sample rate, with the device's own legal range in the prompt,
+/// or on a radio that takes only a list of rates, step through the list.
 pub(super) fn begin_sample_rate_input(ctx: &mut InputCtx<'_>) {
     let Some(device) = ctx.device else { return };
-    let (lo, hi, name) = {
+    let (lo, hi, name, listed) = {
         let c = device.capabilities();
         (
             crate::ui::widgets::timing_fmt::fmt_msps(c.sample_rate_min_hz),
@@ -108,16 +109,21 @@ pub(super) fn begin_sample_rate_input(ctx: &mut InputCtx<'_>) {
             } else {
                 "sample rate"
             },
+            !c.sample_rates.is_empty(),
         )
     };
     let mut m = metrics(ctx.state);
     m.ui.input_mode = InputMode::SampleRateInput;
     m.ui.input_buf.clear();
-    m.push_log(format!(
-        "Enter {name} in MHz ({}\u{2013}{}), then press Enter",
-        lo.trim_start(),
-        hi.trim_start(),
-    ));
+    m.push_log(if listed {
+        format!("Pick a {name} with \u{2190} \u{2192} (or type it in MHz), then press Enter")
+    } else {
+        format!(
+            "Enter {name} in MHz ({}\u{2013}{}), then press Enter",
+            lo.trim_start(),
+            hi.trim_start(),
+        )
+    });
 }
 
 /// `[m]` - survey the band, or lock to where the radio is pointed.

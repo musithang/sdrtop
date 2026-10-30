@@ -94,7 +94,12 @@ pub(super) fn band_sr_line(state: &SdrMetrics, iw: usize, theme: &crate::Theme) 
         ));
         spans.push(Span::raw("  "));
     }
-    let sr = format!("SR {:.1}M", state.radio.config_sample_rate / 1_000_000.0);
+    // As the header writes it: three decimals under 1 Msps, where one would
+    // read 768 and 912 kS/s alike as 0.8.
+    let sr = format!(
+        "SR {}M",
+        crate::ui::widgets::timing_fmt::fmt_msps(state.radio.config_sample_rate).trim()
+    );
     used += sr.chars().count();
     spans.push(Span::styled(sr, Style::default().fg(theme.label)));
     // RBW is the first thing to go on a narrow rail - drop it (and its separator)

@@ -13,6 +13,7 @@ use crate::hardware::GainModel;
 use crate::state::{InputMode, MicroView, SdrMetrics};
 use crate::ui::chrome::frame;
 use crate::ui::panel::{FrameStyle, FrameTone, Panel, PanelChrome};
+use crate::ui::widgets::timing_fmt::fmt_msps;
 
 const FOCUS_SEP: &str = "  ·  ";
 const NORMAL_SEP: &str = " · ";
@@ -581,15 +582,18 @@ impl Panel for FooterPanel {
                     " Frequency (MHz): [{}▌]  [Enter] Confirm  [Esc] Cancel",
                     m.ui.input_buf
                 )),
+                InputMode::SampleRateInput if !m.caps.sample_rates.is_empty() => {
+                    rate_list_prompt(m, theme, max_lines)
+                }
                 InputMode::SampleRateInput => prompt(format!(
-                    " {} ({:.1}–{:.1} MHz): [{}▌]  [Enter] Confirm  [Esc] Cancel",
+                    " {} ({}–{} MHz): [{}▌]  [Enter] Confirm  [Esc] Cancel",
                     if m.caps.sample_rate_is_span {
                         "Span"
                     } else {
                         "Sample rate"
                     },
-                    m.caps.sample_rate_min_hz / 1e6,
-                    m.caps.sample_rate_max_hz / 1e6,
+                    fmt_msps(m.caps.sample_rate_min_hz).trim(),
+                    fmt_msps(m.caps.sample_rate_max_hz).trim(),
                     m.ui.input_buf
                 )),
                 InputMode::SweepStartInput => prompt(format!(
@@ -723,6 +727,64 @@ fn focus_items(m: &SdrMetrics) -> Vec<String> {
     items.push(tab.to_string());
     items.push("[Esc] Exit focus".to_string());
     items
+}
+
+/// The rate prompt of a radio that takes only a list of rates, on two lines:
+/// every rate it offers with the one the field holds lit (or, with the field
+/// empty, the one it runs at, which is where the arrows step from); then
+/// the keys, led by a typed figure that is not on the list. A footer one line
+/// high gets both on that line.
+fn rate_list_prompt(m: &SdrMetrics, theme: &crate::Theme, max_lines: usize) -> Vec<Line<'static>> {
+    use ratatui::style::Modifier;
+    let typed =
+        m.ui.input_buf
+            .parse::<f64>()
+            .ok()
+            .map(|mhz| (mhz * 1e6).round());
+    let chosen = typed.unwrap_or(m.radio.config_sample_rate);
+    let on_list = |hz: f64| (hz - chosen).abs() < 0.5;
+    let name = if m.caps.sample_rate_is_span {
+        "Span"
+    } else {
+        "Sample rate"
+    };
+    let plain = Style::default().fg(theme.value);
+    let mut spans = vec![Span::styled(format!(" {name}:"), plain)];
+    for &hz in &m.caps.sample_rates {
+        let text = fmt_msps(hz).trim().to_string();
+        spans.push(if on_list(hz) {
+            Span::styled(
+                format!(" \u{25b8}{text}\u{25c2}"),
+                Style::default()
+                    .fg(theme.value_hi)
+                    .add_modifier(Modifier::BOLD),
+            )
+        } else {
+            Span::styled(format!("  {text} "), Style::default().fg(theme.label))
+        });
+    }
+    spans.push(Span::styled(" MHz", plain));
+    // A typed figure that is not on the list leads the keys' line, where it
+    // fits beside them even when the list fills the first.
+    let field = if !m.ui.input_buf.is_empty() && !m.caps.sample_rates.iter().any(|&hz| on_list(hz))
+    {
+        format!(" [{}\u{258c}] ", m.ui.input_buf)
+    } else {
+        String::new()
+    };
+    let keys = Span::styled(
+        format!(
+            "{field} [\u{2190}\u{2192}] Step  [Enter] Confirm  [Esc] Cancel  (or type it in MHz)"
+        ),
+        plain,
+    );
+    // A footer one line high (the compact layouts) carries both on one.
+    if max_lines < 2 {
+        spans.push(Span::styled("  ", plain));
+        spans.push(keys);
+        return vec![Line::from(spans)];
+    }
+    vec![Line::from(spans), Line::from(keys)]
 }
 
 #[cfg(test)]
@@ -1224,5 +1286,73 @@ mod tests {
                 assert!(!item.starts_with("[0]"), "{preset}: {item}");
             }
         }
+    }
+
+    /// A radio with a list of rates shows the list in the rate prompt, the
+    /// rate it runs at lit while the field is empty and the stepped one after,
+    /// with the keys on the line below; a typed figure off the list is shown
+    /// beside it. A radio with no list keeps its range, written as the
+    /// header writes rates.
+    #[test]
+    fn the_rate_prompt_lists_a_radios_rates() {
+        let draw = |m: &SdrMetrics| {
+            let mut terminal =
+                ratatui::Terminal::new(ratatui::backend::TestBackend::new(80, 4)).unwrap();
+            terminal
+                .draw(|f| FooterPanel.render(f, f.size(), m, &crate::Theme::sdr(), false))
+                .unwrap();
+            let buf = terminal.backend().buffer().clone();
+            (0..buf.area.height)
+                .map(|y| {
+                    (0..buf.area.width)
+                        .map(|x| buf.get(x, y).symbol().to_string())
+                        .collect::<String>()
+                })
+                .collect::<Vec<_>>()
+                .join("\n")
+        };
+        let mut m = SdrMetrics::fixture().airspyhf();
+        m.ui.input_mode = InputMode::SampleRateInput;
+        let out = draw(&m);
+        for rate in ["0.192", "0.228", "0.384", "0.456", "0.650", "0.912"] {
+            assert!(out.contains(rate), "{rate}: {out}");
+        }
+        assert!(
+            out.contains("\u{25b8}0.768\u{25c2}"),
+            "the running rate lit: {out}"
+        );
+        assert!(out.contains("Step") && out.contains("Cancel"), "{out}");
+        m.ui.input_buf = "0.192".into();
+        let out = draw(&m);
+        assert!(out.contains("\u{25b8}0.192\u{25c2}"), "{out}");
+        assert!(!out.contains("\u{25b8}0.768"), "{out}");
+        m.ui.input_buf = "0.5".into();
+        assert!(
+            draw(&m).contains("[0.5\u{258c}]"),
+            "a typed figure off the list"
+        );
+
+        // A footer one line high, as the compact layouts have: list and keys
+        // on the one line.
+        let mut one = SdrMetrics::fixture().airspyhf();
+        one.ui.input_mode = InputMode::SampleRateInput;
+        let mut terminal =
+            ratatui::Terminal::new(ratatui::backend::TestBackend::new(160, 1)).unwrap();
+        terminal
+            .draw(|f| FooterPanel.render(f, f.size(), &one, &crate::Theme::sdr(), false))
+            .unwrap();
+        let buf = terminal.backend().buffer().clone();
+        let row: String = (0..buf.area.width)
+            .map(|x| buf.get(x, 0).symbol().to_string())
+            .collect();
+        assert!(
+            row.contains("\u{25b8}0.768\u{25c2}") && row.contains("Step"),
+            "{row}"
+        );
+
+        let mut wide = SdrMetrics::fixture();
+        wide.ui.input_mode = InputMode::SampleRateInput;
+        let out = draw(&wide);
+        assert!(out.contains("(2.0\u{2013}20.0 MHz)"), "{out}");
     }
 }

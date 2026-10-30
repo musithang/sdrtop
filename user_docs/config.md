@@ -193,6 +193,8 @@ both **in MHz**, both as a plain number. No units, no suffixes: `92.8`, `433.92`
 A value outside your device's range is clamped into it rather than rejected, so
 typing `9000` on an RTL-SDR gets you its ceiling instead of an error. Something
 that isn't a number at all does get an error, in the log, naming the valid range.
+A radio that takes only a fixed list of rates (the Airspy R2 and HF+) shows the
+list when you press `s`: step through it with `←` `→`, or type one, then `Enter`.
 
 ---
 

@@ -355,6 +355,7 @@ pub fn caps() -> DeviceCapabilities {
         freq_gaps: Vec::new(),
         sample_rate_min_hz: R2_RATES[0] as f64,
         sample_rate_max_hz: R2_RATES[1] as f64,
+        sample_rates: R2_RATES.iter().map(|&r| f64::from(r)).collect(),
         default_frequency_hz: 100_000_000,
         default_sample_rate_hz: 10_000_000.0,
         // libairspy shifts the 12-bit samples up by four and filters them into
