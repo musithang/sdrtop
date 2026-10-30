@@ -46,7 +46,7 @@ pub use net::ROSTER_SORT_KEYS;
 // Named by the NET worker, which counts its arrivals into it, and Wi-Fi's
 // funnel and latest frame with it.
 pub use ft8::{verdict as ft8_verdict, CycleEntry, CycleOutcome, Ft8State};
-pub use home::Home;
+pub use home::{Home, StationField};
 #[cfg(test)]
 pub use net::WifiSurvey;
 pub use net::{AirColumn, Rhythm, Spender, READING_COLUMNS, RHYTHM_BINS};

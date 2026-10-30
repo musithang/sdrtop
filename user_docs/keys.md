@@ -53,6 +53,15 @@ An unavailable value shows the closest advertised integer without applying it.
 `Esc` cancels entry without changing the device.
 The accepted value stays visible until the device finishes applying the change.
 
+Below the radio's settings sit yours, under **Station**: latitude, longitude
+and callsign. `Down` carries on into them, `Enter` opens the value for
+typing, `Enter` again keeps it, and `Esc` leaves it as it was. A latitude of
+95, or a longitude that is not a number, is refused on the spot with the
+reason, and the old value stays. An empty value clears the setting. The
+locator is worked out from the two coordinates; there is nothing to type
+there, and nothing to get wrong. They are saved with the rest of the config
+when you quit ([`[station]`](config.md#the-whole-file)).
+
 **Numbers belong to a group.** `2` is Gain & noise inside Receiver and Full
 spectrum inside Spectrum, and each group starts again at `1`. This is what keeps
 the keyboard small: nine keys a group, instead of one long row of numbers you

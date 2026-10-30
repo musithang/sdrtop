@@ -309,7 +309,7 @@ fn below_pane(
     theme: &crate::Theme,
 ) {
     let (title, hint) = match state.tile {
-        MenuTile::Options => ("Options", "settings of this radio"),
+        MenuTile::Options => ("Options", "this radio, and where you listen from"),
         MenuTile::Keys => ("Keys", "every key, the deck's own first"),
         _ => ("Quit", ""),
     };
@@ -435,7 +435,14 @@ fn footer(f: &mut Frame, area: Rect, state: &MenuState, m: &SdrMetrics, theme: &
                 ("Tab", "tiles"),
                 ("\u{2191}\u{2193}", "option"),
             ]
-        } else if state.tile == MenuTile::Options && !m.device_options.is_empty() {
+        } else if state.tile == MenuTile::Options && state.scroll >= m.device_options.len() {
+            &[
+                ("\u{2191}\u{2193}", "setting"),
+                ("Enter", "type"),
+                ("Tab", "tiles"),
+                ("Esc", "close"),
+            ]
+        } else if state.tile == MenuTile::Options {
             &[
                 ("Tab", "tiles"),
                 ("\u{2191}\u{2193}", "option"),
@@ -443,7 +450,7 @@ fn footer(f: &mut Frame, area: Rect, state: &MenuState, m: &SdrMetrics, theme: &
                 ("Enter", "next"),
                 ("Esc", "close"),
             ]
-        } else if matches!(state.tile, MenuTile::Options | MenuTile::Keys) {
+        } else if matches!(state.tile, MenuTile::Keys) {
             &[
                 ("\u{2191}\u{2193}", "scroll"),
                 ("Tab", "tiles"),
@@ -835,12 +842,15 @@ mod tests {
         assert_ne!(top, down);
     }
 
-    /// The Options pane says so when the radio has nothing to set.
+    /// The Options pane says when the radio has nothing to set, and offers
+    /// yours below it.
     #[test]
-    fn the_options_pane_admits_it_is_empty() {
+    fn the_options_pane_holds_the_radio_and_the_station() {
         let all = draw(90, 30, &pane(MenuTile::Options, 0)).join("\n");
         assert!(all.contains("OPTIONS"), "{all}");
-        assert!(all.contains("Settings will live here"), "{all}");
+        assert!(all.contains("nothing to set"), "{all}");
+        assert!(all.contains("Station") && all.contains("Callsign"), "{all}");
+        assert!(all.contains("Enter type"), "{all}");
     }
 
     /// Quit says what Enter does there, and what is kept.

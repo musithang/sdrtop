@@ -74,7 +74,7 @@ impl MenuTile {
             MenuTile::Resume => "",
             MenuTile::Radio => "listen to the air",
             MenuTile::Lab => "measure and decode",
-            MenuTile::Options => "radio settings",
+            MenuTile::Options => "radio and station",
             MenuTile::Keys => "every key",
             MenuTile::Quit => "close sdrtop",
         }

@@ -174,6 +174,11 @@ pub enum InputMode {
         id: String,
         error: Option<String>,
     },
+    /// A `[station]` setting, typed in the Options pane.
+    StationInput {
+        field: crate::state::StationField,
+        error: Option<String>,
+    },
     FrequencyInput,
     SampleRateInput,
     MarkerNameInput,

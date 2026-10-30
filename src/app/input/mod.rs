@@ -115,6 +115,10 @@ pub fn handle_key(
             KeyAction::Continue
         }
         InputMode::DeviceOptionInput { id, .. } => text::device_option(key, state, &id),
+        InputMode::StationInput { field, .. } => {
+            text::station(key, state, field);
+            KeyAction::Continue
+        }
         InputMode::SampleRateInput => {
             text::sample_rate(key, state, device);
             KeyAction::Continue

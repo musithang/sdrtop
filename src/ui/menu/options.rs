@@ -1,7 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright (C) 2026 MusiThang <viktor.laszlo92@protonmail.com>
 
-//! The menu's right column: settings exposed by the active device.
+//! The menu's right column under Options: the settings the active radio
+//! exposes, then yours (`[station]`), which follow you to every radio.
 
 use ratatui::{
     layout::Rect,
@@ -12,51 +13,14 @@ use ratatui::{
 };
 
 use crate::{
-    state::{DeviceOptionUpdate, InputMode, SdrMetrics},
+    state::{DeviceOptionUpdate, InputMode, SdrMetrics, StationField},
     ui::chrome,
 };
 
-/// The heading. Says what the pane is for, in the future tense, because that is
-/// the only true tense for it right now.
-const HEADING: &str = "Settings will live here.";
-
-/// The joke, and also the truth. Written without the `// ` so it can wrap like
-/// any other prose: a comment that runs off the edge of a narrow pane is still a
-/// comment the reader only sees half of.
-const TODO: &[&str] = &[
-    "TODO: settings go here",
-    "left blank on purpose, not by accident",
-];
-
-/// The pane as lines, for an inner width of `iw`.
-///
-/// Separate from drawing for the same reason `keys::lines` is: the wrapping is
-/// the only thing here that can be wrong, and it can be checked without a
-/// terminal.
-fn empty_lines(iw: usize, theme: &crate::Theme) -> Vec<Line<'static>> {
-    let mut out = vec![Line::from("")];
-    for row in chrome::wrap(HEADING, iw.saturating_sub(4), 3) {
-        out.push(Line::from(Span::styled(
-            format!("  {row}"),
-            Style::default()
-                .fg(theme.value_hi)
-                .add_modifier(Modifier::BOLD),
-        )));
-    }
-    out.push(Line::from(""));
-    for comment in TODO {
-        // Every wrapped row keeps the `// `, which is how a wrapped comment
-        // looks in the source it is pretending to be.
-        for row in chrome::wrap(comment, iw.saturating_sub(5), 3) {
-            out.push(Line::from(Span::styled(
-                format!("  // {row}"),
-                Style::default().fg(theme.border_dim),
-            )));
-        }
-    }
-    out
-}
-
+/// The pane as lines, for an inner width of `iw` and a height of `height`:
+/// the radio's own settings, then yours (`[station]`), the selected row kept
+/// in view. `selected` counts the radio's options first, then
+/// [`StationField::ALL`].
 fn lines(
     m: &SdrMetrics,
     selected: usize,
@@ -67,21 +31,29 @@ fn lines(
     if let InputMode::DeviceOptionInput { id, error } = &m.ui.input_mode {
         return editor_lines(m, id, error.as_deref(), iw, height, theme);
     }
-    if m.device_options.is_empty() {
-        return empty_lines(iw, theme);
+    if let InputMode::StationInput { field, error } = &m.ui.input_mode {
+        return station_editor_lines(m, *field, error.as_deref(), iw, height, theme);
     }
+    if iw == 0 || height == 0 {
+        return Vec::new();
+    }
+    let n = m.device_options.len();
+    let selected = selected.min(n + StationField::ALL.len() - 1);
+    let mut out: Vec<Line<'static>> = Vec::new();
+    let mut at = 0;
 
-    let selected = selected.min(m.device_options.len() - 1);
-    let mut out = option_header(iw, height, theme);
-    let visible = height.saturating_sub(out.len());
-    let first = scroll_offset(selected, m.device_options.len(), visible);
-    for (index, option) in m
-        .device_options
-        .iter()
-        .enumerate()
-        .skip(first)
-        .take(visible)
-    {
+    out.push(Line::from(""));
+    out.push(heading("  Device options", iw, theme));
+    if n == 0 {
+        out.push(Line::from(Span::styled(
+            fit_text("  This radio has nothing to set here.", iw),
+            Style::default().fg(theme.border_dim),
+        )));
+    }
+    for (index, option) in m.device_options.iter().enumerate() {
+        if index == selected {
+            at = out.len();
+        }
         out.push(option_line(
             option,
             index == selected,
@@ -90,6 +62,164 @@ fn lines(
             theme,
         ));
     }
+
+    out.push(Line::from(""));
+    out.push(heading("  Station", iw, theme));
+    for row in chrome::wrap(
+        "Where you listen from, and your call. Kept in the config, for every radio.",
+        iw.saturating_sub(2),
+        3,
+    ) {
+        out.push(Line::from(Span::styled(
+            format!("  {row}"),
+            Style::default().fg(theme.border_dim),
+        )));
+    }
+    for (i, field) in StationField::ALL.into_iter().enumerate() {
+        if n + i == selected {
+            at = out.len();
+        }
+        out.push(station_line(m, field, n + i == selected, iw, theme));
+        if field == StationField::Longitude {
+            out.push(locator_line(m, iw, theme));
+        }
+    }
+
+    // Keep the selected row in view: as much above it as fits, then below.
+    let first = at
+        .saturating_sub(height - 1)
+        .min(out.len().saturating_sub(height));
+    out.into_iter().skip(first).take(height).collect()
+}
+
+fn heading(text: &str, iw: usize, theme: &crate::Theme) -> Line<'static> {
+    Line::from(Span::styled(
+        fit_text(text, iw),
+        Style::default()
+            .fg(theme.value_hi)
+            .add_modifier(Modifier::BOLD),
+    ))
+}
+
+/// One `[station]` setting: its name and its value, or that it is unset.
+fn station_line(
+    m: &SdrMetrics,
+    field: StationField,
+    active: bool,
+    iw: usize,
+    theme: &crate::Theme,
+) -> Line<'static> {
+    let marker = if active { "\u{25b8} " } else { "  " };
+    if iw < 7 {
+        return Line::from(Span::styled(
+            fit_text(marker, iw),
+            Style::default().fg(theme.border_accent),
+        ));
+    }
+    let content = iw - 2;
+    let label_width = content.min(12).min(content / 2);
+    let value_width = content - label_width - 1;
+    let (value, style) = match m.home.shown(field) {
+        Some(v) => (
+            v,
+            Style::default()
+                .fg(if active { theme.value_hi } else { theme.value })
+                .add_modifier(if active {
+                    Modifier::BOLD
+                } else {
+                    Modifier::empty()
+                }),
+        ),
+        None => ("not set".to_string(), Style::default().fg(theme.border_dim)),
+    };
+    Line::from(vec![
+        Span::styled(marker, Style::default().fg(theme.border_accent)),
+        Span::styled(
+            fit_cell(field.label(), label_width),
+            Style::default().fg(theme.label),
+        ),
+        Span::raw(" "),
+        Span::styled(fit_text(&value, value_width), style),
+    ])
+}
+
+/// The locator, worked out from the position: never typed, so not a row
+/// the cursor stops on.
+fn locator_line(m: &SdrMetrics, iw: usize, theme: &crate::Theme) -> Line<'static> {
+    if iw < 7 {
+        return Line::from("");
+    }
+    let content = iw - 2;
+    let label_width = content.min(12).min(content / 2);
+    let value_width = content - label_width - 1;
+    let value = match m.home.position() {
+        Some((lat, lon)) => {
+            crate::geo::maidenhead::locator(lat, lon, 3).unwrap_or_default()
+                + "  worked out, not typed"
+        }
+        None => "needs both coordinates".to_string(),
+    };
+    Line::from(vec![
+        Span::raw("  "),
+        Span::styled(
+            fit_cell("Locator", label_width),
+            Style::default().fg(theme.label),
+        ),
+        Span::raw(" "),
+        Span::styled(
+            fit_text(&value, value_width),
+            Style::default().fg(theme.border_dim),
+        ),
+    ])
+}
+
+/// Typing a `[station]` setting: the field as typed, what was wrong with
+/// the last try, and what it holds now.
+fn station_editor_lines(
+    m: &SdrMetrics,
+    field: StationField,
+    error: Option<&str>,
+    iw: usize,
+    height: usize,
+    theme: &crate::Theme,
+) -> Vec<Line<'static>> {
+    if iw == 0 || height == 0 {
+        return Vec::new();
+    }
+    let mut out = Vec::new();
+    let input = format!("{}: {}\u{258c}", field.label(), m.ui.input_buf);
+    let tail: String = input.chars().rev().take(iw).collect();
+    out.push(Line::from(Span::styled(
+        tail.chars().rev().collect::<String>(),
+        Style::default().fg(theme.value_hi),
+    )));
+    if let Some(error) = error {
+        for row in chrome::wrap(error, iw, height.saturating_sub(out.len())) {
+            out.push(Line::from(Span::styled(
+                row,
+                Style::default().fg(theme.status_warn),
+            )));
+        }
+    }
+    let now = m.home.shown(field).unwrap_or_else(|| "not set".into());
+    let hint = match field {
+        StationField::Latitude => "Degrees north, -90 to 90. Empty clears it.",
+        StationField::Longitude => "Degrees east, -180 to 180. Empty clears it.",
+        StationField::Callsign => "Letters, digits and /. Empty clears it.",
+    };
+    for text in [
+        format!("Now: {now}"),
+        hint.to_string(),
+        "Enter keeps it, Esc leaves it.".into(),
+    ] {
+        for row in chrome::wrap(&text, iw, height.saturating_sub(out.len())) {
+            out.push(Line::from(Span::styled(
+                row,
+                Style::default().fg(theme.label),
+            )));
+        }
+    }
+    out.truncate(height);
     out
 }
 
@@ -148,21 +278,6 @@ fn editor_lines(
     out
 }
 
-fn option_header(iw: usize, height: usize, theme: &crate::Theme) -> Vec<Line<'static>> {
-    let heading = Line::from(Span::styled(
-        fit_text("  Device options", iw),
-        Style::default()
-            .fg(theme.value_hi)
-            .add_modifier(Modifier::BOLD),
-    ));
-    match height {
-        0 | 1 => Vec::new(),
-        2 => vec![heading],
-        3 => vec![heading, Line::from("")],
-        _ => vec![Line::from(""), heading, Line::from("")],
-    }
-}
-
 fn option_line(
     option: &crate::hardware::DeviceOption,
     active: bool,
@@ -204,15 +319,6 @@ fn option_line(
         Span::raw(" "),
         Span::styled(format!("\u{25c0} {choice} \u{25b6}"), value_style),
     ])
-}
-
-fn scroll_offset(cursor: usize, total: usize, visible: usize) -> usize {
-    if visible == 0 || total <= visible {
-        return 0;
-    }
-    cursor
-        .saturating_sub(visible - 1)
-        .min(total.saturating_sub(visible))
 }
 
 fn fit_cell(text: &str, width: usize) -> String {
@@ -257,40 +363,68 @@ mod tests {
     use super::*;
     use std::sync::Arc;
 
-    /// The pane's whole job right now is to name itself and admit it is empty,
-    /// so both halves are worth pinning.
-    #[test]
-    fn the_empty_state_names_itself_and_admits_it() {
-        let text: String = lines(&SdrMetrics::fixture(), 0, 60, 20, &crate::Theme::sdr())
+    fn text(m: &SdrMetrics, selected: usize, iw: usize, height: usize) -> String {
+        lines(m, selected, iw, height, &crate::Theme::sdr())
             .iter()
             .map(|l| l.to_string())
             .collect::<Vec<_>>()
-            .join("\n");
-        assert!(text.contains("Settings will live here"), "{text}");
-        assert!(text.contains("TODO"), "{text}");
+            .join("\n")
     }
 
-    /// The copy wraps, so it has to keep fitting the narrow single column form
-    /// as well as a wide one. A row wider than the pane is a row the reader only
-    /// sees half of.
+    #[test]
+    fn a_radio_with_nothing_to_set_says_so_and_the_station_follows() {
+        let t = text(&SdrMetrics::fixture(), 0, 60, 20);
+        assert!(t.contains("nothing to set"), "{t}");
+        assert!(t.contains("Station"), "{t}");
+        assert!(t.contains("Latitude") && t.contains("not set"), "{t}");
+        assert!(t.contains("needs both coordinates"), "{t}");
+    }
+
+    #[test]
+    fn a_set_station_shows_its_values_and_the_locator_worked_out() {
+        let mut m = SdrMetrics::fixture();
+        m.home.latitude = Some(47.497);
+        m.home.longitude = Some(19.04);
+        m.home.callsign = Some("HA5ZZT".into());
+        let t = text(&m, 2, 60, 20);
+        assert!(t.contains("47.497") && t.contains("19.040"), "{t}");
+        assert!(t.contains("JN97ml"), "{t}");
+        assert!(
+            t.contains("\u{25b8} Callsign") && t.contains("HA5ZZT"),
+            "{t}"
+        );
+    }
+
     #[test]
     fn every_row_fits_the_pane() {
-        for iw in [28, 40, 44, 60, 100] {
-            for line in empty_lines(iw, &crate::Theme::sdr()) {
-                assert!(
-                    line.width() <= iw,
-                    "a {}-wide row does not fit {iw} columns: {line:?}",
-                    line.width()
-                );
+        let mut m = SdrMetrics::fixture();
+        m.home.latitude = Some(-33.868);
+        m.home.longitude = Some(151.209);
+        for iw in [1, 4, 7, 12, 28, 40, 60, 100] {
+            for line in lines(&m, 1, iw, 20, &crate::Theme::sdr()) {
+                assert!(line.width() <= iw, "{iw}: {line:?}");
             }
         }
     }
 
-    /// House style.
     #[test]
-    fn the_copy_uses_no_em_dashes() {
-        assert!(!HEADING.contains('\u{2014}'));
-        assert!(TODO.iter().all(|t| !t.contains('\u{2014}')));
+    fn the_station_editor_says_what_went_wrong_and_what_is_kept() {
+        let mut m = SdrMetrics::fixture();
+        m.home.latitude = Some(47.497);
+        m.ui.input_mode = InputMode::StationInput {
+            field: StationField::Latitude,
+            error: Some("Latitude runs -90 to 90".into()),
+        };
+        m.ui.input_buf = "95".into();
+        let t = text(&m, 0, 60, 20);
+        assert!(t.contains("Latitude: 95\u{258c}"), "{t}");
+        assert!(t.contains("runs -90 to 90"), "{t}");
+        assert!(t.contains("Now: 47.497"), "{t}");
+        for iw in [1, 7, 20] {
+            for line in lines(&m, 0, iw, 20, &crate::Theme::sdr()) {
+                assert!(line.width() <= iw, "{line:?}");
+            }
+        }
     }
 
     #[test]

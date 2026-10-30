@@ -13,7 +13,7 @@ use std::sync::{Arc, Mutex};
 use crossterm::event::{KeyCode, KeyEvent};
 
 use crate::hardware;
-use crate::state::{InputMode, RailMode, SdrMetrics, SpectrumMarker};
+use crate::state::{InputMode, RailMode, SdrMetrics, SpectrumMarker, StationField};
 
 use super::{menu, metrics, KeyAction};
 
@@ -73,6 +73,47 @@ pub(super) fn device_option(key: KeyEvent, state: &Arc<Mutex<SdrMetrics>>, id: &
         _ => {}
     }
     KeyAction::Continue
+}
+
+/// Typing a `[station]` setting in the Options pane. A value that is not
+/// one keeps the old and says why; Esc leaves without changing anything.
+pub(super) fn station(key: KeyEvent, state: &Arc<Mutex<SdrMetrics>>, field: StationField) {
+    let mut m = metrics(state);
+    let clear_error = |m: &mut SdrMetrics| {
+        if let InputMode::StationInput { error, .. } = &mut m.ui.input_mode {
+            *error = None;
+        }
+    };
+    match key.code {
+        KeyCode::Esc => {
+            m.ui.input_mode = InputMode::Normal;
+            m.ui.input_buf.clear();
+        }
+        KeyCode::Backspace => {
+            m.ui.input_buf.pop();
+            clear_error(&mut m);
+        }
+        KeyCode::Char(c) if field.accepts(c) && m.ui.input_buf.chars().count() < 16 => {
+            m.ui.input_buf.push(c);
+            clear_error(&mut m);
+        }
+        KeyCode::Enter => {
+            let typed = m.ui.input_buf.clone();
+            match m.home.set(field, &typed) {
+                Ok(line) => {
+                    m.ui.input_mode = InputMode::Normal;
+                    m.ui.input_buf.clear();
+                    m.push_log(line);
+                }
+                Err(why) => {
+                    if let InputMode::StationInput { error, .. } = &mut m.ui.input_mode {
+                        *error = Some(why);
+                    }
+                }
+            }
+        }
+        _ => {}
+    }
 }
 
 fn clear_option_error(m: &mut SdrMetrics) {

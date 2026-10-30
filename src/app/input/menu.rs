@@ -235,18 +235,29 @@ fn tree_key(code: KeyCode, ctx: &mut InputCtx<'_>, state: MenuState) -> KeyActio
     KeyAction::Continue
 }
 
-/// The Options pane: up and down the settings, left and right through a
-/// setting's values, Enter for a number. Up from the first setting goes
-/// back to the tiles; with nothing to set, left does too.
+/// The Options pane: up and down the settings (the radio's, then yours),
+/// left and right through a radio setting's values, Enter for a number or
+/// to type one of yours. Up from the first setting goes back to the tiles;
+/// so does left where there is no value to step.
 fn options_key(
     code: KeyCode,
     ctx: &mut InputCtx<'_>,
     state: MenuState,
     has_options: bool,
 ) -> KeyAction {
+    let radio = metrics(ctx.state).device_options.len();
+    let rows = radio + crate::state::StationField::ALL.len();
+    let station = state
+        .scroll
+        .checked_sub(radio)
+        .and_then(|i| crate::state::StationField::ALL.get(i).copied());
     match code {
-        KeyCode::Right if has_options => return request_option_change(ctx, state, 1),
-        KeyCode::Left if has_options => return request_option_change(ctx, state, -1),
+        KeyCode::Right if has_options && station.is_none() => {
+            return request_option_change(ctx, state, 1)
+        }
+        KeyCode::Left if has_options && station.is_none() => {
+            return request_option_change(ctx, state, -1)
+        }
         KeyCode::Left => set(
             ctx,
             MenuState {
@@ -257,7 +268,7 @@ fn options_key(
         // Up from the first setting goes back to the tiles, as it does out
         // of the key reference; the list stops at its ends rather than
         // wrapping under the cursor.
-        KeyCode::Up if state.scroll == 0 || !has_options => set(
+        KeyCode::Up if state.scroll == 0 => set(
             ctx,
             MenuState {
                 focus: MenuFocus::Tiles,
@@ -267,21 +278,22 @@ fn options_key(
         KeyCode::Up => set(
             ctx,
             MenuState {
-                scroll: state.scroll - 1,
+                scroll: state.scroll.min(rows) - 1,
                 ..state
             },
         ),
-        KeyCode::Down => {
-            let count = metrics(ctx.state).device_options.len();
-            if count > 0 {
-                set(
-                    ctx,
-                    MenuState {
-                        scroll: (state.scroll + 1).min(count - 1),
-                        ..state
-                    },
-                );
-            }
+        KeyCode::Down => set(
+            ctx,
+            MenuState {
+                scroll: (state.scroll + 1).min(rows - 1),
+                ..state
+            },
+        ),
+        KeyCode::Enter if station.is_some() => {
+            let mut m = metrics(ctx.state);
+            let field = station.expect("a station row");
+            m.ui.input_mode = InputMode::StationInput { field, error: None };
+            m.ui.input_buf = m.home.shown(field).unwrap_or_default();
         }
         KeyCode::Enter => {
             let mut m = metrics(ctx.state);
@@ -1146,22 +1158,22 @@ mod tests {
         assert!(h.state.lock().unwrap().ui.menu.is_none());
     }
 
-    /// Options with nothing to set: no key there loads a layout, and up goes
-    /// back to the tiles.
+    /// Options with nothing on the radio to set still holds your station:
+    /// no key there loads a layout, Down reaches the station's rows, and up
+    /// from the first goes back to the tiles.
     #[test]
-    fn options_has_nothing_to_steer() {
+    fn options_with_nothing_on_the_radio_holds_the_station() {
         let mut h = Harness::new();
         h.show_options(Vec::new());
-        let before = h.menu();
-        for code in [KeyCode::Down, KeyCode::Char('1'), KeyCode::Enter] {
-            h.key(code);
-            assert_eq!(h.menu(), before, "{code:?} moved something");
-        }
+        h.key(KeyCode::Char('1'));
         assert_eq!(
             h.engine.active_preset(),
             "command_rail",
             "no key in Options may load a layout"
         );
+        h.key(KeyCode::Down);
+        assert_eq!(h.menu().scroll, 1, "latitude to longitude");
+        h.key(KeyCode::Up);
         h.key(KeyCode::Up);
         assert_eq!(h.menu().focus, MenuFocus::Tiles);
     }
@@ -1176,9 +1188,14 @@ mod tests {
 
         h.key(KeyCode::Down);
         assert_eq!(h.menu().scroll, 1);
-        h.key(KeyCode::Down);
-        assert_eq!(h.menu().scroll, 1, "stops at the last");
-        h.key(KeyCode::Up);
+        // On past the radio's settings to the station's three, and no further.
+        for _ in 0..6 {
+            h.key(KeyCode::Down);
+        }
+        assert_eq!(h.menu().scroll, 4, "stops at the last");
+        for _ in 0..4 {
+            h.key(KeyCode::Up);
+        }
         assert_eq!(h.menu().scroll, 0);
         assert_eq!(h.menu().focus, MenuFocus::Below);
         h.key(KeyCode::Up);
@@ -1432,5 +1449,78 @@ mod tests {
     fn wrap_handles_a_single_entry() {
         assert_eq!(wrap(0, 1, 1), 0);
         assert_eq!(wrap(0, -1, 1), 0);
+    }
+
+    #[test]
+    fn the_station_rows_follow_the_radios_and_take_typed_values() {
+        use crate::state::StationField;
+        let mut h = Harness::new();
+        h.show_options(vec![option("mode", "Mode", "Narrow")]);
+        // Past the radio's one option to the station's latitude.
+        h.key(KeyCode::Down);
+        assert_eq!(h.menu().scroll, 1);
+        h.key(KeyCode::Enter);
+        assert!(matches!(
+            metrics(&h.state).ui.input_mode,
+            InputMode::StationInput {
+                field: StationField::Latitude,
+                error: None
+            }
+        ));
+        // A letter is not part of a latitude; a value out of range is refused
+        // and the old kept, with the reason on screen.
+        h.type_number("9N5");
+        assert_eq!(metrics(&h.state).ui.input_buf, "95");
+        h.key(KeyCode::Enter);
+        {
+            let m = metrics(&h.state);
+            assert!(matches!(
+                &m.ui.input_mode,
+                InputMode::StationInput { error: Some(e), .. } if e.contains("-90 to 90")
+            ));
+            assert_eq!(m.home.latitude, None);
+        }
+        h.key(KeyCode::Backspace);
+        h.key(KeyCode::Backspace);
+        h.type_number("47.497");
+        h.key(KeyCode::Enter);
+        {
+            let m = metrics(&h.state);
+            assert!(matches!(m.ui.input_mode, InputMode::Normal));
+            assert_eq!(m.home.latitude, Some(47.497));
+            assert!(m
+                .ui
+                .log
+                .iter()
+                .any(|l| l.text.contains("latitude set to 47.497")));
+        }
+        // Down to the call, typed in lower case, kept in upper.
+        h.key(KeyCode::Down);
+        h.key(KeyCode::Down);
+        assert_eq!(h.menu().scroll, 3);
+        h.key(KeyCode::Enter);
+        h.type_number("ha5zzt");
+        h.key(KeyCode::Enter);
+        assert_eq!(metrics(&h.state).home.callsign.as_deref(), Some("HA5ZZT"));
+        // The list stops at its end.
+        h.key(KeyCode::Down);
+        assert_eq!(h.menu().scroll, 3);
+    }
+
+    #[test]
+    fn esc_leaves_a_station_value_as_it_was() {
+        let mut h = Harness::new();
+        h.show_options(Vec::new());
+        metrics(&h.state).home.callsign = Some("HA5ZZT".into());
+        h.key(KeyCode::Down);
+        h.key(KeyCode::Down);
+        h.key(KeyCode::Enter);
+        // The editor opens on the value it holds.
+        assert_eq!(metrics(&h.state).ui.input_buf, "HA5ZZT");
+        h.key(KeyCode::Backspace);
+        h.key(KeyCode::Esc);
+        let m = metrics(&h.state);
+        assert!(matches!(m.ui.input_mode, InputMode::Normal));
+        assert_eq!(m.home.callsign.as_deref(), Some("HA5ZZT"));
     }
 }

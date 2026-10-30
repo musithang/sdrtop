@@ -10,10 +10,47 @@ use crate::config::StationSettings;
 
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct Home {
-    /// Degrees north and east, both or neither.
-    pub position: Option<(f64, f64)>,
+    /// Degrees north. Kept on its own so the two can be entered one at a
+    /// time; a position needs both ([`Home::position`]).
+    pub latitude: Option<f64>,
+    /// Degrees east.
+    pub longitude: Option<f64>,
     /// Upper case, of the characters a call is made of.
     pub callsign: Option<String>,
+}
+
+/// The settings the Options pane edits, in the order it lists them.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum StationField {
+    Latitude,
+    Longitude,
+    Callsign,
+}
+
+impl StationField {
+    pub const ALL: [StationField; 3] = [
+        StationField::Latitude,
+        StationField::Longitude,
+        StationField::Callsign,
+    ];
+
+    pub fn label(self) -> &'static str {
+        match self {
+            StationField::Latitude => "Latitude",
+            StationField::Longitude => "Longitude",
+            StationField::Callsign => "Callsign",
+        }
+    }
+
+    /// What may be typed into it.
+    pub fn accepts(self, c: char) -> bool {
+        match self {
+            StationField::Latitude | StationField::Longitude => {
+                c.is_ascii_digit() || c == '.' || c == '-'
+            }
+            StationField::Callsign => c.is_ascii_alphanumeric() || c == '/',
+        }
+    }
 }
 
 /// The characters a call may hold (the FT8 call alphabet, which every
@@ -26,6 +63,11 @@ fn is_call(s: &str) -> bool {
 }
 
 impl Home {
+    /// Where you listen from: both coordinates, or none.
+    pub fn position(&self) -> Option<(f64, f64)> {
+        self.latitude.zip(self.longitude)
+    }
+
     /// A latitude, if it is one.
     pub fn latitude(v: f64) -> Option<f64> {
         (v.is_finite() && (-90.0..=90.0).contains(&v)).then_some(v)
@@ -64,7 +106,7 @@ impl Home {
             }
             ok
         });
-        if lat.is_some() != lon.is_some() && s.latitude.is_some() != s.longitude.is_some() {
+        if s.latitude.is_some() != s.longitude.is_some() {
             said.push("[station] needs both latitude and longitude: no position".to_string());
         }
         let callsign = s.callsign.as_deref().and_then(|c| {
@@ -75,17 +117,69 @@ impl Home {
             ok
         });
         let home = Self {
-            position: lat.zip(lon),
+            latitude: lat,
+            longitude: lon,
             callsign,
         };
         (home, said)
     }
 
+    /// A field's value as the pane shows it, or `None` when unset.
+    pub fn shown(&self, field: StationField) -> Option<String> {
+        match field {
+            StationField::Latitude => self.latitude.map(|v| format!("{v:.3}")),
+            StationField::Longitude => self.longitude.map(|v| format!("{v:.3}")),
+            StationField::Callsign => self.callsign.clone(),
+        }
+    }
+
+    /// Set a field from what was typed: empty clears it. On a value that is
+    /// not one, the old stays and the reason comes back; on success, a line
+    /// for the log.
+    pub fn set(&mut self, field: StationField, typed: &str) -> Result<String, String> {
+        let typed = typed.trim();
+        let label = field.label();
+        if typed.is_empty() {
+            match field {
+                StationField::Latitude => self.latitude = None,
+                StationField::Longitude => self.longitude = None,
+                StationField::Callsign => self.callsign = None,
+            }
+            return Ok(format!("Station {}: cleared", label.to_lowercase()));
+        }
+        match field {
+            StationField::Latitude | StationField::Longitude => {
+                let v: f64 = typed
+                    .parse()
+                    .map_err(|_| format!("{typed:?} is not a number"))?;
+                let (ok, range) = if field == StationField::Latitude {
+                    (Self::latitude(v), "-90 to 90")
+                } else {
+                    (Self::longitude(v), "-180 to 180")
+                };
+                let v = ok.ok_or_else(|| format!("{label} runs {range}"))?;
+                if field == StationField::Latitude {
+                    self.latitude = Some(v);
+                } else {
+                    self.longitude = Some(v);
+                }
+                Ok(format!("Station {} set to {v}", label.to_lowercase()))
+            }
+            StationField::Callsign => {
+                let c = Self::call(typed)
+                    .ok_or_else(|| "a call is letters, digits and /, at most 11".to_string())?;
+                let line = format!("Station callsign set to {c}");
+                self.callsign = Some(c);
+                Ok(line)
+            }
+        }
+    }
+
     /// Back to the settings, for the save.
     pub fn settings(&self) -> StationSettings {
         StationSettings {
-            latitude: self.position.map(|p| p.0),
-            longitude: self.position.map(|p| p.1),
+            latitude: self.latitude,
+            longitude: self.longitude,
             callsign: self.callsign.clone(),
         }
     }
@@ -108,7 +202,7 @@ mod tests {
         let s = settings(Some(47.497), Some(19.040), Some(" ha5zzt "));
         let (home, said) = Home::from_settings(&s);
         assert!(said.is_empty());
-        assert_eq!(home.position, Some((47.497, 19.040)));
+        assert_eq!(home.position(), Some((47.497, 19.040)));
         assert_eq!(home.callsign.as_deref(), Some("HA5ZZT"));
         assert_eq!(
             home.settings(),
@@ -125,12 +219,12 @@ mod tests {
             settings(Some(47.0), None, None),
         ] {
             let (home, said) = Home::from_settings(&s);
-            assert_eq!(home.position, None, "{s:?}");
+            assert_eq!(home.position(), None, "{s:?}");
             assert_eq!(said.len(), 1, "{s:?}: {said:?}");
         }
         // The poles and the antimeridian are places.
         let (home, _) = Home::from_settings(&settings(Some(-90.0), Some(180.0), None));
-        assert_eq!(home.position, Some((-90.0, 180.0)));
+        assert_eq!(home.position(), Some((-90.0, 180.0)));
     }
 
     #[test]
@@ -142,5 +236,41 @@ mod tests {
         let (home, said) = Home::from_settings(&settings(None, None, Some("HÁ5ZZT")));
         assert_eq!(home.callsign, None);
         assert_eq!(said.len(), 1);
+    }
+
+    #[test]
+    fn typing_sets_a_field_and_a_bad_value_keeps_the_old() {
+        let mut home = Home::default();
+        assert!(home.set(StationField::Latitude, "47.497").is_ok());
+        assert_eq!(home.position(), None, "half a position is no position");
+        assert!(home.set(StationField::Longitude, " 19.04 ").is_ok());
+        assert_eq!(home.position(), Some((47.497, 19.04)));
+        assert_eq!(
+            home.set(StationField::Latitude, "95"),
+            Err("Latitude runs -90 to 90".into())
+        );
+        assert!(home.set(StationField::Longitude, "1.2.3").is_err());
+        assert_eq!(home.position(), Some((47.497, 19.04)));
+        assert!(home.set(StationField::Callsign, "ha5zzt").is_ok());
+        assert_eq!(
+            home.shown(StationField::Callsign).as_deref(),
+            Some("HA5ZZT")
+        );
+        assert!(home.set(StationField::Callsign, "HA5/ZZT/QRP/X").is_err());
+        assert_eq!(home.callsign.as_deref(), Some("HA5ZZT"));
+        assert!(home.set(StationField::Callsign, "").is_ok());
+        assert_eq!(home.callsign, None);
+        assert_eq!(
+            home.shown(StationField::Latitude).as_deref(),
+            Some("47.497")
+        );
+    }
+
+    #[test]
+    fn each_field_takes_only_its_characters() {
+        assert!(StationField::Latitude.accepts('-') && StationField::Latitude.accepts('.'));
+        assert!(!StationField::Latitude.accepts('N'));
+        assert!(StationField::Callsign.accepts('/') && StationField::Callsign.accepts('k'));
+        assert!(!StationField::Callsign.accepts('.'));
     }
 }

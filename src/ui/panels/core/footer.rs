@@ -629,7 +629,9 @@ impl Panel for FooterPanel {
                         m.ui.input_buf
                     ))
                 }
-                InputMode::Normal | InputMode::DeviceOptionInput { .. } => {
+                InputMode::Normal
+                | InputMode::DeviceOptionInput { .. }
+                | InputMode::StationInput { .. } => {
                     if m.ui.focused_panel.is_some() {
                         styled_lines(focus_lines(m, inner_w), FOCUS_SEP, theme, max_lines)
                     } else {
