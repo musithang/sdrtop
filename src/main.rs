@@ -13,9 +13,6 @@ mod theme;
 pub use theme::Theme;
 mod event;
 mod export;
-// Read only by tests until the FT8 map draws it. `expect` fails the build
-// once nothing in it is unread, so this line cannot outlive its reason.
-#[cfg_attr(not(test), expect(dead_code))]
 mod geo;
 mod hardware;
 mod host;

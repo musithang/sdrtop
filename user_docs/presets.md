@@ -222,7 +222,14 @@ address, what decided its kind, how it ended, and one codeword's bits with
 the repaired ones lit. `ft8_map`, the world around you as FT8 hears it:
 centred on your position (`[station]`), every station in the true direction
 of its path and drawn only where it said it was, the land coloured by the
-sun for day, grey line and night, on a logarithmic or a linear range.
+sun for day, grey line and night, on a logarithmic or a linear range. `ft8_cycles`,
+one line: the last minute's cycles with their counts (or cut, or skipped),
+the one being heard, and the clock and receive path as the stations heard
+judge them. `ft8_band`, the band as a river, a row a cycle, every decode a
+bar on its tone with its call, and the energy that did not decode.
+`ft8_decodes`, the decodes cycle by cycle with SNR, DT, tone, message,
+distance and bearing. `ft8_station`, the chosen station's newest decode and
+everything it measured and took.
 
 **Observer:** `observer`
 

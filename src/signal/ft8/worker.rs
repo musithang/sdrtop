@@ -251,6 +251,7 @@ impl Session {
             ready = self.take_cycles(b.centre_hz);
         }
         let spent = t0.elapsed().as_secs_f64();
+        let heard_until = self.unix_of_sample((self.buf_base + self.buf.len()) as f64);
         if b.rate_hz > 0.0 && pairs > 0 {
             let share = spent / (pairs as f64 / b.rate_hz);
             self.load = Some(match self.load {
@@ -283,6 +284,7 @@ impl Session {
         f.feed.load = self.load;
         f.unreachable_rate = self.channel.is_none().then_some(b.rate_hz);
         f.hearing = self.next_cycle;
+        f.heard_until = heard_until;
         if let Some(start) = cut {
             f.push_cycle(
                 undecoded(start, dial_before, CycleOutcome::Cut),

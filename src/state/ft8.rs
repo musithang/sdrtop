@@ -190,6 +190,9 @@ pub struct Ft8State {
     pub clock: Option<ClockVerdict>,
     /// The cycle being heard: its start, once the stream's time is known.
     pub hearing: Option<f64>,
+    /// How far the receiver has heard, UTC of the latest sample: how far
+    /// into [`Ft8State::hearing`] the stream has come.
+    pub heard_until: Option<f64>,
     /// A decode is running.
     pub decoding: bool,
     /// The radio's rate offers no route to FT8's 12 000 samples a second.
@@ -258,6 +261,15 @@ impl Ft8State {
         while self.cycles.len() > CYCLES_MAX {
             self.cycles.pop_front();
         }
+    }
+
+    /// The selected station's newest decode.
+    pub fn selected_decode(&self) -> Option<&Arc<DecodeEntry>> {
+        let call = self.view.selected.as_deref()?;
+        self.decodes
+            .iter()
+            .rev()
+            .find(|d| d.decode.message.sender() == Some(call))
     }
 
     /// Forget what was heard (the session counter stays).

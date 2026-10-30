@@ -134,6 +134,10 @@ impl App {
         registry.register(ui::PagerInboxPanel);
         registry.register(ui::PagerCardPanel);
         registry.register(ui::Ft8MapPanel::new());
+        registry.register(ui::Ft8CyclesPanel);
+        registry.register(ui::Ft8BandPanel);
+        registry.register(ui::Ft8DecodesPanel);
+        registry.register(ui::Ft8CardPanel);
 
         let mut layout = LayoutConfig::with_user_presets(user_presets, presets_dir);
         let mut refusals = Vec::new();

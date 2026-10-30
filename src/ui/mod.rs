@@ -45,6 +45,10 @@ pub use panels::core::spectrum::SpectrumPanel;
 pub use panels::core::system_resources::SystemResourcesPanel;
 pub use panels::core::waterfall::WaterfallPanel;
 
+pub use panels::radio::ft8::band::Ft8BandPanel;
+pub use panels::radio::ft8::card::Ft8CardPanel;
+pub use panels::radio::ft8::cycles::Ft8CyclesPanel;
+pub use panels::radio::ft8::decodes::Ft8DecodesPanel;
 pub use panels::radio::ft8::map::Ft8MapPanel;
 pub use panels::radio::pager::card::PagerCardPanel;
 pub use panels::radio::pager::face::PagerFacePanel;
