@@ -1090,7 +1090,7 @@ impl GainModel {
     /// The stages are digital gain applied after the converter, with
     /// `before` (`"AGC"`) ahead of it: they place the level in the samples,
     /// they do not set what the converter sees. The Airspy HF+'s ATT and LNA
-    /// are such, by Airspy's account and by every measurement here.
+    /// are such, as every measurement here shows.
     pub fn with_digital_stages(mut self, before: &'static str) -> Self {
         self.digital = Some(before);
         self

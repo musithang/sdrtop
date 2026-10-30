@@ -45,6 +45,8 @@ Welcome. This is the plain-language guide to using sdrtop.
   your own
 - **[Supported hardware](hardware.md)**: what works today, and how the radios
   differ
+- **[Airspy HF+ Discovery](airspy-hf.md)**: the radio that manages its own
+  levels, and what that changes on the benches
 
 ## Updates
 

@@ -84,7 +84,7 @@ far the image sits under the carrier, where the image scope can say (a dash wher
 it cannot). The clip ceiling is 0 dBFS on most radios; one whose tuner clips
 before its converter shows that lower figure and names the part, and headroom
 counts from there. A radio whose own AGC holds the level below full scale (the
-[Airspy HF+](hardware.md#airspy-hf-discovery)'s digital AGC does) shows `HOLD` instead of `CLIP`, as a span
+[Airspy HF+](airspy-hf.md)'s digital AGC does) shows `HOLD` instead of `CLIP`, as a span
 (`-14 to -12`) where the radio holds at different levels depending on what came
 before, with headroom counted to the lower one, and a peak that reaches it reads
 `HELD`: nothing was lost, the radio quietly turned its own gain
@@ -145,9 +145,9 @@ bench, which is measured rather than modelled, stays exactly as it is. The bench
 used to go blank instead: three lines on a twenty row panel.
 
 **Some radios' gain knobs are not in the front end at all.** On the
-[Airspy HF+](hardware.md#airspy-hf-discovery) the `ATT` and `LNA` keys set digital gain after the converter, behind the radio's
-own RF, IF and digital AGCs, which are always on (Airspy's account, and every
-measurement sdrtop made agrees). There the chain reads `ANT▸AGC▸ADC▸ATT▸LNA▸word`,
+[Airspy HF+](airspy-hf.md) the `ATT` and `LNA` keys set digital gain after the
+converter, behind the radio's own RF, IF and digital AGCs, which are always at
+work (every measurement sdrtop made fits that). There the chain reads `ANT▸AGC▸ADC▸ATT▸LNA▸word`,
 the lineup starts at the converter and ends at the word the samples are, the ADC
 bench is called Word Loading because that is what it reads, and the verdict speaks
 of where the level sits (`WELL PLACED`, `LOW IN THE WORD`, `HOT`, `HELD`), never of

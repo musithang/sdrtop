@@ -294,8 +294,8 @@ pub fn gain_model() -> GainModel {
     )
     .with_second_stage()
     // Both are digital gain after the converter, behind the radio's own RF,
-    // IF and digital AGCs, which are always on (Airspy's account, and what
-    // every measurement here shows): they place the level in the samples.
+    // IF and digital AGCs, which are always on (what every measurement here
+    // shows): they place the level in the samples.
     .with_digital_stages("AGC")
     .with_no_cascade_reason("ATT and LNA are digital, after the converter")
     .with_boost(crate::hardware::Boost::GainMode)
