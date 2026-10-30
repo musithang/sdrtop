@@ -37,6 +37,7 @@ pub mod estimate;
 pub mod fir;
 pub mod nco;
 pub mod resample;
+pub mod special;
 #[cfg(test)]
 pub mod testkit;
 pub mod timing;

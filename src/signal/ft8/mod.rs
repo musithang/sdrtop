@@ -21,13 +21,19 @@
 //! - [`message`]: the 77-bit payload to a message of one of the paper's types.
 //! - [`crc`]: the 14-bit check that turns 77 bits into 91.
 //! - [`ldpc`]: the (174,91) code that protects those 91, and our decoder.
+//! - [`modulate`]: the codeword as 79 tones and the tones as a waveform.
+//! - [`search`]: where in a cycle transmissions start, and on what tone.
 //!
 //! **A field that does not decode refuses the message.** A payload whose
 //! check passed but whose bits fall in a range the paper leaves unassigned is
 //! not shown as a best guess (POLICY.md, rule 2); it is counted as malformed.
 
+#[cfg(test)]
+mod conformance;
 pub mod crc;
 pub mod fields;
 pub mod hash;
 pub mod ldpc;
 pub mod message;
+pub mod modulate;
+pub mod search;
