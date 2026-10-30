@@ -168,7 +168,7 @@ fn head(bits: &Bits) -> u128 {
 }
 
 /// What was decoded, and what it took.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Decoded {
     /// The 77-bit payload, CRC checked.
     pub payload: u128,
@@ -178,6 +178,10 @@ pub struct Decoded {
     pub repaired: u32,
     /// The OSD order that found it: `None` when belief propagation did.
     pub osd: Option<u8>,
+    /// How far the codeword lies from what was received: the reliability
+    /// of the bits it disagrees with over the total (as
+    /// [`OSD_MAX_DISTANCE`]).
+    pub distance: f32,
 }
 
 /// How far an OSD candidate may lie from what was received: the sum of the
@@ -214,6 +218,18 @@ pub fn decode(llr: &[f32; N], max_iterations: u32, osd_order: u8) -> Option<Deco
             .map(|(a, b)| (a ^ b).count_ones())
             .sum()
     };
+    let total: f32 = llr.iter().map(|l| l.abs()).sum();
+    let distance = |bits: &Bits| -> f32 {
+        let d: f32 = (0..N)
+            .filter(|&v| get(bits, v) != get(&hard, v))
+            .map(|v| llr[v].abs())
+            .sum();
+        if total > 0.0 {
+            d / total
+        } else {
+            0.0
+        }
+    };
 
     if let Some((bits, iterations)) = belief_propagation(llr, max_iterations) {
         let word = head(&bits);
@@ -223,6 +239,7 @@ pub fn decode(llr: &[f32; N], max_iterations: u32, osd_order: u8) -> Option<Deco
                 iterations,
                 repaired: repaired(&bits),
                 osd: None,
+                distance: distance(&bits),
             });
         }
     }
@@ -232,6 +249,7 @@ pub fn decode(llr: &[f32; N], max_iterations: u32, osd_order: u8) -> Option<Deco
         iterations: max_iterations,
         repaired: repaired(&bits),
         osd: Some(order),
+        distance: distance(&bits),
     })
 }
 
@@ -462,6 +480,7 @@ mod tests {
                 iterations: 0,
                 repaired: 0,
                 osd: None,
+                distance: 0.0,
             })
         );
     }

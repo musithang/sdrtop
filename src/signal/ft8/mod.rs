@@ -23,6 +23,8 @@
 //! - [`ldpc`]: the (174,91) code that protects those 91, and our decoder.
 //! - [`modulate`]: the codeword as 79 tones and the tones as a waveform.
 //! - [`search`]: where in a cycle transmissions start, and on what tone.
+//! - [`demod`]: a candidate to soft bits; a decode to what it measured.
+//! - [`cycle`]: one 15 s cycle to its decodes, subtracting and searching again.
 //!
 //! **A field that does not decode refuses the message.** A payload whose
 //! check passed but whose bits fall in a range the paper leaves unassigned is
@@ -31,6 +33,8 @@
 #[cfg(test)]
 mod conformance;
 pub mod crc;
+pub mod cycle;
+pub mod demod;
 pub mod fields;
 pub mod hash;
 pub mod ldpc;
