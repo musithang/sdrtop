@@ -361,6 +361,11 @@ impl UiState {
         self.section == crate::signal::pocsag::SECTION
     }
 
+    /// Whether the deck is on the FT8 view, which turns the FT8 feed on.
+    pub fn is_ft8_section(&self) -> bool {
+        self.section == crate::signal::ft8::SECTION
+    }
+
     pub fn is_lab_mode(&self) -> bool {
         self.active_preset.starts_with("lab_")
     }

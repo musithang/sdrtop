@@ -1574,6 +1574,12 @@ pub struct RxContext {
     pub pager_tx: crossbeam_channel::Sender<StreamBlock>,
     /// What the pager feed did with the blocks handed to it, for the poll task.
     pub pager_feed: FeedHealth,
+    /// Fifth, independently lossy feed, to the FT8 worker, while the FT8
+    /// view is on screen. Its blocks carry the wall clock at their arrival
+    /// ([`TimedBlock`]); counted as the pager's, for the pager's reason.
+    pub ft8_tx: crossbeam_channel::Sender<TimedBlock>,
+    /// What the FT8 feed did with the blocks handed to it, for the poll task.
+    pub ft8_feed: FeedHealth,
     /// Direct power-spectrum traces from backends that do not publish IQ.
     pub power_tx: crossbeam_channel::Sender<PowerTrace>,
     pub geometry: SampleGeometry,
@@ -1702,6 +1708,17 @@ pub struct StreamBlock {
     pub centre_hz: u64,
     /// The sample rate these samples were captured at, for the same reason.
     pub rate_hz: f64,
+}
+
+/// A [`StreamBlock`] with the wall clock at its arrival, for the one worker
+/// that must know when its samples were taken: FT8's cycles start on the UTC
+/// quarter minute. Stamped on the driver's thread, in
+/// `process::arrive`, before any queue could hold the block.
+pub struct TimedBlock {
+    pub block: StreamBlock,
+    /// Unix seconds when the block reached the intake: after its last sample
+    /// was taken, by however long the transfer and the driver held it.
+    pub arrived_unix: f64,
 }
 
 /// What a radio settled on after a rate change.

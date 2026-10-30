@@ -764,3 +764,16 @@ fn time_a_crowded_cycle() {
         );
     }
 }
+
+#[test]
+fn the_band_shows_energy_where_a_signal_sits() {
+    let mut rng = Rng::new(97);
+    let mut sent = readable(1, -5.0, &mut rng);
+    sent[0].f0 = 1500.0;
+    let x = cycle(&sent, &mut rng);
+    let band = Spectrogram::new(&x).band(25.0, 3000.0);
+    assert_eq!(band.len(), 120);
+    // The signal's 50 Hz from 1500 Hz stands out; far from it, the floor.
+    assert!(band[61] > 3.0, "{}", band[61]);
+    assert!(band[20].abs() < 1.0, "{}", band[20]);
+}

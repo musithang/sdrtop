@@ -96,6 +96,41 @@ impl Spectrogram {
         }
     }
 
+    /// Mean power across the band in bins `width_hz` wide from 0 to `top_hz`,
+    /// in dB over the median of those bins: where there was energy this cycle,
+    /// decoded or not, measured against the cycle's own floor.
+    pub fn band(&self, width_hz: f64, top_hz: f64) -> Vec<f32> {
+        if self.frames == 0 {
+            return Vec::new();
+        }
+        let per = (width_hz / BIN_HZ).round().max(1.0) as usize;
+        let count = ((top_hz / width_hz).floor() as usize).min(self.bins / per);
+        let mut mean: Vec<f64> = (0..count)
+            .map(|k| {
+                let mut sum = 0f64;
+                for f in 0..self.frames {
+                    let row = &self.power[f * self.bins..(f + 1) * self.bins];
+                    sum += row[k * per..(k + 1) * per]
+                        .iter()
+                        .map(|&p| f64::from(p))
+                        .sum::<f64>();
+                }
+                sum / (self.frames * per) as f64
+            })
+            .collect();
+        let mut sorted = mean.clone();
+        sorted.sort_by(f64::total_cmp);
+        let floor = sorted
+            .get(sorted.len() / 2)
+            .copied()
+            .unwrap_or(1.0)
+            .max(f64::MIN_POSITIVE);
+        for m in &mut mean {
+            *m = 10.0 * (m.max(f64::MIN_POSITIVE) / floor).log10();
+        }
+        mean.into_iter().map(|m| m as f32).collect()
+    }
+
     fn row(&self, frame: i64) -> Option<&[f32]> {
         (0..self.frames as i64)
             .contains(&frame)

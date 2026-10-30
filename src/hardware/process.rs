@@ -217,6 +217,10 @@ pub struct Arrival {
     demod_enabled: bool,
     net_enabled: bool,
     pager_enabled: bool,
+    ft8_enabled: bool,
+    /// Unix seconds at arrival, taken only when something needs it (the FT8
+    /// feed, a recording); zero otherwise.
+    arrived_unix: f64,
     centre_hz: u64,
     rate_hz: f64,
     /// The block's place in the stream, after the pairs the driver lost.
@@ -261,7 +265,17 @@ pub fn arrive(
     // frequency reference was asked for, which the FFT worker measures from
     // the blocks it gets: at 20 Msps the transform is a core, and on a NET
     // view nothing reads it.
-    let (cal, fft_enabled, demod_enabled, net_enabled, pager_enabled, centre_hz, rate_hz, gain) = {
+    let (
+        cal,
+        fft_enabled,
+        demod_enabled,
+        net_enabled,
+        pager_enabled,
+        ft8_enabled,
+        centre_hz,
+        rate_hz,
+        gain,
+    ) = {
         let mut m = ctx.metrics.lock().unwrap_or_else(|e| e.into_inner());
         // What the radio delivered, counted where it arrives: a block the
         // intake later has no room for still crossed the USB link.
@@ -272,6 +286,7 @@ pub fn arrive(
             m.demod.enabled,
             m.ui.is_net_section(),
             m.ui.is_pager_section(),
+            m.ui.is_ft8_section(),
             m.radio.frequency,
             m.radio.config_sample_rate,
             recording.then(|| (m.radio.gains.clone(), m.radio.amp_enabled)),
@@ -284,6 +299,17 @@ pub fn arrive(
         dropped_pairs + pairs as u64,
         std::sync::atomic::Ordering::Relaxed,
     ) + dropped_pairs;
+    // The wall clock, read once, and only when someone needs it: FT8 must
+    // know when its samples were taken, and it is read here, on the driver's
+    // thread, before any queue can delay the block.
+    let arrived_unix = if ft8_enabled || gain.is_some() {
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_secs_f64())
+            .unwrap_or(0.0)
+    } else {
+        0.0
+    };
     // The recorder takes the raw bytes, whatever the correction: a correction
     // can be applied to a recording afterwards and never taken out of one.
     if let Some((gains, boost)) = gain {
@@ -294,10 +320,7 @@ pub fn arrive(
                 driver_dropped: dropped_pairs,
                 centre_hz,
                 rate_hz,
-                arrived_unix: std::time::SystemTime::now()
-                    .duration_since(std::time::UNIX_EPOCH)
-                    .map(|d| d.as_secs_f64())
-                    .unwrap_or(0.0),
+                arrived_unix,
             },
             buf,
             gains,
@@ -311,6 +334,8 @@ pub fn arrive(
         demod_enabled,
         net_enabled,
         pager_enabled,
+        ft8_enabled,
+        arrived_unix,
         centre_hz,
         rate_hz,
         first_pair,
@@ -392,6 +417,8 @@ pub fn digest(
         demod_enabled,
         net_enabled,
         pager_enabled,
+        ft8_enabled,
+        arrived_unix,
         centre_hz,
         rate_hz,
         first_pair,
@@ -541,6 +568,25 @@ pub fn digest(
             })
             .is_ok();
         ctx.pager_feed.record(ctx.pager_tx.len(), taken);
+    }
+    // The fifth, for the pager's reason, with the arrival time FT8's cycles
+    // are cut by.
+    if ft8_enabled {
+        let taken = ctx
+            .ft8_tx
+            .try_send(super::TimedBlock {
+                block: super::StreamBlock {
+                    seq: block_seq,
+                    gap_before: dropped_pairs > 0,
+                    bytes: forward.clone(),
+                    first_pair,
+                    centre_hz,
+                    rate_hz,
+                },
+                arrived_unix,
+            })
+            .is_ok();
+        ctx.ft8_feed.record(ctx.ft8_tx.len(), taken);
     }
     // The one point where a lost block is observable. This channel is lossy by
     // design - dropping under load beats blocking the USB callback - but lossy
@@ -846,6 +892,8 @@ pub(crate) mod tests {
             net_feed: crate::hardware::FeedHealth::default(),
             pager_tx,
             pager_feed: crate::hardware::FeedHealth::default(),
+            ft8_tx: crossbeam_channel::bounded(1).0,
+            ft8_feed: crate::hardware::FeedHealth::default(),
             power_tx,
             geometry,
             stream_pairs: std::sync::atomic::AtomicU64::new(0),
@@ -1263,6 +1311,8 @@ pub(crate) mod tests {
             net_feed: crate::hardware::FeedHealth::default(),
             pager_tx,
             pager_feed: crate::hardware::FeedHealth::default(),
+            ft8_tx: crossbeam_channel::bounded(1).0,
+            ft8_feed: crate::hardware::FeedHealth::default(),
             power_tx: ctx.power_tx.clone(),
             geometry: ctx.geometry,
             stream_pairs: std::sync::atomic::AtomicU64::new(0),
@@ -1287,6 +1337,50 @@ pub(crate) mod tests {
             "a block no pager will ever see"
         );
         assert_eq!(pager_rx.len(), 1);
+    }
+
+    /// The FT8 feed runs only on its view, carries the wall clock at the
+    /// block's arrival, and counts what it refuses.
+    #[test]
+    fn the_ft8_feed_runs_on_its_view_with_the_arrival_time() {
+        let (ctx, _sample_rx, _demod_rx, _net_rx) = rx_ctx_holding(8, 1);
+        let (ft8_tx, ft8_rx) = crossbeam_channel::bounded(1);
+        let ctx = Arc::new(RxContext {
+            metrics: Arc::clone(&ctx.metrics),
+            sample_tx: ctx.sample_tx.clone(),
+            fft_feed: crate::hardware::FeedHealth::default(),
+            demod_tx: ctx.demod_tx.clone(),
+            net_tx: ctx.net_tx.clone(),
+            net_feed: crate::hardware::FeedHealth::default(),
+            pager_tx: crossbeam_channel::bounded(1).0,
+            pager_feed: crate::hardware::FeedHealth::default(),
+            ft8_tx,
+            ft8_feed: crate::hardware::FeedHealth::default(),
+            power_tx: ctx.power_tx.clone(),
+            geometry: ctx.geometry,
+            stream_pairs: std::sync::atomic::AtomicU64::new(0),
+            streams_begun: std::sync::atomic::AtomicU64::new(0),
+            record: Default::default(),
+            intake: Default::default(),
+        });
+        let block = vec![0x10u8; 64];
+
+        super::process_block(&block, eight_bit(), 0, &ctx, Instant::now());
+        assert_eq!(ctx.ft8_feed.take(), (0, 0));
+        assert!(ft8_rx.is_empty());
+
+        ctx.metrics.lock().unwrap().ui.section = crate::signal::ft8::SECTION.to_string();
+        let before = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_secs_f64();
+        super::process_block(&block, eight_bit(), 0, &ctx, Instant::now());
+        assert_eq!(ctx.ft8_feed.take(), (1, 0), "the queue took it");
+        super::process_block(&block, eight_bit(), 0, &ctx, Instant::now());
+        assert_eq!(ctx.ft8_feed.take(), (1, 1), "a block no decoder will see");
+        let got = ft8_rx.try_recv().unwrap();
+        assert!(got.arrived_unix >= before && got.arrived_unix - before < 5.0);
+        assert_eq!(got.block.first_pair, 32);
     }
 
     /// The stride follows the block, so the budget reaches the end of it.

@@ -186,6 +186,14 @@ pub(super) fn drain(
     if pager_drops > 0 {
         m.pager.feed.last_loss = Some(now);
     }
+    // The FT8 feed's, the same way.
+    let (ft8_depth, ft8_drops) = rx_ctx.ft8_feed.take();
+    m.ft8.feed.peak_depth = ft8_depth;
+    m.ft8.feed.refused = ft8_drops;
+    m.ft8.feed.refused_session += ft8_drops;
+    if ft8_drops > 0 {
+        m.ft8.feed.last_loss = Some(now);
+    }
     let buf_sample = (m.iq.buf_fill_pct * 10.0) as u64;
     if m.iq.buf_fill_history.len() >= THROUGHPUT_HISTORY_LEN {
         m.iq.buf_fill_history.pop_front();
@@ -226,6 +234,8 @@ mod tests {
             net_feed: FeedHealth::default(),
             pager_tx,
             pager_feed: FeedHealth::default(),
+            ft8_tx: crossbeam_channel::bounded(1).0,
+            ft8_feed: FeedHealth::default(),
             power_tx,
             geometry: SampleGeometry {
                 format: SampleFormat::Int8,

@@ -405,6 +405,8 @@ mod power_control_tests {
             net_feed: FeedHealth::default(),
             pager_tx,
             pager_feed: FeedHealth::default(),
+            ft8_tx: crossbeam_channel::bounded(1).0,
+            ft8_feed: FeedHealth::default(),
             power_tx,
             geometry: SampleGeometry::default(),
             stream_pairs: std::sync::atomic::AtomicU64::new(0),

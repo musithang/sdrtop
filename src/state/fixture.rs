@@ -119,6 +119,7 @@ impl SdrMetrics {
             demod: DemodState::default(),
             net: crate::state::NetState::default(),
             pager: crate::state::PagerState::default(),
+            ft8: crate::state::Ft8State::default(),
             record: crate::state::RecordState::default(),
             caps,
             device_options: Arc::new(Vec::new()),

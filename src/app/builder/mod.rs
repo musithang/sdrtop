@@ -174,6 +174,8 @@ impl App {
         // The pager queue is the NET queue's depth for the NET queue's
         // reason: every block is wanted, and a deeper queue would hide losses.
         let (pager_tx, pager_rx) = crossbeam_channel::bounded::<crate::hardware::StreamBlock>(4);
+        // The FT8 queue, the pager's depth for the pager's reason.
+        let (ft8_tx, ft8_rx) = crossbeam_channel::bounded::<crate::hardware::TimedBlock>(4);
         // Read out before `cfg` is moved into `Self::assemble` below - a
         // plain `usize`, not worth threading the whole config through the
         // worker for.
@@ -188,6 +190,8 @@ impl App {
             net_feed: hardware::FeedHealth::default(),
             pager_tx,
             pager_feed: hardware::FeedHealth::default(),
+            ft8_tx,
+            ft8_feed: hardware::FeedHealth::default(),
             power_tx,
             geometry,
             stream_pairs: std::sync::atomic::AtomicU64::new(0),
@@ -235,6 +239,13 @@ impl App {
                 spawn_worker("pager-worker", move || {
                     crate::signal::pocsag::worker::PagerWorker::new(pager_rx, pager_state, geometry)
                         .run()
+                });
+
+                // Spawned always, as the pager's: with no FT8 view on screen
+                // nothing is forwarded, and the thread waits on `recv`.
+                let ft8_state = Arc::clone(&state);
+                spawn_worker("ft8-worker", move || {
+                    crate::signal::ft8::worker::Ft8Worker::new(ft8_rx, ft8_state, geometry).run()
                 });
 
                 tasks::spawn_rx_task(Arc::clone(&state), Arc::clone(&device), Arc::clone(&rx_ctx));

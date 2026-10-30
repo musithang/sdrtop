@@ -5,6 +5,7 @@ mod acc;
 mod demod;
 #[cfg(test)]
 pub(crate) mod fixture;
+pub mod ft8;
 mod iq;
 mod lab;
 mod micro;
@@ -43,6 +44,7 @@ pub use net::{
 pub use net::ROSTER_SORT_KEYS;
 // Named by the NET worker, which counts its arrivals into it, and Wi-Fi's
 // funnel and latest frame with it.
+pub use ft8::{verdict as ft8_verdict, CycleEntry, CycleOutcome, Ft8State};
 #[cfg(test)]
 pub use net::WifiSurvey;
 pub use net::{AirColumn, Rhythm, Spender, READING_COLUMNS, RHYTHM_BINS};
@@ -131,6 +133,8 @@ pub struct SdrMetrics {
     pub net: NetState,
     /// What the pager receiver has heard. See [`PagerState`].
     pub pager: PagerState,
+    /// What the FT8 receiver has heard. See [`Ft8State`].
+    pub ft8: Ft8State,
     /// What the IQ recorder is doing. See [`RecordState`].
     pub record: RecordState,
     /// Active device's capability descriptor - drives capability-aware UI

@@ -116,7 +116,13 @@ pub struct Report {
     /// meaning: counted, never shown.
     pub malformed: usize,
     pub passes: usize,
+    /// Power across the band before anything was subtracted, dB over the
+    /// cycle's median, in [`BAND_BIN_HZ`] bins from 0 to 3000 Hz.
+    pub band: Vec<f32>,
 }
+
+/// The width of a [`Report::band`] bin.
+pub const BAND_BIN_HZ: f64 = 25.0;
 
 /// What a pass found before messages are unpacked.
 struct Found {
@@ -146,6 +152,9 @@ pub fn decode_with(samples: &[Complex<f32>], book: &mut HashBook, settings: &Set
     for pass in 1..=settings.max_passes {
         report.passes = pass;
         let spec = Spectrogram::new(&x);
+        if pass == 1 {
+            report.band = spec.band(BAND_BIN_HZ, 3000.0);
+        }
         let mut cands = search::candidates(&spec);
         cands.truncate(settings.max_candidates);
         report.candidates += cands.len();

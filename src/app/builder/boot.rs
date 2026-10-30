@@ -470,6 +470,7 @@ pub(super) fn initial_metrics(cfg: &AppConfig, boot: Boot) -> anyhow::Result<Sdr
             },
             ..Default::default()
         },
+        ft8: crate::state::Ft8State::default(),
         record: crate::state::RecordState::default(),
         caps,
         device_options: Arc::new(Vec::new()),
