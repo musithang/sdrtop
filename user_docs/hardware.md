@@ -11,12 +11,13 @@
 | HackRF One | Fully supported: spectrum, waterfall, every diagnostic |
 | RTL-SDR (R820T / R828D / E4000) | Fully supported: the whole spectrum, waterfall and lab stack, with a single tuner gain plus AGC |
 | Airspy R2 | Fully supported natively: spectrum, waterfall, every diagnostic, with measured gain tables and Airspy's own gain curves. See [below](#airspy-r2) |
+| Airspy HF+ Discovery | Fully supported natively: both bands, every rate, every diagnostic, with its digital gain drawn as digital. See [below](#airspy-hf-discovery) |
 | tinySA / tinySA Ultra / Ultra+ | Spectrum, waterfall and native band sweeps in calibrated dBm. ZS405 is verified on hardware |
 | **Anything with a SoapySDR driver** | Supported, **and not yet confirmed on hardware other than a HackRF**. See [below](#soapysdr-the-honest-version) |
 | PortaPack H4M (Mayhem) | Fully supported (HackRF mode) |
 
-HackRF One, RTL-SDR, the Airspy R2 and the tinySA Ultra ZS405 are tested on real
-hardware.
+HackRF One, RTL-SDR, the Airspy R2, the Airspy HF+ Discovery and the tinySA Ultra
+ZS405 are tested on real hardware.
 
 The third row is a deliberate exception, and it gets its own section rather than
 a footnote, because you deserve to know which kind of "supported" you are
@@ -26,19 +27,20 @@ looking at.
 
 The UI adapts rather than showing you fields that can't mean anything:
 
-| | HackRF One | RTL-SDR | Airspy R2 |
-|---|---|---|---|
-| Frequency range | 1 MHz to 6 GHz | By tuner: 24 MHz to 1.766 GHz on R820T / R828D, 52 MHz to 2.2 GHz on E4000 | 24 MHz to 1.8 GHz |
-| Sample rate | 2 to 20 Msps | 0.9 to 3.2 Msps | 2.5 or 10 Msps |
-| Gain stages | LNA (0–40, step 8) and VGA (0–62, step 2) | One tuner gain, stepping a table the device reports | LNA, mixer and VGA, each a measured table; the knob walks Airspy's curves |
-| Front-end boost | RF amplifier (`a`) | Tuner AGC (`a`) | Tuner AGC on the LNA and mixer (`a`) |
-| Baseband filter | Tunable, follows the sample rate | None, so the panel reads N/A | None, so the panel reads N/A |
-| Friis noise figure | Computed per stage | N/A: the dongle doesn't expose per-stage gains | N/A: nobody publishes each stage's noise figure |
-| Clip ceiling | The converter's 0 dBFS | The converter's 0 dBFS | The tuner's, about −3 dBFS |
-| Sample format | Signed 8-bit | Unsigned 8-bit, biased at 127.5 | 12 bits, delivered as 16-bit I/Q |
+| | HackRF One | RTL-SDR | Airspy R2 | Airspy HF+ Discovery |
+|---|---|---|---|---|
+| Frequency range | 1 MHz to 6 GHz | By tuner: 24 MHz to 1.766 GHz on R820T / R828D, 52 MHz to 2.2 GHz on E4000 | 24 MHz to 1.8 GHz | 9 kHz to 31 MHz and 60 to 260 MHz |
+| Sample rate | 2 to 20 Msps | 0.9 to 3.2 Msps | 2.5 or 10 Msps | Seven, 192 to 912 kS/s |
+| Gain stages | LNA (0–40, step 8) and VGA (0–62, step 2) | One tuner gain, stepping a table the device reports | LNA, mixer and VGA, each a measured table; the knob walks Airspy's curves | ATT (0 to 48 dB, step 6) and LNA (0 or 6), both digital, after the converter |
+| Front-end boost | RF amplifier (`a`) | Tuner AGC (`a`) | Tuner AGC on the LNA and mixer (`a`) | The radio's AGC setting, which hands it the ATT (`a`) |
+| Baseband filter | Tunable, follows the sample rate | None, so the panel reads N/A | None, so the panel reads N/A | None, so the panel reads N/A |
+| Friis noise figure | Computed per stage | N/A: the dongle doesn't expose per-stage gains | N/A: nobody publishes each stage's noise figure | N/A: its stages are digital |
+| Clip ceiling | The converter's 0 dBFS | The converter's 0 dBFS | The tuner's, about −3 dBFS | None: the radio holds peaks at about −12 dBFS |
+| Sample format | Signed 8-bit | Unsigned 8-bit, biased at 127.5 | 12 bits, delivered as 16-bit I/Q | 16-bit USB word, carried in 32 bits with 8 below it |
 
 Everything else, including every lab bench, the demodulator and the sweep scanner,
-works the same on all three.
+works the same on all four, apart from what the
+[HF+ section](#airspy-hf-discovery) spells out.
 
 ## tinySA
 
@@ -196,11 +198,205 @@ The **Airspy Mini** answers on the same USB id. sdrtop tells them apart by the
 sample rates the firmware offers and leaves a Mini with SoapySDR, which drives it
 today, unless `--device airspy` asks for the native backend by name: nobody here
 has held a Mini, and its gains would be guesses. The **HF+ Discovery** is a
-different radio with a different library; it goes through SoapySDR
-(`--device soapy=driver=airspyhf`) for now. In
+different radio with a different library, and it has
+[its own section](#airspy-hf-discovery). In
 [observer mode](advanced.md#observer-mode-when-another-app-owns-the-radio) an
 Airspy is named by what it says on USB, `AIRSPY`, because USB can't tell an R2
 from a Mini either.
+
+## Airspy HF+ Discovery
+
+Airspy sent this one along with the R2, and it is sdrtop's first radio built for
+the bands below 30 MHz. Unlike the R2, it never worked through SoapySDR here:
+SoapyAirspyHF hands its samples over as floats (`CF32`), sdrtop's pipeline is
+integer, and the open was refused. So this is not a better road to a radio sdrtop
+could already use. Before this backend, there was no road at all.
+
+sdrtop drives it through libairspyhf, and it was rehearsed on this one: firmware
+`R5.0.1-CD`, libairspyhf 1.8.1 for streaming. The 1.6.8 that most distributions
+ship has the same calls, and sdrtop asks for nothing newer. The radio's own flash
+holds a frequency correction in ppb, which libairspyhf applies to every tuning
+and sdrtop logs at open. sdrtop never writes the flash.
+
+The HF+ is a different kind of receiver from everything else on this page, and
+most of what follows comes down to that. Its gain controls are digital, the radio
+runs its own AGCs whatever you do, and a number that would mean "front end" on a
+HackRF means something else here. sdrtop says so wherever it matters.
+
+### Two bands and a gap
+
+The Discovery tunes **9 kHz to 31 MHz** and **60 to 260 MHz**, which are Airspy's
+published bands. The radio itself accepts any frequency without complaint and
+shows a flat floor where it does not receive, so the bands come from Airspy, not
+from asking it. A frequency typed into the gap is refused with both bands named.
+`←` and `→` stop at a band's edge rather than jumping 29 MHz in one press: type
+the frequency to cross. The header's dial leaves the gap blank, the menu's ruler
+draws it dotted, and a sweep across it leaves a hole in the curve instead of
+tuning the radio somewhere it cannot receive. Bluetooth and Wi-Fi are refused,
+since 2.4 GHz is about ten times higher than this radio goes.
+
+### Seven rates, one scale
+
+The firmware offers 912, 768, 650, 456, 384, 228 and 192 kS/s. sdrtop starts on
+768 kS/s at 7.100 MHz, because somewhere on 40 m there is always something.
+
+**0 dBFS is the radio's 16-bit USB word**, where its samples actually clip. That
+has one consequence worth knowing: the firmware filters and decimates each rate
+with its own gain, so **a carrier's dBFS changes when you change the rate**, by
+that rate's filter gain.
+
+| Rate (kS/s) | 912 | 768 | 650 | 456 | 384 | 228 | 192 |
+|---|---|---|---|---|---|---|---|
+| Filter gain (dB) | 0 | 0 | 3 | 7 | 9 | 13 | 16 |
+
+libairspyhf keeps this figure to itself. sdrtop reads it from the samples at the
+start of every stream: the first block comes with the library's correction
+switched off, where every sample is a whole word times that gain, so the gain can
+be worked out exactly. That block is not shown, and the log says what was read.
+On this firmware it matched the table at every rate. On another firmware it is
+read the same way, not assumed.
+
+The samples are carried as 32-bit integers with eight bits below the word. At
+48 dB of attenuation the radio's own noise is less than one step of the 16-bit
+word, and rounding the library's corrected output back to 16 bits lifted that
+floor by up to half a decibel. With the extra bits the difference is gone (under
+0.001 dB). Recordings of the HF+ are `ci32_le` for the same reason; see
+[the SigMF extension](sdrtop.sigmf-ext.md).
+
+**Rate changes stop the stream first.** On this firmware, switching to a low-IF
+rate while streaming and then tuning down near 9 kHz left the radio unable to
+stream again until it was unplugged. Airspy looked at the report and called it a
+silicon problem. Changing the rate with the stream stopped never did it, so
+sdrtop always does it that way, and the timing bench's clock restarts cleanly
+afterwards.
+
+### Where the LO is: the Library DSP switch
+
+libairspyhf does two things to the samples by default. It corrects the I/Q
+balance at the two zero-IF rates (912 and 768 kS/s), and it fine-tunes to the
+hertz. The firmware itself tunes in whole kHz. At those two rates the library
+also puts the radio's LO **5 kHz above** the frequency you asked for and shifts
+the samples back, so the LO's DC leak sits 5 kHz off the centre instead of on it.
+sdrtop follows the LO wherever it is. The I/Q bench reads the leak at
+`+5.0 kHz`, the image scope mirrors about the LO, and the demodulator warns about
+the LO's leak rather than a DC spike at the centre. The I/Q balance is **not
+judged** there, because the samples have been turned off the LO and already
+balanced by the library, so their balance says nothing about the radio. The
+bench says so and gives the reason, and `[C]` declines to calibrate. At the low-IF
+rates the LO is the centre and the balance is measured as usual.
+
+The menu's **Options** pane has a **Library DSP** switch, on by default. Off, the
+library leaves the samples exactly as the radio sent them. The radio then tunes
+to the kHz grid, the centre moves to where it really is, and the header shows
+that frequency: ask for 7.0743 MHz and it reads 7.074 MHz, and the log says
+`tuned to 7.074000 MHz, -300 Hz`. Below 180 kHz the radio cannot be tuned with it
+off, so there it is refused. The choice is saved as `[airspyhf] dsp`.
+
+### ATT and LNA are digital
+
+The Discovery has two gain controls, called what libairspyhf and every other
+program call them:
+
+- **ATT**: an attenuator, 0 to 48 dB in 6 dB steps, shown as a negative gain
+  (`-48` to `0`). `↑` and `↓` move it.
+- **LNA**: off or +6 dB. `[` and `]` switch it.
+
+Measured on the bench against steady carriers, every attenuator step is 6.0 dB
+and the LNA is 6.0 dB, to within 0.1 dB on VHF and 0.2 dB on HF.
+
+What they are not is front-end gain. **By Airspy's account both are digital gain
+after the converter**, and every measurement here agrees. They decide where the
+level sits in the samples. They do not decide the signal-to-noise ratio, which
+the radio's own AGCs set before them. So on the HF+:
+
+- The chain reads `ANT▸AGC▸ADC▸ATT▸LNA▸word`, the gain lineup puts the stages
+  after the converter, and the level diagram walks the samples back through the
+  digital gain, not out to the antenna.
+- The RF bench's verdict talks about placement: `LEVEL WELL PLACED`,
+  `LEVEL LOW IN THE WORD`, `LEVEL HOT`, `LEVEL HELD`. It never promises that more
+  LNA buys a better signal, and its footer says `SNR set in the radio`.
+- The noise sweep (`[K]`) is refused. Digital gain moves the noise floor exactly
+  as far as the signal, so there is no front end to measure.
+- The converter bench is titled **Word Loading**, because what it sees is the
+  USB word, after the digital gain. The radio's own converter is never visible.
+- There is no noise figure card. Nobody publishes one per stage, and these
+  stages would not have one anyway.
+
+sdrtop starts with ATT at 0 and the LNA off, at first run and on `[R]`. On any
+antenna whose band noise is above the radio's own, the LNA only lifts signal and
+noise together and takes 6 dB of headroom.
+
+### The radio's AGCs, and the `a` key
+
+The radio runs an RF, an IF and a digital AGC. **By Airspy's account they are
+always at work**, with the digital gain making up for whatever the analog ones
+take, so the level in the samples stays put. The `a` key switches the radio's AGC
+setting, saved per radio like every other boost. What it does, as far as anyone
+can see from outside, is **hand the attenuator to the radio**. With it on, ATT
+reads `AGC` and a manual setting no longer applies. The LNA stays yours. sdrtop
+logs `AGC ON: the radio sets ATT; its AGCs are always on`. The library has no way
+to ask what attenuation the radio chose, so sdrtop does not show one.
+
+What it does not do is change the level of anything measurable. On a cable, with
+a carrier driven up to 29 dB past the point where the output stops rising and
+held there for six seconds, AGC off, on-low and on-high read the same to within a
+tenth of a dB, at a level where one attenuator step left behind would have shown
+as six. That fits Airspy's account: whatever the analog loops
+take, the digital gain gives back. So there is no threshold control (it starts at
+low and stays there), because there was nothing to measure it with.
+
+### The hold, at about −12 dBFS
+
+Push a strong signal in and its peak stops rising, cleanly, with no clipping and
+no new products. That is the radio's digital AGC turning its own gain down. On
+the USB word it holds a carrier's sample peak at:
+
+| | Arriving well past the hold | After any gain command |
+|---|---|---|
+| HF (below 31 MHz) | −13.5 dBFS | −11.6 dBFS |
+| VHF (60 MHz and up) | −14.8 dBFS | −13.3 dBFS |
+
+The upper figures were measured on a cable at all seven rates, each within
+0.2 dB, and the lower ones at 768 and 192 kS/s, repeatable to 0.1 dB. Where it holds depends on
+what came before. A carrier that arrives well past the hold is held lower, and the
+next gain command sent while it is there lifts the hold to the upper figure, even
+one that changes nothing. That is the AGC's hysteresis being reset. Since sdrtop
+sends a command only when you press a key, the lower figure is the one you will
+usually see.
+
+sdrtop shows the hold as a span (`HOLD -14 to -12 dBFS (digital AGC)` on HF) and
+judges from its low edge, because past that point the level in the samples may no
+longer be the antenna's. A peak there reads `HELD`, not `CLIPPING`, since nothing
+is lost. The radio cut its gain and did not say by how much. Auto-gain (`A`) from
+a held peak goes to the most attenuation first, since how far past the hold the
+signal is cannot be known, and the next `A` lands it. That is also Airspy's own
+advice for a strong signal: more ATT, LNA off.
+
+### Timing
+
+libairspyhf delivers on its own thread, eight blocks deep, 4096 sample pairs a
+block with 1.8.1 (2048 with 1.6.8). sdrtop reads the size at open rather than
+assuming it. On the deliberately old i3, five minutes at 912 kS/s ran at 13 to
+14 % CPU with no drops, and the clock settled within ±15 ppm. Jitter is about
+±1.5 ms at the two zero-IF rates, where the library balances I and Q on its
+delivery thread, and about ±0.2 ms at the others. The `link util` line reads
+against this radio's own top rate, so 768 kS/s shows about 84 %. That is correct,
+not a warning.
+
+### Observer mode, and the other HF+ boards
+
+In [observer mode](advanced.md#observer-mode-when-another-app-owns-the-radio)
+the HF+ is found on USB as `03eb:800c` and its product name, `AIRSPY HF+`. The
+vendor id is Atmel's, shared with boards that are not radios, so a device on that
+id that does not call itself an HF+ is not taken for one. sdrtop names the program
+holding it.
+
+The **HF+ Dual Port** and the **Ranger** answer on the same id and through the
+same library. sdrtop tells them apart by the part id their firmware reports,
+names them, and does not drive them. Nobody here has held one, and their
+attenuators, front ends and rates would be guesses. Through SoapySDR they hit the
+same `CF32` refusal as the Discovery. The Discovery has no bias tee, so there is
+no option for one.
 
 ## SoapySDR: the honest version
 
@@ -212,7 +408,7 @@ their Airspy, and every week the answer is "sorry, I do not have one".
 So I broke my own rule, on purpose, in one specific place.
 
 [SoapySDR](https://github.com/pothosware/SoapySDR) is one API with a lot of
-radios behind it: the Airspy Mini and HF+, SDRplay's RSP line, PlutoSDR, LimeSDR, bladeRF, USRP,
+radios behind it: the Airspy Mini, SDRplay's RSP line, PlutoSDR, LimeSDR, bladeRF, USRP,
 and SoapyRemote for a radio on a different machine entirely. sdrtop now speaks
 it. **The backend was written from the SoapySDR headers, not from owning the
 devices**, which means it is exactly as good as the drivers are honest and as
@@ -254,7 +450,7 @@ dropped.
 | A HackRF through **SoapyRemote** | Verified by a user, not by me: Raspberry Pi Zero 2 W server, Wi-Fi link, 1 Msps. See [below](#a-radio-on-another-machine-soapyremote) |
 | **Every other radio** | **Unverified.** The code is right as far as I can reason. That is not the same as right |
 
-So if you have an Airspy Mini or HF+, an RSP, a Pluto or a Lime: you are the test. I would
+So if you have an Airspy Mini, an RSP, a Pluto or a Lime: you are the test. I would
 genuinely love an issue either way, working or not. "It works, here is what the
 header said" is as useful to me as a crash.
 
@@ -332,7 +528,7 @@ sent the fix. That is exactly how the grey rows above are meant to turn green.
 |---|---|
 | Your **sound card** shows up as an SDR | It is real: `soapysdr-module-audio` presents audio inputs as SDR sources, which is genuinely useful with a soundcard receiver and confusing on a laptop. sdrtop skips the `audio` driver by default. Ask for it with `--device soapy=driver=audio` |
 | A **SoapyRemote** radio is listed but **will not open** | A bug in 0.6.2 and earlier: the server address was dropped on the way from the picker to the open. Fixed; update sdrtop |
-| Your HackRF, RTL-SDR or Airspy R2 appears **once**, not twice, even with the Soapy module installed | On purpose. sdrtop's own driver for those three knows more about them than the generic path does, so the native one wins. Force the other with `--device soapy` |
+| Your HackRF, RTL-SDR, Airspy R2 or HF+ Discovery appears **once**, not twice, even with the Soapy module installed | On purpose. sdrtop's own driver for those four knows more about them than the generic path does, so the native one wins. Force the other with `--device soapy` |
 | The **RF bench is missing** its noise figure, MDS and linearity card | Also on purpose. Those model a specific front end stage by stage. SoapySDR does not publish that, and inventing it would be worse than leaving it out |
 | **No `[A]` boost** on your device | sdrtop asks the driver whether there is an automatic gain mode and only offers the key if there is. A HackRF reached through SoapySDR reports there is not, which surprised me too |
 | `[` and `]` do nothing | Those two are the HackRF's VGA keys. Everywhere else, pick a stage with `,` / `.` and use `↑` / `↓`. See below |
@@ -393,7 +589,7 @@ which is the honest answer rather than a guess dressed as two.
 | ARM / Android (Termux) | Builds and runs; needs a root-capable USB stack to reach the device |
 | macOS (Homebrew) | Unofficial, tested by the people who run it: [macOS, unofficially](#macos-unofficially) |
 
-sdrtop loads libhackrf, librtlsdr and libairspy at runtime. None of them is
+sdrtop loads libhackrf, librtlsdr, libairspy and libairspyhf at runtime. None of them is
 required to build sdrtop. A missing or incompatible library disables only
 its backend.
 
@@ -410,6 +606,13 @@ The Airspy R2 needs libairspy with all required symbols (1.0.10 is what it was
 rehearsed with). Linux candidates are `libairspy.so.0` and `libairspy.so`.
 Runtime packages include `libairspy0` on Debian and Ubuntu and `airspy` on Arch
 and Homebrew.
+
+The Airspy HF+ Discovery needs libairspyhf 1.6.8 or newer (1.8.1 is what it was
+rehearsed with). Linux candidates are `libairspyhf.so.0`, `libairspyhf.so.1`
+(Debian and Ubuntu rename it) and `libairspyhf.so`. Runtime packages include
+`libairspyhf1` on Debian and Ubuntu and `airspyhf` on Fedora, openSUSE and
+Homebrew. Arch has no official package, only the AUR's `airspyhf-git`.
+Ubuntu 20.04's 1.1.5 is too old and is refused whole.
 
 Library loading results are cached for the process lifetime. Unavailable-backend
 diagnostics appear on explicit selection or when automatic discovery finds no devices.
@@ -442,6 +645,7 @@ libraries where Homebrew and MacPorts put them (`/opt/homebrew/lib`,
 brew install rtl-sdr        # an RTL-SDR
 brew install hackrf         # a HackRF
 brew install airspy         # an Airspy R2
+brew install airspyhf       # an Airspy HF+ Discovery
 brew install soapysdr       # SoapySDR
 brew install soapyrtlsdr    # and the driver module for your radio (soapyhackrf for a HackRF)
 cargo install sdrtop --locked
@@ -450,7 +654,7 @@ cargo install sdrtop --locked
 The [one-line installer](getting-started.md) works on a Mac too: it takes the
 macOS tarball for your Mac when the release carries one and compiles with cargo
 when it doesn't (that needs Apple's Command Line Tools, `xcode-select
---install`), and its `--hackrf`, `--rtlsdr`, `--airspy` and `--soapy` go through Homebrew.
+--install`), and its `--hackrf`, `--rtlsdr`, `--airspy`, `--airspyhf` and `--soapy` go through Homebrew.
 I don't own a Mac, so this stays unofficial: tested by the people who run it. If something behaves
 differently there, an issue is how I find out.
 
@@ -461,15 +665,15 @@ differently there, an issue is how I find out.
 | Device | Status | Notes |
 |--------|--------|-------|
 | SDRplay RSP1B | Planned | On the desk, sent by SDRplay |
-| Airspy HF+ Discovery | Planned | On the desk, sent by Airspy |
 | Airspy Mini | Planned | Needs hardware to test |
 | HackRF Pro | Planned | Needs hardware to test |
 | LimeSDR / bladeRF / SDRplay / PlutoSDR | Try SoapySDR | These should already work through the SoapySDR backend. Nobody has told me yet |
 
 **Native** device support means physically owning and testing the hardware, and
 development here runs on a HackRF One and a PortaPack H4M, with an RSP1B from
-SDRplay and an HF+ Discovery from Airspy on the desk, waiting for their native
-backends. The Airspy R2 that came with it has [its own](#airspy-r2) now. That is the whole bottleneck: the list moves at exactly the speed
+SDRplay on the desk, waiting for its native backend. The Airspy R2 and the
+HF+ Discovery that Airspy sent have their own now ([R2](#airspy-r2),
+[HF+](#airspy-hf-discovery)). That is the whole bottleneck: the list moves at exactly the speed
 of a hobby budget. The SoapySDR backend exists precisely because that speed was
 not good enough.
 

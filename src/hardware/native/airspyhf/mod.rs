@@ -3,8 +3,9 @@
 
 //! The Airspy HF+ Discovery, driven through libairspyhf.
 //!
-//! Found, identified, opened, described and streamed here, for now only when
-//! `--device airspyhf` names this backend.
+//! Found, identified, opened, described and streamed here. Offered unasked
+//! for a Discovery (or a radio another program holds); the other boards only
+//! when `--device airspyhf` names this backend ([`offered`]).
 //!
 //! **libairspyhf owns the threads.** Its USB thread queues whole buffers and
 //! its consumer thread converts them to floats and calls [`rx_callback`],
@@ -14,9 +15,11 @@
 //! words by; each stream reads it from its first block ([`filter_gain_db`]).
 //!
 //! **Its gains are what they say.** The attenuator's 6 dB steps and the LNA's
-//! 6 dB were measured on the bench against steady carriers, at HF and VHF,
-//! and neither is made up digitally: both move the level the samples carry.
-//! The attenuator is a negative gain (`-48..0 dB`), front of the LNA.
+//! 6 dB were measured on the bench against steady carriers, at HF and VHF.
+//! Both are digital gain after the converter, behind the radio's own AGCs,
+//! which are always on: they place the level in the samples, not the signal
+//! at the converter ([`gain_model`]). The attenuator is a negative gain
+//! (`-48..0 dB`), ahead of the LNA.
 //!
 //! **Where its LO is.** At its zero-IF rates libairspyhf tunes the radio 5 kHz
 //! above the asked frequency and rotates the samples back, and below the

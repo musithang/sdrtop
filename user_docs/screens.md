@@ -44,7 +44,7 @@ whole path is on screen. The line above the columns says the path in words.
 |------|----------|
 | **Radio** | Listening to the air. **Pagers › POCSAG** is [the pager](radio-pocsag.md); the rest (FM broadcast, aviation, marine, the ham bands, walkie-talkies) are listed as *later*, to say what the tile will hold |
 | **Lab** | Measuring and decoding. **Spectrum** (the general views), **Sweep**, **Receiver** (the four benches), **Bluetooth › 2.4 GHz** (Overview, Low Energy, Classic, Long range), **Wi-Fi › 2.4 GHz** (Channel; Room, Network and Transmitter later, and 5 GHz) and **Compact** (large type, for a small window) |
-| **Options** | The radio's own settings, where it has any: a tinySA's, the Airspy R2's bias tee and packing |
+| **Options** | The radio's own settings, where it has any: a tinySA's, the Airspy R2's bias tee and packing, the HF+ Discovery's Library DSP |
 | **Keys** | Every key, the group you are in first: each panel's focus letter and what it adds, then the general keys |
 | **Quit** | What quitting saves, and `Enter` quits. Plain `q` quits from anywhere, as on the deck |
 
@@ -252,7 +252,7 @@ Whether your computer is keeping up with the radio in real time.
 
 - **Timing Diagnostics** *(left, focus `t`)*: measured versus expected block
   period, jitter, the sample clock's offset in ppm, and a verdict that names its
-  own reason. On a radio that pushes blocks at you (HackRF, RTL-SDR, Airspy R2) it
+  own reason. On a radio that pushes blocks at you (HackRF, RTL-SDR, the Airspys) it
   measures how late the worst blocks come against the radio's slack (a slice of
   one block, or a driver's queue where it keeps one); on one you pull from
   (SoapySDR) there is no deadline to miss, so it measures how much of the read

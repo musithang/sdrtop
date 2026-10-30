@@ -80,7 +80,7 @@ Versioning is SemVer. While the major is `0`, a minor bump is *permitted* to
 break `~/.config/sdrtop/config.toml`, and when it does, `CHANGELOG.md` confesses
 under *Changed*, because we are not animals.
 
-**Steps 8 and 10 require the [GitHub CLI](https://cli.github.com).** It is not a
+**Steps 7 and 9 require the [GitHub CLI](https://cli.github.com).** It is not a
 build dependency, CI brings its own, and your machine is quite possibly entirely
 innocent of it:
 
@@ -89,7 +89,7 @@ gh --version || echo "install it: https://cli.github.com"
 gh auth status
 ```
 
-Everything through step 7 needs only `git` and `cargo`, as the ancients
+Everything through step 6 needs only `git` and `cargo`, as the ancients
 intended, before YAML.
 
 ---
@@ -117,15 +117,7 @@ Byte for byte, that is what the world will read. If it exits non-zero, CI will
 refuse the release later anyway, so find out now, alone, with your dignity
 still on.
 
-## II. Tell the story 📖
-
-Add a checkpoint to `user_docs/whats-new.md` and move the `*(you are here)*`
-marker onto it.
-
-The changelog is the receipt. This is the *story*. People genuinely read this
-one, which is a tremendous responsibility and also secretly the nicest part.
-
-## III. Speak the new number 🔢
+## II. Speak the new number 🔢
 
 ```sh
 # edit Cargo.toml: version = "X.Y.Z"
@@ -144,7 +136,7 @@ profoundly mysterious for about ten minutes and then extremely stupid forever.
 > until the day they would not have. Now there is `version.sh`, and there is
 > only ever one answer.*
 
-## IV. Await the omens 🔮
+## III. Await the omens 🔮
 
 Push to `main` (**not the tag**, we are nowhere near ready for the tag) and let
 CI speak: formatting, clippy, the test suite, `cargo package`, the 1.88 MSRV
@@ -153,7 +145,7 @@ check, shellcheck.
 Green means green. "Mostly green" is not a colour. It is a mood, and it is
 lying to you.
 
-## V. COMMUNE WITH THE ACTUAL RADIO 📻
+## IV. COMMUNE WITH THE ACTUAL RADIO 📻
 
 **No machine can do this for you. It is the law of this project: hardware
 support lands only after physical testing.**
@@ -178,10 +170,10 @@ is a human being, looking at a screen, deciding whether the thing is any good.
 It is the only step that cannot be faked and the only one that has ever caught
 anything interesting.
 
-## VI. THE SUMMONING 🏷️
+## V. THE SUMMONING 🏷️
 
 ```sh
-git add Cargo.toml Cargo.lock CHANGELOG.md user_docs/whats-new.md
+git add Cargo.toml Cargo.lock CHANGELOG.md
 git commit -m "chore(release): X.Y.Z"
 git tag -a vX.Y.Z -m "sdrtop X.Y.Z"
 git push origin main --follow-tags
@@ -193,7 +185,7 @@ Everything before it can be undone with a shrug and a `git tag -d`. After it,
 machines begin acting on your behalf, and one of them is about to do something
 permanent while you watch a progress spinner.
 
-## VII. Observe the machines at their work ⚙️
+## VI. Observe the machines at their work ⚙️
 
 `.github/workflows/release.yaml`. Three jobs, in this order, for this reason:
 
@@ -212,7 +204,7 @@ until the heat death of the universe.
 If any of those three fails, breathe out. Nothing has happened. Proceed to the
 Bestiary.
 
-## VIII. Interrogate the draft before the public may 🔍
+## VII. Interrogate the draft before the public may 🔍
 
 Draft assets are downloadable to those with write access, which is precisely why
 this project needs no prerelease. Should `gh` decline, the draft's own page in
@@ -253,7 +245,7 @@ done
 > was a decoration. It now stops, loudly, and `--no-verify` exists for people
 > who have a reason and know they have one.*
 
-## IX. READ IT. With your eyes. 👁️
+## VIII. READ IT. With your eyes. 👁️
 
 Open the draft. Read it as a stranger who has never heard of you, does not care
 about your refactor, and will judge the entire project by this one page.
@@ -263,7 +255,7 @@ will otherwise find in eleven minutes.
 
 *Then* press Publish.
 
-## X. Confirm the world has accepted your offering 🌍
+## IX. Confirm the world has accepted your offering 🌍
 
 ```sh
 cargo install sdrtop --locked --force
@@ -378,7 +370,7 @@ whatsoever.
 
 ---
 
-# 🤖 APPENDIX: automating step III, should you weaken
+# 🤖 APPENDIX: automating step II, should you weaken
 
 [`cargo-release`](https://github.com/crate-ci/cargo-release) will perform the
 bump, the lockfile, the changelog heading, the commit, the tag and the push in a
@@ -405,9 +397,9 @@ pre-release-replacements = [
 ]
 ```
 
-Steps III and VI then collapse into `cargo release X.Y.Z --execute`.
+Steps II and V then collapse into `cargo release X.Y.Z --execute`.
 
-Steps I, II, V, VIII and IX still demand a human with functioning eyes and an
+Steps I, IV, VII and VIII still demand a human with functioning eyes and an
 actual radio on the desk.
 
 That is not an oversight. That is the job.

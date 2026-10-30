@@ -94,7 +94,7 @@ somewhere else. ([Rule Six](POLICY.md#six))
 You don't have to write like the rest of the docs. Clear and correct is enough,
 and I'll tune the wording before a release.
 
-Leave `user_docs/whats-new.md`, the version number and the release files to me.
+Leave the version number, the changelog's version headings and the release files to me.
 They belong to [the release](RELEASING.md).
 
 ### 6. What sdrtop does not do

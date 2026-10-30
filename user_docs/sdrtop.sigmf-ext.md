@@ -10,7 +10,8 @@ recording correctly.
 
 The recordings themselves are ordinary SigMF: a `.sigmf-data` file holding the
 samples exactly as the radio delivered them (`ci8` from a HackRF, `cu8` from an
-RTL-SDR, `ci16_le` through SoapySDR) and a `.sigmf-meta` file beside it.
+RTL-SDR, `ci16_le` from an Airspy R2 or through SoapySDR, `ci32_le` from an
+Airspy HF+ Discovery) and a `.sigmf-meta` file beside it.
 
 ## 1 Global
 

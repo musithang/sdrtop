@@ -67,11 +67,12 @@ Explicit native selection reports failures for that backend only.
 Explicit tinySA or SoapySDR selection produces no native-library diagnostics.
 
 1. **Install the selected runtime.** Use `sh install.sh --deps-only --hackrf`,
-   `--rtlsdr` or `--airspy`. Distribution package names are in
+   `--rtlsdr`, `--airspy` or `--airspyhf`. Distribution package names are in
    [Getting started](getting-started.md#what-you-need).
 2. **Check the filename and search path.** HackRF tries `libhackrf.so.0` and
    `libhackrf.so`. RTL-SDR tries `librtlsdr.so.0`, `librtlsdr.so.2` and
-   `librtlsdr.so`. The Airspy R2 tries `libairspy.so.0` and `libairspy.so`.
+   `librtlsdr.so`. The Airspy R2 tries `libairspy.so.0` and `libairspy.so`. The HF+ Discovery
+   tries `libairspyhf.so.0`, `libairspyhf.so.1` and `libairspyhf.so`.
    Custom installations need a loader search path such as
    `LD_LIBRARY_PATH`. Installing headers alone does not make a runtime loadable.
 3. **Upgrade an incompatible library.** HackRF needs libhackrf 2023.01.1+
@@ -83,7 +84,7 @@ Explicit tinySA or SoapySDR selection produces no native-library diagnostics.
 ### A SoapySDR device doesn't appear
 
 Everything else on this page assumes a radio sdrtop drives itself (a HackRF, an
-RTL-SDR or an Airspy R2). If you are here for an Airspy Mini or HF+, an RSP, a
+RTL-SDR, an Airspy R2 or an HF+ Discovery). If you are here for an Airspy Mini, an RSP, a
 Pluto or anything else reached through
 [SoapySDR](hardware.md#soapysdr-the-honest-version), the ladder is different and
 it is short.
@@ -113,8 +114,9 @@ it is short.
 4. **Your sound card is not a bug.** If `SoapySDRUtil --find` lists
    `driver = audio`, that is `soapysdr-module-audio` doing its job. sdrtop skips
    it by default. If you actually want it, `--device soapy=driver=audio`.
-5. **Your HackRF, RTL-SDR or Airspy R2 appears once, not twice.** Deliberate:
-   the native backend wins. `--device soapy` forces the other path. An Airspy
+5. **Your HackRF, RTL-SDR, Airspy R2 or HF+ Discovery appears once, not
+   twice.** Deliberate: the native backend wins. `--device soapy` forces the
+   other path (an HF+ is refused there, its driver delivers `CF32`). An Airspy
    Mini stays on the SoapySDR path; see [Airspy R2](hardware.md#airspy-r2).
 6. **Is the radio on another machine?** That is SoapyRemote, and it has its own
    short checklist in
@@ -517,7 +519,7 @@ For a runtime loading error, follow
 
 If none of this covered it:
 
-1. **Check [What's new](whats-new.md)** in case the behaviour changed recently.
+1. **Check the [changelog](../CHANGELOG.md)** in case the behaviour changed recently.
 2. **Collect the useful things:** `~/.config/sdrtop/sdrtop.log`, your device and
    tuner type, sample rate, host OS and CPU, and what you did to trigger it.
 3. **[Open an issue](../../../issues)** with all of that. A log file and a

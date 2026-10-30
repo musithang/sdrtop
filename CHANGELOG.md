@@ -10,10 +10,6 @@ is rewritten on quit, and a version that changes its shape says so here under
 *Changed*. Loading stays forgiving in both directions, so a missing or unknown
 field falls back to a default rather than refusing to start.
 
-For the same story told as narrative rather than as a list, see
-[`user_docs/whats-new.md`](user_docs/whats-new.md), which is organised by
-checkpoint instead of by version.
-
 ## [Unreleased]
 
 ### Added

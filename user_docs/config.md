@@ -46,7 +46,7 @@ gain         = "LNA=24,VGA=30"  # per stage, or a bare total like gain = 54
 recall_hz    = [0, 0, 0]   # Command Rail recall slots. 0 means empty
 
 [radio.boost]               # front end boost, each radio by its own name
-"HackRF One" = false        # HackRF RF amp · RTL-SDR tuner AGC · Airspy AGC
+"HackRF One" = false        # HackRF RF amp · RTL-SDR tuner AGC · Airspy R2 and HF+ AGC
 
 [display]
 active_preset      = "command_rail"  # which layout to open on

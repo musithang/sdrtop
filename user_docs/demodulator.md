@@ -430,7 +430,5 @@ Still no audio. It reads radios, it does not play them.
   reading on the demod panel means, and how to act on it
 - **[Tips and Tricks](tips-and-tricks.md)**: getting a signal clean enough for
   RDS to decode in the first place
-- **[What's new](whats-new.md)**: the checkpoint where the demodulator landed,
-  and the one where it was taken apart and checked
 
 ← [Back](README.md)

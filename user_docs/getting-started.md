@@ -23,7 +23,7 @@ curl -fsSL https://raw.githubusercontent.com/musithang/sdrtop/main/packaging/ins
 # Install the runtime for a HackRF
 curl -fsSL https://raw.githubusercontent.com/musithang/sdrtop/main/packaging/install.sh | sh -s -- --hackrf
 
-# ...and with SoapySDR, if you have an Airspy, an RSP, a Pluto or a Lime
+# ...and with SoapySDR, if you have an Airspy Mini, an RSP, a Pluto or a Lime
 curl -fsSL https://raw.githubusercontent.com/musithang/sdrtop/main/packaging/install.sh | sh -s -- --soapy
 ```
 
@@ -33,7 +33,8 @@ An incompatible architecture or libc triggers a source build through
 `cargo install sdrtop --locked`.
 
 Runtime installation is opt-in. `--hackrf` adds libhackrf. `--rtlsdr` adds
-librtlsdr. `--airspy` adds libairspy, for an Airspy R2. `--soapy` adds SoapySDR
+librtlsdr. `--airspy` adds libairspy, for an Airspy R2. `--airspyhf` adds libairspyhf, for
+an Airspy HF+ Discovery. `--soapy` adds SoapySDR
 and its driver modules. These flags can be
 combined. A plain install of a runtime-loading release adds none of these libraries.
 Missing or incompatible libraries disable only their respective backends.
@@ -49,7 +50,7 @@ could not be installed. The runtime package lists fall back to development
 packages on some distributions. Those packages include the runtime library.
 
 The installer uses distribution packages for native SDR udev rules. It reports
-device-access advice when `--hackrf`, `--rtlsdr` or `--airspy` is selected. See
+device-access advice when `--hackrf`, `--rtlsdr`, `--airspy` or `--airspyhf` is selected. See
 [troubleshooting](troubleshooting.md#permission-denied) for access problems.
 
 Read it before you pipe it into a shell if you like:
@@ -66,6 +67,7 @@ sh install.sh --no-verify           # skip the checksum check (say why first)
 sh install.sh --hackrf              # Install the HackRF runtime
 sh install.sh --rtlsdr              # Install the RTL-SDR runtime
 sh install.sh --airspy              # Install the Airspy R2 runtime
+sh install.sh --airspyhf            # Install the Airspy HF+ Discovery runtime
 sh install.sh --soapy               # add SoapySDR and its driver modules
 sh install.sh --deps-only --rtlsdr   # Install only the selected runtime
 sh install.sh --uninstall           # remove what a previous run installed
@@ -77,7 +79,7 @@ higher up. `--help` is the authority here: the script prints its own flags, and
 that list cannot drift out of date the way this page can.
 
 `--deps-only` installs only the runtimes selected by `--hackrf`, `--rtlsdr`,
-`--airspy` and `--soapy`. It never installs sdrtop or build tools. Without a runtime flag
+`--airspy`, `--airspyhf` and `--soapy`. It never installs sdrtop or build tools. Without a runtime flag
 it exits with a usage error.
 
 `--no-verify` earns a warning of its own. It turns off the checksum check on a
@@ -107,10 +109,12 @@ install the binary to `/usr/bin`, the man page, and these docs under
 `/usr/share/doc`.
 
 The optional dependencies are `hackrf`, `rtl-sdr` and `soapysdr`. The Airspy
-R2 needs `airspy`, which the packages don't list yet:
+R2 needs `airspy`, which the packages don't list yet, and the HF+ Discovery
+needs libairspyhf, which only the AUR has:
 
 ```sh
 sudo pacman -S airspy        # Airspy R2, native
+yay -S airspyhf-git          # Airspy HF+ Discovery, native
 sudo pacman -S soapyrtlsdr soapyhackrf soapyairspy soapyplutosdr   # SoapySDR driver modules
 ```
 
@@ -163,22 +167,23 @@ nix-shell -p gcc
 
 Install runtime packages separately for your radio:
 
-| Distribution | HackRF | RTL-SDR | Airspy R2 |
-|---|---|---|---|
-| Debian / Kali / Raspberry Pi OS | `libhackrf0` | `librtlsdr0` | `libairspy0` |
-| Ubuntu / Mint / Pop!_OS | `libhackrf0` | `librtlsdr2` | `libairspy0` |
-| Arch / Manjaro | `hackrf` | `rtl-sdr` | `airspy` |
-| Fedora | `hackrf` | `rtl-sdr` | `airspyone_host` |
-| Void | `hackrf` | `rtl-sdr` | `libairspy` |
-| openSUSE | `libhackrf0` | `librtlsdr0` | `airspy` |
-| Alpine | `hackrf-libs`, `hackrf-udev` | `librtlsdr`, `librtlsdr-udev` | `airspyone-host-libs` |
-| Gentoo | `net-wireless/hackrf` | `net-wireless/rtl-sdr` | `net-wireless/airspy` |
-| Nixpkgs | `hackrf` | `rtl-sdr` | `airspy` |
+| Distribution | HackRF | RTL-SDR | Airspy R2 | Airspy HF+ |
+|---|---|---|---|---|
+| Debian / Kali / Raspberry Pi OS | `libhackrf0` | `librtlsdr0` | `libairspy0` | `libairspyhf1` |
+| Ubuntu / Mint / Pop!_OS | `libhackrf0` | `librtlsdr2` | `libairspy0` | `libairspyhf1` |
+| Arch / Manjaro | `hackrf` | `rtl-sdr` | `airspy` | `airspyhf-git` (AUR) |
+| Fedora | `hackrf` | `rtl-sdr` | `airspyone_host` | `airspyhf` |
+| Void | `hackrf` | `rtl-sdr` | `libairspy` | `libairspyhf` |
+| openSUSE | `libhackrf0` | `librtlsdr0` | `airspy` | `airspyhf` |
+| Alpine | `hackrf-libs`, `hackrf-udev` | `librtlsdr`, `librtlsdr-udev` | `airspyone-host-libs` | `airspyhf-libs` |
+| Gentoo | `net-wireless/hackrf` | `net-wireless/rtl-sdr` | `net-wireless/airspy` | `net-wireless/airspyhf` (GURU) |
+| Nixpkgs | `hackrf` | `rtl-sdr` | `airspy` | `airspyhf` |
 
 HackRF requires libhackrf 2023.01.1+ with all required symbols. RTL-SDR supports
 `librtlsdr.so.0`, `librtlsdr.so.2` and `librtlsdr.so`. HackRF supports
 `libhackrf.so.0` and `libhackrf.so`. The Airspy R2 supports `libairspy.so.0` and
-`libairspy.so`. See [hardware](hardware.md#host-platforms)
+`libairspy.so`. The HF+ Discovery supports `libairspyhf.so.0`,
+`libairspyhf.so.1` and `libairspyhf.so`. See [hardware](hardware.md#host-platforms)
 for the runtime contract. Custom library locations must be on the dynamic
 loader's search path, for example through `LD_LIBRARY_PATH`.
 
