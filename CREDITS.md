@@ -35,6 +35,19 @@ a pull request and your name belongs here too.
   `packaging/update-sig.sh`. They name a BLE advertiser's company and a
   classic link manager's company and Core version, rather than leaving two
   numbers. The names remain the SIG's.
+- **[Natural Earth](https://www.naturalearthdata.com/)** (public domain):
+  the land polygons at 1:110m, `packaging/data/ne_110m_land.geojson` from the
+  `natural-earth-vector` repository (5.2.0-pre), packed into
+  `src/geo/land.bin` by the converter in `src/geo/land.rs`, whose test
+  rebuilds it on every run. They are the coastlines on the FT8 map.
+- **The FT4 and FT8 protocols' reference files**: S. Franke, B. Somerville
+  and J. Taylor, "The FT4 and FT8 Communication Protocols", QEX July/August
+  2020, and its public-domain reference programs and tables (the ARRL QEX
+  files page). The LDPC code's generator and parity-check tables are
+  `src/signal/ft8/ldpc_generator.dat` and `ldpc_parity.dat`, unaltered.
+- **NOAA's General Solar Position Calculations** (Global Monitoring
+  Division): the declination and equation-of-time series behind the map's
+  day, twilight and night, in `src/geo/sun.rs`.
 
 ## Development approach
 - **Core code**: Written and reviewed by humans
