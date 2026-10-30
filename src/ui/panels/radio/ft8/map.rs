@@ -249,8 +249,9 @@ impl Panel for Ft8MapPanel {
             let (x, y) = ((i % w) as i64, (i / w) as i64);
             let l = light.map_or(Light::Day, |l| l[i]);
             if land_cache.land[i] {
-                // The coast whole, the inside stippled, so labels stay legible.
-                if !(land_cache.coast[i] || (x % 2 == 0 && y % 2 == 0)) {
+                // The coast whole, the inside every other dot (a checker), so
+                // the land reads as land and labels over it stay legible.
+                if !(land_cache.coast[i] || (x + y) % 2 == 0) {
                     continue;
                 }
                 let (p, c) = match l {

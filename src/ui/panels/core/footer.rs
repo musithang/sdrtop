@@ -284,12 +284,19 @@ fn normal_groups(m: &SdrMetrics, available_width: u16) -> Vec<Group> {
             &m.caps.gain,
         )];
     }
-    let mut groups = vec![radio_group(
+    let mut radio = radio_group(
         &m.caps.gain,
         m.caps.sample_rate_is_span,
         m.ui.gain_stage,
         m.radio.gain_curve,
-    )];
+    );
+    // On FT8 the arrows choose a station, so the gain does not offer them:
+    // one key, one meaning on screen.
+    // A stage picked with `,` `.` takes them back, and then they are shown.
+    if m.ui.is_ft8_section() && m.ui.gain_stage.is_none() {
+        radio.retain(|item| !item.starts_with("[\u{2191}\u{2193}]"));
+    }
+    let mut groups = vec![radio];
     let section = section_group(m);
     if !section.is_empty() {
         groups.push(section);

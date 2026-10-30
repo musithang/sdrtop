@@ -221,6 +221,7 @@ pub(crate) mod sample {
 
     pub fn evening() -> SdrMetrics {
         let mut m = SdrMetrics::fixture().streaming();
+        m.radio.frequency = 14_074_000;
         m.home.latitude = Some(47.497);
         m.home.longitude = Some(19.04);
         m.home.callsign = Some("HA5ZZT".into());

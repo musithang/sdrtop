@@ -5,7 +5,8 @@
 //!
 //! **Section-scoped and declining**, as the pager's are: on any other view
 //! every one of these keys goes on to what it does there. Here `↑` `↓` choose
-//! a station rather than step the gain (the gain stays on `,` `.` `[` `]`),
+//! a station rather than step the gain, unless a gain stage was picked with
+//! `,` `.`, which hands them back to it until the stage is let go,
 //! and `←` `→` step between FT8's bands: the one key on this view that
 //! tunes, and only to a band the radio reaches. Opening the view retunes
 //! nothing.
@@ -22,7 +23,11 @@ pub(super) fn handle(key: KeyEvent, ctx: &mut InputCtx<'_>) -> bool {
     if !m.ui.is_ft8_section() {
         return false;
     }
+    // A gain stage picked by hand with `,` `.` takes the arrows back, as on
+    // every view, until the stage is let go: the attenuator has no other key.
+    let gain_picked = m.ui.gain_stage.is_some();
     match key.code {
+        KeyCode::Up | KeyCode::Down if gain_picked => return false,
         KeyCode::Up => m.ft8.select_step(false),
         KeyCode::Down => m.ft8.select_step(true),
         KeyCode::Char('z') => {
@@ -171,5 +176,13 @@ mod tests {
         s.lock().unwrap().ui.section = "spectrum".into();
         press(&s, KeyCode::Char('z'));
         assert_eq!(s.lock().unwrap().ft8.view.range, MapRange::Log);
+    }
+
+    #[test]
+    fn a_picked_gain_stage_takes_the_arrows_back() {
+        let s = on_view();
+        s.lock().unwrap().ui.gain_stage = Some(0);
+        press(&s, KeyCode::Down);
+        assert_eq!(s.lock().unwrap().ft8.view.selected, None);
     }
 }

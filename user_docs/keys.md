@@ -132,8 +132,10 @@ other view these keys go on doing what they do there:
 The display's light and colour are kept in the config's `[pager]` block.
 
 **On FT8** (Radio › Digital modes › FT8) its keys work the moment the view
-is on screen, no focus needed. Here the arrows are the view's, not the
-gain's, which stays on `,` `.` `[` `]`; on every other view these keys go on
+is on screen, no focus needed. Here `↑` `↓` choose a station rather than
+step the gain; pick a gain stage with `,` `.` and they move that stage again
+until you let it go (back to `chain`), which is how the first stage (the
+HF+'s attenuator) is reached here. On every other view these keys go on
 doing what they do there:
 
 | Key | On FT8 |

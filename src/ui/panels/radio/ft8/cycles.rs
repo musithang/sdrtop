@@ -14,7 +14,11 @@
 //! the line says both (rule 5). Beyond a second FT8 starts to lose decodes;
 //! beyond two it stops.
 
-use ratatui::{layout::Rect, style::Style, Frame};
+use ratatui::{
+    layout::Rect,
+    style::{Modifier, Style},
+    Frame,
+};
 
 use super::{hhmmss, put};
 use crate::state::{CycleOutcome, SdrMetrics};
@@ -69,7 +73,33 @@ impl Panel for Ft8CyclesPanel {
             );
             return;
         }
-        let mut x = put(buf, area, area.x + 1, y, "cycle ", label);
+        // The band, unmistakable: the first thing on the line, lit, and a
+        // tuning that is no FT8 frequency said as such.
+        let dial = state.radio.frequency;
+        let (badge, ink) = match crate::signal::ft8::bands::band_of(dial) {
+            Some(band) => (
+                format!(" {band} \u{b7} {:.3} MHz ", dial as f64 / 1e6),
+                theme.value_hi,
+            ),
+            None => (
+                format!(
+                    " {:.3} MHz: not an FT8 frequency, \u{2190}\u{2192} steps to one ",
+                    dial as f64 / 1e6
+                ),
+                theme.status_warn,
+            ),
+        };
+        let mut x = put(
+            buf,
+            area,
+            area.x,
+            y,
+            &badge,
+            Style::default()
+                .fg(ink)
+                .add_modifier(Modifier::REVERSED | Modifier::BOLD),
+        );
+        x = put(buf, area, x + 1, y, "cycle ", label);
         let recent: Vec<_> = ft8.cycles.iter().rev().take(SHOWN).collect();
         for c in recent.iter().rev() {
             let newest = std::ptr::eq(*c, recent[0]);
@@ -148,7 +178,7 @@ impl Panel for Ft8CyclesPanel {
             // Every break or refused block costs the cycle it falls in.
             let breaks = ft8.feed.gaps + ft8.feed.refused_session;
             if breaks > 0 {
-                put(
+                x = put(
                     buf,
                     area,
                     x + 2,
@@ -203,6 +233,7 @@ mod tests {
     #[test]
     fn the_strip_shows_the_cycles_the_one_heard_and_the_clock() {
         let t = draw(Ft8CyclesPanel, 191, 1, &evening()).join("\n");
+        assert!(t.contains(" 20 m \u{b7} 14.074 MHz "), "{t}");
         assert!(t.contains("13:15:00  7 E"), "{t}");
         assert!(t.contains("13:14:45  2 O"), "{t}");
         assert!(t.contains("13:15:15 O  9.2 s of 15"), "{t}");
@@ -229,5 +260,13 @@ mod tests {
         m.ft8.unreachable_rate = Some(11_025.0);
         let t = draw(Ft8CyclesPanel, 191, 1, &m).join("\n");
         assert!(t.contains("11025 S/s has no route"), "{t}");
+    }
+
+    #[test]
+    fn a_tuning_off_the_ft8_frequencies_is_said() {
+        let mut m = evening();
+        m.radio.frequency = 7_100_000;
+        let t = draw(Ft8CyclesPanel, 191, 1, &m).join("\n");
+        assert!(t.contains("7.100 MHz: not an FT8 frequency"), "{t}");
     }
 }

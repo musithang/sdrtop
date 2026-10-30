@@ -447,6 +447,18 @@ mod tests {
             // land on the map, and home read as the middle of the ocean.
             let d = ciede2000(t.map_night, Color::Rgb(0, 0, 0));
             assert!(d >= 20.0, "{name}: night land only {d:.1} off black");
+            // Day is the brighter of the two (the first palettes had it the
+            // other way round, and the lit side of the world read darker).
+            let luma = |c: Color| match c {
+                Color::Rgb(r, g, b) => {
+                    0.2126 * f64::from(r) + 0.7152 * f64::from(g) + 0.0722 * f64::from(b)
+                }
+                _ => 0.0,
+            };
+            assert!(
+                luma(t.map_land) > luma(t.map_night),
+                "{name}: day land darker than night"
+            );
         }
     }
 

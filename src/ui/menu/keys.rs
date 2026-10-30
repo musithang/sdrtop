@@ -301,7 +301,7 @@ pub const GLOBAL: &[(&str, &[Binding])] = &[
             f(
                 "\u{2191} \u{2193}",
                 None,
-                "on FT8: choose a station, down the list as it reads",
+                "on FT8: choose a station down the list; with a gain stage picked (, .) the gain",
                 Footer::Section(&[crate::signal::ft8::SECTION], "station"),
             ),
             f(

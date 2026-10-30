@@ -110,13 +110,17 @@ impl Panel for Ft8DecodesPanel {
                 &rule,
                 Style::default().fg(theme.stale),
             );
+            let band = rows
+                .first()
+                .and_then(|d| crate::signal::ft8::bands::band_of(d.dial_hz))
+                .map_or(String::new(), |b| format!(" \u{b7} {b}"));
             put(
                 buf,
                 area,
                 area.x + 1,
                 y,
                 &format!(
-                    " {} {} \u{b7} {} ",
+                    " {} {} \u{b7} {}{band} ",
                     hhmmss(*start),
                     parity(*start),
                     rows.len()
@@ -270,7 +274,9 @@ mod tests {
         let t = draw(Ft8DecodesPanel, 79, 16, &evening()).join("\n");
         assert!(t.contains("7 this cycle"), "{t}");
         assert!(t.contains("1 for you"), "{t}");
-        let newest = t.find("13:15:00 even").expect("newest rule");
+        let newest = t
+            .find("13:15:00 even \u{b7} 7 \u{b7} 20 m")
+            .expect("newest rule");
         let older = t.find("13:14:45 odd").expect("older rule");
         assert!(newest < older, "{t}");
         // By tone within the cycle: 340 Hz before 612 before 902.

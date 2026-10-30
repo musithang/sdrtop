@@ -64,9 +64,11 @@ impl Panel for Ft8BandPanel {
             .cycles
             .back()
             .map_or(state.radio.frequency, |c| c.dial_hz);
+        let band = crate::signal::ft8::bands::band_of(dial)
+            .map_or(String::new(), |b| format!(" {b} \u{b7}"));
         PanelChrome::new("Band")
             .stale_when(Staleness::NotStreaming)
-            .suffix(format!(" 0-3 kHz above {:.3} MHz", dial as f64 / 1e6))
+            .suffix(format!("{band} 0-3 kHz above {:.3} MHz", dial as f64 / 1e6))
     }
 
     fn render(
@@ -249,7 +251,7 @@ mod tests {
     #[test]
     fn decodes_sit_on_their_tones_with_their_calls() {
         let t = draw(Ft8BandPanel, 79, 12, &evening()).join("\n");
-        assert!(t.contains("0-3 kHz above 14.074 MHz"), "{t}");
+        assert!(t.contains("20 m \u{b7} 0-3 kHz above 14.074 MHz"), "{t}");
         assert!(t.contains("13:15:00") && t.contains("13:14:45"), "{t}");
         // A crowded stretch names whom it can; the list names everyone.
         for call in ["DL7ANR", "W2XK", "JA1VQD", "PY2WQS"] {
