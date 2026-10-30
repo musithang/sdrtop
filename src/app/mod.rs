@@ -647,6 +647,7 @@ impl App {
             recall,
             night,
             display,
+            station,
         ) = {
             let m = self.state.lock().unwrap_or_else(|e| e.into_inner());
             (
@@ -675,6 +676,7 @@ impl App {
                 crate::state::recall_to_hz(&m.ui.recall),
                 m.pager.view.night,
                 m.pager.view.display.clone(),
+                m.home.settings(),
             )
         };
         let cfg = AppConfig {
@@ -720,6 +722,7 @@ impl App {
             net: self.net_config.clone(),
             record: self.record_config.clone(),
             pager: crate::config::PagerSettings { night, display },
+            station,
             presets: self.user_presets.clone(),
         };
         let mut candidate = cfg.clone();

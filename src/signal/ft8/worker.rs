@@ -102,7 +102,17 @@ fn decode_loop(rx: Receiver<Job>, state: Arc<Mutex<SdrMetrics>>, settings: Setti
     let mut book = HashBook::new();
     let mut recent: VecDeque<Vec<f64>> = VecDeque::new();
     while let Ok(job) = rx.recv() {
-        set_decoding(&state, true);
+        // Your own call answers to its hashes too (the paper: a hash is
+        // shown as "mycall" when it maps to it), so a call to you sent as
+        // `<HA5ZZT>` is still yours. Read each cycle: it can change.
+        let my_call = {
+            let mut m = state.lock().unwrap_or_else(|e| e.into_inner());
+            m.ft8.decoding = true;
+            m.home.callsign.clone()
+        };
+        if let Some(call) = &my_call {
+            book.learn(call);
+        }
         let t = Instant::now();
         let report = cycle::decode_with(&job.samples, &mut book, &settings);
         let seconds = t.elapsed().as_secs_f64();
@@ -125,12 +135,9 @@ fn decode_loop(rx: Receiver<Job>, state: Arc<Mutex<SdrMetrics>>, settings: Setti
         let now = Instant::now();
         let mut m = state.lock().unwrap_or_else(|e| e.into_inner());
         m.ft8.decoding = false;
-        m.ft8.push_cycle(entry, report.decodes, clock, now);
+        m.ft8
+            .push_cycle(entry, report.decodes, clock, now, my_call.as_deref());
     }
-}
-
-fn set_decoding(state: &Mutex<SdrMetrics>, on: bool) {
-    state.lock().unwrap_or_else(|e| e.into_inner()).ft8.decoding = on;
 }
 
 /// A cycle that was not decoded, for the record.
@@ -282,10 +289,11 @@ impl Session {
                 Vec::new(),
                 None,
                 now,
+                None,
             );
         }
         for s in skipped {
-            f.push_cycle(s, Vec::new(), None, now);
+            f.push_cycle(s, Vec::new(), None, now, None);
         }
     }
 
@@ -505,5 +513,45 @@ mod tests {
         let f = run(deliver(&x, start, 0.020 - 1.5, None));
         let d = &f.decodes.front().expect("decoded").decode;
         assert!((d.dt - (0.320 - 1.5)).abs() < 0.010, "DT {}", d.dt);
+    }
+
+    #[test]
+    fn a_call_to_you_sent_as_a_hash_is_still_yours() {
+        use crate::signal::ft8::fields::hashes;
+        use crate::signal::ft8::hash::HashBits;
+        let start = EPOCH + 7.0;
+        let to_me = Message::Standard {
+            to: Call::Hashed {
+                bits: HashBits::H22,
+                value: hashes("HA5ZZT").unwrap().h22,
+                call: None,
+            },
+            from: Call::Std {
+                call: "JA1VQD".into(),
+                suffix: None,
+            },
+            ack: false,
+            word: G15::Report(-21),
+        };
+        let x = stream(start, 24.0, 1200.0, EPOCH + 15.0 + 0.8, &to_me);
+        let state = Arc::new(Mutex::new(SdrMetrics::fixture()));
+        state.lock().unwrap().home.callsign = Some("HA5ZZT".into());
+        let blocks = deliver(&x, start, 0.020, None);
+        let (tx, rx) = crossbeam_channel::bounded(blocks.len());
+        for b in blocks {
+            tx.send(b).unwrap();
+        }
+        drop(tx);
+        let mut w = Ft8Worker::new(rx, Arc::clone(&state), geometry());
+        w.settings = Settings {
+            max_candidates: 40,
+            ..Settings::DEFAULT
+        };
+        w.run();
+        let m = state.lock().unwrap();
+        let d = m.ft8.decodes.front().expect("decoded");
+        assert_eq!(d.decode.message.text(), "<HA5ZZT> JA1VQD -21");
+        assert!(d.for_you);
+        assert!(m.ft8.stations["JA1VQD"].called_you);
     }
 }

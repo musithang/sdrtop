@@ -60,6 +60,11 @@ base = "nord"                        # see themes.md for the six palettes
 [net]
 bt_channels = 8            # classic Bluetooth channels given a receiver at once
 
+[station]
+latitude  = 47.497         # where you listen from, degrees north (-90 to 90)
+longitude = 19.040         # degrees east (-180 to 180)
+callsign  = "HA5ZZT"       # yours, if you have one
+
 [record]
 max_seconds = 60.0         # an IQ recording stops at whichever limit comes first
 max_gb      = 4.0          # see recording.md
@@ -91,6 +96,14 @@ Markers and your own presets get their own blocks, described below.
 **`[radio]`** is the tuning state, and it's what `q` writes back. `recall_hz` holds
 the Command Rail's three recall slots, which you set with `M` in rail focus, so
 tuning memory lives with the radio rather than with the display.
+
+**`[station]`** is you, not the radio, so it stays when you swap radios. The
+position is what the FT8 map is drawn around, and the call is what marks a
+message as addressed to you. Both are optional, and sdrtop guesses neither: no
+position means no map, no call means nothing is marked yours. A latitude of 95
+or half a position (one coordinate without the other) is refused at start,
+said in the log, and treated as not there. The block is written only once
+something in it is set.
 
 **`[radio.boost]`** remembers the front end boost (`a`) per radio, under the
 name the header shows, so a HackRF you left with its amp on does not hand

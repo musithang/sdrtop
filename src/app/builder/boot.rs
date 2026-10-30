@@ -356,8 +356,9 @@ pub(super) fn initial_metrics(cfg: &AppConfig, boot: Boot) -> anyhow::Result<Sdr
     } = boot;
 
     caps.validate_display()?;
+    let (home, home_said) = crate::state::Home::from_settings(&cfg.station);
 
-    Ok(SdrMetrics {
+    let mut m = SdrMetrics {
         radio: RadioState {
             frequency: tuning.frequency_hz,
             config_sample_rate: tuning.sample_rate,
@@ -471,11 +472,16 @@ pub(super) fn initial_metrics(cfg: &AppConfig, boot: Boot) -> anyhow::Result<Sdr
             ..Default::default()
         },
         ft8: crate::state::Ft8State::default(),
+        home,
         record: crate::state::RecordState::default(),
         caps,
         device_options: Arc::new(Vec::new()),
         acc: Accumulators::default(),
-    })
+    };
+    for line in home_said {
+        m.push_log(line);
+    }
+    Ok(m)
 }
 
 #[cfg(test)]

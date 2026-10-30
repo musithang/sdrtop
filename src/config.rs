@@ -250,6 +250,31 @@ impl PagerSettings {
     }
 }
 
+/// `[station]`: where you listen from and your call, kept across radios.
+///
+/// The FT8 map is drawn around this position, and a message naming this call
+/// is marked as yours. Both are optional: without a position there is no
+/// map (it is never guessed), without a call nothing is marked. A value out
+/// of range in a hand-edited file is refused at start, said in the log, and
+/// treated as absent.
+#[derive(Deserialize, Serialize, Clone, Debug, Default, PartialEq)]
+pub struct StationSettings {
+    /// Degrees north, -90 to 90.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub latitude: Option<f64>,
+    /// Degrees east, -180 to 180.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub longitude: Option<f64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub callsign: Option<String>,
+}
+
+impl StationSettings {
+    pub fn is_default(&self) -> bool {
+        *self == Self::default()
+    }
+}
+
 /// `[record]`: how long an IQ recording may run, whichever limit comes first.
 ///
 /// No in-app control changes these, so `App` holds the loaded block and
@@ -412,6 +437,9 @@ pub struct AppConfig {
     /// Written only once it differs from the default, as `[airspy]` is.
     #[serde(default, skip_serializing_if = "PagerSettings::is_default")]
     pub pager: PagerSettings,
+    /// Written only once something is set.
+    #[serde(default, skip_serializing_if = "StationSettings::is_default")]
+    pub station: StationSettings,
     #[serde(default)]
     pub tinysa: TinySaSettings,
     /// Written only once it differs from the default, so a file from a radio
@@ -1486,6 +1514,41 @@ panels = [
             !serialized.contains("[presets"),
             "empty presets should not emit a section: {serialized}"
         );
+    }
+
+    #[test]
+    fn the_station_survives_a_save_and_an_empty_one_is_not_written() {
+        let written = AppConfig {
+            station: StationSettings {
+                latitude: Some(47.497),
+                longitude: Some(19.04),
+                callsign: Some("HA5ZZT".into()),
+            },
+            ..AppConfig::default()
+        };
+        let path =
+            std::env::temp_dir().join(format!("sdrtop-station-save-{}.toml", std::process::id()));
+        written.save(&path).unwrap();
+        let back = AppConfig::load_or_default(&path);
+        let text = std::fs::read_to_string(&path).unwrap();
+        let _ = std::fs::remove_file(&path);
+        assert_eq!(back.station, written.station);
+        assert!(text.contains("[station]"), "{text}");
+
+        let none = toml::to_string(&AppConfig::default()).unwrap();
+        assert!(!none.contains("[station]"), "{none}");
+    }
+
+    #[test]
+    fn a_hand_written_station_reads_as_written() {
+        let cfg: AppConfig = toml::from_str(
+            "[station]\nlatitude = -33.87\nlongitude = 151.21\ncallsign = \"vk2abc\"\n",
+        )
+        .unwrap();
+        assert_eq!(cfg.station.latitude, Some(-33.87));
+        assert_eq!(cfg.station.longitude, Some(151.21));
+        // Kept as written; the state checks and upper-cases it.
+        assert_eq!(cfg.station.callsign.as_deref(), Some("vk2abc"));
     }
 
     #[test]

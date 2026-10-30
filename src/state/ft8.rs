@@ -78,6 +78,8 @@ pub struct DecodeEntry {
     pub dial_hz: u64,
     pub at: Instant,
     pub decode: Decode,
+    /// It names your call (`[station] callsign`) as a station addressed.
+    pub for_you: bool,
 }
 
 /// A transmitting station.
@@ -91,6 +93,8 @@ pub struct Station {
     pub heard: u32,
     /// (cycle start, SNR dB), newest last.
     pub snr: VecDeque<(f64, f64)>,
+    /// It has called you this session.
+    pub called_you: bool,
 }
 
 /// The receive path's time, judged by the stations heard: the median DT of
@@ -150,16 +154,19 @@ pub struct Ft8State {
 }
 
 impl Ft8State {
-    /// A finished cycle and its decodes, received at `at` / `unix`.
+    /// A finished cycle and its decodes, received at `at`; `my_call` marks
+    /// the ones that name it.
     pub fn push_cycle(
         &mut self,
         cycle: CycleEntry,
         decodes: Vec<Decode>,
         clock: Option<ClockVerdict>,
         at: Instant,
+        my_call: Option<&str>,
     ) {
         for d in decodes {
             self.decoded += 1;
+            let for_you = my_call.is_some_and(|me| d.message.addressees().contains(&me));
             if let Some(call) = d.message.sender() {
                 let s = self
                     .stations
@@ -171,7 +178,9 @@ impl Ft8State {
                         last_at: at,
                         heard: 0,
                         snr: VecDeque::new(),
+                        called_you: false,
                     });
+                s.called_you |= for_you;
                 if let Some(loc) = d.message.locator() {
                     s.locator = Some(loc.to_string());
                 }
@@ -189,6 +198,7 @@ impl Ft8State {
                 dial_hz: cycle.dial_hz,
                 at,
                 decode: d,
+                for_you,
             }));
         }
         while self.decodes.len() > DECODES_MAX {
@@ -279,8 +289,15 @@ mod tests {
             vec![decode("JA1VQD", Some("PM95"), -21.0)],
             None,
             now,
+            None,
         );
-        s.push_cycle(cycle(15.0), vec![decode("JA1VQD", None, -18.0)], None, now);
+        s.push_cycle(
+            cycle(15.0),
+            vec![decode("JA1VQD", None, -18.0)],
+            None,
+            now,
+            None,
+        );
         let st = &s.stations["JA1VQD"];
         assert_eq!(st.locator.as_deref(), Some("PM95"));
         assert_eq!(st.heard, 2);
@@ -294,6 +311,40 @@ mod tests {
     }
 
     #[test]
+    fn a_message_naming_your_call_is_yours() {
+        let mut s = Ft8State::default();
+        let mut d = decode("JA1VQD", Some("PM95"), -21.0);
+        d.message = Message::Standard {
+            to: Call::Std {
+                call: "HA5ZZT".into(),
+                suffix: None,
+            },
+            from: Call::Std {
+                call: "JA1VQD".into(),
+                suffix: None,
+            },
+            ack: false,
+            word: G15::Grid("PM95".into()),
+        };
+        let other = decode("EA8ZQ", Some("IL18"), -9.0);
+        s.push_cycle(
+            cycle(0.0),
+            vec![d.clone(), other.clone()],
+            None,
+            Instant::now(),
+            Some("HA5ZZT"),
+        );
+        assert!(s.decodes[0].for_you);
+        assert!(!s.decodes[1].for_you);
+        assert!(s.stations["JA1VQD"].called_you);
+        assert!(!s.stations["EA8ZQ"].called_you);
+        // With no call set, nothing is anyone's.
+        let mut t = Ft8State::default();
+        t.push_cycle(cycle(0.0), vec![d], None, Instant::now(), None);
+        assert!(!t.decodes[0].for_you);
+    }
+
+    #[test]
     fn a_station_never_heard_with_a_locator_has_none() {
         let mut s = Ft8State::default();
         s.push_cycle(
@@ -301,6 +352,7 @@ mod tests {
             vec![decode("YO3GCI", None, -1.0)],
             None,
             Instant::now(),
+            None,
         );
         assert_eq!(s.stations["YO3GCI"].locator, None);
     }
@@ -314,10 +366,11 @@ mod tests {
             vec![decode("OK1HZD", Some("JO70"), 2.0)],
             None,
             now,
+            None,
         );
-        s.push_cycle(cycle(3600.0), vec![], None, now);
+        s.push_cycle(cycle(3600.0), vec![], None, now, None);
         assert!(s.stations.contains_key("OK1HZD"));
-        s.push_cycle(cycle(3615.0), vec![], None, now);
+        s.push_cycle(cycle(3615.0), vec![], None, now, None);
         assert!(!s.stations.contains_key("OK1HZD"));
     }
 
@@ -327,7 +380,7 @@ mod tests {
         let now = Instant::now();
         for k in 0..60 {
             let ds = (0..10).map(|_| decode("K1ABC", None, -5.0)).collect();
-            s.push_cycle(cycle(k as f64 * 15.0), ds, None, now);
+            s.push_cycle(cycle(k as f64 * 15.0), ds, None, now, None);
         }
         assert_eq!(s.cycles.len(), CYCLES_MAX);
         assert_eq!(s.decodes.len(), DECODES_MAX);
