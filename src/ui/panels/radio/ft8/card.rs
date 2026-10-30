@@ -33,6 +33,11 @@ impl Panel for Ft8CardPanel {
         (48, 5)
     }
 
+    /// Its seven lines and the frame, or a third of a short column.
+    fn column_height(&self, column: u16) -> Option<u16> {
+        Some(9.min(column / 3))
+    }
+
     fn chrome(&self, _state: &SdrMetrics) -> PanelChrome {
         PanelChrome::new("Station").stale_when(Staleness::Never)
     }

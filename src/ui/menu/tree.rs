@@ -573,6 +573,15 @@ fn radio_table() -> Vec<Node> {
             "Ships and harbours; channel 16 is the calling and distress channel. Not built yet.",
         ),
         heading("AMATEUR RADIO"),
+        branch(
+            "Digital modes",
+            Radio,
+            vec![group(Radio, crate::signal::ft8::SECTION)
+                .hint("15 s cycles")
+                .about("FT8, the weak-signal mode most of the HF bands hum with: a station's call, its locator and a report, in 13 seconds at 50 Hz wide. Read by sdrtop's own decoder.")],
+        )
+        .hint("FT8")
+        .about("Radio amateurs' machine-read modes: short structured messages that get through far below the noise, sent and read by computers on the radio's audio."),
         soon(
             "Ham bands",
             "licensed",
@@ -839,15 +848,30 @@ mod tests {
         assert!(tree.locate("observer").is_none(), "hidden stays hidden");
     }
 
-    /// The Radio tile opens on pagers, its one live group; the rest are
-    /// later rows that say what the tile will hold and open nothing.
+    /// The Radio tile opens on pagers; FT8 sits under the amateurs'
+    /// heading as Digital modes; the rest are later rows that say what the
+    /// tile will hold and open nothing.
     #[test]
     fn the_radio_tree_opens_on_pagers() {
         let tree = builtins();
         let first: Vec<&Node> = tree.radio.iter().filter(|n| n.is_stop()).collect();
         assert_eq!(first[0].title, "Pagers");
         assert!(!first[0].later);
-        assert!(first[1..].iter().all(|n| n.later && n.about.is_some()));
+        let live: Vec<&str> = first
+            .iter()
+            .filter(|n| !n.later)
+            .map(|n| n.title.as_str())
+            .collect();
+        assert_eq!(live, ["Pagers", "Digital modes"]);
+        assert!(first.iter().filter(|n| n.later).all(|n| n.about.is_some()));
+        let (tile, path) = tree.locate("radio_ft8").expect("the FT8 view is listed");
+        assert_eq!(tile, Tile::Radio);
+        let ft8: Vec<&str> = tree
+            .trail(tile, &path)
+            .iter()
+            .map(|n| n.title.as_str())
+            .collect();
+        assert_eq!(ft8, ["Digital modes", "FT8", "World"]);
         let (tile, path) = tree
             .locate("radio_pocsag")
             .expect("the pager view is listed");

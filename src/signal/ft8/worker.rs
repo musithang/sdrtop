@@ -45,6 +45,10 @@ const LOAD_ALPHA: f64 = 0.05;
 /// Samples in a cycle at FT8's rate.
 const CYCLE_SAMPLES: usize = 15 * RATE_HZ as usize;
 
+/// Samples kept before the next cycle's start: half a second, far more
+/// than the stream clock's estimate moves when it settles (milliseconds).
+const KEEP_BEFORE: usize = RATE_HZ as usize / 2;
+
 /// The clock verdict looks at this many of the latest decoded cycles.
 const VERDICT_CYCLES: usize = 4;
 
@@ -242,13 +246,14 @@ impl Session {
 
         let t0 = Instant::now();
         let mut ready: Vec<Job> = Vec::new();
+        let mut lost: Vec<f64> = Vec::new();
         if let Some(ch) = &mut self.channel {
             self.clock.push(b.first_pair, pairs, tb.arrived_unix);
             if self.pair0.is_none() {
                 self.pair0 = Some(b.first_pair);
             }
             ch.push(&self.iq, &mut self.buf);
-            ready = self.take_cycles(b.centre_hz);
+            (ready, lost) = self.take_cycles(b.centre_hz);
         }
         let spent = t0.elapsed().as_secs_f64();
         let heard_until = self.unix_of_sample((self.buf_base + self.buf.len()) as f64);
@@ -294,17 +299,28 @@ impl Session {
                 None,
             );
         }
+        for start in lost {
+            f.push_cycle(
+                undecoded(start, b.centre_hz, CycleOutcome::Cut),
+                Vec::new(),
+                None,
+                now,
+                None,
+            );
+        }
         for s in skipped {
             f.push_cycle(s, Vec::new(), None, now, None);
         }
     }
 
-    /// Every cycle the buffer now holds whole, and the buffer trimmed to the
-    /// next one's start.
-    fn take_cycles(&mut self, dial_hz: u64) -> Vec<Job> {
+    /// Every cycle the buffer now holds whole, the starts of any it can no
+    /// longer assemble (to be published as cut), and the buffer trimmed to
+    /// [`KEEP_BEFORE`] ahead of the next cycle's start.
+    fn take_cycles(&mut self, dial_hz: u64) -> (Vec<Job>, Vec<f64>) {
         let mut out = Vec::new();
+        let mut lost = Vec::new();
         let Some(t0) = self.unix_of_sample(0.0) else {
-            return out;
+            return (out, lost);
         };
         let rate = RATE_HZ as f64;
         if self.next_cycle.is_none() {
@@ -314,16 +330,21 @@ impl Session {
         while let Some(start) = self.next_cycle {
             let i = ((start - t0) * rate).round();
             if i < self.buf_base as f64 {
-                // The clock moved the boundary behind what is kept: this
-                // cycle is incomplete at its start, so go to the next.
+                // The clock moved the boundary further back than the reserve
+                // kept: this cycle cannot be assembled whole. Said, never
+                // skipped in silence.
+                lost.push(start);
                 self.next_cycle = Some(start + 15.0);
                 continue;
             }
             let i = i as usize;
             let end = i + CYCLE_SAMPLES;
             if end > self.buf_base + self.buf.len() {
-                // Not whole yet: keep from its start.
-                let drop = (i - self.buf_base).min(self.buf.len());
+                // Not whole yet: keep from a little before its start, so the
+                // clock's estimate settling by some milliseconds does not
+                // move the boundary out of what is kept.
+                let keep_from = i.saturating_sub(KEEP_BEFORE).max(self.buf_base);
+                let drop = (keep_from - self.buf_base).min(self.buf.len());
                 self.buf.drain(..drop);
                 self.buf_base += drop;
                 break;
@@ -336,7 +357,7 @@ impl Session {
             });
             self.next_cycle = Some(start + 15.0);
         }
-        out
+        (out, lost)
     }
 }
 
@@ -555,5 +576,34 @@ mod tests {
         assert_eq!(d.decode.message.text(), "<HA5ZZT> JA1VQD -21");
         assert!(d.for_you);
         assert!(m.ft8.stations["JA1VQD"].called_you);
+    }
+
+    /// The stream clock's estimate moves when a fast delivery leaves its
+    /// window: here blocks arrive 10 ms late for the first 20 s and 40 ms
+    /// late after, so 50 s in the estimate jumps 30 ms. Every cycle must
+    /// still be there, decoded or said to be cut; none may vanish (found
+    /// live: 20:59:30 went missing between 20:59:15 and 20:59:45).
+    #[test]
+    fn no_cycle_vanishes_when_the_clock_settles() {
+        let start = EPOCH + 1.0;
+        let x = stream(start, 76.0, 1200.0, EPOCH + 15.0 + 0.8, &cq());
+        let mut blocks = deliver(&x, start, 0.010, None);
+        for b in blocks.iter_mut() {
+            if b.block.first_pair as f64 / RADIO > 20.0 {
+                b.arrived_unix += 0.030;
+            }
+        }
+        let f = run(blocks);
+        let mut starts: Vec<f64> = f.cycles.iter().map(|c| c.start_unix - EPOCH).collect();
+        starts.sort_by(f64::total_cmp);
+        assert_eq!(starts, vec![15.0, 30.0, 45.0, 60.0], "{:?}", f.cycles);
+        // None cut: the reserve absorbed the clock's step. (A cycle may be
+        // skipped here only because the test delivers faster than real time
+        // and the decoder is still busy, which is said as skipped.)
+        assert!(
+            f.cycles.iter().all(|c| c.outcome != CycleOutcome::Cut),
+            "{:?}",
+            f.cycles
+        );
     }
 }

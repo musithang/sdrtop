@@ -39,6 +39,10 @@ pub(super) fn handle(key: KeyEvent, ctx: &mut InputCtx<'_>) -> KeyAction {
     if super::pager::handle(key, ctx) {
         return KeyAction::Continue;
     }
+    // The FT8 view's, the same way.
+    if super::ft8::handle(key, ctx) {
+        return KeyAction::Continue;
+    }
     match key.code {
         KeyCode::Esc => view::leave_focus_or_open_menu(ctx),
         KeyCode::Char('q') => return KeyAction::Quit,

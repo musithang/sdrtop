@@ -296,6 +296,41 @@ pub const GLOBAL: &[(&str, &[Binding])] = &[
         ],
     ),
     (
+        "The FT8 view",
+        &[
+            f(
+                "\u{2191} \u{2193}",
+                None,
+                "on FT8: choose a station, down the list as it reads",
+                Footer::Section(&[crate::signal::ft8::SECTION], "station"),
+            ),
+            f(
+                "\u{2190} \u{2192}",
+                None,
+                "on FT8: the next band down or up that this radio reaches",
+                Footer::Section(&[crate::signal::ft8::SECTION], "band"),
+            ),
+            f(
+                "Z",
+                Some('z'),
+                "on FT8: the map's range, the whole world or 1 500, 3 000, 9 000 km",
+                Footer::Section(&[crate::signal::ft8::SECTION], "range"),
+            ),
+            f(
+                "U",
+                Some('u'),
+                "on FT8: only the messages that name your call, or every one",
+                Footer::Section(&[crate::signal::ft8::SECTION], "only yours"),
+            ),
+            f(
+                "C",
+                Some('c'),
+                "on FT8: forget the decodes, the stations and the map",
+                Footer::Section(&[crate::signal::ft8::SECTION], "clear"),
+            ),
+        ],
+    ),
+    (
         "Layouts and session",
         &[
             b("1-9", None, "the nth layout of this section"),
@@ -605,6 +640,7 @@ mod tests {
         let src = [
             include_str!("../../app/input/global/mod.rs"),
             include_str!("../../app/input/pager.rs"),
+            include_str!("../../app/input/ft8.rs"),
         ]
         .concat();
         for (group, bindings) in GLOBAL {

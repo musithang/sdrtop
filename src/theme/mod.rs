@@ -414,8 +414,8 @@ mod tests {
     /// **The FT8 map's grey line never wears a station's colour.** Viktor's
     /// rule: the rays from you to this cycle's stations cross the grey line,
     /// so in every built-in it stands well apart (CIEDE2000) from every ink a
-    /// station is drawn in, and from the land; and land by night is told from
-    /// land by day.
+    /// station is drawn in, and from the land; land by night is told from
+    /// land by day, and is still plainly land against the black.
     #[test]
     fn every_map_keeps_the_grey_line_apart_from_the_stations() {
         for name in Theme::builtin_names() {
@@ -441,7 +441,12 @@ mod tests {
                 assert!(d >= 18.0, "{name}: the grey line only {d:.1} from {what}");
             }
             let d = ciede2000(t.map_land, t.map_night);
-            assert!(d >= 5.0, "{name}: night only {d:.1} from day");
+            assert!(d >= 6.0, "{name}: night only {d:.1} from day");
+            // Land by night is still land: at 20:48 UTC from Bonyhád the first
+            // night colours sank into the black, the lit Americas were the only
+            // land on the map, and home read as the middle of the ocean.
+            let d = ciede2000(t.map_night, Color::Rgb(0, 0, 0));
+            assert!(d >= 20.0, "{name}: night land only {d:.1} off black");
         }
     }
 

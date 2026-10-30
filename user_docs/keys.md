@@ -131,6 +131,19 @@ other view these keys go on doing what they do there:
 
 The display's light and colour are kept in the config's `[pager]` block.
 
+**On FT8** (Radio › Digital modes › FT8) its keys work the moment the view
+is on screen, no focus needed. Here the arrows are the view's, not the
+gain's, which stays on `,` `.` `[` `]`; on every other view these keys go on
+doing what they do there:
+
+| Key | On FT8 |
+|-----|--------|
+| `↑` `↓` | Choose a station, down the list as it reads: the map rings it, the river and the list light it, the card shows it |
+| `←` `→` | The next FT8 band down or up that this radio reaches: the one key here that tunes. Opening the view tunes nothing |
+| `z` | The map's range: the whole world on a logarithmic scale, then 1 500, 3 000 and 9 000 km to the edge |
+| `u` | Only the messages that name your call, or every one again. Needs your call under Options, Station |
+| `c` | Forget what was heard: the decodes, the stations, the map |
+
 `p` stays inside the group. It used to walk every preset in the app in
 alphabetical order, which meant leaving the benches for a compact view halfway
 through and no way to predict what came next. Cycling through the Receiver

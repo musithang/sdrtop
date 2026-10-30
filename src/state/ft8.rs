@@ -138,9 +138,6 @@ pub fn verdict(dts: &[f64]) -> Option<ClockVerdict> {
 
 /// How far the map reaches: the whole world on a logarithmic scale, or a
 /// linear range to its edge.
-// The linear ranges are reached by the view's `z` key; until it is wired,
-// only one test builds one. `expect` fails the build once something does.
-#[expect(dead_code)]
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum MapRange {
     #[default]
@@ -151,6 +148,16 @@ pub enum MapRange {
 }
 
 impl MapRange {
+    /// The next range the `z` key steps to.
+    pub fn next(self) -> Self {
+        match self {
+            MapRange::Log => MapRange::Km1500,
+            MapRange::Km1500 => MapRange::Km3000,
+            MapRange::Km3000 => MapRange::Km9000,
+            MapRange::Km9000 => MapRange::Log,
+        }
+    }
+
     pub fn scale(self) -> crate::geo::projection::Scale {
         use crate::geo::projection::Scale;
         match self {
@@ -175,6 +182,8 @@ impl MapRange {
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct Ft8View {
     pub range: MapRange,
+    /// Only the decodes that name your call.
+    pub only_yours: bool,
     /// The selected station, by call.
     pub selected: Option<String>,
 }
@@ -257,7 +266,15 @@ impl Ft8State {
         if clock.is_some() || cycle.outcome == CycleOutcome::Decoded {
             self.clock = clock;
         }
-        self.cycles.push_back(cycle);
+        // In time order, whatever order they were finished in: a cycle the
+        // decoder had no room for is published before the one it was busy
+        // with.
+        let at = self
+            .cycles
+            .iter()
+            .position(|c| c.start_unix > cycle.start_unix)
+            .unwrap_or(self.cycles.len());
+        self.cycles.insert(at, cycle);
         while self.cycles.len() > CYCLES_MAX {
             self.cycles.pop_front();
         }
@@ -273,14 +290,54 @@ impl Ft8State {
     }
 
     /// Forget what was heard (the session counter stays).
-    // Unread until the view's `c` key calls it; `expect` fails the build
-    // once something does.
-    #[expect(dead_code)]
     pub fn clear(&mut self) {
         self.cycles.clear();
         self.decodes.clear();
         self.stations.clear();
         self.clock = None;
+        self.view.selected = None;
+    }
+
+    /// The decodes in the order the list shows them: cycles newest first,
+    /// each by tone; only yours when that filter is on.
+    pub fn listed(&self) -> Vec<&Arc<DecodeEntry>> {
+        let mut cycles: Vec<f64> = self.decodes.iter().map(|d| d.cycle_unix).collect();
+        cycles.dedup();
+        let mut out = Vec::new();
+        for c in cycles.iter().rev() {
+            let mut rows: Vec<&Arc<DecodeEntry>> = self
+                .decodes
+                .iter()
+                .filter(|d| d.cycle_unix == *c && (!self.view.only_yours || d.for_you))
+                .collect();
+            rows.sort_by(|a, b| a.decode.physics.f0.total_cmp(&b.decode.physics.f0));
+            out.extend(rows);
+        }
+        out
+    }
+
+    /// Move the selection to the station of the row before or after the
+    /// selected one in the list; with none selected, the first row's.
+    pub fn select_step(&mut self, down: bool) {
+        let rows = self.listed();
+        let calls: Vec<String> = rows
+            .iter()
+            .filter_map(|d| d.decode.message.sender().map(str::to_string))
+            .collect();
+        if calls.is_empty() {
+            return;
+        }
+        let at = self
+            .view
+            .selected
+            .as_ref()
+            .and_then(|s| calls.iter().position(|c| c == s));
+        let next = match at {
+            None => 0,
+            Some(i) if down => (i + 1).min(calls.len() - 1),
+            Some(i) => i.saturating_sub(1),
+        };
+        self.view.selected = Some(calls[next].clone());
     }
 }
 
@@ -450,6 +507,17 @@ mod tests {
         assert!((v.median_dt - 0.205).abs() < 1e-9);
         assert!(v.spread < 0.05, "{}", v.spread);
         assert_eq!(v.decodes, 6);
+    }
+
+    #[test]
+    fn cycles_keep_time_order_whatever_order_they_finish_in() {
+        let mut s = Ft8State::default();
+        let now = Instant::now();
+        s.push_cycle(cycle(30.0), vec![], None, now, None);
+        s.push_cycle(cycle(0.0), vec![], None, now, None);
+        s.push_cycle(cycle(15.0), vec![], None, now, None);
+        let starts: Vec<f64> = s.cycles.iter().map(|c| c.start_unix).collect();
+        assert_eq!(starts, vec![0.0, 15.0, 30.0]);
     }
 
     #[test]

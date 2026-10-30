@@ -171,6 +171,9 @@ pub fn std_call_c28(call: &str) -> Option<u32> {
     (std_call(n - NTOKENS - MAX22).ok()?.as_str() == call).then_some(n)
 }
 
+/// The value of the square RR73 (field R R, square 7 3).
+const RR73_SQUARE: u32 = 17 * 1800 + 17 * 100 + 7 * 10 + 3;
+
 /// What a `g15` field carries (`grid4_to_g15`).
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum G15 {
@@ -185,6 +188,15 @@ pub enum G15 {
 
 /// `g15` to what it says.
 pub fn g15_decode(v: u32) -> Result<G15, Malformed> {
+    // The square RR73 is the word RR73. `grid4_to_g15` never encodes the
+    // text "RR73" as a square (`is_grid4(w) .and. w.ne.'RR73'`), so the
+    // square's value on the air is software that encoded the word as a
+    // locator, heard live in the first hour on 40 m. Read as a place, it put
+    // a station in the Arctic Ocean; read as the paper's encoder means it, it
+    // is the acknowledgement.
+    if v == RR73_SQUARE {
+        return Ok(G15::Rr73);
+    }
     if v < MAXGRID4 {
         let field_lon = v / (18 * 100);
         let field_lat = v / 100 % 18;
@@ -412,6 +424,12 @@ mod tests {
     #[test]
     fn g15_grids_reports_and_words() {
         assert_eq!(g15_decode(0), Ok(G15::Grid("AA00".into())));
+        // The square RR73 is read as the word, never as a place.
+        assert_eq!(g15_decode(17 * 1800 + 17 * 100 + 73), Ok(G15::Rr73));
+        assert_eq!(
+            g15_decode(17 * 1800 + 17 * 100 + 72),
+            Ok(G15::Grid("RR72".into()))
+        );
         assert_eq!(g15_decode(MAXGRID4 - 1), Ok(G15::Grid("RR99".into())));
         for g in [
             G15::Grid("FN20".into()),

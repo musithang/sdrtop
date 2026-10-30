@@ -423,8 +423,14 @@ screen. No two views share a title, and none is called what its group is.
 |-----|-------|--------|--------------|
 | `1` | Pager | `radio_pocsag` | A POCSAG pager, as one looks: the page on its dot-matrix display, its address and what it took repairing, the buttons with their keys, the link along the bottom · every page received · the shown page as received, its physics and its decoding |
 
+**Radio › Digital modes › FT8**
+
+| Key | Title | Preset | What's in it |
+|-----|-------|--------|--------------|
+| `1` | World | `radio_ft8` | FT8 on a map of the world around you, every station where it said it was, the land lit by the sun · the minute's cycles and the clock as the stations heard judge it · the band as a river · the decodes cycle by cycle · the chosen station's card |
+
 `p` steps to the next layout in whichever group you are in, and wraps at the
-end. A twenty-ninth preset, `observer`, is marked hidden, so it has no group and no
+end. A thirtieth preset, `observer`, is marked hidden, so it has no group and no
 key: sdrtop loads it by itself when [another app owns the
 radio](#observer-mode).
 

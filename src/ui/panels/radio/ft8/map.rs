@@ -746,7 +746,15 @@ pub(crate) mod tests {
             return;
         };
         let mut out = String::from("<div class=t>");
+        let night = {
+            let mut m = evening();
+            m.home.latitude = Some(46.2917);
+            m.home.longitude = Some(18.5254);
+            m.ft8.hearing = Some(1_793_393_280.0); // 2026-10-30 20:48 UTC
+            m
+        };
         for (title, m) in [
+            ("bonyhad night", night),
             ("log", evening()),
             ("3000", {
                 let mut m = evening();

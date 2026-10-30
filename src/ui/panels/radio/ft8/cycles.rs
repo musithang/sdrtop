@@ -56,6 +56,19 @@ impl Panel for Ft8CyclesPanel {
         let ft8 = &state.ft8;
         let y = area.y;
         let label = Style::default().fg(theme.label);
+        // A rate with no route to 12 000 samples a second is refused, and
+        // said here rather than left as a quiet strip.
+        if let Some(rate) = ft8.unreachable_rate {
+            put(
+                buf,
+                area,
+                area.x + 1,
+                y,
+                &format!("This radio's {rate:.0} S/s has no route to FT8's 12 000; pick another rate with S."),
+                Style::default().fg(theme.status_warn),
+            );
+            return;
+        }
         let mut x = put(buf, area, area.x + 1, y, "cycle ", label);
         let recent: Vec<_> = ft8.cycles.iter().rev().take(SHOWN).collect();
         for c in recent.iter().rev() {
@@ -72,8 +85,8 @@ impl Panel for Ft8CyclesPanel {
             x = put(buf, area, x, y, &hhmmss(c.start_unix), ink);
             let what = match c.outcome {
                 CycleOutcome::Decoded => format!(" {:>2} ", c.decodes),
-                CycleOutcome::Cut => " cut".to_string(),
-                CycleOutcome::Skipped => " skip".to_string(),
+                CycleOutcome::Cut => " cut ".to_string(),
+                CycleOutcome::Skipped => " skip ".to_string(),
             };
             let what_ink = match c.outcome {
                 CycleOutcome::Decoded => ink,
@@ -124,7 +137,7 @@ impl Panel for Ft8CyclesPanel {
                 "O"
             };
             let decoding = if ft8.decoding { "  decoding" } else { "" };
-            put(
+            x = put(
                 buf,
                 area,
                 x,
@@ -132,6 +145,18 @@ impl Panel for Ft8CyclesPanel {
                 &format!("{} {par} {into:4.1} s of 15{decoding}", hhmmss(start)),
                 label,
             );
+            // Every break or refused block costs the cycle it falls in.
+            let breaks = ft8.feed.gaps + ft8.feed.refused_session;
+            if breaks > 0 {
+                put(
+                    buf,
+                    area,
+                    x + 2,
+                    y,
+                    &format!("feed broke {breaks}\u{d7}"),
+                    Style::default().fg(theme.status_warn),
+                );
+            }
         }
 
         // The clock, right-aligned.
@@ -191,7 +216,18 @@ mod tests {
         m.ft8.cycles.back_mut().unwrap().outcome = CycleOutcome::Cut;
         m.ft8.clock = None;
         let t = draw(Ft8CyclesPanel, 191, 1, &m).join("\n");
-        assert!(t.contains("13:15:00 cut"), "{t}");
+        assert!(t.contains("13:15:00 cut E"), "{t}");
         assert!(t.contains("too few decodes"), "{t}");
+    }
+
+    #[test]
+    fn breaks_in_the_feed_and_an_unreachable_rate_are_said() {
+        let mut m = evening();
+        m.ft8.feed.gaps = 3;
+        let t = draw(Ft8CyclesPanel, 191, 1, &m).join("\n");
+        assert!(t.contains("feed broke 3\u{d7}"), "{t}");
+        m.ft8.unreachable_rate = Some(11_025.0);
+        let t = draw(Ft8CyclesPanel, 191, 1, &m).join("\n");
+        assert!(t.contains("11025 S/s has no route"), "{t}");
     }
 }

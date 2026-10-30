@@ -1,0 +1,19 @@
+# FT8: the world around you as FT8 hears it. The map, centred on your
+# position, beside the band as a river, the decodes cycle by cycle and the
+# chosen station's card; the cycle strip with the clock across the top. On a
+# narrow screen the map gives way first and the right column takes the body.
+section = "ft8"
+slot    = 1
+title   = "World"
+blurb   = "FT8 on a map of the world around you"
+about   = "FT8, decoded by sdrtop's own decoder: every station where it said it was, on a map centred on you, the land lit by the sun; the band as a river, the decodes with their physics, and the clock as the stations heard judge it. Set your position under Options, Station; arrows choose a station and step the band, z the map's range, u only yours."
+
+panels = [
+    { name = "header_slim",  position = "top", height = 4 },
+    { name = "ft8_cycles",   position = "top", height = 1 },
+    { name = "ft8_map",      position = "body" },
+    { name = "ft8_band",     position = "right", width_pct = 42 },
+    { name = "ft8_decodes",  position = "right" },
+    { name = "ft8_station",  position = "right" },
+    { name = "footer",       position = "bottom" },
+]

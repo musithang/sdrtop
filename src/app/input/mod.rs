@@ -23,6 +23,7 @@
 
 mod bench;
 mod core;
+mod ft8;
 mod global;
 mod menu;
 mod net;

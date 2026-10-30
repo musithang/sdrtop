@@ -25,6 +25,7 @@
 //! - [`search`]: where in a cycle transmissions start, and on what tone.
 //! - [`demod`]: a candidate to soft bits; a decode to what it measured.
 //! - [`cycle`]: one 15 s cycle to its decodes, subtracting and searching again.
+//! - [`bands`]: the conventional FT8 dial frequencies.
 //! - [`channel`]: the radio's stream to FT8's 12 000 samples a second.
 //! - [`clock`]: when each sample was taken, in UTC.
 //! - [`worker`]: the threads that run it all on the radio's stream while the
@@ -40,6 +41,7 @@ mod conformance;
 /// screen turns the FT8 feed on.
 pub const SECTION: &str = "ft8";
 
+pub mod bands;
 pub mod channel;
 pub mod clock;
 pub mod crc;

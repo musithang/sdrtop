@@ -17,7 +17,7 @@ use ratatui::{
 
 use super::{hhmmss, km, parity, path, put};
 use crate::state::SdrMetrics;
-use crate::ui::panel::{Panel, PanelChrome, Staleness};
+use crate::ui::panel::{Panel, PanelChrome, Staleness, Tag};
 
 pub struct Ft8DecodesPanel;
 
@@ -47,6 +47,7 @@ impl Panel for Ft8DecodesPanel {
         }
         PanelChrome::new("Decodes")
             .stale_when(Staleness::Never)
+            .tag_if(f.view.only_yours, Tag::Filtered)
             .suffix(suffix)
     }
 

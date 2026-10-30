@@ -92,8 +92,9 @@ const KNOWN: &[(&str, &str, Option<&str>)] = &[
         Some(WIFI_HEADING),
     ),
     (WIFI, "Wi-Fi", None),
-    // The Radio tile's first group: a pager.
+    // The Radio tile's groups: a pager, then FT8.
     (crate::signal::pocsag::SECTION, "POCSAG", None),
+    (crate::signal::ft8::SECTION, "FT8", None),
 ];
 
 /// One layout, as the menu shows it.
@@ -305,7 +306,8 @@ mod tests {
                 "classic",
                 "coded",
                 "wifi_channel",
-                "pocsag"
+                "pocsag",
+                "ft8"
             ]
         );
         assert!(menu.warnings.is_empty(), "{:?}", menu.warnings);
@@ -332,7 +334,8 @@ mod tests {
                 "classic",
                 "coded",
                 "wifi_channel",
-                "pocsag"
+                "pocsag",
+                "ft8"
             ]
         );
         assert_eq!(menu.section("net").unwrap().title, "Overview");
@@ -364,6 +367,7 @@ mod tests {
                 ("coded", Some("Bluetooth")),
                 ("wifi_channel", Some("Wi-Fi")),
                 ("pocsag", None),
+                ("ft8", None),
             ]
         );
     }
@@ -587,6 +591,7 @@ mod tests {
                 "coded",
                 "wifi_channel",
                 "pocsag",
+                "ft8",
                 "nightwatch"
             ]
         );

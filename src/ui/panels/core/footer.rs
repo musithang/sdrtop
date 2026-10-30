@@ -121,31 +121,40 @@ fn section_group(m: &SdrMetrics) -> Group {
                 continue;
             }
             let net = crate::signal::net::is_net(&m.ui.section);
+            let pager = m.ui.is_pager_section();
+            let ft8 = m.ui.is_ft8_section();
             let view = &m.pager.view;
-            out.push(match (row.ch, net) {
-                (Some('m'), true) => format!("[{}] {label}={}", row.key, m.net.mode.label()),
-                (Some('i'), true) => {
+            out.push(match row.ch {
+                Some('m') if net => format!("[{}] {label}={}", row.key, m.net.mode.label()),
+                Some('i') if net => {
                     format!("[{}] {label}={}", row.key, m.net.address_display.label())
                 }
                 // The pager's own, with how its view stands.
-                (Some('m'), false) => format!(
+                Some('m') if pager => format!(
                     "[{}] {label}={}",
                     row.key,
                     if view.masked { "on" } else { "off" }
                 ),
-                (Some('u'), false) => match view.mine {
+                Some('u') if pager => match view.mine {
                     Some(ric) => format!("[{}] {label}={ric:07}", row.key),
                     None => format!("[{}] {label}=all", row.key),
                 },
-                (Some('b'), false) => format!(
+                Some('b') if pager => format!(
                     "[{}] {label}={}",
                     row.key,
                     if view.night { "night" } else { "day" }
                 ),
-                (Some('l'), false) => format!(
+                Some('l') if pager => format!(
                     "[{}] {label}={}",
                     row.key,
                     view.display.as_deref().unwrap_or("theme")
+                ),
+                // FT8's, the same way.
+                Some('z') if ft8 => format!("[{}] {label}={}", row.key, m.ft8.view.range.label()),
+                Some('u') if ft8 => format!(
+                    "[{}] {label}={}",
+                    row.key,
+                    if m.ft8.view.only_yours { "on" } else { "off" }
                 ),
                 _ => format!("[{}] {label}", row.key),
             });

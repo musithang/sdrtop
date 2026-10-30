@@ -1660,4 +1660,48 @@ mod tests {
             .collect();
         assert!(missing.is_empty(), "not in presets.md: {missing:?}");
     }
+
+    /// The FT8 view through the real engine at three sizes, written as HTML
+    /// to the path in `FT8_VIEW_HTML`, for looking at.
+    #[test]
+    #[ignore]
+    fn render_the_ft8_view() {
+        use ratatui::style::Color;
+        let Ok(path) = std::env::var("FT8_VIEW_HTML") else {
+            return;
+        };
+        let (mut engine, _) = App::build_ui("radio_ft8", &HashMap::new(), None, true);
+        engine.set_preset("radio_ft8");
+        let mut m = crate::ui::panels::radio::ft8::sample::evening();
+        m.ui.section = crate::signal::ft8::SECTION.to_string();
+        m.ui.active_preset = "radio_ft8".into();
+        m.ft8.view.selected = Some("JA1VQD".into());
+        let theme = crate::Theme::sdr();
+        let mut out = String::new();
+        for (w, h) in [(191u16, 41u16), (152, 32), (100, 30)] {
+            let mut t = ratatui::Terminal::new(ratatui::backend::TestBackend::new(w, h)).unwrap();
+            t.draw(|f| engine.draw(f, &m, &theme)).unwrap();
+            let buf = t.backend().buffer().clone();
+            out.push_str(&format!("<h2>{w} x {h}</h2><div class=g>"));
+            for y in 0..h {
+                out.push_str("<div class=r>");
+                for x in 0..w {
+                    let c = buf.get(x, y);
+                    let col = |c: Color, d: &str| match c {
+                        Color::Rgb(r, g, b) => format!("#{r:02x}{g:02x}{b:02x}"),
+                        _ => d.to_string(),
+                    };
+                    let sym = c.symbol().replace('&', "&amp;").replace('<', "&lt;");
+                    out.push_str(&format!(
+                        "<i style=\"color:{};background:{}\">{sym}</i>",
+                        col(c.fg, "#c3d2dc"),
+                        col(c.bg, "#000000")
+                    ));
+                }
+                out.push_str("</div>");
+            }
+            out.push_str("</div>");
+        }
+        std::fs::write(path, out).unwrap();
+    }
 }

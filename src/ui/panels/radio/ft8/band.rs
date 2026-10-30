@@ -28,6 +28,8 @@ pub struct Ft8BandPanel;
 const TOP_HZ: f64 = 3000.0;
 /// The UTC gutter.
 const GUTTER: u16 = 9;
+/// The narrowest body the map keeps its place in.
+const MAP_MIN_BODY: u16 = 120;
 /// Energy this far over the cycle's median is shown where nothing decoded.
 const ENERGY_DB: f32 = 6.0;
 
@@ -42,6 +44,18 @@ impl Panel for Ft8BandPanel {
 
     fn min_size(&self) -> (u16, u16) {
         (40, 5)
+    }
+
+    /// A quarter of the column, six to twelve rows: eight cycles at most,
+    /// the rest of the column for the list.
+    fn column_height(&self, column: u16) -> Option<u16> {
+        Some((column / 4).clamp(6, 12))
+    }
+
+    /// Below a body of 120 columns the map gives way and this column takes
+    /// the body: the decodes stay readable, a map that small would not be.
+    fn column_width(&self, body: u16) -> Option<u16> {
+        (body < MAP_MIN_BODY).then_some(body)
     }
 
     fn chrome(&self, state: &SdrMetrics) -> PanelChrome {
