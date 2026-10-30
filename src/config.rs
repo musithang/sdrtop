@@ -161,6 +161,10 @@ pub struct ThemeConfig {
     pub lcd_night_glass: Option<String>,
     pub lcd_night_ink: Option<String>,
     pub lcd_night_ghost: Option<String>,
+    pub map_land: Option<String>,
+    pub map_night: Option<String>,
+    pub map_greyline: Option<String>,
+    pub map_grid: Option<String>,
 }
 
 impl ThemeConfig {
@@ -531,6 +535,10 @@ impl AppConfig {
         apply!(lcd_night_glass);
         apply!(lcd_night_ink);
         apply!(lcd_night_ghost);
+        apply!(map_land);
+        apply!(map_night);
+        apply!(map_greyline);
+        apply!(map_grid);
         t
     }
 

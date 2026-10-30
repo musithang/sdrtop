@@ -5,4 +5,5 @@
 //! than the Lab's measurements. Each still says how what it shows was
 //! received (POLICY.md, rule 3).
 
+pub mod ft8;
 pub mod pager;

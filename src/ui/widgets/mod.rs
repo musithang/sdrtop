@@ -13,6 +13,7 @@ pub mod bigdigits;
 pub mod canvas;
 pub mod charts;
 pub mod dotmatrix;
+pub mod dots;
 pub mod limit;
 pub mod micro_common;
 pub mod reading;

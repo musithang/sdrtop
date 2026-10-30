@@ -102,6 +102,17 @@ pub struct ThemeFile {
     pub lcd_night_ink: Option<String>,
     #[serde(default)]
     pub lcd_night_ghost: Option<String>,
+    /// The FT8 map's colours. Optional for the same reason: absent, the
+    /// land by day is the theme's `border_default`, by night its `stale`,
+    /// the grey line its `border_accent`, the rings and grid its `border_dim`.
+    #[serde(default)]
+    pub map_land: Option<String>,
+    #[serde(default)]
+    pub map_night: Option<String>,
+    #[serde(default)]
+    pub map_greyline: Option<String>,
+    #[serde(default)]
+    pub map_grid: Option<String>,
     /// The series colours. Optional for the same reason: absent, a theme's
     /// own accents stand in, in an order that keeps neighbours apart.
     #[serde(default)]
@@ -207,6 +218,10 @@ impl ThemeFile {
             lcd_night_glass: ink("lcd_night_glass", &self.lcd_night_glass, hex!(stale))?,
             lcd_night_ink: ink("lcd_night_ink", &self.lcd_night_ink, hex!(value_hi))?,
             lcd_night_ghost: ink("lcd_night_ghost", &self.lcd_night_ghost, hex!(stale))?,
+            map_land: ink("map_land", &self.map_land, hex!(border_default))?,
+            map_night: ink("map_night", &self.map_night, hex!(stale))?,
+            map_greyline: ink("map_greyline", &self.map_greyline, hex!(border_accent))?,
+            map_grid: ink("map_grid", &self.map_grid, hex!(border_dim))?,
 
             palette: self
                 .palette

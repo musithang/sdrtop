@@ -136,8 +136,52 @@ pub fn verdict(dts: &[f64]) -> Option<ClockVerdict> {
     })
 }
 
+/// How far the map reaches: the whole world on a logarithmic scale, or a
+/// linear range to its edge.
+// The linear ranges are reached by the view's `z` key; until it is wired,
+// only one test builds one. `expect` fails the build once something does.
+#[expect(dead_code)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum MapRange {
+    #[default]
+    Log,
+    Km1500,
+    Km3000,
+    Km9000,
+}
+
+impl MapRange {
+    pub fn scale(self) -> crate::geo::projection::Scale {
+        use crate::geo::projection::Scale;
+        match self {
+            MapRange::Log => Scale::Log,
+            MapRange::Km1500 => Scale::Linear { range_km: 1500.0 },
+            MapRange::Km3000 => Scale::Linear { range_km: 3000.0 },
+            MapRange::Km9000 => Scale::Linear { range_km: 9000.0 },
+        }
+    }
+
+    pub fn label(self) -> &'static str {
+        match self {
+            MapRange::Log => "log distance",
+            MapRange::Km1500 => "1 500 km",
+            MapRange::Km3000 => "3 000 km",
+            MapRange::Km9000 => "9 000 km",
+        }
+    }
+}
+
+/// What the FT8 view shows, set by its keys; the worker never touches it.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct Ft8View {
+    pub range: MapRange,
+    /// The selected station, by call.
+    pub selected: Option<String>,
+}
+
 #[derive(Clone, Debug, Default)]
 pub struct Ft8State {
+    pub view: Ft8View,
     pub cycles: VecDeque<CycleEntry>,
     pub decodes: VecDeque<Arc<DecodeEntry>>,
     /// Decodes this session, including any let go.

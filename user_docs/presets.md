@@ -219,7 +219,10 @@ received this session, newest first, with its text. `pager_card`, the page
 on the display as it was received: rate and clock error, shift, offset,
 level and decision SNR, preamble and sync, codewords and repairs, polarity,
 address, what decided its kind, how it ended, and one codeword's bits with
-the repaired ones lit.
+the repaired ones lit. `ft8_map`, the world around you as FT8 hears it:
+centred on your position (`[station]`), every station in the true direction
+of its path and drawn only where it said it was, the land coloured by the
+sun for day, grey line and night, on a logarithmic or a linear range.
 
 **Observer:** `observer`
 

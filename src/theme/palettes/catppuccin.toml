@@ -38,6 +38,10 @@ lcd_day_ghost  = "#9baf8f"   # an unlit dot, a shade off the glass
 lcd_night_glass = "#231d14"   # the display by night: an amber backlight
 lcd_night_ink  = "#f9e2af"   # its ink
 lcd_night_ghost = "#2a2318"   # an unlit dot
+map_land       = "#585b70"   # the FT8 map: land by day
+map_night      = "#2a2b3c"   # land by night
+map_greyline   = "#c06ad8"   # the grey line, its own ink, never a station's
+map_grid       = "#313244"   # range rings and the locator grid
 
 # The spectrum and waterfall gradient, cold (weak) to hot (strong).
 # `at` is the position in 0.0..1.0; the stops must climb.

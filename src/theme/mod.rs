@@ -73,6 +73,15 @@ pub struct Theme {
     pub lcd_night_ink: Color,
     pub lcd_night_ghost: Color,
 
+    // The FT8 map: land by day and by night, the grey line (civil twilight)
+    // over land and sea, and the range rings and locator grid. The grey line
+    // has an ink of its own, never a station's: the rays to this cycle's
+    // stations are drawn in the stations' colours across it.
+    pub map_land: Color,
+    pub map_night: Color,
+    pub map_greyline: Color,
+    pub map_grid: Color,
+
     // Series: one colour per thing told apart on one plot, in order (the
     // classic hop scatter's piconets). Never empty; a plot with more things
     // than colours reuses them in order, and says so.
@@ -399,6 +408,40 @@ mod tests {
                     "{name}.{field} is not truecolor"
                 );
             }
+        }
+    }
+
+    /// **The FT8 map's grey line never wears a station's colour.** Viktor's
+    /// rule: the rays from you to this cycle's stations cross the grey line,
+    /// so in every built-in it stands well apart (CIEDE2000) from every ink a
+    /// station is drawn in, and from the land; and land by night is told from
+    /// land by day.
+    #[test]
+    fn every_map_keeps_the_grey_line_apart_from_the_stations() {
+        for name in Theme::builtin_names() {
+            let text = BUILTIN.iter().find(|(n, _)| *n == name).unwrap().1;
+            let file = data::ThemeFile::parse(text).unwrap();
+            assert!(
+                file.map_land.is_some()
+                    && file.map_night.is_some()
+                    && file.map_greyline.is_some()
+                    && file.map_grid.is_some(),
+                "{name} relies on the map fallback"
+            );
+            let t = Theme::builtin(name).unwrap();
+            for (what, ink) in [
+                ("value_hi", t.value_hi),
+                ("value", t.value),
+                ("label", t.label),
+                ("status_crit", t.status_crit),
+                ("border_focused", t.border_focused),
+                ("map_land", t.map_land),
+            ] {
+                let d = ciede2000(t.map_greyline, ink);
+                assert!(d >= 18.0, "{name}: the grey line only {d:.1} from {what}");
+            }
+            let d = ciede2000(t.map_land, t.map_night);
+            assert!(d >= 5.0, "{name}: night only {d:.1} from day");
         }
     }
 
