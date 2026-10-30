@@ -852,11 +852,14 @@ fn compose_band_strip(
     ];
     let rail = rail_spans(track_w, marker_col, band_at(freq), theme);
     let column = |hz: u64| (range_frac(hz, fmin, fmax) * (track_w - 1) as f64).round() as usize;
-    let gap_cols: Vec<std::ops::Range<usize>> = gaps
+    let gap_cols: Vec<(std::ops::Range<usize>, String)> = gaps
         .iter()
-        .map(|gap| column(*gap.start())..column(*gap.end()) + 1)
+        .map(|gap| {
+            let cols = column(*gap.start())..(column(*gap.end()) + 1).min(track_w);
+            (cols, gap_label(gap))
+        })
         .collect();
-    spans.extend(cut_gaps(rail, &gap_cols));
+    spans.extend(cut_gaps(rail, &gap_cols, Style::default().fg(theme.label)));
     spans.extend([
         Span::raw(" "),
         Span::styled(hi_lbl, Style::default().fg(theme.label)),
@@ -867,29 +870,72 @@ fn compose_band_strip(
     Line::from(spans)
 }
 
-/// The rail with a radio's gaps between bands cut out of it: the rule's
-/// columns over a frequency the radio does not tune are left blank, so the
-/// dial shows two bands with nothing between them rather than one range. The
-/// needle and the band callout are never cut, only the rule.
-fn cut_gaps(rail: Vec<Span<'static>>, gaps: &[std::ops::Range<usize>]) -> Vec<Span<'static>> {
+/// What a gap between bands is called on the dial: the band edges either side
+/// of it, the unit said once where both share it (`31–60M`).
+fn gap_label(gap: &std::ops::RangeInclusive<u64>) -> String {
+    let below = fmt_freq_compact(gap.start().saturating_sub(1));
+    let above = fmt_freq_compact(gap.end().saturating_add(1));
+    let unit = |s: &str| s.chars().last().filter(|c| c.is_alphabetic());
+    match (unit(&below), unit(&above)) {
+        (Some(a), Some(b)) if a == b => {
+            format!("{}\u{2013}{above}", &below[..below.len() - a.len_utf8()])
+        }
+        _ => format!("{below}\u{2013}{above}"),
+    }
+}
+
+/// The rail with a radio's gaps between bands cut out of it: the rule ends
+/// in a cap at each band's edge (`╡` `╞`), the columns between are left
+/// blank, and the gap is named between the caps where the name fits. So the
+/// dial shows two bands with a range the radio does not tune between them,
+/// rather than one range, or a rule that looks broken. The needle and the
+/// band callout are never cut, only the rule.
+fn cut_gaps(
+    rail: Vec<Span<'static>>,
+    gaps: &[(std::ops::Range<usize>, String)],
+    label: Style,
+) -> Vec<Span<'static>> {
     if gaps.is_empty() {
         return rail;
     }
-    let mut out: Vec<Span<'static>> = Vec::with_capacity(rail.len() + 2 * gaps.len());
-    let mut col = 0usize;
-    for span in rail {
-        for ch in span.content.chars() {
-            let cut = matches!(ch, '━' | '┈') && gaps.iter().any(|g| g.contains(&col));
-            let (text, style) = if cut {
-                (' ', Style::default())
-            } else {
-                (ch, span.style)
-            };
-            match out.last_mut() {
-                Some(last) if last.style == style => last.content.to_mut().push(text),
-                _ => out.push(Span::styled(text.to_string(), style)),
+    let mut cells: Vec<(char, Style)> = rail
+        .iter()
+        .flat_map(|span| span.content.chars().map(move |ch| (ch, span.style)))
+        .collect();
+    let is_rule = |ch: char| matches!(ch, '━' | '┈');
+    for (cols, name) in gaps {
+        let cols = cols.start.min(cells.len())..cols.end.min(cells.len());
+        if cols.is_empty() {
+            continue;
+        }
+        let (first, last) = (cols.start, cols.end - 1);
+        for col in cols.clone() {
+            let (ch, style) = cells[col];
+            if !is_rule(ch) {
+                continue;
             }
-            col += 1;
+            cells[col] = match col {
+                c if c == first && first < last => ('╡', style),
+                c if c == last && first < last => ('╞', style),
+                _ => (' ', Style::default()),
+            };
+        }
+        // The name, with a space either side, centred between the caps, and
+        // only over columns the cut left blank.
+        let inside = first + 1..last;
+        let text: Vec<char> = format!(" {name} ").chars().collect();
+        if inside.len() >= text.len() && inside.clone().all(|c| cells[c].0 == ' ') {
+            let at = inside.start + (inside.len() - text.len()) / 2;
+            for (i, ch) in text.into_iter().enumerate() {
+                cells[at + i] = (ch, if ch == ' ' { Style::default() } else { label });
+            }
+        }
+    }
+    let mut out: Vec<Span<'static>> = Vec::with_capacity(rail.len() + 4 * gaps.len());
+    for (ch, style) in cells {
+        match out.last_mut() {
+            Some(last) if last.style == style => last.content.to_mut().push(ch),
+            _ => out.push(Span::styled(ch.to_string(), style)),
         }
     }
     out
@@ -1580,11 +1626,13 @@ mod tests {
         assert!(out.contains("AGC") && !out.contains("29 dB"), "{out}");
     }
 
-    /// A radio with a gap between its bands shows the gap on the dial as a
-    /// blank stretch of the rule, where the gap's frequencies would fall; the
-    /// needle, the labels and the strip's width are as on any radio.
+    /// A radio with a gap between its bands shows the gap on the dial where
+    /// the gap's frequencies would fall: the rule capped at each band's edge,
+    /// the gap named between the caps where the name fits and blank where it
+    /// does not; the needle, the labels and the strip's width are as on any
+    /// radio.
     #[test]
-    fn the_dial_leaves_a_gap_between_bands_blank() {
+    fn the_dial_caps_and_names_a_gap_between_bands() {
         let t = Theme::sdr();
         let gaps = [std::ops::RangeInclusive::new(31_000_001, 59_999_999)];
         let line = compose_band_strip(
@@ -1605,9 +1653,35 @@ mod tests {
         let col = |hz: u64| {
             (range_frac(hz, 9_000, 260_000_000) * (track.len() - 1) as f64).round() as usize
         };
-        assert_eq!(track[col(45_000_000)], ' ', "inside the gap: {text}");
-        assert_ne!(track[col(20_000_000)], ' ', "inside the HF band: {text}");
-        assert_ne!(track[col(150_000_000)], ' ', "inside the VHF band: {text}");
+        let (start, end) = (col(31_000_001), col(59_999_999));
+        assert_eq!(track[start], '╡', "the HF band's edge is capped: {text}");
+        assert_eq!(track[end], '╞', "the VHF band's edge is capped: {text}");
+        let inside: String = track[start + 1..end].iter().collect();
+        assert_eq!(inside.trim(), "31\u{2013}60M", "the gap is named: {text}");
+        assert!(!inside.contains(['━', '┈']), "no rule in the gap: {text}");
+        assert!(
+            matches!(track[col(20_000_000)], '━' | '┈'),
+            "inside the HF band: {text}"
+        );
+        assert!(
+            matches!(track[col(150_000_000)], '━' | '┈'),
+            "inside the VHF band: {text}"
+        );
+        // Too narrow for the name: the caps alone, the gap blank between them.
+        let narrow = compose_band_strip(
+            7_074_000,
+            9_000,
+            260_000_000,
+            &gaps,
+            "9k".into(),
+            "260M".into(),
+            &t,
+            48,
+        );
+        let narrow: String = narrow.spans.iter().map(|s| s.content.as_ref()).collect();
+        assert_eq!(narrow.chars().count(), 48);
+        assert!(narrow.contains('╡') && narrow.contains('╞'), "{narrow}");
+        assert!(!narrow.contains("31\u{2013}"), "{narrow}");
         let without = compose_band_strip(
             7_074_000,
             9_000,
@@ -1620,6 +1694,16 @@ mod tests {
         );
         let plain: String = without.spans.iter().map(|s| s.content.as_ref()).collect();
         assert!(!plain.contains("  "), "no gap, no blank: {plain}");
+    }
+
+    /// The gap's name is the band edges either side of it, the unit once
+    /// where both share it.
+    #[test]
+    fn a_gap_is_named_by_the_band_edges_beside_it() {
+        let hf_plus = std::ops::RangeInclusive::new(31_000_001, 59_999_999);
+        assert_eq!(gap_label(&hf_plus), "31\u{2013}60M");
+        let across = std::ops::RangeInclusive::new(900_001, 1_999_999);
+        assert_eq!(gap_label(&across), "900k\u{2013}2M");
     }
 
     #[test]

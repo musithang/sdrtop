@@ -132,8 +132,8 @@ the same reason ([the SigMF extension](sdrtop.sigmf-ext.md)).
 The radio accepts any frequency and shows a flat floor where it does not receive,
 so the bands are Airspy's published ones. A frequency typed into the gap is refused
 with both bands named. `←` and `→` stop at a band's edge instead of jumping 29 MHz:
-type the frequency to cross. The header's dial leaves the gap blank, the menu's
-ruler draws it dotted, and a sweep across it leaves a hole rather than tuning
+type the frequency to cross. The header's dial caps each band's edge and names
+the gap between them (`╡ 31–60M ╞`), the menu's ruler draws it dotted, and a sweep across it leaves a hole rather than tuning
 where nothing is received. Bluetooth and Wi-Fi are refused: 2.4 GHz is about nine
 times higher than this radio goes.
 
