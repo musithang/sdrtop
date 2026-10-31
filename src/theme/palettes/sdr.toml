@@ -43,6 +43,7 @@ map_land       = "#4a8eab"   # the FT8 map: land by day
 map_night      = "#41536a"   # land by night
 map_greyline   = "#d070c8"   # the grey line, its own ink, never a station's
 map_grid       = "#3a4152"   # range rings and the locator grid
+map_home       = "#00d282"   # you, at the middle, never a station's ink
 
 # The spectrum and waterfall gradient, cold (weak) to hot (strong).
 # `at` is the position in 0.0..1.0; the stops must climb.

@@ -15,7 +15,7 @@ use ratatui::{
     Frame,
 };
 
-use super::{hhmmss, km, parity, path, put};
+use super::{hhmmss, km, parity, path, put, signed};
 use crate::state::SdrMetrics;
 use crate::ui::panel::{Panel, PanelChrome, Staleness, Tag};
 
@@ -156,7 +156,7 @@ impl Panel for Ft8DecodesPanel {
                     area,
                     area.x,
                     y,
-                    &format!("{:+3.0}", p.snr_db),
+                    &format!("{:>3}", signed(p.snr_db, 0)),
                     style(if ci == 0 { theme.value_hi } else { ink }),
                 );
                 put(
@@ -164,7 +164,7 @@ impl Panel for Ft8DecodesPanel {
                     area,
                     area.x + 5,
                     y,
-                    &format!("{:+.1}", d.decode.dt),
+                    &signed(d.decode.dt, 1),
                     style(ink),
                 );
                 put(

@@ -20,7 +20,7 @@ use ratatui::{
     Frame,
 };
 
-use super::{hhmmss, put};
+use super::{hhmmss, put, signed};
 use crate::state::{CycleOutcome, SdrMetrics};
 use crate::ui::panel::{FrameStyle, Panel, PanelChrome, Staleness};
 
@@ -203,7 +203,10 @@ impl Panel for Ft8CyclesPanel {
                 let side = if v.median_dt >= 0.0 { "late" } else { "early" };
                 vec![
                     ("clock and path ".into(), label),
-                    (format!("{:+.2} s", v.median_dt), Style::default().fg(ink)),
+                    (
+                        format!("{} s", signed(v.median_dt, 2)),
+                        Style::default().fg(ink),
+                    ),
                     (
                         format!(" \u{b1}{:.2}", v.spread),
                         Style::default().fg(theme.value),

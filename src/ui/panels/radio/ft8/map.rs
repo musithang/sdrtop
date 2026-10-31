@@ -387,7 +387,7 @@ impl Panel for Ft8MapPanel {
             hy,
             "\u{25c6}",
             Style::default()
-                .fg(theme.value_hi)
+                .fg(theme.map_home)
                 .add_modifier(Modifier::BOLD),
         );
         used.push((hy, hx, hx));
@@ -432,7 +432,7 @@ impl Panel for Ft8MapPanel {
         }
         let loc = maidenhead::locator(home.0, home.1, 2).unwrap_or_default();
         if free(&used, hy, hx + 1, hx + 2 + loc.len() as i64) {
-            put(buf, hx + 2, hy, &loc, Style::default().fg(theme.value_hi));
+            put(buf, hx + 2, hy, &loc, Style::default().fg(theme.map_home));
         }
 
         if legend {
@@ -520,7 +520,7 @@ fn draw_legend(buf: &mut Buffer, area: Rect, theme: &crate::Theme, lit: bool) {
     let y = area.bottom() - 1;
     let mut x = area.x + 1;
     let mut parts: Vec<(&str, Color, &str)> = vec![
-        ("\u{25c6}", theme.value_hi, " you  "),
+        ("\u{25c6}", theme.map_home, " you  "),
         ("\u{25cf}", theme.value_hi, " this cycle  "),
         ("\u{25cf}", theme.value, " last 45 s  "),
         ("\u{2022}", theme.label, " older  "),

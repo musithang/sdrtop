@@ -14,7 +14,7 @@ use ratatui::{
     Frame,
 };
 
-use super::{hhmmss, km, parity, path, put};
+use super::{hhmmss, km, parity, path, put, signed};
 use crate::state::SdrMetrics;
 use crate::ui::panel::{Panel, PanelChrome, Staleness};
 
@@ -168,9 +168,9 @@ impl Panel for Ft8CardPanel {
         let rows: Vec<Vec<(String, Style)>> = vec![
             vec![
                 ("SNR ".into(), label),
-                (format!("{:+.1} dB", p.snr_db), hi),
+                (format!("{} dB", signed(p.snr_db, 1)), hi),
                 (" in 2500 Hz   DT ".into(), label),
-                (format!("{:+.3} s", d.decode.dt), value),
+                (format!("{} s", signed(d.decode.dt, 3)), value),
                 ("   tone 0 ".into(), label),
                 (
                     format!("{:.*} \u{b1}{:.*} Hz", decimals, p.f0, decimals, p.f0_sigma),
@@ -179,7 +179,7 @@ impl Panel for Ft8CardPanel {
             ],
             vec![
                 ("drift ".into(), label),
-                (format!("{:+.2} Hz", p.drift), value),
+                (format!("{} Hz", signed(p.drift, 2)), value),
                 (" over 12.64 s   sync ".into(), label),
                 (format!("{}/21", d.decode.costas), value),
                 (" Costas tones".into(), label),

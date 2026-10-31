@@ -113,6 +113,9 @@ pub struct ThemeFile {
     pub map_greyline: Option<String>,
     #[serde(default)]
     pub map_grid: Option<String>,
+    /// You, at the map's middle; absent, the theme's `status_ok`.
+    #[serde(default)]
+    pub map_home: Option<String>,
     /// The series colours. Optional for the same reason: absent, a theme's
     /// own accents stand in, in an order that keeps neighbours apart.
     #[serde(default)]
@@ -222,6 +225,7 @@ impl ThemeFile {
             map_night: ink("map_night", &self.map_night, hex!(stale))?,
             map_greyline: ink("map_greyline", &self.map_greyline, hex!(border_accent))?,
             map_grid: ink("map_grid", &self.map_grid, hex!(border_dim))?,
+            map_home: ink("map_home", &self.map_home, hex!(status_ok))?,
 
             palette: self
                 .palette

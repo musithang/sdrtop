@@ -165,6 +165,7 @@ pub struct ThemeConfig {
     pub map_night: Option<String>,
     pub map_greyline: Option<String>,
     pub map_grid: Option<String>,
+    pub map_home: Option<String>,
 }
 
 impl ThemeConfig {
@@ -539,6 +540,7 @@ impl AppConfig {
         apply!(map_night);
         apply!(map_greyline);
         apply!(map_grid);
+        apply!(map_home);
         t
     }
 

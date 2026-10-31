@@ -84,6 +84,15 @@ pub fn hhmm(unix: f64) -> String {
     format!("{:02}:{:02}", s / 3600, (s / 60) % 60)
 }
 
+/// A signed reading to `decimals` places. One that rounds to zero is
+/// written `+0.0`, not `-0.0`: beside `+0.0` a minus sign on a zero reads as
+/// a different number, and the precision shown cannot tell the two apart.
+pub fn signed(v: f64, decimals: usize) -> String {
+    let scale = 10f64.powi(decimals as i32);
+    let r = (v * scale).round() / scale;
+    format!("{:+.*}", decimals, if r == 0.0 { 0.0 } else { r })
+}
+
 /// `HH:MM:SS` UTC of a Unix time.
 pub fn hhmmss(unix: f64) -> String {
     let s = unix.rem_euclid(86_400.0) as u64;
@@ -328,4 +337,16 @@ fn render_the_view_to_html() {
     }
     out.push_str("</div>");
     std::fs::write(path, out).unwrap();
+}
+
+#[cfg(test)]
+#[test]
+fn a_reading_that_rounds_to_zero_is_never_negative() {
+    // Live: "-0.0" in the DT column beside "+0.0", for a DT of -0.04 s.
+    assert_eq!(signed(-0.04, 1), "+0.0");
+    assert_eq!(signed(-0.4, 0), "+0");
+    assert_eq!(signed(0.0, 2), "+0.00");
+    assert_eq!(signed(-0.06, 1), "-0.1");
+    assert_eq!(signed(0.034, 3), "+0.034");
+    assert_eq!(signed(-14.2, 0), "-14");
 }

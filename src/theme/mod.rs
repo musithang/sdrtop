@@ -76,11 +76,13 @@ pub struct Theme {
     // The FT8 map: land by day and by night, the grey line (civil twilight)
     // over land and sea, and the range rings and locator grid. The grey line
     // has an ink of its own, never a station's: the rays to this cycle's
-    // stations are drawn in the stations' colours across it.
+    // stations are drawn in the stations' colours across it. You, at the
+    // middle, have an ink of your own too, never a station's.
     pub map_land: Color,
     pub map_night: Color,
     pub map_greyline: Color,
     pub map_grid: Color,
+    pub map_home: Color,
 
     // Series: one colour per thing told apart on one plot, in order (the
     // classic hop scatter's piconets). Never empty; a plot with more things
@@ -425,7 +427,8 @@ mod tests {
                 file.map_land.is_some()
                     && file.map_night.is_some()
                     && file.map_greyline.is_some()
-                    && file.map_grid.is_some(),
+                    && file.map_grid.is_some()
+                    && file.map_home.is_some(),
                 "{name} relies on the map fallback"
             );
             let t = Theme::builtin(name).unwrap();
@@ -439,7 +442,13 @@ mod tests {
             ] {
                 let d = ciede2000(t.map_greyline, ink);
                 assert!(d >= 18.0, "{name}: the grey line only {d:.1} from {what}");
+                // You are never a station either: the first map drew you in
+                // this cycle's ink, and home read as one more station heard.
+                let d = ciede2000(t.map_home, ink);
+                assert!(d >= 18.0, "{name}: home only {d:.1} from {what}");
             }
+            let d = ciede2000(t.map_home, t.map_greyline);
+            assert!(d >= 18.0, "{name}: home only {d:.1} from the grey line");
             let d = ciede2000(t.map_land, t.map_night);
             assert!(d >= 6.0, "{name}: night only {d:.1} from day");
             // Land by night is still land: at 20:48 UTC from Bonyhád the first
