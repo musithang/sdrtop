@@ -304,13 +304,19 @@ impl Panel for Ft8MapPanel {
                 Some((s, age(s, newest), g.place_dot(place)))
             })
             .collect();
+        // The rays on a canvas of their own, drawn over the map: a cell a
+        // ray crosses shows the ray's dots alone, so it reads as one thin
+        // line. Drawn into the map's canvas it took the colour of every cell
+        // it touched, land dots and all, and became a ragged band.
+        let mut rays = Dots::new(cols, rows);
         for (s, a, (px, py)) in &on_map {
             if *a == Age::Now {
-                let c = lerp_color(ink(s, *a, theme), theme.map_night, 0.45);
-                line(&mut dots, (g.cx, g.cy), (*px, *py), P_RAY, c);
+                let c = lerp_color(ink(s, *a, theme), theme.map_night, 0.2);
+                line(&mut rays, (g.cx, g.cy), (*px, *py), P_RAY, c);
             }
         }
         dots.render(buf, area);
+        rays.render(buf, area);
 
         let put = |buf: &mut Buffer, x: i64, y: i64, text: &str, style: Style| {
             for (k, ch) in text.chars().enumerate() {
@@ -458,14 +464,16 @@ fn circle(dots: &mut Dots, g: &Geometry, r: f64, p: u8, c: Color, every: usize) 
     }
 }
 
-/// A dotted line between two dot positions, leaving the two ends clear.
+/// A straight line between two dot positions, one dot per step along its
+/// longer axis so it never thickens, leaving two dots clear at each end.
 fn line(dots: &mut Dots, a: (f64, f64), b: (f64, f64), p: u8, c: Color) {
-    let n = (b.0 - a.0).hypot(b.1 - a.1).ceil() as usize;
-    for k in (2..n.saturating_sub(2)).step_by(2) {
+    let (dx, dy) = (b.0 - a.0, b.1 - a.1);
+    let n = dx.abs().max(dy.abs()).round() as usize;
+    for k in 2..n.saturating_sub(1) {
         let t = k as f64 / n as f64;
         dots.set(
-            (a.0 + (b.0 - a.0) * t) as i64,
-            (a.1 + (b.1 - a.1) * t) as i64,
+            (a.0 + dx * t).floor() as i64,
+            (a.1 + dy * t).floor() as i64,
             p,
             c,
         );
@@ -705,6 +713,17 @@ pub(crate) mod tests {
         );
         // Tokyo is off a 3000 km map.
         assert!(!t.contains("JA1VQD"), "{t}");
+    }
+
+    #[test]
+    fn a_ray_is_one_thin_unbroken_line() {
+        // Flat along a row: every cell between the ends lit, in that row
+        // alone, the ends left clear.
+        let mut d = Dots::new(24, 3);
+        line(&mut d, (0.0, 5.0), (40.0, 5.0), P_RAY, Color::Red);
+        assert!(!d.lit(0, 1) && !d.lit(20, 1));
+        assert!((2..19).all(|c| d.lit(c, 1)));
+        assert!((0..24).all(|c| !d.lit(c, 0) && !d.lit(c, 2)));
     }
 
     #[test]
