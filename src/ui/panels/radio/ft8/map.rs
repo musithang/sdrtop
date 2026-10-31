@@ -54,12 +54,14 @@ const RINGS_KM: [f64; 6] = [500.0, 1000.0, 2500.0, 5000.0, 10_000.0, 15_000.0];
 /// fields crowd into hatching.
 const GRID_MAX_KM: f64 = 4000.0;
 
-// Layer priorities: what matters wins a cell.
+// Layer priorities: what matters wins a cell. The rings and the grid sit
+// under the land: a cell takes one colour, and with the land drawn whole a
+// ring above it cut a dark band through every continent it crossed.
 const P_SEA_TWILIGHT: u8 = 1;
 const P_GRID: u8 = 1;
+const P_RING: u8 = 1;
 const P_NIGHT: u8 = 2;
 const P_LAND: u8 = 3;
-const P_RING: u8 = 4;
 const P_RAY: u8 = 5;
 
 /// What each dot of the canvas is, for one size, range and position.
@@ -249,15 +251,19 @@ impl Panel for Ft8MapPanel {
             let (x, y) = ((i % w) as i64, (i / w) as i64);
             let l = light.map_or(Light::Day, |l| l[i]);
             if land_cache.land[i] {
-                // The coast whole, the inside every other dot (a checker), so
-                // the land reads as land and labels over it stay legible.
-                if !(land_cache.coast[i] || (x + y) % 2 == 0) {
-                    continue;
-                }
+                // Every dot of the land, and the coast a shade brighter so
+                // the outline reads first. A checker of every other dot was
+                // tried first: in a terminal font's thin braille the night
+                // side of the world all but vanished.
                 let (p, c) = match l {
                     Light::Day => (P_LAND, theme.map_land),
                     Light::Twilight => (P_LAND, theme.map_greyline),
                     Light::Night => (P_NIGHT, theme.map_night),
+                };
+                let c = if land_cache.coast[i] {
+                    lerp_color(c, theme.value, 0.4)
+                } else {
+                    c
                 };
                 dots.set(x, y, p, c);
             } else if l == Light::Twilight && x % 4 == 0 && y % 4 == 0 {
