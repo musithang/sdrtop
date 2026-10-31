@@ -648,6 +648,7 @@ impl App {
             night,
             display,
             station,
+            ft8,
         ) = {
             let m = self.state.lock().unwrap_or_else(|e| e.into_inner());
             (
@@ -677,6 +678,7 @@ impl App {
                 m.pager.view.night,
                 m.pager.view.display.clone(),
                 m.home.settings(),
+                m.ft8.view.settings(),
             )
         };
         let cfg = AppConfig {
@@ -723,6 +725,7 @@ impl App {
             record: self.record_config.clone(),
             pager: crate::config::PagerSettings { night, display },
             station,
+            ft8,
             presets: self.user_presets.clone(),
         };
         let mut candidate = cfg.clone();

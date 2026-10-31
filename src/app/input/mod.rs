@@ -211,6 +211,7 @@ fn handle_normal(key: KeyEvent, ctx: &mut InputCtx<'_>) -> KeyAction {
         Some("net_wifi_survey") => net::net_wifi_survey(key, ctx),
         Some("net_wifi_frames") => net::net_wifi_frames(key, ctx),
         Some("command_rail") => rail::command_rail(key, ctx),
+        Some("ft8_map") => ft8::ft8_map(key, ctx),
         _ => global::handle(key, ctx),
     }
 }

@@ -42,6 +42,7 @@ use crate::geo::maidenhead;
 use crate::geo::projection::{Azimuthal, Scale};
 use crate::geo::sun::{self, Light};
 use crate::geo::{land, sphere};
+use crate::state::ft8::{Names, Window};
 use crate::state::{MapRange, SdrMetrics};
 use crate::ui::panel::{Panel, PanelChrome, Staleness};
 use crate::ui::widgets::charts::lerp_color;
@@ -160,6 +161,22 @@ impl Panel for Ft8MapPanel {
         (40, 12)
     }
 
+    fn focus_key(&self) -> Option<char> {
+        Some('m')
+    }
+
+    fn focus_bindings(&self) -> &'static [(&'static str, &'static str)] {
+        &[
+            ("R", "rays"),
+            ("G", "grid"),
+            ("K", "rings"),
+            ("L", "sun"),
+            ("N", "names"),
+            ("T", "time"),
+            ("B", "this band"),
+        ]
+    }
+
     fn chrome(&self, state: &SdrMetrics) -> PanelChrome {
         let f = &state.ft8;
         let mut suffix = String::new();
@@ -169,13 +186,43 @@ impl Panel for Ft8MapPanel {
                 maidenhead::locator(lat, lon, 3).unwrap_or_default()
             ));
             suffix.push_str(&format!(" · {}", f.view.range.label()));
-            if let Some(t) = sun_time(state) {
-                suffix.push_str(&format!(" · greyline {} UTC", hhmm(t)));
+            let m = &f.view.map;
+            if m.sun {
+                if let Some(t) = sun_time(state) {
+                    suffix.push_str(&format!(" · greyline {} UTC", hhmm(t)));
+                }
+            }
+            // Whatever a switch hides is said, so a sparse map is never
+            // read as a quiet band.
+            if m.window != Window::default() {
+                suffix.push_str(&format!(" · {}", m.window.word()));
+            }
+            if m.this_band {
+                match f.dial().and_then(crate::signal::ft8::bands::band_of) {
+                    Some(b) => suffix.push_str(&format!(" · {b} only")),
+                    None => suffix.push_str(" · this dial only"),
+                }
+            }
+            let off: Vec<&str> = [
+                (m.rays, "rays"),
+                (m.grid, "grid"),
+                (m.rings, "rings"),
+                (m.sun, "sun"),
+            ]
+            .into_iter()
+            .filter(|(on, _)| !on)
+            .map(|(_, w)| w)
+            .collect();
+            if !off.is_empty() {
+                suffix.push_str(&format!(" · {} off", off.join(", ")));
+            }
+            if m.names != Names::All {
+                suffix.push_str(&format!(" · names {}", m.names.word()));
             }
         } else {
             suffix.push_str(" no position");
         }
-        PanelChrome::new("Map")
+        PanelChrome::new("_Map")
             .stale_when(Staleness::NotStreaming)
             .suffix(suffix)
     }
@@ -219,7 +266,8 @@ impl Panel for Ft8MapPanel {
             *cache = Some(build_land(key, &g, w, h));
         }
         let land_cache = cache.as_mut().expect("just built");
-        let time = sun_time(state);
+        let layers = &state.ft8.view.map;
+        let time = sun_time(state).filter(|_| layers.sun);
         let minute = time.map(|t| (t / 60.0).floor() as i64);
         if let Some((t, m)) = time.zip(minute) {
             if land_cache.light.as_ref().is_none_or(|(lm, _)| *lm != m) {
@@ -277,6 +325,7 @@ impl Panel for Ft8MapPanel {
         let edge_r = g.proj.radius(sphere::ANTIPODE_KM);
         circle(&mut dots, &g, edge_r, P_RING, theme.map_grid, 1);
         let rings: Vec<f64> = match range.scale() {
+            _ if !layers.rings => Vec::new(),
             Scale::Log => RINGS_KM.to_vec(),
             Scale::Linear { range_km } => RINGS_KM
                 .iter()
@@ -287,7 +336,8 @@ impl Panel for Ft8MapPanel {
         for &r in &rings {
             circle(&mut dots, &g, g.proj.radius(r), P_RING, theme.map_grid, 2);
         }
-        let fields = matches!(range.scale(), Scale::Linear { range_km } if range_km <= GRID_MAX_KM);
+        let fields = layers.grid
+            && matches!(range.scale(), Scale::Linear { range_km } if range_km <= GRID_MAX_KM);
         if fields {
             grid(&mut dots, &g, theme.map_grid);
         }
@@ -299,6 +349,9 @@ impl Panel for Ft8MapPanel {
             .ft8
             .stations
             .values()
+            // The window and band switches; the chosen station is drawn
+            // whatever they say, as it is named whatever `names` says.
+            .filter(|s| state.ft8.on_map(s, newest) || Some(s.call.as_str()) == selected)
             .filter_map(|s| {
                 let place = maidenhead::centre(s.locator.as_deref()?)?;
                 Some((s, age(s, newest), g.place_dot(place)))
@@ -310,7 +363,7 @@ impl Panel for Ft8MapPanel {
         // it touched, land dots and all, and became a ragged band.
         let mut rays = Dots::new(cols, rows);
         for (s, a, (px, py)) in &on_map {
-            if *a == Age::Now {
+            if layers.rays && *a == Age::Now {
                 let c = lerp_color(ink(s, *a, theme), theme.map_night, 0.2);
                 line(&mut rays, (g.cx, g.cy), (*px, *py), P_RAY, c);
             }
@@ -420,11 +473,19 @@ impl Panel for Ft8MapPanel {
             key(a).cmp(&key(b))
         });
         for (s, a, p) in named {
+            let is_sel = Some(s.call.as_str()) == selected;
+            let shown = match layers.names {
+                Names::All => true,
+                Names::ThisCycle => *a == Age::Now,
+                Names::None => false,
+            };
+            if !(shown || is_sel) {
+                continue;
+            }
             let (x, y) = cell(*p);
             if x <= 0 || y <= 0 || x >= cols as i64 - 1 || y >= rows as i64 - 1 {
                 continue;
             }
-            let is_sel = Some(s.call.as_str()) == selected;
             let n = s.call.chars().count() as i64;
             for tx in [x + 2, x - n - 1] {
                 if free(&used, y, tx - 1, tx + n) {
@@ -627,6 +688,7 @@ pub(crate) mod tests {
             locator: loc.map(str::to_string),
             last_unix: NOW - ago,
             last_at: at,
+            dial_hz: 14_074_000,
             heard: 1,
             snr: VecDeque::from([(NOW - ago, snr)]),
             called_you: you,
@@ -724,6 +786,65 @@ pub(crate) mod tests {
         assert!(!d.lit(0, 1) && !d.lit(20, 1));
         assert!((2..19).all(|c| d.lit(c, 1)));
         assert!((0..24).all(|c| !d.lit(c, 0) && !d.lit(c, 2)));
+    }
+
+    #[test]
+    fn what_a_switch_hides_the_title_says() {
+        use crate::state::ft8::{Names, Window};
+        let mut m = evening();
+        m.ft8.view.map.rays = false;
+        m.ft8.view.map.sun = false;
+        m.ft8.view.map.window = Window::Min15;
+        m.ft8.view.map.names = Names::None;
+        let t = text(&draw(Ft8MapPanel::new(), 112, 37, &m));
+        assert!(t.contains("15 min"), "{t}");
+        assert!(t.contains("rays, sun off"), "{t}");
+        assert!(t.contains("names none"), "{t}");
+        // The sun off: no grey line in the title or the legend.
+        assert!(!t.contains("greyline"), "{t}");
+        // Names none: no call written, but the dots are there.
+        assert!(!t.contains("JA1VQD") && !t.contains("W2XK"), "{t}");
+        assert!(t.contains('\u{25cf}'), "{t}");
+    }
+
+    #[test]
+    fn the_chosen_station_is_named_and_drawn_whatever_the_switches_say() {
+        use crate::state::ft8::{Names, Window};
+        let mut m = evening();
+        m.ft8.view.map.names = Names::None;
+        m.ft8.view.map.window = Window::Cycle;
+        // RA0FWL was heard ten minutes ago: outside this cycle's window.
+        m.ft8.view.selected = Some("RA0FWL".into());
+        let t = text(&draw(Ft8MapPanel::new(), 112, 37, &m));
+        assert!(t.contains("RA0FWL"), "{t}");
+        assert!(!t.contains("PY2WQS"), "outside the window:\n{t}");
+    }
+
+    /// **The keys page lists every key the map's focus takes** (POLICY.md,
+    /// rule 7): each binding's letter has its row in the FT8 map section.
+    #[test]
+    fn the_keys_page_lists_the_map_focus_keys() {
+        let doc = include_str!("../../../../../user_docs/keys.md");
+        let start = doc.find("## FT8 map focus mode").expect("the section");
+        let rest = &doc[start..];
+        let section = &rest[..rest[3..].find("\n## ").map_or(rest.len(), |i| i + 3)];
+        for (k, _) in Ft8MapPanel::new().focus_bindings() {
+            assert!(
+                section.contains(&format!("| `{k}` |")),
+                "no row for {k} in:\n{section}"
+            );
+        }
+    }
+
+    #[test]
+    fn rays_off_draws_no_ray() {
+        let mut with = evening();
+        with.ft8.view.range = MapRange::Km3000;
+        let mut without = with.clone();
+        without.ft8.view.map.rays = false;
+        let a = text(&draw(Ft8MapPanel::new(), 112, 37, &with));
+        let b = text(&draw(Ft8MapPanel::new(), 112, 37, &without));
+        assert_ne!(a, b, "the rays changed nothing");
     }
 
     #[test]

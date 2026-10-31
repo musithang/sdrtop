@@ -65,6 +65,13 @@ latitude  = 47.497         # where you listen from, degrees north (-90 to 90)
 longitude = 19.040         # degrees east (-180 to 180)
 callsign  = "HA5ZZT"       # yours, if you have one
 
+[ft8]
+range = "3000"             # the map's reach: log, 1500, 3000 or 9000
+rays = false               # the map's switches, as its focus mode (m) left them
+names = "this cycle"       # all, this cycle or none
+window = "15 min"          # this cycle, 15 min, 1 h or session
+this_band = true
+
 [record]
 max_seconds = 60.0         # an IQ recording stops at whichever limit comes first
 max_gb      = 4.0          # see recording.md
@@ -104,6 +111,13 @@ position means no map, no call means nothing is marked yours. A latitude of 95
 or half a position (one coordinate without the other) is refused at start,
 said in the log, and treated as not there. The block is written only once
 something in it is set.
+
+**`[ft8]`** is how you left the FT8 map: its range (`z`) and the switches of
+its focus mode (`m`; see [keys](keys.md#ft8-map-focus-mode)), `grid`, `rings`
+and `sun` among them, all on unless set to `false`. Only what differs from the
+default is written, so a map you never touched leaves no block. A word sdrtop
+does not know (`window = "fortnight"`) is said in the log at start and left at
+its default; the rest of the block still counts.
 
 **`[radio.boost]`** remembers the front end boost (`a`) per radio, under the
 name the header shows, so a HackRF you left with its amp on does not hand

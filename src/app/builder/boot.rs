@@ -357,6 +357,7 @@ pub(super) fn initial_metrics(cfg: &AppConfig, boot: Boot) -> anyhow::Result<Sdr
 
     caps.validate_display()?;
     let (home, home_said) = crate::state::Home::from_settings(&cfg.station);
+    let (ft8_view, ft8_said) = crate::state::ft8::Ft8View::from_settings(&cfg.ft8);
 
     let mut m = SdrMetrics {
         radio: RadioState {
@@ -471,14 +472,17 @@ pub(super) fn initial_metrics(cfg: &AppConfig, boot: Boot) -> anyhow::Result<Sdr
             },
             ..Default::default()
         },
-        ft8: crate::state::Ft8State::default(),
+        ft8: crate::state::Ft8State {
+            view: ft8_view,
+            ..Default::default()
+        },
         home,
         record: crate::state::RecordState::default(),
         caps,
         device_options: Arc::new(Vec::new()),
         acc: Accumulators::default(),
     };
-    for line in home_said {
+    for line in home_said.into_iter().chain(ft8_said) {
         m.push_log(line);
     }
     Ok(m)

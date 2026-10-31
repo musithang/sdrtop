@@ -92,7 +92,7 @@ each view, and the footer shows the numbers for the group you are in.
 | `a` | Toggle the front end boost: RF amplifier (HackRF) / tuner AGC (RTL-SDR). Absent on a device that reports neither |
 | `w` | Pause or resume the waterfall |
 | `h` | Freeze the spectrum (hold the current frame behind the live one) |
-| a letter | Focus the panel whose title highlights it. `e` `l` `c` `i` `d` `t` `v` `x` `m` `n` `g` `b`, and under Bluetooth `k` `j` `z` `u` `e` `v` `b` `c`, all listed [below](#focus-modes) |
+| a letter | Focus the panel whose title highlights it. `e` `l` `c` `i` `d` `t` `v` `x` `m` `n` `g` `b`, under Bluetooth `k` `j` `z` `u` `e` `v` `b` `c`, and on FT8 `m` (the map), all listed [below](#focus-modes) |
 | `y` | On a standard station (WWV at 2.5, 5, 10, 15 or 20 MHz): measure our own oscillator's error and take it out of every offset in the app. See [what an offset is worth](net-trust.md#what-an-offset-is-worth) |
 | `1` to `9` | The nth view **of the group you are in** |
 | `p` | Next view in the same group, wrapping at the end |
@@ -145,6 +145,7 @@ doing what they do there:
 | `z` | The map's range: the whole world on a logarithmic scale, then 1 500, 3 000 and 9 000 km to the edge |
 | `u` | Only the messages that name your call, or every one again. Needs your call under Options, Station |
 | `c` | Forget what was heard: the decodes, the stations, the map |
+| `m` | Focus the map: what it draws, [below](#ft8-map-focus-mode) |
 
 `p` stays inside the group. It used to walk every preset in the app in
 alphabetical order, which meant leaving the benches for a compact view halfway
@@ -397,6 +398,30 @@ early reports nothing at all: an interrupted measurement has no answer.
 
 See [the RF bench](lab.md#the-noise-step-k) for what the reading says and,
 just as importantly, what it does not.
+
+---
+
+## FT8 map focus mode
+
+`m` on the FT8 view hands the map the keyboard. What it adds is about what
+the map draws; the view's own keys (`↑` `↓` `←` `→` `z` `u` `c`) keep working
+while it is focused, and `Esc` leaves. Your choices are kept in the config's
+`[ft8]` block, so the map looks the same tomorrow.
+
+Whatever a switch hides, the map's title says (`rays off`, `15 min`,
+`40 m only`), so a sparse map is never mistaken for a quiet band. And the
+station you chose with `↑` `↓` is always drawn and named, whatever the
+switches say: a choice you cannot see is not much of one.
+
+| Key | What it does |
+|-----|--------------|
+| `R` | The rays from you to this cycle's stations, on or off |
+| `G` | The locator grid and the field names (on the 1 500 and 3 000 km ranges), on or off |
+| `K` | The range rings and their distances, on or off |
+| `L` | The sun: day, night and the grey line on the land, on or off |
+| `N` | Names beside the dots: every station's, this cycle's only, or none |
+| `T` | How far back the map reaches: this cycle, 15 minutes, an hour (the default), or the whole session |
+| `B` | Only the stations last heard on the band you are on, or every band's. Useful after `←` `→`: the 20 m crowd otherwise stays on the map beside the 40 m one |
 
 ---
 

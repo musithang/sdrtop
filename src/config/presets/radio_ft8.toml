@@ -6,7 +6,7 @@ section = "ft8"
 slot    = 1
 title   = "World"
 blurb   = "FT8 on a map of the world around you"
-about   = "FT8, decoded by sdrtop's own decoder: every station where it said it was, on a map centred on you, the land lit by the sun; the band as a river, the decodes with their physics, and the clock as the stations heard judge it. Set your position under Options, Station; arrows choose a station and step the band, z the map's range, u only yours."
+about   = "FT8, decoded by sdrtop's own decoder: every station where it said it was, on a map centred on you, the land lit by the sun; the band as a river, the decodes with their physics, and the clock as the stations heard judge it. Set your position under Options, Station; arrows choose a station and step the band, z the map's range, u only yours, m what the map draws."
 
 panels = [
     { name = "header_slim",  position = "top", height = 4 },

@@ -26,8 +26,9 @@ pub const DECODES_MAX: usize = 500;
 /// Cycles kept, newest last: the river's rows and the cycle strip.
 pub const CYCLES_MAX: usize = 40;
 
-/// How long a station stays after it was last heard.
-pub const STATION_SECONDS: f64 = 3600.0;
+/// How long a station stays after it was last heard: the longest time
+/// window the map offers ([`Window::Session`]) reaches back this far.
+pub const STATION_SECONDS: f64 = 86_400.0;
 
 /// SNR readings kept per station, newest last.
 pub const SNR_HISTORY: usize = 20;
@@ -90,6 +91,8 @@ pub struct Station {
     pub locator: Option<String>,
     pub last_unix: f64,
     pub last_at: Instant,
+    /// The dial it was last heard on.
+    pub dial_hz: u64,
     pub heard: u32,
     /// (cycle start, SNR dB), newest last.
     pub snr: VecDeque<(f64, f64)>,
@@ -178,14 +181,203 @@ impl MapRange {
     }
 }
 
+impl MapRange {
+    /// The word `[ft8] range` is written as.
+    pub fn word(self) -> &'static str {
+        match self {
+            MapRange::Log => "log",
+            MapRange::Km1500 => "1500",
+            MapRange::Km3000 => "3000",
+            MapRange::Km9000 => "9000",
+        }
+    }
+
+    fn from_word(w: &str) -> Option<Self> {
+        [
+            MapRange::Log,
+            MapRange::Km1500,
+            MapRange::Km3000,
+            MapRange::Km9000,
+        ]
+        .into_iter()
+        .find(|r| r.word() == w)
+    }
+}
+
+/// Whose calls the map writes beside their dots. The chosen station is named
+/// whatever this says: a choice nobody can see is not one.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum Names {
+    #[default]
+    All,
+    ThisCycle,
+    None,
+}
+
+impl Names {
+    pub fn next(self) -> Self {
+        match self {
+            Names::All => Names::ThisCycle,
+            Names::ThisCycle => Names::None,
+            Names::None => Names::All,
+        }
+    }
+
+    pub fn word(self) -> &'static str {
+        match self {
+            Names::All => "all",
+            Names::ThisCycle => "this cycle",
+            Names::None => "none",
+        }
+    }
+
+    fn from_word(w: &str) -> Option<Self> {
+        [Names::All, Names::ThisCycle, Names::None]
+            .into_iter()
+            .find(|n| n.word() == w)
+    }
+}
+
+/// How far back the map reaches: a station heard longer ago than this,
+/// counted from the newest decoded cycle, is not drawn.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum Window {
+    Cycle,
+    Min15,
+    #[default]
+    Hour,
+    Session,
+}
+
+impl Window {
+    pub fn next(self) -> Self {
+        match self {
+            Window::Cycle => Window::Min15,
+            Window::Min15 => Window::Hour,
+            Window::Hour => Window::Session,
+            Window::Session => Window::Cycle,
+        }
+    }
+
+    /// The reach, seconds before the newest cycle's start.
+    pub fn seconds(self) -> f64 {
+        match self {
+            Window::Cycle => 0.0,
+            Window::Min15 => 900.0,
+            Window::Hour => 3600.0,
+            Window::Session => STATION_SECONDS,
+        }
+    }
+
+    pub fn word(self) -> &'static str {
+        match self {
+            Window::Cycle => "this cycle",
+            Window::Min15 => "15 min",
+            Window::Hour => "1 h",
+            Window::Session => "session",
+        }
+    }
+
+    fn from_word(w: &str) -> Option<Self> {
+        [Window::Cycle, Window::Min15, Window::Hour, Window::Session]
+            .into_iter()
+            .find(|x| x.word() == w)
+    }
+}
+
+/// What the map draws, switched in its focus mode and kept in `[ft8]`.
+#[derive(Clone, Debug, PartialEq)]
+pub struct MapLayers {
+    pub rays: bool,
+    pub grid: bool,
+    pub rings: bool,
+    pub sun: bool,
+    pub names: Names,
+    pub window: Window,
+    /// Only the stations last heard on the dial being listened to.
+    pub this_band: bool,
+}
+
+impl Default for MapLayers {
+    fn default() -> Self {
+        Self {
+            rays: true,
+            grid: true,
+            rings: true,
+            sun: true,
+            names: Names::All,
+            window: Window::Hour,
+            this_band: false,
+        }
+    }
+}
+
 /// What the FT8 view shows, set by its keys; the worker never touches it.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct Ft8View {
     pub range: MapRange,
+    pub map: MapLayers,
     /// Only the decodes that name your call.
     pub only_yours: bool,
     /// The selected station, by call.
     pub selected: Option<String>,
+}
+
+impl Ft8View {
+    /// The view as `[ft8]` left it, and a line for each value that was not
+    /// one this version knows (left at its default, never guessed).
+    pub fn from_settings(s: &crate::config::Ft8Settings) -> (Self, Vec<String>) {
+        let mut said = Vec::new();
+        let mut read =
+            |field: &str, v: &Option<String>, known: &dyn Fn(&str) -> bool| match v.as_deref() {
+                Some(w) if !known(w) => {
+                    said.push(format!(
+                        "[ft8] {field} {w:?} is not one this version knows: the default"
+                    ));
+                    None
+                }
+                other => other.map(str::to_string),
+            };
+        let range = read("range", &s.range, &|w| MapRange::from_word(w).is_some())
+            .and_then(|w| MapRange::from_word(&w));
+        let names = read("names", &s.names, &|w| Names::from_word(w).is_some())
+            .and_then(|w| Names::from_word(&w));
+        let window = read("window", &s.window, &|w| Window::from_word(w).is_some())
+            .and_then(|w| Window::from_word(&w));
+        let d = MapLayers::default();
+        let view = Ft8View {
+            range: range.unwrap_or_default(),
+            map: MapLayers {
+                rays: s.rays.unwrap_or(d.rays),
+                grid: s.grid.unwrap_or(d.grid),
+                rings: s.rings.unwrap_or(d.rings),
+                sun: s.sun.unwrap_or(d.sun),
+                names: names.unwrap_or_default(),
+                window: window.unwrap_or_default(),
+                this_band: s.this_band.unwrap_or(d.this_band),
+            },
+            only_yours: false,
+            selected: None,
+        };
+        (view, said)
+    }
+
+    /// What `[ft8]` keeps: only what differs from the default is written.
+    pub fn settings(&self) -> crate::config::Ft8Settings {
+        let d = MapLayers::default();
+        let m = &self.map;
+        let differs = |a: bool, b: bool| (a != b).then_some(a);
+        crate::config::Ft8Settings {
+            range: (self.range != MapRange::default()).then(|| self.range.word().to_string()),
+            rays: differs(m.rays, d.rays),
+            grid: differs(m.grid, d.grid),
+            rings: differs(m.rings, d.rings),
+            sun: differs(m.sun, d.sun),
+            names: (m.names != d.names).then(|| m.names.word().to_string()),
+            window: (m.window != d.window).then(|| m.window.word().to_string()),
+            this_band: differs(m.this_band, d.this_band),
+        }
+    }
 }
 
 #[derive(Clone, Debug, Default)]
@@ -232,6 +424,7 @@ impl Ft8State {
                         locator: None,
                         last_unix: cycle.start_unix,
                         last_at: at,
+                        dial_hz: cycle.dial_hz,
                         heard: 0,
                         snr: VecDeque::new(),
                         called_you: false,
@@ -242,6 +435,7 @@ impl Ft8State {
                 }
                 s.last_unix = cycle.start_unix;
                 s.last_at = at;
+                s.dial_hz = cycle.dial_hz;
                 s.heard += 1;
                 s.snr.push_back((cycle.start_unix, d.physics.snr_db));
                 if s.snr.len() > SNR_HISTORY {
@@ -278,6 +472,22 @@ impl Ft8State {
         while self.cycles.len() > CYCLES_MAX {
             self.cycles.pop_front();
         }
+    }
+
+    /// The dial being listened to, as the newest cycle was taken at.
+    pub fn dial(&self) -> Option<u64> {
+        self.cycles.back().map(|c| c.dial_hz)
+    }
+
+    /// Whether the map's window and band switch let `s` be drawn, counted
+    /// from `newest`, the newest decoded cycle's start.
+    pub fn on_map(&self, s: &Station, newest: Option<f64>) -> bool {
+        let Some(newest) = newest else {
+            return false;
+        };
+        let m = &self.view.map;
+        newest - s.last_unix <= m.window.seconds()
+            && (!m.this_band || self.dial() == Some(s.dial_hz))
     }
 
     /// The selected station's newest decode.
@@ -478,7 +688,9 @@ mod tests {
     }
 
     #[test]
-    fn stations_leave_after_an_hour_unheard() {
+    fn stations_leave_after_a_day_unheard() {
+        // A day, not the hour the map shows by default: the map's session
+        // window reaches back as far as the table does.
         let mut s = Ft8State::default();
         let now = Instant::now();
         s.push_cycle(
@@ -488,9 +700,9 @@ mod tests {
             now,
             None,
         );
-        s.push_cycle(cycle(3600.0), vec![], None, now, None);
+        s.push_cycle(cycle(STATION_SECONDS), vec![], None, now, None);
         assert!(s.stations.contains_key("OK1HZD"));
-        s.push_cycle(cycle(3615.0), vec![], None, now, None);
+        s.push_cycle(cycle(STATION_SECONDS + 15.0), vec![], None, now, None);
         assert!(!s.stations.contains_key("OK1HZD"));
     }
 
@@ -550,6 +762,70 @@ mod tests {
             s.select_step(false);
             assert_eq!(s.view.selected.as_deref(), Some(want));
         }
+    }
+
+    #[test]
+    fn the_map_switches_survive_a_quit_and_only_what_differs_is_written() {
+        let mut v = Ft8View::default();
+        assert!(v.settings().is_default(), "a default view writes no [ft8]");
+        v.range = MapRange::Km3000;
+        v.map.rays = false;
+        v.map.names = Names::None;
+        v.map.window = Window::Min15;
+        v.map.this_band = true;
+        let s = v.settings();
+        assert_eq!(s.grid, None, "an unchanged switch is not written");
+        let (back, said) = Ft8View::from_settings(&s);
+        assert!(said.is_empty(), "{said:?}");
+        assert_eq!(back.range, v.range);
+        assert_eq!(back.map, v.map);
+    }
+
+    #[test]
+    fn a_word_this_version_does_not_know_is_said_and_left_at_the_default() {
+        let s = crate::config::Ft8Settings {
+            window: Some("fortnight".into()),
+            rays: Some(false),
+            ..Default::default()
+        };
+        let (v, said) = Ft8View::from_settings(&s);
+        assert_eq!(v.map.window, Window::default());
+        assert!(!v.map.rays);
+        assert_eq!(said.len(), 1);
+        assert!(said[0].contains("window") && said[0].contains("fortnight"));
+    }
+
+    #[test]
+    fn the_window_and_the_band_decide_who_is_on_the_map() {
+        let mut s = Ft8State::default();
+        let now = Instant::now();
+        s.push_cycle(
+            cycle(0.0),
+            vec![decode("OLD1", None, -5.0)],
+            None,
+            now,
+            None,
+        );
+        let mut on40 = cycle(1200.0);
+        on40.dial_hz = 7_074_000;
+        s.push_cycle(on40, vec![decode("NEW1", None, -5.0)], None, now, None);
+        let newest = Some(1200.0);
+        let st = |s: &Ft8State, c: &str| s.stations[c].clone();
+        // An hour reaches back 20 minutes; 15 minutes does not.
+        assert!(s.on_map(&st(&s, "OLD1"), newest));
+        s.view.map.window = Window::Min15;
+        assert!(!s.on_map(&st(&s, "OLD1"), newest));
+        assert!(s.on_map(&st(&s, "NEW1"), newest));
+        // This band only: OLD1 was heard on 20 m, the dial is now 40 m.
+        s.view.map.window = Window::Session;
+        s.view.map.this_band = true;
+        assert!(!s.on_map(&st(&s, "OLD1"), newest));
+        assert!(s.on_map(&st(&s, "NEW1"), newest));
+        // This cycle: only the newest cycle's.
+        s.view.map.this_band = false;
+        s.view.map.window = Window::Cycle;
+        assert!(!s.on_map(&st(&s, "OLD1"), newest));
+        assert!(s.on_map(&st(&s, "NEW1"), newest));
     }
 
     #[test]

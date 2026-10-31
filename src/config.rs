@@ -280,6 +280,38 @@ impl StationSettings {
     }
 }
 
+/// `[ft8]`: what the FT8 map draws, as its focus mode left it. Every field
+/// optional and written only when it differs from the default; a word this
+/// version does not know is said in the log and left at the default.
+#[derive(Deserialize, Serialize, Clone, Debug, Default, PartialEq)]
+pub struct Ft8Settings {
+    /// `log`, `1500`, `3000` or `9000`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub range: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub rays: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub grid: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub rings: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub sun: Option<bool>,
+    /// `all`, `this cycle` or `none`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub names: Option<String>,
+    /// `this cycle`, `15 min`, `1 h` or `session`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub window: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub this_band: Option<bool>,
+}
+
+impl Ft8Settings {
+    pub fn is_default(&self) -> bool {
+        *self == Self::default()
+    }
+}
+
 /// `[record]`: how long an IQ recording may run, whichever limit comes first.
 ///
 /// No in-app control changes these, so `App` holds the loaded block and
@@ -445,6 +477,9 @@ pub struct AppConfig {
     /// Written only once something is set.
     #[serde(default, skip_serializing_if = "StationSettings::is_default")]
     pub station: StationSettings,
+    /// Written only once the FT8 map differs from its default.
+    #[serde(default, skip_serializing_if = "Ft8Settings::is_default")]
+    pub ft8: Ft8Settings,
     #[serde(default)]
     pub tinysa: TinySaSettings,
     /// Written only once it differs from the default, so a file from a radio

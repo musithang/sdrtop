@@ -80,6 +80,8 @@ pub(in crate::app::input) const NO_POSITION: &[&str] = &[
     // Its keys tune, cycle the lead card and recall; the gain stage it once
     // picked is a mode every section has now, not a Rail position.
     "command_rail",
+    // Its keys are switches of what the map draws, kept in `[ft8]`.
+    "ft8_map",
 ];
 
 /// What "as it was before the first key" means, panel by panel: every

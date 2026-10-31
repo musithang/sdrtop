@@ -13,7 +13,7 @@
 
 use crossterm::event::{KeyCode, KeyEvent};
 
-use super::{metrics, InputCtx};
+use super::{global, metrics, InputCtx, KeyAction};
 use crate::signal::ft8::bands;
 
 /// Handle `key` if the FT8 view is on screen and it is one of its own.
@@ -87,6 +87,58 @@ pub(super) fn handle(key: KeyEvent, ctx: &mut InputCtx<'_>) -> bool {
     true
 }
 
+/// The map's focus mode: what it draws. Each switch says in the log what it
+/// now is, and the map's title says whatever one hides. Anything else goes
+/// on as it would without focus: the view's own `z` `u` `c` and arrows, and
+/// the global keys.
+pub(super) fn ft8_map(key: KeyEvent, ctx: &mut InputCtx<'_>) -> KeyAction {
+    let mut m = metrics(ctx.state);
+    let onoff = |on: bool| if on { "on" } else { "off" };
+    let line = {
+        let map = &mut m.ft8.view.map;
+        match key.code {
+            KeyCode::Char('r') => {
+                map.rays = !map.rays;
+                format!("FT8 map: rays {}", onoff(map.rays))
+            }
+            KeyCode::Char('g') => {
+                map.grid = !map.grid;
+                format!("FT8 map: locator grid {}", onoff(map.grid))
+            }
+            KeyCode::Char('k') => {
+                map.rings = !map.rings;
+                format!("FT8 map: range rings {}", onoff(map.rings))
+            }
+            KeyCode::Char('l') => {
+                map.sun = !map.sun;
+                format!("FT8 map: day, night and grey line {}", onoff(map.sun))
+            }
+            KeyCode::Char('n') => {
+                map.names = map.names.next();
+                format!("FT8 map: names {}", map.names.word())
+            }
+            KeyCode::Char('t') => {
+                map.window = map.window.next();
+                format!("FT8 map: stations heard in {}", map.window.word())
+            }
+            KeyCode::Char('b') => {
+                map.this_band = !map.this_band;
+                if map.this_band {
+                    "FT8 map: only stations on this band".to_string()
+                } else {
+                    "FT8 map: stations on every band".to_string()
+                }
+            }
+            _ => {
+                drop(m);
+                return global::handle(key, ctx);
+            }
+        }
+    };
+    m.push_log(line);
+    KeyAction::Continue
+}
+
 #[cfg(test)]
 mod tests {
     use super::super::handle_key;
@@ -142,6 +194,42 @@ mod tests {
             s.lock().unwrap().radio.gains,
             SdrMetrics::fixture().radio.gains
         );
+    }
+
+    #[test]
+    fn m_focuses_the_map_and_its_keys_switch_what_it_draws() {
+        use crate::state::ft8::{Names, Window};
+        let (mut engine, keys) =
+            crate::app::App::build_ui("radio_ft8", &HashMap::new(), None, true);
+        let s = on_view();
+        let mut press_on = |code: KeyCode| {
+            let mut footer = true;
+            handle_key(
+                KeyEvent::from(code),
+                &s,
+                None,
+                &mut engine,
+                &mut footer,
+                &keys,
+            );
+        };
+        press_on(KeyCode::Char('m'));
+        for k in ['r', 'g', 'k', 'l', 'n', 't', 'b', 'z'] {
+            press_on(KeyCode::Char(k));
+        }
+        let m = s.lock().unwrap();
+        assert_eq!(m.ui.focused_panel.as_deref(), Some("ft8_map"));
+        let map = &m.ft8.view.map;
+        assert!(!map.rays && !map.grid && !map.rings && !map.sun && map.this_band);
+        assert_eq!(map.names, Names::ThisCycle);
+        assert_eq!(map.window, Window::Session);
+        // The view's own keys still work in focus.
+        assert_eq!(m.ft8.view.range, MapRange::Km1500);
+        assert!(m
+            .ui
+            .log
+            .iter()
+            .any(|l| l.text.contains("FT8 map: rays off")));
     }
 
     #[test]
