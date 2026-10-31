@@ -16,8 +16,10 @@ use ratatui::{
 };
 
 use super::{hhmmss, km, parity, path, put, signed};
+use crate::state::ft8::DecodeEntry;
 use crate::state::SdrMetrics;
 use crate::ui::panel::{Panel, PanelChrome, Staleness, Tag};
+use std::sync::Arc;
 
 pub struct Ft8DecodesPanel;
 
@@ -74,64 +76,92 @@ impl Panel for Ft8DecodesPanel {
                 label,
             );
         }
-        if state.ft8.decodes.is_empty() {
+        let listed = state.ft8.listed();
+        if listed.is_empty() {
+            let said = if state.ft8.decodes.is_empty() {
+                "Nothing decoded yet."
+            } else {
+                "Nothing for you yet: u shows every decode."
+            };
             put(
                 buf,
                 area,
                 area.x + 1,
                 area.y + 2,
-                "Nothing decoded yet.",
+                said,
                 Style::default().fg(theme.border_dim),
             );
             return;
         }
         let my_call = state.home.callsign.as_deref();
         let selected = state.ft8.view.selected.as_deref();
+        let newest = state.ft8.decodes.back().map(|d| d.cycle_unix);
+
+        // The list as lines: a rule for each cycle, then its rows. Whatever
+        // filter is on is the list's own (`listed`), so the keys that step
+        // through it and the rows drawn are one list.
+        enum Line<'a> {
+            Rule(f64, usize, u64),
+            Row(&'a Arc<DecodeEntry>),
+        }
+        let mut lines: Vec<Line> = Vec::new();
+        for d in &listed {
+            if !matches!(lines.iter().rev().find_map(|l| match l {
+                Line::Rule(c, ..) => Some(*c),
+                Line::Row(_) => None,
+            }), Some(c) if c == d.cycle_unix)
+            {
+                let n = listed
+                    .iter()
+                    .filter(|e| e.cycle_unix == d.cycle_unix)
+                    .count();
+                lines.push(Line::Rule(d.cycle_unix, n, d.dial_hz));
+            }
+            lines.push(Line::Row(d));
+        }
+        // Scrolled only as far as the selected station's first row needs to
+        // be seen: a station chosen with the arrows below the panel's foot
+        // was highlighted where nobody could see it.
+        let room = area.height.saturating_sub(1) as usize;
+        let first_sel = lines.iter().position(|l| {
+            matches!(l, Line::Row(d) if selected.is_some() && d.decode.message.sender() == selected)
+        });
+        let skip = first_sel.map_or(0, |i| (i + 1).saturating_sub(room));
+
         let mut y = area.y + 1;
-        let mut cycles: Vec<f64> = state.ft8.decodes.iter().map(|d| d.cycle_unix).collect();
-        cycles.dedup();
-        for (ci, start) in cycles.iter().rev().enumerate() {
+        for line in lines.iter().skip(skip) {
             if y >= area.bottom() {
                 break;
             }
-            let mut rows: Vec<_> = state
-                .ft8
-                .decodes
-                .iter()
-                .filter(|d| d.cycle_unix == *start)
-                .collect();
-            rows.sort_by(|a, b| a.decode.physics.f0.total_cmp(&b.decode.physics.f0));
-            let rule: String = "\u{2500}".repeat(w as usize);
-            put(
-                buf,
-                area,
-                area.x,
-                y,
-                &rule,
-                Style::default().fg(theme.stale),
-            );
-            let band = rows
-                .first()
-                .and_then(|d| crate::signal::ft8::bands::band_of(d.dial_hz))
-                .map_or(String::new(), |b| format!(" \u{b7} {b}"));
-            put(
-                buf,
-                area,
-                area.x + 1,
-                y,
-                &format!(
-                    " {} {} \u{b7} {}{band} ",
-                    hhmmss(*start),
-                    parity(*start),
-                    rows.len()
-                ),
-                Style::default().fg(if ci == 0 { theme.value } else { theme.label }),
-            );
-            y += 1;
-            for d in rows {
-                if y >= area.bottom() {
-                    break;
+            let d = match line {
+                Line::Rule(start, n, dial) => {
+                    let rule: String = "\u{2500}".repeat(w as usize);
+                    put(
+                        buf,
+                        area,
+                        area.x,
+                        y,
+                        &rule,
+                        Style::default().fg(theme.stale),
+                    );
+                    let band = crate::signal::ft8::bands::band_of(*dial)
+                        .map_or(String::new(), |b| format!(" \u{b7} {b}"));
+                    let now = Some(*start) == newest;
+                    put(
+                        buf,
+                        area,
+                        area.x + 1,
+                        y,
+                        &format!(" {} {} \u{b7} {n}{band} ", hhmmss(*start), parity(*start)),
+                        Style::default().fg(if now { theme.value } else { theme.label }),
+                    );
+                    y += 1;
+                    continue;
                 }
+                Line::Row(d) => d,
+            };
+            let ci = usize::from(Some(d.cycle_unix) != newest);
+            {
                 let from = d.decode.message.sender();
                 let is_sel = from.is_some() && from == selected;
                 let bg = if is_sel { Some(theme.stale) } else { None };
@@ -290,6 +320,45 @@ mod tests {
         assert!(t.contains("no locator"), "{t}");
         // Tokyo from Budapest, north-east, about 9 000 km.
         assert!(t.contains(" NE"), "{t}");
+    }
+
+    #[test]
+    fn only_yours_shows_only_yours() {
+        // Live: the title said filtered and every decode was still listed.
+        let mut m = evening();
+        m.ft8.view.only_yours = true;
+        let t = draw(Ft8DecodesPanel, 79, 16, &m).join("\n");
+        assert!(t.contains("HA5ZZT JA1VQD PM95"), "{t}");
+        for other in ["EA8ZQ", "DL7ANR", "YO3GCI"] {
+            assert!(!t.contains(other), "{other} shown:\n{t}");
+        }
+        m.home.callsign = Some("HA9XYZ".into());
+        for d in m.ft8.decodes.iter_mut() {
+            Arc::make_mut(d).for_you = false;
+        }
+        let t = draw(Ft8DecodesPanel, 79, 16, &m).join("\n");
+        assert!(t.contains("Nothing for you yet"), "{t}");
+    }
+
+    #[test]
+    fn the_selected_station_is_scrolled_into_sight() {
+        // The oldest row's station, in a panel too short to reach it.
+        let mut m = evening();
+        let last = m
+            .ft8
+            .listed()
+            .last()
+            .unwrap()
+            .decode
+            .message
+            .sender()
+            .unwrap()
+            .to_string();
+        let t = draw(Ft8DecodesPanel, 79, 8, &m).join("\n");
+        assert!(!t.contains(&last), "{last} fits anyway:\n{t}");
+        m.ft8.view.selected = Some(last.clone());
+        let t = draw(Ft8DecodesPanel, 79, 8, &m).join("\n");
+        assert!(t.contains(&last), "{last} not in sight:\n{t}");
     }
 
     #[test]

@@ -316,14 +316,21 @@ impl Ft8State {
         out
     }
 
-    /// Move the selection to the station of the row before or after the
-    /// selected one in the list; with none selected, the first row's.
+    /// Move the selection to the station before or after the selected one,
+    /// in the order the list first shows each; with none selected, the first
+    /// row's. A station heard in several cycles is one step, not one per
+    /// row: stepping by rows found the selected call's first row and went
+    /// back and forth between it and the next one forever.
     pub fn select_step(&mut self, down: bool) {
         let rows = self.listed();
-        let calls: Vec<String> = rows
-            .iter()
-            .filter_map(|d| d.decode.message.sender().map(str::to_string))
-            .collect();
+        let mut calls: Vec<String> = Vec::new();
+        for d in &rows {
+            if let Some(c) = d.decode.message.sender() {
+                if !calls.iter().any(|k| k == c) {
+                    calls.push(c.to_string());
+                }
+            }
+        }
         if calls.is_empty() {
             return;
         }
@@ -518,6 +525,31 @@ mod tests {
         s.push_cycle(cycle(15.0), vec![], None, now, None);
         let starts: Vec<f64> = s.cycles.iter().map(|c| c.start_unix).collect();
         assert_eq!(starts, vec![0.0, 15.0, 30.0]);
+    }
+
+    #[test]
+    fn stepping_walks_every_station_once_even_one_heard_twice() {
+        // The live list: DK3JW in the newest cycle and again further down.
+        let mut s = Ft8State::default();
+        let now = Instant::now();
+        let ds = |calls: &[&str]| calls.iter().map(|c| decode(c, None, -10.0)).collect();
+        s.push_cycle(cycle(0.0), ds(&["HB9ELE", "DK3JW"]), None, now, None);
+        s.push_cycle(cycle(15.0), ds(&["M0BEW"]), None, now, None);
+        s.push_cycle(cycle(30.0), ds(&["DK3JW"]), None, now, None);
+        s.push_cycle(cycle(45.0), ds(&["F4HBV", "RZ5D"]), None, now, None);
+        let mut seen = Vec::new();
+        for _ in 0..8 {
+            s.select_step(true);
+            seen.push(s.view.selected.clone().unwrap());
+        }
+        assert_eq!(
+            seen,
+            ["F4HBV", "RZ5D", "DK3JW", "M0BEW", "HB9ELE", "HB9ELE", "HB9ELE", "HB9ELE"]
+        );
+        for want in ["M0BEW", "DK3JW", "RZ5D", "F4HBV", "F4HBV"] {
+            s.select_step(false);
+            assert_eq!(s.view.selected.as_deref(), Some(want));
+        }
     }
 
     #[test]
