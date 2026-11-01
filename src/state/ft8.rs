@@ -204,6 +204,27 @@ impl MapRange {
     }
 }
 
+/// An arrow on the map: north is up.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum MapDir {
+    Up,
+    Down,
+    Left,
+    Right,
+}
+
+impl MapDir {
+    /// The unit step on the map, x east and y north.
+    fn axis(self) -> (f64, f64) {
+        match self {
+            MapDir::Up => (0.0, 1.0),
+            MapDir::Down => (0.0, -1.0),
+            MapDir::Left => (-1.0, 0.0),
+            MapDir::Right => (1.0, 0.0),
+        }
+    }
+}
+
 /// Whose calls the map writes beside their dots. The chosen station is named
 /// whatever this says: a choice nobody can see is not one.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -317,6 +338,9 @@ impl Default for MapLayers {
 pub struct Ft8View {
     pub range: MapRange,
     pub map: MapLayers,
+    /// The map zoomed on the chosen station: centred between you and it, on
+    /// a linear range just wide enough for both. Follows the choice.
+    pub zoomed: bool,
     /// Only the decodes that name your call.
     pub only_yours: bool,
     /// The selected station, by call.
@@ -356,6 +380,7 @@ impl Ft8View {
                 window: window.unwrap_or_default(),
                 this_band: s.this_band.unwrap_or(d.this_band),
             },
+            zoomed: false,
             only_yours: false,
             selected: None,
         };
@@ -488,6 +513,67 @@ impl Ft8State {
         let m = &self.view.map;
         newest - s.last_unix <= m.window.seconds()
             && (!m.this_band || self.dial() == Some(s.dial_hz))
+    }
+
+    /// Where the map puts `s`, in the projection's own units about you (x
+    /// east, y north), as the map is drawn at `scale`; `None` without a
+    /// locator.
+    fn map_point(s: &Station, proj: &crate::geo::projection::Azimuthal) -> Option<(f64, f64)> {
+        let place = crate::geo::maidenhead::centre(s.locator.as_deref()?)?;
+        Some(proj.forward(place))
+    }
+
+    /// Move the choice to the nearest station drawn the way of `dir` on the
+    /// map, from the chosen one (or from you): within 60 degrees of the
+    /// arrow, the nearest, the ones off the arrow's line counted farther.
+    /// Returns whether it moved. A station at the very place of the chosen
+    /// one cannot be told apart by direction; the list's arrows reach it.
+    pub fn step_on_map(&mut self, home: (f64, f64), dir: MapDir) -> bool {
+        use crate::geo::projection::{Azimuthal, Scale};
+        // Zoomed, the map is linear whatever the range says, and a linear
+        // map's directions do not depend on its range.
+        let scale = if self.view.zoomed {
+            Scale::Linear { range_km: 1000.0 }
+        } else {
+            self.view.range.scale()
+        };
+        let proj = Azimuthal::new(home, scale);
+        let newest = self
+            .cycles
+            .iter()
+            .rev()
+            .find(|c| c.outcome == CycleOutcome::Decoded)
+            .map(|c| c.start_unix);
+        let selected = self.view.selected.clone();
+        let from = selected
+            .as_ref()
+            .and_then(|c| self.stations.get(c))
+            .and_then(|s| Self::map_point(s, &proj))
+            .unwrap_or((0.0, 0.0));
+        let (ax, ay) = dir.axis();
+        let best = self
+            .stations
+            .values()
+            .filter(|s| Some(&s.call) != selected.as_ref() && self.on_map(s, newest))
+            .filter_map(|s| {
+                let (x, y) = Self::map_point(s, &proj)?;
+                let (dx, dy) = (x - from.0, y - from.1);
+                let d = dx.hypot(dy);
+                if d < 1e-9 {
+                    return None;
+                }
+                let cos = (dx * ax + dy * ay) / d;
+                // Within 60 degrees of the arrow.
+                (cos >= 0.5).then(|| (d * (1.0 + 2.0 * (1.0 - cos)), s.call.clone()))
+            })
+            .min_by(|a, b| a.0.total_cmp(&b.0));
+        match best {
+            Some((_, call)) => {
+                self.view.selected = Some(call);
+                true
+            }
+            None => false,
+        }
     }
 
     /// The selected station's newest decode.
@@ -826,6 +912,72 @@ mod tests {
         s.view.map.window = Window::Cycle;
         assert!(!s.on_map(&st(&s, "OLD1"), newest));
         assert!(s.on_map(&st(&s, "NEW1"), newest));
+    }
+
+    /// Budapest, and a station due north, east, west and south of it, and
+    /// one farther east.
+    fn compass() -> Ft8State {
+        let mut s = Ft8State::default();
+        let ds = [
+            ("NORTH", "JO99"),
+            ("EAST", "KN47"),
+            ("FAREAST", "LN47"),
+            ("WEST", "JN47"),
+            ("SOUTH", "JM99"),
+        ]
+        .iter()
+        .map(|(c, g)| decode(c, Some(g), -10.0))
+        .collect();
+        s.push_cycle(cycle(0.0), ds, None, Instant::now(), None);
+        s
+    }
+
+    const BUDAPEST: (f64, f64) = (47.5, 19.0);
+
+    #[test]
+    fn arrows_on_the_map_go_the_way_they_point() {
+        for (dir, want) in [
+            (MapDir::Up, "NORTH"),
+            (MapDir::Right, "EAST"),
+            (MapDir::Left, "WEST"),
+            (MapDir::Down, "SOUTH"),
+        ] {
+            let mut s = compass();
+            assert!(s.step_on_map(BUDAPEST, dir), "{dir:?}");
+            assert_eq!(s.view.selected.as_deref(), Some(want), "{dir:?}");
+        }
+        // From the chosen one, not from you: on east, then farther east,
+        // then back.
+        let mut s = compass();
+        s.step_on_map(BUDAPEST, MapDir::Right);
+        s.step_on_map(BUDAPEST, MapDir::Right);
+        assert_eq!(s.view.selected.as_deref(), Some("FAREAST"));
+        s.step_on_map(BUDAPEST, MapDir::Left);
+        assert_eq!(s.view.selected.as_deref(), Some("EAST"));
+        // Nothing beyond the northernmost: nothing moves.
+        let mut s = compass();
+        s.step_on_map(BUDAPEST, MapDir::Up);
+        assert!(!s.step_on_map(BUDAPEST, MapDir::Up));
+        assert_eq!(s.view.selected.as_deref(), Some("NORTH"));
+    }
+
+    #[test]
+    fn arrows_on_the_map_skip_what_the_map_does_not_draw() {
+        let mut s = compass();
+        s.view.map.this_band = true;
+        let mut far = cycle(15.0);
+        far.dial_hz = 7_074_000;
+        s.push_cycle(
+            far,
+            vec![decode("ON40", Some("JN98"), -10.0)],
+            None,
+            Instant::now(),
+            None,
+        );
+        // EAST and the rest were heard on 20 m: only the 40 m one is drawn.
+        assert!(s.step_on_map(BUDAPEST, MapDir::Up));
+        assert_eq!(s.view.selected.as_deref(), Some("ON40"));
+        assert!(!s.step_on_map(BUDAPEST, MapDir::Right));
     }
 
     #[test]

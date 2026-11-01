@@ -403,18 +403,23 @@ just as importantly, what it does not.
 
 ## FT8 map focus mode
 
-`m` on the FT8 view hands the map the keyboard. What it adds is about what
-the map draws; the view's own keys (`↑` `↓` `←` `→` `z` `u` `c`) keep working
-while it is focused, and `Esc` leaves. Your choices are kept in the config's
+`m` on the FT8 view hands the map the keyboard. The arrows then move over
+the map instead of down the list and across the bands, and the rest is about
+what the map draws; the view's `z` `u` `c` keep working while it is focused,
+and `Esc` leaves (and ends a zoom). The switches are kept in the config's
 `[ft8]` block, so the map looks the same tomorrow.
 
 Whatever a switch hides, the map's title says (`rays off`, `15 min`,
 `40 m only`), so a sparse map is never mistaken for a quiet band. And the
-station you chose with `↑` `↓` is always drawn and named, whatever the
-switches say: a choice you cannot see is not much of one.
+station you chose is always drawn and named, whatever the switches say: a
+choice you cannot see is not much of one. Off the edge of the map, it is an
+arrow at the edge pointing its way, with its call and how far
+(`→ VK3FTX 15 543 km`).
 
 | Key | What it does |
 |-----|--------------|
+| `↑↓←→` | Choose the nearest station that way on the map, from the chosen one (or from you). Nothing that way, nothing moves, and the log says so. A station on the very spot of the chosen one is reached with the list's arrows, out of focus |
+| `Enter` | Zoom on the chosen station: the map centred between you and it, just wide enough for both, the title saying on whom. Again, or `Esc`, or `z`, and you are home |
 | `R` | The rays from you to this cycle's stations, on or off |
 | `G` | The locator grid and the field names (on the 1 500 and 3 000 km ranges), on or off |
 | `K` | The range rings and their distances, on or off |

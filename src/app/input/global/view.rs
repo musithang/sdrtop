@@ -80,8 +80,6 @@ pub(in crate::app::input) const NO_POSITION: &[&str] = &[
     // Its keys tune, cycle the lead card and recall; the gain stage it once
     // picked is a mode every section has now, not a Rail position.
     "command_rail",
-    // Its keys are switches of what the map draws, kept in `[ft8]`.
-    "ft8_map",
 ];
 
 /// What "as it was before the first key" means, panel by panel: every
@@ -121,6 +119,8 @@ pub(in crate::app::input) fn reset_positions(panel: &str, m: &mut crate::state::
         // The selection is a place in the capture; Single, the river's zoom,
         // the card's face and the frame opened in the list's place are modes.
         "net_wifi_frames" => m.net.wifi.frames_view.selected = None,
+        // The switches are modes, kept in `[ft8]`; a zoom is a place.
+        "ft8_map" => m.ft8.view.zoomed = false,
         // The zoom is a mode; where in time the window ends is a position.
         "net_bt_hops" => {
             m.net.bt_view = Default::default();

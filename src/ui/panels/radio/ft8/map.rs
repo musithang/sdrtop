@@ -43,7 +43,7 @@ use crate::geo::projection::{Azimuthal, Scale};
 use crate::geo::sun::{self, Light};
 use crate::geo::{land, sphere};
 use crate::state::ft8::{Names, Window};
-use crate::state::{MapRange, SdrMetrics};
+use crate::state::SdrMetrics;
 use crate::ui::panel::{Panel, PanelChrome, Staleness};
 use crate::ui::widgets::charts::lerp_color;
 use crate::ui::widgets::dots::Dots;
@@ -67,7 +67,7 @@ const P_RAY: u8 = 5;
 
 /// What each dot of the canvas is, for one size, range and position.
 struct Land {
-    key: (u16, u16, MapRange, i64, i64),
+    key: LandKey,
     /// Per dot: off the world (beyond the antipode), or its place and
     /// whether it is land, coast or the land's inside.
     places: Vec<Option<(f32, f32)>>,
@@ -89,16 +89,57 @@ impl Ft8MapPanel {
 }
 
 /// The map's geometry on a canvas `w` by `h` dots.
+/// The chosen station's place, while the map is zoomed on it and it has a
+/// locator; a zoom on a station that never said where it is zooms on
+/// nothing.
+fn zoomed_place(state: &SdrMetrics) -> Option<(f64, f64)> {
+    let v = &state.ft8.view;
+    if !v.zoomed {
+        return None;
+    }
+    let s = state.ft8.stations.get(v.selected.as_deref()?)?;
+    maidenhead::centre(s.locator.as_deref()?)
+}
+
+/// What the land was worked out for: the size, the scale (0 for the log
+/// scale, else the range in metres), the window's offset and your position,
+/// the last three in ten-thousandths.
+type LandKey = (u16, u16, i64, i64, i64, i64, i64);
+
+/// A zoom on one station: the linear range, km, and the window's middle in
+/// the projection's units, so that you and it both sit inside a map `w` by
+/// `h` dots with a margin. `at_km` is where the station is, km east and
+/// north of you on the map.
+fn zoom_window(at_km: (f64, f64), w: f64, h: f64) -> (f64, (f64, f64)) {
+    // Half the gap each way, as a share of the half-height (the range) and
+    // of the half-width (the range times the aspect); a fifth spare.
+    let aspect = w / h;
+    let range = (at_km.1.abs() / 2.0)
+        .max(at_km.0.abs() / 2.0 / aspect)
+        .max(ZOOM_MIN_KM)
+        / 0.8;
+    (range, (at_km.0 / 2.0 / range, at_km.1 / 2.0 / range))
+}
+
+/// The closest a zoom goes, km of half-height: a station in the next square
+/// still leaves room for its name.
+const ZOOM_MIN_KM: f64 = 150.0;
+
 struct Geometry {
     proj: Azimuthal,
     cx: f64,
     cy: f64,
     half: f64,
+    /// The window's middle in the projection's units: you, unless zoomed.
+    off: (f64, f64),
 }
 
 impl Geometry {
     fn dot(&self, x: f64, y: f64) -> (f64, f64) {
-        (self.cx + x * self.half, self.cy - y * self.half)
+        (
+            self.cx + (x - self.off.0) * self.half,
+            self.cy - (y - self.off.1) * self.half,
+        )
     }
 
     fn place_dot(&self, place: (f64, f64)) -> (f64, f64) {
@@ -107,13 +148,13 @@ impl Geometry {
     }
 }
 
-fn build_land(key: (u16, u16, MapRange, i64, i64), g: &Geometry, w: usize, h: usize) -> Land {
+fn build_land(key: LandKey, g: &Geometry, w: usize, h: usize) -> Land {
     let mut places = Vec::with_capacity(w * h);
     let mut is_land = Vec::with_capacity(w * h);
     for py in 0..h {
         for px in 0..w {
-            let x = (px as f64 + 0.5 - g.cx) / g.half;
-            let y = (g.cy - (py as f64 + 0.5)) / g.half;
+            let x = (px as f64 + 0.5 - g.cx) / g.half + g.off.0;
+            let y = (g.cy - (py as f64 + 0.5)) / g.half + g.off.1;
             match g.proj.inverse(x, y) {
                 Some((lat, lon)) => {
                     places.push(Some((lat as f32, lon as f32)));
@@ -167,6 +208,8 @@ impl Panel for Ft8MapPanel {
 
     fn focus_bindings(&self) -> &'static [(&'static str, &'static str)] {
         &[
+            ("\u{2191}\u{2193}\u{2190}\u{2192}", "move on the map"),
+            ("Enter", "zoom"),
             ("R", "rays"),
             ("G", "grid"),
             ("K", "rings"),
@@ -185,7 +228,10 @@ impl Panel for Ft8MapPanel {
                 " {}",
                 maidenhead::locator(lat, lon, 3).unwrap_or_default()
             ));
-            suffix.push_str(&format!(" · {}", f.view.range.label()));
+            match (zoomed_place(state), f.view.selected.as_deref()) {
+                (Some(_), Some(call)) => suffix.push_str(&format!(" · zoomed on {call}")),
+                _ => suffix.push_str(&format!(" · {}", f.view.range.label())),
+            }
             let m = &f.view.map;
             if m.sun {
                 if let Some(t) = sun_time(state) {
@@ -246,18 +292,33 @@ impl Panel for Ft8MapPanel {
         let mut dots = Dots::new(cols, rows);
         let (w, h) = (dots.width(), dots.height());
         let range = state.ft8.view.range;
+        let zoom_on = zoomed_place(state);
+        let (scale, off) = match zoom_on {
+            Some(place) => {
+                let km = Azimuthal::new(home, Scale::Linear { range_km: 1.0 }).forward(place);
+                let (r, off) = zoom_window(km, w as f64, h as f64);
+                (Scale::Linear { range_km: r }, off)
+            }
+            None => (range.scale(), (0.0, 0.0)),
+        };
         let g = Geometry {
-            proj: Azimuthal::new(home, range.scale()),
+            proj: Azimuthal::new(home, scale),
             cx: w as f64 / 2.0,
             cy: h as f64 / 2.0,
             half: h as f64 / 2.0,
+            off,
         };
 
         // The land, from the cache or worked out again.
         let key = (
             area.width,
             area.height,
-            range,
+            match scale {
+                Scale::Log => 0,
+                Scale::Linear { range_km } => (range_km * 1e3).round() as i64,
+            },
+            (off.0 * 1e4).round() as i64,
+            (off.1 * 1e4).round() as i64,
             (home.0 * 1e4).round() as i64,
             (home.1 * 1e4).round() as i64,
         );
@@ -324,7 +385,7 @@ impl Panel for Ft8MapPanel {
         // The edge of the world, where it shows: the antipode's ring.
         let edge_r = g.proj.radius(sphere::ANTIPODE_KM);
         circle(&mut dots, &g, edge_r, P_RING, theme.map_grid, 1);
-        let rings: Vec<f64> = match range.scale() {
+        let rings: Vec<f64> = match scale {
             _ if !layers.rings => Vec::new(),
             Scale::Log => RINGS_KM.to_vec(),
             Scale::Linear { range_km } => RINGS_KM
@@ -336,8 +397,8 @@ impl Panel for Ft8MapPanel {
         for &r in &rings {
             circle(&mut dots, &g, g.proj.radius(r), P_RING, theme.map_grid, 2);
         }
-        let fields = layers.grid
-            && matches!(range.scale(), Scale::Linear { range_km } if range_km <= GRID_MAX_KM);
+        let fields =
+            layers.grid && matches!(scale, Scale::Linear { range_km } if range_km <= GRID_MAX_KM);
         if fields {
             grid(&mut dots, &g, theme.map_grid);
         }
@@ -365,7 +426,7 @@ impl Panel for Ft8MapPanel {
         for (s, a, (px, py)) in &on_map {
             if layers.rays && *a == Age::Now {
                 let c = lerp_color(ink(s, *a, theme), theme.map_night, 0.2);
-                line(&mut rays, (g.cx, g.cy), (*px, *py), P_RAY, c);
+                line(&mut rays, g.dot(0.0, 0.0), (*px, *py), P_RAY, c);
             }
         }
         dots.render(buf, area);
@@ -423,7 +484,7 @@ impl Panel for Ft8MapPanel {
                 Some(s.call.as_str()) == selected,
             )
         });
-        let (hx, hy) = cell((g.cx, g.cy));
+        let (hx, hy) = cell(g.dot(0.0, 0.0));
         for (s, a, p) in &on_map {
             let (x, y) = cell(*p);
             if x <= 0 || y <= 0 || x >= cols as i64 - 1 || y >= rows as i64 - 1 {
@@ -503,6 +564,43 @@ impl Panel for Ft8MapPanel {
                 }
             }
         }
+        // The chosen station beyond the map's edge: an arrow at the edge the
+        // way it lies, its call and how far, so a choice is never invisible.
+        if let Some((s, _, p)) = on_map
+            .iter()
+            .find(|(s, _, _)| Some(s.call.as_str()) == selected)
+        {
+            let (x, y) = cell(*p);
+            if x <= 0 || y <= 0 || x >= cols as i64 - 1 || y >= rows as i64 - 1 {
+                let (ex, ey, arrow) = edge_mark(
+                    (p.0 / 2.0 - cols as f64 / 2.0, p.1 / 4.0 - rows as f64 / 2.0),
+                    cols as i64,
+                    rows as i64,
+                );
+                let km = maidenhead::centre(s.locator.as_deref().unwrap_or_default())
+                    .map(|place| sphere::distance_km(home, place));
+                let text = match km {
+                    Some(km) => format!("{arrow} {} {} km", s.call, super::km(km)),
+                    None => format!("{arrow} {}", s.call),
+                };
+                let n = text.chars().count() as i64;
+                let tx = if ex + n >= cols as i64 {
+                    ex - n + 1
+                } else {
+                    ex
+                };
+                put(
+                    buf,
+                    tx.max(0),
+                    ey,
+                    &text,
+                    Style::default()
+                        .fg(theme.border_focused)
+                        .add_modifier(Modifier::BOLD),
+                );
+            }
+        }
+
         let loc = maidenhead::locator(home.0, home.1, 2).unwrap_or_default();
         if free(&used, hy, hx + 1, hx + 2 + loc.len() as i64) {
             put(buf, hx + 2, hy, &loc, Style::default().fg(theme.map_home));
@@ -512,6 +610,32 @@ impl Panel for Ft8MapPanel {
             draw_legend(buf, area, theme, lit);
         }
     }
+}
+
+/// Where on the edge of a map `cols` by `rows` cells a mark for something
+/// at `(dx, dy)` cells from the middle goes, one cell in, and the arrow that
+/// points its way (y down, as the screen counts).
+fn edge_mark(d: (f64, f64), cols: i64, rows: i64) -> (i64, i64, char) {
+    let (hx, hy) = ((cols / 2 - 1) as f64, (rows / 2 - 1) as f64);
+    // Cells are about twice as tall as wide: compare the way the eye does.
+    let t = (hx / d.0.abs().max(1e-9)).min(hy / d.1.abs().max(1e-9));
+    let (x, y) = ((cols / 2) as f64 + d.0 * t, (rows / 2) as f64 + d.1 * t);
+    let angle = (-d.1 * 2.0).atan2(d.0).to_degrees();
+    let arrow = match ((angle + 360.0 + 22.5) % 360.0 / 45.0) as usize {
+        0 => '\u{2192}',
+        1 => '\u{2197}',
+        2 => '\u{2191}',
+        3 => '\u{2196}',
+        4 => '\u{2190}',
+        5 => '\u{2199}',
+        6 => '\u{2193}',
+        _ => '\u{2198}',
+    };
+    (
+        (x.round() as i64).clamp(1, cols - 2),
+        (y.round() as i64).clamp(1, rows - 2),
+        arrow,
+    )
 }
 
 /// A circle of radius `r` (in edge units) about the middle, every `every`th
@@ -668,6 +792,7 @@ fn refuse(buf: &mut Buffer, area: Rect, theme: &crate::Theme) {
 pub(crate) mod tests {
     use super::*;
     use crate::state::fixture::draw;
+    use crate::state::ft8::MapRange;
     use crate::state::{CycleEntry, CycleOutcome, Station};
     use std::collections::VecDeque;
     use std::time::Instant;
@@ -834,6 +959,51 @@ pub(crate) mod tests {
                 "no row for {k} in:\n{section}"
             );
         }
+    }
+
+    #[test]
+    fn a_zoom_holds_you_and_the_station_inside_the_map() {
+        for (at, w, h) in [
+            ((1000.0, 0.0), 224.0, 144.0),
+            ((0.0, -3000.0), 224.0, 144.0),
+            ((-7000.0, 5000.0), 100.0, 120.0),
+            ((50.0, 20.0), 224.0, 144.0),
+        ] {
+            let (r, off) = zoom_window(at, w, h);
+            let aspect = w / h;
+            for (x, y) in [(0.0, 0.0), (at.0 / r, at.1 / r)] {
+                assert!(
+                    (x - off.0).abs() <= aspect * 0.81,
+                    "{at:?}: x {x} off {off:?}"
+                );
+                assert!((y - off.1).abs() <= 0.81, "{at:?}: y {y} off {off:?}");
+            }
+            assert!(r >= ZOOM_MIN_KM / 0.8 - 1e-9, "{at:?}: {r}");
+        }
+    }
+
+    #[test]
+    fn zoomed_the_title_says_on_whom_and_both_ends_are_drawn() {
+        let mut m = evening();
+        m.ft8.view.selected = Some("EA8ZQ".into());
+        m.ft8.view.zoomed = true;
+        let t = text(&draw(Ft8MapPanel::new(), 112, 37, &m));
+        assert!(t.contains("zoomed on EA8ZQ"), "{t}");
+        assert!(t.contains("EA8ZQ ") || t.contains(" EA8ZQ"), "{t}");
+        assert!(t.contains("JN97"), "home missing:\n{t}");
+        // Tokyo is far off a Canaries zoom.
+        assert!(!t.contains("JA1VQD"), "{t}");
+    }
+
+    #[test]
+    fn a_chosen_station_off_the_map_is_marked_at_its_edge() {
+        let mut m = evening();
+        m.ft8.view.range = MapRange::Km1500;
+        m.ft8.view.selected = Some("VK3FTX".into());
+        let t = text(&draw(Ft8MapPanel::new(), 112, 37, &m));
+        // Melbourne from Budapest: about 105 degrees, east by a little
+        // south, so the arrow points east; 15 543 km.
+        assert!(t.contains("\u{2192} VK3FTX 15 543 km"), "{t}");
     }
 
     #[test]

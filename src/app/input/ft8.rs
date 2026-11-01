@@ -15,6 +15,7 @@ use crossterm::event::{KeyCode, KeyEvent};
 
 use super::{global, metrics, InputCtx, KeyAction};
 use crate::signal::ft8::bands;
+use crate::state::ft8::MapDir;
 
 /// Handle `key` if the FT8 view is on screen and it is one of its own.
 /// Returns whether it was.
@@ -31,6 +32,8 @@ pub(super) fn handle(key: KeyEvent, ctx: &mut InputCtx<'_>) -> bool {
         KeyCode::Up => m.ft8.select_step(false),
         KeyCode::Down => m.ft8.select_step(true),
         KeyCode::Char('z') => {
+            // A range chosen ends a zoom: the two would say different things.
+            m.ft8.view.zoomed = false;
             m.ft8.view.range = m.ft8.view.range.next();
             let label = m.ft8.view.range.label();
             m.push_log(format!("FT8 map: {label}"));
@@ -93,6 +96,40 @@ pub(super) fn handle(key: KeyEvent, ctx: &mut InputCtx<'_>) -> bool {
 /// the global keys.
 pub(super) fn ft8_map(key: KeyEvent, ctx: &mut InputCtx<'_>) -> KeyAction {
     let mut m = metrics(ctx.state);
+    // On the map the arrows move over the map; a gain stage picked with
+    // `,` `.` still takes them, as everywhere.
+    let dir = match key.code {
+        _ if m.ui.gain_stage.is_some() => None,
+        KeyCode::Up => Some(MapDir::Up),
+        KeyCode::Down => Some(MapDir::Down),
+        KeyCode::Left => Some(MapDir::Left),
+        KeyCode::Right => Some(MapDir::Right),
+        _ => None,
+    };
+    if let Some(dir) = dir {
+        let Some(home) = m.home.position() else {
+            m.push_log("FT8 map: no position, so no map to move on".to_string());
+            return KeyAction::Continue;
+        };
+        if !m.ft8.step_on_map(home, dir) {
+            m.push_log("FT8 map: no station that way".to_string());
+        }
+        return KeyAction::Continue;
+    }
+    if key.code == KeyCode::Enter {
+        let v = &mut m.ft8.view;
+        let line = if v.zoomed {
+            v.zoomed = false;
+            "FT8 map: back home".to_string()
+        } else if let Some(call) = v.selected.clone() {
+            v.zoomed = true;
+            format!("FT8 map: zoomed on {call}")
+        } else {
+            "FT8 map: choose a station to zoom on first".to_string()
+        };
+        m.push_log(line);
+        return KeyAction::Continue;
+    }
     let onoff = |on: bool| if on { "on" } else { "off" };
     let line = {
         let map = &mut m.ft8.view.map;
@@ -143,7 +180,8 @@ pub(super) fn ft8_map(key: KeyEvent, ctx: &mut InputCtx<'_>) -> KeyAction {
 mod tests {
     use super::super::handle_key;
     use crate::config::LayoutConfig;
-    use crate::state::{MapRange, SdrMetrics};
+    use crate::state::ft8::MapRange;
+    use crate::state::SdrMetrics;
     use crate::ui::{self, PanelRegistry};
     use crossterm::event::{KeyCode, KeyEvent};
     use std::collections::HashMap;
@@ -230,6 +268,45 @@ mod tests {
             .log
             .iter()
             .any(|l| l.text.contains("FT8 map: rays off")));
+    }
+
+    #[test]
+    fn in_the_maps_focus_arrows_move_on_the_map_and_enter_zooms() {
+        let (mut engine, keys) =
+            crate::app::App::build_ui("radio_ft8", &HashMap::new(), None, true);
+        let s = on_view();
+        let mut press_on = |code: KeyCode| {
+            let mut footer = true;
+            handle_key(
+                KeyEvent::from(code),
+                &s,
+                None,
+                &mut engine,
+                &mut footer,
+                &keys,
+            );
+        };
+        press_on(KeyCode::Char('m'));
+        // North of Budapest there are stations in the sample; which one is
+        // the direction tests' business, here only that the map chose.
+        press_on(KeyCode::Up);
+        let chosen = s.lock().unwrap().ft8.view.selected.clone();
+        assert!(chosen.is_some(), "Up chose nobody");
+        let dial = s.lock().unwrap().radio.frequency;
+        press_on(KeyCode::Left);
+        // The arrows in focus are the map's: the band did not change.
+        assert_eq!(s.lock().unwrap().radio.frequency, dial);
+        press_on(KeyCode::Enter);
+        assert!(s.lock().unwrap().ft8.view.zoomed);
+        press_on(KeyCode::Enter);
+        assert!(!s.lock().unwrap().ft8.view.zoomed);
+        // Esc leaves the focus and the zoom with it; z ends one too.
+        press_on(KeyCode::Enter);
+        press_on(KeyCode::Esc);
+        assert!(!s.lock().unwrap().ft8.view.zoomed);
+        s.lock().unwrap().ft8.view.zoomed = true;
+        press_on(KeyCode::Char('z'));
+        assert!(!s.lock().unwrap().ft8.view.zoomed);
     }
 
     #[test]
