@@ -168,33 +168,40 @@ mod tests {
         }
     }
 
-    /// The figure is the call's own duration: close to the fake's known delay,
-    /// never below it, and the worst call is at least the mean.
+    /// The figure is the call's own duration: never below the fake's known
+    /// delay, and the worst call is at least the mean.
+    ///
+    /// The ceiling is loose on purpose. A sleep is never shorter than asked
+    /// but can be much longer on a busy machine: on CI's shared macOS runner,
+    /// with the whole suite running beside it, a 5 ms sleep came back at
+    /// 31 ms often enough to fail every other push against a 30 ms ceiling.
     #[test]
     fn the_call_time_is_the_calls_own_duration() {
         let got = measure_calls(&device(5, &[]), &BAND_HOPS_HZ, |_| {});
         assert_eq!(got.attempts, 10);
         assert_eq!(got.failed, 0);
         let ms = got.call_ms.value();
-        assert!((5.0..30.0).contains(&ms), "{ms}");
+        assert!((5.0..500.0).contains(&ms), "{ms}");
         assert!(got.call_ms.sigma().is_finite());
         assert!(got.worst_ms.unwrap() >= ms);
     }
 
     /// The caller's bookkeeping runs once per successful call, with the
     /// frequency just set, and its cost is not in the figure: a slow callback
-    /// on a fast device still reads fast.
+    /// on a fast device still reads fast. The callback sleeps 200 ms and the
+    /// figure must stay under 100: far enough apart that a busy runner's
+    /// late wake-ups cannot blur the two.
     #[test]
     fn the_callback_follows_the_tuning_and_stays_out_of_the_figure() {
         let seen = Mutex::new(Vec::new());
         let got = measure_calls(&device(0, &[2_480_000_000]), &BAND_HOPS_HZ, |hz| {
             seen.lock().unwrap().push(hz);
-            std::thread::sleep(Duration::from_millis(20));
+            std::thread::sleep(Duration::from_millis(200));
         });
         let seen = seen.into_inner().unwrap();
         assert_eq!(seen.len(), 7, "three calls to 2480 MHz were refused");
         assert!(!seen.contains(&2_480_000_000));
-        assert!(got.call_ms.value() < 10.0, "{:?}", got.call_ms);
+        assert!(got.call_ms.value() < 100.0, "{:?}", got.call_ms);
         assert_eq!(got.failed, 3);
         assert!(got.first_error.unwrap().contains("2480000000"));
     }
