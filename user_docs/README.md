@@ -26,6 +26,8 @@ Welcome. This is the plain-language guide to using sdrtop.
   what each view answers, and how far each number can be trusted
 - **[The pager](radio-pocsag.md)**: POCSAG pages on a pager's own face,
   and the link each one came on
+- **[FT8](radio-ft8.md)**: the world's FT8 stations on a map around you,
+  what each signal measured, and the clock as the stations judge it
 - **[Recording the IQ stream](recording.md)**: `Ctrl+R`, the SigMF files it
   writes, and how a recording says what it lost
 - **[How the demodulator works](demodulator.md)**: the signal chain behind the

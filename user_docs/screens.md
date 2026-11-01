@@ -42,7 +42,7 @@ whole path is on screen. The line above the columns says the path in words.
 
 | Tile | Under it |
 |------|----------|
-| **Radio** | Listening to the air. **Pagers › POCSAG** is [the pager](radio-pocsag.md); the rest (FM broadcast, aviation, marine, the ham bands, walkie-talkies) are listed as *later*, to say what the tile will hold |
+| **Radio** | Listening to the air. **Pagers › POCSAG** is [the pager](radio-pocsag.md), **Digital modes › FT8** is [FT8](radio-ft8.md); the rest (FM broadcast, aviation, marine, the ham bands, walkie-talkies) are listed as *later*, to say what the tile will hold |
 | **Lab** | Measuring and decoding. **Spectrum** (the general views), **Sweep**, **Receiver** (the four benches), **Bluetooth › 2.4 GHz** (Overview, Low Energy, Classic, Long range), **Wi-Fi › 2.4 GHz** (Channel; Room, Network and Transmitter later, and 5 GHz) and **Compact** (large type, for a small window) |
 | **Options** | The radio's own settings, where it has any: a tinySA's, the Airspy R2's bias tee and packing, the HF+ Discovery's Library DSP |
 | **Keys** | Every key, the group you are in first: each panel's focus letter and what it adds, then the general keys |
@@ -423,7 +423,7 @@ screen. No two views share a title, and none is called what its group is.
 |-----|-------|--------|--------------|
 | `1` | Pager | `radio_pocsag` | A POCSAG pager, as one looks: the page on its dot-matrix display, its address and what it took repairing, the buttons with their keys, the link along the bottom · every page received · the shown page as received, its physics and its decoding |
 
-**Radio › Digital modes › FT8**
+**Radio › Digital modes › FT8** ([FT8](radio-ft8.md))
 
 | Key | Title | Preset | What's in it |
 |-----|-------|--------|--------------|

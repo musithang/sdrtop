@@ -131,7 +131,7 @@ other view these keys go on doing what they do there:
 
 The display's light and colour are kept in the config's `[pager]` block.
 
-**On FT8** (Radio › Digital modes › FT8) its keys work the moment the view
+**On [FT8](radio-ft8.md)** (Radio › Digital modes › FT8) its keys work the moment the view
 is on screen, no focus needed. Here `↑` `↓` choose a station rather than
 step the gain; pick a gain stage with `,` `.` and they move that stage again
 until you let it go (back to `chain`), which is how the first stage (the
