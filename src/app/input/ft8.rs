@@ -158,6 +158,10 @@ pub(super) fn ft8_map(key: KeyEvent, ctx: &mut InputCtx<'_>) -> KeyAction {
                 map.window = map.window.next();
                 format!("FT8 map: stations heard in {}", map.window.word())
             }
+            KeyCode::Char('w') => {
+                map.long_path = !map.long_path;
+                format!("FT8 map: the long way round {}", onoff(map.long_path))
+            }
             KeyCode::Char('b') => {
                 map.this_band = !map.this_band;
                 if map.this_band {
@@ -252,13 +256,14 @@ mod tests {
             );
         };
         press_on(KeyCode::Char('m'));
-        for k in ['r', 'g', 'k', 'l', 'n', 't', 'b', 'z'] {
+        for k in ['r', 'g', 'k', 'l', 'n', 't', 'b', 'w', 'z'] {
             press_on(KeyCode::Char(k));
         }
         let m = s.lock().unwrap();
         assert_eq!(m.ui.focused_panel.as_deref(), Some("ft8_map"));
         let map = &m.ft8.view.map;
         assert!(!map.rays && !map.grid && !map.rings && !map.sun && map.this_band);
+        assert!(map.long_path);
         assert_eq!(map.names, Names::ThisCycle);
         assert_eq!(map.window, Window::Session);
         // The view's own keys still work in focus.

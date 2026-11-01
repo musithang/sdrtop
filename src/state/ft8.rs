@@ -317,6 +317,8 @@ pub struct MapLayers {
     pub window: Window,
     /// Only the stations last heard on the dial being listened to.
     pub this_band: bool,
+    /// The long way round to the chosen station, dashed.
+    pub long_path: bool,
 }
 
 impl Default for MapLayers {
@@ -329,6 +331,7 @@ impl Default for MapLayers {
             names: Names::All,
             window: Window::Hour,
             this_band: false,
+            long_path: false,
         }
     }
 }
@@ -379,6 +382,7 @@ impl Ft8View {
                 names: names.unwrap_or_default(),
                 window: window.unwrap_or_default(),
                 this_band: s.this_band.unwrap_or(d.this_band),
+                long_path: s.long_path.unwrap_or(d.long_path),
             },
             zoomed: false,
             only_yours: false,
@@ -401,6 +405,7 @@ impl Ft8View {
             names: (m.names != d.names).then(|| m.names.word().to_string()),
             window: (m.window != d.window).then(|| m.window.word().to_string()),
             this_band: differs(m.this_band, d.this_band),
+            long_path: differs(m.long_path, d.long_path),
         }
     }
 }
@@ -859,6 +864,7 @@ mod tests {
         v.map.names = Names::None;
         v.map.window = Window::Min15;
         v.map.this_band = true;
+        v.map.long_path = true;
         let s = v.settings();
         assert_eq!(s.grid, None, "an unchanged switch is not written");
         let (back, said) = Ft8View::from_settings(&s);

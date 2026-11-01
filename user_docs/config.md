@@ -71,6 +71,7 @@ rays = false               # the map's switches, as its focus mode (m) left them
 names = "this cycle"       # all, this cycle or none
 window = "15 min"          # this cycle, 15 min, 1 h or session
 this_band = true
+long_path = true           # the long way round to the chosen station
 
 [record]
 max_seconds = 60.0         # an IQ recording stops at whichever limit comes first
@@ -114,7 +115,8 @@ something in it is set.
 
 **`[ft8]`** is how you left the FT8 map: its range (`z`) and the switches of
 its focus mode (`m`; see [keys](keys.md#ft8-map-focus-mode)), `grid`, `rings`
-and `sun` among them, all on unless set to `false`. Only what differs from the
+and `sun` among them, all on unless set to `false`, and `long_path`, off
+unless set to `true`. Only what differs from the
 default is written, so a map you never touched leaves no block. A word sdrtop
 does not know (`window = "fortnight"`) is said in the log at start and left at
 its default; the rest of the block still counts.

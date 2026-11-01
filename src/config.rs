@@ -304,6 +304,8 @@ pub struct Ft8Settings {
     pub window: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub this_band: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub long_path: Option<bool>,
 }
 
 impl Ft8Settings {

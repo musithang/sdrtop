@@ -217,6 +217,7 @@ impl Panel for Ft8MapPanel {
             ("N", "names"),
             ("T", "time"),
             ("B", "this band"),
+            ("W", "long path"),
         ]
     }
 
@@ -264,6 +265,9 @@ impl Panel for Ft8MapPanel {
             }
             if m.names != Names::All {
                 suffix.push_str(&format!(" · names {}", m.names.word()));
+            }
+            if let Some((call, km)) = best_dx(state) {
+                suffix.push_str(&format!(" · best DX {call} {} km", super::km(km)));
             }
         } else {
             suffix.push_str(" no position");
@@ -385,6 +389,8 @@ impl Panel for Ft8MapPanel {
         // The edge of the world, where it shows: the antipode's ring.
         let edge_r = g.proj.radius(sphere::ANTIPODE_KM);
         circle(&mut dots, &g, edge_r, P_RING, theme.map_grid, 1);
+        let newest = newest_cycle(&state.ft8);
+
         let rings: Vec<f64> = match scale {
             _ if !layers.rings => Vec::new(),
             Scale::Log => RINGS_KM.to_vec(),
@@ -404,7 +410,6 @@ impl Panel for Ft8MapPanel {
         }
 
         // The stations on the map, and the rays to this cycle's.
-        let newest = newest_cycle(&state.ft8);
         let selected = state.ft8.view.selected.as_deref();
         let mut on_map: Vec<(&crate::state::Station, Age, (f64, f64))> = state
             .ft8
@@ -427,6 +432,32 @@ impl Panel for Ft8MapPanel {
             if layers.rays && *a == Age::Now {
                 let c = lerp_color(ink(s, *a, theme), theme.map_night, 0.2);
                 line(&mut rays, g.dot(0.0, 0.0), (*px, *py), P_RAY, c);
+            }
+        }
+        // The long way round to the chosen station: out from you the other
+        // way, through the antipode (the map's rim on the log scale), and in
+        // again to it. Dashed, and in the chosen station's ink.
+        if layers.long_path {
+            if let Some(place) = selected
+                .and_then(|c| state.ft8.stations.get(c))
+                .and_then(|s| maidenhead::centre(s.locator.as_deref()?))
+            {
+                let short = sphere::distance_km(home, place);
+                let back = (sphere::bearing_deg(home, place) + 180.0) % 360.0;
+                let long = 2.0 * sphere::ANTIPODE_KM - short;
+                let steps = 400;
+                let mut prev: Option<(f64, f64)> = None;
+                for k in 0..=steps {
+                    let km = long * f64::from(k) / f64::from(steps);
+                    let p = g.place_dot(sphere::destination(home, back, km));
+                    if let Some(q) = prev {
+                        let jump = (p.0 - q.0).hypot(p.1 - q.1) > h as f64 / 4.0;
+                        if !jump && (k / 4) % 2 == 0 {
+                            line_whole(&mut rays, q, p, P_RAY, theme.border_focused);
+                        }
+                    }
+                    prev = Some(p);
+                }
             }
         }
         dots.render(buf, area);
@@ -533,6 +564,7 @@ impl Panel for Ft8MapPanel {
             };
             key(a).cmp(&key(b))
         });
+        let best = best_dx(state).map(|(c, _)| c);
         for (s, a, p) in named {
             let is_sel = Some(s.call.as_str()) == selected;
             let shown = match layers.names {
@@ -540,7 +572,8 @@ impl Panel for Ft8MapPanel {
                 Names::ThisCycle => *a == Age::Now,
                 Names::None => false,
             };
-            if !(shown || is_sel) {
+            let is_best = best.as_deref() == Some(s.call.as_str());
+            if !(shown || is_sel || is_best) {
                 continue;
             }
             let (x, y) = cell(*p);
@@ -636,6 +669,38 @@ fn edge_mark(d: (f64, f64), cols: i64, rows: i64) -> (i64, i64, char) {
         (y.round() as i64).clamp(1, rows - 2),
         arrow,
     )
+}
+
+/// The farthest station the map draws, by its call, and how far: the
+/// session's best DX as far as the window reaches. Needs your position.
+fn best_dx(state: &SdrMetrics) -> Option<(String, f64)> {
+    let home = state.home.position()?;
+    let newest = newest_cycle(&state.ft8);
+    state
+        .ft8
+        .stations
+        .values()
+        .filter(|s| state.ft8.on_map(s, newest))
+        .filter_map(|s| {
+            let place = maidenhead::centre(s.locator.as_deref()?)?;
+            Some((s.call.clone(), sphere::distance_km(home, place)))
+        })
+        .max_by(|a, b| a.1.total_cmp(&b.1))
+}
+
+/// A line between two dot positions, every dot of it.
+fn line_whole(dots: &mut Dots, a: (f64, f64), b: (f64, f64), p: u8, c: Color) {
+    let (dx, dy) = (b.0 - a.0, b.1 - a.1);
+    let n = dx.abs().max(dy.abs()).ceil().max(1.0) as usize;
+    for k in 0..=n {
+        let t = k as f64 / n as f64;
+        dots.set(
+            (a.0 + dx * t).floor() as i64,
+            (a.1 + dy * t).floor() as i64,
+            p,
+            c,
+        );
+    }
 }
 
 /// A circle of radius `r` (in edge units) about the middle, every `every`th
@@ -1007,6 +1072,39 @@ pub(crate) mod tests {
     }
 
     #[test]
+    fn the_title_names_the_best_dx_inside_the_window() {
+        let mut m = evening();
+        let t = text(&draw(Ft8MapPanel::new(), 112, 37, &m));
+        // Melbourne is the farthest of the evening's stations.
+        assert!(t.contains("best DX VK3FTX 15"), "{t}");
+        // A window that leaves it out names the next farthest heard in it.
+        m.ft8.stations.get_mut("VK3FTX").unwrap().last_unix -= 1200.0;
+        m.ft8.view.map.window = crate::state::ft8::Window::Min15;
+        let t = text(&draw(Ft8MapPanel::new(), 112, 37, &m));
+        assert!(
+            t.contains("best DX") && !t.contains("best DX VK3FTX"),
+            "{t}"
+        );
+    }
+
+    #[test]
+    fn the_long_way_round_is_drawn_only_when_asked_and_with_a_choice() {
+        let mut m = evening();
+        let plain = text(&draw(Ft8MapPanel::new(), 112, 37, &m));
+        m.ft8.view.map.long_path = true;
+        assert_eq!(
+            text(&draw(Ft8MapPanel::new(), 112, 37, &m)),
+            plain,
+            "nobody chosen, nothing to draw"
+        );
+        m.ft8.view.selected = Some("JA1VQD".into());
+        let chosen = text(&draw(Ft8MapPanel::new(), 112, 37, &m));
+        m.ft8.view.map.long_path = false;
+        let short_only = text(&draw(Ft8MapPanel::new(), 112, 37, &m));
+        assert_ne!(chosen, short_only);
+    }
+
+    #[test]
     fn rays_off_draws_no_ray() {
         let mut with = evening();
         with.ft8.view.range = MapRange::Km3000;
@@ -1070,7 +1168,22 @@ pub(crate) mod tests {
             m.ft8.hearing = Some(1_793_393_280.0); // 2026-10-30 20:48 UTC
             m
         };
+        let worked = {
+            let mut m = night.clone();
+            m.ft8.view.map.long_path = true;
+            m.ft8.view.selected = Some("JA1VQD".into());
+            m
+        };
+        let worked3000 = {
+            let mut m = evening();
+            m.ft8.view.range = MapRange::Km3000;
+            m.ft8.view.map.long_path = true;
+            m.ft8.view.selected = Some("EA8ZQ".into());
+            m
+        };
         for (title, m) in [
+            ("best DX, long path to JA1VQD (log, night)", worked),
+            ("long path to EA8ZQ (3000 km)", worked3000),
             ("bonyhad night", night),
             ("log", evening()),
             ("3000", {

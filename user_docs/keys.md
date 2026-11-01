@@ -427,6 +427,11 @@ arrow at the edge pointing its way, with its call and how far
 | `N` | Names beside the dots: every station's, this cycle's only, or none |
 | `T` | How far back the map reaches: this cycle, 15 minutes, an hour (the default), or the whole session |
 | `B` | Only the stations last heard on the band you are on, or every band's. Useful after `←` `→`: the 20 m crowd otherwise stays on the map beside the 40 m one |
+| `W` | The long way round to the chosen station, dashed: out from you the other way, across the rim (on the log scale the rim is the far side of the Earth), and in again from the opposite side. The card gives its bearing and length either way. The short path is not always the one that is open |
+
+The title also names the **best DX**: the farthest station inside the time
+window, and how far (`best DX VK3FTX 15 543 km`). Its name stays on the map
+whatever `N` says, since bragging rights should be legible.
 
 ---
 

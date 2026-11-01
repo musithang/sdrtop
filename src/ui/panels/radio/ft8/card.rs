@@ -91,8 +91,10 @@ impl Panel for Ft8CardPanel {
                     x + 1,
                     y,
                     &format!(
-                        "at {brg:.0}\u{b0} {} (short path)",
-                        crate::geo::sphere::compass(brg)
+                        "at {brg:.0}\u{b0} {} \u{b7} long path {:.0}\u{b0} {} km",
+                        crate::geo::sphere::compass(brg),
+                        (brg + 180.0) % 360.0,
+                        km(2.0 * crate::geo::sphere::ANTIPODE_KM - dist)
                     ),
                     label,
                 );
@@ -257,9 +259,11 @@ mod tests {
         let t = draw(Ft8CardPanel, 79, 9, &m).join("\n");
         assert!(t.contains("JA1VQD  PM95"), "{t}");
         assert!(
-            t.contains(" km at ") && t.contains("NE (short path)"),
+            t.contains(" km at ") && t.contains("NE \u{b7} long path 2"),
             "{t}"
         );
+        // The long way is the rest of the great circle.
+        assert!(t.contains(" 30 9") || t.contains(" 31 0"), "{t}");
         assert!(t.contains("\u{25b6} called you"), "{t}");
         assert!(t.contains("\u{201c}HA5ZZT JA1VQD PM95\u{201d}"), "{t}");
         assert!(t.contains("13:15:00 UTC \u{b7} even"), "{t}");
