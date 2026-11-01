@@ -704,6 +704,32 @@ fn noise_alone_reads_as_nothing() {
     assert!(r.decodes.is_empty(), "{:?}", r.decodes);
 }
 
+/// **A steady carrier is not a message.** On 20 m by day the same few tones
+/// (646, 525, 2400 Hz) "decoded" cycle after cycle as an empty message: a
+/// carrier puts every data symbol on tone 0, tone 0 is the bits 000, and the
+/// all-zero codeword passes both the code and the check (the CRC of zero is
+/// zero). It reads as thirteen blanks of free text, which nobody sends.
+#[test]
+fn a_steady_carrier_decodes_to_nothing() {
+    let mut rng = Rng::new(89);
+    let mut x = cycle(&[], &mut rng);
+    for hz in [646.0, 1525.0, 2400.0] {
+        for (k, v) in x.iter_mut().enumerate() {
+            let ph = std::f64::consts::TAU * hz * k as f64 / 12_000.0;
+            *v += Complex::new(ph.cos() as f32, ph.sin() as f32) * 0.05;
+        }
+    }
+    let r = cycle::decode_with(&x, &mut HashBook::new(), &cycle::Settings::DEFAULT);
+    assert!(
+        r.decodes.is_empty(),
+        "{:?}",
+        r.decodes
+            .iter()
+            .map(|d| d.message.text())
+            .collect::<Vec<_>>()
+    );
+}
+
 #[test]
 fn a_hash_sent_in_the_same_cycle_as_its_call_is_named() {
     use super::hash::HashBits;

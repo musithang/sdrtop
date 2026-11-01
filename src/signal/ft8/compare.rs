@@ -65,82 +65,90 @@ fn rfc3339_to_unix(s: &str) -> f64 {
 }
 
 fn read_recording(meta: &Path) -> Recording {
+    use std::io::Read;
     let m: serde_json::Value =
         serde_json::from_str(&std::fs::read_to_string(meta).unwrap()).unwrap();
     let g = &m["global"];
     let rate = g["core:sample_rate"].as_f64().unwrap();
     let full = g["sdrtop:full_scale"].as_f64().unwrap_or(1.0) as f32;
-    let data = std::fs::read(meta.with_extension("sigmf-data")).unwrap();
-    let iq: Vec<Complex<f32>> = match g["core:datatype"].as_str().unwrap() {
-        "ci32_le" => data
-            .as_chunks::<8>()
-            .0
-            .iter()
-            .map(|c| {
-                let i = i32::from_le_bytes(c[..4].try_into().unwrap()) as f32;
-                let q = i32::from_le_bytes(c[4..].try_into().unwrap()) as f32;
-                Complex::new(i / full, q / full)
-            })
-            .collect(),
-        "ci16_le" => data
-            .as_chunks::<4>()
-            .0
-            .iter()
-            .map(|c| {
-                let i = f32::from(i16::from_le_bytes([c[0], c[1]]));
-                let q = f32::from(i16::from_le_bytes([c[2], c[3]]));
-                Complex::new(i / full, q / full)
-            })
-            .collect(),
-        "ci8" => data
-            .as_chunks::<2>()
-            .0
-            .iter()
-            .map(|c| Complex::new(f32::from(c[0] as i8) / full, f32::from(c[1] as i8) / full))
-            .collect(),
-        "cf32_le" => data
-            .as_chunks::<8>()
-            .0
-            .iter()
-            .map(|c| {
-                Complex::new(
-                    f32::from_le_bytes(c[..4].try_into().unwrap()),
-                    f32::from_le_bytes(c[4..].try_into().unwrap()),
-                )
-            })
-            .collect(),
+    let kind = g["core:datatype"].as_str().unwrap().to_string();
+    let width = match kind.as_str() {
+        "ci32_le" | "cf32_le" => 8,
+        "ci16_le" => 4,
+        "ci8" => 2,
         other => panic!("datatype {other} not read here"),
     };
-    // A capture whose global index moved further than its sample start is a
-    // gap in the stream: a new run. Each run is timed by the earliest
-    // arrival its captures allow (arrivals are late, never early).
-    let caps = m["captures"].as_array().unwrap();
-    let mut runs = Vec::new();
-    let mut k = 0;
-    while k < caps.len() {
-        let offset = |c: &serde_json::Value| {
-            c["core:global_index"].as_u64().unwrap() as i64
-                - c["core:sample_start"].as_u64().unwrap() as i64
-        };
-        let first = k;
-        while k + 1 < caps.len() && offset(&caps[k + 1]) == offset(&caps[first]) {
-            k += 1;
+    let pair = |c: &[u8]| -> Complex<f32> {
+        match kind.as_str() {
+            "ci32_le" => Complex::new(
+                i32::from_le_bytes(c[..4].try_into().unwrap()) as f32 / full,
+                i32::from_le_bytes(c[4..8].try_into().unwrap()) as f32 / full,
+            ),
+            "cf32_le" => Complex::new(
+                f32::from_le_bytes(c[..4].try_into().unwrap()),
+                f32::from_le_bytes(c[4..8].try_into().unwrap()),
+            ),
+            "ci16_le" => Complex::new(
+                f32::from(i16::from_le_bytes([c[0], c[1]])) / full,
+                f32::from(i16::from_le_bytes([c[2], c[3]])) / full,
+            ),
+            _ => Complex::new(f32::from(c[0] as i8) / full, f32::from(c[1] as i8) / full),
         }
-        let start = caps[first]["core:sample_start"].as_u64().unwrap() as usize;
-        let end = caps.get(k + 1).map_or(iq.len(), |c| {
-            c["core:sample_start"].as_u64().unwrap() as usize
-        });
-        let t0 = caps[first..=k]
-            .iter()
-            .map(|c| {
-                rfc3339_to_unix(c["core:datetime"].as_str().unwrap())
-                    - (c["core:sample_start"].as_u64().unwrap() as usize - start) as f64 / rate
-            })
-            .fold(f64::INFINITY, f64::min);
-        runs.push((t0, iq[start..end.min(iq.len())].to_vec()));
-        k += 1;
+    };
+    // The samples the driver lost are known to the sample: a capture's
+    // global index runs ahead of its place in the file by exactly them. They
+    // are filled with zeros, so the recording is one timeline and every
+    // cycle in it can be cut; both decoders are handed the same gaps.
+    let caps = m["captures"].as_array().unwrap();
+    let at = |c: &serde_json::Value, k: &str| c[k].as_u64().unwrap() as usize;
+    let total = at(caps.last().unwrap(), "core:global_index")
+        + (g["sdrtop:pairs_written"].as_u64().unwrap() as usize
+            - at(caps.last().unwrap(), "core:sample_start"));
+    let mut iq = vec![Complex::new(0.0f32, 0.0); total];
+    let mut file =
+        std::io::BufReader::new(std::fs::File::open(meta.with_extension("sigmf-data")).unwrap());
+    let mut buf = vec![0u8; width * 65_536];
+    for (k, c) in caps.iter().enumerate() {
+        let (from, to) = (
+            at(c, "core:sample_start"),
+            caps.get(k + 1)
+                .map_or(usize::MAX, |n| at(n, "core:sample_start")),
+        );
+        let mut place = at(c, "core:global_index");
+        let mut left = to.saturating_sub(from);
+        while left > 0 {
+            let want = left.min(65_536) * width;
+            let got = file.read(&mut buf[..want]).unwrap();
+            if got == 0 {
+                break;
+            }
+            for chunk in buf[..got - got % width].chunks(width) {
+                if place < iq.len() {
+                    iq[place] = pair(chunk);
+                }
+                place += 1;
+            }
+            left -= got / width;
+        }
     }
-    Recording { rate, runs }
+    // Arrivals are late, never early: the earliest any capture allows.
+    let t0 = caps
+        .iter()
+        .map(|c| {
+            rfc3339_to_unix(c["core:datetime"].as_str().unwrap())
+                - at(c, "core:global_index") as f64 / rate
+        })
+        .fold(f64::INFINITY, f64::min);
+    let lost = total - g["sdrtop:pairs_written"].as_u64().unwrap() as usize;
+    println!(
+        "{:.1} s at {rate} S/s, {lost} pairs lost and filled ({:.3} %)",
+        total as f64 / rate,
+        lost as f64 * 100.0 / total as f64
+    );
+    Recording {
+        rate,
+        runs: vec![(t0, iq)],
+    }
 }
 
 /// The upper sideband of a cycle, as real audio with peaks near full scale.
@@ -259,6 +267,16 @@ fn decode_lines(label: &str, x: &[Complex<f32>], book: &mut HashBook) -> Vec<Str
         t.elapsed().as_secs_f64(),
         report.candidates
     );
+    for d in report
+        .decodes
+        .iter()
+        .filter(|d| d.message.text().trim().is_empty())
+    {
+        eprintln!(
+            "EMPTY {label} f0 {:.1} payload {:#x} costas {} block {} iter {} repaired {} osd {:?} pass {} message {:?}",
+            d.physics.f0, d.payload, d.costas, d.block, d.iterations, d.repaired, d.osd, d.pass, d.message
+        );
+    }
     report
         .decodes
         .iter()

@@ -269,9 +269,7 @@ fn try_candidate(
             let Some(decoded) = ldpc::decode(&llr, BP_ITERATIONS, OSD_ORDER) else {
                 continue;
             };
-            if decoded.osd.is_some()
-                && (costas < OSD_MIN_COSTAS || decoded.repaired > OSD_MAX_REPAIRED)
-            {
+            if !believed(&decoded, costas) {
                 continue;
             }
             if !seen.insert(decoded.payload) {
@@ -294,6 +292,42 @@ fn try_candidate(
         }
     }
     None
+}
+
+/// Whether a codeword the code and the check accepted is believed.
+///
+/// **Never the all-zero codeword.** Its check is zero too, so it passes
+/// both, and anything that puts every data symbol on tone 0 produces it: off
+/// the air on 20 m, a steady carrier under a neighbour's sidelobe "decoded"
+/// as an empty message cycle after cycle (2 or 3 Costas symbols right, not
+/// one bit repaired). It is thirteen blanks of free text, which nobody sends.
+///
+/// **OSD only with its sync visibly there** ([`OSD_MIN_COSTAS`],
+/// [`OSD_MAX_REPAIRED`]).
+fn believed(d: &ldpc::Decoded, costas: u8) -> bool {
+    if d.payload == 0 {
+        return false;
+    }
+    !(d.osd.is_some() && (costas < OSD_MIN_COSTAS || d.repaired > OSD_MAX_REPAIRED))
+}
+
+#[cfg(test)]
+#[test]
+fn the_all_zero_codeword_and_an_unsynced_osd_are_not_believed() {
+    let d = |payload, osd, repaired| ldpc::Decoded {
+        payload,
+        iterations: 0,
+        repaired,
+        osd,
+        distance: 0.0,
+    };
+    // As it came off the air: payload 0, BP at once, 2 Costas symbols.
+    assert!(!believed(&d(0, None, 0), 2));
+    assert!(!believed(&d(0, None, 0), 21));
+    assert!(believed(&d(0x1234, None, 3), 2));
+    assert!(believed(&d(0x1234, Some(2), 20), OSD_MIN_COSTAS));
+    assert!(!believed(&d(0x1234, Some(2), 20), OSD_MIN_COSTAS - 1));
+    assert!(!believed(&d(0x1234, Some(2), OSD_MAX_REPAIRED + 1), 21));
 }
 
 /// Take a decoded transmission out of the cycle.

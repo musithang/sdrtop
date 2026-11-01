@@ -165,9 +165,20 @@ Measured on synthetic signals: half of them decode at about -21.2 dB SNR,
 a little better than the figure the protocol's authors give for their own
 decoder. On the same simulated cycles WSJT-X 3.0.2's command-line decoder
 does about 0.2 dB better at its fast depth and 0.6 dB better at its normal
-one; it has had a decade of tuning, and we are working on it. A crowded
-cycle of forty signals takes about six seconds on a modest laptop, inside
-the fifteen it has.
+one; it has had a decade of tuning, and we are working on it. Off the air
+it is closer than that: four minutes of a busy 20 m afternoon, the same
+samples given to both, and of 254 messages sdrtop and WSJT-X at its deepest
+setting both read 233, sdrtop alone 9 and WSJT-X alone 12 (leaving out the
+ones WSJT-X guessed at from what a CQ usually says, which sdrtop does not
+do). A crowded cycle of forty signals takes about six seconds on a modest
+laptop, inside the fifteen it has.
+
+**About SNR.** Off the air sdrtop's figures run about 3 dB below WSJT-X's
+for the same signals (on simulated ones they agree). sdrtop measures the
+noise beside each transmission, in its own slice of the band; WSJT-X
+estimates it across the whole band, and in a busy band that comes out
+kinder. Neither is wrong, but they are not the same number, so compare
+sdrtop's reports with sdrtop's.
 
 ## The clock
 
