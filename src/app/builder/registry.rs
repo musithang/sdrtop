@@ -1600,6 +1600,12 @@ mod tests {
             ("net_bt", false),
             ("net_piconet", false),
             ("net_survey", false),
+            // The Radio views draw from their own feeds: the slim header
+            // above them reads the tuning and the converter's clips, not the
+            // spectrum, and FT8 at 912 kS/s spent a tenth of a core on an FFT
+            // nothing showed.
+            ("radio_ft8", false),
+            ("radio_pocsag", false),
             ("main", true),
             ("lab_signal", true),
             ("spectrum", true),

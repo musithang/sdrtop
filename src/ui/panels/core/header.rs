@@ -1306,6 +1306,13 @@ impl Panel for SlimHeaderPanel {
     fn name(&self) -> &'static str {
         "header_slim"
     }
+
+    /// The tuning, the band dial and the converter's clips: nothing the FFT
+    /// makes. Said, so a view of its own feeds (FT8, the pager) does not keep
+    /// the spectrum running behind it.
+    fn reads_spectrum(&self) -> bool {
+        false
+    }
     fn supports_acquisition(&self, _acquisition: crate::hardware::AcquisitionKind) -> bool {
         true
     }
