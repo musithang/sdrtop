@@ -42,6 +42,15 @@ pub const MAX_PASSES: usize = 3;
 /// a margin under the lowest that lost nothing.
 pub const MIN_POWER: f32 = 2.2;
 
+/// The fewest Costas symbols on their tone, where a candidate was first
+/// read, for it to be tried again at a finer place. Noise matches about 3 of
+/// 21 by chance. Swept on simulated cycles of one transmission at -20 to -22
+/// dB (20 each): every gate from 0 to 13 decoded the same (18, 11 and 1),
+/// the time per cycle on the dev machine falling from 3.0 s to 1.4 s; 9
+/// sits two under the OSD guard's [`OSD_MIN_COSTAS`], because the first
+/// place is the loose one and shows fewer.
+pub const RESYNC_MIN_COSTAS: u8 = 9;
+
 /// The decoder's tunable numbers, so the conformance rows can try others.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Settings {
@@ -52,6 +61,12 @@ pub struct Settings {
     pub max_passes: usize,
     /// The most candidates examined in a pass, strongest first.
     pub max_candidates: usize,
+    /// A candidate that does not decode where the Costas arrays put it is
+    /// tried again where every symbol does (`demod::resync`).
+    pub resync: bool,
+    /// ...but only a candidate with at least this many of its 21 Costas
+    /// symbols on their tone where it was first read ([`RESYNC_MIN_COSTAS`]).
+    pub resync_min_costas: u8,
 }
 
 impl Settings {
@@ -60,6 +75,8 @@ impl Settings {
         min_power: MIN_POWER,
         max_passes: MAX_PASSES,
         max_candidates: search::MAX_CANDIDATES,
+        resync: true,
+        resync_min_costas: RESYNC_MIN_COSTAS,
     };
 }
 
@@ -221,36 +238,60 @@ fn try_candidate(
         return None;
     }
     let (y, at_zero) = bb.around(synced.f0);
-    let n0 = (synced.start * DOWN_RATE).round() as i64;
-    let hz = synced.f0 - at_zero;
-    let z = demod::correlate(&y, n0, hz);
-    let costas = demod::costas_matched(&z);
-    for block in 1..=3u8 {
-        let llr = demod::soft_bits(&z, usize::from(block), settings.llr_scale);
-        let Some(decoded) = ldpc::decode(&llr, BP_ITERATIONS, OSD_ORDER) else {
-            continue;
-        };
-        if decoded.osd.is_some() && (costas < OSD_MIN_COSTAS || decoded.repaired > OSD_MAX_REPAIRED)
-        {
-            continue;
+    let first = (synced.start * DOWN_RATE, synced.f0 - at_zero);
+    // The Costas arrays' place first; failing that, the place every symbol
+    // agrees on (`demod::resync`); failing that, the place the tones chosen
+    // there fit best (`demod::data_aided`). Most of a weak signal's decodes
+    // were lost to a place a few milliseconds and a fraction of a hertz off.
+    let attempts = if settings.resync { 3 } else { 1 };
+    let mut at = first;
+    for attempt in 0..attempts {
+        if attempt == 1 {
+            let z = demod::correlate(&y, first.0.round() as i64, first.1);
+            if demod::costas_matched(&z) < settings.resync_min_costas {
+                return None;
+            }
+            let (start, hz) = demod::resync(&y, first.0, first.1);
+            at = (start * DOWN_RATE, hz);
         }
-        if !seen.insert(decoded.payload) {
-            return None;
+        let (n0, hz) = at;
+        let n0 = n0.round() as i64;
+        let mut z = demod::correlate(&y, n0, hz);
+        if attempt == 2 {
+            let (start, hz2) = demod::data_aided(&y, n0, hz, &z);
+            at = (start * DOWN_RATE, hz2);
+            z = demod::correlate(&y, at.0.round() as i64, hz2);
         }
-        let word91 = crate::signal::ft8::crc::with_crc(decoded.payload);
-        let tones = demod::tones_of(word91);
-        let mut physics = demod::measure(&y, n0 as f64 / DOWN_RATE, hz, &tones, &z);
-        physics.f0 += at_zero;
-        return Some(Found {
-            payload: decoded.payload,
-            start: physics.start,
-            physics,
-            tones,
-            costas,
-            block,
-            decoded,
-            pass,
-        });
+        let (n0, hz) = (at.0.round() as i64, at.1);
+        let costas = demod::costas_matched(&z);
+        for block in 1..=3u8 {
+            let llr = demod::soft_bits(&z, usize::from(block), settings.llr_scale);
+            let Some(decoded) = ldpc::decode(&llr, BP_ITERATIONS, OSD_ORDER) else {
+                continue;
+            };
+            if decoded.osd.is_some()
+                && (costas < OSD_MIN_COSTAS || decoded.repaired > OSD_MAX_REPAIRED)
+            {
+                continue;
+            }
+            if !seen.insert(decoded.payload) {
+                return None;
+            }
+            let word91 = crate::signal::ft8::crc::with_crc(decoded.payload);
+            let tones = demod::tones_of(word91);
+            let mut physics = demod::measure(&y, n0 as f64 / DOWN_RATE, hz, &tones, &z);
+            physics.f0 += at_zero;
+            return Some(Found {
+                payload: decoded.payload,
+                start: physics.start,
+                physics,
+                tones,
+                costas,
+                block,
+                decoded,
+                pass,
+            });
+        }
     }
     None
 }

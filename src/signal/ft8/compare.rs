@@ -1,0 +1,546 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (C) 2026 MusiThang <viktor.laszlo92@protonmail.com>
+
+//! Our decoder beside another one, on the same samples. Test-only: nothing
+//! here ships, and no other decoder is linked or called; this writes files
+//! for one to read and reads files one wrote.
+//!
+//! Two directions:
+//!
+//! - `cycles_from_a_recording`: a SigMF recording (`Ctrl+R`) through our own
+//!   channel, cut on the UTC quarter minutes, each cycle written as a 12 kHz
+//!   16-bit WAV named `YYMMDD_HHMMSS.wav` (the name another decoder takes
+//!   the cycle's time from), and our decodes of the very same samples in
+//!   `ours.txt`.
+//! - `decode_wavs`: every `*.wav` in a directory (a simulator's, say) read as
+//!   upper sideband and decoded by ours, into `ours.txt`.
+//!
+//! The WAV is the upper sideband alone: the channel's complex samples with
+//! the negative frequencies removed. Taking the real part of the complex
+//! samples instead would fold the other sideband's noise onto the signals and
+//! hand the other decoder a band 3 dB noisier than ours.
+//!
+//! `ours.txt` has one line per decode, in the other decoder's own column
+//! order: `HHMMSS SNR DT FREQ ~ MESSAGE`.
+
+use std::path::{Path, PathBuf};
+
+use num_complex::Complex;
+use rustfft::FftPlanner;
+
+use super::channel::{Channel, RATE_HZ};
+use super::cycle::{self, Settings};
+use super::hash::HashBook;
+
+const CYCLE: usize = 15 * RATE_HZ as usize;
+
+/// A recording's samples as complex floats at full scale 1, and how each
+/// contiguous run of them is timed.
+struct Recording {
+    rate: f64,
+    /// Contiguous runs: (UTC of the first sample, samples).
+    runs: Vec<(f64, Vec<Complex<f32>>)>,
+}
+
+fn rfc3339_to_unix(s: &str) -> f64 {
+    // `2026-10-30T20:35:40.954746Z`
+    let (date, time) = s.trim_end_matches('Z').split_once('T').unwrap();
+    let mut d = date.split('-').map(|v| v.parse::<i64>().unwrap());
+    let (y, m, day) = (d.next().unwrap(), d.next().unwrap(), d.next().unwrap());
+    let mut t = time.split(':');
+    let (hh, mm): (f64, f64) = (
+        t.next().unwrap().parse().unwrap(),
+        t.next().unwrap().parse().unwrap(),
+    );
+    let ss: f64 = t.next().unwrap().parse().unwrap();
+    // Days from civil (H. Hinnant).
+    let y = if m <= 2 { y - 1 } else { y };
+    let era = y.div_euclid(400);
+    let yoe = y - era * 400;
+    let mp = (m + 9) % 12;
+    let doy = (153 * mp + 2) / 5 + day - 1;
+    let doe = yoe * 365 + yoe / 4 - yoe / 100 + doy;
+    let days = era * 146_097 + doe - 719_468;
+    days as f64 * 86_400.0 + hh * 3600.0 + mm * 60.0 + ss
+}
+
+fn read_recording(meta: &Path) -> Recording {
+    let m: serde_json::Value =
+        serde_json::from_str(&std::fs::read_to_string(meta).unwrap()).unwrap();
+    let g = &m["global"];
+    let rate = g["core:sample_rate"].as_f64().unwrap();
+    let full = g["sdrtop:full_scale"].as_f64().unwrap_or(1.0) as f32;
+    let data = std::fs::read(meta.with_extension("sigmf-data")).unwrap();
+    let iq: Vec<Complex<f32>> = match g["core:datatype"].as_str().unwrap() {
+        "ci32_le" => data
+            .as_chunks::<8>()
+            .0
+            .iter()
+            .map(|c| {
+                let i = i32::from_le_bytes(c[..4].try_into().unwrap()) as f32;
+                let q = i32::from_le_bytes(c[4..].try_into().unwrap()) as f32;
+                Complex::new(i / full, q / full)
+            })
+            .collect(),
+        "ci16_le" => data
+            .as_chunks::<4>()
+            .0
+            .iter()
+            .map(|c| {
+                let i = f32::from(i16::from_le_bytes([c[0], c[1]]));
+                let q = f32::from(i16::from_le_bytes([c[2], c[3]]));
+                Complex::new(i / full, q / full)
+            })
+            .collect(),
+        "ci8" => data
+            .as_chunks::<2>()
+            .0
+            .iter()
+            .map(|c| Complex::new(f32::from(c[0] as i8) / full, f32::from(c[1] as i8) / full))
+            .collect(),
+        "cf32_le" => data
+            .as_chunks::<8>()
+            .0
+            .iter()
+            .map(|c| {
+                Complex::new(
+                    f32::from_le_bytes(c[..4].try_into().unwrap()),
+                    f32::from_le_bytes(c[4..].try_into().unwrap()),
+                )
+            })
+            .collect(),
+        other => panic!("datatype {other} not read here"),
+    };
+    // A capture whose global index moved further than its sample start is a
+    // gap in the stream: a new run. Each run is timed by the earliest
+    // arrival its captures allow (arrivals are late, never early).
+    let caps = m["captures"].as_array().unwrap();
+    let mut runs = Vec::new();
+    let mut k = 0;
+    while k < caps.len() {
+        let offset = |c: &serde_json::Value| {
+            c["core:global_index"].as_u64().unwrap() as i64
+                - c["core:sample_start"].as_u64().unwrap() as i64
+        };
+        let first = k;
+        while k + 1 < caps.len() && offset(&caps[k + 1]) == offset(&caps[first]) {
+            k += 1;
+        }
+        let start = caps[first]["core:sample_start"].as_u64().unwrap() as usize;
+        let end = caps.get(k + 1).map_or(iq.len(), |c| {
+            c["core:sample_start"].as_u64().unwrap() as usize
+        });
+        let t0 = caps[first..=k]
+            .iter()
+            .map(|c| {
+                rfc3339_to_unix(c["core:datetime"].as_str().unwrap())
+                    - (c["core:sample_start"].as_u64().unwrap() as usize - start) as f64 / rate
+            })
+            .fold(f64::INFINITY, f64::min);
+        runs.push((t0, iq[start..end.min(iq.len())].to_vec()));
+        k += 1;
+    }
+    Recording { rate, runs }
+}
+
+/// The upper sideband of a cycle, as real audio with peaks near full scale.
+fn usb_audio(x: &[Complex<f32>]) -> Vec<i16> {
+    let n = x.len();
+    let mut planner = FftPlanner::<f32>::new();
+    let mut buf = x.to_vec();
+    planner.plan_fft_forward(n).process(&mut buf);
+    // Keep 0 Hz up to (not including) Nyquist; the rest is the other side.
+    for b in buf.iter_mut().skip(n / 2) {
+        *b = Complex::new(0.0, 0.0);
+    }
+    planner.plan_fft_inverse(n).process(&mut buf);
+    let real: Vec<f32> = buf.iter().map(|c| c.re).collect();
+    let peak = real.iter().fold(0f32, |a, v| a.max(v.abs())).max(1e-12);
+    real.iter()
+        .map(|v| (v / peak * 20_000.0).round() as i16)
+        .collect()
+}
+
+/// Real audio back to the complex samples the decoder takes: the analytic
+/// signal, the negative frequencies removed.
+fn analytic(audio: &[f32]) -> Vec<Complex<f32>> {
+    let n = audio.len();
+    let mut planner = FftPlanner::<f32>::new();
+    let mut buf: Vec<Complex<f32>> = audio.iter().map(|&v| Complex::new(v, 0.0)).collect();
+    planner.plan_fft_forward(n).process(&mut buf);
+    let scale = 2.0 / n as f32;
+    for (k, b) in buf.iter_mut().enumerate() {
+        *b = if k == 0 || k >= n / 2 {
+            Complex::new(0.0, 0.0)
+        } else {
+            *b * scale
+        };
+    }
+    planner.plan_fft_inverse(n).process(&mut buf);
+    buf
+}
+
+fn write_wav(path: &Path, audio: &[i16]) {
+    let mut out = Vec::with_capacity(44 + audio.len() * 2);
+    let data_len = (audio.len() * 2) as u32;
+    out.extend(b"RIFF");
+    out.extend((36 + data_len).to_le_bytes());
+    out.extend(b"WAVEfmt ");
+    out.extend(16u32.to_le_bytes());
+    out.extend(1u16.to_le_bytes()); // PCM
+    out.extend(1u16.to_le_bytes()); // mono
+    out.extend((RATE_HZ as u32).to_le_bytes());
+    out.extend((RATE_HZ as u32 * 2).to_le_bytes());
+    out.extend(2u16.to_le_bytes());
+    out.extend(16u16.to_le_bytes());
+    out.extend(b"data");
+    out.extend(data_len.to_le_bytes());
+    for s in audio {
+        out.extend(s.to_le_bytes());
+    }
+    std::fs::write(path, out).unwrap();
+}
+
+/// The 16-bit mono samples of a WAV, wherever its data chunk is.
+fn read_wav(path: &Path) -> Vec<f32> {
+    let b = std::fs::read(path).unwrap();
+    let mut at = 12;
+    while at + 8 <= b.len() {
+        let id = &b[at..at + 4];
+        let len = u32::from_le_bytes(b[at + 4..at + 8].try_into().unwrap()) as usize;
+        if id == b"data" {
+            return b[at + 8..(at + 8 + len).min(b.len())]
+                .as_chunks::<2>()
+                .0
+                .iter()
+                .map(|c| f32::from(i16::from_le_bytes(*c)) / 32768.0)
+                .collect();
+        }
+        at += 8 + len + (len & 1);
+    }
+    panic!("no data chunk in {}", path.display());
+}
+
+/// `YYMMDD` of a Unix time, UTC (H. Hinnant's civil from days).
+fn yymmdd(unix: f64) -> String {
+    let z = (unix / 86_400.0).floor() as i64 + 719_468;
+    let era = z.div_euclid(146_097);
+    let doe = z - era * 146_097;
+    let yoe = (doe - doe / 1460 + doe / 36_524 - doe / 146_096) / 365;
+    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
+    let mp = (5 * doy + 2) / 153;
+    let d = doy - (153 * mp + 2) / 5 + 1;
+    let m = if mp < 10 { mp + 3 } else { mp - 9 };
+    let y = yoe + era * 400 + i64::from(m <= 2);
+    format!("{:02}{m:02}{d:02}", y % 100)
+}
+
+fn hhmmss(unix: f64) -> String {
+    let s = unix.rem_euclid(86_400.0) as u64;
+    format!("{:02}{:02}{:02}", s / 3600, (s / 60) % 60, s % 60)
+}
+
+/// The decoder's settings, `FT8_RESYNC=0` taking the second and third
+/// attempts away, to measure what they cost and bring.
+fn settings() -> Settings {
+    Settings {
+        resync: std::env::var("FT8_RESYNC").map_or(true, |v| v != "0"),
+        resync_min_costas: std::env::var("FT8_GATE")
+            .map_or(cycle::RESYNC_MIN_COSTAS, |v| v.parse().unwrap()),
+        ..Settings::DEFAULT
+    }
+}
+
+fn decode_lines(label: &str, x: &[Complex<f32>], book: &mut HashBook) -> Vec<String> {
+    let t = std::time::Instant::now();
+    let report = cycle::decode_with(x, book, &settings());
+    eprintln!(
+        "{label}: {:.2} s, {} candidates",
+        t.elapsed().as_secs_f64(),
+        report.candidates
+    );
+    report
+        .decodes
+        .iter()
+        .map(|d| {
+            format!(
+                "{label} {:>3.0} {:>4.1} {:>4.0} ~  {}",
+                d.physics.snr_db,
+                d.dt,
+                d.physics.f0,
+                d.message.text()
+            )
+        })
+        .collect()
+}
+
+fn out_dir() -> PathBuf {
+    let dir = PathBuf::from(std::env::var("FT8_OUT").expect("FT8_OUT: where to write"));
+    std::fs::create_dir_all(&dir).unwrap();
+    dir
+}
+
+/// `FT8_SIGMF=<recording>.sigmf-meta FT8_OUT=<dir> cargo test --release
+/// cycles_from_a_recording -- --ignored --nocapture`
+#[test]
+#[ignore]
+fn cycles_from_a_recording() {
+    let Ok(meta) = std::env::var("FT8_SIGMF") else {
+        return;
+    };
+    let rec = read_recording(Path::new(&meta));
+    let dir = out_dir();
+    let mut ours = Vec::new();
+    let mut book = HashBook::new();
+    if let Ok(call) = std::env::var("FT8_CALL") {
+        book.learn(&call);
+    }
+    for (t0, iq) in &rec.runs {
+        let mut ch = Channel::new(rec.rate).expect("a route to 12 000 S/s");
+        let mut x = Vec::new();
+        for block in iq.chunks(16_384) {
+            ch.push(block, &mut x);
+        }
+        // Channel sample k was taken at t0 + k / 12000 - the channel's delay.
+        let first = t0 - ch.delay();
+        let mut start = (first / 15.0).ceil() * 15.0;
+        loop {
+            let i = ((start - first) * RATE_HZ as f64).round() as usize;
+            if i + CYCLE > x.len() {
+                break;
+            }
+            let cyc = &x[i..i + CYCLE];
+            let name = format!("{}_{}.wav", yymmdd(start), hhmmss(start));
+            write_wav(&dir.join(&name), &usb_audio(cyc));
+            let lines = decode_lines(&hhmmss(start), cyc, &mut book);
+            println!("{name}: {} decodes", lines.len());
+            ours.extend(lines);
+            start += 15.0;
+        }
+    }
+    std::fs::write(dir.join("ours.txt"), ours.join("\n") + "\n").unwrap();
+}
+
+/// `FT8_WAVS=<dir> FT8_OUT=<dir> cargo test --release decode_wavs --
+/// --ignored --nocapture`
+#[test]
+#[ignore]
+fn decode_wavs() {
+    let Ok(wavs) = std::env::var("FT8_WAVS") else {
+        return;
+    };
+    let mut files: Vec<PathBuf> = std::fs::read_dir(&wavs)
+        .unwrap()
+        .filter_map(|e| e.ok().map(|e| e.path()))
+        .filter(|p| p.extension().is_some_and(|e| e == "wav"))
+        .collect();
+    files.sort();
+    let mut ours = Vec::new();
+    let mut book = HashBook::new();
+    for f in files {
+        let mut audio = read_wav(&f);
+        audio.resize(CYCLE, 0.0);
+        let stem = f.file_stem().unwrap().to_string_lossy().to_string();
+        let label = stem.rsplit('_').next().unwrap_or("000000").to_string();
+        ours.extend(decode_lines(&label, &analytic(&audio), &mut book));
+    }
+    std::fs::write(out_dir().join("ours.txt"), ours.join("\n") + "\n").unwrap();
+}
+
+#[test]
+fn the_wav_and_the_time_helpers_read_back() {
+    assert_eq!(rfc3339_to_unix("1970-01-01T00:00:00Z"), 0.0);
+    assert_eq!(yymmdd(1_793_366_100.0), "261030");
+    assert_eq!(hhmmss(1_793_366_100.0), "131500");
+    assert!((rfc3339_to_unix("2026-10-30T13:15:00.5Z") - 1_793_366_100.5).abs() < 1e-6);
+    let dir = std::env::temp_dir().join(format!("sdrtop-ft8-compare-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let p = dir.join("t.wav");
+    write_wav(&p, &[0, 16384, -16384, 32767]);
+    let back = read_wav(&p);
+    assert_eq!(back.len(), 4);
+    assert!((back[1] - 0.5).abs() < 1e-6);
+    std::fs::remove_dir_all(&dir).unwrap();
+}
+
+/// A tone in the upper sideband survives the trip to audio and back: same
+/// frequency, and nothing left at the mirror image.
+#[test]
+fn upper_sideband_audio_round_trips() {
+    let n = 12_000;
+    let f = 1500.0;
+    let x: Vec<Complex<f32>> = (0..n)
+        .map(|k| {
+            let ph = std::f32::consts::TAU * f * k as f32 / RATE_HZ as f32;
+            Complex::new(ph.cos(), ph.sin())
+        })
+        .collect();
+    let audio: Vec<f32> = usb_audio(&x)
+        .iter()
+        .map(|&v| f32::from(v) / 32768.0)
+        .collect();
+    let back = analytic(&audio);
+    let mut buf = back.clone();
+    FftPlanner::<f32>::new()
+        .plan_fft_forward(n)
+        .process(&mut buf);
+    let (peak, _) = buf
+        .iter()
+        .enumerate()
+        .max_by(|a, b| a.1.norm().total_cmp(&b.1.norm()))
+        .unwrap();
+    assert_eq!(peak, 1500);
+    assert!(buf[n - 1500].norm() < buf[1500].norm() * 1e-3);
+}
+
+/// Where a decode is lost, cycle by cycle, on simulated cycles of one known
+/// transmission: whether the search put a candidate near it (and its rank),
+/// and, read at the place the search refined it to, how many of the 174
+/// hard decisions were wrong and whether the code decoded.
+///
+/// `FT8_WAVS=<dir> FT8_F0=1200 FT8_START=0.8 cargo test --release
+/// where_decodes_are_lost -- --ignored --nocapture`
+#[test]
+#[ignore]
+fn where_decodes_are_lost() {
+    use super::demod;
+    use super::ldpc;
+    use super::search::{self, Baseband, Spectrogram, DOWN_RATE};
+    let Ok(wavs) = std::env::var("FT8_WAVS") else {
+        return;
+    };
+    let f0: f64 = std::env::var("FT8_F0").map_or(1200.0, |v| v.parse().unwrap());
+    let start: f64 = std::env::var("FT8_START").map_or(0.8, |v| v.parse().unwrap());
+    let mut files: Vec<PathBuf> = std::fs::read_dir(&wavs)
+        .unwrap()
+        .filter_map(|e| e.ok().map(|e| e.path()))
+        .filter(|p| p.extension().is_some_and(|e| e == "wav"))
+        .collect();
+    files.sort();
+    let cycles: Vec<Vec<Complex<f32>>> = files
+        .iter()
+        .map(|f| {
+            let mut a = read_wav(f);
+            a.resize(CYCLE, 0.0);
+            analytic(&a)
+        })
+        .collect();
+    // The true codeword: from whichever cycle decodes.
+    let mut book = HashBook::new();
+    let truth = cycles
+        .iter()
+        .find_map(|x| {
+            cycle::decode_with(x, &mut book, &Settings::DEFAULT)
+                .decodes
+                .first()
+                .map(|d| d.payload)
+        })
+        .expect("no cycle decodes at all");
+    let word = ldpc::encode(super::crc::with_crc(truth));
+    println!("file  full  cand(rank,sync)  synced(dt ms, df Hz, power)  wrong(b1,b2,b3)  at-truth(b1,b2,b3)");
+    for (f, x) in files.iter().zip(&cycles) {
+        let full = !cycle::decode_with(x, &mut HashBook::new(), &Settings::DEFAULT)
+            .decodes
+            .is_empty();
+        let spec = Spectrogram::new(x);
+        let cands = search::candidates(&spec);
+        let near = cands
+            .iter()
+            .enumerate()
+            .find(|(_, c)| (c.f0 - f0).abs() < 4.0 && (c.start - start).abs() < 0.12);
+        let bb = Baseband::new(x);
+        let read = |s: f64, hz0: f64| -> ([usize; 3], [bool; 3]) {
+            let (y, at_zero) = bb.around(hz0);
+            let n0 = (s * DOWN_RATE).round() as i64;
+            let z = demod::correlate(&y, n0, hz0 - at_zero);
+            let mut wrong = [0; 3];
+            let mut ok = [false; 3];
+            for b in 1..=3 {
+                let llr = demod::soft_bits(&z, b, demod::LLR_SCALE);
+                wrong[b - 1] = llr
+                    .iter()
+                    .zip(word.iter())
+                    .filter(|(l, &w)| (**l > 0.0) != (w == 1))
+                    .count();
+                ok[b - 1] = ldpc::decode(&llr, 30, 2).is_some_and(|d| d.payload == truth);
+            }
+            (wrong, ok)
+        };
+        let synced = near.map(|(_, c)| search::refine(&bb, c));
+        let (w, okc) = synced.map_or(([0; 3], [false; 3]), |s| read(s.start, s.f0));
+        let (wt, okt) = read(start, f0);
+        // The second attempt the decoder makes: every symbol's place.
+        let all = synced.map(|s| {
+            let (y, at_zero) = bb.around(s.f0);
+            let (st, hz) = demod::resync(&y, s.start * DOWN_RATE, s.f0 - at_zero);
+            (st, hz + at_zero)
+        });
+        let (wa, oka) = all.map_or(([0; 3], [false; 3]), |b| read(b.0, b.1));
+        // Data-aided: the tones the one-symbol decisions chose, fitted
+        // coherently over the whole transmission.
+        let dd = all.map(|(st, f)| {
+            let (y, at_zero) = bb.around(f);
+            let hz = f - at_zero;
+            let n0 = (st * DOWN_RATE).round() as i64;
+            let z = demod::correlate(&y, n0, hz);
+            let tones: [u8; super::modulate::SYMBOLS] = std::array::from_fn(|k| {
+                super::modulate::COSTAS_AT
+                    .iter()
+                    .find(|&&a| k >= a && k < a + 7)
+                    .map(|&a| super::modulate::COSTAS[k - a])
+                    .unwrap_or_else(|| {
+                        (0..8u8)
+                            .max_by(|&a, &b| {
+                                z[k][usize::from(a)]
+                                    .norm_sqr()
+                                    .total_cmp(&z[k][usize::from(b)].norm_sqr())
+                            })
+                            .unwrap()
+                    })
+            });
+            let ph = demod::measure(&y, n0 as f64 / DOWN_RATE, hz, &tones, &z);
+            (ph.start, ph.f0 + at_zero)
+        });
+        let (wd, okd) = dd.map_or(([0; 3], [false; 3]), |b| read(b.0, b.1));
+        println!(
+            "   dd: {} {:?}{}",
+            dd.map_or("-".to_string(), |b| format!(
+                "{:+.1} {:+.2}",
+                (b.0 - start) * 1e3,
+                b.1 - f0
+            )),
+            wd,
+            okd.map(|b| if b { 'D' } else { '.' })
+                .iter()
+                .collect::<String>()
+        );
+        let flag = |o: [bool; 3]| {
+            o.map(|b| if b { 'D' } else { '.' })
+                .iter()
+                .collect::<String>()
+        };
+        println!(
+            "{}  {}  {}  {}  {:?}{}  {:?}{}  all: {} {:?}{}",
+            f.file_name().unwrap().to_string_lossy(),
+            if full { "DEC " } else { "miss" },
+            near.map_or("none".to_string(), |(r, c)| format!("#{r} {:.2}", c.sync)),
+            synced.map_or("-".to_string(), |s| format!(
+                "{:+.1} {:+.2} {:.2}",
+                (s.start - start) * 1e3,
+                s.f0 - f0,
+                s.power
+            )),
+            w,
+            flag(okc),
+            wt,
+            flag(okt),
+            all.map_or("-".to_string(), |b| format!(
+                "{:+.1} {:+.2}",
+                (b.0 - start) * 1e3,
+                b.1 - f0
+            )),
+            wa,
+            flag(oka),
+        );
+    }
+}

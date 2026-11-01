@@ -36,6 +36,8 @@
 //! not shown as a best guess (POLICY.md, rule 2); it is counted as malformed.
 
 #[cfg(test)]
+mod compare;
+#[cfg(test)]
 mod conformance;
 /// The menu section the FT8 view is filed under: the one whose being on
 /// screen turns the FT8 feed on.

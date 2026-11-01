@@ -79,6 +79,139 @@ pub fn correlate(y: &[Complex<f32>], n0: i64, hz: f64) -> Correlations {
     z
 }
 
+/// **Synchronisation on every symbol**, for a candidate the Costas arrays
+/// alone placed too loosely to decode. The 21 Costas symbols are 27 % of a
+/// transmission's energy; near the decoding threshold their peak wanders by
+/// a hertz and tens of milliseconds, and the two- and three-symbol blocks,
+/// which add symbols coherently, fall apart at a hertz (half a turn over
+/// three symbols). Here every symbol counts: the Costas symbols on their
+/// known tone, each data symbol on its strongest. Measured on simulated
+/// cycles at -20 dB, the frequency error fell from up to 1.2 Hz to mostly
+/// under 0.3.
+///
+/// `y` is the baseband slice with tone 0 at `hz` (the candidate's offset
+/// from the slice's middle) and the transmission at sample `n0`; returns the
+/// start, seconds, and the offset, Hz, that put the most energy where the
+/// symbols are. A coarse grid (±50 ms in 10 ms, ±1.5 Hz in 0.25 Hz), then a
+/// fine one about its best, then a parabola through the fine neighbours.
+pub fn resync(y: &[Complex<f32>], n0: f64, hz: f64) -> (f64, f64) {
+    let len = SYMBOLS * DOWN_SYMBOL;
+    // The tones against a symbol's start, conjugated: one table for every
+    // evaluation, so the inner loop has no trigonometry.
+    let tone: [[Complex<f32>; DOWN_SYMBOL]; 8] = std::array::from_fn(|t| {
+        std::array::from_fn(|n| {
+            let ph = -TAU * t as f64 * TONE_SPACING * n as f64 / DOWN_RATE;
+            Complex::new(ph.cos() as f32, ph.sin() as f32)
+        })
+    });
+    let costas_tone = |k: usize| {
+        COSTAS_AT
+            .iter()
+            .find(|&&a| k >= a && k < a + COSTAS.len())
+            .map(|&a| usize::from(COSTAS[k - a]))
+    };
+    let energy = |start: i64, off: f64| -> f32 {
+        // The slice from `start`, turned so tone 0 sits at zero.
+        let step = Complex::from_polar(1.0f64, -TAU * off / DOWN_RATE);
+        let mut rot = Complex::from_polar(1.0f64, -TAU * off * start as f64 / DOWN_RATE);
+        let mut seg = vec![Complex::new(0.0f32, 0.0); len];
+        for (k, v) in seg.iter_mut().enumerate() {
+            let i = start + k as i64;
+            if i >= 0 && (i as usize) < y.len() {
+                *v = y[i as usize] * Complex::new(rot.re as f32, rot.im as f32);
+            }
+            rot *= step;
+            if k % DOWN_SYMBOL == DOWN_SYMBOL - 1 {
+                rot /= rot.norm();
+            }
+        }
+        let mut e = 0f32;
+        for (s, chunk) in seg.as_chunks::<DOWN_SYMBOL>().0.iter().enumerate() {
+            let power = |t: usize| {
+                chunk
+                    .iter()
+                    .zip(&tone[t])
+                    .map(|(a, b)| a * b)
+                    .sum::<Complex<f32>>()
+                    .norm_sqr()
+            };
+            e += match costas_tone(s) {
+                Some(t) => power(t),
+                None => (0..8).map(power).fold(0f32, f32::max),
+            };
+        }
+        e
+    };
+    let base = n0.round() as i64;
+    let mut best = (0i64, 0.0f64, f32::MIN);
+    for dt in (-10..=10).step_by(2) {
+        for j in -6..=6 {
+            let off = hz + f64::from(j) * 0.25;
+            let e = energy(base + dt, off);
+            if e > best.2 {
+                best = (dt, off, e);
+            }
+        }
+    }
+    // Fine: a sample and an eighth of a hertz either way, then the vertex.
+    let (bt, bf, _) = best;
+    let mut grid = [[0f32; 3]; 3];
+    for (a, row) in grid.iter_mut().enumerate() {
+        for (b, cell) in row.iter_mut().enumerate() {
+            *cell = energy(base + bt + a as i64 - 1, bf + (b as f64 - 1.0) * 0.125);
+        }
+    }
+    let (mut ia, mut ib) = (1usize, 1usize);
+    for a in 0..3 {
+        for b in 0..3 {
+            if grid[a][b] > grid[ia][ib] {
+                (ia, ib) = (a, b);
+            }
+        }
+    }
+    let di = if ia == 1 {
+        super::search::vertex(grid[0][1], grid[1][1], grid[2][1])
+    } else {
+        0.0
+    };
+    let dj = if ib == 1 {
+        super::search::vertex(grid[1][0], grid[1][1], grid[1][2])
+    } else {
+        0.0
+    };
+    let start = (base + bt + ia as i64 - 1) as f64 + di;
+    let off = bf + (ib as f64 - 1.0) * 0.125 + dj * 0.125;
+    (start / DOWN_RATE, off)
+}
+
+/// **Synchronisation on the tones themselves**: the place and frequency
+/// [`measure`] fits coherently over all 79 symbols, given the tones the
+/// one-symbol decisions chose (each data symbol's strongest, the Costas
+/// symbols' own). Most of them are right even when the code cannot finish,
+/// and a coherent fit over 79 symbols is far tighter than any energy search:
+/// on simulated cycles at -21 dB it put the frequency within 0.01 Hz where
+/// [`resync`] left half a hertz. Returns the start, seconds, and the offset,
+/// Hz, of tone 0 in `y`.
+pub fn data_aided(y: &[Complex<f32>], n0: i64, hz: f64, z: &Correlations) -> (f64, f64) {
+    let tones: [u8; SYMBOLS] = std::array::from_fn(|k| {
+        COSTAS_AT
+            .iter()
+            .find(|&&a| k >= a && k < a + COSTAS.len())
+            .map(|&a| COSTAS[k - a])
+            .unwrap_or_else(|| {
+                (0..8u8)
+                    .max_by(|&a, &b| {
+                        z[k][usize::from(a)]
+                            .norm_sqr()
+                            .total_cmp(&z[k][usize::from(b)].norm_sqr())
+                    })
+                    .unwrap_or(0)
+            })
+    });
+    let p = measure(y, n0 as f64 / DOWN_RATE, hz, &tones, z);
+    (p.start, p.f0)
+}
+
 /// How many of the 21 Costas symbols are strongest on the tone they should be.
 pub fn costas_matched(z: &Correlations) -> u8 {
     let mut n = 0;

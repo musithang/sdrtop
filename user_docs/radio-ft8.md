@@ -147,17 +147,27 @@ time, then the LDPC code, then the 14-bit check. Every decoded signal is
 then rebuilt and **subtracted**, and the band searched again, up to three
 passes, so a weak signal under a strong one gets its turn.
 
+Near the threshold the sync patterns alone place a signal a few
+milliseconds and up to a hertz off, and that is where most weak decodes
+used to be lost. So a candidate that looks like a signal and does not
+decode is tried twice more: where all 79 symbols put the most energy, and
+then where the tones chosen there fit best, coherently, over the whole
+transmission.
+
 The ordered-statistics search is powerful enough to "decode" noise into a
 message whose check passes, which is how a decoder ends up reporting a
 station in the middle of the Pacific that nobody sent. Here it is only
 believed with the sync visibly there and a plausible number of bits
-repaired. That costs about half a dB of sensitivity; a station that was
-never there costs more.
+repaired. That costs a little sensitivity; a station that was never there
+costs more.
 
-Measured on synthetic signals: half of them decode at about -20.4 dB SNR,
-between the two figures the protocol's authors give for their own decoder.
-A crowded cycle of forty signals takes about five seconds on a modest
-laptop, inside the fifteen it has.
+Measured on synthetic signals: half of them decode at about -21.2 dB SNR,
+a little better than the figure the protocol's authors give for their own
+decoder. On the same simulated cycles WSJT-X 3.0.2's command-line decoder
+does about 0.2 dB better at its fast depth and 0.6 dB better at its normal
+one; it has had a decade of tuning, and we are working on it. A crowded
+cycle of forty signals takes about six seconds on a modest laptop, inside
+the fifteen it has.
 
 ## The clock
 

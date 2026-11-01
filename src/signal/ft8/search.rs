@@ -334,7 +334,7 @@ fn references(hz: f64) -> [Vec<Complex<f32>>; 8] {
 
 /// The vertex of the parabola through three equally spaced values, as an
 /// offset from the middle one in steps (within half a step).
-fn vertex(a: f32, b: f32, c: f32) -> f64 {
+pub(super) fn vertex(a: f32, b: f32, c: f32) -> f64 {
     let den = f64::from(a - 2.0 * b + c);
     if den >= 0.0 {
         return 0.0;
