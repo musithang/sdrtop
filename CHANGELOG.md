@@ -12,12 +12,85 @@ field falls back to a default rather than refusing to start.
 
 ## [Unreleased]
 
+## [0.7.1] - 2026-11-01
+
+**Short waves, and the whole world on a map.**
+
+The Airspy HF+ Discovery is the fourth radio sdrtop drives itself, and
+the first one for the short waves. So the Radio tile got its second view,
+and it is FT8: sdrtop's own decoder, no library, every station drawn on a
+map of the world around you where it said it was, with the sun's light
+on the land and the clock judged by the stations themselves. It was first
+heard on 40 m one October evening, and then held against WSJT-X on the
+same samples, which found two things to fix and one to be pleased about.
+
 ### Added
 
+- **Native Airspy HF+ Discovery.** libairspyhf loaded at run time like
+  the other native libraries, offered without `--device`. Its two bands
+  and the gap between them, its seven rates (`S` lists them, the arrows
+  step through), and ATT and LNA shown for what they are: digital gain
+  after the converter, with the radio's own AGCs always at work and the
+  bench judging the level against the AGC's hold at about -12 dBFS
+  rather than clipping. The Options pane switches the library's own DSP
+  off and on. Observer mode works for an HF+ another program holds.
+  ([The HF+ Discovery](user_docs/airspy-hf.md))
+- **FT8** (Radio › Digital modes › FT8 › World). sdrtop's own decoder,
+  written from the protocol's definition: message unpacking, LDPC with
+  ordered statistics, subtraction and three passes. Each decode measures
+  its SNR, DT, tone with its spread and drift. On screen: the map, the
+  minute's cycles with the clock as the stations judge it, the band as a
+  river, the decodes cycle by cycle, and the chosen station's card.
+  Opening it retunes nothing; `←` `→` step between the FT8 bands the radio
+  reaches. ([FT8](user_docs/radio-ft8.md))
+- **The map.** Azimuthal around your position, logarithmic or 1 500 to
+  9 000 km, day, night and the grey line for the cycle being heard,
+  stations coloured by how fresh they are and red if they called you,
+  the best DX in the title. `m` focuses it: the arrows move from station
+  to station across the map, `Enter` zooms on one, and switches turn the
+  rays, grid, rings, sun and names on or off, set how far back it
+  reaches, keep this band only, or draw the long way round.
+- **Your station** under Options: latitude, longitude and call, kept in
+  `[station]` across radios. The map is drawn around it and a message to
+  your call is marked yours.
+- **`o` on FT8** writes every decode to CSV: what it said, what it
+  measured, where the sender said it is, and the clock verdict.
 - **Arch, from the AUR.** `sdrtop`, `sdrtop-bin` and `sdrtop-git`, packaged
   by Ateles, are in the install docs, with the Airspy and SoapySDR packages
   their optional dependencies leave out.
   ([Getting started](user_docs/getting-started.md#on-arch-from-the-aur))
+
+### Changed
+
+- **New config blocks**, all optional and written only once set:
+  `[station]`, `[ft8]` and `[airspyhf]`. The front end boost is now kept
+  per radio, by the radio's name, in `[radio.boost]`, so one radio's amp
+  is never handed to the next; the single `amp_enabled` it replaces is
+  no longer read, and every radio starts with its boost off once.
+- Every view in the menu has a name for what it shows (Tuning desk, IQ
+  balance, Gain & noise, Piconets nearby and so on). Preset ids are
+  unchanged, so a saved layout still opens.
+- The header's dial shows a gap between a radio's bands as a gap, named
+  where it fits (`31–60M` on the HF+).
+- Where the samples are turned off the LO, the I/Q balance says so
+  instead of measuring a quadrature it cannot see.
+
+### Fixed
+
+- A sweep over a range the radio does not reach no longer sweeps its
+  nearest edge 145 times and draws it as the range; it sweeps what the
+  radio tunes and refuses a range with nothing left.
+- Wideband noise is no longer read as a stereo pilot, and a band full of
+  stations is no longer one "clean WFM signal".
+- A stream restarted for a rate change no longer reads as a clock 9 000
+  ppm slow.
+- A rate under 1 Msps keeps its kilosamples (0.768, not 0.8).
+- An attenuator's bar moves on the Command Rail, the RF chain and the
+  compact views, and a negative gain reads negative.
+- FT8, from the comparison with WSJT-X: a weak signal is read at the
+  place every symbol agrees on, not only where the sync patterns put it
+  (half of all signals now decode at about -21.2 dB instead of -20.4),
+  and a steady carrier no longer decodes as an empty message.
 
 ## [0.7.0] - 2026-10-24
 
@@ -1329,7 +1402,8 @@ sdrtop stopped being a one-radio program.
   image rejection ratio, wavelength and antenna metrics.
 - Config file with atomic save on quit, and the CLI flags that override it.
 
-[Unreleased]: https://github.com/musithang/sdrtop/compare/v0.7.0...HEAD
+[Unreleased]: https://github.com/musithang/sdrtop/compare/v0.7.1...HEAD
+[0.7.1]: https://github.com/musithang/sdrtop/compare/v0.7.0...v0.7.1
 [0.7.0]: https://github.com/musithang/sdrtop/compare/v0.6.9...v0.7.0
 [0.6.9]: https://github.com/musithang/sdrtop/compare/v0.6.8...v0.6.9
 [0.6.8]: https://github.com/musithang/sdrtop/compare/v0.6.7...v0.6.8
