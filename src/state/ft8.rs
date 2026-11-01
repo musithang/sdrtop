@@ -58,6 +58,9 @@ pub struct CycleEntry {
     /// Power across the band, dB over the cycle's own median, in 25 Hz bins
     /// from 0 Hz: where there was energy, decoded or not.
     pub band: Vec<f32>,
+    /// The clock verdict as it stood when this cycle was published, so a
+    /// record of the cycle carries the one it was read with.
+    pub clock: Option<ClockVerdict>,
 }
 
 impl CycleEntry {
@@ -490,6 +493,8 @@ impl Ft8State {
         if clock.is_some() || cycle.outcome == CycleOutcome::Decoded {
             self.clock = clock;
         }
+        let mut cycle = cycle;
+        cycle.clock = self.clock;
         // In time order, whatever order they were finished in: a cycle the
         // decoder had no room for is published before the one it was busy
         // with.
@@ -698,6 +703,7 @@ mod tests {
             malformed: 0,
             seconds: 0.0,
             band: Vec::new(),
+            clock: None,
         }
     }
 

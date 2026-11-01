@@ -135,6 +135,7 @@ fn decode_loop(rx: Receiver<Job>, state: Arc<Mutex<SdrMetrics>>, settings: Setti
             malformed: report.malformed,
             seconds,
             band: report.band,
+            clock: None,
         };
         let now = Instant::now();
         let mut m = state.lock().unwrap_or_else(|e| e.into_inner());
@@ -155,6 +156,7 @@ fn undecoded(start_unix: f64, dial_hz: u64, outcome: CycleOutcome) -> CycleEntry
         malformed: 0,
         seconds: 0.0,
         band: Vec::new(),
+        clock: None,
     }
 }
 

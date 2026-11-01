@@ -225,6 +225,7 @@ pub(crate) mod sample {
             malformed: 0,
             seconds: 1.8,
             band,
+            clock: None,
         }
     }
 

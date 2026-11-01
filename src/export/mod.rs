@@ -19,6 +19,7 @@ pub mod bt;
 pub mod census;
 pub mod destination;
 pub mod fer;
+pub mod ft8;
 pub mod iq;
 pub mod occupancy;
 pub mod provenance;
@@ -159,6 +160,23 @@ pub fn net_section(
             )
         },
     ]
+}
+
+/// Write the FT8 view's body: every decode held, one to a row.
+pub fn ft8_section(
+    state: &SdrMetrics,
+    dir: &std::path::Path,
+    unix_secs: i64,
+) -> Result<Written, String> {
+    one(
+        state,
+        dir,
+        unix_secs,
+        "ft8",
+        ft8::HEADER,
+        ft8::rows(state),
+        ft8::note(state),
+    )
 }
 
 fn one(

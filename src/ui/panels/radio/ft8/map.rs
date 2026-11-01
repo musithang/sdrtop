@@ -906,6 +906,7 @@ pub(crate) mod tests {
             malformed: 0,
             seconds: 1.8,
             band: Vec::new(),
+            clock: None,
         });
         m.ft8.hearing = Some(NOW + 15.0);
         m

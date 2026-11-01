@@ -328,6 +328,12 @@ pub const GLOBAL: &[(&str, &[Binding])] = &[
                 "on FT8: forget the decodes, the stations and the map",
                 Footer::Section(&[crate::signal::ft8::SECTION], "clear"),
             ),
+            f(
+                "O",
+                Some('o'),
+                "on FT8: write every decode held to a CSV file, with what each measured",
+                Footer::Section(&[crate::signal::ft8::SECTION], "export"),
+            ),
         ],
     ),
     (

@@ -108,12 +108,44 @@ pub fn block(state: &SdrMetrics, unix_secs: i64) -> Vec<String> {
                 geometry.full_scale,
             ),
         ),
-        field("mode", format!("NET / {}", state.net.mode.label())),
-        // The rows below show addresses in this mode, so the file says which.
-        field("addresses", addresses_line(state)),
+        mode_line(state, &field),
+        // NET's rows show addresses in this mode, so the file says which;
+        // FT8's distances are measured from you, so it says from where.
+        if state.ui.is_ft8_section() {
+            field("station", station_line(state))
+        } else {
+            field("addresses", addresses_line(state))
+        },
         field("reference", reference_line(state, now)),
         field("session", session),
     ]
+}
+
+/// What the section was doing: NET's mode, or FT8 and the band it was on.
+fn mode_line(state: &SdrMetrics, field: &dyn Fn(&str, String) -> String) -> String {
+    if state.ui.is_ft8_section() {
+        let hz = state.radio.frequency;
+        let band = crate::signal::ft8::bands::band_of(hz)
+            .map_or("not an FT8 frequency".to_string(), str::to_string);
+        field(
+            "mode",
+            format!("FT8 / {band}, dial {:.3} MHz", hz as f64 / 1e6),
+        )
+    } else {
+        field("mode", format!("NET / {}", state.net.mode.label()))
+    }
+}
+
+/// Where the distances in an FT8 file are measured from, and whose call
+/// marks a decode as yours: each said absent when it is.
+fn station_line(state: &SdrMetrics) -> String {
+    let at = state
+        .home
+        .position()
+        .and_then(|(lat, lon)| crate::geo::maidenhead::locator(lat, lon, 3))
+        .unwrap_or_else(|| "no position, so no distances".to_string());
+    let call = state.home.callsign.as_deref().unwrap_or("no call");
+    format!("{at}   {call}")
 }
 
 /// How the addresses below are shown, and, when a registrant's name can be
@@ -242,6 +274,28 @@ mod tests {
         assert!(joined.contains(env!("CARGO_PKG_VERSION")), "{joined}");
         assert!(joined.contains("2026-09-05T18:22:41Z"), "{joined}");
         assert!(joined.contains("HackRF"), "{joined}");
+    }
+
+    /// **An FT8 file says FT8**, its band and where its distances are from,
+    /// not the NET mode it was not in.
+    #[test]
+    fn an_ft8_file_names_its_band_and_its_station() {
+        let mut m = SdrMetrics::fixture().streaming();
+        m.ui.section = crate::signal::ft8::SECTION.to_string();
+        m.radio.frequency = 7_074_000;
+        m.home.latitude = Some(46.2917);
+        m.home.longitude = Some(18.5254);
+        m.home.callsign = Some("HA5ZZT".into());
+        let joined = block(&m, 1_788_632_561).join("\n");
+        assert!(joined.contains("FT8 / 40 m, dial 7.074 MHz"), "{joined}");
+        assert!(joined.contains("JN96gh   HA5ZZT"), "{joined}");
+        assert!(
+            !joined.contains("NET /") && !joined.contains("addresses"),
+            "{joined}"
+        );
+        m.home.latitude = None;
+        let joined = block(&m, 1_788_632_561).join("\n");
+        assert!(joined.contains("no position, so no distances"), "{joined}");
     }
 
     /// **An unreferenced radio says so.** The reference line is the one most

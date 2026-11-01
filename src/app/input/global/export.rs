@@ -5,8 +5,8 @@
 
 use super::super::{metrics, InputCtx};
 
-/// Export the NET section, and say in the log exactly what happened to each
-/// file.
+/// Export the NET section, or the FT8 view's decodes, and say in the log
+/// exactly what happened to each file.
 ///
 /// **Section-scoped, and it declines rather than absorbing.** The same rule
 /// `[m]` follows: a global arm added for one section must fall through when that
@@ -18,7 +18,8 @@ use super::super::{metrics, InputCtx};
 /// and would put the "did it work" answer somewhere other than the keypress.
 pub(super) fn export_section(ctx: &mut InputCtx<'_>) -> bool {
     let mut m = metrics(ctx.state);
-    if !m.ui.is_net_section() {
+    let ft8 = m.ui.is_ft8_section();
+    if !m.ui.is_net_section() && !ft8 {
         return false;
     }
 
@@ -34,7 +35,12 @@ pub(super) fn export_section(ctx: &mut InputCtx<'_>) -> bool {
         .map(|d| d.as_secs() as i64)
         .unwrap_or(0);
 
-    for result in crate::export::net_section(&m, &dir, unix_secs) {
+    let results = if ft8 {
+        vec![crate::export::ft8_section(&m, &dir, unix_secs)]
+    } else {
+        crate::export::net_section(&m, &dir, unix_secs)
+    };
+    for result in results {
         m.push_log(match result {
             Ok(w) => {
                 let what = match (w.rows, &w.note) {

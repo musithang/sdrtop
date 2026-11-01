@@ -112,7 +112,7 @@ the way of the same key elsewhere:
 |-----|--------|
 | `m` | Survey the band, or lock where you are ([survey or lock](net-reading.md#survey-or-lock-m)) |
 | `i` | Show addresses in full, by vendor and kind, or masked ([addresses](net-reading.md#addresses-i)) |
-| `o` | Write the band, the census, the BLE packets, their error curve and the classic hits to files ([taking the data away](net-export.md)) |
+| `o` | Write the band, the census, the BLE packets, their error curve and the classic hits to files ([taking the data away](net-export.md)); on FT8, the decodes |
 | `←` `→` | Locked: the previous or next place this view listens. On Advertising and Census, advertising channel 37, 38, 39 and round again; under Wi-Fi, the next Wi-Fi channel, 1 to 13; elsewhere one block of the band along ([stepping](net-reading.md#stepping-while-locked)) |
 
 **On the pager** (Radio › Pagers › POCSAG) its buttons work the moment the
@@ -146,6 +146,7 @@ doing what they do there:
 | `u` | Only the messages that name your call, or every one again. Needs your call under Options, Station |
 | `c` | Forget what was heard: the decodes, the stations, the map |
 | `m` | Focus the map: what it draws, [below](#ft8-map-focus-mode) |
+| `o` | Write every decode the view still holds (the newest 500) to `ft8-YYYYMMDD-HHMMSS.csv`, beside the NET exports: what each said and what it measured, its place and distance where the sender said where it is, and the clock verdict its cycle was read with. Anything not heard is left blank |
 
 `p` stays inside the group. It used to walk every preset in the app in
 alphabetical order, which meant leaving the benches for a compact view halfway
