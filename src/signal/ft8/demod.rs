@@ -327,38 +327,57 @@ const START_STEP: f64 = 0.0005;
 const F0_FLOOR: f64 = 0.01;
 
 /// The transmission at `start` (seconds into the slice) correlated, symbol by
-/// symbol, against its rebuilt waveform; and that waveform's energy.
+/// symbol, against its rebuilt waveform (tone 0 at `hz`, moving by `drift`
+/// over the transmission); and the waveform's energy in each symbol.
 fn per_symbol(
     y: &[Complex<f32>],
     start: f64,
     hz: f64,
+    drift: f64,
     tones: &[u8; SYMBOLS],
-) -> (Vec<Complex<f64>>, f64) {
+) -> (Vec<Complex<f64>>, Vec<f64>) {
+    per_part(y, start, hz, drift, tones, 1)
+}
+
+/// [`per_symbol`] with each symbol cut into `parts` equal pieces, correlated
+/// one by one.
+fn per_part(
+    y: &[Complex<f32>],
+    start: f64,
+    hz: f64,
+    drift: f64,
+    tones: &[u8; SYMBOLS],
+    parts: usize,
+) -> (Vec<Complex<f64>>, Vec<f64>) {
+    let len = DOWN_SYMBOL / parts;
     let mut reference = vec![Complex::new(0.0f32, 0.0); y.len()];
     let w = Waveform {
         f0: hz,
         start,
         amplitude: 1.0,
-        drift: 0.0,
+        drift,
         phase: 0.0,
     };
     modulate::add(tones, &w, DOWN_RATE, &mut reference);
     let first = (start * DOWN_RATE).ceil() as i64;
-    let per = (0..SYMBOLS)
+    (0..SYMBOLS * parts)
         .map(|s| {
-            let a = first + (s * DOWN_SYMBOL) as i64;
-            (a..a + DOWN_SYMBOL as i64)
+            let a = first + (s * len) as i64;
+            (a..a + len as i64)
                 .filter(|&i| i >= 0 && (i as usize) < y.len())
                 .map(|i| {
                     let (v, r) = (y[i as usize], reference[i as usize]);
-                    Complex::new(f64::from(v.re), f64::from(v.im))
-                        * Complex::new(f64::from(r.re), -f64::from(r.im))
+                    let r = Complex::new(f64::from(r.re), f64::from(r.im));
+                    (
+                        Complex::new(f64::from(v.re), f64::from(v.im)) * r.conj(),
+                        r.norm_sqr(),
+                    )
                 })
-                .sum()
+                .fold((Complex::new(0.0, 0.0), 0.0), |(z, e), (dz, de)| {
+                    (z + dz, e + de)
+                })
         })
-        .collect();
-    let energy = reference.iter().map(|r| f64::from(r.norm_sqr())).sum();
-    (per, energy)
+        .unzip()
 }
 
 /// The 79 correlations summed with a frequency offset and a drift taken out:
@@ -424,6 +443,11 @@ fn vertex(a: f64, b: f64, c: f64) -> f64 {
     (0.5 * (a - c) / den).clamp(-0.5, 0.5)
 }
 
+/// Pieces a symbol is cut into for the signal's power: short enough that a
+/// carrier fading at 2 Hz barely turns inside one, long enough that each
+/// piece still stands above the noise near the decoder's threshold.
+const POWER_PARTS: usize = 2;
+
 /// Measure a decoded transmission in its slice `y` (tone 0 near `hz`,
 /// starting near `start` seconds), given the tones it was sent as.
 pub fn measure(
@@ -435,11 +459,11 @@ pub fn measure(
 ) -> Physics {
     // Frequency and drift at the synchronised start, then the start on a
     // finer grid with them, then both again at the start found.
-    let (df, drift, _) = fit(&per_symbol(y, start, hz, tones).0);
+    let (df, drift, _) = fit(&per_symbol(y, start, hz, 0.0, tones).0);
     let k = (START_SPAN / START_STEP).round() as i64;
     let scan: Vec<f64> = (-k..=k)
         .map(|i| {
-            let (per, _) = per_symbol(y, start + i as f64 * START_STEP, hz, tones);
+            let (per, _) = per_symbol(y, start + i as f64 * START_STEP, hz, 0.0, tones);
             coherent(&per, df, drift).norm()
         })
         .collect();
@@ -452,20 +476,24 @@ pub fn measure(
         0.0
     };
     let start = start + ((best as i64 - k) as f64 + off) * START_STEP;
-    let (per, energy) = per_symbol(y, start, hz, tones);
+    let (per, energy) = per_symbol(y, start, hz, 0.0, tones);
+    let energy: f64 = energy.iter().sum();
     let (df, drift, _) = fit(&per);
     let sum = coherent(&per, df, drift);
     let amplitude = sum.norm() / energy.max(f64::MIN_POSITIVE);
 
-    // Noise per sample from the tones not sent: |z|^2 of noise alone is
-    // exponential with mean 32 sigma^2, so its median is ln 2 of that.
+    // Noise per sample from the tones not sent, and not next to the one that
+    // was: a signal whose frequency wanders (fading, a drift the fit missed)
+    // spills into its neighbours, and on a strong one that read as noise.
+    // |z|^2 of noise alone is exponential with mean 32 sigma^2, so its median
+    // is ln 2 of that.
     let mut off: Vec<f32> = z
         .iter()
         .zip(tones)
         .flat_map(|(row, &t)| {
             row.iter()
                 .enumerate()
-                .filter(move |&(k, _)| k != usize::from(t))
+                .filter(move |&(k, _)| k.abs_diff(usize::from(t)) > 1)
                 .map(|(_, c)| c.norm_sqr())
         })
         .collect();
@@ -475,7 +503,25 @@ pub fn measure(
     // Noise density per Hz is sigma^2 over the slice's rate; FT8's SNR is the
     // signal's power over the noise in 2500 Hz.
     let n0_density = sigma2 / DOWN_RATE;
-    let snr = amplitude * amplitude / (2500.0 * n0_density).max(f64::MIN_POSITIVE);
+
+    // The signal's power piece by piece (POWER_PARTS to a symbol), against
+    // the waveform rebuilt at the frequency and drift found: each correlation
+    // is the signal's amplitude times the piece's reference energy E, plus
+    // noise of variance sigma^2 E, so sum(|c|^2 - sigma^2 E) / sum(E^2) is
+    // the mean power with the noise's share taken out. The coherent
+    // amplitude above is the right figure for the frequency and the
+    // subtraction, but not for the power: on a fading path the carrier's
+    // phase wanders over the 12.64 s, the coherent sum partly cancels, and a
+    // signal read that way came out 5 to 9 dB weaker than it was at a 2 Hz
+    // Doppler spread.
+    let (cs, es) = per_part(y, start, hz + df, drift, tones, POWER_PARTS);
+    let (mut excess, mut e2) = (0.0, 0.0);
+    for (c, e) in cs.iter().zip(&es) {
+        excess += c.norm_sqr() - sigma2 * e;
+        e2 += e * e;
+    }
+    let power = excess / e2.max(f64::MIN_POSITIVE);
+    let snr = power / (2500.0 * n0_density).max(f64::MIN_POSITIVE);
 
     // Cramer-Rao bound for a tone's frequency over M samples at rate fs:
     // var = 6 fs^2 / ((2 pi)^2 rho M (M^2 - 1)), rho the per-sample SNR.

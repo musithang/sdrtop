@@ -173,11 +173,21 @@ ones WSJT-X guessed at from what a CQ usually says, which sdrtop does not
 do). A crowded cycle of forty signals takes about six seconds on a modest
 laptop, inside the fifteen it has.
 
-**About SNR.** Off the air sdrtop's figures run about 3 dB below WSJT-X's
-for the same signals (on simulated ones they agree). sdrtop measures the
-noise beside each transmission, in its own slice of the band; WSJT-X
-estimates it across the whole band, and in a busy band that comes out
-kinder. Neither is wrong, but they are not the same number, so compare
+**About SNR.** Once a message is decoded, sdrtop knows which tone every
+symbol was sent on, and measures the signal's power there, half a symbol
+at a time, against the noise in the tones that were not sent. Piece by
+piece, not over the whole transmission at once, because on a real path the
+signal fades and its phase wanders through the 12.64 s: added up as one
+coherent sum, a fading signal reads several dB weaker than it arrived. An
+early version did exactly that, and reported stations at -29.8 dB, which no
+decoder can read (it is beyond what information theory allows FT8). On
+simulated signals, fading by up to 2 Hz or not at all, the figure is now
+within half a dB of the truth.
+
+Off the air it still runs about 1 dB below WSJT-X's for the same signals.
+The likeliest reason is where the noise is taken: sdrtop measures it right
+beside each transmission, WSJT-X across the whole band, and in a busy band
+that comes out a little kinder. Close, but not the same number, so compare
 sdrtop's reports with sdrtop's.
 
 ## The clock

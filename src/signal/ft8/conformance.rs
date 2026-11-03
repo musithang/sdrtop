@@ -15,6 +15,8 @@
 //! Test-only. The rows printed by the ignored `measure_` tests are the numbers
 //! written into the plan; the plain tests hold the bars.
 
+use std::f64::consts::TAU;
+
 use num_complex::Complex;
 
 use super::crc;
@@ -68,6 +70,65 @@ pub fn cycle(sent: &[Sent], rng: &mut Rng) -> Vec<Complex<f32>> {
         modulate::add(&s.tones(), &w, RATE, &mut x);
     }
     x
+}
+
+/// Paths a fading channel's gain is the sum of: enough that the gain's
+/// amplitude is close to Rayleigh.
+const FADING_PATHS: usize = 32;
+
+/// [`cycle`] with each transmission through its own fading path: its gain
+/// a sum of [`FADING_PATHS`] equal paths whose Doppler shifts are Gaussian
+/// with a two-sided spread (two standard deviations) of `spread_hz`, the
+/// shape of the Watterson model an HF channel simulator uses. The gain's
+/// power is one on average but not in any one cycle, so beside the cycle
+/// comes each transmission's SNR as it arrived: its power over the 12.64 s.
+pub fn faded(sent: &[Sent], spread_hz: f64, rng: &mut Rng) -> (Vec<Complex<f32>>, Vec<f64>) {
+    let mut x = rng.noise(CYCLE_SAMPLES, 1.0);
+    let noise_in_2500 = 2500.0 / RATE;
+    let mut arrived = Vec::new();
+    for s in sent {
+        let amplitude = (noise_in_2500 * 10f64.powf(s.snr_db / 10.0)).sqrt();
+        let mut one = vec![Complex::new(0.0f32, 0.0); CYCLE_SAMPLES];
+        let w = Waveform {
+            f0: s.f0,
+            start: s.start(),
+            amplitude,
+            drift: s.drift,
+            phase: 0.0,
+        };
+        modulate::add(&s.tones(), &w, RATE, &mut one);
+        // Each path a phasor turned by its Doppler shift every sample.
+        let (mut now, step): (Vec<Complex<f64>>, Vec<Complex<f64>>) = (0..FADING_PATHS)
+            .map(|_| {
+                let f = rng.normal_pair().0 * spread_hz / 2.0;
+                (
+                    Complex::from_polar(1.0, rng.unit() * TAU),
+                    Complex::from_polar(1.0, TAU * f / RATE),
+                )
+            })
+            .unzip();
+        let norm = (FADING_PATHS as f64).sqrt();
+        let first = (s.start() * RATE).ceil().max(0.0) as usize;
+        let last = (first + (SYMBOLS as f64 * modulate::SYMBOL_SECONDS * RATE) as usize)
+            .min(CYCLE_SAMPLES);
+        let mut power = 0.0;
+        for (i, (v, o)) in x.iter_mut().zip(&one).enumerate() {
+            let g = now.iter().sum::<Complex<f64>>() / norm;
+            for (p, d) in now.iter_mut().zip(&step) {
+                *p *= d;
+            }
+            if (first..last).contains(&i) {
+                power += g.norm_sqr();
+            }
+            if o.re != 0.0 || o.im != 0.0 {
+                let g = g * Complex::new(f64::from(o.re), f64::from(o.im));
+                *v += Complex::new(g.re as f32, g.im as f32);
+            }
+        }
+        power /= (last - first).max(1) as f64;
+        arrived.push(s.snr_db + 10.0 * power.log10());
+    }
+    (x, arrived)
 }
 
 /// `n` transmissions at one SNR, at distinct frequencies at least 60 Hz
@@ -440,6 +501,63 @@ fn a_clean_cycle_decodes_every_message_once_with_its_physics() {
     }
     for z in &rows.f0_z {
         assert!(z.abs() < 3.0, "tone 0 off by {z} of its stated sigma");
+    }
+}
+
+/// On a fading path the carrier's phase wanders through the transmission;
+/// the SNR must still be the power that arrived, not what a coherent sum of
+/// the 79 symbols keeps of it.
+#[test]
+fn snr_holds_on_a_fading_path() {
+    let mut rng = Rng::new(83);
+    let settings = cycle::Settings {
+        max_candidates: 40,
+        ..cycle::Settings::DEFAULT
+    };
+    let sent = readable(6, -12.0, &mut rng);
+    let (x, arrived) = faded(&sent, 2.0, &mut rng);
+    let report = cycle::decode_with(&x, &mut HashBook::new(), &settings);
+    let err: Vec<f64> = report
+        .decodes
+        .iter()
+        .filter_map(|d| {
+            let i = sent.iter().position(|s| s.payload == d.payload)?;
+            Some(d.physics.snr_db - arrived[i])
+        })
+        .collect();
+    assert!(err.len() >= 5, "only {} of 6 decoded", err.len());
+    for e in &err {
+        assert!(e.abs() < 1.5, "SNR off by {e} dB on a fading path");
+    }
+    assert!(mean(&err).abs() < 0.7, "SNR biased by {} dB", mean(&err));
+}
+
+/// SNR error against the SNR that arrived, by Doppler spread.
+#[test]
+#[ignore]
+fn measure_the_snr_on_fading_paths() {
+    let mut rng = Rng::new(89);
+    for snr in [-14.0, -18.0, -20.0] {
+        for spread in [0.0, 0.5, 1.0, 2.0] {
+            let (mut err, mut sent_n) = (Vec::new(), 0);
+            for _ in 0..4 {
+                let sent = readable(12, snr, &mut rng);
+                sent_n += sent.len();
+                let (x, arrived) = faded(&sent, spread, &mut rng);
+                let report = cycle::decode(&x, &mut HashBook::new());
+                for d in &report.decodes {
+                    if let Some(i) = sent.iter().position(|s| s.payload == d.payload) {
+                        err.push(d.physics.snr_db - arrived[i]);
+                    }
+                }
+            }
+            println!(
+                "{snr:>5} dB, spread {spread:.1} Hz: {:>2}/{sent_n} decoded, SNR bias {:+.2} rms {:.2} dB",
+                err.len(),
+                mean(&err),
+                rms_of(&err)
+            );
+        }
     }
 }
 
