@@ -4,7 +4,8 @@
 //! The selected station: where it said it was, its newest message, and what
 //! that message measured and took (POLICY.md, rule 3): SNR in 2500 Hz as FT8
 //! counts it, DT, tone 0 to the precision its uncertainty allows, drift,
-//! Costas symbols on their tones, the soft decisions' block, belief
+//! Costas symbols on their tones, whether the path was steady or fading (and
+//! the coherence that says so), the soft decisions' block, belief
 //! propagation's iterations, the bits repaired, OSD if it was needed, the
 //! pass that found it; then how often and since when it was heard.
 
@@ -184,7 +185,9 @@ impl Panel for Ft8CardPanel {
                 (format!("{} Hz", signed(p.drift, 2)), value),
                 (" over 12.64 s   sync ".into(), label),
                 (format!("{}/21", d.decode.costas), value),
-                (" Costas tones".into(), label),
+                (" Costas tones   path ".into(), label),
+                (if p.fading() { "fading" } else { "steady" }.into(), value),
+                (format!(" {:.2}", p.coherence), label),
             ],
             vec![
                 ("LDPC ".into(), label),
@@ -270,6 +273,7 @@ mod tests {
         assert!(t.contains("SNR -21.0 dB in 2500 Hz"), "{t}");
         assert!(t.contains("2210.60 \u{b1}0.01 Hz"), "{t}");
         assert!(t.contains("OSD order 2"), "{t}");
+        assert!(t.contains("Costas tones   path steady 1.00"), "{t}");
         assert!(t.contains("heard 2\u{d7} since 13:14:45"), "{t}");
     }
 

@@ -102,18 +102,13 @@ const OSD_MAX_REPAIRED: u32 = 34;
 /// moving average this many seconds long, on a steady path.
 const GAIN_SECONDS: f64 = 0.32;
 
-/// The same on a fading path, one symbol: short enough to follow a path
+/// The same on a fading path ([`Physics::fading`]), one symbol: short enough to follow a path
 /// fading at 2 Hz. With [`GAIN_SECONDS`] there, a weak signal 20 Hz from a
 /// strong one was read beneath it 4 times in 48 against 47 alone, and with
 /// this 35; at 1 Hz, 39 and 43 of 46. On a steady path it costs instead: the
 /// shorter average is noisier and takes some of its neighbours with it (a
 /// crowded band, 141 of 160 against 149).
 const FADING_GAIN_SECONDS: f64 = 0.16;
-
-/// Below this [`Physics::coherence`] a path is taken as fading. Measured on
-/// simulated paths: steady ones 0.79 to 1.13, fading by 0.5 to 2 Hz 0.12 to
-/// 0.64.
-const FADING_COHERENCE: f64 = 0.7;
 
 /// One transmission read, and what it took.
 #[derive(Clone, Debug, PartialEq)]
@@ -357,7 +352,7 @@ fn subtract(x: &mut [Complex<f32>], f: &Found) {
     modulate::add(&f.tones, &w, RATE, &mut r);
     // g = low-pass of x r*, a centred moving average by prefix sums.
     let n = x.len();
-    let seconds = if f.physics.coherence < FADING_COHERENCE {
+    let seconds = if f.physics.fading() {
         FADING_GAIN_SECONDS
     } else {
         GAIN_SECONDS

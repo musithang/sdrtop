@@ -6,9 +6,9 @@
 //! own filter shows.
 //!
 //! **What each decode measured, beside what it said** (POLICY.md, rule 3):
-//! SNR, DT, tone and its spread, drift, the Costas tones on their tone, the
-//! LDPC's iterations and repairs, OSD's order, and the clock verdict the
-//! cycle was read with. **Blank wherever nothing was heard** (rule 2): a
+//! SNR, DT, tone and its spread, drift, the path's coherence, the Costas
+//! tones on their tone, the LDPC's iterations and repairs, OSD's order, and
+//! the clock verdict the cycle was read with. **Blank wherever nothing was heard** (rule 2): a
 //! message with no locator has no `locator`; a station that never sent one
 //! has no place, no distance and no bearing; without your position there is
 //! no distance either; OSD not needed is blank, not zero.
@@ -21,7 +21,7 @@ use crate::geo::{maidenhead, sphere};
 use crate::state::SdrMetrics;
 
 pub const HEADER: &str = "utc,cycle,band,dial_hz,tone_hz,tone_sigma_hz,\
-snr_db,dt_s,drift_hz,sync_of_21,ldpc_iterations,bits_repaired,osd_order,\
+snr_db,dt_s,drift_hz,coherence,sync_of_21,ldpc_iterations,bits_repaired,osd_order,\
 block,pass,message,from,to,for_me,locator,station_locator,lat,lon,km,\
 bearing_deg,clock_median_dt_s,clock_spread_s,clock_decodes";
 
@@ -89,6 +89,7 @@ pub fn rows(state: &SdrMetrics) -> Vec<String> {
                 format!("{:.1}", p.snr_db),
                 format!("{:.3}", d.dt),
                 format!("{:.2}", p.drift),
+                format!("{:.2}", p.coherence),
                 d.costas.to_string(),
                 d.iterations.to_string(),
                 d.repaired.to_string(),
@@ -175,6 +176,7 @@ mod tests {
         let km: f64 = f[column(HEADER, "km")].parse().unwrap();
         assert!((8000.0..10_000.0).contains(&km), "{km}");
         assert_eq!(f[column(HEADER, "osd_order")], "2");
+        assert_eq!(f[column(HEADER, "coherence")], "1.00");
     }
 
     #[test]

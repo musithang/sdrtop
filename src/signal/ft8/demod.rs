@@ -309,6 +309,18 @@ pub struct Physics {
     pub coherence: f64,
 }
 
+/// Below this [`Physics::coherence`] the path is fading. Measured on
+/// simulated paths: steady ones read 0.79 to 1.13 (above 1 by the noise),
+/// paths fading by 0.5 to 2 Hz 0.12 to 0.64.
+pub const FADING_COHERENCE: f64 = 0.7;
+
+impl Physics {
+    /// Whether the path this came over was fading while it was sent.
+    pub fn fading(&self) -> bool {
+        self.coherence < FADING_COHERENCE
+    }
+}
+
 /// The tones a 91-bit word is sent as.
 pub fn tones_of(word91: u128) -> [u8; SYMBOLS] {
     modulate::channel_symbols(&ldpc::encode(word91))

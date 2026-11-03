@@ -134,6 +134,7 @@ The chosen station's newest decode, as received:
 | **Tone** | Tone 0's frequency above the dial, with its spread, one standard deviation |
 | **Drift** | How far the frequency moved over the 12.64 s of the transmission |
 | **Sync** | How many of the 21 Costas tones (the three 7-tone sync patterns) stood on their own tone |
+| **Path** | `steady` or `fading`, and the coherence that says which: of the signal's power, the share one steady carrier explains. Near 1 when the path held still for the 12.64 s; under 0.7 it was fading, its strength and phase wandering as the ionosphere moved, and the subtraction follows it more closely (below) |
 | **LDPC** | How many iterations the error correction took, how many of the 174 bits it repaired, and whether it needed the slower ordered-statistics search (OSD) |
 | **Block, pass** | How many symbols were read together, and which subtraction pass found it (below) |
 | **Heard** | How often since when, and its SNR over those times |
@@ -146,8 +147,8 @@ places, and reads each: soft decisions over one, two or three symbols at a
 time, then the LDPC code, then the 14-bit check. Every decoded signal is
 then rebuilt and **subtracted**, and the band searched again, up to three
 passes, so a weak signal under a strong one gets its turn. The rebuilt
-signal follows the strong one's fading: on a path that wavers it is
-followed closely, on a steady one smoothly, since close following also
+signal follows the strong one's fading: on a path the card calls fading it
+is followed closely, on a steady one smoothly, since close following also
 takes a little of the neighbours with it.
 
 Near the threshold the sync patterns alone place a signal a few
@@ -226,6 +227,7 @@ One row per decode, oldest first, whatever the list's filter:
 | `band`, `dial_hz` | Where the radio was tuned |
 | `tone_hz`, `tone_sigma_hz` | Tone 0 above the dial, and its spread |
 | `snr_db`, `dt_s`, `drift_hz` | As on the card |
+| `coherence` | The path's, as on the card: under 0.7 it was fading |
 | `sync_of_21`, `ldpc_iterations`, `bits_repaired`, `osd_order` | As on the card; `osd_order` blank where it was not needed |
 | `block`, `pass` | As on the card |
 | `message`, `from`, `to`, `for_me` | What was sent, by whom, to whom, and whether to you |
