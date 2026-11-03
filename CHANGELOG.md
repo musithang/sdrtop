@@ -12,6 +12,43 @@ field falls back to a default rather than refusing to start.
 
 ## [Unreleased]
 
+## [0.7.2] - 2026-11-03
+
+**FT8 heard stations no decoder can hear.**
+
+A few evenings on 40 m put stations in the list at -29.8 dB, which is
+below what information theory lets 77 bits through in 12.64 seconds,
+for any decoder. The decodes were real; the figure was not. On a real
+path the signal fades and its phase wanders, and the SNR was taken as
+one coherent sum over the whole transmission, which a fading signal
+partly cancels. Simulated paths fading at 2 Hz read 5 to 9 dB low.
+
+### Fixed
+
+- **FT8's SNR is the power that arrived.** It is measured half a symbol
+  at a time against the tones that were sent, with the noise taken from
+  the tones that were not and not from their neighbours. On simulated
+  paths, steady or fading by up to 2 Hz, it is within half a dB of the
+  truth; off the air it now runs about 1 dB below WSJT-X's for the same
+  signals, not 3.
+- **A weak FT8 signal beneath a fading strong one decodes.** The
+  subtraction follows a fading signal's gain closely and a steady one's
+  smoothly: under a strong signal fading at 2 Hz, 35 of 48 weak ones
+  read instead of 4, and a steady crowded band is unchanged.
+- The FT8 and pager views no longer keep a spectrum running that nothing
+  on them shows (about a tenth of a core at 912 kS/s on a modest laptop).
+
+### Added
+
+- **Steady or fading.** The FT8 station card says which the path was,
+  with the coherence that decides it, and the export carries it.
+
+### Changed
+
+- The FT8 export has a `coherence` column after `drift_hz`. A reader that
+  goes by the header is unaffected; one that counts columns is not.
+- Dependencies updated within their declared ranges.
+
 ## [0.7.1] - 2026-11-01
 
 **Short waves, and the whole world on a map.**
@@ -1402,7 +1439,8 @@ sdrtop stopped being a one-radio program.
   image rejection ratio, wavelength and antenna metrics.
 - Config file with atomic save on quit, and the CLI flags that override it.
 
-[Unreleased]: https://github.com/musithang/sdrtop/compare/v0.7.1...HEAD
+[Unreleased]: https://github.com/musithang/sdrtop/compare/v0.7.2...HEAD
+[0.7.2]: https://github.com/musithang/sdrtop/compare/v0.7.1...v0.7.2
 [0.7.1]: https://github.com/musithang/sdrtop/compare/v0.7.0...v0.7.1
 [0.7.0]: https://github.com/musithang/sdrtop/compare/v0.6.9...v0.7.0
 [0.6.9]: https://github.com/musithang/sdrtop/compare/v0.6.8...v0.6.9
