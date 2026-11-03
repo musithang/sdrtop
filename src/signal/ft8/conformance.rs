@@ -526,10 +526,49 @@ fn snr_holds_on_a_fading_path() {
         })
         .collect();
     assert!(err.len() >= 5, "only {} of 6 decoded", err.len());
+    for d in &report.decodes {
+        assert!(
+            d.physics.coherence < 0.7,
+            "a path fading at 2 Hz read as steady: coherence {}",
+            d.physics.coherence
+        );
+    }
     for e in &err {
         assert!(e.abs() < 1.5, "SNR off by {e} dB on a fading path");
     }
     assert!(mean(&err).abs() < 0.7, "SNR biased by {} dB", mean(&err));
+}
+
+/// A strong signal fading at 2 Hz is taken out closely enough that a weak
+/// one 20 Hz above it still decodes: the subtraction follows the gain at the
+/// rate the path changes it.
+#[test]
+fn a_weak_signal_comes_out_from_beneath_a_fading_one() {
+    let mut rng = Rng::new(101);
+    let settings = cycle::Settings {
+        max_candidates: 60,
+        ..cycle::Settings::DEFAULT
+    };
+    let weak = readable_apart(4, -14.0, 200.0, &mut rng);
+    let mut strong = readable(4, -2.0, &mut rng);
+    for (s, w) in strong.iter_mut().zip(&weak) {
+        s.f0 = w.f0 - 20.0;
+        s.dt = w.dt + 0.2;
+    }
+    let both: Vec<Sent> = weak.iter().chain(&strong).copied().collect();
+    let (x, _) = faded(&both, 2.0, &mut rng);
+    let report = cycle::decode_with(&x, &mut HashBook::new(), &settings);
+    let read = |sent: &[Sent]| {
+        sent.iter()
+            .filter(|s| report.decodes.iter().any(|d| d.payload == s.payload))
+            .count()
+    };
+    assert_eq!(read(&strong), 4);
+    assert!(
+        read(&weak) >= 3,
+        "{} of 4 weak ones from beneath",
+        read(&weak)
+    );
 }
 
 /// SNR error against the SNR that arrived, by Doppler spread.
@@ -539,7 +578,7 @@ fn measure_the_snr_on_fading_paths() {
     let mut rng = Rng::new(89);
     for snr in [-14.0, -18.0, -20.0] {
         for spread in [0.0, 0.5, 1.0, 2.0] {
-            let (mut err, mut sent_n) = (Vec::new(), 0);
+            let (mut err, mut coh, mut sent_n) = (Vec::new(), Vec::new(), 0);
             for _ in 0..4 {
                 let sent = readable(12, snr, &mut rng);
                 sent_n += sent.len();
@@ -548,6 +587,7 @@ fn measure_the_snr_on_fading_paths() {
                 for d in &report.decodes {
                     if let Some(i) = sent.iter().position(|s| s.payload == d.payload) {
                         err.push(d.physics.snr_db - arrived[i]);
+                        coh.push(d.physics.coherence);
                     }
                 }
             }
@@ -557,7 +597,51 @@ fn measure_the_snr_on_fading_paths() {
                 mean(&err),
                 rms_of(&err)
             );
+            coh.sort_by(f64::total_cmp);
+            if !coh.is_empty() {
+                println!(
+                    "    coherence min {:.2} median {:.2} max {:.2}",
+                    coh[0],
+                    coh[coh.len() / 2],
+                    coh[coh.len() - 1]
+                );
+            }
         }
+    }
+}
+
+/// A weak signal 20 Hz above a strong one, both fading: read alone, and from
+/// beneath the strong one after its subtraction.
+#[test]
+#[ignore]
+fn measure_beneath_a_fading_signal() {
+    let mut rng = Rng::new(97);
+    for spread in [0.0, 1.0, 2.0] {
+        let (mut alone, mut beneath, mut strong_read, mut n) = (0, 0, 0, 0);
+        for _ in 0..8 {
+            let weak = readable_apart(6, -16.0, 150.0, &mut rng);
+            let mut strong = readable(6, -4.0, &mut rng);
+            for (s, w) in strong.iter_mut().zip(&weak) {
+                s.f0 = w.f0 - 20.0;
+                s.dt = w.dt + 0.2;
+            }
+            n += weak.len();
+            let count = |sent: &[Sent], decodes: &[cycle::Decode]| {
+                sent.iter()
+                    .filter(|s| decodes.iter().any(|d| d.payload == s.payload))
+                    .count()
+            };
+            let (x, _) = faded(&weak, spread, &mut rng);
+            alone += count(&weak, &cycle::decode(&x, &mut HashBook::new()).decodes);
+            let both: Vec<Sent> = weak.iter().chain(&strong).copied().collect();
+            let (x, _) = faded(&both, spread, &mut rng);
+            let r = cycle::decode(&x, &mut HashBook::new());
+            beneath += count(&weak, &r.decodes);
+            strong_read += count(&strong, &r.decodes);
+        }
+        println!(
+            "spread {spread:.1} Hz: weak alone {alone}/{n}, beneath a strong one {beneath}/{n} (strong {strong_read}/{n})"
+        );
     }
 }
 

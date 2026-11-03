@@ -145,7 +145,10 @@ patterns across the band and at every start time, takes the best few hundred
 places, and reads each: soft decisions over one, two or three symbols at a
 time, then the LDPC code, then the 14-bit check. Every decoded signal is
 then rebuilt and **subtracted**, and the band searched again, up to three
-passes, so a weak signal under a strong one gets its turn.
+passes, so a weak signal under a strong one gets its turn. The rebuilt
+signal follows the strong one's fading: on a path that wavers it is
+followed closely, on a steady one smoothly, since close following also
+takes a little of the neighbours with it.
 
 Near the threshold the sync patterns alone place a signal a few
 milliseconds and up to a hertz off, and that is where most weak decodes

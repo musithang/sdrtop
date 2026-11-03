@@ -198,6 +198,7 @@ pub(crate) mod sample {
                 drift: -0.2,
                 amplitude: 0.1,
                 phase: 0.0,
+                coherence: 1.0,
             },
             costas: if osd.is_some() { 15 } else { 21 },
             block: if osd.is_some() { 3 } else { 1 },

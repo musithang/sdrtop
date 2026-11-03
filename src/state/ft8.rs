@@ -682,6 +682,7 @@ mod tests {
                 drift: 0.0,
                 amplitude: 1.0,
                 phase: 0.0,
+                coherence: 1.0,
             },
             costas: 21,
             block: 1,

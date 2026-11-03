@@ -302,6 +302,11 @@ pub struct Physics {
     pub amplitude: f64,
     /// Carrier phase at the start, for the subtraction.
     pub phase: f64,
+    /// Of the signal's power, the share one steady carrier explains: the
+    /// coherent amplitude squared over the power measured piece by piece.
+    /// Near 1 on a steady path, lower as the path fades and the phase
+    /// wanders.
+    pub coherence: f64,
 }
 
 /// The tones a 91-bit word is sent as.
@@ -537,6 +542,7 @@ pub fn measure(
         drift,
         amplitude,
         phase: sum.arg(),
+        coherence: amplitude * amplitude / power.max(f64::MIN_POSITIVE),
     }
 }
 
