@@ -415,6 +415,46 @@ impl SdrMetrics {
         self
     }
 
+    /// A chain whose front stage is a radio's own setting with its dB per
+    /// band, as the SDRplay RSP1B's LNA is: states 0..9, measured on a cable
+    /// at 14 and 150 MHz (gain re each band's last state), 7 states under
+    /// 50 MHz and 10 from 50 to 420 MHz, nothing measured above. Behind it an
+    /// IF of 0..39 dB. At 150 MHz, LNA state 4 and the IF at 20 dB.
+    pub(crate) fn banded_chain(mut self) -> Self {
+        use crate::hardware::{BandTable, GainModel, StageSpec};
+        let mut caps = (*self.caps).clone();
+        caps.gain = GainModel::new(
+            vec![
+                StageSpec::banded(
+                    "LNA",
+                    10,
+                    vec![
+                        BandTable {
+                            band: 0..=49_999_999,
+                            db: vec![61.50, 55.29, 48.94, 42.92, 24.05, 18.87, 0.0],
+                        },
+                        BandTable {
+                            band: 50_000_000..=419_999_999,
+                            db: vec![
+                                67.75, 61.65, 55.33, 49.32, 43.13, 36.50, 29.87, 23.75, 4.89, 0.0,
+                            ],
+                        },
+                    ],
+                ),
+                StageSpec::ranged("IF", 0.0, 39.0, 1.0),
+            ],
+            "LNA",
+            "LNA",
+        )
+        .with_second_stage();
+        caps.friis_applicable = false;
+        self.caps = Arc::new(caps);
+        self.radio.gains = vec![4.0, 20.0];
+        self.radio.gain_curve = None;
+        self.radio.frequency = 150_000_000;
+        self
+    }
+
     /// An Airspy HF+ Discovery at its own start, on 40 m: the attenuator at
     /// none and the LNA off, its words carried as `Int32`, and the digital
     /// AGC's hold as its ceiling.

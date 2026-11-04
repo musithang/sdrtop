@@ -161,6 +161,35 @@ impl SdrMetrics {
         Some(spec.reading(self.radio.stage_gain(index), self.radio.frequency))
     }
 
+    /// What stage `index` gives, in dB, at the frequency the radio is tuned
+    /// to: its value, or for a stage whose dB depends on the band
+    /// ([`crate::hardware::StageSpec::banded`]) its setting's dB there.
+    /// `None` where that was not measured, under the device's own AGC, and
+    /// past the end of the chain.
+    pub fn stage_db(&self, index: usize) -> Option<f64> {
+        if self.agc_sets(index) {
+            return None;
+        }
+        let spec = self.caps.gain.stages().into_iter().nth(index)?;
+        spec.gain_db_at(self.radio.stage_gain(index), self.radio.frequency)
+    }
+
+    /// The whole chain's gain in dB at the tuned frequency, or `None` unless
+    /// every stage is a dB here.
+    ///
+    /// **The sum to show, not `RadioState::total_gain`**, which adds the
+    /// stored values as they are: for a stage stored as the radio's own
+    /// setting those are not decibels.
+    pub fn chain_total_db(&self) -> Option<f64> {
+        // A value that is not a number adds nothing, as it never did.
+        (0..self.caps.gain.stages().len())
+            .map(|i| {
+                self.stage_db(i)
+                    .map(|v| if v.is_finite() { v } else { 0.0 })
+            })
+            .sum::<Option<f64>>()
+    }
+
     /// The highest level the samples can honestly reach on this radio where
     /// it is tuned, dBFS. See [`crate::hardware::GainModel::ceiling_dbfs_at`].
     pub fn ceiling_dbfs(&self) -> f64 {
@@ -229,7 +258,7 @@ impl SdrMetrics {
             step: exact.unwrap_or_else(|| curve.nearest_step(&stages, &self.radio.gains)),
             last: curve.last_step(),
             on: exact.is_some(),
-            total_db: self.chain_db_holds().then(|| self.radio.total_gain()),
+            total_db: self.chain_total_db(),
         })
     }
 
@@ -279,6 +308,13 @@ impl SdrMetrics {
             .stages()
             .into_iter()
             .find(|s| !s.db_holds_at(hz))?;
+        if stage.is_banded() {
+            return Some(format!(
+                "{}'s gain in dB was not measured at {:.3} MHz",
+                stage.name,
+                hz as f64 / 1e6
+            ));
+        }
         Some(match &stage.measured_in {
             Some(band) => format!(
                 "{}'s gain in dB was measured from {:.0} to {:.0} MHz only",
@@ -319,6 +355,61 @@ impl SdrMetrics {
 mod stage_reading_tests {
     use super::SdrMetrics;
     use crate::hardware::StageReading;
+
+    /// **A banded stage is the radio's setting, its dB the tuned band's.**
+    /// The same LNA state reads 43.13 dB at 150 MHz and 24.05 dB at 14 MHz;
+    /// state 9 under 50 MHz, where the band has only seven states, reads as
+    /// the band's last, as the radio uses it; where no band was measured it
+    /// is its position. The stored value never moves with the frequency.
+    #[test]
+    fn a_banded_stage_reads_its_bands_db_for_the_same_setting() {
+        let mut m = SdrMetrics::fixture().banded_chain();
+        assert_eq!(m.stage_reading(0), Some(StageReading::Db(43.13)));
+        assert_eq!(m.stage_db(0), Some(43.13));
+        m.radio.frequency = 14_000_000;
+        assert_eq!(m.stage_reading(0), Some(StageReading::Db(24.05)));
+        m.radio.set_stage_gain(0, 9.0);
+        assert_eq!(
+            m.stage_db(0),
+            Some(0.0),
+            "state 9 is the band's last, state 6"
+        );
+        m.radio.frequency = 1_200_000_000;
+        assert_eq!(
+            m.stage_reading(0),
+            Some(StageReading::Position { at: 9, of: 9 })
+        );
+        assert_eq!(m.stage_db(0), None);
+        assert_eq!(m.radio.stage_gain(0), 9.0, "the setting itself never moved");
+    }
+
+    /// The chain's total is its stages' dB at the tuned frequency, not the
+    /// stored settings added up, and there is none where a stage is not dB.
+    #[test]
+    fn the_chain_total_is_the_bands_db_not_the_settings() {
+        let mut m = SdrMetrics::fixture().banded_chain();
+        assert_eq!(m.chain_total_db(), Some(43.13 + 20.0));
+        assert!(m.chain_db_holds());
+        m.radio.frequency = 1_200_000_000;
+        assert_eq!(m.chain_total_db(), None);
+        assert!(!m.chain_db_holds());
+        let why = m.chain_db_refusal().unwrap();
+        assert!(
+            why.contains("LNA's gain in dB was not measured at 1200.000 MHz"),
+            "{why}"
+        );
+    }
+
+    /// Every chain that is not banded totals as it always did.
+    #[test]
+    fn an_unbanded_chain_totals_as_before() {
+        let m = SdrMetrics::fixture().band_measured_chain();
+        assert_eq!(m.chain_total_db(), None, "the R2's LNA outside its band");
+        let mut m = m;
+        m.radio.frequency = 100_000_000;
+        let total = m.chain_total_db().unwrap();
+        assert!((total - m.radio.total_gain()).abs() < 1e-9);
+    }
 
     /// The R2's LNA reads in dB inside the band it was measured in and as a
     /// position outside it; the mixer and VGA, measured everywhere, read in

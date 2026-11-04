@@ -415,6 +415,27 @@ pub struct StageSpec {
     /// "step 14 of 14", and anything that would add it into a dB total does
     /// not.
     pub measured_in: Option<std::ops::RangeInclusive<u64>>,
+    /// For a stage whose decibels depend on the band the radio is tuned to:
+    /// each band's measured dB, by the radio's own setting. Empty for every
+    /// other stage.
+    ///
+    /// **The setting is the radio's number, not a dB.** The SDRplay RSP1B's
+    /// LNA is a state, 0 to 9, whose gain differs from band to band by up to
+    /// 13 dB, and whose number of states differs too (7 under 50 MHz). The
+    /// radio keeps the state it was given and, in a band with fewer, uses
+    /// its last one. So such a stage's value in `RadioState::gains` is that
+    /// state, constant across a retune, and its decibels are always read here
+    /// for the frequency at hand ([`Self::gain_db_at`]); a band that has fewer
+    /// entries than the value clamps to its last, as the radio does.
+    pub banded: Vec<BandTable>,
+}
+
+/// One band's decibels for a [`StageSpec::banded`] stage: entry `n` is the
+/// gain, in dB, of the radio's setting `n` anywhere in `band`.
+#[derive(Clone, Debug, PartialEq)]
+pub struct BandTable {
+    pub band: std::ops::RangeInclusive<u64>,
+    pub db: Vec<f64>,
 }
 
 /// How a stage's setting reads at the frequency the radio is tuned to.
@@ -465,7 +486,45 @@ impl StageSpec {
             step_db,
             table: Vec::new(),
             measured_in: None,
+            banded: Vec::new(),
         }
+    }
+
+    /// A stage whose values are the radio's own settings `0..positions`, its
+    /// decibels read per band from `bands` ([`Self::banded`]).
+    #[cfg(test)]
+    pub fn banded(name: &str, positions: u32, bands: Vec<BandTable>) -> Self {
+        Self {
+            banded: bands,
+            ..Self::ranged(name, 0.0, f64::from(positions.saturating_sub(1)), 1.0)
+        }
+    }
+
+    /// Whether this stage's values are settings whose dB depends on the band.
+    pub fn is_banded(&self) -> bool {
+        !self.banded.is_empty()
+    }
+
+    /// The band table that holds at `hz`, for a banded stage.
+    pub fn band_at(&self, hz: u64) -> Option<&BandTable> {
+        self.banded.iter().find(|b| b.band.contains(&hz))
+    }
+
+    /// The gain, in dB, that a setting of `value` gives with the radio tuned
+    /// to `hz`, or `None` where that was not measured. For every stage but a
+    /// banded one this is `value` itself wherever its dB holds.
+    pub fn gain_db_at(&self, value: f64, hz: u64) -> Option<f64> {
+        if self.is_banded() {
+            let table = &self.band_at(hz)?.db;
+            let last = table.len().checked_sub(1)?;
+            let at = if value.is_finite() {
+                (value.round().max(0.0) as usize).min(last)
+            } else {
+                0
+            };
+            return Some(table[at]);
+        }
+        self.db_holds_at(hz).then_some(value)
     }
 
     /// The same stage, its values decibels only between `lo_hz` and `hi_hz`.
@@ -474,8 +533,12 @@ impl StageSpec {
         self
     }
 
-    /// Whether this stage's values are decibels at `hz`.
+    /// Whether this stage's values are decibels at `hz` (for a banded stage:
+    /// whether a band's table holds there).
     pub fn db_holds_at(&self, hz: u64) -> bool {
+        if self.is_banded() {
+            return self.band_at(hz).is_some();
+        }
         self.measured_in
             .as_ref()
             .is_none_or(|band| band.contains(&hz))
@@ -507,8 +570,8 @@ impl StageSpec {
 
     /// How a setting of `db` reads with the radio tuned to `hz`.
     pub fn reading(&self, db: f64, hz: u64) -> StageReading {
-        if self.db_holds_at(hz) {
-            return StageReading::Db(db);
+        if let Some(gain) = self.gain_db_at(db, hz) {
+            return StageReading::Db(gain);
         }
         match (self.position_of(db), self.positions()) {
             (Some(at), Some(n)) => StageReading::Position {
@@ -533,6 +596,7 @@ impl StageSpec {
             step_db: 0.0,
             table: values,
             measured_in: None,
+            banded: Vec::new(),
         }
     }
 
@@ -2359,6 +2423,56 @@ mod tests {
 
     /// The Airspy R2's LNA as measured at 92.8 MHz, valid over the VHF band
     /// the bench checked it in.
+    /// A banded stage's dB comes from the band at the frequency, its setting
+    /// clamped to a shorter band's last entry; outside every band there is
+    /// no dB. Its values are the radio's settings, 0 to the last.
+    #[test]
+    fn a_banded_stage_takes_its_db_from_the_band() {
+        let lna = StageSpec::banded(
+            "LNA",
+            10,
+            vec![
+                BandTable {
+                    band: 0..=49_999_999,
+                    db: vec![30.0, 20.0, 0.0],
+                },
+                BandTable {
+                    band: 50_000_000..=420_000_000,
+                    db: (0..10).map(|n| f64::from(9 - n) * 5.0).collect(),
+                },
+            ],
+        );
+        assert!(lna.is_banded());
+        assert_eq!(lna.positions(), Some(10));
+        assert_eq!(lna.gain_db_at(2.0, 150_000_000), Some(35.0));
+        assert_eq!(lna.gain_db_at(2.0, 10_000_000), Some(0.0));
+        assert_eq!(
+            lna.gain_db_at(9.0, 10_000_000),
+            Some(0.0),
+            "clamped to the band's last"
+        );
+        assert_eq!(lna.gain_db_at(1.0, 10_000_000), Some(20.0));
+        assert_eq!(lna.gain_db_at(1.0, 1_000_000_000), None);
+        assert!(lna.db_holds_at(50_000_000));
+        assert!(!lna.db_holds_at(500_000_000));
+        assert_eq!(lna.reading(1.0, 150_000_000), StageReading::Db(40.0));
+        assert_eq!(
+            lna.reading(4.0, 1_000_000_000),
+            StageReading::Position { at: 4, of: 9 }
+        );
+    }
+
+    /// A stage that is not banded: its value is its dB wherever that holds.
+    #[test]
+    fn an_unbanded_stage_is_its_own_db() {
+        let vga = StageSpec::ranged("VGA", 0.0, 62.0, 2.0);
+        assert!(!vga.is_banded());
+        assert_eq!(vga.gain_db_at(30.0, 1_000_000_000), Some(30.0));
+        let lna = vhf_lna();
+        assert_eq!(lna.gain_db_at(11.28, 100_000_000), Some(11.28));
+        assert_eq!(lna.gain_db_at(11.28, 943_000_000), None);
+    }
+
     fn vhf_lna() -> StageSpec {
         StageSpec::tabled(
             "LNA",

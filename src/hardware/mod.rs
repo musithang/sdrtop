@@ -36,6 +36,8 @@ pub use discovery::{list_all_devices, open_device, DeviceKind, DeviceListing};
 pub use process::ADC_BANDS;
 pub use record_tap::RecordTap;
 #[cfg(test)]
+pub(crate) use traits::BandTable;
+#[cfg(test)]
 pub(crate) use traits::RateSet;
 pub use traits::{
     AcquisitionKind, Boost, Ceiling, CeilingKind, DeliveryModel, DeviceCapabilities, DeviceInfo,

@@ -424,6 +424,7 @@ mod tests {
             step_db,
             table: Vec::new(),
             measured_in: None,
+            banded: Vec::new(),
         }
     }
 
