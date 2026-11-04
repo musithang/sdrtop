@@ -208,8 +208,8 @@ fn render_gain(f: &mut Frame, area: Rect, state: &SdrMetrics, theme: &crate::The
             cell(
                 "Total",
                 c.total_db.map(StageReading::Db),
-                crate::hardware::gain::total_range(&stages).0,
-                crate::hardware::gain::total_range(&stages).1,
+                crate::hardware::gain::total_range(&stages, state.radio.frequency).0,
+                crate::hardware::gain::total_range(&stages, state.radio.frequency).1,
             ),
         ]
     });
@@ -218,20 +218,17 @@ fn render_gain(f: &mut Frame, area: Rect, state: &SdrMetrics, theme: &crate::The
         bars
     } else {
         match (gm.has_second_stage(), stages.first(), stages.get(1)) {
-            (true, Some(first), Some(second)) => vec![
-                cell(
-                    &first.name,
-                    state.stage_reading(0),
-                    first.min_db,
-                    first.max_db,
-                ),
-                cell(
-                    &second.name,
-                    state.stage_reading(1),
-                    second.min_db,
-                    second.max_db,
-                ),
-            ],
+            // Each over its own span where the radio is tuned (a banded
+            // stage's band figures).
+            (true, Some(first), Some(second)) => {
+                let hz = state.radio.frequency;
+                let (f_lo, f_hi) = first.db_range_at(hz);
+                let (s_lo, s_hi) = second.db_range_at(hz);
+                vec![
+                    cell(&first.name, state.stage_reading(0), f_lo, f_hi),
+                    cell(&second.name, state.stage_reading(1), s_lo, s_hi),
+                ]
+            }
             _ => vec![cell(
                 "Gain",
                 if state.agc_sets(0) {
@@ -586,5 +583,14 @@ mod tests {
             let out = draw(MicroPanel, w, 6, &none).join("\n");
             assert!(!out.contains("AMP") && !out.contains("AGC"), "{w}: {out}");
         }
+    }
+
+    /// **The micro entry reads a banded stage in its band's dB.**
+    #[test]
+    fn the_micro_entry_reads_a_banded_stage_in_its_bands_db() {
+        use crate::state::fixture::draw;
+        let m = SdrMetrics::fixture().banded_chain();
+        let out = draw(MicroPanel, 80, 6, &m).join("\n");
+        assert!(out.contains("43 dB"), "{out}");
     }
 }

@@ -402,10 +402,13 @@ pub fn staging_verdict(peak_dbfs: f64) -> (&'static str, u8) {
 /// total that would put the converter where we want it, and lay that total down
 /// front to back. Each stage lands on its own grid, and the result may not hit
 /// the target exactly when the chain is already at a rail or the grid is coarse.
-pub fn staging_target(peak_dbfs: f64, stages: &[StageSpec], current: &[f64]) -> Vec<f64> {
-    let now: f64 = current.iter().take(stages.len()).sum();
-    let wanted = now + (OPT_PEAK_DBFS - peak_dbfs);
-    crate::hardware::gain::distribute(stages, wanted).0
+///
+/// `hz` is where the radio is tuned: the chain's total is its stages' dB
+/// there, so a stage whose dB depends on the band counts its band's figure,
+/// not its setting.
+pub fn staging_target(peak_dbfs: f64, stages: &[StageSpec], current: &[f64], hz: u64) -> Vec<f64> {
+    let wanted = crate::hardware::gain::total_db(stages, current, hz) + (OPT_PEAK_DBFS - peak_dbfs);
+    crate::hardware::gain::distribute(stages, wanted, hz).0
 }
 
 /// [`staging_target`] for a knob that may be on a vendor curve: there, the
@@ -417,15 +420,16 @@ pub fn staging_target_on(
     gm: &crate::hardware::GainModel,
     curve: Option<usize>,
     current: &[f64],
+    hz: u64,
 ) -> Vec<f64> {
     let stages = gm.stages();
     match curve.and_then(|c| gm.curves().get(c)) {
         Some(c) => {
-            let now: f64 = current.iter().take(stages.len()).sum();
-            let wanted = now + (OPT_PEAK_DBFS - peak_dbfs);
-            c.values(c.step_for_total(&stages, wanted), &stages)
+            let wanted =
+                crate::hardware::gain::total_db(&stages, current, hz) + (OPT_PEAK_DBFS - peak_dbfs);
+            c.values(c.step_for_total(&stages, wanted, hz), &stages)
         }
-        None => staging_target(peak_dbfs, &stages, current),
+        None => staging_target(peak_dbfs, &stages, current, hz),
     }
 }
 
@@ -445,17 +449,20 @@ pub fn auto_gain_target(
     gm: &crate::hardware::GainModel,
     curve: Option<usize>,
     current: &[f64],
+    hz: u64,
 ) -> (Vec<f64>, bool) {
     if staging_verdict(peak_to_ceiling_db).0 != "CLIPPING" {
         return (
-            staging_target_on(peak_to_ceiling_db, gm, curve, current),
+            staging_target_on(peak_to_ceiling_db, gm, curve, current, hz),
             true,
         );
     }
     let stages = gm.stages();
     let least = match curve.and_then(|c| gm.curves().get(c)) {
         Some(c) => c.values(0, &stages),
-        None => stages.iter().map(|s| s.min_db).collect(),
+        // A stage's least gain, not its least value: for a stage stored as
+        // the radio's own setting those differ.
+        None => crate::hardware::gain::least(&stages, hz),
     };
     (least, false)
 }
@@ -464,6 +471,24 @@ pub fn auto_gain_target(
 mod tests {
     use super::*;
 
+    /// **Auto-gain on a banded chain decides in the band's dB.** From a
+    /// clipped peak the least gain is the LNA's highest state, not state 0
+    /// (its most gain); from a weak one the target fills the LNA front first
+    /// in its band's dB and sets it back as a state.
+    #[test]
+    fn auto_gain_on_a_banded_chain_decides_in_the_bands_db() {
+        let m = crate::state::SdrMetrics::fixture().banded_chain();
+        let hz = m.radio.frequency;
+        let (least, known) = auto_gain_target(0.0, &m.caps.gain, None, &m.radio.gains, hz);
+        assert!(!known);
+        assert_eq!(least, vec![9.0, 0.0]);
+        // 63.13 dB now, 22 dB too weak: 85.13 wanted, the LNA's 67.75 (state
+        // 0) and 17 of IF.
+        let (target, known) = auto_gain_target(-30.0, &m.caps.gain, None, &m.radio.gains, hz);
+        assert!(known);
+        assert_eq!(target, vec![0.0, 17.0]);
+    }
+
     /// **From a peak at the ceiling the level is unknown**: auto-gain takes
     /// the chain to its least gain rather than to a target worked out from a
     /// figure that is not the antenna's; under the ceiling, the target as
@@ -471,15 +496,15 @@ mod tests {
     #[test]
     fn from_a_peak_at_the_ceiling_auto_gain_takes_the_least_gain() {
         let hf = crate::hardware::native::airspyhf::gain_model();
-        let (gains, known) = auto_gain_target(1.0, &hf, None, &[0.0, 6.0]);
+        let (gains, known) = auto_gain_target(1.0, &hf, None, &[0.0, 6.0], 0);
         assert_eq!((gains, known), (vec![-48.0, 0.0], false));
-        let (gains, known) = auto_gain_target(-20.0, &hf, None, &[-24.0, 0.0]);
+        let (gains, known) = auto_gain_target(-20.0, &hf, None, &[-24.0, 0.0], 0);
         assert!(known);
-        assert_eq!(gains, staging_target_on(-20.0, &hf, None, &[-24.0, 0.0]));
+        assert_eq!(gains, staging_target_on(-20.0, &hf, None, &[-24.0, 0.0], 0));
         let r2 = crate::hardware::native::airspy::gain_model();
         let stages = r2.stages();
         let (gains, known) =
-            auto_gain_target(0.0, &r2, Some(0), &r2.curves()[0].values(10, &stages));
+            auto_gain_target(0.0, &r2, Some(0), &r2.curves()[0].values(10, &stages), 0);
         assert_eq!((gains, known), (r2.curves()[0].values(0, &stages), false));
     }
 
@@ -496,21 +521,21 @@ mod tests {
                                              // 22 dB short of the optimum wants 73.39 dB: Linearity 15 is 72.07,
                                              // 16 would be 74.03.
         let peak = OPT_PEAK_DBFS - 22.0;
-        let target = staging_target_on(peak, &gm, Some(0), &at_10);
+        let target = staging_target_on(peak, &gm, Some(0), &at_10, 0);
         assert_eq!(target, lin.values(15, &stages));
         assert_eq!(
-            staging_target_on(peak, &gm, None, &at_10),
-            staging_target(peak, &stages, &at_10)
+            staging_target_on(peak, &gm, None, &at_10, 0),
+            staging_target(peak, &stages, &at_10, 0)
         );
         // 28 dB too hot wants 23.39 dB: Linearity 2 is 21.54.
         assert_eq!(
-            staging_target_on(20.0, &gm, Some(0), &at_10),
+            staging_target_on(20.0, &gm, Some(0), &at_10, 0),
             lin.values(2, &stages)
         );
         // Hotter than any step can answer: the bottom of the curve, never
         // below it.
         assert_eq!(
-            staging_target_on(60.0, &gm, Some(0), &at_10),
+            staging_target_on(60.0, &gm, Some(0), &at_10, 0),
             lin.values(0, &stages)
         );
     }
@@ -808,7 +833,7 @@ mod tests {
     #[test]
     fn staging_target_lands_on_each_stages_own_grid() {
         let s = hackrf_stages();
-        let t = staging_target(-30.0, &s, &[0.0, 0.0]); // very weak, add gain
+        let t = staging_target(-30.0, &s, &[0.0, 0.0], 0); // very weak, add gain
         assert_eq!(t.len(), 2);
         assert_eq!(t[0] % 8.0, 0.0, "LNA on its own grid: {}", t[0]);
         assert_eq!(t[1] % 2.0, 0.0, "VGA on its own grid: {}", t[1]);
@@ -822,7 +847,7 @@ mod tests {
     fn staging_target_trims_the_back_stage_first() {
         let s = hackrf_stages();
         // Peak at 0 dBFS from a chain at 32 + 32: needs about 8 dB less.
-        let t = staging_target(0.0, &s, &[32.0, 32.0]);
+        let t = staging_target(0.0, &s, &[32.0, 32.0], 0);
         assert_eq!(t[0], 40.0, "the front stage is not what gets cut");
         assert!(t[1] < 32.0, "the back stage takes the cut: {}", t[1]);
         let total: f64 = t.iter().sum();
@@ -836,7 +861,7 @@ mod tests {
     fn staging_target_adds_at_the_front_first() {
         let s = hackrf_stages();
         // -30 dBFS wants about 22 dB more. The LNA's 8 dB grid takes 16 of it.
-        let t = staging_target(-30.0, &s, &[0.0, 0.0]);
+        let t = staging_target(-30.0, &s, &[0.0, 0.0], 0);
         assert_eq!(t[0], 16.0, "the front takes what its grid can hold");
         assert_eq!(t[1], 6.0, "the back takes the remainder, not the bulk");
         assert!(t[0] > t[1], "and the front still gets the larger share");
@@ -847,21 +872,21 @@ mod tests {
     #[test]
     fn staging_target_serves_any_stage_count() {
         let one = vec![StageSpec::tabled("Tuner", vec![0.0, 9.0, 16.0, 24.0, 49.0])];
-        let t = staging_target(-30.0, &one, &[0.0]);
+        let t = staging_target(-30.0, &one, &[0.0], 0);
         assert_eq!(t.len(), 1);
         assert!(
             one[0].table.contains(&t[0]),
             "a tuner target must be one of its own values: {}",
             t[0]
         );
-        assert!(staging_target(-8.0, &[], &[]).is_empty());
+        assert!(staging_target(-8.0, &[], &[], 0).is_empty());
     }
 
     #[test]
     fn staging_target_at_the_optimum_keeps_the_same_total() {
         let s = hackrf_stages();
         let current = vec![32.0, 30.0];
-        let t = staging_target(OPT_PEAK_DBFS, &s, &current);
+        let t = staging_target(OPT_PEAK_DBFS, &s, &current, 0);
         let before: f64 = current.iter().sum();
         let after: f64 = t.iter().sum();
         assert!(

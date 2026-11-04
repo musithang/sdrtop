@@ -193,6 +193,9 @@ pub(super) fn staging(
     // Digital stages after the converter: the target places the level in
     // the samples, it is not a staging of the front end.
     digital: bool,
+    // Where the radio is tuned: a stage stored as the radio's own setting
+    // reads its band's dB there, its bar spans that band's figures.
+    hz: u64,
     iw: usize,
     theme: &crate::Theme,
 ) {
@@ -217,8 +220,12 @@ pub(super) fn staging(
 
     for (index, spec) in stages.iter().enumerate() {
         let value = current.get(index).copied().unwrap_or(spec.min_db);
-        let target = targets.and_then(|t| t.get(index).copied());
-        let span = (spec.max_db - spec.min_db).max(1.0);
+        // In dB here: a banded stage's settings are not gains.
+        let target = targets
+            .and_then(|t| t.get(index).copied())
+            .map(|t| spec.gain_db_at(t, hz).unwrap_or(t));
+        let (lo_db, hi_db) = spec.db_range_at(hz);
+        let span = (hi_db - lo_db).max(1.0);
         // The front stage keeps the warmer ramp, as in the command rail: it is
         // the one whose setting decides the noise figure.
         let (lo, hi) = if index == 0 {
@@ -239,11 +246,11 @@ pub(super) fn staging(
             StageReading::Auto => (0, 1, None, "AGC".to_string()),
             // Over the stage's own range, from its deepest setting on an
             // attenuator (the HF+'s ATT runs -48 to 0 dB).
-            StageReading::Db(_) => (
-                (value - spec.min_db.min(0.0)).max(0.0).round() as u32,
-                ((spec.max_db - spec.min_db.min(0.0)).round() as u32).max(1),
-                target.map(|t| ((t - spec.min_db) / span).clamp(0.0, 1.0)),
-                format!("{:.0} / {:.0} dB", value, spec.max_db),
+            StageReading::Db(db) => (
+                (db - lo_db.min(0.0)).max(0.0).round() as u32,
+                ((hi_db - lo_db.min(0.0)).round() as u32).max(1),
+                target.map(|t| ((t - lo_db) / span).clamp(0.0, 1.0)),
+                format!("{:.0} / {:.0} dB", db, hi_db),
             ),
         };
         out.push(bar_row(
@@ -290,11 +297,8 @@ pub(super) fn staging(
                     .iter()
                     .enumerate()
                     .map(|(i, spec)| {
-                        format!(
-                            "{} {:.0}",
-                            spec.name,
-                            targets.get(i).copied().unwrap_or(0.0)
-                        )
+                        let t = targets.get(i).copied().unwrap_or(0.0);
+                        format!("{} {:.0}", spec.name, spec.gain_db_at(t, hz).unwrap_or(t))
                     })
                     .collect::<Vec<_>>()
                     .join(" \u{00b7} "),

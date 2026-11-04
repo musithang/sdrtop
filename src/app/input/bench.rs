@@ -154,7 +154,7 @@ pub(super) fn rf_chain(key: KeyEvent, ctx: &mut InputCtx<'_>) -> KeyAction {
         // [A] - auto-gain: one-shot to optimal, or latch the continuous track once
         // already there. HackRF-only; never runs unless streaming.
         KeyCode::Char('a') => {
-            let (peak, stages, current, streaming) = {
+            let (peak, stages, current, streaming, hz) = {
                 let m = metrics(state);
                 (
                     // Against the radio's ceiling: the target keeps its
@@ -163,6 +163,7 @@ pub(super) fn rf_chain(key: KeyEvent, ctx: &mut InputCtx<'_>) -> KeyAction {
                     m.caps.gain.stages(),
                     m.radio.gains.clone(),
                     m.radio.hw_streaming,
+                    m.radio.frequency,
                 )
             };
             if !streaming {
@@ -198,14 +199,15 @@ pub(super) fn rf_chain(key: KeyEvent, ctx: &mut InputCtx<'_>) -> KeyAction {
             };
             // From a peak at the ceiling the level is unknown, and the chain
             // goes to its least gain instead; the log says so.
-            let (targets, known) = crate::ui::rf_calc::auto_gain_target(peak, &gm, curve, &current);
+            let (targets, known) =
+                crate::ui::rf_calc::auto_gain_target(peak, &gm, curve, &current, hz);
             // Judged on the **total**, not on the arrangement. Auto-gain is
             // about where the converter sits; how that total is spread is the
             // knob's business. Comparing per stage would make a hand-set chain
             // at a perfectly good level read as "off optimal" and rearrange
             // itself under the user.
-            let now_total: f64 = current.iter().take(stages.len()).sum();
-            let want_total: f64 = targets.iter().sum();
+            let now_total = crate::hardware::gain::total_db(&stages, &current, hz);
+            let want_total = crate::hardware::gain::total_db(&stages, &targets, hz);
             let moved = (now_total - want_total).abs() >= 0.5;
             if moved {
                 // Off-optimal → one-shot jump, one call per stage, through the
@@ -322,7 +324,9 @@ pub(super) fn rf_chain(key: KeyEvent, ctx: &mut InputCtx<'_>) -> KeyAction {
                 metrics(state).push_log(format!("Noise sweep: {why}"));
                 return KeyAction::Continue;
             }
-            let plan = crate::signal::noise_slope::plan_for(spec);
+            // Each setting with its gain where the radio is tuned: for a stage
+            // stored as the radio's own setting the two differ.
+            let (plan, gains) = crate::signal::noise_slope::plan_for_at(spec, tuned);
             if plan.is_empty() {
                 metrics(state).push_log(format!(
                     "Noise sweep: {} has too few settings to sweep",
@@ -331,7 +335,8 @@ pub(super) fn rf_chain(key: KeyEvent, ctx: &mut InputCtx<'_>) -> KeyAction {
                 return KeyAction::Continue;
             }
             let restore = current.first().copied().unwrap_or(spec.min_db);
-            let mut sweep = crate::signal::noise_slope::GainSweep::new(0, plan.clone(), restore);
+            let mut sweep = crate::signal::noise_slope::GainSweep::new(0, plan.clone(), restore)
+                .with_gains(gains.clone());
             sweep.begin();
             let mut m = metrics(state);
             // The latch would spend the whole measurement putting the stage
@@ -344,8 +349,8 @@ pub(super) fn rf_chain(key: KeyEvent, ctx: &mut InputCtx<'_>) -> KeyAction {
                 "Noise sweep: {} across {} settings, {:.0}\u{2013}{:.0} dB",
                 spec.name,
                 plan.len(),
-                plan[0],
-                plan[plan.len() - 1]
+                gains[0],
+                gains[gains.len() - 1]
             ));
             return KeyAction::Continue;
         }

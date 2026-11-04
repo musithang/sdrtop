@@ -527,6 +527,20 @@ impl StageSpec {
         self.db_holds_at(hz).then_some(value)
     }
 
+    /// The span of gains, in dB, this stage's settings give with the radio
+    /// tuned to `hz`: a banded stage's band table there, or its range. A
+    /// banded stage outside every band keeps its settings' range, which is
+    /// then shown as positions, not dB.
+    pub fn db_range_at(&self, hz: u64) -> (f64, f64) {
+        match self.band_at(hz) {
+            Some(band) if !band.db.is_empty() => (
+                band.db.iter().copied().fold(f64::INFINITY, f64::min),
+                band.db.iter().copied().fold(f64::NEG_INFINITY, f64::max),
+            ),
+            _ => (self.min_db, self.max_db),
+        }
+    }
+
     /// The same stage, its values decibels only between `lo_hz` and `hi_hz`.
     pub fn measured_between(mut self, lo_hz: u64, hi_hz: u64) -> Self {
         self.measured_in = Some(lo_hz..=hi_hz);
@@ -892,11 +906,20 @@ impl GainCurve {
 
     /// The highest step whose chain adds up to no more than `total_db`, or the
     /// first step when every one is over it. Meaningful only where each
-    /// stage's values are dB.
-    pub fn step_for_total(&self, stages: &[StageSpec], total_db: f64) -> usize {
+    /// stage's values are dB. A step's total is its stages' dB at `hz`, so a
+    /// stage whose dB depends on the band counts its band's figure.
+    pub fn step_for_total(&self, stages: &[StageSpec], total_db: f64, hz: u64) -> usize {
         (0..self.steps.len())
             .rev()
-            .find(|&step| self.values(step, stages).iter().sum::<f64>() <= total_db + 1e-9)
+            .find(|&step| {
+                let total: f64 = self
+                    .values(step, stages)
+                    .iter()
+                    .zip(stages)
+                    .map(|(&v, s)| s.gain_db_at(v, hz).unwrap_or(v))
+                    .sum();
+                total <= total_db + 1e-9
+            })
             .unwrap_or(0)
     }
 

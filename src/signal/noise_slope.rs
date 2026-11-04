@@ -115,6 +115,10 @@ pub struct Reading {
 pub struct GainSweep {
     stage: usize,
     plan: Vec<f64>,
+    /// Each planned setting's gain, in dB, where the setting is not one: a
+    /// stage stored as the radio's own setting. Empty when the settings are
+    /// the gains, as on every other stage.
+    gains: Vec<f64>,
     at: usize,
     restore_db: f64,
     settling: u32,
@@ -150,6 +154,7 @@ impl GainSweep {
         Self {
             stage,
             plan: values,
+            gains: Vec::new(),
             at: 0,
             restore_db,
             settling: SETTLE_FRAMES,
@@ -159,6 +164,15 @@ impl GainSweep {
             pending: None,
             aborted: false,
         }
+    }
+
+    /// The same sweep, each planned setting giving the gain beside it in
+    /// `gains` rather than being one: what [`plan_for_at`] returns for a
+    /// stage stored as the radio's own setting.
+    pub fn with_gains(mut self, gains: Vec<f64>) -> Self {
+        debug_assert_eq!(gains.len(), self.plan.len(), "one gain per planned setting");
+        self.gains = gains;
+        self
     }
 
     /// The first thing to do: go to the first point.
@@ -220,7 +234,11 @@ impl GainSweep {
 
         let mean = self.samples.iter().sum::<f32>() / self.samples.len() as f32;
         self.points.push(Point {
-            gain_db: self.plan[self.at],
+            gain_db: self
+                .gains
+                .get(self.at)
+                .copied()
+                .unwrap_or(self.plan[self.at]),
             noise_dbfs: mean,
         });
         self.samples.clear();
@@ -388,6 +406,36 @@ pub fn refusal(spec: &crate::hardware::StageSpec, hz: u64) -> Option<String> {
     ))
 }
 
+/// [`plan_for`] with the radio tuned to `hz`, and the gain of each setting:
+/// for a stage stored as the radio's own setting
+/// ([`crate::hardware::StageSpec::banded`]), its band's settings in order of
+/// their gain there (on the SDRplay RSP1B's LNA, the state numbers falling),
+/// each with its band's dB; for any other stage [`plan_for`]'s values, which
+/// are their own gains.
+pub fn plan_for_at(spec: &crate::hardware::StageSpec, hz: u64) -> (Vec<f64>, Vec<f64>) {
+    let Some(band) = spec.band_at(hz) else {
+        let plan = plan_for(spec);
+        return (plan.clone(), plan);
+    };
+    let mut by_gain: Vec<(f64, f64)> = band
+        .db
+        .iter()
+        .enumerate()
+        .map(|(i, &db)| (i as f64, db))
+        .collect();
+    by_gain.sort_by(|a, b| a.1.total_cmp(&b.1));
+    if by_gain.len() < 3 {
+        return (Vec::new(), Vec::new());
+    }
+    if by_gain.len() > MAX_POINTS {
+        let last = by_gain.len() - 1;
+        by_gain = (0..MAX_POINTS)
+            .map(|i| by_gain[i * last / (MAX_POINTS - 1)])
+            .collect();
+    }
+    by_gain.into_iter().unzip()
+}
+
 pub fn plan_for(spec: &crate::hardware::StageSpec) -> Vec<f64> {
     let Some(n) = spec.positions() else {
         return Vec::new();
@@ -415,6 +463,36 @@ pub fn plan_for(spec: &crate::hardware::StageSpec) -> Vec<f64> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// **A banded stage is swept in order of its gain at the tuned band**,
+    /// each setting with that gain: on the LNA the states fall as the gain
+    /// rises, and the recorded points are in dB, not states.
+    #[test]
+    fn a_banded_stage_is_swept_by_gain_with_its_bands_db() {
+        let m = crate::state::SdrMetrics::fixture().banded_chain();
+        let lna = &m.caps.gain.stages()[0];
+        let (settings, gains) = plan_for_at(lna, 150_000_000);
+        assert!(settings.len() <= MAX_POINTS && settings.len() >= 3);
+        assert_eq!(settings.first(), Some(&9.0), "least gain first");
+        assert_eq!(settings.last(), Some(&0.0), "most gain last");
+        assert!(gains.windows(2).all(|w| w[0] < w[1]), "{gains:?}");
+        assert_eq!(gains.last(), Some(&67.75));
+        // The sweep records each point at that gain, not at the setting.
+        let mut sweep = GainSweep::new(0, settings.clone(), 4.0).with_gains(gains.clone());
+        sweep.begin();
+        sweep.applied();
+        for _ in 0..(SETTLE_FRAMES + AVERAGE_FRAMES) {
+            sweep.feed(-80.0);
+        }
+        assert_eq!(
+            sweep.points[0].gain_db, gains[0],
+            "the band's dB for state 9"
+        );
+        // An unbanded stage's settings are its gains.
+        let vga = crate::hardware::StageSpec::ranged("VGA", 0.0, 62.0, 2.0);
+        let (s, g) = plan_for_at(&vga, 150_000_000);
+        assert_eq!(s, g);
+    }
 
     fn ranged(min_db: f64, max_db: f64, step_db: f64) -> crate::hardware::StageSpec {
         crate::hardware::StageSpec {

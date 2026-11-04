@@ -104,11 +104,16 @@ pub(super) fn lines(
             // The bar spans the stage's own range, as the header's does:
             // from zero on an amplifier, from its deepest setting on an
             // attenuator, whose gains are negative and read as such.
-            _ => {
-                let db = state.radio.stage_gain(index);
-                let floor = spec.min_db.min(0.0);
+            // A stage whose dB depends on the band spans that band's table.
+            reading => {
+                let db = match reading {
+                    Some(StageReading::Db(db)) => db,
+                    _ => state.radio.stage_gain(index),
+                };
+                let (min_db, max_db) = spec.db_range_at(state.radio.frequency);
+                let floor = min_db.min(0.0);
                 let value = (db - floor).max(0.0).round() as u32;
-                let max = ((spec.max_db - floor).round() as u32).max(1);
+                let max = ((max_db - floor).round() as u32).max(1);
                 let text = if db.round() < 0.0 {
                     format!("{db:3.0}")
                 } else {
@@ -134,11 +139,10 @@ pub(super) fn lines(
 
     // A total of gains is one only where every stage is a gain here: a
     // position added to decibels is not a number of anything.
-    let total = if state.chain_db_holds() {
-        // Negative where an attenuator outweighs the rest, and said so.
-        format!("{:.0} dB", state.radio.total_gain())
-    } else {
-        "\u{2014}".to_string()
+    // Negative where an attenuator outweighs the rest, and said so.
+    let total = match state.chain_total_db() {
+        Some(db) => format!("{db:.0} dB"),
+        None => "\u{2014}".to_string(),
     };
     let mut total_spans = vec![
         Span::raw(" "),
@@ -351,5 +355,22 @@ mod tests {
             .unwrap_or_default();
         assert!(total.contains("-18 dB"), "{total}");
         assert_ne!(row(&deep), row(&none), "the bar did not move");
+    }
+
+    /// **The rail reads a banded stage in its band's dB and totals the
+    /// band's figures**, not the state; a dash where no band was measured.
+    #[test]
+    fn the_rail_reads_a_banded_chain_in_its_bands_db() {
+        let mut m = crate::state::SdrMetrics::fixture().banded_chain();
+        let out = crate::state::fixture::draw(crate::ui::CommandRailPanel, 34, 40, &m).join("\n");
+        assert!(out.contains("43"), "{out}");
+        assert!(out.contains("63 dB"), "{out}");
+        m.radio.frequency = 1_200_000_000;
+        let far = crate::state::fixture::draw(crate::ui::CommandRailPanel, 34, 40, &m).join("\n");
+        assert!(far.contains("4/9"), "{far}");
+        assert!(
+            far.contains("TOTAL \u{2014}") || far.contains("TOTAL  \u{2014}"),
+            "{far}"
+        );
     }
 }

@@ -157,6 +157,7 @@ impl Panel for RfChainPanel {
                 &state.caps.gain,
                 state.radio.gain_curve,
                 &state.radio.gains,
+                state.radio.frequency,
             )
         });
         let readings: Vec<_> = (0..stage_specs.len())
@@ -183,6 +184,7 @@ impl Panel for RfChainPanel {
             targets.as_deref(),
             &readings,
             state.caps.gain.stages_are_digital(),
+            state.radio.frequency,
             iw,
             theme,
         );
@@ -940,5 +942,14 @@ mod tests {
             short.windows(2).all(|w| w[0] == w[1]),
             "and every row in the column agrees: {short:?}"
         );
+    }
+
+    /// **The staging bars read a banded stage in its band's dB**, over that
+    /// band's span: the LNA at 43 of the band's 68 dB.
+    #[test]
+    fn the_staging_reads_a_banded_stage_in_its_bands_db() {
+        let m = SdrMetrics::fixture().streaming().banded_chain();
+        let out = draw(RfChainPanel, 70, 60, &m).join("\n");
+        assert!(out.contains("43 / 68 dB"), "{out}");
     }
 }

@@ -318,7 +318,7 @@ pub fn resolve_gains(
         Some(text) if !text.is_empty() => match text.parse::<f64>() {
             // A bare number is the whole chain, spread the way the knob spreads
             // it, so the file and the `[UP]` key mean the same thing.
-            Ok(total) => values = hardware::gain::distribute(&stages, total).0,
+            Ok(total) => values = hardware::gain::distribute(&stages, total, radio.frequency_hz).0,
             Err(_) => {
                 let (pairs, mut n) = hardware::gain::parse_named(text);
                 let (v, more) = hardware::gain::apply_named(&stages, &pairs, &values);

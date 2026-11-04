@@ -92,6 +92,19 @@ impl Panel for MicroGainPanel {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// **A banded chain gets the rows that read every stage as itself**: the
+    /// LNA in its band's dB, the IF, and the total of both, with no HackRF
+    /// VGA row and no state number taken for a gain.
+    #[test]
+    fn a_banded_chain_reads_each_stage_in_its_bands_db() {
+        let m = crate::state::SdrMetrics::fixture().banded_chain();
+        let out = draw(MicroGainPanel, W, H, &m).join("\n");
+        assert!(out.contains("43 dB"), "{out}");
+        assert!(out.contains("IF 20 dB"), "{out}");
+        assert!(out.contains("63 dB"), "{out}");
+        assert!(!out.contains("VGA"), "{out}");
+    }
     use crate::state::fixture::draw;
 
     const W: u16 = 64;

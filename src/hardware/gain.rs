@@ -45,8 +45,13 @@ use super::traits::StageSpec;
 /// Every stage starts at its **minimum**, which matters for an element whose
 /// range begins below zero. Such a stage is an attenuator, and the reachable
 /// total starts at the sum of the minimums rather than at zero.
-pub fn distribute(stages: &[StageSpec], total_db: f64) -> (Vec<f64>, f64) {
-    let mut out: Vec<f64> = stages.iter().map(|s| s.min_db).collect();
+///
+/// **`hz` is where the radio is tuned**, for a stage whose dB depends on the
+/// band ([`StageSpec::banded`]): there the stage is spread over its band's dB
+/// and set back as the radio's own setting. Every other stage ignores it.
+pub fn distribute(stages: &[StageSpec], total_db: f64, hz: u64) -> (Vec<f64>, f64) {
+    let views: Vec<StageSpec> = stages.iter().map(|s| in_db(s, hz)).collect();
+    let mut out: Vec<f64> = views.iter().map(|s| s.min_db).collect();
     if stages.is_empty() {
         return (out, 0.0);
     }
@@ -54,7 +59,7 @@ pub fn distribute(stages: &[StageSpec], total_db: f64) -> (Vec<f64>, f64) {
     let want = if total_db.is_finite() { total_db } else { 0.0 };
     let mut remaining = (want - floor_total).max(0.0);
 
-    for (slot, spec) in out.iter_mut().zip(stages) {
+    for (slot, spec) in out.iter_mut().zip(&views) {
         let headroom = (spec.max_db - spec.min_db).max(0.0);
         let take = spec.snap_down(spec.min_db + remaining.min(headroom)) - spec.min_db;
         let take = take.max(0.0);
@@ -62,17 +67,71 @@ pub fn distribute(stages: &[StageSpec], total_db: f64) -> (Vec<f64>, f64) {
         remaining -= take;
     }
     let achieved = out.iter().sum();
-    (out, achieved)
+    let settings = out
+        .iter()
+        .zip(stages)
+        .map(|(&db, spec)| setting_for(spec, db, hz))
+        .collect();
+    (settings, achieved)
+}
+
+/// The chain's total gain, in dB, with the radio tuned to `hz`: each stage's
+/// dB there (for a stage whose dB depends on the band, its band's figure for
+/// its setting), or its value where no dB is measured, as the totals were
+/// always taken. A stored setting is not a gain, so a total is never a plain
+/// sum of the stored values.
+pub fn total_db(stages: &[StageSpec], values: &[f64], hz: u64) -> f64 {
+    values
+        .iter()
+        .zip(stages)
+        .map(|(&v, s)| s.gain_db_at(v, hz).unwrap_or(v))
+        .sum()
+}
+
+/// Each stage at the least gain it gives with the radio tuned to `hz`: its
+/// minimum, or for a stage whose dB depends on the band the setting with the
+/// least dB in that band (on the SDRplay RSP1B, the highest state number).
+pub fn least(stages: &[StageSpec], hz: u64) -> Vec<f64> {
+    stages
+        .iter()
+        .map(|s| setting_for(s, in_db(s, hz).min_db, hz))
+        .collect()
+}
+
+/// A stage as the decibels its settings give at `hz`: a banded stage becomes
+/// a table of its band's dB; any other stage is itself. A banded stage
+/// outside every band is its settings' range: the callers that decide in dB
+/// refuse there first ([`crate::state::SdrMetrics::chain_db_refusal`]).
+fn in_db(spec: &StageSpec, hz: u64) -> StageSpec {
+    match spec.band_at(hz) {
+        Some(band) if !band.db.is_empty() => StageSpec::tabled(&spec.name, band.db.clone()),
+        _ => spec.clone(),
+    }
+}
+
+/// The value to store for a stage given the dB [`in_db`] chose: a banded
+/// stage's setting whose band entry that is; for any other stage the dB.
+fn setting_for(spec: &StageSpec, db: f64, hz: u64) -> f64 {
+    match spec.band_at(hz) {
+        Some(band) => band
+            .db
+            .iter()
+            .enumerate()
+            .min_by(|a, b| (a.1 - db).abs().total_cmp(&(b.1 - db).abs()))
+            .map_or(0.0, |(i, _)| i as f64),
+        None => db,
+    }
 }
 
 /// The range of totals a stage list can actually reach.
 ///
 /// The knob's own limits. Without this the caller would have to add the
 /// maximums up itself, which is the same arithmetic in a second place.
-pub fn total_range(stages: &[StageSpec]) -> (f64, f64) {
-    stages
-        .iter()
-        .fold((0.0, 0.0), |(lo, hi), s| (lo + s.min_db, hi + s.max_db))
+pub fn total_range(stages: &[StageSpec], hz: u64) -> (f64, f64) {
+    stages.iter().fold((0.0, 0.0), |(lo, hi), s| {
+        let (min, max) = s.db_range_at(hz);
+        (lo + min, hi + max)
+    })
 }
 
 /// The next total the stage list can actually reach, above or below `from`.
@@ -86,8 +145,8 @@ pub fn total_range(stages: &[StageSpec]) -> (f64, f64) {
 /// by at least that much. A list of purely continuous stages has no grid, and
 /// 1 dB is the arbitrary-but-useful answer there, matching what the knob used to
 /// do before it distributed anything.
-pub fn next_total(stages: &[StageSpec], from: f64, up: bool) -> f64 {
-    let (lo, hi) = total_range(stages);
+pub fn next_total(stages: &[StageSpec], from: f64, up: bool, hz: u64) -> f64 {
+    let (lo, hi) = total_range(stages, hz);
     if stages.is_empty() || hi <= lo {
         return lo;
     }
@@ -98,13 +157,13 @@ pub fn next_total(stages: &[StageSpec], from: f64, up: bool) -> f64 {
         .fold(f64::INFINITY, f64::min);
     let probe = if finest.is_finite() { finest } else { 1.0 };
 
-    let current = distribute(stages, from).1;
+    let current = distribute(stages, from, hz).1;
     let dir = if up { 1.0 } else { -1.0 };
     // Bounded by the range itself, so a pathological grid cannot spin here.
     let limit = (((hi - lo) / probe).ceil() as i64).clamp(1, 4096);
     for k in 1..=limit {
         let candidate = (current + dir * probe * k as f64).clamp(lo, hi);
-        let got = distribute(stages, candidate).1;
+        let got = distribute(stages, candidate, hz).1;
         if (got - current).abs() > 1e-9 {
             return got;
         }
@@ -235,6 +294,41 @@ pub fn defaults(stages: &[StageSpec]) -> Vec<f64> {
 mod tests {
     use super::*;
 
+    /// The banded chain's stages: the LNA stored as the radio's state, its
+    /// dB per band; behind it an IF of 0..39 dB.
+    fn banded() -> Vec<StageSpec> {
+        crate::state::SdrMetrics::fixture()
+            .banded_chain()
+            .caps
+            .gain
+            .stages()
+    }
+
+    /// **A banded stage is spread over its band's dB and set back as the
+    /// radio's state**: front first, so 70 dB at 150 MHz is the LNA's most
+    /// gain (state 0, 67.75 dB) and 2 dB of IF; 63.13 is state 1 and 1 dB.
+    #[test]
+    fn a_banded_stage_is_spread_by_its_bands_db() {
+        let stages = banded();
+        let (values, achieved) = distribute(&stages, 70.0, 150_000_000);
+        assert_eq!(values, vec![0.0, 2.0]);
+        assert!((achieved - 69.75).abs() < 1e-9, "{achieved}");
+        let (values, _) = distribute(&stages, 63.13, 150_000_000);
+        assert_eq!(values, vec![1.0, 1.0]);
+        assert!((total_db(&stages, &[4.0, 20.0], 150_000_000) - 63.13).abs() < 1e-9);
+        assert_eq!(total_range(&stages, 150_000_000), (0.0, 67.75 + 39.0));
+    }
+
+    /// **The least gain is not the least value**: on the banded LNA it is
+    /// the highest state the band has (9 at 150 MHz, 6 under 50 MHz), where
+    /// the least value, state 0, is the most gain.
+    #[test]
+    fn the_least_gain_of_a_banded_stage_is_its_bands_lowest_db() {
+        let stages = banded();
+        assert_eq!(least(&stages, 150_000_000), vec![9.0, 0.0]);
+        assert_eq!(least(&stages, 14_000_000), vec![6.0, 0.0]);
+    }
+
     /// **A saved gain comes back as the setting it was.** Whole-dB stages
     /// keep their whole-dB form; a measured table's fractional values are
     /// written to the hundredth, because the Airspy R2's LNA has 27.76 and
@@ -280,7 +374,7 @@ mod tests {
             (200.0, 40.0, 62.0, 102.0),
         ];
         for (asked, lna, vga, achieved) in cases {
-            let (got, total) = distribute(&s, asked);
+            let (got, total) = distribute(&s, asked, 0);
             assert_eq!(got, vec![lna, vga], "asked {asked}");
             assert_eq!(total, achieved, "asked {asked}");
         }
@@ -292,12 +386,12 @@ mod tests {
     fn the_front_stage_fills_before_the_back_one() {
         let s = hackrf();
         for asked in [8.0, 16.0, 24.0, 32.0, 40.0] {
-            let (got, _) = distribute(&s, asked);
+            let (got, _) = distribute(&s, asked, 0);
             assert_eq!(got[0], asked, "the LNA should absorb all of {asked}");
             assert_eq!(got[1], 0.0, "and the VGA stay at zero");
         }
         // Only once the front is full does the back move.
-        let (got, _) = distribute(&s, 48.0);
+        let (got, _) = distribute(&s, 48.0, 0);
         assert_eq!(got, vec![40.0, 8.0]);
     }
 
@@ -309,7 +403,7 @@ mod tests {
         let mut previous = -1.0;
         for tenth in 0..=1100 {
             let asked = tenth as f64 / 10.0;
-            let (_, achieved) = distribute(&s, asked);
+            let (_, achieved) = distribute(&s, asked, 0);
             assert!(achieved >= previous, "went backwards at {asked}");
             assert!(achieved <= asked + 1e-9, "overshot at {asked}: {achieved}");
             previous = achieved;
@@ -322,7 +416,7 @@ mod tests {
     fn the_stages_always_sum_to_the_achieved_total() {
         let s = hackrf();
         for asked in [0.0, 7.5, 33.3, 61.0, 101.9, 500.0] {
-            let (got, achieved) = distribute(&s, asked);
+            let (got, achieved) = distribute(&s, asked, 0);
             let sum: f64 = got.iter().sum();
             assert!((sum - achieved).abs() < 1e-9, "asked {asked}");
             for (v, spec) in got.iter().zip(&s) {
@@ -336,8 +430,8 @@ mod tests {
     #[test]
     fn one_continuous_stage_gets_exactly_what_is_asked() {
         let s = vec![StageSpec::ranged("RF", 0.0, 45.0, 0.0)];
-        assert_eq!(distribute(&s, 17.3), (vec![17.3], 17.3));
-        assert_eq!(distribute(&s, 100.0), (vec![45.0], 45.0));
+        assert_eq!(distribute(&s, 17.3, 0), (vec![17.3], 17.3));
+        assert_eq!(distribute(&s, 100.0, 0), (vec![45.0], 45.0));
     }
 
     /// An RTL-SDR: one stage over an irregular table, so the achievable totals
@@ -345,10 +439,10 @@ mod tests {
     #[test]
     fn a_tabled_stage_lands_on_the_drivers_own_values() {
         let s = vec![StageSpec::tabled("Tuner", vec![0.0, 9.0, 16.0, 24.0, 49.0])];
-        assert_eq!(distribute(&s, 20.0).0, vec![16.0], "largest at or below");
-        assert_eq!(distribute(&s, 9.0).0, vec![9.0]);
-        assert_eq!(distribute(&s, 5.0).0, vec![0.0]);
-        assert_eq!(distribute(&s, 1000.0).0, vec![49.0]);
+        assert_eq!(distribute(&s, 20.0, 0).0, vec![16.0], "largest at or below");
+        assert_eq!(distribute(&s, 9.0, 0).0, vec![9.0]);
+        assert_eq!(distribute(&s, 5.0, 0).0, vec![0.0]);
+        assert_eq!(distribute(&s, 1000.0, 0).0, vec![49.0]);
     }
 
     /// A stage whose range starts below zero is an attenuator, and the reachable
@@ -360,30 +454,30 @@ mod tests {
             StageSpec::ranged("ATT", -30.0, 0.0, 10.0),
             StageSpec::ranged("AMP", 0.0, 20.0, 5.0),
         ];
-        assert_eq!(total_range(&s), (-30.0, 20.0));
-        assert_eq!(distribute(&s, -30.0).0, vec![-30.0, 0.0]);
+        assert_eq!(total_range(&s, 0), (-30.0, 20.0));
+        assert_eq!(distribute(&s, -30.0, 0).0, vec![-30.0, 0.0]);
         assert_eq!(
-            distribute(&s, -100.0).0,
+            distribute(&s, -100.0, 0).0,
             vec![-30.0, 0.0],
             "clamped, not wrapped"
         );
-        assert_eq!(distribute(&s, -10.0), (vec![-10.0, 0.0], -10.0));
-        assert_eq!(distribute(&s, 15.0), (vec![0.0, 15.0], 15.0));
+        assert_eq!(distribute(&s, -10.0, 0), (vec![-10.0, 0.0], -10.0));
+        assert_eq!(distribute(&s, 15.0, 0), (vec![0.0, 15.0], 15.0));
     }
 
     /// Nothing to distribute across. The knob has to answer something.
     #[test]
     fn an_empty_stage_list_is_answered_rather_than_indexed() {
-        assert_eq!(distribute(&[], 40.0), (vec![], 0.0));
-        assert_eq!(total_range(&[]), (0.0, 0.0));
+        assert_eq!(distribute(&[], 40.0, 0), (vec![], 0.0));
+        assert_eq!(total_range(&[], 0), (0.0, 0.0));
     }
 
     /// A request that is not a number must not propagate into the radio.
     #[test]
     fn a_nonsense_request_settles_at_the_floor() {
         let s = hackrf();
-        assert_eq!(distribute(&s, f64::NAN), (vec![0.0, 0.0], 0.0));
-        assert_eq!(distribute(&s, f64::INFINITY), (vec![0.0, 0.0], 0.0));
+        assert_eq!(distribute(&s, f64::NAN, 0), (vec![0.0, 0.0], 0.0));
+        assert_eq!(distribute(&s, f64::INFINITY, 0), (vec![0.0, 0.0], 0.0));
     }
 
     /// The knob has to move. Stepping a fixed 1 dB and redistributing would
@@ -392,22 +486,26 @@ mod tests {
     #[test]
     fn the_knob_steps_to_the_next_reachable_total() {
         let s = hackrf();
-        assert_eq!(next_total(&s, 20.0, true), 22.0);
-        assert_eq!(next_total(&s, 20.0, false), 18.0);
+        assert_eq!(next_total(&s, 20.0, true, 0), 22.0);
+        assert_eq!(next_total(&s, 20.0, false, 0), 18.0);
         // From a total that is not itself reachable, the answer is still a
         // reachable one on the correct side.
-        assert_eq!(next_total(&s, 21.0, true), 22.0);
-        assert_eq!(next_total(&s, 21.0, false), 18.0, "21 floors to 20 first");
+        assert_eq!(next_total(&s, 21.0, true, 0), 22.0);
+        assert_eq!(
+            next_total(&s, 21.0, false, 0),
+            18.0,
+            "21 floors to 20 first"
+        );
     }
 
     /// And it stops at the rails rather than running off or spinning.
     #[test]
     fn the_knob_rests_against_the_rails() {
         let s = hackrf();
-        assert_eq!(next_total(&s, 0.0, false), 0.0);
-        assert_eq!(next_total(&s, -50.0, false), 0.0);
-        assert_eq!(next_total(&s, 102.0, true), 102.0);
-        assert_eq!(next_total(&s, 500.0, true), 102.0);
+        assert_eq!(next_total(&s, 0.0, false, 0), 0.0);
+        assert_eq!(next_total(&s, -50.0, false, 0), 0.0);
+        assert_eq!(next_total(&s, 102.0, true, 0), 102.0);
+        assert_eq!(next_total(&s, 500.0, true, 0), 102.0);
     }
 
     /// Walking the whole range one press at a time must terminate at both ends
@@ -418,14 +516,14 @@ mod tests {
         let mut at = 0.0;
         let mut seen = 0;
         while at < 102.0 && seen < 200 {
-            let next = next_total(&s, at, true);
+            let next = next_total(&s, at, true, 0);
             assert!(next > at, "stalled at {at}");
             at = next;
             seen += 1;
         }
         assert_eq!(at, 102.0, "did not reach the ceiling in {seen} presses");
         while at > 0.0 && seen < 400 {
-            let next = next_total(&s, at, false);
+            let next = next_total(&s, at, false, 0);
             assert!(next < at, "stalled coming down at {at}");
             at = next;
             seen += 1;
@@ -438,23 +536,23 @@ mod tests {
     #[test]
     fn a_continuous_stage_steps_by_one_db() {
         let s = vec![StageSpec::ranged("RF", 0.0, 45.0, 0.0)];
-        assert_eq!(next_total(&s, 17.0, true), 18.0);
-        assert_eq!(next_total(&s, 17.0, false), 16.0);
+        assert_eq!(next_total(&s, 17.0, true, 0), 18.0);
+        assert_eq!(next_total(&s, 17.0, false, 0), 16.0);
     }
 
     /// An RTL-SDR walks its own table.
     #[test]
     fn a_tabled_stage_steps_between_its_entries() {
         let s = vec![StageSpec::tabled("Tuner", vec![0.0, 9.0, 16.0, 24.0, 49.0])];
-        assert_eq!(next_total(&s, 9.0, true), 16.0);
-        assert_eq!(next_total(&s, 16.0, false), 9.0);
-        assert_eq!(next_total(&s, 49.0, true), 49.0);
+        assert_eq!(next_total(&s, 9.0, true, 0), 16.0);
+        assert_eq!(next_total(&s, 16.0, false, 0), 9.0);
+        assert_eq!(next_total(&s, 49.0, true, 0), 49.0);
     }
 
     /// Nothing to step across.
     #[test]
     fn an_empty_list_has_nowhere_to_step() {
-        assert_eq!(next_total(&[], 10.0, true), 0.0);
+        assert_eq!(next_total(&[], 10.0, true, 0), 0.0);
     }
 
     /// A second two-position element stays in the list once the boost key has
@@ -466,13 +564,13 @@ mod tests {
             StageSpec::ranged("LNA", 0.0, 40.0, 8.0),
             StageSpec::ranged("PREAMP", 0.0, 20.0, 20.0),
         ];
-        assert_eq!(distribute(&s, 40.0).0, vec![40.0, 0.0]);
+        assert_eq!(distribute(&s, 40.0, 0).0, vec![40.0, 0.0]);
         assert_eq!(
-            distribute(&s, 55.0).0,
+            distribute(&s, 55.0, 0).0,
             vec![40.0, 0.0],
             "20 does not fit in 15"
         );
-        assert_eq!(distribute(&s, 60.0), (vec![40.0, 20.0], 60.0));
+        assert_eq!(distribute(&s, 60.0, 0), (vec![40.0, 20.0], 60.0));
     }
 
     // ── The named-stage string ──────────────────────────────────────────────

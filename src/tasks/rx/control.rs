@@ -147,7 +147,7 @@ pub(super) fn track_gain(
     device: &Arc<dyn SdrDevice>,
     adc_peak_dbfs: f32,
 ) {
-    let (latched, gm, curve, current, ceiling) = {
+    let (latched, gm, curve, current, ceiling, hz) = {
         let m = state.lock().unwrap_or_else(|e| e.into_inner());
         // A noise sweep moves one stage on purpose and reads what that does to
         // the floor. Auto-track exists to undo exactly that. Whichever ran
@@ -173,6 +173,7 @@ pub(super) fn track_gain(
             m.radio.gain_curve,
             m.radio.gains.clone(),
             m.ceiling_dbfs(),
+            m.radio.frequency,
         )
     };
     let stages = gm.stages();
@@ -191,10 +192,10 @@ pub(super) fn track_gain(
     // From a peak at the ceiling the level is unknown: the least gain, and
     // the next poll, back under it, tracks from a figure that means something.
     let (targets, _) =
-        crate::ui::rf_calc::auto_gain_target(adc_peak_dbfs as f64, &gm, curve, &current);
+        crate::ui::rf_calc::auto_gain_target(adc_peak_dbfs as f64, &gm, curve, &current, hz);
     // The total, not the arrangement: see the note in `input/bench.rs`.
-    let now_total: f64 = current.iter().take(stages.len()).sum();
-    let want_total: f64 = targets.iter().sum();
+    let now_total = crate::hardware::gain::total_db(&stages, &current, hz);
+    let want_total = crate::hardware::gain::total_db(&stages, &targets, hz);
     if (now_total - want_total).abs() < 0.5 {
         return;
     }

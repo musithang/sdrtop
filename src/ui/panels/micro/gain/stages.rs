@@ -56,7 +56,10 @@ pub(super) fn draw(
     let theme = fd.theme;
     let w = label_w(gm);
 
-    if gm.stages().len() > 2 {
+    // The two-stage rows below are a HackRF's (its VGA's 62 dB scale, its
+    // amp's 14 dB): a longer chain, or a stage stored as the radio's own
+    // setting, gets the rows that read every stage as itself.
+    if gm.stages().len() > 2 || gm.stages().iter().any(|s| s.is_banded()) {
         draw_many(f, primary, second, boost, state, fd);
         return;
     }
@@ -176,10 +179,16 @@ fn draw_many(
             let front = stages.first().map_or("", |s| s.name.as_str());
             let fill = match state.stage_reading(0) {
                 Some(StageReading::Position { at, of }) => at as f64 / of.max(1) as f64,
-                // Over the stage's own range, as the header's bar.
-                _ => stages.first().map_or(0.0, |s| {
-                    let floor = s.min_db.min(0.0);
-                    (state.radio.stage_gain(0) - floor) / (s.max_db - floor).max(1.0)
+                // Over the stage's own span where the radio is tuned, as the
+                // header's bar (a banded stage's band figures).
+                reading => stages.first().map_or(0.0, |s| {
+                    let db = match reading {
+                        Some(StageReading::Db(db)) => db,
+                        _ => state.radio.stage_gain(0),
+                    };
+                    let (lo, hi) = s.db_range_at(state.radio.frequency);
+                    let floor = lo.min(0.0);
+                    (db - floor) / (hi - floor).max(1.0)
                 }),
             };
             (
@@ -213,10 +222,9 @@ fn draw_many(
     f.render_widget(Paragraph::new(Line::from(line)), stages_row);
 
     // The whole chain, every stage of it, and only where each is a dB here.
-    let total = if state.chain_db_holds() {
-        format!("{:.0} dB", state.radio.total_gain())
-    } else {
-        "\u{2014}".to_string()
+    let total = match state.chain_total_db() {
+        Some(db) => format!("{db:.0} dB"),
+        None => "\u{2014}".to_string(),
     };
     f.render_widget(
         Paragraph::new(Line::from(vec![

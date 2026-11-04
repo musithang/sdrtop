@@ -338,9 +338,23 @@ impl SdrMetrics {
     /// Lives here rather than on `RadioState` because it needs `caps` to know
     /// which shape the device is, and duplicating the choice at each readout is
     /// how eight panels end up disagreeing.
+    ///
+    /// A front stage stored as the radio's own setting reads as its band's dB
+    /// here (none where it was not measured): the setting is not a gain.
     pub fn shown_gain(&self) -> u32 {
         if self.caps.gain.is_single() {
-            self.radio.total_gain().max(0.0).round() as u32
+            self.chain_total_db()
+                .unwrap_or_else(|| self.radio.total_gain())
+                .max(0.0)
+                .round() as u32
+        } else if self
+            .caps
+            .gain
+            .stages()
+            .first()
+            .is_some_and(|s| s.is_banded())
+        {
+            self.stage_db(0).map_or(0, |db| db.max(0.0).round() as u32)
         } else {
             self.radio.primary_gain()
         }
@@ -398,6 +412,16 @@ mod stage_reading_tests {
             why.contains("LNA's gain in dB was not measured at 1200.000 MHz"),
             "{why}"
         );
+    }
+
+    /// The readouts' single figure for a banded front stage is its band's
+    /// dB, not its state.
+    #[test]
+    fn the_shown_gain_of_a_banded_front_is_its_bands_db() {
+        let mut m = SdrMetrics::fixture().banded_chain();
+        assert_eq!(m.shown_gain(), 43);
+        m.radio.frequency = 1_200_000_000;
+        assert_eq!(m.shown_gain(), 0, "no dB where no band was measured");
     }
 
     /// Every chain that is not banded totals as it always did.

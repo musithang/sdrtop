@@ -68,9 +68,11 @@ pub fn gain_text(caps: &DeviceCapabilities, gains: &[f64], boost: bool, hz: u64)
             match reading {
                 StageReading::Position { at, of } => format!("{}=step {at}/{of}", spec.name),
                 StageReading::Auto => format!("{}=AGC", spec.name),
-                StageReading::Db(_) => crate::hardware::gain::format_named(
+                // The gain the stage gives here: for a stage stored as the
+                // radio's own setting, its band's dB, not the setting.
+                StageReading::Db(gain) => crate::hardware::gain::format_named(
                     std::slice::from_ref(spec),
-                    std::slice::from_ref(&db),
+                    std::slice::from_ref(&gain),
                 ),
             }
         })
@@ -237,6 +239,25 @@ pub fn meta(header: &Header, rec: &Recording, stop: Option<&Stop>) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// **A banded stage is recorded as the gain it gives there**, not as the
+    /// radio's state: a file read later has the dB.
+    #[test]
+    fn a_banded_stage_is_recorded_as_its_bands_db() {
+        let m = crate::state::SdrMetrics::fixture().banded_chain();
+        assert_eq!(
+            gain_text(&m.caps, &m.radio.gains, false, 150_000_000),
+            "LNA=43.13,IF=20"
+        );
+        assert_eq!(
+            gain_text(&m.caps, &m.radio.gains, false, 14_000_000),
+            "LNA=24.05,IF=20"
+        );
+        assert_eq!(
+            gain_text(&m.caps, &m.radio.gains, false, 1_200_000_000),
+            "LNA=step 4/9,IF=20"
+        );
+    }
     use crate::export::iq::recording::Limits;
     use crate::hardware::record_tap::BlockAt;
 

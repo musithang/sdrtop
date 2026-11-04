@@ -1185,15 +1185,18 @@ fn bottom_band_line(state: &SdrMetrics, theme: &crate::Theme, inner_width: u16) 
     spans.push(Span::styled(p_label, Style::default().fg(theme.label)));
     // The front stage's own floor where it has a key of its own; a single
     // knob's gauge is the whole chain, from nothing.
-    let primary_min = if gm.has_second_stage() {
-        gm.stages().first().map_or(0.0, |s| s.min_db)
-    } else {
-        0.0
+    // A stage whose dB depends on the band spans that band's figures.
+    let (primary_min, primary_max) = match (gm.has_second_stage(), gm.stages().first()) {
+        (true, Some(first)) => {
+            let (lo, hi) = first.db_range_at(state.radio.frequency);
+            (lo, hi.max(0.0).round() as u32)
+        }
+        _ => (0.0, gm.primary_max_db()),
     };
     spans.extend(stage_cell(
         primary,
         primary_min,
-        gm.primary_max_db(),
+        primary_max,
         theme.status_ok,
         theme.value_hi,
     ));
@@ -1207,10 +1210,11 @@ fn bottom_band_line(state: &SdrMetrics, theme: &crate::Theme, inner_width: u16) 
             format!("{name:<3} "),
             Style::default().fg(theme.label),
         ));
+        let (second_min, second_max) = second.db_range_at(state.radio.frequency);
         spans.extend(stage_cell(
             state.stage_reading(1),
-            second.min_db,
-            second.max_db.max(1.0).round() as u32,
+            second_min,
+            second_max.max(1.0).round() as u32,
             theme.border_accent,
             theme.status_warn,
         ));
@@ -2347,5 +2351,30 @@ mod tests {
         m.record.current = Some(p);
         let out = crate::state::fixture::draw(HeaderPanel, 120, 5, &m).join("\n");
         assert!(!out.contains("REC"), "{out}");
+    }
+
+    /// **A banded stage reads its band's dB in the header**, the same state
+    /// 43 dB at 150 MHz and 24 dB at 14 MHz, and its position where no band
+    /// was measured.
+    #[test]
+    fn the_header_reads_a_banded_stage_in_its_bands_db() {
+        let mut m = crate::state::SdrMetrics::fixture()
+            .streaming()
+            .banded_chain();
+        let vhf = crate::state::fixture::draw(HeaderPanel, 140, 8, &m).join("\n");
+        assert!(vhf.contains("43 dB"), "{vhf}");
+        // The gauge spans the band's figures: 43 of its 68 dB is five of the
+        // eight cells, where a span of the settings (0..9) would fill them.
+        let row = vhf.lines().find(|l| l.contains("LNA ")).unwrap();
+        let cell = &row[row.find("LNA ").unwrap()..row.find("43 dB").unwrap()];
+        let full = cell.chars().filter(|&c| c == '\u{2588}').count();
+        assert_eq!(full, 5, "{row}");
+        assert!(vhf.contains("20 dB"), "the IF:\n{vhf}");
+        m.radio.frequency = 14_000_000;
+        let hf = crate::state::fixture::draw(HeaderPanel, 140, 8, &m).join("\n");
+        assert!(hf.contains("24 dB"), "{hf}");
+        m.radio.frequency = 1_200_000_000;
+        let out = crate::state::fixture::draw(HeaderPanel, 140, 8, &m).join("\n");
+        assert!(out.contains("4/9"), "{out}");
     }
 }

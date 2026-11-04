@@ -39,7 +39,31 @@ const CONTINUOUS_STEP_DB: u32 = 1;
 /// **A table entry comes back exactly**, never rounded to a whole dB: the
 /// Airspy R2's mixer has 15.90, 16.16, 16.17 and 16.24 dB a position apart,
 /// and rounded they are one 16 the key can never step past.
-fn next_on_stage(stage: &StageSpec, current: f64, up: bool) -> f64 {
+///
+/// **A stage whose dB depends on the band** ([`StageSpec::banded`]) is the
+/// radio's own setting: "up" is the next setting with more gain *in the band
+/// the radio is tuned to*, which on the SDRplay RSP1B's LNA is a lower state
+/// number, and the walk covers that band's settings only. Where no band was
+/// measured there is no gain order to walk, and the setting stays.
+fn next_on_stage(stage: &StageSpec, current: f64, up: bool, hz: u64) -> f64 {
+    if stage.is_banded() {
+        let Some(band) = stage.band_at(hz) else {
+            return current;
+        };
+        let last = band.db.len().saturating_sub(1);
+        let at = (current.round().max(0.0) as usize).min(last);
+        let here = band.db[at];
+        // The setting nearest in gain on the wanted side; the lowest number
+        // on a tie, which is the one the band's own table names.
+        let next = band
+            .db
+            .iter()
+            .enumerate()
+            .filter(|&(_, &db)| if up { db > here } else { db < here })
+            .min_by(|a, b| (a.1 - here).abs().total_cmp(&(b.1 - here).abs()))
+            .map_or(at, |(i, _)| i);
+        return next as f64;
+    }
     if !stage.table.is_empty() {
         let idx = stage.position_of(current).unwrap_or(0) as usize;
         let next = if up {
@@ -110,6 +134,12 @@ fn said(stage: &StageSpec, db: f64, hz: u64) -> String {
     match stage.reading(db, hz) {
         StageReading::Position { at, of } => format!("step {at}/{of}"),
         StageReading::Auto => "AGC".to_string(),
+        // The radio's own setting, and what it gives in this band.
+        StageReading::Db(gain) if stage.is_banded() => {
+            let text = format!("{gain:.2}");
+            let text = text.trim_end_matches('0').trim_end_matches('.');
+            format!("{text} dB (state {db:.0})")
+        }
         StageReading::Db(db) if !stage.table.is_empty() => {
             let at = stage.position_of(db).unwrap_or(0);
             let of = stage.positions().unwrap_or(1).saturating_sub(1);
@@ -130,7 +160,7 @@ fn said(stage: &StageSpec, db: f64, hz: u64) -> String {
 #[cfg(test)]
 fn next_primary_gain(gain: &GainModel, current: f64, up: bool) -> f64 {
     match gain.stages().first() {
-        Some(front) => next_on_stage(front, current, up),
+        Some(front) => next_on_stage(front, current, up, 0),
         None => current,
     }
 }
@@ -177,9 +207,10 @@ pub(super) fn step_selected_stage(ctx: &mut InputCtx<'_>, up: bool) {
         (m.radio.stage_gain(index), m.radio.frequency)
     };
     // A table is walked entry by entry, as the stage keys walk it; a step of
-    // 1 dB snapped onto a table skips entries closer together than that.
-    let next = if !spec.table.is_empty() {
-        next_on_stage(spec, current, up)
+    // 1 dB snapped onto a table skips entries closer together than that. A
+    // banded stage is walked by its band's gain order.
+    let next = if !spec.table.is_empty() || spec.is_banded() {
+        next_on_stage(spec, current, up, hz)
     } else {
         let step = if spec.step_db > 0.0 {
             spec.step_db
@@ -366,7 +397,7 @@ pub(super) fn step_primary(ctx: &mut InputCtx<'_>, up: bool) {
         let m = metrics(ctx.state);
         (m.radio.stage_gain(0), m.radio.frequency)
     };
-    let new_gain = next_on_stage(&front, current, up);
+    let new_gain = next_on_stage(&front, current, up, hz);
 
     // By position, with the exact value: the one setter every backend has for
     // every stage.
@@ -418,9 +449,17 @@ fn step_distributed(ctx: &mut InputCtx<'_>, up: bool) {
     if !release_agc(ctx, &every) {
         return;
     }
-    let from = metrics(ctx.state).radio.total_gain();
-    let want = crate::hardware::gain::next_total(&stages, from, up);
-    let (values, achieved) = crate::hardware::gain::distribute(&stages, want);
+    // From the chain's total in dB where the radio is tuned: for a stage
+    // whose dB depends on the band, its band's figure, not its setting.
+    let (from, hz) = {
+        let m = metrics(ctx.state);
+        (
+            m.chain_total_db().unwrap_or_else(|| m.radio.total_gain()),
+            m.radio.frequency,
+        )
+    };
+    let want = crate::hardware::gain::next_total(&stages, from, up, hz);
+    let (values, achieved) = crate::hardware::gain::distribute(&stages, want, hz);
 
     // Device calls with no lock held, as everywhere else in this file.
     let mut failed = None;
@@ -473,7 +512,7 @@ pub(super) fn step_vga(ctx: &mut InputCtx<'_>, up: bool) {
     let (new_gain, hz) = {
         let m = metrics(ctx.state);
         (
-            next_on_stage(second, m.radio.stage_gain(1), up),
+            next_on_stage(second, m.radio.stage_gain(1), up, m.radio.frequency),
             m.radio.frequency,
         )
     };
@@ -573,6 +612,33 @@ fn boost_line(gm: &crate::hardware::GainModel, on: bool) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// **On a banded stage "up" is more gain in the tuned band**, which on
+    /// the RSP1B's LNA is a lower state; the walk keeps to the band's own
+    /// states, and where no band was measured the setting stays.
+    #[test]
+    fn a_banded_stage_steps_by_gain_in_its_band() {
+        let m = crate::state::SdrMetrics::fixture().banded_chain();
+        let lna = m.caps.gain.stages()[0].clone();
+        assert_eq!(next_on_stage(&lna, 4.0, true, 150_000_000), 3.0);
+        assert_eq!(next_on_stage(&lna, 4.0, false, 150_000_000), 5.0);
+        assert_eq!(
+            next_on_stage(&lna, 0.0, true, 150_000_000),
+            0.0,
+            "at the most gain"
+        );
+        assert_eq!(
+            next_on_stage(&lna, 9.0, true, 14_000_000),
+            5.0,
+            "9 is 6 there"
+        );
+        assert_eq!(
+            next_on_stage(&lna, 4.0, true, 1_200_000_000),
+            4.0,
+            "no band"
+        );
+        assert_eq!(said(&lna, 4.0, 150_000_000), "43.13 dB (state 4)");
+    }
 
     use crate::hardware::native::{hackrf, rtlsdr};
 

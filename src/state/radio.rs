@@ -61,6 +61,12 @@ impl RadioState {
     /// The front stage's value, rounded, for the many readouts that still speak
     /// in whole dB.
     ///
+    /// **Not for a stage stored as the radio's own setting**
+    /// ([`crate::hardware::StageSpec::banded`]): its value is a state, not a
+    /// dB. These two feed only the HackRF's modelled cascade (behind
+    /// `friis_applicable`), which no such chain sets; everything else reads
+    /// `SdrMetrics::stage_db` / `stage_reading`.
+    ///
     /// **A view, not a second copy.** The vector is the truth; this is the
     /// projection the existing panels were written against. A device whose
     /// stages have fractional steps is displayed to the nearest dB by these two
@@ -76,6 +82,10 @@ impl RadioState {
     }
 
     /// Everything the chain is contributing, added up.
+    ///
+    /// The stored values as they are: for a stage stored as the radio's own
+    /// setting that is not a gain, so the figure to show is
+    /// `SdrMetrics::chain_total_db`.
     ///
     /// What a single-knob device's readout means. On an RTL-SDR there is one
     /// stage so this equals the primary; on a SoapySDR device the knob sets a
