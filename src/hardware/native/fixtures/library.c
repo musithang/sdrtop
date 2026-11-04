@@ -446,3 +446,65 @@ int airspyhf_get_samplerates(void *device, uint32_t *buffer, uint32_t len) {
     return 0;
 }
 #endif
+
+// SDRplay's API 3.15 (sdrplay_api.h). Modes 40 and up are this library's:
+// 41 the service is not running (Open fails as the real one does, with
+// sdrplay_api_Fail), 42 an API that reports 3.14, 43 an RSP1A on the bus,
+// 44 no radio.
+typedef struct {
+    char SerNo[64];
+    unsigned char hwVer;
+    int tuner;
+    int rspDuoMode;
+    unsigned char valid;
+    double rspDuoSampleFreq;
+    void *dev;
+} sdrplay_api_DeviceT;
+// What the backend did, by field (see fixture_sdrplay_state): 0 Opens, 1
+// Closes, 2 device locks, 3 unlocks, 4 the maxDevs GetDevices was given.
+static int sdrplay_state[5];
+int fixture_sdrplay_state(int field) { return sdrplay_state[field]; }
+size_t fixture_sdrplay_layout(int field) {
+    switch (field) {
+        case 0: return sizeof(sdrplay_api_DeviceT);
+        case 1: return offsetof(sdrplay_api_DeviceT, hwVer);
+        case 2: return offsetof(sdrplay_api_DeviceT, tuner);
+        case 3: return offsetof(sdrplay_api_DeviceT, rspDuoMode);
+        case 4: return offsetof(sdrplay_api_DeviceT, valid);
+        case 5: return offsetof(sdrplay_api_DeviceT, rspDuoSampleFreq);
+        case 6: return offsetof(sdrplay_api_DeviceT, dev);
+        default: abort();
+    }
+}
+int sdrplay_api_Open(void) {
+    sdrplay_state[0]++;
+    return mode == 41 ? 1 : 0;
+}
+int sdrplay_api_Close(void) { sdrplay_state[1]++; return 0; }
+int sdrplay_api_ApiVersion(float *version) {
+    *version = mode == 42 ? 3.14f : 3.15f;
+    return 0;
+}
+int sdrplay_api_LockDeviceApi(void) { sdrplay_state[2]++; return 0; }
+int sdrplay_api_UnlockDeviceApi(void) { sdrplay_state[3]++; return 0; }
+int sdrplay_api_GetDevices(sdrplay_api_DeviceT *devices, unsigned int *count, unsigned int max) {
+    sdrplay_state[4] = (int)max;
+    if (mode == 44 || max == 0) { *count = 0; return 0; }
+    memset(&devices[0], 0, sizeof(devices[0]));
+    strcpy(devices[0].SerNo, "2402040E60");
+    devices[0].hwVer = mode == 43 ? 255 : 6;
+    devices[0].tuner = 1;
+    devices[0].valid = 1;
+    *count = 1;
+    return 0;
+}
+#ifndef OMIT_LAST_SYMBOL
+const char *sdrplay_api_GetErrorString(int err) {
+    switch (err) {
+        case 0: return "sdrplay_api_Success";
+        case 1: return "sdrplay_api_Fail";
+        case 14: return "sdrplay_api_ServiceNotResponding";
+        default: return "sdrplay_api_Unknown";
+    }
+}
+#endif

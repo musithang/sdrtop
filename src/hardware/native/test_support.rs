@@ -117,6 +117,24 @@ impl TestLibrary {
         }
     }
 
+    /// What the backend did with the fixture's SDRplay API, by field (see
+    /// `fixture_sdrplay_state` in the fixture).
+    pub fn sdrplay_state(&self, field: i32) -> i32 {
+        unsafe {
+            self.lib
+                .get::<unsafe extern "C" fn(i32) -> i32>(b"fixture_sdrplay_state\0")
+                .unwrap()(field)
+        }
+    }
+
+    pub fn sdrplay_layout(&self, field: i32) -> usize {
+        unsafe {
+            self.lib
+                .get::<unsafe extern "C" fn(i32) -> usize>(b"fixture_sdrplay_layout\0")
+                .unwrap()(field)
+        }
+    }
+
     pub fn list_layout(&self, field: i32) -> usize {
         unsafe {
             self.lib

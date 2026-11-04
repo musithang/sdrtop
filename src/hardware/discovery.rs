@@ -15,7 +15,7 @@
 use std::path::PathBuf;
 use std::sync::Arc;
 
-use super::native::{airspy, airspyhf, hackrf, rtlsdr};
+use super::native::{airspy, airspyhf, hackrf, rtlsdr, sdrplay};
 use super::{soapy, tinysa, usb, DeviceCapabilities, SdrDevice};
 
 /// Which backend a [`DeviceListing`] / open request targets.
@@ -29,6 +29,9 @@ pub enum DeviceKind {
     AirspyHf,
     HackRf,
     RtlSdr,
+    /// The SDRplay RSP1B, natively, asked for by name only while its backend
+    /// cannot open it.
+    Sdrplay,
     Soapy,
     TinySa,
 }
@@ -63,6 +66,7 @@ impl DeviceKind {
             Self::AirspyHf => airspyhf::ffi::api().map(|_| ()),
             Self::HackRf => hackrf::ffi::api().map(|_| ()),
             Self::RtlSdr => rtlsdr::ffi::api().map(|_| ()),
+            Self::Sdrplay => sdrplay::ffi::api().map(|_| ()),
             _ => Ok(()),
         }
     }
@@ -105,7 +109,8 @@ impl DeviceKind {
                 caps: airspyhf::observer_caps,
                 stack: || Some(airspyhf::observer_stack()),
             }),
-            DeviceKind::Soapy | DeviceKind::TinySa => None,
+            // Not until its backend can describe the radio.
+            DeviceKind::Sdrplay | DeviceKind::Soapy | DeviceKind::TinySa => None,
         }
     }
 }
@@ -171,6 +176,8 @@ pub fn parse_device_arg(spec: &str) -> anyhow::Result<(DeviceKind, Option<String
         "airspyhf" => DeviceKind::AirspyHf,
         "hackrf" => DeviceKind::HackRf,
         "rtlsdr" | "rtl-sdr" | "rtl" => DeviceKind::RtlSdr,
+        // Not in the list below until it opens the radio: asked for by name only.
+        "sdrplay" => DeviceKind::Sdrplay,
         "soapy" | "soapysdr" => DeviceKind::Soapy,
         "tinysa" | "tiny-sa" => DeviceKind::TinySa,
         other => anyhow::bail!(
@@ -206,6 +213,25 @@ pub fn no_device_hint(want: Option<DeviceKind>) -> String {
             }
         }
     }
+    // SDRplay's API only when its backend was asked for: unasked it offers
+    // nothing yet, so its absence is no reason the search came back empty.
+    // Its library loaded but the API itself refused (no service, a version
+    // whose layout is unchecked): what the search found is said, without
+    // opening the API again.
+    if want == Some(DeviceKind::Sdrplay) {
+        match DeviceKind::Sdrplay.check_available() {
+            Err(err) => {
+                hint.push('\n');
+                hint.push_str(&err.to_string());
+            }
+            Ok(()) => {
+                if let Some(problem) = sdrplay::last_problem() {
+                    hint.push('\n');
+                    hint.push_str(&problem);
+                }
+            }
+        }
+    }
     if (want.is_none() || want == Some(DeviceKind::Soapy)) && soapy::api::api().is_some() {
         hint.push_str("\nSoapySDR is installed: `SoapySDRUtil --find` lists what it can see.");
     }
@@ -233,6 +259,8 @@ pub fn list_all_devices(
     // it below; the other HF+ boards only when asked for by name (see
     // `airspyhf::offered`).
     out.extend(airspyhf::list(want == Some(DeviceKind::AirspyHf)));
+    // An RSP only when asked for by name, until its backend opens it.
+    out.extend(sdrplay::list(want == Some(DeviceKind::Sdrplay)));
     let tinysa = if want == Some(DeviceKind::TinySa) {
         tinysa::list(soapy_filter.filter(|value| !value.is_empty()))
     } else {
@@ -317,6 +345,7 @@ pub fn open_device(
         )?)),
         DeviceKind::HackRf => Ok(Arc::new(hackrf::HackRfDevice::open(listing.index)?)),
         DeviceKind::RtlSdr => Ok(Arc::new(rtlsdr::RtlDevice::open(listing.index)?)),
+        DeviceKind::Sdrplay => Err(sdrplay::not_yet(listing)),
         DeviceKind::Soapy => {
             let Some(args) = listing.args.as_deref() else {
                 anyhow::bail!("a SoapySDR listing with no device arguments cannot be opened");
@@ -394,6 +423,15 @@ mod tests {
     fn an_unasked_search_asks_every_native_backend() {
         assert!(NATIVE.contains(&DeviceKind::AirspyHf));
         assert!(!no_device_hint(Some(DeviceKind::HackRf)).contains("libairspyhf"));
+    }
+
+    /// Unasked, the SDRplay backend offers nothing yet, so SDRplay's API,
+    /// installed or not, is no reason a search came back empty.
+    #[test]
+    fn an_unasked_search_does_not_name_sdrplays_api() {
+        assert!(!NATIVE.contains(&DeviceKind::Sdrplay));
+        assert!(!no_device_hint(None).contains("SDRplay"));
+        assert!(!no_device_hint(Some(DeviceKind::HackRf)).contains("SDRplay"));
     }
 
     fn listing(
@@ -649,6 +687,18 @@ mod tests {
             parse_device_arg("airspyhfplus").is_err(),
             "not a backend name"
         );
+        assert_eq!(
+            parse_device_arg("sdrplay").unwrap(),
+            (DeviceKind::Sdrplay, None)
+        );
+        assert!(parse_device_arg("rsp1b").is_err(), "not a backend name");
+        assert!(
+            !parse_device_arg("rsp1b")
+                .unwrap_err()
+                .to_string()
+                .contains("sdrplay"),
+            "not offered in the list until it opens the radio"
+        );
         assert!(parse_device_arg("").is_err(), "nor is nothing");
         let why = parse_device_arg("airspyhfplus").unwrap_err().to_string();
         assert!(
@@ -702,6 +752,10 @@ mod tests {
             "there is no USB profile for whatever SoapySDR was talking to"
         );
         assert!(DeviceKind::TinySa.observer_profile().is_none());
+        assert!(
+            DeviceKind::Sdrplay.observer_profile().is_none(),
+            "not until its backend can describe the radio"
+        );
     }
 
     /// The failure the deleted assertion existed to prevent: a user staring at
