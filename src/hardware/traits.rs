@@ -1620,6 +1620,16 @@ pub struct RadioDrops {
     pub in_flight_bytes: u64,
 }
 
+/// The radio's own overload flag, as it last reported it. See
+/// [`SdrDevice::radio_overload`].
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct OverloadReport {
+    /// Whether the radio says it is overloaded now.
+    pub on: bool,
+    /// Times it has said so since its stream started.
+    pub events: u64,
+}
+
 /// Shared RX plumbing handed to a backend's streaming start. The per-sample
 /// accumulators write into `metrics`; raw byte blocks go out via `sample_tx` to
 /// the FFT worker. `geometry` tells [`crate::hardware::process::digest`]
@@ -2020,6 +2030,24 @@ pub trait SdrDevice: Send + Sync {
     /// measured here, not at the centre.
     fn lo_offset_hz(&self) -> i64 {
         0
+    }
+
+    /// How many bits the converter delivers at the rate the radio runs now,
+    /// for a radio whose depth changes with its rate; `None` for one whose
+    /// depth is [`SampleGeometry::bits`] at every rate, which is every radio
+    /// but one. The SDRplay RSP1B's ADC gives 14 bits up to about 6 MSPS and
+    /// fewer above, measured from its samples' quantum.
+    fn converter_bits(&self) -> Option<u8> {
+        None
+    }
+
+    /// The radio's own word on overload, for a radio that reports one; `None`
+    /// for every other, which is not the same as "not overloaded": it was
+    /// never asked. The ADC bench's clip counter is sdrtop's own count at the
+    /// rails; this is the radio's, and the two are shown side by side, never
+    /// merged.
+    fn radio_overload(&self) -> Option<OverloadReport> {
+        None
     }
 }
 

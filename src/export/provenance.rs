@@ -104,7 +104,7 @@ pub fn block(state: &SdrMetrics, unix_secs: i64) -> Vec<String> {
                 "{:.3} MHz   {:.3} Msps   {} bit  fs={}",
                 state.radio.frequency as f64 / 1e6,
                 state.radio.config_sample_rate / 1e6,
-                geometry.bits(),
+                state.converter_bits(),
                 geometry.full_scale,
             ),
         ),

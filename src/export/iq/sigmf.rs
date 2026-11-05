@@ -118,7 +118,8 @@ impl Header {
                 state.ui.active_preset
             ),
             full_scale: geometry.full_scale,
-            bits: geometry.bits(),
+            // The depth at the rate it records at, where that changes it.
+            bits: state.converter_bits(),
             stack: state
                 .system
                 .stack
@@ -239,6 +240,17 @@ pub fn meta(header: &Header, rec: &Recording, stop: Option<&Stop>) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// **A recording's header gives the depth at the rate it records at**,
+    /// where the radio's depth changes with its rate.
+    #[test]
+    fn the_header_gives_the_converters_depth_at_its_rate() {
+        let mut m = crate::state::SdrMetrics::fixture().streaming();
+        let geometry_bits = m.caps.sample_geometry.bits();
+        assert_eq!(Header::from_state(&m).unwrap().bits, geometry_bits);
+        m.radio.converter_bits = Some(12);
+        assert_eq!(Header::from_state(&m).unwrap().bits, 12);
+    }
 
     /// **A banded stage is recorded as the gain it gives there**, not as the
     /// radio's state: a file read later has the dB.

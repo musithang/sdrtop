@@ -46,6 +46,48 @@ pub(super) fn ceiling(
     )));
 }
 
+/// The radio's own overload flag, apart from the clip counter: what the
+/// radio says now, how often it has said so, and when last. Only for a radio
+/// that has such a flag.
+pub(super) fn radio_overload(
+    out: &mut Vec<Line<'static>>,
+    ov: &crate::state::RadioOverload,
+    now: std::time::Instant,
+    theme: &crate::Theme,
+) {
+    let times = match ov.events {
+        1 => "once".to_string(),
+        n => format!("{n} times"),
+    };
+    let line = if ov.on {
+        vec![
+            Span::styled(" radio says ", Style::default().fg(theme.label)),
+            Span::styled("OVERLOAD", Style::default().fg(theme.status_warn)),
+            Span::styled(
+                format!(" \u{00b7} {times}"),
+                Style::default().fg(theme.label),
+            ),
+        ]
+    } else {
+        let when = match ov.last_on {
+            Some(t) if ov.events > 0 => {
+                format!(
+                    ", last {} s ago",
+                    now.saturating_duration_since(t).as_secs()
+                )
+            }
+            _ => String::new(),
+        };
+        let said = if ov.events == 0 {
+            " radio: no overload".to_string()
+        } else {
+            format!(" radio: no overload \u{00b7} {times}{when}")
+        };
+        vec![Span::styled(said, Style::default().fg(theme.label))]
+    };
+    out.push(Line::from(line));
+}
+
 /// The staging verdict and how far the peak sits from where this radio
 /// clips, then the loading in one column of labels and one of values: peak,
 /// rms, the bits the peak reaches, and the clips counted at the rails.

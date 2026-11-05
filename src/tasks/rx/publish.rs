@@ -216,6 +216,10 @@ pub(super) fn write_back(
     m.timing.jitter_session_max_us = prev_peak.max(m.timing.jitter_max_us);
     m.timing.wire_bytes_per_pair = wire_bytes_per_pair;
     m.radio.lo_offset_hz = device.lo_offset_hz();
+    m.radio.converter_bits = device.converter_bits();
+    m.radio.overload = device
+        .radio_overload()
+        .map(|report| crate::state::RadioOverload::after(m.radio.overload, report, Instant::now()));
 
     m.radio.rx_enabled
 }

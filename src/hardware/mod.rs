@@ -41,8 +41,8 @@ pub(crate) use traits::BandTable;
 pub(crate) use traits::RateSet;
 pub use traits::{
     AcquisitionKind, Boost, Ceiling, CeilingKind, DeliveryModel, DeviceCapabilities, DeviceInfo,
-    DeviceOption, DirectSweepConfig, FeedHealth, GainCurve, GainModel, LevelUnit, PowerTrace,
-    PowerTraceTarget, RadioDrops, RxContext, SampleFormat, SampleGeometry, SdrDevice,
+    DeviceOption, DirectSweepConfig, FeedHealth, GainCurve, GainModel, LevelUnit, OverloadReport,
+    PowerTrace, PowerTraceTarget, RadioDrops, RxContext, SampleFormat, SampleGeometry, SdrDevice,
     SoftwareStack, StageReading, StageSpec, StreamBlock, TimedBlock, IQ_TRACE_STALE_MS,
 };
 

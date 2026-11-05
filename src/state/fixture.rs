@@ -59,6 +59,8 @@ impl SdrMetrics {
                 reference: None,
                 reference_request: false,
                 lo_offset_hz: 0,
+                converter_bits: None,
+                overload: None,
             },
             signal: SignalState::default(),
             iq: IqState {

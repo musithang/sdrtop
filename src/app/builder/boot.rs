@@ -381,6 +381,8 @@ pub(super) fn initial_metrics(cfg: &AppConfig, boot: Boot) -> anyhow::Result<Sdr
             reference: None,
             reference_request: false,
             lo_offset_hz: 0,
+            converter_bits: None,
+            overload: None,
         },
         signal: SignalState {
             drops_per_sec: 0,

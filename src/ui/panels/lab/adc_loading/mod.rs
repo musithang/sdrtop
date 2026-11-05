@@ -99,7 +99,8 @@ impl Panel for AdcLoadingPanel {
         let (lna_g, vga_g) = fz
             .map(|f| (f.lna_gain, f.vga_gain))
             .unwrap_or((state.radio.primary_gain(), state.radio.secondary_gain()));
-        let bits = state.caps.sample_geometry.bits();
+        // At the rate it runs now, where the radio's depth changes with it.
+        let bits = state.converter_bits();
         let load = adc_loading(peak, rms, clip, n, bits);
         // Judged against this radio's ceiling where it is tuned, where its
         // samples stop.
@@ -112,6 +113,7 @@ impl Panel for AdcLoadingPanel {
         let below = 1
             + 5
             + usize::from(part.is_some())
+            + usize::from(state.radio.overload.is_some())
             + if state.caps.friis_applicable {
                 LINEARITY_ROWS
             } else {
@@ -140,6 +142,10 @@ impl Panel for AdcLoadingPanel {
         if let Some(part) = part {
             readouts::ceiling(&mut lines, &state.ceiling_text(), part, theme);
         }
+        // The radio's own word, beside sdrtop's count at the rails above.
+        if let Some(ov) = &state.radio.overload {
+            readouts::radio_overload(&mut lines, ov, std::time::Instant::now(), theme);
+        }
         // The quantisation ceiling on that card follows the device, but its
         // IIP3, IMD3 and SFDR figures are a specific front end's datasheet
         // wearing a generic name. Drawn only where the chain is one sdrtop
@@ -161,6 +167,51 @@ impl Panel for AdcLoadingPanel {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// **The radio's own overload is shown beside the clip counter**, as the
+    /// radio's word: on, with how often; off, with how often and when last;
+    /// and not at all for a radio that has no such flag.
+    #[test]
+    fn the_radios_overload_is_shown_as_its_own_word() {
+        let mut m = SdrMetrics::fixture().streaming();
+        let none = crate::state::fixture::draw(AdcLoadingPanel, 60, 40, &m).join("\n");
+        assert!(!none.contains("radio"), "{none}");
+        m.radio.overload = Some(crate::state::RadioOverload {
+            on: true,
+            events: 24,
+            last_on: Some(std::time::Instant::now()),
+        });
+        let on = crate::state::fixture::draw(AdcLoadingPanel, 60, 40, &m).join("\n");
+        assert!(on.contains("radio says OVERLOAD \u{00b7} 24 times"), "{on}");
+        m.radio.overload = Some(crate::state::RadioOverload {
+            on: false,
+            events: 3,
+            last_on: std::time::Instant::now().checked_sub(std::time::Duration::from_secs(12)),
+        });
+        let off = crate::state::fixture::draw(AdcLoadingPanel, 60, 40, &m).join("\n");
+        assert!(
+            off.contains("radio: no overload \u{00b7} 3 times, last 12 s ago"),
+            "{off}"
+        );
+    }
+
+    /// **The depth is the one at the rate the radio runs**, where the device
+    /// says it changes with the rate: a 12-bit stream is not called the
+    /// geometry's 8.
+    #[test]
+    fn the_bits_are_the_converters_at_its_rate() {
+        let mut m = SdrMetrics::fixture().streaming();
+        assert_eq!(m.converter_bits(), m.caps.sample_geometry.bits());
+        assert_eq!(m.caps.sample_geometry.bits(), 8, "the fixture is a HackRF");
+        m.radio.converter_bits = Some(12);
+        assert_eq!(m.converter_bits(), 12);
+        let out = crate::state::fixture::draw(AdcLoadingPanel, 60, 40, &m).join("\n");
+        let row = out
+            .lines()
+            .find(|l| l.contains("reached by the peak"))
+            .unwrap_or_else(|| panic!("{out}"));
+        assert!(row.contains(" of 12 "), "{row}");
+    }
 
     #[test]
     fn panel_name_and_min_size() {

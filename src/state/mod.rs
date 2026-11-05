@@ -57,7 +57,8 @@ pub use net::{FramesView, Holdoff, Trigger};
 pub use observer::ObserverState;
 pub use pager::{PagerState, PagerView};
 pub use radio::{
-    offset_ppm, FrequencyReference, OffsetBasis, Provenance, RadioState, REFERENCE_STALE_S,
+    offset_ppm, FrequencyReference, OffsetBasis, Provenance, RadioOverload, RadioState,
+    REFERENCE_STALE_S,
 };
 pub use record::{RecordProgress, RecordState};
 pub use selection::Selection;
@@ -188,6 +189,15 @@ impl SdrMetrics {
                     .map(|v| if v.is_finite() { v } else { 0.0 })
             })
             .sum::<Option<f64>>()
+    }
+
+    /// How many bits the converter delivers now: the device's figure for the
+    /// rate it runs at, where its depth changes with the rate, else the
+    /// sample geometry's.
+    pub fn converter_bits(&self) -> u8 {
+        self.radio
+            .converter_bits
+            .unwrap_or_else(|| self.caps.sample_geometry.bits())
     }
 
     /// The highest level the samples can honestly reach on this radio where

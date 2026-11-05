@@ -55,6 +55,46 @@ pub struct RadioState {
     /// device last said (`hardware::SdrDevice::lo_offset_hz`). Zero on every
     /// radio that mixes straight to 0 Hz.
     pub lo_offset_hz: i64,
+    /// The converter's depth at the rate the radio runs now, as the device
+    /// last said (`hardware::SdrDevice::converter_bits`); `None` where it is
+    /// the sample geometry's at every rate. Read it through
+    /// `SdrMetrics::converter_bits`.
+    pub converter_bits: Option<u8>,
+    /// The radio's own overload flag, as the device last reported it
+    /// (`hardware::SdrDevice::radio_overload`); `None` for a radio that has
+    /// no such flag.
+    pub overload: Option<RadioOverload>,
+}
+
+/// The radio's overload flag in the state: its last report, and when it was
+/// last seen on.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct RadioOverload {
+    pub on: bool,
+    /// Times the radio said so since its stream started.
+    pub events: u64,
+    /// The last poll that found it on.
+    pub last_on: Option<Instant>,
+}
+
+impl RadioOverload {
+    /// The state after a poll found `report`, at `now`.
+    pub fn after(
+        previous: Option<RadioOverload>,
+        report: crate::hardware::OverloadReport,
+        now: Instant,
+    ) -> Self {
+        let seen = report.on || previous.is_some_and(|p| report.events > p.events);
+        Self {
+            on: report.on,
+            events: report.events,
+            last_on: if seen {
+                Some(now)
+            } else {
+                previous.and_then(|p| p.last_on)
+            },
+        }
+    }
 }
 
 impl RadioState {
@@ -363,6 +403,30 @@ mod tests {
     use super::*;
     use crate::signal::dsp::uncertainty::Uncertain;
     use std::time::Duration;
+
+    fn report(on: bool, events: u64) -> crate::hardware::OverloadReport {
+        crate::hardware::OverloadReport { on, events }
+    }
+
+    /// **The radio's overload in the state**: seen on, it is dated; off
+    /// again, the date stays; a detection and its correction both between two
+    /// polls still count as seen (the count moved); a correction with no
+    /// detection before it, which the RSP1B's API sends at the end of a
+    /// stream, is no sighting at all.
+    #[test]
+    fn the_overload_flag_is_dated_when_seen() {
+        let t0 = Instant::now();
+        let t1 = t0 + Duration::from_secs(2);
+        let t2 = t0 + Duration::from_secs(5);
+        let on = RadioOverload::after(None, report(true, 1), t0);
+        assert_eq!((on.on, on.events, on.last_on), (true, 1, Some(t0)));
+        let off = RadioOverload::after(Some(on), report(false, 1), t1);
+        assert_eq!((off.on, off.last_on), (false, Some(t0)), "the date stays");
+        let between = RadioOverload::after(Some(off), report(false, 2), t2);
+        assert_eq!(between.last_on, Some(t2), "on and off between two polls");
+        let orphan = RadioOverload::after(None, report(false, 0), t0);
+        assert_eq!(orphan.last_on, None);
+    }
 
     fn reference(ppm: f64, at: Instant, provenance: Provenance) -> FrequencyReference {
         FrequencyReference {
