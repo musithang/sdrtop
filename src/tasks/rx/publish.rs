@@ -221,6 +221,8 @@ pub(super) fn write_back(
     m.timing.relay_hold_us = c.relay_hold_us;
     m.radio.lo_offset_hz = device.lo_offset_hz();
     m.radio.converter_bits = device.converter_bits();
+    m.radio.upstream_correction = device.upstream_correction();
+    m.radio.filter_in = device.filter_in(m.radio.frequency);
     m.radio.auto_db = (0..device.capabilities().gain.stages().len())
         .map(|i| device.auto_stage_db(i))
         .collect();

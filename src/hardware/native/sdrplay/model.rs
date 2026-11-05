@@ -305,6 +305,18 @@ const CURVE_STEP_MAX_DB: f64 = 3.0;
 const UNMEASURED_STATES: std::ops::RangeInclusive<u8> = 0..=4;
 const UNMEASURED_GR_FLOOR: i32 = 25;
 
+/// Where the AM/FM notch (`rfNotchEnable`) takes 10 dB or more, Hz. Measured
+/// on the cable: FM 15.7 dB at 70 MHz, 44.5-55 from 85 to 108, 27.1 at 115,
+/// 8.9 at 130; MW 35.5 at 1.0 MHz, 26.2 at 1.5, 13 at 1.7, 1.3 at 2.5. Under
+/// 1 MHz the HackRF cannot reach: the MW band's foot is the datasheet's 660
+/// kHz.
+pub const FM_NOTCH_BANDS: [std::ops::RangeInclusive<u64>; 2] =
+    [660_000..=1_700_000, 70_000_000..=115_000_000];
+
+/// Where the DAB notch takes 10 dB or more, Hz: 26.2 dB at 165 MHz, 30-33
+/// from 175 to 230, 9.9 at 245 (the edge), 6.8 at 150 (measured).
+pub const DAB_NOTCH_BAND: std::ops::RangeInclusive<u64> = 165_000_000..=245_000_000;
+
 /// The AGC's set point, dBFS of the band's power. The API's own -60 sat
 /// under the noise of a quiet band (-56 with nothing at the input), and the
 /// AGC did nothing; at -30 it settled to 0.4 dB (S0) and keeps ~18 dB under

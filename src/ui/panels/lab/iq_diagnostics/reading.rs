@@ -41,6 +41,9 @@ pub(super) struct Reading {
     /// Why the gain, phase and IRR above are not the front end's
     /// (`SdrMetrics::iq_balance_refusal`), or `None` when they are.
     pub balance_refusal: Option<String>,
+    /// Who corrected DC and balance before sdrtop
+    /// (`RadioState::upstream_correction`): the readings are what is left.
+    pub corrected: Option<&'static str>,
 }
 
 impl Reading {
@@ -62,6 +65,7 @@ impl Reading {
             lo_offset_hz: state.radio.lo_offset_hz,
             lo_line: lo_line(state),
             balance_refusal: state.iq_balance_refusal(),
+            corrected: state.radio.upstream_correction,
         }
     }
 

@@ -128,11 +128,19 @@ fn rf_chain_str(gm: &GainModel, friis_applicable: bool, amp_enabled: bool) -> St
 /// Lab RF banner middle fields: `CHAIN … · NF … · MDS … · SNR …` (modeled NF/MDS
 /// from the live cascade). On a single-tuner radio only the honest CHAIN + SNR show.
 fn rf_banner_fields(state: &SdrMetrics) -> Vec<(&'static str, String)> {
-    let chain = rf_chain_str(
+    let mut chain = rf_chain_str(
         &state.caps.gain,
         state.caps.friis_applicable,
         state.radio.amp_enabled,
     );
+    // A filter in the path where the radio is tuned is part of the chain.
+    if let Some(filter) = state.radio.filter_in {
+        chain = chain.replacen(
+            "ANT\u{25B8}",
+            &format!("ANT\u{25B8}{}\u{25B8}", filter.to_uppercase()),
+            1,
+        );
+    }
     let snr = format!("{:.0} dB", state.signal.peak_to_nf_db);
     if !state.caps.friis_applicable {
         return vec![("CHAIN", chain), ("SNR", snr)];
@@ -1439,6 +1447,27 @@ mod tests {
         );
         let occ = f.iter().find(|(k, _)| *k == "OCCUPANCY").unwrap();
         assert_eq!(occ.1, "65 %");
+    }
+
+    /// A filter in the path where the radio is tuned is in the chain.
+    #[test]
+    fn a_filter_in_is_part_of_the_chain() {
+        let mut m = SdrMetrics::fixture().streaming();
+        let plain = rf_banner_fields(&m);
+        m.radio.filter_in = Some("AM/FM notch");
+        let chain = rf_banner_fields(&m)
+            .into_iter()
+            .find(|(k, _)| *k == "CHAIN")
+            .unwrap()
+            .1;
+        assert!(
+            chain.starts_with("ANT\u{25B8}AM/FM NOTCH\u{25B8}"),
+            "{chain}"
+        );
+        assert_ne!(
+            Some(&chain),
+            plain.iter().find(|(k, _)| *k == "CHAIN").map(|f| &f.1)
+        );
     }
 
     /// A relayed stream's banner names deliveries and how long the service

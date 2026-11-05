@@ -459,6 +459,43 @@ impl AirspyHfSettings {
     }
 }
 
+/// `[sdrplay]`: the RSP1B's switches that are kept. The bias tee is not
+/// among them: it starts off every time, and is switched by hand.
+#[derive(Deserialize, Serialize, Clone, Debug, PartialEq, Eq)]
+pub struct SdrplaySettings {
+    /// SDRplay's API removes DC and balances I and Q before sdrtop sees a
+    /// sample. On by default: the radio's own balance falls to 27 dB of
+    /// image rejection at 950 MHz, the API's lifts it by 20 to 34 dB.
+    #[serde(default = "SdrplaySettings::on")]
+    pub corrections: bool,
+    /// The AM/FM notch (broadcast MW and FM bands).
+    #[serde(default)]
+    pub fm_notch: bool,
+    /// The DAB notch (band III).
+    #[serde(default)]
+    pub dab_notch: bool,
+}
+
+impl Default for SdrplaySettings {
+    fn default() -> Self {
+        Self {
+            corrections: true,
+            fm_notch: false,
+            dab_notch: false,
+        }
+    }
+}
+
+impl SdrplaySettings {
+    fn on() -> bool {
+        true
+    }
+
+    fn is_default(&self) -> bool {
+        *self == Self::default()
+    }
+}
+
 #[derive(Deserialize, Serialize, Clone, Debug, Default)]
 pub struct AppConfig {
     #[serde(default)]
@@ -491,6 +528,9 @@ pub struct AppConfig {
     /// The same for the Airspy HF+.
     #[serde(default, skip_serializing_if = "AirspyHfSettings::is_default")]
     pub airspyhf: AirspyHfSettings,
+    /// Written only once it differs from the default, as `[airspyhf]` is.
+    #[serde(default, skip_serializing_if = "SdrplaySettings::is_default")]
+    pub sdrplay: SdrplaySettings,
     /// User-defined layout presets, merged into the built-in set at startup.
     /// A preset here with the same name as a built-in overrides it. Preserved
     /// verbatim across save so hand-written presets survive a quit.
@@ -852,6 +892,22 @@ impl LayoutConfig {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// `[sdrplay]` is written only once a switch differs from its default,
+    /// and read back as written; the corrections default to on.
+    #[test]
+    fn the_sdrplay_block_is_written_only_when_it_says_something() {
+        let mut cfg = AppConfig::default();
+        assert!(cfg.sdrplay.corrections);
+        assert!(!toml::to_string(&cfg).unwrap().contains("[sdrplay]"));
+        cfg.sdrplay.dab_notch = true;
+        let text = toml::to_string(&cfg).unwrap();
+        assert!(text.contains("[sdrplay]"), "{text}");
+        let back: AppConfig = toml::from_str(&text).unwrap();
+        assert_eq!(back.sdrplay, cfg.sdrplay);
+        let partial: AppConfig = toml::from_str("[sdrplay]\nfm_notch = true\n").unwrap();
+        assert!(partial.sdrplay.corrections && partial.sdrplay.fm_notch);
+    }
 
     /// Write `files` into a fresh temp directory and return it.
     fn presets_dir_with(tag: &str, files: &[(&str, &str)]) -> std::path::PathBuf {

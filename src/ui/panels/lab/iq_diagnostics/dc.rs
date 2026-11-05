@@ -39,7 +39,12 @@ pub(super) fn lines(r: &Reading, rows: &Rows) -> Vec<Line<'static>> {
     // On a radio whose LO is not at 0 Hz the DC is no longer its leak: the
     // section says where it measures, and the LO gets a line of its own.
     let mut out = if r.lo_offset_hz == 0 {
-        vec![section("DC at the LO", "a tone at 0 Hz", rows.iw, theme)]
+        vec![section(
+            "DC at the LO",
+            r.corrected.unwrap_or("a tone at 0 Hz"),
+            rows.iw,
+            theme,
+        )]
     } else {
         vec![section(
             "DC at 0 Hz",

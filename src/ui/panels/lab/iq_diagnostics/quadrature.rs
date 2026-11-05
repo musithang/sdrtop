@@ -35,7 +35,12 @@ pub(super) fn lines(r: &Reading, rows: &Rows) -> Vec<Line<'static>> {
         return out;
     }
     vec![
-        section("Quadrature", "gain \u{00b7} phase", rows.iw, theme),
+        section(
+            "Quadrature",
+            r.corrected.unwrap_or("gain \u{00b7} phase"),
+            rows.iw,
+            theme,
+        ),
         rows.meter(
             "gain",
             r.amp_db as f64,

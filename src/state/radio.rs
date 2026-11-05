@@ -68,6 +68,12 @@ pub struct RadioState {
     /// radio reports it (`hardware::SdrDevice::auto_stage_db`); `None` for a
     /// stage it does not set or does not report.
     pub auto_db: Vec<Option<f64>>,
+    /// Who corrected the samples before sdrtop, as the I/Q bench says it
+    /// (`hardware::SdrDevice::upstream_correction`).
+    pub upstream_correction: Option<&'static str>,
+    /// The front-end filter switched in that acts where the radio is tuned
+    /// (`hardware::SdrDevice::filter_in`).
+    pub filter_in: Option<&'static str>,
 }
 
 /// The radio's overload flag in the state: its last report, and when it was

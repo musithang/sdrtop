@@ -2061,6 +2061,20 @@ pub trait SdrDevice: Send + Sync {
         Ok(())
     }
 
+    /// Who corrected the samples' DC and I/Q balance before sdrtop saw them,
+    /// as the I/Q bench says it (`"after SDRplay's correction"`), or `None`
+    /// where the samples are the front end's own.
+    fn upstream_correction(&self) -> Option<&'static str> {
+        None
+    }
+
+    /// The front-end filter the device has switched in that acts at `hz`
+    /// (`"FM notch"`), for every reading taken through it to name it;
+    /// `None` where none does.
+    fn filter_in(&self, _hz: u64) -> Option<&'static str> {
+        None
+    }
+
     /// The dB stage `index` is at under the device's own automatic gain, as
     /// the radio reports it; `None` where it is not under it or the radio
     /// does not say. Only a report: a figure worked out here would be a

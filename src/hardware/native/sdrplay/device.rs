@@ -35,6 +35,12 @@ const TUNER_A: libc::c_int = 1;
 const UPDATE_FRF: u32 = 0x0002_0000;
 const UPDATE_GR: u32 = 0x0000_8000;
 const UPDATE_AGC: u32 = 0x0100_0000;
+/// `Ctrl_DCoffsetIQimbalance`, and the RSP1A family's switches
+/// (`Rsp1a_BiasTControl`, `Rsp1a_RfNotchControl`, `Rsp1a_RfDabNotchControl`).
+const UPDATE_CORRECTIONS: u32 = 0x0040_0000;
+const UPDATE_BIAS_TEE: u32 = 0x0000_0010;
+const UPDATE_FM_NOTCH: u32 = 0x0000_0020;
+const UPDATE_DAB_NOTCH: u32 = 0x0000_0040;
 
 /// What the device holds behind its lock: the radio as selected, the API's
 /// parameter block for it, and the rate mode written there.
@@ -82,8 +88,49 @@ impl Drop for Session {
 
 impl SdrplayDevice {
     /// The RSP1B a listing names, by its serial.
-    pub fn open(listing: &DeviceListing) -> anyhow::Result<Self> {
-        Self::open_with_api(ffi::api()?, listing)
+    /// Opens the radio a listing names, with the switches `[sdrplay]` keeps.
+    pub fn open(
+        listing: &DeviceListing,
+        settings: &crate::config::SdrplaySettings,
+    ) -> anyhow::Result<Self> {
+        let device = Self::open_with_api(ffi::api()?, listing)?;
+        device.keep(settings);
+        Ok(device)
+    }
+
+    /// The kept switches into the block, before any stream reads it.
+    fn keep(&self, settings: &crate::config::SdrplaySettings) {
+        let mut sel = self.lock();
+        // SAFETY: the block is the selected radio's; the lock is held.
+        unsafe {
+            let dev = &mut *(*sel.params).dev_params;
+            dev.rsp1a_params.rf_notch_enable = u8::from(settings.fm_notch);
+            dev.rsp1a_params.rf_dab_notch_enable = u8::from(settings.dab_notch);
+            let dc = &mut Self::rx(&mut sel).ctrl_params.dc_offset;
+            dc.dc_enable = u8::from(settings.corrections);
+            dc.iq_enable = u8::from(settings.corrections);
+        }
+    }
+
+    /// The four switches as the block holds them: corrections, AM/FM notch,
+    /// DAB notch, bias tee.
+    fn switches(&self) -> [bool; 4] {
+        let mut sel = self.lock();
+        // SAFETY: the block is the selected radio's; the lock is held.
+        unsafe {
+            let dev = &*(*sel.params).dev_params;
+            let notches = (
+                dev.rsp1a_params.rf_notch_enable,
+                dev.rsp1a_params.rf_dab_notch_enable,
+            );
+            let rx = Self::rx(&mut sel);
+            [
+                rx.ctrl_params.dc_offset.dc_enable != 0,
+                notches.0 != 0,
+                notches.1 != 0,
+                rx.rsp1a_tuner_params.bias_t_enable != 0,
+            ]
+        }
     }
 
     pub(super) fn open_with_api(
@@ -594,6 +641,94 @@ impl SdrDevice for SdrplayDevice {
         Ok(())
     }
 
+    /// The four switches the Options pane shows, in its 18 columns. The
+    /// bias tee says what it puts on the antenna port.
+    fn options(&self) -> Vec<crate::hardware::DeviceOption> {
+        let [corrections, fm, dab, bias] = self.switches();
+        let switch = |id: &str, label: &str, on: bool| crate::hardware::DeviceOption {
+            id: id.into(),
+            label: label.into(),
+            choices: vec!["On".into(), "Off".into()],
+            selected_choice: if on { "On" } else { "Off" }.into(),
+            integer_range: None,
+        };
+        vec![
+            switch("corrections", "DC/IQ correction", corrections),
+            switch("fm_notch", "AM/FM notch", fm),
+            switch("dab_notch", "DAB notch", dab),
+            switch("bias_tee", "Bias tee 4.7 V", bias),
+        ]
+    }
+
+    /// A switch into the block, and to the radio while it streams.
+    fn set_option(&self, id: &str, choice: &str) -> anyhow::Result<()> {
+        let on = match choice {
+            "On" => 1u8,
+            "Off" => 0,
+            _ => anyhow::bail!("{choice} is not a choice for {id}"),
+        };
+        let mut sel = self.lock();
+        // SAFETY: the block is the selected radio's; the lock is held, and
+        // every field written is put back if the radio refuses it.
+        let (field, reason): (*mut u8, u32) = unsafe {
+            let dev = &mut *(*sel.params).dev_params;
+            let rx = &mut *(*sel.params).rx_channel_a;
+            match id {
+                "corrections" => {
+                    rx.ctrl_params.dc_offset.iq_enable = on;
+                    (&mut rx.ctrl_params.dc_offset.dc_enable, UPDATE_CORRECTIONS)
+                }
+                "fm_notch" => (&mut dev.rsp1a_params.rf_notch_enable, UPDATE_FM_NOTCH),
+                "dab_notch" => (&mut dev.rsp1a_params.rf_dab_notch_enable, UPDATE_DAB_NOTCH),
+                "bias_tee" => (&mut rx.rsp1a_tuner_params.bias_t_enable, UPDATE_BIAS_TEE),
+                _ => anyhow::bail!("the RSP1B has no option {id}"),
+            }
+        };
+        // SAFETY: as above.
+        let was = unsafe { std::ptr::replace(field, on) };
+        if let Err(e) = self.apply(&sel, reason, id) {
+            // SAFETY: as above.
+            unsafe {
+                *field = was;
+                if id == "corrections" {
+                    (*(*sel.params).rx_channel_a)
+                        .ctrl_params
+                        .dc_offset
+                        .iq_enable = was;
+                }
+            }
+            return Err(e);
+        }
+        Ok(())
+    }
+
+    /// The kept switches as they stand; the bias tee is never kept.
+    fn update_config(&self, config: &mut crate::config::AppConfig) -> anyhow::Result<()> {
+        let [corrections, fm_notch, dab_notch, _] = self.switches();
+        config.sdrplay = crate::config::SdrplaySettings {
+            corrections,
+            fm_notch,
+            dab_notch,
+        };
+        Ok(())
+    }
+
+    fn upstream_correction(&self) -> Option<&'static str> {
+        self.switches()[0].then_some("after SDRplay's correction")
+    }
+
+    /// A notch that is in and takes 10 dB or more at `hz` (measured).
+    fn filter_in(&self, hz: u64) -> Option<&'static str> {
+        let [_, fm, dab, _] = self.switches();
+        if fm && model::FM_NOTCH_BANDS.iter().any(|b| b.contains(&hz)) {
+            Some("AM/FM notch")
+        } else if dab && model::DAB_NOTCH_BAND.contains(&hz) {
+            Some("DAB notch")
+        } else {
+            None
+        }
+    }
+
     /// The IF's dB under the AGC, from the gRdB the radio last reported.
     fn auto_stage_db(&self, index: usize) -> Option<f64> {
         let mut sel = self.lock();
@@ -868,6 +1003,91 @@ mod tests {
 
     const LAST_REASON: i32 = 10;
     const UPDATES: i32 = 11;
+
+    /// **The switches**: `[sdrplay]`'s kept ones go into the block at open;
+    /// each option reaches the radio through its own `Update` while it
+    /// streams, and a refused one is put back; the config keeps all but the
+    /// bias tee; the correction and a notch acting where the radio is tuned
+    /// are reported for the screen to name.
+    #[test]
+    fn the_switches_are_kept_set_and_reported() {
+        let fixture = TestLibrary::new(false);
+        let device = SdrplayDevice::open_with_api(api(&fixture), &listing()).unwrap();
+        let p = |f| fixture.sdrplay_param(f);
+        device.keep(&crate::config::SdrplaySettings {
+            corrections: false,
+            fm_notch: true,
+            dab_notch: false,
+        });
+        assert_eq!((p(DC), p(IQ), p(NOTCH), p(DAB)), (0.0, 0.0, 1.0, 0.0));
+        assert!(device
+            .options()
+            .iter()
+            .all(|o| o.label.chars().count() <= 18));
+        let shown: Vec<(String, String)> = device
+            .options()
+            .into_iter()
+            .map(|o| (o.id, o.selected_choice))
+            .collect();
+        assert_eq!(
+            shown,
+            [
+                ("corrections".to_string(), "Off".to_string()),
+                ("fm_notch".into(), "On".into()),
+                ("dab_notch".into(), "Off".into()),
+                ("bias_tee".into(), "Off".into()),
+            ]
+        );
+        assert_eq!(device.upstream_correction(), None);
+        assert_eq!(device.filter_in(100_000_000), Some("AM/FM notch"));
+        assert_eq!(device.filter_in(1_200_000), Some("AM/FM notch"));
+        assert_eq!(device.filter_in(150_000_000), None);
+
+        let (ctx, _net) = stream_ctx();
+        device.start_rx(Arc::clone(&ctx)).unwrap();
+        for (id, field, reason) in [
+            ("corrections", DC, 0x0040_0000),
+            ("dab_notch", DAB, 0x0000_0040),
+            ("bias_tee", BIAS, 0x0000_0010),
+            ("fm_notch", NOTCH, 0x0000_0020),
+        ] {
+            let to = if p(field) == 0.0 { "On" } else { "Off" };
+            device.set_option(id, to).unwrap();
+            assert_eq!(p(field), if to == "On" { 1.0 } else { 0.0 }, "{id}");
+            assert_eq!(fixture.sdrplay_count(LAST_REASON), reason, "{id}");
+        }
+        assert_eq!(p(IQ), 1.0, "the correction is DC and I/Q together");
+        assert_eq!(
+            device.upstream_correction(),
+            Some("after SDRplay's correction")
+        );
+        assert_eq!(device.filter_in(200_000_000), Some("DAB notch"));
+        assert_eq!(
+            device.filter_in(100_000_000),
+            None,
+            "the AM/FM notch is out"
+        );
+
+        fixture.mode(49);
+        assert!(device.set_option("bias_tee", "Off").is_err());
+        assert_eq!(p(BIAS), 1.0, "refused, as it was");
+        assert!(device.set_option("corrections", "Off").is_err());
+        assert_eq!((p(DC), p(IQ)), (1.0, 1.0));
+        assert!(device.set_option("lo_mode", "On").is_err());
+        device.stop_rx().unwrap();
+
+        let mut config = crate::config::AppConfig::default();
+        device.update_config(&mut config).unwrap();
+        assert_eq!(
+            config.sdrplay,
+            crate::config::SdrplaySettings {
+                corrections: true,
+                fm_notch: false,
+                dab_notch: true,
+            },
+            "the bias tee is not kept"
+        );
+    }
 
     /// **The AGC, as the radio runs it**: refused in an LNA state whose
     /// trap it would run into; on, it reports the IF it set (gR 31, read

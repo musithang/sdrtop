@@ -297,7 +297,20 @@ fn top_band_line(state: &SdrMetrics, theme: &crate::Theme, inner_width: u16) -> 
 
     // --- Gap ---
     let board_len = state.system.board_name.chars().count();
-    let recording = record_chips(state, theme);
+    let mut recording = record_chips(state, theme);
+    // A filter switched in where the radio is tuned: every level on the deck
+    // is read through it.
+    if let Some(filter) = state.radio.filter_in {
+        recording.extend([
+            Span::raw("  "),
+            Span::styled(
+                format!("{} IN", filter.to_uppercase()),
+                Style::default()
+                    .fg(theme.status_warn)
+                    .add_modifier(Modifier::BOLD),
+            ),
+        ]);
+    }
     let recording_len: usize = recording.iter().map(|s| s.content.chars().count()).sum();
     let gap = top_band_gap(
         board_len,
@@ -1661,6 +1674,18 @@ mod tests {
         rtl.radio.amp_enabled = true;
         let out = crate::state::fixture::draw(HeaderPanel, 160, 8, &rtl).join("\n");
         assert!(out.contains("AGC") && !out.contains("29 dB"), "{out}");
+    }
+
+    /// **A filter switched in where the radio is tuned is named on top**,
+    /// since every level on the deck is read through it.
+    #[test]
+    fn the_header_names_a_filter_in() {
+        let mut m = crate::state::SdrMetrics::fixture().streaming();
+        let plain = crate::state::fixture::draw(HeaderPanel, 160, 8, &m).join("\n");
+        assert!(!plain.contains("NOTCH"), "{plain}");
+        m.radio.filter_in = Some("DAB notch");
+        let out = crate::state::fixture::draw(HeaderPanel, 160, 8, &m).join("\n");
+        assert!(out.contains("DAB NOTCH IN"), "{out}");
     }
 
     /// **Where the radio reports what its AGC set, the header says it**: the

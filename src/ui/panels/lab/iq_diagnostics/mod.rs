@@ -124,6 +124,22 @@ mod tests {
         m
     }
 
+    /// **Samples a driver corrected say so**: the DC and the balance are
+    /// what its correction left, and both sections name it.
+    #[test]
+    fn a_corrected_stream_names_the_correction() {
+        let mut m = bench();
+        m.radio.upstream_correction = Some("after SDRplay's correction");
+        let out = draw(IqDiagnosticsPanel, 72, 30, &m).join("\n");
+        assert_eq!(
+            out.matches("after SDRplay's correction").count(),
+            2,
+            "{out}"
+        );
+        let plain = draw(IqDiagnosticsPanel, 72, 30, &bench()).join("\n");
+        assert!(!plain.contains("SDRplay"), "{plain}");
+    }
+
     /// A stopped radio shows no readings at all, rather than the last ones it
     /// happened to have. The frame's `[STALE]` tag is the engine's job.
     #[test]

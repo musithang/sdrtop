@@ -64,6 +64,8 @@ pub struct App {
     pub(super) airspy_config: crate::config::AirspySettings,
     /// The `[airspyhf]` block, likewise.
     pub(super) airspyhf_config: crate::config::AirspyHfSettings,
+    /// The `[sdrplay]` block, likewise.
+    pub(super) sdrplay_config: crate::config::SdrplaySettings,
     /// `[radio.boost]` as loaded: every other radio's entry is carried
     /// forward, and the open radio's is written from the live state.
     pub(super) boost_config: std::collections::BTreeMap<String, bool>,
@@ -721,6 +723,7 @@ impl App {
             tinysa: self.tinysa_config.clone(),
             airspy: self.airspy_config.clone(),
             airspyhf: self.airspyhf_config.clone(),
+            sdrplay: self.sdrplay_config.clone(),
             net: self.net_config.clone(),
             record: self.record_config.clone(),
             pager: crate::config::PagerSettings { night, display },

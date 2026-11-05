@@ -362,7 +362,10 @@ pub fn open_device(
         )?)),
         DeviceKind::HackRf => Ok(Arc::new(hackrf::HackRfDevice::open(listing.index)?)),
         DeviceKind::RtlSdr => Ok(Arc::new(rtlsdr::RtlDevice::open(listing.index)?)),
-        DeviceKind::Sdrplay => Ok(Arc::new(sdrplay::device::SdrplayDevice::open(listing)?)),
+        DeviceKind::Sdrplay => Ok(Arc::new(sdrplay::device::SdrplayDevice::open(
+            listing,
+            &cfg.sdrplay,
+        )?)),
         DeviceKind::Soapy => {
             let Some(args) = listing.args.as_deref() else {
                 anyhow::bail!("a SoapySDR listing with no device arguments cannot be opened");
