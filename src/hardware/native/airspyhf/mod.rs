@@ -1352,7 +1352,7 @@ mod tests {
         assert_eq!(stages[0].table.last(), Some(&0.0));
         assert_eq!(stages[0].table.len(), 9);
         assert_eq!(stages[1].table, [0.0, 6.0]);
-        assert_eq!(g.start_gains(None), [0.0, 0.0]);
+        assert_eq!(g.start_gains(None, 0), [0.0, 0.0]);
         assert!(g.auto_governs(0) && !g.auto_governs(1));
         assert!(g.has_second_stage());
         assert!(g.stages_are_digital());

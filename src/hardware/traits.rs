@@ -868,28 +868,58 @@ impl Boost {
 /// **Positions, not decibels**, because that is what a vendor's table holds,
 /// and a position means the same register setting at every frequency even
 /// where its decibels were not measured.
+///
+/// **By band, where the radio's stages are.** A curve built from a stage
+/// whose dB depends on the band ([`StageSpec::banded`]) is a different list
+/// of steps in each band; every question is asked at the tuned frequency.
+/// A curve with one list ([`Self::new`]) answers the same everywhere.
 #[derive(Clone, Debug, PartialEq)]
 pub struct GainCurve {
     pub name: &'static str,
     /// Three letters, for the readouts that have no room for the name.
     pub short: &'static str,
-    steps: Vec<Vec<u32>>,
+    /// `(lowest frequency, steps)`, ascending; each list holds from its
+    /// frequency to the next one's.
+    bands: Vec<(u64, Vec<Vec<u32>>)>,
 }
 
 impl GainCurve {
     pub fn new(name: &'static str, short: &'static str, steps: Vec<Vec<u32>>) -> Self {
-        Self { name, short, steps }
+        Self::banded(name, short, vec![(0, steps)])
     }
 
-    /// The highest step; steps count from 0.
-    pub fn last_step(&self) -> usize {
-        self.steps.len().saturating_sub(1)
+    /// A curve whose steps depend on the band: each list holds from its
+    /// frequency up to the next one's, and the first also below its own.
+    pub fn banded(
+        name: &'static str,
+        short: &'static str,
+        bands: Vec<(u64, Vec<Vec<u32>>)>,
+    ) -> Self {
+        debug_assert!(bands.windows(2).all(|w| w[0].0 < w[1].0), "bands ascending");
+        Self { name, short, bands }
     }
 
-    /// One value per stage at `step`, each stage's own value at the position
-    /// the curve gives it.
-    pub fn values(&self, step: usize, stages: &[StageSpec]) -> Vec<f64> {
-        let positions = &self.steps[step.min(self.last_step())];
+    /// The steps that hold at `hz`.
+    fn steps(&self, hz: u64) -> &[Vec<u32>] {
+        self.bands
+            .iter()
+            .rev()
+            .find(|(from, _)| *from <= hz)
+            .or_else(|| self.bands.first())
+            .map_or(&[], |(_, steps)| steps.as_slice())
+    }
+
+    /// The highest step at `hz`; steps count from 0.
+    pub fn last_step(&self, hz: u64) -> usize {
+        self.steps(hz).len().saturating_sub(1)
+    }
+
+    /// One value per stage at `step` with the radio tuned to `hz`, each
+    /// stage's own value at the position the curve gives it.
+    pub fn values(&self, step: usize, stages: &[StageSpec], hz: u64) -> Vec<f64> {
+        let Some(positions) = self.steps(hz).get(step.min(self.last_step(hz))) else {
+            return Vec::new();
+        };
         stages
             .iter()
             .zip(positions)
@@ -897,10 +927,10 @@ impl GainCurve {
             .collect()
     }
 
-    /// The step the chain is exactly on, if it is on one.
-    pub fn step_of(&self, stages: &[StageSpec], gains: &[f64]) -> Option<usize> {
+    /// The step the chain is exactly on at `hz`, if it is on one.
+    pub fn step_of(&self, stages: &[StageSpec], gains: &[f64], hz: u64) -> Option<usize> {
         let at = Self::positions_of(stages, gains)?;
-        self.steps.iter().position(|step| *step == at)
+        self.steps(hz).iter().position(|step| *step == at)
     }
 
     /// The highest step whose chain adds up to no more than `total_db`, or the
@@ -908,11 +938,11 @@ impl GainCurve {
     /// stage's values are dB. A step's total is its stages' dB at `hz`, so a
     /// stage whose dB depends on the band counts its band's figure.
     pub fn step_for_total(&self, stages: &[StageSpec], total_db: f64, hz: u64) -> usize {
-        (0..self.steps.len())
+        (0..self.steps(hz).len())
             .rev()
             .find(|&step| {
                 let total: f64 = self
-                    .values(step, stages)
+                    .values(step, stages, hz)
                     .iter()
                     .zip(stages)
                     .map(|(&v, s)| s.gain_db_at(v, hz).unwrap_or(v))
@@ -922,14 +952,39 @@ impl GainCurve {
             .unwrap_or(0)
     }
 
-    /// The step closest to the chain, by how many positions each stage is
-    /// away from it in all; the lower step on a tie. Where a hand-set chain
-    /// rejoins the curve.
-    pub fn nearest_step(&self, stages: &[StageSpec], gains: &[f64]) -> usize {
+    /// The step closest to the chain at `hz`; the lower step on a tie.
+    /// Where a hand-set chain rejoins the curve, and where a switch from one
+    /// curve to another lands.
+    ///
+    /// **By gain where every stage is in dB there**, by how many positions
+    /// each stage is away otherwise. Positions of different stages need not
+    /// be worth the same: on the RSP1B an LNA state is 2 to 19 dB and an IF
+    /// step 1, and the position count put a 32 dB chain nearest a 102 dB
+    /// step, one key press from a converter flooded by its own noise.
+    pub fn nearest_step(&self, stages: &[StageSpec], gains: &[f64], hz: u64) -> usize {
+        let total = |values: &[f64]| -> Option<f64> {
+            values
+                .iter()
+                .zip(stages)
+                .map(|(&v, s)| s.gain_db_at(v, hz))
+                .sum::<Option<f64>>()
+        };
+        if let Some(now) = total(gains) {
+            let away: Option<Vec<f64>> = (0..self.steps(hz).len())
+                .map(|step| total(&self.values(step, stages, hz)).map(|t| (t - now).abs()))
+                .collect();
+            if let Some(away) = away {
+                return away
+                    .iter()
+                    .enumerate()
+                    .min_by(|a, b| a.1.total_cmp(b.1))
+                    .map_or(0, |(i, _)| i);
+            }
+        }
         let Some(at) = Self::positions_of(stages, gains) else {
             return 0;
         };
-        self.steps
+        self.steps(hz)
             .iter()
             .enumerate()
             .min_by_key(|(_, step)| {
@@ -948,6 +1003,15 @@ impl GainCurve {
             .map(|(i, s)| s.position_of(gains.get(i).copied().unwrap_or(s.min_db)))
             .collect()
     }
+}
+
+/// Where on its curve the knob starts: a step, or the step at a total.
+#[derive(Clone, Copy, Debug, PartialEq)]
+enum CurveStart {
+    Step(usize),
+    /// The highest step at or under this many dB, at the tuned frequency:
+    /// a curve whose steps differ by band starts at the same gain in each.
+    Total(f64),
 }
 
 #[derive(Clone, Debug)]
@@ -987,7 +1051,7 @@ pub struct GainModel {
     curves: Vec<GainCurve>,
     /// The curve and step a first run and `[R]` start from, when the device
     /// starts on a curve rather than on its stages' defaults.
-    start: Option<(usize, usize)>,
+    start: Option<(usize, CurveStart)>,
     /// The stages an automatic gain mode sets, by position; empty for all of
     /// them. See [`Self::auto_governs`].
     auto_stages: Vec<usize>,
@@ -1113,11 +1177,21 @@ impl GainModel {
 
     /// The vendor's curves, the knob starting on the one named `start` at
     /// `step`.
-    pub fn with_curves(mut self, curves: Vec<GainCurve>, start: &str, step: usize) -> Self {
+    pub fn with_curves(self, curves: Vec<GainCurve>, start: &str, step: usize) -> Self {
+        self.on_curves(curves, start, CurveStart::Step(step))
+    }
+
+    /// The vendor's curves, the knob starting on the one named `start` at
+    /// the highest step of no more than `total_db` where the radio is tuned.
+    pub fn with_curves_at_total(self, curves: Vec<GainCurve>, start: &str, total_db: f64) -> Self {
+        self.on_curves(curves, start, CurveStart::Total(total_db))
+    }
+
+    fn on_curves(mut self, curves: Vec<GainCurve>, start: &str, at: CurveStart) -> Self {
         let index = curves.iter().position(|c| c.name == start);
         debug_assert!(index.is_some(), "no curve named {start}");
         self.curves = curves;
-        self.start = index.map(|i| (i, step));
+        self.start = index.map(|i| (i, at));
         self
     }
 
@@ -1137,13 +1211,20 @@ impl GainModel {
         self.start.map(|(curve, _)| curve)
     }
 
-    /// Where a first run and `[R]` put the stages with the knob on `curve`:
-    /// the start step of that curve, or each stage's own default when the knob
-    /// is on no curve.
-    pub fn start_gains(&self, curve: Option<usize>) -> Vec<f64> {
+    /// Where a first run and `[R]` put the stages with the knob on `curve`
+    /// and the radio tuned to `hz`: the start of that curve, or each stage's
+    /// own default when the knob is on no curve.
+    pub fn start_gains(&self, curve: Option<usize>, hz: u64) -> Vec<f64> {
         let stages = self.stages();
         match curve.and_then(|c| self.curves.get(c)) {
-            Some(c) => c.values(self.start.map_or(0, |(_, step)| step), &stages),
+            Some(c) => {
+                let step = match self.start.map(|(_, at)| at) {
+                    Some(CurveStart::Step(step)) => step,
+                    Some(CurveStart::Total(db)) => c.step_for_total(&stages, db, hz),
+                    None => 0,
+                };
+                c.values(step, &stages, hz)
+            }
             None => match &self.start_values {
                 Some(values) => stages
                     .iter()
@@ -2120,6 +2201,46 @@ mod tests {
         }
     }
 
+    /// **A curve by band answers at the tuned frequency**: each list holds
+    /// from its frequency up, the first also below it; a start given as a
+    /// total lands on each band's own step for it.
+    #[test]
+    fn a_banded_curve_answers_where_the_radio_is_tuned() {
+        let stages = vec![
+            StageSpec::ranged("A", 0.0, 9.0, 1.0),
+            StageSpec::ranged("B", 0.0, 9.0, 1.0),
+        ];
+        let curve = GainCurve::banded(
+            "Even",
+            "EVN",
+            vec![
+                (10, vec![vec![0, 0], vec![1, 0], vec![1, 1]]),
+                (100, vec![vec![0, 0], vec![2, 2]]),
+            ],
+        );
+        assert_eq!(
+            (curve.last_step(5), curve.last_step(10), curve.last_step(99)),
+            (2, 2, 2)
+        );
+        assert_eq!(curve.last_step(100), 1);
+        assert_eq!(curve.values(2, &stages, 50), [1.0, 1.0]);
+        assert_eq!(
+            curve.values(2, &stages, 500),
+            [2.0, 2.0],
+            "past its last step"
+        );
+        assert_eq!(curve.step_of(&stages, &[1.0, 1.0], 50), Some(2));
+        assert_eq!(curve.step_of(&stages, &[1.0, 1.0], 500), None);
+        assert_eq!(
+            curve.nearest_step(&stages, &[1.0, 1.0], 500),
+            0,
+            "the lower on a tie"
+        );
+        let gm = GainModel::new(stages, "A", "A").with_curves_at_total(vec![curve], "Even", 2.0);
+        assert_eq!(gm.start_gains(Some(0), 50), [1.0, 1.0]);
+        assert_eq!(gm.start_gains(Some(0), 500), [0.0, 0.0], "4 dB is over 2");
+    }
+
     /// By default every stage is set in turn, front to back, and the first
     /// refusal stops it and names its stage.
     #[test]
@@ -2853,9 +2974,13 @@ mod tests {
             StageSpec::tabled("LNA", vec![0.0, 6.0]),
         ];
         let plain = GainModel::new(stages.clone(), "ATT", "ATT");
-        assert_eq!(plain.start_gains(None), [0.0, 6.0], "the historical rule");
+        assert_eq!(
+            plain.start_gains(None, 0),
+            [0.0, 6.0],
+            "the historical rule"
+        );
         let own = GainModel::new(stages, "ATT", "ATT").with_start_gains(vec![0.0, 0.0]);
-        assert_eq!(own.start_gains(None), [0.0, 0.0]);
+        assert_eq!(own.start_gains(None, 0), [0.0, 0.0]);
     }
 
     /// Each stream begun is counted, and its positions start from zero.

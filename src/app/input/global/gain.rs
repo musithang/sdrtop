@@ -321,14 +321,17 @@ fn step_curve(ctx: &mut InputCtx<'_>, curve: usize, up: bool) {
     }
     let (from, hz) = {
         let m = metrics(ctx.state);
-        (c.nearest_step(&stages, &m.radio.gains), m.radio.frequency)
+        (
+            c.nearest_step(&stages, &m.radio.gains, m.radio.frequency),
+            m.radio.frequency,
+        )
     };
     let step = if up {
-        (from + 1).min(c.last_step())
+        (from + 1).min(c.last_step(hz))
     } else {
         from.saturating_sub(1)
     };
-    let values = c.values(step, &stages);
+    let values = c.values(step, &stages, hz);
 
     // Device calls with no lock held, as everywhere else in this file.
     let failed = device.set_stage_gains(&values).err().map(|e| e.to_string());
@@ -348,7 +351,7 @@ fn step_curve(ctx: &mut InputCtx<'_>, curve: usize, up: bool) {
             m.push_log(format!(
                 "{} {step}/{} \u{2192} {}",
                 c.name,
-                c.last_step(),
+                c.last_step(hz),
                 split.join(" \u{00b7} ")
             ));
         }

@@ -688,7 +688,7 @@ mod tests {
         let mut m = metrics(&h.state);
         let gm = m.caps.gain.clone();
         m.radio.gain_curve = Some(curve);
-        m.radio.gains = gm.curves()[curve].values(step, &gm.stages());
+        m.radio.gains = gm.curves()[curve].values(step, &gm.stages(), m.radio.frequency);
     }
 
     /// **On a curve, `↑↓` walks it**: one step, all three stages set by

@@ -264,12 +264,13 @@ impl SdrMetrics {
         }
         let curve = gm.curves().get(self.radio.gain_curve?)?;
         let stages = gm.stages();
-        let exact = curve.step_of(&stages, &self.radio.gains);
+        let hz = self.radio.frequency;
+        let exact = curve.step_of(&stages, &self.radio.gains, hz);
         Some(CurveReading {
             name: curve.name,
             short: curve.short,
-            step: exact.unwrap_or_else(|| curve.nearest_step(&stages, &self.radio.gains)),
-            last: curve.last_step(),
+            step: exact.unwrap_or_else(|| curve.nearest_step(&stages, &self.radio.gains, hz)),
+            last: curve.last_step(hz),
             on: exact.is_some(),
             total_db: self.chain_total_db(),
         })

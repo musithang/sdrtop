@@ -367,7 +367,7 @@ mod tests {
         track_gain(&state, &r2.device, -30.0);
         let m = state.lock().unwrap();
         let gm = &m.caps.gain;
-        let step = gm.curves()[0].step_of(&gm.stages(), &m.radio.gains);
+        let step = gm.curves()[0].step_of(&gm.stages(), &m.radio.gains, m.radio.frequency);
         assert!(step.is_some_and(|s| s > 10), "{:?}", m.radio.gains);
         let last = m.ui.log.back().map(|e| e.text.clone()).unwrap_or_default();
         assert!(

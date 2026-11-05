@@ -427,7 +427,7 @@ pub fn staging_target_on(
         Some(c) => {
             let wanted =
                 crate::hardware::gain::total_db(&stages, current, hz) + (OPT_PEAK_DBFS - peak_dbfs);
-            c.values(c.step_for_total(&stages, wanted, hz), &stages)
+            c.values(c.step_for_total(&stages, wanted, hz), &stages, hz)
         }
         None => staging_target(peak_dbfs, &stages, current, hz),
     }
@@ -459,7 +459,7 @@ pub fn auto_gain_target(
     }
     let stages = gm.stages();
     let least = match curve.and_then(|c| gm.curves().get(c)) {
-        Some(c) => c.values(0, &stages),
+        Some(c) => c.values(0, &stages, hz),
         // A stage's least gain, not its least value: for a stage stored as
         // the radio's own setting those differ.
         None => crate::hardware::gain::least(&stages, hz),
@@ -504,8 +504,11 @@ mod tests {
         let r2 = crate::hardware::native::airspy::gain_model();
         let stages = r2.stages();
         let (gains, known) =
-            auto_gain_target(0.0, &r2, Some(0), &r2.curves()[0].values(10, &stages), 0);
-        assert_eq!((gains, known), (r2.curves()[0].values(0, &stages), false));
+            auto_gain_target(0.0, &r2, Some(0), &r2.curves()[0].values(10, &stages, 0), 0);
+        assert_eq!(
+            (gains, known),
+            (r2.curves()[0].values(0, &stages, 0), false)
+        );
     }
 
     /// **On a vendor curve the target is a step of it**: the highest step
@@ -517,12 +520,12 @@ mod tests {
         let gm = crate::hardware::native::airspy::gain_model();
         let stages = gm.stages();
         let lin = &gm.curves()[0];
-        let at_10 = lin.values(10, &stages); // 51.39 dB
-                                             // 22 dB short of the optimum wants 73.39 dB: Linearity 15 is 72.07,
-                                             // 16 would be 74.03.
+        let at_10 = lin.values(10, &stages, 0); // 51.39 dB
+                                                // 22 dB short of the optimum wants 73.39 dB: Linearity 15 is 72.07,
+                                                // 16 would be 74.03.
         let peak = OPT_PEAK_DBFS - 22.0;
         let target = staging_target_on(peak, &gm, Some(0), &at_10, 0);
-        assert_eq!(target, lin.values(15, &stages));
+        assert_eq!(target, lin.values(15, &stages, 0));
         assert_eq!(
             staging_target_on(peak, &gm, None, &at_10, 0),
             staging_target(peak, &stages, &at_10, 0)
@@ -530,13 +533,13 @@ mod tests {
         // 28 dB too hot wants 23.39 dB: Linearity 2 is 21.54.
         assert_eq!(
             staging_target_on(20.0, &gm, Some(0), &at_10, 0),
-            lin.values(2, &stages)
+            lin.values(2, &stages, 0)
         );
         // Hotter than any step can answer: the bottom of the curve, never
         // below it.
         assert_eq!(
             staging_target_on(60.0, &gm, Some(0), &at_10, 0),
-            lin.values(0, &stages)
+            lin.values(0, &stages, 0)
         );
     }
 

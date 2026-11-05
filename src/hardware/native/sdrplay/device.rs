@@ -332,7 +332,8 @@ unsafe fn start(params: *mut DeviceParamsT, mode: model::RateMode, freq_hz: u64)
         rx.ctrl_params.dc_offset.iq_enable = 1;
         rx.tuner_params.rf_freq.rf_hz = freq_hz as f64;
         write_mode(dev, rx, mode);
-        let gains = model::gain_model().start_gains(None);
+        let gm = model::gain_model();
+        let gains = gm.start_gains(gm.default_curve(), freq_hz);
         rx.tuner_params.gain.lna_state = gains[0].round().clamp(0.0, 9.0) as u8;
         rx.tuner_params.gain.gr_db = model::grdb_for(gains[1]);
         rx.rsp1a_tuner_params.bias_t_enable
@@ -622,7 +623,9 @@ mod tests {
             (2_000_000.0, 1536.0, 0.0, 0.0)
         );
         assert_eq!(p(RF), 100_000_000.0);
-        assert_eq!((p(LNA), p(GR)), (4.0, 39.0));
+        // The knob's start: Linearity's highest step at or under 42 dB at
+        // 100 MHz, LNA 8 (4.31 dB) with gR 23 (36.21), 40.5 dB.
+        assert_eq!((p(LNA), p(GR)), (8.0, 23.0));
         let info = device.info();
         assert_eq!(info.board_name, "SDRplay RSP1B");
         assert_eq!(info.serial, "2402040E60");

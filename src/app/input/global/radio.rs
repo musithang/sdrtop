@@ -37,7 +37,7 @@ pub(super) fn reset_defaults(ctx: &mut InputCtx<'_>) {
     // it: a radio with three stages is not reset in two of them, and one
     // whose knob starts on a vendor curve goes back onto it.
     let curve = caps.gain.default_curve();
-    let gains = caps.gain.start_gains(curve);
+    let gains = caps.gain.start_gains(curve, def_freq);
 
     // The rate is the device's own default, so a driver has no reason to round
     // it; taking what it reports anyway costs nothing and keeps one account of

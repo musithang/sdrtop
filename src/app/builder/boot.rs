@@ -312,7 +312,7 @@ pub fn resolve_gains(
     // A stage the saved string does not name starts where the device starts
     // it, not at its minimum: on an attenuator the minimum is the deepest
     // setting, and a string saved on another radio names none of its stages.
-    let mut values: Vec<f64> = gm.start_gains(curve);
+    let mut values: Vec<f64> = gm.start_gains(curve, radio.frequency_hz);
 
     match radio.gain.as_deref().map(str::trim) {
         Some(text) if !text.is_empty() => match text.parse::<f64>() {
@@ -329,7 +329,7 @@ pub fn resolve_gains(
         },
         // No string at all: where the knob starts, on its curve or at the
         // historical defaults, the same values `[R]` puts back.
-        _ => values = gm.start_gains(curve),
+        _ => values = gm.start_gains(curve, radio.frequency_hz),
     }
 
     for (index, override_db) in [(0usize, radio.lna_gain), (1, radio.vga_gain)] {

@@ -502,7 +502,7 @@ impl SdrMetrics {
     pub(crate) fn on_curve(mut self, curve: usize, step: usize) -> Self {
         let gm = self.caps.gain.clone();
         self.radio.gain_curve = Some(curve);
-        self.radio.gains = gm.curves()[curve].values(step, &gm.stages());
+        self.radio.gains = gm.curves()[curve].values(step, &gm.stages(), self.radio.frequency);
         self
     }
 

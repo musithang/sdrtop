@@ -1175,17 +1175,17 @@ mod tests {
         assert_eq!(
             curves
                 .iter()
-                .map(|c| (c.name, c.short, c.last_step()))
+                .map(|c| (c.name, c.short, c.last_step(0)))
                 .collect::<Vec<_>>(),
             [("Linearity", "LIN", 21), ("Sensitivity", "SEN", 21)]
         );
         let lin = &curves[0];
-        assert_eq!(lin.values(21, &stages), [36.02, 15.90, 43.65]);
-        assert_eq!(lin.values(0, &stages), [0.0, 0.0, 13.64]);
-        assert_eq!(curves[1].values(12, &stages), [32.34, 10.53, 16.91]);
+        assert_eq!(lin.values(21, &stages, 0), [36.02, 15.90, 43.65]);
+        assert_eq!(lin.values(0, &stages, 0), [0.0, 0.0, 13.64]);
+        assert_eq!(curves[1].values(12, &stages, 0), [32.34, 10.53, 16.91]);
         assert_eq!(g.default_curve(), Some(0));
-        assert_eq!(g.start_gains(Some(0)), [16.74, 1.14, 33.51]);
-        assert_eq!(lin.step_of(&stages, &[16.74, 1.14, 33.51]), Some(10));
+        assert_eq!(g.start_gains(Some(0), 0), [16.74, 1.14, 33.51]);
+        assert_eq!(lin.step_of(&stages, &[16.74, 1.14, 33.51], 0), Some(10));
     }
 
     /// **Opening states what the firmware would otherwise choose**: the IQ

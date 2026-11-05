@@ -20,8 +20,8 @@
 //! asked of it.
 
 use crate::hardware::{
-    AcquisitionKind, BandTable, Boost, DeliveryModel, DeviceCapabilities, GainModel, LevelUnit,
-    SampleFormat, SampleGeometry, StageSpec, IQ_TRACE_STALE_MS,
+    AcquisitionKind, BandTable, Boost, DeliveryModel, DeviceCapabilities, GainCurve, GainModel,
+    LevelUnit, SampleFormat, SampleGeometry, StageSpec, IQ_TRACE_STALE_MS,
 };
 
 /// The lowest and highest frequency SDRplay states for the RSP1B. The API
@@ -293,6 +293,95 @@ pub fn in_trap(state: u8, gr_db: i32) -> bool {
     TRAP_STATES.contains(&state) && gr_db < TRAP_GR_FLOOR
 }
 
+/// The least and the most one step of a curve moves the gain, dB.
+const CURVE_STEP_MIN_DB: f64 = 1.6;
+const CURVE_STEP_MAX_DB: f64 = 3.0;
+
+/// The high-gain LNA states, whose IF could not be measured under gRdB 25:
+/// there the radio clips on its own noise (with nothing transmitted, 150
+/// MHz: LNA 0 pinned at -1.9 dBFS rms from gRdB 30 down, LNA 4 peaking at
+/// full scale from 24), so no source can measure a gain in it. The curves
+/// keep out of it; the stage keys still reach it.
+const UNMEASURED_STATES: std::ops::RangeInclusive<u8> = 0..=4;
+const UNMEASURED_GR_FLOOR: i32 = 25;
+
+/// Where the knob starts on a first run, dB in all: noise some 15 dB over
+/// the converter's own floor, with room above it (live, 150 MHz: 63 dB
+/// read -28 dBFS rms, 25 dB read -61, the floor about -66).
+pub const START_TOTAL_DB: f64 = 42.0;
+
+/// One curve's steps in a band whose LNA states give `lna_db`: each step a
+/// pair of positions (LNA state, IF index), walked up from the least gain
+/// in steps of [`CURVE_STEP_MIN_DB`] to [`CURVE_STEP_MAX_DB`], keeping out
+/// of the trap and the unmeasured corner. `sensitivity` takes the most LNA
+/// gain each step allows (the IF does the rest: the least noise figure);
+/// otherwise the least (the IF first: the most room for strong signals).
+fn curve_steps(lna_db: &[f64], sensitivity: bool) -> Vec<Vec<u32>> {
+    let mut pairs: Vec<(f64, u8, usize)> = Vec::new();
+    for (state, &lna) in lna_db.iter().enumerate() {
+        let state = state as u8;
+        for (at, &if_db) in IF_DB.iter().enumerate() {
+            let gr = 59 - at as i32;
+            if in_trap(state, gr)
+                || (UNMEASURED_STATES.contains(&state) && gr < UNMEASURED_GR_FLOOR)
+            {
+                continue;
+            }
+            pairs.push((lna + if_db, state, at));
+        }
+    }
+    let Some(&first) = pairs.iter().min_by(|a, b| a.0.total_cmp(&b.0)) else {
+        return Vec::new();
+    };
+    // The least LNA gain is the highest state; the most, the lowest.
+    let rank = |p: &(f64, u8, usize)| {
+        if sensitivity {
+            -i32::from(p.1)
+        } else {
+            i32::from(p.1)
+        }
+    };
+    let mut at = first;
+    let mut steps = vec![vec![u32::from(at.1), at.2 as u32]];
+    loop {
+        let within: Vec<_> = pairs
+            .iter()
+            .filter(|p| p.0 > at.0 + CURVE_STEP_MIN_DB && p.0 <= at.0 + CURVE_STEP_MAX_DB)
+            .collect();
+        let next = if within.is_empty() {
+            // A gap wider than a step: the nearest pair past it.
+            pairs
+                .iter()
+                .filter(|p| p.0 > at.0 + CURVE_STEP_MIN_DB)
+                .min_by(|a, b| a.0.total_cmp(&b.0))
+        } else {
+            // The preferred LNA, then the smallest step to it.
+            within
+                .into_iter()
+                .max_by(|a, b| rank(a).cmp(&rank(b)).then(b.0.total_cmp(&a.0)))
+        };
+        let Some(&next) = next else { break };
+        steps.push(vec![u32::from(next.1), next.2 as u32]);
+        at = next;
+    }
+    steps
+}
+
+/// The knob's two curves, built per LNA band from the measured tables;
+/// under the first band (2 MHz), the first band's steps.
+fn curves() -> Vec<GainCurve> {
+    let build = |sensitivity: bool| {
+        lna_bands()
+            .iter()
+            .map(|b| (*b.band.start(), curve_steps(&b.db, sensitivity)))
+            .collect()
+    };
+    vec![
+        GainCurve::banded("Sensitivity", "SEN", build(true)),
+        GainCurve::banded("Linearity", "LIN", build(false)),
+    ]
+}
+
 /// The two stages, front to back: the LNA, stored as the radio's state with
 /// its dB per band, and the IF, in dB from its measured table. The API's AGC
 /// moves the IF only (measured: the LNA's reduction stayed put in every
@@ -310,8 +399,9 @@ pub fn gain_model() -> GainModel {
     .with_no_cascade_reason("each stage's own noise figure is not published")
     .with_boost(Boost::GainMode)
     .with_auto_stages(&[1])
-    // A start in the middle of both, until the knob's curves say otherwise.
+    // With the knob on no curve, the middle of both.
     .with_start_gains(vec![4.0, IF_DB[20]])
+    .with_curves_at_total(curves(), "Linearity", START_TOTAL_DB)
 }
 
 /// What an RSP1B can do.
@@ -356,6 +446,96 @@ pub fn caps() -> DeviceCapabilities {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// **Both curves, in every band**, start at the least gain and climb in
+    /// steps of 1.6 to 3 dB of measured gain (wider only across a gap no
+    /// pair fills), never into the trap or the unmeasured corner, to within
+    /// a step of the most the measured pairs give; about 50 steps each.
+    #[test]
+    fn every_band_has_two_curves_of_measured_steps() {
+        let gm = gain_model();
+        let stages = gm.stages();
+        for band in lna_bands() {
+            let hz = *band.band.start();
+            for curve in gm.curves() {
+                let totals: Vec<f64> = (0..=curve.last_step(hz))
+                    .map(|step| {
+                        let v = curve.values(step, &stages, hz);
+                        let gr = grdb_for(v[1]);
+                        assert!(!in_trap(v[0] as u8, gr), "{} {hz}: {v:?}", curve.name);
+                        assert!(
+                            v[0] > 4.0 || gr >= UNMEASURED_GR_FLOOR,
+                            "{} {hz}: the unmeasured corner {v:?}",
+                            curve.name
+                        );
+                        crate::hardware::gain::total_db(&stages, &v, hz)
+                    })
+                    .collect();
+                assert_eq!(totals[0], 0.0, "{} {hz}", curve.name);
+                for pair in totals.windows(2) {
+                    let rise = pair[1] - pair[0];
+                    assert!(rise > CURVE_STEP_MIN_DB, "{} {hz}: {pair:?}", curve.name);
+                    assert!(
+                        rise <= CURVE_STEP_MAX_DB + 1e-9 || rise < 4.0,
+                        "{} {hz}: {pair:?}",
+                        curve.name
+                    );
+                }
+                assert!(
+                    (45..=60).contains(&totals.len()),
+                    "{} {hz}: {} steps",
+                    curve.name,
+                    totals.len()
+                );
+                // The most a curve may give: the LNA's most (state 0) with the
+                // IF at the corner's floor; the last step is within a step of it.
+                let most = band.db[0] + IF_DB[(59 - UNMEASURED_GR_FLOOR) as usize];
+                let top = *totals.last().unwrap();
+                assert!(
+                    top <= most + 1e-9 && most - top < CURVE_STEP_MIN_DB,
+                    "{} {hz}: {top} of {most}",
+                    curve.name
+                );
+            }
+        }
+    }
+
+    /// **Sensitivity gives the LNA first, Linearity the IF**: at about the
+    /// start's gain, 150 MHz, one sits on a low LNA state with little IF,
+    /// the other on a high one with much; the knob starts on Linearity, at
+    /// LNA 7 and IF 18 dB (41.95 dB).
+    #[test]
+    fn the_curves_differ_where_the_lna_is_given() {
+        let gm = gain_model();
+        let stages = gm.stages();
+        let hz = 150_000_000;
+        let at = |name: &str| {
+            let c = &gm.curves()[gm.curve_named(name).unwrap()];
+            c.values(c.step_for_total(&stages, START_TOTAL_DB, hz), &stages, hz)
+        };
+        let (sen, lin) = (at("Sensitivity"), at("Linearity"));
+        assert!(sen[0] < lin[0] && sen[1] < lin[1], "{sen:?} {lin:?}");
+        assert_eq!(gm.curves()[gm.default_curve().unwrap()].name, "Linearity");
+        assert_eq!(gm.start_gains(gm.default_curve(), hz), [7.0, IF_DB[18]]);
+    }
+
+    /// **A switch of curve lands at the same gain**: Linearity's 32 dB
+    /// (LNA 9, IF 32) rejoins Sensitivity within a step of 32 dB, not at the
+    /// 102 dB step the position count chose live.
+    #[test]
+    fn a_switch_of_curve_keeps_the_gain() {
+        let gm = gain_model();
+        let stages = gm.stages();
+        let hz = 150_000_000;
+        let chain = [9.0, IF_DB[32]];
+        let sen = &gm.curves()[gm.curve_named("Sensitivity").unwrap()];
+        let step = sen.nearest_step(&stages, &chain, hz);
+        let landed = crate::hardware::gain::total_db(&stages, &sen.values(step, &stages, hz), hz);
+        assert!(
+            (landed - 32.1).abs() < CURVE_STEP_MAX_DB,
+            "{landed} at step {step}"
+        );
+    }
 
     /// The trap as measured, held in every band: the footnoted states (and
     /// 7, which is 6 under 50 MHz) under gRdB 23; every other pair is free.
