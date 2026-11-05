@@ -16,11 +16,20 @@ use crate::state::TimingQuality;
 
 /// A sample rate in Msps, without the unit: one decimal from 1 Msps up, as it
 /// always was (`20.0`, ` 2.4`), and three below it, where one decimal reads
-/// 768 and 912 kS/s alike as `0.8`.
+/// 768 and 912 kS/s alike as `0.8`; more where those would round a rate the
+/// radio really runs at onto another, so 2.048 Msps is never `2.0` beside
+/// 2.0 (an RTL-SDR's or an RSP1B's rate list) and 62.5 kS/s is `0.0625`.
 pub(crate) fn fmt_msps(hz: f64) -> String {
     let msps = hz / 1e6;
-    if msps < 1.0 {
-        format!("{msps:.3}")
+    let least = if msps < 1.0 { 3 } else { 1 };
+    let places = (least..=6)
+        .find(|&d| {
+            let scaled = msps * 10f64.powi(d);
+            (scaled - scaled.round()).abs() < 1e-6
+        })
+        .unwrap_or(6) as usize;
+    if msps < 1.0 || places > 1 {
+        format!("{msps:.places$}")
     } else {
         format!("{msps:4.1}")
     }
@@ -136,5 +145,9 @@ mod tests {
         assert_eq!(fmt_msps(912_000.0), "0.912");
         assert_eq!(fmt_msps(2_400_000.0), " 2.4");
         assert_eq!(fmt_msps(20_000_000.0), "20.0");
+        assert_eq!(fmt_msps(2_048_000.0), "2.048", "not 2.0 beside 2.0");
+        assert_eq!(fmt_msps(62_500.0), "0.0625");
+        assert_eq!(fmt_msps(2_560_000.0), "2.56");
+        assert_eq!(fmt_msps(10_000_000.0), "10.0");
     }
 }
