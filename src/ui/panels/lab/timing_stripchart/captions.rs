@@ -27,6 +27,11 @@ const DESC_PUSH: [&str; 3] = [
     "per-callback interval deviation from the expected period",
     "callback interval deviation",
 ];
+const DESC_RELAYED: [&str; 3] = [
+    "each point is one delivery \u{00b7} how far its gap sat from the mean \u{00b7} the service passes the stream on in bursts",
+    "delivery gap spread \u{00b7} the service's rhythm, not the link's",
+    "delivery gap spread",
+];
 const DESC_PULL: [&str; 3] = [
     "each point is one read \u{00b7} how far its gap sat from the mean \u{00b7} a pull loop drains, then waits",
     "read gap spread \u{00b7} our own rhythm, not the link's",
@@ -49,6 +54,7 @@ pub(super) fn description(iw: usize, delivery: crate::hardware::DeliveryModel) -
     let table = match delivery {
         crate::hardware::DeliveryModel::Push => &DESC_PUSH,
         crate::hardware::DeliveryModel::Pull => &DESC_PULL,
+        crate::hardware::DeliveryModel::Relayed => &DESC_RELAYED,
     };
     // Every caption row starts with one space, so that column is not available.
     let room = iw.saturating_sub(LEAD_W);
@@ -72,17 +78,23 @@ pub(super) fn key_row(
     // be over, so the row says what the axis spans and stops.
     let Some(budget_us) = reference.threshold_us else {
         let span = fmt_span(reference.full_scale_us);
+        let what = match delivery {
+            crate::hardware::DeliveryModel::Relayed => "delivery",
+            _ => "read",
+        };
         return Line::from(vec![
             Span::raw(" "),
-            Span::styled("\u{25AC} one read gap", Style::default().fg(theme.value)),
+            Span::styled(
+                format!("\u{25AC} one {what} gap"),
+                Style::default().fg(theme.value),
+            ),
             Span::raw("   "),
             Span::styled(
-                format!("axis \u{00b1}{span} \u{00b7} scaled to the read gaps"),
+                format!("axis \u{00b1}{span} \u{00b7} scaled to the {what} gaps"),
                 Style::default().fg(theme.border_dim),
             ),
         ]);
     };
-    let _ = delivery;
     Line::from(vec![
         Span::raw(" "),
         Span::styled("\u{25AC} in budget", Style::default().fg(theme.value)),
@@ -129,6 +141,7 @@ pub(super) fn window_row(
     let unit = match delivery {
         crate::hardware::DeliveryModel::Push => "one point per RX callback",
         crate::hardware::DeliveryModel::Pull => "one point per read",
+        crate::hardware::DeliveryModel::Relayed => "one point per delivery",
     };
     // With no measured period there is no time axis to name, only a sample axis.
     if stale || t.cb_period_us == 0 {

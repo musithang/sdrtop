@@ -10,11 +10,11 @@
 //! **Gathered, not passed on block by block.** The API's blocks are 1008
 //! samples (0.5 ms at 2 MSPS) and arrive in bursts: SDRplay's service holds
 //! the stream back for up to 40 ms and then hands over everything at once
-//! (measured at 2, 6 and 10 MSPS). Handed to the intake one by one, a burst
+//! (measured at 2, 6 and 10 MSPS; 69 ms at worst). Handed to the intake one by one, a burst
 //! overran its queue of eight and sdrtop lost 2 % of a 2 MSPS stream with
 //! the CPU at 11 % (measured live). So a run of blocks is gathered into one
 //! delivery of [`GATHER_MS`] of signal, whatever the rate, which makes the
-//! queue's eight deliveries longer than the longest burst. Counting the span
+//! queue's eight deliveries (160 ms) more than twice the longest hold. Counting the span
 //! in samples rather than waiting on the clock matters: a fixed count of
 //! 16384 samples is 1.6 ms at 10 MSPS, and a burst there still overran the
 //! queue. A gap or a new run delivers what was gathered before it first, so
@@ -64,7 +64,7 @@ const EVENT_DEVICE_FAILURE: c_int = 4;
 const OVERLOAD_DETECTED: c_int = 0;
 
 /// How much signal one delivery gathers, in milliseconds of the output rate.
-pub const GATHER_MS: f64 = 10.0;
+pub const GATHER_MS: f64 = 20.0;
 
 /// The samples [`GATHER_MS`] holds at `output_hz`, and never less than one.
 pub fn gather_pairs(output_hz: f64) -> usize {
@@ -305,16 +305,16 @@ unsafe extern "C" fn event_callback(
 mod tests {
     use super::*;
 
-    /// A delivery is ten milliseconds of signal at every rate, so the
-    /// intake's eight deliveries outlast the service's longest burst (about
-    /// 40 ms), and the slowest rate still delivers something.
+    /// A delivery is twenty milliseconds of signal at every rate, so the
+    /// intake's eight deliveries outlast twice the service's longest hold
+    /// (69 ms, measured), and the slowest rate still delivers something.
     #[test]
-    fn a_delivery_is_ten_milliseconds_at_every_rate() {
-        assert_eq!(gather_pairs(2_000_000.0), 20_000);
-        assert_eq!(gather_pairs(10_000_000.0), 100_000);
-        assert_eq!(gather_pairs(62_500.0), 625);
+    fn a_delivery_is_twenty_milliseconds_at_every_rate() {
+        assert_eq!(gather_pairs(2_000_000.0), 40_000);
+        assert_eq!(gather_pairs(10_000_000.0), 200_000);
+        assert_eq!(gather_pairs(62_500.0), 1_250);
         assert_eq!(gather_pairs(0.0), 1);
-        const { assert!(8.0 * GATHER_MS > 40.0) };
+        const { assert!(8.0 * GATHER_MS > 2.0 * 69.0) };
     }
 
     /// A block that starts where the last ended loses nothing; one that

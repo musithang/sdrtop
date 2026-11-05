@@ -44,6 +44,9 @@ pub(super) struct Drained {
     /// that mismatch is one block: 437 ppm over 30 s on a HackRF.
     pub bytes: u64,
     pub last_block_at: Option<Instant>,
+    /// The deliveries that came earliest and latest for their place in the
+    /// stream this window, for a relayed stream's clock and hold.
+    pub relay: Option<(crate::state::Lead, crate::state::Lead)>,
 }
 
 /// Enter the lock, take everything this window produced, reset the accumulators,
@@ -101,6 +104,7 @@ pub(super) fn drain(
         jitter_count: m.acc.jitter_count,
         bytes,
         last_block_at: m.acc.last_callback,
+        relay: m.acc.relay_earliest.take().zip(m.acc.relay_latest.take()),
         config_sample_rate: m.radio.config_sample_rate,
     };
     m.acc.drops = 0;

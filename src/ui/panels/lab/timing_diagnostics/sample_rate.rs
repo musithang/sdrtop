@@ -29,7 +29,7 @@ pub(super) fn lines(state: &SdrMetrics, r: &Rows) -> Vec<Line<'static>> {
         ])
     } else {
         let actual = state.radio.actual_sample_rate as f64 / 1_000_000.0;
-        let mut ppm = ppm_span(t.sr_delta_ppm, theme);
+        let mut ppm = ppm_span(t.sr_delta_ppm, state.caps.delivery, theme);
         ppm.content = format!("   {}", ppm.content).into();
         Line::from(vec![
             r.field("Rate"),
@@ -38,9 +38,25 @@ pub(super) fn lines(state: &SdrMetrics, r: &Rows) -> Vec<Line<'static>> {
             Span::styled(format!(" of {configured:.3}"), r.dim()),
         ])
     };
-    vec![
+    let mut out = vec![
         crate::ui::chrome::section("Sample clock", "rate delivered", r.iw, theme),
         rate,
+    ];
+    // Read through a relaying service, the clock is good to its scatter and
+    // no better, and the grade says nothing under that.
+    if state.caps.delivery == crate::hardware::DeliveryModel::Relayed {
+        out.push(Line::from(vec![
+            Span::raw(" "),
+            Span::styled(
+                format!(
+                    "through the service: graded past {} ppm",
+                    crate::state::RELAYED_CLOCK_FLOOR_PPM
+                ),
+                r.dim(),
+            ),
+        ]));
+    }
+    out.extend([
         r.row(
             "Throughput",
             vec![
@@ -58,5 +74,6 @@ pub(super) fn lines(state: &SdrMetrics, r: &Rows) -> Vec<Line<'static>> {
                 .collect::<Vec<f64>>(),
             "  60 s",
         ),
-    ]
+    ]);
+    out
 }

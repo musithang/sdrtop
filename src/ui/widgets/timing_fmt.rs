@@ -57,9 +57,19 @@ pub(crate) fn fmt_us(us: u64) -> String {
 }
 
 /// Signed ppm value, colored by absolute magnitude (green / yellow / red).
-pub(crate) fn ppm_span(ppm: i64, theme: &crate::Theme) -> Span<'static> {
+///
+/// A relayed stream's clock is read only to its scatter through the service,
+/// and is not graded under [`crate::state::RELAYED_CLOCK_FLOOR_PPM`]; under
+/// it the colour does not grade it either.
+pub(crate) fn ppm_span(
+    ppm: i64,
+    delivery: crate::hardware::DeliveryModel,
+    theme: &crate::Theme,
+) -> Span<'static> {
     let mag = ppm.unsigned_abs();
-    let color = if mag < 50 {
+    let unresolved = delivery == crate::hardware::DeliveryModel::Relayed
+        && mag <= crate::state::RELAYED_CLOCK_FLOOR_PPM;
+    let color = if mag < 50 || unresolved {
         theme.status_ok
     } else if mag < 200 {
         theme.status_warn
@@ -101,9 +111,21 @@ mod tests {
     #[test]
     fn ppm_span_color_thresholds() {
         let t = crate::theme::Theme::sdr();
-        assert_eq!(ppm_span(10, &t).style.fg, Some(t.status_ok));
-        assert_eq!(ppm_span(-120, &t).style.fg, Some(t.status_warn));
-        assert_eq!(ppm_span(600, &t).style.fg, Some(t.status_crit));
+        let push = crate::hardware::DeliveryModel::Push;
+        assert_eq!(ppm_span(10, push, &t).style.fg, Some(t.status_ok));
+        assert_eq!(ppm_span(-120, push, &t).style.fg, Some(t.status_warn));
+        assert_eq!(ppm_span(600, push, &t).style.fg, Some(t.status_crit));
+    }
+
+    /// Through a relaying service the clock is not resolved under 200 ppm,
+    /// so it is not coloured as off there either; past it, as any other.
+    #[test]
+    fn a_relayed_clock_is_coloured_only_where_it_is_graded() {
+        let t = crate::theme::Theme::sdr();
+        let relayed = crate::hardware::DeliveryModel::Relayed;
+        assert_eq!(ppm_span(-120, relayed, &t).style.fg, Some(t.status_ok));
+        assert_eq!(ppm_span(200, relayed, &t).style.fg, Some(t.status_ok));
+        assert_eq!(ppm_span(201, relayed, &t).style.fg, Some(t.status_crit));
     }
 
     /// Below 1 Msps three decimals, so 768 and 912 kS/s are two rates; from

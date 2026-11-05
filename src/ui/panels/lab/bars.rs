@@ -163,6 +163,12 @@ fn rf_banner_fields(state: &SdrMetrics) -> Vec<(&'static str, String)> {
 /// On a pull backend the last field is **OCCUPANCY** instead. There is no
 /// deadline to meet when the loop sets its own pace, and this banner printed
 /// `DEADLINE ⚠ 4378%` above a SoapySDR link that was losing nothing.
+fn held_text(hold_us: Option<u64>) -> String {
+    hold_us.map_or("\u{2014}".to_string(), |us| {
+        format!("\u{2264} {}", crate::ui::widgets::timing_fmt::fmt_us(us))
+    })
+}
+
 fn timing_banner_fields(
     t: &crate::state::TimingState,
     delivery: crate::hardware::DeliveryModel,
@@ -191,12 +197,16 @@ fn timing_banner_fields(
                 None => "\u{2014}".to_string(),
             },
         ),
+        // A relayed stream has no deadline either: what it has is how long
+        // the service held it.
+        crate::hardware::DeliveryModel::Relayed => ("HELD", held_text(t.relay_hold_us)),
     };
     // The first field's *name* follows the transport too. It said CALLBACK on a
     // pull backend while the panel two rows below correctly said READ LOOP.
     let period_label = match delivery {
         crate::hardware::DeliveryModel::Push => "CALLBACK",
         crate::hardware::DeliveryModel::Pull => "READ",
+        crate::hardware::DeliveryModel::Relayed => "DELIVERY",
     };
     vec![
         (period_label, callback),
@@ -740,7 +750,7 @@ fn timing_marker_lines(state: &SdrMetrics, theme: &crate::Theme, iw: usize) -> V
             Span::raw("   "),
             Span::styled("CLOCK ", dim),
             if t.sr_known {
-                crate::ui::widgets::timing_fmt::ppm_span(t.sr_delta_ppm, theme)
+                crate::ui::widgets::timing_fmt::ppm_span(t.sr_delta_ppm, state.caps.delivery, theme)
             } else {
                 Span::styled("\u{2014}", dim)
             },
@@ -787,6 +797,11 @@ fn timing_marker_lines(state: &SdrMetrics, theme: &crate::Theme, iw: usize) -> V
                 Span::styled("\u{2014}", val),
             ],
         },
+        crate::hardware::DeliveryModel::Relayed => vec![
+            Span::raw("   "),
+            Span::styled("HELD ", dim),
+            Span::styled(held_text(t.relay_hold_us), val),
+        ],
     };
     try_add(pace_field, &mut used, &mut spans);
 
@@ -1424,6 +1439,32 @@ mod tests {
         );
         let occ = f.iter().find(|(k, _)| *k == "OCCUPANCY").unwrap();
         assert_eq!(occ.1, "65 %");
+    }
+
+    /// A relayed stream's banner names deliveries and how long the service
+    /// held them, never a deadline: the RSP1B's read `DEADLINE ⚠ 12347%` on a
+    /// stream that lost nothing.
+    #[test]
+    fn the_timing_banner_gives_a_relayed_stream_its_hold() {
+        let mut t = crate::state::TimingState {
+            cb_period_us: 20_000,
+            late_callbacks: 160,
+            late_window: 160,
+            dev_peak_us: 48_648,
+            deadline_budget_us: 394,
+            ..Default::default()
+        };
+        let relayed = crate::hardware::DeliveryModel::Relayed;
+        let f = timing_banner_fields(&t, relayed);
+        assert!(!f.iter().any(|(k, _)| *k == "DEADLINE"), "{f:?}");
+        assert_eq!(f[0].0, "DELIVERY");
+        assert_eq!(f.iter().find(|(k, _)| *k == "HELD").unwrap().1, "\u{2014}");
+        t.relay_hold_us = Some(31_200);
+        let f = timing_banner_fields(&t, relayed);
+        assert_eq!(
+            f.iter().find(|(k, _)| *k == "HELD").unwrap().1,
+            "\u{2264} 31.200 ms"
+        );
     }
 
     #[test]

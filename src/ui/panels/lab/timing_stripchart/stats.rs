@@ -50,6 +50,7 @@ pub(super) fn line(
         match delivery {
             DeliveryModel::Push => Span::styled("   over budget ", lbl),
             DeliveryModel::Pull => Span::styled("   loop ", lbl),
+            DeliveryModel::Relayed => Span::styled("   held ", lbl),
         },
         match delivery {
             DeliveryModel::Push => Span::styled(
@@ -70,6 +71,12 @@ pub(super) fn line(
                 ),
                 None => Span::styled("\u{2014}", Style::default().fg(theme.value)),
             },
+            DeliveryModel::Relayed => Span::styled(
+                t.relay_hold_us.map_or("\u{2014}".to_string(), |us| {
+                    format!("\u{2264} {}", fmt_us(us))
+                }),
+                Style::default().fg(theme.value),
+            ),
         },
         Span::styled("   ", lbl),
         Span::styled(

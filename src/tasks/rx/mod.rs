@@ -59,6 +59,8 @@ pub fn spawn_rx_task(
         // Task local: the sample-rate baseline is neither drawn nor shared, so it
         // stays out of the per-frame clone of SdrMetrics.
         let mut rate = metrics::RateTracker::default();
+        // The same reading for a stream a service relays, with the hold.
+        let mut relay = metrics::RelayClock::default();
         // Last reading of the pull backend's cumulative read-loop clock, so each
         // poll reports this window rather than the whole session.
         let mut last_loop_us: Option<(u64, u64)> = None;
@@ -104,6 +106,7 @@ pub fn spawn_rx_task(
                 baseline_rate = drained.config_sample_rate;
                 baseline_streams = streams;
                 rate.reset();
+                relay.reset();
                 throughput.reset();
             } else {
                 // Not the window the baseline restarted in: its last block can
@@ -111,7 +114,9 @@ pub fn spawn_rx_task(
                 // counted the silence before the new stream as time with no
                 // samples in it (93 ms, -9435 ppm ten seconds on).
                 rate.push(drained.last_block_at, drained.bytes);
+                relay.push(drained.relay);
             }
+            let relayed = device.capabilities().delivery == crate::hardware::DeliveryModel::Relayed;
 
             let iq = metrics::iq_metrics(
                 drained.moments,
@@ -129,7 +134,12 @@ pub fn spawn_rx_task(
                     drained.jitter_sq_sum,
                     drained.jitter_count,
                 ),
-                measured_rate: rate.rate(device.capabilities().sample_geometry.bytes_per_pair()),
+                measured_rate: if relayed {
+                    relay.rate()
+                } else {
+                    rate.rate(device.capabilities().sample_geometry.bytes_per_pair())
+                },
+                relay_hold_us: relayed.then(|| relay.hold_us()).flatten(),
                 rate_restarted,
                 read_occupancy: window_occupancy(device.read_loop_us(), &mut last_loop_us),
                 // Asked only of a running stream: the count is the stream's.

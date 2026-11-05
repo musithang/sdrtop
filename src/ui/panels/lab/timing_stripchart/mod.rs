@@ -53,6 +53,7 @@ impl Panel for TimingStripchartPanel {
             // A pull backend has no callbacks; the plot is of read gaps.
             crate::hardware::DeliveryModel::Push => "Callback Interval",
             crate::hardware::DeliveryModel::Pull => "Read Interval",
+            crate::hardware::DeliveryModel::Relayed => "Delivery Interval",
         })
         .stale_when(Staleness::NotStreaming)
         .suffix(" \u{00b7} Real-Time Strip Chart")
@@ -275,5 +276,26 @@ mod tests {
         let out = draw(TimingStripchartPanel, 96, 20, &push).join("\n");
         assert!(out.contains("over budget"), "{out}");
         assert!(out.contains("deadline"), "{out}");
+    }
+
+    /// A relayed stream is plotted as a pull's is, scaled to its gaps and
+    /// with no budget, and named for what it is: deliveries from a service,
+    /// with how long the service held them.
+    #[test]
+    fn the_strip_chart_plots_a_relayed_stream_as_deliveries() {
+        let m = SdrMetrics::fixture()
+            .streaming()
+            .with_timing(4.7)
+            .relayed(31_200, 0);
+        let out = draw(TimingStripchartPanel, 96, 20, &m).join("\n");
+        assert!(out.contains("Delivery Interval"), "{out}");
+        assert!(!out.contains("over budget"), "{out}");
+        assert!(out.contains("held \u{2264} 31.200 ms"), "{out}");
+        assert!(out.contains("scaled to the delivery gaps"), "{out}");
+        assert!(out.contains("one point per delivery"), "{out}");
+        assert!(
+            !out.contains("\u{25B2}") && !out.contains("\u{25BC}"),
+            "{out}"
+        );
     }
 }

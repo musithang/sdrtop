@@ -318,13 +318,14 @@ pub fn caps() -> DeviceCapabilities {
             converter_bits: Some(14),
         },
         gain: gain_model(),
-        // The API's blocks are 1008 or 2016 samples by rate; the device says
-        // which once it streams.
+        // Deliveries are gathered from the API's blocks by the stream; the
+        // device says how long once it streams.
         samples_per_transfer: 0,
         has_bb_filter: false,
         // No stage's own noise figure is published, so no cascade.
         friis_applicable: false,
-        delivery: DeliveryModel::Push,
+        // The service passes the stream on in bursts (see the variant).
+        delivery: DeliveryModel::Relayed,
         // The queue is inside SDRplay's service, which does not say.
         driver_queue_blocks: None,
     }
@@ -442,6 +443,6 @@ mod tests {
         assert!(!c.gain.auto_governs(0));
         assert_eq!(c.sample_geometry.bits(), 14);
         assert_eq!((c.freq_min_hz, c.freq_max_hz), (1_000, 2_000_000_000));
-        assert_eq!(c.delivery, DeliveryModel::Push);
+        assert_eq!(c.delivery, DeliveryModel::Relayed);
     }
 }

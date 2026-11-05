@@ -24,7 +24,7 @@ mod timing;
 mod ui;
 mod waterfall;
 
-pub(crate) use acc::Accumulators;
+pub(crate) use acc::{Accumulators, Lead};
 pub use demod::{
     deviation_limit_hz, strongest_offset_hz, AmMeasure, CtcssMeasure, DemodState, FmMeasure,
     MpxFrame, PilotState, RdsData, OFFSET_STEP_HZ, PTY_NAMES, RDS_AGED_AFTER, RDS_DROPPED_AFTER,
@@ -70,7 +70,10 @@ pub use signal::{
 pub use spectrum::{SpectrumMarker, SpectrumState, SpectrumStyle};
 pub use sweep::{SweepConfig, SweepFrame, SweepState, SWEEP_SETTLING_MS};
 pub use system::SystemState;
-pub use timing::{TimingCause, TimingQuality, TimingState, HACKRF_SAMPLES_PER_TRANSFER};
+pub use timing::{
+    TimingCause, TimingQuality, TimingState, HACKRF_SAMPLES_PER_TRANSFER, RELAYED_CLOCK_FLOOR_PPM,
+    RELAY_BASELINE_US, RELAY_STRETCH_US,
+};
 pub use ui::{
     active_recall_slot, recall_from_hz, recall_to_hz, DeviceOptionUpdate, InputMode, LogEntry,
     LogLevel, MenuFocus, MenuPath, MenuState, MenuTile, RailMode, UiState, RECALL_SLOTS,

@@ -24,6 +24,7 @@
 mod callback;
 mod deadline;
 mod read_loop;
+mod relay;
 mod rows;
 mod sample_rate;
 mod verdict;
@@ -80,6 +81,9 @@ impl Panel for TimingDiagnosticsPanel {
             }
             crate::hardware::DeliveryModel::Pull => {
                 lines.extend(read_loop::lines(state, &r));
+            }
+            crate::hardware::DeliveryModel::Relayed => {
+                lines.extend(relay::lines(state, &r));
             }
         }
         lines.push(Line::raw(""));
@@ -158,6 +162,29 @@ mod tests {
         assert!(
             out.contains("POOR"),
             "a push link with 4.7x jitter is fine?\n{out}"
+        );
+    }
+
+    /// **A relayed stream gets the hold, not a deadline**: the RSP1B's
+    /// intervals, wild enough to fail any budget, with nothing lost and the
+    /// clock 90 ppm off (inside what the service lets it resolve), read as
+    /// healthy, with how long the service held the stream.
+    #[test]
+    fn a_relayed_stream_shows_the_services_hold_and_reads_as_healthy() {
+        let m = SdrMetrics::fixture()
+            .streaming()
+            .with_timing(4.7)
+            .relayed(31_200, 90);
+        let out = draw(TimingDiagnosticsPanel, W, H, &m).join("\n");
+        assert!(out.contains("ARRIVAL"), "{out}");
+        assert!(out.contains("\u{2264} 31.200 ms"), "{out}");
+        assert!(out.contains("rhythm is the service's"), "{out}");
+        assert!(out.contains("graded past 200 ppm"), "{out}");
+        assert!(out.contains("EXCELLENT"), "{out}");
+        assert!(out.contains("Nothing lost through the service"), "{out}");
+        assert!(
+            !out.contains("LATE BY") && !out.contains("READ LOOP"),
+            "{out}"
         );
     }
 

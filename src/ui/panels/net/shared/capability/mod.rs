@@ -77,6 +77,7 @@ fn delivery<'a>(model: DeliveryModel, iw: usize, theme: &crate::Theme) -> Line<'
     let (word, note) = match model {
         DeliveryModel::Push => ("push", "the driver paces blocks: timing is the link's"),
         DeliveryModel::Pull => ("pull", "sdrtop paces reads: timing is its own loop"),
+        DeliveryModel::Relayed => ("relayed", "a service passes blocks on in bursts"),
     };
     fact(
         "DELIVERY",
@@ -384,6 +385,13 @@ mod tests {
         assert!(out.contains("DELIVERY pull"), "{out}");
         assert!(out.contains("timing is its own loop"), "{out}");
         assert!(out.contains("OBSERVER not available"), "{out}");
+
+        let mut caps = (*m.caps).clone();
+        caps.delivery = crate::hardware::DeliveryModel::Relayed;
+        m.caps = std::sync::Arc::new(caps);
+        let out = draw(NetCapabilityPanel, 90, 30, &m).join("\n");
+        assert!(out.contains("DELIVERY relayed"), "{out}");
+        assert!(out.contains("passes blocks on in bursts"), "{out}");
     }
 
     #[test]

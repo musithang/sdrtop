@@ -134,6 +134,13 @@ impl TimingQuality {
     /// through SoapyHackRF that had zero drops, a correct sample rate and half
     /// the bus spare. A pull loop is graded on occupancy instead: whether it
     /// still gets to block.
+    ///
+    /// **A relayed stream has neither.** Its intervals are the relaying
+    /// service's bursts, and it has no read loop of ours; what it loses is
+    /// told by its positions, which the first test already reads. Its clock is
+    /// read through the service to about 70 ppm (see [`RELAY_STRETCH_US`]),
+    /// so it grades only from [`RELAYED_CLOCK_FLOOR_PPM`]: a `GOOD` for 60
+    /// ppm would grade the service's scatter, not the radio.
     pub fn classify(
         jitter_p99_us: u64,
         cb_period_expected: u64,
@@ -177,9 +184,13 @@ impl TimingQuality {
                     .unwrap_or(TimingQuality::Excellent),
                 TimingCause::Backlog,
             ),
+            DeliveryModel::Relayed => (TimingQuality::Excellent, TimingCause::Settled),
         };
 
-        let clock_grade = if ppm > 500 {
+        let resolved = delivery != DeliveryModel::Relayed || ppm > RELAYED_CLOCK_FLOOR_PPM;
+        let clock_grade = if !resolved {
+            TimingQuality::Excellent
+        } else if ppm > 500 {
             TimingQuality::Poor
         } else if ppm > 200 {
             TimingQuality::Marginal
@@ -222,6 +233,28 @@ impl TimingQuality {
         }
     }
 }
+
+/// The stretch at each end of a relayed stream's clock baseline that the
+/// earliest delivery is taken from.
+///
+/// One poll window is not enough: the service can hold every delivery of a
+/// 200 ms window, and an estimate between two such windows 30 s apart
+/// scattered from -1548 to +1855 ppm at 2 MSPS on an RSP1B. Over a stretch
+/// some delivery comes through all but unheld. Measured from 75 s of
+/// SDRplay's callbacks at 2 and 10 MSPS, stamped as sdrtop stamps its 20 ms
+/// deliveries: 5 s stretches 30 s apart scattered -85 to +108 ppm, and 20 s
+/// apart up to -341 ppm; 10 s stretches 30 s apart, -61 to +71 ppm.
+pub const RELAY_STRETCH_US: u64 = 10_000_000;
+
+/// How far apart the two stretches start, and the least before there is a
+/// reading: 30 s, as for every other stream (no shorter start: 20 s
+/// measured past the grade's floor, above).
+pub const RELAY_BASELINE_US: u64 = 30_000_000;
+
+/// The least offset a relayed stream's clock is graded at: about three
+/// times the worst scatter of its estimate through SDRplay's service (see
+/// [`RELAY_STRETCH_US`]), and the threshold of `MARGINAL` anyway.
+pub const RELAYED_CLOCK_FLOOR_PPM: u64 = 200;
 
 /// Blocks of slack a driver's queue gives a late callback: its depth less the
 /// one being delivered, and one block where there is no queue.
@@ -266,6 +299,9 @@ pub struct TimingState {
     /// Read by the timing bench from T5. Collected now so the path from the read
     /// thread to the panel is proven before anything draws it.
     pub read_occupancy: Option<f32>,
+    /// For a relayed stream, the longest its service held the stream over the
+    /// clock's baseline (µs); `None` for any other, and until it is measured.
+    pub relay_hold_us: Option<u64>,
 
     // ── Per-callback deadline view (drives the lab_timing strip chart) ──────────
     /// Signed per-callback deviation from the expected period (µs), newest last.
@@ -387,6 +423,8 @@ impl TimingState {
             timing_quality: verdict.quality,
             timing_cause: verdict.cause,
             read_occupancy,
+            // The rx task sets it from the relay's baseline after this rebuild.
+            relay_hold_us: None,
             cb_deviations_us,
             deadline_budget_us,
             late_callbacks,
@@ -557,6 +595,45 @@ mod tests {
         assert_eq!(
             TimingQuality::classify(9_000, 0, 9_000, 9, DeliveryModel::Push, None, None).cause,
             TimingCause::Settled
+        );
+    }
+
+    /// **A relayed stream is graded on what it lost and on a clock it can
+    /// resolve**, never on the service's bursts: the RSP1B through SDRplay's
+    /// service read p99 42.4 ms against an 8.6 ms period with nothing lost,
+    /// `POOR` as a push stream. Its clock grades from 200 ppm; drops still
+    /// grade it first.
+    #[test]
+    fn a_relayed_stream_is_graded_on_losses_and_a_resolved_clock() {
+        let relayed = |jitter, ppm, drops| {
+            TimingQuality::classify(
+                jitter,
+                8_568,
+                ppm,
+                drops,
+                DeliveryModel::Relayed,
+                None,
+                None,
+            )
+        };
+        let calm = relayed(42_400, 150, 0);
+        assert_eq!(
+            (calm.quality, calm.cause),
+            (TimingQuality::Excellent, TimingCause::Settled)
+        );
+        let pushed =
+            TimingQuality::classify(42_400, 8_568, 150, 0, DeliveryModel::Push, None, None);
+        assert_eq!(pushed.quality, TimingQuality::Poor);
+        let off = relayed(42_400, -201, 0);
+        assert_eq!(
+            (off.quality, off.cause),
+            (TimingQuality::Marginal, TimingCause::Clock)
+        );
+        assert_eq!(relayed(0, 501, 0).quality, TimingQuality::Poor);
+        let lost = relayed(0, 0, 5);
+        assert_eq!(
+            (lost.quality, lost.cause),
+            (TimingQuality::Poor, TimingCause::Drops)
         );
     }
 

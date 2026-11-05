@@ -4,6 +4,38 @@
 use std::collections::VecDeque;
 use std::time::Instant;
 
+/// One delivery's arrival against its place in the stream.
+///
+/// `key` is when the stream's first sample would have arrived had this
+/// delivery come with no delay at all: the arrival less the delivery's
+/// length of stream at the configured rate. Of two deliveries, the one with
+/// the earlier key came sooner for where it is in the stream. A relayed
+/// stream's clock is measured between deliveries with the earliest keys,
+/// and how long its service held the stream is the spread of the keys.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct Lead {
+    pub key: Instant,
+    pub at: Instant,
+    /// The stream position just past the delivery's last sample.
+    pub end_pair: u64,
+}
+
+impl Lead {
+    /// `None` without a rate, or for a stream longer than the host's clock
+    /// has run.
+    pub fn of(at: Instant, end_pair: u64, rate_hz: f64) -> Option<Self> {
+        if rate_hz.is_nan() || rate_hz <= 0.0 {
+            return None;
+        }
+        let into = std::time::Duration::try_from_secs_f64(end_pair as f64 / rate_hz).ok()?;
+        Some(Self {
+            key: at.checked_sub(into)?,
+            at,
+            end_pair,
+        })
+    }
+}
+
 /// Raw accumulators written by the hardware RX callback and consumed by the
 /// polling task. Never visible to the UI layer.
 #[derive(Clone, Default)]
@@ -26,6 +58,11 @@ pub(crate) struct Accumulators {
     pub jitter_count: u64,
     pub iq_cross_sum: i128,
     pub last_callback: Option<Instant>,
+    /// The delivery this window that came earliest for its place in the
+    /// stream, and the one that came latest: what a relayed stream's clock
+    /// and hold are measured from (`Lead`).
+    pub relay_earliest: Option<Lead>,
+    pub relay_latest: Option<Lead>,
     /// Rolling window of recent inter-callback gaps (µs), newest at the back.
     /// Unlike the sum/variance accumulators above, this is NOT zeroed each poll -
     /// it is a continuous ring the poll task only snapshots, feeding the

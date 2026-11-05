@@ -71,6 +71,9 @@ pub(super) struct Computed {
     /// Delivered sample rate over the long baseline, or `None` while that
     /// baseline is still too short to mean anything.
     pub measured_rate: Option<u32>,
+    /// How long a relaying service held the stream, worst over the baseline;
+    /// `None` for any other stream, and until a stretch has been seen.
+    pub relay_hold_us: Option<u64>,
     /// The baseline started again this window (the rate changed): the last
     /// figure measured belongs to the old rate and is no longer one.
     pub rate_restarted: bool,
@@ -215,6 +218,7 @@ pub(super) fn write_back(
     );
     m.timing.jitter_session_max_us = prev_peak.max(m.timing.jitter_max_us);
     m.timing.wire_bytes_per_pair = wire_bytes_per_pair;
+    m.timing.relay_hold_us = c.relay_hold_us;
     m.radio.lo_offset_hz = device.lo_offset_hz();
     m.radio.converter_bits = device.converter_bits();
     m.radio.overload = device

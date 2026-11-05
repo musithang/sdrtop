@@ -642,7 +642,7 @@ mod tests {
     /// the API's first two blocks (from its position 254) go as one delivery
     /// at 0, flushed by the loss of 4 samples before the third, which starts
     /// the next delivery at 12 with the loss counted as the driver's, and
-    /// that one goes when 10 ms of the rate has gathered; the
+    /// that one goes when 20 ms of the rate has gathered; the
     /// radio's overload is acknowledged at once and reported; after stop
     /// nothing can call back.
     #[test]
@@ -669,14 +669,14 @@ mod tests {
         );
         assert_eq!(ctx.metrics.lock().unwrap().signal.driver_drops_session, 4);
         assert!(device.is_streaming());
-        let ten_ms = 20_000;
+        let span = 40_000;
         let second = words(&blocks[1]).len() / 2;
         assert!(
-            (ten_ms..ten_ms + 1008).contains(&second),
-            "the second delivery gathers 10 ms of 2 MSPS, not {second}"
+            (span..span + 1008).contains(&second),
+            "the second delivery gathers 20 ms of 2 MSPS, not {second}"
         );
-        // A later delivery may have come by now; each is 10 ms.
-        assert!((ten_ms..ten_ms + 1008).contains(&(device.samples_per_transfer() as usize)));
+        // A later delivery may have come by now; each is 20 ms.
+        assert!((span..span + 1008).contains(&(device.samples_per_transfer() as usize)));
         assert_eq!(
             device.radio_overload(),
             Some(OverloadReport {

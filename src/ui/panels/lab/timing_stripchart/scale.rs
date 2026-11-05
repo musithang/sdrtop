@@ -57,7 +57,7 @@ impl Reference {
                 full_scale_us: full_scale_us(budget_us),
                 threshold_us: Some(budget_us),
             },
-            crate::hardware::DeliveryModel::Pull => {
+            crate::hardware::DeliveryModel::Pull | crate::hardware::DeliveryModel::Relayed => {
                 let peak = deviations
                     .iter()
                     .map(|d| d.unsigned_abs() as u64)

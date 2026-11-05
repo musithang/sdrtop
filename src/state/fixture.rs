@@ -285,6 +285,29 @@ impl SdrMetrics {
         self
     }
 
+    /// Turn the fixture into a relayed stream (SDRplay's service) whose
+    /// service held it up to `hold_us`, with its clock `ppm` off, and
+    /// regrade it, as [`pulling`](Self::pulling) does for a pull backend.
+    pub(crate) fn relayed(mut self, hold_us: u64, ppm: i64) -> Self {
+        let mut caps = (*self.caps).clone();
+        caps.delivery = DeliveryModel::Relayed;
+        self.caps = std::sync::Arc::new(caps);
+        self.timing.relay_hold_us = Some(hold_us);
+        self.timing.sr_delta_ppm = ppm;
+        let v = TimingQuality::classify(
+            self.timing.dev_p99_us,
+            self.timing.cb_period_expected,
+            ppm,
+            0,
+            DeliveryModel::Relayed,
+            None,
+            None,
+        );
+        self.timing.timing_quality = v.quality;
+        self.timing.timing_cause = v.cause;
+        self
+    }
+
     pub(crate) fn with_timing(mut self, jitter_ratio: f64) -> Self {
         let expected = 4_096u64;
         let budget = (expected as f64 * 0.15).round() as u64;
@@ -321,6 +344,7 @@ impl SdrMetrics {
             // The fixture is a push device (an idle HackRF), which has no read
             // loop to measure.
             read_occupancy: None,
+            relay_hold_us: None,
             late_callbacks: abs.iter().filter(|&&d| d > budget).count() as u32,
             late_window: abs.len() as u32,
             dev_p95_us: pick(0.95),

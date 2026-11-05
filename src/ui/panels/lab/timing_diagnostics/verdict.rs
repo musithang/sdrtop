@@ -39,6 +39,7 @@ pub(super) struct Reading {
     pub drops_per_sec: u64,
     pub sr_delta_ppm: i64,
     pub occupancy: Option<f32>,
+    pub hold_us: Option<u64>,
 }
 
 /// Two-line plain-language verdict copy.
@@ -63,6 +64,13 @@ pub(super) fn verdict_copy(r: &Reading) -> [String; 2] {
                 match r.occupancy {
                     Some(o) => format!("{} % of it spare.", 100 - (o * 100.0).round() as u32),
                     None => "Nothing lost, nothing late.".into(),
+                },
+            ],
+            DeliveryModel::Relayed => [
+                "Nothing lost through the service.".into(),
+                match r.hold_us {
+                    Some(us) => format!("It held the stream up to {}.", fmt_us(us)),
+                    None => "Its hold is still being measured.".into(),
                 },
             ],
         },
@@ -127,6 +135,7 @@ pub(super) fn lines(state: &SdrMetrics, r: &Rows) -> Vec<Line<'static>> {
         sr_delta_ppm: t.sr_delta_ppm,
         delivery: state.caps.delivery,
         occupancy: t.read_occupancy,
+        hold_us: t.relay_hold_us,
     };
     for copy in verdict_copy(&reading) {
         out.push(Line::from(vec![
@@ -160,6 +169,7 @@ mod tests {
             sr_delta_ppm: 0,
             delivery: DeliveryModel::Push,
             occupancy: None,
+            hold_us: None,
         }
     }
 
@@ -203,6 +213,7 @@ mod tests {
             sr_delta_ppm: -576,
             delivery: DeliveryModel::Push,
             occupancy: None,
+            hold_us: None,
         });
         let joined = jittery.join(" ").to_lowercase();
         // Claims of loss, not the word: "nothing lost" is exactly what this copy

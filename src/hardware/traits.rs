@@ -1363,6 +1363,16 @@ pub enum DeliveryModel {
     /// configured rate, drops, and how much of the loop is spent waiting rather
     /// than working.
     Pull,
+    /// The driver calls us, but from a service that holds the stream and
+    /// hands it over in bursts: SDRplay's API, whose service passes on 50
+    /// blocks at once every 25 to 35 ms at 2 MSPS and holds the stream for up
+    /// to 69 ms (measured). The interval between calls is the service's
+    /// rhythm, not the link's, so it is not graded against a deadline; what
+    /// is shown instead is how long the service held the stream. The arrival
+    /// times scatter by the same tens of milliseconds, so the sample clock is
+    /// measured from the deliveries that came earliest for their position
+    /// rather than from the last of each window.
+    Relayed,
 }
 
 /// Static description of a device's limits and features - the single source of

@@ -350,6 +350,102 @@ impl RateBaseline {
     }
 }
 
+use crate::state::{RELAY_BASELINE_US, RELAY_STRETCH_US};
+
+/// The sample clock and the hold of a stream relayed by a service, from each
+/// window's earliest and latest delivery (`crate::state::Lead`).
+///
+/// Task local and clockless, like [`RateTracker`]: the leads are stamped in
+/// the hot path and handed here.
+#[derive(Debug, Default)]
+pub(super) struct RelayClock {
+    /// `(earliest, latest)` per window, oldest first.
+    windows: std::collections::VecDeque<(crate::state::Lead, crate::state::Lead)>,
+}
+
+impl RelayClock {
+    pub(super) fn reset(&mut self) {
+        self.windows.clear();
+    }
+
+    pub(super) fn push(&mut self, relay: Option<(crate::state::Lead, crate::state::Lead)>) {
+        let Some(window) = relay else { return };
+        self.windows.push_back(window);
+        // Keep one window past the span, so a trim never leaves the baseline
+        // short of it and the reading does not blink out between windows.
+        let span = RELAY_BASELINE_US + RELAY_STRETCH_US;
+        while let (Some(next), Some(new)) = (self.windows.get(1), self.windows.back()) {
+            if us(new.0.at, next.0.at) < span {
+                break;
+            }
+            self.windows.pop_front();
+        }
+    }
+
+    /// The earliest delivery among windows that came between `from` and
+    /// `from + RELAY_STRETCH_US`.
+    fn earliest_from(&self, from: std::time::Instant) -> Option<crate::state::Lead> {
+        self.windows
+            .iter()
+            .map(|w| w.0)
+            .filter(|l| l.at >= from && us(l.at, from) < RELAY_STRETCH_US)
+            .min_by_key(|l| l.key)
+    }
+
+    /// Complex samples per second between the earliest delivery of the
+    /// oldest stretch and that of the newest, or `None` until the two are
+    /// [`RELAY_BASELINE_US`] apart.
+    pub(super) fn rate(&self) -> Option<u32> {
+        let first = self.windows.front()?.0.at;
+        let last = self.windows.back()?.0.at;
+        let newest_from = last.checked_sub(std::time::Duration::from_micros(RELAY_STRETCH_US))?;
+        if us(newest_from, first) < RELAY_BASELINE_US {
+            return None;
+        }
+        let a = self.earliest_from(first)?;
+        let b = self.earliest_from(newest_from)?;
+        let elapsed = us(b.at, a.at);
+        let pairs = b.end_pair.checked_sub(a.end_pair)?;
+        if elapsed == 0 {
+            return None;
+        }
+        u32::try_from(u128::from(pairs) * 1_000_000 / u128::from(elapsed)).ok()
+    }
+
+    /// The longest the service held the stream over the baseline: each
+    /// window's latest delivery against the earliest of the stretch before
+    /// it. `None` until a whole stretch has been seen.
+    pub(super) fn hold_us(&self) -> Option<u64> {
+        let first = self.windows.front()?.0.at;
+        let last = self.windows.back()?.0.at;
+        if us(last, first) < RELAY_STRETCH_US {
+            return None;
+        }
+        self.windows
+            .iter()
+            .filter(|w| us(w.1.at, first) >= RELAY_STRETCH_US)
+            .filter_map(|w| {
+                let since =
+                    w.1.at
+                        .checked_sub(std::time::Duration::from_micros(RELAY_STRETCH_US))?;
+                let floor = self
+                    .windows
+                    .iter()
+                    .map(|v| v.0)
+                    .filter(|l| l.at >= since && l.at <= w.1.at)
+                    .map(|l| l.key)
+                    .min()?;
+                Some(us(w.1.key, floor))
+            })
+            .max()
+    }
+}
+
+/// Microseconds from `from` to `to`, nothing if `to` came first.
+fn us(to: std::time::Instant, from: std::time::Instant) -> u64 {
+    to.saturating_duration_since(from).as_micros() as u64
+}
+
 /// One poll window of the radio's own drop count.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub(super) struct DropWindow {
@@ -440,6 +536,81 @@ impl ConstellationScale {
 mod tests {
     use super::*;
     use crate::hardware::SampleFormat;
+
+    /// A relayed stream as SDRplay's service delivers it: 20 ms deliveries
+    /// of a radio running `true_hz`, each held 0 to 60 ms by a fixed
+    /// pattern, every seventh not held at all, gathered into 200 ms poll
+    /// windows the way the hot path keeps them; `secs` of it.
+    fn relayed(true_hz: f64, secs: f64) -> RelayClock {
+        use crate::state::Lead;
+        let base = std::time::Instant::now();
+        let mut clock = RelayClock::default();
+        let per = (true_hz * 0.020) as u64;
+        let mut window: Option<(Lead, Lead)> = None;
+        let mut window_ends = 0.2;
+        let mut k = 0u64;
+        loop {
+            k += 1;
+            let end = per * k;
+            let sent = end as f64 / true_hz;
+            if sent > secs {
+                break;
+            }
+            let held_ms = if k.is_multiple_of(7) {
+                0
+            } else {
+                (k * 37) % 61
+            };
+            let at = base
+                + std::time::Duration::from_secs(1)
+                + std::time::Duration::from_secs_f64(sent)
+                + std::time::Duration::from_millis(held_ms);
+            if sent >= window_ends {
+                clock.push(window.take());
+                window_ends += 0.2;
+            }
+            let lead = Lead::of(at, end, 2_000_000.0).unwrap();
+            window = Some(match window {
+                None => (lead, lead),
+                Some((e, l)) => (
+                    if lead.key < e.key { lead } else { e },
+                    if lead.key > l.key { lead } else { l },
+                ),
+            });
+        }
+        clock.push(window);
+        clock
+    }
+
+    /// **The clock through the service is read from its earliest
+    /// deliveries**, so holds of up to 60 ms do not reach it: a radio 300
+    /// ppm fast reads 300 ppm fast, where the last delivery of each window
+    /// would have carried a hold of up to 60 ms into each end. No reading
+    /// before the stretches are 30 s apart.
+    #[test]
+    fn a_relayed_clock_is_read_from_the_earliest_deliveries() {
+        assert_eq!(relayed(2_000_600.0, 39.0).rate(), None, "29 s apart");
+        let rate = relayed(2_000_600.0, 45.0).rate().expect("30 s apart");
+        assert!(rate.abs_diff(2_000_600) <= 1, "{rate}");
+        let rate = relayed(2_000_600.0, 90.0)
+            .rate()
+            .expect("still, once trimmed");
+        assert!(rate.abs_diff(2_000_600) <= 1, "{rate}");
+        let rate = relayed(1_999_800.0, 45.0).rate().expect("30 s apart");
+        assert!(rate.abs_diff(1_999_800) <= 1, "{rate}");
+    }
+
+    /// The hold is the longest any delivery came after the earliest for its
+    /// place: 60 ms here, on a radio at its rate.
+    #[test]
+    fn a_relayed_hold_is_the_longest_delay_seen() {
+        assert_eq!(relayed(2_000_000.0, 9.0).hold_us(), None, "no stretch yet");
+        let hold = relayed(2_000_000.0, 45.0).hold_us().expect("measured");
+        assert!(hold.abs_diff(60_000) <= 1, "{hold}");
+        let mut clock = relayed(2_000_000.0, 45.0);
+        clock.reset();
+        assert_eq!((clock.rate(), clock.hold_us()), (None, None));
+    }
 
     /// The scale follows a growing cloud at once and a shrinking one only
     /// after a second of wanting it; a frozen cloud keeps its scale.

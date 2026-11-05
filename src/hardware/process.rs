@@ -449,6 +449,8 @@ pub fn digest(
     } = acc;
 
     let block_seq: u64;
+    // Outside the lock: it divides. Inside, only Instants are compared.
+    let lead = crate::state::Lead::of(now, first_pair + pairs as u64, rate_hz);
 
     // Single brief lock to flush accumulated results - O(1), no loops inside.
     {
@@ -505,6 +507,14 @@ pub fn digest(
             m.acc.cb_gaps_us.push_back(gap_us);
         }
         m.acc.last_callback = Some(now);
+        if let Some(lead) = lead {
+            if m.acc.relay_earliest.is_none_or(|e| lead.key < e.key) {
+                m.acc.relay_earliest = Some(lead);
+            }
+            if m.acc.relay_latest.is_none_or(|l| lead.key > l.key) {
+                m.acc.relay_latest = Some(lead);
+            }
+        }
         // Stamped here, inside the lock that already runs, so the demod can tell a
         // contiguous run of blocks from one interrupted by a drop.
         m.demod.block_seq = m.demod.block_seq.wrapping_add(1);
@@ -1337,6 +1347,25 @@ pub(crate) mod tests {
             "a block no pager will ever see"
         );
         assert_eq!(pager_rx.len(), 1);
+    }
+
+    /// **Each window keeps the deliveries that came earliest and latest for
+    /// their place in the stream**, for a relayed stream's clock and hold: a
+    /// block that came 10 ms after the one before it, with 32 pairs (16 us
+    /// at 2 MSPS) more of stream, came later for its place.
+    #[test]
+    fn a_window_keeps_its_earliest_and_latest_delivery() {
+        let (ctx, _sample_rx, _demod_rx, _net_rx) = rx_ctx_holding(8, 1);
+        ctx.metrics.lock().unwrap().radio.config_sample_rate = 2_000_000.0;
+        let block = vec![0x10u8; 64];
+        let t0 = Instant::now();
+        let t1 = t0 + std::time::Duration::from_millis(10);
+        super::process_block(&block, eight_bit(), 0, &ctx, t0);
+        super::process_block(&block, eight_bit(), 0, &ctx, t1);
+        let m = ctx.metrics.lock().unwrap();
+        let (early, late) = (m.acc.relay_earliest.unwrap(), m.acc.relay_latest.unwrap());
+        assert_eq!((early.at, early.end_pair), (t0, 32));
+        assert_eq!((late.at, late.end_pair), (t1, 64));
     }
 
     /// The FT8 feed runs only on its view, carries the wall clock at the
