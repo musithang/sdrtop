@@ -26,8 +26,15 @@ use crate::hardware::{
 };
 
 use super::layout::{DeviceParamsT, DeviceT, RxChannelParamsT, MAX_DEVICES};
-use super::stream::{Overload, StreamCtx};
+use super::stream::{Overload, StreamCtx, REASON_EXT1_NONE};
 use super::{ffi, model, serial_of, Model, Problem};
+
+/// `sdrplay_api_Tuner_A`, the RSP1B's one tuner.
+const TUNER_A: libc::c_int = 1;
+/// `sdrplay_api_ReasonForUpdateT`: what an `Update` tells the API changed.
+const UPDATE_FRF: u32 = 0x0002_0000;
+const UPDATE_GR: u32 = 0x0000_8000;
+const UPDATE_AGC: u32 = 0x0100_0000;
 
 /// What the device holds behind its lock: the radio as selected, the API's
 /// parameter block for it, and the rate mode written there.
@@ -158,20 +165,58 @@ impl SdrplayDevice {
         })
     }
 
-    /// A setting changed while the stream runs would sit in the block
-    /// unapplied (the API takes it only through an update), and the screen
-    /// would show a setting the radio is not at: refused until changes are
-    /// applied while streaming.
-    fn not_while_streaming(&self, sel: &Selected, what: &str) -> anyhow::Result<()> {
-        if sel
+    /// Applies what was just written into the block. Stopped, nothing is
+    /// sent: `Init` reads the block as it stands. Streaming, the API takes a
+    /// change only through `Update`, naming what changed; refused, the error
+    /// says so and the caller puts the old value back, so the block never
+    /// holds a setting the radio is not at.
+    fn apply(&self, sel: &Selected, reason: u32, what: &str) -> anyhow::Result<()> {
+        let streaming = sel
             .stream
             .as_ref()
-            .is_some_and(|s| !s.ended.load(Ordering::Relaxed))
-        {
+            .is_some_and(|s| !s.ended.load(Ordering::Relaxed));
+        if !streaming {
+            return Ok(());
+        }
+        // SAFETY: the radio is selected and streams; the block holds the
+        // change.
+        let done = unsafe { (self.api.update)(sel.device.dev, TUNER_A, reason, REASON_EXT1_NONE) };
+        if done != ffi::SUCCESS {
             anyhow::bail!(
-                "the RSP1B's {what} cannot be changed while it streams yet: stop RX first"
+                "SDRplay's API would not change the RSP1B's {what} while it streams ({})",
+                self.api.error_name(done)
             );
         }
+        Ok(())
+    }
+
+    /// `Init` with the block as it stands, into a new stream context kept
+    /// in `sel` until `Uninit`.
+    fn begin(&self, sel: &mut Selected, ctx: Arc<RxContext>) -> anyhow::Result<()> {
+        let stream = Arc::new(StreamCtx::new(
+            ctx,
+            self.api,
+            sel.device.dev,
+            Arc::clone(&self.overload),
+            sel.mode.output_hz(),
+        ));
+        // SAFETY: the radio is selected; the callbacks' context outlives the
+        // stream (it is dropped only after Uninit); the API reads the
+        // callback table it is given.
+        let started = unsafe {
+            (self.api.init)(
+                sel.device.dev,
+                &stream.fns as *const _ as *mut _,
+                Arc::as_ptr(&stream) as *mut libc::c_void,
+            )
+        };
+        if started != ffi::SUCCESS {
+            anyhow::bail!(
+                "SDRplay's API would not start the stream ({})",
+                self.api.error_name(started)
+            );
+        }
+        sel.stream = Some(stream);
         Ok(())
     }
 
@@ -309,31 +354,11 @@ impl SdrDevice for SdrplayDevice {
             }
             stop_locked(self.api, &mut sel);
         }
-        let stream = Arc::new(StreamCtx::new(
-            ctx,
-            self.api,
-            sel.device.dev,
-            Arc::clone(&self.overload),
-            sel.mode.output_hz(),
-        ));
-        // SAFETY: the radio is selected; the callbacks' context outlives the
-        // stream (it is dropped only after Uninit); the API reads the
-        // callback table it is given.
-        let started = unsafe {
-            (self.api.init)(
-                sel.device.dev,
-                &stream.fns as *const _ as *mut _,
-                Arc::as_ptr(&stream) as *mut libc::c_void,
-            )
-        };
-        if started != ffi::SUCCESS {
-            anyhow::bail!(
-                "SDRplay's API would not start the stream ({})",
-                self.api.error_name(started)
-            );
-        }
-        sel.stream = Some(stream);
-        Ok(())
+        // A session's overload account starts with its stream; a rate
+        // change, which restarts the stream, keeps it.
+        self.overload.on.store(false, Ordering::Relaxed);
+        self.overload.events.store(0, Ordering::Relaxed);
+        self.begin(&mut sel, ctx)
     }
 
     fn stop_rx(&self) -> anyhow::Result<()> {
@@ -375,9 +400,14 @@ impl SdrDevice for SdrplayDevice {
             );
         }
         let mut sel = self.lock();
-        self.not_while_streaming(&sel, "frequency")?;
         // SAFETY: the block is the selected radio's; the lock is held.
-        unsafe { Self::rx(&mut sel) }.tuner_params.rf_freq.rf_hz = hz as f64;
+        let rx = unsafe { Self::rx(&mut sel) };
+        let was = std::mem::replace(&mut rx.tuner_params.rf_freq.rf_hz, hz as f64);
+        if let Err(e) = self.apply(&sel, UPDATE_FRF, "frequency") {
+            // SAFETY: as above.
+            unsafe { Self::rx(&mut sel) }.tuner_params.rf_freq.rf_hz = was;
+            return Err(e);
+        }
         Ok(hz)
     }
 
@@ -392,14 +422,45 @@ impl SdrDevice for SdrplayDevice {
             anyhow::bail!("the RSP1B runs at {} kS/s", listed.join(", "));
         };
         let mut sel = self.lock();
-        self.not_while_streaming(&sel, "rate")?;
+        let was = sel.mode;
         // SAFETY: the block is the selected radio's; the lock is held.
-        unsafe {
-            let dev = &mut *(*sel.params).dev_params;
-            let rx = &mut *(*sel.params).rx_channel_a;
-            write_mode(dev, rx, mode);
-        }
+        let write = |sel: &mut Selected, mode| unsafe {
+            write_mode(
+                &mut *(*sel.params).dev_params,
+                &mut *(*sel.params).rx_channel_a,
+                mode,
+            );
+        };
+        write(&mut sel, mode);
         sel.mode = mode;
+        // Streaming, a new rate is a new stream: stopped and started again
+        // in it. Changed through `Update` instead, the API's positions stop
+        // describing the samples: a change of decimation moves the count by
+        // 14 million with no reset, and one into or out of the low IF
+        // restarts it at a rate that is not the samples' (measured). Every
+        // mode started by `Init` counts true.
+        let running = sel
+            .stream
+            .as_ref()
+            .filter(|s| !s.ended.load(Ordering::Relaxed))
+            .map(|s| Arc::clone(&s.rx));
+        if let Some(rx) = running {
+            stop_locked(self.api, &mut sel);
+            if let Err(e) = self.begin(&mut sel, Arc::clone(&rx)) {
+                write(&mut sel, was);
+                sel.mode = was;
+                let back = self.begin(&mut sel, rx);
+                anyhow::bail!(
+                    "{e} at {:.3} MS/s; {}",
+                    mode.output_hz() / 1e6,
+                    if back.is_ok() {
+                        "streaming again at the rate before"
+                    } else {
+                        "the stream is stopped"
+                    }
+                );
+            }
+        }
         Ok(RateSet::new(mode.output_hz(), None, 0))
     }
 
@@ -412,13 +473,19 @@ impl SdrDevice for SdrplayDevice {
     /// takes.
     fn set_stage_gain(&self, index: usize, _name: &str, db: f64) -> anyhow::Result<()> {
         let mut sel = self.lock();
-        self.not_while_streaming(&sel, "gain")?;
         // SAFETY: the block is the selected radio's; the lock is held.
-        let rx = unsafe { Self::rx(&mut sel) };
+        let gain = &mut unsafe { Self::rx(&mut sel) }.tuner_params.gain;
+        let was = (gain.lna_state, gain.gr_db);
         match index {
-            0 => rx.tuner_params.gain.lna_state = db.round().clamp(0.0, 9.0) as u8,
-            1 => rx.tuner_params.gain.gr_db = model::grdb_for(db),
+            0 => gain.lna_state = db.round().clamp(0.0, 9.0) as u8,
+            1 => gain.gr_db = model::grdb_for(db),
             _ => anyhow::bail!("the RSP1B has no gain stage {index}"),
+        }
+        if let Err(e) = self.apply(&sel, UPDATE_GR, "gain") {
+            // SAFETY: as above.
+            let gain = &mut unsafe { Self::rx(&mut sel) }.tuner_params.gain;
+            (gain.lna_state, gain.gr_db) = was;
+            return Err(e);
         }
         Ok(())
     }
@@ -426,9 +493,14 @@ impl SdrDevice for SdrplayDevice {
     /// The API's AGC on the IF, at its own 50 Hz loop and set point, or off.
     fn set_tuner_agc(&self, on: bool) -> anyhow::Result<()> {
         let mut sel = self.lock();
-        self.not_while_streaming(&sel, "AGC")?;
         // SAFETY: the block is the selected radio's; the lock is held.
-        unsafe { Self::rx(&mut sel) }.ctrl_params.agc.enable = if on { 2 } else { 0 };
+        let agc = &mut unsafe { Self::rx(&mut sel) }.ctrl_params.agc.enable;
+        let was = std::mem::replace(agc, if on { 2 } else { 0 });
+        if let Err(e) = self.apply(&sel, UPDATE_AGC, "AGC") {
+            // SAFETY: as above.
+            unsafe { Self::rx(&mut sel) }.ctrl_params.agc.enable = was;
+            return Err(e);
+        }
         Ok(())
     }
 
@@ -685,21 +757,145 @@ mod tests {
             })
         );
         assert_eq!(fixture.sdrplay_count(ACKS), 1, "acknowledged");
-        // Nothing is changed while it streams that the radio would not get.
-        let rf = fixture.sdrplay_param(RF);
-        assert!(device.set_frequency(14_074_000).is_err());
-        assert!(device.set_sample_rate(10_000_000.0).is_err());
-        assert!(device.set_stage_gain(0, "LNA", 1.0).is_err());
-        assert!(device.set_tuner_agc(true).is_err());
-        assert_eq!(fixture.sdrplay_param(RF), rf, "the block untouched");
         device.stop_rx().unwrap();
-        assert!(
-            device.set_frequency(14_074_000).is_ok(),
-            "stopped, it is set"
-        );
         assert!(!device.is_streaming());
         assert_eq!(fixture.sdrplay_count(UNINITS), 1);
         assert_eq!(Arc::strong_count(&ctx), 1, "nothing can call back now");
+    }
+
+    const LAST_REASON: i32 = 10;
+    const UPDATES: i32 = 11;
+
+    /// **While it streams, every setting reaches the radio through an
+    /// `Update` naming what changed**; stopped, none is sent, since `Init`
+    /// reads the block as it stands.
+    #[test]
+    fn settings_reach_a_streaming_radio_through_update() {
+        let fixture = TestLibrary::new(false);
+        let device = SdrplayDevice::open_with_api(api(&fixture), &listing()).unwrap();
+        let (ctx, _net) = stream_ctx();
+        device.start_rx(Arc::clone(&ctx)).unwrap();
+        device.set_frequency(14_074_000).unwrap();
+        assert_eq!(fixture.sdrplay_param(RF), 14_074_000.0);
+        assert_eq!(fixture.sdrplay_count(LAST_REASON), 0x0002_0000, "Tuner_Frf");
+        device.set_stage_gain(0, "LNA", 7.0).unwrap();
+        assert_eq!(fixture.sdrplay_param(LNA), 7.0);
+        assert_eq!(fixture.sdrplay_count(LAST_REASON), 0x0000_8000, "Tuner_Gr");
+        device.set_stage_gain(1, "IF", model::IF_DB[30]).unwrap();
+        assert_eq!(fixture.sdrplay_param(GR), 29.0);
+        device.set_tuner_agc(true).unwrap();
+        assert_eq!(fixture.sdrplay_param(AGC), 2.0);
+        assert_eq!(fixture.sdrplay_count(LAST_REASON), 0x0100_0000, "Ctrl_Agc");
+        assert_eq!(fixture.sdrplay_count(UPDATES), 4);
+        device.stop_rx().unwrap();
+        device.set_frequency(100_000_000).unwrap();
+        device.set_sample_rate(6_000_000.0).unwrap();
+        assert_eq!(
+            fixture.sdrplay_count(UPDATES),
+            4,
+            "stopped, Init reads the block"
+        );
+        assert_eq!(fixture.sdrplay_param(RF), 100_000_000.0);
+    }
+
+    /// **A rate changed while streaming is a new stream**: stopped and
+    /// started again in the new mode, never sent as an `Update`, with the
+    /// deliveries after it 20 ms of the new rate and the session's overload
+    /// account kept.
+    #[test]
+    fn a_rate_changed_while_streaming_restarts_the_stream() {
+        let fixture = TestLibrary::new(false);
+        let device = SdrplayDevice::open_with_api(api(&fixture), &listing()).unwrap();
+        let (ctx, net) = stream_ctx();
+        device.start_rx(Arc::clone(&ctx)).unwrap();
+        net.recv_timeout(WAIT).unwrap();
+        // The first delivery came after the overload: it is counted.
+        let overload = device.radio_overload().unwrap().events;
+        assert_eq!(overload, 1);
+        let set = device.set_sample_rate(10_000_000.0).unwrap();
+        assert_eq!(set.rate_hz, 10_000_000.0);
+        assert_eq!(
+            (fixture.sdrplay_count(UNINITS), fixture.sdrplay_count(INITS)),
+            (1, 2)
+        );
+        assert_eq!(fixture.sdrplay_count(UPDATES), 0, "no Update of a rate");
+        assert_eq!(
+            (fixture.sdrplay_param(FS), fixture.sdrplay_param(BW)),
+            (10_000_000.0, 8000.0)
+        );
+        assert!(device.is_streaming());
+        assert_eq!(device.converter_bits(), Some(8));
+        assert!(
+            device.radio_overload().unwrap().events >= overload,
+            "the session's account, not reset by the restart"
+        );
+        let deadline = std::time::Instant::now() + WAIT;
+        let pairs = loop {
+            let pairs = net.recv_timeout(WAIT).unwrap().bytes.len() / 4;
+            if pairs >= 100_000 {
+                break pairs;
+            }
+            assert!(std::time::Instant::now() < deadline, "no 10 MSPS delivery");
+        };
+        assert!((200_000..201_008).contains(&pairs), "{pairs}");
+        device.stop_rx().unwrap();
+    }
+
+    /// A new rate the stream will not start in puts the old one back and
+    /// says whether the stream runs again.
+    #[test]
+    fn a_rate_the_stream_will_not_start_in_is_undone() {
+        let fixture = TestLibrary::new(false);
+        let device = SdrplayDevice::open_with_api(api(&fixture), &listing()).unwrap();
+        let (ctx, _net) = stream_ctx();
+        device.start_rx(Arc::clone(&ctx)).unwrap();
+        fixture.mode(48);
+        let refused = device
+            .set_sample_rate(10_000_000.0)
+            .unwrap_err()
+            .to_string();
+        assert!(
+            refused.contains("would not start the stream")
+                && refused.contains("the stream is stopped"),
+            "{refused}"
+        );
+        assert_eq!(
+            fixture.sdrplay_param(FS),
+            2_000_000.0,
+            "the block as it was"
+        );
+        assert_eq!(device.converter_bits(), Some(14));
+        assert!(!device.is_streaming());
+    }
+
+    /// **A change the API refuses while streaming** says so and leaves the
+    /// block as it was, so nothing on screen claims a setting the radio is
+    /// not at.
+    #[test]
+    fn a_refused_update_leaves_the_block_as_it_was() {
+        let fixture = TestLibrary::new(false);
+        let device = SdrplayDevice::open_with_api(api(&fixture), &listing()).unwrap();
+        let (ctx, _net) = stream_ctx();
+        device.start_rx(Arc::clone(&ctx)).unwrap();
+        fixture.mode(49);
+        let before: Vec<f64> = [RF, FS, BW, IF, DEC, LNA, GR, AGC]
+            .iter()
+            .map(|&f| fixture.sdrplay_param(f))
+            .collect();
+        let refused = device.set_frequency(14_074_000).unwrap_err().to_string();
+        assert!(
+            refused.contains("would not change the RSP1B's frequency while it streams"),
+            "{refused}"
+        );
+        assert!(device.set_stage_gain(0, "LNA", 1.0).is_err());
+        assert!(device.set_stage_gain(1, "IF", model::IF_DB[5]).is_err());
+        assert!(device.set_tuner_agc(true).is_err());
+        let after: Vec<f64> = [RF, FS, BW, IF, DEC, LNA, GR, AGC]
+            .iter()
+            .map(|&f| fixture.sdrplay_param(f))
+            .collect();
+        assert_eq!(after, before);
+        device.stop_rx().unwrap();
     }
 
     /// **The radio leaving**: what was gathered before it is delivered, the

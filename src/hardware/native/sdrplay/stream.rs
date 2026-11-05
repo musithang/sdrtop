@@ -117,7 +117,8 @@ pub struct StreamCtx {
     /// The selected radio's handle, for acknowledging an overload.
     handle: usize,
     position: Mutex<Position>,
-    /// Samples one delivery gathers, from [`gather_pairs`].
+    /// Samples one delivery gathers, from [`gather_pairs`]. A stream runs at
+    /// one rate: a new rate is a new stream.
     gather: usize,
     pub overload: Arc<Overload>,
     /// The radio left the bus or failed; the stream is over.
@@ -139,8 +140,6 @@ impl StreamCtx {
         overload: Arc<Overload>,
         output_hz: f64,
     ) -> Self {
-        overload.on.store(false, Ordering::Relaxed);
-        overload.events.store(0, Ordering::Relaxed);
         Self {
             rx,
             api,

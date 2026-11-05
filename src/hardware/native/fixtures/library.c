@@ -551,7 +551,8 @@ int sdrplay_api_GetDevices(sdrplay_api_DeviceT *devices, unsigned int *count, un
 // two blocks, then the block the API sends as the radio leaves (position 0, no
 // reset, full length) and DeviceRemoved, then nothing. Mode 47: a block ending
 // at 2^32 - 1, then one 4 samples past the wrap, then a block of 1008 every
-// millisecond. Mode 48: Init fails.
+// millisecond. Mode 48: Init fails. Mode 49: every Update but an overload
+// acknowledgement fails.
 static struct {
     sdrplay_api_CallbackFnsT fns;
     void *ctx;
@@ -560,8 +561,8 @@ static struct {
 } sdrplay_stream;
 static _Atomic int sdrplay_stop;
 // 7 Inits, 8 Uninits, 9 overload acknowledgements, 10 the last reason given
-// to Update other than an acknowledgement.
-static int sdrplay_counts[4];
+// to Update other than an acknowledgement, 11 those Updates.
+static int sdrplay_counts[5];
 int fixture_sdrplay_count(int field) { return sdrplay_counts[field - 7]; }
 static void sdrplay_block_of(unsigned int first, unsigned int reset, short base, unsigned int len) {
     short xi[1008], xq[1008];
@@ -623,7 +624,10 @@ int sdrplay_api_Uninit(void *dev) {
 }
 int sdrplay_api_Update(void *dev, int tuner, unsigned int reason, unsigned int ext) {
     (void)dev; (void)tuner; (void)ext;
-    if (reason == 0x04000000u) sdrplay_counts[2]++; else sdrplay_counts[3] = (int)reason;
+    if (reason == 0x04000000u) { sdrplay_counts[2]++; return 0; }
+    if (mode == 49) return 1;
+    sdrplay_counts[3] = (int)reason;
+    sdrplay_counts[4]++;
     return 0;
 }
 #ifndef OMIT_LAST_SYMBOL
