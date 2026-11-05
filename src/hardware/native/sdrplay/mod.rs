@@ -224,6 +224,15 @@ pub fn list(asked_by_name: bool) -> Vec<DeviceListing> {
         .collect()
 }
 
+/// What the header names for an RSP1B watched in observer mode: SDRplay's
+/// API, whose version is not asked (asking would open a session of it).
+pub fn observer_stack() -> crate::hardware::SoftwareStack {
+    crate::hardware::SoftwareStack {
+        label: "sdrplay api ",
+        value: std::sync::Arc::from("\u{2014}"),
+    }
+}
+
 fn label(found: &Found) -> String {
     let base = format!("{} · {}", found.model.name(), found.serial);
     match found.model {

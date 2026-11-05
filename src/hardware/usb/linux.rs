@@ -85,6 +85,33 @@ pub fn find_owner(bus: u32, dev: u32) -> Option<super::OwnerInfo> {
     })
 }
 
+/// The processes whose memory maps `library`, sdrtop aside: the ones whose
+/// maps this user may read.
+#[cfg(target_os = "linux")]
+pub fn library_users(library: &str) -> Vec<super::Holder> {
+    let own = std::process::id();
+    let Ok(entries) = fs::read_dir("/proc") else {
+        return Vec::new();
+    };
+    let mut users: Vec<super::Holder> = entries
+        .flatten()
+        .filter_map(|entry| {
+            let pid = entry.file_name().to_string_lossy().parse::<u32>().ok()?;
+            if pid == own {
+                return None;
+            }
+            let maps = fs::read_to_string(entry.path().join("maps")).ok()?;
+            super::maps_load(&maps, library).then_some(())?;
+            Some(super::Holder {
+                pid,
+                name: read(&entry.path().join("comm"))?,
+            })
+        })
+        .collect();
+    users.sort_by_key(|h| h.pid);
+    users
+}
+
 /// What `/proc` says about process `pid`, each reading only when it could
 /// be read. A process with no name has gone, and is `None`.
 #[cfg(target_os = "linux")]

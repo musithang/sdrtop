@@ -47,6 +47,16 @@ pub fn spawn_observer_task(state: Arc<Mutex<SdrMetrics>>, profile: ObserverProfi
                 m.observer.serial = info.serial;
                 m.observer.usb = Some(usb).filter(|l| !l.is_empty());
                 m.observer.connected = info.connected_secs.map(fmt_duration);
+                m.observer.relay = profile.relay.map(|r| crate::state::RelayAccount {
+                    through: r.through,
+                    api: r.api,
+                    users: hardware::usb::library_users(r.library).map(|users| {
+                        users
+                            .into_iter()
+                            .map(|h| format!("{} (PID {})", h.name, h.pid))
+                            .collect()
+                    }),
+                });
 
                 if let Some(o) = owner {
                     m.observer.owner = Some(format!("{} (PID {})", o.name, o.pid));

@@ -116,6 +116,17 @@ pub const AIRSPYHF: Wanted = Wanted {
     named: Some("AIRSPY HF+"),
 };
 
+/// An SDRplay RSP1B: 1df7:3050 as the one here reads in `/sys`. It gives no
+/// product or manufacturer string, only its serial, so these names are
+/// sdrtop's for the id.
+pub const SDRPLAY_RSP1B: Wanted = Wanted {
+    vid: 0x1df7,
+    pids: &[0x3050],
+    product: "RSP1B",
+    manufacturer: "SDRplay",
+    named: None,
+};
+
 /// An RTL-SDR dongle (Realtek, 0bda:2832 or 0bda:2838).
 pub const RTLSDR: Wanted = Wanted {
     vid: 0x0bda,
@@ -152,6 +163,36 @@ pub fn find_airspy() -> Result<Option<UsbDeviceInfo>, String> {
 /// An Airspy HF+, held by another app or not.
 pub fn find_airspyhf() -> Result<Option<UsbDeviceInfo>, String> {
     find(&AIRSPYHF)
+}
+
+/// An SDRplay RSP1B, held through SDRplay's service or not.
+pub fn find_sdrplay() -> Result<Option<UsbDeviceInfo>, String> {
+    find(&SDRPLAY_RSP1B)
+}
+
+/// The processes of this user, sdrtop aside, that have a library whose file
+/// name starts with `library` loaded; `None` where this system cannot tell.
+/// Another user's processes cannot be read, and are not among them.
+pub fn library_users(library: &str) -> Option<Vec<Holder>> {
+    #[cfg(target_os = "linux")]
+    return Some(linux::library_users(library));
+    #[cfg(not(target_os = "linux"))]
+    {
+        let _ = library;
+        None
+    }
+}
+
+/// Whether a `/proc/<pid>/maps` text maps a file whose name starts with
+/// `library`.
+#[cfg(any(target_os = "linux", test))]
+pub fn maps_load(maps: &str, library: &str) -> bool {
+    maps.lines().any(|line| {
+        line.split_whitespace()
+            .nth(5)
+            .and_then(|path| path.rsplit('/').next())
+            .is_some_and(|file| file.starts_with(library))
+    })
 }
 
 /// An RTL-SDR dongle, held by another app or not.
@@ -345,6 +386,27 @@ mod tests {
         assert!(!AIRSPYHF.matches(0x03eb, 0x2404, Some("AIRSPY HF+")));
         assert!(HACKRF.matches(0x1d50, 0x6089, None));
         assert!(AIRSPY.matches(0x1d50, 0x60a1, Some("AIRSPY")));
+        assert!(
+            SDRPLAY_RSP1B.matches(0x1df7, 0x3050, None),
+            "it gives no name"
+        );
+        assert!(!SDRPLAY_RSP1B.matches(0x1df7, 0x3000, None));
+    }
+
+    /// A library is loaded where a mapping's file name starts with it, at
+    /// any path and version; a name elsewhere on the line is not a mapping.
+    #[test]
+    fn a_loaded_library_is_found_by_its_file_name() {
+        let maps = "\
+7f1c2a000000-7f1c2a1f0000 r-xp 00000000 103:02 1310 /usr/local/lib/libsdrplay_api.so.3.15
+7f1c2b000000-7f1c2b010000 rw-p 00000000 00:00 0 
+7ffd0000-7ffd2000 rw-p 00000000 00:00 0                          [stack]";
+        assert!(maps_load(maps, "libsdrplay_api"));
+        assert!(!maps_load(maps, "libhackrf"));
+        assert!(!maps_load(
+            "7f-7f r-xp 0 0:0 0 /opt/libsdrplay_api_old/libfoo.so",
+            "libsdrplay_api"
+        ));
     }
 
     /// Each speed by its name, a low-speed device's 1.5 included.

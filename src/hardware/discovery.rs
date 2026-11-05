@@ -56,6 +56,21 @@ pub struct ObserverProfile {
     /// What the header names where a HackRF names its firmware, for a backend
     /// whose radio has none; `None` for one that has firmware of its own.
     pub stack: fn() -> Option<super::SoftwareStack>,
+    /// For a radio another program reaches through a service, the service
+    /// and the API it serves: the system names the service as the holder,
+    /// whoever is listening, so the clients are looked for by the library
+    /// they load. `None` for a radio its user holds itself.
+    pub relay: Option<Relay>,
+}
+
+/// A service between the radio and the program using it.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Relay {
+    /// The service, as the screen names it (`"SDRplay's service"`).
+    pub through: &'static str,
+    /// Its API as the screen names it, and the library file it is in.
+    pub api: &'static str,
+    pub library: &'static str,
 }
 
 impl DeviceKind {
@@ -87,11 +102,13 @@ impl DeviceKind {
                 scan: usb::find_hackrf,
                 caps: hackrf::caps,
                 stack: || None,
+                relay: None,
             }),
             DeviceKind::RtlSdr => Some(ObserverProfile {
                 scan: usb::find_rtlsdr,
                 caps: rtlsdr::observer_caps,
                 stack: || Some(rtlsdr::stack()),
+                relay: None,
             }),
             // The R2's capabilities as placeholders: a Mini on the same USB id
             // would show the R2's band and stage names, but the scan names it
@@ -100,6 +117,7 @@ impl DeviceKind {
                 scan: usb::find_airspy,
                 caps: airspy::caps,
                 stack: || Some(airspy::observer_stack()),
+                relay: None,
             }),
             // A Discovery's capabilities as placeholders: another HF+ board on
             // the same USB id would show the Discovery's bands, but the scan
@@ -108,9 +126,22 @@ impl DeviceKind {
                 scan: usb::find_airspyhf,
                 caps: airspyhf::observer_caps,
                 stack: || Some(airspyhf::observer_stack()),
+                relay: None,
             }),
-            // Not until its backend can describe the radio.
-            DeviceKind::Sdrplay | DeviceKind::Soapy | DeviceKind::TinySa => None,
+            // Held through SDRplay's service: the service is the USB
+            // device's holder whoever listens, and a radio it holds for a
+            // client is not in its API's list at all (measured).
+            DeviceKind::Sdrplay => Some(ObserverProfile {
+                scan: usb::find_sdrplay,
+                caps: sdrplay::model::caps,
+                stack: || Some(sdrplay::observer_stack()),
+                relay: Some(Relay {
+                    through: "SDRplay's service",
+                    api: "SDRplay's API",
+                    library: "libsdrplay_api",
+                }),
+            }),
+            DeviceKind::Soapy | DeviceKind::TinySa => None,
         }
     }
 }
@@ -238,6 +269,25 @@ pub fn no_device_hint(want: Option<DeviceKind>) -> String {
     hint
 }
 
+/// The listing for an RSP1B on the bus that SDRplay's API did not list:
+/// held for another program through the service.
+fn held_sdrplay(info: &usb::UsbDeviceInfo) -> DeviceListing {
+    let serial = info.serial.clone();
+    DeviceListing {
+        kind: DeviceKind::Sdrplay,
+        index: 0,
+        label: format!(
+            "SDRplay {} \u{00b7} {} \u{00b7} in use through SDRplay's service",
+            info.product,
+            serial.as_deref().unwrap_or("no serial")
+        ),
+        serial,
+        args: None,
+        path: None,
+        tiny_sa_input: None,
+    }
+}
+
 /// Every connected device across all compiled-in backends. Never fails: a
 /// backend with no devices (or an enumeration error) simply contributes nothing.
 ///
@@ -261,6 +311,18 @@ pub fn list_all_devices(
     out.extend(airspyhf::list(want == Some(DeviceKind::AirspyHf)));
     // An RSP only when asked for by name, until its backend streams.
     out.extend(sdrplay::list(want == Some(DeviceKind::Sdrplay)));
+    // A radio another program holds through SDRplay's service is not in the
+    // API's list at all. Asked for by name, an RSP1B on the bus that the API
+    // answered for without listing is offered as held, so its open fails
+    // into observer mode as any held radio's does.
+    if want == Some(DeviceKind::Sdrplay)
+        && sdrplay::last_problem().is_none()
+        && !out.iter().any(|l| l.kind == DeviceKind::Sdrplay)
+    {
+        if let Ok(Some(info)) = usb::find_sdrplay() {
+            out.push(held_sdrplay(&info));
+        }
+    }
     let tinysa = if want == Some(DeviceKind::TinySa) {
         tinysa::list(soapy_filter.filter(|value| !value.is_empty()))
     } else {
@@ -816,9 +878,36 @@ mod tests {
             "there is no USB profile for whatever SoapySDR was talking to"
         );
         assert!(DeviceKind::TinySa.observer_profile().is_none());
-        assert!(
-            DeviceKind::Sdrplay.observer_profile().is_none(),
-            "not until its backend can describe the radio"
+        let rsp = DeviceKind::Sdrplay.observer_profile().expect("observable");
+        assert_eq!(rsp.relay.map(|r| r.through), Some("SDRplay's service"));
+        assert!(DeviceKind::HackRf
+            .observer_profile()
+            .unwrap()
+            .relay
+            .is_none());
+    }
+
+    /// **An RSP1B the API did not list is offered as held**, by its serial,
+    /// so opening it fails into observer mode.
+    #[test]
+    fn an_unlisted_rsp1b_on_the_bus_is_offered_as_held() {
+        let info = usb::UsbDeviceInfo {
+            product: "RSP1B".into(),
+            manufacturer: "SDRplay".into(),
+            serial: Some("2402040E60".into()),
+            speed_mbits: Some(480.0),
+            max_power: None,
+            bus: Some(1),
+            dev: Some(9),
+            connected_secs: None,
+            holder: None,
+        };
+        let listing = held_sdrplay(&info);
+        assert_eq!(listing.kind, DeviceKind::Sdrplay);
+        assert_eq!(listing.serial.as_deref(), Some("2402040E60"));
+        assert_eq!(
+            listing.label,
+            "SDRplay RSP1B \u{00b7} 2402040E60 \u{00b7} in use through SDRplay's service"
         );
     }
 

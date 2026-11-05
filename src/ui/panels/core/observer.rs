@@ -100,10 +100,28 @@ impl Panel for ObserverPanel {
                 format!("  CPU: {cpu}  ·  RAM: {ram}  ·  Running: {uptime}"),
                 Style::default().fg(theme.value),
             )));
-        } else {
+        } else if state.observer.relay.is_none() {
             lines.push(Line::from(Span::styled(
                 "  Owner: unknown (different user or process ended)",
                 Style::default().fg(theme.label),
+            )));
+        }
+        // Held through a service: the system names the service whoever
+        // listens, so what is said is who has the service's API loaded,
+        // which is a fact, not who holds the radio, which is not known.
+        if let Some(relay) = &state.observer.relay {
+            lines.push(Line::from(Span::styled(
+                format!("  Held through {}", relay.through),
+                Style::default().fg(theme.value),
+            )));
+            let users = match relay.users.as_deref() {
+                None => "cannot be told on this system".to_string(),
+                Some([]) => "no other program of yours".to_string(),
+                Some(users) => users.join(", "),
+            };
+            lines.push(Line::from(Span::styled(
+                format!("  {} loaded in: {users}", relay.api),
+                Style::default().fg(theme.value),
             )));
         }
 
@@ -140,6 +158,43 @@ mod tests {
     fn the_panel_names_itself_once() {
         let screen = draw(ObserverPanel, 80, 16, &held(None, None)).join("\n");
         assert_eq!(screen.matches("Observer Mode").count(), 1, "{screen}");
+    }
+
+    /// **A radio held through a service names the service and who has its
+    /// API loaded**, never a holder it cannot know: the system's holder is
+    /// the service whoever listens.
+    #[test]
+    fn a_radio_held_through_a_service_says_so() {
+        let mut m = SdrMetrics::fixture();
+        m.observer.active = true;
+        let relay = |users: Option<Vec<String>>| crate::state::RelayAccount {
+            through: "SDRplay's service",
+            api: "SDRplay's API",
+            users,
+        };
+        m.observer.relay = Some(relay(Some(vec!["gqrx (PID 812)".into()])));
+        let screen = draw(ObserverPanel, 80, 16, &m).join("\n");
+        assert!(
+            screen.contains("Held through SDRplay's service"),
+            "{screen}"
+        );
+        assert!(
+            screen.contains("SDRplay's API loaded in: gqrx (PID 812)"),
+            "{screen}"
+        );
+        assert!(!screen.contains("Owner: unknown"), "{screen}");
+        m.observer.relay = Some(relay(Some(Vec::new())));
+        let screen = draw(ObserverPanel, 80, 16, &m).join("\n");
+        assert!(
+            screen.contains("loaded in: no other program of yours"),
+            "{screen}"
+        );
+        m.observer.relay = Some(relay(None));
+        let screen = draw(ObserverPanel, 80, 16, &m).join("\n");
+        assert!(
+            screen.contains("loaded in: cannot be told on this system"),
+            "{screen}"
+        );
     }
 
     #[test]
