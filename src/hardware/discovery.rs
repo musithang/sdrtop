@@ -276,12 +276,29 @@ pub fn list_all_devices(
     } else {
         &out[..]
     };
-    let soapy = offer_soapy(soapy::device::list(soapy_filter), native, soapy_filter);
-    out.extend(soapy);
+    if asks_soapy(want) {
+        let soapy = offer_soapy(soapy::device::list(soapy_filter), native, soapy_filter);
+        out.extend(soapy);
+    }
     if let Some(want) = want {
         out.retain(|d| d.kind == want);
     }
     out
+}
+
+/// Whether a search asks SoapySDR at all: unasked, and when SoapySDR itself
+/// was named. **Not when another backend was named**, whose search keeps
+/// only that backend's listings anyway: asking SoapySDR there loads every
+/// module it has, and one of them must not share a process with a native
+/// backend. SoapySDRPlay3 opens a session of SDRplay's API when it searches
+/// and closes it only as the process exits; sdrtop's own SDRplay backend
+/// opens and closes its own, and SDRplay's API keeps one state per process,
+/// so the second close tears down what the first already did (measured:
+/// "munmap: Invalid argument" three times and "close: Bad file descriptor"
+/// at exit, never without SoapySDRPlay3 loaded), closing a file descriptor
+/// that by then may be someone else's.
+fn asks_soapy(want: Option<DeviceKind>) -> bool {
+    matches!(want, None | Some(DeviceKind::Soapy))
 }
 
 /// Which Soapy listings to actually show, given what the native backends already
@@ -491,6 +508,25 @@ mod tests {
             Some("644064DC3639AF31"),
             Some("driver=airspy, serial=644064DC3639AF31"),
         )
+    }
+
+    /// SoapySDR is asked when nothing was named or SoapySDR was, never when
+    /// another backend was: its modules (SoapySDRPlay3's API session among
+    /// them) would share the process with that backend for nothing.
+    #[test]
+    fn soapysdr_is_asked_only_unasked_or_by_name() {
+        assert!(asks_soapy(None));
+        assert!(asks_soapy(Some(DeviceKind::Soapy)));
+        for kind in [
+            DeviceKind::Sdrplay,
+            DeviceKind::HackRf,
+            DeviceKind::RtlSdr,
+            DeviceKind::Airspy,
+            DeviceKind::AirspyHf,
+            DeviceKind::TinySa,
+        ] {
+            assert!(!asks_soapy(Some(kind)), "{kind:?}");
+        }
     }
 
     /// **The native RSP1B wins over SoapySDRPlay3's listing of it**: both
